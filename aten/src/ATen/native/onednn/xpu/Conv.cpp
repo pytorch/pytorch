@@ -141,11 +141,11 @@ static void check_shape_forward(
     const at::Tensor& weight,
     const at::Tensor& bias,
     const ConvParams& params,
-    bool input_is_mkldnn) {
+    bool input_is_onednn) {
   int64_t k = input.ndimension();
   int64_t weight_dim = weight.ndimension();
   std::vector<int64_t> weight_sizes(weight_dim);
-  if ((weight_dim == k + 1) && input_is_mkldnn) {
+  if ((weight_dim == k + 1) && input_is_onednn) {
     weight_sizes[0] = weight.size(0) * weight.size(1);
     std::copy_n(weight.sizes().cbegin() + 2, k - 1, weight_sizes.begin() + 1);
     weight_dim = k;

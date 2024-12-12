@@ -132,7 +132,7 @@ Tensor dense_to_mkldnn(const Tensor& cpu_tensor, std::optional<ScalarType> dtype
   return onednn_tensor;
 }
 
-// Mkldnn tensor has special non-public format for conv2d weights
+// Onednn tensor has special non-public format for conv2d weights
 // (dense_to_mkldnn only converts dense tensor to mkldnn tensor with
 // public format). Ideep conv kernel will do implicit reorder if the
 // weight is not already in this optimized format. By the time I'm
@@ -160,7 +160,7 @@ Tensor mkldnn_reorder_conv2d_weight(
     memory_format = at::MemoryFormat::ChannelsLast;
   }
 
-  auto self_ = self.is_mkldnn() ? self : self.contiguous(memory_format);
+  auto self_ = self.is_onednn() ? self : self.contiguous(memory_format);
   auto w = itensor_from_tensor(self_);
 
   // Legacy mkldnn conv2d jitted module may contain a 5-d weight with an extra
@@ -217,7 +217,7 @@ Tensor mkldnn_reorder_conv3d_weight(
     memory_format = at::MemoryFormat::ChannelsLast3d;
   }
 
-  auto self_ = self.is_mkldnn() ? self : self.contiguous(memory_format);
+  auto self_ = self.is_onednn() ? self : self.contiguous(memory_format);
   auto w = itensor_from_tensor(self_);
 
   auto desc = ideep::convolution_forward::expected_weights_desc(

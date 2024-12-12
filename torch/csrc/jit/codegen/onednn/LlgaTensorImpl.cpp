@@ -83,7 +83,7 @@ at::Tensor empty_llga(
 
 static const LlgaTensorDesc& get_llga_desc(const at::Tensor& tensor) {
   TORCH_INTERNAL_ASSERT(
-      tensor.is_mkldnn(), "get_llga_desc expects Mkldnn tensor input");
+      tensor.is_onednn(), "get_llga_desc expects Onednn tensor input");
   return static_cast<LlgaTensorImpl*>(tensor.unsafeGetTensorImpl())->desc();
 }
 
@@ -119,7 +119,7 @@ data_type LlgaTensorDesc::getLlgaDataType(at::ScalarType dt) const {
 }
 
 LlgaTensorDesc LlgaTensorDesc::supplementTensorInfo(const at::Tensor& t) const {
-  if (t.is_mkldnn()) {
+  if (t.is_onednn()) {
     // if input tensor is of mkldnn, it's originated from an upstream
     // LLGA partition which carries opaque layout info
     return get_llga_desc(t).tid(tid_);

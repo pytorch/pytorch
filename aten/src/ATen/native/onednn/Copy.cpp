@@ -31,7 +31,7 @@ Tensor& copy_mkldnn_(Tensor& self, const Tensor& src, bool non_blocking) {
       self.sizes() == src.sizes(),
       "copy_mkldnn_: only support same size tensor.");
   TORCH_CHECK(
-      self.is_mkldnn() && src.is_mkldnn(),
+      self.is_onednn() && src.is_onednn(),
       "copy_mkldnn_: between mkldnn layout and dense Tensors is not implemented! Found self type = ",
       self.toString(),
       " and src type = ",

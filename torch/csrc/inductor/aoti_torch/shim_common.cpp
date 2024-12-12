@@ -245,7 +245,7 @@ AOTITorchError aoti_torch_get_data_ptr(
     void** ret_data_ptr) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
     at::Tensor* t = tensor_handle_to_tensor_pointer(tensor);
-    if (t->is_mkldnn()) {
+    if (t->is_onednn()) {
       *ret_data_ptr = data_ptr_from_onednn(t);
     } else {
       *ret_data_ptr = t->data_ptr();

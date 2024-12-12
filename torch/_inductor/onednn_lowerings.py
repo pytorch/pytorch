@@ -341,7 +341,7 @@ def register_onednn_fusion_ops():
         ):
             return pytree.tree_map(
                 TensorBox.create,
-                onednn_ir.MkldnnRnnLayer.create(
+                onednn_ir.OnednnRnnLayer.create(
                     x,
                     w0,
                     w1,

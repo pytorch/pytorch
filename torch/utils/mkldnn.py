@@ -2,7 +2,7 @@
 import torch
 
 
-class MkldnnLinear(torch.jit.ScriptModule):
+class OnednnLinear(torch.jit.ScriptModule):
     def __init__(self, dense_module, dtype):
         super().__init__()
         self.register_buffer('weight', dense_module.weight.to_mkldnn(dtype))
@@ -28,14 +28,14 @@ class MkldnnLinear(torch.jit.ScriptModule):
 
     @torch.jit.script_method
     def forward(self, x):
-        x_mkldnn = x if x.is_mkldnn else x.to_mkldnn()
+        x_mkldnn = x if x.is_onednn else x.to_mkldnn()
         y_mkldnn = torch._C._nn.mkldnn_linear(x_mkldnn, self.weight, self.bias)
-        y = y_mkldnn if x.is_mkldnn else y_mkldnn.to_dense()
+        y = y_mkldnn if x.is_onednn else y_mkldnn.to_dense()
         return y
 
 
-class _MkldnnConvNd(torch.jit.ScriptModule):
-    """Common base of MkldnnConv1d and MkldnnConv2d."""
+class _OnednnConvNd(torch.jit.ScriptModule):
+    """Common base of OnednnConv1d and OnednnConv2d."""
 
     __constants__ = ['stride', 'padding', 'dilation', 'groups']
 
@@ -73,7 +73,7 @@ class _MkldnnConvNd(torch.jit.ScriptModule):
             self.groups)
 
 
-class MkldnnConv1d(_MkldnnConvNd):
+class OnednnConv1d(_OnednnConvNd):
     def __init__(self, dense_module, dtype):
         super().__init__(dense_module)
 
@@ -86,7 +86,7 @@ class MkldnnConv1d(_MkldnnConvNd):
         self.training = state[2]
 
 
-class MkldnnConv2d(_MkldnnConvNd):
+class OnednnConv2d(_OnednnConvNd):
     def __init__(self, dense_module, dtype):
         super().__init__(dense_module)
 
@@ -108,7 +108,7 @@ class MkldnnConv2d(_MkldnnConvNd):
         self.bias = state[1].to_mkldnn()
         self.training = state[2]
 
-class MkldnnConv3d(_MkldnnConvNd):
+class OnednnConv3d(_OnednnConvNd):
     def __init__(self, dense_module, dtype):
         super().__init__(dense_module)
 
@@ -131,7 +131,7 @@ class MkldnnConv3d(_MkldnnConvNd):
         self.training = state[2]
 
 
-class MkldnnBatchNorm(torch.jit.ScriptModule):
+class OnednnBatchNorm(torch.jit.ScriptModule):
     __constants__ = ['exponential_average_factor', 'eps']
 
     def __init__(self, dense_module):
@@ -182,7 +182,7 @@ class MkldnnBatchNorm(torch.jit.ScriptModule):
             False,  # cuda_enabled
         )
 
-class MkldnnPrelu(torch.jit.ScriptModule):
+class OnednnPrelu(torch.jit.ScriptModule):
     def __init__(self, dense_module, dtype):
         super().__init__()
         self.register_buffer('weight', dense_module.weight.to_mkldnn(dtype))
@@ -198,9 +198,9 @@ class MkldnnPrelu(torch.jit.ScriptModule):
 
     @torch.jit.script_method
     def forward(self, x):
-        x_mkldnn = x if x.is_mkldnn else x.to_mkldnn()
+        x_mkldnn = x if x.is_onednn else x.to_mkldnn()
         y_mkldnn = torch.prelu(x_mkldnn, self.weight)
-        y = y_mkldnn if x.is_mkldnn else y_mkldnn.to_dense()
+        y = y_mkldnn if x.is_onednn else y_mkldnn.to_dense()
         return y
 
 def to_mkldnn(module, dtype=torch.float):
@@ -209,19 +209,19 @@ def to_mkldnn(module, dtype=torch.float):
 
     def m_fn(m, d):
         if isinstance(m, torch.nn.Linear):
-            return MkldnnLinear(m, d)
+            return OnednnLinear(m, d)
         elif isinstance(m, torch.nn.Conv1d):
-            return MkldnnConv1d(m, d)
+            return OnednnConv1d(m, d)
         elif isinstance(m, torch.nn.Conv2d):
-            return MkldnnConv2d(m, d)
+            return OnednnConv2d(m, d)
         elif isinstance(m, torch.nn.Conv3d):
-            return MkldnnConv3d(m, d)
+            return OnednnConv3d(m, d)
         elif isinstance(m, (torch.nn.BatchNorm2d, torch.nn.BatchNorm3d)):
             # For batchnorm bf16 path, OneDNN requires weight and bias need fp32 dtype.
             # so it doesn't need dtype argument.
-            return MkldnnBatchNorm(m)
+            return OnednnBatchNorm(m)
         elif isinstance(m, torch.nn.PReLU):
-            return MkldnnPrelu(m, d)
+            return OnednnPrelu(m, d)
         else:
             return m
 

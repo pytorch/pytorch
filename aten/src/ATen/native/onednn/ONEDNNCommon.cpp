@@ -103,7 +103,7 @@ Tensor new_with_itensor_onednn(ideep::tensor&& it, std::optional<ScalarType> dty
 }
 
 ideep::tensor& itensor_from_onednn(const MKLDNNTensor& onednn_tensor) {
-  TORCH_CHECK(onednn_tensor.is_mkldnn(),
+  TORCH_CHECK(onednn_tensor.is_onednn(),
              "itensor_from_onednn expects MKL-DNN tensor input");
   MKLDNNTensorImpl *mklimpl = static_cast<MKLDNNTensorImpl *>(onednn_tensor.unsafeGetTensorImpl());
   return mklimpl->unsafe_opaque_handle()->get_target();
@@ -189,7 +189,7 @@ ideep::tensor itensor_view_from_dense(
 // caller needs to make sure the aten dense tensor's lifetime is
 // longer than the ideep tensor.
 ideep::tensor itensor_from_tensor(const Tensor& tensor, bool from_const_data_ptr) {
-  if (tensor.is_mkldnn()) {
+  if (tensor.is_onednn()) {
     return itensor_from_onednn(tensor);
   } else {
     return itensor_view_from_dense(tensor, from_const_data_ptr);

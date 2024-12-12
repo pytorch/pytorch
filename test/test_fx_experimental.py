@@ -63,7 +63,7 @@ try:
 except ImportError:
     HAS_TORCHVISION = False
 skipIfNoTorchVision = unittest.skipIf(not HAS_TORCHVISION, "no torchvision")
-skipIfNoMkldnn = unittest.skipIf(
+skipIfNoOnednn = unittest.skipIf(
     not (torch.backends.mkldnn.enabled and torch.backends.mkldnn.is_available()),
     "no MKLDNN",
 )
@@ -1534,7 +1534,7 @@ class {test_classname}(torch.nn.Module):
         for sig_type, arg_type in should_fail:
             self.assertFalse(type_matches(sig_type, arg_type))
 
-    @skipIfNoMkldnn
+    @skipIfNoOnednn
     def test_optimize_for_inference_cpu(self):
         import torch.nn as nn
 
@@ -1575,7 +1575,7 @@ class {test_classname}(torch.nn.Module):
             torch.testing.assert_close(model(inp), optimized_model2(inp))
 
     @skipIfNoTorchVision
-    @skipIfNoMkldnn
+    @skipIfNoOnednn
     def test_optimize_for_inference_cpu_torchvision(self):
         models = [
             torchvision.models.resnet18,

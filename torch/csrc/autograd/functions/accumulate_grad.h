@@ -123,7 +123,7 @@ struct TORCH_API AccumulateGrad : public Node {
           !new_grad.is_sparse_csr() &&
           !(variable.is_sparse_csr() && new_grad.layout() == at::kStrided) &&
           at::caching::adjusted_use_count(new_grad) <= num_expected_refs &&
-          (new_grad.is_mkldnn() ||
+          (new_grad.is_onednn() ||
            utils::obeys_layout_contract(new_grad, variable))) {
         // we aren't setting up for double-backward
         // not sparse
@@ -168,7 +168,7 @@ struct TORCH_API AccumulateGrad : public Node {
             new_grad.is_nested()) {
           update_grad(new_grad.clone());
         } else {
-          if (new_grad.is_mkldnn()) {
+          if (new_grad.is_onednn()) {
             update_grad(new_grad.clone());
           } else {
             // Deep copies new_grad according to the "Gradient Layout Contract."

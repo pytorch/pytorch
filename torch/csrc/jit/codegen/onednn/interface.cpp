@@ -146,9 +146,9 @@ static Operation createLlgaGuardKernel(const Node* node) {
       // LLGA partition that has passed the check on input shapes.
       // It is valid to continue here as long as the output shapes from
       // oneDNN graph partitions are determined by the input shapes.
-      if (tensor.is_mkldnn()) {
+      if (tensor.is_onednn()) {
 #ifdef GRAPH_DEBUG_ENABLED
-        GRAPH_DEBUG("input ", i, " is_mkldnn, continue");
+        GRAPH_DEBUG("input ", i, " is_onednn, continue");
 #endif
         continue;
       }

@@ -3327,12 +3327,12 @@ coverage_ignore_classes = [
     "BackwardHook",
     "RemovableHandle",
     # torch.utils.mkldnn
-    "MkldnnBatchNorm",
-    "MkldnnConv1d",
-    "MkldnnConv2d",
-    "MkldnnConv3d",
-    "MkldnnLinear",
-    "MkldnnPrelu",
+    "OnednnBatchNorm",
+    "OnednnConv1d",
+    "OnednnConv2d",
+    "OnednnConv3d",
+    "OnednnLinear",
+    "OnednnPrelu",
     # torch.utils.mobile_optimizer
     "LintCode",
     # torch.utils.show_pickle

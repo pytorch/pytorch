@@ -1466,7 +1466,7 @@ static at::Tensor _quantized_convolution_onednn(
     kSpatialDim += 1;
   }
   TORCH_CHECK(
-    weight.is_mkldnn(),
+    weight.is_onednn(),
     func_name, ": Weight should be prepacked as an MKLDNN tensor"
   );
   if (transposed) {

@@ -258,7 +258,7 @@ static Tensor& linear_out(
     const Tensor& input,
     const Tensor& weight,
     const std::optional<Tensor>& bias_opt) {
-  TORCH_CHECK(!input.is_mkldnn());
+  TORCH_CHECK(!input.is_onednn());
 
   auto bias = bias_opt.has_value()
       ? c10::MaybeOwned<Tensor>::borrowed(*bias_opt)

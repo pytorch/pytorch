@@ -293,7 +293,7 @@ void onednn_matmul(
     }
   };
 
-  // Mkldnn only optimized for contiguous or transposed (transpose last 2 dim if 3-D tensor) format now
+  // Onednn only optimized for contiguous or transposed (transpose last 2 dim if 3-D tensor) format now
   // Will remove this "contiguous" after mkldnn have fully supported
   Tensor mat1_ = is_onednn_optimized_format(mat1_unsqueezed) ? mat1_unsqueezed : mat1_unsqueezed.contiguous();
   Tensor mat2_ = is_onednn_optimized_format(mat2_unsqueezed) ? mat2_unsqueezed : mat2_unsqueezed.contiguous();
