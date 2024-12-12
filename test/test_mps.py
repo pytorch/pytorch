@@ -8152,7 +8152,7 @@ class TestMPS(TestCaseMPS):
         self.assertTrue(event.query())
         self.assertEqual(c_acc.cpu(), c)
 
-    def test_amps_event(self):
+    def test_ageneric_event1(self):
         event = torch.mps.Event()
         a = torch.randn(1000)
         b = torch.randn(1000)
