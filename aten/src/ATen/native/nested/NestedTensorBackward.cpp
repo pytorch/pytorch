@@ -203,8 +203,13 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_backward_nested(
   // For NestedTensors weight and bias are non nested.
   auto* nt_impl_grad = get_nested_tensor_impl(grad);
   auto* nt_impl_input = get_nested_tensor_impl(input);
-  const auto& weight = *weight_opt;
-  const auto& bias = *bias_opt;
+  // See [Note: hacky wrapper removal for optional tensor]
+  c10::MaybeOwned<Tensor> weight_maybe_owned =
+      at::borrow_from_optional_tensor(weight_opt);
+  const Tensor& weight = *weight_maybe_owned;
+  c10::MaybeOwned<Tensor> bias_maybe_owned =
+      at::borrow_from_optional_tensor(bias_opt);
+  const Tensor& bias = *bias_maybe_owned;
   const auto& sizes = nt_impl_input->get_nested_sizes();
   auto M_N = _check_nested_layer_norm_inputs(
       *nt_impl_input, normalized_shape, weight, bias);
