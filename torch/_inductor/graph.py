@@ -519,6 +519,13 @@ class GraphLowering(torch.fx.Interpreter):
         finally:
             self.current_device = prior
 
+    def get_training_phase(self) -> str:
+        if self.is_inference:
+            return "inference"
+        if self.is_backward:
+            return "backward"
+        return "forward"
+
     @staticmethod
     def decide_layout_opt(gm: GraphModule, *, is_inference: bool) -> bool:
         """
@@ -812,6 +819,16 @@ class GraphLowering(torch.fx.Interpreter):
     def get_dtype(self, buffer_name: str) -> torch.dtype:
         if buffer_name in self.constants:
             return self.constants[buffer_name].dtype
+        # For a mutation op we should return the dtype of the buffer being mutated
+        if (
+            hasattr(self.scheduler, "mutation_real_name")
+            and buffer_name in self.scheduler.mutation_real_name
+        ):
+            mutated_buf = self.scheduler.mutation_real_name[buffer_name]
+            if mutated_buf in self.name_to_buffer:
+                return self.name_to_buffer[mutated_buf].get_dtype()
+            if mutated_buf in self.graph_inputs:
+                return self.graph_inputs[mutated_buf].get_dtype()
         if buffer_name in self.name_to_buffer:
             return self.name_to_buffer[buffer_name].get_dtype()
         if buffer_name in self.graph_inputs:
@@ -1069,7 +1086,7 @@ class GraphLowering(torch.fx.Interpreter):
             ), f"{target} is not an OpOverload"
             base_name = target.name().split(".")[0]
             if base_name in FALLBACK_ALLOW_LIST:
-                make_fallback(target)
+                make_fallback(target, warn=False, override_decomp=True)
             elif config.implicit_fallbacks:
                 error = (
                     MissingOperatorWithDecomp

@@ -240,6 +240,7 @@ def set_logs(
     compiled_autograd_verbose: bool = False,
     cudagraph_static_inputs: bool = False,
     benchmarking: bool = False,
+    graph_region_expansion: bool = False,
 ):
     """
     Sets the log level for individual components and toggles individual log
@@ -416,6 +417,9 @@ def set_logs(
         cudagraph_static_inputs (:class:`bool`):
             Whether to emit debug info for cudagraph static input detection. Default: ``False``
 
+        graph_region_expansion (:class:`bool`):
+            Whether to emit the detailed steps of the duplicate graph region tracker expansion algorithm. Default: ``False``
+
 
     Example::
 
@@ -514,6 +518,7 @@ def set_logs(
         compiled_autograd_verbose=compiled_autograd_verbose,
         cudagraph_static_inputs=cudagraph_static_inputs,
         benchmarking=benchmarking,
+        graph_region_expansion=graph_region_expansion,
     )
 
 
