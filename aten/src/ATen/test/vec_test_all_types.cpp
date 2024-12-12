@@ -1046,7 +1046,7 @@ namespace {
           mask[idx] = (VT)0;
         }
         else {
-          int64_t hex_mask = 0xFFFFFFFFFFFFFFFF;
+          uint64_t hex_mask = 0xFFFFFFFFFFFFFFFF;
           std::memcpy(&mask[idx], &hex_mask, sizeof(VT));
         }
         if (!test_blendv<vec, VT, idx+1, N>(expected_val, a, b, mask)) return false;
@@ -1315,8 +1315,8 @@ namespace {
         ValueGen<float> generator_sc(1.f, 15.f, seed.add(2));
         for ([[maybe_unused]] const auto i : c10::irange(trials)) {
           float scale = generator_sc.get();
-          int32_t zero_point_val = generator.get();
-          float scale_zp_premul = -(scale * zero_point_val);
+          auto zero_point_val = generator.get();
+          float scale_zp_premul = -(scale * static_cast<float>(zero_point_val));
           vfloat vf_scale = vfloat{scale};
           vfloat vf_zp = vfloat{static_cast<float>(zero_point_val)};
           vfloat vf_scale_zp = vfloat{scale_zp_premul};
@@ -1657,18 +1657,16 @@ namespace {
     TEST(HalfConversionTest, HalfFloat) {
       float f32s[100];
       for (const auto i : c10::irange(100)) {
-        f32s[i] = i + 0.3;
+        f32s[i] = static_cast<float>(i + 0.3);
       }
-      uint16_t u16;
-      float x;
       for (const auto i : c10::irange(100)) {
       #if (defined(CPU_CAPABILITY_AVX2) || defined(CPU_CAPABILITY_AVX512)) && \
           !defined(__APPLE__)
-        u16 = at::vec::float2half_scalar(f32s[i]);
-        x = at::vec::half2float_scalar(u16);
+        uint16_t u16 = at::vec::float2half_scalar(f32s[i]);
+        float x = at::vec::half2float_scalar(u16);
       #else
-        u16 = c10::detail::fp16_ieee_from_fp32_value(f32s[i]);
-        x = c10::detail::fp16_ieee_to_fp32_value(u16);
+        uint16_t u16 = c10::detail::fp16_ieee_from_fp32_value(f32s[i]);
+        float x = c10::detail::fp16_ieee_to_fp32_value(u16);
       #endif
 
         EXPECT_EQ(u16, c10::detail::fp16_ieee_from_fp32_value(f32s[i]))
@@ -1697,7 +1695,7 @@ namespace {
       VT v_pinf = static_cast<VT>(*(float *)&infBits);
       values[index] = v_pinf;
       auto vec_pinf = vec::loadu(values);
-      int negInfBits = 0xFF800000;
+      unsigned int negInfBits = 0xFF800000;
       VT v_ninf  = static_cast<VT>(*(float *)&negInfBits);
       values[index] = v_ninf;
       auto vec_ninf = vec::loadu(values);
