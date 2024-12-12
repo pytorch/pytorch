@@ -881,6 +881,7 @@ class CompilationMetrics:
     cuda_version: Optional[str] = None
     triton_version: Optional[str] = None
     feature_usage: Optional[dict[str, bool]] = None
+    compile_time_autotune_time_us: Optional[int] = None
 
 
 DEFAULT_COMPILATION_METRICS_LIMIT = 64
