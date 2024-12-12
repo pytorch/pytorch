@@ -15,7 +15,7 @@
 #include <torch/custom_class.h>
 #include <torch/library.h>
 #include <ATen/Config.h>
-#if AT_MKLDNN_ENABLED()
+#if AT_ONEDNN_ENABLED()
 #include <ATen/native/onednn/Utils.h>
 #endif
 
@@ -84,7 +84,7 @@ bool use_miopen(const at::Tensor& input, const double dropout_state) {
 }
 
 bool use_mkldnn(const Tensor& input, TensorList params, TensorList hx) {
-#if AT_MKLDNN_ENABLED()
+#if AT_ONEDNN_ENABLED()
   if (!at::globalContext().userEnabledMkldnn()) {
     return false;
   }

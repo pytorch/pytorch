@@ -786,7 +786,7 @@ at::Tensor PackedLinearWeightsQnnp::apply_relu(
 
 #endif // USE_PYTORCH_QNNPACK
 
-#if AT_MKLDNN_ENABLED()
+#if AT_ONEDNN_ENABLED()
 template <PostOps post_op>
 at::Tensor PackedLinearWeightsOnednn::apply_impl(
     at::Tensor input,
@@ -1099,7 +1099,7 @@ static at::Tensor linear_int8_with_onednn_weight(
   primitive.execute(ideep::stream::default_stream(), args);
   return dim == 2 ? output : output.reshape(output_size);
 }
-#endif // #if AT_MKLDNN_ENABLED()
+#endif // #if AT_ONEDNN_ENABLED()
 
 namespace at::native {
 
@@ -1117,7 +1117,7 @@ namespace at::native {
       std::string_view post_op_name,
       torch::List<std::optional<at::Scalar>> post_op_args,
       std::string_view post_op_algorithm) {
-#if AT_MKLDNN_ENABLED()
+#if AT_ONEDNN_ENABLED()
     TORCH_CHECK(act_scale.numel() == 1 && act_zero_point.numel() == 1,
         "onednn int8 linear: act scale/zp size should be 1");
     static std::optional<at::Tensor> other = std::nullopt;
@@ -1153,7 +1153,7 @@ namespace at::native {
       std::string_view unary_post_op, // e.g. "none", "relu"
       torch::List<std::optional<at::Scalar>> unary_post_op_args,
       std::string_view unary_post_op_algorithm) {
-#if AT_MKLDNN_ENABLED()
+#if AT_ONEDNN_ENABLED()
     TORCH_CHECK(act_scale.numel() == 1 && act_zero_point.numel() == 1,
         "onednn int8 linear: act scale/zp size should be 1");
     return linear_int8_with_onednn_weight(
@@ -1197,10 +1197,10 @@ class QLinearLeakyReluInt8 final {
       double output_scale,
       int64_t output_zero_point,
       double negative_slope) {
-#if AT_MKLDNN_ENABLED() || !defined(STRIP_ERROR_MESSAGES)
+#if AT_ONEDNN_ENABLED() || !defined(STRIP_ERROR_MESSAGES)
     auto& ctx = at::globalContext();
 #endif
-#if AT_MKLDNN_ENABLED()
+#if AT_ONEDNN_ENABLED()
     if (ctx.qEngine() == at::QEngine::ONEDNN) {
       return dynamic_cast<PackedLinearWeightsOnednn*>(packed_weight.get())->apply_leaky_relu(
           std::move(input), output_scale, output_zero_point, negative_slope);
@@ -1221,10 +1221,10 @@ class QLinearTanhInt8 final {
       const c10::intrusive_ptr<LinearPackedParamsBase>& packed_weight,
       double output_scale,
       int64_t output_zero_point) {
-#if AT_MKLDNN_ENABLED() || !defined(STRIP_ERROR_MESSAGES)
+#if AT_ONEDNN_ENABLED() || !defined(STRIP_ERROR_MESSAGES)
     auto& ctx = at::globalContext();
 #endif
-#if AT_MKLDNN_ENABLED()
+#if AT_ONEDNN_ENABLED()
     if (ctx.qEngine() == at::QEngine::ONEDNN) {
       return dynamic_cast<PackedLinearWeightsOnednn*>(packed_weight.get())->apply_tanh(
           std::move(input), output_scale, output_zero_point);
@@ -1271,7 +1271,7 @@ class QLinearOnednn final {
       std::string_view post_op_name,
       torch::List<std::optional<at::Scalar>> post_op_args,
       std::string_view post_op_algorithm) {
-#if AT_MKLDNN_ENABLED()
+#if AT_ONEDNN_ENABLED()
     static std::optional<at::Tensor> other = std::nullopt;
     static const std::string_view binary_post_op = "none";
     return linear_int8_with_onednn_weight(
@@ -1305,7 +1305,7 @@ class QLinearOnednn final {
       std::string_view unary_post_op, // e.g. "none", "relu"
       torch::List<std::optional<at::Scalar>> unary_post_op_args,
       std::string_view unary_post_op_algorithm) {
-#if AT_MKLDNN_ENABLED()
+#if AT_ONEDNN_ENABLED()
     return linear_int8_with_onednn_weight(
         act, act_scale, act_zero_point,
         onednn_weight, weight_scales, weight_zero_points,

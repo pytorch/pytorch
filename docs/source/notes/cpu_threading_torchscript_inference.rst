@@ -77,7 +77,7 @@ libraries at the build time with the following build options:
 +------------+------------------------+-----------------------------+----------------------------------------+
 | MKL        | ``MKL_THREADING``      | (same)                      | To enable MKL use ``BLAS=MKL``         |
 +------------+------------------------+-----------------------------+----------------------------------------+
-| MKL-DNN    | ``MKLDNN_CPU_RUNTIME`` | (same)                      | To enable MKL-DNN use ``USE_MKLDNN=1`` |
+| MKL-DNN    | ``ONEDNN_CPU_RUNTIME`` | (same)                      | To enable MKL-DNN use ``USE_ONEDNN=1`` |
 +------------+------------------------+-----------------------------+----------------------------------------+
 
 It is recommended not to mix OpenMP and TBB within one build.

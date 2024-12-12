@@ -110,7 +110,7 @@ else()
     append_torchlib_if_found(fbgemm)
   endif()
 
-  if(@USE_MKLDNN@)
+  if(@USE_ONEDNN@)
     append_torchlib_if_found(dnnl mkldnn)
   endif()
 

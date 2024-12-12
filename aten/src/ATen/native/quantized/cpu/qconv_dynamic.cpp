@@ -129,7 +129,7 @@ template at::Tensor PackedConvWeightsQnnp<3>::apply_dynamic(
 
 #endif // USE_PYTORCH_QNNPACK
 
-#if AT_MKLDNN_ENABLED()
+#if AT_ONEDNN_ENABLED()
 
 template <int kSpatialDim>
 at::Tensor PackedConvWeightsOnednn<kSpatialDim>::apply_dynamic(
@@ -178,7 +178,7 @@ template at::Tensor PackedConvWeightsOnednn<3>::apply_dynamic(
     const at::Tensor& input,
     bool reduce_range);
 
-#endif // AT_MKLDNN_ENABLED()
+#endif // AT_ONEDNN_ENABLED()
 
 namespace at::native {
 namespace {

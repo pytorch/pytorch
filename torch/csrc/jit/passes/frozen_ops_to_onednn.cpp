@@ -34,7 +34,7 @@
 #include <c10/core/Layout.h>
 #include <c10/util/StringUtil.h>
 
-#if AT_MKLDNN_ENABLED()
+#if AT_ONEDNN_ENABLED()
 #include <ATen/CPUFunctions.h>
 #include <dnnl_types.h>
 #include <ATen/native/onednn/Utils.h>
@@ -46,7 +46,7 @@
 
 namespace torch::jit {
 
-#if AT_MKLDNN_ENABLED()
+#if AT_ONEDNN_ENABLED()
 
 using Tensor = at::Tensor;
 

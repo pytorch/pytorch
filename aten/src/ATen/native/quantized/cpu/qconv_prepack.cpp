@@ -322,7 +322,7 @@ c10::intrusive_ptr<ConvPackedParamsBase<2>> PackedConvWeightsQnnp<
         bool transpose);
 #endif // USE_PYTORCH_QNNPACK
 
-#if AT_MKLDNN_ENABLED()
+#if AT_ONEDNN_ENABLED()
 template <int kSpatialDim>
 c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> PackedConvWeightsOnednn<
     kSpatialDim>::
@@ -616,7 +616,7 @@ at::Tensor _qconv_prepack_onednn(
   return packed_weight;
 }
 
-#endif // #if AT_MKLDNN_ENABLED()
+#endif // #if AT_ONEDNN_ENABLED()
 
 namespace at::native {
 namespace {
@@ -665,7 +665,7 @@ class QConvPackWeightInt8 final {
     auto& ctx = at::globalContext();
 #ifdef USE_FBGEMM
   if (ctx.qEngine() == at::QEngine::X86) {
-#if AT_MKLDNN_ENABLED()
+#if AT_ONEDNN_ENABLED()
     bool use_onednn = onednn_utils::should_use_onednn_quant(
           weight, transpose, groups, output_padding);
     if (use_onednn) {
@@ -676,7 +676,7 @@ class QConvPackWeightInt8 final {
       return PackedConvWeight<kSpatialDim>::prepack(
           weight, bias, stride, padding, output_padding, dilation, groups, transpose);
   } // x86
-#endif // defined(USE_FBGEMM) || AT_MKLDNN_ENABLED()
+#endif // defined(USE_FBGEMM) || AT_ONEDNN_ENABLED()
 
 #ifdef USE_FBGEMM
     if (ctx.qEngine() == at::QEngine::FBGEMM) {
@@ -694,7 +694,7 @@ class QConvPackWeightInt8 final {
     }
 #endif
 
-#if AT_MKLDNN_ENABLED()
+#if AT_ONEDNN_ENABLED()
     if (ctx.qEngine() == at::QEngine::ONEDNN) {
       return PackedConvWeightsOnednn<kSpatialDim>::prepack(
         weight, bias, stride, padding, output_padding, dilation, groups,
@@ -758,7 +758,7 @@ class QConv1dPackWeightInt8 final {
 
 #ifdef USE_FBGEMM
   if (ctx.qEngine() == at::QEngine::X86) {
-#if AT_MKLDNN_ENABLED()
+#if AT_ONEDNN_ENABLED()
     bool use_onednn = onednn_utils::should_use_onednn_quant(
         weight, transpose, groups, output_padding);
     if (use_onednn) {
@@ -790,7 +790,7 @@ class QConv1dPackWeightInt8 final {
     }
 #endif
 
-#if AT_MKLDNN_ENABLED()
+#if AT_ONEDNN_ENABLED()
     if (ctx.qEngine() == at::QEngine::ONEDNN) {
       return PackedConvWeightsOnednn<2>::prepack(
           weight, bias, stride, padding, output_padding, dilation, groups,
@@ -817,7 +817,7 @@ class QConvPrepackOneDNN final {
     torch::List<int64_t> dilation,
     int64_t groups,
     std::optional<torch::List<int64_t>> input_shape) {
-#if AT_MKLDNN_ENABLED()
+#if AT_ONEDNN_ENABLED()
     return _qconv_prepack_onednn(
         weight, weight_scales, input_scale, input_zero_point,
         stride, padding, dilation, groups, input_shape);

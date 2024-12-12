@@ -9,7 +9,7 @@
 #include <ATen/ops/tanh_native.h>             // for mkldnn_tanh, mkldnn_tanh_
 #endif
 
-#if !AT_MKLDNN_ENABLED()
+#if !AT_ONEDNN_ENABLED()
 
 namespace at {
 namespace native {
@@ -33,7 +33,7 @@ Tensor& mkldnn_tanh_(Tensor& self) {
 } // namespace native
 } // namespace at
 
-#else // AT_MKLDNN_ENABLED
+#else // AT_ONEDNN_ENABLED
 
 #include <ATen/native/onednn/ONEDNNCommon.h>
 
@@ -73,4 +73,4 @@ Tensor& mkldnn_tanh_(Tensor& self) {
 
 } // namespace at
 
-#endif // AT_MKLDNN_ENABLED
+#endif // AT_ONEDNN_ENABLED

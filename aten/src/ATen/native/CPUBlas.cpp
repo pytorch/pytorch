@@ -44,7 +44,7 @@ extern "C" void zaxpy_(int *n, void *a, const void *x, int *incx, void *y, int *
 #include <fbgemm/FbgemmI64.h>
 #endif  // USE_FBGEMM
 
-#if AT_MKLDNN_ENABLED()
+#if AT_ONEDNN_ENABLED()
 #include <ideep.hpp>
 // Add uKernel API versioning to be compatible with different oneDNN versions
 // oneDNN 3.6.x updates the ukernel APIs of brgemm and brgemm_pack_B
@@ -57,7 +57,7 @@ extern "C" void zaxpy_(int *n, void *a, const void *x, int *incx, void *y, int *
 #if ((defined(ONEDNN_UKERNEL_1) || defined(ONEDNN_UKERNEL_2)) && (defined(__x86_64__) || (defined(_M_X64) && !defined(_M_ARM64EC))))
 #define ONEDNN_UKERNEL_ENABLED
 #endif
-#endif  // AT_MKLDNN_ENABLED()
+#endif  // AT_ONEDNN_ENABLED()
 
 #if defined(ONEDNN_UKERNEL_ENABLED)
 #include <oneapi/dnnl/dnnl_ukernel.hpp>
@@ -188,7 +188,7 @@ void gemm(
     const float beta,
     float *c, int64_t ldc) {
   internal::normalize_last_dims(transa, transb, m, n, k, &lda, &ldb, &ldc);
-#if AT_MKLDNN_ENABLED()
+#if AT_ONEDNN_ENABLED()
    if (mkldnn_bf32_gemm(transa, transb, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc)) {
      return;
    }
@@ -343,7 +343,7 @@ void gemm(
       return;
    }
 #endif
-#if AT_MKLDNN_ENABLED()
+#if AT_ONEDNN_ENABLED()
 #ifdef __aarch64__
    // MKLDNN also supports ARM for bf16, and the bypass is only
    // currently intended for x86/x86_64.
@@ -373,7 +373,7 @@ void gemm(
    const float beta,
    at::Half *c, int64_t ldc) {
    internal::normalize_last_dims(transa, transb, m, n, k, &lda, &ldb, &ldc);
-#if AT_MKLDNN_ENABLED()
+#if AT_ONEDNN_ENABLED()
    // Per https://github.com/pytorch/pytorch/pull/137918#discussion_r1825460179 ,
    // we should not bother checking for !cpuinfo_has_x86_avx512fp16() here,
    // because "onednn (mkldnn) won't use avx512fp16 to compute gemms by default

@@ -187,7 +187,7 @@ filegroup(
 )
 
 filegroup(
-    name = "aten_native_mkldnn_cpp",
+    name = "aten_native_onednn_cpp",
     srcs = glob(["aten/src/ATen/native/onednn/*.cpp"]),
 )
 
@@ -260,8 +260,8 @@ header_template_rule(
     out = "aten/src/ATen/Config.h",
     include = "aten/src",
     substitutions = {
-        "@AT_MKLDNN_ENABLED@": "1",
-        "@AT_MKLDNN_ACL_ENABLED@": "0",
+        "@AT_ONEDNN_ENABLED@": "1",
+        "@AT_ONEDNN_ACL_ENABLED@": "0",
         "@AT_MKL_ENABLED@": "1",
         "@AT_MKL_SEQUENTIAL@": "0",
         "@AT_POCKETFFT_ENABLED@": "0",
@@ -346,7 +346,7 @@ cc_library(
         ":aten_base_vulkan",
         ":aten_native_cpp",
         ":aten_native_mkl_cpp",
-        ":aten_native_mkldnn_cpp",
+        ":aten_native_onednn_cpp",
         ":aten_native_nested_cpp",
         ":aten_native_quantized_cpp",
         ":aten_native_sparse_cpp",

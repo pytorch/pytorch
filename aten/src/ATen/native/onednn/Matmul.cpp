@@ -4,7 +4,7 @@
 #include <ATen/Context.h>
 #include <ATen/native/onednn/Matmul.h>
 
-#if !AT_MKLDNN_ENABLED()
+#if !AT_ONEDNN_ENABLED()
 
 namespace at {
 namespace native {
@@ -88,7 +88,7 @@ void mkldnn_matmul_i8i8i32(
 } // namespace native
 } // namespace at
 
-#else // AT_MKLDNN_ENABLED
+#else // AT_ONEDNN_ENABLED
 
 #include <ATen/native/onednn/ONEDNNCommon.h>
 #include <ATen/native/onednn/Utils.h>
@@ -514,4 +514,4 @@ void mkldnn_matmul_i8i8i32(
 
 } // namespace at
 
-#endif // AT_MKLDNN_ENABLED
+#endif // AT_ONEDNN_ENABLED

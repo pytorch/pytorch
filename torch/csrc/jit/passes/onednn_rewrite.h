@@ -5,15 +5,15 @@
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/passes/subgraph_rewrite.h>
 
-#if AT_MKLDNN_ENABLED()
+#if AT_ONEDNN_ENABLED()
 
 #include <ideep/tensor.hpp>
 
-#endif // AT_MKLDNN_ENABLED()
+#endif // AT_ONEDNN_ENABLED()
 
 namespace torch::jit {
 
-#if AT_MKLDNN_ENABLED()
+#if AT_ONEDNN_ENABLED()
 
 namespace mkldnn {
 
@@ -25,7 +25,7 @@ const static std::map<std::string, std::vector<torch::jit::MatchFilter>>
 
 } // namespace mkldnn
 
-#endif // AT_MKLDNN_ENABLED()
+#endif // AT_ONEDNN_ENABLED()
 
 void FuseConvWithEltwise(std::shared_ptr<Graph>& graph);
 

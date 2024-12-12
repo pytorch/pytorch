@@ -10,7 +10,7 @@
 
 namespace torch::jit {
 
-#if AT_MKLDNN_ENABLED()
+#if AT_ONEDNN_ENABLED()
 
 static c10::VaryingShape<int64_t> getSizesOf(Node* n, size_t idx) {
   auto tt = n->input(idx)->type()->cast<TensorType>();
@@ -214,6 +214,6 @@ void FuseConvWithEltwise(std::shared_ptr<Graph>& graph) {
   GRAPH_DEBUG("MKLDNN Not enabled");
 }
 
-#endif // AT_MKLDNN_ENABLED()
+#endif // AT_ONEDNN_ENABLED()
 
 } // namespace torch::jit

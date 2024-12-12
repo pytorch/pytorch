@@ -3,7 +3,7 @@
 #include <ATen/Tensor.h>
 #include <ATen/Config.h>
 
-#if AT_MKLDNN_ENABLED()
+#if AT_ONEDNN_ENABLED()
 
 namespace at::native {
 C10_API Tensor mkldnn_linear_pointwise(
@@ -34,4 +34,4 @@ C10_API Tensor mkl_linear(
 
 } // namespace at
 
-#endif // AT_MKLDNN_ENABLED()
+#endif // AT_ONEDNN_ENABLED()

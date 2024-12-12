@@ -187,7 +187,7 @@ Fast Fourier Transform (torch.fft)
 -  (emeritus) Mike Ruberry (`mruberry <https://github.com/mruberry>`__)
 -  (emeritus) Peter Bell (`peterbell10 <https://github.com/peterbell10>`__)
 
-MKLDNN
+ONEDNN
 ~~~~~~
 
 -  Xiaobing Zhang (`XiaobingSuper <https://github.com/XiaobingSuper>`__)
