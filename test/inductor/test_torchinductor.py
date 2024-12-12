@@ -1846,9 +1846,9 @@ class CommonTemplate:
         from torch._inductor.runtime.runtime_utils import next_power_of_2
         from torch._inductor.runtime.triton_heuristics import triton_config_reduction
 
-        size_hints = [67108864, 8192]
+        size_hints = {"x": 67108864, "r": 8192}
         for i in range(4):
-            size_hints[0] = next_power_of_2(size_hints[0])
+            size_hints["x"] = next_power_of_2(size_hints["x"])
             triton_config_reduction(size_hints, 1, 2048, 1, 8)
 
     def test_prod(self):
@@ -11920,6 +11920,28 @@ class CommonTemplate:
         # recompilation.
         run(9)
         self.assertEqual(cnts.frame_count, 4)
+
+    def test_slice_after_split_dont_specialize_dynamic_dim(self):
+        N = 16
+
+        @torch.compile(backend="inductor", dynamic=False, fullgraph=True)
+        def fn(x):
+            # Creates an upper bound: x.shape[0] <= N
+            splits = torch.ops.aten.split.Tensor(x, N)
+            first = splits[0]
+            # Previously: creates a lower bound: x.shape[0] >= N
+            # Currenty: creates an upper bound: x.shape[0] <= N
+            #
+            # See: https://github.com/pytorch/pytorch/issues/141251
+            r = torch.ops.aten.slice.Tensor(first, 0, 0, N)
+            return r
+
+        x = torch.arange(N)
+        torch._dynamo.mark_dynamic(x, 0)
+
+        # Check it doesn't error because we have specialized a dimension
+        # marked as dynamic.
+        fn(x)
 
 
 @dataclasses.dataclass
