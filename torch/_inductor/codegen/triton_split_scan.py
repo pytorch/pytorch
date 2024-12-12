@@ -5,13 +5,12 @@ from typing import Dict
 import sympy
 
 from torch._inductor import config
-from torch._inductor.codegen.simd import IterationRangesRoot
+from torch._inductor.codegen.simd import IterationRangesRoot, prefix_is_reduction
 from torch._inductor.codegen.triton import triton_compute_type, TritonKernel
 from torch._inductor.runtime.triton_heuristics import split_scan_grid
 from torch.utils._sympy.functions import CeilDiv
 
 from ..utils import sympy_product
-from .simd import prefix_is_reduction
 
 
 class TritonSplitScanKernel(TritonKernel):
@@ -58,11 +57,11 @@ class TritonSplitScanKernel(TritonKernel):
         ), "z dimension not supported for split scan"
         active_prefixes = prefixes[len(prefixes) - len(self.numels) :]
 
-        grid_dims = ["r0_", "x", "y"]
+        grid_dims = {"r0_": 0, "x": 1, "y": 2}
         for prefix in active_prefixes:
             numel = self.numels[prefix]
             tensor_dim = 0 if prefix_is_reduction(prefix) else None
-            grid_dim = grid_dims.index(prefix)
+            grid_dim = grid_dims[prefix]
             self.range_trees.append(
                 IterationRangesRoot(
                     f"{prefix}index",

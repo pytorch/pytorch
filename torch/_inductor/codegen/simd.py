@@ -53,6 +53,7 @@ from ..utils import (
     get_dtype_size,
     IndentedBuffer,
     Placeholder,
+    prefix_is_reduction,
     sympy_index_symbol,
     sympy_product,
     sympy_subs,
@@ -78,9 +79,7 @@ fusion_log = torch._logging.getArtifactLogger(__name__, "fusion")
 
 pexpr = PythonPrinter().doprint
 
-
-def prefix_is_reduction(prefix: str) -> bool:
-    return prefix[0] == "r"
+all_prefixes = OrderedSet(["z", "y", "x", "r0_", "r1_"])
 
 
 @dataclasses.dataclass
@@ -404,9 +403,15 @@ class SIMDKernel(Kernel):
         return False
 
     def initialize_range_tree(self, pid_cache):
-        prefixes = ["z", "y", "x", "r0_", "r1_"]
-        active_prefixes = [prefix for prefix in prefixes if prefix in self.numels]
-        no_r_dim = not self.inside_reduction or self.features.reduction_numel == 1
+        active_prefixes = OrderedSet(
+            prefix for prefix in all_prefixes if prefix in self.numels
+        )
+        no_r_dim = not self.inside_reduction or not self.features.is_reduction()
+
+        def filtered_index_map(seq, mask) -> Dict[Any, int]:
+            return {
+                val: idx for idx, val in enumerate(val for val in seq if val in mask)
+            }
 
         grid_dims = ["x", "y", "z"]
         reduction_dims = ["r0_", "r1_"]
@@ -417,12 +422,15 @@ class SIMDKernel(Kernel):
         else:
             tensor_dims = grid_dims + reduction_dims
 
-        tensor_dims = [p for p in tensor_dims if p in active_prefixes]
+        # Filter out unused tensor dims.
+        # Convert to dicts for O(1) index lookup.
+        tensor_dim_map = filtered_index_map(tensor_dims, active_prefixes)
+        grid_dim_map = filtered_index_map(grid_dims, all_prefixes)
 
         for i, prefix in enumerate(active_prefixes):
             is_reduction = prefix_is_reduction(prefix)
-            tensor_dim = tensor_dims.index(prefix) if prefix in tensor_dims else None
-            grid_dim = None if is_reduction else grid_dims.index(prefix)
+            tensor_dim = tensor_dim_map.get(prefix)
+            grid_dim = grid_dim_map.get(prefix)
             index = i if grid_dim is None else grid_dim
             self.range_trees.append(
                 IterationRangesRoot(
@@ -538,7 +546,7 @@ class SIMDKernel(Kernel):
 
         @contextlib.contextmanager
         def ctx():
-            if self.features.reduction_numel == 1:
+            if not self.features.is_reduction():
                 assert not self.inside_reduction
                 yield
                 return
