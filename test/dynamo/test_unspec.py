@@ -45,7 +45,7 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
         z = np.int64(12)
         res1 = fn(x, y, z)
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        opt_fn = torch.compile(fn, backend=cnts)
         res2 = opt_fn(x, y, z)
         self.assertEqual(res1, res2)
 
@@ -56,7 +56,7 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
 
         x = torch.tensor([[1.0, 2.0], [3.0, 4.0]], dtype=torch.float64)
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        opt_fn = torch.compile(fn, backend=cnts)
         for i in range(10):
             opt_fn(x, np.int64(i))
         self.assertEqual(cnts.frame_count, 1)
@@ -73,7 +73,7 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
         z = torch.tensor([[1.0, 2.0], [3.0, 4.0]], dtype=torch.float64)
         res1 = fn(x, y, z)
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        opt_fn = torch.compile(fn, backend=cnts)
         res2 = opt_fn(x, y, z)
         self.assertTrue(same(res1, res2, relax_numpy_equality=True))
 
@@ -87,7 +87,7 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
         random.seed(1)
         res1 = fn(shape)
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        opt_fn = torch.compile(fn, backend=cnts)
         random.seed(1)
         res2 = opt_fn(shape)
 
@@ -106,7 +106,7 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
         random.seed(1)
         res1 = fn(x)
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        opt_fn = torch.compile(fn, backend=cnts)
         random.seed(1)
         res2 = opt_fn(x)
         self.assertTrue(same(res1, res2))
@@ -131,7 +131,7 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
         random.seed(1)
         res1 = fn(x)
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        opt_fn = torch.compile(fn, backend=cnts)
         random.seed(1)
         res2 = opt_fn(x)
         self.assertTrue(same(res1, res2))
@@ -161,7 +161,7 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
         x = torch.randn(4)
         random.seed(1)
         res1 = fn(x)
-        opt_fn = torch._dynamo.optimize("eager")(fn)
+        opt_fn = torch.compile(fn, backend="eager")
         random.seed(1)
         res2 = opt_fn(x)
         self.assertTrue(same(res1, res2))
@@ -263,7 +263,7 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
         x = list(range(50))
         ref = fn(x, 48)  # 48 is unspecialized
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        opt_fn = torch.compile(fn, backend=cnts)
         res = opt_fn(x, 48)
         self.assertTrue(same(ref, res))
 
@@ -333,7 +333,7 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
         scale_factor = 1.873536229133606
         ref = fn(x, scale_factor)
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        opt_fn = torch.compile(fn, backend=cnts)
         res = opt_fn(x, scale_factor)
         self.assertTrue(same(ref, res))
 
@@ -348,7 +348,7 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
                 return x - 1
 
         x = torch.rand(4)
-        opt_fn = torch._dynamo.optimize("eager", nopython=True)(fn)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         for t in [np.float16, np.float32, np.float64]:
             y = t(1.23)
             ref = fn(x, y)
@@ -373,7 +373,7 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
             return x + torch.randn(x_shape)
 
         x = torch.randn(20)
-        opt_fn = torch._dynamo.optimize("eager")(fn)
+        opt_fn = torch.compile(fn, backend="eager")
         opt_fn(x)
 
     def test_isinstance_symint(self):
@@ -382,7 +382,7 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
             return x * 2
 
         x = torch.randn(20)
-        opt_fn = torch._dynamo.optimize("eager")(fn)
+        opt_fn = torch.compile(fn, backend="eager")
         opt_fn(x)
         y = torch.randn(30)
         torch._dynamo.mark_dynamic(y, 0)
@@ -394,7 +394,7 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
 
         x = torch.randn(1)
         torch._dynamo.mark_dynamic(x, 0)
-        opt_fn = torch._dynamo.optimize("eager")(fn)
+        opt_fn = torch.compile(fn, backend="eager")
         # This will fail to compile a generic kernel, but we should not
         # complain about it (mark dynamic will try its best but 0/1
         # specialization is allowed)
@@ -547,7 +547,7 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
     def test_symbol_guard_limit_before_specialize(self):
         cnts = torch._dynamo.testing.CompileCounter()
 
-        @torch._dynamo.optimize(cnts, dynamic=True)
+        @torch.compile(backend=cnts, dynamic=True)
         def fn(x):
             torch._check(x.size(0) != 3)
             torch._check(x.size(0) != 4)
@@ -644,7 +644,7 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
                 return x * y
 
             cnt = CompileCounterWithBackend("aot_eager")
-            fn_opt = torch._dynamo.optimize(cnt)(fn)
+            fn_opt = torch.compile(fn, backend=cnt)
             x = torch.randn(5, dtype=dtype, requires_grad=True)
             y1 = 1.00048828125
             y2 = 1.00048828126
@@ -703,7 +703,7 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
             else:
                 return False
 
-        @torch._dynamo.optimize(cnts)
+        @torch.compile(backend=cnts)
         def fn(x):
             x = x + 1
             y = x.item()
