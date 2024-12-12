@@ -145,6 +145,7 @@ def _compile_shader(source: str):
     defined there from the comfort of Python runtime
     Example::
 
+        >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_MPS)
         >>> lib = torch.mps._compile_shader(
         ... "kernel void full(device float* out, constant float& val, uint idx [[thread_position_in_grid]]) { out[idx] = val; }"
         ...  )

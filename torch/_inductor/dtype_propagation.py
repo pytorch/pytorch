@@ -49,7 +49,7 @@ def get_promoted_dtype(
 ):
     def construct_input(inp):
         if inp[1]:
-            return torch.empty([], dtype=inp[0])
+            return torch.empty(1, dtype=inp[0])
         else:
             return torch.empty([1], dtype=inp[0])
 
@@ -89,7 +89,7 @@ def promote_types(
             dtype_prop_candidates.append((type_to_dtype(type(arg)), True))
             continue
 
-        dtype_prop_candidates.append((arg.dtype, getattr(arg, "is_scalar", False)))
+        dtype_prop_candidates.append((arg.dtype, False))
 
     dtype = get_promoted_dtype(
         *dtype_prop_candidates,

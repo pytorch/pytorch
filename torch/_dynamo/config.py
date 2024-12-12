@@ -86,6 +86,9 @@ assume_static_by_default = True
 # any guards due to wobbles in shape, we recompile with *all* the wobbled shapes as being marked dynamic.
 automatic_dynamic_shapes = True
 
+# Valid options: "dynamic", "unbacked"
+automatic_dynamic_shapes_mark_as = "dynamic"
+
 # This flag changes how the shapes of parameters are treated.
 # If this flag is set to True, then the shapes of torch.nn.Parameter as well as of torch.Tensor are attempted to be dynamic
 # If this flag is set to False, then the shapes of torch.nn.Parameter are assumed to be static,
@@ -381,6 +384,14 @@ enable_cpp_guard_manager = True
 
 # Inline inbuilt nn modules
 inline_inbuilt_nn_modules = not is_fbcode()
+
+# Whether to automatically find and replace identical graph
+# regions with a call to invoke_subgraph
+use_graph_deduplication = False
+
+# Whether to track nodes for deduplication (testing only)
+# This flag is ignored if use_graph_deduplication is True
+track_nodes_for_deduplication = False
 
 # Issues a warning in Python 3.13.0 for possibly slower guard evaluation and
 # instructs user to attempt using 3.13.1+, where the CPython bug is fixed.
