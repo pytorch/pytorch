@@ -10,7 +10,7 @@ extern "C" {
 #endif
 
 AOTI_TORCH_EXPORT AOTITorchError
-aoti_torch_cpu_mkldnn__convolution_pointwise_binary(
+aoti_torch_cpu_onednn__convolution_pointwise_binary(
     AtenTensorHandle X,
     AtenTensorHandle other,
     AtenTensorHandle W,
@@ -31,7 +31,7 @@ aoti_torch_cpu_mkldnn__convolution_pointwise_binary(
     AtenTensorHandle* ret0);
 
 AOTI_TORCH_EXPORT AOTITorchError
-aoti_torch_cpu_mkldnn__convolution_pointwise_binary_(
+aoti_torch_cpu_onednn__convolution_pointwise_binary_(
     AtenTensorHandle other,
     AtenTensorHandle X,
     AtenTensorHandle W,
@@ -51,7 +51,7 @@ aoti_torch_cpu_mkldnn__convolution_pointwise_binary_(
     const char** unary_algorithm,
     AtenTensorHandle* ret0);
 
-AOTI_TORCH_EXPORT AOTITorchError aoti_torch_cpu_mkldnn__convolution_pointwise(
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_cpu_onednn__convolution_pointwise(
     AtenTensorHandle X,
     AtenTensorHandle W,
     AtenTensorHandle* B,
@@ -69,7 +69,7 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_cpu_mkldnn__convolution_pointwise(
     AtenTensorHandle* ret0);
 
 AOTI_TORCH_EXPORT AOTITorchError
-aoti_torch_cpu_mkldnn__convolution_transpose_pointwise(
+aoti_torch_cpu_onednn__convolution_transpose_pointwise(
     AtenTensorHandle X,
     AtenTensorHandle W,
     AtenTensorHandle* B,
