@@ -1194,6 +1194,41 @@ class MpsMemoryLeakCheck:
                    f"MPS driver allocated memory was {self.driver_before} and is now {driver_mem_allocated}.")
 
             raise RuntimeError(msg)
+        
+class SelfAttentionBlock(nn.Module):
+    def __init__(self, in_channels):
+        super().__init__()
+        self.query_conv = nn.Conv2d(in_channels, in_channels // 8, kernel_size=1)
+        self.key_conv = nn.Conv2d(in_channels, in_channels // 8, kernel_size=1)
+        self.value_conv = nn.Conv2d(in_channels, in_channels, kernel_size=1)
+        self.gamma = nn.Parameter(torch.zeros(1))
+
+    def forward(self, x):
+        B, C, H, W = x.size()
+        query = self.query_conv(x).reshape(B, -1, H * W)  # Use reshape here
+        print("Query output:", query)
+        key = self.key_conv(x).reshape(B, -1, H * W)
+        value = self.value_conv(x).reshape(B, -1, H * W)
+
+        attention = torch.bmm(query.permute(0, 2, 1), key)
+        attention = torch.softmax(attention, dim=-1)
+        out = torch.bmm(value, attention.permute(0, 2, 1))
+        out = out.reshape(B, C, H, W)  # Use reshape here
+        return self.gamma * out + x
+
+
+class SimpleDenoiseNet(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.conv_in = nn.Conv2d(3, 32, kernel_size=3, padding=1)
+        self.attn = SelfAttentionBlock(32)
+        self.conv_out = nn.Conv2d(32, 3, kernel_size=3, padding=1)
+
+    def forward(self, x):
+        x = self.conv_in(x)
+        x = self.attn(x)
+        x = self.conv_out(x)
+        return x
 
 class TestAutocastMPS(TestCase):
 
@@ -10953,6 +10988,47 @@ class TestConvolutionMPS(TestCaseMPS):
                     self.assertEqual(output, groundtruth, atol=1e-5, rtol=0,
                                      msg=f"groundtruth comparison failed for mode={mode}, "
                                      f"padding_mode={padding_mode}")
+                    
+    # Regression test for https://github.com/pytorch/pytorch/issues/142344
+    def test_self_attention_block_backward(self):
+        def helper(device = "mps"):
+            # Define a simplified SelfAttentionBlock for testing
+            class SelfAttentionBlock(nn.Module):
+                def __init__(self, in_channels):
+                    super().__init__()
+                    self.query_conv = nn.Conv2d(in_channels, in_channels // 8, kernel_size=1)
+                    self.key_conv = nn.Conv2d(in_channels, in_channels // 8, kernel_size=1)
+                    self.value_conv = nn.Conv2d(in_channels, in_channels, kernel_size=1)
+                    self.gamma = nn.Parameter(torch.zeros(1))
+
+                def forward(self, x):
+                    B, C, H, W = x.size()
+                    query = self.query_conv(x).reshape(B, -1, H * W)
+                    key = self.key_conv(x).reshape(B, -1, H * W)
+                    value = self.value_conv(x).reshape(B, -1, H * W)
+
+                    attention = torch.bmm(query.permute(0, 2, 1), key)
+                    attention = torch.softmax(attention, dim=-1)
+                    out = torch.bmm(value, attention.permute(0, 2, 1))
+                    out = out.reshape(B, C, H, W)
+                    return self.gamma * out + x
+
+            # Create the model, input, and target tensors
+            model = SelfAttentionBlock(32).to(device)
+            input_data = torch.rand(2, 32, 16, 16, device=device, requires_grad=True)
+            target_data = torch.rand(2, 32, 16, 16, device=device)
+
+            # Compute the forward pass and loss
+            output = model(input_data)
+            loss = (output - target_data).pow(2).mean()
+
+            # Perform backward pass and validate no errors
+            loss.backward()
+            
+        try:
+            helper()
+        except RuntimeError as e:
+            self.fail(f"MPS test failed with error: {str(e)}")
 
 class TestAdvancedIndexing(TestCaseMPS):
     supported_dtypes = [torch.float32, torch.float16, torch.int64, torch.int32, torch.int16, torch.uint8]
