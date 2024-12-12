@@ -1811,6 +1811,9 @@ PyObject* initModule() {
 #ifdef USE_CUDA
   torch::cuda::initModule(module);
 #endif
+#ifdef USE_MPS
+  torch::mps::initModule(module);
+#endif
 #ifdef USE_XPU
   torch::xpu::initModule(module);
 #endif

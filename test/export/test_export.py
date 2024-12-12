@@ -1128,6 +1128,21 @@ graph():
         ep_model = export(model, (x,), strict=False).module()
         self.assertTrue(torch.allclose(model(x), ep_model(x)))
 
+    def test_output_node_name(self):
+        class TestModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(10, 10)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        model = TestModule()
+        x = torch.randn(20, 10)
+        ep_model = export(model, (x,), strict=False).module()
+        self.assertEqual(list(ep_model.graph.nodes)[-1].name, "output")
+        self.assertTrue(torch.allclose(model(x), ep_model(x)))
+
     def test_real_tensor_size_mismatch(self):
         from torch._subclasses.fake_tensor import MetadataMismatchError
 
@@ -8856,6 +8871,25 @@ def forward(self, x, b_t, y):
         ep = export(copied_m, (torch.randn(N, C, H, W),))
         self.assertEqual(copied_m.state_dict(), m.state_dict())
         self.assertEqual(ep.state_dict, m.state_dict())
+
+    def test_module_list_slice(self):
+        class ModuleListTruncated(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.fcs = torch.nn.ModuleList(
+                    [torch.nn.Linear(1, 1) for _ in range(2)]
+                )
+
+            def forward(self, x):
+                for fc in self.fcs[:1]:
+                    x = fc(x)
+                return x
+
+        x = torch.rand(2, 1)
+        mod = ModuleListTruncated()
+
+        epm = export(mod, (x,)).module()
+        self.assertTrue(torch.allclose(mod(x), epm(x)))
 
     def test_non_persistent_buffer(self):
         class MyModule(torch.nn.Module):
