@@ -421,28 +421,28 @@ void _assert_async_cpu(const Tensor& self) {
   TORCH_CHECK(native::is_nonzero(self), "Expected Tensor with single nonzero value, but got zero");
 }
 
-void _assert_async_msg_cpu(const Tensor& self, c10::string_view assert_msg) {
+void _assert_async_msg_cpu(const Tensor& self, std::string_view assert_msg) {
   TORCH_CHECK(native::is_nonzero(self), assert_msg != "" ? assert_msg : "Assertion is failed");
 }
 
-void _assert_scalar(const Scalar& scalar, c10::string_view assert_msg) {
+void _assert_scalar(const Scalar& scalar, std::string_view assert_msg) {
   TORCH_SYM_CHECK(scalar.toSymBool(), assert_msg != "" ? assert_msg : "Assertion is failed");
 }
 
-Tensor _functional_assert_scalar(const Scalar& scalar, c10::string_view assert_msg, const Tensor& dep_token) {
+Tensor _functional_assert_scalar(const Scalar& scalar, std::string_view assert_msg, const Tensor& dep_token) {
   _assert_scalar(scalar, assert_msg);
   return dep_token.clone();
 }
 
 Tensor _functional_assert_async_msg_cpu(
   const Tensor& self,
-  c10::string_view assert_msg,
+  std::string_view assert_msg,
   const Tensor& dep_token) {
   _assert_async_msg_cpu(self, assert_msg);
   return dep_token.clone();
 }
 
-void _print(c10::string_view s) {
+void _print(std::string_view s) {
   std::cout << s << "\n";
 }
 

@@ -323,16 +323,16 @@ def while_loop_tracing(mode, cond_fn, body_fn, carried_inputs, additional_inputs
 
 
 def check_outputs_carry_consistency(
-    outs: List[torch.Tensor | torch.SymInt | int],
-    carries: List[torch.Tensor | torch.SymInt | int],
+    outs: List[Union[torch.Tensor, torch.SymInt, int]],
+    carries: List[Union[torch.Tensor, torch.SymInt, int]],
 ) -> None:
     def diff_meta_pairs(
-        lhs_list: List[torch.Tensor | torch.SymInt | int],
-        rhs_list: List[torch.Tensor | torch.SymInt | int],
+        lhs_list: List[Union[torch.Tensor, torch.SymInt, int]],
+        rhs_list: List[Union[torch.Tensor, torch.SymInt, int]],
     ) -> List[str]:
         def diff_meta(
-            lhs: torch.Tensor | torch.SymInt | int,
-            rhs: torch.Tensor | torch.SymInt | int,
+            lhs: Union[torch.Tensor, torch.SymInt, int],
+            rhs: Union[torch.Tensor, torch.SymInt, int],
         ) -> str:
             if isinstance(lhs, torch.Tensor) and isinstance(rhs, torch.Tensor):
                 # We have vmap x cond tests and querying is_contiguous inside of vmap for
@@ -415,7 +415,7 @@ def while_loop_func(ctx, cond_fn, body_fn, carried_inputs, additional_inputs):
     unwrapped_carried_inputs = ctx.unwrap_tensors(carried_inputs)
     unwrapped_additional_inputs = ctx.unwrap_tensors(additional_inputs)
     unwrapped_inputs = unwrapped_carried_inputs + unwrapped_additional_inputs
-    with ctx.redispatch_to_next() as m:
+    with ctx.redispatch_to_next():
         functional_cond_fn = ctx.functionalize(_maybe_run_with_interpreter(cond_fn))
         functional_body_fn = ctx.functionalize(_maybe_run_with_interpreter(body_fn))
         pre_dispatch = hasattr(ctx, "mode") and ctx.mode.pre_dispatch

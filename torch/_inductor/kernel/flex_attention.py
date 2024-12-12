@@ -15,6 +15,7 @@ from torch.utils._pytree import tree_map
 
 from .. import config
 from ..ir import (
+    Buffer,
     ComputedBuffer,
     ExternKernel,
     FixedLayout,
@@ -629,10 +630,19 @@ flex_attention_template = TritonTemplate(
 
 
 def _use_flex_decoding(query, kernel_options):
-    # Decide which kernel to use, return true if use flex decoding kernel.
-    return (
-        not kernel_options.get("FORCE_USE_FLEX_ATTENTION", False)
-    ) and V.graph.sizevars.evaluate_expr(sympy.Lt(query.get_size()[-2], 128))
+    """Decide which kernel to use, return true if use flex decoding kernel.
+    Note:
+       Since the number of splits is calculated based of the the number of batch and head dims
+       we need to ensure that the batch and head dims are statically known. Otherwise we just
+       use the main flex_attention kernel.
+    """
+    force_flex = kernel_options.get("FORCE_USE_FLEX_DECODING", False)
+    short_query_length = V.graph.sizevars.evaluate_expr(
+        sympy.Lt(query.get_size()[-2], 128)
+    )
+    static_batch = isinstance(query.get_size()[0], (int, sympy.Integer))
+    static_num_heads = isinstance(query.get_size()[1], (int, sympy.Integer))
+    return not force_flex and short_query_length and static_batch and static_num_heads
 
 
 _h100_default_config = {
@@ -679,7 +689,7 @@ class Mode(Enum):
 
 def _get_rocm_config(query, mode: Mode) -> Tuple[int, int, int, int]:
     dtype = query.get_dtype()
-    head_dim = query.get_size()[-1]
+    head_dim = V.graph.sizevars.evaluate_static_shape(query.get_size()[-1])
     fwd_config = None
 
     if mode == Mode.fwd:
@@ -712,7 +722,7 @@ def _get_rocm_config(query, mode: Mode) -> Tuple[int, int, int, int]:
 
 def _get_nv_config(query, mode: Mode) -> Tuple[int, int, int, int]:
     dtype = query.get_dtype()
-    head_dim = query.get_size()[-1]
+    head_dim = V.graph.sizevars.evaluate_static_shape(query.get_size()[-1])
     fwd_config = None
 
     capability = torch.cuda.get_device_capability()
@@ -803,10 +813,25 @@ def create_indices_fake(x) -> torch.Tensor:
 
 from torch._inductor.kernel.flex_decoding import create_flex_decoding_kernel
 
+from ..codegen.cpp_flex_attention_template import CppFlexAttentionTemplate
 
-# TODO: We probably also need a layout constraint?
-@register_lowering(torch.ops.higher_order.flex_attention, type_promotion_kind=None)
-def flex_attention(
+
+def check_cpu_supported():
+    import os
+    import sys
+
+    requires_avx2_on_cpu = (
+        torch.cpu._is_avx2_supported() and os.getenv("ATEN_CPU_CAPABILITY") != "default"
+    )
+    supported = (
+        requires_avx2_on_cpu
+        and not torch.xpu.is_available()
+        and not sys.platform == "darwin"
+    )
+    return supported
+
+
+def lower_cpu(
     query,
     key,
     value,
@@ -832,6 +857,221 @@ def flex_attention(
         SPARSE_KV_BLOCK_SIZE,
         mask_graph,
     ) = block_mask
+
+    if kernel_options["OUTPUT_LOGSUMEXP"]:
+        raise NotImplementedError(
+            "torch.compile on CPU only supports inference and `return_lse` is not supported yet."
+        )
+    if not check_cpu_supported():
+        raise NotImplementedError(
+            "torch.compile on current platform is not supported for CPU."
+        )
+
+    fake_buffers: List[Buffer] = []  # noqa: F821
+    placeholder_inps = [
+        create_placeholder(name, dtype, query.get_device())
+        for name, dtype in [
+            ("score", torch.float),
+            ("b", torch.int64),
+            ("h", torch.int64),
+            ("q_idx", torch.int64),
+            ("kv_idx", torch.int64),
+        ]
+    ]
+    subgraph_buffer = build_subgraph_buffer(
+        placeholder_inps + list(score_mod_other_buffers), subgraph
+    )
+    if subgraph_buffer is not None:
+        if isinstance(subgraph_buffer, list):
+            for _buf in subgraph_buffer:
+                if _buf is not None:
+                    _buf.freeze_layout()
+        else:
+            subgraph_buffer.freeze_layout()
+    mask_graph_placeholder_inps = [
+        create_placeholder(name, dtype, query.get_device())
+        for name, dtype in [
+            ("b", torch.int64),
+            ("h", torch.int64),
+            ("q_idx", torch.int64),
+            ("kv_idx", torch.int64),
+        ]
+    ]
+    mask_graph_buffer = build_subgraph_buffer(
+        mask_graph_placeholder_inps + list(mask_mod_other_buffers), mask_graph
+    )
+
+    buffer_list = (
+        placeholder_inps
+        + list(score_mod_other_buffers)
+        + mask_graph_placeholder_inps
+        + list(mask_mod_other_buffers)
+    )
+    for item in buffer_list:
+        if isinstance(item, TensorBox):
+            fake_buffers.append(item.data.data)  # type: ignore[attr-defined]
+
+    (
+        query,
+        key,
+        value,
+        kv_num_blocks,
+        kv_indices,
+        full_kv_num_blocks,
+        full_kv_indices,
+        q_num_blocks,
+        q_indices,
+        full_q_num_blocks,
+        full_q_indices,
+    ) = maybe_realize(
+        [
+            query,
+            key,
+            value,
+            kv_num_blocks,
+            kv_indices,
+            full_kv_num_blocks,
+            full_kv_indices,
+            q_num_blocks,
+            q_indices,
+            full_q_num_blocks,
+            full_q_indices,
+        ]
+    )
+
+    if len({query.get_name(), key.get_name(), value.get_name()}) != 3:
+        raise NotImplementedError(
+            "Unsupported for now if query, key, value are the same buffer."
+        )
+    if query.get_dtype() not in [torch.float, torch.bfloat16]:
+        raise NotImplementedError(
+            "`torch.float` and `torch.bfloat16` are supported in FlexAttention for CPU device. "
+            f"Found input tensors are `{query.get_dtype()}`."
+        )
+    score_mod_other_buffers = maybe_realize(score_mod_other_buffers)
+    mask_mod_other_buffers = maybe_realize(mask_mod_other_buffers)
+    Bq, Hq, seq_len_q, qk_head_dim = query.get_size()
+    Bkv, Hkv, seq_len_kv, v_head_dim = value.get_size()
+    B = Bq
+
+    # Construct output layout with strides matching the query.
+    out_size = [B, Hq, seq_len_q, v_head_dim]
+    fill_order = get_fill_order(query.get_stride())
+    out_strides = construct_strides(out_size, fill_order)
+
+    layout = FixedLayout(
+        query.get_device(),
+        query.get_dtype(),
+        [B, Hq, seq_len_q, v_head_dim],
+        stride=[sympy.sympify(s) for s in out_strides],
+    )
+    _choices: List[Any] = []
+    input_nodes = [query, key, value, kv_num_blocks, kv_indices]
+    if not full_kv_num_blocks:
+        no_full_kv_block = True
+    else:
+        no_full_kv_block = False
+        input_nodes += [full_kv_num_blocks]
+    has_other_buffer = False
+    kernel_input_name_to_buffer = {}
+    if score_mod_other_buffers or mask_mod_other_buffers:
+        has_other_buffer = True
+
+        for prefix, buffers in [
+            ("score_others", score_mod_other_buffers),
+            ("mask_others", mask_mod_other_buffers),
+        ]:
+            kernel_input_name_to_buffer.update(
+                {f"{prefix}_{i}": buf for i, buf in enumerate(buffers)}
+            )
+        input_nodes += [
+            value
+            for value in kernel_input_name_to_buffer.values()
+            if not isinstance(value, sympy.Symbol)
+        ]
+
+    skip_mask_score = kernel_options.get("SKIP_MASK_SCORE", False)
+    # Mark SPARSE_KV_BLOCK_SIZE & SPARSE_Q_BLOCK_SIZE as static shapes and add guards.
+    SPARSE_KV_BLOCK_SIZE = V.graph.sizevars.evaluate_static_shape(SPARSE_KV_BLOCK_SIZE)
+    SPARSE_Q_BLOCK_SIZE = V.graph.sizevars.evaluate_static_shape(SPARSE_Q_BLOCK_SIZE)
+    assert V.graph.sizevars.evaluate_expr(
+        sympy.Le(seq_len_q, sympy.Mul(kv_indices.get_size()[-2], SPARSE_Q_BLOCK_SIZE))
+    ), "Q seqlen must be smaller than the block_mask size in the Q dimension, considering pass a larger block_mask."
+    assert V.graph.sizevars.evaluate_expr(
+        sympy.Le(seq_len_kv, sympy.Mul(kv_indices.get_size()[-1], SPARSE_KV_BLOCK_SIZE))
+    ), "KV seqlen must be smaller than the block_mask size in the KV dimension, considering pass a larger block_mask."
+    CppFlexAttentionTemplate.add_choices(
+        choices=_choices,
+        input_nodes=input_nodes,
+        layout=layout,
+        scale=scale,
+        score_mod=None if skip_mask_score else subgraph_buffer,
+        mask_mod=None if skip_mask_score else mask_graph_buffer,
+        kv_block_size=SPARSE_KV_BLOCK_SIZE,
+        has_other_buffer=has_other_buffer,
+        no_full_kv_block=no_full_kv_block,
+        fake_buffers=fake_buffers,
+        len_score_other=len(score_mod_other_buffers),
+        len_mask_other=len(mask_mod_other_buffers),
+        kernel_input_name_to_buffer=kernel_input_name_to_buffer,
+    )
+    inputs_for_autotuning = [
+        query,
+        key,
+        value,
+    ]
+    res = autotune_select_algorithm(
+        "flex_attention",
+        _choices,
+        inputs_for_autotuning,
+        layout,
+    )
+    return (res,)
+
+
+# TODO: We probably also need a layout constraint?
+@register_lowering(torch.ops.higher_order.flex_attention, type_promotion_kind=None)
+def flex_attention(
+    query,
+    key,
+    value,
+    subgraph,
+    block_mask,
+    scale,
+    kernel_options,
+    score_mod_other_buffers,
+    mask_mod_other_buffers,
+):
+    if query.get_device().type == "cpu":
+        return lower_cpu(
+            query,
+            key,
+            value,
+            subgraph,
+            block_mask,
+            scale,
+            kernel_options,
+            score_mod_other_buffers,
+            mask_mod_other_buffers,
+        )
+
+    # below is cuda path if device is not cpu
+    (
+        _,  # q_length
+        _,  # kv_length
+        kv_num_blocks,
+        kv_indices,
+        full_kv_num_blocks,
+        full_kv_indices,
+        q_num_blocks,
+        q_indices,
+        full_q_num_blocks,
+        full_q_indices,
+        SPARSE_Q_BLOCK_SIZE,
+        SPARSE_KV_BLOCK_SIZE,
+        mask_graph,
+    ) = block_mask
+
     placeholder_inps = [
         create_placeholder(name, dtype, query.get_device())
         for name, dtype in [
@@ -925,7 +1165,7 @@ def flex_attention(
 
     # Construct output layout with strides matching the query.
     out_size = [B, Hq, seq_len_q, v_head_dim]
-    fill_order = get_fill_order(query.get_stride())
+    fill_order = get_fill_order(query.get_stride(), V.graph.sizevars.shape_env)
     out_strides = construct_strides(out_size, fill_order)
 
     layout = FixedLayout(
@@ -956,8 +1196,13 @@ def flex_attention(
         full_kv_num_blocks, full_kv_indices = (
             empty(0, device=query.get_device()) for _ in range(2)
         )
-    kernel_options.setdefault("QK_HEAD_DIM", qk_head_dim)
-    kernel_options.setdefault("V_HEAD_DIM", v_head_dim)
+    kernel_options.setdefault(
+        "QK_HEAD_DIM",
+        V.graph.sizevars.evaluate_static_shape(qk_head_dim),
+    )
+    kernel_options.setdefault(
+        "V_HEAD_DIM", V.graph.sizevars.evaluate_static_shape(v_head_dim)
+    )
 
     choices: List[Any] = []
     configs: List[Tuple[int, int, int, int]] = []
@@ -1917,7 +2162,6 @@ def flex_attention_backward(*args, **kwargs):
     assert V.graph.sizevars.evaluate_expr(
         sympy.Eq(Bq, Bkv) | sympy.Eq(Bkv, 1)
     ), f"Bq and Bkv must broadcastable. Got Bq={Bq} and Bkv={Bkv}"
-    B = Bq
 
     kernel_options = dict(kernel_options)
     kernel_options.setdefault("FLOAT32_PRECISION", get_float32_precision())
@@ -2015,8 +2259,15 @@ def flex_attention_backward(*args, **kwargs):
         full_kv_num_blocks, full_kv_indices, full_q_num_blocks, full_q_indices = (
             empty(0, device=query.get_device()) for _ in range(4)
         )
-    kernel_options.setdefault("QK_HEAD_DIM", qk_head_dim)
-    kernel_options.setdefault("V_HEAD_DIM", v_head_dim)
+    kernel_options.setdefault(
+        "QK_HEAD_DIM", V.graph.sizevars.evaluate_static_shape(qk_head_dim)
+    )
+    kernel_options.setdefault(
+        "V_HEAD_DIM", V.graph.sizevars.evaluate_static_shape(v_head_dim)
+    )
+
+    SPARSE_Q_BLOCK_SIZE = V.graph.sizevars.evaluate_static_shape(SPARSE_Q_BLOCK_SIZE)
+    SPARSE_KV_BLOCK_SIZE = V.graph.sizevars.evaluate_static_shape(SPARSE_KV_BLOCK_SIZE)
 
     choices: List[Any] = []
     configs: List[Tuple[int, int, int, int]] = []
