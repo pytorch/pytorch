@@ -100,6 +100,8 @@ from .triton_utils import (
 
 
 if TYPE_CHECKING:
+    from torch._inductor.dtype_propagation import DtypePropagationOpsHandler
+
     from ..ir import IRNode
 
 log = logging.getLogger(__name__)
@@ -729,6 +731,12 @@ class TritonCSEVariable(CSEVariable):
                 self.mask_vars.update({f"{arg.name[0]}mask"})
 
 
+def get_dtype_handler() -> DtypePropagationOpsHandler:
+    from torch._inductor.dtype_propagation import DtypePropagationOpsHandler
+
+    return DtypePropagationOpsHandler()
+
+
 def maybe_upcast_float32(convert_output: bool = True):
     """
     Codegen helper to upcast arguments to float32, depending on the config and dtype.
@@ -759,25 +767,15 @@ def maybe_upcast_float32(convert_output: bool = True):
             upcast_args = [maybe_upcast_arg(arg) for arg in args]
             upcast_kwargs = {key: maybe_upcast_arg(val) for key, val in kwargs.items()}
 
-            # Infer the output dtype from the inputs.
-            # This promotes to the largest input type.
-            all_args = args + tuple(kwargs.values())
-            input_dtypes = [
-                var.dtype
-                for var in all_args
-                if isinstance(var, CSEVariable) and var.dtype is not None
-            ]
-            result_dtype = (
-                functools.reduce(torch.promote_types, input_dtypes)
-                if len(input_dtypes) > 0
-                else None
-            )
+            result_dtype = getattr(get_dtype_handler(), func.__name__)(*args, **kwargs)
 
             # Call the decorated function, optionally downcasting the result.
             result = func(*upcast_args, **upcast_kwargs)
             needs_downcast = (
                 convert_output
-                and any(needs_upcast(var) for var in all_args)
+                and any(
+                    needs_upcast(var) for var in itertools.chain(args, kwargs.values())
+                )
                 and result_dtype not in {torch.float32, None}
             )
             downcast_string = (
@@ -901,6 +899,25 @@ class TritonOverrides(OpOverrides):
     @maybe_upcast_float32()
     def abs(x):
         return f"tl_math.abs({x})"
+
+    # TODO - register these ops as having divergent dtype
+    # output if doing graph pass to remove consecutive casts
+
+    @staticmethod
+    def truediv(x, y):
+        out = f"({x} / {y})"
+        out_dtype = get_dtype_handler().truediv(x, y)
+        if out_dtype in (torch.float16, torch.float32):
+            out = f"{out}.to({triton_type(out_dtype)})"
+        return out
+
+    @staticmethod
+    def mod(x, y):
+        out = f"({x} % {y})"
+        out_dtype = get_dtype_handler().mod(x, y)
+        if out_dtype in (torch.float16, torch.float32):
+            out = f"{out}.to({triton_type(out_dtype)})"
+        return out
 
     @staticmethod
     @maybe_upcast_float32()
@@ -2602,16 +2619,20 @@ class TritonKernel(SIMDKernel):
 
         exit_stack.close()
 
-    def _lift_helper(self, fn, num_args) -> str:
+    def _lift_helper(self, fn, num_args, dtypes: Tuple[torch.dtype, ...]) -> str:
         # Lift IR function for scan operations into a triton function
         # in the global namespace
         helper = IndentedBuffer()
         helper.writeline("@triton.jit")
-        args = [tuple(f"arg{i}_{n}" for n in range(num_args)) for i in range(2)]
-        signature = ", ".join(itertools.chain.from_iterable(args))
+        cse = CSE(prefix="", suffix="")
+
+        args = [
+            tuple(cse.namedvar(f"arg{i}_{n}", dtype=dtypes[n]) for n in range(num_args))
+            for i in range(2)
+        ]
+        signature = ", ".join(str(x) for x in itertools.chain.from_iterable(args))
         helper.writeline(f"def {{name}}({signature}):")
 
-        cse = CSE(prefix="", suffix="")
         overrides = TritonOverrides(V.MockHandler())
 
         # Build a name that changes depending on fn to workaround a triton bug
@@ -2620,15 +2641,25 @@ class TritonKernel(SIMDKernel):
         # This is fixed with the latest triton pin, but not the triton-rocm pin.
         helper_name = "_triton_helper_fn"
 
+        from torch._inductor.dtype_propagation import DtypePropagationOpsHandler
+
+        dtype_handler = DtypePropagationOpsHandler()
+
         class CSEProxy:
             def __getattr__(self, name: str) -> Callable[..., CSEVariable]:
                 def inner(*args, **kwargs):
                     nonlocal helper_name
                     helper_name += f"_{name}"
+
+                    output_dtype = getattr(
+                        dtype_handler,
+                        name,
+                    )(*args, **kwargs)
+
                     return cse.generate(
                         helper,
                         getattr(overrides, name)(*args, **kwargs),
-                        dtype=torch.float32,
+                        dtype=output_dtype,
                     )
 
                 return inner
@@ -2659,7 +2690,7 @@ class TritonKernel(SIMDKernel):
         accumulators = []
 
         cse_compute = functools.partial(self.cse.generate, self.compute)
-        combine_helper_fn = self._lift_helper(combine_fn, len(values))
+        combine_helper_fn = self._lift_helper(combine_fn, len(values), dtypes)
         dim = self.triton_tensor_ndim() - 1
 
         for value, dtype in zip(values, dtypes):
