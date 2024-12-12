@@ -313,7 +313,7 @@ static Tensor rrelu_with_noise_batch(
   auto [noise_value, noise_bdim] = unwrapTensorAtLevel(noise, cur_level);
   TORCH_CHECK(!noise_bdim.has_value(), "vmap: Attempted to vmap over 'noise' in torch.rrelu_with_noise. This is not supported.");
   auto res = rrelu_with_noise_batch_rule(self_value, self_bdim, noise_value, noise_bdim, lower, upper, training, std::move(generator));
-  return makeBatched(std::get<0>(res), std::get<1>(res), cur_level);
+  return makeBatched(std::move(std::get<0>(res)), std::get<1>(res), cur_level);
 }
 
 static std::tuple<Tensor, std::optional<int64_t>> log_sigmoid_backward_batch_rule(
