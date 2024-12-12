@@ -51,7 +51,7 @@ class Config:
             default behaviour. I.e. user overrides take preference.
     """
 
-    default: Any = True
+    default: Any
     justknob: Optional[str] = None
     env_name_default: Optional[str] = None
     env_name_force: Optional[str] = None
@@ -59,7 +59,7 @@ class Config:
 
     def __init__(
         self,
-        default: Any = True,
+        default: Any,
         justknob: Optional[str] = None,
         env_name_default: Optional[str] = None,
         env_name_force: Optional[str] = None,
