@@ -302,6 +302,23 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
             expected_opcount=2,
         )
 
+    def test_symint_in_slice(self):
+        def f(x):
+            i = x.size(0) - 2
+            j = x.size(1) - 3
+            k = x.size(2)
+            return wrap(lambda x: x[:i, :j, k:], x)
+
+        x = torch.randn(3, 4, 5)
+        self._test_wrap_simple(
+            f,
+            default_args_generator((x,)),
+            # 3 basic symbols and 2 compound symbols
+            ifdynstaticdefault(2, 7),
+            # 2 more sym expression computation
+            expected_opcount=ifdynstaticdefault(2, 4),
+        )
+
     def test_wrap_pytree_args_nested(self):
         def f(x, y, z):
             def fn(d):
@@ -6939,6 +6956,23 @@ class ActivationCheckpointingTests(torch._dynamo.test_case.TestCase):
 
         with self.assertRaises(AssertionError):
             opt_test(True, False, inp)
+
+    def test_cond_with_mismatched_output(self):
+        def output_mismatch_test(x):
+            def true_fn():
+                return torch.concat([x, x])
+
+            def false_fn():
+                return x.sin()
+
+            return torch.cond(x.sum() > 0, true_fn, false_fn)
+
+        x = torch.randn(2, 3)
+        with self.assertRaises(torch._dynamo.exc.UncapturedHigherOrderOpError):
+            output_mismatch_test(x)
+
+        with self.assertRaises(torch._dynamo.exc.UncapturedHigherOrderOpError):
+            torch.compile(output_mismatch_test)(x)
 
     def test_non_aliasing_util(self):
         from torch._dynamo.variables.higher_order_ops import _assert_tensors_nonaliasing
