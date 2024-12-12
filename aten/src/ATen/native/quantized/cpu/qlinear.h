@@ -10,7 +10,7 @@ class QLinearOnednn final {
       Tensor act, // int8 CPU tensor, not QTensor
       Tensor act_scale,
       Tensor act_zero_point,
-      Tensor onednn_weight, // int8 tensor from MkldnnCPU
+      Tensor onednn_weight, // int8 tensor from OnednnCPU
       Tensor weight_scales,
       Tensor weight_zero_points,
       std::optional<Tensor> bias,
@@ -25,7 +25,7 @@ C10_API static Tensor run_pointwise_binary_tensor(
       Tensor act, // int8 CPU tensor, not QTensor
       Tensor act_scale,
       Tensor act_zero_point,
-      Tensor onednn_weight, // int8 tensor from MkldnnCPU
+      Tensor onednn_weight, // int8 tensor from OnednnCPU
       Tensor weight_scales,
       Tensor weight_zero_points,
       std::optional<at::Tensor> other, // extra input for binary post-op

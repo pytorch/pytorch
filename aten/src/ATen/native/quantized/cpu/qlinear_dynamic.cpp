@@ -619,7 +619,7 @@ at::Tensor PackedLinearWeightsOnednn::apply_dynamic_relu(
 
 static at::Tensor linear_dynamic_fp16_with_onednn_weight(
     at::Tensor input,
-    at::Tensor onednn_weight, // fp16 tensor from MkldnnCPU
+    at::Tensor onednn_weight, // fp16 tensor from OnednnCPU
     std::optional<at::Tensor> bias,
     bool relu_fused) {
   using ideep::tensor;
@@ -877,7 +877,7 @@ class LinearDynamicFp16Onednn final {
  public:
   static Tensor run(
       Tensor act, // int8 CPU tensor, not QTensor
-      Tensor onednn_weight, // int8 tensor from MkldnnCPU
+      Tensor onednn_weight, // int8 tensor from OnednnCPU
       std::optional<Tensor> bias) {
 #if AT_ONEDNN_ENABLED()
     return linear_dynamic_fp16_with_onednn_weight(
@@ -888,7 +888,7 @@ class LinearDynamicFp16Onednn final {
 
   static Tensor run_relu(
       Tensor act, // int8 CPU tensor, not QTensor
-      Tensor onednn_weight, // int8 tensor from MkldnnCPU
+      Tensor onednn_weight, // int8 tensor from OnednnCPU
       std::optional<Tensor> bias) {
 #if AT_ONEDNN_ENABLED()
     return linear_dynamic_fp16_with_onednn_weight(
@@ -947,7 +947,7 @@ TORCH_LIBRARY_IMPL(_quantized, Meta, m) {
       wrapped_fbgemm_linear_fp16_weight_meta);
 }
 
-TORCH_LIBRARY_IMPL(onednn, MkldnnCPU, m) {
+TORCH_LIBRARY_IMPL(onednn, OnednnCPU, m) {
   m.impl(TORCH_SELECTIVE_NAME("onednn::linear_dynamic_fp16"),
       TORCH_FN(LinearDynamicFp16Onednn::run));
   m.impl(TORCH_SELECTIVE_NAME("onednn::linear_relu_dynamic_fp16"),

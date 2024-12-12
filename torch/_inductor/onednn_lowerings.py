@@ -34,14 +34,14 @@ def register_onednn_fusion_ops():
         from . import onednn_ir
 
         aten_mkldnn_linear_unary = ExternKernelChoice(
-            torch.ops.mkldnn._linear_pointwise,
-            "mkldnn::_linear_pointwise",
+            torch.ops.onednn._linear_pointwise,
+            "onednn::_linear_pointwise",
             has_out_variant=False,
             kernel_creator=onednn_ir.LinearUnary.create,
         )
         aten_mkldnn_linear_binary = ExternKernelChoice(
-            torch.ops.mkldnn._linear_pointwise.binary,
-            "mkldnn::_linear_pointwise",
+            torch.ops.onednn._linear_pointwise.binary,
+            "onednn::_linear_pointwise",
             has_out_variant=False,
             kernel_creator=onednn_ir.LinearBinary.create,
         )
@@ -58,15 +58,15 @@ def register_onednn_fusion_ops():
             kernel_creator=onednn_ir.QLinearPointwiseBinaryPT2E.create,
         )
         cpu_needs_realized_inputs = [
-            torch.ops.mkldnn._convolution_pointwise,
-            torch.ops.mkldnn._convolution_pointwise_,
-            torch.ops.mkldnn._convolution_transpose_pointwise,
-            torch.ops.mkldnn._linear_pointwise,
+            torch.ops.onednn._convolution_pointwise,
+            torch.ops.onednn._convolution_pointwise_,
+            torch.ops.onednn._convolution_transpose_pointwise,
+            torch.ops.onednn._linear_pointwise,
             aten.mkldnn_rnn_layer.default,
             torch.ops.onednn.qconv2d_pointwise,
         ]
 
-        @register_lowering(torch.ops.mkldnn._convolution_pointwise)
+        @register_lowering(torch.ops.onednn._convolution_pointwise)
         def convolution_unary(
             x: TensorBox,
             weight: TensorBox,
@@ -94,7 +94,7 @@ def register_onednn_fusion_ops():
                 )
             )
 
-        @register_lowering(torch.ops.mkldnn._convolution_pointwise.binary)
+        @register_lowering(torch.ops.onednn._convolution_pointwise.binary)
         def convolution_binary(
             x: TensorBox,
             other: TensorBox,
@@ -128,7 +128,7 @@ def register_onednn_fusion_ops():
                 )
             )
 
-        @register_lowering(torch.ops.mkldnn._convolution_pointwise_.binary)
+        @register_lowering(torch.ops.onednn._convolution_pointwise_.binary)
         def convolution_binary_inplace(
             x: TensorBox,
             other: TensorBox,
@@ -162,7 +162,7 @@ def register_onednn_fusion_ops():
                 )
             )
 
-        @register_lowering(torch.ops.mkldnn._linear_pointwise)
+        @register_lowering(torch.ops.onednn._linear_pointwise)
         def linear_unary(
             x: TensorBox,
             w: TensorBox,
@@ -228,7 +228,7 @@ def register_onednn_fusion_ops():
                 result = view(result, (*x_size[:-1], result.get_size()[-1]))
             return result
 
-        @register_lowering(torch.ops.mkldnn._linear_pointwise.binary)
+        @register_lowering(torch.ops.onednn._linear_pointwise.binary)
         def linear_binary(
             x: TensorBox, y: TensorBox, w: TensorBox, b: TensorBox, attr, layout=None
         ):
@@ -290,7 +290,7 @@ def register_onednn_fusion_ops():
                 result = view(result, (*x_size[:-1], result.get_size()[-1]))
             return result
 
-        @register_lowering(torch.ops.mkldnn._convolution_transpose_pointwise)
+        @register_lowering(torch.ops.onednn._convolution_transpose_pointwise)
         def convolution_transpose_unary(
             x: TensorBox,
             weight: TensorBox,

@@ -97,7 +97,7 @@ void DispatchParallel(
 
 FOR_ALL_EXTERNAL_FUNCTIONS(DECLARE_EXTERNAL_FUNCTION)
 #if AT_ONEDNN_ENABLED()
-DECLARE_EXTERNAL_FUNCTION(nnc_mkldnn_prepacked_conv_run)
+DECLARE_EXTERNAL_FUNCTION(nnc_onednn_prepacked_conv_run)
 #endif
 
 TORCH_API void nnc_aten_free(size_t bufs_num, void** ptrs) noexcept;

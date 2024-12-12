@@ -538,24 +538,24 @@ static Tensor get_onednn_serialized_md(const Tensor& self) {
   return res;
 }
 
-TORCH_LIBRARY_IMPL(mkldnn, CPU, m) {
+TORCH_LIBRARY_IMPL(onednn, CPU, m) {
   m.impl(
-      TORCH_SELECTIVE_NAME("mkldnn::_reorder_convolution_transpose_weight"),
+      TORCH_SELECTIVE_NAME("onednn::_reorder_convolution_transpose_weight"),
       TORCH_FN(mkldnn_reorder_conv_transpose_weight));
   m.impl(
-      TORCH_SELECTIVE_NAME("mkldnn::_reorder_linear_weight"),
-      TORCH_FN(onednn_reorder_linear_weight));
+      TORCH_SELECTIVE_NAME("onednn::_reorder_linear_weight"),
+    TORCH_FN(onednn_reorder_linear_weight));
   m.impl(
-      TORCH_SELECTIVE_NAME("mkldnn::_reorder_convolution_weight"),
+      TORCH_SELECTIVE_NAME("onednn::_reorder_convolution_weight"),
       TORCH_FN(mkldnn_reorder_conv_weight));
   m.impl(
-      TORCH_SELECTIVE_NAME("mkldnn::_reorder_onednn_rnn_layer_weight"),
+      TORCH_SELECTIVE_NAME("onednn::_reorder_onednn_rnn_layer_weight"),
       TORCH_FN(onednn_reorder_onednn_rnn_layer_weight));
 }
 
-TORCH_LIBRARY_IMPL(mkldnn, MkldnnCPU, m) {
+TORCH_LIBRARY_IMPL(onednn, OnednnCPU, m) {
   m.impl(
-      TORCH_SELECTIVE_NAME("mkldnn::_get_onednn_serialized_md"),
+      TORCH_SELECTIVE_NAME("onednn::_get_onednn_serialized_md"),
       TORCH_FN(get_onednn_serialized_md ));
 }
 

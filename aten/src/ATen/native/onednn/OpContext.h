@@ -6,7 +6,7 @@
 
 #if AT_ONEDNN_ENABLED()
 
-namespace at::native::mkldnn {
+namespace at::native::onednn {
 
 const static std::map<std::string, ideep::attr_t> fusion_attr_map = {
     {"none", ideep::attr_t()},
@@ -51,12 +51,12 @@ class ConvOpContext : public torch::jit::CustomClassHolder {
   virtual void run(const Tensor& input, void* output) = 0;
 };
 
-class MkldnnConvOpContext final : public ConvOpContext {
+class OnednnConvOpContext final : public ConvOpContext {
  private:
   ContextConv op_context_;
 
  public:
-  MkldnnConvOpContext(
+  OnednnConvOpContext(
       Tensor&& weight,
       std::optional<Tensor>&& bias,
       std::vector<int64_t>&& padding,

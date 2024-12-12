@@ -6,9 +6,9 @@
 
 #if AT_ONEDNN_ENABLED()
 
-namespace at::native::mkldnn::internal::convolution {
+namespace at::native::onednn::internal::convolution {
 
-c10::intrusive_ptr<mkldnn::ConvOpContext> createConvPrePackOpContext(
+c10::intrusive_ptr<onednn::ConvOpContext> createConvPrePackOpContext(
     Tensor weight,
     std::optional<Tensor> bias,
     std::vector<int64_t> stride,
@@ -20,7 +20,7 @@ c10::intrusive_ptr<mkldnn::ConvOpContext> createConvPrePackOpContext(
 
 Tensor conv_run(
     const Tensor& input,
-    const c10::intrusive_ptr<mkldnn::ConvOpContext>& op_context);
+    const c10::intrusive_ptr<onednn::ConvOpContext>& op_context);
 
 ContextConv create(
     const Tensor& weight,

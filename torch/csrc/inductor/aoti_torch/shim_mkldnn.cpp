@@ -26,7 +26,7 @@ c10::List<T> convert_to_c10_List(const T* scalars, const int64_t len) {
   return scalars_list;
 }
 
-AOTITorchError aoti_torch_cpu_mkldnn__convolution_pointwise_binary(
+AOTITorchError aoti_torch_cpu_onednn__convolution_pointwise_binary(
     AtenTensorHandle X,
     AtenTensorHandle other,
     AtenTensorHandle W,
@@ -69,7 +69,7 @@ AOTITorchError aoti_torch_cpu_mkldnn__convolution_pointwise_binary(
   });
 }
 
-AOTITorchError aoti_torch_cpu_mkldnn__convolution_pointwise_binary_(
+AOTITorchError aoti_torch_cpu_onednn__convolution_pointwise_binary_(
     AtenTensorHandle other,
     AtenTensorHandle X,
     AtenTensorHandle W,
@@ -112,7 +112,7 @@ AOTITorchError aoti_torch_cpu_mkldnn__convolution_pointwise_binary_(
   });
 }
 
-AOTITorchError aoti_torch_cpu_mkldnn__convolution_pointwise(
+AOTITorchError aoti_torch_cpu_onednn__convolution_pointwise(
     AtenTensorHandle X,
     AtenTensorHandle W,
     AtenTensorHandle* B,
@@ -150,7 +150,7 @@ AOTITorchError aoti_torch_cpu_mkldnn__convolution_pointwise(
 }
 
 AOTI_TORCH_EXPORT AOTITorchError
-aoti_torch_cpu_mkldnn__convolution_transpose_pointwise(
+aoti_torch_cpu_onednn__convolution_transpose_pointwise(
     AtenTensorHandle X,
     AtenTensorHandle W,
     AtenTensorHandle* B,

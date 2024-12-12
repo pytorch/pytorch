@@ -48,7 +48,7 @@ static void insertPrePackedConvOpForNode(Node* n) {
   auto input_size = graph->insertConstant(input_size_value);
 
   auto prepack_node = graph->create(
-      Symbol::fromQualString("mkldnn_prepacked::conv2d_prepack"), 1);
+      Symbol::fromQualString("onednn_prepacked::conv2d_prepack"), 1);
 
   // skip input value
   for (const auto i : c10::irange(1, n->inputs().size())) {
@@ -59,11 +59,11 @@ static void insertPrePackedConvOpForNode(Node* n) {
   auto attr = graph->insertConstant(IValue("none"));
   prepack_node->addInput(attr);
   prepack_node->output()->setType(
-      getCustomClass("__torch__.torch.classes.mkldnn.ConvOpContext"));
+      getCustomClass("__torch__.torch.classes.onednn.ConvOpContext"));
   graph->insertNode(prepack_node);
 
   auto prepack_conv = graph->insertNode(
-      graph->create(Symbol::fromQualString("mkldnn_prepacked::conv2d_run"), 1));
+      graph->create(Symbol::fromQualString("onednn_prepacked::conv2d_run"), 1));
   prepack_conv->addInput(n->input(0));
   prepack_conv->addInput(prepack_node->output());
   prepack_conv->output()->setType(n->output()->type()->cast<TensorType>());
@@ -115,10 +115,10 @@ static void FuseReluWithPackedOps(std::shared_ptr<Graph>& graph) {
   auto conv_op_rstring = at::jit::CodeTemplate(R"(
     graph(%input, %weight, %bias, %stride:int[], %padding:int[],
           %dilation:int[], %groups:int, %input_size:int[], %dummy_attr:str):
-        %packed_weight_bias = mkldnn_prepacked::conv2d_prepack(
+        %packed_weight_bias = onednn_prepacked::conv2d_prepack(
             %weight, %bias, %stride, %padding, %dilation, %groups,
             %input_size, %dummy_attr)
-        %conv2d_res = mkldnn_prepacked::conv2d_run(%input, %packed_weight_bias)
+        %conv2d_res = onednn_prepacked::conv2d_run(%input, %packed_weight_bias)
         %res = aten::${op}(%conv2d_res)
         return (%res))");
 
@@ -126,13 +126,13 @@ static void FuseReluWithPackedOps(std::shared_ptr<Graph>& graph) {
     graph(%input, %weight, %bias, %stride:int[], %padding:int[],
           %dilation:int[], %groups:int, %input_size:int[], %dummy_attr:str):
         %attr: str = prim::Constant[value="${op_attr}"]()
-        %packed_weight_bias : __torch__.torch.classes.mkldnn.ConvOpContext = mkldnn_prepacked::conv2d_prepack(
+        %packed_weight_bias : __torch__.torch.classes.onednn.ConvOpContext = onednn_prepacked::conv2d_prepack(
             %weight, %bias, %stride, %padding, %dilation, %groups,
             %input_size, %attr)
-        %res = mkldnn_prepacked::conv2d_run(%input, %packed_weight_bias)
+        %res = onednn_prepacked::conv2d_run(%input, %packed_weight_bias)
         return (%res))");
 
-  for (auto const& it : mkldnn::fusion_rewrite_map) {
+  for (auto const& it : onednn::fusion_rewrite_map) {
     std::string op = it.first;
     if (op == std::string("none")) {
       continue;
@@ -157,7 +157,7 @@ static void PrePackingOpsFolder(Block* b) {
   auto is_foldable_op = [](const Node* n) -> bool {
     return (
         n->kind() ==
-        Symbol::fromQualString("mkldnn_prepacked::conv2d_prepack"));
+        Symbol::fromQualString("onednn_prepacked::conv2d_prepack"));
   };
 
   std::unordered_set<Node*> nodes_to_delete;

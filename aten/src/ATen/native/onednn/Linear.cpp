@@ -420,27 +420,27 @@ TORCH_LIBRARY_IMPL(mkl, CPU, m) {
   m.impl(TORCH_SELECTIVE_NAME("mkl::_mkl_linear"), TORCH_FN(mkl_linear));
 }
 
-TORCH_LIBRARY_IMPL(mkl, MkldnnCPU, m) {
+TORCH_LIBRARY_IMPL(mkl, OnednnCPU, m) {
   m.impl(TORCH_SELECTIVE_NAME("mkl::_mkl_linear"), TORCH_FN(mkl_linear));
 }
 
 #endif// AT_MKL_ENABLED
 
-TORCH_LIBRARY_IMPL(mkldnn, CPU, m) {
+TORCH_LIBRARY_IMPL(onednn, CPU, m) {
   m.impl(
-      TORCH_SELECTIVE_NAME("mkldnn::_linear_pointwise"),
+      TORCH_SELECTIVE_NAME("onednn::_linear_pointwise"),
       TORCH_FN(mkldnn_linear_pointwise));
   m.impl(
-      TORCH_SELECTIVE_NAME("mkldnn::_linear_pointwise.binary"),
+      TORCH_SELECTIVE_NAME("onednn::_linear_pointwise.binary"),
       TORCH_FN(mkldnn_linear_pointwise_binary));
 }
 
-TORCH_LIBRARY_IMPL(mkldnn, MkldnnCPU, m) {
+TORCH_LIBRARY_IMPL(onednn, OnednnCPU, m) {
   m.impl(
-      TORCH_SELECTIVE_NAME("mkldnn::_linear_pointwise"),
+      TORCH_SELECTIVE_NAME("onednn::_linear_pointwise"),
       TORCH_FN(mkldnn_linear_pointwise));
   m.impl(
-      TORCH_SELECTIVE_NAME("mkldnn::_linear_pointwise.binary"),
+      TORCH_SELECTIVE_NAME("onednn::_linear_pointwise.binary"),
       TORCH_FN(mkldnn_linear_pointwise_binary));
 }
 
