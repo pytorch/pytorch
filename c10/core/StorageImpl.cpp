@@ -3,6 +3,8 @@
 
 namespace c10 {
 
+std::atomic<size_t> StorageImpl::g_id = 0;
+
 // The array to save function pointer for custom storageImpl create.
 static std::array<StorageImplCreateHelper, at::COMPILE_TIME_MAX_DEVICE_TYPES>
     StorageImplCreate;
