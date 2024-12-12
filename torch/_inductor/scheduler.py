@@ -2650,6 +2650,7 @@ class Scheduler:
                 # Currently, persistent+TMA Triton template does not due to the TMA-based loads.
                 if (
                     not epilogue_fusion
+                    and hasattr(choice, "allowed_prologue_inps")
                     and choice.allowed_prologue_inps != multi_node.allowed_prologue_inps
                 ):
                     continue

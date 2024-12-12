@@ -1829,7 +1829,7 @@ class AlgorithmSelectorCache(PersistentCache):
             # We take the union of allowed prologue inputs from all choices,
             # and, within benchmark fusion, don't allow prologue fusion for
             # choices which dont support the whole union.
-            allowed_prologue_inps: Optional[OrderedSet[str]] = OrderedSet()
+            allowed_prologue_inps: OrderedSet[str] = OrderedSet()
             for c in choices:
                 if isinstance(c, TritonTemplateCaller):
                     allowed_prologue_inps |= c.allowed_prologue_inps
