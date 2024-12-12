@@ -8276,11 +8276,10 @@ BACKWARD_SKIPS_AND_XFAILS = [
         sample_match_fn=lambda device, sample: ("(T, NT)" in sample.name),
         name="broken_rpow_backward",
     ),
-    # linear(): some formula problem when bias is used
-    XFailRule(
-        error_type=RuntimeError,
+    # linear(): some formula problem when bias is used; seems to be platform-specific
+    # (fails locally but not in CI)
+    SkipRule(
         # result2.use_count() <= 1 INTERNAL ASSERT FAILED
-        error_msg="INTERNAL ASSERT FAILED",
         op_match_fn=lambda device, op: (op.full_name == "nn.functional.linear"),
         sample_match_fn=lambda device, sample: ("with bias" in sample.name),
         name="broken_linear_backward",
