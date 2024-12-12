@@ -207,8 +207,8 @@ jobs:
         conda activate "${CONDA_ENV}"
 
         # Test tools
-        PYTHONPATH=$(pwd) pytest tools/test
-        PYTHONPATH=$(pwd) pytest .github/scripts
+        PYTHONPATH=$(pwd) pytest --continue-on-collection-errors tools/test
+        PYTHONPATH=$(pwd) pytest --continue-on-collection-errors .github/scripts
 
   test_run_test:
     name: Test `run_test.py` is usable without boto3
