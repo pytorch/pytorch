@@ -234,7 +234,7 @@ void Logger::set_event_time(
     Timer& timer,
     Timer::Event event) {
   auto timestamp = timer.getTimestamp(event);
-  if (timestamp.has_value()) {
+  if (timestamp != std::nullopt) {
     // TODO: should we set this as human-readable time instead of unixtime?
     event_time = *timestamp;
   }

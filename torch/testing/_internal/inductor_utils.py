@@ -41,13 +41,6 @@ HAS_CPU = LazyVal(test_cpu)
 
 HAS_TRITON = has_triton()
 
-if HAS_TRITON:
-    import triton
-    TRITON_HAS_CPU = "cpu" in triton.backends.backends
-else:
-    TRITON_HAS_CPU = False
-
-
 HAS_CUDA = torch.cuda.is_available() and HAS_TRITON
 
 HAS_XPU = torch.xpu.is_available() and HAS_TRITON
@@ -127,4 +120,4 @@ IS_H100 = LazyVal(
     and get_gpu_shared_memory() == 232448
 )
 
-IS_BIG_GPU = LazyVal(lambda: HAS_CUDA and is_big_gpu())
+IS_BIG_GPU = LazyVal(lambda: HAS_CUDA and is_big_gpu(0))

@@ -23,4 +23,3 @@ jobs:
       build-environment: linux-s390x-binary-manywheel
       docker-image-name: pytorch/manylinuxs390x-builder:cpu-s390x-main
       runner: linux.s390x
-    secrets: inherit

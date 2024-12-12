@@ -157,7 +157,7 @@ def functional_call(
 
 @exposed_in("torch.func")
 def stack_module_state(
-    models: Union[Sequence[nn.Module], nn.ModuleList],
+    models: List[nn.Module],
 ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     """stack_module_state(models) -> params, buffers
 

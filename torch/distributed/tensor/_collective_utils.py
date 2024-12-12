@@ -35,11 +35,9 @@ if not torch._running_with_deploy():
         group = _resolve_process_group(group_name)
         group_rank = get_group_rank(group, get_rank())
 
-        return (
-            torch.cat(stacked_list, dim=gather_dim)
-            .chunk(group_size, dim=shard_dim)[group_rank]
-            .contiguous()
-        )
+        return torch.cat(stacked_list, dim=gather_dim).chunk(group_size, dim=shard_dim)[
+            group_rank
+        ]
 
 else:
     import warnings
@@ -64,7 +62,7 @@ def shard_dim_alltoall(input, gather_dim, shard_dim, mesh, mesh_dim):
         out = torch.chunk(out, mesh.size(mesh_dim), dim=shard_dim)[
             mesh.get_local_rank(mesh_dim)
         ]
-        return out.contiguous()
+        return out.contiguous() if not out.is_contiguous() else out
 
     group_name = funcol._resolve_group_name((mesh, mesh_dim))
     # TODO: enable async op for shard_dim_alltoall

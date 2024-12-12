@@ -68,7 +68,7 @@ from pickle import (
 )
 from struct import unpack
 from sys import maxsize
-from typing import Any, Callable, Dict, List, Set, Tuple, Union
+from typing import Any, Callable, Dict, List, Set, Tuple
 
 import torch
 from torch._utils import IMPORT_MAPPING, NAME_MAPPING
@@ -83,15 +83,15 @@ _blocklisted_modules = [
     "nt",
 ]
 
-_marked_safe_globals_set: Set[Union[Callable, Tuple[Callable, str]]] = set()
+_marked_safe_globals_set: Set[Any] = set()
 
 
-def _add_safe_globals(safe_globals: List[Union[Callable, Tuple[Callable, str]]]):
+def _add_safe_globals(safe_globals: List[Any]):
     global _marked_safe_globals_set
     _marked_safe_globals_set = _marked_safe_globals_set.union(set(safe_globals))
 
 
-def _get_safe_globals() -> List[Union[Callable, Tuple[Callable, str]]]:
+def _get_safe_globals() -> List[Any]:
     global _marked_safe_globals_set
     return list(_marked_safe_globals_set)
 
@@ -101,15 +101,13 @@ def _clear_safe_globals():
     _marked_safe_globals_set = set()
 
 
-def _remove_safe_globals(
-    globals_to_remove: List[Union[Callable, Tuple[Callable, str]]],
-):
+def _remove_safe_globals(globals_to_remove: List[Any]):
     global _marked_safe_globals_set
     _marked_safe_globals_set = _marked_safe_globals_set - set(globals_to_remove)
 
 
 class _safe_globals:
-    def __init__(self, safe_globals: List[Union[Callable, Tuple[Callable, str]]]):
+    def __init__(self, safe_globals: List[Any]):
         self.safe_globals = safe_globals
 
     def __enter__(self):
@@ -129,20 +127,8 @@ class _safe_globals:
 def _get_user_allowed_globals():
     rc: Dict[str, Any] = {}
     for f in _marked_safe_globals_set:
-        if isinstance(f, tuple):
-            if len(f) != 2:
-                raise ValueError(
-                    f"Expected tuple of length 2 (global, str of callable full path), but got tuple of length: {len(f)}"
-                )
-            if type(f[1]) is not str:
-                raise TypeError(
-                    f"Expected second item in tuple to be str of callable full path, but got: {type(f[1])}"
-                )
-            f, name = f
-            rc[name] = f
-        else:
-            module, name = f.__module__, f.__name__
-            rc[f"{module}.{name}"] = f
+        module, name = f.__module__, f.__name__
+        rc[f"{module}.{name}"] = f
     return rc
 
 

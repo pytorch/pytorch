@@ -11,10 +11,10 @@ from typing import Iterator, Sequence, TYPE_CHECKING
 _PARENT = Path(__file__).parent.absolute()
 _PATH = [Path(p).absolute() for p in sys.path]
 
-if TYPE_CHECKING or _PARENT not in _PATH:
-    from . import _linter
-else:
+if not TYPE_CHECKING and _PARENT in _PATH:
     import _linter
+else:
+    from . import _linter
 
 if TYPE_CHECKING:
     from tokenize import TokenInfo

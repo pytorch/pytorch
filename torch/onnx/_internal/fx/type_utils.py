@@ -5,11 +5,11 @@ from __future__ import annotations
 
 from typing import (
     Any,
-    Mapping,
+    Dict,
+    List,
     Optional,
     Protocol,
     runtime_checkable,
-    Sequence,
     Tuple,
     TYPE_CHECKING,
     Union,
@@ -245,9 +245,9 @@ BaseArgumentTypes = Union[
 ]
 Argument = Optional[
     Union[
-        Tuple["Argument", ...],
-        Sequence["Argument"],
-        Mapping[str, "Argument"],
+        Tuple[Any, ...],  # actually Argument, but mypy can't represent recursive types
+        List[Any],  # actually Argument
+        Dict[str, Any],  # actually Argument
         slice,  # Slice[Argument, Argument, Argument], but slice is not a templated type in typing
         range,
         "torch.fx.Node",

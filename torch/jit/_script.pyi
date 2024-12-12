@@ -195,7 +195,7 @@ def script(
     example_inputs: list[tuple] | dict[Callable, list[tuple]] | None = None,
 ) -> Never: ...
 @overload
-def script(
+def script(  # type: ignore[misc]
     obj: dict,
     optimize: bool | None = None,
     _frames_up: int = 0,
@@ -203,7 +203,7 @@ def script(
     example_inputs: list[tuple] | dict[Callable, list[tuple]] | None = None,
 ) -> torch.ScriptDict: ...
 @overload
-def script(
+def script(  # type: ignore[misc]
     obj: list,
     optimize: bool | None = None,
     _frames_up: int = 0,
@@ -211,7 +211,7 @@ def script(
     example_inputs: list[tuple] | dict[Callable, list[tuple]] | None = None,
 ) -> torch.ScriptList: ...
 @overload
-def script(  # type: ignore[overload-overlap]
+def script(  # type: ignore[misc]
     obj: Module,
     optimize: bool | None = None,
     _frames_up: int = 0,
@@ -219,7 +219,7 @@ def script(  # type: ignore[overload-overlap]
     example_inputs: list[tuple] | dict[Callable, list[tuple]] | None = None,
 ) -> RecursiveScriptModule: ...
 @overload
-def script(  # type: ignore[overload-overlap]
+def script(  # type: ignore[misc]
     obj: _ClassVar,
     optimize: bool | None = None,
     _frames_up: int = 0,
@@ -227,7 +227,7 @@ def script(  # type: ignore[overload-overlap]
     example_inputs: list[tuple] | dict[Callable, list[tuple]] | None = None,
 ) -> _ClassVar: ...
 @overload
-def script(
+def script(  # type: ignore[misc]
     obj: Callable,
     optimize: bool | None = None,
     _frames_up: int = 0,

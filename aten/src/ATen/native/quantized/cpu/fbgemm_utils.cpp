@@ -400,7 +400,7 @@ register_conv_params() {
         },
         // __setstate__ takes c10::IValue because we support parsing historical
         // serialization versions.
-        [](const c10::IValue& v)
+        [](c10::IValue v)
         -> c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> { // __setstate__
           ConvParamsSerializationTypeV3 state = parse_conv_serialized_state<kSpatialDim>(v);
           return deserialize_conv<kSpatialDim>(state);
@@ -441,15 +441,21 @@ TORCH_API int register_linear_params() {
               [](SerializationType state)
                   -> c10::intrusive_ptr<
                       LinearPackedParamsBase> { // __setstate__
+                at::Tensor weight;
+                std::optional<at::Tensor> bias;
+                weight = std::move(std::get<0>(state));
+                bias = std::move(std::get<1>(state));
+
 #ifdef USE_FBGEMM
                 if (at::globalContext().qEngine() == at::QEngine::FBGEMM ||
                     at::globalContext().qEngine() == at::QEngine::X86) {
-                  const auto& weight = std::get<0>(state);
                   if (weight.scalar_type() == at::kQInt8) {
-                    return std::apply(PackedLinearWeight::prepack, std::move(state));
+                    return PackedLinearWeight::prepack(
+                        std::move(weight), std::move(bias));
                   } else if (weight.scalar_type() == at::kFloat) {
                     // NB: fp16 weight is serialized as float
-                    return std::apply(PackedLinearWeightFp16::prepack, std::move(state));
+                    return PackedLinearWeightFp16::prepack(
+                        std::move(weight), std::move(bias));
                   } else {
                     TORCH_CHECK(
                         false,
@@ -461,22 +467,22 @@ TORCH_API int register_linear_params() {
 #endif // USE_FBGEMM
 #ifdef USE_PYTORCH_QNNPACK
                 if (at::globalContext().qEngine() == at::QEngine::QNNPACK) {
-                  const auto& weight = std::get<0>(state);
                   TORCH_CHECK(
                       weight.scalar_type() == at::kQInt8,
                       "QNNPACK only supports INT8 bit width currently. Got ",
                       c10::toString(weight.scalar_type()));
-                  return std::apply(PackedLinearWeightsQnnp::prepack, std::move(state));
+                  return PackedLinearWeightsQnnp::prepack(
+                      std::move(weight), std::move(bias));
                 }
 #endif // USE_PYTORCH_QNNPACK
 #if AT_MKLDNN_ENABLED()
                 if (at::globalContext().qEngine() == at::QEngine::ONEDNN) {
-                  const auto& weight = std::get<0>(state);
                   TORCH_CHECK(
                       weight.scalar_type() == at::kQInt8,
                       "ONEDNN only supports INT8 bit width currently. Got ",
                       c10::toString(weight.scalar_type()));
-                  return std::apply(PackedLinearWeightsOnednn::prepack, std::move(state));
+                  return PackedLinearWeightsOnednn::prepack(
+                      std::move(weight), std::move(bias));
                 }
 #endif // #if AT_MKLDNN_ENABLED()
                 TORCH_CHECK(false, "Unknown qengine");

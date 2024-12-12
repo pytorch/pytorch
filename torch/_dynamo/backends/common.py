@@ -9,10 +9,7 @@ import torch
 from torch._dynamo import disable
 from torch._dynamo.exc import TensorifyScalarRestartAnalysis
 from torch._dynamo.utils import counters, defake, flatten_graph_inputs
-from torch._functorch.aot_autograd import (
-    aot_module_simplified,
-    SerializableAOTDispatchCompiler,
-)
+from torch._functorch.aot_autograd import aot_module_simplified
 from torch.utils._python_dispatch import _disable_current_modes
 
 
@@ -48,21 +45,14 @@ class AotAutograd:
             counters["aot_autograd"]["not_ok"] += 1
             return gm
 
-        def wrap_bw_compiler(bw_compiler_fn):
-            def _wrapped_bw_compiler(*args, **kwargs):
-                # stop TorchDynamo from trying to compile our generated backwards pass
-                return disable(disable(bw_compiler_fn)(*args, **kwargs))
+        # OK attempt to compile
 
-            return _wrapped_bw_compiler
+        def _wrapped_bw_compiler(*args, **kwargs):
+            # stop TorchDynamo from trying to compile our generated backwards pass
+            return disable(disable(bw_compiler)(*args, **kwargs))
 
         bw_compiler = self.kwargs.get("bw_compiler") or self.kwargs["fw_compiler"]
-
-        if isinstance(bw_compiler, SerializableAOTDispatchCompiler):
-            bw_compiler.compiler_fn = wrap_bw_compiler(bw_compiler.compiler_fn)
-        else:
-            bw_compiler = wrap_bw_compiler(bw_compiler)
-
-        self.kwargs["bw_compiler"] = bw_compiler
+        self.kwargs["bw_compiler"] = _wrapped_bw_compiler
         self.kwargs["inference_compiler"] = (
             self.kwargs.get("inference_compiler") or self.kwargs["fw_compiler"]
         )

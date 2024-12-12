@@ -11,7 +11,8 @@ if [[ "$DESIRED_CUDA" == 'xpu' ]]; then
     export XPU_VERSION=2025.0
 fi
 
-pushd "$PYTORCH_ROOT/.ci/pytorch/"
+pushd "$BUILDER_ROOT"
+
 ./windows/internal/smoke_test.bat
 
 popd

@@ -1131,7 +1131,6 @@ API Reference
 .. autoclass:: OutputSpec
 .. autoclass:: SymIntArgument
 .. autoclass:: SymBoolArgument
-.. autoclass:: SymFloatArgument
 .. autoclass:: ExportGraphSignature
 
     .. automethod:: replace_all_uses

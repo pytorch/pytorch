@@ -309,14 +309,10 @@ class Linear(WeightedQuantizedModule):
             # the type mismatch in assignment. Also, mypy has an issue with
             # iterables not being implemented, so we are ignoring those too.
             if not isinstance(cls._FLOAT_MODULE, Iterable):
-                cls._FLOAT_MODULE = [cls._FLOAT_MODULE]
-            supported_modules = ", ".join(
-                [float_mod.__name__ for float_mod in cls._FLOAT_MODULE]
-            )
+                cls._FLOAT_MODULE = [cls._FLOAT_MODULE]  # type: ignore[assignment]
+            supported_modules = ", ".join([float_mod.__name__ for float_mod in cls._FLOAT_MODULE])  # type: ignore[attr-defined]
             error_msg = f"nnq.{cls.__name__}.from_float only works for {supported_modules}, but got: {type(mod)}"
-            assert (
-                type_before_parametrizations(mod) in cls._FLOAT_MODULE
-            ), error_msg.format()
+            assert type_before_parametrizations(mod) in cls._FLOAT_MODULE, error_msg.format()  # type: ignore[attr-defined]
             assert hasattr(
                 mod, "qconfig"
             ), "Input float module must have qconfig defined"
