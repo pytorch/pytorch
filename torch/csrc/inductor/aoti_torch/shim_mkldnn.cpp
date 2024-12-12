@@ -7,8 +7,8 @@
 #else
 #include <ATen/ops/mkldnn_rnn_layer_cpu_dispatch.h>
 #endif
-#include <ATen/native/mkldnn/Conv.h>
-#include <ATen/native/mkldnn/Linear.h>
+#include <ATen/native/onednn/Conv.h>
+#include <ATen/native/onednn/Linear.h>
 #include <ATen/native/quantized/cpu/qconv.h>
 #include <ATen/native/quantized/cpu/qlinear.h>
 

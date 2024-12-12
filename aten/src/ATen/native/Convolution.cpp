@@ -27,7 +27,7 @@
 #endif
 
 #if AT_MKLDNN_ENABLED()
-#include <ATen/native/mkldnn/Utils.h>
+#include <ATen/native/onednn/Utils.h>
 #endif
 
 #ifndef AT_PER_OPERATOR_HEADERS

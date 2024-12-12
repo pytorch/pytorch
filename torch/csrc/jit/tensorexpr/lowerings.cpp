@@ -4,7 +4,7 @@
 #include <torch/csrc/jit/tensorexpr/operators/operators.h>
 
 #include <ATen/native/Activation.h>
-#include <ATen/native/mkldnn/Common.h>
+#include <ATen/native/onednn/Common.h>
 
 namespace torch::jit::tensorexpr {
 

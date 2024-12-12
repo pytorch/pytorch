@@ -78,14 +78,14 @@ file(GLOB miopen_h "miopen/*.h")
 file(GLOB miopen_cpp "miopen/*.cpp")
 
 file(GLOB mkl_cpp "mkl/*.cpp")
-file(GLOB mkldnn_cpp "mkldnn/*.cpp")
+file(GLOB mkldnn_cpp "onednn/*.cpp")
 
-file(GLOB mkldnn_xpu_h "native/mkldnn/xpu/*.h" "native/mkldnn/xpu/detail/*.h")
-file(GLOB mkldnn_xpu_cpp "native/mkldnn/xpu/*.cpp" "native/mkldnn/xpu/detail/*.cpp")
+file(GLOB mkldnn_xpu_h "native/onednn/xpu/*.h" "native/onednn/xpu/detail/*.h")
+file(GLOB mkldnn_xpu_cpp "native/onednn/xpu/*.cpp" "native/onednn/xpu/detail/*.cpp")
 
 file(GLOB native_cpp "native/*.cpp")
 file(GLOB native_mkl_cpp "native/mkl/*.cpp")
-file(GLOB native_mkldnn_cpp "native/mkldnn/*.cpp")
+file(GLOB native_mkldnn_cpp "native/onednn/*.cpp")
 file(GLOB vulkan_cpp "vulkan/*.cpp")
 file(GLOB native_vulkan_cpp "native/vulkan/*.cpp" "native/vulkan/api/*.cpp" "native/vulkan/impl/*.cpp" "native/vulkan/ops/*.cpp")
 
@@ -242,8 +242,8 @@ if(USE_XPU)
   list(APPEND ATen_XPU_DEPENDENCY_LIBS xpu_mkldnn)
 
   list(APPEND ATen_XPU_DEPENDENCY_LIBS ${OCL_LIBRARY})
-  list(APPEND ATen_XPU_INCLUDE ${CMAKE_CURRENT_SOURCE_DIR}/native/mkldnn/xpu)
-  list(APPEND ATen_XPU_INCLUDE ${CMAKE_CURRENT_SOURCE_DIR}/native/mkldnn/xpu/detail)
+  list(APPEND ATen_XPU_INCLUDE ${CMAKE_CURRENT_SOURCE_DIR}/native/onednn/xpu)
+  list(APPEND ATen_XPU_INCLUDE ${CMAKE_CURRENT_SOURCE_DIR}/native/onednn/xpu/detail)
   list(APPEND ATen_XPU_INCLUDE ${PROJECT_SOURCE_DIR}/third_party/ideep/mkl-dnn/include)
   list(APPEND ATen_XPU_INCLUDE ${XPU_MKLDNN_INCLUDE})
 

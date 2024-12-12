@@ -6,7 +6,7 @@
 #include <ATen/NamedTensorUtils.h>
 #include <ATen/Config.h>
 
-#include <ATen/native/mkldnn/Matmul.h>
+#include <ATen/native/onednn/Matmul.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/CPUFunctions.h>
