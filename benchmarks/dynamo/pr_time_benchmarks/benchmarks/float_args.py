@@ -1,9 +1,9 @@
 import sys
 
 from benchmark_base import BenchmarkBase
-from torch._inductor.utils import fresh_inductor_cache
 
 import torch
+from torch._inductor.utils import fresh_inductor_cache
 
 
 class Benchmark(BenchmarkBase):
