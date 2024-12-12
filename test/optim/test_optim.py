@@ -1,6 +1,11 @@
 # Owner(s): ["module: optimizer"]
 
+from __future__ import annotations
+
+from typing import Any
+
 import torch
+from torch import nn, Tensor
 from torch.optim import (
     Adadelta,
     Adagrad,
@@ -9,6 +14,7 @@ from torch.optim import (
     AdamW,
     ASGD,
     NAdam,
+    Optimizer,
     RAdam,
     RMSprop,
     Rprop,
@@ -45,6 +51,76 @@ def _diff_fn(p, grad, opt_differentiable_state, opt_class, kwargs, *ignored):
         v
         for v in opt.state[p].values()
         if isinstance(v, torch.Tensor) and v.requires_grad
+    )
+
+
+def _multistep_backprop_diff_lr_fn(
+    p: Tensor,
+    grad: Tensor,
+    outer_opt_differentiable_state: dict[str, Any],
+    inner_opt_differentiable_state: dict[str, Any],
+    inner_opt_class: type[Optimizer],
+    kwargs: dict[str, Any],
+    *ignored: Any,
+) -> tuple[Tensor, ...]:
+    assert (
+        kwargs["differentiable"] is True
+    ), "Only call this test function when differentiable=True"
+
+    p = p.clone()
+    if not p.requires_grad:
+        p.requires_grad_(True)
+    p = p * 1.0  # make leaf
+    p.grad = grad
+    outer_opt_differentiable_state = {
+        k: v.clone() if isinstance(v, torch.Tensor) else v
+        for k, v in outer_opt_differentiable_state.items()
+    }
+    inner_opt_differentiable_state = {
+        k: v.clone() if isinstance(v, torch.Tensor) else v
+        for k, v in inner_opt_differentiable_state.items()
+    }
+    lr = kwargs["lr"]
+
+    criterion = nn.MSELoss()
+    # Just SGD because we're interested in the inner_optimizer
+    # TODO: Adjust this function to test more hyperparameters than just lr
+    outer_optimizer = SGD([lr], lr=1e-3)
+    outer_optimizer.state[p].update(outer_opt_differentiable_state)
+
+    x = torch.full((1, 1), 1.0, dtype=torch.float64)
+    y = 2 * x
+
+    params = p.clone()
+    params = params * 1.0
+    inner_optimizer = inner_opt_class([params], **kwargs)
+    inner_optimizer.state[p].update(inner_opt_differentiable_state)
+    for _ in range(2):
+        outputs = x * torch.sum(params)
+        loss = criterion(outputs, y)
+        loss.backward(
+            inputs=(params,),
+            create_graph=True,
+        )
+        inner_optimizer.step()
+        inner_optimizer.zero_grad()
+
+    meta_loss = loss  # type: ignore
+    meta_loss.backward(inputs=(p,), create_graph=True)
+    outer_optimizer.step()  # type: ignore
+
+    return (
+        (meta_loss,)
+        + tuple(
+            v
+            for v in inner_optimizer.state[p].values()
+            if isinstance(v, torch.Tensor) and v.requires_grad
+        )
+        + tuple(
+            v
+            for v in outer_optimizer.state[p].values()
+            if isinstance(v, torch.Tensor) and v.requires_grad
+        )
     )
 
 
@@ -330,6 +406,32 @@ class TestDifferentiableOptimizer(TestCase):
                     "differentiable": True,
                 },
                 *state.values(),
+            ),
+        )
+
+    def test_differentiable_lr(self):
+        params = torch.rand(10, requires_grad=True, dtype=torch.float64)
+        grad = torch.rand_like(params, requires_grad=True, dtype=torch.float64)
+
+        lr = torch.rand(1, requires_grad=True, dtype=torch.float64)
+        outer_mbuff = torch.rand_like(lr, requires_grad=True, dtype=torch.float64)
+        outer_state = {"momentum_buffer": outer_mbuff}
+        inner_mbuff = torch.rand_like(params, requires_grad=True, dtype=torch.float64)
+        inner_state = {"momentum_buffer": inner_mbuff}
+        kwargs: dict[str, Any] = {"lr": lr, "differentiable": True}
+
+        gradcheck(
+            _multistep_backprop_diff_lr_fn,
+            (
+                params,
+                grad,
+                outer_state,
+                inner_state,
+                SGD,
+                kwargs,  # includes lr
+                *outer_state.values(),
+                *inner_state.values(),
+                *kwargs.values(),
             ),
         )
 
