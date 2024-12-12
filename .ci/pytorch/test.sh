@@ -313,6 +313,7 @@ test_dynamo_wrapped_shard() {
     --exclude-jit-executor \
     --exclude-distributed-tests \
     --exclude-torch-export-tests \
+    --exclude-aot-dispatch-tests \
     --shard "$1" "$NUM_TEST_SHARDS" \
     --verbose \
     --upload-artifacts-while-running
@@ -1412,7 +1413,7 @@ test_linux_aarch64() {
        inductor/test_pattern_matcher inductor/test_perf inductor/test_profiler inductor/test_select_algorithm inductor/test_smoke \
        inductor/test_split_cat_fx_passes inductor/test_standalone_compile inductor/test_torchinductor \
        inductor/test_torchinductor_codegen_dynamic_shapes inductor/test_torchinductor_dynamic_shapes inductor/test_memory \
-       inductor/test_triton_cpu_backend inductor/test_triton_extension_backend \
+       inductor/test_triton_cpu_backend inductor/test_triton_extension_backend inductor/test_mkldnn_pattern_matcher inductor/test_cpu_cpp_wrapper \
        --shard "$SHARD_NUMBER" "$NUM_TEST_SHARDS" --verbose
 }
 
@@ -1421,9 +1422,9 @@ if ! [[ "${BUILD_ENVIRONMENT}" == *libtorch* || "${BUILD_ENVIRONMENT}" == *-baze
   (cd test && python -c "import torch; print(torch.__config__.parallel_info())")
 fi
 if [[ "${TEST_CONFIG}" == *numpy_2* ]]; then
-  # Install numpy-2.0.2 and test inductor tracing
-  python -mpip install --pre numpy==2.0.2
-  python test/run_test.py --include dynamo/test_unspec.py
+  # Install numpy-2.0.2 and compatible scipy & numba versions
+  python -mpip install --pre numpy==2.0.2 scipy==1.13.1 numba==0.60.0
+  python test/run_test.py --include dynamo/test_functions.py dynamo/test_unspec.py test_binary_ufuncs.py test_fake_tensor.py test_linalg.py test_numpy_interop.py test_tensor_creation_ops.py test_torch.py torch_np/test_basic.py
 elif [[ "${BUILD_ENVIRONMENT}" == *aarch64* && "${TEST_CONFIG}" != *perf_cpu_aarch64* ]]; then
   test_linux_aarch64
 elif [[ "${TEST_CONFIG}" == *backward* ]]; then
