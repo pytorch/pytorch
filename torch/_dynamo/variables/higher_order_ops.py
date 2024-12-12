@@ -1160,14 +1160,7 @@ class WhileLoopHigherOrderVariable(TorchHigherOrderOperatorVariable):
         # so using either of them is OK. Use cond_shared as it doesnt matter.
         additional_lifted_inputs = cond_shared + cond_unique + body_unique
 
-<<<<<<< HEAD
-        body_nn_modules = dict(tx.output.nn_modules)
-
         cond_name = tx.output.install_subgraph(
-=======
-        cond_name = add_subgraph(
-            tx,
->>>>>>> e612347675e ([while_loop][dynamo] auto-unspecialize int input and output to unbacked symints)
             "cond_fn",
             torch.fx.GraphModule(cond_nn_modules, cond_graph),
         )

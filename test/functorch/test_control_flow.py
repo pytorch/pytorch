@@ -6268,7 +6268,7 @@ class GraphModule(torch.nn.Module):
     # [TorchInGraphFunctionVariable(<method 'add' of 'torch._C.TensorBase' objects>)] {}
     # Seems we're inside the PreDispatchTorchFunctionMode, _side_effectful_need_to_be_preserved_pre_dispatch
     # becomes a user defined variable instead of SetVariable.
-    @parametrize("strict", [True])
+    @parametrize("strict", [True, False])
     @parametrize("dynamic", [True, False])
     def test_while_loop_op_pytree_int_carry(self, strict, dynamic):
         class Mod(torch.nn.Module):
