@@ -956,10 +956,6 @@ aten::miopen_rnn
 aten::miopen_rnn.out
 aten::miopen_rnn_backward
 aten::miopen_rnn_backward.out
-aten::mkldnn_reorder_conv2d_weight
-aten::mkldnn_reorder_conv2d_weight.out
-aten::mkldnn_reorder_conv3d_weight
-aten::mkldnn_reorder_conv3d_weight.out
 aten::mm
 aten::mm.out
 aten::mode
@@ -1010,6 +1006,10 @@ aten::onednn_max_pool3d
 aten::onednn_max_pool3d.out
 aten::onednn_max_pool3d_backward
 aten::onednn_max_pool3d_backward.out
+aten::onednn_reorder_conv2d_weight
+aten::onednn_reorder_conv2d_weight.out
+aten::onednn_reorder_conv3d_weight
+aten::onednn_reorder_conv3d_weight.out
 aten::onednn_rnn_layer
 aten::onednn_rnn_layer.out
 aten::onednn_rnn_layer_backward

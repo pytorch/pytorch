@@ -5092,13 +5092,13 @@
   dispatch:
     CPU, CUDA: _prelu_kernel
     QuantizedCPU: _prelu_kernel_quantized_cpu
-    OnednnCPU: mkldnn_prelu
+    OnednnCPU: onednn_prelu
     MPS: prelu_mps
 
 - func: _prelu_kernel_backward(Tensor grad_output, Tensor self, Tensor weight) -> (Tensor, Tensor)
   dispatch:
     CPU, CUDA: _prelu_kernel_backward
-    OnednnCPU: mkldnn_prelu_backward
+    OnednnCPU: onednn_prelu_backward
     MPS: prelu_backward_mps
 
 - func: gelu.out(Tensor self, *, str approximate='none', Tensor(a!) out) -> Tensor(a!)
@@ -7558,19 +7558,23 @@
     CPU: dense_to_onednn
   autogen: to_mkldnn.out
 
-- func: mkldnn_reorder_conv2d_weight(Tensor self, SymInt[2] padding=0, SymInt[2] stride=1, SymInt[2] dilation=1, SymInt groups=1, SymInt[]? input_size=None) -> Tensor
+- func: onednn_reorder_conv2d_weight(Tensor self, SymInt[2] padding=0, SymInt[2] stride=1, SymInt[2] dilation=1, SymInt groups=1, SymInt[]? input_size=None) -> Tensor
   variants: function
   python_module: nn
   dispatch:
-    OnednnCPU: mkldnn_reorder_conv2d_weight
-  autogen: mkldnn_reorder_conv2d_weight.out
+    OnednnCPU: onednn_reorder_conv2d_weight
+  autogen: onednn_reorder_conv2d_weight.out
+
+- func: mkldnn_reorder_conv2d_weight(Tensor self, SymInt[2] padding=0, SymInt[2] stride=1, SymInt[2] dilation=1, SymInt groups=1, SymInt[]? input_size=None) -> Tensor
+
+- func: onednn_reorder_conv3d_weight(Tensor self, SymInt[3] padding=0, SymInt[3] stride=1, SymInt[3] dilation=1, SymInt groups=1, SymInt[]? input_size=None) -> Tensor
+  variants: function
+  python_module: nn
+  dispatch:
+    OnednnCPU: onednn_reorder_conv3d_weight
+  autogen: onednn_reorder_conv3d_weight.out
 
 - func: mkldnn_reorder_conv3d_weight(Tensor self, SymInt[3] padding=0, SymInt[3] stride=1, SymInt[3] dilation=1, SymInt groups=1, SymInt[]? input_size=None) -> Tensor
-  variants: function
-  python_module: nn
-  dispatch:
-    OnednnCPU: mkldnn_reorder_conv3d_weight
-  autogen: mkldnn_reorder_conv3d_weight.out
 
 - func: to_mkldnn_backward(Tensor grad, Tensor input) -> Tensor
 

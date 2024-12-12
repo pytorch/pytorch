@@ -14,14 +14,14 @@ ${c_nn_function_hints}
 def onednn_linear(input: Tensor, weight: Tensor, bias: Optional[Tensor]) -> Tensor: ...
 
 # Defined at aten/src/ATen/native/onednn/ONEDNNConversions.cpp
-def mkldnn_reorder_conv2d_weight(
+def onednn_reorder_conv2d_weight(
     self: Tensor,
     padding: List,
     stride: List,
     dilatation: List,
     groups: int,
 ) -> Tensor: ...
-def mkldnn_reorder_conv3d_weight(
+def onednn_reorder_conv3d_weight(
     self: Tensor,
     padding: List,
     stride: List,
@@ -30,7 +30,7 @@ def mkldnn_reorder_conv3d_weight(
 ) -> Tensor: ...
 
 # Defined in aten/src/ATen/native/onednn/Prelu.cpp
-def mkldnn_prelu(input: Tensor, weight: Tensor) -> Tensor: ...
+def onednn_prelu(input: Tensor, weight: Tensor) -> Tensor: ...
 
 # Defined at tools/autograd/templates/python_nn_functions.cpp
 @overload

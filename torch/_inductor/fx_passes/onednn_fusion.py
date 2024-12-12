@@ -1279,8 +1279,8 @@ if torch._C._has_mkldnn:
             return gm
 
         packed_weight_ops = [
-            torch._C._nn.mkldnn_reorder_conv2d_weight,
-            torch._C._nn.mkldnn_reorder_conv3d_weight,
+            torch._C._nn.onednn_reorder_conv2d_weight,
+            torch._C._nn.onednn_reorder_conv3d_weight,
             onednn._reorder_convolution_transpose_weight,
             onednn._reorder_linear_weight,
             onednn._reorder_onednn_rnn_layer_weight,
