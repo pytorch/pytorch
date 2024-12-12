@@ -339,9 +339,10 @@ mha_fwd_ck(const at::Tensor &q,                      // batch_size x seqlen_q x 
                 softmax_scale,
                 p_dropout,
                 drop_seed_offset);
-
+#if (defined(__gfx90a__) || defined(__gfx942__))
         float t = fmha_fwd(traits, args, stream_config);
         TORCH_CHECK(t >= 0, "invalid argument for fmha_fwd");
+#endif
     }
     else {
         // If seqlen_k == 0, then we have an empty tensor. We need to set the output to 0.
