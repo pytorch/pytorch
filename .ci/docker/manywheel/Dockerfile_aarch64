@@ -25,6 +25,8 @@ RUN yum install -y \
   make \
   patch \
   perl \
+  tbb \
+  tbb-devel \
   unzip \
   util-linux \
   wget \
