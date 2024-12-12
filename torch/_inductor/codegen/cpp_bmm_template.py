@@ -5,8 +5,8 @@ from unittest.mock import patch
 
 import sympy
 
-from .. import ir
 from ...fx.experimental.symbolic_shapes import has_free_symbols
+from .. import ir
 from ..select_algorithm import PartialRender
 from ..virtualized import V
 from .cpp_gemm_template import CppGemmTemplate, GEMM_TEMPLATE

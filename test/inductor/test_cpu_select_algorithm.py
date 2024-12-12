@@ -2077,7 +2077,9 @@ class TestSelectAlgorithmDynamicShapes(_DynamicShapesTestBase):
     @parametrize("Kdim", (96,))
     @parametrize("Ndim", (64, 65))
     @dtypes(torch.float, torch.bfloat16, torch.half)
-    def test_bmm_with_pointwise_with_reshape_dynamic_shapes(self, bs, Mdim, Kdim, Ndim, dtype):
+    def test_bmm_with_pointwise_with_reshape_dynamic_shapes(
+        self, bs, Mdim, Kdim, Ndim, dtype
+    ):
         class M(torch.nn.Module):
             def __init__(self):
                 super().__init__()
