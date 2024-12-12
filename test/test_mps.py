@@ -7507,9 +7507,11 @@ class TestMPS(TestCaseMPS):
             self.assertEqual(b_CPU.grad, b_MPS.grad)
             self.assertEqual(a_CPU.grad, a_MPS.grad)
 
-        helper(3, 5, 7, [0, 1, 2])
-        helper(3, 6, 7, [0, 1, 2])  # verify if changes in shape would cause cached graph lookup problems
-        helper(3, 5, 7, 2)  # test scalar index
+        # See https://github.com/pytorch/pytorch/pull/142477#issuecomment-2536508053
+        with self.assertRaisesRegex(RuntimeError, "Expected all tensors to be on the same device"):
+            helper(3, 5, 7, [0, 1, 2])
+            helper(3, 6, 7, [0, 1, 2])  # verify if changes in shape would cause cached graph lookup problems
+            helper(3, 5, 7, 2)  # test scalar index
 
     # Test pytorch gather
     def test_gather(self):
