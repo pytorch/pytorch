@@ -638,7 +638,7 @@ Tensor& multinomial_out_mps(const Tensor& self,
     // s = argmax( p / q ) where q ~ Exp(1)
     // If needed, create `q` as contiguous tensor to ensure memory layout supports inplace operations
     const auto has_strided_api = is_macos_13_or_newer(MacOSVersion::MACOS_VER_15_0_PLUS);
-    auto q = at::empty_like(self, has_strided_api ? MemoryFormat::Preserve : MemoryFormat::Contiguous);
+    auto q = at::empty_like(self, {}, has_strided_api ? std::nullopt : std::optional(MemoryFormat::Contiguous));
     q.exponential_(1, gen);
     // In theory the probability to generate 0 from exponential distribution is
     // 0. However, on CUDA side there is a protection to avoid 0s, but on CPU
