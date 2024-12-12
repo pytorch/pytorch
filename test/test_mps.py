@@ -10953,10 +10953,10 @@ class TestConvolutionMPS(TestCaseMPS):
                     self.assertEqual(output, groundtruth, atol=1e-5, rtol=0,
                                      msg=f"groundtruth comparison failed for mode={mode}, "
                                      f"padding_mode={padding_mode}")
-                    
+
     # Regression test for https://github.com/pytorch/pytorch/issues/142344
     def test_self_attention_block_backward(self):
-        def helper(device = "mps"):
+        def helper(device="mps"):
             # Define a simplified SelfAttentionBlock for testing
             class SelfAttentionBlock(nn.Module):
                 def __init__(self, in_channels):
@@ -10989,7 +10989,7 @@ class TestConvolutionMPS(TestCaseMPS):
 
             # Perform backward pass and validate no errors
             loss.backward()
-            
+
         try:
             helper()
         except RuntimeError as e:
