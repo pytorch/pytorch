@@ -31,8 +31,6 @@ class LSTMBenchmark(op_bench.TorchBenchmarkBase):
 
         # The quantized.dynamic.LSTM has a bug. That's why we create a regular
         # LSTM, and quantize it later. See issue #31192.
-        scale = 1.0 / 256
-        zero_point = 0
         cell_nn = nn.LSTM(
             input_size=I,
             hidden_size=H,

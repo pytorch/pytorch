@@ -21,21 +21,21 @@ static variable_list CopyBackwards_apply_functional(
     std::array<bool, 2> needs_input_grad,
     const c10::TensorOptions& src_options) {
   check_input_variables("CopyBackwards", grads, 1, -1, true);
-  auto grad = c10::MaybeOwned<at::Tensor>::borrowed(grads[0]);
+  auto& grad = std::move(grads)[0];
   variable_list grad_inputs(2);
-  if (grad->defined()) {
+  if (grad.defined()) {
     if (needs_input_grad[0]) {
-      grad_inputs[0] = at::zeros_like(*grad, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+      grad_inputs[0] = at::zeros_like(grad, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
     }
     if (needs_input_grad[1]) {
       // Handle R->C copies without raising a warning
       const auto src_type = src_options.dtype().toScalarType();
-      if (!c10::isComplexType(src_type) && grad->is_complex()) {
-        grad = c10::MaybeOwned<at::Tensor>::owned(at::real(grads[0]));
+      if (!c10::isComplexType(src_type) && grad.is_complex()) {
+        grad = at::real(grad);
       }
 
       at::DeviceGuard device_guard(src_options.device());
-      grad_inputs[1] = grad->to(src_options);
+      grad_inputs[1] = grad.to(src_options);
     }
   }
   return grad_inputs;
@@ -87,7 +87,7 @@ inline variable_list CopySlices::apply_impl(
     variable_list&& inputs,
     const T& call_fn) {
   check_input_variables("CopySlices", inputs, 1, -1, true);
-  auto& grad = inputs[0];
+  auto& grad = std::move(inputs)[0];
   if (!grad.defined()) {
     return variable_list(num_outputs());
   }
