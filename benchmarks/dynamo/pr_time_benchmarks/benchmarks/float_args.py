@@ -1,6 +1,7 @@
 import sys
 
 from benchmark_base import BenchmarkBase
+from torch._inductor.utils import fresh_inductor_cache
 
 import torch
 
@@ -17,10 +18,9 @@ class Benchmark(BenchmarkBase):
         return f"{self.category()}"
 
     def description(self):
-        return "Benchmark to measure recompilations with random float arguments."
+        return "Benchmark to measure recompilations with float arguments."
 
     def _prepare_once(self):
-        torch._dynamo.config.capture_scalar_outputs = True
         torch.manual_seed(0)
 
     def _prepare(self):
@@ -31,8 +31,9 @@ class Benchmark(BenchmarkBase):
         def f(x, y):
             return x + y
 
-        for i in range(8):
-            f(torch.randn(3), i * 2.5)
+        with fresh_inductor_cache():
+            for i in range(8):
+                f(torch.arange(3), i * 2.5)
 
 
 def main():
