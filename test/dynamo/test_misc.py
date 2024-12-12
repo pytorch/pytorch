@@ -10102,6 +10102,8 @@ def ___make_guard_fn():
 
     def test_pytree_tree_flatten_unflatten(self):
         implemtations = [("python", python_pytree)]
+        if cxx_pytree is not None:
+            implemtations.append(("cxx", cxx_pytree))
 
         for name, module in implemtations:
             with self.subTest(f"pytree implement: {name}"):
@@ -10138,7 +10140,7 @@ def ___make_guard_fn():
                         torch.ones(3, 2),
                         1,
                     ]
-                    new_tree = module.tree_unflatten(leaves, treespec)
+                    new_tree = module.tree_unflatten(new_leaves, treespec)
                     return leaves, new_tree
 
             x = torch.randn(3, 2)
@@ -10151,6 +10153,8 @@ def ___make_guard_fn():
 
     def test_pytree_tree_map(self):
         implemtations = [("python", python_pytree)]
+        if cxx_pytree is not None:
+            implemtations.append(("cxx", cxx_pytree))
 
         for name, module in implemtations:
             with self.subTest(f"pytree implement: {name}"):
