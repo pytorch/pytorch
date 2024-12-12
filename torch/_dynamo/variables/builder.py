@@ -115,6 +115,7 @@ from ..utils import (
     is_utils_checkpoint,
     is_wrapper_or_member_descriptor,
     istype,
+    namedtuple_fields,
     odict_values,
     proxy_args_kwargs,
     range_iterator,
@@ -576,8 +577,18 @@ class VariableBuilder:
         ):
             return self.wrap_tensor(value)
         elif is_namedtuple(value):
-            return self.wrap_listlike(value)
-
+            self.install_guards(GuardBuilder.SEQUENCE_LENGTH)
+            output = [
+                LazyVariableTracker.create(
+                    getattr(value, name),
+                    source=AttrSource(self.source, name),
+                )
+                for name in namedtuple_fields(type(value))
+            ]
+            result = NamedTupleVariable(
+                output, tuple_cls=type(value), source=self.source
+            )
+            return result
         elif value is torch.utils._pytree.SUPPORTED_NODES:
             # For SUPPORTED_NODES, we guard on the dictionary version (PEP509)
             # under the assumption that the values themselves don't change.
@@ -944,40 +955,53 @@ class VariableBuilder:
         ):
             self.install_guards(GuardBuilder.FUNCTION_MATCH)
             return ItertoolsVariable(value, source=self.source)
-        elif isinstance(value, torch.SymBool):
-            # Note: the idea here is to re-use the infra we've built for SymInt by simulating the
-            # user provided SymBool with a SymInt in dynamo.
+        elif isinstance(value, (torch.SymBool, torch.SymInt)) and not isinstance(
+            value.node, torch.nested._internal.nested_int.NestedIntNode
+        ):
+            # Note: this doesn't handle nested symints.
+            # For SymBool input, we re-use the infra for SymInt by simulating SymBool with a SymInt in dynamo.
 
             # Concretely,
             # 1. We create a SymInt in dynamo's shape_env, whose source is constructed as ConvertIntSource(self.source).
             # so that guards on the SymInts can be effectively applied on the original SymBool in user program.
             # 2. We create a SymBool based on the SymInt in dynamo's ShapeEnv. Because the original user program
             # depends on the value being a SymBool. This allows dynamo to interpret the user's program correctly.
-
-            new_source = ConvertIntSource(self.source)
+            source = (
+                self.source
+                if isinstance(value, torch.SymInt)
+                else ConvertIntSource(self.source)
+            )
             if value.node.has_hint():
-                value_hint = value.node.require_hint()
-
                 new_symint = (
                     self.tx.output.shape_env.create_unspecified_symint_and_symbol(
-                        int(value_hint),
-                        new_source,
+                        int(value.node.hint),
+                        source,
                         dynamic_dim=DimDynamic.DYNAMIC,
                     )
                 )
             else:
-                # We need to create an unbacked symint to replace the unbacked symbool.
-                new_symint = self.tx.output.shape_env.create_unbacked_symint()
+                if isinstance(value, torch.SymBool):
+                    # We need to create an unbacked symint to replace the unbacked symbool.
+                    new_symint = self.tx.output.shape_env.create_unbacked_symint()
+                else:
+                    # TODO (yidi): we need to figure out a way to propagate the guards
+                    # we accumulated when tracing the subggraph to outer shape_env. For normal symints,
+                    # this is automatically done by evaluating the guards once but this
+                    # will cause data-dependent error when we evaluate the outer unbacked symints.
+                    # The test case that triggers this graph break is test_cond_unbacked_symint_closure
+                    unimplemented(
+                        "unbacked symint input is not supported yet. If you need this feature, please file a github issue."
+                    )
 
             sym_node_proxy = self.tx.output.root_tracer.create_graph_input(
                 re.sub(r"[^a-zA-Z0-9]+", "_", self.name),
                 type(new_symint),
                 new_symint,
-                source=new_source,
+                source=source,
             )
 
             sym_node_proxy.node.meta["grapharg"] = GraphArg(
-                new_source,
+                source,
                 new_symint,
                 False,
                 None,
@@ -985,19 +1009,17 @@ class VariableBuilder:
                 example_strong_ref=new_symint,
             )
             # We bind the new_symint to graph input.
-            set_example_value(sym_node_proxy.node, new_symint)
             sym_expr = new_symint.node.expr
             assert isinstance(
                 sym_expr, sympy.Symbol
             ), f"{sym_expr} is not a basic Symbol."
-            self.tx.output.root_tracer.bound_symbols[sym_expr] = sym_node_proxy
-            self.tx.output.tracked_fakes.append(
-                TrackedFake(new_symint, new_source, None)
-            )
-            return SymNodeVariable(
-                sym_node_proxy,
-                new_symint == 1,
-            )
+            self.tx.output.tracked_fakes.append(TrackedFake(new_symint, source, None))
+
+            tracing_symint = (
+                new_symint if isinstance(value, torch.SymInt) else new_symint == 1
+            )  # cast it back to symbool for tracing
+            return SymNodeVariable(sym_node_proxy, tracing_symint)
+
         elif isinstance(value, (JITFunction, Autotuner)):
             self.install_guards(GuardBuilder.ID_MATCH)
             return TritonKernelVariable(
@@ -1241,10 +1263,6 @@ class VariableBuilder:
         # One can index a tensor with a list/tuple. Therefore, we need to
         # have a stricter match.
         self.install_guards(GuardBuilder.SEQUENCE_LENGTH)
-
-        for item in value:
-            if item is value:
-                unimplemented("list elements are pointing to the list itself")
 
         # Tuples are immutable objects, so we should mark its items static. This
         # avoids wrapping of tuple items as symints. This helps for nn module
@@ -1837,7 +1855,9 @@ class VariableBuilder:
             if (
                 config.automatic_dynamic_shapes
                 and frame_state_entry.scalar is auto_dynamic
-            ) or not config.assume_static_by_default:
+            ):
+                dynamic_dim = get_automatic_dynamic_shapes_mark_as()
+            elif not config.assume_static_by_default:
                 dynamic_dim = DimDynamic.DYNAMIC
             else:  # assume_static_by_default
                 # TODO: dynamic_dim = DimDynamic.STATIC should work but
@@ -1898,6 +1918,9 @@ class VariableBuilder:
         return unspec_var
 
     def wrap_symfloat(self, value):
+        # To prevent circular import
+        from ..symbolic_convert import TensorifyState
+
         # SymFloat wrapping is special.  We first wrap it in the same way we
         # do an unspecialized primitive, and then we item() it into a
         # SymFloat.  Removal of the item() call is left to a later FX pass,
@@ -1929,6 +1952,7 @@ class VariableBuilder:
             or torch._inductor.config.triton.cudagraphs
             or justknobs_check("pytorch/compiler:unspecialize_float_killswitch", False)
             or frame_state_entry.scalar is not auto_dynamic
+            or TensorifyState.should_specialize(self.source)
         ):
             self.install_guards(GuardBuilder.CONSTANT_MATCH)
             return ConstantVariable.create(value=value, source=self.source)
@@ -2380,6 +2404,9 @@ def handle_traced_output(example_value, tx, proxy, options, subclass_type, targe
                 )
 
                 if "source" in options:
+                    # This path should only trigger for list stealing, so it's
+                    # safe to use `GetItemSource`.
+                    assert isinstance(example_value, list)
                     source = options["source"]
                     options_i = options.copy()
                     options_i["source"] = GetItemSource(
@@ -2504,6 +2531,19 @@ def handle_traced_output(example_value, tx, proxy, options, subclass_type, targe
             "torch.* op returned non-Tensor "
             + f"{typestr(example_value)} {proxy.node.op} {proxy.node.target}",
             case_name="unsupported_operator",
+        )
+
+
+def get_automatic_dynamic_shapes_mark_as():
+    if config.automatic_dynamic_shapes_mark_as == "dynamic":
+        return DimDynamic.DYNAMIC
+    elif config.automatic_dynamic_shapes_mark_as == "unbacked":
+        return DimDynamic.SIZE_LIKE_UNBACKED
+    elif config.automatic_dynamic_shapes_mark_as == "oblivious":
+        return DimDynamic.OBLIVIOUS_SIZE
+    else:
+        raise ValueError(
+            f"invalid automatic_dynamic_shapes_mark_as = {config.automatic_dynamic_shapes_mark_as}"
         )
 
 
@@ -2764,10 +2804,14 @@ def _automatic_dynamic(
             # NB: We could assert static_shapes is False here, but it
             # seems better to allow the user to override symbolic_context in this
             # case
-            dynamic_size = DimDynamic.DYNAMIC
+            if automatic_dynamic:
+                dynamic_size = get_automatic_dynamic_shapes_mark_as()
+            else:
+                dynamic_size = DimDynamic.DYNAMIC
         elif static_shapes or config.assume_static_by_default or marked_static:
             dynamic_size = DimDynamic.STATIC
         else:
+            # TODO: When does this show up?
             dynamic_size = DimDynamic.DUCK
 
         if constraint_stride is not None:

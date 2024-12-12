@@ -204,7 +204,8 @@ TORCH_API void brgemm(
     const bool add_C,
     const at::Half* A,
     const at::Half* B,
-    float* C);
+    float* C,
+    bool is_vnni = true);
 
 TORCH_API void brgemm(
     int64_t M,
@@ -216,10 +217,24 @@ TORCH_API void brgemm(
     const bool add_C,
     const at::BFloat16* A,
     const at::BFloat16* B,
-    float* C);
+    float* C,
+    bool is_vnni = true);
+
+TORCH_API void brgemm(
+    int64_t M,
+    int64_t N,
+    int64_t K,
+    int64_t ld_a,
+    int64_t ld_b,
+    int64_t ld_c,
+    const bool add_C,
+    const float* A,
+    const float* B,
+    float* C,
+    bool is_vnni = false);
 
 // Release brgemm hardware context
-TORCH_API void brgemm_release();
+TORCH_API void brgemm_release(bool is_vnni = true);
 
 // Pack B matrix to get better performance if needed
 void pack(
@@ -233,6 +248,6 @@ void pack(
     void* out);
 
 // Whether pack is supported in the platform.
-bool could_pack(ScalarType dt_in);
+TORCH_API bool could_pack(ScalarType dt_in);
 
 } // namespace at::native::cpublas
