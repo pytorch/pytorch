@@ -1,5 +1,7 @@
 # mypy: allow-untyped-defs
 r"""Implementation for Stochastic Gradient Descent optimizer."""
+from __future__ import annotations
+
 from typing import cast, List, Optional, Union
 
 import torch
@@ -322,7 +324,7 @@ def _single_tensor_sgd(
     *,
     weight_decay: float,
     momentum: float,
-    lr: float,
+    lr: float | Tensor,
     dampening: float,
     nesterov: bool,
     maximize: bool,
@@ -349,8 +351,10 @@ def _single_tensor_sgd(
                 grad = grad.add(buf, alpha=momentum)
             else:
                 grad = buf
-
-        param.add_(grad, alpha=-lr)
+        if isinstance(lr, Tensor):
+            param.addcmul_(grad, lr, value=-1)
+        else:
+            param.add_(grad, alpha=-lr)
 
 
 def _multi_tensor_sgd(
