@@ -62,7 +62,7 @@ bool check_no_grad(sdp::sdp_params const& params, bool debug) {
   const bool any_inputs_require_grad = params.query.requires_grad() ||
       params.key.requires_grad() || params.value.requires_grad();
   const bool gradmode_enabled = at::GradMode::is_enabled();
-  if (debug && any_inputs_require_grad && any_inputs_require_grad) {
+  if (debug && any_inputs_require_grad && gradmode_enabled) {
     TORCH_WARN("Backward or grad to be supported.");
   }
   return !any_inputs_require_grad || !gradmode_enabled;
@@ -140,7 +140,9 @@ sdp::SDPBackend select_sdp_backend_xpu(sdp::sdp_params const& kernel_params) {
   TORCH_CHECK(!print_debug, "No available kernel. Aborting execution.")
   return sdp::SDPBackend::error;
 }
+} // namespace
 
+namespace at::native {
 int64_t _fused_sdp_choice_xpu(
     const at::Tensor& query_,
     const at::Tensor& key,
@@ -256,21 +258,6 @@ _scaled_dot_product_fused_attention_overrideable_xpu(
       philox_offset,
       debug_attn_mask);
 }
-} // namespace
 
-namespace at {
-namespace native {
-
-TORCH_LIBRARY_IMPL(aten, XPU, m) {
-  m.impl("_fused_sdp_choice", &_fused_sdp_choice_xpu);
-  m.impl(
-      "_scaled_dot_product_fused_attention_overrideable",
-      &_scaled_dot_product_fused_attention_overrideable_xpu);
-  // Backward to be implemented
-  // m.impl("_scaled_dot_product_fused_attention_overrideable_backward",
-  // &_scaled_dot_product_fused_attention_overrideable_backward_xpu);
-}
 REGISTER_XPU_DISPATCH(_fused_sdp_choice_stub, &_fused_sdp_choice_xpu);
-
-} // namespace native
-} // namespace at
+} // namespace at::native
