@@ -109,7 +109,7 @@ class Beta(ExponentialFamily):
         return self._dirichlet.log_prob(heads_tails)
 
     def entropy(self):
-        return self._dirichlet.entropy() + torch.log(self.scale)
+        return self._dirichlet.entropy()
 
     @property
     def concentration1(self):

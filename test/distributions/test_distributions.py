@@ -186,6 +186,12 @@ def _get_examples():
                     "low": torch.zeros(4).requires_grad_(),
                     "high": torch.ones(4).requires_grad_()
                 },
+                {
+                    "concentration1": torch.randn(3, 2).exp().requires_grad_(),
+                    "concentration0": torch.randn(3, 2).exp().requires_grad_(),
+                    "low": -3 * torch.ones(3, 2).requires_grad_(),
+                    "high": +2 * torch.ones(3, 2).requires_grad_()
+                },
             ],
         ),
         Example(
@@ -6733,13 +6739,11 @@ class TestJit(DistributionsTestCase):
 
     def _perturb(self, Dist, keys, values, sample):
         with torch.no_grad():
-            if Dist is Uniform:
+            if Dist is Uniform or Dist is Beta:
                 param = dict(zip(keys, values))
                 param["low"] = param["low"] - torch.rand(param["low"].shape)
                 param["high"] = param["high"] + torch.rand(param["high"].shape)
                 values = [param[key] for key in keys]
-            elif Dist is Beta:
-                pass
             else:
                 values = [
                     self._perturb_tensor(
