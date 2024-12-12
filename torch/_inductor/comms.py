@@ -1040,8 +1040,8 @@ def bucket_fsdp_all_gather_concat_on_scheduler_ir(
                 # then do the all_gather, then view the output back to the original dtype. Look at FSDP2 to see how to do this.
                 assert all(get_fx_node(n).meta["val"].dtype == dtype for n in ag_input_snodes), "All all_gather inputs in the same bucket must have the same dtype"
                 # must schedule all the all_gather input nodes first, before the bucketed all_gather node
-                for ag_input_node in ag_input_snodes:
-                    schedule_snode(ag_input_node)
+                for ag_input_snode in ag_input_snodes:
+                    schedule_snode(ag_input_snode)
                 param_all_gather_inputs_orig = [sn.node for sn in ag_input_snodes]
                 # schedule the bucketed all_gather node
                 param_all_gather_inputs_flattened = [
