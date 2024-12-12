@@ -1125,6 +1125,9 @@ struct Brgemm : public KernelCache <BrgemmKey, GemmHelper> {
     if (dtype == ScalarType::Half) {
       static bool fp16_support = dnnl::get_effective_cpu_isa() >= dnnl::cpu_isa::avx512_core_fp16;
       return fp16_support;
+    } else if (dtype == ScalarType::Float) {
+      static bool fp32_support = dnnl::get_effective_cpu_isa() >= dnnl::cpu_isa::avx2;
+      return fp32_support;
     } else if (dtype == ScalarType::BFloat16) {
       static bool bf16_support = dnnl::get_effective_cpu_isa() >= dnnl::cpu_isa::avx512_core;
       return bf16_support;
@@ -1192,18 +1195,29 @@ void brgemm(
     int64_t ld_b,
     int64_t ld_c,
     const bool add_C,
-    const at::Half* A,
-    const at::Half* B,
-    float* C) {
+    const float* A,
+    const float* B,
+    float* C,
+    bool is_vnni) {
+
+  TORCH_CHECK(!is_vnni,
+    "Float Brgemm does not support vnni layout.");
+
 #if defined(ONEDNN_UKERNEL_ENABLED)
-  if (Brgemm::device_check(ScalarType::Half)) {
-    Brgemm::call<at::Half, at::Half, float>(
+  if (Brgemm::device_check(ScalarType::Float)) {
+    Brgemm::call<float, float, float>(
       M, N, K, ld_a, ld_b, ld_c, add_C, A, B, C);
     return;
   }
 #endif
-  TORCH_CHECK(false,
-  "Half Brgemm is only supported on X64 when oneDNN ukernel is enabled and avx512_fp16 is supported");
+  // fallback path
+  auto beta = add_C ? 1 : 0;
+  gemm(
+    at::native::TransposeType::NoTranspose,
+    at::native::TransposeType::NoTranspose,
+    N, M, K, 1,
+    B, ld_b, A, ld_a,
+    beta, C, ld_c);
 }
 
 void brgemm(
@@ -1216,22 +1230,64 @@ void brgemm(
     const bool add_C,
     const at::BFloat16* A,
     const at::BFloat16* B,
-    float* C) {
+    float* C,
+    bool is_vnni) {
 #if defined(ONEDNN_UKERNEL_ENABLED)
-  if (Brgemm::device_check(ScalarType::BFloat16)) {
+  if (is_vnni && Brgemm::device_check(ScalarType::BFloat16)) {
     Brgemm::call<at::BFloat16, at::BFloat16, float>(
       M, N, K, ld_a, ld_b, ld_c, add_C, A, B, C);
     return;
   }
 #endif
-  TORCH_CHECK(false,
-  "BFloat16 Brgemm is only supported on X64 when oneDNN ukernel is enabled and avx512 is supported");
+  // fallback path
+  TORCH_CHECK(!is_vnni,
+    "BFloat16 Brgemm VNNI format is only supported on X64 when oneDNN ukernel is enabled and `amx` is supported");
+  auto beta = add_C ? 1 : 0;
+  gemm(
+    at::native::TransposeType::NoTranspose,
+    at::native::TransposeType::NoTranspose,
+    N, M, K, 1,
+    B, ld_b, A, ld_a,
+    beta, C, ld_c);
 }
 
-void brgemm_release() {
+void brgemm(
+    int64_t M,
+    int64_t N,
+    int64_t K,
+    int64_t ld_a,
+    int64_t ld_b,
+    int64_t ld_c,
+    const bool add_C,
+    const at::Half* A,
+    const at::Half* B,
+    float* C,
+    bool is_vnni) {
 #if defined(ONEDNN_UKERNEL_ENABLED)
-  dnnl::ukernel::brgemm::release_hw_context();
-  Brgemm::get_current() = nullptr;
+  if (is_vnni && Brgemm::device_check(ScalarType::Half)) {
+    Brgemm::call<at::Half, at::Half, float>(
+      M, N, K, ld_a, ld_b, ld_c, add_C, A, B, C);
+    return;
+  }
+#endif
+  // fallback path
+  TORCH_CHECK(!is_vnni,
+    "Half Brgemm VNNI format is only supported on X64 when oneDNN ukernel is enabled and `amx_fp16` is supported");
+  auto beta = add_C ? 1 : 0;
+  gemm(
+    at::native::TransposeType::NoTranspose,
+    at::native::TransposeType::NoTranspose,
+    N, M, K, 1,
+    B, ld_b, A, ld_a,
+    beta, C, ld_c);
+}
+
+void brgemm_release(bool is_vnni) {
+#if defined(ONEDNN_UKERNEL_ENABLED)
+  if (is_vnni) {
+    dnnl::ukernel::brgemm::release_hw_context();
+    Brgemm::get_current() = nullptr;
+  }
 #endif
 }
 
