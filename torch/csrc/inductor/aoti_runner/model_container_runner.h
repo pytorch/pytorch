@@ -28,13 +28,15 @@ class TORCH_API AOTIModelContainerRunner {
       const std::vector<at::Tensor>& inputs,
       void* stream_handle = nullptr);
 
-  virtual std::vector<at::Tensor> steal_inputs_and_run(
+  // boxed_run will steal the ownership of the input tensors
+  std::vector<at::Tensor> boxed_run(
       std::vector<at::Tensor>& inputs,
       void* stream_handle = nullptr);
 
   std::unordered_map<std::string, std::string> getConstantNamesToOriginalFQNs()
       const;
   std::unordered_map<std::string, int32_t> getConstantNamesToDtypes() const;
+
   void update_inactive_constant_buffer(const TensorConstantMap& const_map);
   void update_constant_buffer(
       std::unordered_map<std::string, at::Tensor>& tensor_map,
@@ -57,6 +59,10 @@ class TORCH_API AOTIModelContainerRunner {
       size_t num_models,
       const std::string& device_str,
       const std::string& cubin_dir);
+
+  virtual std::vector<at::Tensor> run_impl(
+      std::vector<AtenTensorHandle>& input_handles,
+      void* stream_handle);
 
   std::unique_ptr<at::DynamicLibrary> model_so_;
   decltype(&AOTInductorModelContainerCreateWithDevice) create_func_{nullptr};
@@ -88,10 +94,6 @@ class TORCH_API AOTIModelContainerRunner {
 
  private:
   std::unique_ptr<torch::aot_inductor::ProxyExecutor> proxy_executor_;
-
-  std::vector<at::Tensor> run_impl(
-      std::vector<AtenTensorHandle>& input_handles,
-      void* stream_handle);
 };
 
 using CreateAOTIModelRunnerFunc = std::unique_ptr<AOTIModelContainerRunner> (*)(

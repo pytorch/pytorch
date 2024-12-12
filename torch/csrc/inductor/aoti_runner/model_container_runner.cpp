@@ -122,7 +122,7 @@ std::vector<at::Tensor> AOTIModelContainerRunner::run(
   return run_impl(input_handles, stream_handle);
 }
 
-std::vector<at::Tensor> AOTIModelContainerRunner::steal_inputs_and_run(
+std::vector<at::Tensor> AOTIModelContainerRunner::boxed_run(
     std::vector<at::Tensor>& inputs,
     void* stream_handle) {
   std::vector<AtenTensorHandle> input_handles =

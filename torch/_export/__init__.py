@@ -373,6 +373,9 @@ def aot_load(so_path: str, device: str) -> Callable:
         runner = torch._C._aoti.AOTIModelContainerRunnerCpu(so_path, 1)  # type: ignore[call-arg]
     elif device == "cuda" or device.startswith("cuda:"):
         runner = torch._C._aoti.AOTIModelContainerRunnerCuda(so_path, 1, device)  # type: ignore[assignment, call-arg]
+    elif device == "xpu" or device.startswith("xpu:"):
+        runner = torch._C._aoti.AOTIModelContainerRunnerXpu(so_path, 1, device)  # type: ignore[assignment, call-arg]
+
     else:
         raise RuntimeError("Unsupported device " + device)
 
@@ -382,7 +385,7 @@ def aot_load(so_path: str, device: str) -> Callable:
         out_spec = pytree.treespec_loads(call_spec[1])
         flat_inputs = pytree.tree_flatten((args, reorder_kwargs(kwargs, in_spec)))[0]
         flat_inputs = [x for x in flat_inputs if isinstance(x, torch.Tensor)]
-        flat_outputs = runner.steal_inputs_and_run(flat_inputs)  # type: ignore[attr-defined]
+        flat_outputs = runner.run(flat_inputs)  # type: ignore[attr-defined]
         return pytree.tree_unflatten(flat_outputs, out_spec)
 
     return optimized
