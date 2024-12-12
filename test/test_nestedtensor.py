@@ -6036,13 +6036,19 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
                 torch.randn(7, 5, device=device, dtype=dtype),
             ],
             layout=torch.jagged,
-            requires_grad=True,
+            requires_grad=False,
         )
 
         def f(nt, start, length):
             return nt.narrow(0, start, length)
 
+        # tests narrow() of narrow()ed NJT
+        def g(nt, start, length):
+            intermediate = nt.narrow(0, start, length)
+            return intermediate.narrow(0, 1, length - 2)
+
         if "compile" in env:
+            # required to avoid data-dependent guard errors
             torch._dynamo.config.capture_scalar_outputs = True
             f = torch.compile(f, dynamic=(env == "compile_dynamic"), fullgraph=True)
 
@@ -6067,6 +6073,14 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
         # length past the end
         with self.assertRaisesRegex(RuntimeError, "exceeds dimension size"):
             out4 = f(nt, 3, 3)
+
+        # narrow() of narrow()ed NJT
+        # first narrow(): 1:5
+        # second narrow() 1+1:4-2 == 2:4
+        out4 = g(nt, 1, 4)
+        self.assertEqual(out4.shape[0], 2)
+        for out4_comp, nt_comp in zip(out4.unbind(), nt.unbind()[2:4]):
+            self.assertEqual(out4_comp, nt_comp)
 
     def test_njt_cat(self, device):
         offsets = torch.tensor([0, 2, 3], device=device, dtype=torch.int64)

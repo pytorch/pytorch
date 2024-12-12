@@ -884,6 +884,7 @@ def split_with_sizes_default(func, *args, **kwargs):
     ]
 
 
+# TODO: Implement slice() instead and narrow() in terms of slice()
 @register_jagged_func(
     torch.ops.aten.narrow.default, "self: jt_all, dim: any, start: any, length: any"
 )
@@ -899,39 +900,62 @@ def narrow(func, *args, **kwargs):
     if operating_on_batch:
         # batch dim narrowing requires custom logic involving offsets
         out_kwargs = extract_kwargs(inp)
-        start, length = new_kwargs["start"], new_kwargs["length"]
-        end = start + length - 1
+        start_val, length_val = new_kwargs["start"], new_kwargs["length"]
+        end_val = start_val + length_val
         batch = inp._offsets.shape[0] - 1
-        if end >= batch:
+        if end_val > batch:
             raise RuntimeError(
-                f"narrow(): start ({start}) + length ({length}) exceeds dimension size ({batch})"
+                f"narrow(): start ({start_val}) + length ({length_val}) "
+                f"exceeds dimension size ({batch})"
             )
+
+        # clamp start, end values
+        if start_val < 0:
+            start_val += inp._values.size(dim)
+        if end_val < 0:
+            end_val += inp._values.size(dim)
+        start_val = max(min(start_val, inp._values.size(dim)), 0)
+        end_val = max(min(end_val, inp._values.size(dim)), 0)
+        length_val = max(min(length_val, end_val - start_val), 0)
 
         # +1 to include last offset. Also normalize offsets to start at 0.
         out_kwargs["offsets"] = (
-            inp._offsets[start : start + length + 1] - inp._offsets[start]
+            inp._offsets[start_val : start_val + length_val + 1]
+            - inp._offsets[start_val]
         )
         # metadata cache may no longer be accurate since offsets have changed
         if "_metadata_cache" in out_kwargs:
             del out_kwargs["_metadata_cache"]
 
         if inp._lengths is not None:
-            out_kwargs["lengths"] = inp._lengths[start : start + length]
+            out_kwargs["lengths"] = inp._lengths[start_val : start_val + length_val]
 
-        start_offset = inp._offsets[start].item()
-        torch._check_is_size(start_offset)
-        torch._check(start_offset <= inp._values.size(inp._ragged_idx - 1))
+        # unbacked SymInt for new storage offset
+        new_storage_offset = (
+            inp._values.storage_offset()
+            + (inp._offsets[start_val] * inp._values.stride(dim))
+        ).item()
+        torch._check_is_size(new_storage_offset)
 
-        length = (inp._offsets[start + length] - inp._offsets[start]).item()
+        # compute symbolic start involving unbacked SymInt
+        start = (
+            new_storage_offset - inp._values.storage_offset()
+        ) // inp._values.stride(dim)
+        torch._check_is_size(start)
+        torch._check(start <= inp._values.size(dim))
+
+        # unbacked SymInt for length
+        length = (inp._offsets[start_val + length_val] - inp._offsets[start_val]).item()
         torch._check_is_size(length)
-        torch._check(length <= inp._values.size(inp._ragged_idx - 1))
+        torch._check(start + length <= inp._values.size(dim))
 
-        new_values = inp._values.narrow(
-            dim=(inp._ragged_idx - 1),
-            start=start_offset,
-            length=length,
-        )
+        # compute new sizes / strides from symbolic values
+        new_sizes = list(inp._values.size())
+        new_sizes[dim] = length
+        new_strides = list(inp._values.stride())
 
+        # apply view with new sizes / strides / storage offset
+        new_values = inp._values.as_strided(new_sizes, new_strides, new_storage_offset)
         return NestedTensor(new_values, **out_kwargs)
 
     if inp._lengths is not None or inp._ragged_idx != 1:
