@@ -10,11 +10,11 @@ add_loop_inductor,compile_time_instruction_count,31100000000,0.015
 
 
 
-add_loop_inductor_dynamic_gpu,compile_time_instruction_count,43280000000,0.025
+add_loop_inductor_dynamic_gpu,compile_time_instruction_count,44500000000,0.025
 
 
 
-add_loop_inductor_gpu,compile_time_instruction_count,26280000000,0.015
+add_loop_inductor_gpu,compile_time_instruction_count,26870000000,0.015
 
 
 

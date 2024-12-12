@@ -70,6 +70,7 @@ from .cpp_utils import (
     DTYPE_TO_CPP,
     INDEX_TYPE,
     LocalBufferContext,
+    may_unify_binary_op_mask_type,
     promote_args,
     template_fusion_with_epilogues_supported,
     unify_mask_base_type,
@@ -1256,6 +1257,7 @@ class CppVecOverrides(CppOverrides):
 
     @staticmethod
     def logical_and(a, b):
+        a, b = may_unify_binary_op_mask_type(a, b)
         return f"{a} & {b}"
 
     @staticmethod
@@ -1264,14 +1266,17 @@ class CppVecOverrides(CppOverrides):
 
     @staticmethod
     def logical_or(a, b):
+        a, b = may_unify_binary_op_mask_type(a, b)
         return f"{a} | {b}"
 
     @staticmethod
     def logical_xor(a, b):
+        a, b = may_unify_binary_op_mask_type(a, b)
         return f"{a} ^ {b}"
 
     @staticmethod
     def bitwise_and(a, b):
+        a, b = may_unify_binary_op_mask_type(a, b)
         return f"{a} & {b}"
 
     @staticmethod
@@ -1280,10 +1285,12 @@ class CppVecOverrides(CppOverrides):
 
     @staticmethod
     def bitwise_or(a, b):
+        a, b = may_unify_binary_op_mask_type(a, b)
         return f"{a} | {b}"
 
     @staticmethod
     def bitwise_xor(a, b):
+        a, b = may_unify_binary_op_mask_type(a, b)
         return f"{a} ^ {b}"
 
     @staticmethod
@@ -1397,9 +1404,7 @@ class CppVecOverrides(CppOverrides):
 
     @staticmethod
     def asinh(x):
-        # For real x, asinh(x) = log(x + sqrt(1 + x**2))
-        vec_one = f"decltype({x})(1)"
-        return f"({x} + ({vec_one} + {x}*{x}).sqrt()).log()"
+        return f"{x}.asinh()"
 
     @staticmethod
     def acosh(x):
@@ -4798,12 +4803,10 @@ class CppScheduling(BaseScheduling):
         self,
         template_node: BaseSchedulerNode,
         epilogue_nodes: Sequence[BaseSchedulerNode],
-        prologue_nodes: Sequence[BaseSchedulerNode],
     ):
         """
         Codegen a CPP template, possibly with fused epilogues
         """
-        assert not prologue_nodes
         counters["inductor"]["cpp_epilogue_fusion_counter"] += len(epilogue_nodes)
         assert self.is_cpp_template(
             template_node
@@ -4919,7 +4922,7 @@ class KernelGroup:
         new_kernel.codegen_loops(code, ws)
 
     def get_num_args(self):
-        arg_defs, _call_args, _arg_types = self.args.cpp_argdefs()
+        arg_defs, call_args, arg_types = self.args.cpp_argdefs()
         args_num = len(arg_defs)
         return args_num
 

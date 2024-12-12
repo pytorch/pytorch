@@ -91,7 +91,10 @@ from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Type, TYPE_C
 import torch
 import torch.ao.quantization.quantize_fx as quantize_fx
 import torch.nn as nn
-from torch.ao.ns.fx.graph_matcher import get_matching_subgraph_pairs
+from torch.ao.ns.fx.graph_matcher import (
+    get_matching_subgraph_pairs,
+    get_type_a_related_to_b,
+)
 from torch.ao.ns.fx.mappings import get_base_name_to_sets_of_related_ops
 from torch.ao.ns.fx.n_shadows_utils import (
     _get_dedup_subgraphs,
@@ -407,6 +410,7 @@ def extract_weights(
     torch._C._log_api_usage_once("quantization_api._numeric_suite_fx.extract_weights")
     if base_name_to_sets_of_related_ops is None:
         base_name_to_sets_of_related_ops = get_base_name_to_sets_of_related_ops()
+    type_a_related_to_b = get_type_a_related_to_b(base_name_to_sets_of_related_ops)
 
     # TODO(future PR): expose these
     skipped_module_names: List[str] = []
@@ -586,7 +590,7 @@ def _extract_logger_info_one_model(
     torch._C._log_api_usage_once(
         "quantization_api._numeric_suite_fx._extract_logger_info_one_model"
     )
-    for _gm_name, mod in model.named_modules():
+    for gm_name, mod in model.named_modules():
         # TODO(future PR): better check when scripted
         is_logger = isinstance(mod, logger_cls) or (  # type: ignore[arg-type]
             isinstance(mod, torch.jit.RecursiveScriptModule)
@@ -1064,7 +1068,7 @@ def loggers_set_enabled(model: torch.nn.Module, enabled: bool) -> None:
     """
     Sets the `enabled` setting on a `model`'s loggers
     """
-    for _, child in model.named_modules():
+    for name, child in model.named_modules():
         if isinstance(child, OutputLogger):
             child.enabled = enabled
 
@@ -1078,7 +1082,7 @@ def loggers_set_save_activations(
     """
     Sets the `save_activations` setting on a `model`'s loggers
     """
-    for _name, child in model.named_modules():
+    for name, child in model.named_modules():
         if isinstance(child, OutputLogger):
             child.save_activations = save_activations
 
