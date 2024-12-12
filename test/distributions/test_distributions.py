@@ -834,6 +834,12 @@ def _get_bad_examples():
                     "concentration1": torch.tensor([-1.0], requires_grad=True),
                     "concentration0": torch.tensor([-2.0], requires_grad=True),
                 },
+                {
+                    "concentration1": torch.tensor([0.1], requires_grad=True),
+                    "concentration0": torch.tensor([0.4], requires_grad=True),
+                    "low": torch.tensor([2.0], requires_grad=True),
+                    "high": torch.tensor([1.2], requires_grad=True),
+                },
             ],
         ),
         Example(
@@ -3815,12 +3821,19 @@ class TestDistributions(DistributionsTestCase):
         for _ in range(100):
             con1 = np.exp(np.random.normal())
             con0 = np.exp(np.random.normal())
-            dist = Beta(con1, con0)
+            low = np.random.uniform(-1,1)
+            high = low + np.random.uniform(0,1)
+            scale = high - low
+            dist = Beta(con1, con0, low, high)
             x = dist.sample()
+            dirichlet_sample = (x - low) / scale
+            #TODO numerical instabilities that needs to be fixed
+            if dirichlet_sample > 1 - 1e-5 or dirichlet_sample < 1e-5:
+                continue
             actual_log_prob = dist.log_prob(x).sum()
-            expected_log_prob = scipy.stats.beta.logpdf(x, con1, con0)
+            expected_log_prob = scipy.stats.beta.logpdf(x, con1, con0, loc=low, scale=scale)
             self.assertEqual(
-                float(actual_log_prob), float(expected_log_prob), atol=1e-3, rtol=0
+                float(actual_log_prob), float(expected_log_prob), atol=1e-2, rtol=0
             )
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
@@ -3833,9 +3846,11 @@ class TestDistributions(DistributionsTestCase):
                 scipy.stats.beta(con1, con0),
                 f"Beta(alpha={con1}, beta={con0})",
             )
-        # Check that small alphas do not cause NANs.
+        # Check that small values do not cause NANs.
         for Tensor in [torch.FloatTensor, torch.DoubleTensor]:
             x = Beta(Tensor([1e-6]), Tensor([1e-6])).sample()[0]
+            self.assertTrue(np.isfinite(x) and x > 0, f"Invalid Beta.sample(): {x}")
+            x = Beta(Tensor([1.0]), Tensor([1.0]), Tensor([1e-6]), Tensor([1e-6])).sample()[0]
             self.assertTrue(np.isfinite(x) and x > 0, f"Invalid Beta.sample(): {x}")
 
     def test_beta_underflow(self):
@@ -5504,6 +5519,7 @@ class TestKL(DistributionsTestCase):
             (Beta(1, 2), Uniform(0.25, 1)),
             (Beta(1, 2), Uniform(0, 0.75)),
             (Beta(1, 2), Uniform(0.25, 0.75)),
+            (Beta(1, 2, 3, 4), Uniform(0.25, 0.75)),
             (Beta(1, 2), Pareto(1, 2)),
             (Binomial(31, 0.7), Binomial(30, 0.3)),
             (

@@ -58,6 +58,10 @@ class Beta(ExponentialFamily):
         self._dirichlet = Dirichlet(
             concentration1_concentration0, validate_args=validate_args
         )
+
+        if validate_args and not torch.gt(self.scale, 0).all():
+            raise ValueError("Beta is not defined when low>= high")
+
         super().__init__(self._dirichlet._batch_shape, validate_args=validate_args)
 
     def expand(self, batch_shape, _instance=None):
@@ -69,12 +73,12 @@ class Beta(ExponentialFamily):
         super(Beta, new).__init__(batch_shape, validate_args=False)
         new._validate_args = self._validate_args
         return new
-    
+
     @constraints.dependent_property(is_discrete=False, event_dim=0)
     def support(self):
         low = self._location
         high = self._location + self._scale
-        return(constraints.interval(low, high))
+        return constraints.interval(low, high)
 
     @property
     def mean(self):
@@ -104,12 +108,12 @@ class Beta(ExponentialFamily):
     def log_prob(self, value):
         if self._validate_args:
             self._validate_sample(value)
-        scaled_value = (value - self.location) / self.scale
+        scaled_value = (value - self.location) / (self.scale)
         heads_tails = torch.stack([scaled_value, 1.0 - scaled_value], -1)
-        return self._dirichlet.log_prob(heads_tails)
+        return self._dirichlet.log_prob(heads_tails) - torch.log(self.scale)
 
     def entropy(self):
-        return self._dirichlet.entropy()
+        return self._dirichlet.entropy() + torch.log(self.scale)
 
     @property
     def concentration1(self):
@@ -126,14 +130,14 @@ class Beta(ExponentialFamily):
             return torch.tensor([result])
         else:
             return result
-        
+
     @property
     def location(self):
         if isinstance(self._location, Number):
             return torch.ones_like(self.concentration0) * self._location
         else:
             return self._location
-        
+
     @property
     def scale(self):
         if isinstance(self._scale, Number):
