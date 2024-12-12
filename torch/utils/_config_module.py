@@ -70,7 +70,7 @@ class Config(Generic[T]):
             default behaviour. I.e. user overrides take preference.
     """
 
-    default: Optional[T]
+    default: T
     justknob: Optional[str] = None
     env_name_default: Optional[str] = None
     env_name_force: Optional[str] = None
