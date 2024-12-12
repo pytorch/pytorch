@@ -52,5 +52,6 @@ def freeze_rng_state():
             torch.set_rng_state(rng_state)
 
 
+# Used for tests as a function on module level
 def _dummy_test_fn_with_module():
     pass

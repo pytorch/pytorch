@@ -172,6 +172,9 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         return super().as_python_constant()
 
     def as_proxy(self):
+        if not torch._dynamo.config.capture_function_args:
+            raise Unsupported("UserFunctionVariable.as_proxy() is not supported")
+
         if self.fn.__module__ in ("__main__"):
             raise Unsupported("Local function can not be put in the graph")
         return self.fn

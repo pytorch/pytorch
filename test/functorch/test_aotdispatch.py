@@ -6333,6 +6333,7 @@ metadata incorrectly.
         out.sum().backward()
         self.assertEqual(ref_x.grad, x.grad)
 
+    @torch._dynamo.config.patch({"capture_function_args": True})
     def test_unwrap_subclass_parameters_with_unused_callable_arg_in_ctor(self):
         from torch.testing._utils import _dummy_test_fn_with_module
 

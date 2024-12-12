@@ -538,6 +538,9 @@ automatic_dynamic_remote_pgo: Optional[bool] = get_tristate_env(
     "TORCH_DYNAMO_AUTOMATIC_DYNAMIC_REMOTE_PGO"
 )
 
+# Allow Dynamo to use user function as argument in the graph
+capture_function_args: bool = False
+
 # HACK: this is for testing custom ops profiling only
 _custom_ops_profile: Optional[Any] = None
 
