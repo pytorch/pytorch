@@ -3284,7 +3284,10 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
 
         log.debug("DONE INLINING %s", code)
 
-        if config.enable_yield_on_generator:
+        if config.enable_yield_on_generator or (
+            isinstance(self, InliningGeneratorInstructionTranslator)
+            and self.is_generator_from_ctx_manager
+        ):
             if (
                 is_generator(code)
                 and isinstance(self, InliningGeneratorInstructionTranslator)
@@ -3426,6 +3429,7 @@ class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
         super().__init__(*args, **kwargs)
         self.generated_items = []
         self.generator_exhausted = False
+        self.is_generator_from_ctx_manager = False
 
     def YIELD_VALUE(self, inst: Instruction):
         top = self.pop()
@@ -3436,7 +3440,7 @@ class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
                 f"If not, please report a bug at {PT2_ISSUE_TRACKER_URL}",
             )
         self.push(ConstantVariable.create(None))
-        if config.enable_yield_on_generator:
+        if config.enable_yield_on_generator or self.is_generator_from_ctx_manager:
             self.symbolic_result = top
             # Stop tracing
             raise YieldValueOp
