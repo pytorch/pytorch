@@ -9,11 +9,13 @@ const std::string ScriptCall::ATEN_PREFIX_("aten::");
 
 ScriptCall::ScriptCall(
     std::shared_ptr<Operator> op,
+    // NOLINTNEXTLINE(cppcoreguidelines-rvalue-reference-param-not-moved)
     std::vector<at::IValue>&& stack)
     : op_(std::move(op)), stack_(stack), isAsyncExecution_(false) {}
 
 ScriptCall::ScriptCall(
     const c10::QualifiedName& qualifiedName,
+    // NOLINTNEXTLINE(cppcoreguidelines-rvalue-reference-param-not-moved)
     std::vector<at::IValue>&& stack,
     const bool isAsyncExecution)
     : qualifiedName_(qualifiedName),
@@ -25,7 +27,7 @@ bool ScriptCall::hasOp() const {
 }
 
 std::shared_ptr<Operator> ScriptCall::op() const {
-  return *op_;
+  return op_.value();
 }
 
 bool ScriptCall::hasQualifiedName() const {
@@ -33,7 +35,7 @@ bool ScriptCall::hasQualifiedName() const {
 }
 
 const c10::QualifiedName& ScriptCall::qualifiedName() const {
-  return *qualifiedName_;
+  return qualifiedName_.value();
 }
 
 const std::vector<at::IValue>& ScriptCall::stack() const {

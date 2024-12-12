@@ -6,8 +6,8 @@ import sys
 import traceback
 import warnings
 from collections import defaultdict
-from typing import Any, Callable, DefaultDict, Generic, List, Optional
-from typing_extensions import ParamSpec
+from typing import Any, Callable, DefaultDict, Generic, List, Optional, TYPE_CHECKING
+from typing_extensions import deprecated, ParamSpec
 
 import torch
 
@@ -66,6 +66,17 @@ def _to(self, device, non_blocking=False):
     """
     if self.device == device:
         return self
+
+    if device.type == "cpu":
+        pin_memory = non_blocking and self.device.type in (
+            "cuda",
+            torch._C._get_privateuse1_backend_name(),
+        )
+        untyped_storage = torch.empty(
+            self.nbytes(), dtype=torch.uint8, device=device, pin_memory=pin_memory
+        ).untyped_storage()
+        untyped_storage.copy_(self, non_blocking)
+        return untyped_storage
 
     device_module = getattr(torch, device.type, None)
     assert (
@@ -328,6 +339,13 @@ def _rebuild_sparse_tensor(layout, data):
 
 def _rebuild_nested_tensor(buffer, sizes, strides, storage_offsets):
     return torch._nested_view_from_buffer(buffer, sizes, strides, storage_offsets)
+
+
+def _rebuild_device_tensor_from_cpu_tensor(data, dtype, device, requires_grad):
+    device = _get_restore_location(device)
+    tensor = data.to(dtype=dtype, device=device)
+    tensor.requires_grad = requires_grad
+    return tensor
 
 
 def _rebuild_device_tensor_from_numpy(data, dtype, device, requires_grad):
@@ -718,6 +736,8 @@ class ExceptionWrapper:
 def _get_available_device_type():
     if torch.cuda.is_available():
         return "cuda"
+    if torch.backends.mps.is_available():
+        return "mps"
     if hasattr(torch, "xpu") and torch.xpu.is_available():  # type: ignore[attr-defined]
         return "xpu"
     if hasattr(torch, "mtia") and torch.mtia.is_available():
@@ -734,6 +754,8 @@ def _get_device_attr(get_member):
     device_type = _get_available_device_type()
     if device_type and device_type.lower() == "cuda":
         return get_member(torch.cuda)
+    if device_type and device_type.lower() == "mps":
+        return get_member(torch.mps)
     if device_type and device_type.lower() == "xpu":
         return get_member(torch.xpu)  # type: ignore[attr-defined]
     if device_type and device_type.lower() == "mtia":
@@ -864,13 +886,28 @@ def classproperty(func):
     return _ClassPropertyDescriptor(func)
 
 
-def is_compiling() -> bool:
-    """
-    Indicates whether we are tracing/compiling with torch.compile() or torch.export().
+if TYPE_CHECKING:
+    # TorchScript does not support `@deprecated`
+    # This is a workaround to avoid breaking TorchScript
+    @deprecated(
+        "`torch._utils.is_compiling` is deprecated. Use `torch.compiler.is_compiling` instead.",
+        category=FutureWarning,
+    )
+    def is_compiling() -> bool:
+        return torch.compiler.is_compiling()
 
-    TODO(khabinov): we should deprecate this function and use torch.compiler.is_compiling().
-    """
-    return torch.compiler.is_compiling()
+else:
+
+    def is_compiling() -> bool:
+        """
+        Indicates whether we are tracing/compiling with torch.compile() or torch.export().
+        """
+        warnings.warn(  # use `warnings.warn` instead of `@deprecated`
+            "`torch._utils.is_compiling` is deprecated. Use `torch.compiler.is_compiling` instead.",
+            # FutureWarning,  # TorchScript does not support Warning type
+            stacklevel=2,
+        )
+        return torch.compiler.is_compiling()
 
 
 def _functionalize_sync(t):

@@ -211,7 +211,7 @@ def tensor_split(
 
         loop_block = loop_context.block
         block_input_iter = utils._add_input_to_block(loop_block)
-        cond = utils._add_input_to_block(loop_block)
+        cond = utils._add_input_to_block(loop_block)  # noqa: F841
         final_splits = utils._add_input_to_block(loop_block)
 
         start = loop_context.op(
@@ -689,7 +689,7 @@ def repeat_interleave(
 
     loop_block = loop_context.block
     block_input_iter = utils._add_input_to_block(loop_block)
-    cond = utils._add_input_to_block(loop_block)
+    cond = utils._add_input_to_block(loop_block)  # noqa: F841
     final_splits = utils._add_input_to_block(loop_block)
 
     r_split = loop_context.op("SequenceAt", r_splits, block_input_iter)

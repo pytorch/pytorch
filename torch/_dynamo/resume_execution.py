@@ -10,6 +10,7 @@ from .bytecode_transformation import (
     create_call_function,
     create_instruction,
     create_jump_absolute,
+    create_load_const,
     Instruction,
     overwrite_instruction,
     transform_code_object,
@@ -90,27 +91,25 @@ class ReenterWith:
     stack_index: int
     target_values: Optional[Tuple[Any, ...]] = None
 
-    # TODO(mlazos) - Uncomment with the reland of torch function mode support
-    # def try_except_torch_function_mode(self, code_options, cleanup: List[Instruction]):
-    #     """
-    #     Codegen based off of:
-    #     try:
-    #         (rest)
-    #     except:
-    #         (restore previous tf mode stack)
-    #         raise
+    def try_except_torch_function_mode(self, code_options, cleanup: List[Instruction]):
+        """
+        Codegen based off of:
+        try:
+            (rest)
+        except:
+            (restore previous tf mode stack)
+            raise
+        """
+        from .variables.torch_function import get_prev_stack_var_name
 
-    #     """
-    #     from .variables.torch_function import get_prev_stack_var_name
+        setup_try_except, epilogue = _bytecode_from_template_with_split(
+            _try_except_tf_mode_template,
+            self.stack_index,
+            varname_map={"stack_var_name": get_prev_stack_var_name()},
+        )
+        cleanup[:] = epilogue + cleanup
 
-    #     setup_try_except, epilogue = _bytecode_from_template_with_split(
-    #         _try_except_tf_mode_template,
-    #         self.stack_index,
-    #         varname_map={"stack_var_name": get_prev_stack_var_name()},
-    #     )
-    #     cleanup[:] = epilogue + cleanup
-
-    #     return setup_try_except
+        return setup_try_except
 
     # If we do not want to destroy the stack, we can do the same thing as a
     # `SETUP_WITH` block, only that we store the context manager in a local_symbol
@@ -127,10 +126,7 @@ class ReenterWith:
         # NOTE: we assume that TOS is a context manager CLASS!
         load_args = []
         if self.target_values:
-            load_args = [
-                create_instruction("LOAD_CONST", argval=val)
-                for val in self.target_values
-            ]
+            load_args = [create_load_const(val) for val in self.target_values]
         ctx_name = unique_id(f"___context_manager_{self.stack_index}")
         if ctx_name not in code_options["co_varnames"]:
             code_options["co_varnames"] += (ctx_name,)
@@ -170,10 +166,7 @@ class ReenterWith:
         # NOTE: we assume that TOS is a context manager CLASS!
         load_args = []
         if self.target_values:
-            load_args = [
-                create_instruction("LOAD_CONST", argval=val)
-                for val in self.target_values
-            ]
+            load_args = [create_load_const(val) for val in self.target_values]
 
         create_ctx: List[Instruction] = []
         _initial_push_null(create_ctx)
@@ -254,8 +247,7 @@ def _filter_iter(l1, l2, cond):
 def _load_tuple_and_call(tup):
     insts: List[Instruction] = []
     _initial_push_null(insts)
-    for val in tup:
-        insts.append(create_instruction("LOAD_CONST", argval=val))
+    insts.extend(create_load_const(val) for val in tup)
     insts.extend(create_call_function(len(tup), False))
     return insts
 
@@ -459,7 +451,7 @@ class ContinueExecutionCache:
     def unreachable_codes(code_options) -> List[Instruction]:
         """Codegen a `raise None` to make analysis work for unreachable code"""
         return [
-            create_instruction("LOAD_CONST", argval=None),
+            create_load_const(None),
             create_instruction("RAISE_VARARGS", arg=1),
         ]
 

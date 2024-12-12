@@ -216,15 +216,6 @@
 #include <vector>
 
 namespace at::meta {
-inline void cat_check_no_zero_dim(const MaterializedITensorListRef& tensors) {
-  size_t i = 0;
-  for (const Tensor& t : tensors) {
-    TORCH_CHECK(
-        t.dim() > 0,
-        "zero-dimensional tensor (at position ", i, ") cannot be concatenated");
-    i++;
-  }
-}
 
 inline c10::MemoryFormat cat_compute_output_memory_format(const MaterializedITensorListRef& inputs) {
   std::optional<c10::MemoryFormat> format = std::nullopt;
@@ -248,7 +239,7 @@ TORCH_PRECOMPUTE_META_FUNC(cat)(const ITensorListRef& tensors, int64_t dim) {
   // size (i.e. other empty sizes are not skipped).
   auto materialized = tensors.materialize();
 
-  cat_check_no_zero_dim(materialized);
+  native::check_cat_no_zero_dim(materialized);
   dim = at::legacy_cat_wrap_dim(dim, materialized);
 
   // Checking names before the actual dimensions.
@@ -480,75 +471,101 @@ Tensor& set_meta_(Tensor& result) {
 
 Tensor sparse_broadcast_to(const Tensor& self, IntArrayRef size) {
   TORCH_CHECK(self.is_sparse(), "input must be sparse tensor");
-  int64_t sparse_extra_ndim = size.size() - self.dim();
-  int64_t sparse_ndim = size.size() - self.dense_dim();
-  TORCH_CHECK(sparse_extra_ndim >= 0, "input not broadcastable to size with smaller dimensionality");
-  Tensor indices = self._indices();
-  Tensor values = self._values();
-  auto nnz = values.size(0);
 
-  std::vector<int64_t> broadcast_sizes;
-  std::vector<int64_t> broadcast_dense_sizes;
-  std::vector<int64_t> broadcast_dims;
-  std::vector<int64_t> unchanged_dims;
-  broadcast_sizes.reserve(sparse_ndim);
-  broadcast_dense_sizes.reserve(self.dense_dim() + 1);
-  broadcast_dims.reserve(self.sparse_dim());
-  unchanged_dims.reserve(self.sparse_dim());
-  int64_t nnz_factor = 1;
-  int64_t min_broadcast_dim = (sparse_extra_ndim > 0 ? 0: -1);
-  int64_t max_unchanged_dim = -1;
-  for (int64_t i=0; i<sparse_extra_ndim; i++) {
-    auto d = size[i];
-    nnz_factor *= d;
-    broadcast_sizes.emplace_back(d);
+  const auto self_size = self.sizes();
+  const int64_t new_sparse_dims = size.size() - self.dim();
+  TORCH_CHECK(new_sparse_dims >= 0, "the requested broadcast shape has fewer dimensions than the input");
+  const int64_t res_sparse_dim = new_sparse_dims + self.sparse_dim();
+
+  for (int64_t i = 0; i < self.dim(); ++i) {
+    TORCH_CHECK(self_size[i] == 1 || self_size[i] == size[i + new_sparse_dims],
+                "The input's length ", self_size[i], " at dimension ", i,
+                " does not broadcast over the requested shape of length ", size[i + new_sparse_dims],
+                " at dimension ", i + new_sparse_dims);
   }
-  for (int64_t i=0; i<self.sparse_dim(); i++) {
-    auto d = size[sparse_extra_ndim + i];
-    if (self.size(i) != d) {
-      TORCH_CHECK(self.size(i) == 1,
-                  "The expanded size of the tensor (",size[sparse_extra_ndim + i],") ",
-                  "must match the existing size (",self.size(i),")");
-      nnz_factor *= d;
-      broadcast_sizes.emplace_back(d);
-      if (min_broadcast_dim == -1) {
-        min_broadcast_dim = sparse_extra_ndim + i;
+
+  const int64_t self_nnz = self._nnz();
+  const auto self_indices = self._indices();
+  int64_t nnz_expand_factor = 1;
+  int64_t largest_sparse_dim_len = -1;
+  int64_t min_broadcast_dim = (new_sparse_dims > 0) ? 0 : -1;
+  int64_t max_unchanged_dim = -1;
+  for (int64_t i = 0; i < res_sparse_dim; ++i) {
+    if ((i < new_sparse_dims) || (self_size[i - new_sparse_dims] != size[i])) {
+      nnz_expand_factor *= size[i];
+      largest_sparse_dim_len = std::max(size[i], largest_sparse_dim_len);
+      if (i >= new_sparse_dims && min_broadcast_dim == -1) {
+        min_broadcast_dim = i;
       }
-      broadcast_dims.emplace_back(i);
     } else {
-      unchanged_dims.emplace_back(i);
-      max_unchanged_dim = sparse_extra_ndim + i;
+      if (i >= new_sparse_dims) {
+        max_unchanged_dim = i;
+      }
     }
   }
+
   // to_broadcast conserves is_coalesced property iff only the last
   // sparse dimensions are expanded. Possible expansion of dense
   // dimensions can be discarded as it does not affect the is_coalesce
   // property.
-  bool is_coalesced = self.dim()==0 || (self.is_coalesced() && (max_unchanged_dim < min_broadcast_dim || min_broadcast_dim == -1));
+  bool is_coalesced = !self.dim() || (self.is_coalesced() && (max_unchanged_dim < min_broadcast_dim || min_broadcast_dim == -1));
 
-  broadcast_dense_sizes.emplace_back(nnz);
-  for (int64_t i=0; i<self.dense_dim(); i++) {
-    broadcast_dense_sizes.emplace_back(size[sparse_extra_ndim + self.sparse_dim() + i]);
+  // Replace non-broadcastable dims with 1 in the `size` vector {
+  auto res_sparse_dim_broadcast_mask = at::DimVector(size.begin(), size.begin() + res_sparse_dim);
+  for (int64_t i = new_sparse_dims; i < res_sparse_dim; ++i) {
+    res_sparse_dim_broadcast_mask[i] = (size[i] == self_size[i - new_sparse_dims]) ? 1 : size[i];
+  }
+  // }
+
+  // Then define for each sparse dim the number of reps for each nnz index/value due to broadcasting.
+  // Repetitions do not take into accout the current value of nnz - this will be taken care of later {
+  auto nnz_repeats = c10::DimVector(res_sparse_dim);
+  nnz_repeats.back() = res_sparse_dim_broadcast_mask.back();
+  for (int64_t i = res_sparse_dim - 2; i >= 0; --i) {
+    nnz_repeats[i] = res_sparse_dim_broadcast_mask[i] * nnz_repeats[i + 1];
+  }
+  // }
+
+  // Broadcast values. Each nnz value has to be repeated nnz_expand_factor times {
+  auto broadcast_values_shape = DimVector(size.size() - res_sparse_dim + 2);
+  std::copy(size.begin() + res_sparse_dim, size.end(), broadcast_values_shape.begin() + 2);
+  broadcast_values_shape[0] = self_nnz;
+  broadcast_values_shape[1] = nnz_expand_factor;
+  auto broadcast_values = self._values().unsqueeze(1).expand(broadcast_values_shape).flatten(0, 1);
+  // }
+
+  // We can return early if there are no broadcastable sparse dims
+  if (largest_sparse_dim_len < 0) {
+    return at::sparse_coo_tensor(self._indices(), broadcast_values, size, self.options(), self.is_coalesced());
   }
 
-  std::vector<int64_t> new_indices_size{sparse_ndim, nnz * nnz_factor};
-  std::vector<int64_t> new_values_size(values.sizes().vec());
-  new_values_size[0] = new_indices_size[1];
+  auto broadcast_indices = self._indices().new_empty(
+      {res_sparse_dim, self_nnz * nnz_expand_factor}
+  );
 
-  Tensor new_values = values.expand(broadcast_dense_sizes).repeat_interleave(nnz_factor, 0);
-  Tensor new_indices = indices.new_empty(new_indices_size);
-  if (!broadcast_sizes.empty()) {
-    Tensor broadcast_indices = at::sparse::full_coo_indices(broadcast_sizes, indices.options()).tile(nnz);
-    new_indices.narrow(0, 0, sparse_extra_ndim).copy_(broadcast_indices.narrow(0, 0, sparse_extra_ndim));
-    for (size_t i=0; i<broadcast_dims.size(); i++) {
-      int64_t j=broadcast_dims[i];
-      new_indices.select(0, sparse_extra_ndim + j).copy_(broadcast_indices.select(0, sparse_extra_ndim + i));
+  // Repeat each individual index value in dimension dim nnz_repeats[dim] / size[dim] times,
+  // and then repeat the whole vector self_nnz * (nnz_expand_factor / nnz_repeats[dim]) times to get the final
+  // index vector - only for broadcast dims {
+  const auto dim_arange = at::arange(largest_sparse_dim_len, self._indices().options());
+  for (int64_t i = 0; i < res_sparse_dim; ++i) {
+    Tensor curr_dim_idx;
+    if ((i < new_sparse_dims) || (self_size[i - new_sparse_dims] != size[i])) {
+      // If the dim is either a newly created sparse dim, or an already existing one which is broadcastable,
+      // do the reps over an arange vector
+      curr_dim_idx = dim_arange.narrow(0, 0, size[i]).unsqueeze_(0).unsqueeze_(-1).expand(
+          {self_nnz * (nnz_expand_factor / nnz_repeats[i]), size[i], nnz_repeats[i] / size[i]}
+      );
+    } else {
+      // Otherwise over a slice of self._indices() of length self_nnz
+      curr_dim_idx = self_indices.select(0, i - new_sparse_dims).unsqueeze_(1).expand(
+          {self_nnz, nnz_expand_factor}
+      );
     }
+    broadcast_indices.select(0, i).view(curr_dim_idx.sizes()).copy_(curr_dim_idx);
   }
-  for (int64_t j:unchanged_dims) {
-    new_indices.select(0, sparse_extra_ndim + j).copy_(indices.select(0, j).repeat_interleave(nnz_factor));
-  }
-  return at::sparse_coo_tensor(new_indices, new_values, size, self.options(), is_coalesced);
+  // }
+
+  return at::sparse_coo_tensor(broadcast_indices, broadcast_values, size, self.options(), is_coalesced);
 }
 
 Tensor broadcast_to_symint(const Tensor& self, SymIntArrayRef size) {
@@ -1188,7 +1205,7 @@ inline void setStridedUnchecked(
     ArrayRef<T> stride,
     T&& storage_offset) {
   auto* self_ = self.unsafeGetTensorImpl();
-  self_->set_sizes_and_strides(size, stride, std::make_optional(std::forward<T>(storage_offset)));
+  self_->set_sizes_and_strides(size, stride, std::forward<T>(storage_offset));
 }
 
 Tensor as_strided_tensorimpl_meta_symint(const Tensor& self, SymIntArrayRef sym_size, SymIntArrayRef sym_stride, std::optional<c10::SymInt> sym_storage_offset_) {
@@ -1954,7 +1971,7 @@ Tensor index_select_sparse_cpu(const Tensor& self, int64_t dim, const Tensor& in
       at::parallel_for(0, index_len, at::internal::GRAIN_SIZE, [&](int64_t start, int64_t end) {
           const auto* src = ptr_index + start;
           auto* dst = ptr_nneg_index + start;
-          for (C10_UNUSED const auto _ : c10::irange(start, end)) {
+          for ([[maybe_unused]] const auto _ : c10::irange(start, end)) {
             auto idx = *src++;
             if (idx < -size || idx >= size) {
                // Mark self and dim as used if code is compiled with STRIP_ERROR_MESSAGES
@@ -2060,36 +2077,42 @@ Tensor index_select_sparse_cpu(const Tensor& self, int64_t dim, const Tensor& in
         const auto* ptr_sorted_start = ptr_sorted;
         const auto* ptr_sorted_end = ptr_sorted + sorted_len;
 
-        at::parallel_for(0, n_threads_src, 1, [&](int64_t tid, C10_UNUSED int64_t _) {
-            const auto start = tid * chunk_size_src;
-            const auto end = std::min(start + chunk_size_src, src_len);
-            auto* ptr_tid_src_int_idx = src_int_idx.select(0, tid).data_ptr<int64_t>();
-            auto* ptr_tid_sorted_int_idx = sorted_int_idx.select(0, tid).data_ptr<int64_t>();
-            auto* ptr_tid_int_counts = int_counts.select(0, tid).data_ptr<int64_t>();
-            const auto* ptr_src = src.const_data_ptr<int64_t>() + start;
+        at::parallel_for(
+            0, n_threads_src, 1, [&](int64_t tid, [[maybe_unused]] int64_t _) {
+              const auto start = tid * chunk_size_src;
+              const auto end = std::min(start + chunk_size_src, src_len);
+              auto* ptr_tid_src_int_idx =
+                  src_int_idx.select(0, tid).data_ptr<int64_t>();
+              auto* ptr_tid_sorted_int_idx =
+                  sorted_int_idx.select(0, tid).data_ptr<int64_t>();
+              auto* ptr_tid_int_counts =
+                  int_counts.select(0, tid).data_ptr<int64_t>();
+              const auto* ptr_src = src.const_data_ptr<int64_t>() + start;
 
-            for (const auto i : c10::irange(start, end)) {
-              const auto src_val = *ptr_src++;
-              const auto src_val_lb = std::lower_bound(ptr_sorted_start, ptr_sorted_end, src_val);
-              // We cannot just use *src_val_lb != src_val because when
-              // src_val_lb == ptr_sorted_end, dereferencing past-the-end value
-              // is not well-defined.
-              if (src_val_lb == ptr_sorted_end || *src_val_lb != src_val) {
-                ++ptr_tid_src_int_idx;
-                ++ptr_tid_sorted_int_idx;
-                ++ptr_tid_int_counts;
-                continue;
+              for (const auto i : c10::irange(start, end)) {
+                const auto src_val = *ptr_src++;
+                const auto src_val_lb =
+                    std::lower_bound(ptr_sorted_start, ptr_sorted_end, src_val);
+                // We cannot just use *src_val_lb != src_val because when
+                // src_val_lb == ptr_sorted_end, dereferencing past-the-end
+                // value is not well-defined.
+                if (src_val_lb == ptr_sorted_end || *src_val_lb != src_val) {
+                  ++ptr_tid_src_int_idx;
+                  ++ptr_tid_sorted_int_idx;
+                  ++ptr_tid_int_counts;
+                  continue;
+                }
+                const auto src_val_ub =
+                    std::upper_bound(ptr_sorted_start, ptr_sorted_end, src_val);
+
+                const int64_t count = src_val_ub - src_val_lb;
+                const int64_t j = src_val_lb - ptr_sorted_start;
+
+                *ptr_tid_src_int_idx++ = i;
+                *ptr_tid_sorted_int_idx++ = j;
+                *ptr_tid_int_counts++ = count;
               }
-              const auto src_val_ub = std::upper_bound(ptr_sorted_start, ptr_sorted_end, src_val);
-
-              const int64_t count = src_val_ub - src_val_lb;
-              const int64_t j = src_val_lb - ptr_sorted_start;
-
-              *ptr_tid_src_int_idx++ = i;
-              *ptr_tid_sorted_int_idx++ = j;
-              *ptr_tid_int_counts++ = count;
-            }
-        });
+            });
       }
 
       const auto compressed_int_counts = int_counts.sum(-1);
@@ -2120,29 +2143,35 @@ Tensor index_select_sparse_cpu(const Tensor& self, int64_t dim, const Tensor& in
 
         const auto thread_offsets = compressed_int_counts.cumsum(0).sub_(compressed_int_counts);
         const auto* ptr_sorted_idx = sorted_idx.const_data_ptr<int64_t>();
-        at::parallel_for(0, n_threads_src, 1, [&](int64_t tid, C10_UNUSED int64_t _) {
-            const auto start = tid * chunk_size_src;
-            const auto end = std::min(start + chunk_size_src, src_len);
-            const auto tid_offset = thread_offsets.const_data_ptr<int64_t>()[tid];
-            const auto* ptr_tid_src_int_idx = src_int_idx.select(0, tid).const_data_ptr<int64_t>();
-            const auto* ptr_tid_sorted_int_idx = sorted_int_idx.select(0, tid).const_data_ptr<int64_t>();
-            const auto* ptr_tid_int_counts = int_counts.select(0, tid).const_data_ptr<int64_t>();
-            auto* ptr_tid_selected_sorted = ptr_selected_sorted + tid_offset;
-            auto* ptr_tid_selected_src = ptr_selected_src + tid_offset;
+        at::parallel_for(
+            0, n_threads_src, 1, [&](int64_t tid, [[maybe_unused]] int64_t _) {
+              const auto start = tid * chunk_size_src;
+              const auto end = std::min(start + chunk_size_src, src_len);
+              const auto tid_offset =
+                  thread_offsets.const_data_ptr<int64_t>()[tid];
+              const auto* ptr_tid_src_int_idx =
+                  src_int_idx.select(0, tid).const_data_ptr<int64_t>();
+              const auto* ptr_tid_sorted_int_idx =
+                  sorted_int_idx.select(0, tid).const_data_ptr<int64_t>();
+              const auto* ptr_tid_int_counts =
+                  int_counts.select(0, tid).const_data_ptr<int64_t>();
+              auto* ptr_tid_selected_sorted = ptr_selected_sorted + tid_offset;
+              auto* ptr_tid_selected_src = ptr_selected_src + tid_offset;
 
-            for (C10_UNUSED const auto _ : c10::irange(start, end)) {
-              const auto count = *ptr_tid_int_counts++;
-              const auto i = *ptr_tid_src_int_idx++;
-              const auto j = *ptr_tid_sorted_int_idx++;
-              if (!count) continue;
+              for ([[maybe_unused]] const auto _ : c10::irange(start, end)) {
+                const auto count = *ptr_tid_int_counts++;
+                const auto i = *ptr_tid_src_int_idx++;
+                const auto j = *ptr_tid_sorted_int_idx++;
+                if (!count)
+                  continue;
 
-              std::fill_n(ptr_tid_selected_src, count, i);
-              std::copy_n(ptr_sorted_idx + j, count, ptr_tid_selected_sorted);
+                std::fill_n(ptr_tid_selected_src, count, i);
+                std::copy_n(ptr_sorted_idx + j, count, ptr_tid_selected_sorted);
 
-              ptr_tid_selected_sorted += count;
-              ptr_tid_selected_src += count;
-            }
-        });
+                ptr_tid_selected_sorted += count;
+                ptr_tid_selected_src += count;
+              }
+            });
       }
 
       return search_in_dim_indices
@@ -2201,7 +2230,7 @@ Tensor index_select_sparse_cpu(const Tensor& self, int64_t dim, const Tensor& in
         else {
           auto* ptr_counts = counts.data_ptr<int64_t>();
           const auto* ptr_vals = t.const_data_ptr<int64_t>();
-          for (C10_UNUSED const auto _ : c10::irange(t.numel())) {
+          for ([[maybe_unused]] const auto _ : c10::irange(t.numel())) {
             ++ptr_counts[*ptr_vals++];
           }
         }
@@ -2221,14 +2250,19 @@ Tensor index_select_sparse_cpu(const Tensor& self, int64_t dim, const Tensor& in
         const auto run_in_parallel = (n_threads == 1);
 
         auto counts_per_thread = at::zeros({n_threads, size}, idx.options());
-        at::parallel_for(0, n_threads, 1, [&](int64_t tid, C10_UNUSED int64_t _) {
-          const auto start = tid * chunk_size;
-          const auto end = std::min(start + chunk_size, idx_len);
-          const auto tid_idx = idx.slice(0, start, end);
-          auto tid_counts = counts_per_thread.select(0, tid);
-          get_counts(tid_counts, tid_idx, /*bins=*/size,
-              /*is_sorted=*/is_sorted, /*run_in_parallel=*/run_in_parallel);
-        });
+        at::parallel_for(
+            0, n_threads, 1, [&](int64_t tid, [[maybe_unused]] int64_t _) {
+              const auto start = tid * chunk_size;
+              const auto end = std::min(start + chunk_size, idx_len);
+              const auto tid_idx = idx.slice(0, start, end);
+              auto tid_counts = counts_per_thread.select(0, tid);
+              get_counts(
+                  tid_counts,
+                  tid_idx,
+                  /*bins=*/size,
+                  /*is_sorted=*/is_sorted,
+                  /*run_in_parallel=*/run_in_parallel);
+            });
 
         return counts_per_thread;
       };
@@ -2319,32 +2353,38 @@ Tensor index_select_sparse_cpu(const Tensor& self, int64_t dim, const Tensor& in
             1, std::min<int64_t>((src_len + grain_size - 1) / grain_size, at::get_num_threads())
         );
         const auto chunk_size = (src_len + n_threads_src - 1) / n_threads_src;
-        at::parallel_for(0, n_threads_src, 1, [&](int64_t tid, C10_UNUSED int64_t _) {
-            const auto start = tid * chunk_size;
-            const auto end = std::min(start + chunk_size, src_len);
-            auto* ptr_src_tid = ptr_src + start;
-            const auto* ptr_src_counts_per_thread
-              = src_counts_per_thread.select(0, tid).const_data_ptr<int64_t>();
-            const auto* ptr_src_offset_counts_per_thread
-              = src_offset_counts_per_thread.select(0, tid).const_data_ptr<int64_t>();
-            auto tid_counts = at::zeros({size}, src.options());
-            auto* ptr_tid_counts = tid_counts.data_ptr<int64_t>();
+        at::parallel_for(
+            0, n_threads_src, 1, [&](int64_t tid, [[maybe_unused]] int64_t _) {
+              const auto start = tid * chunk_size;
+              const auto end = std::min(start + chunk_size, src_len);
+              auto* ptr_src_tid = ptr_src + start;
+              const auto* ptr_src_counts_per_thread =
+                  src_counts_per_thread.select(0, tid)
+                      .const_data_ptr<int64_t>();
+              const auto* ptr_src_offset_counts_per_thread =
+                  src_offset_counts_per_thread.select(0, tid)
+                      .const_data_ptr<int64_t>();
+              auto tid_counts = at::zeros({size}, src.options());
+              auto* ptr_tid_counts = tid_counts.data_ptr<int64_t>();
 
-            for (const auto i : c10::irange(start, end)) {
-              const auto idx_val = *ptr_src_tid++;
-              // skip idx value if not in the intersection
-              if (!ptr_intersection_counts[idx_val]) continue;
-              const auto idx_val_offset
-                = ptr_src_intersection_offsets[idx_val]
-                - ptr_src_intersection_counts[idx_val];
-              const auto idx_val_tid_offset
-                = ptr_src_offset_counts_per_thread[idx_val]
-                - ptr_src_counts_per_thread[idx_val];
-              auto& idx_val_local_tid_count = ptr_tid_counts[idx_val];
-              ptr_src_idx[idx_val_offset + idx_val_tid_offset + idx_val_local_tid_count] = i;
-              ++idx_val_local_tid_count;
-            }
-        });
+              for (const auto i : c10::irange(start, end)) {
+                const auto idx_val = *ptr_src_tid++;
+                // skip idx value if not in the intersection
+                if (!ptr_intersection_counts[idx_val])
+                  continue;
+                const auto idx_val_offset =
+                    ptr_src_intersection_offsets[idx_val] -
+                    ptr_src_intersection_counts[idx_val];
+                const auto idx_val_tid_offset =
+                    ptr_src_offset_counts_per_thread[idx_val] -
+                    ptr_src_counts_per_thread[idx_val];
+                auto& idx_val_local_tid_count = ptr_tid_counts[idx_val];
+                ptr_src_idx
+                    [idx_val_offset + idx_val_tid_offset +
+                     idx_val_local_tid_count] = i;
+                ++idx_val_local_tid_count;
+              }
+            });
 
         const auto src_idx_offsets = src_intersection_offsets.sub_(src_intersection_counts);
 
@@ -2378,26 +2418,28 @@ Tensor index_select_sparse_cpu(const Tensor& self, int64_t dim, const Tensor& in
             1, std::min<int64_t>((idx_len + grain_size - 1) / grain_size, at::get_num_threads())
         );
         const auto chunk_size = (idx_len + n_threads_idx - 1) / n_threads_idx;
-        at::parallel_for(0, n_threads_idx, 1, [&](int64_t tid, C10_UNUSED int64_t _) {
-            const auto start = tid * chunk_size;
-            const auto end = std::min(start + chunk_size, idx_len);
-            const auto tid_offset = ptr_thread_offset[tid];
-            const auto* ptr_idx_tid = ptr_idx + start;
-            auto* ptr_idx_selected_tid = ptr_idx_selected + tid_offset;
-            auto* ptr_src_selected_tid = ptr_src_selected + tid_offset;
+        at::parallel_for(
+            0, n_threads_idx, 1, [&](int64_t tid, [[maybe_unused]] int64_t _) {
+              const auto start = tid * chunk_size;
+              const auto end = std::min(start + chunk_size, idx_len);
+              const auto tid_offset = ptr_thread_offset[tid];
+              const auto* ptr_idx_tid = ptr_idx + start;
+              auto* ptr_idx_selected_tid = ptr_idx_selected + tid_offset;
+              auto* ptr_src_selected_tid = ptr_src_selected + tid_offset;
 
-            for (const auto i : c10::irange(start, end)) {
-              const auto idx_val = *ptr_idx_tid++;
-              // skip if idx_val is not in the intersection
-              if (!ptr_intersection_counts[idx_val]) continue;
-              const auto count = ptr_src_counts[idx_val];
-              const auto j = ptr_src_idx_offsets[idx_val];
-              std::fill_n(ptr_idx_selected_tid, count, i);
-              std::copy_n(ptr_src_idx + j, count, ptr_src_selected_tid);
-              ptr_idx_selected_tid += count;
-              ptr_src_selected_tid += count;
-            }
-        });
+              for (const auto i : c10::irange(start, end)) {
+                const auto idx_val = *ptr_idx_tid++;
+                // skip if idx_val is not in the intersection
+                if (!ptr_intersection_counts[idx_val])
+                  continue;
+                const auto count = ptr_src_counts[idx_val];
+                const auto j = ptr_src_idx_offsets[idx_val];
+                std::fill_n(ptr_idx_selected_tid, count, i);
+                std::copy_n(ptr_src_idx + j, count, ptr_src_selected_tid);
+                ptr_idx_selected_tid += count;
+                ptr_src_selected_tid += count;
+              }
+            });
 
         return std::make_tuple(idx_selected, src_selected);
       }();
@@ -3598,7 +3640,7 @@ std::vector<Tensor> meshgrid(TensorList tensors) {
 }
 
 std::vector<Tensor> meshgrid(TensorList tensors,
-                             c10::string_view indexing) {
+                             std::string_view indexing) {
   int64_t size = tensors.size();
   TORCH_CHECK(size > 0, "meshgrid expects a non-empty TensorList");
 
@@ -3776,6 +3818,7 @@ Tensor unfold(const Tensor& self, int64_t d, int64_t size, int64_t step) {
   auto sizes = self.sizes().vec();
   auto strides = self.strides().vec();
   int64_t max_size = self.dim() == 0 ? 1 : sizes[d];
+  TORCH_CHECK(size >= 0, "size is ", size, " but must be >= 0");
   TORCH_CHECK(size <= max_size, "maximum size for tensor at dimension ", d,
                                 " is ", max_size, " but size is ", size);
   TORCH_CHECK(step > 0, "step is ", step, " but must be > 0");

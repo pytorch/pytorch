@@ -17,6 +17,8 @@ from ...ir import (
     Layout,
     ReinterpretView,
 )
+from ...utils import is_dynamic
+from ...virtualized import V
 from ..common import IndentedBuffer
 from . import cutlass_utils
 from .cuda_kernel import CUDATemplateKernel
@@ -33,12 +35,9 @@ GEMM_TEMPLATE_CUTLASS_3X = r"""
 // When workspace_size is not a nullptr, populates requested workspace_size and returns.
 // Otherwise, computes the Gemm kernel using the given workspace ptr.
 extern "C" {
-{{kernel_call_signature}} {
+PT_EXPORT {{kernel_call_signature}} {
   try {
   int64_t B = {{kernel.size(Y, 0, -3, default_value=1)}};
-  int64_t M = {{kernel.size(X, -2)}};
-  int64_t K = {{kernel.size(X, -1)}};
-  int64_t N = {{kernel.size(W, -1)}};
   using ElementComputeEpilogue = {{instance_type}}::ElementAccumulator;
   using coord_t = cutlass::gemm::GemmCoord::Index;
   static cutlass::KernelHardwareInfo hw_info;
@@ -56,10 +55,6 @@ extern "C" {
   }
   // check for null pointers after workspace size, since querying workspace size doesn't require valid data pointers
 #ifndef CUTLASS_BACKEND_DISABLE_CHECKS
-  {{kernel.check_not_null(X)}}
-  {{kernel.check_not_null(W)}}
-  {{kernel.check_not_null(Bias)}}
-  {{kernel.check_not_null(Y)}}
   {
     auto status = gemm_op.can_implement(arguments);
     CUTLASS_CHECK(status);
@@ -154,7 +149,7 @@ GEMM_TEMPLATE_CUTLASS_2X = r"""
 // When workspace_size is not a nullptr, populates requested workspace_size and returns.
 // Otherwise, computes the Gemm kernel using the given workspace ptr.
 extern "C" {
-{{kernel_call_signature}} {
+PT_EXPORT {{kernel_call_signature}} {
   try {
   int64_t B = {{kernel.size(Y, 0, -3, default_value=1)}};
   int64_t M = {{kernel.size(X, -2)}};
@@ -505,9 +500,10 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
         """
 
         ops = self.gen_ops()
-        for op in ops:
+        for name, op in ops:
             self.maybe_append_choice(
                 choices,
+                description=name,
                 op=op,
             )
         if len(ops) == 0:
@@ -550,7 +546,9 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
                 #include "cutlass/util/tensor_view_io.h"
             """
         )
-        if inductor_cuda_config.generate_test_runner:
+        if inductor_cuda_config.generate_test_runner and not is_dynamic(
+            *self.input_nodes, self.output_node
+        ):
             res.splice(GEMM_STANDALONE_RUNNER_ADDITIONAL_INCLUDES)
         return res
 
@@ -570,9 +568,9 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
         assert cutlass_utils.try_import_cutlass()
         import cutlass_library.library as cutlass_lib
 
-        if torch_layout.stride[-1] == 1:
+        if V.graph.sizevars.statically_known_equals(torch_layout.stride[-1], 1):
             return cutlass_lib.LayoutType.RowMajor
-        elif torch_layout.stride[-2] == 1:
+        elif V.graph.sizevars.statically_known_equals(torch_layout.stride[-2], 1):
             return cutlass_lib.LayoutType.ColumnMajor
         else:
             return None
@@ -809,7 +807,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
 
         return op
 
-    def gen_ops(self) -> "List[cutlass_gemm_op.GemmOperation]":  # type: ignore[name-defined]  # noqa: F821
+    def gen_ops(self) -> "List[Tuple[str, cutlass_gemm_op.GemmOperation]]":  # type: ignore[name-defined]  # noqa: F821
         """
         Creates a list of Cutlass GemmOperation instances that match the operation this template is designed to represent.
         The matching is carried out with respect to the input and output specifications of the operation.
@@ -817,8 +815,8 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
         No function arguments.
 
         Returns:
-            List[cutlass_gemm_op.GemmOperation]: A list of GemmOperation instances that are compatible with the
-            operation requirements of this template.
+            List[Tuple[str, cutlass_gemm_op.GemmOperation]]: A list of (cutlass_name, GemmOperation)
+            tuples that are compatible with the operation requirements of this template.
         """
         assert cutlass_utils.try_import_cutlass()
         import cutlass_library.gemm_operation as cutlass_gemm_op
@@ -837,7 +835,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
                     ):
                         res[filter_res.configuration_name()] = filter_res
         log.debug("Got cutlass configs: total number of ops: %d, ", len(res))
-        return list(res.values())[: inductor_cuda_config.cutlass_max_profiling_configs]
+        return list(res.items())[: inductor_cuda_config.cutlass_max_profiling_configs]
 
     def gemm_mode(self) -> str:
         """
@@ -892,8 +890,11 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
 
         assert len(self.input_nodes) >= 2 and self.output_node is not None
         X, W = self.input_nodes[0], self.input_nodes[1]
-        assert isinstance(X.layout, FixedLayout), "X.layout is not fixed"
-        assert isinstance(W.layout, FixedLayout), "W.layout is not fixed"
+        if not isinstance(X.layout, FixedLayout):
+            raise NotImplementedError("X.layout is not fixed")
+        if not isinstance(W.layout, FixedLayout):
+            raise NotImplementedError("W.layout is not fixed")
+
         Y = self.output_node
         if template_buffer_node is not None:
             Y = template_buffer_node
@@ -963,7 +964,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
         )
         options.update(dict(zip(extra_names, extra_inputs)))
         res = self._template_from_string(self._get_template()).render(**options)
-        if inductor_cuda_config.generate_test_runner:
+        if inductor_cuda_config.generate_test_runner and not is_dynamic(X, W, Y, Bias):
             test_runner_code = self._template_from_string(
                 GEMM_STANDALONE_RUNNER_TEMPLATE
             ).render(**options)
@@ -1075,8 +1076,8 @@ class CUTLASS3xGemmTemplate(CUTLASSGemmTemplate):
             return False
         if len(B_layout.size) < 1:
             return False
-        A_size = [int(i) for i in A_layout.size]
-        B_size = [int(i) for i in B_layout.size]
+        A_size = list(V.graph.sizevars.size_hints(A_layout.size))
+        B_size = list(V.graph.sizevars.size_hints(B_layout.size))
         if len(A_size) < 2:
             A_size.insert(0, 1)
         if len(B_size) < 2:
@@ -1130,7 +1131,7 @@ class CUTLASS3xGemmTemplate(CUTLASSGemmTemplate):
         op: "cutlass_library.gemm_op.GemmOperation",  # type: ignore[name-defined]  # noqa: F821
     ) -> bool:
         X, W = self.input_nodes[0], self.input_nodes[1]
-        return X.layout.size[1] == W.layout.size[0]
+        return X.get_size()[1] == W.get_size()[0]
 
     def _alignment_match(
         self,
@@ -1268,16 +1269,17 @@ class CUTLASS3xGemmTemplate(CUTLASSGemmTemplate):
             # Swap
             def clone_with_transposed_stride(node: IRNode) -> IRNode:
                 old_layout = node.get_layout()
-                new_stride = list(old_layout.stride)
+                new_stride = list(old_layout.stride)  # type: ignore[union-attr]
                 new_stride[-2], new_stride[-1] = new_stride[-1], new_stride[-2]
+                assert old_layout.device is not None
                 new_layout = FixedLayout(
                     old_layout.device,
                     old_layout.dtype,
-                    list(old_layout.size),
+                    list(old_layout.size),  # type: ignore[union-attr]
                     new_stride,
-                    old_layout.offset,
+                    old_layout.offset,  # type: ignore[union-attr]
                 )
-                return Buffer(node.get_name(), new_layout)
+                return Buffer(name=node.get_name(), layout=new_layout)
 
             new_X = clone_with_transposed_stride(X)
             new_W = clone_with_transposed_stride(W)
@@ -1391,9 +1393,9 @@ class CUTLASS2xGemmTemplate(CUTLASSGemmTemplate):
         X, W = self.input_nodes[0], self.input_nodes[1]
 
         if op.gemm_kind == cutlass_lib.GemmKind.Sparse:
-            return X.layout.size[1] * 2 == W.layout.size[0]
+            return X.get_size()[1] * 2 == W.get_size()[0]
 
-        return X.layout.size[1] == W.layout.size[0]
+        return X.get_size()[1] == W.get_size()[0]
 
     def _alignment_match(
         self,
@@ -1410,7 +1412,7 @@ class CUTLASS2xGemmTemplate(CUTLASSGemmTemplate):
         # https://github.com/NVIDIA/cutlass/blob/e01b9b5029b7caca5a43c29f7d2714d7cf1dcae8/include/cutlass/gemm/kernel/sparse_gemm.h#L198-L200  # noqa: B950
         # So, let's skip these choices if that would be the case.
         X = self.input_nodes[0]
-        return (X.layout.size[1] * 2) % op.tile_description.tile_shape[2] == 0
+        return (X.get_size()[1] * 2) % op.tile_description.tile_shape[2] == 0
 
     def _set_bias_layout_and_alignment(
         self,

@@ -271,9 +271,9 @@ struct VecConvert<
     1,
     int64_t,
     2,
-    typename std::enable_if<
+    std::enable_if_t<
         std::is_same_v<dst_t, int8_t> ||
-        std::is_same_v<dst_t, uint8_t>>::type> {
+        std::is_same_v<dst_t, uint8_t>>> {
   static inline VectorizedN<dst_t, 1> apply(
       const VectorizedN<int64_t, 2>& src) {
     return VecConvert<dst_t, 1, int32_t, 1>::apply(
@@ -284,7 +284,7 @@ struct VecConvert<
 #endif /* defined(CPU_CAPABILITY_AVX2) && !defined(_MSC_VER) */
 
 
-#if (defined(CPU_CAPABILITY_AVX2) && !defined(_MSC_VER)) || defined(CPU_CAPABILITY_NEON)
+#if (defined(CPU_CAPABILITY_AVX2) && !defined(_MSC_VER))
 template <typename src_t>
 struct VecConvert<
     float,
@@ -295,24 +295,6 @@ struct VecConvert<
         void>> {
   static inline VectorizedN<float, 1> apply(const VectorizedN<src_t, 1>& src) {
     return convert_int8_to_float<src_t>(src[0]);
-  }
-};
-#endif
-
-#if defined(CPU_CAPABILITY_NEON)
-template <>
-struct VecConvert<float, 1, BFloat16, 1> {
-  static inline VectorizedN<float, 1> apply(
-      const VectorizedN<BFloat16, 1>& src) {
-    VectorizedN<float, 1> result;
-    uint16x8_t u16_8 = vld1q_u16(reinterpret_cast<const uint16_t*>(&src[0]));
-    int32x4_t shift = vdupq_n_s32(16);
-    auto u16_low1 = vget_low_u16(u16_8);
-    auto u16_high1 = vget_high_u16(u16_8);
-    float32x4_t f32x4_0 = vreinterpretq_f32_u32(vshlq_u32(vmovl_u16(u16_low1), shift));
-    float32x4_t f32x4_1 = vreinterpretq_f32_u32(vshlq_u32(vmovl_u16(u16_high1), shift));
-    result[0] = {f32x4_0, f32x4_1};
-    return result;
   }
 };
 #endif

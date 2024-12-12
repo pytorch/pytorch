@@ -4,19 +4,14 @@ import sys
 
 import torch
 from torch import distributed as dist
-from torch.distributed.checkpoint import (
-    FileSystemReader,
-    FileSystemWriter,
-    load_state_dict,
-    save_state_dict,
-)
+from torch.distributed.checkpoint import FileSystemReader, FileSystemWriter, load, save
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP, StateDictType
 from torch.distributed.fsdp.fully_sharded_data_parallel import FullyShardedDataParallel
 from torch.distributed.fsdp.wrap import enable_wrap, wrap
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import FSDPTest, SkipModel
 from torch.testing._internal.common_utils import (
-    instantiate_parametrized_tests,
     parametrize,
     run_tests,
     TEST_WITH_DEV_DBG_ASAN,
@@ -71,13 +66,13 @@ class TestDistributedCheckpoint(FSDPTest):
         ):
             state_dict = model.state_dict()
 
-        save_state_dict(state_dict, writer)
+        save(state_dict, writer)
 
         with FSDP.state_dict_type(model, state_dict_type), FSDP.state_dict_type(
             new_model, state_dict_type
         ):
             state_dict = new_model.state_dict()
-            load_state_dict(state_dict, reader)
+            load(state_dict, reader)
             new_model.load_state_dict(state_dict)
 
         with FullyShardedDataParallel.summon_full_params(
@@ -90,7 +85,7 @@ class TestDistributedCheckpoint(FSDPTest):
         # TODO: add resharding test case.
 
 
-instantiate_parametrized_tests(TestDistributedCheckpoint)
-
+devices = ("cuda", "hpu")
+instantiate_device_type_tests(TestDistributedCheckpoint, globals(), only_for=devices)
 if __name__ == "__main__":
     run_tests()

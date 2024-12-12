@@ -5,7 +5,7 @@ import os
 import re
 from collections import Counter, defaultdict, namedtuple
 from pathlib import Path
-from typing import Sequence
+from typing import TYPE_CHECKING
 
 import yaml
 
@@ -26,6 +26,10 @@ from torchgen.model import (
 from torchgen.selective_build.selector import SelectiveBuilder
 from torchgen.utils import concatMap, context, FileManager, NamespaceHelper, Target
 from torchgen.yaml_utils import YamlLoader
+
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 
 # Parses the external backend's yaml, and adds a new BackendIndex for the backend's dispatch key.
@@ -460,7 +464,7 @@ def gen_dispatcher_registrations(
             """\
 TORCH_LIBRARY_IMPL(aten, $dispatch_key, m) {
     $dispatch_registrations_body
-};"""
+}"""
         )
         static_init_dispatch_registrations = static_template.substitute(
             dispatch_key=dispatch_key,

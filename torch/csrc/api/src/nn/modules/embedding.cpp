@@ -4,30 +4,26 @@
 #include <torch/types.h>
 #include <torch/utils.h>
 
-#include <cstddef>
 #include <ostream>
 #include <utility>
-#include <vector>
 
 namespace F = torch::nn::functional;
 
-namespace torch {
-namespace nn {
+namespace torch::nn {
 EmbeddingImpl::EmbeddingImpl(EmbeddingOptions options_)
     : options(std::move(options_)) {
-  // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.VirtualCall)
-  reset();
+  EmbeddingImpl::reset();
 }
 
 void EmbeddingImpl::reset() {
-  if (options.padding_idx() != std::nullopt) {
-    if (*options.padding_idx() > 0) {
+  if (options.padding_idx().has_value()) {
+    if (options.padding_idx() > 0) {
       TORCH_CHECK(
-          *options.padding_idx() < options.num_embeddings(),
+          options.padding_idx() < options.num_embeddings(),
           "Padding_idx must be within num_embeddings");
-    } else if (*options.padding_idx() < 0) {
+    } else if (options.padding_idx() < 0) {
       TORCH_CHECK(
-          *options.padding_idx() >= -options.num_embeddings(),
+          options.padding_idx() >= -options.num_embeddings(),
           "Padding_idx must be within num_embedding");
       options.padding_idx(options.num_embeddings() + *options.padding_idx());
     }
@@ -179,5 +175,4 @@ void EmbeddingBagImpl::pretty_print(std::ostream& stream) const {
   }
   stream << ")";
 }
-} // namespace nn
-} // namespace torch
+} // namespace torch::nn

@@ -82,10 +82,10 @@ class ExperimentResults:
     @classmethod
     def get_entry_names(cls) -> List[str]:
         return [
-            "nn_mha_time (\u00B5s)",
-            "compiled_nn_mha_time (\u00B5s)",
-            "composite_mha_time (\u00B5s)",
-            "compiled_composite_mha_time (\u00B5s)",
+            "nn_mha_time (\u00b5s)",
+            "compiled_nn_mha_time (\u00b5s)",
+            "composite_mha_time (\u00b5s)",
+            "compiled_composite_mha_time (\u00b5s)",
         ]
 
 
@@ -211,7 +211,7 @@ def run_single_experiment(config: ExperimentConfig) -> ExperimentResults:
         enable_flash=config.enable_flash,
         enable_mem_efficient=config.enable_mem_efficient,
         enable_cudnn=config.enable_cudnn,
-    ) as kernel_choice, torch.inference_mode() as inference_mode:
+    ):
         dropout_p = 0.0
         mask = None
 
