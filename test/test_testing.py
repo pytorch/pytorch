@@ -588,7 +588,7 @@ class TestAssertClose(TestCase):
             with self.assertRaisesRegex(AssertionError, "shape"):
                 fn()
 
-    @unittest.skipIf(not torch.backends.mkldnn.is_available(), reason="MKLDNN is not available.")
+    @unittest.skipIf(not torch.backends.onednn.is_available(), reason="MKLDNN is not available.")
     def test_unknown_layout(self):
         actual = torch.empty((2, 2))
         expected = actual.to_mkldnn()

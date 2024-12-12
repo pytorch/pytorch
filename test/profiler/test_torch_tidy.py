@@ -637,7 +637,7 @@ class TestTorchTidyProfiler(TestCase):
         )
 
     @unittest.skipIf(
-        not torch.backends.mkldnn.is_available(), "MKL-DNN build is disabled"
+        not torch.backends.onednn.is_available(), "MKL-DNN build is disabled"
     )
     def test_mkldnn_tensors(self):
         x = torch.ones(4, 3).to_mkldnn()
