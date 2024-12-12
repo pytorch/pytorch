@@ -1064,63 +1064,63 @@ class WhileLoopHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 for carry in operands_seq
             ]
 
-            # create cond subgrpahs
-            (
-                (cond_r, cond_treespec),
-                cond_graph,
-                cond_lifted_freevars,
-            ) = speculate_subgraph(
-                tx,
-                cond_fn,
-                new_operands_seq + additional_inputs_seq,
-                {},
-                "while_loop",
-                source_target=self.value,
-                # NOTE [why we cannot use "automatic" for while_loop]:
-                # The reason is that we want to enforce
-                # the ordering of inputs and outputs to be consistent and the the ordering
-                # of cond_fn and body_fn to the consistent.
-                # e.g. suppose we use "automatic" and we have:
-                #
-                # def body_fn(ph1, ph2):
-                #   new_a, new_b = ph2.cos(), ph1.sin()
-                #   return new_a, new_b
-                #
-                # a, b = torch.randn(3), torch.randn(3)
-                # new_a, new_b = body_fn(a, b)
-                #
-                # Using automatic, the ordering of arguments will be the order that they're
-                # used. In this example, the capture graph looks like:
-                #
-                # def captured_body(ph1, ph2):
-                #   new_a, new_b = ph1.cos(), ph2.add_(1)
-                #   return new_a, new_b
-                #
-                # This is fine when we change the calling convention of captured_body to be
-                # new_a, new_b = captured_body(b, a).
-                # But for while_loop, the next iteration's input is previous iteration output
-                # we'll end up feeding captured_body(new_a, new_b) instead.
-                # So it's best we always enforce the ordering of carried_inputs the same as outputs
-                # with "flatten_manual".
-                set_subgraph_inputs="flatten_manual",
-            )
-            cond_nn_modules = dict(tx.output.nn_modules)
-            # create body subgraph
-            (
-                (body_r, body_treespec),
-                body_graph,
-                body_lifted_freevars,
-            ) = speculate_subgraph(
-                tx,
-                body_fn,
-                new_operands_seq + additional_inputs_seq,
-                {},
-                "while_loop",
-                source_target=self.value,
-                set_subgraph_inputs="flatten_manual",
-                should_flatten_outputs=True,
-            )
-            body_nn_modules = dict(tx.output.nn_modules)
+        # create cond subgrpahs
+        (
+            (cond_r, cond_treespec),
+            cond_graph,
+            cond_lifted_freevars,
+        ) = speculate_subgraph(
+            tx,
+            cond_fn,
+            new_operands_seq + additional_inputs_seq,
+            {},
+            "while_loop",
+            source_target=self.value,
+            # NOTE [why we cannot use "automatic" for while_loop]:
+            # The reason is that we want to enforce
+            # the ordering of inputs and outputs to be consistent and the the ordering
+            # of cond_fn and body_fn to the consistent.
+            # e.g. suppose we use "automatic" and we have:
+            #
+            # def body_fn(ph1, ph2):
+            #   new_a, new_b = ph2.cos(), ph1.sin()
+            #   return new_a, new_b
+            #
+            # a, b = torch.randn(3), torch.randn(3)
+            # new_a, new_b = body_fn(a, b)
+            #
+            # Using automatic, the ordering of arguments will be the order that they're
+            # used. In this example, the capture graph looks like:
+            #
+            # def captured_body(ph1, ph2):
+            #   new_a, new_b = ph1.cos(), ph2.add_(1)
+            #   return new_a, new_b
+            #
+            # This is fine when we change the calling convention of captured_body to be
+            # new_a, new_b = captured_body(b, a).
+            # But for while_loop, the next iteration's input is previous iteration output
+            # we'll end up feeding captured_body(new_a, new_b) instead.
+            # So it's best we always enforce the ordering of carried_inputs the same as outputs
+            # with "flatten_manual".
+            set_subgraph_inputs="flatten_manual",
+        )
+        cond_nn_modules = dict(tx.output.nn_modules)
+        # create body subgraph
+        (
+            (body_r, body_treespec),
+            body_graph,
+            body_lifted_freevars,
+        ) = speculate_subgraph(
+            tx,
+            body_fn,
+            new_operands_seq + additional_inputs_seq,
+            {},
+            "while_loop",
+            source_target=self.value,
+            set_subgraph_inputs="flatten_manual",
+            should_flatten_outputs=True,
+        )
+        body_nn_modules = dict(tx.output.nn_modules)
 
         validate_subgraph_output_types(cond_r)
         validate_subgraph_output_types(body_r)
