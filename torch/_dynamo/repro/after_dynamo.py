@@ -451,11 +451,13 @@ def repro_run(options, mod, load_args):
     else:
         with torch.amp.autocast("cuda", enabled=options.autocast):
             args = run_load_args(options, mod, load_args)
-            run_fwd_maybe_bwd(mod, args, only_fwd=options.only_fwd, disable_clone=True)
+            ref = run_fwd_maybe_bwd(
+                mod, args, only_fwd=options.only_fwd, disable_clone=True
+            )
             del args
 
             args = run_load_args(options, mod, load_args)
-            run_fwd_maybe_bwd(
+            res = run_fwd_maybe_bwd(
                 opt_mod, args, only_fwd=options.only_fwd, disable_clone=True
             )
 

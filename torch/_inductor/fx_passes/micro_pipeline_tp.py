@@ -524,6 +524,7 @@ def fuse_all_gather_matmul(all_gather: _AllGatherMatch) -> None:
     ):
         return
 
+    c10d = torch.ops._c10d_functional
     from torch.distributed._symmetric_memory import (
         is_symm_mem_enabled_for_group,
         restride_A_shard_for_fused_all_gather_matmul,
@@ -682,12 +683,13 @@ def fuse_matmul_reduce_scatter(reduce_scatter: _ReduceScatterMatch) -> None:
     ):
         return
 
+    c10d = torch.ops._c10d_functional
     from torch.distributed._symmetric_memory import (
         is_symm_mem_enabled_for_group,
         restride_A_for_fused_matmul_reduce_scatter,
     )
 
-    input_node, _rs_node, rs_res_node, reduce_op, scatter_dim, group_name = (
+    input_node, rs_node, rs_res_node, reduce_op, scatter_dim, group_name = (
         reduce_scatter.input_node,
         reduce_scatter.rs_node,
         reduce_scatter.res_node,

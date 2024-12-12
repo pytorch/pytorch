@@ -428,7 +428,12 @@ class BaseSchedulerNode:
             and hasattr(V.kernel, "args")
         ):
             return
+        fused_nodes = {
+            node.get_name()
+            for node in self.scheduler.name_to_fused_node[self.get_name()].get_nodes()
+        }
 
+        ordered_reads = sorted(self.read_writes.reads, key=lambda x: x.name)
         # NOTE remove V.graph.removed_operations once deps issue is fixed
         inconsequential_nodes = (
             self.ancestors
@@ -551,35 +556,6 @@ class BaseSchedulerNode:
 
     @cache_on_self
     def get_read_write_buffers_sizes(self) -> int:
-        return self.get_read_write_buffers_sizes_impl(
-            include_reads=True, include_writes=True
-        )
-
-    @cache_on_self
-    def get_read_buffer_sizes(self) -> int:
-        return self.get_read_write_buffers_sizes_impl(
-            include_reads=True, include_writes=False
-        )
-
-    @cache_on_self
-    def get_write_buffer_sizes(self) -> int:
-        return self.get_read_write_buffers_sizes_impl(
-            include_reads=False, include_writes=True
-        )
-
-    def get_read_write_buffers_sizes_impl(
-        self, include_reads: bool, include_writes: bool
-    ) -> int:
-        return sum(
-            self.get_read_write_buffer_accesses(
-                include_reads=include_reads, include_writes=include_writes
-            ).values(),
-            start=0,
-        )
-
-    def get_read_write_buffer_accesses(
-        self, include_reads: bool, include_writes: bool
-    ) -> Dict[str, int]:
         """
         Counting the number of bytes accessed for a kernel is
         surprisingly tricky. In particular, there is a differentiation
@@ -601,16 +577,14 @@ class BaseSchedulerNode:
 
         1. Numel in ranges multiplied by number of deps the buffer has
         2. The buffer size
-
-        Returns memory accesses per buffer.
         """
         if isinstance(self, NopKernelSchedulerNode):
-            return {}
+            return 0
         if isinstance(self, ExternKernelSchedulerNode) and isinstance(
             self.node, MultiOutput
         ):
             # todo: Calculate this - it's kinda annoying.
-            return {}
+            return 0
 
         def try_size_hint(s: sympy.Expr) -> int:
             return V.graph.sizevars.size_hint(s, fallback=0)
@@ -623,25 +597,11 @@ class BaseSchedulerNode:
         else:
             node_numel = int(1e9)
         buf_accesses = collections.defaultdict(list)
+        for dep in self.read_writes.reads | self.read_writes.writes:
+            buf_accesses[dep.name].append(dep)
 
-        if include_reads:
-            for dep in self.read_writes.reads:
-                buf_accesses[dep.name].append(dep)
-
-        if include_writes:
-            for dep in self.read_writes.writes:
-                buf_accesses[dep.name].append(dep)
-
-        reads = (
-            OrderedSet(dep.name for dep in self.read_writes.reads)
-            if include_reads
-            else OrderedSet()
-        )
-        writes = (
-            OrderedSet(dep.name for dep in self.read_writes.writes)
-            if include_writes
-            else OrderedSet()
-        )
+        reads = OrderedSet(dep.name for dep in self.read_writes.reads)
+        writes = OrderedSet(dep.name for dep in self.read_writes.writes)
 
         def is_materialized(buf: str, snodes: Sequence[BaseSchedulerNode]) -> bool:
             users = self.scheduler.name_to_buf[buf].users
@@ -654,8 +614,7 @@ class BaseSchedulerNode:
             )
             writes = writes - removed_buffers
             reads = reads - removed_buffers
-
-        buf_byte_accesses: Dict[str, int] = {}
+        node_bytes = 0
 
         for buf_name in reads | writes:
             buf_accessed_elems = sum(node_numel for dep in buf_accesses[buf_name])
@@ -697,13 +656,9 @@ class BaseSchedulerNode:
                         buf_accessed_elems, buf_elems
                     )
 
-            buf_bytes = get_buf_bytes(buf)
-            if buf_name not in buf_byte_accesses:
-                buf_byte_accesses[buf_name] = buf_bytes
-            else:
-                buf_byte_accesses[buf_name] += buf_bytes
+            node_bytes += get_buf_bytes(buf)
 
-        return buf_byte_accesses
+        return node_bytes
 
     @cache_on_self
     def get_estimated_runtime(self) -> float:
@@ -800,25 +755,6 @@ class BaseSchedulerNode:
 
     def get_template_node(self) -> Optional[ir.TemplateBuffer]:
         return None
-
-    def get_template_node_or_throw(self) -> ir.TemplateBuffer:
-        template = self.get_template_node()
-        assert template is not None
-        return template
-
-    @staticmethod
-    def get_prologue_template_epilogue(
-        nodes: List[BaseSchedulerNode],
-    ) -> Tuple[List[BaseSchedulerNode], BaseSchedulerNode, List[BaseSchedulerNode]]:
-        """
-        For the list of nodes, get the prologue, template, and epilogue
-        """
-        template_index = next(i for i, n in enumerate(nodes) if n.is_template())
-
-        prologue = nodes[:template_index]
-        template_node = nodes[template_index]
-        epilogue = nodes[template_index + 1 :]
-        return prologue, template_node, epilogue
 
 
 class WhyNoFuse:
@@ -2575,10 +2511,8 @@ class Scheduler:
         Otherwise, return True if fusion can brings speedup.
         """
 
-        is_multi_template = any(
-            n.is_template()
-            and isinstance(n.get_template_node(), ir.MultiTemplateBuffer)
-            for n in (node1, node2)
+        is_multi_template = node1.is_template() and isinstance(
+            node1.get_template_node(), ir.MultiTemplateBuffer
         )
         if not config.benchmark_fusion and not is_multi_template:
             return True
@@ -2630,28 +2564,20 @@ class Scheduler:
                         red_text(f"{ms_fused / (ms1 + ms2):.3f}"),
                     )
 
-        # After the succesful fusion with Template, we finalize its config.
-        # Subsequently we benchmark but dont update. Checking for SchedulerNode, instead of FusedSchedulerNode
-        # accomplishes this.
-        if is_multi_template and any(
-            n.get_template_node() is not None and isinstance(n, SchedulerNode)
-            for n in (node1, node2)
+        if isinstance(node1, SchedulerNode) and isinstance(
+            node1.node, ir.MultiTemplateBuffer
         ):
-            epilogue_fusion = node1.get_template_node() is not None
-
-            multi_node = node1.node if epilogue_fusion else node2.node
-            assert isinstance(multi_node, ir.MultiTemplateBuffer)
+            multi_node = node1.node
             choice_timings = multi_node.choice_timings
+
             _, ms1 = multi_node.get_min_choice()
-
-            non_template_nodes = node_list_2 if epilogue_fusion else node_list_1
-
-            ms2, path2 = self.benchmark_fused_nodes(non_template_nodes)
+            ms2, path2 = self.benchmark_fused_nodes(node_list_2)
 
             min_ms_fused = float("inf")
             ms_fused_choice = None
 
             triton_choices = 0
+
             for choice, unfused_time in sorted(
                 choice_timings.items(), key=lambda x: x[1]
             ):
@@ -2667,8 +2593,8 @@ class Scheduler:
 
                 # TODO - parallel compile triton templates
                 # TODO - should prune/skip choices that are not within certain % of best choice
-                with multi_node.swap_as_triton_caller(choice):
-                    ms_fused, path = self.benchmark_fused_nodes(node_list_fused)
+                with node1.node.swap_as_triton_caller(choice):
+                    ms_fused, _ = self.benchmark_fused_nodes(node_list_fused)
 
                     if ms_fused < min_ms_fused:
                         min_ms_fused = ms_fused
@@ -2679,7 +2605,7 @@ class Scheduler:
             # after we do a fusion, we finalize a triton template.
             # TODO - could preserve multi template and choices for subsequent fusions
             if min_ms_fused < (ms1 + ms2) and ms_fused_choice is not None:
-                multi_node.finalize_as_triton_caller(ms_fused_choice)
+                node1.node.finalize_as_triton_caller(ms_fused_choice)
                 return True
             else:
                 return False
@@ -3103,7 +3029,7 @@ class Scheduler:
             return 0
 
         # Pick the largest buffer to guide the loop reordering
-        _numel, lhs_dep, rhs_dep = max(candidates, key=lambda x: x[0])
+        numel, lhs_dep, rhs_dep = max(candidates, key=lambda x: x[0])
 
         if lhs_dep.num_vars != rhs_dep.num_vars:
             # this can happen due to we don't merge loops.
@@ -3171,98 +3097,8 @@ class Scheduler:
             return False
 
         if node2.is_template():
-            if not config.prologue_fusion:
-                why("prologue fusion turned off")
-                return False
-
-            if node1.is_reduction() or node1.is_template():
-                why("prologue fusion only supported for pointwise nodes")
-                return False
-
-            template = node2.get_template_node_or_throw()
-            if not isinstance(template, ir.TritonTemplateBuffer):
-                why("prologue fusion only supported for TritonTemplates")
-                return False
-
-            allowed_prologue_inps = template.get_allowed_prologue_inps()
-
-            unsupported_prologue_args = (
-                OrderedSet(inp.get_name() for inp in template.inputs)
-                - allowed_prologue_inps
-            )
-
-            if node1.get_buffer_names() & unsupported_prologue_args:
-                why("prologue fusion not implemented for kernel for these inputs")
-                return False
-
-            if node1.has_aliasing_or_mutation() or node1.has_aliasing_or_mutation():
-                why("template prologue can only fuse functional pointwise nodes")
-                return False
-
-            prologue_nodes = node1.get_nodes()
-            for node in prologue_nodes[:-1]:
-                node_outs = node.get_outputs()
-                for out in node_outs:
-                    if not all(user.node in prologue_nodes for user in out.users):
-                        why("template prologue can only fuse nodes with a single use")
-                        return False
-
-            template_snodes = (
-                [node2]
-                if not isinstance(node2, FusedSchedulerNode)
-                else [n for n in node2.snodes if n.is_template()]
-            )
-            assert len(template_snodes) == 1
-            template_snode = template_snodes[0]
-
-            if not (
-                len(prologue_nodes[-1].outputs) == 1
-                and len(prologue_nodes[-1].outputs[0].users) == 1
-                and prologue_nodes[-1].outputs[0].users[0].node is template_snode
-            ):
-                why(
-                    "template prologue can only fuse nodes with a single use into template"
-                )
-                return False
-
-            read_bytes = node1.get_read_buffer_sizes()
-            write_bytes = node1.get_write_buffer_sizes()
-
-            # Initially, only do fusions which will result in fewer memory accesses inside of the template to avoid
-            # potential bad cache behavior and shared memory use.
-            # we also want to avoid benchmarking reliably unprofitable fusions like downcasts from fp32 -> fp16 inside kernel.
-            # allowing gathers by allowing increasing write_bytes by small factor
-            # TODO - make configurable per input, for insance, bias can fuse fp32 -> fp16 profitably
-
-            BYTES_THRESHOLD_MULTIPLIER = 1.1
-            if read_bytes > (write_bytes * BYTES_THRESHOLD_MULTIPLIER):
-                why("prologue fusion will not increase amount of bytes read in kernel")
-                return False
-
-            unaligned_reads = 0
-            unaligned_writes = 0
-
-            buf_accesses = node1.get_read_write_buffer_accesses(
-                include_reads=True, include_writes=True
-            )
-            for buf_name, mem in buf_accesses.items():
-                aligned = ir.is_aligned_realized_tensor(
-                    V.graph.get_buffer(buf_name), alignment=8
-                )
-                if aligned:
-                    continue
-
-                if buf_name in node1.get_buffer_names():
-                    unaligned_writes += mem
-                else:
-                    unaligned_reads += mem
-
-            if unaligned_reads >= (unaligned_writes * BYTES_THRESHOLD_MULTIPLIER):
-                why(
-                    "prologue fusion will not increase amount of unaligned bytes read in kernel"
-                )
-                return False
-
+            why("templates can only fuse epilogues")
+            return False
         if node1.is_template() and (
             node2.has_aliasing_or_mutation()
             or node2.is_reduction()
@@ -3670,7 +3506,7 @@ class Scheduler:
                         node.get_name(),
                         node.get_estimated_runtime(),
                     )
-                except Exception:
+                except Exception as e:
                     log.debug(
                         "Generating code for node %s with estimated runtime 0.0",
                         node.get_name(),
@@ -3698,12 +3534,8 @@ class Scheduler:
             self.buffer_names_to_free.update(node.last_usage)
 
             if node.is_template():
-                prologue, template_node, epilogue = node.get_prologue_template_epilogue(
-                    list(node.get_nodes())
-                )
-                self.get_backend(device).codegen_template(
-                    template_node, epilogue, prologue
-                )
+                node, *epilogue = node.get_nodes()
+                self.get_backend(device).codegen_template(node, epilogue)
             elif node.is_extern():
                 node = typing.cast(ExternKernelSchedulerNode, node)
                 self.codegen_extern_call(node)
@@ -3804,7 +3636,7 @@ class Scheduler:
             path1_list.append(path)
 
         try:
-            ms2, ms2_clone, _path2_list = self.benchmark_combo_kernel(subkernel_nodes)
+            ms2, ms2_clone, path2_list = self.benchmark_combo_kernel(subkernel_nodes)
         except CompilationError as e:
             # workaround triton issue: https://github.com/openai/triton/issues/2151
             if "Loop-carried variable" in str(e):
@@ -3895,7 +3727,6 @@ class BaseScheduling:
         self,
         template_node: BaseSchedulerNode,
         epilogue_nodes: Sequence[BaseSchedulerNode],
-        prologue_nodes: Sequence[BaseSchedulerNode],
     ) -> Optional[str]:
         """
         Given a template node, generate a kernel.

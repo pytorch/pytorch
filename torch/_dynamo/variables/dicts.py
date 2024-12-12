@@ -940,7 +940,8 @@ class CustomizedDictVariable(ConstDictVariable):
 
 @functools.lru_cache(None)
 def _install_PretrainedConfig_patch():
-    import transformers
+    mod = sys.modules.get("transformers.configuration_utils")
+    assert mod is not None, "Caller is responsible for ensuring this was imported"
 
     # We need to monkeypatch transformers here, sadly.
     # TODO(voz): Upstream to transformers lib
@@ -950,9 +951,7 @@ def _install_PretrainedConfig_patch():
             return False
         return self.__dict__ == other.__dict__
 
-    transformers.configuration_utils.PretrainedConfig.__eq__ = (
-        _dynamo_overriden_transformers_eq
-    )
+    mod.PretrainedConfig.__eq__ = _dynamo_overriden_transformers_eq
 
 
 class HFPretrainedConfigVariable(VariableTracker):
@@ -1038,7 +1037,7 @@ class PythonSysModulesVariable(VariableTracker):
         return k, has_key
 
     def call_contains(self, tx: "InstructionTranslator", key: VariableTracker):
-        _k, has_key = self._contains_helper(tx, key)
+        k, has_key = self._contains_helper(tx, key)
         return ConstantVariable.create(value=has_key)
 
     def call_get(
@@ -1059,6 +1058,6 @@ class PythonSysModulesVariable(VariableTracker):
         return ConstantVariable.create(value=None)
 
     def call_getitem(self, tx: "InstructionTranslator", key: VariableTracker):
-        k, _has_key = self._contains_helper(tx, key)
+        k, has_key = self._contains_helper(tx, key)
         source = self.source and GetItemSource(self.source, k)
         return VariableTracker.build(tx, sys.modules[k], source)

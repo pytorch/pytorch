@@ -1128,6 +1128,21 @@ graph():
         ep_model = export(model, (x,), strict=False).module()
         self.assertTrue(torch.allclose(model(x), ep_model(x)))
 
+    def test_output_node_name(self):
+        class TestModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(10, 10)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        model = TestModule()
+        x = torch.randn(20, 10)
+        ep_model = export(model, (x,), strict=False).module()
+        self.assertEqual(list(ep_model.graph.nodes)[-1].name, "output")
+        self.assertTrue(torch.allclose(model(x), ep_model(x)))
+
     def test_real_tensor_size_mismatch(self):
         from torch._subclasses.fake_tensor import MetadataMismatchError
 
