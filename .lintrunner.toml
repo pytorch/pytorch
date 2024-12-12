@@ -73,6 +73,8 @@ include_patterns = [
     'aten/src/ATen/native/cudnn/*.cpp',
     'aten/src/ATen/native/mkldnn/xpu/**/*.h',
     'aten/src/ATen/native/mkldnn/xpu/**/*.cpp',
+    'aten/src/ATen/native/Tensor*.h',
+    'aten/src/ATen/native/Tensor*.cpp',
     'c10/**/*.h',
     'c10/**/*.cpp',
     'torch/csrc/**/*.h',
