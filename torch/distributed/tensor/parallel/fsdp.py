@@ -186,7 +186,7 @@ def _chunk_tensor(
             inner_param,
             rank,
             world_size,
-            torch.get_device_module().device_count(),
+            torch.accelerator.device_count(),
             pg,
         )
 
