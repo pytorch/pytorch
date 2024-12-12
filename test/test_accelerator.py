@@ -51,8 +51,8 @@ class TestAccelerator(TestCase):
         torch.accelerator.set_stream(s1)
         self.assertEqual(torch.accelerator.current_stream(), s1)
         event = torch.Event()
-        a = torch.randn(100)
-        b = torch.randn(100)
+        a = torch.randn(1000)
+        b = torch.randn(1000)
         c = a + b
         torch.accelerator.set_stream(s2)
         self.assertEqual(torch.accelerator.current_stream(), s2)
