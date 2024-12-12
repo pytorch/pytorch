@@ -2301,10 +2301,6 @@ Args:
 Keyword args:
     {out}
 
-.. note:: It is recommended to keep all `tensors` in the same dtype to avoid unintended type promotion.
-          For example, mixing `torch.int32` and `torch.int64` may result in the output being automatically
-          promoted to `torch.int64`.
-
 Example::
 
     >>> x = torch.randn(2, 3)
