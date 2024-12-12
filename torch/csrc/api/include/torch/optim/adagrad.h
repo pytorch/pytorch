@@ -41,11 +41,6 @@ struct TORCH_API AdagradParamState
   TORCH_ARG(int64_t, step) = 0;
 
  public:
-  AdagradParamState() = default;
-  AdagradParamState(const AdagradParamState&) = default;
-  AdagradParamState& operator=(const AdagradParamState&) = default;
-  AdagradParamState(AdagradParamState&&) noexcept = default;
-  AdagradParamState& operator=(AdagradParamState&&) noexcept = default;
   void serialize(torch::serialize::InputArchive& archive) override;
   void serialize(torch::serialize::OutputArchive& archive) const override;
   TORCH_API friend bool operator==(

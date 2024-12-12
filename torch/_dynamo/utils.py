@@ -418,7 +418,7 @@ def dynamo_timed(
                 dynamo_compile_runtime_column_us,
                 time_spent_ns // 1000,
                 extra={
-                    "compile_id": compile_id,
+                    "compile_id": str(compile_id),
                     "is_runtime": True,
                     "is_forward": is_forward,
                 },
@@ -915,6 +915,7 @@ class CompilationMetrics:
     cuda_version: Optional[str] = None
     triton_version: Optional[str] = None
     feature_usage: Optional[dict[str, bool]] = None
+    compile_time_autotune_time_us: Optional[int] = None
     is_runtime: Optional[bool] = False
 
 
