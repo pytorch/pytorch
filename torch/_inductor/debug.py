@@ -2,6 +2,7 @@ import collections
 import contextlib
 import dataclasses
 import functools
+import io
 import itertools
 import logging
 import os
@@ -710,3 +711,41 @@ def load_args_and_run_compile_fx_inner(path: str) -> Any:
     with fake_mode, config.patch("save_args", False):
         args, kwargs = tree_map(handle_tensor, (args, kwargs))
         return compile_fx_inner(*args, **kwargs)
+
+
+def aot_inductor_minifier_wrapper(
+    func: Callable[..., str],
+    exported_program: torch.export.ExportedProgram,
+    *,
+    inductor_configs: Dict[str, Any],
+    package_path: Optional[Union[str, io.BytesIO]] = None,
+) -> str:
+    from torch._inductor import config
+
+    use_minifier = config.aot_inductor.dump_aoti_minifier
+
+    gm = exported_program.module()
+    assert isinstance(gm, torch.fx.GraphModule)
+
+    args, kwargs = exported_program.example_inputs
+
+    try:
+        return func(
+            gm,
+            args,
+            kwargs,
+            inductor_configs=inductor_configs,
+            package_path=package_path,
+            load_and_run=use_minifier,
+        )
+    except Exception as e:
+        if use_minifier:
+            # TODO: check accuracy and re-direct to minifier
+            from torch._dynamo.repro.aoti import dump_to_minify
+
+            dump_to_minify(
+                exported_program,
+                "compile_fx_aot",
+                options=inductor_configs,
+            )
+        raise e

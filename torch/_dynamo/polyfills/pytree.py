@@ -18,7 +18,7 @@ if TYPE_CHECKING:
 __all__: list[str] = []
 
 
-if python_pytree._cxx_pytree_exists:
+if python_pytree._cxx_pytree_dynamo_traceable:
     import optree
     import optree._C
 
