@@ -2069,6 +2069,40 @@ class TestSelectAlgorithmDynamicShapes(_DynamicShapesTestBase):
         self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
         self.assertEqual(counters["inductor"]["cpp_epilogue_fusion_counter"], 1)
 
+    @patches
+    @torch.no_grad
+    @unittest.skipIf(not TEST_MKL, "Test requires MKL")
+    @parametrize("bs", (5,))
+    @parametrize("Mdim", (384,))
+    @parametrize("Kdim", (96,))
+    @parametrize("Ndim", (64, 65))
+    @dtypes(torch.float, torch.bfloat16, torch.half)
+    def test_bmm_with_pointwise_with_reshape_dynamic_shapes(self, bs, Mdim, Kdim, Ndim, dtype):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.epilogue = torch.nn.ReLU()
+
+            def forward(self, x, other, noise):
+                result = x.reshape(-1, Mdim, Kdim) @ other.reshape(-1, Kdim, Ndim)
+                return self.epilogue(result) + noise
+
+        counters.clear()
+        u = torch.randn(bs, 8, Mdim, Kdim).to(dtype=dtype)
+        v = torch.randn(bs, 8, Kdim, Ndim).to(dtype=dtype)
+        noise = torch.randn(bs * 8, Mdim, Ndim).to(dtype=dtype)
+        torch._dynamo.mark_dynamic(u, 0)
+        torch._dynamo.mark_static(u, 1)
+        torch._dynamo.mark_static(u, 2)
+        torch._dynamo.mark_static(u, 3)
+        torch._dynamo.mark_static(v, 2)
+        torch._dynamo.mark_static(v, 3)
+        mod = M().to(dtype=dtype).eval()
+        with verify(dtype) as (atol, rtol):
+            self.common(mod, (u, v, noise), atol=atol, rtol=rtol)
+        self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
+        self.assertEqual(counters["inductor"]["cpp_epilogue_fusion_counter"], 1)
+
 
 instantiate_device_type_tests(TestSelectAlgorithm, globals(), only_for="cpu")
 instantiate_device_type_tests(

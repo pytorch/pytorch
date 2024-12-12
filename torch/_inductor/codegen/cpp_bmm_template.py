@@ -6,6 +6,7 @@ from unittest.mock import patch
 import sympy
 
 from .. import ir
+from ...fx.experimental.symbolic_shapes import has_free_symbols
 from ..select_algorithm import PartialRender
 from ..virtualized import V
 from .cpp_gemm_template import CppGemmTemplate, GEMM_TEMPLATE
@@ -105,7 +106,12 @@ class CppBmmTemplate(CppGemmTemplate):
             should_block_weights=should_block_weights,
             name=name,
         )
-        self.b_index = sympy.Symbol("s_b_index", integer=True, nonnegative=True)
+        b = layout.size[0]
+        self.is_dynamic_B = has_free_symbols((b,))
+        if self.is_dynamic_B:
+            self.b_index = b.free_symbols.pop()
+        else:
+            self.b_index = sympy.Symbol("s_b_index", integer=True, nonnegative=True)
 
     @staticmethod
     def get_padded_size(n, block_n, k, should_block_weight):
@@ -223,7 +229,8 @@ class CppBmmTemplate(CppGemmTemplate):
             result = PartialRender(result, sub_mm_hooks).finalize_all()
             for name in sub_mm_hooks:
                 del kernel.render_hooks[name]
-            del kernel.args.sizevars[options["b_index"]]
+            if not self.is_dynamic_B:
+                del kernel.args.sizevars[options["b_index"]]
             return result
 
     def codegen_single_thread_gemm(self):
