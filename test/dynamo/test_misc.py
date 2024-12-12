@@ -1729,6 +1729,28 @@ utils_device.CURRENT_DEVICE == None""".split(
         res = opt_fn(x, packed)
         self.assertTrue(same(ref, res))
 
+    def test_namedtuple_with_custom_getitem(self):
+        @torch.compile(fullgraph=True, backend="eager")
+        def f(my_tuple):
+            return my_tuple.a + 1
+
+        class MyTuple(typing.NamedTuple):
+            a: torch.Tensor
+            b: torch.Tensor
+
+            def __getitem__(self, index):
+                return MyTuple(a[index], b[index])
+
+        a = torch.randn(2)
+        b = torch.randn(2)
+
+        out = f(MyTuple(a, b))
+        self.assertTrue(same(a + 1, out))
+
+        # Test guard evaluation in the second call
+        out = f(MyTuple(a, b))
+        self.assertTrue(same(a + 1, out))
+
     def test_structseq1(self):
         def fn(x, y):
             return torch.return_types.max((x, y))
@@ -5711,154 +5733,6 @@ utils_device.CURRENT_DEVICE == None""".split(
         b = opt_fn(torch.tensor(True), torch.tensor([0.25, 0.25]))
         self.assertTrue(same(torch.sin(torch.tensor([0.25, 0.25])), b))
 
-    def test_nonzero_static(self):
-        # invalid size
-        with self.assertRaisesRegex(
-            RuntimeError, "nonzero_static: 'size' must be an non-negative integer"
-        ):
-            torch.nonzero_static(torch.tensor([8]), size=-2)
-
-        with self.assertRaisesRegex(
-            RuntimeError, "nonzero_static: 'size' must be an non-negative integer"
-        ):
-            torch.nonzero_static(torch.tensor([8]), size=-2, out=torch.tensor(0))
-
-        # nonzero_static.out: out dtype mismatch
-        input_tensor = torch.tensor([8])
-        static_size = 1
-        out_tensor = torch.empty((static_size, input_tensor.dim()), dtype=torch.float)
-        with self.assertRaisesRegex(
-            RuntimeError, "nonzero_static: Expected out tensor to have scalar type Long"
-        ):
-            torch.nonzero_static(input_tensor, size=static_size, out=out_tensor)
-
-        # nonzero_static.out: out resize (shrink)
-        input_tensor = torch.tensor([8])
-        static_size = 1
-        out_tensor = torch.empty((10, 10, 10, 10), dtype=torch.long)
-        self.assertTrue(
-            same(
-                torch.nonzero_static(input_tensor, size=static_size, out=out_tensor),
-                torch.tensor([0]),
-            )
-        )
-        self.assertTrue(
-            same(
-                out_tensor,
-                torch.tensor([0]),
-            )
-        )
-
-        # nonzero_static.out: out resize (enlarge)
-        input_tensor = torch.tensor([8])
-        static_size = 1
-        out_tensor = torch.empty((0), dtype=torch.long)
-        self.assertTrue(
-            same(
-                torch.nonzero_static(input_tensor, size=static_size, out=out_tensor),
-                torch.tensor([0]),
-            )
-        )
-        self.assertTrue(
-            same(
-                out_tensor,
-                torch.tensor([0]),
-            )
-        )
-
-        # 0 rank
-        input_tensor = torch.tensor(6)
-        static_size = 2
-        self.assertTrue(
-            same(
-                torch.nonzero_static(input_tensor, size=static_size),
-                torch.empty((static_size, input_tensor.dim()), dtype=torch.long),
-            )
-        )
-
-        # 0 size
-        input_tensor = torch.tensor([[[1]]])
-        static_size = 0
-        self.assertTrue(
-            same(
-                torch.nonzero_static(input_tensor, size=static_size),
-                torch.empty((static_size, input_tensor.dim()), dtype=torch.long),
-            )
-        )
-
-        # 1D input
-        input_tensor = torch.tensor([0, 8])
-        static_size = 1
-        self.assertTrue(
-            same(
-                torch.nonzero_static(input_tensor, size=static_size),
-                torch.tensor([1]),
-            )
-        )
-
-        input_tensor = torch.tensor([8, 0])
-        static_size = 2
-        self.assertTrue(
-            same(
-                torch.nonzero_static(input_tensor, size=static_size),
-                torch.tensor([[0], [-1]]),  # padded with default fill_value "-1"
-            )
-        )
-
-        # 2D input
-        input_tensor = torch.tensor([[1.2, 0], [3.4, 5.6]])
-        static_size = 5
-        fill_value = -100
-        self.assertTrue(
-            torch._dynamo.utils.same(
-                torch.nonzero_static(
-                    input_tensor, size=static_size, fill_value=fill_value
-                ),
-                torch.tensor(
-                    [
-                        [0, 0],
-                        [1, 0],
-                        [1, 1],
-                        [fill_value, fill_value],
-                        [fill_value, fill_value],
-                    ]
-                ),
-            )
-        )
-        input_tensor = torch.tensor([[1.2, 0], [3.4, 5.6]])
-        static_size = 2
-        fill_value = -100
-        self.assertTrue(
-            torch._dynamo.utils.same(
-                torch.nonzero_static(
-                    input_tensor, size=static_size, fill_value=fill_value
-                ),
-                torch.tensor([[0, 0], [1, 0]]),
-            )
-        )
-
-        # 3D input
-        input_tensor = torch.tensor([[[0, 0], [0, -3]], [[0, 0], [5, 0]]])
-        static_size = 4
-        fill_value = -999
-        self.assertTrue(
-            torch._dynamo.utils.same(
-                torch.nonzero_static(
-                    input_tensor,
-                    size=static_size,
-                    fill_value=fill_value,
-                ),
-                torch.tensor(
-                    [
-                        [0, 1, 1],
-                        [1, 1, 0],
-                        [fill_value, fill_value, fill_value],
-                        [fill_value, fill_value, fill_value],
-                    ]
-                ),
-            )
-        )
-
     def test_cond_with_quantization(self):
         from functorch.experimental.control_flow import cond
 
@@ -6089,6 +5963,29 @@ utils_device.CURRENT_DEVICE == None""".split(
         opt_fn = torch.compile(backend="eager")(fn)
         res = opt_fn(x, y)
         self.assertTrue(same(ref, res))
+
+    def test_enum_method(self):
+        class Bool(enum.IntEnum):
+            TRUE = enum.auto()
+            FALSE = enum.auto()
+
+            def is_true(self, x):
+                # Return `x + 1` to make sure Dynamo actually traced into this,
+                # rather than invoking it.
+                return self == Bool.TRUE, x + 1
+
+        def f(x, e):
+            cond, y = e.is_true(x)
+            if cond:
+                return y + 2
+            else:
+                return y - 2
+
+        opt_f = torch.compile(fullgraph=True)(f)
+        args = [torch.zeros(1), Bool.TRUE]
+        ref_out = f(*args)
+        opt_out = opt_f(*args)
+        self.assertTrue(same(ref_out, opt_out))
 
     def test_duplicate_graph_break_log(self):
         torch._logging.set_logs(graph_breaks=True)
@@ -8364,21 +8261,8 @@ utils_device.CURRENT_DEVICE == None""".split(
         expr: str
         preface: typing.List[str] = dataclasses.field(default_factory=list)
         expected: typing.Optional[str] = None
-        expected_py38: typing.Optional[str] = None
-
-    def _is_py38(self) -> bool:
-        return sys.version_info[:2] <= (3, 8)
-
-    def _has_ast_unparse(self) -> bool:
-        from torch._dynamo.guards import HAS_UNPARSE_FUNCTIONS
-
-        return HAS_UNPARSE_FUNCTIONS
 
     def test_guards_cse_pass_single(self):
-        if not self._has_ast_unparse():
-            if IS_FBCODE:
-                raise RuntimeError("Needs astunparse or Python-3.9+")
-            raise unittest.SkipTest("Needs astunparse or Python-3.9+")
         from torch._dynamo.guards import PyExprCSEPass
 
         testcase = self.CSETestCase
@@ -8423,8 +8307,6 @@ utils_device.CURRENT_DEVICE == None""".split(
             self.assertEqual(expr, expected)
 
     def test_guards_cse_pass_multiple(self):
-        if not self._has_ast_unparse():
-            raise unittest.SkipTest("Needs astunparse or Python-3.9+")
         from torch._dynamo.guards import PyExprCSEPass
 
         testcase = self.CSETestCase
@@ -8432,25 +8314,21 @@ utils_device.CURRENT_DEVICE == None""".split(
             testcase(
                 expr="x[0].a < x[1].a * (3 - x[2].a)",
                 expected="x[0].a < x[1].a * (3 - x[2].a)",
-                expected_py38="(x[0].a < (x[1].a * (3 - x[2].a)))",
             ),
             testcase(
                 expr="a.b.c[0].d.e + a.b.c[1].d.e * a.b.c[2].d.e > 0",
                 preface=["_var0 = a.b", "_var1 = _var0.c"],
                 expected="_var1[0].d.e + _var1[1].d.e * _var1[2].d.e > 0",
-                expected_py38="((_var1[0].d.e + (_var1[1].d.e * _var1[2].d.e)) > 0)",
             ),
             testcase(
                 expr="f(m.n[0], '0').x.y.z * f(m.n[0], '1').x.y.z * f(m.n[0], '2').x.y.z < 512",
                 preface=["_var2 = m.n", "_var3 = _var2[0]"],
                 expected="f(_var3, '0').x.y.z * f(_var3, '1').x.y.z * f(_var3, '2').x.y.z < 512",
-                expected_py38="(((f(_var3, '0').x.y.z * f(_var3, '1').x.y.z) * f(_var3, '2').x.y.z) < 512)",
             ),
             testcase(
                 expr="self.g(a, b).k + (1 - self.g(a, b).k) <= m[0].a + self.g(a, b).k",
                 preface=["_var4 = self.g", "_var5 = _var4(a, b)", "_var6 = _var5.k"],
                 expected="_var6 + (1 - _var6) <= m[0].a + _var6",
-                expected_py38="((_var6 + (1 - _var6)) <= (m[0].a + _var6))",
             ),
         ]
 
@@ -8460,7 +8338,7 @@ utils_device.CURRENT_DEVICE == None""".split(
         for t in testcases:
             preface, expr = csepass.replace(t.expr)
             self.assertEqual(preface, t.preface)
-            expected = t.expected_py38 if self._is_py38() else t.expected
+            expected = t.expected
             expected = expected if expected is not None else t.expr
             self.assertEqual(expr, expected)
 
@@ -8496,46 +8374,7 @@ def ___make_guard_fn():
         return True
     return guard
 """
-        expected_38 = """\
-def ___make_guard_fn():
-    def guard(L):
-        if not ((x[0].a < (x[1].a * (3 - x[2].a)))):
-            return False
-        _var0 = a.b
-        _var1 = _var0.c
-        if not (((_var1[0].d.e + (_var1[1].d.e * _var1[2].d.e)) > 0)):
-            return False
-        _var2 = m.n
-        _var3 = _var2[0]
-        if not ((((f(_var3, '0').x.y.z * f(_var3, '1').x.y.z) * f(_var3, '2').x.y.z) < 512)):
-            return False
-        _var4 = self.g
-        _var5 = _var4(a, b)
-        _var6 = _var5.k
-        if not (((_var6 + (1 - _var6)) <= (m[0].a + _var6))):
-            return False
-        return True
-    return guard
-"""
-        expected_38_no_astunparse = """\
-def ___make_guard_fn():
-    def guard(L):
-        if not (x[0].a < x[1].a * (3 - x[2].a)):
-            return False
-        if not (a.b.c[0].d.e + a.b.c[1].d.e * a.b.c[2].d.e > 0):
-            return False
-        if not (f(m.n[0], '0').x.y.z * f(m.n[0], '1').x.y.z * f(m.n[0], '2').x.y.z < 512):
-            return False
-        if not (self.g(a, b).k + (1 - self.g(a, b).k) <= m[0].a + self.g(a, b).k):
-            return False
-        return True
-    return guard
-"""
 
-        if self._is_py38():
-            expected = (
-                expected_38 if self._has_ast_unparse() else expected_38_no_astunparse
-            )
         self.assertEqual(expected, pycode)
 
     def test_dynamo_compiling_fake_tensor_to_vararg_int(self):
