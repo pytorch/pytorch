@@ -2568,7 +2568,7 @@ class <lambda>(torch.nn.Module):
 
         sym_size_int: "Sym(s2 + 5)" = torch.ops.aten.sym_size.int(cat_2, 1);  cat_2 = None
         sym_stride_int: "Sym(s2 + 5)" = torch.ops.aten.sym_stride.int(mul, 0)
-        return (mul, cat_1, zeros_1, zeros_2, sym_size_int, sym_stride_int)
+        return (mul, cat_1, zeros_2, zeros_1, sym_size_int, sym_stride_int)
 """,  # noqa: B950
         )
 
@@ -3121,8 +3121,8 @@ class GraphModule(torch.nn.Module):
 
         expected_var_to_val = {
             "s0": SingletonInt(0),
-            "s1": 2,
-            "s2": 18,
+            "s1": 18,
+            "s2": 2,
             "s3": 23,
             "s4": SingletonInt(0),
             "s5": SingletonInt(0),
@@ -3134,8 +3134,8 @@ class GraphModule(torch.nn.Module):
         # the common case, e.g. raggedness/metadata preserving operations like pointwise.
         expected_var_to_sources = {
             "s0": "L['a']._base.size()[1]",
-            "s1": "L['a']._base.size()[1].node.nested_int_cache()._min_seqlen_tensor.size()[0]",
-            "s2": "L['a']._base.size()[1].node.nested_int_cache()._max_seqlen_tensor.size()[0]",
+            "s1": "L['a']._base.size()[1].node.nested_int_cache()._max_seqlen_tensor.size()[0]",
+            "s2": "L['a']._base.size()[1].node.nested_int_cache()._min_seqlen_tensor.size()[0]",
             "s3": "L['a']._base._values.size()[0]",
             "s4": "torch._nested_int_from_offsets(L['a']._base.size()[1].node.nested_int_cache()._host_offsets)",
             "s5": "L['a'].size()[1]",
