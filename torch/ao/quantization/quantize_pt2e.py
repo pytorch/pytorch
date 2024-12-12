@@ -1,4 +1,3 @@
-# flake8: noqa
 import torch
 from torch._export.passes.constant_folding import constant_fold
 from torch.ao.quantization.pt2e.duplicate_dq_pass import DuplicateDQPass

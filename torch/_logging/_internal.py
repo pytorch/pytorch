@@ -1,5 +1,5 @@
 # mypy: allow-untyped-defs
-# flake8: noqa: B950
+
 import functools
 import hashlib
 import importlib.util
