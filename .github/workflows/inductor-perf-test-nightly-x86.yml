@@ -97,6 +97,8 @@ jobs:
       test-matrix: ${{ needs.linux-jammy-cpu-py3_9-gcc11-inductor-build.outputs.test-matrix }}
       use-gha: anything-non-empty-to-use-gha
       timeout-minutes: 720
+      # disable monitor in perf tests for more investigation
+      disable-monitor: true
     secrets: inherit
 
 
@@ -112,4 +114,6 @@ jobs:
       test-matrix: ${{ needs.linux-jammy-cpu-py3_9-gcc11-inductor-build.outputs.test-matrix }}
       use-gha: anything-non-empty-to-use-gha
       timeout-minutes: 720
+      # disable monitor in perf tests for more investigation
+      disable-monitor: true
     secrets: inherit

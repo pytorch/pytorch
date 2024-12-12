@@ -35,7 +35,7 @@ bool ScriptCall::hasQualifiedName() const {
 }
 
 const c10::QualifiedName& ScriptCall::qualifiedName() const {
-  return *qualifiedName_;
+  return qualifiedName_.value();
 }
 
 const std::vector<at::IValue>& ScriptCall::stack() const {
