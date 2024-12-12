@@ -21,7 +21,6 @@ class AnyValue {
   /// behavior of move for `std::unique_ptr`.
   AnyValue(AnyValue&&) = default;
   AnyValue& operator=(AnyValue&&) = default;
-  ~AnyValue() = default;
 
   /// Copy construction and assignment is allowed.
   AnyValue(const AnyValue& other) : content_(other.content_->clone()) {}
@@ -90,8 +89,6 @@ class AnyValue {
         : type_info(type_info_) {}
     Placeholder(const Placeholder&) = default;
     Placeholder(Placeholder&&) = default;
-    Placeholder& operator=(const Placeholder&) = delete;
-    Placeholder& operator=(Placeholder&&) = delete;
     virtual ~Placeholder() = default;
     virtual std::unique_ptr<Placeholder> clone() const {
       TORCH_CHECK(false, "clone() should only be called on `AnyValue::Holder`");

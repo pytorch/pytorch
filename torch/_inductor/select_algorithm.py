@@ -292,7 +292,7 @@ class TritonTemplateKernel(TritonKernel):
         super().__init__(
             {
                 "x": numel,
-                "r": sympy.S.One,
+                "r0_": sympy.S.One,
             },
             features=SIMDKernelFeatures([], numel),
         )
@@ -665,11 +665,15 @@ class TritonTemplateKernel(TritonKernel):
         tilings = (sympy_product(input_node.get_size()), sympy.Integer(1))
         groups = {
             "x": tilings[0],
-            "r": tilings[1],
+            "r0_": tilings[1],
         }
 
         range_trees = self.construct_range_trees(
-            pid_cache=None, inside_reduction=False, numels=groups, no_x_dim=False
+            pid_cache=None,
+            inside_reduction=False,
+            is_reduction=False,
+            numels=groups,
+            no_x_dim=False,
         )
         load_code = None
 
@@ -1749,7 +1753,11 @@ class AlgorithmSelectorCache(PersistentCache):
             return wait_on_futures
 
         def autotune(choices):
-            with dynamo_timed(f"{name}_template_autotuning"):
+            with dynamo_timed(
+                f"{name}_template_autotuning",
+                log_pt2_compile_event=True,
+                dynamo_compile_column_us="compile_time_autotune_time_us",
+            ):
                 return make_benchmark_fn()(choices)
 
         if config.autotune_in_subproc:
@@ -1760,7 +1768,11 @@ class AlgorithmSelectorCache(PersistentCache):
 
         def do_autotuning(precompile_fn):
             precompile_start_ts = time.time()
-            with dynamo_timed(f"{name}_template_precompiling"):
+            with dynamo_timed(
+                f"{name}_template_precompiling",
+                log_pt2_compile_event=True,
+                dynamo_compile_column_us="compile_time_autotune_time_us",
+            ):
                 precompile_fn()
             precompile_elapse = time.time() - precompile_start_ts
 
@@ -1847,7 +1859,6 @@ class AlgorithmSelectorCache(PersistentCache):
             return choices[0].output_node()
 
         selected_key = builtins.min(timings, key=timings.__getitem__)
-        selected_time = timings[selected_key]
         selected_choice = selected_key.output_node()
         log.debug("selected choice: %s", str(selected_choice))
         return selected_choice

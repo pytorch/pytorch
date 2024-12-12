@@ -428,12 +428,7 @@ class BaseSchedulerNode:
             and hasattr(V.kernel, "args")
         ):
             return
-        fused_nodes = {
-            node.get_name()
-            for node in self.scheduler.name_to_fused_node[self.get_name()].get_nodes()
-        }
 
-        ordered_reads = sorted(self.read_writes.reads, key=lambda x: x.name)
         # NOTE remove V.graph.removed_operations once deps issue is fixed
         inconsequential_nodes = (
             self.ancestors
@@ -2463,7 +2458,11 @@ class Scheduler:
         device = nodes[0].get_device()
         self.current_device = device
         backend = self.get_backend(device)
-        with dynamo_timed("benchmark_fused_nodes"):
+        with dynamo_timed(
+            "benchmark_fused_nodes",
+            log_pt2_compile_event=True,
+            dynamo_compile_column_us="compile_time_autotune_time_us",
+        ):
             return backend.benchmark_fused_nodes(nodes)
 
     def finalize_multi_template_buffers(self) -> None:
@@ -3091,7 +3090,7 @@ class Scheduler:
             return 0
 
         # Pick the largest buffer to guide the loop reordering
-        numel, lhs_dep, rhs_dep = max(candidates, key=lambda x: x[0])
+        _numel, lhs_dep, rhs_dep = max(candidates, key=lambda x: x[0])
 
         if lhs_dep.num_vars != rhs_dep.num_vars:
             # this can happen due to we don't merge loops.
@@ -3632,7 +3631,7 @@ class Scheduler:
                         node.get_name(),
                         node.get_estimated_runtime(),
                     )
-                except Exception as e:
+                except Exception:
                     log.debug(
                         "Generating code for node %s with estimated runtime 0.0",
                         node.get_name(),
@@ -3766,7 +3765,7 @@ class Scheduler:
             path1_list.append(path)
 
         try:
-            ms2, ms2_clone, path2_list = self.benchmark_combo_kernel(subkernel_nodes)
+            ms2, ms2_clone, _path2_list = self.benchmark_combo_kernel(subkernel_nodes)
         except CompilationError as e:
             # workaround triton issue: https://github.com/openai/triton/issues/2151
             if "Loop-carried variable" in str(e):
