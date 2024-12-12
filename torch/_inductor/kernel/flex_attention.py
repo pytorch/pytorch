@@ -640,9 +640,8 @@ def _use_flex_decoding(query, kernel_options):
     short_query_length = V.graph.sizevars.evaluate_expr(
         sympy.Lt(query.get_size()[-2], 128)
     )
-    V.graph.sizevars.statically_known_equals
-    static_batch = isinstance(query.get_size()[0], int)
-    static_num_heads = isinstance(query.get_size()[1], int)
+    static_batch = isinstance(query.get_size()[0], (int, sympy.Integer))
+    static_num_heads = isinstance(query.get_size()[1], (int, sympy.Integer))
     return not force_flex and short_query_length and static_batch and static_num_heads
 
 
