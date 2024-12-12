@@ -415,10 +415,19 @@ class CachingAutotuner(KernelInterface):
         if not ASTSource:
             raise RuntimeError("Installed triton version too old, please upgrade")
 
+        def fixup_signature(signature, constants):
+            signature = signature.copy()
+            for constant in constants:
+                # If it's not in the signature already, it's a constexpr
+                # argument that we need to add in
+                if constant not in signature:
+                    signature[constant] = "constexpr"
+            return signature
+
         compile_args = (
             ASTSource(
                 self.fn,
-                compile_meta["signature"],
+                fixup_signature(compile_meta["signature"], compile_meta["constants"]),
                 compile_meta["constants"],
                 compile_meta["configs"][0],
             ),

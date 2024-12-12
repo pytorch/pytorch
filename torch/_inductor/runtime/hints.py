@@ -52,8 +52,8 @@ if _is_triton_available():
         ):
             # Prepare the arguments for AttrsDescriptor
             kwargs = {
-                "tt.divisibility": divisible_by_16,
-                "tt.equal_to": equal_to_1,
+                "tt.divisibility": tuple([(i,) for i in divisible_by_16]),
+                "tt.equal_to": tuple([(i,) for i in equal_to_1]),
             }
 
             # Instantiate AttrsDescriptor with the prepared arguments
