@@ -2,15 +2,12 @@
 r"""Implementation for Stochastic Gradient Descent optimizer."""
 from __future__ import annotations
 
-from typing import List, Optional, Union, cast
+from typing import cast, List, Optional, Union
 
 import torch
 from torch import Tensor
 
 from .optimizer import (
-    DeviceDict,
-    Optimizer,
-    ParamsT,
     _default_to_fused_or_foreach,
     _device_dtype_check_for_fused,
     _differentiable_doc,
@@ -19,6 +16,9 @@ from .optimizer import (
     _maximize_doc,
     _params_doc,
     _use_grad_for_differentiable,
+    DeviceDict,
+    Optimizer,
+    ParamsT,
 )
 
 
