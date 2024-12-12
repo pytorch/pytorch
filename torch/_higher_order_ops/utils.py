@@ -313,16 +313,23 @@ def prepare_fw_with_masks(fn):
 # In PyTorch there is the convention that None gradients are
 # replaced with all-zeros gradients
 def unmask_none_gradients(grads, operands):
-    return [
-        g
-        if (
-            (isinstance(o, torch.Tensor) and not o.requires_grad)
-            or not isinstance(o, torch.Tensor)
-            or g is not None
-        )
-        else torch.zeros_like(o)
-        for g, o in zip(grads, operands)
-    ]
+    allowed_types = (torch.Tensor, int, torch.SymInt)
+    unmasked_grads = []
+    for g, o in zip(grads, operands):
+        if not isinstance(o, allowed_types) or g is not None:
+            unmasked_grads.append(g)
+        else:
+            assert isinstance(
+                o, allowed_types
+            ), f"operands can only be of {allowed_types} but got {type(o)}"
+            # In case the operand is an int or a torch.SymInt, return None
+            # This can happen for lifted_arguments. E.g., the shapes of a dynamic tensor are lifted and passed
+            # as additional arguments
+            unmasked_grads.append(
+                torch.zeros_like(o) if isinstance(o, torch.Tensor) else None
+            )
+
+    return unmasked_grads
 
 
 # TODO: The parameter use_output_and_grad_bw is required because some operations
