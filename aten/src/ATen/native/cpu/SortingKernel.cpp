@@ -1,5 +1,6 @@
 #define TORCH_ASSERT_NO_OPERATORS
 
+#include <execution>
 #include <limits>
 
 #include <ATen/native/Sorting.h>
@@ -18,6 +19,10 @@
 #include <c10/util/irange.h>
 #ifdef USE_FBGEMM
 #include <fbgemm/Utils.h>
+#endif
+
+#ifdef __GNUC__
+#include <parallel/algorithm>
 #endif
 
 namespace at::native {
@@ -146,23 +151,43 @@ static inline void sort_kernel_impl(const value_accessor_t& value_accessor,
   auto composite_accessor = CompositeRandomAccessorCPU<
     value_accessor_t, indices_accessor_t
   >(value_accessor, indices_accessor);
+#ifdef __GNUC__
   if (descending) {
     if (stable) {
-      std::stable_sort(composite_accessor, composite_accessor + dim_size,
-        KeyValueCompDesc<scalar_t>());
+      __gnu_parallel::stable_sort(composite_accessor, composite_accessor + dim_size,
+            KeyValueCompDesc<scalar_t>());
     } else {
-      std::sort(composite_accessor, composite_accessor + dim_size,
-        KeyValueCompDesc<scalar_t>());
+      __gnu_parallel::sort(composite_accessor, composite_accessor + dim_size,
+            KeyValueCompDesc<scalar_t>());
     }
   } else {
     if (stable) {
-      std::stable_sort(composite_accessor, composite_accessor + dim_size,
-        KeyValueCompAsc<scalar_t>());
+      __gnu_parallel::stable_sort(composite_accessor, composite_accessor + dim_size,
+            KeyValueCompAsc<scalar_t>());
     } else {
-      std::sort(composite_accessor, composite_accessor + dim_size,
-        KeyValueCompAsc<scalar_t>());
+      __gnu_parallel::sort(composite_accessor, composite_accessor + dim_size,
+            KeyValueCompAsc<scalar_t>());
     }
   }
+#else
+  if (descending) {
+    if (stable) {
+      std::stable_sort(std::execution::par_unseq, composite_accessor, composite_accessor + dim_size,
+            KeyValueCompDesc<scalar_t>());
+    } else {
+      std::sort(std::execution::par_unseq, composite_accessor, composite_accessor + dim_size,
+            KeyValueCompDesc<scalar_t>());
+    }
+  } else {
+    if (stable) {
+      std::stable_sort(std::execution::par_unseq, composite_accessor, composite_accessor + dim_size,
+            KeyValueCompAsc<scalar_t>());
+    } else {
+      std::sort(std::execution::par_unseq, composite_accessor, composite_accessor + dim_size,
+            KeyValueCompAsc<scalar_t>());
+    }
+  }
+#endif
 }
 
 static void sort_kernel(
