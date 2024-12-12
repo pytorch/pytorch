@@ -9507,7 +9507,6 @@ class CommonTemplate:
                         # by matmul, inputs should be deallocated
                         # TODO: should not be necessary, ref-cycle ?
                         gc.collect()
-                        print(f"####FUNC: {func}")
                         if func is aten.mm.out:
                             matmul_seen = True
                             test_self.assertEqual(len(inps), 0)
