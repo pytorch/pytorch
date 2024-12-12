@@ -1260,8 +1260,16 @@ class AOTInductorTestsTemplate:
 
                 return torch.cond(x.shape[0] > 5, true_fn, false_fn, (x,))
 
-        input1 = (torch.ones(3, 3), torch.ones(5), torch.ones(3, 3))
-        input2 = (torch.ones(10, 3), torch.ones(6), torch.ones(10, 3))
+        input1 = (
+            torch.ones(3, 3, device=self.device),
+            torch.ones(5, device=self.device),
+            torch.ones(3, 3, device=self.device),
+        )
+        input2 = (
+            torch.ones(10, 3, device=self.device),
+            torch.ones(6, device=self.device),
+            torch.ones(10, 3, device=self.device),
+        )
         inputs = (input1, input2)
         dynamic_shapes = {"x": {0: Dim("d")}, "y": {0: Dim("d1")}, "z": {0: Dim("d")}}
         self.check_model_with_multiple_inputs(
@@ -1386,7 +1394,11 @@ class AOTInductorTestsTemplate:
 
         self.check_model(M(self.device), (torch.randn(5, 5, device=self.device),))
 
+    @unittest.skipIf(IS_MACOS, "no CUDA on Mac")
     def test_zero_grid_with_backed_symbols(self):
+        if self.device != GPU_TYPE:
+            raise unittest.SkipTest("requires GPU")
+
         class Repro(torch.nn.Module):
             def __init__(self) -> None:
                 super().__init__()
@@ -1912,7 +1924,7 @@ class AOTInductorTestsTemplate:
             def forward(self, x):
                 return torch.ops.aten.normal_functional.default(x)
 
-        self.check_model(Model(), (torch.empty(4, 1, 4, 4),))
+        self.check_model(Model(), (torch.empty(4, 1, 4, 4, device=self.device),))
 
     def test_empty_graph(self):
         class Model(torch.nn.Module):
@@ -3005,7 +3017,6 @@ class AOTInductorTestsTemplate:
             dynamic_shapes=dynamic_shapes,
         )
 
-    @skipIfRocm  # USE_MEM_EFF_ATTENTION was not enabled for build.
     def test_scaled_dot_product_efficient_attention(self):
         if self.device != GPU_TYPE:
             raise unittest.SkipTest("requires GPU")

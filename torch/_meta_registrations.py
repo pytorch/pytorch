@@ -2414,6 +2414,7 @@ if torch._C._has_mkldnn:
         return out
 
     @register_meta(torch.ops.onednn.linear_dynamic_fp16.default)
+    @register_meta(torch.ops.onednn.linear_relu_dynamic_fp16.default)
     def meta_linear_dynamic_fp16(
         x,
         w,
