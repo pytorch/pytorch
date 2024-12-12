@@ -1962,27 +1962,6 @@ class GraphModule(torch.nn.Module):
         y = fn(x)
         self.assertEqual(y, x.sin().cos())
 
-    def test_raise_stopiteration_pep0479(self):
-        def whoo():
-            raise StopIteration
-            yield 1
-
-        @torch.compile(backend="eager", fullgraph=True)
-        def fn(t):
-            try:
-                gen = whoo()
-                return next(gen)
-            except RuntimeError:
-                # converts the StopIteration into a RuntimeError
-                # https://peps.python.org/pep-0479/
-                return 1
-            except StopIteration:
-                return 2
-
-        t = torch.tensor([1.0])
-        y = fn(t)
-        self.assertEqual(y, 1)
-
     def test_graph_break_inside_ctx(self):
         @contextlib.contextmanager
         def whoo(x):

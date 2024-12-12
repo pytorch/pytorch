@@ -23,13 +23,7 @@ from ..exc import (
     Unsupported,
 )
 from ..guards import GuardBuilder, install_guard
-from ..source import (
-    AttrSource,
-    ConstantSource,
-    DefaultsSource,
-    GetItemSource,
-    LocalSource,
-)
+from ..source import AttrSource, ConstantSource, DefaultsSource, GetItemSource
 from ..utils import (
     check_constant_args,
     check_unspec_or_constant_args,
@@ -348,6 +342,16 @@ class GeneratorFunctionVariable(BaseUserFunctionVariable):
             return getattr(self, name)
         return getattr(self.vt, name)
 
+    def _build_inline_tracer(self, tx, args, kwargs):
+        from torch._dynamo.symbolic_convert import InliningInstructionTranslator
+
+        return InliningInstructionTranslator.build_inline_tracer(
+            tx,
+            self,
+            args,
+            kwargs,
+        )
+
     def call_function(
         self,
         tx: "InstructionTranslator",
@@ -355,15 +359,8 @@ class GeneratorFunctionVariable(BaseUserFunctionVariable):
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
         assert is_generator(self.vt.get_code())
-        from torch._dynamo.symbolic_convert import InliningInstructionTranslator
 
-        inline_tracer = InliningInstructionTranslator.build_inline_tracer(
-            tx,
-            self,
-            args,
-            kwargs,
-        )
-
+        inline_tracer = self._build_inline_tracer(tx, args, kwargs)
         code = self.vt.get_code()
         f_globals = self.vt.get_globals()
 
@@ -381,6 +378,26 @@ class GeneratorFunctionVariable(BaseUserFunctionVariable):
             inline_tracer,
             source=self.source,
         )
+
+
+class FunctionDecoratedByContextlibContextManagerVariable(GeneratorFunctionVariable):
+    """
+    .. note::
+
+        This is only used when the function is annotated with @contextlib.contextmanager
+    """
+
+    def _build_inline_tracer(self, tx, args, kwargs):
+        # NOTE: This only exists to not break support for context manager when
+        # config.enable_yield_on_generator is False. We can safely remove this
+        # once generators are fully supported
+        tracer = super()._build_inline_tracer(tx, args, kwargs)
+        assert isinstance(
+            tracer,
+            torch._dynamo.symbolic_convert.InliningGeneratorInstructionTranslator,
+        )
+        tracer.is_generator_from_ctx_manager = True
+        return tracer
 
 
 class GeneratorObjectVariable(VariableTracker):
@@ -437,17 +454,7 @@ class GeneratorObjectVariable(VariableTracker):
             )
         return self.inline_tracer
 
-    def _raise_if_generator_is_argument(self, tx):
-        # We don't support generator as arguments if it takes any arguments
-        if isinstance(self.source, LocalSource) and self.source.is_input:
-            # if tx.inline_depth == 0:
-            #     # skip current frame
-            #     raise SkipFrame
-            unimplemented("Generator as graph argument is not supported")
-
     def next_variable(self, tx):
-        self._raise_if_generator_is_argument(tx)
-
         tracer = self._get_inline_tracer(tx)
 
         try:
