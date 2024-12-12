@@ -1,4 +1,6 @@
 # mypy: allow-untyped-defs
+from __future__ import annotations
+
 import contextlib
 import dataclasses
 import enum
@@ -18,14 +20,21 @@ from typing import (
     List,
     NamedTuple,
     Optional,
+    Set,
     Tuple,
+    TYPE_CHECKING,
     Union,
 )
+
+
+if TYPE_CHECKING:
+    from typing import Never
 
 import sympy
 
 import torch
 import torch.fx
+from torch._inductor.dtype_propagation import DtypePropagationOpsHandler
 from torch._prims_common import ELEMENTWISE_TYPE_PROMOTION_KIND
 from torch.utils import _pytree as pytree
 from torch.utils._ordered_set import OrderedSet
@@ -36,6 +45,7 @@ from torch.utils._sympy.value_ranges import bound_sympy, ValueRangeAnalysis, Val
 
 from .. import config, metrics
 from ..utils import (
+    boolean_ops,
     DeferredLineBase,
     generate_assert,
     IndentedBuffer,
@@ -364,7 +374,9 @@ def init_backend_registration():
             "cpu",
             lambda *args, **kwargs: cpu_backends[config.cpu_backend](*args, **kwargs),
             PythonWrapperCodegen,
-            CppWrapperCpuArrayRef if config.allow_stack_allocation else CppWrapperCpu,
+            CppWrapperCpuArrayRef
+            if config.aot_inductor.allow_stack_allocation
+            else CppWrapperCpu,
         )
 
     if get_scheduling_for_device("cuda") is None:
@@ -428,22 +440,6 @@ def get_device_op_overrides(device: str):
 
     if device in device_op_overrides_dict.keys():
         return device_op_overrides_dict[device]
-
-
-@functools.lru_cache(None)
-def boolean_ops():
-    return (
-        "isinf",
-        "isnan",
-        "logical_not",
-        "signbit",
-        "le",
-        "lt",
-        "ge",
-        "gt",
-        "eq",
-        "ne",
-    )
 
 
 DTYPE_TO_COMPUTATION_DTYPE = {
@@ -617,50 +613,15 @@ class PythonPrinter(_PythonPrinter):
         return super().doprint(expr)
 
 
-class OpOverrides:
-    def __init__(self, parent):
-        super().__init__()
-        self._parent = parent
-
-    @staticmethod
-    def paren(string: str) -> str:
-        def all_in_parens(string: str) -> bool:
-            if string[0] != "(" or len(string) < 2:
-                return False
-            count = 1
-            for i, char in enumerate(string[1:]):
-                if char == "(":
-                    count += 1
-                elif char == ")":
-                    count -= 1
-                if count == 0 and i != len(string) - 2:
-                    return False
-            assert count == 0
-            return True
-
-        if (
-            isinstance(string, CSEVariable)
-            or re.match(r"^[a-z0-9_.]+$", string, re.IGNORECASE)
-            or re.match(r"^\([^)]*\)$", string, re.IGNORECASE)
-            or string == ""
-        ):
-            return string
-        # don't put extra parens for strings that are already wrapped in parens
-        if all_in_parens(string):
-            return string
-        return f"({string})"
-
-    def __getattr__(self, item):
-        return getattr(self._parent, item)
+class OpDecompositions:
+    """
+    Decomposes inductor ops
+    """
 
     @staticmethod
     def identity(value):
         # used to trigger cse
         return value
-
-    @staticmethod
-    def constant(value, dtype):
-        return repr(value)
 
     @staticmethod
     def reciprocal(x):
@@ -704,13 +665,84 @@ class OpOverrides:
         return ops.truediv(one, ops.add(one, ops.exp(ops.neg(x))))
 
     @staticmethod
+    def relu(x):
+        return ops.maximum(x, ops.constant(0, torch.int32))
+
+    @staticmethod
+    def fma(x, y, z):
+        # for backends that don't override this (halide)
+        return ops.add(ops.mul(x, y), z)
+
+    @staticmethod
+    def floor_to_int(a, dtype):
+        return ops.to_dtype(ops.floor(a), dtype)
+
+    @staticmethod
+    def ceil_to_int(a, dtype):
+        return ops.to_dtype(ops.ceil(a), dtype)
+
+    @staticmethod
+    def trunc_to_int(a, dtype):
+        return ops.to_dtype(ops.trunc(a), dtype)
+
+    @staticmethod
+    def remainder(a, b):
+        r = ops.mod(a, b)
+        cond = ops.and_(
+            ops.ne(r, ops.constant(0, torch.int32)),
+            ops.ne(ops.signbit(r), ops.signbit(b)),
+        )
+        return ops.where(cond, ops.add(r, b), r)
+
+    @staticmethod
+    def round_to_int(a, dtype):
+        return ops.to_dtype(ops.round(a), dtype)
+
+
+class OpOverrides(OpDecompositions):
+    def __init__(self, parent):
+        super().__init__()
+        self._parent = parent
+
+    @staticmethod
+    def paren(string: str) -> str:
+        def all_in_parens(string: str) -> bool:
+            if string[0] != "(" or len(string) < 2:
+                return False
+            count = 1
+            for i, char in enumerate(string[1:]):
+                if char == "(":
+                    count += 1
+                elif char == ")":
+                    count -= 1
+                if count == 0 and i != len(string) - 2:
+                    return False
+            assert count == 0
+            return True
+
+        if (
+            isinstance(string, CSEVariable)
+            or re.match(r"^[a-z0-9_.]+$", string, re.IGNORECASE)
+            or re.match(r"^\([^)]*\)$", string, re.IGNORECASE)
+            or string == ""
+        ):
+            return string
+        # don't put extra parens for strings that are already wrapped in parens
+        if all_in_parens(string):
+            return string
+        return f"({string})"
+
+    def __getattr__(self, item):
+        return getattr(self._parent, item)
+
+    @staticmethod
+    def constant(value, dtype):
+        return repr(value)
+
+    @staticmethod
     def libdevice_sigmoid(x):
         one = ops.constant(1, torch.int32)
         return ops.truediv(one, ops.add(one, ops.libdevice_exp(ops.neg(x))))
-
-    @staticmethod
-    def relu(x):
-        return ops.maximum(x, ops.constant(0, torch.int32))
 
     @staticmethod
     def libdevice_abs(x):
@@ -763,36 +795,6 @@ class OpOverrides:
     @staticmethod
     def bitwise_right_shift(x, y):
         return f"{OpOverrides.paren(x)} >> {OpOverrides.paren(y)}"
-
-    @staticmethod
-    def remainder(a, b):
-        r = ops.mod(a, b)
-        cond = ops.and_(
-            ops.ne(r, ops.constant(0, torch.int32)),
-            ops.ne(ops.signbit(r), ops.signbit(b)),
-        )
-        return ops.where(cond, ops.add(r, b), r)
-
-    @staticmethod
-    def fma(x, y, z):
-        # for backends that don't override this (halide)
-        return ops.add(ops.mul(x, y), z)
-
-    @staticmethod
-    def trunc_to_int(a, dtype):
-        return ops.to_dtype(ops.trunc(a), dtype)
-
-    @staticmethod
-    def floor_to_int(a, dtype):
-        return ops.to_dtype(ops.floor(a), dtype)
-
-    @staticmethod
-    def ceil_to_int(a, dtype):
-        return ops.to_dtype(ops.ceil(a), dtype)
-
-    @staticmethod
-    def round_to_int(a, dtype):
-        return ops.to_dtype(ops.round(a), dtype)
 
     @staticmethod
     def int_truediv(a, b):
@@ -1419,7 +1421,7 @@ class CSEVariable:
         assert isinstance(bounds, ValueRanges)
         self.name = name
         self.bounds = bounds
-        self.use_count = 1  # track how many tims this expression is used
+        self.use_count = 1  # track how many times this expression is used
         self.dtype = dtype
 
     def __str__(self):
@@ -1466,7 +1468,7 @@ class CSE:
         self.invalidated_stores = OrderedSet()  # type: ignore[var-annotated]
         self.varname_map = varname_map or {}
 
-    def invalidate(self, keep_vars: OrderedSet[str]):
+    def invalidate(self, keep_vars: Union[OrderedSet[str], Set[Never]]):
         for name, tmp in list(self.store_cache.items()):
             if tmp not in keep_vars:
                 del self.store_cache[name]
@@ -1569,203 +1571,18 @@ class CSE:
         self.varname_map[var_name] = var
         return var
 
-
-@functools.lru_cache(None)
-def get_promoted_dtype(*args, type_promotion_kind: ELEMENTWISE_TYPE_PROMOTION_KIND):
-    def construct_input(inp):
-        if isinstance(inp, torch._prims_common.Number):
-            return inp
-        else:
-            # construct a tmp tensor to use dtype promotion util function
-            return torch.empty([1], dtype=inp.dtype)
-
-    inps = [construct_input(arg) for arg in args]
-    _, dtype = torch._prims_common.elementwise_dtypes(
-        *inps, type_promotion_kind=type_promotion_kind
-    )
-    return dtype
-
-
-def promote_types(args):
-    dtype_prop_candidates = []
-
-    # CSEVariable and scalar will be included in dtype_prop_candidates
-    for arg in args:
-        if isinstance(arg, str):
-            continue
-        elif (
-            isinstance(arg, OpsValue)
-            and isinstance(arg.value, CSEVariable)
-            and arg.value.dtype is not None
-        ):
-            dtype_prop_candidates.append(arg.value)
-        elif (isinstance(arg, CSEVariable) and arg.dtype is not None) or isinstance(
-            arg, torch._prims_common.Number
-        ):
-            dtype_prop_candidates.append(arg)  # type: ignore[arg-type]
-
-    dtype = get_promoted_dtype(
-        *dtype_prop_candidates,
-        type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
-    )
-
-    return dtype
-
-
-class DtypePropagationOpsHandler:
-    """
-    Propagate dtype from args to output
-    """
-
-    @staticmethod
-    def default_handler(*args):
-        # Fallback to FP32 dtype
-        return torch.float32
-
-    @staticmethod
-    def randint64(seed, offset, low, high):
-        return torch.int64
-
-    @staticmethod
-    def where(a, b, c):
-        return promote_types([b, c])
-
-    @staticmethod
-    def to_dtype_bitcast(x, dtype: torch.dtype, src_dtype: torch.dtype):
-        return dtype
-
-    @staticmethod
-    def load_seed(name, offset):
-        return torch.float32
-
-    @staticmethod
-    def masked(mask, body, other):
-        # TODO: inspect body to propagate dtype
-        return torch.float32
-
-    @staticmethod
-    def index_expr(expr, dtype):
-        return dtype
-
-    @staticmethod
-    def isnan(x):
-        return torch.bool
-
-    @staticmethod
-    def lt(a, b):
-        return torch.bool
-
-    @staticmethod
-    def to_dtype(x, dtype: torch.dtype, src_dtype: Optional[torch.dtype] = None):
-        return dtype
-
-    @staticmethod
-    def constant(value, dtype):
-        return dtype
-
-    @staticmethod
-    def mul(a, b):
-        return promote_types([a, b])
-
-    @staticmethod
-    def sub(a, b):
-        return promote_types([a, b])
-
-    @staticmethod
-    def add(a, b):
-        return promote_types([a, b])
-
-    @staticmethod
-    def div(a, b):
-        return promote_types([a, b])
-
-    @staticmethod
-    def abs(x):
-        return promote_types([x])
-
-    @staticmethod
-    def exp(x):
-        return promote_types([x])
-
-    @staticmethod
-    def truediv(a, b):
-        return promote_types([a, b])
-
-    @staticmethod
-    def pow(a, b):
-        return promote_types([a, b])
-
-    @staticmethod
-    def sqrt(x):
-        return promote_types([x])
-
-    @staticmethod
-    def rsqrt(x):
-        return promote_types([x])
-
-    @staticmethod
-    def sigmoid(x):
-        return promote_types([x])
-
-    @staticmethod
-    def gelu(x):
-        return promote_types([x])
-
-    @staticmethod
-    def neg(x):
-        return promote_types([x])
-
-    @staticmethod
-    def minimum(a, b):
-        return promote_types([a, b])
-
-    @staticmethod
-    def maximum(a, b):
-        return promote_types([a, b])
-
-    @staticmethod
-    def log(x):
-        return promote_types([x])
-
-    @staticmethod
-    def log1p(x):
-        return promote_types([x])
-
-    @staticmethod
-    def gt(a, b):
-        return torch.bool
-
-    @staticmethod
-    def ge(a, b):
-        return torch.bool
-
-    @staticmethod
-    def reciprocal(x):
-        return promote_types([x])
-
-    @staticmethod
-    def and_(a, b):
-        return torch.bool
-
-    @staticmethod
-    def bitwise_right_shift(a, b):
-        return a.dtype
-
-    @staticmethod
-    def bitwise_left_shift(a, b):
-        return a.dtype
-
-    @staticmethod
-    def sin(x):
-        return promote_types([x])
-
-    @staticmethod
-    def cos(x):
-        return promote_types([x])
-
-    @staticmethod
-    def mod(a, b):
-        return promote_types([a, b])
+    def namedvar(
+        self,
+        name: str,
+        bounds: ValueRanges[Any] = ValueRanges.unknown(),
+        dtype: Optional[torch.dtype] = None,
+    ) -> CSEVariable:
+        torch._check_value(
+            name not in self.varname_map, lambda: f"duplicate name: {name}"
+        )
+        var = V.kernel.create_cse_var(name, bounds, dtype)
+        self.varname_map[name] = var
+        return var
 
 
 class CodeGen:
@@ -2001,13 +1818,34 @@ class Kernel(CodeGen):
                     bounds = CSEProxy._bound_variable(name, *args, **kwargs)
 
                     value = getattr(parent_handler, name)(*args, **kwargs)  # type: ignore[has-type]
+                    dtype_handler = DtypePropagationOpsHandler()
+
+                    output_idx = 0
 
                     def do_cse(v):
-                        output_dtype = getattr(
-                            DtypePropagationOpsHandler,
-                            name,
-                            DtypePropagationOpsHandler.default_handler,
-                        )(*args)
+                        # cpp backend doesnt set current device - TODO: fix
+                        if V.graph.current_device is not None:
+                            device_str = V.graph.get_current_device_or_throw().type
+                            triton_backend = (
+                                config.cpu_backend == "triton"
+                                if device_str == "cpu"
+                                else config.cuda_backend == "triton"
+                            )
+                        else:
+                            triton_backend = False
+
+                        # only triton backend tracks dtype currently
+                        if triton_backend:
+                            if name == "masked":
+                                output_dtype = value.dtype
+                            else:
+                                output_dtype = getattr(
+                                    dtype_handler,
+                                    name,
+                                )(*args, **kwargs)
+                        else:
+                            # cpp backend doesnt track dtype yet
+                            output_dtype = None
 
                         csevar = V.kernel.cse.generate(
                             V.kernel.compute,
@@ -2015,7 +1853,25 @@ class Kernel(CodeGen):
                             bounds=bounds,
                             dtype=output_dtype,
                         )
+
+                        nonlocal output_idx
+                        if (
+                            config.test_configs.runtime_triton_dtype_assert
+                            and triton_backend
+                        ):
+                            from torch._inductor.codegen.triton import triton_type
+
+                            # we tree_map over the output, so we need to fetch corresponding dtype
+                            if isinstance(output_dtype, (list, tuple)):
+                                output_dtype = output_dtype[output_idx]
+
+                            V.kernel.compute.writeline(
+                                f"tl.static_assert({csevar}.dtype == {triton_type(output_dtype)})"
+                            )
+                        output_idx += 1
+
                         csevar.update_on_args(name, args, kwargs)
+
                         return csevar
 
                     return pytree.tree_map(do_cse, value)
@@ -2478,7 +2334,7 @@ class KernelTemplate:
         except NotImplementedError as e:
             return e
 
-    def generate(self, **kwargs) -> "torch._inductor.ir.ChoiceCaller":
+    def generate(self, **kwargs) -> torch._inductor.ir.ChoiceCaller:
         """
         Generates a ChoiceCaller instance from the given arguments.
         """

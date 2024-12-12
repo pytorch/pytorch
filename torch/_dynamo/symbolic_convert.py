@@ -55,10 +55,10 @@ from .replay_record import DummyModule, ExecutionRecorder
 from .resume_execution import ContinueExecutionCache, ReenterWith
 from .source import (
     AttrSource,
-    AutoDerefLocalSource,
     GetItemSource,
     GlobalSource,
     GlobalWeakRefSource,
+    LocalCellSource,
     LocalSource,
     Source,
 )
@@ -99,8 +99,8 @@ from .variables.lists import (
     TupleVariable,
 )
 from .variables.misc import (
+    CellVariable,
     GetAttrVariable,
-    NewCellVariable,
     NullVariable,
     PythonModuleVariable,
     UnknownVariable,
@@ -1132,9 +1132,9 @@ class InstructionTranslatorBase(
         val = self.pop()
         self.output.side_effects.store_cell(cell, val)
 
-        assert isinstance(cell, NewCellVariable)  # tame mypy
-        if cell.is_root_frame_cell():
-            val.set_name_hint(cell.source.local_name)  # type: ignore[attr-defined]
+        assert isinstance(cell, CellVariable)  # tame mypy
+        if cell.local_name is not None:
+            val.set_name_hint(cell.local_name)  # type: ignore[attr-defined]
 
     LOAD_CLOSURE = LOAD_FAST
 
@@ -1858,14 +1858,13 @@ class InstructionTranslatorBase(
     @break_graph_if_unsupported(push=0)
     def STORE_SUBSCR(self, inst):
         val, obj, key = self.popn(3)
-        result = obj.call_method(self, "__setitem__", [key, val], {})
+        obj.call_method(self, "__setitem__", [key, val], {})
 
     def DELETE_SUBSCR(self, inst):
         obj, key = self.popn(2)
         obj.call_method(self, "__delitem__", [key], {})
 
     def BUILD_TUPLE(self, inst):
-        name_tuple = None
         items = self.popn(inst.argval)
         self.push(TupleVariable(items))
 
@@ -1971,7 +1970,6 @@ class InstructionTranslatorBase(
 
     def MAKE_FUNCTION(self, inst):
         flags = inst.arg
-        old_stack = list(self.stack)
         if sys.version_info < (3, 11):
             fn_name = self.pop()
         code = self.pop()
@@ -2087,6 +2085,15 @@ class InstructionTranslatorBase(
         self.push(b)
         self.push(a)
 
+    def _convert_value(self, value, flag):
+        if flag == 1:
+            return BuiltinVariable(str).call_function(self, [value], {})  # type: ignore[arg-type]
+        elif flag == 2:
+            return BuiltinVariable(repr).call_function(self, [value], {})  # type: ignore[arg-type]
+        elif flag == 3:
+            return BuiltinVariable(ascii).call_function(self, [value], {})  # type: ignore[arg-type]
+        return value
+
     def _format_value(self, fmt_spec, flags):
         value = self.pop()
         if isinstance(value, SymNodeVariable):
@@ -2100,12 +2107,8 @@ class InstructionTranslatorBase(
             )
             self.push(value)
             return
-        if (flags & 0x03) == 0x01:
-            value = BuiltinVariable(str).call_function(self, [value], {})  # type: ignore[arg-type]
-        elif (flags & 0x03) == 0x02:
-            value = BuiltinVariable(repr).call_function(self, [value], {})  # type: ignore[arg-type]
-        elif (flags & 0x03) == 0x03:
-            value = BuiltinVariable(ascii).call_function(self, [value], {})  # type: ignore[arg-type]
+
+        value = self._convert_value(value, flags & 0x03)
 
         fmt_var = ConstantVariable.create("{:" + fmt_spec.as_python_constant() + "}")
 
@@ -2504,6 +2507,9 @@ class InstructionTranslatorBase(
 
         self.push(fn)
 
+    def CONVERT_VALUE(self, inst):
+        self.push(self._convert_value(self.pop(), inst.argval))
+
     def FORMAT_SIMPLE(self, inst):
         self._format_value(ConstantVariable.create(""), 0)
 
@@ -2771,7 +2777,7 @@ class InstructionTranslator(InstructionTranslatorBase):
                     # 1. Dynamo only uses these cell objects for their ids, so that
                     # if we encounter the same cell (if it's captured by some
                     # pre-existing function), we'll reuse the original
-                    # `NewCellVariable` instance we created for the cell object.
+                    # `CellVariable` instance we created for the cell object.
                     #
                     # 2. In this case the original cell object should've
                     # never been accessed by anyone else, as Dynamo intercepts
@@ -2779,30 +2785,26 @@ class InstructionTranslator(InstructionTranslatorBase):
                     # after these cell objects are created. Thus they cannot be
                     # captured by any pre-existig function.
                     dummy_cell = types.CellType(value)
-                    cell_source = LocalSource(
-                        name, is_input=True, is_root_frame_cell=True
+                    cell_source = LocalCellSource(name)
+                    contents_source = LocalSource(
+                        name, is_input=True, is_derefed_cell_contents=True
                     )
-                    contents_source = AutoDerefLocalSource(cell_source)
                     contents_var: VariableTracker = LazyVariableTracker.create(
                         value, contents_source
                     )
                     cell_var = side_effects.track_cell_existing(
                         cell_source, dummy_cell, contents_var
                     )
-                    self.symbolic_locals[name] = cell_var
                 else:
                     cell_var = side_effects.track_cell_new()
-                    self.symbolic_locals[name] = cell_var
-                    # We conveniently piggyback on `LocalSource.reconstruct` so
-                    # we don't have to plumb extra stuff down to simplify
-                    # codegen of `cell_var` and its side effects.
-                    cell_var.source = LocalSource(name, is_root_frame_cell=True)
+                cell_var.local_name = name
+                self.symbolic_locals[name] = cell_var
 
             # Populate `symbolic_locals` with cells captured by this frame,
             # effectively implementing the `COPY_FREE_VARS` instruction.
             for name, cell in zip(self.freevars(), closure):
-                cell_source = LocalSource(name, is_root_frame_cell=True)
-                contents_source = AutoDerefLocalSource(cell_source)
+                cell_source = LocalCellSource(name)
+                contents_source = LocalSource(name, is_derefed_cell_contents=True)
                 try:
                     contents_var = LazyVariableTracker.create(
                         cell.cell_contents, contents_source
@@ -2813,6 +2815,7 @@ class InstructionTranslator(InstructionTranslatorBase):
                 cell_var = side_effects.track_cell_existing(
                     cell_source, cell, contents_var
                 )
+                cell_var.local_name = name
                 self.symbolic_locals[name] = cell_var
 
             self.symbolic_torch_function_state = SymbolicTorchFunctionState(
@@ -3204,7 +3207,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             msg = f"SKIPPED INLINING {code}: {e}"
             log.debug(msg)
             raise Unsupported(msg) from e
-        except Exception as e:
+        except Exception:
             log.debug("FAILED INLINING %s", code)
             raise
         assert tracer.symbolic_result is not None
@@ -3332,7 +3335,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             if isinstance(value, RemovableHandleVariable):
                 unimplemented("Storing handles in globals - NYI")
             name = inst.argval
-            fglobals_value, fglobals_vt, _ = self.get_globals_source_and_value(name)
+            _fglobals_value, fglobals_vt, _ = self.get_globals_source_and_value(name)
             self.output.side_effects.store_attr(fglobals_vt, name, value)
 
 

@@ -125,6 +125,7 @@ class TestDynamoTimed(TestCase):
     # return the same value; all durations will be zero.
     @mock.patch("time.time", return_value=0.001)
     @mock.patch("time.time_ns", return_value=100000)
+    @dynamo_config.patch(specialize_float=False)
     def test_dynamo_timed(self, mock_time, mock_time_ns):
         """
         Run a compilation that includes a forward and a backward and validate
@@ -180,6 +181,7 @@ class TestDynamoTimed(TestCase):
 {'_recursive_joint_graph_passes': 0.0,
  '_recursive_post_grad_passes': 0.0,
  '_recursive_pre_grad_passes': 0.0,
+ 'async_compile.wait': 0.0,
  'backend_compile': 0.0,
  'code_gen': 0.0,
  'entire_backward_compile': 0.0,
@@ -270,12 +272,12 @@ class TestDynamoTimed(TestCase):
  'runtime_cudagraphify_time_us': None,
  'runtime_triton_autotune_time_us': None,
  'shape_env_guard_count': 0,
- 'specialize_float': True,
+ 'specialize_float': False,
  'start_time': 0.0001,
  'start_time_us': 100,
  'structured_logging_overhead_s': 0.0,
  'structured_logging_overhead_us': 0,
- 'triton_compile_time_us': None,
+ 'triton_compile_time_us': 0,
  'triton_version': None}""",  # noqa: B950
         )
 
@@ -349,7 +351,7 @@ class TestDynamoTimed(TestCase):
  'start_time_us': 100,
  'structured_logging_overhead_s': 0.0,
  'structured_logging_overhead_us': 0,
- 'triton_compile_time_us': None,
+ 'triton_compile_time_us': 0,
  'triton_version': None}""",  # noqa: B950
         )
 

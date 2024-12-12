@@ -11,7 +11,18 @@ import sys
 import traceback
 import weakref
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple, TYPE_CHECKING, Union
+from typing import (
+    Any,
+    Callable,
+    cast,
+    Dict,
+    List,
+    Optional,
+    Set,
+    Tuple,
+    TYPE_CHECKING,
+    Union,
+)
 
 import sympy
 
@@ -47,6 +58,7 @@ from .backends.registry import CompiledFn, CompilerFn
 from .bytecode_transformation import (
     create_call_function,
     create_instruction,
+    create_load_const,
     Instruction,
     unique_id,
 )
@@ -60,6 +72,8 @@ from .exc import (
     unimplemented,
     unimplemented_with_warning,
 )
+from .graph_deduplication import apply_graph_deduplication
+from .graph_region_tracker import GraphRegionTracker
 from .guards import GuardBuilder, install_guard
 from .mutation_guard import is_dynamic_nn_module
 from .side_effects import AttributeMutationExisting, SideEffects
@@ -105,7 +119,7 @@ from .variables.builder import (
     wrap_fx_proxy,
 )
 from .variables.lists import BaseListVariable
-from .variables.misc import NullVariable
+from .variables.misc import CellVariable, NullVariable
 from .variables.nn_module import NNModuleVariable
 from .variables.tensor import (
     NumpyNdarrayVariable,
@@ -284,6 +298,8 @@ class OutputGraph:
             "co_filename": f_code.co_filename,
             "co_firstlineno": f_code.co_firstlineno,
         }
+
+        self.region_tracker = GraphRegionTracker()
 
         # tracked_fakes says where any tensor that was wrapped to fake came
         # from.  It is similar to GraphArg, in that all GraphArgs will get
@@ -620,8 +636,11 @@ class OutputGraph:
         """
         Saves to out if it is provided. Else saves to the tracing context's global_state.
         """
-        global_state = (
-            out if out is not None else self.tracing_context.global_context.global_state
+        global_state = cast(
+            Dict[str, Tuple[Callable[..., Any], bool]],
+            out
+            if out is not None
+            else self.tracing_context.global_context.global_state,
         )
 
         # TODO - Consider having a torch level API for torch_function_state. As
@@ -644,11 +663,11 @@ class OutputGraph:
             functools.partial(torch.set_autocast_enabled, "cpu"),
             torch.is_autocast_enabled("cpu"),
         )
-        global_state["autocast_gpu_dtype"] = (
+        global_state["autocast_gpu_dtype"] = (  # type:ignore[assignment]
             functools.partial(torch.set_autocast_dtype, "cuda"),
             torch.get_autocast_dtype("cuda"),
         )
-        global_state["autocast_cpu_dtype"] = (
+        global_state["autocast_cpu_dtype"] = (  # type:ignore[assignment]
             functools.partial(torch.set_autocast_dtype, "cpu"),
             torch.get_autocast_dtype("cpu"),
         )
@@ -925,7 +944,7 @@ class OutputGraph:
                     alias_insts.extend(
                         [
                             create_instruction("LOAD_FAST", argval=list_name),
-                            create_instruction("LOAD_CONST", argval=list_idx),
+                            create_load_const(list_idx),
                             create_instruction("BINARY_SUBSCR"),
                             create_instruction("STORE_FAST", argval=alias_name),
                         ]
@@ -1000,6 +1019,8 @@ class OutputGraph:
         for value in stack_values:
             value.realize()
 
+        output_replacements = self.dedup_pass()
+
         # Use nn.Module "proxies" in the constructed GraphModule so that
         # the resulting GM does not hold additional strong references to the original modules.
         # This prevents a strong ref cycle where Dynamo created code holds on to references
@@ -1025,6 +1046,8 @@ class OutputGraph:
             # This was very tricky to debug. For an example, dump the graph at call_user_compiler
             # while running test_subgraphs.py
             if isinstance(v.source, LocalSource) and v.source.local_name == k:
+                continue  # no need to restore initial state
+            if isinstance(v, CellVariable) and v.local_name == k:
                 continue  # no need to restore initial state
             # Do not load variable if it is NULL.
             if sys.version_info >= (3, 12):
@@ -1081,7 +1104,9 @@ class OutputGraph:
             append_prefix_insts()
             # optimization to generate better code in a common case
             self.add_output_instructions(
-                self.compile_and_call_fx_graph(tx, list(reversed(stack_values)), root)
+                self.compile_and_call_fx_graph(
+                    tx, list(reversed(stack_values)), root, output_replacements
+                )
                 + [create_instruction("UNPACK_SEQUENCE", arg=len(stack_values))]
             )
             # restore all the live local vars
@@ -1114,7 +1139,9 @@ class OutputGraph:
             output = []
             if count_calls(self.graph) != 0 or len(pass2.graph_outputs) != 0:
                 output.extend(
-                    self.compile_and_call_fx_graph(tx, pass2.graph_output_vars(), root)
+                    self.compile_and_call_fx_graph(
+                        tx, pass2.graph_output_vars(), root, output_replacements
+                    )
                 )
 
                 if len(pass2.graph_outputs) != 0:
@@ -1275,7 +1302,7 @@ class OutputGraph:
             tx.speculation_log.clear()
             raise exc.CompileCollectiveRestartAnalysis
 
-    def compile_and_call_fx_graph(self, tx, rv, root):
+    def compile_and_call_fx_graph(self, tx, rv, root, replaced_outputs):
         """
         Generate code from self.graph and return the Instruction()s to
         call that generated code.
@@ -1291,12 +1318,17 @@ class OutputGraph:
 
             assert isinstance(rv, list)
             assert isinstance(root, FakeRootModule)
+
             output_node = self.create_node(
                 "output",
                 "output",
                 (self.current_tracer.create_arg(tuple(x.as_proxy() for x in rv)),),
                 {},
             )
+
+            for old_node, new_node in replaced_outputs.items():
+                old_node.replace_all_uses_with(new_node)
+
             tx.output.current_tracer._maybe_preserve_original_meta(tx, output_node)
             if not config.do_not_emit_runtime_asserts:
                 insert_deferred_runtime_asserts(
@@ -1472,6 +1504,29 @@ class OutputGraph:
         )
 
         return compiled_fn
+
+    def dedup_pass(self):
+        if torch._dynamo.config.use_graph_deduplication:
+            return apply_graph_deduplication(self)
+        else:
+            return dict()
+
+    def install_subgraph(self, name, sub_gm):
+        next_name = None
+        i = 0
+        while not next_name:
+            candidate = f"{name}_{i}"
+            if candidate in self.nn_modules:
+                i += 1
+            else:
+                next_name = candidate
+
+        sub_gm.__name__ = next_name
+        sub_gm.torchdynamo_force_dynamic = False
+        # This graph module is not present in the user space, so it can't be
+        # accessed by a source. Set source=None.
+        self.register_attr_or_module(sub_gm, next_name, source=None)
+        return next_name
 
     def example_inputs(self) -> List[torch.Tensor]:
         result = [arg.example for arg in self.graphargs]
@@ -2087,6 +2142,13 @@ class SubgraphTracer(fx.Tracer):
             msgs = traceback.StackSummary.from_list(frame_summaries).format()
             rv.node.stack_trace = "".join(msgs)
 
+        if (
+            torch._dynamo.config.use_graph_deduplication
+            or torch._dynamo.config.track_nodes_for_deduplication
+        ):
+            self.output_graph.region_tracker.track_node(
+                self.output_graph.current_tx, rv.node
+            )
         return rv
 
     def create_node(
@@ -2275,7 +2337,19 @@ class SubgraphTracer(fx.Tracer):
         original arg.
         """
         if not isinstance(arg, torch.fx.Proxy):
-            return arg
+            # Note: arg can be a python built-in slice type e.g.
+            # x[:max_seq] is represented as get_item(t, (slice(None, max_seq, None)))
+            # we need to also look into the slice variable itself to lift the
+            # proxies there.
+            if isinstance(arg, slice):
+                return slice(
+                    *(
+                        self.maybe_lift_tracked_freevar_to_input(sub_arg)
+                        for sub_arg in (arg.start, arg.stop, arg.step)
+                    )
+                )
+            else:
+                return arg
         elif arg.tracer == self:
             return arg
         return self.lift_tracked_freevar_to_input(arg)
