@@ -12756,7 +12756,9 @@ if HAS_GPU and not TEST_WITH_ASAN:
             for dynamic_shapes in [True, False]:
                 with torch._dynamo.config.patch(dynamic_shapes=dynamic_shapes):
                     torch._dynamo.reset()
-                    fn_opt = torch.compile(fn, backend="inductor", dynamic=dynamic_shapes)
+                    fn_opt = torch.compile(
+                        fn, backend="inductor", dynamic=dynamic_shapes
+                    )
                     inps = torch.randn([5, 5])
                     fn_opt(inps)
 

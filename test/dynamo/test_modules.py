@@ -1477,7 +1477,7 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         pre = m(data)
         cnt.clear()
 
-        with torch.compile(backend=cnt, fullgraph=False):
+        with torch._dynamo.optimize(cnt, nopython=False):
             opt_pre = m(data)
             m = M(module_dict)
             data = torch.randn(1)
