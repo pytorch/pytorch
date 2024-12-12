@@ -369,9 +369,6 @@ core_sources_full_mobile_no_backend_interface_xplat = [
     "torch/csrc/jit/tensorexpr/types.cpp",
     "torch/csrc/jit/tensorexpr/unique_name_manager.cpp",
     "torch/csrc/jit/testing/file_check.cpp",
-    "torch/csrc/profiler/unwind/unwind.cpp",
-    "torch/csrc/profiler/unwind/unwind_fb.cpp",
-    "torch/csrc/profiler/combined_traceback.cpp",
     "torch/csrc/jit/testing/hooks_for_testing.cpp",
     "torch/csrc/utils/cpp_stacktraces.cpp",
     "torch/csrc/utils/schema_info.cpp",
@@ -567,6 +564,19 @@ libtorch_distributed_extra_sources = [
     "torch/csrc/distributed/rpc/torchscript_functions.cpp",
     "torch/csrc/distributed/rpc/types.cpp",
     "torch/csrc/distributed/rpc/utils.cpp",
+]
+
+libtorch_memory_profiler_sources = [
+    "torch/csrc/profiler/unwind/unwind.cpp",
+    "torch/csrc/profiler/unwind/unwind_fb.cpp",
+    "torch/csrc/profiler/python/combined_traceback.cpp",
+    "torch/csrc/profiler/combined_traceback.cpp",
+]
+
+libtorch_memory_profiler_headers = [
+    "torch/csrc/profiler/unwind/unwind.h",
+    "torch/csrc/profiler/combined_traceback.h",
+    "torch/csrc/profiler/python/combined_traceback.h",
 ]
 
 libtorch_distributed_sources = libtorch_distributed_base_sources + libtorch_distributed_extra_sources
@@ -901,7 +911,6 @@ libtorch_python_core_sources = [
     "torch/csrc/multiprocessing/init.cpp",
     "torch/csrc/onnx/init.cpp",
     "torch/csrc/profiler/python/init.cpp",
-    "torch/csrc/profiler/python/combined_traceback.cpp",
     "torch/csrc/serialization.cpp",
     "torch/csrc/tensor/python_tensor.cpp",
     "torch/csrc/utils/init.cpp",
