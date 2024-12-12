@@ -1,14 +1,14 @@
 #pragma once
 
-#include <c10/core/Device.h>
-#include <c10/macros/Export.h>
+#include <torch/csrc/Export.h>
 
+#include <cstddef>
 #include <cstdint>
 
 namespace torch::cuda {
 
 /// Returns the number of CUDA devices available.
-c10::DeviceIndex TORCH_API device_count();
+size_t TORCH_API device_count();
 
 /// Returns true if at least one CUDA device is available.
 bool TORCH_API is_available();
