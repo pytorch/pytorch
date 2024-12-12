@@ -165,6 +165,10 @@ jobs:
         shell: cmd
         run: |
           "builder/windows/arm64/bootstrap_git.bat"
+      - name: Bootstrap APL
+        shell: cmd
+        run: |
+          "builder/windows/arm64/bootstrap_apl.bat"
       - name: Git checkout PyTorch
         uses: actions/checkout@v4
         with:
