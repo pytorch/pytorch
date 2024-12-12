@@ -1401,7 +1401,9 @@ class CppVecOverrides(CppOverrides):
 
     @staticmethod
     def asinh(x):
-        return f"{x}.asinh()"
+        # For real x, asinh(x) = log(x + sqrt(1 + x**2))
+        vec_one = f"decltype({x})(1)"
+        return f"({x} + ({vec_one} + {x}*{x}).sqrt()).log()"
 
     @staticmethod
     def acosh(x):
@@ -4919,7 +4921,7 @@ class KernelGroup:
         new_kernel.codegen_loops(code, ws)
 
     def get_num_args(self):
-        arg_defs, call_args, arg_types = self.args.cpp_argdefs()
+        arg_defs, _call_args, _arg_types = self.args.cpp_argdefs()
         args_num = len(arg_defs)
         return args_num
 
