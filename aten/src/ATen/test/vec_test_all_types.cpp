@@ -561,8 +561,8 @@ namespace {
         bool expected = std::isnan(val);
         CACHE_ALIGN c10::Half actual_vals[vHalf::size()];
         vHalf(val).isnan().store(actual_vals);
-        for (int jj = 0; jj < vHalf::size(); ++jj) {
-          EXPECT_EQ(expected, c10::bit_cast<uint16_t>(actual_vals[jj]) != 0) << "fp16 isnan failure for bit pattern " << std::hex << ii << std::dec;
+        for (auto actual_val : actual_vals) {
+          EXPECT_EQ(expected, c10::bit_cast<uint16_t>(actual_val) != 0) << "fp16 isnan failure for bit pattern " << std::hex << ii << std::dec;
         }
       }
     }
@@ -1777,8 +1777,8 @@ namespace {
         const auto expected = static_cast<float>(val);
         CACHE_ALIGN float actual_vals[vfloat::size()];
         at::vec::convert<float>(vBFloat16(val)).store(actual_vals);
-        for (int jj = 0; jj < vfloat::size(); ++jj) {
-          EXPECT_EQ(c10::bit_cast<uint32_t>(expected), c10::bit_cast<uint32_t>(actual_vals[jj]))
+        for (auto actual_val : actual_vals) {
+          EXPECT_EQ(c10::bit_cast<uint32_t>(expected), c10::bit_cast<uint32_t>(actual_val))
             << "convert-to-float failure for bf16 bit pattern "
             << std::hex << ii << std::dec;
         }
