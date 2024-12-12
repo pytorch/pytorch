@@ -1190,12 +1190,15 @@ def trace_structured(
             if (
                 trace_id := torch._guards.CompileContext.current_trace_id()
             ) is not None:
-                record[
-                    "compiled_autograd_id"
-                ] = trace_id.compile_id.compiled_autograd_id
-                record["frame_id"] = trace_id.compile_id.frame_id
-                record["frame_compile_id"] = trace_id.compile_id.frame_compile_id
-                record["attempt"] = trace_id.attempt
+                cid = trace_id.compile_id
+                if cid.compiled_autograd_id is not None:
+                    record["compiled_autograd_id"] = cid.compiled_autograd_id
+                if cid.frame_id is not None:
+                    record["frame_id"] = cid.frame_id
+                if cid.frame_compile_id is not None:
+                    record["frame_compile_id"] = cid.frame_compile_id
+                if trace_id.attempt is not None:
+                    record["attempt"] = trace_id.attempt
             else:
                 if expect_trace_id:
                     # Record the stack of the log call to better diagnose why we
