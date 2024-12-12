@@ -332,7 +332,7 @@ def _single_tensor_sgd(
     nesterov: bool,
     maximize: bool,
     has_sparse_grad: bool,
-    differentiable: bool = False,
+    differentiable: bool,
 ):
     assert grad_scale is None and found_inf is None
 
@@ -375,7 +375,7 @@ def _multi_tensor_sgd(
     nesterov: bool,
     maximize: bool,
     has_sparse_grad: bool,
-    differentiable: bool = False,
+    differentiable: bool,
 ):
     assert grad_scale is None and found_inf is None
     if differentiable:
@@ -470,7 +470,7 @@ def _fused_sgd(
     nesterov: bool,
     maximize: bool,
     has_sparse_grad: bool,
-    differentiable: bool = False,
+    differentiable: bool,
 ) -> None:
     if not params:
         return
