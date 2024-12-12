@@ -592,8 +592,8 @@ struct TORCH_API TensorType : public SharedType {
   static TensorTypePtr create(
       std::optional<at::ScalarType> scalar_type,
       std::optional<Device> device,
-      const SymbolicShape& sizes,
-      const VaryingShape<Stride>& stride_,
+      SymbolicShape sizes,
+      VaryingShape<Stride> stride_,
       std::optional<bool> requires_grad,
       std::optional<bool> undefined = false);
 

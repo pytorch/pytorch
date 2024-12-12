@@ -9,6 +9,7 @@ import operator
 import os
 import warnings
 from collections import defaultdict
+from collections.abc import Iterable
 from typing import Any, Callable, Dict, List, Optional, Sequence, Set, Tuple, Union
 from unittest.mock import patch
 
@@ -75,6 +76,13 @@ from .utils import (
 from .virtualized import ops, V
 
 
+# TODO(jansel): we should implement decomps or lowerings for these
+# https://github.com/pytorch/torchdynamo/issues/327
+FALLBACK_ALLOW_LIST = {
+    "torchvision::roi_align",
+    "aten::index_add",
+}
+
 log = logging.getLogger(__name__)
 lowerings: Dict[Union[Callable[..., Any], str], Callable[..., Any]] = {}
 # Use maybe_layout_constraints to access this dict, we lazily register tag-based layout constraints
@@ -86,10 +94,44 @@ aten = torch.ops.aten
 tr_c10d = torch.ops.tr_c10d
 prims = torch.ops.prims
 needs_realized_inputs: Set[torch._ops.OpOverload] = set()
-foreach_ops: Set[torch._ops.OpOverload] = set()
+foreach_ops: Set[torch._ops.OpOverload] = {torch._higher_order_ops._foreach_map}  # type: ignore[arg-type]
 inplace_foreach_ops: Set[torch._ops.OpOverload] = set()
 inplaceable_foreach_ops: Dict[torch._ops.OpOverload, torch._ops.OpOverload] = {}
 quantized_decomposed = torch.ops.quantized_decomposed
+
+
+def cur_node_has_non_foreach_users():
+    for node in V.graph.current_node.users:
+        for user in node.users:
+            if not (user.op == "call_function" and (user.target in foreach_ops)):
+                return True
+
+    return False
+
+
+# group by device, whether any of the inputs are dynamic
+# note arg_pairs may or may not be a pair
+# foreach_map for example just passes output buffers here
+def group_foreach_args(arg_pairs: Iterable[Union[Tuple[Any, Any], Any]]):
+    out = defaultdict(list)
+    unpack_args = False
+    for i, args in enumerate(arg_pairs):
+        if not isinstance(args, Iterable):
+            unpack_args = True
+            args = (args,)
+        use_foreach = (
+            not is_dynamic(*args) or config.combo_kernel_foreach_dynamic_shapes
+        )
+        device = None
+        for t in args:
+            if isinstance(t, TensorBox):
+                device = t.data.get_device()
+                break
+        assert device is not None, "foreach op should have at least one tensor arg"
+        if unpack_args:
+            (args,) = args
+        out[(device, use_foreach)].append((i, args))
+    return out
 
 
 def maybe_layout_constraints(fn: Callable[..., Any]) -> Optional[Callable[..., Any]]:
@@ -601,33 +643,11 @@ def make_pointwise(
 
 def make_foreach_pointwise(pw_fn, allow_alpha=False):
     def inner(*inputs: List[List[TensorBox]], alpha=1):
-        # group by device, whether any of the inputs are dynamic, and whether their types match
-        # (proxy for type promotion)
-        def group_args(arg_pairs):
-            out = defaultdict(list)
-            for i, args in enumerate(arg_pairs):
-                use_foreach = (
-                    not is_dynamic(*args) or config.combo_kernel_foreach_dynamic_shapes
-                )
-                device = None
-                for t in args:
-                    if isinstance(t, TensorBox):
-                        device = t.data.get_device()
-                        break
-                assert (
-                    device is not None
-                ), "foreach op should have at least one tensor arg"
-                out[(device, use_foreach)].append((i, args))
-            return out
-
         realize_outputs = (
             len(V.graph.current_node.users) == 0
             or V.graph.current_node.target in inplace_foreach_ops
+            or cur_node_has_non_foreach_users()
         )
-        for node in V.graph.current_node.users:
-            for user in node.users:
-                if not (user.op == "call_function" and (user.target in foreach_ops)):
-                    realize_outputs = True
 
         a_list_input = None
         for input in inputs:
@@ -646,7 +666,7 @@ def make_foreach_pointwise(pw_fn, allow_alpha=False):
             else:
                 broadcast_inputs.append(input)
 
-        groups = group_args(zip(*broadcast_inputs))
+        groups = group_foreach_args(zip(*broadcast_inputs))
 
         outputs = [None] * len(a_list_input)
         for (device, use_foreach), group in groups.items():
@@ -688,6 +708,59 @@ def to_dtype(x: TensorBox, dtype: torch.dtype, copy=False):
         return ops.to_dtype(x, dtype, src_dtype=src_dtype)
 
     return make_pointwise(_to_dtype, override_return_dtype=dtype)(x)
+
+
+@register_lowering(torch._higher_order_ops._foreach_map)
+def _foreach_map(subgraph, *args, **kwargs):
+    """
+    This lowers an invocation of foreach_map
+    The way this works is that an arbitrary N-arg func is provided by the user, looped over by the
+    polyfill with the same semantics as a foreach op (a loop applying an n-ary function to n args)
+    and then traced into a subgraph by dynamo.
+    This code allows us to inline the subgraph into the main graph lowering using the PontwiseSubgraphLowering.
+    The graph outputs represent the vertically fused sequence of ops, and then register_operation_list
+    below registers the buffers as horizontally fuseable in the scheduler.
+    """
+    realize_outputs = (
+        len(V.graph.current_node.users) == 0 or cur_node_has_non_foreach_users()
+    )
+
+    from .subgraph_lowering import PointwiseSubgraphLowering
+
+    inputs = args[0]  # nested tuple
+
+    gm = subgraph.graph_module
+    pw_subgraph = PointwiseSubgraphLowering(gm, root_graph_lowering=V.graph)
+    with V.set_graph_handler(pw_subgraph):  # type: ignore[arg-type]
+        pw_subgraph.run(*inputs)
+
+    sub_outputs = pw_subgraph.graph_outputs
+    # group outputs by device and register as foreach
+    assert sub_outputs  # mypy lol
+    groups = group_foreach_args(sub_outputs)
+
+    outputs = [None] * len(sub_outputs)
+    for (device, use_foreach), group in groups.items():
+        operation_list: List[str] = []
+        for (
+            output_ind,
+            output,
+        ) in group:
+            outputs[output_ind] = output
+
+            if (
+                V.graph.has_feature(device, BackendFeature.FOREACH)
+                and use_foreach
+                and realize_outputs
+            ):
+                output.realize()
+                operation_list.append(output.get_operation_name())
+
+        if operation_list:
+            V.graph.register_operation_list(operation_list)
+
+    assert all(x is not None for x in outputs)
+    return outputs
 
 
 @register_lowering(prims.convert_element_type, type_promotion_kind=None)
@@ -1869,8 +1942,10 @@ def fallback_node_due_to_unsupported_type(node: torch.fx.Node, allow_cpu_inputs=
     return check_skip_condition(node, node, is_output=True)
 
 
-def make_fallback(op, layout_constraint=None, warn=True):
-    assert op not in decompositions, f"both a fallback and a decomp for same op: {op}"
+def make_fallback(op, layout_constraint=None, warn=True, override_decomp=False):
+    assert (
+        op not in decompositions or override_decomp
+    ), f"both a fallback and a decomp for same op: {op}"
     if (
         warn
         and bool(os.getenv("CI"))
@@ -1880,6 +1955,7 @@ def make_fallback(op, layout_constraint=None, warn=True):
             config.fallback_random
             and op in torch._decomp.decompositions_for_rng.extra_random_decomps
         )
+        and not override_decomp
     ):
         # Note: 'warn' is holdover from when this was a warning, but for ops that previously
         # set warn=False we do not want a CI error.
@@ -2323,13 +2399,6 @@ def constrain_to_fx_strides(fx_node, *args, **kwargs):
     )
     kwargs = {k: apply_constraint(v, fx_node.kwargs[k]) for k, v in kwargs.items()}
     return args, kwargs
-
-
-# TODO(jansel): we should implement decomps or lowerings for these
-# https://github.com/pytorch/torchdynamo/issues/327
-FALLBACK_ALLOW_LIST = {
-    "torchvision::roi_align",
-}
 
 
 def sdpa_constraint(fx_node, *args, **kwargs):
