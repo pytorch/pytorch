@@ -1,5 +1,5 @@
 import sys
-import random
+
 from benchmark_base import BenchmarkBase
 
 import torch
@@ -32,13 +32,14 @@ class Benchmark(BenchmarkBase):
             return x + y
 
         for i in range(8):
-            random_float = random.uniform(1.0, 10.0)
-            f(torch.randn(3), random_float)
+            f(torch.randn(3), i * 2.5)
 
 
 def main():
     result_path = sys.argv[1]
-    Benchmark().enable_compile_time_instruction_count().collect_all().append_results(result_path)
+    Benchmark().enable_compile_time_instruction_count().collect_all().append_results(
+        result_path
+    )
 
 
 if __name__ == "__main__":
