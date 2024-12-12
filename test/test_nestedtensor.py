@@ -8734,7 +8734,6 @@ class TestCachedTensor(torch.testing._internal.common_utils.TestCase):
                 return CachedTensor(
                     cloned_metadata,
                     inp.source_field,
-                    inp.all_fields,
                 )
 
             cloned_cached_tensor = cached_tensor.clone()
@@ -8761,7 +8760,8 @@ class TestCachedTensor(torch.testing._internal.common_utils.TestCase):
         metadata = {"a": a, "b": b, "c": c}
 
         cached_tensor = CachedTensor(
-            metadata, source_field="a", all_fields=("a", "b", "c")
+            metadata,
+            source_field="a",
         )
 
         @torch.compile
