@@ -510,10 +510,11 @@ class PContext(abc.ABC):
         A timeout value of zero simply queries the status of the processes (e.g. equivalent
         to a poll).
 
-        ..note: Multiprocessing library registers SIGTERM and SIGINT signal handlers that raise
-                ``SignalException`` when the signals received. It is up to the consumer of the code
-                to properly handle the exception. It is important not to swallow the exception otherwise
-                the process would not terminate. Example of the typical workflow can be:
+        .. note::
+            Multiprocessing library registers SIGTERM and SIGINT signal handlers that raise
+            ``SignalException`` when the signals received. It is up to the consumer of the code
+            to properly handle the exception. It is important not to swallow the exception otherwise
+            the process would not terminate. Example of the typical workflow can be:
 
         .. code-block:: python
             pc = start_processes(...)

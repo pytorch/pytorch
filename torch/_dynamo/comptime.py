@@ -380,7 +380,7 @@ class _Comptime:
         """
 
         def inner(inner_ctx):
-            _ctx = inner_ctx.parent()
+            ctx = inner_ctx.parent()
             builtins.breakpoint()
 
         comptime(inner)
