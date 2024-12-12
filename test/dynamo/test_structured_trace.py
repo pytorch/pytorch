@@ -879,6 +879,58 @@ def forward(self, x_1: "f32[2][1]cpu"):
         logs = self.buffer.getvalue()
         self.assertTrue(all(event in logs for event in chromium_events))
 
+    @requires_tlparse
+    @torch._dynamo.config.patch("compiled_autograd", True)
+    def test_compiled_autograd_attribution(self):
+        # multiple dynamo recompiles should still be attributed to the parent compiled autograd id
+        def fn():
+            class MySin(torch.autograd.Function):
+                @staticmethod
+                def forward(ctx, x):
+                    ctx.save_for_backward(x)
+                    return torch.sin(x)
+
+                @staticmethod
+                def backward(ctx, gO):
+                    print("graph break")
+                    (x,) = ctx.saved_tensors
+                    print("graph break")
+                    return gO * torch.cos(x)
+
+            grads = []
+            for i in [10, 100, 10, 15, 20, 25]:
+                x = torch.arange(0.0, i, requires_grad=True)
+                out = MySin.apply(x)
+                loss = out.sum()
+                loss.backward()
+                grads.append(x.grad)
+
+            return grads
+
+        fn_opt = torch.compile(fn)
+        fn_opt()
+        self.assertParses()
+        expected = [
+            '{"dynamo_start": {"stack": "STACK"}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0}',
+            '{"dynamo_start": {"stack": "STACK"}, "frame_id": 1, "frame_compile_id": 0, "attempt": 0}',
+            '{"dynamo_start": {"stack": "STACK"}, "compiled_autograd_id": 0, "frame_id": 2, "frame_compile_id": 0, "attempt": 0}',
+            '{"dynamo_start": {"stack": "STACK"}, "compiled_autograd_id": 0, "frame_id": 3, "frame_compile_id": 0, "attempt": 0}',
+            '{"dynamo_start": {"stack": "STACK"}, "compiled_autograd_id": 0, "frame_id": 4, "frame_compile_id": 0, "attempt": 0}',
+            '{"dynamo_start": {"stack": "STACK"}, "compiled_autograd_id": 0, "frame_id": 5, "frame_compile_id": 0, "attempt": 0}',
+            '{"dynamo_start": {"stack": "STACK"}, "compiled_autograd_id": 0, "frame_id": 6, "frame_compile_id": 0, "attempt": 0}',
+            '{"dynamo_start": {"stack": "STACK"}, "compiled_autograd_id": 0, "frame_id": 7, "frame_compile_id": 0, "attempt": 0}',
+            '{"dynamo_start": {"stack": "STACK"}, "compiled_autograd_id": 0, "frame_id": 8, "frame_compile_id": 0, "attempt": 0}',
+            '{"dynamo_start": {"stack": "STACK"}, "frame_id": 1, "frame_compile_id": 1, "attempt": 0}',
+            '{"dynamo_start": {"stack": "STACK"}, "compiled_autograd_id": 1, "frame_id": 9, "frame_compile_id": 0, "attempt": 0}',
+            '{"dynamo_start": {"stack": "STACK"}, "compiled_autograd_id": 1, "frame_id": 5, "frame_compile_id": 1, "attempt": 0}',
+            '{"dynamo_start": {"stack": "STACK"}, "compiled_autograd_id": 1, "frame_id": 6, "frame_compile_id": 1, "attempt": 0}',
+            '{"dynamo_start": {"stack": "STACK"}, "compiled_autograd_id": 1, "frame_id": 10, "frame_compile_id": 0, "attempt": 0}',
+            '{"dynamo_start": {"stack": "STACK"}, "compiled_autograd_id": 1, "frame_id": 9, "frame_compile_id": 1, "attempt": 0}',
+            '{"dynamo_start": {"stack": "STACK"}, "compiled_autograd_id": 1, "frame_id": 10, "frame_compile_id": 1, "attempt": 0}',
+        ]
+        logs = self.buffer.getvalue()
+        self.assertTrue(all(event in logs for event in expected))
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

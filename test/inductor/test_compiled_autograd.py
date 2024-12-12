@@ -3322,6 +3322,57 @@ TORCH_LIBRARY(test_cudagraphs_cpu_scalar_used_in_cpp_custom_op, m) {
 
         self.check_output_and_recompiles(fn)
 
+    def test_sac(self):
+        # circular import
+        from torch.utils.checkpoint import (
+            checkpoint,
+            CheckpointPolicy,
+            create_selective_checkpoint_contexts,
+        )
+
+        def fn():
+            class mlp(nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.layer1 = nn.Linear(10, 10)
+                    self.layer2 = nn.Linear(10, 10)
+                    self.layer3 = nn.Linear(10, 10)
+                    self.layer4 = nn.Linear(10, 10)
+
+                def forward(self, x):
+                    x = self.layer1(x)
+                    x = self.layer2(x)
+                    x = self.layer3(x)
+                    x = self.layer4(x)
+                    return x
+
+            recompute_list = [torch.ops.aten.addmm.default]
+
+            def recompute_policy(ctx, op, *args, **kwargs):
+                if op in recompute_list:
+                    return CheckpointPolicy.MUST_RECOMPUTE
+                else:
+                    return CheckpointPolicy.PREFER_SAVE
+
+            def context_fn():
+                return create_selective_checkpoint_contexts(recompute_policy)
+
+            model = mlp()
+            input = torch.randn(1, 10)
+
+            out = checkpoint(model, input, use_reentrant=False, context_fn=context_fn)
+            out.sum().backward()
+            yield model.layer1.weight.grad
+            yield model.layer1.bias.grad
+            yield model.layer2.weight.grad
+            yield model.layer2.bias.grad
+            yield model.layer3.weight.grad
+            yield model.layer3.bias.grad
+            yield model.layer4.weight.grad
+            yield model.layer4.bias.grad
+
+        self.check_output_and_recompiles(fn)
+
 
 def load_test_module(name):
     testdir = Path(__file__).absolute().parent.parent
