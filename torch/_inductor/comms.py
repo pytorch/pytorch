@@ -224,7 +224,7 @@ def _schedule_for_comm(
 
     assert all(len(deps) == 0 for deps in unmet_deps.values()), (
         "Detected unscheduled nodes. "
-        f"Nodes with unmet dependencies: {[(snode, [buf_name_to_snode[dep] for dep in deps]) for snode, deps in unmet_deps.items() if len(deps) > 0]}"
+        f"Nodes with unmet dependencies: {[(snode, deps) for snode, deps in unmet_deps.items() if len(deps) > 0]}"
     )
     return scheduled
 
@@ -990,6 +990,7 @@ def bucket_fsdp_all_gather_concat_on_scheduler_ir(
     ag_and_wait_snodes |= OrderedSet(ag_snode_to_wait_snode.values())  # wait_tensor
     new_order = []
     scheduled = OrderedSet()
+    operation_name_to_snode = {}
 
     def schedule_snode(snode):
         if snode in scheduled:
@@ -1003,10 +1004,14 @@ def bucket_fsdp_all_gather_concat_on_scheduler_ir(
         ir.FallbackKernel.create(target, *args, **kwargs)
         new_operations = V.graph.operations[operations_prev_watermark:]
         new_snodes = []
-        for operation in new_operations:
-            new_snode = scheduler.create_scheduler_node(operation)
+        for new_operation in new_operations:
+            new_snode = scheduler.create_scheduler_node(new_operation)
             new_snodes.append(new_snode)
             schedule_snode(new_snode)
+            operation_name_to_snode[new_operation.get_operation_name()] = new_snode
+            for o in new_snode.get_outputs():
+                name_to_buf[o.get_name()] = o
+            name_to_fused_node[new_snode.get_name()] = new_snode
         multi_output_operations = []
         # only return the trailing MultiOutput operations
         for operation in reversed(new_operations):
@@ -1015,7 +1020,6 @@ def bucket_fsdp_all_gather_concat_on_scheduler_ir(
             else:
                 break
         return multi_output_operations[0] if len(multi_output_operations) == 1 else multi_output_operations
-
 
     for snode in snodes:
         if snode not in ag_and_wait_snodes:
@@ -1118,6 +1122,18 @@ def bucket_fsdp_all_gather_concat_on_scheduler_ir(
                 # TODO(yf225): we need to make sure downstream users of original wait nodes are now dependent on the new `outs` nodes
                 assert len(orig_wait_snodes) == len(outs), f"len(orig_wait_snodes)={len(orig_wait_snodes)}, len(outs)={len(outs)}, orig_wait_snodes={orig_wait_snodes}, outs={outs}"
                 assert len(orig_wait_snodes) > 0
+                # Swap out the original wait output buffer with the new buffer,
+                # so that downstream user nodes can read from the new buffer just by following the original dep buffer name.
+                for out_operation, orig_wait_snode in zip(outs, orig_wait_snodes):
+                    out_snode = operation_name_to_snode[out_operation.get_operation_name()]
+                    orig_wait_snode_output = orig_wait_snode.outputs[-1]
+                    out_snode_output = out_snode.outputs[-1]
+                    out_snode_output.users = orig_wait_snode_output.users
+                    del name_to_buf[out_snode_output.get_name()]
+                    out_snode_output.node.name = orig_wait_snode_output.node.name
+                    assert orig_wait_snode_output.get_name() in name_to_buf
+                    log.warn(f"Swapping name_to_buf[{orig_wait_snode_output.get_name()}] from {name_to_buf[orig_wait_snode_output.get_name()]} to {out_snode_output}")
+                    name_to_buf[orig_wait_snode_output.get_name()] = out_snode_output
                 bucket_id_is_scheduled[bucket_id] = True
     return new_order
 
