@@ -5,7 +5,7 @@ import unittest
 from typing import Optional
 
 import torch
-from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FP8, SM90OrLater
+from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FP8
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
     IS_WINDOWS,
@@ -13,8 +13,12 @@ from torch.testing._internal.common_utils import (
     run_tests,
     skipIfRocm,
     TestCase,
+    TEST_CUDA,
 )
 
+_IS_SM9X = False
+if TEST_CUDA:
+    _IS_SM9X = torch.cuda.get_device_capability(0)[0] == 9
 
 # Protects against includes accidentally setting the default dtype
 assert torch.get_default_dtype() is torch.float32
@@ -379,7 +383,7 @@ class TestFP8Matmul(TestCase):
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8 or IS_WINDOWS, f8_msg)
     @unittest.skipIf(
-        not SM90OrLater, "rowwise implementation is currently sm90 specific"
+        not _IS_SM9X, "rowwise implementation is currently sm90 specific"
     )
     @skipIfRocm()
     @parametrize("use_fast_accum", [True, False])
@@ -492,7 +496,7 @@ class TestFP8Matmul(TestCase):
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8 or IS_WINDOWS, f8_msg)
     @unittest.skipIf(
-        not SM90OrLater, "rowwise implementation is currently sm90 specific"
+        not _IS_SM9X, "rowwise implementation is currently sm90 specific"
     )
     @skipIfRocm()
     @parametrize("base_dtype", [torch.bfloat16])

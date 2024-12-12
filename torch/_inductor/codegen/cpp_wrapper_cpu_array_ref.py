@@ -647,6 +647,21 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
             self.stack_allocated_buffers[new_name] = new
         return f"{self.declare_maybe_reference}{new_name} = std::move({reinterpret_view}){del_line}  // reuse"
 
+    def _assert_safe_to_use_borrow_arrayref_tensor_as_tensor(self):
+        # Borrowing arguments to shim functions is only safe because we know
+        # that the arguments can't be stack-allocated. Otherwise, to be sure
+        # we can't return a dangling pointer, we need to either 1) be
+        # certain that the shim function cannot return an alias of a
+        # borrowed argument, or 2) be certain that the returned Tensor from
+        # the shim function cannot escape.
+        assert self.is_safe_to_use_borrow_arrayref_tensor_as_tensor(), (
+            "borrowing arguments to shim functions is unsafe with "
+            "stack allocation on! (see comment above this assertion)"
+        )
+
+    def is_safe_to_use_borrow_arrayref_tensor_as_tensor(self):
+        return not self.allow_stack_allocation and not self.stack_allocated_buffers
+
     def generate_c_shim_extern_kernel_call(self, kernel, args):
         # In the abi_compatible mode, we call fallback aten ops through a C shim layer
         # Setting self.allow_stack_allocation to False because the exchange between
@@ -659,16 +674,17 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
         for x in args:
             pieces = x.split(", ")
             for piece in pieces:
-                # We only really *need* convert_arrayref_tensor_to_tensor for
+                # We only really *need* borrow_arrayref_tensor_as_tensor for
                 # ArrayRefTensors. The code flowing into here uses `0` for nullptr,
-                # which convert_arrayref_tensor_to_tensor would blindly coerce to int,
+                # which borrow_arrayref_tensor_as_tensor would blindly coerce to int,
                 # so just avoid wrapping integers.
                 # Name matching is to find tensor is hacky, but fixing all the
                 # ArrayRefTensor issues is not a priority for now.
                 if isinstance(piece, str) and piece.startswith(
                     ("buf", "arg", "wrap_with_raii_handle_if_needed")
                 ):
-                    piece = f"convert_arrayref_tensor_to_tensor({piece})"
+                    self._assert_safe_to_use_borrow_arrayref_tensor_as_tensor()
+                    piece = f"borrow_arrayref_tensor_as_tensor({piece})"
                 wrapped_args.append(piece)
 
         debug_printer_manager.set_printer_args(args, kernel, None, None, "extern")
@@ -695,15 +711,12 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
         cpp_kernel_name = self.get_c_shim_func_name(cpp_kernel_name)
         # TODO: consider remove "_out" and add missing inplace variants to fallback_ops.py
         cpp_kernel_name = cpp_kernel_name.replace("__", "_") + "_out"
+        self._assert_safe_to_use_borrow_arrayref_tensor_as_tensor()
         inputs_wrapped = [
-            (
-                f"convert_arrayref_tensor_to_tensor({x})"
-                if isinstance(x, str)
-                else str(x)
-            )
+            (f"borrow_arrayref_tensor_as_tensor({x})" if isinstance(x, str) else str(x))
             for x in inputs
         ]
-        line = f"{cpp_kernel_name}(convert_arrayref_tensor_to_tensor({output}), {','.join(inputs_wrapped)}"
+        line = f"{cpp_kernel_name}(borrow_arrayref_tensor_as_tensor({output}), {','.join(inputs_wrapped)}"
 
         if python_kernel_name.startswith("aten.scatter_reduce"):
             line += f", {','.join(kwargs)}"
@@ -722,6 +735,7 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
         # No stack allocation when there is a fallback op
         self.allow_stack_allocation = False
 
+        self._assert_safe_to_use_borrow_arrayref_tensor_as_tensor()
         # TODO: update aoti_torch_index_put_out in ir.py to use autogen out version
         # See the comment in codegen_reinterpret_view about why having something like
         # RAIIAtenTensorHandle(tmp_tensor_handle_2) in a tmp array can cause the correponding
@@ -730,20 +744,20 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
             "std::vector<AtenTensorHandle>{"
             + (
                 ", ".join(
-                    [f"convert_arrayref_tensor_to_tensor({ind})" for ind in indices]
+                    [f"borrow_arrayref_tensor_as_tensor({ind})" for ind in indices]
                 )
             )
             + "}.data()"
         )
         args = [
-            f"convert_arrayref_tensor_to_tensor({x})",
+            f"borrow_arrayref_tensor_as_tensor({x})",
             indices_str,
             str(len(indices)),
-            f"convert_arrayref_tensor_to_tensor({values})",
+            f"borrow_arrayref_tensor_as_tensor({values})",
             accumulate,
         ]
         args.insert(
-            0, f"convert_arrayref_tensor_to_tensor({x})"
+            0, f"borrow_arrayref_tensor_as_tensor({x})"
         )  # set x as the output tensor, this fallback mutates x.
         self.writeline(self.wrap_kernel_call(kernel, args))
 
@@ -985,7 +999,10 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
                 # Similar to other data type, use pointer to denote optional tensor arg in v2 C shim
                 base_handle = self.val_to_arg_str(val, element_type)
                 if config.aot_inductor.use_minimal_arrayref_interface:
-                    base_handle = f"convert_arrayref_tensor_to_tensor({base_handle})"
+                    if self.is_safe_to_use_borrow_arrayref_tensor_as_tensor():
+                        base_handle = f"borrow_arrayref_tensor_as_tensor({base_handle})"
+                    else:
+                        base_handle = f"copy_arrayref_tensor_to_tensor({base_handle})"
                 (
                     tmp_raii_handle_var,
                     tmp_raii_handle_var_decl,
@@ -1029,8 +1046,8 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
             scalar_tmp = f"{scalar}_tmp"
             writer.writeline(f"{DTYPE_TO_CPP[dtype]} {scalar_tmp};")
 
-            # need convert_arrayref_tensor_to_tensor for ArrayRefTensors
-            tensor = f"convert_arrayref_tensor_to_tensor({tensor})"
+            # We know that item_ doesn't alias the input, so borrowing should be safe.
+            tensor = f"borrow_arrayref_tensor_as_tensor({tensor})"
 
             writer.writeline(
                 f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_item_{dtype_str}({tensor}, &{scalar_tmp}));"
@@ -1039,8 +1056,8 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
         else:
             writer.writeline(f"{DTYPE_TO_CPP[dtype]} {scalar};")
 
-            # need convert_arrayref_tensor_to_tensor for ArrayRefTensors
-            tensor = f"convert_arrayref_tensor_to_tensor({tensor})"
+            # We know that item_ doesn't alias the input, so borrowing should be safe.
+            tensor = f"borrow_arrayref_tensor_as_tensor({tensor})"
 
             writer.writeline(
                 f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_item_{dtype_str}({tensor}, &{scalar}));"
@@ -1049,7 +1066,8 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
     def create_tmp_raii_handle_var(self, base_handle):
         if base_handle.startswith(
             (
-                "convert_arrayref_tensor_to_tensor",
+                "borrow_arrayref_tensor_as_tensor",
+                "copy_arrayref_tensor_to_tensor",
                 "wrap_with_raii_handle_if_needed",
             )
         ):

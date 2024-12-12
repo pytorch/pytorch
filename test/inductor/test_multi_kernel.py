@@ -89,13 +89,7 @@ class MultiKernelTest(TestCase):
         if expect_multi_kernel:
             self.assertTrue(_contains_multi_kernel_code(wrapper_code))
         else:
-            # Skip verifying the wrapper_code in fbcode since we may fail
-            # compiling the cpp wrapper cuda code due to lacking proper setup of
-            # cuda compiler in fbcode environment. In that case, the last
-            # collected wrapper_code will corresponds to the first pass
-            # cpp-wrapper codegen which contains the multi-kernel.
-            if not config.is_fbcode():
-                self.assertFalse(_contains_multi_kernel_code(wrapper_code))
+            self.assertFalse(_contains_multi_kernel_code(wrapper_code))
 
     @parametrize("force_kernel", (0, 1))
     @unittest.mock.patch.dict(
@@ -136,7 +130,7 @@ class MultiKernelTest(TestCase):
         self.test_softmax()
 
     test_softmax_cpp_wrapper = make_cpp_wrapper_test(
-        test_softmax, expect_multi_kernel=False
+        test_softmax, expect_multi_kernel=True
     )
 
     def test_layernorm(self):
