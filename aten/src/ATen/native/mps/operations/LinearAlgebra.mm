@@ -490,17 +490,28 @@ static Tensor& tiled_bmm_out_mps_impl(const Tensor& batch1, const Tensor& batch2
         MPSDataType dtype = getMPSDataType(batch1);
 
         uint64_t elemInMatrix = resRows * resCols;
+        // if largest supported batch size is zero, we need to split up the computation more
         uint64_t largestSupportedBatchSize = floor(pow(2, 32) / elemInMatrix);
-        uint64_t batchSize = std::min(largestSupportedBatchSize, originalBatchSize);
+        bool tileEachMatmul = largestSupportedBatchSize == 0;
+        uint64_t batchSize = largestSupportedBatchSize > 0 ? std::min(largestSupportedBatchSize, originalBatchSize) : 1;
         uint64_t lastBatchSize = originalBatchSize % batchSize;
+
+        uint64_t aRowsTiled = aRows;
+        uint64_t resRowsTiled = resRows;
+        if (tileEachMatmul) {
+          uint64_t maxNumRows = floor(pow(2, 32) / resCols);
+          aRowsTiled = std::min(uint64_t(512), maxNumRows);
+          resRowsTiled = aRowsTiled;
+        }
+        uint64_t lastTileSize = aRows % aRowsTiled;
 
         id<MTLCommandBuffer> commandBuffer = mpsStream->commandBuffer();
 
         auto matmul = [[MPSNDArrayMatrixMultiplication alloc] initWithDevice:device sourceCount:2];
 
-        MPSShape* aShape = @[ @(batchSize), @(aRows), @(aCols) ];
+        MPSShape* aShape = @[ @(batchSize), @(aRowsTiled), @(aCols) ];
         MPSShape* bShape = @[ @(batchSize), @(bRows), @(bCols) ];
-        MPSShape* resShape = @[ @(batchSize), @(resRows), @(resCols) ];
+        MPSShape* resShape = @[ @(batchSize), @(resRowsTiled), @(resCols) ];
         auto aDesc_ = [MPSNDArrayDescriptor descriptorWithDataType:dtype shape:aShape];
         aDesc_.preferPackedRows = true;
         auto bDesc_ = [MPSNDArrayDescriptor descriptorWithDataType:dtype shape:bShape];
@@ -515,18 +526,30 @@ static Tensor& tiled_bmm_out_mps_impl(const Tensor& batch1, const Tensor& batch2
         //.matrices is a readonly property so we need a separate descriptor.
         MPSNDArrayDescriptor *aDescLastBatch_, *bDescLastBatch_, *resDescLastBatch_;
         if (lastBatchSize != 0) {
-          aDescLastBatch_ = [MPSNDArrayDescriptor descriptorWithDataType:dtype
-                                                                   shape:@[ @(lastBatchSize), @(aRows), @(aCols) ]];
+          aDescLastBatch_ =
+              [MPSNDArrayDescriptor descriptorWithDataType:dtype shape:@[ @(lastBatchSize), @(aRowsTiled), @(aCols) ]];
           aDescLastBatch_.preferPackedRows = true;
           bDescLastBatch_ = [MPSNDArrayDescriptor descriptorWithDataType:dtype
                                                                    shape:@[ @(lastBatchSize), @(bRows), @(bCols) ]];
           bDescLastBatch_.preferPackedRows = true;
           resDescLastBatch_ =
-              [MPSNDArrayDescriptor descriptorWithDataType:dtype shape:@[ @(lastBatchSize), @(resRows), @(resCols) ]];
+              [MPSNDArrayDescriptor descriptorWithDataType:dtype
+                                                     shape:@[ @(lastBatchSize), @(resRowsTiled), @(resCols) ]];
           resDescLastBatch_.preferPackedRows = true;
         }
 
+        MPSNDArrayDescriptor *aDescLastTile_, *resDescLastTile_;
+        if (lastTileSize != 0) {
+          aDescLastTile_ = [MPSNDArrayDescriptor descriptorWithDataType:dtype
+                                                                  shape:@[ @(batchSize), @(lastTileSize), @(aCols) ]];
+          aDescLastTile_.preferPackedRows = true;
+          resDescLastTile_ =
+              [MPSNDArrayDescriptor descriptorWithDataType:dtype shape:@[ @(batchSize), @(lastTileSize), @(resCols) ]];
+          resDescLastTile_.preferPackedRows = true;
+        }
+
         uint64_t requiredIterations = ceil(float(originalBatchSize) / batchSize);
+        uint64_t requiredTileIterations = ceil(float(aRows) / aRowsTiled);
         auto aDesc = aDesc_;
         auto bDesc = bDesc_;
         auto resDesc = resDesc_;
@@ -536,24 +559,30 @@ static Tensor& tiled_bmm_out_mps_impl(const Tensor& batch1, const Tensor& batch2
             bDesc = bDescLastBatch_;
             resDesc = resDescLastBatch_;
           }
-          const uint64_t aArrayOffset = i * batchSize * aRows * aCols;
-          const uint64_t bArrayOffset = i * batchSize * bRows * bCols;
-          const uint64_t resArrayOffset = i * batchSize * resRows * resCols;
+          for (const auto j : c10::irange(requiredTileIterations)) {
+            if (j == requiredTileIterations - 1 && lastTileSize != 0) {
+              aDesc = aDescLastTile_;
+              resDesc = resDescLastTile_;
+            }
+            const uint64_t aArrayOffset = i * batchSize * aCols * aRows + j * aRowsTiled * aCols;
+            const uint64_t bArrayOffset = i * batchSize * bCols * bRows;
+            const uint64_t resArrayOffset = i * batchSize * resCols * resRows + j * resRowsTiled * resCols;
 
-          auto aMatrix = [[[MPSNDArray alloc] initWithBuffer:aBuffer
-                                                      offset:(batch1.storage_offset() + aArrayOffset) * aElemSize
-                                                  descriptor:aDesc] autorelease];
-          auto bMatrix = [[[MPSNDArray alloc] initWithBuffer:bBuffer
-                                                      offset:(batch2.storage_offset() + bArrayOffset) * bElemSize
-                                                  descriptor:bDesc] autorelease];
-          auto resMatrix = [[[MPSNDArray alloc] initWithBuffer:resBuffer
-                                                        offset:(result.storage_offset() + resArrayOffset) * resElemSize
-                                                    descriptor:resDesc] autorelease];
-
-          [matmul encodeToCommandEncoder:computeEncoder
-                           commandBuffer:commandBuffer
-                            sourceArrays:@[ aMatrix, bMatrix ]
-                        destinationArray:resMatrix];
+            auto aMatrix = [[[MPSNDArray alloc] initWithBuffer:aBuffer
+                                                        offset:(batch1.storage_offset() + aArrayOffset) * aElemSize
+                                                    descriptor:aDesc] autorelease];
+            auto bMatrix = [[[MPSNDArray alloc] initWithBuffer:bBuffer
+                                                        offset:(batch2.storage_offset() + bArrayOffset) * bElemSize
+                                                    descriptor:bDesc] autorelease];
+            auto resMatrix =
+                [[[MPSNDArray alloc] initWithBuffer:resBuffer
+                                             offset:(result.storage_offset() + resArrayOffset) * resElemSize
+                                         descriptor:resDesc] autorelease];
+            [matmul encodeToCommandEncoder:computeEncoder
+                             commandBuffer:commandBuffer
+                              sourceArrays:@[ aMatrix, bMatrix ]
+                          destinationArray:resMatrix];
+          }
         }
       }
     });
@@ -568,15 +597,11 @@ static Tensor& bmm_out_mps_impl(const Tensor& batch1, const Tensor& batch2, Tens
 
   TORCH_CHECK(supportedFloatingOrComplexType(batch1), "MPS device does not support bmm for non-float inputs");
 
-  // Currently unsupported if the matmul output goes over the 32-bit indexing limit
-  TORCH_CHECK(
-      batch1.size(1) * batch2.size(2) <= pow(2, 32),
-      "Output size of the matrix multiplication is larger than currently supported by the MPS backend: ",
-      batch1.size(1),
-      ",",
-      batch2.size(2),
-      ", needs to be less than 2**32 elements.",
-      "File a feature request for this use case against the MPS backend at https://github.com/pytorch/pytorch/issues");
+  // Matmul not supported if any output dimension size is larger than 2**32
+  for (auto elem : result.sizes()) {
+    TORCH_CHECK_NOT_IMPLEMENTED(elem <= pow(2, 32),
+                                "Output dim sizes larger than 2**32 elements for matmul not supported on MPS device.");
+  }
 
   if (batch1.numel() == 0 || batch2.numel() == 0) {
     result.zero_();
@@ -607,7 +632,7 @@ static Tensor& bmm_out_mps_impl(const Tensor& batch1, const Tensor& batch2, Tens
     }
   }
 
-  // Check if we need to split the batch to do the computation
+  // Call tiled implementation if the number of elements exceeds 2^32
   uint64_t resultSize = batch1.size(0) * batch1.size(1) * batch2.size(2);
   if (resultSize > pow(2, 32)) {
     result = tiled_bmm_out_mps_impl(batch1, batch2, result);
