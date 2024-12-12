@@ -2467,7 +2467,7 @@ class AutogradFunctionApplyVariable(VariableTracker):
             size = SourcelessBuilder.create(tx, fwd_out_tensor.size())
             device = SourcelessBuilder.create(tx, fwd_out_tensor.device)
             dtype = SourcelessBuilder.create(tx, fwd_out_tensor.dtype)
-            requires_grad = SourcelessBuilder.create(tx, fwd_out_tensor.requires_grad)
+            requires_grad = SourcelessBuilder.create(tx, False)
             grad_out = variables.TorchInGraphFunctionVariable(
                 torch.empty_strided
             ).call_function(

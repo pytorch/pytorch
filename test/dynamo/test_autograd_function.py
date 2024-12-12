@@ -10,6 +10,7 @@ import torch._dynamo.testing
 import torch._dynamo.utils
 from torch.testing._internal.triton_utils import HAS_CUDA, requires_cuda
 
+torch._dynamo.config.capture_scalar_outputs = True
 
 if HAS_CUDA:
     import triton
