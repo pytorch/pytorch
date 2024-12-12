@@ -143,7 +143,7 @@ init_command = [
     '--dry-run={{DRYRUN}}',
     'numpy==1.26.4 ; python_version >= "3.9" and python_version <= "3.11"',
     'numpy==2.1.0 ; python_version >= "3.12"',
-    'expecttest==0.2.1',
+    'expecttest==0.3.0',
     'mypy==1.13.0',
     'sympy==1.13.0 ; python_version >= "3.9"',
     'types-requests==2.27.25',
@@ -1714,3 +1714,20 @@ include_patterns = [
     'torch/**/does-not-exist.py'
 ]
 is_formatter = true
+
+# `docstring_linter` reports on long Python classes, methods, and functions
+# whose definitions have very small docstrings or none at all.
+#
+[[linter]]
+code = 'DOCSTRING_LINTER'
+command = [
+    'python3',
+    'tools/linter/adapters/docstring_linter.py',
+    '--lintrunner',
+    '--',
+    '@{{PATHSFILE}}'
+]
+include_patterns = [
+   'torch/**/not-exist.py'
+]
+is_formatter = false
