@@ -6,17 +6,7 @@ import functools
 import inspect
 import itertools
 import types
-from typing import (
-    Any,
-    Callable,
-    Dict,
-    List,
-    Optional,
-    Tuple,
-    TYPE_CHECKING,
-    TypeVar,
-    Union,
-)
+from typing import Any, Callable, Dict, List, Optional, Tuple, TYPE_CHECKING, TypeVar
 from typing_extensions import Never
 
 import torch
@@ -47,7 +37,6 @@ except ModuleNotFoundError:
 
 if TYPE_CHECKING:
     from torch._dynamo.symbolic_convert import InstructionTranslator
-    from torch._guards import Source
     from torch._higher_order_ops.triton_kernel_wrap import (
         TritonGridType,
         TritonKernelType,
@@ -463,7 +452,9 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
         kwdefaults,
         annotations,
         closure,
-        wrapped_reconstructible=None,
+        # This is present when this function is created by
+        # `functools.wrap(wrapped_fn)(this_fn)`.
+        wrapped_fn=None,
         **kwargs,
     ) -> None:
         super().__init__(**kwargs)
@@ -477,10 +468,7 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
         self.kwdefaults = kwdefaults
         self.annotations = annotations
         self.closure = closure
-        # Either a source or a VT with .can_reconstruct() == True
-        self.wrapped_reconstructible: Optional[
-            Union[Source, VariableTracker]
-        ] = wrapped_reconstructible
+        self.wrapped_fn: Optional[VariableTracker] = wrapped_fn
 
     def self_args(self):
         return []
@@ -581,11 +569,11 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
 
         codegen.extend_output(create_call_function(7, False))
 
-        if self.wrapped_reconstructible:
+        if self.wrapped_fn:
             codegen.add_push_null(
                 lambda: codegen.load_import_from("functools", "wraps")
             )
-            codegen(self.wrapped_reconstructible)
+            codegen(self.wrapped_fn)
             codegen.extend_output(create_call_function(1, False))
             codegen.extend_output(create_rot_n(2))
             codegen.extend_output(create_call_function(1, True))
@@ -643,22 +631,11 @@ class SkipFunctionVariable(VariableTracker):
             return self.fold_through_function_to_wrapper().get(self.value)(
                 value, mutation_type=ValueMutationNew()
             )
-        elif (
-            self.value is functools.wraps
-            and not kwargs
-            and len(args) == 1
-            and (
-                args[0].source is not None or args[0].can_reconstruct(tx.output.root_tx)
-            )
-        ):
+        elif self.value is functools.wraps and not kwargs and len(args) == 1:
 
             def wraps(fn):
                 if isinstance(fn, variables.NestedUserFunctionVariable):
-                    if args[0].source:
-                        reconstructible = args[0].source
-                    else:
-                        reconstructible = args[0]
-                    return fn.clone(wrapped_reconstructible=reconstructible)
+                    return fn.clone(wrapped_fn=args[0])
                 unimplemented(f"functools.wraps({fn})")
 
             return variables.LambdaVariable(wraps)

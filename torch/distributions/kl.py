@@ -969,4 +969,4 @@ def _add_kl_info():
         )
     kl_info = "\n\t".join(rows)
     if kl_divergence.__doc__:
-        kl_divergence.__doc__ += kl_info  # type: ignore[operator]
+        kl_divergence.__doc__ += kl_info

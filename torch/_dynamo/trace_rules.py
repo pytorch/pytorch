@@ -293,6 +293,7 @@ manual_torch_name_rule_map = {
     "torch._functorch.deprecated.grad_and_value": UserFunctionVariable,
     "torch._functorch.deprecated.vjp": UserFunctionVariable,
     # everything else
+    "torch._higher_order_ops.foreach_map.foreach_map": UserFunctionVariable,
     "torch._constrain_as_size": UserFunctionVariable,
     "torch._tensor._convert": UserFunctionVariable,
     "torch.jit._unwrap_optional": UserFunctionVariable,
@@ -2270,10 +2271,7 @@ torch_non_c_binding_in_graph_functions = dict.fromkeys(
         "torch._functorch.deprecated.warn_deprecated",
         "torch._functorch.eager_transforms._any_differentiable",
         "torch._functorch.eager_transforms._autograd_grad",
-        "torch._functorch.eager_transforms._vjp_treespec_compare",
         "torch._functorch.eager_transforms._set_tensor_requires_grad",
-        "torch._functorch.eager_transforms._jvp_treespec_compare",
-        "torch._functorch.eager_transforms._linearize_treespec_compare",
         "torch._functorch.eager_transforms._is_differentiable",
         "torch._functorch.eager_transforms._maybe_unwrap_functional_tensor",
         "torch._functorch.eager_transforms._maybe_wrap_functional_tensor",
@@ -2920,16 +2918,26 @@ Get all torch.Tensor methods which are allowed to be in graph functions.
 
 @functools.lru_cache(None)
 def get_tensor_method():
+    disallowed_tensor_methods = {"__new__", "_make_wrapper_subclass", "_make_subclass"}
     s = set()
     for name in dir(torch.Tensor):
         method = getattr(torch.Tensor, name)
-        if isinstance(
-            method, (types.MethodDescriptorType, types.WrapperDescriptorType)
+        if (
+            isinstance(
+                method,
+                (
+                    types.MethodDescriptorType,
+                    types.WrapperDescriptorType,
+                    types.BuiltinFunctionType,
+                ),
+            )
+            and name not in disallowed_tensor_methods
         ):
             s.add(method)
 
-    # mlazos: this is a function which we handle specially in TensorVariable
+    # mlazos: these are functions which we handle specially in TensorVariable
     s.add(torch.Tensor.__contains__)  # type: ignore[arg-type]
+    s.add(torch.Tensor.register_hook)  # type: ignore[arg-type]
     return frozenset(s)
 
 

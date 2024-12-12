@@ -191,7 +191,7 @@ void scatter_meta_impl(
     int64_t dim,
     const Tensor& index,
     const std::optional<Tensor>& src = std::nullopt,
-    const std::optional<c10::string_view> reduce = std::nullopt) {
+    const std::optional<std::string_view> reduce = std::nullopt) {
   int64_t wrapped_dim = at::maybe_wrap_dim(dim, self.dim());
   at::native::scatter_gather_dtype_check("scatter", self, index, src);
   at::native::scatter_shape_check(self, wrapped_dim, index, src);
@@ -227,7 +227,7 @@ TORCH_META_FUNC2(scatter, reduce)
  int64_t dim,
  const Tensor& index,
  const Tensor& src,
- const c10::string_view reduce) {
+ const std::string_view reduce) {
   TORCH_WARN_ONCE(
       "The reduce argument of torch.scatter with Tensor src is deprecated and will be removed ",
       "in a future PyTorch release. Use torch.scatter_reduce instead for more reduction options."
@@ -240,7 +240,7 @@ TORCH_META_FUNC2(scatter, value_reduce)
  int64_t dim,
  const Tensor& index,
  const Scalar& src,
- const c10::string_view reduce) {
+ const std::string_view reduce) {
   scatter_meta_impl(*this, self, dim, index, std::nullopt, reduce);
 }
 
@@ -254,7 +254,7 @@ TORCH_META_FUNC2(scatter_reduce, two)
  int64_t dim,
  const Tensor& index,
  const Tensor& src,
- const c10::string_view reduce,
+ const std::string_view reduce,
  bool include_self) {
   (void) include_self;
   scatter_meta_impl</*use_new_options=*/true>(*this, self, dim, index, src, reduce);
@@ -326,7 +326,7 @@ void index_func_meta_impl(
   int64_t dim,
   const Tensor& index,
   const Tensor& source,
-  c10::string_view func) {
+  std::string_view func) {
   auto numel = index.numel();
 
   TORCH_CHECK_INDEX(index.dim() <= 1, func, "_(): Index is supposed to be a vector, but got dim: ",
@@ -387,7 +387,7 @@ TORCH_PRECOMPUTE_META_FUNC(index_reduce)
  int64_t dim,
  const Tensor& index,
  const Tensor& source,
- const c10::string_view reduce,
+ const std::string_view reduce,
  bool include_self) {
   (void)include_self;
   TORCH_CHECK(reduce == "prod" || reduce == "mean" || reduce == "amax" || reduce == "amin",
@@ -1212,7 +1212,7 @@ TORCH_IMPL_FUNC(index_reduce_cpu_out)
  int64_t dim,
  const Tensor& index,
  const Tensor& source,
- const c10::string_view reduce,
+ const std::string_view reduce,
  bool include_input,
  const Tensor& result) {
   TORCH_WARN_ONCE("index_reduce() is in beta and the API may change at any time.");
@@ -1796,7 +1796,7 @@ void scatter_impl(
     const Tensor& out,
     ReduceStub& reduce_stub,
     FillStub& fill_stub,
-    const std::optional<c10::string_view> reduce = std::nullopt,
+    const std::optional<std::string_view> reduce = std::nullopt,
     bool reduce_includes_self = true) {
 
   dim = at::maybe_wrap_dim(dim, self.dim());
@@ -1865,7 +1865,7 @@ TORCH_IMPL_FUNC(scatter_reduce_out)
  int64_t dim,
  const Tensor& index,
  const Tensor& src,
- const c10::string_view reduce,
+ const std::string_view reduce,
  const Tensor& out) {
   scatter_impl(self, dim, index, src, out,
                scatter_reduce_stub,
@@ -1878,7 +1878,7 @@ TORCH_IMPL_FUNC(scatter_value_reduce_out)
  int64_t dim,
  const Tensor& index,
  const Scalar& value,
- const c10::string_view reduce,
+ const std::string_view reduce,
  const Tensor& out) {
   scatter_impl(self, dim, index, value, out,
                scatter_scalar_reduce_stub,
@@ -1919,7 +1919,7 @@ TORCH_IMPL_FUNC(scatter_reduce_two)
  int64_t dim,
  const Tensor& index,
  const Tensor& src,
- const c10::string_view reduce,
+ const std::string_view reduce,
  bool include_self,
  const Tensor& out) {
 

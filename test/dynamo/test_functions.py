@@ -4317,6 +4317,25 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         x = torch.randn(4)
         self.assertEqual(opt_fn(x, pybind_obj), fn(x, pybind_obj))
 
+    def test_tree_map(self):
+        def fn(a, b, index):
+            def call(index):
+                mapped_attributes = torch.utils._pytree.tree_map_only(
+                    torch.Tensor,
+                    lambda x: x[index],
+                    (a, b),
+                )
+                return mapped_attributes
+
+            return call(index)
+
+        a = torch.randn(4, 2, 5)
+        b = torch.randn(4, 2, 5, 5)
+        compiled_fn = torch.compile(fn, fullgraph=True)
+        compiled_res = compiled_fn(a, b, torch.tensor([2]))
+        reference_res = fn(a, b, torch.tensor([2]))
+        self.assertTrue(same(compiled_res, reference_res))
+
 
 instantiate_parametrized_tests(FunctionTests)
 
