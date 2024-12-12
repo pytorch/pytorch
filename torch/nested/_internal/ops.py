@@ -918,6 +918,11 @@ def narrow(func, *args, **kwargs):
         end_val = max(min(end_val, inp._values.size(dim)), 0)
         length_val = max(min(length_val, end_val - start_val), 0)
 
+        # shortcut if no actual narrowing is happening; this helps us ensure
+        # that length < batch size if we don't take this path
+        if length_val == inp.size(0):
+            return inp.detach()
+
         # +1 to include last offset. Also normalize offsets to start at 0.
         out_kwargs["offsets"] = (
             inp._offsets[start_val : start_val + length_val + 1]
@@ -947,6 +952,8 @@ def narrow(func, *args, **kwargs):
         # unbacked SymInt for length
         length = (inp._offsets[start_val + length_val] - inp._offsets[start_val]).item()
         torch._check_is_size(length)
+        # we can say this because we short-circuit earlier if length == inp._values.size(dim)
+        torch._check(length < inp._values.size(dim))
         torch._check(start + length <= inp._values.size(dim))
 
         # compute new sizes / strides from symbolic values
@@ -1610,7 +1617,7 @@ def view_default(func, *args, **kwargs):
         )
 
     # Ensure specified size still includes batch and ragged dims
-    if len(size) < 3 or not raggedness_matches(inp, size):
+    if len(size) < 2 or not raggedness_matches(inp, size):
         raise RuntimeError(f"view(): cannot view shape {inp._size} as {size}")
 
     # outer size: the size of the NT, e.g. [3, j0, 10]

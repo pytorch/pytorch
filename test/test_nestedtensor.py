@@ -6036,7 +6036,7 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
                 torch.randn(7, 5, device=device, dtype=dtype),
             ],
             layout=torch.jagged,
-            requires_grad=False,
+            requires_grad=True,
         )
 
         def f(nt, start, length):
@@ -8353,13 +8353,6 @@ BACKWARD_SKIPS_AND_XFAILS = [
         sample_match_fn=lambda device, sample: ("with bias" in sample.name),
         name="broken_linear_backward",
     ),
-    # narrow(): unimplemented backward
-    XFailRule(
-        error_type=RuntimeError,
-        error_msg="derivative for aten::narrow is not implemented",
-        op_match_fn=lambda device, op: (op.full_name == "narrow"),
-        name="broken_narrow_backward",
-    ),
     # min / max: need to examine backwards formula for non-full reduction
     XFailRule(
         error_type=RuntimeError,
@@ -8564,6 +8557,18 @@ COMPILE_BACKWARD_SKIPS_AND_XFAILS = [
         op_match_fn=lambda device, op: (op.full_name in {"cdouble", "cfloat", "chalf"}),
         name="unimplemented_view_as_real",
     ),
+    # narrow(): unbacked SymInt bug with non-contig transposed inputs
+    XFailRule(
+        error_type=torch.fx.experimental.symbolic_shapes.GuardOnDataDependentSymNode,
+        error_msg=r"data-dependent expression Eq.IsNonOverlappingAndDenseIndicator",
+        op_match_fn=lambda device, op: (op.full_name == "narrow"),
+        sample_match_fn=lambda device, sample: (
+            "noncontig_transposed" in sample.name
+            and "batch_dim" in sample.name
+            and sample.kwargs["length"] < sample.input.size(0)
+        ),
+        name="broken_narrow_backward",
+    ),
     # torch._subclasses.fake_tensor.DataDependentOutputException: aten._local_scalar_dense.default
     # from item call in clone() -> unbind()
     XFailRule(
@@ -8634,6 +8639,8 @@ COMPILE_BACKWARD_SKIPS_AND_XFAILS = [
 COMPARE_TENSOR_COMPONENT_EQUALITY = {
     # masked_select is expected to output a different shape
     "masked_select",
+    # narrow is expected to output a new shape
+    "narrow",
 }
 
 
@@ -8730,6 +8737,9 @@ class TestNestedTensorOpInfo(NestedTensorTestCase):
         ):
             with subtest_ctx(self), skip_xfail_ctx(self):
                 torch.compiler.reset()
+                # must be set to avoid:
+                # DataDependentOutputException: aten._local_scalar_dense.default
+                torch._dynamo.config.capture_scalar_outputs = True
 
                 op_fn = op.op
 

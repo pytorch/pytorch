@@ -840,7 +840,7 @@ def batchwise_reference_narrow(op, sample):
     start, length = sample.kwargs["start"], sample.kwargs["length"]
     components = list(sample.input.unbind())
     narrowed = components[start : start + length]
-    return torch.nested.nested_tensor(narrowed, layout=torch.jagged)
+    return torch.nested.as_nested_tensor(narrowed, layout=torch.jagged)
 
 
 def batchwise_reference_select(op, sample):
