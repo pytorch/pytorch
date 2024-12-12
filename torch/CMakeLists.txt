@@ -310,10 +310,6 @@ endif()
 
 add_library(torch_python SHARED ${TORCH_PYTHON_SRCS})
 torch_compile_options(torch_python)  # see cmake/public/utils.cmake
-if(NOT WIN32)
-  target_compile_options(torch_python PRIVATE
-      $<$<COMPILE_LANGUAGE:CXX>: -fvisibility=default>)
-endif()
 
 if(CAFFE2_USE_MKL AND BUILD_LIBTORCHLESS)
 
