@@ -4959,15 +4959,6 @@ class ShapeEnv:
                         curr_t.storage_offset(),
                     )
 
-                    if (
-                        isinstance(curr_t, torch._subclasses.fake_tensor.FakeTensor)
-                        and curr_t.try_get_nested_int_id() is not None
-                    ):
-                        track_symint(
-                            torch._dynamo.source.NestedIntSource(src),
-                            torch._nested_int_from_offsets(curr_t),
-                        )
-
         # 1. Every input must equal the final simplified symbolic expression
         #    stored on the placeholder.  Given a placeholder (s0*2, s1),
         #    if we have an input (2, 3), we must show s0*2 == 2 and s1 == 3.

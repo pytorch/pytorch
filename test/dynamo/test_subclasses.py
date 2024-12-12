@@ -3068,6 +3068,7 @@ class GraphModule(torch.nn.Module):
 
         self._validate_compile(fn, arg_fn)
 
+    @requires_cuda
     @fresh_tensor_registry
     def test_different_devices(self):
         from torch.utils._sympy.singleton_int import SingletonInt
