@@ -30,10 +30,10 @@ dill==0.3.7
 #Pinned versions: 0.3.7
 #test that import: dynamo/test_replay_record.py test_dataloader.py test_datapipe.py test_serialization.py
 
-expecttest==0.2.1
+expecttest==0.3.0
 #Description: method for writing tests where test framework auto populates
 # the expected output based on previous runs
-#Pinned versions: 0.2.1
+#Pinned versions: 0.3.0
 #test that import:
 
 fbscribelogger==0.1.7
@@ -132,6 +132,9 @@ numpy==1.22.4; python_version == "3.9" or python_version == "3.10"
 numpy==1.26.2; python_version == "3.11" or python_version == "3.12"
 numpy==2.1.2; python_version >= "3.13"
 
+pandas==2.0.3; python_version < "3.13"
+pandas==2.2.3; python_version >= "3.13"
+
 #onnxruntime
 #Description: scoring engine for Open Neural Network Exchange (ONNX) models
 #Pinned versions: 1.9.0
@@ -187,6 +190,11 @@ pytest-flakefinder==1.1.0
 
 pytest-rerunfailures>=10.3
 #Description: plugin for rerunning failure tests in pytest
+#Pinned versions:
+#test that import:
+
+pytest-subtests==0.13.1
+#Description: plugin for subtest support
 #Pinned versions:
 #test that import:
 
