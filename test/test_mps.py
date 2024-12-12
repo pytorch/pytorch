@@ -8167,7 +8167,6 @@ class TestMPS(TestCaseMPS):
         torch.mps.synchronize()
         self.assertTrue(event.query())
         self.assertEqual(c_acc.cpu(), c)
-        self.assertTrue(False)
 
     def test_jit_save_load(self):
         m = torch.nn.Module()
