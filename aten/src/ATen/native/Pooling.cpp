@@ -20,8 +20,8 @@
 #include <ATen/ops/max_pool2d_with_indices.h>
 #include <ATen/ops/max_pool3d_native.h>
 #include <ATen/ops/max_pool3d_with_indices.h>
-#include <ATen/ops/mkldnn_max_pool2d.h>
-#include <ATen/ops/mkldnn_max_pool3d.h>
+#include <ATen/ops/onednn_max_pool2d.h>
+#include <ATen/ops/onednn_max_pool3d.h>
 #include <ATen/ops/quantized_max_pool2d.h>
 #include <ATen/ops/quantized_max_pool3d.h>
 #endif
@@ -149,7 +149,7 @@ Tensor max_pool2d(
                                     dilation, ceil_mode);
   }
   if (self.is_onednn()) {
-    return at::mkldnn_max_pool2d(
+    return at::onednn_max_pool2d(
         self, kernel_size, stride, padding, dilation, ceil_mode);
   }
 #if defined(C10_MOBILE)
@@ -176,7 +176,7 @@ Tensor max_pool3d(
                                     dilation, ceil_mode);
   }
   if (self.is_onednn()) {
-    return at::mkldnn_max_pool3d(
+    return at::onednn_max_pool3d(
         self, kernel_size, stride, padding, dilation, ceil_mode);
   }
   auto output_and_indices = at::max_pool3d_with_indices(

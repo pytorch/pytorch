@@ -3900,25 +3900,33 @@
     MPS: mps_max_pool2d_backward
   autogen: max_pool2d_backward.out
 
-- func: mkldnn_max_pool2d(Tensor self, int[2] kernel_size, int[2] stride=[], int[2] padding=0, int[2] dilation=1, bool ceil_mode=False) -> Tensor
+- func: onednn_max_pool2d(Tensor self, int[2] kernel_size, int[2] stride=[], int[2] padding=0, int[2] dilation=1, bool ceil_mode=False) -> Tensor
   dispatch:
-    OnednnCPU: mkldnn_max_pool2d
-  autogen: mkldnn_max_pool2d.out
+    OnednnCPU: onednn_max_pool2d
+  autogen: onednn_max_pool2d.out
+
+- func: mkldnn_max_pool2d(Tensor self, int[2] kernel_size, int[2] stride=[], int[2] padding=0, int[2] dilation=1, bool ceil_mode=False) -> Tensor
+
+- func: onednn_max_pool2d_backward(Tensor grad_output, Tensor output, Tensor input, int[2] kernel_size, int[2] stride=[], int[2] padding=0, int[2] dilation=1, bool ceil_mode=False) -> Tensor
+  dispatch:
+    OnednnCPU: onednn_max_pool2d_backward
+  autogen: onednn_max_pool2d_backward.out
 
 - func: mkldnn_max_pool2d_backward(Tensor grad_output, Tensor output, Tensor input, int[2] kernel_size, int[2] stride=[], int[2] padding=0, int[2] dilation=1, bool ceil_mode=False) -> Tensor
+
+- func: onednn_max_pool3d(Tensor self, int[3] kernel_size, int[3] stride=[], int[3] padding=0, int[3] dilation=1, bool ceil_mode=False) -> Tensor
   dispatch:
-    OnednnCPU: mkldnn_max_pool2d_backward
-  autogen: mkldnn_max_pool2d_backward.out
+    OnednnCPU: onednn_max_pool3d
+  autogen: onednn_max_pool3d.out
 
 - func: mkldnn_max_pool3d(Tensor self, int[3] kernel_size, int[3] stride=[], int[3] padding=0, int[3] dilation=1, bool ceil_mode=False) -> Tensor
+
+- func: onednn_max_pool3d_backward(Tensor grad_output, Tensor output, Tensor input, int[3] kernel_size, int[3] stride=[], int[3] padding=0, int[3] dilation=1, bool ceil_mode=False) -> Tensor
   dispatch:
-    OnednnCPU: mkldnn_max_pool3d
-  autogen: mkldnn_max_pool3d.out
+    OnednnCPU: onednn_max_pool3d_backward
+  autogen: onednn_max_pool3d_backward.out
 
 - func: mkldnn_max_pool3d_backward(Tensor grad_output, Tensor output, Tensor input, int[3] kernel_size, int[3] stride=[], int[3] padding=0, int[3] dilation=1, bool ceil_mode=False) -> Tensor
-  dispatch:
-    OnednnCPU: mkldnn_max_pool3d_backward
-  autogen: mkldnn_max_pool3d_backward.out
 
 - func: quantized_max_pool1d(Tensor self, int[1] kernel_size, int[1] stride=[], int[1] padding=0, int[1] dilation=1, bool ceil_mode=False) -> Tensor
   dispatch:
@@ -4964,12 +4972,12 @@
     CPU, CUDA, Meta, QuantizedCPU, QuantizedCUDA, ZeroTensor, MPS: _reshape_alias
     # We don't need to support onednn since this is handled explicitly by the reshape operator.
 
-- func: _mkldnn_reshape(Tensor self, int[] shape) -> Tensor
+- func: _onednn_reshape(Tensor self, int[] shape) -> Tensor
   device_check: NoCheck
   device_guard: False
   dispatch:
-    OnednnCPU: mkldnn_reshape
-  autogen: _mkldnn_reshape.out
+    OnednnCPU: onednn_reshape
+  autogen: _onednn_reshape.out
 
 - func: reshape_as(Tensor(a) self, Tensor other) -> Tensor(a)
   variants: method
@@ -6132,11 +6140,11 @@
   device_check: NoCheck
   device_guard: False
 
-- func: _mkldnn_transpose(Tensor self, int dim0, int dim1) -> Tensor
+- func: _onednn_transpose(Tensor self, int dim0, int dim1) -> Tensor
   device_check: NoCheck
   device_guard: False
   dispatch:
-    OnednnCPU: mkldnn_transpose
+    OnednnCPU: onednn_transpose
 
 - func: transpose_(Tensor(a!) self, int dim0, int dim1) -> Tensor(a!)
   variants: method
@@ -6146,12 +6154,12 @@
   dispatch:
     CompositeExplicitAutograd: transpose_
 
-- func: _mkldnn_transpose_(Tensor(a!) self, int dim0, int dim1) -> Tensor(a!)
+- func: _onednn_transpose_(Tensor(a!) self, int dim0, int dim1) -> Tensor(a!)
   device_check: NoCheck
   device_guard: False
   dispatch:
-    OnednnCPU: mkldnn_transpose_
-  autogen: _mkldnn_transpose.out
+    OnednnCPU: onednn_transpose_
+  autogen: _onednn_transpose.out
 
 - func: one_hot(Tensor self, int num_classes=-1) -> Tensor
   python_module: nn
@@ -12126,18 +12134,22 @@
   dispatch:
     CompositeImplicitAutograd: adaptive_avg_pool2d_symint
 
-- func: mkldnn_adaptive_avg_pool2d(Tensor self, int[2] output_size) -> Tensor
+- func: onednn_adaptive_avg_pool2d(Tensor self, int[2] output_size) -> Tensor
   dispatch:
-    OnednnCPU: mkldnn_adaptive_avg_pool2d
+    OnednnCPU: onednn_adaptive_avg_pool2d
 
-- func: mkldnn_adaptive_avg_pool2d.out(Tensor self, int[2] output_size, *, Tensor(a!) out) -> Tensor(a!)
+- func: mkldnn_adaptive_avg_pool2d(Tensor self, int[2] output_size) -> Tensor
+
+- func: onednn_adaptive_avg_pool2d.out(Tensor self, int[2] output_size, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     OnednnCPU: onednn_adaptive_avg_pool2d_out
 
-- func: mkldnn_adaptive_avg_pool2d_backward(Tensor grad_output, Tensor self) -> Tensor
+- func: onednn_adaptive_avg_pool2d_backward(Tensor grad_output, Tensor self) -> Tensor
   dispatch:
-    OnednnCPU: mkldnn_adaptive_avg_pool2d_backward
-  autogen: mkldnn_adaptive_avg_pool2d_backward.out
+    OnednnCPU: onednn_adaptive_avg_pool2d_backward
+  autogen: onednn_adaptive_avg_pool2d_backward.out
+
+- func: mkldnn_adaptive_avg_pool2d_backward(Tensor grad_output, Tensor self) -> Tensor
 
 - func: _adaptive_avg_pool2d(Tensor self, SymInt[2] output_size) -> Tensor
   dispatch:

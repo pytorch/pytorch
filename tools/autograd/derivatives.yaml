@@ -2817,16 +2817,16 @@
 - name: onednn_linear(Tensor self, Tensor weight, Tensor? bias=None) -> Tensor
   self, weight, bias: onednn_linear_backward(self, grad, weight, grad_input_mask)
 
-- name: mkldnn_max_pool2d(Tensor self, int[2] kernel_size, int[2] stride=[], int[2] padding=0, int[2] dilation=1, bool ceil_mode=False) -> Tensor
-  self: mkldnn_max_pool2d_backward(grad, result, self, kernel_size, stride, padding, dilation, ceil_mode)
+- name: onednn_max_pool2d(Tensor self, int[2] kernel_size, int[2] stride=[], int[2] padding=0, int[2] dilation=1, bool ceil_mode=False) -> Tensor
+  self: onednn_max_pool2d_backward(grad, result, self, kernel_size, stride, padding, dilation, ceil_mode)
 
-- name: mkldnn_max_pool3d(Tensor self, int[3] kernel_size, int[3] stride=[], int[3] padding=0, int[3] dilation=1, bool ceil_mode=False) -> Tensor
-  self: mkldnn_max_pool3d_backward(grad, result, self, kernel_size, stride, padding, dilation, ceil_mode)
+- name: onednn_max_pool3d(Tensor self, int[3] kernel_size, int[3] stride=[], int[3] padding=0, int[3] dilation=1, bool ceil_mode=False) -> Tensor
+  self: onednn_max_pool3d_backward(grad, result, self, kernel_size, stride, padding, dilation, ceil_mode)
 
-- name: mkldnn_adaptive_avg_pool2d(Tensor self, int[2] output_size) -> Tensor
-  self: mkldnn_adaptive_avg_pool2d_backward(grad, self)
+- name: onednn_adaptive_avg_pool2d(Tensor self, int[2] output_size) -> Tensor
+  self: onednn_adaptive_avg_pool2d_backward(grad, self)
 
-- name: _mkldnn_reshape(Tensor self, int[] shape) -> Tensor
+- name: _onednn_reshape(Tensor self, int[] shape) -> Tensor
   self: grad.reshape_symint(self.sym_sizes())
 
 # NestedTensor

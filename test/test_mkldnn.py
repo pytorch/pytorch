@@ -765,7 +765,7 @@ class TestMkldnn(TestCase):
                     y_bf16 = max_pool(x_bf16.to_mkldnn()).to_dense(torch.float32)
                     self.assertEqual(y, y_bf16, atol=0.1, rtol=1e-3)
                 else:
-                    msg = "mkldnn_max_pool%dd: bf16 path needs the cpu support avx512bw, avx512vl and avx512dq" % dim
+                    msg = "onednn_max_pool%dd: bf16 path needs the cpu support avx512bw, avx512vl and avx512dq" % dim
                     self.assertRaisesRegex(RuntimeError,
                                            msg,
                                            lambda: max_pool(x_bf16.to_mkldnn()))
@@ -822,7 +822,7 @@ class TestMkldnn(TestCase):
             padding=1,
             dilation=2)
         self.assertRaisesRegex(RuntimeError,
-                               'mkldnn_max_pool2d does not support dilation case',
+                               'onednn_max_pool2d does not support dilation case',
                                lambda: max_pool2d(x))
 
         # 3d dilation case
@@ -833,7 +833,7 @@ class TestMkldnn(TestCase):
             padding=1,
             dilation=2)
         self.assertRaisesRegex(RuntimeError,
-                               'mkldnn_max_pool3d does not support dilation case',
+                               'onednn_max_pool3d does not support dilation case',
                                lambda: max_pool3d(x))
 
     def _test_avg_pool_base(self, dim, input):
@@ -954,7 +954,7 @@ class TestMkldnn(TestCase):
             y_bf16 = adaptive_avg_pool2d(x.to_mkldnn()).to_dense(torch.float32)
             self.assertEqual(y, y_bf16, atol=1e-1, rtol=1e-3)
         else:
-            msg = "mkldnn_adaptive_avg_pool2d: bf16 path needs the cpu support avx512bw, avx512vl and avx512dq"
+            msg = "onednn_adaptive_avg_pool2d: bf16 path needs the cpu support avx512bw, avx512vl and avx512dq"
             self.assertRaisesRegex(RuntimeError,
                                    msg,
                                    lambda: adaptive_avg_pool2d(x_bf16.to_mkldnn()))
@@ -1243,7 +1243,7 @@ class TestMkldnn(TestCase):
     def test_transpose_invalid_dime(self):
         x = torch.randn(3, 4, 5, dtype=torch.float32).to_mkldnn()
         with self.assertRaisesRegex(IndexError, "Dimension out of range"):
-            torch._mkldnn_transpose(x, 0, 12)
+            torch._onednn_transpose(x, 0, 12)
 
     def test_linear_non_contiguous_weight(self):
         in_features = torch.randint(3, 10, (1,)).item()

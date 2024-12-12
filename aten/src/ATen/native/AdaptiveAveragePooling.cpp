@@ -13,7 +13,7 @@
 #include <ATen/ops/_adaptive_avg_pool2d_native.h>
 #include <ATen/ops/adaptive_avg_pool2d_native.h>
 #include <ATen/ops/empty.h>
-#include <ATen/ops/mkldnn_adaptive_avg_pool2d.h>
+#include <ATen/ops/onednn_adaptive_avg_pool2d.h>
 #endif
 
 
@@ -114,7 +114,7 @@ namespace {
         "but received {", output_size[0], ", ", output_size[1], "}");
 
     if (input.is_onednn()) {
-      return at::mkldnn_adaptive_avg_pool2d(input, C10_AS_INTARRAYREF_SLOW(output_size));
+      return at::onednn_adaptive_avg_pool2d(input, C10_AS_INTARRAYREF_SLOW(output_size));
     }
 
     if (!input.is_quantized() && output_size[0] == 1 && output_size[1] == 1) {

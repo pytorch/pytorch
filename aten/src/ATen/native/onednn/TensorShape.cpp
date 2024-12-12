@@ -7,8 +7,8 @@
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/NativeFunctions.h>
 #else
-#include <ATen/ops/_mkldnn_reshape_native.h>
-#include <ATen/ops/_mkldnn_transpose_native.h>
+#include <ATen/ops/_onednn_reshape_native.h>
+#include <ATen/ops/_onednn_transpose_native.h>
 #include <ATen/ops/clone_native.h>
 #include <ATen/ops/view_native.h>
 #endif
@@ -19,23 +19,23 @@ namespace at {
 namespace native {
 
 Tensor onednn_view(const Tensor& self, IntArrayRef size) {
-  TORCH_CHECK(false, "mkldnn_reshape: ATen not compiled with ONEDNN support");
+  TORCH_CHECK(false, "onednn_reshape: ATen not compiled with ONEDNN support");
 }
 
-Tensor mkldnn_reshape(const Tensor& self, IntArrayRef size) {
-  TORCH_CHECK(false, "mkldnn_reshape: ATen not compiled with ONEDNN support");
+Tensor onednn_reshape(const Tensor& self, IntArrayRef size) {
+  TORCH_CHECK(false, "onednn_reshape: ATen not compiled with ONEDNN support");
 }
 
 Tensor onednn_clone(const Tensor& self, std::optional<c10::MemoryFormat> optional_memory_format) {
   TORCH_CHECK(false, "onednn_clone: ATen not compiled with ONEDNN support");
 }
 
-Tensor mkldnn_transpose(const Tensor& self, int64_t dim0, int64_t dim1) {
-  TORCH_CHECK(false, "mkldnn_transpose: ATen not compiled with ONEDNN support");
+Tensor onednn_transpose(const Tensor& self, int64_t dim0, int64_t dim1) {
+  TORCH_CHECK(false, "onednn_transpose: ATen not compiled with ONEDNN support");
 }
 
-Tensor& mkldnn_transpose_(Tensor& self, int64_t dim0, int64_t dim1) {
-  TORCH_CHECK(false, "mkldnn_transpose_: ATen not compiled with ONEDNN support");
+Tensor& onednn_transpose_(Tensor& self, int64_t dim0, int64_t dim1) {
+  TORCH_CHECK(false, "onednn_transpose_: ATen not compiled with ONEDNN support");
 }
 
 } // namespace native
@@ -52,7 +52,7 @@ Tensor onednn_view(const Tensor& self, IntArrayRef size) {
       "Currently Onednn tensor does not support view. Change to use reshape instead");
 }
 
-Tensor mkldnn_reshape(const Tensor& self, IntArrayRef size) {
+Tensor onednn_reshape(const Tensor& self, IntArrayRef size) {
   auto inferred_size = at::infer_size(size, self.numel());
   if (self.sizes() == inferred_size) {
     return self;
@@ -76,7 +76,7 @@ Tensor onednn_clone(const Tensor& self, std::optional<c10::MemoryFormat> optiona
                                  self.options().device_opt());
 }
 
-Tensor mkldnn_transpose(const Tensor& self, int64_t dim0, int64_t dim1) {
+Tensor onednn_transpose(const Tensor& self, int64_t dim0, int64_t dim1) {
   auto ndims = self.dim();
   dim0 = maybe_wrap_dim(dim0, ndims);
   dim1 = maybe_wrap_dim(dim1, ndims);
@@ -90,8 +90,8 @@ Tensor mkldnn_transpose(const Tensor& self, int64_t dim0, int64_t dim1) {
                                  self.options().device_opt());
 }
 
-Tensor& mkldnn_transpose_(Tensor& self, int64_t dim0, int64_t dim1) {
-  TORCH_CHECK(false, "mkldnn_transpose_: in-place onednn operations are not supported yet");
+Tensor& onednn_transpose_(Tensor& self, int64_t dim0, int64_t dim1) {
+  TORCH_CHECK(false, "onednn_transpose_: in-place onednn operations are not supported yet");
 }
 
 } // namespace at

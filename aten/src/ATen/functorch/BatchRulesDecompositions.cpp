@@ -400,6 +400,12 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatchedDecomposition, m) {
   OP_DECOMPOSE(mkldnn_linear_backward_input);
   OP_DECOMPOSE(mkldnn_linear_backward_weights);
   OP_DECOMPOSE(mkldnn_linear_backward);
+  OP_DECOMPOSE(mkldnn_max_pool2d);
+  OP_DECOMPOSE(mkldnn_max_pool2d_backward);
+  OP_DECOMPOSE(mkldnn_max_pool3d);
+  OP_DECOMPOSE(mkldnn_max_pool3d_backward);
+  OP_DECOMPOSE(mkldnn_adaptive_avg_pool2d);
+  OP_DECOMPOSE(mkldnn_adaptive_avg_pool2d_backward);
 }
 
 } // namespace at::functorch
