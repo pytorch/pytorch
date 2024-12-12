@@ -553,7 +553,7 @@ def tuned_scaled_mm(
     if use_aten_gemm_kernels():
         choices.append(aten_choice)
 
-    static_shape, is_nonzero = _is_static_problem(layout)
+    _static_shape, is_nonzero = _is_static_problem(layout)
 
     if is_nonzero and use_triton_template(layout, enable_float8=True):
         if use_persistent_tma(k, bias is not None):

@@ -827,5 +827,6 @@ def reference_representation_rewrite(model: GraphModule) -> GraphModule:
             replacement = replacement_post_trans(replacement)
         pattern.recompile()  # type: ignore[attr-defined]
         replacement.recompile()  # type: ignore[attr-defined]
-        matches = replace_pattern(model, pattern, replacement)
+        replace_pattern(model, pattern, replacement)
+
     return model

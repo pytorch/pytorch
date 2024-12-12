@@ -600,7 +600,7 @@ def identify_mutated_tensors(
         return [
             ordered_tensor_names[i] for i, mutated in enumerate(mutations) if mutated
         ]
-    except Exception as e:
+    except Exception:
         log.warning(
             "Encountered an exception in identify_mutated_tensors, assuming every input is mutated",
             exc_info=True,

@@ -162,7 +162,7 @@ class OptimizerVariable(UserDefinedObjectVariable):
         # track indices to not set so we don't need to
         # in the variable tracker realize the whole state
         # we handle guarding the state specially
-        for ind, group in enumerate(self.value.param_groups):
+        for group in self.value.param_groups:
             if safe_to_set_capturable(group):
                 group["capturable"] = True
 
@@ -170,7 +170,7 @@ class OptimizerVariable(UserDefinedObjectVariable):
         param_groups_vt = LazyVariableTracker.realize_all(
             VariableTracker.build(tx, self.value.param_groups, source)
         )
-        for ind, param_group_vt in enumerate(param_groups_vt.items):
+        for param_group_vt in param_groups_vt.items:
             key = ConstDictVariable._HashableTracker(
                 ConstantVariable.create("capturable")
             )
@@ -247,9 +247,7 @@ class OptimizerVariable(UserDefinedObjectVariable):
 
         # Populate self.grad_to_source and self.tensor_to_source so that we can
         # manually update_list_args
-        for g_ind, (group, group_vt) in enumerate(
-            zip(self.value.param_groups, param_groups_vt.items)
-        ):
+        for group, group_vt in zip(self.value.param_groups, param_groups_vt.items):
             # we assume here that all params within a param group
             # are initialized similarly
             if len(group["params"]) > 0:
@@ -273,7 +271,6 @@ class OptimizerVariable(UserDefinedObjectVariable):
                             )
                             break
 
-            group_source = group_vt.source
             params_vt = group_vt.getitem_const(tx, ConstantVariable.create("params"))
             all_static = True
             non_static_grads = []
