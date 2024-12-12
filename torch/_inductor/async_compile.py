@@ -207,6 +207,7 @@ class AsyncCompile:
             with dynamo_timed(
                 "async_compile.precompile",
                 log_pt2_compile_event=True,
+                dynamo_compile_column_us="triton_compile_time_us",
                 log_waitcounter=True,
             ):
                 kernel.precompile()
@@ -277,7 +278,10 @@ class AsyncCompile:
 
     def wait(self, scope: Dict[str, Any]) -> None:
         with dynamo_timed(
-            "async_compile.wait", log_pt2_compile_event=True, log_waitcounter=True
+            "async_compile.wait",
+            log_pt2_compile_event=True,
+            dynamo_compile_column_us="triton_compile_time_us",
+            log_waitcounter=True,
         ):
             num_kernels = len(
                 [

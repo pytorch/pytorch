@@ -85,12 +85,9 @@ struct TORCH_API ClassType : public NamedType {
       return true;
     }
     if (auto user_rhs = rhs.castRaw<ClassType>()) {
-      // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
-      const auto& lhs_name = name().value();
-      // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
-      const auto& rhs_name = user_rhs->name().value();
-
-      return lhs_name == rhs_name &&
+      const auto& lhs_name = name();
+      const auto& rhs_name = user_rhs->name();
+      return lhs_name.has_value() && lhs_name == rhs_name &&
           this->compilation_unit() == user_rhs->compilation_unit();
     }
     return false;
@@ -394,8 +391,8 @@ struct TORCH_API ClassType : public NamedType {
 
   std::string annotation_str_impl(
       [[maybe_unused]] const TypePrinter& printer = nullptr) const override {
-    const auto& n = name().value();
-    return n.qualifiedName();
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+    return name()->qualifiedName();
   }
 
   void addAttribute(ClassAttribute classAttribute);

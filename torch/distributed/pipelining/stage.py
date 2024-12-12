@@ -539,7 +539,7 @@ class _PipelineStageBase(ABC):
                 raise AssertionError(f"Expected _RecvInfo but got {type(info)}")
 
         tensors = map_aggregate(
-            recv_infos,
+            recv_infos,  # type: ignore[arg-type]
             get_recv_tensor,
         )
 
