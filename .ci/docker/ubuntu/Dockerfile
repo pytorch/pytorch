@@ -36,7 +36,8 @@ ENV DOCS=$DOCS
 COPY requirements-ci.txt requirements-docs.txt /opt/conda/
 COPY ./common/install_conda.sh install_conda.sh
 COPY ./common/common_utils.sh common_utils.sh
-RUN bash ./install_conda.sh && rm install_conda.sh common_utils.sh /opt/conda/requirements-ci.txt /opt/conda/requirements-docs.txt
+COPY ./common/install_magma_conda.sh install_magma_conda.sh
+RUN bash ./install_conda.sh && rm install_conda.sh install_magma_conda.sh common_utils.sh /opt/conda/requirements-ci.txt /opt/conda/requirements-docs.txt
 RUN if [ -n "${UNINSTALL_DILL}" ]; then pip uninstall -y dill; fi
 
 # Install gcc
@@ -169,13 +170,6 @@ COPY ./common/install_acl.sh install_acl.sh
 RUN if [ -n "${ACL}" ]; then bash ./install_acl.sh; fi
 RUN rm install_acl.sh
 ENV INSTALLED_ACL ${ACL}
-
-# (optional) install graphviz
-ARG GRAPHVIZ
-COPY ./common/install_graphviz.sh install_graphviz.sh
-RUN if [ -n "${GRAPHVIZ}" ]; then bash ./install_graphviz.sh; fi
-RUN rm install_graphviz.sh
-ENV INSTALLED_GRAPHVIZ ${GRAPHVIZ}
 
 # Install ccache/sccache (do this last, so we get priority in PATH)
 ARG SKIP_SCCACHE_INSTALL

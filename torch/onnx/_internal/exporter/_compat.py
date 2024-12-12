@@ -6,11 +6,14 @@ from __future__ import annotations
 
 import inspect
 import logging
+import re
+import warnings
 from typing import Any, Callable, Mapping, Sequence, TYPE_CHECKING
 
 import torch
 from torch.onnx._internal._lazy_import import onnxscript_apis, onnxscript_ir as ir
 from torch.onnx._internal.exporter import _core, _onnx_program, _registration
+from torch.utils import _pytree
 
 
 if TYPE_CHECKING:
@@ -26,13 +29,51 @@ def _signature(model) -> inspect.Signature:
     raise ValueError("model has no forward method and is not callable")
 
 
+def _rename_dynamic_shapes_with_model_inputs(
+    model,
+    *,
+    dynamic_shapes: dict[str, Any] | tuple[Any] | list[Any],
+    input_names: Sequence[str],
+) -> dict[str, Any] | tuple[Any] | list[Any]:
+    """
+
+    This function renames the dynamic_shapes with the paramters of the model, since
+    torch.export.export requires the dynamic_shapes to be named with the model's input names.
+
+    NOTE: If the model input is nested, this function does nothing, and the users are responsible
+    for providing the correct dynamic_shapes with the correct model parameters as keys. However,
+    dynamic_shapes is usually defined as a tuple when the input is nested.
+
+    """
+    if isinstance(dynamic_shapes, (tuple, list)):
+        # It doesn not specify input names if it's a tuple
+        return dynamic_shapes
+
+    sig = _signature(model)
+
+    # This indicates that inputs are nested, and users specify
+    # flattened input names, so we don't rename accordingly.
+    # If users really assign customized names to the nested inputs, they
+    # get errors from torch.export.export
+    if len(input_names) != len(sig.parameters):
+        return dynamic_shapes
+
+    renamed_dynamic_shapes = {}
+    for idx, param_name in enumerate(sig.parameters):
+        renamed_dynamic_shapes[param_name] = dynamic_shapes[input_names[idx]]
+
+    return renamed_dynamic_shapes
+
+
 def _from_dynamic_axes_to_dynamic_shapes(
     model,
+    args: tuple[Any, ...],
+    kwargs: dict[str, Any] | None,
     *,
     dynamic_axes=None,
     output_names: set[str],
     input_names: Sequence[str] | None = None,
-) -> dict[str, Any] | None:
+) -> dict[str, Any | None] | None:
     """
 
     dynamic_axes examples:
@@ -52,52 +93,118 @@ def _from_dynamic_axes_to_dynamic_shapes(
     if input_names is None:
         input_names = []
 
-    sig = _signature(model)
-    if len(input_names) > len(sig.parameters):
-        raise ValueError(
-            f"Number of input names ({len(input_names)}) should not be greater than "
-            f"the number of model inputs ({len(sig.parameters)})"
-        )
-    input_names_to_model_inputs = {}
-    for idx, param_name in enumerate(sig.parameters):
-        if idx < len(input_names):
-            input_names_to_model_inputs[input_names[idx]] = param_name
-        else:
-            input_names_to_model_inputs[param_name] = param_name
+    if kwargs is None:
+        kwargs = {}
 
-    # NOTE: torch.export.export does not support input names assignment,
-    # so we need to map input names to model inputs to create dynamic_shapes
-    # for the exported program
-    dynamic_shapes_to_exported_program = {}
+    dynamic_shapes: dict[str, Any | None] = {}
     for input_name, axes in dynamic_axes.items():
+        # NOTE: torch.export.Dim requires strict min and max constraints, and it
+        # dpends on the traced model to provide the correct min and max values.
+        # We set max to 99999 to avoid the constraints violation error with the default int64 max.
+        # https://github.com/pytorch/pytorch/blob/32f585d9346e316e554c8d9bf7548af9f62141fc/test/export/test_export.py#L687
         if input_name in output_names:
             # User specified an output name as a dynamic axis, so we skip it
             continue
-        # input_name can be either from input_names or from the model inputs
-        if input_name not in input_names_to_model_inputs:
-            raise ValueError(
-                f"dynamic axis: {input_name} is not found in the input names: {input_names}"
-            )
-        model_input_name = input_names_to_model_inputs[input_name]
         if isinstance(axes, dict):
-            dynamic_shapes_to_exported_program[model_input_name] = {
-                k: torch.export.Dim(v) for k, v in axes.items()
+            # Dim needs to pass str.isidentifier()
+            # If the max is not set, llm is going to fail, as sequence length is usually bounded within config.
+            # But we also don't want to only support llm. This kind of leaves us with this awkward position.
+            dynamic_shapes[input_name] = {
+                k: torch.export.Dim(re.sub(r"[^A-Za-z_]", "", v), max=99999)
+                for k, v in axes.items()
             }
         elif isinstance(axes, list):
-            dynamic_shapes_to_exported_program[model_input_name] = {
-                k: torch.export.Dim(f"{model_input_name}_dim_{k}") for k in axes
+            dynamic_shapes[input_name] = {
+                k: torch.export.Dim(f"{input_name}_dim_{k}", max=99999) for k in axes
             }
+        elif axes is None:
+            dynamic_shapes[input_name] = None
         else:
-            raise TypeError(
-                f"dynamic_axes value must be either a dict or a list, but got {type(axes)}"
+            raise ValueError(
+                "Unsupported dynamic_axes format. Please provide a dict or a list."
             )
-    # torch.export.export needs static dim to present in dynamic_shapes
-    # for all input tensors, so we need to add them with None
-    for input_name in sig.parameters:
-        if input_name not in dynamic_shapes_to_exported_program:
-            dynamic_shapes_to_exported_program[input_name] = None  # type: ignore[assignment]
 
-    return dynamic_shapes_to_exported_program
+    for input_name in input_names:
+        if input_name not in dynamic_shapes:
+            dynamic_shapes[input_name] = None
+
+    # Order the inputs according to the signature of the model
+    sig = _signature(model)
+    inputs = []
+    for idx, param_name in enumerate(sig.parameters):
+        if idx < len(args):
+            inputs.append(args[idx])
+        elif param_name in kwargs:
+            inputs.append(kwargs[param_name])
+
+    # We need tree structure to represent dynamic_shapes
+    dynamic_shapes = _unflatten_dynamic_shapes_with_inputs_tree(inputs, dynamic_shapes)
+    return dynamic_shapes
+
+
+def _unflatten_dynamic_shapes_with_inputs_tree(
+    inputs: list[Any],
+    dynamic_shapes: dict[str, Any | None],
+) -> dict[str, Any | None]:
+    _, tree_structure = _pytree.tree_flatten(inputs)
+    return _pytree.tree_unflatten(dynamic_shapes.values(), tree_structure)
+
+
+def _from_dynamic_shapes_to_dynamic_axes(
+    dynamic_shapes: dict[str, Any] | tuple[Any, ...] | list[Any],
+    input_names: Sequence[str],
+    exception: Exception,
+) -> dict[str, Any] | None:
+    """
+    Converts dynamic_shapes into dynamic_axes by removing torch.export.Dim wrapping
+    and converting to list or dict form based on whether dimension names are present.
+
+    dynamic_shapes examples:
+    (1) dynamic_shapes = {"x": {0: Dim("my_custom_axis_name_1")}, "y": {1: Dim("my_custom_axis_name_2")}}
+    (2) dynamic_shapes = ({0: Dim("my_custom_axis_name_1"}, {1: Dim("my_custom_axis_name_2")})
+
+    these will be converted to dynamic_axes respectively:
+    (1) dynamic_axes = {"x": {0: "my_custom_axis_name_1"}, "y": {1: "my_custom_axis_name_2"}}
+    (2) dynamic_axes = {"x": [0], "y": [1]}
+
+    NOTE: If the model input is nested, so is the dynamic_shapes, we need to flatten the dynamic_shapes,
+    and then assign the axes to the input names in the order they are provided.
+
+    NOTE: input_names are used to assign the axes to the correct input names. If the input names are not
+    provided, or less than the dynamic inputs/axes, it raises an error.
+    """
+
+    # 0. flatten the dynamic_shapes
+    # If it's a dict with torch.export._Dim, we consider it's an axis to dim mapping
+    def is_dict_axes(x) -> bool:
+        # TODO: torch.export._Dim is not exposed, so we use a hacky way to check the type
+        return isinstance(x, dict) and all(
+            isinstance(k, int)
+            and (v is None or isinstance(v, torch.export.Dim("test").__class__))
+            for k, v in x.items()
+        )
+
+    flat_dynamic_shapes = _pytree.tree_leaves(dynamic_shapes, is_leaf=is_dict_axes)
+
+    if len(input_names) < len(flat_dynamic_shapes):
+        raise ValueError(
+            "To construct dynamic_axes from dynamic_shapes, "
+            f"number of input names ({len(input_names)}) should be greater than or equal to "
+            f"the number of graph inputs(flat) ({len(flat_dynamic_shapes)})"
+        ) from exception
+
+    dynamic_axes = {}
+    # input names are assigned in order
+    for input_name, axes in zip(input_names, flat_dynamic_shapes):
+        if axes is None:
+            continue
+        converted_axes = {}
+        for axis, dim in axes.items():
+            if dim is None:
+                continue
+            converted_axes[axis] = dim.__name__
+            dynamic_axes[input_name] = converted_axes
+    return dynamic_axes
 
 
 def _get_torch_export_args(
@@ -143,8 +250,7 @@ def export_compat(
     **_,
 ) -> _onnx_program.ONNXProgram:
     if opset_version is None:
-        # TODO(justinchuby): Change the hardcoded opset version for it to be flexible
-        opset_version = 18
+        opset_version = onnxscript_apis.torchlib_opset_version()
 
     if isinstance(model, torch.export.ExportedProgram):
         # We know the model is already exported program, so the args, kwargs, and dynamic_shapes
@@ -153,11 +259,35 @@ def export_compat(
     else:
         args, kwargs = _get_torch_export_args(args, kwargs)
         if dynamic_shapes is None and dynamic_axes is not None:
-            dynamic_shapes = _from_dynamic_axes_to_dynamic_shapes(
+            warnings.warn(
+                "# 'dynamic_axes' is not recommended when dynamo=True, "
+                "and may lead to 'torch._dynamo.exc.UserError: Constraints violated.' "
+                "Supply the 'dynamic_shapes' argument instead if export is unsuccessful.",
+                UserWarning,
+            )
+            try:
+                dynamic_shapes = _from_dynamic_axes_to_dynamic_shapes(
+                    model,
+                    args,
+                    kwargs,
+                    dynamic_axes=dynamic_axes,
+                    input_names=input_names,
+                    output_names=set(output_names or ()),
+                )
+            except Exception as e:
+                raise RuntimeError(
+                    "# Failed to convert 'dynamic_axes' to 'dynamic_shapes'. "
+                    "Please provide 'dynamic_shapes' directly. "
+                    "Refer to the documentation for 'torch.export.export' for more information on dynamic shapes."
+                ) from e
+        elif dynamic_shapes is not None and input_names is not None:
+            # NOTE: If dynamic_shapes and input_names are both provided, we need to check
+            # if dynamic_shapes is using input_names. If so, we need to internally change it to
+            # model inputs to be compatible with torch.export.export
+            dynamic_shapes = _rename_dynamic_shapes_with_model_inputs(
                 model,
-                dynamic_axes=dynamic_axes,
+                dynamic_shapes=dynamic_shapes,
                 input_names=input_names,
-                output_names=set(output_names or ()),
             )
 
     registry = _registration.ONNXRegistry.from_torchlib()
@@ -196,6 +326,16 @@ def export_compat(
                 )
             if f is None:
                 raise TypeError("f must be provided when fallback is enabled") from e
+            if dynamic_shapes is not None and dynamic_axes is None:
+                if input_names is None:
+                    raise ValueError(
+                        "Failed to convert dynamic_shapes to dynamic_axes. "
+                        "Either input_names or dynamic_axes must be provided "
+                        "when dynamic is requested in fallback"
+                    ) from e
+                dynamic_axes = _from_dynamic_shapes_to_dynamic_axes(
+                    dynamic_shapes=dynamic_shapes, input_names=input_names, exception=e
+                )
             torch.onnx.utils.export(
                 model,  # type: ignore[arg-type]
                 args,

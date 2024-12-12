@@ -46,6 +46,15 @@
 #include <c10/macros/Macros.h>
 
 namespace {
+constexpr uint64_t getDefaultMaxThreadsPerBlock() {
+#ifndef USE_ROCM
+  return 128;
+#else
+  // bigger default
+  return 512;
+#endif
+}
+
 template <typename scalar_t, int SZ>
 __global__ void indexing_backward_kernel(
   const int64_t* sorted_indices, const int64_t* indices, const scalar_t* grad_output, scalar_t* grad_weight,
@@ -684,7 +693,7 @@ void index_put_with_sort_kernel(Tensor & self, const c10::List<std::optional<Ten
   }
 }
 
-REGISTER_CUDA_DISPATCH(index_put_with_sort_stub, &index_put_with_sort_kernel);
+REGISTER_CUDA_DISPATCH(index_put_with_sort_stub, &index_put_with_sort_kernel)
 
 void index_put_with_sort_quantized(Tensor & self, const c10::List<std::optional<Tensor>>& indices, const Tensor & value, double scale, int zero_point, bool unsafe) {
   if (indices.size() > (size_t)self.dim()) {
@@ -784,7 +793,7 @@ void index_put_with_sort_quantized(Tensor & self, const c10::List<std::optional<
   }
 }
 
-REGISTER_CUDA_DISPATCH(index_put_with_sort_quantized_stub, &index_put_with_sort_quantized);
+REGISTER_CUDA_DISPATCH(index_put_with_sort_quantized_stub, &index_put_with_sort_quantized)
 } //anonymous
 
 
@@ -1034,11 +1043,13 @@ void index_add_cuda_impl(const Tensor& self, int64_t dim, const Tensor& index, c
       selfAddDimSize, selfNumel, reduce_add, alpha_value);                  \
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 
+  uint64_t defaultMaxBlockThreads = getDefaultMaxThreadsPerBlock();
   const dim3 smallIndexGrid(std::min(ceil_div(sliceSize, (uint64_t)128), (uint64_t)(mpc * 8)));
   const dim3 smallIndexBlock(std::min(sliceSize, (uint64_t)128));
 
   const dim3 largeIndexGrid(std::min(ceil_div(sourceTotalSize, (uint64_t)128), (uint64_t)(mpc * 8)));
-  const dim3 largeIndexBlock(std::min(sourceTotalSize, (uint64_t)128));
+  //On ROCm, std::min -> ::min did not work as expected on when outTotalSize>=2147483648
+  dim3 largeIndexBlock( (sourceTotalSize < defaultMaxBlockThreads) ? sourceTotalSize : defaultMaxBlockThreads );
 
   if (cuda::detail::canUse32BitIndexMath(result) &&
       cuda::detail::canUse32BitIndexMath(source) &&
@@ -1207,11 +1218,13 @@ void index_reduce_func_cuda_impl(
       selfReduceDimSize, selfNumel, reduce_func, alpha_value);                           \
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 
+  uint64_t defaultMaxBlockThreads = getDefaultMaxThreadsPerBlock();
   dim3 smallIndexGrid(std::min(ceil_div(sliceSize, (uint64_t)128), (uint64_t)(mpc * 8)));
   dim3 smallIndexBlock(std::min(sliceSize, (uint64_t)128));
 
   dim3 largeIndexGrid(std::min(ceil_div(sourceTotalSize, (uint64_t)128), (uint64_t)(mpc * 8)));
-  dim3 largeIndexBlock(std::min(sourceTotalSize, (uint64_t)128));
+  //On ROCm, std::min -> ::min did not work as expected on when outTotalSize>=2147483648
+  dim3 largeIndexBlock( (sourceTotalSize < defaultMaxBlockThreads) ? sourceTotalSize : defaultMaxBlockThreads );
 
   if (cuda::detail::canUse32BitIndexMath(result) &&
       cuda::detail::canUse32BitIndexMath(source) &&
@@ -1435,14 +1448,6 @@ tensorInfoLegacyIfScalar(cuda::detail::TensorInfo<T, IndexType> ti) {
   return ti;
 }
 
-constexpr uint64_t getDefaultMaxThreadsPerBlock() {
-#ifndef USE_ROCM
-  return 128;
-#else
-  // bigger default
-  return 512;
-#endif
-}
 
 }
 
@@ -1687,7 +1692,7 @@ void masked_fill_kernel_quantized(TensorIterator& iter, const Scalar& value, dou
     });
 }
 
-REGISTER_CUDA_DISPATCH(masked_fill_kernel_quantized_stub, &masked_fill_kernel_quantized);
+REGISTER_CUDA_DISPATCH(masked_fill_kernel_quantized_stub, &masked_fill_kernel_quantized)
 
 } // anonymous namespace
 

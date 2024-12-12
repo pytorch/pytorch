@@ -36,6 +36,7 @@ from typing import (
     Sequence,
     Set,
     Tuple,
+    TYPE_CHECKING,
     TypeVar,
     Union,
     ValuesView,
@@ -46,6 +47,11 @@ from unittest import mock
 import sympy
 
 import torch
+
+
+if TYPE_CHECKING:
+    from torch._prims_common import ELEMENTWISE_TYPE_PROMOTION_KIND
+
 from torch.utils._pytree import tree_map_only
 
 
@@ -90,6 +96,7 @@ _T = TypeVar("_T")
 VarRanges = Dict[sympy.Expr, sympy.Expr]
 InputType = Optional[Union[torch.Tensor, int, torch.SymInt]]
 
+GPU_KERNEL_BIN_EXTS = {"cuda": ".cubin", "xpu": ".spv"}
 
 GPU_ALIGN_BYTES = 16
 ALIGNMENT = 16
@@ -234,7 +241,7 @@ def decode_device(device: Union[Optional[torch.device], str]) -> torch.device:
 
 
 def sympy_product(it):
-    return functools.reduce(operator.mul, it, sympy.Integer(1))
+    return functools.reduce(operator.mul, it, sympy.S.One)
 
 
 def sympy_dot(seq1, seq2):
@@ -316,11 +323,15 @@ def convert_shape_to_symint(
     from .virtualized import V
 
     return [
-        i
-        if isinstance(i, int)
-        else int(i)
-        if isinstance(i, sympy.Integer)
-        else V.graph.sizevars.shape_env.create_symintnode(i, hint=None)
+        (
+            i
+            if isinstance(i, int)
+            else (
+                int(i)
+                if isinstance(i, sympy.Integer)
+                else V.graph.sizevars.shape_env.create_symintnode(i, hint=None)
+            )
+        )
         for i in lst
     ]
 
@@ -739,7 +750,6 @@ def get_first_incompatible_cudagraph_node(
     forbidden_set = {
         "aten._fused_moving_avg_obs_fq_helper.default",
         "aten._fused_moving_avg_obs_fq_helper_functional.default",
-        "aten.multinomial.default",
         "fbgemm.dense_to_jagged.default",
         "fbgemm.jagged_to_padded_dense.default",
         "run_and_save_rng_state",
@@ -1087,10 +1097,35 @@ class DeferredLineBase:
         return len(self.line)
 
 
+class DelayReplaceLine(DeferredLineBase):
+    """At end of codegen call `line.replace(key, value_fn())`"""
+
+    def __init__(self, key: str, value_fn: Callable[[], str], line: str):
+        super().__init__(line)
+        self.key = key
+        self.value_fn = value_fn
+
+    def __call__(self) -> str:
+        return self.line.replace(self.key, self.value_fn())
+
+    def _new_line(self, line: str) -> DelayReplaceLine:
+        return DelayReplaceLine(self.key, self.value_fn, line)
+
+
 @functools.lru_cache(None)
 def is_big_gpu(index) -> bool:
+    prop = torch.cuda.get_device_properties(index)
+
+    # SM logic is not relevant to ROCm gpus
+    # Arbitrarily skipping the older models
+    if torch.version.hip:
+        if prop.major < 9 or prop.major == 10:
+            log.warning("GPU arch does not support max_autotune_gemm mode usage")
+            return False
+        return True
+
     min_sms = 68  # 3080
-    avail_sms = torch.cuda.get_device_properties(index).multi_processor_count
+    avail_sms = prop.multi_processor_count
     if avail_sms < min_sms:
         log.warning(
             "Not enough SMs to use max_autotune_gemm mode",
@@ -1261,14 +1296,14 @@ def use_ck_gemm_template(layout, m, n, k):
     from .virtualized import V
 
     return (
-        use_ck_template(layout)
-        and _use_autotune_backend("CK")
+        _use_autotune_backend("CK")
+        and use_ck_template(layout)
         and V.graph.sizevars.size_hint(m * n * k, fallback=-1) > 0
     )
 
 
 def use_ck_conv_template(layout):
-    return use_ck_template(layout) and _use_conv_autotune_backend("CK")
+    return _use_conv_autotune_backend("CK") and use_ck_template(layout)
 
 
 def _use_template_for_cpu(layout):
@@ -1429,8 +1464,8 @@ def run_and_get_triton_code(fn, *args, **kwargs):
 
 
 def run_and_get_graph_lowering(fn, *args, **kwargs):
-    from torch._inductor.codecache import CompiledFxGraph
     from torch._inductor.graph import GraphLowering
+    from torch._inductor.output_code import CompiledFxGraph
 
     real_init = CompiledFxGraph.__init__
     graph_lowerings = []
@@ -1568,6 +1603,14 @@ def parallel_num_threads():
 
 
 @functools.lru_cache(None)
+def get_backend_num_stages():
+    from .runtime.triton_helpers import get_backend_options
+
+    options = get_backend_options()
+    return options.get("num_stages", 2 if torch.version.hip else 3)
+
+
+@functools.lru_cache(None)
 def get_device_tflops(dtype):
     from triton.testing import get_max_simd_tflops, get_max_tensorcore_tflops
 
@@ -1632,14 +1675,12 @@ def is_dynamic(*args):
     from . import ir
 
     for t in args:
-        if isinstance(t, ir.TensorBox):
-            if has_free_symbols(t.data.get_size()) or (
-                hasattr(t.data, "get_stride") and has_free_symbols(t.data.get_stride())
+        if isinstance(
+            t, (ir.TensorBox, ir.StorageBox, ir.BaseView, ir.ComputedBuffer, ir.Buffer)
+        ):
+            if has_free_symbols(t.maybe_get_size() or ()) or has_free_symbols(
+                t.maybe_get_stride() or ()
             ):
-                return True
-        elif isinstance(t, (ir.StorageBox, ir.BaseView, ir.ComputedBuffer)):
-            assert hasattr(t, "get_size") and hasattr(t, "get_stride")
-            if has_free_symbols(t.get_size()) or has_free_symbols(t.get_stride()):
                 return True
         elif not isinstance(t, ir.IRNode):
             continue
@@ -1861,7 +1902,7 @@ def get_cloned_parameter_buffer_name(name: str):
     return name + "__original__"
 
 
-def is_gpu(device: str):
+def is_gpu(device: Optional[str]):
     assert isinstance(device, str) or device is None, device
     return device in GPU_TYPES
 
@@ -2109,16 +2150,18 @@ def set_tracing_context_output_strides(example_inputs, compiled_graph):
             if exprs is None:
                 context.output_strides.append(None)
             else:
-                context.output_strides.append(
-                    tuple(
-                        (
-                            shape_env.evaluate_symexpr(e)
-                            if shape_env is not None
-                            else int(e)
-                        )
-                        for e in exprs
-                    )
-                )
+                fakify_first_call = False
+                if ctx := torch._guards.TracingContext.try_get():
+                    fakify_first_call = ctx.fakify_first_call
+
+                def map_expr(e):
+                    if shape_env is None:
+                        return int(e)
+                    if fakify_first_call:
+                        return shape_env.deserialize_symexpr(e)
+                    return shape_env.evaluate_symexpr(e)
+
+                context.output_strides.append(tuple(map_expr(e) for e in exprs))
 
 
 def should_use_remote_fx_graph_cache():
@@ -2144,6 +2187,34 @@ def normalize_name(name: str) -> str:
     return re.sub(r"[^a-zA-Z0-9_]", "_", name)
 
 
+# correct cases where Triton types names don't match PyTorch
+_triton_type_mapping = {
+    "tl.bool": "tl.int1",
+    "tl.float8_e4m3fn": "tl.float8e4nv",
+    "tl.float8_e5m2": "tl.float8e5",
+    "tl.float8_e4m3fnuz": "tl.float8e4b8",
+    "tl.float8_e5m2fnuz": "tl.float8e5b16",
+}
+_torch_triton_mapping = {v: k for k, v in _triton_type_mapping.items()}
+
+
+_triton_type_re = re.compile(r"^.*[.]")
+
+
+def triton_type(dtype: torch.dtype) -> str:
+    """Convert torch.dtype to triton type"""
+    triton_type_name = _triton_type_re.sub("tl.", str(dtype))
+    return _triton_type_mapping.get(triton_type_name, triton_type_name)
+
+
+def triton_type_to_torch(dtype: str) -> torch.dtype:
+    adjusted_type = _torch_triton_mapping.get(dtype, dtype)
+    type_name = adjusted_type.replace("tl.", "")
+    out_dtype = getattr(torch, type_name)
+    assert isinstance(out_dtype, torch.dtype)
+    return out_dtype
+
+
 def is_same_tensor(data: torch.Tensor, value: torch.Tensor):
     return (
         not data.is_mkldnn
@@ -2166,6 +2237,54 @@ def is_same_mkldnn_tensor(data: torch.Tensor, value: torch.Tensor):
     )
 
 
+@functools.lru_cache(None)
+def boolean_ops():
+    return (
+        "isinf",
+        "isnan",
+        "logical_not",
+        "logical_and",
+        "signbit",
+        "and_",
+        "le",
+        "lt",
+        "ge",
+        "gt",
+        "eq",
+        "ne",
+        "or_",  # TODO should remove this op
+        "xor",
+    )
+
+
+@dataclasses.dataclass
+class OpDtypeRule:
+    type_promotion_kind: ELEMENTWISE_TYPE_PROMOTION_KIND
+    override_return_dtype: Optional[torch.dtype]
+
+
+op_dtype_propagation_rules: Dict[str, OpDtypeRule] = {}
+
+
+def register_op_dtype_propagation_rules(
+    name,
+    type_promotion_kind: ELEMENTWISE_TYPE_PROMOTION_KIND,
+    override_return_dtype: Optional[torch.dtype],
+):
+    op_dtype_propagation_rules[name] = OpDtypeRule(
+        type_promotion_kind, override_return_dtype
+    )
+
+
+def upcast_compute_type(dtype: torch.dtype) -> torch.dtype:
+    """Maybe upcast [b]float16 to float32"""
+    if config.triton.codegen_upcast_to_fp32 and (
+        dtype in (torch.float16, torch.bfloat16)
+    ):
+        return torch.float32
+    return dtype
+
+
 @dataclass_transform(frozen_default=True)
 def ir_dataclass(cls=None, /, *, frozen: bool = True):
     def wrap(cls: _T) -> _T:
@@ -2179,3 +2298,10 @@ def ir_dataclass(cls=None, /, *, frozen: bool = True):
     if cls is None:
         return wrap
     return wrap(cls)
+
+
+def get_donated_idxs() -> Optional[List[int]]:
+    tracing_context = torch._guards.TracingContext.try_get()
+    if tracing_context is not None and tracing_context.fw_metadata:
+        return tracing_context.fw_metadata.bw_donated_idxs
+    return None

@@ -1454,7 +1454,7 @@ Tensor& cholesky_inverse_kernel_impl(Tensor &result, Tensor& infos, bool upper) 
 
 }
 
-REGISTER_CUDA_DISPATCH(cholesky_inverse_stub, &cholesky_inverse_kernel_impl);
+REGISTER_CUDA_DISPATCH(cholesky_inverse_stub, &cholesky_inverse_kernel_impl)
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ lu ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -1670,7 +1670,7 @@ static void lu_factor(const Tensor& input, const Tensor& pivots, const Tensor& i
   }
 }
 
-REGISTER_CUDA_DISPATCH(lu_factor_stub, &lu_factor);
+REGISTER_CUDA_DISPATCH(lu_factor_stub, &lu_factor)
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ triangular_solve ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -1764,7 +1764,7 @@ void triangular_solve_kernel(const Tensor& A, const Tensor& B, bool left, bool u
   }
 }
 
-REGISTER_CUDA_DISPATCH(triangular_solve_stub, &triangular_solve_kernel);
+REGISTER_CUDA_DISPATCH(triangular_solve_stub, &triangular_solve_kernel)
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ orgqr ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -1782,7 +1782,7 @@ Tensor& orgqr_kernel_impl(Tensor& result, const Tensor& tau) {
 #endif
 }
 
-REGISTER_CUDA_DISPATCH(orgqr_stub, &orgqr_kernel_impl);
+REGISTER_CUDA_DISPATCH(orgqr_stub, &orgqr_kernel_impl)
 
 void ormqr_kernel(const Tensor& input, const Tensor& tau, const Tensor& other, bool left, bool transpose) {
 #ifdef USE_LINALG_SOLVER
@@ -1794,7 +1794,7 @@ void ormqr_kernel(const Tensor& input, const Tensor& tau, const Tensor& other, b
 #endif
 }
 
-REGISTER_CUDA_DISPATCH(ormqr_stub, &ormqr_kernel);
+REGISTER_CUDA_DISPATCH(ormqr_stub, &ormqr_kernel)
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ qr ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -1878,7 +1878,7 @@ void geqrf_kernel(const Tensor& input, const Tensor& tau) {
 #endif
 }
 
-REGISTER_CUDA_DISPATCH(geqrf_stub, &geqrf_kernel);
+REGISTER_CUDA_DISPATCH(geqrf_stub, &geqrf_kernel)
 
 template <typename scalar_t>
 static void apply_magma_eigh(const Tensor& values, const Tensor& vectors, const Tensor& infos, bool upper, bool compute_eigenvectors) {
@@ -2007,7 +2007,7 @@ void linalg_eigh_kernel(const Tensor& eigenvalues, const Tensor& eigenvectors, c
 #endif
 }
 
-REGISTER_CUDA_DISPATCH(linalg_eigh_stub, &linalg_eigh_kernel);
+REGISTER_CUDA_DISPATCH(linalg_eigh_stub, &linalg_eigh_kernel)
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ linalg_eig ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -2093,7 +2093,7 @@ void linalg_eig_kernel(Tensor& eigenvalues, Tensor& eigenvectors, Tensor& infos,
   });
 }
 
-REGISTER_CUDA_DISPATCH(linalg_eig_stub, &linalg_eig_kernel);
+REGISTER_CUDA_DISPATCH(linalg_eig_stub, &linalg_eig_kernel)
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ svd ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -2579,7 +2579,7 @@ if (n <= 8) {
 #endif // ifdef USE_LINALG_SOLVER
 }
 
-REGISTER_CUDA_DISPATCH(lu_solve_stub, &lu_solve_kernel);
+REGISTER_CUDA_DISPATCH(lu_solve_stub, &lu_solve_kernel)
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ lstsq ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -2761,7 +2761,7 @@ void lstsq_kernel(const Tensor& a, Tensor& b, Tensor& /*rank*/, Tensor& /*singul
   }
 }
 
-REGISTER_CUDA_DISPATCH(lstsq_stub, &lstsq_kernel);
+REGISTER_CUDA_DISPATCH(lstsq_stub, &lstsq_kernel)
 
 
 #if defined(BUILD_LAZY_CUDA_LINALG)

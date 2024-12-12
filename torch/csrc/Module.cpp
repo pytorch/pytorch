@@ -68,6 +68,7 @@
 #include <torch/csrc/autograd/python_variable.h>
 #include <torch/csrc/cpu/Module.h>
 #include <torch/csrc/dynamo/init.h>
+#include <torch/csrc/export/pybind.h>
 #include <torch/csrc/functorch/init.h>
 #include <torch/csrc/fx/node.h>
 #include <torch/csrc/inductor/aoti_package/pybind.h>
@@ -1367,7 +1368,7 @@ static PyObject* THPModule_are_vmap_fallback_warnings_enabled(
   END_HANDLE_TH_ERRORS
 }
 
-static PyMethodDef TorchMethods[] = { // NOLINT
+static std::initializer_list<PyMethodDef> TorchMethods = {
     {"_initExtension", THPModule_initExtension, METH_O, nullptr},
     {"_autograd_init", THPAutograd_initExtension, METH_NOARGS, nullptr},
     {"_add_docstr", THPModule_addDocStr, METH_VARARGS, nullptr},
@@ -1703,7 +1704,7 @@ PyObject* initModule() {
   if (!(cmd))            \
   return nullptr
 
-  THPUtils_addPyMethodDefs(methods, TorchMethods);
+  THPUtils_addPyMethodDefs(methods, std::data(TorchMethods));
   THPUtils_addPyMethodDefs(methods, DataLoaderMethods);
   THPUtils_addPyMethodDefs(methods, torch::autograd::python_functions());
   THPUtils_addPyMethodDefs(methods, torch::multiprocessing::python_functions());
@@ -1773,6 +1774,7 @@ PyObject* initModule() {
   torch::profiler::initPythonBindings(module);
   torch::python::init_bindings(module);
   torch::lazy::initLazyBindings(module);
+  torch::_export::initExportBindings(module);
   torch::inductor::initAOTIRunnerBindings(module);
   torch::inductor::initAOTIPackageBindings(module);
 #ifdef USE_ITT
@@ -1848,7 +1850,8 @@ PyObject* initModule() {
   at::init();
 
   // Automatically translate errors thrown from pybind11 functions
-  py::register_exception_translator([](std::exception_ptr e) { // NOLINT
+  // NOLINTNEXTLINE(performance-unnecessary-value-param)
+  py::register_exception_translator([](std::exception_ptr e) {
     try {
       if (e) {
         std::rethrow_exception(e);
@@ -2455,7 +2458,7 @@ Call this whenever a new thread is created in order to propagate values from
 // Checks that the _C shared library isn't initialized multiple times. This
 // can happen if the same csrc files are compiled into multiple shared
 // libraries.
-inline static void pytorch_duplicate_guard() {
+static void pytorch_duplicate_guard() {
   static int initialized = 0;
   if (initialized) {
     fmt::print(stderr, "pytorch: _C shared library re-initialized\n");
