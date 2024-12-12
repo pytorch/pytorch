@@ -30,7 +30,7 @@ class TestDeviceAnalysis(JitTestCase):
         cls.vulkan = torch.device("vulkan")
         cls.mkldnn = torch.device(
             "mkldnn"
-        )  # MKLDNN can't mix with other device types at all
+        )  # ONEDNN can't mix with other device types at all
         cls.device_types = [cls.cpu, cls.cuda, cls.vulkan]
 
     @staticmethod

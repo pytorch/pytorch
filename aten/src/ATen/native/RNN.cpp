@@ -1420,7 +1420,7 @@ DEFINE_DISPATCH(lstm_cudnn_stub);
 DEFINE_DISPATCH(lstm_packed_cudnn_stub);
 DEFINE_DISPATCH(lstm_miopen_stub);
 DEFINE_DISPATCH(lstm_packed_miopen_stub);
-DEFINE_DISPATCH(lstm_mkldnn_stub);
+DEFINE_DISPATCH(lstm_onednn_stub);
 REGISTER_NO_CPU_DISPATCH(lstm_cudnn_stub)
 REGISTER_NO_CPU_DISPATCH(lstm_packed_cudnn_stub)
 REGISTER_NO_CPU_DISPATCH(lstm_miopen_stub)
@@ -1466,7 +1466,7 @@ std::tuple<Tensor, Tensor, Tensor> lstm(
           "LSTM with symbolic sizes and strides is not supported with oneDNN. Using default implementation.");
       } else {
         Tensor output, hy, cy;
-        lstm_mkldnn_stub(_input.device().type(), output, hy, cy,_input, hx, _params, has_biases,
+        lstm_onednn_stub(_input.device().type(), output, hy, cy,_input, hx, _params, has_biases,
             num_layers, dropout_p, train, bidirectional, batch_first);
         return std::make_tuple(std::move(output), std::move(hy), std::move(cy));
       }

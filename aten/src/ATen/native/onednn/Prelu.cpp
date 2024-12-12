@@ -8,11 +8,11 @@
 namespace at { namespace native {
 
 Tensor mkldnn_prelu(const Tensor& input, const Tensor& weight) {
-  TORCH_CHECK(false, "mkldnn_prelu: ATen not compiled with MKLDNN support");
+  TORCH_CHECK(false, "mkldnn_prelu: ATen not compiled with ONEDNN support");
 }
 
 std::tuple<Tensor, Tensor> mkldnn_prelu_backward(const Tensor& grad_output, const Tensor& input, const Tensor& weight) {
-  TORCH_CHECK(false, "mkldnn_prelu_backward: ATen not compiled with MKLDNN support");
+  TORCH_CHECK(false, "mkldnn_prelu_backward: ATen not compiled with ONEDNN support");
 }
 
 }}
@@ -27,7 +27,7 @@ namespace at::native {
 Tensor mkldnn_prelu(const Tensor& input, const Tensor& weight) {
   if (input.scalar_type() == ScalarType::BFloat16) {
     TORCH_CHECK(onednn_bf16_device_check(),
-        "mkldnn_relu: bf16 path needs the cpu support avx512bw, avx512vl and avx512dq");
+        "onednn_relu: bf16 path needs the cpu support avx512bw, avx512vl and avx512dq");
   }
 
   const ideep::tensor& x = itensor_from_onednn(input);
@@ -62,7 +62,7 @@ std::tuple<Tensor, Tensor> mkldnn_prelu_backward(const Tensor& grad_output, cons
         new_with_itensor_onednn(std::move(gradx),
                                 optTypeMetaToScalarType(grad_output.options().dtype_opt()),
                                 grad_output.options().device_opt()),
-        mkldnn_to_dense(new_with_itensor_onednn(std::move(gradw),
+        onednn_to_dense(new_with_itensor_onednn(std::move(gradw),
                                                 optTypeMetaToScalarType(weight.options().dtype_opt()),
                                                 weight.options().device_opt())));
   }

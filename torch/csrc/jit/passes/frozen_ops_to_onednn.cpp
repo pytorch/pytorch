@@ -224,11 +224,11 @@ void InplaceMKLDNNSubgraph(const std::shared_ptr<Graph>& graph) {
 }
 
 // This is a factory function that creates an Operation that takes
-// MKLDNN tensors and unpacks them into 1D contiguous tensors that we can
+// ONEDNN tensors and unpacks them into 1D contiguous tensors that we can
 // run aten operations on. The precondition for using this function is that the
 // aten operations in `aten_op` should be an identity for zero inputs. In other
 // words, this should: `aten_op(0) = 0` The reason for this precondition has to
-// do with blocked formats MKLDNN uses to lay tensor elements (nChw8c, nChw16c,
+// do with blocked formats ONEDNN uses to lay tensor elements (nChw8c, nChw16c,
 // etc). It splits the channel dimension into chunks of 8/16 makes it the
 // innermost dimension. Whenever the channel dim isn't divisible by 8/16 the
 // innermost dimension is padded with 0s. The precondition, `aten_op(0) == 0`
@@ -312,7 +312,7 @@ Operation BroadOp(const Node* node) {
     auto b_size = b.sizes();
     auto a_size = a.sizes();
     if (a_size.equals(b_size)) {
-      // TODO: follow up with MKLDNN what the best way is
+      // TODO: follow up with ONEDNN what the best way is
       // to handle perf incompatible formats
       push(stack, a, b);
       return;
@@ -326,7 +326,7 @@ Operation BroadOp(const Node* node) {
       auto exp_a = a;
       auto exp_b = b;
       int stacked = 0;
-      // mkldnn tensors only support reshape, not expand or view operators
+      // onednn tensors only support reshape, not expand or view operators
       if (a_size.equals(out_size)) {
         push(stack, a);
         ++stacked;
@@ -353,7 +353,7 @@ Operation BroadOp(const Node* node) {
         }
         // If one of the inputs was expanded and converted to nchw/nhwc
         // we might end up in a very bad spot if the second argument
-        // is in a blocked format. In this case, MKLDNN uses its
+        // is in a blocked format. In this case, ONEDNN uses its
         // reference implementation for a binary operation that follows
         // these broadcasts and it could be up to ~100x slower.
         // We use a very simple heuristic to convert an arg in nchw
@@ -362,7 +362,7 @@ Operation BroadOp(const Node* node) {
         auto a_it = at::native::itensor_from_onednn(exp_a);
         auto b_it = at::native::itensor_from_onednn(exp_b);
 
-        // `is_public_format` means a tensor's physical layout isn't in MKLDNN
+        // `is_public_format` means a tensor's physical layout isn't in ONEDNN
         // blocked layout e.g. nchw or nhwc but not nChw8c
         if (!a_it.is_public_format()) {
           if (b_it.is_public_format()) {
@@ -540,7 +540,7 @@ jit::RegisterOperators reg_fut_ops({
                 input.sizes(), weight.sizes(), padding, stride, dilation);
             push(
                 stack,
-                at::native::empty_mkldnn(
+                at::native::empty_onednn(
                     o,
                     c10::optTypeMetaToScalarType(input.options().dtype_opt()),
                     input.options().layout_opt(),
@@ -572,7 +572,7 @@ jit::RegisterOperators reg_fut_ops({
               c10::autograd_dispatch_keyset);
           float other = pop(stack).toScalar().toFloat();
           Tensor self = pop(stack).toTensor();
-          auto out = at::native::empty_mkldnn(
+          auto out = at::native::empty_onednn(
               self.sizes(),
               c10::optTypeMetaToScalarType(self.options().dtype_opt()),
               self.options().layout_opt(),
@@ -598,7 +598,7 @@ jit::RegisterOperators reg_fut_ops({
 
 // This is registered as its own op instead of as prim::Constant bc it does not
 // serialize which is an invariant of prim::Constant
-// TODO: make mkldnn tensor serialize...
+// TODO: make onednn tensor serialize...
 const RegisterOperators MKLDNNConstantOp({
     torch::jit::Operator(
         prim::ConstantONEDNNTensor,
@@ -618,7 +618,7 @@ bool supportedMKLDNNWeight(const Tensor& weight) {
       weight.ndimension() != 0;
 }
 
-void replaceInputWithMKLDNNTensor(Node* n, size_t index) {
+void replaceInputWithONEDNNTensor(Node* n, size_t index) {
   Value* input = n->inputs().at(index);
   auto onednn_tensor = constant_as<Tensor>(input)->to_mkldnn();
   auto onednn_tensor_value =
@@ -629,7 +629,7 @@ void replaceInputWithMKLDNNTensor(Node* n, size_t index) {
   n->replaceInputWith(input, onednn_tensor_value);
 }
 
-void replaceInputWithMKLDNNTensor(
+void replaceInputWithONEDNNTensor(
     Node* n,
     const std::string& name,
     const at::Tensor& onednn_tensor) {
@@ -642,10 +642,10 @@ void replaceInputWithMKLDNNTensor(
   n->replaceInputWith(input, onednn_tensor_value);
 }
 
-void replaceInputWithMKLDNNTensor(Node* n, const std::string& name) {
+void replaceInputWithONEDNNTensor(Node* n, const std::string& name) {
   Value* input = n->namedInput(name);
   auto onednn_tensor = constant_as<Tensor>(input)->to_mkldnn();
-  replaceInputWithMKLDNNTensor(n, name, onednn_tensor);
+  replaceInputWithONEDNNTensor(n, name, onednn_tensor);
 }
 
 void moveConvWeightsToMKLDNN(Node* conv) {
@@ -668,15 +668,15 @@ void moveConvWeightsToMKLDNN(Node* conv) {
   } else {
     TORCH_INTERNAL_ASSERT(false);
   }
-  replaceInputWithMKLDNNTensor(conv, "weight", conv_w_mkldnn);
+  replaceInputWithONEDNNTensor(conv, "weight", conv_w_mkldnn);
 
   if (conv->namedInput("bias")->type() != NoneType::get()) {
-    replaceInputWithMKLDNNTensor(conv, "bias");
+    replaceInputWithONEDNNTensor(conv, "bias");
   }
 }
 
 void moveWeightsToMKLDNN(Node* n) {
-  // conv goes through special pathway so we can call mkldnn reorder conv
+  // conv goes through special pathway so we can call onednn reorder conv
   // primitive
   if (n->kind() == aten::conv2d || n->kind() == aten::conv3d) {
     moveConvWeightsToMKLDNN(n);
@@ -686,7 +686,7 @@ void moveWeightsToMKLDNN(Node* n) {
           n->input(i)->node()->kind() != prim::Constant) {
         continue;
       }
-      replaceInputWithMKLDNNTensor(n, i);
+      replaceInputWithONEDNNTensor(n, i);
     }
   }
 }
@@ -848,7 +848,7 @@ bool frozenOnednnCompatibleConvNode(Node* n) {
   if (nonConstantParameters(n)) {
     return false;
   }
-  // mkldnn does not support conv1d
+  // onednn does not support conv1d
   // _convolution is rewritten before this pass is invoked
   if (n->kind() != aten::conv2d && n->kind() != aten::conv3d) {
     return false;
@@ -858,18 +858,18 @@ bool frozenOnednnCompatibleConvNode(Node* n) {
   return supportedMKLDNNWeight(weight);
 }
 
-// [mkldnn perf strategy]
+// [onednn perf strategy]
 // Certain ops - aten::linear, aten::conv2d, aten::conv3d - provide a huge speed
-// up just by converting the constant weights to MKLDNN AOT, and then at runtime
+// up just by converting the constant weights to ONEDNN AOT, and then at runtime
 // converting the non-constant input to_mkldnn before the op, and then back to
 // its original layout after the op. The speed up holds even if you end up
 // converting the input to_mkldnn and output back to_dense. We start groups of
-// ops to compute in MKLDNN only from these ops that are a strict speedup. Then,
-// we expand the groups to include operators which are computable in MKLDNN &
+// ops to compute in ONEDNN only from these ops that are a strict speedup. Then,
+// we expand the groups to include operators which are computable in ONEDNN &
 // are roughly perf equal to eager. We do this in the hopes of joining multiple
 // fast nodes together, saving to_mkldnn and to_dense conversions.
 //
-// MKLDNN only supports float32 inputs for aten::linear, aten::conv2d &
+// ONEDNN only supports float32 inputs for aten::linear, aten::conv2d &
 // aten::conv3d. We only fuse these nodes if the weights are float32, and then
 // we only include operators which we can prove will execute in float32. By
 // fusing topologically we can maintain the invariant that all tensor types in
@@ -938,14 +938,14 @@ class MKLDNNSubgraphSlicer {
     if (node->kind() == prim::ONEDNNGroup) {
       return true;
     }
-    // see [mkldnn perf strategy]
+    // see [onednn perf strategy]
     return frozenOnednnCompatibleConvNode(node);
   }
 
  private:
-  // MKLDNN only supports floats of dimension > 0, so we only support
+  // ONEDNN only supports floats of dimension > 0, so we only support
   // Tensors who have a known type or were previously verified
-  // to be usable in an MKLDNN Group
+  // to be usable in an ONEDNN Group
   bool tensorInputIsMKLDNNSupported(Value* v, Node* v_use) {
     auto const_tensor = constant_as<Tensor>(v);
     if (const_tensor) {
@@ -965,7 +965,7 @@ class MKLDNNSubgraphSlicer {
     return false;
   }
 
-  // We include ops here which are roughly perf-equivalent in mkldnn as with
+  // We include ops here which are roughly perf-equivalent in onednn as with
   // aten (single & multithreaded) and whose inputs & outputs are float32.
   bool computableInMKLDNN(Node* n) {
     for (Value* v : n->inputs()) {
@@ -985,7 +985,7 @@ class MKLDNNSubgraphSlicer {
     }
 
     // unary ops we dont need to prove anything else than
-    // the input is mkldnn supported
+    // the input is onednn supported
     switch (n->kind()) {
       case aten::relu:
       case aten::relu6:
@@ -1020,7 +1020,7 @@ class MKLDNNSubgraphSlicer {
     }
 
     if (n->kind() == aten::add) {
-      // mkldnn doesn't currently support Tensor-Scalar add
+      // onednn doesn't currently support Tensor-Scalar add
       for (const auto i : c10::irange(2)) {
         if (!n->inputs().at(i)->type()->cast<TensorType>()) {
           return false;
@@ -1135,13 +1135,13 @@ bool containsONEDNNGroup(Block* b) {
 } // namespace
 
 void ConvertFrozenOpsToMKLDNN(std::shared_ptr<Graph>& graph) {
-  GRAPH_DUMP("Before convert frozen ops to mkldnn", graph);
+  GRAPH_DUMP("Before convert frozen ops to onednn", graph);
   // TODO: replace conv1d with conv2d ?
   graph_rewrite_helper::replaceConvolutionWithAtenConv(graph);
   if (containsONEDNNGroup(graph->block())) {
     // Only remove tensor mutation if we know we're going to create speedups
-    // with mkldnn. Only supporting functional ops simplifies this pass bc
-    // running an op in mkldnn removes the aliasing relationships that
+    // with onednn. Only supporting functional ops simplifies this pass bc
+    // running an op in onednn removes the aliasing relationships that
     // previously existed between input and output.
     RemoveTensorMutation(graph, [](Node* node_to_functionalize) {
       static std::unordered_set<Symbol> mkldnn_ops = {
@@ -1164,16 +1164,16 @@ void ConvertFrozenOpsToMKLDNN(std::shared_ptr<Graph>& graph) {
     AliasDb db(graph);
     MKLDNNSubgraphSlicer(graph->block(), graph, db).run();
     EliminateDeadCode(graph);
-    GRAPH_DUMP("After convert frozen ops to mkldnn", graph);
+    GRAPH_DUMP("After convert frozen ops to onednn", graph);
   } else {
-    GRAPH_DUMP("No mkldnn compatible frozen nodes", graph);
+    GRAPH_DUMP("No onednn compatible frozen nodes", graph);
   }
 }
 
 #else
 
 void ConvertFrozenOpsToMKLDNN(std::shared_ptr<Graph>& graph) {
-  GRAPH_DUMP("MKLDNN Not enabled", graph);
+  GRAPH_DUMP("ONEDNN Not enabled", graph);
 }
 
 #endif

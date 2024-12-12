@@ -1088,7 +1088,7 @@ def register_onednn_fusion_ops():
 
                 assert packed_w.get_name() in V.graph.constants
                 assert orig_w.get_name() in V.graph.constants
-                # packed_w is a mkldnn tensor which we can't generate directly
+                # packed_w is a onednn tensor which we can't generate directly
                 # so we use the weights from the original tensor in autotune.
                 input_gen_fns = {
                     1: lambda x: V.graph.constants[x.get_name()],

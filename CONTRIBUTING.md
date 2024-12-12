@@ -230,7 +230,7 @@ dependencies as well as the nightly binaries into the repo directory.
           operators.
         * [sparse](aten/src/ATen/native/sparse) - CPU and CUDA
           implementations of COO sparse tensor operations
-        * [mkl](aten/src/ATen/native/mkl) [mkldnn](aten/src/ATen/native/onednn)
+        * [mkl](aten/src/ATen/native/mkl) [onednn](aten/src/ATen/native/onednn)
           [miopen](aten/src/ATen/native/miopen) [cudnn](aten/src/ATen/native/cudnn)
           - implementations of operators which simply bind to some
             backend library.

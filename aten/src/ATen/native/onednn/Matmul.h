@@ -29,7 +29,7 @@ bool use_onednn_bf32_matmul(
     const Tensor& mat2,
     const Tensor& result_opt);
 
-// Try running mkldnn optimized gemm, or returns false if naive gemm would be faster
+// Try running onednn optimized gemm, or returns false if naive gemm would be faster
 bool onednn_bf16_gemm(
     TransposeType transa, TransposeType transb,
     int64_t m, int64_t n, int64_t k,

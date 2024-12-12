@@ -38,7 +38,7 @@ TEST_YAML = """
     SparseCUDA: add_out_sparse_cuda
     SparseCsrCPU: add_out_sparse_csr_cpu
     SparseCsrCUDA: add_out_sparse_csr_cuda
-    OnednnCPU: mkldnn_add_out
+    OnednnCPU: onednn_add_out
     MPS: add_out_mps
 
 - func: add.Tensor(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor
@@ -48,7 +48,7 @@ TEST_YAML = """
   dispatch:
     SparseCPU, SparseCUDA: add_sparse
     SparseCsrCPU, SparseCsrCUDA: add_sparse_csr
-    OnednnCPU: mkldnn_add
+    OnednnCPU: onednn_add
     ZeroTensor: add_zerotensor
     NestedTensorCPU, NestedTensorCUDA: NestedTensor_add_Tensor
   tags: core
@@ -63,7 +63,7 @@ TEST_YAML = """
     SparseCPU: mul_out_sparse_cpu
     SparseCUDA: mul_out_sparse_cuda
     SparseCsrCPU, SparseCsrCUDA: mul_out_sparse_csr
-    OnednnCPU: mkldnn_mul_out
+    OnednnCPU: onednn_mul_out
 
 - func: mul.Tensor(Tensor self, Tensor other) -> Tensor
   device_check: NoCheck   # TensorIterator
@@ -72,7 +72,7 @@ TEST_YAML = """
   dispatch:
     SparseCPU, SparseCUDA: mul_sparse
     SparseCsrCPU, SparseCsrCUDA: mul_sparse_csr
-    OnednnCPU: mkldnn_mul
+    OnednnCPU: onednn_mul
     ZeroTensor: mul_zerotensor
     NestedTensorCPU, NestedTensorCUDA: NestedTensor_mul_Tensor
   tags: core

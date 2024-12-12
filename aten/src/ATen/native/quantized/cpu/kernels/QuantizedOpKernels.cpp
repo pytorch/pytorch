@@ -687,7 +687,7 @@ static void qprelu_out_kernel(Tensor& out,
       dim_w[1] = qw.numel();
     }
     // This will always be a view in CPU/CUDA, but some backends
-    // like MKLDNN do not support views
+    // like ONEDNN do not support views
     qw_nd = qw_nd.reshape(dim_w);
   }
 
