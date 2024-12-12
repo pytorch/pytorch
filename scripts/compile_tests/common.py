@@ -242,13 +242,13 @@ def parse_xmls(xmls):
         v = parse_testcase(testcase)
         tcs[k] = v
         tc_total_tests += 1
-        print(f"XXX {tc_total_tests} TC_TESTCASE:{k}")
+        #print(f"XXX {tc_total_tests} TC_TESTCASE:{k}")
         if v.status == TestCaseStatus.FAILED:
             tc_total_failed += 1
-            print(f"XXX FAILED")
+            #print(f"XXX FAILED")
         elif v.status == TestCaseStatus.SKIPPED:
             tc_total_skipped += 1
-            print(f"XXX SKIPPED")
+            #print(f"XXX SKIPPED")
         else:
             assert False
 
@@ -258,10 +258,18 @@ def parse_xmls(xmls):
     tc_total_passed = tc_total_tests - tc_total_skipped - tc_total_failed
     print(f"XXX tc_total_passed:{tc_total_passed}")
 
-    for k, v in tcs.items():
-        if v.status == TestCaseStatus.FAILED:
-            print(f"XXX FAILED_TC {k}")
+    #for k, v in tcs.items():
+    #    if v.status == TestCaseStatus.FAILED:
+    #        print(f"XXX FAILED_TC {k}")
 
+    print(f"XXX PRE_ASSERT total_tests:{total_tests}")
+    print(f"XXX PRE_ASSERT total_failed:{total_failed}")
+    print(f"XXX PRE_ASSERT total_skipped:{total_skipped}")
+
+    print(f"XXX PRE_ASSERT tc_total_tests:{tc_total_tests}")
+    print(f"XXX PRE_ASSERT tc_total_failed:{tc_total_failed}")
+    print(f"XXX PRE_ASSERT tc_total_skipped:{tc_total_skipped}")
+    
     assert total_tests == tc_total_tests
     assert total_failed == tc_total_failed
     assert total_skipped == tc_totak_skipped

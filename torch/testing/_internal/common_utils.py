@@ -1572,7 +1572,7 @@ TEST_WITH_SUBCLASSES: bool = TestEnvironment.def_flag(
 TEST_WITH_TORCHDYNAMO: bool = TestEnvironment.def_flag(
     "TEST_WITH_TORCHDYNAMO",
     env_var="PYTORCH_TEST_WITH_DYNAMO",
-    implied_by_fn=lambda: TEST_WITH_TORCHINDUCTOR or TEST_WITH_AOT_EAGER,
+    implied_by_fn=lambda: TEST_WITH_TORCHINDUCTOR
 )
 
 if TEST_WITH_TORCHDYNAMO:
