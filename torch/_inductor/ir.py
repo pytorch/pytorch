@@ -1002,12 +1002,12 @@ class Reduction(Loops):
 
     def inner_fn_args(self) -> Sequence[Sequence[Expr]]:
         index = self._index(self.ranges)
-        rindex = self._index(self.reduction_ranges, SymT.RINDEX)
+        rindex = self._index(self.reduction_ranges, SymT.R0_INDEX)
         return (index, rindex)
 
     def inner_fn_free_unbacked_symbols(self) -> OrderedSet[Symbol]:
         index = self._index(self.ranges)
-        rindex = self._index(self.reduction_ranges, SymT.RINDEX)
+        rindex = self._index(self.reduction_ranges, SymT.R0_INDEX)
         return extract_free_unbacked_symbols(self.inner_fn, index, rindex)
 
     def constant_to_device(self, device: torch.device) -> IRNode:
@@ -1972,13 +1972,13 @@ class Scan(Loops):
 
     def inner_fn_args(self) -> Sequence[Sequence[_IntLike]]:
         index = self._index(self.ranges)
-        rindex = self._index(self.scan_ranges, SymT.RINDEX)
+        rindex = self._index(self.scan_ranges, SymT.R0_INDEX)
         idx = self.reindex(index, rindex)
         return (idx,)
 
     def inner_fn_free_unbacked_symbols(self) -> OrderedSet[Symbol]:
         index = self._index(self.ranges)
-        rindex = self._index(self.scan_ranges, SymT.RINDEX)
+        rindex = self._index(self.scan_ranges, SymT.R0_INDEX)
         idx = self.reindex(index, rindex)
         return extract_free_unbacked_symbols(self.inner_fn, idx)
 
@@ -2169,13 +2169,13 @@ class Sort(Loops):
 
     def inner_fn_args(self) -> Sequence[Sequence[Expr]]:
         index = self._index(self.ranges)
-        rindex = self._index(self.sort_ranges, SymT.RINDEX)
+        rindex = self._index(self.sort_ranges, SymT.R0_INDEX)
         idx = self.reindex(index, rindex)
         return (idx,)
 
     def inner_fn_free_unbacked_symbols(self) -> OrderedSet[Symbol]:
         index = self._index(self.ranges)
-        rindex = self._index(self.sort_ranges, SymT.RINDEX)
+        rindex = self._index(self.sort_ranges, SymT.R0_INDEX)
         idx = self.reindex(index, rindex)
         return extract_free_unbacked_symbols(self.inner_fn, idx)
 
@@ -2269,7 +2269,7 @@ def is_storage_and_layout(x: IRNode) -> bool:
 
 def is_contiguous_storage_and_layout(x: IRNode) -> bool:
     try:
-        buffer, layout = as_storage_and_layout(x, freeze=False)
+        _buffer, layout = as_storage_and_layout(x, freeze=False)
         # pad the stride here so we will NOT claim an tensor as contiguous
         # if a padding is gonna happen.
         if layout.should_pad_strides():
@@ -2338,7 +2338,7 @@ def is_stride_order_storage_and_layout(
     x: IRNode, stride_order: Sequence[Union[int, Integer]]
 ) -> bool:
     try:
-        buffer, layout = as_storage_and_layout(x, freeze=False)
+        _buffer, layout = as_storage_and_layout(x, freeze=False)
         return layout.is_stride_ordered(stride_order)
     except NotImplementedError:
         return False
@@ -2965,7 +2965,6 @@ class SliceView(View):
         except TypeError:
             pass
 
-        sizevars = V.graph.sizevars
         new_size = list(x.get_size())
 
         # NB: Ordinarily we default to clamping.
@@ -4051,7 +4050,7 @@ class ComputedBuffer(OperationBuffer):
             x_vars = reindex0(x_vars)
 
             if simplify_loops:
-                sizes, reindex2, prune = V.graph.sizevars._simplify_loops(
+                sizes, reindex2, _prune = V.graph.sizevars._simplify_loops(
                     x_vars,
                     sizes,
                     index_prevent_reordering(index_formulas, x_vars, sizes),
@@ -4734,7 +4733,7 @@ class ExternKernel(InputsKernel):
             self.freeze_layout()
 
     def codegen_comment(self, wrapper) -> None:  # type: ignore[no-untyped-def]
-        origin_str, detailed_origin_str = get_kernel_metadata(self, wrapper)
+        origin_str, _detailed_origin_str = get_kernel_metadata(self, wrapper)
         if origin_str:
             wrapper.writeline(origin_str)
 
@@ -5327,7 +5326,7 @@ class ExternKernel(InputsKernel):
         indexer = self.make_indexer()
         index = indexer(index_vars)
 
-        new_sizes, reindex, prune = V.graph.sizevars._simplify_loops(
+        new_sizes, reindex, _prune = V.graph.sizevars._simplify_loops(
             index_vars, sizes, [index]
         )
 
@@ -6252,7 +6251,6 @@ class FallbackKernel(ExternKernelAlloc):
                 f"NYI: Can't generate FallbackKernel for {kernel}"
             )
 
-        schema_args = schema.arguments
         args, kwargs = self.unflatten_args(self.inputs, self.constant_args)
 
         def handle_aliasing_and_mutation(info, arg) -> None:  # type: ignore[no-untyped-def]
@@ -7410,7 +7408,7 @@ class _CollectiveKernel(FallbackKernel):
     ) -> None:
         with V.graph.fake_mode:
             (
-                example_output,
+                _example_output,
                 tensor_args,
                 non_tensor_args,
                 unflatten_args,
@@ -7537,7 +7535,7 @@ class _WaitKernel(_CollectiveKernel):
     def create_wait(cls, kernel, inp: TensorBox) -> None:  # type: ignore[no-untyped-def]
         with V.graph.fake_mode:
             (
-                example_output,
+                _example_output,
                 tensor_args,
                 non_tensor_args,
                 unflatten_args,

@@ -295,7 +295,6 @@ def user_defined_triton_kernel_transitive_closure_source_code(kernel) -> str:
                     else:
                         symbol_str = f"{symbol!r}"
                     if annotation := global_annotations.get(symbol_name):
-                        annotion_code = ""
                         if isinstance(annotation, type):
                             annotation_code = (
                                 f": {annotation.__module__}.{annotation.__name__}"
@@ -649,7 +648,7 @@ class PythonWrapperCodegen(CodeGen):
         self.supports_intermediate_hooks = True
         self.user_defined_kernel_cache: Dict[Tuple[Any, ...], Tuple[str, Any]] = {}
         self.unbacked_symbol_decls = OrderedSet[str]()  # str of sympy.Symbol
-        self.computed_sizes = OrderedSet[sympy.Symbol]()
+        self.computed_sizes: OrderedSet[sympy.Symbol] = OrderedSet()
         self.launcher_fn_name = None
         # This function can be overridden to change the launcher name
         self.set_launcher_fn_name()

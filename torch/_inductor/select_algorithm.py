@@ -263,7 +263,7 @@ class TritonTemplateKernel(TritonKernel):
         super().__init__(
             {
                 "x": numel,
-                "r": sympy.S.One,
+                "r0_": sympy.S.One,
             },
             features=SIMDKernelFeatures([], numel),
         )
@@ -1492,7 +1492,11 @@ class AlgorithmSelectorCache(PersistentCache):
             return wait_on_futures
 
         def autotune(choices):
-            with dynamo_timed(f"{name}_template_autotuning"):
+            with dynamo_timed(
+                f"{name}_template_autotuning",
+                log_pt2_compile_event=True,
+                dynamo_compile_column_us="compile_time_autotune_time_us",
+            ):
                 return make_benchmark_fn()(choices)
 
         if config.autotune_in_subproc:
@@ -1503,7 +1507,11 @@ class AlgorithmSelectorCache(PersistentCache):
 
         def do_autotuning(precompile_fn):
             precompile_start_ts = time.time()
-            with dynamo_timed(f"{name}_template_precompiling"):
+            with dynamo_timed(
+                f"{name}_template_precompiling",
+                log_pt2_compile_event=True,
+                dynamo_compile_column_us="compile_time_autotune_time_us",
+            ):
                 precompile_fn()
             precompile_elapse = time.time() - precompile_start_ts
 
@@ -1575,7 +1583,6 @@ class AlgorithmSelectorCache(PersistentCache):
             return choices[0].output_node()
 
         selected_key = builtins.min(timings, key=timings.__getitem__)
-        selected_time = timings[selected_key]
         selected_choice = selected_key.output_node()
         log.debug("selected choice: %s", str(selected_choice))
         return selected_choice
