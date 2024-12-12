@@ -82,7 +82,6 @@ class CUDACPPScheduling(BaseScheduling):
         self,
         template_node: BaseSchedulerNode,
         epilogue_nodes: Sequence[BaseSchedulerNode],
-        prologue_nodes: Sequence[BaseSchedulerNode],
     ):
         """
         Codegen a CUDA template, possibly with fused epilogues
