@@ -51,7 +51,7 @@ AOTITorchError aoti_torch_cpu_onednn__convolution_pointwise_binary(
     for (int64_t i = 0; i < unary_scalars_len_; i++) {
       unary_scalars_list.emplace_back(pointer_to_optional(unary_scalars[i]));
     }
-    auto tmp_result = at::native::mkldnn_convolution_pointwise_binary(
+    auto tmp_result = at::native::onednn_convolution_pointwise_binary(
         *tensor_handle_to_tensor_pointer(X),
         *tensor_handle_to_tensor_pointer(other),
         *tensor_handle_to_tensor_pointer(W),
@@ -94,7 +94,7 @@ AOTITorchError aoti_torch_cpu_onednn__convolution_pointwise_binary_(
     for (int64_t i = 0; i < unary_scalars_len_; i++) {
       unary_scalars_list.emplace_back(pointer_to_optional(unary_scalars[i]));
     }
-    auto tmp_result = at::native::mkldnn_convolution_pointwise_binary_(
+    auto tmp_result = at::native::onednn_convolution_pointwise_binary_(
         *tensor_handle_to_tensor_pointer(other),
         *tensor_handle_to_tensor_pointer(X),
         *tensor_handle_to_tensor_pointer(W),
@@ -134,7 +134,7 @@ AOTITorchError aoti_torch_cpu_onednn__convolution_pointwise(
     for (int64_t i = 0; i < scalars_len_; i++) {
       scalars_list.emplace_back(pointer_to_optional(scalars[i]));
     }
-    auto tmp_result = at::native::mkldnn_convolution_pointwise(
+    auto tmp_result = at::native::onednn_convolution_pointwise(
         *tensor_handle_to_tensor_pointer(X),
         *tensor_handle_to_tensor_pointer(W),
         pointer_to_optional<at::Tensor>(B),
@@ -174,7 +174,7 @@ aoti_torch_cpu_onednn__convolution_transpose_pointwise(
     for (int64_t i = 0; i < scalars_len_; i++) {
       scalars_list.emplace_back(pointer_to_optional(scalars[i]));
     }
-    auto tmp_result = at::native::mkldnn_convolution_transpose_pointwise(
+    auto tmp_result = at::native::onednn_convolution_transpose_pointwise(
         *tensor_handle_to_tensor_pointer(X),
         *tensor_handle_to_tensor_pointer(W),
         pointer_to_optional<at::Tensor>(B),

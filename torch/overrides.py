@@ -209,6 +209,7 @@ def get_ignored_functions() -> Set[Callable]:
         torch.mkldnn_adaptive_avg_pool2d,
         torch.onednn_adaptive_avg_pool2d,
         torch.mkldnn_convolution,
+        torch.onednn_convolution,
         torch.mkldnn_max_pool2d,
         torch.onednn_max_pool2d,
         torch.mkldnn_max_pool3d,
