@@ -1938,27 +1938,6 @@ class GraphModule(torch.nn.Module):
         y = fn(x)
         self.assertEqual(y, x.sin().cos())
 
-    def test_raise_stopiteration_pep0479(self):
-        def whoo():
-            raise StopIteration
-            yield 1
-
-        @torch.compile(backend="eager", fullgraph=True)
-        def fn(t):
-            try:
-                gen = whoo()
-                return next(gen)
-            except RuntimeError:
-                # converts the StopIteration into a RuntimeError
-                # https://peps.python.org/pep-0479/
-                return 1
-            except StopIteration:
-                return 2
-
-        t = torch.tensor([1.0])
-        y = fn(t)
-        self.assertEqual(y, 1)
-
     def test_change_parent_1(self):
         def create_ctx(x):
             @contextlib.contextmanager
@@ -1982,6 +1961,27 @@ class GraphModule(torch.nn.Module):
         x = torch.tensor([1.0])
         y = fn(x)
         self.assertEqual(y, x.sin().cos())
+
+    def test_raise_stopiteration_pep0479(self):
+        def whoo():
+            raise StopIteration
+            yield 1
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(t):
+            try:
+                gen = whoo()
+                return next(gen)
+            except RuntimeError:
+                # converts the StopIteration into a RuntimeError
+                # https://peps.python.org/pep-0479/
+                return 1
+            except StopIteration:
+                return 2
+
+        t = torch.tensor([1.0])
+        y = fn(t)
+        self.assertEqual(y, 1)
 
     def test_graph_break_inside_ctx(self):
         @contextlib.contextmanager
@@ -2119,6 +2119,34 @@ class GraphModule(torch.nn.Module):
         eager = EagerAndRecordGraphs()
         out = torch.compile(backend=eager, fullgraph=False)(fn)(x)
         self.assertEqual(expected, out)
+        self.assertEqual(len(eager.graphs), 0)
+
+    def test_graph_break_in_finally(self):
+        z = []
+
+        @contextlib.contextmanager
+        def whoo(x):
+            nonlocal z
+            try:
+                z.append(x)
+                yield x.sin()
+            finally:
+                torch._dynamo.graph_break()
+                z.append(x.cos())
+
+        def fn(x):
+            ctx = whoo(x)
+            try:
+                y = ctx.__enter__()
+            finally:
+                ctx.__exit__(None, None, None)
+            return y
+
+        x = torch.tensor([1.0])
+        eager = EagerAndRecordGraphs()
+        out = torch.compile(backend=eager, fullgraph=False)(fn)(x)
+        self.assertEqual(out, x.sin())
+        self.assertEqual(z, [x, x.cos()])
         self.assertEqual(len(eager.graphs), 0)
 
     def test_graph_break_inside___enter__(self):
