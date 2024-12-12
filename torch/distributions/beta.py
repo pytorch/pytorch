@@ -34,16 +34,16 @@ class Beta(ExponentialFamily):
 
     arg_constraints = {
         "concentration1": constraints.positive,
-        "concentration0": constraints.positive,
-        "low": constraints.dependent(is_discrete=False, event_dim=0),
-        "high": constraints.dependent(is_discrete=False, event_dim=0),
+        "concentration0": constraints.positive
     }
-    support = constraints.unit_interval
     has_rsample = True
 
     def __init__(
         self, concentration1, concentration0, low=0.0, high=1.0, validate_args=None
     ):
+        self._scale = high - low
+        self._location = low
+
         if isinstance(concentration1, Real) and isinstance(concentration0, Real):
             concentration1_concentration0 = torch.tensor(
                 [float(concentration1), float(concentration0)]
@@ -58,17 +58,23 @@ class Beta(ExponentialFamily):
         self._dirichlet = Dirichlet(
             concentration1_concentration0, validate_args=validate_args
         )
-        self.scale = high - low
-        self.location = low
         super().__init__(self._dirichlet._batch_shape, validate_args=validate_args)
 
     def expand(self, batch_shape, _instance=None):
         new = self._get_checked_instance(Beta, _instance)
         batch_shape = torch.Size(batch_shape)
         new._dirichlet = self._dirichlet.expand(batch_shape)
+        new._scale = self.scale.expand(batch_shape)
+        new._location = self.location.expand(batch_shape)
         super(Beta, new).__init__(batch_shape, validate_args=False)
         new._validate_args = self._validate_args
         return new
+    
+    @constraints.dependent_property(is_discrete=False, event_dim=0)
+    def support(self):
+        low = self._location
+        high = self._location + self._scale
+        return(constraints.interval(low, high))
 
     @property
     def mean(self):
@@ -96,9 +102,9 @@ class Beta(ExponentialFamily):
         return scaled_sample
 
     def log_prob(self, value):
-        scaled_value = (value - self.location) / self.scale
         if self._validate_args:
-            self._validate_sample(scaled_value)
+            self._validate_sample(value)
+        scaled_value = (value - self.location) / self.scale
         heads_tails = torch.stack([scaled_value, 1.0 - scaled_value], -1)
         return self._dirichlet.log_prob(heads_tails)
 
@@ -120,15 +126,29 @@ class Beta(ExponentialFamily):
             return torch.tensor([result])
         else:
             return result
+        
+    @property
+    def location(self):
+        if isinstance(self._location, Number):
+            return torch.ones_like(self.concentration0) * self._location
+        else:
+            return self._location
+        
+    @property
+    def scale(self):
+        if isinstance(self._scale, Number):
+            return torch.ones_like(self.concentration0) * self._scale
+        else:
+            return self._scale
 
     @property
     def _natural_params(self):
         return (self.concentration1, self.concentration0)
 
-    def _log_normalizer(self, x, y, high=1.0, low=0.0):
+    def _log_normalizer(self, x, y):
         return (
             torch.lgamma(x)
             + torch.lgamma(y)
             - torch.lgamma(x + y)
-            + torch.log(high - low)
+            + torch.log(self.scale)
         )

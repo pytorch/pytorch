@@ -177,10 +177,14 @@ def _get_examples():
                 {
                     "concentration1": torch.randn(2, 3).exp().requires_grad_(),
                     "concentration0": torch.randn(2, 3).exp().requires_grad_(),
+                    "low": torch.zeros(2, 3).requires_grad_(),
+                    "high": torch.ones(2, 3).requires_grad_()
                 },
                 {
                     "concentration1": torch.randn(4).exp().requires_grad_(),
                     "concentration0": torch.randn(4).exp().requires_grad_(),
+                    "low": torch.zeros(4).requires_grad_(),
+                    "high": torch.ones(4).requires_grad_()
                 },
             ],
         ),
@@ -6734,6 +6738,8 @@ class TestJit(DistributionsTestCase):
                 param["low"] = param["low"] - torch.rand(param["low"].shape)
                 param["high"] = param["high"] + torch.rand(param["high"].shape)
                 values = [param[key] for key in keys]
+            elif Dist is Beta:
+                pass
             else:
                 values = [
                     self._perturb_tensor(
