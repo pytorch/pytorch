@@ -237,7 +237,7 @@ def _chunk_dtensor(
         )
 
     # We need to explicitly call .detach() to return a new tensor detached from the current graph.
-    tensor = tensor.clone().detach()
+    tensor = tensor.detach().clone()
 
     # When a layer is not involved in TP, then the tensor will not be a DTensor.
     # e.g. When a layer is not sppecified in the parallelize_plan, TP will have no effect on the layer.

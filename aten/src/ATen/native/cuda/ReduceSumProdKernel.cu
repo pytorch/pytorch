@@ -208,8 +208,8 @@ static void prod_kernel_cuda(TensorIterator& iter) {
   reduce_dispatch<prod_functor>(iter, general_dispatcher);
 }
 
-REGISTER_DISPATCH(sum_stub, &sum_kernel_cuda);
-REGISTER_DISPATCH(nansum_stub, &nansum_kernel_cuda);
-REGISTER_DISPATCH(prod_stub, &prod_kernel_cuda);
+REGISTER_DISPATCH(sum_stub, &sum_kernel_cuda)
+REGISTER_DISPATCH(nansum_stub, &nansum_kernel_cuda)
+REGISTER_DISPATCH(prod_stub, &prod_kernel_cuda)
 
 } // namespace at::native

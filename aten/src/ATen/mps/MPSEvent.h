@@ -11,7 +11,7 @@ namespace at::mps {
 // NOTE: don't create instances of this class directly.
 // Use MPSEventPool to acquire instances of MPSEvent.
 class MPSEvent {
-public:
+ public:
   explicit MPSEvent(id_t ID, MPSStream* stream, bool enable_timing);
   ~MPSEvent();
 
@@ -26,16 +26,21 @@ public:
   // blocks the CPU thread until all the GPU work that were scheduled
   // prior to recording this event are completed.
   bool synchronize();
-  // resets this event with new parameters in case it gets reused from the event pool
+  // resets this event with new parameters in case it gets reused from the event
+  // pool
   void reset(MPSStream* stream, bool enable_timing);
   // returns the unique ID of the event instance
-  id_t getID() const { return m_id; }
+  id_t getID() const {
+    return m_id;
+  }
   // returns the completion timestamp of the event
-  uint64_t getCompletionTime() const { return m_completion_time; }
+  uint64_t getCompletionTime() const {
+    return m_completion_time;
+  }
   // if already recorded, waits for cpu_sync_cv to be signaled
   void waitForCpuSync();
 
-private:
+ private:
   id_t m_id;
   // enables measuring the completion time of the notifyListener of this event
   bool m_enable_timing;
@@ -63,7 +68,7 @@ private:
 typedef std::unique_ptr<MPSEvent, std::function<void(MPSEvent*)>> MPSEventPtr;
 
 class MPSEventPool {
-public:
+ public:
   explicit MPSEventPool(MPSStream* default_stream);
   ~MPSEventPool();
 
@@ -80,7 +85,7 @@ public:
   // returns elapsed time between two recorded events in milliseconds
   double elapsedTime(id_t start_event_id, id_t end_event_id);
 
-private:
+ private:
   MPSStream* m_default_stream = nullptr;
   std::recursive_mutex m_mutex;
   std::stack<std::unique_ptr<MPSEvent>> m_pool{};

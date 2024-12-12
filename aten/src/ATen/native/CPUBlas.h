@@ -189,10 +189,11 @@ void copy(int64_t n, const c10::complex<float> *x, int64_t incx, c10::complex<fl
 
 // Batch-reduce GEMM
 // Operates by the following formula:
-// C = alpha * SUM(A[i] x B[i]) + beta * C, i = 0 to batch size
+// C = SUM(A[i] x B[i]) + C if add_C is true, i = 0 to batch size
 // A Base pointer to a tensor A.
 // B Base pointer to a tensor B.
 // C Pointer to a tensor C (accumulation buffer).
+// Note only batch size 1 is used currently
 TORCH_API void brgemm(
     int64_t M,
     int64_t N,
@@ -200,14 +201,25 @@ TORCH_API void brgemm(
     int64_t ld_a,
     int64_t ld_b,
     int64_t ld_c,
-    const float alpha,
-    const float beta,
+    const bool add_C,
     const at::Half* A,
     const at::Half* B,
     float* C);
 
+TORCH_API void brgemm(
+    int64_t M,
+    int64_t N,
+    int64_t K,
+    int64_t ld_a,
+    int64_t ld_b,
+    int64_t ld_c,
+    const bool add_C,
+    const at::BFloat16* A,
+    const at::BFloat16* B,
+    float* C);
+
 // Release brgemm hardware context
-void brgemm_release();
+TORCH_API void brgemm_release();
 
 // Pack B matrix to get better performance if needed
 void pack(
@@ -220,7 +232,7 @@ void pack(
     const void* in,
     void* out);
 
-// Whether pack is needed in the platform.
-bool need_pack(ScalarType dt_in);
+// Whether pack is supported in the platform.
+bool could_pack(ScalarType dt_in);
 
 } // namespace at::native::cpublas

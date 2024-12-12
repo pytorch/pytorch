@@ -8,6 +8,7 @@ import argparse
 import math
 from typing import Any, Dict, List, Set, Tuple
 
+from tools.flight_recorder.components.fr_logger import FlightRecorderLogger
 from tools.flight_recorder.components.types import (
     Group,
     MatchState,
@@ -17,10 +18,13 @@ from tools.flight_recorder.components.types import (
 )
 
 
+logger: FlightRecorderLogger = FlightRecorderLogger()
+
+
 try:
     from tabulate import tabulate
 except ModuleNotFoundError:
-    print("tabulate is not installed. Proceeding without it.")
+    logger.debug("tabulate is not installed. Proceeding without it.")
 
 
 def format_frame(frame: Dict[str, str]) -> str:
@@ -121,7 +125,8 @@ def match_coalesced_groups(
             row = []
             i += 1
         title = "Match" if match else "MISMATCH"
-        print(f"{title}\n", tabulate(table))  # type: ignore[operator]
+        logger.info("%s \n", title)
+        logger.info("%s", tabulate(table))  # type: ignore[operator]
 
     # TODO can't verify seq_id bc there might have been valid seq deltas between ranks even within a pg.
     for op_list in all_ops.values():
@@ -248,7 +253,7 @@ def just_print_entries(
         if progress:
             rows.append(row)
 
-    print(tabulate(rows, headers=headers))
+    logger.info(tabulate(rows, headers=headers))
 
 
 def check_no_missing_dump_files(

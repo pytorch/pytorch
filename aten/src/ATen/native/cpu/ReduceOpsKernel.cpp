@@ -49,8 +49,7 @@ static inline void cpu_cum_base_kernel(const Tensor& result,
   auto iter = TensorIteratorConfig()
     .check_all_same_dtype(false)
     .resize_outputs(false)
-    // NOLINTNEXTLINE(bugprone-argument-comment)
-    .declare_static_shape(self.sizes(), /*squash_dim=*/dim)
+    .declare_static_shape(self.sizes(), /*squash_dims=*/dim)
     .add_output(result)
     .add_const_input(self)
     .build();
@@ -160,8 +159,7 @@ static void prod_kernel_impl(TensorIterator& iter) {
             __ubsan_ignore_undefined__ -> scalar_t { return a && b; },
         [=](Vectorized<scalar_t> a, Vectorized<scalar_t> b)
             __ubsan_ignore_undefined__ { return a && b; },
-        // NOLINTNEXTLINE(bugprone-argument-comment)
-        /*identity=*/1);
+        /*ident=*/1);
   } else {
     AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kBFloat16, kHalf, iter.dtype(), "prod_out_cpu", [&] {
       binary_kernel_reduce_vec(
@@ -170,8 +168,7 @@ static void prod_kernel_impl(TensorIterator& iter) {
               __ubsan_ignore_undefined__ -> scalar_t { return a * b; },
           [=](Vectorized<scalar_t> a, Vectorized<scalar_t> b)
               __ubsan_ignore_undefined__ { return a * b; },
-          // NOLINTNEXTLINE(bugprone-argument-comment)
-          /*identity=*/1);
+          /*ident=*/1);
     });
   }
 }
@@ -188,11 +185,10 @@ inline void norm_two_reduce_step(Vectorized<float>& acc_fvec, Vectorized<BFloat1
   acc_fvec += data_fvec1 * data_fvec1;
 }
 
-// This reduction accumulates results as the type `acc_t`. By default, when
-// `scalar_t` is complex, `acc_t` is the downgraded real number type.
-// Otherwise, `acc_t` and `scalar_t` are the same type.
-template <typename scalar_t, typename acc_t=typename scalar_value_type<scalar_t>::type, typename out_t=typename scalar_value_type<scalar_t>::type>
+template <typename scalar_t, typename out_t=typename scalar_value_type<scalar_t>::type>
 void norm_kernel_cpu_impl(TensorIterator& iter, const double& val) {
+  // This reduction accumulates results as the type `acc_t`.
+  using acc_t = at::opmath_type<typename scalar_value_type<scalar_t>::type>;
   if (val == 0.0) {
     binary_kernel_reduce(iter, NormZeroOps<scalar_t, acc_t, out_t>(), acc_t(0));
   } else if (val == 1.0) {
@@ -259,19 +255,15 @@ static void norm_kernel_tensor_iterator_impl(
         });
       });
   } else {
-    if (iter.dtype(0) == kHalf) {
-      return norm_kernel_cpu_impl<at::Half, float>(iter, val);
-    } else if (iter.input_dtype() == kHalf && iter.dtype(0) == kFloat) {
+    if (iter.input_dtype() == kHalf && iter.dtype(0) == kFloat) {
       // type promotion that does cast and reduction in a single kernel
-      return norm_kernel_cpu_impl<at::Half, float, float>(iter, val);
-    } else if(iter.dtype(0) == kBFloat16) {
-      return norm_kernel_cpu_impl<at::BFloat16, float>(iter, val);
+      return norm_kernel_cpu_impl<at::Half, float>(iter, val);
     } else if (iter.input_dtype() == kBFloat16 && iter.dtype(0) == kFloat) {
       // type promotion that does cast and reduction in a single kernel
-      return norm_kernel_cpu_impl<at::BFloat16, float, float>(iter, val);
+      return norm_kernel_cpu_impl<at::BFloat16, float>(iter, val);
     }
 
-    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(iter.input_dtype(), "norm_cpu", [&] {
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND3(kHalf, kBFloat16, kComplexHalf, iter.input_dtype(), "norm_cpu", [&] {
       norm_kernel_cpu_impl<scalar_t>(iter, val);
     });
 
