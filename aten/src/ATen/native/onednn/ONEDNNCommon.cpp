@@ -41,7 +41,7 @@ using IDeepTensorWrapperPtr = c10::intrusive_ptr<IDeepTensorWrapper>;
 using MKLDNNTensorImpl = OpaqueTensorImpl<IDeepTensorWrapperPtr>;
 using MKLDNNTensor = Tensor;
 
-ideep::tensor::data_type get_mkldnn_dtype(ScalarType type) {
+ideep::tensor::data_type get_onednn_dtype(ScalarType type) {
   switch (type) {
     case ScalarType::Float:
       return ideep::tensor::data_type::f32;
@@ -58,17 +58,17 @@ ideep::tensor::data_type get_mkldnn_dtype(ScalarType type) {
     case ScalarType::Half:
       return ideep::tensor::data_type::f16;
     default:
-      TORCH_CHECK(false, "get_mkldnn_dtype: unsupported data type");
+      TORCH_CHECK(false, "get_onednn_dtype: unsupported data type");
   }
 }
 
-int64_t data_ptr_from_mkldnn(const Tensor& mkldnn_tensor) {
-  MKLDNNTensorImpl *mklimpl = static_cast<MKLDNNTensorImpl *>(mkldnn_tensor.unsafeGetTensorImpl());
+int64_t data_ptr_from_onednn(const Tensor& onednn_tensor) {
+  MKLDNNTensorImpl *mklimpl = static_cast<MKLDNNTensorImpl *>(onednn_tensor.unsafeGetTensorImpl());
   void* data_ptr = mklimpl->unsafe_opaque_handle()->get_target().get_data_handle();
   return reinterpret_cast<int64_t>(data_ptr);
 }
 
-at::Tensor mkldnn_tensor_from_data_ptr(
+at::Tensor onednn_tensor_from_data_ptr(
     void* data_ptr,
     at::IntArrayRef dims,
     at::ScalarType dtype,
@@ -86,10 +86,10 @@ at::Tensor mkldnn_tensor_from_data_ptr(
 #endif
 
   auto a = ideep::tensor(deserialized_ideep_desc, data_ptr);
-  return at::native::new_with_itensor_mkldnn(std::move(a), dtype, device);
+  return at::native::new_with_itensor_onednn(std::move(a), dtype, device);
 }
 
-Tensor new_with_itensor_mkldnn(ideep::tensor&& it, std::optional<ScalarType> dtype, std::optional<Device> device) {
+Tensor new_with_itensor_onednn(ideep::tensor&& it, std::optional<ScalarType> dtype, std::optional<Device> device) {
   // NOTE: int32_t dims from ideep::tensor but sizes needs int64_t
   // TODO: support int64_t dims in ideep::tensor to avoid extra conversion
   auto dims = it.get_dims();
@@ -102,15 +102,15 @@ Tensor new_with_itensor_mkldnn(ideep::tensor&& it, std::optional<ScalarType> dty
     std::vector<int64_t>(dims.begin(), dims.end()));
 }
 
-ideep::tensor& itensor_from_mkldnn(const MKLDNNTensor& mkldnn_tensor) {
-  TORCH_CHECK(mkldnn_tensor.is_mkldnn(),
-             "itensor_from_mkldnn expects MKL-DNN tensor input");
-  MKLDNNTensorImpl *mklimpl = static_cast<MKLDNNTensorImpl *>(mkldnn_tensor.unsafeGetTensorImpl());
+ideep::tensor& itensor_from_onednn(const MKLDNNTensor& onednn_tensor) {
+  TORCH_CHECK(onednn_tensor.is_mkldnn(),
+             "itensor_from_onednn expects MKL-DNN tensor input");
+  MKLDNNTensorImpl *mklimpl = static_cast<MKLDNNTensorImpl *>(onednn_tensor.unsafeGetTensorImpl());
   return mklimpl->unsafe_opaque_handle()->get_target();
 }
 
-int64_t nbytes_from_mkldnn(const Tensor& mkldnn_tensor) {
-  ideep::tensor t = itensor_from_mkldnn(mkldnn_tensor);
+int64_t nbytes_from_onednn(const Tensor& onednn_tensor) {
+  ideep::tensor t = itensor_from_onednn(onednn_tensor);
   return t.get_desc().get_size();
 }
 
@@ -190,7 +190,7 @@ ideep::tensor itensor_view_from_dense(
 // longer than the ideep tensor.
 ideep::tensor itensor_from_tensor(const Tensor& tensor, bool from_const_data_ptr) {
   if (tensor.is_mkldnn()) {
-    return itensor_from_mkldnn(tensor);
+    return itensor_from_onednn(tensor);
   } else {
     return itensor_view_from_dense(tensor, from_const_data_ptr);
   }
@@ -203,10 +203,10 @@ int set_verbose(int level) {
 TORCH_LIBRARY_IMPL(mkldnn, MkldnnCPU, m) {
   m.impl(
       TORCH_SELECTIVE_NAME("mkldnn::data_ptr"),
-      TORCH_FN(data_ptr_from_mkldnn));
+      TORCH_FN(data_ptr_from_onednn));
   m.impl(
       TORCH_SELECTIVE_NAME("mkldnn::_nbytes"),
-      TORCH_FN(nbytes_from_mkldnn));
+      TORCH_FN(nbytes_from_onednn));
 }
 
 }

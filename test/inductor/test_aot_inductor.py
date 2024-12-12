@@ -350,7 +350,7 @@ class AOTInductorTestsTemplate:
     )
     def test_deconv_freezing(self):
         dtypes = [torch.float]
-        if torch._C._has_mkldnn and torch.ops.mkldnn._is_mkldnn_bf16_supported():
+        if torch._C._has_mkldnn and torch.ops.mkldnn._is_onednn_bf16_supported():
             dtypes.append(torch.bfloat16)
         for dtype, groups in itertools.product(dtypes, [2, 1]):
             iC = 4

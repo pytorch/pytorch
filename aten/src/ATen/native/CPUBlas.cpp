@@ -189,7 +189,7 @@ void gemm(
     float *c, int64_t ldc) {
   internal::normalize_last_dims(transa, transb, m, n, k, &lda, &ldb, &ldc);
 #if AT_ONEDNN_ENABLED()
-   if (mkldnn_bf32_gemm(transa, transb, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc)) {
+   if (onednn_bf32_gemm(transa, transb, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc)) {
      return;
    }
 #endif
@@ -355,7 +355,7 @@ void gemm(
      transa == TransposeType::Transpose &&
      transb == TransposeType::NoTranspose && n == 1 && alpha == 1.0;
 #endif
-   if (!use_bf16_gemv_trans && mkldnn_bf16_gemm(transa, transb, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc)) {
+   if (!use_bf16_gemv_trans && onednn_bf16_gemm(transa, transb, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc)) {
      return;
    }
 #endif
@@ -384,7 +384,7 @@ void gemm(
      transa == TransposeType::Transpose &&
      transb == TransposeType::NoTranspose && n == 1 && alpha == 1.0;
    if (!use_fp16_gemv_trans &&
-       mkldnn_fp16_gemm(transa, transb, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc)) {
+       onednn_fp16_gemm(transa, transb, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc)) {
      return;
    }
 #endif
@@ -1119,7 +1119,7 @@ struct Brgemm : public KernelCache <BrgemmKey, GemmHelper> {
   }
 
   static inline bool device_check(ScalarType dtype) {
-    if (!at::globalContext().userEnabledMkldnn()) {
+    if (!at::globalContext().userEnabledOnednn()) {
       return false;
     }
     if (dtype == ScalarType::Half) {
@@ -1172,7 +1172,7 @@ struct Pack : public KernelCache <PackKey, pack_t> {
   }
 
   static inline bool could_pack(ScalarType dtype) {
-    if (!at::globalContext().userEnabledMkldnn()) {
+    if (!at::globalContext().userEnabledOnednn()) {
       return false;
     }
     if (dtype == ScalarType::Half) {

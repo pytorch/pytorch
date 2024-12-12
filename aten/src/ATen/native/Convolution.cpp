@@ -513,17 +513,17 @@ struct ConvParams {
            && !(groups > 1 && is_dilated()) // MIOpen currently does not support dilation with groups of size > 1
            ;
   }
-  bool use_mkldnn(const at::Tensor& input, const at::Tensor& weight) const  {
+  bool use_onednn(const at::Tensor& input, const at::Tensor& weight) const  {
 #if AT_ONEDNN_ENABLED()
-    if (!at::globalContext().userEnabledMkldnn()) {
+    if (!at::globalContext().userEnabledOnednn()) {
       return false;
     }
     if (transposed && is_output_padding_big()) {
       return false;
     }
     if (input.device().is_cpu() &&
-        ((input.scalar_type() == at::kBFloat16 && mkldnn_bf16_device_check()) ||
-         (input.scalar_type() == at::kHalf && mkldnn_fp16_device_check()))) {
+        ((input.scalar_type() == at::kBFloat16 && onednn_bf16_device_check()) ||
+         (input.scalar_type() == at::kHalf && onednn_fp16_device_check()))) {
       return true;
     }
     return (input.is_mkldnn()) || // input is mkldnn Tensor
@@ -1240,7 +1240,7 @@ ConvBackend _select_conv_backend(
     } else {
       return ConvBackend::Miopen;
     }
-  } else if (params.use_mkldnn(input, weight)) {
+  } else if (params.use_onednn(input, weight)) {
     if (params.transposed) {
       return ConvBackend::MkldnnTranspose;
     } else {
@@ -1435,7 +1435,7 @@ static inline at::MemoryFormat determine_backend_memory_format(
       break;
     case ConvBackend::Mkldnn:
     case ConvBackend::MkldnnTranspose:
-      if (mkldnn_conv_use_channels_last(input, weight)) {
+      if (onednn_conv_use_channels_last(input, weight)) {
         backend_memory_format = (k == 5) ? at::MemoryFormat::ChannelsLast3d : at::MemoryFormat::ChannelsLast;
       }
       break;

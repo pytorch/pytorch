@@ -19,9 +19,9 @@ Tensor empty_mkldnn(IntArrayRef sizes, std::optional<ScalarType> dtype, std::opt
   // NOTE: int32_t dims from ideep::tensor but sizes needs int64_t
   // TODO: support int64_t dims in ideep::tensor to avoid extra conversion
   ideep::tensor::dims dst_dims (sizes.begin(), sizes.end());
-  auto data_type = dtype.has_value() ? get_mkldnn_dtype(dtype.value()) : ideep::tensor::data_type::f32;
+  auto data_type = dtype.has_value() ? get_onednn_dtype(dtype.value()) : ideep::tensor::data_type::f32;
   ideep::tensor it {dst_dims, data_type};
-  return new_with_itensor_mkldnn(std::move(it), dtype, device);
+  return new_with_itensor_onednn(std::move(it), dtype, device);
 }
 
 #else

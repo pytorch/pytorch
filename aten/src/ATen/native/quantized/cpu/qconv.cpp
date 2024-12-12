@@ -1549,7 +1549,7 @@ static at::Tensor _quantized_convolution_onednn(
   const ideep::zero_point_t dst_zero_points = ideep::zero_point_t(1, output_zero_point);
 
   // Weight
-  auto packed_weight = at::native::itensor_from_mkldnn(weight);
+  auto packed_weight = at::native::itensor_from_onednn(weight);
 
   // Bias
   ideep::tensor onednn_bias;

@@ -23,14 +23,14 @@
 namespace at { namespace native {
 
 // Mapping ScalarType to ideep tensor data_type
-TORCH_API ideep::tensor::data_type get_mkldnn_dtype(ScalarType type);
-static inline ideep::tensor::data_type get_mkldnn_dtype(const Tensor& t) {
-  return get_mkldnn_dtype(t.scalar_type());
+TORCH_API ideep::tensor::data_type get_onednn_dtype(ScalarType type);
+static inline ideep::tensor::data_type get_onednn_dtype(const Tensor& t) {
+  return get_onednn_dtype(t.scalar_type());
 }
 
-TORCH_API int64_t data_ptr_from_mkldnn(const Tensor& mkldnn_tensor);
+TORCH_API int64_t data_ptr_from_onednn(const Tensor& onednn_tensor);
 
-TORCH_API at::Tensor mkldnn_tensor_from_data_ptr(
+TORCH_API at::Tensor onednn_tensor_from_data_ptr(
     void* data_ptr,
     at::IntArrayRef dims,
     at::ScalarType dtype,
@@ -39,12 +39,12 @@ TORCH_API at::Tensor mkldnn_tensor_from_data_ptr(
     int64_t opaque_metadata_size);
 
 // Construct aten MKL-DNN tensor given an ideep tensor
-TORCH_API Tensor new_with_itensor_mkldnn(ideep::tensor&& it, std::optional<ScalarType> dtype, std::optional<Device> device);
+TORCH_API Tensor new_with_itensor_onednn(ideep::tensor&& it, std::optional<ScalarType> dtype, std::optional<Device> device);
 
 // Retrieve `ideep::tensor` from MKL-DNN tensor
-TORCH_API ideep::tensor& itensor_from_mkldnn(const Tensor& mkldnn_tensor);
+TORCH_API ideep::tensor& itensor_from_onednn(const Tensor& onednn_tensor);
 
-TORCH_API int64_t nbytes_from_mkldnn(const Tensor& mkldnn_tensor);
+TORCH_API int64_t nbytes_from_onednn(const Tensor& onednn_tensor);
 
 // Construct an `ideep::tensor` "view" from dense tensor, note the
 // ideep::tensor will share the underlying buffer

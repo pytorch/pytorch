@@ -115,7 +115,7 @@ sycl::event convolution(
 
 #if ONEDNN_SUPPORT_DETERMINISTIC
   if (at::globalContext().deterministicAlgorithms() ||
-      at::globalContext().deterministicMkldnn()) {
+      at::globalContext().deterministicOnednn()) {
     pattr.set_deterministic(true);
   }
 #endif
@@ -206,7 +206,7 @@ sycl::event convolution_backward_weights(
 
 #if ONEDNN_SUPPORT_DETERMINISTIC
   if (at::globalContext().deterministicAlgorithms() ||
-      at::globalContext().deterministicMkldnn()) {
+      at::globalContext().deterministicOnednn()) {
     pattr.set_deterministic(true);
   }
 #endif
@@ -308,7 +308,7 @@ sycl::event convolution_backward_data(
 
 #if ONEDNN_SUPPORT_DETERMINISTIC
   if (at::globalContext().deterministicAlgorithms() ||
-      at::globalContext().deterministicMkldnn()) {
+      at::globalContext().deterministicOnednn()) {
     pattr.set_deterministic(true);
   }
 #endif

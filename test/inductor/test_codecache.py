@@ -813,7 +813,7 @@ class TestFxGraphCache(TestCase):
         if (
             device == "cpu"
             and torch.backends.mkldnn.is_available()
-            and torch.ops.mkldnn._is_mkldnn_fp16_supported()
+            and torch.ops.mkldnn._is_onednn_fp16_supported()
         ):
             raise unittest.SkipTest("mkldnn tensors unsupported")
 
