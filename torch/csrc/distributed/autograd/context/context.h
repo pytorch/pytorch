@@ -20,7 +20,6 @@ class TORCH_API DistAutogradContext {
   using GradCallback = std::function<bool(torch::Tensor&)>;
 
   explicit DistAutogradContext(int64_t contextId);
-  ~DistAutogradContext() = default;
 
   // Retrieves the autograd context id for this context.
   int64_t contextId() const;
