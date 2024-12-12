@@ -6081,8 +6081,12 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor, L_add_closure_0_
         self.assertEqual(eager_out, exp_out)
         self.assertEqual(compiled_out, exp_out)
 
-    # TODO: add dynamo support for int carries
-    @skipIfTorchDynamo("Skip because we haven't support dynamo")
+    @skipIfTorchDynamo("Skip because we're testing export")
+    # TODO: we cannot turn on strict=True yet because torch._check for out_it > 0 is
+    # removed from the graph in dynamo and in non-strict export's graph capturing
+    # step, we re-run the traced graph module to get graph captured result.
+    # Since torch._check is removed from graph, we end up getting a data-dependent
+    # error when we call torch.ones(out_it * 2).
     @parametrize("strict", [False])
     @parametrize("dynamic", [True, False])
     def test_while_loop_op_int_carry_export(self, strict, dynamic):
@@ -6166,9 +6170,8 @@ class GraphModule(torch.nn.Module):
 """,  # noqa: B950
             )
 
-    # TODO: add dynamo support for int carries
-    @skipIfTorchDynamo("Skip because we haven't support dynamo")
-    @parametrize("strict", [False])
+    @skipIfTorchDynamo("Skip because we're testing export")
+    @parametrize("strict", [True, False])
     @parametrize("dynamic", [True, False])
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_while_loop_op_constant_and_symint_output(self, strict, dynamic):
@@ -6258,6 +6261,104 @@ class GraphModule(torch.nn.Module):
             return (b_1, c1_1, c2_1, c3_1, a_1, 0, add, add_1)
 """,  # noqa: B950
             )
+
+    @skipIfTorchDynamo("Skip because we're testing export")
+    # TODO: we cannot turn on strict=False yet, because
+    # torch._dynamo.exc.Unsupported: call_method UserDefinedObjectVariable(set) __contains__
+    # [TorchInGraphFunctionVariable(<method 'add' of 'torch._C.TensorBase' objects>)] {}
+    # Seems we're inside the PreDispatchTorchFunctionMode, _side_effectful_need_to_be_preserved_pre_dispatch
+    # becomes a user defined variable instead of SetVariable.
+    @parametrize("strict", [True])
+    @parametrize("dynamic", [True, False])
+    def test_while_loop_op_pytree_int_carry(self, strict, dynamic):
+        class Mod(torch.nn.Module):
+            def forward(self, x):
+                a = x.shape[0]
+                b = x.shape[1]
+
+                def cond_fn(shapes, const_int_dict, x):
+                    a, b = shapes
+                    c1, c2, c3 = const_int_dict["int_carry"]
+                    return c1 * c2 * c3 < a * b
+
+                def body_fn(shapes, const_int_dict, x):
+                    a, b = shapes
+                    c1, c2, c3 = const_int_dict["int_carry"]
+                    return (
+                        [a + 1, b + 1],
+                        {"int_carry": (c1 + 1, c2 + 1, c3 + 1)},
+                        x + 1,
+                    )
+
+                carry = ([a, b], {"int_carry": (2, 2, 3)}, x.sin())
+                out_shapes, out_it, out_x = while_loop(cond_fn, body_fn, carry)
+                out_inc = pytree.tree_map(lambda x: x + 1, out_it)
+                out_add = pytree.tree_map(lambda x: x + out_x, out_it)
+                return (out_shapes, out_inc, out_add, out_x)
+
+        dynamic_shapes = {"x": {0: torch.export.Dim("dim_x")}} if dynamic else None
+        x = torch.randn(2, 3)
+        m = Mod()
+        with torch.no_grad():
+            ep = self._check_export(
+                m, (x,), strict=strict, dynamic_shapes=dynamic_shapes
+            )
+        if strict and dynamic:
+            self.assertExpectedInline(
+                normalize_gm(ep.module().print_readable(print_output=False)),
+                """\
+class GraphModule(torch.nn.Module):
+    def forward(self, x):
+        x: "f32[s0, 3]";
+
+        x, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
+        sym_size_int_1: "Sym(s0)" = torch.ops.aten.sym_size.int(x, 0)
+
+        sin: "f32[s0, 3]" = torch.ops.aten.sin.default(x);  x = None
+
+        while_loop_cond_graph_0 = self.while_loop_cond_graph_0
+        while_loop_body_graph_0 = self.while_loop_body_graph_0
+        while_loop = torch.ops.higher_order.while_loop(while_loop_cond_graph_0, while_loop_body_graph_0, (sym_size_int_1, 3, 2, 2, 3, sin), ());  while_loop_cond_graph_0 = while_loop_body_graph_0 = sym_size_int_1 = sin = None
+        getitem: "Sym(u20)" = while_loop[0]
+        getitem_1: "Sym(u21)" = while_loop[1]
+        getitem_2: "Sym(u22)" = while_loop[2]
+        getitem_3: "Sym(u23)" = while_loop[3]
+        getitem_4: "Sym(u24)" = while_loop[4]
+        getitem_5: "f32[s0, 3]" = while_loop[5];  while_loop = None
+
+        add: "Sym(u22 + 1)" = getitem_2 + 1
+        add_1: "Sym(u23 + 1)" = getitem_3 + 1
+        add_2: "Sym(u24 + 1)" = getitem_4 + 1
+
+        add_3: "f32[s0, 3]" = torch.ops.aten.add.Tensor(getitem_5, getitem_2);  getitem_2 = None
+        add_4: "f32[s0, 3]" = torch.ops.aten.add.Tensor(getitem_5, getitem_3);  getitem_3 = None
+        add_5: "f32[s0, 3]" = torch.ops.aten.add.Tensor(getitem_5, getitem_4);  getitem_4 = None
+        return pytree.tree_unflatten((getitem, getitem_1, add, add_1, add_2, add_3, add_4, add_5, getitem_5), self._out_spec)
+
+    class while_loop_cond_graph_0(torch.nn.Module):
+        def forward(self, arg0_1: "Sym(u15)", arg1_1: "Sym(u16)", arg2_1: "Sym(u17)", arg3_1: "Sym(u18)", arg4_1: "Sym(u19)", arg5_1: "f32[s0, 3]"):
+            mul: "Sym(u17*u18)" = arg2_1 * arg3_1;  arg2_1 = arg3_1 = None
+            mul_1: "Sym(u17*u18*u19)" = mul * arg4_1;  mul = arg4_1 = None
+            mul_2: "Sym(u15*u16)" = arg0_1 * arg1_1;  arg0_1 = arg1_1 = None
+            lt: "Sym(u17*u18*u19 < u15*u16)" = mul_1 < mul_2;  mul_1 = mul_2 = None
+            return lt
+
+    class while_loop_body_graph_0(torch.nn.Module):
+        def forward(self, arg0_1: "Sym(u15)", arg1_1: "Sym(u16)", arg2_1: "Sym(u17)", arg3_1: "Sym(u18)", arg4_1: "Sym(u19)", arg5_1: "f32[s0, 3]"):
+            add: "Sym(u15 + 1)" = arg0_1 + 1;  arg0_1 = None
+            add_1: "Sym(u16 + 1)" = arg1_1 + 1;  arg1_1 = None
+            add_2: "Sym(u17 + 1)" = arg2_1 + 1;  arg2_1 = None
+            add_3: "Sym(u18 + 1)" = arg3_1 + 1;  arg3_1 = None
+            add_4: "Sym(u19 + 1)" = arg4_1 + 1;  arg4_1 = None
+            add_5: "f32[s0, 3]" = torch.ops.aten.add.Tensor(arg5_1, 1);  arg5_1 = None
+            return (add, add_1, add_2, add_3, add_4, add_5)
+""",  # noqa: B950
+            )
+
+
+# 1. add pytree
+# 2. add closure
+# 3. add torch.compile backend = "eager", "aot_eager"
 
 
 _hop_schema_test_schema_types = [
