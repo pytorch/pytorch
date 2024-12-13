@@ -94,6 +94,7 @@ static PyObject* THPStream_pynew(
   // NOLINTNEXTLINE(bugprone-signed-char-misuse)
   self->device_index = static_cast<int64_t>(stream_opt->device_index());
   self->device_type = static_cast<int64_t>(stream_opt->device_type());
+  self->attributes = Py_None;
 
   return (PyObject*)ptr.release();
   END_HANDLE_TH_ERRORS
@@ -112,11 +113,15 @@ PyObject* THPStream_Wrap(const c10::Stream& stream) {
   // NOLINTNEXTLINE(bugprone-signed-char-misuse)
   self->device_index = static_cast<int64_t>(stream.device_index());
   self->device_type = static_cast<int64_t>(stream.device_type());
+  self->attributes = Py_None;
   return ptr.release();
   END_HANDLE_TH_ERRORS
 }
 
 static void THPStream_dealloc(THPStream* self) {
+  if (self->attributes) {
+    Py_DECREF(self->attributes);
+  }
   Py_TYPE(self)->tp_free((PyObject*)self);
 }
 
@@ -256,11 +261,12 @@ static PyObject* THPStream_eq(THPStream* self, THPStream* other) {
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* THPStream_enter(THPStream* self, PyObject* unused) {
+static PyObject* THPStream_enter(PyObject* _self, PyObject* unused) {
   HANDLE_TH_ERRORS
-  // No operation is performed if the stream does not belong to an accelerator.
+  auto self = (THPStream*)_self;
   c10::DeviceType dst_device_type =
       static_cast<c10::DeviceType>(self->device_type);
+  // No operation is performed if the stream does not belong to an accelerator.
   if (C10_UNLIKELY(!at::accelerator::isAccelerator(dst_device_type))) {
     Py_RETURN_NONE;
   }
@@ -278,31 +284,28 @@ static PyObject* THPStream_enter(THPStream* self, PyObject* unused) {
       c10::Stream::unpack3(self->stream_id, dst_device_idx, dst_device_type));
   auto src_device_index_object = THPUtils_packDeviceIndex(src_device_idx);
   auto dst_prev_stream_object = THPStream_Wrap(dst_prev_stream);
-  // Push [src, dst] streams onto the stack.
-  at::impl::PythonTorchFunctionTLS::push_onto_stack(
-      std::make_shared<c10::SafePyObject>(
-          src_device_index_object, getPyInterpreter()));
-  at::impl::PythonTorchFunctionTLS::push_onto_stack(
-      std::make_shared<c10::SafePyObject>(
-          dst_prev_stream_object, getPyInterpreter()));
+  PyObject_SetAttrString(_self, "_src_device_index", src_device_index_object);
+  PyObject_SetAttrString(_self, "_dst_prev_stream", dst_prev_stream_object);
+  // Move ownership to the object self's attributes dict.
+  Py_DECREF(src_device_index_object);
+  Py_DECREF(dst_prev_stream_object);
   Py_INCREF(self);
   return (PyObject*)self;
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* THPStream_exit(THPStream* self, PyObject* unused) {
+static PyObject* THPStream_exit(PyObject* _self, PyObject* unused) {
   HANDLE_TH_ERRORS
+  auto self = (THPStream*)_self;
   // No operation is performed if the stream does not belong to an accelerator.
   if (C10_UNLIKELY(!at::accelerator::isAccelerator(
           static_cast<c10::DeviceType>(self->device_type)))) {
     Py_RETURN_NONE;
   }
-  // Pop streams from the stack [src, dst].
   THPStream* dst_prev_stream =
-      (THPStream*)(at::impl::PythonTorchFunctionTLS::pop_stack()->ptr(
-          getPyInterpreter()));
+      (THPStream*)PyObject_GetAttrString(_self, "_dst_prev_stream");
   auto src_device_idx = THPUtils_unpackDeviceIndex(
-      at::impl::PythonTorchFunctionTLS::pop_stack()->ptr(getPyInterpreter()));
+      PyObject_GetAttrString(_self, "_src_device_index"));
   at::accelerator::setCurrentStream(c10::Stream::unpack3(
       dst_prev_stream->stream_id,
       static_cast<c10::DeviceIndex>(dst_prev_stream->device_index),
@@ -313,6 +316,44 @@ static PyObject* THPStream_exit(THPStream* self, PyObject* unused) {
   }
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
+}
+
+static void THPStream_maybe_init_attributes(PyObject* attributes) {
+  if (!attributes) {
+    attributes = PyDict_New();
+    if (!attributes) {
+      throw python_error();
+    }
+  }
+}
+
+static PyObject* THPStream_getattro(PyObject* _self, PyObject* attr_name) {
+  HANDLE_TH_ERRORS
+  auto self = (THPStream*)_self;
+  auto attr_name_str = THPUtils_unpackString(attr_name);
+  if (attr_name_str == "_src_device_index" ||
+      attr_name_str == "_dst_prev_stream") {
+    THPStream_maybe_init_attributes(self->attributes);
+    return PyDict_GetItem(self->attributes, attr_name);
+  }
+  return PyObject_GenericGetAttr(self, attr_name);
+  END_HANDLE_TH_ERRORS
+}
+
+static int THPStream_setattro(
+    PyObject* _self,
+    PyObject* attr_name,
+    PyObject* value) {
+  HANDLE_TH_ERRORS
+  auto self = (THPStream*)_self;
+  auto attr_name_str = THPUtils_unpackString(attr_name);
+  if (attr_name_str == "_src_device_index" ||
+      attr_name_str == "_dst_prev_stream") {
+    THPStream_maybe_init_attributes(self->attributes);
+    return PyDict_SetItem(self->attributes, attr_name, value);
+  }
+  return PyObject_GenericSetAttr(self, attr_name, value);
+  END_HANDLE_TH_ERRORS_RET(-1)
 }
 
 static PyObject* THPStream_ne(THPStream* self, THPStream* other) {
@@ -380,8 +421,8 @@ static const std::initializer_list<PyMethodDef> THPStream_methods = {
      METH_VARARGS | METH_KEYWORDS,
      nullptr},
     {"__eq__", (PyCFunction)THPStream_eq, METH_O, nullptr},
-    {"__enter__", (PyCFunction)THPStream_enter, METH_NOARGS, nullptr},
-    {"__exit__", (PyCFunction)THPStream_exit, METH_VARARGS, nullptr},
+    {"__enter__", THPStream_enter, METH_NOARGS, nullptr},
+    {"__exit__", THPStream_exit, METH_VARARGS, nullptr},
     {nullptr}};
 
 static PyTypeObject THPStreamType = {
@@ -401,8 +442,8 @@ static PyTypeObject THPStreamType = {
     (hashfunc)THPStream_hash, /* tp_hash  */
     nullptr, /* tp_call */
     nullptr, /* tp_str */
-    nullptr, /* tp_getattro */
-    nullptr, /* tp_setattro */
+    THPStream_getattro, /* tp_getattro */
+    THPStream_setattro, /* tp_setattro */
     nullptr, /* tp_as_buffer */
     // NOLINTNEXTLINE(misc-redundant-expression)
     Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE, /* tp_flags */
