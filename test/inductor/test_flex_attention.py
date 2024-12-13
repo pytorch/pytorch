@@ -3197,6 +3197,61 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         torch.testing.assert_close(grads_eager, grads_compile)
 
     @supported_platform
+    def test_dynamic_shapes_bug_dynamic_batch(self):
+        def _flex_attention_mask(b, h, q_idx, kv_idx, input_lengths):
+            padding_condition = (q_idx < input_lengths[b]) & (kv_idx < input_lengths[b])
+            return padding_condition
+
+        counter = CompileCounterWithBackend("inductor")
+
+        class Model(torch.nn.Module):
+            def __init__(self, dim=1024):
+                super().__init__()
+                self.subsampler = torch.nn.Conv1d(256, 256, 5)
+                self.projector = torch.nn.Linear(256, dim)
+                self.num_heads = 4
+
+            def forward(self, x, input_lengths):
+                x = self.subsampler(x.transpose(-1, -2)).transpose(-1, -2)
+                x = self.projector(x).transpose(0, 1)
+                head_dim = x.size(-1) // self.num_heads
+                x = x.view(-1, x.size(1), self.num_heads, head_dim)
+                x = x.permute(1, 2, 0, 3)
+
+                max_time = x.size(-2)
+                mask = torch.compile(create_block_mask, dynamic=True, fullgraph=False)(
+                    functools.partial(
+                        _flex_attention_mask,
+                        input_lengths=input_lengths,
+                    ),
+                    B=input_lengths.size(0),
+                    H=None,
+                    Q_LEN=max_time,
+                    KV_LEN=max_time,
+                )
+
+                x = torch.compile(
+                    flex_attention, dynamic=True, fullgraph=True, backend=counter
+                )(
+                    query=x,
+                    key=x,
+                    value=x,
+                    block_mask=mask,
+                )
+                return x
+
+        model = Model(128).cuda()
+        B, F, T = 16, 256, 12
+        for _ in range(5):
+            x = torch.randn(B, T, F, device="cuda")
+            l = torch.randint(0, T, (B,), device="cuda")
+            model(x, l)
+
+        assert (
+            counter.frame_count == 1
+        ), f"Expected 1 graph, but got {counter.frame_count} graphs"
+
+    @supported_platform
     def test_causal_block_non_divisible_with_captured_buffer(self):
         Q_S = S - 3
         KV_S = S - 3
