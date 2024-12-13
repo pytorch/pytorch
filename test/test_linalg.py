@@ -4807,7 +4807,7 @@ class TestLinalg(TestCase):
         # Test one MB
         torch.cuda.tunable.set_rotating_buffer_size(1)
         self.assertEqual(torch.cuda.tunable.get_rotating_buffer_size(), 1024 * 1024)
-        # Test negative zero, which will return the l2 cache size
+        # Test negative value, which will return the l2 cache size
         torch.cuda.tunable.set_rotating_buffer_size(-1)
         self.assertEqual(torch.cuda.tunable.get_rotating_buffer_size(), l2_cache_size)
 
