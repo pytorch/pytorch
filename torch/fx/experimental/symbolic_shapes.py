@@ -3872,7 +3872,7 @@ class ShapeEnv:
         stride: List[Optional[sympy.Expr]] = [None] * len(size)
         contiguous_striding = True
         numel = math.prod(size)
-        if isinstance(numel, int) and numel < 2:
+        if isinstance(numel, int) and numel < 2 or ex_stride[-1] != 1:
             contiguous_striding = False
         for i in range(len(size) - 2, -1, -1):
             # Even though a tensor is contiguous, it may not
@@ -3911,25 +3911,31 @@ class ShapeEnv:
                     candidates[ex_size[i] * ex_stride[i]] = size[i] * stride[i]  # type: ignore[operator]
 
             if any(x is None for x in stride):
-                if contiguous_striding:
+                if (
+                    contiguous_striding
+                    and dynamic_strides[i] == DimDynamic.INFER_STRIDE
+                ):
                     if stride[-1] is None:
                         val, i = 1, len(size) - 1
                     else:
                         i, val = max(
-                            ((i, stride[i + 1] * size[i + 1])
-                            for i in range(len(stride))
-                            if stride[i] is None),
+                            (
+                                (i, stride[i + 1] * size[i + 1])
+                                for i in range(len(stride))
+                                if stride[i] is None
+                            ),
                             key=_nested_int_aware_sort,
                         )
                 else:
                     # Bind the smallest unbound stride to a new variable
                     val, i = min(
-                        ((ex_stride[i], i)
-                        for i in range(len(stride))
-                        if stride[i] is None),
+                        (
+                            (ex_stride[i], i)
+                            for i in range(len(stride))
+                            if stride[i] is None
+                        ),
                         key=_nested_int_aware_sort,
                     )
-
 
                 # Set INFER_STRIDE to STATIC or DUCK depending on sizes
                 dyn_stride = dynamic_strides[i]
@@ -3937,7 +3943,7 @@ class ShapeEnv:
                     dyn_stride = (
                         DimDynamic.STATIC if are_sizes_static else DimDynamic.DUCK
                     )
-                if isinstance(val, sympy.Symbol):
+                if not isinstance(val, int):
                     stride[i] = val
                 else:
                     stride[i] = self.create_symbol(
