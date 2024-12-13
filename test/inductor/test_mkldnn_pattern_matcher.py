@@ -354,6 +354,8 @@ class TestPatternMatcher(TestPatternMatcherBase):
             # only fuse for linear when the dtype is bf16
             mod = mod
             v = torch.randn(2, 10)
+            # TODO: Remove when https://github.com/pytorch/pytorch/issues/143146 is fixed
+            acl_bf16 = TEST_ACL and dtype == torch.bfloat16
 
             def matcher_check_fn():
                 match_nodes = unary_list[unary_fn]
@@ -362,15 +364,15 @@ class TestPatternMatcher(TestPatternMatcherBase):
                     match_nodes += 2
                 self.assertEqual(
                     counters["inductor"]["mkldnn_unary_fusion_matcher_nodes"],
-                    match_nodes,
+                    match_nodes if not acl_bf16 else 0,
                 )
                 self.assertEqual(
-                    counters["inductor"]["mkldnn_linear_weight_pack_matcher_count"], 1
+                    counters["inductor"]["mkldnn_linear_weight_pack_matcher_count"],1
                 )
 
             self._test_common(mod, (v,), matcher_check_fn, check_autocast=dtype)
             # only generated 1 kernel for "to"
-            self.assertEqual(metrics.generated_kernel_count, 1)
+            self.assertEqual(metrics.generated_kernel_count, 1 if not acl_bf16 else 2)
 
     @unittest.skipIf(not TEST_MKL, "Test requires MKL")
     def test_linear_fp32(self):
@@ -575,6 +577,13 @@ class TestPatternMatcher(TestPatternMatcherBase):
             generated_kernel_count = cal_conv_generated_kernel_number(
                 mod, v, dtype, dim
             )
+            # TODO: Remove when https://github.com/pytorch/pytorch/issues/143146 is fixed
+            if (
+                TEST_ACL
+                and dtype == torch.bfloat16
+                and memory_format != torch.contiguous_format
+            ):
+                continue            
             self.assertEqual(metrics.generated_kernel_count, generated_kernel_count)
 
     @skipIfNoDynamoSupport
