@@ -26,13 +26,7 @@ from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
 )
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
-from torch.testing._internal.common_utils import (
-    decorateIf,
-    instantiate_parametrized_tests,
-    parametrize,
-    run_tests,
-    skipIfRocm,
-)
+from torch.testing._internal.common_utils import run_tests, skipIfRocm
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     ModelArgs,
@@ -60,6 +54,10 @@ class RingAttentionTest(DTensorTestBase):
     def world_size(self) -> int:
         return torch.cuda.device_count()
 
+    @property
+    def destroy_pg_upon_exit(self) -> bool:
+        return False
+
     @skip_if_lt_x_gpu(2)
     @skipIfRocm  # Missing _c10d_functional_autograd::all_to_all_single
     @unittest.skipIf(
@@ -67,15 +65,19 @@ class RingAttentionTest(DTensorTestBase):
         "Does not support flash nor efficient attention",
     )
     @with_comms
-    @decorateIf(
-        unittest.skip, lambda params: params["load_balance"] and not params["is_causal"]
-    )
-    @parametrize("is_causal", [True, False])
-    @parametrize("compiled", [True, False])
-    @parametrize("backend", backends)
-    @parametrize("load_balance", [True, False])
-    @parametrize("rotater", [_RotateMethod.ALL_TO_ALL, _RotateMethod.ALL_GATHER])
-    def test_ring_attention_sdpa(
+    def test_ring_attention_sdpa(self) -> None:
+        self.run_subtests(
+            {
+                "is_causal": [True, False],
+                "compiled": [True, False],
+                "backend": backends,
+                "load_balance": [True, False],
+                "rotater": [_RotateMethod.ALL_TO_ALL, _RotateMethod.ALL_GATHER],
+            },
+            self._test_ring_attention_sdpa,
+        )
+
+    def _test_ring_attention_sdpa(
         self,
         is_causal: bool,
         compiled: bool,
@@ -83,6 +85,9 @@ class RingAttentionTest(DTensorTestBase):
         load_balance: bool,
         rotater: _RotateMethod,
     ) -> None:
+        if load_balance and not is_causal:
+            return
+
         set_rotate_method(rotater_enum_to_str[rotater])
         self.assertEqual(_cp_options.rotate_method, rotater)
         device_mesh = DeviceMesh(self.device_type, torch.arange(0, self.world_size))
@@ -231,10 +236,17 @@ class RingAttentionTest(DTensorTestBase):
         not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Does not support flash attention"
     )
     @with_comms
+    def test_ring_attention_native_transformer(self) -> None:
+        self.run_subtests(
+            {
+                "is_causal": [True, False],
+                "rotater": [_RotateMethod.ALL_GATHER, _RotateMethod.ALL_TO_ALL],
+            },
+            self._test_ring_attention_native_transformer,
+        )
+
     @sdpa_kernel(backends=[SDPBackend.FLASH_ATTENTION])
-    @parametrize("is_causal", [True, False])
-    @parametrize("rotater", [_RotateMethod.ALL_GATHER, _RotateMethod.ALL_TO_ALL])
-    def test_ring_attention_native_transformer(
+    def _test_ring_attention_native_transformer(
         self, is_causal: bool, rotater: _RotateMethod
     ) -> None:
         _cp_options.enable_load_balance = is_causal
@@ -321,8 +333,13 @@ class RingAttentionTest(DTensorTestBase):
     )
     @with_comms
     @sdpa_kernel(backends=[SDPBackend.FLASH_ATTENTION])
-    @parametrize("rotater", [_RotateMethod.ALL_GATHER, _RotateMethod.ALL_TO_ALL])
-    def test_ring_attention_custom_transformer(self, rotater: _RotateMethod) -> None:
+    def test_ring_attention_custom_transformer(self) -> None:
+        self.run_subtests(
+            {"rotater": [_RotateMethod.ALL_GATHER, _RotateMethod.ALL_TO_ALL]},
+            self._test_ring_attention_custom_transformer,
+        )
+
+    def _test_ring_attention_custom_transformer(self, rotater: _RotateMethod) -> None:
         set_rotate_method(rotater_enum_to_str[rotater])
         self.assertEqual(_cp_options.rotate_method, rotater)
         device_mesh = DeviceMesh(
@@ -385,9 +402,6 @@ class RingAttentionTest(DTensorTestBase):
                 },
             )
 
-
-if backends:
-    instantiate_parametrized_tests(RingAttentionTest)
 
 if __name__ == "__main__":
     run_tests()
