@@ -12,7 +12,7 @@ torch.fx.graph.Graph.call_function(self, the_function: Callable[..., Any], args:
 torch.fx.graph.Graph.call_method(self, method_name: str, args: Optional[Tuple[Argument, ...]] = None, kwargs: Optional[Dict[str, Argument]] = None, type_expr: Optional[Any] = None) -> torch.fx.node.Node
 torch.fx.graph.Graph.call_module(self, module_name: str, args: Optional[Tuple[Argument, ...]] = None, kwargs: Optional[Dict[str, Argument]] = None, type_expr: Optional[Any] = None) -> torch.fx.node.Node
 torch.fx.graph.Graph.create_node(self, op: str, target: 'Target', args: Optional[Tuple[Argument, ...]] = None, kwargs: Optional[Dict[str, Argument]] = None, name: Optional[str] = None, type_expr: Optional[Any] = None) -> torch.fx.node.Node
-torch.fx.graph.Graph.eliminate_dead_code(self, is_impure_node: Optional[Callable[[torch.fx.node.Node], bool]] = None)
+torch.fx.graph.Graph.eliminate_dead_code(self, is_impure_node: Optional[Callable[[torch.fx.node.Node], bool]] = None) -> bool
 torch.fx.graph.Graph.erase_node(self, to_erase: torch.fx.node.Node) -> None
 torch.fx.graph.Graph.get_attr(self, qualified_name: str, type_expr: Optional[Any] = None) -> torch.fx.node.Node
 torch.fx.graph.Graph.graph_copy(self, g: 'Graph', val_map: Dict[torch.fx.node.Node, torch.fx.node.Node], return_output_node = False) -> 'Optional[Argument]'
