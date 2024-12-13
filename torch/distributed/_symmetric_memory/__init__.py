@@ -12,6 +12,7 @@ from typing import Any, Callable, Dict, Generator, List, Optional, Tuple
 import torch
 import torch.distributed._functional_collectives as funcol
 import torch.distributed.distributed_c10d as c10d
+from torch._C._autograd import DeviceType
 from torch._C._distributed_c10d import _SymmetricMemory, Work as _Work
 
 
@@ -682,6 +683,11 @@ def _fused_all_gather_matmul(
         )
         return A.view(*leading_dims, -1), [out.view(*leading_dims, -1)]
 
+    if _should_use_multimem_all_gather_matmul(
+        A_shard, gather_dim, group_name, return_A
+    ):
+        return None, _multimem_all_gather_matmul(A_shard, Bs, group_name)
+
     with torch.profiler.record_function("fused_all_gather_matmul"):
         return _fused_all_gather_matmul_impl(
             torch.ops.aten.mm.out,
@@ -713,7 +719,7 @@ def _should_use_fused_all_gather_matmul_native(
         and local_M % group.size() == 0
         # _async_input_mm outperforms the decomposition-based approach when the
         # global M is small.
-        and local_M * group.size() <= 4096
+        and 2048 < local_M * group.size() <= 4096
         # _async_input_mm only supports a single B.
         and len(Bs) == 1
     )
@@ -771,6 +777,47 @@ def _fused_all_gather_matmul_native(
 
     symm_mem.barrier()
     return A, out
+
+
+def _should_use_multimem_all_gather_matmul(
+    A_shard: torch.Tensor,
+    gather_dim: int,
+    group_name: str,
+    return_A: bool,
+) -> bool:
+    group = c10d._resolve_process_group(group_name)
+    local_M = math.prod(A_shard.shape[:-1])
+    has_multicast_support = (
+        A_shard.device.type == "cuda"
+        and _SymmetricMemory.has_multicast_support(
+            DeviceType.CUDA, A_shard.device.index
+        )
+    )
+
+    return (
+        has_multicast_support
+        and not return_A
+        and A_shard.is_contiguous()
+        and gather_dim == 0
+        # The heuristic is empirical. We could refine it with a more
+        # sophisticated perf model.
+        and local_M * group.size() <= 2048
+    )
+
+
+def _multimem_all_gather_matmul(
+    A_shard: torch.Tensor,
+    Bs: List[torch.Tensor],
+    group_name: str,
+) -> List[torch.Tensor]:
+    group = c10d._resolve_process_group(group_name)
+    A_shape = torch.Size((A_shard.shape[0] * group.size(), *A_shard.shape[1:]))
+    symm_mem = get_symm_mem_workspace(
+        group_name, A_shape.numel() * A_shard.element_size()
+    )
+    A = symm_mem.get_buffer(symm_mem.rank, A_shape, A_shard.dtype)
+    torch.ops.symm_mem.multimem_all_gather_out(A_shard, group_name, A)
+    return [torch.matmul(A, B) for B in Bs]
 
 
 @torch.library.impl(lib, "fused_all_gather_scaled_matmul", "Meta")
