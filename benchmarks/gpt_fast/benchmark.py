@@ -318,8 +318,14 @@ all_experiments = {
     run_gemv,
 }
 
+# exp1, autoquant around 120-130 tokens/s
 all_experiments = {
-    # run_llama2_7b_int8,
+    run_llama2_7b_autoquant
+}
+
+# exp2: autoquant get around 80 tokens/s, similar to bf16
+all_experiments = {
+    run_llama2_7b_bf16,
     run_llama2_7b_autoquant
 }
 

@@ -227,9 +227,12 @@ def run_experiment(
 
     if x.mode == "autoquant":
         print("Using autoquant")
-        model = torchao.autoquant(model, manual=True, error_on_unseen=False)
+        model = torchao.autoquant(model, qtensor_class_list = torchao.quantization.DEFAULT_INT4_AUTOQUANT_CLASS_LIST, manual=True, error_on_unseen=False)
+        # torch.compiler.cudagraph_mark_step_begin()
         generate(model, prompt, max_new_tokens, temperature=temperature, top_k=top_k)
         model.finalize_autoquant()
+        from torchao.quantization.autoquant import AUTOQUANT_CACHE
+        print("autoquant cacahe:", AUTOQUANT_CACHE)
         model = torch.compile(model, mode="max-autotune")
 
     if x.mode == "autoquant_v2":
