@@ -863,17 +863,27 @@ class TestMaxAutotuneRemoteCache(TestCase):
                     with fresh_inductor_cache():
                         torch.compile(mm, dynamic=dynamic)(a, b)
                     reset()
+                with torch.compiler.config.patch(
+                    {"cache_key_tag": "test"}
+                ), fresh_inductor_cache():
+                    torch.compile(mm, dynamic=dynamic)(a, b)
+                    reset()
 
                 global_stats.report()
-                self.assertEqual(global_stats.autotune_remote, Stats(1, 3, 1))
+                self.assertEqual(global_stats.autotune_remote, Stats(2, 3, 2))
 
             global_stats.reset()
             for _ in range(4):
                 with fresh_inductor_cache():
                     torch.compile(f, dynamic=dynamic)(x, y)
                 reset()
+            with torch.compiler.config.patch(
+                {"cache_key_tag": "test"}
+            ), fresh_inductor_cache():
+                torch.compile(mm, dynamic=dynamic)(a, b)
+                reset()
             global_stats.report()
-            self.assertEqual(global_stats.autotune_remote, Stats(1, 3, 1))
+            self.assertEqual(global_stats.autotune_remote, Stats(2, 3, 2))
 
 
 class TestBenchmarkRequest(BenchmarkRequest):
@@ -1094,14 +1104,29 @@ class TestPrologueFusion(TestCase):
         self.assertEqual(out, foo(x, y), atol=0.05, rtol=0.05)
         self.check_code(code[0], num_kernels=1, num_allocs=1, num_deallocs=2)
 
-    def test_broadcast(self):
+    @parametrize("K", (63, 64))
+    def test_broadcast_x(self, K):
         def foo(x, y):
             return (x.expand([1, y.shape[0]]) + 1) @ y
 
         x = torch.rand([1, 1], dtype=torch.float, device="cuda")
-        y = torch.rand([64, 128], dtype=torch.float, device="cuda")
+        y = torch.rand([K, 128], dtype=torch.float, device="cuda")
 
-        out, code = run_and_get_code(torch.compile(foo), x, y)
+        out, code = run_and_get_code(torch.compile(foo, dynamic=True), x, y)
+        self.assertEqual(out, foo(x, y), atol=0.05, rtol=0.05)
+        self.check_code(code[0], num_kernels=1, num_allocs=1, num_deallocs=2)
+
+    def test_broadcast_y(self):
+        def foo(x, y):
+            return x @ y
+
+        M = 20
+        N = K = 1
+        x = torch.rand([M, K], dtype=torch.float, device="cuda")
+        y = torch.rand([K, N], dtype=torch.float, device="cuda")
+        torch._dynamo.mark_dynamic(x, 0)
+
+        out, code = run_and_get_code(torch.compile(foo, dynamic=True), x, y)
         self.assertEqual(out, foo(x, y), atol=0.05, rtol=0.05)
         self.check_code(code[0], num_kernels=1, num_allocs=1, num_deallocs=2)
 
@@ -1112,7 +1137,7 @@ class TestPrologueFusion(TestCase):
             (
                 lambda x: torch.hypot(x, x),
                 True,
-            ),  # not handled in analysis, conservatively assume does not
+            ),  # not handled in analysis, conservatively assume does not preserve
         )
 
         def foo(x, y, fn):
