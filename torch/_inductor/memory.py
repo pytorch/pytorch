@@ -184,8 +184,6 @@ def assign_memory_planning_info_for_scheduler_buffers(
     """
     # get buffer sizes
     sched_buf_to_size = compute_size_for_scheduler_buffer(name_to_buf)
-    if "buf4193" in name_to_buf:
-        assert "buf4193" in sched_buf_to_size
 
     # get buffer's successor nodes
     # note that different deps can have the same name, so we use name as keys

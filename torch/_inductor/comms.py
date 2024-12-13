@@ -12,6 +12,7 @@ import math
 from torch._dispatch.python import enable_python_dispatcher
 from .virtualized import V
 from torch.utils._ordered_set import OrderedSet
+import torch.utils._pytree as pytree
 
 import torch
 from torch.multiprocessing.reductions import StorageWeakRef
@@ -161,7 +162,7 @@ def _schedule_for_comm(
     snode_to_cost = {snode: estimate_op_runtime(snode) for snode in snodes}
     buf_name_to_snode = {buf_name: snode for snode in snodes for buf_name in snode.get_buffer_names()}
     for snode in snodes:
-        log.warn(f"snode: {snode}, snode.debug_str(): {snode.debug_str()}")
+        log.warn(f"id(snode): {id(snode)}, snode: {snode}, snode.debug_str(): {snode.debug_str()}")
 
     for snode, deps in unmet_deps.items():
         if len(deps) == 0:
@@ -176,9 +177,15 @@ def _schedule_for_comm(
         Schedules `snode` and put all unblocked nodes onto the ready queue.
         """
         scheduled.append(snode)
-        for buf_name in snode.get_buffer_names():
+        # get_buffer_names() is cached and does not use the latest buffer name info.
+        # Need to use get_outputs() here instead.
+        for o in snode.get_outputs():
+            buf_name = o.get_name()
             for snode in buffer_users[buf_name]:
                 unmet_deps[snode].remove(buf_name)
+                # except:
+                #     log.warn(f"remove error happens for snode: {snode}, snode.debug_str(): {snode.debug_str()}, unmet_deps[snode]: {unmet_deps[snode]}")
+                #     raise
                 if len(unmet_deps[snode]) == 0:
                     heapq.heappush(ready, Runnable(snode))
 
@@ -858,16 +865,17 @@ def bucket_fsdp_all_gather_concat_on_scheduler_ir(
 
     # return snodes
 
-    def get_fx_node(snode_or_ir_node, expected_op=None):
-        ir_node = None
-        if isinstance(snode_or_ir_node, torch._inductor.scheduler.BaseSchedulerNode):
-            ir_node = snode_or_ir_node.node
-        elif isinstance(snode_or_ir_node, torch._inductor.ir.IRNode):
-            ir_node = snode_or_ir_node
+    def get_fx_node(snode_or_operation, expected_op=None):
+        operation = None
+        if isinstance(snode_or_operation, torch._inductor.scheduler.BaseSchedulerNode):
+            operation = snode_or_operation.node
+        elif isinstance(snode_or_operation, torch._inductor.ir.IRNode):
+            operation = snode_or_operation
         else:
             raise ValueError(f"Expected BaseSchedulerNode or IRNode, got {type(snode)}. Offending value: {snode}")
         # TODO(yf225): having to pass in `expected_op` is ugly, how can we make it better?
-        origins = ir_node.get_origins()
+        origins = operation.get_origins()
+        log.warn(f"origins: {origins}, operation.get_origin_node(): {operation.get_origin_node()}")
         if expected_op is not None:
             origins_with_expected_op = [o for o in origins if o.target == expected_op]
             assert len(origins_with_expected_op) == 1
@@ -913,10 +921,6 @@ def bucket_fsdp_all_gather_concat_on_scheduler_ir(
             ag_related_snodes = sorted(
                 ag_related_snode_set, key=lambda x: get_op_idx(x)
             )
-            if not len(ag_related_snodes) in [1, 2]:
-                log.warn(f"len(ag_related_snodes)={len(ag_related_snodes)}")
-                for snode in ag_related_snodes:
-                    log.warn(f"snode: {snode}, snode.debug_str(): {snode.debug_str()}")
             assert len(ag_related_snodes) in [1, 2]
 
             if len(ag_related_snodes) == 2:
@@ -982,7 +986,7 @@ def bucket_fsdp_all_gather_concat_on_scheduler_ir(
             assert ag_fx_node.args[1] == group_size and ag_fx_node.args[2] == group_name, f"Expected group_size {group_size} and group_name {group_name}, but got {ag_fx_node.args[1:]}"
             ag_input_snodes.append(ag_snode_to_cast_snode[ag_snode])
             wait_snodes.append(ag_snode_to_wait_snode[ag_snode])
-        bucket_id_to_bucketed_op_info[bucket_id] = (ag_input_snodes, group_size, group_name, wait_snodes)
+        bucket_id_to_bucketed_op_info[bucket_id] = (ag_input_snodes, group_size, group_name, ag_bucket, wait_snodes)
 
     ag_snodes = OrderedSet(ag_snode_to_wait_snode.keys())
     ag_and_wait_snodes = OrderedSet()
@@ -998,10 +1002,42 @@ def bucket_fsdp_all_gather_concat_on_scheduler_ir(
         new_order.append(snode)
         scheduled.add(snode)
 
+    def replace_scheduler_buffer(
+        orig_sched_buf: torch._inductor.scheduler.SchedulerBuffer,
+        new_sched_buf: torch._inductor.scheduler.SchedulerBuffer
+    ):
+        orig_buf = orig_sched_buf.node
+        new_buf = new_sched_buf.node
+        orig_buf_name = orig_buf.get_name()
+        new_buf_name = new_buf.get_name()
+        if new_buf_name in V.graph.name_to_buffer:
+            del V.graph.name_to_buffer[new_buf_name]
+            V.graph.buffers.remove(new_buf)
+        if new_buf_name in name_to_buf:
+            del name_to_buf[new_buf_name]
+        V.graph.buffers[V.graph.buffers.index(orig_buf)] = new_buf
+        V.graph.name_to_buffer[orig_buf_name] = new_buf
+        name_to_buf[orig_buf_name] = new_buf
+        new_buf.name = orig_buf_name
+        new_sched_buf.users = orig_sched_buf.users
+
+    def remove_operation(operation: ir.Operation):
+        assert isinstance(operation, ir.Operation), f"Expected ir.Operation, but got {type(ir.Operation)}. Offending value: {ir.Operation}"
+        idx = V.graph.operations.index(operation)
+        del V.graph.operations[idx]
+        del name_to_fused_node[operation.get_operation_name()]
+
     def schedule_fallback_operation(target, args, kwargs):
+        def wrap_tensors(x):
+            return ir.TensorBox.create(x) if isinstance(x, ir.IRNode) else x
+
         operations_prev_watermark = len(V.graph.operations)
         # this will append newly created operations to V.graph.operations
-        ir.FallbackKernel.create(target, *args, **kwargs)
+        ir.FallbackKernel.create(
+            target,
+            *pytree.tree_map(wrap_tensors, args),
+            **pytree.tree_map(wrap_tensors, kwargs),
+        )
         new_operations = V.graph.operations[operations_prev_watermark:]
         new_snodes = []
         for new_operation in new_operations:
@@ -1029,7 +1065,7 @@ def bucket_fsdp_all_gather_concat_on_scheduler_ir(
             assert snode in ag_snode_to_bucket_id, f"{snode} not in {ag_snode_to_bucket_id}"
             bucket_id = ag_snode_to_bucket_id[snode]
             if bucket_id not in bucket_id_is_scheduled:
-                ag_input_snodes, group_size, group_name, orig_wait_snodes = bucket_id_to_bucketed_op_info[bucket_id]
+                ag_input_snodes, group_size, group_name, orig_ag_snodes, orig_wait_snodes = bucket_id_to_bucketed_op_info[bucket_id]
                 for orig_wait_snode in orig_wait_snodes:
                     log.warn(f"orig_wait_snode: {orig_wait_snode}, orig_wait_snode.debug_str(): {orig_wait_snode.debug_str()}")
                 example_ag_input_fx_node = get_fx_node(ag_input_snodes[0])
@@ -1040,7 +1076,9 @@ def bucket_fsdp_all_gather_concat_on_scheduler_ir(
                 # then do the all_gather, then view the output back to the original dtype. Look at FSDP2 to see how to do this.
                 assert all(get_fx_node(n).meta["val"].dtype == dtype for n in ag_input_snodes), "All all_gather inputs in the same bucket must have the same dtype"
                 # must schedule all the all_gather input nodes first, before the bucketed all_gather node
+                param_all_gather_inputs_orig = []
                 for ag_input_snode in ag_input_snodes:
+                    # log.warn(f"ag_input_snode: {ag_input_snode}, ag_input_snode.debug_str(): {ag_input_snode.debug_str()}")
                     schedule_snode(ag_input_snode)
                 param_all_gather_inputs_orig = [sn.node for sn in ag_input_snodes]
                 # schedule the bucketed all_gather node
@@ -1123,17 +1161,17 @@ def bucket_fsdp_all_gather_concat_on_scheduler_ir(
                 assert len(orig_wait_snodes) == len(outs), f"len(orig_wait_snodes)={len(orig_wait_snodes)}, len(outs)={len(outs)}, orig_wait_snodes={orig_wait_snodes}, outs={outs}"
                 assert len(orig_wait_snodes) > 0
                 # Swap out the original wait output buffer with the new buffer,
-                # so that downstream user nodes can read from the new buffer just by following the original dep buffer name.
-                for out_operation, orig_wait_snode in zip(outs, orig_wait_snodes):
+                # so that downstream user nodes can read from the new buffer just by using the original dep buffer name.
+                for out_operation, orig_ag_snode, orig_wait_snode in zip(outs, orig_ag_snodes, orig_wait_snodes):
                     out_snode = operation_name_to_snode[out_operation.get_operation_name()]
+                    orig_ag_snode_output = orig_ag_snode.outputs[-1]
                     orig_wait_snode_output = orig_wait_snode.outputs[-1]
                     out_snode_output = out_snode.outputs[-1]
-                    out_snode_output.users = orig_wait_snode_output.users
-                    del name_to_buf[out_snode_output.get_name()]
-                    out_snode_output.node.name = orig_wait_snode_output.node.name
-                    assert orig_wait_snode_output.get_name() in name_to_buf
-                    log.warn(f"Swapping name_to_buf[{orig_wait_snode_output.get_name()}] from {name_to_buf[orig_wait_snode_output.get_name()]} to {out_snode_output}")
-                    name_to_buf[orig_wait_snode_output.get_name()] = out_snode_output
+                    replace_scheduler_buffer(orig_sched_buf=orig_ag_snode_output, new_sched_buf=out_snode_output)
+                    replace_scheduler_buffer(orig_sched_buf=orig_wait_snode_output, new_sched_buf=out_snode_output)
+                    # Remove original AG and wait operations
+                    remove_operation(orig_ag_snode.node)
+                    remove_operation(orig_wait_snode.node)
                 bucket_id_is_scheduled[bucket_id] = True
     return new_order
 
