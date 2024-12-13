@@ -2049,7 +2049,10 @@ class CommonTemplate:
 
     @skipCUDAIf(TEST_WITH_ROCM, "associative_scan is not supported on ROCm")
     @skip_if_halide  # scan ops
-    @skip_if_dynamic  # TODO: support lifted symints when dynamic
+    # TODO: support lifted symints when dynamic
+    @torch._dynamo.config.patch(
+        {"dynamic_shapes": False, "assume_static_by_default": True}
+    )
     def test_custom_scan_op(self):
         if self.device != "cuda":
             raise unittest.SkipTest("associative_scan only supported on GPU")
@@ -2075,7 +2078,10 @@ class CommonTemplate:
         self.assertEqual(expect, actual)
 
     @skip_if_halide  # scan ops
-    @skip_if_dynamic  # TODO: support lifted symints when dynamic
+    # TODO: support lifted symints when dynamic
+    @torch._dynamo.config.patch(
+        {"dynamic_shapes": False, "assume_static_by_default": True}
+    )
     def test_custom_scan_op_compiled(self):
         if self.device != "cuda":
             raise unittest.SkipTest("associative_scan only supported on GPU")
@@ -2103,7 +2109,10 @@ class CommonTemplate:
 
     @skipCUDAIf(TEST_WITH_ROCM, "associative_scan is not supported on ROCm")
     @skip_if_halide  # scan ops
-    @skip_if_dynamic  # TODO: support lifted symints when dynamic
+    # TODO: support lifted symints when dynamic
+    @torch._dynamo.config.patch(
+        {"dynamic_shapes": False, "assume_static_by_default": True}
+    )
     def test_custom_scan_op_multi_input(self):
         if self.device != "cuda":
             raise unittest.SkipTest("associative_scan only supported on GPU")
@@ -2128,7 +2137,10 @@ class CommonTemplate:
 
     @skipCUDAIf(TEST_WITH_ROCM, "associative_scan is not supported on ROCm")
     @skip_if_halide  # scan ops
-    @skip_if_dynamic  # TODO: support lifted symints when dynamic
+    # TODO: support lifted symints when dynamic
+    @torch._dynamo.config.patch(
+        {"dynamic_shapes": False, "assume_static_by_default": True}
+    )
     def test_custom_scan_would_split(self):
         if self.device != "cuda":
             raise unittest.SkipTest("associative_scan only supported on GPU")
