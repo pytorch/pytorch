@@ -12,6 +12,7 @@ from typing import (
     Dict,
     List,
     Optional,
+    Sequence,
     Tuple,
     TYPE_CHECKING,
     TypeVar,
@@ -1061,6 +1062,83 @@ class DynamoTritonHOPifier(TritonHOPifier):
         meta = {variables.ConstantVariable.create(k): v for k, v in meta.items()}
         grid = grid.call_function(tx, [meta], {})
         return grid
+
+    # We use this function to wrap user-defined functions (e.g., early_config_prune, perf_model)
+    def call_user_defined_fn(self, user_fn, args, kwargs, tx):
+        result = UserFunctionVariable(user_fn).call_function(tx, args, kwargs)
+        return result
+
+    # We need to override call_getitem here so that we can call GetItemSource
+    def call_getitem(
+        self,
+        variable: Union["TritonKernelVariable", "TraceableTritonKernelWrapper"],
+        args: Sequence[Any],
+    ) -> Union["TritonKernelVariable", "TraceableTritonKernelWrapper"]:
+        # __getitem__ should only be called if we don't already have a grid
+        # Only grid needs to be passed
+        if variable.grid is not None or len(args) != 1:
+            self.raise_unsupported(
+                "Triton kernels should be called with only a single grid"
+            )
+        return type(variable)(
+            kernel=variable.kernel,
+            kernel_idx=variable.kernel_idx,
+            grid=args[0],
+            source=variable.source,
+        )
+
+    def call_prune_configs_if_required(  # type: ignore[no-untyped-def]
+        self,
+        autotuner,
+        args,
+        kwargs,
+        configs,
+        tx,
+    ):
+        # we need this to process the configs for the user-defined functions
+        from .builder import VariableBuilder
+
+        # Reimplement autotuner.prune_configs(...) here
+        # see triton/runtime/autotuner.py for the upstream reference
+        # We do this to avoid calling prune_configs, which in turn calls early_config_prune and perf_model
+        # These are both user-defined functions which can contain side effects, so we want to sandbox them in Dynamo
+
+        configs_variable = VariableBuilder(tx, AttrSource(autotuner.source, "configs"))(
+            autotuner.kernel.configs
+        )
+        if autotuner.kernel.early_config_prune:
+            # call the first user-defined function here (early_config_prune)
+            configs_variable = self.call_user_defined_fn(
+                autotuner.kernel.early_config_prune,
+                [configs_variable, args],
+                kwargs,
+                tx,
+            )
+        # realize the pruned configs
+        configs_variable = [config.realize().value for config in configs_variable.items]
+
+        if autotuner.kernel.perf_model:
+            top_k = autotuner.kernel.configs_top_k
+            if isinstance(top_k, float) and top_k <= 1.0:
+                top_k = int(len(configs_variable) * top_k)
+            if len(configs_variable) > top_k:
+                est_timing = {
+                    # call the user-defined function here as well
+                    config: self.call_user_defined_fn(
+                        autotuner.kernel.perf_model,
+                        [args],
+                        {**kwargs, **config.all_kwargs()},
+                        tx,
+                    )
+                    for config in configs_variable
+                }
+                # realize the results of calling perf_model
+                est_timing = {k: v.realize().value for k, v in est_timing.items()}
+                configs_variable = sorted(
+                    est_timing.keys(), key=lambda x: est_timing[x]
+                )[:top_k]
+
+        return configs_variable
 
     def call_HOP(self, variable, grids, combined_args_raw, tx) -> ConstantVariable:
         from .constant import ConstantVariable

@@ -54,6 +54,7 @@ if TYPE_CHECKING:
     TritonGridType = Union[TritonGridTupleType, TritonGridCallableType]
 
     if has_triton():
+        from triton import Config as TritonConfig
         from triton.runtime.autotuner import Autotuner
         from triton.runtime.jit import JITFunction
     else:
@@ -64,8 +65,14 @@ if TYPE_CHECKING:
         class JITFunction:  # type: ignore[no-redef]
             pass
 
+        class TritonConfig:  # type: ignore[no-redef]
+            pass
+
     TritonKernelType = Union[Autotuner, JITFunction]
 
+    # types for prune_configs_by
+    TritonAutotunerType = Autotuner
+    TritonConfigType = TritonConfig
 
 log = logging.getLogger("torch._dynamo")
 
@@ -719,7 +726,6 @@ def triton_kernel_wrapper_mutation_dense(
                 *block_dims,
                 element_size,
             )
-
     # move as many positional arguments from dicts to args as we
     # can to circumvent the bug with the kwargs and pre_/post_hook:
     # https://github.com/triton-lang/triton/issues/5082
@@ -1027,6 +1033,19 @@ class TritonHOPifier:
     ) -> Union[Tuple[Union[int, sympy.Expr, SymInt], ...], Tuple["Proxy", ...]]:
         raise NotImplementedError("abstract method")
 
+    def call_user_defined_fn(self, user_fn, args: List, kwargs: Dict) -> Any:
+        raise NotImplementedError("abstract method")
+
+    def call_prune_configs_if_required(  # type: ignore[no-untyped-def]
+        self,
+        autotuner,
+        args,
+        kwargs,
+        configs,
+        tx,
+    ) -> Any:
+        raise NotImplementedError("abstract method")
+
     def call_HOP(  # type: ignore[no-untyped-def]
         self,
         variable,
@@ -1188,66 +1207,30 @@ class TritonHOPifier:
                     "Please use a single @triton.autotune decorator instead."
                 )
             iter_kernel = iter_kernel.fn
-
         # These are the default values in upstream Triton
         # see: triton/runtime/autotuner.py
         default_perf_model = None
         default_configs_top_k = 1.0
         default_early_config_prune = None
 
-        # Run prune_configs_by to filter the configs
-        # Check to see if we need to prune:
-        # - We are looking at an Autotuner
-        # - user provided perf_model or early_config_prune is provided)
+        # Save the arguments length for prune_configs_by
+        # We need this to get the args from kwargs later in get_kernel_and_metadata
         if isinstance(variable.kernel, Autotuner) and (
             variable.kernel.perf_model != default_perf_model
             or variable.kernel.early_config_prune != default_early_config_prune
         ):
-            # args and kwargs aren't real values yet
-            # e.g., LazyVariableTracker
-            # If a user wants to access them, we should realize them
-            def realize_var(
-                var: Any,
-            ) -> Any:
-                while hasattr(var, "realize") and not (
-                    hasattr(var, "value") or hasattr(var, "get_real_value")
-                ):
-                    var = var.realize()
-
-                # if we can return the value, do it
-                if hasattr(var, "value"):
-                    return var.value
-                elif hasattr(var, "get_real_value"):
-                    return var.get_real_value()
-                else:
-                    self.raise_unsupported(
-                        "Unable to realize value for args or kwargs while pruning configs"
-                    )
-
-            # Eagerly realize the args/kwargs for kernel.prune_configs
-            # We can't pass objects such as VariableTracker to user-provided functions
-            realized_kwargs = {key: realize_var(kwarg) for key, kwarg in kwargs.items()}
-            realized_args = zip(
-                variable.kernel.arg_names, [realize_var(arg) for arg in args]
-            )
-
-            # save kernel.nargs if it is present
-            if hasattr(variable.kernel, "nargs"):
-                prev_nargs = variable.kernel.nargs
-            else:
-                prev_nargs = None
-
             # Prune the configs
-            variable.kernel.nargs = dict(realized_args)
-            variable.kernel.prune_configs(realized_kwargs)
+            named_args = dict(zip(variable.kernel.arg_names, args))
 
-            # Reset Autotuner vars to the default values so we don't run prune_configs again
-            variable.kernel.perf_model = default_perf_model
-            variable.kernel.configs_top_k = default_configs_top_k
-            variable.kernel.early_config_prune = default_early_config_prune
-
-            # restore nargs
-            variable.kernel.nargs = prev_nargs
+            assert tx is not None
+            pruned_configs = self.call_prune_configs_if_required(
+                variable, named_args, kwargs, variable.kernel.configs, tx
+            )
+            new_kernel = autotune(configs=pruned_configs, key=[])(variable.kernel.fn)
+            # create a new variable to contain the new (wrapped) kernel;
+            # skip kernel_idx to get a new record in the kernel side table
+            new_var = type(variable)(new_kernel, None, variable.grid)
+            return self.call_triton_kernel(new_var, args, kwargs, tx)
 
         special_kwargs = {}
         for name in SPECIAL_CONFIG_NAMES:
@@ -1263,12 +1246,28 @@ class TritonHOPifier:
                 new_configs = copy.deepcopy(variable.kernel.configs)
                 for config in new_configs:
                     config.__dict__.update(special_kwargs)
-                new_kernel = autotune(configs=new_configs, key=[])(variable.kernel.fn)
+
+                prune_configs_by = {
+                    "perf_model": variable.kernel.perf_model,
+                    "early_config_prune": variable.kernel.early_config_prune,
+                    "configs_top_k": variable.kernel.configs_top_k,
+                }
+                new_kernel = autotune(
+                    configs=new_configs, prune_configs_by=prune_configs_by, key=[]
+                )(variable.kernel.fn)
             else:
                 # if there is no Autotuner, wrap the kernel into a
                 # new one with a single config with special kwargs
                 new_config = Config(kwargs={}, **special_kwargs)
-                new_kernel = autotune(configs=[new_config], key=[])(variable.kernel)
+                prune_configs_by = {
+                    "perf_model": variable.kernel.perf_model,
+                    "early_config_prune": variable.kernel.early_config_prune,
+                    "configs_top_k": variable.kernel.configs_top_k,
+                }
+
+                new_kernel = autotune(
+                    configs=[new_config], prune_configs_by=prune_configs_by, key=[]
+                )(variable.kernel)
 
             # create a new variable to contain the new (wrapped) kernel;
             # skip kernel_idx to get a new record in the kernel side table
@@ -1301,9 +1300,15 @@ class TritonHOPifier:
                             updated = True
 
                 if updated:
-                    new_kernel = autotune(configs=new_configs, key=[])(
-                        variable.kernel.fn
-                    )
+                    prune_configs_by = {
+                        "perf_model": variable.kernel.perf_model,
+                        "early_config_prune": variable.kernel.early_config_prune,
+                        "configs_top_k": variable.kernel.configs_top_k,
+                    }
+
+                    new_kernel = autotune(
+                        configs=new_configs, prune_configs_by=prune_configs_by, key=[]
+                    )(variable.kernel.fn)
                     new_var = type(variable)(new_kernel, None, variable.grid)
                     return self.call_triton_kernel(new_var, args, kwargs, tx)
 
@@ -1395,6 +1400,38 @@ class TracingTritonHOPifier(TritonHOPifier):
         assert isinstance(meta, dict)
         assert callable(grid)
         return grid(meta)
+
+    def call_user_defined_fn(self, user_fn, args: List, kwargs: Dict) -> Any:
+        assert isinstance(args, list)
+        assert isinstance(kwargs, dict)
+        assert callable(user_fn)
+        return user_fn(*args, **kwargs)
+
+    def call_prune_configs_if_required(  # type: ignore[no-untyped-def]
+        self,
+        autotuner: "TritonAutotunerType",
+        args: Dict,
+        kwargs: Dict,
+        configs: List["TritonConfigType"],
+        tx: None,
+    ):
+        assert tx is None
+        assert isinstance(args, dict)
+        assert isinstance(kwargs, dict)
+        assert isinstance(autotuner, Autotuner)
+        assert isinstance(configs, list)
+
+        # save the prev nargs
+        prev_nargs = autotuner.nargs
+        autotuner.nargs = args
+
+        # prune_configs does not modify the state of the autotuner
+        pruned_configs = autotuner.prune_configs(kwargs)
+
+        # restore prev nargs
+        autotuner.nargs = prev_nargs
+
+        return pruned_configs
 
     def check_grid(
         self,

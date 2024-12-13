@@ -3616,6 +3616,7 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
             self.assertEqual(len(records), 1)
             self.assertTrue(records["run_perf_model"] is not None)
         else:
+            breakpoint()
             self.assertEqual(len(records), 3)
             self.assertTrue(records["run_early_config_prune"] is not None)
             self.assertTrue(records["capture_kwargs"] is not None)
