@@ -1028,6 +1028,8 @@ class TestPrologueFusion(TestCase):
         out, code = run_and_get_code(torch.compile(foo), x, y)
         self.assertEqual(out, foo(x, y), atol=0.05, rtol=0.05)
         self.check_code(code[0], num_kernels=1, num_allocs=1, num_deallocs=2)
+        # upcast preserves zero mask
+        FileCheck().check("a =").check_not("tl.where").check("tl.dot").run(code[0])
 
     def test_downcast(self):
         # per heuristics, dont fuse a downcast into a mm because it would lead to more reads inside kernel
@@ -1127,6 +1129,33 @@ class TestPrologueFusion(TestCase):
         out, code = run_and_get_code(torch.compile(foo, dynamic=True), x, y)
         self.assertEqual(out, foo(x, y), atol=0.05, rtol=0.05)
         self.check_code(code[0], num_kernels=1, num_allocs=1, num_deallocs=2)
+
+    def test_preserves_zero_analysis(self):
+        fns = (
+            (lambda x: x.relu(), False),  # preserves zero
+            (lambda x: x + 1, True),  # does not
+            (
+                lambda x: torch.hypot(x, x),
+                True,
+            ),  # not handled in analysis, conservatively assume does not preserve
+        )
+
+        def foo(x, y, fn):
+            return fn(x) @ y
+
+        for fn, should_mask in fns:
+            x = torch.rand([64, 127], dtype=torch.float, device="cuda")
+            y = torch.rand([127, 64], dtype=torch.float, device="cuda")
+
+            out, code = run_and_get_code(torch.compile(foo), x, y, fn)
+            self.assertEqual(out, foo(x, y, fn), atol=0.05, rtol=0.05)
+            self.check_code(code[0], num_kernels=1, num_allocs=1, num_deallocs=2)
+
+            if should_mask:
+                f = FileCheck().check("k_idx").check("a =").check_same("tl.where")
+            else:
+                f = FileCheck().check("k_idx").check("a =").check_not("tl.where")
+            f.check("tl.dot").run(code[0])
 
     @config.patch(realize_reads_threshold=1, realize_opcount_threshold=1)
     @parametrize("benchmark_fusion", (True, False))
