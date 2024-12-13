@@ -85,6 +85,8 @@ void initModule(PyObject* module) {
         at::detail::getMTIAHooks().getDeviceCapability(device_index);
     return py::reinterpret_steal<py::object>(raw_pyobject);
   });
+
+  m.def("_mtia_emptyCache", []() { at::detail::getMTIAHooks().emptyCache(); });
 }
 
 } // namespace torch::mtia

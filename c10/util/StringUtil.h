@@ -139,7 +139,7 @@ inline std::string Join(const std::string& delimiter, const Container& v) {
 // Replace all occurrences of "from" substring to "to" string.
 // Returns number of replacements
 size_t C10_API
-ReplaceAll(std::string& s, c10::string_view from, c10::string_view to);
+ReplaceAll(std::string& s, std::string_view from, std::string_view to);
 
 /// Represents a location in source code (for debugging).
 struct C10_API SourceLocation {
@@ -155,7 +155,7 @@ inline bool isPrint(char s) {
   return s > 0x1f && s < 0x7f;
 }
 
-inline void printQuotedString(std::ostream& stmt, const string_view str) {
+inline void printQuotedString(std::ostream& stmt, const std::string_view str) {
   stmt << "\"";
   for (auto s : str) {
     switch (s) {

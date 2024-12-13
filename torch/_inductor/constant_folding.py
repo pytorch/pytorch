@@ -47,6 +47,7 @@ def replace_node_with_constant(
         node.replace_all_uses_with(new_input_node)
         new_input_node.meta.update(node.meta)
         g.erase_node(node)
+        new_input_node.name = node.name
 
     if constant is not None:
         # needed to suppress `does not reference an nn.Module, nn.Parameter, or buffer` warning
@@ -131,6 +132,7 @@ class ConstantFolder(torch.fx.Interpreter):
             torch.ops.quantized_decomposed.dequantize_per_channel.default,
             torch.ops.quantized_decomposed.dequantize_per_tensor.default,
             torch.ops.quantized_decomposed.dequantize_per_tensor.tensor,
+            torch.ops.quantized_decomposed.convert_element_type.no_fuse,
         ]:
             # For the pattern fp32_weight -> q -> dq
             # We only folding fp32_weight -> q
