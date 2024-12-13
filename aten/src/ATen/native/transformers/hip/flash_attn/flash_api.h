@@ -89,7 +89,7 @@ mha_varlen_bwd_aot(const at::Tensor &dout,  // total_q x num_heads, x head_size
                    const bool deterministic,
                    const at::Tensor philox_seed,
                    const at::Tensor philox_offset);
-
+#if defined(USE_CK_FLASH_ATTENTION)
 // CK implementation
 TORCH_API
 std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor, at::Tensor, at::Tensor, at::Tensor, at::Tensor>
@@ -170,6 +170,7 @@ mha_varlen_bwd_ck(const at::Tensor &dout,  // total_q x num_heads, x head_size
                   const bool deterministic,
                   const at::Tensor philox_seed,
                   const at::Tensor philox_offset);
+#endif
 
 TORCH_API
 inline std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor, at::Tensor, at::Tensor, at::Tensor, at::Tensor>
@@ -185,6 +186,7 @@ mha_fwd(const at::Tensor &q,         // batch_size x seqlen_q x num_heads x head
         int window_size_right,
         const bool return_softmax,
         std::optional<at::Generator> gen_) {
+#if defined(USE_CK_FLASH_ATTENTION)
   if(at::globalContext().getROCmFAPreferredBackend() == at::ROCmFABackend::Ck) {
     return mha_fwd_ck(q,
                       k,
@@ -211,7 +213,22 @@ mha_fwd(const at::Tensor &q,         // batch_size x seqlen_q x num_heads x head
                       window_size_right,
                       return_softmax,
                       gen_);
-  }
+
+   }
+#else
+     return mha_fwd_aot(q,
+                      k,
+                      v,
+                      out_,
+                      alibi_slopes_,
+                      p_dropout,
+                      softmax_scale,
+                      is_causal,
+                      window_size_left,
+                      window_size_right,
+                      return_softmax,
+                      gen_);
+#endif
 }
 
 inline std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor, at::Tensor, at::Tensor, at::Tensor, at::Tensor>
@@ -234,6 +251,7 @@ mha_varlen_fwd(const at::Tensor &q,  // total_q x num_heads x head_size, total_q
                int window_size_right,
                const bool return_softmax,
                std::optional<at::Generator> gen_) {
+#if defined(USE_CK_FLASH_ATTENTION)
   if(at::globalContext().getROCmFAPreferredBackend() == at::ROCmFABackend::Ck) {
     return mha_varlen_fwd_ck(q,
                              k,
@@ -273,7 +291,28 @@ mha_varlen_fwd(const at::Tensor &q,  // total_q x num_heads x head_size, total_q
                               window_size_right,
                               return_softmax,
                               gen_);
-  }
+    }
+#else
+    return mha_varlen_fwd_aot(q,
+                              k,
+                              v,
+                              out_,
+                              cu_seqlens_q,
+                              cu_seqlens_k,
+                              seqused_k,
+                              block_table_,
+                              alibi_slopes_,
+                              max_seqlen_q,
+                              max_seqlen_k,
+                              p_dropout,
+                              softmax_scale,
+                              zero_tensors,
+                              is_causal,
+                              window_size_left,
+                              window_size_right,
+                              return_softmax,
+                              gen_);
+#endif
 
 }
 
@@ -297,6 +336,7 @@ mha_bwd(const at::Tensor &dout,  // batch_size x seqlen_q x num_heads, x head_si
         const bool deterministic,
         const at::Tensor philox_seed,
         const at::Tensor philox_offset) {
+#if defined(USE_CK_FLASH_ATTENTION)
   if(at::globalContext().getROCmFAPreferredBackend() == at::ROCmFABackend::Ck) {
     return mha_bwd_ck(dout,
                       q,
@@ -335,7 +375,27 @@ mha_bwd(const at::Tensor &dout,  // batch_size x seqlen_q x num_heads, x head_si
                        deterministic,
                        philox_seed,
                        philox_offset);
-  }
+    }
+#else
+    return mha_bwd_aot(dout,
+                       q,
+                       k,
+                       v,
+                       out,
+                       softmax_lse,
+                       dq_,
+                       dk_,
+                       dv_,
+                       alibi_slopes_,
+                       p_dropout,
+                       softmax_scale,
+                       is_causal,
+                       window_size_left,
+                       window_size_right,
+                       deterministic,
+                       philox_seed,
+                       philox_offset);
+#endif
 
 }
 
@@ -363,6 +423,7 @@ mha_varlen_bwd(const at::Tensor &dout,  // total_q x num_heads, x head_size
                const bool deterministic,
                const at::Tensor philox_seed,
                const at::Tensor philox_offset) {
+#if defined(USE_CK_FLASH_ATTENTION)
   if(at::globalContext().getROCmFAPreferredBackend() == at::ROCmFABackend::Ck) {
     return mha_varlen_bwd_ck(dout,
                              q,
@@ -411,7 +472,32 @@ mha_varlen_bwd(const at::Tensor &dout,  // total_q x num_heads, x head_size
                               deterministic,
                               philox_seed,
                               philox_offset);
-  }
+   }
+#else
+    return mha_varlen_bwd_aot(dout,
+                              q,
+                              k,
+                              v,
+                              out,
+                              softmax_lse,
+                              dq_,
+                              dk_,
+                              dv_,
+                              cu_seqlens_q,
+                              cu_seqlens_k,
+                              alibi_slopes_,
+                              max_seqlen_q,
+                              max_seqlen_k,
+                              p_dropout,
+                              softmax_scale,
+                              zero_tensors,
+                              is_causal,
+                              window_size_left,
+                              window_size_right,
+                              deterministic,
+                              philox_seed,
+                              philox_offset);
+#endif
 }
 
 } // namespace pytorch_flash
