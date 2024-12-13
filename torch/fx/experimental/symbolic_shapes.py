@@ -4064,6 +4064,7 @@ class ShapeEnv:
                 # Don't participate in caching when coeff != 1
                 fake_mode = _try_get_fake_mode(cache)
                 assert fake_mode is not None
+                # See [ Best effort SymInt association ]
                 fake_mode.nt_cache_to_nested_int[cache] = weakref.ref(out)
         else:
             # How can this occur? When we mark_unbacked, we end up with a real

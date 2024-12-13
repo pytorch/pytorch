@@ -2737,9 +2737,9 @@ class GraphModule(torch.nn.Module):
     # Note: [What kind of guards are involved in nested tensor compilation]
     #
     # Until we implement UnionFind, dynamic shapes guards are not involved.
-    # we rely only on dynamo's tensor aliasing guards.
+    # we rely only on dynamo's tensor deduping guards.
     #
-    # This is possible because dynamo able to generate tensor aliasing guards
+    # This is possible because dynamo able to generate tensor deduping guards
     # not only for the outer tensor, but also for the inner tensor.
     #
     # The case where dynamic shapes guards would eventually come into play is
@@ -2750,11 +2750,11 @@ class GraphModule(torch.nn.Module):
     #
     # Today there are two pieces of global eager state that NJTs deals with:
     # - tensor_id_counter: a global counter that assigns unique ids to tensors
-    # - tensor_symint_registry: maps tensor to nested int
-    #   - this is used in eager only (we should get rid of this because it is
-    #     not necessary to cache nested int in eager)
-    #   - during tracing, we DO need to cache nested int, but we do so on
-    #     the FakeTensor.
+    # - tensor_int_registry: maps tensor to id
+    #   - This is used to things like nt.to("cpu").shape == nt.shape
+    #   - This is NOT actually sound, because dynamo believes the two tensors are
+    #     different instances, and we don't produce the proper symbolic shapes guards.
+    #     (during tracing, we use this to handle view_avoid_dupes_with_primals
     #
     # Ideally we would like to satisfy the following:
     # - (1) The eager state is not mutated during tracing
@@ -2765,9 +2765,8 @@ class GraphModule(torch.nn.Module):
     #
     # Today we can satisfy (1) and (2a) but cannot satisfy (2b)
     #
-    # Today, (1) is satisfied because we maintain a separate counter during
-    # tracing, and cache nested int on FakeTensor instead of relying on
-    # tensor_symint_registry.
+    # Today, (1) is satisfied because we maintain a separate counter and
+    # tensor_int_registry during tracing on FakeTensorMode.
     #
     # (2) is cannot be completely satisfied because we trace away the
     # side-effectful operations (which we can fix this by wrapping the
@@ -2833,6 +2832,9 @@ class GraphModule(torch.nn.Module):
     # symbol, and there is no error produced.
     # The unsupported case is when we guard that two shapes are not equal, in
     # which, we will try and fail to generate a guard.
+    #
+    # See [ Best effort SymInt association ] for more information
+    # on NestedInt caching.
 
     #
     # Case 1: in-graph construction where the offsets are passed as inputs

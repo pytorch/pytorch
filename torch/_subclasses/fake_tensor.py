@@ -1129,6 +1129,7 @@ class FakeTensorMode(TorchDispatchMode):
     nt_tensor_id_counter: int = -1
     nt_tensor_id_initial_count: int = -1
 
+    # See [ Best effort SymInt association ]
     nt_cache_to_nested_int: WeakTensorKeyDictionary = WeakTensorKeyDictionary()
 
     def __init__(
@@ -2525,59 +2526,34 @@ class FakeTensorMode(TorchDispatchMode):
         cache: CachedTensor,
         coeff: Union[int, torch.SymInt] = 1,
     ) -> torch.SymInt:
-        # Note [ Best effort SymInt caching for CachedTensor ]
+        # Note [ Best effort SymInt association ]
         #
-        # The main question this note tries to answer is why is it okay to be
-        # "best effort" when it comes to associating CachedTensor with
-        # SymInts.
+        # The question this note tries to answer is why is it okay to be
+        # "best effort/unreliable" when it comes to associating raggedness with
+        # SymInts. What we mean by "unreliable" here is that in an ideal world
+        # symbolic shapes guards should serve as the perfect complement to dynamo
+        # guards, e.g., two SymInts share the same symbol if dynamo can already guard
+        # based on tensor deduping guards that they are the same. Instead of doing that,
+        # we instead associate SymInt on CachedTensor, an object that is somewhat
+        # ephemeral/disposable, e.g. the same CachedTensor gets preserved when
+        # we do something like pointwise, but calling from_jagged(values, offsets)
+        # actually always creates a new CachedTensor, and we would have a fresh
+        # SymInt in that case.
         #
-        # TLDR:
-        # - It's okay to be best effort because the caching is just a optimization
-        #   that doesn't matter for correctness.
-        # - We don't NEED symbolic shapes guards because we rely on Dynamo guards.
-        # - We don't NEED a cache because SymInts in this model are disposable.
+        # The answer is that:
+        # - We don't /need/ symbolic shapes guards because we rely on Dynamo guards.
+        #   Hence, we use ephmeral sources when convenient. (There are some known
+        #   downsides: (1) actually trying to produce guards with those SymInts would
+        #   error out. (2) we sometimes secretly update the tensor registry so that
+        #   two j0 compare equal despite not having caches that share the same tensor
+        #   instance. This is not sound, but should be rare - only happens in the .to()
+        #   case).
+        # - We don't /need/ a cache because SymInts in this model are fungible.
+        #   (All have ephemeral sources.)
         # - All we care about is that the common case (pointwise) doesn't
-        #   create a new symbol/SymInt everytime. Maybe this dosn't
-        #
-        # Stepping back, there are theoretically two types of guards that
-        # NestedTensor cares about for raggedness comparison.
-        #
-        #   1) The dynamo guards (specifically, dynamo
-        #      tensor deduping guards) captures most of what we need because
-        #      if two nested ints compare equal, the tensor instances held in their
-        #      caches must also have the same object id.
-        #
-        #   2) The symbolic shape guards in an
-        #      ideal world should serve as the perfect complement to the dynamo guards,
-        #      e.g., two SymInts share the same symbol if dynamo can already guard based
-        #      on tensor deduping guards that they are the same.
-        #
-        # For now though, we take the easy path and say we don't care about
-        # symbolic shapes guards at all. What this allows us to do
-        # is to use ephemeral sources whenever it is not convenient to figure out
-        # what the source is, e.g. whenever we create a NestedTensor and its SymInt in
-        # the middle of a graph because we don't need to produce a guard with that symbol
-        # anyway.
-        #
-        # There are some known downsides to this:
-        #
-        #   1) If we do an operation that results in a symbolic shape guard being produced
-        #      we will error out. This is rare though bc the main thing we care about is Eq.
-        #      which when evaluated to be True results in "input guards".
-        #
-        #   2) If we secretly update the tensor registry so that two Caches compare equal
-        #      even though they don't share the same tensor instance anywhere. Dynamo
-        #      would not be able to guard for us. This is not sound, but should be rare.
-        #      (Only happens if someone does .to().
-        #
-        # Assuming that we're okay with these downsides, you might ask the qn:
-        #
-        # Why have a cache at all?
-        #
-        # The answer is that we DON'T! In a world where we don't care about producing guards
-        # and source is always ephemeral, an unreliable cache is okay because SymInts are fungible
-        # anyway, so it's always okay to just create a new one. We still have it though because
-        # its nice to avoid creating a new SymInt upon every op call on NJT.
+        #   create a new symbol/SymInt everytime.
+        # - It's okay to be best effort/not be reliable because the caching is just
+        #   a optimization that doesn't matter for correctness.
         ref = self.nt_cache_to_nested_int.get(cache)
         if ref is None or (ret := ref()) is None:
             ret = self.create_symbolic_nested_int(cache=cache)
