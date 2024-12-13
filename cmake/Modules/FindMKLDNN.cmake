@@ -32,7 +32,8 @@ IF(NOT MKLDNN_FOUND)
       set(SYCL_CXX_DRIVER "icpx")
       set(DNNL_LIB_NAME "libdnnl.a")
     else()
-      MESSAGE(FATAL_ERROR "Platform not known")
+      MESSAGE(FATAL_ERROR "OneDNN for Intel GPU in PyTorch currently supports only Windows and Linux.
+                           Detected system '${CMAKE_SYSTEM_NAME}' is not supported.")
     endif()
 
     set(DNNL_MAKE_COMMAND "cmake" "--build" ".")
