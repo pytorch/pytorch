@@ -4,8 +4,6 @@ import collections
 from enum import Enum
 from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING
 
-import torch
-
 from .. import variables
 from ..current_scope_id import current_scope_id
 from ..exc import unimplemented
@@ -185,10 +183,11 @@ class VariableTrackerMeta(type):
 
     def __instancecheck__(cls, instance) -> bool:
         """Make isinstance work with LazyVariableTracker"""
-        # This is super expensive - just having it costs over 4% of tracing
-        # time!
-        if (type(instance) is variables.LazyVariableTracker) and (
-            cls not in (VariableTracker, variables.LazyVariableTracker)
+        if type.__instancecheck__(
+            variables.LazyVariableTracker, instance
+        ) and cls not in (
+            VariableTracker,
+            variables.LazyVariableTracker,
         ):
             instance = instance.realize()
         return type.__instancecheck__(cls, instance)
@@ -450,7 +449,8 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         source: Optional[Source] = None,
     ) -> Any:
         """Create a new VariableTracker from a value and optional Source"""
-        builder = torch._dynamo.variables.builder
+        from . import builder
+
         if source is None:
             return builder.SourcelessBuilder.create(tx, value)
         else:

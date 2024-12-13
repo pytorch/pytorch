@@ -36,7 +36,7 @@ import sympy
 
 import torch
 from torch import SymInt
-from torch._guards import TracingContext
+from torch._guards import GuardSource, TracingContext
 from torch._higher_order_ops.torchbind import call_torchbind
 from torch._ops import HigherOrderOperator
 from torch._subclasses.fake_tensor import FakeTensor, is_fake, maybe_get_fake_mode
@@ -73,6 +73,7 @@ from ..source import (
     AttrProxySource,
     AttrSource,
     CallMethodItemSource,
+    ConstantSource,
     ConstDictKeySource,
     ConvertIntSource,
     FloatTensorSource,
@@ -423,11 +424,12 @@ class VariableBuilder:
 
     def install_guards(self, *guards):
         source = self.get_source()
-        try:
-            tmp = [source.make_guard(guard) for guard in guards]
-        except NotImplementedError:
+        if (
+            isinstance(source, ConstantSource)
+            or source.guard_source() == GuardSource.CONSTANT
+        ):
             return None
-        install_guard(*tmp, skip=1)
+        install_guard(*[source.make_guard(guard) for guard in guards], skip=1)
         return {}
 
     @classmethod
@@ -1902,8 +1904,6 @@ class VariableBuilder:
                     f"Dynamo attempts to add additional input during export: value={wrapped_value}, source={self.get_source()}"
                 )
 
-            example_value = unspec_var.proxy.node.meta["example_value"]
-
             proxy.node.meta["grapharg"] = GraphArg(
                 self.get_source(),
                 wrapped_value,
@@ -2360,7 +2360,9 @@ def handle_traced_output(example_value, tx, proxy, options, subclass_type, targe
             specialized_props["class_type"] = (
                 torch.nn.Parameter
                 if is_parameter
-                else torch.nn.Buffer if is_buffer else tensor_type
+                else torch.nn.Buffer
+                if is_buffer
+                else tensor_type
             )
 
         options.update(specialized_props)
@@ -2839,7 +2841,7 @@ def wrap_to_fake_tensor_and_record(
         or is_traceable_wrapper_subclass(e)
     ):
         assert source is not None
-        static_shapes, reason = tensor_always_has_static_shape(
+        static_shapes, _reason = tensor_always_has_static_shape(
             e,
             is_tensor,
             tensor_source=source,
@@ -3024,20 +3026,20 @@ class SourcelessBuilder:
         handlers[random.Random] = lambda tx, value: RandomClassVariable()
         handlers[types.ModuleType] = lambda tx, value: PythonModuleVariable(value)
 
-        handlers[torch.distributions.constraints._Real] = (
-            lambda tx, value: UserDefinedObjectVariable(
-                value, mutation_type=ValueMutationNew()
-            )
+        handlers[
+            torch.distributions.constraints._Real
+        ] = lambda tx, value: UserDefinedObjectVariable(
+            value, mutation_type=ValueMutationNew()
         )
-        handlers[torch.distributions.constraints._Interval] = (
-            lambda tx, value: UserDefinedObjectVariable(
-                value, mutation_type=ValueMutationNew()
-            )
+        handlers[
+            torch.distributions.constraints._Interval
+        ] = lambda tx, value: UserDefinedObjectVariable(
+            value, mutation_type=ValueMutationNew()
         )
-        handlers[torch.distributions.constraints.Constraint] = (
-            lambda tx, value: UserDefinedObjectVariable(
-                value, mutation_type=ValueMutationNew()
-            )
+        handlers[
+            torch.distributions.constraints.Constraint
+        ] = lambda tx, value: UserDefinedObjectVariable(
+            value, mutation_type=ValueMutationNew()
         )
 
         def passthrough(tx: "InstructionTranslator", value):

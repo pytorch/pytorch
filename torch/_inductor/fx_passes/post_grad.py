@@ -232,13 +232,13 @@ def is_valid_mm_plus_mm(match: Match):
     if not torch._inductor.utils.use_max_autotune():
         return False
 
-    *b1, m1, k1 = match.kwargs["mat1"].meta.get("tensor_meta").shape
-    *b2, k2, n1 = match.kwargs["mat2"].meta.get("tensor_meta").shape
+    *_b1, m1, k1 = match.kwargs["mat1"].meta.get("tensor_meta").shape
+    *_b2, k2, n1 = match.kwargs["mat2"].meta.get("tensor_meta").shape
     if k1 != k2:
         return False
 
-    *b1, m2, k3 = match.kwargs["mat3"].meta.get("tensor_meta").shape
-    *b2, k4, n2 = match.kwargs["mat4"].meta.get("tensor_meta").shape
+    *_b1, m2, k3 = match.kwargs["mat3"].meta.get("tensor_meta").shape
+    *_b2, k4, n2 = match.kwargs["mat4"].meta.get("tensor_meta").shape
     if k3 != k4:
         return False
 
@@ -841,12 +841,12 @@ def decompose_auto_functionalized(graph):
 
     graph_pass.apply(graph)
 
-    for node in graph.find_nodes(
+    for _ in graph.find_nodes(
         op="call_function", target=torch.ops.higher_order.auto_functionalized
     ):
         raise AssertionError("auto_functionalized was not removed")
 
-    for node in graph.find_nodes(
+    for _ in graph.find_nodes(
         op="call_function", target=torch.ops.higher_order.auto_functionalized_v2
     ):
         raise AssertionError("auto_functionalized_v2 was not removed")
@@ -1060,7 +1060,7 @@ def is_index_put_and_requires_h2d_sync_for_gpu_value(node):
     # if the value we are putting is a cpu scalar.
     # Therefore, when inductor sees an index_put_ with byte tensor indices,
     # it should *not* convert the cpu scalar value into a gpu tensor.
-    args_, kwargs_ = normalize_function(node.target, node.args, node.kwargs)  # type: ignore[misc]
+    args_, _kwargs = normalize_function(node.target, node.args, node.kwargs)  # type: ignore[misc]
     any_byte_bool_indices = False
     indices = args_[1]
     for i in indices:
