@@ -13,7 +13,6 @@ import inspect
 import itertools
 import logging
 import math
-import re
 import sys
 import textwrap
 import types
