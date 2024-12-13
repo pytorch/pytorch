@@ -8,23 +8,21 @@ Hardware Prerequisite
    :widths: 50 50
    :header-rows: 1
 
-   * - Validated Hardware
-     - Supported OS
-   * - Intel® Data Center GPU Max Series
-     - Linux
-   * - Intel Client GPU
-     - Windows/Linux
+   * - Supported OS
+     - Validated Hardware
+   * - Linux
+     - Intel® Data Center GPU Max Series/ Intel® Client GPUs (Intel® Arc™ B-Series graphics not supported)
+   * - Windows
+     - Intel® Client GPUs (Intel® Arc™ B-Series graphics with experimental support)
+   * - WSL2 (experimental feature)
+     - Intel® Client GPUs (Intel® Arc™ B-Series graphics/Intel® Core™ Ultra Series 2 with Intel® Arc™ Graphics not supported)
 
-Intel GPUs support (Prototype) is ready in PyTorch* 2.5 for Intel® Data Center GPU Max Series and Intel® Client GPUs on both Linux and Windows, which brings Intel GPUs and the SYCL* software stack into the official PyTorch stack with consistent user experience to embrace more AI application scenarios.
+Intel GPUs support (Prototype) is ready in PyTorch* 2.6 for Intel® Data Center GPU Max Series and Intel® Client GPUs on both Linux and Windows, which brings Intel GPUs and the SYCL* software stack into the official PyTorch stack with consistent user experience to embrace more AI application scenarios.
 
 Software Prerequisite
 ---------------------
 
-Visit `PyTorch Installation Prerequisites for Intel GPUs <https://www.intel.com/content/www/us/en/developer/articles/tool/pytorch-prerequisites-for-intel-gpus.html>`_ for more detailed information regarding:
-
-#. Intel GPU driver installation
-#. Intel support package installation
-#. Environment setup
+Visit `PyTorch Installation Prerequisites for Intel GPUs <https://www.intel.com/content/www/us/en/developer/articles/tool/pytorch-prerequisites-for-intel-gpus.html>`_ Driver Installation.
 
 Installation
 ------------
@@ -32,17 +30,13 @@ Installation
 Binaries
 ^^^^^^^^
 
-Platform Linux
-""""""""""""""
-
-
 Now we have all the required packages installed and environment activated. Use the following commands to install ``pytorch``, ``torchvision``, ``torchaudio`` on Linux.
 
-For preview wheels
+For release wheels
 
 .. code-block::
 
-    pip3 install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/test/xpu
+    pip3 install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/xpu
 
 For nightly wheels
 
@@ -50,22 +44,7 @@ For nightly wheels
 
     pip3 install --pre torch torchvision torchaudio --index-url https://download.pytorch.org/whl/nightly/xpu
 
-Platform Windows
-""""""""""""""""
 
-Now we have all the required packages installed and environment activated. Use the following commands to install ``pytorch`` on Windows, build from source for ``torchvision`` and ``torchaudio``.
-
-For preview wheels
-
-.. code-block::
-
-    pip3 install torch --index-url https://download.pytorch.org/whl/test/xpu
-
-For nightly wheels
-
-.. code-block::
-
-    pip3 install --pre torch torchvision torchaudio --index-url https://download.pytorch.org/whl/nightly/xpu
 
 From Source
 ^^^^^^^^^^^
@@ -86,11 +65,7 @@ To check if your Intel GPU is available, you would typically use the following c
    import torch
    torch.xpu.is_available()  # torch.xpu is the API for Intel GPU support
 
-If the output is ``False``, double check following steps below.
-
-#. Intel GPU driver installation
-#. Intel support package installation
-#. Environment setup
+If the output is ``False``, double check driver installation for Intel GPUs.
 
 Minimum Code Change
 -------------------
@@ -183,22 +158,22 @@ Inference with ``torch.compile``
    model = model.to("xpu")
    data = data.to("xpu")
 
-    for i in range(ITERS):
-        start = time.time()
-        with torch.no_grad():
-            model(data)
-            torch.xpu.synchronize()
-        end = time.time()
-        print(f"Inference time before torch.compile for iteration {i}: {(end-start)*1000} ms")
+   for i in range(ITERS):
+       start = time.time()
+       with torch.no_grad():
+           model(data)
+           torch.xpu.synchronize()
+       end = time.time()
+       print(f"Inference time before torch.compile for iteration {i}: {(end-start)*1000} ms")
 
-    model = torch.compile(model)
-    for i in range(ITERS):
-        start = time.time()
-        with torch.no_grad():
-            model(data)
-            torch.xpu.synchronize()
-        end = time.time()
-        print(f"Inference time after torch.compile for iteration {i}: {(end-start)*1000} ms")
+   model = torch.compile(model)
+   for i in range(ITERS):
+       start = time.time()
+       with torch.no_grad():
+           model(data)
+           torch.xpu.synchronize()
+       end = time.time()
+       print(f"Inference time after torch.compile for iteration {i}: {(end-start)*1000} ms")
 
    print("Execution finished")
 
