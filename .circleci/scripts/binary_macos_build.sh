@@ -8,4 +8,4 @@ mkdir -p "$PYTORCH_FINAL_PACKAGE_DIR"
 export USE_PYTORCH_METAL_EXPORT=1
 export USE_COREML_DELEGATE=1
 export TORCH_PACKAGE_NAME="$(echo $TORCH_PACKAGE_NAME | tr '-' '_')"
-"${BUILDER_ROOT}/wheel/build_wheel.sh"
+"${PYTORCH_ROOT}/.ci/wheel/build_wheel.sh"
