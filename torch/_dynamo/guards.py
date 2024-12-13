@@ -1923,10 +1923,6 @@ class GuardBuilder(GuardBuilderBase):
             if not code_parts:
                 return
 
-            # Make ShapeEnv guards available for testing.
-            if compile_context := CompileContext.try_get():
-                compile_context.shape_env_guards.extend(verbose_code_parts)
-
             python_fallback = False
             for source in source_to_symbol:
                 if not isinstance(self.get(source.name()), (int, float)):
