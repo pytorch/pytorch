@@ -36,7 +36,7 @@ import sympy
 
 import torch
 from torch import SymInt
-from torch._guards import GuardSource, TracingContext
+from torch._guards import TracingContext
 from torch._higher_order_ops.torchbind import call_torchbind
 from torch._ops import HigherOrderOperator
 from torch._subclasses.fake_tensor import FakeTensor, is_fake, maybe_get_fake_mode
@@ -73,7 +73,6 @@ from ..source import (
     AttrProxySource,
     AttrSource,
     CallMethodItemSource,
-    ConstantSource,
     ConstDictKeySource,
     ConvertIntSource,
     FloatTensorSource,
@@ -424,12 +423,11 @@ class VariableBuilder:
 
     def install_guards(self, *guards):
         source = self.get_source()
-        if (
-            isinstance(source, ConstantSource)
-            or source.guard_source() == GuardSource.CONSTANT
-        ):
+        try:
+            tmp = [source.make_guard(guard) for guard in guards]
+        except NotImplementedError:
             return None
-        install_guard(*[source.make_guard(guard) for guard in guards], skip=1)
+        install_guard(*tmp, skip=1)
         return {}
 
     @classmethod
@@ -1499,9 +1497,15 @@ class VariableBuilder:
                 not self.source.guard_source().is_local()
                 # Assume that integers that came from NN modules want to be
                 # specialized (as we don't expect users to be changing the
-                # NN modules on the fly)
-                or self.source.guard_source().is_specialized_nn_module()
-                or self.source.guard_source().is_unspecialized_builtin_nn_module()
+                # NN modules on the fly), unless explicitly disabled
+                or (
+                    self.source.guard_source().is_specialized_nn_module()
+                    and not config.allow_unspec_int_on_nn_module
+                )
+                or (
+                    self.source.guard_source().is_unspecialized_builtin_nn_module()
+                    and not config.allow_unspec_int_on_nn_module
+                )
                 or is_from_defaults(self.source)
                 # TODO: Delete this condition when rollout is done.  NB: this
                 # condition never evaluates True in open source
@@ -1903,8 +1907,6 @@ class VariableBuilder:
                 raise AssertionError(
                     f"Dynamo attempts to add additional input during export: value={wrapped_value}, source={self.get_source()}"
                 )
-
-            example_value = unspec_var.proxy.node.meta["example_value"]
 
             proxy.node.meta["grapharg"] = GraphArg(
                 self.get_source(),
@@ -2843,7 +2845,7 @@ def wrap_to_fake_tensor_and_record(
         or is_traceable_wrapper_subclass(e)
     ):
         assert source is not None
-        static_shapes, reason = tensor_always_has_static_shape(
+        static_shapes, _reason = tensor_always_has_static_shape(
             e,
             is_tensor,
             tensor_source=source,
