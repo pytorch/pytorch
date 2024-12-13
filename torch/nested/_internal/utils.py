@@ -56,18 +56,3 @@ def _try_get_fake_mode(t: torch.Tensor) -> Any:
         return None
     assert all(out[0] is o for o in out)
     return out[0]
-
-
-def _try_get_source(t: torch.Tensor) -> Any:
-    from torch._subclasses.fake_tensor import FakeTensor
-
-    out = []
-
-    def func(t: torch.Tensor) -> None:
-        if isinstance(t, FakeTensor) and t.source is not None:
-            out.append(t.source)
-
-    apply_func(t, func, only_source_fields=True)
-    if len(out) == 0:
-        return None
-    return out[0]
