@@ -34,29 +34,6 @@ _DEQUANTIZE_OPS = [
     torch.ops.quantized_decomposed.dequantize_per_channel.default,
 ]
 
-# Example inputs for conv-bn1d patterns
-_conv1d_bn_example_inputs = (
-    torch.randn(1, 1, 3),  # x
-    torch.randn(1, 1, 1),  # conv_weight
-    torch.randn(1),  # conv_bias
-    torch.randn(1),  # bn_weight
-    torch.randn(1),  # bn_bias
-    torch.randn(1),  # bn_running_mean
-    torch.randn(1),  # bn_running_var
-)
-
-# Example inputs for conv-bn2d patterns
-_conv2d_bn_example_inputs = (
-    torch.randn(1, 1, 3, 3),  # x
-    torch.randn(1, 1, 1, 1),  # conv_weight
-    torch.randn(1),  # conv_bias
-    torch.randn(1),  # bn_weight
-    torch.randn(1),  # bn_bias
-    torch.randn(1),  # bn_running_mean
-    torch.randn(1),  # bn_running_var
-)
-
-
 def _is_connected(source: torch.fx.Node, dest: torch.fx.Node) -> bool:
     """
     Assuming dest is one of the ops inserted by quant workflow, this function
