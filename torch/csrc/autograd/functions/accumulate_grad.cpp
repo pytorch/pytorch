@@ -21,7 +21,6 @@ AccumulateGrad::AccumulateGrad(Variable variable_)
   add_input_metadata(variable);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-rvalue-reference-param-not-moved)
 auto AccumulateGrad::apply(variable_list&& grads) -> variable_list {
   check_input_variables("AccumulateGrad", grads, 1, 0);
 
