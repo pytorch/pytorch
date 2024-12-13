@@ -271,7 +271,6 @@ class MetaTensorDescriber:
         is_batchedtensor_v = is_batchedtensor(t)
         is_legacy_batchedtensor_v = is_legacy_batchedtensor(t)
         is_gradtrackingtensor_v = is_gradtrackingtensor(t)
-        is_functorch_batched_or_grad = is_batchedtensor_v or is_gradtrackingtensor_v
         is_functional = torch._is_functional_tensor(t)
 
         storage = None
@@ -858,7 +857,6 @@ class MetaConverter(Generic[_TensorT]):
         assert not torch._C._dispatch_tls_local_exclude_set().has(
             torch._C.DispatchKey.Python
         )
-        arg_cnt = self.arg_cnt
         self.arg_cnt += 1
 
         # When we make as_strided calls, we end up generating a guard
@@ -937,7 +935,7 @@ class MetaConverter(Generic[_TensorT]):
             (
                 inner_sizes,
                 inner_strides,
-                inner_storage_offset,
+                _inner_storage_offset,
             ) = sym_sizes_strides_storage_offset(inner_t, inner_src, symbolic_context)
             return torch.empty_strided(
                 inner_sizes,
