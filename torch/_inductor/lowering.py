@@ -10,7 +10,7 @@ import os
 import warnings
 from collections import defaultdict
 from collections.abc import Iterable
-from typing import Any, Callable, Dict, List, Optional, Sequence, Set, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Union
 from unittest.mock import patch
 
 import sympy
@@ -35,6 +35,7 @@ from torch._prims_common import (
     Number,
 )
 from torch.fx.experimental.sym_node import magic_methods, method_to_operator
+from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.functions import (
     CeilDiv,
     FloorDiv,
@@ -78,10 +79,12 @@ from .virtualized import ops, V
 
 # TODO(jansel): we should implement decomps or lowerings for these
 # https://github.com/pytorch/torchdynamo/issues/327
-FALLBACK_ALLOW_LIST = {
-    "torchvision::roi_align",
-    "aten::index_add",
-}
+FALLBACK_ALLOW_LIST = OrderedSet(
+    [
+        "torchvision::roi_align",
+        "aten::index_add",
+    ]
+)
 
 log = logging.getLogger(__name__)
 lowerings: Dict[Union[Callable[..., Any], str], Callable[..., Any]] = {}
@@ -89,13 +92,17 @@ lowerings: Dict[Union[Callable[..., Any], str], Callable[..., Any]] = {}
 _maybe_layout_constraints: Dict[
     torch._ops.OpOverload, Optional[Callable[..., Any]]
 ] = {}
-fallbacks: Set[torch._ops.OpOverload] = set()
+fallbacks = OrderedSet[torch._ops.OpOverload]()
 aten = torch.ops.aten
 tr_c10d = torch.ops.tr_c10d
 prims = torch.ops.prims
-needs_realized_inputs: Set[torch._ops.OpOverload] = set()
-foreach_ops: Set[torch._ops.OpOverload] = {torch._higher_order_ops._foreach_map}  # type: ignore[arg-type]
-inplace_foreach_ops: Set[torch._ops.OpOverload] = set()
+needs_realized_inputs = OrderedSet[torch._ops.OpOverload]()
+foreach_ops = OrderedSet[torch._ops.OpOverload](
+    [torch._higher_order_ops._foreach_map]  # type: ignore[list-item]
+)
+# TODO(rec): torch._higher_order_ops._foreach_map is not an OpOverload
+# so why is it in foreach_ops?
+inplace_foreach_ops = OrderedSet[torch._ops.OpOverload]()
 inplaceable_foreach_ops: Dict[torch._ops.OpOverload, torch._ops.OpOverload] = {}
 quantized_decomposed = torch.ops.quantized_decomposed
 
@@ -180,7 +187,7 @@ def assert_nyi(cond, msg):
 
 
 def add_needs_realized_inputs(fn):
-    if isinstance(fn, (list, tuple, set)):
+    if isinstance(fn, (list, set, tuple, OrderedSet)):  # noqa: set_linter
         return [add_needs_realized_inputs(x) for x in fn]
     needs_realized_inputs.add(fn)
     if isinstance(fn, torch._ops.OpOverloadPacket):
@@ -998,7 +1005,7 @@ def squeeze(x, dim=None):
         else tuple(V.graph.sizevars.evaluate_static_shape(d) for d in dim)
     )
     dim = canonicalize_dims(len(x.get_size()), dim)  # type: ignore[call-overload]
-    dims = set((dim,) if not isinstance(dim, tuple) else dim)
+    dims = OrderedSet((dim,) if not isinstance(dim, tuple) else dim)
 
     new_shape = []
     for d, s in enumerate(x.get_size()):
@@ -3472,7 +3479,7 @@ def index_put_impl_(self, indices, values, accumulate, check):
     if (
         values.get_numel() == 1
         and len(indices) == 1
-        and indices[0].get_dtype() in {torch.bool, torch.uint8}
+        and indices[0].get_dtype() in (torch.bool, torch.uint8)
     ):
         mask = indices[0]
         for _ in range(len(mask.get_size()), len(self.get_size())):
@@ -3485,7 +3492,7 @@ def index_put_impl_(self, indices, values, accumulate, check):
 
     # Fallback if there is a boolean index
     for index in indices:
-        if index is not None and index.get_dtype() in {torch.bool, torch.uint8}:
+        if index is not None and index.get_dtype() in (torch.bool, torch.uint8):
             return index_put_fallback(self, indices, values, accumulate)
 
     x_size = self.get_size()
@@ -3656,7 +3663,7 @@ def scatter_fallback(
 
 @register_lowering(aten.scatter_, type_promotion_kind=None)
 def scatter_(self, dim: int, index, src, *, reduce: Optional[str] = None):
-    assert reduce in {None, "add", "multiply"}
+    assert reduce in (None, "add", "multiply")
     if reduce is None:
         op_overload = getattr(aten.scatter_, V.graph.current_node.target._overloadname)  # type: ignore[union-attr]
         fallback_result = scatter_fallback(
@@ -3689,7 +3696,7 @@ def scatter_reduce(x, dim: int, index, src, reduction_type, **kwargs):
 
 @register_lowering(aten.scatter_reduce_, type_promotion_kind=None)
 def scatter_reduce_(self, dim: int, index, src, reduce, *, include_self: bool = True):
-    assert reduce in {None, "sum", "prod", "mean", "amax", "amin"}
+    assert reduce in (None, "sum", "prod", "mean", "amax", "amin")
     assert (
         len(aten.scatter_reduce_.overloads()) == 1
         and "two" in aten.scatter_reduce_.overloads()
@@ -3957,7 +3964,7 @@ def constant_pad_nd(x, padding, fill_value=0):
 
     def offset_fn(index):
         new_index = list(index[:n])
-        for idx, (low, high) in zip(index[n:], bounds_precomp):
+        for idx, (low, _high) in zip(index[n:], bounds_precomp):
             new_index.append(idx - low)
         assert len(new_index) == len(index)
         return mask(new_index)
@@ -4244,7 +4251,7 @@ def max_pool2d_with_indices_backward(
             grad_output, x, kernel_size, stride, padding, dilation, ceil_mode, indices
         )
 
-    *batch, height, width = x.get_size()
+    *_batch, _height, width = x.get_size()
     *_, pooled_height, pooled_width = grad_output.get_size()
 
     indices_loader = indices.make_loader()
@@ -4342,7 +4349,6 @@ def max_pool2d_with_indices_backward(
 
 
 def pad_adaptive_loader(x, pad_val=0.0):
-    *_, h, w = x.get_size()
     x_loader = x.make_loader()
 
     def load(prefix, increments, start_indices, end_indices):
@@ -4736,11 +4742,11 @@ def upsample_nearest2d_backward(
 ):
     x.realize_hint()
 
-    *batch, inp_h, inp_w = x.get_size()
+    *_batch, inp_h, inp_w = x.get_size()
     inp_h = V.graph.sizevars.evaluate_static_shape(inp_h)
     inp_w = V.graph.sizevars.evaluate_static_shape(inp_w)
 
-    *batch, out_h, out_w = input_size
+    *_batch, out_h, out_w = input_size
 
     if inp_h % out_h == 0 and inp_w % out_w == 0:
         return avg_pool2d(x, [inp_h // out_h, inp_w // out_w], divisor_override=1)
@@ -4918,7 +4924,6 @@ def _avg_poolnd(
     else:
 
         def fn(idx):
-            prefix = idx[:-dim]
             bh = idx[-dim:]
 
             divide_factors = []
@@ -4974,10 +4979,12 @@ def avg_pool2d_backward(
 
     grad_output.realize_hint()  # we will read this many times, so make sure it is computed
 
-    *batch, height, width = x.get_size()
+    *_, height, width = x.get_size()
 
-    h_out, ceil_mode1 = pooling_size(height, 0, kernel_size, stride, padding, ceil_mode)
-    w_out, ceil_mode2 = pooling_size(width, 1, kernel_size, stride, padding, ceil_mode)
+    _h_out, ceil_mode1 = pooling_size(
+        height, 0, kernel_size, stride, padding, ceil_mode
+    )
+    _w_out, ceil_mode2 = pooling_size(width, 1, kernel_size, stride, padding, ceil_mode)
 
     grad_loader = grad_output.make_loader()
 
@@ -5143,13 +5150,17 @@ def avg_pool3d_backward(
 
     grad_output.realize_hint()
 
-    *batch, depth, height, width = x.get_size()
+    *_batch, depth, height, width = x.get_size()
 
-    d_out, ceil_mode_d = pooling_size(depth, 0, kernel_size, stride, padding, ceil_mode)
-    h_out, ceil_mode_h = pooling_size(
+    _d_out, ceil_mode_d = pooling_size(
+        depth, 0, kernel_size, stride, padding, ceil_mode
+    )
+    _h_out, ceil_mode_h = pooling_size(
         height, 1, kernel_size, stride, padding, ceil_mode
     )
-    w_out, ceil_mode_w = pooling_size(width, 2, kernel_size, stride, padding, ceil_mode)
+    _w_out, ceil_mode_w = pooling_size(
+        width, 2, kernel_size, stride, padding, ceil_mode
+    )
 
     grad_loader = grad_output.make_loader()
     had_padding = any(padding) or ceil_mode_d or ceil_mode_h or ceil_mode_w
@@ -5327,7 +5338,7 @@ def _validate_reduction_axis(x, axis):
         if axis[i] < 0:
             axis[i] += len(size) if len(size) else 1
         assert 0 <= axis[i] < len(size) or (len(size) == 0 and axis[i] == 0)
-    assert len(set(axis)) == len(axis), "reduction axis not unique"
+    assert len(OrderedSet(axis)) == len(axis), "reduction axis not unique"
     return axis
 
 
@@ -5335,7 +5346,7 @@ def _make_reduction_inner(x, *, axis, keepdims, dtype, override_return_dtype):
     if dtype is not None:
         x = to_dtype(x, dtype)
     size = x.get_size()
-    axis = set(_validate_reduction_axis(x, axis))
+    axis = OrderedSet[int](_validate_reduction_axis(x, axis))
 
     kept_sizes = []
     kept_idx = []
@@ -5402,7 +5413,6 @@ def make_reduction(reduction_type: str, override_return_dtype=None):
 def _make_scan_inner(x, *, axis, dtype):
     if dtype is not None:
         x = to_dtype(x, dtype)
-    size = x.get_size()
     axis = _validate_dim(x, axis)
 
     return dict(
@@ -5894,16 +5904,6 @@ def cummax(x, axis=None):
         "argmax", dtype=dtype, arg_break_ties_left=False
     )
 
-    min_value = (
-        False
-        if dtype is torch.bool
-        else (
-            torch.finfo(dtype).min
-            if dtype.is_floating_point
-            else torch.iinfo(dtype).min
-        )
-    )
-
     kwargs = _make_scan_inner(x, axis=axis, dtype=dtype)
     kwargs["dtypes"] = (dtype, torch.int64)
     kwargs["inner_fns"] = (x.make_loader(), lambda _: "rindex")
@@ -5922,16 +5922,6 @@ def cummin(x, axis=None):
     dtype = x.get_dtype()
     combine_fn = ir.get_reduction_combine_fn(
         "argmin", dtype=dtype, arg_break_ties_left=False
-    )
-
-    max_value = (
-        True
-        if dtype is torch.bool
-        else (
-            torch.finfo(dtype).max
-            if dtype.is_floating_point
-            else torch.iinfo(dtype).max
-        )
     )
 
     kwargs = _make_scan_inner(x, axis=axis, dtype=dtype)
