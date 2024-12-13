@@ -36,10 +36,6 @@ struct CudaIPCGlobalEntities {
   CudaIPCGlobalEntities() {
     alive = true;
   }
-  CudaIPCGlobalEntities(const CudaIPCGlobalEntities&) = delete;
-  CudaIPCGlobalEntities(CudaIPCGlobalEntities&&) = delete;
-  CudaIPCGlobalEntities& operator=(const CudaIPCGlobalEntities&) = delete;
-  CudaIPCGlobalEntities& operator=(CudaIPCGlobalEntities&&) = delete;
   ~CudaIPCGlobalEntities() {
     CudaIPCSentDataLimbo_.collect();
     safe_clean_current_file();
@@ -206,7 +202,6 @@ CudaIPCSentData::~CudaIPCSentData() {
       }
       cuda_ipc_global_entities.sync_events_used_--;
     }
-    // NOLINTNEXTLINE(bugprone-empty-catch)
   } catch (...) { /* No throw */
   }
 #endif
