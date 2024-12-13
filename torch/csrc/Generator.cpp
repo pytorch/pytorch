@@ -365,7 +365,7 @@ PyObject* pyobj(const Generator& self) {
   return self.pyobj();
 }
 
-PyObject* THPGenerator_Wrap(Generator gen) {
+PyObject* THPGenerator_Wrap(const Generator& gen) {
   if (!gen.defined()) {
     Py_RETURN_NONE;
   }
