@@ -52,6 +52,7 @@ from ..utils import (
     get_dtype_size,
     IndentedBuffer,
     Placeholder,
+    prefix_is_reduction,
     sympy_index_symbol,
     sympy_product,
     sympy_subs,
@@ -76,9 +77,7 @@ fusion_log = torch._logging.getArtifactLogger(__name__, "fusion")
 
 pexpr = PythonPrinter().doprint
 
-
-def prefix_is_reduction(prefix: str) -> bool:
-    return prefix[0] == "r"
+all_prefixes = OrderedSet(["z", "y", "x", "r0_", "r1_"])
 
 
 @dataclasses.dataclass
@@ -360,7 +359,7 @@ class SIMDKernel(Kernel):
         self.range_trees: List[IterationRangesRoot] = []
         self.range_tree_nodes: Dict[sympy.Symbol, IterationRangesEntry] = {}
         self.iter_vars_count = itertools.count()
-        self.inside_reduction = self.numels["r"] != 1
+        self.inside_reduction = features.is_reduction()
         self.cooperative_reduction: bool = (
             override_cooperative_reduction
             if override_cooperative_reduction is not None
@@ -386,6 +385,12 @@ class SIMDKernel(Kernel):
         self.simplify_indexing = simplify_indexing
         self.initialize_range_tree(pid_cache)
 
+    @property
+    @cache_on_self
+    @no_type_check  # https://github.com/python/mypy/issues/17184
+    def num_reduction_dims(self) -> int:
+        return sum(prefix_is_reduction(prefix) for prefix in self.numels)
+
     def dtype_to_str(self, dtype: torch.dtype) -> str:
         raise NotImplementedError
 
@@ -396,27 +401,38 @@ class SIMDKernel(Kernel):
     def want_no_x_dim(self):
         return False
 
-    def construct_range_trees(self, pid_cache, inside_reduction, numels, no_x_dim):
-        no_r_dim = not inside_reduction or numels["r"] == 1
+    def construct_range_trees(
+        self, pid_cache, inside_reduction, is_reduction, numels, no_x_dim
+    ):
+        active_prefixes = OrderedSet(
+            prefix for prefix in all_prefixes if prefix in numels
+        )
+        no_r_dim = not inside_reduction or not is_reduction
 
-        prefixes = "zyxr"
-        active_prefixes = prefixes[-len(numels) :]
+        def filtered_index_map(seq, mask) -> Dict[Any, int]:
+            return {
+                val: idx for idx, val in enumerate(val for val in seq if val in mask)
+            }
 
-        grid_dims = "xyz"
+        grid_dims = ["x", "y", "z"]
+        reduction_dims = ["r0_", "r1_"]
         if no_x_dim:
-            tensor_dims = "r"
+            tensor_dims = reduction_dims
         elif no_r_dim:
-            tensor_dims = "xyz"
+            tensor_dims = grid_dims
         else:
-            tensor_dims = "xyzr"
+            tensor_dims = grid_dims + reduction_dims
 
-        tensor_dims = "".join(p for p in tensor_dims if p in active_prefixes)
+        # Filter out unused tensor dims.
+        # Convert to dicts for O(1) index lookup.
+        tensor_dim_map = filtered_index_map(tensor_dims, active_prefixes)
+        grid_dim_map = filtered_index_map(grid_dims, all_prefixes)
 
         range_trees = []
         for i, prefix in enumerate(active_prefixes):
             is_reduction = prefix_is_reduction(prefix)
-            tensor_dim = tensor_dims.find(prefix) if prefix in tensor_dims else None
-            grid_dim = None if is_reduction else grid_dims.find(prefix)
+            tensor_dim = tensor_dim_map.get(prefix)
+            grid_dim = grid_dim_map.get(prefix)
             index = i if grid_dim is None else grid_dim
             range_trees.append(
                 IterationRangesRoot(
@@ -429,14 +445,18 @@ class SIMDKernel(Kernel):
                     is_loop=is_reduction and not self.persistent_reduction,
                     tensor_dim=tensor_dim,
                     grid_dim=grid_dim,
-                    has_zdim="z" in active_prefixes,
+                    has_zdim="z" in numels,
                 )
             )
         return range_trees
 
     def initialize_range_tree(self, pid_cache):
         range_trees = self.construct_range_trees(
-            pid_cache, self.inside_reduction, self.numels, self.no_x_dim
+            pid_cache,
+            self.inside_reduction,
+            self.features.is_reduction(),
+            self.numels,
+            self.no_x_dim,
         )
         self.range_trees.extend(range_trees)
 
@@ -523,7 +543,7 @@ class SIMDKernel(Kernel):
         index_vars, sizes = tree.vars_and_sizes(index)
         if len(sizes) <= 1:
             return index
-        new_sizes, reindex, prune = V.graph.sizevars._simplify_loops(
+        new_sizes, reindex, _prune = V.graph.sizevars._simplify_loops(
             index_vars, sizes, index_prevent_reordering([index], index_vars, sizes)
         )
         if new_sizes == sizes:
@@ -537,7 +557,7 @@ class SIMDKernel(Kernel):
 
         @contextlib.contextmanager
         def ctx():
-            if self.numels["r"] == 1:
+            if not self.features.is_reduction():
                 assert not self.inside_reduction
                 yield
                 return
@@ -883,7 +903,7 @@ class SIMDKernel(Kernel):
                 # This arg points to a buf that has been sliced.
                 # We need to count each individual slice to have
                 # a better estimation.
-                indices: OrderedSet[Any] = OrderedSet()
+                indices = OrderedSet[Any]()
                 no_index_dep_count = 0
                 for dep in buf_accesses[arg]:
                     if isinstance(dep, (StarDep, WeakDep)):
@@ -914,7 +934,7 @@ class SIMDKernel(Kernel):
             # the mix layouts.
             return
 
-        argdefs, call_args, signature, _ = self.args.python_argdefs()
+        argdefs, call_args, _signature, _ = self.args.python_argdefs()
         uniform_stride_order = None
         for arg_name in call_args:
             buf = V.graph.try_get_buffer(arg_name)
@@ -972,7 +992,7 @@ class SIMDKernel(Kernel):
     def welford_reduce_fallback(self, dtype, value):
         sum_ = ops.reduction(dtype, dtype, "sum", value)
         self.inside_reduction = False
-        rnumel = ops.index_expr(self.numels["r"], dtype)
+        rnumel = ops.index_expr(self.features.reduction_numel, dtype)
         mean = ops.truediv(sum_, rnumel)
 
         self.inside_reduction = True
@@ -1142,11 +1162,11 @@ class SIMDScheduling(BaseScheduling):
 
     def generate_node_schedule(self, nodes, numel, rnumel):
         node_schedule: List[Any] = []
-        done: OrderedSet[scheduler.BaseSchedulerNode] = OrderedSet()
+        done = OrderedSet[scheduler.BaseSchedulerNode]()
         # Writes with a reduced shape, meaning they are only present once the
         # reduction loop has ended
-        not_ready_yet_nodes: OrderedSet[str] = OrderedSet()
-        current_loop_buffer_usage: OrderedSet[str] = OrderedSet()
+        not_ready_yet_nodes = OrderedSet[str]()
+        current_loop_buffer_usage = OrderedSet[str]()
         maybe_split_index: Optional[int] = None
 
         def fits_in_main_body(n):
@@ -1208,7 +1228,7 @@ class SIMDScheduling(BaseScheduling):
             )
             return bool(not_ready_yet_nodes)
 
-        for index, node in enumerate(nodes):
+        for node in nodes:
             if node in done:
                 continue
             done.add(node)
@@ -1395,7 +1415,7 @@ class SIMDScheduling(BaseScheduling):
 
         If `only_gen_src_code` the src code will be returned instead of codegen'd into the wrapper
         """
-        _, (numel, rnumel) = template_node.group
+        _, (_numel, rnumel) = template_node.group
         assert rnumel == 1
         kernel, render = template_node.node.make_kernel_render(template_node.node)
 
@@ -1427,7 +1447,7 @@ class SIMDScheduling(BaseScheduling):
             with kernel.set_subgraph_body("<STORE_OUTPUT>"):
                 for node in epilogue_nodes:
                     node.codegen(kernel.split_and_set_ranges(node.get_ranges()))
-                kernel.cse.invalidate(set())
+                kernel.cse.invalidate(OrderedSet())
 
             for input_name, buffer in kernel.named_input_nodes.items():
                 subgraph_name = f"<LOAD_INPUT_{input_name}>"
@@ -1453,7 +1473,7 @@ class SIMDScheduling(BaseScheduling):
                                         prologue_node.get_ranges()
                                     )
                                 )
-                            kernel.cse.invalidate(set())
+                            kernel.cse.invalidate(OrderedSet())
 
         if not isinstance(partial_code, str):
             partial_code.finalize_hook("<DEF_KERNEL>")
@@ -1607,7 +1627,7 @@ class SIMDScheduling(BaseScheduling):
             for dep in itertools.chain.from_iterable(dep_sources)
             if dep.name not in V.graph.removed_buffers and isinstance(dep, MemoryDep)
         ]
-        write_names = {dep.name for dep in rw.writes}
+        write_names = OrderedSet(dep.name for dep in rw.writes)
 
         tilings: List[CandidateTiling] = []
 
@@ -1660,10 +1680,9 @@ class SIMDScheduling(BaseScheduling):
         Create a tiling dict from pointwise and reduction splits.
         """
         pw_prefixes = ["z", "y", "x"][-len(pw_tiling) :]
-        reduction_prefixes = ["r"][: len(reduction_tiling)]
+        reduction_prefixes = ["r0_", "r1_"][: len(reduction_tiling)]
         return immutable_dict(
-            list(zip(pw_prefixes, pw_tiling))
-            + list(zip(reduction_prefixes, reduction_tiling))
+            [*zip(pw_prefixes, pw_tiling), *zip(reduction_prefixes, reduction_tiling)]
         )
 
     @classmethod
@@ -1689,7 +1708,7 @@ class SIMDScheduling(BaseScheduling):
                         break
             return default_tiling
 
-        seen_names: OrderedSet[str] = OrderedSet()
+        seen_names = OrderedSet[str]()
         candidate_tiles: Counter[Any] = collections.Counter()
         for node in EnableReduction.filter(node_schedule):
             for tiling in cls.candidate_tilings(node):
@@ -1710,13 +1729,13 @@ class SIMDScheduling(BaseScheduling):
             # Add one 3D tiling choice
             for i in range(1, len(ranked_tilings)):
                 a0, a1 = ranked_tilings[0]
-                b0, b1 = ranked_tilings[i]
+                _b0, b1 = ranked_tilings[i]
                 if V.graph.sizevars.size_hint(a1 - b1) == 0:
                     continue
                 if V.graph.sizevars.size_hint(a1 - b1) < 0:
                     # swap so a0 is bigger
                     a0, a1 = ranked_tilings[i]
-                    b0, b1 = ranked_tilings[0]
+                    _b0, b1 = ranked_tilings[0]
                 assert V.graph.sizevars.size_hint(a1 - b1) > 0
                 if V.graph.sizevars.statically_known_multiple_of(a1, b1):
                     tiling = (a0, FloorDiv(a1, b1), b1)
@@ -1734,7 +1753,7 @@ class SIMDScheduling(BaseScheduling):
                 for node in EnableReduction.filter(node_schedule)
                 if isinstance(node, scheduler.SchedulerNode)
             ]
-            new_tilings: OrderedSet[Tuple[sympy.Expr]] = OrderedSet()
+            new_tilings = OrderedSet[Tuple[sympy.Expr]]()
             for node_range in node_ranges:
                 # Collapse leading dims, to fit in the maximum dimensionality.
                 num_leading_dims = max(0, len(node_range) - config.triton.max_tiles)

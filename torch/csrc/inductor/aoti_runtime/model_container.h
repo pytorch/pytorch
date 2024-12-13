@@ -51,12 +51,11 @@ class AOTInductorModelContainer {
     for (size_t i = 0; i < num_outputs; i++) {
       output_names_.emplace_back(model->output_name(static_cast<int64_t>(i)));
     }
-
     model->load_constants();
-#ifdef USE_CUDA
+#if defined(USE_CUDA) || defined(USE_XPU)
     constant_blob_ = model->release_constant_blob();
     constants_internal_offset_.resize(model->num_constants());
-    model->compute_cuda_constant_blob(blob_size_, constants_internal_offset_);
+    model->compute_gpu_constant_blob(blob_size_, constants_internal_offset_);
 #endif
 
     for (auto& model : models_) {
@@ -276,7 +275,7 @@ class AOTInductorModelContainer {
         continue;
       }
 
-#ifdef USE_CUDA
+#if defined(USE_CUDA) || defined(USE_XPU)
       AtenTensorHandle tensor;
       if (_should_skip_update(idx) && use_inactive) {
         tensor = original_constants_map->find(constant_name)->second.get();
@@ -293,13 +292,20 @@ class AOTInductorModelContainer {
       int64_t constant_size;
       aoti_torch_get_data_ptr(tensor, &user_constant_ptr);
       aoti_torch_get_storage_size(tensor, &constant_size);
+#ifdef USE_XPU
+      sycl::queue* queue_ptr = nullptr;
+      aoti_torch_get_current_sycl_queue((void**)&queue_ptr);
+      queue_ptr
+          ->memcpy(internal_constants_ptr, user_constant_ptr, constant_size)
+          .wait();
 
+#else
       AOTI_RUNTIME_DEVICE_CHECK(cudaMemcpy(
           internal_constants_ptr,
           user_constant_ptr,
           constant_size,
           cudaMemcpyDefault));
-
+#endif
       // Generate Tensor from container handled blob.
       // We extract stride and offset from provided Tensor since we do not
       // guarantee that the tensor is contiguous.
@@ -317,7 +323,11 @@ class AOTInductorModelContainer {
           stride,
           offset,
           models_[0]->constant_dtype(idx),
+#ifdef USE_XPU
+          aoti_torch_device_type_xpu(),
+#else
           aoti_torch_device_type_cuda(),
+#endif
           device_idx,
           &tensor_handle));
 #else // USE_CUDA
@@ -397,10 +407,10 @@ class AOTInductorModelContainer {
   const char* in_spec_;
   const char* out_spec_;
 
-#ifdef USE_CUDA
+#if defined(USE_CUDA) || defined(USE_XPU)
   // Holds the blob storage for constants' at::Tensor for CUDA.
-  CUDAPtr constant_blob_;
-  CUDAPtr constant_blob_secondary_;
+  GPUPtr constant_blob_;
+  GPUPtr constant_blob_secondary_;
 
   // Let's place this within USE_CUDA at the moment before we fully support
   // update for CPU cases.
@@ -461,14 +471,14 @@ class AOTInductorModelContainer {
   // make sure no one is executing the model.
   std::shared_mutex model_exec_mutex_;
 
-#ifdef USE_CUDA
+#if defined(USE_CUDA) || defined(USE_XPU)
   void* get_constant_blob_ptr(bool get_inactive) {
     if ((get_inactive && use_secondary_) ||
         (!get_inactive && !use_secondary_)) {
       return constant_blob_.get();
     } else {
       if (!constant_blob_secondary_) {
-        constant_blob_secondary_ = RAII_cudaMalloc(blob_size_);
+        constant_blob_secondary_ = RAII_gpuMalloc(blob_size_);
       }
       return constant_blob_secondary_.get();
     }

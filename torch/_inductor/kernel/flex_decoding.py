@@ -297,6 +297,7 @@ flex_decoding_template = TritonTemplate(
 def get_split_k(B: int, H: int, Mk: int, SM: int = 128) -> int:
     """Heuristic for the number of splits from xformer"""
     bh = max(B * H, 1)  # NOTE: Handle B*h=0 case
+    assert isinstance(bh, (int, sympy.Integer)), "B and H must be concrete integers"
     split_k = SM // bh  # Each SM should at least get one block.
     split_k = max(split_k, 1)
 

@@ -26,7 +26,7 @@ import os
 import subprocess
 import sys
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Optional
 
 
 logging.basicConfig(
@@ -56,7 +56,7 @@ def requirements_installed() -> bool:
         return False
 
 
-def setup_py(cmd_args: List[str], extra_env: Optional[Dict[str, str]] = None) -> None:
+def setup_py(cmd_args: list[str], extra_env: Optional[dict[str, str]] = None) -> None:
     if extra_env is None:
         extra_env = {}
     cmd = [sys.executable, str(SETUP_PY_PATH), *cmd_args]
