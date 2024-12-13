@@ -142,7 +142,8 @@ def install_storage_overlapping_guard(
 ): ...
 def install_symbolic_shape_guard(
     guard_managers: list[GuardManager],
-    nargs: int,
+    nargs_int: int,
+    nargs_float: int,
     py_addr: int,
     py_addr_keep_alive: Any,
     verbose_code_parts: list[str],
