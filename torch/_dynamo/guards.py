@@ -1947,7 +1947,7 @@ class GuardBuilder(GuardBuilderBase):
 
                 for code in code_parts:
                     self._set_guard_export_info(guard, [code])
-            
+
                 # Make ShapeEnv guards available for testing.
                 if compile_context := CompileContext.try_get():
                     compile_context.shape_env_guards.extend(verbose_code_parts)
