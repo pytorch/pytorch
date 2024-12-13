@@ -7,6 +7,7 @@ from torch import Tensor
 from torch._C import DispatchKey
 from torch._higher_order_ops.utils import (
     _has_potential_branch_input_mutation,
+    _maybe_reenter_make_fx,
     autograd_not_implemented,
     reenter_make_fx,
     save_tensors_and_symints_for_backward,
@@ -945,11 +946,14 @@ def trace_flex_attention_backward(
     mask_example_vals = [query.new_zeros((), dtype=torch.int) for _ in range(4)]
     mask_graph = block_mask[-1]
     with TransformGetItemToIndex():
-        fw_graph = reenter_make_fx(fw_graph)(*fw_example_vals, *score_mod_other_buffers)
-        joint_graph = reenter_make_fx(joint_graph)(
+        # There's no active make_fx during the compiled autograd graph's initial capture
+        fw_graph = _maybe_reenter_make_fx(fw_graph)(
+            *fw_example_vals, *score_mod_other_buffers
+        )
+        joint_graph = _maybe_reenter_make_fx(joint_graph)(
             *bw_example_vals, *score_mod_other_buffers
         )
-        mask_graph = reenter_make_fx(mask_graph)(
+        mask_graph = _maybe_reenter_make_fx(mask_graph)(
             *mask_example_vals, *mask_mod_other_buffers
         )
     assert isinstance(proxy_mode.tracer, torch.fx.Tracer)
