@@ -18,6 +18,7 @@ import time
 from typing import Any, Container, Dict, List, Optional, Set, Tuple
 
 import torch
+from torch._guards import CompileId
 
 from ..triton_bundler import TritonBundler
 from .autotune_cache import AutotuneCache
@@ -884,7 +885,7 @@ class CachingAutotuner(KernelInterface):
             log_pt2_compile_event=True,
             metadata={"kernel_name": self.inductor_meta.get("kernel_name")},
             dynamo_compile_runtime_column_us="runtime_triton_autotune_time_us",
-            compile_id=self.inductor_meta.get("compile_id"),
+            compile_id=CompileId.from_string(self.inductor_meta.get("compile_id")),
             is_forward=self.inductor_meta.get("is_forward"),
         ):
             timings = {

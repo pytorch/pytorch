@@ -65,10 +65,12 @@ class CompileId(NamedTuple):
         return f"{self.frame_id}/{self.frame_compile_id}"
 
     @classmethod
-    def from_string(cls, compile_id: str):
+    def from_string(cls, compile_id: Optional[str]):
         """
         Factory method that creates a CompileId from its string representation.
         """
+        if compile_id is None:
+            return None
         try:
             frame_id, frame_compile_id = compile_id.split("/")
             return cls(int(frame_id), int(frame_compile_id))
