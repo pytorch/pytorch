@@ -277,7 +277,7 @@ def stream(stream: Optional["torch.mtia.Stream"]) -> StreamContext:
     Arguments:
         stream (Stream): selected stream. This manager is a no-op if it's
             ``None``.
-    ..Note:: In eager mode stream is of type Stream class while in JIT it doesn't support torch.mtia.stream
+    .. note:: In eager mode stream is of type Stream class while in JIT it doesn't support torch.mtia.stream
     """
     return StreamContext(stream)
 
