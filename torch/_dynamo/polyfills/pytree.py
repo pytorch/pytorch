@@ -319,7 +319,7 @@ if python_pytree._cxx_pytree_dynamo_traceable:
     def _is_pytreespec_instance(obj: Any, /) -> TypeIs[PyTreeSpec]:
         return isinstance(obj, PyTreeSpec)
 
-    @substitute_in_graph(
+    @substitute_in_graph(  # type: ignore[arg-type]
         cxx_pytree.treespec_leaf,
         # We need to disable constant folding here because we want the function to reference the
         # PyTreeSpec class defined above, not the one in the C++ module.
@@ -328,7 +328,7 @@ if python_pytree._cxx_pytree_dynamo_traceable:
     def treespec_leaf() -> PyTreeSpec:
         return _LEAF_SPEC
 
-    @substitute_in_graph(
+    @substitute_in_graph(  # type: ignore[arg-type]
         cxx_pytree.treespec_tuple,
         # We need to disable constant folding here because we want the function to reference the
         # PyTreeSpec class defined above, not the one in the C++ module.
@@ -341,7 +341,7 @@ if python_pytree._cxx_pytree_dynamo_traceable:
         handler = optree.register_pytree_node.get(tuple, namespace="torch")  # type: ignore[attr-defined]
         return PyTreeSpec(tuple(children), tuple, None, None, handler.unflatten_func)
 
-    @substitute_in_graph(
+    @substitute_in_graph(  # type: ignore[arg-type]
         cxx_pytree.treespec_dict,
         # We need to disable constant folding here because we want the function to reference the
         # PyTreeSpec class defined above, not the one in the C++ module.
@@ -352,7 +352,6 @@ if python_pytree._cxx_pytree_dynamo_traceable:
         /,
         **kwargs: PyTreeSpec,
     ) -> PyTreeSpec:
-        """Make a dict treespec from a dict of child treespecs."""
         dct = dict(mapping, **kwargs)
         if any(not _is_pytreespec_instance(child) for child in dct.values()):
             raise ValueError(f"Expected a dictionary of TreeSpecs, got: {dct!r}.")
