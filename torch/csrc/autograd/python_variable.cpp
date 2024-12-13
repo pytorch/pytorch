@@ -1828,9 +1828,12 @@ static int THPVariable_subclass_clear(THPVariable* self) {
   // C++ owns the PyObject.
 
   // See https://github.com/pytorch/pytorch/pull/75933 for more discussion.
-  if (isResurrectable((THPVariable*)self)) {
+  if (isResurrectable(self)) {
     return 0;
   }
+
+  // First clear Tensor specific things
+
   Py_CLEAR(self->backward_hooks);
   Py_CLEAR(self->post_accumulate_grad_hooks);
   const auto& tensor = THPVariable_Unpack(self);
@@ -1891,13 +1894,34 @@ static int THPVariable_subclass_clear(THPVariable* self) {
       }
     }
   }
-  TORCH_INTERNAL_ASSERT(!isResurrectable((THPVariable*)self));
+  TORCH_INTERNAL_ASSERT(!isResurrectable(self));
   {
     // MapAllocator can take significant time to release large tensors;
     // release the GIL here to avoid impacting main thread perf.
     pybind11::gil_scoped_release no_gil;
     self->cdata = MaybeOwned<Variable>();
   }
+  // Since we override the basic subtype_clear from CPython, we need a crappy
+  // version here just like for traverse and dealloc
+
+  // Clear all slots until we get to the base Tensor class
+  PyTypeObject* type = Py_TYPE((PyObject*)self);
+  PyTypeObject* base = type;
+  while (base != &THPVariableType) {
+    if (Py_SIZE(base))
+      clear_slots(base, (PyObject*)self);
+    base = base->tp_base;
+    TORCH_INTERNAL_ASSERT(base);
+  }
+
+  // Assume we never have managed dict for Tensors as we don't set the flag on
+  // the base class
+  if (C10_LIKELY(type->tp_dictoffset)) {
+    PyObject** dictptr = _PyObject_GetDictPtr((PyObject*)self);
+    if (dictptr && *dictptr)
+      Py_CLEAR(*dictptr);
+  }
+
   return 0;
 }
 
