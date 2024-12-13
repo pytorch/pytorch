@@ -2411,7 +2411,11 @@ class Scheduler:
         device = nodes[0].get_device()
         self.current_device = device
         backend = self.get_backend(device)
-        with dynamo_timed("benchmark_fused_nodes"):
+        with dynamo_timed(
+            "benchmark_fused_nodes",
+            log_pt2_compile_event=True,
+            dynamo_compile_column_us="compile_time_autotune_time_us",
+        ):
             return backend.benchmark_fused_nodes(nodes)
 
     def finalize_multi_template_buffers(self) -> None:
