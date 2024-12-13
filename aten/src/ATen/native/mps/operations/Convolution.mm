@@ -434,7 +434,7 @@ static Tensor mps_convolution_backward_input(IntArrayRef input_size,
           getTensorsStringKey({grad_output_t, weight_t});
     }
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
-      auto gradOutputTensor = mpsGraphRankedPlaceHolder(mpsGraph, getMPSScalarType(grad_output_t));
+      auto gradOutputTensor = mpsGraphRankedPlaceHolder(mpsGraph, getMPSScalarType(grad_output_t.scalar_type()), mps::getMPSShape(grad_output_t));
       auto weightTensor = mpsGraphRankedPlaceHolder(mpsGraph, weight_t);
 
       MPSGraphTensor* gradInputTensor;
