@@ -248,6 +248,30 @@ def _is_pytreespec_instance(obj: Any, /) -> TypeIs[TreeSpec]:
     return isinstance(obj, TreeSpec)
 
 
+def treespec_leaf() -> TreeSpec:
+    """Make a treespec representing a leaf node."""
+    return optree.treespec_leaf(none_is_leaf=True, namespace="torch")
+
+
+def treespec_tuple(iterable: Iterable[TreeSpec], /) -> TreeSpec:
+    """Make a tuple treespec from an iterable of child treespecs."""
+    return optree.treespec_tuple(iterable, none_is_leaf=True, namespace="torch")
+
+
+def treespec_dict(
+    mapping: Union[Mapping[Any, TreeSpec], Iterable[Tuple[Any, TreeSpec]]] = (),
+    /,
+    **kwargs: TreeSpec,
+) -> TreeSpec:
+    """Make a dict treespec from a dict of child treespecs."""
+    return optree.treespec_dict(
+        mapping,
+        **kwargs,
+        none_is_leaf=True,
+        namespace="torch",
+    )
+
+
 def tree_is_leaf(
     tree: PyTree,
     is_leaf: Optional[Callable[[PyTree], bool]] = None,
@@ -281,30 +305,6 @@ def tree_is_leaf(
     return optree.tree_is_leaf(
         tree,
         is_leaf=is_leaf,
-        none_is_leaf=True,
-        namespace="torch",
-    )
-
-
-def treespec_leaf() -> TreeSpec:
-    """Make a treespec representing a leaf node."""
-    return optree.treespec_leaf(none_is_leaf=True, namespace="torch")
-
-
-def treespec_tuple(iterable: Iterable[TreeSpec], /) -> TreeSpec:
-    """Make a tuple treespec from an iterable of child treespecs."""
-    return optree.treespec_tuple(iterable, none_is_leaf=True, namespace="torch")
-
-
-def treespec_dict(
-    mapping: Union[Mapping[Any, TreeSpec], Iterable[Tuple[Any, TreeSpec]]] = (),
-    /,
-    **kwargs: TreeSpec,
-) -> TreeSpec:
-    """Make a dict treespec from a dict of child treespecs."""
-    return optree.treespec_dict(
-        mapping,
-        **kwargs,
         none_is_leaf=True,
         namespace="torch",
     )
