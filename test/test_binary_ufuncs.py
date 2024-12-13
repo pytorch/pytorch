@@ -3520,23 +3520,24 @@ class TestBinaryUfuncs(TestCase):
                 self.assertEqual(actual, expected, atol=0.0, rtol=0.0)
 
     @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
-    def test_lerp_weight_type_promotion(self, device, dtype):
+    def test_lerp_tensor_type_promotion(self, device, dtype):
         start = make_tensor((5, 5), dtype=dtype, device=device, low=1, high=100)
         end = make_tensor((5, 5), dtype=dtype, device=device, low=1, high=100)
-        weight = make_tensor((5, 5), dtype=dtype, device=device, low=1, high=100)
+        weight = make_tensor((5, 5), dtype=torch.float, device=device, low=1, high=100)
 
-        actual = torch.lerp(start, end, weight.to(torch.float))
-        expected = torch.lerp(start, end, weight)
+        actual = torch.lerp(start, end, weight)
+        expected = start + weight.to(dtype) * (end - start)
         self.assertEqual(expected, actual)
 
-    @dtypes(torch.int, torch.long, torch.bfloat16, torch.float16, torch.float)
-    def test_lerp_weight_type_error(self, device, dtype):
-        x = torch.ones(2, 2, device=device, dtype=dtype)
-        w = torch.ones(2, 2, device=device, dtype=dtype)
-        s = torch.tensor(2.2, device=device, dtype=torch.double)
+    @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
+    def test_lerp_scalar_type_promotion(self, device, dtype):
+        start = make_tensor((5, 5), dtype=dtype, device=device, low=1, high=100)
+        end = make_tensor((5, 5), dtype=torch.float, device=device, low=1, high=100)
+        weight = torch.rand(1).item()
 
-        with self.assertRaisesRegex(RuntimeError, "Unable to promote `input` dtype"):
-            torch.lerp(x, w, s)
+        actual = torch.lerp(start, end, weight)
+        expected = start + weight * (end.to(dtype) - start)
+        self.assertEqual(expected, actual)
 
     def _test_logaddexp(self, device, dtype, base2):
         if base2:

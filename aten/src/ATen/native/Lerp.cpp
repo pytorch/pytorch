@@ -14,29 +14,19 @@ namespace at::meta {
 
 TORCH_META_FUNC(lerp_Tensor)(
     const Tensor& self, const Tensor& end, const Tensor& weight) {
-  TORCH_CHECK(self.dtype() == end.dtype(), "expected dtype ", self.dtype(),
-              " for `end` but got dtype ", end.dtype());
-
-  auto weight_ = weight;
-  if (self.dtype() != weight.dtype()) {
-    auto promote_type = c10::promoteTypes(self.scalar_type(), weight.scalar_type());
-    TORCH_CHECK(promote_type == self.scalar_type(), "Unable to promote `input` dtype to ", promote_type,
-                ", change `weight` dtype ", weight.dtype(), " same as `input` dtype ", self.dtype());
-    weight_ = weight.to(promote_type);
-  }
+  bool all_same_dtype = (self.dtype() == end.dtype() && self.dtype() == weight.dtype());
 
   build(at::TensorIteratorConfig()
         .allow_cpu_scalars(true)
+        .promote_inputs_to_common_dtype(!all_same_dtype)
         .add_output(maybe_get_output())
         .add_const_input(self)
         .add_const_input(end)
-        .add_const_input(weight_));
+        .add_const_input(weight));
 }
 
 TORCH_META_FUNC(lerp_Scalar)(
     const Tensor& self, const Tensor& end, const Scalar& /*weight*/) {
-  TORCH_CHECK(self.dtype() == end.dtype(), "expected dtype ", self.dtype(),
-              " for `end` but got dtype ", end.dtype());
   build_binary_op(maybe_get_output(), self, end);
 }
 
