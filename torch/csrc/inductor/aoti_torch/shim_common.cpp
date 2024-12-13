@@ -795,6 +795,28 @@ AOTITorchError aoti_torch_clone(AtenTensorHandle self, AtenTensorHandle* ret) {
   });
 }
 
+AOTITorchError aoti_torch_clone_preserve_strides(
+    AtenTensorHandle self,
+    AtenTensorHandle* ret) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    // To mimic clone_preserve_strides which is used in copy_misaligned_inputs
+    at::Tensor* self_tensor = tensor_handle_to_tensor_pointer(self);
+    int64_t needed_size = 1;
+    for (int i = 0; i < self_tensor->dim(); i++) {
+      if (self_tensor->size(i) == 0) {
+        needed_size = 0;
+        break;
+      }
+      needed_size += (self_tensor->size(i) - 1) * self_tensor->stride(i);
+    }
+    at::Tensor ret_tensor =
+        self_tensor->as_strided({needed_size}, {1})
+            .clone()
+            .as_strided(self_tensor->sizes(), self_tensor->strides());
+    *ret = new_tensor_handle(std::move(ret_tensor));
+  });
+}
+
 // TODO: implement a more efficient version instead of calling into aten
 AOTITorchError aoti_torch_addmm_out(
     AtenTensorHandle out,

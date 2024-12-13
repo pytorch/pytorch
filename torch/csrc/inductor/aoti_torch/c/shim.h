@@ -469,6 +469,9 @@ aoti_torch_assign_tensors_out(AtenTensorHandle src, AtenTensorHandle* ret_dst);
 AOTI_TORCH_EXPORT AOTITorchError
 aoti_torch_clone(AtenTensorHandle self, AtenTensorHandle* ret);
 
+AOTI_TORCH_EXPORT AOTITorchError
+aoti_torch_clone_preserve_strides(AtenTensorHandle self, AtenTensorHandle* ret);
+
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_addmm_out(
     AtenTensorHandle out,
     AtenTensorHandle self,
