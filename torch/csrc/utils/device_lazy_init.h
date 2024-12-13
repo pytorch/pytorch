@@ -26,10 +26,18 @@ namespace torch::utils {
 void device_lazy_init(at::DeviceType device_type);
 void set_requires_device_init(at::DeviceType device_type, bool value);
 
-inline void maybe_initialize_device(at::Device& device) {
+inline bool is_device_lazy_init_supported(at::DeviceType device_type) {
   // Add more devices here to enable lazy initialization.
-  if (device.is_cuda() || device.is_xpu() || device.is_privateuseone() ||
-      device.is_hpu() || device.is_mtia()) {
+  return (
+      device_type == at::DeviceType::CUDA ||
+      device_type == at::DeviceType::XPU ||
+      device_type == at::DeviceType::HPU ||
+      device_type == at::DeviceType::MTIA ||
+      device_type == at::DeviceType::PrivateUse1);
+}
+
+inline void maybe_initialize_device(at::Device& device) {
+  if (is_device_lazy_init_supported(device.type())) {
     device_lazy_init(device.type());
   }
 }
