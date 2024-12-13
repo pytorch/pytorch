@@ -176,12 +176,19 @@ def derived_types(
         ]
 
     if list_base:
-        result.extend((seq_typ, f"{cpp_type}[]") for seq_typ in derived_seq_types(base_type))  # type: ignore[valid-type]
+        result.extend(
+            (seq_typ, f"{cpp_type}[]") for seq_typ in derived_seq_types(base_type)
+        )
     if optional_base_list:
-        result.extend((seq_typ, f"{cpp_type}?[]") for seq_typ in derived_seq_types(typing.Optional[base_type]))  # type: ignore[valid-type]
+        result.extend(
+            (seq_typ, f"{cpp_type}?[]")
+            for seq_typ in derived_seq_types(typing.Optional[base_type])
+        )
     if optional_list_base:
-        # type: ignore[valid-type]
-        result.extend((typing.Optional[seq_typ], f"{cpp_type}[]?") for seq_typ in derived_seq_types(base_type))  # type: ignore[valid-type]
+        result.extend(
+            (typing.Optional[seq_typ], f"{cpp_type}[]?")
+            for seq_typ in derived_seq_types(base_type)
+        )
     return result
 
 
@@ -263,7 +270,7 @@ def tuple_to_list(tuple_type: typing.Type[typing.Tuple]) -> typing.Type[typing.L
     elif len(type_args) == 1:
         # General case: create a List with the same type arguments
         return typing.List[type_args[0]]  # type: ignore[valid-type]
-    elif len(type_args) == 2 and type_args[1] is Ellipsis:  # type: ignore[valid-type]
+    elif len(type_args) == 2 and type_args[1] is Ellipsis:
         return typing.List[type_args[0]]  # type: ignore[valid-type]
     else:
         return typing.List[typing.Union[tuple(type_args)]]  # type: ignore[misc, return-value]

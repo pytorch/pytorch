@@ -20,12 +20,12 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, Type, TypeVar, Un
 from unittest.mock import patch
 
 import sympy
-from filelock import FileLock
 
 import torch
 import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncCompile pools
 from torch._dynamo.testing import rand_strided
 from torch._dynamo.utils import counters, dynamo_timed, identity, preserve_rng_state
+from torch.utils._filelock import FileLock
 
 from . import config, ir
 from .autotune_process import (
@@ -260,8 +260,10 @@ class TritonTemplateKernel(TritonKernel):
     ) -> None:
         numel = sympy_product(output_node.get_size())
         super().__init__(
-            numel,
-            sympy.S.One,
+            {
+                "x": numel,
+                "r": sympy.S.One,
+            },
             features=SIMDKernelFeatures([], numel),
         )
         self.input_nodes = input_nodes
@@ -342,7 +344,7 @@ class TritonTemplateKernel(TritonKernel):
             return "@triton.jit"
 
         argdefs, _, signature, _ = self.args.python_argdefs()
-        triton_meta = {
+        triton_meta: Dict[str, Any] = {
             "signature": signature_to_meta(
                 signature, size_dtype=self.index_dtype, argdefs=argdefs
             ),

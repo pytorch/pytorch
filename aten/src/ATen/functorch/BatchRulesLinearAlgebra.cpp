@@ -151,7 +151,7 @@ Tensor addmm_decomp(const Tensor& self, const Tensor& mat1, const Tensor& mat2, 
   return at::add(self * beta, at::mm(mat1, mat2), alpha);
 }
 
-void _linalg_check_errors_batch_rule(const Tensor& info, std::optional<int64_t> info_bdim, c10::string_view api_name, bool is_matrix) {
+void _linalg_check_errors_batch_rule(const Tensor& info, std::optional<int64_t> info_bdim, std::string_view api_name, bool is_matrix) {
   auto info_ = moveBatchDimToFront(info, info_bdim);
   // Not a matrix means this is a batch of matrices
   at::_linalg_check_errors(info_, api_name, false);
@@ -421,7 +421,7 @@ std::optional<int64_t> batch_dim_if_not_empty(const Tensor& t) {
 
 fourOutputs linalg_lstsq_batch_rule(
     const Tensor& self, std::optional<int64_t> self_bdim, const Tensor& b, std::optional<int64_t> b_bdim,
-    std::optional<double> rcond, std::optional<c10::string_view> driver) {
+    std::optional<double> rcond, std::optional<std::string_view> driver) {
   TORCH_CHECK(rankWithoutBatchDim(self, self_bdim) >= 2, "torch.linalg.lstsq: input must have at least 2 dimensions.");
   TORCH_CHECK(rankWithoutBatchDim(b, b_bdim) >= 1, "torch.linalg.lstsq: other must have at least 1 dimension.");
 
