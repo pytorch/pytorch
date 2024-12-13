@@ -65,6 +65,19 @@ class CompileId(NamedTuple):
     def __str__(self):
         return f"{self.frame_id}/{self.frame_compile_id}"
 
+    @classmethod
+    def from_string(cls, compile_id: Optional[str]):
+        """
+        Factory method that creates a CompileId from its string representation.
+        """
+        if compile_id is None:
+            return None
+        try:
+            frame_id, frame_compile_id = compile_id.split("/")
+            return cls(int(frame_id), int(frame_compile_id))
+        except Exception as e:
+            raise ValueError(f"Invalid compile_id '{compile_id}'") from e
+
 
 class TraceId(NamedTuple):
     compile_id: CompileId

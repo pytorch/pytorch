@@ -112,6 +112,10 @@ class StructuredTraceTestingFormatter(logging.Formatter):
             metadata["compilation_metrics"] = "METRICS"
         if "bwd_compilation_metrics" in metadata:
             metadata["bwd_compilation_metrics"] = "METRICS"
+        if "compilation_metrics_runtime" in metadata:
+            metadata["compilation_metrics_runtime"] = "METRICS"
+        if "bwd_compilation_metrics_runtime" in metadata:
+            metadata["bwd_compilation_metrics_runtime"] = "METRICS"
         if "describe_storage" in metadata:
             metadata["describe_storage"]["describer_id"] = "ID"
         if "describe_tensor" in metadata:
@@ -225,6 +229,7 @@ class StructuredTraceTest(TestCase):
 {"artifact": {"name": "aotautograd_cache_hash", "encoding": "json"}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}
 {"dynamo_cpp_guards_str": {}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}
 {"compilation_metrics": "METRICS", "frame_id": 0, "frame_compile_id": 0, "attempt": 0}
+{"compilation_metrics_runtime": "METRICS", "frame_id": 0, "frame_compile_id": 0}
 """,  # noqa: B950
         )
 
@@ -251,6 +256,7 @@ class StructuredTraceTest(TestCase):
 {"artifact": {"name": "aotautograd_cache_hash", "encoding": "json"}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}
 {"dynamo_cpp_guards_str": {}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}
 {"compilation_metrics": "METRICS", "frame_id": 0, "frame_compile_id": 0, "attempt": 0}
+{"compilation_metrics_runtime": "METRICS", "frame_id": 0, "frame_compile_id": 0}
 """,  # noqa: B950
         )
 
