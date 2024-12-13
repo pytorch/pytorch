@@ -1021,8 +1021,7 @@ static void registerCudaDeviceProperties(PyObject* module) {
 #ifndef USE_ROCM
       // NVIDIA-only properties
       .def_readonly(
-          "shared_memory_per_block",
-          &cudaDeviceProp::sharedMemPerBlock)
+          "shared_memory_per_block", &cudaDeviceProp::sharedMemPerBlock)
       .def_readonly(
           "shared_memory_per_block_optin",
           &cudaDeviceProp::sharedMemPerBlockOptin)
