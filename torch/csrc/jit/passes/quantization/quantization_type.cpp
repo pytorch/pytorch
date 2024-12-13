@@ -1,7 +1,6 @@
 #include <torch/csrc/jit/passes/quantization/quantization_type.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 std::ostream& operator<<(std::ostream& os, QuantType t) {
   switch (t) {
@@ -17,5 +16,4 @@ std::ostream& operator<<(std::ostream& os, QuantType t) {
   return os;
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

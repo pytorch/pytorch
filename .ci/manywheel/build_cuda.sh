@@ -59,11 +59,19 @@ cuda_version_nodot=$(echo $CUDA_VERSION | tr -d '.')
 
 TORCH_CUDA_ARCH_LIST="5.0;6.0;7.0;7.5;8.0;8.6"
 case ${CUDA_VERSION} in
-    12.4)
+    12.6)
         if [[ "$GPU_ARCH_TYPE" = "cuda-aarch64" ]]; then
             TORCH_CUDA_ARCH_LIST="9.0"
         else
             TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST};9.0+PTX"
+        fi
+        EXTRA_CAFFE2_CMAKE_FLAGS+=("-DATEN_NO_TEST=ON")
+        ;;
+    12.4)
+        if [[ "$GPU_ARCH_TYPE" = "cuda-aarch64" ]]; then
+            TORCH_CUDA_ARCH_LIST="9.0"
+        else
+            TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST};9.0"
         fi
         EXTRA_CAFFE2_CMAKE_FLAGS+=("-DATEN_NO_TEST=ON")
         ;;
@@ -73,10 +81,6 @@ case ${CUDA_VERSION} in
         ;;
     11.8)
         TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST};3.7;9.0"
-        EXTRA_CAFFE2_CMAKE_FLAGS+=("-DATEN_NO_TEST=ON")
-        ;;
-    11.[67])
-        TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST};3.7"
         EXTRA_CAFFE2_CMAKE_FLAGS+=("-DATEN_NO_TEST=ON")
         ;;
     *)
@@ -118,7 +122,9 @@ DEPS_SONAME=(
     "libgomp.so.1"
 )
 
-if [[ $USE_CUSPARSELT == "1" ]]; then
+# CUDA 11.8 have to ship the libcusparseLt.so.0 with the binary
+# since nvidia-cusparselt-cu11 is not available in PYPI
+if [[ $USE_CUSPARSELT == "1" && $CUDA_VERSION == "11.8" ]]; then
         DEPS_SONAME+=(
             "libcusparseLt.so.0"
         )
@@ -127,7 +133,7 @@ if [[ $USE_CUSPARSELT == "1" ]]; then
         )
 fi
 
-if [[ $CUDA_VERSION == "12.1" || $CUDA_VERSION == "12.4" ]]; then
+if [[ $CUDA_VERSION == "12.4" || $CUDA_VERSION == "12.6" ]]; then
     export USE_STATIC_CUDNN=0
     # Try parallelizing nvcc as well
     export TORCH_NVCC_FLAGS="-Xfatbin -compress-all --threads 2"
@@ -145,6 +151,7 @@ if [[ $CUDA_VERSION == "12.1" || $CUDA_VERSION == "12.4" ]]; then
             "/usr/local/cuda/lib64/libcudnn.so.9"
             "/usr/local/cuda/lib64/libcublas.so.12"
             "/usr/local/cuda/lib64/libcublasLt.so.12"
+            "/usr/local/cuda/lib64/libcusparseLt.so.0"
             "/usr/local/cuda/lib64/libcudart.so.12"
             "/usr/local/cuda/lib64/libnvToolsExt.so.1"
             "/usr/local/cuda/lib64/libnvrtc.so.12"
@@ -161,6 +168,7 @@ if [[ $CUDA_VERSION == "12.1" || $CUDA_VERSION == "12.4" ]]; then
             "libcudnn.so.9"
             "libcublas.so.12"
             "libcublasLt.so.12"
+            "libcusparseLt.so.0"
             "libcudart.so.12"
             "libnvToolsExt.so.1"
             "libnvrtc.so.12"
@@ -178,6 +186,7 @@ if [[ $CUDA_VERSION == "12.1" || $CUDA_VERSION == "12.4" ]]; then
             '$ORIGIN/../../nvidia/curand/lib'
             '$ORIGIN/../../nvidia/cusolver/lib'
             '$ORIGIN/../../nvidia/cusparse/lib'
+            '$ORIGIN/../../cusparselt/lib'
             '$ORIGIN/../../nvidia/nccl/lib'
             '$ORIGIN/../../nvidia/nvtx/lib'
         )

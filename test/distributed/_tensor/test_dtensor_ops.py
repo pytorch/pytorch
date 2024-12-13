@@ -446,7 +446,6 @@ dtensor_fails = {
     xfail("trapz"),
     xfail("triangular_solve"),
     xfail("unbind"),
-    xfail("unbind_copy"),
     xfail("unfold"),
     xfail("unfold_copy"),
     xfail("uniform"),

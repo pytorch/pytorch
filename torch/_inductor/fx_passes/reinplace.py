@@ -8,6 +8,7 @@ from typing import Any, Callable, Dict, List, Tuple
 
 import torch
 from torch._dispatch.python import enable_python_dispatcher
+from torch._dynamo.utils import ReinplaceCounters, ReInplaceTrigger
 from torch._higher_order_ops.triton_kernel_wrap import (
     kernel_side_table,
     triton_kernel_wrapper_functional,
@@ -127,7 +128,6 @@ def _decompose_scatter_functional(
     inp_updated = aten.slice_scatter(inp, view_updated, 0, 0, 10)
     """
     assert node.target is _generalized_scatter
-    inp, src, view_ops = node.args
     return _decompose_scatter_functional_helper(graph, *node.args)  # type: ignore[arg-type]
 
 
@@ -182,7 +182,7 @@ def should_reinplace_scatter(node: torch.fx.Node) -> bool:
     input and output would have been realized anyway.
 
     """
-    inp, src, view_ops = node.args
+    inp, _src, _view_ops = node.args
 
     # Mutating scatter ops unconditionally realize input and output
     if scatter_always_uses_mutation(node):
@@ -271,7 +271,7 @@ def canonicalize_view_scatter_ops(graph: torch.fx.Graph) -> None:
         def can_fuse():
             if src.target is not _generalized_scatter:  # type: ignore[union-attr]
                 return False
-            src_inp, src_src, src_scatter_view_op = src.args  # type: ignore[union-attr]
+            src_inp, _src_src, _src_scatter_view_op = src.args  # type: ignore[union-attr]
 
             inp_base = node_to_view_base.get(inp, inp)  # type: ignore[arg-type]
             src_base = node_to_view_base.get(src_inp, src_inp)  # type: ignore[arg-type]
@@ -293,7 +293,7 @@ def canonicalize_view_scatter_ops(graph: torch.fx.Graph) -> None:
             graph.erase_node(node)
             return
 
-        src_inp, src_src, src_scatter_view_op = src.args  # type: ignore[union-attr]
+        _src_inp, src_src, src_scatter_view_op = src.args  # type: ignore[union-attr]
         with graph.inserting_before(src):  # type: ignore[arg-type]
             new_node = graph_call_function(
                 graph,
@@ -497,7 +497,12 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
             )
 
     def log_inplace_results(
-        node_name, old_tensors_to_clone, tensors_to_clone, missed_args, missed_nodes
+        node_name,
+        old_tensors_to_clone,
+        tensors_to_clone,
+        missed_args,
+        missed_nodes,
+        trigger,
     ):
         # Total size of possibly_missed_reinplacing_opportunities for tensors with static shapes.
         missed_bytes = 0
@@ -531,17 +536,14 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
             missed_args,
             missed_bytes,
         )
-        torch._dynamo.utils.counters["inductor"][
-            "possibly_missed_reinplacing_opportunities"
-        ] += len(missed_args)
-        torch._dynamo.utils.counters["inductor"][
-            "possibly_missed_reinplacing_bytes"
-        ] += missed_bytes
+
+        ReinplaceCounters.add_missed_opportunities(trigger, len(missed_args))
+        ReinplaceCounters.add_missed_bytes(trigger, missed_bytes)
 
     replace_dict: Dict[torch.fx.Node, torch.fx.Node] = {}
 
     def reinplace_and_refine_tensors_to_clone(
-        old_tensors_to_clone, kwargs, node_name, auto_functionalize_v2=False
+        old_tensors_to_clone, kwargs, node_name, trigger
     ):
         tensors_to_clone: List[str] = []
         storage_of_reinplaced_args = set()
@@ -580,7 +582,7 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
                 copy_node = copy_args_to_copy_nodes.get((mutated_arg, node))
                 if copy_node is not None:
                     replace_dict[copy_node] = copy_node.args[0]
-                if not auto_functionalize_v2:
+                if not trigger == ReInplaceTrigger.AUTO_FUNC_V2:
                     for user in node.users:
                         # For auto_functionalize_v2, arg is the index of the base, where base at index i corresponds to
                         # output atindex size(out)+i.
@@ -602,7 +604,12 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
                 tensors_to_clone.append(arg)
 
         log_inplace_results(
-            node_name, old_tensors_to_clone, tensors_to_clone, missed_args, missed_nodes
+            node_name,
+            old_tensors_to_clone,
+            tensors_to_clone,
+            missed_args,
+            missed_nodes,
+            trigger,
         )
         return tensors_to_clone
 
@@ -628,7 +635,7 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
                 bases_to_clone,
                 base_tensors_dct,
                 node.target,
-                auto_functionalize_v2=True,
+                ReInplaceTrigger.AUTO_FUNC_V2,
             )
             # Stash the metadata. There is a pass later on where we decompose
             # auto_functionalized into clones + a mutable op; this metadata
@@ -647,7 +654,7 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
                 tensors_to_clone,
                 node.kwargs,
                 _mutable_op._name,
-                auto_functionalize_v2=False,
+                ReInplaceTrigger.AUTO_FUNC_V1,
             )
 
             # Stash the metadata. There is a pass later on where we decompose
@@ -679,7 +686,10 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
             # This pass iterates over them and sees which ones are safe
             # to eliminate (i.e. no longer need the clones)
             tensors_to_clone = reinplace_and_refine_tensors_to_clone(
-                node.kwargs["tensors_to_clone"], node.kwargs["kwargs"], kernel_name
+                node.kwargs["tensors_to_clone"],
+                node.kwargs["kwargs"],
+                kernel_name,
+                ReInplaceTrigger.TRITON_OPS,
             )
 
             kwargs = dict(node.kwargs)

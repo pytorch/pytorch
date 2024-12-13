@@ -844,6 +844,12 @@ Tensor scalar_tensor(const Scalar& s,
     std::optional<Layout> layout,
     std::optional<Device> device,
     std::optional<bool> pin_memory) {
+  // NB: It's always wrong to try to create a scalar tensor with the jagged layout.
+  // Rather than fix this everywhere, just use the strided layout and let NJT handle
+  // scalar tensor broadcasting.
+  if (layout == at::kJagged) {
+    layout = at::kStrided;
+  }
   // See [Note: hacky wrapper removal for TensorOptions]
   TensorOptions options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
 
@@ -1708,7 +1714,7 @@ Tensor tensor_complex_backend(ArrayRef<T> values, const TensorOptions& options) 
   return at::detail::tensor_complex_backend(values, options);
 }
 
-Tensor from_file(c10::string_view filename, std::optional<bool> shared, std::optional<int64_t> size,
+Tensor from_file(std::string_view filename, std::optional<bool> shared, std::optional<int64_t> size,
     std::optional<ScalarType> dtype,
     std::optional<Layout> layout,
     std::optional<Device> device,

@@ -2013,8 +2013,8 @@ Tensor to_sparse_bsc(const Tensor& self, IntArrayRef blocksize, std::optional<in
 
 Tensor to_meta(const Tensor& tensor) {
   auto out = at::native::empty_strided_meta_symint(tensor.sym_sizes(), tensor.sym_strides(), \
-/*dtype=*/std::make_optional(tensor.scalar_type()), /*layout=*/std::make_optional(tensor.layout()), \
-/*device=*/std::make_optional(c10::Device(c10::kMeta)), /*pin_memory=*/std::nullopt);
+/*dtype=*/tensor.scalar_type(), /*layout=*/tensor.layout(), \
+/*device=*/c10::Device(c10::kMeta), /*pin_memory=*/std::nullopt);
   // needs to handle wrapped numbers, so dtype promotion works properly.
   if (tensor.unsafeGetTensorImpl()->is_wrapped_number()) {
     out.unsafeGetTensorImpl()->set_wrapped_number(true);

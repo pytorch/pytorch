@@ -8,7 +8,9 @@
 #include <cstdint>
 #include <cstring>
 #include <iosfwd>
+#ifndef C10_EMBEDDED
 #include <ostream>
+#endif // C10_EMBEDDED
 
 #if defined(__CUDACC__) && !defined(USE_ROCM)
 #include <cuda_bf16.h>
@@ -114,12 +116,14 @@ struct alignas(2) BFloat16 {
 #endif
 };
 
+#ifndef C10_EMBEDDED
 C10_API inline std::ostream& operator<<(
     std::ostream& out,
     const BFloat16& value) {
   out << (float)value;
   return out;
 }
+#endif // C10_EMBEDDED
 
 } // namespace c10
 

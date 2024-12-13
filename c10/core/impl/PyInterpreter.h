@@ -220,7 +220,7 @@ struct C10_API PyInterpreterVTable {
 struct C10_API PyInterpreter {
   const PyInterpreterVTable* vtable_;
 
-  PyInterpreter(const PyInterpreterVTable* vtable) : vtable_(vtable){};
+  PyInterpreter(const PyInterpreterVTable* vtable) : vtable_(vtable) {}
 
   const PyInterpreterVTable& operator*() const noexcept {
     return *vtable_;
