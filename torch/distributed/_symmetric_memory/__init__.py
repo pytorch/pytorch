@@ -1,4 +1,5 @@
 # mypy: allow-untyped-decorators
+import math
 import os
 import socket
 import uuid
@@ -683,14 +684,18 @@ def _should_use_fused_all_gather_matmul_native(
     group_name: str,
 ) -> bool:
     group = c10d._resolve_process_group(group_name)
-    if not A_shard.is_contiguous():
-        return False
-    A_shard = A_shard.flatten(0, -2)
+    local_M = math.prod(A_shard.shape[:-1])
+
     return (
         "TORCH_SYMM_MEM_ENABLE_NATIVE_ASYNC_TP" in os.environ
+        and A_shard.is_contiguous()
         and gather_dim == 0
-        and A_shard.shape[0] % group.size() == 0
-        and A_shard.shape[0] * group.size() <= 4096
+        # _async_input_mm requires local_M to be divisible by world_size.
+        and local_M % group.size() == 0
+        # _async_input_mm outperforms the decomposition-based approach when the
+        # global M is small.
+        and local_M * group.size() <= 4096
+        # _async_input_mm only supports a single B.
         and len(Bs) == 1
     )
 
