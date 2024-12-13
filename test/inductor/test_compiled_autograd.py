@@ -3217,6 +3217,7 @@ TORCH_LIBRARY(test_cudagraphs_cpu_scalar_used_in_cpp_custom_op, m) {
         self.assertTrue(isinstance(view_nodes[0].args[1][0], torch.fx.Node))
         self.assertTrue(isinstance(view_nodes[1].args[1][0], torch.fx.Node))
 
+    @unittest.skipIf(not HAS_CUDA, "requires cuda")
     def test_flex_attention(self):
         def fn():
             @torch.compile(backend="aot_eager")
@@ -3346,6 +3347,7 @@ TORCH_LIBRARY(test_cudagraphs_cpu_scalar_used_in_cpp_custom_op, m) {
             yield tuple(order)
 
         self.check_output_and_recompiles(fn)
+
 
 def load_test_module(name):
     testdir = Path(__file__).absolute().parent.parent
