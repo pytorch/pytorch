@@ -3799,7 +3799,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         nms_pre = torch.tensor(4)
         inputs = (score, score_thr, nms_pre, dict(bbox_pred=bbox_pred))
 
-        ep = torch.export.export(M(), inputs)
+        ep = export(M(), inputs)
         orig_res = M()(*inputs)
         ep_res = ep.module()(*inputs)
         self.assertTrue(torch.allclose(orig_res[0], ep_res[0]))

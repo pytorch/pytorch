@@ -537,6 +537,19 @@ class _NonStrictTorchFunctionHandler(torch.overrides.TorchFunctionMode):
     Usage: TORCHEXPORT_EXTENDED_DEBUG_CURRENT_LOC=1 TORCH_LOGS="+export" ...
     """
 
+    def _override(self, func, args, kwargs):
+        if func is torch.tensor:
+            # Redirect to Python implementation of torch.tensor for data with symints.
+            # NOTE(avik): We don't unconditionally redirect to this implementation
+            # because it has some known incompletenesses, e.g., it doesn't support
+            # empty data. See https://github.com/pytorch/pytorch/issues/143216
+            if any(
+                isinstance(a, torch.SymInt)
+                for a in pytree.tree_flatten(args[0])[0]
+            ):
+                return torch._refs.tensor
+        return func
+
     def __torch_function__(self, func, types, args=(), kwargs=None):
         kwargs = kwargs or {}
         if (
@@ -554,6 +567,7 @@ class _NonStrictTorchFunctionHandler(torch.overrides.TorchFunctionMode):
                     frame.f_code.co_name,
                 )
         try:
+            func = self._override(func, args, kwargs)
             return func(*args, **kwargs)
         except GuardOnDataDependentSymNode as e:
             _suggest_fixes_for_data_dependent_error_non_strict(e)
