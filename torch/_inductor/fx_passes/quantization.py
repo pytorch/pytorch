@@ -2405,6 +2405,75 @@ def _generate_qlinear_weight_prepack_patterns(
         )
 
 
+def _generate_linear_dynamic_fp16_pattern(
+    _dequant_weight_pattern,
+    input_dim_exceeds_two=False,
+    input_contiguous=True,
+    relu_fused=False,
+):
+    dtype = torch.float32
+    t_pattern = _generate_linear_t_pattern(_dequant_weight_pattern, dtype)
+
+    if input_dim_exceeds_two and not input_contiguous:
+        # pattern is
+        #                   x -> expand -> bmm (-> add) (-> relu)
+        # w -> dequant -> permute -> expand /
+        pattern_no_bias = CallFunction(
+            aten.bmm.default,
+            CallFunction(
+                aten.expand.default,
+                KeywordArg("x"),
+                KeywordArg("act_expand_size"),
+            ),
+            CallFunction(
+                aten.expand.default,
+                t_pattern,
+                KeywordArg("wgt_expand_size"),
+            ),
+        )
+        pattern_with_bias = CallFunction(
+            aten.add.Tensor,
+            pattern_no_bias,
+            KeywordArg("b"),
+        )
+        if relu_fused:
+            pattern_with_bias = CallFunction(aten.relu.default, pattern_with_bias)
+            pattern_no_bias = CallFunction(aten.relu.default, pattern_no_bias)
+        return pattern_with_bias, pattern_no_bias
+
+    x_pattern_with_reshape = _may_generate_pattern_with_reshape(
+        KeywordArg("x"),
+        KeywordArg("act_reshape_size"),
+        input_dim_exceeds_two,
+    )
+    dequant_linear_bias_pattern = generate_pattern_with_unary(
+        _may_generate_pattern_with_reshape(
+            CallFunction(
+                aten.addmm.default,
+                KeywordArg("b"),
+                x_pattern_with_reshape,
+                t_pattern,
+            ),
+            KeywordArg("output_reshape_size"),
+            input_dim_exceeds_two,
+        ),
+        aten.relu.default if relu_fused else None,
+    )
+    dequant_linear_no_bias_pattern = generate_pattern_with_unary(
+        _may_generate_pattern_with_reshape(
+            CallFunction(
+                aten.mm.default,
+                x_pattern_with_reshape,
+                t_pattern,
+            ),
+            KeywordArg("output_reshape_size"),
+            input_dim_exceeds_two,
+        ),
+        aten.relu.default if relu_fused else None,
+    )
+    return dequant_linear_bias_pattern, dequant_linear_no_bias_pattern
+
+
 def _register_dequant_promotion():
     dequant_pattern_cases = itertools.product(
         [torch.float32, torch.bfloat16], [True, False], [True, False]
@@ -2539,6 +2608,200 @@ def _register_qlinear_weight_prepack():
         )
 
 
+def _register_linear_dynamic_fp16_weight_prepack_pass(
+    pattern,
+    pass_number,
+    input_dim_exceeds_two=False,
+    input_contiguous=True,
+    relu_fused=False,
+):
+    def _extra_check_fn(match: Match):
+        return match.kwargs["dtype_fp16"] == torch.float16
+
+    @register_freezing_graph_pattern(
+        pattern,
+        extra_check=_extra_check_fn,
+        pass_number=pass_number,
+    )
+    def linear_dynamic_fp16_weight_prepack(match: Match, *args, **kwargs):
+        """
+        Match the pattern:
+        fp32 activation
+          |
+        mm/addmm <- t <- to_fp32 <- to_fp16 <- weight
+          |
+        (reshape) <- (relu)
+
+        OR
+
+        fp32 activation
+          |
+        expand
+          |
+         bmm <- expand <- t <- to_fp32 <- to_fp16 <- weight
+          |
+        (add) <- (relu)
+
+        Insert weight prepack node and change the pattern to:
+        fp32 activation
+          |
+        onednn.linear_dynamic_fp16 <- onednn.linear_prepack_fp16 <- weight
+        (or onednn.linear_relu_dynamic_fp16)
+        """
+        # find params
+        x = kwargs["x"]
+        w = kwargs["w"]
+        bias = kwargs["b"] if "b" in kwargs else None
+
+        # find linear node
+        nodes_to_find = [aten.addmm.default, aten.mm.default, aten.bmm.default]
+        linear_nodes = []
+        for node in nodes_to_find:
+            linear_nodes.extend(filter_nodes(match.nodes, node))
+        assert len(linear_nodes) == 1
+        linear_node = linear_nodes[0]
+        assert isinstance(linear_node, torch.fx.node.Node)
+        input_index = 1 if linear_node.target is aten.addmm.default else 0
+        weight_index = input_index + 1
+
+        # find relu node
+        relu_node = None
+        if relu_fused:
+            relu_node = match.output_node()
+            assert isinstance(relu_node, torch.fx.node.Node)
+
+        # find reshape node, expand node and add node
+        (
+            act_reshape_node,
+            output_reshape_node,
+            expand_x_node,
+            expand_w_node,
+            add_bias_node,
+        ) = (None, None, None, None, None)
+        t_node = None
+        if input_dim_exceeds_two:
+            if input_contiguous:
+                act_reshape_node = linear_node.args[input_index]
+                t_node = linear_node.args[weight_index]
+                output_reshape_node = next(iter(linear_node.users))
+                assert output_reshape_node.target is aten.reshape.default
+            else:
+                expand_x_node = linear_node.args[input_index]
+                expand_w_node = linear_node.args[weight_index]
+                assert isinstance(expand_w_node, torch.fx.node.Node)
+                t_node = expand_w_node.args[0]
+                if bias:
+                    add_bias_node = next(iter(linear_node.users))
+                    assert add_bias_node.target is aten.add.Tensor
+        else:
+            t_node = linear_node.args[weight_index]
+        assert isinstance(t_node, torch.fx.node.Node)
+
+        w_to_fp32_node = t_node.args[0]
+        assert (
+            isinstance(w_to_fp32_node, torch.fx.node.Node)
+            and w_to_fp32_node.target
+            is quantized_decomposed.convert_element_type.no_fuse
+        )
+        w_to_fp16_node = w_to_fp32_node.args[0]
+        assert (
+            isinstance(w_to_fp16_node, torch.fx.node.Node)
+            and w_to_fp16_node.target
+            is quantized_decomposed.convert_element_type.no_fuse
+        )
+
+        x_shape = x.meta.get("tensor_meta").shape
+        if has_free_symbols(x_shape):
+            # For dynamic shape case, we can't get activation shape ahead of runtime.
+            x_shape = None
+        graph = match.graph
+        with graph.inserting_before(linear_node):
+            # Insert weight prepack node and the qlinear node
+            packed_weight_inputs = (
+                w,
+                x_shape,
+            )
+            packed_weight_op = torch.ops.onednn.linear_prepack_fp16
+            prepack_weight_node = graph.call_function(
+                packed_weight_op, args=packed_weight_inputs
+            )
+
+            # create new linear node and insert on graph
+            new_args: Tuple[Any, ...] = (
+                x,
+                prepack_weight_node,
+                bias,
+            )
+            linear_op = (
+                torch.ops.onednn.linear_relu_dynamic_fp16.default
+                if relu_fused
+                else torch.ops.onednn.linear_dynamic_fp16.default
+            )
+            new_linear_node = graph.call_function(linear_op, args=new_args)
+            out_node = match.output_node()
+            out_node.replace_all_uses_with(new_linear_node)
+
+            # Erase the original nodes in the reverse order
+            new_linear_node.meta.update(out_node.meta)
+            if relu_node is not None:
+                graph.erase_node(relu_node)
+            if output_reshape_node is not None:
+                graph.erase_node(output_reshape_node)
+            if add_bias_node is not None:
+                graph.erase_node(add_bias_node)
+            graph.erase_node(linear_node)
+            if act_reshape_node is not None:
+                assert isinstance(act_reshape_node, torch.fx.node.Node)
+                graph.erase_node(act_reshape_node)
+            if expand_x_node is not None:
+                assert isinstance(expand_x_node, torch.fx.node.Node)
+                graph.erase_node(expand_x_node)
+            if expand_w_node is not None:
+                assert isinstance(expand_w_node, torch.fx.node.Node)
+                graph.erase_node(expand_w_node)
+            graph.erase_node(t_node)
+            graph.erase_node(w_to_fp32_node)
+            graph.erase_node(w_to_fp16_node)
+
+            counters["inductor"]["qlinear_weight_prepack_matcher_count"] += 1
+            counters["inductor"]["qlinear_weight_prepack_matcher_nodes"] += len(
+                match.nodes
+            )
+
+
+def _register_linear_dynamic_fp16_weight_prepack():
+    to_dtype_op = torch.ops.quantized_decomposed.convert_element_type.no_fuse
+    weight_pattern = CallFunction(
+        to_dtype_op,
+        CallFunction(
+            to_dtype_op,
+            KeywordArg("w"),
+            KeywordArg("dtype_fp16"),
+        ),
+        KeywordArg("dtype_fp32"),
+    )
+    cases = itertools.product(
+        [False, True],  # input_dim_exceeds_two
+        [True, False],  # input_contiguous
+        [False, True],  # relu fused
+    )
+    for input_dim_exceeds_two, input_contiguous, relu_fused in cases:
+        patterns = _generate_linear_dynamic_fp16_pattern(
+            weight_pattern,
+            input_dim_exceeds_two,
+            input_contiguous,
+            relu_fused,
+        )
+        for pattern in patterns:
+            _register_linear_dynamic_fp16_weight_prepack_pass(
+                pattern,
+                pass_number=0 if relu_fused else 1,
+                input_dim_exceeds_two=input_dim_exceeds_two,
+                input_contiguous=input_contiguous,
+                relu_fused=relu_fused,
+            )
+
+
 @functools.lru_cache(None)
 def _register_quantization_weight_pack_pass():
     # Step 1: Dequant promotion for int8-mixed-fp32/bf16
@@ -2549,6 +2812,7 @@ def _register_quantization_weight_pack_pass():
 
     # Step 3: QLinear weight prepack
     _register_qlinear_weight_prepack()
+    _register_linear_dynamic_fp16_weight_prepack()
 
 
 def quant_lift_up(graph_module: torch.fx.GraphModule):

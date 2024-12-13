@@ -798,8 +798,8 @@ class _NullDecorator(contextlib.nullcontext):  # type: ignore[type-arg]
 
 
 def check_if_dynamo_supported():
-    if sys.version_info >= (3, 13):
-        raise RuntimeError("Python 3.13+ not yet supported for torch.compile")
+    if sys.version_info >= (3, 14):
+        raise RuntimeError("Python 3.14+ not yet supported for torch.compile")
 
 
 def is_dynamo_supported():
@@ -992,7 +992,7 @@ def explain(f, *extra_args, **extra_kwargs):
         return inner
 
 
-class FlattenInputOutputSignature(torch.fx.interpreter.Transformer):
+class FlattenInputOutputSignature(torch.fx.Transformer):
     def __init__(
         self,
         m: torch.fx.GraphModule,
@@ -1503,6 +1503,7 @@ def export(
                 # NB: this is wrong if graph_captured_result has
                 # data-dependent output size!
                 ignore_fresh_unbacked = null_context()
+                assert ambient_fake_mode is not None
                 if shape_env := ambient_fake_mode.shape_env:
                     ignore_fresh_unbacked = shape_env.ignore_fresh_unbacked_symbols()
 
