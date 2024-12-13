@@ -367,6 +367,8 @@ class SymmetricMemoryTest(MultiProcessTestCase):
         os.environ["TORCH_SYMM_MEM_ENABLE_NATIVE_ASYNC_TP"] = "1"
         self._init_process()
 
+        # See _should_use_fused_all_gather_matmul_native() for the algo
+        # selection criteria of _fused_all_gather_matmul_native().
         M = 4096
         N = 1024
         K = 1024
@@ -404,6 +406,47 @@ class SymmetricMemoryTest(MultiProcessTestCase):
 
         self.assertTrue(
             any("PersistentAsyncInputScheduler" in event.key for event in prof.events())
+        )
+
+        torch.testing.assert_close(ag_target, ag_baseline)
+        torch.testing.assert_close(mm_target[0], mm_baseline[0])
+
+        dist.destroy_process_group()
+
+    @skipIfRocm
+    @skip_if_lt_x_gpu(2)
+    @requires_multicast_support()
+    def test_multimem_all_gather_matmul(self) -> None:
+        self._init_process()
+
+        # See _should_use_multimem_all_gather_matmul() for the algo
+        # selection criteria of _multimem_gather_matmul().
+        M = 1024
+        N = 1024
+        K = 1024
+        group_name = dist.group.WORLD.group_name
+
+        torch.manual_seed(42 + self.rank)
+        A_shard = torch.rand(
+            M // self.world_size, K, dtype=torch.bfloat16, device="cuda"
+        )
+
+        B = torch.rand(K, N, dtype=torch.bfloat16, device="cuda")
+
+        ag_baseline, mm_baseline = _fused_all_gather_matmul_fallback(
+            A_shard, [B], gather_dim=0, group_name=group_name, return_A=False
+        )
+        with torch.profiler.profile(
+            activities=[
+                torch.profiler.ProfilerActivity.CUDA,
+            ],
+        ) as prof:
+            ag_target, mm_target = torch.ops.symm_mem.fused_all_gather_matmul(
+                A_shard, [B], gather_dim=0, group_name=group_name, return_A=False
+            )
+
+        self.assertTrue(
+            any("multimem_all_gather_kernel" in event.key for event in prof.events())
         )
 
         torch.testing.assert_close(ag_target, ag_baseline)
