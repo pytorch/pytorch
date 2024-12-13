@@ -80,7 +80,8 @@ DynamicType::~DynamicType() {
 
 std::shared_ptr<const DynamicType> DynamicType::create(const Type& other) {
   if (auto dynRaw = other.castRaw<DynamicType>()) {
-    TORCH_INTERNAL_ASSERT(!dynRaw->weak_from_this().expired(),
+    TORCH_INTERNAL_ASSERT(
+        !dynRaw->weak_from_this().expired(),
         "Error creating dynamic type instance not managed by shared_ptr: ",
         other.str());
   }
@@ -92,7 +93,8 @@ std::shared_ptr<const DynamicType> DynamicType::create(const Type& other) {
 
 DynamicTypePtr DynamicType::create(Type& other) {
   if (auto dynRaw = other.castRaw<DynamicType>()) {
-    TORCH_INTERNAL_ASSERT(!dynRaw->weak_from_this().expired(),
+    TORCH_INTERNAL_ASSERT(
+        !dynRaw->weak_from_this().expired(),
         "Error creating dynamic type instance not managed by shared_ptr: ",
         other.str());
   }
@@ -258,11 +260,11 @@ TypePtr DynamicType::fallback() const {
         fallbacks.push_back(elem.ty->fallback());
       }
       if (name_) {
-        std::vector<c10::string_view> fields;
+        std::vector<std::string_view> fields;
         fields.reserve(arguments_.elems.size());
         for (const auto& elem : arguments_.elems) {
           // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
-          fields.emplace_back(*elem.label);
+          fields.emplace_back(elem.label.value());
         }
         return TupleType::createNamed(*name_, fields, fallbacks);
       }
@@ -292,7 +294,7 @@ TypePtr DynamicType::fallback() const {
       return StorageType::get();
     case Tag::Var:
       // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
-      return VarType::create(*name_);
+      return VarType::create(name_.value());
     case Tag::AnyClass:
       return AnyClassType::get();
     case Tag::QScheme:
@@ -382,7 +384,7 @@ TORCH_API TupleTypePtr ivalue::TupleTypeFactory<TupleType>::fallback(
   return nullptr;
 #else
   const auto& dyn = type.expectRef<DynamicType>();
-  std::vector<c10::string_view> fields;
+  std::vector<std::string_view> fields;
   std::vector<TypePtr> types;
 
   for (const auto& elem : dyn.arguments().elems) {

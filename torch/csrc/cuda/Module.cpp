@@ -536,6 +536,20 @@ PyObject* THCPModule_hasPrimaryContext(PyObject* _unused, PyObject* arg) {
   END_HANDLE_TH_ERRORS
 }
 
+PyObject* THCPModule_getMemoryFraction(PyObject* _unused, PyObject* args) {
+  HANDLE_TH_ERRORS
+  PyObject* device_o = nullptr;
+  if (!PyArg_ParseTuple(args, "O", &device_o)) {
+    THPUtils_invalidArguments(
+        args, nullptr, "get_memory_fraction", 1, "(int device);");
+    return nullptr;
+  }
+  auto device_index = THPUtils_unpackDeviceIndex(device_o);
+  return PyFloat_FromDouble(
+      c10::cuda::CUDACachingAllocator::getMemoryFraction(device_index));
+  END_HANDLE_TH_ERRORS
+}
+
 PyObject* THCPModule_setMemoryFraction(PyObject* _unused, PyObject* args) {
   HANDLE_TH_ERRORS
   PyObject* fraction_o = nullptr;
@@ -1004,6 +1018,12 @@ static void registerCudaDeviceProperties(PyObject* module) {
           "max_threads_per_multi_processor",
           &cudaDeviceProp::maxThreadsPerMultiProcessor)
       .def_readonly("warp_size", &cudaDeviceProp::warpSize)
+#ifndef USE_ROCM
+      // NVIDIA-only property
+      .def_readonly(
+          "shared_memory_per_multiprocessor",
+          &cudaDeviceProp::sharedMemPerMultiprocessor)
+#endif
 #if (defined(USE_ROCM) && ROCM_VERSION >= 60100) || !USE_ROCM
       .def_readonly(
           "regs_per_multiprocessor", &cudaDeviceProp::regsPerMultiprocessor)
@@ -1872,6 +1892,10 @@ static struct PyMethodDef _THCPModule_methods[] = {
      METH_NOARGS,
      nullptr},
     {"_cuda_hasPrimaryContext", THCPModule_hasPrimaryContext, METH_O, nullptr},
+    {"_cuda_getMemoryFraction",
+     THCPModule_getMemoryFraction,
+     METH_VARARGS,
+     nullptr},
     {"_cuda_setMemoryFraction",
      THCPModule_setMemoryFraction,
      METH_VARARGS,
