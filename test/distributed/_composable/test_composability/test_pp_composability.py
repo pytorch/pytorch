@@ -119,7 +119,7 @@ class ComposabilityTest(MultiProcessTestCase):
     )
     @parametrize("use_new_runtime", [False, True])
     def test_manual_with_data_parallel(self, dp_type, ScheduleClass, use_new_runtime):
-        device = torch.device("cuda", self.device)
+        _device_raii = torch.device("cuda", self.device)
         torch.cuda.set_device(self.device)
         store = torch.distributed.FileStore(self.file_name, self.world_size)
         torch.distributed.init_process_group(
@@ -398,7 +398,7 @@ class ComposabilityTest(MultiProcessTestCase):
         ],
     )
     def test_3d_with_tp_dp_pp(self, ScheduleClass, MixedPrecisionParam):
-        device = torch.device("cuda", self.device)
+        _device_raii = torch.device("cuda", self.device)
         torch.cuda.set_device(self.device)
         store = torch.distributed.FileStore(self.file_name, self.world_size)
         torch.distributed.init_process_group(
