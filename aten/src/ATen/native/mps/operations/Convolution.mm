@@ -372,7 +372,6 @@ static Tensor mps_convolution_backward_input(IntArrayRef input_size,
   using namespace at::native::mps;
   using namespace mps;
   bool is3DConv = grad_output_t.dim() == 5;
-  const auto has_strided_api = is_macos_13_or_newer(MacOSVersion::MACOS_VER_15_0_PLUS);
 
   if (!is_macos_13_or_newer(MacOSVersion::MACOS_VER_15_1_PLUS)) {
     // On macOS < 15.1, MPS convolution kernel does not support output channels > 2^16
