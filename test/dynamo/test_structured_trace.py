@@ -208,6 +208,20 @@ class StructuredTraceTest(TestCase):
         finally:
             shutil.rmtree(out, ignore_errors=True)
 
+    def test_compile_id_serialization_deserialization(self):
+        cid = torch._guards.CompileId(
+            frame_id=1,
+            frame_compile_id=2,
+        )
+        assert cid == torch._guards.CompileId.from_string(str(cid))
+
+        cid = torch._guards.CompileId(
+            compiled_autograd_id=1,
+            frame_id=2,
+            frame_compile_id=3,
+        )
+        assert cid == torch._guards.CompileId.from_string(str(cid))
+
     @requires_cuda
     def test_schedule(self):
         fn_opt = torch.compile(inductor_schedule_fn, backend="inductor")
