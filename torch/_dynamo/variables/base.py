@@ -1,10 +1,9 @@
 # mypy: ignore-errors
 
 import collections
+import functools
 from enum import Enum
 from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING
-
-import torch
 
 from .. import variables
 from ..current_scope_id import current_scope_id
@@ -16,6 +15,19 @@ from ..utils import istype
 
 if TYPE_CHECKING:
     from .symbolic_convert import InstructionTranslator, InstructionTranslatorBase
+
+
+@functools.cache
+def _lazy_import():
+    import importlib
+
+    globals()["builder"] = importlib.import_module(".builder", __package__)
+
+
+if TYPE_CHECKING:
+    # TCH004 complains about used imports in a TYPE_CHECKING block because RUFF
+    # doesn't understand that we're getting them from _lazy_import() above.
+    from . import builder  # noqa: TCH004
 
 
 class SourceType(Enum):
@@ -185,11 +197,10 @@ class VariableTrackerMeta(type):
 
     def __instancecheck__(cls, instance) -> bool:
         """Make isinstance work with LazyVariableTracker"""
-        if type.__instancecheck__(
-            variables.LazyVariableTracker, instance
-        ) and cls not in (
-            VariableTracker,
-            variables.LazyVariableTracker,
+        # This is super expensive - just having it costs over 4% of tracing
+        # time!
+        if (type(instance) is variables.LazyVariableTracker) and (
+            cls not in (VariableTracker, variables.LazyVariableTracker)
         ):
             instance = instance.realize()
         return type.__instancecheck__(cls, instance)
@@ -451,7 +462,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         source: Optional[Source] = None,
     ) -> Any:
         """Create a new VariableTracker from a value and optional Source"""
-        builder = torch._dynamo.variables.builder
+        _lazy_import()
         if source is None:
             return builder.SourcelessBuilder.create(tx, value)
         else:
