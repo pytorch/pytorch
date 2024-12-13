@@ -418,7 +418,7 @@ def dynamo_timed(
                 dynamo_compile_runtime_column_us,
                 time_spent_ns // 1000,
                 extra={
-                    "compile_id": str(compile_id),
+                    "compile_id": compile_id,
                     "is_runtime": True,
                     "is_forward": is_forward,
                 },
@@ -1059,9 +1059,8 @@ def record_compilation_metrics(
 
     # Populate the compile_id from the metrics context if it's set. Otherwise
     # look for it in the compile context.
-    if compile_id_str := metrics.get("compile_id"):
-        compile_id = CompileId.from_string(compile_id_str)
-    else:
+    compile_id = metrics.get("compile_id")
+    if not compile_id:
         compile_id = torch._guards.CompileContext.current_compile_id()
 
     common_metrics = {
