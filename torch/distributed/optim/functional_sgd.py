@@ -99,6 +99,7 @@ class _FunctionalSGD:
                 fused=self.fused,
                 grad_scale=None,
                 found_inf=None,
+                differentiable=False,
             )
         # update momentum_buffer in state
         state = self.state[param]
@@ -156,6 +157,7 @@ class _FunctionalSGD:
                 fused=self.fused,
                 grad_scale=None,
                 found_inf=None,
+                differentiable=False,
             )
 
         # update momentum_buffers in state
