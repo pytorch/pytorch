@@ -549,9 +549,9 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, int64_t> _batch_norm_impl_index(
   // See [Note: hacky wrapper removal for optional tensor]
   c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
   const Tensor& weight = *weight_maybe_owned;
-  const Tensor& bias = c10::value_or_else(bias_opt, [] {return Tensor();});
-  const Tensor& running_mean = c10::value_or_else(running_mean_opt, [] {return Tensor();});
-  const Tensor& running_var = c10::value_or_else(running_var_opt, [] {return Tensor();});
+  const Tensor& bias = bias_opt.value_or(Tensor());
+  const Tensor& running_mean = running_mean_opt.value_or(Tensor());
+  const Tensor& running_var = running_var_opt.value_or(Tensor());
 
   auto num_features = input.sym_sizes()[1];
 
@@ -631,10 +631,10 @@ std::tuple<Tensor, Tensor, Tensor> _batch_norm_impl_index_backward(
   // See [Note: hacky wrapper removal for optional tensor]
   c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
   const Tensor& weight = *weight_maybe_owned;
-  const Tensor& running_mean = c10::value_or_else(running_mean_opt, [] {return Tensor();});
-  const Tensor& running_var = c10::value_or_else(running_var_opt, [] {return Tensor();});
-  const Tensor& save_mean = c10::value_or_else(save_mean_opt, [] {return Tensor();});
-  const Tensor& save_var_transform = c10::value_or_else(save_var_transform_opt, [] {return Tensor();});
+  const Tensor& running_mean = running_mean_opt.value_or(Tensor());
+  const Tensor& running_var = running_var_opt.value_or(Tensor());
+  const Tensor& save_mean = save_mean_opt.value_or(Tensor());
+  const Tensor& save_var_transform = save_var_transform_opt.value_or(Tensor());
 
   if (input.numel() == 0) {
     std::vector<int64_t> dims(input.dim() - 1);
@@ -675,10 +675,10 @@ Tensor batch_norm(
     const Tensor& input, const std::optional<Tensor>& weight_opt, const std::optional<Tensor>& bias_opt,
     const std::optional<Tensor>& running_mean_opt, const std::optional<Tensor>& running_var_opt,
     bool training, double momentum, double eps, bool cudnn_enabled) {
-  const Tensor& weight = c10::value_or_else(weight_opt, [] {return Tensor();});
-  const Tensor& bias = c10::value_or_else(bias_opt, [] {return Tensor();});
-  const Tensor& running_mean = c10::value_or_else(running_mean_opt, [] {return Tensor();});
-  const Tensor& running_var = c10::value_or_else(running_var_opt, [] {return Tensor();});
+  const Tensor& weight = weight_opt.value_or(Tensor());
+  const Tensor& bias = bias_opt.value_or(Tensor());
+  const Tensor& running_mean = running_mean_opt.value_or(Tensor());
+  const Tensor& running_var = running_var_opt.value_or(Tensor());
   return std::get<0>(at::_batch_norm_impl_index(input, weight, bias, running_mean, running_var,
                                                 training, momentum, eps, cudnn_enabled));
   // TODO: switch to the new stack after the 2 week FC window
@@ -713,9 +713,9 @@ Tensor instance_norm(
   // See [Note: hacky wrapper removal for optional tensor]
   c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
   const Tensor& weight = *weight_maybe_owned;
-  const Tensor& bias = c10::value_or_else(bias_opt, [] {return Tensor();});
-  const Tensor& running_mean = c10::value_or_else(running_mean_opt, [] {return Tensor();});
-  const Tensor& running_var = c10::value_or_else(running_var_opt, [] {return Tensor();});
+  const Tensor& bias = bias_opt.value_or(Tensor());
+  const Tensor& running_mean = running_mean_opt.value_or(Tensor());
+  const Tensor& running_var = running_var_opt.value_or(Tensor());
 
  TORCH_CHECK(use_input_stats || (running_mean.defined() && running_var.defined()),
            "Expected running_mean and running_var to be defined when use_input_stats is false");
@@ -750,7 +750,7 @@ std::tuple<Tensor, Tensor> batch_norm_update_stats_cpu(
   // See [Note: hacky wrapper removal for optional tensor]
   c10::MaybeOwned<Tensor> running_mean_maybe_owned = at::borrow_from_optional_tensor(running_mean_opt);
   const Tensor& running_mean = *running_mean_maybe_owned;
-  const Tensor& running_var = c10::value_or_else(running_var_opt, [] {return Tensor();});
+  const Tensor& running_var = running_var_opt.value_or(Tensor());
 
   const bool mixed_type = is_mixed_type(self, running_mean, running_var);
   return AT_DISPATCH_FLOATING_TYPES_AND2(ScalarType::BFloat16, ScalarType::Half, self.scalar_type(), "batch_norm_update_stats_cpu", [&] {
@@ -769,9 +769,9 @@ std::tuple<Tensor&, Tensor&, Tensor&> batch_norm_cpu_out(const Tensor& self, con
   // See [Note: hacky wrapper removal for optional tensor]
   c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
   const Tensor& weight = *weight_maybe_owned;
-  const Tensor& bias = c10::value_or_else(bias_opt, [] {return Tensor();});
-  const Tensor& running_mean = c10::value_or_else(running_mean_opt, [] {return Tensor();});
-  const Tensor& running_var = c10::value_or_else(running_var_opt, [] {return Tensor();});
+  const Tensor& bias = bias_opt.value_or(Tensor());
+  const Tensor& running_mean = running_mean_opt.value_or(Tensor());
+  const Tensor& running_var = running_var_opt.value_or(Tensor());
 
   checkBackend("batch_norm_cpu_out", {self, weight, bias, running_mean, running_var}, Backend::CPU);
   // Resize out
@@ -812,9 +812,9 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_cpu(const Tensor& self, const std:
   // See [Note: hacky wrapper removal for optional tensor]
   c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
   const Tensor& weight = *weight_maybe_owned;
-  const Tensor& bias = c10::value_or_else(bias_opt, [] {return Tensor();});
-  const Tensor& running_mean = c10::value_or_else(running_mean_opt, [] {return Tensor();});
-  const Tensor& running_var = c10::value_or_else(running_var_opt, [] {return Tensor();});
+  const Tensor& bias = bias_opt.value_or(Tensor());
+  const Tensor& running_mean = running_mean_opt.value_or(Tensor());
+  const Tensor& running_var = running_var_opt.value_or(Tensor());
 
   checkBackend("batch_norm_cpu", {self, weight, bias, running_mean, running_var}, Backend::CPU);
 
@@ -879,8 +879,8 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> _batch_norm_no_update(
     const Tensor& input, const std::optional<Tensor>& weight_opt, const std::optional<Tensor>& bias_opt,
     const std::optional<Tensor>& running_mean_opt, const std::optional<Tensor>& running_var_opt,
     double momentum, double eps) {
-  const Tensor& running_mean = c10::value_or_else(running_mean_opt, [] {return Tensor();});
-  const Tensor& running_var = c10::value_or_else(running_var_opt, [] {return Tensor();});
+  const Tensor& running_mean = running_mean_opt.value_or(Tensor());
+  const Tensor& running_var = running_var_opt.value_or(Tensor());
   auto [output, save_mean, save_var] =
     batch_norm_cpu(input, weight_opt, bias_opt, const_cast<Tensor&>(running_mean), const_cast<Tensor&>(running_var), /*update*/false, momentum, eps);
   Tensor reserve = at::empty({0}, input.options().dtype(kByte));
@@ -927,10 +927,10 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_cpu(const Tensor& grad_ou
   // See [Note: hacky wrapper removal for optional tensor]
   c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
   const Tensor& weight = *weight_maybe_owned;
-  const Tensor& running_mean = c10::value_or_else(running_mean_opt, [] {return Tensor();});
-  const Tensor& running_var = c10::value_or_else(running_var_opt, [] {return Tensor();});
-  const Tensor& save_mean = c10::value_or_else(save_mean_opt, [] {return Tensor();});
-  const Tensor& save_invstd = c10::value_or_else(save_invstd_opt, [] {return Tensor();});
+  const Tensor& running_mean = running_mean_opt.value_or(Tensor());
+  const Tensor& running_var = running_var_opt.value_or(Tensor());
+  const Tensor& save_mean = save_mean_opt.value_or(Tensor());
+  const Tensor& save_invstd = save_invstd_opt.value_or(Tensor());
 
   const bool mixed_type = is_mixed_type(self, weight, running_mean, running_var, save_mean, save_invstd);
   return AT_DISPATCH_FLOATING_TYPES_AND2(ScalarType::BFloat16, ScalarType::Half, self.scalar_type(), "batch_norm_backward_cpu", [&] {

@@ -25,6 +25,7 @@ Tensor random_batching_rule(SymIntArrayRef shape, ExtraArgs... extra_args) {
   c10::SmallVector<SymInt> shapeVec(1, maybe_layer->batchSize());
   shapeVec.reserve(shape.size() + 1);
   shapeVec.insert(shapeVec.end(), shape.begin(), shape.end());
+  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
   RandomnessType randomness = maybe_layer->randomness();
   check_randomness(randomness);
   if (randomness == RandomnessType::Different) {
@@ -38,9 +39,11 @@ template <typename F, F Func, typename... ExtraArgs>
 Tensor& random_inplace_batching_rule(Tensor& self, ExtraArgs... extra_args) {
   c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchVmapMode);
   auto maybe_layer = maybeCurrentDynamicLayer();
+  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
   const auto cur_level = maybe_layer->layerId();
   auto [self_value, self_bdim] = unwrapTensorAtLevel(self, cur_level);
-  self_value = moveBatchDimToFront(self_value, self_bdim);
+  self_value = moveBatchDimToFront(std::move(self_value), self_bdim);
+  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
   RandomnessType randomness = maybe_layer->randomness();
   check_randomness(randomness);
   TORCH_CHECK(
@@ -211,6 +214,11 @@ static std::tuple<Tensor,Tensor> native_dropout_batching_rule(const Tensor& tens
   mask.bernoulli_(p1m);
   const auto output = tensor.mul(mask).mul_(scale);
   return std::make_tuple(output, mask);
+}
+
+static Tensor native_dropout_backward_batch_rule(const Tensor& grad_out, const Tensor& mask, double scale){
+  Tensor result = grad_out * mask * scale;
+  return result;
 }
 
 static Tensor multinomial_batching_rule(const Tensor& self, const int64_t num_samples, const bool replacement, std::optional<Generator> generator) {
@@ -462,6 +470,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchVmapMode, m) {
   UNARY_POINTWISE_RANDOM_LEADING_FLOAT(normal, float_Tensor);
 
   m.impl("native_dropout", native_dropout_batching_rule); // needs special casing because cuda version doesn't call bernoulli
+  m.impl("native_dropout_backward", native_dropout_backward_batch_rule);
 
   UNARY_POINTWISE_RANDOM(_standard_gamma);
   UNARY_POINTWISE_RANDOM(_sample_dirichlet);

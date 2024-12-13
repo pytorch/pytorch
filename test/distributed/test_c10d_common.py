@@ -323,7 +323,7 @@ class CommonDistributedDataParallelTest:
         # Use this hack to remove files for that test
         try:
             os.remove(self.file_name)
-        except OSError:
+        except (OSError, AttributeError):
             pass
 
     @property
@@ -1775,11 +1775,20 @@ class PythonProcessGroupExtensionTest(MultiProcessTestCase):
 
         with self.assertRaises(ValueError):
             dist.send(input_tensor, dist.get_rank())
+        with self.assertRaises(ValueError):
+            dist.send(input_tensor, group_dst=dist.get_rank())
+
+        with self.assertRaises(ValueError):
+            dist.send(input_tensor, dist.get_rank(), group_dst=dist.get_rank())
+        with self.assertRaises(ValueError):
+            dist.send(input_tensor)
 
         # test recv
         input_tensor = torch.zeros(2, 2)
         dist.recv(input_tensor, (self.rank + 1) % self.world_size)
         self.assertEqual(input_tensor, torch.zeros(2, 2) + 2)
+        with self.assertRaises(ValueError):
+            dist.recv(input_tensor, src=0, group_src=0)
 
         dist.barrier()
         # intentionally not calling into `destroy_process_group` as not all
@@ -1833,6 +1842,9 @@ class ProcessGroupWithDispatchedCollectivesTests(MultiProcessTestCase):
                     continue
             elif backend == dist.Backend.UCC:
                 if not dist.is_ucc_available():
+                    continue
+            elif backend == dist.Backend.XCCL:
+                if not dist.is_xccl_available():
                     continue
             # Multi-threaded PG is defined as a pure python class.
             # Its pg.name() does not going through Pybind, so its backend name
@@ -1930,6 +1942,10 @@ class ProcessGroupWithDispatchedCollectivesTests(MultiProcessTestCase):
         input_tensor = torch.ones(2, 2, device=torch.device(device))
         output_tensor = torch.zeros(2, 2, device=torch.device(device))
         dist.all_to_all_single(output_tensor, input_tensor)
+
+        input_tensor = input_tensor.t()
+        with self.assertRaisesRegex(ValueError, "Tensors must be contiguous"):
+            dist.all_to_all_single(output_tensor, input_tensor)
 
 
 class ReduceOpTest(TestCase):

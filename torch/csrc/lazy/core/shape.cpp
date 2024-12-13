@@ -8,7 +8,7 @@
 C10_DEFINE_bool(
     ltc_enable_symbolic_shapes,
     false,
-    "Enables calculation of if dims are symbolic");
+    "Enables calculation of if dims are symbolic")
 
 namespace torch::lazy {
 

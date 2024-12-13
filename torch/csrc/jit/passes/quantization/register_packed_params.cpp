@@ -7,8 +7,7 @@
 #include <torch/csrc/jit/passes/quantization/helper.h>
 #include <torch/csrc/jit/passes/quantization/register_packed_params.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 namespace {
 bool isPrepackNode(Node* n) {
@@ -144,5 +143,4 @@ std::unordered_set<std::string> RegisterPrePackParams(
   return packed_param_names;
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

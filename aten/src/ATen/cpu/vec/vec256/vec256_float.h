@@ -35,6 +35,8 @@ public:
          float val5, float val6, float val7, float val8) {
     values = _mm256_setr_ps(val1, val2, val3, val4, val5, val6, val7, val8);
   }
+  Vectorized(const float (&arr)[8])
+      : Vectorized(arr[0], arr[1], arr[2], arr[3], arr[4], arr[5], arr[6], arr[7]) {}
   operator __m256() const {
     return values;
   }

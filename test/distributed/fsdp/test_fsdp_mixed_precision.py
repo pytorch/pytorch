@@ -13,7 +13,6 @@ import torch.cuda.nccl as nccl
 import torch.nn as nn
 import torch.nn.functional as F
 from torch import distributed as dist
-from torch.distributed._composable import fully_shard
 from torch.distributed.fsdp import (
     BackwardPrefetch,
     CPUOffload,
@@ -23,7 +22,6 @@ from torch.distributed.fsdp import (
 )
 from torch.distributed.fsdp.sharded_grad_scaler import ShardedGradScaler
 from torch.distributed.fsdp.wrap import ModuleWrapPolicy, size_based_auto_wrap_policy
-from torch.nn import TransformerDecoderLayer, TransformerEncoderLayer
 from torch.nn.modules.batchnorm import _BatchNorm
 from torch.optim.swa_utils import AveragedModel
 from torch.testing._internal.common_distributed import (
@@ -262,21 +260,6 @@ class TestFSDPMixedPrecision(FSDPTest):
             *fsdp_args,
             **fsdp_kwargs,
         )
-        return model
-
-    def _get_simple_nested_model_composable(
-        self, param_dtype, run_checks, *fsdp_args, **fsdp_kwargs
-    ):
-        model = nn.Sequential(
-            LinearMixedPrecision(
-                param_dtype, buffer_name="buffer0", run_checks=run_checks
-            ).cuda(),
-            LinearMixedPrecision(
-                param_dtype, buffer_name="buffer1", run_checks=run_checks
-            ).cuda(),
-        )
-        fully_shard(model[0], *fsdp_args, **fsdp_kwargs)
-        fully_shard(model, *fsdp_args, **fsdp_kwargs)
         return model
 
     def _get_simple_model(self, param_dtype, *fsdp_args, **fsdp_kwargs):
@@ -811,10 +794,9 @@ class TestFSDPMixedPrecisionSharded(TestFSDPMixedPrecision):
         Tests that eval runs in full precision if FSDP_USE_FULL_PREC_IN_EVAL is set.
         """
         for (
-            use_composable,
             cast_forward_inputs,
             use_full_prec_in_eval,
-        ) in itertools.product([True, False], [True, False], [True, False]):
+        ) in itertools.product([True, False], [True, False]):
             mp_config = MixedPrecision(
                 param_dtype=torch.float16,
                 reduce_dtype=torch.float16,
@@ -826,25 +808,16 @@ class TestFSDPMixedPrecisionSharded(TestFSDPMixedPrecision):
             )
             model = TransformerWithSharedParams.init(
                 self.process_group,
-                FSDPInitMode.NO_FSDP if use_composable else FSDPInitMode.RECURSIVE,
+                FSDPInitMode.RECURSIVE,
                 DEVICEInitMode.DEVICE_BEFORE,
                 {"mixed_precision": mp_config},
             )
-            if use_composable:
-                auto_wrap_policy = ModuleWrapPolicy(
-                    {
-                        TransformerEncoderLayer,
-                        TransformerDecoderLayer,
-                    }
-                )
-                fully_shard(model, policy=auto_wrap_policy, mixed_precision=mp_config)
-            module_accessor = model if use_composable else model
-            inp = module_accessor.get_input(torch.device("cuda"))
+            inp = model.get_input(torch.device("cuda"))
             output = model(*inp)
-            loss = module_accessor.get_loss(inp, output).cuda()
+            loss = model.get_loss(inp, output).cuda()
             # Loss should be in fp16
             self.assertEqual(torch.float16, loss.dtype)
-            module_accessor.run_backward(loss)
+            model.run_backward(loss)
             # Grads should be in fp32 as we upcast them
             for p in model.parameters():
                 if p.grad is not None:
@@ -852,9 +825,9 @@ class TestFSDPMixedPrecisionSharded(TestFSDPMixedPrecision):
 
             # Now in eval mode, loss should be fp32 if use_full_prec_in_eval is set.
             model.eval()
-            inp = module_accessor.get_input(torch.device("cuda"))
+            inp = model.get_input(torch.device("cuda"))
             output = model(*inp)
-            loss = module_accessor.get_loss(inp, output).cuda()
+            loss = model.get_loss(inp, output).cuda()
             expected_dtype = torch.float32 if use_full_prec_in_eval else torch.float16
             self.assertEqual(expected_dtype, loss.dtype)
 
@@ -865,10 +838,9 @@ class TestFSDPMixedPrecisionSharded(TestFSDPMixedPrecision):
         buffers are in the full precision.
         """
         for (
-            use_composable,
             cast_forward_inputs,
             use_full_prec_in_eval,
-        ) in itertools.product([True, False], [True, False], [True, False]):
+        ) in itertools.product([True, False], [True, False]):
             os.environ["FSDP_USE_FULL_PREC_IN_EVAL"] = (
                 "1" if use_full_prec_in_eval else "0"
             )
@@ -878,11 +850,7 @@ class TestFSDPMixedPrecisionSharded(TestFSDPMixedPrecision):
                 buffer_dtype=torch.float16,
                 cast_forward_inputs=cast_forward_inputs,
             )
-            model_getter = (
-                self._get_simple_nested_model_composable
-                if use_composable
-                else self._get_simple_nested_model
-            )
+            model_getter = self._get_simple_nested_model
             fsdp_model = model_getter(
                 param_dtype=torch.float32,
                 run_checks=False,
@@ -938,10 +906,9 @@ class TestFSDPMixedPrecisionSharded(TestFSDPMixedPrecision):
     @skip_if_lt_x_gpu(2)
     def test_full_precision_in_eval_comm(self):
         for (
-            use_composable,
             cast_forward_inputs,
             use_full_prec_in_eval,
-        ) in itertools.product([True, False], [True, False], [True, False]):
+        ) in itertools.product([True, False], [True, False]):
             os.environ["FSDP_USE_FULL_PREC_IN_EVAL"] = (
                 "1" if use_full_prec_in_eval else "0"
             )
@@ -956,19 +923,10 @@ class TestFSDPMixedPrecisionSharded(TestFSDPMixedPrecision):
             )
             model = TransformerWithSharedParams.init(
                 self.process_group,
-                FSDPInitMode.NO_FSDP if use_composable else FSDPInitMode.RECURSIVE,
+                FSDPInitMode.RECURSIVE,
                 DEVICEInitMode.DEVICE_BEFORE,
                 {"mixed_precision": mp_config},
             )
-            if use_composable:
-                auto_wrap_policy = ModuleWrapPolicy(
-                    {
-                        TransformerEncoderLayer,
-                        TransformerDecoderLayer,
-                    }
-                )
-                fully_shard(model, policy=auto_wrap_policy, mixed_precision=mp_config)
-            model_accessor = model if use_composable else model.module
             # Patch reduce_scatter to add validation for mixed precision types.
             orig_reduce_scatter = dist.reduce_scatter_tensor
             test_reduce_scatter = partial(
@@ -979,10 +937,10 @@ class TestFSDPMixedPrecisionSharded(TestFSDPMixedPrecision):
             )
             model.eval()
             with patch_reduce_scatter(test_reduce_scatter, torch.float32):
-                inp = model_accessor.get_input(torch.device("cuda"))
+                inp = model.get_input(torch.device("cuda"))
                 output = model(*inp)
-                loss = model_accessor.get_loss(inp, output).cuda()
-                model_accessor.run_backward(loss)
+                loss = model.get_loss(inp, output).cuda()
+                model.run_backward(loss)
 
     @skip_if_lt_x_gpu(2)
     def test_input_grads_with_param_mixed_precision(self):

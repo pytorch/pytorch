@@ -5,6 +5,7 @@ import copy
 import glob
 import json
 import os
+import platform
 import re
 import shutil
 import signal
@@ -84,6 +85,7 @@ RERUN_DISABLED_TESTS = os.getenv("PYTORCH_TEST_RERUN_DISABLED_TESTS", "0") == "1
 DISTRIBUTED_TEST_PREFIX = "distributed"
 INDUCTOR_TEST_PREFIX = "inductor"
 IS_SLOW = "slow" in TEST_CONFIG or "slow" in BUILD_ENVIRONMENT
+IS_S390X = platform.machine() == "s390x"
 
 
 # Note [ROCm parallel CI testing]
@@ -181,6 +183,334 @@ ROCM_BLOCKLIST = [
     "test_cuda_nvml_based_avail",
     "test_jit_cuda_fuser",
     "distributed/_tensor/test_attention",
+]
+
+# whitelist of tests for s390x
+S390X_TESTLIST = [
+    "backends/xeon/test_launch.py",
+    "benchmark_utils/test_benchmark_utils.py",
+    "cpp/apply_utils_test",
+    "cpp/atest",
+    "cpp/basic",
+    "cpp/broadcast_test",
+    "cpp/cpu_generator_test",
+    "cpp/Dict_test",
+    "cpp/Dimname_test",
+    "cpp/dlconvertor_test",
+    "cpp/extension_backend_test",
+    "cpp/lazy_tensor_test",
+    "cpp/legacy_vmap_test",
+    "cpp/NamedTensor_test",
+    "cpp/native_test",
+    "cpp/operators_test",
+    "cpp/scalar_tensor_test",
+    "cpp/scalar_test",
+    "cpp/tensor_iterator_test",
+    "cpp/test_api",
+    "cpp/undefined_tensor_test",
+    "cpp/wrapdim_test",
+    "distributions/test_constraints",
+    "doctests",
+    "dynamo/test_activation_checkpointing",
+    "dynamo/test_after_aot",
+    "dynamo/test_aot_autograd",
+    "dynamo/test_aot_autograd_cache",
+    "dynamo/test_autograd_function",
+    "dynamo/test_backends",
+    "dynamo/test_backward_higher_order_ops",
+    "dynamo/test_base_output",
+    "dynamo/test_bytecode_utils",
+    "dynamo/test_compile",
+    "dynamo/test_comptime",
+    "dynamo/test_config",
+    "dynamo/test_ctx_manager",
+    "dynamo/test_cudagraphs",
+    "dynamo/test_cudagraphs_expandable_segments",
+    "dynamo/test_debug_utils",
+    "dynamo/test_decorators",
+    "dynamo/test_deviceguard",
+    "dynamo/test_export",
+    "dynamo/test_export_mutations",
+    "dynamo/test_frame_init",
+    "dynamo/test_fx_passes_pre_grad",
+    "dynamo/test_global",
+    "dynamo/test_guard_manager",
+    "dynamo/test_higher_order_ops",
+    "dynamo/test_hooks",
+    "dynamo/test_input_attr_tracking",
+    "dynamo/test_interop",
+    "dynamo/test_logging",
+    "dynamo/test_minifier",
+    "dynamo/test_model_output",
+    "dynamo/test_modes",
+    "dynamo/test_modules",
+    "dynamo/test_nops",
+    "dynamo/test_optimizers",
+    "dynamo/test_pre_dispatch",
+    "dynamo/test_profiler",
+    "dynamo/test_python_autograd",
+    "dynamo/test_recompiles",
+    "dynamo/test_recompile_ux",
+    "dynamo/test_reconstruct",
+    "dynamo/test_reorder_logs",
+    "dynamo/test_repros",
+    "dynamo/test_resume",
+    "dynamo/test_sdpa",
+    "dynamo/test_skip_non_tensor",
+    "dynamo/test_sources",
+    "dynamo/test_structured_trace",
+    "dynamo/test_subclasses",
+    "dynamo/test_subgraphs",
+    "dynamo/test_torchrec",
+    "dynamo/test_unspec",
+    "dynamo/test_utils",
+    "dynamo/test_verify_correctness",
+    "dynamo/test_view",
+    "export/test_db",
+    "export/test_experimental",
+    "export/test_export",
+    "export/test_export_nonstrict",
+    "export/test_export_training_ir_to_run_decomp",
+    "export/test_functionalized_assertions",
+    "export/test_hop",
+    "export/test_lift_unlift",
+    "export/test_passes",
+    "export/test_pass_infra",
+    "export/test_retraceability",
+    "export/test_schema",
+    "export/test_serdes",
+    "export/test_serialize",
+    "export/test_sparse",
+    "export/test_swap",
+    "export/test_tools",
+    "export/test_torchbind",
+    "export/test_tree_utils",
+    "export/test_unflatten",
+    "export/test_unflatten_training_ir",
+    "export/test_verifier",
+    "functorch/test_ac",
+    "functorch/test_control_flow",
+    "functorch/test_eager_transforms",
+    "functorch/test_logging",
+    "functorch/test_minifier",
+    "higher_order_ops/test_with_effects.py",
+    "inductor/test_auto_functionalize",
+    "inductor/test_autoheuristic",
+    "inductor/test_b2b_gemm",
+    "inductor/test_benchmarking",
+    "inductor/test_ck_backend",
+    "inductor/test_codecache",
+    "inductor/test_codegen_triton",
+    "inductor/test_combo_kernels",
+    "inductor/test_compiled_autograd",
+    "inductor/test_compiled_optimizers",
+    "inductor/test_compile_worker",
+    "inductor/test_config",
+    "inductor/test_control_flow",
+    "inductor/test_coordinate_descent_tuner",
+    "inductor/test_cpp_wrapper_hipify",
+    "inductor/test_cpu_cpp_wrapper",
+    "inductor/test_cuda_cpp_wrapper",
+    "inductor/test_cudagraph_trees",
+    "inductor/test_cudagraph_trees_expandable_segments",
+    "inductor/test_cuda_repro",
+    "inductor/test_custom_lowering",
+    "inductor/test_cutlass_backend",
+    "inductor/test_debug_trace",
+    "inductor/test_decompose_mem_bound_mm",
+    "inductor/test_dependencies",
+    "inductor/test_distributed_patterns",
+    "inductor/test_efficient_conv_bn_eval",
+    "inductor/test_extension_backend",
+    "inductor/test_external_callables",
+    "inductor/test_flex_attention",
+    "inductor/test_flex_decoding",
+    "inductor/test_foreach",
+    "inductor/test_fp8",
+    "inductor/test_fx_fusion",
+    "inductor/test_graph_transform_observer",
+    "inductor/test_group_batch_fusion",
+    "inductor/test_halide",
+    "inductor/test_indexing",
+    "inductor/test_inductor_freezing",
+    "inductor/test_loop_ordering",
+    "inductor/test_memory",
+    "inductor/test_memory_planning",
+    "inductor/test_metrics",
+    "inductor/test_minifier",
+    "inductor/test_minifier_isolate",
+    "inductor/test_mmdecomp",
+    "inductor/test_padding",
+    "inductor/test_pad_mm",
+    "inductor/test_profiler",
+    "inductor/test_scatter_optimization",
+    "inductor/test_smoke",
+    "inductor/test_standalone_compile",
+    "inductor/test_torchbind",
+    "inductor/test_triton_cpu_backend",
+    "inductor/test_triton_extension_backend",
+    "inductor/test_triton_heuristics",
+    "inductor/test_triton_kernels",
+    "inductor/test_utils",
+    "inductor/test_xpu_basic",
+    "lazy/test_bindings",
+    "lazy/test_debug_util",
+    "lazy/test_extract_compiled_graph",
+    "lazy/test_functionalization",
+    "lazy/test_generator",
+    "lazy/test_reuse_ir",
+    "lazy/test_step_closures",
+    "lazy/test_ts_opinfo",
+    "nn/test_convolution.py",
+    "nn/test_dropout.py",
+    "nn/test_embedding.py",
+    "nn/test_init.py",
+    "nn/test_lazy_modules.py",
+    "nn/test_load_state_dict.py",
+    "nn/test_module_hooks.py",
+    "nn/test_multihead_attention.py",
+    "nn/test_packed_sequence.py",
+    "nn/test_parametrization.py",
+    "nn/test_pooling.py",
+    "nn/test_pruning.py",
+    "optim/test_lrscheduler",
+    "optim/test_swa_utils",
+    "profiler/test_cpp_thread",
+    "profiler/test_execution_trace",
+    "profiler/test_memory_profiler",
+    "profiler/test_record_function",
+    "profiler/test_torch_tidy",
+    "test_autocast",
+    "test_autograd",
+    "test_autograd_fallback",
+    "test_autoload",
+    "test_autoload_disable",
+    "test_autoload_enable",
+    "test_bundled_inputs",
+    "test_comparison_utils",
+    "test_compile_benchmark_util",
+    "test_complex",
+    "test_content_store",
+    "test_cpp_api_parity",
+    "test_cpp_extensions_aot_ninja",
+    "test_cpp_extensions_aot_no_ninja",
+    "test_cpp_extensions_jit",
+    "test_cpp_extensions_mtia_backend",
+    "test_cpp_extensions_stream_and_event",
+    "test_cuda",
+    "test_cuda_expandable_segments",
+    "test_cuda_multigpu",
+    "test_cuda_nvml_based_avail",
+    "test_cuda_primary_ctx",
+    "test_cuda_sanitizer",
+    "test_cuda_trace",
+    "test_custom_ops",
+    "test_datapipe",
+    "test_deploy",
+    "test_dispatch",
+    "test_dlpack",
+    "test_dynamic_shapes",
+    "test_expanded_weights",
+    "test_fake_tensor",
+    "test_file_check",
+    "test_flop_counter",
+    "test_functionalization",
+    "test_functionalization_of_rng_ops",
+    "test_functional_optim",
+    "test_function_schema",
+    "test_futures",
+    "test_hub",
+    "test_import_stats",
+    "test_indexing",
+    "test_itt",
+    "test_legacy_vmap",
+    "test_logging",
+    "test_masked",
+    "test_maskedtensor",
+    "test_matmul_cuda",
+    "test_mkldnn",
+    "test_mkldnn_fusion",
+    "test_mkldnn_verbose",
+    "test_mkl_verbose",
+    "test_mobile_optimizer",
+    "test_model_exports_to_core_aten",
+    "test_module_tracker",
+    "test_monitor",
+    "test_namedtuple_return_api",
+    "test_native_mha",
+    "test_nestedtensor",
+    "test_numba_integration",
+    "test_numpy_interop",
+    "test_openmp",
+    "test_out_dtype_op",
+    "test_overrides",
+    "test_package",
+    "test_per_overload_api",
+    "test_prims",
+    "test_pruning_op",
+    "test_python_dispatch",
+    "test_scatter_gather_ops",
+    "test_segment_reductions",
+    "test_serialization",
+    "test_set_default_mobile_cpu_allocator",
+    "test_shape_ops",
+    "test_show_pickle",
+    "test_sort_and_select",
+    "test_spectral_ops",
+    "test_stateless",
+    "test_subclass",
+    "test_tensorboard",
+    "test_tensor_creation_ops",
+    "test_tensorexpr",
+    "test_tensorexpr_pybind",
+    "test_torch",
+    "test_transformers",
+    "test_type_hints",
+    "test_type_info",
+    "test_type_promotion",
+    "test_typing",
+    "test_utils",
+    "test_utils_internal",
+    "test_view_ops",
+    "test_vulkan",
+    "test_weak",
+    "test_xnnpack_integration",
+    "torch_np/numpy_tests/core/test_dlpack",
+    "torch_np/numpy_tests/core/test_dtype",
+    "torch_np/numpy_tests/core/test_einsum",
+    "torch_np/numpy_tests/core/test_getlimits",
+    "torch_np/numpy_tests/core/test_indexing",
+    "torch_np/numpy_tests/core/test_numeric",
+    "torch_np/numpy_tests/core/test_numerictypes",
+    "torch_np/numpy_tests/core/test_scalar_ctors",
+    "torch_np/numpy_tests/core/test_scalarinherit",
+    "torch_np/numpy_tests/core/test_scalarmath",
+    "torch_np/numpy_tests/core/test_scalar_methods",
+    "torch_np/numpy_tests/core/test_shape_base",
+    "torch_np/numpy_tests/fft/test_helper",
+    "torch_np/numpy_tests/fft/test_pocketfft",
+    "torch_np/numpy_tests/lib/test_arraypad",
+    "torch_np/numpy_tests/lib/test_arraysetops",
+    "torch_np/numpy_tests/lib/test_function_base",
+    "torch_np/numpy_tests/lib/test_histograms",
+    "torch_np/numpy_tests/lib/test_index_tricks",
+    "torch_np/numpy_tests/lib/test_shape_base_",
+    "torch_np/numpy_tests/lib/test_twodim_base",
+    "torch_np/numpy_tests/lib/test_type_check",
+    "torch_np/numpy_tests/linalg/test_linalg",
+    "torch_np/test_basic",
+    "torch_np/test_binary_ufuncs",
+    "torch_np/test_dtype",
+    "torch_np/test_function_base",
+    "torch_np/test_ndarray_methods",
+    "torch_np/test_nep50_examples",
+    "torch_np/test_random",
+    "torch_np/test_reductions",
+    "torch_np/test_scalars_0D_arrays",
+    "torch_np/test_ufuncs_basic",
+    "torch_np/test_unary_ufuncs",
+    "xpu/test_conv.py",
+    "xpu/test_gemm.py",
 ]
 
 XPU_BLOCKLIST = [
@@ -332,6 +662,9 @@ JIT_EXECUTOR_TESTS = [
 INDUCTOR_TESTS = [test for test in TESTS if test.startswith(INDUCTOR_TEST_PREFIX)]
 DISTRIBUTED_TESTS = [test for test in TESTS if test.startswith(DISTRIBUTED_TEST_PREFIX)]
 TORCH_EXPORT_TESTS = [test for test in TESTS if test.startswith("export")]
+AOT_DISPATCH_TESTS = [
+    test for test in TESTS if test.startswith("functorch/test_aotdispatch")
+]
 FUNCTORCH_TESTS = [test for test in TESTS if test.startswith("functorch")]
 ONNX_TESTS = [test for test in TESTS if test.startswith("onnx")]
 CPP_TESTS = [test for test in TESTS if test.startswith(CPP_TEST_PREFIX)]
@@ -701,18 +1034,23 @@ def _test_cpp_extensions_aot(test_directory, options, use_ninja):
     # Build the test cpp extensions modules
     shell_env = os.environ.copy()
     shell_env["USE_NINJA"] = str(1 if use_ninja else 0)
-    cmd = [sys.executable, "setup.py", "install", "--root", "./install"]
-    return_code = shell(cmd, cwd=cpp_extensions_test_dir, env=shell_env)
+    install_cmd = [sys.executable, "setup.py", "install", "--root", "./install"]
+    wheel_cmd = [sys.executable, "setup.py", "bdist_wheel"]
+    return_code = shell(install_cmd, cwd=cpp_extensions_test_dir, env=shell_env)
     if return_code != 0:
         return return_code
     if sys.platform != "win32":
-        return_code = shell(
-            cmd,
-            cwd=os.path.join(cpp_extensions_test_dir, "no_python_abi_suffix_test"),
-            env=shell_env,
-        )
-        if return_code != 0:
-            return return_code
+        exts_to_build = [(install_cmd, "no_python_abi_suffix_test")]
+        if TEST_CUDA:
+            exts_to_build.append((wheel_cmd, "python_agnostic_extension"))
+        for cmd, extension_dir in exts_to_build:
+            return_code = shell(
+                cmd,
+                cwd=os.path.join(cpp_extensions_test_dir, extension_dir),
+                env=shell_env,
+            )
+            if return_code != 0:
+                return return_code
 
     # "install" the test modules and run tests
     python_path = os.environ.get("PYTHONPATH", "")
@@ -963,6 +1301,9 @@ def run_doctests(test_module, test_directory, options):
     if enabled["onnx"]:
         os.environ["TORCH_DOCTEST_ONNX"] = "1"
 
+    if torch.mps.is_available():
+        os.environ["TORCH_DOCTEST_MPS"] = "1"
+
     if 0:
         # TODO: could try to enable some of these
         os.environ["TORCH_DOCTEST_QUANTIZED_DYNAMIC"] = "1"
@@ -1037,7 +1378,7 @@ def get_pytest_args(options, is_cpp_test=False, is_distributed_test=False):
     if RERUN_DISABLED_TESTS:
         # Distributed tests are too slow, so running them x50 will cause the jobs to timeout after
         # 3+ hours. So, let's opt for less number of reruns. We need at least 150 instances of the
-        # test every 2 weeks to satisfy the Rockset query (15 x 14 = 210). The same logic applies
+        # test every 2 weeks to satisfy the SQL query (15 x 14 = 210). The same logic applies
         # to ASAN, which is also slow
         count = 15 if is_distributed_test or TEST_WITH_ASAN else 50
         # When under rerun-disabled-tests mode, run the same tests multiple times to determine their
@@ -1303,6 +1644,11 @@ def parse_args():
         help="exclude torch export tests",
     )
     parser.add_argument(
+        "--exclude-aot-dispatch-tests",
+        action="store_true",
+        help="exclude aot dispatch tests",
+    )
+    parser.add_argument(
         "--exclude-distributed-tests",
         action="store_true",
         help="exclude distributed tests",
@@ -1394,6 +1740,10 @@ def can_run_in_pytest(test):
 def get_selected_tests(options) -> List[str]:
     selected_tests = options.include
 
+    # for s390x, override defaults
+    if IS_S390X and selected_tests == TESTS:
+        selected_tests = S390X_TESTLIST
+
     # filter if there's JIT only and distributed only test options
     if options.jit:
         selected_tests = list(
@@ -1464,6 +1814,9 @@ def get_selected_tests(options) -> List[str]:
     if options.exclude_torch_export_tests:
         options.exclude.extend(TORCH_EXPORT_TESTS)
 
+    if options.exclude_aot_dispatch_tests:
+        options.exclude.extend(AOT_DISPATCH_TESTS)
+
     # these tests failing in CUDA 11.6 temporary disabling. issue https://github.com/pytorch/pytorch/issues/75375
     if torch.version.cuda is not None:
         options.exclude.extend(["distributions/test_constraints"])
@@ -1495,6 +1848,13 @@ def get_selected_tests(options) -> List[str]:
 
     elif TEST_WITH_ROCM:
         selected_tests = exclude_tests(ROCM_BLOCKLIST, selected_tests, "on ROCm")
+
+    elif IS_S390X:
+        selected_tests = exclude_tests(
+            DISTRIBUTED_TESTS,
+            selected_tests,
+            "Skip distributed tests on s390x",
+        )
 
     # skip all distributed tests if distributed package is not available.
     if not dist.is_available():

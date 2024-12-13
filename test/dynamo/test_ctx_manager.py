@@ -92,7 +92,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
         a = torch.randn([3, 4])
         b = torch.randn([3, 4])
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        opt_fn = torch.compile(fn, backend=cnts)
         for _ in range(10):
             opt_fn(a, b)
         self.assertEqual(cnts.frame_count, 2)
@@ -113,7 +113,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
 
         a = torch.randn([3, 4])
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        opt_fn = torch.compile(fn, backend=cnts)
 
         for _ in range(10):
             opt_fn(a)
@@ -134,7 +134,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
         x = torch.randn((2, 2), requires_grad=True)
         ref = fn(x)
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        opt_fn = torch.compile(fn, backend=cnts)
         res = opt_fn(x)
         self.assertTrue(same(ref, res))
         self.assertEqual(cnts.frame_count, 2)
@@ -154,7 +154,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
         x = torch.randn((2, 2), requires_grad=True)
         ref = fn(x)
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        opt_fn = torch.compile(fn, backend=cnts)
         res = opt_fn(x)
         self.assertTrue(same(ref, res))
         self.assertEqual(cnts.frame_count, 2)
@@ -177,7 +177,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
         x = torch.randn((2, 2), device="cuda")
         ref = fn(x)
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnts, nopython=True)(fn)
+        opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
         res = opt_fn(x)
         self.assertEqual(ref, res)
         self.assertEqual(cnts.frame_count, 1)
@@ -208,7 +208,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
         x = torch.randn((2, 2), device="cuda")
         ref = fn(x)
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        opt_fn = torch.compile(fn, backend=cnts)
         res = opt_fn(x)
         self.assertEqual(ref, res)
         self.assertEqual(cnts.frame_count, 2)
@@ -245,7 +245,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
         s = torch.cuda.Stream()
         ref = fn(x, s)
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnts, nopython=True)(fn)
+        opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
         res = opt_fn(x, s)
         self.assertEqual(ref, res)
         self.assertEqual(cnts.frame_count, 1)
@@ -284,7 +284,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
         x = torch.randn((2, 2), device="cuda")
         ref = fn(x)
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnts, nopython=True)(fn)
+        opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
         res = opt_fn(x)
         self.assertEqual(ref, res)
         self.assertEqual(cnts.frame_count, 1)
@@ -313,8 +313,8 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
         x = torch.randn((2, 2), device="cuda")
         ref = fn(x)
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnts, nopython=True)(fn)
-        opt_fn2 = torch._dynamo.optimize(cnts, nopython=True)(fn2)
+        opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
+        opt_fn2 = torch.compile(fn2, backend=cnts, fullgraph=True)
         res = opt_fn(x)
         res2 = opt_fn2(x)
         self.assertEqual(ref, res)
@@ -332,7 +332,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
         s1 = torch.cuda.Stream()
         x = torch.randn(2, 2)
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnts, nopython=True)(fn)
+        opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
 
         ref0 = fn(x, s0, s1)
         res0 = opt_fn(x, s0, s1)
@@ -347,7 +347,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
 
         torch._dynamo.reset()
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnts, nopython=True)(fn)
+        opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
 
         ref1 = fn(x, s1, s1)
         res1 = opt_fn(x, s1, s1)
@@ -371,7 +371,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
         x = torch.randn((2, 2), device="cuda")
         ref = fn(x)
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        opt_fn = torch.compile(fn, backend=cnts)
         res = opt_fn(x)
         self.assertEqual(ref[0], res[0])
         self.assertEqual(cnts.frame_count, 1)
@@ -395,7 +395,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
         x = torch.randn((2, 2), device="cuda")
         ref = fn(x)
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        opt_fn = torch.compile(fn, backend=cnts)
         res = opt_fn(x)
         self.assertEqual(ref[0], res[0])
         self.assertEqual(cnts.frame_count, 2)
@@ -416,7 +416,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
 
         def run_iters(fn, compile=False):
             if compile:
-                fn = torch._dynamo.optimize(cnts)(fn)
+                fn = torch.compile(fn, backend=cnts)
             for _ in range(10):
                 with torch.cuda.stream(user_stream):
                     torch.mm(x, x, out=foo)
@@ -463,7 +463,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
         new_stream = torch.cuda.Stream()
         ref = fn(x, cur_stream, new_stream)
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnts, nopython=True)(fn)
+        opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
         res = opt_fn(x, cur_stream, new_stream)
         self.assertEqual(ref, res)
         self.assertEqual(cnts.frame_count, 1)
@@ -503,7 +503,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
         x = torch.randn((2, 2), device="cuda")
         ref = fn(x)
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnts, nopython=True)(fn)
+        opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
         res = opt_fn(x)
         self.assertEqual(ref, res)
         self.assertEqual(cnts.frame_count, 1)
@@ -531,7 +531,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
 
         x = torch.randn((2, 2), requires_grad=True)
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        opt_fn = torch.compile(fn, backend=cnts)
 
         if torch.autograd._profiler_enabled():
             torch.autograd._disable_profiler()
@@ -612,7 +612,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
         a = torch.rand((8, 8))
         b = torch.rand((8, 8))
         ref = fn(a, b)
-        opt_fn = torch._dynamo.optimize("eager", nopython=True)(fn)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         res = opt_fn(a, b)
         self.assertTrue(same(ref, res))
 
@@ -649,7 +649,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
         real_device = real.device
         real_dtype = real.dtype
 
-        opt_mod = torch._dynamo.optimize("inductor")(module)
+        opt_mod = torch.compile(module, backend="inductor")
         compiled = opt_mod(query, key, value)
 
         self.assertEqual(compiled.device, real_device)
@@ -703,7 +703,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
         real_device = real.device
         real_dtype = real.dtype
 
-        opt = torch._dynamo.optimize("eager")(module)
+        opt = torch.compile(module, backend="eager")
         res = opt(torch.tensor([0.5]))
         self.assertEqual(res.device, real_device)
         self.assertEqual(res.dtype, real_dtype)
@@ -723,7 +723,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
         x = torch.rand([4, 4])
         self.assertEqual(x.dtype, torch.float32)
         res = fn(x)
-        opt_fn = torch._dynamo.optimize("eager")(fn)
+        opt_fn = torch.compile(fn, backend="eager")
         opt_res = opt_fn(x)
         self.assertTrue(torch.allclose(res, opt_res))
         self.assertEqual(res.dtype, torch.bfloat16)
@@ -764,7 +764,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
         real_device_32 = real_32.device
         real_dtype_32 = real_32.dtype
 
-        graph = torch._dynamo.optimize("eager")(module)
+        graph = torch.compile(module, backend="eager")
         out_16, out_32 = graph(torch.tensor([0.5]))
         self.assertEqual(out_16.device, real_device_16)
         self.assertEqual(out_16.dtype, real_dtype_16)
@@ -820,7 +820,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
         real_device_32 = real_32.device
         real_dtype_32 = real_32.dtype
 
-        graph = torch._dynamo.optimize("eager")(module)
+        graph = torch.compile(module, backend="eager")
         out_16, out_32 = graph(torch.tensor([0.5]))
         self.assertEqual(out_16.device, real_device_16)
         self.assertEqual(out_16.dtype, real_dtype_16)
@@ -1099,7 +1099,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
 
         torch._dynamo.reset()
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnts, nopython=False)(fn)
+        opt_fn = torch.compile(fn, backend=cnts, fullgraph=False)
 
         with torch.enable_grad():
             ref = fn(x)
@@ -1121,7 +1121,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
 
         torch._dynamo.reset()
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnts, nopython=False)(fn)
+        opt_fn = torch.compile(fn, backend=cnts, fullgraph=False)
         x = torch.randn(4, 4, requires_grad=True)
         y = torch.randn(4, 4, requires_grad=True)
         z = torch.randn(4)

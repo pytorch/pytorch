@@ -77,7 +77,7 @@ PyCodeObject* getCode<CallType::PyModuleCall>() {
     return (PyCodeObject*)res;
   }();
   return module_call_code;
-};
+}
 
 template <>
 PyCodeObject* getCode<CallType::PyOptimizerCall>() {
@@ -92,7 +92,7 @@ PyCodeObject* getCode<CallType::PyOptimizerCall>() {
     return (PyCodeObject*)res;
   }();
   return optimizer_step_code;
-};
+}
 
 } // namespace
 } // namespace torch::profiler::impl
@@ -457,8 +457,9 @@ ExtraFields<EventType::PyCall>::args_t ValueCache::load<
   OptimizerInfo info{
       key, cls, cache.cls_names_.at(cls), cls_and_parameters.parameters_};
   return {
-      // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
-      /*frame_state_=*/std::get<CallType::PyCall>(state_).at(*cache.location_),
+      /*frame_state_=*/std::get<CallType::PyCall>(state_).at(
+          // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+          cache.location_.value()),
       /*module_info_=*/std::nullopt,
       /*optimizer_info_=*/std::move(info)};
 }
@@ -548,7 +549,7 @@ struct TraceKeyCacheState {
 // `PyEval_SetProfile`.
 struct ThreadLocalResults;
 struct TraceContext {
-  PyObject_HEAD;
+  PyObject_HEAD
   ThreadLocalResults* thread_local_results_;
 };
 
@@ -795,7 +796,7 @@ PythonTracer::PythonTracer(torch::profiler::impl::RecordQueue* queue)
     //   cannot be round tripped via `sys.settrace(sys.gettrace())`
     PyEval_SetProfile(PythonTracer::pyProfileFn, (PyObject*)ctx);
   }
-};
+}
 
 void PythonTracer::stop() {
   gil_and_restore_thread gil;
