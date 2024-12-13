@@ -3952,9 +3952,9 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         root = []
         root[:] = [root, root, None, None]
 
-        @torch.compile(backend="eager")
+        @torch.compile(fullgraph=True, backend="eager")
         def test_bug():
-            return root
+            return root[0]
 
         test_bug()
 
@@ -6314,6 +6314,16 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
 
         for _ in range(2):
             make_dist_and_execute(torch.randn(10), SubCateg)
+
+    def test_bitwise_print_precedence(self):
+        import math
+
+        @torch.compile(fullgraph=True, dynamic=True)
+        def f(x):
+            torch._check(math.floor((x.size(0) | 3) * 4) == 12)
+            return x.sin()
+
+        f(torch.randn(2))
 
     def test_tensor_split_within_device_cm(self):
         @torch.compile(fullgraph=True)
