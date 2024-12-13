@@ -1,6 +1,7 @@
 #include <torch/csrc/dynamo/variable_tracker_cache.h>
 #include <torch/csrc/utils/object_ptr.h>
 
+#include <array>
 #include <functional>
 #include <stdexcept>
 
@@ -125,7 +126,7 @@ struct VariableTrackerCache {
   THPObjectPtr lookup(PyObject* value, PyObject* source) const {
     auto it = m_cache.find(VariableTrackerCacheKey(value, source));
     if (it == m_cache.end()) {
-      return THPObjectPtr::dup(Py_None);
+      return THPObjectPtr::none();
     } else {
       return it->second.dup();
     }
@@ -148,28 +149,29 @@ PyObject* _add(
     VariableTrackerCache* self,
     PyObject* const* args,
     Py_ssize_t nargs) {
-  if (!_checkParamCount(nargs, 3))
-    return Py_None;
-  self->add(args[0], args[1], args[2]);
-  return Py_None;
+  if (_checkParamCount(nargs, 3)) {
+    self->add(args[0], args[1], args[2]);
+  }
+  return THPObjectPtr::none().release();
 }
 
 PyObject* _clear(
     VariableTrackerCache* self,
     PyObject* const* args,
     Py_ssize_t nargs) {
-  if (!_checkParamCount(nargs, 0))
-    return Py_None;
-  self->clear();
-  return Py_None;
+  if (_checkParamCount(nargs, 0)) {
+    self->clear();
+  }
+  return THPObjectPtr::none();
 }
 
 PyObject* _clone(
     VariableTrackerCache* self,
     PyObject* const* args,
     Py_ssize_t nargs) {
-  if (!_checkParamCount(nargs, 0))
-    return Py_None;
+  if (!_checkParamCount(nargs, 0)) {
+    return THPObjectPtr::none().release();
+  }
   return self->clone().release();
 }
 
@@ -177,8 +179,9 @@ PyObject* _lookup(
     VariableTrackerCache* self,
     PyObject* const* args,
     Py_ssize_t nargs) {
-  if (!_checkParamCount(nargs, 2))
-    return Py_None;
+  if (!_checkParamCount(nargs, 2)) {
+    return THPObjectPtr::none().release();
+  }
   return self->lookup(args[0], args[1]).release();
 }
 
@@ -211,7 +214,7 @@ const char* vtc_doc =
     "VariableTracker.";
 
 PyTypeObject vtc_type = {
-  PyVarObject_HEAD_INIT(nullptr, 0)
+    PyVarObject_HEAD_INIT(nullptr, 0)
     "torch._C._dynamo.VariableTrackerCache", // tp_name
     sizeof(VariableTrackerCache), // tp_basicsize
     0, // tp_itemsize
