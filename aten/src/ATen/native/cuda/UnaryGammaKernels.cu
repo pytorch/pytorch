@@ -125,8 +125,8 @@ void lgamma_kernel_cuda(TensorIteratorBase& iter) {
   #endif
 }
 
-REGISTER_DISPATCH(digamma_stub, &digamma_kernel_cuda);
-REGISTER_DISPATCH(polygamma_stub, &polygamma_kernel_cuda);
-REGISTER_DISPATCH(lgamma_stub, &lgamma_kernel_cuda);
+REGISTER_DISPATCH(digamma_stub, &digamma_kernel_cuda)
+REGISTER_DISPATCH(polygamma_stub, &polygamma_kernel_cuda)
+REGISTER_DISPATCH(lgamma_stub, &lgamma_kernel_cuda)
 
 } // namespace at::native

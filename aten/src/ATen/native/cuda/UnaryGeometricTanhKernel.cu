@@ -53,6 +53,6 @@ void tanh_kernel_cuda(TensorIteratorBase& iter) {
   }
 }
 
-REGISTER_DISPATCH(tanh_stub, &tanh_kernel_cuda);
+REGISTER_DISPATCH(tanh_stub, &tanh_kernel_cuda)
 
 } // namespace at::native
