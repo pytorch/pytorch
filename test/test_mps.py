@@ -8164,7 +8164,7 @@ class TestMPS(TestCaseMPS):
         event.synchronize()
         c_acc = a_acc + b_acc
         event.record()
-        torch.mps.synchronize()
+        torch.accelerator.synchronize()
         self.assertTrue(event.query())
         self.assertEqual(c_acc.cpu(), c)
 
