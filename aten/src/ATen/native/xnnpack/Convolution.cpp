@@ -11,8 +11,7 @@
 #include <c10/util/irange.h>
 
 namespace at::native::xnnpack {
-namespace internal {
-namespace convolution2d {
+namespace internal::convolution2d {
 
 namespace {
 
@@ -464,7 +463,6 @@ Tensor conv2d_transpose_clamp_run(
   return op_context->run(input);
 }
 
-} // namespace convolution2d
 } // namespace internal
 
 bool use_convolution2d(

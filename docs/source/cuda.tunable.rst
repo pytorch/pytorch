@@ -33,3 +33,4 @@ API Reference
 .. autofunction:: write_file
 .. autofunction:: read_file
 .. autofunction:: tune_gemm_in_file
+.. autofunction:: mgpu_tune_gemm_in_file

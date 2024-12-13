@@ -59,8 +59,11 @@ struct strided_tensor_iter_fixed {
   T* data_ = NULL;
   int64_t dim_ = 0;
 
+  // NOLINTNEXTLINE(*array*)
   int64_t counter_[N] = {0};
+  // NOLINTNEXTLINE(*array*)
   int64_t sizes_[N] = {0};
+  // NOLINTNEXTLINE(*array*)
   int64_t strides_[N] = {0};
 
   strided_tensor_iter_fixed(strided_tensor_iter_fixed const&) = delete;
@@ -157,7 +160,7 @@ inline int64_t _max_dim_tensors(ArrayRef<Tensor> tensors) {
   return dim;
 }
 
-inline void iterate(int64_t /*size*/){};
+inline void iterate(int64_t /*size*/) {}
 
 template <typename Arg, typename... Args>
 inline void iterate(int64_t size, Arg& iter, Args&... iter_tail) {
@@ -168,7 +171,7 @@ inline void iterate(int64_t size, Arg& iter, Args&... iter_tail) {
 
 inline bool iterate_continue() {
   return true;
-};
+}
 
 template <typename Arg, typename... Args>
 inline bool iterate_continue(Arg& iter, Args&... iter_tail) {
@@ -178,7 +181,7 @@ inline bool iterate_continue(Arg& iter, Args&... iter_tail) {
 
 inline int64_t max_iterate_size() {
   return std::numeric_limits<int64_t>::max();
-};
+}
 
 template <typename Arg, typename... Args>
 inline int64_t max_iterate_size(Arg& iter, Args&... iter_tail) {
@@ -187,7 +190,7 @@ inline int64_t max_iterate_size(Arg& iter, Args&... iter_tail) {
       max_iterate_size(iter_tail...));
 }
 
-inline void iterate_overflow(){};
+inline void iterate_overflow() {}
 
 template <typename Arg, typename... Args>
 inline void iterate_overflow(Arg& iter, Args&... iter_tail) {
@@ -204,7 +207,7 @@ inline void iterate_overflow(Arg& iter, Args&... iter_tail) {
   iterate_overflow(iter_tail...);
 }
 
-inline void forward(int64_t /*offset*/){};
+inline void forward(int64_t /*offset*/) {}
 
 template <typename Arg, typename... Args>
 inline void forward(int64_t offset, Arg& iter, Args&... iter_tail) {
@@ -227,7 +230,7 @@ inline int64_t max_dim(Arg& iter, Args&... iter_tail) {
   return std::max(iter.dim_, max_dim(iter_tail...));
 }
 
-inline void apply_op(){};
+inline void apply_op() {}
 
 template <typename Op, typename... Args>
 inline void apply_op(

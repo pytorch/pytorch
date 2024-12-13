@@ -410,15 +410,26 @@ void initPythonBindings(PyObject* module) {
           }));
 
   py::class_<ProfilerConfig>(m, "ProfilerConfig")
-      .def(py::init<
-           ProfilerState,
-           bool, /* report_input_shapes */
-           bool, /* profile_memory */
-           bool, /* with_stack */
-           bool, /* with_flops */
-           bool, /* with_modules */
-           ExperimentalConfig /* experimental_config */
-           >());
+      .def(
+          py::init<
+              ProfilerState,
+              bool, /* report_input_shapes */
+              bool, /* profile_memory */
+              bool, /* with_stack */
+              bool, /* with_flops */
+              bool, /* with_modules */
+              ExperimentalConfig /* experimental_config */,
+              std::string /* trace_id */
+              >(),
+          py::arg("state"),
+          py::arg("report_input_shapes"),
+          py::arg("profile_memory"),
+          py::arg("with_stack"),
+          py::arg("with_flops"),
+          py::arg("with_modules"),
+          py::arg("experimental_config"),
+          py::arg("trace_id") = "" // Make trace_id the only optional param
+      );
 
   py::enum_<EventType>(m, "_EventType")
       .value("TorchOp", EventType::TorchOp)

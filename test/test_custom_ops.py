@@ -33,6 +33,7 @@ from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     parametrize,
     run_tests,
+    scoped_load_inline,
     skipIfTorchDynamo,
     subtest,
     TestCase,
@@ -489,6 +490,24 @@ def sin_override(x):
 m.impl("sin", sin_override, "CompositeImplicitAutograd")
 x = torch.randn(3)
 y = torch.sin(x)
+
+# should be a no-op
+@torch.library.custom_op("mylib::foobar", mutates_args={})
+def foobar(x: torch.Tensor) -> torch.Tensor:
+    return x.sin()
+
+# should be a no-op
+@foobar.register_fake
+def _(x):
+    return torch.empty_like(x)
+
+# should be a no-op
+m2.define("foobarbaz9996(Tensor x) -> Tensor")
+
+# should be a no-op
+@torch.library.register_fake("mylib4392::foobarbaz9996")
+def _(x):
+    return torch.empty_like(x)
         """
         script = script.strip()
         env = os.environ.copy()
@@ -2088,7 +2107,8 @@ dynamic shape operator: _torch_testing.numpy_nonzero.default
         with self.assertRaisesRegex(RuntimeError, "Expected one of cpu, cuda"):
             torch.library.impl("blah::blah", "somethingsomething")
 
-    def test_autograd_function_backed_op(self):
+    @scoped_load_inline
+    def test_autograd_function_backed_op(self, load_inline):
         cpp_source = """
 struct CustomOpAutogradFunction : public torch::autograd::Function<CustomOpAutogradFunction> {
   static constexpr bool is_traceable = true;
@@ -2110,21 +2130,25 @@ torch::Tensor custom_op_backed_by_autograd_fn(const torch::Tensor& x) {
   return CustomOpAutogradFunction::apply(x);
 }
 
-TORCH_LIBRARY(mylib, m) {
+TORCH_LIBRARY(test_autograd_function_backed_op, m) {
     m.def("custom_op_backed_by_autograd_fn", custom_op_backed_by_autograd_fn);
 }
         """
 
-        module = torch.utils.cpp_extension.load_inline(
-            name="mylib",
+        module = load_inline(
+            name="test_autograd_function_backed_op",
             cpp_sources=cpp_source,
             functions="custom_op_backed_by_autograd_fn",
             verbose=True,
         )
 
         x = torch.ones(2, 2, requires_grad=True)
-        temp = x.clone().detach()
-        out = torch.ops.mylib.custom_op_backed_by_autograd_fn(x)
+        temp = x.detach().clone()
+        out = (
+            torch.ops.test_autograd_function_backed_op.custom_op_backed_by_autograd_fn(
+                x
+            )
+        )
         loss = out.sum()
         loss.backward()
         self.assertEqual(x.grad, temp)

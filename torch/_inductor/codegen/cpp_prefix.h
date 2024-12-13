@@ -537,7 +537,7 @@ Welford<scalar_t> welford_vec_reduce_all(Welford<at::vec::VectorizedN<scalar_t, 
 #endif
 
 
-template <typename T, typename U> inline typename std::common_type<T, U>::type mod(T a, U b) { return a % b; }
+template <typename T, typename U> inline typename std::common_type_t<T, U> mod(T a, U b) { return a % b; }
 template <> inline float mod(float a, float b) { return std::fmod(a, b); }
 template <> inline double mod(double a, double b) { return std::fmod(a, b); }
 

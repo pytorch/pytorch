@@ -87,11 +87,13 @@ class FrameInitTests(torch._dynamo.test_case.TestCase):
             target_with_varkwargs.__code__: varkwargs_code2.__code__,
         }
 
+        empty_guard_manager = torch._dynamo.guards.GuardManagerWrapper()
+
         def callback1(frame, cache_entry, frame_state):
             if frame.f_code in code_map1:
                 transformed_code = code_map1[frame.f_code]
                 return torch._dynamo.types.GuardedCode(
-                    transformed_code, lambda f_locals: True, CompileId(0, 0)
+                    transformed_code, empty_guard_manager, CompileId(0, 0)
                 )
             return None
 
@@ -99,7 +101,7 @@ class FrameInitTests(torch._dynamo.test_case.TestCase):
             if frame.f_code in code_map2:
                 transformed_code = code_map2[frame.f_code]
                 return torch._dynamo.types.GuardedCode(
-                    transformed_code, lambda f_locals: True, CompileId(0, 0)
+                    transformed_code, empty_guard_manager, CompileId(0, 0)
                 )
             return None
 

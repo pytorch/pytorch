@@ -38,6 +38,7 @@ PyObject* Dim_init() {
 #include "python_variable_simple.h"
 
 #if IS_PYTHON_3_11_PLUS
+
 #define Py_BUILD_CORE
 #include "internal/pycore_opcode.h"
 #undef Py_BUILD_CORE
@@ -867,7 +868,7 @@ mpy::object Tensor::from_positional(Arena & A, at::Tensor tensor, Slice<DimEntry
     }
     AT_ASSERT(last == 0 || last == -1);
     if (!seen_dims) {
-        return mpy::object::steal(THPVariable_Wrap(std::move(tensor)));
+        return mpy::object::steal(THPVariable_Wrap(tensor));
     }
 
     mpy::obj<Tensor> self = Tensor::create();
@@ -1887,7 +1888,6 @@ static PyObject* order(PyObject *_,
         }
     }
 
-    int ndim = 0;
     int insert_point = -1;
     Slice<DimEntry> new_levels;
     for (auto l : levels) {
@@ -1895,7 +1895,6 @@ static PyObject* order(PyObject *_,
             continue;
         }
         if (l.is_positional()) {
-            ndim++;
             if (insert_point == -1) {
                 insert_point = new_levels.size();
                 new_levels.extend(A, flat_positional_dims);

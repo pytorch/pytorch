@@ -3,6 +3,7 @@
 import _codecs
 import io
 import os
+import sys
 import tempfile
 import types
 import unittest
@@ -329,6 +330,10 @@ class TestCppExtensionOpenRgistration(common.TestCase):
         z3 = z3[0:3]
         self.assertTrue(self.module.custom_storageImpl_called())
 
+    @unittest.skipIf(
+        sys.version_info >= (3, 13),
+        "Error: Please register PrivateUse1HooksInterface by `RegisterPrivateUse1HooksInterface` first.",
+    )
     @skipIfTorchDynamo("unsupported aten.is_pinned.default")
     def test_open_device_storage_pin_memory(self):
         # Check if the pin_memory is functioning properly on custom device
@@ -459,7 +464,7 @@ class TestCppExtensionOpenRgistration(common.TestCase):
         out_ref = self.module.custom_autograd_fn_returns_self(x_ref)
         out_ref.sum().backward()
 
-        x_test = x_ref.clone().detach().requires_grad_(True)
+        x_test = x_ref.detach().clone().requires_grad_(True)
         f_compiled = torch.compile(self.module.custom_autograd_fn_returns_self)
         out_test = f_compiled(x_test)
         out_test.sum().backward()
@@ -475,7 +480,7 @@ class TestCppExtensionOpenRgistration(common.TestCase):
         out_ref = torch.ops._test_funcs.custom_autograd_fn_aliasing(x_ref)
         out_ref.sum().backward()
 
-        x_test = x_ref.clone().detach().requires_grad_(True)
+        x_test = x_ref.detach().clone().requires_grad_(True)
         f_compiled = torch.compile(torch.ops._test_funcs.custom_autograd_fn_aliasing)
         out_test = f_compiled(x_test)
         out_test.sum().backward()
@@ -592,7 +597,9 @@ class TestCppExtensionOpenRgistration(common.TestCase):
 
         with safe_globals(
             [
-                np.core.multiarray._reconstruct,
+                (np.core.multiarray._reconstruct, "numpy.core.multiarray._reconstruct")
+                if np.__version__ >= "2.1"
+                else np.core.multiarray._reconstruct,
                 np.ndarray,
                 np.dtype,
                 _codecs.encode,
@@ -643,6 +650,15 @@ class TestCppExtensionOpenRgistration(common.TestCase):
                 ):
                     with torch.serialization.skip_data():
                         torch.save(sd, f)
+
+    def test_open_device_dlpack(self):
+        t = torch.randn(2, 3).to("foo")
+        capsule = torch.utils.dlpack.to_dlpack(t)
+        t1 = torch.from_dlpack(capsule)
+        self.assertTrue(t1.device == t.device)
+        t = t.to("cpu")
+        t1 = t1.to("cpu")
+        self.assertEqual(t, t1)
 
 
 if __name__ == "__main__":

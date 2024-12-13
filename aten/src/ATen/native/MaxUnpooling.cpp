@@ -64,7 +64,7 @@ Tensor& max_unpooling2d_forward_out_cpu(
   }
 
   return output;
-};
+}
 
 Tensor max_unpooling2d_forward_cpu(
     const Tensor& self,
