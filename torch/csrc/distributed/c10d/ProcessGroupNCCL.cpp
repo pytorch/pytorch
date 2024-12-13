@@ -1298,7 +1298,7 @@ bool ProcessGroupNCCL::waitForFutureOrTimeout(
       bool result = fut.get();
       if (result) {
         VLOG(2) << logPrefix()
-                << "future is successfully executed for: " << futDescription;
+                << "future successfully executed for: " << futDescription;
         if (log) {
           data.strings["status"] = "SUCCESS";
         }
@@ -1780,6 +1780,9 @@ void ProcessGroupNCCL::heartbeatMonitor() {
           true);
 
       if (complete) {
+        LOG(INFO)
+            << logPrefix()
+            << "Finished flight recorder successfully. Output can be analyzed using the fr_trace script.";
         break;
       }
       // If we failed to dump, try dumping without stack trace in the 2nd
@@ -2046,9 +2049,9 @@ void ProcessGroupNCCL::broadcastDumpSignal() {
         reinterpret_cast<uint8_t*>(&rank) + sizeof(rank));
     globalStore_->set(std::string(EXCEPTION_DUMP), vec);
     if (!shouldDump_.load()) {
-      LOG(ERROR)
+      LOG(INFO)
           << logPrefix()
-          << "Broadcasting flight-recorder dump signal to other processes via TCPStore.";
+          << "Broadcasting flight recorder dump signal to other processes via TCPStore.";
     }
     // signal the monitor thread on PG0 to start dumping
     shouldDump_.store(true);
@@ -3801,6 +3804,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::allreduce_sparse(
 
 c10::intrusive_ptr<Work> ProcessGroupNCCL::allreduce_impl(
     at::Tensor& tensor,
+    const char* profilingTitle,
     const AllreduceOptions& opts) {
   return collective(
       tensor,
@@ -3822,7 +3826,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::allreduce_impl(
             stream.stream());
       },
       OpType::ALLREDUCE,
-      "nccl:all_reduce");
+      profilingTitle);
 }
 
 c10::intrusive_ptr<Work> ProcessGroupNCCL::allreduce(
@@ -3871,7 +3875,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::allreduce(
       this->getSize()); // worldSize
 
   // avoidRecordStreams_ note: collective() will stash tensors.
-  return allreduce_impl(tensor, opts);
+  return allreduce_impl(tensor, "nccl:all_reduce", opts);
 }
 
 c10::intrusive_ptr<Work> ProcessGroupNCCL::allreduce_coalesced(
@@ -4579,7 +4583,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::barrier(const BarrierOptions& opts) {
       at::zeros({1}, at::TensorOptions().device(barDevice).dtype(at::kFloat));
 
   // All reduce to achieve the barrier
-  auto work = allreduce_impl(barrierTensor);
+  auto work = allreduce_impl(barrierTensor, "nccl:all_reduce_barrier");
 
   // Work will take over barrierTensors
   auto ncclWork = dynamic_cast<ProcessGroupNCCL::WorkNCCL*>(work.get());

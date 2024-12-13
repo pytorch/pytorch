@@ -881,6 +881,7 @@ class CompilationMetrics:
     cuda_version: Optional[str] = None
     triton_version: Optional[str] = None
     feature_usage: Optional[dict[str, bool]] = None
+    compile_time_autotune_time_us: Optional[int] = None
 
 
 DEFAULT_COMPILATION_METRICS_LIMIT = 64
@@ -1071,7 +1072,10 @@ def record_compilation_metrics(
         name = "bwd_compilation_metrics"
     torch._logging.trace_structured(
         name,
-        lambda: {k: list(v) if isinstance(v, set) else v for k, v in metrics.items()},
+        lambda: {
+            k: list(v) if isinstance(v, set) else v
+            for k, v in dataclasses.asdict(compilation_metrics).items()
+        },
         # NB: Because compilation metrics *includes* the logging overhead time,
         # we can't both *measure* the logging overhead of compilation metrics
         # without making it inconsistent with compilation metrics itself, so
