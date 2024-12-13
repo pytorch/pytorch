@@ -3070,6 +3070,14 @@ class GraphModule(torch.nn.Module):
 
         self._validate_compile(fn, arg_fn)
 
+    # See [ Best effort SymInt association ] for more info.
+    #
+    # This test is expected to fail because doing
+    # nested_tensor_from_jagged creates a fresh cache, and creates
+    # a new ephemeral symbol, which fails when it needs to be
+    # involved in any guard. In an ideal world, the resulting nt
+    # from nested_tensor_from_jagged preserves the original symbol
+    # which still has a proper source, but that is too hard.
     @unittest.expectedFailure
     @torch.fx.experimental._config.patch(use_duck_shape=False)
     def test_in_graph_construction_mixed_4(self):

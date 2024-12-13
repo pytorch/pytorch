@@ -2544,7 +2544,8 @@ class FakeTensorMode(TorchDispatchMode):
         # - We don't /need/ symbolic shapes guards because we rely on Dynamo guards.
         #   Hence, we use ephmeral sources when convenient. (There are some known
         #   downsides: (1) actually trying to produce guards with those SymInts would
-        #   error out. (2) we sometimes secretly update the tensor registry so that
+        #   error out. See test_in_graph_construction_mixed_4
+        #   (2) we sometimes secretly update the tensor registry so that
         #   two j0 compare equal despite not having caches that share the same tensor
         #   instance. This is not sound, but should be rare - only happens in the .to()
         #   case).
@@ -2553,7 +2554,8 @@ class FakeTensorMode(TorchDispatchMode):
         # - All we care about is that the common case (pointwise) doesn't
         #   create a new symbol/SymInt everytime.
         # - It's okay to be best effort/not be reliable because the caching is just
-        #   a optimization that doesn't matter for correctness.
+        #   a optimization that doesn't matter foe correctness.
+        #
         ref = self.nt_cache_to_nested_int.get(cache)
         if ref is None or (ret := ref()) is None:
             ret = self.create_symbolic_nested_int(cache=cache)
