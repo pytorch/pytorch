@@ -55,6 +55,11 @@ different profiles.  If you know your workload is truly SPMD, you can run with
 consistent profiles across all ranks.
 """
 
+cache_key_tag: str = os.environ.get("TORCH_COMPILE_CACHE_KEY_TAG", "")
+"""
+Tag to be included in the cache key generation for all torch compile caching.
+A common use case for such a tag is to break caches.
+"""
 
 from torch.utils._config_module import install_config_module
 
