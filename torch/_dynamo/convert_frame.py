@@ -77,10 +77,10 @@ from .eval_frame import (
 from .exc import (
     augment_exc_message,
     BackendCompilerFailed,
-    CacheLimitExceeded,
-    FailOnCacheLimitHit,
+    FailOnRecompileLimitHit,
     format_error_msg,
     InternalTorchDynamoError,
+    RecompileLimitExceeded,
     SkipCodeRecursiveException,
     TorchRuntimeError,
     UncapturedHigherOrderOpError,
@@ -916,13 +916,13 @@ def _compile(
                 troubleshooting_url,
             )
             if config.fail_on_cache_limit_hit:
-                raise FailOnCacheLimitHit(
+                raise FailOnRecompileLimitHit(
                     f"{limit_type} reached, because fail_on_cache_limit_hit = True this is a HARD failure"
                 )
             elif config.skip_code_recursive_on_cache_limit_hit and justknobs_check(
                 "pytorch/compiler:skip_code_recursive_on_cache_limit_hit"
             ):
-                raise CacheLimitExceeded(f"{limit_type} reached")
+                raise RecompileLimitExceeded(f"{limit_type} reached")
             else:
                 # do not recursively skip frames
                 unimplemented(f"{limit_type} reached")
@@ -1236,7 +1236,7 @@ class ConvertFrame:
             # to signal to Dynamo eval frame to skip the current frame and any recursive calls.
             if isinstance(e, SkipCodeRecursiveException):
                 return torch._C._dynamo.eval_frame.skip_code_recursive_flag
-            elif isinstance(e, CacheLimitExceeded):
+            elif isinstance(e, RecompileLimitExceeded):
                 # signal to Dynamo to run this frame on run-only mode, skipping recursively if
                 # no valid cache entry is found.
                 return torch._C._dynamo.eval_frame.cache_limit_hit_flag

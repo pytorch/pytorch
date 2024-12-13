@@ -72,7 +72,6 @@ from torch.testing._internal.common_utils import (
     parametrize,
     run_tests,
     skipIfRocm,
-    skipIfTorchDynamo,
     TestCase,
     xfail_inherited_tests,
     xfailIfS390X,
@@ -787,7 +786,6 @@ def forward(self, primals_1):
         self.assertEqual(x_ref.grad, x_test.grad)
         self.assertEqual(x_ref_view.grad, x_test_view.grad)
 
-    @skipIfTorchDynamo("https://github.com/pytorch/pytorch/issues/127470")
     def test_nested_subclasses(self):
         @torch.compile(backend="aot_eager")
         def f(x):
@@ -814,7 +812,6 @@ def forward(self, primals_1):
         self.assertTrue(isinstance(aaaa.grad.a, TwoTensor))
         self.assertTrue(isinstance(aaaa.grad.b, TwoTensor))
 
-    @skipIfTorchDynamo("https://github.com/pytorch/pytorch/issues/127470")
     def test_nested_subclasses_non_nested_grad(self):
         @torch.compile(backend="aot_eager")
         def f(x):
@@ -841,7 +838,6 @@ metadata incorrectly.
             new_out.sum().backward()
 
     @unittest.skipIf(IS_WINDOWS, "Windows isn't supported for this case")
-    @skipIfTorchDynamo("https://github.com/pytorch/pytorch/issues/127470")
     def test_custom_tensor_metadata(self):
         def f(x):
             x_elem = x.elem
@@ -871,7 +867,6 @@ metadata incorrectly.
             isinstance(custom_aa_compile.grad.elem, ConstantExtraMetadataTensor)
         )
 
-    @skipIfTorchDynamo("https://github.com/pytorch/pytorch/issues/127470")
     def test_nested_subclasses_complicated_inps(self):
         def f(x, y, z):
             temp = x + y
@@ -923,7 +918,6 @@ metadata incorrectly.
         self.assertTrue(torch.allclose(y_nested_compile.grad.a.b, y_nested.grad.a.b))
 
     @unittest.skipIf(IS_WINDOWS, "Windows isn't supported for this case")
-    @skipIfTorchDynamo("https://github.com/pytorch/pytorch/issues/127470")
     def test_nested_subclasses_complicated_inps_mixed(self):
         def f(x, y):
             y_elem = y.elem
@@ -960,7 +954,6 @@ metadata incorrectly.
         self.assertTrue(torch.allclose(x_nested_compile.grad, x_nested.grad))
         self.assertTrue(torch.allclose(custom_aa_compile.grad, custom_aa.grad))
 
-    @skipIfTorchDynamo("This test suite already uses dynamo")
     def test_composite_impl_compile(self):
         class Foo(torch.nn.Module):
             def __init__(self) -> None:
@@ -2246,7 +2239,6 @@ def forward(self, primals_1, primals_2):
             )
 
     # https://github.com/pytorch/pytorch/issues/106456
-    @skipIfTorchDynamo()
     def test_input_mutation_noncontiguous(self):
         def f(a):
             a.mul_(2)
@@ -2466,7 +2458,6 @@ def forward(self, primals_1, primals_2):
         # Not checking equality of ref and x as Exception is expected
 
     # Partially addresses https://github.com/pytorch/pytorch/issues/106457
-    @skipIfTorchDynamo()
     def test_input_mutation_false_aliasing(self):
         def f(a, b):
             a.mul_(3)
@@ -3898,7 +3889,6 @@ def forward(self, tangents_1):
             str(out2.grad_fn.__class__), """<class 'ViewBackward0'>"""
         )
 
-    @skipIfTorchDynamo()
     @patch("torch._dynamo.config.assume_static_by_default", False)
     def test_dynamic_output_aliases_input_view_meta_replay(self):
         # - torch.compile: using it so we can have a SymInt in the FX graph.
@@ -5409,7 +5399,6 @@ def forward(self, tangents_1, tangents_2):
         self.assertEqual(out_ref.a, out_test.a)
         self.assertEqual(out_ref.b, out_test.b)
 
-    @skipIfTorchDynamo()
     def test_aot_dispatch_incorrect_backward(self):
         # a is a subclass, b is not
         def f(a, b):
@@ -6197,7 +6186,6 @@ class TestAOTModuleSimplified(AOTTestCase):
         out_buffer = out.values()
         ga, gb, gc = torch.autograd.grad(out_buffer.sum(), (a, b, c))
 
-    @skipIfTorchDynamo()
     def test_wrong_guess_tangent_type(self):
         def fn(x):
             return x.clone()
@@ -6294,7 +6282,10 @@ metadata incorrectly.
             def __init__(self):
                 super().__init__()
                 self.p = torch.nn.Parameter(
-                    TwoTensor(torch.zeros(3, 4), torch.zeros(3, 4))
+                    TwoTensor(
+                        TwoTensor(torch.zeros(3, 4), torch.randn(3, 4)),
+                        torch.ones(3, 4),
+                    )
                 )
 
             def forward(self, x):
@@ -6305,7 +6296,10 @@ metadata incorrectly.
                 super().__init__()
                 self.p1 = torch.nn.Parameter(torch.ones(3, 4))
                 self.p2 = torch.nn.Parameter(
-                    TwoTensor(torch.zeros(3, 4), torch.zeros(3, 4))
+                    TwoTensor(
+                        torch.ones(3, 4),
+                        TwoTensor(torch.randn(3, 4), torch.randn(3, 4)),
+                    )
                 )
                 self._m = _M()
 
@@ -6696,7 +6690,6 @@ instantiate_device_type_tests(TestEagerFusionModuleInfo, globals(), only_for=onl
         "test_subclass_metadata_mutation_req_grad_False",
     ]
 )
-@skipIfTorchDynamo("This test suite already uses dynamo")
 class TestAOTAutogradWithDynamo(TestAOTAutograd):
     """
     These are the same as TestAOTAutograd tests, but we run dynamo first to get a graph module.
