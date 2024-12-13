@@ -49,7 +49,7 @@ like so::
   GemmTunableOp_float_NT,nt_25088_4096_64,1219,1.262
   GemmTunableOp_float_NT,nt_4096_4096_64,1216,0.033
 
-Note the "Validator" lines. If you change a library verison, or ROCm version, or
+Note the "Validator" lines. If you change a library version, or ROCm version, or
 PyTorch version, TunableOp will detect this and reject the tunings file because
 the prior tunings are likely affected by other software changes.
 
@@ -112,6 +112,11 @@ environment variables take precedence over any setting you manipulate using the
 C++ or Python APIs.
 
 """
+import concurrent.futures
+import glob
+import multiprocessing as mp
+import os
+import shutil
 import warnings
 from typing import Optional, Tuple
 
@@ -137,6 +142,7 @@ __all__ = [
     "write_file",
     "read_file",
     "tune_gemm_in_file",
+    "mgpu_tune_gemm_in_file",
 ]
 
 
@@ -265,56 +271,258 @@ def tune_gemm_in_file(filename: str) -> None:
     assert is_enabled()
     assert tuning_is_enabled()
 
+    deviceid = torch.cuda.current_device()
+
     with open(filename) as file:
         for line in file:
-            if line.startswith("Gemm"):
-                untuned_gemm = line.strip().split(",")[:]
-                [op_sig, data_type, layout] = untuned_gemm[0].split("_")
+            if line.startswith(("Gemm", "ScaledGemm")):
+                _process_single_offline_gemm(line, deviceid)
 
-                transA = True if layout[0] == "T" else False
-                transB = True if layout[1] == "T" else False
 
-                dtype = {
-                    "float": torch.float32,
-                    "double": torch.float64,
-                    "BFloat16": torch.bfloat16,
-                    "Half": torch.half,
-                    "c10::complex<double>": torch.complex128,
-                    "c10::complex<float>": torch.complex64,
-                    "Float8_e4m3fn": torch.float8_e4m3fn,
-                    "Float8_e5m2": torch.float8_e5m2,
-                    "Float8_e4m3fnuz": torch.float8_e4m3fnuz,
-                    "Float8_e5m2fnuz": torch.float8_e5m2fnuz,
-                }.get(data_type, torch.half)
+def _gather_unique_untuned_gemm_from_files(filename_pattern: str) -> set[str]:
+    r"""Process multiple untuned results file and return a set with duplicates removed."""
+    unique_gemm_entries = set()  # set will avoid duplicates
 
-                if op_sig == "GemmTunableOp":
-                    [n, m, k] = [int(g) for g in untuned_gemm[1].split("_")[1:]]
-                    matA = (
-                        torch.rand(k, m, dtype=dtype, device="cuda").t()
-                        if transB
-                        else torch.rand(m, k, dtype=dtype, device="cuda")
-                    )
-                    matB = (
-                        torch.rand(n, k, dtype=dtype, device="cuda").t()
-                        if transA
-                        else torch.rand(k, n, dtype=dtype, device="cuda")
-                    )
-                    torch.mm(matA, matB)
-                elif op_sig == "GemmStridedBatchedTunableOp":
-                    [n, m, k] = [int(g) for g in untuned_gemm[1].split("_")[1:4]]
-                    [b] = [int(g) for g in untuned_gemm[1].split("_")[5:6]]
-                    matA = (
-                        torch.rand(b, k, m, dtype=dtype, device="cuda")
-                        if transB
-                        else torch.rand(b, m, k, dtype=dtype, device="cuda")
-                    )
-                    matB = (
-                        torch.rand(b, n, k, dtype=dtype, device="cuda")
-                        if transA
-                        else torch.rand(b, k, n, dtype=dtype, device="cuda")
-                    )
-                    matA = matA.transpose(1, 2) if transB else matA
-                    matB = matB.transpose(1, 2) if transA else matB
-                    torch.bmm(matA, matB)
+    for file_path in glob.glob(filename_pattern):
+        with open(file_path) as file:
+            for line in file:
+                if line.startswith(("Gemm", "ScaledGemm")):
+                    unique_gemm_entries.add(line)
+
+    return unique_gemm_entries
+
+
+def _gather_tunableop_results() -> None:
+    r"""Gather results from multiple tunableop results file and create a single file."""
+    gemm_lines = set()
+    validator_lines = []
+
+    # Need to allow for the possibility that results filename was
+    # set with the Python API instead of with environment variable.
+    # Also possible that results filename was not set at all.
+    # There are several test cases to check, but ultimately we
+    # need a glob-able expression
+    results_filename = get_filename()  # Note empty string could be returned here
+
+    if (
+        results_filename is not None and results_filename != ""
+    ):  # Case were the Python API was used to set the filename
+        dot_pos = results_filename.find(".")
+        if dot_pos != -1 and dot_pos > 0:
+            # Replace the character just to the left of the dot
+            filename_pattern = (
+                results_filename[: dot_pos - 1] + "?" + results_filename[dot_pos:]
+            )
+        else:
+            filename_pattern = ""  # Needed to make linter happy
+    else:  # Case where the environment variable was used to set the filename.
+        results_filename_env = os.getenv("PYTORCH_TUNABLEOP_FILENAME")
+        if results_filename_env is None or results_filename_env == "":
+            filename_pattern = "tunableop_results?.csv"
+        elif "%d" in results_filename_env:
+            filename_pattern = results_filename_env.replace("%d", "?")
+        else:
+            filename_pattern = results_filename_env.replace(".", "?.")
+
+    assert "?" in filename_pattern
+
+    FirstFile = False
+    matching_files = glob.glob(filename_pattern)
+    num_matching_files = len(matching_files)
+    for file_path in matching_files:
+        with open(file_path) as file:
+            for line in file:
+                if line.startswith("Validator"):
+                    if not (FirstFile):
+                        # Only read Validator from first file
+                        validator_lines.append(line)
                 else:
-                    warnings.warn(f"error: unkown op {op_sig}")
+                    gemm_lines.add(line)
+
+        FirstFile = True
+
+    output_file = filename_pattern.replace("?", "_full0")
+
+    with open(output_file, "w") as out_file:
+        for line in validator_lines:
+            out_file.write(line)
+        for line in gemm_lines:
+            out_file.write(line)
+
+    # Create num_matching_copies of the results file
+    for i in range(1, num_matching_files):
+        duplicate_file = output_file.replace("0", str(i))
+        shutil.copy(output_file, duplicate_file)
+
+
+def _process_single_offline_gemm(untuned_gemm_line: str, gpu_id: int) -> None:
+    r"""Process a single untuned GEMM."""
+
+    deviceid = "cuda:" + str(gpu_id)
+
+    dtype_dict = {
+        "float": torch.float32,
+        "double": torch.float64,
+        "BFloat16": torch.bfloat16,
+        "Half": torch.half,
+        "c10::complex<double>": torch.complex128,
+        "c10::complex<float>": torch.complex64,
+        "Float8_e4m3fn": torch.float8_e4m3fn,
+        "Float8_e5m2": torch.float8_e5m2,
+        "Float8_e4m3fnuz": torch.float8_e4m3fnuz,
+        "Float8_e5m2fnuz": torch.float8_e5m2fnuz,
+    }
+
+    untuned_gemm = untuned_gemm_line.strip().split(",")[:]
+
+    underscore_count = untuned_gemm[0].count("_")
+
+    # Initialize dtype to make linter happy
+    dtype = None
+    dtypeA = None
+    dtypeB = None
+    dtypeC = None
+
+    if underscore_count == 2:
+        [op_sig, data_type, layout] = untuned_gemm[0].split("_")
+        transA = layout[0] == "T"
+        transB = layout[1] == "T"
+        dtype = dtype_dict.get(data_type)
+    else:  # ScaledGEMM
+        untuned_gemm_temp = untuned_gemm[0].split("_")
+        op_sig = untuned_gemm_temp[0]
+        data_typeA = untuned_gemm_temp[1] + "_" + untuned_gemm_temp[2]
+        data_typeB = untuned_gemm_temp[3] + "_" + untuned_gemm_temp[4]
+        data_typeC = untuned_gemm_temp[5] + "_" + untuned_gemm_temp[6]
+        transA = untuned_gemm_temp[7][0] == "T"
+        transB = untuned_gemm_temp[7][1] == "T"
+        dtypeA = dtype_dict.get(data_typeA)
+        dtypeB = dtype_dict.get(data_typeB)
+        dtypeC = dtype_dict.get(data_typeC)
+
+    [n, m, k] = [int(g) for g in untuned_gemm[1].split("_")[1:4]]
+    if op_sig == "GemmTunableOp":
+        matA = (
+            torch.rand(k, m, dtype=dtype, device=deviceid).t()
+            if transB
+            else torch.rand(m, k, dtype=dtype, device=deviceid)
+        )
+        matB = (
+            torch.rand(n, k, dtype=dtype, device=deviceid).t()
+            if transA
+            else torch.rand(k, n, dtype=dtype, device=deviceid)
+        )
+        torch.mm(matA, matB)
+    elif op_sig == "GemmStridedBatchedTunableOp":
+        [b] = [int(g) for g in untuned_gemm[1].split("_")[5:6]]
+        matA = (
+            torch.rand(b, k, m, dtype=dtype, device=deviceid)
+            if transB
+            else torch.rand(b, m, k, dtype=dtype, device=deviceid)
+        )
+        matB = (
+            torch.rand(b, n, k, dtype=dtype, device=deviceid)
+            if transA
+            else torch.rand(b, k, n, dtype=dtype, device=deviceid)
+        )
+        matA = matA.transpose(1, 2) if transB else matA
+        matB = matB.transpose(1, 2) if transA else matB
+        torch.bmm(matA, matB)
+    elif op_sig == "ScaledGemmTunableOp":
+        fillA = 0.25
+        fillB = 0.75
+        scaleA = torch.tensor(0.8, device=deviceid)
+        scaleB = torch.tensor(0.9, device=deviceid)
+        matA = (
+            torch.full((k, m), fillA, dtype=dtypeA, device=deviceid).t()
+            if transB
+            else torch.full((m, k), fillA, dtype=dtypeA, device=deviceid)
+        )
+        matB = (
+            torch.full((n, k), fillB, dtype=dtypeB, device=deviceid).t()
+            if transA
+            else torch.full((k, n), fillB, dtype=dtypeB, device=deviceid)
+        )
+        torch._scaled_mm(matA, matB, scale_a=scaleA, scale_b=scaleB, out_dtype=dtypeC)
+    elif op_sig == "GemmAndBiasTunableOp":
+        # y = x*A^T + b
+        assert transA != transB
+
+        X = (
+            torch.rand(k, m, dtype=dtype, device=deviceid).t()
+            if transB
+            else torch.rand(m, k, dtype=dtype, device=deviceid)
+        )
+        matA = (
+            torch.rand(n, k, dtype=dtype, device=deviceid)
+            if transA
+            else torch.rand(k, n, dtype=dtype, device=deviceid).t()
+        )
+        bias = (
+            torch.rand(n, dtype=dtype, device=deviceid)
+            if transA
+            else torch.rand(m, dtype=dtype, device=deviceid)
+        )
+        torch.nn.functional.linear(X, matA, bias)
+    else:
+        warnings.warn(f"error: unknown op {op_sig}")
+
+
+def _check_tuning_assertions() -> None:
+    r"""Helper function for multi-GPU tuning case. Need to check that TunableOp feature
+    is enabled and that tuning is enabled.
+    """
+    assert is_enabled()
+    assert tuning_is_enabled()
+
+
+def mgpu_tune_gemm_in_file(filename_pattern: str, num_gpus: int) -> None:
+    r"""Process one or more files and distribute work over one or more GPUs."""
+    unique_gemm_entries = _gather_unique_untuned_gemm_from_files(filename_pattern)
+
+    total_gpus = torch.cuda.device_count()
+
+    assert 1 <= num_gpus <= total_gpus
+
+    mp_context = mp.get_context("spawn")
+
+    checks = []  # empty list to hold futures
+    futures = []  # empty list to hold futures
+    flush_results = []  # empty list to hold futures
+
+    # GEMM are assigned to GPUs in a round robin manner
+    h = 0
+    with concurrent.futures.ProcessPoolExecutor(
+        max_workers=num_gpus, mp_context=mp_context
+    ) as executor:
+        # The workers are a separate process. TunableOp will be
+        # enabled in the child processes if the environment variable
+        # is set. However, if we enable TunableOp via the API
+        # the workers do not inherit this state. As a precaution,
+        # we need to check that TuningOp feature and tuning is
+        # enabled in the pool of processes.
+        for g in range(num_gpus):
+            check = executor.submit(_check_tuning_assertions)
+            checks.append(check)
+
+        for check in concurrent.futures.as_completed(checks):
+            check.result()
+
+        for line in unique_gemm_entries:
+            future = executor.submit(_process_single_offline_gemm, line, h)
+            futures.append(future)
+            h = (h + 1) % num_gpus
+
+        for future in concurrent.futures.as_completed(futures):
+            future.result()
+
+        for g in range(num_gpus):
+            flush_result = executor.submit(write_file)
+            flush_results.append(flush_result)
+
+        for flush_result in concurrent.futures.as_completed(flush_results):
+            flush_result.result()
+
+    torch.cuda.synchronize()
+
+    _gather_tunableop_results()

@@ -2285,9 +2285,7 @@ def sample_inputs_stack(op_info, device, dtype, requires_grad, **kwargs):
         ((0, 1, 0), 2),)
 
     for shape, num_tensors in cases:
-        tensors = []
-        for _ in range(num_tensors):
-            tensors.append(make_arg(shape))
+        tensors = [make_arg(shape) for _ in range(num_tensors)]
         for dim in range(-1, len(shape) - 1):
             yield SampleInput(tensors, args=(dim,))
 
@@ -2328,9 +2326,7 @@ def sample_inputs_chunk_cat(op_info, device, dtype, requires_grad, **kwargs):
         ),
     )
     for sizes, dim, num_chunks in same_ndim_cases:
-        tensors = []
-        for size in sizes:
-            tensors.append(make_arg(size))
+        tensors = [make_arg(size) for size in sizes]
         yield SampleInput(tensors, args=(dim, num_chunks))
 
     different_ndim_case = [
@@ -8766,11 +8762,8 @@ def sample_inputs_scaled_dot_product_attention(op_info, device, dtype, requires_
 
     qkv_shapes = [(dim_3_q_shape, dim_3_kv_shape), (dim_4_q_shape, dim_4_kv_shape), broadcast_tuple]
     samples = []
-    gqa_options = [False] if TEST_WITH_ROCM else [True, False]  # TODO: GQA support
-    if TEST_WITH_ROCM and dtype == torch.float32:
-        causal_options = [False]  # FIXME: Large errors with causal+fp32
-    else:
-        causal_options = [True, False]
+    gqa_options = [True, False]
+    causal_options = [True, False]
     for qkv_shape, is_causal, dropout_p, _enable_gqa in product(
             qkv_shapes, causal_options, [0.0, 0.5], gqa_options):
         shape_q, shape_kv = qkv_shape
@@ -8802,16 +8795,6 @@ def sample_inputs_scaled_dot_product_attention(op_info, device, dtype, requires_
             is_causal=False,
             dropout_p=0.0)
     )
-
-    if not TEST_WITH_ROCM:
-        samples.append(
-            SampleInput(
-                make((batch, num_heads_q_gqa, seq_q, head_dim)),
-                make((batch, num_heads_kv_gqa, seq_kv, head_dim)),
-                make((batch, num_heads_kv_gqa, seq_kv, head_dim)),
-                enable_gqa=True
-            )
-        )
 
     yield from samples
 
@@ -13124,7 +13107,8 @@ op_db: List[OpInfo] = [
                     variant_test_name='trunc_rounding',
                     dtypes=all_types_and(torch.half, torch.bfloat16),
                     dtypesIfHpu=custom_types(torch.float32, torch.bfloat16, torch.int32, torch.int8),
-                    sample_inputs_func=partial(sample_inputs_elementwise_binary, sample_kwargs=dict(rounding_mode="trunc")),
+                    sample_kwargs=lambda device, dtype, input:
+                        ({"rounding_mode": "trunc"}, {"rounding_mode": "trunc"}),
                     # https://github.com/pytorch/pytorch/issues/80411
                     gradcheck_fast_mode=True,
                     supports_forward_ad=True,
@@ -13153,7 +13137,8 @@ op_db: List[OpInfo] = [
                     variant_test_name='floor_rounding',
                     dtypes=all_types_and(torch.half, torch.bfloat16),
                     dtypesIfHpu=custom_types(torch.float32, torch.bfloat16, torch.int32, torch.int8),
-                    sample_inputs_func=partial(sample_inputs_elementwise_binary, sample_kwargs=dict(rounding_mode="floor")),
+                    sample_kwargs=lambda device, dtype, input:
+                        ({"rounding_mode": "floor"}, {"rounding_mode": "floor"}),
                     # https://github.com/pytorch/pytorch/issues/80411
                     gradcheck_fast_mode=True,
                     supports_forward_ad=True,

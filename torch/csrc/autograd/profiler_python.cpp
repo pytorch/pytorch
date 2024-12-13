@@ -457,8 +457,9 @@ ExtraFields<EventType::PyCall>::args_t ValueCache::load<
   OptimizerInfo info{
       key, cls, cache.cls_names_.at(cls), cls_and_parameters.parameters_};
   return {
-      // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
-      /*frame_state_=*/std::get<CallType::PyCall>(state_).at(*cache.location_),
+      /*frame_state_=*/std::get<CallType::PyCall>(state_).at(
+          // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+          cache.location_.value()),
       /*module_info_=*/std::nullopt,
       /*optimizer_info_=*/std::move(info)};
 }

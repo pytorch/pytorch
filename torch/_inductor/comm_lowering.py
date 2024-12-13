@@ -65,7 +65,7 @@ def can_realize_as_comm_buffer(
     if isinstance(data, ir.Loops):
         return True
 
-    layout = data.get_layout()
+    layout = data.get_output_spec()
     if isinstance(layout, ir.CommBufferLayout):
         return True
 
@@ -88,7 +88,7 @@ def realize_as_comm_buffer(
     buffer = _get_data(x)
     assert isinstance(buffer, ir.Buffer)
 
-    layout = buffer.get_layout()
+    layout = buffer.get_output_spec()
     if isinstance(layout, ir.CommBufferLayout):
         return
 

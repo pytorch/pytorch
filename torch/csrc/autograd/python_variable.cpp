@@ -344,7 +344,7 @@ bool isResurrectable(THPVariable* self) {
   // Check if this is hermetic. If it is, no resurrection.
   if (tensor.unsafeGetTensorImpl()->pyobj_slot()->check_pyobj(
           getPyInterpreter(), /*ignore_hermetic_tls=*/false) !=
-      std::make_optional((PyObject*)self)) {
+      (PyObject*)self) {
     return false;
   }
   return true;
@@ -452,7 +452,7 @@ static int THPVariable_subclass_clear(THPVariable* self) {
     if (!self->cdata.unsafeIsBorrowed() &&
         tensor.unsafeGetTensorImpl()->pyobj_slot()->check_pyobj(
             getPyInterpreter(), /*ignore_hermetic_tls=*/false) ==
-            std::make_optional((PyObject*)self)) {
+            (PyObject*)self) {
       // TODO: empirically, on OS X this assert appears to be untrue
       // In test_py_tensors_multi_async_call - ProcessGroupRpcTestWithSpawn
       // distributed/rpc/test_process_group_agent.py
@@ -697,7 +697,7 @@ static PyObject* THPVariable_make_subclass(
     PyObject* kwargs) {
   HANDLE_TH_ERRORS
   static PythonArgParser parser({
-      "_make_subclass(PyObject* cls, Tensor data, bool require_grad=False, *, c10::string_view? dispatch_sizes_strides_policy=None, bool dispatch_device=False, bool dispatch_layout=False, Device? device_for_backend_keys=None)",
+      "_make_subclass(PyObject* cls, Tensor data, bool require_grad=False, *, std::string_view? dispatch_sizes_strides_policy=None, bool dispatch_device=False, bool dispatch_layout=False, Device? device_for_backend_keys=None)",
   });
   ParsedArgs<7> parsed_args{};
   auto r = parser.parse(args, kwargs, parsed_args);
@@ -774,7 +774,7 @@ static PyObject* THPVariable_make_wrapper_subclass(
       "_make_wrapper_subclass(PyObject* cls, SymIntArrayRef size, SymIntArrayRef? strides=None, "
       "SymInt? storage_offset=None, MemoryFormat? memory_format=None, ScalarType dtype=None, "
       "Layout layout=torch.strided, Device device=None, bool pin_memory=False, bool requires_grad=False, "
-      "c10::string_view? dispatch_sizes_strides_policy=None, bool dispatch_device=False, bool dispatch_layout=False, "
+      "std::string_view? dispatch_sizes_strides_policy=None, bool dispatch_device=False, bool dispatch_layout=False, "
       "DispatchKeySet _extra_dispatch_keys=None, SymInt? storage_size=None)",
   });
   ParsedArgs<15> parsed_args{};

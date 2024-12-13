@@ -103,6 +103,8 @@ def semi_sparse_detach(func, types, args, kwargs) -> torch.Tensor:
         packed_t=self.packed_t,
         meta_t=self.meta_t,
         compressed_swizzled_bitmask=self.compressed_swizzled_bitmask,
+        fuse_transpose_cusparselt=self.fuse_transpose_cusparselt,
+        alg_id_cusparselt=self.alg_id_cusparselt,
         requires_grad=False,
     )
 
