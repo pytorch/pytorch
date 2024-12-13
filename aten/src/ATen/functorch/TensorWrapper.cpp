@@ -126,7 +126,7 @@ c10::intrusive_ptr<TensorImpl> TensorWrapper::shallow_copy_and_detach(
     c10::VariableVersion&& version_counter,
     bool allow_tensor_metadata_change) const {
   auto dest_impl = makeTensorWrapperPtr(value(), level_, is_alive_);
-  dest_impl->set_version_counter(version_counter);
+  dest_impl->set_version_counter(std::move(version_counter));
 
   // TODO: is this even right?
   dest_impl->set_allow_tensor_metadata_change(allow_tensor_metadata_change);

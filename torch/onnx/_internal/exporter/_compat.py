@@ -250,8 +250,7 @@ def export_compat(
     **_,
 ) -> _onnx_program.ONNXProgram:
     if opset_version is None:
-        # TODO(justinchuby): Change the hardcoded opset version for it to be flexible
-        opset_version = 18
+        opset_version = onnxscript_apis.torchlib_opset_version()
 
     if isinstance(model, torch.export.ExportedProgram):
         # We know the model is already exported program, so the args, kwargs, and dynamic_shapes
