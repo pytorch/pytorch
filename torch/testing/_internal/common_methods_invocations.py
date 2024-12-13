@@ -3287,8 +3287,9 @@ def sample_inputs_index_put(op_info, device, dtype, requires_grad, **kwargs):
         # Test with indices arg
         yield SampleInput(
             make_arg((S, S,)),
-            (index_variable(2, S, device=device),),
-            make_arg((2, S)),
+            # As defined in the docs, if accumulate is false, duplicate indices are not supported
+            (index_variable(2 if accumulate else 1, S, device=device),),
+            make_arg((2 if accumulate else 1, S)),
             accumulate=accumulate)
 
         # Test with mask arg
