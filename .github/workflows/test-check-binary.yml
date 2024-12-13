@@ -18,6 +18,7 @@ jobs:
     with:
       repository: "pytorch/pytorch"
       docker-image: python:3.11
+      docker-build-dir: "skip-docker-build"
       script: |
           pip install --pre torch --index-url https://download.pytorch.org/whl/nightly/cpu
           DESIRED_PYTHON=3.11 DESIRED_CUDA=cpu PACKAGE_TYPE=manywheel .ci/pytorch/check_binary.sh
@@ -29,6 +30,7 @@ jobs:
       repository: "pytorch/pytorch"
       runner: linux.4xlarge.nvidia.gpu
       docker-image: python:3.11
+      docker-build-dir: "skip-docker-build"
       script: |
           pip install --pre torch --index-url https://download.pytorch.org/whl/nightly/cu124
           DESIRED_PYTHON=3.11 DESIRED_CUDA=cu124 PACKAGE_TYPE=manywheel .ci/pytorch/check_binary.sh
