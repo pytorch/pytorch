@@ -823,13 +823,15 @@ class TestPatternMatcher(TestPatternMatcherBase):
 
         for binary_fn, input_shape, bias, dtype in options:
             metrics.reset()
+            # TODO: Remove when https://github.com/pytorch/pytorch/issues/143146 is fixed
+            acl_bf16 = TEST_ACL and dtype == torch.bfloat16
 
             def matcher_check_fn():
                 self.assertEqual(
                     counters["inductor"][
                         "mkldnn_conv_binary_unary_fusion_matcher_nodes"
                     ],
-                    2,
+                    2 if not acl_bf16 else 0,
                 )
                 reshape_linear_reshape_match_nodes = 3 if len(input_shape) == 3 else 0
                 self.assertEqual(
@@ -852,7 +854,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 matcher_check_fn,
                 check_autocast=dtype,
             )
-            self.assertEqual(metrics.generated_kernel_count, 1)
+            self.assertEqual(metrics.generated_kernel_count, 1 if not acl_bf16 else 2)
 
     def test_linear_binary_broadcast_shapes_cpu(self):
         class M(torch.nn.Module):
