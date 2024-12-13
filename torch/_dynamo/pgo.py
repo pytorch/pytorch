@@ -458,6 +458,8 @@ def get_cache_key() -> Optional[str]:
     if dist.is_available() and dist.is_initialized():
         rank = dist.get_rank()
 
+    tag = torch.compiler.config.cache_key_tag
+
     # NB: We namespace the cache keys so that only user-specified job id
     # can alias with each other.
     if (r := torch.compiler.config.job_id) is not None:
@@ -467,11 +469,11 @@ def get_cache_key() -> Optional[str]:
                 "automatically generated job id associated with a specific MAST job "
                 "name and version."
             )
-        return f"{r}:{rank}"
+        return f"{r}:{rank}:{tag}"
 
     if (name_version := torch._utils_internal.get_mast_job_name_version()) is not None:
         mast_job_name, mast_job_version = name_version
-        return f"mast:{mast_job_name}:{mast_job_version}:{rank}"
+        return f"mast:{mast_job_name}:{mast_job_version}:{rank}:{tag}"
 
     return None
 
@@ -657,7 +659,7 @@ def put_local_code_state(cache_key: str) -> None:
         lock_path = path + ".lock"
         # We /mostly/ don't need the lock but the tmp file could be clobbered
         # TODO: use a safe tempfile create to eliminate lock
-        from filelock import FileLock
+        from torch.utils._filelock import FileLock
 
         os.makedirs(os.path.dirname(path), exist_ok=True)
 

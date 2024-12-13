@@ -3646,6 +3646,18 @@ class GraphModule(torch.nn.Module):
         self.assertIsInstance(it2, enumerate)
         self.assertEqual(list(it1), list(it2))
 
+    def test_returning_recursive_func(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def run(x):
+            def f():
+                return f
+
+            return x + 1, f
+
+        res, f = run(torch.zeros(1))
+        self.assertTrue(same(res, torch.ones(1)))
+        self.assertTrue(f is f())
+
 
 def udf_mul(x, y):
     return x * y
@@ -4304,6 +4316,25 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         pybind_obj = torch._C._dynamo.guards.GuardDebugInfo(False, ["a==1"], 1)
         x = torch.randn(4)
         self.assertEqual(opt_fn(x, pybind_obj), fn(x, pybind_obj))
+
+    def test_tree_map(self):
+        def fn(a, b, index):
+            def call(index):
+                mapped_attributes = torch.utils._pytree.tree_map_only(
+                    torch.Tensor,
+                    lambda x: x[index],
+                    (a, b),
+                )
+                return mapped_attributes
+
+            return call(index)
+
+        a = torch.randn(4, 2, 5)
+        b = torch.randn(4, 2, 5, 5)
+        compiled_fn = torch.compile(fn, fullgraph=True)
+        compiled_res = compiled_fn(a, b, torch.tensor([2]))
+        reference_res = fn(a, b, torch.tensor([2]))
+        self.assertTrue(same(compiled_res, reference_res))
 
 
 instantiate_parametrized_tests(FunctionTests)

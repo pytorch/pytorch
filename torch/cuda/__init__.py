@@ -601,8 +601,9 @@ def stream(stream: Optional["torch.cuda.Stream"]) -> StreamContext:
     Arguments:
         stream (Stream): selected stream. This manager is a no-op if it's
             ``None``.
-    ..Note:: In eager mode stream is of type Stream class while in JIT it is
-    an object of the custom class ``torch.classes.cuda.Stream``.
+    .. note::
+        In eager mode stream is of type Stream class while in JIT it is
+        an object of the custom class ``torch.classes.cuda.Stream``.
     """
     return StreamContext(stream)
 
@@ -1646,6 +1647,7 @@ __all__ = [
     "get_device_name",
     "get_device_properties",
     "get_gencode_flags",
+    "get_per_process_memory_fraction",
     "get_rng_state",
     "get_rng_state_all",
     "get_sync_debug_mode",
