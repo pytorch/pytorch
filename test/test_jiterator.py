@@ -165,7 +165,7 @@ class TestPythonJiterator(TestCase):
     ])
     def test_invalid_function_name(self, code_string):
         with self.assertRaises(Exception):
-            create_jit_fn(code_string)
+            jitted_fn = create_jit_fn(code_string)
 
 
 instantiate_device_type_tests(TestPythonJiterator, globals(), only_for="cuda")

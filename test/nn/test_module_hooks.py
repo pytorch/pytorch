@@ -1,5 +1,4 @@
 # Owner(s): ["module: nn"]
-# ruff: noqa: F841
 import gc
 import math
 import pickle
@@ -1213,6 +1212,27 @@ class TestModuleGlobalHooks(TestCase):
 
         output.backward(torch.ones(5, 5), retain_graph=True)
         self.assertTrue(local_backward_called and global_backward_called)
+
+    @skipIfTorchDynamo("TorchDynamo does not work well with hooks")
+    def test_module_global_hooks_with_kwargs(self):
+        def kwarg_global_forward_hook(
+            module: nn.Module,
+            args: Tuple[torch.Tensor],
+            kwargs: Dict[str, Any],
+            out: torch.Tensor,
+        ) -> Any:
+            out = out + kwargs["bias"]
+            return out
+
+        model = KwargModel()
+        nn.modules.module.register_module_forward_hook(
+            kwarg_global_forward_hook,
+            with_kwargs=True,
+        )
+        x: torch.Tensor = torch.randn(10, 20)
+        bias: torch.Tensor = torch.randn(10, 20)
+        out = model(x, bias=bias)
+        self.assertEqual(out, x + 2 * bias, rtol=0, atol=1e-5)
 
 
 class TestModuleHookNN(NNTestCase):

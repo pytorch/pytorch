@@ -42,10 +42,10 @@ struct uniform_int_from_to_distribution {
   template <typename RNG>
   C10_HOST_DEVICE inline T operator()(RNG generator) {
     if ((
-      std::is_same<T, int64_t>::value ||
-      std::is_same<T, double>::value ||
-      std::is_same<T, float>::value ||
-      std::is_same<T, at::BFloat16>::value) && range_ >= 1ULL << 32)
+      std::is_same_v<T, int64_t> ||
+      std::is_same_v<T, double> ||
+      std::is_same_v<T, float> ||
+      std::is_same_v<T, at::BFloat16>) && range_ >= 1ULL << 32)
     {
       return transformation::uniform_int_from_to<T>(generator->random64(), range_, base_);
     } else {
@@ -95,11 +95,9 @@ struct uniform_int_distribution {
 template <typename T>
 struct uniform_real_distribution {
 
-  C10_HOST_DEVICE inline uniform_real_distribution(T from, T to) {
+  C10_HOST_DEVICE inline uniform_real_distribution(T from, T to) : from_(from), to_(to) {
     TORCH_CHECK_IF_NOT_ON_CUDA(from <= to);
     TORCH_CHECK_IF_NOT_ON_CUDA(to - from <= std::numeric_limits<T>::max());
-    from_ = from;
-    to_ = to;
   }
 
   template <typename RNG>
@@ -174,8 +172,8 @@ template <typename RNG, typename ret_type,                                      
 C10_HOST_DEVICE inline void maybe_set_next_##TYPE##_normal_sample(RNG* /*generator*/, ret_type /*cache*/) { \
 }
 
-DISTRIBUTION_HELPER_GENERATE_NEXT_NORMAL_METHODS(double);
-DISTRIBUTION_HELPER_GENERATE_NEXT_NORMAL_METHODS(float);
+DISTRIBUTION_HELPER_GENERATE_NEXT_NORMAL_METHODS(double)
+DISTRIBUTION_HELPER_GENERATE_NEXT_NORMAL_METHODS(float)
 
 /**
  * Samples a normal distribution using the Box-Muller method
@@ -186,10 +184,8 @@ DISTRIBUTION_HELPER_GENERATE_NEXT_NORMAL_METHODS(float);
 template <typename T>
 struct normal_distribution {
 
-  C10_HOST_DEVICE inline normal_distribution(T mean_in, T stdv_in) {
+  C10_HOST_DEVICE inline normal_distribution(T mean_in, T stdv_in) : mean(mean_in), stdv(stdv_in) {
     TORCH_CHECK_IF_NOT_ON_CUDA(stdv_in >= 0, "stdv_in must be positive: ", stdv_in);
-    mean = mean_in;
-    stdv = stdv_in;
   }
 
   template <typename RNG>
@@ -236,9 +232,8 @@ template <> struct DiscreteDistributionType<double> { using type = double; };
 template <typename T>
 struct bernoulli_distribution {
 
-  C10_HOST_DEVICE inline bernoulli_distribution(T p_in) {
+  C10_HOST_DEVICE inline bernoulli_distribution(T p_in) : p(p_in) {
     TORCH_CHECK_IF_NOT_ON_CUDA(p_in >= 0 && p_in <= 1);
-    p = p_in;
   }
 
   template <typename RNG>
@@ -257,9 +252,8 @@ struct bernoulli_distribution {
 template <typename T>
 struct geometric_distribution {
 
-  C10_HOST_DEVICE inline geometric_distribution(T p_in) {
+  C10_HOST_DEVICE inline geometric_distribution(T p_in) : p(p_in) {
     TORCH_CHECK_IF_NOT_ON_CUDA(p_in > 0 && p_in < 1);
-    p = p_in;
   }
 
   template <typename RNG>
@@ -317,10 +311,8 @@ struct cauchy_distribution {
 template <typename T>
 struct lognormal_distribution {
 
-  C10_HOST_DEVICE inline lognormal_distribution(T mean_in, T stdv_in) {
+  C10_HOST_DEVICE inline lognormal_distribution(T mean_in, T stdv_in) : mean(mean_in), stdv(stdv_in) {
     TORCH_CHECK_IF_NOT_ON_CUDA(stdv_in > 0);
-    mean = mean_in;
-    stdv = stdv_in;
   }
 
   template<typename RNG>

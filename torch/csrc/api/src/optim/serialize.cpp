@@ -9,8 +9,7 @@
 #include <string>
 #include <vector>
 
-namespace torch {
-namespace optim {
+namespace torch::optim {
 void serialize(
     serialize::OutputArchive& archive,
     const std::string& key,
@@ -50,5 +49,4 @@ void serialize(
     steps.push_back(step.item<int64_t>());
   }
 }
-} // namespace optim
-} // namespace torch
+} // namespace torch::optim

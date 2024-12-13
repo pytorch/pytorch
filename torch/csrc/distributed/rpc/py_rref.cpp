@@ -137,6 +137,7 @@ PyRRef::PyRRef(const py::object& value, const py::object& type_hint)
         return rref;
       }()) {}
 
+// NOLINTNEXTLINE(bugprone-exception-escape)
 PyRRef::~PyRRef() {
   if (type_.has_value()) {
     pybind11::gil_scoped_acquire ag;

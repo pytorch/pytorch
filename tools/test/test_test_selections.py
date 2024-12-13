@@ -474,7 +474,8 @@ class TestCalculateShards(unittest.TestCase):
                 else:
                     # x.time is not None because of the above check
                     self.assertAlmostEqual(
-                        random_times[test], sum(x.time for x in sharded_tests)  # type: ignore[misc]
+                        random_times[test],
+                        sum(x.time for x in sharded_tests),  # type: ignore[misc]
                     )
                 self.assertListEqual(
                     list(range(sharded_tests[0].num_shards)),

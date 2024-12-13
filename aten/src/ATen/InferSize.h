@@ -33,7 +33,7 @@ inline void infer_size_impl(
     } else if (shape[dim] >= 0) {
       newsize *= shape[dim];
     } else {
-      AT_ERROR("invalid shape dimension ", shape[dim]);
+      TORCH_CHECK(false, "invalid shape dimension ", shape[dim]);
     }
   }
 

@@ -41,7 +41,12 @@ class TestCppWrapperHipify(TestCase):
             do {                                               \\
                 hipError_t code = EXPR;                          \\
                 const char *msg;                               \\
-                hipDrvGetErrorString(code, &msg);                  \\
+                hipError_t code_get_error = hipDrvGetErrorString(code, &msg); \\
+                if (code_get_error != hipSuccess) {          \\
+                    throw std::runtime_error(                  \\
+                        std::string("CUDA driver error: ") +   \\
+                        std::string("invalid error code!"));   \\
+                }                                              \\
                 if (code != hipSuccess) {                    \\
                     throw std::runtime_error(                  \\
                         std::string("CUDA driver error: ") +   \\
@@ -105,7 +110,11 @@ class TestCppWrapperHipify(TestCase):
             }
         """
         if torch.version.hip is not None:
-            expected = expected.replace("32*numWarps", "64*numWarps")
+            # Adjusting the warp size to GPU supported wavefront size on AMD GPU
+            prop = torch.cuda.get_device_properties(torch.cuda.current_device())
+            expected = expected.replace(
+                "32*numWarps", str(prop.warp_size) + "*numWarps"
+            )
         result = maybe_hipify_code_wrapper(header, True)
         self.assertEqual(result.rstrip(), expected.rstrip())
 

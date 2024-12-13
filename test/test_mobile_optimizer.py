@@ -37,6 +37,7 @@ class TestOptimizer(TestCase):
         dilation = 1
         input_channels = input_channels_per_group * groups
         output_channels = output_channels_per_group * groups
+        kernels = (kernel_h, kernel_w)
         strides = (stride_h, stride_w)
         paddings = (pad_h, pad_w)
         dilations = (dilation, dilation)
@@ -302,7 +303,7 @@ class TestOptimizer(TestCase):
             torch.ao.quantization.convert(model, inplace=True)
             model = torch.jit.script(model)
             # this line should not have ASAN failures
-            optimize_for_mobile(model)
+            model_optim = optimize_for_mobile(model)
 
     def test_generate_mobile_module_lints(self):
         class MyTestModule(torch.nn.Module):

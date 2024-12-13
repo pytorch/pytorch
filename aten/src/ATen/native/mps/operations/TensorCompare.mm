@@ -535,7 +535,7 @@ Tensor& nan_to_num_out_mps(const Tensor& self,
                                                                     name:nil];
     });
     MPSScalar nanReplacementScalar, posInfReplacementScalar, negInfReplacementScalar;
-    AT_DISPATCH_FLOATING_TYPES_AND(kHalf, self.scalar_type(), "nan_to_num_mps", [&]() {
+    AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, self.scalar_type(), "nan_to_num_mps", [&]() {
       scalar_t nan_replacement = static_cast<scalar_t>(nan.value_or(0.));
       scalar_t pos_inf_replacement =
           pos_inf.has_value() ? static_cast<scalar_t>(pos_inf.value()) : std::numeric_limits<scalar_t>::max();
@@ -570,8 +570,8 @@ static void isposinf_kernel_mps(TensorIteratorBase& iter) {
   mps::is_posneginf_helper(iter, false);
 }
 
-REGISTER_DISPATCH(where_kernel, &where_kernel_mps);
-REGISTER_DISPATCH(isneginf_stub, &isneginf_kernel_mps);
-REGISTER_DISPATCH(isposinf_stub, &isposinf_kernel_mps);
+REGISTER_DISPATCH(where_kernel, &where_kernel_mps)
+REGISTER_DISPATCH(isneginf_stub, &isneginf_kernel_mps)
+REGISTER_DISPATCH(isposinf_stub, &isposinf_kernel_mps)
 
 } // namespace at::native

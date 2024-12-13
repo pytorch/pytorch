@@ -5,10 +5,10 @@
 #include <cstdint>
 #include <utility>
 
-#include <c10/core/DeviceGuard.h>
-#include <c10/util/Exception.h>
-#include <c10/core/Stream.h>
 #include <ATen/mps/MPSDevice.h>
+#include <c10/core/DeviceGuard.h>
+#include <c10/core/Stream.h>
+#include <c10/util/Exception.h>
 
 #ifdef __OBJC__
 #include <Foundation/Foundation.h>
@@ -32,7 +32,6 @@ typedef void* MTLDevice_t;
 #define nil NULL;
 #endif
 
-
 namespace at::mps {
 
 //-----------------------------------------------------------------
@@ -40,16 +39,15 @@ namespace at::mps {
 //-----------------------------------------------------------------
 
 enum class SyncType {
-  NONE,               // no commit to command buffer
-  COMMIT,             // commit and flush the command buffer
-  COMMIT_AND_WAIT,    // flush and wait for command buffer execution to finish
-  COMMIT_AND_CONTINUE,// commit and continue with a new underlying command buffer
-  COMMIT_ADAPTIVE,    // commit adaptively based on available memory
+  NONE, // no commit to command buffer
+  COMMIT, // commit and flush the command buffer
+  COMMIT_AND_WAIT, // flush and wait for command buffer execution to finish
+  COMMIT_AND_CONTINUE, // commit and continue with a new underlying command buffer
+  COMMIT_ADAPTIVE, // commit adaptively based on available memory
 };
 
-class TORCH_API MPSStream
-{
-public:
+class TORCH_API MPSStream {
+ public:
   enum Unchecked { UNCHECKED };
 
   /// Construct a MPSStream from a Stream.  This construction is checked,
@@ -57,41 +55,64 @@ public:
   explicit MPSStream(Stream stream);
 
   ~MPSStream();
-  MTLCommandQueue_t commandQueue() const { return _commandQueue; };
-  dispatch_queue_t queue() const { return _serialQueue; }
+  MTLCommandQueue_t commandQueue() const {
+    return _commandQueue;
+  };
+  dispatch_queue_t queue() const {
+    return _serialQueue;
+  }
 
   MPSCommandBuffer* commandBuffer();
   MTLComputeCommandEncoder_t commandEncoder();
   void endKernelCoalescing();
   void synchronize(SyncType syncType);
   void fill(id<MTLBuffer> buffer, uint8_t value, size_t length, size_t offset, SyncType syncType = SyncType::NONE);
-  void copy(id<MTLBuffer> srcBuffer, id<MTLBuffer> dstBuffer,
-            size_t length, size_t srcOffset, size_t dstOffset,
-            uint64_t profileId, SyncType syncType = SyncType::NONE);
-  void copy_and_sync(id<MTLBuffer> srcBuffer, id<MTLBuffer> dstBuffer,
-                     size_t length, size_t srcOffset, size_t dstOffset,
-                     bool non_blocking, uint64_t profileId);
-  void executeMPSGraph(MPSGraph* mpsGraph, NSDictionary* feeds, NSDictionary* results, SyncType syncType = SyncType::NONE);
+  void copy(id<MTLBuffer> srcBuffer,
+            id<MTLBuffer> dstBuffer,
+            size_t length,
+            size_t srcOffset,
+            size_t dstOffset,
+            uint64_t profileId,
+            SyncType syncType = SyncType::NONE);
+  void copy_and_sync(id<MTLBuffer> srcBuffer,
+                     id<MTLBuffer> dstBuffer,
+                     size_t length,
+                     size_t srcOffset,
+                     size_t dstOffset,
+                     bool non_blocking,
+                     uint64_t profileId);
+  void executeMPSGraph(MPSGraph* mpsGraph,
+                       NSDictionary* feeds,
+                       NSDictionary* results,
+                       SyncType syncType = SyncType::NONE);
   void addCompletedHandler(MTLCommandBufferHandler block);
 
   /// Get the MPS device index that this stream is associated with.
-  c10::DeviceIndex device_index() const { return _stream.device_index(); }
+  c10::DeviceIndex device_index() const {
+    return _stream.device_index();
+  }
 
-  MTLCommandQueue_t stream() const { return _commandQueue; };
+  MTLCommandQueue_t stream() const {
+    return _commandQueue;
+  };
 
-  MTLDevice_t device() const { return [_commandQueue device];}
+  MTLDevice_t device() const {
+    return [_commandQueue device];
+  }
 
   /// Explicit conversion to Stream.
-  Stream unwrap() const { return _stream; }
+  Stream unwrap() const {
+    return _stream;
+  }
 
-private:
+ private:
   Stream _stream;
   MTLCommandQueue_t _commandQueue = nil;
   MPSCommandBuffer* _commandBuffer = nil;
   MPSCommandBuffer* _prevCommandBuffer = nil;
   MTLComputeCommandEncoder_t _commandEncoder = nil;
-  MPSGraphExecutionDescriptor *_executionDescriptor = nil;
-  MPSGraphCompilationDescriptor *_compilationDescriptor = nil;
+  MPSGraphExecutionDescriptor* _executionDescriptor = nil;
+  MPSGraphCompilationDescriptor* _compilationDescriptor = nil;
   dispatch_queue_t _serialQueue = nullptr;
   // CommitAndContinue is enabled by default
   bool _enableCommitAndContinue = true;
@@ -117,8 +138,7 @@ TORCH_API MPSStream* getDefaultMPSStream();
 //  MPSStreamImpl
 //-----------------------------------------------------------------
 
-class TORCH_API MPSStreamImpl
-{
+class TORCH_API MPSStreamImpl {
  public:
   /**
    * Gets single instance of the MPSStream.

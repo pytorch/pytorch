@@ -104,14 +104,13 @@ static PyObject* THPVariable_pynew(
     }
   }
 
-  return THPVariable_Wrap(std::move(var));
+  return THPVariable_Wrap(var);
   END_HANDLE_TH_ERRORS
 }
 
 PyTypeObject THPLegacyVariableType = {
-    PyVarObject_HEAD_INIT(
-        nullptr,
-        0) "torch._C._LegacyVariableBase", /* tp_name */
+    PyVarObject_HEAD_INIT(nullptr, 0)
+    "torch._C._LegacyVariableBase", /* tp_name */
     0, /* tp_basicsize */
     0, /* tp_itemsize */
     nullptr, /* tp_dealloc */

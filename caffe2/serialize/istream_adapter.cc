@@ -29,7 +29,7 @@ size_t IStreamAdapter::read(uint64_t pos, void* buf, size_t n, const char* what)
 
 void IStreamAdapter::validate(const char* what) const {
   if (!*istream_) {
-    AT_ERROR("istream reader failed: ", what, ".");
+    TORCH_CHECK(false, "istream reader failed: ", what, ".");
   }
 }
 

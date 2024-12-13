@@ -10,7 +10,7 @@ We propose distributed tensor primitives to allow easier distributed computation
 # torchrun --standalone --nnodes=1 --nproc-per-node=4 dtensor_example.py
 import os
 import torch
-from torch.distributed._tensor import init_device_mesh, Shard, distribute_tensor
+from torch.distributed.tensor import init_device_mesh, Shard, distribute_tensor
 
 # Create a mesh topology with the available devices:
 # 1. We can directly create the mesh using elastic launcher, (recommended)
@@ -54,7 +54,7 @@ Here are some basic DTensor API examples that showcase:
 ```python
 # torchrun --standalone --nnodes=1 --nproc-per-node=4 dtensor_example.py
 import torch
-from torch.distributed._tensor import DTensor, Shard, Replicate, distribute_tensor, distribute_module, init_device_mesh
+from torch.distributed.tensor import DTensor, Shard, Replicate, distribute_tensor, distribute_module, init_device_mesh
 
 # construct a device mesh with available devices (multi-host or single host)
 device_mesh = init_device_mesh("cuda", (4,))
@@ -114,7 +114,7 @@ def distribute_module(
 
 ```python
 import torch.nn as nn
-from torch.distributed._tensor import Shard, distribute_tensor, distribute_module, init_device_mesh
+from torch.distributed.tensor import Shard, distribute_tensor, distribute_module, init_device_mesh
 
 class MyModule(nn.Module):
     def __init__(self) -> None:

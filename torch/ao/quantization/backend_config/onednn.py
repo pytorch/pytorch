@@ -368,12 +368,12 @@ def _conv_bn_add_relu_extra_inputs_getter_left(pattern):
     return [extra_input]
 
 
-conv_add_relu_left_options = itertools.product(
+conv_add_relu_left_optioins = itertools.product(
     [True, False],  # with_bn
     [torch.add, operator.add],  # add_op
 )
 
-for with_bn, add_op in conv_add_relu_left_options:
+for with_bn, add_op in conv_add_relu_left_optioins:
     if with_bn:
         conv_configs.append(
             BackendPatternConfig()
@@ -463,12 +463,12 @@ def _conv_bn_add_relu_extra_inputs_getter_right(pattern):
     return [extra_input]
 
 
-conv_add_relu_options = itertools.product(
+conv_add_relu_left_optioins = itertools.product(
     [True, False],  # with_bn
     [torch.add, operator.add],  # add_op
 )
 
-for with_bn, add_op in conv_add_relu_options:
+for with_bn, add_op in conv_add_relu_left_optioins:
     if with_bn:
         conv_configs.append(
             BackendPatternConfig()

@@ -38,7 +38,7 @@ C10_DEFINE_SHARED_REGISTRY_WITHOUT_WARNING(
     GlooDeviceRegistry,
     ::gloo::transport::Device,
     const std::string& /* interface */,
-    const std::string& /* hostname */);
+    const std::string& /* hostname */)
 
 #if GLOO_HAVE_TRANSPORT_TCP
 static std::shared_ptr<::gloo::transport::Device> makeTCPDevice(
@@ -61,8 +61,8 @@ static std::shared_ptr<::gloo::transport::Device> makeTCPDevice(
 // Registry priority is per key identifier. We register TCP to `LINUX` for
 // the flexibility of other application to override by priority. Register
 // TCP to `TCP` for env "GLOO_DEVICE_TRANSPORT" override.
-C10_REGISTER_CREATOR(GlooDeviceRegistry, LINUX, makeTCPDevice);
-C10_REGISTER_CREATOR(GlooDeviceRegistry, TCP, makeTCPDevice);
+C10_REGISTER_CREATOR(GlooDeviceRegistry, LINUX, makeTCPDevice)
+C10_REGISTER_CREATOR(GlooDeviceRegistry, TCP, makeTCPDevice)
 #endif
 
 #if GLOO_HAVE_TRANSPORT_TCP_TLS

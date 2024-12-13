@@ -5,7 +5,18 @@ import itertools
 import logging
 import re
 import typing
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    List,
+    Optional,
+    Sequence,
+    Set,
+    Tuple,
+    TypeVar,
+    Union,
+)
 from unittest.mock import patch
 
 import sympy
@@ -14,6 +25,7 @@ import torch
 from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
 from torch.utils._ordered_set import OrderedSet
 
+from ..utils._sympy.symbol import make_symbol, SymT
 from .codegen.common import index_prevent_reordering
 from .utils import (
     get_dtype_size,
@@ -25,6 +37,8 @@ from .utils import (
 )
 from .virtualized import OpsHandler, ReductionType, V
 
+
+T = TypeVar("T")
 
 log = logging.getLogger(__name__)
 is_indirect = re.compile(r"indirect|tmp").search
@@ -67,7 +81,10 @@ class MemoryDep(Dep):
     mode: Optional[str] = None
 
     def __repr__(self) -> str:
-        return f"MemoryDep({self.name!r}, {self.index}, {self.ranges}, {self.mode})"
+        maybe_mode = ""
+        if self.mode is not None:
+            maybe_mode = f", {self.mode}"
+        return f"MemoryDep({self.name!r}, {self.index}, {self.ranges}{maybe_mode})"
 
     @property
     def num_vars(self):
@@ -125,9 +142,7 @@ class MemoryDep(Dep):
             return None
 
         stride_to_index = {s: i for i, s in enumerate(self_strides)}
-        order = []
-        for s in other_strides:
-            order.append(stride_to_index[s])
+        order = [stride_to_index[s] for s in other_strides]
 
         assert set(order) == set(range(0, self.num_vars))
         return order
@@ -197,12 +212,21 @@ class MemoryDep(Dep):
         """{c0: 128, c1: 512, ...}"""
         return dict(zip(self.var_names, self.size))
 
+    def simplify_with_ranges(self):
+        return MemoryDep(
+            name=self.name,
+            index=V.graph.sizevars.simplify_with_ranges(self.index, self.ranges),
+            var_names=self.var_names,
+            size=self.size,
+            mode=self.mode,
+        )
+
     def get_numel(self) -> sympy.Expr:
         if self.is_indirect():
             numel = V.graph.get_numel(self.name)
         else:
             vars: OrderedSet[sympy.Basic] = OrderedSet(self.index.free_symbols)
-            numel = sympy.Integer(1)
+            numel = sympy.S.One
             for var, size in zip(self.var_names, self.size):
                 if var in vars:
                     numel = numel * size
@@ -219,15 +243,20 @@ class MemoryDep(Dep):
             )
         return self
 
-    def numbytes_hint(self):
-        return V.graph.sizevars.size_hint(self.get_numel()) * get_dtype_size(
-            V.graph.get_dtype(self.name)
-        )
+    def numbytes_hint(self) -> int:
+        try:
+            return V.graph.sizevars.size_hint(self.get_numel()) * get_dtype_size(
+                V.graph.get_dtype(self.name)
+            )
+        except NotImplementedError:  # NoneLayout
+            return 0
 
     def has_unbacked_symbols(self):
         return len(free_unbacked_symbols(self.get_numel())) > 0
 
     def is_contiguous(self) -> bool:
+        if isinstance(self.index, sympy.Integer):
+            return True
         return isinstance(self.index, sympy.Symbol) and self.index in self.var_names
 
     def stride1_for_last_dim(self, result_for_complex_expression=True) -> bool:
@@ -243,7 +272,7 @@ class MemoryDep(Dep):
 
         last_sym = self.var_names[-1]
         for term in terms:
-            if term is last_sym:
+            if term == last_sym:
                 return True
 
             # Having a >1 stride for the last dimension is bad for perf
@@ -251,7 +280,7 @@ class MemoryDep(Dep):
             if (
                 isinstance(term, sympy.Mul)
                 and len(term.args) == 2
-                and term.args[1] is last_sym
+                and term.args[1] == last_sym
                 and isinstance(term.args[0], (int, sympy.Integer))
                 and term.args[0] > 1
             ):
@@ -287,9 +316,12 @@ class StarDep(Dep):
         return self
 
     def numbytes_hint(self):
-        return V.graph.sizevars.size_hint(self.get_numel()) * get_dtype_size(
-            V.graph.get_dtype(self.name)
-        )
+        try:
+            return V.graph.sizevars.size_hint(self.get_numel()) * get_dtype_size(
+                V.graph.get_dtype(self.name)
+            )
+        except NotImplementedError:
+            return 0  # NoneLayout, MultiOutputLayout, etc
 
     def has_unbacked_symbols(self):
         return len(free_unbacked_symbols(self.get_numel())) > 0
@@ -324,7 +356,7 @@ class WeakDep(Dep):
         raise NotImplementedError("WeakDep does not have an index")
 
     def get_numel(self) -> sympy.Expr:
-        return sympy.Integer(1)
+        return sympy.S.One
 
     def rename(self, renames: Dict[str, str]) -> "WeakDep":
         if self.name in renames:
@@ -506,14 +538,18 @@ class _RecordLoadStoreInner(V.MockHandler):  # type: ignore[name-defined]
 
     def bucketize(
         self,
-        values,
-        offsets_name: str,
-        offsets_size: sympy.Expr,
+        values: T,
+        boundaries: Tuple[str, sympy.Expr, sympy.Expr, sympy.Expr],
+        boundary_indices: T,
         indexing_dtype: torch.dtype,
         right: bool,
-    ):
-        self._reads.add(StarDep(offsets_name))
-        return f"bucketize({values}, {offsets_name}, {sympy_str(offsets_size)}, {indexing_dtype}, {right})"
+        sorter: Optional[Tuple[str, sympy.Expr]] = None,
+        sorter_indices: Optional[T] = None,
+    ) -> None:
+        """Records the names of the buffers that bucketize will read from."""
+        self._reads.add(StarDep(boundaries[0]))
+        if sorter is not None:
+            self._reads.add(StarDep(sorter[0]))
 
 
 class RecordLoadStore(V.KernelFormatterHandler):  # type: ignore[name-defined]
@@ -537,15 +573,13 @@ def var_builder(prefix: str) -> Tuple[VarRanges, Callable[[sympy.Expr], sympy.Sy
     return var_ranges, add_var
 
 
-def index_vars_no_squeeze(*argsizes: Tuple[sympy.Expr, ...], prefix: str):
+def index_vars_no_squeeze(*argsizes: Sequence[sympy.Expr], prefix: str):
     var_ranges, add_var = var_builder(prefix)
-    args: List[List[sympy.Symbol]] = []
-    for size in argsizes:
-        args.append(list(map(add_var, size)))
+    args: List[List[sympy.Symbol]] = [list(map(add_var, size)) for size in argsizes]
     return args, var_ranges
 
 
-def index_vars_squeeze(*argsizes: Tuple[sympy.Expr, ...], prefix: str = "d"):
+def index_vars_squeeze(*argsizes: Sequence[sympy.Expr], prefix: str = "d"):
     from .ir import SqueezeView
 
     var_ranges, add_var = var_builder(prefix)
@@ -560,42 +594,19 @@ def index_vars_squeeze(*argsizes: Tuple[sympy.Expr, ...], prefix: str = "d"):
 
 def extract_read_writes(
     fn: Callable[..., Any],
-    *argsizes: Tuple[sympy.Expr, ...],
+    *argsizes: Sequence[sympy.Expr],
     normalize: bool = False,
     prefix: str = "d",
     hidden_args=(),
 ):
     args, var_ranges = index_vars_squeeze(*argsizes, prefix=prefix)
 
-    from .loop_body import LoopBody, MemoryUsageType
+    from .loop_body import LoopBody
 
     if isinstance(fn, LoopBody):
-        # Fast path to avoid tracing when we already have a LoopBody
-        inner = _RecordLoadStoreInner(var_ranges=var_ranges, normalize=normalize)
-        name_to_index = fn.indexing_from_args([*args, *hidden_args])
-        if fn.indirect_vars:
-            # mimic the `tmpX` naming tracing gives us
-            repl = {v: sympy.Symbol(f"tmp{i}") for i, v in enumerate(fn.indirect_vars)}
-            name_to_index = {k: sympy_subs(v, repl) for k, v in name_to_index.items()}  # type: ignore[arg-type]
-        for entry in fn.memory_usage[MemoryUsageType.LOAD]:
-            inner.load(entry.buffer_name, name_to_index[entry.index_name])  # type: ignore[arg-type]
-        for entry in fn.memory_usage[MemoryUsageType.LOAD_SEED]:
-            inner.load_seed(entry.buffer_name, int(name_to_index[entry.index_name]))  # type: ignore[arg-type]
-        for entry in fn.memory_usage[MemoryUsageType.STORE]:
-            inner.store(
-                entry.buffer_name, name_to_index[entry.index_name], None, entry.mode  # type: ignore[arg-type]
-            )
-        for entry in fn.memory_usage[MemoryUsageType.STORE_REDUCTION]:
-            inner.store_reduction(
-                entry.buffer_name, name_to_index[entry.index_name], None  # type: ignore[arg-type]
-            )
-        for entry in fn.memory_usage[MemoryUsageType.INDEX_EXPR]:
-            inner.index_expr(name_to_index[entry.index_name], None)
-        for entry in fn.memory_usage[MemoryUsageType.BUCKETIZE]:
-            inner.bucketize(
-                None, entry.buffer_name, name_to_index[entry.index_name], None, None  # type: ignore[arg-type]
-            )
-        # fn.memory_usage[MemoryUsageType.CHECK_BOUNDS] intentionally skipped
+        inner = extract_loop_body_with_args(
+            fn, [*args, *hidden_args], var_ranges, normalize
+        )
     else:
         # Slow path tracing the function
         rw = RecordLoadStore(var_ranges, normalize=normalize)
@@ -617,8 +628,42 @@ def extract_read_writes(
     )
 
 
+def extract_loop_body_with_args(fn, args, var_ranges, normalize=False):
+    from .loop_body import MemoryUsageType
+
+    # Fast path to avoid tracing when we already have a LoopBody
+    inner = _RecordLoadStoreInner(var_ranges=var_ranges, normalize=normalize)
+    name_to_index = fn.indexing_from_args(args)
+    if fn.indirect_vars:
+        # mimic the `tmpX` naming tracing gives us
+        repl = {v: make_symbol(SymT.TMP, i) for i, v in enumerate(fn.indirect_vars)}
+        name_to_index = {k: sympy_subs(v, repl) for k, v in name_to_index.items()}  # type: ignore[arg-type]
+    for entry in fn.memory_usage[MemoryUsageType.LOAD]:
+        inner.load(entry.buffer_name, name_to_index[entry.index_name])  # type: ignore[arg-type]
+    for entry in fn.memory_usage[MemoryUsageType.LOAD_SEED]:
+        inner.load_seed(entry.buffer_name, int(name_to_index[entry.index_name]))  # type: ignore[arg-type]
+    for entry in fn.memory_usage[MemoryUsageType.STORE]:
+        inner.store(
+            entry.buffer_name, name_to_index[entry.index_name], None, entry.mode  # type: ignore[arg-type]
+        )
+    for entry in fn.memory_usage[MemoryUsageType.STORE_REDUCTION]:
+        inner.store_reduction(
+            entry.buffer_name, name_to_index[entry.index_name], None  # type: ignore[arg-type]
+        )
+    for entry in fn.memory_usage[MemoryUsageType.INDEX_EXPR]:
+        inner.index_expr(name_to_index[entry.index_name], None)
+    for entry in fn.memory_usage[MemoryUsageType.BUCKETIZE]:
+        # All that matters is that we record the buffer name, so place it in the
+        # "boundaries" name position to ensure that it's recorded.
+        inner.bucketize(
+            None, (entry.buffer_name, None, None, None), None, None, None  # type: ignore[arg-type]
+        )
+    # fn.memory_usage[MemoryUsageType.CHECK_BOUNDS] intentionally skipped
+    return inner
+
+
 def extract_input_node_reduction_ranges(
-    input_node: "torch._inductor.ir.TensorBox",
+    input_node: "torch._inductor.ir.IRNode",
 ) -> Tuple[Optional[List[sympy.Expr]], Optional[List[sympy.Expr]]]:
     """
     Returns the size and reduction size of all inputs, if the sizes and reduction_sizes (if exist) are all the same.
@@ -627,12 +672,15 @@ def extract_input_node_reduction_ranges(
     Otherwise returns (None, None).
     """
 
-    from .ir import ComputedBuffer, Loops
+    from .ir import ComputedBuffer, ExternKernel, Loops
 
-    if isinstance(input_node.data, ComputedBuffer):
+    size: Optional[List[sympy.Expr]]
+    reduction_size: Optional[List[sympy.Expr]]
+
+    if isinstance(input_node.get_defining_op(), ComputedBuffer):
         # Input node has already been realized. Return its size and reduction_size.
-        size = input_node.get_size()
-        reduction_size = input_node.get_reduction_size()
+        size = [*input_node.get_size()]
+        reduction_size = [*input_node.get_reduction_size()]
         if len(reduction_size) > 0:
             return (size, reduction_size)
         else:
@@ -646,11 +694,11 @@ def extract_input_node_reduction_ranges(
     # The current method still uses reduction ranges from the dependent realized node, which is not ideal.
     # Is there a way to check whether there are permutations inbetween?
     reads = input_node.get_reads()
-    reduction_size = None
-    size = None
+    reduction_size: Optional[List[sympy.Expr]] = None
+    size: Optional[List[sympy.Expr]] = None
     while reduction_size is None and len(reads) > 0:
         seen: OrderedSet[str] = OrderedSet()
-        new_reads = []
+        new_reads: List[Dep] = []
         for read in reads:
             if not isinstance(read, MemoryDep):
                 continue
@@ -661,21 +709,23 @@ def extract_input_node_reduction_ranges(
             if buffer is None:
                 continue
             op = buffer.get_defining_op()
-            if op is None:
+            if op is None or isinstance(op, ExternKernel):
                 continue
 
             if isinstance(op, ComputedBuffer) and len(op.get_reduction_size()) > 0:
                 if reduction_size is None:
-                    reduction_size = op.get_reduction_size()
-                    size = op.get_size()
-                elif reduction_size != op.get_reduction_size() or size != op.get_size():
+                    reduction_size = [*op.get_reduction_size()]
+                    size = [*op.get_size()]
+                elif reduction_size != [*op.get_reduction_size()] or size != [
+                    *op.get_size()
+                ]:
                     return (None, None)
             else:
                 new_reads.extend(op.get_reads())
         if reads == new_reads:
             return (size, reduction_size)
         else:
-            reads = new_reads
+            reads = OrderedSet(new_reads)
     return (size, reduction_size)
 
 
@@ -723,6 +773,11 @@ class FreeUnbackedSymbolsOpsHandler:
     ) -> Union[None, Tuple[None, ...]]:
         num_values = reduction_num_outputs(reduction_type)
         return (None,) * num_values if num_values > 1 else None
+
+    def masked(self, mask, body, other) -> None:
+        assert callable(body), "masked body must always be callable."
+        # The body can make additional calls, for e.g. ops.indirect_indexing
+        body()
 
 
 def _typecheck_FreeUnbackedSymbolsOpsHandler(

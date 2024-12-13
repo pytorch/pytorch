@@ -5,10 +5,7 @@
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/utils/subgraph_utils.h>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace onednn {
+namespace torch::jit::fuser::onednn {
 
 void GraphRewriter::cleanupSubgraphs() {
   auto curNode = *block_->nodes().rbegin();
@@ -138,7 +135,4 @@ std::optional<Node*> GraphRewriter::tryMerge(Node* consumer, Node* producer) {
   return consumer;
 }
 
-} // namespace onednn
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::fuser::onednn

@@ -53,7 +53,7 @@ class Shard(Placement):
     DeviceMesh dimension only holds a shard/piece of the global Tensor. The
     ``Shard(dim)`` placement follows the ``torch.chunk(dim)`` semantic, where the
     last few shards on the DeviceMesh dimension might be empty when the tensor dimension
-    is not evenly divisble on the DeviceMesh dimension. The ``Shard`` placement can be
+    is not evenly divisible on the DeviceMesh dimension. The ``Shard`` placement can be
     used by all DTensor APIs (i.e. distribute_tensor, from_local, etc.)
 
     Args:
