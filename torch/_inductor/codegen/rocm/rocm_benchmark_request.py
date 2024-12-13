@@ -94,7 +94,9 @@ class ROCmBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest):
         if self._workspace_size_updated:
             return
         self.ensure_dll_loaded()
-        unique_input_count = len({meta.name for meta in self.input_tensor_meta})
+        unique_input_count = len(
+            {meta.name for meta in self.input_tensor_meta}  # noqa: set_linter
+        )
         args = [c_void_p(None) for _ in range(unique_input_count + 1)]
         stream_ptr = c_void_p(torch.cuda.current_stream().cuda_stream)
 
