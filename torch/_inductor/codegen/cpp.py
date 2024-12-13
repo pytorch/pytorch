@@ -69,6 +69,7 @@ from .cpp_utils import (
     DTYPE_TO_CPP,
     INDEX_TYPE,
     LocalBufferContext,
+    may_unify_binary_op_mask_type,
     promote_args,
     template_fusion_with_epilogues_supported,
     unify_mask_base_type,
@@ -1253,6 +1254,7 @@ class CppVecOverrides(CppOverrides):
 
     @staticmethod
     def logical_and(a, b):
+        a, b = may_unify_binary_op_mask_type(a, b)
         return f"{a} & {b}"
 
     @staticmethod
@@ -1261,14 +1263,17 @@ class CppVecOverrides(CppOverrides):
 
     @staticmethod
     def logical_or(a, b):
+        a, b = may_unify_binary_op_mask_type(a, b)
         return f"{a} | {b}"
 
     @staticmethod
     def logical_xor(a, b):
+        a, b = may_unify_binary_op_mask_type(a, b)
         return f"{a} ^ {b}"
 
     @staticmethod
     def bitwise_and(a, b):
+        a, b = may_unify_binary_op_mask_type(a, b)
         return f"{a} & {b}"
 
     @staticmethod
@@ -1277,10 +1282,12 @@ class CppVecOverrides(CppOverrides):
 
     @staticmethod
     def bitwise_or(a, b):
+        a, b = may_unify_binary_op_mask_type(a, b)
         return f"{a} | {b}"
 
     @staticmethod
     def bitwise_xor(a, b):
+        a, b = may_unify_binary_op_mask_type(a, b)
         return f"{a} ^ {b}"
 
     @staticmethod
@@ -4914,7 +4921,7 @@ class KernelGroup:
         new_kernel.codegen_loops(code, ws)
 
     def get_num_args(self):
-        arg_defs, call_args, arg_types = self.args.cpp_argdefs()
+        arg_defs, _call_args, _arg_types = self.args.cpp_argdefs()
         args_num = len(arg_defs)
         return args_num
 
