@@ -170,7 +170,7 @@ WHEEL_CONTAINER_IMAGES = {
     "cpu-cxx11-abi": f"pytorch/manylinuxcxx11-abi-builder:cpu-cxx11-abi-{DEFAULT_TAG}",
     "cpu-aarch64": f"pytorch/manylinux2_28_aarch64-builder:cpu-aarch64-{DEFAULT_TAG}",
     "cpu-s390x": f"pytorch/manylinuxs390x-builder:cpu-s390x-{DEFAULT_TAG}",
-    "cuda-aarch64": f"pytorch/manylinuxaarch64-builder:cuda12.4-{DEFAULT_TAG}",
+    "cuda-aarch64": f"pytorch/manylinuxaarch64-builder:cuda12.6-{DEFAULT_TAG}",
 }
 
 
@@ -215,7 +215,7 @@ def translate_desired_cuda(gpu_arch_type: str, gpu_arch_version: str) -> str:
         "cpu-cxx11-abi": "cpu-cxx11-abi",
         "cpu-s390x": "cpu",
         "cuda": f"cu{gpu_arch_version.replace('.', '')}",
-        "cuda-aarch64": "cu124",
+        "cuda-aarch64": "cu126",
         "rocm": f"rocm{gpu_arch_version}",
         "xpu": "xpu",
     }.get(gpu_arch_type, gpu_arch_version)
@@ -328,10 +328,9 @@ def generate_wheels_matrix(
                 else arch_version
             )
 
-            # TODO: Enable python 3.13 on rocm, aarch64, windows
+            # TODO: Enable python 3.13 on aarch64, windows
             if (
-                gpu_arch_type == "rocm"
-                or os
+                os
                 not in [
                     "linux",
                     "linux-s390x",
