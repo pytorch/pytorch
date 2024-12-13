@@ -78,16 +78,16 @@ class TestAccelerator(TestCase):
     def test_multi_device_stream_context_manager(self):
         src_device = 0
         dst_device = 1
-        torch.accelerator.set_device_idx(src_device)
+        torch.accelerator.set_device_index(src_device)
         src_prev_stream = torch.accelerator.current_stream()
         dst_prev_stream = torch.accelerator.current_stream(dst_device)
         with torch.Stream(dst_device) as dst_stream:
-            self.assertEqual(torch.accelerator.current_device_idx(), dst_device)
+            self.assertEqual(torch.accelerator.current_device_index(), dst_device)
             self.assertEqual(torch.accelerator.current_stream(), dst_stream)
             self.assertEqual(
                 torch.accelerator.current_stream(src_device), src_prev_stream
             )
-        self.assertEqual(torch.accelerator.current_device_idx(), src_device)
+        self.assertEqual(torch.accelerator.current_device_index(), src_device)
         self.assertEqual(torch.accelerator.current_stream(), src_prev_stream)
         self.assertEqual(torch.accelerator.current_stream(dst_device), dst_prev_stream)
 
