@@ -2574,9 +2574,7 @@ class FakeTensorMode(TorchDispatchMode):
         import torch.nested._internal.nested_tensor
         from torch.nested._internal.nested_int import NestedIntNode
 
-        src = torch._dynamo.source.EphemeralSource(
-            "intermediate_offsets_or_lengths"
-        )
+        src = torch._dynamo.source.EphemeralSource("intermediate_offsets_or_lengths")
         hint = torch.SymInt(NestedIntNode(cache, coeff=1))
         assert self.shape_env is not None
         ret = self.shape_env.create_symintnode(

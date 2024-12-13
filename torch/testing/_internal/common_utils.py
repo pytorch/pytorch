@@ -5456,7 +5456,6 @@ def fresh_tensor_registry_ctx():
         tensor_registry_module._global_tensor_registry = original_tensor_symint_registry
 
 
-@staticmethod
 def fresh_tensor_registry(fn):
     """Decorator to branch the nested tensor state and restore it after the test."""
     @wraps(fn)
