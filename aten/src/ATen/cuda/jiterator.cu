@@ -75,14 +75,14 @@ static inline void launch_jitted_vectorized_kernel_dynamic(
   if (vectorized) {
     // pack args for kernel launch
     constexpr int kernel_args = 3;
-    auto args = std::make_unique<void*[]>(kernel_args + extra_args_size);
+    auto args = std::make_unique<const void*[]>(kernel_args + extra_args_size);
     args[0] = static_cast<void*>(&N);
     args[1] = data_ptr;
     args[2] = static_cast<void*>(&scalar_val);
 
     for (const auto i : c10::irange(extra_args_size)) {
       // since 3 slots are already filled in `args`
-      args[i + 3] = const_cast<void*>(extra_args[i].data_ptr());
+      args[i + 3] = extra_args[i].data_ptr();
     }
     at::cuda::jit::launch_jitted_pwise_function(*fn_ptr, args.get(), {grid, 1u, 1u}, {num_threads(), 1u, 1u});
   } else {
@@ -96,7 +96,7 @@ static inline void launch_jitted_vectorized_kernel_dynamic(
 
     // pack args for kernel launch
     constexpr int kernel_args = 7;
-    auto args = std::make_unique<void*[]>(kernel_args + extra_args_size);
+    auto args = std::make_unique<const void*[]>(kernel_args + extra_args_size);
     args[0] = static_cast<void*>(&N);
     args[1] = data_ptr;
     args[2] = ic_ptr;
@@ -107,7 +107,7 @@ static inline void launch_jitted_vectorized_kernel_dynamic(
 
     for (const auto i : c10::irange(extra_args_size)) {
       // since 7 slots are already filled in `args`
-      args[i + 7] = const_cast<void*>(extra_args[i].data_ptr());
+      args[i + 7] = extra_args[i].data_ptr();
     }
 
     at::cuda::jit::launch_jitted_pwise_function(*fn_ptr, args.get(), {grid, 1u, 1u}, {num_threads(), 1u, 1u});
@@ -163,24 +163,24 @@ static inline void launch_jitted_unrolled_kernel_dynamic(
   // pack args for kernel launch
   constexpr int kernel_args = 7;
   auto extra_args_size = extra_args.size();
-  auto args = std::make_unique<void*[]>(kernel_args + extra_args_size);
-  args[0] = static_cast<void*>(&N);
+  auto args = std::make_unique<const void*[]>(kernel_args + extra_args_size);
+  args[0] = &N;
   args[1] = data_ptr;
   args[2] = ic_ptr;
   args[3] = oc_ptr;
   args[4] = l_ptr;
   args[5] = s_ptr;
-  args[6] = static_cast<void*>(&scalar_val);
+  args[6] = &scalar_val;
 
   for (const auto i : c10::irange(extra_args_size)) {
     // since 7 slots are already filled in `args`
-    args[i + 7] = const_cast<void*>(extra_args[i].data_ptr());
+    args[i + 7] = extra_args[i].data_ptr();
   }
 
   at::cuda::jit::launch_jitted_pwise_function(*fn_ptr, args.get(), {grid, 1u, 1u}, {num_threads(), 1u, 1u});
 }
 
-void jitted_gpu_kernel_dynamic_impl(
+static void jitted_gpu_kernel_dynamic_impl(
     const std::string& kernel_name,
     TensorIteratorBase& iter,
     const std::string& f,
@@ -273,7 +273,7 @@ void jitted_gpu_kernel_dynamic_impl(
 // Similarly, launch_jitted_vectorized_kernel_dynamic and launch_jitted_unrolled_kernel_dynamic are created
 // to handle arbitrary functions defined in python user code.
 // For templated version, see note [Jiterator] in JitLoops.cuh for more details
-void jitted_gpu_kernel_dynamic(
+static void jitted_gpu_kernel_dynamic(
     const std::string& kernel_name,
     TensorIteratorBase& iter,
     const std::string& f,
