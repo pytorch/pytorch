@@ -1856,14 +1856,17 @@ class STORAGE_OVERLAPPING : public RelationalGuard {
 class SYMBOLIC_SHAPE_GUARD : public RelationalGuard {
  public:
   SYMBOLIC_SHAPE_GUARD(
-      py::int_ nargs,
+      py::int_ nargs_int,
+      py::int_ nargs_float,
       py::int_ py_addr,
       py::object py_addr_keep_alive,
       py::object verbose_code_parts)
       : RelationalGuard(std::move(verbose_code_parts)),
         _py_addr_keep_alive(std::move(py_addr_keep_alive)),
         _args_seen{0} {
-    _nargs = PyLong_AsSize_t(nargs.ptr());
+    _nargs_int = PyLong_AsSize_t(nargs_int.ptr());
+    _nargs_float = PyLong_AsSize_t(nargs_float.ptr());
+    _nargs = _nargs_int + _nargs_float;
     if (PyErr_Occurred()) {
       throw py::value_error(
           "SYMBOLIC_SHAPE_GUARD expected a non-negative number of arguments.");
@@ -1873,8 +1876,9 @@ class SYMBOLIC_SHAPE_GUARD : public RelationalGuard {
       throw py::value_error(
           "SYMBOLIC_SHAPE_GUARD expected an address to a C function.");
     }
-    _guard_check_fn = reinterpret_cast<int64_t (*)(int64_t*)>(addr);
-    _args = std::vector<int64_t>(_nargs);
+    _guard_check_fn = reinterpret_cast<int8_t (*)(int64_t*, double*)>(addr);
+    _args_int = std::vector<int64_t>(_nargs_int);
+    _args_float = std::vector<double>(_nargs_float);
   }
 
   bool check_nopybind(PyObject* value) override {
@@ -1883,13 +1887,23 @@ class SYMBOLIC_SHAPE_GUARD : public RelationalGuard {
     // the value is a Tuple[int, int].
     PyObject* py_idx = PyTuple_GET_ITEM(value, 0);
     PyObject* py_val = PyTuple_GET_ITEM(value, 1);
-    Py_ssize_t iarg = PyLong_AsSsize_t(py_idx);
-    _args[iarg] = PyLong_AsLongLong(py_val);
+    size_t iarg = PyLong_AsSize_t(py_idx);
+    if (iarg < _nargs_int) {
+      if (!PyLong_Check(py_val)) {
+        return false;
+      }
+      _args_int[iarg] = PyLong_AsLongLong(py_val);
+    } else {
+      if (!PyFloat_Check(py_val)) {
+        return false;
+      }
+      _args_float[iarg - _nargs_int] = PyFloat_AS_DOUBLE(py_val);
+    }
     _args_seen++;
 
     if (_args_seen == _nargs) {
       _args_seen = 0;
-      return _guard_check_fn(_args.data());
+      return _guard_check_fn(_args_int.data(), _args_float.data());
     } else {
       // We don't have all the values yet. Return true until we get all.
       return true;
@@ -1901,10 +1915,20 @@ class SYMBOLIC_SHAPE_GUARD : public RelationalGuard {
       return GuardDebugInfo(false, "Non tuple found!", 0);
     } else if (PyTuple_Size(value) != 2) {
       return GuardDebugInfo(false, "Tuple of size not 2 found!", 0);
-    } else if (!PyLong_Check(PyTuple_GET_ITEM(value, 0))) {
-      return GuardDebugInfo(false, "Non integer found!", 0);
-    } else if (!PyLong_Check(PyTuple_GET_ITEM(value, 1))) {
-      return GuardDebugInfo(false, "Non integer found!", 0);
+    } else {
+      PyObject* py_idx = PyTuple_GET_ITEM(value, 0);
+      PyObject* py_val = PyTuple_GET_ITEM(value, 1);
+      if (!PyLong_Check(py_idx)) {
+        return GuardDebugInfo(false, "Non integer index found!", 0);
+      }
+      size_t iarg = PyLong_AsSize_t(py_idx);
+      if (iarg >= _nargs) {
+        return GuardDebugInfo(false, "Index out of bounds!", 0);
+      } else if (iarg < _nargs_int && !PyLong_Check(py_val)) {
+        return GuardDebugInfo(false, "Non integer found!", 0);
+      } else if (iarg >= _nargs_int && !PyFloat_Check(py_val)) {
+        return GuardDebugInfo(false, "Non float found!", 0);
+      }
     }
     bool result = check_nopybind(value);
 
@@ -1920,9 +1944,10 @@ class SYMBOLIC_SHAPE_GUARD : public RelationalGuard {
 
  private:
   py::object _py_addr_keep_alive;
-  size_t _args_seen, _nargs;
-  std::vector<int64_t> _args;
-  std::function<int64_t(int64_t*)> _guard_check_fn;
+  size_t _args_seen, _nargs_float, _nargs_int, _nargs;
+  std::vector<int64_t> _args_int;
+  std::vector<double> _args_float;
+  std::function<int8_t(int64_t*, double*)> _guard_check_fn;
 };
 
 class DYNAMIC_INDICES : public LeafGuard {
@@ -4905,7 +4930,8 @@ void install_no_tensor_aliasing_guard(
 
 void install_symbolic_shape_guard(
     const py::list& guard_managers,
-    py::int_ nargs,
+    py::int_ nargs_int,
+    py::int_ nargs_float,
     py::int_ py_addr,
     py::object py_addr_keep_alive,
     py::object verbose_code_parts) {
@@ -4914,7 +4940,8 @@ void install_symbolic_shape_guard(
   // multiple guard managers.
   std::shared_ptr<RelationalGuard> guard =
       std::make_shared<SYMBOLIC_SHAPE_GUARD>(
-          std::move(nargs),
+          std::move(nargs_int),
+          std::move(nargs_float),
           std::move(py_addr),
           std::move(py_addr_keep_alive),
           std::move(verbose_code_parts));
