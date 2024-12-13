@@ -862,17 +862,27 @@ class TestMaxAutotuneRemoteCache(TestCase):
                     with fresh_inductor_cache():
                         torch.compile(mm, dynamic=dynamic)(a, b)
                     reset()
+                with torch.compiler.config.patch(
+                    {"cache_key_tag": "test"}
+                ), fresh_inductor_cache():
+                    torch.compile(mm, dynamic=dynamic)(a, b)
+                    reset()
 
                 global_stats.report()
-                self.assertEqual(global_stats.autotune_remote, Stats(1, 3, 1))
+                self.assertEqual(global_stats.autotune_remote, Stats(2, 3, 2))
 
             global_stats.reset()
             for _ in range(4):
                 with fresh_inductor_cache():
                     torch.compile(f, dynamic=dynamic)(x, y)
                 reset()
+            with torch.compiler.config.patch(
+                {"cache_key_tag": "test"}
+            ), fresh_inductor_cache():
+                torch.compile(mm, dynamic=dynamic)(a, b)
+                reset()
             global_stats.report()
-            self.assertEqual(global_stats.autotune_remote, Stats(1, 3, 1))
+            self.assertEqual(global_stats.autotune_remote, Stats(2, 3, 2))
 
 
 class TestBenchmarkRequest(BenchmarkRequest):
@@ -974,5 +984,5 @@ if __name__ == "__main__":
     from torch._inductor.utils import is_big_gpu
 
     # Set env to make it work in CI.
-    if HAS_CUDA and HAS_CPU and is_big_gpu(0):
+    if HAS_CUDA and HAS_CPU and is_big_gpu():
         run_tests()
