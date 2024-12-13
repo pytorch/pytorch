@@ -1900,7 +1900,6 @@ class BaseTy(Enum):
     Stream = auto()
     SymInt = auto()
     SymBool = auto()
-    ConstQuantizerPtr = auto()  # TODO: rename
     GraphModule = auto()
 
 

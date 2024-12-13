@@ -83,12 +83,6 @@ __all__ = [
     "treespec_dumps",
     "treespec_loads",
     "treespec_pprint",
-    "is_namedtuple",
-    "is_namedtuple_class",
-    "is_namedtuple_instance",
-    "is_structseq",
-    "is_structseq_class",
-    "is_structseq_instance",
 ]
 
 
@@ -283,51 +277,24 @@ def _private_register_pytree_node(
     for the C++ pytree only. End-users should use :func:`register_pytree_node`
     instead.
     """
-    optree_flatten_func, optree_unflatten_func = _to_optree_func(
-        flatten_func=flatten_fn,
-        unflatten_func=unflatten_fn,
-        flatten_with_keys_func=flatten_with_keys_fn,
-    )
-    optree.register_pytree_node(
-        cls,
-        optree_flatten_func,  # type: ignore[arg-type]
-        optree_unflatten_func,  # type: ignore[arg-type]
-        namespace="torch",
-    )
+    # TODO(XuehaiPan): remove this condition when we make Python pytree out-of-box support
+    # PyStructSequence types
+    if not optree.is_structseq_class(cls):
+        optree_flatten_func, optree_unflatten_func = _to_optree_func(
+            flatten_func=flatten_fn,
+            unflatten_func=unflatten_fn,
+            flatten_with_keys_func=flatten_with_keys_fn,
+        )
+        optree.register_pytree_node(
+            cls,
+            optree_flatten_func,  # type: ignore[arg-type]
+            optree_unflatten_func,  # type: ignore[arg-type]
+            namespace="torch",
+        )
 
 
 def _is_pytreespec_instance(obj: Any, /) -> TypeIs[TreeSpec]:
     return isinstance(obj, TreeSpec)
-
-
-def is_namedtuple(obj: Union[object, type]) -> bool:
-    """Return whether the object is an instance of namedtuple or a subclass of namedtuple."""
-    return optree.is_namedtuple(obj)
-
-
-def is_namedtuple_class(cls: type) -> bool:
-    """Return whether the class is a subclass of namedtuple."""
-    return optree.is_namedtuple_class(cls)
-
-
-def is_namedtuple_instance(obj: object) -> bool:
-    """Return whether the object is an instance of namedtuple."""
-    return optree.is_namedtuple_instance(obj)
-
-
-def is_structseq(obj: Union[object, type]) -> bool:
-    """Return whether the object is an instance of PyStructSequence or a class of PyStructSequence."""
-    return optree.is_structseq(obj)
-
-
-def is_structseq_class(cls: type) -> bool:
-    """Return whether the class is a class of PyStructSequence."""
-    return optree.is_structseq_class(cls)
-
-
-def is_structseq_instance(obj: object) -> bool:
-    """Return whether the object is an instance of PyStructSequence."""
-    return optree.is_structseq_instance(obj)
 
 
 def tree_is_leaf(
