@@ -6431,6 +6431,21 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
         inp = torch.randn(3, 3)
         self.assertEqual(fn(inp), opt_fn(inp))
 
+    def test_no_tracing_into_eval_frame(self):
+        # test that dynamo doesn't trace into nested calls from eval_frame
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x):
+            return x + 1
+
+        orig_fn = torch._dynamo.eval_frame._maybe_set_eval_frame
+
+        def bad(*args, **kwargs):
+            torch._dynamo.graph_break()
+            return orig_fn(*args, **kwargs)
+
+        with mock.patch("torch._dynamo.eval_frame._maybe_set_eval_frame", bad):
+            fn(torch.ones(3))
+
 
 instantiate_parametrized_tests(ReproTests)
 
