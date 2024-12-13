@@ -6492,7 +6492,6 @@ class ShapeEnv:
                         ok = True
 
                     if not ok:
-                        breakpoint()
                         raise self._make_data_dependent_error(
                             expr.xreplace(self.var_to_val),
                             expr,

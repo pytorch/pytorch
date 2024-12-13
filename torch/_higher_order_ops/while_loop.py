@@ -1,5 +1,4 @@
 # mypy: allow-untyped-defs
-from contextlib import nullcontext
 from typing import Callable, List, Tuple, Union
 
 import torch

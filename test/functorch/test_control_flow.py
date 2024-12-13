@@ -4690,7 +4690,7 @@ def forward(self, arg0_1):
         x = torch.randn(4)
         with self.assertRaisesRegex(
             torch._dynamo.exc.UncapturedHigherOrderOpError,
-            "Expected to return tensors with same metadata but found"
+            "Expected to return tensors with same metadata but found",
         ):
             make_fx(f)(x, torch.tensor(False))
 
