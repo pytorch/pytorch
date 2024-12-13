@@ -355,22 +355,6 @@ def is_cpu(x: Union[IRNode, torch.device, None, str]) -> bool:
     return get_device_type(x) == "cpu"
 
 
-def is_aligned_realized_tensor(x: Union[Buffer, TensorBox], alignment: int) -> bool:
-    if not isinstance(x, IRNode) or x.maybe_get_stride() is None:
-        return False
-
-    aligned_strides = all(
-        (V.graph.sizevars.size_hint(x.get_stride()[i]) % alignment) == 0
-        for i in range(len(x.get_stride()) - 1)
-    )
-    # if the last dim size is <= 1, stride doesnt matter
-    aligned_last_dim = (
-        V.graph.sizevars.size_hint(x.get_stride()[-1]) == 1
-        or V.graph.sizevars.size_hint(x.get_size()[-1]) <= 1
-    )
-    return aligned_last_dim and aligned_strides
-
-
 class IRNode:
     _current_origins: ClassVar[OrderedSet[Any]] = OrderedSet()
 
@@ -1019,12 +1003,12 @@ class Reduction(Loops):
 
     def inner_fn_args(self) -> Sequence[Sequence[Expr]]:
         index = self._index(self.ranges)
-        rindex = self._index(self.reduction_ranges, SymT.RINDEX)
+        rindex = self._index(self.reduction_ranges, SymT.R0_INDEX)
         return (index, rindex)
 
     def inner_fn_free_unbacked_symbols(self) -> Set[Symbol]:
         index = self._index(self.ranges)
-        rindex = self._index(self.reduction_ranges, SymT.RINDEX)
+        rindex = self._index(self.reduction_ranges, SymT.R0_INDEX)
         return extract_free_unbacked_symbols(self.inner_fn, index, rindex)
 
     def constant_to_device(self, device: torch.device) -> IRNode:
@@ -1989,13 +1973,13 @@ class Scan(Loops):
 
     def inner_fn_args(self) -> Sequence[Sequence[_IntLike]]:
         index = self._index(self.ranges)
-        rindex = self._index(self.scan_ranges, SymT.RINDEX)
+        rindex = self._index(self.scan_ranges, SymT.R0_INDEX)
         idx = self.reindex(index, rindex)
         return (idx,)
 
     def inner_fn_free_unbacked_symbols(self) -> Set[Symbol]:
         index = self._index(self.ranges)
-        rindex = self._index(self.scan_ranges, SymT.RINDEX)
+        rindex = self._index(self.scan_ranges, SymT.R0_INDEX)
         idx = self.reindex(index, rindex)
         return extract_free_unbacked_symbols(self.inner_fn, idx)
 
@@ -2186,13 +2170,13 @@ class Sort(Loops):
 
     def inner_fn_args(self) -> Sequence[Sequence[Expr]]:
         index = self._index(self.ranges)
-        rindex = self._index(self.sort_ranges, SymT.RINDEX)
+        rindex = self._index(self.sort_ranges, SymT.R0_INDEX)
         idx = self.reindex(index, rindex)
         return (idx,)
 
     def inner_fn_free_unbacked_symbols(self) -> Set[Symbol]:
         index = self._index(self.ranges)
-        rindex = self._index(self.sort_ranges, SymT.RINDEX)
+        rindex = self._index(self.sort_ranges, SymT.R0_INDEX)
         idx = self.reindex(index, rindex)
         return extract_free_unbacked_symbols(self.inner_fn, idx)
 
@@ -4196,18 +4180,7 @@ class TemplateBuffer(OperationBuffer):
         deps = dependencies.extract_read_writes(
             dummy, self.get_size(), (), normalize=normalize
         )
-
-        for inp in self.inputs:
-            indexer = inp.layout.make_indexer()
-
-            def dummy(index, rindex):  # type: ignore[no-untyped-def]
-                assert len(rindex) == 0
-                ops.load(inp.get_name(), indexer(index))
-
-            deps.reads |= dependencies.extract_read_writes(
-                dummy, inp.get_size(), (), normalize=True
-            ).reads
-
+        deps.reads = OrderedSet(dependencies.StarDep(x.get_name()) for x in self.inputs)
         return deps
 
     def get_reduction_size(self) -> Sequence[sympy.Expr]:
@@ -4240,7 +4213,6 @@ class TritonTemplateBuffer(TemplateBuffer):
         inputs,
         make_kernel_render,
         mutated_inputs: Optional[Iterable[IRNode]] = None,
-        allowed_prologue_inps: Optional[OrderedSet[str]] = None,
     ) -> None:
         """
         NOTE:[TritonTemplates with multiple outputs]
@@ -4270,15 +4242,8 @@ class TritonTemplateBuffer(TemplateBuffer):
                 for buf in mutated_inputs
             ]
 
-        self.allowed_prologue_inps = (
-            allowed_prologue_inps if allowed_prologue_inps else OrderedSet()
-        )
-
     def get_outputs(self) -> List[Buffer]:
         return self.outputs
-
-    def get_allowed_prologue_inps(self) -> OrderedSet[str]:
-        return self.allowed_prologue_inps
 
     def __str__(self) -> str:
         out = f"TritonTemplateBuffer(layout={self.layout})"
@@ -4356,14 +4321,8 @@ class MultiTemplateBuffer(TritonTemplateBuffer):
         inputs: List[IRNode],
         choice_timings: Callable[[], Dict[ChoiceCaller, float]],
         unfiltered_choices: List[ChoiceCaller],
-        allowed_prologue_inps: OrderedSet[str],
     ) -> None:
-        super().__init__(
-            layout=layout,
-            inputs=inputs,
-            make_kernel_render=None,
-            allowed_prologue_inps=allowed_prologue_inps,
-        )
+        super().__init__(layout=layout, inputs=inputs, make_kernel_render=None)
         self._choice_timings_fn = choice_timings
         self._choice_timings: Optional[Dict[ChoiceCaller, float]] = None
         self.original_inputs = inputs

@@ -681,6 +681,10 @@ def get_bounds_index_expr(index):
         return ValueRanges.unknown()
 
 
+def prefix_is_reduction(prefix: str) -> bool:
+    return prefix[0] == "r"
+
+
 def sympy_index_symbol_with_prefix(prefix: SymT, idx: int) -> sympy.Symbol:
     """
     Used to generate an integer-nonnegative symbol.
