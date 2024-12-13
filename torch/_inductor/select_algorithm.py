@@ -979,6 +979,11 @@ class TritonTemplateKernel(TritonKernel):
                 name,
                 call_args,
                 grid=self.grid_fn(*grid),
+                # Calling self.grid_fn(*grid) already computes grid as a tuple,
+                # so we need to explicitly set grid_fn as empty here. Otherwise, the
+                # generated wrapper code will wrap the tuple as grid(tuple), which can
+                # cause incorrect grid computation in some corner cases.
+                grid_fn="",
                 arg_types=arg_types,
                 triton_meta=self.triton_meta,
             )
