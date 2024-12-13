@@ -408,12 +408,14 @@ def split_const_gm(
 
 def is_tf32_warning_applicable(gm: GraphModule) -> bool:
     aten = torch.ops.aten
-    tf32_ops = {
-        aten.mm.default,
-        aten.addmm.default,
-        aten.bmm.default,
-        aten.baddbmm.default,
-    }
+    tf32_ops = OrderedSet(
+        [
+            aten.mm.default,
+            aten.addmm.default,
+            aten.bmm.default,
+            aten.baddbmm.default,
+        ]
+    )
     for target in tf32_ops:
         for node in gm.graph.find_nodes(op="call_function", target=target):
             if (
@@ -612,8 +614,6 @@ def _compile_fx_inner(
             **graph_kwargs,
         )
 
-    boxed_forward_device_index = graph_kwargs.get("boxed_forward_device_index")
-
     start = time.time()
 
     fx_graph_remote_cache = should_use_remote_fx_graph_cache()
@@ -633,7 +633,7 @@ def _compile_fx_inner(
         for i, input in enumerate(example_inputs):
             if (
                 isinstance(input, torch.Tensor)
-                and input.device.type == "cuda"
+                and is_gpu(input.device.type)
                 and i in static_input_idxs
             ):
                 input._is_inductor_static = True  # type: ignore[attr-defined]
@@ -812,7 +812,6 @@ class _InProcessFxCompile(FxCompile):
         cpp_wrapper: bool = graph_kwargs.get("cpp_wrapper", False)
         aot_mode: bool = graph_kwargs.get("aot_mode", False)
         is_inference: bool = graph_kwargs.get("is_inference", False)
-        layout_opt: Optional[bool] = graph_kwargs.get("layout_opt", None)
         extern_node_serializer: Optional[
             Callable[[List[ExternKernelNode]], Any]
         ] = graph_kwargs.get("extern_node_serializer", None)
@@ -1419,7 +1418,6 @@ def fw_compiler_freezing(
     ]
 
     static_input_idxs = list(range(num_fixed))
-    wrapper_new_args_unwrapped_indices: List[int] = []
     # constant params will be real tensors, not fake
     tracing_context = torch._guards.TracingContext.try_get()
     unwrapped_args_offsets = [0]
@@ -1428,7 +1426,7 @@ def fw_compiler_freezing(
         assert tracing_context.params_flat_unwrap_subclasses is not None
         params_flat_unwrap = tracing_context.params_flat_unwrap_subclasses
         max_offset_idx = max(0, len(params_flat_unwrap) - 1)
-        preserved_indices_params_flat = set()
+        preserved_indices_params_flat = OrderedSet[int]()
         unwrapped_idxs = tracing_context.params_unwrapped_to_flat_index
         assert unwrapped_idxs is not None
         current_offset = 0
