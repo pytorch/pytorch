@@ -12,7 +12,6 @@ import torch.distributed.checkpoint as dcp
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.distributed._composable import replicate
-from torch.distributed._composable.fsdp import CPUOffloadPolicy, fully_shard
 from torch.distributed._tensor import DTensor, init_device_mesh, Replicate, Shard
 from torch.distributed.checkpoint.state_dict import (
     get_model_state_dict,
@@ -22,7 +21,11 @@ from torch.distributed.checkpoint.state_dict import (
     StateDictOptions,
 )
 from torch.distributed.device_mesh import DeviceMesh
-from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
+from torch.distributed.fsdp import (
+    CPUOffloadPolicy,
+    fully_shard,
+    FullyShardedDataParallel as FSDP,
+)
 from torch.distributed.fsdp._common_utils import (
     _get_module_fsdp_state,
     clean_tensor_name,

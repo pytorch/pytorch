@@ -309,7 +309,7 @@ class _map<F, A, c10::guts::typelist::typelist<Args...>> {
             TORCH_CHECK(a.degree() > 0, "Internal assert.");
             return a.children(i);
           });
-      c10::guts::apply(
+      std::apply(
           [&result, &fn](Args... filtered) {
             result.emplace_back(function_one(fn, filtered...));
           },

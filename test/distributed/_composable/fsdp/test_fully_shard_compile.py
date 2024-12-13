@@ -12,17 +12,19 @@ from unittest import mock
 
 import torch
 import torch._dynamo.testing
-import torch.distributed._composable.fsdp._fsdp_param
 import torch.nn.functional as F
 from torch import nn
 from torch._dynamo.utils import counters
 from torch._inductor import comms
 from torch._inductor.utils import is_fallback_op, run_and_get_code
-from torch.distributed._composable.fsdp import fully_shard
-from torch.distributed._composable.fsdp._fsdp_common import TrainingState
-from torch.distributed._composable.fsdp._fsdp_param_group import FSDPParamGroup
 from torch.distributed._tensor import init_device_mesh
-from torch.distributed.fsdp import FullyShardedDataParallel as FSDP, ShardingStrategy
+from torch.distributed.fsdp import (
+    fully_shard,
+    FullyShardedDataParallel as FSDP,
+    ShardingStrategy,
+)
+from torch.distributed.fsdp._fully_shard._fsdp_common import TrainingState
+from torch.distributed.fsdp._fully_shard._fsdp_param_group import FSDPParamGroup
 from torch.testing import FileCheck
 from torch.testing._internal.common_distributed import (
     at_least_x_gpu,
@@ -83,7 +85,7 @@ class TestFullyShardCompileCompute(FSDPTest):
     ):
         torch._dynamo.reset()
         trace_rules_check_count = 0
-        HOOKS_FILE_NAME = "torch/distributed/_composable/fsdp/_fsdp_state.py"
+        HOOKS_FILE_NAME = "torch/distributed/fsdp/_fully_shard/_fsdp_state.py"
         HOOK_WRAPPER_NAME = "fsdp_hook_wrapper"
 
         def patched_trace_rules_check(*args, **kwargs):
