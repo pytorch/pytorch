@@ -507,6 +507,12 @@ def register_onednn_fusion_ops():
             algorithm,
             layout=None,
         ):
+            # Symmetrically Quantized activation. In case of asymmetrically quantized activation,
+            # we'd have to compute compensation corresponding to the zero-point of the activation.
+            da8w8_gemm_sym_act = False
+            # True if the weight is symmetrically quantized.
+            # Currently, auto-tuning is only supported for this case.
+            da8w8_gemm_sym_wgt = False
             x_size = x.get_size()
             if len(x_size) > 2:
                 # GEMM template needs 2D input, normalize input shape here
@@ -520,6 +526,8 @@ def register_onednn_fusion_ops():
                 x_scale.realize()
             if not isinstance(x_zp, ir.TensorBox):
                 assert type(x_zp) == int
+                if x.get_dtype() == torch.int8 and x_zp == 0:
+                    da8w8_gemm_sym_act = True
                 x_zp = V.graph.add_tensor_constant(
                     torch.tensor(x_zp, dtype=torch.int32), name="x_zp"
                 )
@@ -549,27 +557,69 @@ def register_onednn_fusion_ops():
                     x, packed_weight, layout=layout, out_dtype=output_dtype
                 )
                 if (
-                    isinstance(
-                        ir.InputsKernel.unwrap_storage_for_input(x_zp),
-                        ir.ConstantBuffer,
-                    )
-                    and len(x_zp.get_layout().size) == 0  # Per tensor quant of act
+                    w_zp.get_numel() == 0
                     and isinstance(
                         ir.InputsKernel.unwrap_storage_for_input(w_zp),
-                        ir.ConstantBuffer,
+                        ir.ComputedBuffer,
                     )
-                    and torch.equal(
-                        torch.zeros_like(V.graph.constants[w_zp.get_name()]),
-                        V.graph.constants[w_zp.get_name()],
-                    )  # We only compensate MatrixB and assume B_zp is 0 to avoid the compensation of MatrixA
+                    and packed_weight.get_dtype() == torch.int8
+                ):
+                    # weight zero point is not a ConstantBuffer
+                    # but it is empty/dummy, which means the weight is symmetrically quantized
+                    da8w8_gemm_sym_wgt = True
+                if (
+                    isinstance(
+                        ir.InputsKernel.unwrap_storage_for_input(x_zp),
+                        ir.ComputedBuffer,
+                    )
+                    and x_zp.get_numel() == 0
+                    and packed_weight.get_dtype() == torch.int8
+                ):
+                    # act zero point is not a ConstantBuffer
+                    # but it is empty/dummy, which means the activation is symmetrically quantized
+                    da8w8_gemm_sym_act = True
+                if (
+                    (
+                        # oneDNN doesn't support a vector activation zero-point
+                        # So, if the activation zero point is a vector, we won't support it with oneDNN,
+                        # unless the zero-point was present, but was all zeros because of symmetric quantization.
+                        (
+                            isinstance(
+                                ir.InputsKernel.unwrap_storage_for_input(x_zp),
+                                ir.ConstantBuffer,
+                            )
+                            and len(x_zp.get_layout().size) == 0
+                        )
+                        or da8w8_gemm_sym_act
+                    )
+                    and (
+                        # Currently, we only support symmetric quantization of the weight.
+                        (
+                            isinstance(
+                                ir.InputsKernel.unwrap_storage_for_input(w_zp),
+                                ir.ConstantBuffer,
+                            )
+                            and torch.equal(
+                                torch.zeros_like(V.graph.constants[w_zp.get_name()]),
+                                V.graph.constants[w_zp.get_name()],
+                            )
+                        )
+                        or da8w8_gemm_sym_wgt
+                    )
                     and use_cpp_gemm_template(layout, x, packed_weight)
                 ):
-                    W_tensor = V.graph.constants[packed_weight.get_name()].to_dense()
-                    weight_compens_tensor = torch.sum(W_tensor.to(torch.float), dim=0)
-                    weight_compens = V.graph.add_tensor_constant(
-                        weight_compens_tensor,
-                        name=packed_weight.get_name() + "_BMatrixCompens",
-                    )
+                    if not da8w8_gemm_sym_act:
+                        # We would have to compute compensation
+                        W_tensor = V.graph.constants[
+                            packed_weight.get_name()
+                        ].to_dense()
+                        weight_compens_tensor = torch.sum(
+                            W_tensor.to(torch.float), dim=0
+                        )
+                        weight_compens = V.graph.add_tensor_constant(
+                            weight_compens_tensor,
+                            name=packed_weight.get_name() + "_BMatrixCompens",
+                        )
 
                     def epilogue_creator(input_buffer):
                         # Epilogue to convert from s32 to f32 for u8s8f32
@@ -579,10 +629,11 @@ def register_onednn_fusion_ops():
                             torch.uint8,
                         ]
                         input_loader = input_buffer.make_loader()
-                        weight_compens_loader = weight_compens.make_loader()
+                        if not da8w8_gemm_sym_act:
+                            weight_compens_loader = weight_compens.make_loader()
+                            x_zp_loader = x_zp.make_loader()
                         x_scale_loader = x_scale.make_loader()
                         w_scale_loader = w_scale.make_loader()
-                        x_zp_loader = x_zp.make_loader()
                         nonlocal bias
                         bias_loader = None
                         if bias is not None:
@@ -596,10 +647,15 @@ def register_onednn_fusion_ops():
                             input = ops.to_dtype(input, torch.float32)
                             weight_compens_index = (index[-1],)
                             _x_scale = x_scale_loader(())
-                            _x_zp = x_zp_loader(())
                             _w_scale = w_scale_loader(weight_compens_index)
-                            _weight_compo = weight_compens_loader(weight_compens_index)
-                            # Step 1: Doing compensation to cvt fp32
+                            if not da8w8_gemm_sym_act:
+                                _x_zp = x_zp_loader(())
+                                _weight_compo = weight_compens_loader(
+                                    weight_compens_index
+                                )
+
+                            # Step 1: Compute int8xint8->int32 GEMM & maybe apply compensation
+
                             temp = ops.mul(
                                 ops.mul(
                                     input,
@@ -607,19 +663,20 @@ def register_onednn_fusion_ops():
                                 ),
                                 _w_scale,
                             )
-                            temp = ops.sub(
-                                temp,
-                                ops.mul(
+                            if not da8w8_gemm_sym_act:
+                                temp = ops.sub(
+                                    temp,
                                     ops.mul(
                                         ops.mul(
-                                            _x_scale,
-                                            _w_scale,
+                                            ops.mul(
+                                                _x_scale,
+                                                _w_scale,
+                                            ),
+                                            _x_zp,  # type: ignore[possibly-undefined]
                                         ),
-                                        _x_zp,
+                                        _weight_compo,  # type: ignore[possibly-undefined]
                                     ),
-                                    _weight_compo,
-                                ),
-                            )
+                                )
                             # Step 2: add Bias if applicable
                             if bias is not None:
                                 _bias = bias_loader(weight_compens_index)
@@ -633,7 +690,7 @@ def register_onednn_fusion_ops():
 
                         output_buf = ir.Pointwise(
                             device=input_buffer.get_device(),
-                            dtype=torch.float32,  # Hardcode to FP32 for u8s8f32
+                            dtype=torch.float32,  # Hardcode to FP32 for u8s8f32 & s8s8f32
                             inner_fn=inner_fn,
                             ranges=input_buffer.get_size(),
                         )
@@ -688,7 +745,7 @@ def register_onednn_fusion_ops():
 
                         return output_buf
 
-                    assert x.get_dtype() == torch.uint8
+                    assert x.get_dtype() in [torch.uint8, torch.int8]
                     CppGemmTemplate.add_choices(
                         choices,
                         layout,
@@ -700,6 +757,7 @@ def register_onednn_fusion_ops():
                         input_indices=[0, 3, 1, 2, 4, 5]
                         if bias is None
                         else [6, 0, 3, 1, 2, 4, 5],
+                        da8w8_gemm_sym_act=da8w8_gemm_sym_act,
                     )
             if len(choices) == 0 or use_aten_gemm_kernels():
                 kwargs = dict(
@@ -725,9 +783,11 @@ def register_onednn_fusion_ops():
             input_gen_fns = {
                 3: lambda x: V.graph.constants[x.get_name()],
                 4: lambda x: V.graph.constants[x.get_name()],
-                5: lambda x: V.graph.constants[x.get_name()],
                 6: lambda x: V.graph.constants[x.get_name()],  # For bias
             }
+            if not da8w8_gemm_sym_wgt:
+                # weight is asymmetrically quantized, so w_zp will be used in computation.
+                input_gen_fns[5] = lambda x: V.graph.constants[x.get_name()]
             result = autotune_select_algorithm(
                 "qlinear_unary",
                 choices,
