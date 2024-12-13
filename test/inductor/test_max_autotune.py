@@ -22,6 +22,12 @@ from torch._inductor.select_algorithm import (
     AlgorithmSelectorCache,
     TritonTemplateCaller,
 )
+from torch.testing._internal.common_cuda import SM90OrLater
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+    TEST_WITH_ROCM,
+)
 
 
 aten = torch.ops.aten
@@ -31,12 +37,7 @@ from torch._inductor.utils import fresh_inductor_cache, run_and_get_code
 from torch._inductor.virtualized import V
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing import FileCheck
-from torch.testing._internal.common_utils import (
-    instantiate_parametrized_tests,
-    parametrize,
-    skipIfRocm,
-    TEST_WITH_ROCM,
-)
+from torch.testing._internal.common_utils import skipIfRocm
 from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
 
 
@@ -1030,6 +1031,70 @@ class TestPrologueFusion(TestCase):
         self.check_code(code[0], num_kernels=1, num_allocs=1, num_deallocs=2)
         # upcast preserves zero mask
         FileCheck().check("a =").check_not("tl.where").check("tl.dot").run(code[0])
+
+    @unittest.skip("Triton bug in compilation")
+    def test_gather_fusion(self):
+        M, K, N = (64, 128, 256)
+        x = torch.rand([M, K], dtype=torch.float16, device="cuda")
+        y = torch.rand([K, N], dtype=torch.float16, device="cuda")
+
+        index = torch.randperm(M, device="cuda")
+
+        def foo(x, y, index):
+            return (x[index]) @ y
+
+        out, code = run_and_get_code(torch.compile(foo), x, y, index)
+        self.assertEqual(out, foo(x, y, index), atol=0.05, rtol=0.05)
+        self.check_code(code[0], num_kernels=1, num_allocs=1, num_deallocs=3)
+
+        # should be done in low precision
+        f = (
+            FileCheck()
+            .check("for k_idx")
+            .check_not("to(tl.float32)")
+            .check("dot")
+            .run(code[0])
+        )
+
+    @unittest.skipIf(TEST_WITH_ROCM, "FP8 is not supported on ROCM")
+    @unittest.skipIf(not SM90OrLater, "FP8 is only supported on H100+")
+    def test_low_precision(self):
+        M = K = N = 128
+
+        x = torch.rand([M, K], device="cuda").to(torch.float8_e4m3fn)
+        y = torch.rand([K, N], dtype=torch.bfloat16, device="cuda")
+
+        def foo(x, y):
+            return x.to(y.dtype) @ y
+
+        out, code = run_and_get_code(torch.compile(foo), x, y)
+        self.assertEqual(out, foo(x, y), atol=0.05, rtol=0.05)
+        self.check_code(code[0], num_kernels=1, num_allocs=1, num_deallocs=2)
+
+        # should be done in low precision, no arithmetic
+        f = (
+            FileCheck()
+            .check("for k_idx")
+            .check_not("to(tl.float32)")
+            .check("dot")
+            .run(code[0])
+        )
+
+        def foo(x, y):
+            return (x.to(y.dtype) + 1) @ y
+
+        out, code = run_and_get_code(torch.compile(foo), x, y)
+        self.assertEqual(out, foo(x, y), atol=0.05, rtol=0.05)
+        self.check_code(code[0], num_kernels=1, num_allocs=1, num_deallocs=2)
+
+        # should not be done in low precision
+        f = (
+            FileCheck()
+            .check("for k_idx")
+            .check("to(tl.float32)")
+            .check("dot")
+            .run(code[0])
+        )
 
     def test_downcast(self):
         # per heuristics, dont fuse a downcast into a mm because it would lead to more reads inside kernel
