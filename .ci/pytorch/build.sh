@@ -277,8 +277,9 @@ else
     if [[ "$BUILD_ENVIRONMENT" != *rocm*  &&
           "$BUILD_ENVIRONMENT" != *xla* ]]; then
       if [[ "$BUILD_ENVIRONMENT" != *py3.8* ]]; then
-        # Install numpy-2.0.2 for builds which are backward compatible with 1.X
-        python -mpip install --pre numpy==2.0.2
+        # Install numpy-2.0.2 and compatible scipy & numba versions for builds
+        # which are backward compatible with numpy-1.X
+        python -mpip install --pre numpy==2.0.2 scipy==1.13.1 numba==0.60.0
       fi
 
       WERROR=1 python setup.py clean
