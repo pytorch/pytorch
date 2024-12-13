@@ -141,6 +141,28 @@ class AOTAutogradCacheTests(InductorTestCase):
         self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 2)
 
     @inductor_config.patch("fx_graph_remote_cache", False)
+    @inductor_config.patch("fx_graph_cache", True)
+    @functorch_config.patch(
+        {"enable_autograd_cache": True, "view_replay_for_aliased_outputs": True}
+    )
+    def test_view_replay_bypass(self):
+        """
+        Shoud bypass when view replay is turned on
+        """
+
+        def fn(a):
+            tmp = a.detach()
+            a.mul_(2)
+            return a, tmp
+
+        with torch.autograd._force_original_view_tracking(True):
+            compiled_fn = torch.compile(fn)
+            out = compiled_fn(torch.rand(2, 3))
+
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_bypass"], 1)
+
+    @inductor_config.patch("fx_graph_remote_cache", False)
     @inductor_config.patch("fx_graph_cache", False)
     @functorch_config.patch({"enable_autograd_cache": True})
     def test_fx_graph_cache_off(self):
@@ -744,6 +766,16 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
             self.assertRaises(
                 BypassAOTAutogradCache, lambda: self.gen_cache_key(fn, config)
             )
+
+    @torch._inductor.config.patch({"freezing": True})
+    def test_freezing(self):
+        def fn(x):
+            return x.cos().sin()
+
+        config = self.default_config()
+        self.assertRaises(
+            BypassAOTAutogradCache, lambda: self.gen_cache_key(fn, config)
+        )
 
     def test_private_builtin(self):
         # _foreach_add is a private torch function, but

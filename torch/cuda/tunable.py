@@ -488,6 +488,7 @@ def mgpu_tune_gemm_in_file(filename_pattern: str, num_gpus: int) -> None:
 
     checks = []  # empty list to hold futures
     futures = []  # empty list to hold futures
+    flush_results = []  # empty list to hold futures
 
     # GEMM are assigned to GPUs in a round robin manner
     h = 0
@@ -514,6 +515,13 @@ def mgpu_tune_gemm_in_file(filename_pattern: str, num_gpus: int) -> None:
 
         for future in concurrent.futures.as_completed(futures):
             future.result()
+
+        for g in range(num_gpus):
+            flush_result = executor.submit(write_file)
+            flush_results.append(flush_result)
+
+        for flush_result in concurrent.futures.as_completed(flush_results):
+            flush_result.result()
 
     torch.cuda.synchronize()
 

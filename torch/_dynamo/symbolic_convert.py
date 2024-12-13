@@ -247,17 +247,16 @@ class DistributedState:
 
 
 class TensorifyState:
-    # These are the set of string symfloats names (eg. "zf0") that we collect
-    # from the tensorify_python_scalars.py joint fx pass to inform us about
-    # which float inputs we should specialize when we restart analysis.
-    force_specializations: Set[str] = set()
+    # These are the set of source that we collect from the tensorify_python_scalars.py joint
+    # fx pass to inform us about which float inputs we should specialize when we restart analysis.
+    force_specializations: Set[Source] = set()
 
     @classmethod
-    def specialize(cls, index: str) -> None:
+    def specialize(cls, index: Source) -> None:
         cls.force_specializations.add(index)
 
     @classmethod
-    def should_specialize(cls, index: str) -> bool:
+    def should_specialize(cls, index: Source) -> bool:
         return index in cls.force_specializations
 
     @classmethod
@@ -2087,6 +2086,15 @@ class InstructionTranslatorBase(
         self.push(b)
         self.push(a)
 
+    def _convert_value(self, value, flag):
+        if flag == 1:
+            return BuiltinVariable(str).call_function(self, [value], {})  # type: ignore[arg-type]
+        elif flag == 2:
+            return BuiltinVariable(repr).call_function(self, [value], {})  # type: ignore[arg-type]
+        elif flag == 3:
+            return BuiltinVariable(ascii).call_function(self, [value], {})  # type: ignore[arg-type]
+        return value
+
     def _format_value(self, fmt_spec, flags):
         value = self.pop()
         if isinstance(value, SymNodeVariable):
@@ -2100,12 +2108,8 @@ class InstructionTranslatorBase(
             )
             self.push(value)
             return
-        if (flags & 0x03) == 0x01:
-            value = BuiltinVariable(str).call_function(self, [value], {})  # type: ignore[arg-type]
-        elif (flags & 0x03) == 0x02:
-            value = BuiltinVariable(repr).call_function(self, [value], {})  # type: ignore[arg-type]
-        elif (flags & 0x03) == 0x03:
-            value = BuiltinVariable(ascii).call_function(self, [value], {})  # type: ignore[arg-type]
+
+        value = self._convert_value(value, flags & 0x03)
 
         fmt_var = ConstantVariable.create("{:" + fmt_spec.as_python_constant() + "}")
 
@@ -2503,6 +2507,9 @@ class InstructionTranslatorBase(
             fn.defaults = attr
 
         self.push(fn)
+
+    def CONVERT_VALUE(self, inst):
+        self.push(self._convert_value(self.pop(), inst.argval))
 
     def FORMAT_SIMPLE(self, inst):
         self._format_value(ConstantVariable.create(""), 0)
@@ -3256,6 +3263,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             distributed_state=parent.distributed_state,
         )
         self.parent = parent
+        self.num_calls = parent.num_calls
         self.symbolic_result = None
         self.nn_module_stack = parent.nn_module_stack.copy()
         self.one_graph = parent.one_graph
