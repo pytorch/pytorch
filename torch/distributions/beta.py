@@ -7,6 +7,8 @@ from torch.distributions.dirichlet import Dirichlet
 from torch.distributions.exp_family import ExponentialFamily
 from torch.distributions.utils import broadcast_all
 from torch.types import _size
+from typing import Union
+from torch.distributions.utils import is_identically_zero, is_identically_one
 
 
 __all__ = ["Beta"]
@@ -34,15 +36,20 @@ class Beta(ExponentialFamily):
 
     arg_constraints = {
         "concentration1": constraints.positive,
-        "concentration0": constraints.positive
+        "concentration0": constraints.positive,
     }
     has_rsample = True
 
     def __init__(
-        self, concentration1, concentration0, low=0.0, high=1.0, validate_args=None
+        self,
+        concentration1,
+        concentration0,
+        low: Union[Number, torch.Tensor] = 0.0,
+        high: Union[Number, torch.Tensor] = 1.0,
+        validate_args=None,
     ):
-        self._scale = high - low
-        self._location = low
+        self._low = low
+        self._high = high
 
         if isinstance(concentration1, Real) and isinstance(concentration0, Real):
             concentration1_concentration0 = torch.tensor(
@@ -68,51 +75,73 @@ class Beta(ExponentialFamily):
         new = self._get_checked_instance(Beta, _instance)
         batch_shape = torch.Size(batch_shape)
         new._dirichlet = self._dirichlet.expand(batch_shape)
-        new._scale = self.scale.expand(batch_shape)
-        new._location = self.location.expand(batch_shape)
+        if isinstance(self._low, torch.Tensor):
+            new._low = self.low.expand(batch_shape)
+        else:
+            new._low = self._low
+        if isinstance(self._high, torch.Tensor):
+            new._high = self.high.expand(batch_shape)
+        else:
+            new._high = self._high
         super(Beta, new).__init__(batch_shape, validate_args=False)
         new._validate_args = self._validate_args
         return new
 
     @constraints.dependent_property(is_discrete=False, event_dim=0)
     def support(self):
-        low = self._location
-        high = self._location + self._scale
-        return constraints.interval(low, high)
+        return constraints.interval(self._low, self._high)
 
     @property
     def mean(self):
-        return self.location + self.scale * (
-            self.concentration1 / (self.concentration1 + self.concentration0)
+        unscaled_mean = self.concentration1 / (
+            self.concentration1 + self.concentration0
         )
+        if self._has_default_scale_parameters():
+            return unscaled_mean
+        return self.location + self.scale * unscaled_mean
 
     @property
     def mode(self):
-        return self.location + self.scale * self._dirichlet.mode[..., 0]
+        unscaled_mode = self._dirichlet.mode[..., 0]
+        if self._has_default_scale_parameters():
+            return unscaled_mode
+        return self.location + self.scale * unscaled_mode
 
     @property
     def variance(self):
         total = self.concentration1 + self.concentration0
-        return (
-            self.scale.pow(2)
-            * self.concentration1
-            * self.concentration0
-            / (total.pow(2) * (total + 1))
+        unscaled_variance = (
+            self.concentration1 * self.concentration0 / (total.pow(2) * (total + 1))
         )
+        if self._has_default_scale_parameters():
+            return unscaled_variance
+        return (
+            self.scale.pow(2) * unscaled_variance
+        )
+
+    def _has_default_scale_parameters(self):
+        return is_identically_zero(self._low) and is_identically_one(self.high)
 
     def rsample(self, sample_shape=()):
         sample = self._dirichlet.rsample(sample_shape).select(-1, 0)
+        if self._has_default_scale_parameters():
+            return sample
         scaled_sample = self.location + self.scale * sample
         return scaled_sample
 
     def log_prob(self, value):
         if self._validate_args:
             self._validate_sample(value)
+        if self._has_default_scale_parameters():
+            heads_tails = torch.stack([value, 1.0 - value], -1)
+            return self._dirichlet.log_prob(heads_tails)
         scaled_value = (value - self.location) / (self.scale)
         heads_tails = torch.stack([scaled_value, 1.0 - scaled_value], -1)
         return self._dirichlet.log_prob(heads_tails) - torch.log(self.scale)
 
     def entropy(self):
+        if self._has_default_scale_parameters():
+            return self._dirichlet.entropy()
         return self._dirichlet.entropy() + torch.log(self.scale)
 
     @property
@@ -133,26 +162,34 @@ class Beta(ExponentialFamily):
 
     @property
     def location(self):
-        if isinstance(self._location, Number):
-            return torch.ones_like(self.concentration0) * self._location
-        else:
-            return self._location
+        return self.low
 
     @property
     def scale(self):
-        if isinstance(self._scale, Number):
-            return torch.ones_like(self.concentration0) * self._scale
+        return self.high - self.low
+
+    @property
+    def low(self):
+        if isinstance(self._low, Number):
+            return torch.full_like(self.concentration0, self._low)
         else:
-            return self._scale
+            return self._low
+
+    @property
+    def high(self):
+        if isinstance(self._high, Number):
+            return torch.full_like(self.concentration0, self._high)
+        else:
+            return self._high
 
     @property
     def _natural_params(self):
         return (self.concentration1, self.concentration0)
 
     def _log_normalizer(self, x, y):
-        return (
-            torch.lgamma(x)
+        unscaled_log_normalizer = (torch.lgamma(x)
             + torch.lgamma(y)
-            - torch.lgamma(x + y)
-            + torch.log(self.scale)
-        )
+            - torch.lgamma(x + y))
+        if self._has_default_scale_parameters():
+            return unscaled_log_normalizer
+        return unscaled_log_normalizer + torch.log(self.scale)

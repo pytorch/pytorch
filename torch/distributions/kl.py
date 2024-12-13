@@ -38,12 +38,12 @@ from .uniform import Uniform
 from .utils import _sum_rightmost, euler_constant as _euler_gamma
 
 
-_KL_REGISTRY: Dict[
-    Tuple[Type, Type], Callable
-] = {}  # Source of truth mapping a few general (type, type) pairs to functions.
-_KL_MEMOIZE: Dict[
-    Tuple[Type, Type], Callable
-] = {}  # Memoized version mapping many specific (type, type) pairs to functions.
+_KL_REGISTRY: Dict[Tuple[Type, Type], Callable] = (
+    {}
+)  # Source of truth mapping a few general (type, type) pairs to functions.
+_KL_MEMOIZE: Dict[Tuple[Type, Type], Callable] = (
+    {}
+)  # Memoized version mapping many specific (type, type) pairs to functions.
 
 __all__ = ["register_kl", "kl_divergence"]
 
@@ -224,7 +224,8 @@ def _kl_beta_beta(p, q):
     t3 = (p.concentration1 - q.concentration1) * torch.digamma(p.concentration1)
     t4 = (p.concentration0 - q.concentration0) * torch.digamma(p.concentration0)
     t5 = (sum_params_q - sum_params_p) * torch.digamma(sum_params_p)
-    return t1 - t2 + t3 + t4 + t5
+    t6 = torch.log(p.scale / q.scale)
+    return t1 - t2 + t3 + t4 + t5 + t6
 
 
 @register_kl(Binomial, Binomial)

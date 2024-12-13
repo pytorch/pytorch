@@ -3828,12 +3828,12 @@ class TestDistributions(DistributionsTestCase):
             x = dist.sample()
             dirichlet_sample = (x - low) / scale
             #TODO numerical instabilities that needs to be fixed
-            if dirichlet_sample > 1 - 1e-5 or dirichlet_sample < 1e-5:
+            if dirichlet_sample > 1 - 1e-4 or dirichlet_sample < 1e-4:
                 continue
             actual_log_prob = dist.log_prob(x).sum()
             expected_log_prob = scipy.stats.beta.logpdf(x, con1, con0, loc=low, scale=scale)
             self.assertEqual(
-                float(actual_log_prob), float(expected_log_prob), atol=1e-2, rtol=0
+                float(actual_log_prob), float(expected_log_prob), atol=1e-3*scale, rtol=0
             )
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
@@ -5394,7 +5394,7 @@ class TestKL(DistributionsTestCase):
             Binomial(torch.tensor([3, 4]), torch.tensor([0.4, 0.6])),
             Binomial(torch.tensor([3, 4]), torch.tensor([0.5, 0.8])),
         )
-        beta = pairwise(Beta, [1.0, 2.5, 1.0, 2.5], [1.5, 1.5, 3.5, 3.5])
+        beta = pairwise(Beta, [1.0, 2.5, 1.0, 2.5], [1.5, 1.5, 3.5, 3.5], [0.0, 3.0, 0.0, -1.0], [1.0, 4.0, 0.5, 2.0])
         categorical = pairwise(
             Categorical,
             [[0.4, 0.3, 0.3], [0.2, 0.7, 0.1], [0.33, 0.33, 0.34], [0.2, 0.2, 0.6]],

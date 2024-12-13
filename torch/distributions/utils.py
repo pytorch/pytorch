@@ -198,3 +198,28 @@ def vec_to_tril_matrix(vec: torch.Tensor, diag: int = 0) -> torch.Tensor:
     tril_mask = arange < arange.view(-1, 1) + (diag + 1)
     mat[..., tril_mask] = vec
     return mat
+
+def is_identically_zero(x):
+    """
+    Check if argument is exactly the number zero. True for the number zero;
+    false for other numbers; false for :class:`~torch.Tensor`s.
+    """
+    if isinstance(x, Number):
+        return x == 0
+    if not torch._C._get_tracing_state():
+        if isinstance(x, torch.Tensor) and x.dtype == torch.int64 and not x.shape:
+            return x.item() == 0
+    return False
+
+
+def is_identically_one(x):
+    """
+    Check if argument is exactly the number one. True for the number one;
+    false for other numbers; false for :class:`~torch.Tensor`s.
+    """
+    if isinstance(x, Number):
+        return x == 1
+    if not torch._C._get_tracing_state():
+        if isinstance(x, torch.Tensor) and x.dtype == torch.int64 and not x.shape:
+            return x.item() == 1
+    return False
