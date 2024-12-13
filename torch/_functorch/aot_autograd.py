@@ -1137,20 +1137,22 @@ def aot_module_simplified(
             )
         return compiled_fn
 
-    # Autograd cache stuff
-    remote = should_use_remote_autograd_cache()
-    local = should_use_local_autograd_cache()
     # We only care if the forward will return an OutputCode.
-    if (local or remote) and isinstance(fw_compiler, SerializableAOTDispatchCompiler):
-        compiled_fn = AOTAutogradCache.load(
-            dispatch_and_compile,
-            mod,
-            fake_flat_args,
-            aot_config,
-            cudagraphs,
-            local,
-            remote,
-        )
+    if isinstance(fw_compiler, SerializableAOTDispatchCompiler):
+        local = should_use_local_autograd_cache()
+        remote = should_use_remote_autograd_cache()
+        if local or remote:
+            compiled_fn = AOTAutogradCache.load(
+                dispatch_and_compile,
+                mod,
+                fake_flat_args,
+                aot_config,
+                cudagraphs,
+                local,
+                remote,
+            )
+        else:
+            compiled_fn = dispatch_and_compile()
     else:
         compiled_fn = dispatch_and_compile()
 
@@ -1366,7 +1368,7 @@ We require the output marked as the loss (at index {output_loss_index}) to be a 
             fw_outs, gradients = fx_g(args, fake_tangents)
             assert len(gradients) == len(args)
             output_gradients = []
-            for i, (a, grad) in enumerate(zip(args, gradients)):
+            for a, grad in zip(args, gradients):
                 if isinstance(a, torch.Tensor) and a.requires_grad:
                     assert (
                         grad is not None
@@ -1482,7 +1484,7 @@ def aot_export_joint_simple(
 
     if config.debug_assert:
         # Smoke test that after partitioning, we can run the forward without any calling convention changes.
-        fw_module, bw_module = aot_config.default_partition(  # noqa: F821
+        fw_module, _bw_module = aot_config.default_partition(  # noqa: F821
             fx_g, args, num_fwd_outputs=len(fw_metadata.output_infos)  # noqa: F821
         )
         # Attempt to run the fw_module with the original user inputs

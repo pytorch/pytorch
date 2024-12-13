@@ -317,7 +317,7 @@ def get_inputs(input_data_path):
                 type = meta
                 input = type(random.rand())
             else:
-                type, shape, stride, dtype, device = meta
+                type, shape, _stride, dtype, device = meta
                 if dtype in {
                     torch.int,
                     torch.int32,

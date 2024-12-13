@@ -121,7 +121,7 @@ def apply_shuffle_settings(
         datapipe = datapipe.shuffle()
         shufflers = [
             datapipe,
-        ]  # type: ignore[list-item]
+        ]
 
     for shuffler in shufflers:
         shuffler.set_shuffle(shuffle)
