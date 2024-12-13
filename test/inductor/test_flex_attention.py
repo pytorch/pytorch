@@ -38,7 +38,7 @@ from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_BF16, TEST_MUL
 from torch.testing._internal.common_device_type import (
     flex_attention_supported_platform as supported_platform,
 )
-from torch.testing._internal.common_utils import TEST_WITH_ROCM
+from torch.testing._internal.common_utils import IS_MACOS, TEST_WITH_ROCM
 from torch.utils._triton import has_triton
 
 
@@ -123,9 +123,21 @@ else:
         # if the compiler is clang, skip UT for CPU due to long compilation time found in CI
         # TODO: check reason of long compile time
         LONG_COMPILATION_ON_CPU = True
+
+    import os
+
+    # skip since currently flex attention requires at least `avx2` support on CPU.
+    IS_PLATFORM_SUPPORTED = (
+        not torch.xpu.is_available()
+        and not IS_MACOS
+        and torch.cpu._is_avx2_supported()
+        and os.getenv("ATEN_CPU_CAPABILITY") != "default"
+    )
+
     test_dtypes = (
         [torch.float32, torch.bfloat16]
-        if torch.ops.mkldnn._is_mkldnn_bf16_supported()
+        if torch.backends.mkldnn.is_available()
+        and torch.ops.mkldnn._is_mkldnn_bf16_supported()
         else [torch.float32]
     )
     test_dtypes_fast = [torch.float32]
@@ -310,8 +322,13 @@ class TestFlexAttention(InductorTestCase):
     def setUp(self):
         super().setUp()
         self.device = test_device
-        if self.device == "cpu" and LONG_COMPILATION_ON_CPU:
-            self.skipTest("skip UT for CPU due to long compilation time found in CI")
+        if self.device == "cpu":
+            if LONG_COMPILATION_ON_CPU:
+                self.skipTest(
+                    "skip UT for CPU due to long compilation time found in CI"
+                )
+            if not IS_PLATFORM_SUPPORTED:
+                self.skipTest("skip UT due to not support on those platforms")
 
     def _check_equal(
         self,
@@ -3180,6 +3197,61 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         torch.testing.assert_close(grads_eager, grads_compile)
 
     @supported_platform
+    def test_dynamic_shapes_bug_dynamic_batch(self):
+        def _flex_attention_mask(b, h, q_idx, kv_idx, input_lengths):
+            padding_condition = (q_idx < input_lengths[b]) & (kv_idx < input_lengths[b])
+            return padding_condition
+
+        counter = CompileCounterWithBackend("inductor")
+
+        class Model(torch.nn.Module):
+            def __init__(self, dim=1024):
+                super().__init__()
+                self.subsampler = torch.nn.Conv1d(256, 256, 5)
+                self.projector = torch.nn.Linear(256, dim)
+                self.num_heads = 4
+
+            def forward(self, x, input_lengths):
+                x = self.subsampler(x.transpose(-1, -2)).transpose(-1, -2)
+                x = self.projector(x).transpose(0, 1)
+                head_dim = x.size(-1) // self.num_heads
+                x = x.view(-1, x.size(1), self.num_heads, head_dim)
+                x = x.permute(1, 2, 0, 3)
+
+                max_time = x.size(-2)
+                mask = torch.compile(create_block_mask, dynamic=True, fullgraph=False)(
+                    functools.partial(
+                        _flex_attention_mask,
+                        input_lengths=input_lengths,
+                    ),
+                    B=input_lengths.size(0),
+                    H=None,
+                    Q_LEN=max_time,
+                    KV_LEN=max_time,
+                )
+
+                x = torch.compile(
+                    flex_attention, dynamic=True, fullgraph=True, backend=counter
+                )(
+                    query=x,
+                    key=x,
+                    value=x,
+                    block_mask=mask,
+                )
+                return x
+
+        model = Model(128).cuda()
+        B, F, T = 16, 256, 12
+        for _ in range(5):
+            x = torch.randn(B, T, F, device="cuda")
+            l = torch.randint(0, T, (B,), device="cuda")
+            model(x, l)
+
+        assert (
+            counter.frame_count == 1
+        ), f"Expected 1 graph, but got {counter.frame_count} graphs"
+
+    @supported_platform
     def test_causal_block_non_divisible_with_captured_buffer(self):
         Q_S = S - 3
         KV_S = S - 3
@@ -4002,8 +4074,13 @@ class TestPagedAttention(InductorTestCase):
     def setUp(self):
         super().setUp()
         self.device = test_device
-        if self.device == "cpu" and LONG_COMPILATION_ON_CPU:
-            self.skipTest("skip UT for CPU due to long compilation time found in CI")
+        if self.device == "cpu":
+            if LONG_COMPILATION_ON_CPU:
+                self.skipTest(
+                    "skip UT for CPU due to long compilation time found in CI"
+                )
+            if not IS_PLATFORM_SUPPORTED:
+                self.skipTest("skip UT due to not support on those platforms")
 
     def _check_equal(
         self,

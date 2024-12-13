@@ -124,7 +124,7 @@ class PrimHOPBase(HigherOrderOperator, abc.ABC):
 
     def _call_Functionalize(self, ctx, subgraph, operands, *_, **kwargs):
         unwrapped_operands = ctx.unwrap_tensors(operands)
-        with ctx.redispatch_to_next() as m:
+        with ctx.redispatch_to_next():
             # We assume the subgraph doesn't mutate inputs and there is no aliasing.
             # In the PT2 stack, this is Dynamo's responsibility to figure out.
             functionalized_subgraph = FunctionWithNoFreeVars(
@@ -158,7 +158,6 @@ class PrimHOPBaseFunction(torch.autograd.Function):
                 from .utils import _from_fun
 
                 fw_inputs = pytree.tree_map(_from_fun, operands)
-                fw_outputs = subgraph(*fw_inputs)
                 _, joint_graph, _ = create_fw_bw_graph(
                     subgraph, fw_inputs, grad_outputs
                 )
