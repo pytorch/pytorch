@@ -1908,57 +1908,33 @@ class GuardBuilder(GuardBuilderBase):
                 lang=lang,
             )
 
-        def install_python_guard():
-            # Install all the symbolic guards in one python lambda guard. These are run
-            # at the very end of the RootGuardManager via epilogue guards.
-            python_code_parts, verbose_code_parts = _get_code_parts("python")
-            code_parts = python_code_parts.exprs
+        if config.enable_cpp_symbolic_shape_guards:
+            import ctypes
+
+            from torch._inductor.codecache import CppCodeCache
+
+            cpp_code_parts, verbose_code_parts = _get_code_parts("cpp")
+
+            code_parts, source_to_symbol = (
+                cpp_code_parts.exprs,
+                cpp_code_parts.source_to_symbol,
+            )
 
             if not code_parts:
                 return
-
-            for code in code_parts:
-                self._set_guard_export_info(guard, [code])
 
             # Make ShapeEnv guards available for testing.
             if compile_context := CompileContext.try_get():
                 compile_context.shape_env_guards.extend(verbose_code_parts)
 
-            self.add_python_lambda_leaf_guard_to_root(
-                code_parts,
-                verbose_code_parts,
-                closure_vars={**SYMPY_INTERP, **_get_closure_vars()},
-            )
+            python_fallback = False
+            for source in source_to_symbol:
+                if not isinstance(self.get(source.name()), (int, float)):
+                    # SymInts go through python guard as we only support
+                    # int64_t in C++ guards for now.
+                    python_fallback = True
 
-        try:
-            if config.enable_cpp_symbolic_shape_guards:
-                import ctypes
-
-                from torch._inductor.codecache import CppCodeCache
-
-                cpp_code_parts, verbose_code_parts = _get_code_parts("cpp")
-
-                code_parts, source_to_symbol = (
-                    cpp_code_parts.exprs,
-                    cpp_code_parts.source_to_symbol,
-                )
-                if not code_parts:
-                    return
-
-                for code in code_parts:
-                    self._set_guard_export_info(guard, [code])
-
-                # Make ShapeEnv guards available for testing.
-                if compile_context := CompileContext.try_get():
-                    compile_context.shape_env_guards.extend(verbose_code_parts)
-
-                for source in source_to_symbol:
-                    if not isinstance(self.get(source.name()), (int, float)):
-                        # SymInts go through python guard as we only support
-                        # int64_t in C++ guards for now.
-                        install_python_guard()
-                        return
-
+            if not python_fallback:
                 try:
                     guard_managers = [
                         self.get_guard_manager_from_source(IndexedSource(source, i))
@@ -1986,11 +1962,23 @@ class GuardBuilder(GuardBuilderBase):
                     assert cguard
                 except NameError:
                     # Happens when there are ConstantSource
-                    pass
+                    python_fallback = True
                 except torch._inductor.exc.InvalidCxxCompiler:
                     # No valid C++ compiler to compile the shape guard
-                    pass
+                    python_fallback = True
                 else:
+                    # When exporting, we may work with the shape constraints some more in
+                    # postprocessing, so don't freeze yet
+                    if not self.check_fn_manager.output_graph.export:
+                        output_graph.shape_env.freeze()
+
+                    for code in code_parts:
+                        self._set_guard_export_info(guard, [code])
+
+                    # Make ShapeEnv guards available for testing.
+                    if compile_context := CompileContext.try_get():
+                        compile_context.shape_env_guards.extend(verbose_code_parts)
+
                     install_symbolic_shape_guard(
                         guard_managers,
                         len(source_to_symbol),
@@ -2000,12 +1988,29 @@ class GuardBuilder(GuardBuilderBase):
                     )
                     return
 
-            install_python_guard()
-        finally:
-            # When exporting, we may work with the shape constraints some more in
-            # postprocessing, so don't freeze yet
-            if not self.check_fn_manager.output_graph.export:
-                output_graph.shape_env.freeze()
+        python_code_parts, verbose_code_parts = _get_code_parts("python")
+        code_parts = python_code_parts.exprs
+
+        # When exporting, we may work with the shape constraints some more in
+        # postprocessing, so don't freeze yet
+        if not self.check_fn_manager.output_graph.export:
+            output_graph.shape_env.freeze()
+
+        for code in code_parts:
+            self._set_guard_export_info(guard, [code])
+
+        # Make ShapeEnv guards available for testing.
+        if compile_context := CompileContext.try_get():
+            compile_context.shape_env_guards.extend(verbose_code_parts)
+
+        # Install all the symbolic guards in one python lambda guard. These are run
+        # at the very end of the RootGuardManager via epilogue guards.
+        # TODO(anijain2305,williamwen42) - Consider moving this to C++.
+        self.add_python_lambda_leaf_guard_to_root(
+            code_parts,
+            verbose_code_parts,
+            closure_vars={**SYMPY_INTERP, **_get_closure_vars()},
+        )
 
     def TENSOR_MATCH(self, guard: Guard, value=None):
         # For tensors that are part of the Dynamo extracted Fx graph module, an
