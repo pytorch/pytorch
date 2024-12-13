@@ -367,7 +367,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
                     match_nodes if not acl_bf16 else 0,
                 )
                 self.assertEqual(
-                    counters["inductor"]["mkldnn_linear_weight_pack_matcher_count"],1
+                    counters["inductor"]["mkldnn_linear_weight_pack_matcher_count"], 1
                 )
 
             self._test_common(mod, (v,), matcher_check_fn, check_autocast=dtype)
@@ -467,6 +467,8 @@ class TestPatternMatcher(TestPatternMatcherBase):
             metrics.reset()
             fold_mod = M(dtype, unary_fn, cast_bias=True).eval()
             v = torch.randn(2, 10)
+            # TODO: Remove when https://github.com/pytorch/pytorch/issues/143146 is fixed
+            acl_bf16 = TEST_ACL and dtype == torch.bfloat16
 
             def folder_matcher_check_fn():
                 match_nodes = unary_list[unary_fn]
@@ -475,11 +477,12 @@ class TestPatternMatcher(TestPatternMatcherBase):
                     match_nodes += 2
                 # we have 2 linears, so we double the matcher_count/nodes
                 self.assertEqual(
-                    counters["inductor"]["mkldnn_unary_fusion_matcher_count"], 2
+                    counters["inductor"]["mkldnn_unary_fusion_matcher_count"],
+                    2 if not acl_bf16 else 0,
                 )
                 self.assertEqual(
                     counters["inductor"]["mkldnn_unary_fusion_matcher_nodes"],
-                    match_nodes * 2,
+                    match_nodes * 2 if not acl_bf16 else 0,
                 )
                 self.assertEqual(
                     counters["inductor"]["mkldnn_linear_weight_pack_matcher_count"], 2
@@ -491,7 +494,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 folder_matcher_check_fn,
                 check_autocast=dtype,
             )
-            self.assertEqual(metrics.generated_kernel_count, 1)
+            self.assertEqual(metrics.generated_kernel_count, 1 if not acl_bf16 else 3)
             # we won't fold the bias if bias is not same dtype with weight
             # https://github.com/pytorch/pytorch/pull/129138
             metrics.reset()
@@ -583,7 +586,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 and dtype == torch.bfloat16
                 and memory_format != torch.contiguous_format
             ):
-                continue            
+                continue
             self.assertEqual(metrics.generated_kernel_count, generated_kernel_count)
 
     @skipIfNoDynamoSupport
