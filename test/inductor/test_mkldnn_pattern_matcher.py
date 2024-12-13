@@ -564,7 +564,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
                     torch.bfloat16,
                 ) and self._check_unary_is_decomposed(unary_fn):
                     # Has extra dtype conversion nodes for autocast.
-                    match_nodes += 2
+                    match_nodes += 2 if not TEST_ACL else 0
                 self.assertEqual(
                     counters["inductor"]["mkldnn_unary_fusion_matcher_nodes"],
                     match_nodes,
