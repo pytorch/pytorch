@@ -1252,7 +1252,7 @@ class ChromiumEventLogger:
         :param str event_name Name of event to appear in trace
         :param time_ns Timestamp in nanoseconds
         :param metadata: Any extra metadata associated with this event
-        :param log_pt_compile_event: If True, log to pt2_compile_events
+        :param log_pt2_compile_event: If True, log to pt2_compile_events
         :param compile_id: Explicit compile_id (rather than using the current context)
         """
         compile_id = compile_id or torch._guards.CompileContext.current_compile_id()
@@ -1437,7 +1437,7 @@ def get_chromium_event_logger() -> ChromiumEventLogger:
 @contextmanager
 def chromium_event_timed(
     event_name: str,
-    reset_event_log: bool = False,
+    reset_event_log_on_exit: bool = False,
     log_pt2_compile_event: bool = False,
 ) -> Generator[Any, None, None]:
     """
@@ -1446,8 +1446,6 @@ def chromium_event_timed(
     instead. Use this context manager only if you want to avoid dynamo_timed.
     """
     chromium_event_log = get_chromium_event_logger()
-    if reset_event_log:
-        chromium_event_log.reset()
     chromium_start_time = time.time_ns()
     chromium_event_log.log_event_start(
         event_name,
@@ -1465,6 +1463,8 @@ def chromium_event_timed(
             chromium_start_time,
             log_pt2_compile_event,
         )
+        if reset_event_log_on_exit:
+            chromium_event_log.reset()
 
 
 @dataclasses.dataclass

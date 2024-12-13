@@ -882,7 +882,7 @@ def _compile(
     with _use_lazy_graph_module(config.use_lazy_graph_module), compile_context(
         CompileContext(compile_id)
     ), chromium_event_timed(
-        "dynamo", reset_event_log=True, log_pt2_compile_event=True
+        "dynamo", reset_event_log_on_exit=True, log_pt2_compile_event=True
     ), metrics_context:
         restart_reasons: set[str] = set()
         # This is shared across restarts
