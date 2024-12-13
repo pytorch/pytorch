@@ -15,6 +15,7 @@ import collections
 import functools
 import inspect
 import itertools
+import json
 import logging
 import math
 import operator
@@ -4094,14 +4095,19 @@ class ShapeEnv:
         )
         trace_structured(
             "create_unbacked_symbol",
-            metadata_fn=lambda: {
-                "symbol": str(symbol),
-                "vr": f"[{vr.lower}, {vr.upper}]",
-                "user_stack": structured.from_traceback(TracingContext.extract_stack()),
-                "stack": structured.from_traceback(
-                    CapturedTraceback.extract(skip=1).summary()
-                ),
-            },
+            payload_fn=lambda: json.dumps(
+                {
+                    "symbol": str(symbol),
+                    "vr": f"[{vr.lower}, {vr.upper}]",
+                    "user_stack": structured.from_traceback(
+                        TracingContext.extract_stack()
+                    ),
+                    "stack": structured.from_traceback(
+                        CapturedTraceback.extract(skip=1).summary()
+                    ),
+                },
+                indent=1,
+            ),
         )
 
     @record_shapeenv_event()
@@ -4414,18 +4420,21 @@ class ShapeEnv:
             )
             trace_structured(
                 "create_symbol",
-                metadata_fn=lambda: {
-                    "symbol": str(sympy_expr),
-                    "val": repr(val),
-                    "vr": range_str,
-                    "source": source.name(),
-                    "user_stack": structured.from_traceback(
-                        TracingContext.extract_stack()
-                    ),
-                    "stack": structured.from_traceback(
-                        CapturedTraceback.extract(skip=1).summary()
-                    ),
-                },
+                payload_fn=lambda: json.dumps(
+                    {
+                        "symbol": str(sympy_expr),
+                        "val": repr(val),
+                        "vr": range_str,
+                        "source": source.name(),
+                        "user_stack": structured.from_traceback(
+                            TracingContext.extract_stack()
+                        ),
+                        "stack": structured.from_traceback(
+                            CapturedTraceback.extract(skip=1).summary()
+                        ),
+                    },
+                    indent=1,
+                ),
             )
 
             self.counter["create_symbol"] += 1
@@ -5639,13 +5648,16 @@ class ShapeEnv:
                     )
                     trace_structured(
                         "propagate_real_tensors",
-                        metadata_fn=lambda: {
-                            "expr": repr(expr),
-                            "result": repr(unsound_expr),
-                            "stack": structured.from_traceback(
-                                CapturedTraceback.extract(skip=1).summary()
-                            ),
-                        },
+                        payload_fn=lambda: json.dumps(
+                            {
+                                "expr": repr(expr),
+                                "result": repr(unsound_expr),
+                                "stack": structured.from_traceback(
+                                    CapturedTraceback.extract(skip=1).summary()
+                                ),
+                            },
+                            indent=1,
+                        ),
                     )
                     self.defer_runtime_assert(
                         sympy.Eq(result_expr, unsound_expr),
@@ -5894,18 +5906,21 @@ class ShapeEnv:
             user_tb = TracingContext.extract_stack()
             trace_structured(
                 "symbolic_shape_specialization",
-                metadata_fn=lambda: {
-                    "symbol": repr(a),
-                    "sources": [s.name() for s in self.var_to_sources.get(a, [])],
-                    "value": repr(tgt),
-                    "reason": msg,
-                    "stack": structured.from_traceback(
-                        CapturedTraceback.extract(skip=1).summary()
-                    ),
-                    "user_stack": structured.from_traceback(user_tb)
-                    if user_tb
-                    else None,
-                },
+                payload_fn=lambda: json.dumps(
+                    {
+                        "symbol": repr(a),
+                        "sources": [s.name() for s in self.var_to_sources.get(a, [])],
+                        "value": repr(tgt),
+                        "reason": msg,
+                        "stack": structured.from_traceback(
+                            CapturedTraceback.extract(skip=1).summary()
+                        ),
+                        "user_stack": structured.from_traceback(user_tb)
+                        if user_tb
+                        else None,
+                    },
+                    indent=1,
+                ),
             )
 
             if config.print_specializations:
@@ -6210,13 +6225,18 @@ class ShapeEnv:
         )
         trace_structured(
             "guard_added_fast",
-            metadata_fn=lambda: {
-                "expr": str(g),
-                "user_stack": structured.from_traceback(TracingContext.extract_stack()),
-                "stack": structured.from_traceback(
-                    CapturedTraceback.extract(skip=1).summary()
-                ),
-            },
+            payload_fn=lambda: json.dumps(
+                {
+                    "expr": str(g),
+                    "user_stack": structured.from_traceback(
+                        TracingContext.extract_stack()
+                    ),
+                    "stack": structured.from_traceback(
+                        CapturedTraceback.extract(skip=1).summary()
+                    ),
+                },
+                indent=1,
+            ),
         )
         if self.log.isEnabledFor(logging.INFO):
             str_g = str(g)
@@ -6400,13 +6420,16 @@ class ShapeEnv:
                         )
                         trace_structured(
                             "propagate_real_tensors",
-                            metadata_fn=lambda: {
-                                "expr": repr(orig_expr),
-                                "result": repr(unsound_result),
-                                "stack": structured.from_traceback(
-                                    CapturedTraceback.extract(skip=1).summary()
-                                ),
-                            },
+                            payload_fn=lambda: json.dumps(
+                                {
+                                    "expr": repr(orig_expr),
+                                    "result": repr(unsound_result),
+                                    "stack": structured.from_traceback(
+                                        CapturedTraceback.extract(skip=1).summary()
+                                    ),
+                                },
+                                indent=1,
+                            ),
                         )
                         transmute_into_runtime_assert = True
                         concrete_val = unsound_result
