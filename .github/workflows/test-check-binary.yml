@@ -16,7 +16,6 @@ jobs:
     name: Test check_binary.sh for Linux CPU
     uses: pytorch/test-infra/.github/workflows/linux_job.yml@main
     with:
-      repository: "pytorch/pytorch"
       docker-image: python:3.11
       docker-build-dir: "skip-docker-build"
       script: |
@@ -29,7 +28,6 @@ jobs:
     name: Test check_binary.sh for Linux CUDA
     uses: pytorch/test-infra/.github/workflows/linux_job.yml@main
     with:
-      repository: "pytorch/pytorch"
       runner: linux.4xlarge.nvidia.gpu
       docker-image: python:3.11
       docker-build-dir: "skip-docker-build"
