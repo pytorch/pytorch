@@ -6697,6 +6697,12 @@ add_docstr(
     r"""
 mean(input, *, dtype=None) -> Tensor
 
+.. note::
+    If the `input` tensor is empty, ``torch.mean()`` returns ``nan``.
+    This behavior is consistent with NumPy and follows the definition
+    that the mean over an empty set is undefined.
+
+
 Returns the mean value of all elements in the :attr:`input` tensor. Input must be floating point or complex.
 
 Args:

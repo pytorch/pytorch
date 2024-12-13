@@ -82,8 +82,7 @@ jobs:
           { config: "inductor_torchbench_perf_cpu_x86", shard: 4, num_shards: 4, runner: "linux.24xl.spr-metal" },
         ]}
       selected-test-configs: ${{ inputs.benchmark_configs }}
-    secrets:
-      HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}
+    secrets: inherit
 
 
   linux-jammy-cpu-py3_9-gcc11-inductor-test-nightly:
@@ -98,8 +97,9 @@ jobs:
       test-matrix: ${{ needs.linux-jammy-cpu-py3_9-gcc11-inductor-build.outputs.test-matrix }}
       use-gha: anything-non-empty-to-use-gha
       timeout-minutes: 720
-    secrets:
-      HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}
+      # disable monitor in perf tests for more investigation
+      disable-monitor: true
+    secrets: inherit
 
 
   linux-jammy-cpu-py3_9-gcc11-inductor-test:
@@ -114,5 +114,6 @@ jobs:
       test-matrix: ${{ needs.linux-jammy-cpu-py3_9-gcc11-inductor-build.outputs.test-matrix }}
       use-gha: anything-non-empty-to-use-gha
       timeout-minutes: 720
-    secrets:
-      HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}
+      # disable monitor in perf tests for more investigation
+      disable-monitor: true
+    secrets: inherit
