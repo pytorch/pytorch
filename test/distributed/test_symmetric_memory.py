@@ -726,7 +726,7 @@ class SubgroupTest(MultiProcessTestCase):
 
 @instantiate_parametrized_tests
 @requires_cuda_p2p_access()
-class SymmMemAllReduceTest(MultiProcessTestCase):
+class SymmMemCollectiveTest(MultiProcessTestCase):
     def setUp(self) -> None:
         super().setUp()
         self._spawn_processes()
@@ -875,6 +875,32 @@ class SymmMemAllReduceTest(MultiProcessTestCase):
         torch.testing.assert_close(
             gathered_inps.sum(dim=0), res, rtol=1e-01, atol=1e-01
         )
+
+    @skip_if_lt_x_gpu(4)
+    @parametrize("align_bytes", [4, 8, 16])
+    def test_multimem_all_gather(self, align_bytes: int) -> None:
+        self._init_process()
+        group_name = dist.group.WORLD.group_name
+
+        input_numel = 32
+        shift = align_bytes // 4
+        input = torch.zeros(shift + input_numel, device=self.device)[shift:].fill_(
+            self.rank
+        )
+
+        out = symm_mem.empty(
+            shift + input_numel * self.world_size, device=self.device
+        ).zero_()[shift:]
+        symm_mem.rendezvous(out, group=group_name)
+
+        torch.ops.symm_mem.multimem_all_gather_out(input, group_name, out)
+        ref = torch.ops._c10d_functional.all_gather_into_tensor(
+            input, self.world_size, group_name
+        )
+        ref = torch.ops._c10d_functional.wait_tensor(ref)
+
+        self.assertTrue(out.eq(ref).all())
+        dist.destroy_process_group()
 
 
 @instantiate_parametrized_tests
