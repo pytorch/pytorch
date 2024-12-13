@@ -296,7 +296,7 @@ void gpu_kernel_impl_nocast(TensorIteratorBase& iter, const func_t& f) {
   TORCH_INTERNAL_ASSERT(iter.noutputs() == 1);
   TORCH_INTERNAL_ASSERT(!needs_dynamic_casting<func_t>::check(iter));
 
-  at::detail::Array<char*, ntensors> data;
+  std::array<char*, ntensors> data;
   for (int i = 0; i < ntensors; i++) {
     data[i] = (char*)iter.data_ptr(i);
   }
@@ -313,7 +313,7 @@ void gpu_kernel_impl_nocast(TensorIteratorBase& iter, const func_t& f) {
   launch_legacy_kernel<128, unroll_factor>(numel, [=] GPU_LAMBDA(int idx) {
     auto offsets = offset_calc.get(idx);
     arg0_t* out = (arg0_t*)(data[0] + offsets[0]);
-    *out = invoke(f, &data.data[1], &offsets.data[1], 1);
+    *out = invoke(f, &data[1], &offsets[1], 1);
   });
 }
 
@@ -330,7 +330,7 @@ void gpu_kernel_impl(TensorIteratorBase& iter, const func_t& f) {
   TORCH_INTERNAL_ASSERT(iter.ninputs() == traits::arity);
   TORCH_INTERNAL_ASSERT(iter.noutputs() == 1);
 
-  at::detail::Array<char*, ntensors> data;
+  std::array<char*, ntensors> data;
   for (int i = 0; i < ntensors; i++) {
     data[i] = (char*)iter.data_ptr(i);
   }
@@ -341,16 +341,16 @@ void gpu_kernel_impl(TensorIteratorBase& iter, const func_t& f) {
 
   if (contiguous) {
 #ifdef USE_ROCM
-    at::detail::Array<ScalarType, ntensors> dtypes;
+    std::array<ScalarType, ntensors> dtypes;
     auto inner_strides = iter.get_inner_strides();
-    at::detail::Array<int, ntensors> strides;
+    std::array<int, ntensors> strides;
     for (int i = 0; i < ntensors; i++) {
       dtypes[i] = iter.dtype(i);
       strides[i] = inner_strides[i];
     }
     launch_legacy_kernel<512, 1>(numel, [=]GPU_LAMBDA(int idx) {
       void* out = data[0] + strides[0] * idx;
-      arg0_t result = invoke(f, &data.data[1], &strides.data[1], &dtypes.data[1], idx);
+      arg0_t result = invoke(f, &data[1], &strides[1], &dtypes[1], idx);
       c10::cast_and_store<arg0_t>(dtypes[0], out, result);
     });
 #else
@@ -368,7 +368,7 @@ void gpu_kernel_impl(TensorIteratorBase& iter, const func_t& f) {
         storer);
 #endif
   } else {
-    at::detail::Array<ScalarType, ntensors> dtypes;
+    std::array<ScalarType, ntensors> dtypes;
     for (int i = 0; i < ntensors; i++) {
       dtypes[i] = iter.dtype(i);
     }
@@ -376,7 +376,7 @@ void gpu_kernel_impl(TensorIteratorBase& iter, const func_t& f) {
     launch_legacy_kernel<128, 4>(numel, [=] GPU_LAMBDA(int idx) {
       auto offsets = offset_calc.get(idx);
       void* out = data[0] + offsets[0];
-      arg0_t result = invoke(f, &data.data[1], &offsets.data[1], &dtypes.data[1], 1);
+      arg0_t result = invoke(f, &data[1], &offsets[1], &dtypes[1], 1);
       c10::cast_and_store<arg0_t>(dtypes[0], out, result);
     });
   }

@@ -7,11 +7,11 @@ from typing import Any, Dict, Iterable, List, Type, Union
 import sympy
 
 import torch
-from torch._inductor.scheduler import SchedulerNode
 
 from ...utils._ordered_set import OrderedSet
 from ..dependencies import Dep, MemoryDep
 from ..runtime.hints import ReductionHint
+from ..scheduler import SchedulerNode
 from ..utils import cache_on_self
 from ..virtualized import V
 
@@ -73,8 +73,13 @@ class SIMDKernelFeatures:
         reduction_numel: sympy.Expr = sympy.S.One,
     ):
         self.node_schedule = node_schedule
-        self.numel = V.graph.sizevars.simplify(numel)  # numel excludes reduction_numel
-        self.reduction_numel = V.graph.sizevars.simplify(reduction_numel)
+        # numel excludes reduction_numel
+        self.numel: sympy.Expr = V.graph.sizevars.simplify(numel)
+        self.reduction_numel: sympy.Expr = V.graph.sizevars.simplify(reduction_numel)
+
+    @cache_on_self
+    def is_reduction(self) -> bool:
+        return self.reduction_numel != 1
 
     @cache_on_self
     def scheduler_nodes(self) -> Iterable[SchedulerNode]:

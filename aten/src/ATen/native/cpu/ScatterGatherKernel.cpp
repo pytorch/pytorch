@@ -34,11 +34,11 @@ public:
   template <typename scalar_t>
   constexpr void operator() (at::opmath_type<scalar_t> * self_data, scalar_t * src_data) const {
     using opmath_t = at::opmath_type<scalar_t>;
-    *self_data *= opmath_t(*src_data);
+    *self_data *= opmath_t(c10::load(src_data));
   }
 
   constexpr void operator() (bool * self_data, bool * src_data) const {
-    *self_data = *self_data && *src_data;
+    *self_data = c10::load(self_data) && c10::load(src_data);
   }
 };
 static ReduceMultiply reduce_multiply;
@@ -48,7 +48,7 @@ public:
   template <typename scalar_t>
   constexpr void operator() (at::opmath_type<scalar_t> * self_data, scalar_t * src_data) const {
     using opmath_t = at::opmath_type<scalar_t>;
-    *self_data += opmath_t(*src_data);
+    *self_data += opmath_t(c10::load(src_data));
   }
 };
 static ReduceAdd reduce_add;
@@ -58,7 +58,7 @@ public:
   template <typename scalar_t>
   constexpr void operator() (at::opmath_type<scalar_t> * self_data, scalar_t * src_data) const {
     using opmath_t = at::opmath_type<scalar_t>;
-    *self_data += opmath_t(*src_data);
+    *self_data += opmath_t(c10::load(src_data));
   }
 };
 static ReduceMean reduce_mean;
@@ -68,7 +68,9 @@ public:
   template <typename scalar_t>
   constexpr void operator() (at::opmath_type<scalar_t> * self_data, scalar_t * src_data) const {
     using opmath_t = at::opmath_type<scalar_t>;
-    *self_data = at::_isnan<scalar_t>(*src_data) ? opmath_t(*src_data) : std::max(*self_data, opmath_t(*src_data));
+    auto self_value = c10::load(self_data);
+    auto src_value = c10::load(src_data);
+    *self_data = at::_isnan<scalar_t>(src_value) ? opmath_t(src_value) : std::max(self_value, opmath_t(src_value));
   }
 };
 static ReduceMaximum reduce_maximum;
@@ -78,7 +80,9 @@ public:
   template <typename scalar_t>
   constexpr void operator() (at::opmath_type<scalar_t> * self_data, scalar_t * src_data) const {
     using opmath_t = at::opmath_type<scalar_t>;
-    *self_data = at::_isnan<scalar_t>(*src_data) ? opmath_t(*src_data) : std::min(*self_data, opmath_t(*src_data));
+    auto self_value = c10::load(self_data);
+    auto src_value = c10::load(src_data);
+    *self_data = at::_isnan<scalar_t>(src_value) ? opmath_t(src_value) : std::min(self_value, opmath_t(src_value));
   }
 };
 static ReduceMinimum reduce_minimum;
@@ -88,7 +92,7 @@ public:
   template <typename scalar_t>
   constexpr void operator() (at::opmath_type<scalar_t> * self_data, scalar_t * src_data) const {
     using opmath_t = at::opmath_type<scalar_t>;
-    *self_data = opmath_t(*src_data);
+    *self_data = opmath_t(c10::load(src_data));
   }
 };
 static TensorAssign tensor_assign;
@@ -183,8 +187,7 @@ struct cpu_scatter_gather_base_kernel {
     auto iter = TensorIteratorConfig()
       .check_all_same_dtype(false)
       .resize_outputs(false)
-      // NOLINTNEXTLINE(bugprone-argument-comment)
-      .declare_static_shape(index.sizes(), /*squash_dim=*/dim)
+      .declare_static_shape(index.sizes(), /*squash_dims=*/dim)
       .add_output(buffer)
       .add_const_input(index)
       .build();
@@ -270,8 +273,7 @@ struct cpu_scatter_gather_base_kernel {
     auto iter = TensorIteratorConfig()
       .check_all_same_dtype(false)
       .resize_outputs(false)
-      // NOLINTNEXTLINE(bugprone-argument-comment)
-      .declare_static_shape(index.sizes(), /*squash_dim=*/dim)
+      .declare_static_shape(index.sizes(), /*squash_dims=*/dim)
       .add_output(buffer)
       .add_const_input(src)
       .add_const_input(index)
@@ -366,8 +368,7 @@ struct cpu_scatter_gather_base_kernel {
     auto iter = TensorIteratorConfig()
       .check_all_same_dtype(false)
       .resize_outputs(false)
-      // NOLINTNEXTLINE(bugprone-argument-comment)
-      .declare_static_shape(index.sizes(), /*squash_dim=*/dim)
+      .declare_static_shape(index.sizes(), /*squash_dims=*/dim)
       .add_output(buffer)
       .add_const_input(src)
       .add_const_input(index)
@@ -461,8 +462,7 @@ struct cpu_scatter_gather_base_kernel {
     auto iter = TensorIteratorConfig()
       .check_all_same_dtype(false)
       .resize_outputs(false)
-      // NOLINTNEXTLINE(bugprone-argument-comment)
-      .declare_static_shape(index.sizes(), /*squash_dim=*/dim)
+      .declare_static_shape(index.sizes(), /*squash_dims=*/dim)
       .add_output(buffer)
       .add_const_input(src)
       .add_const_input(index)
@@ -557,8 +557,7 @@ struct cpu_scatter_gather_base_kernel {
     auto iter = TensorIteratorConfig()
       .check_all_same_dtype(false)
       .resize_outputs(false)
-      // NOLINTNEXTLINE(bugprone-argument-comment)
-      .declare_static_shape(index.sizes(), /*squash_dim=*/dim)
+      .declare_static_shape(index.sizes(), /*squash_dims=*/dim)
       .add_output(buffer)
       .add_const_input(src)
       .add_const_input(index)

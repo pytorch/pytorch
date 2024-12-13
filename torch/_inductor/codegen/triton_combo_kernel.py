@@ -16,6 +16,7 @@ from typing import (
     Union,
 )
 
+import sympy
 from sympy import Integer, Symbol
 
 from .. import config, metrics
@@ -33,7 +34,7 @@ from .common import (
     SizeArg,
     WorkspaceArg,
 )
-from .simd import SIMDScheduling
+from .simd import prefix_is_reduction, SIMDScheduling
 from .simd_kernel_features import SIMDKernelFeatures
 from .triton import gen_common_triton_imports, TritonKernel
 from .triton_utils import config_of, signature_to_meta
@@ -76,7 +77,7 @@ def _default_custom_combo_kernel_horizontal_partition(
     tilings = [node_info_map[n][1] for n in nodes]
 
     max_dims = max(len(t) for t in tilings)
-    nodes_per_ndim = []
+    nodes_per_ndim: List[List[BaseSchedulerNode]] = []
     for i in range(2, max_dims + 1):
         group_per_dim = [n for n, t in zip(nodes, tilings) if len(t) == i]
         reduction = [
@@ -102,7 +103,7 @@ def _default_custom_combo_kernel_horizontal_partition(
             for n in not_reduction
             if not kernel_map[n].inside_reduction
             and len(kernel_map[n].numels) == 2
-            and V.graph.sizevars.size_hint(kernel_map[n].numels[0]) > LARGE_NUMELS
+            and V.graph.sizevars.size_hint(kernel_map[n].numels["x"]) > LARGE_NUMELS
         ]
         if large_pointwise:
             # TODO benchmark the performance when large pointwise nodes combining with others
@@ -111,12 +112,11 @@ def _default_custom_combo_kernel_horizontal_partition(
                 len(large_pointwise),
             )
             not_reduction = [n for n in not_reduction if n not in large_pointwise]
-            for node in large_pointwise:
-                nodes_per_ndim.append([node])
+            nodes_per_ndim.extend([node] for node in large_pointwise)
 
-        for g in (not_reduction, short_reduction, long_reduction):
-            if g:
-                nodes_per_ndim.append(g)
+        nodes_per_ndim.extend(
+            g for g in (not_reduction, short_reduction, long_reduction) if g
+        )
 
     assert sum(len(p) for p in nodes_per_ndim) == len(nodes)
     return nodes_per_ndim
@@ -208,7 +208,7 @@ class ComboKernel(Kernel):
         )
 
         for node in subkernel_nodes:
-            node_schedule, tiled_groups, numel, rnumel = node_info_map[node]
+            _node_schedule, tiled_groups, _numel, _rnumel = node_info_map[node]
             node_info = node
 
             read_writes = node.read_writes
@@ -217,7 +217,7 @@ class ComboKernel(Kernel):
             ndim = len(tiled_groups)
             assert ndim >= 2, f"Combokernel not support tile {tiled_groups}"
             if not mixed_sizes and ndim == 3:
-                y_elem = tiled_groups[0]
+                y_elem = tiled_groups["y"]
                 partition_state = yelem_to_partition_state[y_elem]
                 ComboKernel._update_partition(
                     partition_state, read_write_count, node_info
@@ -464,7 +464,7 @@ class ComboKernel(Kernel):
 
     @staticmethod
     def create_triton_kernel(
-        *groups: Any,
+        tiling: Dict[str, sympy.Expr],
         features: SIMDKernelFeatures,
         optimize_mask: bool,
     ) -> TritonKernel:
@@ -473,7 +473,7 @@ class ComboKernel(Kernel):
         2) numels except x dimension are the same for each sub kernel.
         """
         return TritonKernel(
-            *groups,
+            tiling,
             features=features,
             pid_cache={"tl.program_id(0)": "pid_offset"},
             optimize_mask=optimize_mask,
@@ -490,7 +490,7 @@ class ComboKernel(Kernel):
         This code stomps on the passed-in values by writing an constant to the top of the kernel.
 
         In a kernel like:
-        def KERNEL_NAME(in_ptr0, in_ptr1, out_ptr2, xnumel, rnumel, XBLOCK : tl.constexpr, RBLOCK : tl.constexpr):
+        def KERNEL_NAME(in_ptr0, in_ptr1, out_ptr2, xnumel, rnumel, XBLOCK : tl.constexpr, R0_BLOCK : tl.constexpr):
 
         We would add
         xnumel = 4096
@@ -510,13 +510,13 @@ class ComboKernel(Kernel):
                 assert f"{tree.prefix}numel_{num}" in self.dynamic_shape_args
                 uniquify_block_sizes.append(f"{tree.prefix}numel")
 
-            if tree.prefix != "r":
+            if not tree.is_reduction:
                 if isinstance(simplified_tree_numel, (Integer, int)):
                     grid.append(int(simplified_tree_numel))
                 else:
                     grid.append(f"{tree.prefix}numel_{num}")
 
-            if tree.prefix == "r" and sub_kernel.persistent_reduction:
+            if tree.is_reduction and sub_kernel.persistent_reduction:
                 if isinstance(simplified_tree_numel, (Integer, int)):
                     val = int(simplified_tree_numel)
                 else:
@@ -525,7 +525,8 @@ class ComboKernel(Kernel):
                     )
                 val = next_power_of_2(val)
                 code.writeline(f"RBLOCK_{num}: tl.constexpr = {val}")
-                uniquify_block_sizes.append("RBLOCK")
+                code.writeline(f"R0_BLOCK_{num}: tl.constexpr = {val}")
+                uniquify_block_sizes.append("R0_BLOCK")
 
             if tree.prefix == "x" and sub_kernel.no_x_dim:
                 code.writeline(f"XBLOCK_{num}: tl.constexpr = 1")
@@ -562,36 +563,36 @@ class ComboKernel(Kernel):
         self.min_x_blocks_list.append(min_x_blocks)
         self.x_numels_list.append(x_numels)
 
-    def select_heuristics(self, sub_kernel: TritonKernel) -> Tuple[str, List[int]]:
-        size_hints = [
-            next_power_of_2(V.graph.sizevars.size_hint(numel))
-            for numel in sub_kernel.numels
-        ]
+    def select_heuristics(self, sub_kernel: TritonKernel) -> Tuple[str, Dict[str, int]]:
+        size_hints = {
+            prefix: next_power_of_2(V.graph.sizevars.size_hint(numel))
+            for prefix, numel in sub_kernel.numels.items()
+            if not prefix_is_reduction(prefix) or sub_kernel.inside_reduction
+        }
         if sub_kernel.persistent_reduction:
             assert sub_kernel.inside_reduction
             heuristics = "persistent_reduction"
         elif sub_kernel.inside_reduction:
             heuristics = "reduction"
         else:
-            size_hints.pop()
             heuristics = "pointwise"
         return heuristics, size_hints
 
     def select_combo_heuristics(
-        self, heuristics_list: List[str], size_hints_list: List[List[int]]
-    ) -> Tuple[str, List[int], TritonKernel]:
+        self, heuristics_list: List[str], size_hints_list: List[Dict[str, int]]
+    ) -> Tuple[str, Dict[str, int], TritonKernel]:
         if not self.enable_autotune:
             return "foreach", size_hints_list[0], self.sub_kernels[0]
         if "reduction" in heuristics_list:
             i, _ = max(
                 enumerate(size_hints_list),
-                key=lambda x: x[1][0] if heuristics_list[x[0]] == "reduction" else 0,
+                key=lambda x: x[1]["x"] if heuristics_list[x[0]] == "reduction" else 0,
             )
             return heuristics_list[i], size_hints_list[i], self.sub_kernels[i]
         elif "pointwise" in heuristics_list:
             i, _ = max(
                 enumerate(size_hints_list),
-                key=lambda x: x[1][0] if heuristics_list[x[0]] == "pointwise" else 0,
+                key=lambda x: x[1]["x"] if heuristics_list[x[0]] == "pointwise" else 0,
             )
             # modify size_hint to avoid oom check fail (may be a false alarm)
             num_pointwise = len([e for e in heuristics_list if e == "pointwise"])
@@ -609,7 +610,7 @@ class ComboKernel(Kernel):
             )
             if len(heuristics_list) - num_pointwise >= 4:
                 size_hints = size_hints_list[i]
-                size_hints[0] = min(128, size_hints[0])
+                size_hints["x"] = min(128, size_hints["x"])
             return heuristics, size_hints_list[i], self.sub_kernels[i]
         else:
             return heuristics_list[0], size_hints_list[0], self.sub_kernels[0]
@@ -655,7 +656,7 @@ class ComboKernel(Kernel):
     def jit_line(
         self,
         heuristics: str,
-        size_hints: List[int],
+        size_hints: Dict[str, int],
         selected_kernel: TritonKernel,
         signature: List[Any],
         argdefs: List[str],
@@ -723,26 +724,27 @@ class ComboKernel(Kernel):
 
     def codegen_blocks(self, code: IndentedBuffer) -> None:
         for block in self.block_args:
-            assert block in [
+            assert block in {
                 "XBLOCK",
                 "YBLOCK",
-                "RBLOCK",
-            ], f"{block} is not supported without autotuning"
+                "R0_BLOCK",
+            }, f"{block} is not supported without autotuning"
         if "YBLOCK" in self.block_args:
             code.splice(f"XBLOCK: tl.constexpr = {self.block_size_2d}")
             code.splice(f"YBLOCK: tl.constexpr = {self.block_size_2d}")
         else:
             code.splice(f"XBLOCK: tl.constexpr = {self.block_size_1d}")
-        if "RBLOCK" in self.block_args:
+        if "R0_BLOCK" in self.block_args:
+            code.splice(f"R0_BLOCK: tl.constexpr = {self.block_size_reduce}")
             code.splice(f"RBLOCK: tl.constexpr = {self.block_size_reduce}")
 
     def add_blockd_to_args(self, argdefs: List[str]) -> List[str]:
         block_args = {}
         block_names = {}
-        for num, sub_kernel in enumerate(self.sub_kernels):
+        for sub_kernel in self.sub_kernels:
             # TODO: we assume all sub_kernels have the same block size
             for tree in sub_kernel.range_trees:
-                if tree.prefix == "r" and (
+                if tree.is_reduction and (
                     not sub_kernel.inside_reduction or sub_kernel.persistent_reduction
                 ):
                     continue
@@ -753,6 +755,7 @@ class ComboKernel(Kernel):
         if self.enable_autotune:
             argdefs.extend(block_args)
         self.block_args = list(block_names.keys())
+
         return argdefs
 
     def add_numel_to_args(self, argdefs: List[str], signature: List[Any]) -> List[str]:
@@ -780,7 +783,7 @@ class ComboKernel(Kernel):
                     expr = V.graph.wrapper_code.generate_numel_expr(
                         name, tree, suffix=str(num)
                     )
-                if tree.prefix != "r":
+                if not tree.is_reduction:
                     assert isinstance(
                         grid[i][num], str
                     ), f"Grid {grid[i][num]} should be a dynamic shape."
@@ -790,7 +793,7 @@ class ComboKernel(Kernel):
                     ), f"numel args mismatch: {grid[i][num]} vs {numel_name}"
                     grid[i][num] = -expr if numel_sign == "-" else expr
 
-                if tree.prefix != "r" or sub_kernel.inside_reduction:
+                if not tree.is_reduction or sub_kernel.inside_reduction:
                     call_args.append(expr)
                     arg_types.append(type(expr))
 
@@ -803,7 +806,7 @@ class ComboKernel(Kernel):
                 if numel_name not in self.dynamic_shape_args:
                     continue
                 expr = V.graph.sizevars.size_hint(tree.numel)
-                if tree.prefix != "r":
+                if not tree.is_reduction:
                     assert isinstance(
                         grid[i][num], str
                     ), f"Grid {grid[i][num]} should be a dynamic shape."
@@ -812,7 +815,7 @@ class ComboKernel(Kernel):
                         grid[i][num] == numel_sign + numel_name
                     ), f"grid mismatch: {grid[i][num]} vs {numel_name}"
                     grid[i][num] = -expr if numel_sign == "-" else expr
-                if tree.prefix != "r" or sub_kernel.inside_reduction:
+                if not tree.is_reduction or sub_kernel.inside_reduction:
                     extra_args.append(expr)
 
     def codegen_kernel(self, name: Optional[str] = None) -> str:
@@ -884,7 +887,7 @@ class ComboKernel(Kernel):
         self, num_gb: float, grid: Optional[List[Any]] = None
     ) -> IndentedBuffer:
         result = IndentedBuffer()
-        argdefs, call_args, signature, _ = self.args.python_argdefs()
+        _argdefs, call_args, signature, _ = self.args.python_argdefs()
 
         result.writelines(["", "", "def get_args():"])
         with result.indent():

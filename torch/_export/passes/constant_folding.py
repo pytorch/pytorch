@@ -49,8 +49,8 @@ def replace_node_with_constant(gm, node, constant, name=None):
 class ConstantFolder(torch.fx.Interpreter):
     def __init__(
         self,
-        gm,
-        skip_constructors=False,
+        gm: torch.fx.GraphModule,
+        skip_constructors: bool = False,
     ):
         super().__init__(gm)
         self.node_replacements: Dict[torch.fx.Node, Any] = {}
@@ -62,7 +62,7 @@ class ConstantFolder(torch.fx.Interpreter):
         # is the output
         self.user_to_last_uses = self.node_to_last_non_output_use()
 
-    def is_impure(self, node: torch.fx.node.Node):
+    def is_impure(self, node: torch.fx.Node) -> bool:
         if (
             node.target == torch.ops.prims.convert_element_type.default
             and node.args[0].op == "get_attr"  # type: ignore[union-attr]
@@ -85,9 +85,9 @@ class ConstantFolder(torch.fx.Interpreter):
     def node_to_last_non_output_use(self):
         last_non_output_use = collections.defaultdict(list)
         seen_uses = set()
-        output_node = next(iter(reversed(self.module.graph.nodes)))
+        output_node = next(iter(reversed(self.module.graph.nodes)))  # type: ignore[arg-type, union-attr]
 
-        for node in reversed(self.module.graph.nodes):
+        for node in reversed(self.module.graph.nodes):  # type: ignore[arg-type, union-attr]
             if node.target == "output":
                 continue
 
@@ -197,12 +197,15 @@ class ConstantFolder(torch.fx.Interpreter):
 
     def run(self):  # type: ignore[override]
         env = {}
-        for n in self.module.graph.find_nodes(op="placeholder"):
+        for n in self.module.graph.find_nodes(op="placeholder"):  # type: ignore[operator, union-attr]
             env[n] = self.unknown_value
         return super().run(initial_env=env)
 
 
-def constant_fold(gm, constraint_fn: Optional[Callable[[torch.fx.Node], bool]] = None):
+def constant_fold(
+    gm: torch.fx.GraphModule,
+    constraint_fn: Optional[Callable[[torch.fx.Node], bool]] = None,
+):
     with torch.utils._python_dispatch._disable_current_modes():
         cf = ConstantFolder(gm, skip_constructors=True)
         cf.run()
@@ -242,7 +245,7 @@ def constant_fold(gm, constraint_fn: Optional[Callable[[torch.fx.Node], bool]] =
         gm.recompile()
 
 
-def constant_graph_tag(gm: torch.fx.GraphModule):
+def constant_graph_tag(gm: torch.fx.GraphModule) -> None:
     with torch.utils._python_dispatch._disable_current_modes():
         cf = ConstantFolder(gm, skip_constructors=True)
         cf.run()

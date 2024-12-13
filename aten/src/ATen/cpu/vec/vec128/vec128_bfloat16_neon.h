@@ -339,18 +339,18 @@ class Vectorized<c10::BFloat16> : public Vectorized16<at_bfloat16x8_t, c10::BFlo
     return map2_bitmask_with_vec_float_method(other, &Vectorized<float>::name); \
   }
 
-  DEFINE_UNARY_ELEMENTWISE_FUNC_VIA_FLOAT_METHOD(abs);
+  DEFINE_UNARY_ELEMENTWISE_FUNC_VIA_FLOAT_METHOD(abs)
   Vectorized frac() const;
-  DEFINE_UNARY_ELEMENTWISE_FUNC_VIA_FLOAT_METHOD(neg);
-  DEFINE_UNARY_ELEMENTWISE_FUNC_VIA_FLOAT_METHOD(trunc);
-  DEFINE_UNARY_ELEMENTWISE_FUNC_VIA_FLOAT_METHOD(sqrt);
-  DEFINE_UNARY_ELEMENTWISE_FUNC_VIA_FLOAT_METHOD(reciprocal);
-  DEFINE_BINARY_COMPARISON_OPERATOR_VIA_FLOAT_METHOD(operator==);
-  DEFINE_BINARY_COMPARISON_OPERATOR_VIA_FLOAT_METHOD(operator!=);
-  DEFINE_BINARY_COMPARISON_OPERATOR_VIA_FLOAT_METHOD(operator<);
-  DEFINE_BINARY_COMPARISON_OPERATOR_VIA_FLOAT_METHOD(operator<=);
-  DEFINE_BINARY_COMPARISON_OPERATOR_VIA_FLOAT_METHOD(operator>);
-  DEFINE_BINARY_COMPARISON_OPERATOR_VIA_FLOAT_METHOD(operator>=);
+  DEFINE_UNARY_ELEMENTWISE_FUNC_VIA_FLOAT_METHOD(neg)
+  DEFINE_UNARY_ELEMENTWISE_FUNC_VIA_FLOAT_METHOD(trunc)
+  DEFINE_UNARY_ELEMENTWISE_FUNC_VIA_FLOAT_METHOD(sqrt)
+  DEFINE_UNARY_ELEMENTWISE_FUNC_VIA_FLOAT_METHOD(reciprocal)
+  DEFINE_BINARY_COMPARISON_OPERATOR_VIA_FLOAT_METHOD(operator==)
+  DEFINE_BINARY_COMPARISON_OPERATOR_VIA_FLOAT_METHOD(operator!=)
+  DEFINE_BINARY_COMPARISON_OPERATOR_VIA_FLOAT_METHOD(operator<)
+  DEFINE_BINARY_COMPARISON_OPERATOR_VIA_FLOAT_METHOD(operator<=)
+  DEFINE_BINARY_COMPARISON_OPERATOR_VIA_FLOAT_METHOD(operator>)
+  DEFINE_BINARY_COMPARISON_OPERATOR_VIA_FLOAT_METHOD(operator>=)
 
 #undef DEFINE_UNARY_ELEMENTWISE_FUNC_VIA_FLOAT_METHOD
 #undef DEFINE_BINARY_ELEMENTWISE_FUNC_VIA_FLOAT_METHOD
@@ -542,16 +542,12 @@ Vectorized<c10::BFloat16> inline fmsub(
     const Vectorized<c10::BFloat16>& b,
     const Vectorized<c10::BFloat16>& c) {
   // See NOTE [BF16 FMA] above.
-#ifdef __ARM_FEATURE_BF16
-  return 2Vectorized<c10::BFloat16>(vfmsq_f16(c, a, b));
-#else
   const auto [a_float_low, a_float_high] = convert_bfloat16_float(a);
   const auto [b_float_low, b_float_high] = convert_bfloat16_float(b);
   const auto [c_float_low, c_float_high] = convert_bfloat16_float(c);
   return convert_float_bfloat16(
       fmsub(a_float_low, b_float_low, c_float_low),
       fmsub(a_float_high, b_float_high, c_float_high));
-#endif
 }
 
 #endif // !defined(C10_MOBILE) && defined(__aarch64__)
