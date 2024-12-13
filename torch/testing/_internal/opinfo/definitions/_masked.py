@@ -773,20 +773,6 @@ op_db: List[OpInfo] = [
         skips=(
             DecorateInfo(
                 unittest.expectedFailure,
-                "TestReductions",
-                "test_ref_duplicate_values",
-                dtypes=(torch.bool,),
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestReductions",
-                "test_reference_masked",
-                dtypes=(torch.bool,),
-            ),
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestReductions",
-                "test_ref_small_input",
                 dtypes=(torch.bool,),
             ),
             DecorateInfo(
