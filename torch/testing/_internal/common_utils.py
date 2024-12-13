@@ -106,7 +106,6 @@ try:
 except ImportError:
     has_pytest = False
 
-
 MI300_ARCH = ("gfx940", "gfx941", "gfx942")
 
 
@@ -2218,6 +2217,12 @@ def slowTest(fn):
 def slowTestIf(condition):
     return slowTest if condition else lambda fn: fn
 
+def skipPythonCycleCheckIf(condition):
+    def dec(fn):
+        if getattr(fn, '_do_python_cycle_check', True):  # if current True
+            fn._do_python_cycle_check = not condition
+        return fn
+    return dec
 
 def skipCUDAMemoryLeakCheckIf(condition):
     def dec(fn):
@@ -2328,6 +2333,66 @@ def is_iterable_of_tensors(iterable, include_empty=False):
         return False
 
     return True
+
+class PythonCycleLeakCheck:
+    def __init__(self, test_method):
+        self.test_method = test_method
+
+    def __enter__(self):
+        gc.disable()
+
+        before = len(tuple(o for o in gc.get_objects() if isinstance(o, torch.Tensor)))
+        if before != 0:
+            print(before)
+            msg = "No Tensor should be alive before starting the test! Another test must have failed with a leak before this one."
+            raise RuntimeError(msg)
+
+    def __exit__(self, exec_type, exec_value, traceback):
+        # Clear some global cache we should remove anyway
+        torch.nested._internal.nested_tensor._dummy_instance = None
+        torch._C._jit_clear_class_registry()
+        torch.jit._state._python_cu.drop_all_functions()
+
+
+        after = len(tuple(o for o in gc.get_objects() if isinstance(o, torch.Tensor)))
+
+        if after != 0:
+            # Some Tensor are still alive, let's check if the test function is still
+            # alive in a cycle. If so, manually break that cycle
+            frame = None
+            for o in gc.get_objects():
+                if not isinstance(o, types.FrameType):
+                    continue
+                if o.f_code.co_name == self.test_method.__name__:
+                    frame = o
+                    break
+            if frame is not None:
+                frame.clear()
+
+            after = len(tuple(o for o in gc.get_objects() if isinstance(o, torch.Tensor)))
+
+            if after != 0:
+                gc.collect()
+                post_collect = len(tuple(o for o in gc.get_objects() if isinstance(o, torch.Tensor)))
+
+                if post_collect == 0:
+                    if getattr(self.test_method, "_do_python_cycle_check", True):
+                        msg = f"{after} Tensor object(s) were leftover within a cycle by the test!\n"
+                        raise RuntimeError(msg)
+                else:
+                    msg = f"{post_collect} Tensor object(s) are leaked by this test!"
+                    # Debugging what the leaked objects are?
+                    # The example code below shows how to get all their type and generate a graph of what
+                    # keeps the 0th object alive.
+                    print(tuple(type(o) for o in gc.get_objects() if isinstance(o, torch.Tensor)))
+                    import objgraph
+                    objgraph.show_backrefs(
+                        tuple(o for o in gc.get_objects() if isinstance(o, torch.Tensor))[1],
+                        filename="graph.png"
+                    )
+                    raise RuntimeError(msg)
+
+        gc.enable()
 
 
 class CudaNonDefaultStream:
@@ -2937,6 +3002,7 @@ class TestCase(expecttest.TestCase):
 
     _do_cuda_memory_leak_check = False
     _do_cuda_non_default_stream = False
+    _do_python_cycle_check = True
 
     # When True, if a test case raises a NotImplementedError, instead of failing
     # the test, skip it instead.
@@ -2965,6 +3031,9 @@ class TestCase(expecttest.TestCase):
 
             if self._ignore_not_implemented_error:
                 self.wrap_with_policy(method_name, lambda: skip_exception_type(NotImplementedError))
+
+            if self._do_python_cycle_check:
+                self.wrap_with_policy(method_name, self.assertLeaksNoTensor(test_method))
 
             if PRINT_REPRO_ON_FAILURE:
                 try:
@@ -3000,6 +3069,9 @@ class TestCase(expecttest.TestCase):
     def assertLeaksNoCudaTensors(self, name=None):
         name = self.id() if name is None else name
         return CudaMemoryLeakCheck(self, name)
+
+    def assertLeaksNoTensor(self, test_method):
+        return partial(PythonCycleLeakCheck, test_method)
 
     def enforceNonDefaultStream(self):
         return CudaNonDefaultStream()
