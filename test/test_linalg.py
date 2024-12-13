@@ -4572,7 +4572,7 @@ class TestLinalg(TestCase):
         import os
 
         try:
-            os.environ["PYTORCH_TUNABLEOP_ROTATING_BUFFER_SIZE"] = "0"
+            torch.cuda.tunable.set_rotating_buffer_size(0)
             os.environ["PYTORCH_TUNABLEOP_NUMERICAL_CHECK"] = "1"
             set_tunableop_defaults()
             ordinal = torch.cuda.current_device()
@@ -4632,7 +4632,6 @@ class TestLinalg(TestCase):
 
             # undo all the environment variables set
             try:
-                del os.environ["PYTORCH_TUNABLEOP_ROTATING_BUFFER_SIZE"]
                 del os.environ["PYTORCH_TUNABLEOP_NUMERICAL_CHECK"]
             except KeyError:
                 pass
@@ -4641,7 +4640,7 @@ class TestLinalg(TestCase):
     @dtypes(torch.half)
     def test_matmul_offline_tunableop(self, device, dtype):
         import os
-        os.putenv('PYTORCH_TUNABLEOP_ROTATING_BUFFER_SIZE', '0')
+        torch.cuda.tunable.set_rotating_buffer_size(0)
 
         # Pointing to temp files. The test cannot remove them on Windows because
         # they are in use and locked
@@ -4720,7 +4719,6 @@ class TestLinalg(TestCase):
         # if test is interrupted.
         try:
             set_tunableop_defaults()
-            os.environ["PYTORCH_TUNABLEOP_ROTATING_BUFFER_SIZE"] = "0"
 
             # Pointing to temp files. The test cannot remove them on Windows because
             # they are in use and locked
