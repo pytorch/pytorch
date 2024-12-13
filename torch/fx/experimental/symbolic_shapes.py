@@ -3922,7 +3922,7 @@ class ShapeEnv:
                             (
                                 (i, stride[i + 1] * size[i + 1])
                                 for i in range(len(stride))
-                                if stride[i] is None
+                                if stride[i] is None and stride[i + 1] is not None
                             ),
                             key=_nested_int_aware_sort,
                         )
