@@ -2482,6 +2482,31 @@ class CPUReproTests(TestCase):
                     self.assertEqual(res_vec, res_scalar)
 
     @requires_vectorization
+    def test_bitwise_logical_op_bool(self):
+        bitwise_fns = [
+            torch.bitwise_and,
+            torch.bitwise_or,
+            torch.bitwise_xor,
+            torch.logical_and,
+            torch.logical_or,
+            torch.logical_xor,
+        ]
+
+        for bitwise_fn in bitwise_fns:
+
+            def fn(a, b):
+                c = bitwise_fn((a > 1), (b > 1))
+                return c
+
+            a = torch.ones((64), dtype=torch.int64)
+            b = torch.ones((64), dtype=torch.uint8)
+
+            with config.patch({"cpp.simdlen": None}):
+                torch._dynamo.reset()
+                metrics.reset()
+                self.common(fn, (a, b))
+
+    @requires_vectorization
     @patch("torch.cuda.is_available", lambda: False)
     def test_vec_compare_op_cpu_only(self):
         def fn(x):
@@ -4801,6 +4826,33 @@ class CPUReproTests(TestCase):
         FileCheck().check_count("#pragma omp for collapse(2)", 1, exactly=True).run(
             code
         )
+
+    @config.patch(freezing=True)
+    def test_add_layernorm(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.dense = torch.nn.Linear(768, 768)
+                self.layernorm = torch.nn.LayerNorm(768, eps=1e-12)
+
+            def forward(self, context_layer, hidden_states):
+                attention_output = self.dense(context_layer)
+                hidden_states = attention_output + hidden_states
+                layer_output = self.layernorm(hidden_states)
+                return layer_output
+
+        model = Model()
+        example_batch = (torch.rand(1, 197, 768), torch.rand(1, 197, 768))
+        from torch.testing._internal.common_quantization import (
+            _generate_qdq_quantized_model,
+        )
+
+        with torch.no_grad():
+            converted_model = _generate_qdq_quantized_model(model, example_batch)
+            torch.ao.quantization.move_exported_model_to_eval(converted_model)
+            metrics.reset()
+            torch.compile(converted_model)(*example_batch)
+            check_metrics_vec_kernel_count(3)
 
 
 if __name__ == "__main__":
