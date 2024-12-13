@@ -9,6 +9,7 @@ import torch.fx.traceback as fx_traceback
 import torch.utils._pytree as pytree
 from torch._ops import OperatorBase
 from torch.fx.experimental.proxy_tensor import make_fx
+from torch.fx.passes.shape_prop import TensorMetadata
 from torch.multiprocessing.reductions import StorageWeakRef
 
 
@@ -479,6 +480,27 @@ def get_dummy_aot_autograd_config():
 # Slices off the first element of a given dimension
 def first_slice_copy(t: torch.Tensor, dim: int = 0) -> torch.Tensor:
     return torch.select_copy(t, dim, 0)
+
+
+# Reports the difference between meta of two tensors in a string
+def diff_tensor_meta(
+    meta1: TensorMetadata, meta2: TensorMetadata, check_grad=True
+) -> List[str]:
+    from torch.fx.experimental.symbolic_shapes import GuardOnDataDependentSymNode
+
+    pair_diffs = []
+    for meta_name in TensorMetadata._fields:
+        if not check_grad and meta_name == "requires_grad":
+            continue
+        val1 = getattr(meta1, meta_name)
+        val2 = getattr(meta2, meta_name)
+        try:
+            if val1 != val2:
+                pair_diffs.append(f"'{meta_name}: {val1} vs {val2}'")
+        except GuardOnDataDependentSymNode as _:
+            pair_diffs.append(f"'{meta_name}: {val1} vs {val2}'")
+            continue
+    return pair_diffs
 
 
 # Note [lifted arg types in hop]
