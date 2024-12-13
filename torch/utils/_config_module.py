@@ -97,6 +97,10 @@ class _Config(Generic[T]):
             ), f"justknobs only support booleans, {self.default} is not a boolean"
 
 
+# In runtime, we unbox the Config[T] to a T, but typechecker cannot see this,
+# so in order to allow for this dynamic behavior to work correctly with
+# typechecking we are going to lie to the typechecker that Config[T] returns
+# a T.
 if TYPE_CHECKING:
 
     def Config(
