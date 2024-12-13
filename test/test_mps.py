@@ -948,8 +948,7 @@ def mps_ops_modifier(ops):
         # See https://github.com/pytorch/pytorch/issues/111479
         'nn.functional.multi_head_attention_forward': [torch.float32, torch.float16, torch.bfloat16],
 
-        # duplicate indices are used in the testcase - undefined behaviour
-        'index_put': None,
+        'index_put': [torch.bool, torch.uint8, torch.int8, torch.int16, torch.int64, torch.float16, torch.bfloat16],
         # zero to negative integer powers are undefined
         '__rpow__': [torch.int8, torch.int16, torch.int32, torch.int64],
         'resize_': [torch.float16, torch.float32, torch.bfloat16],
