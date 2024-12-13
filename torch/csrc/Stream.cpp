@@ -264,34 +264,35 @@ static PyObject* THPStream_eq(THPStream* self, THPStream* other) {
 static PyObject* THPStream_enter(PyObject* _self, PyObject* unused) {
   HANDLE_TH_ERRORS
   auto self = (THPStream*)_self;
-  c10::DeviceType dst_device_type =
+  c10::DeviceType stream_device_type =
       static_cast<c10::DeviceType>(self->device_type);
   // No operation is performed if the stream does not belong to an accelerator.
-  if (C10_UNLIKELY(!at::accelerator::isAccelerator(dst_device_type))) {
-    Py_RETURN_NONE;
+  if (C10_UNLIKELY(!at::accelerator::isAccelerator(stream_device_type))) {
+    // Support with torch.Stream() as stream: works
+    Py_INCREF(_self);
+    return _self;
   }
-  c10::DeviceIndex src_device_idx = at::accelerator::getDeviceIndex();
-  c10::DeviceIndex dst_device_idx =
+  c10::DeviceIndex cur_device_idx = at::accelerator::getDeviceIndex();
+  c10::DeviceIndex stream_device_idx =
       static_cast<c10::DeviceIndex>(self->device_index);
   // If the stream is not on the current device, switch the current device to
   // the device of the stream.
-  if (dst_device_idx != src_device_idx) {
-    at::accelerator::setDeviceIndex(dst_device_idx);
+  if (stream_device_idx != cur_device_idx) {
+    at::accelerator::setDeviceIndex(stream_device_idx);
   }
-  c10::Stream dst_prev_stream =
-      at::accelerator::getCurrentStream(dst_device_idx);
-  at::accelerator::setCurrentStream(
-      c10::Stream::unpack3(self->stream_id, dst_device_idx, dst_device_type));
-  auto src_device_index_object = THPUtils_packDeviceIndex(src_device_idx);
-  auto dst_prev_stream_object = THPStream_Wrap(dst_prev_stream);
-  PyObject_SetAttrString(_self, "_src_device_index", src_device_index_object);
-  PyObject_SetAttrString(_self, "_dst_prev_stream", dst_prev_stream_object);
+  c10::Stream cur_stream = at::accelerator::getCurrentStream(stream_device_idx);
+  at::accelerator::setCurrentStream(c10::Stream::unpack3(
+      self->stream_id, stream_device_idx, stream_device_type));
+  auto ctx_device_index = THPUtils_packDeviceIndex(cur_device_idx);
+  auto ctx_stream = THPStream_Wrap(cur_stream);
+  PyObject_SetAttrString(_self, "_ctx_device_index", ctx_device_index);
+  PyObject_SetAttrString(_self, "_ctx_stream", ctx_stream);
   // Move ownership to the self's context.
-  Py_DECREF(src_device_index_object);
-  Py_DECREF(dst_prev_stream_object);
+  Py_DECREF(ctx_device_index);
+  Py_DECREF(ctx_stream);
   // Support with torch.Stream() as stream: works
-  Py_INCREF(self);
-  return (PyObject*)self;
+  Py_INCREF(_self);
+  return _self;
   END_HANDLE_TH_ERRORS
 }
 
@@ -303,17 +304,17 @@ static PyObject* THPStream_exit(PyObject* _self, PyObject* unused) {
           static_cast<c10::DeviceType>(self->device_type)))) {
     Py_RETURN_NONE;
   }
-  THPStream* dst_prev_stream =
-      (THPStream*)PyObject_GetAttrString(_self, "_dst_prev_stream");
-  auto src_device_idx = THPUtils_unpackDeviceIndex(
-      PyObject_GetAttrString(_self, "_src_device_index"));
+  THPStream* prev_stream =
+      (THPStream*)PyObject_GetAttrString(_self, "_ctx_stream");
+  auto prev_device_index = THPUtils_unpackDeviceIndex(
+      PyObject_GetAttrString(_self, "_ctx_device_index"));
   at::accelerator::setCurrentStream(c10::Stream::unpack3(
-      dst_prev_stream->stream_id,
-      static_cast<c10::DeviceIndex>(dst_prev_stream->device_index),
-      static_cast<c10::DeviceType>(dst_prev_stream->device_type)));
-  // Reset the current device to the device of original stream.
-  if (static_cast<c10::DeviceIndex>(self->device_index) != src_device_idx) {
-    at::accelerator::setDeviceIndex(src_device_idx);
+      prev_stream->stream_id,
+      static_cast<c10::DeviceIndex>(prev_stream->device_index),
+      static_cast<c10::DeviceType>(prev_stream->device_type)));
+  // Reset the current device to the previous device if they differ.
+  if (static_cast<c10::DeviceIndex>(self->device_index) != prev_device_index) {
+    at::accelerator::setDeviceIndex(prev_device_index);
   }
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
@@ -332,8 +333,7 @@ static PyObject* THPStream_getattro(PyObject* _self, PyObject* attr_name) {
   HANDLE_TH_ERRORS
   auto self = (THPStream*)_self;
   auto attr_name_str = THPUtils_unpackString(attr_name);
-  if (attr_name_str == "_src_device_index" ||
-      attr_name_str == "_dst_prev_stream") {
+  if (attr_name_str == "_ctx_device_index" || attr_name_str == "_ctx_stream") {
     THPStream_maybe_init_context(self);
     return PyDict_GetItem(self->context, attr_name);
   }
@@ -348,8 +348,7 @@ static int THPStream_setattro(
   HANDLE_TH_ERRORS
   auto self = (THPStream*)_self;
   auto attr_name_str = THPUtils_unpackString(attr_name);
-  if (attr_name_str == "_src_device_index" ||
-      attr_name_str == "_dst_prev_stream") {
+  if (attr_name_str == "_ctx_device_index" || attr_name_str == "_ctx_stream") {
     THPStream_maybe_init_context(self);
     return PyDict_SetItem(self->context, attr_name, value);
   }
