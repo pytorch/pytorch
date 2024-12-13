@@ -28,6 +28,7 @@ from typing import (
 )
 
 from torch.utils import _pytree as pytree
+from torch.utils._backport_slots import dataclass_slots
 from torch.utils._traceback import CapturedTraceback, format_frame
 from torch.utils.weak import WeakTensorKeyDictionary
 
@@ -63,6 +64,19 @@ class CompileId(NamedTuple):
 
     def __str__(self):
         return f"{self.frame_id}/{self.frame_compile_id}"
+
+    @classmethod
+    def from_string(cls, compile_id: Optional[str]):
+        """
+        Factory method that creates a CompileId from its string representation.
+        """
+        if compile_id is None:
+            return None
+        try:
+            frame_id, frame_compile_id = compile_id.split("/")
+            return cls(int(frame_id), int(frame_compile_id))
+        except Exception as e:
+            raise ValueError(f"Invalid compile_id '{compile_id}'") from e
 
 
 class TraceId(NamedTuple):
@@ -169,6 +183,7 @@ class ShapeGuard(NamedTuple):
     sloc: SLoc
 
 
+@dataclass_slots
 @dataclasses.dataclass
 class Guard:
     # originating_source is the source that called the make_guard method to

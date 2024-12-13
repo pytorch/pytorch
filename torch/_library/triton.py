@@ -153,21 +153,7 @@ def triton_op(
             from torch.compiler import is_exporting
 
             if is_exporting():
-                from torch._higher_order_ops.auto_functionalize import (
-                    can_auto_functionalize,
-                    do_auto_functionalize,
-                )
-                from torch._subclasses.functional_tensor import PythonFunctionalizeAPI
-
-                if can_auto_functionalize(op):
-                    return do_auto_functionalize(op, args, kwargs)
-
-                assert (
-                    not op._schema.is_mutable
-                ), "custom triton op need to be auto_functionalized if it's mutable"
-                ctx = PythonFunctionalizeAPI(mode, mode.pre_dispatch)
-                unwrapped_args, unwrapped_kwargs = ctx.unwrap_tensors((args, kwargs))
-                return ctx.wrap_tensors(op(*unwrapped_args, **unwrapped_kwargs))
+                return mode.__torch_dispatch__(op, types, args, kwargs)
             else:
                 with mode:
                     return fn(*args, **kwargs)
