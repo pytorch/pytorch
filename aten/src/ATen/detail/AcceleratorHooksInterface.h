@@ -88,12 +88,12 @@ struct TORCH_API AcceleratorHooksInterface {
                                               ptrdiff_t ref_counter_offset,
                                               ptrdiff_t storage_offset_bytes) const {
     TORCH_CHECK(false, "Backend doesn't support StorageNewSharedDevice");
-  };
+  }
 
   virtual int64_t getIpcRefCounterFileSize() const {
     TORCH_CHECK(false, "Backend doesn't support getIpcRefCounterFileSize");
     return -1;
-  };
+  }
 };
 
 } // namespace at

@@ -7,7 +7,9 @@
 #include <ATen/mps/MPSDevice.h>
 #include <c10/core/CPUAllocator.h>
 #include <c10/core/RefcountedDeleter.h>
+#ifdef USE_CUDA
 #include <c10/cuda/CUDACachingAllocator.h>
+#endif
 #include <libshm.h>
 #include <torch/csrc/Device.h>
 #include <torch/csrc/DynamicTypes.h>
