@@ -15,6 +15,7 @@ except ImportError:
 
 import gc
 import re
+import sys
 import textwrap
 import unittest
 import weakref
@@ -56,6 +57,7 @@ class SimpleNet(nn.Module):
         return self.fc2(self.fc1(x))
 
 
+@unittest.skipIf(sys.version_info >= (3, 13), "segfaults")
 class TestTorchTidyProfiler(TestCase):
     def _get_tensor_fields(self, node, index):
         self.assertIsNotNone(node)

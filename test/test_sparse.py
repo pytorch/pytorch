@@ -3765,8 +3765,7 @@ class TestSparse(TestSparseBase):
                     self.assertEqual(s_res.to_dense(), t_res)
                 else:
                     with self.assertRaisesRegex(RuntimeError,
-                                                r"The expanded size of the tensor \(\d\) "
-                                                r"must match the existing size \(\d\)"):
+                                                r"does not broadcast"):
                         torch._sparse_broadcast_to(s, s1)
 
     @coalescedonoff

@@ -338,10 +338,13 @@ class TestMisc(PackageTestCase):
         causes modules who do this hackery to fail on import. See
         https://github.com/pytorch/pytorch/issues/57490 for more information.
         """
-        import package_a.std_sys_module_hacks
+        if sys.version_info < (3, 13):
+            import package_a.std_sys_module_hacks as std_sys_module_hacks
+        else:
+            import package_a.std_sys_module_hacks_3_13 as std_sys_module_hacks
 
         buffer = BytesIO()
-        mod = package_a.std_sys_module_hacks.Module()
+        mod = std_sys_module_hacks.Module()
 
         with PackageExporter(buffer) as pe:
             pe.intern("**")

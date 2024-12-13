@@ -1,6 +1,7 @@
 # Owner(s): ["module: pytree"]
 
 import collections
+import enum
 import inspect
 import os
 import re
@@ -9,6 +10,7 @@ import sys
 import unittest
 from collections import defaultdict, deque, namedtuple, OrderedDict, UserDict
 from dataclasses import dataclass
+from enum import auto
 from typing import Any, NamedTuple
 
 import torch
@@ -39,6 +41,14 @@ class GlobalDummyType:
     def __init__(self, x, y):
         self.x = x
         self.y = y
+
+
+cxx_pytree.register_pytree_node(
+    GlobalDummyType,
+    lambda dummy: ([dummy.x, dummy.y], None),
+    lambda xs, _: GlobalDummyType(*xs),
+    serialized_type_name="GlobalDummyType",
+)
 
 
 class TestGenericPytree(TestCase):
@@ -947,6 +957,15 @@ TreeSpec(tuple, None, [*,
         self.assertIsInstance(serialized_spec, str)
         self.assertEqual(spec, py_pytree.treespec_loads(serialized_spec))
 
+    def test_pytree_serialize_enum(self):
+        class TestEnum(enum.Enum):
+            A = auto()
+
+        spec = py_pytree.TreeSpec(dict, TestEnum.A, [py_pytree.LeafSpec()])
+
+        serialized_spec = py_pytree.treespec_dumps(spec)
+        self.assertIsInstance(serialized_spec, str)
+
     def test_pytree_serialize_namedtuple(self):
         Point1 = namedtuple("Point1", ["x", "y"])
         py_pytree._register_namedtuple(
@@ -1317,7 +1336,7 @@ class TestCxxPytree(TestCase):
         _, spec = cxx_pytree.tree_flatten(pytree)
         self.assertExpectedInline(
             repr(spec),
-            "PyTreeSpec((*, [*, *, [*]]), NoneIsLeaf)",
+            "PyTreeSpec((*, [*, *, [*]]), NoneIsLeaf, namespace='torch')",
         )
 
     @parametrize(
@@ -1372,12 +1391,6 @@ class TestCxxPytree(TestCase):
         self.assertEqual(roundtrip_spec.type._fields, spec.type._fields)
 
     def test_pytree_custom_type_serialize(self):
-        cxx_pytree.register_pytree_node(
-            GlobalDummyType,
-            lambda dummy: ([dummy.x, dummy.y], None),
-            lambda xs, _: GlobalDummyType(*xs),
-            serialized_type_name="GlobalDummyType",
-        )
         spec = cxx_pytree.tree_structure(GlobalDummyType(0, 1))
         serialized_spec = cxx_pytree.treespec_dumps(spec)
         roundtrip_spec = cxx_pytree.treespec_loads(serialized_spec)
