@@ -13,6 +13,7 @@ concurrency:
 
 jobs:
   check_binary_linux_cpu:
+    if: github.repository_owner == 'pytorch'
     name: Test check_binary.sh for Linux CPU
     uses: pytorch/test-infra/.github/workflows/linux_job.yml@main
     with:
@@ -25,6 +26,7 @@ jobs:
           popd
 
   check_binary_linux_cuda:
+    if: github.repository_owner == 'pytorch'
     name: Test check_binary.sh for Linux CUDA
     uses: pytorch/test-infra/.github/workflows/linux_job.yml@main
     with:
