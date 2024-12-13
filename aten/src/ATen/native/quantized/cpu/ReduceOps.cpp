@@ -20,8 +20,7 @@
 #include <ATen/ops/zeros_like_ops.h>
 #endif
 
-namespace at {
-namespace native {
+namespace at::native {
 
 DEFINE_DISPATCH(qmean_inner_dim_stub);
 DEFINE_DISPATCH(qstd_inner_dim_stub);
@@ -227,5 +226,4 @@ Tensor std_quantized_cpu(
   return result;
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native

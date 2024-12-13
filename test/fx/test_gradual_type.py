@@ -913,7 +913,7 @@ class TypeCheckerTest(TestCase):
             (2, 2, 10, 10),
         ]
 
-        intermediate_list = [  # noqa: F841
+        intermediate_list = [
             Dyn,
             (2, 5, 6, 9),
             (10, 15, 13, 14),
@@ -1139,7 +1139,7 @@ class TypeCheckerTest(TestCase):
                 return out
 
         B = BasicBlock()
-        ast_rewriter = RewritingTracer()  # noqa: F841
+        ast_rewriter = RewritingTracer()
         traced = symbolic_trace(B)
         tc = GraphTypeChecker({}, traced)
         tc.type_check()

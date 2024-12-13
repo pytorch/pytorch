@@ -14,79 +14,73 @@ static_assert(3 == size<typelist<int, float&, const MyClass&&>>::value, "");
 namespace test_from_tuple {
 class MyClass {};
 static_assert(
-    std::is_same<
+    std::is_same_v<
         typelist<int, float&, const MyClass&&>,
-        from_tuple_t<std::tuple<int, float&, const MyClass&&>>>::value,
+        from_tuple_t<std::tuple<int, float&, const MyClass&&>>>,
     "");
-static_assert(std::is_same<typelist<>, from_tuple_t<std::tuple<>>>::value, "");
+static_assert(std::is_same_v<typelist<>, from_tuple_t<std::tuple<>>>, "");
 } // namespace test_from_tuple
 
 namespace test_to_tuple {
 class MyClass {};
 static_assert(
-    std::is_same<
+    std::is_same_v<
         std::tuple<int, float&, const MyClass&&>,
-        to_tuple_t<typelist<int, float&, const MyClass&&>>>::value,
+        to_tuple_t<typelist<int, float&, const MyClass&&>>>,
     "");
-static_assert(std::is_same<std::tuple<>, to_tuple_t<typelist<>>>::value, "");
+static_assert(std::is_same_v<std::tuple<>, to_tuple_t<typelist<>>>, "");
 } // namespace test_to_tuple
 
 namespace test_concat {
 class MyClass {};
-static_assert(std::is_same<typelist<>, concat_t<>>::value, "");
-static_assert(std::is_same<typelist<>, concat_t<typelist<>>>::value, "");
+static_assert(std::is_same_v<typelist<>, concat_t<>>, "");
+static_assert(std::is_same_v<typelist<>, concat_t<typelist<>>>, "");
+static_assert(std::is_same_v<typelist<>, concat_t<typelist<>, typelist<>>>, "");
+static_assert(std::is_same_v<typelist<int>, concat_t<typelist<int>>>, "");
 static_assert(
-    std::is_same<typelist<>, concat_t<typelist<>, typelist<>>>::value,
-    "");
-static_assert(std::is_same<typelist<int>, concat_t<typelist<int>>>::value, "");
-static_assert(
-    std::is_same<typelist<int>, concat_t<typelist<int>, typelist<>>>::value,
+    std::is_same_v<typelist<int>, concat_t<typelist<int>, typelist<>>>,
     "");
 static_assert(
-    std::is_same<typelist<int>, concat_t<typelist<>, typelist<int>>>::value,
+    std::is_same_v<typelist<int>, concat_t<typelist<>, typelist<int>>>,
     "");
 static_assert(
-    std::is_same<
+    std::is_same_v<
         typelist<int>,
-        concat_t<typelist<>, typelist<int>, typelist<>>>::value,
+        concat_t<typelist<>, typelist<int>, typelist<>>>,
     "");
 static_assert(
-    std::is_same<
+    std::is_same_v<
         typelist<int, float&>,
-        concat_t<typelist<int>, typelist<float&>>>::value,
+        concat_t<typelist<int>, typelist<float&>>>,
     "");
 static_assert(
-    std::is_same<
+    std::is_same_v<
         typelist<int, float&>,
-        concat_t<typelist<>, typelist<int, float&>, typelist<>>>::value,
+        concat_t<typelist<>, typelist<int, float&>, typelist<>>>,
     "");
 static_assert(
-    std::is_same<
+    std::is_same_v<
         typelist<int, float&, const MyClass&&>,
-        concat_t<
-            typelist<>,
-            typelist<int, float&>,
-            typelist<const MyClass&&>>>::value,
+        concat_t<typelist<>, typelist<int, float&>, typelist<const MyClass&&>>>,
     "");
 } // namespace test_concat
 
 namespace test_filter {
 class MyClass {};
 static_assert(
-    std::is_same<typelist<>, filter_t<std::is_reference, typelist<>>>::value,
+    std::is_same_v<typelist<>, filter_t<std::is_reference, typelist<>>>,
     "");
 static_assert(
-    std::is_same<
+    std::is_same_v<
         typelist<>,
-        filter_t<std::is_reference, typelist<int, float, double, MyClass>>>::
-        value,
+        filter_t<std::is_reference, typelist<int, float, double, MyClass>>>,
     "");
 static_assert(
-    std::is_same<
+    std::is_same_v<
         typelist<float&, const MyClass&&>,
         filter_t<
             std::is_reference,
-            typelist<int, float&, double, const MyClass&&>>>::value,
+            typelist<int, float&, double, const MyClass&&>>>,
     "");
 } // namespace test_filter
 
@@ -140,67 +134,63 @@ static_assert(!true_for_any_type<std::is_reference, typelist<>>::value, "");
 namespace test_map {
 class MyClass {};
 static_assert(
-    std::is_same<typelist<>, map_t<std::add_lvalue_reference_t, typelist<>>>::
-        value,
+    std::is_same_v<typelist<>, map_t<std::add_lvalue_reference_t, typelist<>>>,
     "");
 static_assert(
-    std::is_same<
+    std::is_same_v<
         typelist<int&>,
-        map_t<std::add_lvalue_reference_t, typelist<int>>>::value,
+        map_t<std::add_lvalue_reference_t, typelist<int>>>,
     "");
 static_assert(
-    std::is_same<
+    std::is_same_v<
         typelist<int&, double&, const MyClass&>,
         map_t<
             std::add_lvalue_reference_t,
-            typelist<int, double, const MyClass>>>::value,
+            typelist<int, double, const MyClass>>>,
     "");
 } // namespace test_map
 
 namespace test_head {
 class MyClass {};
-static_assert(std::is_same<int, head_t<typelist<int, double>>>::value, "");
+static_assert(std::is_same_v<int, head_t<typelist<int, double>>>, "");
 static_assert(
-    std::is_same<const MyClass&, head_t<typelist<const MyClass&, double>>>::
-        value,
+    std::is_same_v<const MyClass&, head_t<typelist<const MyClass&, double>>>,
     "");
 static_assert(
-    std::is_same<MyClass&&, head_t<typelist<MyClass&&, MyClass>>>::value,
+    std::is_same_v<MyClass&&, head_t<typelist<MyClass&&, MyClass>>>,
     "");
-static_assert(std::is_same<bool, head_t<typelist<bool>>>::value, "");
+static_assert(std::is_same_v<bool, head_t<typelist<bool>>>, "");
 } // namespace test_head
 
 namespace test_head_with_default {
 class MyClass {};
 static_assert(
-    std::is_same<int, head_with_default_t<bool, typelist<int, double>>>::value,
+    std::is_same_v<int, head_with_default_t<bool, typelist<int, double>>>,
     "");
 static_assert(
-    std::is_same<
+    std::is_same_v<
         const MyClass&,
-        head_with_default_t<bool, typelist<const MyClass&, double>>>::value,
+        head_with_default_t<bool, typelist<const MyClass&, double>>>,
     "");
 static_assert(
-    std::is_same<
+    std::is_same_v<
         MyClass&&,
-        head_with_default_t<bool, typelist<MyClass&&, MyClass>>>::value,
+        head_with_default_t<bool, typelist<MyClass&&, MyClass>>>,
     "");
 static_assert(
-    std::is_same<int, head_with_default_t<bool, typelist<int>>>::value,
+    std::is_same_v<int, head_with_default_t<bool, typelist<int>>>,
     "");
-static_assert(
-    std::is_same<bool, head_with_default_t<bool, typelist<>>>::value,
-    "");
+static_assert(std::is_same_v<bool, head_with_default_t<bool, typelist<>>>, "");
 } // namespace test_head_with_default
 
 namespace test_reverse {
 class MyClass {};
 static_assert(
-    std::is_same<
+    std::is_same_v<
         typelist<int, double, MyClass*, const MyClass&&>,
-        reverse_t<typelist<const MyClass&&, MyClass*, double, int>>>::value,
+        reverse_t<typelist<const MyClass&&, MyClass*, double, int>>>,
     "");
-static_assert(std::is_same<typelist<>, reverse_t<typelist<>>>::value, "");
+static_assert(std::is_same_v<typelist<>, reverse_t<typelist<>>>, "");
 } // namespace test_reverse
 
 namespace test_map_types_to_values {
@@ -215,7 +205,7 @@ TEST(TypeListTest, MapTypesToValues_sametype) {
   auto sizes =
       map_types_to_values<typelist<int64_t, bool, uint32_t>>(map_to_size());
   std::tuple<size_t, size_t, size_t> expected(8, 1, 4);
-  static_assert(std::is_same<decltype(expected), decltype(sizes)>::value, "");
+  static_assert(std::is_same_v<decltype(expected), decltype(sizes)>, "");
   EXPECT_EQ(expected, sizes);
 }
 
@@ -230,9 +220,9 @@ TEST(TypeListTest, MapTypesToValues_differenttypes) {
   auto shared_ptrs =
       map_types_to_values<typelist<int, double>>(map_make_shared());
   static_assert(
-      std::is_same<
+      std::is_same_v<
           std::tuple<std::shared_ptr<int>, std::shared_ptr<double>>,
-          decltype(shared_ptrs)>::value,
+          decltype(shared_ptrs)>,
       "");
 }
 
@@ -258,7 +248,7 @@ TEST(TypeListTest, MapTypesToValues_members) {
   auto result =
       map_types_to_values<typelist<Class1, Class2>>(mapper_call_func());
   std::tuple<int, double> expected(3, 2.0);
-  static_assert(std::is_same<decltype(expected), decltype(result)>::value, "");
+  static_assert(std::is_same_v<decltype(expected), decltype(result)>, "");
   EXPECT_EQ(expected, result);
 }
 
@@ -273,7 +263,7 @@ TEST(TypeListTest, MapTypesToValues_empty) {
   auto result =
       map_types_to_values<typelist<>>(mapper_call_nonexistent_function());
   std::tuple<> expected;
-  static_assert(std::is_same<decltype(expected), decltype(result)>::value, "");
+  static_assert(std::is_same_v<decltype(expected), decltype(result)>, "");
   EXPECT_EQ(expected, result);
 }
 } // namespace test_map_types_to_values
@@ -299,82 +289,75 @@ static_assert(!contains<typelist<>, double>::value, "");
 } // namespace test_contains
 
 namespace test_take {
-static_assert(std::is_same<typelist<>, take_t<typelist<>, 0>>::value, "");
+static_assert(std::is_same_v<typelist<>, take_t<typelist<>, 0>>, "");
+static_assert(std::is_same_v<typelist<>, take_t<typelist<int64_t>, 0>>, "");
 static_assert(
-    std::is_same<typelist<>, take_t<typelist<int64_t>, 0>>::value,
+    std::is_same_v<typelist<int64_t>, take_t<typelist<int64_t>, 1>>,
     "");
 static_assert(
-    std::is_same<typelist<int64_t>, take_t<typelist<int64_t>, 1>>::value,
+    std::is_same_v<typelist<>, take_t<typelist<int64_t, int32_t>, 0>>,
     "");
 static_assert(
-    std::is_same<typelist<>, take_t<typelist<int64_t, int32_t>, 0>>::value,
+    std::is_same_v<typelist<int64_t>, take_t<typelist<int64_t, int32_t>, 1>>,
     "");
 static_assert(
-    std::is_same<typelist<int64_t>, take_t<typelist<int64_t, int32_t>, 1>>::
-        value,
-    "");
-static_assert(
-    std::is_same<
+    std::is_same_v<
         typelist<int64_t, int32_t>,
-        take_t<typelist<int64_t, int32_t>, 2>>::value,
+        take_t<typelist<int64_t, int32_t>, 2>>,
     "");
 } // namespace test_take
 
 namespace test_drop {
-static_assert(std::is_same<typelist<>, drop_t<typelist<>, 0>>::value, "");
+static_assert(std::is_same_v<typelist<>, drop_t<typelist<>, 0>>, "");
 static_assert(
-    std::is_same<typelist<int64_t>, drop_t<typelist<int64_t>, 0>>::value,
+    std::is_same_v<typelist<int64_t>, drop_t<typelist<int64_t>, 0>>,
     "");
+static_assert(std::is_same_v<typelist<>, drop_t<typelist<int64_t>, 1>>, "");
 static_assert(
-    std::is_same<typelist<>, drop_t<typelist<int64_t>, 1>>::value,
-    "");
-static_assert(
-    std::is_same<
+    std::is_same_v<
         typelist<int64_t, int32_t>,
-        drop_t<typelist<int64_t, int32_t>, 0>>::value,
+        drop_t<typelist<int64_t, int32_t>, 0>>,
     "");
 static_assert(
-    std::is_same<typelist<int32_t>, drop_t<typelist<int64_t, int32_t>, 1>>::
-        value,
+    std::is_same_v<typelist<int32_t>, drop_t<typelist<int64_t, int32_t>, 1>>,
     "");
 static_assert(
-    std::is_same<typelist<>, drop_t<typelist<int64_t, int32_t>, 2>>::value,
+    std::is_same_v<typelist<>, drop_t<typelist<int64_t, int32_t>, 2>>,
     "");
 } // namespace test_drop
 
 namespace test_drop_if_nonempty {
 static_assert(
-    std::is_same<typelist<>, drop_if_nonempty_t<typelist<>, 0>>::value,
+    std::is_same_v<typelist<>, drop_if_nonempty_t<typelist<>, 0>>,
     "");
 static_assert(
-    std::is_same<typelist<int64_t>, drop_if_nonempty_t<typelist<int64_t>, 0>>::
-        value,
+    std::is_same_v<typelist<int64_t>, drop_if_nonempty_t<typelist<int64_t>, 0>>,
     "");
 static_assert(
-    std::is_same<typelist<>, drop_if_nonempty_t<typelist<int64_t>, 1>>::value,
+    std::is_same_v<typelist<>, drop_if_nonempty_t<typelist<int64_t>, 1>>,
     "");
 static_assert(
-    std::is_same<
+    std::is_same_v<
         typelist<int64_t, int32_t>,
-        drop_if_nonempty_t<typelist<int64_t, int32_t>, 0>>::value,
+        drop_if_nonempty_t<typelist<int64_t, int32_t>, 0>>,
     "");
 static_assert(
-    std::is_same<
+    std::is_same_v<
         typelist<int32_t>,
-        drop_if_nonempty_t<typelist<int64_t, int32_t>, 1>>::value,
+        drop_if_nonempty_t<typelist<int64_t, int32_t>, 1>>,
     "");
 static_assert(
-    std::is_same<
+    std::is_same_v<
         typelist<>,
-        drop_if_nonempty_t<typelist<int64_t, int32_t>, 2>>::value,
+        drop_if_nonempty_t<typelist<int64_t, int32_t>, 2>>,
     "");
 static_assert(
-    std::is_same<typelist<>, drop_if_nonempty_t<typelist<>, 1>>::value,
+    std::is_same_v<typelist<>, drop_if_nonempty_t<typelist<>, 1>>,
     "");
 static_assert(
-    std::is_same<
+    std::is_same_v<
         typelist<>,
-        drop_if_nonempty_t<typelist<int64_t, int32_t>, 3>>::value,
+        drop_if_nonempty_t<typelist<int64_t, int32_t>, 3>>,
     "");
 } // namespace test_drop_if_nonempty
 // NOLINTEND(modernize-unary-static-assert)

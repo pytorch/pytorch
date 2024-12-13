@@ -1043,8 +1043,7 @@ TEST(Reductions, ReduceSplitRfactor) {
   SimpleIREvaluator cg(s, {b, c});
 
   cg.call({in, out});
-  for (const auto i : c10::irange(M)) {
-    (void)i; // Suppress unused variable warning
+  for ([[maybe_unused]] const auto i : c10::irange(M)) {
     ASSERT_EQ(out[0], 4950);
   }
 }

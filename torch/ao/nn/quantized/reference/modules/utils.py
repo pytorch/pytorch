@@ -39,14 +39,14 @@ class ReferenceQuantizedModule(torch.nn.Module):
             )
             w_scale = weight_qparams["scale"]
             w_scale_tensor = (
-                w_scale.clone().detach()
+                w_scale.detach().clone()
                 if isinstance(w_scale, torch.Tensor)
                 else torch.tensor(w_scale, dtype=torch.float, device=device)
             )
             self.register_buffer("weight_scale", w_scale_tensor)
             w_zp = weight_qparams["zero_point"]
             w_zp_tensor = (
-                w_zp.clone().detach()
+                w_zp.detach().clone()
                 if isinstance(w_zp, torch.Tensor)
                 else torch.tensor(w_zp, dtype=zero_point_dtype, device=device)
             )
@@ -57,7 +57,7 @@ class ReferenceQuantizedModule(torch.nn.Module):
             ]:
                 w_axis = weight_qparams["axis"]
                 w_axis_tensor = (
-                    w_axis.clone().detach()
+                    w_axis.detach().clone()
                     if isinstance(w_axis, torch.Tensor)
                     else torch.tensor(w_axis, dtype=torch.int, device=device)
                 )

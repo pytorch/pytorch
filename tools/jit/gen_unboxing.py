@@ -7,7 +7,7 @@ import os
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal, Sequence, TYPE_CHECKING
+from typing import Literal, TYPE_CHECKING
 
 import yaml
 
@@ -22,6 +22,8 @@ from torchgen.utils import FileManager, make_file_manager, mapMaybe, Target
 
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from torchgen.selective_build.selector import SelectiveBuilder
 
 

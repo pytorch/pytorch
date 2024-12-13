@@ -233,8 +233,7 @@ def dump():
     for op_key in sorted(_operation_device_version_data, key=sort_key):
         data_part.append("    " + repr(op_key).replace("'", '"') + ": {")
         op_data = _operation_device_version_data[op_key]
-        for key in sorted(op_data):
-            data_part.append(f"        {key}: {op_data[key]},")
+        data_part.extend(f"        {key}: {op_data[key]}," for key in sorted(op_data))
         data_part.append("    },")
     new_content = part1 + "\n".join(data_part) + "\n" + part2
     if current_content != new_content:
@@ -643,7 +642,15 @@ def tune_bsr_dense_addmm(
     # Compute the key of parameters:
     sparsity = round(1 - bsr._nnz() * BM * BK / (M * K), 2)
     dtype = bsr.dtype
-    version = (0, dtype, sparsity)
+    if out is None:
+        out_dtype = dtype
+    else:
+        out_dtype = out.dtype
+    if out_dtype is dtype:
+        version_dtype = dtype
+    else:
+        version_dtype = (dtype, out_dtype)
+    version = (0, version_dtype, sparsity)
     key = (M, K, N, BM, BK, beta == 0, beta == 1, alpha == 1)
 
     # For tuning, for an initial state, use parameters from the
@@ -739,6 +746,7 @@ def optimize_bsr_dense_addmm(
     use_left_alpha=False,
     use_right_alpha=False,
     dtype=torch.float16,
+    out_dtype=None,
     device="cuda",
     sparsity=0.5,
     force=False,
@@ -755,6 +763,10 @@ def optimize_bsr_dense_addmm(
     right_alpha = (
         make_tensor(n, dtype=dtype, device=device) if use_right_alpha else None
     )
+    if out_dtype is not None:
+        out = dense.new_empty((m, n), dtype=out_dtype)
+    else:
+        out = None
     tune_bsr_dense_addmm(
         input,
         bsr,
@@ -763,6 +775,7 @@ def optimize_bsr_dense_addmm(
         alpha=alpha,
         left_alpha=left_alpha,
         right_alpha=right_alpha,
+        out=out,
         store=True,
         force=force,
         verbose=verbose,

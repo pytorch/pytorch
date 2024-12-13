@@ -77,6 +77,56 @@ default, now called through TunableOp. Any call to at::cuda::blas::gemm() or ::b
 when enabled. Calling gemm() for a given set of input arguments (transa, transb, m, n, k) will attempt to use the
 fastest available implementation across both rocblas and hipblaslt.
 
+## Offline Tuning
+
+### Motivation
+There are a couple of uses cases for offline tuning.
+
+One use case, is a workload with a high-memory utilization where one might run out of memory with regular tuning.
+
+Another use case would be a workload that is compute intensive to run and it would be more resource efficient to collect
+the GEMMs for the workload once, and then tune repeatedly with different tuning parameters or libraries.
+
+### Workflow
+There are basically two steps:
+1) Set the environment variables to collect the untuned GEMM and this will generate `tunableop_untuned0.csv`
+```
+PYTORCH_TUNABLEOP_ENABLED=1
+PYTORCH_TUNABLEOP_TUNING=0
+PYTORCH_TUNABLEOP_RECORD_UNTUNED=1
+...
+```
+2) Run a Python script that reads the `tunableop_untuned0.csv` and generates the `tunableop_results0.csv`, like:
+```
+import torch.cuda.tunable as tunable
+import os
+
+os.putenv('PYTORCH_TUNABLEOP_ENABLED', '1')
+os.putenv('PYTORCH_TUNABLEOP_TUNING', '1')
+os.putenv('PYTORCH_TUNABLEOP_RECORD_UNTUNED', '0')
+tunable.tune_gemm_in_file("tunableop_untuned0.csv")
+```
+
+It is also possible to take multiple untuned files and distribute the GEMMs for tuning to multiple GPUs
+within a single node. In the first step, the GEMMs are first gathered and duplicate GEMMs are eliminated.
+Next, the GEMMs are distributed to different GPUs for tuning. After all GEMMs are tuned, the results from
+all the GPUs are then gathered into a single file whose base filename has `_full0` appended to it
+(e.g. `tunableop_results_full0.csv`). Finally, this new file, containing the gathered results, will be
+duplicated N times, once for each GPU as convenience to the user will run the workload with the tuned
+configuration on N GPUs.
+
+```
+if __name__ == "__main__":
+    num_gpus = 8 # number of GPUs that will be used during the tuning process
+    tunable.mgpu_tune_gemm_in_file("tunableop_untuned?.csv", num_gpus)
+```
+
+Note that the usage of the `mgpu_tune_gemm_in_file` API is different from its single GPU counterpart
+(`tune_gemm_in_file`). The body of the Python script that calls the API must be wrapped in `main()` as shown
+due to the use of concurrent futures module. The argument to `mgpu_tune_gemm_in_file` must contain a wild card
+expression (? or *) to generate the list of untuned files containing the GEMMs to be processed. The `num_gpus`
+must between 1 and the total number of GPUs available.
+
 ## Tuning Context
 The behavior of TunableOp is currently manipulated through environment variables, the C++ interface of
 at::cuda::tunable::getTuningContext(), or the `torch.cuda.tunable` python interfaces. The environment variables take
@@ -90,6 +140,8 @@ programmatically since the settings become fixed. Use the C++ or Python APIs ins
 | -------------------- | ----------- |
 | PYTORCH_TUNABLEOP_ENABLED | Default is 0. Set to 1 to enable. |
 | PYTORCH_TUNABLEOP_TUNING | Default is 1. Set to 0 to disable. |
+| PYTORCH_TUNABLEOP_RECORD_UNTUNED | Default is 0. Set to 1 to enable. |
+| PYTORCH_TUNABLEOP_UNTUNED_FILENAME | Default is 'tunableop_untuned.csv'. |
 | PYTORCH_TUNABLEOP_VERBOSE | Default is 0. Set to 1 to enable basic logging. 2 for basic tuning status. 3 for full trace. |
 | PYTORCH_TUNABLEOP_VERBOSE_FILENAME | Default is "err" for stderr. Set to "out" for stdout or a filename for capturing verbose logging. |
 | PYTORCH_TUNABLEOP_FILENAME | Default is 'tunableop_results.csv'. |
@@ -112,6 +164,8 @@ All python APIs exist in the `torch.cuda.tunable` module.
 | is_enabled() -> bool | |
 | tuning_enable(val: bool = True) -> None | Default is True. |
 | tuning_is_enabled() -> bool | |
+| record_untuned_enable(val: bool = True) -> None | Default is True. |
+| record_untuned_is_enabled() -> bool | |
 | set_max_tuning_duration(duration: int) -> None | |
 | get_max_tuning_duration() -> int | |
 | set_max_tuning_iterations(iterations: int) -> None | |
@@ -123,6 +177,8 @@ All python APIs exist in the `torch.cuda.tunable` module.
 | write_file_on_exit(val: bool) -> None | Default is True. |
 | write_file(filename: Optional[str] = None) -> None | If filename not given, it will call get_filename(). |
 | read_file(filename: Optional[str] = None) -> None | If filename not given, it will call get_filename(). |
+| tune_gemm_in_file(filename: str) -> None | read an untuned file and tune GEMMs in it. |
+| mgpu_tune_gemm_in_file(filename_pattern: str, num_gpus: int) -> None: -> None | read one or more untuned files and tune all unique GEMMs on one or more GPUs. |
 
 ### C++ Interface
 Example:

@@ -73,6 +73,7 @@ TorchInductor
 -  Horace He (`Chillee <https://github.com/Chillee>`__)
 -  Shunting Zhang (`shunting314 <https://github.com/shunting314>`__)
 -  Jason Ansel (`jansel <https://github.com/jansel>`__)
+-  Jiong Gong (`jgong5 <https://github.com/jgong5>`__)
 
 Cudagraph Tree
 ~~~~~~~~~~~~~~
@@ -294,7 +295,7 @@ Quantization (torch/ao)
 Windows
 ~~~~~~~
 
--  Guoliang Hua (`nbcsm <https://github.com/nbcsm>`__)
+-  (emeritus) Guoliang Hua (`nbcsm <https://github.com/nbcsm>`__)
 -  (emeritus) Teng Gao (`gaoteng-git <https://github.com/gaoteng-git>`__)
 -  (emeritus) Peter Johnson (`peterjc123 <https://github.com/peterjc123>`__)
 
@@ -310,6 +311,12 @@ PowerPC
 ~~~~~~~
 
 -  (emeritus) Alfredo Mendoza (`avmgithub <https://github.com/avmgithub>`__)
+
+x86 CPU
+~~~~~~~
+
+-  Mingfei Ma (`mingfeima <https://github.com/mingfeima>`__)
+-  Jiong Gong (`jgong5 <https://github.com/jgong5>`__)
 
 AArch64 CPU
 ~~~~~~~~~~~~

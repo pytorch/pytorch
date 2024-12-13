@@ -93,7 +93,7 @@ class StrobelightCompileTimeProfiler:
     profiler: Optional[Any] = None
 
     max_stack_length: int = int(
-        os.environ.get("COMPILE_STROBELIGHT_MAX_STACK_LENGTH", 127)
+        os.environ.get("COMPILE_STROBELIGHT_MAX_STACK_LENGTH", 500)
     )
     max_profile_time: int = int(
         os.environ.get("COMPILE_STROBELIGHT_MAX_PROFILE_TIME", 60 * 30)
@@ -125,6 +125,8 @@ class StrobelightCompileTimeProfiler:
         cls._cls_init()
         # profiler_class should have public API similar to that of StrobelightCLIFunctionProfiler.
         # we have pass different functionProfilerClass for meta-internal fbcode targets.
+        # NB: the actual implementation in Meta is at
+        # fbcode/caffe2/fb/strobelight/function_profiler.py
         cls.profiler = profiler_class(
             sample_each=cls.sample_each,
             max_profile_duration_sec=cls.max_profile_time,

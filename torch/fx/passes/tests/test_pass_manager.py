@@ -26,9 +26,7 @@ class TestPassManager(unittest.TestCase):
     def test_these_before_those_pass_constraint(self) -> None:
         passes = [lambda x: 2 * x for _ in range(10)]
         constraint = these_before_those_pass_constraint(passes[-1], passes[0])
-        pm = PassManager(
-            [inplace_wrapper(p) for p in passes]
-        )
+        pm = PassManager([inplace_wrapper(p) for p in passes])
 
         # add unfulfillable constraint
         pm.add_constraint(constraint)
@@ -46,7 +44,7 @@ class TestPassManager(unittest.TestCase):
             pm1.add_pass(p)
         pm1.add_constraint(constraint)
         output1 = pm1(1)
-        self.assertEqual(output1, 2 ** 3)
+        self.assertEqual(output1, 2**3)
 
         passes = [lambda x: 3 * x for _ in range(3)]
         constraint = these_before_those_pass_constraint(passes[0], passes[1])
@@ -55,4 +53,4 @@ class TestPassManager(unittest.TestCase):
             pm2.add_pass(p)
         pm2.add_constraint(constraint)
         output2 = pm2(1)
-        self.assertEqual(output2, 3 ** 3)
+        self.assertEqual(output2, 3**3)

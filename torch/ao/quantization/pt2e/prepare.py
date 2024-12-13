@@ -388,6 +388,7 @@ def _maybe_insert_input_observer_for_arg_or_kwarg(
         if id(maybe_obs_mod) == id(input_edge_obs_or_fq):
             return maybe_obs_node
 
+    assert isinstance(model.graph, Graph)
     new_arg = _insert_obs_or_fq(
         arg, input_edge_obs_or_fq, model, named_modules, model.graph
     )
@@ -534,6 +535,7 @@ def prepare(
     model: GraphModule,
     node_name_to_scope: Dict[str, Tuple[str, type]],
     is_qat: bool,
+    obs_or_fq_callback=None,
 ) -> GraphModule:
     # Since we are mutating the graph as we go, we iterate over the original
     # nodes before observer insertion, instead of model.graph.nodes.
@@ -548,6 +550,8 @@ def prepare(
     obs_or_fq_map = _get_obs_or_fq_map(
         edge_or_node_to_group_id, edge_or_node_to_qspec, is_qat
     )
+    if obs_or_fq_callback:
+        obs_or_fq_callback(model, obs_or_fq_map)
 
     for node in nodes_before_observation:
         # TODO: simplify logic for inserting observers

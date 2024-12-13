@@ -74,7 +74,7 @@ detectron2_fasterrcnn_r_50_fpn,pass,46
 
 
 
-detectron2_fcos_r_50_fpn,pass,23
+detectron2_fcos_r_50_fpn,pass,24
 
 
 
@@ -191,10 +191,6 @@ mobilenet_v2_quantized_qat,pass,2
 
 
 mobilenet_v3_large,pass,0
-
-
-
-moco,model_fail_to_load,0
 
 
 

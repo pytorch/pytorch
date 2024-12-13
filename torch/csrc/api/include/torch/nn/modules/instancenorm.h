@@ -1,13 +1,14 @@
 #pragma once
 
+#include <torch/nn/functional/instancenorm.h>
 #include <torch/nn/modules/batchnorm.h>
 #include <torch/nn/options/instancenorm.h>
 
-namespace torch {
-namespace nn {
+namespace torch::nn {
 
 /// Base class for all (dimension-specialized) instance norm modules
 template <size_t D, typename Derived>
+// NOLINTNEXTLINE(bugprone-crtp-constructor-accessibility)
 class InstanceNormImpl
     : public torch::nn::NormImplBase<D, Derived, InstanceNormOptions> {
  private:
@@ -149,5 +150,4 @@ class TORCH_API InstanceNorm3dImpl
 /// to learn about PyTorch's module storage semantics.
 TORCH_MODULE(InstanceNorm3d);
 
-} // namespace nn
-} // namespace torch
+} // namespace torch::nn

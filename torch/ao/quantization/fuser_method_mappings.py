@@ -266,9 +266,7 @@ def _get_valid_patterns(op_pattern):
     """
     result: List[Any]
     if isinstance(op_pattern, (tuple, list)):
-        sub_combs = []
-        for sub_pattern in op_pattern:
-            sub_combs.append(_get_valid_patterns(sub_pattern))
+        sub_combs = [_get_valid_patterns(sub_pattern) for sub_pattern in op_pattern]
         result = list(itertools.product(*sub_combs))
     else:
         result = [op_pattern, MatchAllNode]

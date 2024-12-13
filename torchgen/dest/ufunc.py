@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Sequence, TYPE_CHECKING
+from typing import TYPE_CHECKING
 
 import torchgen.api.ufunc as ufunc
 from torchgen.api.translate import translate
@@ -30,6 +30,8 @@ from torchgen.utils import OrderedSet
 
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from torchgen.api.ufunc import UfunctorBindings
 
 
@@ -313,14 +315,14 @@ AT_DISPATCH_CASE(at::ScalarType::{dtype},
 {ufunctors}
 
 {stub_sig.type_defn()};
-{stub_sig.dispatch_decl()};
+{stub_sig.dispatch_decl()}
 
 {stub_sig.kernel_defn()} {{
   AT_DISPATCH_SWITCH(iter.common_dtype(), "{sig.name}",
     {dtype_cases_str}
   );
 }}
-REGISTER_DISPATCH({stub_sig.name}, &{stub_sig.kernel_name});
+REGISTER_DISPATCH({stub_sig.name}, &{stub_sig.kernel_name})
 
 {sig.defn()} {{
   {stub_sig.direct_call(sig.arguments())};
@@ -386,7 +388,7 @@ def compute_ufunc_cpu(g: NativeFunctionsGroup) -> str:
 
     return f"""
 {stub_sig.type_defn()};
-{stub_sig.dispatch_decl()};
+{stub_sig.dispatch_decl()}
 {stub_sig.dispatch_defn()};
 
 {sig.defn()} {{
@@ -546,6 +548,6 @@ namespace {{
 }} // anonymous namespace
 
 {stub_sig.type_defn()};
-{stub_sig.dispatch_decl()};
-REGISTER_DISPATCH({stub_sig.name}, &{stub_sig.kernel_name});
+{stub_sig.dispatch_decl()}
+REGISTER_DISPATCH({stub_sig.name}, &{stub_sig.kernel_name})
 """
