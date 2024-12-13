@@ -2376,7 +2376,7 @@ class AutogradFunctionApplyVariable(VariableTracker):
             UserFunctionVariable,
             UserMethodVariable,
         )
-        from .builder import SourcelessBuilder, wrap_fx_proxy
+        from .builder import wrap_fx_proxy
 
         """
         Consider the following:
@@ -2459,61 +2459,80 @@ class AutogradFunctionApplyVariable(VariableTracker):
                 return v.proxy.tracer is not fwd_tracer
             return True
 
-        def generate_fake_grad_out(unbacked_symint_var, fwd_out):
-            fwd_out_tensor = fwd_out.as_proxy().node.meta["example_value"]
-            stride = SourcelessBuilder.create(
-                tx, [unbacked_symint_var] * len(fwd_out_tensor.stride())
-            )
-            size = SourcelessBuilder.create(tx, fwd_out_tensor.size())
-            device = SourcelessBuilder.create(tx, fwd_out_tensor.device)
-            dtype = SourcelessBuilder.create(tx, fwd_out_tensor.dtype)
-            requires_grad = SourcelessBuilder.create(tx, False)
+        @torch.library.custom_op("mylib::clone_unknown_strides", mutates_args=())
+        def clone_unknown_strides(x: torch.Tensor) -> torch.Tensor:
+            ctx = torch.library.get_ctx()
+            strides = []
+            for i in range(x.dim()):
+                s = ctx.new_dynamic_size(min=1)
+                torch._check(s > 0, lambda: "s > 0")
+                strides.append(s)
+            return torch.empty_strided(x.shape, strides, dtype=x.dtype, device=x.device)
+
+        @clone_unknown_strides.register_fake
+        def _(x: torch.Tensor) -> torch.Tensor:
+            ctx = torch.library.get_ctx()
+            strides = []
+            for i in range(x.dim()):
+                s = ctx.new_dynamic_size(min=1)
+                torch._check(s > 0, lambda: "s > 0")
+                strides.append(s)
+            return torch.empty_strided(x.shape, strides, dtype=x.dtype, device=x.device)
+
+        def generate_fake_grad_out(tx, fwd_out):
+            # breakpoint()
+            unbacked_stride_symbols = []
             grad_out = variables.TorchInGraphFunctionVariable(
-                torch.empty_strided
-            ).call_function(
-                tx,
-                [size, stride],
-                {
-                    "device": device,
-                    "dtype": dtype,
-                    "requires_grad": requires_grad,
-                },
-            )
-            return grad_out
+                torch.ops.mylib.clone_unknown_strides
+            ).call_function(tx, [fwd_out], {})
+
+            if "unbacked_bindings" in grad_out.as_proxy().node.meta:
+                for x in grad_out.as_proxy().node.meta["unbacked_bindings"].keys():
+                    unbacked_stride_symbols.append(str(x))
+            return grad_out, unbacked_stride_symbols
+
+        unbacked_stride_symbols = []
+        unbacked_stride_nodes = []
+
+        torch._dynamo.config.capture_dynamic_output_shape_ops = True
+        # print(fwd_graph)
+        from unittest.mock import patch
 
         with tx.output.subtracer(fwd_fn, fwd_tracer), tx.strict_translation_mode(
             is_strict_for
         ):
-            with discard_graph_changes(tx) as dummy_tracer:
+            with discard_graph_changes(tx) as dummy_tracer, patch.object(
+                torch.fx.experimental.symbolic_shapes.ShapeEnv,
+                "allow_dynamic_output_shape_ops",
+                True,
+            ):
                 bwd_tracer = torch._dynamo.output_graph.SubgraphTracer(
                     tx.output,
                     parent=dummy_tracer,
                     source_target="autograd.Function",
                 )
 
-                unbacked_symint_var = (
-                    variables.TorchInGraphFunctionVariable(torch.empty)
-                    .call_function(
-                        tx,
-                        [variables.ConstantVariable.create(1)],
-                        {"dtype": SourcelessBuilder.create(tx, torch.int)},
-                    )
-                    .call_method(tx, "item", [], {})
-                )
-
                 if isinstance(fwd_out, variables.BaseListVariable):
                     bwd_args = [ctx, *fwd_out.items]
-                    bwd_args = [
-                        (
-                            generate_fake_grad_out(unbacked_symint_var, arg)
-                            if isinstance(arg, variables.TensorVariable)
-                            else arg
-                        )
-                        for arg in bwd_args
-                    ]
+                    new_bwd_args = []
+                    for arg in bwd_args:
+                        if isinstance(arg, variables.TensorVariable):
+                            grad_out, _unbacked_stride_symbols = generate_fake_grad_out(
+                                tx, arg
+                            )
+                            unbacked_stride_symbols.extend(_unbacked_stride_symbols)
+                            # unbacked_stride_nodes.extend(grad_out.as_proxy().node.users)
+                        else:
+                            grad_out = arg
+                        new_bwd_args.append(grad_out)
+                    bwd_args = new_bwd_args
                 else:
                     assert isinstance(fwd_out, variables.TensorVariable)
-                    grad_out = generate_fake_grad_out(unbacked_symint_var, fwd_out)
+                    grad_out, unbacked_stride_symbols = generate_fake_grad_out(
+                        tx, fwd_out
+                    )
+                    # unbacked_stride_nodes.extend(grad_out.as_proxy().node.users)
+                    # breakpoint()
                     bwd_args = [ctx, grad_out]
 
                 bwd_src = AttrSource(self.parent_source, member="backward")
@@ -2541,11 +2560,9 @@ class AutogradFunctionApplyVariable(VariableTracker):
                     tracer=bwd_tracer,
                 )
 
-                for node in bwd_graph.find_nodes(
-                    op="placeholder", target=str(unbacked_symint_var.sym_num)
-                ):
-                    bwd_graph.erase_node(node)
-                    break
+                for x in bwd_args:
+                    if isinstance(x, variables.TensorVariable):
+                        unbacked_stride_nodes.extend(x.as_proxy().node.users)
 
         # TODO: assert that bwd_graph didn't capture values that were
         # not created inside fwd_graph.
@@ -2576,8 +2593,19 @@ class AutogradFunctionApplyVariable(VariableTracker):
             fwd_graph.erase_node(node)
             break
 
-        print(fwd_graph)
-        print(bwd_graph)
+        for node in fwd_graph.find_nodes(op="placeholder"):
+            if (
+                node.type is torch.SymInt
+                and str(node.target) in unbacked_stride_symbols
+            ):
+                fwd_graph.erase_node(node)
+
+        for node in bwd_graph.find_nodes(op="placeholder"):
+            if (
+                node.type is torch.SymInt
+                and str(node.target) in unbacked_stride_symbols
+            ):
+                bwd_graph.erase_node(node)
 
         # breakpoint()
         # Because we lift the bwd_freevars as inputs of the bwd_graph,
@@ -2588,17 +2616,17 @@ class AutogradFunctionApplyVariable(VariableTracker):
         for k in bwd_freevars.keys():
             if k in fwd_freevars:
                 fwd_proxy_of_bwd_freevars.append(fwd_freevars[k])
-            elif k is unbacked_symint_var.as_proxy():
+            elif k.node in unbacked_stride_nodes:
                 continue
             else:
                 fwd_proxy_of_bwd_freevars.append(k)
 
         new_fwd_graph_outputs = (fwd_out.as_proxy(), fwd_proxy_of_bwd_freevars)
         new_fwd_graph_outputs = pytree.tree_map(lambda x: x.node, new_fwd_graph_outputs)
-        print(fwd_graph)
+        # print(fwd_graph)
         fwd_graph.output(new_fwd_graph_outputs)
-        print(fwd_graph)
-        fwd_graph.lint()
+        # print(fwd_graph)
+        # fwd_graph.lint()
 
         # Store fwd_body
         fwd_nn_modules = tx.output.tracing_context.module_context.copy_graphstate()

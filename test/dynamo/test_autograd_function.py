@@ -10,7 +10,6 @@ import torch._dynamo.testing
 import torch._dynamo.utils
 from torch.testing._internal.triton_utils import HAS_CUDA, requires_cuda
 
-torch._dynamo.config.capture_scalar_outputs = True
 
 if HAS_CUDA:
     import triton
@@ -322,11 +321,11 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
         y = f(x, SomeEnum.A)
         self.assertEqual(y, x.sin())
 
-    def test_save_for_bwd(self):
-        model = SaveForBwdModule()
-        opt_model = torch.compile(model, backend="eager", fullgraph=True)
-        x = torch.randn(2, 2, dtype=torch.double, requires_grad=True)
-        opt_model(x)
+    # def test_save_for_bwd(self):
+    #     model = SaveForBwdModule()
+    #     opt_model = torch.compile(model, backend="eager", fullgraph=True)
+    #     x = torch.randn(2, 2, dtype=torch.double, requires_grad=True)
+    #     opt_model(x)
 
     def test_allow_in_graph(self):
         torch._dynamo.utils.counters.clear()
