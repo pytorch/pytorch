@@ -94,7 +94,7 @@ static PyObject* THPStream_pynew(
   // NOLINTNEXTLINE(bugprone-signed-char-misuse)
   self->device_index = static_cast<int64_t>(stream_opt->device_index());
   self->device_type = static_cast<int64_t>(stream_opt->device_type());
-  self->context = NULL;
+  self->context = nullptr;
 
   return (PyObject*)ptr.release();
   END_HANDLE_TH_ERRORS
@@ -113,7 +113,7 @@ PyObject* THPStream_Wrap(const c10::Stream& stream) {
   // NOLINTNEXTLINE(bugprone-signed-char-misuse)
   self->device_index = static_cast<int64_t>(stream.device_index());
   self->device_type = static_cast<int64_t>(stream.device_type());
-  self->context = NULL;
+  self->context = nullptr;
   return ptr.release();
   END_HANDLE_TH_ERRORS
 }
@@ -319,7 +319,7 @@ static PyObject* THPStream_exit(PyObject* _self, PyObject* unused) {
   END_HANDLE_TH_ERRORS
 }
 
-static void THPStream_maybe_init_context(PyObject* self) {
+static void THPStream_maybe_init_context(THPStream* self) {
   if (!(self->context)) {
     self->context = PyDict_New();
     if (!(self->context)) {
@@ -334,10 +334,10 @@ static PyObject* THPStream_getattro(PyObject* _self, PyObject* attr_name) {
   auto attr_name_str = THPUtils_unpackString(attr_name);
   if (attr_name_str == "_src_device_index" ||
       attr_name_str == "_dst_prev_stream") {
-    THPStream_maybe_init_context(_self);
+    THPStream_maybe_init_context(self);
     return PyDict_GetItem(self->context, attr_name);
   }
-  return PyObject_GenericGetAttr(self, attr_name);
+  return PyObject_GenericGetAttr(_self, attr_name);
   END_HANDLE_TH_ERRORS
 }
 
@@ -350,10 +350,10 @@ static int THPStream_setattro(
   auto attr_name_str = THPUtils_unpackString(attr_name);
   if (attr_name_str == "_src_device_index" ||
       attr_name_str == "_dst_prev_stream") {
-    THPStream_maybe_init_context(_self);
+    THPStream_maybe_init_context(self);
     return PyDict_SetItem(self->context, attr_name, value);
   }
-  return PyObject_GenericSetAttr(self, attr_name, value);
+  return PyObject_GenericSetAttr(_self, attr_name, value);
   END_HANDLE_TH_ERRORS_RET(-1)
 }
 
