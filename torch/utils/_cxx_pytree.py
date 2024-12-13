@@ -253,7 +253,7 @@ def treespec_leaf() -> TreeSpec:
     return optree.treespec_leaf(none_is_leaf=True, namespace="torch")
 
 
-def treespec_tuple(iterable: Iterable[TreeSpec], /) -> TreeSpec:
+def treespec_tuple(iterable: Iterable[TreeSpec] = (), /) -> TreeSpec:
     """Make a tuple treespec from an iterable of child treespecs."""
     return optree.treespec_tuple(iterable, none_is_leaf=True, namespace="torch")
 
