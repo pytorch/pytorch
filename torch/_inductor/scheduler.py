@@ -428,12 +428,7 @@ class BaseSchedulerNode:
             and hasattr(V.kernel, "args")
         ):
             return
-        fused_nodes = {
-            node.get_name()
-            for node in self.scheduler.name_to_fused_node[self.get_name()].get_nodes()
-        }
 
-        ordered_reads = sorted(self.read_writes.reads, key=lambda x: x.name)
         # NOTE remove V.graph.removed_operations once deps issue is fixed
         inconsequential_nodes = (
             self.ancestors
@@ -679,6 +674,10 @@ class BaseSchedulerNode:
             except ValueError as e:
                 # We don't know how to estimate runtime for this collective,
                 # falling back to 0
+                log.info(e)
+                return 0
+            except TypeError as e:
+                # this happens when the collective is not of type ir._CollectiveKernel
                 log.info(e)
                 return 0
 
@@ -1849,12 +1848,11 @@ class Scheduler:
         self.dead_node_elimination()
         self.name_to_fused_node = {n.get_name(): n for n in self.nodes}
         self.compute_ancestors()
-        if config.reorder_for_compute_comm_overlap:
-            self.nodes = comms.decide_global_ordering_of_comms(
-                self.nodes,
-                self.name_to_buf,
-                self.name_to_fused_node,
-            )
+        self.nodes = comms.decide_global_ordering_of_comms(
+            self.nodes,
+            self.name_to_buf,
+            self.name_to_fused_node,
+        )
 
         metrics.ir_nodes_pre_fusion += len(self.nodes)
         V.debug.ir_pre_fusion(self.nodes)
@@ -2408,7 +2406,11 @@ class Scheduler:
         device = nodes[0].get_device()
         self.current_device = device
         backend = self.get_backend(device)
-        with dynamo_timed("benchmark_fused_nodes"):
+        with dynamo_timed(
+            "benchmark_fused_nodes",
+            log_pt2_compile_event=True,
+            dynamo_compile_column_us="compile_time_autotune_time_us",
+        ):
             return backend.benchmark_fused_nodes(nodes)
 
     def finalize_multi_template_buffers(self) -> None:
@@ -3026,7 +3028,7 @@ class Scheduler:
             return 0
 
         # Pick the largest buffer to guide the loop reordering
-        numel, lhs_dep, rhs_dep = max(candidates, key=lambda x: x[0])
+        _numel, lhs_dep, rhs_dep = max(candidates, key=lambda x: x[0])
 
         if lhs_dep.num_vars != rhs_dep.num_vars:
             # this can happen due to we don't merge loops.
@@ -3118,10 +3120,7 @@ class Scheduler:
         del device2
 
         shared_data_score = self.score_fusion_memory(node1, node2)
-        if (
-            shared_data_score < config.score_fusion_memory_threshold
-            and config.loop_ordering_after_fusion
-        ):
+        if shared_data_score == 0:
             shared_data_score = self.shared_data_after_reordering_loop(node1, node2)
 
         if loop_ordering_log.isEnabledFor(logging.DEBUG):
@@ -3302,7 +3301,7 @@ class Scheduler:
         node2_dep_len = len(node1.read_writes.reads) + len(node2.read_writes.writes)
 
         # optimization: iter over smaller set
-        if min(node1_dep_len, node2_dep_len) * 4 < max(node1_dep_len, node2_dep_len):
+        if max(node1_dep_len, node2_dep_len) * 4 > min(node1_dep_len, node2_dep_len):
             if node1_dep_len > node2_dep_len:
                 tmp = node1
                 node1 = node2
@@ -3506,7 +3505,7 @@ class Scheduler:
                         node.get_name(),
                         node.get_estimated_runtime(),
                     )
-                except Exception as e:
+                except Exception:
                     log.debug(
                         "Generating code for node %s with estimated runtime 0.0",
                         node.get_name(),
@@ -3636,7 +3635,7 @@ class Scheduler:
             path1_list.append(path)
 
         try:
-            ms2, ms2_clone, path2_list = self.benchmark_combo_kernel(subkernel_nodes)
+            ms2, ms2_clone, _path2_list = self.benchmark_combo_kernel(subkernel_nodes)
         except CompilationError as e:
             # workaround triton issue: https://github.com/openai/triton/issues/2151
             if "Loop-carried variable" in str(e):
