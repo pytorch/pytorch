@@ -641,7 +641,7 @@ std::string _format_non_converging_batches(const std::vector<int64_t>& batches) 
 void svd_cusolver(const Tensor& A,
                   const bool full_matrices,
                   const bool compute_uv,
-                  const std::optional<c10::string_view>& driver,
+                  const std::optional<std::string_view>& driver,
                   const Tensor& U,
                   const Tensor& S,
                   const Tensor& V,
@@ -655,7 +655,7 @@ void svd_cusolver(const Tensor& A,
 
   // The default heuristic is to use gesvdj driver
 #ifdef USE_ROCM
-  const auto driver_v = c10::string_view("gesvdj");
+  const auto driver_v = std::string_view("gesvdj");
 #else
   const auto driver_v = driver.value_or("gesvdj");
 #endif
