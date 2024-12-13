@@ -14,18 +14,37 @@ Usage:
 
 from __future__ import annotations
 
+from collections import defaultdict
+import dataclasses
+import threading
 import argparse
 import datetime
 import json
 import signal
 import time
-from typing import Any, Dict
-
+from typing import Any
 import psutil  # type: ignore[import]
-
 
 _HAS_PYNVML = False
 _HAS_AMDSMI = False
+
+@dataclasses.dataclass
+class UsageData:
+    """
+    Dataclass for storing usage data.
+    """
+    cpu_percent: float
+    memory_percent: float
+    processes: list[dict[str, Any]]
+    gpu_list: list[GpuData]
+@dataclasses.dataclass
+class GpuData:
+    """
+    Dataclass for storing gpu data.
+    """
+    uuid: str
+    utilization: float
+    mem_utilization: float
 
 try:
     import pynvml  # type: ignore[import]
@@ -97,41 +116,109 @@ class UsageLogger:
         self._num_of_cpus = 0
         self._debug_mode = is_debug_mode
         self._initial_gpu_handler()
+        self.data_list: list[UsageData] = []
 
-    def start(self) -> None:
-        """
-        runs the main loop of the program.
-        the first json record is the metadata of the run,
-        including the start time, end time, and the interval of the log.
-        """
 
+        self.lock = threading.Lock()
+        self.collect_thread = None
+        self.output_thread = None
+    def _collect_data(self) -> None:
+        """
+        Collects the data.
+        """
+        while not self._kill_now:
+            try:
+                # collect cpu and memory metrics
+                memory = psutil.virtual_memory().percent
+                cpu_percent = psutil.cpu_percent()
+                processes = self._get_process_info()
+                gpuList = self._collect_gpu_data()
+                data = UsageData(cpu_percent=cpu_percent, memory_percent=memory, processes=processes, gpu_list=gpuList)
+                if self._debug_mode:
+                    print(f"collecting data {data}")
+                with self.lock:
+                    self.data_list.append(data)
+            except Exception as e:
+                continue
+            finally:
+                time.sleep(0.5)
+
+    def _ouput_data(self) -> None:
+        """
+        output the data.
+        """
         self._summary_info["start_time"] = datetime.datetime.now().timestamp()
         self.log_json(self._summary_info)
 
-        # start data collection
         while not self._kill_now:
             collecting_start_time = time.time()
             stats = {}
             try:
-                stats.update(
+                with self.lock:
+                    if self._debug_mode:
+                        print("collected:", len(self.data_list))
+                    if not self.data_list or len(self.data_list) < 1:
+                        continue
+                    stats.update(
                     {
                         "level": "record",
                         "time": datetime.datetime.now().timestamp(),
-                    }
-                )
-                # collect cpu and memory metrics
-                memory = psutil.virtual_memory()
-                used_cpu_percent = psutil.cpu_percent()
+                    })
 
-                stats.update(
-                    {
-                        "total_cpu_percent": used_cpu_percent,
-                        "total_memory_percent": memory.percent,
-                        "processes": self._get_process_info(),  # type: ignore[dict-item]
-                        "gpu_usage": self._collect_gpu_data(),  # type: ignore[dict-item]
-                    }
-                )
+                    total_cpu = sum(usageData.cpu_percent for usageData in self.data_list)
+                    avg_cpu = total_cpu / len(self.data_list)
+                    max_cpu = max(usageData.cpu_percent for usageData in self.data_list)
 
+                    max_memory = max(usageData.memory_percent for usageData in self.data_list)
+                    total_memory = sum(usageData.memory_percent for usageData in self.data_list)
+                    avg_memory = total_memory / len(self.data_list)
+
+                    stats.update(
+                        {
+                            "cpu": {
+                                "avg": avg_cpu,
+                                "max": max_cpu,
+                            },
+                            "memory": {
+                                "avg": avg_memory,
+                                "max": max_memory,
+                            },
+                        }
+                    )
+
+                    if self._has_pynvml or self._has_amdsmi:
+                        calculate_gpu = []
+                        gpu_mem_utilization = defaultdict(list)
+                        gpu_utilization = defaultdict(list)
+
+                        for data in self.data_list:
+                            for gpu in data.gpu_list:
+                                gpu_mem_utilization[gpu.uuid].append(gpu.mem_utilization)
+                                gpu_utilization[gpu.uuid].append(gpu.utilization)
+                                
+                        for gpu in gpu_utilization.keys():
+                            gpu_uuid = gpu
+                            max_gpu_utilization = max(gpu_utilization[gpu])
+                            max_gpu_mem_utilization = max(gpu_mem_utilization[gpu])
+                            total_gpu = sum(gpu_utilization[gpu])
+                            total_mem = sum(gpu_mem_utilization[gpu])
+                            avg_gpu_utilization = total_gpu / len(gpu_utilization[gpu])
+                            avg_gpu_mem_utilization = total_mem / len(gpu_mem_utilization[gpu])
+                            calculate_gpu.append({
+                                "uuid": gpu_uuid,
+                                "util_percent": {
+                                    "avg": avg_gpu_utilization,
+                                    "max": max_gpu_utilization,
+                                },
+                                "mem_util_percent": {
+                                    "avg": avg_gpu_mem_utilization,
+                                    "max": max_gpu_mem_utilization,
+                                }
+                            })
+                        stats.update({
+                            "gpu_list": calculate_gpu,
+                        })
+                    self.data_list.clear()
             except Exception as e:
                 stats = {
                     "level": "record",
@@ -142,13 +229,23 @@ class UsageLogger:
                 collecting_end_time = time.time()
                 time_diff = collecting_end_time - collecting_start_time
                 stats["log_duration"] = f"{time_diff * 1000:.2f} ms"
-
                 # output the data to stdout
                 self.log_json(stats)
                 time.sleep(self._log_interval)
-
         # shut down gpu connections when exiting
         self._shutdown_gpu_connections()
+
+    def start_collection(self):
+        self.collect_thread = threading.Thread(target=self._collect_data)
+        self.collect_thread.start()
+
+    def start_output(self):
+        self.output_thread = threading.Thread(target=self._ouput_data)
+        self.output_thread.start()
+
+    def start(self):
+        self.start_collection()
+        self.start_output()
 
     def stop(self, *args: Any) -> None:
         """
@@ -166,7 +263,7 @@ class UsageLogger:
             return
         print(json.dumps(stats))
 
-    def _collect_gpu_data(self) -> list[Dict[str, Any]]:
+    def _collect_gpu_data(self) -> list[GpuData]:
         gpu_data_list = []
         if self._has_pynvml:
             # Iterate over the available GPUs
@@ -174,30 +271,22 @@ class UsageLogger:
                 # see https://docs.nvidia.com/deploy/nvml-api/group__nvmlDeviceQueries.html
                 gpu_utilization = pynvml.nvmlDeviceGetUtilizationRates(gpu_handle)
                 gpu_uuid = pynvml.nvmlDeviceGetUUID(gpu_handle)
-                gpu_processes = self._get_per_process_gpu_info(gpu_handle)
                 gpu_data_list.append(
-                    {
-                        "gpu_uuid": gpu_uuid,
-                        "total_gpu_utilization": gpu_utilization.gpu,
-                        "total_gpu_mem_utilization": gpu_utilization.memory,
-                        "gpu_processes": gpu_processes,
-                    }
+                    GpuData(uuid=gpu_uuid, utilization=gpu_utilization.gpu, mem_utilization=gpu_utilization.memory)
                 )
         elif self._has_amdsmi:
             # Iterate over the available GPUs
             for handle in self._gpu_handles:
                 # see https://rocm.docs.amd.com/projects/amdsmi/en/docs-5.7.0/py-interface_readme_link.html
                 engine_usage = amdsmi.amdsmi_get_gpu_activity(handle)
-                gpu_processes = self._rocm_get_per_process_gpu_info(handle)
                 gpu_uuid = amdsmi.amdsmi_get_gpu_device_uuid(handle)
                 gpu_utilization = engine_usage["gfx_activity"]
                 gpu_mem_utilization = gpu_utilization["umc_activity"]
                 gpu_data_list.append(
                     {
                         "gpu_uuid": gpu_uuid,
-                        "total_gpu_utilization": gpu_utilization,
-                        "total_gpu_mem_utilization": gpu_mem_utilization,
-                        "gpu_processes": gpu_processes,
+                        "gpu_utilization": gpu_utilization,
+                        "gpu_mem_utilization": gpu_mem_utilization,
                     }
                 )
         return gpu_data_list
@@ -272,45 +361,19 @@ class UsageLogger:
 
     def _get_process_info(self) -> list[dict[str, Any]]:
         def get_processes_running_python_tests() -> list[Any]:
-            python_processes = []
+            python_test_processes = []
             for process in psutil.process_iter():
                 try:
-                    if "python" in process.name() and process.cmdline():
-                        python_processes.append(process)
-                except (
-                    psutil.ZombieProcess,
-                    psutil.NoSuchProcess,
-                    psutil.AccessDenied,
-                ):
-                    # access denied or the process died
+                    cmd  =  " ".join(process.cmdline())
+                    processName = process.name()
+                    pid = process.pid
+                    if "python" in processName and cmd.startswith("python"):
+                        python_test_processes.append({"pid": process.pid, "cmd": cmd})
+                except Exception as e:
                     pass
-            return python_processes
-
+            return python_test_processes
         processes = get_processes_running_python_tests()
-        per_process_info = []
-        for p in processes:
-            try:
-                cmdline = p.cmdline()
-                info = {
-                    "pid": p.pid,
-                    "cmd": " ".join(cmdline),
-                }
-            except (psutil.ZombieProcess, psutil.NoSuchProcess, psutil.AccessDenied):
-                continue
-
-            # https://psutil.readthedocs.io/en/latest/index.html?highlight=memory_full_info
-            # requires higher user privileges and could throw AccessDenied error, i.e. mac
-            try:
-                memory_full_info = p.memory_full_info()
-                info["uss_memory"] = f"{memory_full_info.uss / (1024 * 1024):.2f}"
-                if "pss" in memory_full_info:
-                    # only availiable in linux
-                    info["pss_memory"] = f"{memory_full_info.pss / (1024 * 1024):.2f}"
-            except psutil.AccessDenied:
-                # It's ok to skip this
-                pass
-            per_process_info.append(info)
-        return per_process_info
+        return processes
 
 
 def main() -> None:
