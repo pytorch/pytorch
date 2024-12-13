@@ -66,6 +66,7 @@ def set_tunableop_defaults():
     torch.cuda.tunable.tuning_enable(True)
     torch.cuda.tunable.set_max_tuning_duration(30)
     torch.cuda.tunable.set_max_tuning_iterations(100)
+    torch.cuda.tunable.set_rotating_buffer_size(-1)
 
 def tunableop_matmul(device, dtype):
     # Helper function to test TunableOp in a subprocess
@@ -4572,9 +4573,9 @@ class TestLinalg(TestCase):
         import os
 
         try:
+            set_tunableop_defaults()
             torch.cuda.tunable.set_rotating_buffer_size(0)
             os.environ["PYTORCH_TUNABLEOP_NUMERICAL_CHECK"] = "1"
-            set_tunableop_defaults()
             ordinal = torch.cuda.current_device()
             torch.cuda.tunable.set_filename(f"tunableop_results{ordinal}.csv")
 
@@ -4640,6 +4641,7 @@ class TestLinalg(TestCase):
     @dtypes(torch.half)
     def test_matmul_offline_tunableop(self, device, dtype):
         import os
+        set_tunableop_defaults()
         torch.cuda.tunable.set_rotating_buffer_size(0)
 
         # Pointing to temp files. The test cannot remove them on Windows because
@@ -4819,7 +4821,6 @@ class TestLinalg(TestCase):
         # buffer rotation (on by default) with strided batched gemm tunableop was causing a mem fault
         set_tunableop_defaults()
         torch.cuda.tunable.enable(True)
-        torch.cuda.tunable.set_rotating_buffer_size(-1)  # Make sure we use the default buffer rotation
         torch.cuda.tunable.set_max_tuning_iterations(10)
         # the following 3 cases cover all previous failure cases and are here to catch regressions
         B = 16
@@ -4877,6 +4878,7 @@ class TestLinalg(TestCase):
     @skipCUDAIfNotRocm
     @dtypes(torch.float)
     def test_numeric_check_leak_tunableop_rocm(self, device, dtype):
+        set_tunableop_defaults()
         from torch.testing._internal.common_utils import CudaMemoryLeakCheck
         import os
         # run operator first without tuning to ensure all rocm libs are loaded,
@@ -5138,6 +5140,7 @@ class TestLinalg(TestCase):
         import os
         import multiprocessing as mp
 
+        set_tunableop_defaults()
         ordinal = torch.cuda.current_device()
         filename = f"tunableop_results{ordinal}.csv"
 
