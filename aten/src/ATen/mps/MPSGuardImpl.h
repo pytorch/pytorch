@@ -106,6 +106,11 @@ struct TORCH_API MPSGuardImpl final
 
   bool queryEvent(void* event) const override;
 
+  void synchronizeEvent(void* event) const override;
+
+  double elapsedTime(void* event1, void* event2, const DeviceIndex device_index)
+      const override;
+
   void synchronizeDevice(const DeviceIndex device_index) const override;
 };
 
