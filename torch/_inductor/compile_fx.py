@@ -1190,6 +1190,7 @@ def cudagraphify(
             constants=constants,
             placeholders=placeholders,
             mutated_input_idxs=mutated_input_idxs,
+            compile_id=torch._guards.CompileContext.current_compile_id(),
         )
     else:
         cudagraphify_fn = cudagraphify_impl
@@ -1199,10 +1200,7 @@ def cudagraphify(
     def run(new_inputs: Sequence[InputType]) -> Any:
         nonlocal compiled_fn
         if compiled_fn is None:
-            with dynamo_utils.dynamo_timed(
-                "cudagraphify",
-                log_pt2_compile_event=True,
-            ), dynamo_utils.preserve_rng_state():
+            with dynamo_utils.preserve_rng_state():
                 compiled_fn = cudagraphify_fn(model, new_inputs, static_input_idxs)
         return compiled_fn(new_inputs)
 

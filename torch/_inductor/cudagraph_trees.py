@@ -100,6 +100,7 @@ from torch.utils.weak import TensorWeakRef
 
 
 if TYPE_CHECKING:
+    from torch._guards import CompileId
     from torch._inductor.utils import InputType
     from torch.types import _bool
 
@@ -416,8 +417,8 @@ def cudagraphify(
     constants: Tuple[torch.Tensor, ...] = (),
     placeholders: Tuple[PlaceholderInfo, ...] = (),
     mutated_input_idxs: Tuple[int, ...] = (),
+    compile_id: Optional[CompileId] = None,
 ) -> Tuple[ModelType, OutputType]:
-    manager = get_container(device_index).get_tree_manager()
     assert not (is_backward and is_inference)
     mode = (
         CompilationMode.BACKWARD
@@ -425,16 +426,34 @@ def cudagraphify(
         else (CompilationMode.INFERENCE if is_inference else CompilationMode.FORWARD)
     )
 
-    return manager.add_function(
-        model,
-        inputs,
-        static_input_idxs,
-        stack_traces,
-        mode,
-        constants,
-        placeholders,
-        mutated_input_idxs,
-    )
+    with dynamo_timed(
+        "cudagraphify.get_container",
+        log_pt2_compile_event=True,
+        # This operation is strictly cudagraph overhead, so we count it
+        # towards the overall cudagraphify time when logging to scuba.
+        dynamo_compile_runtime_column_us="runtime_cudagraphify_time_us",
+        compile_id=compile_id,
+        is_forward=mode != CompilationMode.BACKWARD,
+    ):
+        manager = get_container(device_index).get_tree_manager()
+
+    with dynamo_timed(
+        "CUDAGraphTreeManager.add_function",
+        log_pt2_compile_event=True,
+        compile_id=compile_id,
+        is_forward=mode != CompilationMode.BACKWARD,
+    ):
+        return manager.add_function(
+            model,
+            inputs,
+            static_input_idxs,
+            stack_traces,
+            mode,
+            constants,
+            placeholders,
+            mutated_input_idxs,
+            compile_id,
+        )
 
 
 class StorageWeakRefWrapper:
@@ -778,6 +797,8 @@ class CUDAGraphNode:
         device_index: int,
         stack_traces: Optional[StackTraces],
         stream: torch.cuda.Stream,
+        mode: CompilationMode,
+        compile_id: Optional[CompileId],
     ) -> None:
         assert isinstance(inputs, (list, tuple))
 
@@ -981,9 +1002,18 @@ class CUDAGraphNode:
         self.static_output_tensors: OutputList[Optional[Tensor]] = []
 
         # Cleared after recording
-        self.recording_outputs: Optional[OutputType] = self._record(
-            wrapped_function.model, recording_inputs
-        )
+        with dynamo_timed(
+            "CUDAGraphNode.record",
+            log_pt2_compile_event=True,
+            # This operation is strictly cudagraph overhead, so we count it
+            # towards the overall cudagraphify time when logging to scuba.
+            dynamo_compile_runtime_column_us="runtime_cudagraphify_time_us",
+            compile_id=compile_id,
+            is_forward=mode != CompilationMode.BACKWARD,
+        ):
+            self.recording_outputs: Optional[OutputType] = self._record(
+                wrapped_function.model, recording_inputs
+            )
         self.outputs_metadata: OutputList[Union[Dict[str, Any], int, None]] = []
 
         # As with inputs, we do not want to keep the outputs permanently alive because that would prevent
@@ -999,7 +1029,13 @@ class CUDAGraphNode:
                 assert isinstance(out, (int, type(None))), type(out)
                 self.outputs_metadata.append(out)
 
-        self.graph.replay()
+        with dynamo_timed(
+            "CUDAGraphNode.replay",
+            log_pt2_compile_event=True,
+            compile_id=compile_id,
+            is_forward=mode != CompilationMode.BACKWARD,
+        ):
+            self.graph.replay()
 
     def _copy_inputs_and_remove_from_src(
         self, dsts: List[InputType], srcs: List[InputType]
@@ -1944,10 +1980,16 @@ class CUDAGraphTreeManager:
             )
         )
 
-    def run(self, new_inputs: List[InputType], function_id: FunctionID) -> OutputType:
+    def run(
+        self,
+        new_inputs: List[InputType],
+        function_id: FunctionID,
+        mode: CompilationMode,
+        compile_id: Optional[CompileId],
+    ) -> OutputType:
         assert self.graph is not None, "Running CUDAGraph after shutdown"
         self.mode = self.id_to_mode[function_id]
-        out = self._run(new_inputs, function_id)
+        out = self._run(new_inputs, function_id, mode, compile_id)
 
         # The forwards are only pending following invocation, not before
         if self.mode == CompilationMode.FORWARD:
@@ -2008,7 +2050,13 @@ class CUDAGraphTreeManager:
             > torch._inductor.config.triton.cudagraph_unexpected_rerecord_limit
         )
 
-    def _run(self, new_inputs: List[InputType], function_id: FunctionID) -> OutputType:
+    def _run(
+        self,
+        new_inputs: List[InputType],
+        function_id: FunctionID,
+        mode: CompilationMode,
+        compile_id: Optional[CompileId],
+    ) -> OutputType:
         # we will try to end the current execution lazily, since
         # we dont want to do unnecessary checking of the existing outputs
         # on the hot path, but both recording and warmup only happen once
@@ -2054,6 +2102,8 @@ class CUDAGraphTreeManager:
             with dynamo_timed(
                 "CUDAGraphTreeManager.run_eager",
                 log_pt2_compile_event=True,
+                compile_id=compile_id,
+                is_forward=mode != CompilationMode.BACKWARD,
             ):
                 out = self.run_eager(new_inputs, function_id)
 
@@ -2090,7 +2140,7 @@ class CUDAGraphTreeManager:
 
                 # run again to hit the root matching case which must succeed
                 if self.current_node is None:
-                    return self.run(new_inputs, function_id)
+                    return self.run(new_inputs, function_id, mode, compile_id)
 
             if len(self.ids_to_funcs[function_id].mutated_input_idxs) > 0:
                 self._update_non_cudagraph_managed_mutation(function_id, new_inputs)
@@ -2126,8 +2176,10 @@ class CUDAGraphTreeManager:
         with dynamo_timed(
             "CUDAGraphTreeManager.record_function",
             log_pt2_compile_event=True,
+            compile_id=compile_id,
+            is_forward=mode != CompilationMode.BACKWARD,
         ):
-            out = self.record_function(new_inputs, function_id)
+            out = self.record_function(new_inputs, function_id, mode, compile_id)
 
         return out
 
@@ -2153,7 +2205,11 @@ class CUDAGraphTreeManager:
         self.current_node = None
 
     def record_function(
-        self, new_inputs: List[InputType], function_id: FunctionID
+        self,
+        new_inputs: List[InputType],
+        function_id: FunctionID,
+        mode: CompilationMode,
+        compile_id: Optional[CompileId],
     ) -> OutputType:
         assert not isinstance(self.current_node, CUDAWarmupNode)
         graph_id = self.new_graph_id()
@@ -2172,6 +2228,8 @@ class CUDAGraphTreeManager:
             self.device_index,
             self.ids_to_stack_traces[function_id],
             self.stream,
+            mode,
+            compile_id,
         )
         if self.current_node is None:
             self.roots[function_id].append(node)
@@ -2237,6 +2295,7 @@ class CUDAGraphTreeManager:
         constants: Tuple[torch.Tensor, ...],
         placeholders: Tuple[PlaceholderInfo, ...],
         mutated_input_idxs: Tuple[int, ...],
+        compile_id: Optional[CompileId],
     ) -> Tuple[ModelType, OutputType,]:
         id = self.new_func_id()
         self.ids_to_stack_traces[id] = stack_traces
@@ -2249,7 +2308,9 @@ class CUDAGraphTreeManager:
             mutated_input_idxs,
         )
         self.id_to_mode[id] = mode
-        fn = functools.partial(self.run, function_id=id)
+        fn = functools.partial(
+            self.run, function_id=id, mode=mode, compile_id=compile_id
+        )
 
         # container needs to set clean up when fn dies
         get_container(self.device_index).add_strong_reference(fn)
