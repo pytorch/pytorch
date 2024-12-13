@@ -39,9 +39,9 @@ class QConvoneDNNXPU final {
       double inv_output_scale,
       int64_t output_zero_point,
       c10::optional<c10::ScalarType> output_dtype,
-      c10::string_view attr,
+      std::string_view attr,
       torch::List<c10::optional<at::Scalar>> scalars,
-      c10::optional<c10::string_view> algorithm) {
+      c10::optional<std::string_view> algorithm) {
     if (act.dim() == 3 || act.dim() == 5) {
       TORCH_CHECK(
           attr == "none",

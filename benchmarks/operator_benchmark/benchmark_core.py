@@ -111,10 +111,9 @@ def _build_test(
 
         if tags is None:
             raise ValueError("Missing tags in configs")
-        input_config = str(test_attrs)[1:-1].replace("'", "")
+
         op = bench_op()
         assert op is not None, "Can't create test"
-        tensor_error_info = None
         # op_name_function is a dictionary which has op_name and op_function.
         # an example of op_name_function is:
         # {'op_name' : 'abs', 'op_function' : torch.abs}
