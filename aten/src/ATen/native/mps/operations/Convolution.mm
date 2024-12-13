@@ -418,7 +418,8 @@ static Tensor mps_convolution_backward_input(IntArrayRef input_size,
         assert(0 && "Check should have been done earlier\n");
     }
 
-    MPSShape* gradOutputShape = has_strided_api ? getMPSShape(grad_output_t) : getMPSShape(grad_output_t, memory_format);
+    MPSShape* gradOutputShape =
+        has_strided_api ? getMPSShape(grad_output_t) : getMPSShape(grad_output_t, memory_format);
     MPSShape* mps_input_shape = getMPSShape(input_size);
     NSString* ns_shape_key = [[gradOutputShape valueForKey:@"description"] componentsJoinedByString:@","];
     string key;
