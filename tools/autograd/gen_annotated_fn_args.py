@@ -20,7 +20,7 @@ import argparse
 import os
 import textwrap
 from collections import defaultdict
-from typing import Any, Sequence, TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
 
 import torchgen.api.python as python
 from torchgen.context import with_native_function
@@ -39,6 +39,8 @@ from .gen_python_functions import (
 
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from torchgen.model import Argument, BaseOperatorName, NativeFunction
 
 
