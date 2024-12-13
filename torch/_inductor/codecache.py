@@ -67,6 +67,7 @@ from torch._inductor.custom_graph_pass import CustomGraphPass, CustomGraphPassTy
 from torch._inductor.output_code import has_frozen_params
 from torch._utils_internal import log_cache_bypass
 from torch.compiler import config as cconfig
+from torch.utils._ordered_set import OrderedSet
 
 from .remote_cache import create_cache
 from .runtime import autotune_cache
@@ -790,10 +791,10 @@ class FxGraphHashDetails:
         self.fx_kwargs: Dict[str, object] = {}
         for k, v in sorted(fx_kwargs.items()):
             if k not in self.EXCLUDED_KWARGS:
-                if type(v) is set:
+                if type(v) in (set, OrderedSet):  # noqa: set_linter
                     # Special case to handle set params. Python sets can't be
                     # ordered, so sort the elements and store them in a proxy.
-                    self.fx_kwargs[k] = OrderedSetHolder(sorted(v))
+                    self.fx_kwargs[k] = OrderedSetHolder(sorted(v))  # type: ignore[call-overload]
                 else:
                     self.fx_kwargs[k] = v
 
@@ -1485,7 +1486,7 @@ class AotCodeCompiler:
 
         def _compile_consts(consts: bytes, platform: str) -> str:
             if platform == "linux":
-                if graph.mutated_buffers & set(graph.constants.keys()):
+                if graph.mutated_buffers & OrderedSet(graph.constants.keys()):
                     # .data section is between .text and .bss. When the size of .data is large,
                     # during the linking, the relocation of .text against .bss may overflow.
                     # Rename it to .ldata so that it won't be in between the .text and .bss section

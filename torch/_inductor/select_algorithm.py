@@ -637,7 +637,7 @@ class TritonTemplateKernel(TritonKernel):
                     self.body.writeline(str(scatter))
 
             body_val = self.body.getvalue()
-            self.cse.invalidate(set())
+            self.cse.invalidate(OrderedSet[str]())
             return body_val
 
     def load_input(
@@ -726,7 +726,7 @@ class TritonTemplateKernel(TritonKernel):
             self.template_out = "xindex"
             self.template_indices = indices
             self.named_input_nodes[input_name].data.freeze_layout()
-            self.cse.invalidate(set())
+            self.cse.invalidate(OrderedSet())
 
             template_mask = self.template_mask
 
@@ -799,9 +799,9 @@ class TritonTemplateKernel(TritonKernel):
 
         def hook():
             with self.set_subgraph_body(hook_key):
-                self.cse.invalidate(set())
+                self.cse.invalidate(OrderedSet())
                 self.codegen_body()
-                self.cse.invalidate(set())
+                self.cse.invalidate(OrderedSet())
                 if input_node.get_name() not in self.prologue_fused_inputs:
                     self.body.writeline(load_code)
 
@@ -885,7 +885,7 @@ class TritonTemplateKernel(TritonKernel):
         def hook():
             # more stuff might have been added since the codegen_body above
             self.codegen_body()
-            self.cse.invalidate(set())
+            self.cse.invalidate(OrderedSet())
 
             return textwrap.indent(self.body.getvalue(), " " * indent_width).strip()
 
