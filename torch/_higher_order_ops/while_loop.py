@@ -322,7 +322,7 @@ def while_loop_tracing(mode, cond_fn, body_fn, carried_inputs, additional_inputs
     )
 
 
-def check_outputs_carry_consistency(
+def check_meta_consistency(
     outs: List[Union[torch.Tensor, torch.SymInt, int]],
     carries: List[Union[torch.Tensor, torch.SymInt, int]],
 ) -> None:
@@ -407,7 +407,7 @@ def while_loop_fake_tensor_mode(
             # body_fn return output with the same pytree and tensor meta data as carried_inputs
             # so we could just return the output after one iteration.
             body_outs = body_fn(*carried_inputs, *additional_inputs)
-            check_outputs_carry_consistency(body_outs, carried_inputs)
+            check_meta_consistency(body_outs, carried_inputs)
         # See NOTE [unspecialize int carry with unbacked symints]
         return pytree.tree_map_only(
             (int, torch.SymInt),

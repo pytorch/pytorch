@@ -85,7 +85,7 @@ def discard_graph_changes(tx):
 def check_meta_consistency_vt(
     vars1: List[VariableTracker], vars2: List[VariableTracker]
 ) -> str:
-    from torch._higher_order_ops.while_loop import check_outputs_carry_consistency
+    from torch._higher_order_ops.while_loop import check_meta_consistency
 
     from . import TensorVariable
 
@@ -102,7 +102,7 @@ def check_meta_consistency_vt(
     unwrapped1 = [_unwrap_var(var) for var in vars1]
     unwrapped2 = [_unwrap_var(var) for var in vars2]
 
-    return check_outputs_carry_consistency(unwrapped1, unwrapped2)
+    return check_meta_consistency(unwrapped1, unwrapped2)
 
 
 @contextlib.contextmanager
