@@ -182,11 +182,7 @@ def _schedule_for_comm(
         for o in snode.get_outputs():
             buf_name = o.get_name()
             for snode in buffer_users[buf_name]:
-                if buf_name in unmet_deps[snode]:
-                    unmet_deps[snode].remove(buf_name)
-                # except:
-                #     log.warn(f"remove error happens for snode: {snode}, snode.debug_str(): {snode.debug_str()}, unmet_deps[snode]: {unmet_deps[snode]}")
-                #     raise
+                unmet_deps[snode].remove(buf_name)
                 if len(unmet_deps[snode]) == 0:
                     heapq.heappush(ready, Runnable(snode))
 
@@ -1003,26 +999,22 @@ def bucket_fsdp_all_gather_concat_on_scheduler_ir(
         scheduled.add(snode)
 
     def replace_scheduler_buffer(
-        orig_sched_bufs: List[torch._inductor.scheduler.SchedulerBuffer],
+        orig_sched_buf: torch._inductor.scheduler.SchedulerBuffer,
         new_sched_buf: torch._inductor.scheduler.SchedulerBuffer
     ):
         new_buf = new_sched_buf.node
         new_buf_name = new_buf.get_name()
-        # renames = {}
-        assert len(orig_sched_bufs) == 1
-        for orig_sched_buf in orig_sched_bufs:
-            orig_buf = orig_sched_buf.node
-            orig_buf_name = orig_buf.get_name()
-            try:
-                V.graph.buffers[V.graph.buffers.index(orig_buf)] = new_buf
-            except ValueError:
-                pass
-            V.graph.name_to_buffer[orig_buf_name] = new_buf
-            name_to_buf[orig_buf_name] = new_sched_buf
-            # renames[orig_buf_name] = new_buf_name
-            new_buf.name = orig_buf_name
-            new_sched_buf.defining_op.set_read_writes(new_sched_buf.defining_op.read_writes.rename({new_buf_name: orig_buf_name}))
-            new_sched_buf.users = orig_sched_buf.users
+        orig_buf = orig_sched_buf.node
+        orig_buf_name = orig_buf.get_name()
+        try:
+            V.graph.buffers[V.graph.buffers.index(orig_buf)] = new_buf
+        except ValueError:
+            pass
+        V.graph.name_to_buffer[orig_buf_name] = new_buf
+        name_to_buf[orig_buf_name] = new_sched_buf
+        new_buf.name = orig_buf_name
+        new_sched_buf.defining_op.set_read_writes(new_sched_buf.defining_op.read_writes.rename({new_buf_name: orig_buf_name}))
+        new_sched_buf.users = orig_sched_buf.users
         # log.warn(f"renames: {renames}")
         # for snode in snodes:
         #     if hasattr(snode, "snodes"):
@@ -1183,7 +1175,17 @@ def bucket_fsdp_all_gather_concat_on_scheduler_ir(
                     orig_wait_snode_output = orig_wait_snode.outputs[-1]
                     out_snode_output = out_snode.outputs[-1]
                     # sched_bufs_to_replace = [orig_ag_snode_output, orig_wait_snode_output] + [name_to_buf[mutation] for mutation in orig_wait_snode_output.get_mutations()]
-                    replace_scheduler_buffer(orig_sched_bufs=[orig_ag_snode_output], new_sched_buf=out_snode_output)
+                    replace_scheduler_buffer(orig_sched_buf=orig_ag_snode_output, new_sched_buf=out_snode_output)
+                    # This ensures we have the mutation:
+                    """
+                    # buf148 is the output buffer of all_gather
+                    # `orig_wait_snode_output` is the following (required to model the relationship between all_gather and wait_tensor)
+                    buf150: MutationOutput
+                    buf150.layout = NoneLayout(device=device(type='cuda', index=1), size=[0], stride=[0])
+                    buf150.mutations = ['buf148']
+                    buf150.users = [NodeUser(node=SchedulerNode(name='op183'), can_inplace=False, is_weak=False)]
+                    """
+                    out_snode.outputs.append(orig_wait_snode_output)
                     # Remove original AG and wait operations
                     remove_operation(orig_ag_snode.node)
                     remove_operation(orig_wait_snode.node)
