@@ -143,6 +143,8 @@ __all__ = [
     "read_file",
     "tune_gemm_in_file",
     "mgpu_tune_gemm_in_file",
+    "set_rotating_buffer_size",
+    "get_rotating_buffer_size",
 ]
 
 
