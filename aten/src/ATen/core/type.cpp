@@ -61,8 +61,8 @@ std::ostream& operator<<(std::ostream & out, const Type & t) {
     } else {
       out << "Tensor";
     }
-    if (auto ndim = value->sizes().size()) {
-      bool has_valid_strides_info = *ndim > 0 &&
+    if (auto ndim = value->sizes().size(); ndim.has_value()) {
+      bool has_valid_strides_info = ndim > 0 &&
           value->strides().isComplete() && value->strides().size() == ndim;
 
       out << "(";
@@ -87,7 +87,7 @@ std::ostream& operator<<(std::ostream & out, const Type & t) {
           if (i > 0) {
             out << ", ";
           }
-          out << *value->strides()[i];
+          out << value->strides()[i].value();
         }
         out << "]";
       }
@@ -903,7 +903,7 @@ bool ListType::isSubtypeOfExt(const Type& rhs_, std::ostream* why_not) const {
 
 std::string TupleType::str() const {
   std::stringstream ss;
-  if (schema_ && name()) {
+  if (schema_ && name().has_value()) {
     ss << name()->qualifiedName();
   } else {
     ss << "(";
