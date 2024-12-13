@@ -330,14 +330,14 @@ ctc_loss_backward_log_beta_gpu_kernel(scalar_t* __restrict__ log_beta_data,
 
   int64_t b = threadIdx.y + blockIdx.y * blockDim.y;
 
+  if (b >= batch_size)
+    return;
+
   int64_t input_length = input_lengths[b];
   int64_t target_length = target_lengths[b];
   int64_t lp_batch_offset = b*lp_batch_stride;
   int64_t lb_batch_offset = b*lb_batch_stride;
   int64_t tg_batch_offset = tg_batch_offsets[b];
-
-  if (b >= batch_size)
-    return;
 
   if (input_length == 0)
     return;

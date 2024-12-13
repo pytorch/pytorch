@@ -1,7 +1,6 @@
 # mypy: allow-untyped-defs
 # mypy: allow-untyped-decorators
 import torch
-from torch._C import DispatchKey
 from torch.utils._pytree import tree_map, tree_flatten, tree_unflatten
 from .module_tracker import ModuleTracker
 from typing import List, Any, Dict, Optional, Union, Tuple, Iterator
@@ -594,7 +593,7 @@ def _pytreeify_preserve_structure(f):
     return nf
 
 
-class FlopCounterMode(TorchDispatchMode):
+class FlopCounterMode:
     """
     ``FlopCounterMode`` is a context manager that counts the number of flops within its context.
 
@@ -624,6 +623,7 @@ class FlopCounterMode(TorchDispatchMode):
         self.flop_counts: Dict[str, Dict[Any, int]] = defaultdict(lambda: defaultdict(int))
         self.depth = depth
         self.display = display
+        self.mode: Optional[_FlopCounterMode] = None
         if custom_mapping is None:
             custom_mapping = {}
         if mods is not None:
@@ -633,7 +633,6 @@ class FlopCounterMode(TorchDispatchMode):
             **{k: v if getattr(v, "_get_raw", False) else shape_wrapper(v) for k, v in custom_mapping.items()}
         }
         self.mod_tracker = ModuleTracker()
-        self.decomposed_counter = _DecomposedCounterMode(self)
 
     def get_total_flops(self) -> int:
         return sum(self.flop_counts['Global'].values())
@@ -710,17 +709,36 @@ class FlopCounterMode(TorchDispatchMode):
 
         return tabulate.tabulate(values, headers=header, colalign=("left", "right", "right"))
 
+    # NB: This context manager is NOT reentrant
     def __enter__(self):
         self.flop_counts.clear()
         self.mod_tracker.__enter__()
-        super().__enter__()
+        self.mode = _FlopCounterMode(self)
+        self.mode.__enter__()
         return self
 
     def __exit__(self, *args):
-        super().__exit__(*args)
+        assert self.mode is not None
+        b = self.mode.__exit__(*args)
+        self.mode = None  # break cycles
         self.mod_tracker.__exit__()
         if self.display:
             print(self.get_table(self.depth))
+        return b
+
+    def _count_flops(self, func_packet, out, args, kwargs):
+        if func_packet in self.flop_registry:
+            flop_count_func = self.flop_registry[func_packet]
+            flop_count = flop_count_func(*args, **kwargs, out_val=out)  # type: ignore[operator]
+            for par in set(self.mod_tracker.parents):
+                self.flop_counts[par][func_packet] += flop_count
+
+        return out
+
+
+class _FlopCounterMode(TorchDispatchMode):
+    def __init__(self, counter: FlopCounterMode):
+        self.counter = counter
 
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
         kwargs = kwargs if kwargs else {}
@@ -743,30 +761,13 @@ class FlopCounterMode(TorchDispatchMode):
 
             return NotImplemented
 
-        dk = DispatchKey.CompositeImplicitAutograd
-        if torch._C._dispatch_has_kernel_for_dispatch_key(func.name(), dk):
-            # func can be decomposed; redispatch
-            with self.decomposed_counter:
-                return func._op_dk(dk, *args, **kwargs)
-        else:
-            # no further decomposition; execute & count flops
-            out = func(*args, **kwargs)
-            return self._count_flops(func._overloadpacket, out, args, kwargs)
+        # If we don't have func in flop_registry, see if it can decompose
+        if func not in self.counter.flop_registry and func is not torch.ops.prim.device.default:
+            with self:
+                r = func.decompose(*args, **kwargs)
+                if r is not NotImplemented:
+                    return r
 
-    def _count_flops(self, func_packet, out, args, kwargs):
-        if func_packet in self.flop_registry:
-            flop_count_func = self.flop_registry[func_packet]
-            flop_count = flop_count_func(*args, **kwargs, out_val=out)  # type: ignore[operator]
-            for par in set(self.mod_tracker.parents):
-                self.flop_counts[par][func_packet] += flop_count
-
-        return out
-
-class _DecomposedCounterMode(TorchDispatchMode):
-    def __init__(self, counter):
-        self.counter = counter
-
-    def __torch_dispatch__(self, func, types, args=(), kwargs=None):
-        kwargs = kwargs if kwargs else {}
+        # no further decomposition; execute & count flops
         out = func(*args, **kwargs)
         return self.counter._count_flops(func._overloadpacket, out, args, kwargs)

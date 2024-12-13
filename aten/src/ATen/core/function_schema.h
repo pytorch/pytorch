@@ -95,7 +95,7 @@ struct TORCH_API Argument {
   const TypePtr& real_type() const {
     return real_type_;
   }
-  std::optional<int32_t> N() const {
+  const std::optional<int32_t>& N() const {
     return N_;
   }
   const std::optional<IValue>& default_value() const {
@@ -398,7 +398,7 @@ struct TORCH_API FunctionSchema {
   bool is_mutable(std::string_view name) const {
     std::optional<int> index = argumentIndexWithName(name);
     TORCH_INTERNAL_ASSERT(
-        index != std::nullopt, "Schema has no argument named ", name);
+        index.has_value(), "Schema has no argument named ", name);
 
     return is_mutable({c10::SchemaArgType::input, static_cast<size_t>(*index)});
   }
@@ -651,11 +651,11 @@ template<>
       hash = c10::hash_combine(hash, type_hash);
       hash = c10::hash_combine(hash, kwarg_only_hash);
       // hashing optional fields if they exist
-      if (arg.default_value()) {
-        auto default_value_hash = c10::hash<c10::IValue>{}(arg.default_value().value());
+      if (arg.default_value().has_value()) {
+        auto default_value_hash = c10::hash<c10::IValue>{}(*arg.default_value());
         hash = c10::hash_combine(hash, default_value_hash);
       }
-      if (arg.N()) {
+      if (arg.N().has_value()) {
         auto N_hash = std::hash<int64_t>{}(*arg.N());
         hash = c10::hash_combine(hash, N_hash);
       }

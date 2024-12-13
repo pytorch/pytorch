@@ -94,6 +94,7 @@ else()
 
   if(@USE_XNNPACK@)
     append_torchlib_if_found(XNNPACK)
+    append_torchlib_if_found(microkernels-prod)
   endif()
 
   append_torchlib_if_found(caffe2_protos protobuf-lite protobuf protoc)
