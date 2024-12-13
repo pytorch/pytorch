@@ -976,8 +976,8 @@ class CallTorchbindHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
 
 def validate_subgraph_output_types(output: VariableTracker):
-    """Verify that that the output of the subgraph is a tensor
-    or int or or bool, SymBool SymInt
+    """Verify that that the output of the subgraph is a tensor,
+    int, bool, SymBool, or SymInt.
     """
     from . import TensorVariable
 

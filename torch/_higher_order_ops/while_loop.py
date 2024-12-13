@@ -106,7 +106,7 @@ def while_loop(cond_fn, body_fn, carried_inputs):
 
     Restrictions:
 
-        - body_fn must return tensors with the same metadata and dtype (e.g.shape, dtype) as inputs.
+        - body_fn must return tensors or int with the same metadata (e.g.shape, dtype) as inputs.
 
         - body_fn and cond_fn must not in-place mutate the carried_inputs. A clone before the mutation is required.
 
