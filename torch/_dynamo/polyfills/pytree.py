@@ -362,14 +362,17 @@ if python_pytree._cxx_pytree_dynamo_traceable:
         if any(not _is_pytreespec_instance(child) for child in dct.values()):
             raise ValueError(f"Expected a dictionary of TreeSpecs, got: {dct!r}.")
 
-        children: list[PyTreeSpec]
         (
             children,
             metadata,
             entries,
             unflatten_func,
-        ) = optree.tree_flatten_one_level(dct, none_is_leaf=True, namespace="torch")
-        return PyTreeSpec(tuple(children), dict, metadata, entries, unflatten_func)
+        ) = optree.tree_flatten_one_level(  # type: ignore[assignment,var-annotated]
+            dct,  # type: ignore[arg-type]
+            none_is_leaf=True,
+            namespace="torch",
+        )
+        return PyTreeSpec(tuple(children), dict, metadata, entries, unflatten_func)  # type: ignore[arg-type]
 
     @substitute_in_graph(  # type: ignore[arg-type]
         cxx_pytree.tree_flatten,
