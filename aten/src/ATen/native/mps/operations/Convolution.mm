@@ -372,6 +372,7 @@ static Tensor mps_convolution_backward_input(IntArrayRef input_size,
   using namespace at::native::mps;
   using namespace mps;
   bool is3DConv = grad_output_t.dim() == 5;
+  const auto has_strided_api = is_macos_13_or_newer(MacOSVersion::MACOS_VER_15_0_PLUS);
 
   if (!is_macos_13_or_newer(MacOSVersion::MACOS_VER_15_1_PLUS)) {
     // On macOS < 15.1, MPS convolution kernel does not support output channels > 2^16
@@ -388,9 +389,6 @@ static Tensor mps_convolution_backward_input(IntArrayRef input_size,
   auto memory_format = grad_output_t.suggest_memory_format();
   bool is_channels_last = (memory_format == at::MemoryFormat::ChannelsLast) && !is3DConv;
   auto grad_input_t = at::empty(input_size, grad_output_t.options(), std::nullopt);
-
-  // Ensure grad_output_t is contiguous
-  Tensor grad_output_contiguous = grad_output_t.contiguous();
 
   // Avoid "grad_input" when this is being used as transposed convolution
   TensorArg grad_input{grad_input_t, "result", 0};
@@ -420,36 +418,29 @@ static Tensor mps_convolution_backward_input(IntArrayRef input_size,
         assert(0 && "Check should have been done earlier\n");
     }
 
-    MPSShape* gradOutputShape = getMPSShape(grad_output_contiguous, memory_format);
     MPSShape* mps_input_shape = getMPSShape(input_size);
-    NSString* ns_shape_key = [[gradOutputShape valueForKey:@"description"] componentsJoinedByString:@","];
     string key;
     if (is3DConv) {
       key = "mps_3d_convolution_backward_input:" + std::to_string(stride[0]) + ":" + std::to_string(stride[1]) + ":" +
           ":" + std::to_string(stride[2]) + std::to_string(dilation[0]) + ":" + std::to_string(dilation[1]) + ":" +
           std::to_string(dilation[2]) + ":" + std::to_string(padding[0]) + ":" + std::to_string(padding[1]) + ":" +
           std::to_string(padding[2]) + ":" + std::to_string(groups) + ":" + mem_format_key +
-          getTensorsStringKey({grad_output_contiguous, weight_t}) + ":" + string([ns_shape_key UTF8String]);
+          getTensorsStringKey({grad_output_t, weight_t});
 
     } else {
       key = "mps_convolution_backward_input:" + std::to_string(stride[0]) + ":" + std::to_string(stride[1]) + ":" +
           std::to_string(dilation[0]) + ":" + std::to_string(dilation[1]) + ":" + std::to_string(padding[0]) + ":" +
           std::to_string(padding[1]) + ":" + std::to_string(groups) + ":" + mem_format_key +
-          getTensorsStringKey({grad_output_contiguous, weight_t}) + ":" + string([ns_shape_key UTF8String]);
+          getTensorsStringKey({grad_output_t, weight_t});
     }
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
-      MPSGraphTensor* gradOutputTensor =
-          mpsGraphRankedPlaceHolder(mpsGraph, getMPSScalarType(grad_output_contiguous), gradOutputShape);
-      MPSGraphTensor* weightTensor = mpsGraphRankedPlaceHolder(mpsGraph, weight_t);
+      auto gradOutputTensor = mpsGraphRankedPlaceHolder(mpsGraph, getMPSScalarType(grad_output_t));
+      auto weightTensor = mpsGraphRankedPlaceHolder(mpsGraph, weight_t);
 
-      MPSGraphTensor* gradOutputTensorTranspose = gradOutputTensor;
-      if (is_channels_last) {
-        gradOutputTensorTranspose = mps::convertNHWCtoNCHW(mpsGraph, gradOutputTensorTranspose);
-      }
       MPSGraphTensor* gradInputTensor;
       MPSShape* weightOutputShape = mps::getMPSShape(weight_t);
       // Depthwise conv is input feature channels = groups. So I in OIHW has to be 1.
-      bool isDepthwiseConv = ((groups > 1 && (weightOutputShape[1].intValue == 1)) && gradOutputShape.count >= 4 &&
+      bool isDepthwiseConv = ((groups > 1 && (weightOutputShape[1].intValue == 1)) && grad_output_t.ndimension() >= 4 &&
                               weightOutputShape.count >= 4 && !is_channels_last);
 
       if (is3DConv) {
@@ -465,7 +456,7 @@ static Tensor mps_convolution_backward_input(IntArrayRef input_size,
                          padding[1],
                          padding[0],
                          groups);
-        gradInputTensor = [mpsGraph convolution3DDataGradientWithIncomingGradientTensor:gradOutputTensorTranspose
+        gradInputTensor = [mpsGraph convolution3DDataGradientWithIncomingGradientTensor:gradOutputTensor
                                                                           weightsTensor:weightTensor
                                                                             outputShape:mps_input_shape
                                                            forwardConvolutionDescriptor:conv3dDescriptor_
@@ -487,7 +478,7 @@ static Tensor mps_convolution_backward_input(IntArrayRef input_size,
                                                             withDimension:-4
                                                                      name:nil];
         gradInputTensor =
-            [mpsGraph depthwiseConvolution3DDataGradientWithIncomingGradientTensor:gradOutputTensorTranspose
+            [mpsGraph depthwiseConvolution3DDataGradientWithIncomingGradientTensor:gradOutputTensor
                                                                      weightsTensor:weightTransposeTensor
                                                                        outputShape:mps_input_shape
                                                                         descriptor:depthWiseConv3dDescriptor_
@@ -504,7 +495,7 @@ static Tensor mps_convolution_backward_input(IntArrayRef input_size,
                        at::MemoryFormat::Contiguous,
                        groups);
 
-        gradInputTensor = [mpsGraph convolution2DDataGradientWithIncomingGradientTensor:gradOutputTensorTranspose
+        gradInputTensor = [mpsGraph convolution2DDataGradientWithIncomingGradientTensor:gradOutputTensor
                                                                           weightsTensor:weightTensor
                                                                             outputShape:mps_input_shape
                                                            forwardConvolutionDescriptor:conv2dDescriptor_
@@ -516,7 +507,7 @@ static Tensor mps_convolution_backward_input(IntArrayRef input_size,
       newCachedGraph->gradInputTensor_ = gradInputTensor;
     });
 
-    auto gradOutputPlaceholder = Placeholder(cachedGraph->gradOutputTensor_, grad_output_contiguous, gradOutputShape);
+    auto gradOutputPlaceholder = Placeholder(cachedGraph->gradOutputTensor_, grad_output_t);
     auto weightsPlaceholder = Placeholder(cachedGraph->weightTensor_, weight_t);
     auto outputPlaceholder = Placeholder(cachedGraph->gradInputTensor_, *grad_input);
 
