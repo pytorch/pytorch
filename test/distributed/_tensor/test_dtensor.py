@@ -25,6 +25,7 @@ from torch.distributed._tensor.placement_types import (
     Shard,
     TensorMeta,
 )
+from torch.distributed.tensor._api import _shard_tensor
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.distributed.tensor.parallel import (
     ColwiseParallel,
@@ -571,6 +572,45 @@ class DTensorTest(DTensorTestBase):
                     else None
                 )
                 self._attempt_load_from_subprocess(filename, import_string, err_msg)
+
+    @with_comms
+    def test_shard_tensor(self):
+        ws = self.world_size
+        device_mesh = DeviceMesh(self.device_type, list(range(ws)))
+        full_tensor = torch.arange(ws * ws).reshape(ws, ws)
+
+        # Shard by row
+        placements = [Shard(0)]
+        sharded_tensor = _shard_tensor(full_tensor, placements, device_mesh)
+        self.assertEqual(sharded_tensor.size(), torch.Size([ws, ws]))
+        self.assertEqual(sharded_tensor.placements, placements)
+        local_tensor = sharded_tensor.to_local()
+        self.assertEqual(local_tensor, full_tensor[range(self.rank, self.rank + 1), :])
+
+        # Shard by column
+        placements = [Shard(1)]
+        sharded_tensor = _shard_tensor(full_tensor, placements, device_mesh)
+        self.assertEqual(sharded_tensor.size(), torch.Size([ws, ws]))
+        self.assertEqual(sharded_tensor.placements, placements)
+        local_tensor = sharded_tensor.to_local()
+        self.assertEqual(local_tensor, full_tensor[:, range(self.rank, self.rank + 1)])
+
+        # assert full tensor is not changed
+        self.assertEqual(full_tensor, torch.arange(ws * ws).reshape(ws, ws))
+
+    @with_comms
+    def test_shard_tensor_2d(self):
+        ws = self.world_size
+        full_tensor = torch.arange(ws).reshape(2, ws // 2)
+        device_mesh = DeviceMesh(self.device_type, full_tensor)
+
+        # Shard by row and column
+        placements = [Shard(0), Shard(1)]
+        sharded_tensor = _shard_tensor(full_tensor, placements, device_mesh)
+        self.assertEqual(sharded_tensor.size(), torch.Size([2, ws // 2]))
+        self.assertEqual(sharded_tensor.placements, placements)
+        local_tensor = sharded_tensor.to_local()
+        self.assertEqual(local_tensor.item(), self.rank)
 
 
 class DTensorMeshTest(DTensorTestBase):

@@ -27,16 +27,6 @@ debug_assert = False
 
 debug_partitioner = os.environ.get("AOT_PARTITIONER_DEBUG", "0") != "0"
 
-# Today, if you are in a situation where there is "false aliasing"
-# (e.g. you have a bunch of model parameters that all alias the same underlying buffer),
-# our checks for this situation are very slow if these inputs have dynamic shapes.
-# This config is set to ensure that there aren't too many aliased inputs in this situation,
-# so that we error loudly instead of compiling forever.
-# Eventually, we should make these checks faster.
-# For now, however, you can simply turn off dynamic shapes by marking your inputs static
-# when you run into this situation.
-_max_aliased_inputs_with_dynamic_shapes_enabled = 5
-
 static_weight_shapes = True
 
 # Applies CSE to the graph before partitioning
@@ -214,6 +204,10 @@ generate_fake_kernels_from_real_mismatches = False
 # Error on BypassAOTAutogradCache instead of just a warning
 # Used for tests
 strict_autograd_cache = False
+
+# See Note [AOTAutograd Tangent Subclassness for mutated inputs]
+# TODO(ivankobzarev): Remove this config, being able to deduce it compile time.
+disable_guess_zero_tangent_for_mutated_input_subclass = False
 
 if TYPE_CHECKING:
     from torch.utils._config_typing import *  # noqa: F401, F403
