@@ -154,9 +154,8 @@ static PyObject* THPGenerator_cloneState(PyObject* _self, PyObject* noargs) {
 
   // See Note [Acquire lock when using random generators]
   std::scoped_lock<std::mutex> lock(gen.mutex());
-  auto new_generator = gen.clone();
 
-  return THPGenerator_Wrap(new_generator);
+  return THPGenerator_Wrap(gen.clone());
   END_HANDLE_TH_ERRORS
 }
 
@@ -366,7 +365,7 @@ PyObject* pyobj(const Generator& self) {
   return self.pyobj();
 }
 
-PyObject* THPGenerator_Wrap(const Generator& gen) {
+PyObject* THPGenerator_Wrap(Generator gen) {
   if (!gen.defined()) {
     Py_RETURN_NONE;
   }
