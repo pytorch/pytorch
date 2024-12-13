@@ -389,6 +389,9 @@ static Tensor mps_convolution_backward_input(IntArrayRef input_size,
   bool is_channels_last = (memory_format == at::MemoryFormat::ChannelsLast) && !is3DConv;
   auto grad_input_t = at::empty(input_size, grad_output_t.options(), std::nullopt);
 
+  // Ensure grad_output_t is contiguous
+  Tensor grad_output_contiguous = grad_output_t.contiguous();
+
   // Avoid "grad_input" when this is being used as transposed convolution
   TensorArg grad_input{grad_input_t, "result", 0};
   convolution_shape_check(c, grad_input, weight, grad_output, padding, stride, dilation, groups);
@@ -417,7 +420,7 @@ static Tensor mps_convolution_backward_input(IntArrayRef input_size,
         assert(0 && "Check should have been done earlier\n");
     }
 
-    MPSShape* gradOutputShape = getMPSShape(grad_output_t, memory_format);
+    MPSShape* gradOutputShape = getMPSShape(grad_output_contiguous, memory_format);
     MPSShape* mps_input_shape = getMPSShape(input_size);
     NSString* ns_shape_key = [[gradOutputShape valueForKey:@"description"] componentsJoinedByString:@","];
     string key;
@@ -426,17 +429,17 @@ static Tensor mps_convolution_backward_input(IntArrayRef input_size,
           ":" + std::to_string(stride[2]) + std::to_string(dilation[0]) + ":" + std::to_string(dilation[1]) + ":" +
           std::to_string(dilation[2]) + ":" + std::to_string(padding[0]) + ":" + std::to_string(padding[1]) + ":" +
           std::to_string(padding[2]) + ":" + std::to_string(groups) + ":" + mem_format_key +
-          getTensorsStringKey({grad_output_t, weight_t}) + ":" + string([ns_shape_key UTF8String]);
+          getTensorsStringKey({grad_output_contiguous, weight_t}) + ":" + string([ns_shape_key UTF8String]);
 
     } else {
       key = "mps_convolution_backward_input:" + std::to_string(stride[0]) + ":" + std::to_string(stride[1]) + ":" +
           std::to_string(dilation[0]) + ":" + std::to_string(dilation[1]) + ":" + std::to_string(padding[0]) + ":" +
           std::to_string(padding[1]) + ":" + std::to_string(groups) + ":" + mem_format_key +
-          getTensorsStringKey({grad_output_t, weight_t}) + ":" + string([ns_shape_key UTF8String]);
+          getTensorsStringKey({grad_output_contiguous, weight_t}) + ":" + string([ns_shape_key UTF8String]);
     }
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
       MPSGraphTensor* gradOutputTensor =
-          mpsGraphRankedPlaceHolder(mpsGraph, getMPSScalarType(grad_output_t), gradOutputShape);
+          mpsGraphRankedPlaceHolder(mpsGraph, getMPSScalarType(grad_output_contiguous), gradOutputShape);
       MPSGraphTensor* weightTensor = mpsGraphRankedPlaceHolder(mpsGraph, weight_t);
 
       MPSGraphTensor* gradOutputTensorTranspose = gradOutputTensor;
@@ -513,7 +516,7 @@ static Tensor mps_convolution_backward_input(IntArrayRef input_size,
       newCachedGraph->gradInputTensor_ = gradInputTensor;
     });
 
-    auto gradOutputPlaceholder = Placeholder(cachedGraph->gradOutputTensor_, grad_output_t, gradOutputShape);
+    auto gradOutputPlaceholder = Placeholder(cachedGraph->gradOutputTensor_, grad_output_contiguous, gradOutputShape);
     auto weightsPlaceholder = Placeholder(cachedGraph->weightTensor_, weight_t);
     auto outputPlaceholder = Placeholder(cachedGraph->gradInputTensor_, *grad_input);
 
