@@ -655,7 +655,11 @@ from a multi-output view call"
                     t, lambda _, inner_t: view_avoid_dupes_with_primals(inner_t)
                 )
             if isinstance(t, Tensor):
-                return t.detach()
+                out = t.view(t.shape)
+                assert isinstance(t, torch._subclasses.fake_tensor.FakeTensor)
+                if (t_id := t.try_get_nested_int_id()) is not None:
+                    out.register_nested_int_id(t_id)
+                return out
             return t
 
         # This analysis function returns *only* the outputs that are meant to be tangents to the backwards.

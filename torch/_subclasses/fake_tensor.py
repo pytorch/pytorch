@@ -920,12 +920,6 @@ class FakeTensor(Tensor):
         else:
             return [elem.tolist() for elem in self]
 
-    def detach(self) -> torch.Tensor:  # type: ignore[override]
-        out = torch.ops.aten.detach.default(self)
-        if (t_id := self.try_get_nested_int_id()) is not None:
-            out.register_nested_int_id(t_id)
-        return out
-
 
 _MetadataIntLike = Union[IntLikeType, "_PySymInputStub", "_SymIntOutputStub"]
 
