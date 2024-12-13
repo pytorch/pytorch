@@ -18,6 +18,7 @@ from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
 from weakref import WeakSet
 
 import torch._logging.structured
+from torch._guards import CompileId
 from torch._utils_internal import log_trace_structured_event
 from torch.utils._traceback import CapturedTraceback
 
@@ -1157,6 +1158,7 @@ def trace_structured(
     suppress_context: bool = False,
     expect_trace_id: bool = True,  # Whether or not we expect to have a current trace id
     record_logging_overhead: bool = True,  # Whether or not to record the time spent on structured logging
+    compile_id: Optional[CompileId] = None,  # Optional if unavailable in the trace
 ) -> None:
     """
     metadata is an arbitrary JSON compatible struct, but it's expected to not be
@@ -1190,6 +1192,9 @@ def trace_structured(
                 record["frame_id"] = trace_id.compile_id.frame_id
                 record["frame_compile_id"] = trace_id.compile_id.frame_compile_id
                 record["attempt"] = trace_id.attempt
+            elif compile_id is not None:
+                record["frame_id"] = compile_id.frame_id
+                record["frame_compile_id"] = compile_id.frame_compile_id
             else:
                 if expect_trace_id:
                     # Record the stack of the log call to better diagnose why we
