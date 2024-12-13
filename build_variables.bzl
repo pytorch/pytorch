@@ -476,6 +476,7 @@ inductor_core_resources = [
     "torch/csrc/inductor/aoti_torch/oss_proxy_executor.cpp",
     "torch/csrc/inductor/inductor_ops.cpp",
     "torch/csrc/jit/serialization/pickle.cpp",
+    "torch/csrc/dynamo/compiled_autograd.cpp",
 ]
 
 libtorch_core_sources = sorted(

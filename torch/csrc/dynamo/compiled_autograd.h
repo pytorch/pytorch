@@ -324,7 +324,6 @@ class CompiledNodeArgs {
   template <typename T>
   void collect(const std::optional<T>& t) {
     if (cond(t.has_value())) {
-      // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
       collect(*t);
     }
   }
@@ -899,6 +898,511 @@ class SwapSavedVariables {
   StashedVars<c10::SymInt> stashed_symints;
   StashedVars<at::IValue> stashed_ivalues;
 };
+
+template <class T>
+struct dependent_false : std::false_type {};
+
+// NOTE: [Compiled Autograd and backward functions]
+// Built-in autograd nodes have functional apply variants
+// (e.g. MulBackward0_apply_functional). Compiled Autograd's initial graph
+// capture wants to take a variant of this function and proxy it into the graph.
+// Every autograd node defines an apply_with_saved function, that when invoked,
+// proxys a call to a function into the Compiled Autograd graph.
+//
+// Some requirements that we have are:
+// - The proxy'ed function must have inputs that are FX-graphable types.
+// - Windows has a DLL symbol limit of 65536.
+// - Node::apply_with_saved is in libtorch_cpu which does not have direct access
+// to Python
+//
+// There were multiple ways to skin the cat, but what we end up doing is:
+// - for e.g. MulBackward0_apply_functional, we create a new C++ function
+// MulBackward0_apply_functional_ivalue that accepts IValues.
+// - We define how to pack and unpack arbitrary C++ types into IValues.
+// - apply_with_saved passes MulBackward0_apply_functional_ivalue and
+// the IValue arguments to Python via an indirection.
+// In Python, these get proxy'ed into a graph.
+
+// Helper struct for packing/unpacking an arbitrary C++ type into a single
+// IValue. There are various full and partial specializations for IValuePacker
+// to handle packing specific types (like TensorOptions) into an IValue.
+template <typename T>
+struct IValuePacker {
+  // Pack a T into an IValue.
+  static at::IValue pack(const T& t) {
+    return t;
+  }
+  // Unpacks an IValue into a T.
+  static T unpack(const at::IValue& t) {
+    return t.to<T>();
+  }
+  // Returns the TypePtr for the IValue. This is used when
+  // passing the IValue from Python into C++; we use it to
+  // parse the Python object into an IValue.
+  static at::TypePtr packed_type() {
+    if constexpr (std::is_same_v<T, at::Tensor>) {
+      return at::TensorType::get();
+    } else if constexpr (std::is_same_v<T, int64_t>) {
+      return at::IntType::get();
+    } else if constexpr (std::is_same_v<T, c10::SymInt>) {
+      return at::SymIntType::get();
+    } else if constexpr (std::is_same_v<T, bool>) {
+      return at::BoolType::get();
+    } else if constexpr (std::is_same_v<T, double>) {
+      return at::FloatType::get();
+    } else if constexpr (std::is_same_v<T, c10::SymFloat>) {
+      return at::SymFloatType::get();
+    } else if constexpr (std::is_same_v<T, c10::SymBool>) {
+      return at::SymBoolType::get();
+    } else if constexpr (std::is_same_v<T, c10::Layout>) {
+      return at::LayoutType::get();
+    } else if constexpr (std::is_same_v<T, std::string>) {
+      return at::StringType::get();
+    } else if constexpr (std::is_same_v<T, at::Device>) {
+      return at::DeviceObjType::get();
+    } else if constexpr (std::is_same_v<T, at::Scalar>) {
+      return at::NumberType::get();
+    } else if constexpr (std::is_same_v<T, at::MemoryFormat>) {
+      return at::MemoryFormatType::get();
+    } else if constexpr (std::is_same_v<T, at::ScalarType>) {
+      return at::ScalarTypeType::get();
+    } else {
+      // If you got here, you have probably added a member of a new type
+      // to a built-in C++ autograd node.
+      // To get this new type to work with Compiled Autograd, please
+      // either change it to be an IValue-constructible type, or
+      // define how to pack and unpack an object of this time into an IValue.
+      // See NOTE: [Compiled Autograd and backward functions] for context.
+      static_assert(dependent_false<T>::value);
+    }
+  }
+};
+
+template <>
+struct IValuePacker<uint64_t> {
+  static at::TypePtr packed_type() {
+    return at::IntType::get();
+  }
+  static at::IValue pack(const uint64_t& t) {
+    return static_cast<int64_t>(t);
+  }
+  static uint64_t unpack(const at::IValue& t) {
+    return static_cast<uint64_t>(t.toInt());
+  }
+};
+
+template <>
+struct IValuePacker<std::vector<at::SymInt>> {
+  static at::TypePtr packed_type() {
+    return at::ListType::create(at::SymIntType::get());
+  }
+  static at::IValue pack(const std::vector<at::SymInt>& t) {
+    return t;
+  }
+  static std::vector<at::SymInt> unpack(const at::IValue& t) {
+    return t.toSymIntVector();
+  }
+};
+
+template <>
+struct IValuePacker<VariableInfo> {
+  static at::TypePtr packed_type() {
+    return at::TupleType::create({
+        at::LayoutType::get(),
+        at::DeviceObjType::get(),
+        at::ScalarTypeType::get(),
+        at::ListType::create(at::SymIntType::get()),
+        at::BoolType::get(),
+        at::BoolType::get(),
+    });
+  }
+  static at::IValue pack(const VariableInfo& t) {
+    auto tuple = std::make_tuple(
+        t.layout, t.device, t.scalar_type, t.size, t.requires_grad, t.is_empty);
+    return tuple;
+  }
+  static VariableInfo unpack(const at::IValue& t) {
+    auto tuple = t.to<std::tuple<
+        at::Layout,
+        at::Device,
+        at::ScalarType,
+        std::vector<at::SymInt>,
+        bool,
+        bool>>();
+    VariableInfo v;
+    v.layout = std::get<0>(tuple);
+    v.device = std::get<1>(tuple);
+    v.scalar_type = std::get<2>(tuple);
+    v.size = std::get<3>(tuple);
+    v.requires_grad = std::get<4>(tuple);
+    v.is_empty = std::get<5>(tuple);
+    return v;
+  }
+};
+
+template <>
+struct IValuePacker<caffe2::TypeMeta> {
+  static at::TypePtr packed_type() {
+    return at::ScalarTypeType::get();
+  }
+  static at::IValue pack(const caffe2::TypeMeta& t) {
+    return at::typeMetaToScalarType(t);
+  }
+  static caffe2::TypeMeta unpack(const at::IValue& t) {
+    return caffe2::TypeMeta::fromScalarType(t.to<at::ScalarType>());
+  }
+};
+
+inline std::optional<at::ScalarType> optTypeMetaToScalarType(
+    const std::optional<caffe2::TypeMeta>& t) {
+  if (t.has_value()) {
+    return at::typeMetaToScalarType(t.value());
+  } else {
+    return std::nullopt;
+  }
+}
+
+using packed_tensoroptions_t = std::tuple<
+    std::optional<bool>,
+    std::optional<at::MemoryFormat>,
+    std::optional<at::Device>,
+    std::optional<at::ScalarType>,
+    std::optional<at::Layout>,
+    std::optional<bool>>;
+
+inline packed_tensoroptions_t pack_TensorOptions(const at::TensorOptions& t) {
+  auto tuple = std::make_tuple(
+      t.requires_grad_opt(),
+      t.memory_format_opt(),
+      t.device_opt(),
+      optTypeMetaToScalarType(t.dtype_opt()),
+      t.layout_opt(),
+      t.pinned_memory_opt());
+  return tuple;
+}
+inline at::TensorOptions unpack_TensorOptions(
+    const packed_tensoroptions_t& tuple) {
+  at::TensorOptions result;
+  if (std::get<0>(tuple).has_value()) {
+    result = result.requires_grad(std::get<0>(tuple).value());
+  }
+  if (std::get<1>(tuple).has_value()) {
+    result = result.memory_format(std::get<1>(tuple).value());
+  }
+  if (std::get<2>(tuple).has_value()) {
+    result = result.device(std::get<2>(tuple).value());
+  }
+  if (std::get<3>(tuple).has_value()) {
+    result = result.dtype(
+        caffe2::TypeMeta::fromScalarType(std::get<3>(tuple).value()));
+  }
+  if (std::get<4>(tuple).has_value()) {
+    result = result.layout(std::get<4>(tuple).value());
+  }
+  if (std::get<5>(tuple).has_value()) {
+    result = result.pinned_memory(std::get<5>(tuple).value());
+  }
+  return result;
+}
+
+template <>
+struct IValuePacker<at::TensorOptions> {
+  static at::TypePtr packed_type() {
+    return at::TupleType::create(
+        {at::OptionalType::create(at::BoolType::get()),
+         at::OptionalType::create(at::MemoryFormatType::get()),
+         at::OptionalType::create(at::DeviceObjType::get()),
+         at::OptionalType::create(at::ScalarTypeType::get()),
+         at::OptionalType::create(at::LayoutType::get()),
+         at::OptionalType::create(at::BoolType::get())});
+  }
+  static at::IValue pack(const at::TensorOptions& t) {
+    return pack_TensorOptions(t);
+  }
+  static at::TensorOptions unpack(const at::IValue& t) {
+    auto tuple = t.to<packed_tensoroptions_t>();
+    return unpack_TensorOptions(tuple);
+  }
+};
+
+template <>
+struct IValuePacker<TypeAndSize> {
+  static at::TypePtr packed_type() {
+    return at::TupleType::create(
+        {IValuePacker<std::vector<at::SymInt>>::packed_type(),
+         IValuePacker<at::TensorOptions>::packed_type()});
+  }
+  static at::IValue pack(const TypeAndSize& t) {
+    auto tuple = std::make_tuple(t.sym_sizes, pack_TensorOptions(t.options));
+    return tuple;
+  }
+  static TypeAndSize unpack(const at::IValue& t) {
+    auto tuple =
+        t.to<std::tuple<std::vector<at::SymInt>, packed_tensoroptions_t>>();
+    TypeAndSize result;
+    result.sym_sizes = std::get<0>(tuple);
+    result.options = unpack_TensorOptions(std::get<1>(tuple));
+    return result;
+  }
+};
+
+template <typename T>
+struct IValuePacker<std::optional<T>> {
+  static at::TypePtr packed_type() {
+    return at::OptionalType::create(IValuePacker<T>::packed_type());
+  }
+  static at::IValue pack(const std::optional<T>& t) {
+    if (t.has_value()) {
+      return IValuePacker<T>::pack(t.value());
+    } else {
+      return std::nullopt;
+    }
+  }
+  static std::optional<T> unpack(const at::IValue& t) {
+    if (t.isNone()) {
+      return std::nullopt;
+    } else {
+      return IValuePacker<T>::unpack(t);
+    }
+  }
+};
+
+template <typename T>
+struct IValuePacker<std::vector<T>> {
+  static at::TypePtr packed_type() {
+    return at::ListType::create(IValuePacker<T>::packed_type());
+  }
+  static at::IValue pack(const std::vector<T>& t) {
+    if constexpr (std::is_constructible_v<at::IValue, T>) {
+      return t;
+    }
+    if (t.empty()) {
+      auto lst = c10::impl::GenericList(at::AnyType::get());
+      return lst;
+    }
+    auto type_ptr = IValuePacker<T>::pack(t[0]).type();
+    auto lst = c10::impl::GenericList(type_ptr);
+    for (const auto& elt : t) {
+      lst.emplace_back(IValuePacker<T>::pack(elt));
+    }
+    return lst;
+  }
+  static std::vector<T> unpack(const at::IValue& t) {
+    if constexpr (std::is_constructible_v<at::IValue, T>) {
+      return t.to<std::vector<T>>();
+    }
+    std::vector<T> result;
+    auto lst = t.toList();
+    for (const at::IValue& elt : lst) {
+      result.emplace_back(IValuePacker<T>::unpack(elt));
+    }
+    return result;
+  }
+};
+
+template <typename T>
+struct IValuePacker<c10::List<T>> {
+  static at::TypePtr packed_type() {
+    return IValuePacker<std::vector<T>>::packed_type();
+  }
+  static at::IValue pack(const c10::List<T>& t) {
+    return IValuePacker<std::vector<T>>::pack(t.vec());
+  }
+  static c10::List<T> unpack(const at::IValue& t) {
+    return c10::List<T>(IValuePacker<std::vector<T>>::unpack(t));
+  }
+};
+
+template <size_t N>
+struct IValuePacker<std::array<bool, N>> {
+  static at::TypePtr packed_type() {
+    return IValuePacker<std::vector<bool>>::packed_type();
+  }
+  static at::IValue pack(const std::array<bool, N>& t) {
+    std::vector<bool> result(t.begin(), t.end());
+    return IValuePacker<std::vector<bool>>::pack(result);
+  }
+  static std::array<bool, N> unpack(const at::IValue& t) {
+    std::array<bool, N> result;
+    auto packed = IValuePacker<std::vector<bool>>::unpack(t);
+    for (size_t i = 0; i < packed.size(); i++) {
+      result[i] = packed[i];
+    }
+    return result;
+  }
+};
+
+template <>
+struct IValuePacker<at::TensorGeometry> {
+  static at::TypePtr packed_type() {
+    return at::TupleType::create(
+        {IValuePacker<std::vector<at::SymInt>>::packed_type(),
+         IValuePacker<std::vector<at::SymInt>>::packed_type(),
+         at::SymIntType::get()});
+  }
+  static at::IValue pack(const at::TensorGeometry& t) {
+    auto tuple = std::make_tuple(
+        t.sym_sizes().vec(), t.sym_strides().vec(), t.sym_storage_offset());
+    return tuple;
+  }
+  static at::TensorGeometry unpack(const at::IValue& t) {
+    auto tuple = t.to<std::tuple<
+        std::vector<at::SymInt>,
+        std::vector<at::SymInt>,
+        at::SymInt>>();
+    return at::TensorGeometry(
+        std::get<0>(tuple), std::get<1>(tuple), std::get<2>(tuple));
+  }
+};
+
+template <>
+struct IValuePacker<InputMetadata> {
+  static at::TypePtr packed_type() {
+    return at::TupleType::create(
+        {IValuePacker<at::TensorOptions>::packed_type(),
+         IValuePacker<std::vector<at::SymInt>>::packed_type(),
+         at::BoolType::get()});
+  }
+  static at::IValue pack(const InputMetadata& t) {
+    TORCH_INTERNAL_ASSERT(!t.is_nested_tensor());
+    auto tuple = std::make_tuple(
+        pack_TensorOptions(t.options()),
+        t.shape_as_dim_vector().vec(),
+        t.is_tensor_subclass());
+    return tuple;
+  }
+  static InputMetadata unpack(const at::IValue& t) {
+    auto tuple = t.to<
+        std::tuple<packed_tensoroptions_t, std::vector<at::SymInt>, bool>>();
+
+    return InputMetadata(
+        unpack_TensorOptions(std::get<0>(tuple)),
+        SymIntSmallVec(std::get<1>(tuple)),
+        std::get<2>(tuple),
+        false);
+  }
+};
+
+template <typename T>
+struct IValuePacker<at::OptionalArray<T>> {
+  static at::TypePtr packed_type() {
+    return IValuePacker<std::optional<std::vector<T>>>::packed_type();
+  }
+  static at::IValue pack(const at::OptionalArray<T>& t) {
+    return IValuePacker<std::optional<std::vector<T>>>::pack(t.list);
+  }
+  static at::OptionalArray<T> unpack(const at::IValue& t) {
+    auto result = IValuePacker<std::optional<std::vector<T>>>::unpack(t);
+    if (result.has_value()) {
+      return {result.value()};
+    } else {
+      return {};
+    }
+  }
+};
+
+template <>
+struct IValuePacker<ska::flat_hash_map<std::string, at::IValue>> {
+  static at::TypePtr packed_type() {
+    return at::DictType::create(at::StringType::get(), at::AnyType::get());
+  }
+  static at::IValue pack(const ska::flat_hash_map<std::string, at::IValue>& t) {
+    auto result =
+        c10::impl::GenericDict(at::StringType::get(), at::AnyType::get());
+    for (const auto& [key, value] : t) {
+      result.insert(key, value);
+    }
+    return result;
+  }
+  static ska::flat_hash_map<std::string, at::IValue> unpack(
+      const at::IValue& t) {
+    auto dct = t.toGenericDict();
+    auto result = ska::flat_hash_map<std::string, at::IValue>();
+    for (const auto& entry : dct) {
+      result.insert({entry.key().to<std::string>(), entry.value()});
+    }
+    return result;
+  }
+};
+
+using saved_data_t = ska::flat_hash_map<std::string, at::IValue>;
+
+struct SavedState {
+  SavedState() = default;
+
+  explicit SavedState(std::vector<at::IValue> stack_)
+      : stack(std::move(stack_)) {}
+
+  std::vector<at::IValue> stack;
+  int64_t idx = 0;
+
+  template <typename T>
+  void pack(const T& t) {
+    stack.emplace_back(IValuePacker<T>::pack(t));
+  }
+  template <typename T>
+  T unpack() {
+    return IValuePacker<T>::unpack(std::move(stack[idx++]));
+  }
+
+  void pack_saved_data(const ska::flat_hash_map<std::string, at::IValue>& dct) {
+    std::vector<std::string> keys;
+    std::vector<at::IValue> values;
+    for (const auto& [key, value] : dct) {
+      keys.emplace_back(key);
+      values.emplace_back(value);
+    }
+    pack(keys);
+    for (const auto& value : values) {
+      pack(value);
+    }
+  }
+
+  saved_data_t unpack_saved_data() {
+    ska::flat_hash_map<std::string, at::IValue> dct;
+    auto keys = unpack<std::vector<std::string>>();
+    for (const auto& key : keys) {
+      dct.insert({key, std::move(stack[idx++])});
+    }
+    return dct;
+  }
+};
+
+struct TORCH_API PyCompilerInterface {
+  virtual ~PyCompilerInterface(){};
+  virtual variable_list call_function(
+      PyObject* py_compiler,
+      const char* name,
+      functional_apply_t fn,
+      const variable_list& inputs,
+      const ivalue_list& saved_state,
+      int64_t num_outputs,
+      const std::string& debug,
+      const std::vector<at::TypePtr>& saved_state_schema,
+      bool builtin) {
+    TORCH_INTERNAL_ASSERT(false, "Needs to be overridden");
+  }
+  virtual variable_list call_copy_slices_prologue(
+      PyObject* py_compiler,
+      const variable_list& inputs,
+      const at::TensorGeometry& base,
+      const at::TensorGeometry& view) {
+    TORCH_INTERNAL_ASSERT(false, "Needs to be overridden");
+  }
+  virtual variable_list call_copy_slices_epilogue(
+      PyObject* py_compiler,
+      const std::vector<bool>& needs_input_grad,
+      const at::Tensor& result,
+      const variable_list& res,
+      const at::Tensor& grad_slice) {
+    TORCH_INTERNAL_ASSERT(false, "Needs to be overridden");
+  }
+};
+
+TORCH_API const std::unique_ptr<PyCompilerInterface>& getPyCompilerInterface();
+TORCH_API void setPyCompilerInterface(
+    std::unique_ptr<PyCompilerInterface>&& impl);
+TORCH_API void resetPyCompilerInterface();
 
 } // namespace torch::dynamo::autograd
 

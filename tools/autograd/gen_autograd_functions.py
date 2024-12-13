@@ -7,7 +7,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import Sequence
 
 from torchgen.api.autograd import (
     Derivative,
@@ -47,10 +47,6 @@ from torchgen.utils import FileManager
 from .gen_inplace_or_view_type import VIEW_FUNCTIONS
 
 
-if TYPE_CHECKING:
-    from collections.abc import Sequence
-
-
 FUNCTION_DECLARATION = CodeTemplate(
     """\
 #ifdef _WIN32
@@ -68,6 +64,7 @@ struct TORCH_API ${op} : public ${superclass} {
   }
   ${will_release_variables}
   void compiled_args(CompiledNodeArgs& args) override;
+  ivalue_list get_state();
   variable_list apply_with_saved(const variable_list& inputs, SwapSavedVariables& saved) override;
   ${saved_variables}
   ${saved_list_sizes}
@@ -107,6 +104,13 @@ static variable_list ${op}_apply_functional(
   ${body}
   return grad_inputs;
 }
+static variable_list ${op}_apply_functional_ivalue(const variable_list& grads, const ivalue_list& stack)
+{
+  auto state = SavedState(stack);
+  auto needs_input_grad = state.unpack<std::array<bool, ${num_inputs}>>();
+  ${saved_var_dequeues}
+  return ${op}_apply_functional(variable_list(grads), needs_input_grad${,apply_functional_args});
+}
 
 variable_list ${op}::apply(variable_list&& grads) {
   ${thread_lock}
@@ -120,11 +124,38 @@ void ${op}::compiled_args(CompiledNodeArgs& args) {
     ${compiled_args}
 }
 variable_list ${op}::apply_with_saved(const variable_list& grads, SwapSavedVariables& saved) {
-    ${apply_with_saved_before}
-    variable_list result = apply(variable_list(grads));
-    ${apply_with_saved_after}
-    return result;
+  ${apply_with_saved_before}
+
+  variable_list result;
+  auto state = get_state();
+  ${compute_schema}
+  const auto& interface = torch::dynamo::autograd::getPyCompilerInterface();
+  result = interface->call_function(
+      saved.get_py_compiler(),
+      "apply_functional",
+      ${op}_apply_functional_ivalue,
+      grads,
+      state,
+      num_outputs(),
+      name(),
+      schema,
+      /*builtin*/true);
+  
+
+  ${apply_with_saved_after}
+  return result;
 }
+ivalue_list ${op}::get_state() {
+  SavedState saved_state;
+  ${unpacks}
+  ${compute_needs_input_grad}
+  saved_state.pack(needs_input_grad);
+  ${get_state}
+  std::vector<std::optional<InputMetadata>> input_metadata = collect_input_metadata(next_edges());
+  saved_state.pack(input_metadata);
+  return saved_state.stack;
+}
+
 """
 )
 
@@ -993,14 +1024,41 @@ PyObject* THP${op}_${name}_getter(THPCppFunction *self, void *_unused) {
         f"{T} {x}"
         for T, x in zip(apply_functional_args_ref_types, apply_functional_args)
     ]
+    get_state = "\n".join(
+        f"saved_state.pack({name});" for name in apply_functional_args
+    )
+    saved_var_dequeues = []
+    for typ, name in zip(apply_functional_args_ref_types, apply_functional_args):
+        if typ.endswith("&"):
+            typ = typ[:-1]
+        saved_var_dequeues.append(f"auto {name} = state.unpack<{typ}>();")
+
+    schema_args = [f"std::array<bool, {len(input_name_to_idx)}>"]
+    for typ in apply_functional_args_ref_types:
+        if typ.endswith("&"):
+            typ = typ[:-1]
+        if typ.startswith("const"):
+            typ = typ[5:]
+        schema_args.append(typ.strip())
+    compute_schema = ["std::vector<at::TypePtr> schema = {"]
+    for arg in schema_args:
+        compute_schema.append(
+            f"  torch::dynamo::autograd::IValuePacker<{arg}>::packed_type(),"
+        )
+    # compute_schema.append(
+    #     f"    torch::dynamo::autograd::IValuePacker<std::vector<std::optional<InputMetadata>>>::packed_type()"
+    # )
+    compute_schema.append("};")
 
     return template.substitute(
         unpacks="\n".join(unpack),
         op=info.op,
+        compute_schema="\n".join(compute_schema),
         apply_functional_args=apply_functional_args,
         apply_functional_args_signature=apply_functional_args_signature,
         compute_needs_input_grad=compute_needs_input_grad,
         num_inputs=len(input_name_to_idx),
+        saved_var_dequeues="\n".join(saved_var_dequeues),
         compute_index_ranges=compute_index_ranges,
         saved_variables=saved_variables,
         release_variables=release_variables,
@@ -1015,4 +1073,5 @@ PyObject* THP${op}_${name}_getter(THPCppFunction *self, void *_unused) {
         compiled_args=compiled_args,
         apply_with_saved_before=apply_with_saved_before,
         apply_with_saved_after=apply_with_saved_after,
+        get_state=get_state,
     )
