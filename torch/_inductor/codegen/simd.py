@@ -902,7 +902,7 @@ class SIMDKernel(Kernel):
                 # This arg points to a buf that has been sliced.
                 # We need to count each individual slice to have
                 # a better estimation.
-                indices: OrderedSet[Any] = OrderedSet()
+                indices = OrderedSet[Any]()
                 no_index_dep_count = 0
                 for dep in buf_accesses[arg]:
                     if isinstance(dep, (StarDep, WeakDep)):
@@ -1161,11 +1161,11 @@ class SIMDScheduling(BaseScheduling):
 
     def generate_node_schedule(self, nodes, numel, rnumel):
         node_schedule: List[Any] = []
-        done: OrderedSet[scheduler.BaseSchedulerNode] = OrderedSet()
+        done = OrderedSet[scheduler.BaseSchedulerNode]()
         # Writes with a reduced shape, meaning they are only present once the
         # reduction loop has ended
-        not_ready_yet_nodes: OrderedSet[str] = OrderedSet()
-        current_loop_buffer_usage: OrderedSet[str] = OrderedSet()
+        not_ready_yet_nodes = OrderedSet[str]()
+        current_loop_buffer_usage = OrderedSet[str]()
         maybe_split_index: Optional[int] = None
 
         def fits_in_main_body(n):
@@ -1446,7 +1446,7 @@ class SIMDScheduling(BaseScheduling):
             with kernel.set_subgraph_body("<STORE_OUTPUT>"):
                 for node in epilogue_nodes:
                     node.codegen(kernel.split_and_set_ranges(node.get_ranges()))
-                kernel.cse.invalidate(set())
+                kernel.cse.invalidate(OrderedSet())
 
             for input_name, buffer in kernel.named_input_nodes.items():
                 subgraph_name = f"<LOAD_INPUT_{input_name}>"
@@ -1463,7 +1463,7 @@ class SIMDScheduling(BaseScheduling):
                                         prologue_node.get_ranges()
                                     )
                                 )
-                            kernel.cse.invalidate(set())
+                            kernel.cse.invalidate(OrderedSet())
 
         if not isinstance(partial_code, str):
             partial_code.finalize_hook("<DEF_KERNEL>")
@@ -1617,7 +1617,7 @@ class SIMDScheduling(BaseScheduling):
             for dep in itertools.chain.from_iterable(dep_sources)
             if dep.name not in V.graph.removed_buffers and isinstance(dep, MemoryDep)
         ]
-        write_names = {dep.name for dep in rw.writes}
+        write_names = OrderedSet(dep.name for dep in rw.writes)
 
         tilings: List[CandidateTiling] = []
 
@@ -1698,7 +1698,7 @@ class SIMDScheduling(BaseScheduling):
                         break
             return default_tiling
 
-        seen_names: OrderedSet[str] = OrderedSet()
+        seen_names = OrderedSet[str]()
         candidate_tiles: Counter[Any] = collections.Counter()
         for node in EnableReduction.filter(node_schedule):
             for tiling in cls.candidate_tilings(node):
@@ -1743,7 +1743,7 @@ class SIMDScheduling(BaseScheduling):
                 for node in EnableReduction.filter(node_schedule)
                 if isinstance(node, scheduler.SchedulerNode)
             ]
-            new_tilings: OrderedSet[Tuple[sympy.Expr]] = OrderedSet()
+            new_tilings = OrderedSet[Tuple[sympy.Expr]]()
             for node_range in node_ranges:
                 # Collapse leading dims, to fit in the maximum dimensionality.
                 num_leading_dims = max(0, len(node_range) - config.triton.max_tiles)
