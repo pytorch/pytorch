@@ -339,7 +339,13 @@ if python_pytree._cxx_pytree_dynamo_traceable:
         if any(not _is_pytreespec_instance(child) for child in children):
             raise ValueError(f"Expected a tuple of PyTreeSpecs, got: {children!r}.")
         handler = optree.register_pytree_node.get(tuple, namespace="torch")  # type: ignore[attr-defined]
-        return PyTreeSpec(tuple(children), tuple, None, None, handler.unflatten_func)
+        return PyTreeSpec(
+            tuple(children),
+            tuple,
+            None,
+            tuple(range(len(children))),
+            handler.unflatten_func,
+        )
 
     @substitute_in_graph(  # type: ignore[arg-type]
         cxx_pytree.treespec_dict,
@@ -355,6 +361,8 @@ if python_pytree._cxx_pytree_dynamo_traceable:
         dct = dict(mapping, **kwargs)
         if any(not _is_pytreespec_instance(child) for child in dct.values()):
             raise ValueError(f"Expected a dictionary of TreeSpecs, got: {dct!r}.")
+
+        children: list[PyTreeSpec]
         (
             children,
             metadata,
