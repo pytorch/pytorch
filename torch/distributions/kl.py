@@ -517,12 +517,21 @@ def _kl_bernoulli_poisson(p, q):
 
 @register_kl(Beta, ContinuousBernoulli)
 def _kl_beta_continuous_bernoulli(p, q):
-    return (
+    kl_unscaled = (
         -p.entropy()
         - p.mean * q.logits
         - torch.log1p(-q.probs)
         - q._cont_bern_log_norm()
     )
+    if p._has_default_scale_parameters():
+        return kl_unscaled
+
+    scale_adjustment = (
+        p.scale
+        * (p.scale - 1)
+        * torch.digamma(p.concentration1 + p.concentration0)  # Scaling term
+    )
+    return kl_unscaled + scale_adjustment
 
 
 @register_kl(Beta, Pareto)
@@ -532,12 +541,11 @@ def _kl_beta_infinity(p, q):
 
 @register_kl(Beta, Exponential)
 def _kl_beta_exponential(p, q):
-    return (
-        -p.entropy()
-        - q.rate.log()
-        + q.rate * (p.concentration1 / (p.concentration1 + p.concentration0))
-    )
-
+    kl_unscaled = -p.entropy() - q.rate.log() + q.rate * p.mean
+    if p._has_default_scale_parameters():
+        return kl_unscaled
+    scaled_beta_term = q.rate * (p.mean * p.scale + p.location)
+    return kl_unscaled + scaled_beta_term
 
 @register_kl(Beta, Gamma)
 def _kl_beta_gamma(p, q):
@@ -546,7 +554,7 @@ def _kl_beta_gamma(p, q):
     t3 = (q.concentration - 1) * (
         p.concentration1.digamma() - (p.concentration1 + p.concentration0).digamma()
     )
-    t4 = q.rate * p.concentration1 / (p.concentration1 + p.concentration0)
+    t4 = q.rate * p.mean
     return t1 + t2 - t3 + t4
 
 
