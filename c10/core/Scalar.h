@@ -19,6 +19,7 @@
 #include <c10/util/TypeCast.h>
 #include <c10/util/complex.h>
 #include <c10/util/intrusive_ptr.h>
+#include <c10/util/overflows.h>
 
 namespace c10 {
 
@@ -77,9 +78,11 @@ class C10_API Scalar {
 #endif
 #if defined(__linux__) && !defined(__ANDROID__)
   static_assert(
-      std::is_same_v<long, int64_t>,
-      "int64_t is the same as long on Linux");
+      sizeof(void*) != 8 || std::is_same_v<long, int64_t>,
+      "int64_t is the same as long on 64 bit Linux");
+#if LONG_MAX != INT_MAX
   Scalar(long long vv) : Scalar(vv, true) {}
+#endif /* not 32-bit system */
 #endif
 
   Scalar(uint16_t vv) : Scalar(vv, true) {}

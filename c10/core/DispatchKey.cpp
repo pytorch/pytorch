@@ -84,6 +84,8 @@ const char* toString(DispatchKey t) {
 
     case DispatchKey::Quantized:
       return "Quantized";
+    case DispatchKey::QuantizedPrivateUse1:
+      return "QuantizedPrivateUse1";
     case DispatchKey::CustomRNGKeyId:
       return "CustomRNGKeyId";
     case DispatchKey::MkldnnCPU:

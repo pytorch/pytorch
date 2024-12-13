@@ -1,12 +1,16 @@
 # mypy: allow-untyped-defs
 import functools
+from typing import Dict
+
+import sympy
 
 from torch._inductor import config
-from torch._inductor.codegen.simd import IterationRangesRoot
+from torch._inductor.codegen.simd import IterationRangesRoot, prefix_is_reduction
 from torch._inductor.codegen.triton import triton_compute_type, TritonKernel
 from torch._inductor.runtime.triton_heuristics import split_scan_grid
-from torch._prims_common import prod
 from torch.utils._sympy.functions import CeilDiv
+
+from ..utils import sympy_product
 
 
 class TritonSplitScanKernel(TritonKernel):
@@ -27,13 +31,15 @@ class TritonSplitScanKernel(TritonKernel):
 
     def __init__(
         self,
-        *groups,
+        tiling: Dict[str, sympy.Expr],
         pid_cache=None,
+        fixed_config=None,
         **kwargs,
     ) -> None:
         assert pid_cache is None, "not supported"
+        assert fixed_config is None, "not supported"
         super().__init__(
-            *groups,
+            tiling,
             **kwargs,
         )
         self.no_x_dim = True
@@ -45,17 +51,17 @@ class TritonSplitScanKernel(TritonKernel):
         return False
 
     def initialize_range_tree(self, pid_cache):
-        prefixes = "yxr"
+        prefixes = ["y", "x", "r0_"]
         assert len(self.numels) <= len(
             prefixes
         ), "z dimension not supported for split scan"
         active_prefixes = prefixes[len(prefixes) - len(self.numels) :]
 
-        grid_dims = "rxy"
-        for numel, prefix in zip(self.numels, active_prefixes):
-            is_reduction = prefix == "r"
-            tensor_dim = 0 if is_reduction else None
-            grid_dim = grid_dims.find(prefix)
+        grid_dims = {"r0_": 0, "x": 1, "y": 2}
+        for prefix in active_prefixes:
+            numel = self.numels[prefix]
+            tensor_dim = 0 if prefix_is_reduction(prefix) else None
+            grid_dim = grid_dims[prefix]
             self.range_trees.append(
                 IterationRangesRoot(
                     f"{prefix}index",
@@ -97,7 +103,17 @@ class TritonSplitScanKernel(TritonKernel):
 
         assert len(self.numels) == 2, "Unexpected tiling"
         min_rblock = config.triton.min_split_scan_rblock
-        max_blocks = prod(self.numels[:-1]) * CeilDiv(self.numels[-1], min_rblock)
+        reduction_numel = sympy_product(
+            numel
+            for prefix, numel in self.numels.items()
+            if prefix_is_reduction(prefix)
+        )
+        pointwise_numel = sympy_product(
+            numel
+            for prefix, numel in self.numels.items()
+            if not prefix_is_reduction(prefix)
+        )
+        max_blocks = pointwise_numel * CeilDiv(reduction_numel, min_rblock)
         nbytes = scratch_nbytes_per_block * max_blocks
         scratch_base, offset = self.args.workspace(nbytes=nbytes, zero_fill=True)
         if offset != 0:
@@ -121,7 +137,7 @@ class TritonSplitScanKernel(TritonKernel):
             dtype=dtype,
         )
 
-        combine_helper_fn = self._lift_helper(combine_fn, 1)
+        combine_helper_fn = self._lift_helper(combine_fn, 1, (dtype,))
         dim = self.triton_tensor_ndim() - 1
         assert dim == 0, ""
 

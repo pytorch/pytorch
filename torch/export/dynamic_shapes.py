@@ -432,11 +432,11 @@ def _process_equalities(
         # branch based on the root of the _DerivedConstraint
         if not isinstance(constraint.root, _PhantomRoot):
             # either root points to an input source
-            root = get_sources(constraint.root.t_id, constraint.root.dim)[0]  # type: ignore[assignment]
+            root = get_sources(constraint.root.t_id, constraint.root.dim)[0]
         else:
             # or root points to a phantom symbol
             if constraint.root.name in phantom_symbols:
-                root = phantom_symbols[constraint.root.name]  # type: ignore[assignment]
+                root = phantom_symbols[constraint.root.name]
             else:
                 # create a phantom symbol in the shape env based on the _PhantomRoot
                 root = shape_env.create_symbol(
@@ -445,7 +445,7 @@ def _process_equalities(
                     dynamic_dim=torch.fx.experimental.symbolic_shapes.DimDynamic.DYNAMIC,
                     constraint_dim=constraint.root.constraint_range,
                 )
-                phantom_symbols[constraint.root.name] = root  # type: ignore[assignment]
+                phantom_symbols[constraint.root.name] = root
 
         fn = constraint.fn
         # A derived equality (source, root, fn) informally corresponds to source = fn(root).
@@ -829,7 +829,7 @@ def _process_dynamic_shapes(
             expr = dim.fn(symbol)
             solution = try_solve(sympy.Eq(expr, tensor.shape[i]), symbol)
             if solution is not None:
-                return int(solution[1])  # type: ignore[call-overload]
+                return int(solution[1])
             else:
                 raise UserError(  # noqa: B904
                     UserErrorType.CONSTRAINT_VIOLATION,
@@ -969,7 +969,7 @@ def _process_dynamic_shapes(
     for dynamic_dims in symbols.values():
         constraints.extend(dynamic_dims)
 
-    return constraints  # type: ignore[return-value]
+    return constraints
 
 
 def _get_dim_name_mapping(
@@ -1066,7 +1066,7 @@ def refine_dynamic_shapes_from_suggested_fixes(
             expr = sympy.sympify(expr)
             if isinstance(expr, sympy.Number):
                 # static, integer
-                shape_fixes[name] = int(expr)  # type: ignore[assignment]
+                shape_fixes[name] = int(expr)
             else:
                 # relation or derived dim
                 shape_fixes[name] = expr
@@ -1102,11 +1102,11 @@ def refine_dynamic_shapes_from_suggested_fixes(
                 else:
                     symbol = next(iter(fix.free_symbols))
                     # try to locate symbol
-                    if symbol.name in shape_fixes:  # type: ignore[attr-defined]
-                        root = shape_fixes[symbol.name]  # type: ignore[attr-defined]
+                    if symbol.name in shape_fixes:
+                        root = shape_fixes[symbol.name]
                     else:
-                        assert symbol.name in name_to_dim  # type: ignore[attr-defined]
-                        root = name_to_dim[symbol.name]  # type: ignore[attr-defined]
+                        assert symbol.name in name_to_dim
+                        root = name_to_dim[symbol.name]
                     # figure out value of fix
                     modulus, remainder = sympy.polys.polytools.div(fix, symbol)
                     dim = root

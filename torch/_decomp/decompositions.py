@@ -305,44 +305,6 @@ def _prelu_kernel_backward(
     return (input_grad, weight_grad)
 
 
-@register_decomposition(aten.rrelu_with_noise)
-@aten.rrelu_with_noise.default.py_impl(DispatchKey.Autograd)
-@out_wrapper()
-@pw_cast_for_opmath
-def rrelu_with_noise(
-    self: Tensor,
-    noise: Tensor,
-    lower: float = 0.125,
-    upper: float = 0.3333333333333333,
-    training: bool = False,
-    generator: Optional[torch.Generator] = None,
-) -> Tensor:
-    assert generator is None
-    if training:
-        not_positive = self <= 0
-        r = aten.uniform(self, lower, upper)
-        output = torch.where(not_positive, self * r, self)
-        noise.copy_(torch.where(not_positive, r, 1))
-        return output
-    else:
-        negative_slope = (lower + upper) / 2
-        return aten.leaky_relu(self, negative_slope)
-
-
-@register_decomposition(aten.rrelu_with_noise_)
-@aten.rrelu_with_noise_.default.py_impl(DispatchKey.Autograd)
-@pw_cast_for_opmath
-def rrelu_with_noise_(
-    self: Tensor,
-    noise: Tensor,
-    lower: float = 0.125,
-    upper: float = 0.3333333333333333,
-    training: bool = False,
-    generator: Optional[torch.Generator] = None,
-) -> Tensor:
-    return self.copy_(rrelu_with_noise(self, noise, lower, upper, training, generator))
-
-
 @register_decomposition(aten.rrelu_with_noise_backward)
 @out_wrapper()
 @pw_cast_for_opmath
@@ -778,8 +740,10 @@ def slice_forward(
 
     if guard_size_oblivious(end_val < start_val):
         end_val = start_val
-    elif statically_known_true(end_val == sys.maxsize) or guard_size_oblivious(
-        end_val > sizes[dim]
+    elif (
+        statically_known_true(end_val == sys.maxsize)
+        or statically_known_true(end_val >= sizes[dim])
+        or guard_size_oblivious(end_val > sizes[dim])
     ):
         end_val = sizes[dim]
 
@@ -1220,7 +1184,7 @@ def _softmax(x: Tensor, dim: int, half_to_float: bool):
 
 
 @register_decomposition(aten._log_softmax)
-@out_wrapper()
+@out_wrapper(exact_dtype=True)
 def _log_softmax(x: Tensor, dim: int, half_to_float: bool):
     # eager log_softmax returns a contiguous tensor. Ensure that decomp also
     # returns a contiguous tensor.
@@ -2800,7 +2764,7 @@ def _index_copy(
 def log_sigmoid_forward(self: Tensor) -> Tuple[Tensor, Tensor]:
     min = torch.minimum(self.new_zeros(()), self)
     z = torch.exp(-torch.abs(self))
-    if self.is_cuda:
+    if self.is_cuda or self.is_xpu:
         buffer = self.new_zeros((0,))
     else:
         buffer = z
@@ -3826,7 +3790,7 @@ def _upsample_linear(
     scales: List[Optional[float]],
 ) -> Tensor:
     # get dimensions of original image
-    n_batch, n_channels = input.shape[:2]
+    n_channels = input.shape[1]
     inp_sizes = input.shape[2:]
     n_dims = len(inp_sizes)
 
@@ -4990,7 +4954,6 @@ def scaled_dot_product_flash_attention_for_cpu(
     attn_mask: Optional[Tensor] = None,
     scale: Optional[float] = None,
 ) -> Tuple[Tensor, Tensor]:
-    dtype = query.dtype
     torch._check(
         torch.is_floating_point(query),
         lambda: f"query must be FP32, FP64, BF16, FP16 but got {query.dtype}",
@@ -5135,6 +5098,40 @@ def isin(elements, test_elements, *, assume_unique=False, invert=False):
         return isin_sorting(
             elements, test_elements, assume_unique=assume_unique, invert=invert
         )
+
+
+@register_decomposition(aten.bernoulli.default)
+def bernoulli(
+    self: torch.Tensor,
+    *,
+    generator: Optional[torch.Generator] = None,
+) -> torch.Tensor:
+    if generator is None:
+        raw_p = torch.rand(self.size(), dtype=torch.float32, device=self.device)
+    else:
+        raw_p = torch.rand(
+            self.size(),
+            generator=generator,
+            dtype=torch.float32,
+            device=self.device,
+        )
+    p = (raw_p < self).to(self.dtype)
+    return p
+
+
+@register_decomposition(aten.bernoulli.p)
+def bernoulli_p(self, p, *, generator: Optional[torch.Generator] = None):
+    if generator is None:
+        raw_p = torch.rand(self.size(), dtype=torch.float32, device=self.device)
+    else:
+        raw_p = torch.rand(
+            self.size(),
+            generator=generator,
+            dtype=self.float32,
+            device=self.device,
+        )
+    p = (raw_p < p).to(self.dtype)
+    return p
 
 
 def isin_default(elements, test_elements, *, invert=False):

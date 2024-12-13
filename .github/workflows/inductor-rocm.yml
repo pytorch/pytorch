@@ -1,22 +1,49 @@
 name: inductor-rocm
 
 on:
-  schedule:
-    # We have several schedules so jobs can check github.event.schedule to activate only for a fraction of the runs.
-    # Also run less frequently on weekends.
-    - cron: 45 0,4,8,12,16,20 * * 1-5
-    - cron: 45 4,12 * * 0,6
-    - cron: 29 8 * * *  # about 1:29am PDT, for mem leak check and rerun disabled tests
+  pull_request:
+    paths:
+      # from "ciflow/inductor" in .github/labeler.yml
+      - 'torch/_decomp/**'
+      - 'torch/_dynamo/**'
+      - 'torch/_export/**'
+      - 'torch/_inductor/**'
+      - 'benchmarks/dynamo/**'
+      - 'torch/_subclasses/fake_tensor.py'
+      - 'torch/_subclasses/fake_utils.py'
+      - 'torch/_subclasses/meta_utils.py'
+      - 'test/distributed/test_dynamo_distributed.py'
+      - 'test/distributed/test_inductor_collectives.py'
+      - 'torch/_functorch/_aot_autograd/**'
+      - 'torch/_functorch/aot_autograd.py'
+      - 'torch/_functorch/partitioners.py'
+      - '.ci/docker/ci_commit_pins/**'
+      - '.github/ci_commit_pins/**'
+      - 'c10/core/Sym*'
+      - 'torch/fx/experimental/symbolic_shapes.py'
+      - 'torch/fx/experimental/recording.py'
+      - 'torch/fx/experimental/sym_node.py'
+      - 'torch/fx/experimental/validator.py'
+      - 'torch/fx/experimental/proxy_tensor.py'
+      - 'test/distributed/_tensor/test_dtensor_compile.py'
+      - 'test/distributed/tensor/parallel/test_fsdp_2d_parallel.py'
+      - 'torch/distributed/_tensor/**'
+      - 'torch/distributed/fsdp/**'
+      - 'torch/csrc/inductor/**'
+      - 'test/cpp/aoti_abi_check/**'
+      - 'test/cpp/aoti_inference/**'
+      # from "module: inductor" in .github/labeler.yml
+      - 'test/inductor/**'
   push:
     branches:
-#     - main
+      - main
       - release/*
     tags:
       - ciflow/inductor-rocm/*
   workflow_dispatch:
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref_name }}-${{ github.ref_type == 'branch' && github.sha }}-${{ github.event_name == 'workflow_dispatch' }}-${{ github.event_name == 'schedule' }}-${{ github.event.schedule }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}-${{ github.event_name == 'schedule' }}-${{ github.event.schedule }}
   cancel-in-progress: true
 
 permissions: read-all
@@ -45,6 +72,7 @@ jobs:
           { config: "inductor", shard: 1, num_shards: 2, runner: "linux.rocm.gpu.2" },
           { config: "inductor", shard: 2, num_shards: 2, runner: "linux.rocm.gpu.2" },
         ]}
+    secrets: inherit
 
   linux-focal-rocm6_2-py3_10-inductor-test:
     permissions:
@@ -57,3 +85,4 @@ jobs:
       build-environment: linux-focal-rocm6.2-py3.10
       docker-image: ${{ needs.linux-focal-rocm6_2-py3_10-inductor-build.outputs.docker-image }}
       test-matrix:  ${{ needs.linux-focal-rocm6_2-py3_10-inductor-build.outputs.test-matrix }}
+    secrets: inherit
