@@ -10,6 +10,7 @@ struct THPStream {
   int64_t stream_id;
   int64_t device_type;
   int64_t device_index;
+  PyObject* attributes;
 };
 extern TORCH_API PyTypeObject* THPStreamClass;
 
