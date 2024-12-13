@@ -599,7 +599,7 @@ class TestDTensorCompile(torch._dynamo.test_case.TestCase):
 
         @torch.compile(backend=cnt)
         def fn(x):
-            dt = DTensor.from_local(x, mesh, [placement], run_check=False)  # noqa: F841
+            DTensor.from_local(x, mesh, [placement], run_check=False)
 
         x = torch.ones(4, 4, requires_grad=True)
 

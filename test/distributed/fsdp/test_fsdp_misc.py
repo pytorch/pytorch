@@ -857,13 +857,13 @@ class TestFSDPMiscMultiThread(FSDPTestMultiThread):
         torch.cuda.set_device(self.rank)
         # Test CPU
         no_params = nn.ReLU()
-        module = FSDP(no_params)  # noqa: F841
+        FSDP(no_params)
         # Test CUDA
         no_params = nn.ReLU().cuda()
-        module = FSDP(no_params)
+        FSDP(no_params)
         # Test CPU + device_id
         no_params = nn.ReLU()
-        module = FSDP(no_params, device_id=torch.cuda.current_device())  # noqa: F841
+        FSDP(no_params, device_id=torch.cuda.current_device())
         # For modules with no params, wrong device_id will raise error about
         # inconsistency between compute_device and device_id, since compute_device
         # is computed as torch.cuda.current_device when there are no params.

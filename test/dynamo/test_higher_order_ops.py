@@ -1,5 +1,4 @@
 # Owner(s): ["module: dynamo"]
-# ruff: noqa: F841
 import enum
 import functools
 import pprint
@@ -3269,8 +3268,6 @@ class GraphModule(torch.nn.Module):
                 outer_body_fn, ((x, {"test": y}),), {}, hints={"test": True}
             )
             return res
-
-        backend = EagerAndRecordGraphs()
 
         x = torch.randn(2, 4)
         y = torch.ones(4)
