@@ -9,7 +9,6 @@
 #include <torch/csrc/dynamo/extra_state.h>
 #include <torch/csrc/dynamo/guards.h>
 #include <torch/csrc/dynamo/python_compiled_autograd.h>
-#include <torch/csrc/dynamo/variable_tracker_cache.h>
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/python_compat.h>
 #include <torch/csrc/utils/python_numbers.h>
@@ -85,11 +84,11 @@ THPObjectPtr strip_function_call_helper(
 THPObjectPtr strip_function_call(PyObject* name) {
   if (!PyUnicode_Check(name)) {
     PyErr_SetString(PyExc_TypeError, "String expected");
-    return THPObjectPtr::dup(Py_None);
+    return THPObjectPtr::none();
   }
 
   if (PyUnicode_READY(name) != 0)
-    return THPObjectPtr::dup(Py_None);
+    return THPObjectPtr::none();
 
   // TODO: what about endianism?
   auto length = PyUnicode_GET_LENGTH(name);
@@ -122,8 +121,9 @@ PyObject* _strip_function_call(
     PyObject* self,
     PyObject* const* args,
     Py_ssize_t nargs) {
-  if (!_checkParamCount(nargs, 1))
-    return Py_None;
+  if (!_checkParamCount(nargs, 1)) {
+    return THPObjectPtr::none().release();
+  }
   return strip_function_call(args[0]).release();
 }
 
@@ -151,8 +151,6 @@ void initDynamoBindings(PyObject* torch) {
 #ifdef Py_GIL_DISABLED
   PyUnstable_Module_SetGIL(dynamo, Py_MOD_GIL_NOT_USED);
 #endif
-
-  register_variable_tracker_cache(dynamo);
 
   PyObject* eval_frame = torch_c_dynamo_eval_frame_init();
   if (eval_frame == nullptr ||

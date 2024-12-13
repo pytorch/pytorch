@@ -2,6 +2,7 @@
 
 import random
 import sys
+import unittest
 from collections import OrderedDict
 from dataclasses import dataclass
 from typing import List
@@ -10,13 +11,11 @@ import torch
 import torch.nn as nn
 from torch import distributed as dist
 from torch.distributed.utils import _apply_to_tensors, _replace_by_prefix
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
-from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
     parametrize,
     run_tests,
     subtest,
-    TEST_HPU,
     TEST_WITH_DEV_DBG_ASAN,
     TestCase,
 )
@@ -33,25 +32,22 @@ if TEST_WITH_DEV_DBG_ASAN:
     )
     sys.exit(0)
 
-list_device = "hpu" if TEST_HPU else "cuda"
-
 
 class TestUtils(TestCase):
     @parametrize(
-        "device_list",
-        [
-            ["cpu"],
-            [list_device],
-            subtest(["cpu", list_device], name=f"cpu_{list_device}"),
-        ],
+        "devices", [["cpu"], ["cuda"], subtest(["cpu", "cuda"], name="cpu_cuda")]
     )
-    @skip_if_lt_x_gpu(1)
-    def test_apply_to_tensors(self, device_list):
+    def test_apply_to_tensors(self, devices):
+        if "cuda" in devices and (
+            not torch.cuda.is_available() or torch.cuda.device_count() < 1
+        ):
+            raise unittest.SkipTest("Skipped due to lack of GPU")
+
         expected = 0
 
         def get_a_tensor():
             """Return a random tensor on random device."""
-            dev = random.choice(device_list)
+            dev = random.choice(devices)
             shape = random.choice(((1), (2, 3), (4, 5, 6), (7, 8, 9, 10)))
             t = torch.rand(shape).to(dev)
             nonlocal expected
@@ -95,7 +91,6 @@ class TestUtils(TestCase):
         for i, v in enumerate(data):
             self.assertEqual(type(new_data[i]), type(v))
 
-    @skip_if_lt_x_gpu(1)
     def test_replace_by_prefix(self):
         state_dict = {
             "layer.a": torch.tensor(1),
@@ -112,7 +107,6 @@ class TestUtils(TestCase):
         _replace_by_prefix(state_dict, "module.layer.", "layer.")
         assert state_dict == original_state_dict
 
-    @skip_if_lt_x_gpu(1)
     def test_packed_sequence(self):
         """Test to ensure RNN packed sequences are modified correctly."""
         rnn = nn.RNN(5, 5)
@@ -130,7 +124,7 @@ class TestUtils(TestCase):
         self.assertEqual(torch.sum(x), 0)
 
 
-devices = ("cuda", "hpu")
-instantiate_device_type_tests(TestUtils, globals(), only_for=devices)
+instantiate_parametrized_tests(TestUtils)
+
 if __name__ == "__main__":
     run_tests()
