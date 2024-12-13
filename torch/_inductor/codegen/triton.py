@@ -1871,7 +1871,6 @@ class TritonKernel(SIMDKernel):
             return self.loads
 
     def load(self, name: str, index: sympy.Expr):
-        # assert name != "buf148"
         var = self.args.input(name)
         load_counts = self._load_counts
         load_counts[name] += 1

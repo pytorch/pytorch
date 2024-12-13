@@ -16,9 +16,6 @@ from .graph_module import GraphModule
 from .node import Argument, map_aggregate, map_arg, Node, Target
 from .proxy import Proxy
 
-import logging
-log = logging.getLogger(__name__)
-
 
 __all__ = ["Interpreter", "Transformer"]
 
@@ -225,9 +222,7 @@ class Interpreter:
             Any: The result of executing ``n``
         """
         with self._set_current_node(n):
-            # log.warn(f"run_node: n.args: {n.args}, n.kwargs: {n.kwargs}")
             args, kwargs = self.fetch_args_kwargs_from_env(n)
-            # log.warn(f"run_node after fetch: args: {args}, kwargs: {kwargs}")
             assert isinstance(args, tuple)
             assert isinstance(kwargs, dict)
             return getattr(self, n.op)(n.target, args, kwargs)
