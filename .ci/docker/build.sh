@@ -372,6 +372,7 @@ case "$image" in
     # from pytorch/llvm:9.0.1 is x86 specific
     SKIP_LLVM_SRC_BUILD_INSTALL=yes
     INDUCTOR_BENCHMARKS=yes
+    TRITON_CPU=yes
     ;;
   *)
     # Catch-all for builds that are not hardcoded.

@@ -347,7 +347,7 @@ use_experimental_benchmarker: bool = Config(
 )
 
 # enable slow autotuning passes to select algorithms
-max_autotune = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE") == "1"
+max_autotune = True
 
 # enable slow autotuning passes to select pointwise/reductions algorithms
 max_autotune_pointwise = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE_POINTWISE") == "1"
@@ -421,12 +421,9 @@ max_autotune_subproc_terminate_timeout_seconds = 2.0
 # If autotuning in subprocess, whether to use multiple devices
 autotune_multi_device = os.environ.get("TORCHINDUCTOR_AUTOTUNE_MULTI_DEVICE") == "1"
 
-coordinate_descent_tuning = (
-    os.environ.get("TORCHINDUCTOR_COORDINATE_DESCENT_TUNING") == "1"
-)
-coordinate_descent_check_all_directions = (
-    os.environ.get("TORCHINDUCTOR_COORDINATE_DESCENT_CHECK_ALL_DIRECTIONS") == "1"
-)
+coordinate_descent_tuning = True
+coordinate_descent_check_all_directions = False
+
 coordinate_descent_search_radius = int(
     os.environ.get("TORCHINDUCTOR_COORDINATE_DESCENT_RADIUS", "1")
 )
@@ -1359,7 +1356,7 @@ class rocm:
 
 
 # Backend to use for CPU codegen either "cpp" or "triton" (experimental) or "halide" (experimental)
-cpu_backend: Literal["cpp", "triton", "halide"] = "cpp"
+cpu_backend: Literal["cpp", "triton", "halide"] = "triton"
 
 # Backend to use for CUDA codegen either "triton" or "halide" (experimental)
 cuda_backend: Literal["triton", "halide"] = "triton"

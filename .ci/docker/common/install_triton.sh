@@ -26,6 +26,10 @@ fi
 # The logic here is copied from .ci/pytorch/common_utils.sh
 TRITON_PINNED_COMMIT=$(get_pinned_commit ${TRITON_TEXT_FILE})
 
+if [ -n "${TRITON_CPU}" ]; then
+    TRITON_PINNED_COMMIT=8b4787d60228422e7b5edce9f97a02c5df8ae079
+fi
+
 if [ -n "${UBUNTU_VERSION}" ];then
     apt update
     apt-get install -y gpg-agent
@@ -51,6 +55,13 @@ as_jenkins git clone --recursive ${TRITON_REPO} triton
 cd triton
 as_jenkins git checkout ${TRITON_PINNED_COMMIT}
 as_jenkins git submodule update --init --recursive
+if [ -n "${TRITON_CPU}" ]; then
+    echo "##$$## Patching..."
+    cd third_party/cpu/runtime
+    ls -al
+    as_jenkins sed -i -e "s/FLT16_MAX/FLT16_MAX_BOGUS/g" cpu_runtime.cpp
+    cd ../../../
+fi
 cd python
 
 # TODO: remove patch setup.py once we have a proper fix for https://github.com/triton-lang/triton/issues/4527

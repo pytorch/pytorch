@@ -3,6 +3,23 @@
 BRANCH=$(git rev-parse --abbrev-ref HEAD)
 DOWNLOAD_PYTORCH_ORG="https://download.pytorch.org/whl"
 
+TRITON_REPO="https://github.com/triton-lang/triton-cpu"
+TRITON_COMMIT_ID="$(cat .ci/docker/ci_commit_pins/triton-cpu.txt)"
+echo "HACK TRITON_REPO: ${TRITON_REPO}"
+echo "HACK TRITON_COMMIT_ID: ${TRITON_COMMIT_ID}"
+
+# force-reinstall to ensure the pinned version is installed
+git clone --recursive ${TRITON_REPO} triton
+cd triton
+git checkout ${TRITON_COMMIT_ID}
+git submodule update --init --recursive
+cd python
+CC=$(which clang) \
+pip install .
+
+echo "HACK TRITON: $(pip list)"
+exit $?
+
 if [[ -z "${USE_XPU}" ]]; then
     # Default install from PyTorch source
 
@@ -24,8 +41,14 @@ else
         pip install --index-url ${DOWNLOAD_PYTORCH_ORG}/nightly/ ${TRITON_VERSION}+git${TRITON_XPU_COMMIT_ID}
     else
         TRITON_XPU_REPO="https://github.com/intel/intel-xpu-backend-for-triton"
-
         # force-reinstall to ensure the pinned version is installed
-        pip install --force-reinstall "git+${TRITON_XPU_REPO}@${TRITON_XPU_COMMIT_ID}#subdirectory=python"
-    fi
-fi
+        git clone --recursive ${TRITON_REPO} triton
+        cd triton
+        git checkout ${TRITON_COMMIT_ID}
+        git submodule update --init --recursive
+        cd python
+        CC=$(which clang) \
+        pip install .
+     fi
+ fi
+
