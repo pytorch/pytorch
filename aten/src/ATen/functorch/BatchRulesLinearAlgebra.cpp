@@ -492,6 +492,7 @@ _scaled_dot_product_flash_attention_batch_rule(
 ) {
   if (dropout_p > 0) {
     auto maybe_layer = maybeCurrentDynamicLayer();
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
     RandomnessType randomness = maybe_layer->randomness();
     check_randomness(randomness, query_bdim.has_value() || key_bdim.has_value() || value_bdim.has_value());
   }
@@ -543,6 +544,7 @@ fourOutputs _scaled_dot_product_efficient_attention_batch_rule(
 ) {
   if (dropout_p > 0) {
     auto maybe_layer = maybeCurrentDynamicLayer();
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
     RandomnessType randomness = maybe_layer->randomness();
     check_randomness(randomness, query_bdim.has_value() || key_bdim.has_value() || value_bdim.has_value());
   }
@@ -585,6 +587,7 @@ _scaled_dot_product_cudnn_attention_batch_rule(
 ) {
   if (dropout_p > 0) {
     auto maybe_layer = maybeCurrentDynamicLayer();
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
     RandomnessType randomness = maybe_layer->randomness();
     check_randomness(randomness, query_bdim.has_value() || key_bdim.has_value() || value_bdim.has_value());
   }

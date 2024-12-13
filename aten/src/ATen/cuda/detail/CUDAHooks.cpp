@@ -470,6 +470,6 @@ void CUDAHooks::deviceSynchronize(DeviceIndex device_index) const {
 using at::CUDAHooksRegistry;
 using at::RegistererCUDAHooksRegistry;
 
-REGISTER_CUDA_HOOKS(CUDAHooks);
+REGISTER_CUDA_HOOKS(CUDAHooks)
 
 } // namespace at::cuda::detail

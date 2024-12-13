@@ -39,10 +39,6 @@ from torch.utils._sympy.symbol import (
 
 from ..._dynamo.utils import counters
 from .. import config, ir, scheduler
-from ..analyze_preserves_zero_mask import (
-    can_codegen_without_upcasts,
-    prologue_preserves_zero_mask,
-)
 from ..codecache import code_hash
 from ..dependencies import MemoryDep, StarDep, WeakDep
 from ..ir import IRNode, TritonTemplateBuffer
@@ -55,6 +51,7 @@ from ..utils import (
     get_dtype_size,
     IndentedBuffer,
     Placeholder,
+    prefix_is_reduction,
     sympy_index_symbol,
     sympy_product,
     sympy_subs,
@@ -79,9 +76,7 @@ fusion_log = torch._logging.getArtifactLogger(__name__, "fusion")
 
 pexpr = PythonPrinter().doprint
 
-
-def prefix_is_reduction(prefix: str) -> bool:
-    return prefix[0] == "r"
+all_prefixes = OrderedSet(["z", "y", "x", "r0_", "r1_"])
 
 
 @dataclasses.dataclass
@@ -363,7 +358,7 @@ class SIMDKernel(Kernel):
         self.range_trees: List[IterationRangesRoot] = []
         self.range_tree_nodes: Dict[sympy.Symbol, IterationRangesEntry] = {}
         self.iter_vars_count = itertools.count()
-        self.inside_reduction = self.numels["r"] != 1
+        self.inside_reduction = features.is_reduction()
         self.cooperative_reduction: bool = (
             override_cooperative_reduction
             if override_cooperative_reduction is not None
@@ -389,6 +384,12 @@ class SIMDKernel(Kernel):
         self.simplify_indexing = simplify_indexing
         self.initialize_range_tree(pid_cache)
 
+    @property
+    @cache_on_self
+    @no_type_check  # https://github.com/python/mypy/issues/17184
+    def num_reduction_dims(self) -> int:
+        return sum(prefix_is_reduction(prefix) for prefix in self.numels)
+
     def dtype_to_str(self, dtype: torch.dtype) -> str:
         raise NotImplementedError
 
@@ -399,32 +400,40 @@ class SIMDKernel(Kernel):
     def want_no_x_dim(self):
         return False
 
-    def construct_range_trees(self, pid_cache, inside_reduction, numels, no_x_dim):
-        no_r_dim = not inside_reduction or numels["r"] == 1
+    def initialize_range_tree(self, pid_cache):
+        active_prefixes = OrderedSet(
+            prefix for prefix in all_prefixes if prefix in self.numels
+        )
+        no_r_dim = not self.inside_reduction or not self.features.is_reduction()
 
-        prefixes = "zyxr"
-        active_prefixes = prefixes[-len(numels) :]
+        def filtered_index_map(seq, mask) -> Dict[Any, int]:
+            return {
+                val: idx for idx, val in enumerate(val for val in seq if val in mask)
+            }
 
-        grid_dims = "xyz"
-        if no_x_dim:
-            tensor_dims = "r"
+        grid_dims = ["x", "y", "z"]
+        reduction_dims = ["r0_", "r1_"]
+        if self.no_x_dim:
+            tensor_dims = reduction_dims
         elif no_r_dim:
-            tensor_dims = "xyz"
+            tensor_dims = grid_dims
         else:
-            tensor_dims = "xyzr"
+            tensor_dims = grid_dims + reduction_dims
 
-        tensor_dims = "".join(p for p in tensor_dims if p in active_prefixes)
+        # Filter out unused tensor dims.
+        # Convert to dicts for O(1) index lookup.
+        tensor_dim_map = filtered_index_map(tensor_dims, active_prefixes)
+        grid_dim_map = filtered_index_map(grid_dims, all_prefixes)
 
-        range_trees = []
         for i, prefix in enumerate(active_prefixes):
             is_reduction = prefix_is_reduction(prefix)
-            tensor_dim = tensor_dims.find(prefix) if prefix in tensor_dims else None
-            grid_dim = None if is_reduction else grid_dims.find(prefix)
+            tensor_dim = tensor_dim_map.get(prefix)
+            grid_dim = grid_dim_map.get(prefix)
             index = i if grid_dim is None else grid_dim
-            range_trees.append(
+            self.range_trees.append(
                 IterationRangesRoot(
                     f"{prefix}index",
-                    numels[prefix],
+                    self.numels[prefix],
                     prefix,
                     index,
                     self,
@@ -432,16 +441,9 @@ class SIMDKernel(Kernel):
                     is_loop=is_reduction and not self.persistent_reduction,
                     tensor_dim=tensor_dim,
                     grid_dim=grid_dim,
-                    has_zdim="z" in active_prefixes,
+                    has_zdim="z" in self.numels,
                 )
             )
-        return range_trees
-
-    def initialize_range_tree(self, pid_cache):
-        range_trees = self.construct_range_trees(
-            pid_cache, self.inside_reduction, self.numels, self.no_x_dim
-        )
-        self.range_trees.extend(range_trees)
 
     def finalize_indexing(self, indices: Sequence[sympy.Expr]):
         """
@@ -540,7 +542,7 @@ class SIMDKernel(Kernel):
 
         @contextlib.contextmanager
         def ctx():
-            if self.numels["r"] == 1:
+            if not self.features.is_reduction():
                 assert not self.inside_reduction
                 yield
                 return
@@ -975,7 +977,7 @@ class SIMDKernel(Kernel):
     def welford_reduce_fallback(self, dtype, value):
         sum_ = ops.reduction(dtype, dtype, "sum", value)
         self.inside_reduction = False
-        rnumel = ops.index_expr(self.numels["r"], dtype)
+        rnumel = ops.index_expr(self.features.reduction_numel, dtype)
         mean = ops.truediv(sum_, rnumel)
 
         self.inside_reduction = True
@@ -1040,47 +1042,22 @@ class SIMDScheduling(BaseScheduling):
 
         if not node1.is_reduction() and not node2.is_reduction():
             if not (numel1 == numel2 and rnumel1 == rnumel2):
-                if not node2.is_template():
-                    why(
-                        "numel/rnumel mismatch (non-reduce) (%s, %s), (%s, %s)",
-                        numel1,
-                        numel2,
-                        rnumel1,
-                        rnumel2,
-                    )
-                    return False
-                else:
-                    # prologue fusion input sizes differ from output group
-                    # fuse so long as this node matches the group of existing prologue nodes
-                    for node in node2.get_nodes():
-                        # dont need to check epilogue nodes for prologue fusion, break after template
-                        if node.is_template():
-                            break
-                        # we would have already restricted prologue from fusing if it had multiple
-                        # uses, so it must be fusing into this node
-                        if not node.used_buffer_names() & node1.get_buffer_names():
-                            continue
-                        _, (pro_numel, pro_rnumel) = node.group
-                        if not (numel1 == pro_numel and rnumel1 == pro_rnumel):
-                            why(
-                                "numel/rnumel mismatch prologue mismatch (%s, %s), (%s, %s)",
-                                numel1,
-                                pro_numel,
-                                rnumel1,
-                                pro_rnumel,
-                            )
-                            return False
+                why(
+                    "numel/rnumel mismatch (non-reduce) (%s, %s), (%s, %s)",
+                    numel1,
+                    numel2,
+                    rnumel1,
+                    rnumel2,
+                )
+                return False
 
-            for n, node_name in zip((node1, node2), ("node1", "node2")):
-                if n.is_template():
-                    # Only allow fusion for TritonTemplates for now.
-                    # Fusion for CUDATemplates are not supported.
-                    is_triton_template = isinstance(
-                        n.get_template_node(), TritonTemplateBuffer
-                    )
-                    if not is_triton_template:
-                        why(f"{node_name} is not TritonTemplateBuffer")
-                    return is_triton_template
+            if node1.is_template():
+                # Only allow fusion for TritonTemplates for now.
+                # Fusion for CUDATemplates are not supported.
+                is_triton_template = isinstance(node1.node, TritonTemplateBuffer)
+                if not is_triton_template:
+                    why("node1 is not TritonTemplateBuffer")
+                return is_triton_template
 
             # check for a bad combined tiling
             tiling1 = self.select_tiling(node1.get_nodes(), numel1, rnumel1)
@@ -1391,7 +1368,7 @@ class SIMDScheduling(BaseScheduling):
                     node.codegen(index_vars)
 
     def codegen_template(
-        self, template_node, epilogue_nodes, prologue_nodes, *, only_gen_src_code=False
+        self, template_node, epilogue_nodes, only_gen_src_code=False
     ) -> Optional[str]:
         """
         Codegen a triton template
@@ -1401,88 +1378,28 @@ class SIMDScheduling(BaseScheduling):
         _, (_numel, rnumel) = template_node.group
         assert rnumel == 1
         kernel, render = template_node.node.make_kernel_render(template_node.node)
-
-        buf_name_to_prologue_group = {}
-        template_reads = template_node.used_buffer_names()
-        prologue_group = []
-        for prologue in prologue_nodes:
-            names = prologue.get_buffer_names()
-            prologue_group.append(prologue)
-            # this must be the end of a prologue group
-            if names & template_reads:
-                assert len(names) == 1
-                buf_name_to_prologue_group[next(iter(names))] = prologue_group
-                kernel.prologue_fused_inputs.add(next(iter(names)))
-                prologue_group = []
-
-        # all prologue groups should have finalized with use in template
-        assert len(prologue_group) == 0
-
         with kernel:
             if not only_gen_src_code:
-                # prologue nodes can only be fused if their only use is in the template,
-                # so they are necessarily not allocated
                 for node in [template_node, *epilogue_nodes]:
                     node.mark_run()
-
             partial_code = render()
-
             with kernel.set_subgraph_body("<STORE_OUTPUT>"):
                 for node in epilogue_nodes:
                     node.codegen(kernel.split_and_set_ranges(node.get_ranges()))
-                kernel.cse.invalidate(set())
-
-            for input_name, buffer in kernel.named_input_nodes.items():
-                subgraph_name = f"<LOAD_INPUT_{input_name}>"
-                if prologue_group := buf_name_to_prologue_group.get(
-                    buffer.get_name(), []
-                ):
-                    can_codegen_without_upcast = all(
-                        can_codegen_without_upcasts(p_n) for p_n in prologue_group
-                    )
-
-                    # TODO - this doesnt work with libdevice calls, potentially other bugs
-                    # upcasting to fp32 and downcasting gives large slowdown
-                    with config.patch(
-                        "triton.codegen_upcast_to_fp32", not can_codegen_without_upcast
-                    ):
-                        with kernel.set_subgraph_body(subgraph_name):
-                            for prologue_node in prologue_group:
-                                if (
-                                    len(prologue_node.get_buffer_names()) == 1
-                                    and len(prologue_group) == 1
-                                ):
-                                    if prologue_preserves_zero_mask(prologue_node):
-                                        kernel.prologue_fused_inputs_preserve_zero |= (
-                                            prologue_node.get_buffer_names()
-                                        )
-
-                                prologue_node.codegen(
-                                    kernel.split_and_set_ranges(
-                                        prologue_node.get_ranges()
-                                    )
-                                )
-                            kernel.cse.invalidate(set())
 
         if not isinstance(partial_code, str):
             partial_code.finalize_hook("<DEF_KERNEL>")
             partial_code.finalize_hook("<ARGDEFS>", strict=False)
         # finalize must be called after adding epilogue above
-
         with V.set_kernel_handler(kernel):
             # TODO: Maybe unify CUDATemplateKernel to also use PartialRender for flexible epilogue fusion.
-
-            for input_name in kernel.named_input_nodes.keys():
-                subgraph_name = f"<LOAD_INPUT_{input_name}>"
-                partial_code.finalize_hook(subgraph_name, strict=False)
-
             with kernel.set_subgraph_body("<STORE_OUTPUT>"):
                 if isinstance(partial_code, str):
                     src_code = partial_code
                 else:
                     partial_code.finalize_hook("<STORE_OUTPUT>")
                     src_code = partial_code.code
-            node_schedule = [*prologue_nodes, template_node, *epilogue_nodes]
+            node_schedule = [template_node, *epilogue_nodes]
 
             if config.benchmark_kernel:
                 num_gb = kernel.estimate_kernel_num_bytes() / 1e9
@@ -1669,10 +1586,9 @@ class SIMDScheduling(BaseScheduling):
         Create a tiling dict from pointwise and reduction splits.
         """
         pw_prefixes = ["z", "y", "x"][-len(pw_tiling) :]
-        reduction_prefixes = ["r"][: len(reduction_tiling)]
+        reduction_prefixes = ["r0_", "r1_"][: len(reduction_tiling)]
         return immutable_dict(
-            list(zip(pw_prefixes, pw_tiling))
-            + list(zip(reduction_prefixes, reduction_tiling))
+            [*zip(pw_prefixes, pw_tiling), *zip(reduction_prefixes, reduction_tiling)]
         )
 
     @classmethod
@@ -1775,7 +1691,7 @@ class SIMDScheduling(BaseScheduling):
         return False
 
     def generate_kernel_code_from_nodes(self, nodes, benchmark_kernel=False):
-        if not any(n.is_template() for n in nodes):
+        if not nodes[0].is_template():
             _, (numel, rnumel) = max(nodes, key=lambda x: int(x.is_reduction())).group
             node_schedule = self.generate_node_schedule(nodes, numel, rnumel)
             tiling = self.select_tiling(node_schedule, numel, rnumel)
@@ -1789,15 +1705,12 @@ class SIMDScheduling(BaseScheduling):
             ), V.set_kernel_handler(kernel):
                 src_code = kernel.codegen_kernel()
         else:
-            prologue, template, epilogue = nodes[0].get_prologue_template_epilogue(
-                nodes
-            )
+            template_node = nodes[0]
+            epilogue_nodes = nodes[1:]
+
             with config.patch("benchmark_kernel", benchmark_kernel):
                 src_code = self.codegen_template(
-                    template,
-                    epilogue,
-                    prologue,
-                    only_gen_src_code=True,
+                    template_node, epilogue_nodes, only_gen_src_code=True
                 )
 
         src_code = src_code.replace(str(Placeholder.KERNEL_NAME), "triton_")
