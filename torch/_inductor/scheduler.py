@@ -295,6 +295,8 @@ class BaseSchedulerNode:
     ) -> None:
         used_buffers = self.used_or_aliased_buffer_names()
         used_buffers = OrderedSet([mutation_real_name.get(k, k) for k in used_buffers])
+        # if self.get_name() in ["op3383", "op3384", "op57_op149_op150_op183"]:
+        #     log.warn(f"{self.get_name()}: used_buffers: {used_buffers}, future_used_buffers: {future_used_buffers}")
         self.last_usage = used_buffers - future_used_buffers
 
     def mark_run(self) -> None:
@@ -884,8 +886,8 @@ class SchedulerNode(BaseSchedulerNode):
         scheduler: Scheduler,
         node: Union[ir.ComputedBuffer, ir.TemplateBuffer],
     ) -> None:
-        import traceback
-        log.warn("\n".join(traceback.format_stack()) + "\n" + f"id(SchedulerNode): {id(self)}")
+        # import traceback
+        # log.warn("\n".join(traceback.format_stack()) + "\n" + f"id(SchedulerNode): {id(self)}")
         super().__init__(scheduler)
         self._init_from_node(node)
         self._compute_attrs()
@@ -1238,11 +1240,15 @@ class FusedSchedulerNode(BaseSchedulerNode):
     ) -> None:
         # Set self.last_usage using the global information
         # This will be used for inter-kernel optimisations
+        # if self.get_name() in ["op3383", "op3384", "op57_op149_op150_op183"]:
+        #     log.warn(f"{self.get_name()}: fused set_last_usage here1: future_used_buffers: {future_used_buffers}")
         super().set_last_usage(future_used_buffers, mutation_real_name)
         # Set self.last_usage on the snodes
         # This will be used for optimisations within the kernel
         future_used_buffers: OrderedSet[str] = OrderedSet()
         for node in reversed(self.snodes):
+            # if self.get_name() in ["op3383", "op3384", "op57_op149_op150_op183"]:
+            #     log.warn(f"{self.get_name()}: fused set_last_usage here2: node.name: {node.get_name()}, future_used_buffers: {future_used_buffers}")
             node.set_last_usage(future_used_buffers, mutation_real_name)
             future_used_buffers.update(node.last_usage)
 
@@ -1889,6 +1895,7 @@ class Scheduler:
             all_gather_bucket_cap_mb=100,
             scheduler=self,
         )
+        log.warn(f"self.mutation_real_name: {self.mutation_real_name}")
         if config.reorder_for_compute_comm_overlap:
             self.nodes = comms.reorder_compute_and_comm_for_overlap(self.nodes)
         self.process_grouped_nodes()
@@ -3376,6 +3383,8 @@ class Scheduler:
         future_used_buffers: OrderedSet[str] = OrderedSet(V.graph.get_output_names())
 
         for node in reversed(self.nodes):
+            # if node.get_name() in ["op3383", "op3384", "op57_op149_op150_op183"]:
+            #     log.warn(f"{node.get_name()}: node.used_or_aliased_buffer_names(): {node.used_or_aliased_buffer_names()}, node.read_writes.reads: {node.read_writes.reads}, future_used_buffers: {future_used_buffers}")
             node.set_last_usage(future_used_buffers, self.mutation_real_name)
             future_used_buffers.update(node.last_usage)
 

@@ -30,6 +30,9 @@ from .codegen.common import index_prevent_reordering
 from .utils import cache_on_self, sympy_index_symbol_with_prefix, sympy_subs
 from .virtualized import ops, V
 
+import logging
+
+log = logging.getLogger(__name__)
 
 T = TypeVar("T")
 
@@ -400,6 +403,7 @@ class LoopBody:
         }
 
     def __call__(self, *indices):
+        log.warn(f"LoopBody debug_str: {self.debug_str()}")
         self.indexing = self.indexing_from_args(indices)
         result = self.root_block()
         self.indexing = None

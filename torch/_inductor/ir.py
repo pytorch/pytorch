@@ -603,8 +603,8 @@ class IRNode:
 @ir_dataclass(frozen=False)
 class Operation:
     def __post_init__(self) -> None:
-        import traceback
-        log.warn("\n".join(traceback.format_stack()) + "\n" + f"id(Operation): {id(self)}")
+        # import traceback
+        # log.warn("\n".join(traceback.format_stack()) + "\n" + f"id(Operation): {id(self)}")
         self.operation_name: Optional[str] = None
 
     def get_device(self) -> Optional[torch.device]:
