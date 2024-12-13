@@ -76,6 +76,7 @@ jobs:
       curr_branch: ${{ github.head_ref || github.ref_name }}
       curr_ref_type: ${{ github.ref_type }}
 
+  # NB: Keep this in sync with trunk.yml
   linux-focal-cuda12_1-py3_10-gcc9-inductor-build:
     name: cuda12.1-py3.10-gcc9-sm80
     uses: ./.github/workflows/_linux-build.yml
@@ -115,6 +116,8 @@ jobs:
       test-matrix: ${{ needs.linux-focal-cuda12_1-py3_10-gcc9-inductor-build.outputs.test-matrix }}
       use-gha: anything-non-empty-to-use-gha
       timeout-minutes: 720
+      # disable monitor in perf tests for more investigation
+      disable-monitor: true
     secrets: inherit
 
   linux-focal-cuda12_1-py3_10-gcc9-inductor-test-weekly:
@@ -129,6 +132,8 @@ jobs:
       test-matrix: ${{ needs.linux-focal-cuda12_1-py3_10-gcc9-inductor-build.outputs.test-matrix }}
       use-gha: anything-non-empty-to-use-gha
       timeout-minutes: 1440
+      # disable monitor in perf tests for more investigation
+      disable-monitor: true
     secrets: inherit
 
   linux-focal-cuda12_1-py3_10-gcc9-inductor-test:
@@ -143,4 +148,6 @@ jobs:
       test-matrix: ${{ needs.linux-focal-cuda12_1-py3_10-gcc9-inductor-build.outputs.test-matrix }}
       use-gha: anything-non-empty-to-use-gha
       timeout-minutes: 720
+      # disable monitor in perf tests for more investigation
+      disable-monitor: true
     secrets: inherit
