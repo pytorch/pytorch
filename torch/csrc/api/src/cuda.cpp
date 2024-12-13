@@ -4,9 +4,11 @@
 #include <c10/core/DeviceGuard.h>
 #include <c10/util/irange.h>
 
+#include <cstddef>
+
 namespace torch::cuda {
 
-c10::DeviceIndex device_count() {
+size_t device_count() {
   return at::detail::getCUDAHooks().deviceCount();
 }
 
@@ -52,7 +54,7 @@ void synchronize(int64_t device_index) {
   TORCH_CHECK(is_available(), "No CUDA GPUs are available");
   auto num_gpus = cuda::device_count();
   TORCH_CHECK(
-      device_index < 0 || device_index < num_gpus,
+      device_index < 0 || static_cast<size_t>(device_index) < num_gpus,
       "Device index out of range: ",
       device_index);
   at::detail::getCUDAHooks().deviceSynchronize(
