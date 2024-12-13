@@ -185,7 +185,7 @@ auto PyNode::apply(variable_list&& inputs) -> variable_list {
 
 auto PyNode::defer_to_dynamo(
     variable_list&& inputs,
-    std::optional<PyObject*> compiler) -> variable_list {
+    const std::optional<PyObject*>& compiler) -> variable_list {
   pybind11::gil_scoped_acquire gil;
   at::OptionalDeviceGuard _device_guard;
   THPFunction* py_fn = (THPFunction*)obj;
@@ -238,7 +238,8 @@ auto PyNode::defer_to_dynamo(
       "indices should already be set by compiled_args, called before apply_with_saved");
   TORCH_INTERNAL_ASSERT(!_backward_state_idx.has_value());
   THPObjectPtr r(PyObject_CallMethod(
-      *compiler,
+      // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+      compiler.value(),
       "proxy_call_backward",
       "OOOi",
       pyInputs.get(),
@@ -724,8 +725,9 @@ static void _wrap_outputs(
 
   for (const auto i : c10::irange(num_outputs)) {
     PyObject* obj = PyTuple_GetItem(raw_output, i);
+    const auto& wrapped_output = wrapped_outputs[i];
     // Keep the non-tensor outputs as is.
-    if (!THPVariable_Check(obj)) {
+    if (!THPVariable_Check(obj) || !wrapped_output.has_value()) {
       if (is_executable) {
         self->output_info.emplace_back();
       }
@@ -736,18 +738,15 @@ static void _wrap_outputs(
         // If one of the grad outputs is undefined, a correctly-shaped zeros
         // should be used instead. To construct these for NJT, zeros_like() must
         // be used until we have factory function support.
-        // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
         bool is_differentiable =
-            (non_differentiable.count(
-                 wrapped_outputs[i]->unsafeGetTensorImpl()) == 0 &&
-             isDifferentiableType(wrapped_outputs[i]->scalar_type()));
-        bool use_zeros_like = is_differentiable && num_outputs > 1 &&
-            wrapped_outputs[i]->is_nested();
-        // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
-        self->output_info.emplace_back(*wrapped_outputs[i], use_zeros_like);
+            (non_differentiable.count(wrapped_output->unsafeGetTensorImpl()) ==
+                 0 &&
+             isDifferentiableType(wrapped_output->scalar_type()));
+        bool use_zeros_like =
+            is_differentiable && num_outputs > 1 && wrapped_output->is_nested();
+        self->output_info.emplace_back(wrapped_output.value(), use_zeros_like);
       }
-      // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
-      PyTuple_SetItem(outputs, i, THPVariable_Wrap(*wrapped_outputs[i]));
+      PyTuple_SetItem(outputs, i, THPVariable_Wrap(wrapped_output.value()));
     }
   }
 }
