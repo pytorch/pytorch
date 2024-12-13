@@ -572,15 +572,15 @@ class TestPythonRegistration(TestCase):
 
     def test_undefined_tensors(self):
         with torch.library._scoped_library(self.test_ns, "FRAGMENT") as lib:
-            lib.define("foo(Tensor[] ts) -> Tensor[]")
+            lib.define("foos(Tensor[] ts) -> Tensor[]")
 
             def foo_impl(ts):
                 return [t.clone() if t is not None else None for t in ts]
 
-            lib.impl("foo", foo_impl, "CompositeImplicitAutograd")
+            lib.impl("foos", foo_impl, "CompositeImplicitAutograd")
 
             ts = [None, torch.randn(3), None, torch.randn(4)]
-            results = foo_impl(ts)
+            results = getattr(torch.ops, self.test_ns).foos(ts)
             self.assertEqual(results, ts)
 
     def test_returning_symint(self) -> None:

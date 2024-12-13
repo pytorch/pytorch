@@ -370,7 +370,7 @@ IValue toIValue(py::handle obj, const TypePtr& type, std::optional<int32_t> N) {
         case TypeKind::BoolType:
           return IValue(py::cast<std::vector<bool>>(obj));
         case TypeKind::TensorType:
-          return IValue(py::cast<std::optional<std::vector<at::Tensor>>>(obj));
+          return IValue(py::cast<std::vector<std::optional<at::Tensor>>>(obj));
         default:
           return createGenericList(obj, elem_type);
       }
