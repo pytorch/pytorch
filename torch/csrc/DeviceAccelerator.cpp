@@ -66,7 +66,7 @@ void initModule(PyObject* module) {
 
   m.def("_accelerator_synchronizeDevice", [](c10::DeviceIndex device_index) {
     const auto device_type = at::getAccelerator(true).value();
-    if (torch::utils::is_lazy_initialized_supported(device_type) and
+    if (torch::utils::is_lazy_initialized_supported(device_type) &&
         !torch::utils::is_device_initialized(device_type)) {
       return;
     }
