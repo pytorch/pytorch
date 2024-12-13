@@ -177,118 +177,18 @@ def _prepare_llm_model_gptj_to_test() -> (
 ):
     model = GPTJForCausalLM.from_pretrained("hf-internal-testing/tiny-random-gptj")
 
-    input_ids = torch.tensor(
-        [
-            [
-                156,
-                600,
-                759,
-                397,
-                725,
-                535,
-                387,
-                110,
-                22,
-                634,
-                581,
-                757,
-                122,
-                986,
-                710,
-                643,
-            ],
-            [
-                926,
-                305,
-                867,
-                280,
-                682,
-                649,
-                50,
-                186,
-                171,
-                311,
-                523,
-                113,
-                288,
-                141,
-                516,
-                571,
-            ],
-        ]
-    )
-    attention_mask = torch.tensor(
-        [
-            [
-                1,
-                1,
-                1,
-                1,
-                1,
-                0,
-                0,
-                0,
-                0,
-                0,
-                0,
-                0,
-                0,
-                0,
-                0,
-                0,
-                1,
-                1,
-                1,
-                1,
-                1,
-                1,
-                1,
-                1,
-                1,
-                1,
-                1,
-                1,
-                1,
-                1,
-                1,
-                1,
-            ],
-            [
-                1,
-                1,
-                1,
-                1,
-                1,
-                0,
-                0,
-                0,
-                0,
-                0,
-                0,
-                0,
-                0,
-                0,
-                0,
-                0,
-                1,
-                1,
-                1,
-                1,
-                1,
-                1,
-                1,
-                1,
-                1,
-                1,
-                1,
-                1,
-                1,
-                1,
-                1,
-                1,
-            ],
-        ]
-    )
+    batch_size = 2
+    input_seq_len = 16
+    mask_seq_len = 32
+    active_prob = 0.5
+    vocab_size = 1000
+
+    # Generate random input_ids with values between 0 and vocab_size-1
+    input_ids = torch.randint(100, vocab_size, (batch_size, input_seq_len))
+    # Generate random attention_mask with values 0 or 1, where 1 indicates an active token
+    attention_mask = torch.bernoulli(
+        torch.full((batch_size, mask_seq_len), active_prob)
+    ).int()
     position_ids = torch.tensor(
         [
             [1, 1, 0, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1],

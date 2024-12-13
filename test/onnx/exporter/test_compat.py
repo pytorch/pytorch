@@ -474,7 +474,7 @@ class TestPyTreeDynamicAxesShapes(common_utils.TestCase):
         dynamic_axes,
         expected_dynamic_shapes,
     ):
-        dynamic_shapes = _compat._from_dynamic_axes_to_dynamic_shapes(
+        dynamic_shapes, _, _ = _compat._from_dynamic_axes_to_dynamic_shapes(
             model,
             args,
             kwargs,
