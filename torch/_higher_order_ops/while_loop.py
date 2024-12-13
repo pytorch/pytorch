@@ -353,6 +353,10 @@ def check_outputs_carry_consistency(
                 )
             return ""
 
+        if len(lhs_list) != len(rhs_list):
+            raise torch._dynamo.exc.UncapturedHigherOrderOpError(
+                f"Expected to have same number of outputs but got lhs:{lhs_list} and rhs:{rhs_list}"
+            )
         assert len(lhs_list) == len(rhs_list)
         all_diffs = []
         for i, (lhs, rhs) in enumerate(zip(lhs_list, rhs_list)):
@@ -364,8 +368,8 @@ def check_outputs_carry_consistency(
 
     if all_diffs := diff_meta_pairs(outs, carries):
         diff_str = "\n".join(all_diffs)
-        raise RuntimeError(
-            f"Expected carried_inputs and body outputs return tensors with same metadata but found:\n{diff_str}"
+        raise torch._dynamo.exc.UncapturedHigherOrderOpError(
+            f"Expected to return tensors with same metadata but found:\n{diff_str}"
         )
 
 

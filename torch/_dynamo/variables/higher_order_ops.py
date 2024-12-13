@@ -987,7 +987,7 @@ def validate_subgraph_output_types(output: VariableTracker):
             ):
                 continue
             unimplemented(
-                f"HigherOrderOperator body's output must consist of tensors or ints only but got {output}"
+                f"HigherOrderOperator body's output must consist of tensors or ints only but got {out.python_type()}"
             )
 
 
