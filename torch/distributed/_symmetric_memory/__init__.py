@@ -719,7 +719,7 @@ def _should_use_fused_all_gather_matmul_native(
         and local_M % group.size() == 0
         # _async_input_mm outperforms the decomposition-based approach when the
         # global M is small.
-        and local_M * group.size() <= 4096
+        and 2048 < local_M * group.size() <= 4096
         # _async_input_mm only supports a single B.
         and len(Bs) == 1
     )
