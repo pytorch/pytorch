@@ -372,6 +372,7 @@ static Tensor mps_convolution_backward_input(IntArrayRef input_size,
   using namespace at::native::mps;
   using namespace mps;
   bool is3DConv = grad_output_t.dim() == 5;
+  const auto has_strided_api = is_macos_13_or_newer(MacOSVersion::MACOS_VER_15_0_PLUS);
 
   if (!is_macos_13_or_newer(MacOSVersion::MACOS_VER_15_1_PLUS)) {
     // On macOS < 15.1, MPS convolution kernel does not support output channels > 2^16
@@ -417,7 +418,7 @@ static Tensor mps_convolution_backward_input(IntArrayRef input_size,
         assert(0 && "Check should have been done earlier\n");
     }
 
-    MPSShape* gradOutputShape = getMPSShape(grad_output_t, memory_format);
+    MPSShape* gradOutputShape = has_strided_api ? getMPSShape(grad_output_t) : getMPSShape(grad_output_t, memory_format);
     MPSShape* mps_input_shape = getMPSShape(input_size);
     NSString* ns_shape_key = [[gradOutputShape valueForKey:@"description"] componentsJoinedByString:@","];
     string key;
@@ -440,7 +441,7 @@ static Tensor mps_convolution_backward_input(IntArrayRef input_size,
       MPSGraphTensor* weightTensor = mpsGraphRankedPlaceHolder(mpsGraph, weight_t);
 
       MPSGraphTensor* gradOutputTensorTranspose = gradOutputTensor;
-      if (is_channels_last) {
+      if (is_channels_last && !has_strided_api) {
         gradOutputTensorTranspose = mps::convertNHWCtoNCHW(mpsGraph, gradOutputTensorTranspose);
       }
       MPSGraphTensor* gradInputTensor;
