@@ -4794,6 +4794,23 @@ class TestLinalg(TestCase):
             except FileNotFoundError:
                 pass
 
+    @onlyCUDA
+    @dtypes(torch.float)
+    def test_rotating_buffer_tunableop(self, device, dtype):
+        # Test the TunableOp rotating buffer API
+        # Test the default value, will return the l2_cache_size
+        l2_cache_size = torch.cuda.tunable.get_rotating_buffer_size()
+        self.assertGreater(l2_cache_size, 0)
+        # Test zero
+        torch.cuda.tunable.set_rotating_buffer_size(0)
+        self.assertEqual(torch.cuda.tunable.get_rotating_buffer_size(), 0)
+        # Test one MB
+        torch.cuda.tunable.set_rotating_buffer_size(1)
+        self.assertEqual(torch.cuda.tunable.get_rotating_buffer_size(), 1024 * 1024)
+        # Test negative zero, which will return the l2 cache size
+        torch.cuda.tunable.set_rotating_buffer_size(-1)
+        self.assertEqual(torch.cuda.tunable.get_rotating_buffer_size(), l2_cache_size)
+
 
     @onlyCUDA
     @skipCUDAIfNotRocm
