@@ -683,6 +683,8 @@ def generate_tensor_like_override_tests(cls):
                 return torch.float32
             elif arg_type == "c10::string_view":
                 return ""
+            elif arg_type == "std::string_view":
+                return ""
             elif arg_type == "SymInt":
                 # TODO: generate actual SymbolicInt
                 return 1

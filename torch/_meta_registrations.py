@@ -42,6 +42,7 @@ from torch.utils import _pytree as pytree
 aten = torch.ops.aten
 
 _meta_lib_dont_use_me_use_register_meta = torch.library.Library("aten", "IMPL", "Meta")
+MODE_SUM, MODE_MEAN, MODE_MAX = range(3)
 
 
 def register_meta(op):
@@ -1461,7 +1462,6 @@ def _linalg_solve_ex(
         device=B.device,
     )
     shape = A.shape
-    ndim = A.ndim
     LU_ = torch.empty_strided(
         size=shape,
         stride=make_contiguous_strides_for(shape, False),
@@ -1864,18 +1864,15 @@ def meta_pad2d_backward(grad_output, self, padding):
     dim_w = 2
     dim_h = 1
     dim_plane = 0
-    nbatch = 1
 
     self_shape = self.shape
     if self.dim() == 4:
-        nbatch = self_shape[0]
         dim_w += 1
         dim_h += 1
         dim_plane += 1
 
     pad_l, pad_r, pad_t, pad_b = padding
 
-    nplane = self_shape[dim_plane]
     input_h = self_shape[dim_h]
     input_w = self_shape[dim_w]
     output_h = input_h + pad_t + pad_b
@@ -3455,7 +3452,6 @@ def meta_embedding_bag(
         num_bags -= 1
 
     output = weight.new_empty(num_bags, weight.size(1))
-    MODE_SUM, MODE_MEAN, MODE_MAX = range(3)
 
     if per_sample_weights is not None:
         torch._check(
@@ -5131,7 +5127,6 @@ def meta__scaled_dot_product_cudnn_attention(
     H = query.size(1)
     S_Q = query.size(2)
     S_KV = key.size(2)
-    D_QK = query.size(-1)
     D_V = value.size(-1)
 
     res = torch.empty((B, H, S_Q, D_V), dtype=query.dtype, device=query.device)
@@ -5203,7 +5198,6 @@ def meta__scaled_dot_product_flash_attention_for_cpu(
     batch_size = query.size(0)
     num_heads = query.size(1)
     max_seqlen_batch_q = query.size(2)
-    head_dim = query.size(3)
 
     attention = torch.empty_like(query)
     logsumexp = torch.empty(
@@ -5285,9 +5279,7 @@ def meta__scaled_dot_product_efficient_attention(
 
     B = query.size(0)
     M = query.size(1)
-    N = key.size(1)
     num_heads = query.size(-2)
-    K = query.size(-1)
     Kv = value.size(-1)
 
     res = torch.empty(B, M, num_heads, Kv, dtype=query.dtype, device=query.device)
@@ -5519,7 +5511,6 @@ def meta__efficient_attention_forward(
     M = query.size(1)
     N = key.size(1)
     num_heads = query.size(-2)
-    K = query.size(-1)
     Kv = value.size(-1)
 
     res = torch.empty(B, M, num_heads, Kv, dtype=query.dtype, device=query.device)
@@ -5667,7 +5658,7 @@ def meta_scaled_mm(
             scale_a.dtype == torch.float32 and scale_b.dtype == torch.float32,
             lambda: "Both scale_a and scale_b must be float (fp32) tensors.",
         )
-        m, k = self.shape
+        m, _k = self.shape
         n = mat2.size(1)
         if scale_a.numel() == 1 and scale_b.numel() == 1:
             # tensorwise scaling
@@ -6481,7 +6472,6 @@ def meta_embedding_bag_dense_backward(
         grad.dtype in [torch.float16, torch.bfloat16, torch.float32, torch.float64],
         lambda: f"Unsupported input type encountered: {grad.dtype}",
     )
-    MODE_SUM, MODE_MEAN, MODE_MAX = range(3)
     if mode == MODE_MAX:
         torch._check(maximum_indices is not None)
     index_grad_weight = grad.new_empty((num_weights, grad.size(1)))
@@ -6498,7 +6488,6 @@ def meta_embedding_bag_per_sample_weights_backward(
     mode,
     padding_idx=-1,
 ):
-    MODE_SUM, MODE_MEAN, MODE_MAX = range(3)
     embedding_features = grad.size(1)
     torch._check(
         mode == MODE_SUM,
