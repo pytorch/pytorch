@@ -6207,25 +6207,16 @@ class GraphModule(torch.nn.Module):
         while_loop_cond_graph_0 = self.while_loop_cond_graph_0
         while_loop_body_graph_0 = self.while_loop_body_graph_0
         while_loop = torch.ops.higher_order.while_loop(while_loop_cond_graph_0, while_loop_body_graph_0, (0, x), ());  while_loop_cond_graph_0 = while_loop_body_graph_0 = x = None
-
-        getitem_2: "Sym(u1)" = while_loop[0]
-        sym_constrain_range_for_size_default = torch.ops.aten.sym_constrain_range_for_size.default(getitem_2);  sym_constrain_range_for_size_default = None
-
-        ge: "Sym(u1 >= 1)" = getitem_2 >= 1
-        _assert_scalar_default = torch.ops.aten._assert_scalar.default(ge, "Runtime assertion failed for expression u1 >= 1 on node 'ge'");  ge = _assert_scalar_default = None
-
-        gt_1: "Sym(u1 > 0)" = getitem_2 > 0
-        _assert_scalar_default_1 = torch.ops.aten._assert_scalar.default(gt_1, "Runtime assertion failed for expression 0 < u1 on node 'gt_1'");  gt_1 = _assert_scalar_default_1 = None
-
+        getitem: "Sym(u1)" = while_loop[0]
         getitem_1: "f32[s0, 3]" = while_loop[1];  while_loop = None
 
-        add: "Sym(u1 + 1)" = getitem_2 + 1
+        add: "Sym(u1 + 1)" = getitem + 1
 
-        add_1: "f32[s0, 3]" = torch.ops.aten.add.Tensor(getitem_1, getitem_2);  getitem_1 = None
+        add_1: "f32[s0, 3]" = torch.ops.aten.add.Tensor(getitem_1, getitem);  getitem_1 = None
 
-        lt: "Sym(u1 < s0)" = getitem_2 < sym_size_int_1;  sym_size_int_1 = None
+        lt: "Sym(u1 < s0)" = getitem < sym_size_int_1;  sym_size_int_1 = None
 
-        ones: "f32[u1]" = torch.ops.aten.ones.default([getitem_2], device = device(type='cpu'), pin_memory = False);  getitem_2 = None
+        ones: "f32[u1]" = torch.ops.aten.ones.default([getitem], device = device(type='cpu'), pin_memory = False);  getitem = None
         return pytree.tree_unflatten((add, add_1, lt, ones), self._out_spec)
 
     class while_loop_cond_graph_0(torch.nn.Module):
@@ -6496,23 +6487,21 @@ class GraphModule(torch.nn.Module):
         while_loop_cond_graph_0 = self.while_loop_cond_graph_0
         while_loop_body_graph_0 = self.while_loop_body_graph_0
         while_loop = torch.ops.higher_order.while_loop(while_loop_cond_graph_0, while_loop_body_graph_0, (sym_size_int_1, 3, 2, 2, 3, sin), ());  while_loop_cond_graph_0 = while_loop_body_graph_0 = sym_size_int_1 = sin = None
-
-        getitem_6: "Sym(u20)" = while_loop[0]
-        getitem_7: "Sym(u21)" = while_loop[1]
-        getitem_8: "Sym(u22)" = while_loop[2]
-        getitem_9: "Sym(u23)" = while_loop[3]
-        getitem_10: "Sym(u24)" = while_loop[4]
-
+        getitem: "Sym(u20)" = while_loop[0]
+        getitem_1: "Sym(u21)" = while_loop[1]
+        getitem_2: "Sym(u22)" = while_loop[2]
+        getitem_3: "Sym(u23)" = while_loop[3]
+        getitem_4: "Sym(u24)" = while_loop[4]
         getitem_5: "f32[s0, 3]" = while_loop[5];  while_loop = None
 
-        add: "Sym(u22 + 1)" = getitem_8 + 1
-        add_1: "Sym(u23 + 1)" = getitem_9 + 1
-        add_2: "Sym(u24 + 1)" = getitem_10 + 1
+        add: "Sym(u22 + 1)" = getitem_2 + 1
+        add_1: "Sym(u23 + 1)" = getitem_3 + 1
+        add_2: "Sym(u24 + 1)" = getitem_4 + 1
 
-        add_3: "f32[s0, 3]" = torch.ops.aten.add.Tensor(getitem_5, getitem_8);  getitem_8 = None
-        add_4: "f32[s0, 3]" = torch.ops.aten.add.Tensor(getitem_5, getitem_9);  getitem_9 = None
-        add_5: "f32[s0, 3]" = torch.ops.aten.add.Tensor(getitem_5, getitem_10);  getitem_10 = None
-        return pytree.tree_unflatten((getitem_6, getitem_7, add, add_1, add_2, add_3, add_4, add_5, getitem_5), self._out_spec)
+        add_3: "f32[s0, 3]" = torch.ops.aten.add.Tensor(getitem_5, getitem_2);  getitem_2 = None
+        add_4: "f32[s0, 3]" = torch.ops.aten.add.Tensor(getitem_5, getitem_3);  getitem_3 = None
+        add_5: "f32[s0, 3]" = torch.ops.aten.add.Tensor(getitem_5, getitem_4);  getitem_4 = None
+        return pytree.tree_unflatten((getitem, getitem_1, add, add_1, add_2, add_3, add_4, add_5, getitem_5), self._out_spec)
 
     class while_loop_cond_graph_0(torch.nn.Module):
         def forward(self, arg0_1: "Sym(u15)", arg1_1: "Sym(u16)", arg2_1: "Sym(u17)", arg3_1: "Sym(u18)", arg4_1: "Sym(u19)", arg5_1: "f32[s0, 3]"):

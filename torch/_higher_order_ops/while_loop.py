@@ -221,7 +221,7 @@ while_loop_op.py_impl(DispatchKey.Autograd)(
 )
 
 
-def _create_unbacked_symint(ignore=True) -> torch.SymInt:
+def _create_unbacked_symint() -> torch.SymInt:
     from torch._subclasses.fake_tensor import FakeTensorMode
     from torch.fx.experimental.symbolic_shapes import ShapeEnv
 
@@ -231,12 +231,7 @@ def _create_unbacked_symint(ignore=True) -> torch.SymInt:
     if fake_mode is None:
         fake_mode = FakeTensorMode(shape_env=ShapeEnv())
 
-    ctx = (
-        nullcontext()
-        if not ignore
-        else fake_mode.shape_env.ignore_fresh_unbacked_symbols()
-    )
-    with ctx:
+    with fake_mode.shape_env.ignore_fresh_unbacked_symbols():
         return fake_mode.shape_env.create_unbacked_symint()
 
 
@@ -417,7 +412,7 @@ def while_loop_fake_tensor_mode(
         # See NOTE [unspecialize int carry with unbacked symints]
         return pytree.tree_map_only(
             (int, torch.SymInt),
-            lambda _: _create_unbacked_symint(ignore=False),
+            lambda _: _create_unbacked_symint(),
             body_outs,
         )
 

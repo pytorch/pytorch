@@ -1043,9 +1043,6 @@ class WhileLoopHigherOrderVariable(TorchHigherOrderOperatorVariable):
             )
         additional_inputs_seq = additional_inputs.unpack_var_sequence(tx)
 
-        # We enclose speculate subgraph within dicard_graph_changes
-        # to keep the unbacked symints created during discard_graph_changes
-        # accessible.
         with discard_graph_changes(tx):
             # See NOTE [unspecialize int carry with unbacked symints]
             # Note: this must be run under discard graph changes.
@@ -1066,7 +1063,7 @@ class WhileLoopHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
         # create cond subgrpahs
         (
-            (cond_r, cond_treespec),
+            (cond_r, _cond_treespec),
             cond_graph,
             cond_lifted_freevars,
         ) = speculate_subgraph(
@@ -1105,6 +1102,18 @@ class WhileLoopHigherOrderVariable(TorchHigherOrderOperatorVariable):
             set_subgraph_inputs="flatten_manual",
         )
         cond_nn_modules = dict(tx.output.nn_modules)
+        validate_subgraph_output_types(cond_r)
+        if isinstance(cond_r, TensorVariable):
+            cond_r_meta = _extract_tensor_metadata(
+                cond_r.proxy.node.meta["example_value"], include_contiguity=False
+            )
+            if (
+                not cond_r_meta.dtype == torch.bool
+                or not cond_r_meta.shape == torch.Size([])
+            ):
+                unimplemented(
+                    f"Expected cond_fn to return a tensor with shape (,) but got {cond_r_meta.shape}"
+                )
         # create body subgraph
         (
             (body_r, body_treespec),
@@ -1121,22 +1130,7 @@ class WhileLoopHigherOrderVariable(TorchHigherOrderOperatorVariable):
             should_flatten_outputs=True,
         )
         body_nn_modules = dict(tx.output.nn_modules)
-
-        validate_subgraph_output_types(cond_r)
         validate_subgraph_output_types(body_r)
-
-        # cond output checks
-        if isinstance(cond_r, TensorVariable):
-            cond_r_meta = _extract_tensor_metadata(
-                cond_r.proxy.node.meta["example_value"], include_contiguity=False
-            )
-            if (
-                not cond_r_meta.dtype == torch.bool
-                or not cond_r_meta.shape == torch.Size([])
-            ):
-                unimplemented(
-                    f"Expected cond_fn to return a tensor with shape (,) but got {cond_r_meta.shape}"
-                )
 
         check_meta_consistency_vt(body_r.unpack_var_sequence(tx), operands_seq)
 
