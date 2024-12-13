@@ -846,7 +846,7 @@ class TreeSpec:
                             f"expected {treespec._context!r}, but got {context!r}.",  # namedtuple type mismatch
                         )
 
-            for subtree, subspec in zip(children, treespec.children_specs):
+            for subtree, subspec in zip(children, treespec._children):
                 helper(subspec, subtree, subtrees)
 
         subtrees: List[PyTree] = []

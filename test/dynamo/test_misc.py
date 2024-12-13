@@ -3015,6 +3015,45 @@ utils_device.CURRENT_DEVICE == None""".split(
         self.assertEqual(fn(args2, x), opt_fn(args2, x))
         self.assertEqual(cnts.frame_count, 2)
 
+    def test_mutable_mapping_multiple_inheritance(self):
+        class MyWeirdDict(collections.abc.MutableMapping, torch.nn.Module):
+            def __init__(self, **kwargs):
+                super().__init__()
+                self._items = kwargs
+
+            def keys(self):
+                return self._items.keys()
+
+            def __getitem__(self, item):
+                return self._items[item]
+
+            def __setitem__(self, key, value):
+                self._items[key] = value
+
+            def __delitem__(self, item):
+                del self._items[item]
+
+            def __len__(self):
+                return len(self._items)
+
+            def __iter__(self):
+                yield from self._items
+
+            def __hash__(self):
+                return hash(id(self))
+
+            def items(self):
+                for k, v in self._items.items():
+                    yield (k, v)
+
+        @torch.compile(fullgraph=True)
+        def to_weird_dict(td):
+            return MyWeirdDict(**td)
+
+        d = MyWeirdDict(a=1, b=2, c=3)
+        res = to_weird_dict(d)
+        self.assertEqual(tuple(d.items()), tuple(res.items()))
+
     def test_dunder_new_function_inlining(self):
         # https://github.com/pytorch/pytorch/issues/107460
 
