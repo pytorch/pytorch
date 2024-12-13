@@ -885,13 +885,15 @@ class TestPatternMatcher(TestPatternMatcherBase):
             mod = M(binary_fn, input_shape[-1], out_feature, bias).eval()
             v = torch.randn(input_shape)
             other = torch.randn(input_shape[:-1] + [1]).to(dtype)
+            # TODO: Remove when https://github.com/pytorch/pytorch/issues/143146 is fixed
+            acl_bf16 = TEST_ACL and dtype == torch.bfloat16
 
             def matcher_check_fn():
                 self.assertEqual(
                     counters["inductor"][
                         "mkldnn_conv_binary_unary_fusion_matcher_nodes"
                     ],
-                    2,
+                    2 if not acl_bf16 else 0,
                 )
                 reshape_linear_reshape_match_nodes = 3 if len(input_shape) == 3 else 0
                 self.assertEqual(
@@ -902,7 +904,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
                     counters["inductor"][
                         "mkldnn_conv_binary_unary_fusion_matcher_nodes"
                     ],
-                    2,
+                    2 if not acl_bf16 else 0,
                 )
                 self.assertEqual(
                     counters["inductor"]["mkldnn_linear_weight_pack_matcher_nodes"], 1
@@ -917,7 +919,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 matcher_check_fn,
                 check_autocast=dtype,
             )
-            self.assertEqual(metrics.generated_kernel_count, 1)
+            self.assertEqual(metrics.generated_kernel_count, 1 if not acl_bf16 else 2)
 
     def test_multi_linear_share_same_input(self):
         # llama pattern.
@@ -933,7 +935,8 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 return F.silu(self.w1(x)) * F.relu(self.w2(x))
 
         dtypes = []
-        if torch.ops.mkldnn._is_mkldnn_bf16_supported():
+        # TODO: Remove when https://github.com/pytorch/pytorch/issues/143146 is fixed
+        if torch.ops.mkldnn._is_mkldnn_bf16_supported() and not TEST_ACL:
             dtypes.append(torch.bfloat16)
         if torch.ops.mkldnn._is_mkldnn_fp16_supported():
             dtypes.append(torch.float16)
@@ -3363,7 +3366,8 @@ class TestDynamicPatternMatcher(TestPatternMatcherBase):
                 return F.silu(self.w1(x)) * F.relu(self.w2(x))
 
         dtypes = []
-        if torch.ops.mkldnn._is_mkldnn_bf16_supported():
+        # TODO: Remove when https://github.com/pytorch/pytorch/issues/143146 is fixed
+        if torch.ops.mkldnn._is_mkldnn_bf16_supported() and not TEST_ACL:
             dtypes.append(torch.bfloat16)
         if torch.ops.mkldnn._is_mkldnn_fp16_supported():
             dtypes.append(torch.float16)
