@@ -5441,17 +5441,28 @@ class NestedTensorTestCase(TestCase):
         b_shapes = pytree.tree_map(_get_njt_shapes, b)
         self.assertEqual(a_shapes, b_shapes)
 
-    @contextlib.contextmanager
-    def branch_nested_state(self):
-        """Context manager to branch and restore the nested tensor state."""
-        nested_tensor_module = torch.nested._internal.nested_tensor
-        original_tensor_symint_registry = nested_tensor_module._tensor_symint_registry.copy()
-        original_tensor_id_counter = nested_tensor_module._tensor_id_counter
-        try:
-            yield
-        finally:
-            nested_tensor_module._tensor_id_counter = original_tensor_id_counter
-            nested_tensor_module._tensor_symint_registry = original_tensor_symint_registry
+
+@contextlib.contextmanager
+def fresh_tensor_registry_ctx():
+    """Context manager to branch and restore the nested tensor state."""
+    from torch.nested._internal.tensor_registry import TensorRegistry
+
+    tensor_registry_module = torch.nested._internal.tensor_registry
+    original_tensor_symint_registry = tensor_registry_module._global_tensor_registry
+    tensor_registry_module._global_tensor_registry = TensorRegistry()
+    try:
+        yield
+    finally:
+        tensor_registry_module._global_tensor_registry = original_tensor_symint_registry
+
+
+def fresh_tensor_registry(fn):
+    """Decorator to branch the nested tensor state and restore it after the test."""
+    @wraps(fn)
+    def wrapper(self, *args, **kwargs):
+        with fresh_tensor_registry_ctx():
+            return fn(self, *args, **kwargs)
+    return wrapper
 
 
 @make_lazy_class

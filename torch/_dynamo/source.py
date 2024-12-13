@@ -251,6 +251,17 @@ class LocalCellSource(Source):
     # local cell object should never be used for guards.
 
 
+@dataclasses.dataclass(frozen=True)
+class SymNodePropertySource(ChainedSource):
+    prop: str
+
+    def guard_source(self):
+        return self.base.guard_source()
+
+    def name(self):
+        return f"{self.base.name()}.node.{self.prop}()"
+
+
 # Represents tensor.grad source. It could be represented by AttrSource as well.
 # But, we could access grad field on tensor directly in C++ without going
 # through the Python bytecodes. Therefore, we use a separate source for grad

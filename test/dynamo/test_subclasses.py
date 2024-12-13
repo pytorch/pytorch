@@ -26,6 +26,8 @@ from torch.nested._internal.nested_tensor import (
     nested_view_from_values_offsets,
 )
 from torch.testing._internal.common_utils import (
+    fresh_tensor_registry,
+    fresh_tensor_registry_ctx,
     instantiate_parametrized_tests,
     NestedTensorTestCase,
     parametrize,
@@ -2466,11 +2468,11 @@ class GraphModule(torch.nn.Module):
             normalize_gm(fw[0].print_readable(print_output=False)),
             """\
 class GraphModule(torch.nn.Module):
-    def forward(self, primals_1: "Sym(s2)", primals_2: "Sym(s3)", primals_3: "Sym(s1)", primals_4: "f64[s0, s1]", primals_5: "i64[s2 + 1]", primals_6: "f32[s6, 0]", primals_7: "f32[s7, 0]", primals_8: "Sym(s2)", primals_9: "Sym(s1)", primals_10: "Sym(s1)"):
+    def forward(self, primals_1: "Sym(s2)", primals_2: "Sym(s3)", primals_3: "Sym(s1)", primals_4: "f64[s0, s1]", primals_5: "i64[s2 + 1]", primals_6: "f32[s5, 0]", primals_7: "f32[s6, 0]", primals_8: "Sym(s2 + 1)", primals_9: "Sym(s2)", primals_10: "Sym(s1)", primals_11: "Sym(s1)"):
         clone: "f64[s0, s1]" = torch.ops.aten.clone.default(primals_4);  primals_4 = None
 
         mul: "f64[s0, s1]" = torch.ops.aten.mul.Tensor(clone, primals_1);  clone = None
-        return (mul, primals_5, primals_6, primals_7, primals_8, primals_10, primals_10, primals_1, primals_8, primals_10)
+        return (mul, primals_5, primals_6, primals_7, primals_8, primals_9, primals_11, primals_11, primals_1, primals_9, primals_11, primals_8)
 """,  # noqa: B950
         )
 
@@ -2478,9 +2480,9 @@ class GraphModule(torch.nn.Module):
             normalize_gm(bw[0].print_readable(print_output=False)),
             """\
 class GraphModule(torch.nn.Module):
-    def forward(self, primals_1: "Sym(s2)", primals_8: "Sym(s2)", primals_10: "Sym(s1)", tangents_1: "f64[s0, s1]", tangents_2: "i64[s2 + 1]", tangents_3: "f32[s6, 0]", tangents_4: "f32[s7, 0]"):
+    def forward(self, primals_1: "Sym(s2)", primals_9: "Sym(s2)", primals_11: "Sym(s1)", primals_8: "Sym(s2 + 1)", tangents_1: "f64[s0, s1]", tangents_2: "i64[s2 + 1]", tangents_3: "f32[s5, 0]", tangents_4: "f32[s6, 0]"):
         mul_1: "f64[s0, s1]" = torch.ops.aten.mul.Tensor(tangents_1, primals_1);  tangents_1 = primals_1 = None
-        return (None, None, None, mul_1, tangents_2, tangents_3, tangents_4, primals_8, primals_10, primals_10)
+        return (None, None, None, mul_1, tangents_2, tangents_3, tangents_4, primals_8, primals_9, primals_11, primals_11)
 """,  # noqa: B950
         )
 
@@ -2499,12 +2501,12 @@ class GraphModule(torch.nn.Module):
             normalize_gm(fw[0].print_readable(print_output=False)),
             """\
 class GraphModule(torch.nn.Module):
-    def forward(self, primals_1: "Sym(s2)", primals_2: "Sym(s3)", primals_3: "Sym(s1)", primals_4: "f64[s0, s1]", primals_5: "i64[s2 + 1]", primals_6: "f32[s6, 0]", primals_7: "f32[s7, 0]", primals_8: "Sym(s2)", primals_9: "Sym(s1)", primals_10: "Sym(s1)"):
+    def forward(self, primals_1: "Sym(s2)", primals_2: "Sym(s3)", primals_3: "Sym(s1)", primals_4: "f64[s0, s1]", primals_5: "i64[s2 + 1]", primals_6: "f32[s5, 0]", primals_7: "f32[s6, 0]", primals_8: "Sym(s2 + 1)", primals_9: "Sym(s2)", primals_10: "Sym(s1)", primals_11: "Sym(s1)"):
         clone: "f64[s0, s1]" = torch.ops.aten.clone.default(primals_4);  primals_4 = None
 
         cat: "f64[s0, 2*s1]" = torch.ops.aten.cat.default([clone, clone], 1);  clone = None
-        add_2: "Sym(2*s1)" = primals_10 + primals_10
-        return (cat, primals_5, primals_6, primals_7, primals_8, add_2, add_2, primals_8, primals_10, add_2)
+        add_2: "Sym(2*s1)" = primals_11 + primals_11
+        return (cat, primals_5, primals_6, primals_7, primals_8, primals_9, add_2, add_2, primals_9, primals_11, primals_8, add_2)
 """,  # noqa: B950
         )
 
@@ -2512,12 +2514,12 @@ class GraphModule(torch.nn.Module):
             normalize_gm(bw[0].print_readable(print_output=False)),
             """\
 class GraphModule(torch.nn.Module):
-    def forward(self, primals_8: "Sym(s2)", primals_10: "Sym(s1)", add_2: "Sym(2*s1)", tangents_1: "f64[s0, 2*s1]", tangents_2: "i64[s2 + 1]", tangents_3: "f32[s6, 0]", tangents_4: "f32[s7, 0]"):
-        slice_1: "f64[s0, s1]" = torch.ops.aten.slice.Tensor(tangents_1, 1, 0, primals_10)
-        slice_2: "f64[s0, s1]" = torch.ops.aten.slice.Tensor(tangents_1, 1, primals_10, add_2);  tangents_1 = add_2 = None
+    def forward(self, primals_9: "Sym(s2)", primals_11: "Sym(s1)", primals_8: "Sym(s2 + 1)", add_2: "Sym(2*s1)", tangents_1: "f64[s0, 2*s1]", tangents_2: "i64[s2 + 1]", tangents_3: "f32[s5, 0]", tangents_4: "f32[s6, 0]"):
+        slice_1: "f64[s0, s1]" = torch.ops.aten.slice.Tensor(tangents_1, 1, 0, primals_11)
+        slice_2: "f64[s0, s1]" = torch.ops.aten.slice.Tensor(tangents_1, 1, primals_11, add_2);  tangents_1 = add_2 = None
 
         add_4: "f64[s0, s1]" = torch.ops.aten.add.Tensor(slice_1, slice_2);  slice_1 = slice_2 = None
-        return (None, None, None, add_4, tangents_2, tangents_3, tangents_4, primals_8, primals_10, primals_10)
+        return (None, None, None, add_4, tangents_2, tangents_3, tangents_4, primals_8, primals_9, primals_11, primals_11)
 """,  # noqa: B950
         )
 
@@ -2545,7 +2547,7 @@ class GraphModule(torch.nn.Module):
             normalize_gm(fw[0].print_readable(print_output=False)),
             """\
 class <lambda>(torch.nn.Module):
-    def forward(self, arg0_1: "Sym(s3)", arg1_1: "Sym(s4)", arg2_1: "Sym(s2)", arg3_1: "f64[9, s2]", arg4_1: "i64[s3 + 1]", arg5_1: "f32[s7, 0]", arg6_1: "f32[s8, 0]", arg7_1: "Sym(s3)", arg8_1: "Sym(s2)", arg9_1: "Sym(s2)"):
+    def forward(self, arg0_1: "Sym(s3)", arg1_1: "Sym(s4)", arg2_1: "Sym(s2)", arg3_1: "f64[9, s2]", arg4_1: "i64[s3 + 1]", arg5_1: "f32[s6, 0]", arg6_1: "f32[s7, 0]", arg7_1: "Sym(s3 + 1)", arg8_1: "Sym(s3)", arg9_1: "Sym(s2)", arg10_1: "Sym(s2)"):
         randn: "f64[2, 5]" = torch.ops.aten.randn.default([2, 5], dtype = torch.float64, device = device(type='cpu'), pin_memory = False)
         randn_1: "f64[3, 5]" = torch.ops.aten.randn.default([3, 5], dtype = torch.float64, device = device(type='cpu'), pin_memory = False)
         randn_2: "f64[4, 5]" = torch.ops.aten.randn.default([4, 5], dtype = torch.float64, device = device(type='cpu'), pin_memory = False)
@@ -2566,7 +2568,7 @@ class <lambda>(torch.nn.Module):
 
         sym_size_int: "Sym(s2 + 5)" = torch.ops.aten.sym_size.int(cat_2, 1);  cat_2 = None
         sym_stride_int: "Sym(s2 + 5)" = torch.ops.aten.sym_stride.int(mul, 0)
-        return (mul, cat_1, zeros_1, zeros_2, sym_size_int, sym_stride_int)
+        return (mul, cat_1, zeros_2, zeros_1, sym_size_int, sym_stride_int)
 """,  # noqa: B950
         )
 
@@ -2635,12 +2637,12 @@ class TestNestedTensor(torch._dynamo.test_case.TestCase, NestedTensorTestCase):
             else:
                 return (torch.ones_like(out_val),)
 
-        with self.branch_nested_state():
-            from torch.nested._internal.nested_tensor import _tensor_symint_registry
+        with fresh_tensor_registry_ctx():
+            from torch.nested._internal.tensor_registry import _global_tensor_registry
 
             # Validate that compilation does not modify eager state
-            registry_before = list(_tensor_symint_registry.items())
-            count_before = torch.nested._internal.nested_tensor._tensor_id_counter
+            registry_before = list(_global_tensor_registry._tensor_to_id.items())
+            count_before = _global_tensor_registry._next_id
 
             guards_exported = []
             guards_failed = []
@@ -2659,8 +2661,10 @@ class TestNestedTensor(torch._dynamo.test_case.TestCase, NestedTensorTestCase):
                 guard_export_fn=append_guard_export,
                 guard_fail_fn=append_guard_fail,
             )(fn)
-            registry_after = list(_tensor_symint_registry.items())
-            count_after = torch.nested._internal.nested_tensor._tensor_id_counter
+
+            # Validate that compilation does not modify eager state
+            registry_after = list(_global_tensor_registry._tensor_to_id.items())
+            count_after = _global_tensor_registry._next_id
             self.assertEqual(registry_before, registry_after)
             self.assertEqual(count_before, count_after)
 
@@ -2674,7 +2678,7 @@ class TestNestedTensor(torch._dynamo.test_case.TestCase, NestedTensorTestCase):
                     compile_out, inputs=g_args, grad_outputs=compile_grad_outputs
                 )
 
-        with self.branch_nested_state():
+        with fresh_tensor_registry_ctx():
             args = arg_fn()
             ref_out = fn(*args)
             ref_grads = []
@@ -2733,9 +2737,9 @@ class GraphModule(torch.nn.Module):
     # Note: [What kind of guards are involved in nested tensor compilation]
     #
     # Until we implement UnionFind, dynamic shapes guards are not involved.
-    # we rely only on dynamo's tensor aliasing guards.
+    # we rely only on dynamo's tensor deduping guards.
     #
-    # This is possible because dynamo able to generate tensor aliasing guards
+    # This is possible because dynamo able to generate tensor deduping guards
     # not only for the outer tensor, but also for the inner tensor.
     #
     # The case where dynamic shapes guards would eventually come into play is
@@ -2746,11 +2750,11 @@ class GraphModule(torch.nn.Module):
     #
     # Today there are two pieces of global eager state that NJTs deals with:
     # - tensor_id_counter: a global counter that assigns unique ids to tensors
-    # - tensor_symint_registry: maps tensor to nested int
-    #   - this is used in eager only (we should get rid of this because it is
-    #     not necessary to cache nested int in eager)
-    #   - during tracing, we DO need to cache nested int, but we do so on
-    #     the FakeTensor.
+    # - tensor_int_registry: maps tensor to id
+    #   - This is used to things like nt.to("cpu").shape == nt.shape
+    #   - This is NOT actually sound, because dynamo believes the two tensors are
+    #     different instances, and we don't produce the proper symbolic shapes guards.
+    #     (during tracing, we use this to handle view_avoid_dupes_with_primals
     #
     # Ideally we would like to satisfy the following:
     # - (1) The eager state is not mutated during tracing
@@ -2761,9 +2765,8 @@ class GraphModule(torch.nn.Module):
     #
     # Today we can satisfy (1) and (2a) but cannot satisfy (2b)
     #
-    # Today, (1) is satisfied because we maintain a separate counter during
-    # tracing, and cache nested int on FakeTensor instead of relying on
-    # tensor_symint_registry.
+    # Today, (1) is satisfied because we maintain a separate counter and
+    # tensor_int_registry during tracing on FakeTensorMode.
     #
     # (2) is cannot be completely satisfied because we trace away the
     # side-effectful operations (which we can fix this by wrapping the
@@ -2829,6 +2832,9 @@ class GraphModule(torch.nn.Module):
     # symbol, and there is no error produced.
     # The unsupported case is when we guard that two shapes are not equal, in
     # which, we will try and fail to generate a guard.
+    #
+    # See [ Best effort SymInt association ] for more information
+    # on NestedInt caching.
 
     #
     # Case 1: in-graph construction where the offsets are passed as inputs
@@ -2973,6 +2979,19 @@ class GraphModule(torch.nn.Module):
         values = torch.randn(10, 5).requires_grad_(True)
         self._validate_compile(fn, arg_fn=lambda: (values,))
 
+    @requires_cuda
+    def test_in_graph_construction_from_intermediate_4_2(self):
+        # Shared intermediate (should be same as case #1)
+        def fn(values):
+            offsets = torch.tensor([0, 2, 6, 10], dtype=torch.int64, device="cuda")
+            nt = torch.nested.nested_tensor_from_jagged(values, offsets)
+            values2 = torch.ones_like(values)
+            nt2 = torch.nested.nested_tensor_from_jagged(values2, offsets)
+            return nt * nt2
+
+        values = torch.randn(10, 5, device="cuda").requires_grad_(True)
+        self._validate_compile(fn, arg_fn=lambda: (values,))
+
     # AssertionError: s2 (could be from ['<ephemeral: intermediate_offsets_or_lengths>',
     @unittest.expectedFailure
     def test_in_graph_construction_from_intermediate_5(self):
@@ -3050,6 +3069,151 @@ class GraphModule(torch.nn.Module):
             return nt, values, offsets
 
         self._validate_compile(fn, arg_fn)
+
+    # See [ Best effort SymInt association ] for more info.
+    #
+    # This test is expected to fail because doing
+    # nested_tensor_from_jagged creates a fresh cache, and creates
+    # a new ephemeral symbol, which fails when it needs to be
+    # involved in any guard. In an ideal world, the resulting nt
+    # from nested_tensor_from_jagged preserves the original symbol
+    # which still has a proper source, but that is too hard.
+    @unittest.expectedFailure
+    @torch.fx.experimental._config.patch(use_duck_shape=False)
+    def test_in_graph_construction_mixed_4(self):
+        def fn(nt, nt2):
+            # Intermediate offsets has fresh cache
+            intermediate_nt = torch.nested.nested_tensor_from_jagged(
+                nt.values(), nt.offsets()
+            )
+            # This creates a dynamic shapes neq guard
+            if nt2.shape[1] != intermediate_nt.shape[1]:
+                # We should always go here.
+                nt = nt * 2
+            return nt, nt2
+
+        values = torch.randn(10, 5, requires_grad=True)
+        offsets = torch.tensor([0, 2, 6, 10], dtype=torch.int64)
+        offsets2 = torch.tensor([0, 1, 4, 10], dtype=torch.int64)
+
+        def arg_fn(values=values, offsets=offsets, offsets2=offsets2):
+            # Values is shared, but it shouldn't matter
+            nt = torch.nested.nested_tensor_from_jagged(values, offsets)
+            nt2 = torch.nested.nested_tensor_from_jagged(values, offsets2)
+            return nt, nt2
+
+        self._validate_compile(fn, arg_fn)
+
+    @requires_cuda
+    @fresh_tensor_registry
+    def test_different_devices(self):
+        from torch.utils._sympy.singleton_int import SingletonInt
+
+        def get_njt(device):
+            return torch.nested.nested_tensor(
+                [torch.randn(2, 5), torch.randn(3, 5), torch.randn(18, 5)],
+                layout=torch.jagged,
+                device=device,
+                requires_grad=True,
+            )
+
+        # Test shape comparison when the two inputs are the result of doing .to
+        t_cuda = get_njt("cuda")
+        t_cpu = t_cuda.to("cpu")
+        # Creating a fresh NJT to clear the cache
+        t_cpu_cleared = torch.nested.nested_tensor_from_jagged(
+            t_cpu.values(), t_cpu.offsets()
+        )
+
+        # Check guards
+        curr_var_to_val = None
+        curr_var_to_sources = None
+        guards = None
+
+        def backend(gm, args):
+            context = torch._guards.TracingContext.get()
+
+            # Grab info on sources and guards from the shapeenv
+            nonlocal curr_var_to_val
+            nonlocal curr_var_to_sources
+            nonlocal guards
+
+            guards = [str(g.expr) for g in context.fake_mode.shape_env.guards]
+            curr_var_to_val = {
+                str(k): v for k, v in context.fake_mode.shape_env.var_to_val.items()
+            }
+            curr_var_to_sources = {
+                str(k): v[0].name()
+                for k, v in context.fake_mode.shape_env.var_to_sources.items()
+            }
+            return gm
+
+        @torch.compile(backend=backend)
+        def fn(a, b):
+            if a.shape[1] == b.shape[1]:
+                return a.clone()
+            return b.clone()
+
+        fn(t_cpu_cleared, t_cuda)
+
+        expected_var_to_val = {
+            "s0": SingletonInt(0),
+            "s1": 18,
+            "s2": 2,
+            "s3": 23,
+            "s4": SingletonInt(0),
+            "s5": SingletonInt(0),
+            "s6": 23,
+            "s7": 23,
+            "s8": SingletonInt(0),
+        }
+        # We create extraneous symbols, but for we make sure to reuse symbols for
+        # the common case, e.g. raggedness/metadata preserving operations like pointwise.
+        expected_var_to_sources = {
+            "s0": "L['a']._base.size()[1]",
+            "s1": "L['a']._base.size()[1].node.nested_int_cache()._max_seqlen_tensor.size()[0]",
+            "s2": "L['a']._base.size()[1].node.nested_int_cache()._min_seqlen_tensor.size()[0]",
+            "s3": "L['a']._base._values.size()[0]",
+            "s4": "<ephemeral: intermediate_offsets_or_lengths>",
+            "s5": "L['a'].size()[1]",
+            "s6": "L['a']._values.size()[0]",
+            "s7": "L['b']._base.size()[0]",
+            "s8": "L['b'].size()[1]",
+        }
+        self.assertEqual(curr_var_to_val, expected_var_to_val)
+        self.assertEqual(curr_var_to_sources, expected_var_to_sources)
+        self.assertExpectedInline(
+            "\n".join(guards),
+            """\
+Eq(s4, s0)
+Eq(s3, s6)
+Eq(s0, s5)
+Eq(s0, s8)""",
+        )
+
+        def fn2(a, b):
+            if a.shape[1] == b.shape[1]:
+                return a.clone()
+            return b.clone()
+
+        t2_cpu = get_njt("cpu").clone()
+        t2_cpu_cleared = torch.nested.nested_tensor_from_jagged(
+            t2_cpu.values(), t2_cpu.offsets()
+        )
+        # Clone to ensure that the t4 is a view whose base is a NT to mimic the .to
+        # (torch.nested.nested_tensor produces a view whose base is a plain tensor!)
+        self.assertTrue(t2_cpu_cleared._base.is_nested)
+        t2_cuda = get_njt("cuda")
+
+        # This time, t2_cpu_cleared and t2_cpu are independently created (as opposed
+        # to being from .to), it should fail a symbolic shapes guard.
+        # We cannot rely on dynamo deduping guards because there was no overlap between
+        # t_cpu_cleared and t_cuda caches.
+        self.assertTrue(
+            _recompiles_for_inputs(
+                fn2, (t_cpu_cleared, t_cuda), (t2_cpu_cleared, t2_cuda), dynamic=False
+            )
+        )
 
     def test_return_shape(self):
         nt, _ = self._get_jagged_tensor(((2, 3, 4), 5), None)
@@ -3219,27 +3383,34 @@ class GraphModule(torch.nn.Module):
             # varies based on the type of view
             guard_str = "\n".join(guards)
             if nt_view_name == "subclass_dense":
-                self.assertExpectedInline(guard_str, """Eq(s3 - 1, s0)""")
+                self.assertExpectedInline(
+                    guard_str,
+                    """\
+Eq(s2 - 1, s0)
+Eq(s6, s1)""",
+                )
             elif nt_view_name == "dense_subclass_dense_subclass":
                 self.assertExpectedInline(
                     guard_str,
                     """\
-Eq(s5 - 1, s2)
-Eq(s12 - 1, s7)
-Eq(s11, s9)""",
+Eq(s4 - 1, s2)
+Eq(s6, s3)
+Eq(s2 + 1, s7)""",
                 )
             elif nt_view_name.startswith("base_is_nt_True"):
                 self.assertExpectedInline(
                     guard_str,
-                    """Eq(s3 - 1, s0)""",
+                    """\
+Eq(s2 - 1, s0)
+Eq(s6, s1)
+Eq(s1, s7)""",
                 )
             else:
                 self.assertExpectedInline(
                     guard_str,
                     """\
-Eq(s4 - 1, s1)
-Eq(s13 - 1, s8)
-Eq(s12, s10)""",
+Eq(s3 - 1, s1)
+Eq(s7, s2)""",
                 )
             return gm
 

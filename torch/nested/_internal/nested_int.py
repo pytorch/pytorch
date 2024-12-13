@@ -2,6 +2,8 @@ from typing import *  # noqa: F403
 
 import torch
 from torch.fx.experimental._constant_symnode import ConstantIntNode
+from torch.nested._internal.tensor_registry import register_tensor, try_get_int
+from torch.nested._internal.utils import apply_func
 
 
 __all__ = ["NestedIntNode"]
@@ -34,13 +36,31 @@ def _ge(lhs: Any, rhs: Any) -> bool:
         raise ValueError("inputs unsupported")
 
 
+def _get_tensor_id(t: torch.Tensor) -> int:
+    ret: List[Optional[int]] = [None]
+
+    def func(t: torch.Tensor) -> None:
+        if try_get_int(t) is None:
+            ret[0] = register_tensor(t)
+        else:
+            ret[0] = try_get_int(t)
+
+    apply_func(t, func, only_source_fields=True)
+    assert ret[0] is not None
+    return ret[0]
+
+
 class NestedIntNode:
-    def __init__(self, t_id: int, coeff: int):
-        self.t_id = t_id
+    def __init__(self, cache: torch.Tensor, coeff: int):
+        self.cache = cache
+        self.t_id = _get_tensor_id(cache)
         self.coeff = coeff
 
     def nested_int_coeff(self) -> int:
         return self.coeff
+
+    def nested_int_cache(self) -> Any:
+        return self.cache
 
     def maybe_as_int(self) -> Optional[int]:
         return None
@@ -82,7 +102,7 @@ class NestedIntNode:
             other = other.constant_int()
         else:
             raise ValueError(f"unsupported: {type(other)}")
-        return NestedIntNode(self.t_id, self.coeff * other)
+        return NestedIntNode(self.cache, self.coeff * other)
 
     def eq(self, other: Any) -> Any:
         return torch._C._get_constant_bool_symnode(_eq(self, other))
@@ -114,3 +134,10 @@ class NestedIntNode:
     def wrap_int(self, num: int) -> ConstantIntNode:
         assert type(num) is int
         return ConstantIntNode(num)
+
+
+def get_metadata(x: torch.SymInt) -> torch.Tensor:
+    if isinstance(x.node, NestedIntNode):
+        return x.node.nested_int_cache()
+    else:
+        return x.node.hint.node.nested_int_cache()
