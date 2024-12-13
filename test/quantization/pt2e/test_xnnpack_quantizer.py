@@ -995,6 +995,40 @@ class TestXNNPACKQuantizer(PT2EQuantizationTestCase):
             node_list,
         )
 
+    def test_cat_same_node(self):
+        """Ensure that concatenating the same node does not cause any unexpected behavior"""
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                x = torch.cat([x, x])
+                return x
+
+        quantizer = XNNPACKQuantizer()
+        quantization_config = get_symmetric_quantization_config(is_per_channel=True)
+        quantizer.set_global(quantization_config)
+        example_inputs = (torch.randn(1, 3, 5, 5),)
+        node_occurrence = {
+            torch.ops.quantized_decomposed.quantize_per_tensor.default: 2,
+            torch.ops.quantized_decomposed.dequantize_per_tensor.default: 2,
+        }
+        node_list = [
+            torch.ops.quantized_decomposed.quantize_per_tensor.default,
+            torch.ops.quantized_decomposed.dequantize_per_tensor.default,
+            torch.ops.aten.cat.default,
+            torch.ops.quantized_decomposed.quantize_per_tensor.default,
+            torch.ops.quantized_decomposed.dequantize_per_tensor.default,
+        ]
+        self._test_quantizer(
+            M(),
+            example_inputs,
+            quantizer,
+            node_occurrence,
+            node_list,
+        )
+
 
 # TODO: express this using self._test_quantizer, add test for inception_v4
 class TestXNNPACKQuantizerModels(PT2EQuantizationTestCase):
