@@ -15,9 +15,10 @@ import re
 import sys
 import threading
 import time
-from typing import Any, Container, Dict, List, Optional, Set, Tuple
+from typing import Any, Container, Dict, List, Optional, Tuple
 
 import torch
+from torch.utils._ordered_set import OrderedSet
 
 from ..triton_bundler import TritonBundler
 from ..utils import prefix_is_reduction
@@ -112,7 +113,7 @@ def get_total_reduction_numel(numels: Dict[str, int]) -> int:
 
 
 def autotune_hints_to_configs(
-    hints: Set[AutotuneHint],
+    hints: OrderedSet[AutotuneHint],
     size_hints,
     block_size: int,
     device_props: DeviceProperties,
@@ -315,7 +316,7 @@ class CachingAutotuner(KernelInterface):
                     "No valid triton configs. Report a fatal compilation error"
                 )
 
-            seen_configs = set(self.configs)
+            seen_configs = OrderedSet[Config](self.configs)
 
             device_prop = self.device_props
             warp_size = device_prop.warp_size
@@ -552,15 +553,15 @@ class CachingAutotuner(KernelInterface):
                     so we use self.fn.constexprs instead.
             3. It isn't in the compile_meta signature
         """
-        known_constants = {
+        known_constants = OrderedSet(
             arg for i, arg in enumerate(self.fn.arg_names) if i in self.fn.constexprs
-        }
-        none_args = {
+        )
+        none_args = OrderedSet(
             k
             for k, v in compile_meta["constants"].items()
             if v is None and k not in known_constants
-        }
-        none_args = none_args.difference(set(compile_meta["signature"].keys()))
+        )
+        none_args = none_args.difference(OrderedSet(compile_meta["signature"].keys()))
 
         call_args = [
             arg
@@ -895,7 +896,7 @@ class CachingAutotuner(KernelInterface):
         return cloned_args, cloned_kwargs
 
     def clone_args(self, *args, **kwargs) -> Tuple[List[Any], Dict[str, Any]]:
-        return self.maybe_clone_args(set(), *args, **kwargs)
+        return self.maybe_clone_args(OrderedSet(), *args, **kwargs)
 
     def benchmark_all_configs(self, *args, **kwargs):
         with dynamo_timed(
@@ -1352,7 +1353,7 @@ def cached_autotune(
 
 def unique_configs(configs: List[Config]):
     """Remove duplicate configurations"""
-    seen = set()
+    seen = OrderedSet[str]()
     pruned_configs = []
 
     for cfg in configs:
@@ -1677,7 +1678,7 @@ def pointwise(
     bs = max(256, min(numel // 128, 1024))
 
     hinted_configs = autotune_hints_to_configs(
-        inductor_meta.get("autotune_hints", set()),
+        inductor_meta.get("autotune_hints", OrderedSet()),
         size_hints,
         bs,
         triton_meta["device"],
