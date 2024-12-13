@@ -16233,9 +16233,9 @@ op_db: List[OpInfo] = [
             DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_out',
                          device_type='cpu'),
             # "mul_cuda" not implemented for float8_e4m3fn
+            # "mul_cpu_reduced_float" not implemented for 'Float8_e4m3fn'
             # https://github.com/pytorch/pytorch/issues/107256
-            DecorateInfo(unittest.skip("Skipped!"), 'TestSchemaCheckModeOpInfo', 'test_schema_correctness',
-                         dtypes=(torch.float8_e4m3fn,)),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestSchemaCheckModeOpInfo', 'test_schema_correctness'),
             # aten::_scaled_mm hit the vmap fallback which is currently disabled
             DecorateInfo(unittest.skip("Skipped!"), "TestVmapOperatorsOpInfo", "test_op_has_batch_rule",
                          device_type='cpu'),
