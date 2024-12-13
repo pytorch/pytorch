@@ -76,6 +76,7 @@ from torch._C import ScriptDict, ScriptList  # type: ignore[attr-defined]
 from torch._dynamo.trace_rules import _as_posix_path
 from torch._utils_internal import get_writable_path
 from torch._logging.scribe import open_source_signpost
+from torch._subclasses.fake_tensor import FakeTensor
 from torch.nn import (
     ModuleDict,
     ModuleList,
@@ -2350,7 +2351,7 @@ class PythonCycleLeakCheck:
     def __enter__(self):
         gc.disable()
 
-        before = len(tuple(o for o in gc.get_objects() if isinstance(o, torch.Tensor)))
+        before = len(tuple(o for o in gc.get_objects() if (isinstance(o, torch.Tensor) and not isinstance(o, FakeTensor))))
         if before != 0:
             print(before)
             msg = "No Tensor should be alive before starting the test! Another test must have failed with a leak before this one."
@@ -2362,8 +2363,14 @@ class PythonCycleLeakCheck:
         torch._C._jit_clear_class_registry()
         torch.jit._state._python_cu.drop_all_functions()
 
+        export_db_examples = sys.modules.get('torch._export.db', None)
+        if export_db_examples is not None:
+            for k in sys.modules:
+                if k.startswith("torch._export.db"):
+                    sys.modules[k].__dict__.clear()
 
-        after = len(tuple(o for o in gc.get_objects() if isinstance(o, torch.Tensor)))
+
+        after = len(tuple(o for o in gc.get_objects() if (isinstance(o, torch.Tensor) and not isinstance(o, FakeTensor))))
 
         if after != 0:
             # Some Tensor are still alive, let's check if the test function is still
@@ -2378,11 +2385,18 @@ class PythonCycleLeakCheck:
             if frame is not None:
                 frame.clear()
 
-            after = len(tuple(o for o in gc.get_objects() if isinstance(o, torch.Tensor)))
+            after = len(tuple(o for o in gc.get_objects() if (isinstance(o, torch.Tensor) and not isinstance(o, FakeTensor))))
+
+            import objgraph
+            objgraph.show_refs(
+                tuple(o for o in gc.get_objects() if (isinstance(o, torch.Tensor) and not isinstance(o, FakeTensor)))[-1],
+                max_depth=5,
+                filename="graph.png"
+            )
 
             if after != 0:
                 gc.collect()
-                post_collect = len(tuple(o for o in gc.get_objects() if isinstance(o, torch.Tensor)))
+                post_collect = len(tuple(o for o in gc.get_objects() if (isinstance(o, torch.Tensor) and not isinstance(o, FakeTensor))))
 
                 if post_collect == 0:
                     if getattr(self.test_method, "_do_python_cycle_check", True):
@@ -2393,10 +2407,11 @@ class PythonCycleLeakCheck:
                     # Debugging what the leaked objects are?
                     # The example code below shows how to get all their type and generate a graph of what
                     # keeps the 0th object alive.
-                    print(tuple(type(o) for o in gc.get_objects() if isinstance(o, torch.Tensor)))
+                    # print(tuple(o.device for o in gc.get_objects() if (isinstance(o, torch.Tensor) and not isinstance(o, FakeTensor))))
                     import objgraph
                     objgraph.show_backrefs(
-                        tuple(o for o in gc.get_objects() if isinstance(o, torch.Tensor))[1],
+                        tuple(o for o in gc.get_objects() if (isinstance(o, torch.Tensor) and not isinstance(o, FakeTensor)))[0],
+                        max_depth=15,
                         filename="graph.png"
                     )
                     raise RuntimeError(msg)
