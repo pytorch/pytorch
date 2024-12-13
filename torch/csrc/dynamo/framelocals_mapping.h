@@ -28,6 +28,21 @@ using FrameLocalsFrameType = PyFrameObject;
  *  - Can be converted into a dict for use in Python.
  *    The dict is constructed once per FrameLocalsMapping, lazily.
  *  - Lifetime should not exceed the lifetime of the frame
+ *
+ * How do guards use FrameLocalsMapping?
+ * - When a guard accesses a frame's localsplus, we find the index of the
+ *   variable name in the frame's code object and create a
+ *   FrameLocalsGuardAccessor.
+ * - We create a FrameLocalsMapping for the frame that we pass on to guard eval.
+ * - LeafGuards/GuardManagers/GuardAccessors now need to define how they
+ *   handle FrameLocalsMapping. By default, the FrameLocalsMapping is converted
+ *   to a Python dict and the guard check is performed on the resulting dict.
+ * - Some guard checks don't actually depend on the input arguments, e.g. they
+ *   only check global state. In this case, no dict conversion of
+ *   FrameLocalsMapping is done.
+ * - FrameLocalsGuardAccessor is like DictGetItemGuardAccessor, except it knows
+ *   how to handle FrameLocalsMapping - by using the framelocals variable name
+ *   index that it was given when it was built.
  */
 typedef struct VISIBILITY_HIDDEN FrameLocalsMapping {
  private:

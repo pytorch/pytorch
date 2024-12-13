@@ -382,6 +382,9 @@ enable_cpp_guard_manager = True
 # Inline inbuilt nn modules
 inline_inbuilt_nn_modules = not is_fbcode()
 
+# Use C++ FrameLocalsMapping (raw array view of Python frame fastlocals)
+enable_cpp_framelocals_guard_eval = True
+
 # Whether to automatically find and replace identical graph
 # regions with a call to invoke_subgraph
 use_graph_deduplication = False
