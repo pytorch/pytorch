@@ -557,12 +557,14 @@ def _load_model_state_dict(
         device = None
         for key, value in local_state_dict.items():
             if torch.is_tensor(value) and value.dim() > 0:
-                if device is None:
+                if value.device == torch.device("meta") and not info.strict:
+                    assign = True
+                elif device is None:
                     device = value.device
                 else:
                     assert device == value.device
-        assert device is not None
-        if device == torch.device("meta"):
+        assert (device is not None) or assign
+        if device == torch.device("meta") or (device is None and assign is True):
             device = dist.distributed_c10d._get_pg_default_device()
             assign = True
         if info.broadcast_from_rank0:
