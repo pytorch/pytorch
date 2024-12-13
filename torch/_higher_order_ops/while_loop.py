@@ -410,9 +410,7 @@ def while_loop_fake_tensor_mode(
             check_meta_consistency(body_outs, carried_inputs)
         # See NOTE [unspecialize int carry with unbacked symints]
         return pytree.tree_map_only(
-            (int, torch.SymInt),
-            lambda _: _create_unbacked_symint(),
-            body_outs,
+            (int, torch.SymInt), lambda _: _create_unbacked_symint(), body_outs
         )
 
 

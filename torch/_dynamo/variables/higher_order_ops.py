@@ -976,14 +976,19 @@ class CallTorchbindHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
 
 def validate_subgraph_output_types(output: VariableTracker):
+    """Verify that that the output of the subgraph is a tensor
+    or int or or bool, SymBool SymInt
+    """
     from . import TensorVariable
 
     if non_tensor_output := find_mismatched_vars(
         output, TensorVariable, allow_none=True
     ):
         for out in non_tensor_output:
-            if isinstance(out, SymNodeVariable) or (
-                isinstance(out, ConstantVariable) and out.python_type() is int
+            if (
+                isinstance(out, SymNodeVariable) and out.python_type() in (int, bool)
+            ) or (
+                isinstance(out, ConstantVariable) and out.python_type() in (int, bool)
             ):
                 continue
             unimplemented(
