@@ -21,7 +21,7 @@ import warnings
 import weakref
 from contextlib import contextmanager
 from copy import deepcopy
-from inspect import currentframe, getframeinfo
+from inspect import currentframe
 from typing import (
     Any,
     Callable,
@@ -446,37 +446,6 @@ def _ast_unparse(node: ast.AST) -> str:
 strip_function_call = torch._C._dynamo.strip_function_call
 
 
-def _strip_function_call(name):  # .781!
-    """
-    "___odict_getitem(a, 1)" => "a"
-    "a.layers[slice(2)][0]._xyz" ==> "a"
-    "getattr(a.layers[slice(2)][0]._abc, '0')" ==> "a"
-    "getattr(getattr(a.x[3], '0'), '3')" ==> "a"
-    "a.layers[slice(None, -1, None)][0]._xyz" ==> "a"
-    """
-    # recursively find valid object name in function
-    valid_name = re.compile("[A-Za-z_].*")
-    curr = ""
-    for char in name:
-        if char in " (":
-            curr = ""
-        elif char in "),[]":
-            if curr and curr != "None" and valid_name.match(curr):
-                return strip_function_call(curr)
-        else:
-            curr += char
-
-    return strip_getattr_getitem(name)
-
-
-def strip_getattr_getitem(name):
-    """
-    "a[1]" => "a"
-    "a.foo" => "a"
-    """
-    return re.split(r"[.\[]", name)[0]
-
-
 def get_verbose_code_part(code_part: str, guard: Guard) -> str:
     extra = ""
     if guard is not None:
@@ -551,7 +520,6 @@ def getitem_on_dict_manager(
     source, base_guard_manager, base_example_value, example_value, guard_manager_enum
 ):
     base_source_name = source.base.name()
-    source_name = source.name()
     if isinstance(source.index, ConstDictKeySource):
         index = source.index.index
     else:
@@ -660,9 +628,9 @@ class GuardBuilder(GuardBuilderBase):
         self.id_matched_objs: Dict[str, ReferenceType[object]] = {}
 
         # Save the guard managers to avoid repeatedly traversing sources.
-        self._cached_guard_managers: Dict[str, torch._C._dynamo.guards.GuardManager] = (
-            {}
-        )
+        self._cached_guard_managers: Dict[
+            str, torch._C._dynamo.guards.GuardManager
+        ] = {}
         self._cached_duplicate_input_guards: Set[Tuple[str, str]] = set()
 
     def guard_on_dict_keys_and_ignore_order(self, example_value, guard):
@@ -1242,7 +1210,7 @@ class GuardBuilder(GuardBuilderBase):
         # code_parts in a function object which is then passed on to the leaf
         # guard.
         make_guard_fn_args = ", ".join(closure_vars.keys())
-        guard_body, pycode = build_guard_function(code_parts, make_guard_fn_args)
+        _guard_body, pycode = build_guard_function(code_parts, make_guard_fn_args)
         out: Dict[str, Any] = {}
         globals_for_guard_fn = {"G": self.scope["G"]}
         exec(pycode, globals_for_guard_fn, out)
@@ -1277,7 +1245,7 @@ class GuardBuilder(GuardBuilderBase):
             name = guard
         else:
             name = guard.name
-        base = strip_getattr_getitem(strip_function_call(name))
+        base = strip_function_call(name)
         if base not in self.argnames:
             if re.match(r"[a-zA-Z0-9_]+", base):
                 if re.match(r"^\d+$", base):
@@ -1517,7 +1485,6 @@ class GuardBuilder(GuardBuilderBase):
     def EQUALS_MATCH(self, guard: Guard):
         ref = self.arg_ref(guard)
         val = self.get(guard.name)
-        t = type(val)
         if np:
             np_types: Tuple[Type[Any], ...] = (
                 np.int8,
@@ -1656,7 +1623,6 @@ class GuardBuilder(GuardBuilderBase):
         # tuple, collections.deque etc
         ref = self.arg_ref(guard)
         value = self.get(guard.name)
-        t = type(value)
 
         if not isinstance(value, dict):
             # C++ DICT_LENGTH checks for type
@@ -1722,15 +1688,16 @@ class GuardBuilder(GuardBuilderBase):
         ) or is_from_optimizer_source(source_b):
             return
 
-        code = [f"{ref_b} is {ref_a}"]
-        self._set_guard_export_info(guard, code)
-
         # Check that the guard has not been inserted already
         key = (ref_a, ref_b)
         if key in self._cached_duplicate_input_guards:
             return
+
         self._cached_duplicate_input_guards.add((ref_a, ref_b))
         self._cached_duplicate_input_guards.add((ref_b, ref_a))
+
+        code = [f"{ref_b} is {ref_a}"]
+        self._set_guard_export_info(guard, code)
 
         install_object_aliasing_guard(
             self.get_guard_manager(guard),
@@ -1742,7 +1709,6 @@ class GuardBuilder(GuardBuilderBase):
         # Guard on the keys and their order
         ref = self.arg_ref(guard)
         value = self.get(guard.name)
-        t = type(value)
 
         self.TYPE_MATCH(guard)
         code = []
@@ -1774,7 +1740,6 @@ class GuardBuilder(GuardBuilderBase):
         """Constant keys match"""
         ref = self.arg_ref(guard)
         value = self.get(guard.name)
-        t = type(value)
 
         code = []
         code.append(f"list({ref}.keys()) == {list(value.keys())!r}")
@@ -2029,7 +1994,7 @@ class GuardBuilder(GuardBuilderBase):
             # this logic, be my guest!  -- ezyang 2024)
             #
             assert guard.source is not None
-            static, reason = tensor_always_has_static_shape(
+            static, _reason = tensor_always_has_static_shape(
                 value, is_tensor=True, tensor_source=guard.originating_source
             )
 
@@ -2065,18 +2030,17 @@ class GuardBuilder(GuardBuilderBase):
         caller = cur_frame.f_back
         del cur_frame
         assert caller is not None
-        func_name = getframeinfo(caller)[2]
+        func_name = caller.f_code.co_name
         del caller
         # We use func_name for export, so might as well get a nice defensive check out of it
-        assert func_name in dir(
-            self.__class__
+        assert (
+            func_name in self.__class__.__dict__
         ), f"_produce_guard_code must be called from inside GuardedCode. Called from {func_name}"
 
         # Not all guards have names, some can be installed globally (see asserts on HAS_GRAD)
         if provided_guarded_object is None:
-            name_valid = guard.name is not None and guard.name != ""
-
-            guarded_object = self.get(guard.name) if name_valid else None
+            name = guard.name
+            guarded_object = None if not name else self.get(name)
         else:
             guarded_object = provided_guarded_object
 
@@ -2291,7 +2255,7 @@ class CheckFunctionManager:
         if not justknobs_check("pytorch/compiler:guard_nn_modules"):
             log.warning("guard_nn_modules is turned off using justknobs killswitch")
 
-        for guard in sorted(guards or [], key=Guard.sort_key):
+        for guard in sorted(guards or (), key=Guard.sort_key):
             if (
                 not guard_on_nn_modules
                 and guard.is_specialized_nn_module()
@@ -2704,7 +2668,7 @@ def get_guard_fail_reason_helper(
             with report_compile_source_on_error():
                 try:
                     fail_reason = eval(part, global_scope, scope)
-                except Exception as e:
+                except Exception:
                     if is_recompiles_verbose_enabled():
                         continue
                     else:
@@ -2739,7 +2703,7 @@ def get_guard_fail_reason(
             guard_manager.guard_fail_fn(
                 GuardFail(reason_str or "unknown reason", orig_code_map[code])
             )
-    except Exception as e:
+    except Exception:
         log.exception(
             "Failure in guard_fail_fn callback - raising here will cause a NULL Error on guard eval",
         )

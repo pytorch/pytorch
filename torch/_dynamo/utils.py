@@ -881,6 +881,7 @@ class CompilationMetrics:
     cuda_version: Optional[str] = None
     triton_version: Optional[str] = None
     feature_usage: Optional[dict[str, bool]] = None
+    compile_time_autotune_time_us: Optional[int] = None
 
 
 DEFAULT_COMPILATION_METRICS_LIMIT = 64
@@ -3579,7 +3580,7 @@ def get_torch_function_mode_stack_at(ind):
 
 
 def set_torch_function_mode_stack(stack):
-    for i in range(_len_torch_function_stack()):
+    for _ in range(_len_torch_function_stack()):
         _pop_torch_function_stack()
 
     for mode in stack:
@@ -3587,7 +3588,7 @@ def set_torch_function_mode_stack(stack):
 
 
 def clear_torch_function_mode_stack():
-    for i in range(_len_torch_function_stack()):
+    for _ in range(_len_torch_function_stack()):
         _pop_torch_function_stack()
 
 
