@@ -51,7 +51,7 @@ def _arg_str(a) -> str:
 # implementations make heavy use of __getattr__ magic, and pre-existing
 # stubs for methods would interfere with this mechanism.
 #
-# See OpDecompositions for superclass that desugars operations like reciprocal/square
+# See OpDecompositions for superclass that desugars operations like reciprocal/square.
 class OpsHandler(Protocol[T]):
     """
     Protocol describing the set of valid operations on ``torch._inductor.virtualized.ops``,

@@ -1,4 +1,6 @@
 # mypy: allow-untyped-decorators
+import math
+import os
 import socket
 import uuid
 from contextlib import contextmanager
@@ -653,6 +655,15 @@ def _fused_all_gather_matmul(
     if _is_test_mode:
         return _fused_all_gather_matmul_fallback(A_shard, Bs, gather_dim, group_name)
 
+    if _should_use_fused_all_gather_matmul_native(A_shard, Bs, gather_dim, group_name):
+        group = c10d._resolve_process_group(group_name)
+        leading_dims = list(A_shard.shape[:-1])
+        leading_dims[0] *= group.size()
+        A, out = _fused_all_gather_matmul_native(
+            A_shard.flatten(0, -2), Bs[0], group_name
+        )
+        return A.view(*leading_dims, -1), [out.view(*leading_dims, -1)]
+
     with torch.profiler.record_function("fused_all_gather_matmul"):
         return _fused_all_gather_matmul_impl(
             torch.ops.aten.mm.out,
@@ -664,6 +675,29 @@ def _fused_all_gather_matmul(
             gather_dim,
             group_name,
         )
+
+
+def _should_use_fused_all_gather_matmul_native(
+    A_shard: torch.Tensor,
+    Bs: List[torch.Tensor],
+    gather_dim: int,
+    group_name: str,
+) -> bool:
+    group = c10d._resolve_process_group(group_name)
+    local_M = math.prod(A_shard.shape[:-1])
+
+    return (
+        "TORCH_SYMM_MEM_ENABLE_NATIVE_ASYNC_TP" in os.environ
+        and A_shard.is_contiguous()
+        and gather_dim == 0
+        # _async_input_mm requires local_M to be divisible by world_size.
+        and local_M % group.size() == 0
+        # _async_input_mm outperforms the decomposition-based approach when the
+        # global M is small.
+        and local_M * group.size() <= 4096
+        # _async_input_mm only supports a single B.
+        and len(Bs) == 1
+    )
 
 
 def _fused_all_gather_matmul_native(
@@ -688,15 +722,18 @@ def _fused_all_gather_matmul_native(
     backend_stream = _get_backend_stream(priority=-1)
 
     symm_mem.barrier()
-    current_stream.wait_stream(backend_stream)
     backend_stream.wait_stream(current_stream)
+    current_stream.wait_stream(backend_stream)
 
     A = A_shard.new_empty(A_shard.shape[0] * world_size, A_shard.shape[1])
     A_signals = torch.zeros(world_size, dtype=torch.uint32, device=A_shard.device)
     A_shards = A.chunk(world_size)
 
     A_shards[rank].copy_(A_shard)
-    _SymmetricMemory.stream_write_value32(A_signals, rank, 1)
+    if not torch.cuda.is_current_stream_capturing():
+        _SymmetricMemory.stream_write_value32(A_signals, rank, 1)
+    else:
+        _SymmetricMemory.memset32(A_signals, offset=rank, val=1, count=1)
 
     out = torch.ops.symm_mem._async_input_mm(A, B, A_signals, rank)
     for step in range(1, world_size):
@@ -704,8 +741,11 @@ def _fused_all_gather_matmul_native(
         src_buf = symm_mem.get_buffer(src_rank, A_shard.shape, A_shard.dtype)
         with torch.cuda.stream(backend_stream):
             A_shards[src_rank].copy_(src_buf)
-            # cuStreamWriteValue32 issues a system level fence before the write
-            _SymmetricMemory.stream_write_value32(A_signals, src_rank, 1)
+            if not torch.cuda.is_current_stream_capturing():
+                # cuStreamWriteValue32 issues a system level fence before the write
+                _SymmetricMemory.stream_write_value32(A_signals, src_rank, 1)
+            else:
+                _SymmetricMemory.memset32(A_signals, offset=src_rank, val=1, count=1)
 
     current_stream.wait_stream(backend_stream)
     backend_stream.wait_stream(current_stream)

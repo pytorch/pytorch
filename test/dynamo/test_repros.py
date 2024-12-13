@@ -3952,9 +3952,9 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         root = []
         root[:] = [root, root, None, None]
 
-        @torch.compile(backend="eager")
+        @torch.compile(fullgraph=True, backend="eager")
         def test_bug():
-            return root
+            return root[0]
 
         test_bug()
 
