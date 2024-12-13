@@ -184,7 +184,7 @@ def _retrieve_or_adapt_input_to_graph_set(
         ] = []
         for tensor in onnx_tensor:
             sequence_elements.append(
-                fx_name_to_onnxscript_value[tensor.name] if tensor is not None else None
+                fx_name_to_onnxscript_value[tensor.name] if tensor is not None else None  # type: ignore[index, union-attr]
             )
         return sequence_elements
     if isinstance(onnx_tensor, torch.dtype):
