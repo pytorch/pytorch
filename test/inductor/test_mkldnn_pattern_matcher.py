@@ -104,7 +104,7 @@ def cal_conv_generated_kernel_number(mod, input, dtype, dim=4):
     if dtype == torch.float32:
         maybe_autocast = contextlib.nullcontext()
     else:
-        maybe_autocast = torch.cpu.amp.autocast(dtype=dtype)
+        maybe_autocast = torch.amp.autocast("cpu", dtype=dtype)
     with torch.no_grad(), maybe_autocast:
         output = mod(input)
     input_kernel, output_kernel = 0, 0
@@ -156,13 +156,13 @@ class TestPatternMatcherBase(TestCase):
             check_autocast == torch.bfloat16
             and torch.ops.mkldnn._is_mkldnn_bf16_supported()
         ):
-            maybe_autocast = torch.cpu.amp.autocast(dtype=torch.bfloat16)
+            maybe_autocast = torch.amp.autocast("cpu", dtype=torch.bfloat16)
             atol, rtol = 1e-2, 1e-2
         elif (
             check_autocast == torch.float16
             and torch.ops.mkldnn._is_mkldnn_fp16_supported()
         ):
-            maybe_autocast = torch.cpu.amp.autocast(dtype=torch.float16)
+            maybe_autocast = torch.amp.autocast("cpu", dtype=torch.float16)
             atol, rtol = 1e-2, 1e-2
         else:
             assert check_autocast == torch.float32
