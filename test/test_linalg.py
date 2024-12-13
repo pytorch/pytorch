@@ -4819,6 +4819,7 @@ class TestLinalg(TestCase):
         # buffer rotation (on by default) with strided batched gemm tunableop was causing a mem fault
         set_tunableop_defaults()
         torch.cuda.tunable.enable(True)
+        torch.cuda.tunable.set_rotating_buffer_size(-1)  # Make sure we use the default buffer rotation
         torch.cuda.tunable.set_max_tuning_iterations(10)
         # the following 3 cases cover all previous failure cases and are here to catch regressions
         B = 16
