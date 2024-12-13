@@ -115,10 +115,9 @@ device_tma = r"""
     k_tiles = tl.cdiv(K, BLOCK_K)
     num_tiles = num_pid_m * num_pid_n
 
-    workspace_base = ws_ptr + start_pid * 3 * TMA_SIZE
+    workspace_base = ws_ptr + start_pid * 2 * TMA_SIZE
     a_desc_ptr = workspace_base
     b_desc_ptr = workspace_base + TMA_SIZE
-    c_desc_ptr = workspace_base + 2 * TMA_SIZE
 
     triton.language.extra.cuda.experimental_device_tensormap_create2d(
         desc_ptr=a_desc_ptr,
@@ -553,7 +552,7 @@ def tuned_scaled_mm(
                     input_nodes=input_nodes,
                     layout=layout,
                     workspace_arg=get_tma_workspace_arg(
-                        num_tma_descriptors=3,
+                        num_tma_descriptors=2,
                         device=mat_a.get_device(),
                     ),
                     **kwargs,

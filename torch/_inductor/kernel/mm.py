@@ -145,11 +145,9 @@ persistent_tma_mm_template = TritonTemplate(
         # early exit due to zero-size input(s)
         return
 
-    # based on triton.ops.matmul
     start_pid = tl.program_id(0)
-    grid_m = (M + BLOCK_M - 1) // BLOCK_M
-    grid_n = (N + BLOCK_N - 1) // BLOCK_N
-
+    grid_m = tl.cdiv(M, BLOCK_M)
+    grid_n = tl.cdiv(N, BLOCK_N)
     k_tiles = tl.cdiv(K, BLOCK_K)
     num_tiles = grid_m * grid_n
     tiles_per_SM = num_tiles // NUM_SMS
@@ -163,7 +161,7 @@ persistent_tma_mm_template = TritonTemplate(
     rk_for_mask = tl.arange(0, BLOCK_K)
     acc = tl.zeros((BLOCK_M, BLOCK_N), dtype=ACC_TYPE)
 
-    workspace_base = ws_ptr + start_pid * 3 * TMA_SIZE
+    workspace_base = ws_ptr + start_pid * 2 * TMA_SIZE
     a_desc_ptr = workspace_base
     b_desc_ptr = workspace_base + TMA_SIZE
 
