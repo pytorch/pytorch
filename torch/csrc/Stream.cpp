@@ -94,7 +94,7 @@ static PyObject* THPStream_pynew(
   // NOLINTNEXTLINE(bugprone-signed-char-misuse)
   self->device_index = static_cast<int64_t>(stream_opt->device_index());
   self->device_type = static_cast<int64_t>(stream_opt->device_type());
-  self->attributes = Py_None;
+  self->context = NULL;
 
   return (PyObject*)ptr.release();
   END_HANDLE_TH_ERRORS
@@ -113,14 +113,14 @@ PyObject* THPStream_Wrap(const c10::Stream& stream) {
   // NOLINTNEXTLINE(bugprone-signed-char-misuse)
   self->device_index = static_cast<int64_t>(stream.device_index());
   self->device_type = static_cast<int64_t>(stream.device_type());
-  self->attributes = Py_None;
+  self->context = NULL;
   return ptr.release();
   END_HANDLE_TH_ERRORS
 }
 
 static void THPStream_dealloc(THPStream* self) {
-  if (self->attributes) {
-    Py_DECREF(self->attributes);
+  if (self->context) {
+    Py_DECREF(self->context);
   }
   Py_TYPE(self)->tp_free((PyObject*)self);
 }
@@ -286,9 +286,10 @@ static PyObject* THPStream_enter(PyObject* _self, PyObject* unused) {
   auto dst_prev_stream_object = THPStream_Wrap(dst_prev_stream);
   PyObject_SetAttrString(_self, "_src_device_index", src_device_index_object);
   PyObject_SetAttrString(_self, "_dst_prev_stream", dst_prev_stream_object);
-  // Move ownership to the object self's attributes dict.
+  // Move ownership to the self's context.
   Py_DECREF(src_device_index_object);
   Py_DECREF(dst_prev_stream_object);
+  // Support with torch.Stream() as stream: works
   Py_INCREF(self);
   return (PyObject*)self;
   END_HANDLE_TH_ERRORS
@@ -318,10 +319,10 @@ static PyObject* THPStream_exit(PyObject* _self, PyObject* unused) {
   END_HANDLE_TH_ERRORS
 }
 
-static void THPStream_maybe_init_attributes(PyObject* attributes) {
-  if (!attributes) {
-    attributes = PyDict_New();
-    if (!attributes) {
+static void THPStream_maybe_init_context(PyObject* self) {
+  if (!(self->context)) {
+    self->context = PyDict_New();
+    if (!(self->context)) {
       throw python_error();
     }
   }
@@ -333,8 +334,8 @@ static PyObject* THPStream_getattro(PyObject* _self, PyObject* attr_name) {
   auto attr_name_str = THPUtils_unpackString(attr_name);
   if (attr_name_str == "_src_device_index" ||
       attr_name_str == "_dst_prev_stream") {
-    THPStream_maybe_init_attributes(self->attributes);
-    return PyDict_GetItem(self->attributes, attr_name);
+    THPStream_maybe_init_context(_self);
+    return PyDict_GetItem(self->context, attr_name);
   }
   return PyObject_GenericGetAttr(self, attr_name);
   END_HANDLE_TH_ERRORS
@@ -349,8 +350,8 @@ static int THPStream_setattro(
   auto attr_name_str = THPUtils_unpackString(attr_name);
   if (attr_name_str == "_src_device_index" ||
       attr_name_str == "_dst_prev_stream") {
-    THPStream_maybe_init_attributes(self->attributes);
-    return PyDict_SetItem(self->attributes, attr_name, value);
+    THPStream_maybe_init_context(_self);
+    return PyDict_SetItem(self->context, attr_name, value);
   }
   return PyObject_GenericSetAttr(self, attr_name, value);
   END_HANDLE_TH_ERRORS_RET(-1)
