@@ -1209,6 +1209,12 @@ uint64_t ProcessGroupNCCL::getSequenceNumberForGroup() {
 
 void ProcessGroupNCCL::registerOnCompletionHook(
     std::function<void(std::shared_ptr<WorkInfo>)>&& hook) {
+  TORCH_WARN_ONCE(
+      "ProcessGroupNCCL OnCompletion hook will be deprecated in favor of Flight Recorder. "
+      "Please check out FlightRecorder.hpp for information that is recorded at work completion. "
+      "You can file an issue if you want additional information to be recorded. "
+      "You can also file an RFC if you want Flight Recorder to accept plugins that customize the recording.")
+
   TORCH_CHECK_WITH(
       DistBackendError,
       onCompletionHook_ == nullptr,
@@ -1292,7 +1298,7 @@ bool ProcessGroupNCCL::waitForFutureOrTimeout(
       bool result = fut.get();
       if (result) {
         VLOG(2) << logPrefix()
-                << "future is successfully executed for: " << futDescription;
+                << "future successfully executed for: " << futDescription;
         if (log) {
           data.strings["status"] = "SUCCESS";
         }
@@ -1444,7 +1450,8 @@ void ProcessGroupNCCL::shutdown() {
   // timeout is reach, this will throw an exception.
   for (auto& it : devNCCLCommMap_) {
     auto& ncclComm = it.second;
-    ncclComm->waitReady();
+    // Use long interval to avoid acquiring CPU too frequently
+    ncclComm->waitReady(true);
   }
   // Tell watchdog to (1) flush its queue and (2) do not use comm objects
   // anymore because I am going to destroy them now
@@ -1475,44 +1482,66 @@ void ProcessGroupNCCL::shutdown() {
 
 // NOLINTNEXTLINE(bugprone-exception-escape)
 ProcessGroupNCCL::~ProcessGroupNCCL() {
-  VLOG(2) << logPrefix() << "ProcessGroupNCCL destructor entered.";
+  LOG(INFO) << logPrefix() << "ProcessGroupNCCL destructor entered.";
 
-  if (!terminateProcessGroup_.load()) {
-    if (rank_ % localDeviceCount_ == 0) {
-      TORCH_WARN_ONCE(
-          "WARNING: process group has NOT been destroyed before we destruct ProcessGroupNCCL. ",
-          "On normal program exit, the application should call destroy_process_group to ",
-          "ensure that any pending NCCL operations have finished in this process. "
-          "In rare cases this process can exit before this point and block the progress of "
-          "another member of the process group. This constraint has always been present, "
-          "but this warning has only been added since PyTorch 2.4");
-    }
-    // If user haven't explicitly destroy/shutdown process group, destructor
-    // needs to do so
-    // Note: we have rewritten `shutdown` to represent the destroy behavior.
-    // Here we route to `abort()` explicitly to maintain the old behavior, until
-    // we fix everything.
-    abort();
+  if (terminateProcessGroup_.load())
+    // `shutdown()` or `abort` already called. Skip the favor of disposing
+    // communicators.
+    goto join_threads;
+
+  // If user haven't explicitly destroy/shutdown process group, destructor
+  // needs to do so
+  // First print warning on first rank of each node
+  if (rank_ % localDeviceCount_ == 0) {
+    TORCH_WARN_ONCE(
+        "WARNING: destroy_process_group() was not called before program exit, "
+        "which can leak resources. For more info, please see "
+        "https://pytorch.org/docs/stable/distributed.html#shutdown");
   }
+
+  // Note 1: in distributed_c10d.py, a reference to PG is held by the global
+  // context. Therefore, we are here only when the global context is tearing
+  // down, which means the entire program is exiting.  At this point, user will
+  // no longer care about the result of any collective, thus we can use abort
+  // instead of destroy to make the destruction non-blocking.
+
+  // TODO: Note 1 is not true in case of a C++ program using libtorch, which
+  // does not have the global context mentioned. In that case, calling `abort()`
+  // here could lead to corrupted result. We should consider not doing anything
+  // and just let things leak.
+  // Adversarial example:
+  /*
+    Work routine(Tensor& t) {
+      pg = ProcessGroupNCCL(…);
+      w = pg.allReduce(t);
+      return w;
+    }
+  */
+  abort();
+
+join_threads:
+  // Make sure we've told threads to stop; doesn't hurt if we'd done so before.
+  // Tell watchdog and onCompletionHook:
+  terminateProcessGroup_.store(true);
+  workMetaListCV_.notify_one();
+  // Tell heartbeat thread:
+  terminateHeartbeatMonitorThread_.store(true);
+  monitorWakeUpCV_.notify_one();
 
   // Wait for all threads to finish before returning
-#ifdef ENABLE_NCCL_ERROR_CHECKING
-  if (!blockingWait_) {
-    if (ncclCommWatchdogThread_.joinable()) {
-      ncclCommWatchdogThread_.join();
-      VLOG(2) << logPrefix() << "ProcessGroupNCCL watchdog thread joined.";
-    }
-    if (ncclHeartbeatMonitorThread_.joinable()) {
-      ncclHeartbeatMonitorThread_.join();
-      VLOG(2) << logPrefix()
-              << "ProcessGroupNCCL heart beat monitor thread joined.";
-    }
+  if (ncclCommWatchdogThread_.joinable()) {
+    ncclCommWatchdogThread_.join();
+    LOG(INFO) << logPrefix() << "ProcessGroupNCCL watchdog thread joined.";
   }
-#endif
+  if (ncclHeartbeatMonitorThread_.joinable()) {
+    ncclHeartbeatMonitorThread_.join();
+    LOG(INFO) << logPrefix()
+              << "ProcessGroupNCCL heart beat monitor thread joined.";
+  }
   if (onCompletionHookThread_.joinable()) {
     onCompletionHookThread_.join();
-    VLOG(2) << logPrefix()
-            << "ProcessGroupNCCL onCompletionHookThread thread joined.";
+    LOG(INFO) << logPrefix()
+              << "ProcessGroupNCCL onCompletionHookThread thread joined.";
   }
 }
 
@@ -1751,6 +1780,9 @@ void ProcessGroupNCCL::heartbeatMonitor() {
           true);
 
       if (complete) {
+        LOG(INFO)
+            << logPrefix()
+            << "Finished flight recorder successfully. Output can be analyzed using the fr_trace script.";
         break;
       }
       // If we failed to dump, try dumping without stack trace in the 2nd
@@ -2017,9 +2049,9 @@ void ProcessGroupNCCL::broadcastDumpSignal() {
         reinterpret_cast<uint8_t*>(&rank) + sizeof(rank));
     globalStore_->set(std::string(EXCEPTION_DUMP), vec);
     if (!shouldDump_.load()) {
-      LOG(ERROR)
+      LOG(INFO)
           << logPrefix()
-          << "Broadcasting flight-recorder dump signal to other processes via TCPStore.";
+          << "Broadcasting flight recorder dump signal to other processes via TCPStore.";
     }
     // signal the monitor thread on PG0 to start dumping
     shouldDump_.store(true);
@@ -2519,7 +2551,12 @@ std::shared_ptr<NCCLComm> ProcessGroupNCCL::initNCCLComm(
 #endif
 
 #ifdef NCCL_HAS_COMM_SPLIT
-  if (options_->split_from) {
+  // Use split to create a new communicator only if:
+  // 1. The parent comm is known; AND
+  // 2. The new comm is not for a point-to-point operation.
+  // ncclCommSplit() is a collective call, so it does not work for P2P
+  // operations.
+  if (options_->split_from && !singleP2POp) {
     // Find a valid, healthy communicator to split from if possible.
     std::lock_guard<std::mutex> lock(options_->split_from->mutex_);
     auto& other_comms = options_->split_from->devNCCLCommMap_;
@@ -3767,6 +3804,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::allreduce_sparse(
 
 c10::intrusive_ptr<Work> ProcessGroupNCCL::allreduce_impl(
     at::Tensor& tensor,
+    const char* profilingTitle,
     const AllreduceOptions& opts) {
   return collective(
       tensor,
@@ -3788,7 +3826,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::allreduce_impl(
             stream.stream());
       },
       OpType::ALLREDUCE,
-      "nccl:all_reduce");
+      profilingTitle);
 }
 
 c10::intrusive_ptr<Work> ProcessGroupNCCL::allreduce(
@@ -3837,7 +3875,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::allreduce(
       this->getSize()); // worldSize
 
   // avoidRecordStreams_ note: collective() will stash tensors.
-  return allreduce_impl(tensor, opts);
+  return allreduce_impl(tensor, "nccl:all_reduce", opts);
 }
 
 c10::intrusive_ptr<Work> ProcessGroupNCCL::allreduce_coalesced(
@@ -4545,7 +4583,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::barrier(const BarrierOptions& opts) {
       at::zeros({1}, at::TensorOptions().device(barDevice).dtype(at::kFloat));
 
   // All reduce to achieve the barrier
-  auto work = allreduce_impl(barrierTensor);
+  auto work = allreduce_impl(barrierTensor, "nccl:all_reduce_barrier");
 
   // Work will take over barrierTensors
   auto ncclWork = dynamic_cast<ProcessGroupNCCL::WorkNCCL*>(work.get());

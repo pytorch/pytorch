@@ -77,10 +77,6 @@ __all__ = [
 ]
 
 
-__TORCH_DICT_SESSION = optree.dict_insertion_ordered(True, namespace="torch")
-__TORCH_DICT_SESSION.__enter__()  # enable globally and permanently
-
-
 T = TypeVar("T")
 S = TypeVar("S")
 U = TypeVar("U")
@@ -335,15 +331,20 @@ def tree_flatten(
 
     >>> tree = {"b": (2, [3, 4]), "a": 1, "c": None, "d": 5}
     >>> tree_flatten(tree)
-    ([2, 3, 4, 1, None, 5], PyTreeSpec({'b': (*, [*, *]), 'a': *, 'c': *, 'd': *}, NoneIsLeaf, namespace='torch'))
+    ([1, 2, 3, 4, None, 5], PyTreeSpec({'a': *, 'b': (*, [*, *]), 'c': *, 'd': *}, NoneIsLeaf))
     >>> tree_flatten(1)
-    ([1], PyTreeSpec(*, NoneIsLeaf, namespace='torch'))
+    ([1], PyTreeSpec(*, NoneIsLeaf))
     >>> tree_flatten(None)
-    ([None], PyTreeSpec(*, NoneIsLeaf, namespace='torch'))
+    ([None], PyTreeSpec(*, NoneIsLeaf))
+
+    For unordered dictionaries, :class:`dict` and :class:`collections.defaultdict`, the order is
+    dependent on the **sorted** keys in the dictionary. Please use :class:`collections.OrderedDict`
+    if you want to keep the keys in the insertion order.
+
     >>> from collections import OrderedDict
     >>> tree = OrderedDict([("b", (2, [3, 4])), ("a", 1), ("c", None), ("d", 5)])
     >>> tree_flatten(tree)
-    ([2, 3, 4, 1, None, 5], PyTreeSpec(OrderedDict({'b': (*, [*, *]), 'a': *, 'c': *, 'd': *}), NoneIsLeaf, namespace='torch'))
+    ([2, 3, 4, 1, None, 5], PyTreeSpec(OrderedDict({'b': (*, [*, *]), 'a': *, 'c': *, 'd': *}), NoneIsLeaf))
 
     Args:
         tree (pytree): A pytree to flatten.
@@ -402,7 +403,7 @@ def tree_iter(
 
     >>> tree = {"b": (2, [3, 4]), "a": 1, "c": None, "d": 5}
     >>> list(tree_iter(tree))
-    [2, 3, 4, 1, None, 5]
+    [1, 2, 3, 4, None, 5]
     >>> list(tree_iter(1))
     [1]
     >>> list(tree_iter(None))
@@ -437,7 +438,7 @@ def tree_leaves(
 
     >>> tree = {"b": (2, [3, 4]), "a": 1, "c": None, "d": 5}
     >>> tree_leaves(tree)
-    [2, 3, 4, 1, None, 5]
+    [1, 2, 3, 4, None, 5]
     >>> tree_leaves(1)
     [1]
     >>> tree_leaves(None)
@@ -472,11 +473,11 @@ def tree_structure(
 
     >>> tree = {"b": (2, [3, 4]), "a": 1, "c": None, "d": 5}
     >>> tree_structure(tree)
-    PyTreeSpec({'b': (*, [*, *]), 'a': *, 'c': *, 'd': *}, NoneIsLeaf, namespace='torch')
+    PyTreeSpec({'a': *, 'b': (*, [*, *]), 'c': *, 'd': *}, NoneIsLeaf)
     >>> tree_structure(1)
-    PyTreeSpec(*, NoneIsLeaf, namespace='torch')
+    PyTreeSpec(*, NoneIsLeaf)
     >>> tree_structure(None)
-    PyTreeSpec(*, NoneIsLeaf, namespace='torch')
+    PyTreeSpec(*, NoneIsLeaf)
 
     Args:
         tree (pytree): A pytree to flatten.

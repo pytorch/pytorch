@@ -399,7 +399,7 @@ def _decompose_and_get_gm_with_new_signature_constants(
         # Fix the graph output signature to be tuple if scalar
         out_spec = mod._out_spec
 
-        orig_arg_names = mod.graph._codegen.pytree_info.orig_args  # type: ignore[attr-defined]
+        orig_arg_names = mod.graph._codegen.pytree_info.orig_args
 
         # aot_export expect the return type to always be a tuple.
         if out_spec.type not in (list, tuple):
@@ -719,7 +719,7 @@ def _get_updated_module_call_graph(
     provenance: Dict[str, str] = {}
     for node in gm.graph.nodes:
         if history := node.meta.get("from_node", []):
-            provenance[history[-1][0]] = node.name
+            provenance[history[-1].name] = node.name
 
     # map old names to new names in module call signatures
     for entry in new_module_call_graph:
@@ -1051,7 +1051,7 @@ class ExportedProgram:
             kwargs = reorder_kwargs(kwargs, in_spec)
         flat_args_with_path, received_spec = pytree.tree_flatten_with_path(
             (args, kwargs)
-        )  # type: ignore[possibly-undefined]
+        )
         self._check_input_constraints(flat_args_with_path)
         flat_args = tuple(x[1] for x in flat_args_with_path)
         return flat_args, received_spec
