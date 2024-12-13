@@ -42,10 +42,10 @@ struct uniform_int_from_to_distribution {
   template <typename RNG>
   C10_HOST_DEVICE inline T operator()(RNG generator) {
     if ((
-      std::is_same<T, int64_t>::value ||
-      std::is_same<T, double>::value ||
-      std::is_same<T, float>::value ||
-      std::is_same<T, at::BFloat16>::value) && range_ >= 1ULL << 32)
+      std::is_same_v<T, int64_t> ||
+      std::is_same_v<T, double> ||
+      std::is_same_v<T, float> ||
+      std::is_same_v<T, at::BFloat16>) && range_ >= 1ULL << 32)
     {
       return transformation::uniform_int_from_to<T>(generator->random64(), range_, base_);
     } else {
@@ -172,8 +172,8 @@ template <typename RNG, typename ret_type,                                      
 C10_HOST_DEVICE inline void maybe_set_next_##TYPE##_normal_sample(RNG* /*generator*/, ret_type /*cache*/) { \
 }
 
-DISTRIBUTION_HELPER_GENERATE_NEXT_NORMAL_METHODS(double);
-DISTRIBUTION_HELPER_GENERATE_NEXT_NORMAL_METHODS(float);
+DISTRIBUTION_HELPER_GENERATE_NEXT_NORMAL_METHODS(double)
+DISTRIBUTION_HELPER_GENERATE_NEXT_NORMAL_METHODS(float)
 
 /**
  * Samples a normal distribution using the Box-Muller method

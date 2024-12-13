@@ -18,7 +18,7 @@ Autocast wrapper for CuDNN RNNs (the weight reflattening needs special attention
 
 // To be registered for the "_cudnn_rnn(...)" schema.
 // _cudnn_rnn is autograd-exposed (test_autocast_cudnn_rnn in test_cuda.py includes a test to confirm)
-std::tuple<Tensor,Tensor,Tensor,Tensor,Tensor>
+static std::tuple<Tensor,Tensor,Tensor,Tensor,Tensor>
 _cudnn_rnn_cast_reflatten(const Tensor & input,
                           TensorList weight,
                           int64_t weight_stride0,

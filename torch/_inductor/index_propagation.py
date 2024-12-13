@@ -135,7 +135,7 @@ class SymPyOps:
         if not is_integer_dtype(result_type):
             return NotImplemented
 
-        result_expr = ModularIndexing(x.expr, sympy.Integer(1), y.expr)
+        result_expr = ModularIndexing(x.expr, sympy.S.One, y.expr)
         return TypedExpr(result_expr, result_type)
 
     @staticmethod
@@ -152,7 +152,7 @@ class SymPyOps:
             x_expr.is_nonnegative is not None
             and x_expr.is_nonnegative == y_expr.is_positive
         ):
-            result_expr = ModularIndexing(x.expr, sympy.Integer(1), y.expr)
+            result_expr = ModularIndexing(x.expr, sympy.S.One, y.expr)
             return TypedExpr(result_expr, result_type)
         return NotImplemented
 

@@ -93,11 +93,10 @@ else:
             # If we want to slice out mesh["dp", "cp"], then submesh_dims = [(0,), (1,)] and submesh_dim_size = [2, 2].
             slice_dim_size = [
                 reduce(
-                    lambda x, y: device_mesh.mesh.size(x) * device_mesh.mesh.size(y),
+                    lambda x, y: x * device_mesh.mesh.size(y),
                     mesh_dim,
+                    1,
                 )
-                if len(mesh_dim) > 1
-                else device_mesh.mesh.size(mesh_dim[0])
                 for mesh_dim in submesh_dims
             ]
 
@@ -713,9 +712,19 @@ else:
                 slice_mesh_dims = _mesh_resources._get_slice_mesh_dims(
                     self, mesh_dim_names
                 )
-                submesh = _mesh_resources.create_sub_mesh(
-                    self, mesh_dim_names, slice_mesh_dims
-                )
+                # When using FakeTensorMode to trace the model, `create_sub_mesh()` will
+                # fail as it will require a real tensor to manipulate.
+                # `unset_fake_temporarily()` will allow us to materialize the tensors
+                # within `_mesh_resources`, which should not affect modling.
+                #
+                # Note that this should be orthogonal to torch.compile(). But whether
+                # we can compile device_mesh `slicing` (no graph break) is not verified
+                # yet and need a follow-up,
+                # TODO: compiler + device_mesh slicing.
+                with torch._subclasses.fake_tensor.unset_fake_temporarily():
+                    submesh = _mesh_resources.create_sub_mesh(
+                        self, mesh_dim_names, slice_mesh_dims
+                    )
                 return submesh
 
         def get_group(self, mesh_dim: Optional[Union[int, str]] = None) -> ProcessGroup:
@@ -983,7 +992,7 @@ else:
         # assume valid device types are all letters
         if device_type and not device_type.isalpha():
             raise RuntimeError(
-                f"Device type with GPU index is not supported but got {device_type}. ",
+                f"Device type with index is not supported but got {device_type}. ",
                 "If you maintained a 'torch.device' object, it's recommended to pass in 'device.type'.",
             )
 

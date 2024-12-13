@@ -61,7 +61,7 @@ case ${GPU_ARCH_TYPE} in
     cpu-s390x)
         TARGET=final
         DOCKER_TAG=cpu-s390x
-        GPU_IMAGE=redhat/ubi9
+        GPU_IMAGE=s390x/almalinux:8
         DOCKER_GPU_BUILD_ARG=""
         MANY_LINUX_VERSION="s390x"
         ;;
@@ -87,22 +87,18 @@ case ${GPU_ARCH_TYPE} in
         MANY_LINUX_VERSION="aarch64"
         DOCKERFILE_SUFFIX="_cuda_aarch64"
         ;;
-    rocm)
+    rocm|rocm-manylinux_2_28)
         TARGET=rocm_final
         DOCKER_TAG=rocm${GPU_ARCH_VERSION}
         GPU_IMAGE=rocm/dev-centos-7:${GPU_ARCH_VERSION}-complete
-        PYTORCH_ROCM_ARCH="gfx900;gfx906;gfx908;gfx90a;gfx1030;gfx1100"
-        ROCM_REGEX="([0-9]+)\.([0-9]+)[\.]?([0-9]*)"
-        if [[ $GPU_ARCH_VERSION =~ $ROCM_REGEX ]]; then
-            ROCM_VERSION_INT=$((${BASH_REMATCH[1]}*10000 + ${BASH_REMATCH[2]}*100 + ${BASH_REMATCH[3]:-0}))
-        else
-            echo "ERROR: rocm regex failed"
-            exit 1
+        DEVTOOLSET_VERSION="9"
+        if [ ${GPU_ARCH_TYPE} == "rocm-manylinux_2_28" ]; then
+            MANY_LINUX_VERSION="2_28"
+            DEVTOOLSET_VERSION="11"
+            GPU_IMAGE=rocm/dev-almalinux-8:${GPU_ARCH_VERSION}-complete
         fi
-        if [[ $ROCM_VERSION_INT -ge 60000 ]]; then
-            PYTORCH_ROCM_ARCH+=";gfx942"
-        fi
-        DOCKER_GPU_BUILD_ARG="--build-arg ROCM_VERSION=${GPU_ARCH_VERSION} --build-arg PYTORCH_ROCM_ARCH=${PYTORCH_ROCM_ARCH} --build-arg DEVTOOLSET_VERSION=9"
+        PYTORCH_ROCM_ARCH="gfx908;gfx90a;gfx942;gfx1030;gfx1100;gfx1101"
+        DOCKER_GPU_BUILD_ARG="--build-arg ROCM_VERSION=${GPU_ARCH_VERSION} --build-arg PYTORCH_ROCM_ARCH=${PYTORCH_ROCM_ARCH} --build-arg DEVTOOLSET_VERSION=${DEVTOOLSET_VERSION}"
         ;;
     xpu)
         TARGET=xpu_final
@@ -125,11 +121,13 @@ fi
 (
     set -x
 
-    # TODO: Remove LimitNOFILE=1048576 patch once https://github.com/pytorch/test-infra/issues/5712
-    # is resolved. This patch is required in order to fix timing out of Docker build on Amazon Linux 2023.
-    sudo sed -i s/LimitNOFILE=infinity/LimitNOFILE=1048576/ /usr/lib/systemd/system/docker.service
-    sudo systemctl daemon-reload
-    sudo systemctl restart docker
+    if [ "$(uname -m)" != "s390x" ]; then
+        # TODO: Remove LimitNOFILE=1048576 patch once https://github.com/pytorch/test-infra/issues/5712
+        # is resolved. This patch is required in order to fix timing out of Docker build on Amazon Linux 2023.
+        sudo sed -i s/LimitNOFILE=infinity/LimitNOFILE=1048576/ /usr/lib/systemd/system/docker.service
+        sudo systemctl daemon-reload
+        sudo systemctl restart docker
+    fi
 
     DOCKER_BUILDKIT=1 docker build  \
         ${DOCKER_GPU_BUILD_ARG} \

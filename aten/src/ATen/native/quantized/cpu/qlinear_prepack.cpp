@@ -309,6 +309,24 @@ inline at::Tensor pack_weight_to_onednn_tensor(
   return packed_weight;
 }
 
+inline at::Tensor pack_weight_to_fp16_onednn_tensor(
+    at::Tensor& weight,
+    std::optional<torch::List<int64_t>>& input_shape) {
+  TORCH_CHECK(weight.scalar_type() == at::kHalf || weight.scalar_type() == at::kFloat, "Weight should be of type float or float16");
+  weight = weight.scalar_type() == at::kHalf ? weight : at::_saturate_weight_to_fp16(weight);
+  std::vector<int64_t> w_dims = weight.sizes().vec();
+  auto weight_fp16 = weight.to(at::kHalf);
+  ideep::tensor wei = ideep::tensor({w_dims, dnnl::memory::data_type::f16}, weight_fp16.data_ptr());
+  auto expected_weight = wei.transpose(0, 1); // oneDNN requires transposed weight
+  // Onednn does not support f32f16f32 matmul, so we need to convert weight to f32 before compute
+  // Therefore, we just return weight in plain format
+  auto packed_weight = at::native::new_with_itensor_mkldnn(
+      std::move(expected_weight),
+      c10::kHalf,
+      weight.options().device_opt());
+  return packed_weight;
+}
+
 #endif // #if AT_MKLDNN_ENABLED()
 
 namespace at::native {
@@ -672,6 +690,21 @@ class QLinearPackWeightInt8Onednn final {
   }
 };
 
+class QLinearPackWeightFp16Onednn final {
+ public:
+  static at::Tensor run(
+    // NOLINTNEXTLINE(performance-unnecessary-value-param)
+    [[maybe_unused]] at::Tensor weight, // Not QTensor
+    // NOLINTNEXTLINE(performance-unnecessary-value-param)
+    [[maybe_unused]] std::optional<torch::List<int64_t>> input_shape) {
+#if AT_MKLDNN_ENABLED()
+    return pack_weight_to_fp16_onednn_tensor(weight, input_shape);
+#else
+    TORCH_CHECK(false, "Unimplemented as onednn is not available.");
+#endif
+  }
+};
+
 TORCH_LIBRARY_IMPL(quantized, QuantizedCPU, m) {
   register_linear_params();
   m.impl(TORCH_SELECTIVE_NAME("quantized::linear_prepack"), TORCH_FN(QLinearPackWeightInt8::run));
@@ -714,6 +747,10 @@ TORCH_LIBRARY_IMPL(_quantized, Meta, m) {
 
 TORCH_LIBRARY_IMPL(onednn, CPU, m) {
   m.impl(TORCH_SELECTIVE_NAME("onednn::qlinear_prepack"), TORCH_FN(QLinearPackWeightInt8Onednn::run));
+}
+
+TORCH_LIBRARY_IMPL(onednn, CPU, m) {
+  m.impl(TORCH_SELECTIVE_NAME("onednn::linear_prepack_fp16"), TORCH_FN(QLinearPackWeightFp16Onednn::run));
 }
 
 } // namespace

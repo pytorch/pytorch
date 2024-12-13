@@ -36,7 +36,8 @@ ENV DOCS=$DOCS
 COPY requirements-ci.txt requirements-docs.txt /opt/conda/
 COPY ./common/install_conda.sh install_conda.sh
 COPY ./common/common_utils.sh common_utils.sh
-RUN bash ./install_conda.sh && rm install_conda.sh common_utils.sh /opt/conda/requirements-ci.txt /opt/conda/requirements-docs.txt
+COPY ./common/install_magma_conda.sh install_magma_conda.sh
+RUN bash ./install_conda.sh && rm install_conda.sh install_magma_conda.sh common_utils.sh /opt/conda/requirements-ci.txt /opt/conda/requirements-docs.txt
 RUN if [ -n "${UNINSTALL_DILL}" ]; then pip uninstall -y dill; fi
 
 # Install gcc
@@ -86,19 +87,6 @@ COPY ./common/install_vision.sh ./common/cache_vision_models.sh ./common/common_
 RUN if [ -n "${VISION}" ]; then bash ./install_vision.sh; fi
 RUN rm install_vision.sh cache_vision_models.sh common_utils.sh
 ENV INSTALLED_VISION ${VISION}
-
-# (optional) Install Android NDK
-ARG ANDROID
-ARG ANDROID_NDK
-ARG GRADLE_VERSION
-COPY ./common/install_android.sh ./common/cache_vision_models.sh ./common/common_utils.sh ./
-COPY ./android/AndroidManifest.xml AndroidManifest.xml
-COPY ./android/build.gradle build.gradle
-RUN if [ -n "${ANDROID}" ]; then bash ./install_android.sh; fi
-RUN rm install_android.sh cache_vision_models.sh common_utils.sh
-RUN rm AndroidManifest.xml
-RUN rm build.gradle
-ENV INSTALLED_ANDROID ${ANDROID}
 
 # (optional) Install Vulkan SDK
 ARG VULKAN_SDK_VERSION
