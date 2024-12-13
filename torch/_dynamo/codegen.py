@@ -25,7 +25,10 @@ from .exc import unimplemented
 from .source import AttrSource, Source
 from .utils import is_safe_constant, rot_n_helper
 from .variables.base import ValueMutationExisting, VariableTracker
-from .variables.functions import GeneratorObjectVariable
+from .variables.functions import (
+    FunctionDecoratedByContextlibContextManagerVariable,
+    GeneratorObjectVariable,
+)
 from .variables.nn_module import NNModuleVariable
 from .variables.tensor import (
     NumpyNdarrayVariable,
@@ -164,7 +167,13 @@ class PyCodegen:
         if (
             value.source is not None
             and allow_cache
-            and not isinstance(value, GeneratorObjectVariable)
+            and not isinstance(
+                value,
+                (
+                    FunctionDecoratedByContextlibContextManagerVariable,
+                    GeneratorObjectVariable,
+                ),
+            )
         ):
             # There's a corner case for export: for instance, if the computation
             # graph is just identity on an input tensor, Dynamo would just emit
