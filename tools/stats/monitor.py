@@ -133,7 +133,6 @@ class UsageLogger:
         self._initial_gpu_handler()
 
         self.exit_event = threading.Event()
-
         self.data_list: list[UsageData] = []
         self.lock = threading.Lock()
 
@@ -290,10 +289,12 @@ class UsageLogger:
                 {
                     "uuid": gpu_uuid,
                     "util_percent": {
+                        "nums":len(gpu_utilization[gpu_uuid]),
                         "avg": round(avg_gpu_utilization, 2),
                         "max": round(max_gpu_utilization, 2),
                     },
                     "mem_util_percent": {
+                        "nums":len(gpu_mem_utilization[gpu_uuid]),
                         "avg": round(avg_gpu_mem_utilization, 2),
                         "max": round(max_gpu_mem_utilization, 2),
                     },
