@@ -14,6 +14,7 @@ Usage:
 
 from __future__ import annotations
 
+import copy
 import argparse
 import dataclasses
 import datetime
@@ -97,6 +98,33 @@ def parse_args() -> argparse.Namespace:
     args = parser.parse_args()
     return args
 
+class SharedResource:
+    def __init__(self, is_debug_mode: bool = False) -> None:
+        self._data_list: list[UsageData] = []
+        self._data_errors: list[str] = []
+        self._lock = threading.Lock()
+
+    def get_and_reset(self) -> tuple[list[UsageData],list[str]]:
+        copy_data = []
+        copy_error = []
+        with self._lock:
+            copy_data = copy.deepcopy(self._data_list)
+            copy_error = copy.deepcopy(self._data_errors)
+            self._data_list.clear()
+            self._data_errors.clear()
+        return copy_data, copy_error
+
+    def peek(self) -> None:
+        with self._lock:
+            print(f"data list size: {len(self._data_list)}, error list size: {len(self._data_errors)}")
+
+    def add_data(self, data: UsageData) -> None:
+        with self._lock:
+            self._data_list.append(data)
+
+    def add_error(self, error: Exception) -> None:
+        with self._lock:
+            self._data_errors.append(str(error))
 
 class UsageLogger:
     """
@@ -134,11 +162,8 @@ class UsageLogger:
         self._debug_mode = is_debug_mode
         self._initial_gpu_handler()
 
+        self.shared_resource = SharedResource()
         self.exit_event = threading.Event()
-
-        self.data_list: list[UsageData] = []
-        self.data_errors: list[str] = []
-        self.lock = threading.Lock()
 
     def _collect_data(self) -> None:
         """
@@ -160,21 +185,13 @@ class UsageLogger:
                 )
                 if self._debug_mode:
                     print(f"collecting data {data}")
-                self._add_data(data)
+                self.shared_resource.add_data(data)
             except Exception as e:
                 if self._debug_mode:
                     print(f"error detected: {str(e)}")
-                self._add_error(e)
+                self.shared_resource.add_error(e)
             finally:
                 time.sleep(self._data_collect_interval)
-
-    def _add_data(self, data: UsageData) -> None:
-        with self.lock:
-            self.data_list.append(data)
-
-    def _add_error(self, error: Exception) -> None:
-        with self.lock:
-            self.data_errors.append(str(error))
 
     def _output_data(self) -> None:
         """
@@ -187,80 +204,75 @@ class UsageLogger:
             collecting_start_time = time.time()
             stats = {}
             try:
-                with self.lock:
-                    if self._debug_mode:
-                        print("collected:", len(self.data_list))
-                        print("errors found", len(self.data_errors))
+                self.shared_resource.peek()
+                data_list,error_list = self.shared_resource.get_and_reset()
+                self.shared_resource.peek()
 
-                    # if errors are dominated during the internal, log the errors
-                    if not self.data_list and len(self.data_errors) > 0:
-                        errors = ",".join(set(self.data_errors))
-                        self.data_errors.clear()
-                        raise ValueError(
-                            f"no data is collected but detected multiple errors: [{errors}]"
-                        )
+                if self._debug_mode:
+                    print(f"collected data: {len(data_list)}, errors found: {len(error_list)}")
+                # records and clears found errors
+                errors = list(set(error_list))
 
-                    # otherwise, clear the errors.
-                    if self.data_errors:
-                        self.data_errors.clear()
-
-                    # pass if no data is collected
-                    if not self.data_list:
-                        continue
-
-                    stats.update(
-                        {
-                            "level": "record",
-                            "time": datetime.datetime.now().timestamp(),
-                        }
+                # if has errors but data list is None, a bug may exist in the monitor code, log the errors
+                if not data_list and len(errors) > 0:
+                    raise Exception(
+                        f"no data is collected but detected errors during the interval: {errors}"
                     )
+                if not data_list:
+                    # pass since no data is collected
+                    continue
 
-                    # collect cpu and memory metrics
-                    total_cpu = sum(
-                        usageData.cpu_percent for usageData in self.data_list
-                    )
-                    avg_cpu = total_cpu / len(self.data_list)
-                    max_cpu = max(usageData.cpu_percent for usageData in self.data_list)
-
-                    max_memory = max(
-                        usageData.memory_percent for usageData in self.data_list
-                    )
-                    total_memory = sum(
-                        usageData.memory_percent for usageData in self.data_list
-                    )
-                    avg_memory = total_memory / len(self.data_list)
-
-                    # find all cmds during the interval
-                    cmds = {
-                        process["cmd"]
-                        for data in self.data_list
-                        for process in data.processes
+                stats.update(
+                    {
+                        "level": "record",
+                        "time": datetime.datetime.now().timestamp(),
                     }
+                )
 
+                # collect cpu and memory metrics
+                total_cpu = sum(
+                    usageData.cpu_percent for usageData in data_list
+                )
+                avg_cpu = total_cpu / len(data_list)
+                max_cpu = max(usageData.cpu_percent for usageData in data_list)
+
+                max_memory = max(
+                    usageData.memory_percent for usageData in data_list
+                )
+                total_memory = sum(
+                    usageData.memory_percent for usageData in data_list
+                )
+                avg_memory = total_memory / len(data_list)
+
+                # find all cmds during the interval
+                cmds = {
+                    process["cmd"]
+                    for data in data_list
+                    for process in data.processes
+                }
+                stats.update(
+                    {
+                        "cpu": {
+                            "avg": round(avg_cpu, 2),
+                            "max": round(max_cpu, 2),
+                        },
+                        "memory": {
+                            "avg": round(avg_memory, 2),
+                            "max": round(max_memory, 2),
+                        },
+                        "cmds": list(cmds),
+                        "count": len(data_list),
+                    }
+                )
+
+                # collect gpu metrics
+                if self._has_pynvml or self._has_amdsmi:
+                    gpu_list = self._calculate_gpu_utilization(data_list)
                     stats.update(
                         {
-                            "cpu": {
-                                "avg": round(avg_cpu, 2),
-                                "max": round(max_cpu, 2),
-                            },
-                            "memory": {
-                                "avg": round(avg_memory, 2),
-                                "max": round(max_memory, 2),
-                            },
-                            "cmds": list(cmds),
-                            "count": len(self.data_list),
+                            "gpu_list": gpu_list,
                         }
                     )
-
-                    # collect gpu metrics
-                    if self._has_pynvml or self._has_amdsmi:
-                        gpu_list = self._calculate_gpu_utilization(self.data_list)
-                        stats.update(
-                            {
-                                "gpu_list": gpu_list,
-                            }
-                        )
-                    self.data_list.clear()
             except Exception as e:
                 stats = {
                     "level": "record",
