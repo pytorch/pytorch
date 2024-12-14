@@ -22,7 +22,7 @@ import signal
 import threading
 import time
 from collections import defaultdict
-from typing import Any, final
+from typing import Any
 
 import psutil  # type: ignore[import]
 
@@ -301,7 +301,7 @@ class UsageLogger:
                 if len(gpu_mem_utilization[gpu_uuid]) > 0
                 else 0
             )
-            
+
             calculate_gpu.append(
                 {
                     "uuid": gpu_uuid,
@@ -424,7 +424,7 @@ class UsageLogger:
             try:
                 proc = psutil.Process(pid)
                 cmdline = proc.cmdline()
-                info.update({"cmd": ' '.join(cmdline)})
+                info.update({"cmd": " ".join(cmdline)})
             except Exception as e:
                 pass
             finally:
@@ -449,7 +449,7 @@ class UsageLogger:
             try:
                 proc = psutil.Process(proc_info["pid"])
                 cmdline = proc.cmdline()
-                info.update({"cmd": ' '.join(cmdline)})
+                info.update({"cmd": " ".join(cmdline)})
             except Exception as e:
                 pass
             finally:
