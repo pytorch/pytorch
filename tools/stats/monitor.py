@@ -98,25 +98,35 @@ def parse_args() -> argparse.Namespace:
     args = parser.parse_args()
     return args
 
+
 class SharedResource:
+    """
+    thread-safe utils for shared resources used in both worker processor and main processor
+    """
+
     def __init__(self, is_debug_mode: bool = False) -> None:
         self._data_list: list[UsageData] = []
         self._data_errors: list[str] = []
         self._lock = threading.Lock()
 
-    def get_and_reset(self) -> tuple[list[UsageData],list[str]]:
+    def get_and_reset(self) -> tuple[list[UsageData], list[str]]:
+        """
+        get deepcopy of list of usageData and list of string errors
+        """
         copy_data = []
-        copy_error = []
+        copy_errors = []
         with self._lock:
             copy_data = copy.deepcopy(self._data_list)
-            copy_error = copy.deepcopy(self._data_errors)
+            copy_errors = copy.deepcopy(self._data_errors)
             self._data_list.clear()
             self._data_errors.clear()
-        return copy_data, copy_error
+        return copy_data, copy_errors
 
     def peek(self) -> None:
         with self._lock:
-            print(f"data list size: {len(self._data_list)}, error list size: {len(self._data_errors)}")
+            print(
+                f"data list size: {len(self._data_list)}, error list size: {len(self._data_errors)}"
+            )
 
     def add_data(self, data: UsageData) -> None:
         with self._lock:
@@ -126,12 +136,13 @@ class SharedResource:
         with self._lock:
             self._data_errors.append(str(error))
 
+
 class UsageLogger:
     """
     Collect and display usage data, including:
     CPU, memory, GPU memory utilization, and GPU utilization.
-    By default, data is collected every 0.5 seconds, and output
-    the aggregated json log every 5 seconds.
+    By default, data is collected every 0.5 seconds, and log
+    the aggregated result every 5 seconds.
     """
 
     def __init__(
@@ -185,6 +196,7 @@ class UsageLogger:
                 )
                 if self._debug_mode:
                     print(f"collecting data {data}")
+
                 self.shared_resource.add_data(data)
             except Exception as e:
                 if self._debug_mode:
@@ -204,12 +216,11 @@ class UsageLogger:
             collecting_start_time = time.time()
             stats = {}
             try:
-                self.shared_resource.peek()
-                data_list,error_list = self.shared_resource.get_and_reset()
-                self.shared_resource.peek()
-
+                data_list, error_list = self.shared_resource.get_and_reset()
                 if self._debug_mode:
-                    print(f"collected data: {len(data_list)}, errors found: {len(error_list)}")
+                    print(
+                        f"collected data: {len(data_list)}, errors found: {len(error_list)}"
+                    )
                 # records and clears found errors
                 errors = list(set(error_list))
 
@@ -230,25 +241,17 @@ class UsageLogger:
                 )
 
                 # collect cpu and memory metrics
-                total_cpu = sum(
-                    usageData.cpu_percent for usageData in data_list
-                )
+                total_cpu = sum(usageData.cpu_percent for usageData in data_list)
                 avg_cpu = total_cpu / len(data_list)
                 max_cpu = max(usageData.cpu_percent for usageData in data_list)
 
-                max_memory = max(
-                    usageData.memory_percent for usageData in data_list
-                )
-                total_memory = sum(
-                    usageData.memory_percent for usageData in data_list
-                )
+                max_memory = max(usageData.memory_percent for usageData in data_list)
+                total_memory = sum(usageData.memory_percent for usageData in data_list)
                 avg_memory = total_memory / len(data_list)
 
                 # find all cmds during the interval
                 cmds = {
-                    process["cmd"]
-                    for data in data_list
-                    for process in data.processes
+                    process["cmd"] for data in data_list for process in data.processes
                 }
                 stats.update(
                     {
