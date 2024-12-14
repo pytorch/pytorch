@@ -80,7 +80,6 @@ def parse_args() -> argparse.Namespace:
         default=5,
         help="set time interval for logging utilization data, default is 5 seconds",
     )
-    
     parser.add_argument(
         "--data-collect-interval",
         type=float,
@@ -177,12 +176,12 @@ class UsageLogger:
             calculate_gpu.append({
                 "uuid": gpu_uuid,
                 "util_percent": {
-                    "avg": avg_gpu_utilization,
-                    "max": max_gpu_utilization,
+                    "avg": round(avg_gpu_utilization,2),
+                    "max": round(max_gpu_utilization,2),
                 },
                 "mem_util_percent": {
-                    "avg": avg_gpu_mem_utilization,
-                    "max": max_gpu_mem_utilization,
+                    "avg": round(avg_gpu_mem_utilization,2),
+                    "max": round(max_gpu_mem_utilization,2),
                 }
             })
         return calculate_gpu
@@ -223,12 +222,12 @@ class UsageLogger:
                     stats.update(
                         {
                             "cpu": {
-                                "avg": avg_cpu,
-                                "max": max_cpu,
+                                "avg": round(avg_cpu,2),
+                                "max": round(max_cpu,2),
                             },
                             "memory": {
-                                "avg": avg_memory,
-                                "max": max_memory,
+                                "avg": round(avg_memory,2),
+                                "max": round(max_memory,2),
                             },
                         }
                     )
