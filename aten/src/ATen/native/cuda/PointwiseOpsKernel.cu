@@ -93,7 +93,7 @@ void addcmul_cuda_scalar_tensor2_kernel(TensorIteratorBase& iter, const Scalar& 
         auto alpha = value.to<scalar_t>();
 
         static const auto addcmul_scalar_tensor2_string = jiterator_stringify(
-          template <typename T> T addcmul_scalar_tensor2(T a, T b, T c, T alpha) { return a + alpha * (c * b); });
+          template <typename T> T addcmul_scalar_tensor2(T a, T b, T c, T alpha) { return a + alpha * (b * c); });
 
         jitted_gpu_kernel<
             /*name=*/addcmul_scalar_tensor2_name,
