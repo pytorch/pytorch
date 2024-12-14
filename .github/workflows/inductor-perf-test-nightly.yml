@@ -116,6 +116,8 @@ jobs:
       test-matrix: ${{ needs.linux-focal-cuda12_1-py3_10-gcc9-inductor-build.outputs.test-matrix }}
       use-gha: anything-non-empty-to-use-gha
       timeout-minutes: 720
+      # disable monitor in perf tests for more investigation
+      disable-monitor: true
     secrets: inherit
 
   linux-focal-cuda12_1-py3_10-gcc9-inductor-test-weekly:
@@ -130,6 +132,8 @@ jobs:
       test-matrix: ${{ needs.linux-focal-cuda12_1-py3_10-gcc9-inductor-build.outputs.test-matrix }}
       use-gha: anything-non-empty-to-use-gha
       timeout-minutes: 1440
+      # disable monitor in perf tests for more investigation
+      disable-monitor: true
     secrets: inherit
 
   linux-focal-cuda12_1-py3_10-gcc9-inductor-test:
@@ -144,4 +148,6 @@ jobs:
       test-matrix: ${{ needs.linux-focal-cuda12_1-py3_10-gcc9-inductor-build.outputs.test-matrix }}
       use-gha: anything-non-empty-to-use-gha
       timeout-minutes: 720
+      # disable monitor in perf tests for more investigation
+      disable-monitor: true
     secrets: inherit
