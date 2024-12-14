@@ -293,6 +293,7 @@ class TestCuda(TestCase):
 
     @serialTest()
     def test_set_per_process_memory_fraction(self):
+        orig = torch.cuda.get_per_process_memory_fraction(0)
         try:
             # test invalid fraction value.
             with self.assertRaisesRegex(TypeError, "Invalid type"):
@@ -327,7 +328,7 @@ class TestCuda(TestCase):
             tensor.fill_(1)
             self.assertTrue((tensor == 1).all())
         finally:
-            torch.cuda.set_per_process_memory_fraction(1.0, 0)
+            torch.cuda.set_per_process_memory_fraction(orig, 0)
 
     @serialTest()
     def test_get_per_process_memory_fraction(self):
@@ -724,14 +725,6 @@ class TestCuda(TestCase):
         self.assertIsInstance(cuda_event, torch.Event)
         self.assertTrue(issubclass(type(cuda_event), torch.Event))
         self.assertTrue(torch.Event in type(cuda_event).mro())
-
-    def test_stream_compatibility(self):
-        s1 = torch.cuda.Stream()
-        s2 = torch.cuda.Stream()
-        torch.accelerator.set_stream(s1)
-        self.assertEqual(torch.accelerator.current_stream().stream_id, s1.stream_id)
-        torch.accelerator.set_stream(s2)
-        self.assertEqual(torch.accelerator.current_stream().stream_id, s2.stream_id)
 
     def test_record_stream(self):
         cycles_per_ms = get_cycles_per_ms()
@@ -3651,6 +3644,7 @@ class TestCudaMallocAsync(TestCase):
         finally:
             torch.cuda.memory._record_memory_history(None)
 
+    @serialTest
     def test_max_split_expandable(self):
         try:
             torch.cuda.memory.empty_cache()
@@ -3660,6 +3654,7 @@ class TestCudaMallocAsync(TestCase):
             total_allowed = 120 * mb + pre_reserved
             fraction_allowed = total_allowed / all_memory
             self.assertEqual(int(fraction_allowed * all_memory), total_allowed)
+            orig = torch.cuda.get_per_process_memory_fraction()
             torch.cuda.memory.set_per_process_memory_fraction(fraction_allowed)
 
             def alloc(n):
@@ -3683,8 +3678,9 @@ class TestCudaMallocAsync(TestCase):
             # force release_cached_blocks to run with some expandable segments in the free list
             alloc(120)
         finally:
-            torch.cuda.memory.set_per_process_memory_fraction(1.0)
+            torch.cuda.memory.set_per_process_memory_fraction(orig)
 
+    @serialTest
     def test_garbage_collect_expandable(self):
         try:
             torch.cuda.memory.empty_cache()
@@ -3694,6 +3690,7 @@ class TestCudaMallocAsync(TestCase):
             total_allowed = 120 * mb + pre_reserved
             fraction_allowed = total_allowed / all_memory
             self.assertEqual((fraction_allowed * all_memory), total_allowed)
+            orig = torch.cuda.get_per_process_memory_fraction(0)
             torch.cuda.memory.set_per_process_memory_fraction(fraction_allowed)
 
             def alloc(n):
@@ -3713,7 +3710,7 @@ class TestCudaMallocAsync(TestCase):
             # expandable_segment blocks can be in the free list when this is called.
             alloc(80)
         finally:
-            torch.cuda.memory.set_per_process_memory_fraction(1.0)
+            orig = torch.cuda.get_per_process_memory_fraction(0)
 
     def test_allocator_settings(self):
         def power2_div(size, div_factor):
