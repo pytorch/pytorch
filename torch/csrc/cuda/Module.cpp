@@ -1809,6 +1809,29 @@ PyObject* THCPModule_cuda_tunableop_get_validators(
   END_HANDLE_TH_ERRORS
 }
 
+PyObject* THCPModule_cuda_tunableop_set_rotating_buffer_size(
+    PyObject* _unused,
+    PyObject* arg) {
+  HANDLE_TH_ERRORS
+  TORCH_CHECK(
+      THPUtils_checkLong(arg),
+      "cuda_tunableop_set_rotating_buffer_size expects an int, but got ",
+      THPUtils_typename(arg));
+  auto buffer_size = static_cast<int>(THPUtils_unpackLong(arg));
+  at::cuda::tunable::getTuningContext()->SetRotatingBufferSize(buffer_size);
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+PyObject* THCPModule_cuda_tunableop_get_rotating_buffer_size(
+    PyObject* _unused,
+    PyObject* noargs) {
+  HANDLE_TH_ERRORS
+  return THPUtils_packInt32(
+      at::cuda::tunable::getTuningContext()->GetRotatingBufferSize());
+  END_HANDLE_TH_ERRORS
+}
+
 static PyObject* THCPModule_isCurrentStreamCapturing_wrap(
     PyObject* self,
     PyObject* noargs) {
@@ -2057,6 +2080,14 @@ static struct PyMethodDef _THCPModule_methods[] = {
      nullptr},
     {"_cuda_tunableop_get_validators",
      THCPModule_cuda_tunableop_get_validators,
+     METH_NOARGS,
+     nullptr},
+    {"_cuda_tunableop_set_rotating_buffer_size",
+     THCPModule_cuda_tunableop_set_rotating_buffer_size,
+     METH_O,
+     nullptr},
+    {"_cuda_tunableop_get_rotating_buffer_size",
+     THCPModule_cuda_tunableop_get_rotating_buffer_size,
      METH_NOARGS,
      nullptr},
     {nullptr}};
