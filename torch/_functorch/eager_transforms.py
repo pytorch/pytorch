@@ -1646,7 +1646,6 @@ def functionalize(func: Callable, *, remove: str = "mutations") -> Callable:
             outputs = _unwrap_all_tensors_from_functional(
                 func_outputs, reapply_views=reapply_views
             )
-            flat_outputs, func_out_spec = tree_flatten(outputs)
 
             for a in flattened_wrapped_args + flattened_wrapped_kwargs:
                 if isinstance(a, torch.Tensor):
