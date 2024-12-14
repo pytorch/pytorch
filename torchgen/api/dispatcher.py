@@ -45,7 +45,6 @@ def argumenttype_type(
     *,
     mutable: bool,
     binds: ArgName,
-    remove_non_owning_ref_types: bool = False,
     symint: bool = True,
 ) -> NamedCType:
     # This is a faux amis.  If it makes sense in the future to add
@@ -57,7 +56,6 @@ def argumenttype_type(
         mutable=mutable,
         binds=binds,
         symint=symint,
-        remove_non_owning_ref_types=remove_non_owning_ref_types,
     )
 
 
@@ -65,14 +63,12 @@ def argument_type(
     a: Argument,
     *,
     binds: ArgName,
-    remove_non_owning_ref_types: bool = False,
     symint: bool = True,
 ) -> NamedCType:
     return argumenttype_type(
         a.type,
         mutable=a.is_write,
         binds=binds,
-        remove_non_owning_ref_types=remove_non_owning_ref_types,
         symint=symint,
     )
 
@@ -105,14 +101,11 @@ def jit_arguments(func: FunctionSchema) -> list[Argument]:
     )
 
 
-def argument(
-    a: Argument, *, remove_non_owning_ref_types: bool = False, symint: bool = True
-) -> Binding:
+def argument(a: Argument, *, symint: bool = True) -> Binding:
     return Binding(
         nctype=argument_type(
             a,
             binds=a.name,
-            remove_non_owning_ref_types=remove_non_owning_ref_types,
             symint=symint,
         ),
         name=a.name,

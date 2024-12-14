@@ -127,15 +127,12 @@ def valuetype_type(
 
 
 # Translation of types occurring in JIT arguments to a C++ argument type.
-# If remove_non_owning_ref_types is set, we'll guarantee that the outputed CType is not a non-owning reference type.
-# For example, we'll return std::vector<int> instead of IntArrayRef.
 # See Note [translation from C++ reference to value types]
 def argumenttype_type(
     t: Type,
     *,
     mutable: bool,
     binds: ArgName,
-    remove_non_owning_ref_types: bool = False,
     symint: bool = False,
 ) -> NamedCType:
     # If it's a value type, do the value type translation
@@ -182,21 +179,12 @@ def argumenttype_type(
     elif isinstance(t, ListType):
         # TODO: remove these special cases, ArrayRef fallthrough works fine
         if str(t.elem) == "int":
-            if remove_non_owning_ref_types:
-                return NamedCType(binds, VectorCType(BaseCType(longT)))
+            return NamedCType(binds, BaseCType(intArrayRefT))
+        if str(t.elem) == "SymInt":
+            if symint:
+                return NamedCType(binds, BaseCType(symIntArrayRefT))
             else:
                 return NamedCType(binds, BaseCType(intArrayRefT))
-        if str(t.elem) == "SymInt":
-            if remove_non_owning_ref_types:
-                if symint:
-                    return NamedCType(binds, VectorCType(BaseCType(SymIntT)))
-                else:
-                    return NamedCType(binds, VectorCType(BaseCType(longT)))
-            else:
-                if symint:
-                    return NamedCType(binds, BaseCType(symIntArrayRefT))
-                else:
-                    return NamedCType(binds, BaseCType(intArrayRefT))
         if str(t.elem) == "Tensor":
             if local.use_ilistref_for_tensor_lists():
                 return NamedCType(binds, ConstRefCType(BaseCType(iTensorListRefT)))
