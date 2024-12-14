@@ -100,6 +100,8 @@ class UsageLogger:
     """
     Collect and display usage data, including:
     CPU, memory, GPU memory utilization, and GPU utilization.
+    two thread workers are used, one collect the data every data_collect_interval (in seconds), and other aggregate and output the data every log_interval (in seconds).
+    By default, data is collected every 0.5 seconds, and output every 5 seconds.
     """
 
     def __init__(
@@ -130,23 +132,24 @@ class UsageLogger:
         self._num_of_cpus = 0
         self._debug_mode = is_debug_mode
         self._initial_gpu_handler()
-        self.data_list: list[UsageData] = []
 
+        self.data_list: list[UsageData] = []
         self.lock = threading.Lock()
         self.collect_thread = None
         self.output_thread = None
 
     def _collect_data(self) -> None:
         """
-        Collects the data.
+        Collects the data every data_collect_interval (in seconds).
         """
         while not self._kill_now:
             try:
-                # collect cpu and memory metrics
+                # collect cpu, memory and gpu metrics
                 memory = psutil.virtual_memory().percent
                 cpu_percent = psutil.cpu_percent()
                 processes = self._get_process_info()
                 gpuList = self._collect_gpu_data()
+
                 data = UsageData(
                     cpu_percent=cpu_percent,
                     memory_percent=memory,
@@ -155,6 +158,7 @@ class UsageLogger:
                 )
                 if self._debug_mode:
                     print(f"collecting data {data}")
+
                 with self.lock:
                     self.data_list.append(data)
             except Exception as e:
@@ -164,7 +168,7 @@ class UsageLogger:
 
     def _calculate_gpu_utilization(self, data_list) -> list[dict[str, Any]]:
         """
-        Calculates the GPU utilization for output.
+        Calculates the GPU utilization.
         """
         calculate_gpu = []
         gpu_mem_utilization = defaultdict(list)
@@ -283,6 +287,7 @@ class UsageLogger:
                 # output the data to stdout
                 self.log_json(stats)
                 time.sleep(self._log_interval)
+
         # shut down gpu connections when exiting
         self._shutdown_gpu_connections()
 
