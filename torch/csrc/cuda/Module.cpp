@@ -1019,7 +1019,12 @@ static void registerCudaDeviceProperties(PyObject* module) {
           &cudaDeviceProp::maxThreadsPerMultiProcessor)
       .def_readonly("warp_size", &cudaDeviceProp::warpSize)
 #ifndef USE_ROCM
-      // NVIDIA-only property
+      // NVIDIA-only properties
+      .def_readonly(
+          "shared_memory_per_block", &cudaDeviceProp::sharedMemPerBlock)
+      .def_readonly(
+          "shared_memory_per_block_optin",
+          &cudaDeviceProp::sharedMemPerBlockOptin)
       .def_readonly(
           "shared_memory_per_multiprocessor",
           &cudaDeviceProp::sharedMemPerMultiprocessor)
