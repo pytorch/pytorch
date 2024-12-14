@@ -551,11 +551,11 @@ class _NonStrictTorchFunctionHandler(torch.overrides.TorchFunctionMode):
             # because it has some known incompletenesses, e.g., it doesn't support
             # empty data. See https://github.com/pytorch/pytorch/issues/143216
             if any(
-                isinstance(a, torch.SymInt)
-                for a in pytree.tree_flatten(args[0])[0]
+                isinstance(a, torch.SymInt) for a in pytree.tree_flatten(args[0])[0]
             ):
                 return torch._refs.tensor, args, kwargs
         if func.__name__ == "__getitem__" and isinstance(args[0], torch.Tensor):
+            # Redirect to torch.select for indexing with symint.
             if isinstance(args[1], torch.SymInt):
                 return torch.select, [args[0], 0, args[1]], {}
         return func, args, kwargs
