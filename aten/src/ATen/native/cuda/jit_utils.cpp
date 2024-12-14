@@ -196,7 +196,7 @@ const std::string jit_common_types = R"ESCAPE(
   static_assert(sizeof(uint32_t) == 4, "expected size does not match");
   static_assert(sizeof(int8_t) == 1, "expected size does not match");
   constexpr int num_threads = CUDA_OR_ROCM_NUM_THREADS;
-  constexpr int thread_work_size = 4; // TODO: make template substitution once we decide where those vars live
+  constexpr int thread_work_size = ${thread_work_size}; // TODO: make template substitution once we decide where those vars live
   constexpr int block_work_size = thread_work_size * num_threads;
 
   ${traits_string}
@@ -933,6 +933,58 @@ void initializeCudaContext() {
   }
 }
 
+#ifdef USE_ROCM
+int calc_io_size(
+    const int nInputs,
+    const int nOutputs,
+    const c10::ScalarType& inputs_type,
+    const c10::ScalarType& result_type) {
+    if (nInputs > 0 && nOutputs > 0) {
+        return std::min(c10::elementSize(inputs_type), c10::elementSize(result_type));
+    }
+
+    if (nInputs > 0) {
+        return c10::elementSize(inputs_type);
+    }
+
+    if (nOutputs > 0) {
+        return c10::elementSize(result_type);
+    }
+
+    return 0;
+}
+
+int calc_optimal_vec_size(int vec_size, int dtype_size) {
+  TORCH_INTERNAL_ASSERT(vec_size != 0);
+  TORCH_INTERNAL_ASSERT(dtype_size != 0);
+  if (dtype_size == 1 && vec_size >= 16) {
+    return 16;
+  } else if (dtype_size <= 2 && vec_size >= 8) {
+    return 8;
+  } else if (dtype_size <= 4 && vec_size >= 4) {
+    return 4;
+  } else if (vec_size >= 4) {
+    return 4;
+  } else if (vec_size >= 2) {
+    return 2;
+  } else {
+    return 1;
+  }
+}
+
+int calc_thread_work_size(int io_size) {
+    TORCH_INTERNAL_ASSERT(io_size > 0);
+    if (io_size == 1) {
+        return 16;
+    } else if (io_size < 4) {
+        return 8;
+    } else {
+        return 4;
+    }
+    return io_size;
+}
+#endif
+
 std::string generate_code(
     const KernelDescriptor &desc,
     bool contiguous,
@@ -940,6 +992,7 @@ std::string generate_code(
     BinaryFuncVariant scalar_pos,
     bool vectorized,
     int vec_size,
+    int thread_work_size,
     bool return_by_ref) {
   c10::SmallVector<std::string> extra_args_typenames(desc.extra_args_types.size());
   for (auto i : c10::irange(extra_args_typenames.size())) {
@@ -951,48 +1004,51 @@ std::string generate_code(
       desc.nOutputs,
       desc.f,
       desc.name,
-      typeName(desc.f_inputs_type),
-      typeName(toOpMathType(desc.f_inputs_type)),
-      typeName(desc.result_type),
+      desc.f_inputs_type,
+      toOpMathType(desc.f_inputs_type),
+      desc.result_type,
       contiguous,
       dynamic_casting,
       scalar_pos,
       extra_args_typenames,
       vectorized,
       vec_size,
+      thread_work_size,
       return_by_ref);
 }
-
-//FIXME - this are defined in Loops.cuh, but including Loops.cuh here would lead to circular includes Loops.cuh -> CUDALoops.cuh -> jit_utils.h -> Loops.cuh
-#define THREAD_WORK_SIZE 4
-constexpr int thread_work_size = THREAD_WORK_SIZE;
 
 std::string generate_code(
     int nInputs,
     int nOutputs,
     const std::string& func_,
     const std::string& name,
-    const std::string& f_inputs_type,
-    const std::string& compute_type,
-    const std::string& result_type,
+    const c10::ScalarType& f_inputs_type,
+    const c10::ScalarType& compute_type,
+    const c10::ScalarType& result_type,
     bool contiguous,
     bool dynamic_casting,
     BinaryFuncVariant scalar_pos,
     c10::SmallVector<std::string>& extra_args_typenames,
     bool vectorized,
     int vec_size,
+    int thread_work_size,
     bool return_by_ref) {
   std::string func = func_;
   at::jit::TemplateEnv env;
 
+  const std::string f_inputs_type_str = typeName(f_inputs_type);
+  const std::string compute_type_str = typeName(compute_type);
+  const std::string result_type_str = typeName(result_type);
+
   env.s("index_type", "unsigned int");
   env.s("nInputs", std::to_string(nInputs));
   env.s("nOutputs", std::to_string(nOutputs));
-  env.s("scalar_type", f_inputs_type);
-  env.s("compute_type", compute_type);
+  env.s("scalar_type", f_inputs_type_str);
+  env.s("compute_type", compute_type_str);
   env.s("functor", func);
   env.s("name", name);
   env.s("cmath_string", get_cmath_string());
+  env.s("thread_work_size", std::to_string(thread_work_size));
 
   // Generate `extra_params` for function signature
   // and `extra_args` for computation call if
@@ -1013,14 +1069,14 @@ std::string generate_code(
   for (int i = 0; i < nInputs; i++) {
     // TODO these arrays are potentially of the different types, use function
     // traits to determine the types
-    declare_load_arrays << f_inputs_type << " arg" << std::to_string(i)
+    declare_load_arrays << f_inputs_type_str << " arg" << std::to_string(i)
                         << "[" << std::to_string(thread_work_size) << "];\n";
   }
   env.s("declare_load_arrays", declare_load_arrays.str());
 
   std::stringstream declare_store_arrays;
   for (int i = 0; i < nOutputs; i++) {
-    declare_store_arrays << result_type << " out" << std::to_string(i)
+    declare_store_arrays << result_type_str << " out" << std::to_string(i)
                         << "[" << std::to_string(thread_work_size) << "];\n";
   }
   env.s("declare_store_arrays", declare_store_arrays.str());
@@ -1042,7 +1098,7 @@ std::string generate_code(
 
   std::string call_functor_template;
   if (return_by_ref) {  // return one or more outputs by reference
-    bool need_temp_out = (compute_type != result_type);
+    bool need_temp_out = (compute_type_str != result_type_str);
     std::stringstream functor_outs;
     if (need_temp_out) {
       for (int i = 0; i < nOutputs - 1; i++) {
@@ -1075,24 +1131,24 @@ std::string generate_code(
   }
   env.s("call_functor", at::jit::CodeTemplate(call_functor_template).format(env));
 
-  if (f_inputs_type == "at::Half" || result_type == "at::Half" ||
-      f_inputs_type == "std::complex<at::Half>" ||
-      result_type == "std::complex<at::Half>" || dynamic_casting) {
+  if (f_inputs_type_str == "at::Half" || result_type_str == "at::Half" ||
+      f_inputs_type_str == "std::complex<at::Half>" ||
+      result_type_str == "std::complex<at::Half>" || dynamic_casting) {
     // complex<Half> depends on complex<T> and Half dtypes.
     env.s("half_string", jiterator_half_support_literal);
   } else {
     env.s("half_string", "");
   }
-  if (f_inputs_type == "at::BFloat16" || result_type == "at::BFloat16" || dynamic_casting) {
+  if (f_inputs_type_str == "at::BFloat16" || result_type_str == "at::BFloat16" || dynamic_casting) {
     env.s("bfloat16_string", jiterator_bfloat16_support_literal);
   } else {
     env.s("bfloat16_string", "");
   }
   // the definition of complex math functions is only needed when the compute type is complex
   // but the definition of std::complex is needed for dynamic casting even if the compute type is not complex
-  if (f_inputs_type == "std::complex<float>" || result_type == "std::complex<float>" ||
-      f_inputs_type == "std::complex<double>" || result_type == "std::complex<double>" ||
-      f_inputs_type == "std::complex<at::Half>" || result_type == "std::complex<at::Half>") {
+  if (f_inputs_type_str == "std::complex<float>" || result_type_str == "std::complex<float>" ||
+      f_inputs_type_str == "std::complex<double>" || result_type_str == "std::complex<double>" ||
+      f_inputs_type_str == "std::complex<at::Half>" || result_type_str == "std::complex<at::Half>") {
     // complex<Half> depends on complex<T> and Half dtypes.
     env.s("traits_string", get_traits_string_but_hiprtc_safe());
     env.s("complex_body_string", get_complex_body_string());
@@ -1111,8 +1167,8 @@ std::string generate_code(
     env.s("complex_body_string", "");
     env.s("complex_math_string", "");
   }
-  if (f_inputs_type == "std::complex<at::Half>" ||
-      result_type == "std::complex<at::Half>" || dynamic_casting) {
+  if (f_inputs_type_str == "std::complex<at::Half>" ||
+      result_type_str == "std::complex<at::Half>" || dynamic_casting) {
     // dynamic_casting requires the definition of all types
     // include complex<at::Half>
     // Look at the definition of `StoreWithCast` and `LoadWithCast`.
@@ -1143,7 +1199,7 @@ std::string generate_code(
     std::stringstream load_inputs;
     for (int i = 0; i < nInputs; i++) {
       auto i_string = std::to_string(i);
-      load_inputs << "arg" << i_string << "[j] = l.load<" << f_inputs_type
+      load_inputs << "arg" << i_string << "[j] = l.load<" << f_inputs_type_str
                   << ">(data[" << std::to_string(i + nOutputs)
                   << "], input_offsets[" << i_string << "], " << i_string
                   << ");\n";
@@ -1153,7 +1209,7 @@ std::string generate_code(
     std::stringstream store_outputs;
     for (int i = 0; i < nOutputs; i++) {
       auto i_string = std::to_string(i);
-      store_outputs << "s.store<" << result_type
+      store_outputs << "s.store<" << result_type_str
                     << ">(out" << i_string << "[j], data[" << i_string
                     << "], output_offsets[" << i_string << "], " << i_string
                     << ");\n";
@@ -1168,7 +1224,7 @@ std::string generate_code(
 
   // vectorized case
   env.s("vec_size", std::to_string(vec_size));
-  env.s("result_type", result_type);
+  env.s("result_type", result_type_str);
 
   std::stringstream vector_inputs;
   for (const auto i : c10::irange(nInputs)){
@@ -1214,7 +1270,7 @@ std::string generate_code(
   std::stringstream load_unrolled_inputs;
   for (const auto i: c10::irange(nInputs)){
     auto i_string = std::to_string(i);
-    load_unrolled_inputs << "arg" << i_string << "[j] = load<" << f_inputs_type
+    load_unrolled_inputs << "arg" << i_string << "[j] = load<" << f_inputs_type_str
       << ">(data[" << std::to_string(i + nOutputs) << "], linear_idx);\n";
   }
   env.s("load_unrolled_inputs", load_unrolled_inputs.str());
@@ -1222,7 +1278,7 @@ std::string generate_code(
   std::stringstream store_unrolled_outputs;
   for (const auto i : c10::irange(nOutputs)) {
     auto i_string = std::to_string(i);
-    store_unrolled_outputs << "store<" << result_type << ">(out" << i_string
+    store_unrolled_outputs << "store<" << result_type_str << ">(out" << i_string
       << "[j], data[" << i_string << "], linear_idx);\n";
   }
   env.s("store_unrolled_outputs", store_unrolled_outputs.str());
@@ -1340,6 +1396,7 @@ std::string generate_reduction_code(
     int max_threads_codegen) {
       std::string func = func_;
       at::jit::TemplateEnv env;
+      constexpr int thread_work_size = JIT_THREAD_WORK_SIZE;
       env.s("index_type", "unsigned int");
       env.s("scalar_type", f_inputs_type);
       env.s("result_type", result_type);
@@ -1347,6 +1404,7 @@ std::string generate_reduction_code(
       env.s("vt0", std::to_string(vt0));
       env.s("name", name);
       env.s("max_threads_lb", std::to_string(max_threads_codegen));
+      env.s("thread_work_size", std::to_string(thread_work_size));
       // reductions don't support dynamic casting, so the only way to get nonstandard types
       // is through input
       if (f_inputs_type == "at::Half" || f_inputs_type == "std::complex<at::Half>") {

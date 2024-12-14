@@ -89,8 +89,10 @@ void launch_jitted_unrolled_kernel(
     c10::ArrayRef<void*> extra_args) {
 
   TORCH_INTERNAL_ASSERT(N > 0 && N <= std::numeric_limits<int32_t>::max());
+  const int tws = JIT_THREAD_WORK_SIZE;
+  int bws = tws * num_threads();
   //casting result to int is always safe, intermediate is int64 and won't overflow
-  const uint32_t grid = (N + block_work_size() - 1) / block_work_size();
+  const uint32_t grid = (N + bws - 1) / bws;
 
   if (!fn_cache.function) {
     const std::lock_guard<std::mutex> lock{jiterator_mutex};
@@ -115,8 +117,10 @@ void launch_jitted_vectorized_kernel(
     at::cuda::jit::BinaryFuncVariant scalar_pos,
     void *scalar_val, c10::ArrayRef<void*> extra_args) {
   TORCH_INTERNAL_ASSERT(N > 0 && N <= std::numeric_limits<int32_t>::max());
+  const int tws = JIT_THREAD_WORK_SIZE;
+  int bws = tws * num_threads();
   // N is still int64_t for the computation, but it's always safe to cast result to int
-  const uint32_t grid = (N + block_work_size() - 1) / block_work_size();
+  const uint32_t grid = (N + bws - 1) / bws;
   const int vec_size = at::cuda::jit::can_vectorize_up_to(
       desc, c10::ArrayRef<char*>(data.data(), data.size()));
 

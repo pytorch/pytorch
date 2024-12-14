@@ -82,20 +82,36 @@ inline int can_vectorize_up_to(const KernelDescriptor &desc, c10::ArrayRef<char*
   return result;
 }
 
+//FIXME - this are defined in Loops.cuh, but including Loops.cuh here would lead to circular includes Loops.cuh -> CUDALoops.cuh -> jit_utils.h -> Loops.cuh
+#define JIT_THREAD_WORK_SIZE 4
+
+#ifdef USE_ROCM
+int calc_io_size(
+    const int nInputs,
+    const int nOutputs,
+    const c10::ScalarType& inputs_type,
+    const c10::ScalarType& result_type);
+
+int calc_optimal_vec_size(int vec_size, int dtype_size);
+
+int calc_thread_work_size(int io_size);
+#endif
+
 std::string generate_code(
     int nInputs,
     int nOutputs,
     const std::string& func,
     const std::string& name,
-    const std::string& f_input_type,
-    const std::string& compute_type,
-    const std::string& result_type,
+    const c10::ScalarType& f_inputs_type,
+    const c10::ScalarType& compute_type,
+    const c10::ScalarType& result_type,
     bool contiguous,
     bool dynamic_casting,
     BinaryFuncVariant scalar_pos,
     c10::SmallVector<std::string>& extra_args_typenames,
     bool vectorized=false,
     int vec_size=0,
+    int thread_work_size=JIT_THREAD_WORK_SIZE,
     bool return_by_ref=false);
 
 std::string generate_code(
@@ -105,6 +121,7 @@ std::string generate_code(
     BinaryFuncVariant scalar_pos,
     bool vectorized=false,
     int vec_size=0,
+    int thread_work_size=JIT_THREAD_WORK_SIZE,
     bool return_by_ref=false);
 
 std::string generate_reduction_code(

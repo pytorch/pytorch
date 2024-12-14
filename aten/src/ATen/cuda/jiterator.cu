@@ -16,10 +16,13 @@ static inline void launch_jitted_vectorized_kernel_dynamic(
   DeviceIndex dev_idx, int64_t N, const std::string& f, void* data_ptr,
   const c10::SmallVector<at::Scalar>& extra_args, bool return_by_ref) {
   TORCH_INTERNAL_ASSERT(N > 0 && N <= std::numeric_limits<int32_t>::max());
-  // N is still int64_t for the computation, but it's always safe to cast result to int
-  const uint32_t grid = (N + block_work_size() - 1) / block_work_size();
 
-  const int vec_size = jitted_can_vectorize_up_to(iter);
+  const int tws = JIT_THREAD_WORK_SIZE;
+  int bws = tws * num_threads();
+  // N is still int64_t for the computation, but it's always safe to cast result to int
+  const uint32_t grid = (N + bws - 1) / bws;
+
+  int vec_size = jitted_can_vectorize_up_to(iter);
   bool vectorized = vec_size > 1;
 
   // Different kernels are compiled depending on what we're vectorizing up to (1, 2 or 4 elements)
@@ -55,11 +58,12 @@ static inline void launch_jitted_vectorized_kernel_dynamic(
     if (!fn_ptr->function) { // cache miss!
       // Generates program
       auto code = at::cuda::jit::generate_code(nInputs, nOutputs, f, name,
-                                               f_inputs_type_str, compute_type_str, result_type_str,
+                                               common_dtype, toOpMathType(common_dtype), common_dtype,
                                                /*contiguous=*/true, /*dynamic_casting=*/false,
                                                at::cuda::jit::BinaryFuncVariant::NoScalar,
                                                extra_args_types,
                                                vectorized, vec_size,
+					       tws,
                                                return_by_ref);
       std::string kernel_name = vectorized ? name + "_vectorized" + std::to_string(vec_size) : name;
       // Acquires the program
@@ -121,8 +125,10 @@ static inline void launch_jitted_unrolled_kernel_dynamic(
   const c10::SmallVector<at::Scalar>& extra_args, bool return_by_ref) {
 
   TORCH_INTERNAL_ASSERT(N > 0 && N <= std::numeric_limits<int32_t>::max());
+  const int tws = JIT_THREAD_WORK_SIZE;
+  int bws = tws * num_threads();
   //casting result to int is always safe, intermediate is int64 and won't overflow
-  const uint32_t grid = (N + block_work_size() - 1) / block_work_size();
+  const uint32_t grid = (N + bws - 1) / bws;
 
   int nInputs = iter.ninputs();
   int nOutputs = iter.noutputs();
@@ -150,10 +156,10 @@ static inline void launch_jitted_unrolled_kernel_dynamic(
     const std::lock_guard<std::mutex> lock{_jiterator_mutex};
     if (!fn_ptr->function) {
       auto code = at::cuda::jit::generate_code(nInputs, nOutputs, f, name,
-                                               f_inputs_type_str, compute_type_str, result_type_str,
+                                               common_dtype, toOpMathType(common_dtype), common_dtype,
                                                contiguous, dynamic_casting,
                                                at::cuda::jit::BinaryFuncVariant::NoScalar,
-                                               extra_args_types, /*vectorized*/false, /*vec_size*/0, return_by_ref);
+                                               extra_args_types, /*vectorized*/false, /*vec_size*/0, tws, return_by_ref);
       *fn_ptr = at::cuda::jit::jit_pwise_function(code, name);
     }
   }
