@@ -303,7 +303,7 @@ class UsageLogger:
             )
         return calculate_gpu
 
-    def start(self):
+    def start(self) -> None:
         self.collect_thread = threading.Thread(target=self._collect_data)
         self.collect_thread.start()
         self._ouput_data()
