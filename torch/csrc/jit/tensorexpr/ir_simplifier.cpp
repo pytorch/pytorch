@@ -1293,7 +1293,7 @@ bool isOperandInMinMaxTerm(
     return true;
   }
   return false;
-};
+}
 
 // Simplifies the nested min-max pattern like:
 //   * Max(Min(x, y), Min(x, z)) => Min(x, Max(y, z))
@@ -2885,7 +2885,6 @@ ExprPtr SimplifierUnderContext::mutate(const DivPtr& v) {
   ExprPtr lhs = v->lhs();
   ExprPtr rhs = v->rhs();
 
-  std::ostringstream oss;
   if (auto ret = distributeDiv(lhs, rhs, var_bound_info_)) {
     GRAPH_DEBUG("SimplifierUnderContext: ", *v, " => ", *ret);
     return ret->accept_mutator(this);
@@ -3005,7 +3004,6 @@ ExprPtr SimplifierUnderContext::mutate(const ModPtr& v) {
   ExprPtr lhs = v->lhs();
   ExprPtr rhs = v->rhs();
 
-  std::ostringstream oss;
   if (auto ret = distributeMod(lhs, rhs, var_bound_info_)) {
     GRAPH_DEBUG("SimplifierUnderContext: ", *v, " => ", *ret);
     return ret->accept_mutator(this);

@@ -107,7 +107,7 @@ class WrapActivationCheckpoint(HigherOrderOperator):
     """
 
     def __init__(self) -> None:
-        super().__init__("wrap_activation_checkpoint")
+        super().__init__("wrap_activation_checkpoint", cacheable=False)
 
     def __call__(self, function, *args, **kwargs):
         # use_reentrant is set to False because this op is going to be traced.
@@ -146,7 +146,7 @@ class TagActivationCheckpoint(HigherOrderOperator):
     """
 
     def __init__(self) -> None:
-        super().__init__("tag_activation_checkpoint")
+        super().__init__("tag_activation_checkpoint", cacheable=False)
 
     @staticmethod
     def divide_kwargs(kwargs):

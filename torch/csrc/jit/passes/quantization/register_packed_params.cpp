@@ -7,8 +7,7 @@
 #include <torch/csrc/jit/passes/quantization/helper.h>
 #include <torch/csrc/jit/passes/quantization/register_packed_params.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 namespace {
 bool isPrepackNode(Node* n) {
@@ -59,7 +58,6 @@ std::unordered_set<std::string> RegisterPrePackParams(
   int64_t uid = 0; // int + method name gives unique identifier
   auto graph = m.get_method(method_name).graph();
   std::stack<Block*> blocks_to_visit;
-  std::unordered_set<Node*> nodes_to_delete;
   blocks_to_visit.push(graph->block());
   std::string attr_name_base =
       attr_prefix + "_" + method_name + "_ondevice_ptq_packed_weight_";
@@ -145,5 +143,4 @@ std::unordered_set<std::string> RegisterPrePackParams(
   return packed_param_names;
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

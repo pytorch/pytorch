@@ -18,7 +18,6 @@
 #endif
 
 #include <string>
-#include <type_traits>
 #include <unordered_map>
 #include <vector>
 
@@ -27,8 +26,6 @@ namespace at::cuda::tunable {
 template <typename ParamsT>
 class Callable {
   public:
-    Callable() = default;
-    Callable(Callable&&) = default;
     virtual ~Callable() = default;
     virtual TuningStatus Call(const ParamsT*) {
       return FAIL;
@@ -41,8 +38,6 @@ class Callable {
 template <typename ParamsT, typename TimerT>
 class TunableOp {
   public:
-    TunableOp() = default;
-    TunableOp(TunableOp&&) = default;
     virtual ~TunableOp() = default;
 
     TuningStatus operator()(const ParamsT* params) {
@@ -54,9 +49,15 @@ class TunableOp {
         auto params_sig = params->Signature();
         result = mgr.Lookup(op_sig, params_sig);
         // If there is not previous tuning result been found, we do the tuning iff tuning is enabled
-        if (result == ResultEntry::Null() && ctx->IsTuningEnabled()) {
-          result = FindFastest(params);
-          mgr.Add(op_sig, params_sig, result);
+        if (result == ResultEntry::Null()) {
+          if (ctx->IsTuningEnabled()) {
+            result = FindFastest(params);
+            mgr.Add(op_sig, params_sig, result);
+          }
+          else if (ctx->IsRecordUntunedEnabled()) {
+            // or record the gemm into file
+            mgr.RecordUntuned(ctx->GetUntunedFile(), op_sig, params_sig);
+          }
         }
       }
       else {
@@ -140,7 +141,7 @@ class TunableOp {
       bool use_buffer_rotation = (rotating_size > 0);
       size_t param_size = params->GetSize(use_buffer_rotation);
       size_t param_count = (rotating_size / param_size) + 1;
-      constexpr size_t MB = 1024*1024;
+      constexpr size_t MB = 1024ull*1024;
       if (use_buffer_rotation) {
         TUNABLE_LOG2("Rotating buffer ", rotating_size/MB, " MiB. ",
             "Needed Size: ", param_size/MB, " MiB. ",
@@ -260,6 +261,7 @@ class TunableOp {
     std::string CreateSignature() {
 #ifndef _WIN32
       const auto* name = typeid(*this).name();
+      // NOLINTNEXTLINE(*array*)
       char buf[256];
       size_t buf_len = 256;
       abi::__cxa_demangle(name, buf, &buf_len, nullptr);
@@ -278,7 +280,6 @@ class TunableOp {
 };
 
 struct OpParams {
-  OpParams() {}
   virtual ~OpParams() = default;
   virtual std::string Signature() const = 0;
 };

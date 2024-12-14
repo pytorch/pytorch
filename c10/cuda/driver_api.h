@@ -8,17 +8,18 @@
     CUresult __err = EXPR;                                                 \
     if (__err != CUDA_SUCCESS) {                                           \
       const char* err_str;                                                 \
-      CUresult get_error_str_err C10_UNUSED =                              \
+      CUresult get_error_str_err [[maybe_unused]] =                        \
           c10::cuda::DriverAPI::get()->cuGetErrorString_(__err, &err_str); \
       if (get_error_str_err != CUDA_SUCCESS) {                             \
-        AT_ERROR("CUDA driver error: unknown error");                      \
+        TORCH_CHECK(false, "CUDA driver error: unknown error");            \
       } else {                                                             \
-        AT_ERROR("CUDA driver error: ", err_str);                          \
+        TORCH_CHECK(false, "CUDA driver error: ", err_str);                \
       }                                                                    \
     }                                                                      \
   } while (0)
 
 #define C10_LIBCUDA_DRIVER_API(_)   \
+  _(cuDeviceGetAttribute)           \
   _(cuMemAddressReserve)            \
   _(cuMemRelease)                   \
   _(cuMemMap)                       \
@@ -29,6 +30,8 @@
   _(cuMemGetAllocationGranularity)  \
   _(cuMemExportToShareableHandle)   \
   _(cuMemImportFromShareableHandle) \
+  _(cuMemsetD32Async)               \
+  _(cuStreamWriteValue32)           \
   _(cuGetErrorString)
 
 #if defined(CUDA_VERSION) && (CUDA_VERSION >= 12030)

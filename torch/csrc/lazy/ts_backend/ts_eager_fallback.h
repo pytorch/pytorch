@@ -5,8 +5,7 @@
 #include <ATen/core/stack.h>
 #include <functional>
 
-namespace torch {
-namespace lazy {
+namespace torch::lazy {
 
 bool force_eager_fallback(c10::Symbol op);
 void ltc_eager_fallback(
@@ -23,5 +22,4 @@ void ts_eager_fallback(
 // by the main Torchscript backend init function.
 void register_ts_ltc_eager_fallback();
 
-} // namespace lazy
-} // namespace torch
+} // namespace torch::lazy

@@ -67,14 +67,14 @@ class Operation {
 // treat the last N elements of the stack as a list, looking up
 // element i
 inline IValue& peek(Stack& stack, size_t i, size_t N) {
-  // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions)
+  // NOLINTNEXTLINE(*-narrowing-conversions)
   return *(stack.end() - N + i);
 }
 inline IValue& peek(Stack* stack, size_t i, size_t N) {
   return peek(*stack, i, N);
 }
 inline const IValue& peek(const Stack& stack, size_t i, size_t N) {
-  // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions)
+  // NOLINTNEXTLINE(*-narrowing-conversions)
   return *(stack.end() - N + i);
 }
 inline const IValue& peek(const Stack* stack, size_t i, size_t N) {
@@ -96,13 +96,16 @@ inline at::ArrayRef<IValue> last(const Stack* stack, size_t N) {
   return last(*stack, N);
 }
 inline void drop(Stack& stack, size_t n) {
-  // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions)
+  // NOLINTNEXTLINE(*-narrowing-conversions)
   stack.erase(stack.end() - n, stack.end());
 }
 inline void drop(Stack* stack, size_t n) {
   drop(*stack, n);
 }
 inline IValue pop(Stack& stack) {
+  if (stack.empty()) {
+    throw std::runtime_error("pop() called on empty stack");
+  }
   auto r = std::move(stack.back());
   stack.pop_back();
   return r;
@@ -193,7 +196,7 @@ struct TuplePacker {
 template <typename... Args>
 struct TuplePacker<0, Args...> {
   // NOLINTNEXTLINE(cppcoreguidelines-rvalue-reference-param-not-moved)
-  static void execute(Stack& /*stack*/, std::tuple<Args...>&& /*t*/){};
+  static void execute(Stack& /*stack*/, std::tuple<Args...>&& /*t*/){}
 };
 
 template <typename... Args>

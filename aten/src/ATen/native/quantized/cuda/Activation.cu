@@ -2,8 +2,7 @@
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cuda/Loops.cuh>
 
-namespace at {
-namespace native {
+namespace at::native {
 
 Tensor& relu_quantized_cuda_(Tensor& self) {
   const auto zero_point = self.q_zero_point();
@@ -18,4 +17,3 @@ Tensor& relu_quantized_cuda_(Tensor& self) {
 }
 
 }  // namespace at::native
-}  // namespace at

@@ -200,7 +200,8 @@ static PyMethodDef THCPEvent_methods[] = {
     {nullptr}};
 
 PyTypeObject THCPEventType = {
-    PyVarObject_HEAD_INIT(nullptr, 0) "torch._C._CudaEventBase", /* tp_name */
+    PyVarObject_HEAD_INIT(nullptr, 0)
+    "torch._C._CudaEventBase", /* tp_name */
     sizeof(THCPEvent), /* tp_basicsize */
     0, /* tp_itemsize */
     (destructor)THCPEvent_dealloc, /* tp_dealloc */
@@ -240,6 +241,9 @@ PyTypeObject THCPEventType = {
 };
 
 void THCPEvent_init(PyObject* module) {
+  TORCH_CHECK(THPEventClass, "THPEvent has not been initialized yet.");
+  Py_INCREF(THPEventClass);
+  THCPEventType.tp_base = THPEventClass;
   THCPEventClass = (PyObject*)&THCPEventType;
   if (PyType_Ready(&THCPEventType) < 0) {
     throw python_error();

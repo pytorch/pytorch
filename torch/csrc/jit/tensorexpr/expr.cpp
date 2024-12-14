@@ -87,7 +87,7 @@ ExprHandle ExprHandle::operator>>(const ExprHandle& other) const {
 
 #define IMM_EXPR_DECLARE(Type, Name) \
   ExprHandle::ExprHandle(Type v) : ExprHandle(Name##Imm::make(v)) {}
-AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, IMM_EXPR_DECLARE);
+AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, IMM_EXPR_DECLARE)
 #undef IMM_EXPR_DECLARE
 
 ExprHandle sin(const ExprHandle& v) {
@@ -552,7 +552,7 @@ bool Buf::is_stride_one(int cur_dim) const {
   return exprEquals(strides_[cur_dim], alloc<LongImm>(1));
 }
 
-ExprHandle expr_to_vec(ExprHandle v, int lanes) {
+ExprHandle expr_to_vec(const ExprHandle& v, int lanes) {
   if (lanes == 1) {
     return v;
   } else {

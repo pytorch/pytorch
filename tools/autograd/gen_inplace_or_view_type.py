@@ -590,8 +590,7 @@ def inplace_or_view_method_definition(
         # For functions that modify their inputs but don't return them,
         # we can't give them autograd support.
         # See https://github.com/pytorch/pytorch/issues/53796
-        not modifies_arguments(f)
-        or len(f.func.returns) == 0
+        not modifies_arguments(f) or len(f.func.returns) == 0
     ):
         return None
     return METHOD_DEFINITION.substitute(
@@ -654,7 +653,6 @@ def gen_inplace_or_view_type(
 ) -> None:
     # NOTE: see Note [Sharded File] at the top of the VariableType.cpp
     # template regarding sharding of the generated files.
-    num_shards = 2
 
     fm = FileManager(install_dir=out, template_dir=template_path, dry_run=False)
     fm.write_sharded(

@@ -30,7 +30,7 @@ void ForwardADLevel::release_idx(uint64_t idx) {
       "order they were created.");
   TORCH_INTERNAL_ASSERT(!all_forward_levels_.empty());
   // Keep the level alive until we have released the lock
-  auto lvl = all_forward_levels_.back();
+  auto lvl = std::move(all_forward_levels_.back());
   all_forward_levels_.pop_back();
   lock.unlock();
 }

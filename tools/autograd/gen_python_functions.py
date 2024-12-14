@@ -36,7 +36,7 @@ from __future__ import annotations
 import itertools
 import re
 from collections import defaultdict
-from typing import Callable, Iterable, Sequence
+from typing import Callable, TYPE_CHECKING
 
 import yaml
 
@@ -74,6 +74,10 @@ from torchgen.yaml_utils import YamlLoader
 
 from .gen_inplace_or_view_type import is_tensor_list_type
 from .gen_trace_type import should_trace
+
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable, Sequence
 
 
 #
@@ -386,9 +390,9 @@ def group_filter_overloads(
     pairs: Sequence[PythonSignatureNativeFunctionPair],
     pred: Callable[[NativeFunction], bool],
 ) -> dict[BaseOperatorName, list[PythonSignatureNativeFunctionPair]]:
-    grouped: dict[
-        BaseOperatorName, list[PythonSignatureNativeFunctionPair]
-    ] = defaultdict(list)
+    grouped: dict[BaseOperatorName, list[PythonSignatureNativeFunctionPair]] = (
+        defaultdict(list)
+    )
     for pair in pairs:
         if pred(pair.function):
             grouped[pair.function.func.name.name].append(pair)
@@ -522,12 +526,12 @@ def create_python_bindings_sharded(
     grouped = group_filter_overloads(pairs, pred)
 
     def key_func(
-        kv: tuple[BaseOperatorName, list[PythonSignatureNativeFunctionPair]]
+        kv: tuple[BaseOperatorName, list[PythonSignatureNativeFunctionPair]],
     ) -> str:
         return kv[0].base
 
     def env_func(
-        kv: tuple[BaseOperatorName, list[PythonSignatureNativeFunctionPair]]
+        kv: tuple[BaseOperatorName, list[PythonSignatureNativeFunctionPair]],
     ) -> dict[str, list[str]]:
         name, fn_pairs = kv
         return {
@@ -679,9 +683,7 @@ def load_deprecated_signatures(
                     function=pair.function,
                 )
             )
-        assert (
-            any_schema_found
-        ), f"No native function with name {aten_name} matched signature:\n  {str(schema)}"
+        assert any_schema_found, f"No native function with name {aten_name} matched signature:\n  {str(schema)}"
 
     return results
 
@@ -1102,7 +1104,7 @@ def method_def(
     if module == "torch":
         flags += " | METH_STATIC"
 
-    return f'{{"{name}", {pycname}, {flags}, NULL}},'
+    return f'{{"{name}", {pycname}, {flags}, nullptr}},'
 
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
@@ -1320,8 +1322,6 @@ def emit_single_dispatch(
             schema_comment = f"// [deprecated] aten::{ps.deprecated_schema}"
         else:
             schema_comment = f"// aten::{f.func}"
-
-        deprecated = "[deprecated] " if ps.deprecated else ""
 
         # dispatch lambda signature
         name = cpp.name(f.func)

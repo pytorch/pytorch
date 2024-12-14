@@ -3,7 +3,7 @@ from collections import defaultdict
 from typing import Dict
 
 import torch
-from torch.distributed._tensor.experimental.tp_transform import (
+from torch.distributed._tensor.experimental._tp_transform import (
     tensor_parallel_transformation,
 )
 from torch.distributed.tensor.parallel.style import (

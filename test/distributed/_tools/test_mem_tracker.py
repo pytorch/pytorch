@@ -7,7 +7,12 @@ import torch
 import torch.nn as nn
 from torch.distributed._tools.mem_tracker import MemTracker
 from torch.testing._internal.common_cuda import TEST_CUDA
-from torch.testing._internal.common_utils import run_tests, skipIfTorchDynamo, TestCase
+from torch.testing._internal.common_utils import (
+    run_tests,
+    skipIfRocm,
+    skipIfTorchDynamo,
+    TestCase,
+)
 from torch.utils.checkpoint import checkpoint
 
 
@@ -26,6 +31,7 @@ class TestMemTracker(TestCase):
 
     @skipIfTorchDynamo("https://github.com/pytorch/pytorch/issues/115653")
     @unittest.skipIf(not TEST_CUDA, "CUDA not available")
+    @skipIfRocm()
     def test_cuda_tracker_equivalence(
         self,
     ):

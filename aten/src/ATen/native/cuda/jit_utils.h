@@ -71,7 +71,7 @@ inline int can_vectorize_up_to(const KernelDescriptor &desc, c10::ArrayRef<char*
 
   // Deals with output
   auto result_size = c10::scalarTypeToTypeMeta(desc.result_type).itemsize();
-  int result = can_vectorize_up_to(result_size, pointers[0]);
+  auto result = can_vectorize_up_to(result_size, pointers[0]);
 
   // Incorporates input(s)
   auto input_size = c10::scalarTypeToTypeMeta(desc.f_inputs_type).itemsize();

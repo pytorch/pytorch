@@ -588,7 +588,7 @@ SparseTensor& copy_sparse_wrapper_(
   {
     NoNamesGuard guard;
     if (!self.is_sparse() || !src.is_sparse()) {
-      AT_ERROR(
+      TORCH_CHECK(false,
           "copy_() between dense and sparse Tensors is not implemented! Found self type = ",
           self.toString(),
           " and src type = ",

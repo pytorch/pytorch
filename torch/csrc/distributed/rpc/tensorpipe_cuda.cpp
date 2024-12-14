@@ -121,7 +121,7 @@ class TensorpipeCudaConverter : public TensorpipeDeviceTypeConverter {
   }
 };
 
-C10_REGISTER_TENSORPIPE_DEVICE_TYPE_CONVERTER(CUDA, TensorpipeCudaConverter);
+C10_REGISTER_TENSORPIPE_DEVICE_TYPE_CONVERTER(CUDA, TensorpipeCudaConverter)
 
 } // namespace
 } // namespace torch::distributed::rpc
