@@ -843,7 +843,7 @@ std::tuple<Tensor, std::optional<int64_t>> gather_batch_rule(
 
 Tensor get_expanded_index(const Tensor& index, SymIntArrayRef self_size, int64_t dim) {
   if (index.dim() == 0) {
-    SmallVector<int64_t, 5> self_size_singleton(self_size.begin(), self_size.end());
+    std::vector<int64_t> self_size_singleton(self_size.begin(), self_size.end());
     self_size_singleton[dim] = 1;
     return index.expand_symint(self_size_singleton);
   }
