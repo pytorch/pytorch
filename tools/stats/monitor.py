@@ -28,23 +28,29 @@ import psutil  # type: ignore[import]
 _HAS_PYNVML = False
 _HAS_AMDSMI = False
 
+
 @dataclasses.dataclass
 class UsageData:
     """
     Dataclass for storing usage data.
     """
+
     cpu_percent: float
     memory_percent: float
     processes: list[dict[str, Any]]
     gpu_list: list[GpuData]
+
+
 @dataclasses.dataclass
 class GpuData:
     """
     Dataclass for storing gpu data.
     """
+
     uuid: str
     utilization: float
     mem_utilization: float
+
 
 try:
     import pynvml  # type: ignore[import]
@@ -89,6 +95,7 @@ def parse_args() -> argparse.Namespace:
     args = parser.parse_args()
     return args
 
+
 class UsageLogger:
     """
     Collect and display usage data, including:
@@ -125,10 +132,10 @@ class UsageLogger:
         self._initial_gpu_handler()
         self.data_list: list[UsageData] = []
 
-
         self.lock = threading.Lock()
         self.collect_thread = None
         self.output_thread = None
+
     def _collect_data(self) -> None:
         """
         Collects the data.
@@ -140,7 +147,12 @@ class UsageLogger:
                 cpu_percent = psutil.cpu_percent()
                 processes = self._get_process_info()
                 gpuList = self._collect_gpu_data()
-                data = UsageData(cpu_percent=cpu_percent, memory_percent=memory, processes=processes, gpu_list=gpuList)
+                data = UsageData(
+                    cpu_percent=cpu_percent,
+                    memory_percent=memory,
+                    processes=processes,
+                    gpu_list=gpuList,
+                )
                 if self._debug_mode:
                     print(f"collecting data {data}")
                 with self.lock:
@@ -168,22 +180,32 @@ class UsageLogger:
             max_gpu_mem_utilization = max(gpu_mem_utilization[gpu_uuid])
 
             total_gpu = sum(gpu_utilization[gpu_uuid])
-            avg_gpu_utilization = total_gpu / len(gpu_utilization[gpu_uuid]) if len(gpu_utilization[gpu_uuid]) > 0 else 0
+            avg_gpu_utilization = (
+                total_gpu / len(gpu_utilization[gpu_uuid])
+                if len(gpu_utilization[gpu_uuid]) > 0
+                else 0
+            )
 
             total_mem = sum(gpu_mem_utilization[gpu_uuid])
-            avg_gpu_mem_utilization = total_mem / len(gpu_mem_utilization[gpu_uuid]) if len(gpu_mem_utilization[gpu_uuid]) > 0 else 0
+            avg_gpu_mem_utilization = (
+                total_mem / len(gpu_mem_utilization[gpu_uuid])
+                if len(gpu_mem_utilization[gpu_uuid]) > 0
+                else 0
+            )
 
-            calculate_gpu.append({
-                "uuid": gpu_uuid,
-                "util_percent": {
-                    "avg": round(avg_gpu_utilization,2),
-                    "max": round(max_gpu_utilization,2),
-                },
-                "mem_util_percent": {
-                    "avg": round(avg_gpu_mem_utilization,2),
-                    "max": round(max_gpu_mem_utilization,2),
+            calculate_gpu.append(
+                {
+                    "uuid": gpu_uuid,
+                    "util_percent": {
+                        "avg": round(avg_gpu_utilization, 2),
+                        "max": round(max_gpu_utilization, 2),
+                    },
+                    "mem_util_percent": {
+                        "avg": round(avg_gpu_mem_utilization, 2),
+                        "max": round(max_gpu_mem_utilization, 2),
+                    },
                 }
-            })
+            )
         return calculate_gpu
 
     def _ouput_data(self) -> None:
@@ -206,38 +228,47 @@ class UsageLogger:
 
                     # collect cpu and memory metrics
                     stats.update(
-                    {
-                        "level": "record",
-                        "time": datetime.datetime.now().timestamp(),
-                    })
+                        {
+                            "level": "record",
+                            "time": datetime.datetime.now().timestamp(),
+                        }
+                    )
 
-                    total_cpu = sum(usageData.cpu_percent for usageData in self.data_list)
+                    total_cpu = sum(
+                        usageData.cpu_percent for usageData in self.data_list
+                    )
                     avg_cpu = total_cpu / len(self.data_list)
                     max_cpu = max(usageData.cpu_percent for usageData in self.data_list)
 
-                    max_memory = max(usageData.memory_percent for usageData in self.data_list)
-                    total_memory = sum(usageData.memory_percent for usageData in self.data_list)
+                    max_memory = max(
+                        usageData.memory_percent for usageData in self.data_list
+                    )
+                    total_memory = sum(
+                        usageData.memory_percent for usageData in self.data_list
+                    )
                     avg_memory = total_memory / len(self.data_list)
 
                     stats.update(
                         {
                             "cpu": {
-                                "avg": round(avg_cpu,2),
-                                "max": round(max_cpu,2),
+                                "avg": round(avg_cpu, 2),
+                                "max": round(max_cpu, 2),
                             },
                             "memory": {
-                                "avg": round(avg_memory,2),
-                                "max": round(max_memory,2),
+                                "avg": round(avg_memory, 2),
+                                "max": round(max_memory, 2),
                             },
                         }
                     )
 
                     # collect gpu metrics
                     if self._has_pynvml or self._has_amdsmi:
-                        gpu_list= self._calculate_gpu_utilization(self.data_list)
-                        stats.update({
-                            "gpu_list": gpu_list,
-                        })
+                        gpu_list = self._calculate_gpu_utilization(self.data_list)
+                        stats.update(
+                            {
+                                "gpu_list": gpu_list,
+                            }
+                        )
                     self.data_list.clear()
             except Exception as e:
                 stats = {
@@ -292,7 +323,11 @@ class UsageLogger:
                 gpu_utilization = pynvml.nvmlDeviceGetUtilizationRates(gpu_handle)
                 gpu_uuid = pynvml.nvmlDeviceGetUUID(gpu_handle)
                 gpu_data_list.append(
-                    GpuData(uuid=gpu_uuid, utilization=gpu_utilization.gpu, mem_utilization=gpu_utilization.memory)
+                    GpuData(
+                        uuid=gpu_uuid,
+                        utilization=gpu_utilization.gpu,
+                        mem_utilization=gpu_utilization.memory,
+                    )
                 )
         elif self._has_amdsmi:
             # Iterate over the available GPUs
@@ -384,7 +419,7 @@ class UsageLogger:
             python_test_processes = []
             for process in psutil.process_iter():
                 try:
-                    cmd  =  " ".join(process.cmdline())
+                    cmd = " ".join(process.cmdline())
                     processName = process.name()
                     pid = process.pid
                     if "python" in processName and cmd.startswith("python"):
@@ -392,6 +427,7 @@ class UsageLogger:
                 except Exception as e:
                     pass
             return python_test_processes
+
         processes = get_processes_running_python_tests()
         return processes
 
@@ -424,7 +460,7 @@ def main() -> None:
         data_collect_interval=args.data_collect_interval,
         is_debug_mode=args.debug,
         pynvml_enabled=pynvml_enabled,
-        amdsmi_enabled=amdsmi_enabled
+        amdsmi_enabled=amdsmi_enabled,
     )
 
     # gracefully exit the script when pid is killed
