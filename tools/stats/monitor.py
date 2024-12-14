@@ -101,7 +101,7 @@ def parse_args() -> argparse.Namespace:
 
 class SharedResource:
     """
-    thread-safe utils for shared resources used in both worker processor and main processor
+    thread-safe utils for shared resources used in both worker processor and main processor during UsageLogger
     """
 
     def __init__(self, is_debug_mode: bool = False) -> None:
