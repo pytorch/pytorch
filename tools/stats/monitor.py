@@ -357,11 +357,11 @@ class UsageLogger:
                 gpu_utilization = engine_usage["gfx_activity"]
                 gpu_mem_utilization = gpu_utilization["umc_activity"]
                 gpu_data_list.append(
-                    {
-                        "gpu_uuid": gpu_uuid,
-                        "gpu_utilization": gpu_utilization,
-                        "gpu_mem_utilization": gpu_mem_utilization,
-                    }
+                    GpuData(
+                       uuid=gpu_uuid,
+                       utilization= gpu_utilization,
+                       mem_utilization= gpu_mem_utilization,
+                    )
                 )
         return gpu_data_list
 
