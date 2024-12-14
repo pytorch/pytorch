@@ -200,7 +200,7 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_backward_nested(
     const std::optional<Tensor>& weight_opt /* optional */,
     const std::optional<Tensor>& bias_opt /*{ optional */,
     std::array<bool, 3> grad_input_mask) {
-  TORCH_CHECK(weight_opt.has_value() && bias_opt.has_value(), "NestedTensor layer_norm requires weight and bias");
+  TORCH_CHECK_VALUE(weight_opt.has_value() && bias_opt.has_value(), "NestedTensor layer_norm requires weight and bias");
   // For NestedTensors weight and bias are non nested.
   auto* nt_impl_grad = get_nested_tensor_impl(grad);
   auto* nt_impl_input = get_nested_tensor_impl(input);
