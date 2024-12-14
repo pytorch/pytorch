@@ -3,7 +3,6 @@ import operator
 from typing import Any, Dict, Iterable, List, Set, Tuple
 
 import torch.fx
-from torch._higher_order_ops.utils import has_potential_input_alias_or_mutation
 from torch.utils._pytree import tree_flatten
 
 from .graph_region_tracker import Node, Region
@@ -76,6 +75,25 @@ when they are created in output_graph.
     return output_replacements
 
 
+def _flatten_args_kwargs(args) -> List[Node]:
+    fully_flattened = []
+
+    def flatten(args):
+        flattened, _ = tree_flatten(args)
+        for arg in flattened:
+            if isinstance(arg, slice):
+                start = arg.start
+                stop = arg.stop
+                step = arg.step
+                flatten((start, stop, step))
+            else:
+                fully_flattened.append(arg)
+
+    flatten(args)
+
+    return fully_flattened
+
+
 def _replace_region_with_subgraph(
     graph: torch.fx.Graph,
     region: Region,
@@ -89,18 +107,20 @@ def _replace_region_with_subgraph(
     sub_args = []
     for node_ind, arg_ind in node_ind_arg_ind:
         node = region[node_ind]
-        flattened_args_kwargs, _ = tree_flatten((node.args, node.kwargs))
+        flattened_args_kwargs = _flatten_args_kwargs((node.args, node.kwargs))
         sub_args.append(flattened_args_kwargs[arg_ind])
 
     invoke_args = (get_subgraph_node, subgraph_name, tuple(sub_args))
     fake_inputs = [node.meta["example_value"] for node in sub_args]
 
-    if has_potential_input_alias_or_mutation(sub_gm, fake_inputs):
-        log.debug(
-            "NYI: Failed to substitute region %s due to input alias or mutation",
-            region,
-        )
-        return
+    # print(fake_inputs)
+    # breakpoint()
+    # if has_potential_input_alias_or_mutation(sub_gm, fake_inputs):
+    #    log.debug(
+    #        "NYI: Failed to substitute region %s due to input alias or mutation",
+    #        region,
+    #    )
+    #    return
 
     latest_region_node = region[-1]
     with graph.inserting_after(latest_region_node):
@@ -127,12 +147,15 @@ def _get_external_inputs(
     external_node_to_indices = dict()
     region_unique = set(region)
     for node_ind, node in enumerate(region):
-        flattened_args_kwargs, _ = tree_flatten((node.args, node.kwargs))
+        # if node.name == "rope_cache_4":
+        #    breakpoint()
+
+        flattened_args_kwargs = _flatten_args_kwargs((node.args, node.kwargs))
         for arg_ind, in_node in enumerate(flattened_args_kwargs):
             if (
-                in_node not in region_unique
+                isinstance(in_node, Node)
+                and in_node not in region_unique
                 and in_node not in external_node_to_indices
-                and isinstance(in_node, Node)
             ):
                 external_node_to_indices[in_node] = (node_ind, arg_ind)
 

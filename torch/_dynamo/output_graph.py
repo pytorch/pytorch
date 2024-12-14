@@ -99,7 +99,6 @@ from .utils import (
     get_static_address_type,
     graph_break_reasons,
     increment_op_count,
-    lazy_format_graph_code,
     LazyString,
     nn_module_proxy,
     same,
@@ -1350,12 +1349,6 @@ class OutputGraph:
             ] = self.dynamo_flat_name_to_original_fqn.copy()
             gm.meta["dynamo_compile_id"] = self.dynamo_compile_id
 
-            graph_code_log.debug(
-                "%s",
-                lazy_format_graph_code(
-                    name, gm, include_stride=True, include_device=True, colored=True
-                ),
-            )
             torch._logging.trace_structured(
                 "dynamo_output_graph",
                 lambda: {"sizes": self.get_graph_sizes_structured()},

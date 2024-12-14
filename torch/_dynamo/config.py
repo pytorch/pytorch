@@ -84,7 +84,7 @@ assume_static_by_default = True
 # with assume_static_by_default=True.
 # With this flag enabled, we always compile a frame as fully static for the first time, and, if we fail
 # any guards due to wobbles in shape, we recompile with *all* the wobbled shapes as being marked dynamic.
-automatic_dynamic_shapes = True
+automatic_dynamic_shapes = False
 
 # Valid options: "dynamic", "unbacked"
 automatic_dynamic_shapes_mark_as = "dynamic"
@@ -398,7 +398,7 @@ enable_cpp_framelocals_guard_eval = True
 
 # Whether to automatically find and replace identical graph
 # regions with a call to invoke_subgraph
-use_graph_deduplication = False
+use_graph_deduplication = True
 
 # Whether to track nodes for deduplication (testing only)
 # This flag is ignored if use_graph_deduplication is True

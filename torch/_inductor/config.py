@@ -91,7 +91,7 @@ autotune_remote_cache: Optional[bool] = autotune_remote_cache_default()
 bundled_autotune_remote_cache: Optional[bool] = bundled_autotune_remote_cache_default()
 
 # Force disabled all inductor level caching -- This will override any other caching flag
-force_disable_caches = os.environ.get("TORCHINDUCTOR_FORCE_DISABLE_CACHES") == "1"
+force_disable_caches = True
 
 # sleep in inductor for testing
 sleep_sec_TESTING_ONLY: Optional[int] = None

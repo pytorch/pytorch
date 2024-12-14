@@ -258,10 +258,13 @@ class GraphRegionTracker:
                 region_group = []
                 min_rank = math.inf
                 for node in group:
-                    min_rank = min(min_rank, topological_ranking[node])
-                    region_group.append([node])
+                    # some nodes aren't in the topo ranking?
+                    if node in topological_ranking:
+                        min_rank = min(min_rank, topological_ranking[node])
+                        region_group.append([node])
 
-                region_groups_with_rank.append((region_group, min_rank))
+                if len(region_group) > 1:
+                    region_groups_with_rank.append((region_group, min_rank))
 
         region_groups_with_rank.sort(key=lambda rg: -rg[1])
         region_groups = [rg for rg, _ in region_groups_with_rank]
@@ -272,6 +275,10 @@ class GraphRegionTracker:
         seen_nodes: Set[Node] = set()
         for region_group in region_groups:
             fully_expand_region_group(region_group, seen_nodes, self._is_identical)
+
+        for rg in region_groups:
+            for r in rg:
+                r.sort(key=lambda n: topological_ranking[n])
 
         return [
             region_group for region_group in region_groups if len(region_group[0]) > 1
@@ -305,7 +312,7 @@ def fully_expand_region_group(
         region_it.add_children(node)
 
     current_node = region_iters[0].next()
-    assert current_node is not None
+
     # Loop incrementally adding new nodes to each region
     # regions are only expanded if the node to add is valid
     # for ALL regions
@@ -325,6 +332,8 @@ def fully_expand_region_group(
                 debug_log("is_identical: %s", is_identical_fn(node, current_node))
                 add_node &= (
                     node not in seen_nodes
+                    and node.op != "placeholder"
+                    # and node.target != "size"
                     and node not in nodes_to_add_set
                     and is_identical_fn(node, current_node)
                 )

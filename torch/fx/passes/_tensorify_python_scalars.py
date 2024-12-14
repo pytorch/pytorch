@@ -15,7 +15,6 @@ from torch._prims_common import get_computation_dtype
 from torch._subclasses import fake_tensor  # noqa: TCH001
 from torch._subclasses.fake_tensor import FakeTensor
 from torch._utils_internal import justknobs_check
-from torch.fx._utils import lazy_format_graph_code
 from torch.fx.experimental.symbolic_shapes import guard_scalar, ShapeEnv  # noqa: TCH001
 from torch.fx.graph_module import GraphModule  # noqa: TCH001
 
@@ -340,7 +339,3 @@ def tensorify_python_scalars(
         # are no longer needed and should be specialized. Restarting analysis is necessary
         # because we need to instruct Dynamo to NOT make these as inputs.
         raise TensorifyScalarRestartAnalysis
-
-    graph_code_log.debug(
-        "%s", lazy_format_graph_code("tensorify_python_scalars", gm, colored=True)
-    )
