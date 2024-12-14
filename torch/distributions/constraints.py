@@ -204,7 +204,7 @@ class _DependentProperty(property, _Dependent):
         self._is_discrete = is_discrete
         self._event_dim = event_dim
 
-    def __call__(self, fn):
+    def __call__(self, fn):  # type: ignore[override]
         """
         Support for syntax to customize static attributes::
 

@@ -5,10 +5,10 @@ import itertools
 
 import torch
 from torch.distributed._tensor import DeviceMesh, distribute_tensor, DTensor
-from torch.distributed._tensor._collective_utils import shard_dim_alltoall
-from torch.distributed._tensor.debug import CommDebugMode
 from torch.distributed._tensor.placement_types import Partial, Replicate, Shard
 from torch.distributed.device_mesh import init_device_mesh
+from torch.distributed.tensor._collective_utils import shard_dim_alltoall
+from torch.distributed.tensor.debug import CommDebugMode
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
@@ -207,7 +207,7 @@ class RedistributeTest(DTensorTestBase):
         with self.assertRaisesRegex(RuntimeError, "Can not redistribute to Partial"):
             partial_tensor = replica_tensor.redistribute(device_mesh, [partial_spec])
 
-        from torch.distributed._tensor._redistribute import Redistribute
+        from torch.distributed.tensor._redistribute import Redistribute
 
         comm_mode = CommDebugMode()
 
@@ -309,7 +309,7 @@ class RedistributeTest(DTensorTestBase):
         shard_tensor = distribute_tensor(local_tensor, device_mesh, shard_spec)
         self.assertEqual(shard_tensor.placements[0].dim, 1)
         reshard_tensor = shard_tensor.redistribute(device_mesh, shard_minus_spec)
-        self.assertEqual(shard_tensor.placements[0].dim, 1)
+        self.assertEqual(reshard_tensor.placements[0].dim, 1)
 
     @with_comms
     def test_redistribute_uneven_sharding(self):
@@ -443,6 +443,7 @@ class RedistributeTest(DTensorTestBase):
         new_meta_tensor = shard_dim_alltoall(meta_tensor, 0, 1, mesh, 0)
 
         self.assertEqual(new_tensor.shape, new_meta_tensor.shape)
+        self.assertEqual(new_tensor.stride(), new_meta_tensor.stride())
 
 
 class MultiDimRedistributeTest(DTensorTestBase):

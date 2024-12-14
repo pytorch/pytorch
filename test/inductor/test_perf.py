@@ -32,8 +32,8 @@ from torch.testing._internal.triton_utils import HAS_CUDA, requires_cuda
 
 
 if HAS_CUDA:
-    import triton
-    import triton.language as tl
+    import triton  # @manual
+    import triton.language as tl  # @manual
 
     from torch.testing._internal.triton_utils import add_kernel
 
@@ -501,6 +501,9 @@ class FusionTests(TestCase):
         expected_numel = (
             1 + hidden_size * 2 + 4 * 2048 * hidden_size * 2 + 4 * 2048 * 2 + 1
         )
+        if config.triton.cooperative_reductions:
+            expected_numel = 134225922
+
         self.assertExpectedInline(count_numel(f, *inp, True), str(expected_numel))
         self.assertExpectedInline(count_numel(f, *inp, False), str(expected_numel))
 
@@ -532,6 +535,52 @@ class FusionTests(TestCase):
         actual_numel_amax_no_keep_dim = count_numel(f, *inp, False)
         self.assertEqual(actual_numel_amax_keep_dim, actual_numel_amax_no_keep_dim)
         self.assertGreaterAlmostEqual(actual_numel_amax_keep_dim, str(expected_numel))
+
+    def test_create_block_mask(self):
+        def mk_3d_flex_natten_mask(dims, kernel_size):
+            T, H, W = dims
+            K_T, K_H, K_W = kernel_size
+            spatial = H * W
+
+            def get_x_y_t(idx: int) -> tuple[int, int, int]:
+                t = idx // spatial
+                s = idx % spatial
+                x = s // W
+                y = s % W
+                return x, y, t
+
+            def get_mask(b, h, q_idx, kv_idx):
+                q_x, q_y, q_t = get_x_y_t(q_idx)
+                kv_x, kv_y, kv_t = get_x_y_t(kv_idx)
+                kernel_x = q_x.clamp(K_W // 2, (W - 1) - K_W // 2)
+                kernel_y = q_y.clamp(K_H // 2, (H - 1) - K_H // 2)
+                kernel_t = q_t.clamp(K_T // 2, (T - 1) - K_T // 2)
+                hori_mask = (kernel_x - kv_x).abs() <= K_W // 2
+                vert_mask = (kernel_y - kv_y).abs() <= K_H // 2
+                temp_mask = (kernel_t - kv_t).abs() <= K_T // 2
+                return hori_mask & vert_mask & temp_mask
+
+            return get_mask
+
+        T = 4
+        H = 16
+        W = 16
+        t = 5
+        h = 5
+        w = 5
+        data_size = (T, H, W)
+        kernel_size = (t, h, w)
+        S = T * H * W
+        from torch.nn.attention.flex_attention import create_block_mask
+
+        mask_mod = mk_3d_flex_natten_mask(data_size, kernel_size)
+
+        torch.compile(create_block_mask)(mask_mod, None, None, S, S)
+        numel = int(count_numel(create_block_mask, mask_mod, None, None, S, S))
+
+        # We should be writing way less than a quadratic amount of bytes here
+        # With fusion, we should only be writing a linear number of bytes
+        self.assertLess(numel * 5, S * S)
 
 
 class SchedulerFusionTests(TestCase):
@@ -694,6 +743,13 @@ class MinCutPartitioningTests(TestCase):
 
         inp = (T(10, grad=True), T(10, grad=True))
         self.assertExpectedInline(count_numel_train(f, *inp), """70""")
+
+    def test_partitioning_relu(self):
+        def f(x):
+            return torch.relu(x)
+
+        inp = (T(16, grad=True),)
+        self.assertExpectedInline(count_numel_train(f, *inp), """72""")
 
     def test_partitioning_with_view(self):
         class Foo(torch.autograd.Function):
@@ -904,6 +960,61 @@ class InplacingTests(TestCase):
 
         x = T(3, grad=True)
         self.assertExpectedInline(count_numel_train(f, x), """9""")
+
+    @requires_cuda
+    def test_triton_kernel_not_fusable_with_users(self):
+        @triton.jit
+        def _sin_kernel(
+            in_ptr0,
+            out_ptr,
+            out2_ptr,
+            n_elements,
+            BLOCK_SIZE: "tl.constexpr",
+        ):
+            pid = tl.program_id(axis=0)
+            block_start = pid * BLOCK_SIZE
+            offsets = block_start + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            x = tl.load(in_ptr0 + offsets, mask=mask)
+            output = tl.sin(x)
+            tl.store(out_ptr + offsets, output, mask=mask)
+            tl.store(out2_ptr + offsets, output, mask=mask)
+
+        from typing import List
+
+        from torch._library import capture_triton, triton_op
+
+        @triton_op("mylib::sin_kernel", mutates_args={})
+        def sin_kernel(x: torch.Tensor) -> List[torch.Tensor]:
+            n_elements = x.numel()
+            out = torch.empty_like(x)
+            out2 = torch.empty_like(x)
+            capture_triton(_sin_kernel)[(n_elements,)](
+                x, out, out2, n_elements, BLOCK_SIZE=4
+            )
+            return [out, out2]
+
+        class MySin(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                out, saved = tuple(torch.ops.mylib.sin_kernel(x))
+                ctx.save_for_backward(x, saved)
+                return out
+
+            @staticmethod
+            def backward(ctx, grad):
+                (x, saved) = ctx.saved_tensors
+                return grad * saved.sigmoid() * x
+
+        def f(x):
+            return MySin.apply(x)
+
+        x = T(3, grad=True)
+        # Important bit: saved.sigmoid() can be fused into its consumer (mul),
+        # but not its producer (user triton kernel).
+        # So we should not compute it in the fw and save it for backward
+        # (it will cost an extra kernel)
+        self.assertExpectedInline(count_numel_train(f, x), """27""")
 
     @requires_cuda
     def test_inplace_custom_op_training_two_mutated_inputs(self):

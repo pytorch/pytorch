@@ -19,7 +19,7 @@ namespace {
 
 template <typename scalar_t>
 bool is_nan(scalar_t v) {
-  if (std::is_integral<scalar_t>::value || std::is_same<scalar_t, unsigned char>::value) {
+  if (std::is_integral_v<scalar_t> || std::is_same_v<scalar_t, unsigned char>) {
     return false;
   }
   return std::isnan(v);
@@ -64,7 +64,7 @@ vec::Vectorized<int64_t> is_nan_vec<int64_t>(vec::Vectorized<int64_t> vec) {
 
 template <typename scalar_t, typename opmath_t>
 inline
-typename std::enable_if<std::is_same<scalar_t, opmath_t>::value, void>::type
+std::enable_if_t<std::is_same_v<scalar_t, opmath_t>, void>
 compute_internal(
   const scalar_t* input_data,
   scalar_t* out_data,
@@ -139,7 +139,7 @@ compute_internal(
 // std::is_same<scalar_t, at::BFloat16> || std::is_same<scalar_t, at::Half>
 template <typename scalar_t, typename opmath_t>
 inline
-typename std::enable_if<!std::is_same<scalar_t, opmath_t>::value, void>::type
+std::enable_if_t<!std::is_same_v<scalar_t, opmath_t>, void>
 compute_internal(
   const scalar_t* input_data,
   scalar_t* out_data,
@@ -429,7 +429,7 @@ void cpu_max_pool_channels_last(
     // temp buffer holding max value with opmath_t
     std::unique_ptr<opmath_t []> max_arr;
     opmath_t* max_ptr = nullptr;
-    if (!std::is_same<scalar_t, opmath_t>::value) {
+    if (!std::is_same_v<scalar_t, opmath_t>) {
       max_arr = std::make_unique<opmath_t[]>(size);
       max_ptr = max_arr.get();
     }
@@ -740,8 +740,8 @@ void max_pool3d_backward_kernel_impl(
 
 } // anonymous namespace
 
-REGISTER_DISPATCH(max_pool2d_kernel, &max_pool2d_kernel_impl);
-REGISTER_DISPATCH(max_pool2d_backward_kernel, &max_pool2d_backward_kernel_impl);
-REGISTER_DISPATCH(max_pool3d_kernel, &max_pool3d_kernel_impl);
-REGISTER_DISPATCH(max_pool3d_backward_kernel, &max_pool3d_backward_kernel_impl);
+REGISTER_DISPATCH(max_pool2d_kernel, &max_pool2d_kernel_impl)
+REGISTER_DISPATCH(max_pool2d_backward_kernel, &max_pool2d_backward_kernel_impl)
+REGISTER_DISPATCH(max_pool3d_kernel, &max_pool3d_kernel_impl)
+REGISTER_DISPATCH(max_pool3d_backward_kernel, &max_pool3d_backward_kernel_impl)
 } // at::native

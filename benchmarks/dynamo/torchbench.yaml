@@ -191,6 +191,7 @@ skip:
       - hf_Whisper
       - stable_diffusion_text_encoder
       - llava
+      - moco
 
     cuda: []
 
@@ -232,10 +233,13 @@ skip:
 
   # for these models, conv-batchnorm fusing causes big numerical churn.
   # Skip them
+  # mnasnet1_0 and shufflenet_v2_x1_0 can pass on cpu, moco cuda only.
   freezing:
-    - mnasnet1_0
-    - moco
-    - shufflenet_v2_x1_0
+    cuda:
+      - mnasnet1_0
+      - moco
+      - shufflenet_v2_x1_0
+    cpu: []
 
 
 

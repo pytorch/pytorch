@@ -15,11 +15,11 @@ from torch.distributed._tensor import (
     Replicate,
     Shard,
 )
-from torch.distributed._tensor.debug import CommDebugMode
 from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
     checkpoint_wrapper,
     CheckpointImpl,
 )
+from torch.distributed.tensor.debug import CommDebugMode
 from torch.distributed.tensor.parallel import (
     ColwiseParallel,
     loss_parallel,
@@ -117,8 +117,6 @@ class DistTensorParallelExampleTest(DTensorTestBase):
 
         output = model(inp)
         output.sum().backward()
-
-        from torch.distributed._tensor.debug import CommDebugMode
 
         comm_mode = CommDebugMode()
         with comm_mode:
@@ -313,7 +311,7 @@ class DistTensorParallelExampleTest(DTensorTestBase):
 
         torch.manual_seed(0)
         steps = 10 if type(model) is torch.float64 else 1
-        for iter in range(steps):
+        for _ in range(steps):
             inp = torch.randint(
                 model_args.vocab_size, inp_size, device=self.device_type
             )

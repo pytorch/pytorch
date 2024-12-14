@@ -5,7 +5,6 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import torch
 import torch.nn.functional as F
-from torch._export import capture_pre_autograd_graph
 
 # Makes sure that quantized_decomposed ops are registered
 from torch.ao.quantization.fx._decomposed import quantized_decomposed_lib  # noqa: F401
@@ -363,6 +362,7 @@ def _get_aten_graph_module_for_pattern(
     pattern: Callable,
     example_inputs: Tuple[Any, ...],
     is_cuda: bool = False,
+    using_training_ir: bool = True,
     **kwargs,
 ) -> GraphModule:
     """
@@ -372,26 +372,33 @@ def _get_aten_graph_module_for_pattern(
         example_inputs = tuple(
             [x.cuda() if isinstance(x, torch.Tensor) else x for x in example_inputs]
         )
-    aten_pattern = capture_pre_autograd_graph(
-        pattern,  # type: ignore[arg-type]
-        example_inputs,
-        kwargs,
-    )
-    aten_pattern.graph.eliminate_dead_code()
-    aten_pattern.recompile()
+
+    if using_training_ir:
+        aten_pattern = torch.export.export_for_training(
+            pattern,  # type: ignore[arg-type]
+            example_inputs,
+            kwargs,
+        ).module()
+    else:
+        raise RuntimeError(
+            "capture_pre_autograd_graph is deprecated and will be deleted soon."
+            "Please use torch.export.export_for_training instead."
+        )
+    aten_pattern.graph.eliminate_dead_code()  # type: ignore[operator, union-attr]
+    aten_pattern.recompile()  # type: ignore[operator]
 
     # ep.module() adds copy_ nodes for the mutated inputs.
     # For patterns, it doesn't matter
-    for node in aten_pattern.graph.nodes:
+    for node in aten_pattern.graph.nodes:  # type: ignore[union-attr]
         if (
             node.op == "call_function"
             and node.target == torch.ops.aten.copy_.default
             and len(node.users) == 0
         ):
-            aten_pattern.graph.erase_node(node)
+            aten_pattern.graph.erase_node(node)  # type: ignore[operator, union-attr]
 
-    aten_pattern.graph.eliminate_dead_code()
-    aten_pattern.recompile()
+    aten_pattern.graph.eliminate_dead_code()  # type: ignore[operator, union-attr]
+    aten_pattern.recompile()  # type: ignore[operator]
 
     return aten_pattern  # type: ignore[return-value]
 

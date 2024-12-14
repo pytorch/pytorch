@@ -28,9 +28,9 @@ namespace at::native {
 namespace {
 
 void norm_kernel_cuda(TensorIterator& iter, const Scalar& val) {
-  double p;
+  double p = 0;
   if (val.isIntegral(false)) {
-    p = val.to<int64_t>();
+    p = static_cast<double>(val.to<int64_t>());
   } else if (val.isFloatingPoint()) {
     p = val.to<double>();
   } else {
@@ -90,13 +90,13 @@ void aminmax_allreduce_kernel_impl(const Tensor& input, Tensor& min_result, Tens
 
 }  // namespace (anonymous)
 
-REGISTER_CUDA_DISPATCH(min_stub, &min_kernel_impl);
-REGISTER_CUDA_DISPATCH(max_stub, &max_kernel_impl);
-REGISTER_CUDA_DISPATCH(min_all_stub, &min_all_kernel_impl);
-REGISTER_CUDA_DISPATCH(max_all_stub, &max_all_kernel_impl);
-REGISTER_CUDA_DISPATCH(aminmax_allreduce_stub, &aminmax_allreduce_kernel_impl);
-REGISTER_CUDA_DISPATCH(aminmax_stub, &aminmax_kernel_impl);
+REGISTER_CUDA_DISPATCH(min_stub, &min_kernel_impl)
+REGISTER_CUDA_DISPATCH(max_stub, &max_kernel_impl)
+REGISTER_CUDA_DISPATCH(min_all_stub, &min_all_kernel_impl)
+REGISTER_CUDA_DISPATCH(max_all_stub, &max_all_kernel_impl)
+REGISTER_CUDA_DISPATCH(aminmax_allreduce_stub, &aminmax_allreduce_kernel_impl)
+REGISTER_CUDA_DISPATCH(aminmax_stub, &aminmax_kernel_impl)
 
-REGISTER_CUDA_DISPATCH(norm_stub, &norm_kernel_cuda);
+REGISTER_CUDA_DISPATCH(norm_stub, &norm_kernel_cuda)
 
 } // namespace at::native

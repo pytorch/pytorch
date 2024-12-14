@@ -2,7 +2,7 @@
 import copy
 import itertools
 import logging
-from typing import Dict, Optional
+from typing import Dict, Optional, Sequence
 
 import torch
 import torch.nn as nn
@@ -100,15 +100,25 @@ def stack_to_unsqueeze_pass(graph):
     return None
 
 
+def merge_concats_pass(graph):
+    return None
+
+
+def relu_nan_to_num(graph):
+    return None
+
+
 @init_once_fakemode
 def lazy_init():
-    from . import efficient_conv_bn_eval, split_cat  # noqa: F401  # noqa: F401
+    from . import efficient_conv_bn_eval, split_cat  # noqa: F401
 
     if config.is_fbcode():
         from . import fb  # type: ignore[attr-defined]  # noqa: F401
 
 
-def pre_grad_passes(gm: torch.fx.GraphModule, example_inputs=None):
+def pre_grad_passes(
+    gm: torch.fx.GraphModule, example_inputs: Sequence[object] = ()
+) -> torch.fx.GraphModule:
     """
     Apply passes on the input FX graph using Torch IR.
 
@@ -134,7 +144,7 @@ def pre_grad_passes(gm: torch.fx.GraphModule, example_inputs=None):
                     gm=mod,
                     # pyre-fixme[16]: Module `torch._dynamo.utils` has no attribute `detect_fake_mode`
                     fake_mode=detect_fake_mode(example_inputs),
-                ).propagate(*example_inputs)
+                ).propagate(*tuple(example_inputs))
 
             # normalization pass
             pass_execution_and_save(
@@ -155,6 +165,12 @@ def pre_grad_passes(gm: torch.fx.GraphModule, example_inputs=None):
                 gm,
                 example_inputs,
                 "[Pre grad(predispatch IR)]Apply remove_noop pass",
+            )
+            pass_execution_and_save(
+                relu_nan_to_num,
+                gm,
+                example_inputs,
+                "[Pre grad(predispatch IR)]Apply relu_nan_to_num pass",
             )
             pass_execution_and_save(
                 fuse_chunk_reshape_concat_pass,
@@ -179,6 +195,12 @@ def pre_grad_passes(gm: torch.fx.GraphModule, example_inputs=None):
                 gm,
                 example_inputs,
                 "[Pre grad(predispatch IR)] Apply fuse_chunk_squeeze_cat_pass",
+            )
+            pass_execution_and_save(
+                merge_concats_pass,
+                gm,
+                example_inputs,
+                "[Pre grad(predispatch IR)] Apply merge_concats_pass",
             )
             pass_execution_and_save(
                 fuse_split_linear_add_pass.apply,
@@ -233,10 +255,14 @@ def pre_grad_passes(gm: torch.fx.GraphModule, example_inputs=None):
                 gm = fuse_fx(gm, example_inputs)
             numpy_compat_normalization(gm.graph)
             optimus_scuba_log["before_recompile_pre_grad"] = upload_graph(gm.graph)
+            # We should always do the normalization_pass first
+            if "normalization_pass" in config.pre_grad_fusion_options:
+                pattern_matcher_pass = PRE_GRAD_PATTERNS["normalization_pass"]
+                pattern_matcher_pass.apply(gm.graph)  # type: ignore[arg-type]
             group_batch_fusion_passes(gm.graph, pre_grad=True)
             for pass_name in config.pre_grad_fusion_options:
                 # skip all patterns for group batch fusions
-                if pass_name in PRE_GRAD_FUSIONS:
+                if pass_name in PRE_GRAD_FUSIONS or pass_name == "normalization_pass":
                     continue
                 pattern_matcher_pass = PRE_GRAD_PATTERNS[pass_name]
                 inductor_before_change = save_inductor_dict(
@@ -254,9 +280,7 @@ def pre_grad_passes(gm: torch.fx.GraphModule, example_inputs=None):
             efficient_conv_bn_eval_pass.apply(gm.graph)  # type: ignore[arg-type]
 
     if config.pre_grad_custom_pass is not None:
-        with GraphTransformObserver(
-            gm, "pre_grad_custom_pass", config.trace.log_url_for_graph_xform
-        ):
+        with GraphTransformObserver(gm, "pre_grad_custom_pass"):
             config.pre_grad_custom_pass(gm.graph)
     stable_topological_sort(gm.graph)
 
@@ -298,30 +322,20 @@ def fuse_fx(gm: torch.fx.GraphModule, example_inputs) -> torch.fx.GraphModule:
         # For linear permute fusion, we need to check input info to identify
         # and perform proper permutation/transpose
         ShapeProp(gm, fake_mode=fake_mode).propagate(*example_inputs)
-        with GraphTransformObserver(
-            gm, "linear_permute_fusion", config.trace.log_url_for_graph_xform
-        ):
+        with GraphTransformObserver(gm, "linear_permute_fusion"):
             gm = linear_permute_fusion(gm)
-        with GraphTransformObserver(
-            gm, "permute_linear_fusion", config.trace.log_url_for_graph_xform
-        ):
+        with GraphTransformObserver(gm, "permute_linear_fusion"):
             gm = permute_linear_fusion(gm)
-        with GraphTransformObserver(
-            gm, "permute_matmul_fusion", config.trace.log_url_for_graph_xform
-        ):
+        with GraphTransformObserver(gm, "permute_matmul_fusion"):
             gm = permute_matmul_fusion(gm)
 
     # make sure the autograd is disabled.
     if torch.is_grad_enabled() or not is_cpu:
         return gm
     if config.freezing:
-        with GraphTransformObserver(
-            gm, "remove_identity", config.trace.log_url_for_graph_xform
-        ):
+        with GraphTransformObserver(gm, "remove_identity"):
             gm = remove_identity(gm)
-        with GraphTransformObserver(
-            gm, "fuse_conv_bn", config.trace.log_url_for_graph_xform
-        ):
+        with GraphTransformObserver(gm, "fuse_conv_bn"):
             gm = fuse_conv_bn(gm)
     return gm
 
@@ -592,7 +606,7 @@ def check_permute(node: torch.fx.Node) -> bool:
         and node.kwargs["permutation"] is not None
         and len(node.kwargs["permutation"]) > 2  # type: ignore[arg-type]
     ):
-        permutation = [i % ranks for i in node.kwargs["permutation"]]  # type: ignore[union-attr]
+        permutation = [i % ranks for i in node.kwargs["permutation"]]  # type: ignore[operator, union-attr]
     else:
         return False
     allowed_permutation = list(range(ranks))
@@ -607,12 +621,12 @@ def sink_cat_after_pointwise(module: torch.fx.GraphModule) -> torch.fx.GraphModu
         return users[0] if len(users) == 1 else None
 
     def is_view(node):
-        view = {"view"}
-        return node.op == "call_method" and node.target in view
+        return node.op == "call_method" and node.target == "view"
 
     def is_pointwise_unary(node):
-        pointwise = {torch.relu, torch.tanh, "relu", "tanh"}
-        return node.op in {"call_function", "call_method"} and node.target in pointwise
+        ops = "call_function", "call_method"
+        pointwise = torch.relu, torch.tanh, "relu", "tanh"
+        return node.op in ops and node.target in pointwise
 
     g = module.graph
     for node in g.nodes:

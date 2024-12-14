@@ -36,6 +36,7 @@ const std::set<libkineto::ActivityType> kCudaTypes = {
     // CUDA_RUNTIME appears in both kCpuTypes and kCudaTypes.
     libkineto::ActivityType::CUDA_RUNTIME,
     libkineto::ActivityType::CUDA_DRIVER,
+    libkineto::ActivityType::OVERHEAD,
 };
 const std::set<libkineto::ActivityType> kXpuTypes = {
     libkineto::ActivityType::GPU_MEMCPY,
@@ -95,8 +96,6 @@ TraceWrapper::TraceWrapper(const int64_t start_time, const std::string& name)
 {
 }
 #endif // USE_KINETO
-
-TraceWrapper::~TraceWrapper() = default;
 
 activity_t* TraceWrapper::addCPUActivity(
     const std::string& name,
@@ -222,11 +221,25 @@ bool collectivesProfilerExists() {
 #endif
 }
 
+#ifdef USE_KINETO
+static const std::string setTraceID(const std::string& trace_id) {
+  if (trace_id.empty()) {
+    return "";
+  }
+  std::stringstream configss;
+  configss << "REQUEST_TRACE_ID=" << trace_id << "\n";
+  configss << "REQUEST_GROUP_TRACE_ID=" << trace_id << "\n";
+  return configss.str();
+}
+#endif
+
 void prepareTrace(
     const bool cpuOnly,
     const ActivitySet& activities,
-    const torch::profiler::impl::ExperimentalConfig& config) {
+    const torch::profiler::impl::ExperimentalConfig& config,
+    const std::string& trace_id) {
 #ifdef USE_KINETO
+  libkineto::api().resetKinetoTLS();
   if (!libkineto::api().isProfilerRegistered()) {
     libkineto_init(/*cpuOnly=*/cpuOnly, /*logOnError=*/true);
     libkineto::api().suppressLogMessages();
@@ -271,7 +284,9 @@ void prepareTrace(
     return;
   }
 
-  libkineto::api().activityProfiler().prepareTrace(k_activities);
+  const std::string configStr = setTraceID(trace_id);
+
+  libkineto::api().activityProfiler().prepareTrace(k_activities, configStr);
 #endif // USE_KINETO
 }
 
@@ -393,6 +408,7 @@ c10::DeviceType deviceTypeFromActivity(libkineto::ActivityType activity_type) {
     case libkineto::ActivityType::CUDA_DRIVER:
     case libkineto::ActivityType::PRIVATEUSE1_RUNTIME:
     case libkineto::ActivityType::PRIVATEUSE1_DRIVER:
+    case libkineto::ActivityType::OVERHEAD:
       return c10::DeviceType::CPU;
     default: {
       TORCH_WARN(

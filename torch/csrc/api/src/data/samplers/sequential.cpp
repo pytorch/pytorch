@@ -6,9 +6,7 @@
 #include <cstddef>
 #include <vector>
 
-namespace torch {
-namespace data {
-namespace samplers {
+namespace torch::data::samplers {
 SequentialSampler::SequentialSampler(size_t size) : size_(size) {}
 
 void SequentialSampler::reset(std::optional<size_t> new_size) {
@@ -21,7 +19,7 @@ void SequentialSampler::reset(std::optional<size_t> new_size) {
 std::optional<std::vector<size_t>> SequentialSampler::next(size_t batch_size) {
   const auto remaining_indices = size_ - index_;
   if (remaining_indices == 0) {
-    return nullopt;
+    return std::nullopt;
   }
   std::vector<size_t> index_batch(std::min(batch_size, remaining_indices));
   for (auto& i : index_batch) {
@@ -50,6 +48,4 @@ size_t SequentialSampler::index() const noexcept {
   return index_;
 }
 
-} // namespace samplers
-} // namespace data
-} // namespace torch
+} // namespace torch::data::samplers

@@ -191,8 +191,8 @@ def forward(self, a_1):
             torch.set_grad_enabled(True)
             return b + c.sin()
         a1 = torch.randn(4, requires_grad=True)
-        a2 = a1.clone().detach().requires_grad_(True)
-        a_tmp = a1.clone().detach().requires_grad_(True)
+        a2 = a1.detach().clone().requires_grad_(True)
+        a_tmp = a1.detach().clone().requires_grad_(True)
         fx_g = make_fx(f, pre_dispatch=True)(a_tmp)
         out1 = f(a1)
         out2 = fx_g(a2)
@@ -450,7 +450,7 @@ def forward(self, x_1):
 
     def test_pre_dispatch_functionalization(self):
         def f(x):
-            a = FunctionalTensorMode(pre_dispatch=True)
+            a = FunctionalTensorMode(pre_dispatch=True, export=True)
             with a:
                 x_unwrapped = FunctionalTensor.to_functional(x)
                 y = torch.matmul(x_unwrapped, x_unwrapped)
@@ -475,7 +475,7 @@ def forward(self, x_1):
 
     def test_pre_dispatch_functionalization_view_op(self):
         def f(x):
-            a = FunctionalTensorMode(pre_dispatch=True)
+            a = FunctionalTensorMode(pre_dispatch=True, export=True)
             with a:
                 x_unwrapped = FunctionalTensor.to_functional(x)
                 y = torch.matmul(x_unwrapped, x_unwrapped)
@@ -1358,8 +1358,8 @@ def forward(self, crop_camera_1, mask_1):
     mul_4 = sym_size_int * 3
     view_3 = torch.ops.aten.view.default(view_2, [mul_4, 3]);  view_2 = mul_4 = None
     mm = torch.ops.aten.mm.default(view_3, eye);  view_3 = eye = None
-    view_4 = torch.ops.aten.view.default(mm, [sym_size_int, 3, 3]);  mm = sym_size_int = None
-    index_put_ = torch.ops.aten.index_put_.default(crop_camera_1, [mask_1], view_4);  crop_camera_1 = mask_1 = view_4 = index_put_ = None
+    _unsafe_view = torch.ops.aten._unsafe_view.default(mm, [sym_size_int, 3, 3]);  mm = sym_size_int = None
+    index_put_ = torch.ops.aten.index_put_.default(crop_camera_1, [mask_1], _unsafe_view);  crop_camera_1 = mask_1 = _unsafe_view = index_put_ = None
     return None""")  # noqa: B950
 
     def test_unbacked_slice(self):
@@ -1519,11 +1519,6 @@ def forward(self, x_1, y_1):
             z3 = x3.item()
             torch._check(z1 == z2 + z3)
             return y * 2
-            if z2 + z3 == z1:
-                return y * 2
-            else:
-                return y + 3
-
         # NB: inputs are done as CUDA to ensure they aren't queried to be
         # backed
 
@@ -1989,10 +1984,7 @@ only_fake_tensor_failures = {
     xfail('narrow'),
 }
 
-fake_tensor_failures = {
-    # ASAN failures due to divide by 0
-    skip('nn.functional.nll_loss'),
-}
+fake_tensor_failures = set()
 
 symbolic_tensor_failures = {
     xfail('combinations', ''),
@@ -2062,7 +2054,6 @@ out_symbolic_tensor_failures = {
     xfail('scatter_add', ''),
     xfail('scatter', ''),
     xfail('take_along_dim', ''),
-    xfail('triangular_solve', ''),
 
     # SymIntArrayRef expected to contain only concrete
     xfail('ones', ''),

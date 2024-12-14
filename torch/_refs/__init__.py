@@ -10,7 +10,18 @@ import warnings
 from collections.abc import Iterable
 from enum import Enum
 from functools import partial, reduce, singledispatch, wraps
-from typing import Any, Callable, Dict, List, Optional, overload, Sequence, Tuple, Union
+from typing import (
+    Any,
+    Callable,
+    cast,
+    Dict,
+    List,
+    Optional,
+    overload,
+    Sequence,
+    Tuple,
+    Union,
+)
 
 import torch
 import torch._prims as prims
@@ -274,6 +285,7 @@ __all__ = [
     "native_group_norm",
     "native_layer_norm",
     "permute",
+    "permute_copy",
     "ravel",
     "repeat",
     "reshape",
@@ -281,15 +293,18 @@ __all__ = [
     "roll",
     "rot90",
     "rsqrt",
+    "split_with_sizes",
     "stack",
     "swap_axes",  # alias for transpose
     "squeeze",
+    "squeeze_copy",
     "t",
     "t_copy",
     "T",
     "take_along_dim",
     "tensor_split",
     "transpose",
+    "transpose_copy",
     "unfold",
     "unfold_copy",
     "unsqueeze",
@@ -395,7 +410,7 @@ def _broadcast_shapes(*_shapes):
         assert isinstance(shape, Sequence)
 
     # Computes common shape
-    common_shape = [
+    common_shape: List[Union[int, torch.SymInt]] = [
         1,
     ] * reduce(max, (len(shape) for shape in shapes))
     for arg_idx, shape in enumerate(shapes):
@@ -407,12 +422,12 @@ def _broadcast_shapes(*_shapes):
                     )
                 common_shape[idx] = shape[idx]
             elif guard_size_oblivious(shape[idx] != 1):
-                if common_shape[idx] != shape[idx]:
-                    raise RuntimeError(
-                        f"Attempting to broadcast a dimension of length {shape[idx]} at {idx}! "
-                        f"Mismatching argument at index {arg_idx} had {shape}; but expected shape "
-                        f"should be broadcastable to {common_shape}"
-                    )
+                torch._check(
+                    common_shape[idx] == shape[idx],
+                    lambda: f"Attempting to broadcast a dimension of length {shape[idx]} at {idx}! "
+                    f"Mismatching argument at index {arg_idx} had {shape}; but expected shape "
+                    f"should be broadcastable to {common_shape}",
+                )
 
     return common_shape
 
@@ -461,12 +476,13 @@ def _make_elementwise_unary_reference(
     *,
     aten_op=infer_aten_op,
     extra_meta=None,
+    exact_dtype=False,
 ) -> Callable:
     def inner(prim: Callable):
         nonlocal aten_op
 
         @wraps(prim)
-        @out_wrapper()
+        @out_wrapper(exact_dtype=exact_dtype)
         @elementwise_unary_scalar_wrapper
         @elementwise_type_promotion_wrapper(
             type_promoting_args=("a",),
@@ -530,7 +546,10 @@ def _make_inplace(fn):
     return _fn
 
 
-@_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.COMPLEX_TO_FLOAT)
+@_make_elementwise_unary_reference(
+    ELEMENTWISE_TYPE_PROMOTION_KIND.COMPLEX_TO_FLOAT,
+    exact_dtype=True,
+)
 def abs(a):
     return prims.abs(a)
 
@@ -570,7 +589,10 @@ def bitwise_not(a):
     return prims.bitwise_not(a)
 
 
-@_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT)
+@_make_elementwise_unary_reference(
+    ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+    exact_dtype=True,
+)
 def ceil(a):
     return prims.ceil(a)
 
@@ -664,12 +686,18 @@ def zero(input: TensorLikeType) -> TensorLikeType:
     return torch.zeros_like(input)
 
 
-@_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT)
+@_make_elementwise_unary_reference(
+    ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+    exact_dtype=True,
+)
 def floor(a):
     return prims.floor(a)
 
 
-@_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT)
+@_make_elementwise_unary_reference(
+    ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+    exact_dtype=True,
+)
 def frac(x: TensorLikeType) -> TensorLikeType:
     trunc_x = torch.mul(torch.floor(torch.abs(x)), torch.sign(x))
     return torch.sub(x, trunc_x)
@@ -704,7 +732,10 @@ def isinf(a: TensorLikeType) -> TensorLikeType:
     return torch.zeros_like(a, dtype=torch.bool)
 
 
-@_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL)
+@_make_elementwise_unary_reference(
+    ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
+    exact_dtype=True,
+)
 def isposinf(a: TensorLikeType) -> TensorLikeType:
     torch._check(
         not utils.is_complex_dtype(a.dtype),
@@ -715,7 +746,10 @@ def isposinf(a: TensorLikeType) -> TensorLikeType:
     return torch.zeros_like(a, dtype=torch.bool)
 
 
-@_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL)
+@_make_elementwise_unary_reference(
+    ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
+    exact_dtype=True,
+)
 def isneginf(a: TensorLikeType) -> TensorLikeType:
     torch._check(
         not utils.is_complex_dtype(a.dtype),
@@ -905,7 +939,10 @@ def sigmoid(a: TensorLikeType) -> TensorLikeType:
     return true_divide(1, add(1, exp(neg(a))))
 
 
-@_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT)
+@_make_elementwise_unary_reference(
+    ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+    exact_dtype=True,
+)
 def sgn(a):
     if utils.is_complex_dtype(a.dtype):
         a_abs = a.abs()
@@ -914,12 +951,18 @@ def sgn(a):
         return a.sign()
 
 
-@_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT)
+@_make_elementwise_unary_reference(
+    ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+    exact_dtype=True,
+)
 def sign(a):
     return prims.sign(a)
 
 
-@_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL)
+@_make_elementwise_unary_reference(
+    ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
+    exact_dtype=True,
+)
 def signbit(a):
     return prims.signbit(a)
 
@@ -965,7 +1008,10 @@ def tanh(a):
     return prims.tanh(a)
 
 
-@_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT)
+@_make_elementwise_unary_reference(
+    ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+    exact_dtype=True,
+)
 def trunc(a):
     return prims.trunc(a)
 
@@ -3009,9 +3055,7 @@ def chunk(a: TensorLikeType, chunks: int, dim: int = 0) -> Tuple[TensorLikeType,
     full_chunks = math.floor(length / chunk_size)
     tail_chunk_size = length % chunk_size
 
-    result = []
-    for i in range(full_chunks):
-        result.append(narrow(a, dim, i * chunk_size, chunk_size))
+    result = [narrow(a, dim, i * chunk_size, chunk_size) for i in range(full_chunks)]
 
     if tail_chunk_size != 0:
         result.append(narrow(a, dim, full_chunks * chunk_size, tail_chunk_size))
@@ -3032,7 +3076,7 @@ def flatten(a: TensorLikeType, start_dim: int = 0, end_dim: int = -1) -> TensorL
 
     # Tries to take a view
     # TODO: we could look at directing collapse_view to skip its meta function here (unsafe_collapse_view)
-    new_shape, new_strides = prims._collapse_view_helper(a, start_dim, end_dim)
+    new_shape, _new_strides = prims._collapse_view_helper(a, start_dim, end_dim)
     if new_shape is not None:
         return prims.collapse_view(a, start_dim, end_dim)
 
@@ -3078,22 +3122,27 @@ def narrow(
             lambda: "start must be an 0-dim integral Tensor.",
         )
         start = start.item()  # type: ignore[assignment]
+    start = cast(int, start)
     torch._check(a.dim() > 0, lambda: "narrow() cannot be applied to a 0-dim tensor.")
     torch._check(length >= 0, lambda: "narrow(): length must be non-negative.")
     dim = utils.canonicalize_dim(a.ndim, dim)
     dim_length = a.size(dim)
     torch._check_with(
         IndexError,
-        -dim_length <= start and start <= dim_length,  # type: ignore[arg-type]
+        -dim_length <= start and start <= dim_length,
         lambda: f"start out of range (expected to be in range of [{-dim_length}, {dim_length}], but got {start})",
     )
     if start < 0:
         start = start + dim_length
     torch._check(
-        start <= dim_length - length,  # type: ignore[arg-type]
+        start <= dim_length - length,
         lambda: f"start ({start}) + length ({length}) exceeds dimension size ({dim_length}).",
     )
-    return prims.slice_in_dim(a, start, start + length, axis=dim)
+    new_shape = list(a.shape)
+    new_shape[dim] = length
+    return a.as_strided(
+        new_shape, a.stride(), a.storage_offset() + a.stride(dim) * start
+    )
 
 
 def _normalize(
@@ -3121,7 +3170,7 @@ def _normalize(
         a_acc, dim=norm_dims, unbiased=False, keepdim=True
     )
     rstd = torch.rsqrt(biased_var + eps)
-    out = (a - mean) * rstd
+    out = (a_acc - mean) * rstd
     return out, mean, rstd
 
 
@@ -3249,10 +3298,15 @@ def native_layer_norm(
         out = out * weight + bias
 
     out = _maybe_convert_to_dtype(out, input.dtype)  # type: ignore[assignment]
-    if input.device.type == "cpu":
+    if input.device.type in ["cpu", "mtia"]:
         mean = _maybe_convert_to_dtype(mean, input.dtype)  # type: ignore[assignment]
         rstd = _maybe_convert_to_dtype(rstd, input.dtype)  # type: ignore[assignment]
     return (out, mean, rstd)
+
+
+@torch._subclasses.fake_impls.register_op_impl(aten.native_layer_norm.default)
+def native_layer_norm_fake(fake_mode, func, *args, **kwargs):
+    return native_layer_norm(*args)
 
 
 # TODO: Adding this as a meta function causes functorch tests to fail when compiled with debug mode.
@@ -3361,7 +3415,6 @@ def stft(
         input = aten.pad(input.view(extended_shape), [pad_amount, pad_amount], pad_mode)
         input = input.view(input.size()[extra_dims:])
 
-    batch = input.size(0)
     length = input.size(1)
     torch._check(
         0 < n_fft <= length,
@@ -3549,12 +3602,6 @@ def istft(
     y = y.narrow(dim=1, start=start, length=length)
     window_envelop = window_envelop.narrow(dim=1, start=start, length=length)
 
-    window_envelop_lowest = window_envelop.abs().min().lt(1e-11)
-    torch._check(
-        not window_envelop_lowest.item(),
-        lambda: "window overlap add min less than 1e-11",
-    )
-
     y = y / window_envelop
     if original_ndim == 2:
         y = y.squeeze(0)
@@ -3640,7 +3687,7 @@ def repeat(a: Tensor, *repeat_shape) -> Tensor:
     # derive permute order by sorting urtensor strides
     enumerated_stride = list(enumerate(urtensor_stride))
     enumerated_stride.sort(key=operator.itemgetter(1), reverse=True)
-    permute_order, sorted_stride = zip(*enumerated_stride)
+    permute_order, _sorted_stride = zip(*enumerated_stride)
 
     # add new and expand dimensions according to urtensor
     repeat_xtensor = a.expand(urtensor_shape)
@@ -3751,7 +3798,7 @@ def _reshape_view_helper(a: TensorLikeType, *shape, allow_copy: bool) -> TensorL
             # may return a view of a copy
 
             # Checks if collapse can be a view and short-circuits to copying reshape if it can't
-            new_shape, new_strides = prims._collapse_view_helper(a_, idx, end)
+            new_shape, _new_strides = prims._collapse_view_helper(a_, idx, end)
             if new_shape is None:
                 if allow_copy:
                     return prims.reshape(a, shape)
@@ -4018,7 +4065,10 @@ def _index_fill(
         )  # type: ignore[arg-type]
     else:
         value = torch.scalar_tensor(
-            value, dtype=x.dtype, layout=x.layout, device=x.device  # type: ignore[arg-type]
+            value,
+            dtype=x.dtype,
+            layout=x.layout,
+            device=x.device,  # type: ignore[arg-type]
         )
 
     # index_copy has some unnecessary preconditions when x is a scalar. We do this to work through them
@@ -4055,7 +4105,10 @@ def index_add(
 ):
     # index_add always returns a new contiguous tensor
     return x.clone(memory_format=torch.contiguous_format).index_add_(
-        dim, index, tensor, alpha=alpha  # type: ignore[arg-type]
+        dim,
+        index,
+        tensor,
+        alpha=alpha,  # type: ignore[arg-type]
     )
 
 
@@ -4107,6 +4160,36 @@ def squeeze(a: TensorLikeType, dim: Optional[DimsType] = None) -> TensorLikeType
     return a
 
 
+@register_decomposition(aten.split_with_sizes)
+def split_with_sizes(
+    self: Tensor, split_sizes: List[int], dim: int = 0
+) -> List[Tensor]:
+    # NB: Perform the check_is_size tests first so that the
+    # sum test does not try to do a replacement
+    for i in range(len(split_sizes)):
+        torch._check_is_size(
+            split_sizes[i],
+            lambda: "split_with_sizes expects split_sizes have only non-negative entries",
+        )
+    torch._check_with(
+        ValueError,
+        builtins.sum(split_sizes) == self.shape[dim],
+        lambda: f"Split sizes add up to {builtins.sum(split_sizes)} but got the tensor's size of {self.shape[dim]}",
+    )
+
+    splits = []
+    offset = self.storage_offset()
+
+    for split_size in split_sizes:
+        new_shape = list(self.shape)
+        new_shape[dim] = split_size
+        # We reimplement narrow here to avoid a lot of checks in the
+        # decomposition of narrow which calls slice_in_dim and slice
+        splits.append(self.as_strided(new_shape, self.stride(), offset))
+        offset = offset + self.stride()[dim] * split_size
+    return splits
+
+
 # Note: does not work with TensorMetas because of data-dependent control-flow
 # CompositeImplicitAutograd - don't register decomp
 def tensor_split(
@@ -4146,22 +4229,20 @@ def tensor_split(
             msg = f"tensor_split: number of sections must be greater than 0, but was {sections}"
             raise ValueError(msg)
 
-        splits = []
         dim_size = a.shape[_dim]
         min_split_size = math.floor(dim_size / sections)
         num_splits_one_extra = dim_size % sections
-        start_idx = 0
+
+        split_sizes = []
         for split_idx in range(sections):
             split_size = (
                 min_split_size + 1
                 if (split_idx < num_splits_one_extra)
                 else min_split_size
             )
-            s = prims.slice_in_dim(a, start_idx, start_idx + split_size, axis=_dim)
-            splits.append(s)
-            start_idx = start_idx + split_size
+            split_sizes.append(split_size)
 
-        return tuple(splits)
+        return tuple(aten.split_with_sizes(a, split_sizes, dim=_dim))
     # Case 1 -- indices_or_sections is a sequence of integers or a 1D tensor describing the splits
     else:
         indices = indices_or_sections
@@ -4173,13 +4254,9 @@ def tensor_split(
 
             indices = indices_or_sections.tolist()
 
-        splits = []
-        start_idx = 0
-        for x in indices:
-            splits.append(prims.slice_in_dim(a, start_idx, x, axis=_dim))
-            start_idx = x
-        splits.append(prims.slice_in_dim(a, start_idx, a.shape[_dim], axis=_dim))
-        return tuple(splits)
+        indices = [0] + list(indices) + [a.shape[_dim]]
+        split_sizes = [indices[i + 1] - indices[i] for i in range(len(indices) - 1)]
+        return tuple(aten.split_with_sizes(a, split_sizes, dim=_dim))
 
 
 # CompositeImplicitAutograd - don't register decomp
@@ -6171,6 +6248,12 @@ def _dot_check(self, other):
         lambda: f"1D tensors expected, but got {self.dim()}D and {other.dim()}D tensors",
     )
 
+    torch._check(
+        self.dtype == other.dtype,
+        lambda: "dot : expected both vectors to have same dtype, but found "
+        f"{self.dtype} and {other.dtype}",
+    )
+
     def numel_error():
         return (
             f"inconsistent tensor size, expected tensor [{self.numel()}] and src [{other.numel()}] to have the"
@@ -6180,8 +6263,18 @@ def _dot_check(self, other):
     torch._check(self.numel() == other.numel(), numel_error)
 
 
+def _dot_check_wrapper(fn):
+    @wraps(fn)
+    def wrapper(self, other):
+        _dot_check(self, other)
+        return fn(self, other)
+
+    return wrapper
+
+
 @register_decomposition(aten.dot)
 @out_wrapper()
+@_dot_check_wrapper
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("self", "other"),
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
@@ -6196,12 +6289,12 @@ def dot(self, other):
         elif other.is_conj():
             return torch.vdot(other.conj(), self)
 
-    _dot_check(self, other)
     return (self * other).sum()
 
 
 @register_decomposition(aten.vdot)
 @out_wrapper()
+@_dot_check_wrapper
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("self", "other"),
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
@@ -6218,7 +6311,6 @@ def vdot(self, other):
     elif other.is_conj():
         return torch.dot(self, other.conj()).conj()
 
-    _dot_check(self, other)
     # The decomposition fails if you do self.conj()... not sure why
     return (self.conj_physical() * other).sum()
 
@@ -6340,7 +6432,10 @@ expand_copy = _make_copy_from_view(aten.expand)
 # TODO: This must return a sparse tensor if the input is sparse, but refs have
 # no sparse support. See narrow_copy_sparse in core.
 narrow_copy = _make_copy_from_view(aten.narrow)
+squeeze_copy = _make_copy_from_view(aten.squeeze)
+permute_copy = _make_copy_from_view(aten.permute)
 t_copy = _make_copy_from_view(aten.t)
+transpose_copy = _make_copy_from_view(aten.transpose)
 unsqueeze_copy = _make_copy_from_view(aten.unsqueeze)
 view_copy = _make_copy_from_view(aten.view)
 

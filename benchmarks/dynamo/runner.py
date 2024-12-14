@@ -387,11 +387,6 @@ def get_skip_tests(suite, device, is_training: bool):
             skip_tests.update(module.TorchBenchmarkRunner().skip_models_for_cpu)
         elif device == "cuda":
             skip_tests.update(module.TorchBenchmarkRunner().skip_models_for_cuda)
-    else:
-        if hasattr(module, "SKIP"):
-            skip_tests.update(module.SKIP)
-        if is_training and hasattr(module, "SKIP_TRAIN"):
-            skip_tests.update(module.SKIP_TRAIN)
 
     skip_tests = (f"-x {name}" for name in skip_tests)
     skip_str = " ".join(skip_tests)
@@ -438,7 +433,7 @@ def generate_commands(args, dtypes, suites, devices, compilers, output_dir):
                     if args.enable_cpu_launcher:
                         launcher_cmd = f"python -m torch.backends.xeon.run_cpu {args.cpu_launcher_args}"
                     cmd = f"{launcher_cmd} benchmarks/dynamo/{suite}.py --{testing} --{dtype} -d{device} --output={output_filename}"
-                    cmd = f"{cmd} {base_cmd} {args.extra_args} --no-skip --dashboard"
+                    cmd = f"{cmd} {base_cmd} {args.extra_args} --dashboard"
                     skip_tests_str = get_skip_tests(suite, device, args.training)
                     cmd = f"{cmd} {skip_tests_str}"
 
@@ -1456,7 +1451,7 @@ class DashboardUpdater:
             RegressionDetector(self.args).generate_comment()
             try:
                 RegressionTracker(self.args).diff()
-            except Exception as e:
+            except Exception:
                 logging.exception("")
                 with open(f"{self.args.output_dir}/gh_regression.txt", "w") as gh_fh:
                     gh_fh.write("")

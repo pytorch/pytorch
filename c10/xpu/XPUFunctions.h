@@ -32,4 +32,14 @@ C10_XPU_API void get_device_properties(
 
 C10_XPU_API DeviceIndex get_device_idx_from_pointer(void* ptr);
 
+static inline void check_device_index(DeviceIndex device) {
+  TORCH_CHECK(
+      device >= 0 && device < c10::xpu::device_count(),
+      "device is out of range, device is ",
+      static_cast<int>(device),
+      ", total number of device is ",
+      static_cast<int>(c10::xpu::device_count()),
+      ".");
+}
+
 } // namespace c10::xpu

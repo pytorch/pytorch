@@ -680,6 +680,18 @@ class TestXNNPACKQuantizer(PT2EQuantizationTestCase):
             torch.ops.quantized_decomposed.quantize_per_tensor.default: 0,
             torch.ops.quantized_decomposed.dequantize_per_tensor.default: 1,
         }
+
+        training_ir_node_occurrence = {
+            # input and output are using quantize_per_tensor and weight is using quantize_per_channel
+            # In training IR, the decomposition is different.
+            # `torch.ops.quantized_decomposed.quantize_per_tensor.default` nodes becomes
+            # `torch.ops.quantized_decomposed.quantize_per_tensor.tensor` nodes.
+            torch.ops.quantized_decomposed.quantize_per_tensor.tensor: 2,
+            torch.ops.quantized_decomposed.dequantize_per_tensor.tensor: 2,
+            # note: quantize op for weights are const propagated
+            torch.ops.quantized_decomposed.quantize_per_tensor.default: 0,
+            torch.ops.quantized_decomposed.dequantize_per_tensor.default: 0,
+        }
         act_affine_quant_obs = observer.PlaceholderObserver.with_args(
             dtype=torch.qint8,
             qscheme=torch.per_tensor_affine,
@@ -703,6 +715,7 @@ class TestXNNPACKQuantizer(PT2EQuantizationTestCase):
             [],
             True,
             qconfig_mapping,
+            training_ir_node_occurrence=training_ir_node_occurrence,
         )
 
     def test_gru(self):
@@ -973,6 +986,40 @@ class TestXNNPACKQuantizer(PT2EQuantizationTestCase):
         node_list = [
             torch.ops.aten.add.Tensor,
             torch.ops.aten.mul.Tensor,
+        ]
+        self._test_quantizer(
+            M(),
+            example_inputs,
+            quantizer,
+            node_occurrence,
+            node_list,
+        )
+
+    def test_cat_same_node(self):
+        """Ensure that concatenating the same node does not cause any unexpected behavior"""
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                x = torch.cat([x, x])
+                return x
+
+        quantizer = XNNPACKQuantizer()
+        quantization_config = get_symmetric_quantization_config(is_per_channel=True)
+        quantizer.set_global(quantization_config)
+        example_inputs = (torch.randn(1, 3, 5, 5),)
+        node_occurrence = {
+            torch.ops.quantized_decomposed.quantize_per_tensor.default: 2,
+            torch.ops.quantized_decomposed.dequantize_per_tensor.default: 2,
+        }
+        node_list = [
+            torch.ops.quantized_decomposed.quantize_per_tensor.default,
+            torch.ops.quantized_decomposed.dequantize_per_tensor.default,
+            torch.ops.aten.cat.default,
+            torch.ops.quantized_decomposed.quantize_per_tensor.default,
+            torch.ops.quantized_decomposed.dequantize_per_tensor.default,
         ]
         self._test_quantizer(
             M(),

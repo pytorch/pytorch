@@ -1291,19 +1291,19 @@ static void log_softmax_backward_kernel_impl(
 
 } // anonymous namespace
 
-ALSO_REGISTER_AVX512_DISPATCH(softmax_lastdim_kernel, &softmax_lastdim_kernel_impl);
-ALSO_REGISTER_AVX512_DISPATCH(log_softmax_lastdim_kernel, &log_softmax_lastdim_kernel_impl);
+ALSO_REGISTER_AVX512_DISPATCH(softmax_lastdim_kernel, &softmax_lastdim_kernel_impl)
+ALSO_REGISTER_AVX512_DISPATCH(log_softmax_lastdim_kernel, &log_softmax_lastdim_kernel_impl)
 ALSO_REGISTER_AVX512_DISPATCH(
     softmax_backward_lastdim_kernel,
-    &softmax_backward_lastdim_kernel_impl);
+    &softmax_backward_lastdim_kernel_impl)
 ALSO_REGISTER_AVX512_DISPATCH(
     log_softmax_backward_lastdim_kernel,
-    &log_softmax_backward_lastdim_kernel_impl);
+    &log_softmax_backward_lastdim_kernel_impl)
 
-ALSO_REGISTER_AVX512_DISPATCH(softmax_kernel, &softmax_kernel_impl);
-ALSO_REGISTER_AVX512_DISPATCH(log_softmax_kernel, &log_softmax_kernel_impl);
-ALSO_REGISTER_AVX512_DISPATCH(softmax_backward_kernel, &softmax_backward_kernel_impl);
+ALSO_REGISTER_AVX512_DISPATCH(softmax_kernel, &softmax_kernel_impl)
+ALSO_REGISTER_AVX512_DISPATCH(log_softmax_kernel, &log_softmax_kernel_impl)
+ALSO_REGISTER_AVX512_DISPATCH(softmax_backward_kernel, &softmax_backward_kernel_impl)
 ALSO_REGISTER_AVX512_DISPATCH(
     log_softmax_backward_kernel,
-    &log_softmax_backward_kernel_impl);
+    &log_softmax_backward_kernel_impl)
 } // namespace at::native

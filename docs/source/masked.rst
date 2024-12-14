@@ -283,9 +283,11 @@ The following ops are currently supported:
     kron
     meshgrid
     narrow
+    nn.functional.unfold
     ravel
     select
     split
+    stack
     t
     transpose
     vsplit
@@ -294,6 +296,7 @@ The following ops are currently supported:
     Tensor.expand_as
     Tensor.reshape
     Tensor.reshape_as
+    Tensor.unfold
     Tensor.view
 
 .. This module needs to be documented. Adding here in the meantime

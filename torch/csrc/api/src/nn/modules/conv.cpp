@@ -37,8 +37,7 @@ static F::PadFuncOptions::mode_t _get_pad_mode_from_conv_padding_mode(
   return pad_mode;
 }
 
-namespace torch {
-namespace nn {
+namespace torch::nn {
 Conv1dImpl::Conv1dImpl(Conv1dOptions options_)
     : ConvNdImpl(detail::ConvNdOptions<1>(
                      /*in_channels=*/options_.in_channels(),
@@ -347,5 +346,4 @@ template class ConvTransposeNdImpl<1, ConvTranspose1dImpl>;
 template class ConvTransposeNdImpl<2, ConvTranspose2dImpl>;
 template class ConvTransposeNdImpl<3, ConvTranspose3dImpl>;
 
-} // namespace nn
-} // namespace torch
+} // namespace torch::nn

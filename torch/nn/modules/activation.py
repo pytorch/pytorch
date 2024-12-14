@@ -979,11 +979,11 @@ class MultiheadAttention(Module):
     Multi-Head Attention is defined as:
 
     .. math::
-        \text{MultiHead}(Q, K, V) = \text{Concat}(head_1,\dots,head_h)W^O
+        \text{MultiHead}(Q, K, V) = \text{Concat}(\text{head}_1,\dots,\text{head}_h)W^O
 
-    where :math:`head_i = \text{Attention}(QW_i^Q, KW_i^K, VW_i^V)`.
+    where :math:`\text{head}_i = \text{Attention}(QW_i^Q, KW_i^K, VW_i^V)`.
 
-    ``nn.MultiHeadAttention`` will use the optimized implementations of
+    ``nn.MultiheadAttention`` will use the optimized implementations of
     ``scaled_dot_product_attention()`` when possible.
 
     In addition to support for the new ``scaled_dot_product_attention()``
