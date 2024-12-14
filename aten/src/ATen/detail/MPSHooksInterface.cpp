@@ -7,21 +7,17 @@ namespace at {
 namespace detail {
 
 const MPSHooksInterface& getMPSHooks() {
-  static std::unique_ptr<MPSHooksInterface> mps_hooks;
+  auto create_impl = [] {
 #if !defined C10_MOBILE
-  static c10::once_flag once;
-  c10::call_once(once, [] {
-    mps_hooks = MPSHooksRegistry()->Create("MPSHooks", MPSHooksArgs{});
-    if (!mps_hooks) {
-      mps_hooks = std::make_unique<MPSHooksInterface>();
+    auto hooks = MPSHooksRegistry()->Create("MPSHooks", MPSHooksArgs{});
+    if (hooks) {
+      return hooks;
     }
-  });
-#else
-  if (mps_hooks == nullptr) {
-    mps_hooks = std::make_unique<MPSHooksInterface>();
-  }
 #endif
-  return *mps_hooks;
+    return std::make_unique<MPSHooksInterface>();
+  };
+  static auto hooks = create_impl();
+  return *hooks;
 }
 } // namespace detail
 

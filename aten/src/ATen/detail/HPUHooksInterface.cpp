@@ -1,20 +1,19 @@
 #include <ATen/detail/HPUHooksInterface.h>
-#include <c10/util/CallOnce.h>
 #include <memory>
 
 namespace at {
 namespace detail {
 
 TORCH_API const at::HPUHooksInterface& getHPUHooks() {
-  static std::unique_ptr<HPUHooksInterface> hpu_hooks;
-  static c10::once_flag once;
-  c10::call_once(once, [] {
-    hpu_hooks = HPUHooksRegistry()->Create("HPUHooks", HPUHooksArgs{});
-    if (!hpu_hooks) {
-      hpu_hooks = std::make_unique<HPUHooksInterface>();
+  auto create_impl = [] {
+    auto hooks = HPUHooksRegistry()->Create("HPUHooks", HPUHooksArgs{});
+    if (hooks) {
+      return hooks;
     }
-  });
-  return *hpu_hooks;
+    return std::make_unique<HPUHooksInterface>();
+  };
+  static auto hooks = create_impl();
+  return *hooks;
 }
 
 } // namespace detail

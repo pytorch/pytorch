@@ -6,16 +6,15 @@ namespace at {
 namespace detail {
 
 const XPUHooksInterface& getXPUHooks() {
-  static XPUHooksInterface* xpu_hooks = nullptr;
-  static c10::once_flag once;
-  c10::call_once(once, [] {
-    xpu_hooks =
-        XPUHooksRegistry()->Create("XPUHooks", XPUHooksArgs{}).release();
-    if (!xpu_hooks) {
-      xpu_hooks = new XPUHooksInterface();
+  auto create_impl = [] {
+    auto hooks = XPUHooksRegistry()->Create("XPUHooks", XPUHooksArgs{});
+    if (hooks) {
+      return hooks;
     }
-  });
-  return *xpu_hooks;
+    return std::make_unique<XPUHooksInterface>();
+  };
+  static auto hooks = create_impl();
+  return *hooks;
 }
 } // namespace detail
 
