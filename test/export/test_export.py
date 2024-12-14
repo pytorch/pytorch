@@ -5074,6 +5074,7 @@ def forward(self, x):
             },
         }
         ep = export(Foo(), inputs, dynamic_shapes=shapes)
+
         for tensor in inputs[0].values():
             for attr in [
                 "_dynamo_weak_dynamic_indices",

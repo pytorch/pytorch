@@ -101,17 +101,26 @@ def _from_dynamic_axes_to_dynamic_shapes(
 
     dynamic_shapes: dict[str, Any | None] = {}
     for input_name, axes in dynamic_axes.items():
-        # TODO(titaiwang): Add ONNX IR pass to post-process the dynamic axes
-        # torch.export.Dim.AUTO does its best to infer the min and max values
+        # TODO(titaiwang): Add ONNX IR pass to rename default dynamic axes: s0, s1, ...
+        # to the dynamic axes defined by users.
+        # NOTE: torch.export.Dim.AUTO does its best to infer the min and max values
         # from the model, but it's not guaranteed to be dynamic.
         if input_name in output_names:
             # User specified an output name as a dynamic axis, so we skip it
             continue
         if isinstance(axes, dict):
+            if any(not isinstance(k, int) for k in axes.keys()):
+                raise ValueError(
+                    "The axis in dynamic_axes must be in the form of: dict[int, str] or list[int]."
+                )
             dynamic_shapes[input_name] = {
                 k: torch.export.Dim.AUTO for k, _ in axes.items()
             }
         elif isinstance(axes, list):
+            if any(not isinstance(k, int) for k in axes):
+                raise ValueError(
+                    "The axis in dynamic_axes must be in the form of: dict[int, str] or list[int]."
+                )
             dynamic_shapes[input_name] = {k: torch.export.Dim.AUTO for k in axes}
         elif axes is None:
             dynamic_shapes[input_name] = None
