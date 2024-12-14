@@ -22,7 +22,7 @@ log = logging.getLogger(__name__)
 
 
 def triton_config(num_stages, num_warps, **kwargs):
-    from triton import Config  # type: ignore[attr-defined]
+    from triton import Config
 
     return Config(kwargs, num_stages=num_stages, num_warps=num_warps)
 
@@ -58,7 +58,7 @@ def filtered_configs(
     m = max(
         next_power_of_2(
             V.graph.sizevars.size_hint(
-                m, fallback=torch._inductor.config.unbacked_symint_fallback  # type: ignore[arg-type]
+                m, fallback=torch._inductor.config.unbacked_symint_fallback
             )
         ),
         min_block_size,
@@ -66,7 +66,7 @@ def filtered_configs(
     n = max(
         next_power_of_2(
             V.graph.sizevars.size_hint(
-                n, fallback=torch._inductor.config.unbacked_symint_fallback  # type: ignore[arg-type]
+                n, fallback=torch._inductor.config.unbacked_symint_fallback
             )
         ),
         min_block_size,
@@ -74,7 +74,7 @@ def filtered_configs(
     k = max(
         next_power_of_2(
             V.graph.sizevars.size_hint(
-                k, fallback=torch._inductor.config.unbacked_symint_fallback  # type: ignore[arg-type]
+                k, fallback=torch._inductor.config.unbacked_symint_fallback
             )
         ),
         min_block_size_k,

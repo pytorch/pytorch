@@ -77,7 +77,7 @@ class ModuleWrapper(nn.Module):
         return self
 
     # nn.Module defines training as a boolean
-    @property  # type: ignore[override]
+    @property
     def training(self):
         return self.cpp_module.training
 

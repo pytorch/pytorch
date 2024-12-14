@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 # mypy: allow-untyped-defs
-import sys
-import pickle
-import struct
-import pprint
-import zipfile
 import fnmatch
-from typing import Any, IO, BinaryIO, Union
+import pickle
+import pprint
+import struct
+import sys
+import zipfile
+from typing import IO, Any, BinaryIO, Union
+
 
 __all__ = ["FakeObject", "FakeClass", "DumpUnpickler", "main"]
 
@@ -48,7 +49,7 @@ class FakeClass:
     def __init__(self, module, name):
         self.module = module
         self.name = name
-        self.__new__ = self.fake_new  # type: ignore[assignment]
+        self.__new__ = self.fake_new  # type: ignore[method-assign]
 
     def __repr__(self):
         return f"{self.module}.{self.name}"
@@ -60,7 +61,7 @@ class FakeClass:
         return FakeObject(self.module, self.name, args[1:])
 
 
-class DumpUnpickler(pickle._Unpickler):  # type: ignore[name-defined]
+class DumpUnpickler(pickle._Unpickler):
     def __init__(
             self,
             file,
@@ -76,7 +77,7 @@ class DumpUnpickler(pickle._Unpickler):  # type: ignore[name-defined]
     def persistent_load(self, pid):
         return FakeObject("pers", "obj", (pid,))
 
-    dispatch = dict(pickle._Unpickler.dispatch)  # type: ignore[attr-defined]
+    dispatch = dict(pickle._Unpickler.dispatch)
 
     # Custom objects in TorchScript are able to return invalid UTF-8 strings
     # from their pickle (__getstate__) functions.  Install a custom loader

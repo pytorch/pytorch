@@ -1442,7 +1442,7 @@ def _export(
                 custom_opsets = {}
 
             _C._jit_pass_dce_allow_deleting_nodes_with_side_effects(graph)
-            node_attr_to_name = {}  # type: ignore[var-annotated]
+            node_attr_to_name = {}
             if module_typenames_to_export_as_functions:
                 # NOTE: cannot call DCE after this pass. DCE will remove function definition nodes.
                 node_attr_to_name = _C._jit_pass_onnx_function_extraction(
@@ -1455,7 +1455,7 @@ def _export(
                 params_dict = _C._jit_pass_onnx_deduplicate_initializers(  # type: ignore[assignment]
                     graph,
                     params_dict,  # type: ignore[arg-type]
-                    getattr(model, "training", False),  # type: ignore[arg-type]
+                    getattr(model, "training", False),
                 )
             _C._jit_pass_onnx_assign_scoped_names_for_node_and_value(graph)
             defer_weight_export = False
@@ -1704,7 +1704,7 @@ def _run_symbolic_function(
             # Clone node to trigger ONNX shape inference
             return graph_context.op(
                 op_name, *inputs, **attrs, outputs=node.outputsSize()
-            )  # type: ignore[attr-defined]
+            )
 
         raise errors.UnsupportedOperatorError(
             symbolic_function_name,

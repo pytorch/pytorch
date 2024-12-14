@@ -1,5 +1,5 @@
 # mypy: allow-untyped-defs
-from __future__ import annotations  # type: ignore[attr-defined]
+from __future__ import annotations
 
 import copy
 import operator
@@ -315,7 +315,7 @@ class ShardedTensor(ShardedTensorBase):
                 hasattr(self, "_sharded_tensor_id")
                 and self._sharded_tensor_id in _sharded_tensor_map
             ):
-                _sharded_tensor_map.pop(self._sharded_tensor_id)  # type: ignore[call-overload]
+                _sharded_tensor_map.pop(self._sharded_tensor_id)
 
     def _init_rpc(self):
         # Validate PG and RPC ranks match.
@@ -402,7 +402,7 @@ class ShardedTensor(ShardedTensorBase):
         """
 
         def shard_size(shard_md):
-            return reduce(operator.mul, shard_md.shard_sizes)  # type: ignore[attr-defined]
+            return reduce(operator.mul, shard_md.shard_sizes)
 
         if enforce_dtype:
             warnings.warn(
@@ -527,7 +527,7 @@ class ShardedTensor(ShardedTensorBase):
         list_shards: List[Shard] = []
         # move all local shards to cpu, and change metadata
         for shard in self._local_shards:
-            cpu_tensor = shard.tensor.cpu(memory_format=memory_format)  # type: ignore[call-arg]
+            cpu_tensor = shard.tensor.cpu(memory_format=memory_format)
             metadata = copy.deepcopy(shard.metadata)
             metadata.placement._device = torch.device("cpu")  # type: ignore[union-attr]
             list_shards.append(Shard(cpu_tensor, metadata))
@@ -592,7 +592,7 @@ class ShardedTensor(ShardedTensorBase):
                 device=current_device,
                 non_blocking=non_blocking,
                 memory_format=memory_format,
-            )  # type: ignore[call-arg]
+            )
             metadata = copy.deepcopy(shard.metadata)
             metadata.placement._device = current_device  # type: ignore[union-attr]
 
@@ -675,7 +675,7 @@ class ShardedTensor(ShardedTensorBase):
         list_shards: List[Shard] = []
 
         for shard in self._local_shards:
-            new_tensor = shard.tensor.to(  # type: ignore[call-overload]
+            new_tensor = shard.tensor.to(
                 device=device_to,
                 dtype=dtype_to,
                 non_blocking=non_blocking,
@@ -898,7 +898,7 @@ class ShardedTensor(ShardedTensorBase):
         local_shard_metadatas = []
 
         # collect local shard metadatas from the global sharded_tensor_metadata
-        for shard_metadata in shards_metadata:  # type: ignore[attr-defined]
+        for shard_metadata in shards_metadata:
             rank, local_device = _parse_and_validate_remote_device(
                 process_group, shard_metadata.placement
             )
@@ -1096,13 +1096,13 @@ class ShardedTensor(ShardedTensorBase):
         if len(self.local_shards()) != 1:
             raise NotImplementedError("Only single local shard supported for reshard.")
 
-        if self._sharding_spec.dim == resharding_spec.dim:  # type: ignore[attr-defined]
-            if self._sharding_spec.placements == resharding_spec.placements:  # type: ignore[attr-defined]
+        if self._sharding_spec.dim == resharding_spec.dim:
+            if self._sharding_spec.placements == resharding_spec.placements:
                 return self
             else:
                 local_shards, shards_metadata = reshuffle_local_shard(
                     self.local_tensor(),
-                    self.size(),  # type: ignore[arg-type]
+                    self.size(),
                     self._sharding_spec,
                     resharding_spec,
                     self._process_group,
@@ -1110,7 +1110,7 @@ class ShardedTensor(ShardedTensorBase):
         else:
             local_shards, shards_metadata = reshard_local_shard(
                 self.local_tensor(),
-                self.size(),  # type: ignore[arg-type]
+                self.size(),
                 self._sharding_spec,
                 resharding_spec,
                 self._process_group,

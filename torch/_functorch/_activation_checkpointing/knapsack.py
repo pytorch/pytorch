@@ -41,7 +41,7 @@ def ilp_knapsack(
 
     np_memory = np.array(memory)
     np_runtimes = np.array(runtimes)
-    c = -np_runtimes  # type: ignore[operator]
+    c = -np_runtimes
 
     memory_constraint = LinearConstraint(A=np_memory, ub=np.array(max_memory))
     constraints = [memory_constraint]

@@ -149,7 +149,7 @@ if is_available():
             # Ignore type error because mypy doesn't handle dynamically generated type objects (#4865)
             if backend != BackendType.TENSORPIPE:  # type: ignore[attr-defined]
                 logger.warning(
-                    "RPC was initialized with no explicit backend but with options "  # type: ignore[attr-defined]
+                    "RPC was initialized with no explicit backend but with options "
                     "corresponding to %(backend)s, hence that backend will be used "
                     "instead of the default BackendType.TENSORPIPE. To silence this "
                     "warning pass `backend=%(backend)s` explicitly.",

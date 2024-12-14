@@ -88,7 +88,7 @@ def get_reversed_fusions() -> List[Tuple[NSFusionType, int]]:
         # patterns which contain a single ops (they get matched
         # without caring about fusions).
         if isinstance(quant_pattern, tuple):
-            results.append((quant_pattern, default_base_op_idx))  # type: ignore[arg-type]
+            results.append((quant_pattern, default_base_op_idx))
 
         # For each pattern, add additional patterns with observers and
         # fake quants at the end.
@@ -99,7 +99,7 @@ def get_reversed_fusions() -> List[Tuple[NSFusionType, int]]:
                 new_pattern = (cls, *quant_pattern)
             else:
                 new_pattern = (cls, quant_pattern)
-            results.append((new_pattern, default_base_op_idx))  # type: ignore[arg-type]
+            results.append((new_pattern, default_base_op_idx))
 
     # After this point, results contains values such as
     # [..., ((torch.nn.Relu, torch.nn.Conv2d), 0), ...]

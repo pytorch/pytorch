@@ -28,7 +28,7 @@ from torch.testing._internal.common_device_type import (
     ops,
 )
 from torch.testing._internal.common_methods_invocations import op_db
-from torch.testing._internal.common_utils import (  # type: ignore[attr-defined]
+from torch.testing._internal.common_utils import (
     IS_FBCODE,
     IS_SANDCASTLE,
     IS_WINDOWS,
@@ -260,7 +260,7 @@ class TestCheckpoint(TestCase):
         for use_reentrant in [True, False]:
             with self.subTest(use_reentrant=use_reentrant):
                 with self.assertRaises(TypeError):
-                    checkpoint_sequential(model, 1, a, b)  # type: ignore[call-arg]
+                    checkpoint_sequential(model, 1, a, b)
 
     def test_checkpoint_sequential_deprecated_no_args(self):
         class Noop(nn.Module):

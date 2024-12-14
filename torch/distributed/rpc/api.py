@@ -930,8 +930,7 @@ def _get_should_profile():
     ActiveProfilerType = torch._C._profiler.ActiveProfilerType
     return (
         torch.autograd._profiler_enabled()
-        and torch._C._autograd._profiler_type()
-        == ActiveProfilerType.LEGACY  # type: ignore[attr-defined]
+        and torch._C._autograd._profiler_type() == ActiveProfilerType.LEGACY
     )
 
 

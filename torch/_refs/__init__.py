@@ -366,7 +366,7 @@ __all__ = [
 ]
 
 Tensor = torch.Tensor
-DispatchKey = torch._C.DispatchKey  # type: ignore[attr-defined]
+DispatchKey = torch._C.DispatchKey
 aten = torch._ops.ops.aten
 
 # Note that the docstrings for the public methods from this file are in
@@ -766,7 +766,7 @@ def isnan(a: TensorLikeType) -> TensorLikeType:
 
 
 # alias
-mvlgamma = _make_alias(torch.special.multigammaln, "mvlgamma")  # type: ignore[has-type]
+mvlgamma = _make_alias(torch.special.multigammaln, "mvlgamma")
 
 
 @_make_elementwise_unary_reference(
@@ -822,7 +822,7 @@ def log_softmax(
     result_dtype = dtype or a.dtype
     computation_dtype = utils.get_computation_dtype(result_dtype)
     a_ = _maybe_convert_to_dtype(a, computation_dtype)
-    return _maybe_convert_to_dtype(a_ - logsumexp(a_, dim, keepdim=True), result_dtype)  # type: ignore[return-value]
+    return _maybe_convert_to_dtype(a_ - logsumexp(a_, dim, keepdim=True), result_dtype)
 
 
 @register_decomposition(aten.logsumexp)
@@ -867,9 +867,9 @@ def nan_to_num(
     if neginf is None:
         neginf = torch.finfo(a.dtype).min
 
-    result = torch.where(torch.isnan(a), nan, a)  # type: ignore[call-overload]
-    result = torch.where(torch.isneginf(a), neginf, result)  # type: ignore[call-overload]
-    result = torch.where(torch.isposinf(a), posinf, result)  # type: ignore[call-overload]
+    result = torch.where(torch.isnan(a), nan, a)
+    result = torch.where(torch.isneginf(a), neginf, result)
+    result = torch.where(torch.isposinf(a), posinf, result)
     return result
 
 
@@ -1130,7 +1130,7 @@ def add(
     a, b = _maybe_broadcast(a, b)
 
     if alpha is not None:
-        dtype = a.dtype if isinstance(a, TensorLike) else b.dtype  # type: ignore[union-attr]
+        dtype = a.dtype if isinstance(a, TensorLike) else b.dtype
         python_type = utils.dtype_to_type(dtype)
         if python_type != bool and not utils.is_weakly_lesser_type(
             type(alpha), python_type
@@ -1249,7 +1249,7 @@ def pow(
 
     if isinstance(b, Number):
         if b == 1.0:
-            return a.clone()  # type: ignore[return-value,union-attr]
+            return a.clone()  # type: ignore[union-attr]
         elif b == 2.0:
             return a * a  # type: ignore[return-value]
         elif b == 0.5:
@@ -1607,7 +1607,7 @@ def logaddexp(a: TensorLikeType, b: TensorLikeType) -> TensorLikeType:
         )
         # the type for full_like does not include tensor yet
         nan_mask = torch.isnan(min_)
-        return torch.where(nan_mask, complex(float("nan"), float("nan")), non_nan_vals)  # type: ignore[call-overload]
+        return torch.where(nan_mask, complex(float("nan"), float("nan")), non_nan_vals)
     else:
         return torch.where(inf_mask, a, max_ + torch.log1p(torch.exp(min_ - max_)))
 
@@ -1772,7 +1772,7 @@ def sub(
         )
 
     if alpha != 1:
-        dtype = a.dtype if isinstance(a, TensorLike) else b.dtype  # type: ignore[union-attr]
+        dtype = a.dtype if isinstance(a, TensorLike) else b.dtype
         python_type = utils.dtype_to_type(dtype)
         if not utils.is_weakly_lesser_type(type(alpha), python_type):
             msg = f"alpha argument of type {type(alpha)} cannot be safely cast to type {python_type}!"
@@ -1915,17 +1915,17 @@ def clamp(
         raise ValueError(msg)
     if min is not None:
         a_isnan = torch.isnan(a)
-        condition = torch.bitwise_or(torch.ge(a, min), a_isnan)  # type: ignore[arg-type]
+        condition = torch.bitwise_or(torch.ge(a, min), a_isnan)
         # we should also propagate `nan` coming from boundaries. However, that's
         # not necessary since `ge` would already `False` when either operands has
         # a `nan`. So this line below is redundant
         #   `condition = bitwise_and(condition, bitwise_not(isnan(min)))`
-        a = torch.where(condition, a, min)  # type: ignore[arg-type]
+        a = torch.where(condition, a, min)
     if max is not None:
         a_isnan = torch.isnan(a)
         # same as above, no need to adjust `nan` from `max`
-        condition = torch.bitwise_or(torch.le(a, max), a_isnan)  # type: ignore[arg-type]
-        a = torch.where(condition, a, max)  # type: ignore[arg-type]
+        condition = torch.bitwise_or(torch.le(a, max), a_isnan)
+        a = torch.where(condition, a, max)
 
     return a
 
@@ -1936,7 +1936,7 @@ def clamp_min(
     self: TensorLikeType,
     min: Optional[TensorOrNumberLikeType] = None,
 ) -> TensorLikeType:
-    return torch.clamp(self, min=min)  # type: ignore[arg-type]
+    return torch.clamp(self, min=min)
 
 
 @register_decomposition(aten.clamp_max)
@@ -1945,7 +1945,7 @@ def clamp_max(
     self: TensorLikeType,
     max: Optional[TensorOrNumberLikeType] = None,
 ) -> TensorLikeType:
-    return torch.clamp(self, max=max)  # type: ignore[arg-type]
+    return torch.clamp(self, max=max)
 
 
 #
@@ -2213,7 +2213,7 @@ def _reduction(
     if not accepts_dim_tuple:
         assert dims is None or isinstance(dims, Dim)
     if isinstance(dims, Dim):
-        dims = (dims,)  # type: ignore[assignment]
+        dims = (dims,)
     dims = utils.reduction_dims(a.shape, dims)
     if not has_identity:
         valid_shape = a.ndim == 0 or builtins.all(a.shape[i] for i in dims)
@@ -2224,7 +2224,7 @@ def _reduction(
     computation_dtype, result_dtype = utils.reduction_dtypes(
         a, output_dtype_kind, dtype
     )
-    a = _maybe_convert_to_dtype(a, computation_dtype)  # type: ignore[method-assign]
+    a = _maybe_convert_to_dtype(a, computation_dtype)
     result = prim(a, dims)
     if keepdims:
         output_shape = [a.shape[i] if i not in dims else 1 for i in range(a.ndim)]
@@ -2537,16 +2537,16 @@ def mean(
         ),
     )
     if isinstance(dim, Dim):
-        dim = (dim,)  # type: ignore[assignment]
-    dims = utils.reduction_dims(a.shape, dim)  # type: ignore[arg-type]
+        dim = (dim,)
+    dims = utils.reduction_dims(a.shape, dim)
     nelem = 1 if a.ndim == 0 else reduce(operator.mul, (a.shape[i] for i in dims), 1)
     result = true_divide(result, nelem)
     result_dtype = a.dtype if dtype is None else dtype
-    result = _maybe_convert_to_dtype(result, result_dtype)  # type: ignore[method-assign]
+    result = _maybe_convert_to_dtype(result, result_dtype)
     if out is not None:
         assert isinstance(out, TensorLike)
         out = _maybe_resize_out(out, result.shape)
-        return _safe_copy_out(copy_from=result, copy_to=out)  # type: ignore[arg-type]
+        return _safe_copy_out(copy_from=result, copy_to=out)
     return result
 
 
@@ -2862,7 +2862,7 @@ def cat(tensors: TensorSequenceType, dim: int = 0) -> TensorLikeType:
             #   TestFakeTensorCUDA.test_fake_crossref_backward_amp_cat_cuda_float32
             requires_grad = bool(any(x.requires_grad for x in tensors))  # type: ignore[arg-type]
         except Exception:
-            requires_grad = False  # type: ignore[assignment]
+            requires_grad = False
 
         return empty(
             (0,),
@@ -2965,7 +2965,7 @@ def constant_pad_nd(
     if value == 0 and input.dtype == torch.bool:
         value = False
     # torch.fill isn't typed to allow complex values
-    output = torch.fill(output, value)  # type: ignore[arg-type]
+    output = torch.fill(output, value)
 
     c_output = output
     for i in range(l_diff, l_inp):
@@ -3089,7 +3089,7 @@ def flatten(a: TensorLikeType, start_dim: int = 0, end_dim: int = -1) -> TensorL
 def flip(a: TensorLikeType, dims: DimsSequenceType) -> TensorLikeType:
     if not isinstance(dims, tuple) and not isinstance(dims, list):
         raise ValueError("dims has to be a sequence of ints")
-    dims = utils.canonicalize_dims(a.ndim, dims)  # type: ignore[assignment]
+    dims = utils.canonicalize_dims(a.ndim, dims)
     utils.validate_no_repeating_dims(dims)
     return prims.rev(a, dims)
 
@@ -3224,9 +3224,9 @@ def native_group_norm(
     if unsqueeze_bias is not None:
         out = out + unsqueeze_bias
 
-    out = _maybe_convert_to_dtype(out, input.dtype)  # type: ignore[assignment]
-    mean = _maybe_convert_to_dtype(mean, input.dtype)  # type: ignore[assignment]
-    rstd = _maybe_convert_to_dtype(rstd, input.dtype)  # type: ignore[assignment]
+    out = _maybe_convert_to_dtype(out, input.dtype)
+    mean = _maybe_convert_to_dtype(mean, input.dtype)
+    rstd = _maybe_convert_to_dtype(rstd, input.dtype)
 
     # remove broadcast dimensions from mean and rstd
     mean = torch.squeeze(mean, reduction_dims)
@@ -3297,10 +3297,10 @@ def native_layer_norm(
     elif weight is not None and bias is not None:
         out = out * weight + bias
 
-    out = _maybe_convert_to_dtype(out, input.dtype)  # type: ignore[assignment]
+    out = _maybe_convert_to_dtype(out, input.dtype)
     if input.device.type in ["cpu", "mtia"]:
-        mean = _maybe_convert_to_dtype(mean, input.dtype)  # type: ignore[assignment]
-        rstd = _maybe_convert_to_dtype(rstd, input.dtype)  # type: ignore[assignment]
+        mean = _maybe_convert_to_dtype(mean, input.dtype)
+        rstd = _maybe_convert_to_dtype(rstd, input.dtype)
     return (out, mean, rstd)
 
 
@@ -3965,7 +3965,7 @@ def softmax(
         a_exp = exp(a_ - a_max)
     return _maybe_convert_to_dtype(
         true_divide(a_exp, sum(a_exp, dim, keepdim=True)), result_dtype
-    )  # type: ignore[return-value]
+    )
 
 
 # CompositeImplicitAutograd - don't register decomp
@@ -4060,15 +4060,15 @@ def _index_fill(
     if isinstance(value, TensorLike):
         torch._check(
             value.ndim == 0,
-            lambda: "Only supports 0-dimensional value tensor. "  # type: ignore[union-attr]
+            lambda: "Only supports 0-dimensional value tensor. "
             f"Got a tensor with {value.ndim} dimensions.",
-        )  # type: ignore[arg-type]
+        )
     else:
         value = torch.scalar_tensor(
             value,
             dtype=x.dtype,
             layout=x.layout,
-            device=x.device,  # type: ignore[arg-type]
+            device=x.device,
         )
 
     # index_copy has some unnecessary preconditions when x is a scalar. We do this to work through them
@@ -4079,7 +4079,7 @@ def _index_fill(
     shape[dim] = index.numel()
     value = value.expand(shape)
     index_copy = Tensor.index_copy_ if inplace else torch.index_copy
-    out = index_copy(y, dim, index, value)  # type: ignore[operator]
+    out = index_copy(y, dim, index, value)
     if inplace:
         return x
     else:
@@ -4108,7 +4108,7 @@ def index_add(
         dim,
         index,
         tensor,
-        alpha=alpha,  # type: ignore[arg-type]
+        alpha=alpha,
     )
 
 
@@ -4576,7 +4576,7 @@ def alias(a: TensorLikeType) -> TensorLikeType:
 
 @register_decomposition(aten.transpose)
 def transpose(a: TensorLikeType, dim0: int, dim1: int) -> TensorLikeType:
-    _dim0, _dim1 = utils.canonicalize_dims(a.ndim, (dim0, dim1))  # type: ignore[misc]
+    _dim0, _dim1 = utils.canonicalize_dims(a.ndim, (dim0, dim1))
 
     if a.ndim <= 1 or dim0 == dim1:
         return aten.alias.default(a)
@@ -5120,7 +5120,7 @@ def arange(
 def lerp(start: Tensor, end: Tensor, weight: Union[Tensor, NumberType]):
     inputs = [start, end]
     if isinstance(weight, Number):
-        weight = start.new_full((), weight)  # type: ignore[arg-type]
+        weight = start.new_full((), weight)
     else:
         inputs.append(weight)
     assert isinstance(weight, Tensor)  # mypy
@@ -5225,10 +5225,10 @@ def linspace(
     step = (end - start) / (steps - 1)
     out = torch.where(
         rg < steps / 2,
-        start + step * cast_rg(rg),  # type: ignore[arg-type,operator]
-        end - step * cast_rg((steps - 1) - rg),  # type: ignore[arg-type,operator]
+        start + step * cast_rg(rg),
+        end - step * cast_rg((steps - 1) - rg),
     )
-    return _maybe_convert_to_dtype(out, dtype)  # type: ignore[return-value]
+    return _maybe_convert_to_dtype(out, dtype)
 
 
 @register_decomposition(aten.logspace)
@@ -5289,7 +5289,7 @@ def logspace(
         pin_memory=pin_memory,
         requires_grad=requires_grad,
     )
-    return _maybe_convert_to_dtype(torch.pow(base, ret), dtype)  # type: ignore[arg-type,return-value]
+    return _maybe_convert_to_dtype(torch.pow(base, ret), dtype)
 
 
 @overload
@@ -5387,7 +5387,7 @@ def movedim(
     torch._check(
         len(source) == len(destination),  # type: ignore[arg-type]
         lambda: (
-            "movedim: Invalid source or destination dims: source "  # type: ignore[arg-type]
+            "movedim: Invalid source or destination dims: source "
             f"({list(source)} dims) should contain the same number "  # type: ignore[arg-type]
             f"of dims as destination ({list(destination)} dims)"  # type: ignore[arg-type]
         ),
@@ -5529,7 +5529,7 @@ def full(
         pin_memory=pin_memory,
         requires_grad=requires_grad,
     )
-    return torch.fill(e, fill_value)  # type: ignore[arg-type]
+    return torch.fill(e, fill_value)
 
 
 def full_like(
@@ -5710,7 +5710,7 @@ def masked_fill(a: TensorLikeType, mask: TensorLikeType, value: TensorOrNumberLi
     # Since `where` allows type-promotion,
     # cast value to correct type before passing to `where`
     value = _maybe_convert_to_dtype(value, a.dtype)
-    r = torch.where(mask, value, a)  # type: ignore[arg-type]
+    r = torch.where(mask, value, a)
 
     # aten.mask_fill always return a new contiguous tensor
     # contiguous() is needed to correctly model the output stride
@@ -5721,7 +5721,7 @@ def masked_fill(a: TensorLikeType, mask: TensorLikeType, value: TensorOrNumberLi
 def masked_fill_(
     a: TensorLikeType, mask: TensorLikeType, value: TensorOrNumberLikeType
 ) -> TensorLikeType:
-    b = torch.masked_fill(a, mask, value)  # type: ignore[arg-type]
+    b = torch.masked_fill(a, mask, value)
     a.copy_(b)
     return a
 

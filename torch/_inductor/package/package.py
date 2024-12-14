@@ -269,7 +269,9 @@ class AOTICompiledModel:
         return self.loader.get_constant_fqns()  # type: ignore[attr-defined]
 
 
-def load_package(path: Union[str, io.BytesIO], model_name: str = "model") -> AOTICompiledModel:  # type: ignore[type-arg]
+def load_package(
+    path: Union[str, io.BytesIO], model_name: str = "model"
+) -> AOTICompiledModel:
     assert isinstance(path, io.BytesIO) or (
         isinstance(path, str) and path.endswith(".pt2")
     ), f"Unable to load package. Path must be a buffer or a file ending in .pt2. Instead got {path}"

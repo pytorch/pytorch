@@ -480,7 +480,7 @@ def view_inference_rule(n: Node, symbols, constraints, counter):
             num_constraints.append(BinConstraintD(t, Dyn, op_neq))
             t2_type.append(t)
 
-    t2_type = TensorType(t2_type)  # type: ignore[assignment]
+    t2_type = TensorType(t2_type)
 
     c1 = BinConstraintT(my_view, t2_type, op_eq)
     c2 = CanReshape(src_var, t2_type)
@@ -488,7 +488,7 @@ def view_inference_rule(n: Node, symbols, constraints, counter):
     # TODO: add the extra check mentioned here:
     # https://pytorch.org/docs/stable/generated/torch.Tensor.view.html#torch.Tensor.view
 
-    return [c1, c2] + num_constraints, counter  # type: ignore[operator]
+    return [c1, c2] + num_constraints, counter
 
 
 @register_inference_rule("size")
@@ -925,7 +925,7 @@ def full_inference_rule(n: Node, symbols, constraints, counter):
     for arg in n.args[0]:
         dim = arg if isinstance(arg, int) else symbols[arg]
         res.append(dim)
-    c = BinConstraintT(full, TensorType(list(res)), op_eq)  # type: ignore[arg-type]
+    c = BinConstraintT(full, TensorType(list(res)), op_eq)
     return [c], counter
 
 
@@ -1174,7 +1174,7 @@ def linear_inference_rule(n: Node, module_instance, symbols, constraints, counte
     )
 
 
-@register_inference_rule("dim")  # type: ignore[attr-defined]
+@register_inference_rule("dim")
 def torch_dim_inference_rule(n: Node, symbols, constraints, counter):
     assert isinstance(n.args[0], Node)
     my_dim, counter = gen_dvar(counter)
@@ -1200,7 +1200,7 @@ def torch_dim_inference_rule(n: Node, symbols, constraints, counter):
     return [Disj([Conj([input_dyn, output_dyn]), Disj(c1)])], counter
 
 
-@register_inference_rule(torch._C._nn.linear)  # type: ignore[attr-defined]
+@register_inference_rule(torch._C._nn.linear)
 def torch_linear_inference_rule(n: Node, symbols, constraints, counter):
     assert isinstance(n.args[0], Node)
     weight_dims, counter = gen_tensor_dims(2, counter)
@@ -1289,7 +1289,7 @@ def reshape_inference_rule(n: Node, symbols, constraints, counter):
     src_var = symbols[n.args[0]]
     t2 = n.args[1]
     t2_type = TensorType([Dyn if elem == -1 else elem for elem in t2])  # type: ignore[union-attr]
-    c1 = BinConstraintT(my_reshape, t2_type, op_eq)  # type: ignore[union-attr]
+    c1 = BinConstraintT(my_reshape, t2_type, op_eq)
     c2 = CanReshape(src_var, t2_type)
 
     return [c1, c2], counter

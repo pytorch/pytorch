@@ -336,7 +336,7 @@ def remove_from_cache(f):
     elif hasattr(getattr(f, "forward", None), "__code__"):
         reset_code(f.forward.__code__)
     else:
-        from . import reset  # type: ignore[attr-defined]
+        from . import reset
 
         reset()
         log.warning("could not determine __code__ for %s", f)
@@ -922,7 +922,7 @@ def _optimize(
 def explain(f, *extra_args, **extra_kwargs):
     def inner(*args, **kwargs):
         # TODO(voz): Do we want a decorator for this?
-        from . import reset  # type: ignore[attr-defined]
+        from . import reset
 
         reset()
 
@@ -1714,7 +1714,7 @@ def export(
                 example_fake_inputs,
                 graph_captured_input,
                 graph_captured_result,
-                result_traced,  # type: ignore[possibly-undefined]
+                result_traced,
                 flat_args_dynamic_dims,
             )
         return ExportResult(graph, out_guards)  # type: ignore[arg-type]

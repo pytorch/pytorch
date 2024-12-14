@@ -267,8 +267,8 @@ def get_model_info(
                 def parse_new_format(line):
                     # (0, (('', '', 0), 0, 0))
                     num, ((text_indexes, fname_idx, offset), start, end), tag = line
-                    text = ''.join(text_table[x] for x in text_indexes)  # type: ignore[index]
-                    fname = text_table[fname_idx]  # type: ignore[index]
+                    text = ''.join(text_table[x] for x in text_indexes)
+                    fname = text_table[fname_idx]
                     return num, ((text, fname, offset), start, end), tag
 
                 debug_info_t = map(parse_new_format, content)

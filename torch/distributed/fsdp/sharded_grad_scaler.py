@@ -315,7 +315,7 @@ class ShardedGradScaler(GradScaler):
         if not self._enabled:
             return
 
-        _scale, _growth_tracker = self._check_scale_growth_tracker("update")  # type: ignore[var-annotated]
+        _scale, _growth_tracker = self._check_scale_growth_tracker("update")
 
         if new_scale is not None:
             # Accept a new user-defined scale.
@@ -351,9 +351,9 @@ class ShardedGradScaler(GradScaler):
                     self._scale,  # type: ignore[arg-type]
                     self._growth_tracker,  # type: ignore[arg-type]
                     found_inf_combined,
-                    self._growth_factor,  # type: ignore[arg-type]
-                    self._backoff_factor,  # type: ignore[arg-type]
-                    self._growth_interval,  # type: ignore[arg-type]
+                    self._growth_factor,
+                    self._backoff_factor,
+                    self._growth_interval,
                 )
 
         # To prepare for next iteration, clear the data collected from optimizers this iteration.

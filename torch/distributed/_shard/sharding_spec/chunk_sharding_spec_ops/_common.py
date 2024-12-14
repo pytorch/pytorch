@@ -74,7 +74,7 @@ def _register_sharded_op_on_local_tensor(
         return ShardedTensor._init_from_local_tensor(
             local_tensor.contiguous(),
             sharding_spec,
-            st_size,  # type: ignore[arg-type]
+            st_size,
             process_group=pg,
             init_rrefs=st._init_rrefs,
         )

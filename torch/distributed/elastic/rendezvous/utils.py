@@ -217,7 +217,7 @@ class _PeriodicTimer:
 
         self._ctx = self._Context()
         self._ctx.interval = interval.total_seconds()
-        self._ctx.function = function  # type: ignore[assignment]
+        self._ctx.function = function
         self._ctx.args = args or ()
         self._ctx.kwargs = kwargs or {}
         self._ctx.stop_event = Event()

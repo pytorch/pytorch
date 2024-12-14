@@ -1795,7 +1795,7 @@ def norm(  # noqa: F811
             else:
                 _dim = dim
         else:
-            _dim = None  # type: ignore[assignment]
+            _dim = None
 
         if isinstance(p, str):
             if p == "fro" and (
@@ -1850,7 +1850,7 @@ def norm(  # noqa: F811
         else:
             _dim = dim
     else:
-        _dim = None  # type: ignore[assignment]
+        _dim = None
 
     if isinstance(p, str):
         if p == "fro":
@@ -1868,9 +1868,9 @@ def norm(  # noqa: F811
                 raise ValueError("dtype argument is not supported in nuclear norm")
             if _dim is None:
                 if out is None:
-                    return _VF.nuclear_norm(input, keepdim=keepdim)  # type: ignore[arg-type]
+                    return _VF.nuclear_norm(input, keepdim=keepdim)
                 else:
-                    return _VF.nuclear_norm(input, keepdim=keepdim, out=out)  # type: ignore[arg-type]
+                    return _VF.nuclear_norm(input, keepdim=keepdim, out=out)
             else:
                 if out is None:
                     return _VF.nuclear_norm(input, _dim, keepdim=keepdim)  # type: ignore[arg-type]

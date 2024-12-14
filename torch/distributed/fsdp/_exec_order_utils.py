@@ -201,8 +201,8 @@ class _ExecOrderData:
                 "dtype": torch.int32,
                 "device": device,
             }
-            world_num_valid_indices = torch.zeros(self.world_size, **tensor_kwargs)  # type: ignore[arg-type, call-overload]
-            local_num_valid_indices = torch.tensor([num_valid_indices], **tensor_kwargs)  # type: ignore[arg-type, call-overload]
+            world_num_valid_indices = torch.zeros(self.world_size, **tensor_kwargs)  # type: ignore[call-overload]
+            local_num_valid_indices = torch.tensor([num_valid_indices], **tensor_kwargs)  # type: ignore[arg-type]
             dist.all_gather_into_tensor(
                 world_num_valid_indices,
                 local_num_valid_indices,

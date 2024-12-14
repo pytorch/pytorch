@@ -52,7 +52,7 @@ class BaseScheduler:
             wrapper._with_counter = True  # type: ignore[attr-defined]
             return wrapper
 
-        self.sparsifier.step = with_counter(self.sparsifier.step)  # type: ignore[assignment]
+        self.sparsifier.step = with_counter(self.sparsifier.step)  # type: ignore[method-assign]
         self.sparsifier._step_count = 0  # type: ignore[attr-defined]
         self._step_count: int = 0
         self.verbose = verbose

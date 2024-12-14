@@ -358,7 +358,9 @@ def get_op_node_and_weight_eq_obs(
             model, "equalization_node_name_to_qconfig"
         )
         assert maybe_equalization_node_name_to_config is not None
-        equalization_node_name_to_qconfig: Dict[str, Any] = maybe_equalization_node_name_to_config  # type: ignore[assignment]
+        equalization_node_name_to_qconfig: Dict[
+            str, Any
+        ] = maybe_equalization_node_name_to_config
         assert equalization_node_name_to_qconfig.get(op_node.name, None) is not None
         weight_eq_obs = equalization_node_name_to_qconfig.get(
             op_node.name, None

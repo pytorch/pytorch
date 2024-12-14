@@ -79,9 +79,9 @@ class DTensorSpec:
             return self.tensor_meta == __o.tensor_meta
 
         return (
-            self.tensor_meta.shape == __o.tensor_meta.shape  # type: ignore[union-attr]
-            and self.tensor_meta.stride == __o.tensor_meta.stride  # type: ignore[union-attr]
-            and self.tensor_meta.dtype == __o.tensor_meta.dtype  # type: ignore[union-attr]
+            self.tensor_meta.shape == __o.tensor_meta.shape
+            and self.tensor_meta.stride == __o.tensor_meta.stride
+            and self.tensor_meta.dtype == __o.tensor_meta.dtype
         )
 
     def __str__(self) -> str:

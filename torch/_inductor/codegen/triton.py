@@ -1539,7 +1539,7 @@ class TritonCSE(CSE):
 
 
 class TritonKernel(SIMDKernel):
-    overrides = TritonKernelOverrides  # type: ignore[assignment]
+    overrides = TritonKernelOverrides
     helper_functions: HelperFunctions
     kexpr: Callable[[sympy.Expr], str] = texpr
     allow_block_ptr = True
@@ -1948,7 +1948,9 @@ class TritonKernel(SIMDKernel):
         self.filter_masks(mask_vars)
 
         mask_str = " & ".join(sorted(map(str, mask_vars))) if mask_vars else "None"
-        return IndexingOptions(index_str, mask_vars, mask_str, expand_str, has_rindex, index)  # type: ignore[arg-type]
+        return IndexingOptions(
+            index_str, mask_vars, mask_str, expand_str, has_rindex, index
+        )
 
     def codegen_block_ptr(
         self, name: str, var: str, indexing: BlockPtrOptions, other=""
@@ -2124,7 +2126,7 @@ class TritonKernel(SIMDKernel):
         if result_var.use_count > 1:
             load_counts[name] -= 1  # don't double count cache hit
         assert isinstance(result_var, TritonCSEVariable)
-        result_var.mask_vars = indexing.mask_vars  # type: ignore[assignment]
+        result_var.mask_vars = indexing.mask_vars
 
         if append_broadcast:
             line = f"tl.broadcast_to({result_var}, {append_broadcast})"
@@ -2242,7 +2244,7 @@ class TritonKernel(SIMDKernel):
             f"{sorter_indices}, "
             f"{block_size}, "
             ")",
-            dtype=indexing_dtype,  # type: ignore[attr-defined]
+            dtype=indexing_dtype,
         )
 
         return result
@@ -2843,7 +2845,7 @@ class TritonKernel(SIMDKernel):
             cache_keys = [f"{line}, {i}, {masks}" for i in range(n)]
             if all(self.cse.contains(cache_key) for cache_key in cache_keys):
                 return [self.cse.get(cache_key) for cache_key in cache_keys]
-            result_vars = [self.cse.newvar(dtype=dtypes[i]) for i in range(n)]  # type: ignore[attr-defined]
+            result_vars = [self.cse.newvar(dtype=dtypes[i]) for i in range(n)]
             self.compute.writeline(
                 f"{csv(result_vars)} = {line}",
             )
@@ -2866,7 +2868,7 @@ class TritonKernel(SIMDKernel):
             raise AssertionError("Unhandled sort")
 
         for result_var, input_var in zip(result_vars, values):
-            result_var.mask_vars = masks  # type: ignore[attr-defined]
+            result_var.mask_vars = masks
             result_var.bounds = input_var.bounds
 
         return tuple(result_vars)
@@ -2957,7 +2959,7 @@ class TritonKernel(SIMDKernel):
                     # note that random seed is put in V.graph.constants
                     const_tensor = V.graph.constants[arg_name]
                     result.writeline(
-                        f"{var_name} = rand_strided({V.graph.sizevars.size_hints(const_tensor.size())}, {V.graph.sizevars.size_hints(const_tensor.stride())}, device='{const_tensor.device}', dtype={const_tensor.dtype})"  # type: ignore[arg-type]  # noqa: B950 line too long
+                        f"{var_name} = rand_strided({V.graph.sizevars.size_hints(const_tensor.size())}, {V.graph.sizevars.size_hints(const_tensor.stride())}, device='{const_tensor.device}', dtype={const_tensor.dtype})"  # noqa: B950 line too long
                     )
                 elif isinstance(arg_sig, SizeArg):
                     symval_hint = V.graph.sizevars.size_hint(arg_sig.expr)
@@ -3245,8 +3247,8 @@ class TritonKernel(SIMDKernel):
         # during launching the Inductor-compiled Triton kernel.
         # https://github.com/pytorch/pytorch/issues/120478#issuecomment-1962822307
         # https://github.com/openai/triton/blob/231efe9ed2d200be0f69a07c298e4342b08efe3d/python/triton/runtime/jit.py#L384
-        for arg_num in triton_meta["configs"][0].equal_to_1:  # type: ignore[index]
-            triton_meta["constants"][signature[arg_num].name] = 1  # type: ignore[index]
+        for arg_num in triton_meta["configs"][0].equal_to_1:
+            triton_meta["constants"][signature[arg_num].name] = 1
 
         self.triton_meta = triton_meta
 
@@ -3499,7 +3501,7 @@ class TritonKernel(SIMDKernel):
     def _has_constant_mask(self, tree: IterationRangesRoot):
         if not self.optimize_mask:
             return False
-        if V.graph.sizevars.statically_known_equals(tree.numel, 1):  # type: ignore[arg-type]
+        if V.graph.sizevars.statically_known_equals(tree.numel, 1):
             return True
 
         # Masks are superfluous if numel is a multiple of BLOCK

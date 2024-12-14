@@ -815,7 +815,7 @@ class NestedIOFunction(Function):
         r"""
         See :meth:`Function.saved_tensors`.
         """
-        flat_tensors = super().saved_tensors  # type: ignore[misc]
+        flat_tensors = super().saved_tensors
         return _unflatten(flat_tensors, self._to_save_nested)
 
     def mark_dirty(self, *args: Any, **kwargs: Any) -> None:

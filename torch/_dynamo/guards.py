@@ -2636,7 +2636,7 @@ def make_torch_function_mode_stack_guard(intial_stack):
 def recompilation_reason_for_no_tensor_aliasing_guard(guard_manager, scope):
     global_scope = dict(guard_manager.global_scope)
     ids_to_source = collections.defaultdict(list)
-    for tensor_source in guard_manager.no_tensor_aliasing_sources:  # type: ignore[attr-defined]
+    for tensor_source in guard_manager.no_tensor_aliasing_sources:
         global_scope["__compile_source__"] = tensor_source
         tensor_id = id(eval(tensor_source, global_scope, scope))
         ids_to_source[tensor_id].append(tensor_source)

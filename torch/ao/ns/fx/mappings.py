@@ -394,7 +394,7 @@ def get_base_name_to_sets_of_related_ops() -> Dict[str, Set[NSNodeTargetType]]:
         _lower_to_native_backend.WEIGHT_ONLY_LOWER_MODULE_MAP,
         _lower_to_native_backend.SPECIAL_PATTERN_LOWER_MODULE_MAP,
     ):
-        for source, target in source_to_target.items():  # type: ignore[attr-defined]
+        for source, target in source_to_target.items():
             new_connections.append((source, target))
 
     for source_to_double_target in (
@@ -402,7 +402,7 @@ def get_base_name_to_sets_of_related_ops() -> Dict[str, Set[NSNodeTargetType]]:
         _lower_to_native_backend.STATIC_LOWER_FUSED_MODULE_TWO_INPUTS_MAP,
         _lower_to_native_backend.DYNAMIC_LOWER_FUSED_MODULE_MAP,
     ):
-        for source, (target1, target2) in source_to_double_target.items():  # type: ignore[attr-defined]
+        for source, (target1, target2) in source_to_double_target.items():
             new_connections.append((source, target1))
             new_connections.append((source, target2))
 

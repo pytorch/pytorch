@@ -169,7 +169,7 @@ ONNXProgram(
         if not include_initializers:
             self.model.graph.initializers.clear()
         if keep_initializers_as_inputs:
-            self.model.graph.inputs.extend(original_initializers.values())  # type: ignore[arg-type]
+            self.model.graph.inputs.extend(original_initializers.values())
 
         # Save the model to disk
         if (
@@ -234,7 +234,7 @@ ONNXProgram(
             self.save(model_path, external_data=True)
             model = model_path
         else:
-            model = self.model_proto.SerializeToString()  # type: ignore[assignment]
+            model = self.model_proto.SerializeToString()
 
         self._inference_session = initializer(model)
         logger.debug("Inference session initialized.")

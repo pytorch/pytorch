@@ -228,7 +228,7 @@ class LazyInstanceNorm1d(_LazyNormBase, _InstanceNorm):
         - Output: :math:`(N, C, L)` or :math:`(C, L)` (same shape as input)
     """
 
-    cls_to_become = InstanceNorm1d  # type: ignore[assignment]
+    cls_to_become = InstanceNorm1d
 
     def _get_no_batch_dim(self):
         return 2
@@ -345,7 +345,7 @@ class LazyInstanceNorm2d(_LazyNormBase, _InstanceNorm):
         - Output: :math:`(N, C, H, W)` or :math:`(C, H, W)` (same shape as input)
     """
 
-    cls_to_become = InstanceNorm2d  # type: ignore[assignment]
+    cls_to_become = InstanceNorm2d
 
     def _get_no_batch_dim(self):
         return 3
@@ -461,7 +461,7 @@ class LazyInstanceNorm3d(_LazyNormBase, _InstanceNorm):
         - Output: :math:`(N, C, D, H, W)` or :math:`(C, D, H, W)` (same shape as input)
     """
 
-    cls_to_become = InstanceNorm3d  # type: ignore[assignment]
+    cls_to_become = InstanceNorm3d
 
     def _get_no_batch_dim(self):
         return 4

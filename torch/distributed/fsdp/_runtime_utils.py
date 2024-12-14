@@ -1439,7 +1439,7 @@ def _register_post_backward_hook(
             return
         hook = functools.partial(_post_backward_hook, state, handle)
         hook_handle = flat_param.register_post_accumulate_grad_hook(hook)
-        flat_param._post_backward_hook_handle = hook_handle  # type: ignore[attr-defined]
+        flat_param._post_backward_hook_handle = hook_handle
     else:
         already_registered = hasattr(flat_param, "_post_backward_hook_state")
         if already_registered or not flat_param.requires_grad:
@@ -1456,7 +1456,7 @@ def _register_post_backward_hook(
         hook_handle = acc_grad.register_hook(
             functools.partial(_post_backward_hook, state, handle)
         )
-        flat_param._post_backward_hook_state = (acc_grad, hook_handle)  # type: ignore[attr-defined]
+        flat_param._post_backward_hook_state = (acc_grad, hook_handle)
 
 
 def _register_post_backward_reshard_only_hook(
@@ -1499,9 +1499,9 @@ def _register_post_backward_reshard_only_hook(
         inp_tensors, functools.partial(_post_backward_reshard_only_hook, state, handle)
     )
     if torch.distributed._functional_collectives.is_torchdynamo_compiling():
-        flat_param._post_backward_hook_handle = hook_handle  # type: ignore[attr-defined, assignment]
+        flat_param._post_backward_hook_handle = hook_handle
     else:
-        flat_param._post_backward_hook_state = (hook_handle,)  # type: ignore[attr-defined, assignment]
+        flat_param._post_backward_hook_state = (hook_handle,)  # type: ignore[assignment]
 
 
 @no_type_check
@@ -1541,11 +1541,11 @@ def _wait_for_computation_stream(
     # Tracing does not need to wait
     if torch.distributed._functional_collectives.is_torchdynamo_compiling():
         return
-    unshard_stream.wait_stream(computation_stream)  # type: ignore[attr-defined]
+    unshard_stream.wait_stream(computation_stream)
     # Having the pre-all-gather stream wait for the current stream even if we
     # do not leverage the pre-all-gather stream is tolerable since this only
     # runs once per iteration
-    pre_unshard_stream.wait_stream(computation_stream)  # type: ignore[attr-defined]
+    pre_unshard_stream.wait_stream(computation_stream)
 
 
 def _reset_flat_param_grad_info_if_needed(

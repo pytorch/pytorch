@@ -197,7 +197,7 @@ class _WeakRefInfo:
         while len(unflattened_tensors) > 0:
             obj = unflattened_tensors.pop()
             if is_traceable_wrapper_subclass(obj):
-                attrs, _ = obj.__tensor_flatten__()  # type: ignore[attr-defined]
+                attrs, _ = obj.__tensor_flatten__()
                 unflattened_tensors.extend([getattr(obj, attr) for attr in attrs])
             else:
                 if not hasattr(obj, "untyped_storage"):

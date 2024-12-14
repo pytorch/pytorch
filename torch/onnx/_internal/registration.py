@@ -90,8 +90,8 @@ class OverrideDict(Collection[_K], Generic[_K, _V]):
 
     def remove_override(self, key: _K) -> None:
         """Un-overrides a key-value pair."""
-        self._overrides.pop(key, None)  # type: ignore[arg-type]
-        self._merged.pop(key, None)  # type: ignore[arg-type]
+        self._overrides.pop(key, None)
+        self._merged.pop(key, None)
         if key in self._base:
             self._merged[key] = self._base[key]
 

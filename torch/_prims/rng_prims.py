@@ -38,7 +38,7 @@ def register_rng_prim(name, schema, impl_aten, impl_meta, doc, tags=None):
 
     for p in (prim_packet, prim):
         p.__doc__ = doc
-        p.return_type = torch._prims_common.RETURN_TYPE.NEW  # type: ignore[attr-defined]
+        p.return_type = torch._prims_common.RETURN_TYPE.NEW
 
         p.schema = name + schema
         p.impl_aten = impl_aten

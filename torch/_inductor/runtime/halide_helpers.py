@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 try:
-    import halide as hl  # type: ignore[import-untyped, import-not-found]
+    import halide as hl  # type: ignore[import-not-found]
 except ImportError:
     hl = None
 

@@ -524,7 +524,7 @@ class CachingAutotuner(KernelInterface):
         device_interface = self.get_device_interface()
 
         # load binary to the correct device
-        with DeviceGuard(device_interface, compile_meta["device"]):  # type: ignore[attr-defined]
+        with DeviceGuard(device_interface, compile_meta["device"]):
             # need to initialize context
             device_interface.synchronize(device_interface.current_device())
 

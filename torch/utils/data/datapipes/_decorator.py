@@ -91,7 +91,7 @@ class non_deterministic:
         #    When the function returns True, the instance is non-deterministic. Otherwise,
         #    the instance is a deterministic DataPipe.
         elif isinstance(arg, Callable):  # type:ignore[arg-type]
-            self.deterministic_fn = arg  # type: ignore[assignment, misc]
+            self.deterministic_fn = arg  # type: ignore[assignment]
         else:
             raise TypeError(f"{arg} can not be decorated by non_deterministic")
 
@@ -105,13 +105,10 @@ class non_deterministic:
                     "You can turn off determinism for this DataPipe if that is acceptable "
                     "for your application"
                 )
-            return self.cls(*args, **kwargs)  # type: ignore[call-arg]
+            return self.cls(*args, **kwargs)
 
         # Decorate with a functional argument
-        if not (
-            isinstance(args[0], type)
-            and issubclass(args[0], IterDataPipe)  # type: ignore[arg-type]
-        ):
+        if not (isinstance(args[0], type) and issubclass(args[0], IterDataPipe)):
             raise TypeError(
                 f"Only `IterDataPipe` can be decorated, but {args[0].__name__} is found"
             )
@@ -119,7 +116,7 @@ class non_deterministic:
         return self.deterministic_wrapper_fn
 
     def deterministic_wrapper_fn(self, *args, **kwargs) -> IterDataPipe:
-        res = self.deterministic_fn(*args, **kwargs)  # type: ignore[call-arg, misc]
+        res = self.deterministic_fn(*args, **kwargs)
         if not isinstance(res, bool):
             raise TypeError(
                 "deterministic_fn of `non_deterministic` decorator is required "
@@ -132,7 +129,7 @@ class non_deterministic:
                 "'guaranteed_datapipes_determinism'. You can turn off determinism "
                 "for this DataPipe if that is acceptable for your application"
             )
-        return self.cls(*args, **kwargs)  # type: ignore[call-arg, misc]
+        return self.cls(*args, **kwargs)  # type: ignore[misc]
 
 
 ######################################################

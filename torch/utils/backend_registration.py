@@ -119,7 +119,7 @@ def _generate_tensor_methods_for_privateuse1_backend(custom_backend_name: str) -
     def wrap_tensor_backend(self: torch.Tensor) -> bool:
         if has_torch_function_unary(self):
             # TODO mypy doesn't support @property, see: https://github.com/python/mypy/issues/6185
-            return handle_torch_function(wrap_tensor_backend.__get__, (self,), self)  # type: ignore[attr-defined]
+            return handle_torch_function(wrap_tensor_backend.__get__, (self,), self)
         return self.device.type == custom_backend_name
 
     _check_register_once(torch.Tensor, f'is_{custom_backend_name}')
@@ -372,8 +372,8 @@ def _get_custom_mod_func(func_name: str):
     """
     assert isinstance(func_name, str), f"func_name must be `str`, but got `{type(func_name)}`."
     backend_name = _get_privateuse1_backend_name()
-    custom_device_mod = getattr(torch, backend_name, None)  # type: ignore[arg-type]
-    function = getattr(custom_device_mod, func_name, None)  # type: ignore[arg-type]
+    custom_device_mod = getattr(torch, backend_name, None)
+    function = getattr(custom_device_mod, func_name, None)
     if custom_device_mod is None or function is None:
         message = f'Try to call torch.{backend_name}.{func_name}. The backend must register a custom backend '
         message += f"module with `torch._register_device_module('{backend_name}', BackendModule)`. And "

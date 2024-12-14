@@ -346,7 +346,7 @@ class CUDACompileSourceCapturingContext:
         self._compile_patch = mock.patch(
             "torch._inductor.codecache.CUDACodeCache.compile", my_compile
         )
-        return self._compile_patch.__enter__(*args, **kwargs)  # type: ignore[union-attr]
+        return self._compile_patch.__enter__(*args, **kwargs)
 
     def __exit__(self, *args, **kwargs):
         return self._compile_patch.__exit__(*args, **kwargs)  # type: ignore[union-attr]

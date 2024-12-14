@@ -51,13 +51,13 @@ def input_reshard(
         )
         saved_tensor_hooks.__enter__()
         nonlocal cx
-        cx = saved_tensor_hooks  # type: ignore[name-defined]
+        cx = saved_tensor_hooks
 
     def input_reshard_backward_hook(
         _: torch.nn.Module, _i: Tuple[Any, ...], _o: Any
     ) -> Any:
         nonlocal cx
-        cx.__exit__()  # type: ignore[name-defined, union-attr]
+        cx.__exit__()  # type: ignore[union-attr]
 
     module.register_forward_pre_hook(input_reshard_forward_pre_hook)
     module.register_forward_hook(input_reshard_backward_hook)

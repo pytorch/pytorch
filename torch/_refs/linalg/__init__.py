@@ -113,7 +113,7 @@ def vector_norm(
     check_fp_or_complex(x.dtype, "linalg.vector_norm")
 
     if isinstance(dim, Dim):
-        dim = [dim]  # type: ignore[assignment]
+        dim = [dim]
 
     if guard_size_oblivious(x.numel() == 0) and (ord < 0.0 or ord == float("inf")):
         torch._check(
@@ -142,18 +142,18 @@ def vector_norm(
     if ord == 0.0:
         return torch.sum(torch.ne(x, 0.0), dim=dim, keepdim=keepdim, dtype=result_dtype)
     elif ord == float("inf"):
-        return to_result_dtype(torch.amax(torch.abs(x), dim=dim, keepdim=keepdim))  # type: ignore[return-value,arg-type]
+        return to_result_dtype(torch.amax(torch.abs(x), dim=dim, keepdim=keepdim))  # type: ignore[arg-type]
     elif ord == float("-inf"):
-        return to_result_dtype(torch.amin(torch.abs(x), dim=dim, keepdim=keepdim))  # type: ignore[return-value,arg-type]
+        return to_result_dtype(torch.amin(torch.abs(x), dim=dim, keepdim=keepdim))  # type: ignore[arg-type]
     else:
         # From here on the computation dtype is important as the reduction is non-trivial
-        x = _maybe_convert_to_dtype(x, computation_dtype)  # type: ignore[assignment]
+        x = _maybe_convert_to_dtype(x, computation_dtype)
         reduce_sum = partial(torch.sum, dim=dim, keepdim=keepdim)
 
         is_ord_even = ord % 2 == 0 if isinstance(ord, IntLike) else ord % 2.0 == 0.0
         if not (is_ord_even and utils.is_float_dtype(x.dtype)):
             x = torch.abs(x)
-        return to_result_dtype(torch.pow(reduce_sum(torch.pow(x, ord)), 1.0 / ord))  # type: ignore[return-value]
+        return to_result_dtype(torch.pow(reduce_sum(torch.pow(x, ord)), 1.0 / ord))
 
 
 def _backshift_permutation(dim0, dim1, ndim):
@@ -184,7 +184,7 @@ def matrix_norm(
     # dim
     dim = utils.canonicalize_dims(A.ndim, dim)
     if isinstance(dim, Dim):
-        dim = (dim,)  # type: ignore[assignment]
+        dim = (dim,)
     torch._check(
         len(dim) == 2, lambda: "linalg.matrix_norm: dim must be a 2-tuple. Got {dim}"
     )
@@ -210,7 +210,7 @@ def matrix_norm(
             return vector_norm(A, 2, dim, keepdim, dtype=dtype)
         else:  # ord == "nuc"
             if dtype is not None:
-                A = _maybe_convert_to_dtype(A, dtype)  # type: ignore[assignment]
+                A = _maybe_convert_to_dtype(A, dtype)
             perm = _backshift_permutation(dim[0], dim[1], A.ndim)
             result = torch.sum(svdvals(prims.transpose(A, perm)), -1, keepdim)
             if keepdim:
@@ -233,7 +233,7 @@ def matrix_norm(
 
         if abs_ord == 2.0:
             if dtype is not None:
-                A = _maybe_convert_to_dtype(A, dtype)  # type: ignore[assignment]
+                A = _maybe_convert_to_dtype(A, dtype)
             perm = _backshift_permutation(dim[0], dim[1], A.ndim)
             result = max_min(svdvals(prims.transpose(A, perm)), dim=-1)
             if keepdim:
@@ -263,7 +263,7 @@ def norm(
 ) -> TensorLikeType:
     if dim is not None:
         if isinstance(dim, Dim):
-            dim = (dim,)  # type: ignore[assignment]
+            dim = (dim,)
         torch._check(
             len(dim) in (1, 2),
             lambda: "linalg.norm: If dim is specified, it must be of length 1 or 2. Got {dim}",

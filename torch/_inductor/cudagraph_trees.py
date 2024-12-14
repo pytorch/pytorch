@@ -1012,7 +1012,7 @@ class CUDAGraphNode:
             expanded_dims = self.expanded_dims[idx]
             dst_tensors.append(index_expanded_dims(dsts[idx], expanded_dims))  # type: ignore[arg-type]
             src_tensors.append(index_expanded_dims(srcs[idx], expanded_dims))  # type: ignore[arg-type]
-            srcs[idx] = None  # type: ignore[call-overload]
+            srcs[idx] = None
         # Fails on empty lists
         if dst_tensors:
             torch._foreach_copy_(dst_tensors, src_tensors)
@@ -1689,7 +1689,7 @@ class CUDAGraphNode:
         # because we would have already written over their memory.
         for idx in self.cudagraph_managed_idxs:
             if not self.preserved_aliased_inputs[idx]:
-                inputs[idx] = None  # type: ignore[call-overload]
+                inputs[idx] = None
 
         torch._check(
             self._check_liveness(

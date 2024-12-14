@@ -339,7 +339,7 @@ class ExportGraphSignature:
     @property
     def inputs_to_buffers(self) -> Mapping[str, str]:
         return _immutable_dict(
-            (s.arg.name, s.target)  # type: ignore[union-attr, misc]
+            (s.arg.name, s.target)
             for s in self.input_specs
             if s.kind == InputKind.BUFFER
             and isinstance(s.arg, TensorArgument)

@@ -76,7 +76,7 @@ class NormalizeArgs(Transformer):
             target,
             args,  # type: ignore[arg-type]
             kwargs,
-            arg_types,  # type: ignore[arg-type]
+            arg_types,
             kwarg_types,
             self.normalize_to_only_use_kwargs,
         )

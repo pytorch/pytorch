@@ -174,7 +174,7 @@ def launch_kernel(kernel, tensor_dims_map, full_grid, grid_blocks=None):
 
         grid_blocks = tuple(
             valid_grid_dim(g, mg) for g, mg in zip(grid_blocks, cuda_max_grid)
-        )  # type: ignore[assignment]
+        )
 
     for grid, *sliced_tensors in grid_partitioner(
         full_grid, grid_blocks, tensor_dims_map
@@ -2526,4 +2526,4 @@ else:
     _scaled_dot_product_attention = None  # type: ignore[assignment]
     _scatter_mm2 = None  # type: ignore[assignment]
     _scatter_mm6 = None  # type: ignore[assignment]
-    _bsr_strided_addmm_kernel = None  # type: ignore[assignment]
+    _bsr_strided_addmm_kernel = None

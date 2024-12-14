@@ -145,12 +145,12 @@ def decompose_stack(graph: torch.fx.GraphModule, input_tensors: List[Any]) -> An
             aten.unsqueeze, args=(input_tensor,), kwargs={"dim": 0}
         )
         unsqueezed_inputs.append(unsqueezed_input)
-        unsqueezed_input.meta["val"] = aten.unsqueeze(input_tensor.meta["val"], dim=0)  # type: ignore[assignment]
+        unsqueezed_input.meta["val"] = aten.unsqueeze(input_tensor.meta["val"], dim=0)
         unsqueezed_inputs_meta.append(unsqueezed_input.meta["val"])
     stacked_inputs = graph.call_function(  # type: ignore[operator]
         aten.cat, args=(unsqueezed_inputs,), kwargs={"dim": 0}
     )
-    stacked_inputs.meta["val"] = aten.cat(unsqueezed_inputs_meta, dim=0)  # type: ignore[assignment]
+    stacked_inputs.meta["val"] = aten.cat(unsqueezed_inputs_meta, dim=0)
     return stacked_inputs
 
 
@@ -238,10 +238,10 @@ class PostGradBatchLinearFusion(BatchFusion):
             batch_inputs.append(input)  # type: ignore[possibly-undefined]
             batch_weights.append(weight)  # type: ignore[possibly-undefined]
             batch_biases.append(bias)  # type: ignore[possibly-undefined]
-            batch_inputs_meta.append(input.meta)  # type: ignore[possibly-undefined, union-attr]
-            batch_weights_meta.append(weight.meta)  # type: ignore[possibly-undefined, union-attr]
-            if bias is not None:  # type: ignore[possibly-undefined]
-                batch_biases_meta.append(bias.meta)  # type: ignore[possibly-undefined, union-attr]
+            batch_inputs_meta.append(input.meta)  # type: ignore[union-attr]
+            batch_weights_meta.append(weight.meta)  # type: ignore[union-attr]
+            if bias is not None:
+                batch_biases_meta.append(bias.meta)  # type: ignore[union-attr]
             else:
                 batch_biases_meta.append(None)
 
@@ -280,7 +280,9 @@ class PostGradBatchLinearFusion(BatchFusion):
                             args=(batch_biases[i],),
                             kwargs={"size": broadcast_shape},
                         )
-                        broadcast_bias.meta["val"] = aten.broadcast_to(batch_biases_meta[i]["val"], broadcast_shape)  # type: ignore[assignment]
+                        broadcast_bias.meta["val"] = aten.broadcast_to(
+                            batch_biases_meta[i]["val"], broadcast_shape
+                        )
                         new_bias_add = graph.call_function(  # type: ignore[operator]
                             aten.add.Tensor, args=((broadcast_bias, new_mm))
                         )
@@ -403,8 +405,8 @@ class BatchPointwiseMathOpsPostGradFusion(BatchPointwiseOpsFusionFactory):
             # input and other can be scalars, where they have no attribute 'meta'
             if hasattr(input, "meta")
             and hasattr(other, "meta")
-            and is_node_meta_valid(input)  # type: ignore[arg-type, union-attr]
-            and is_node_meta_valid(other)  # type: ignore[arg-type, union-attr]
+            and is_node_meta_valid(input)  # type: ignore[arg-type]
+            and is_node_meta_valid(other)  # type: ignore[arg-type]
             # torch.SymInt or torch.SymFloat object has no attribute 'shape'
             and isinstance(input.meta["val"], torch.Tensor)  # type: ignore[union-attr]
             and isinstance(other.meta["val"], torch.Tensor)  # type: ignore[union-attr]
@@ -456,8 +458,8 @@ class BatchPointwiseMathOpsPostGradFusion(BatchPointwiseOpsFusionFactory):
             input, other = node.args
             batch_inputs.append(input)
             batch_others.append(other)
-            batch_inputs_meta.append(input.meta)  # type: ignore[possibly-undefined, union-attr]
-            batch_others_meta.append(other.meta)  # type: ignore[possibly-undefined, union-attr]
+            batch_inputs_meta.append(input.meta)  # type: ignore[union-attr]
+            batch_others_meta.append(other.meta)  # type: ignore[union-attr]
 
         with graph.inserting_before(subset[0]):  # type: ignore[operator]
             stack_inputs = decompose_stack(graph, batch_inputs)

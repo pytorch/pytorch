@@ -61,14 +61,14 @@ def _accuracy_fails(gm, example_inputs, compiler_fn):
 class WrapBackendDebug:
     def __init__(self, unconfigured_compiler_fn, compiler_name: str) -> None:
         functools.wraps(unconfigured_compiler_fn)(self)
-        self._torchdynamo_orig_callable = unconfigured_compiler_fn  # type: ignore[attr-defined]
+        self._torchdynamo_orig_callable = unconfigured_compiler_fn
         self._compiler_name = compiler_name
         if hasattr(unconfigured_compiler_fn, "__name__"):
             self.__name__ = unconfigured_compiler_fn.__name__
         if hasattr(unconfigured_compiler_fn, "compiler_name"):
             self.__name__ = unconfigured_compiler_fn.compiler_name
         if hasattr(unconfigured_compiler_fn, "get_compiler_config"):
-            self.get_compiler_config = unconfigured_compiler_fn.get_compiler_config  # type: ignore[attr-defined]
+            self.get_compiler_config = unconfigured_compiler_fn.get_compiler_config
 
     def __call__(self, gm, example_inputs, **kwargs):
         compiler_fn = functools.partial(self._torchdynamo_orig_callable, **kwargs)

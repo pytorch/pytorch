@@ -75,20 +75,20 @@ class FunctionalTensor(torch.Tensor):
     # These are all aten ops that correspond to metadata queries.
     # We want FunctionalTensor to be able to handle them directly.
     metadata_fns = [
-        torch.ops.aten.is_contiguous.default,  # type: ignore[has-type]
-        torch.ops.aten.is_contiguous.memory_format,  # type: ignore[has-type]
-        torch.ops.aten.is_strides_like_format.default,  # type: ignore[has-type]
-        torch.ops.aten.is_non_overlapping_and_dense.default,  # type: ignore[has-type]
-        torch.ops.aten.size.default,  # type: ignore[has-type]
-        torch.ops.aten.sym_size.default,  # type: ignore[has-type]
-        torch.ops.aten.stride.default,  # type: ignore[has-type]
-        torch.ops.aten.sym_stride.default,  # type: ignore[has-type]
-        torch.ops.aten.storage_offset.default,  # type: ignore[has-type]
-        torch.ops.aten.sym_storage_offset.default,  # type: ignore[has-type]
-        torch.ops.aten.numel.default,  # type: ignore[has-type]
-        torch.ops.aten.sym_numel.default,  # type: ignore[has-type]
-        torch.ops.aten.dim.default,  # type: ignore[has-type]
-        torch.ops.prim.device.default,  # type: ignore[has-type]
+        torch.ops.aten.is_contiguous.default,
+        torch.ops.aten.is_contiguous.memory_format,
+        torch.ops.aten.is_strides_like_format.default,
+        torch.ops.aten.is_non_overlapping_and_dense.default,
+        torch.ops.aten.size.default,
+        torch.ops.aten.sym_size.default,
+        torch.ops.aten.stride.default,
+        torch.ops.aten.sym_stride.default,
+        torch.ops.aten.storage_offset.default,
+        torch.ops.aten.sym_storage_offset.default,
+        torch.ops.aten.numel.default,
+        torch.ops.aten.sym_numel.default,
+        torch.ops.aten.dim.default,
+        torch.ops.prim.device.default,
     ]
 
     # Used by auto_functionalize to determine base of tensors during inference mode.
@@ -117,7 +117,7 @@ class FunctionalTensor(torch.Tensor):
             FunctionalTensor._extra_dispatch_keys & torch._C._dispatch_keys(elem)
         )
 
-        out = torch.Tensor._make_wrapper_subclass(  # type: ignore[arg-type, attr-defined]
+        out = torch.Tensor._make_wrapper_subclass(  # type: ignore[attr-defined]
             # TODO: right now, _make_wrapper_subclass's dynamic shape interaction is not great.
             # Calling the overload that has kwargs causes us to go down the first overload path,
             # which will **always** specialize sizes.
@@ -305,7 +305,7 @@ class FunctionalTensorMode(TorchDispatchMode):
         self._mode_key = torch._C._TorchDispatchModeKey.FUNCTIONAL
         self.pre_dispatch = pre_dispatch
         # This will be turned off later for pre-dispatch functionalization
-        self._dispatch_key = torch._C.DispatchKey.PreDispatch if pre_dispatch else None  # type: ignore[attr-defined]
+        self._dispatch_key = torch._C.DispatchKey.PreDispatch if pre_dispatch else None
         # Map of effect type (ex. _EffectType.ORDERED) to a token. The tokens help keep
         # track of the ordering between side effectful operations.
         self._tokens: Dict[Any, torch.Tensor] = {}

@@ -317,7 +317,7 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
                         from ..graph import may_get_constant_buffer_dtype
 
                         dtype = may_get_constant_buffer_dtype(
-                            V.graph.graph_inputs[input_key]  # type: ignore[arg-type]
+                            V.graph.graph_inputs[input_key]
                         )
                         assert (
                             dtype is not None

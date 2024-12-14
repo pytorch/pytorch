@@ -150,7 +150,7 @@ class MemoryDep(Dep):
         """
         return MemoryDep(
             self.name,
-            *_RecordLoadStoreInner._normalize(self.index, self.ranges),  # type: ignore[arg-type]
+            *_RecordLoadStoreInner._normalize(self.index, self.ranges),
             self.mode,
         )
 
@@ -191,9 +191,11 @@ class MemoryDep(Dep):
                 reindex([add_var(x) for x in new_simplified_sizes]),
             )
         )
-        new_index = sympy_subs(sympy.expand(self.index), replacement)  # type: ignore[arg-type] # next PR
+        new_index = sympy_subs(sympy.expand(self.index), replacement)  # next PR
 
-        out = MemoryDep(self.name, new_index, tuple(var_ranges.keys()), tuple(var_ranges.values()))  # type: ignore[arg-type]
+        out = MemoryDep(
+            self.name, new_index, tuple(var_ranges.keys()), tuple(var_ranges.values())
+        )
         return out
 
     @property
@@ -219,7 +221,7 @@ class MemoryDep(Dep):
             for var, size in zip(self.var_names, self.size):
                 if var in vars:
                     numel = numel * size
-        return numel  # type: ignore[return-value]
+        return numel
 
     def rename(self, renames: Dict[str, str]) -> "MemoryDep":
         if self.name in renames:
@@ -283,7 +285,7 @@ class MemoryDep(Dep):
         return isinstance(self.index, (int, sympy.Integer))
 
     def is_indirect(self) -> bool:
-        return any(is_indirect(v.name) for v in self.index.free_symbols)  # type: ignore[attr-defined]
+        return any(is_indirect(v.name) for v in self.index.free_symbols)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -297,7 +299,7 @@ class StarDep(Dep):
         raise NotImplementedError("StarDep does not have an index")
 
     def get_numel(self) -> sympy.Expr:
-        return V.graph.get_numel(self.name)  # type: ignore[return-value]
+        return V.graph.get_numel(self.name)
 
     def rename(self, renames: Dict[str, str]) -> "StarDep":
         if self.name in renames:
@@ -364,7 +366,7 @@ class WeakDep(Dep):
 
 @dataclasses.dataclass(frozen=True)
 class IndexExprDep:
-    index: sympy.Expr  # type: ignore[assignment]
+    index: sympy.Expr
     var_names: Tuple[sympy.Symbol, ...]
     size: Tuple[sympy.Expr, ...]
 
@@ -469,7 +471,7 @@ class _RecordLoadStoreInner(V.MockHandler):  # type: ignore[name-defined]
         # convert it to the simplest form because of the interference from
         # different indexing formulas.
         index_vars = [*var_ranges.keys()]
-        sizes = tuple(var_ranges.values())  # type: ignore[assignment]
+        sizes = tuple(var_ranges.values())
         new_sizes, reindex, _prune = V.graph.sizevars._simplify_loops(
             index_vars,
             sizes,
@@ -485,7 +487,7 @@ class _RecordLoadStoreInner(V.MockHandler):  # type: ignore[name-defined]
         new_vars = [*new_vars.keys()]
         new_sizes = [*new_sizes]
         cls.drop_unused_symbols(index, new_vars, new_sizes)
-        return index, tuple(new_vars), tuple(new_sizes)  # type: ignore[arg-type]
+        return index, tuple(new_vars), tuple(new_sizes)
 
     def canonicalize(
         self, index: sympy.Expr
@@ -497,7 +499,7 @@ class _RecordLoadStoreInner(V.MockHandler):  # type: ignore[name-defined]
 
             self.drop_unused_symbols(index, var_names, sizes)
 
-            return index, tuple(var_names), tuple(sizes)  # type: ignore[return-value, arg-type]
+            return index, tuple(var_names), tuple(sizes)
         var_ranges = {
             k: V.graph.sizevars.simplify(v)
             for k, v in self._var_ranges.items()
@@ -626,19 +628,17 @@ def extract_loop_body_with_args(fn, args, var_ranges, normalize=False):
     if fn.indirect_vars:
         # mimic the `tmpX` naming tracing gives us
         repl = {v: make_symbol(SymT.TMP, i) for i, v in enumerate(fn.indirect_vars)}
-        name_to_index = {k: sympy_subs(v, repl) for k, v in name_to_index.items()}  # type: ignore[arg-type]
+        name_to_index = {k: sympy_subs(v, repl) for k, v in name_to_index.items()}
     for entry in fn.memory_usage[MemoryUsageType.LOAD]:
-        inner.load(entry.buffer_name, name_to_index[entry.index_name])  # type: ignore[arg-type]
+        inner.load(entry.buffer_name, name_to_index[entry.index_name])
     for entry in fn.memory_usage[MemoryUsageType.LOAD_SEED]:
-        inner.load_seed(entry.buffer_name, int(name_to_index[entry.index_name]))  # type: ignore[arg-type]
+        inner.load_seed(entry.buffer_name, int(name_to_index[entry.index_name]))
     for entry in fn.memory_usage[MemoryUsageType.STORE]:
         inner.store(
             entry.buffer_name, name_to_index[entry.index_name], None, entry.mode  # type: ignore[arg-type]
         )
     for entry in fn.memory_usage[MemoryUsageType.STORE_REDUCTION]:
-        inner.store_reduction(
-            entry.buffer_name, name_to_index[entry.index_name], None  # type: ignore[arg-type]
-        )
+        inner.store_reduction(entry.buffer_name, name_to_index[entry.index_name], None)
     for entry in fn.memory_usage[MemoryUsageType.INDEX_EXPR]:
         inner.index_expr(name_to_index[entry.index_name], None)
     for entry in fn.memory_usage[MemoryUsageType.BUCKETIZE]:

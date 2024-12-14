@@ -321,14 +321,14 @@ class Shard(Placement):
             old_dim_unpad_size = (
                 old_dim_full_chunk_size * num_chunks - current_logical_shape[self.dim]  # type: ignore[possibly-undefined]
             )
-            new_tensor = unpad_tensor(new_tensor, self.dim, old_dim_unpad_size)  # type: ignore[possibly-undefined]
+            new_tensor = unpad_tensor(new_tensor, self.dim, old_dim_unpad_size)
 
         if new_dim_padding:
             local_shard_size_on_new_dim = self._local_shard_size_on_dim(
                 new_dim_logical_size, num_chunks, my_coordinate[mesh_dim]
             )[0]
             new_dim_unpad_size = new_dim_full_chunk_size - local_shard_size_on_new_dim  # type: ignore[possibly-undefined]
-            new_tensor = unpad_tensor(new_tensor, new_shard_dim, new_dim_unpad_size)  # type: ignore[possibly-undefined]
+            new_tensor = unpad_tensor(new_tensor, new_shard_dim, new_dim_unpad_size)
 
         return new_tensor
 

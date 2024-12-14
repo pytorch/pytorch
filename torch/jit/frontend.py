@@ -376,7 +376,7 @@ def get_jit_def(fn, def_name, self_name=None, is_classmethod=False):
     # for the arguments from type_trace_db
     type_trace_db = torch.jit._script._get_type_trace_db()
     pdt_arg_types = None
-    if monkeytype_trace and not isinstance(fn, _ParsedDef):  # type: ignore[truthy-function]
+    if monkeytype_trace and not isinstance(fn, _ParsedDef):
         qualname = get_qualified_name(fn)
         pdt_arg_types = type_trace_db.get_args_types(qualname)
 

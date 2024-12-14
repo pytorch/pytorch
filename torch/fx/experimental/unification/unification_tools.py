@@ -406,7 +406,7 @@ def groupby(key, seq):
         d[key(item)](item)
     rv = {}
     for k, v in d.items():
-        rv[k] = v.__self__  # type: ignore[var-annotated, attr-defined]
+        rv[k] = v.__self__  # type: ignore[attr-defined]
     return rv
 
 

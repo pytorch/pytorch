@@ -519,7 +519,7 @@ def fix_iota_device(match: Match, length, start, step, dtype, device, requires_g
             and user.target in (aten.index.Tensor, aten.index_put.default)
             and hasattr(user.meta.get("val"), "device")
         ):
-            user_devices.add(user.meta["val"].device)  # type: ignore[union-attr]
+            user_devices.add(user.meta["val"].device)
         else:
             return  # bail out
 

@@ -77,7 +77,7 @@ class MapperIterDataPipe(IterDataPipe[_T_co]):
         self.datapipe = datapipe
 
         _check_unpickable_fn(fn)
-        self.fn = fn  # type: ignore[assignment]
+        self.fn = fn
 
         self.input_col = input_col
         if input_col is None and output_col is not None:

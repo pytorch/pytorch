@@ -35,7 +35,7 @@ from torch.utils import _pytree as pytree
 from torch.utils._pytree import tree_map
 
 
-DispatchKey = torch._C.DispatchKey  # type: ignore[attr-defined]
+DispatchKey = torch._C.DispatchKey  # type: ignore[attr-defined, unused-ignore]
 
 # None of these functions are publicly accessible; get at them
 # from torch._decomps
@@ -1241,7 +1241,7 @@ def embedding_dense_backward(
         grad_output, type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
     )
     grad_output = grad_output.to(computation_dtype)
-    indices = _maybe_convert_to_dtype(indices, torch.long)  # type: ignore[assignment]
+    indices = _maybe_convert_to_dtype(indices, torch.long)
     if scale_grad_by_freq:
         counts = indices.new_zeros((num_weights,))
         ones = torch.ones_like(indices)
@@ -1982,7 +1982,7 @@ def _get_batch_norm_reserve_tensor(
     the correct shape in the traced graph if we detect that will call the cudnn kernel,
     and rely on DCE to avoid materializing this tensor.
     """
-    backend = torch._C._select_batch_norm_backend(  # type: ignore[attr-defined]
+    backend = torch._C._select_batch_norm_backend(
         input, weight, bias, running_mean, running_var, True, eps
     )
     reserve_size = 0
@@ -2270,23 +2270,25 @@ def native_batch_norm_backward(
         if i != axis:
             reduction_axes.append(i)
 
-    mean = _broadcast_batch_norm_backward(mean, broadcast_mask)  # type: ignore[arg-type]
+    mean = _broadcast_batch_norm_backward(mean, broadcast_mask)
     norm = 1.0 / num_features
     grad_output_sum = torch.sum(grad_out_cast, reduction_axes)  # type: ignore[arg-type]
-    dot_p = torch.sum(grad_out_cast * (input_cast - mean), reduction_axes)  # type: ignore[operator]
+    dot_p = torch.sum(grad_out_cast * (input_cast - mean), reduction_axes)
 
     grad_mean = _broadcast_batch_norm_backward(grad_output_sum * norm, broadcast_mask)
-    proj_scale = _broadcast_batch_norm_backward(torch.mul(dot_p * norm, invstd * invstd), broadcast_mask)  # type: ignore[operator]
+    proj_scale = _broadcast_batch_norm_backward(
+        torch.mul(dot_p * norm, invstd * invstd), broadcast_mask
+    )
 
     if weight_cast is None:
-        grad_scale = _broadcast_batch_norm_backward(invstd, broadcast_mask) * 1.0  # type: ignore[arg-type]
+        grad_scale = _broadcast_batch_norm_backward(invstd, broadcast_mask) * 1.0
     else:
         grad_scale = _broadcast_batch_norm_backward(
             invstd * weight_cast, broadcast_mask
         )
 
     if train:
-        proj = (input_cast - mean) * proj_scale  # type: ignore[operator]
+        proj = (input_cast - mean) * proj_scale
         grad_input = ((grad_out_cast - proj) - grad_mean) * grad_scale
     else:
         grad_input = grad_out_cast * grad_scale

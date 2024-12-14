@@ -1358,7 +1358,7 @@ class CppGemmTemplate(CppTemplate):
         )
         return options
 
-    def render(  # type: ignore[override, return]
+    def render(  # type: ignore[override]
         self,
         kernel: CppTemplateKernel,
         template_buffer_node: Optional[ir.CppTemplateBuffer] = None,

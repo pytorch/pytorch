@@ -222,10 +222,10 @@ class CppCSEVariable(CSEVariable):
         """
         for s in index.free_symbols:
             if s in V.kernel.itervars:
-                self.dependent_itervars.add(s)  # type: ignore[arg-type]
-            elif s.name in V.kernel.cse.varname_map:  # type: ignore[attr-defined]
+                self.dependent_itervars.add(s)
+            elif s.name in V.kernel.cse.varname_map:
                 self.dependent_itervars.update(
-                    V.kernel.cse.varname_map[s.name].dependent_itervars  # type: ignore[attr-defined]
+                    V.kernel.cse.varname_map[s.name].dependent_itervars
                 )
 
     def depends_on(self, itervar: sympy.Symbol):
@@ -278,13 +278,13 @@ def rewrite_index_for_function(
         f"x{len(call_ranges) - (idx + 1)}"
         for idx in range(len(local_buf.get_layout().size))
     ]
-    sorted_symbols = sorted(index.free_symbols, key=lambda s: s.name)  # type: ignore[attr-defined]
+    sorted_symbols = sorted(index.free_symbols, key=lambda s: s.name)
     replacements = {}
     for x in sorted_symbols:
-        if x.name.startswith("x") and x.name not in indices_to_keep:  # type: ignore[attr-defined]
+        if x.name.startswith("x") and x.name not in indices_to_keep:
             # Only keep index used by local buffer
             replacements[x] = sympy.core.numbers.Zero()
-    index = sympy_subs(index, replacements)  # type: ignore[arg-type]
+    index = sympy_subs(index, replacements)
     return index
 
 

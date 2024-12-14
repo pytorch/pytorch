@@ -233,7 +233,7 @@ class FXSymbolicTracer(_exporter_legacy.FXGraphExtractor):
             *model_args, model=model, **model_kwargs
         )
 
-        return self.pre_export_passes(options, model, graph_module, updated_model_args)  # type: ignore[return-value]
+        return self.pre_export_passes(options, model, graph_module, updated_model_args)
 
     def pre_export_passes(
         self,

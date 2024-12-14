@@ -67,7 +67,7 @@ def mark_non_differentiable(ctx, output, output_differentiability):
         if not isinstance(output, tuple):
             tuple_output = (output,)
         else:
-            tuple_output = output  # type: ignore[assignment]
+            tuple_output = output
         assert len(output_differentiability) == len(tuple_output)
         non_differentiable_tensors = []
         for idx, (differentiable, out) in enumerate(zip(output_differentiability, tuple_output)):

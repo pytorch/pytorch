@@ -262,7 +262,7 @@ def parse_args(
                 arg_names = [None] * len(args)  # type: ignore[list-item]
                 fn_name = None
             args = [
-                _parse_arg(arg, arg_desc, arg_name, fn_name)  # type: ignore[method-assign]
+                _parse_arg(arg, arg_desc, arg_name, fn_name)
                 for arg, arg_desc, arg_name in zip(args, arg_descriptors, arg_names)
             ]
             # only support _outputs in kwargs
@@ -1193,9 +1193,9 @@ def _unbind_helper(g: jit_utils.GraphContext, self, dim, _outputs):
     if g.opset < 11:
         from torch.onnx.symbolic_opset9 import unbind
     elif g.opset <= 12:
-        from torch.onnx.symbolic_opset11 import unbind  # type: ignore[no-redef]
+        from torch.onnx.symbolic_opset11 import unbind
     else:
-        from torch.onnx.symbolic_opset13 import unbind  # type: ignore[no-redef]
+        from torch.onnx.symbolic_opset13 import unbind
     return unbind(g, self, dim, _outputs)
 
 
@@ -1204,7 +1204,7 @@ def _scatter_helper(g: jit_utils.GraphContext, self, dim, index, src):
         from torch.onnx.symbolic_opset9 import scatter
     else:
         # for mypy, scatter was imported two lines above
-        from torch.onnx.symbolic_opset11 import scatter  # type: ignore[no-redef]
+        from torch.onnx.symbolic_opset11 import scatter
     return scatter(g, self, dim, index, src)
 
 
@@ -1307,7 +1307,7 @@ def _arange_helper(g: jit_utils.GraphContext, *args):
     if g.opset <= 10:
         from torch.onnx.symbolic_opset9 import arange
     else:
-        from torch.onnx.symbolic_opset11 import arange  # type: ignore[no-redef]
+        from torch.onnx.symbolic_opset11 import arange
     return arange(g, *args)
 
 
@@ -1330,7 +1330,7 @@ def _index_fill_reshape_helper(g: jit_utils.GraphContext, self, dim, index):
         from torch.onnx.symbolic_opset9 import scatter
     else:
         # for mypy, scatter was imported two lines above
-        from torch.onnx.symbolic_opset11 import scatter  # type: ignore[no-redef]
+        from torch.onnx.symbolic_opset11 import scatter
 
     if self.type().dim() is None:
         return _unimplemented("index_fill", "input rank not accessible")

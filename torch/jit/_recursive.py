@@ -696,7 +696,7 @@ def create_script_module_impl(nn_module, concrete_type, stubs_fn):
         # Setter is optional, so it may not exist.
         setter_name = property_stub.def_.setter_name()
         fset = cpp_module._get_method(setter_name.name) if setter_name else None
-        script_module.__dict__[property_name] = property(property_name, fget, fset)  # type: ignore[arg-type]
+        script_module.__dict__[property_name] = property(property_name, fget, fset)
 
     # copy over python methods to script module if they aren't defined on the script module
     # this is currently an internal api used only on module containers
@@ -985,7 +985,7 @@ def try_compile_fn(fn, loc):
 
     # The object returned by __prepare_scriptable__ might have a different closure.
     # Resolve it here to get the right resolution callback.
-    fn = fn.__prepare_scriptable__() if hasattr(fn, "__prepare_scriptable__") else fn  # type: ignore[operator]
+    fn = fn.__prepare_scriptable__() if hasattr(fn, "__prepare_scriptable__") else fn
 
     # We don't have the actual scope where the function was defined, but we can
     # extract the necessary info from the closed over variables on the function

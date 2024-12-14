@@ -470,9 +470,7 @@ def do_auto_functionalize(
             "Please consider using a different name for this argument to avoid potential issues."
         )
     with ctx.redispatch_to_next():
-        unwrapped_outs = auto_functionalized(
-            op, **unwrapped_kwargs  # type: ignore[arg-type]
-        )
+        unwrapped_outs = auto_functionalized(op, **unwrapped_kwargs)
 
     # List of the name of args that get mutated (according to the schema)
     mutable_args_names, _ = get_mutable_args(op)
@@ -517,7 +515,7 @@ def do_auto_functionalize(
                 f"unsupported type for auto-functionalization: {unwrapped_out}"
             )
 
-    return ctx.wrap_tensors(unwrapped_actual_out)  # type: ignore[arg-type]
+    return ctx.wrap_tensors(unwrapped_actual_out)
 
 
 def do_auto_functionalize_v2(
@@ -599,7 +597,7 @@ def do_auto_functionalize_v2(
 
     # remove mutated args from the kwargs (its a function of _all_bases now)
     for arg_name in mutable_args_names:
-        del normalized_kwargs[arg_name]  # type: ignore[arg-type]
+        del normalized_kwargs[arg_name]
 
     unwrapped_kwargs = ctx.unwrap_tensors(normalized_kwargs)  # type: ignore[arg-type]
     if "self" in unwrapped_kwargs or "self_" in unwrapped_kwargs:
@@ -611,7 +609,7 @@ def do_auto_functionalize_v2(
 
     with ctx.redispatch_to_next():
         unwrapped_outs = auto_functionalized_v2(
-            op, **dict(unwrapped_kwargs, _all_bases=all_basis_unwrapped)  # type: ignore[arg-type]
+            op, **dict(unwrapped_kwargs, _all_bases=all_basis_unwrapped)
         )
 
     unwrapped_actual_out: Union[Any, Tuple[Any]] = (
@@ -655,7 +653,7 @@ def do_auto_functionalize_v2(
                 f"unsupported type for auto-functionalization: {unwrapped_out}"
             )
 
-    return ctx.wrap_tensors(unwrapped_actual_out)  # type: ignore[arg-type]
+    return ctx.wrap_tensors(unwrapped_actual_out)
 
 
 # auto_functionalize functions
@@ -689,9 +687,9 @@ def auto_functionalized_dense(
     out = _mutable_op(**new_kwargs)
 
     if isinstance(out, tuple):
-        return (*out, *result)  # type: ignore[return-value]
+        return (*out, *result)
     else:
-        return (out, *result)  # type: ignore[return-value]
+        return (out, *result)
 
 
 @auto_functionalized.py_impl(FakeTensorMode)
@@ -786,9 +784,9 @@ def auto_functionalized_v2_dense(
     out = _mutable_op(**new_kwargs)
 
     if isinstance(out, tuple):
-        return (*out, *all_bases_new)  # type: ignore[return-value]
+        return (*out, *all_bases_new)
     else:
-        return (out, *all_bases_new)  # type: ignore[return-value]
+        return (out, *all_bases_new)
 
 
 @auto_functionalized_v2.py_impl(FakeTensorMode)

@@ -1613,7 +1613,7 @@ class _ModuleStackTracer(PythonKeyTracer):
                 # Calling into torch.nn.Module.__getattr__ with super(),
                 # That __getattr__ is patched to be module_getattr_wrapper in _symbolic_trace.py.
                 # which then calls into _ModuleStackTracer.getattr
-                attr_val = super().__getattr__(name)  # type: ignore[misc]
+                attr_val = super().__getattr__(name)
                 if isinstance(attr_val, AttrProxy):
                     attr_val = tracer.proxy_modules[attr_val]
                 elif not isinstance(attr_val, Module):

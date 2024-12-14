@@ -583,7 +583,7 @@ class ModuleDict(Module):
                     )
                 # modules can be Mapping (what it's typed at), or a list: [(name1, module1), (name2, module2)]
                 # that's too cumbersome to type correctly with overloads, so we add an ignore here
-                self[m[0]] = m[1]  # type: ignore[assignment]
+                self[m[0]] = m[1]
 
     # remove forward alltogether to fallback on Module's _forward_unimplemented
 
@@ -933,7 +933,7 @@ class ParameterDict(Module):
                         "#" + str(j) + " has length " + str(len(p)) + "; 2 is required"
                     )
                 # parameters as length-2 list too cumbersome to type, see ModuleDict.update comment
-                self[p[0]] = p[1]  # type: ignore[assignment]
+                self[p[0]] = p[1]
 
     def extra_repr(self) -> str:
         child_lines = []

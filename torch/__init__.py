@@ -776,7 +776,7 @@ def sym_not(a):
     if hasattr(a, "__sym_not__"):
         return a.__sym_not__()
     if isinstance(a, sympy.Basic):
-        return ~a  # type: ignore[operator]
+        return ~a
     return not a
 
 
@@ -792,7 +792,7 @@ def sym_float(a):
         return a
     elif hasattr(a, "__sym_float__"):
         return a.__sym_float__()
-    return builtins.float(a)  # type: ignore[operator]
+    return builtins.float(a)
 
 
 def sym_int(a):
@@ -807,7 +807,7 @@ def sym_int(a):
         return a
     elif isinstance(a, SymFloat):
         return math.trunc(a)
-    return builtins.int(a)  # type: ignore[operator]
+    return builtins.int(a)
 
 
 def sym_max(a, b):
@@ -2029,7 +2029,7 @@ if TYPE_CHECKING:
     # Some type signatures pulled in from _VariableFunctions here clash with
     # signatures already imported. For now these clashes are ignored; see
     # PR #43339 for details.
-    from torch._C._VariableFunctions import *  # type: ignore[assignment, misc] # noqa: F403
+    from torch._C._VariableFunctions import *  # type: ignore[assignment] # noqa: F403
 
     # Fixup segment_reduce visibility
     _segment_reduce = segment_reduce
@@ -2227,13 +2227,7 @@ quantized_gru = ops.aten.quantized_gru
 from torch import masked as masked
 
 # Import removed ops with error message about removal
-from torch._linalg_utils import (  # type: ignore[misc]
-    _symeig as symeig,
-    eig,
-    lstsq,
-    matrix_rank,
-    solve,
-)
+from torch._linalg_utils import _symeig as symeig, eig, lstsq, matrix_rank, solve
 from torch.utils.dlpack import from_dlpack, to_dlpack
 
 
@@ -2279,7 +2273,7 @@ class _TorchCompileInductorWrapper:
         if bisect_changes := CompilerBisector.get_config_change("inductor"):
             options = {} if options is None else options
             options = (
-                {**bisect_changes} if options is None else {**options, **bisect_changes}  # type: ignore[dict-item]
+                {**bisect_changes} if options is None else {**options, **bisect_changes}
             )
 
         if not options:
@@ -2535,7 +2529,7 @@ def compile(
         nopython=fullgraph,
         dynamic=dynamic,
         disable=disable,
-    )(model)  # type: ignore[return-value]
+    )(model)
 
 
 def _register_device_module(device_type, module):

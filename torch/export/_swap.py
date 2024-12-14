@@ -95,7 +95,7 @@ def _try_remove_connecting_pytrees(curr_module_node: torch.fx.Node) -> None:
         )
         return
 
-    for i, arg in enumerate(unflatten_node.args[0]):  # type: ignore[union-attr,arg-type]
+    for i, arg in enumerate(unflatten_node.args[0]):  # type: ignore[arg-type]
         if arg not in flatten_node.users:
             log.debug(
                 "Module %s's outputs are not all directly used as inputs to "
@@ -429,8 +429,8 @@ def _swap_modules(
     _fix_input_output_signature(gm, ep.module_call_graph[0].signature)
 
     gm.module_call_graph = ep.module_call_graph
-    gm.train = types.MethodType(type(gm).train, gm)  # type: ignore[assignment]
-    gm.eval = types.MethodType(type(gm).eval, gm)  # type: ignore[assignment]
+    gm.train = types.MethodType(type(gm).train, gm)  # type: ignore[method-assign]
+    gm.eval = types.MethodType(type(gm).eval, gm)  # type: ignore[method-assign]
 
     assert isinstance(gm, torch.fx.GraphModule)
     gm = _swap_module_helper(gm, modules_to_swap, module_call_graph)

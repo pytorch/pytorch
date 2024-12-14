@@ -1410,7 +1410,7 @@ class TS2EPConverter:
             else []
         )
         if not isinstance(self.ts_model, torch._C.ScriptFunction):
-            for k, tensor in self.ts_model.state_dict().items():  # type: ignore[union-attr]
+            for k, tensor in self.ts_model.state_dict().items():
                 # Check if tensor belongs to any parameter.
                 if any(
                     (tensor == param).all()
@@ -1469,7 +1469,7 @@ DEBUG: (TORCH_LOGS="+export" <cmd>), additionally
         # the original TorchScript model. Throw warnings for additionally populated
         # state_dict entries.
         if not isinstance(self.ts_model, torch._C.ScriptFunction):
-            for k, tensor in self.ts_model.state_dict().items():  # type: ignore[union-attr]
+            for k, tensor in self.ts_model.state_dict().items():
                 if k not in ep.state_dict:
                     warnings.warn(
                         f"Manually populate {k} into state_dict ExportedProgram, but it is never used by the ExportedProgram."

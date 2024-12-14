@@ -924,7 +924,7 @@ def chunk_default(func, *args, **kwargs):
         lengths = inp._offsets.diff()
         chunked_lengths = lengths.chunk(chunks)
         chunked_offsets = [torch.cumsum(x, dim=0) for x in chunked_lengths]
-        chunked_offsets = [F.pad(x, (1, 0), value=0) for x in chunked_offsets]  # type: ignore[arg-type]
+        chunked_offsets = [F.pad(x, (1, 0), value=0) for x in chunked_offsets]
         nested_kwargs = [
             {"offsets": per_offsets, "_ragged_idx": inp._ragged_idx}
             for per_offsets in chunked_offsets
@@ -2327,7 +2327,7 @@ def masked_select_default(func, *args, **kwargs):
             f"Mask with shape {mask.shape} is not compatible with input's shape {inp.shape}"
         )
     res_values = inp._values.masked_select(mask.values())
-    mask_cumsum = F.pad(mask.values().cumsum(dim=0), (1, 0))  # type: ignore[arg-type]
+    mask_cumsum = F.pad(mask.values().cumsum(dim=0), (1, 0))
 
     args = extract_kwargs(inp)
     args["offsets"] = mask_cumsum[inp._offsets]
@@ -2429,7 +2429,7 @@ from torch._higher_order_ops.flex_attention import (
 from torch.fx.graph_module import GraphModule
 
 
-@flex_attention_hop.py_impl(NestedTensor)  # type: ignore[misc]
+@flex_attention_hop.py_impl(NestedTensor)
 def flex_njt(
     query: torch.Tensor,
     key: torch.Tensor,
@@ -2486,7 +2486,7 @@ def flex_njt(
     return (output_njt, logsumexp_njt)
 
 
-@flex_attention_backward_hop.py_impl(NestedTensor)  # type: ignore[misc]
+@flex_attention_backward_hop.py_impl(NestedTensor)
 def flex_njt_backward(
     query: torch.Tensor,
     key: torch.Tensor,

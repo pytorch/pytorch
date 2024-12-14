@@ -53,7 +53,7 @@ def torch_to_refs_map():
         torch.Tensor.resize: torch._prims.resize,
     }
     for mod_torch, mod_refs in modules:
-        for s in mod_refs.__all__:  # type: ignore[attr-defined]
+        for s in mod_refs.__all__:
             r[mod_torch.__dict__.get(s)] = mod_refs.__dict__.get(s)
 
     # Support remapping torch.Tensor.foo to _refs.foo

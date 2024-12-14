@@ -215,7 +215,7 @@ def cudagraph_post_compile(
             assert manager is not None
 
             def compiled_artifact(new_inputs: List[Any]) -> Callable[..., Any]:
-                manager.set_to_running_backward()  # type: ignore[union-attr]
+                manager.set_to_running_backward()
                 return compiled_graph_callable(new_inputs)
 
             compiled_graph.current_callable = compiled_artifact

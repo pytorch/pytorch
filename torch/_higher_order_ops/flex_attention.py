@@ -1101,7 +1101,7 @@ def flex_attention_backward_functionalize(
             logsumexp_unwrapped,
             grad_out_unwrapped,
             grad_logsumexp_unwrapped,
-            functional_fw_graph,  # type: ignore[arg-type]
+            functional_fw_graph,
             functional_joint_graph,  # type: ignore[arg-type]
             block_mask_unwrapped,
             scale,

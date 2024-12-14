@@ -42,7 +42,7 @@ class _Union:
         return obj
 
     def __post_init__(self):
-        assert not any(f.name in ("type", "_type", "create", "value") for f in fields(self))  # type: ignore[arg-type, misc]
+        assert not any(f.name in ("type", "_type", "create", "value") for f in fields(self))  # type: ignore[arg-type]
 
     @property
     def type(self) -> str:

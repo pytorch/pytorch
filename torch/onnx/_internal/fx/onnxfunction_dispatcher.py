@@ -293,7 +293,7 @@ class OnnxFunctionDispatcher:
             # overloadpacket for some reasons.
             # https://github.com/pytorch/pytorch/issues/97201
             aten_op_default = node.target.default
-            return registration.OpName.from_op_overload(op_overload=aten_op_default)  # type: ignore[no-any-return]
+            return registration.OpName.from_op_overload(op_overload=aten_op_default)
 
         if isinstance(node.target, types.BuiltinFunctionType):
             # Make sure it's symint/symfloat consuming builtin ops.
@@ -382,7 +382,7 @@ class OnnxFunctionDispatcher:
             function_group = self._filter_or_keep_complex(
                 node, function_group, diagnostic_context
             )
-            return function_group  # type: ignore[return-value]
+            return function_group
 
         op_full_name = internal_opname.qualified_name()
         diagnostic = diagnostics.UnsupportedFxNodeDiagnostic(

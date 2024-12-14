@@ -1040,8 +1040,8 @@ class CUTLASS3xGemmTemplate(CUTLASSGemmTemplate):
 
     @staticmethod
     def _has_tma_epilogue(  # noqa: F821 # type: ignore[arg-type,name-defined]
-        op: "cutlass_library.gemm_op.GemmOperation",  # type: ignore[name-defined,arg-type] # noqa: F821
-    ) -> bool:  # type: ignore[name-defined]
+        op: "cutlass_library.gemm_op.GemmOperation",  # type: ignore[name-defined] # noqa: F821
+    ) -> bool:
         """Helper method: Determine whether a given Cutlass GEMM op has a TMA Epilogue"""
         assert cutlass_utils.try_import_cutlass()
         import cutlass_library.library as cutlass_lib
@@ -1269,15 +1269,15 @@ class CUTLASS3xGemmTemplate(CUTLASSGemmTemplate):
             # Swap
             def clone_with_transposed_stride(node: IRNode) -> IRNode:
                 old_layout = node.get_layout()
-                new_stride = list(old_layout.stride)  # type: ignore[union-attr]
+                new_stride = list(old_layout.stride)
                 new_stride[-2], new_stride[-1] = new_stride[-1], new_stride[-2]
                 assert old_layout.device is not None
                 new_layout = FixedLayout(
                     old_layout.device,
                     old_layout.dtype,
-                    list(old_layout.size),  # type: ignore[union-attr]
+                    list(old_layout.size),
                     new_stride,
-                    old_layout.offset,  # type: ignore[union-attr]
+                    old_layout.offset,
                 )
                 return Buffer(name=node.get_name(), layout=new_layout)
 

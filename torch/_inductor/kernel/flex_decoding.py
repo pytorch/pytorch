@@ -459,7 +459,8 @@ def create_flex_decoding_kernel(*args, **kwargs):
             max(
                 next_power_of_2(
                     V.graph.sizevars.size_hint(
-                        seq_len_q, fallback=torch._inductor.config.unbacked_symint_fallback  # type: ignore[arg-type]
+                        seq_len_q,
+                        fallback=torch._inductor.config.unbacked_symint_fallback,
                     )
                     * gqa_shared_heads
                 ),

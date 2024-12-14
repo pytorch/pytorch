@@ -51,7 +51,7 @@ class ActivationWrapper(torch.nn.Module, ABC):
 
     def __getitem__(self, key: int) -> Any:
         """Forward indexing calls in case the module is a nn.Sequential."""
-        return self._checkpoint_wrapped_module.__getitem__(key)  # type: ignore[operator]
+        return self._checkpoint_wrapped_module.__getitem__(key)
 
     def named_parameters(
         self,
@@ -162,14 +162,12 @@ class CheckpointWrapper(ActivationWrapper):
 
             # Pass the function that only takes packed args into reentrant
             # checkpoint API.
-            return self.checkpoint_fn(  # type: ignore[misc]
+            return self.checkpoint_fn(
                 my_function,
                 *flat_args,
             )
         else:
-            return self.checkpoint_fn(  # type: ignore[misc]
-                self._checkpoint_wrapped_module, *args, **kwargs
-            )
+            return self.checkpoint_fn(self._checkpoint_wrapped_module, *args, **kwargs)
 
 
 def offload_wrapper(module: torch.nn.Module) -> torch.nn.Module:
@@ -315,7 +313,7 @@ def apply_activation_checkpointing(
 
     _recursive_wrap(
         module=model,
-        auto_wrap_policy=policy,  # type: ignore[arg-type]
+        auto_wrap_policy=policy,
         wrapper_cls=checkpoint_wrapper_fn,
         ignored_modules=set(),
         ignored_params=set(),

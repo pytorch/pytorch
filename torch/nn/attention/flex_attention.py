@@ -390,8 +390,8 @@ class BlockMask:
             flatten (bool): If True, it will flatten the tuple of (KV_BLOCK_SIZE, Q_BLOCK_SIZE)
         """
         if flatten:
-            block_size = (self.BLOCK_SIZE[0], self.BLOCK_SIZE[1])  # type: ignore[assignment]
-            seq_lengths = (self.seq_lengths[0], self.seq_lengths[1])  # type: ignore[assignment]
+            block_size = (self.BLOCK_SIZE[0], self.BLOCK_SIZE[1])
+            seq_lengths = (self.seq_lengths[0], self.seq_lengths[1])
         else:
             block_size = (self.BLOCK_SIZE,)  # type: ignore[assignment]
             seq_lengths = (self.seq_lengths,)  # type: ignore[assignment]
@@ -1298,10 +1298,10 @@ def flex_attention(
     if scale is None:
         scale = 1.0 / math.sqrt(query.size(-1))
 
-    if query.device != block_mask.kv_num_blocks.device:  # type: ignore[union-attr]
+    if query.device != block_mask.kv_num_blocks.device:
         raise RuntimeError(
             f"Expect q/k/v and block_mask to be on the same device "
-            f"but got {query.device} and {block_mask.kv_num_blocks.device}."  # type: ignore[union-attr]
+            f"but got {query.device} and {block_mask.kv_num_blocks.device}."
         )
 
     kernel_options = _apply_kernel_options(
@@ -1319,7 +1319,7 @@ def flex_attention(
             torch._dynamo.mark_static(x, -1)
 
         out, lse = flex_attention_hop(
-            query, key, value, score_mod, block_mask.as_tuple(), scale, kernel_options  # type: ignore[union-attr]
+            query, key, value, score_mod, block_mask.as_tuple(), scale, kernel_options
         )
         if return_lse:
             return out, lse * math.log(2)
@@ -1355,7 +1355,7 @@ def flex_attention(
                         key,
                         value,
                         score_mod,
-                        block_mask.as_tuple(),  # type: ignore[union-attr]
+                        block_mask.as_tuple(),
                         scale,
                         kernel_options,
                     )

@@ -256,7 +256,7 @@ def augment_many_model_functions_with_bundled_inputs(
             function_name = function.__name__
         else:
             if hasattr(function, "name"):
-                function_name = function.name  # type: ignore[attr-defined]
+                function_name = function.name
             else:
                 raise Exception(  # noqa: TRY002
                     'At least one of your functions has no attribute name please ensure all have one. m.foo.name = "foo"')

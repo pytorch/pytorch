@@ -134,7 +134,7 @@ def config_of(
         if isinstance(x, TensorArg):
             if include_tensor:
                 offset_aligned = V.graph.sizevars.statically_known_multiple_of(
-                    x.offset * x.dtype.itemsize, alignment  # type: ignore[arg-type]
+                    x.offset * x.dtype.itemsize, alignment
                 )
                 return offset_aligned and not is_unaligned_buffer(x)
             else:
@@ -148,7 +148,7 @@ def config_of(
                 return False
             if isinstance(x.expr, float):
                 return False
-            return V.graph.sizevars.statically_known_multiple_of(x.expr, alignment)  # type: ignore[arg-type]
+            return V.graph.sizevars.statically_known_multiple_of(x.expr, alignment)
         if isinstance(x, WorkspaceArg):
             # We allocate the workspace ourselves, so it is always aligned
             return True
@@ -170,7 +170,7 @@ def config_of(
         for i, arg in zip(indices, args)
         if isinstance(arg, SizeArg)
         and isinstance(arg.expr, (int, sympy.Integer))
-        and V.graph.sizevars.statically_known_equals(arg.expr, 1)  # type: ignore[arg-type]
+        and V.graph.sizevars.statically_known_equals(arg.expr, 1)
     )
 
     return AttrsDescriptorWrapper(divisible_by_16, equal_to_1)

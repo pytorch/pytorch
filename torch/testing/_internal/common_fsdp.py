@@ -292,7 +292,7 @@ class TransformerWithSharedParams(FSDPTestModel):
         self.register_buffer(
             "long_buffer",
             torch.zeros_like(self.vocab_bias, dtype=torch.long),  # type: ignore[arg-type]
-        )  # type: ignore[arg-type]
+        )
 
         self.bs = 2
         self.bn = torch.nn.BatchNorm1d(self.bs) if add_bn else torch.nn.Identity()
@@ -769,7 +769,7 @@ class MixtureOfExperts(NestedWrappedModule):
 
         self.num_expert_params = sum(p.numel() for p in expert.parameters())
         for p in expert.parameters():
-            p.expert = True  # type: ignore[attr-defined]
+            p.expert = True
 
         if deterministic:
             # Keep all other parameters the same across ranks
@@ -782,8 +782,8 @@ class MixtureOfExperts(NestedWrappedModule):
             expert_group = torch.distributed.new_group(
                 [group.rank()]
             )  # world size 1 means no shard
-            expert = FSDP(expert, expert_group, **fsdp_kwargs)  # type: ignore[assignment]
-            shared = FSDP(shared, group, **fsdp_kwargs)  # type: ignore[assignment]
+            expert = FSDP(expert, expert_group, **fsdp_kwargs)
+            shared = FSDP(shared, group, **fsdp_kwargs)
 
         self.module = nn.Sequential(
             _move_to_device(nn.Linear(d_input, d_shared), self.move_to_device),
@@ -1487,7 +1487,7 @@ class FSDPTest(MultiProcessTestCase):
 
 def test_compiled_fsdp(compile_compute_on_module: Optional[type] = None):
     def fully_shard_with_compiled_compute(*args, **kwargs):
-        torch.distributed.fsdp.fully_shard(*args, **kwargs)  # type: ignore[operator]
+        torch.distributed.fsdp.fully_shard(*args, **kwargs)
         if compile_compute_on_module is None or isinstance(
             args[0], compile_compute_on_module
         ):
@@ -1515,7 +1515,7 @@ def test_compiled_fsdp(compile_compute_on_module: Optional[type] = None):
                 elif mode == FullyShardMode.COMPILED_COMPUTE:
                     torch._dynamo.config.skip_fsdp_hooks = True
                     torch._inductor.config.compile_threads = 1
-                    fully_shard_patch = fully_shard_with_compiled_compute  # type: ignore[assignment]
+                    fully_shard_patch = fully_shard_with_compiled_compute
                 else:
                     raise NotImplementedError(
                         f"Need to implement FullyShardMode={mode}"

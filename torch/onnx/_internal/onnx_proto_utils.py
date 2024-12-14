@@ -234,7 +234,7 @@ def _find_onnxscript_op(
             onnx_fn = onnx_function_group.get(specified_version)
             if onnx_fn is not None:
                 if hasattr(onnx_fn, "to_function_proto"):
-                    onnx_function_proto = onnx_fn.to_function_proto()  # type: ignore[attr-defined]
+                    onnx_function_proto = onnx_fn.to_function_proto()
                     onnx_function_list.append(onnx_function_proto)
                     included_node_func.add(node_kind)
                 continue

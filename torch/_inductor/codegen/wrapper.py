@@ -165,7 +165,7 @@ TritonGrid = Union[
 
 def user_defined_kernel_grid_fn_code(
     name: str,
-    configs: List[triton.Config],  # type: ignore[name-defined]
+    configs: List[triton.Config],
     grids: List[TritonGrid],
     wrapper: Optional[PythonWrapperCodegen] = None,
 ) -> Tuple[str, str]:
@@ -260,8 +260,8 @@ def user_defined_triton_kernel_transitive_closure_source_code(kernel) -> str:
     compile_wrapper.splice(kernel.src, strip=True)
 
     # Also include any possible kernel being called indirectly
-    from triton import JITFunction  # type: ignore[name-defined, attr-defined]
-    from triton.language import constexpr  # type: ignore[name-defined]
+    from triton import JITFunction
+    from triton.language import constexpr
 
     # global constexpr vars handled above
     symbols_included = OrderedSet([kernel.__name__])
@@ -535,7 +535,7 @@ class NullLine(MemoryPlanningLine):
 
 @dataclasses.dataclass
 class CommBufferLine(WrapperLine):
-    wrapper: PythonWrapperCodegen  # type: ignore[name-defined] # noqa: F821
+    wrapper: PythonWrapperCodegen  # noqa: F821
     node: ir.Buffer
 
     @property
@@ -675,7 +675,7 @@ class PythonWrapperCodegen(CodeGen):
         # maps from reusing buffer to reused buffer
         self.reuses: Dict[BufferName, BufferName] = {}
 
-        self.write_get_raw_stream = functools.lru_cache(None)(  # type: ignore[assignment]
+        self.write_get_raw_stream = functools.lru_cache(None)(  # type: ignore[method-assign]
             self.write_get_raw_stream
         )
 
@@ -1597,9 +1597,7 @@ class PythonWrapperCodegen(CodeGen):
                     signature.append(SizeArg(key, arg))
                     if isinstance(
                         arg, (int, sympy.Integer)
-                    ) and V.graph.sizevars.statically_known_equals(
-                        arg, 1  # type: ignore[arg-type]
-                    ):
+                    ) and V.graph.sizevars.statically_known_equals(arg, 1):
                         equal_to_1_args.append(key)
         triton_meta: Dict[str, Any] = {
             "signature": signature_to_meta(
@@ -2437,7 +2435,7 @@ class PythonWrapperCodegen(CodeGen):
             val = V.graph._shape_env._maybe_evaluate_static(x)
             if val is None:
                 return val
-            return int(val)  # type: ignore[call-overload]
+            return int(val)
         except Exception:
             return None
 

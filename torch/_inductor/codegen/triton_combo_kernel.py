@@ -92,7 +92,7 @@ def _default_custom_combo_kernel_horizontal_partition(
         # rnumel > 2048 usually has long execution time
         # BaseSchedulerNode.group[-1][-1] is rnumel for reduction nodes
         long_reduction = [
-            n for n in reduction if V.graph.sizevars.size_hint(n.group[-1][-1]) > 2048  # type: ignore[arg-type]
+            n for n in reduction if V.graph.sizevars.size_hint(n.group[-1][-1]) > 2048
         ]
         short_reduction = [n for n in reduction if n not in long_reduction]
         if long_reduction:
@@ -404,7 +404,7 @@ class ComboKernel(Kernel):
                 if any(e is None for e in xnumel)
                 else xnumel
                 if dynamic_shape
-                else max(xnumel_x_dim)  # type: ignore[type-var, arg-type]
+                else max(xnumel_x_dim)  # type: ignore[arg-type]
             )
             ynumel = (
                 None
@@ -906,7 +906,7 @@ class ComboKernel(Kernel):
                     # note that random seed is put in V.graph.constants
                     const_tensor = V.graph.constants[arg_name]
                     result.writeline(
-                        f"{var_name} = rand_strided({V.graph.sizevars.size_hints(const_tensor.size())}, {V.graph.sizevars.size_hints(const_tensor.stride())}, device='{const_tensor.device}', dtype={const_tensor.dtype})"  # type: ignore[arg-type]  # noqa: B950 line too long
+                        f"{var_name} = rand_strided({V.graph.sizevars.size_hints(const_tensor.size())}, {V.graph.sizevars.size_hints(const_tensor.stride())}, device='{const_tensor.device}', dtype={const_tensor.dtype})"  # noqa: B950 line too long
                     )
                 elif isinstance(arg_sig, SizeArg):
                     symval_hint = V.graph.sizevars.size_hint(arg_sig.expr)

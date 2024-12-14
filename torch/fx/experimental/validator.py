@@ -73,7 +73,7 @@ try:
             raise ValueError(f"can't print Z3 expression: {e}")
 
         if z3.is_int_value(e) or z3.is_rational_value(e):
-            return e.as_string()  # type: ignore[attr-defined]
+            return e.as_string()
 
         decl = e.decl()
         kind = decl.kind()
@@ -184,7 +184,7 @@ try:
 
         # Implements Python division semantics.
         def div(self, numerator: z3.ArithRef, denominator: z3.ArithRef) -> z3.ArithRef:
-            self.validator.add_assertion(denominator != 0)  # type: ignore[arg-type]
+            self.validator.add_assertion(denominator != 0)
             return _Z3Ops.to_real(numerator) / _Z3Ops.to_real(denominator)
 
         def floor(self, number: z3.ArithRef) -> z3.ArithRef:
@@ -203,18 +203,16 @@ try:
             return _Z3Ops.to_real(result) if cast_result_to_real else result
 
         def ceil(self, number: z3.ArithRef) -> z3.ArithRef:
-            return z3.If(
-                self.floor(number) < number, self.floor(number + 1), number
-            )  # type: ignore[return-value]
+            return z3.If(self.floor(number) < number, self.floor(number + 1), number)
 
         def trunc(self, number: z3.ArithRef) -> z3.ArithRef:
-            return z3.If(number >= 0, self.floor(number), self.ceil(number))  # type: ignore[return-value]
+            return z3.If(number >= 0, self.floor(number), self.ceil(number))
 
         def max(self, a: z3.ArithRef, b: z3.ArithRef) -> z3.ArithRef:
-            return z3.If(a > b, a, b)  # type: ignore[return-value]
+            return z3.If(a > b, a, b)
 
         def min(self, a: z3.ArithRef, b: z3.ArithRef) -> z3.ArithRef:
-            return z3.If(a < b, a, b)  # type: ignore[return-value]
+            return z3.If(a < b, a, b)
 
         # Python semantics for 'Mod' is defined as: p % q = p - floordiv(p, q) * q
         # It should work with both integer and reals.
@@ -223,7 +221,7 @@ try:
 
         def pow(self, base: z3.ArithRef, exp: z3.ArithRef) -> z3.ArithRef:
             # Z3 can't handle complex numbers very well.
-            self.validator.add_assertion(z3.Or(base != 0, exp > 0))  # type: ignore[arg-type]
+            self.validator.add_assertion(z3.Or(base != 0, exp > 0))
             return base**exp
 
         def sqrt(self, number: z3.ArithRef) -> z3.ArithRef:
@@ -366,7 +364,7 @@ try:
             assert (
                 len(args) == 1
             ), f"expected 1 argument on assertion. Got: {len(args)} "
-            self.validator.add_source_expr(args[0])  # type: ignore[arg-type]
+            self.validator.add_source_expr(args[0])
 
     # Translates SymPy expressions into Z3 expressions.
     #
@@ -460,7 +458,7 @@ try:
             raise AttributeError(f"unhandled operator: {name}")
 
         def run(self, expr: sympy.Basic) -> z3.ExprRef:
-            return sympy_interp(self, self._validator.symbols, expr)  # type: ignore[arg-type]
+            return sympy_interp(self, self._validator.symbols, expr)
 
     # Dynamo guards translation validator.
     #
@@ -514,7 +512,7 @@ try:
 
                 # If 'symbol' is positive (SymPy assumption), we have to
                 # convey it to Z3 as well.
-                if symbol.is_positive:  # type: ignore[attr-defined]
+                if symbol.is_positive:
                     self._target_exprs.add(var > 0)
             elif type is float:
                 var = z3.Real(symbol.name)

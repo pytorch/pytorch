@@ -99,7 +99,9 @@ class InductorChoices:
         # to pick the faster one.
         if config.triton.multi_kernel:
             threshold *= 16
-        return V.graph.sizevars.statically_known_leq(features.reduction_numel, threshold)  # type: ignore[arg-types]
+        return V.graph.sizevars.statically_known_leq(
+            features.reduction_numel, threshold
+        )
 
     @staticmethod
     def want_no_x_dim(features: SIMDKernelFeatures) -> bool:

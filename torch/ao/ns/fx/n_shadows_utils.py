@@ -117,7 +117,7 @@ def _get_dedup_subgraphs(matches: Dict[str, _MatchResult]) -> Dict[str, List[Nod
     # in reverse order.  We would like to process the matches in non-reverse
     # order, so that we can create an intuitive naming scheme, such as
     # naming the first op's submodules `shadow_0_0` through `shadow_0_(n-1)`
-    for name, cur_match in matches_items_reversed:  # type: ignore[call-overload]
+    for name, cur_match in matches_items_reversed:
         was_seen = False
         for node_or_tuple in cur_match[1]:
             # Cur_match[1] has an unusual type. It says that it's a `List[Node]`,
@@ -575,7 +575,7 @@ def create_one_transformed_and_logged_copy_of_subgraph(
                     # TODO(future PR): clarify why we are adding kwargs to args
                     new_args.extend(old_kwarg)  # type: ignore[arg-type]
 
-            new_args = tuple(new_args)  # type: ignore[assignment]
+            new_args = tuple(new_args)
 
             new_node = mt.graph.call_module(attr_name, args=new_args, kwargs=new_kwargs)  # type: ignore[arg-type]
 
@@ -635,7 +635,7 @@ def create_n_transformed_and_logged_copies_of_subgraph(
     if isinstance(prev_node, list):
         example_inputs = [x.traced_result for x in prev_node]
     elif isinstance(prev_node, tuple):
-        example_inputs = (x.traced_result for x in prev_node)  # type: ignore[assignment]
+        example_inputs = (x.traced_result for x in prev_node)
     else:
         # currently some customer models do not have a traced_result in
         # every node, so we have to guard for this case since we cannot
@@ -644,7 +644,7 @@ def create_n_transformed_and_logged_copies_of_subgraph(
         # repro, see https://github.com/pytorch/pytorch/pull/80521/files#r975940489
         # for additional context
         if hasattr(prev_node, "traced_result"):
-            example_inputs = (prev_node.traced_result,)  # type: ignore[attr-defined, assignment]
+            example_inputs = (prev_node.traced_result,)
         else:
             print(
                 "unable to get example input for node "
@@ -775,7 +775,7 @@ def create_add_loggers_graph(
     orig_first_node_to_shadow_in_node = {}
     orig_first_node_to_shadow_out_node = {}
     # need to record original list because we will mutate the graph as we go
-    orig_nodes = list(model.graph.nodes)  # type: ignore[union-attr, arg-type]
+    orig_nodes = list(model.graph.nodes)
     cur_subgraph_idx = 0
     for n in orig_nodes:
         if n.op in ("placeholder", "get_attr", "output") or n in nodes_to_skip:
@@ -802,7 +802,7 @@ def create_add_loggers_graph(
                 [qconfig_mapping],
                 [node_name_to_qconfig],
                 None,
-                None,  # type: ignore[arg-type]
+                None,
             )
             # find the created shadow module and record it so we
             # can find it easily in step 2
@@ -1055,7 +1055,7 @@ def extract_weight_comparison(m: GraphModule) -> NSResultsType:
 
     results: NSResultsType = {"model": {NSSingleResultValuesType.WEIGHT.value: {}}}
 
-    for n in m.graph.nodes:  # type: ignore[union-attr]
+    for n in m.graph.nodes:
         if not (n.op == "call_function" and n.target in weighted_ops):
             continue
 
@@ -1073,9 +1073,7 @@ def extract_weight_comparison(m: GraphModule) -> NSResultsType:
         if shadow_wrapper_node is None:
             continue
 
-        shadow_wrapper = getattr_from_fqn(
-            m, shadow_wrapper_node.target
-        )  # type: ignore[arg-type]
+        shadow_wrapper = getattr_from_fqn(m, shadow_wrapper_node.target)
         weight_info = _get_weight_info_from_shadow_wrapper(shadow_wrapper)
         if weight_info is None:
             continue

@@ -124,7 +124,7 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
                     f"{pattern_matcher_pass.pass_name}_post_grad"
                 ] = upload_graph(gm.graph)
         if config.b2b_gemm_pass:
-            B2B_GEMM_PASS.apply(gm.graph)  # type: ignore[arg-type]
+            B2B_GEMM_PASS.apply(gm.graph)
 
     if config._micro_pipeline_tp:
         micro_pipeline_tp_pass(gm.graph)

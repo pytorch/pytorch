@@ -148,7 +148,7 @@ def add_loggers_to_model(
                         type(node_arg) == torch.fx.immutable_collections.immutable_list
                     ):
                         # create N input loggers, one for each node
-                        for arg_idx, arg in enumerate(node_arg):  # type: ignore[var-annotated, arg-type]
+                        for arg_idx, arg in enumerate(node_arg):
                             prev_node = env[arg.name]
                             env[prev_node.name] = _insert_logger_after_node(
                                 prev_node,
@@ -420,7 +420,7 @@ def _copy_node_from_a_to_c(
         if node_a.target == "dequantize":
             arg_copy = _copy_node_from_a_to_c(
                 get_normalized_nth_input(node_a, gm_a, 0), gm_a, gm_b, graph_c
-            )  # type: ignore[arg-type]
+            )
             node_a_copy_name = get_new_attr_name_with_prefix(
                 node_a.name + "_shadow_copy_"
             )(gm_b)
@@ -431,7 +431,7 @@ def _copy_node_from_a_to_c(
         else:  # to
             arg_copy = _copy_node_from_a_to_c(
                 get_normalized_nth_input(node_a, gm_a, 0), gm_a, gm_b, graph_c
-            )  # type: ignore[arg-type]
+            )
             node_a_copy_name = get_new_attr_name_with_prefix(
                 node_a.name + "_shadow_copy_"
             )(gm_b)
@@ -465,7 +465,7 @@ def _can_insert_copy_of_subgraph_a(
     cur_node = subgraph_a.end_node
     while cur_node != subgraph_a.start_node:
         nodes.append(cur_node)
-        cur_node = get_normalized_nth_input(cur_node, gm_a, 0)  # type: ignore[assignment]
+        cur_node = get_normalized_nth_input(cur_node, gm_a, 0)
     nodes.append(cur_node)
     nodes.reverse()
 
@@ -543,7 +543,7 @@ def _insert_copy_of_subgraph_a_after_input_node_c(
     nodes_of_a = [subgraph_a.end_node]
     cur_node = subgraph_a.end_node
     while cur_node != subgraph_a.start_node:
-        cur_node = get_normalized_nth_input(cur_node, gm_a, 0)  # type: ignore[assignment]
+        cur_node = get_normalized_nth_input(cur_node, gm_a, 0)
         nodes_of_a.insert(0, cur_node)
 
     # go through nodes of a in order, and insert them into the graph of c
@@ -1062,7 +1062,7 @@ def create_a_shadows_b(
                     # Find the first node in the subgraph
                     cur_node = node_a_shadows_c
                     while get_normalized_nth_input(cur_node, gm_b, 0) != input_logger:  # type: ignore[possibly-undefined]
-                        cur_node = get_normalized_nth_input(cur_node, gm_b, 0)  # type: ignore[assignment]
+                        cur_node = get_normalized_nth_input(cur_node, gm_b, 0)
                     if isinstance(input_logger, Node):
                         input_logger_mod = getattr(gm_b, input_logger.name)
                         input_logger_mod.ref_node_name = cur_node.name

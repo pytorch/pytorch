@@ -69,11 +69,11 @@ def _patch_difflib_sequence_matcher_init():
     def patched_init(self, isjunk=None, a="", b="", autojunk=True):
         original_init(self, isjunk, a, b, autojunk=False)
 
-    difflib.SequenceMatcher.__init__ = patched_init  # type: ignore[assignment]
+    difflib.SequenceMatcher.__init__ = patched_init  # type: ignore[method-assign]
     try:
         yield
     finally:
-        difflib.SequenceMatcher.__init__ = original_init  # type: ignore[assignment]
+        difflib.SequenceMatcher.__init__ = original_init  # type: ignore[method-assign]
 
 
 def _unified_diff(a: str, b: str) -> str:

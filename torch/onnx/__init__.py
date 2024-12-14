@@ -403,7 +403,7 @@ def export(
 
 
 def dynamo_export(
-    model: torch.nn.Module | Callable | torch.export.ExportedProgram,  # type: ignore[name-defined]
+    model: torch.nn.Module | Callable | torch.export.ExportedProgram,
     /,
     *model_args,
     export_options: ExportOptions | None = None,
@@ -461,7 +461,7 @@ def dynamo_export(
 
     if isinstance(model, torch.export.ExportedProgram):
         return _compat.export_compat(
-            model,  # type: ignore[arg-type]
+            model,
             model_args,
             f=None,
             kwargs=model_kwargs,

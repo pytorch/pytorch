@@ -175,7 +175,7 @@ def _aoti_compile_and_package_inner(
     return package_path
 
 
-def aoti_load_package(path: Union[str, io.BytesIO]) -> Any:  # type: ignore[type-arg]
+def aoti_load_package(path: Union[str, io.BytesIO]) -> Any:
     """
     Loads the model from the PT2 package.
 
@@ -225,7 +225,7 @@ def aot_compile(
 
     return compile_fx_aot(
         gm,
-        flat_example_inputs,  # type: ignore[arg-type]
+        flat_example_inputs,
         config_patches=options,
     )
 
@@ -264,7 +264,7 @@ def list_mode_options(
             "coordinate_descent_tuning": True,
         },
     }
-    return mode_options[mode] if mode else mode_options  # type: ignore[return-value]
+    return mode_options[mode] if mode else mode_options
 
 
 def list_options() -> List[str]:

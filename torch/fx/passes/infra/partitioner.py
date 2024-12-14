@@ -253,15 +253,15 @@ class CapabilityBasedPartitioner:
                 if (
                     user.op != "call_function"
                     or _get_qualified_name(user.target) != "_operator.getitem"
-                ):  # type: ignore[arg-type]
+                ):
                     is_tuple_output = False
                     break
 
             # node has tuple outputs, re-assign all following getitem node into node's partition
             if is_tuple_output:
-                id = assignment.get(node, None)  # type: ignore[arg-type]
+                id = assignment.get(node, None)
                 for user in node.users:
-                    if assignment.get(user, None) != id:  # type: ignore[arg-type]
+                    if assignment.get(user, None) != id:
                         nodes_reassignment[user] = id  # type: ignore[assignment]
         for node, id in nodes_reassignment.items():
             merge_single_node(node, id)

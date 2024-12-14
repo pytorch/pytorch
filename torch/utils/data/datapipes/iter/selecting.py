@@ -56,7 +56,7 @@ class FilterIterDataPipe(IterDataPipe[_T_co]):
         self.datapipe = datapipe
 
         _check_unpickable_fn(filter_fn)
-        self.filter_fn = filter_fn  # type: ignore[assignment]
+        self.filter_fn = filter_fn
 
         self.input_col = input_col
         validate_input_col(filter_fn, input_col)

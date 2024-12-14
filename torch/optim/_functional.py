@@ -5,17 +5,17 @@ from typing import List
 
 from torch import Tensor
 
-from .adadelta import adadelta  # type: ignore[attr-defined]  # noqa: F401
-from .adagrad import _make_sparse, adagrad  # type: ignore[attr-defined]  # noqa: F401
-from .adam import adam  # type: ignore[attr-defined]  # noqa: F401
-from .adamax import adamax  # type: ignore[attr-defined]  # noqa: F401
-from .adamw import adamw  # type: ignore[attr-defined]  # noqa: F401
-from .asgd import asgd  # type: ignore[attr-defined]  # noqa: F401
-from .nadam import nadam  # type: ignore[attr-defined]  # noqa: F401
-from .radam import radam  # type: ignore[attr-defined]  # noqa: F401
-from .rmsprop import rmsprop  # type: ignore[attr-defined]  # noqa: F401
-from .rprop import rprop  # type: ignore[attr-defined]  # noqa: F401
-from .sgd import sgd  # type: ignore[attr-defined]  # noqa: F401
+from .adadelta import adadelta  # noqa: F401
+from .adagrad import _make_sparse, adagrad  # noqa: F401
+from .adam import adam  # noqa: F401
+from .adamax import adamax  # noqa: F401
+from .adamw import adamw  # noqa: F401
+from .asgd import asgd  # noqa: F401
+from .nadam import nadam  # noqa: F401
+from .radam import radam  # noqa: F401
+from .rmsprop import rmsprop  # noqa: F401
+from .rprop import rprop  # noqa: F401
+from .sgd import sgd  # noqa: F401
 
 
 # TODO: use foreach API in optim._functional to do all the computation

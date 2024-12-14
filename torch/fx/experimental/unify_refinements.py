@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 from torch.fx.experimental.graph_gradual_typechecker import Refine
-from torch.fx.experimental.unification import unify, Var  # type: ignore[attr-defined]
+from torch.fx.experimental.unification import unify, Var
 from torch.fx.tensor_type import TensorType
 
 

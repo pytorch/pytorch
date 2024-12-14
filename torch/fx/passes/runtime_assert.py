@@ -321,7 +321,7 @@ def insert_deferred_runtime_asserts(
             # it just needs to happen right after the placeholders.
             # insert this after placeholders & added sym nodes, and before non-placeholders.
             if node == first_non_placeholder:
-                add_runtime_asserts(ras_by_symbol.pop(None, []))  # type: ignore[call-overload]
+                add_runtime_asserts(ras_by_symbol.pop(None, []))
 
             # deduplicate asserts already present in graph
             if node.target in (
@@ -341,7 +341,7 @@ def insert_deferred_runtime_asserts(
                     if isinstance(arg, fx.Node) and not arg.users:
                         gm.graph.erase_node(arg)
                 else:
-                    added_asserts.add(assert_expr)  # type: ignore[arg-type]
+                    added_asserts.add(assert_expr)
 
             # hash cons, replace function calls that return torch.SymInts with direct references to
             # FX nodes built up to reify the sympy expression.
@@ -391,9 +391,11 @@ def insert_deferred_runtime_asserts(
                                 nn_module_stack=node.meta.get("nn_module_stack"),
                             ),
                         ):
-                            expr_to_proxy[sym_expr] = _sympy_interp(expr_to_proxy, sym_expr)  # type: ignore[arg-type]
+                            expr_to_proxy[sym_expr] = _sympy_interp(
+                                expr_to_proxy, sym_expr
+                            )
                         # won't try DCE-ing tensor compute here
-                    hash_node = expr_to_proxy[sym_expr].node  # type: ignore[arg-type]
+                    hash_node = expr_to_proxy[sym_expr].node
                     node.replace_all_uses_with(hash_node)
                     gm.graph.erase_node(node)
                     log.debug(
@@ -404,7 +406,7 @@ def insert_deferred_runtime_asserts(
                 elif sym_expr not in expr_to_proxy and not isinstance(
                     sym_expr, (sympy.Number, sympy.logic.boolalg.BooleanAtom)
                 ):  # don't hash cons primitives
-                    expr_to_proxy[sym_expr] = fx.Proxy(node, tracer=tracer)  # type: ignore[arg-type]
+                    expr_to_proxy[sym_expr] = fx.Proxy(node, tracer=tracer)
 
             # We add sym_constrain_range calls for symbols later in any case if they're size-like or range-constrained,
             # so calls before that are redundant.

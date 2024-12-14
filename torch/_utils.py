@@ -738,7 +738,7 @@ def _get_available_device_type():
         return "cuda"
     if torch.backends.mps.is_available():
         return "mps"
-    if hasattr(torch, "xpu") and torch.xpu.is_available():  # type: ignore[attr-defined]
+    if hasattr(torch, "xpu") and torch.xpu.is_available():
         return "xpu"
     if hasattr(torch, "mtia") and torch.mtia.is_available():
         return "mtia"
@@ -757,7 +757,7 @@ def _get_device_attr(get_member):
     if device_type and device_type.lower() == "mps":
         return get_member(torch.mps)
     if device_type and device_type.lower() == "xpu":
-        return get_member(torch.xpu)  # type: ignore[attr-defined]
+        return get_member(torch.xpu)
     if device_type and device_type.lower() == "mtia":
         return get_member(torch.mtia)
     if device_type == torch._C._get_privateuse1_backend_name():
@@ -932,12 +932,12 @@ def _functionalize_sync(t):
             torch._C._TorchDispatchModeKey.FUNCTIONAL
         )
         try:
-            torch._functionalize_sync(t.elem)  # type: ignore[attr-defined]
+            torch._functionalize_sync(t.elem)
         finally:
             if maybe_functional_mode is not None:
                 torch._C._set_dispatch_mode(maybe_functional_mode)
     else:
-        torch._functionalize_sync(t)  # type: ignore[attr-defined]
+        torch._functionalize_sync(t)
 
 
 @functools.lru_cache(2)

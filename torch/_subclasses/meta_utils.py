@@ -1092,7 +1092,7 @@ class MetaConverter(Generic[_TensorT]):
                 t_symbolic_context = SubclassSymbolicContext(
                     dynamic_sizes=t_dynamic_sizes,
                     constraint_sizes=[None] * t.ndim,
-                    inner_contexts=inner_contexts,  # type: ignore[arg-type]
+                    inner_contexts=inner_contexts,
                     tensor_source=source,
                     view_base_context=view_base_context,
                 )

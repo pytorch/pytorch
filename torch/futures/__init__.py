@@ -11,7 +11,7 @@ T = TypeVar("T")
 S = TypeVar("S")
 
 
-class _PyFutureMeta(type(torch._C.Future), type(Generic)):  # type: ignore[misc, no-redef]
+class _PyFutureMeta(type(torch._C.Future), type(Generic)):  # type: ignore[misc]
     pass
 
 

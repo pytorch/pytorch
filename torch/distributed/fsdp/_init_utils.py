@@ -928,7 +928,7 @@ def _materialize_meta_module(
         warnings.warn(
             "Unable to call `reset_parameters()` for module on meta "
             f"device with error {str(e)}. Please ensure that your module of"
-            f"type {type(module)} implements a `reset_parameters()` method."  # type: ignore[possibly-undefined]
+            f"type {type(module)} implements a `reset_parameters()` method."
         )
         raise e
 
@@ -1107,7 +1107,7 @@ def _sync_module_params_and_buffers(
             if is_traceable_wrapper_subclass(detached_buffer):
                 # NOTE: Here we assume no nested subclasses, at most one level of subclass
                 # in both model's buffers and params
-                attrs, _ = detached_buffer.__tensor_flatten__()  # type: ignore[attr-defined]
+                attrs, _ = detached_buffer.__tensor_flatten__()
                 inner_buffers = [getattr(detached_buffer, attr) for attr in attrs]
                 module_states.extend(inner_buffers)
             else:
@@ -1116,7 +1116,7 @@ def _sync_module_params_and_buffers(
     for param in params:
         detached_param = param.detach()
         if is_traceable_wrapper_subclass(detached_param):
-            attrs, _ = detached_param.__tensor_flatten__()  # type: ignore[attr-defined]
+            attrs, _ = detached_param.__tensor_flatten__()
             inner_params = [getattr(detached_param, attr) for attr in attrs]
             module_states.extend(inner_params)
         else:

@@ -114,7 +114,7 @@ class set_stance(_DecoratorContextManager):
         _set_stance(self.prev)
         wrapper = super().__call__(fn)
         # forbid wrapper in graph
-        wrapper._dynamo_forbidden = True  # type: ignore[attr-defined]
+        wrapper._dynamo_forbidden = True
         return wrapper
 
     def __enter__(self):
@@ -612,7 +612,7 @@ def _allow_in_graph_einops():
 
     try:
         # requires einops > 0.6.1, torch >= 2.0
-        from einops._torch_specific import (  # type: ignore[attr-defined]  # noqa: F401
+        from einops._torch_specific import (  # type: ignore[attr-defined, unused-ignore]  # noqa: F401
             _ops_were_registered_in_torchdynamo,
         )
 

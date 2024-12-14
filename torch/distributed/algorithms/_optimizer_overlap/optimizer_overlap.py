@@ -69,7 +69,7 @@ class _OverlappedStandardOptimizer(OverlappedOptimizer):
     def register_ddp(self, ddp_inst: DistributedDataParallel):
         # NOTE: using a custom communication hook and fused optimizer is not
         # yet supported.
-        ddp_inst.register_comm_hook(  # type: ignore[operator]
+        ddp_inst.register_comm_hook(
             None,  # wrapped hook state
             _hook_then_optimizer(allreduce_hook, self._opt_hook_state),
         )

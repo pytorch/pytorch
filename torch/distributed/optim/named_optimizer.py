@@ -99,7 +99,7 @@ class _NamedOptimizer(optim.Optimizer):
                 "Since we pass in param_groups, we will use param_groups to "
                 "initialize the optimizer, not all parameters of the module."
             )
-            param_to_key = {param: key for key, param in self.named_parameters.items()}  # type: ignore[misc, has-type]
+            param_to_key = {param: key for key, param in self.named_parameters.items()}
             ordered_param_keys = []
             for group in param_groups:
                 for param in group["params"]:
@@ -294,7 +294,7 @@ class _NamedOptimizer(optim.Optimizer):
         else:
             param_group["params"] = list(params)
 
-        param_to_key = {param: key for key, param in self.named_parameters.items()}  # type: ignore[misc, has-type]
+        param_to_key = {param: key for key, param in self.named_parameters.items()}
         for param in param_group["params"]:
             if param not in param_to_key:
                 raise ValueError("some parameters are not in the module")

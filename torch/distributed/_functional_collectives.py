@@ -138,7 +138,7 @@ def wait_tensor(tensor):
 
     Waiting follows device semantics, which means blocking on CPU and synchronizing streams on CUDA.
     """
-    return torch.ops._c10d_functional.wait_tensor(tensor)  # type: ignore[attr-defined]
+    return torch.ops._c10d_functional.wait_tensor(tensor)
 
 
 def broadcast(self: torch.Tensor, src: int, group: RANK_TYPES, tag: str = ""):
@@ -211,7 +211,7 @@ def all_gather_tensor(
         # torch.cat access the data so we already need to wait here, first do wait
         # and then chunk + cat avoid us going through ACT dispatching logic again
         if isinstance(res, AsyncCollectiveTensor):
-            res = res.wait()  # type: ignore[attr-defined]
+            res = res.wait()
         res = torch.cat(torch.chunk(res, group_size, dim=0), dim=gather_dim)
     return res
 
@@ -244,7 +244,7 @@ def all_gather_tensor_autograd(
         # torch.cat access the data so we already need to wait here, first do wait
         # and then chunk + cat avoid us going through ACT dispatching logic again
         if isinstance(res, AsyncCollectiveTensor):
-            res = res.wait()  # type: ignore[attr-defined]
+            res = res.wait()
         res = torch.cat(torch.chunk(res, group_size, dim=0), dim=gather_dim)
     return res
 
@@ -285,7 +285,7 @@ def reduce_scatter_tensor(
         self,
         reduceOp.lower(),
         group_size,
-        group_name,  # type: ignore[possibly-undefined]
+        group_name,
     )
     res = _maybe_wrap_tensor(tensor)
     return res
@@ -324,7 +324,7 @@ def reduce_scatter_tensor_autograd(
         self,
         reduceOp.lower(),
         group_size,
-        group_name,  # type: ignore[possibly-undefined]
+        group_name,
     )
     res = _FromTorchTensor.apply(tensor)
     return res
@@ -350,7 +350,7 @@ def all_reduce_coalesced(
     that information and perform collective algebraic optimization. Use other forms of input for that.
     """
     group_name = _resolve_group_name(group, tag)
-    tensor_list = torch.ops._c10d_functional.all_reduce_coalesced(  # type: ignore[attr-defined]
+    tensor_list = torch.ops._c10d_functional.all_reduce_coalesced(
         self,
         reduceOp.lower(),
         group_name,
@@ -379,7 +379,7 @@ def all_gather_into_tensor_coalesced(
     """
     group_name = _resolve_group_name(group, tag)
     group_size = c10d._get_group_size_by_name(group_name)
-    tensor_list = torch.ops._c10d_functional.all_gather_into_tensor_coalesced(  # type: ignore[attr-defined]
+    tensor_list = torch.ops._c10d_functional.all_gather_into_tensor_coalesced(
         self,
         group_size,
         group_name,
@@ -421,11 +421,11 @@ def reduce_scatter_tensor_coalesced(
             tensor_list = torch.chunk(tensor, group_size, dim=dim)
             inputs[idx] = torch.cat(tensor_list)
 
-    tensor_list = torch.ops._c10d_functional.reduce_scatter_tensor_coalesced(  # type: ignore[attr-defined]
+    tensor_list = torch.ops._c10d_functional.reduce_scatter_tensor_coalesced(
         inputs,
         reduceOp.lower(),
         group_size,
-        group_name,  # type: ignore[possibly-undefined]
+        group_name,
     )
 
     return list(map(_maybe_wrap_tensor, tensor_list))
@@ -481,7 +481,7 @@ def all_to_all_single(
         )
         output_split_sizes = [self.shape[0] // group_size] * group_size
         input_split_sizes = output_split_sizes
-    tensor = torch.ops._c10d_functional.all_to_all_single(  # type: ignore[attr-defined]
+    tensor = torch.ops._c10d_functional.all_to_all_single(
         self,
         output_split_sizes,
         input_split_sizes,
@@ -518,7 +518,7 @@ def all_to_all_single_autograd(
         )
         output_split_sizes = [self.shape[0] // group_size] * group_size
         input_split_sizes = output_split_sizes
-    tensor = torch.ops._c10d_functional_autograd.all_to_all_single(  # type: ignore[attr-defined]
+    tensor = torch.ops._c10d_functional_autograd.all_to_all_single(
         self,
         output_split_sizes,
         input_split_sizes,
@@ -793,7 +793,7 @@ class _FromTorchTensor(torch.autograd.Function):
     """
 
     @staticmethod
-    def forward(  # type: ignore[override]
+    def forward(
         ctx,  # pyre-ignore[2]: Parameter must be annotated.
         input: torch.Tensor,
     ) -> torch.Tensor:

@@ -359,7 +359,7 @@ class autocast:
         self.prev = torch.is_autocast_enabled(self.device)
         self.prev_fastdtype = torch.get_autocast_dtype(self.device)
         torch.set_autocast_enabled(self.device, self._enabled)
-        torch.set_autocast_dtype(self.device, self.fast_dtype)  # type: ignore[arg-type]
+        torch.set_autocast_dtype(self.device, self.fast_dtype)
         torch.autocast_increment_nesting()
         torch.set_autocast_cache_enabled(self._cache_enabled)
 
@@ -381,7 +381,7 @@ class autocast:
                     )
                     return mode.__torch_function__(torch.amp._enter_autocast, (), args)
 
-    def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any):  # type: ignore[override]
+    def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any):
         if torch._jit_internal.is_scripting():
             return
 

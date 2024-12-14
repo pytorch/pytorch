@@ -70,7 +70,7 @@ if not torch._running_with_deploy():
     ) -> Tensor:
         return vals.new_empty(shape)
 
-    @zeros_and_scatter.register_vmap  # type: ignore[misc]
+    @zeros_and_scatter.register_vmap
     def _(info, indims, shape, indices, value):  # type: ignore[no-untyped-def]
         """The batching rule is special in that it returns a tensor that is not batched"""
         indices_indims = indims[1]

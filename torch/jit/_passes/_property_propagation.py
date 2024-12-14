@@ -44,4 +44,4 @@ def apply_input_props_using_example(graph: Graph, example_input: List[Any]):
             )
 
         if isinstance(example_i, torch.Tensor):
-            graph_i.setType(TensorType.create_from_tensor(example_i))  # type: ignore[arg-type]
+            graph_i.setType(TensorType.create_from_tensor(example_i))

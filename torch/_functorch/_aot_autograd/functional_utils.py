@@ -40,7 +40,7 @@ def to_fun(t):
             # goes at the bottom.
             # recurse here, so we can support nested wrapper subclasses
             out = transform_subclass(t, lambda _, inner_t: to_fun(inner_t))
-            torch._mirror_autograd_meta_to(t, out)  # type: ignore[attr-defined]
+            torch._mirror_autograd_meta_to(t, out)
             return out
         else:
             return FunctionalTensor.to_functional(t)
@@ -50,7 +50,7 @@ def to_fun(t):
 
 def sync_functional_tensor(t):
     if is_traceable_wrapper_subclass(t):
-        attrs, _ctx = t.__tensor_flatten__()  # type: ignore[attr-defined]
+        attrs, _ctx = t.__tensor_flatten__()
         for attr in attrs:
             sync_functional_tensor(getattr(t, attr))
     else:
@@ -66,13 +66,13 @@ def from_fun(t):
         # goes at the bottom.
         # recurse here, so we can support nested wrapper subclasses
         out = transform_subclass(t, lambda _, inner_t: from_fun(inner_t))
-        torch._mirror_autograd_meta_to(t, out)  # type: ignore[attr-defined]
+        torch._mirror_autograd_meta_to(t, out)
         return out
 
     if not isinstance(t, FunctionalTensor):
         # quick sanity assert
         if isinstance(t, torch.Tensor):
-            assert not torch._is_functional_tensor(t)  # type: ignore[attr-defined]
+            assert not torch._is_functional_tensor(t)
         return t
     sync_functional_tensor(t)
     return torch._from_functional_tensor(t.elem)
@@ -84,7 +84,7 @@ def is_fun(t):
         # This means that if we want to "functionalize" a subclass, we need to ensure that the functional wrapper
         # goes at the bottom.
         # recurse here, so we can support nested wrapper subclasses
-        t_attrs, _ = t.__tensor_flatten__()  # type: ignore[attr-defined]
+        t_attrs, _ = t.__tensor_flatten__()
         t_inners = [getattr(t, attr) for attr in t_attrs]
         any_fun = any(is_fun(x) for x in t_inners)
         all_fun = all(is_fun(x) for x in t_inners)
@@ -183,7 +183,7 @@ def has_metadata_mutation(f_arg, arg, *, check_only_storage_mutation: bool):
 
         arg_after = torch._from_functional_tensor(f_arg.elem)
         # This is true if the current tensor experienced at least one set_() call
-        maybe_storage_changed = torch._functionalize_was_storage_changed(f_arg.elem)  # type: ignore[attr-defined]
+        maybe_storage_changed = torch._functionalize_was_storage_changed(f_arg.elem)
         # However, multiple set_() calls can cancel out. So we also check whether the
         # storage of the tensor has changed.
         # Note: if an input experienced two set_() calls that cancel out, **and**
@@ -205,7 +205,7 @@ def has_metadata_mutation(f_arg, arg, *, check_only_storage_mutation: bool):
         if has_storage_metadata_mutation:
             return True
 
-        maybe_metadata_mutated = torch._functionalize_has_metadata_mutation(f_arg.elem)  # type: ignore[attr-defined]
+        maybe_metadata_mutated = torch._functionalize_has_metadata_mutation(f_arg.elem)
         # This is true if the current tensor experienced at least one metadata mutation.
         # So if false, we know there was no metadata mutation
         if not maybe_metadata_mutated:

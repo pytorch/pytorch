@@ -662,7 +662,7 @@ def _export_to_torch_ir(
             ), _ignore_backend_decomps():
                 gm_torch_level, _ = torch._dynamo.export(
                     f,
-                    dynamic_shapes=dynamic_shapes,  # type: ignore[arg-type]
+                    dynamic_shapes=dynamic_shapes,
                     assume_static_by_default=True,
                     tracing_mode="symbolic",
                     disable_constraint_solver=disable_constraint_solver,
@@ -737,7 +737,7 @@ def _export_to_aten_ir(
         tie_weights=True,
         strict=True,
         stack_weights=True,
-    ), grad_safe_guard, _ignore_backend_decomps(), _compiling_state_context():  # type: ignore[attr-defined]
+    ), grad_safe_guard, _ignore_backend_decomps(), _compiling_state_context():
         gm, graph_signature = transform(aot_export_module)(
             mod,
             fake_args,
@@ -869,7 +869,7 @@ def _rewrite_dynamo_tensor_constants(
                 # Convert it into a constant in the graph signature, and add its
                 # value to the constants table.
                 spec.kind = InputKind.CONSTANT_TENSOR
-                constants[spec.target] = value  # type: ignore[arg-type]
+                constants[spec.target] = value
 
 
 def _move_non_persistent_buffers_to_tensor_constants(
@@ -884,7 +884,7 @@ def _move_non_persistent_buffers_to_tensor_constants(
         if spec.kind == InputKind.BUFFER and not spec.persistent:
             assert spec.target is not None
             assert spec.target not in constants
-            constants[spec.target] = orig_mod.get_buffer(spec.target)  # type: ignore[arg-type]
+            constants[spec.target] = orig_mod.get_buffer(spec.target)
 
 
 def _verify_nn_module_stack(graph_module: torch.fx.GraphModule) -> None:
@@ -1209,7 +1209,7 @@ def _convert_ts_to_export_experimental(traced_callable, args, kwargs=None):
 
         export_args, export_kwargs = _process_jit_trace_inputs_for_export(args, kwargs)
 
-        if isinstance(traced_callable, (TopLevelTracedModule, torch._C.ScriptModule)):  # type: ignore[operator]
+        if isinstance(traced_callable, (TopLevelTracedModule, torch._C.ScriptModule)):
             return _export(
                 traced_callable,
                 export_args,
@@ -1335,7 +1335,7 @@ def _strict_export_lower_to_aten_ir(
     if out_spec.type not in (list, tuple):
         out_spec = pytree.TreeSpec(tuple, None, [out_spec])
 
-    orig_arg_names = gm_torch_level.graph._codegen.pytree_info.orig_args  # type: ignore[attr-defined]
+    orig_arg_names = gm_torch_level.graph._codegen.pytree_info.orig_args
 
     gm_torch_level.graph._codegen = _PyTreeCodeGen(
         _PyTreeInfo(
@@ -1557,7 +1557,7 @@ def _export_to_aten_ir_make_fx(
         tie_weights=True,
         strict=True,
         stack_weights=True,
-    ), _ignore_backend_decomps(), _compiling_state_context():  # type: ignore[attr-defined]
+    ), _ignore_backend_decomps(), _compiling_state_context():
         param_len = len(dict(mod.named_parameters(remove_duplicate=False)))
         buffer_len = len(dict(mod.named_buffers(remove_duplicate=False)))
         params_len = param_len + buffer_len
@@ -1770,7 +1770,7 @@ def _non_strict_export(
                     _is_torch_jit_trace=_is_torch_jit_trace,
                 )
             )
-            aten_export_artifact = _to_aten_func(  # type: ignore[operator]
+            aten_export_artifact = _to_aten_func(
                 patched_mod,
                 new_fake_args,
                 new_fake_kwargs,
@@ -1832,7 +1832,7 @@ def _export_for_training(
             dispatch_tracing_mode="make_fx",
         )
     )
-    export_artifact = export_func(  # type: ignore[operator]
+    export_artifact = export_func(
         mod=mod,
         args=args,
         kwargs=kwargs,
@@ -1988,7 +1988,7 @@ def _export(
     # Call the appropriate export function based on the strictness of tracing.
     export_func = _strict_export if strict else _non_strict_export
 
-    export_artifact = export_func(  # type: ignore[operator]
+    export_artifact = export_func(
         mod,
         args,
         kwargs,

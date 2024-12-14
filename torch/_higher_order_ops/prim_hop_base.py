@@ -80,7 +80,7 @@ class PrimHOPBase(HigherOrderOperator, abc.ABC):
             pass
         if not torch.is_grad_enabled() or pytree.tree_all_only(
             torch.Tensor,
-            lambda t: not t.requires_grad,  # type: ignore[union-attr]
+            lambda t: not t.requires_grad,
             operands,
         ):
             with torch._C._AutoDispatchBelowAutograd():

@@ -1524,7 +1524,7 @@ def _set_pg_timeout(timeout: timedelta, group: Optional[ProcessGroup] = None) ->
         if is_nccl_available() and isinstance(backend, ProcessGroupNCCL):
             backends.add(backend)  # type: ignore[arg-type]
         elif is_gloo_available() and isinstance(backend, ProcessGroupGloo):
-            backends.add(backend)  # type: ignore[arg-type]
+            backends.add(backend)
     if len(backends) == 0:
         warnings.warn("Set timeout is now only supported for either nccl or gloo.")
     for backend in backends:
@@ -2929,7 +2929,7 @@ def _object_to_tensor(obj, device, group):
     with _WaitCounter("pytorch.wait_counter.c10d._object_to_tensor").guard():
         f = io.BytesIO()
         _pickler(f).dump(obj)
-        byte_storage = torch.ByteStorage._from_buffer(f.getvalue())  # type: ignore[attr-defined]
+        byte_storage = torch.ByteStorage._from_buffer(f.getvalue())
         # Do not replace `torch.ByteTensor` or `torch.LongTensor` with torch.tensor and specifying dtype.
         # Otherwise, it will casue 100X slowdown.
         # See: https://github.com/pytorch/pytorch/issues/65696
@@ -3268,7 +3268,7 @@ def send_object_list(
     # Concatenate and send serialized object tensors
     # Note: torch.cat will do an extra memory copy to the current device, if the tensor_list
     # has only one element, we can skip the copy.
-    if len(tensor_list) == 1:  # type: ignore[possibly-undefined]
+    if len(tensor_list) == 1:
         object_tensor = tensor_list[0]
     else:
         object_tensor = torch.cat(tensor_list)
@@ -3358,7 +3358,7 @@ def recv_object_list(
     rank_sizes = recv(object_sizes_tensor, src=src, group=group, group_src=group_src)
 
     # Tensor to receive serialized objects into.
-    object_tensor = torch.empty(  # type: ignore[call-overload]
+    object_tensor = torch.empty(
         torch.sum(object_sizes_tensor).item(),  # type: ignore[arg-type]
         dtype=torch.uint8,
         device=current_device,
@@ -3487,7 +3487,7 @@ def broadcast_object_list(
         else:
             object_tensor = torch.cat(tensor_list)
     else:
-        object_tensor = torch.empty(  # type: ignore[call-overload]
+        object_tensor = torch.empty(
             torch.sum(object_sizes_tensor).item(),  # type: ignore[arg-type]
             dtype=torch.uint8,
             device=current_device,
@@ -3601,8 +3601,8 @@ def scatter_object_list(
 
         # Src rank broadcasts the maximum tensor size. This is because all ranks are
         # expected to call into scatter() with equal-sized tensors.
-        max_tensor_size = max(tensor_sizes)  # type: ignore[possibly-undefined]
-        for tensor in tensor_list:  # type: ignore[possibly-undefined]
+        max_tensor_size = max(tensor_sizes)
+        for tensor in tensor_list:
             tensor.resize_(max_tensor_size)
     else:
         max_tensor_size = torch.tensor([0], dtype=torch.long, device=pg_device)

@@ -260,7 +260,7 @@ class LazyLinear(LazyModuleMixin, Linear):
 
     """
 
-    cls_to_become = Linear  # type: ignore[assignment]
+    cls_to_become = Linear
     weight: UninitializedParameter
     bias: UninitializedParameter  # type: ignore[assignment]
 
@@ -280,7 +280,7 @@ class LazyLinear(LazyModuleMixin, Linear):
         if not self.has_uninitialized_params() and self.in_features != 0:
             super().reset_parameters()
 
-    def initialize_parameters(self, input) -> None:  # type: ignore[override]
+    def initialize_parameters(self, input) -> None:
         if self.has_uninitialized_params():
             with torch.no_grad():
                 self.in_features = input.shape[-1]

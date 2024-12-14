@@ -148,7 +148,7 @@ def aot_dispatch_base(
     flat_fn, flat_args, fw_metadata = pre_compile(
         wrappers, flat_fn, flat_args, aot_config, fw_metadata=fw_metadata
     )
-    fw_module, updated_flat_args, maybe_subclass_meta = aot_dispatch_base_graph(  # type: ignore[misc]
+    fw_module, updated_flat_args, maybe_subclass_meta = aot_dispatch_base_graph(
         flat_fn, flat_args, aot_config, fw_metadata=fw_metadata
     )
     # Save the forward_graph_str right after aot_dispatch_base_graph,
@@ -545,7 +545,7 @@ def aot_dispatch_autograd(
 
         # reversed() since we expect output at end of graph
         bw_output = next(reversed(bw_module.graph.find_nodes(op="output")))
-        bw_outs: Sequence[torch.fx.Node] = bw_output.args[0]  # type: ignore[assignment]
+        bw_outs: Sequence[torch.fx.Node] = bw_output.args[0]
 
         # TODO: we should apply the below "detach inputs if their gradients are statically known to be None"
         # optimization even if we have subclass inputs/outputs (we do not handle this today).

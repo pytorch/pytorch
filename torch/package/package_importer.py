@@ -292,7 +292,7 @@ class PackageImporter(Importer):
         # Load the data (which may in turn use `persistent_load` to load tensors)
         data_file = io.BytesIO(self.zip_reader.get_record(pickle_file))
         unpickler = self.Unpickler(data_file)
-        unpickler.persistent_load = persistent_load  # type: ignore[assignment]
+        unpickler.persistent_load = persistent_load  # type: ignore[method-assign]
 
         @contextmanager
         def set_deserialization_context():
@@ -400,7 +400,7 @@ class PackageImporter(Importer):
             assert mangled_filename is not None
             # pre-emptively install the source in `linecache` so that stack traces,
             # `inspect`, etc. work.
-            assert filename not in linecache.cache  # type: ignore[attr-defined]
+            assert filename not in linecache.cache
             linecache.lazycache(mangled_filename, ns)
 
             code = self._compile_source(filename, mangled_filename)
@@ -475,7 +475,7 @@ class PackageImporter(Importer):
             parent_module = self.modules[parent]
 
             try:
-                parent_module.__path__  # type: ignore[attr-defined]
+                parent_module.__path__
 
             except AttributeError:
                 # when we attempt to import a package only containing pybinded files,

@@ -102,7 +102,7 @@ def call_for_per_sample_grads(
     if batch_size is not None and batch_size < 1:
         raise RuntimeError(f"Batch size must be positive, got {batch_size}")
     for weight in module.parameters():
-        if hasattr(weight, "grad_sample") and weight.grad_sample is not None:  # type: ignore[attr-defined]
+        if hasattr(weight, "grad_sample") and weight.grad_sample is not None:
             raise RuntimeError(
                 "Current Expanded Weights accumulates the gradients, which will be incorrect for multiple "
                 f"calls without clearing gradients. Please clear out the grad_sample parameter of {weight} or "

@@ -89,7 +89,7 @@ def _extract_members(
     if len(unique_named_members) == 0:
         names, params = (), ()
     else:
-        names, params = zip(*unique_named_members)  # type: ignore[assignment]
+        names, params = zip(*unique_named_members)
     return params, names, names_map
 
 
@@ -561,7 +561,7 @@ def functional_init(
         if len(ensemble_shape) == 0:
             model = model_class(*args, **kwargs).to(device)
             return make_functional_deprecated_v1(model)
-        num_models = ensemble_shape[0]  # type: ignore[misc]
+        num_models = ensemble_shape[0]
         if num_models <= 0:
             raise ValueError(f"num_models {num_models} should be > 0")
         # NB: Not very efficient, more of a POC
@@ -588,7 +588,7 @@ def functional_init_with_buffers(
         if len(ensemble_shape) == 0:
             model = model_class(*args, **kwargs).to(device)
             return make_functional_deprecated_v1(model)
-        num_models = ensemble_shape[0]  # type: ignore[misc]
+        num_models = ensemble_shape[0]
         if num_models <= 0:
             raise ValueError(f"num_models {num_models} should be > 0")
         # NB: Not very efficient, more of a POC

@@ -774,7 +774,7 @@ def aot_graph_input_parser(
                     resolved_shape.append(int(dim))
 
         constructor = torch.randn if dtype.is_floating_point else torch.zeros
-        out = constructor(resolved_shape, dtype=dtype, device=device)  # type: ignore[call-arg]
+        out = constructor(resolved_shape, dtype=dtype, device=device)
         for d in dynamic_dims:
             torch._dynamo.mark_dynamic(out, d)
         return out

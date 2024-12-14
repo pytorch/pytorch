@@ -96,7 +96,7 @@ class SymPyOps:
 
     @staticmethod
     def abs(x: TypedExpr) -> TypedExpr:
-        return TypedExpr(abs(x.expr), x.dtype)  # type: ignore[arg-type]
+        return TypedExpr(abs(x.expr), x.dtype)
 
     @staticmethod
     def square(x: TypedExpr) -> TypedExpr:

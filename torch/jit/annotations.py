@@ -207,7 +207,7 @@ def _eval_no_call(stmt, glob, loc):
             raise RuntimeError(
                 f"Type annotation should not contain calls, but '{stmt}' does"
             )
-    return eval(bytecode, glob, loc)  # type: ignore[arg-type] # noqa: P204
+    return eval(bytecode, glob, loc)  # noqa: P204
 
 
 def parse_type_line(type_line, rcb, loc):
@@ -455,7 +455,7 @@ def try_ann_to_type(ann, loc, rcb=None):
             msg = "Unsupported annotation {} could not be resolved because {} could not be resolved. At\n{}"
             assert maybe_type, msg.format(repr(ann), repr(maybe_type), repr(loc))
             inner.append(maybe_type)
-        return UnionType(inner)  # type: ignore[arg-type]
+        return UnionType(inner)
     if torch.distributed.rpc.is_available() and is_rref(ann):
         return RRefType(try_ann_to_type(ann_args[0], loc))
     if is_future(ann):

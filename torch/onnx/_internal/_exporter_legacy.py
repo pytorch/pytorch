@@ -122,7 +122,7 @@ class OnnxRegistry:
                 meta.qualified_name
             )
             symbolic_function = registration.ONNXFunction(
-                onnx_function=meta.function,  # type: ignore[arg-type]
+                onnx_function=meta.function,
                 op_full_name=internal_name_instance.qualified_name(),
                 is_custom=False,
                 is_complex=meta.is_complex,
@@ -297,7 +297,7 @@ class ResolvedExportOptions(ExportOptions):
     def __init__(
         self,
         options: ExportOptions | ResolvedExportOptions,
-        model: torch.nn.Module | Callable | None = None,  # type: ignore[name-defined]
+        model: torch.nn.Module | Callable | None = None,
     ):
         from torch.onnx._internal.fx import (  # TODO: Prevent circular dep
             diagnostics,

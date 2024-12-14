@@ -371,7 +371,7 @@ class TritonTemplateKernel(TritonKernel):
             if not self.ops_handler
             else lambda: V.set_ops_handler(self.ops_handler(V.get_ops_handler()))
         )
-        with context():  # type: ignore[operator]
+        with context():
             yield
         self.subgraph_bodies[body_name] = SubgraphInfo(
             **{
@@ -424,8 +424,8 @@ class TritonTemplateKernel(TritonKernel):
             "constants": {},
         }
         triton_meta["configs"] = [config_of(signature)]
-        for arg_num in triton_meta["configs"][0].equal_to_1:  # type: ignore[index]
-            triton_meta["constants"][signature[arg_num].name] = 1  # type: ignore[index]
+        for arg_num in triton_meta["configs"][0].equal_to_1:
+            triton_meta["constants"][signature[arg_num].name] = 1
         matrix_instr_nonkdim = self.meta.get("matrix_instr_nonkdim", 0)
         if matrix_instr_nonkdim != 0:
             triton_meta["matrix_instr_nonkdim"] = matrix_instr_nonkdim
@@ -2046,7 +2046,7 @@ class AlgorithmSelectorCache(PersistentCache):
                     map(
                         str,
                         V.graph.sizevars.size_hints(
-                            n.get_size(), fallback=config.unbacked_symint_fallback  # type: ignore[arg-type]
+                            n.get_size(), fallback=config.unbacked_symint_fallback
                         ),
                     )
                 )

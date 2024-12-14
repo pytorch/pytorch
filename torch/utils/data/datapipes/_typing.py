@@ -35,7 +35,7 @@ from typing import (  # type: ignore[attr-defined]
 from torch.utils.data.datapipes._hook_iterator import _SnapshotState, hook_iterator
 
 
-class GenericMeta(ABCMeta):  # type: ignore[no-redef]
+class GenericMeta(ABCMeta):
     pass
 
 
@@ -121,7 +121,7 @@ def _decompose_type(t, to_list=True):
             return None
         ts = [t]
     # Ignored: Generator has incompatible item type "object"; expected "Type[Any]"
-    ts = [TYPE2ABC.get(_t, _t) for _t in ts]  # type: ignore[misc]
+    ts = [TYPE2ABC.get(_t, _t) for _t in ts]
     return ts
 
 
@@ -284,26 +284,26 @@ class _DataPipeMeta(GenericMeta):
     type: _DataPipeType
 
     def __new__(cls, name, bases, namespace, **kwargs):
-        return super().__new__(cls, name, bases, namespace, **kwargs)  # type: ignore[call-overload]
+        return super().__new__(cls, name, bases, namespace, **kwargs)
 
         # TODO: the statements below are not reachable by design as there is a bug and typing is low priority for now.
         cls.__origin__ = None
         if "type" in namespace:
-            return super().__new__(cls, name, bases, namespace, **kwargs)  # type: ignore[call-overload]
+            return super().__new__(cls, name, bases, namespace, **kwargs)
 
         namespace["__type_class__"] = False
         #  For plain derived class without annotation
         for base in bases:
             if isinstance(base, _DataPipeMeta):
-                return super().__new__(cls, name, bases, namespace, **kwargs)  # type: ignore[call-overload]
+                return super().__new__(cls, name, bases, namespace, **kwargs)
 
         namespace.update(
             {"type": _DEFAULT_TYPE, "__init_subclass__": _dp_init_subclass}
         )
-        return super().__new__(cls, name, bases, namespace, **kwargs)  # type: ignore[call-overload]
+        return super().__new__(cls, name, bases, namespace, **kwargs)
 
     def __init__(self, name, bases, namespace, **kwargs):
-        super().__init__(name, bases, namespace, **kwargs)  # type: ignore[call-overload]
+        super().__init__(name, bases, namespace, **kwargs)
 
     # TODO: Fix isinstance bug
     @_tp_cache
@@ -321,7 +321,7 @@ class _DataPipeMeta(GenericMeta):
         if isinstance(self.type.param, _GenericAlias):
             orig = getattr(self.type.param, "__origin__", None)
             if isinstance(orig, type) and orig is not Generic:
-                p = self.type.param[params]  # type: ignore[index]
+                p = self.type.param[params]
                 t = _DataPipeType(p)
                 l = len(str(self.type)) + 2
                 name = self.__name__[:-l]
@@ -412,7 +412,7 @@ class _IterDataPipeMeta(_DataPipeMeta):
 
         if "__iter__" in namespace:
             hook_iterator(namespace)
-        return super().__new__(cls, name, bases, namespace, **kwargs)  # type: ignore[call-overload]
+        return super().__new__(cls, name, bases, namespace, **kwargs)
 
 
 def _dp_init_subclass(sub_cls, *args, **kwargs):

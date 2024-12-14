@@ -1218,7 +1218,7 @@ class DynamicRendezvousHandler(RendezvousHandler):
             store,
             rank,
             world_size,
-            self._bootstrap_store_info,  # type: ignore[assignment]
+            self._bootstrap_store_info,
         )
 
     def is_closed(self) -> bool:

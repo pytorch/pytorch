@@ -506,7 +506,7 @@ def _profile_to_snapshot(profile):
             seg['blocks'].append({'size': seg['total_size'] - last_addr, 'state': 'inactive'})
 
     snapshot['segments'] = [seg for seg in snapshot['segments'] if seg['blocks']]  # type: ignore[attr-defined]
-    for seg in snapshot['segments']:  # type: ignore[attr-defined, name-defined, no-redef]
+    for seg in snapshot['segments']:  # type: ignore[attr-defined]
         seg['total_size'] -= seg['address']
         if not seg['blocks']:
             seg['blocks'].append({'size': seg['total_size'], 'state': 'inactive'})

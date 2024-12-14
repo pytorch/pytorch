@@ -186,11 +186,11 @@ def wrap_compiler_debug(
                     raise AccuracyError("Bad accuracy detected")
                 else:
                     # Call the compiled function with real inputs
-                    return inner_compiled_fn(real_inputs)  # type: ignore[operator]
+                    return inner_compiled_fn(real_inputs)
             else:
                 try:
                     # Call the compiled function with real inputs
-                    out = inner_compiled_fn(real_inputs)  # type: ignore[operator]
+                    out = inner_compiled_fn(real_inputs)
                     # sync cuda kernels to ensure IMA detection
                     for arg in example_inputs:
                         if isinstance(arg, torch.Tensor) and arg.is_cuda:
@@ -652,7 +652,7 @@ def repro_analyze(options, mod, load_args):
         known_names.add(name)
         if not options.skip_saving_inductor_intermediates:
             writer.write_tensor(os.path.join("inductor", name), val)
-        pbar.update(1)  # type: ignore[has-type]
+        pbar.update(1)
 
     writer = torch.utils._content_store.ContentStoreWriter(
         options.save_dir, stable_hash=options.stable_hash

@@ -47,7 +47,7 @@ cls_to_fsdp_cls: Dict[Type, Type] = {}
 
 # The decorator adds a state object to `module` that can be accessed via
 # `fully_shard.state(module)`. The state object and module are 1:1.
-@contract(state_cls=FSDPState)  # type: ignore[operator]
+@contract(state_cls=FSDPState)
 def fully_shard(
     module: Union[nn.Module, List[nn.Module]],
     *,

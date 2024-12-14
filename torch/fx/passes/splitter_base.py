@@ -738,7 +738,7 @@ class _SplitterBase:
                 break
 
             # Put the node into `tag` subgraph
-            node.tag = tag  # type: ignore[attr-defined]
+            node.tag = tag
             parent_nodes.remove(node)
             visited_nodes.add(node)
 
@@ -879,7 +879,7 @@ class _SplitterBase:
                 if hasattr(node, "tag"):
                     raise FxNetSplitterInternalError(f"Node {node} was already tagged")
 
-                node.tag = tag  # type: ignore[attr-defined]
+                node.tag = tag
                 self._node_submodule_map[node.name] = tag
 
     def split(self, remove_tag: bool = False) -> torch.fx.GraphModule:

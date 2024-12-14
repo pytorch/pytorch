@@ -174,12 +174,12 @@ def tensorify_python_scalars(
 
         # don't cache
         if isinstance(expr, Symbol):
-            return sympy_interp(Analysis, expr_to_tensor_proxy, expr)  # type: ignore[arg-type]
+            return sympy_interp(Analysis, expr_to_tensor_proxy, expr)
 
         # hash cons on arguments, run expr handler
         expr_to_tensor_proxy[expr] = _run_sympy_handler(
             Analysis,
-            [_sympy_interp(arg) for arg in expr.args],  # type: ignore[arg-type]
+            [_sympy_interp(arg) for arg in expr.args],
             expr,
         )
 

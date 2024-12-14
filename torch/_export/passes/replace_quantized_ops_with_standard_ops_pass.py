@@ -330,7 +330,7 @@ def _transform_conv_with_packedparam(gm: torch.fx.GraphModule, node: torch.fx.No
             param_1,
         ) = insert_weight_and_bias_get_attr_node_from_get_attr_to_scriptobject(
             gm, param_node
-        )  # type: ignore[assignment]
+        )
         op_res_node = gm.graph.call_function(
             op_f,
             (
@@ -376,7 +376,7 @@ def _transform_linear_with_packedparam(gm: torch.fx.GraphModule, node: torch.fx.
             param_1,
         ) = insert_weight_and_bias_get_attr_node_from_get_attr_to_scriptobject(
             gm, param_node
-        )  # type: ignore[assignment]
+        )
         op_res_node = gm.graph.call_function(
             torch.ops.aten.linear, (inp_node, param_0, param_1)
         )

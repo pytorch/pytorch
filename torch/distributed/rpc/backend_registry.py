@@ -42,7 +42,7 @@ _backend_type_doc = """
 # Can't handle Function Enum API (mypy bug #9079)
 BackendType = enum.Enum(value="BackendType", names={})  # type: ignore[misc]
 # Unable to assign a function a method (mypy bug #2427)
-BackendType.__repr__ = _backend_type_repr  # type: ignore[assignment]
+BackendType.__repr__ = _backend_type_repr  # type: ignore[method-assign]
 
 if BackendType.__doc__:
     BackendType.__doc__ = _backend_type_doc
@@ -92,7 +92,7 @@ def register_backend(
     # Can't handle Function Enum API (mypy bug #9079)
     BackendType = enum.Enum(value="BackendType", names=extended_enum_dict)  # type: ignore[misc]
     # Unable to assign a function a method (mypy bug #2427)
-    BackendType.__repr__ = _backend_type_repr  # type: ignore[assignment]
+    BackendType.__repr__ = _backend_type_repr  # type: ignore[method-assign]
     if BackendType.__doc__:
         BackendType.__doc__ = _backend_type_doc
     return BackendType[backend_name]

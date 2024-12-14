@@ -716,8 +716,8 @@ def jagged_scaled_dot_product_attention(
             output,
             query.offsets(),
             query.lengths(),
-            min_seqlen=query._maybe_min_seqlen,  # type: ignore[attr-defined]
-            max_seqlen=query._maybe_max_seqlen,  # type: ignore[attr-defined]
+            min_seqlen=query._maybe_min_seqlen,
+            max_seqlen=query._maybe_max_seqlen,
         )
 
     compute_logsumexp = query.requires_grad or key.requires_grad or value.requires_grad

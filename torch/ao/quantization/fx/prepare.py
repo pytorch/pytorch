@@ -184,8 +184,8 @@ def _create_obs_or_fq_from_qspec(
     # it seems that dynamic range quantization
     obs_or_fq_class = observer_or_fake_quant_ctr
     if isinstance(observer_or_fake_quant_ctr, _PartialWrapper):
-        obs_or_fq_class = observer_or_fake_quant_ctr.p.func  # type: ignore[union-attr, assignment]
-    if "PerChannel" not in obs_or_fq_class.__name__:  # type: ignore[operator, union-attr]
+        obs_or_fq_class = observer_or_fake_quant_ctr.p.func
+    if "PerChannel" not in obs_or_fq_class.__name__:  # type: ignore[union-attr]
         kwargs.pop("ch_axis")
     return observer_or_fake_quant_ctr.with_args(**kwargs)()
 
@@ -439,7 +439,7 @@ def _get_standalone_module_configs(
     a standalone modules.
     """
     module_name = str(node.target)
-    module_type = type(named_modules[module_name])  # type: ignore[index]
+    module_type = type(named_modules[module_name])
     # name config has precedence over type config
     config_entry = StandaloneModuleConfigEntry(None, (), None, None)
     config_entry = prepare_custom_config.standalone_module_classes.get(
@@ -1246,7 +1246,7 @@ def _maybe_insert_observers_before_graph_output(
         for old_arg in graph_output_node.args
     ]
 
-    graph_output_node.args = tuple(new_args)  # type: ignore[assignment]
+    graph_output_node.args = tuple(new_args)
 
 
 def _maybe_propagate_dtype_for_node(
@@ -1938,9 +1938,7 @@ def _run_prepare_fx_on_standalone_modules(
         )
 
         standalone_module = named_modules[root_node.target]
-        prepare = (
-            torch.ao.quantization.quantize_fx._prepare_standalone_module_fx
-        )  # type: ignore[attr-defined]
+        prepare = torch.ao.quantization.quantize_fx._prepare_standalone_module_fx
         observed_standalone_module = prepare(
             standalone_module,
             sm_qconfig_mapping,

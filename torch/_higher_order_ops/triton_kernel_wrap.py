@@ -965,21 +965,21 @@ def triton_kernel_wrapper_functional_functionalize(
         return ctx.wrap_tensors(outputs)  # type: ignore[return-value,arg-type]
 
 
-triton_kernel_wrapper_mutation.fallthrough(DispatchKey.PythonDispatcher)  # type: ignore[attr-defined]
-triton_kernel_wrapper_mutation.fallthrough(DispatchKey.PythonTLSSnapshot)  # type: ignore[attr-defined]
+triton_kernel_wrapper_mutation.fallthrough(DispatchKey.PythonDispatcher)
+triton_kernel_wrapper_mutation.fallthrough(DispatchKey.PythonTLSSnapshot)
 triton_kernel_wrapper_mutation.fallthrough(DispatchKey.ADInplaceOrView)
 triton_kernel_wrapper_mutation.fallthrough(DispatchKey.BackendSelect)
-triton_kernel_wrapper_mutation.fallthrough(DispatchKey.AutocastCPU)  # type: ignore[attr-defined]
-triton_kernel_wrapper_mutation.fallthrough(DispatchKey.AutocastCUDA)  # type: ignore[attr-defined]
+triton_kernel_wrapper_mutation.fallthrough(DispatchKey.AutocastCPU)
+triton_kernel_wrapper_mutation.fallthrough(DispatchKey.AutocastCUDA)
 triton_kernel_wrapper_mutation.fallthrough(DispatchKey.AutogradCUDA)
 triton_kernel_wrapper_mutation.fallthrough(DispatchKey.AutogradCPU)
 
-triton_kernel_wrapper_functional.fallthrough(DispatchKey.PythonDispatcher)  # type: ignore[attr-defined]
-triton_kernel_wrapper_functional.fallthrough(DispatchKey.PythonTLSSnapshot)  # type: ignore[attr-defined]
+triton_kernel_wrapper_functional.fallthrough(DispatchKey.PythonDispatcher)
+triton_kernel_wrapper_functional.fallthrough(DispatchKey.PythonTLSSnapshot)
 triton_kernel_wrapper_functional.fallthrough(DispatchKey.ADInplaceOrView)
 triton_kernel_wrapper_functional.fallthrough(DispatchKey.BackendSelect)
-triton_kernel_wrapper_functional.fallthrough(DispatchKey.AutocastCPU)  # type: ignore[attr-defined]
-triton_kernel_wrapper_functional.fallthrough(DispatchKey.AutocastCUDA)  # type: ignore[attr-defined]
+triton_kernel_wrapper_functional.fallthrough(DispatchKey.AutocastCPU)
+triton_kernel_wrapper_functional.fallthrough(DispatchKey.AutocastCUDA)
 triton_kernel_wrapper_functional.fallthrough(DispatchKey.AutogradCUDA)
 triton_kernel_wrapper_functional.fallthrough(DispatchKey.AutogradCUDA)
 triton_kernel_wrapper_functional.fallthrough(DispatchKey.AutogradCPU)
@@ -1258,7 +1258,7 @@ class TritonHOPifier:
             if self.is_callable(grid):
                 # Populate the special "meta" argument to call the grid function
                 meta = {**combined_args_raw, **config_args}
-                grid = self.call_grid(grid, meta, tx)  # type: ignore[arg-type]
+                grid = self.call_grid(grid, meta, tx)
             grids.append(self.check_grid(grid))
 
         for i in range(len(grids)):

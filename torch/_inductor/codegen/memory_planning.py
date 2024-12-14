@@ -299,7 +299,7 @@ class TemporalSplit(ClearCacheOnAllocateMixin, AllocationTreeNode):
     @cache_on_self
     def get_symbolic_size(self) -> sympy.Expr:
         if not self.allocations:
-            return 0  # type: ignore[return-value]
+            return 0
         return sympy.Max(*[x.get_symbolic_size() for x in self.allocations])
 
     def is_empty(self):

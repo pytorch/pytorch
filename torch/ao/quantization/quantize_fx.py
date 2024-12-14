@@ -82,9 +82,7 @@ def _fuse_fx(
         model: GraphModule object from symbolic tracing (torch.fx.symbolic_trace)
     """
     _check_is_graph_module(model)
-    return fuse(
-        model, is_qat, fuse_custom_config, backend_config
-    )  # type: ignore[operator]
+    return fuse(model, is_qat, fuse_custom_config, backend_config)
 
 
 def _prepare_fx(
@@ -153,7 +151,7 @@ def _prepare_fx(
         _equalization_config=_equalization_config,
         backend_config=backend_config,
         is_standalone_module=is_standalone_module,
-    )  # type: ignore[operator]
+    )
 
     attach_preserved_attrs_to_model(prepared, preserved_attrs)
     return prepared

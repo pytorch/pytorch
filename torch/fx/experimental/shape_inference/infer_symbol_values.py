@@ -73,7 +73,7 @@ def infer_symbol_values(
             symints,
             init_symints,
             padding_constraints,
-            padding_constraints[var][0],  # type: ignore[arg-type]
+            padding_constraints[var][0],
             left_num,
             var,
             idx,
@@ -125,7 +125,7 @@ def update_equation(
     idx: int,
 ) -> None:
     padding_constraints[var].append(new_mod_num)
-    mod_num = np.lcm.reduce(padding_constraints[var][1:])  # type: ignore[arg-type]
+    mod_num = np.lcm.reduce(padding_constraints[var][1:])
     eq = mod_num * init_symints[idx]
     eq_const = [arg for arg in init_eq.args if arg.is_number]
     if eq_const:

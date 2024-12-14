@@ -153,7 +153,7 @@ def get_symmetric_quantization_config(
         if weight_qscheme == torch.per_tensor_symmetric:
             extra_args["observer"] = MovingAverageMinMaxObserver
         else:
-            extra_args["observer"] = MovingAveragePerChannelMinMaxObserver  # type: ignore[dict-item]
+            extra_args["observer"] = MovingAveragePerChannelMinMaxObserver
     weight_quantization_spec = QuantizationSpec(
         dtype=torch.int8,
         quant_min=weight_qmin,

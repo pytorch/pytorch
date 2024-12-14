@@ -215,7 +215,7 @@ class MultiheadAttention(nn.MultiheadAttention):
         # Note: Because the linear layers are quantized, mypy does not nkow how
         # to deal with them -- might need to ignore the typing checks.
         # for the type: ignore[has-type], see https://github.com/pytorch/pytorch/issues/58969
-        w, b = self.out_proj._weight_bias()  # type: ignore[operator, has-type]
+        w, b = self.out_proj._weight_bias()  # type: ignore[operator]
         fp.out_proj.weight = nn.Parameter(w.dequantize())
         if b is not None:
             fp.out_proj.bias = nn.Parameter(b)
@@ -535,7 +535,7 @@ class MultiheadAttention(nn.MultiheadAttention):
         # Reentering the quantized zone
         attn_output = self.quant_attn_output(attn_output)
         # for the type: ignore[has-type], see https://github.com/pytorch/pytorch/issues/58969
-        attn_output = self.out_proj(attn_output)  # type: ignore[has-type]
+        attn_output = self.out_proj(attn_output)
         attn_output_weights = self.quant_attn_output_weights(attn_output_weights)
 
         if need_weights:

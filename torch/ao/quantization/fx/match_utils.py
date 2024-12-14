@@ -206,8 +206,7 @@ def _find_matches(
         assert modules is not None
         return (
             node_target in standalone_module_names
-            or type(modules[node_target])  # type: ignore[operator]
-            in standalone_module_classes  # type: ignore[operator]
+            or type(modules[node_target]) in standalone_module_classes
         )
 
     # add standalone modules to the match

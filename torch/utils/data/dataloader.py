@@ -1153,7 +1153,7 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
             # Queue is not type-annotated
             self._data_queue = queue.Queue()  # type: ignore[var-annotated]
             if self._pin_memory_device == "xpu":
-                current_device = torch.xpu.current_device()  # type: ignore[attr-defined]
+                current_device = torch.xpu.current_device()
             elif self._pin_memory_device == torch._C._get_privateuse1_backend_name():
                 custom_device_mod = getattr(
                     torch, torch._C._get_privateuse1_backend_name()

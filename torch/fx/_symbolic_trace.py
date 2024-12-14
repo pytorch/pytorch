@@ -25,7 +25,7 @@ from typing import (
 
 import torch
 import torch.utils._pytree as pytree
-from torch._C import ScriptObject  # type: ignore[attr-defined]
+from torch._C import ScriptObject
 from torch._library.fake_class_registry import FakeScriptObject
 
 from ._compatibility import compatibility
@@ -147,10 +147,10 @@ def _patch_function(fn: FunctionType, nargs: int) -> FunctionType:
             co.co_varnames,
             co.co_filename,
             co.co_name,
-            co.co_qualname,  # type: ignore[attr-defined]
+            co.co_qualname,
             co.co_firstlineno,
             co.co_lnotab,
-            co.co_exceptiontable,  # type: ignore[attr-defined]
+            co.co_exceptiontable,
             co.co_freevars,
             co.co_cellvars,
         )
@@ -916,7 +916,7 @@ class Tracer(TracerBase):
             default: Tuple[Any, ...] = ()
         else:
             param = sig.parameters[name]
-            default = (  # type: ignore[assignment]
+            default = (
                 () if param.default is inspect.Parameter.empty else (param.default,)
             )
         return self.create_proxy(

@@ -247,7 +247,7 @@ class _PipelineStageBase(ABC):
         assert (
             self._outputs_meta is None
         ), "Attempting to reconfigure output_meta, which is not supported"
-        self._outputs_meta = tuple(outputs_meta)  # type: ignore[assignment]
+        self._outputs_meta = tuple(outputs_meta)
 
     def get_outputs_meta(self) -> Tuple[torch.Tensor, ...]:
         """Get the output metadata (meta tensors) reprensenting the outputs of this stage"""
@@ -568,7 +568,7 @@ class _PipelineStageBase(ABC):
         # If submod is wrapped with DDP, we use the `no_sync` context manager to
         # avoid gradient all-reduce per microbatch
         if isinstance(self.submod, DistributedDataParallel):
-            with self.submod.no_sync():  # type: ignore[operator]
+            with self.submod.no_sync():
                 out_val = self.submod(*args, **kwargs)
         else:
             out_val = self.submod(*args, **kwargs)
@@ -621,16 +621,16 @@ class _PipelineStageBase(ABC):
             if last_backward:
                 # Last chunk, prepare for gradient reduction
                 # HACK: reaching into DDP implementation details here. Is there a better way?
-                self.submod.reducer.prepare_for_backward(  # type: ignore[union-attr, operator]
+                self.submod.reducer.prepare_for_backward(
                     list(
-                        torch.nn.parallel.distributed._find_tensors(  # type: ignore[attr-defined]
+                        torch.nn.parallel.distributed._find_tensors(
                             bwd_kwargs["stage_output"]
                         )
                     )
                 )
                 result = perform_backward(backward_type)()
             else:
-                with self.submod.no_sync():  # type: ignore[operator]
+                with self.submod.no_sync():
                     result = perform_backward(backward_type)()
         # If submod is a FSDP module
         elif isinstance(self.submod, FSDPModule):

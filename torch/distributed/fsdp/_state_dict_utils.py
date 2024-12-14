@@ -339,7 +339,7 @@ def _full_post_state_dict_hook(
         if not getattr(state_dict[fqn], "_has_been_cloned", False):
             try:
                 state_dict[fqn] = state_dict[fqn].detach().clone()
-                state_dict[fqn]._has_been_cloned = True  # type: ignore[attr-defined]
+                state_dict[fqn]._has_been_cloned = True
             except BaseException as e:
                 warnings.warn(
                     f"Failed to clone() tensor with name {fqn} on rank {fsdp_state.rank}. "
@@ -425,7 +425,7 @@ def _local_post_state_dict_hook(
     # Constructs a ShardedTensor from the flat_param "without" padding.
     # Removing the padding allows users to change the number of ranks
     # when loading the local_state_dict.
-    full_numel = flat_param._unpadded_unsharded_size.numel()  # type: ignore[attr-defined]
+    full_numel = flat_param._unpadded_unsharded_size.numel()
     shard_offset = flat_param.numel() * fsdp_state.rank
     valid_data_size = flat_param.numel() - flat_param._shard_numel_padded
     if valid_data_size > 0:
@@ -441,7 +441,7 @@ def _local_post_state_dict_hook(
         local_shards = []
     sharded_tensor = init_from_local_shards(
         local_shards, full_numel, process_group=fsdp_state.process_group
-    )  # type: ignore[assignment]
+    )
     # TODO: Add DTensor state_dict support for LOCAL_STATE_DICT.
     if fsdp_state._state_dict_config.offload_to_cpu:
         sharded_tensor = sharded_tensor.cpu()

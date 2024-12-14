@@ -177,7 +177,7 @@ class OperatorBase:
 
 
 # Equivalent to computeDispatchTableEntryWithDebug
-def resolve_key(op: OperatorBase, k: DispatchKey):  # type: ignore[valid-type]
+def resolve_key(op: OperatorBase, k: DispatchKey):
     # 1. (Direct) operator registration
     if op.has_kernel_for_dispatch_key(k):
         return k
@@ -233,12 +233,12 @@ def resolve_key(op: OperatorBase, k: DispatchKey):  # type: ignore[valid-type]
 _higher_order_ops: Dict[str, "HigherOrderOperator"] = {}
 
 _HIGHER_ORDER_OP_DEFAULT_FALLTHROUGH_DISPATCH_KEYS = [
-    DispatchKey.PythonDispatcher,  # type: ignore[attr-defined]
-    DispatchKey.PythonTLSSnapshot,  # type: ignore[attr-defined]
+    DispatchKey.PythonDispatcher,
+    DispatchKey.PythonTLSSnapshot,
     DispatchKey.ADInplaceOrView,
     DispatchKey.BackendSelect,
-    DispatchKey.AutocastCPU,  # type: ignore[attr-defined]
-    DispatchKey.AutocastCUDA,  # type: ignore[attr-defined]
+    DispatchKey.AutocastCPU,
+    DispatchKey.AutocastCUDA,
 ]
 
 

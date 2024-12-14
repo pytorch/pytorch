@@ -230,7 +230,7 @@ def split_by_tags(
             return comp.input_placeholders[comp.orig_inputs.index(x)]
 
         n = comp.graph.node_copy(node, remap_func)
-        n.tag = node.tag  # type: ignore[attr-defined]
+        n.tag = node.tag
         node_remapping[node] = n
         node_to_component[n] = comp
 
@@ -295,7 +295,7 @@ def split_by_tags(
     # then we need to make sure get_attr is copied to the new graph.
     for x in flatten(output_node.args[0]):
         if x.op == "get_attr":
-            setattr(main_root, x.name, getattr_recursive(gm, x.target))  # type: ignore[arg-type]
+            setattr(main_root, x.name, getattr_recursive(gm, x.target))
 
     result_gm = GraphModuleCls(main_root, main_g)
     if return_fqn_mapping:

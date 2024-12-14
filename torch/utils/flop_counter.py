@@ -729,7 +729,7 @@ class FlopCounterMode:
     def _count_flops(self, func_packet, out, args, kwargs):
         if func_packet in self.flop_registry:
             flop_count_func = self.flop_registry[func_packet]
-            flop_count = flop_count_func(*args, **kwargs, out_val=out)  # type: ignore[operator]
+            flop_count = flop_count_func(*args, **kwargs, out_val=out)
             for par in set(self.mod_tracker.parents):
                 self.flop_counts[par][func_packet] += flop_count
 

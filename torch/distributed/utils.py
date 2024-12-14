@@ -137,10 +137,10 @@ def _recursive_to(inputs, target_device, use_side_stream_for_tensor_copies):
                     # Ensure tensor memory is not reused until work on
                     # main stream is complete
                     if isinstance(obj, PackedSequence):
-                        output.data.record_stream(current_stream)  # type: ignore[arg-type]
+                        output.data.record_stream(current_stream)
                     else:
                         assert isinstance(output, torch.Tensor)
-                        output.record_stream(current_stream)  # type: ignore[arg-type]
+                        output.record_stream(current_stream)
                 return (output,)
 
         from torch.nn.parallel.scatter_gather import _is_namedtuple

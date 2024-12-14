@@ -121,7 +121,7 @@ def fakify(
             if isinstance(constraint, _RelaxedConstraint):
                 continue
             symbolic_context.constraint_sizes[i] = constraint.constraint_range
-            mode.shape_env.source_name_to_debug_name[src.name()] = constraint.name  # type: ignore[assignment]
+            mode.shape_env.source_name_to_debug_name[src.name()] = constraint.name
     fake = mode.from_tensor(t, source=source, symbolic_context=symbolic_context)
     mode.shape_env.tracked_fakes.append(TrackedFake(fake, source, symbolic_context))  # type: ignore[union-attr]
     return fake
@@ -320,7 +320,7 @@ def produce_guards_and_solve_constraints(
             original_signature,
             dynamic_shapes,  # type: ignore[arg-type]
             constraint_violation_error,
-            forced_specializations,  # type: ignore[arg-type]
+            forced_specializations,
         )
     else:
         # FIXME(ycao): This is a hack to get around missing signature from ScriptMethod

@@ -104,7 +104,7 @@ _builtin_ops = [
     (torch._C._get_cpu_capability, "aten::_get_cpu_capability"),
     (warnings.warn, "aten::warn"),
     (torch._VF.stft, "aten::stft"),  # type: ignore[attr-defined]
-    (torch._VF.istft, "aten::istft"),  # type: ignore[attr-defined]
+    (torch._VF.istft, "aten::istft"),
     (torch._VF.cdist, "aten::cdist"),  # type: ignore[attr-defined]
     (torch._VF.norm, "aten::norm"),  # type: ignore[attr-defined]
     (torch._VF.unique_dim, "aten::unique_dim"),
@@ -170,7 +170,7 @@ def _get_builtin_table():
 
     _builtin_ops.append((math.gcd, "aten::gcd"))
     _builtin_ops.append((math.isfinite, "aten::isfinite"))
-    _builtin_ops.append((math.remainder, "aten::mathremainder"))  # type: ignore[attr-defined]
+    _builtin_ops.append((math.remainder, "aten::mathremainder"))
 
     import torch.distributed.autograd as dist_autograd
 

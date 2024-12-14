@@ -161,7 +161,7 @@ class OpDispatcher:
         """
         # operators that does not need to go through sharding propagation
         if op_call in self._custom_op_handlers:
-            return self._custom_op_handlers[op_call](op_call, args, kwargs)  # type: ignore[operator]
+            return self._custom_op_handlers[op_call](op_call, args, kwargs)
 
         # extract local tensor and sharding infos to a OpInfo
         op_info = self.unwrap_to_op_info(op_call, args, kwargs)

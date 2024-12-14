@@ -304,7 +304,7 @@ def _find_shard(tensor: ShardedTensor, index: MetadataIndex) -> Shard:
 def find_tensor_shard(tensor: torch.Tensor, index: MetadataIndex) -> torch.Tensor:
     if hasattr(tensor, "__get_tensor_shard__"):
         # DTensor implements _Checkpointable
-        return tensor.__get_tensor_shard__(index)  # type: ignore[attr-defined]
+        return tensor.__get_tensor_shard__(index)
     if isinstance(tensor, ShardedTensor):
         return _find_shard(tensor, index).tensor
     if index.offset is not None:

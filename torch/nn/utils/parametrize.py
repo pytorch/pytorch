@@ -157,7 +157,7 @@ class ParametrizationList(ModuleList):
         # Compute new
         with torch.no_grad():
             new = original
-            for module in reversed(self):  # type: ignore[call-overload]
+            for module in reversed(self):
                 if hasattr(module, "right_inverse"):
                     try:
                         new = module.right_inverse(new)  # type: ignore[operator]
@@ -245,7 +245,7 @@ class ParametrizationList(ModuleList):
 
         with torch.no_grad():
             # See https://github.com/pytorch/pytorch/issues/53103
-            for module in reversed(self):  # type: ignore[call-overload]
+            for module in reversed(self):
                 if hasattr(module, "right_inverse"):
                     value = module.right_inverse(value)  # type: ignore[operator]
                 else:
@@ -597,7 +597,7 @@ def register_parametrization(
         assert isinstance(module.parametrizations, ModuleDict)  # Make mypy happy
         module.parametrizations[tensor_name].append(parametrization)
         # If unsafe was True in previous parametrization, keep it enabled
-        module.parametrizations[tensor_name].unsafe |= unsafe  # type: ignore[index, union-attr]
+        module.parametrizations[tensor_name].unsafe |= unsafe
     elif tensor_name in module._buffers or tensor_name in module._parameters:
         # Set the parametrization mechanism
         # Fetch the original buffer or parameter

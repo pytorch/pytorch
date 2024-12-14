@@ -408,7 +408,7 @@ def _single_tensor_adam(
         device = param.device
 
         if beta1_dict is not None:
-            dtype = param.dtype  # type: ignore[union-attr]
+            dtype = param.dtype
 
             # cast to workaround https://github.com/pytorch/pytorch/issues/140601
             key = (device, dtype)
@@ -548,7 +548,7 @@ def _multi_tensor_adam(
 
     # We only shuffle around the beta when it is a Tensor and on CUDA, otherwise, we prefer
     # treating it as a scalar.
-    beta1_dict: Optional[DeviceDict] = (  # type: ignore[attr-defined]
+    beta1_dict: Optional[DeviceDict] = (
         {beta1.device: beta1}
         if isinstance(beta1, Tensor) and str(beta1.device) != "cpu"
         else None
@@ -570,7 +570,7 @@ def _multi_tensor_adam(
 
         device = device_params[0].device
         if beta1_dict is not None and device not in beta1_dict:
-            beta1_dict[device] = beta1.to(device=device, non_blocking=True)  # type: ignore[union-attr, attr-defined]
+            beta1_dict[device] = beta1.to(device=device, non_blocking=True)  # type: ignore[union-attr]
 
         device_beta1 = beta1_dict[device] if beta1_dict else beta1
 
@@ -625,7 +625,7 @@ def _multi_tensor_adam(
         # as a result, separate out the value mul
         # Filed https://github.com/pytorch/pytorch/issues/139795
         if isinstance(beta2, torch.Tensor):
-            scaled_device_grads = torch._foreach_mul(device_grads, 1 - beta2)  # type: ignore[assignment]
+            scaled_device_grads = torch._foreach_mul(device_grads, 1 - beta2)
             value = 1.0
         else:
             scaled_device_grads = device_grads  # type: ignore[assignment]
@@ -667,7 +667,7 @@ def _multi_tensor_adam(
             if amsgrad:
                 device_max_exp_avg_sqs = cast(List[Tensor], device_max_exp_avg_sqs_)
                 # Maintains the maximum of all 2nd moment running avg. till now
-                torch._foreach_maximum_(device_max_exp_avg_sqs, device_exp_avg_sqs)  # type: ignore[assignment]
+                torch._foreach_maximum_(device_max_exp_avg_sqs, device_exp_avg_sqs)
 
                 # Set intermediate to the max. for normalizing running avg. of gradient when amsgrad
                 exp_avg_sq_sqrt = torch._foreach_sqrt(device_max_exp_avg_sqs)
@@ -690,7 +690,7 @@ def _multi_tensor_adam(
 
             step_size = _stack_if_compiling([(lr / bc) * -1 for bc in bias_correction1])
 
-            bias_correction2_sqrt = [bc**0.5 for bc in bias_correction2]  # type: ignore[arg-type]
+            bias_correction2_sqrt = [bc**0.5 for bc in bias_correction2]
 
             if amsgrad:
                 device_max_exp_avg_sqs = cast(List[Tensor], device_max_exp_avg_sqs_)

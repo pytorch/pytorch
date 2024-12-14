@@ -49,8 +49,8 @@ def _all_gather_sharded_tensor(
         pg = distributed_c10d._get_default_group()
     world_size = dist.get_world_size(pg)
     shards = sharded_tensor.local_shards()
-    dim_0_size = sharded_tensor.size()[0]  # type: ignore[index]
-    tensor_numel = sharded_tensor.size().numel()  # type: ignore[union-attr]
+    dim_0_size = sharded_tensor.size()[0]
+    tensor_numel = sharded_tensor.size().numel()
     chunk_size = math.ceil(dim_0_size / world_size) * tensor_numel // dim_0_size
     pg_device = (
         distributed_c10d._get_pg_default_device(pg) if device is None else device

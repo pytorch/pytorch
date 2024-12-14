@@ -1734,7 +1734,7 @@ class Module:
 
     def _wrapped_call_impl(self, *args, **kwargs):
         if self._compiled_call_impl is not None:
-            return self._compiled_call_impl(*args, **kwargs)  # type: ignore[misc]
+            return self._compiled_call_impl(*args, **kwargs)
         else:
             return self._call_impl(*args, **kwargs)
 
@@ -1769,7 +1769,7 @@ class Module:
                     *self._forward_pre_hooks.items(),
                 ):
                     if hook_id in self._forward_pre_hooks_with_kwargs:
-                        args_kwargs_result = hook(self, args, kwargs)  # type: ignore[misc]
+                        args_kwargs_result = hook(self, args, kwargs)
                         if args_kwargs_result is not None:
                             if isinstance(args_kwargs_result, tuple) and len(args_kwargs_result) == 2:
                                 args, kwargs = args_kwargs_result
@@ -1848,9 +1848,9 @@ class Module:
             # For now only forward hooks have the always_call option but perhaps
             # this functionality should be added to full backward hooks as well.
             for hook_id, hook in _global_forward_hooks.items():
-                if hook_id in _global_forward_hooks_always_called and hook_id not in called_always_called_hooks:  # type: ignore[possibly-undefined]
+                if hook_id in _global_forward_hooks_always_called and hook_id not in called_always_called_hooks:
                     try:
-                        hook_result = hook(self, args, result)  # type: ignore[possibly-undefined]
+                        hook_result = hook(self, args, result)
                         if hook_result is not None:
                             result = hook_result
                     except Exception as e:
@@ -1859,12 +1859,12 @@ class Module:
                         continue
 
             for hook_id, hook in self._forward_hooks.items():
-                if hook_id in self._forward_hooks_always_called and hook_id not in called_always_called_hooks:  # type: ignore[possibly-undefined]
+                if hook_id in self._forward_hooks_always_called and hook_id not in called_always_called_hooks:
                     try:
                         if hook_id in self._forward_hooks_with_kwargs:
-                            hook_result = hook(self, args, kwargs, result)  # type: ignore[possibly-undefined]
+                            hook_result = hook(self, args, kwargs, result)
                         else:
-                            hook_result = hook(self, args, result)  # type: ignore[possibly-undefined]
+                            hook_result = hook(self, args, result)
                         if hook_result is not None:
                             result = hook_result
                     except Exception as e:

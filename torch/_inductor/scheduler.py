@@ -1256,7 +1256,7 @@ class FusedSchedulerNode(BaseSchedulerNode):
         )
         for snode in self.snodes:
             assert isinstance(snode, SchedulerNode)
-            snode.apply_new_loop_order(new_order)  # type: ignore[arg-type]
+            snode.apply_new_loop_order(new_order)
 
         refresh_group_node_dependencies(self)
 
@@ -1723,7 +1723,7 @@ class GroupedSchedulerNode(BaseSchedulerNode):
     def create(cls, snodes: List[BaseSchedulerNode]) -> GroupedSchedulerNode:
         scheduler = snodes[0].scheduler
         assert all(node.scheduler is scheduler for node in snodes)
-        grouped_snode = cls(scheduler, snodes)  # type: ignore[arg-type]
+        grouped_snode = cls(scheduler, snodes)
         for snode in snodes:
             scheduler.name_to_fused_node[snode.get_name()] = grouped_snode
         scheduler.name_to_fused_node[grouped_snode.get_name()] = grouped_snode

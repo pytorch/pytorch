@@ -49,7 +49,7 @@ from torch.utils._pytree import treespec_dumps, treespec_loads
 from torch.utils._sympy.numbers import int_oo
 from torch.utils._sympy.value_ranges import ValueRanges
 
-from .schema import (  # type: ignore[attr-defined]
+from .schema import (
     Argument,
     BufferMutationSpec,
     ConstantValue,
@@ -409,8 +409,8 @@ def serialize_range_constraints(
 ) -> Dict[str, RangeConstraint]:
     return {
         str(k): RangeConstraint(
-            _sympy_int_to_int(v.lower, "ceil"),  # type: ignore[arg-type]
-            _sympy_int_to_int(v.upper, "floor"),  # type: ignore[arg-type]
+            _sympy_int_to_int(v.lower, "ceil"),
+            _sympy_int_to_int(v.upper, "floor"),
         )
         for k, v in range_constraints.items()
     }
@@ -1601,8 +1601,8 @@ class GraphModuleDeserializer(metaclass=Final):
                 if vr := self.symbol_name_to_range.get(expr_str):
                     self.shape_env.constrain_symbol_range(
                         sym,
-                        compiler_min=vr.lower,  # type: ignore[arg-type]
-                        compiler_max=vr.upper,  # type: ignore[arg-type]
+                        compiler_min=vr.lower,
+                        compiler_max=vr.upper,
                     )
             return sym
 
@@ -1666,8 +1666,8 @@ class GraphModuleDeserializer(metaclass=Final):
             return cast(
                 FakeTensor,
                 torch.empty_strided(
-                    tuple(self.deserialize_sym_int(val) for val in tensor_meta.sizes),  # type: ignore[misc]
-                    tuple(self.deserialize_sym_int(val) for val in tensor_meta.strides),  # type: ignore[misc]
+                    tuple(self.deserialize_sym_int(val) for val in tensor_meta.sizes),
+                    tuple(self.deserialize_sym_int(val) for val in tensor_meta.strides),
                     device=deserialize_device(tensor_meta.device),
                     dtype=_SERIALIZE_TO_TORCH_DTYPE[tensor_meta.dtype],
                 ),
@@ -2423,7 +2423,7 @@ class ExportedProgramDeserializer(metaclass=Final):
         range_constraints = {}
         for k, v in symbol_name_to_range.items():
             if symbol := symbol_name_to_symbol.get(k):
-                range_constraints[symbol] = v  # type: ignore[arg-type]
+                range_constraints[symbol] = v
             else:
                 log.warning(f"Symbol {k} did not appear in the graph that was deserialized")  # noqa: G004
         return range_constraints
@@ -2473,7 +2473,7 @@ class ExportedProgramDeserializer(metaclass=Final):
             root=res.graph_module,
             graph=res.graph_module.graph,
             graph_signature=res.signature,
-            state_dict=res.state_dict,  # type: ignore[arg-type]
+            state_dict=res.state_dict,
             range_constraints=range_constraints,
             module_call_graph=res.module_call_graph,
             example_inputs=res.example_inputs,
@@ -2551,7 +2551,7 @@ def _dict_to_dataclass(cls, data):
         field_type = cls.__annotations__[_type]
         return cls.create(**{_type: _dict_to_dataclass(field_type, _value)})
     elif dataclasses.is_dataclass(cls):
-        obj = cls(**data)  # type: ignore[assignment,operator]
+        obj = cls(**data)  # type: ignore[operator]
         type_hints = typing.get_type_hints(cls)
         for f in dataclasses.fields(cls):
             name = f.name
@@ -2945,7 +2945,7 @@ def canonicalize(ep: ExportedProgram) -> ExportedProgram:
     )
 
     if len(sorted_ins) > 0:
-        sorted_inputs, input_specs = zip(*(i for idx, i in sorted_ins))  # type: ignore[assignment]
+        sorted_inputs, input_specs = zip(*(i for idx, i in sorted_ins))
     else:
         sorted_inputs = ()
         input_specs = ()
@@ -2953,7 +2953,7 @@ def canonicalize(ep: ExportedProgram) -> ExportedProgram:
     sorted_outs = sorted(
         enumerate(zip(graph.outputs, signature.output_specs)), key=rank_output
     )
-    sorted_outputs, output_specs = zip(*(i for idx, i in sorted_outs))  # type: ignore[assignment]
+    sorted_outputs, output_specs = zip(*(i for idx, i in sorted_outs))
 
     sorted_graph, replace_table = _canonicalize_graph(
         sorted_inputs, sorted_outputs, graph

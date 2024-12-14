@@ -40,9 +40,9 @@ class _ModuleMeta:
         _raw_meta: The raw meta '(module_name, node.meta["nn_module_stack"][module_name])'.
     """
 
-    _module_class: Final[type | str | None]  # type: ignore[misc]
-    _module_name: Final[str]  # type: ignore[misc]
-    _raw_meta: Final[tuple[Any, Any]]  # type: ignore[misc]
+    _module_class: Final[type | str | None]
+    _module_name: Final[str]
+    _raw_meta: Final[tuple[Any, Any]]
 
     def __init__(
         self,
@@ -195,7 +195,7 @@ class _ModuleStackMeta:
             }
     """
 
-    _module_stack: Final[list[_ModuleMeta]]  # type: ignore[misc]
+    _module_stack: Final[list[_ModuleMeta]]
 
     def __init__(
         self,

@@ -45,7 +45,7 @@ class ROCmTemplate(KernelTemplate):
         self.input_reorder = input_reorder
         self.layout = layout
 
-    def generate(  # type: ignore[override]
+    def generate(
         self,
         **kwargs,
     ) -> ROCmTemplateCaller:

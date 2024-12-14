@@ -164,7 +164,7 @@ def efficient_conv_bn_eval_graph_transform_inlined(match: Match, *args, **kwargs
     if input_node.op != "call_function":  # type: ignore[union-attr]
         return
 
-    input_fn = input_node.target  # type: ignore[arg-type, union-attr]
+    input_fn = input_node.target  # type: ignore[union-attr]
     supported_convs = [
         torch._C._nn.linear,
         torch.conv1d,
@@ -255,7 +255,7 @@ def efficient_conv_bn_eval_graph_transform_decomposed(match: Match, *args, **kwa
     if input_node.op != "call_function":  # type: ignore[union-attr]
         return
 
-    input_fn = input_node.target  # type: ignore[arg-type, union-attr]
+    input_fn = input_node.target  # type: ignore[union-attr]
     supported_convs = [
         torch.ops.aten.linear.default,
         torch.ops.aten.conv1d.default,

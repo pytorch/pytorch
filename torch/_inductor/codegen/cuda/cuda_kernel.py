@@ -72,7 +72,7 @@ class CUDAKernel(Kernel):
     Baseclass for CUDA / Cutlass based Kernels
     """
 
-    overrides = OpOverrides  # type: ignore[assignment]
+    overrides = OpOverrides
 
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
@@ -271,7 +271,7 @@ class CUDATemplateKernel(CUDAKernel):
     def call_kernel(
         self,
         name: str,
-        node: "CUDATemplateBuffer",  # type: ignore[name-defined]
+        node: "CUDATemplateBuffer",
     ) -> None:
         """
         Generates code to call the kernel through V.graph.wrapper_code.
@@ -377,7 +377,7 @@ class CUDATemplateKernel(CUDAKernel):
 
         if node is None:
             return "0"
-        return str(node.get_layout().offset)  # type: ignore[union-attr]
+        return str(node.get_layout().offset)
 
     def ptr(self, node: IRNode) -> str:
         """
@@ -490,8 +490,10 @@ class CUDATemplateCaller(ChoiceCaller):
         layout: Layout,
         make_kernel_render: Callable[[CUDATemplateBuffer, Optional[List[IRNode]]], str],
         bmreq: CUDABenchmarkRequest,
-        template: "CUDATemplate",  # type: ignore[name-defined]
-        info_kwargs: Optional[Dict[str, Union[PrimitiveInfoType, List[PrimitiveInfoType]]]],  # type: ignore[type-arg]
+        template: "CUDATemplate",
+        info_kwargs: Optional[
+            Dict[str, Union[PrimitiveInfoType, List[PrimitiveInfoType]]]
+        ],
         description: str,
     ) -> None:
         super().__init__(name, input_nodes, layout, description)

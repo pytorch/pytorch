@@ -156,7 +156,7 @@ class Dispatcher:
         """
 
         def _df(func):
-            self.add(types, func, **kwargs)  # type: ignore[call-arg]
+            self.add(types, func, **kwargs)
             return func
 
         return _df

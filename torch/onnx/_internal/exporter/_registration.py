@@ -80,7 +80,7 @@ def _get_overload(qualified_name: str) -> torch._ops.OpOverload | None:
             )
             return None
 
-        return getattr(op_packet, overload)  # type: ignore[call-overload]
+        return getattr(op_packet, overload)
     except AttributeError:
         if qualified_name.endswith("getitem"):
             # This is a special case where we registered the function incorrectly,
@@ -140,7 +140,7 @@ class ONNXRegistry:
                 else:
                     opset_version = 1
 
-                overload_func.signature = _schemas.OpSignature.from_function(  # type: ignore[attr-defined]
+                overload_func.signature = _schemas.OpSignature.from_function(
                     overload_func,
                     domain,
                     name,
@@ -213,7 +213,7 @@ class ONNXRegistry:
             try:
                 # TODO(justinchuby): Use the op_signature attribute when onnxscript is updated in CI
                 if isinstance(function, onnxscript.OnnxFunction):
-                    function.signature = _schemas.OpSignature.from_function(  # type: ignore[attr-defined]
+                    function.signature = _schemas.OpSignature.from_function(
                         function,
                         function.function_ir.domain,
                         function.name,

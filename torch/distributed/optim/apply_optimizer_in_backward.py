@@ -69,26 +69,26 @@ def _apply_optimizer_in_backward(
         optimizer = optimizer_class([param], **optimizer_kwargs)
 
         if not hasattr(param, "_in_backward_optimizers"):
-            param._in_backward_optimizers = []  # type: ignore[attr-defined]
+            param._in_backward_optimizers = []
             # TODO: Remove these attributes once we have a better way of accessing
             # optimizer classes and kwargs for a parameter.
-            param._optimizer_classes = []  # type: ignore[attr-defined]
-            param._optimizer_kwargs = []  # type: ignore[attr-defined]
+            param._optimizer_classes = []
+            param._optimizer_kwargs = []
 
-        param._in_backward_optimizers.append(optimizer)  # type: ignore[attr-defined]
-        param._optimizer_classes.append(optimizer_class)  # type: ignore[attr-defined]
-        param._optimizer_kwargs.append(optimizer_kwargs)  # type: ignore[attr-defined]
+        param._in_backward_optimizers.append(optimizer)
+        param._optimizer_classes.append(optimizer_class)
+        param._optimizer_kwargs.append(optimizer_kwargs)
 
         if not register_hook:
             return
 
         def optimizer_hook(*_unused) -> None:
-            for opt in param._in_backward_optimizers:  # type: ignore[attr-defined]
+            for opt in param._in_backward_optimizers:
                 opt.step()
 
             param.grad = None
 
-        handle = param_to_acc_grad_map[param].register_hook(optimizer_hook)  # type: ignore[attr-defined]
+        handle = param_to_acc_grad_map[param].register_hook(optimizer_hook)
         if param not in param_to_optim_hook_handle_map:
             param_to_optim_hook_handle_map[param] = []
         param_to_optim_hook_handle_map[param].append(handle)

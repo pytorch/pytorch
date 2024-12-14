@@ -62,7 +62,7 @@ class _remote_device:
             if len(fields) == 2:
                 # rank:<rank>/device format, extract rank
                 if fields[0] == "rank" and fields[1].isdigit():
-                    self._rank = int(fields[1])  # type: ignore[assignment]
+                    self._rank = int(fields[1])
                     self._worker_name = None
                 else:
                     raise ValueError(PARSE_ERROR)

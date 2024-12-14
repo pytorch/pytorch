@@ -1327,7 +1327,7 @@ def _create_named_tuple(
     field_names: List[str],
     defaults: Tuple[Any, ...],
 ):
-    TupleType = collections.namedtuple(unqual_name, field_names, defaults=defaults)  # type: ignore[call-arg, no-redef, misc]
+    TupleType = collections.namedtuple(unqual_name, field_names, defaults=defaults)  # type: ignore[misc]
     return TupleType(*t)
 
 

@@ -135,5 +135,5 @@ def ordering(signatures):
     for s in signatures:
         if s not in edges:
             edges[s] = []
-    edges = {k: [b for a, b in v] for k, v in edges.items()}  # type: ignore[assignment, attr-defined]
+    edges = {k: [b for a, b in v] for k, v in edges.items()}
     return _toposort(edges)

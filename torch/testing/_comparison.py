@@ -789,7 +789,7 @@ class TensorLikePair(Pair):
         # The comparison logic uses operators currently not supported by the MPS backends.
         #  See https://github.com/pytorch/pytorch/issues/77144 for details.
         # TODO: Remove this conversion as soon as all operations are supported natively by the MPS backend
-        if actual.is_mps or expected.is_mps:  # type: ignore[attr-defined]
+        if actual.is_mps or expected.is_mps:
             actual = actual.cpu()
             expected = expected.cpu()
 

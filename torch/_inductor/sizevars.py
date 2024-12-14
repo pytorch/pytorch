@@ -345,7 +345,7 @@ class SizeVarAllocator:
         """
         Returns a bool indicating if it is sound to optimize as if left and right are equal.
         """
-        return self.is_expr_static_and_true(sympy.Eq(left, right))  # type: ignore[arg-type]
+        return self.is_expr_static_and_true(sympy.Eq(left, right))
 
     # See Note - [On Statically Known]
     def statically_known_list_equals(self, left: List[Expr], right: List[Expr]) -> bool:
@@ -398,7 +398,7 @@ class SizeVarAllocator:
         if free_unbacked_symbols(numerator) or free_unbacked_symbols(denominator):
             return False
         expr = sympy.Eq(numerator % denominator, 0)
-        return self.is_expr_static_and_true(expr)  # type: ignore[arg-type]
+        return self.is_expr_static_and_true(expr)
 
     # See Note - [On Statically Known]
     def statically_known_power_of_2(self, expr: Expr) -> bool:
@@ -414,9 +414,9 @@ class SizeVarAllocator:
 
     def guard_equals(self, left: Expr, right: Expr) -> Expr:
         if isinstance(left, Expr):
-            left = sympy_subs(left, self.inv_precomputed_replacements)  # type: ignore[arg-type]
+            left = sympy_subs(left, self.inv_precomputed_replacements)
         if isinstance(right, Expr):
-            right = sympy_subs(right, self.inv_precomputed_replacements)  # type: ignore[arg-type]
+            right = sympy_subs(right, self.inv_precomputed_replacements)
 
         expr = sympy.Eq(left, right)
         static_expr = self.shape_env._maybe_evaluate_static(expr)
@@ -472,9 +472,9 @@ class SizeVarAllocator:
     def evaluate_min(self, left: Expr, right: Expr) -> Expr:
         """return the smaller of left and right, and guard on that choice"""
         if isinstance(left, Expr):
-            left = sympy_subs(left, self.inv_precomputed_replacements)  # type: ignore[arg-type]
+            left = sympy_subs(left, self.inv_precomputed_replacements)
         if isinstance(right, Expr):
-            right = sympy_subs(right, self.inv_precomputed_replacements)  # type: ignore[arg-type]
+            right = sympy_subs(right, self.inv_precomputed_replacements)
         try:
             lv = self.size_hint(left)
             rv = self.size_hint(right)
@@ -526,8 +526,8 @@ class SizeVarAllocator:
         return [self.evaluate_static_shape(x) for x in left]
 
     def remove_precomputed_replacements(self, expr: Expr) -> Expr:
-        if any(symbol_is_type(s, SymT.PRECOMPUTED_SIZE) for s in expr.free_symbols):  # type: ignore[attr-defined]
-            return sympy_subs(expr, self.inv_precomputed_replacements)  # type: ignore[arg-type]
+        if any(symbol_is_type(s, SymT.PRECOMPUTED_SIZE) for s in expr.free_symbols):
+            return sympy_subs(expr, self.inv_precomputed_replacements)
         return expr
 
     def symbolic_hint(self, expr: Union[Expr, int]) -> Union[Expr, int]:
@@ -541,7 +541,7 @@ class SizeVarAllocator:
         free_symbols = expr.free_symbols
         if not free_symbols:
             try:
-                return int(expr)  # type: ignore[return-value]
+                return int(expr)
             except TypeError:
                 return expr  # inf/nan/I
         expr = self.remove_precomputed_replacements(expr)
@@ -557,7 +557,7 @@ class SizeVarAllocator:
                 s: self.shape_env.var_to_range.get(s, None) for s in out.free_symbols
             }
             if all(vr is not None for vr in unbacked_sym_vrs.values()):
-                hint_vr = bound_sympy(out, unbacked_sym_vrs)  # type: ignore[arg-type]
+                hint_vr = bound_sympy(out, unbacked_sym_vrs)
                 if isinstance(hint_vr.lower, (int, sympy.Integer)):
                     fallback = max(fallback, int(hint_vr.lower))
                 if isinstance(hint_vr.upper, (int, sympy.Integer)):
@@ -680,8 +680,8 @@ class SizeVarAllocator:
         support_vars: Optional[Sequence[sympy.Symbol]] = None,
     ) -> List[int]:
         for v in index.free_symbols:
-            if symbol_is_type(v, SymT.INDIRECT):  # type: ignore[attr-defined]
-                index = sympy_subs(index, {v: 0})  # type: ignore[dict-item]
+            if symbol_is_type(v, SymT.INDIRECT):
+                index = sympy_subs(index, {v: 0})
         result = []
         for s in self.stride_vars(index, vars, support_vars):
             try:

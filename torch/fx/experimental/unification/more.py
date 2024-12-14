@@ -1,5 +1,5 @@
 # mypy: allow-untyped-defs
-from .core import reify, unify  # type: ignore[attr-defined]
+from .core import reify, unify
 from .dispatch import dispatch
 
 

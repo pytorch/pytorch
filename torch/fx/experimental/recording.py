@@ -133,7 +133,7 @@ class ShapeEnvEvent:
             # It also means we are building an FX graph for symbolic shapes at shape_env.graph, and
             # we are tracking node names at shape_env.name_to_node.
             assert hasattr(shape_env, "name_to_node")
-            name_to_node = shape_env.name_to_node  # type: ignore[attr-defined]
+            name_to_node = shape_env.name_to_node
             assert x.name in name_to_node
             return name_to_node[x.name]
 
@@ -254,7 +254,7 @@ def record_shapeenv_event(*, save_tracked_fakes: bool = False) -> Callable:
 
             try:
                 shape_env = args[0]
-                if not shape_env.should_record_events or shape_env.is_recording:  # type: ignore[has-type]
+                if not shape_env.should_record_events or shape_env.is_recording:
                     # If ShapeEnv is already recording an event, call the wrapped
                     # function directly.
                     #

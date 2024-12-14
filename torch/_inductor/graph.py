@@ -580,20 +580,20 @@ class GraphLowering(torch.fx.Interpreter):
             return False
 
         def is_grouped(n: Any) -> bool:
-            meta_val = n.args[1].meta["val"]  # type: ignore[union-attr, operator]
+            meta_val = n.args[1].meta["val"]
             assert isinstance(meta_val, torch.Tensor)
-            return n.args[-1] > 1 and meta_val.size(1) > 1  # type: ignore[union-attr, operator]
+            return n.args[-1] > 1 and meta_val.size(1) > 1
 
         def is_in_out_channel(n: torch.fx.Node) -> bool:
             return (
-                n.args[1].meta["val"].size(0) * 2 <= n.args[1].meta["val"].size(1)  # type: ignore[union-attr, operator]
-                and n.args[1].meta["val"].size(2) > 1  # type: ignore[union-attr, operator]
+                n.args[1].meta["val"].size(0) * 2 <= n.args[1].meta["val"].size(1)  # type: ignore[union-attr]
+                and n.args[1].meta["val"].size(2) > 1  # type: ignore[union-attr]
             )
 
         def is_small_channel(n: torch.fx.Node) -> bool:
             return (
-                n.args[1].meta["val"].size(0) <= 64  # type: ignore[union-attr, operator]
-                and n.args[1].meta["val"].size(1) <= 64  # type: ignore[union-attr, operator]
+                n.args[1].meta["val"].size(0) <= 64  # type: ignore[union-attr]
+                and n.args[1].meta["val"].size(1) <= 64  # type: ignore[union-attr]
             )
 
         # only grouped convolutions benchmarked as slower in conv samples for inference only
@@ -963,7 +963,7 @@ class GraphLowering(torch.fx.Interpreter):
             f"{tuple(data.size())!r} {tuple(data.stride())!r} "
             f"{hash(data):x}"
         )
-        self.allocated_constant_name[name] = orig_name  # type: ignore[assignment]
+        self.allocated_constant_name[name] = orig_name
         return name
 
     def add_tensor_constant(
@@ -1126,7 +1126,7 @@ class GraphLowering(torch.fx.Interpreter):
                 raise MissingOperatorWithoutDecomp(target, args, kwargs)
 
         try:
-            log.debug("  via %s", lowerings[target])  # type: ignore[index]
+            log.debug("  via %s", lowerings[target])
 
             n = self.current_node
             layout_constraints = maybe_layout_constraints(target)
@@ -1134,7 +1134,7 @@ class GraphLowering(torch.fx.Interpreter):
                 old_args, old_kwargs = args, kwargs
                 args, kwargs = layout_constraints(n, *args, **kwargs)
 
-            out = lowerings[target](*args, **kwargs)  # type: ignore[index]
+            out = lowerings[target](*args, **kwargs)
 
             if layout_constraints:
                 # layout_constraints are allowed to make new copies of the inputs.
@@ -1228,7 +1228,7 @@ class GraphLowering(torch.fx.Interpreter):
             for x in result
         ), result
 
-        fx_node_args = V.graph.current_node.args[0]  # type: ignore[arg-type]
+        fx_node_args = V.graph.current_node.args[0]
         if not isinstance(fx_node_args, (tuple, list)):
             # nested subgraphs can have singleton outputs
             fx_node_args = (fx_node_args,)
@@ -1321,7 +1321,7 @@ class GraphLowering(torch.fx.Interpreter):
             self.sizevars.statically_known_equals(s1, s2)
             for s1, s2 in zip(meta_strides, tensor.get_stride())
         ):
-            return tensor  # type: ignore[arg-type]
+            return tensor
 
         def significant_strides_equal(
             shape: Sequence[Union[Expr, int]],
@@ -1329,7 +1329,7 @@ class GraphLowering(torch.fx.Interpreter):
             tensor_strides: Sequence[Union[Expr, int]],
         ) -> bool:
             for dim, s1, s2 in zip(shape, meta_strides, tensor_strides):
-                if self.sizevars.statically_known_leq(dim, 1):  # type: ignore[arg-type]
+                if self.sizevars.statically_known_leq(dim, 1):
                     continue
 
                 if not self.sizevars.statically_known_equals(s1, s2):
@@ -1345,7 +1345,7 @@ class GraphLowering(torch.fx.Interpreter):
         storage, old_layout = torch._inductor.ir.as_storage_and_layout(tensor)
         new_stride = [*old_layout.stride]
         for i, s in enumerate(tensor.get_size()):
-            if self.sizevars.statically_known_leq(s, 1):  # type: ignore[arg-type]
+            if self.sizevars.statically_known_leq(s, 1):
                 new_stride[i] = meta_strides[i]
 
         new_layout = torch._inductor.ir.FixedLayout(
@@ -1446,11 +1446,9 @@ class GraphLowering(torch.fx.Interpreter):
         if is_call_function:
             args, kwargs = self.fetch_args_kwargs_from_env(n)
             origins |= gather_origins(args, kwargs)
-        with ir.IRNode.current_origins(origins), self.set_current_node(  # type: ignore[arg-type]
+        with ir.IRNode.current_origins(origins), self.set_current_node(
             n
-        ), V.set_current_node(
-            n
-        ):
+        ), V.set_current_node(n):
             if (
                 n.op == "call_function"
                 and n.target is not operator.getitem
@@ -1477,9 +1475,9 @@ class GraphLowering(torch.fx.Interpreter):
                 ):
                     old_args = args  # type: ignore[possibly-undefined]
                     old_kwargs = kwargs  # type: ignore[possibly-undefined]
-                    args, kwargs = constrain_to_fx_strides(n, *args, **kwargs)  # type: ignore[index]
+                    args, kwargs = constrain_to_fx_strides(n, *args, **kwargs)
                     result = self.call_function(n.target, args, kwargs)  # type: ignore[arg-type]
-                    self.propagate_mutation(n, old_args, old_kwargs, args, kwargs)  # type: ignore[possibly-undefined]
+                    self.propagate_mutation(n, old_args, old_kwargs, args, kwargs)
                 else:
                     raise RuntimeError(
                         f"Unknown triton_kernel_default_layout_constraint: {config.triton_kernel_default_layout_constraint}"
@@ -1819,7 +1817,7 @@ class GraphLowering(torch.fx.Interpreter):
             ):
                 dtype = may_get_constant_buffer_dtype(value)
 
-            if not supported_dtype_of_cpp_wrapper(dtype, self.device_type):  # type: ignore[arg-type]
+            if not supported_dtype_of_cpp_wrapper(dtype, self.device_type):
                 raise CppWrapperCodegenError(f"Unsupported input dtype {dtype}")
 
     def init_wrapper_code(

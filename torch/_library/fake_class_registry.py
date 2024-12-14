@@ -159,7 +159,7 @@ def maybe_to_fake_obj(
             if not callable(attr):
                 raise RuntimeError(f"Expect {name} to be a callable but got {attr}.")
 
-            real_attr = getattr(x, name)  # type: ignore[attr-defined]
+            real_attr = getattr(x, name)
 
             # real attr sometimes is not torch.ScriptMethod thus doesn't have schema e.g. __init___ or __eq__
             method_schema: Optional[torch.FunctionSchema] = None

@@ -105,7 +105,7 @@ def register_fake_classes():
 def load_torchbind_test_lib():
     import unittest
 
-    from torch.testing._internal.common_utils import (  # type: ignore[attr-defined]
+    from torch.testing._internal.common_utils import (
         find_library_location,
         IS_FBCODE,
         IS_MACOS,

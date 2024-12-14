@@ -77,7 +77,7 @@ class ONNXTorchPatcher:
                 # Record path for later serialization into ONNX proto
                 self.paths.append(filename)
                 result = {}
-                with safetensors.torch.safe_open(  # type: ignore[attr-defined]
+                with safetensors.torch.safe_open(
                     filename, framework="pt", device=device
                 ) as f:
                     for k in f.keys():

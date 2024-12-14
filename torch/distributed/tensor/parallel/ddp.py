@@ -44,7 +44,7 @@ def _reconstruct_dtensor(module: nn.Module, _input: Any):
         if hasattr(t, "_st_info"):
             dtensor = _unflatten_tensor(t, t._st_info)
             param_list.append((*_get_submodule_n_params(module, name), dtensor))
-    _update_module_param(param_list)  # type: ignore[arg-type]
+    _update_module_param(param_list)
 
 
 def _localize_dtensor(
@@ -64,7 +64,7 @@ def _localize_dtensor(
             t = nn.Parameter(t)
             t._st_info = sharding_info  # type: ignore[attr-defined]
             param_list.append((*_get_submodule_n_params(module, name), t))
-    _update_module_param(param_list)  # type: ignore[arg-type]
+    _update_module_param(param_list)
 
 
 def _pre_dp_module_transform(module: nn.Module):

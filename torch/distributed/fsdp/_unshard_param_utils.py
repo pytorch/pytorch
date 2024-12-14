@@ -61,7 +61,7 @@ def _writeback_to_local_shard(
         return flat_param_or_grad
 
     param_shard = _get_shard(handle.flat_param)
-    handle.flat_param._local_shard[: param_shard.numel()].copy_(param_shard)  # type: ignore[attr-defined]
+    handle.flat_param._local_shard[: param_shard.numel()].copy_(param_shard)
     if writeback_grad:
         existing_grad = handle.sharded_grad
         if existing_grad is not None:

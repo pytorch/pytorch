@@ -247,7 +247,7 @@ def _create_chunk_from_dtensor(tensor: DTensor) -> ChunkStorageMetadata:
 def _create_chunk_list(tensor: torch.Tensor) -> List[ChunkStorageMetadata]:
     if hasattr(tensor, "__create_chunk_list__"):
         # DTensor implements _Checkpointable
-        local_chunks = tensor.__create_chunk_list__()  # type: ignore[attr-defined]
+        local_chunks = tensor.__create_chunk_list__()
     elif isinstance(tensor, ShardedTensor):
         local_chunks = [
             _chunk_for_shard(shard.metadata) for shard in tensor.local_shards()

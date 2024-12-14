@@ -258,7 +258,7 @@ def pre_grad_passes(
             # We should always do the normalization_pass first
             if "normalization_pass" in config.pre_grad_fusion_options:
                 pattern_matcher_pass = PRE_GRAD_PATTERNS["normalization_pass"]
-                pattern_matcher_pass.apply(gm.graph)  # type: ignore[arg-type]
+                pattern_matcher_pass.apply(gm.graph)
             group_batch_fusion_passes(gm.graph, pre_grad=True)
             for pass_name in config.pre_grad_fusion_options:
                 # skip all patterns for group batch fusions
@@ -271,13 +271,13 @@ def pre_grad_passes(
                 # we support run same pattern multiple times, the default is to run only once
                 counter = config.pre_grad_fusion_options[pass_name].get("counter", 1)
                 for _ in range(counter):
-                    pattern_matcher_pass.apply(gm.graph)  # type: ignore[arg-type]
+                    pattern_matcher_pass.apply(gm.graph)
                 if not is_same_dict(counters["inductor"], inductor_before_change):
                     optimus_scuba_log[
                         f"{pattern_matcher_pass.pass_name}_pre_grad"
                     ] = upload_graph(gm.graph)
             # TODO: move efficient_conv_bn_eval_pass to the fusions dict too.
-            efficient_conv_bn_eval_pass.apply(gm.graph)  # type: ignore[arg-type]
+            efficient_conv_bn_eval_pass.apply(gm.graph)
 
     if config.pre_grad_custom_pass is not None:
         with GraphTransformObserver(gm, "pre_grad_custom_pass"):

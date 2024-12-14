@@ -1,5 +1,5 @@
 # mypy: allow-untyped-defs
-from .core import reify, unify  # type: ignore[attr-defined]
+from .core import reify, unify
 from .unification_tools import first, groupby  # type: ignore[import]
 from .utils import _toposort, freeze
 from .variable import isvar
@@ -125,5 +125,5 @@ def ordering(signatures):
     for s in signatures:
         if s not in edges:
             edges[s] = []
-    edges = {k: [b for a, b in v] for k, v in edges.items()}  # type: ignore[attr-defined, assignment]
+    edges = {k: [b for a, b in v] for k, v in edges.items()}
     return _toposort(edges)

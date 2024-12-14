@@ -182,7 +182,7 @@ def _adjust_attributes_of_max_pool(
         kernel_shape = kernel_size  # type: ignore[assignment]
 
     if isinstance(padding, int):
-        pads = [padding] * expand_size * 2  # type: ignore[operator, assignment]
+        pads = [padding] * expand_size * 2
     elif len(padding) == 1:
         pads = padding * expand_size * 2  # type: ignore[operator, assignment]
     elif len(padding) == 2:

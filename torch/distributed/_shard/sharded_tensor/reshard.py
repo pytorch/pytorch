@@ -34,8 +34,8 @@ def get_idx_from_placements(placements, current_rank) -> int:
     Returns:
         A int which contains the position of current device in the placement list.
     """
-    for idx, placement in enumerate(placements):  # type: ignore[attr-defined]
-        if current_rank == placement.rank():  # type: ignore[union-attr]
+    for idx, placement in enumerate(placements):
+        if current_rank == placement.rank():
             return idx
     raise RuntimeError("current_rank not in the placement.")
 
@@ -122,7 +122,7 @@ def reshuffle_local_shard(
     split_size = get_split_size(st_size[reshard_dim], world_size)
     input_split_sizes = [0] * world_size
     idx = get_idx_from_placements(sharding_spec.placements, current_rank)  # type: ignore[attr-defined]
-    new_rank = resharding_spec.placements[idx].rank()  # type: ignore[union-attr, attr-defined]
+    new_rank = resharding_spec.placements[idx].rank()  # type: ignore[attr-defined]
     input_split_sizes[new_rank] = local_shard.size(reshard_dim)
     # Get output split size for all2all.
     output_split_sizes = [0] * world_size
@@ -220,13 +220,11 @@ def reshard_local_shard(
         output_tensor_size = list(st_size)
         output_tensor_size[current_sharding_dim] = sharded_dim_size
         output_tensor_size[reshard_dim] = input_split_sizes[current_rank]
-        output_tensor_list[
-            placement.rank()
-        ] = torch.empty(  # type: ignore[union-attr, index]
+        output_tensor_list[placement.rank()] = torch.empty(
             output_tensor_size, device=local_tensor.device, dtype=local_tensor.dtype
         )
-        indices.append(placement.rank())  # type: ignore[union-attr, index, arg-type]
-        if idx != placement.rank():  # type: ignore[union-attr]
+        indices.append(placement.rank())
+        if idx != placement.rank():
             rearrange_output_list = True
 
     # Perform autograd enabled all2all.
@@ -240,7 +238,7 @@ def reshard_local_shard(
 
     if rearrange_output_list:
         # Need to re-arrange original shard_dim of output_tensor_list.
-        output_tensor_list = [output_tensor_list[idx] for idx in indices]  # type: ignore[call-overload]
+        output_tensor_list = [output_tensor_list[idx] for idx in indices]
     local_tensor = torch.cat(output_tensor_list, dim=current_sharding_dim)
     local_shards = [Shard(local_tensor, shards_metadata[current_rank])]
     return local_shards, shards_metadata

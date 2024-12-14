@@ -104,10 +104,10 @@ class ConstantFolder(torch.fx.Interpreter):
     def is_impure(self, node: torch.fx.node.Node) -> bool:
         def is_woq_int8_pattern(node: torch.fx.node.Node) -> bool:
             return (
-                node.target == torch.ops.prims.convert_element_type.default  # type: ignore[return-value]
+                node.target == torch.ops.prims.convert_element_type.default
                 and isinstance(node.args[0], torch.fx.Node)
                 and "val" in node.args[0].meta
-                and node.args[0].meta["val"].dtype == torch.int8  # type: ignore[union-attr]
+                and node.args[0].meta["val"].dtype == torch.int8
                 and node.args[1] == torch.bfloat16
             )
 
@@ -265,7 +265,7 @@ class ConstantFolder(torch.fx.Interpreter):
 
     def insert_placerholder_values(self, env: Dict[torch.fx.Node, Any]) -> None:
         for n in self.module.graph.find_nodes(op="placeholder"):  # type: ignore[operator, union-attr]
-            env[n] = self.unknown_value  # type: ignore[assignment]
+            env[n] = self.unknown_value
         if self.lifted_constant_names is None:
             return
         for n in self.module.graph.nodes:  # type: ignore[union-attr]

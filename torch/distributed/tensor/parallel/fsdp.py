@@ -269,10 +269,10 @@ def _chunk_dtensor(
         # For higher dimensional meshes, it is replicated across other dimensions. For example, with
         # HSDP the shard placements for tensor is (Replicate, Shard(0), tp_placement).
         replicate_placements = [Replicate() for _ in range(root_mesh.ndim)]
-        replicate_placements[-1] = tp_placement  # type: ignore[call-overload]
-        shard_placements = [Replicate() for i in range(root_mesh.ndim)]  # type: ignore[misc]
+        replicate_placements[-1] = tp_placement
+        shard_placements = [Replicate() for i in range(root_mesh.ndim)]
         shard_placements[-2] = DShard(0)  # type: ignore[call-overload]
-        shard_placements[-1] = tp_placement  # type: ignore[call-overload]
+        shard_placements[-1] = tp_placement
 
         return DTensor.from_local(
             tensor, root_mesh, replicate_placements, run_check=False

@@ -194,7 +194,7 @@ class DynamoExport(_exporter_legacy.FXGraphExtractor):
             else contextlib.nullcontext()
         )
         fx_mode = "symbolic" if options.dynamic_shapes else "fake"
-        with fake_mode:  # type: ignore[attr-defined]
+        with fake_mode:
             graph_module, graph_guard = torch._dynamo.export(
                 wrapped_model,
                 tracing_mode=fx_mode,
@@ -214,7 +214,7 @@ class DynamoExport(_exporter_legacy.FXGraphExtractor):
             *model_args, model=model, **model_kwargs
         )
 
-        return self.pre_export_passes(options, model, graph_module, updated_model_args)  # type: ignore[return-value]
+        return self.pre_export_passes(options, model, graph_module, updated_model_args)
 
     def pre_export_passes(
         self,

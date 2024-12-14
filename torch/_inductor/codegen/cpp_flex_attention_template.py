@@ -1016,7 +1016,7 @@ class CppFlexAttentionTemplate(CppTemplate):
     def apply_score_mod(self, score, b, h, q_idx, kv_idx):
         return self.score_mod.graph_module(score, b, h, q_idx, kv_idx).item()
 
-    def render(  # type: ignore[override,return]
+    def render(  # type: ignore[override]
         self,
         kernel,
         template_buffer_node: Optional[ir.CppTemplateBuffer] = None,

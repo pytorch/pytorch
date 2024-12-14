@@ -294,7 +294,7 @@ class InvalidVecISA(VecISA):
     def __str__(self) -> str:
         return "INVALID_VEC_ISA"
 
-    def __bool__(self) -> bool:  # type: ignore[override]
+    def __bool__(self) -> bool:
         return False
 
     __hash__: Callable[[VecISA], Any] = VecISA.__hash__

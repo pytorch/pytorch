@@ -204,7 +204,7 @@ def _infer_sharding_spec_from_shards_metadata(shards_metadata):
     shard_size_list = []
     shard_offset_list = []
     # collect local shard metadatas from the global sharded_tensor_metadata
-    for shard_metadata in shards_metadata:  # type: ignore[attr-defined]
+    for shard_metadata in shards_metadata:
         placements.append(shard_metadata.placement)
         local_offsets = shard_metadata.shard_offsets
         chunk_offset_list.append(sum(local_offsets))

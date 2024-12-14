@@ -409,15 +409,15 @@ def conv_layout(
             ir.ir_node_to_tensor(x, guard_shape=True),
             ir.ir_node_to_tensor(weight, guard_shape=True),
             ir.ir_node_to_tensor(bias, guard_shape=True),
-            V.graph.sizevars.size_hints(stride),  # type: ignore[arg-type]
-            V.graph.sizevars.size_hints(padding),  # type: ignore[arg-type]
-            V.graph.sizevars.size_hints(dilation),  # type: ignore[arg-type]
+            V.graph.sizevars.size_hints(stride),
+            V.graph.sizevars.size_hints(padding),
+            V.graph.sizevars.size_hints(dilation),
             transposed,
-            V.graph.sizevars.size_hints(output_padding),  # type: ignore[arg-type]
+            V.graph.sizevars.size_hints(output_padding),
             groups,
         )
         sizes = ir.convert_shape_to_inductor(output.size())
-        stride = ir.convert_shape_to_inductor(output.stride())  # type: ignore[assignment]
+        stride = ir.convert_shape_to_inductor(output.stride())
 
     return ir.FixedLayout(
         x.get_device_or_error(),
@@ -573,7 +573,7 @@ def convolution(
     ]
     if bias is None:
         args = [x, weight]
-        kwargs["bias"] = None  # type: ignore[typeddict-unknown-key]
+        kwargs["bias"] = None
         ordered_kwargs_for_cpp_kernel.insert(0, "bias")
     else:
         args = [x, weight, bias]
@@ -600,7 +600,7 @@ def convolution(
         and not transposed
         and is_zeros(output_padding)
         # there are some odd models where this check fails (e.g. shufflenet_v2_x1_0)
-        and V.graph.sizevars.statically_known_equals(in_chan, x.get_size()[1])  # type: ignore[arg-type]
+        and V.graph.sizevars.statically_known_equals(in_chan, x.get_size()[1])
     ):
         if (
             is_ones(kernel_shape)

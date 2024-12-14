@@ -1197,7 +1197,7 @@ class ConvertFrame:
                 # "skip: " to tell that the whole frame is falling back to
                 # eager.
                 if hasattr(e, "compile_id"):
-                    with compile_context(CompileContext(e.compile_id)):  # type: ignore[attr-defined]
+                    with compile_context(CompileContext(e.compile_id)):
                         user_stack = e.real_stack
                         user_stack_formatted = "".join(
                             traceback.format_list(user_stack)

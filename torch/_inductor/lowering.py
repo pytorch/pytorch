@@ -259,7 +259,7 @@ def is_integer_type(x):
     if isinstance(x, TensorBox):
         return is_integer_dtype(x.get_dtype()) or is_boolean_dtype(x.get_dtype())
     elif isinstance(x, sympy.Expr):
-        return x.is_integer is True  # type: ignore[attr-defined]
+        return x.is_integer is True
     else:
         return isinstance(x, int)
 
@@ -639,7 +639,7 @@ def make_pointwise(
         device = override_device or device
 
         return Pointwise.create(
-            device=device,  # type: ignore[arg-type]
+            device=device,
             dtype=dtype,
             inner_fn=inner_fn,
             ranges=ranges,
@@ -1004,7 +1004,7 @@ def squeeze(x, dim=None):
         if isinstance(dim, (int, sympy.Expr))
         else tuple(V.graph.sizevars.evaluate_static_shape(d) for d in dim)
     )
-    dim = canonicalize_dims(len(x.get_size()), dim)  # type: ignore[call-overload]
+    dim = canonicalize_dims(len(x.get_size()), dim)
     dims = OrderedSet((dim,) if not isinstance(dim, tuple) else dim)
 
     new_shape = []
@@ -1237,8 +1237,8 @@ def pointwise_cat(inputs, dim=0):
     inputs_ranges: List[Tuple[sympy.Expr, sympy.Expr]] = []
     prev_end = 0
     for inp in inputs:
-        inputs_ranges.append((prev_end, prev_end + inp.get_size()[dim]))  # type: ignore[arg-type]
-        prev_end = inputs_ranges[-1][-1]  # type: ignore[assignment]
+        inputs_ranges.append((prev_end, prev_end + inp.get_size()[dim]))
+        prev_end = inputs_ranges[-1][-1]
 
     inputs_loaders = [inp.make_loader() for inp in inputs]
 
@@ -1705,14 +1705,14 @@ def diagonal(input, offset: int = 0, dim1: int = 0, dim2: int = 1):
             V.graph.sizevars.evaluate_min(
                 original_shape[dim1] + offset, original_shape[dim2]
             ),
-            0,  # type: ignore[arg-type]
+            0,
         )
     else:
         diag_size = V.graph.sizevars.evaluate_max(
             V.graph.sizevars.evaluate_min(
                 original_shape[dim1], original_shape[dim2] - offset
             ),
-            0,  # type: ignore[arg-type]
+            0,
         )
 
     base_idx = (0, 0)
@@ -1816,7 +1816,7 @@ def unfold(x, dimension, size, step):
     dim_size = sizes[dim]
     sizevars = V.graph.sizevars
     sizevars.guard_leq(size, dim_size)
-    sizevars.guard_lt(0, step)  # type: ignore[arg-type]
+    sizevars.guard_lt(0, step)
 
     new_dim_size = FloorDiv(dim_size - size, step) + 1
     if sizevars.size_hint(dim_size) > 0:
@@ -2743,8 +2743,8 @@ def select_scatter(x, src, dim: int, index: int):
     dim = _validate_dim(x, dim, 0)
     if V.graph.sizevars.evaluate_expr(sympy.Lt(index, 0)):
         index = index + x.get_size()[dim]
-    V.graph.sizevars.guard_leq(0, index)  # type: ignore[arg-type]
-    V.graph.sizevars.guard_lt(index, x.get_size()[dim])  # type: ignore[arg-type]
+    V.graph.sizevars.guard_leq(0, index)
+    V.graph.sizevars.guard_lt(index, x.get_size()[dim])
     src = expand(unsqueeze(src, dim), x.get_size())
     src_loader = src.make_loader()
 
@@ -3926,7 +3926,7 @@ def constant_pad_nd(x, padding, fill_value=0):
     # if padding is a complicated expression, hoist it
     bounds_precomp: List[Tuple[sympy.Symbol, Any]] = []
     for l, h in bounds:
-        bounds_precomp.append((V.graph.sizevars.lookup_precomputed_size(l), h))  # type: ignore[arg-type]
+        bounds_precomp.append((V.graph.sizevars.lookup_precomputed_size(l), h))
 
     output_size = list(sizes[:n])
     mask_sizes = []
@@ -4025,7 +4025,7 @@ def pooling_size(x, i, kernel_size, stride, padding, ceil_mode):
         if V.graph.sizevars.size_hint((x_alt - 1) * stride[i] - x - padding[i]) >= 0:
             # Sliding windows must start within the input or left padding
             x_alt -= 1  # type: ignore[assignment]
-            V.graph.sizevars.guard_leq(0, x_alt * stride[i] - x - padding[i])  # type: ignore[arg-type]
+            V.graph.sizevars.guard_leq(0, x_alt * stride[i] - x - padding[i])
         if V.graph.sizevars.size_hint(x_out - x_alt) == 0:
             # ceil mode is actually a no-op, lets guard on that
             V.graph.sizevars.guard_equals(x_out, x_alt)
@@ -6403,7 +6403,7 @@ def resize(x, size, *, memory_format=None):
         # using zero as that is what empty does
         uninitalized_val = 0.0
 
-    if V.graph.sizevars.statically_known_equals(old_numel, 0):  # type: ignore[arg-type]
+    if V.graph.sizevars.statically_known_equals(old_numel, 0):
         return full(size, uninitalized_val, dtype=dtype, device=device)
 
     x_flat = as_strided(
