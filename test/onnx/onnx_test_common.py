@@ -13,16 +13,13 @@ import warnings
 from typing import (
     Any,
     Callable,
-    Collection,
-    Iterable,
     List,
-    Mapping,
     Optional,
-    Sequence,
     Tuple,
     Type,
     Union,
 )
+from collections.abc import Collection, Iterable, Mapping, Sequence
 
 import numpy as np
 import onnxruntime

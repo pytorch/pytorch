@@ -3,7 +3,8 @@
 import os
 import unittest
 from collections import OrderedDict
-from typing import List, Mapping, Tuple
+from typing import List, Tuple
+from collections.abc import Mapping
 
 import onnx_test_common
 import parameterized

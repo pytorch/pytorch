@@ -4,7 +4,7 @@ import functools
 import itertools
 import os
 from pathlib import Path
-from typing import Sequence
+from collections.abc import Sequence
 from unittest import skip
 
 import yaml
