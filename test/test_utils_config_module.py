@@ -126,7 +126,6 @@ class TestConfigModule(TestCase):
                 "e_env_default_FALSE": False,
                 "e_env_force": True,
                 "e_optional": True,
-                "e_aliased_bool": False,
             },
         )
         config.e_bool = False
@@ -159,7 +158,6 @@ class TestConfigModule(TestCase):
                 "e_env_default_FALSE": False,
                 "e_env_force": True,
                 "e_optional": True,
-                "e_aliased_bool": False,
             },
         )
         config.e_bool = False
@@ -179,29 +177,35 @@ torch.testing._internal.fake_config_module._save_config_ignore = ['e_ignored']""
         )
 
     def test_get_hash(self):
+        hash_value = b"\xf2C\xdbo\x99qq\x12\x11\xf7\xb4\xeewVpZ"
         self.assertEqual(
-            config.get_hash(), b"\x0c\xe4!\x0e\xb1\xca@\t\xed\n\xbd\xf7=\x14\x0fl"
+            config.get_hash(),
+            hash_value,
         )
         # Test cached value
         self.assertEqual(
-            config.get_hash(), b"\x0c\xe4!\x0e\xb1\xca@\t\xed\n\xbd\xf7=\x14\x0fl"
+            config.get_hash(),
+            hash_value,
         )
         self.assertEqual(
-            config.get_hash(), b"\x0c\xe4!\x0e\xb1\xca@\t\xed\n\xbd\xf7=\x14\x0fl"
+            config.get_hash(),
+            hash_value,
         )
         config._hash_digest = "fake"
         self.assertEqual(config.get_hash(), "fake")
 
         config.e_bool = False
         self.assertNotEqual(
-            config.get_hash(), b"\x0c\xe4!\x0e\xb1\xca@\t\xed\n\xbd\xf7=\x14\x0fl"
+            config.get_hash(),
+            hash_value,
         )
         config.e_bool = True
 
         # Test ignored values
         config.e_compile_ignored = False
         self.assertEqual(
-            config.get_hash(), b"\x0c\xe4!\x0e\xb1\xca@\t\xed\n\xbd\xf7=\x14\x0fl"
+            config.get_hash(),
+            hash_value,
         )
 
     def test_dict_copy_semantics(self):
@@ -232,7 +236,6 @@ torch.testing._internal.fake_config_module._save_config_ignore = ['e_ignored']""
                 "e_env_default_FALSE": False,
                 "e_env_force": True,
                 "e_optional": True,
-                "e_aliased_bool": False,
             },
         )
         p2 = config.to_dict()
@@ -262,7 +265,6 @@ torch.testing._internal.fake_config_module._save_config_ignore = ['e_ignored']""
                 "e_env_default_FALSE": False,
                 "e_env_force": True,
                 "e_optional": True,
-                "e_aliased_bool": False,
             },
         )
         p3 = config.get_config_copy()
@@ -292,7 +294,6 @@ torch.testing._internal.fake_config_module._save_config_ignore = ['e_ignored']""
                 "e_env_default_FALSE": False,
                 "e_env_force": True,
                 "e_optional": True,
-                "e_aliased_bool": False,
             },
         )
 
@@ -337,18 +338,12 @@ torch.testing._internal.fake_config_module._save_config_ignore = ['e_ignored']""
 
     def test_alias(self):
         self.assertFalse(config2.e_aliasing_bool)
-        self.assertTrue(config._config["e_aliased_bool"].default)
         self.assertFalse(config.e_aliased_bool)
         with config2.patch(e_aliasing_bool=True):
             self.assertTrue(config2.e_aliasing_bool)
             self.assertTrue(config.e_aliased_bool)
-        with self.assertRaises(
-            AttributeError,
-            msg="torch.testing._internal.fake_config_module.e_aliased_bool is already set via"
-            " alias torch.testing._internal.fake_config_module2.e_aliasing_bool",
-        ):
-            with config.patch(e_aliased_bool=True):
-                pass
+        with config.patch(e_aliased_bool=True):
+            self.assertTrue(config2.e_aliasing_bool)
 
 
 if __name__ == "__main__":
