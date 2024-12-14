@@ -56,6 +56,9 @@ KernelDescriptor make_kernel_descriptor(
 
 inline int can_vectorize_up_to(size_t default_alignment, void *pointer) {
   auto ip = reinterpret_cast<uintptr_t>(pointer);
+  if (ip % (8 * default_alignment) == 0) {
+    return 8;
+  }
   if (ip % (4 * default_alignment) == 0) {
     return 4;
   }
