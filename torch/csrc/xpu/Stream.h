@@ -15,3 +15,8 @@ void THXPStream_init(PyObject* module);
 inline bool THXPStream_Check(PyObject* obj) {
   return THXPStreamClass && PyObject_IsInstance(obj, THXPStreamClass);
 }
+
+#ifdef USE_CUDA
+std::vector<std::optional<at::xpu::XPUStream>>
+THPUtils_PySequence_to_XPUStreamList(PyObject* obj);
+#endif

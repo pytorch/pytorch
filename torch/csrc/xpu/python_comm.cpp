@@ -1,8 +1,8 @@
 #include <ATen/core/functional.h>
 #include <pybind11/pybind11.h>
-#include <torch/csrc/cuda/Stream.h>
-#include <torch/csrc/cuda/THCP.h>
-#include <torch/csrc/cuda/comm.h>
+#include <torch/csrc/utils.h>
+#include <torch/csrc/xpu/Stream.h>
+#include <torch/csrc/xpu/comm.h>
 #include <torch/csrc/utils/pybind.h>
 
 #include <ATen/ATen.h>
@@ -12,7 +12,7 @@
 
 #include <torch/csrc/profiler/unwind/unwind.h>
 
-namespace torch::cuda::python {
+namespace torch::xpu::python {
 void initCommMethods(PyObject* module) {
   auto m = py::cast<py::module>(module);
   m.def(
@@ -49,11 +49,11 @@ void initCommMethods(PyObject* module) {
              const std::optional<std::vector<int64_t>>& chunk_sizes,
              int64_t dim,
              std::optional<py::object> py_streams) {
-            std::optional<std::vector<std::optional<at::cuda::CUDAStream>>>
+            std::optional<std::vector<std::optional<at::xpu::XPUStream>>>
                 streams;
             if (py_streams) {
               py::handle handle = *py_streams;
-              streams = THPUtils_PySequence_to_CUDAStreamList(handle.ptr());
+              streams = THPUtils_PySequence_to_XPUStreamList(handle.ptr());
             }
             // Note: We're holding the GIL up to here.
             pybind11::gil_scoped_release no_gil;
@@ -70,11 +70,11 @@ void initCommMethods(PyObject* module) {
              std::vector<at::Tensor>& out_tensors,
              int64_t dim,
              std::optional<py::object> py_streams) {
-            std::optional<std::vector<std::optional<at::cuda::CUDAStream>>>
+            std::optional<std::vector<std::optional<at::xpu::XPUStream>>>
                 streams;
             if (py_streams) {
               py::handle handle = *py_streams;
-              streams = THPUtils_PySequence_to_CUDAStreamList(handle.ptr());
+              streams = THPUtils_PySequence_to_XPUStreamList(handle.ptr());
             }
             // Note: We're holding the GIL up to here.
             pybind11::gil_scoped_release no_gil;
@@ -105,4 +105,4 @@ void initCommMethods(PyObject* module) {
           py::arg("dim"),
           py::call_guard<py::gil_scoped_release>());
 }
-} // namespace torch::cuda::python
+} // namespace torch::xpu::python

@@ -1,16 +1,11 @@
-#include <torch/csrc/cuda/comm.h>
+#include <torch/csrc/xpu/comm.h>
 
-#include <torch/csrc/cuda/device_set.h>
 #include <torch/csrc/utils/tensor_flatten.h>
-
-#ifdef USE_NCCL
-#include <torch/csrc/cuda/nccl.h>
-#endif
 
 #include <ATen/ATen.h>
 #include <ATen/WrapDimUtils.h>
-#include <ATen/cuda/CUDAContext.h>
-#include <c10/cuda/CUDAGuard.h>
+#include <ATen/xpu/XPUContext.h>
+#include <c10/xpu/XPUGuard.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/autograd/variable.h>
 #include <optional>
@@ -18,7 +13,7 @@
 #include <cstddef>
 #include <vector>
 
-namespace torch::cuda {
+namespace torch::xpu {
 using namespace at;
 using namespace torch::autograd;
 
@@ -43,29 +38,15 @@ struct unique_type_checker {
 
 // ***************** Broadcast *******************
 //
-// Broadcast a source tensor (CPU or CUDA) to a list of CUDA devices, or CUDA
+// Broadcast a source tensor (CPU or XPU) to a list of XPU devices, or XPU
 // tensors on one or more devices.
 
 // no checks
 static std::vector<Tensor>& _broadcast_out_impl(
     const Tensor& tensor,
     std::vector<Tensor>& out_tensors) {
-#ifdef USE_NCCL
-  std::vector<Tensor> nccl_list;
-  nccl_list.reserve(out_tensors.size() + 1);
-  nccl_list.emplace_back(tensor);
   for (auto& out_tensor : out_tensors) {
-    nccl_list.emplace_back(out_tensor);
-  }
-  if (nccl::is_available(nccl_list)) {
-    nccl::broadcast(nccl_list);
-  } else {
-#else
-  {
-#endif
-    for (auto& out_tensor : out_tensors) {
-      out_tensor.copy_(tensor, /*non_blocking=*/true);
-    }
+    out_tensor.copy_(tensor, /*non_blocking=*/true);
   }
   return out_tensors;
 }
@@ -75,8 +56,8 @@ std::vector<Tensor>& broadcast_out(
     std::vector<Tensor>& out_tensors) {
   for (const auto i : c10::irange(out_tensors.size())) {
     TORCH_CHECK(
-        out_tensors[i].is_cuda(),
-        "Expected all output tensors to be CUDA tensors, but output tensor at index ",
+        out_tensors[i].is_xpu(),
+        "Expected all output tensors to be XPU tensors, but output tensor at index ",
         i,
         " has device '",
         out_tensors[i].device(),
@@ -103,7 +84,7 @@ std::vector<Tensor> broadcast(const Tensor& tensor, IntArrayRef devices) {
       diff_device_dst_tensors.emplace_back(at::empty(
           tensor.sizes(),
           tensor.options().device(at::Device(
-              DeviceType::CUDA,
+              DeviceType::XPU,
               static_cast<DeviceIndex>(device))))); // preserve memory format
     }
   }
@@ -166,9 +147,6 @@ tensor_list2d broadcast_coalesced(
           [&](const at::Tensor& t) { return t.get_device() == devices[0]; }),
       "All tensors must be on devices[0]: ",
       devices[0]);
-#ifdef USE_NCCL
-  buffer_size = std::min(torch::cuda::nccl::get_max_count(), buffer_size);
-#endif
 
   tensor_list2d outputs(devices.size());
   outputs[0] = tensors.vec();
@@ -176,7 +154,7 @@ tensor_list2d broadcast_coalesced(
     o.reserve(tensors.size());
 
   unique_type_checker type_checker;
-  at::cuda::CUDAGuard device_guard(static_cast<DeviceIndex>(devices[0]));
+  at::xpu::XPUGuard device_guard(static_cast<DeviceIndex>(devices[0]));
   for (auto& chunk : torch::utils::take_tensors(tensors, buffer_size)) {
     auto type_id = chunk.type_id();
     type_checker.show(type_id);
@@ -222,14 +200,14 @@ tensor_list2d broadcast_coalesced(
 
 // ***************** Scatter *******************
 //
-// Scatter a source tensor (CPU or CUDA) to a list of CUDA tensors on one or
+// Scatter a source tensor (CPU or XPU) to a list of XPU tensors on one or
 // more devices.
 
 std::vector<at::Tensor>& scatter_out(
     const at::Tensor& tensor,
     std::vector<at::Tensor>& out_tensors,
     int64_t dim,
-    const std::optional<std::vector<std::optional<at::cuda::CUDAStream>>>&
+    const std::optional<std::vector<std::optional<at::xpu::XPUStream>>>&
         streams) {
   TORCH_CHECK(
       !out_tensors.empty(),
@@ -240,8 +218,8 @@ std::vector<at::Tensor>& scatter_out(
   chunk_sizes.reserve(out_tensors.size());
   for (const auto i : c10::irange(out_tensors.size())) {
     TORCH_CHECK(
-        out_tensors[i].is_cuda(),
-        "Expected all output tensors to be CUDA tensors, but output tensor at index ",
+        out_tensors[i].is_xpu(),
+        "Expected all output tensors to be XPU tensors, but output tensor at index ",
         i,
         " has device '",
         out_tensors[i].device(),
@@ -279,7 +257,7 @@ std::vector<at::Tensor>& scatter_out(
 
   auto chunks =
       tensor.split_with_sizes(/*split_sizes=*/chunk_sizes, /*dim=*/dim);
-  at::cuda::OptionalCUDAStreamGuard cuda_guard;
+  at::xpu::OptionalXPUStreamGuard xpu_guard;
   for (const auto i : c10::irange(chunks.size())) {
     if (i < (streams ? streams->size() : 0U) && (*streams)[i]) {
       const auto device_index = out_tensors[i].get_device();
@@ -294,7 +272,7 @@ std::vector<at::Tensor>& scatter_out(
           "(expected ",
           static_cast<int16_t>(device_index),
           ")");
-      cuda_guard.reset_stream(*(*streams)[i]);
+      xpu_guard.reset_stream(*(*streams)[i]);
     }
     // NB: We don't detect the case where `out_tensor` is already the correct
     //     view of `tensor` since that would be nontrivial and involve checking
@@ -310,7 +288,7 @@ std::vector<at::Tensor> scatter(
     at::IntArrayRef devices,
     const std::optional<std::vector<int64_t>>& chunk_sizes,
     int64_t dim,
-    const std::optional<std::vector<std::optional<at::cuda::CUDAStream>>>&
+    const std::optional<std::vector<std::optional<at::xpu::XPUStream>>>&
         streams) {
   TORCH_CHECK(!devices.empty(), "Expected at least one device to scatter to");
   if (chunk_sizes.has_value()) {
@@ -327,7 +305,7 @@ std::vector<at::Tensor> scatter(
       ? tensor.split_with_sizes(/*split_sizes=*/*chunk_sizes, /*dim=*/dim)
       : tensor.chunk(
             /*chunks=*/static_cast<int64_t>(devices.size()), /*dim=*/dim);
-  at::cuda::OptionalCUDAStreamGuard cuda_guard;
+  at::xpu::OptionalXPUStreamGuard xpu_guard;
   for (const auto i : c10::irange(chunks.size())) {
     const auto device_index = static_cast<int16_t>(devices[i]);
     if (device_index != tensor.get_device()) {
@@ -343,14 +321,14 @@ std::vector<at::Tensor> scatter(
             "(expected ",
             device_index,
             ")");
-        cuda_guard.reset_stream(*(*streams)[i]);
+        xpu_guard.reset_stream(*(*streams)[i]);
       }
       TORCH_CHECK(
           device_index >= 0,
           "Expected non-negative device index, but got ",
           device_index);
       chunks[i] = chunks[i].to(
-          {DeviceType::CUDA, device_index},
+          {DeviceType::XPU, device_index},
           /*non_blocking=*/true,
           /*copy=*/false,
           /*memory_format=*/at::MemoryFormat::Preserve);
@@ -361,8 +339,8 @@ std::vector<at::Tensor> scatter(
 
 // ***************** Gather *******************
 //
-// Gather a list of CUDA tensors on one or more devices to a target tensor or
-// device, either CPU or CUDA.
+// Gather a list of XPU tensors on one or more devices to a target tensor or
+// device, either CPU or XPU.
 
 // no checks
 static at::Tensor& _gather_out_impl(
@@ -377,7 +355,7 @@ static at::Tensor& _gather_out_impl(
   auto chunks =
       out_tensor.split_with_sizes(/*split_sizes=*/chunk_sizes, /*dim=*/dim);
   for (const auto i : c10::irange(tensors.size())) {
-    chunks[i].copy_(tensors[i], /*non_blocking=*/out_tensor.is_cuda());
+    chunks[i].copy_(tensors[i], /*non_blocking=*/out_tensor.is_xpu());
   }
   return out_tensor;
 }
@@ -395,8 +373,8 @@ at::Tensor& gather_out(
   for (const auto i : c10::irange(tensors.size())) {
     const auto& tensor = tensors[i];
     TORCH_CHECK(
-        tensor.is_cuda(),
-        "Expected all input tensors to be CUDA tensors, but "
+        tensor.is_xpu(),
+        "Expected all input tensors to be XPU tensors, but "
         "tensor at index ",
         i,
         " has device '",
@@ -450,8 +428,8 @@ at::Tensor gather(
   for (const auto i : c10::irange(tensors.size())) {
     const auto& tensor = tensors[i];
     TORCH_CHECK(
-        tensor.is_cuda(),
-        "Expected all input tensors to be CUDA tensors, but "
+        tensor.is_xpu(),
+        "Expected all input tensors to be XPU tensors, but "
         "tensor at index ",
         i,
         " has device ",
@@ -487,7 +465,7 @@ at::Tensor gather(
   at::Device device(DeviceType::CPU);
   if (!destination_index || *destination_index != -1) {
     device = at::Device(
-        DeviceType::CUDA,
+        DeviceType::XPU,
         destination_index ? static_cast<DeviceIndex>(*destination_index)
                           : DeviceIndex(-1));
   }
@@ -497,4 +475,4 @@ at::Tensor gather(
   return _gather_out_impl(tensors, result, dim);
 }
 
-} // namespace torch::cuda
+} // namespace torch::xpu

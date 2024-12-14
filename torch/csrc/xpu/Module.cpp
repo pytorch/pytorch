@@ -6,6 +6,7 @@
 #include <c10/xpu/XPUFunctions.h>
 #include <torch/csrc/Module.h>
 #include <torch/csrc/THP.h>
+#include <torch/csrc/xpu/python_comm.h>
 #include <torch/csrc/utils/device_lazy_init.h>
 #include <torch/csrc/utils/pycfunction_helpers.h>
 #include <torch/csrc/utils/python_numbers.h>
@@ -473,6 +474,7 @@ PyMethodDef* THXPModule_methods() {
 namespace torch::xpu {
 
 void initModule(PyObject* module) {
+  python::initCommMethods(module);
   registerXpuDeviceProperties(module);
   initXpuMethodBindings(module);
 }

@@ -16,6 +16,10 @@
 #include <c10/cuda/CUDAStream.h>
 #endif
 
+#ifdef USE_XPU
+#include <c10/xpu/XPUStream.h>
+#endif
+
 #define THPUtils_(NAME) TH_CONCAT_4(THP, Real, Utils_, NAME)
 
 #define THPUtils_typename(obj) (Py_TYPE(obj)->tp_name)
@@ -208,6 +212,12 @@ bool maybeThrowBackCompatKeepdimWarn(char* func);
 #ifdef USE_CUDA
 std::vector<std::optional<at::cuda::CUDAStream>>
 THPUtils_PySequence_to_CUDAStreamList(PyObject* obj);
+#endif
+
+// NB: This is in torch/csrc/xpu/utils.cpp, for whatever reason
+#ifdef USE_XPU
+std::vector<std::optional<at::xpu::XPUStream>>
+THPUtils_PySequence_to_XPUStreamList(PyObject* obj);
 #endif
 
 void storage_fill(const at::Storage& self, uint8_t value);
