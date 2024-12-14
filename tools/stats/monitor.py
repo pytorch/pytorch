@@ -22,7 +22,7 @@ import signal
 import threading
 import time
 from collections import defaultdict
-from typing import Any
+from typing import Any, final
 
 import psutil  # type: ignore[import]
 
@@ -301,7 +301,7 @@ class UsageLogger:
                 if len(gpu_mem_utilization[gpu_uuid]) > 0
                 else 0
             )
-
+            
             calculate_gpu.append(
                 {
                     "uuid": gpu_uuid,
@@ -413,14 +413,22 @@ class UsageLogger:
             except pynvml.NVMLError:
                 pass
 
-    def _get_per_process_gpu_info(self, handle: Any) -> list[dict[str, Any]]:
+    def _pynvml_get_per_process_gpu_info(self, handle: Any) -> list[dict[str, Any]]:
         processes = pynvml.nvmlDeviceGetComputeRunningProcesses(handle)
         per_process_info = []
+
         for p in processes:
             mem = p.usedGpuMemory / (1024 * 1024)
             pid = p.pid
             info = {"pid": pid, "gpu_memory": mem}
-            per_process_info.append(info)
+            try:
+                proc = psutil.Process(pid)
+                cmdline = proc.cmdline()
+                info.update({"cmd": ' '.join(cmdline)})
+            except Exception as e:
+                pass
+            finally:
+                per_process_info.append(info)
         return per_process_info
 
     def _rocm_get_per_process_gpu_info(self, handle: Any) -> list[dict[str, Any]]:
@@ -433,11 +441,19 @@ class UsageLogger:
                 # https://github.com/ROCm/amdsmi/commit/c551c3caedbd903ba828e7fdffa5b56d475a15e7
                 # BC-breaking change that removes amdsmi_get_gpu_process_info API from amdsmi
                 proc_info = p
+
             info = {
                 "pid": proc_info["pid"],
                 "gpu_memory": proc_info["memory_usage"]["vram_mem"] / (1024 * 1024),
             }
-            per_process_info.append(info)
+            try:
+                proc = psutil.Process(proc_info["pid"])
+                cmdline = proc.cmdline()
+                info.update({"cmd": ' '.join(cmdline)})
+            except Exception as e:
+                pass
+            finally:
+                per_process_info.append(info)
         return per_process_info
 
     def _get_process_info(self) -> list[dict[str, Any]]:
