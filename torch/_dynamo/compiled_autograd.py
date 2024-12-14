@@ -97,7 +97,7 @@ class OpNamespace:
     def __init__(self):
         self.next_id = {}
 
-    def add(self, base_name, fn, builtin):
+    def add(self, base_name, fn, builtin, allow_in_graph=True):
         if builtin and hasattr(self, base_name):
             return getattr(self, base_name)
 
@@ -109,7 +109,8 @@ class OpNamespace:
             name = f"{base_name}_{nid}"
             self.next_id[base_name] += 1
         result = Op(name, fn)
-        torch._dynamo.allow_in_graph(result)
+        if allow_in_graph:
+            torch._dynamo.allow_in_graph(result)
         setattr(self, name, result)
         return result
 
@@ -393,7 +394,13 @@ class AutogradCompilerInstance:
             lambda e: self.to_proxy(e),
             (inputs, stack),
         )
-        op = ops.add(debug_name, fn, builtin)
+
+        # TODO(xmfan): pass cppnode is_traceable as an additional arg
+        allow_in_graph = True
+        if debug_name.startswith("torch::autograd::CppNode") and not builtin:
+            allow_in_graph = False
+
+        op = ops.add(debug_name, fn, builtin, allow_in_graph)
         proxy_out = self.fx_tracer.create_proxy(
             "call_function", op, args=(proxy_inputs, *proxy_stack), kwargs={}
         )

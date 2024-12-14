@@ -195,14 +195,16 @@ struct CppNode : public Node {
   void save_variables_to_ctx();
 
   void compiled_args(CompiledNodeArgs& args) override {
-    static_assert(
-        std::is_same_v<std::remove_cv_t<decltype(T::is_traceable)>, bool>);
-    if (!T::is_traceable) {
-      throw std::runtime_error(
-          std::string(
-              "Attempting to trace a potentially unsafe C++ autograd function: ") +
-          name() +
-          ". It may be possible to trace it safely, please refer to the instructions in: https://docs.google.com/document/d/11VucFBEewzqgkABIjebZIzMvrXr3BtcY1aGKpX61pJY/.");
+    if (!torch::dynamo::autograd::is_proxy_nodes_into_graph_enabled()) {
+      static_assert(
+          std::is_same_v<std::remove_cv_t<decltype(T::is_traceable)>, bool>);
+      if (!T::is_traceable) {
+        throw std::runtime_error(
+            std::string(
+                "Attempting to trace a potentially unsafe C++ autograd function: ") +
+            name() +
+            ". It may be possible to trace it safely, please refer to the instructions in: https://docs.google.com/document/d/11VucFBEewzqgkABIjebZIzMvrXr3BtcY1aGKpX61pJY/.");
+      }
     }
 
     // although neither of the 2 methods below have uniqueness guarantees
@@ -259,6 +261,8 @@ struct CppNode : public Node {
         }
       }
 
+      static_assert(
+          std::is_same_v<std::remove_cv_t<decltype(T::is_traceable)>, bool>);
       const auto& interface = torch::dynamo::autograd::getPyCompilerInterface();
       results = interface->call_function(
           saved.get_py_compiler(),
@@ -269,7 +273,7 @@ struct CppNode : public Node {
           num_outputs(),
           name(),
           schema,
-          /*builtin*/ false);
+          /*builtin*/ T::is_traceable);
     }
 
     saved.after(ctx_.saved_data);

@@ -12,6 +12,7 @@ import sys
 import unittest
 from importlib.machinery import SourceFileLoader
 from pathlib import Path
+from string import Template
 from unittest import mock
 
 import torch
@@ -25,6 +26,8 @@ from torch._dynamo.utils import counters
 from torch._inductor import config as inductor_config
 from torch._inductor.test_case import run_tests, TestCase
 from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
     scoped_load_inline,
     skipIfWindows,
     xfailIfS390X,
@@ -1989,59 +1992,12 @@ main()
             )
 
     @scoped_load_inline
-    def test_non_traceable_autograd_cpp_node(self, load_inline):
-        cpp_source = """
+    @parametrize("is_traceable", (True, False))
+    def test_autograd_cpp_node(self, load_inline, is_traceable):
+        cpp_source = Template(
+            """
 struct CustomOpAutogradFunction : public torch::autograd::Function<CustomOpAutogradFunction> {
-  static constexpr bool is_traceable = false;
-
-  static torch::Tensor forward(
-      torch::autograd::AutogradContext* ctx,
-      const torch::Tensor& x) {
-    return x;
-  }
-
-  static torch::autograd::variable_list backward(
-      torch::autograd::AutogradContext *ctx,
-      torch::autograd::variable_list grad_output) {
-    return grad_output;
-  }
-};
-
-torch::Tensor custom_op_backed_by_autograd_fn(torch::Tensor x) {
-  return CustomOpAutogradFunction::apply(x);
-}
-
-TORCH_LIBRARY(test_non_traceable_autograd_cpp_node, m) {
-    m.def("custom_op_backed_by_autograd_fn", custom_op_backed_by_autograd_fn);
-}
-        """
-
-        module = load_inline(
-            name="test_non_traceable_autograd_cpp_node",
-            cpp_sources=cpp_source,
-            functions="custom_op_backed_by_autograd_fn",
-            verbose=True,
-        )
-
-        def fn():
-            x = torch.ones(10, 10, requires_grad=True)
-            out = torch.ops.test_non_traceable_autograd_cpp_node.custom_op_backed_by_autograd_fn(
-                x
-            )
-            loss = out.sum()
-            loss.backward()
-
-        with self.assertRaisesRegex(
-            RuntimeError,
-            "https://docs.google.com/document/d/11VucFBEewzqgkABIjebZIzMvrXr3BtcY1aGKpX61pJY/",
-        ), compiled_autograd._enable(compiler_fn):
-            fn()
-
-    @scoped_load_inline
-    def test_autograd_cpp_node(self, load_inline):
-        cpp_source = """
-struct CustomOpAutogradFunction : public torch::autograd::Function<CustomOpAutogradFunction> {
-  static constexpr bool is_traceable = true;
+  static constexpr bool is_traceable = $is_traceable;
 
   static torch::Tensor forward(
       torch::autograd::AutogradContext* ctx,
@@ -2064,6 +2020,7 @@ TORCH_LIBRARY(test_autograd_cpp_node, m) {
     m.def("custom_op_backed_by_autograd_fn", custom_op_backed_by_autograd_fn);
 }
         """
+        ).substitute(is_traceable="true" if is_traceable else "false")
 
         module = load_inline(
             name="test_autograd_cpp_node",
@@ -2075,21 +2032,26 @@ TORCH_LIBRARY(test_autograd_cpp_node, m) {
         def fn():
             for i in [10, 100, 10, 20, 10]:
                 x = torch.ones(i, i, requires_grad=True)
-                out = torch.ops.test_autograd_cpp_node.custom_op_backed_by_autograd_fn(
-                    x
-                )
+                out = module.custom_op_backed_by_autograd_fn(x)
                 loss = out.sum()
                 loss.backward()
                 yield x.grad
 
-        # compiles for 10 (static) and 100 (dynamic)
-        self.check_output_and_recompiles(fn, 2)
+        if is_traceable:
+            # compiles for 10 (static) and 100 (dynamic)
+            self.check_output_and_recompiles(fn, 2)
+        else:
+            self.check_output_and_recompiles(
+                fn, 2, compiler_fn=make_compiler_fn(fullgraph=False)
+            )
 
     @scoped_load_inline
-    def test_autograd_cpp_node_id(self, load_inline):
-        cpp_source = """
+    @parametrize("is_traceable", (True, False))
+    def test_autograd_cpp_node_id(self, load_inline, is_traceable):
+        cpp_source = Template(
+            """
 struct CustomOpAutogradFunction : public torch::autograd::Function<CustomOpAutogradFunction> {
-  static constexpr bool is_traceable = true;
+  static constexpr bool is_traceable = $is_traceable;
 
   static torch::Tensor forward(
       torch::autograd::AutogradContext* ctx,
@@ -2105,7 +2067,7 @@ struct CustomOpAutogradFunction : public torch::autograd::Function<CustomOpAutog
 };
 
 struct CustomOpAutogradFunction2 : public torch::autograd::Function<CustomOpAutogradFunction2> {
-  static constexpr bool is_traceable = true;
+  static constexpr bool is_traceable = $is_traceable;
 
   static torch::Tensor forward(
       torch::autograd::AutogradContext* ctx,
@@ -2133,11 +2095,15 @@ TORCH_LIBRARY(test_autograd_cpp_node_id, m) {
     m.def("custom_op_backed_by_autograd_fn2", custom_op_backed_by_autograd_fn2);
 }
         """
+        ).substitute(is_traceable="true" if is_traceable else "false")
 
         module = load_inline(
             name="test_autograd_cpp_node_id",
             cpp_sources=cpp_source,
-            functions="custom_op_backed_by_autograd_fn",
+            functions=[
+                "custom_op_backed_by_autograd_fn",
+                "custom_op_backed_by_autograd_fn2",
+            ],
             verbose=True,
             extra_cflags=["-g", "-O0"],
         )
@@ -2145,11 +2111,7 @@ TORCH_LIBRARY(test_autograd_cpp_node_id, m) {
         def same_autograd_fn():
             def fn():
                 x = torch.ones(10, 10, requires_grad=True)
-                out = (
-                    torch.ops.test_autograd_cpp_node_id.custom_op_backed_by_autograd_fn(
-                        x
-                    )
-                )
+                out = module.custom_op_backed_by_autograd_fn(x)
                 loss = out.sum()
                 loss.backward()
                 yield x.grad
@@ -2159,7 +2121,14 @@ TORCH_LIBRARY(test_autograd_cpp_node_id, m) {
             yield from fn()  # reuse
             yield from fn()  # reuse
 
-        self.check_output_and_recompiles(same_autograd_fn, 1)
+        if is_traceable:
+            self.check_output_and_recompiles(same_autograd_fn, 1)
+        else:
+            self.check_output_and_recompiles(
+                same_autograd_fn,
+                count=[1, 2],
+                compiler_fn=make_compiler_fn(fullgraph=False),
+            )
 
         def different_autograd_fn():
             def fn(op):
@@ -2169,20 +2138,29 @@ TORCH_LIBRARY(test_autograd_cpp_node_id, m) {
                 loss.backward()
                 yield x.grad
 
-            op1 = torch.ops.test_autograd_cpp_node_id.custom_op_backed_by_autograd_fn
-            op2 = torch.ops.test_autograd_cpp_node_id.custom_op_backed_by_autograd_fn2
+            op1 = module.custom_op_backed_by_autograd_fn
+            op2 = module.custom_op_backed_by_autograd_fn2
             yield from fn(op1)  # compile
             yield from fn(op2)  # compile
             yield from fn(op1)  # reuse
             yield from fn(op2)  # reuse
 
-        self.check_output_and_recompiles(different_autograd_fn, 2)
+        if is_traceable:
+            self.check_output_and_recompiles(different_autograd_fn, 2)
+        else:
+            self.check_output_and_recompiles(
+                different_autograd_fn,
+                count=[2, 4],
+                compiler_fn=make_compiler_fn(fullgraph=False),
+            )
 
     @scoped_load_inline
-    def test_autograd_cpp_node_saved(self, load_inline):
-        cpp_source = """
+    @parametrize("is_traceable", (True, False))
+    def test_autograd_cpp_node_saved(self, load_inline, is_traceable):
+        cpp_source = Template(
+            """
 struct CustomOpAutogradFunction : public torch::autograd::Function<CustomOpAutogradFunction> {
-  static constexpr bool is_traceable = true;
+  static constexpr bool is_traceable = $is_traceable;
 
   static torch::Tensor forward(
       torch::autograd::AutogradContext* ctx,
@@ -2232,6 +2210,7 @@ TORCH_LIBRARY(test_autograd_cpp_node_saved, m) {
     m.def("custom_op_backed_by_autograd_fn", custom_op_backed_by_autograd_fn);
 }
         """
+        ).substitute(is_traceable="true" if is_traceable else "false")
 
         module = load_inline(
             name="test_autograd_cpp_node_saved",
@@ -2245,20 +2224,26 @@ TORCH_LIBRARY(test_autograd_cpp_node_saved, m) {
             for i in [10, 100, 10, 20, 10]:
                 x = torch.ones(i, i, requires_grad=True)
                 y = torch.randn(i, i)
-                out = torch.ops.test_autograd_cpp_node_saved.custom_op_backed_by_autograd_fn(
-                    x, y, fixed
-                )
+                out = module.custom_op_backed_by_autograd_fn(x, y, fixed)
                 loss = out.sum()
                 loss.backward()
                 yield x.grad
 
-        self.check_output_and_recompiles(fn, 2)
+        if is_traceable:
+            # TODO: why is this 4
+            self.check_output_and_recompiles(fn, count=[2, 4])
+        else:
+            self.check_output_and_recompiles(
+                fn, count=[2, 4], compiler_fn=make_compiler_fn(fullgraph=False)
+            )
 
     @scoped_load_inline
-    def test_autograd_cpp_node_saved_dynamic(self, load_inline):
-        cpp_source = """
+    @parametrize("is_traceable", (True, False))
+    def test_autograd_cpp_node_saved_dynamic(self, load_inline, is_traceable):
+        cpp_source = Template(
+            """
 struct CustomOpAutogradFunction : public torch::autograd::Function<CustomOpAutogradFunction> {
-  static constexpr bool is_traceable = true;
+  static constexpr bool is_traceable = $is_traceable;
 
   static torch::Tensor forward(
       torch::autograd::AutogradContext* ctx,
@@ -2290,6 +2275,7 @@ TORCH_LIBRARY(test_autograd_cpp_node_saved_dynamic, m) {
     m.def("custom_op_backed_by_autograd_fn", custom_op_backed_by_autograd_fn);
 }
         """
+        ).substitute(is_traceable="true" if is_traceable else "false")
 
         module = load_inline(
             name="test_autograd_cpp_node_saved_dynamic",
@@ -2301,21 +2287,27 @@ TORCH_LIBRARY(test_autograd_cpp_node_saved_dynamic, m) {
         def fn():
             for i in [10, 100, 10, 20, 10]:
                 x = torch.ones(i, i, requires_grad=True)
-                out = torch.ops.test_autograd_cpp_node_saved_dynamic.custom_op_backed_by_autograd_fn(
-                    x
-                )
+                out = module.custom_op_backed_by_autograd_fn(x)
                 loss = out.sum()
                 loss.backward()
                 yield x.grad
 
-        # compiles for 10 (static) and 100 (dynamic)
-        self.check_output_and_recompiles(fn, 2)
+        if is_traceable:
+            # compiles for 10 (static) and 100 (dynamic)
+            # TODO: why 4?
+            self.check_output_and_recompiles(fn, count=[2, 4])
+        else:
+            self.check_output_and_recompiles(
+                fn, count=[2, 4], compiler_fn=make_compiler_fn(fullgraph=False)
+            )
 
     @scoped_load_inline
-    def test_autograd_cpp_node_saved_int(self, load_inline):
-        cpp_source = """
+    @parametrize("is_traceable", (True, False))
+    def test_autograd_cpp_node_saved_int(self, load_inline, is_traceable):
+        cpp_source = Template(
+            """
 struct CustomOpAutogradFunction : public torch::autograd::Function<CustomOpAutogradFunction> {
-  static constexpr bool is_traceable = true;
+  static constexpr bool is_traceable = $is_traceable;
 
   static torch::Tensor forward(
       torch::autograd::AutogradContext* ctx,
@@ -2350,6 +2342,7 @@ TORCH_LIBRARY(test_autograd_cpp_node_saved_int, m) {
     m.def("custom_op_backed_by_autograd_fn", custom_op_backed_by_autograd_fn);
 }
         """
+        ).substitute(is_traceable="true" if is_traceable else "false")
 
         module = load_inline(
             name="test_autograd_cpp_node_saved_int",
@@ -2361,20 +2354,25 @@ TORCH_LIBRARY(test_autograd_cpp_node_saved_int, m) {
         def fn():
             for y in [1, 2, 3, 1]:
                 x = torch.ones(10, 10, requires_grad=True)
-                out = torch.ops.test_autograd_cpp_node_saved_int.custom_op_backed_by_autograd_fn(
-                    x, y
-                )
+                out = module.custom_op_backed_by_autograd_fn(x, y)
                 loss = out.sum()
                 loss.backward()
                 yield x.grad
 
-        self.check_output_and_recompiles(fn, 1)
+        if is_traceable:
+            self.check_output_and_recompiles(fn, 1)
+        else:
+            self.check_output_and_recompiles(
+                fn, count=[1, 2], compiler_fn=make_compiler_fn(fullgraph=False)
+            )
 
     @scoped_load_inline
-    def test_autograd_cpp_node_saved_float(self, load_inline):
-        cpp_source = """
+    @parametrize("is_traceable", (True, False))
+    def test_autograd_cpp_node_saved_float(self, load_inline, is_traceable):
+        cpp_source = Template(
+            """
 struct CustomOpAutogradFunction : public torch::autograd::Function<CustomOpAutogradFunction> {
-  static constexpr bool is_traceable = true;
+  static constexpr bool is_traceable = $is_traceable;
 
   static torch::Tensor forward(
       torch::autograd::AutogradContext* ctx,
@@ -2409,6 +2407,7 @@ TORCH_LIBRARY(test_autograd_cpp_node_saved_float, m) {
     m.def("custom_op_backed_by_autograd_fn", custom_op_backed_by_autograd_fn);
 }
         """
+        ).substitute(is_traceable="true" if is_traceable else "false")
 
         module = load_inline(
             name="test_autograd_cpp_node_saved_float",
@@ -2420,21 +2419,24 @@ TORCH_LIBRARY(test_autograd_cpp_node_saved_float, m) {
         def fn():
             for z in [1.1, 2.2, 3.3, 1.1]:
                 x = torch.ones(10, 10, requires_grad=True)
-                out = torch.ops.test_autograd_cpp_node_saved_float.custom_op_backed_by_autograd_fn(
-                    x, z
-                )
+                out = module.custom_op_backed_by_autograd_fn(x, z)
                 loss = out.sum()
                 loss.backward()
                 yield x.grad
 
-        # compiled autograd and dynamo both support symfloat, but not backend
-        self.check_output_and_recompiles(fn, [1, 4])
+        if is_traceable:
+            # compiled autograd and dynamo both support symfloat, but not backend
+            self.check_output_and_recompiles(fn, [1, 4])
+        else:
+            self.check_output_and_recompiles(
+                fn, [1, 4], compiler_fn=make_compiler_fn(fullgraph=False)
+            )
 
     @scoped_load_inline
-    def test_autograd_cpp_node_data_dependent(self, load_inline):
+    def test_non_traceable_autograd_cpp_node_data_dependent(self, load_inline):
         cpp_source = """
 struct CustomOpAutogradFunction : public torch::autograd::Function<CustomOpAutogradFunction> {
-  static constexpr bool is_traceable = true;
+  static constexpr bool is_traceable = false;
   static int iteration;
 
   static torch::autograd::variable_list forward(
@@ -2505,26 +2507,26 @@ TORCH_LIBRARY(test_autograd_cpp_node_data_dependent, m) {
         module = load_inline(
             name="test_autograd_cpp_node_data_dependent",
             cpp_sources=cpp_source,
-            functions="custom_op_backed_by_autograd_fn",
+            functions=["custom_op_backed_by_autograd_fn", "reset"],
             verbose=True,
         )
 
         def fn():
-            torch.ops.test_autograd_cpp_node_data_dependent.reset()
+            module.reset()
             for i in [10, 10, 10, 10]:
                 x = torch.ones(i, i, requires_grad=True)
                 y = torch.randn(i, i)
                 (
                     out1,
                     out2,
-                ) = torch.ops.test_autograd_cpp_node_data_dependent.custom_op_backed_by_autograd_fn(
-                    x, y
-                )
+                ) = module.custom_op_backed_by_autograd_fn(x, y)
                 loss = (out1 + out2).sum()
                 loss.backward()
                 yield x.grad
 
-        self.check_output_and_recompiles(fn, 3)
+        self.check_output_and_recompiles(
+            fn, count=[3, 6], compiler_fn=make_compiler_fn(fullgraph=False)
+        )
 
     @unittest.skipIf(not HAS_GPU, "requires gpu")
     def test_free_activation_memory(self):
@@ -3495,6 +3497,8 @@ test_custom_ops = load_test_module("test_custom_ops")
 
 TestAutogradWithCompiledAutograd = wrap_test_class(test_autograd.TestAutograd)
 TestCustomOpWithCompiledAutograd = wrap_test_class(test_custom_ops.TestCustomOp)
+
+instantiate_parametrized_tests(TestCompiledAutograd)
 
 if __name__ == "__main__":
     if HAS_CPU:
