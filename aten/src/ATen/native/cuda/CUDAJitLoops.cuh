@@ -50,6 +50,11 @@ struct JittedVecKernelCache {
   at::cuda::jit::NvrtcFunction vec1;
   at::cuda::jit::NvrtcFunction vec2;
   at::cuda::jit::NvrtcFunction vec4;
+#ifdef USE_ROCM
+  at::cuda::jit::NvrtcFunction vec8;
+  at::cuda::jit::NvrtcFunction vec16;
+#endif
+
 };
 
 struct JittedKernelVariantCache {
@@ -89,7 +94,13 @@ void launch_jitted_unrolled_kernel(
     c10::ArrayRef<void*> extra_args) {
 
   TORCH_INTERNAL_ASSERT(N > 0 && N <= std::numeric_limits<int32_t>::max());
-  const int tws = JIT_THREAD_WORK_SIZE;
+
+  int tws = JIT_THREAD_WORK_SIZE;
+#ifdef USE_ROCM
+  auto io_size = at::cuda::jit::calc_io_size(desc.nInputs, desc.nOutputs, desc.f_inputs_type, desc.result_type);
+  tws = at::cuda::jit::calc_thread_work_size(io_size);
+#endif
+
   int bws = tws * num_threads();
   //casting result to int is always safe, intermediate is int64 and won't overflow
   const uint32_t grid = (N + bws - 1) / bws;
@@ -100,7 +111,7 @@ void launch_jitted_unrolled_kernel(
       constexpr bool dynamic_casting = !std::is_same<decltype(l), memory::LoadWithoutCast>() ||
                                        !std::is_same<decltype(s), memory::StoreWithoutCast>();
       auto code = at::cuda::jit::generate_code(
-          desc, contiguous, dynamic_casting, scalar_pos);
+          desc, contiguous, dynamic_casting, scalar_pos, /*vectorized=*/false, /*vec_size=*/0, tws);
       fn_cache = at::cuda::jit::jit_pwise_function(code, desc.name);
     }
   }
@@ -117,17 +128,31 @@ void launch_jitted_vectorized_kernel(
     at::cuda::jit::BinaryFuncVariant scalar_pos,
     void *scalar_val, c10::ArrayRef<void*> extra_args) {
   TORCH_INTERNAL_ASSERT(N > 0 && N <= std::numeric_limits<int32_t>::max());
-  const int tws = JIT_THREAD_WORK_SIZE;
+
+  int tws = JIT_THREAD_WORK_SIZE;
+
+  int vec_size = at::cuda::jit::can_vectorize_up_to(
+      desc, c10::ArrayRef<char*>(data.data(), data.size()));
+
+#ifdef USE_ROCM
+  auto io_size = at::cuda::jit::calc_io_size(desc.nInputs, desc.nOutputs, desc.f_inputs_type, desc.result_type);
+  tws = at::cuda::jit::calc_thread_work_size(io_size);
+  vec_size = at::cuda::jit::calc_optimal_vec_size(vec_size, io_size);
+#endif
+
   int bws = tws * num_threads();
   // N is still int64_t for the computation, but it's always safe to cast result to int
   const uint32_t grid = (N + bws - 1) / bws;
-  const int vec_size = at::cuda::jit::can_vectorize_up_to(
-      desc, c10::ArrayRef<char*>(data.data(), data.size()));
 
   // Different kernels are compiled depending on what we're vectorizing up to (1, 2 or 4 elements)
   //   fn_ptr is set to the appropriate function based on the vec size and GPU used
   at::cuda::jit::NvrtcFunction* fn_ptr;
-  if (vec_size == 4) {
+#ifdef USE_ROCM
+  if (vec_size == 16) {
+    fn_ptr = &fn_cache.vec16;
+  } else if (vec_size == 8) {
+    fn_ptr = &fn_cache.vec8;
+  } else if (vec_size == 4) {
     fn_ptr = &fn_cache.vec4;
   } else if (vec_size == 2) {
     fn_ptr = &fn_cache.vec2;
@@ -136,6 +161,17 @@ void launch_jitted_vectorized_kernel(
   } else {
     TORCH_INTERNAL_ASSERT(false, "unexpected vec_size for jitter vectorized kernel");
   }
+#else
+  if (vec_size == 4) {
+    fn_ptr = &fn_cache.vec4;
+  } else if (vec_size == 2) {
+    fn_ptr = &fn_cache.vec2;
+  } else if (vec_size ==1) {
+    fn_ptr = &fn_cache.vec1;
+  } else {
+    TORCH_INTERNAL_ASSERT(false, "unexpected vec_size for jitter vectorized kernel");
+  }  
+#endif
 
   bool vectorized = vec_size > 1;
 
@@ -146,7 +182,7 @@ void launch_jitted_vectorized_kernel(
       // Generates program
       auto code = at::cuda::jit::generate_code(
           desc, /*contiguous=*/true, /*dynamic_casting=*/false,
-          scalar_pos, vectorized, vec_size);
+          scalar_pos, vectorized, vec_size, tws);
       std::string kernel_name = vectorized ? desc.name + "_vectorized" + std::to_string(vec_size) : desc.name;
 
       // Acquires the program
