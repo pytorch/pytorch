@@ -3273,9 +3273,10 @@ else:
         self.assertTrue(y.stride() == (1, 4))
 
     # FIXME: move to elementwise ternary test suite
+    @parametrize("use_cpu_scalar", [True, False])
     @dtypesIfCUDA(*set(get_all_math_dtypes('cuda')))
     @dtypes(*set(get_all_math_dtypes('cpu')))
-    def test_addcmul(self, device, dtype):
+    def test_addcmul(self, device, dtype, use_cpu_scalar):
         # Returns floating or integral scalar corresponding to dtype
         def _number(floating, integer, dtype):
             if dtype in [torch.half, torch.float, torch.double, torch.bfloat16]:
@@ -3295,7 +3296,10 @@ else:
 
         a = rand_tensor((2, 2), dtype=dtype, device=device)
         b = rand_tensor((2, 2), dtype=dtype, device=device)
-        c = rand_tensor((2, 2), dtype=dtype, device=device)
+        if use_cpu_scalar:
+            c = rand_tensor([], device="cpu", dtype=dtype)
+        else:
+            c = rand_tensor((2, 2), dtype=dtype, device=device)
 
         alpha = _number(0.5, 3, dtype)
 
