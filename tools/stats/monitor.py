@@ -34,10 +34,10 @@ class UsageData:
     """
     Dataclass for storing usage data.
     """
-    cpu_percent: float = 0.0
-    memory_percent: float = 0.0
-    processes: list[dict[str, Any]] = []
-    gpu_list: list[GpuData] = []
+    cpu_percent: float
+    memory_percent: float
+    processes: list[dict[str, Any]]
+    gpu_list: list[GpuData]
 
 @dataclasses.dataclass
 class GpuData:
@@ -131,7 +131,9 @@ class UsageLogger:
         self._initial_gpu_handler()
 
         self.exit_event = threading.Event()
+
         self.data_list: list[UsageData] = []
+        self.data_errors: list[str] = []
         self.lock = threading.Lock()
 
     def _collect_data(self) -> None:
@@ -154,12 +156,19 @@ class UsageLogger:
                 )
                 if self._debug_mode:
                     print(f"collecting data {data}")
-                with self.lock:
-                    self.data_list.append(data)
+                self._add_data(data)
             except Exception as e:
-                continue
+                self._add_error(e)
             finally:
+                count+=1
                 time.sleep(self._data_collect_interval)
+
+    def _add_data(self, data):
+        with self.lock:
+            self.data_list.append(data)
+    def _add_error(self, error):
+        with self.lock:
+            self.data_errors.append(str(error))
 
     def _output_data(self) -> None:
         """
@@ -176,9 +185,14 @@ class UsageLogger:
                     if self._debug_mode:
                         print("collected:", len(self.data_list))
 
+                    # if no data is collected and has more than one error during collect interval, log the errors
+                    if not self.data_list and len(self.data_errors) > 1:
+                        errors  = ",".join(set(self.data_errors))
+                        self.data_errors.clear()
+                        raise ValueError(f"no data is collected but detected multiple errors: [{errors}]")
+
                     if not self.data_list:
                         continue
-
                     # record timestamp
                     stats.update(
                         {
@@ -186,7 +200,6 @@ class UsageLogger:
                             "time": datetime.datetime.now().timestamp(),
                         }
                     )
-
                     # collect cpu and memory metrics
                     total_cpu = sum(
                         usageData.cpu_percent for usageData in self.data_list
@@ -222,6 +235,7 @@ class UsageLogger:
                                 "max": round(max_memory, 2),
                             },
                             "cmds": cmds,
+                            "count": len(self.data_list),
                         }
                     )
 
