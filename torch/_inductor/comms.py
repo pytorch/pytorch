@@ -236,21 +236,6 @@ def decide_global_ordering_of_comms(
     if not torch.distributed.is_available():
         return nodes
 
-    # If FSDP2 is used, we apply FSDP-specific passes.
-    if any(
-        is_fallback_op(
-            x.node,
-            OrderedSet(
-                [
-                    torch.ops.fsdp.all_gather_copy_in.default,
-                    torch.ops.fsdp.chunk_cat.default,
-                ]
-            ),
-        )
-        for x in nodes
-    ):
-        nodes = enforce_comm_ordering_for_fsdp(nodes, name_to_buf, name_to_fused_node)
-
     comm_nodes = [n for n in nodes if contains_collective(n)]
 
     for i in range(1, len(comm_nodes)):

@@ -546,6 +546,11 @@ automatic_dynamic_remote_pgo: Optional[bool] = get_tristate_env(
     "TORCH_DYNAMO_AUTOMATIC_DYNAMIC_REMOTE_PGO"
 )
 
+# temporary config to kill later
+_unsafe_skip_fsdp_module_guards = (
+    os.environ.get("UNSAFE_SKIP_FSDP_MODULE_GUARDS", "0") == "1"
+)
+
 # HACK: this is for testing custom ops profiling only
 _custom_ops_profile: Optional[Any] = None
 
