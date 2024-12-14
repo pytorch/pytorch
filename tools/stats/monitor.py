@@ -136,8 +136,6 @@ class UsageLogger:
 
         self.data_list: list[UsageData] = []
         self.lock = threading.Lock()
-        self.collect_thread = None
-        self.output_thread = None
 
     def _collect_data(self) -> None:
         """
@@ -304,10 +302,10 @@ class UsageLogger:
         return calculate_gpu
 
     def start(self) -> None:
-        self.collect_thread = threading.Thread(target=self._collect_data)
-        self.collect_thread.start()
+        collect_thread = threading.Thread(target=self._collect_data)
+        collect_thread.start()
         self._ouput_data()
-        self.collect_thread.join()
+        collect_thread.join()
 
     def stop(self, *args: Any) -> None:
         """
