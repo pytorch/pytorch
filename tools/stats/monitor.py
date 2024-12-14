@@ -285,22 +285,16 @@ class UsageLogger:
                 gpu_utilization[gpu.uuid].append(gpu.utilization)
 
         for gpu_uuid in gpu_utilization.keys():
+            if not gpu_utilization[gpu_uuid] or not gpu_mem_utilization[gpu_uuid]:
+                continue
+
             max_gpu_utilization = max(gpu_utilization[gpu_uuid])
             max_gpu_mem_utilization = max(gpu_mem_utilization[gpu_uuid])
-
             total_gpu = sum(gpu_utilization[gpu_uuid])
-            avg_gpu_utilization = (
-                total_gpu / len(gpu_utilization[gpu_uuid])
-                if len(gpu_utilization[gpu_uuid]) > 0
-                else 0
-            )
+            avg_gpu_utilization = total_gpu / len(gpu_utilization[gpu_uuid])
 
             total_mem = sum(gpu_mem_utilization[gpu_uuid])
-            avg_gpu_mem_utilization = (
-                total_mem / len(gpu_mem_utilization[gpu_uuid])
-                if len(gpu_mem_utilization[gpu_uuid]) > 0
-                else 0
-            )
+            avg_gpu_mem_utilization = total_mem / len(gpu_mem_utilization[gpu_uuid])
 
             calculate_gpu.append(
                 {
