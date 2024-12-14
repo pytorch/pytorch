@@ -11,7 +11,8 @@ import io
 import operator
 import unittest
 from enum import Enum
-from typing import Dict, List, Sequence
+from typing import Dict, List
+from collections.abc import Sequence
 from unittest.mock import patch
 
 import torch

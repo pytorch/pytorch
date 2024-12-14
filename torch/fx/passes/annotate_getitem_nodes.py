@@ -7,7 +7,7 @@ def annotate_getitem_nodes(graph: torch.fx.Graph) -> None:
     """
     Annotate the type of getitem nodes, inferred from the type of sequence node.
     If sequence node is not annotated with a type, do nothing.
-    Currently support getitem nodes from Tuple, List, and NamedTuple sequence node.
+    Currently support getitem nodes from tuple, list, and NamedTuple sequence node.
 
     This is helpful since annotations on local names within function are lost during FX transforms.
     Adding back known type annotation for getitem nodes to improve jit scriptability.
@@ -23,7 +23,7 @@ def annotate_getitem_nodes(graph: torch.fx.Graph) -> None:
             # container types
             if hasattr(sequence_node.type, "_name"):
                 parameterized_types = sequence_node.type.__args__
-                if sequence_node.type._name == "Tuple":
+                if sequence_node.type._name in ("tuple", "Tuple"):
                     if len(parameterized_types) == 2 and isinstance(
                         parameterized_types[1], type(...)
                     ):
@@ -32,7 +32,7 @@ def annotate_getitem_nodes(graph: torch.fx.Graph) -> None:
                         assert len(parameterized_types) > index_node
                         node_type = parameterized_types[index_node]
                         node.type = node_type
-                elif sequence_node.type._name == "List":
+                elif sequence_node.type._name in ("list", "List"):
                     assert len(parameterized_types) == 1
                     node.type = parameterized_types[0]
             # NamedTuple type

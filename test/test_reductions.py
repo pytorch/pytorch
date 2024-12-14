@@ -5,7 +5,7 @@ import torch
 import numpy as np
 
 import math
-from typing import Dict, List, Sequence
+from collections.abc import Sequence
 import random
 from functools import partial
 from itertools import product, combinations, permutations
@@ -736,7 +736,7 @@ class TestReductions(TestCase):
 
     # TODO: kill this ane replace with common creation ops
     def _make_tensors(self, shape, val_range=(-100, 100), use_floating=True, use_integral=True,
-                      use_complex=False) -> Dict[str, List[torch.Tensor]]:
+                      use_complex=False) -> dict[str, list[torch.Tensor]]:
         float_types = [torch.double,
                        torch.float]
         int_types = [torch.int64,
@@ -778,7 +778,7 @@ class TestReductions(TestCase):
             types += int_types
         if use_complex:
             types += complex_types
-        tensors: Dict[str, List[torch.Tensor]] = {"cont": [], "noncont": [], "slice": []}
+        tensors: dict[str, list[torch.Tensor]] = {"cont": [], "noncont": [], "slice": []}
         for dtype in types:
             tensors["cont"].append(make_contiguous(shape, dtype))
             tensors["noncont"].append(make_non_contiguous(shape, dtype))

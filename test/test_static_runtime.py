@@ -2,14 +2,13 @@
 # ruff: noqa: F841
 
 import unittest
-from typing import Dict, Optional
+from typing import Optional
 
 import numpy as np
 import torch
 from torch import nn
 from torch.testing._internal.common_utils import TestCase, run_tests
 from torch.testing._internal.static_module import StaticModule
-from typing import List
 
 
 def linear_shim(
@@ -108,7 +107,7 @@ def fork_wait_graph2(input1, input2):
    :param iters: number of future/wait pairs to be created
 """
 def fork_wait_graph3(input, iters: int):
-    futures : List[torch.jit.Future[torch.Tensor]] = []
+    futures : list[torch.jit.Future[torch.Tensor]] = []
     for _ in range(iters):
         futures.append(torch.jit.fork(torch.neg, input))
     results = []
@@ -123,7 +122,7 @@ def fork_wait_graph3(input, iters: int):
    :param num_child_forks: number of child forks per parent fork
 """
 def fork_wait_graph4(input, num_forks: int, num_child_forks: int):
-    futures : List[torch.jit.Future[torch.Tensor]] = []
+    futures : list[torch.jit.Future[torch.Tensor]] = []
     for _ in range(num_forks):
         futures.append(torch.jit.fork(fork_wait_graph3, input, num_child_forks))
     results = []
@@ -150,7 +149,7 @@ def loop_graph(a, b, iters: int):
 def output_graph(a, b, c, iters: int):
     s = torch.tensor([[3, 3], [3, 3]])
     k = a + b * c + s
-    d: Dict[int, torch.Tensor] = {}
+    d: dict[int, torch.Tensor] = {}
     for i in range(iters):
         d[i] = k + i
     return d

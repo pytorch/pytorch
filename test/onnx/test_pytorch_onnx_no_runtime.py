@@ -10,7 +10,7 @@ import itertools
 import unittest
 import unittest.mock
 import warnings
-from typing import Callable, Dict, Iterable, List, Optional, Tuple, Union
+from typing import Callable, Dict, List, Optional, Tuple, Union, TYPE_CHECKING
 
 import numpy as np
 
@@ -24,6 +24,9 @@ from torch import Tensor
 from torch.onnx import symbolic_helper, utils
 from torch.onnx._internal import registration
 from torch.testing._internal import common_quantization, common_utils, jit_utils
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable
 
 
 def export_to_onnx(

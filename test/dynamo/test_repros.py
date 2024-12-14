@@ -24,7 +24,8 @@ from collections import namedtuple
 from copy import deepcopy
 from enum import Enum, IntEnum
 from functools import wraps
-from typing import Any, Dict, Iterator, List, Literal, Tuple, TypedDict
+from typing import Any, Dict, List, Literal, Tuple, TypedDict
+from collections.abc import Iterator
 from unittest import mock
 
 import numpy as np
