@@ -310,18 +310,19 @@ def prepare_fw_with_masks(fn):
 
 
 # This function replaces None gradients with all-zero gradients.
-# In PyTorch there is the convention that None gradients are
-# replaced with all-zeros gradients
+# `None` gradients are problematic for CUDA graphs. Those gradients are
+# replaced with an all-zero tensor for better optimization
 def unmask_none_gradients(grads, operands):
     allowed_types = (torch.Tensor, int, torch.SymInt)
+    assert all(
+        isinstance(o, allowed_types) for o in operands
+    ), f"operands can only be of {allowed_types} but got {[type(o) for o in operands]}"
+
     unmasked_grads = []
     for g, o in zip(grads, operands):
-        if not isinstance(o, allowed_types) or g is not None:
+        if g is not None:
             unmasked_grads.append(g)
         else:
-            assert isinstance(
-                o, allowed_types
-            ), f"operands can only be of {allowed_types} but got {type(o)}"
             # In case the operand is an int or a torch.SymInt, return None
             # This can happen for lifted_arguments. E.g., the shapes of a dynamic tensor are lifted and passed
             # as additional arguments

@@ -1138,7 +1138,7 @@ def forward(self, pred_1, x_1):
             expected_grads = torch.autograd.grad(fn(x), (x,), grad_out)
             self.assertEqual(expected_grads, grads)
 
-    def _test_cond_autograd(self, cond_fct, pred, true_fn, false_fn, operands):
+    def _test_cond_autograd(self, cond_fct, pred_fn, true_fn, false_fn, operands):
         from torch.fx.passes.shape_prop import _extract_tensor_metadata, TensorMetadata
 
         # This is a helper function that extracts the metadata from the tensor and
@@ -1158,43 +1158,61 @@ def forward(self, pred_1, x_1):
             return metadata
 
         # Comparison of FWD path
-        y_cond = cond_fct(pred(*operands), true_fn, false_fn, operands)
+        cond_outputs = cond_fct(pred_fn(*operands), true_fn, false_fn, operands)
         operands_forced_grad = [o.clone().detach() for o in operands]
         for o in operands_forced_grad:
             o.requires_grad = True
-        y_exp = true_fn(*operands_forced_grad) if pred(*operands_forced_grad) else false_fn(*operands_forced_grad)
-        self.assertEqual(y_cond, y_exp)
+        cond_outputs_exp = (
+            true_fn(*operands_forced_grad)
+            if pred_fn(*operands_forced_grad)
+            else false_fn(*operands_forced_grad)
+        )
+        self.assertEqual(cond_outputs, cond_outputs_exp)
 
         # Comparison of BWD path
-        grad_operands = [o for o in operands if o.requires_grad]
-        grad_exp_operands = [o for o in operands_forced_grad if o.requires_grad]
-        
+        cond_inputs = [o for o in operands if o.requires_grad]
+        cond_inputs_exp = [o for o in operands_forced_grad if o.requires_grad]
+
         # Check if at least some operators require grads
-        if len(grad_operands) > 0:
-            grad_cond = torch.autograd.grad(y_cond, grad_operands, allow_unused=True, retain_graph=True)
-            grad_exp = torch.autograd.grad(y_exp, grad_exp_operands, allow_unused=True, materialize_grads=True)
-            
-            grad_exp_masked = [g for g, o in zip(grad_exp, operands) if o.requires_grad]
-            self.assertEqual(grad_exp_masked, grad_cond)
+        if len(cond_inputs) > 0:
+            grad_inputs = torch.autograd.grad(
+                cond_outputs, cond_inputs, allow_unused=True, retain_graph=True
+            )
+            grad_inputs_exp = torch.autograd.grad(
+                cond_outputs_exp,
+                cond_inputs_exp,
+                allow_unused=True,
+                materialize_grads=True,
+            )
+
+            grad_exp_masked = [
+                g for g, o in zip(grad_inputs_exp, operands) if o.requires_grad
+            ]
+            self.assertEqual(grad_exp_masked, grad_inputs)
 
             # Extraction and comparison of Metadata of operands and gradients
             operands_metadata = [
-                _extract_tensor_metadata_except_requires_grad(o) for o in grad_operands
+                _extract_tensor_metadata_except_requires_grad(o) for o in cond_inputs
             ]
             grad_metadata = [
-                _extract_tensor_metadata_except_requires_grad(o) for o in grad_cond
+                _extract_tensor_metadata_except_requires_grad(o) for o in grad_inputs
             ]
-            self.assertTrue(all(op == g for op, g in zip(operands_metadata, grad_metadata)))
+            self.assertTrue(
+                all(op == g for op, g in zip(operands_metadata, grad_metadata))
+            )
 
-        return y_cond, grad_operands
+        return cond_outputs, cond_inputs
 
+    # TODO: The compile_mode = `compile_dynamic_shape` raises the Error
+    # torch._inductor.exc.LoweringException: NotImplementedError: get_size() is not
+    # implemented by <class 'torch._inductor.ir.NoneAsConstantBuffer'>!
     @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
-    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
     # @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
-    @parametrize("compile_mode", ["none", "eager"])
-    def test_cond_autograd_zeros_unused_branch(self, device, compile_mode):
+    @parametrize("compile_mode", ["none", "eager", "compile"])
+    def test_cond_autograd_zeros_unused_branch(self, compile_mode):
         from torch._higher_order_ops.cond import create_fw_bw_graph_branches
 
+        device = torch.device("cuda")
         cond_fct = compile_mode_helper(torch.cond, compile_mode)
 
         def true_fn(x, w1, w2):
@@ -1203,7 +1221,7 @@ def forward(self, pred_1, x_1):
         def false_fn(x, w1, w2):
             return (w2 * x,)
 
-        def pred(x, w1, w2):
+        def pred_fn(x, w1, w2):
             return x > 0
 
         x = torch.ones((), device=device, requires_grad=False)
@@ -1211,17 +1229,19 @@ def forward(self, pred_1, x_1):
         w2 = torch.zeros((), device=device, requires_grad=True)
         operands = [x, w1, w2]
 
-        y_cond, grad_operands = self._test_cond_autograd(
-            cond_fct, pred, true_fn, false_fn, operands
+        cond_outputs, cond_inputs = self._test_cond_autograd(
+            cond_fct, pred_fn, true_fn, false_fn, operands
         )
 
         def f():
-            return torch.autograd.grad(y_cond, grad_operands, allow_unused=True)
+            return torch.autograd.grad(cond_outputs, cond_inputs, allow_unused=True)
 
         gm = make_fx(f)()
-        self.assertExpectedInline(
-            gm.code.strip(),
-            """\
+
+        if compile_mode == "eager" or compile_mode == "none":
+            self.assertExpectedInline(
+                gm.code.strip(),
+                """\
 def forward(self):
     _tensor_constant0 = self._tensor_constant0
     ones_like = torch.ops.aten.ones_like.default(_tensor_constant0, pin_memory = False,\
@@ -1240,7 +1260,19 @@ def forward(self):
     getitem_1 = cond[1]
     getitem_2 = cond[2];  cond = None
     return (getitem_1, getitem_2)""",
-        )
+            )
+        else:
+            self.assertExpectedInline(
+                gm.code.strip(),
+                """\
+def forward(self):
+    _tensor_constant0 = self._tensor_constant0
+    ones_like = torch.ops.aten.ones_like.default(_tensor_constant0, pin_memory = False,\
+ memory_format = torch.preserve_format);  _tensor_constant0 = ones_like = None
+    _tensor_constant1 = self._tensor_constant1
+    _tensor_constant2 = self._tensor_constant2
+    return (_tensor_constant1, _tensor_constant2)""",
+            )
 
         (
             fw_true_graph,
@@ -1272,13 +1304,16 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1):
     return [zeros_like, zeros_like_1, mul_1]""",
         )
 
+    # TODO: The compile_mode = `compile_dynamic_shape` raises the Error
+    # torch._inductor.exc.LoweringException: NotImplementedError: get_size() is not
+    # implemented by <class 'torch._inductor.ir.NoneAsConstantBuffer'>!
     @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
-    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
     # @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
-    @parametrize("compile_mode", ["none", "eager"])
-    def test_cond_autograd_zeros_unused_branch_complex(self, device, compile_mode):
+    @parametrize("compile_mode", ["none", "eager", "compile"])
+    def test_cond_autograd_zeros_unused_branch_complex(self, compile_mode):
         from torch._higher_order_ops.cond import create_fw_bw_graph_branches
 
+        device = torch.device("cuda")
         cond_fct = compile_mode_helper(torch.cond, compile_mode)
 
         autograd = [False, True, True, True, True]
@@ -1295,23 +1330,26 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1):
         def false_fn(x, w1, b1, w2, b2):
             return ((w2 @ x + b2).sum(),)
 
-        def pred(x, w1, b1, w2, b2):
+        def pred_fn(x, w1, b1, w2, b2):
             return x.mean() > 0
 
-        y_cond, grad_operands = self._test_cond_autograd(
-            cond_fct, pred, true_fn, false_fn, operands
+        cond_outputs, cond_inputs = self._test_cond_autograd(
+            cond_fct, pred_fn, true_fn, false_fn, operands
         )
-            
+
         def f():
-            return torch.autograd.grad(y_cond, grad_operands, allow_unused=True)
+            return torch.autograd.grad(cond_outputs, cond_inputs, allow_unused=True)
 
         gm = make_fx(f)()
-        self.assertExpectedInline(
-            gm.code.strip(),
-            """\
+
+        if compile_mode == "eager" or compile_mode == "none":
+            self.assertExpectedInline(
+                gm.code.strip(),
+                """\
 def forward(self):
     _tensor_constant0 = self._tensor_constant0
-    ones_like = torch.ops.aten.ones_like.default(_tensor_constant0, pin_memory = False, memory_format = torch.preserve_format);  _tensor_constant0 = None
+    ones_like = torch.ops.aten.ones_like.default(_tensor_constant0, pin_memory = False,\
+ memory_format = torch.preserve_format);  _tensor_constant0 = None
     _tensor_constant1 = self._tensor_constant1
     true_graph_0 = self.true_graph_0
     false_graph_0 = self.false_graph_0
@@ -1320,14 +1358,36 @@ def forward(self):
     _tensor_constant4 = self._tensor_constant4
     _tensor_constant5 = self._tensor_constant5
     _tensor_constant6 = self._tensor_constant6
-    cond = torch.ops.higher_order.cond(_tensor_constant1, true_graph_0, false_graph_0, (ones_like, _tensor_constant2, _tensor_constant3, _tensor_constant4, _tensor_constant5, _tensor_constant6));  _tensor_constant1 = true_graph_0 = false_graph_0 = ones_like = _tensor_constant2 = _tensor_constant3 = _tensor_constant4 = _tensor_constant5 = _tensor_constant6 = None
+    cond = torch.ops.higher_order.cond(_tensor_constant1, true_graph_0, false_graph_0,\
+ (ones_like, _tensor_constant2, _tensor_constant3, _tensor_constant4, _tensor_constant5,\
+ _tensor_constant6));  _tensor_constant1 = true_graph_0 = false_graph_0 = ones_like =\
+ _tensor_constant2 = _tensor_constant3 = _tensor_constant4 = _tensor_constant5 =\
+ _tensor_constant6 = None
     getitem = cond[0];  getitem = None
     getitem_1 = cond[1]
     getitem_2 = cond[2]
     getitem_3 = cond[3]
     getitem_4 = cond[4];  cond = None
     return (getitem_1, getitem_2, getitem_3, getitem_4)""",
-        )
+            )
+        else:
+            self.assertExpectedInline(
+                gm.code.strip(),
+                """\
+def forward(self):
+    _tensor_constant0 = self._tensor_constant0
+    ones_like = torch.ops.aten.ones_like.default(_tensor_constant0, pin_memory = False,\
+ memory_format = torch.preserve_format);  _tensor_constant0 = ones_like = None
+    _tensor_constant1 = self._tensor_constant1
+    _tensor_constant2 = self._tensor_constant2
+    _tensor_constant3 = self._tensor_constant3
+    mm = torch.ops.aten.mm.out(_tensor_constant1, _tensor_constant2, out = _tensor_constant3);\
+  _tensor_constant1 = _tensor_constant2 = _tensor_constant3 = None
+    _tensor_constant4 = self._tensor_constant4
+    _tensor_constant5 = self._tensor_constant5
+    _tensor_constant6 = self._tensor_constant6
+    return (_tensor_constant4, _tensor_constant5, mm, _tensor_constant6)""",
+            )
 
         (
             fw_true_graph,
@@ -1390,9 +1450,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1):
             def pred(x, w1, b1, w2, b2):
                 return x.mean() > 0
 
-            y_cond, grad_operands = self._test_cond_autograd(
-                cond_fct, pred, true_fn, false_fn, operands
-            )
+            self._test_cond_autograd(cond_fct, pred, true_fn, false_fn, operands)
 
     @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
     def test_map_gpu(self):
