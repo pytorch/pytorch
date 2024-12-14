@@ -162,6 +162,8 @@ class UsageLogger:
                     print(f"collecting data {data}")
                 self._add_data(data)
             except Exception as e:
+                if self._debug_mode:
+                    print(f"error detected: {str(e)}")
                 self._add_error(e)
             finally:
                 time.sleep(self._data_collect_interval)
@@ -188,24 +190,31 @@ class UsageLogger:
                 with self.lock:
                     if self._debug_mode:
                         print("collected:", len(self.data_list))
+                        print("errors found", len(self.data_errors))
 
-                    # if no data is collected and has more than one error during collect interval, log the errors
-                    if not self.data_list and len(self.data_errors) > 1:
+                    # if errors are dominated during the internal, log the errors
+                    if not self.data_list and len(self.data_errors) > 0:
                         errors = ",".join(set(self.data_errors))
                         self.data_errors.clear()
                         raise ValueError(
                             f"no data is collected but detected multiple errors: [{errors}]"
                         )
 
+                    # otherwise, clear the errors.
+                    if self.data_errors:
+                        self.data_errors.clear()
+
+                    # pass if no data is collected
                     if not self.data_list:
                         continue
-                    # record timestamp
+
                     stats.update(
                         {
                             "level": "record",
                             "time": datetime.datetime.now().timestamp(),
                         }
                     )
+
                     # collect cpu and memory metrics
                     total_cpu = sum(
                         usageData.cpu_percent for usageData in self.data_list
