@@ -208,8 +208,15 @@ class UsageLogger:
                     )
                     avg_memory = total_memory / len(self.data_list)
 
-                    cmds = list(set(process['cmd'] for data in self.data_list for process in data.processes))
-                    
+                    # find all cmds during the interval
+                    cmds = list(
+                        set(
+                            process["cmd"]
+                            for data in self.data_list
+                            for process in data.processes
+                        )
+                    )
+
                     stats.update(
                         {
                             "cpu": {
@@ -220,7 +227,7 @@ class UsageLogger:
                                 "avg": round(avg_memory, 2),
                                 "max": round(max_memory, 2),
                             },
-                            "cmds":cmds
+                            "cmds": cmds,
                         }
                     )
 
