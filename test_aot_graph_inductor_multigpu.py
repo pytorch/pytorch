@@ -162,7 +162,7 @@ if __name__ == "__main__":
     }
     import gc
 
-    num_iters = 3
+    num_iters = 30
     with torch.no_grad():
         example_inputs = create_example_inputs(device, times=1, repeat=1)
         inductor_compiled_fn = compile_fx(

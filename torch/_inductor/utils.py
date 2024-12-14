@@ -1738,13 +1738,21 @@ def pass_execution_and_save(func, gm, inp, msg):
 def is_collective(node, op=None):
     from . import ir
 
-    return type(node) == ir._CollectiveKernel and (op is None or node.op_overload is op)
+    return (
+        type(node) == ir._CollectiveKernel and (op is None or node.op_overload is op)
+    ) or (
+        type(node) == ir.FallbackKernel and "c10d_functional" in str(node.op_overload) and "wait_tensor" not in str(node.op_overload)
+    )
 
 
 def is_wait(node):
     from . import ir
 
-    return type(node) == ir._WaitKernel
+    return (
+        type(node) == ir._WaitKernel
+    ) or (
+        type(node) == ir.FallbackKernel and "wait_tensor" in str(node.op_overload)
+    )
 
 
 def contains_collective(snode):

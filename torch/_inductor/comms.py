@@ -116,7 +116,8 @@ def _schedule_for_comm(
     name_to_fused_node = {}
     scores_0, scores_1, scores_2 = {}, {}, {}
     for idx, snode in enumerate(snodes):
-        for buf_name in snode.get_buffer_names():
+        for o in snode.get_outputs():
+            buf_name = o.get_name()
             buf_name_to_snode[buf_name] = snode
 
         for op_name in snode.get_operation_names():
@@ -160,7 +161,7 @@ def _schedule_for_comm(
     ready: List[Runnable] = []
     buffer_users: Dict[str, Set[BaseSchedulerNode]] = defaultdict(OrderedSet)
     snode_to_cost = {snode: estimate_op_runtime(snode) for snode in snodes}
-    buf_name_to_snode = {buf_name: snode for snode in snodes for buf_name in snode.get_buffer_names()}
+    buf_name_to_snode = {o.get_name(): snode for snode in snodes for o in snode.get_outputs()}
 
     for snode, deps in unmet_deps.items():
         if len(deps) == 0:
@@ -1087,7 +1088,6 @@ def bucket_fsdp_all_gather_concat_on_scheduler_ir(
                     (get_fx_node(n).meta["val"].shape[0] * group_size,) + get_fx_node(n).meta["val"].shape[1:] for n in param_all_gather_inputs_orig
                 ]
                 all_gather_input_numel = sum(inp_split_sizes)
-                # TODO(yf225): figure out how to handle this MultiOutput/MultiOutputLayout
                 all_gather_input, all_gather_output = schedule_fallback_operation(
                     torch.ops.fsdp.all_gather_copy_in.default,
                     (
@@ -1140,7 +1140,8 @@ def bucket_fsdp_all_gather_concat_on_scheduler_ir(
                 # Make sure downstream users of original wait nodes are now dependent on the new `outs` nodes
                 assert len(orig_wait_snodes) == len(outs), f"len(orig_wait_snodes)={len(orig_wait_snodes)}, len(outs)={len(outs)}, orig_wait_snodes={orig_wait_snodes}, outs={outs}"
                 assert len(orig_wait_snodes) > 0
-                # Make sure downstream users of original wait nodes are now dependent on the new `outs` nodes
+                # Swap out the original wait output buffer with the new buffer,
+                # so that downstream user nodes can read from the new buffer just by using the original dep buffer name.
                 for out_operation, orig_ag_snode, orig_wait_snode in zip(outs, orig_ag_snodes, orig_wait_snodes):
                     out_snode = new_operation_name_to_snode[out_operation.get_operation_name()]
                     assert len(orig_ag_snode.outputs) == 1
