@@ -10,8 +10,19 @@ permissions:
   contents: read
 
 jobs:
+  get-label-type:
+    if: github.repository_owner == 'pytorch'
+    name: get-label-type
+    uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@main
+    with:
+      triggering_actor: ${{ github.triggering_actor }}
+      issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
+      curr_branch: ${{ github.head_ref || github.ref_name }}
+      curr_ref_type: ${{ github.ref_type }}
+
   index:
-    runs-on: linux.g5.4xlarge.nvidia.gpu # 1 GPU A10G 24GB each
+    needs: get-label-type
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}linux.g5.4xlarge.nvidia.gpu" # 1 GPU A10G 24GB each
     environment: target-determinator-env
     steps:
       - name: Clone PyTorch

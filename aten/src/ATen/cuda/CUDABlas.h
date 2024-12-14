@@ -34,7 +34,7 @@ public:
 
 private:
   cublasHandle_t handle;
-  cublasPointerMode_t previous_mode;
+  cublasPointerMode_t previous_mode{};
 };
 
 /* LEVEL 3 BLAS FUNCTIONS */
@@ -140,7 +140,6 @@ void scaled_gemm(
     const void* result_scale_ptr,
     int64_t result_ld,
     ScalarType result_dtype,
-    void* amax_ptr,
     bool use_fast_accum);
 
 #define CUDABLAS_BGEMM_ARGTYPES(Dtype)                                                        \

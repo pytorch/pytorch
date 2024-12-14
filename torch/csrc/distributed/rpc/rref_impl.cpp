@@ -281,7 +281,7 @@ c10::intrusive_ptr<JitFuture> OwnerRRef::getFuture() {
 }
 
 void OwnerRRef::setValue(IValue&& value) {
-  future_->markCompleted(value);
+  future_->markCompleted(std::move(value));
 }
 
 void OwnerRRef::setError(std::exception_ptr eptr) {

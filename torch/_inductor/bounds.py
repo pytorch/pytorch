@@ -1,15 +1,14 @@
-# mypy: allow-untyped-defs
 import logging
 import operator
 from functools import partial
-from typing import Any, Callable, Dict
+from typing import Any, Callable, Dict, Union
 
 from sympy import Expr
 
 import torch
 from torch.utils._sympy.value_ranges import bound_sympy, ValueRangeAnalysis, ValueRanges
 
-from .ir import InterpreterShim, LoopBody, LoopBodyBlock
+from .loop_body import InterpreterShim, LoopBody, LoopBodyBlock
 from .utils import cache_on_self, dominated_nodes
 from .virtualized import V
 
@@ -28,7 +27,7 @@ class BoundVars:
     """
 
     def __init__(self, loop_body: LoopBody) -> None:
-        def upper_bound(v):
+        def upper_bound(v: Union[Expr, int]) -> int:
             return bound_sympy(v).upper if isinstance(v, Expr) else v
 
         self.loop_body = loop_body
@@ -90,7 +89,9 @@ class BoundVars:
                 # moving the lambda out of make_fn would close over the reference to subblock,
                 # so all lambdas would have the same subblock reference that is the final
                 # subblock in the loop
-                def make_fn(subblock):
+                def make_fn(
+                    subblock: LoopBodyBlock,
+                ) -> Callable[[Any, Any], ValueRanges[Expr]]:
                     return lambda mask, value: self.masked_subblock(
                         subblock, self._bounds, mask, value, result
                     )
@@ -128,7 +129,7 @@ class BoundVars:
         self.replacement_vals[old] = new
         return new
 
-    def get_index(self, name: Expr) -> ValueRanges[Expr]:
+    def get_index(self, name: str) -> ValueRanges[Expr]:
         expr = self.loop_body.indexing_exprs[name]
         bound = self.replacement_vals.get(expr)
         if bound is None:

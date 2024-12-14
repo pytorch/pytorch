@@ -1,9 +1,9 @@
+#include <array>
 #include <gtest/gtest.h>
 #include <ATen/ATen.h>
 #include <ATen/native/cuda/Loops.cuh>
 #include <ATen/native/cuda/MemoryAccess.cuh>
 #include <ATen/cuda/CUDAContext.h>
-#include <ATen/core/Array.h>
 
 using namespace at::native;
 using namespace at::native::memory;
@@ -77,12 +77,12 @@ TEST(TestVectorizedMemoryAccess, CanVectorizeUpTo) {
 template <typename scalar_t, int vec_size>
 __global__ void vectorized_copy(scalar_t *dst, scalar_t *src) {
   static_assert(vec_size <= thread_work_size() && thread_work_size() % vec_size == 0, "Invalid vec_size");
-  using array_t = at::detail::Array<char*, 2>;
+  using array_t = std::array<char*, 2>;
   array_t data;
   data[0] = reinterpret_cast<char *>(dst);
   data[1] = reinterpret_cast<char *>(src);
   int idx = blockIdx.x;
-  using vectorized = policies::vectorized<vec_size, array_t>;
+  using vectorized = policies::vectorized<vec_size, array_t, thread_work_size()>;
   auto policy = vectorized(data);
   scalar_t buf[thread_work_size()];
 #if !defined(USE_ROCM)

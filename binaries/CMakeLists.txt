@@ -35,12 +35,6 @@ if(USE_ROCM)
 
 endif()
 
-if(USE_MPI)
-  caffe2_binary_target("run_plan_mpi.cc")
-  target_link_libraries(run_plan_mpi ${MPI_CXX_LIBRARIES})
-endif()
-
-
 caffe2_binary_target("dump_operator_names.cc")
 caffe2_binary_target("optimize_for_mobile.cc")
 

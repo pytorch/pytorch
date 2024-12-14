@@ -27,7 +27,8 @@ from torch.distributed._functional_collectives import AsyncCollectiveTensor
 if dist.is_available() or TYPE_CHECKING:
     from torch.distributed import distributed_c10d
     from torch.distributed._shard.sharded_tensor import ShardedTensor
-    from torch.distributed._tensor import distribute_tensor, DTensor, Replicate
+    from torch.distributed.tensor import distribute_tensor, DTensor, Replicate
+    from torch.distributed.tensor._utils import compute_local_shape_and_global_offset
 
 
 def _identity_func(
@@ -551,8 +552,23 @@ def _distribute_tensors(
 
         local_state = _local_state[0]
         full_tensor = _local_state[1]
-        local_state_dict[key] = distribute_tensor(
-            full_tensor, local_state.device_mesh, local_state.placements
+
+        shape, offset = compute_local_shape_and_global_offset(
+            full_tensor.shape, local_state.device_mesh, local_state.placements
+        )
+        slices = [
+            slice(cur_offset, cur_offset + cur_shape)
+            for cur_shape, cur_offset in zip(shape, offset)
+        ]
+        local_tensor = full_tensor[slices]
+        # TODO: currently, we cannot handle strided sharding if the dp dimension is not even. For example,
+        # one of the case that is not yet supported is when placements = (Shard(0), _StridedShard(0, sf=2)).
+        local_state_dict[key] = DTensor.from_local(
+            local_tensor,
+            local_state.device_mesh,
+            local_state.placements,
+            shape=local_state.shape,
+            stride=local_state.stride(),
         )
 
 

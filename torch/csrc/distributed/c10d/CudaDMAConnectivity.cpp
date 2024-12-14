@@ -12,6 +12,7 @@ namespace {
 constexpr int max_nvlinks = 64;
 
 std::string get_bus_id(int device_idx) {
+  // NOLINTNEXTLINE(*array*)
   char bus_id[80];
   cudaDeviceProp prop{};
   C10_CUDA_CHECK(cudaGetDeviceProperties(&prop, device_idx));
@@ -27,7 +28,7 @@ std::string get_bus_id(int device_idx) {
 
 struct C10_EXPORT NVLinkDetector : public c10d::DMAConnectivityDetector {
   c10::intrusive_ptr<c10d::DMAConnectivity> detect() override {
-    int num_devices;
+    int num_devices = 0;
     C10_CUDA_CHECK(cudaGetDeviceCount(&num_devices));
 
     std::vector<std::vector<int>> matrix;
@@ -46,22 +47,36 @@ struct C10_EXPORT NVLinkDetector : public c10d::DMAConnectivityDetector {
       bus_ids.push_back(std::move(bus_id));
     }
 
-    // Obtain the nvml device for all bus_ids
+    static const char* warning_msg =
+        "PyTorch features that use NVLinkDetector may assume no NVLink presence.";
+
     auto driver_api = c10::cuda::DriverAPI::get();
+    if (driver_api->nvmlInit_v2_() != NVML_SUCCESS) {
+      LOG(WARNING)
+          << "NVLinkDetector: Failed to initialize NVML via nvmlInit_v2. "
+          << warning_msg;
+      return c10::make_intrusive<c10d::DMAConnectivity>(
+          c10::DeviceType::CUDA, "nvlink", std::move(matrix));
+    }
+
+    // Obtain the nvml device for all bus_ids
     std::vector<nvmlDevice_t> nvml_devices(num_devices, nullptr);
     for (int i = 0; i < num_devices; ++i) {
-      TORCH_CHECK_EQ(
-          driver_api->nvmlDeviceGetHandleByPciBusId_v2_(
-              bus_ids[i].c_str(), &nvml_devices[i]),
-          NVML_SUCCESS);
+      auto res = driver_api->nvmlDeviceGetHandleByPciBusId_v2_(
+          bus_ids[i].c_str(), &nvml_devices[i]);
+      if (res != NVML_SUCCESS) {
+        LOG(WARNING) << "NVLinkDetector: Failed to obtain NVML device via "
+                     << "nvmlDeviceGetHandleByPciBusId_v2. " << warning_msg;
+        return c10::make_intrusive<c10d::DMAConnectivity>(
+            c10::DeviceType::CUDA, "nvlink", std::move(matrix));
+      }
     }
 
     std::vector<int> switch_link_count(num_devices, 0);
     for (int i = 0; i < num_devices; ++i) {
       for (int link = 0; link < max_nvlinks; ++link) {
-        nvmlReturn_t ret;
-        nvmlIntNvLinkDeviceType_t deviceType;
-        ret = driver_api->nvmlDeviceGetNvLinkRemoteDeviceType_(
+        nvmlIntNvLinkDeviceType_t deviceType{};
+        auto ret = driver_api->nvmlDeviceGetNvLinkRemoteDeviceType_(
             nvml_devices[i], link, &deviceType);
         if (ret != NVML_SUCCESS) {
           // We've exhausted the NVLinks connected to this device. This error
@@ -74,10 +89,14 @@ struct C10_EXPORT NVLinkDetector : public c10d::DMAConnectivityDetector {
         // Remote device is GPU
         if (deviceType == NVML_NVLINK_DEVICE_TYPE_GPU) {
           nvmlPciInfo_t pciInfo;
-          TORCH_CHECK_EQ(
-              driver_api->nvmlDeviceGetNvLinkRemotePciInfo_v2_(
-                  nvml_devices[i], link, &pciInfo),
-              NVML_SUCCESS);
+          auto res = driver_api->nvmlDeviceGetNvLinkRemotePciInfo_v2_(
+              nvml_devices[i], link, &pciInfo);
+          if (res != NVML_SUCCESS) {
+            LOG(WARNING) << "NVLinkDetector: Failed to obtain NVML device via "
+                         << "nvmlDeviceGetHandleByPciBusId_v2. " << warning_msg;
+            return c10::make_intrusive<c10d::DMAConnectivity>(
+                c10::DeviceType::CUDA, "nvlink", std::move(matrix));
+          }
           auto it = bus_id_to_device_idx.find(pciInfo.busId);
           if (it != bus_id_to_device_idx.end()) {
             if (i != it->second) {

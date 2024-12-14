@@ -63,25 +63,22 @@ std::tuple<uint64_t, dim3, dim3> calc_execution_policy(const int64_t total_eleme
 // grid stride loop kernel for distributions
 template<typename accscalar_t, int unroll_factor, typename dist_t, typename transform_t>
 C10_LAUNCH_BOUNDS_2(block_size_bound, grid_size_bound)
-__global__ void distribution_elementwise_grid_stride_kernel(int numel,
+__global__ void distribution_elementwise_grid_stride_kernel(int64_t numel,
                                                             PhiloxCudaState philox_args,
                                                             const dist_t dist_func,
                                                             const transform_t transform_func) {
-  auto seeds = at::cuda::philox::unpack(philox_args);
-  int idx = blockIdx.x * blockDim.x + threadIdx.x;
+  auto [seed, offset] = at::cuda::philox::unpack(philox_args);
+  int64_t idx = blockIdx.x * blockDim.x + threadIdx.x;
   curandStatePhilox4_32_10_t state;
-  curand_init(std::get<0>(seeds),
-              idx,
-              std::get<1>(seeds),
-              &state);
+  curand_init(seed, idx, offset, &state);
 
-  int rounded_size = ((numel - 1)/(blockDim.x * gridDim.x * unroll_factor)+1) *
+  int64_t rounded_size = ((numel - 1)/(blockDim.x * gridDim.x * unroll_factor)+1) *
       blockDim.x * gridDim.x * unroll_factor;
-  for(int linear_index = idx; linear_index < rounded_size; linear_index += blockDim.x * gridDim.x * unroll_factor) {
+  for(int64_t linear_index = idx; linear_index < rounded_size; linear_index += blockDim.x * gridDim.x * unroll_factor) {
     auto rand = dist_func(&state);
     #pragma unroll
     for (int ii = 0; ii < unroll_factor; ii++) {
-      int li = linear_index + blockDim.x * gridDim.x * ii;
+      int64_t li = linear_index + blockDim.x * gridDim.x * ii;
       if (li < numel) {
         transform_func(li, static_cast<accscalar_t>((&rand.x)[ii]));
       }
@@ -123,10 +120,7 @@ void distribution_nullary_kernel(at::TensorIteratorBase& iter,
     return;
   }
 
-  auto execution_policy = calc_execution_policy(numel, unroll_factor);
-  auto counter_offset = std::get<0>(execution_policy);
-  auto grid = std::get<1>(execution_policy);
-  auto block = std::get<2>(execution_policy);
+  auto [counter_offset, grid, block] = calc_execution_policy(numel, unroll_factor);
   PhiloxCudaState rng_engine_inputs;
   {
     // See Note [Acquire lock when using random generators]
@@ -233,7 +227,7 @@ __global__ void distribution_binary_elementwise_kernel(
 
 template <typename func_t>
 void distribution_binary_kernel(TensorIteratorBase &iter, PhiloxCudaState philox_args, const func_t &f) {
-  static_assert(std::is_same<typename function_traits<func_t>::template arg<0>::type, curandStatePhilox4_32_10_t&>::value, "the first argument of functor must be curandStatePhilox4_32_10_t");
+  static_assert(std::is_same_v<typename function_traits<func_t>::template arg<0>::type, curandStatePhilox4_32_10_t&>, "the first argument of functor must be curandStatePhilox4_32_10_t");
   using input_t_1 = typename function_traits<func_t>::template arg<1>::type;
   using input_t_2 = typename function_traits<func_t>::template arg<2>::type;
   using output_t = typename function_traits<func_t>::result_type;
@@ -287,10 +281,10 @@ template<typename RNG>
 void random_from_to_kernel(TensorIteratorBase& iter, uint64_t range, int64_t base, RNG gen) {
   AT_DISPATCH_V2(iter.dtype(), "random_from_to_kernel_cuda", AT_WRAP([&] {
     if ((
-      std::is_same<scalar_t, int64_t>::value ||
-      std::is_same<scalar_t, double>::value ||
-      std::is_same<scalar_t, float>::value ||
-      std::is_same<scalar_t, at::BFloat16>::value) && range >= 1ULL << 32)
+      std::is_same_v<scalar_t, int64_t> ||
+      std::is_same_v<scalar_t, double> ||
+      std::is_same_v<scalar_t, float> ||
+      std::is_same_v<scalar_t, at::BFloat16>) && range >= 1ULL << 32)
     {
       // define lambda to mod with range and add base
       auto random_func = [range, base] __device__ (uint64_t rand) {
@@ -326,10 +320,10 @@ void random_from_to_kernel(TensorIteratorBase& iter, uint64_t range, int64_t bas
 template<typename RNG>
 void random_full_64_bits_range_kernel(TensorIteratorBase& iter, RNG gen) {
   AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::BFloat16, iter.dtype(), "random_full_64_bits_range_kernel_cuda", [&] {
-    if (std::is_same<scalar_t, int64_t>::value ||
-        std::is_same<scalar_t, double>::value ||
-        std::is_same<scalar_t, float>::value ||
-        std::is_same<scalar_t, at::BFloat16>::value) {
+    if (std::is_same_v<scalar_t, int64_t> ||
+        std::is_same_v<scalar_t, double> ||
+        std::is_same_v<scalar_t, float> ||
+        std::is_same_v<scalar_t, at::BFloat16>) {
       auto random_func = [] __device__ (uint64_t rand) {
         return transformation::uniform_int_full_range<scalar_t>(rand);
       };
@@ -362,7 +356,7 @@ struct RandomFromToKernel {
 template<typename RNG>
 void random_kernel(TensorIteratorBase& iter, RNG gen) {
   AT_DISPATCH_ALL_TYPES_AND3(at::ScalarType::Half, at::ScalarType::BFloat16, at::ScalarType::Bool, iter.dtype(), "random_kernel_cuda", [&] {
-    if (std::is_same<scalar_t, double>::value || std::is_same<scalar_t, int64_t>::value) {
+    if (std::is_same_v<scalar_t, double> || std::is_same_v<scalar_t, int64_t>) {
       auto random_func = [] __device__ (uint64_t rand) {
         return transformation::uniform_int<scalar_t>(rand);
       };
@@ -400,7 +394,7 @@ struct RandomKernel {
 
 template<typename scalar_t, typename accscalar_t, typename RNG, typename transform_t>
 void uniform_and_transform(TensorIteratorBase& iter, RNG gen, transform_t transform) {
-  if (std::is_same<scalar_t, double>::value) {
+  if (std::is_same_v<scalar_t, double>) {
     distribution_nullary_kernel<scalar_t, accscalar_t, double2>(iter,
       gen,
       [] __device__ (curandStatePhilox4_32_10_t* state) -> double2 { return curand_uniform2_double(state); },
@@ -415,7 +409,7 @@ void uniform_and_transform(TensorIteratorBase& iter, RNG gen, transform_t transf
 
 template<typename scalar_t, typename accscalar_t, typename RNG, typename transform_t>
 void normal_and_transform(TensorIteratorBase& iter, RNG gen, transform_t transform) {
-  if (std::is_same<scalar_t, double>::value) {
+  if (std::is_same_v<scalar_t, double>) {
     distribution_nullary_kernel<scalar_t, accscalar_t, double2>(iter,
       gen,
       [] __device__ (curandStatePhilox4_32_10_t* state) -> double2 { return curand_normal2_double(state); },
@@ -637,7 +631,7 @@ void bernoulli_kernel(const TensorBase &self, const TensorBase &p_, RNG gen) {
   auto p = expand_inplace(self, p_cuda);
   AT_DISPATCH_ALL_TYPES_AND3(
     at::ScalarType::Half, at::ScalarType::BFloat16, at::ScalarType::Bool, self.scalar_type(), "bernoulli_tensor_cuda_self_", [&] {
-      if (std::is_same<scalar_t, double>::value) {
+      if (std::is_same_v<scalar_t, double>) {
         return bernoulli_tensor_cuda_kernel<double, double>(self, *p, rng_engine_inputs);
       } else {
         return bernoulli_tensor_cuda_kernel<scalar_t, float>(self, *p, rng_engine_inputs);
