@@ -1,7 +1,4 @@
-#include "c10/util/Registry.h"
 #include <ATen/detail/CUDAHooksInterface.h>
-
-#include <memory>
 
 namespace at {
 namespace detail {

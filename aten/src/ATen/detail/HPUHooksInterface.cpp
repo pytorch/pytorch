@@ -1,5 +1,4 @@
 #include <ATen/detail/HPUHooksInterface.h>
-#include <memory>
 
 namespace at {
 namespace detail {

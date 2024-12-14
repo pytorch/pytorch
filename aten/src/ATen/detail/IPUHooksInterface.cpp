@@ -1,7 +1,5 @@
 #include <ATen/detail/IPUHooksInterface.h>
 
-#include <c10/util/CallOnce.h>
-
 namespace at {
 namespace detail {
 

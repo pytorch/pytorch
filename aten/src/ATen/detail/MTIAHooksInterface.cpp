@@ -1,7 +1,5 @@
 #include <ATen/detail/MTIAHooksInterface.h>
 
-#include <memory>
-
 namespace at {
 namespace detail {
 

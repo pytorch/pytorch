@@ -1,9 +1,5 @@
 #include <ATen/detail/HIPHooksInterface.h>
 
-#include <c10/util/Registry.h>
-
-#include <memory>
-
 namespace at {
 namespace detail {
 

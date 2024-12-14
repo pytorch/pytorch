@@ -1,9 +1,5 @@
 #include <ATen/detail/MAIAHooksInterface.h>
 
-#include <c10/util/Registry.h>
-
-#include <memory>
-
 namespace at {
 namespace detail {
 
