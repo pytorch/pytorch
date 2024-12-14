@@ -3738,6 +3738,8 @@ class TritonScheduling(SIMDScheduling):
             # to "triton_" to maximize caching opportunities (when unique_kernel_names = False).
             src_code = src_code.replace(str(Placeholder.DESCRIPTIVE_NAME), kernel_name)
             src_code = src_code.replace(str(Placeholder.KERNEL_NAME), subs_name)
+            if kernel_category == KernelCategory.TEMPLATE:
+                src_code = src_code.replace(kernel.kernel_name, kernel_name)
 
             # TODO(voz): Ostensibly, we should not need this. But there are cases where C++ codegen does
             # not use BracesBuffer, so we have no good indicator of a C++ buffer atm.
