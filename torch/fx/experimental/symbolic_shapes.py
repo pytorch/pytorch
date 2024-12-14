@@ -3875,8 +3875,6 @@ class ShapeEnv:
         if isinstance(numel, int) and numel < 2 or ex_stride[-1] != 1:
             contiguous_striding = False
         for i in range(len(size) - 2, -1, -1):
-            # Even though a tensor is contiguous, it may not
-            # conform to stride[i] = size[i+1] * stride[i+1]
             contiguous_stride = ex_stride[i + 1] * ex_size[i + 1]
             if (
                 not isinstance(contiguous_stride, sympy.Symbol)
