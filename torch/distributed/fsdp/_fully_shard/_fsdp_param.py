@@ -799,6 +799,7 @@ class FSDPParam:
 
     @property
     def shard_mesh_from_root(self):
+        mesh = self.mesh_info.mesh
         mesh = _MeshEnv.get_root_mesh(mesh)
         if mesh.ndim == 1:
             return mesh
