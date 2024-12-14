@@ -44,7 +44,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        py_vers: [ "3.9", "3.10", "3.11", "3.12", "3.13" ]
+        py_vers: [ "3.9", "3.10", "3.11", "3.12", "3.13", "3.13t" ]
         device: ["cuda", "rocm", "xpu"]
         docker-image: ["pytorch/manylinux-builder:cpu", "pytorch/manylinux2_28-builder:cpu"]
         exclude:
@@ -113,6 +113,9 @@ jobs:
             ;;
           3.13)
             PYTHON_EXECUTABLE=/opt/python/cp313-cp313/bin/python
+            ;;
+          3.13t)
+            PYTHON_EXECUTABLE=/opt/python/cp313-cp313t/bin/python
             ;;
           *)
             echo "Unsupported python version ${PY_VERS}"

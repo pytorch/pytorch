@@ -1,7 +1,6 @@
 # mypy: ignore-errors
 
 import collections
-import functools
 from enum import Enum
 from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING
 
@@ -15,19 +14,6 @@ from ..utils import istype
 
 if TYPE_CHECKING:
     from .symbolic_convert import InstructionTranslator, InstructionTranslatorBase
-
-
-@functools.cache
-def _lazy_import():
-    import importlib
-
-    globals()["builder"] = importlib.import_module(".builder", __package__)
-
-
-if TYPE_CHECKING:
-    # TCH004 complains about used imports in a TYPE_CHECKING block because RUFF
-    # doesn't understand that we're getting them from _lazy_import() above.
-    from . import builder  # noqa: TCH004
 
 
 class SourceType(Enum):
@@ -463,7 +449,6 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         source: Optional[Source] = None,
     ) -> Any:
         """Create a new VariableTracker from a value and optional Source"""
-        _lazy_import()
         if source is None:
             return builder.SourcelessBuilder.create(tx, value)
         else:
@@ -506,3 +491,6 @@ def typestr(*objs):
             return type(obj).__name__
     else:
         return " ".join(map(typestr, objs))
+
+
+from . import builder

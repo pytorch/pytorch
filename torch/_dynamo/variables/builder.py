@@ -89,12 +89,6 @@ from ..source import (
     SubclassAttrListSource,
     TupleIteratorGetItemSource,
 )
-from ..trace_rules import (
-    is_callable_allowed,
-    is_numpy,
-    is_numpy_dtype,
-    is_numpy_type_info,
-)
 from ..utils import (
     _extract_tensor_dict,
     build_checkpoint_variable,
@@ -751,7 +745,7 @@ class VariableBuilder:
         elif np is not None and isinstance(value, np.generic):
             # numpy array scalars: convert to 0D arrays
             return self.wrap_numpy_ndarray(np.asarray(value))
-        elif is_numpy(value):
+        elif trace_rules.is_numpy(value):
             assert np
             self.install_guards(
                 GuardBuilder.FUNCTION_MATCH
@@ -759,10 +753,10 @@ class VariableBuilder:
                 else GuardBuilder.TYPE_MATCH
             )
             return NumpyVariable(value, source=self.source)
-        elif is_numpy_dtype(value):
+        elif trace_rules.is_numpy_dtype(value):
             self.install_guards(GuardBuilder.ID_MATCH)
             return NumpyDTypeVariable(value, source=self.source)
-        elif is_numpy_type_info(value):
+        elif trace_rules.is_numpy_type_info(value):
             if isinstance(value, np.iinfo):
                 self.install_guards(GuardBuilder.TYPE_MATCH)
                 dt_source = AttrSource(self.source, "dtype")
@@ -848,7 +842,7 @@ class VariableBuilder:
                 )
             )
         elif callable(value) and trace_rules.lookup_callable(value) is not None:
-            if is_callable_allowed(value):
+            if trace_rules.is_callable_allowed(value):
                 self.tx.output.has_user_defined_allowed_in_graph = True
             return trace_rules.lookup_callable(value).create_with_source(
                 value, source=self.source
@@ -2967,7 +2961,7 @@ class SourcelessBuilder:
         elif ConstantVariable.is_literal(value):
             return ConstantVariable.create(value)
         elif callable(value) and trace_rules.lookup_callable(value) is not None:
-            if is_callable_allowed(value):
+            if trace_rules.is_callable_allowed(value):
                 tx.output.has_user_defined_allowed_in_graph = True
             return trace_rules.lookup_callable(value)(value)
         elif is_function_or_wrapper(value):
