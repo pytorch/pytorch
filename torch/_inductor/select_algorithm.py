@@ -30,12 +30,12 @@ from typing import (
 from unittest.mock import patch
 
 import sympy
-from filelock import FileLock
 
 import torch
 import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncCompile pools
 from torch._dynamo.testing import rand_strided
 from torch._dynamo.utils import counters, dynamo_timed, identity, preserve_rng_state
+from torch.utils._filelock import FileLock
 from torch.utils._ordered_set import OrderedSet
 
 from . import config, ir
@@ -74,6 +74,7 @@ from .utils import (
     sympy_dot,
     sympy_index_symbol,
     sympy_product,
+    triton_type,
     triton_type_to_torch,
     unique,
 )
@@ -292,7 +293,7 @@ class TritonTemplateKernel(TritonKernel):
         super().__init__(
             {
                 "x": numel,
-                "r": sympy.S.One,
+                "r0_": sympy.S.One,
             },
             features=SIMDKernelFeatures([], numel),
         )
@@ -332,6 +333,8 @@ class TritonTemplateKernel(TritonKernel):
 
         # input buffers which we are fusing into
         self.prologue_fused_inputs: OrderedSet[str] = OrderedSet()
+        # input buffers which we are fusing into, which preserve a zero mask
+        self.prologue_fused_inputs_preserve_zero: OrderedSet[str] = OrderedSet()
 
         # The following attributes are all used for triton kernel codegen.
         # They are swapped onto the TritonTemplateKernel object by
@@ -637,7 +640,7 @@ class TritonTemplateKernel(TritonKernel):
                     self.body.writeline(str(scatter))
 
             body_val = self.body.getvalue()
-            self.cse.invalidate(set())
+            self.cse.invalidate(OrderedSet[str]())
             return body_val
 
     def load_input(
@@ -665,11 +668,15 @@ class TritonTemplateKernel(TritonKernel):
         tilings = (sympy_product(input_node.get_size()), sympy.Integer(1))
         groups = {
             "x": tilings[0],
-            "r": tilings[1],
+            "r0_": tilings[1],
         }
 
         range_trees = self.construct_range_trees(
-            pid_cache=None, inside_reduction=False, numels=groups, no_x_dim=False
+            pid_cache=None,
+            inside_reduction=False,
+            is_reduction=False,
+            numels=groups,
+            no_x_dim=False,
         )
         load_code = None
 
@@ -707,9 +714,12 @@ class TritonTemplateKernel(TritonKernel):
             )
             contiguous_index = self.rename_indexing(contiguous_index)
             self.body.writeline("xindex = " + texpr(contiguous_index))
-            self.range_trees[0].lookup(
+
+            xindex_range_root = self.range_trees[0].lookup(
                 sympy.Integer(1), sympy_product(lengths)
-            ).set_name("xindex")
+            )
+            xindex_range_root.set_name("xindex")
+            xindex_expr = xindex_range_root.expr
 
             # Note - ["None" override_mask]
             # MM Templates work by taking out of bounds index values and wrapping them around to 0
@@ -722,7 +732,7 @@ class TritonTemplateKernel(TritonKernel):
             self.template_out = "xindex"
             self.template_indices = indices
             self.named_input_nodes[input_name].data.freeze_layout()
-            self.cse.invalidate(set())
+            self.cse.invalidate(OrderedSet())
 
             template_mask = self.template_mask
 
@@ -742,14 +752,20 @@ class TritonTemplateKernel(TritonKernel):
                         # We load masked out values with 0, then apply a prologue.
                         # The masked out values may not necessariliy be 0 any more
                         # so we need to reapply the mask.
-                        # TODO: do analysis with value ranges if the prologue is 0 preserving, such as
-                        # type casting or multiplication, and omit reapplication of mask.
-                        if template_mask == "None":
-                            V.kernel.compute.writeline(f"{output_name} = {value}")
-                        else:
-                            V.kernel.compute.writeline(
-                                f"{output_name} = tl.where({template_mask}, {value}, {other})"
+                        value_dtype = value.dtype
+                        value_str = str(value)
+                        if template_mask != "None" and (
+                            name not in V.kernel.prologue_fused_inputs_preserve_zero
+                            or other != 0
+                        ):
+                            value_str = (
+                                f"tl.where({template_mask}, {value_str}, {other})"
                             )
+
+                        if value_dtype != V.graph.get_buffer(name).dtype:
+                            value_str = f"{value_str}.to({triton_type(V.graph.get_buffer(name).dtype)})"
+
+                        V.kernel.compute.writeline(f"{output_name} = {value_str}")
 
             self.ops_handler = StoreOutputSubstitution
 
@@ -767,13 +783,24 @@ class TritonTemplateKernel(TritonKernel):
                 )
 
             output_index = self.rename_indexing(output_index)
+
             if output_index == contiguous_index:
-                output_index = sympy.Symbol("xindex", integer=True)
+                output_index_str = "xindex"
             else:
-                output_index = f"({output_index}).broadcast_to(xindex.shape)"
+                out_indexing = self.indexing(
+                    output_index,
+                    copy_shape=self.template_out,
+                    override_mask=self.template_mask,
+                )
+                from .codegen.triton import IndexingOptions
+
+                assert isinstance(out_indexing, IndexingOptions)
+                output_index_str = (
+                    f"({out_indexing.index_str}).broadcast_to(xindex.shape)"
+                )
 
             # Generate load code
-            load_code = f"{output_name} = tl.load({input_name} + ({output_index})"
+            load_code = f"{output_name} = tl.load({input_name} + ({output_index_str})"
 
             if mask:
                 load_code += f", mask={mask}, other={other})"
@@ -784,9 +811,9 @@ class TritonTemplateKernel(TritonKernel):
 
         def hook():
             with self.set_subgraph_body(hook_key):
-                self.cse.invalidate(set())
+                self.cse.invalidate(OrderedSet())
                 self.codegen_body()
-                self.cse.invalidate(set())
+                self.cse.invalidate(OrderedSet())
                 if input_node.get_name() not in self.prologue_fused_inputs:
                     self.body.writeline(load_code)
 
@@ -870,7 +897,7 @@ class TritonTemplateKernel(TritonKernel):
         def hook():
             # more stuff might have been added since the codegen_body above
             self.codegen_body()
-            self.cse.invalidate(set())
+            self.cse.invalidate(OrderedSet())
 
             return textwrap.indent(self.body.getvalue(), " " * indent_width).strip()
 
@@ -964,6 +991,11 @@ class TritonTemplateKernel(TritonKernel):
                 name,
                 call_args,
                 grid=self.grid_fn(*grid),
+                # Calling self.grid_fn(*grid) already computes grid as a tuple,
+                # so we need to explicitly set grid_fn as empty here. Otherwise, the
+                # generated wrapper code will wrap the tuple as grid(tuple), which can
+                # cause incorrect grid computation in some corner cases.
+                grid_fn="",
                 arg_types=arg_types,
                 triton_meta=self.triton_meta,
             )
@@ -1738,7 +1770,11 @@ class AlgorithmSelectorCache(PersistentCache):
             return wait_on_futures
 
         def autotune(choices):
-            with dynamo_timed(f"{name}_template_autotuning"):
+            with dynamo_timed(
+                f"{name}_template_autotuning",
+                log_pt2_compile_event=True,
+                dynamo_compile_column_us="compile_time_autotune_time_us",
+            ):
                 return make_benchmark_fn()(choices)
 
         if config.autotune_in_subproc:
@@ -1749,7 +1785,11 @@ class AlgorithmSelectorCache(PersistentCache):
 
         def do_autotuning(precompile_fn):
             precompile_start_ts = time.time()
-            with dynamo_timed(f"{name}_template_precompiling"):
+            with dynamo_timed(
+                f"{name}_template_precompiling",
+                log_pt2_compile_event=True,
+                dynamo_compile_column_us="compile_time_autotune_time_us",
+            ):
                 precompile_fn()
             precompile_elapse = time.time() - precompile_start_ts
 
@@ -1836,7 +1876,6 @@ class AlgorithmSelectorCache(PersistentCache):
             return choices[0].output_node()
 
         selected_key = builtins.min(timings, key=timings.__getitem__)
-        selected_time = timings[selected_key]
         selected_choice = selected_key.output_node()
         log.debug("selected choice: %s", str(selected_choice))
         return selected_choice
