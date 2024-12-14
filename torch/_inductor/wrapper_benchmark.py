@@ -4,6 +4,7 @@ import datetime
 import tempfile
 from collections import defaultdict
 from enum import Enum
+from functools import cached_property
 
 import torch
 from torch.autograd import DeviceType
@@ -22,6 +23,11 @@ class KernelCategory(Enum):
     TEMPLATE = "template"
     UNKNOWN = "unknown"
 
+    @cached_property
+    def abbrev(self) -> str:
+        """Returns small string abbreviation for category"""
+        return self.value[:3]
+
     @classmethod
     def from_source_code(cls, src_code: str) -> "KernelCategory":
         """
@@ -39,13 +45,6 @@ class KernelCategory(Enum):
     def from_module(cls, kernel_mod) -> "KernelCategory":
         """
         Given the module defining a triton kernel, return the category of the kernel.
-        Category can be one of:
-        - pointwise
-        - reduction
-        - persistent_reduction
-        - foreach
-        - split_scan
-        - template
 
         Currently we simply decide the category depending on what decorator is imported
         by the kernel.
@@ -116,7 +115,7 @@ def benchmark_all_kernels(benchmark_name, benchmark_all_configs):
             )
 
         kernel_desc = (
-            f"{benchmark_name:20} {kernel_category.value[:3].upper()} {kernel_key[:10]}"
+            f"{benchmark_name:20} {kernel_category.abbrev.upper()} {kernel_key[:10]}"
         )
         if benchmark_all_configs:
             assert hasattr(kernel_mod, "benchmark_all_configs")

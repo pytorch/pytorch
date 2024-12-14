@@ -3716,17 +3716,19 @@ class TritonScheduling(SIMDScheduling):
                 else ""
             )
             kernel_category = KernelCategory.from_source_code(src_code)
-            if kernel_category == KernelCategory.TEMPLATE:
-                kernel_name = "_".join([kernel.kernel_name])
-            else:
-                kernel_name = "_".join(
-                    [
-                        "triton",
-                        kernel_category.value[:3],
-                        fused_name,
-                        wrapper.next_kernel_suffix(),
-                    ]
-                )
+            fused_name = (
+                kernel.kernel_name
+                if kernel_category == KernelCategory.TEMPLATE
+                else fused_name
+            )
+            kernel_name = "_".join(
+                [
+                    "triton",
+                    kernel_category.abbrev,
+                    fused_name,
+                    wrapper.next_kernel_suffix(),
+                ]
+            )
             # use the original src_code as the key
             wrapper.src_to_kernel[src_code] = kernel_name
             subs_name = kernel_name if config.triton.unique_kernel_names else "triton_"
