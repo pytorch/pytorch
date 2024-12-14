@@ -122,12 +122,6 @@ class SharedResource:
             self._data_errors.clear()
         return copy_data, copy_errors
 
-    def peek(self) -> None:
-        with self._lock:
-            print(
-                f"data list size: {len(self._data_list)}, error list size: {len(self._data_errors)}"
-            )
-
     def add_data(self, data: UsageData) -> None:
         with self._lock:
             self._data_list.append(data)
@@ -135,7 +129,6 @@ class SharedResource:
     def add_error(self, error: Exception) -> None:
         with self._lock:
             self._data_errors.append(str(error))
-
 
 class UsageLogger:
     """
@@ -309,9 +302,6 @@ class UsageLogger:
                 gpu_utilization[gpu.uuid].append(gpu.utilization)
 
         for gpu_uuid in gpu_utilization.keys():
-            if not gpu_utilization[gpu_uuid] or not gpu_mem_utilization[gpu_uuid]:
-                continue
-
             max_gpu_utilization = max(gpu_utilization[gpu_uuid])
             max_gpu_mem_utilization = max(gpu_mem_utilization[gpu_uuid])
             total_gpu = sum(gpu_utilization[gpu_uuid])
