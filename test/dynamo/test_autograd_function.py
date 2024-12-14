@@ -760,7 +760,7 @@ class GraphModule(torch.nn.Module):
             def backward(ctx, gO):
                 return torch.tensor(float("nan")).expand(10, 10)
 
-        def run_fn(a):
+        def run_fn(a):  # noqa: F841
             out = MyFunc2.apply(a)
             return out.sum()
 
@@ -837,11 +837,11 @@ class GraphModule(torch.nn.Module):
 
             x = torch.randn(5, 5, requires_grad=True)
             y = torch.randn(5, 5, requires_grad=True)
-            q, p = Identity.apply(x, y)
+            Identity.apply(x, y)
 
             a = torch.rand(1, 2)
             b = torch.rand(1, requires_grad=True)
-            view_a = MyFn.apply(a)
+            MyFn.apply(a)
 
             a = torch.ones(2, requires_grad=True)
             b = torch.ones(2, requires_grad=True)
@@ -860,7 +860,7 @@ class GraphModule(torch.nn.Module):
             MyFn2.apply(c, d)
 
             base = torch.rand(10, requires_grad=True)
-            foo = MyFn3.apply(base, False)
+            MyFn3.apply(base, False)
 
         test()
         opt_test = torch.compile(test, backend="eager")
