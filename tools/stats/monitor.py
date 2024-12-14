@@ -34,12 +34,10 @@ class UsageData:
     """
     Dataclass for storing usage data.
     """
-
-    cpu_percent: float
-    memory_percent: float
-    processes: list[dict[str, Any]]
-    gpu_list: list[GpuData]
-
+    cpu_percent: float = 0.0
+    memory_percent: float = 0.0
+    processes: list[dict[str, Any]] = []
+    gpu_list: list[GpuData] = []
 
 @dataclasses.dataclass
 class GpuData:
@@ -90,7 +88,7 @@ def parse_args() -> argparse.Namespace:
         "--data-collect-interval",
         type=float,
         default=0.5,
-        help="set time interval for logging utilization data, default is 5 seconds",
+        help="set time interval to collect data, default is 0.5 second, this should not longer than log_interval",
     )
     args = parser.parse_args()
     return args
@@ -156,7 +154,6 @@ class UsageLogger:
                 )
                 if self._debug_mode:
                     print(f"collecting data {data}")
-
                 with self.lock:
                     self.data_list.append(data)
             except Exception as e:
@@ -164,7 +161,7 @@ class UsageLogger:
             finally:
                 time.sleep(self._data_collect_interval)
 
-    def _ouput_data(self) -> None:
+    def _output_data(self) -> None:
         """
         output the data.
         """
@@ -179,7 +176,7 @@ class UsageLogger:
                     if self._debug_mode:
                         print("collected:", len(self.data_list))
 
-                    if not self.data_list or len(self.data_list) < 1:
+                    if not self.data_list:
                         continue
 
                     # record timestamp
@@ -305,7 +302,7 @@ class UsageLogger:
     def start(self) -> None:
         collect_thread = threading.Thread(target=self._collect_data)
         collect_thread.start()
-        self._ouput_data()
+        self._output_data()
         collect_thread.join()
 
     def stop(self, *args: Any) -> None:
