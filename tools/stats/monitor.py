@@ -160,7 +160,6 @@ class UsageLogger:
             except Exception as e:
                 self._add_error(e)
             finally:
-                count+=1
                 time.sleep(self._data_collect_interval)
 
     def _add_data(self, data):
