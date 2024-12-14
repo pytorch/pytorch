@@ -20,6 +20,7 @@ from typing import (
     NoReturn,
     Optional,
     Set,
+    TYPE_CHECKING,
     TypeVar,
     Union,
 )
@@ -38,7 +39,7 @@ T = TypeVar("T", bound=Union[int, float, bool, None, str, list, set, tuple, dict
 
 
 @dataclass
-class Config(Generic[T]):
+class _Config(Generic[T]):
     """Represents a config with richer behaviour than just a default value.
     ::
         i.e.
@@ -96,6 +97,33 @@ class Config(Generic[T]):
             ), f"justknobs only support booleans, {self.default} is not a boolean"
 
 
+# In runtime, we unbox the Config[T] to a T, but typechecker cannot see this,
+# so in order to allow for this dynamic behavior to work correctly with
+# typechecking we are going to lie to the typechecker that Config[T] returns
+# a T.
+if TYPE_CHECKING:
+
+    def Config(
+        default: T,
+        justknob: Optional[str] = None,
+        env_name_default: Optional[str] = None,
+        env_name_force: Optional[str] = None,
+        value_type: Optional[type] = None,
+    ) -> T:
+        ...
+
+else:
+
+    def Config(
+        default: T,
+        justknob: Optional[str] = None,
+        env_name_default: Optional[str] = None,
+        env_name_force: Optional[str] = None,
+        value_type: Optional[type] = None,
+    ) -> _Config[T]:
+        return _Config(default, justknob, env_name_default, env_name_force, value_type)
+
+
 def _read_env_variable(name: str) -> Optional[bool]:
     value = os.environ.get(name)
     if value == "1":
@@ -132,7 +160,7 @@ def install_config_module(module: ModuleType) -> None:
                 or isinstance(value, (ModuleType, FunctionType))
                 or (hasattr(value, "__module__") and value.__module__ == "typing")
                 # Handle from torch.utils._config_module import Config
-                or (isinstance(value, type) and issubclass(value, Config))
+                or (isinstance(value, type) and issubclass(value, _Config))
             ):
                 continue
 
@@ -140,11 +168,11 @@ def install_config_module(module: ModuleType) -> None:
             if isinstance(value, CONFIG_TYPES):
                 annotated_type = type_hints.get(key, None)
                 config[name] = _ConfigEntry(
-                    Config(default=value, value_type=annotated_type)
+                    _Config(default=value, value_type=annotated_type)
                 )
                 if dest is module:
                     delattr(module, key)
-            elif isinstance(value, Config):
+            elif isinstance(value, _Config):
                 config[name] = _ConfigEntry(value)
 
                 if dest is module:
@@ -245,7 +273,7 @@ class _ConfigEntry:
     # upstream bug - python/cpython#126886
     hide: bool = False
 
-    def __init__(self, config: Config):
+    def __init__(self, config: _Config):
         self.default = config.default
         self.value_type = (
             config.value_type if config.value_type is not None else type(self.default)
