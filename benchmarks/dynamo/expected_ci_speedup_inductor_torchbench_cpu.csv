@@ -7,7 +7,7 @@ resnet50,inductor,float32,dynamic,default,1.67742767
 #timm_efficientnet,inductor,float32,static,cpp,
 mobilenet_v3_large,inductor,float32,static,cpp,2.63311706
 timm_resnest,inductor,float32,dynamic,cpp,1.7321529
-functorch_maml_omniglot,inductor,float32,dynamic,cpp,1.17617472
+functorch_maml_omniglot,inductor,float32,dynamic,cpp,1.126799
 #hf_GPT2,inductor,float32,dynamic,cpp,
 yolov3,export-aot-inductor,float32,static,default,1.40687424
 mobilenet_v2,export-aot-inductor,float32,static,default,2.90375357

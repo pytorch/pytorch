@@ -7,8 +7,7 @@
 
 #include <c10/macros/Macros.h>
 
-namespace at {
-namespace native {
+namespace at::native {
 
 using namespace at::cuda::detail;
 
@@ -260,5 +259,4 @@ void col2vol(
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native

@@ -13,7 +13,6 @@
 #include <optional>
 
 #include <memory>
-#include <optional>
 #include <vector>
 
 namespace torch::jit {
@@ -37,7 +36,7 @@ struct PyNode : public Node {
   variable_list apply(variable_list&& inputs) override;
   variable_list defer_to_dynamo(
       variable_list&& inputs,
-      std::optional<PyObject*> compiler);
+      const std::optional<PyObject*>& compiler);
 
   void release_variables() override;
   std::string name() const override;
@@ -95,7 +94,7 @@ inline bool ensure_tuple(THPObjectPtr& obj) {
 struct THPFunction {
   PyObject_HEAD
 
-      PyObject* needs_input_grad;
+  PyObject* needs_input_grad;
 
   // Python tuple of tensors whose variables we should save.  Set
   // by Python with 'save_for_backward'.  If nullptr, no tensors were

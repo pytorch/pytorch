@@ -136,7 +136,7 @@ def _low_precision_hook(
     prec: torch.dtype,
     state: LowPrecisionState,
     grad: torch.Tensor,
-    output: torch.Tensor,
+    output: Optional[torch.Tensor],
 ):
     if grad.dtype != prec:
         grad.data = grad.data.to(prec)

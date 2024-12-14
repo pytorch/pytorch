@@ -33,6 +33,7 @@ def efficient_conv_bn_eval(
     """
 
     assert bn.running_var is not None
+    assert bn.running_mean is not None
 
     # These lines of code are designed to deal with various cases
     # like bn without affine transform, and conv without bias

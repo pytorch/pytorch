@@ -66,7 +66,7 @@ void ArgumentSpecCreator::scan(
   } else {
     instructions_.emplace_back(SKIP);
   }
-};
+}
 
 // this is a coarse-grained guarantee that the slots of a class will not be
 // modified by the function. It works fine for things that used be read-only

@@ -126,6 +126,10 @@ MobileBertForQuestionAnswering,pass,0
 
 
 
+OPTForCausalLM,pass,0
+
+
+
 PLBartForCausalLM,pass,0
 
 

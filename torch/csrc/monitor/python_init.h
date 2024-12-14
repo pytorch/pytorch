@@ -2,10 +2,8 @@
 
 #include <torch/csrc/utils/pybind.h>
 
-namespace torch {
-namespace monitor {
+namespace torch::monitor {
 
 void initMonitorBindings(PyObject* module);
 
 }
-} // namespace torch

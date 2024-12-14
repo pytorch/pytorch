@@ -2,7 +2,9 @@
 
 This is mostly string manipulation, with just a bit of importlib magic.
 """
+
 # mypy: ignore-errors
+
 import importlib.abc
 import importlib.util
 import itertools as it

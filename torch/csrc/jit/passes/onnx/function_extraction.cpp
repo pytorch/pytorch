@@ -2,9 +2,7 @@
 #include <torch/csrc/jit/passes/onnx/function_extraction.h>
 #include <torch/csrc/jit/passes/onnx/naming.h>
 
-namespace torch {
-namespace jit {
-namespace onnx {
+namespace torch::jit::onnx {
 
 namespace {
 
@@ -75,9 +73,9 @@ struct FunctionExtractor {
   using FunctionCtxPtr = FunctionContext*;
   using func_ctx_map = std::unordered_map<ScopePtr, FunctionCtxPtr>;
 
-  static bool IsValidScope(ScopePtr s);
+  static bool IsValidScope(const ScopePtr& s);
   static std::optional<ScopePtr> InferScope(Node* n);
-  static bool IsAncestor(ScopePtr parent, ScopePtr child);
+  static bool IsAncestor(const ScopePtr& parent, ScopePtr child);
   static std::optional<ScopePtr> FindCommonAncestor(ScopePtr a, ScopePtr b);
   static std::optional<ScopePtr> FindCommonAncestor(const scope_list& scopes);
   std::shared_ptr<Graph> ConstructFuncGraph(FunctionContext& ctx);
@@ -88,7 +86,9 @@ struct FunctionExtractor {
       scope_ctx_map& scope_ctxs,
       const std::shared_ptr<Graph>& graph);
 
-  static void HandleNoScopeNodes(scope_ctx_map&, node_list no_scope_nlist);
+  static void HandleNoScopeNodes(
+      scope_ctx_map&,
+      const node_list& no_scope_nlist);
   std::tuple<scope_ctx_map, node_list> PartitionNodesByScope(Block* b);
   scope_ctx_map PartitionNodesByScope(const std::shared_ptr<Graph>& graph);
   static std::unordered_map<ScopePtr, scope_list> PartitionIdenticalScopes(
@@ -279,11 +279,11 @@ void FunctionExtractor::DebugPrintGraphWithFunction(
   GRAPH_UPDATE("Main graph: ", g->toString());
 }
 
-bool FunctionExtractor::IsValidScope(ScopePtr s) {
+bool FunctionExtractor::IsValidScope(const ScopePtr& s) {
   return !s->isRoot() && !s->isBlank();
 }
 
-bool FunctionExtractor::IsAncestor(ScopePtr parent, ScopePtr child) {
+bool FunctionExtractor::IsAncestor(const ScopePtr& parent, ScopePtr child) {
   if (!IsValidScope(parent) || !IsValidScope(child) ||
       parent->getDepth() >= child->getDepth()) {
     return false;
@@ -376,7 +376,7 @@ std::optional<ScopePtr> FunctionExtractor::InferScope(Node* n) {
       std::all_of(
           output_scopes.begin(),
           output_scopes.end(),
-          [&output_scopes](ScopePtr scope) -> bool {
+          [&output_scopes](const ScopePtr& scope) -> bool {
             return IsValidScope(scope) && scope == output_scopes.at(0);
           })) {
     return output_scopes.at(0);
@@ -385,7 +385,7 @@ std::optional<ScopePtr> FunctionExtractor::InferScope(Node* n) {
       std::all_of(
           input_scopes.begin(),
           input_scopes.end(),
-          [&input_scopes](ScopePtr scope) -> bool {
+          [&input_scopes](const ScopePtr& scope) -> bool {
             return IsValidScope(scope) && scope == input_scopes.at(0);
           })) {
     return input_scopes.at(0);
@@ -822,7 +822,7 @@ void FunctionExtractor::ScopeContext::PopulateInputsOutputs(
 
 void FunctionExtractor::HandleNoScopeNodes(
     scope_ctx_map& scope_ctxs,
-    node_list no_scope_nlist) {
+    const node_list& no_scope_nlist) {
   GRAPH_UPDATE("No scope node count: ", no_scope_nlist.size());
   for (auto n : no_scope_nlist) {
     TORCH_WARN(
@@ -1181,6 +1181,4 @@ void ONNXTrackScopeAttributes(
   }
 }
 
-} // namespace onnx
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::onnx

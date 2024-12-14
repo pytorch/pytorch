@@ -342,7 +342,8 @@ inline TypedIValue toDictKeyIValue(py::handle key) {
   } else if (py::isinstance<py::float_>(key)) {
     return TypedIValue(py::cast<double>(key), FloatType::get());
   } else {
-    AT_ERROR("Dictionary inputs may only have string, int, or float keys");
+    TORCH_CHECK(
+        false, "Dictionary inputs may only have string, int, or float keys");
   }
 }
 
@@ -389,6 +390,9 @@ inline InferredType tryToInferType(py::handle input) {
     return InferredType(FloatType::get());
   } else if (PyComplex_CheckExact(input.ptr())) {
     return InferredType(ComplexType::get());
+  } else if (py::isinstance<py::bytes>(input)) {
+    // NOTE: We may need a ByteType in the future
+    return InferredType(StringType::get());
   } else if (py::isinstance<py::str>(input)) {
     return InferredType(StringType::get());
   } else if (THPLayout_Check(input.ptr())) {
@@ -634,7 +638,7 @@ inline InferredType tryToInferContainerType(
       // used from a bunch of circumstances unrelated to tracing. We can re-use
       // this instead of the attribute_failure stuff in concreteType
       return InferredType(c10::str(
-          "Only tensors and (possibly nested) tuples of tensors, lists, or dicts",
+          "Only tensors and (possibly nested) tuples of tensors, lists, or dicts ",
           "are supported ",
           "as inputs or outputs of traced functions",
           ", but instead got value of type ",
@@ -687,8 +691,12 @@ inline IValue toTypeInferredIValue(py::handle input) {
       return c10::intrusive_ptr<c10::ivalue::Object>::reclaim_copy(
           ptr.release());
     }
-    AT_ERROR(
-        "Tracer cannot infer type of ", py::str(input), "\n:", match.reason());
+    TORCH_CHECK(
+        false,
+        "Tracer cannot infer type of ",
+        py::str(input),
+        "\n:",
+        match.reason());
   }
   return toIValue(input, match.type());
 }
@@ -1073,7 +1081,11 @@ inline py::object createPyObjectForStack(Stack&& stack) {
     return_values[ret] = toPyObject(std::move(stack[ret]));
   }
 
+#if defined(__clang__)
   return std::move(return_values);
+#else
+  return return_values;
+#endif
 }
 
 // TODO: Remove once we clean up the GraphExecutor usage.
@@ -1082,9 +1094,10 @@ inline Stack evilDeprecatedBadCreateStackDoNotUse(
     at::ArrayRef<Value*> inputs,
     size_t reserve_extra_space = 0) {
   if (tuple.size() != inputs.size()) {
-    AT_ERROR(
+    TORCH_CHECK(
+        false,
         "expected " + std::to_string(inputs.size()) + " inputs, but got " +
-        std::to_string(tuple.size()));
+            std::to_string(tuple.size()));
   }
   Stack result;
   result.reserve(tuple.size() + reserve_extra_space);

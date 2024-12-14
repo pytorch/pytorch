@@ -6,8 +6,7 @@
 
 #include <utility>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 // Merges existing_type and inferred_type.
 // Returns {merged type, whether or not inferred_type was used}.
@@ -28,13 +27,13 @@ namespace jit {
 //    ONNX represents list of scalars by 1-d Tensor. Return inferred type since
 //    it is more compatible with ONNX.
 std::pair<TypePtr, bool> MergeInferredType(
-    TypePtr existing_type,
-    TypePtr inferred_type);
+    const TypePtr& existing_type,
+    const TypePtr& inferred_type);
 
 void MergeInferredTypeAndSetMap(
     Value* dest_v,
-    TypePtr existing_type,
-    TypePtr inferred_type);
+    const TypePtr& existing_type,
+    const TypePtr& inferred_type);
 
 // Update graph input types with dynamic axes info.
 // Axes that are marked as dynamic will be assigned as dynamic ShapeSymbol.
@@ -96,5 +95,4 @@ void UpdateReliable(
 void UpdateReliable(torch::jit::Node* n);
 void UpdateShapeConstantIfReliable(torch::jit::Value* output);
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

@@ -51,7 +51,7 @@ def _trace_and_get_graph_from_model(model, args):
     # No perf impact for when there are reused weights since https://github.com/pytorch/pytorch/pull/85665
     prev_autocast_cache_enabled = torch.is_autocast_cache_enabled()
     torch.set_autocast_cache_enabled(False)
-    trace_graph, torch_out, inputs_states = torch.jit._get_trace_graph(
+    trace_graph, torch_out, _inputs_states = torch.jit._get_trace_graph(
         model,
         args,
         strict=False,
@@ -161,7 +161,7 @@ def inplace_optimize_sym_size_div(gm: torch.fx.GraphModule):
         sym_size_int = torch.ops.aten.sym_size.int(im, dim)
         return sym_size_int // scale
 
-    replaced_patterns = subgraph_rewriter.replace_pattern(gm, pattern, replacement)
+    subgraph_rewriter.replace_pattern(gm, pattern, replacement)
 
 
 def is_valid_for_codegen(name):
@@ -260,7 +260,9 @@ def construct_fqn(ir, ref_map, name_map):
     return ".".join(reversed(name_list))
 
 
-def get_block_to_lifted_attrs(graph: torch._C.Graph) -> Dict[torch._C.Block, Set[str]]:
+def get_block_to_lifted_attrs(
+    graph: torch._C.Graph,
+) -> Tuple[Dict[torch._C.Block, Set[str]], Dict[str, str]]:
     """
     Perform two passes to get a mapping of blocks to a set of FQNs of its lifted attributes.
     When a graph has control flow, the graph will be divided into multiple blocks. We want to convert
@@ -272,7 +274,8 @@ def get_block_to_lifted_attrs(graph: torch._C.Graph) -> Dict[torch._C.Block, Set
         of the attributes used in the current block, and the lifted attributes of all its child blocks.
 
     Returns:
-        A mapping of blocks to a set of FQNs of its lifted attributes.
+        A mapping of blocks to a set of FQNs of its lifted attributes, and a
+        mapping of node names to the FQNs of its lifted attributes.
     """
 
     # A map from a block to its expected to be lifted arguments.
@@ -334,7 +337,7 @@ def get_block_to_lifted_attrs(graph: torch._C.Graph) -> Dict[torch._C.Block, Set
     _dfs_get_attr_dependency(graph)
     _map_blocks_to_lifted_attrs(graph)
 
-    return blocks_to_lifted_attrs
+    return blocks_to_lifted_attrs, node_to_attr_name
 
 
 def get_attribute_fqn_from_ts_node(
@@ -393,22 +396,28 @@ class TS2FXGraphConverter:
         blocks_to_lifted_attrs: Dict[torch._C.Block, Set[str]],
         name_to_non_tensor_attribute: Dict[str, Any],
         name_to_constant: Dict[str, Any],
+        name_to_attribute_fqn: Dict[str, str],
     ):
         self.ts_graph = ts_graph
+        # Mapping of parameter FQN to actual parameter value
         self.name_to_param = name_to_param
+        # Mapping of buffer FQN to actual buffer value
         self.name_to_buffer = name_to_buffer
 
         self.fx_graph: torch.fx.Graph = torch.fx.Graph()
         self.input_specs: List[InputSpec] = []
         self.output_specs: List[OutputSpec] = []
 
+        # Mapping of TS node name to converted FX node
         self.name_to_node: Dict[
             str, Union[torch.fx.Node, List[torch.fx.Node], Dict[Any, torch.fx.Node]]
         ] = {}
+        # Mapping of TS node name to constant value (int, str, TorchBind obj,
+        # tensor constants ...)
         self.name_to_constant: Dict[str, Any] = name_to_constant
 
         # Mapping from torchscript node output name to attribute fully qualified name
-        self.name_to_attribute_fqn: Dict[str, str] = {}
+        self.name_to_attribute_fqn: Dict[str, str] = name_to_attribute_fqn
 
         # Mapping from fully qualified name to real values or a fx graph node
         # During convert, this represents the current value of a non-tensor attribute
@@ -427,6 +436,8 @@ class TS2FXGraphConverter:
 
         self.subgraphs: Dict[str, torch.fx.GraphModule] = {}
 
+        # Mapping of block to list of attributes that need to be lifted for each
+        # block
         self.blocks_to_lifted_attrs = blocks_to_lifted_attrs
 
         # Populate methods for the standard operators.
@@ -467,8 +478,8 @@ class TS2FXGraphConverter:
                 self.blocks_to_lifted_attrs,
                 {},
                 self.name_to_constant,
+                self.name_to_attribute_fqn,
             )
-            subgraph_converter.name_to_attribute_fqn = self.name_to_attribute_fqn
 
             for block_arg in arguments:
                 normalized_block_arg_name = normalize_name(block_arg)
@@ -537,6 +548,8 @@ class TS2FXGraphConverter:
             if isinstance(self.name_to_constant[value_name], torch.ScriptObject):
                 return self.fx_graph.get_attr(value_name)
             return self.name_to_constant[value_name]
+        elif value_name in self.name_to_attribute_fqn:
+            return self.get_fx_value_by_fqn(self.name_to_attribute_fqn[value_name])
         else:
             raise ValueError(f"Input {value_name} not found")
 
@@ -820,9 +833,7 @@ class TS2FXGraphConverter:
         self._convert_prim_iterator(node)
 
     def _convert_prim_iterator(self, node: torch._C.Node):
-        output_list = []
-        for inp in node.inputs():
-            output_list.append(self.get_fx_value_by_ir_value(inp))
+        output_list = [self.get_fx_value_by_ir_value(inp) for inp in node.inputs()]
 
         output_name = node.output().debugName()
         self.name_to_node[output_name] = output_list
@@ -954,7 +965,7 @@ class TS2FXGraphConverter:
 
     def convert_aten_to(self, node: torch._C.Node):
         target = get_op_overload(node)
-        args, kwargs = self.get_args_kwargs(node, target._schema)
+        args, _kwargs = self.get_args_kwargs(node, target._schema)
 
         # special handle aten.to.dtype and aten.to.prim_dtype followed by inplace_mutation_op
         # coz aten.to + inplace_mutation_op pattern would trigger
@@ -1004,7 +1015,7 @@ class TS2FXGraphConverter:
         if target == torch.ops.aten.add.t:
             # special handle python list/tuple add: "aten::add.t(t[] a, t[] b) -> t[]" for
             # RuntimeError: aten::add() Expected a value of type 'List[t]' for argument 'a' but instead found type 'immutable_list'.
-            args, kwargs = self.get_args_kwargs(node, target._schema)
+            args, _kwargs = self.get_args_kwargs(node, target._schema)
             output_name = node.output().debugName()
             self.name_to_node[output_name] = self.fx_graph.call_function(list_add, args)
         else:
@@ -1185,7 +1196,7 @@ class TS2FXGraphConverter:
         target = get_op_overload(node)
         schema = target._schema
 
-        args, kwargs = self.get_args_kwargs(node, schema)
+        args, _kwargs = self.get_args_kwargs(node, schema)
 
         output_name = node.output().debugName()
         self.name_to_node[output_name] = args[0]
@@ -1325,6 +1336,7 @@ class ExplainTS2FXGraphConverter(TS2FXGraphConverter):
         blocks_to_lifted_attrs: Dict[torch._C.Block, Set[str]],
         name_to_non_tensor_attribute: Dict[str, Any],
         name_to_constant: Dict[str, Any],
+        name_to_attribute_fqn: Dict[str, str],
     ):
         super().__init__(
             ts_graph,
@@ -1333,6 +1345,7 @@ class ExplainTS2FXGraphConverter(TS2FXGraphConverter):
             blocks_to_lifted_attrs,
             name_to_non_tensor_attribute,
             name_to_constant,
+            name_to_attribute_fqn,
         )
 
         # Data to keep track of unsupported nodes.
@@ -1361,7 +1374,7 @@ class ExplainTS2FXGraphConverter(TS2FXGraphConverter):
     def convert_node(self, node):
         try:
             super().convert_node(node)
-        except Exception as e:
+        except Exception:
             self.unsupported_node_list.append(node)
 
 
@@ -1427,7 +1440,9 @@ DEBUG: (TORCH_LOGS="+export" <cmd>), additionally
         )
         log.info("TorchScript graph\n\n%s\n", self.ts_graph)
 
-        blocks_to_lifted_attrs = get_block_to_lifted_attrs(self.ts_graph)
+        blocks_to_lifted_attrs, name_to_attribute_fqn = get_block_to_lifted_attrs(
+            self.ts_graph
+        )
 
         graph_converter = TS2FXGraphConverter(
             self.ts_graph,
@@ -1436,6 +1451,7 @@ DEBUG: (TORCH_LOGS="+export" <cmd>), additionally
             blocks_to_lifted_attrs,
             self.name_to_non_tensor_attributes,
             self.name_to_constant,
+            name_to_attribute_fqn,
         )
         gm = graph_converter.convert()
 
@@ -1464,7 +1480,9 @@ DEBUG: (TORCH_LOGS="+export" <cmd>), additionally
 
     @disable_logging(log)
     def explain(self, print_output=True):
-        blocks_to_lifted_attrs = get_block_to_lifted_attrs(self.ts_graph)
+        blocks_to_lifted_attrs, name_to_attribute_fqn = get_block_to_lifted_attrs(
+            self.ts_graph
+        )
 
         graph_converter = ExplainTS2FXGraphConverter(
             self.ts_graph,
@@ -1473,6 +1491,7 @@ DEBUG: (TORCH_LOGS="+export" <cmd>), additionally
             blocks_to_lifted_attrs,
             self.name_to_non_tensor_attributes,
             self.name_to_constant,
+            name_to_attribute_fqn,
         )
         graph_converter.explain()
         if len(graph_converter.unsupported_node_list) > 0:
@@ -1513,7 +1532,7 @@ DEBUG: (TORCH_LOGS="+export" <cmd>), additionally
         for k in name_to_constant:
             ep.state_dict.pop(k, None)
 
-        for i, spec in enumerate(ep.graph_signature.input_specs):
+        for spec in ep.graph_signature.input_specs:
             # Mark as constant tensors for erroneously traced buffers.
             if spec.kind == InputKind.BUFFER and spec.target in name_to_constant:
                 assert isinstance(

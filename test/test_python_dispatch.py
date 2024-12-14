@@ -201,6 +201,28 @@ class TestPythonRegistration(TestCase):
             self.assertEqual(c, a + b)
             self.assertTrue(is_called)
 
+    def test_fallthrough_for_dense_key_with_meta_in_tls(self) -> None:
+        # This tests that if meta is included in TlS dispatch key set,
+        # then a meta kernel should be called regardless if a dense
+        # backend has a fallthrough kernel
+
+        a = torch.randn((3, 3))
+        with _scoped_library("custom", "DEF") as my_lib:
+            my_lib.define("sum(Tensor self) -> Tensor")
+            meta_is_called = False
+
+            def sum_meta(*args, **kwargs):
+                nonlocal meta_is_called
+                meta_is_called = True
+                return args[0]
+
+            my_lib.impl("sum", fallthrough_kernel, "CPU")
+            my_lib.impl("sum", sum_meta, "Meta")
+
+            with torch._C._IncludeDispatchKeyGuard(torch.DispatchKey.Meta):
+                torch.ops.custom.sum.default(a)
+                self.assertTrue(meta_is_called)
+
     def test_override_aten_ops_with_multiple_libraries(self) -> None:
         x = torch.tensor([1, 2])
         with _scoped_library("aten", "IMPL") as my_lib2:
@@ -1793,6 +1815,23 @@ $0: f32[] = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), p
         with self.assertRaises(AssertionError):
             self.assertEqual(x, None)
 
+    # See https://github.com/pytorch/pytorch/issues/136064
+    def test_view_returns_alias_under_torch_dispatch(self):
+        class MyMode(TorchDispatchMode):
+            def __init__(self, testcase):
+                self.testcase = testcase
+
+            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                out = func(*args, **kwargs)
+                if func == torch.ops.aten.view.dtype:
+                    # view should return a fresh TensorImpl
+                    self.testcase.assertTrue(out is not args[0])
+                return out
+
+        with MyMode(self):
+            x = torch.ones(4, dtype=torch.float32)
+            out = x.view(torch.float32)
+
     def test_record_stream(self) -> None:
         class TestMode(TorchDispatchMode):
             def __init__(self, testcase):
@@ -2578,6 +2617,28 @@ def forward(self, x_1):
             e = LayoutDefaultReturn(torch.randn(4, 2), use_wrapper_subclass)
             self.assertEqual(e.layout, torch.strided)
 
+    def test_wrapper_subclass_reentrant_dispatch_with_mode(self):
+        # Tests the interaction between a wrapper subclass using reentrant dispatch
+        # and a TorchDispatchMode. See https://github.com/pytorch/pytorch/issues/136565
+
+        # simple passthrough TorchDispatchMode
+        class CustomDispatchMode(TorchDispatchMode):
+            def __torch_dispatch__(self, func, types, args=..., kwargs=None):
+                return func(*args, **kwargs)
+
+        # derive from TwoTensor to minimize boilerplate
+        class MySubclass(TwoTensor):
+            def __torch_dispatch__(self, func, types, args, kwargs=None):
+                with torch.overrides.enable_reentrant_dispatch():
+                    return func(args[0].a)
+
+        t = MySubclass(torch.rand(2), torch.rand(2))
+        with CustomDispatchMode():
+            res = t.clone()
+
+        self.assertEqual(res, t.a)
+        self.assertIs(type(res), torch.Tensor)
+
 
 class TestPythonDispatcher(TestCase):
     def test_basic(self):
@@ -2700,6 +2761,15 @@ class TestWrapperSubclassAliasing(TestCase):
         args = (torch.ones(4), torch.ones(4))
         kwargs = {"out": torch.empty(4)}
         self._test_wrapper_subclass_aliasing(torch.ops.aten.add.out, args, kwargs)
+
+    def test_wrapper_subclass_aliasing_fft_fft2(self, device):
+        args = (torch.randn(4, 4),)
+        kwargs = {}
+        # fft_fft2 has a default arg 'int[1] dim=[-2,-1]',
+        # Make sure that _return_and_correct_aliasing can handle this case
+        # (I'm using inference_mode to make sure fft_fft2 doesn't decompose and goes to torch_dispatch)
+        with torch.inference_mode():
+            self._test_wrapper_subclass_aliasing(torch.ops.aten.fft_fft2, args, kwargs)
 
 
 instantiate_device_type_tests(TestWrapperSubclassAliasing, globals())

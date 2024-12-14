@@ -6,6 +6,7 @@ from functools import partial, wraps
 from typing import Sequence
 
 import numpy as np
+import numpy.typing as npt
 
 import torch
 from torch.testing._internal.common_cuda import TEST_CUDA
@@ -85,7 +86,7 @@ def get_supported_dtypes(op, sample_inputs_fn, device_type):
         for sample in samples:
             try:
                 op(sample.input, *sample.args, **sample.kwargs)
-            except RuntimeError as re:
+            except RuntimeError:
                 # dtype is not supported
                 supported = False
                 break
@@ -206,7 +207,7 @@ def reference_reduction_numpy(f, supports_keepdims=True):
     """
 
     @wraps(f)
-    def wrapper(x: np.ndarray, *args, **kwargs):
+    def wrapper(x: npt.NDArray, *args, **kwargs):
         # Copy keys into a set
         keys = set(kwargs.keys())
 

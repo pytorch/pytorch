@@ -68,10 +68,10 @@
 
 @synthesize kernel = _kernel;
 
-+ (MPSCNNConvOp*)conv2d:(const Conv2DParams&)params
++ (MPSCNNConvOp*)conv2d:(const at::native::metal::Conv2DParams&)params
                 weights:(float*)w
                    bias:(float*)b
-           neuronFilter:(NeuronType)t API_AVAILABLE(ios(11.0), macos(10.13)) {
+           neuronFilter:(at::native::metal::NeuronType)t API_AVAILABLE(ios(11.0), macos(10.13)) {
   using namespace at::native::metal::mpscnn;
   TORCH_CHECK(
       params.DX == params.DY == 1, "Dilated convolution is not supported yet.");

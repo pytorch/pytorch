@@ -10,7 +10,7 @@ import unittest
 from typing import Callable
 
 import torch
-from torch._utils_internal import get_file_path_2
+from torch._utils_internal import get_file_path_2  # @manual
 from torch.testing._internal.common_utils import (
     IS_JETSON,
     IS_MACOS,
@@ -278,8 +278,6 @@ class TestPublicBindings(TestCase):
         for mod in pkgutil.walk_packages(torch.__path__, "torch.", onerror=onerror):
             modname = mod.name
             try:
-                # TODO: fix "torch/utils/model_dump/__main__.py"
-                # which calls sys.exit() when we try to import it
                 if "__main__" in modname:
                     continue
                 importlib.import_module(modname)

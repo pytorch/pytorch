@@ -172,7 +172,7 @@ class DTensorPlanner(DTensorTestBase):
             )
         """
 
-        dist_cp.save_state_dict(
+        dist_cp.save(
             state_dict=state_dict,
             storage_writer=dist_cp.FileSystemWriter(path=CHECKPOINT_DIR),
             planner=dist_cp.DefaultSavePlanner(),
@@ -224,7 +224,7 @@ class DTensorPlanner(DTensorTestBase):
             )
         """
 
-        dist_cp.load_state_dict(
+        dist_cp.load(
             state_dict=state_dict,
             storage_reader=dist_cp.FileSystemReader(CHECKPOINT_DIR),
             planner=dist_cp.DefaultLoadPlanner(),

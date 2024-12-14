@@ -11,12 +11,16 @@ import logging
 import os
 import tempfile
 import textwrap
+import warnings
 from typing import Callable, Sequence, TYPE_CHECKING
 
 import torch
 from torch.onnx._internal._lazy_import import onnx, onnxscript_apis, onnxscript_ir as ir
 from torch.utils import _pytree
 
+
+# NOTE: DO NOT import module from torch.onnx._internal to this module in the global scope
+# because ONNXProgram is exposed to the public API
 
 if TYPE_CHECKING:
     import onnxruntime as ort
@@ -107,8 +111,16 @@ ONNXProgram(
 
     @property
     def model_proto(self) -> onnx.ModelProto:
-        """Compatibility property for `torch.onnx.ONNXProgram.model_proto`."""
+        """Return the ONNX ``ModelProto`` object."""
         return ir.serde.serialize_model(self.model)
+
+    def optimize(self) -> None:
+        """Optimize the ONNX model.
+
+        This method optimizes the ONNX model by performing constant folding and
+        eliminating redundancies in the graph. The optimization is done in-place.
+        """
+        self.model = onnxscript_apis.optimize(self.model)
 
     def save(
         self,
@@ -117,12 +129,27 @@ ONNXProgram(
         include_initializers: bool = True,
         keep_initializers_as_inputs: bool = False,
         external_data: bool | None = None,
-        **_,
     ):
         """Save the ONNX model to the specified destination.
 
-        When `external_data` is `True` or the model is larger than 2GB,
+        When ``external_data`` is ``True`` or the model is larger than 2GB,
         the weights are saved as external data in a separate file.
+
+        Initializer (model weights) serialization behaviors:
+        * ``include_initializers=True``, ``keep_initializers_as_inputs=False`` (default):
+        The initializers are included in the saved model.
+        * ``include_initializers=True``, ``keep_initializers_as_inputs=True``:
+        The initializers are included in the saved model and kept as model inputs.
+        Choose this option if you want the ability to override the model weights
+        during inference.
+        * ``include_initializers=False``, ``keep_initializers_as_inputs=False``:
+        The initializers are not included in the saved model and are not listed
+        as model inputs. Choose this option if you want to attach the initializers
+        to the ONNX model in a separate, post-processing, step.
+        * ``include_initializers=False``, ``keep_initializers_as_inputs=True``:
+        The initializers are not included in the saved model but are listed as model
+        inputs. Choose this option if you want to supply the initializers during
+        inference and want to minimize the size of the saved model.
 
         Args:
             destination: The path to save the ONNX model to.
@@ -133,7 +160,7 @@ ONNXProgram(
             external_data: Whether to save the weights as external data in a separate file.
 
         Raises:
-            TypeError: If `external_data` is `True` and `destination` is not a file path.
+            TypeError: If ``external_data`` is ``True`` and ``destination`` is not a file path.
         """
         original_initializers = copy.copy(self.model.graph.initializers)
         original_inputs = copy.copy(self.model.graph.inputs)
@@ -142,7 +169,7 @@ ONNXProgram(
         if not include_initializers:
             self.model.graph.initializers.clear()
         if keep_initializers_as_inputs:
-            self.model.graph.inputs.extend(self.model.graph.initializers.values())  # type: ignore[arg-type]
+            self.model.graph.inputs.extend(original_initializers.values())  # type: ignore[arg-type]
 
         # Save the model to disk
         if (
@@ -159,6 +186,28 @@ ONNXProgram(
         if keep_initializers_as_inputs:
             self.model.graph.inputs.clear()
             self.model.graph.inputs.extend(original_inputs)
+
+    def apply_weights(self, state_dict: dict[str, torch.Tensor]) -> None:
+        """Apply the weights from the specified state dict to the ONNX model.
+
+        Use this method to replace FakeTensors or other weights.
+
+        Args:
+            state_dict: The state dict containing the weights to apply to the ONNX model.
+        """
+        from torch.onnx._internal.exporter import _core
+
+        for name, tensor in state_dict.items():
+            if name in self.model.graph.initializers:
+                self.model.graph.initializers[name].const_value = _core.TorchTensor(
+                    tensor, name
+                )
+            else:
+                warnings.warn(
+                    f"Weight '{name}' not found in the model. Skipped applying.",
+                    category=torch.onnx.errors.OnnxExporterWarning,
+                    stacklevel=1,
+                )
 
     def initialize_inference_session(
         self,

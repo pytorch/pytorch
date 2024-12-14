@@ -8,8 +8,7 @@
 
 #include <torch/csrc/Export.h>
 
-namespace torch {
-namespace nn {
+namespace torch::nn {
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ELU ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -852,7 +851,7 @@ class TORCH_API MultiheadAttentionImpl
   /// The options with which this `Module` was constructed.
   MultiheadAttentionOptions options;
 
-  bool _qkv_same_embed_dim;
+  bool _qkv_same_embed_dim{};
   Tensor in_proj_weight;
   Tensor in_proj_bias;
   Tensor bias_k;
@@ -861,7 +860,7 @@ class TORCH_API MultiheadAttentionImpl
   Tensor q_proj_weight;
   Tensor k_proj_weight;
   Tensor v_proj_weight;
-  int64_t head_dim;
+  int64_t head_dim{};
 };
 
 /// A `ModuleHolder` subclass for `MultiheadAttentionImpl`.
@@ -871,5 +870,4 @@ class TORCH_API MultiheadAttentionImpl
 /// `ModuleHolder` to learn about PyTorch's module storage semantics.
 TORCH_MODULE(MultiheadAttention);
 
-} // namespace nn
-} // namespace torch
+} // namespace torch::nn
