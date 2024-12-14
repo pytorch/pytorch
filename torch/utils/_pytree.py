@@ -115,8 +115,8 @@ class KeyEntry(Protocol):
 class EnumEncoder(json.JSONEncoder):
     def default(self, obj: object) -> str:
         if isinstance(obj, Enum):
-            return obj.value
-        return super().default(obj)
+            return obj.value  # type: ignore[no-any-return, unused-ignore]
+        return super().default(obj)  # type: ignore[no-any-return, unused-ignore]
 
 
 Context = Any
@@ -1090,7 +1090,7 @@ def map_only(
     ):
 
         def pred(x: Any) -> bool:
-            return isinstance(x, __type_or_types_or_pred)
+            return isinstance(x, __type_or_types_or_pred)  # type: ignore[arg-type, unused-ignore]
 
     elif callable(__type_or_types_or_pred):
         pred = __type_or_types_or_pred  # type: ignore[assignment]

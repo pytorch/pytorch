@@ -623,7 +623,7 @@ def map_only(
     ):
 
         def pred(x: Any) -> bool:
-            return isinstance(x, __type_or_types_or_pred)
+            return isinstance(x, __type_or_types_or_pred)  # type: ignore[arg-type, unused-ignore]
 
     elif callable(__type_or_types_or_pred):
         pred = __type_or_types_or_pred  # type: ignore[assignment]
