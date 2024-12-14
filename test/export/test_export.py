@@ -5097,7 +5097,7 @@ def forward(self, x):
                 torch._check(pos <= 4)
                 return self.freq[pos] * self.freq[pos]
 
-        ep = torch.export.export(M(), (torch.tensor(1),))
+        ep = export(M(), (torch.tensor(1),))
         FileCheck().check_count(
             "torch.ops.aten._assert_scalar.default", 2, exactly=True
         ).run(ep.graph_module.code)
