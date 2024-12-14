@@ -14,16 +14,18 @@ Usage:
 
 from __future__ import annotations
 
-from collections import defaultdict
-import dataclasses
-import threading
 import argparse
+import dataclasses
 import datetime
 import json
 import signal
+import threading
 import time
+from collections import defaultdict
 from typing import Any
+
 import psutil  # type: ignore[import]
+
 
 _HAS_PYNVML = False
 _HAS_AMDSMI = False
@@ -34,10 +36,12 @@ class UsageData:
     """
     Dataclass for storing usage data.
     """
+
     cpu_percent: float
     memory_percent: float
     processes: list[dict[str, Any]]
     gpu_list: list[GpuData]
+
 
 @dataclasses.dataclass
 class GpuData:
@@ -98,8 +102,8 @@ class UsageLogger:
     """
     Collect and display usage data, including:
     CPU, memory, GPU memory utilization, and GPU utilization.
-    two thread workers are used, one collect the data every data_collect_interval (in seconds), and other aggregate and output the data every log_interval (in seconds).
-    By default, data is collected every 0.5 seconds, and output every 5 seconds.
+    By default, data is collected every 0.5 seconds, and output
+    the aggregated json log every 5 seconds.
     """
 
     def __init__(
@@ -162,10 +166,11 @@ class UsageLogger:
             finally:
                 time.sleep(self._data_collect_interval)
 
-    def _add_data(self, data):
+    def _add_data(self, data: UsageData) -> None:
         with self.lock:
             self.data_list.append(data)
-    def _add_error(self, error):
+
+    def _add_error(self, error: Exception) -> None:
         with self.lock:
             self.data_errors.append(str(error))
 
@@ -186,9 +191,11 @@ class UsageLogger:
 
                     # if no data is collected and has more than one error during collect interval, log the errors
                     if not self.data_list and len(self.data_errors) > 1:
-                        errors  = ",".join(set(self.data_errors))
+                        errors = ",".join(set(self.data_errors))
                         self.data_errors.clear()
-                        raise ValueError(f"no data is collected but detected multiple errors: [{errors}]")
+                        raise ValueError(
+                            f"no data is collected but detected multiple errors: [{errors}]"
+                        )
 
                     if not self.data_list:
                         continue
@@ -299,12 +306,12 @@ class UsageLogger:
                 {
                     "uuid": gpu_uuid,
                     "util_percent": {
-                        "nums":len(gpu_utilization[gpu_uuid]),
+                        "count": len(gpu_utilization[gpu_uuid]),
                         "avg": round(avg_gpu_utilization, 2),
                         "max": round(max_gpu_utilization, 2),
                     },
                     "mem_util_percent": {
-                        "nums":len(gpu_mem_utilization[gpu_uuid]),
+                        "count": len(gpu_mem_utilization[gpu_uuid]),
                         "avg": round(avg_gpu_mem_utilization, 2),
                         "max": round(max_gpu_mem_utilization, 2),
                     },
@@ -358,9 +365,9 @@ class UsageLogger:
                 gpu_mem_utilization = gpu_utilization["umc_activity"]
                 gpu_data_list.append(
                     GpuData(
-                       uuid=gpu_uuid,
-                       utilization= gpu_utilization,
-                       mem_utilization= gpu_mem_utilization,
+                        uuid=gpu_uuid,
+                        utilization=gpu_utilization,
+                        mem_utilization=gpu_mem_utilization,
                     )
                 )
         return gpu_data_list
