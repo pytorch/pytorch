@@ -800,13 +800,15 @@ class FSDPParam:
     @property
     def shard_mesh_from_root(self):
         mesh = self.mesh_info.mesh
-        mesh = _MeshEnv.get_root_mesh(mesh)
+
         if mesh.ndim == 1:
             return mesh
-        elif mesh.ndim == 2:
+        else:
             assert mesh.mesh_dim_names is not None
-            return mesh[mesh.mesh_dim_names[-1]]
-        raise ValueError(f"Invalid mesh: {mesh}")
+            shard_dim_name = mesh.mesh_dim_names[-1]
+
+            root_mesh = _MeshEnv.get_root_mesh(mesh)
+            return root_mesh[shard_dim_name]
 
     def _assert_in_states(self, *states: ShardedState) -> None:
         if self.sharded_state not in states:
