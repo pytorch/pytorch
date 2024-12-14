@@ -256,8 +256,6 @@ def mark_nodes_dislike_padding(
             else None
         )
 
-    output_node = g.find_nodes(op="output")[0]
-
     for cur in reversed(g.nodes):
         op = _get_overload_packet(cur)
         if not op:
@@ -518,6 +516,13 @@ class GraphLowering(torch.fx.Interpreter):
             yield
         finally:
             self.current_device = prior
+
+    def get_training_phase(self) -> str:
+        if self.is_inference:
+            return "inference"
+        if self.is_backward:
+            return "backward"
+        return "forward"
 
     @staticmethod
     def decide_layout_opt(gm: GraphModule, *, is_inference: bool) -> bool:
@@ -1079,7 +1084,7 @@ class GraphLowering(torch.fx.Interpreter):
             ), f"{target} is not an OpOverload"
             base_name = target.name().split(".")[0]
             if base_name in FALLBACK_ALLOW_LIST:
-                make_fallback(target)
+                make_fallback(target, warn=False, override_decomp=True)
             elif config.implicit_fallbacks:
                 error = (
                     MissingOperatorWithDecomp

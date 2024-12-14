@@ -532,7 +532,7 @@ class SIMDKernel(Kernel):
         index_vars, sizes = tree.vars_and_sizes(index)
         if len(sizes) <= 1:
             return index
-        new_sizes, reindex, prune = V.graph.sizevars._simplify_loops(
+        new_sizes, reindex, _prune = V.graph.sizevars._simplify_loops(
             index_vars, sizes, index_prevent_reordering([index], index_vars, sizes)
         )
         if new_sizes == sizes:
@@ -927,7 +927,7 @@ class SIMDKernel(Kernel):
             # the mix layouts.
             return
 
-        argdefs, call_args, signature, _ = self.args.python_argdefs()
+        argdefs, call_args, _signature, _ = self.args.python_argdefs()
         uniform_stride_order = None
         for arg_name in call_args:
             buf = V.graph.try_get_buffer(arg_name)
@@ -1196,7 +1196,7 @@ class SIMDScheduling(BaseScheduling):
             )
             return bool(not_ready_yet_nodes)
 
-        for index, node in enumerate(nodes):
+        for node in nodes:
             if node in done:
                 continue
             done.add(node)
@@ -1383,7 +1383,7 @@ class SIMDScheduling(BaseScheduling):
 
         If `only_gen_src_code` the src code will be returned instead of codegen'd into the wrapper
         """
-        _, (numel, rnumel) = template_node.group
+        _, (_numel, rnumel) = template_node.group
         assert rnumel == 1
         kernel, render = template_node.node.make_kernel_render(template_node.node)
         with kernel:
@@ -1826,6 +1826,7 @@ class SIMDScheduling(BaseScheduling):
                 if V.graph.sizevars.size_hint(a1 - b1) < 0:
                     # swap so a0 is bigger
                     (a0, a1), (b0, b1) = (b0, b1), (a0, a1)
+
                 assert V.graph.sizevars.size_hint(a1 - b1) > 0
                 if not V.graph.sizevars.statically_known_multiple_of(a1, b1):
                     return None
