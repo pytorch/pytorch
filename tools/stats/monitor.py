@@ -222,13 +222,11 @@ class UsageLogger:
                     avg_memory = total_memory / len(self.data_list)
 
                     # find all cmds during the interval
-                    cmds = list(
-                        set(
-                            process["cmd"]
-                            for data in self.data_list
-                            for process in data.processes
-                        )
-                    )
+                    cmds = {
+                        process["cmd"]
+                        for data in self.data_list
+                        for process in data.processes
+                    }
 
                     stats.update(
                         {
@@ -240,7 +238,7 @@ class UsageLogger:
                                 "avg": round(avg_memory, 2),
                                 "max": round(max_memory, 2),
                             },
-                            "cmds": cmds,
+                            "cmds": list(cmds),
                             "count": len(self.data_list),
                         }
                     )
@@ -271,7 +269,9 @@ class UsageLogger:
         # shut down gpu connections when exiting
         self._shutdown_gpu_connections()
 
-    def _calculate_gpu_utilization(self, data_list) -> list[dict[str, Any]]:
+    def _calculate_gpu_utilization(
+        self, data_list: list[UsageData]
+    ) -> list[dict[str, Any]]:
         """
         Calculates the GPU utilization.
         """
