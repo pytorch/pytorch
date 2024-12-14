@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import functools
-from typing import Callable, Dict, List, Sequence, Tuple, Union
+from typing import Callable, Union, TYPE_CHECKING
 
 import torch
 from functorch._C import dim as _C
@@ -13,6 +13,9 @@ from ._parsing import (
     parse_pattern,
     validate_rearrange_expressions,
 )
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 
 __all__ = ["rearrange"]
@@ -65,9 +68,9 @@ def _create_rearrange_callable(
         # an identity rearrangement on a 0-dimension tensor
         return lambda tensor: tensor
 
-    first_class_dims: Tuple[str, ...] = tuple(f"d{i}" for i in range(n_dims))
-    identifier_dim_map: Dict[Union[str, AnonymousAxis], Tuple[str, ...]] = {}
-    anon_axes: List[AnonymousAxis] = []
+    first_class_dims: tuple[str, ...] = tuple(f"d{i}" for i in range(n_dims))
+    identifier_dim_map: dict[Union[str, AnonymousAxis], tuple[str, ...]] = {}
+    anon_axes: list[AnonymousAxis] = []
 
     # map the left-hand side identifiers to strings representing first class dims
     dims_i = 0
@@ -95,11 +98,11 @@ def _create_rearrange_callable(
             raise ValueError(f"Unexpected dimension: {dimension}")
 
     def composition_to_dims(
-        composition: Sequence[Union[List[Union[str, AnonymousAxis]], str]],
-    ) -> List[Union[str, Tuple[str, ...]]]:
+        composition: Sequence[Union[list[Union[str, AnonymousAxis]], str]],
+    ) -> list[Union[str, tuple[str, ...]]]:
         """Convert a `ParsedExpression.composition` into a `Tensor.__getitem__` index of strings representing first
         class dims."""
-        dim_composition: List[Union[str, Tuple[str, ...]]] = []
+        dim_composition: list[Union[str, tuple[str, ...]]] = []
         for dimension in composition:
             if isinstance(dimension, list):
                 dim_composition.append(
@@ -148,7 +151,7 @@ def _create_rearrange_callable(
 
 
 def rearrange(
-    tensor: Union[torch.Tensor, List[torch.Tensor], Tuple[torch.Tensor, ...]],
+    tensor: Union[torch.Tensor, list[torch.Tensor], tuple[torch.Tensor, ...]],
     pattern: str,
     **axes_lengths: int,
 ) -> torch.Tensor:
