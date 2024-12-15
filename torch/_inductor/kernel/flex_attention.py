@@ -1990,7 +1990,7 @@ def bwd_dkdv_block_mn(
     ) | indent_except_first(1) }}
 
     # ~~~~~~~~~~~~~~~~~~~ Apply other buffer grad writes ~~~~~~~~~~~~~
-    if WRITE_DK_DV:
+    if not WRITE_DQ:
         idx_b = off_z
         idx_h = off_hq
         idx_m = m
