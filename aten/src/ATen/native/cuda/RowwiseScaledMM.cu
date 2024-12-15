@@ -583,11 +583,8 @@ void check_inputs(
 
 } // namespace
 
-#endif // !defined(BUILD_ROWWISE_FP8_KERNEL)
+#endif // !defined(USE_ROCM)
 
-// ROCm defines its own in a separate file.
-// See aten/src/ATen/native/hip/ck_fp8_rowwise_gemm.hip
-#ifndef USE_ROCM
 namespace at::cuda::detail {
 void f8f8bf16_rowwise(
     at::Tensor XQ, // FP8
@@ -609,4 +606,3 @@ void f8f8bf16_rowwise(
 }
 
 } // namespace at::cuda::detail
-#endif // USE_ROCM
