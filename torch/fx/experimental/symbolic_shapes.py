@@ -4978,6 +4978,11 @@ class ShapeEnv:
                         verbose_exprs.append(
                             f"{res}  # (unknown var {s0}, please file a bug)"
                         )
+                elif isinstance(source, TensorPropertySource):
+                    # Source is self evident since we are simply guarding
+                    # on a property of a source, for example:
+                    # L['aot6_sub_58'].stride()[0] == L['aot6_sub_58'].size()[1]
+                    verbose_exprs.append(f"{res}")
                 else:
                     verbose_exprs.append(
                         f"{res}  # (unknown source {srcname}, please file a bug)"
