@@ -3551,11 +3551,10 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
         self.assertEqual(y + increment, x)
 
     """
-    The behavior of prune_configs_by deviates from OSS Triton in that it does not support
-    user-defined functions side effects (User-defined functions supplied to the autotuner are executed in Dynamo).
+    The behavior of prune_configs_by deviates from OSS Triton in that user-defined functions are
+    executed in Dynamo instead of the standard CPython interpreter.
 
-
-    One example of how user-defined Triton kernels differ from OSS Triton:
+    An example of how user-defined Triton kernels differ from OSS Triton:
 
     records = {}
     def early_config_prune(configs, named_args, **kwargs):
@@ -3569,8 +3568,7 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
         return [configs[0]]
 
     In OSS Triton this user-defined function executes correctly in the test.
-    We execute early_config_prune in dynamo, so records is not updated.
-
+    We execute early_config_prune in dynamo, so `records` is not updated.
     """
 
     @requires_gpu
