@@ -3393,7 +3393,7 @@ def _unsafe_index_put_(self, indices, values, accumulate=False):
     )
 
 
-def index_put_impl_(self, indices, values, accumulate, check, may_realize):
+def index_put_impl_(self, indices, values, accumulate, check, may_realize=False):
     if may_realize:
 
         def try_get_name(x):
