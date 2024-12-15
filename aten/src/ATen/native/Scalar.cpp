@@ -18,7 +18,7 @@ namespace at::native {
 Scalar item(const Tensor& self) {
   auto numel = self.sym_numel();
   TORCH_CHECK(numel == 1, "a Tensor with ", numel, " elements cannot be converted to Scalar");
-  if (numel == 1 && torch::autograd::GradMode::is_enabled() && self.requires_grad()) {
+  if (torch::autograd::GradMode::is_enabled() && self.requires_grad()) {
     TORCH_WARN_ONCE("Converting a tensor with requires_grad=True to a scalar may lead to unexpected behavior.\n"
                     "Consider using tensor.detach() first.");
   }
