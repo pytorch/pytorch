@@ -10,7 +10,6 @@ import torch
 import torch.distributed as dist
 import torch.nn as nn
 from torch.distributed._composable import replicate
-from torch.distributed._composable.fsdp import fully_shard
 from torch.distributed._shard.sharded_tensor import ShardedTensor
 from torch.distributed._tensor import DTensor, init_device_mesh
 from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
@@ -28,6 +27,7 @@ from torch.distributed.checkpoint.state_dict import (
     StateDictOptions,
 )
 from torch.distributed.fsdp import (
+    fully_shard,
     FullyShardedDataParallel as FSDP,
     ShardingStrategy,
     StateDictType,
@@ -81,7 +81,7 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
 
         # Train 10 steps.
         _dist_optim = [dist_optim] if not isinstance(dist_optim, list) else dist_optim
-        for i in range(10):
+        for _ in range(10):
             optim.zero_grad()
             for d_optim in _dist_optim:
                 d_optim.zero_grad()
@@ -366,16 +366,21 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
             self._test_single_gpu,
         )
 
-    @with_comms
-    @skip_if_lt_x_gpu(1)
-    def test_strict(self) -> None:
+    def _test_strict(self, parallelism: str) -> None:
         model = CompositeParamModel(device=torch.device("cuda"))
+        if parallelism == "DDP":
+            model = DDP(model)
+        else:
+            model = fully_shard(model)
 
         model_state_dict = get_model_state_dict(model)
-        key = next(iter(model_state_dict.keys()))
         model_state_dict["abc"] = torch.zeros(10)
         with self.assertRaisesRegex(RuntimeError, "Unexpected key"):
             set_model_state_dict(model, model_state_dict=model_state_dict)
+        key_iter = iter(model_state_dict.keys())
+        for key in key_iter:
+            if key != "abc":
+                break
         model_state_dict.pop(key)
         incompatible_keys = set_model_state_dict(
             model,
@@ -387,6 +392,14 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
         model_state_dict.pop("abc")
         with self.assertRaisesRegex(RuntimeError, "Missing key"):
             set_model_state_dict(model, model_state_dict=model_state_dict)
+
+    @with_comms
+    @skip_if_lt_x_gpu(1)
+    def test_strict(self) -> None:
+        self.run_subtests(
+            {"parallelism": ["DDP", "fully_shard"]},
+            self._test_strict,
+        )
 
     def _test_cpu_offload_full_state_dict(
         self, optimizer_class: Type[Optimizer]

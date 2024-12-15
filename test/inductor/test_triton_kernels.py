@@ -3427,7 +3427,7 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
 
         output = "\n".join(record.getMessage() for record in log.records)
         # correct grid example values updated per block size
-        FileCheck().check("Compile-time auto-tuning code").check(
+        FileCheck().check("Compile-time auto-tuning block:").check(
             "grid_wrapper_for_op_zeros_0"
         ).check_next("return (256").check_next("return (64").run(output)
 
@@ -3549,6 +3549,155 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
             f(x, increment)
 
         self.assertEqual(y + increment, x)
+
+    """
+    The behavior of prune_configs_by deviates from OSS Triton in that user-defined functions are
+    executed in Dynamo instead of the standard CPython interpreter.
+
+    An example of how user-defined Triton kernels differ from OSS Triton:
+
+    records = {}
+    def early_config_prune(configs, named_args, **kwargs):
+        records["run_early_config_prune"] = True
+        if "N" in kwargs and kwargs["N"] == 1024:
+            records["capture_kwargs"] = True
+        elif "N" in kwargs:
+            breakpoint()
+        if "dst" in named_args and "src" in named_args and len(named_args) == 5:
+            records["capture_named_args"] = True
+        return [configs[0]]
+
+    In OSS Triton this user-defined function executes correctly in the test.
+    We execute early_config_prune in dynamo, so `records` is not updated.
+    """
+
+    @requires_gpu
+    @common_utils.parametrize("backend", ["eager", "aot_eager", "inductor"])
+    @common_utils.parametrize("with_perf_model", [False, True])
+    def test_triton_kernel_prune_configs_by(self, backend, with_perf_model):
+        def early_config_prune(configs, named_args, **kwargs):
+            # we need to save the records to the returned config
+            records = {}
+            records["run_early_config_prune"] = True
+            if "N" in kwargs and kwargs["N"] == 1024:
+                records["capture_kwargs"] = True
+            if "dst" in named_args and "src" in named_args and len(named_args) == 5:
+                records["capture_named_args"] = True
+            configs[0].records = records
+            return [configs[0]]
+
+        # this will pick the Config with the largest block size  (128)
+        def perf_model(*args, **kwargs):
+            # we can't update state here
+            # records["run_perf_model"] = True
+            return kwargs["BLOCK_SIZE"] * -1
+
+        if with_perf_model:
+            prune_configs_by = {"perf_model": perf_model, "top_k": 1}
+        else:
+            prune_configs_by = {"early_config_prune": early_config_prune}
+
+        @triton.autotune(
+            configs=[
+                triton.Config(kwargs={"BLOCK_SIZE": 32}),
+                triton.Config(kwargs={"BLOCK_SIZE": 128}),
+            ],
+            key=["N"],
+            prune_configs_by=prune_configs_by,
+        )
+        @triton.jit
+        def prune_by_kernel(
+            dst,
+            src,
+            add_float,
+            string_arg: tl.constexpr,
+            bool_var: tl.constexpr,
+            N,
+            BLOCK_SIZE: tl.constexpr,
+        ):
+            offsets = tl.program_id(0) * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+            x = tl.load(src + offsets, mask=offsets < N)
+            # Let's make sure we always select a block size of 128 based on our perf_model
+            if (string_arg == "TEST" and bool_var) and BLOCK_SIZE == 128:
+                x = x + add_float
+            tl.store(dst + offsets, x, mask=offsets < N)
+
+        @torch.compile(fullgraph=True, backend=backend)
+        def f(dst, src, add_float, string_arg, bool_var, N):
+            grid = lambda META: (triton.cdiv(N, META["BLOCK_SIZE"]),)
+            prune_by_kernel[grid](dst, src, add_float, string_arg, bool_var, N=N)
+
+        N = 1024
+        src = torch.randn(N, device=GPU_TYPE)
+        dst = torch.empty(N, device=GPU_TYPE)
+        f(dst, src, 1.5, "TEST", True, N)
+
+        # We ran the kernel, lets fetch the records we saved to the first config we kept
+        # while pruning. When running with the perf_model we don't set this.
+        records = (
+            prune_by_kernel.configs[0].records
+            if hasattr(prune_by_kernel.configs[0], "records")
+            else {}
+        )
+
+        if with_perf_model:
+            self.assertEqual(src + 1.5, dst)
+        else:
+            # We require the largest config to be picked for the correct result (BLOCK_SIZE==128)
+            self.assertNotEqual(src + 1.5, dst)
+            self.assertEqual(len(records), 3)
+            self.assertTrue(records["run_early_config_prune"] is not None)
+            self.assertTrue(records["capture_kwargs"] is not None)
+            self.assertTrue(records["capture_named_args"] is not None)
+
+    @requires_gpu
+    def test_triton_single_autotune(self):
+        @triton.autotune(
+            configs=[
+                triton.Config(
+                    {"BLOCK_SIZE": 4096},
+                )
+            ],
+            key=["n_elements"],
+        )
+        # Currently, this autotuning decorator will never run!
+        # We only support having a single autotuning decorator on each Triton kernel
+        @triton.autotune(
+            configs=[
+                triton.Config(
+                    {"BLOCK_SIZE": 1024},
+                )
+            ],
+            key=["n_elements"],
+        )
+        @triton.jit
+        def add_kernel(x_ptr, y_ptr, output_ptr, n_elements, BLOCK_SIZE: tl.constexpr):
+            pid = tl.program_id(axis=0)
+
+            block_start = pid * BLOCK_SIZE
+            offsets = block_start + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+
+            x = tl.load(x_ptr + offsets, mask=mask)
+            y = tl.load(y_ptr + offsets, mask=mask)
+            output = x + y
+            tl.atomic_add(output_ptr + offsets, output, mask=mask)
+
+        def add(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+            output = torch.ones(x.shape, device=x.device, dtype=x.dtype)
+            n_elements = output.numel()
+            grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
+            add_kernel[grid](x, y, output, n_elements)
+            return output
+
+        x = torch.ones((4096,), device=GPU_TYPE, dtype=torch.float16)
+        y = torch.ones((4096,), device=GPU_TYPE, dtype=torch.float16)
+
+        # this should cause an exception, since pre_hook is not allowed
+        msg = "Passing multiple @triton.autotune decorators is not supported. Please use a single @triton.autotune decorator instead."
+        with self.assertRaisesRegex(torch._dynamo.exc.Unsupported, msg):
+            add_compiled = torch.compile(add, mode="reduce-overhead", fullgraph=True)
+            add_compiled(x, y).mean()
 
 
 common_utils.instantiate_parametrized_tests(KernelTests)

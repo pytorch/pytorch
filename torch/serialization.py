@@ -261,21 +261,29 @@ def clear_safe_globals() -> None:
     _weights_only_unpickler._clear_safe_globals()
 
 
-def get_safe_globals() -> List[Any]:
+def get_safe_globals() -> List[Union[Callable, Tuple[Callable, str]]]:
     """
     Returns the list of user-added globals that are safe for ``weights_only`` load.
     """
     return _weights_only_unpickler._get_safe_globals()
 
 
-def add_safe_globals(safe_globals: List[Any]) -> None:
+def add_safe_globals(safe_globals: List[Union[Callable, Tuple[Callable, str]]]) -> None:
     """
     Marks the given globals as safe for ``weights_only`` load. For example, functions
     added to this list can be called during unpickling, classes could be instantiated
     and have state set.
 
+    Each item in the list can either be a function/class or a tuple of the form
+    (function/class, string) where string is the full path of the function/class.
+
+    Within the serialized format, each function is identified with its full
+    path as ``{__module__}.{__name__}``. When calling this API, you can provide this
+    full path that should match the one in the checkpoint otherwise the default
+    ``{fn.__module__}.{fn.__name__}`` will be used.
+
     Args:
-        safe_globals (List[Any]): list of globals to mark as safe
+        safe_globals (List[Union[Callable, Tuple[Callable, str]]]): list of globals to mark as safe
 
     Example:
         >>> # xdoctest: +SKIP("Can't torch.save(t, ...) as doctest thinks MyTensor is defined on torch.serialization")
