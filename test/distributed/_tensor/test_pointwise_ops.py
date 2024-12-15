@@ -1,8 +1,8 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 # Owner(s): ["oncall: distributed"]
 
-from typing import Any, Callable, Dict, Optional
 from collections.abc import Sequence
+from typing import Any, Callable, Dict, Optional
 from unittest import skip
 
 import torch

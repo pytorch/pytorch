@@ -1,8 +1,3 @@
-import dis
-import inspect
-from typing import Union
-from collections.abc import Sequence
-
 import functorch._C
 import torch
 from functorch._C import dim as _C

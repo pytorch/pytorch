@@ -27,7 +27,7 @@ from __future__ import annotations
 
 import keyword
 import warnings
-from typing import Optional, Union, TYPE_CHECKING
+from typing import Optional, TYPE_CHECKING, Union
 
 if TYPE_CHECKING:
     from collections.abc import Collection, Mapping

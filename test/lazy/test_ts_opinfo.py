@@ -3,8 +3,8 @@
 import functools
 import itertools
 import os
-from pathlib import Path
 from collections.abc import Sequence
+from pathlib import Path
 from unittest import skip
 
 import yaml
