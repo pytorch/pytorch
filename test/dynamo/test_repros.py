@@ -5815,7 +5815,7 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
     def test_unsqueeze_mul_strides(self):
         # This is a case where we had an input that was marked unbacked:
         # size=[2, u0], stride=[1, 1] which is bad. We want it to actually
-        # be size=[2, u0], stride=[u0. 1]. See more in the issue below:
+        # be size=[2, u0], stride=[u0, 1]. See more in the issue below:
         # https://github.com/pytorch/pytorch/issues/142024
 
         @torch.compile(backend="eager", fullgraph=True)

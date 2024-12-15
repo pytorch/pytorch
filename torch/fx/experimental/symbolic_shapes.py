@@ -3913,6 +3913,11 @@ class ShapeEnv:
                     contiguous_striding
                     and dynamic_strides[i] == DimDynamic.INFER_STRIDE
                 ):
+                    # In cases of contiguous striding, we actually want
+                    # to use the stride[i] = stride[i + 1] * size[i + 1]
+                    # formula to prevent specializing to 1. See the following
+                    # issue for more context:
+                    # https://github.com/pytorch/pytorch/issues/142024
                     if stride[-1] is None:
                         val, i = 1, len(size) - 1
                     else:
