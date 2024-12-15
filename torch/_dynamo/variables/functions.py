@@ -6,7 +6,17 @@ import functools
 import inspect
 import itertools
 import types
-from typing import Any, Callable, Dict, List, Optional, Tuple, TYPE_CHECKING, TypeVar, Sequence
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    List,
+    Optional,
+    Sequence,
+    Tuple,
+    TYPE_CHECKING,
+    TypeVar,
+)
 from typing_extensions import Never
 
 import torch
