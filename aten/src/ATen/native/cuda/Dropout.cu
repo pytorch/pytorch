@@ -51,8 +51,8 @@ fused_dropout_kernel_vec(at::cuda::detail::TensorInfo<const scalar_t, IndexType>
                          IndexType totalElements, accscalar_t p,
                          PhiloxCudaState philox_args) {
 #ifdef USE_ROCM
-  // make sure we don't break assumption that we can't have > 8 elements / thread
-  static_assert(VEC <= 8, "Value of VEC must be in [2, 4, 8]");
+  // make sure we don't break assumption that we can't have > 16 elements / thread
+  static_assert(VEC <= 16, "Value of VEC must be in [2, 4, 8, 16]");
 #else
   // make sure we don't break assumption that we can't have > 4 elements / thread
   static_assert(VEC <= 4, "Value of VEC must be in [2, 4]");
@@ -71,10 +71,8 @@ fused_dropout_kernel_vec(at::cuda::detail::TensorInfo<const scalar_t, IndexType>
   bool gridxvec_loop_state = 0;
   accscalar_t scale = 1.0 / p;
 
-  float4 rand;
-#ifdef USE_ROCM
-  float4 rand1;
-#endif
+  constexpr int RAND_SIZE = (VEC + 4 - 1) / 4;
+  float4 rand[RAND_SIZE];
 
   // Note: Vectorized loads means we'll stride each thread by an additional VEC factor, as we'll load VEC elements at a time
   for (IndexType linearIndex = idx * VEC;
@@ -89,35 +87,31 @@ fused_dropout_kernel_vec(at::cuda::detail::TensorInfo<const scalar_t, IndexType>
     // Note: need a new set of random values per 4 elements -- we'll handle VEC elements in this thread, so need ceil(VEC / 4)
     // sets of rand.
     if ((VEC >= 4) || (gridxvec_loop_state == 0)) {
-      rand = curand_uniform4(&state);
+      #pragma unroll
+      for (int ii = 0; ii < RAND_SIZE; ii++) {
+        rand[ii] = curand_uniform4(&state);
+      }
     } else {
       // sets up the last two values we generated last iteration to be used this iteration.
-      rand.x = rand.z;
-      rand.y = rand.w;
+      rand[0].x = rand[0].z;
+      rand[0].y = rand[0].w;
       gridxvec_loop_state ^= 1;
     }
 
-#ifdef USE_ROCM
-    if (VEC == 8) {
-      rand1 = curand_uniform4(&state);
-    }
-#endif
-
-    rand.x = rand.x < p;
-    rand.y = rand.y < p;
-    if (VEC >= 4) {
-      rand.z = rand.z < p;
-      rand.w = rand.w < p;
+    rand[0].x = rand[0].x < p;
+    rand[0].y = rand[0].y < p;
+    if constexpr (VEC >= 4) {
+      rand[0].z = rand[0].z < p;
+      rand[0].w = rand[0].w < p;
     }
 
-#ifdef USE_ROCM
-    if (VEC == 8) {
-      rand1.x = rand1.x < p;
-      rand1.y = rand1.y < p;
-      rand1.z = rand1.z < p;
-      rand1.w = rand1.w < p;
+    #pragma unroll
+    for (int ii = 1; ii < RAND_SIZE; ii++) {
+      rand[ii].x = rand[ii].x < p;
+      rand[ii].y = rand[ii].y < p;
+      rand[ii].z = rand[ii].z < p;
+      rand[ii].w = rand[ii].w < p;
     }
-#endif
 
     // Note: We explicitly check for is_contiguous() before launching the vectorized kernel
     // and replace IndexToOffset call with linearIndex to allow vectorization of NHWC (or other)
@@ -130,20 +124,13 @@ fused_dropout_kernel_vec(at::cuda::detail::TensorInfo<const scalar_t, IndexType>
 
     // Perform the actual computation
     #pragma unroll
-    for (int ii = 0; ii < std::min(VEC, 4); ii++) {
-      r[ii] = src[ii]*(&rand.x)[ii]*scale;
-      mask[ii] = (mask_t)(&rand.x)[ii];
-    }
-
-#ifdef USE_ROCM
-    if (VEC == 8) {
+    for (int jj = 0; jj < RAND_SIZE; jj++) { 
       #pragma unroll
-      for (int ii = 0; ii < 4; ii++) {
-        r[4+ii] = src[4+ii]*(&rand1.x)[ii]*scale;
-        mask[4+ii] = (mask_t)(&rand1.x)[ii];
+      for (int ii = 0; ii < std::min(VEC, 4); ii++) {
+        r[jj * 4 + ii] = src[jj * 4 + ii]*(&rand[jj].x)[ii]*scale;
+        mask[jj * 4 + ii] = (mask_t)(&rand[jj].x)[ii];
       }
     }
-#endif
 
     // Vectorized writes for both mask & result
     *(reinterpret_cast<LoadT*>(&b.data[linearIndex])) = *reinterpret_cast<LoadT*>(&r[0]);
@@ -234,9 +221,6 @@ int get_vector_size(at::Tensor self, at::Tensor ret, at::Tensor mask) {
     vec_size = 1;
   } else {
     vec_size = memory::can_vectorize_up_to<scalar_t>((const char*)self.const_data_ptr());
-#ifdef USE_ROCM
-    vec_size = std::min(vec_size, 8);
-#endif
   }
 
   // check that we'd have no remainders - prefer a smaller vector size with no remainders over a larger vector and remainder.
@@ -281,6 +265,23 @@ inline void launcher(
 
         if (vec_size > 1) {
           switch (vec_size) {
+#ifdef USE_ROCM
+            case 16:
+              fused_dropout_kernel_vec<
+                  scalar_t,
+                  accscalar_t,
+                  index_type,
+                  1,
+                  16>
+                  <<<grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(
+                      self_info,
+                      ret_info,
+                      mask_info,
+                      nelem,
+                      pa,
+                      rng_engine_inputs);
+              C10_CUDA_KERNEL_LAUNCH_CHECK();
+              break;
             case 8:
               fused_dropout_kernel_vec<
                   scalar_t,
@@ -297,6 +298,7 @@ inline void launcher(
                       rng_engine_inputs);
               C10_CUDA_KERNEL_LAUNCH_CHECK();
               break;
+#endif
             case 4:
               fused_dropout_kernel_vec<
                   scalar_t,
