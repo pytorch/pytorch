@@ -56,13 +56,10 @@ fused_dropout_kernel_vec(at::cuda::detail::TensorInfo<const scalar_t, IndexType>
   using LoadT = memory::aligned_vector<scalar_t, VEC>;
   using MaskLoadT = memory::aligned_vector<mask_t, VEC>;
 
-  auto seeds = at::cuda::philox::unpack(philox_args);
+  auto [seed, offset] = at::cuda::philox::unpack(philox_args);
   IndexType idx = blockIdx.x * blockDim.x + threadIdx.x;
   curandStatePhilox4_32_10_t state;
-  curand_init(std::get<0>(seeds),
-              idx,
-              std::get<1>(seeds),
-              &state);
+  curand_init(seed, idx, offset, &state);
 
   // Helps align the total number of times curand_uniform4 is called by each thread for the same totalElements
   // in the vec=2 and vec=4 cases.
@@ -138,13 +135,10 @@ fused_dropout_kernel(cuda::detail::TensorInfo<const scalar_t, IndexType> a,
                      cuda::detail::TensorInfo<mask_t, IndexType> c,
                      IndexType totalElements, accscalar_t p,
                      PhiloxCudaState philox_args) {
-  auto seeds = at::cuda::philox::unpack(philox_args);
+  auto [seed, offset] = at::cuda::philox::unpack(philox_args);
   IndexType idx = blockIdx.x * blockDim.x + threadIdx.x;
   curandStatePhilox4_32_10_t state;
-  curand_init(std::get<0>(seeds),
-              idx,
-              std::get<1>(seeds),
-              &state);
+  curand_init(seed, idx, offset, &state);
   accscalar_t scale = 1.0 / p;
 
   IndexType rounded_size = ((totalElements - 1)/(blockDim.x * gridDim.x * UNROLL)+1) *

@@ -144,7 +144,7 @@ def _conv_add_extra_inputs_getter_left(pattern):
     """get inputs pattern for extra inputs, inputs for root node
     are assumed to be copied over from root node to the fused node
     """
-    _, conv, extra_input = pattern
+    _, _conv, extra_input = pattern
     return [extra_input]
 
 
@@ -166,7 +166,7 @@ def _fuse_conv_bn_add_left(is_qat, add, bn_conv, _):
 
 def _conv_bn_add_root_node_getter_left(add_pattern):
     _, bn_conv, _ = add_pattern
-    bn, conv = bn_conv
+    _bn, conv = bn_conv
     return conv
 
 
@@ -174,8 +174,7 @@ def _conv_bn_add_extra_inputs_getter_left(add_pattern):
     """get inputs pattern for extra inputs, inputs for root node
     are assumed to be copied over from root node to the fused node
     """
-    _, bn_conv, extra_input = add_pattern
-    bn, conv = bn_conv
+    _, _bn_conv, extra_input = add_pattern
     return [extra_input]
 
 
@@ -222,7 +221,7 @@ def _fuse_conv_add_right(is_qat, add, _, conv):
 
 
 def _conv_add_root_node_getter_right(pattern):
-    add, _, conv = pattern
+    _add, _, conv = pattern
     return conv
 
 
@@ -230,7 +229,7 @@ def _conv_add_extra_inputs_getter_right(pattern):
     """get inputs pattern for extra inputs, inputs for root node
     are assumed to be copied over from root node to the fused node
     """
-    _, extra_input, conv = pattern
+    _, extra_input, _conv = pattern
     return [extra_input]
 
 
@@ -251,8 +250,8 @@ def _fuse_conv_bn_add_right(is_qat, add, _, bn_conv):
 
 
 def _conv_bn_add_root_node_getter_right(pattern):
-    add, _, bn_conv = pattern
-    bn, conv = bn_conv
+    _add, _, bn_conv = pattern
+    _bn, conv = bn_conv
     return conv
 
 
@@ -260,8 +259,7 @@ def _conv_bn_add_extra_inputs_getter_right(pattern):
     """get inputs pattern for extra inputs, inputs for root node
     are assumed to be copied over from root node to the fused node
     """
-    _, extra_input, bn_conv = pattern
-    bn, conv = bn_conv
+    _, extra_input, _bn_conv = pattern
     return [extra_input]
 
 
@@ -321,7 +319,7 @@ def _fuse_conv_add_relu_left(is_qat, relu, add_pattern):
 
 
 def _conv_add_relu_root_node_getter_left(pattern):
-    relu, add_pattern = pattern
+    _relu, add_pattern = pattern
     _, conv, _ = add_pattern
     return conv
 
@@ -330,8 +328,8 @@ def _conv_add_relu_extra_inputs_getter_left(pattern):
     """get inputs pattern for extra inputs, inputs for root node
     are assumed to be copied over from root node to the fused node
     """
-    relu, add_pattern = pattern
-    _, conv, extra_input = add_pattern
+    _relu, add_pattern = pattern
+    _, _conv, extra_input = add_pattern
     return [extra_input]
 
 
@@ -355,9 +353,9 @@ def _fuse_conv_bn_add_relu_left(is_qat, relu, add_pattern):
 
 
 def _conv_bn_add_relu_root_node_getter_left(pattern):
-    relu, add_pattern = pattern
+    _relu, add_pattern = pattern
     _, bn_conv, _ = add_pattern
-    bn, conv = bn_conv
+    _bn, conv = bn_conv
     return conv
 
 
@@ -365,9 +363,8 @@ def _conv_bn_add_relu_extra_inputs_getter_left(pattern):
     """get inputs pattern for extra inputs, inputs for root node
     are assumed to be copied over from root node to the fused node
     """
-    relu, add_pattern = pattern
-    _, bn_conv, extra_input = add_pattern
-    bn, conv = bn_conv
+    _relu, add_pattern = pattern
+    _, _bn_conv, extra_input = add_pattern
     return [extra_input]
 
 
@@ -417,8 +414,8 @@ def _fuse_conv_add_relu_right(is_qat, relu, add_pattern):
 
 
 def _conv_add_relu_root_node_getter_right(pattern):
-    relu, add_pattern = pattern
-    _, _, conv = add_pattern
+    _relu, add_pattern = pattern
+    _, _extra_input, conv = add_pattern
     return conv
 
 
@@ -426,8 +423,8 @@ def _conv_add_relu_extra_inputs_getter_right(pattern):
     """get inputs pattern for extra inputs, inputs for root node
     are assumed to be copied over from root node to the fused node
     """
-    relu, add_pattern = pattern
-    _, extra_input, conv = add_pattern
+    _relu, add_pattern = pattern
+    _, extra_input, _conv = add_pattern
     return [extra_input]
 
 
@@ -451,9 +448,9 @@ def _fuse_conv_bn_add_relu_right(is_qat, relu, add_pattern):
 
 
 def _conv_bn_add_relu_root_node_getter_right(pattern):
-    relu, add_pattern = pattern
+    _relu, add_pattern = pattern
     _, _, bn_conv = add_pattern
-    bn, conv = bn_conv
+    _bn, conv = bn_conv
     return conv
 
 
@@ -461,18 +458,17 @@ def _conv_bn_add_relu_extra_inputs_getter_right(pattern):
     """get inputs pattern for extra inputs, inputs for root node
     are assumed to be copied over from root node to the fused node
     """
-    relu, add_pattern = pattern
-    _, extra_input, bn_conv = add_pattern
-    bn, conv = bn_conv
+    _relu, add_pattern = pattern
+    _, extra_input, _bn_conv = add_pattern
     return [extra_input]
 
 
-conv_add_relu_optioins = itertools.product(
+conv_add_relu_left_optioins = itertools.product(
     [True, False],  # with_bn
     [torch.add, operator.add],  # add_op
 )
 
-for with_bn, add_op in conv_add_relu_optioins:
+for with_bn, add_op in conv_add_relu_left_optioins:
     if with_bn:
         conv_configs.append(
             BackendPatternConfig()

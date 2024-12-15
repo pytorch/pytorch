@@ -17,10 +17,10 @@ from typing import Dict, List, Optional, Tuple
 
 # NOTE: Also update the CUDA sources in tools/nightly.py when changing this list
 CUDA_ARCHES = ["11.8", "12.4", "12.6"]
-CUDA_ARCHES_FULL_VERSION = {"11.8": "11.8.0", "12.4": "12.4.1", "12.6": "12.6.2"}
+CUDA_ARCHES_FULL_VERSION = {"11.8": "11.8.0", "12.4": "12.4.1", "12.6": "12.6.3"}
 CUDA_ARCHES_CUDNN_VERSION = {"11.8": "9", "12.4": "9", "12.6": "9"}
 
-ROCM_ARCHES = ["6.1", "6.2"]
+ROCM_ARCHES = ["6.1", "6.2.4"]
 
 XPU_ARCHES = ["xpu"]
 
@@ -162,7 +162,7 @@ WHEEL_CONTAINER_IMAGES = {
     "12.4": f"pytorch/manylinux-builder:cuda12.4-{DEFAULT_TAG}",
     "12.6": f"pytorch/manylinux2_28-builder:cuda12.6-{DEFAULT_TAG}",
     **{
-        gpu_arch: f"pytorch/manylinux-builder:rocm{gpu_arch}-{DEFAULT_TAG}"
+        gpu_arch: f"pytorch/manylinux2_28-builder:rocm{gpu_arch}-{DEFAULT_TAG}"
         for gpu_arch in ROCM_ARCHES
     },
     "xpu": f"pytorch/manylinux2_28-builder:xpu-{DEFAULT_TAG}",
@@ -170,7 +170,7 @@ WHEEL_CONTAINER_IMAGES = {
     "cpu-cxx11-abi": f"pytorch/manylinuxcxx11-abi-builder:cpu-cxx11-abi-{DEFAULT_TAG}",
     "cpu-aarch64": f"pytorch/manylinux2_28_aarch64-builder:cpu-aarch64-{DEFAULT_TAG}",
     "cpu-s390x": f"pytorch/manylinuxs390x-builder:cpu-s390x-{DEFAULT_TAG}",
-    "cuda-aarch64": f"pytorch/manylinuxaarch64-builder:cuda12.4-{DEFAULT_TAG}",
+    "cuda-aarch64": f"pytorch/manylinuxaarch64-builder:cuda12.6-{DEFAULT_TAG}",
 }
 
 
@@ -197,13 +197,6 @@ LIBTORCH_CONTAINER_IMAGES: Dict[Tuple[str, str], str] = {
     **{
         (
             gpu_arch,
-            PRE_CXX11_ABI,
-        ): f"pytorch/manylinux-builder:rocm{gpu_arch}-{DEFAULT_TAG}"
-        for gpu_arch in ROCM_ARCHES
-    },
-    **{
-        (
-            gpu_arch,
             CXX11_ABI,
         ): f"pytorch/libtorch-cxx11-builder:rocm{gpu_arch}-{DEFAULT_TAG}"
         for gpu_arch in ROCM_ARCHES
@@ -222,7 +215,7 @@ def translate_desired_cuda(gpu_arch_type: str, gpu_arch_version: str) -> str:
         "cpu-cxx11-abi": "cpu-cxx11-abi",
         "cpu-s390x": "cpu",
         "cuda": f"cu{gpu_arch_version.replace('.', '')}",
-        "cuda-aarch64": "cu124",
+        "cuda-aarch64": "cu126",
         "rocm": f"rocm{gpu_arch_version}",
         "xpu": "xpu",
     }.get(gpu_arch_type, gpu_arch_version)
@@ -262,7 +255,9 @@ def generate_libtorch_matrix(
             gpu_arch_type = arch_type(arch_version)
             gpu_arch_version = "" if arch_version == "cpu" else arch_version
             # ROCm builds without-deps failed even in ROCm runners; skip for now
-            if gpu_arch_type == "rocm" and "without-deps" in libtorch_variant:
+            if gpu_arch_type == "rocm" and (
+                "without-deps" in libtorch_variant or "pre-cxx11" in abi_version
+            ):
                 continue
             ret.append(
                 {
@@ -333,10 +328,9 @@ def generate_wheels_matrix(
                 else arch_version
             )
 
-            # TODO: Enable python 3.13 on rocm, aarch64, windows
+            # TODO: Enable python 3.13 on aarch64, windows
             if (
-                gpu_arch_type == "rocm"
-                or os
+                os
                 not in [
                     "linux",
                     "linux-s390x",
@@ -382,7 +376,11 @@ def generate_wheels_matrix(
                         ),
                         "use_split_build": "True" if use_split_build else "False",
                         "devtoolset": (
-                            "cxx11-abi" if arch_version == "cuda-aarch64" else ""
+                            "cxx11-abi"
+                            if (
+                                arch_version == "cuda-aarch64" or arch_version == "12.6"
+                            )
+                            else ""
                         ),
                         "container_image": WHEEL_CONTAINER_IMAGES[arch_version],
                         "package_type": package_type,
@@ -428,7 +426,8 @@ def generate_wheels_matrix(
                         "use_split_build": "True" if use_split_build else "False",
                         "devtoolset": (
                             "cxx11-abi"
-                            if arch_version in ["cpu-cxx11-abi", "cpu-aarch64"]
+                            if (arch_version in ["cpu-cxx11-abi", "cpu-aarch64", "xpu"])
+                            or gpu_arch_type == "rocm"
                             else ""
                         ),
                         "container_image": WHEEL_CONTAINER_IMAGES[arch_version],
