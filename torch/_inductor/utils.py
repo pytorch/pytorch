@@ -34,7 +34,6 @@ from typing import (
     Optional,
     Protocol,
     Sequence,
-    Set,
     Tuple,
     TYPE_CHECKING,
     TypeVar,
@@ -54,6 +53,7 @@ if TYPE_CHECKING:
     from torch._prims_common import ELEMENTWISE_TYPE_PROMOTION_KIND
     from .codegen.common import WorkspaceArg
 
+from torch.utils._ordered_set import OrderedSet
 from torch.utils._pytree import tree_map_only
 
 
@@ -520,12 +520,12 @@ def aggregate_origins(node_schedule):
                 for node in node_schedule
                 if hasattr(node, "node") and node.node
             ],
-            set(),
+            OrderedSet(),
         )
     elif isinstance(node_schedule, ir.ExternKernel):
         return node_schedule.origins
     else:
-        return set()
+        return OrderedSet()
 
 
 def get_fused_kernel_name(node_schedule, descriptive_names):
@@ -539,7 +539,7 @@ def get_fused_kernel_name(node_schedule, descriptive_names):
             and "original_aten" in origin.meta
             and origin.meta["original_aten"] is not None
         ]
-        sources = sorted(set(sources))
+        sources = sorted(OrderedSet(sources))
     elif descriptive_names == "torch":
         # Bases the kernel name off of the top-level "torch" operator (i.e. post-dynamo graph)
         sources = []
@@ -550,7 +550,7 @@ def get_fused_kernel_name(node_schedule, descriptive_names):
                     sources.append(source_fn[1])
                 else:
                     sources.append(source_fn[1].__name__)
-        sources = sorted(set(sources))
+        sources = sorted(OrderedSet(sources))
     elif descriptive_names == "inductor_node":
         sources = [
             origin.name for origin in all_origins if origin.op == "call_function"
@@ -573,7 +573,7 @@ def get_kernel_metadata(node_schedule, wrapper):
     # is not supported. An example of this is conditional statements.
     single_graph = None
     if len(inductor_nodes):
-        unique_graphs = {n.graph for n in inductor_nodes}
+        unique_graphs = OrderedSet(n.graph for n in inductor_nodes)
         if len(unique_graphs) == 1:
             single_graph = inductor_nodes[0].graph
             # create a map of idx -> node and cache it
@@ -619,10 +619,10 @@ def get_kernel_metadata(node_schedule, wrapper):
 
 def dominated_nodes(
     initial_queue: Iterable[torch.fx.Node], skip_filter=None
-) -> Set[torch.fx.Node]:
+) -> OrderedSet[torch.fx.Node]:
     """Returns the set of nodes whose values depend on those within initial_queue"""
     initial_queue = list(initial_queue)
-    dominated_set = set(initial_queue)
+    dominated_set = OrderedSet(initial_queue)
 
     while initial_queue:
         node = initial_queue.pop()
@@ -650,7 +650,7 @@ def gather_origins(args, kwargs):
 
     kwarg_origins = [val.origins for val in kwargs.values() if is_unrealized_node(val)]
     arg_origins = [arg.origins for arg in args if is_unrealized_node(arg)]
-    return set(itertools.chain(*arg_origins, *kwarg_origins))
+    return OrderedSet(itertools.chain(*arg_origins, *kwarg_origins))
 
 
 def sympy_str(expr: sympy.Expr) -> str:
@@ -756,23 +756,25 @@ def get_first_incompatible_cudagraph_node(
 ) -> Optional[torch.fx.Node]:
     from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
 
-    forbidden_set = {
-        "aten._fused_moving_avg_obs_fq_helper.default",
-        "aten._fused_moving_avg_obs_fq_helper_functional.default",
-        "fbgemm.dense_to_jagged.default",
-        "fbgemm.jagged_to_padded_dense.default",
-        "run_and_save_rng_state",
-        "run_with_rng_state",
-        "aten._local_scalar_dense",
-        # Technically, it's not necessary to ban this, because an
-        # assert_scalar with constant arguments can be validly run
-        # with CUDA graphs, but the operator is also pointless with
-        # constant arguments, so might as well ban
-        "aten._assert_scalar",
-    }
+    forbidden_set = OrderedSet(
+        [
+            "aten._fused_moving_avg_obs_fq_helper.default",
+            "aten._fused_moving_avg_obs_fq_helper_functional.default",
+            "fbgemm.dense_to_jagged.default",
+            "fbgemm.jagged_to_padded_dense.default",
+            "run_and_save_rng_state",
+            "run_with_rng_state",
+            "aten._local_scalar_dense",
+            # Technically, it's not necessary to ban this, because an
+            # assert_scalar with constant arguments can be validly run
+            # with CUDA graphs, but the operator is also pointless with
+            # constant arguments, so might as well ban
+            "aten._assert_scalar",
+        ]
+    )
     if torch.are_deterministic_algorithms_enabled():
         forbidden_set.update(
-            {
+            (
                 "aten._unsafe_index_put.default",
                 "aten._unsafe_masked_index_put_accumulate.default",
                 "aten.index_put.default",
@@ -785,8 +787,9 @@ def get_first_incompatible_cudagraph_node(
                 "aten.scatter_reduce.two",
                 "aten.scatter_reduce_.two",
                 "aten.scatter_reduce.two_out",
-            }
+            )
         )
+
     for node in gm.graph.nodes:
         if str(node.target) in forbidden_set:
             return node
@@ -1872,7 +1875,7 @@ def is_fallback_op(node, op):
     from . import ir
 
     if isinstance(op, torch._ops.OpOverload):
-        op = {op}
+        op = OrderedSet([op])
     return isinstance(node, ir.FallbackKernel) and node.op_overload in op
 
 
@@ -2020,7 +2023,7 @@ def needs_fallback_due_to_atomic_add_limitations(dtype):
     if config.is_fbcode() and dtype == torch.bfloat16:
         return False
     else:
-        return dtype in {torch.int64, torch.bool, torch.bfloat16}
+        return dtype in (torch.int64, torch.bool, torch.bfloat16)
 
 
 def use_scatter_fallback(
@@ -2043,7 +2046,7 @@ def use_scatter_fallback(
     )
 
     return (
-        reduction_type not in {None, reduce_ty}
+        reduction_type not in (None, reduce_ty)
         or (
             src_is_tensor
             and is_gpu(src_device_type)
@@ -2057,7 +2060,7 @@ def use_scatter_fallback(
             and config.cpp.fallback_scatter_reduce_sum
             and (config.cpp.dynamic_threads or parallel_num_threads() != 1)
         )
-        or (reduction_type == reduce_ty and self_dtype in {torch.bool, torch.int64})
+        or (reduction_type == reduce_ty and self_dtype in (torch.bool, torch.int64))
         or torch.are_deterministic_algorithms_enabled()
     )
 
