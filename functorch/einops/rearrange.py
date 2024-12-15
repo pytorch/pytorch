@@ -14,6 +14,7 @@ from ._parsing import (
     validate_rearrange_expressions,
 )
 
+
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
