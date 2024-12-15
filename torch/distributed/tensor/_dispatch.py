@@ -137,6 +137,7 @@ class OpDispatcher:
         }
         self._custom_op_handlers = {
             aten.linear.default: decompose_handler,
+            aten.matmul.default: decompose_handler,
             aten.is_same_size.default: is_same_size_handler,
             aten.convolution.default: convolution_handler,
             aten.convolution_backward.default: convolution_backward_handler,
@@ -401,9 +402,11 @@ class OpDispatcher:
             mesh,
             OpSchema(
                 op_call,
-                pytree.tree_unflatten(args_schema, args_spec)
-                if args_spec
-                else tuple(args_schema),
+                (
+                    pytree.tree_unflatten(args_schema, args_spec)
+                    if args_spec
+                    else tuple(args_schema)
+                ),
                 kwargs_schema,
                 schema_info=runtime_schema_info,
             ),
