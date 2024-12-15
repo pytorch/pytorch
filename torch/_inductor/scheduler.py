@@ -2670,6 +2670,18 @@ class Scheduler:
                 if not isinstance(choice, torch._inductor.ir.TritonTemplateCallerBase):
                     continue
 
+                # For prologue fusion we check if the underlying template of the choice
+                # supports all allowed prologue inputs. If not, we skip this choice in
+                # the fusion benchmark.
+                # TODO: Remove this check after all Triton templates support prologue fusion.
+                # Currently, persistent+TMA Triton template does not due to the TMA-based loads.
+                if (
+                    not epilogue_fusion
+                    and hasattr(choice, "allowed_prologue_inps")
+                    and choice.allowed_prologue_inps != multi_node.allowed_prologue_inps
+                ):
+                    continue
+
                 if unfused_time >= ms1 + ms2:
                     break
 
