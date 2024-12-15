@@ -3904,22 +3904,9 @@ class ShapeEnv:
             ex_size, source, symbolic_context
         )
         stride: List[Optional[sympy.Expr]] = [None] * len(size)
-        contiguous_striding = True
-        numel = math.prod(size)
-        if isinstance(numel, int) and numel < 2 or ex_stride[-1] != 1:
-            contiguous_striding = False
-        for i in range(len(size) - 2, -1, -1):
-            contiguous_stride = ex_stride[i + 1] * ex_size[i + 1]
-            if (
-                not isinstance(contiguous_stride, sympy.Symbol)
-                and ex_stride[i] != contiguous_stride
-            ):
-                contiguous_striding = False
-
-        if not contiguous_striding:
-            for i, val in enumerate(ex_stride):
-                if val in (0, 1):
-                    stride[i] = sympy.Integer(val)
+        for i, val in enumerate(ex_stride):
+            if val in (0, 1):
+                stride[i] = sympy.Integer(val)
         while any(x is None for x in stride):
             candidates = {
                 ex_size[i] * ex_stride[i]: size[i] * stride[i]
@@ -3943,53 +3930,28 @@ class ShapeEnv:
                     candidates[ex_size[i] * ex_stride[i]] = size[i] * stride[i]  # type: ignore[operator]
 
             if any(x is None for x in stride):
-                if (
-                    contiguous_striding
-                    and dynamic_strides[i] == DimDynamic.INFER_STRIDE
-                ):
-                    # In cases of contiguous striding, we actually want
-                    # to use the stride[i] = stride[i + 1] * size[i + 1]
-                    # formula to prevent specializing to 1. See the following
-                    # issue for more context:
-                    # https://github.com/pytorch/pytorch/issues/142024
-                    if stride[-1] is None:
-                        val, i = 1, len(size) - 1
-                    else:
-                        i, val = max(
-                            (
-                                (i, stride[i + 1] * size[i + 1])
-                                for i in range(len(stride))
-                                if stride[i] is None and stride[i + 1] is not None
-                            ),
-                            key=_nested_int_aware_sort,
-                        )
-                else:
-                    # Bind the smallest unbound stride to a new variable
-                    val, i = min(
-                        (
-                            (ex_stride[i], i)
-                            for i in range(len(stride))
-                            if stride[i] is None
-                        ),
-                        key=_nested_int_aware_sort,
-                    )
-
+                # bind the smallest unbound stride to a new variable
+                val, i = min(
+                    [
+                        (ex_stride[i], i)
+                        for i in range(len(stride))
+                        if stride[i] is None
+                    ],
+                    key=_nested_int_aware_sort,
+                )
                 # Set INFER_STRIDE to STATIC or DUCK depending on sizes
                 dyn_stride = dynamic_strides[i]
                 if dynamic_strides[i] == DimDynamic.INFER_STRIDE:
                     dyn_stride = (
                         DimDynamic.STATIC if are_sizes_static else DimDynamic.DUCK
                     )
-                if not isinstance(val, int):
-                    stride[i] = val
-                else:
-                    stride[i] = self.create_symbol(
-                        val,
-                        TensorPropertySource(source, TensorProperty.STRIDE, i),
-                        dynamic_dim=dyn_stride,
-                        constraint_dim=constraint_strides[i],
-                        symbolic_context=symbolic_context,
-                    )
+                stride[i] = self.create_symbol(
+                    val,
+                    TensorPropertySource(source, TensorProperty.STRIDE, i),
+                    dynamic_dim=dyn_stride,
+                    constraint_dim=constraint_strides[i],
+                    symbolic_context=symbolic_context,
+                )
         assert all(x is not None for x in stride)
 
         sym_sizes = [
@@ -5021,11 +4983,6 @@ class ShapeEnv:
                         verbose_exprs.append(
                             f"{res}  # (unknown var {s0}, please file a bug)"
                         )
-                elif isinstance(source, TensorPropertySource):
-                    # Source is self evident since we are simply guarding
-                    # on a property of a source, for example:
-                    # L['aot6_sub_58'].stride()[0] == L['aot6_sub_58'].size()[1]
-                    verbose_exprs.append(f"{res}")
                 else:
                     verbose_exprs.append(
                         f"{res}  # (unknown source {srcname}, please file a bug)"
