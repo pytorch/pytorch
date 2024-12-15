@@ -904,7 +904,7 @@ class TestFullyShardProcessGroupInit(FSDPTestMultiThread):
         )
         self.assertEqual(mesh.mesh, ref_mesh.mesh)
         self.assertEqual(mesh._coordinate_on_dim, ref_mesh._coordinate_on_dim)
-        for (tag, ranks, group_name), (ref_tag, ref_ranks, ref_group_name) in zip(
+        for (_, ranks, _), (_, ref_ranks, _) in zip(
             mesh._dim_group_infos, ref_mesh._dim_group_infos
         ):
             # Since we manually constructed new subgroups, the test and ref
@@ -1168,12 +1168,17 @@ class TestFullyShardOldImport(FSDPTestMultiThread):
     @unittest.skipIf(not TEST_CUDA, "no cuda")
     def test_old_import_training(self):
         from torch.distributed._composable.fsdp import fully_shard, MixedPrecisionPolicy
+        from torch.distributed._composable.fsdp.fully_shard import FSDPModule
 
         model = nn.Sequential(nn.Linear(16, 16), nn.Linear(16, 16))
         mp_policy = MixedPrecisionPolicy(param_dtype=torch.bfloat16)
         fully_shard(model[0], mp_policy=mp_policy)
         fully_shard(model[1], mp_policy=mp_policy)
         fully_shard(model, mp_policy=mp_policy)
+
+        self.assertIsInstance(model[0], FSDPModule)
+        self.assertIsInstance(model[1], FSDPModule)
+        self.assertIsInstance(model, FSDPModule)
 
         inp = torch.randn((8, 16), device="cuda")
         model(inp).sum().backward()
