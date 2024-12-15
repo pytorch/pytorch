@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import functools
-from typing import Callable, Union, TYPE_CHECKING
+from typing import Callable, TYPE_CHECKING, Union
 
 import torch
 from functorch._C import dim as _C

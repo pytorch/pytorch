@@ -29,6 +29,7 @@ import keyword
 import warnings
 from typing import Optional, TYPE_CHECKING, Union
 
+
 if TYPE_CHECKING:
     from collections.abc import Collection, Mapping
 
