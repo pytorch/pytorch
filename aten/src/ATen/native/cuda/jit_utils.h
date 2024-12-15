@@ -56,9 +56,14 @@ KernelDescriptor make_kernel_descriptor(
 
 inline int can_vectorize_up_to(size_t default_alignment, void *pointer) {
   auto ip = reinterpret_cast<uintptr_t>(pointer);
-  if (ip % (8 * default_alignment) == 0) {
+#ifdef USE_ROCM
+  if ((default_alignment == 1) && (ip % (16 * default_alignment) == 0)) {
+    return 16;
+  }
+  if ((default_alignment <= 2) && (ip % (8 * default_alignment) == 0)) {
     return 8;
   }
+#endif
   if (ip % (4 * default_alignment) == 0) {
     return 4;
   }
@@ -94,11 +99,13 @@ int calc_io_size(
     const int nOutputs,
     const c10::ScalarType& inputs_type,
     const c10::ScalarType& result_type);
-
-int calc_optimal_vec_size(int vec_size, int dtype_size);
-
-int calc_thread_work_size(int io_size);
 #endif
+
+int calc_thread_work_size(
+    const int nInputs,
+    const int nOutputs,
+    const c10::ScalarType& inputs_type,
+    const c10::ScalarType& result_type);
 
 std::string generate_code(
     int nInputs,

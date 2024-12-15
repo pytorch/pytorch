@@ -95,12 +95,7 @@ void launch_jitted_unrolled_kernel(
 
   TORCH_INTERNAL_ASSERT(N > 0 && N <= std::numeric_limits<int32_t>::max());
 
-  int tws = JIT_THREAD_WORK_SIZE;
-#ifdef USE_ROCM
-  auto io_size = at::cuda::jit::calc_io_size(desc.nInputs, desc.nOutputs, desc.f_inputs_type, desc.result_type);
-  tws = at::cuda::jit::calc_thread_work_size(io_size);
-#endif
-
+  int tws = at::cuda::jit::calc_thread_work_size(desc.nInputs, desc.nOutputs, desc.f_inputs_type, desc.result_type);
   int bws = tws * num_threads();
   //casting result to int is always safe, intermediate is int64 and won't overflow
   const uint32_t grid = (N + bws - 1) / bws;
@@ -129,20 +124,13 @@ void launch_jitted_vectorized_kernel(
     void *scalar_val, c10::ArrayRef<void*> extra_args) {
   TORCH_INTERNAL_ASSERT(N > 0 && N <= std::numeric_limits<int32_t>::max());
 
-  int tws = JIT_THREAD_WORK_SIZE;
-
-  int vec_size = at::cuda::jit::can_vectorize_up_to(
-      desc, c10::ArrayRef<char*>(data.data(), data.size()));
-
-#ifdef USE_ROCM
-  auto io_size = at::cuda::jit::calc_io_size(desc.nInputs, desc.nOutputs, desc.f_inputs_type, desc.result_type);
-  tws = at::cuda::jit::calc_thread_work_size(io_size);
-  vec_size = at::cuda::jit::calc_optimal_vec_size(vec_size, io_size);
-#endif
-
+  int tws = at::cuda::jit::calc_thread_work_size(desc.nInputs, desc.nOutputs, desc.f_inputs_type, desc.result_type);
   int bws = tws * num_threads();
   // N is still int64_t for the computation, but it's always safe to cast result to int
   const uint32_t grid = (N + bws - 1) / bws;
+
+  int vec_size = at::cuda::jit::can_vectorize_up_to(
+      desc, c10::ArrayRef<char*>(data.data(), data.size()));
 
   // Different kernels are compiled depending on what we're vectorizing up to (1, 2 or 4 elements)
   //   fn_ptr is set to the appropriate function based on the vec size and GPU used

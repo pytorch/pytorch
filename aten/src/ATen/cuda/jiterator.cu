@@ -21,14 +21,8 @@ static inline void launch_jitted_vectorized_kernel_dynamic(
   int nOutputs = iter.noutputs();
   const at::ScalarType common_dtype = iter.common_dtype();
 
-  int tws = JIT_THREAD_WORK_SIZE;
+  int tws = at::cuda::jit::calc_thread_work_size(nInputs, nOutputs, common_dtype, common_dtype);
   int vec_size = jitted_can_vectorize_up_to(iter);
-
-#ifdef USE_ROCM
-  auto io_size = at::cuda::jit::calc_io_size(nInputs, nOutputs, common_dtype, common_dtype);
-  tws = at::cuda::jit::calc_thread_work_size(io_size);
-  vec_size = at::cuda::jit::calc_optimal_vec_size(vec_size, io_size);
-#endif
 
   int bws = tws * num_threads();
   // N is still int64_t for the computation, but it's always safe to cast result to int
@@ -138,12 +132,7 @@ static inline void launch_jitted_unrolled_kernel_dynamic(
   int nOutputs = iter.noutputs();
   const at::ScalarType common_dtype = iter.common_dtype();
 
-  int tws = JIT_THREAD_WORK_SIZE;
-#ifdef USE_ROCM
-  auto io_size = at::cuda::jit::calc_io_size(nInputs, nOutputs, common_dtype, common_dtype);
-  tws = at::cuda::jit::calc_thread_work_size(io_size);
-#endif
-
+  int tws = at::cuda::jit::calc_thread_work_size(nInputs, nOutputs, common_dtype, common_dtype);
   int bws = tws * num_threads();
   //casting result to int is always safe, intermediate is int64 and won't overflow
   const uint32_t grid = (N + bws - 1) / bws;

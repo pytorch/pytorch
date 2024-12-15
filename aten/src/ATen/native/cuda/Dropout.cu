@@ -234,6 +234,9 @@ int get_vector_size(at::Tensor self, at::Tensor ret, at::Tensor mask) {
     vec_size = 1;
   } else {
     vec_size = memory::can_vectorize_up_to<scalar_t>((const char*)self.const_data_ptr());
+#ifdef USE_ROCM
+    vec_size = std::min(vec_size, 8);
+#endif
   }
 
   // check that we'd have no remainders - prefer a smaller vector size with no remainders over a larger vector and remainder.

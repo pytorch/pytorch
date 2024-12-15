@@ -88,13 +88,15 @@ constexpr auto input_size(args_t args, std::index_sequence<Is...>) {
   }
 }
 
-template <int vec_size, int dtype_size>
+template <int vec_size, int io_size>
 constexpr auto calc_optimal_vec_size() {
   static_assert(vec_size != 0);
-  static_assert(dtype_size != 0);
-  if constexpr (dtype_size <= 2 && vec_size >= 8) {
+  static_assert(io_size != 0);
+  if constexpr (io_size == 1 && vec_size >= 16) {
+    return 16;
+  } else if constexpr (io_size <= 2 && vec_size >= 8) {
     return 8;
-  } else if constexpr (dtype_size <= 4 && vec_size >= 4) {
+  } else if constexpr (io_size <= 4 && vec_size >= 4) {
     return 4;
   } else if constexpr (vec_size >= 4) {
     return 4;
@@ -193,11 +195,18 @@ static inline void launch_vectorized_kernel(
   int vec_size = memory::can_vectorize_up_to<func_t>(data);
 
   switch (vec_size) {
+#ifdef USE_ROCM
+    case 16:
+      vectorized_elementwise_kernel<16, func_t, array_t>
+          <<<grid, num_threads(), 0, stream>>>(N, f, data);
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
+      break;
     case 8:
       vectorized_elementwise_kernel<8, func_t, array_t>
           <<<grid, num_threads(), 0, stream>>>(N, f, data);
       C10_CUDA_KERNEL_LAUNCH_CHECK();
       break;
+#endif
     case 4:
       vectorized_elementwise_kernel<4, func_t, array_t>
           <<<grid, num_threads(), 0, stream>>>(N, f, data);

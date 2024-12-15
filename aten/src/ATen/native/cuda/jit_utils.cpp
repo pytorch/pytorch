@@ -953,26 +953,15 @@ int calc_io_size(
 
     return 0;
 }
+#endif
 
-int calc_optimal_vec_size(int vec_size, int dtype_size) {
-  TORCH_INTERNAL_ASSERT(vec_size != 0);
-  TORCH_INTERNAL_ASSERT(dtype_size != 0);
-  if (dtype_size == 1 && vec_size >= 16) {
-    return 16;
-  } else if (dtype_size <= 2 && vec_size >= 8) {
-    return 8;
-  } else if (dtype_size <= 4 && vec_size >= 4) {
-    return 4;
-  } else if (vec_size >= 4) {
-    return 4;
-  } else if (vec_size >= 2) {
-    return 2;
-  } else {
-    return 1;
-  }
-}
-
-int calc_thread_work_size(int io_size) {
+int calc_thread_work_size(
+    const int nInputs,
+    const int nOutputs,
+    const c10::ScalarType& inputs_type,
+    const c10::ScalarType& result_type) {
+#ifdef USE_ROCM
+    auto io_size = at::cuda::jit::calc_io_size(nInputs, nOutputs, inputs_type, result_type);
     TORCH_INTERNAL_ASSERT(io_size > 0);
     if (io_size == 1) {
         return 16;
@@ -982,8 +971,10 @@ int calc_thread_work_size(int io_size) {
         return 4;
     }
     return io_size;
-}
+#else
+    return JIT_THREAD_WORK_SIZE
 #endif
+}
 
 std::string generate_code(
     const KernelDescriptor &desc,

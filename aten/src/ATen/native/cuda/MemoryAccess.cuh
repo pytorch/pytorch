@@ -343,6 +343,26 @@ struct multi_outputs_unroll {
 
 }  // namespace policies
 
+#if 0
+inline C10_HOST_DEVICE int calc_optimal_vec_size(int vec_size, int io_size) {
+  assert(vec_size != 0);
+  assert(io_size != 0);
+  if (io_size == 1 && vec_size >= 16) {
+    return 16;
+  } else if (io_size <= 2 && vec_size >= 8) {
+    return 8;
+  } else if (io_size <= 4 && vec_size >= 4) {
+    return 4;
+  } else if (vec_size >= 4) {
+    return 4;
+  } else if (vec_size >= 2) {
+    return 2;
+  } else {
+    return 1;
+  }
+}
+#endif
+
 // This is only used in host, but we will wrap this into some templates
 // which is C10_HOST_DEVICE, so we have to make this C10_HOST_DEVICE
 // in order to compile
@@ -353,7 +373,11 @@ inline C10_HOST_DEVICE int can_vectorize_up_to(const char *pointer) {
   constexpr int vec4_alignment = std::alignment_of_v<aligned_vector<scalar_t, 4>>;
 #ifdef USE_ROCM
   constexpr int vec8_alignment = std::alignment_of_v<aligned_vector<scalar_t, 8>>;
-  if (address % vec8_alignment == 0) {
+  constexpr int vec16_alignment = std::alignment_of_v<aligned_vector<scalar_t, 16>>;
+  constexpr int type_size = sizeof(scalar_t);
+  if (type_size == 1 && (address % vec16_alignment == 0)) {
+    return 16;
+  } else if (type_size <= 2 && (address % vec8_alignment == 0)) {
     return 8;
   } else if (address % vec4_alignment == 0) {
     return 4;
