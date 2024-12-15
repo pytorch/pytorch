@@ -343,26 +343,6 @@ struct multi_outputs_unroll {
 
 }  // namespace policies
 
-#if 0
-inline C10_HOST_DEVICE int calc_optimal_vec_size(int vec_size, int io_size) {
-  assert(vec_size != 0);
-  assert(io_size != 0);
-  if (io_size == 1 && vec_size >= 16) {
-    return 16;
-  } else if (io_size <= 2 && vec_size >= 8) {
-    return 8;
-  } else if (io_size <= 4 && vec_size >= 4) {
-    return 4;
-  } else if (vec_size >= 4) {
-    return 4;
-  } else if (vec_size >= 2) {
-    return 2;
-  } else {
-    return 1;
-  }
-}
-#endif
-
 // This is only used in host, but we will wrap this into some templates
 // which is C10_HOST_DEVICE, so we have to make this C10_HOST_DEVICE
 // in order to compile
