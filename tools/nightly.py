@@ -44,22 +44,18 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import textwrap
 import time
 import uuid
 from ast import literal_eval
 from datetime import datetime
 from pathlib import Path
 from platform import system as platform_system
-from typing import (
-    Any,
-    Callable,
-    cast,
-    Generator,
-    Iterable,
-    Iterator,
-    NamedTuple,
-    TypeVar,
-)
+from typing import Any, Callable, cast, NamedTuple, TYPE_CHECKING, TypeVar
+
+
+if TYPE_CHECKING:
+    from collections.abc import Generator, Iterable, Iterator
 
 
 try:
@@ -127,15 +123,15 @@ PIP_SOURCES = {
         supported_platforms={"Linux", "Windows"},
         accelerator="cuda",
     ),
-    "cuda-12.1": PipSource(
-        name="cuda-12.1",
-        index_url=f"{PYTORCH_NIGHTLY_PIP_INDEX_URL}/cu121",
-        supported_platforms={"Linux", "Windows"},
-        accelerator="cuda",
-    ),
     "cuda-12.4": PipSource(
         name="cuda-12.4",
         index_url=f"{PYTORCH_NIGHTLY_PIP_INDEX_URL}/cu124",
+        supported_platforms={"Linux", "Windows"},
+        accelerator="cuda",
+    ),
+    "cuda-12.6": PipSource(
+        name="cuda-12.6",
+        index_url=f"{PYTORCH_NIGHTLY_PIP_INDEX_URL}/cu126",
         supported_platforms={"Linux", "Windows"},
         accelerator="cuda",
     ),
@@ -322,6 +318,42 @@ class Venv:
         self.base_python("-m", "venv", str(self.prefix))
         assert self.is_venv(), "Failed to create virtual environment."
         (self.prefix / ".gitignore").write_text("*\n", encoding="utf-8")
+
+        if LINUX:
+            activate_script = self.prefix / "bin" / "activate"
+            st_mode = activate_script.stat().st_mode
+            activate_script.chmod(st_mode | 0o200)
+            with (self.prefix / "bin" / "activate").open(mode="a") as f:
+                f.write(
+                    "\n"
+                    + textwrap.dedent(
+                        f"""
+                        # Add NVIDIA PyPI packages to LD_LIBRARY_PATH
+                        export LD_LIBRARY_PATH="$(
+                            {self.executable.name} - <<EOS
+                        import glob
+                        import itertools
+                        import os
+                        import site
+
+                        nvidia_libs = [
+                            p.rstrip("/")
+                            for p in itertools.chain.from_iterable(
+                                glob.iglob(f"{{site_dir}}/{{pattern}}/", recursive=True)
+                                for site_dir in site.getsitepackages()
+                                for pattern in ("nvidia/**/lib", "cu*/**/lib")
+                            )
+                        ]
+                        ld_library_path = os.getenv("LD_LIBRARY_PATH", "").split(":")
+                        print(":".join(dict.fromkeys((*nvidia_libs, *ld_library_path))))
+                        EOS
+                        )"
+                        """
+                    ).strip()
+                    + "\n"
+                )
+            activate_script.chmod(st_mode)
+
         return self.ensure()
 
     def ensure(self) -> Path:

@@ -531,7 +531,7 @@ Tensor to_functional_tensor(const Tensor& tensor) {
 }
 std::optional<Tensor> to_functional_tensor(const std::optional<Tensor>& tensor) {
   if (tensor.has_value()) {
-    return std::make_optional<Tensor>(to_functional_tensor(*tensor));
+    return to_functional_tensor(*tensor);
   }
   return std::nullopt;
 }
@@ -569,7 +569,7 @@ Tensor from_functional_tensor(const Tensor& tensor, bool assert_functional) {
 }
 std::optional<Tensor> from_functional_tensor(const std::optional<Tensor>& t, bool assert_functional) {
   if (t.has_value()) {
-    return std::make_optional<Tensor>(from_functional_tensor(*t, assert_functional));
+    return from_functional_tensor(*t, assert_functional);
   }
   return std::nullopt;
 }

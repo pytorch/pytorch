@@ -2,13 +2,13 @@
 from __future__ import annotations
 
 import logging
-from typing import Mapping, Sequence
+from typing import Sequence
 
-from onnxscript import ir
+from torch.onnx._internal._lazy_import import onnxscript_apis, onnxscript_ir as ir
 
 
-_MIN_ONNX_OPSET_VERSION = 18
-
+# The opset domain for ONNX operators
+_ONNX_DOMAIN = ""
 
 logger = logging.getLogger(__name__)
 
@@ -44,32 +44,38 @@ def add_torchlib_common_imports(model: ir.Model) -> None:
         logger.exception("Failed to add torchlib common imports to the model.")
 
 
-def _get_opset_version(node: ir.Node, opset_imports: Mapping[str, int]) -> int:
-    """Determine the appropriate opset version for a node."""
-    domain = node.domain
-    version = node.version if node.version is not None else 1
-    if domain == "":
-        return max(version, _MIN_ONNX_OPSET_VERSION)
-    elif domain in opset_imports:
-        # Heuristic to use the latest version seen
-        return max(version, opset_imports[domain])
-    return version
+def _maybe_set_opset_version(
+    opset_imports: dict[str, int], domain: str, version: int | None
+) -> None:
+    """Set the opset version for the domain."""
+    if domain in opset_imports and opset_imports[domain] != 1:
+        # Already set
+        return
+    if domain == _ONNX_DOMAIN:
+        # Set the default opset version for ONNX operators
+        opset_imports[domain] = onnxscript_apis.torchlib_opset_version()
+        return
+    if version is None:
+        # We don't know the opset version, so set it to 1
+        # This is valid for the custom function domains like "pkg.torch.__subgraph__"
+        opset_imports[domain] = 1
+        return
+    # Set the known opset version for the domain
+    opset_imports[domain] = version
 
 
 def add_opset_imports(model: ir.Model) -> None:
     """Collect all opsets used and add opset imports to the model and functions."""
     for node in ir.traversal.RecursiveGraphIterator(model.graph):
         domain = node.domain
-        model.opset_imports[domain] = _get_opset_version(node, model.opset_imports)
+        _maybe_set_opset_version(model.opset_imports, domain, node.version)
 
     for function in model.functions.values():
         for node in ir.traversal.RecursiveGraphIterator(function):
             domain = node.domain
-            function.opset_imports[domain] = _get_opset_version(
-                node, function.opset_imports
-            )
-        for opset, version in function.opset_imports.items():
+            _maybe_set_opset_version(function.opset_imports, domain, node.version)
+        for domain, version in function.opset_imports.items():
             # Add all opsets used in the function to the model, because ONNX Runtime
             # does not handle adding the opset imports to the model after inlining during inference.
             # This should happen after all opsets are collected for the function from its nodes.
-            model.opset_imports[opset] = max(version, model.opset_imports.get(opset, 1))
+            _maybe_set_opset_version(model.opset_imports, domain, version)
