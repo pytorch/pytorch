@@ -1083,6 +1083,8 @@ def _apply_kernel_options(
     kernel_options.setdefault("PRESCALE_QK", False)
     kernel_options.setdefault("ROWS_GUARANTEED_SAFE", False)
     kernel_options.setdefault("BLOCKS_ARE_CONTIGUOUS", False)
+    # This forces all biases grad scatters to be done in the DQ iteration loop of the backwards
+    kernel_options.setdefault("WRITE_DQ", True)
 
     # If forward kernel needs to return logsumexp is decided by this rule internally.
     assert "OUTPUT_LOGSUMEXP" not in kernel_options
