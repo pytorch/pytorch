@@ -1122,6 +1122,9 @@ class DelayReplaceLine(DeferredLineBase):
 
 @functools.lru_cache(None)
 def is_big_gpu(index_or_device: Union[int, torch.device] = 0) -> bool:
+    if torch.xpu.is_available():
+        return True
+
     if isinstance(index_or_device, torch.device):
         device = index_or_device
     else:
@@ -1155,9 +1158,9 @@ def use_max_autotune() -> bool:
     )
 
 
-def _use_template_for_cuda(layout, allowed_layout_dtypes: List[torch.dtype]) -> bool:
+def _use_template_for_gpu(layout, allowed_layout_dtypes: List[torch.dtype]) -> bool:
     return (
-        layout.device.type == "cuda"
+        is_gpu(layout.device.type)
         and layout.dtype in allowed_layout_dtypes
         and is_big_gpu(layout.device)
     )
@@ -1186,8 +1189,8 @@ def use_triton_template(layout, *, enable_int32=False, enable_float8=False):
     return (
         (
             (
-                layout.device.type == "cuda"
-                and _use_template_for_cuda(layout, layout_dtypes)
+                is_gpu(layout.device.type)
+                and _use_template_for_gpu(layout, layout_dtypes)
             )
             or (layout.device.type == "cpu" and layout.dtype in layout_dtypes)
         )
@@ -1211,7 +1214,7 @@ def use_cutlass_template(layout, m, n, k):
 
     layout_dtypes = [torch.float16, torch.bfloat16, torch.float32, torch.int32]
     res = (
-        _use_template_for_cuda(layout, layout_dtypes)
+        _use_template_for_gpu(layout, layout_dtypes)
         and use_max_autotune()
         and _use_autotune_backend("CUTLASS")
     )
