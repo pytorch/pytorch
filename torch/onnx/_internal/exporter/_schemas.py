@@ -95,7 +95,7 @@ class TypeConstraintParam:
 
     @classmethod
     def any_value(cls, name: str, description: str = "") -> TypeConstraintParam:
-        return cls(name, _ALL_VALUE_TYPES, description)
+        return cls(name, _ALL_VALUE_TYPES, description)  # type: ignore[arg-type, unused-ignore]
 
 
 @dataclasses.dataclass(frozen=True)
@@ -170,7 +170,7 @@ def _get_type_from_str(
             type_ = ir.OptionalType(type_)
         else:
             raise ValueError(f"Unknown type part: '{type_part}' in type '{type_str}'")
-    return type_
+    return type_  # type: ignore[return-value, unused-ignore]
 
 
 def _convert_formal_parameter(
@@ -284,7 +284,7 @@ def _get_allowed_types_from_type_annotation(
         else:
             bound = type_.__bound__
             if bound is None:
-                allowed_types = _ALL_VALUE_TYPES
+                allowed_types = _ALL_VALUE_TYPES  # type: ignore[assignment, unused-ignore]
             else:
                 allowed_types.update(_get_allowed_types_from_type_annotation(bound))
         return allowed_types
@@ -320,7 +320,7 @@ def _get_allowed_types_from_type_annotation(
         }
 
     # Allow everything by default
-    return _ALL_VALUE_TYPES
+    return _ALL_VALUE_TYPES  # type: ignore[return-value, unused-ignore]
 
 
 @dataclasses.dataclass
@@ -410,7 +410,7 @@ class OpSignature:
                     name=param.name,
                     type=ir.AttributeType(param.type),  # type: ignore[arg-type]
                     required=param.required,
-                    default=default_attr,
+                    default=default_attr,  # type: ignore[arg-type, unused-ignore]
                 )
             )
 

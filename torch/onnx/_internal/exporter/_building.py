@@ -102,9 +102,9 @@ def _construct_named_inputs_and_attrs(
             ), f"Expected AttributeParameter, got {type(param)}"
             if reversed_args_stack:
                 # First exhaust the positional arguments
-                attribute = reversed_args_stack.pop()
+                attribute = reversed_args_stack.pop()  # type: ignore[assignment, unused-ignore]
             elif param.name in kwargs:
-                attribute = kwargs[param.name]
+                attribute = kwargs[param.name]  # type: ignore[assignment, unused-ignore]
             elif param.default is not None:
                 attribute = param.default
             else:
@@ -351,7 +351,7 @@ def _process_python_constants(
             constant_value = _get_or_create_constant(constant_farm, arg, dtype, opset)  # type: ignore[arg-type]
 
         named_inputs[param.name] = constant_value
-    return named_inputs
+    return named_inputs  # type: ignore[return-value, unused-ignore]
 
 
 def _process_python_sequences(
@@ -439,7 +439,7 @@ def _process_python_sequences(
                         val, (bool, int, float)
                     ), f"Expected int or float, got {type(val)}"
                     new_args.append(
-                        _get_or_create_constant(constant_farm, [val], dtype, opset)
+                        _get_or_create_constant(constant_farm, [val], dtype, opset)  # type: ignore[arg-type, unused-ignore]
                     )
             named_inputs[name] = opset.Concat(*new_args, axis=0)
             continue
@@ -529,7 +529,7 @@ class OpRecorder(evaluator.Evaluator):
             )
             converted_named_inputs = _process_python_sequences(
                 op_signature,
-                converted_named_inputs,
+                converted_named_inputs,  # type: ignore[arg-type, unused-ignore]
                 type_binding,
                 self.constant_farm,
                 self.opset,
@@ -553,12 +553,12 @@ class OpRecorder(evaluator.Evaluator):
                 f"named_inputs={named_inputs}, converted_named_inputs={converted_named_inputs}, "
                 f"named_attrs={named_attrs}, opset={self.opset}, op_signature={op_signature}."
             ) from e
-        return node.outputs
+        return node.outputs  # type: ignore[return-value, unused-ignore]
 
     def eval(
         self,
         schema: onnx.defs.OpSchema,
-        args: Sequence[AllowedArgType],
+        args: Sequence[AllowedArgType],  # type: ignore[override, unused-ignore]
         kwargs: Mapping[str, AllowedArgType],
     ) -> _tensors.SymbolicTensor | Sequence[_tensors.SymbolicTensor]:
         try:
@@ -582,7 +582,7 @@ class OpRecorder(evaluator.Evaluator):
                     # dtypes are available
                     if src_input.dtype == target_type.dtype:
                         # Same type. No cast needed
-                        return src_input
+                        return src_input  # type: ignore[return-value, unused-ignore]
                     else:
                         # Create a Cast node
                         return self.opset.Cast(src_input, to=target_type.dtype)
@@ -596,7 +596,7 @@ class OpRecorder(evaluator.Evaluator):
                 f"Error calling operator '{schema.name}' with args {args} and kwargs {kwargs}."
             ) from e
 
-    def eval_function(
+    def eval_function(  # type: ignore[override, unused-ignore]
         self,
         function: onnxscript.OnnxFunction,
         args: Sequence[AllowedArgType],

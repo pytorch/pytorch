@@ -21,7 +21,7 @@ from torch.monitor import _WaitCounter
 try:
     import redis
 except ImportError:
-    redis = None
+    redis = None  # type: ignore[assignment, unused-ignore]
 
 
 log = logging.getLogger(__name__)

@@ -586,7 +586,7 @@ class SACEstimator(TorchDispatchMode):
     ) -> SACTradeOffStats:
         try:
             import numpy as np
-            import pwlf  # type: ignore[import-not-found]
+            import pwlf  # type: ignore[import-untyped, import-not-found, unused-ignore]
         except ImportError as err:
             raise ImportError("Please install pwlf and numpy package.") from err
 

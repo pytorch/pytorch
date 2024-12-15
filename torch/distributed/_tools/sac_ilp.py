@@ -8,7 +8,7 @@ from torch.distributed._tools.sac_estimator import SACStats
 
 
 try:
-    from pulp import (  # type: ignore[import-not-found]
+    from pulp import (  # type: ignore[import-untyped, import-not-found, unused-ignore]
         lpDot,
         LpInteger,
         LpMaximize,

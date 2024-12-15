@@ -792,7 +792,7 @@ def _get_inputs_and_attributes(
             } or isinstance(kwarg, torch.device):
                 attr = str(kwarg)
             elif isinstance(kwarg, torch.dtype):
-                attr = _torch_dtype_to_onnx_dtype(kwarg)
+                attr = _torch_dtype_to_onnx_dtype(kwarg)  # type: ignore[assignment, unused-ignore]
             else:
                 attr = kwarg  # type: ignore[assignment]
 
@@ -1129,7 +1129,7 @@ def _exported_program_to_onnx_program(
         exported_program.named_buffers(),
         exported_program.constants.items(),
     ):
-        initializer = model.graph.initializers.get(name)
+        initializer = model.graph.initializers.get(name)  # type: ignore[assignment, unused-ignore]
         if initializer is None:
             logger.warning("Tensor '%s' is not one of the initializers", name)
             continue

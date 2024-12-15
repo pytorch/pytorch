@@ -234,7 +234,7 @@ ONNXProgram(
             self.save(model_path, external_data=True)
             model = model_path
         else:
-            model = self.model_proto.SerializeToString()
+            model = self.model_proto.SerializeToString()  # type: ignore[assignment, unused-ignore]
 
         self._inference_session = initializer(model)
         logger.debug("Inference session initialized.")
