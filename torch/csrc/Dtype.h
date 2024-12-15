@@ -13,7 +13,7 @@ struct TORCH_API THPDtype {
   char name[DTYPE_NAME_LEN + 1];
 };
 
-TORCH_PYTHON_API TORCH_API extern PyTypeObject THPDtypeType;
+TORCH_API extern PyTypeObject THPDtypeType;
 
 inline bool THPDtype_Check(PyObject* obj) {
   return Py_TYPE(obj) == &THPDtypeType;
