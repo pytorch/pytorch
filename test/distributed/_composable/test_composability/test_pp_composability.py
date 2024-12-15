@@ -537,12 +537,6 @@ class ComposabilityTest(MultiProcessTestCase):
             else:
                 pipeline_schedule.step()
 
-            # accumulate losses across pipeline microbatches
-            loss = (
-                torch.mean(torch.stack(losses))
-                if is_last_stage
-                else torch.Tensor([-1.0])
-            )
             for optimizer in optimizers:
                 optimizer.step()
 
