@@ -1,10 +1,7 @@
-from typing import Optional, Union
+from typing import Optional
 
 import torch
-from torch import device as _device
-
-
-_device_t = Union[_device, str, int, None]
+from torch.types import Device as _device_t
 
 
 def _get_device_index(device: _device_t, optional: bool = False) -> int:
@@ -24,5 +21,5 @@ def _get_device_index(device: _device_t, optional: bool = False) -> int:
             raise ValueError(
                 f"Expected a torch.device with a specified index or an integer, but got:{device}"
             )
-        return torch.accelerator.current_device_idx()
+        return torch.accelerator.current_device_index()
     return device_index

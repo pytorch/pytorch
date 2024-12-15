@@ -149,6 +149,7 @@ jobs:
       GPU_ARCH_VERSION: 12.6
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.6-main
+      DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.9"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
@@ -173,6 +174,7 @@ jobs:
       GPU_ARCH_VERSION: 12.6
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.6-main
+      DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.9"
       build_name: manywheel-py3_9-cuda12_6

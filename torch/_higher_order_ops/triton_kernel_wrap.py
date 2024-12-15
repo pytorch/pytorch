@@ -24,7 +24,6 @@ import torch.fx as fx
 import torch.utils._pytree as pytree
 from torch import SymInt, Tensor
 from torch._C import DispatchKey
-from torch._dynamo.variables.lazy import LazyVariableTracker, VariableTracker
 from torch._ops import HigherOrderOperator
 from torch._prims_common import clone_preserve_strides
 from torch._subclasses.fake_tensor import FakeTensorMode
@@ -601,7 +600,7 @@ def identify_mutated_tensors(
         return [
             ordered_tensor_names[i] for i, mutated in enumerate(mutations) if mutated
         ]
-    except Exception as e:
+    except Exception:
         log.warning(
             "Encountered an exception in identify_mutated_tensors, assuming every input is mutated",
             exc_info=True,
@@ -1028,6 +1027,31 @@ class TritonHOPifier:
     ) -> Union[Tuple[Union[int, sympy.Expr, SymInt], ...], Tuple["Proxy", ...]]:
         raise NotImplementedError("abstract method")
 
+    def call_user_defined_fn(
+        self, user_fn: Callable[..., Any], args: List, kwargs: Dict
+    ) -> Any:
+        raise NotImplementedError("abstract method")
+
+    def apply_heuristic(  # type: ignore[no-untyped-def]
+        self,
+        kwarg_key: str,
+        heuristic: Callable[..., Any],
+        args: Dict,
+        kwargs: Dict,
+        tx,
+    ) -> Dict:
+        raise NotImplementedError("abstract method")
+
+    def call_prune_configs_if_required(  # type: ignore[no-untyped-def]
+        self,
+        autotuner,
+        args,
+        kwargs,
+        configs,
+        tx,
+    ) -> Any:
+        raise NotImplementedError("abstract method")
+
     def call_HOP(  # type: ignore[no-untyped-def]
         self,
         variable,
@@ -1180,48 +1204,29 @@ class TritonHOPifier:
                 "Please use a Config in @triton.autotune instead."
             )
 
-        # run @heuristics to populate kwargs
-        # heuristics decorator always is nested beneath the autotuner decorator
-        if isinstance(variable.kernel.fn, Heuristics):
-            # args and kwargs aren't real values yet
-            # e.g., LazyVariableTracker
-            # If a user wants to access them, we should realize them
-            def maybe_lazy_unwrap(
-                var: LazyVariableTracker | VariableTracker,
-            ) -> Union[Any, VariableTracker, LazyVariableTracker]:
-                while isinstance(var, VariableTracker) and hasattr(var, "realize"):
-                    var = var.realize()
-                if hasattr(var, "value"):
-                    # if we can return the value, do it
-                    return var.value
-                elif hasattr(var, "get_real_value"):
-                    return var.get_real_value()
-                else:
-                    return var
+        # We support running a single Autotuner for each Triton kernel
+        # Currently, if there are multiple autotuning decorators, the subsequent ones will be silently ignored
+        # We raise an error here to avoid silent incorrectness
+        iter_kernel = variable.kernel
+        autotuner_count = 0
+        while not isinstance(iter_kernel, JITFunction):
+            if isinstance(iter_kernel, Autotuner):
+                autotuner_count += 1
+            if autotuner_count > 1:
+                self.raise_unsupported(
+                    "Passing multiple @triton.autotune decorators is not supported. "
+                    "Please use a single @triton.autotune decorator instead."
+                )
+            iter_kernel = iter_kernel.fn
 
-            # we want to lazily realize values if possible
-            class LazyRealizeArgsKwargs(dict):
-                def __init__(self, *args: Any, **kwargs: Any) -> None:
-                    super().__init__(*args, **kwargs)
-
-                def __getitem__(self, key: Any) -> Any:
-                    item = super().__getitem__(key)
-                    # TensorVariable is an instance of LazyVariableTracker
-                    # But we have to handle it differently (there may be no value)
-                    return maybe_lazy_unwrap(item)
-
-            lazyKwargs = LazyRealizeArgsKwargs(
-                {key: maybe_lazy_unwrap(kwarg) for key, kwarg in kwargs.items()}
-            )
-            tempArgs = dict(zip(variable.kernel.arg_names, args))
-            lazyArgs = LazyRealizeArgsKwargs(
-                {key: maybe_lazy_unwrap(arg) for key, arg in tempArgs.items()}
-            )
-
-            # We need to wrap the results of the calling eachheuristic for Dynamo
-            from torch._dynamo.variables.builder import SourcelessBuilder
-
-            # variable.kernel.values = []
+        # Let's process the @triton.heuristics decorator:
+        # - We know there is only 1 autotuner decorator here
+        # - We can apply the heuristic to all triton.Configs in the order that the decorators appear
+        #   This way, when the config is selected, the heuristics have already been applied.
+        # - Decorators that appear *before* the autotuner are already processed correctly
+        if isinstance(variable.kernel, Autotuner) and isinstance(
+            variable.kernel.fn, Heuristics
+        ):
             # unwrap the heuristics decorator, we don't need it anymore
             # variable.kernel ==> Autotuner
             # variable.kernel.fn ==> Heuristics
@@ -1229,18 +1234,69 @@ class TritonHOPifier:
             # There can be arbitrarily many heuristics wrappers here!
             # ...
             # variable.kernel.fn ==> JITFunction
-            # assert that tx is not None for the type checker
+
             assert tx is not None
+
+            # One way of doing this is iterating over configs, adding each config to the kwargs, running heuristics on the args / kwargs
+            # and augmenting the config with the result of the heuristics.
+            # We should also bail out if heuristics returns non-constant values, as we can't put them into configs.
+
+            # Copy the configs, we are going to be modifying them
+            new_configs = copy.deepcopy(variable.kernel.configs)
+
+            named_args = dict(zip(variable.kernel.arg_names, args))
+
+            # Iterate through all of the heuristics wrappers that come after the autotune wrapper
             iter_kernel = variable.kernel.fn
             while isinstance(iter_kernel, Heuristics):
-                for v, heuristic_fn in iter_kernel.values.items():
-                    kwargs[v] = SourcelessBuilder.create(
-                        tx, heuristic_fn({**lazyArgs, **lazyKwargs})
-                    )
-                iter_kernel = iter_kernel.fn
+                # For each config, apply the heuristic fn
+                for config_idx in range(len(new_configs)):
+                    for kwarg_key, heuristic_fn in iter_kernel.values.items():
+                        # Run heuristics on the combined configs + kwargs
+                        # We define a apply_heuristic wrapper because we want to assert that the results are constants values
+                        configs_kwargs = self.apply_heuristic(
+                            kwarg_key,
+                            heuristic_fn,
+                            named_args,
+                            {**kwargs, **new_configs[config_idx].__dict__["kwargs"]},
+                            tx,
+                        )
+                        # Update the kwargs in each config
+                        for k, v in configs_kwargs.items():
+                            new_configs[config_idx].__dict__["kwargs"][k] = v
 
-            variable.kernel.fn = iter_kernel
-            assert isinstance(variable.kernel.fn, JITFunction)
+                iter_kernel = iter_kernel.fn
+            assert isinstance(iter_kernel, JITFunction)
+            new_kernel = autotune(configs=new_configs, key=[])(iter_kernel)
+            # create a new variable to contain the new (wrapped) kernel;
+            # skip kernel_idx to get a new record in the kernel side table
+            new_var = type(variable)(new_kernel, None, variable.grid)
+            return self.call_triton_kernel(new_var, args, kwargs, tx)
+
+        # These are the default values in upstream Triton
+        # see: triton/runtime/autotuner.py
+        default_perf_model = None
+        default_configs_top_k = 1.0
+        default_early_config_prune = None
+
+        # Save the arguments length for prune_configs_by
+        # We need this to get the args from kwargs later in get_kernel_and_metadata
+        if isinstance(variable.kernel, Autotuner) and (
+            variable.kernel.perf_model != default_perf_model
+            or variable.kernel.early_config_prune != default_early_config_prune
+        ):
+            # Prune the configs
+            named_args = dict(zip(variable.kernel.arg_names, args))
+
+            assert tx is not None
+            pruned_configs = self.call_prune_configs_if_required(
+                variable, named_args, kwargs, variable.kernel.configs, tx
+            )
+            new_kernel = autotune(configs=pruned_configs, key=[])(variable.kernel.fn)
+            # create a new variable to contain the new (wrapped) kernel;
+            # skip kernel_idx to get a new record in the kernel side table
+            new_var = type(variable)(new_kernel, None, variable.grid)
+            return self.call_triton_kernel(new_var, args, kwargs, tx)
 
         special_kwargs = {}
         for name in SPECIAL_CONFIG_NAMES:
@@ -1386,6 +1442,59 @@ class TracingTritonHOPifier(TritonHOPifier):
         assert isinstance(meta, dict)
         assert callable(grid)
         return grid(meta)
+
+    def call_user_defined_fn(
+        self, user_fn: Callable[..., Any], args: List, kwargs: Dict
+    ) -> Any:
+        assert isinstance(args, list)
+        assert isinstance(kwargs, dict)
+        assert callable(user_fn)
+        return user_fn(*args, **kwargs)
+
+    def apply_heuristic(  # type: ignore[no-untyped-def]
+        self,
+        kwarg_key: str,
+        heuristic: Callable[..., Any],
+        args: Dict,
+        kwargs: Dict,
+        tx,
+    ) -> Dict:
+        assert isinstance(args, dict)
+        assert isinstance(kwargs, dict)
+        assert isinstance(config, "TritonConfigType")
+        assert isinstance(kwarg_key, str)
+        assert isinstance(heuristic, callable)
+        return {
+            kwarg_key: self.call_user_defined_fn(
+                heuristic, [{**args, **kwargs}], {}, tx
+            )
+        }
+
+    def call_prune_configs_if_required(  # type: ignore[no-untyped-def]
+        self,
+        autotuner: "TritonAutotunerType",
+        args: Dict,
+        kwargs: Dict,
+        configs: List["TritonConfigType"],
+        tx: None,
+    ):
+        assert tx is None
+        assert isinstance(args, dict)
+        assert isinstance(kwargs, dict)
+        assert isinstance(autotuner, Autotuner)
+        assert isinstance(configs, list)
+
+        # save the prev nargs
+        prev_nargs = autotuner.nargs
+        autotuner.nargs = args
+
+        # prune_configs does not modify the state of the autotuner
+        pruned_configs = autotuner.prune_configs(kwargs)
+
+        # restore prev nargs
+        autotuner.nargs = prev_nargs
+
+        return pruned_configs
 
     def check_grid(
         self,
