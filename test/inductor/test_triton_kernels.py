@@ -3550,26 +3550,49 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
 
         self.assertEqual(y + increment, x)
 
+    """
+    The behavior of prune_configs_by deviates from OSS Triton in that it does not support
+    user-defined functions side effects (User-defined functions supplied to the autotuner are executed in Dynamo).
+
+
+    One example of how user-defined Triton kernels differ from OSS Triton:
+
+    records = {}
+    def early_config_prune(configs, named_args, **kwargs):
+        records["run_early_config_prune"] = True
+        if "N" in kwargs and kwargs["N"] == 1024:
+            records["capture_kwargs"] = True
+        elif "N" in kwargs:
+            breakpoint()
+        if "dst" in named_args and "src" in named_args and len(named_args) == 5:
+            records["capture_named_args"] = True
+        return [configs[0]]
+
+    In OSS Triton this user-defined function executes correctly in the test.
+    We execute early_config_prune in dynamo, so records is not updated.
+
+    """
+
     @requires_gpu
     @common_utils.parametrize("backend", ["eager", "aot_eager", "inductor"])
     @common_utils.parametrize("with_perf_model", [False, True])
     def test_triton_kernel_prune_configs_by(self, backend, with_perf_model):
-        # Tracks the state in early_config_prune
-        records = {}
-
         def early_config_prune(configs, named_args, **kwargs):
+            # we need to save the records to the returned config
+            records = {}
             records["run_early_config_prune"] = True
             if "N" in kwargs and kwargs["N"] == 1024:
                 records["capture_kwargs"] = True
-            elif "N" in kwargs:
-                breakpoint()
             if "dst" in named_args and "src" in named_args and len(named_args) == 5:
                 records["capture_named_args"] = True
+            configs[0].records = records
             return [configs[0]]
 
+        # this will pick the Config with the largest block size  (128)
         def perf_model(*args, **kwargs):
-            records["run_perf_model"] = True
-            return kwargs["BLOCK_SIZE"]
+            # we can't update state here
+            # records["run_perf_model"] = True
+            return kwargs["BLOCK_SIZE"] * -1
 
         if with_perf_model:
             prune_configs_by = {"perf_model": perf_model, "top_k": 1}
@@ -3596,7 +3619,8 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
         ):
             offsets = tl.program_id(0) * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
             x = tl.load(src + offsets, mask=offsets < N)
-            if string_arg == "TEST" and bool_var:
+            # Let's make sure we always select a block size of 128 based on our perf_model
+            if (string_arg == "TEST" and bool_var) and BLOCK_SIZE == 128:
                 x = x + add_float
             tl.store(dst + offsets, x, mask=offsets < N)
 
@@ -3610,13 +3634,19 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
         dst = torch.empty(N, device=GPU_TYPE)
         f(dst, src, 1.5, "TEST", True, N)
 
-        self.assertEqual(src + 1.5, dst)
+        # We ran the kernel, lets fetch the records we saved to the first config we kept
+        # while pruning. When running with the perf_model we don't set this.
+        records = (
+            prune_by_kernel.configs[0].records
+            if hasattr(prune_by_kernel.configs[0], "records")
+            else {}
+        )
 
         if with_perf_model:
-            self.assertEqual(len(records), 1)
-            self.assertTrue(records["run_perf_model"] is not None)
+            self.assertEqual(src + 1.5, dst)
         else:
-            breakpoint()
+            # We require the largest config to be picked for the correct result (BLOCK_SIZE==128)
+            self.assertNotEqual(src + 1.5, dst)
             self.assertEqual(len(records), 3)
             self.assertTrue(records["run_early_config_prune"] is not None)
             self.assertTrue(records["capture_kwargs"] is not None)

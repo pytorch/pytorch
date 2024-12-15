@@ -1033,7 +1033,9 @@ class TritonHOPifier:
     ) -> Union[Tuple[Union[int, sympy.Expr, SymInt], ...], Tuple["Proxy", ...]]:
         raise NotImplementedError("abstract method")
 
-    def call_user_defined_fn(self, user_fn, args: List, kwargs: Dict) -> Any:
+    def call_user_defined_fn(
+        self, user_fn: Callable[..., Any], args: List, kwargs: Dict
+    ) -> Any:
         raise NotImplementedError("abstract method")
 
     def call_prune_configs_if_required(  # type: ignore[no-untyped-def]
@@ -1401,7 +1403,9 @@ class TracingTritonHOPifier(TritonHOPifier):
         assert callable(grid)
         return grid(meta)
 
-    def call_user_defined_fn(self, user_fn, args: List, kwargs: Dict) -> Any:
+    def call_user_defined_fn(
+        self, user_fn: Callable[..., Any], args: List, kwargs: Dict
+    ) -> Any:
         assert isinstance(args, list)
         assert isinstance(kwargs, dict)
         assert callable(user_fn)

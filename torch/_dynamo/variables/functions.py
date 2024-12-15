@@ -1071,9 +1071,9 @@ class DynamoTritonHOPifier(TritonHOPifier):
     # We need to override call_getitem here so that we can call GetItemSource
     def call_getitem(
         self,
-        variable: Union["TritonKernelVariable", "TraceableTritonKernelWrapper"],
+        variable: "TritonKernelVariable",
         args: Sequence[Any],
-    ) -> Union["TritonKernelVariable", "TraceableTritonKernelWrapper"]:
+    ) -> "TritonKernelVariable":
         # __getitem__ should only be called if we don't already have a grid
         # Only grid needs to be passed
         if variable.grid is not None or len(args) != 1:
