@@ -1,7 +1,6 @@
 # mypy: ignore-errors
 
 import collections
-import functools
 import inspect
 import operator
 import types
@@ -18,7 +17,6 @@ from ..source import AttrSource
 from ..utils import (
     get_fake_value,
     guard_if_dyn,
-    is_namedtuple,
     istype,
     iter_contains,
     Lit,
@@ -40,8 +38,6 @@ if TYPE_CHECKING:
 class BaseListVariable(VariableTracker):
     @staticmethod
     def cls_for_instance(obj):
-        if is_namedtuple(obj):
-            return functools.partial(NamedTupleVariable, tuple_cls=type(obj))
         return BaseListVariable.cls_for(type(obj))
 
     @staticmethod
