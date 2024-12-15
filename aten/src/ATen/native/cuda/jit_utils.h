@@ -119,9 +119,9 @@ std::string generate_code(
     bool dynamic_casting,
     BinaryFuncVariant scalar_pos,
     c10::SmallVector<std::string>& extra_args_typenames,
+    int thread_work_size=JIT_THREAD_WORK_SIZE,
     bool vectorized=false,
     int vec_size=0,
-    int thread_work_size=JIT_THREAD_WORK_SIZE,
     bool return_by_ref=false);
 
 std::string generate_code(
@@ -129,9 +129,9 @@ std::string generate_code(
     bool contiguous,
     bool dynamic_casting,
     BinaryFuncVariant scalar_pos,
+    int thread_work_size=JIT_THREAD_WORK_SIZE,
     bool vectorized=false,
     int vec_size=0,
-    int thread_work_size=JIT_THREAD_WORK_SIZE,
     bool return_by_ref=false);
 
 std::string generate_reduction_code(

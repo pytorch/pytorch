@@ -981,9 +981,9 @@ std::string generate_code(
     bool contiguous,
     bool dynamic_casting,
     BinaryFuncVariant scalar_pos,
+    int thread_work_size,
     bool vectorized,
     int vec_size,
-    int thread_work_size,
     bool return_by_ref) {
   c10::SmallVector<std::string> extra_args_typenames(desc.extra_args_types.size());
   for (auto i : c10::irange(extra_args_typenames.size())) {
@@ -1002,9 +1002,9 @@ std::string generate_code(
       dynamic_casting,
       scalar_pos,
       extra_args_typenames,
+      thread_work_size,
       vectorized,
       vec_size,
-      thread_work_size,
       return_by_ref);
 }
 
@@ -1020,9 +1020,9 @@ std::string generate_code(
     bool dynamic_casting,
     BinaryFuncVariant scalar_pos,
     c10::SmallVector<std::string>& extra_args_typenames,
+    int thread_work_size,
     bool vectorized,
     int vec_size,
-    int thread_work_size,
     bool return_by_ref) {
   std::string func = func_;
   at::jit::TemplateEnv env;

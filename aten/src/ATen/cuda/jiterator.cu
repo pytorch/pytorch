@@ -64,8 +64,8 @@ static inline void launch_jitted_vectorized_kernel_dynamic(
                                                /*contiguous=*/true, /*dynamic_casting=*/false,
                                                at::cuda::jit::BinaryFuncVariant::NoScalar,
                                                extra_args_types,
-                                               vectorized, vec_size,
 					       tws,
+					       vectorized, vec_size,
                                                return_by_ref);
       std::string kernel_name = vectorized ? name + "_vectorized" + std::to_string(vec_size) : name;
       // Acquires the program
@@ -163,7 +163,7 @@ static inline void launch_jitted_unrolled_kernel_dynamic(
                                                common_dtype, toOpMathType(common_dtype), common_dtype,
                                                contiguous, dynamic_casting,
                                                at::cuda::jit::BinaryFuncVariant::NoScalar,
-                                               extra_args_types, /*vectorized*/false, /*vec_size*/0, tws, return_by_ref);
+                                               extra_args_types, tws, /*vectorized*/false, /*vec_size*/0, return_by_ref);
       *fn_ptr = at::cuda::jit::jit_pwise_function(code, name);
     }
   }

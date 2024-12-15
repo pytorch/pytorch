@@ -106,7 +106,7 @@ void launch_jitted_unrolled_kernel(
       constexpr bool dynamic_casting = !std::is_same<decltype(l), memory::LoadWithoutCast>() ||
                                        !std::is_same<decltype(s), memory::StoreWithoutCast>();
       auto code = at::cuda::jit::generate_code(
-          desc, contiguous, dynamic_casting, scalar_pos, /*vectorized=*/false, /*vec_size=*/0, tws);
+          desc, contiguous, dynamic_casting, scalar_pos, tws);
       fn_cache = at::cuda::jit::jit_pwise_function(code, desc.name);
     }
   }
@@ -170,7 +170,7 @@ void launch_jitted_vectorized_kernel(
       // Generates program
       auto code = at::cuda::jit::generate_code(
           desc, /*contiguous=*/true, /*dynamic_casting=*/false,
-          scalar_pos, vectorized, vec_size, tws);
+          scalar_pos, tws, vectorized, vec_size);
       std::string kernel_name = vectorized ? desc.name + "_vectorized" + std::to_string(vec_size) : desc.name;
 
       // Acquires the program
