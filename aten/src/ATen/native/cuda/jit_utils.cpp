@@ -972,7 +972,7 @@ int calc_thread_work_size(
     }
     return io_size;
 #else
-    return JIT_THREAD_WORK_SIZE
+    return JIT_THREAD_WORK_SIZE;
 #endif
 }
 
