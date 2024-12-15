@@ -28,6 +28,7 @@ from typing import (
 )
 
 from torch.utils import _pytree as pytree
+from torch.utils._backport_slots import dataclass_slots
 from torch.utils._traceback import CapturedTraceback, format_frame
 from torch.utils.weak import WeakTensorKeyDictionary
 
@@ -113,6 +114,17 @@ class GuardSource(enum.Enum):
         return self in (GuardSource.GLOBAL_FSDP_MODULE, GuardSource.LOCAL_FSDP_MODULE)
 
     def is_specialized_nn_module(self) -> bool:
+        import torch._dynamo.config as config
+
+        if config._unsafe_skip_fsdp_module_guards:
+            return (
+                self
+                in (
+                    GuardSource.GLOBAL_SPECIALIZED_NN_MODULE,
+                    GuardSource.LOCAL_SPECIALIZED_NN_MODULE,
+                )
+                or self.is_fsdp_module()
+            )
         return self in (
             GuardSource.GLOBAL_SPECIALIZED_NN_MODULE,
             GuardSource.LOCAL_SPECIALIZED_NN_MODULE,
@@ -182,6 +194,7 @@ class ShapeGuard(NamedTuple):
     sloc: SLoc
 
 
+@dataclass_slots
 @dataclasses.dataclass
 class Guard:
     # originating_source is the source that called the make_guard method to
