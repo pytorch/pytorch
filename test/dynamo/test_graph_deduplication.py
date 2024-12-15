@@ -28,7 +28,7 @@ class GraphDededuplicationTests(TestCase):
             return z
 
         def fn(x, y):
-            o0 = inner_fn(x, y)
+            _o0 = inner_fn(x, y)
             o1 = torch.sin(y)
             o2 = inner_fn(x, o1)
             o3 = inner_fn(x, y)
@@ -448,7 +448,7 @@ class GraphModule(torch.nn.Module):
 
         def fn(x, y):
             x0 = torch.sin(x)
-            y0 = torch.cos(y)
+            _y0 = torch.cos(y)
             # o0 = inner_fn(x0, y0)
             # o1 = inner_fn(x0, o0)
             o2 = inner_fn2(x0, y)
