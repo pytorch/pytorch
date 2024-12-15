@@ -308,7 +308,7 @@ class TORCH_API Reducer {
           GradCallback,
           torch::distributed::autograd::DistAutogradContext::GradCallback>);
 #endif
-  void runGradCallbackForVariable(at::Tensor& variable, GradCallback&& cb);
+  void runGradCallbackForVariable(at::Tensor& variable, const GradCallback& cb);
 
   // This function is called inside `initialize_buckets()`. It initializes both
   // `bucket_views_in` and `bucket_views_out` with views for each variable's

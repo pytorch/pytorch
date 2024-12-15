@@ -69,7 +69,7 @@ std::string jsonStrEscape(const std::string& str) {
       ostream << "\\r";
     } else if (ch == '\t') {
       ostream << "\\t";
-    } else if ('\x00' <= ch && ch <= '\x1f') {
+    } else if (ch <= '\x1f') {
       ostream << "\\u" << std::hex << std::setw(4) << std::setfill('0')
               << static_cast<int>(ch);
     } else {
