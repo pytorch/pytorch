@@ -71,8 +71,8 @@ if TYPE_CHECKING:
     TritonKernelType = Union[Autotuner, JITFunction]
 
     # types for prune_configs_by
-    TritonAutotunerType = Autotuner
-    TritonConfigType = TritonConfig
+    TritonAutotunerType = Union[Autotuner]
+    TritonConfigType = Union[TritonConfig]
 
 log = logging.getLogger("torch._dynamo")
 
