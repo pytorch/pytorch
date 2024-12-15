@@ -217,17 +217,19 @@ compute_next_offset_func = r"""
 def get_offset_for_next_block(
     loop_iter, col_indices, total_blocks,
     SPARSE_BLOCK, SPARSE_BLOCK_MULTIPLE, BLOCK,
-    BLOCKS_ARE_CONTIGUOUS: tl.constexpr
+    BLOCKS_ARE_CONTIGUOUS: tl.constexpr,
+    SPLIT_KV_STRIDE: tl.constexpr = 1,
 ):
     if BLOCKS_ARE_CONTIGUOUS:
         return BLOCK
     cur_block_idx = loop_iter // SPARSE_BLOCK_MULTIPLE
     cur_block = tl.load(col_indices + cur_block_idx, eviction_policy="evict_last")
-    next_block = tl.load(col_indices + cur_block_idx + 1, eviction_policy="evict_last", mask=cur_block_idx + 1 < total_blocks)
-    needs_jump = (loop_iter + 1) % SPARSE_BLOCK_MULTIPLE == 0
-    jump_to_block = (next_block - cur_block ) * SPARSE_BLOCK - (SPARSE_BLOCK_MULTIPLE - 1) * BLOCK
-    offset = jump_to_block * needs_jump + (1 - needs_jump) * BLOCK
-    return offset
+    cur_block_offset = loop_iter % SPARSE_BLOCK_MULTIPLE
+    next_block_idx = (loop_iter + SPLIT_KV_STRIDE) // SPARSE_BLOCK_MULTIPLE
+    next_block = tl.load(col_indices + next_block_idx, eviction_policy="evict_last", mask= next_block_idx < total_blocks)
+    next_block_offset = (loop_iter + SPLIT_KV_STRIDE) % SPARSE_BLOCK_MULTIPLE
+    jump_to_block = (next_block - cur_block) * SPARSE_BLOCK + (next_block_offset - cur_block_offset) * BLOCK
+    return jump_to_block
 """
 
 get_bounded_indices_func = r"""
@@ -462,6 +464,7 @@ def forward_inner(
     block_n_start, block_n_end,
     MATMUL_PRECISION,
     IS_FULL_BLOCKS,
+    SPLIT_KV_STRIDE: tl.constexpr = 1,
 ):
     # Redefines all kernel parameters (BLOCK_M, etc.) so we don't need to plumb them all through
     {{gen_defines() | indent_except_first(1)}}
@@ -473,7 +476,7 @@ def forward_inner(
         q = (q * SM_SCALE * RCP_LN2).to(MATMUL_PRECISION)
 
     # loop over k, v and update accumulator until block_n_end
-    for start_n in range(block_n_start, block_n_end):
+    for start_n in range(block_n_start, block_n_end, SPLIT_KV_STRIDE):
         if IS_DIVISIBLE:
             acc, l_i, m_i = forward_block_mn(
                 {{gen_argdefs()}},
@@ -504,7 +507,7 @@ def forward_inner(
         # update pointers
         offset = get_offset_for_next_block(
             start_n, kv_indices, kv_num_blocks,
-            SPARSE_KV_BLOCK_SIZE, SPARSE_KV_MULTIPLE, BLOCK_N, BLOCKS_ARE_CONTIGUOUS
+            SPARSE_KV_BLOCK_SIZE, SPARSE_KV_MULTIPLE, BLOCK_N, BLOCKS_ARE_CONTIGUOUS, SPLIT_KV_STRIDE
         )
 
         V_block_ptr = tl.advance(V_block_ptr, (offset, 0))
