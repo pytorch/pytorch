@@ -10331,6 +10331,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
                 m2[0] = True
 
         x = SlotTensor1(torch.empty(2))
+        x_ref = weakref.ref(x)
         y = SlotTensor2(torch.empty(2))
 
         x.slot1 = y
@@ -10345,6 +10346,13 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         gc.collect()
         self.assertTrue(m1[0])
         self.assertTrue(m2[0])
+
+        self.assertIsNone(x_ref())
+
+        # At this point, we know the finalizer ran and the weakref
+        # was cleared. But is the object really gone?
+        self.assertFalse(any(isinstance(o, SlotTensor1) for o in gc.get_objects()))
+
 
     def test_storage_cycle_via_slots(self):
         m1 = [False]
