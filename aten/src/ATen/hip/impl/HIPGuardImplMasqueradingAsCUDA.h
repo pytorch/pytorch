@@ -337,7 +337,7 @@ struct OptionalHIPStreamGuardMasqueradingAsCUDA {
   std::optional<HIPStreamMasqueradingAsCUDA> original_stream() const {
     auto r = guard_.original_stream();
     if (r.has_value()) {
-      return std::make_optional(HIPStreamMasqueradingAsCUDA(HIPStreamMasqueradingAsCUDA::UNCHECKED, r.value()));
+      return HIPStreamMasqueradingAsCUDA(HIPStreamMasqueradingAsCUDA::UNCHECKED, r.value());
     } else {
       return std::nullopt;
     }
@@ -346,7 +346,7 @@ struct OptionalHIPStreamGuardMasqueradingAsCUDA {
   std::optional<HIPStreamMasqueradingAsCUDA> current_stream() const {
     auto r = guard_.current_stream();
     if (r.has_value()) {
-      return std::make_optional(HIPStreamMasqueradingAsCUDA(HIPStreamMasqueradingAsCUDA::UNCHECKED, r.value()));
+      return HIPStreamMasqueradingAsCUDA(HIPStreamMasqueradingAsCUDA::UNCHECKED, r.value());
     } else {
       return std::nullopt;
     }

@@ -9,7 +9,7 @@ class PytreeFlatten(torch.nn.Module):
     """
 
     def forward(self, x):
-        y, spec = pytree.tree_flatten(x)
+        y, _spec = pytree.tree_flatten(x)
         return y[0] + 1
 
 example_args = ({1: torch.randn(3, 2), 2: torch.randn(3, 2)},),

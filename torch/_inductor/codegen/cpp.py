@@ -69,6 +69,7 @@ from .cpp_utils import (
     DTYPE_TO_CPP,
     INDEX_TYPE,
     LocalBufferContext,
+    may_unify_binary_op_mask_type,
     promote_args,
     template_fusion_with_epilogues_supported,
     unify_mask_base_type,
@@ -292,7 +293,7 @@ def reduction_prefix_array(
     acc_type: str,
     reduction_type: str,
     dtype: torch.dtype,
-    len: int,
+    len: Union[str, int],
     init_fn,
 ):
     """
@@ -1253,6 +1254,7 @@ class CppVecOverrides(CppOverrides):
 
     @staticmethod
     def logical_and(a, b):
+        a, b = may_unify_binary_op_mask_type(a, b)
         return f"{a} & {b}"
 
     @staticmethod
@@ -1261,14 +1263,17 @@ class CppVecOverrides(CppOverrides):
 
     @staticmethod
     def logical_or(a, b):
+        a, b = may_unify_binary_op_mask_type(a, b)
         return f"{a} | {b}"
 
     @staticmethod
     def logical_xor(a, b):
+        a, b = may_unify_binary_op_mask_type(a, b)
         return f"{a} ^ {b}"
 
     @staticmethod
     def bitwise_and(a, b):
+        a, b = may_unify_binary_op_mask_type(a, b)
         return f"{a} & {b}"
 
     @staticmethod
@@ -1277,10 +1282,12 @@ class CppVecOverrides(CppOverrides):
 
     @staticmethod
     def bitwise_or(a, b):
+        a, b = may_unify_binary_op_mask_type(a, b)
         return f"{a} | {b}"
 
     @staticmethod
     def bitwise_xor(a, b):
+        a, b = may_unify_binary_op_mask_type(a, b)
         return f"{a} ^ {b}"
 
     @staticmethod
@@ -2086,6 +2093,7 @@ class CppKernel(Kernel):
         )
 
     def size_hint(self):
+        assert self.call_ranges is not None
         return V.graph.sizevars.size_hint(
             sympy_product(self.call_ranges), fallback=8192
         )
@@ -3284,6 +3292,11 @@ class CppTile2DKernel(CppVecKernel):
 
     def store(self, name, index, value, mode=None):
         assert "buf" in name
+        assert isinstance(value, CppCSEVariable), value
+        if not value.is_vec:
+            # this happens when we store a scalar into a vectorized buffer like "fill"
+            value = self.broadcast(value)
+
         var = self.args.output(name)
 
         inner = self.inner_itervar()
@@ -3511,11 +3524,15 @@ class TilingSelect:
                 non_contig_indexing_op_num = sum(
                     non_contig_indexing_op_counter.values()
                 )
-                threshold = 0.08
-                if op_num > 0 and non_contig_indexing_op_num / op_num >= threshold:
+                ratio_threshold = 0.12
+                quantity_threshold = 35
+                if non_contig_indexing_op_num >= quantity_threshold or (
+                    op_num > 0
+                    and non_contig_indexing_op_num / op_num >= ratio_threshold
+                ):
                     # Too many non-contiguous load/store/index_expr which hurts the
                     # vectorization performance. Disable vectorization when exceeding
-                    # the threshold.
+                    # the thresholds.
                     return [], []
 
                 if (
@@ -4461,8 +4478,9 @@ class CppScheduling(BaseScheduling):
         to avoid non-contiguous loads, subject to the following conditions:
             1. No reduction and no mudular index for all nodes.
             2. The indexing_exprs of all nodes contain only one (or more, but all the same) division,
-               where the divisor is an integer, the dividend is one of the iter_vars, and this var,
-               i.e. the dimension that needs to be split, is contiguous in all other indexing_exprs.
+               where the divisor is an integer and not too small (the divisor > 8), the dividend is
+               one of the iter_vars, and this var, i.e. the dimension that needs to be split, is
+               contiguous in all other indexing_exprs.
 
         For example, if the node's var_ranges: {z0: 2, z1: 9216, z2: 960} and indexing_exprs:
         {'index0': 8847360*z0 + 960*z1 + z2, 'index1': 32*z0 + (z2//30), 'index2': z2},
@@ -4510,6 +4528,7 @@ class CppScheduling(BaseScheduling):
                             for name_, expr_ in original_body.indexing_exprs.items()
                             if name_ != name
                         )
+                        and div_expr.args[1] > 8
                     ):
                         split_var = div_expr.args[0]
                         split_number = div_expr.args[1]
@@ -4783,10 +4802,12 @@ class CppScheduling(BaseScheduling):
         self,
         template_node: BaseSchedulerNode,
         epilogue_nodes: Sequence[BaseSchedulerNode],
+        prologue_nodes: Sequence[BaseSchedulerNode],
     ):
         """
         Codegen a CPP template, possibly with fused epilogues
         """
+        assert not prologue_nodes
         counters["inductor"]["cpp_epilogue_fusion_counter"] += len(epilogue_nodes)
         assert self.is_cpp_template(
             template_node
@@ -4902,7 +4923,7 @@ class KernelGroup:
         new_kernel.codegen_loops(code, ws)
 
     def get_num_args(self):
-        arg_defs, call_args, arg_types = self.args.cpp_argdefs()
+        arg_defs, _call_args, _arg_types = self.args.cpp_argdefs()
         args_num = len(arg_defs)
         return args_num
 

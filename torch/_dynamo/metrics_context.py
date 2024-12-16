@@ -1,8 +1,12 @@
+import time
 from typing import Any, Callable, Dict, Optional, Type
 from typing_extensions import TypeAlias
 
 
-OnExitType: TypeAlias = Callable[[Dict[str, Any]], None]
+OnExitType: TypeAlias = Callable[
+    [int, int, Dict[str, Any], Optional[Type[BaseException]], Optional[BaseException]],
+    None,
+]
 
 
 class MetricsContext:
@@ -15,7 +19,8 @@ class MetricsContext:
         """
         self._on_exit = on_exit
         self._metrics: Dict[str, Any] = {}
-        self._level = 0
+        self._start_time_ns: int = 0
+        self._level: int = 0
 
     def __enter__(self) -> "MetricsContext":
         """
@@ -24,6 +29,7 @@ class MetricsContext:
         if self._level == 0:
             # In case of recursion, track at the outermost context.
             self._metrics = {}
+            self._start_time_ns = time.time_ns()
 
         self._level += 1
         return self
@@ -40,7 +46,10 @@ class MetricsContext:
         self._level -= 1
         assert self._level >= 0
         if self._level == 0:
-            self._on_exit(self._metrics)
+            end_time_ns = time.time_ns()
+            self._on_exit(
+                self._start_time_ns, end_time_ns, self._metrics, exc_type, exc_value
+            )
 
     def in_progress(self) -> bool:
         """
