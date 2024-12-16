@@ -1,11 +1,12 @@
 # mypy: allow-untyped-defs
 import contextlib
 import logging
-from typing import Any, Callable, cast, List, Optional, Set, Union
+from typing import Any, Callable, cast, List, Optional, Union
 from unittest.mock import patch
 
 import torch
 import torch.utils
+from torch.utils._ordered_set import OrderedSet
 
 from ..._dynamo.utils import counters
 from .. import config, ir
@@ -15,11 +16,9 @@ from ..utils import parallel_num_threads
 from ..virtualized import V
 from .cpp import get_export_declaration
 from .cpp_gemm_template import (
-    CppPackedGemmTemplate,
+    CppGemmTemplate,
     expand_bias,
     gen_2d_view_of_epilogue_buf,
-    get_padded_n,
-    pack_w,
     prune_tensors,
     transpose_w,
 )
@@ -231,7 +230,7 @@ extern "C" {{export_declaration}}
 
 def get_deduplicated_act(act_mapping: dict[int, ir.TensorBox]):
     act_deduplicated = []
-    act_deduplicated_name = set()
+    act_deduplicated_name = OrderedSet[str]()
     for act_idx in range(len(act_mapping.values())):
         act = act_mapping[act_idx]
         if act.get_name() not in act_deduplicated_name:
@@ -240,7 +239,7 @@ def get_deduplicated_act(act_mapping: dict[int, ir.TensorBox]):
     return act_deduplicated
 
 
-class CppGroupGemmTemplate(CppPackedGemmTemplate):
+class CppGroupGemmTemplate(CppGemmTemplate):
     def __init__(
         self,
         input_nodes,
@@ -276,8 +275,9 @@ class CppGroupGemmTemplate(CppPackedGemmTemplate):
         self.gemm_group_num = gemm_group_num
         self.silu_mul_fusion = True
 
-    @staticmethod
+    @classmethod
     def add_choices(
+        cls,
         choices,
         layout,
         input_nodes,
@@ -349,14 +349,18 @@ class CppGroupGemmTemplate(CppPackedGemmTemplate):
         )
         assert micro_gemm is not None
         _, block_n, _ = micro_gemm.register_blocking
-        padded_n = get_padded_n(n, block_n)
+        new_size, padded_n = cls.get_padded_size(
+            n, block_n, k, should_block_weight=True
+        )
+        padding = padded_n - n
 
         def pack_weight(inputs, layout_or_out):
             new_W_list = []
             new_inputs = list(inputs)
             W_list = new_inputs[wgt_start_idx : wgt_start_idx + gemm_group_num]
             for W in W_list:
-                new_W_list.append(pack_w(W, padded_n, block_n, k, n, micro_gemm))
+                blocked_w = cls.block_weight(W, new_size, padding)
+                new_W_list.append(cls.pack_vnni_weight(blocked_w, micro_gemm, new_size))
             new_inputs[wgt_start_idx : wgt_start_idx + gemm_group_num] = new_W_list
             return new_inputs, layout_or_out
 
@@ -444,7 +448,7 @@ class CppGroupGemmTemplate(CppPackedGemmTemplate):
 
         template_buffer = Y
         fake_buffers: List[ir.Buffer] = []
-        Y_aliases: Set[str] = set()
+        Y_aliases = OrderedSet[str]()
         Y_2d: Union[ir.Buffer, ir.ReinterpretView] = Y
         output_dtype, compute_dtype = get_gemm_template_output_and_compute_dtype(
             X_list[0].get_dtype()
@@ -504,6 +508,7 @@ class CppGroupGemmTemplate(CppPackedGemmTemplate):
                 template_buffer,
                 epilogue_nodes,
                 reindexers,
+                default_reindexers=self.get_default_reindexers(epilogue_nodes),
             )
 
         kernel_args = {}
