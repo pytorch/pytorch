@@ -34,7 +34,7 @@ constexpr auto tuple_to_array_helper(const Tuple& [[maybe_unused]] t, std::index
     return std::array<const void*, size>{static_cast<const void*>(&std::get<I>(t))...};
 }
 
-// Helper function convert tuple to std::array<void*, N>
+// Helper function convert tuple to std::array<const void*, N>
 // for passing the arguments to CUDA Kernel
 // NOTE: We capture tuple by reference,
 // so the pointers in returned array are only valid
@@ -113,7 +113,7 @@ void launch_jitted_vectorized_kernel(
     std::mutex &jiterator_mutex, JittedVecKernelCache &fn_cache,
     const at::cuda::jit::KernelDescriptor &desc, int64_t N, array_t data,
     at::cuda::jit::BinaryFuncVariant scalar_pos,
-    const void *scalar_val, c10::ArrayRef<void*> extra_args) {
+    const void *scalar_val, c10::ArrayRef<const void*> extra_args) {
   TORCH_INTERNAL_ASSERT(N > 0 && N <= std::numeric_limits<int32_t>::max());
   // N is still int64_t for the computation, but it's always safe to cast result to int
   const uint32_t grid = (N + block_work_size() - 1) / block_work_size();
