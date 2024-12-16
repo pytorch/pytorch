@@ -183,9 +183,7 @@ def install_config_module(module: ModuleType) -> None:
                 if dest is module:
                     delattr(module, key)
             elif isinstance(value, type):
-                assert (
-                    value.__module__ == module.__name__
-                ), f"{value.__module__}, {module.__name__}"
+                assert value.__module__ == module.__name__
                 # a subconfig with `class Blah:` syntax
                 proxy = SubConfigProxy(module, f"{name}.")
                 visit(value, proxy, f"{name}.")

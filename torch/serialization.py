@@ -140,48 +140,6 @@ class LoadEndianness(Enum):
     BIG = 3
 
 
-# @dataclass
-# class _LoadConfig:
-#     mmap: bool = False
-#     endianness: Optional[LoadEndianness] = None
-#     mmap_flags: Optional[int] = MAP_PRIVATE
-
-
-# @dataclass
-# class _SaveConfig:
-#     compute_crc32: bool = True
-
-
-# @dataclass
-# class SerializationConfig:
-#     save_options: _SaveConfig = _SaveConfig()
-#     load_options: _LoadConfig = _LoadConfig()
-
-
-# config = SerializationConfig()
-
-
-# config.__doc__ = """
-# ``torch.serialization.config`` is a config of options that can control
-# the behavior of ``torch.save`` and ``torch.load``.
-
-# * ``save_options``: options that control the behavior of ``torch.save``.
-
-#   * ``compute_crc32``: whether to compute and write crc32 for each storage (Default : ``True``).
-#     See :func:`~torch.serialization.set_crc32_options`.
-
-# * ``load_options``: options that control the behavior of ``torch.load``.
-
-#   * ``mmap``: See the documentation for ``mmap`` argument in :func:`torch.load`.
-#     This config will set the behavior of ``mmap`` for ``torch.load`` if it is not
-#     already explicitly passed to the ``torch.load`` call (Default : ``False``).
-#   * ``endianness``: See :func:`~torch.serialization.set_default_load_endianness`.
-#     (Default : LoadEndianness.NATIVE)
-#   * ``mmap_flags``: See :class:`~torch.serialization.set_default_mmap_options`.
-
-# """
-
-
 def get_default_load_endianness() -> Optional[LoadEndianness]:
     """
     Get fallback byte order for loading files
