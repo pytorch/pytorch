@@ -939,8 +939,12 @@ class TestPatternMatcher(TestPatternMatcherBase):
         x2 = torch.randn(2, 3)
 
         def matcher_check_fn():
-            self.assertEqual(counters["inductor"]["mkldnn_conv_binary_unary_fusion_matcher_nodes"], 2)
-            self.assertEqual(counters["inductor"]["mkldnn_conv_weight_pack_matcher_nodes"], 1)
+            self.assertEqual(
+                counters["inductor"]["mkldnn_conv_binary_unary_fusion_matcher_nodes"], 2
+            )
+            self.assertEqual(
+                counters["inductor"]["mkldnn_conv_weight_pack_matcher_nodes"], 1
+            )
 
         self._test_common(mod, (x1, x2), matcher_check_fn)
 
