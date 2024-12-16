@@ -21,6 +21,18 @@ void addcmul_cuda_scalar_tensor2_kernel(
 constexpr char addcmul_name[] = "addcmul";
 #endif
 void addcmul_cuda_kernel(TensorIteratorBase& iter, const Scalar& value) {
+  TORCH_CHECK(
+    !iter.is_cpu_scalar(1),
+    "CPU Scalar support for self argument is not supported."
+  );
+
+  TORCH_CHECK(
+    !iter.is_cpu_scalar(2),
+    "CPU Scalar support for tensor1 argument is not supported. "
+    "However, CPU Scalar support for tensor2 is supported, "
+    "please swap your tensor1 and tensor2 terms."
+  );
+
   auto dtype = iter.common_dtype();
   if (at::isComplexType(dtype)) {
     // When using Jiterator, addcmul and addcdiv kernels get stuck during a

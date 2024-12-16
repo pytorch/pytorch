@@ -48,7 +48,6 @@ TORCH_META_FUNC(addcdiv)
         "The future addcdiv behavior is just the latter implementation: ",
         "(input + value * tensor1 / tensor2), for all dtypes.");
   }
-  // TODO: add support for cpu_scalar in addcdiv
   build_ternary_op(maybe_get_output(), self, tensor1, tensor2);
 }
 
