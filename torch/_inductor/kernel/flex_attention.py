@@ -756,11 +756,13 @@ def _get_nv_config(query, mode: Mode) -> Tuple[int, int, int, int]:
                 return (64, 128, 8, 3)
             else:
                 return (64, 64, 4, 2)
-        elif capability >= (8, 0):  # A100
-            if head_dim == 64:
+        elif capability >= (8, 0):
+            if head_dim >= 64:
                 return (32, 128, 4, 3)
             elif head_dim == 128:
-                return (64, 64, 4, 3)
+                # SM86/89 have smaller shared memory sizes
+                num_stages = 3 if capability[-1] == 0 else 2
+                return (64, 64, 4, num_stages)
             else:
                 return (64, 64, 4, 2)
         else:  # modest hardware or extremely large head_dim
