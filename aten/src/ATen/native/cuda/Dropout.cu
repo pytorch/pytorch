@@ -124,7 +124,7 @@ fused_dropout_kernel_vec(at::cuda::detail::TensorInfo<const scalar_t, IndexType>
 
     // Perform the actual computation
     #pragma unroll
-    for (int jj = 0; jj < RAND_SIZE; jj++) { 
+    for (int jj = 0; jj < RAND_SIZE; jj++) {
       #pragma unroll
       for (int ii = 0; ii < std::min(VEC, 4); ii++) {
         r[jj * 4 + ii] = src[jj * 4 + ii]*(&rand[jj].x)[ii]*scale;

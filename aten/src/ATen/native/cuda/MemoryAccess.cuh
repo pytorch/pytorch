@@ -364,7 +364,7 @@ inline C10_HOST_DEVICE int can_vectorize_up_to(const char *pointer) {
   } else if (address % vec2_alignment == 0) {
     return 2;
   }
-#else  
+#else
   if (address % vec4_alignment == 0) {
     return 4;
   } else if (address % vec2_alignment == 0) {

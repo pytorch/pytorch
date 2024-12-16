@@ -995,9 +995,9 @@ std::string generate_code(
       desc.nOutputs,
       desc.f,
       desc.name,
-      desc.f_inputs_type,
-      toOpMathType(desc.f_inputs_type),
-      desc.result_type,
+      typeName(desc.f_inputs_type),
+      typeName(toOpMathType(desc.f_inputs_type)),
+      typeName(desc.result_type),
       contiguous,
       dynamic_casting,
       scalar_pos,
@@ -1013,9 +1013,9 @@ std::string generate_code(
     int nOutputs,
     const std::string& func_,
     const std::string& name,
-    const c10::ScalarType& f_inputs_type,
-    const c10::ScalarType& compute_type,
-    const c10::ScalarType& result_type,
+    const std::string& f_inputs_type,
+    const std::string& compute_type,
+    const std::string& result_type,
     bool contiguous,
     bool dynamic_casting,
     BinaryFuncVariant scalar_pos,
@@ -1027,15 +1027,11 @@ std::string generate_code(
   std::string func = func_;
   at::jit::TemplateEnv env;
 
-  const std::string f_inputs_type_str = typeName(f_inputs_type);
-  const std::string compute_type_str = typeName(compute_type);
-  const std::string result_type_str = typeName(result_type);
-
   env.s("index_type", "unsigned int");
   env.s("nInputs", std::to_string(nInputs));
   env.s("nOutputs", std::to_string(nOutputs));
-  env.s("scalar_type", f_inputs_type_str);
-  env.s("compute_type", compute_type_str);
+  env.s("scalar_type", f_inputs_type);
+  env.s("compute_type", compute_type);
   env.s("functor", func);
   env.s("name", name);
   env.s("cmath_string", get_cmath_string());
@@ -1060,14 +1056,14 @@ std::string generate_code(
   for (int i = 0; i < nInputs; i++) {
     // TODO these arrays are potentially of the different types, use function
     // traits to determine the types
-    declare_load_arrays << f_inputs_type_str << " arg" << std::to_string(i)
+    declare_load_arrays << f_inputs_type << " arg" << std::to_string(i)
                         << "[" << std::to_string(thread_work_size) << "];\n";
   }
   env.s("declare_load_arrays", declare_load_arrays.str());
 
   std::stringstream declare_store_arrays;
   for (int i = 0; i < nOutputs; i++) {
-    declare_store_arrays << result_type_str << " out" << std::to_string(i)
+    declare_store_arrays << result_type << " out" << std::to_string(i)
                         << "[" << std::to_string(thread_work_size) << "];\n";
   }
   env.s("declare_store_arrays", declare_store_arrays.str());
@@ -1089,7 +1085,7 @@ std::string generate_code(
 
   std::string call_functor_template;
   if (return_by_ref) {  // return one or more outputs by reference
-    bool need_temp_out = (compute_type_str != result_type_str);
+    bool need_temp_out = (compute_type != result_type);
     std::stringstream functor_outs;
     if (need_temp_out) {
       for (int i = 0; i < nOutputs - 1; i++) {
@@ -1122,24 +1118,24 @@ std::string generate_code(
   }
   env.s("call_functor", at::jit::CodeTemplate(call_functor_template).format(env));
 
-  if (f_inputs_type_str == "at::Half" || result_type_str == "at::Half" ||
-      f_inputs_type_str == "std::complex<at::Half>" ||
-      result_type_str == "std::complex<at::Half>" || dynamic_casting) {
+  if (f_inputs_type == "at::Half" || result_type == "at::Half" ||
+      f_inputs_type == "std::complex<at::Half>" ||
+      result_type == "std::complex<at::Half>" || dynamic_casting) {
     // complex<Half> depends on complex<T> and Half dtypes.
     env.s("half_string", jiterator_half_support_literal);
   } else {
     env.s("half_string", "");
   }
-  if (f_inputs_type_str == "at::BFloat16" || result_type_str == "at::BFloat16" || dynamic_casting) {
+  if (f_inputs_type == "at::BFloat16" || result_type == "at::BFloat16" || dynamic_casting) {
     env.s("bfloat16_string", jiterator_bfloat16_support_literal);
   } else {
     env.s("bfloat16_string", "");
   }
   // the definition of complex math functions is only needed when the compute type is complex
   // but the definition of std::complex is needed for dynamic casting even if the compute type is not complex
-  if (f_inputs_type_str == "std::complex<float>" || result_type_str == "std::complex<float>" ||
-      f_inputs_type_str == "std::complex<double>" || result_type_str == "std::complex<double>" ||
-      f_inputs_type_str == "std::complex<at::Half>" || result_type_str == "std::complex<at::Half>") {
+  if (f_inputs_type == "std::complex<float>" || result_type == "std::complex<float>" ||
+      f_inputs_type == "std::complex<double>" || result_type == "std::complex<double>" ||
+      f_inputs_type == "std::complex<at::Half>" || result_type == "std::complex<at::Half>") {
     // complex<Half> depends on complex<T> and Half dtypes.
     env.s("traits_string", get_traits_string_but_hiprtc_safe());
     env.s("complex_body_string", get_complex_body_string());
@@ -1158,8 +1154,8 @@ std::string generate_code(
     env.s("complex_body_string", "");
     env.s("complex_math_string", "");
   }
-  if (f_inputs_type_str == "std::complex<at::Half>" ||
-      result_type_str == "std::complex<at::Half>" || dynamic_casting) {
+  if (f_inputs_type == "std::complex<at::Half>" ||
+      result_type == "std::complex<at::Half>" || dynamic_casting) {
     // dynamic_casting requires the definition of all types
     // include complex<at::Half>
     // Look at the definition of `StoreWithCast` and `LoadWithCast`.
@@ -1190,7 +1186,7 @@ std::string generate_code(
     std::stringstream load_inputs;
     for (int i = 0; i < nInputs; i++) {
       auto i_string = std::to_string(i);
-      load_inputs << "arg" << i_string << "[j] = l.load<" << f_inputs_type_str
+      load_inputs << "arg" << i_string << "[j] = l.load<" << f_inputs_type
                   << ">(data[" << std::to_string(i + nOutputs)
                   << "], input_offsets[" << i_string << "], " << i_string
                   << ");\n";
@@ -1200,7 +1196,7 @@ std::string generate_code(
     std::stringstream store_outputs;
     for (int i = 0; i < nOutputs; i++) {
       auto i_string = std::to_string(i);
-      store_outputs << "s.store<" << result_type_str
+      store_outputs << "s.store<" << result_type
                     << ">(out" << i_string << "[j], data[" << i_string
                     << "], output_offsets[" << i_string << "], " << i_string
                     << ");\n";
@@ -1215,7 +1211,7 @@ std::string generate_code(
 
   // vectorized case
   env.s("vec_size", std::to_string(vec_size));
-  env.s("result_type", result_type_str);
+  env.s("result_type", result_type);
 
   std::stringstream vector_inputs;
   for (const auto i : c10::irange(nInputs)){
@@ -1261,7 +1257,7 @@ std::string generate_code(
   std::stringstream load_unrolled_inputs;
   for (const auto i: c10::irange(nInputs)){
     auto i_string = std::to_string(i);
-    load_unrolled_inputs << "arg" << i_string << "[j] = load<" << f_inputs_type_str
+    load_unrolled_inputs << "arg" << i_string << "[j] = load<" << f_inputs_type
       << ">(data[" << std::to_string(i + nOutputs) << "], linear_idx);\n";
   }
   env.s("load_unrolled_inputs", load_unrolled_inputs.str());
@@ -1269,7 +1265,7 @@ std::string generate_code(
   std::stringstream store_unrolled_outputs;
   for (const auto i : c10::irange(nOutputs)) {
     auto i_string = std::to_string(i);
-    store_unrolled_outputs << "store<" << result_type_str << ">(out" << i_string
+    store_unrolled_outputs << "store<" << result_type << ">(out" << i_string
       << "[j], data[" << i_string << "], linear_idx);\n";
   }
   env.s("store_unrolled_outputs", store_unrolled_outputs.str());

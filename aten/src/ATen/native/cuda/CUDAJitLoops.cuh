@@ -140,7 +140,9 @@ void launch_jitted_vectorized_kernel(
     fn_ptr = &fn_cache.vec16;
   } else if (vec_size == 8) {
     fn_ptr = &fn_cache.vec8;
-  } else if (vec_size == 4) {
+  } else
+#endif
+if (vec_size == 4) {
     fn_ptr = &fn_cache.vec4;
   } else if (vec_size == 2) {
     fn_ptr = &fn_cache.vec2;
@@ -149,17 +151,6 @@ void launch_jitted_vectorized_kernel(
   } else {
     TORCH_INTERNAL_ASSERT(false, "unexpected vec_size for jitter vectorized kernel");
   }
-#else
-  if (vec_size == 4) {
-    fn_ptr = &fn_cache.vec4;
-  } else if (vec_size == 2) {
-    fn_ptr = &fn_cache.vec2;
-  } else if (vec_size ==1) {
-    fn_ptr = &fn_cache.vec1;
-  } else {
-    TORCH_INTERNAL_ASSERT(false, "unexpected vec_size for jitter vectorized kernel");
-  }  
-#endif
 
   bool vectorized = vec_size > 1;
 

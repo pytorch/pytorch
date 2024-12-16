@@ -60,12 +60,12 @@ static inline void launch_jitted_vectorized_kernel_dynamic(
     if (!fn_ptr->function) { // cache miss!
       // Generates program
       auto code = at::cuda::jit::generate_code(nInputs, nOutputs, f, name,
-                                               common_dtype, toOpMathType(common_dtype), common_dtype,
+                                               f_inputs_type_str, compute_type_str, result_type_str,
                                                /*contiguous=*/true, /*dynamic_casting=*/false,
                                                at::cuda::jit::BinaryFuncVariant::NoScalar,
                                                extra_args_types,
-					       tws,
-					       vectorized, vec_size,
+                                               tws,
+                                               vectorized, vec_size,
                                                return_by_ref);
       std::string kernel_name = vectorized ? name + "_vectorized" + std::to_string(vec_size) : name;
       // Acquires the program
@@ -160,7 +160,7 @@ static inline void launch_jitted_unrolled_kernel_dynamic(
     const std::lock_guard<std::mutex> lock{_jiterator_mutex};
     if (!fn_ptr->function) {
       auto code = at::cuda::jit::generate_code(nInputs, nOutputs, f, name,
-                                               common_dtype, toOpMathType(common_dtype), common_dtype,
+                                               f_inputs_type_str, compute_type_str, result_type_str,
                                                contiguous, dynamic_casting,
                                                at::cuda::jit::BinaryFuncVariant::NoScalar,
                                                extra_args_types, tws, /*vectorized*/false, /*vec_size*/0, return_by_ref);
