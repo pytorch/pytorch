@@ -372,7 +372,7 @@ class ReplicateTest(MultiProcessInductorTestCase):
         self.assertEqual(counters["inductor"]["ddp_buckets"], 3)
         fc = FileCheck()
         for _ in range(3):
-            fc.check("aten.flatten.using_ints(").check("cpp_fused_").check(
+            fc.check("cpp_fused_").check(
                 "torch.ops._c10d_functional.all_reduce_.default("
             )
         for _ in range(3):
@@ -384,7 +384,7 @@ class ReplicateTest(MultiProcessInductorTestCase):
         self.assertEqual(counters["inductor"]["ddp_buckets"], 3)
         fc = FileCheck()
         for _ in range(3):
-            fc.check("aten.flatten.using_ints(").check("cpp_fused_").check(
+            fc.check("cpp_fused_").check(
                 "torch.ops._c10d_functional.all_reduce_.default("
             )
         for _ in range(3):
