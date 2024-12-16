@@ -294,6 +294,7 @@ class TestCuda(TestCase):
 
     @serialTest()
     def test_set_per_process_memory_fraction(self):
+        orig = torch.cuda.get_per_process_memory_fraction(0)
         try:
             # test invalid fraction value.
             with self.assertRaisesRegex(TypeError, "Invalid type"):
@@ -328,7 +329,7 @@ class TestCuda(TestCase):
             tensor.fill_(1)
             self.assertTrue((tensor == 1).all())
         finally:
-            torch.cuda.set_per_process_memory_fraction(1.0, 0)
+            torch.cuda.set_per_process_memory_fraction(orig, 0)
 
     @serialTest()
     def test_get_per_process_memory_fraction(self):
@@ -483,7 +484,33 @@ class TestCuda(TestCase):
 
         torch._C._cuda_clearCublasWorkspaces()
 
+    @contextlib.contextmanager
+    def _hip_allow_tf32(self):
+        # for HIP/AMDGPU, tf32 is behind a flag because the TF32 support is new
+        # and only for MI300+
+        hip_allow_tf32 = os.environ.get("HIPBLASLT_ALLOW_TF32", None)
+        os.environ["HIPBLASLT_ALLOW_TF32"] = "1"
+
+        try:
+            yield
+        finally:
+            if hip_allow_tf32 is not None:
+                os.environ["HIPBLASLT_ALLOW_TF32"] = hip_allow_tf32
+            else:
+                del os.environ["HIPBLASLT_ALLOW_TF32"]
+
     def test_cublas_allow_tf32_get_set(self):
+        """
+        We only turn on TF32 for MI300 with a special env var. This is because TF32
+        is only available in MI300+ and is in experimental mode (hipblaslt support
+        is current WIP)
+        """
+        tf32_ctx = self._hip_allow_tf32 if torch.version.hip else contextlib.nullcontext
+
+        with tf32_ctx():
+            self._test_cublas_allow_tf32_get_set_inner()
+
+    def _test_cublas_allow_tf32_get_set_inner(self):
         skip_tf32_cublas = "TORCH_ALLOW_TF32_CUBLAS_OVERRIDE" in os.environ and int(
             os.environ["TORCH_ALLOW_TF32_CUBLAS_OVERRIDE"]
         )
@@ -498,6 +525,12 @@ class TestCuda(TestCase):
         torch.backends.cuda.matmul.allow_tf32 = orig
 
     def test_float32_matmul_precision_get_set(self):
+        tf32_ctx = self._hip_allow_tf32 if torch.version.hip else contextlib.nullcontext
+
+        with tf32_ctx():
+            self._test_float32_matmul_precision_get_set_inner()
+
+    def _test_float32_matmul_precision_get_set_inner(self):
         orig = torch.get_float32_matmul_precision()
         skip_tf32_cublas = "TORCH_ALLOW_TF32_CUBLAS_OVERRIDE" in os.environ and int(
             os.environ["TORCH_ALLOW_TF32_CUBLAS_OVERRIDE"]
@@ -509,6 +542,7 @@ class TestCuda(TestCase):
             self.assertEqual(torch.get_float32_matmul_precision(), "highest")
         else:
             self.assertTrue(torch.backends.cuda.matmul.allow_tf32)
+
         for p in ("medium", "high"):
             torch.set_float32_matmul_precision(p)
             self.assertEqual(torch.get_float32_matmul_precision(), p)
@@ -724,6 +758,14 @@ class TestCuda(TestCase):
         self.assertIsInstance(cuda_event, torch.Event)
         self.assertTrue(issubclass(type(cuda_event), torch.Event))
         self.assertTrue(torch.Event in type(cuda_event).mro())
+
+    def test_stream_compatibility(self):
+        s1 = torch.cuda.Stream()
+        s2 = torch.cuda.Stream()
+        torch.accelerator.set_stream(s1)
+        self.assertEqual(torch.accelerator.current_stream().stream_id, s1.stream_id)
+        torch.accelerator.set_stream(s2)
+        self.assertEqual(torch.accelerator.current_stream().stream_id, s2.stream_id)
 
     def test_record_stream(self):
         cycles_per_ms = get_cycles_per_ms()
@@ -3642,6 +3684,7 @@ class TestCudaMallocAsync(TestCase):
         finally:
             torch.cuda.memory._record_memory_history(None)
 
+    @serialTest
     def test_max_split_expandable(self):
         try:
             torch.cuda.memory.empty_cache()
@@ -3651,6 +3694,7 @@ class TestCudaMallocAsync(TestCase):
             total_allowed = 120 * mb + pre_reserved
             fraction_allowed = total_allowed / all_memory
             self.assertEqual(int(fraction_allowed * all_memory), total_allowed)
+            orig = torch.cuda.get_per_process_memory_fraction()
             torch.cuda.memory.set_per_process_memory_fraction(fraction_allowed)
 
             def alloc(n):
@@ -3674,8 +3718,9 @@ class TestCudaMallocAsync(TestCase):
             # force release_cached_blocks to run with some expandable segments in the free list
             alloc(120)
         finally:
-            torch.cuda.memory.set_per_process_memory_fraction(1.0)
+            torch.cuda.memory.set_per_process_memory_fraction(orig)
 
+    @serialTest
     def test_garbage_collect_expandable(self):
         try:
             torch.cuda.memory.empty_cache()
@@ -3685,6 +3730,7 @@ class TestCudaMallocAsync(TestCase):
             total_allowed = 120 * mb + pre_reserved
             fraction_allowed = total_allowed / all_memory
             self.assertEqual((fraction_allowed * all_memory), total_allowed)
+            orig = torch.cuda.get_per_process_memory_fraction(0)
             torch.cuda.memory.set_per_process_memory_fraction(fraction_allowed)
 
             def alloc(n):
@@ -3704,7 +3750,7 @@ class TestCudaMallocAsync(TestCase):
             # expandable_segment blocks can be in the free list when this is called.
             alloc(80)
         finally:
-            torch.cuda.memory.set_per_process_memory_fraction(1.0)
+            orig = torch.cuda.get_per_process_memory_fraction(0)
 
     def test_allocator_settings(self):
         def power2_div(size, div_factor):
