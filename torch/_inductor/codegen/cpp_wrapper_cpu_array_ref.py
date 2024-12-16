@@ -47,19 +47,13 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
             self.device = "cpu"
         super().__init__()
         self.supports_intermediate_hooks = False
-        self.outputs_need_copy = set()
         self.kernel_callsite_id = count()
         self.var_array_id = (
             count()
         )  # for different types of local array variable declarations
-        self.declared_var_array_vars = set()
         self.int_array_id = count()  # for int array local variable declarations
-        self.declared_int_array_vars = set()
         self.tmp_tensor_id = count()  # for tmp tensor local variable declarations
         self.arg_var_id = count()
-        self.used_cached_devices = set()
-        self.used_cached_dtypes = set()
-        self.used_cached_layouts = set()
         self.cached_output_id = count()
         self.scalar_to_tensor_id = count()
         self.custom_op_wrapper_loaded = False
@@ -440,7 +434,6 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
             with self.wrapper_call.indent():
                 if arr_iface:
                     cached_output_name = f"cached_output_{next(self.cached_output_id)}"
-                    output_value_type = f"std::decay_t<decltype(std::get<{idx}>(output_arrayref_tensors).data()[0])>"
                     self.wrapper_call.writeline(
                         f"thread_local RAIIAtenTensorHandle {cached_output_name};"
                     )
