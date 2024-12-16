@@ -137,3 +137,15 @@ runs:
         done
         echo "Reached maximum attempts to connect to Docker. Exiting."
         exit 1
+
+    - name: Enable swap
+      shell: bash
+      continue-on-error: true
+      run: |
+        set -ex
+
+        # Testing https://github.com/pytorch/test-infra/pull/6058
+        sudo fallocate -l 3G /swapfile
+        sudo chmod 600 /swapfile
+        sudo mkswap /swapfile
+        sudo swapon /swapfile
