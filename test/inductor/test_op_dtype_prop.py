@@ -219,6 +219,7 @@ class TestCase(InductorTestCase):
             return x % y, x / y
 
         x, y = (torch.rand([8], dtype=torch.float16, device="cuda") for _ in range(2))
+
         out, code = run_and_get_code(torch.compile(fn), x, y)
         FileCheck().check("static_assert").check_same(".dtype").run(code[0])
         self.assertEqual(fn(x, y), out)
@@ -241,6 +242,16 @@ class TestCase(InductorTestCase):
         x = torch.rand([40], device="cuda").to(torch.bool)
         out, code = run_and_get_code(torch.compile(fn), x)
         self.assertEqual(fn(x), out)
+
+    @config.patch("test_configs.runtime_triton_dtype_assert", True)
+    def test_assoc_scan(self):
+        from torch._higher_order_ops.associative_scan import associative_scan
+
+        x = torch.randn(10, device="cuda")
+        # dtype check correctly
+        associative_scan(
+            lambda acc, curr: acc + torch.abs(curr), x, dim=-1, combine_mode="pointwise"
+        )
 
 
 instantiate_device_type_tests(TestCase, globals(), only_for=("cuda",))
