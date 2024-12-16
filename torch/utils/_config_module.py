@@ -161,6 +161,11 @@ def install_config_module(module: ModuleType) -> None:
                 or (hasattr(value, "__module__") and value.__module__ == "typing")
                 # Handle from torch.utils._config_module import Config
                 or (isinstance(value, type) and issubclass(value, _Config))
+                # Handle from torch.serialization import LoadEndianness
+                or (
+                    hasattr(value, "__module__")
+                    and value.__module__ == "torch.serialization"
+                )
             ):
                 continue
 
@@ -178,7 +183,9 @@ def install_config_module(module: ModuleType) -> None:
                 if dest is module:
                     delattr(module, key)
             elif isinstance(value, type):
-                assert value.__module__ == module.__name__
+                assert (
+                    value.__module__ == module.__name__
+                ), f"{value.__module__}, {module.__name__}"
                 # a subconfig with `class Blah:` syntax
                 proxy = SubConfigProxy(module, f"{name}.")
                 visit(value, proxy, f"{name}.")

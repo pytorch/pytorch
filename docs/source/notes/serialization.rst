@@ -487,3 +487,4 @@ The following utility functions are related to serialization:
 .. autofunction:: get_unsafe_globals_in_checkpoint
 .. autoclass:: safe_globals
 .. autoclass:: skip_data
+.. autovariable:: config
