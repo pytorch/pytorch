@@ -2141,6 +2141,7 @@ class TestSelectAlgorithmDynamicShapes(_DynamicShapesTestBase):
         self.assertEqual(counters["inductor"]["cpp_epilogue_fusion_counter"], 1)
 
 <<<<<<< HEAD
+<<<<<<< HEAD
     @patches
     @torch.no_grad
     @unittest.skipIf(not TEST_MKL, "Test requires MKL")
@@ -2296,7 +2297,7 @@ class TestSelectAlgorithmDynamicShapes(_DynamicShapesTestBase):
         if dtype == torch.bfloat16 and not torch.ops.mkldnn._is_mkldnn_bf16_supported():
             return
         M = 32
-        in_feature = 32
+        in_feature = 48
         out_feature = 64
         q_min, q_max = -32, 31
 
