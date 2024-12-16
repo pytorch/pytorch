@@ -864,7 +864,6 @@ def get_fx_node(snode_or_ir_node, expected_op):
     return origins_with_expected_op[0]
 
 
-# TODO(yf225): abstract these into common util functions
 def _schedule_snode(snode, new_order, scheduled):
     if snode in scheduled:
         return
