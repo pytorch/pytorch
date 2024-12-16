@@ -4967,18 +4967,15 @@ class TestLinalg(TestCase):
     @onlyCUDA
     @dtypes(torch.half)
     def test_minimum_tuning_iteration_tunableop(self, device, dtype):
-        # Make sure that there is at least one tuning iteration when the tuning duration
-        # is set to zero
-
+        # Make sure that there is at least one tuning iteration occurs
+        # when the max tuning duration and max tuning iteration are set
+        # to zero.
         set_tunableop_defaults()
         torch.cuda.tunable.enable()
 
-        # Set tuning duration to zero milliseconds
         # Tune a single GEMM and verify that we get a new tuning result
-        import os
-        os.environ["PYTORCH_TUNABLEOP_MAX_TUNING_DURATION_MS"] = "0"
-        self.assertGreater(torch.cuda.tunable.get_max_tuning_iterations(), 0)
-        os.environ["PYTORCH_TUNABLEOP_MAX_TUNING_DURATION_MS"] = "30"  # reset to default
+        torch.cuda.tunable.set_max_tuning_duration(0)
+        torch.cuda.tunable.set_max_tuning_iterations(0)
 
         # Reference number of results
         ref_num_results = len(torch.cuda.tunable.get_results())
