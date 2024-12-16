@@ -7,10 +7,11 @@ import logging
 import operator
 import sys
 from collections import defaultdict
-from typing import Dict, List, Set, TYPE_CHECKING
+from typing import Any, Dict, List, TYPE_CHECKING
 
 import torch
 from torch.multiprocessing.reductions import StorageWeakRef
+from torch.utils._ordered_set import OrderedSet
 
 from . import config, ir
 from .dependencies import WeakDep
@@ -148,12 +149,13 @@ def _schedule_for_comm(
         def __lt__(self, other):
             return self.score < other.score
 
-    unmet_deps: Dict[BaseSchedulerNode, Set[str]] = {
-        snode: {dep.name for dep in snode.unmet_dependencies} for snode in snodes
+    unmet_deps: Dict[BaseSchedulerNode, OrderedSet[str]] = {
+        snode: OrderedSet(dep.name for dep in snode.unmet_dependencies)
+        for snode in snodes
     }
 
     ready: List[Runnable] = []
-    buffer_users: Dict[str, Set[BaseSchedulerNode]] = defaultdict(set)
+    buffer_users: Dict[str, OrderedSet[BaseSchedulerNode]] = defaultdict(OrderedSet)
     snode_to_cost = {snode: estimate_op_runtime(snode) for snode in snodes}
 
     for snode, deps in unmet_deps.items():
@@ -231,18 +233,8 @@ def decide_global_ordering_of_comms(
     (might not be the same ordering as the eager mode program).
     TODO: Come up with a better approach
     """
-    # If FSDP2 is used, we apply FSDP-specific passes.
-    if any(
-        is_fallback_op(
-            x.node,
-            {
-                torch.ops.fsdp.all_gather_copy_in.default,
-                torch.ops.fsdp.chunk_cat.default,
-            },
-        )
-        for x in nodes
-    ):
-        nodes = enforce_comm_ordering_for_fsdp(nodes, name_to_buf, name_to_fused_node)
+    if not torch.distributed.is_available():
+        return nodes
 
     comm_nodes = [n for n in nodes if contains_collective(n)]
 
@@ -442,14 +434,18 @@ Offending node: {unsharded_param}. Graph: {graph}
             if isinstance(node.target, torch._ops.OpOverload)
             else []
         )
-        mutated_node_arg_storages = {
-            StorageWeakRef(node.args[i].meta["val"].untyped_storage())
-            for i in mutated_arg_idxes
-        }
-        storages_of_unsharded_params = {
-            StorageWeakRef(unsharded_param.meta["val"].untyped_storage())
-            for unsharded_param in unsharded_params
-        }
+        mutated_node_arg_storages = OrderedSet(
+            [
+                StorageWeakRef(node.args[i].meta["val"].untyped_storage())
+                for i in mutated_arg_idxes
+            ]
+        )
+        storages_of_unsharded_params = OrderedSet(
+            [
+                StorageWeakRef(unsharded_param.meta["val"].untyped_storage())
+                for unsharded_param in unsharded_params
+            ]
+        )
         return len(mutated_node_arg_storages & storages_of_unsharded_params) > 0
 
     # Check no user mutation on any unsharded_param
@@ -664,7 +660,7 @@ def enforce_comm_ordering_for_fsdp(
     from . import scheduler
 
     new_order: list[BaseSchedulerNode] = []
-    scheduled = set()
+    scheduled = OrderedSet[Any]()
     ag_exists = False
     rs_exists = False
     ag_grouped_node_to_wait_grouped_node = {}
@@ -691,7 +687,7 @@ def enforce_comm_ordering_for_fsdp(
         ):
             ag_exists = True
             ag_snode = snode
-            ag_related_snode_set: set[scheduler.BaseSchedulerNode] = set()
+            ag_related_snode_set: OrderedSet[scheduler.BaseSchedulerNode] = OrderedSet()
 
             # Find the "cast + copy_in + getitem + all_gather" code block
             find_recursive_deps_of_node(
@@ -702,11 +698,13 @@ def enforce_comm_ordering_for_fsdp(
             )
 
             # Find the "all_gather + all_gather_wait_tensor + copy_out" code block
-            allowed_ops = {
-                torch.ops._c10d_functional.all_gather_into_tensor_out.default,
-                torch.ops._c10d_functional.wait_tensor.default,
-                torch.ops.fsdp.split_with_sizes_copy.default,
-            }
+            allowed_ops = OrderedSet(
+                [
+                    torch.ops._c10d_functional.all_gather_into_tensor_out.default,
+                    torch.ops._c10d_functional.wait_tensor.default,
+                    torch.ops.fsdp.split_with_sizes_copy.default,
+                ]
+            )
             find_recursive_users_of_node(
                 ag_snode,
                 ag_related_snode_set,
@@ -762,7 +760,7 @@ def enforce_comm_ordering_for_fsdp(
             rs_snode = snode
 
             # Find the "reduce_scatter copy-in + reduce_scatter comm + reduce_scatter wait" code block
-            rs_related_snode_set: set[scheduler.BaseSchedulerNode] = set()
+            rs_related_snode_set: OrderedSet[scheduler.BaseSchedulerNode] = OrderedSet()
             find_recursive_users_of_node(
                 rs_snode,
                 rs_related_snode_set,
