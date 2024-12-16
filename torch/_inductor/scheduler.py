@@ -222,7 +222,6 @@ class BaseSchedulerNode:
         buf.splice(
             f"""\
 {name}: {type(self).__name__}({type(getattr(self, 'node', None)).__name__})
-id({name}): {id(self)}
 {name}.writes = {pformat(self.read_writes.writes)}
 {name}.unmet_dependencies = {pformat(self.unmet_dependencies)}
 {name}.met_dependencies = {pformat(self.read_writes.reads - self.unmet_dependencies)}
