@@ -769,13 +769,8 @@ op_db: List[OpInfo] = [
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
         promotes_int_to_float=True,
-        dtypes=all_types_and_complex_and(torch.float16, torch.bfloat16, torch.bool),
+        dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16),
         skips=(
-            # For any non-floating point or complex dtypes we expect a failure
-            DecorateInfo(
-                unittest.expectedFailure,
-                dtypes=(torch.bool, *integral_types()),
-            ),
             DecorateInfo(
                 unittest.expectedFailure,
                 "TestNormalizeOperators",
