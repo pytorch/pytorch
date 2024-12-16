@@ -671,7 +671,7 @@ def print_summary_table(data, print_dataframe=False):
                     col.ljust(width),
                     f"gmean={gmean(cdata):.2f}x mean={cdata.mean():.3f}x",
                 )
-        except Exception as e:
+        except Exception:
             pass
 
 
@@ -3018,7 +3018,7 @@ class BenchmarkRunner:
                     )
                 ):
                     is_same = False
-            except Exception as e:
+            except Exception:
                 # Sometimes torch.allclose may throw RuntimeError
                 is_same = False
 
@@ -3110,7 +3110,7 @@ class BenchmarkRunner:
                     tol=tolerance,
                 ):
                     is_same = False
-            except Exception as e:
+            except Exception:
                 # Sometimes torch.allclose may throw RuntimeError
                 is_same = False
 
@@ -3157,7 +3157,7 @@ class BenchmarkRunner:
                 self.init_optimizer(name, current_device, model.parameters())
                 optimized_model_iter_fn = optimize_ctx(self.run_n_iterations)
                 new_result = optimized_model_iter_fn(model, example_inputs)
-            except Exception as e:
+            except Exception:
                 log.exception("")
                 print(
                     "TorchDynamo optimized model failed to run because of following error"
@@ -3272,13 +3272,9 @@ class BenchmarkRunner:
             )
 
             if self.args.export_aot_inductor:
-                t_0 = time.perf_counter()
                 optimized_model_iter_fn = optimize_ctx
-                t_1 = time.perf_counter()
-                aot_compilation_time = t_1 - t_0
             else:
                 optimized_model_iter_fn = optimize_ctx(self.model_iter_fn)
-                aot_compilation_time = 0
 
             with maybe_enable_compiled_autograd(
                 self.args.compiled_autograd,
@@ -3318,7 +3314,7 @@ class BenchmarkRunner:
                 )
                 dynamo_cache_lookup_latency = events[0].self_cpu_time_total
 
-            compilation_time = dynamo_latency - eager_latency + aot_compilation_time
+            compilation_time = dynamo_latency - eager_latency
             compression_ratio = (
                 eager_peak_mem / dynamo_peak_mem if dynamo_peak_mem else 0.0
             )
@@ -3429,13 +3425,9 @@ class BenchmarkRunner:
                     )
 
             if self.args.export_aot_inductor:
-                t_0 = time.perf_counter()
                 optimized_model_iter_fn = optimize_ctx
-                t_1 = time.perf_counter()
-                aot_compilation_time = t_1 - t_0
             else:
                 optimized_model_iter_fn = optimize_ctx(self.model_iter_fn)
-                aot_compilation_time = 0
 
             with maybe_enable_compiled_autograd(
                 self.args.compiled_autograd,
@@ -3475,7 +3467,7 @@ class BenchmarkRunner:
                 )
                 dynamo_cache_lookup_latency = events[0].self_cpu_time_total
 
-            compilation_time = dynamo_latency - eager_latency + aot_compilation_time
+            compilation_time = dynamo_latency - eager_latency
             compression_ratio = (
                 eager_peak_mem / dynamo_peak_mem if dynamo_peak_mem else 0.0
             )
@@ -3550,7 +3542,7 @@ class BenchmarkRunner:
 
         try:
             shutil.move("repro.py", f"{repro_dir}/{name}_repro.py")
-        except OSError as e:
+        except OSError:
             logging.error("Could not find repro script for model %s", name)
         else:
             logging.info(
@@ -4377,9 +4369,6 @@ def run(runner, args, original_dir=None):
             # Set translation validation on by default on CI accuracy runs.
             torch.fx.experimental._config.translation_validation = True
 
-        ci = functools.partial(
-            CI, args.backend, training=args.training, dynamic=args.dynamic_shapes
-        )
     if args.ddp:
         assert args.training, "DDP benchmark requires --training mode"
         torch._dynamo.config.optimize_ddp = args.optimize_ddp_mode

@@ -86,6 +86,9 @@ assume_static_by_default = True
 # any guards due to wobbles in shape, we recompile with *all* the wobbled shapes as being marked dynamic.
 automatic_dynamic_shapes = True
 
+# Valid options: "dynamic", "unbacked"
+automatic_dynamic_shapes_mark_as = "dynamic"
+
 # This flag changes how the shapes of parameters are treated.
 # If this flag is set to True, then the shapes of torch.nn.Parameter as well as of torch.Tensor are attempted to be dynamic
 # If this flag is set to False, then the shapes of torch.nn.Parameter are assumed to be static,
@@ -252,6 +255,14 @@ allow_complex_guards_as_runtime_asserts = False
 # 0/1.  This is not on by default as AOTAutograd/Inductor cannot currently
 # compile this code; however, this can be useful for export.
 force_unspec_int_unbacked_size_like_on_torchrec_kjt = False
+
+# Currently, Dynamo will always specialize on int members of NN module.
+# However, there could be cases where this is undesirable, e.g., when tracking
+# step count leading to constant recompilation and eventually eager fallback.
+# Setting this flag to True will allow int members to be potentially unspecialized
+# through dynamic shape mechanism.
+# Defaults to False for BC.
+allow_unspec_int_on_nn_module = False
 
 # Specify how to optimize a compiled DDP module. The flag accepts a boolean
 # value or a string. There are 4 modes.
@@ -533,6 +544,11 @@ automatic_dynamic_local_pgo: bool = (
 # Like above, but using remote cache
 automatic_dynamic_remote_pgo: Optional[bool] = get_tristate_env(
     "TORCH_DYNAMO_AUTOMATIC_DYNAMIC_REMOTE_PGO"
+)
+
+# temporary config to kill later
+_unsafe_skip_fsdp_module_guards = (
+    os.environ.get("UNSAFE_SKIP_FSDP_MODULE_GUARDS", "0") == "1"
 )
 
 # HACK: this is for testing custom ops profiling only
