@@ -527,12 +527,10 @@ void onFunctionExit(
         nullptr, &fallback->device_event_end_, nullptr);
   }
 
-  if (!config.experimental_config.disable_external_correlation) {
-    if (fn.scope() == at::RecordScope::USER_SCOPE) {
-      torch::profiler::impl::kineto::popUserCorrelationId();
-    } else {
-      torch::profiler::impl::kineto::popCorrelationId();
-    }
+  if (fn.scope() == at::RecordScope::USER_SCOPE) {
+    torch::profiler::impl::kineto::popUserCorrelationId();
+  } else {
+    torch::profiler::impl::kineto::popCorrelationId();
   }
 }
 
