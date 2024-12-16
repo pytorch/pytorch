@@ -63,5 +63,12 @@ Tag to be included in the cache key generation for all torch compile caching.
 A common use case for such a tag is to break caches.
 """
 
+record_cache_artifacts: bool = Config(
+    env_name_default="TORCH_COMPILE_RECORD_CACHE_ARTIFACTS", default=False
+)
+"""
+Prepare for hotloading
+"""
+
 
 install_config_module(sys.modules[__name__])

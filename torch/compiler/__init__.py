@@ -1,5 +1,5 @@
 # mypy: allow-untyped-defs
-from typing import Any, Callable, List, TypeVar
+from typing import Any, Callable, List, Optional, TypeVar
 
 import torch
 
@@ -17,6 +17,8 @@ __all__ = [
     "wrap_numpy",
     "is_compiling",
     "is_dynamo_compiling",
+    "save_cache_artifacts",
+    "load_cache_artifacts",
 ]
 
 
@@ -402,3 +404,21 @@ def is_dynamo_compiling() -> bool:
         >>>     # ...rest of the function...
     """
     return False
+
+
+def save_cache_artifacts() -> Optional[bytes]:
+    """
+    Serializes cache artifacts for hot loading
+    """
+    from ._cache import CacheArtifactManager
+
+    return CacheArtifactManager.serialize()
+
+
+def load_cache_artifacts(serialized_artifacts: bytes) -> None:
+    """
+    Hot loads cache artifacts that were previously serializes
+    """
+    from ._cache import CacheArtifactManager
+
+    CacheArtifactManager.deserialize(serialized_artifacts)

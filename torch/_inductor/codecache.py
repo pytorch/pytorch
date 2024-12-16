@@ -67,6 +67,7 @@ from torch._inductor.custom_graph_pass import CustomGraphPass, CustomGraphPassTy
 from torch._inductor.output_code import has_frozen_params
 from torch._utils_internal import log_cache_bypass
 from torch.compiler import config as cconfig
+from torch.compiler._cache import CacheArtifactManager, CacheArtifactType
 from torch.utils._ordered_set import OrderedSet
 
 from .remote_cache import create_cache
@@ -1014,14 +1015,17 @@ class FxGraphCache:
         symints = FxGraphCache._filter_backed_symints(example_inputs)
         hints = [hint_int(s) for s in symints]
 
-        def iterate_over_candidates() -> Generator[CompiledFxGraph, None, None]:
+        def iterate_over_candidates() -> (
+            Generator[Tuple[CompiledFxGraph, bytes], None, None]
+        ):
             if local:
                 subdir = FxGraphCache._get_tmp_dir_for_key(key)
                 if os.path.exists(subdir):
                     for path in sorted(os.listdir(subdir)):
                         try:
                             with open(os.path.join(subdir, path), "rb") as f:
-                                yield pickle.load(f)
+                                content = f.read()
+                                yield pickle.loads(content), content
                         except Exception:
                             log.warning(
                                 "fx graph cache unable to load compiled graph",
@@ -1035,7 +1039,7 @@ class FxGraphCache:
                         data = cache_data["data"]
                         assert isinstance(data, (str, bytes))
                         content = base64.b64decode(data)
-                        yield pickle.loads(content)
+                        yield pickle.loads(content), content
                 except Exception:
                     log.warning(
                         "fx graph cache unable to load compiled graph", exc_info=True
@@ -1044,9 +1048,10 @@ class FxGraphCache:
         # Iterate over any entries in the subdir for this key and evaluate
         # their guards to determine whether there's a hit.
         graph = None
+        pickled_content = None
         cache_info: Dict[str, Any] = dict()
 
-        for candidate in iterate_over_candidates():
+        for candidate, pickled_content in iterate_over_candidates():
             if not candidate.guards_expr:
                 # No guards to evaluate, so this is a hit.
                 graph = candidate
@@ -1072,6 +1077,11 @@ class FxGraphCache:
 
         if graph is None:
             return None, cache_info
+
+        if pickled_content is not None:
+            CacheArtifactManager.record_artifact(
+                CacheArtifactType.INDUCTOR_CACHE, key, pickled_content
+            )
 
         if bundle := graph._triton_bundle:
             triton_bundler_meta = TritonBundler.read_and_emit(bundle)
@@ -1165,6 +1175,9 @@ class FxGraphCache:
             return
 
         try:
+            CacheArtifactManager.record_artifact(
+                CacheArtifactType.INDUCTOR_CACHE, key, content
+            )
             if local:
                 subdir = FxGraphCache._get_tmp_dir_for_key(key)
                 if not os.path.exists(subdir):
