@@ -760,7 +760,7 @@ def _get_nv_config(query, mode: Mode) -> Tuple[int, int, int, int]:
             if head_dim == 64:
                 return (32, 128, 4, 3)
             elif head_dim == 128:
-                return (64, 128, 8, 3)
+                return (64, 128, 4, 3)
             else:
                 return (64, 64, 4, 2)
         else:  # modest hardware or extremely large head_dim
