@@ -330,6 +330,7 @@ class FunctionDecoratedByContextlibContextManagerVariable(BaseUserFunctionVariab
     """
 
     def __init__(self, vt: VariableTracker, **kwargs):
+        super().__init__(**kwargs)
         self.vt = vt
         self.inline_tracer = None
 
@@ -358,10 +359,6 @@ class FunctionDecoratedByContextlibContextManagerVariable(BaseUserFunctionVariab
         )
 
         return self
-
-    def can_reconstruct(self, tx):
-        # Any graph break should force the entire context manager to run on eager mode
-        return False
 
     def next_variable(self, tx):
         from torch._dynamo import exc
