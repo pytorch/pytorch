@@ -117,7 +117,7 @@ MobileDebugTable::MobileDebugTable(
   const std::vector<std::string>& record_names = reader->getAllRecords();
   constexpr std::string_view suffix(".debug_pkl");
   for (const auto& record_name : record_names) {
-    if (c10::string_view_ends_with(std::string_view(record_name), suffix)) {
+    if (c10::ends_with(std::string_view(record_name), suffix)) {
       auto [debug_data, debug_size] = reader->getRecord(record_name);
       auto ivalueTuple = jit::unpickle(
           reinterpret_cast<const char*>(debug_data.get()),

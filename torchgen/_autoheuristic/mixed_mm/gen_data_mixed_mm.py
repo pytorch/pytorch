@@ -6,7 +6,7 @@ import sys
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from typing import Any, Tuple
+from typing import Any
 
 from benchmark_runner import BenchmarkRunner  # type: ignore[import-not-found]
 from benchmark_utils import (  # type: ignore[import-not-found]
@@ -33,7 +33,7 @@ class BenchmarkRunnerMixedMM(BenchmarkRunner):  # type: ignore[misc, no-any-unim
     def __init__(self) -> None:
         super().__init__("mixed_mm")
 
-    def create_input(self) -> Tuple[Any, ...]:
+    def create_input(self) -> tuple[Any, ...]:
         dtype1, dtype2 = self.get_dtypes()
         m, k, n = self.get_m_k_n(dtype1)
         transpose_left, transpose_right = False, True
@@ -109,7 +109,7 @@ class BenchmarkRunnerMixedMM(BenchmarkRunner):  # type: ignore[misc, no-any-unim
         else:
             return get_random_between_pow2(1, 7)
 
-    def get_m_k_n(self, dtype: Any) -> Tuple[int, int, int]:
+    def get_m_k_n(self, dtype: Any) -> tuple[int, int, int]:
         numel_max = 2**31
 
         # repeat until tensors fit in memory

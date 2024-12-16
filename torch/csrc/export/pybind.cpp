@@ -7,6 +7,7 @@ void initExportBindings(PyObject* module) {
   auto rootModule = py::handle(module).cast<py::module>();
   auto m = rootModule.def_submodule("_export");
 
+  // NOLINTNEXTLINE(bugprone-unused-raii)
   py::class_<ExportedProgram>(m, "CppExportedProgram");
 
   m.def("deserialize_exported_program", [](const std::string& serialized) {

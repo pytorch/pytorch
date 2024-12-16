@@ -12,16 +12,17 @@
 #include <c10/util/Metaprogramming.h>
 #include <type_traits>
 
-namespace c10 {
-namespace impl {
+namespace c10::impl {
 
 //
 // utils
 //
 
 // is_mutable_tensor_ref
-template <class T> struct is_mutable_tensor_ref : std::false_type {};
-template <> struct is_mutable_tensor_ref<at::Tensor&> : std::true_type {};
+template <class T>
+struct is_mutable_tensor_ref : std::false_type {};
+template <>
+struct is_mutable_tensor_ref<at::Tensor&> : std::true_type {};
 
 // is_tuple_of_mutable_tensor_refs
 //
@@ -29,27 +30,27 @@ template <class T, class Enable = void>
 struct is_tuple_of_mutable_tensor_refs : std::false_type {};
 
 template <class T>
-struct is_tuple_of_mutable_tensor_refs<T, std::enable_if_t<guts::is_instantiation_of<std::tuple, T>::value, void>>
-: guts::typelist::all<is_mutable_tensor_ref, guts::typelist::from_tuple_t<T>>
-{};
+struct is_tuple_of_mutable_tensor_refs<
+    T,
+    std::enable_if_t<guts::is_instantiation_of<std::tuple, T>::value, void>>
+    : guts::typelist::
+          all<is_mutable_tensor_ref, guts::typelist::from_tuple_t<T>> {};
 
-// has_ivalue_to<T> tests the presence/absence of instance method IValue::to<T>()
+// has_ivalue_to<T> tests the presence/absence of instance method
+// IValue::to<T>()
 //
 template <class T, class Enable = void>
 struct has_ivalue_to : std::false_type {};
 
 template <class T>
-struct ivalue_to_helper
-{
-    using type = decltype(std::declval<IValue>().template to<T>());
+struct ivalue_to_helper {
+  using type = decltype(std::declval<IValue>().template to<T>());
 };
 template <class T>
 using ivalue_to_helper_t = typename ivalue_to_helper<T>::type;
 
 template <class T>
-struct has_ivalue_to<T, std::void_t<ivalue_to_helper_t<T>>>
-: std::true_type
-{};
+struct has_ivalue_to<T, std::void_t<ivalue_to_helper_t<T>>> : std::true_type {};
 
 //
 // boxing predicates
@@ -57,28 +58,23 @@ struct has_ivalue_to<T, std::void_t<ivalue_to_helper_t<T>>>
 
 // A boxable arg type is one that IValue has a constructor for.
 template <typename T>
-using can_box =
-  std::disjunction<
+using can_box = std::disjunction<
     std::is_constructible<IValue, std::decay_t<T>>,
     // TensorOptions are not directly constructible into IValue,
     // but torch::jit::push knows how to handle them
-    std::is_same<TensorOptions, std::decay_t<T>>
-  >;
+    std::is_same<TensorOptions, std::decay_t<T>>>;
 
 template <typename... Ts>
 using can_box_all = std::conjunction<can_box<Ts>...>;
 
 // an unboxable result is one that can be extracted from an IValue
 template <typename T>
-using can_unbox =
-   std::conjunction<
+using can_unbox = std::conjunction<
     std::disjunction<
-      has_ivalue_to<T>,
-      // void returns are ok
-      std::is_same<void, T>
-    >,
-    std::negation<std::is_lvalue_reference<T>>
-  >;
+        has_ivalue_to<T>,
+        // void returns are ok
+        std::is_same<void, T>>,
+    std::negation<std::is_lvalue_reference<T>>>;
 
 //
 // boxArgs - utility for pushing unboxed args onto IValue stack
@@ -94,7 +90,9 @@ torch::jit::Stack boxArgs(Args... args) {
 
 template <class T>
 inline constexpr size_t boxed_size_one() {
-  static_assert(!std::is_same<std::decay_t<T>, c10::TensorOptions>::value, "need to patch this path to support TensorOptions passed by reference");
+  static_assert(
+      !std::is_same<std::decay_t<T>, c10::TensorOptions>::value,
+      "need to patch this path to support TensorOptions passed by reference");
   return 1;
 }
 
@@ -109,22 +107,32 @@ inline constexpr size_t boxed_size_one<c10::TensorOptions>() {
 template <typename...>
 struct BoxedSize : std::integral_constant<size_t, 0> {};
 template <class T, class... Args>
-struct BoxedSize<T, Args...> : std::integral_constant<size_t, boxed_size_one<T>() + BoxedSize<Args...>::value> {};
+struct BoxedSize<T, Args...>
+    : std::integral_constant<
+          size_t,
+          boxed_size_one<T>() + BoxedSize<Args...>::value> {};
 
 template <class... Args>
 static inline constexpr size_t boxed_size() {
   return BoxedSize<Args...>::value;
 }
 
-using IValueAlignedStorage = std::aligned_storage_t<sizeof(IValue), alignof(IValue)>;
+using IValueAlignedStorage =
+    std::aligned_storage_t<sizeof(IValue), alignof(IValue)>;
 
 template <typename T>
-C10_ALWAYS_INLINE_UNLESS_MOBILE void boxToStack(IValueAlignedStorage* dest, T& arg, int& lastIdx) {
+C10_ALWAYS_INLINE_UNLESS_MOBILE void boxToStack(
+    IValueAlignedStorage* dest,
+    T& arg,
+    int& lastIdx) {
   new (&dest[lastIdx]) IValue(arg);
   lastIdx++;
 }
 
-C10_ALWAYS_INLINE_UNLESS_MOBILE void boxToStack(IValueAlignedStorage* dest, c10::TensorOptions options, int& lastIdx) {
+C10_ALWAYS_INLINE_UNLESS_MOBILE void boxToStack(
+    IValueAlignedStorage* dest,
+    c10::TensorOptions options,
+    int& lastIdx) {
   new (&dest[lastIdx++]) IValue(c10::typeMetaToScalarType(options.dtype()));
   new (&dest[lastIdx++]) IValue(options.layout());
   new (&dest[lastIdx++]) IValue(options.device());
@@ -133,8 +141,12 @@ C10_ALWAYS_INLINE_UNLESS_MOBILE void boxToStack(IValueAlignedStorage* dest, c10:
 
 inline void boxArgsToStack(IValueAlignedStorage*, int&) {}
 
-template<typename T, typename... Args>
-C10_ALWAYS_INLINE_UNLESS_MOBILE void boxArgsToStack(IValueAlignedStorage* dest, int& lastIdx, T& arg, Args &... args) {
+template <typename T, typename... Args>
+C10_ALWAYS_INLINE_UNLESS_MOBILE void boxArgsToStack(
+    IValueAlignedStorage* dest,
+    int& lastIdx,
+    T& arg,
+    Args&... args) {
   boxToStack(dest, arg, lastIdx);
   boxArgsToStack(dest, lastIdx, args...);
 }
@@ -147,10 +159,11 @@ template <class Result>
 struct PopResult final {
   static Result call(Stack& stack) {
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-      stack.size() == 1,
-      "Boxed kernel was expected to return one value on the stack, ",
-      "but instead pushed ", stack.size(), " values."
-    );
+        stack.size() == 1,
+        "Boxed kernel was expected to return one value on the stack, ",
+        "but instead pushed ",
+        stack.size(),
+        " values.");
     return std::move(stack[0]).to<Result>();
   }
 };
@@ -160,20 +173,28 @@ struct PopResult<std::tuple<Types...>> final {
   using Result = std::tuple<Types...>;
 
   static Result call(Stack& stack) {
-    // for tuple return types, boxed kernel has pushed multiple values onto the stack
+    // for tuple return types, boxed kernel has pushed multiple values onto the
+    // stack
     constexpr int RetCount = sizeof...(Types);
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-      stack.size() == RetCount,
-      "Boxed kernel was expected to return ", RetCount, " values on the stack, ",
-      "but instead pushed ", stack.size(), " values."
-    );
+        stack.size() == RetCount,
+        "Boxed kernel was expected to return ",
+        RetCount,
+        " values on the stack, ",
+        "but instead pushed ",
+        stack.size(),
+        " values.");
     return pop_to_tuple_impl(stack, std::make_index_sequence<RetCount>());
   }
-private:
-  // note: this has been moved into its own helper only to avoid a parse error on `indices` otherwise.
-  // I'm sure there's an incantation that slips it past the parser but eh
+
+ private:
+  // note: this has been moved into its own helper only to avoid a parse error
+  // on `indices` otherwise. I'm sure there's an incantation that slips it past
+  // the parser but eh
   template <size_t... indices>
-  static Result pop_to_tuple_impl(Stack& stack, std::index_sequence<indices...>) {
+  static Result pop_to_tuple_impl(
+      Stack& stack,
+      std::index_sequence<indices...>) {
     return std::make_tuple((std::move(stack[indices]).to<Types>())...);
   }
 };
@@ -193,24 +214,25 @@ private:
 // and ops returning references have nonstandard wrapper implementations.
 //
 
-// 1. The base specialization of BoxedKernelWrapper should never be instantiated.
-// A "no call method defined on BoxedKernelWrapper" compile error means that
-// an op signature has failed to trigger any of the partial specializations
-// that follow this one.
+// 1. The base specialization of BoxedKernelWrapper should never be
+// instantiated. A "no call method defined on BoxedKernelWrapper" compile error
+// means that an op signature has failed to trigger any of the partial
+// specializations that follow this one.
 //
 template <class FuncType, class Enable = void>
 struct BoxedKernelWrapper {
   // The reason we're not just doing straight up static_assert(false, ...) here:
   // Basically, the way to make sure a static_assert only fires if a template
-  // is actually instantiated (rather than every time the file is parsed) is to use
-  // template parameters in the expression, e.g. FuncType here. However, since
-  // `sizeof(FuncType) != sizeof(FuncType)` is always false, this has the same
-  // effect.
-  static_assert(sizeof(FuncType) != sizeof(FuncType),
-     "Function signature contains one or more unsupported parameter and/or return types. "
-     "Look for a nearby error like "
-     "\"'call' is not a member of 'c10::impl::BoxedKernelWrapper<(your function type), void>'\" "
-     "- (your function type) is the unsupported signature.");
+  // is actually instantiated (rather than every time the file is parsed) is to
+  // use template parameters in the expression, e.g. FuncType here. However,
+  // since `sizeof(FuncType) != sizeof(FuncType)` is always false, this has the
+  // same effect.
+  static_assert(
+      sizeof(FuncType) != sizeof(FuncType),
+      "Function signature contains one or more unsupported parameter and/or return types. "
+      "Look for a nearby error like "
+      "\"'call' is not a member of 'c10::impl::BoxedKernelWrapper<(your function type), void>'\" "
+      "- (your function type) is the unsupported signature.");
 };
 
 //
@@ -220,31 +242,30 @@ struct BoxedKernelWrapper {
 
 template <class Result, class... Args>
 struct BoxedKernelWrapper<
-  Result(Args...),
-  std::enable_if_t<
-    can_box_all<Args...>::value && can_unbox<Result>::value && !is_tuple_of_mutable_tensor_refs<Result>::value,
-    void
-  >
-> {
+    Result(Args...),
+    std::enable_if_t<
+        can_box_all<Args...>::value && can_unbox<Result>::value &&
+            !is_tuple_of_mutable_tensor_refs<Result>::value,
+        void>> {
   static Result call(
-    const BoxedKernel& boxed_kernel_func,
-    const OperatorHandle& opHandle,
-    DispatchKeySet dispatchKeySet,
-    Args... args
-  ) {
+      const BoxedKernel& boxed_kernel_func,
+      const OperatorHandle& opHandle,
+      DispatchKeySet dispatchKeySet,
+      Args... args) {
     torch::jit::Stack stack = boxArgs<Args...>(std::forward<Args>(args)...);
     boxed_kernel_func.callBoxed(opHandle, dispatchKeySet, &stack);
 
     if constexpr (!std::is_same_v<void, Result>) {
-        // op has pushed one or more values onto the stack.
-        return PopResult<Result>::call(stack);
+      // op has pushed one or more values onto the stack.
+      return PopResult<Result>::call(stack);
     } else {
       // op returns void, boxed kernel has pushed nothing onto stack.
       TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
           stack.empty(),
           "Boxed kernel was expected to return no values on the stack, ",
-          "but instead returned ", stack.size(), " values."
-      );
+          "but instead returned ",
+          stack.size(),
+          " values.");
     }
   }
 };
@@ -260,22 +281,23 @@ struct BoxedKernelWrapper<
 
 template <class... OtherArgs>
 struct BoxedKernelWrapper<
-  at::Tensor&(at::Tensor&, OtherArgs...),
-  std::enable_if_t<can_box_all<OtherArgs...>::value, void>
-> {
+    at::Tensor&(at::Tensor&, OtherArgs...),
+    std::enable_if_t<can_box_all<OtherArgs...>::value, void>> {
   static at::Tensor& call(
-    const BoxedKernel& boxed_kernel_func,
-    const OperatorHandle& opHandle,
-    DispatchKeySet dispatchKeySet,
-    at::Tensor& outArg, OtherArgs... otherArgs
-  ) {
-    torch::jit::Stack stack = boxArgs<at::Tensor&, OtherArgs...>(outArg, std::forward<OtherArgs>(otherArgs)...);
+      const BoxedKernel& boxed_kernel_func,
+      const OperatorHandle& opHandle,
+      DispatchKeySet dispatchKeySet,
+      at::Tensor& outArg,
+      OtherArgs... otherArgs) {
+    torch::jit::Stack stack = boxArgs<at::Tensor&, OtherArgs...>(
+        outArg, std::forward<OtherArgs>(otherArgs)...);
     boxed_kernel_func.callBoxed(opHandle, dispatchKeySet, &stack);
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-      stack.size() == 1,
-      "Boxed kernel was expected to return a single value on the stack, ",
-      "but instead returned ", stack.size(), " values."
-    );
+        stack.size() == 1,
+        "Boxed kernel was expected to return a single value on the stack, ",
+        "but instead returned ",
+        stack.size(),
+        " values.");
 
     return outArg;
   }
@@ -286,22 +308,22 @@ struct BoxedKernelWrapper<
 // const references instead.
 template <class... OtherArgs>
 struct BoxedKernelWrapper<
-  const at::Tensor&(const at::Tensor&, OtherArgs...),
-  std::enable_if_t<can_box_all<OtherArgs...>::value, void>
-> {
+    const at::Tensor&(const at::Tensor&, OtherArgs...),
+    std::enable_if_t<can_box_all<OtherArgs...>::value, void>> {
   static const at::Tensor& call(
-    const BoxedKernel& boxed_kernel_func,
-    const OperatorHandle& opHandle,
-    DispatchKeySet dispatchKeySet,
-    const at::Tensor& outArg, OtherArgs... otherArgs
-  ) {
+      const BoxedKernel& boxed_kernel_func,
+      const OperatorHandle& opHandle,
+      DispatchKeySet dispatchKeySet,
+      const at::Tensor& outArg,
+      OtherArgs... otherArgs) {
     torch::jit::Stack stack = boxArgs(outArg, otherArgs...);
     boxed_kernel_func.callBoxed(opHandle, dispatchKeySet, &stack);
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-      stack.size() == 1,
-      "Boxed kernel was expected to return a single value on the stack, ",
-      "but instead returned ", stack.size(), " values."
-    );
+        stack.size() == 1,
+        "Boxed kernel was expected to return a single value on the stack, ",
+        "but instead returned ",
+        stack.size(),
+        " values.");
 
     return outArg;
   }
@@ -312,37 +334,39 @@ struct BoxedKernelWrapper<
 // final argument, and also return it.
 //
 // Note: all signatures matching this pattern are assumed to be for such ops.
-// This assumption permits the generated BoxedKernelWrapper specializations to simply
-// return out arguments.
+// This assumption permits the generated BoxedKernelWrapper specializations to
+// simply return out arguments.
 //
 template <class FirstArg, class... RestArgs>
 struct BoxedKernelWrapper<
-  at::Tensor&(FirstArg, RestArgs...),
-  std::enable_if_t<
-    can_box_all<FirstArg, RestArgs...>::value
-    // this skips over in-place kernels with a non-const Tensor
-    // arg at the front, so those can unambiguously trigger the preceding specialization.
-    && !is_mutable_tensor_ref<FirstArg>::value,
-    void
-  >
-> {
+    at::Tensor&(FirstArg, RestArgs...),
+    std::enable_if_t<
+        can_box_all<FirstArg, RestArgs...>::value
+            // this skips over in-place kernels with a non-const Tensor
+            // arg at the front, so those can unambiguously trigger the
+            // preceding specialization.
+            && !is_mutable_tensor_ref<FirstArg>::value,
+        void>> {
   static at::Tensor& call(
-    const BoxedKernel& boxed_kernel_func,
-    const OperatorHandle& opHandle,
-    DispatchKeySet dispatchKeySet,
-    FirstArg firstArg, RestArgs... restArgs
-  ) {
-    torch::jit::Stack stack = boxArgs<FirstArg, RestArgs...>(std::forward<FirstArg>(firstArg), std::forward<RestArgs>(restArgs)...);
+      const BoxedKernel& boxed_kernel_func,
+      const OperatorHandle& opHandle,
+      DispatchKeySet dispatchKeySet,
+      FirstArg firstArg,
+      RestArgs... restArgs) {
+    torch::jit::Stack stack = boxArgs<FirstArg, RestArgs...>(
+        std::forward<FirstArg>(firstArg), std::forward<RestArgs>(restArgs)...);
     boxed_kernel_func.callBoxed(opHandle, dispatchKeySet, &stack);
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-      stack.size() == 1,
-      "Boxed kernel was expected to return a single value on the stack, ",
-      "but instead returned ", stack.size(), " values."
-    );
+        stack.size() == 1,
+        "Boxed kernel was expected to return a single value on the stack, ",
+        "but instead returned ",
+        stack.size(),
+        " values.");
 
     // reusing restArgs after it has been forwarded here is ok because we know
     // that the last element is of type `Tensor&`.
-    return std::get<sizeof...(RestArgs) - 1>(std::tuple<RestArgs...>{restArgs...});
+    return std::get<sizeof...(RestArgs) - 1>(
+        std::tuple<RestArgs...>{restArgs...});
   }
 };
 
@@ -351,45 +375,45 @@ struct BoxedKernelWrapper<
 // final arguments, and return them in a std::tuple.
 //
 // Note: all signatures matching this pattern are assumed to be for such ops.
-// This assumption permits the generated BoxedKernelWrapper specializations to simply
-// return the out arguments.
+// This assumption permits the generated BoxedKernelWrapper specializations to
+// simply return the out arguments.
 //
 template <class Result, class... Args>
 struct BoxedKernelWrapper<
-  Result(Args...),
-  std::enable_if_t<
-    can_box_all<Args...>::value && is_tuple_of_mutable_tensor_refs<Result>::value,
-    void
-  >
-> {
+    Result(Args...),
+    std::enable_if_t<
+        can_box_all<Args...>::value &&
+            is_tuple_of_mutable_tensor_refs<Result>::value,
+        void>> {
   static Result call(
-    const BoxedKernel& boxed_kernel_func,
-    const OperatorHandle& opHandle,
-    DispatchKeySet dispatchKeySet,
-    Args... args
-  ) {
+      const BoxedKernel& boxed_kernel_func,
+      const OperatorHandle& opHandle,
+      DispatchKeySet dispatchKeySet,
+      Args... args) {
     using ArgTuple = std::tuple<Args...>;
     constexpr int RetCount = std::tuple_size<Result>();
 
     torch::jit::Stack stack = boxArgs<Args...>(std::forward<Args>(args)...);
     boxed_kernel_func.callBoxed(opHandle, dispatchKeySet, &stack);
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-      stack.size() == RetCount,
-      "Boxed kernel was expected to return ", RetCount, " values on the stack, ",
-      "but instead returned ", stack.size(), " values."
-    );
+        stack.size() == RetCount,
+        "Boxed kernel was expected to return ",
+        RetCount,
+        " values on the stack, ",
+        "but instead returned ",
+        stack.size(),
+        " values.");
 
     // reusing args after it has been forwarded here is ok because we know
     // that the last RetCount elements are of type `Tensor&`.
-    auto result = guts::tuple_take<ArgTuple, -RetCount>(ArgTuple{std::forward<Args>(args)...});
+    auto result = guts::tuple_take<ArgTuple, -RetCount>(
+        ArgTuple{std::forward<Args>(args)...});
     static_assert(
         std::is_same_v<Result, decltype(result)>,
         "The parameter list of an op returning a tuple of Tensor references "
-            "must end with an equal number of Tensor reference parameters."
-    );
+        "must end with an equal number of Tensor reference parameters.");
     return result;
   }
 };
 
-} // impl
-} // c10
+} // namespace c10::impl

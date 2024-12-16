@@ -743,6 +743,98 @@ num_guards_executed=0)
         # fails because of len check
         self.assertFalse(root.check(f_locals))
 
+    def test_clone(self):
+        try:
+            from .utils import install_guard_manager_testing_hook
+        except ImportError:
+            from utils import install_guard_manager_testing_hook
+
+        def hook(guard_wrapper, f_locals):
+            root = guard_wrapper.root
+
+            # Check full cloning works as expected
+            cloned_root = root.clone_manager(lambda x: True)
+            self.assertTrue(cloned_root.check(f_locals))
+            f_locals["foo"] = [3, 4]
+            self.assertFalse(cloned_root.check(f_locals))
+            f_locals["foo"] = [2, 3]
+
+            # Skip guarding on foo
+            cloned_root = root.clone_manager(lambda x: "foo" not in x.get_source())
+            f_locals["foo"] = [3, 4]
+            # Original root should fail, but new root should pass because of
+            # absence of guards on foo.
+            self.assertFalse(root.check(f_locals))
+            self.assertTrue(cloned_root.check(f_locals))
+
+        class Bar:
+            x = 4
+            y = torch.randn(4)
+
+        foo = [2, 3]
+        bar = Bar()
+
+        def fn(x, foo, bar):
+            return x + foo[0] + bar.x * bar.y
+
+        x = torch.randn(4)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with install_guard_manager_testing_hook(hook):
+            opt_fn(x, foo, bar)
+
+    def test_diff_guard_manager(self):
+        try:
+            from .utils import install_guard_manager_testing_hook
+        except ImportError:
+            from utils import install_guard_manager_testing_hook
+        counter = 0
+
+        def hook(guard_wrapper, f_locals):
+            nonlocal counter
+            root = guard_wrapper.root
+            diff_guard_root = guard_wrapper.diff_guard_root
+
+            # Check full cloning works as expected
+            self.assertTrue(root.check(f_locals))
+            self.assertTrue(diff_guard_root.check(f_locals))
+
+            # Check that tensor guards run well
+            old_tensor = f_locals["bar"].y
+            f_locals["bar"].y = torch.randn(5)
+            self.assertFalse(root.check(f_locals))
+            self.assertFalse(diff_guard_root.check(f_locals))
+            f_locals["bar"].y = old_tensor
+
+            # Original root should fail on foo changes, but diff_guard_root
+            # should pass because it does not have foo guards on counter = 0. On
+            # counter = 1, it should pass because we have caused a recompile
+            # because of foo, causing it to recompile on foo.
+            f_locals["foo"] = [3, 3]
+            self.assertFalse(root.check(f_locals))
+            if counter == 0:
+                self.assertTrue(diff_guard_root.check(f_locals))
+            else:
+                self.assertFalse(diff_guard_root.check(f_locals))
+            counter += 1
+
+        class Bar:
+            x = 4
+            y = torch.randn(4)
+
+        bar = Bar()
+
+        def fn(x, foo, bar):
+            return x + foo[0] + bar.x * bar.y
+
+        x = torch.randn(4)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with install_guard_manager_testing_hook(hook):
+            foo = (12.0, 13)
+            opt_fn(x, foo, bar)
+
+            foo = (10.0, 11)
+            opt_fn(x, foo, bar)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
