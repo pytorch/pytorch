@@ -114,14 +114,9 @@ def _schedule_for_comm(
     # When only raise_comms is True, only score_0 and score_2 are considered.
     # When only sink_waits is True, only score_1 and score_2 are considered.
     # When neither is True, the original order is yielded.
-    buf_name_to_snode = {}
     name_to_fused_node = {}
     scores_0, scores_1, scores_2 = {}, {}, {}
     for idx, snode in enumerate(snodes):
-        for o in snode.get_outputs():
-            buf_name = o.get_name()
-            buf_name_to_snode[buf_name] = snode
-
         for op_name in snode.get_operation_names():
             name_to_fused_node[op_name] = snode
         name_to_fused_node[snode.get_name()] = snode
@@ -161,9 +156,8 @@ def _schedule_for_comm(
     }
 
     ready: List[Runnable] = []
-    buffer_users: Dict[str, Set[BaseSchedulerNode]] = defaultdict(OrderedSet)
+    buffer_users: Dict[str, OrderedSet[BaseSchedulerNode]] = defaultdict(OrderedSet)
     snode_to_cost = {snode: estimate_op_runtime(snode) for snode in snodes}
-    buf_name_to_snode = {o.get_name(): snode for snode in snodes for o in snode.get_outputs()}
 
     for snode, deps in unmet_deps.items():
         if len(deps) == 0:
@@ -1786,7 +1780,7 @@ def enforce_comm_ordering_for_fsdp(
     from . import scheduler
 
     new_order: list[BaseSchedulerNode] = []
-    scheduled = set()
+    scheduled = OrderedSet()
     ag_exists = False
     rs_exists = False
     ag_grouped_node_to_wait_grouped_node = {}
@@ -1813,7 +1807,7 @@ def enforce_comm_ordering_for_fsdp(
         ):
             ag_exists = True
             ag_snode = snode
-            ag_related_snode_set: set[scheduler.BaseSchedulerNode] = set()
+            ag_related_snode_set: OrderedSet[scheduler.BaseSchedulerNode] = OrderedSet()
 
             # Find the "cast + copy_in + getitem + all_gather" code block
             find_recursive_deps_of_snode(
@@ -1884,7 +1878,7 @@ def enforce_comm_ordering_for_fsdp(
             rs_snode = snode
 
             # Find the "reduce_scatter copy-in + reduce_scatter comm + reduce_scatter wait" code block
-            rs_related_snode_set: set[scheduler.BaseSchedulerNode] = set()
+            rs_related_snode_set: OrderedSet[scheduler.BaseSchedulerNode] = OrderedSet()
             find_recursive_users_of_snode(
                 rs_snode,
                 rs_related_snode_set,
