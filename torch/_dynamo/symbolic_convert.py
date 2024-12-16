@@ -3414,7 +3414,9 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                 self.push(VariableTracker.build(self, value, global_source))
 
     def STORE_GLOBAL(self, inst):
-        if self.f_globals is self.parent.f_globals:
+        if self.f_globals is self.parent.f_globals or isinstance(
+            self, InliningGeneratorInstructionTranslator
+        ):
             super().STORE_GLOBAL(inst)
         else:
             value = self.pop()
