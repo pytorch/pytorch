@@ -1,3 +1,8 @@
+This is a poolside-specific fork of pytorch. For now we do not have any custom code, only some changes to CI/build workflows.
+See [poolside.md](poolside.md) for more info about this fork.
+
+--------------------------------------------------------------------------------
+
 ![PyTorch Logo](https://github.com/pytorch/pytorch/raw/main/docs/source/_static/img/pytorch-logo-dark.png)
 
 --------------------------------------------------------------------------------
