@@ -6294,10 +6294,7 @@ metadata incorrectly.
             def __init__(self):
                 super().__init__()
                 self.p = torch.nn.Parameter(
-                    TwoTensor(
-                        TwoTensor(torch.zeros(3, 4), torch.randn(3, 4)),
-                        torch.ones(3, 4),
-                    )
+                    TwoTensor(torch.zeros(3, 4), torch.zeros(3, 4))
                 )
 
             def forward(self, x):
@@ -6308,10 +6305,7 @@ metadata incorrectly.
                 super().__init__()
                 self.p1 = torch.nn.Parameter(torch.ones(3, 4))
                 self.p2 = torch.nn.Parameter(
-                    TwoTensor(
-                        torch.ones(3, 4),
-                        TwoTensor(torch.randn(3, 4), torch.randn(3, 4)),
-                    )
+                    TwoTensor(torch.zeros(3, 4), torch.zeros(3, 4))
                 )
                 self._m = _M()
 

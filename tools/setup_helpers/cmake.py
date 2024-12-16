@@ -95,7 +95,7 @@ class CMake:
         print(" ".join(command))
         try:
             check_call(command, cwd=self.build_dir, env=env)
-        except (CalledProcessError, KeyboardInterrupt):
+        except (CalledProcessError, KeyboardInterrupt) as e:
             # This error indicates that there was a problem with cmake, the
             # Python backtrace adds no signal here so skip over it by catching
             # the error and exiting manually

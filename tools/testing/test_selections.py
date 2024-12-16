@@ -42,7 +42,7 @@ if IS_ROCM and not IS_MEM_LEAK_CHECK:
         assert count > 0  # there must be at least 1 GPU
         # Limiting to 8 GPUs(PROCS)
         NUM_PROCS = min(count, 8)
-    except subprocess.CalledProcessError:
+    except subprocess.CalledProcessError as e:
         # The safe default for ROCm GHA runners is to run tests serially.
         NUM_PROCS = 1
 

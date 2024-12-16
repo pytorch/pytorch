@@ -235,12 +235,12 @@ class UsageLogger:
         if self._has_amdsmi:
             try:
                 amdsmi.amdsmi_shut_down()
-            except amdsmi.AmdSmiException:
+            except amdsmi.AmdSmiException as e:
                 pass
         if self._has_pynvml:
             try:
                 pynvml.nvmlShutdown()
-            except pynvml.NVMLError:
+            except pynvml.NVMLError as e:
                 pass
 
     def _get_per_process_gpu_info(self, handle: Any) -> list[dict[str, Any]]:
@@ -306,7 +306,7 @@ class UsageLogger:
                 if "pss" in memory_full_info:
                     # only availiable in linux
                     info["pss_memory"] = f"{memory_full_info.pss / (1024 * 1024):.2f}"
-            except psutil.AccessDenied:
+            except psutil.AccessDenied as e:
                 # It's ok to skip this
                 pass
             per_process_info.append(info)

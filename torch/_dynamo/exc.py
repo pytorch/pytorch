@@ -177,7 +177,7 @@ class SkipCodeRecursiveException(TorchDynamoException):
     pass
 
 
-class RecompileLimitExceeded(Unsupported):
+class CacheLimitExceeded(Unsupported):
     pass
 
 
@@ -196,7 +196,7 @@ class IncorrectUsage(Exception):
 # TODO: I'm a little uncertain about what error classification we should have
 # for this.  This is potentially a user error, but regressions in
 # specialization in PyTorch proper could also trigger this problem
-class FailOnRecompileLimitHit(Exception):
+class FailOnCacheLimitHit(Exception):
     pass
 
 
