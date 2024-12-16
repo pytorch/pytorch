@@ -91,7 +91,10 @@ def is_forbidden_context_manager(ctx):
     except ImportError:
         pass
 
-    return ctx.__qualname__ == "_AssertRaisesRegexWithHighlightContext" or ctx in f_ctxs
+    if m := sys.modules.get("torch.testing._internal.jit_utils"):
+        f_ctxs.append(m._AssertRaisesRegexWithHighlightContext)
+
+    return ctx in ctxs
 
 
 class UserDefinedVariable(VariableTracker):
