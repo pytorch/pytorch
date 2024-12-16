@@ -34,8 +34,12 @@ using tensor_list = std::vector<at::Tensor>;
 using variable_list = std::vector<Variable>;
 using edge_list = std::vector<Edge>;
 using saved_variable_list = std::vector<SavedVariable>;
+using ivalue_list = std::vector<c10::IValue>;
+using functional_apply_t = std::function<
+    variable_list(const variable_list&, const std::vector<c10::IValue>&)>;
 using IndexRange = std::pair<size_t, size_t>;
 using torch::dynamo::autograd::CompiledNodeArgs;
+using torch::dynamo::autograd::PackedArgs;
 using torch::dynamo::autograd::SwapSavedVariables;
 
 // Custom deleter to prevent stack overflows.
