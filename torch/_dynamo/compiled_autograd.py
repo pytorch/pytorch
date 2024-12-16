@@ -393,9 +393,12 @@ class AutogradCompilerInstance:
             if is_cpu and is_scalar:
                 node_users = list(node.users.keys())
                 # We can only move the cpu scalar if it is not exposed to user code.
-                # Only builtin nodes use torch._dynamo.compiled_autograd.Op right now.
                 if all(
-                    isinstance(user.target, torch._dynamo.compiled_autograd.Op)
+                    (
+                        isinstance(user.target, torch._ops.OpOverload)
+                        and user.target.namespace in ("prims", "aten")
+                    )
+                    or isinstance(user.target, torch._dynamo.compiled_autograd.Op)
                     for user in node_users
                 ):
                     # all users are prims/aten, can move safely
@@ -461,7 +464,7 @@ class AutogradCompilerInstance:
         runtime_inputs_to_move: List[int] = []
         if snapshot_cudagraph_enabled():
             runtime_inputs_to_move = self.move_graph_nodes_to_cuda(self.fx_tracer.graph)
-        # TODO: remove the graph node's dummy metadata
+        # TODO(rzou): the guessed metadata is incorrect, we will remove it at the end of the PR stack.
         self.rename_aot_dispatcher_nodes()
         self.reorder_tensor_pre_hook_nodes()
         self.reorder_pre_hook_nodes_to_schedule_asap()
