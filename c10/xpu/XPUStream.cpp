@@ -102,7 +102,7 @@ inline std::ostream& operator<<(std::ostream& stream, StreamIdType q) {
 inline StreamIdType streamIdType(StreamId s) {
   // Externally allocated streams have their id being the sycl:queue* pointer.
   // So the last bit will be 0.
-  if ((!(s & 1) && s)) {
+  if ((!(s & 1))) {
     return StreamIdType(StreamIdType::EXT);
   }
   int mask_for_type = (1 << kStreamTypeBits) - 1;
@@ -321,7 +321,12 @@ XPUStream getStreamFromExternal(
   TORCH_CHECK(
       ext_queue->get_device() == c10::xpu::get_raw_device(device_index),
       "External SYCL queue doesn't match the given device index.");
-  return XPUStreamForId(device_index, reinterpret_cast<int64_t>(ext_queue));
+  StreamId stream_id = reinterpret_cast<StreamId>(ext_queue);
+  TORCH_CHECK(
+      !(stream_id & 1),
+      "External sycl::queue* must have the last bit set to 0. ",
+      "You can file an issue at https://github.com/pytorch/pytorch/issues to describe your use case.");
+  return XPUStreamForId(device_index, stream_id);
 }
 
 // Note: The stream pools will be initialized if needed, at the first invocation
