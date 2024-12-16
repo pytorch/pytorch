@@ -178,7 +178,7 @@ void jitted_gpu_kernel_generic(
     JittedKernelVariantCache &cache,
     const at::cuda::jit::KernelDescriptor &desc,
     at::cuda::jit::BinaryFuncVariant scalar_pos,
-    c10::ArrayRef<void*> extra_args,
+    c10::ArrayRef<const void*> extra_args,
     TensorIteratorBase& iter,
     const bool dynamic_casting,
     const void *scalar_val) {
