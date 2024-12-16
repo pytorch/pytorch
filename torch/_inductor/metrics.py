@@ -11,7 +11,6 @@ from functools import lru_cache
 from typing import Dict, List, Tuple, TYPE_CHECKING
 
 from torch._inductor import config
-from torch._inductor.codegen.common import Kernel
 from torch._inductor.utils import get_benchmark_name
 from torch._inductor.wrapper_benchmark import KernelCategory
 from torch.utils._ordered_set import OrderedSet
