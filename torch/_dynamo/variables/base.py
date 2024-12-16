@@ -449,8 +449,6 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         source: Optional[Source] = None,
     ) -> Any:
         """Create a new VariableTracker from a value and optional Source"""
-        from . import builder
-
         if source is None:
             return builder.SourcelessBuilder.create(tx, value)
         else:
@@ -493,3 +491,6 @@ def typestr(*objs):
             return type(obj).__name__
     else:
         return " ".join(map(typestr, objs))
+
+
+from . import builder

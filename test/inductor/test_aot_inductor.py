@@ -29,7 +29,10 @@ from torch.export import Dim, export, export_for_training
 from torch.testing import FileCheck
 from torch.testing._internal import common_utils
 from torch.testing._internal.common_cuda import SM80OrLater, SM90OrLater
-from torch.testing._internal.common_device_type import skipCUDAIf
+from torch.testing._internal.common_device_type import (
+    _has_sufficient_memory,
+    skipCUDAIf,
+)
 from torch.testing._internal.common_quantization import (
     skip_if_no_torchvision,
     skipIfNoFBGEMM,
@@ -1268,8 +1271,16 @@ class AOTInductorTestsTemplate:
 
                 return torch.cond(x.shape[0] > 5, true_fn, false_fn, (x,))
 
-        input1 = (torch.ones(3, 3), torch.ones(5), torch.ones(3, 3))
-        input2 = (torch.ones(10, 3), torch.ones(6), torch.ones(10, 3))
+        input1 = (
+            torch.ones(3, 3, device=self.device),
+            torch.ones(5, device=self.device),
+            torch.ones(3, 3, device=self.device),
+        )
+        input2 = (
+            torch.ones(10, 3, device=self.device),
+            torch.ones(6, device=self.device),
+            torch.ones(10, 3, device=self.device),
+        )
         inputs = (input1, input2)
         dynamic_shapes = {"x": {0: Dim("d")}, "y": {0: Dim("d1")}, "z": {0: Dim("d")}}
         self.check_model_with_multiple_inputs(
@@ -1394,7 +1405,11 @@ class AOTInductorTestsTemplate:
 
         self.check_model(M(self.device), (torch.randn(5, 5, device=self.device),))
 
+    @unittest.skipIf(IS_MACOS, "no CUDA on Mac")
     def test_zero_grid_with_backed_symbols(self):
+        if self.device != GPU_TYPE:
+            raise unittest.SkipTest("requires GPU")
+
         class Repro(torch.nn.Module):
             def __init__(self) -> None:
                 super().__init__()
@@ -1417,7 +1432,7 @@ class AOTInductorTestsTemplate:
             example_inputs,
             dynamic_shapes=dynamic_shapes,
         )
-        aot_inductor_module = AOTIRunnerUtil.load(GPU_TYPE, so_path)
+        aot_inductor_module = AOTIRunnerUtil.load(self.device, so_path)
         aot_inductor_module(*example_inputs)
 
         # Re-run where dynamic dim size is 0.
@@ -1920,7 +1935,7 @@ class AOTInductorTestsTemplate:
             def forward(self, x):
                 return torch.ops.aten.normal_functional.default(x)
 
-        self.check_model(Model(), (torch.empty(4, 1, 4, 4),))
+        self.check_model(Model(), (torch.empty(4, 1, 4, 4, device=self.device),))
 
     def test_empty_graph(self):
         class Model(torch.nn.Module):
@@ -3013,7 +3028,6 @@ class AOTInductorTestsTemplate:
             dynamic_shapes=dynamic_shapes,
         )
 
-    @skipIfRocm  # USE_MEM_EFF_ATTENTION was not enabled for build.
     def test_scaled_dot_product_efficient_attention(self):
         if self.device != GPU_TYPE:
             raise unittest.SkipTest("requires GPU")
@@ -4088,6 +4102,62 @@ class AOTInductorTestsTemplate:
         # If the model is already compiled with a misaligned input, the
         # generated code should NOT contain an alignment check for that input.
         self.check_model(Model(), example_inputs)
+
+    def test_conv3d(self):
+        if self.device != GPU_TYPE:
+            raise unittest.SkipTest("requires GPU")
+
+        if not _has_sufficient_memory(self.device, 2**35):
+            raise unittest.SkipTest("insufficient memory")
+
+        class Model(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+
+            def forward(
+                self,
+                convert_element_type_1271,
+                convert_element_type_1272,
+                convert_element_type_1273,
+            ):
+                return torch.ops.aten.convolution.default(
+                    convert_element_type_1271,
+                    convert_element_type_1272,
+                    convert_element_type_1273,
+                    [1, 1],
+                    [1, 1],
+                    [1, 1],
+                    False,
+                    [0, 0],
+                    1,
+                )
+
+        example_inputs = (
+            torch.randn(1, 64, 5160, 5160, device=self.device),
+            torch.randn(3, 64, 3, 3, device=self.device),
+            torch.randn(3, device=self.device),
+        )
+        dynamic_shapes = {
+            "convert_element_type_1271": {
+                3: torch.export.Dim.DYNAMIC,
+                4: torch.export.Dim.DYNAMIC,
+            },
+            "convert_element_type_1272": None,
+            "convert_element_type_1273": None,
+        }
+        with config.patch(
+            {
+                "max_autotune": True,
+                "max_autotune_conv_backends": "TRITON",
+            }
+        ):
+            self.check_model(
+                Model(),
+                example_inputs,
+                atol=0.1,
+                rtol=1e-3,
+                dynamic_shapes=dynamic_shapes,
+            )
 
 
 class AOTInductorLoggingTest(LoggingTestCase):
