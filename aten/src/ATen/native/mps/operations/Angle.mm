@@ -46,7 +46,6 @@ Tensor& angle_out_mps(const Tensor& self, Tensor& result) {
     // etc match the earlier created MPSGraph
     string key = "angle_out_mps:" + getTensorsStringKey({self, result});
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto* mpsGraph, auto* newCachedGraph) {
-
       newCachedGraph->inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, self);
 
       // Here we can call the MPSGraph API needed to execute the operation.
