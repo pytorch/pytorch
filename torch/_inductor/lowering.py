@@ -2447,23 +2447,7 @@ def sdpa_constraint(fx_node, *args, **kwargs):
         if len(arg.get_size()) not in (3, 4):
             return arg
 
-        def is_aligned_realized_tensor(x):
-            aligned_strides = all(
-                (V.graph.sizevars.size_hint(x.get_stride()[i]) % ALIGNMENT) == 0
-                for i in range(len(x.get_stride()) - 1)
-            )
-            # if the last dim size is <= 1, stride doesnt matter
-            aligned_last_dim = (
-                V.graph.sizevars.size_hint(x.get_stride()[-1]) == 1
-                or V.graph.sizevars.size_hint(x.get_size()[-1]) <= 1
-            )
-            return aligned_last_dim and aligned_strides
-
-        if (
-            isinstance(arg, IRNode)
-            and arg.maybe_get_stride() is not None
-            and is_aligned_realized_tensor(arg)
-        ):
+        if ir.is_aligned_realized_tensor(arg, ALIGNMENT):
             return V.graph.try_match_insignificant_strides(
                 ir.ExternKernel.realize_input(arg), meta_stride
             )

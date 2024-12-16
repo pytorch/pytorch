@@ -66,6 +66,7 @@ def set_tunableop_defaults():
     torch.cuda.tunable.tuning_enable(True)
     torch.cuda.tunable.set_max_tuning_duration(30)
     torch.cuda.tunable.set_max_tuning_iterations(100)
+    torch.cuda.tunable.set_rotating_buffer_size(-1)
 
 def tunableop_matmul(device, dtype):
     # Helper function to test TunableOp in a subprocess
@@ -4572,9 +4573,9 @@ class TestLinalg(TestCase):
         import os
 
         try:
-            os.environ["PYTORCH_TUNABLEOP_ROTATING_BUFFER_SIZE"] = "0"
-            os.environ["PYTORCH_TUNABLEOP_NUMERICAL_CHECK"] = "1"
             set_tunableop_defaults()
+            torch.cuda.tunable.set_rotating_buffer_size(0)
+            os.environ["PYTORCH_TUNABLEOP_NUMERICAL_CHECK"] = "1"
             ordinal = torch.cuda.current_device()
             torch.cuda.tunable.set_filename(f"tunableop_results{ordinal}.csv")
 
@@ -4632,7 +4633,6 @@ class TestLinalg(TestCase):
 
             # undo all the environment variables set
             try:
-                del os.environ["PYTORCH_TUNABLEOP_ROTATING_BUFFER_SIZE"]
                 del os.environ["PYTORCH_TUNABLEOP_NUMERICAL_CHECK"]
             except KeyError:
                 pass
@@ -4641,7 +4641,8 @@ class TestLinalg(TestCase):
     @dtypes(torch.half)
     def test_matmul_offline_tunableop(self, device, dtype):
         import os
-        os.putenv('PYTORCH_TUNABLEOP_ROTATING_BUFFER_SIZE', '0')
+        set_tunableop_defaults()
+        torch.cuda.tunable.set_rotating_buffer_size(0)
 
         # Pointing to temp files. The test cannot remove them on Windows because
         # they are in use and locked
@@ -4720,7 +4721,6 @@ class TestLinalg(TestCase):
         # if test is interrupted.
         try:
             set_tunableop_defaults()
-            os.environ["PYTORCH_TUNABLEOP_ROTATING_BUFFER_SIZE"] = "0"
 
             # Pointing to temp files. The test cannot remove them on Windows because
             # they are in use and locked
@@ -4796,6 +4796,23 @@ class TestLinalg(TestCase):
             except FileNotFoundError:
                 pass
 
+    @onlyCUDA
+    @dtypes(torch.float)
+    def test_rotating_buffer_tunableop(self, device, dtype):
+        # Test the TunableOp rotating buffer API
+        # Test the default value, will return the l2_cache_size
+        l2_cache_size = torch.cuda.tunable.get_rotating_buffer_size()
+        self.assertGreater(l2_cache_size, 0)
+        # Test zero
+        torch.cuda.tunable.set_rotating_buffer_size(0)
+        self.assertEqual(torch.cuda.tunable.get_rotating_buffer_size(), 0)
+        # Test one MB
+        torch.cuda.tunable.set_rotating_buffer_size(1)
+        self.assertEqual(torch.cuda.tunable.get_rotating_buffer_size(), 1024 * 1024)
+        # Test negative value, which will return the l2 cache size
+        torch.cuda.tunable.set_rotating_buffer_size(-1)
+        self.assertEqual(torch.cuda.tunable.get_rotating_buffer_size(), l2_cache_size)
+
 
     @onlyCUDA
     @skipCUDAIfNotRocm
@@ -4861,6 +4878,7 @@ class TestLinalg(TestCase):
     @skipCUDAIfNotRocm
     @dtypes(torch.float)
     def test_numeric_check_leak_tunableop_rocm(self, device, dtype):
+        set_tunableop_defaults()
         from torch.testing._internal.common_utils import CudaMemoryLeakCheck
         import os
         # run operator first without tuning to ensure all rocm libs are loaded,
@@ -5122,6 +5140,7 @@ class TestLinalg(TestCase):
         import os
         import multiprocessing as mp
 
+        set_tunableop_defaults()
         ordinal = torch.cuda.current_device()
         filename = f"tunableop_results{ordinal}.csv"
 
