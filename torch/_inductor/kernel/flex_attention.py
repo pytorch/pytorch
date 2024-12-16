@@ -1787,6 +1787,21 @@ def bwd_dq_block_mn(
     if CHECK_BLOCK_BOUNDARY:
         grad_scores = tl.where(offs_n2[None, :] < KV_LEN, grad_scores, 0.0)
 
+    # ~~~~~~~~~~~~~~~~~~~ Apply other buffer grad writes ~~~~~~~~~~~~~
+    if WRITE_DQ:
+        scatter_mask = offs_m2[:, None] < Q_LEN and offs_n2[None, :] < KV_LEN
+        {{ modification(
+            subgraph_number=3,
+            output_name=None,
+            mask="scatter_mask",
+            score="pre_mod_scores",
+            b="off_z",
+            h="off_hq",
+            m="m",
+            n="n",
+            grad_score_mod="ds"
+        ) | indent_except_first(2) }}
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     ds = grad_scores
 
     if not IS_FULL_BLOCKS:
@@ -1975,22 +1990,23 @@ def bwd_dkdv_block_mn(
     ) | indent_except_first(1) }}
 
     # ~~~~~~~~~~~~~~~~~~~ Apply other buffer grad writes ~~~~~~~~~~~~~
-    idx_b = off_z
-    idx_h = off_hq
-    idx_m = m
-    idx_n = n
-    scatter_mask = offs_m1[None, :] < Q_LEN and offs_n1[:, None] < KV_LEN
-    {{ modification(
-        subgraph_number=3,
-        output_name=None,
-        mask="scatter_mask",
-        score="pre_mod_scores",
-        b="idx_b",
-        h="idx_h",
-        m="idx_m",
-        n="idx_n",
-        grad_score_mod="dsT"
-    ) | indent_except_first(1) }}
+    if not WRITE_DQ:
+        idx_b = off_z
+        idx_h = off_hq
+        idx_m = m
+        idx_n = n
+        scatter_mask = offs_m1[None, :] < Q_LEN and offs_n1[:, None] < KV_LEN
+        {{ modification(
+            subgraph_number=3,
+            output_name=None,
+            mask="scatter_mask",
+            score="pre_mod_scores",
+            b="idx_b",
+            h="idx_h",
+            m="idx_m",
+            n="idx_n",
+            grad_score_mod="dsT"
+        ) | indent_except_first(2) }}
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
     if CHECK_BLOCK_BOUNDARY:
