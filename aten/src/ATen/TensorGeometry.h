@@ -37,6 +37,16 @@ struct TORCH_API TensorGeometry {
         has_symbolic_sizes_strides_(
             t.unsafeGetTensorImpl()->has_symbolic_sizes_strides()) {}
 
+  explicit TensorGeometry(
+      std::vector<at::SymInt> sizes,
+      std::vector<at::SymInt> strides,
+      at::SymInt storage_offset)
+      : sizes_(std::move(sizes)),
+        strides_(std::move(strides)),
+        storage_offset_(std::move(storage_offset)) {
+    recompute();
+  }
+
   // true if the tensor is contiguous
   bool is_contiguous() const;
 

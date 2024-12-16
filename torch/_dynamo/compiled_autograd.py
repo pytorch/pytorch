@@ -6,6 +6,7 @@ import operator
 from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING, Union
 
 import torch
+import torch.utils._pytree as pytree
 from torch._dynamo.external_utils import (
     call_backward,
     call_hook,
@@ -55,6 +56,40 @@ def maybe_clone(x):
     if x is not None:
         return clone_preserve_strides(x)
     return x
+
+
+# We lazily bind "functional backward" variants for PyTorch built-in autograd
+# nodes to this class. Example: torch._dynamo.compiled_autograd.ops.MulBackward0
+# Each "functional backward" is bound the first time the node's apply_with_saved
+# function is called. It's possible to avoid lazy binding and instead bind
+# all of this upfront (perhaps at import time) via codegen changes.
+class OpNamespace:
+    def add(self, name, fn):
+        assert not hasattr(self, name)
+        result = Op(name, fn)
+        torch._dynamo.allow_in_graph(result)
+        setattr(self, name, result)
+        return result
+
+    def get(self, name):
+        assert hasattr(self, name)
+        return getattr(self, name)
+
+
+class Op:
+    def __init__(self, name, fn):
+        self.fn = fn
+        self.__name__ = name
+        self.__module__ = "torch._dynamo.compiled_autograd.ops"
+
+    def __call__(self, *args, **kwargs):
+        return self.fn(*args, **kwargs)
+
+    def __repr__(self):
+        return self.__module__ + "." + self.__name__
+
+
+ops = OpNamespace()
 
 
 _graph_placeholders = ["inputs", "sizes", "scalars", "hooks"]
@@ -107,7 +142,8 @@ class AutogradCompilerInstance:
         self.fx_tracer.root = torch.nn.Module()
         self.fx_tracer.graph = torch.fx.Graph(tracer_cls=PythonKeyTracer)
         self.fx_tracer.tensor_attrs = {}
-        args_proxy, sizes_proxy, scalars_proxy, self.hooks_proxy = (
+        self.symnode_proxy_lookup = {}
+        args_proxy, self.sizes_proxy, self.scalars_proxy, self.hooks_proxy = (
             self.fx_tracer.create_proxy("placeholder", name, (), {})
             for name in _graph_placeholders
         )
@@ -130,7 +166,9 @@ class AutogradCompilerInstance:
             )
             for idx, val in enumerate(sizes)
         ]
-        self.bind_tensors_to_proxies(sizes, sizes_proxy, sizes_origins)
+        self.bind_tensors_to_proxies(sizes, self.sizes_proxy, sizes_origins)
+        for i, symint in enumerate(sizes):
+            self.symnode_proxy_lookup[symint.node] = self.sizes_proxy[i]
 
         for idx, val in enumerate(scalars):
             source = self.source("scalars", idx)
@@ -152,7 +190,9 @@ class AutogradCompilerInstance:
                 )
             else:
                 raise AssertionError("Unexpected scalar type: ", type(val))
-        self.bind_tensors_to_proxies(scalars, scalars_proxy, scalars_origins)
+        self.bind_tensors_to_proxies(scalars, self.scalars_proxy, scalars_origins)
+        for i, symval in enumerate(scalars):
+            self.symnode_proxy_lookup[symval.node] = self.scalars_proxy[i]  # type: ignore[union-attr]
 
         # TODO(jansel): are all these modes needed?
         self.stack.enter_context(decompose({}))
@@ -186,7 +226,6 @@ class AutogradCompilerInstance:
             ),
             kwargs={},
         )
-
         with disable_proxy_modes_tracing():
             # create fake Tensors
             grad_ins: List[Optional[torch.Tensor]] = []
@@ -201,6 +240,65 @@ class AutogradCompilerInstance:
                 )
             self.bind_tensors_to_proxies(grad_ins, proxies)
         return tuple(grad_ins)
+
+    # Guess what the outputs should be from the InputMetadata.
+    # This is not sound in general (we guess contiguous strides
+    # and no Tensor subclass-ness); we will stop guessing
+    # the output metadata in a follow-up.
+    def guess_output(self, input_metadata):
+        if input_metadata is None:
+            return None
+        tensoroptions, shape, _ = input_metadata
+        kwargs = {}
+        names = [
+            "requires_grad",
+            "memory_format",
+            "device",
+            "dtype",
+            "layout",
+            "pinned_memory",
+        ]
+        for name, option in zip(names, tensoroptions):
+            if option is not None:
+                kwargs[name] = option
+
+        with disable_proxy_modes_tracing():
+            return torch.ops.aten.zeros(shape, **kwargs)
+
+    def bind_function(self, fn_name, fn):
+        """Binds ops.fn_name = fn"""
+        op = ops.add(fn_name, fn)
+
+    def apply_functional(self, fn_name, grads, args, output_metadata):
+        """Proxies a call to ops.fn_name(grads, *args) into the graph"""
+        op = ops.get(fn_name)
+        return self.proxy_call(op, (grads, *args), output_metadata)
+
+    def proxy_call(self, fn, args, output_metadata):
+        """Proxies a call to fn(*args) into the graph"""
+        flat_args, _ = pytree.tree_flatten(args)
+        proxy_args = pytree.tree_map(lambda e: self.to_proxy(e), args)
+        proxy_out = self.fx_tracer.create_proxy(
+            "call_function", fn, args=proxy_args, kwargs={}
+        )
+        result = [self.guess_output(metadata) for metadata in output_metadata]
+        self.bind_tensors_to_proxies(result, [proxy_out[i] for i in range(len(result))])
+        return result
+
+    def validate_outputs(self, _, outputs, args, output_metadata):
+        """Proxies a call to ops.validate_outputs(outputs, *args) into the graph"""
+        op = ops.get("validate_outputs")
+        proxy_args = pytree.tree_map(self.to_proxy, (outputs, *args))
+        new_proxy_outputs = self.fx_tracer.create_proxy(
+            "call_function", op, args=proxy_args, kwargs={}
+        )
+        assert len(output_metadata) == len(outputs)
+        outputs = [
+            None if output is None or metadata is None else self.guess_output(metadata)
+            for output, metadata in zip(outputs, output_metadata)
+        ]
+        self.bind_tensors_to_proxies(outputs, new_proxy_outputs)
+        return outputs
 
     def proxy_call_hook(self, hook, *args, **kwargs):
         return self.fx_tracer.create_proxy(
@@ -284,6 +382,7 @@ class AutogradCompilerInstance:
         assert nodes[first_getitem_idx] == inputs_users[0]
         last_getitem_idx = first_getitem_idx + len(inputs_users) - 1
         assert nodes[last_getitem_idx] == inputs_users[-1]
+        # getitem nodes on inputs
         for i, node in enumerate(inputs_users):
             if not has_cuda_inputs and node.meta["val"].device.type == "cuda":
                 has_cuda_inputs = True
@@ -293,9 +392,13 @@ class AutogradCompilerInstance:
             is_scalar = len(node.meta["val"].size()) == 0
             if is_cpu and is_scalar:
                 node_users = list(node.users.keys())
+                # We can only move the cpu scalar if it is not exposed to user code.
                 if all(
-                    isinstance(user.target, torch._ops.OpOverload)
-                    and user.target.namespace in ("prims", "aten")
+                    (
+                        isinstance(user.target, torch._ops.OpOverload)
+                        and user.target.namespace in ("prims", "aten")
+                    )
+                    or isinstance(user.target, torch._dynamo.compiled_autograd.Op)
                     for user in node_users
                 ):
                     # all users are prims/aten, can move safely
@@ -305,6 +408,7 @@ class AutogradCompilerInstance:
         # this is to handle the case where cudagraphs is enabled on a cpu-only graph
         if has_cuda_inputs:
             for node in to_move.values():
+                verbose_log.debug("Moving node %s from cpu to cuda", node)
                 node.meta["val"] = node.meta["val"].cuda()
 
             # return runtime indices we need to move to cuda
@@ -338,7 +442,10 @@ class AutogradCompilerInstance:
                 or (node.op == "call_function" and node.target in _impure_targets)
             )
 
+        before = len(list(self.fx_tracer.graph.nodes))
         self.fx_tracer.graph.eliminate_dead_code(is_impure)
+        after = len(list(self.fx_tracer.graph.nodes))
+        verbose_log.debug("DCE removed %d nodes", before - after)
 
     def end_capture(self, outputs):
         self.fx_tracer.create_proxy(
@@ -354,6 +461,10 @@ class AutogradCompilerInstance:
             (self.fx_tracer.create_arg(self.to_proxy(outputs)),),
             {},
         )
+        runtime_inputs_to_move: List[int] = []
+        if snapshot_cudagraph_enabled():
+            runtime_inputs_to_move = self.move_graph_nodes_to_cuda(self.fx_tracer.graph)
+        # TODO(rzou): the guessed metadata is incorrect, we will remove it at the end of the PR stack.
         self.rename_aot_dispatcher_nodes()
         self.reorder_tensor_pre_hook_nodes()
         self.reorder_pre_hook_nodes_to_schedule_asap()
@@ -372,9 +483,6 @@ class AutogradCompilerInstance:
         # Proper fix is Richard's Python compiled autograd effort which will avoid calling make_fx and
         # should prevent these ops from going into the CA graph.
         self.dce()
-        runtime_inputs_to_move: List[int] = []
-        if snapshot_cudagraph_enabled():
-            runtime_inputs_to_move = self.move_graph_nodes_to_cuda(self.fx_tracer.graph)
 
         graph = GraphModule(
             self.fx_tracer.root, self.fx_tracer.graph, f"CompiledAutograd{self.id}"
@@ -732,8 +840,11 @@ class AutogradCompilerInstance:
             return [self.to_proxy(x) for x in t]
         if isinstance(t, tuple):
             return tuple(self.to_proxy(x) for x in t)
-        # can it be torch.SymInt as the code used to imply?
-        assert isinstance(t, torch.Tensor)
+        if isinstance(t, (torch.SymInt, torch.SymFloat)):
+            return self.symnode_proxy_lookup[t.node]
+        if not isinstance(t, torch.Tensor):
+            # constant types like device, dtype, str
+            return t
         proxy_tensor = fetch_object_proxy(self.fx_tracer, t)
         assert isinstance(proxy_tensor, torch.fx.experimental.proxy_tensor._ProxyTensor)
         return proxy_tensor.proxy

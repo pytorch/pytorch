@@ -2911,7 +2911,6 @@ TORCH_LIBRARY(test_cudagraphs_cpu_scalar_used_in_cpp_custom_op, m) {
             "aot0_le",
             "aot0_permute_2",
             "code: CompiledFunctionBackward0 (NodeCall 2)",
-            "aot0_tangents_1",
             "aot0_full_default",
             "aot0_where",
             "aot0_mm",
@@ -3595,6 +3594,7 @@ known_failing_tests = {
     "test_autograd_node_isinstance",  # backward ctx is a fake cls and not directly a Node instance
     "test_backward_hook_relative_ordering",  # compiled autograd collects breadth first, and module backward hook not supported
     # Uncategorized
+    "test_not_implemented_grad",  # Dynamo changes the types of exceptions
 }
 
 if not HAS_CUDA:
