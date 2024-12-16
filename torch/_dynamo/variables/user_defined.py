@@ -94,7 +94,7 @@ def is_forbidden_context_manager(ctx):
     if m := sys.modules.get("torch.testing._internal.jit_utils"):
         f_ctxs.append(m._AssertRaisesRegexWithHighlightContext)
 
-    return ctx in ctxs
+    return ctx in f_ctxs
 
 
 class UserDefinedVariable(VariableTracker):
