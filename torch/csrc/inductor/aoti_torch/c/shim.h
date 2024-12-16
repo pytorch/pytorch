@@ -683,7 +683,7 @@ AOTI_TORCH_EXPORT void aoti_torch_warn(
 #else
 #define AOTI_TORCH_WARN(...) \
   aoti_torch_warn(           \
-      __func__, __FILE__, static_cast<uint32_t>(__LINE__), ##__VA_ARGS__);
+      __func__, __FILE__, static_cast<uint32_t>(__LINE__), #__VA_ARGS__);
 #endif
 
 #ifdef __cplusplus
