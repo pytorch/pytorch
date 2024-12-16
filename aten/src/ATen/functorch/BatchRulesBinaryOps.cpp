@@ -54,6 +54,8 @@ struct BinaryRandomPointwiseBatchRuleHelper<F, Func, typelist<T1, T2, T...>> {
   static Tensor apply(const Tensor& tensor, const Tensor& other, T... extra_args) {
     c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchVmapMode);
     auto maybe_layer = maybeCurrentDynamicLayer();
+    TORCH_INTERNAL_ASSERT(maybe_layer.has_value())
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
     auto cur_level = maybe_layer->layerId();
     RandomnessType randomness = maybe_layer->randomness();
 
@@ -306,12 +308,13 @@ static Tensor rrelu_with_noise_batch(
   c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchBatched);
   auto maybe_layer = maybeCurrentDynamicLayer();
   vmap_check_escaped(maybe_layer, "gen_vmap_plumbing");
+  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
   int64_t cur_level = maybe_layer->layerId();
   auto [self_value, self_bdim] = unwrapTensorAtLevel(self, cur_level);
   auto [noise_value, noise_bdim] = unwrapTensorAtLevel(noise, cur_level);
   TORCH_CHECK(!noise_bdim.has_value(), "vmap: Attempted to vmap over 'noise' in torch.rrelu_with_noise. This is not supported.");
   auto res = rrelu_with_noise_batch_rule(self_value, self_bdim, noise_value, noise_bdim, lower, upper, training, std::move(generator));
-  return makeBatched(std::get<0>(res), std::get<1>(res), cur_level);
+  return makeBatched(std::move(std::get<0>(res)), std::get<1>(res), cur_level);
 }
 
 static std::tuple<Tensor, std::optional<int64_t>> log_sigmoid_backward_batch_rule(
