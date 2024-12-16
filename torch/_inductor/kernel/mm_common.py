@@ -2,13 +2,14 @@
 import functools
 import itertools
 import logging
-from typing import Any, cast, Dict, Sequence, Set, Tuple
+from typing import Any, cast, Dict, Sequence, Tuple
 
 import sympy
 
 import torch
 from torch._inductor.select_algorithm import realize_inputs
 from torch._inductor.virtualized import V
+from torch.utils._ordered_set import OrderedSet
 
 from .. import config as inductor_config
 from ..codegen.wrapper import PythonWrapperCodegen
@@ -28,7 +29,7 @@ def triton_config(num_stages, num_warps, **kwargs):
 
 def build_rocm_gemm_configs(configs):
     rocm_num_stages = get_backend_num_stages()
-    return tuple({(c[0], c[1], c[2], rocm_num_stages, c[4]) for c in configs})
+    return tuple((c[0], c[1], c[2], rocm_num_stages, c[4]) for c in configs)
 
 
 def filtered_configs(
@@ -78,7 +79,7 @@ def filtered_configs(
         ),
         min_block_size_k,
     )
-    used: Set[Any] = set()
+    used = OrderedSet[tuple[int, int, int, int, int, int]]()
     for block_m, block_n, block_k, num_stages, num_warps in configs:
         # shrink configs for small sizes
         block_m = max(min(int(block_m * scale), m), min_block_size)

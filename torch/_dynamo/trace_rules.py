@@ -294,6 +294,7 @@ manual_torch_name_rule_map = {
     "torch._functorch.deprecated.grad_and_value": UserFunctionVariable,
     "torch._functorch.deprecated.vjp": UserFunctionVariable,
     # everything else
+    "torch._higher_order_ops.foreach_map.foreach_map": UserFunctionVariable,
     "torch._constrain_as_size": UserFunctionVariable,
     "torch._tensor._convert": UserFunctionVariable,
     "torch.jit._unwrap_optional": UserFunctionVariable,
@@ -2918,11 +2919,20 @@ Get all torch.Tensor methods which are allowed to be in graph functions.
 
 @functools.lru_cache(None)
 def get_tensor_method():
+    disallowed_tensor_methods = {"__new__", "_make_wrapper_subclass", "_make_subclass"}
     s = set()
     for name in dir(torch.Tensor):
         method = getattr(torch.Tensor, name)
-        if isinstance(
-            method, (types.MethodDescriptorType, types.WrapperDescriptorType)
+        if (
+            isinstance(
+                method,
+                (
+                    types.MethodDescriptorType,
+                    types.WrapperDescriptorType,
+                    types.BuiltinFunctionType,
+                ),
+            )
+            and name not in disallowed_tensor_methods
         ):
             s.add(method)
 
