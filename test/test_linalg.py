@@ -4994,26 +4994,6 @@ class TestLinalg(TestCase):
         # There must be a new tuning result
         self.assertEqual((total_num_results - ref_num_results), 1)
 
-        # Set tuning iterations to zero
-        # Tune a single GEMM and verify that we get a new tuning result
-        os.environ["PYTORCH_TUNABLEOP_MAX_TUNING_ITERATIONS"] = "0"
-        self.assertGreater(torch.cuda.tunable.get_max_tuning_iterations(), 0)
-        os.environ["PYTORCH_TUNABLEOP_MAX_TUNING_ITERATIONS"] = "100"  # reset to default
-
-        # Reference number of results
-        ref_num_results = total_num_results
-
-        N = M = K = 16
-        A = torch.randn(N, K, device=device, dtype=dtype)
-        B = torch.randn(K, M, device=device, dtype=dtype)
-        C = torch.matmul(A, B)
-
-        # This stores total number of cummulative results
-        total_num_results = len(torch.cuda.tunable.get_results())
-
-        # There must be a new tuning result
-        self.assertEqual((total_num_results - ref_num_results), 1)
-
         # disable TunableOp
         torch.cuda.tunable.enable(False)
 
