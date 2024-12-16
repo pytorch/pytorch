@@ -1002,7 +1002,7 @@ Tensor host_softmax(const Tensor & input_, const int64_t dim_, const bool half_t
             }
           } else {
             constexpr int ILP = sizeof(float4) / sizeof(scalar_t);
-            if (use_fast_softmax) {
+            if constexpr (use_fast_softmax) {
               dim3 block(512);
               size_t smem_reduction_sz = block.x / C10_WARP_SIZE * sizeof(accscalar_t);
               cunn_SoftMaxForwardGmem<ILP, scalar_t, accscalar_t, accscalar_t, EpilogueWithMul>
@@ -1208,7 +1208,7 @@ TORCH_IMPL_FUNC(softmax_cuda_out) (
   const int64_t dim,
   const bool half_to_float,
   const Tensor &output) {
-#if defined(USE_ROCM) && defined(PYTORCH_USE_FAST_SOFTMAX)
+#if defined(USE_ROCM) //&& defined(PYTORCH_USE_FAST_SOFTMAX)
   host_softmax<SoftMaxForwardEpilogue, SoftMaxForwardWithMulEpilogue, false, true>(input, dim, half_to_float, output);
 #else
   host_softmax<SoftMaxForwardEpilogue, SoftMaxForwardWithMulEpilogue, false, false>(input, dim, half_to_float, output);
