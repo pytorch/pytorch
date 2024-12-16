@@ -2931,6 +2931,86 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         v = torch.randn(48, 512, 64)
         with verify(u.dtype) as (atol, rtol):
             self.common(mod, (u, v))
+    @inductor_config.patch({"freezing": True})
+    @patches
+    @torch.no_grad
+    @unittest.skipIf(not TEST_MKL, "Test requires MKL")
+    @parametrize("batch_size", (384, 385))
+    @parametrize("in_features", (196, 1024))
+    @parametrize("out_features", (384, 385))
+    @parametrize("bias", (False,))
+    @parametrize(
+        "epilogue",
+        ("relu",),
+    )
+    @dtypes(torch.bfloat16)
+    @torch.fx.experimental._config.patch(use_duck_shape=False)
+    @inductor_config.patch({"cpp.cpp_gemm_transverse_strategy": "HORIZONTAL"})
+    def test_horizontal_transverse(
+        self, batch_size, in_features, out_features, bias, epilogue, dtype
+    ):
+        class M(torch.nn.Module):
+            def __init__(self, bias, epilogue, other):
+                super().__init__()
+                self.linear = torch.nn.Linear(in_features, out_features, bias)
+                self.epilogue = _get_epilogue(epilogue, other)
+
+            def forward(self, x):
+                return self.epilogue(self.linear(x))
+
+        counters.clear()
+        v = torch.randn(batch_size, in_features).to(dtype=dtype)
+        u = torch.randn(batch_size, out_features).to(dtype=dtype)
+        mod = M(bias=bias, epilogue=epilogue, other=u).to(dtype=dtype).eval()
+        with verify(dtype) as (atol, rtol):
+            self.common(mod, (v,), atol=atol, rtol=rtol)
+        self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
+
+    @inductor_config.patch({"freezing": True})
+    @inductor_config.patch({"cpp.enable_linear_silu_linear_mul": True})
+    @patches
+    @torch.no_grad
+    @unittest.skipIf(not TEST_MKL, "Test requires MKL")
+    @parametrize("batch_size", (16,))
+    @parametrize("in_features", (52,))
+    @parametrize("out_features", (32,))
+    @parametrize("bias_gate", (True, False))
+    @parametrize("bias_up", (True, False))
+    @parametrize("input_3d", (True, False))
+    @dtypes(
+        torch.bfloat16,
+    )
+    @inductor_config.patch({"cpp.cpp_gemm_transverse_strategy": "HORIZONTAL"})
+    def test_linear_silu_linear_mul_horizontal(
+        self, batch_size, in_features, out_features, bias_gate, bias_up, input_3d, dtype
+    ):
+        class Linear_Gate_Up(torch.nn.Module):
+            def __init__(self, in_feature, out_feature, bias_gate=False, bias_up=False):
+                super().__init__()
+                self.gate_proj = torch.nn.Linear(
+                    in_feature, out_feature, bias=bias_gate
+                )
+                self.up_proj = torch.nn.Linear(in_feature, out_feature, bias=bias_up)
+
+            def forward(self, x):
+                return torch.nn.functional.silu(self.gate_proj(x)) * self.up_proj(x)
+
+        if input_3d and bias_gate and bias_up:
+            # Reduce the redundant test combination
+            return
+
+        torch._dynamo.reset()
+        torch._inductor.metrics.reset()
+        counters.clear()
+        assert dtype == torch.bfloat16
+        mod = Linear_Gate_Up(in_features, out_features, bias_gate, bias_up).eval()
+        B = (2, batch_size) if input_3d else (batch_size,)
+        v = torch.randn(*B, in_features).to(torch.bfloat16)
+        with verify(dtype) as (atol, rtol), torch.autocast(
+            device_type="cpu"
+        ), torch.no_grad():
+            self.common(mod, (v,), atol=atol, rtol=rtol)
+        self.assertEqual(counters["inductor"]["cpp_group_gemm_template"], 1)
 
 
 @dynamo_config.patch({"dynamic_shapes": True, "assume_static_by_default": False})
@@ -2973,6 +3053,12 @@ class TestSelectAlgorithmDynamicShapes(_DynamicShapesTestBase):
     )
     test_linear_thread_factors_dynamic_shapes = (
         TestSelectAlgorithm.test_linear_thread_factors
+    )
+    test_horizontal_transverse_dynamic_shapes = (
+        TestSelectAlgorithm.test_horizontal_transverse
+    )
+    test_linear_silu_linear_mul_horizontal_dynamic_shapes = (
+        TestSelectAlgorithm.test_linear_silu_linear_mul_horizontal
     )
 
     @patches
