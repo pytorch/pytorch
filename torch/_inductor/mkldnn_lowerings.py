@@ -786,7 +786,7 @@ def register_onednn_fusion_ops():
                 6: lambda x: V.graph.constants[x.get_name()],  # For bias
             }
             if not da8w8_gemm_sym_wgt:
-                # weight is asymmetrically quantized, so w_zp will be used in computation.
+                # w_zp may be present in codegened code.
                 input_gen_fns[5] = lambda x: V.graph.constants[x.get_name()]
             result = autotune_select_algorithm(
                 "qlinear_unary",
