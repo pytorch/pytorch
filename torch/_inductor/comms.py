@@ -1293,7 +1293,6 @@ def bucket_fsdp_reduce_scatter_concat_on_scheduler_ir(
     example_rs_fx_node = get_fx_node(list(rs_snode_to_wait_snode.keys())[0], expected_op=torch.ops._c10d_functional.reduce_scatter_tensor.default)
     _, reduce_op, group_size, group_name = example_rs_fx_node.args
     for bucket_id, rs_bucket in enumerate(rs_buckets):
-        # TODO: this needs to be IRNode too
         rs_input_ir_nodes: List[ir.IRNode]= []
         wait_snodes = []
         wait_snode_recursive_users = OrderedSet()
