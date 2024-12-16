@@ -4929,30 +4929,27 @@ class TestLinalg(TestCase):
         # Validator,GCN_ARCH_NAME,<architecutre name>
         validator_num_lines = 5
 
-        # Test in try-finally block to avoid leaking state
-        # if test is interrupted.
+        set_tunableop_defaults()
+        torch.cuda.tunable.enable()
+        # set these to single iterations to keep it short but still exercise the code
+        torch.cuda.tunable.set_max_tuning_iterations(1)
+
+        N = M = K = 4
+        A = torch.randn(N, K, device=device, dtype=dtype)
+        B = torch.randn(K, M, device=device, dtype=dtype)
+        C = torch.matmul(A, B)
+        self.assertEqual(len(torch.cuda.tunable.get_validators()), validator_num_lines)
+
+        # disable TunableOp
+        torch.cuda.tunable.enable(False)
+
+        # clean up, remove any file that was generated
         try:
-            set_tunableop_defaults()
-            torch.cuda.tunable.enable()
-            # set these to single iterations to keep it short but still exercise the code
-            torch.cuda.tunable.set_max_tuning_iterations(1)
-
-            N = M = K = 4
-            A = torch.randn(N, K, device=device, dtype=dtype)
-            B = torch.randn(K, M, device=device, dtype=dtype)
-            C = torch.matmul(A, B)
-            self.assertEqual(len(torch.cuda.tunable.get_validators()), validator_num_lines)
-        finally:
-            # disable TunableOp
-            torch.cuda.tunable.enable(False)
-
-            # clean up, remove any file that was generated
-            try:
-                import os
-                filename = torch.cuda.tunable.get_filename()
-                os.remove(filename)
-            except FileNotFoundError:
-                pass
+            import os
+            filename = torch.cuda.tunable.get_filename()
+            os.remove(filename)
+        except FileNotFoundError:
+            pass
 
     @onlyCUDA
     @dtypes(torch.half)
