@@ -15,7 +15,7 @@ from torch.types import Device
 from ._utils import _get_device_index
 
 
-_device_t = Union[_device, str, int, None]
+_device_t = Union[_device, str, int]
 
 # torch.mtia.Event/Stream is alias of torch.Event/Stream
 Event = torch.Event
@@ -316,7 +316,7 @@ def stream(stream: Optional["torch.mtia.Stream"]) -> StreamContext:
     Arguments:
         stream (Stream): selected stream. This manager is a no-op if it's
             ``None``.
-    ..Note:: In eager mode stream is of type Stream class while in JIT it doesn't support torch.mtia.stream
+    .. note:: In eager mode stream is of type Stream class while in JIT it doesn't support torch.mtia.stream
     """
     return StreamContext(stream)
 
@@ -353,6 +353,9 @@ def set_rng_state(
     )
 
 
+from .memory import *  # noqa: F403
+
+
 __all__ = [
     "init",
     "is_available",
@@ -363,6 +366,7 @@ __all__ = [
     "current_stream",
     "default_stream",
     "memory_stats",
+    "max_memory_allocated",
     "get_device_capability",
     "empty_cache",
     "set_device",

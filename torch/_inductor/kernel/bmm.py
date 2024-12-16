@@ -14,6 +14,7 @@ from ..utils import (
     ceildiv as cdiv,
     use_aten_gemm_kernels,
     use_ck_template,
+    use_cpp_bmm_template,
     use_cutlass_template,
     use_triton_template,
 )
@@ -182,6 +183,14 @@ def tuned_bmm(mat1, mat2, *, layout=None):
 
         CUTLASS3xGemmTemplate.add_cutlass_gemm_choices(choices, layout, [mat1, mat2])
 
+    if use_cpp_bmm_template(layout, mat1, mat2):
+        from ..codegen.cpp_bmm_template import CppBmmTemplate
+
+        CppBmmTemplate.add_choices(
+            choices,
+            layout,
+            [mat1, mat2],
+        )
     if use_ck_template(layout):
         CKGemmTemplate.add_ck_gemm_choices(choices, layout, [mat1, mat2])
 
