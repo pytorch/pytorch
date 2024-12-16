@@ -549,7 +549,12 @@ def _load_model_state_dict(
             if (
                 not info.broadcast_from_rank0 or dist.get_rank() == 0
             ) and fqn != fqn_with_prefix:
-                state_dict[fqn_with_prefix] = state_dict.pop(fqn)
+                load_value = state_dict.pop(fqn, None)
+                if load_value is None:
+                    if info.strict:
+                        raise RuntimeError(f"Missing key: {fqn}.")
+                else:
+                    state_dict[fqn_with_prefix] = load_value
             local_state_dict[fqn_with_prefix] = value
 
     assign = False
