@@ -4058,6 +4058,10 @@ class AOTInductorTestsTemplate:
         )
         self.check_model(Model(), example_inputs)
 
+    @unittest.skipIf(
+        IS_FBCODE,
+        "To enable after the C shim FC window ends",
+    )
     def test_misaligned_input_1(self):
         if self.device != "cuda":
             raise unittest.SkipTest("CUDA test only")
