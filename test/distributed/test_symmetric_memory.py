@@ -12,7 +12,6 @@ from torch._inductor.utils import fresh_inductor_cache, run_and_get_triton_code
 from torch.distributed._functional_collectives import all_gather_tensor
 from torch.distributed._symmetric_memory import (
     _fused_all_gather_matmul_fallback,
-    _fused_all_gather_matmul_native,
     _fused_all_gather_scaled_matmul_fallback,
     _fused_matmul_reduce_scatter_fallback,
     _fused_scaled_matmul_reduce_scatter_fallback,
@@ -333,7 +332,6 @@ class SymmetricMemoryTest(MultiProcessTestCase):
         K = 32
         group = dist.group.WORLD
         rank = self.rank
-        world_size = self.world_size
 
         torch.manual_seed(42 + rank)
         A_shard = torch.rand(BATCH, M // self.world_size, K, device="cuda")
@@ -365,21 +363,21 @@ class SymmetricMemoryTest(MultiProcessTestCase):
     def test_fused_all_gather_matmul_native(
         self, symm_mem_input: bool, is_b_row_major: bool
     ) -> None:
+        os.environ["TORCH_SYMM_MEM_ENABLE_NATIVE_ASYNC_TP"] = "1"
         self._init_process()
 
-        M = 1024
+        M = 4096
         N = 1024
         K = 1024
         group_name = dist.group.WORLD.group_name
 
         torch.manual_seed(42 + self.rank)
         if symm_mem_input:
-            A_shard = _SymmetricMemory.empty_strided_p2p(
-                size=(M // self.world_size, K),
-                stride=(K, 1),
+            A_shard = symm_mem.empty(
+                M // self.world_size,
+                K,
                 dtype=torch.bfloat16,
                 device=self.device,
-                group_name="0",
             ).normal_()
         else:
             A_shard = torch.rand(
@@ -394,12 +392,21 @@ class SymmetricMemoryTest(MultiProcessTestCase):
         ag_baseline, mm_baseline = _fused_all_gather_matmul_fallback(
             A_shard, [B], gather_dim=0, group_name=group_name
         )
-        ag_target, mm_target = _fused_all_gather_matmul_native(
-            A_shard, B, group_name=group_name
+        with torch.profiler.profile(
+            activities=[
+                torch.profiler.ProfilerActivity.CUDA,
+            ],
+        ) as prof:
+            ag_target, mm_target = torch.ops.symm_mem.fused_all_gather_matmul(
+                A_shard, [B], gather_dim=0, group_name=group_name
+            )
+
+        self.assertTrue(
+            any("PersistentAsyncInputScheduler" in event.key for event in prof.events())
         )
 
         torch.testing.assert_close(ag_target, ag_baseline)
-        torch.testing.assert_close(mm_target, mm_baseline[0])
+        torch.testing.assert_close(mm_target[0], mm_baseline[0])
 
         dist.destroy_process_group()
 
@@ -420,7 +427,6 @@ class SymmetricMemoryTest(MultiProcessTestCase):
         K = 32
         group = dist.group.WORLD
         rank = self.rank
-        world_size = self.world_size
 
         if gather_dim == 0:
             leading_dims = (BATCH // self.world_size, M)
@@ -505,7 +511,6 @@ class SymmetricMemoryTest(MultiProcessTestCase):
         K = 32
         group = dist.group.WORLD
         rank = self.rank
-        world_size = self.world_size
 
         torch.manual_seed(42 + rank)
         A = torch.rand(BATCH, M, K, device="cuda")
@@ -538,7 +543,6 @@ class SymmetricMemoryTest(MultiProcessTestCase):
         K = 32
         group = dist.group.WORLD
         rank = self.rank
-        world_size = self.world_size
 
         torch.manual_seed(42 + rank)
         A = torch.rand(BATCH, M, K, device="cuda").to(torch.float8_e4m3fn)

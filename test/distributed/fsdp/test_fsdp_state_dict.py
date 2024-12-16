@@ -966,7 +966,7 @@ class TestFSDPStateDict(FSDPTest):
                 setattr(module, LINEAR_SKIP, linear_skip)
                 return fsdp, linear_skip_tensor_names
 
-        fsdp, linear_skip_tensor_names = _create_module()
+        fsdp, _ = _create_module()
         # Run a forward pass
         inp = torch.randn((1, 10), device=torch.cuda.current_device())
         loss = fsdp(inp)
