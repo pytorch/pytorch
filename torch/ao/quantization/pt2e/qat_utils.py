@@ -19,7 +19,6 @@ from torch.fx import Graph, GraphModule, Node
 from torch.fx.subgraph_rewriter import replace_pattern_with_filters, ReplacedPatterns
 
 from .utils import (
-    _conv1d_bn_example_inputs,
     _get_aten_graph_module_for_pattern,
     _is_bn_node,
     _is_conv_or_conv_transpose_node,
@@ -32,6 +31,7 @@ if TYPE_CHECKING:
     from torch.fx.passes.utils.matcher_with_name_node_map_utils import InternalMatch
 
 __all__ = []  # type: ignore[var-annotated]
+
 
 def _get_quantized_conv_bn_example_inputs_kwargs(
     is_per_channel: bool,
@@ -629,7 +629,7 @@ def _fuse_conv_bn_qat(m: GraphModule) -> GraphModule:
         torch.randn(1),  # bn_running_mean
         torch.randn(1),  # bn_running_var
     )
-    
+
     has_bn = any(_is_bn_node(n) for n in m.graph.nodes)
     if not has_bn:
         return m

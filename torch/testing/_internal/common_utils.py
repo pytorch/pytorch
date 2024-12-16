@@ -2353,7 +2353,16 @@ class PythonCycleLeakCheck:
 
         before = len(tuple(o for o in gc.get_objects() if (isinstance(o, torch.Tensor) and not isinstance(o, FakeTensor))))
         if before != 0:
-            print(before)
+            # Debugging why something is already alive here with no other test failing before?
+            # The example code below shows how to get all their type and generate a graph of what
+            # keeps the 0th object alive.
+            print(tuple(type(o) for o in gc.get_objects() if (isinstance(o, torch.Tensor) and not isinstance(o, FakeTensor))))
+            # import objgraph
+            # objgraph.show_backrefs(
+            #     tuple(o for o in gc.get_objects() if (isinstance(o, torch.Tensor) and not isinstance(o, FakeTensor)))[0],
+            #     max_depth=15,
+            #     filename="graph.png"
+            # )
             msg = "No Tensor should be alive before starting the test! Another test must have failed with a leak before this one."
             raise RuntimeError(msg)
 
@@ -2389,7 +2398,8 @@ class PythonCycleLeakCheck:
 
             if after != 0:
                 gc.collect()
-                post_collect = len(tuple(o for o in gc.get_objects() if (isinstance(o, torch.Tensor) and not isinstance(o, FakeTensor))))
+                post_collect = len(tuple(
+                    o for o in gc.get_objects() if (isinstance(o, torch.Tensor) and not isinstance(o, FakeTensor))))
 
                 if post_collect == 0:
                     if getattr(self.test_method, "_do_python_cycle_check", True):
@@ -2400,7 +2410,8 @@ class PythonCycleLeakCheck:
                     # Debugging what the leaked objects are?
                     # The example code below shows how to get all their type and generate a graph of what
                     # keeps the 0th object alive.
-                    print(tuple(type(o) for o in gc.get_objects() if (isinstance(o, torch.Tensor) and not isinstance(o, FakeTensor))))
+                    print(tuple(
+                        type(o) for o in gc.get_objects() if (isinstance(o, torch.Tensor) and not isinstance(o, FakeTensor))))
                     # import objgraph
                     # objgraph.show_backrefs(
                     #     tuple(o for o in gc.get_objects() if (isinstance(o, torch.Tensor) and not isinstance(o, FakeTensor)))[0],

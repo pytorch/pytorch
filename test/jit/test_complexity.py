@@ -20,8 +20,8 @@ from torch.testing._internal.common_utils import (
 from torch.testing._internal.jit_metaprogramming_utils import (
     get_all_nn_module_tests,
     get_nn_functional_compiled_fn_and_inputs,
-    get_nn_mod_test_name,
     get_nn_functional_tests,
+    get_nn_mod_test_name,
     try_get_nn_module_compiled_mod_and_inputs,
 )
 from torch.testing._internal.jit_utils import enable_profiling_mode, JitTestCase
