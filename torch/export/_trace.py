@@ -285,7 +285,8 @@ def _normalize_nn_module_stack(gm_torch_level, root_cls):
 
                         class Path:
                             def __getattr__(self, name):
-                                parts.append(name)
+                                if name != "_modules":
+                                    parts.append(name)
                                 return self
 
                             def __getitem__(self, idx):
