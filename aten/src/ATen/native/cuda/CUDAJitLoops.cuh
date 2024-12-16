@@ -28,10 +28,10 @@
 namespace at::native {
 
 template <typename Tuple, std::size_t... I>
-constexpr auto tuple_to_array_helper(Tuple& t, std::index_sequence<I...> seq) {
+// warning : unused parameter when tuple is empty.
+constexpr auto tuple_to_array_helper(const Tuple& [[maybe_unused]] t, std::index_sequence<I...> seq) {
     constexpr auto size = seq.size();
-    (void)t; // warning : unused parameter when tuple is empty.
-    return std::array<void*, size>{static_cast<void*>(&std::get<I>(t))...};
+    return std::array<const void*, size>{static_cast<const void*>(&std::get<I>(t))...};
 }
 
 // Helper function convert tuple to std::array<void*, N>
@@ -40,7 +40,7 @@ constexpr auto tuple_to_array_helper(Tuple& t, std::index_sequence<I...> seq) {
 // so the pointers in returned array are only valid
 // till tuple is alive.
 template <typename ...Args>
-constexpr auto tuple_to_array(std::tuple<Args...>& extra_args) {
+constexpr auto tuple_to_array(const std::tuple<Args...>& extra_args) {
     constexpr auto tuple_size = sizeof...(Args);
     return tuple_to_array_helper(extra_args, std::make_index_sequence<tuple_size>{});
 }
@@ -265,7 +265,7 @@ static void jitted_gpu_kernel_impl(
     const std::string &f,
     const bool dynamic_casting,
     at::opmath_type<f_inputs_type> scalar_val,
-    std::tuple<ExtraArgs...> extra_args) {
+    const std::tuple<ExtraArgs...>& extra_args) {
 
   // TODO: Memory use can probably be optimized by re-using kernels across GPUs with
   //   the same compute capability
