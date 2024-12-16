@@ -959,7 +959,7 @@ Tensor host_softmax(const Tensor & input_, const int64_t dim_, const bool half_t
             }
           } else {
             constexpr int ILP = sizeof(float4) / sizeof(scalar_t);
-            if (use_fast_softmax) {
+            if constexpr (use_fast_softmax) {
               dim3 block(512);
               size_t smem_reduction_sz = block.x / C10_WARP_SIZE * sizeof(accscalar_t);
               cunn_SoftMaxForwardGmem<ILP, scalar_t, accscalar_t, scalar_t, EpilogueWithMul>
