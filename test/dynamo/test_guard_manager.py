@@ -8,6 +8,7 @@ import torch._dynamo
 import torch._dynamo.test_case
 from torch._C._dynamo import guards
 from torch._dynamo.convert_frame import GlobalStateGuard
+from torch._dynamo.eval_frame import _debug_get_cache_entry_list
 from torch.testing._internal.common_utils import set_default_dtype
 
 
@@ -492,6 +493,70 @@ num_guards_executed=0)
         self.assertTrue(guard_manager.check(foo))
         self.assertFalse(guard_manager.check([3, 4]))
         self.assertFalse(guard_manager.check("foo"))
+
+    def test_framelocals_accessor(self):
+        foo = {
+            "a": 1,
+            "b": 2,
+        }
+
+        guards_manager = RootGuardManager()
+        guards_manager.add_type_match_guard(id_type(foo), ["type(x) == Foo"])
+        guards_manager.framelocals_manager(
+            ("a", 0), "", 1, default_mgr_enum
+        ).add_equals_match_guard(1, ["a == 1"])
+        guards_manager.framelocals_manager(
+            ("b", 1), "", 2, default_mgr_enum
+        ).add_equals_match_guard(2, ["b == 2"])
+
+        self.assertTrue(guards_manager.check(foo))
+        self.assertFalse(guards_manager.check({"a": 1, "b": 3}))
+
+    def test_framelocals_guard_e2e(self):
+        def fn(x, y, z):
+            return x + y + z[0]
+
+        opt_fn = torch.compile(fn, backend="eager")
+
+        ref = opt_fn(torch.ones(3), 2, {0: 1, 2: 3})
+        with torch._dynamo.set_stance("fail_on_recompile"):
+            res = opt_fn(torch.ones(3), 2, {0: 1, 2: 3})
+        self.assertEqual(ref, res)
+
+        c1 = _debug_get_cache_entry_list(fn.__code__)
+        self.assertEqual(len(c1), 1)
+        guard_str = str(c1[0].guard_manager)
+        self.assertIn(
+            "source=L['x'], accessed_by=FrameLocalsGuardAccessor(key='x', framelocals_idx=0)",
+            guard_str,
+        )
+        self.assertIn(
+            "source=L['y'], accessed_by=FrameLocalsGuardAccessor(key='y', framelocals_idx=1)",
+            guard_str,
+        )
+        self.assertIn(
+            "source=L['z'], accessed_by=FrameLocalsGuardAccessor(key='z', framelocals_idx=2)",
+            guard_str,
+        )
+
+    @torch._dynamo.config.patch(enable_cpp_framelocals_guard_eval=False)
+    def test_framelocals_guard_config_flag(self):
+        def fn(x):
+            return x + 1
+
+        opt_fn = torch.compile(fn, backend="eager")
+        ref = opt_fn(torch.ones(3))
+        with torch._dynamo.set_stance("fail_on_recompile"):
+            res = opt_fn(torch.ones(3))
+        self.assertEqual(ref, res)
+
+        c1 = _debug_get_cache_entry_list(fn.__code__)
+        self.assertEqual(len(c1), 1)
+        guard_str = str(c1[0].guard_manager)
+        self.assertIn(
+            "source=L['x'], accessed_by=DictGetItemGuardAccessor('x')",
+            guard_str,
+        )
 
     def test_dict_getitem_accessor(self):
         foo = {
