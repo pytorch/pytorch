@@ -1906,7 +1906,7 @@ class GuardBuilder(GuardBuilderBase):
         else:
             equalities_inputs = None
 
-        def _get_code_parts(lang):
+        def _get_code_parts(langs):
             return output_graph.shape_env.produce_guards_verbose(
                 [a.fake for a in fs],
                 [a.source for a in fs],
@@ -1915,16 +1915,36 @@ class GuardBuilder(GuardBuilderBase):
                 source_ref=self.source_ref,
                 # Export keeps static.
                 ignore_static=(not self.check_fn_manager.output_graph.export),
-                lang=lang,
+                langs=langs,
             )
+
+        if config.enable_cpp_symbolic_shape_guards:
+            # For exporting we need the python code parts
+            python_code_parts, verbose_code_parts, cpp_code_parts = _get_code_parts(
+                ("python", "verbose", "cpp")
+            )
+        else:
+            python_code_parts, verbose_code_parts = _get_code_parts(
+                ("python", "verbose")
+            )
+
+        # When exporting, we may work with the shape constraints some more in
+        # postprocessing, so don't freeze yet
+        if not self.check_fn_manager.output_graph.export:
+            output_graph.shape_env.freeze()
+        for code in python_code_parts.exprs:
+            self._set_guard_export_info(guard, [code])
+
+        # Make ShapeEnv guards available for testing.
+        if compile_context := CompileContext.try_get():
+            compile_context.shape_env_guards.extend(verbose_code_parts.exprs)
 
         if config.enable_cpp_symbolic_shape_guards:
             import ctypes
 
             from torch._inductor.codecache import CppCodeCache
 
-            cpp_code_parts, verbose_code_parts = _get_code_parts("cpp")
-
+            assert cpp_code_parts  # type: ignore[possibly-undefined]
             code_parts, source_to_symbol = (
                 cpp_code_parts.exprs,
                 cpp_code_parts.source_to_symbol,
@@ -1991,51 +2011,24 @@ class GuardBuilder(GuardBuilderBase):
                     assert cguard
                 except torch._inductor.exc.InvalidCxxCompiler:
                     # No valid C++ compiler to compile the shape guard
-                    python_fallback = True
+                    pass
                 else:
-                    # When exporting, we may work with the shape constraints some more in
-                    # postprocessing, so don't freeze yet
-                    if not self.check_fn_manager.output_graph.export:
-                        output_graph.shape_env.freeze()
-
-                    for code in code_parts:
-                        self._set_guard_export_info(guard, [code])
-
-                    # Make ShapeEnv guards available for testing.
-                    if compile_context := CompileContext.try_get():
-                        compile_context.shape_env_guards.extend(verbose_code_parts)
-
                     install_symbolic_shape_guard(
                         guard_managers,
                         len(int_source_to_symbol),
                         len(float_source_to_symbol),
                         cguard,
                         clib,
-                        verbose_code_parts,
+                        verbose_code_parts.exprs,
                     )
                     return
-
-        python_code_parts, verbose_code_parts = _get_code_parts("python")
-        code_parts = python_code_parts.exprs
-
-        # When exporting, we may work with the shape constraints some more in
-        # postprocessing, so don't freeze yet
-        if not self.check_fn_manager.output_graph.export:
-            output_graph.shape_env.freeze()
-
-        for code in code_parts:
-            self._set_guard_export_info(guard, [code])
-
-        # Make ShapeEnv guards available for testing.
-        if compile_context := CompileContext.try_get():
-            compile_context.shape_env_guards.extend(verbose_code_parts)
 
         # Install all the symbolic guards in one python lambda guard. These are run
         # at the very end of the RootGuardManager via epilogue guards.
         # TODO(anijain2305,williamwen42) - Consider moving this to C++.
         self.add_python_lambda_leaf_guard_to_root(
-            code_parts,
-            verbose_code_parts,
+            python_code_parts.exprs,
+            verbose_code_parts.exprs,
             closure_vars={**SYMPY_INTERP, **_get_closure_vars()},
         )
 
