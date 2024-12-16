@@ -18,6 +18,7 @@ from torch._library.custom_ops import (
     device_types_t,
 )
 from torch._library.infer_schema import infer_schema  # noqa: F401
+from torch._library.triton import triton_op, wrap_triton
 from torch._ops import OpOverload
 
 
@@ -32,6 +33,8 @@ __all__ = [
     "register_vmap",
     "get_ctx",
     "custom_op",
+    "triton_op",
+    "wrap_triton",
     "infer_schema",
 ]
 
@@ -868,6 +871,10 @@ def register_autograd(
     not depend on or mutate global state. If you need a non-traceable backward,
     you can make it a separate custom_op that you call inside ``backward_fn``.
 
+    If you need different autograd behavior on different devices, then we
+    recommend creating two different custom operators, one for each device
+    that needs different behavior, and switching between them at runtime.
+
     Examples:
         >>> import torch
         >>> import numpy as np
@@ -1318,12 +1325,12 @@ def opcheck(
 
         >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_CUDA)
         >>> @torch.library.custom_op("mylib::numpy_mul", mutates_args=())
-        >>> def numpy_add(x: Tensor, y: float) -> Tensor:
+        >>> def numpy_mul(x: Tensor, y: float) -> Tensor:
         >>>     x_np = x.numpy(force=True)
-        >>>     z_np = x_np + y
+        >>>     z_np = x_np * y
         >>>     return torch.from_numpy(z_np).to(x.device)
         >>>
-        >>> @numpy_sin.register_fake
+        >>> @numpy_mul.register_fake
         >>> def _(x, y):
         >>>     return torch.empty_like(x)
         >>>
@@ -1334,7 +1341,7 @@ def opcheck(
         >>> def backward(ctx, grad):
         >>>     return grad * ctx.y, None
         >>>
-        >>> numpy_sin.register_autograd(backward, setup_context=setup_context)
+        >>> numpy_mul.register_autograd(backward, setup_context=setup_context)
         >>>
         >>> sample_inputs = [
         >>>     (torch.randn(3), 3.14),
@@ -1344,7 +1351,7 @@ def opcheck(
         >>> ]
         >>>
         >>> for args in sample_inputs:
-        >>>     torch.library.opcheck(foo, args)
+        >>>     torch.library.opcheck(numpy_mul, args)
 
     """
     import torch.testing._internal.optests as optests
