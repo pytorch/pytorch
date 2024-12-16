@@ -2387,13 +2387,6 @@ class PythonCycleLeakCheck:
 
             after = len(tuple(o for o in gc.get_objects() if (isinstance(o, torch.Tensor) and not isinstance(o, FakeTensor))))
 
-            import objgraph
-            objgraph.show_refs(
-                tuple(o for o in gc.get_objects() if (isinstance(o, torch.Tensor) and not isinstance(o, FakeTensor)))[-1],
-                max_depth=5,
-                filename="graph.png"
-            )
-
             if after != 0:
                 gc.collect()
                 post_collect = len(tuple(o for o in gc.get_objects() if (isinstance(o, torch.Tensor) and not isinstance(o, FakeTensor))))
@@ -2407,13 +2400,13 @@ class PythonCycleLeakCheck:
                     # Debugging what the leaked objects are?
                     # The example code below shows how to get all their type and generate a graph of what
                     # keeps the 0th object alive.
-                    # print(tuple(o.device for o in gc.get_objects() if (isinstance(o, torch.Tensor) and not isinstance(o, FakeTensor))))
-                    import objgraph
-                    objgraph.show_backrefs(
-                        tuple(o for o in gc.get_objects() if (isinstance(o, torch.Tensor) and not isinstance(o, FakeTensor)))[0],
-                        max_depth=15,
-                        filename="graph.png"
-                    )
+                    print(tuple(type(o) for o in gc.get_objects() if (isinstance(o, torch.Tensor) and not isinstance(o, FakeTensor))))
+                    # import objgraph
+                    # objgraph.show_backrefs(
+                    #     tuple(o for o in gc.get_objects() if (isinstance(o, torch.Tensor) and not isinstance(o, FakeTensor)))[0],
+                    #     max_depth=15,
+                    #     filename="graph.png"
+                    # )
                     raise RuntimeError(msg)
 
         gc.enable()
