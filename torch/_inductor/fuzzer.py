@@ -172,7 +172,7 @@ class SamplingMethod(Enum):
                 )
                 for _ in range(random.randint(1, 3))
             ]
-        elif is_type(type_hint, set):
+        elif is_type(type_hint, set):  # noqa: set_linter
             indexable = list(default)
             elem_type = getattr(
                 type_hint,
@@ -180,7 +180,7 @@ class SamplingMethod(Enum):
                 [type(indexable[0])] if len(default) else [type(None)],
             )[0]
             new_default = indexable[0] if len(default) > 0 else None
-            return {
+            return {  # noqa: set_linter
                 SamplingMethod._generate_value_for_type(
                     random_sample, elem_type, new_default
                 )
