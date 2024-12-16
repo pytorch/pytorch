@@ -198,6 +198,7 @@ def __torch_function__(self, orig, cls, args, kwargs=empty_dict):
 
     if orig in pointwise:
         result_levels = llist()
+        arg_levels = llist()
         to_expand = []
         for i, f in enumerate(flat_args):
             if isinstance(f, TensorLike):
@@ -267,6 +268,7 @@ def positional(self, *dims):
             needs_view = True
 
     permute = list(range(len(levels)))
+    nflat = len(flat_dims)
     for i, d in enumerate(flat_dims):
         try:
             idx = levels.index(d)

@@ -940,8 +940,7 @@ class CustomizedDictVariable(ConstDictVariable):
 
 @functools.lru_cache(None)
 def _install_PretrainedConfig_patch():
-    mod = sys.modules.get("transformers.configuration_utils")
-    assert mod is not None, "Caller is responsible for ensuring this was imported"
+    import transformers
 
     # We need to monkeypatch transformers here, sadly.
     # TODO(voz): Upstream to transformers lib
@@ -951,7 +950,9 @@ def _install_PretrainedConfig_patch():
             return False
         return self.__dict__ == other.__dict__
 
-    mod.PretrainedConfig.__eq__ = _dynamo_overriden_transformers_eq
+    transformers.configuration_utils.PretrainedConfig.__eq__ = (
+        _dynamo_overriden_transformers_eq
+    )
 
 
 class HFPretrainedConfigVariable(VariableTracker):
