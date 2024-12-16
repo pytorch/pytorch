@@ -56,16 +56,12 @@ def load_sparse_matrix(path, device):
 def gen_vector(path, device):
     with open(path) as file:
         nrows, ncols, nnz = (int(el) for el in file.readline().split(", "))
-        index_pointers = (int(el) for el in file.readline().split())
-        indices = (int(el) for el in file.readline().split())
         return torch.randn(nrows, dtype=torch.double, device=device)
 
 
 def gen_matrix(path, device):
     with open(path) as file:
         nrows, ncols, nnz = (int(el) for el in file.readline().split(", "))
-        index_pointers = (int(el) for el in file.readline().split())
-        indices = (int(el) for el in file.readline().split())
         return torch.randn(nrows, ncols, dtype=torch.double, device=device)
 
 
