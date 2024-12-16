@@ -109,6 +109,11 @@ struct TORCH_API MTIAHooksInterface : AcceleratorHooksInterface {
     FAIL_MTIAHOOKS_FUNC(__func__);
     return nullptr;
   }
+
+  virtual void emptyCache() const {
+    FAIL_MTIAHOOKS_FUNC(__func__);
+  }
+
 };
 
 struct TORCH_API MTIAHooksArgs {};
