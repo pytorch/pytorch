@@ -144,6 +144,8 @@ runs:
       run: |
         set -ex
 
+        sudo swapoff /swapfile
+        sudo rm /swapfile
         # Testing https://github.com/pytorch/test-infra/pull/6058
         sudo fallocate -l 3G /swapfile
         sudo chmod 600 /swapfile
