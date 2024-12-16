@@ -335,7 +335,7 @@ class SubprocMain:
 
         try:
             result = job()
-        except Exception as e:
+        except Exception:
             result = _SubprocExceptionInfo(traceback.format_exc())
         return pickler.dumps(result)
 
