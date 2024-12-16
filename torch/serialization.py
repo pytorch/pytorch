@@ -14,6 +14,7 @@ import tempfile
 import threading
 import warnings
 from contextlib import closing, contextmanager
+from dataclasses import dataclass
 from enum import Enum
 from typing import (
     Any,
@@ -36,6 +37,9 @@ from torch._sources import get_source_lines_and_file
 from torch._utils import _import_dotted_name
 from torch.storage import _get_dtype_from_pickle_storage_type
 from torch.types import Storage
+
+
+# import torch._serialization_config as serialization_config
 
 
 __all__ = [
@@ -140,7 +144,25 @@ class LoadEndianness(Enum):
     BIG = 3
 
 
-_default_load_endian: Optional[LoadEndianness] = None
+@dataclass
+class _LoadConfig:
+    mmap: bool = False
+    endianness: Optional[LoadEndianness] = None
+    mmap_flags: Optional[int] = MAP_PRIVATE
+
+
+@dataclass
+class _SaveConfig:
+    compute_crc32: bool = True
+
+
+@dataclass
+class SerializationConfig:
+    save_options: _SaveConfig = _SaveConfig()
+    load_options: _LoadConfig = _LoadConfig()
+
+
+config = SerializationConfig()
 
 
 def get_default_load_endianness() -> Optional[LoadEndianness]:
@@ -154,7 +176,7 @@ def get_default_load_endianness() -> Optional[LoadEndianness]:
     Returns:
         default_load_endian: Optional[LoadEndianness]
     """
-    return _default_load_endian
+    return config.load_options.endianness
 
 
 def set_default_load_endianness(endianness):
@@ -168,13 +190,10 @@ def set_default_load_endianness(endianness):
     Args:
         endianness: the new fallback byte order
     """
-    global _default_load_endian
+    global config
     if not isinstance(endianness, LoadEndianness) and endianness is not None:
         raise TypeError("Invalid argument type in function set_default_load_endianness")
-    _default_load_endian = endianness
-
-
-_compute_crc32: bool = True
+    config.load_options.endianness = endianness
 
 
 def get_crc32_options() -> bool:
@@ -183,7 +202,7 @@ def get_crc32_options() -> bool:
 
     Defaults to ``True``.
     """
-    return _compute_crc32
+    return config.save_options.compute_crc32
 
 
 def set_crc32_options(compute_crc32: bool):
@@ -198,14 +217,11 @@ def set_crc32_options(compute_crc32: bool):
     Args:
         compute_crc32 (bool): set crc32 compuation flag
     """
-    global _compute_crc32
-    _compute_crc32 = compute_crc32
+    global config
+    config.save_options.compute_crc32 = compute_crc32
 
 
-_default_mmap_options: int = MAP_PRIVATE
-
-
-def get_default_mmap_options() -> int:
+def get_default_mmap_options() -> Optional[int]:
     """
     Get default mmap options for :func:`torch.load` with ``mmap=True``.
 
@@ -215,7 +231,7 @@ def get_default_mmap_options() -> int:
     Returns:
         default_mmap_options: int
     """
-    return _default_mmap_options
+    return config.load_options.mmap_flags
 
 
 class set_default_mmap_options:
@@ -242,16 +258,16 @@ class set_default_mmap_options:
                 "Invalid argument in function set_default_mmap_options, "
                 f"expected mmap.MAP_PRIVATE or mmap.MAP_SHARED, but got {flags}"
             )
-        global _default_mmap_options
-        self.prev = _default_mmap_options
-        _default_mmap_options = flags
+        global config
+        self.prev = config.load_options.mmap_flags
+        config.load_options.mmap_flags = flags
 
     def __enter__(self) -> None:
         pass
 
     def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any) -> None:
-        global _default_mmap_options
-        _default_mmap_options = self.prev
+        global config
+        config.load_options.mmap_flags = self.prev
 
 
 def clear_safe_globals() -> None:
@@ -768,10 +784,14 @@ class _open_zipfile_writer_file(_opener):
             # for writing out the file.
             self.file_stream = io.FileIO(self.name, mode="w")
             super().__init__(
-                torch._C.PyTorchFileWriter(self.file_stream, _compute_crc32)
+                torch._C.PyTorchFileWriter(
+                    self.file_stream, config.save_options.compute_crc32
+                )
             )
         else:
-            super().__init__(torch._C.PyTorchFileWriter(self.name, _compute_crc32))
+            super().__init__(
+                torch._C.PyTorchFileWriter(self.name, config.save_options.compute_crc32)
+            )
 
     def __exit__(self, *args) -> None:
         self.file_like.write_end_of_file()
@@ -787,7 +807,9 @@ class _open_zipfile_writer_buffer(_opener):
                 raise AttributeError(msg)
             raise TypeError(msg)
         self.buffer = buffer
-        super().__init__(torch._C.PyTorchFileWriter(buffer, _compute_crc32))
+        super().__init__(
+            torch._C.PyTorchFileWriter(buffer, config.save_options.compute_crc32)
+        )
 
     def __exit__(self, *args) -> None:
         self.file_like.write_end_of_file()
@@ -1414,7 +1436,7 @@ def load(
 
     # make flipping default BC-compatible
     if mmap is None:
-        mmap = False
+        mmap = config.load_options.mmap
 
     _check_dill_version(pickle_module)
 
