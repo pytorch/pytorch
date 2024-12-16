@@ -406,104 +406,6 @@ static bool THPVariable_tryResurrect(THPVariable* self) {
   return true;
 }
 
-static int THPVariable_subclass_clear(THPVariable* self) {
-  // Is it OK for an object to still be live after running
-  // tp_clear? Yes. When Python is breaking reference cycles, it can't assume
-  // that an object will dealloc after it's cleared.  The source code explicitly
-  // handles this case:
-  // https://github.com/python/cpython/blob/4e661cd69164318c1f871faa476c68a04092ddc4/Modules/gcmodule.c#L1010-L1025
-
-  // Note that we don't need to actually resurrect here. There are 2 cases:
-  // 1. The PyObject is not part of a reference cycle. In this case, we don't
-  // need to do anything. The GC will move on to try and break the reference
-  // cycle on another object, which will eventually trigger tp_dealloc (and thus
-  // resurrection).
-
-  // 2. The PyObject is part of a reference cycle. This case should not actually
-  // be possible, due to the logic in our tp_traverse
-  // (THPVariable_subclass_traverse).
-
-  // In fact, resurrecting here breaks the invariant that "C++ owns Python only
-  // when PyObject's refcount would otherwise be 0". Most immediately, as we're
-  // merely breaking reference cycles here, there can be other references to the
-  // PyObject. *However*, if other objects in the refcycle resurrect, then we
-  // will be in a state where the PyObject has multiple Python references, yet
-  // C++ owns the PyObject.
-
-  // See https://github.com/pytorch/pytorch/pull/75933 for more discussion.
-  if (isResurrectable((THPVariable*)self)) {
-    return 0;
-  }
-  Py_CLEAR(self->backward_hooks);
-  Py_CLEAR(self->post_accumulate_grad_hooks);
-  const auto& tensor = THPVariable_Unpack(self);
-  if (tensor.defined()) {
-    // Two situations to consider:
-    //    PyObject -owns-> Tensor
-    //        unsafeIsBorrowed() is FALSE.  We're obligated to look through
-    //        Tensor to break references.  Clearing cdata must induce the
-    //        destruction of the C++ Tensor.  If there were other references
-    //        to C++ tensor, the Python object would have been resurrected
-    //        by flipping the ownership.
-    //    Tensor -owns-> PyObject
-    //        unsafeIsBorrowed() is TRUE.  We're deallocating the PyObject
-    //        because Tensor asked us to (it's already destructing).
-
-    if (!self->cdata.unsafeIsBorrowed() &&
-        tensor.unsafeGetTensorImpl()->pyobj_slot()->check_pyobj(
-            getPyInterpreter(), /*ignore_hermetic_tls=*/false) ==
-            (PyObject*)self) {
-      // TODO: empirically, on OS X this assert appears to be untrue
-      // In test_py_tensors_multi_async_call - ProcessGroupRpcTestWithSpawn
-      // distributed/rpc/test_process_group_agent.py
-      //
-      //  libc++abi.dylib: terminating with uncaught exception of type
-      //  c10::Error:
-      //  !tensor.unsafeGetTensorImpl()->pyobj_slot()->owns_pyobj()INTERNAL
-      //  ASSERT FAILED at "../torch/csrc/autograd/python_variable.cpp":171,
-      //  please report a bug to PyTorch. Exception raised from
-      //  THPVariable_subclass_clear at
-      //  ../torch/csrc/autograd/python_variable.cpp:171 (most recent call
-      //  first): frame #0: c10::Error::Error(c10::SourceLocation,
-      //  std::__1::basic_string<char, std::__1::char_traits<char>,
-      //  std::__1::allocator<char> >) + 98 (0x1158a0442 in libc10.dylib) frame
-      //  #1: c10::detail::torchCheckFail(char const*, char const*, unsigned
-      //  int, char const*) + 205 (0x11589ed3d in libc10.dylib) frame #2:
-      //  c10::detail::torchInternalAssertFail(char const*, char const*,
-      //  unsigned int, char const*, c10::detail::CompileTimeEmptyString) + 9
-      //  (0x1141e3f89 in libtorch_python.dylib) frame #3:
-      //  THPVariable_subclass_clear(THPVariable*) + 412 (0x1148a547c in
-      //  libtorch_python.dylib) frame #4:
-      //  THPVariable_subclass_dealloc(_object*) + 453 (0x1148a5035 in
-      //  libtorch_python.dylib) frame #5: (anonymous
-      //  namespace)::concrete_decref_fn(c10::impl::PyInterpreter const*,
-      //  _object*) + 53 (0x1148a5ea5 in libtorch_python.dylib) frame #6:
-      //  c10::TensorImpl::release_resources() + 182 (0x11588c4a6 in
-      //  libc10.dylib) frame #7:
-      //  c10::MaybeOwned<at::Tensor>::operator=(c10::MaybeOwned<at::Tensor>&&)
-      //  + 91 (0x11488c11b in libtorch_python.dylib) frame #8:
-      //  THPVariable_subclass_dealloc(_object*) + 607 (0x1148a50cf in
-      //  libtorch_python.dylib) <omitting python frames> frame #47: start + 1
-      //  (0x7fff6ffc7cc9 in libdyld.dylib) frame #48: 0x0 + 4 (0x4 in ???)
-      // TORCH_INTERNAL_ASSERT(!tensor.unsafeGetTensorImpl()->pyobj_slot()->owns_pyobj());
-      if (auto grad_acc =
-              torch::autograd::impl::try_get_grad_accumulator(tensor)) {
-        grad_acc->pre_hooks().clear();
-        grad_acc->tensor_pre_hooks().clear();
-        grad_acc->retains_grad_hooks().clear();
-      }
-    }
-  }
-  TORCH_INTERNAL_ASSERT(!isResurrectable((THPVariable*)self));
-  {
-    // MapAllocator can take significant time to release large tensors;
-    // release the GIL here to avoid impacting main thread perf.
-    pybind11::gil_scoped_release no_gil;
-    self->cdata = MaybeOwned<Variable>();
-  }
-  return 0;
-}
-
 int THPFake_traverse(THPVariable* self, visitproc visit, void* arg) {
   TORCH_INTERNAL_ASSERT(
       false, "TensorBase tp_traverse function was not overriden properly");
@@ -1899,6 +1801,128 @@ PyObject* THPVariable_pynew(
       c10::impl::PyInterpreterStatus::MAYBE_UNINITIALIZED,
       /*allow_preexisting_pyobj=*/true);
   END_HANDLE_TH_ERRORS
+}
+
+static int THPVariable_subclass_clear(THPVariable* self) {
+  // Is it OK for an object to still be live after running
+  // tp_clear? Yes. When Python is breaking reference cycles, it can't assume
+  // that an object will dealloc after it's cleared.  The source code explicitly
+  // handles this case:
+  // https://github.com/python/cpython/blob/4e661cd69164318c1f871faa476c68a04092ddc4/Modules/gcmodule.c#L1010-L1025
+
+  // Note that we don't need to actually resurrect here. There are 2 cases:
+  // 1. The PyObject is not part of a reference cycle. In this case, we don't
+  // need to do anything. The GC will move on to try and break the reference
+  // cycle on another object, which will eventually trigger tp_dealloc (and thus
+  // resurrection).
+
+  // 2. The PyObject is part of a reference cycle. This case should not actually
+  // be possible, due to the logic in our tp_traverse
+  // (THPVariable_subclass_traverse).
+
+  // In fact, resurrecting here breaks the invariant that "C++ owns Python only
+  // when PyObject's refcount would otherwise be 0". Most immediately, as we're
+  // merely breaking reference cycles here, there can be other references to the
+  // PyObject. *However*, if other objects in the refcycle resurrect, then we
+  // will be in a state where the PyObject has multiple Python references, yet
+  // C++ owns the PyObject.
+
+  // See https://github.com/pytorch/pytorch/pull/75933 for more discussion.
+  if (isResurrectable(self)) {
+    return 0;
+  }
+
+  // First clear Tensor specific things
+
+  Py_CLEAR(self->backward_hooks);
+  Py_CLEAR(self->post_accumulate_grad_hooks);
+  const auto& tensor = THPVariable_Unpack(self);
+  if (tensor.defined()) {
+    // Two situations to consider:
+    //    PyObject -owns-> Tensor
+    //        unsafeIsBorrowed() is FALSE.  We're obligated to look through
+    //        Tensor to break references.  Clearing cdata must induce the
+    //        destruction of the C++ Tensor.  If there were other references
+    //        to C++ tensor, the Python object would have been resurrected
+    //        by flipping the ownership.
+    //    Tensor -owns-> PyObject
+    //        unsafeIsBorrowed() is TRUE.  We're deallocating the PyObject
+    //        because Tensor asked us to (it's already destructing).
+
+    if (!self->cdata.unsafeIsBorrowed() &&
+        tensor.unsafeGetTensorImpl()->pyobj_slot()->check_pyobj(
+            getPyInterpreter(), /*ignore_hermetic_tls=*/false) ==
+            std::make_optional((PyObject*)self)) {
+      // TODO: empirically, on OS X this assert appears to be untrue
+      // In test_py_tensors_multi_async_call - ProcessGroupRpcTestWithSpawn
+      // distributed/rpc/test_process_group_agent.py
+      //
+      //  libc++abi.dylib: terminating with uncaught exception of type
+      //  c10::Error:
+      //  !tensor.unsafeGetTensorImpl()->pyobj_slot()->owns_pyobj()INTERNAL
+      //  ASSERT FAILED at "../torch/csrc/autograd/python_variable.cpp":171,
+      //  please report a bug to PyTorch. Exception raised from
+      //  THPVariable_subclass_clear at
+      //  ../torch/csrc/autograd/python_variable.cpp:171 (most recent call
+      //  first): frame #0: c10::Error::Error(c10::SourceLocation,
+      //  std::__1::basic_string<char, std::__1::char_traits<char>,
+      //  std::__1::allocator<char> >) + 98 (0x1158a0442 in libc10.dylib) frame
+      //  #1: c10::detail::torchCheckFail(char const*, char const*, unsigned
+      //  int, char const*) + 205 (0x11589ed3d in libc10.dylib) frame #2:
+      //  c10::detail::torchInternalAssertFail(char const*, char const*,
+      //  unsigned int, char const*, c10::detail::CompileTimeEmptyString) + 9
+      //  (0x1141e3f89 in libtorch_python.dylib) frame #3:
+      //  THPVariable_subclass_clear(THPVariable*) + 412 (0x1148a547c in
+      //  libtorch_python.dylib) frame #4:
+      //  THPVariable_subclass_dealloc(_object*) + 453 (0x1148a5035 in
+      //  libtorch_python.dylib) frame #5: (anonymous
+      //  namespace)::concrete_decref_fn(c10::impl::PyInterpreter const*,
+      //  _object*) + 53 (0x1148a5ea5 in libtorch_python.dylib) frame #6:
+      //  c10::TensorImpl::release_resources() + 182 (0x11588c4a6 in
+      //  libc10.dylib) frame #7:
+      //  c10::MaybeOwned<at::Tensor>::operator=(c10::MaybeOwned<at::Tensor>&&)
+      //  + 91 (0x11488c11b in libtorch_python.dylib) frame #8:
+      //  THPVariable_subclass_dealloc(_object*) + 607 (0x1148a50cf in
+      //  libtorch_python.dylib) <omitting python frames> frame #47: start + 1
+      //  (0x7fff6ffc7cc9 in libdyld.dylib) frame #48: 0x0 + 4 (0x4 in ???)
+      // TORCH_INTERNAL_ASSERT(!tensor.unsafeGetTensorImpl()->pyobj_slot()->owns_pyobj());
+      if (auto grad_acc =
+              torch::autograd::impl::try_get_grad_accumulator(tensor)) {
+        grad_acc->pre_hooks().clear();
+        grad_acc->tensor_pre_hooks().clear();
+        grad_acc->retains_grad_hooks().clear();
+      }
+    }
+  }
+  TORCH_INTERNAL_ASSERT(!isResurrectable(self));
+  {
+    // MapAllocator can take significant time to release large tensors;
+    // release the GIL here to avoid impacting main thread perf.
+    pybind11::gil_scoped_release no_gil;
+    self->cdata = MaybeOwned<Variable>();
+  }
+  // Since we override the basic subtype_clear from CPython, we need a crappy
+  // version here just like for traverse and dealloc
+
+  // Clear all slots until we get to the base Tensor class
+  PyTypeObject* type = Py_TYPE((PyObject*)self);
+  PyTypeObject* base = type;
+  while (base != &THPVariableType) {
+    if (Py_SIZE(base))
+      clear_slots(base, (PyObject*)self);
+    base = base->tp_base;
+    TORCH_INTERNAL_ASSERT(base);
+  }
+
+  // Assume we never have managed dict for Tensors as we don't set the flag on
+  // the base class
+  if (C10_LIKELY(type->tp_dictoffset)) {
+    PyObject** dictptr = _PyObject_GetDictPtr((PyObject*)self);
+    if (dictptr && *dictptr)
+      Py_CLEAR(*dictptr);
+  }
+
+  return 0;
 }
 
 // NB: this is not the tp_dealloc on THPVariable; instead, its the dealloc
