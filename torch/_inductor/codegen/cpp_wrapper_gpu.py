@@ -241,9 +241,15 @@ class CppWrapperGpu(CppWrapperCpu):
                 assert isinstance(
                     value, TensorBox
                 ), f"{input_name} is expected to be tensor but found as {type(value)}"
+                warn_msg = (
+                    f"Input {idx} was compiled as {GPU_ALIGN_BYTES}-bytes aligned, "
+                    "but it is not aligned at run time. Copying to an aligned tensor "
+                    "to guarantee correctness, but expect a performance hit."
+                )
                 self.prefix.splice(
                     f"""
                     if ((long({input_name}.data_ptr()) & ({GPU_ALIGN_BYTES} -1)) != 0) {{
+                        AOTI_TORCH_WARN("{warn_msg}");
                         AtenTensorHandle {input_name}_aligned;
                         aoti_torch_clone_preserve_strides({input_name}, &{input_name}_aligned);
                         {input_name} = std::move(RAIIAtenTensorHandle({input_name}_aligned));

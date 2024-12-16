@@ -1203,6 +1203,18 @@ void aoti_torch_check(
   }
 }
 
+void aoti_torch_warn(
+    const char* func,
+    const char* file,
+    uint32_t line,
+    const char* msg) {
+  ::c10::warn(::c10::Warning(
+      ::c10::UserWarning(),
+      {func, file, static_cast<uint32_t>(line)},
+      msg,
+      false));
+}
+
 AOTITorchError aoti_torch__alloc_from_pool(
     AtenTensorHandle self,
     int64_t offset_bytes,

@@ -672,6 +672,20 @@ AOTI_TORCH_EXPORT void aoti_torch_check(
   }
 #endif
 
+AOTI_TORCH_EXPORT void aoti_torch_warn(
+    const char* func,
+    const char* file,
+    uint32_t line,
+    const char* msg);
+
+#ifdef DISABLE_WARN
+#define AOTI_TORCH_WARN(...) ((void)0);
+#else
+#define AOTI_TORCH_WARN(...) \
+  aoti_torch_warn(           \
+      __func__, __FILE__, static_cast<uint32_t>(__LINE__), ##__VA_ARGS__);
+#endif
+
 #ifdef __cplusplus
 } // extern "C"
 
