@@ -510,10 +510,6 @@ def _do_annotate_conv_bn(
     gm.graph.eliminate_dead_code()
     gm.recompile()
 
-    from torch._export import gm_using_training_ir
-
-    using_training_ir = gm_using_training_ir(gm)
-
     matches = []
     if is_conv_transpose:
         combinations = [
@@ -536,7 +532,7 @@ def _do_annotate_conv_bn(
     # Match against all conv dimensions and cuda variants
     for (conv_fn, example_inputs), is_cuda, relu_is_inplace in combinations:  # type: ignore[misc]
         pattern = get_pattern(conv_fn, relu_is_inplace)  # type: ignore[has-type]
-        pattern = _get_aten_graph_module_for_pattern(pattern, example_inputs, is_cuda, using_training_ir=using_training_ir)  # type: ignore[has-type]
+        pattern = _get_aten_graph_module_for_pattern(pattern, example_inputs, is_cuda)  # type: ignore[has-type]
         pattern.graph.eliminate_dead_code()
         pattern.recompile()
         matcher = SubgraphMatcherWithNameNodeMap(pattern, ignore_literals=True)
