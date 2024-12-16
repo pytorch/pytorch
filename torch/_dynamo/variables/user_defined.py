@@ -481,7 +481,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 # supported in dynamo
                 args = [
                     FunctionDecoratedByContextlibContextManagerVariable(
-                        args[0], source=self.source
+                        args[0], source=args[0].source
                     )
                 ] + args[1:]
 

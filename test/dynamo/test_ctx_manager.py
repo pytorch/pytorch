@@ -1844,7 +1844,6 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(z, 100)
         self.assertEqual(k, 100)
 
-    @unittest.expectedFailure
     def test_change_parent_global_0(self):
         # test if a global actually gets propagated
         global z_glb, k_glb
@@ -2297,6 +2296,61 @@ class GraphModule(torch.nn.Module):
         out = torch.compile(backend=eager, fullgraph=False)(fn)(x, whoo(x))
         self.assertEqual(expected, out)
         self.assertEqual(len(eager.graphs), 2)
+
+    @unittest.expectedFailure  # contextmanager is exhausted if reconstructed
+    def test_return_new_contextmanager(self):
+        L = []
+
+        def h(x):
+            return x.cos()
+
+        @contextlib.contextmanager
+        def whoo(x):
+            try:
+                L.append(x.sin())
+                yield h(x) + 1
+            finally:
+                L.append(x.cos())
+
+        def fn(x):
+            ctx = whoo(x)
+            return x + 1, ctx
+
+        x = torch.tensor([1.0])
+        eager = EagerAndRecordGraphs()
+        y, ctx = torch.compile(backend=eager, fullgraph=False)(fn)(x)
+        self.assertEqual(y, x + 1)
+        self.assertEqual(L, [x.sin(), x.cos()])
+        ctx.__next__()
+        self.assertEqual(L, [x.sin()])
+        ctx.__exit__(None, None, None)
+
+    def test_return_advanced_contextmanager(self):
+        L = []
+
+        def h(x):
+            return x.cos()
+
+        @contextlib.contextmanager
+        def whoo(x):
+            try:
+                L.append(x.sin())
+                yield h(x) + 1
+            finally:
+                L.append(x.cos())
+
+        def fn(x):
+            ctx = whoo(x)
+            y = ctx.__enter__()
+            return x + y, ctx
+
+        x = torch.tensor([1.0])
+        eager = EagerAndRecordGraphs()
+        y, ctx = torch.compile(backend=eager, fullgraph=False)(fn)(x)
+        self.assertEqual(y, x + x.cos() + 1)
+        self.assertEqual(L, [x.sin()])
+        ctx.__exit__(None, None, None)
+        self.assertEqual(L, [x.sin(), x.cos()])  # Two items now
 
     def test_contextmanager_as_argument_only___enter__(self):
         L = []
