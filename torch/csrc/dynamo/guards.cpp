@@ -3969,8 +3969,14 @@ class TensorPropertyGuardAccessor : public GuardAccessor {
     at::Tensor tensor = THPVariable_Unpack(obj);
     std::optional<int64_t> opt_value;
     if (_prop == TensorProperty::SIZE) {
+      if (_index >= tensor.dim()) {
+        return false;
+      }
       opt_value = tensor.sym_size(_index).maybe_as_int();
     } else if (_prop == TensorProperty::STRIDE) {
+      if (_index >= tensor.dim()) {
+        return false;
+      }
       opt_value = tensor.sym_stride(_index).maybe_as_int();
     } else if (_prop == TensorProperty::STORAGE_OFFSET) {
       opt_value = tensor.sym_storage_offset().maybe_as_int();
@@ -3998,8 +4004,14 @@ class TensorPropertyGuardAccessor : public GuardAccessor {
     at::Tensor tensor = THPVariable_Unpack(obj);
     std::optional<int64_t> opt_value;
     if (_prop == TensorProperty::SIZE) {
+      if (_index >= tensor.dim()) {
+        return GuardDebugInfo(false, "tensor has too few dimensions", 0);
+      }
       opt_value = tensor.sym_size(_index).maybe_as_int();
     } else if (_prop == TensorProperty::STRIDE) {
+      if (_index >= tensor.dim()) {
+        return GuardDebugInfo(false, "tensor has too few dimensions", 0);
+      }
       opt_value = tensor.sym_stride(_index).maybe_as_int();
     } else if (_prop == TensorProperty::STORAGE_OFFSET) {
       opt_value = tensor.sym_storage_offset().maybe_as_int();
