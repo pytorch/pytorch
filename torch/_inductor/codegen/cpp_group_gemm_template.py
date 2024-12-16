@@ -48,6 +48,7 @@ extern "C" {{export_declaration}}
         {{ template.codegen_single_thread_params(is_dynamic_M)|indent(8, false) }}
 {%- endif %}
         {{ micro_gemm.codegen_init(kernel) }}
+
 {%- set acc_buf_name_list=[] %}
 {%- set acc_buf_name_prefix = "local_acc_buf_" %}
 {%- for gemm_idx in range(0, gemm_group_num, 1) %}
@@ -55,6 +56,93 @@ extern "C" {{export_declaration}}
     {{ kernel.define_buffer(acc_buf_name, ["Mc_blocks*Mr", "Nc_blocks*Nr"], acc_buf_dtype) }}
     {%- set acc_buf_name_list=acc_buf_name_list.append(acc_buf_name) %}
 {%- endfor %}
+
+    if (horizontal_transverse) {
+        for (int64_t nc = n_block_start; nc < n_block_end; nc += Nc_blocks) {
+            {{ template.codegen_n_loop_params()|indent(12, false) }}
+            for (int64_t mc_block_id = 0; mc_block_id < num_Mc_blocks_per_thread; mc_block_id++) {
+                {{ template.codegen_m_loop_params()|indent(16, false) }}
+{%- set acc_list=[] %}
+{%- for gemm_idx in range(0, gemm_group_num, 1) %}
+    {%- set acc_list = acc_list.append( kernel.local_buffers[acc_buf_name_list[gemm_idx]] ) %}
+    {{ kernel.reinit_buffer_if_null(acc_buf_name_list[gemm_idx]) }}
+{%- endfor %}
+                for (int64_t kc = k_block_start; kc < k_block_end; kc += Kc_blocks) {
+                    int64_t k_start = kc * Kr;
+                    int64_t k_end = std::min(std::min(kc + Kc_blocks, k_block_end) * Kr, K);
+                    for (int64_t mci = m_start; mci < m_end; mci+=Mr) {
+                        const int64_t m_start_i = mci;
+                        const int64_t m_end_i = m_start_i + Mr;
+{%- set tile_X_list=[] %}
+{%- for gemm_idx in range(0, gemm_group_num, 1) %}
+    {%- set tile_X_list = tile_X_list.append( kernel.slice_nd(X_list[gemm_idx], [("m_start", "m_end"), ("k_start", "k_end")]) ) %}
+{%- endfor %}
+                        for (int64_t nci = nc; nci < nc_block_end; nci++) {
+
+{%- set tile_W_3d_list=[] %}
+{%- set tile_W_list=[] %}
+{%- set acc_slice_list=[] %}
+{%- for gemm_idx in range(0, gemm_group_num, 1) %}
+    {%- set acc_slice_list = acc_slice_list.append(
+        kernel.slice_nd(acc_list[gemm_idx], [("m_start_i - m_start", "m_end_i - m_start"), ("(nci - nc)*Nr", "(nci - nc + 1)*Nr")])
+    ) %}
+    {%- set tile_W_3d_list = tile_W_3d_list.append(
+        kernel.slice_nd(W_list[gemm_idx], [("nci", "nci + 1"), ("k_start", "k_end"), ()])
+    ) %}
+{%- endfor %}
+{%- for gemm_idx in range(0, gemm_group_num, 1) %}
+    {%- set tile_W_list = tile_W_list.append(
+        kernel.view(tile_W_3d_list[gemm_idx], ["k_end - k_start", micro_gemm.register_blocking.block_n])
+    ) %}
+{%- endfor %}
+                        if (kc == k_block_start) {
+                            {%- for gemm_idx in range(0, gemm_group_num, 1) %}
+                                {{ micro_gemm.codegen_call(
+                                    kernel,
+                                    tile_X_list[gemm_idx],
+                                    tile_W_list[gemm_idx],
+                                    acc_slice_list[gemm_idx],
+                                    accum=False,
+                                    horizontal_transverse=True
+                                )|indent(28, false) }}
+                            {%- endfor %}
+                        } else {
+                            {%- for gemm_idx in range(0, gemm_group_num, 1) %}
+                                {{ micro_gemm.codegen_call(
+                                    kernel,
+                                    tile_X_list[gemm_idx],
+                                    tile_W_list[gemm_idx],
+                                    acc_slice_list[gemm_idx],
+                                    accum=True,
+                                    horizontal_transverse=True
+                                )|indent(28, false) }}
+                            {%- endfor %}
+                        }
+                        }
+                    }
+                }
+
+                {
+{%- set tile_Y = kernel.slice_nd(Y_2d, [("m_start", "m_end"), ("n_start", "n_end")]) %}
+{%- set tile_acc_list = [] %}
+{%- for gemm_idx in range(0, gemm_group_num, 1) %}
+    {%- set tile_acc_list = tile_acc_list.append(
+        kernel.slice_nd(acc_list[gemm_idx], [("0", "m_end - m_start"), ("0", "n_end - n_start")])
+    ) %}
+{%- endfor %}
+                    {{ kernel.store_output(
+                        tile_Y,
+                        tile_acc_list,
+                        GemmOuts,
+                        epilogue_nodes,
+                        offsets=("m_start", "n_start"),
+                        reindexers=reindexers
+                    )|indent(20, false)
+                    }}
+                }
+            }
+        }
+    } else {
         for (int64_t mc_block_id = 0; mc_block_id < num_Mc_blocks_per_thread; mc_block_id++) {
             {{ template.codegen_m_loop_params()|indent(12, false) }}
             for (int64_t nc = n_block_start; nc < n_block_end; nc += Nc_blocks) {
@@ -91,13 +179,23 @@ extern "C" {{export_declaration}}
                         if (kc == k_block_start) {
                             {%- for gemm_idx in range(0, gemm_group_num, 1) %}
                                 {{ micro_gemm.codegen_call(
-                                    kernel, tile_X_list[gemm_idx], tile_W_list[gemm_idx], acc_slice_list[gemm_idx], accum=False
+                                    kernel,
+                                    tile_X_list[gemm_idx],
+                                    tile_W_list[gemm_idx],
+                                    acc_slice_list[gemm_idx],
+                                    accum=False,
+                                    horizontal_transverse=False
                                 )|indent(28, false) }}
                             {%- endfor %}
                         } else {
                             {%- for gemm_idx in range(0, gemm_group_num, 1) %}
                                 {{ micro_gemm.codegen_call(
-                                    kernel, tile_X_list[gemm_idx], tile_W_list[gemm_idx], acc_slice_list[gemm_idx], accum=True
+                                    kernel,
+                                    tile_X_list[gemm_idx],
+                                    tile_W_list[gemm_idx],
+                                    acc_slice_list[gemm_idx],
+                                    accum=True,
+                                    horizontal_transverse=False
                                 )|indent(28, false) }}
                             {%- endfor %}
                         }
@@ -127,6 +225,7 @@ extern "C" {{export_declaration}}
                 }
             }
         }
+    }
         {{ micro_gemm.codegen_finalize(kernel) }}
     }
 }
@@ -182,6 +281,7 @@ class CppGroupGemmTemplate(CppGemmTemplate):
             ir.Buffer(name="buf_out" + str(idx), layout=layout)
             for idx in range(gemm_group_num)
         ]
+        self.silu_mul_fusion = True
 
     @staticmethod
     def _fake_get_dtype(fake_outs):
