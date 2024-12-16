@@ -771,9 +771,10 @@ op_db: List[OpInfo] = [
         promotes_int_to_float=True,
         dtypes=all_types_and_complex_and(torch.float16, torch.bfloat16, torch.bool),
         skips=(
+            # For any non-floating point or complex dtypes we expect a failure
             DecorateInfo(
                 unittest.expectedFailure,
-                dtypes=(torch.bool,),
+                dtypes=(torch.bool, *integral_types()),
             ),
             DecorateInfo(
                 unittest.expectedFailure,
