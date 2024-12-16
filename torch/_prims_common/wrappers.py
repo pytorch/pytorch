@@ -314,12 +314,20 @@ def out_wrapper(
                 # harmless.
                 if is_tensor:
                     assert isinstance(out, TensorLike)
+                    # out.shape.numel() == 0 means there is a specific empty tensor for out,
+                    # it may come from some specific ops, like conj_physical, it needs two
+                    # operands, so it may allocate an empty tensor as out in some case, we
+                    # have to keep the stride of out align with result.
+                    is_empty = False
+                    if out.shape.numel() == 0 and out.stride() != result.stride():
+                        is_empty = True
+
                     # These two operations are done in-place
                     _maybe_resize_out(
                         out, result.shape, maybe_compute_memory_format(result)  # type: ignore[union-attr]
                     )
-                    if(out.stride() != result.stride()):
-                        out.as_strided_(size = result.shape, stride = result.stride())
+                    if is_empty:
+                        out.as_strided_(size=result.shape, stride=result.stride())
                     _safe_copy_out(copy_from=result, copy_to=out, exact_dtype=exact_dtype)  # type: ignore[arg-type]
                 else:
                     assert isinstance(out, Tuple)  # type: ignore[arg-type]
