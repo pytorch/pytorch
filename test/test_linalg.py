@@ -4967,7 +4967,8 @@ class TestLinalg(TestCase):
     @onlyCUDA
     @dtypes(torch.half)
     def test_minimum_tuning_iteration_tunableop(self, device, dtype):
-        # Make sure that there is at least one tuning iteration under various scenarios
+        # Make sure that there is at least one tuning iteration when the tuning duration
+        # is set to zero
 
         # Test in try-finally block to avoid leaking state
         # if test is interrupted.
