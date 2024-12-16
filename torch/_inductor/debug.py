@@ -22,6 +22,7 @@ from torch._dynamo.utils import get_debug_dir
 from torch.fx.graph_module import GraphModule
 from torch.fx.passes.shape_prop import _extract_tensor_metadata, TensorMetadata
 from torch.fx.passes.tools_common import legalize_graph
+from torch.utils._ordered_set import OrderedSet
 from torch.utils._pytree import tree_map
 
 from . import config, ir  # noqa: F811, this is needed
@@ -236,7 +237,7 @@ def get_node_name_to_buf_meta(
     buf_name_to_n_node = {}
     for node_name, buf_name in node_name_to_buf_name.items():
         if buf_name not in buf_name_to_n_node:
-            buf_name_to_n_node[buf_name] = {node_name}
+            buf_name_to_n_node[buf_name] = OrderedSet([node_name])
         else:
             buf_name_to_n_node[buf_name].add(node_name)
 
@@ -588,29 +589,29 @@ class DebugFormatter:
                     node_info["layout"] = str(static_layout)
                 else:
                     node_info["layout"] = str(layout)
-            except Exception as e:
+            except Exception:
                 pass
             try:
                 node_info["dtype"] = str(node.get_dtype())
-            except Exception as e:
+            except Exception:
                 pass
             try:
                 node_info["device"] = str(node.get_device())
-            except Exception as e:
+            except Exception:
                 pass
             try:
                 node_info["stride"] = str(
                     V.graph.sizevars.size_hints(node.get_stride())
                 )
-            except Exception as e:
+            except Exception:
                 pass
             try:
                 node_info["size"] = str(V.graph.sizevars.size_hints(node.get_size()))  # type: ignore[arg-type]
-            except Exception as e:
+            except Exception:
                 pass
             try:
                 node_info["numel"] = str(V.graph.sizevars.size_hint(node.get_numel()))
-            except Exception as e:
+            except Exception:
                 pass
             if hasattr(node, "data") and isinstance(node.data, ir.IRNode):
                 node_info["data"] = build_node_info(node.data)
