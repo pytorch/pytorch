@@ -16,6 +16,7 @@ from torch.testing._internal.common_utils import (
     TestCase,
 )
 
+
 _IS_SM9X = False
 if TEST_CUDA:
     _IS_SM9X = torch.cuda.get_device_capability(0)[0] == 9
