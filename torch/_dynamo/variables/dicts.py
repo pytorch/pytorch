@@ -89,7 +89,7 @@ class ConstDictVariable(VariableTracker):
                 Hashable = ConstDictVariable._HashableTracker
                 x = tuple(Hashable(e).underlying_value for e in self.vt.items)
             elif isinstance(self.vt, variables.NNModuleVariable):
-                return self.vt.module
+                return self.vt.value
             elif isinstance(self.vt, variables.UnspecializedNNModuleVariable):
                 return self.vt.value
             elif isinstance(self.vt, variables.UserFunctionVariable):
@@ -203,13 +203,21 @@ class ConstDictVariable(VariableTracker):
             ]
         )
 
-    def reconstruct(self, codegen):
-        def is_new_item(value, other):
-            # compare the id of the realized values if both values are not lazy VTs
-            if value and value.is_realized() and other.is_realized():
-                return id(value.realize()) != id(other.realize())
-            return id(value) != id(other)
+    def has_new_items(self):
+        if self.should_reconstruct_all:
+            return True
+        return any(
+            self.is_new_item(self.original_items.get(key.vt), value)
+            for key, value in self.items.items()
+        )
 
+    def is_new_item(self, value, other):
+        # compare the id of the realized values if both values are not lazy VTs
+        if value and value.is_realized() and other.is_realized():
+            return id(value.realize()) != id(other.realize())
+        return id(value) != id(other)
+
+    def reconstruct(self, codegen):
         # instructions to load collections.OrderedDict if necessary
         if self.user_cls is collections.OrderedDict:
             codegen.add_push_null(
@@ -225,7 +233,7 @@ class ConstDictVariable(VariableTracker):
         for key, value in self.items.items():
             # We can safely call realize() here as it won't introduce any new guards
             item = self.original_items.get(key.vt)
-            if is_new_item(item, value) or self.should_reconstruct_all:
+            if self.is_new_item(item, value) or self.should_reconstruct_all:
                 codegen(key.vt)
                 codegen(value)
                 num_args += 1
@@ -269,14 +277,7 @@ class ConstDictVariable(VariableTracker):
         args: "List[VariableTracker]",
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
-        from . import (
-            BuiltinVariable,
-            ConstantVariable,
-            ListIteratorVariable,
-            ListVariable,
-            TupleVariable,
-            UserDefinedObjectVariable,
-        )
+        from . import BuiltinVariable, ConstantVariable, TupleVariable
 
         Hashable = ConstDictVariable._HashableTracker
 
@@ -304,7 +305,9 @@ class ConstDictVariable(VariableTracker):
             return DictValues(self)
         elif name == "copy":
             assert not (args or kwargs)
-            return self.clone(items=self.items.copy(), mutation_type=ValueMutationNew())
+            return self.clone(
+                items=self.items.copy(), mutation_type=ValueMutationNew(), source=None
+            )
         elif name == "__len__":
             assert not (args or kwargs)
             return ConstantVariable.create(len(self.items))
@@ -334,33 +337,25 @@ class ConstDictVariable(VariableTracker):
             self.items.clear()
             return ConstantVariable.create(None)
         elif name == "update" and self.is_mutable():
-            is_args_supported = len(args) == 1 and isinstance(
-                args[0],
-                (
-                    ConstDictVariable,
-                    ListVariable,
-                    TupleVariable,
-                    ListIteratorVariable,
-                    variables.IteratorVariable,
-                    UserDefinedObjectVariable,
-                ),
-            )
-
-            is_kwargs_supported = len(kwargs) > 0 and len(args) == 0
-
-            if is_args_supported or is_kwargs_supported:
+            # In general, this call looks like `a.update(b, x=1, y=2, ...)`.
+            # Either `b` or the kwargs is omittable, but not both.
+            has_arg = len(args) == 1
+            has_kwargs = len(kwargs) > 0
+            if has_arg or has_kwargs:
                 tx.output.side_effects.mutation(self)
-                if len(args) == 1:
+                if has_arg:
                     if isinstance(args[0], ConstDictVariable):
                         dict_vt = args[0]
                     else:
                         dict_vt = BuiltinVariable.call_custom_dict(tx, dict, args[0])
                     self.items.update(dict_vt.items)
-                # Wrap strings
-                kwargs = {
-                    Hashable(ConstantVariable.create(k)): v for k, v in kwargs.items()
-                }
-                self.items.update(kwargs)
+                if has_kwargs:
+                    # Handle kwargs
+                    kwargs = {
+                        Hashable(ConstantVariable.create(k)): v
+                        for k, v in kwargs.items()
+                    }
+                    self.items.update(kwargs)
                 return ConstantVariable.create(None)
             else:
                 return super().call_method(tx, name, args, kwargs)
@@ -497,8 +492,6 @@ class SetVariable(ConstDictVariable):
         args: List[VariableTracker],
         kwargs: Dict[str, VariableTracker],
     ) -> "VariableTracker":
-        from . import ListVariable, TupleVariable
-
         # We foward the calls to the dictionary model
         if name == "add":
             assert not kwargs
@@ -536,24 +529,12 @@ class SetVariable(ConstDictVariable):
             return variables.UserFunctionVariable(
                 polyfills.set_difference
             ).call_function(tx, [self, args[0]], {})
-        elif (
-            name == "update"
-            and len(args) == 1
-            and isinstance(
-                args[0],
-                (
-                    SetVariable,
-                    ListVariable,
-                    TupleVariable,
-                ),
+        elif name == "update" and len(args) == 1 and self.is_mutable():
+            assert not kwargs
+            assert len(args) == 1
+            return variables.UserFunctionVariable(polyfills.set_update).call_function(
+                tx, [self, args[0]], {}
             )
-            and self.is_mutable()
-        ):
-            if isinstance(args[0], (ListVariable, TupleVariable)):
-                arg = SetVariable(args[0].unpack_var_sequence(tx))
-            else:
-                arg = args[0]
-            return super().call_method(tx, "update", (arg,), kwargs)
         elif name == "remove":
             assert not kwargs
             assert len(args) == 1
@@ -849,7 +830,7 @@ class CustomizedDictVariable(ConstDictVariable):
                 if val is not None:
                     key = ConstantVariable.create(key)
                     items[key] = var
-        return cls(items, user_cls)
+        return cls(items, user_cls, source=builder.source)
 
     def __init__(self, items, user_cls, **options) -> None:
         super().__init__(items, user_cls, **options)
@@ -880,7 +861,7 @@ class CustomizedDictVariable(ConstDictVariable):
 
                 codegen.add_push_null(gen_fn2)
 
-            codegen.extend_output([codegen._create_load_const(self.user_cls)])
+            codegen.extend_output([codegen.create_load_const_unchecked(self.user_cls)])
 
             if is_hf_model_output:
                 # Wrap user_cls with disable
@@ -944,7 +925,8 @@ class CustomizedDictVariable(ConstDictVariable):
 
 @functools.lru_cache(None)
 def _install_PretrainedConfig_patch():
-    import transformers
+    mod = sys.modules.get("transformers.configuration_utils")
+    assert mod is not None, "Caller is responsible for ensuring this was imported"
 
     # We need to monkeypatch transformers here, sadly.
     # TODO(voz): Upstream to transformers lib
@@ -954,9 +936,7 @@ def _install_PretrainedConfig_patch():
             return False
         return self.__dict__ == other.__dict__
 
-    transformers.configuration_utils.PretrainedConfig.__eq__ = (
-        _dynamo_overriden_transformers_eq
-    )
+    mod.PretrainedConfig.__eq__ = _dynamo_overriden_transformers_eq
 
 
 class HFPretrainedConfigVariable(VariableTracker):
@@ -1042,7 +1022,7 @@ class PythonSysModulesVariable(VariableTracker):
         return k, has_key
 
     def call_contains(self, tx: "InstructionTranslator", key: VariableTracker):
-        k, has_key = self._contains_helper(tx, key)
+        _k, has_key = self._contains_helper(tx, key)
         return ConstantVariable.create(value=has_key)
 
     def call_get(
@@ -1063,6 +1043,6 @@ class PythonSysModulesVariable(VariableTracker):
         return ConstantVariable.create(value=None)
 
     def call_getitem(self, tx: "InstructionTranslator", key: VariableTracker):
-        k, has_key = self._contains_helper(tx, key)
+        k, _has_key = self._contains_helper(tx, key)
         source = self.source and GetItemSource(self.source, k)
         return VariableTracker.build(tx, sys.modules[k], source)
