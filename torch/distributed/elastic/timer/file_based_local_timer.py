@@ -267,6 +267,8 @@ class FileTimerServer:
         self.register_timers(timer_requests)
         now = time.time()
         reaped_worker_pids = set()
+        kill_process = False
+        reap_signal = 0
 
         all_expired_timers = self.get_expired_timers(now)
         log_debug_info_for_expired_timers(
@@ -305,11 +307,20 @@ class FileTimerServer:
                     "Successfully reaped worker=[%s] with signal=%s", worker_pid, signal
                 )
                 self._log_event("kill worker process", expired_timer)
+                kill_process = True
+                reap_signal = signal
             else:
                 logger.error(
                     "Error reaping worker=[%s]. Will retry on next watchdog.",
                     worker_pid,
                 )
+        if kill_process and reap_signal > 0:
+            logger.info(
+                "Terminating the server process=[%s] because of expired timers",
+                os.getpid(),
+            )
+            self._reap_worker(os.getpid(), reap_signal)
+
         self.clear_timers(reaped_worker_pids)
 
     def _get_scopes(self, timer_requests: List[FileTimerRequest]) -> List[str]:
