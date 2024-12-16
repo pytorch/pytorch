@@ -297,11 +297,11 @@ class CppTemplateKernel(CppKernel):
 
     def store_group_gemm_pointwise_nodes(
         self,
-        dst: Tuple[ir.Buffer],
-        nodes: List[ir.IRNode],
-        offsets: List[sympy.Expr],
-        reindexers: List[Optional[Callable[[List[Any]], List[Any]]]],
-        output_names: List[str],
+        dst: tuple[ir.Buffer],
+        nodes: list[ir.IRNode],
+        offsets: list[sympy.Expr],
+        reindexers: list[Optional[Callable[[list[Any]], list[Any]]]],
+        output_names: list[str],
     ) -> str:
         assert isinstance(dst, Iterable)
         ref_dst = dst[0]
@@ -483,13 +483,13 @@ class CppTemplateKernel(CppKernel):
 
     def store_outputs(
         self,
-        dst: Tuple[ir.Buffer],
-        src: Tuple[ir.IRNode],
-        orig_src: Optional[Tuple[ir.IRNode]] = None,
-        epilogue_nodes: Optional[List[ir.IRNode]] = None,
-        offsets: Optional[List[Any]] = None,
-        reindexers: Optional[List[Optional[Callable[[List[Any]], List[Any]]]]] = None,
-        multi_output_buffers: Optional[Tuple[ir.MultiOutput]] = None,
+        dst: tuple[ir.Buffer],
+        src: tuple[ir.IRNode],
+        orig_src: Optional[tuple[ir.IRNode]] = None,
+        epilogue_nodes: Optional[list[ir.IRNode]] = None,
+        offsets: Optional[list[Any]] = None,
+        reindexers: Optional[list[Optional[Callable[[list[Any]], list[Any]]]]] = None,
+        multi_output_buffers: Optional[tuple[ir.MultiOutput]] = None,
     ):
         assert isinstance(dst, Iterable)
         assert all(_dst.get_size() == _src.get_size() for _src, _dst in zip(src, dst))
