@@ -11,6 +11,7 @@ import sympy
 
 import torch
 from torch._inductor.virtualized import V
+from torch.utils._ordered_set import OrderedSet
 from torch.utils._pytree import tree_map
 
 from .. import config
@@ -168,7 +169,7 @@ def build_subgraph_buffer(args: List[TensorBox], subgraph: Subgraph) -> Subgraph
     pw_subgraph = PointwiseSubgraphLowering(
         subgraph.graph_module,
         root_graph_lowering=V.graph,
-        allowed_mutations={torch.ops.flex_lib.zeros_and_scatter.default},
+        allowed_mutations=OrderedSet([torch.ops.flex_lib.zeros_and_scatter.default]),
         additional_lowerings={
             torch.ops.flex_lib.zeros_and_scatter.default: zeros_and_scatter_lowering
         },
@@ -630,10 +631,19 @@ flex_attention_template = TritonTemplate(
 
 
 def _use_flex_decoding(query, kernel_options):
-    # Decide which kernel to use, return true if use flex decoding kernel.
-    return (
-        not kernel_options.get("FORCE_USE_FLEX_ATTENTION", False)
-    ) and V.graph.sizevars.evaluate_expr(sympy.Lt(query.get_size()[-2], 128))
+    """Decide which kernel to use, return true if use flex decoding kernel.
+    Note:
+       Since the number of splits is calculated based of the the number of batch and head dims
+       we need to ensure that the batch and head dims are statically known. Otherwise we just
+       use the main flex_attention kernel.
+    """
+    force_flex = kernel_options.get("FORCE_USE_FLEX_DECODING", False)
+    short_query_length = V.graph.sizevars.evaluate_expr(
+        sympy.Lt(query.get_size()[-2], 128)
+    )
+    static_batch = isinstance(query.get_size()[0], (int, sympy.Integer))
+    static_num_heads = isinstance(query.get_size()[1], (int, sympy.Integer))
+    return not force_flex and short_query_length and static_batch and static_num_heads
 
 
 _h100_default_config = {
@@ -680,7 +690,7 @@ class Mode(Enum):
 
 def _get_rocm_config(query, mode: Mode) -> Tuple[int, int, int, int]:
     dtype = query.get_dtype()
-    head_dim = query.get_size()[-1]
+    head_dim = V.graph.sizevars.evaluate_static_shape(query.get_size()[-1])
     fwd_config = None
 
     if mode == Mode.fwd:
@@ -713,7 +723,7 @@ def _get_rocm_config(query, mode: Mode) -> Tuple[int, int, int, int]:
 
 def _get_nv_config(query, mode: Mode) -> Tuple[int, int, int, int]:
     dtype = query.get_dtype()
-    head_dim = query.get_size()[-1]
+    head_dim = V.graph.sizevars.evaluate_static_shape(query.get_size()[-1])
     fwd_config = None
 
     capability = torch.cuda.get_device_capability()
@@ -930,7 +940,7 @@ def lower_cpu(
         ]
     )
 
-    if len({query.get_name(), key.get_name(), value.get_name()}) != 3:
+    if len(OrderedSet([query.get_name(), key.get_name(), value.get_name()])) != 3:
         raise NotImplementedError(
             "Unsupported for now if query, key, value are the same buffer."
         )
@@ -1156,7 +1166,7 @@ def flex_attention(
 
     # Construct output layout with strides matching the query.
     out_size = [B, Hq, seq_len_q, v_head_dim]
-    fill_order = get_fill_order(query.get_stride())
+    fill_order = get_fill_order(query.get_stride(), V.graph.sizevars.shape_env)
     out_strides = construct_strides(out_size, fill_order)
 
     layout = FixedLayout(
@@ -1187,8 +1197,13 @@ def flex_attention(
         full_kv_num_blocks, full_kv_indices = (
             empty(0, device=query.get_device()) for _ in range(2)
         )
-    kernel_options.setdefault("QK_HEAD_DIM", qk_head_dim)
-    kernel_options.setdefault("V_HEAD_DIM", v_head_dim)
+    kernel_options.setdefault(
+        "QK_HEAD_DIM",
+        V.graph.sizevars.evaluate_static_shape(qk_head_dim),
+    )
+    kernel_options.setdefault(
+        "V_HEAD_DIM", V.graph.sizevars.evaluate_static_shape(v_head_dim)
+    )
 
     choices: List[Any] = []
     configs: List[Tuple[int, int, int, int]] = []
@@ -1772,6 +1787,21 @@ def bwd_dq_block_mn(
     if CHECK_BLOCK_BOUNDARY:
         grad_scores = tl.where(offs_n2[None, :] < KV_LEN, grad_scores, 0.0)
 
+    # ~~~~~~~~~~~~~~~~~~~ Apply other buffer grad writes ~~~~~~~~~~~~~
+    if WRITE_DQ:
+        scatter_mask = offs_m2[:, None] < Q_LEN and offs_n2[None, :] < KV_LEN
+        {{ modification(
+            subgraph_number=3,
+            output_name=None,
+            mask="scatter_mask",
+            score="pre_mod_scores",
+            b="off_z",
+            h="off_hq",
+            m="m",
+            n="n",
+            grad_score_mod="ds"
+        ) | indent_except_first(2) }}
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     ds = grad_scores
 
     if not IS_FULL_BLOCKS:
@@ -1960,22 +1990,23 @@ def bwd_dkdv_block_mn(
     ) | indent_except_first(1) }}
 
     # ~~~~~~~~~~~~~~~~~~~ Apply other buffer grad writes ~~~~~~~~~~~~~
-    idx_b = off_z
-    idx_h = off_hq
-    idx_m = m
-    idx_n = n
-    scatter_mask = offs_m1[None, :] < Q_LEN and offs_n1[:, None] < KV_LEN
-    {{ modification(
-        subgraph_number=3,
-        output_name=None,
-        mask="scatter_mask",
-        score="pre_mod_scores",
-        b="idx_b",
-        h="idx_h",
-        m="idx_m",
-        n="idx_n",
-        grad_score_mod="dsT"
-    ) | indent_except_first(1) }}
+    if not WRITE_DQ:
+        idx_b = off_z
+        idx_h = off_hq
+        idx_m = m
+        idx_n = n
+        scatter_mask = offs_m1[None, :] < Q_LEN and offs_n1[:, None] < KV_LEN
+        {{ modification(
+            subgraph_number=3,
+            output_name=None,
+            mask="scatter_mask",
+            score="pre_mod_scores",
+            b="idx_b",
+            h="idx_h",
+            m="idx_m",
+            n="idx_n",
+            grad_score_mod="dsT"
+        ) | indent_except_first(2) }}
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
     if CHECK_BLOCK_BOUNDARY:
@@ -2148,7 +2179,6 @@ def flex_attention_backward(*args, **kwargs):
     assert V.graph.sizevars.evaluate_expr(
         sympy.Eq(Bq, Bkv) | sympy.Eq(Bkv, 1)
     ), f"Bq and Bkv must broadcastable. Got Bq={Bq} and Bkv={Bkv}"
-    B = Bq
 
     kernel_options = dict(kernel_options)
     kernel_options.setdefault("FLOAT32_PRECISION", get_float32_precision())
@@ -2246,8 +2276,15 @@ def flex_attention_backward(*args, **kwargs):
         full_kv_num_blocks, full_kv_indices, full_q_num_blocks, full_q_indices = (
             empty(0, device=query.get_device()) for _ in range(4)
         )
-    kernel_options.setdefault("QK_HEAD_DIM", qk_head_dim)
-    kernel_options.setdefault("V_HEAD_DIM", v_head_dim)
+    kernel_options.setdefault(
+        "QK_HEAD_DIM", V.graph.sizevars.evaluate_static_shape(qk_head_dim)
+    )
+    kernel_options.setdefault(
+        "V_HEAD_DIM", V.graph.sizevars.evaluate_static_shape(v_head_dim)
+    )
+
+    SPARSE_Q_BLOCK_SIZE = V.graph.sizevars.evaluate_static_shape(SPARSE_Q_BLOCK_SIZE)
+    SPARSE_KV_BLOCK_SIZE = V.graph.sizevars.evaluate_static_shape(SPARSE_KV_BLOCK_SIZE)
 
     choices: List[Any] = []
     configs: List[Tuple[int, int, int, int]] = []
