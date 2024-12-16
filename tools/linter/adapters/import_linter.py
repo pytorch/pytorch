@@ -321,6 +321,7 @@ _MODULE_NAME_ALLOW_LIST.update(
         "torch_xla",
         "_pytest",
         "functorch",
+        "einops",
         "the",
         "libfb",
         "typing_extensions",
