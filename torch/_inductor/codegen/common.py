@@ -20,11 +20,12 @@ from typing import (
     List,
     NamedTuple,
     Optional,
-    Set,
     Tuple,
     TYPE_CHECKING,
     Union,
 )
+
+from torch.utils._ordered_set import OrderedSet
 
 
 if TYPE_CHECKING:
@@ -37,7 +38,6 @@ import torch.fx
 from torch._inductor.dtype_propagation import DtypePropagationOpsHandler
 from torch._prims_common import ELEMENTWISE_TYPE_PROMOTION_KIND
 from torch.utils import _pytree as pytree
-from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.numbers import int_oo
 from torch.utils._sympy.printers import PythonPrinter as _PythonPrinter
 from torch.utils._sympy.symbol import free_symbol_is_type, symbol_is_type, SymT
@@ -809,7 +809,7 @@ class OpOverrides(OpDecompositions):
 
     @classmethod
     def _initialize_pointwise_overrides(cls, target):
-        assert target in {"triton", "cpp", "cppvec"}, target
+        assert target in ("triton", "cpp", "cppvec"), target
 
         for funcname, data in pointwise_overrides_data.items():
             impl = getattr(data, target)
@@ -1465,10 +1465,10 @@ class CSE:
         self.store_cache = store_cache or {}
         self.reduction_cache = reduction_cache or {}
         self.iter_buffer_ids = iter_buffers or itertools.count()
-        self.invalidated_stores = OrderedSet()  # type: ignore[var-annotated]
+        self.invalidated_stores = OrderedSet[str]()
         self.varname_map = varname_map or {}
 
-    def invalidate(self, keep_vars: Union[OrderedSet[str], Set[Never]]):
+    def invalidate(self, keep_vars: Union[OrderedSet[str], OrderedSet[Never]]):
         for name, tmp in list(self.store_cache.items()):
             if tmp not in keep_vars:
                 del self.store_cache[name]
@@ -1641,16 +1641,16 @@ class Kernel(CodeGen):
         self.num_reduction = 0
 
         self.cse: CSE = CSE(self.newvar_prefix, self.suffix)
-        self.must_keep_buffers = OrderedSet()  # type: ignore[var-annotated]
-        self.store_buffer_names = OrderedSet()  # type: ignore[var-annotated]
+        self.must_keep_buffers = OrderedSet[str]()
+        self.store_buffer_names = OrderedSet[str]()
         self._load_mask = None
         self._load_other = None
         # OrderedSet in set_current_node
         self.current_node = None
         self.node_to_bounds: Optional[Dict[torch.fx.Node, ValueRanges[Any]]] = None
 
-        self.removed_buffers = OrderedSet()  # type: ignore[var-annotated]
-        self.inplaced_to_remove = OrderedSet()  # type: ignore[var-annotated]
+        self.removed_buffers = OrderedSet[str]()
+        self.inplaced_to_remove = OrderedSet[str]()
 
         # key: the buffer to write
         # value: the buffer to read and whose memory can be reused for
@@ -2163,7 +2163,7 @@ class Kernel(CodeGen):
             for buf in self.store_buffer_names
             if buf in scheduler.name_to_buf
         )
-        names_to_remove: OrderedSet[str] = OrderedSet()
+        names_to_remove = OrderedSet[str]()
         for name in self.store_buffer_names:
             if (
                 name not in self.must_keep_buffers

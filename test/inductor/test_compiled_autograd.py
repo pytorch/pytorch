@@ -2425,7 +2425,9 @@ TORCH_LIBRARY(test_autograd_cpp_node_saved_float, m) {
                 yield x.grad
 
         # compiled autograd and dynamo both support symfloat, but not backend
-        self.check_output_and_recompiles(fn, [1, 3])
+        self.check_output_and_recompiles(fn, [1, 4])
+        # 1 restart analysis due to specialize_float=False
+        self.assertEqual(counters["stats"]["unique_graphs"], 3)
 
     @scoped_load_inline
     def test_autograd_cpp_node_data_dependent(self, load_inline):
