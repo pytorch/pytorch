@@ -13,6 +13,8 @@ from typing import (
 
 import sympy
 
+from torch.utils._ordered_set import OrderedSet
+
 
 if TYPE_CHECKING:
     from torch._inductor.loop_body import LoopBodyBlock
@@ -49,7 +51,7 @@ def get_promoted_dtype(
 ):
     def construct_input(inp):
         if inp[1]:
-            return torch.empty(1, dtype=inp[0])
+            return torch.empty([], dtype=inp[0])
         else:
             return torch.empty([1], dtype=inp[0])
 
@@ -89,7 +91,7 @@ def promote_types(
             dtype_prop_candidates.append((type_to_dtype(type(arg)), True))
             continue
 
-        dtype_prop_candidates.append((arg.dtype, False))
+        dtype_prop_candidates.append((arg.dtype, getattr(arg, "is_scalar", False)))
 
     dtype = get_promoted_dtype(
         *dtype_prop_candidates,
@@ -145,8 +147,8 @@ class DtypePropagationOpsHandler:
 
         from torch._inductor.ops_handler import OpsHandler
 
-        ops_set = {s for s in dir(OpsHandler) if s[0] != "_"}
-        unimplemented_ops = ops_set - set(dir(self))
+        ops_set = OrderedSet(s for s in dir(OpsHandler) if s[0] != "_")
+        unimplemented_ops = ops_set - OrderedSet(dir(self))
         torch._check(
             len(unimplemented_ops) == 0,
             lambda: f"Unimplemented dtype rule for ops: {unimplemented_ops}",
