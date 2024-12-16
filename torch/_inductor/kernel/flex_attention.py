@@ -760,7 +760,7 @@ def _get_nv_config(query, mode: Mode) -> Tuple[int, int, int, int]:
             if head_dim == 64:
                 return (32, 128, 4, 3)
             elif head_dim == 128:
-                return (64, 128, 4, 3)
+                return (64, 64, 4, 3)
             else:
                 return (64, 64, 4, 2)
         else:  # modest hardware or extremely large head_dim
@@ -2296,7 +2296,7 @@ def flex_attention_backward(*args, **kwargs):
                 (BLOCK1, BLOCK2, w, s)
                 for BLOCK1 in [32, 64]
                 for BLOCK2 in [32, 64, 128]
-                for w in ([4, 8] if BLOCK1 >= 128 or BLOCK2 >= 128 else [4])
+                for w in ([4, 8] if BLOCK1 >= 128 or BLOCK2 >= 128 else [4, 8])
                 for s in num_stages_list
                 if BLOCK2 % BLOCK1 == 0
             ]
