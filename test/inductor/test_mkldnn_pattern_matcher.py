@@ -923,6 +923,9 @@ class TestPatternMatcher(TestPatternMatcherBase):
             )
             self.assertEqual(metrics.generated_kernel_count, 1 if not acl_bf16 else 2)
 
+    @skipIfNoDynamoSupport
+    @skipIfNoONEDNN
+    @skipIfRocm
     def test_conv2d_linear_add_broadcast_shapes_cpu(self):
         class M(torch.nn.Module):
             def __init__(self):
@@ -939,8 +942,10 @@ class TestPatternMatcher(TestPatternMatcherBase):
         x2 = torch.randn(2, 3)
 
         def matcher_check_fn():
+            match_nodes = 0 if TEST_ACL else 2
             self.assertEqual(
-                counters["inductor"]["mkldnn_conv_binary_unary_fusion_matcher_nodes"], 2
+                counters["inductor"]["mkldnn_conv_binary_unary_fusion_matcher_nodes"],
+                match_nodes,
             )
             self.assertEqual(
                 counters["inductor"]["mkldnn_conv_weight_pack_matcher_nodes"], 1
