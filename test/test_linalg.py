@@ -4970,66 +4970,60 @@ class TestLinalg(TestCase):
         # Make sure that there is at least one tuning iteration when the tuning duration
         # is set to zero
 
-        # Test in try-finally block to avoid leaking state
-        # if test is interrupted.
+        set_tunableop_defaults()
+        torch.cuda.tunable.enable()
+
+        # Set tuning duration to zero milliseconds
+        # Tune a single GEMM and verify that we get a new tuning result
+        import os
+        os.environ["PYTORCH_TUNABLEOP_MAX_TUNING_DURATION_MS"] = "0"
+        self.assertGreater(torch.cuda.tunable.get_max_tuning_iterations(), 0)
+        os.environ["PYTORCH_TUNABLEOP_MAX_TUNING_DURATION_MS"] = "30"  # reset to default
+
+        # Reference number of results
+        ref_num_results = len(torch.cuda.tunable.get_results())
+
+        N = M = K = 8
+        A = torch.randn(N, K, device=device, dtype=dtype)
+        B = torch.randn(K, M, device=device, dtype=dtype)
+        C = torch.matmul(A, B)
+
+        # This stores total number of cummulative results
+        total_num_results = len(torch.cuda.tunable.get_results())
+
+        # There must be a new tuning result
+        self.assertEqual((total_num_results - ref_num_results), 1)
+
+        # Set tuning iterations to zero
+        # Tune a single GEMM and verify that we get a new tuning result
+        os.environ["PYTORCH_TUNABLEOP_MAX_TUNING_ITERATIONS"] = "0"
+        self.assertGreater(torch.cuda.tunable.get_max_tuning_iterations(), 0)
+        os.environ["PYTORCH_TUNABLEOP_MAX_TUNING_ITERATIONS"] = "100"  # reset to default
+
+        # Reference number of results
+        ref_num_results = total_num_results
+
+        N = M = K = 16
+        A = torch.randn(N, K, device=device, dtype=dtype)
+        B = torch.randn(K, M, device=device, dtype=dtype)
+        C = torch.matmul(A, B)
+
+        # This stores total number of cummulative results
+        total_num_results = len(torch.cuda.tunable.get_results())
+
+        # There must be a new tuning result
+        self.assertEqual((total_num_results - ref_num_results), 1)
+
+        # disable TunableOp
+        torch.cuda.tunable.enable(False)
+
+        # clean up, remove any file that was generated
         try:
-            set_tunableop_defaults()
-            torch.cuda.tunable.enable()
-            # set these to single iterations to keep it short but still exercise the code
-            torch.cuda.tunable.set_max_tuning_iterations(1)
-
-            # Set tuning duration to zero milliseconds
-            # Tune a single GEMM and verify that we get a new tuning result
             import os
-            os.environ["PYTORCH_TUNABLEOP_MAX_TUNING_DURATION_MS"] = "0"
-            self.assertGreater(torch.cuda.tunable.get_max_tuning_iterations(), 0)
-            os.environ["PYTORCH_TUNABLEOP_MAX_TUNING_DURATION_MS"] = "30"  # reset to default
-
-            # Reference number of results
-            ref_num_results = len(torch.cuda.tunable.get_results())
-
-            N = M = K = 8
-            A = torch.randn(N, K, device=device, dtype=dtype)
-            B = torch.randn(K, M, device=device, dtype=dtype)
-            C = torch.matmul(A, B)
-
-            # This stores total number of cummulative results
-            total_num_results = len(torch.cuda.tunable.get_results())
-
-            # There must be a new tuning result
-            self.assertEqual((total_num_results - ref_num_results), 1)
-
-            # Set tuning iterations to zero
-            # Tune a single GEMM and verify that we get a new tuning result
-            os.environ["PYTORCH_TUNABLEOP_MAX_TUNING_ITERATIONS"] = "0"
-            self.assertGreater(torch.cuda.tunable.get_max_tuning_iterations(), 0)
-            os.environ["PYTORCH_TUNABLEOP_MAX_TUNING_ITERATIONS"] = "100"  # reset to default
-
-            # Reference number of results
-            ref_num_results = total_num_results
-
-            N = M = K = 16
-            A = torch.randn(N, K, device=device, dtype=dtype)
-            B = torch.randn(K, M, device=device, dtype=dtype)
-            C = torch.matmul(A, B)
-
-            # This stores total number of cummulative results
-            total_num_results = len(torch.cuda.tunable.get_results())
-
-            # There must be a new tuning result
-            self.assertEqual((total_num_results - ref_num_results), 1)
-
-        finally:
-            # disable TunableOp
-            torch.cuda.tunable.enable(False)
-
-            # clean up, remove any file that was generated
-            try:
-                import os
-                filename = torch.cuda.tunable.get_filename()
-                os.remove(filename)
-            except FileNotFoundError:
-                pass
+            filename = torch.cuda.tunable.get_filename()
+            os.remove(filename)
+        except FileNotFoundError:
+            pass
 
     @onlyCUDA
     @dtypes(torch.half)
