@@ -1,5 +1,5 @@
 #!/bin/bash
-set -ex
+set -ex -o pipefail
 
 SCRIPT_PARENT_DIR=$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )
 # shellcheck source=./common.sh
@@ -41,7 +41,7 @@ python -m pip install pytest-rerunfailures==10.3 pytest-cpp==2.3.0 tensorboard==
 python -m pip install z3-solver==4.12.2.0
 
 # Install tlparse for test\dynamo\test_structured_trace.py UTs.
-python -m pip install tlparse==0.3.25
+python -m pip install tlparse==0.3.30
 
 # Install parameterized
 python -m pip install parameterized==0.8.1
