@@ -5026,44 +5026,42 @@ class TestLinalg(TestCase):
         # Tune a couple of matrix multiplies
         # Verify we get the correct number of results
 
+        set_tunableop_defaults()
+        torch.cuda.tunable.enable()
+        # set these to single iterations to keep it short but still exercise the code
+        torch.cuda.tunable.set_max_tuning_iterations(1)
+
+        # Reference number of results
+        ref_num_results = len(torch.cuda.tunable.get_results())
+
+        # Execute matrix multiplies. We intentionally throw in M list the same index
+        # twice. The CSV file should only get unique GEMMs
+        count_matmul = 4
+        K = 64
+        for M in [32, 64, 32]:
+            for N in [32, 64]:
+                A = torch.randn(N, K, device=device, dtype=dtype)
+                B = torch.randn(K, M, device=device, dtype=dtype)
+                C = torch.matmul(A, B)
+
+        # This stores total number of cummulative results
+        total_num_results = len(torch.cuda.tunable.get_results())
+
+        # Take the difference to calculate the number of results from
+        # the this test and verify that it agrees with the number of
+        # GEMMs.
+        self.assertEqual((total_num_results - ref_num_results), count_matmul)
+
+        # disable TunableOp
+        torch.cuda.tunable.enable(False)
+
+        # clean up, remove any file that was generated
         try:
-            set_tunableop_defaults()
-            torch.cuda.tunable.enable()
-            # set these to single iterations to keep it short but still exercise the code
-            torch.cuda.tunable.set_max_tuning_iterations(1)
-
-            # Reference number of results
-            ref_num_results = len(torch.cuda.tunable.get_results())
-
-            # Execute matrix multiplies. We intentionally throw in M list the same index
-            # twice. The CSV file should only get unique GEMMs
-            count_matmul = 4
-            K = 64
-            for M in [32, 64, 32]:
-                for N in [32, 64]:
-                    A = torch.randn(N, K, device=device, dtype=dtype)
-                    B = torch.randn(K, M, device=device, dtype=dtype)
-                    C = torch.matmul(A, B)
-
-            # This stores total number of cummulative results
-            total_num_results = len(torch.cuda.tunable.get_results())
-
-            # Take the difference to calculate the number of results from
-            # the this test and verify that it agrees with the number of
-            # GEMMs.
-            self.assertEqual((total_num_results - ref_num_results), count_matmul)
-
-        finally:
-            # disable TunableOp
-            torch.cuda.tunable.enable(False)
-
-            # clean up, remove any file that was generated
-            try:
-                import os
-                filename = torch.cuda.tunable.get_filename()
-                os.remove(filename)
-            except FileNotFoundError:
-                pass
+            import os
+            filename = torch.cuda.tunable.get_filename()
+            os.remove(filename)
+        except FileNotFoundError:
+            pass
 
     @onlyCUDA
     @dtypes(torch.float)
