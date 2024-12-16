@@ -9,14 +9,6 @@
 
 namespace at::native::onednn {
 
-inline Tensor resize_as_onednn_mat1(const Tensor& mat1, const Tensor& output) {
-  auto output_ = output.flatten(0, -2);
-  int n = output_.sizes()[1];
-  auto sizes = mat1.sym_sizes().vec();
-  sizes[sizes.size() - 1] = n;
-  return output.view_symint(sizes);
-}
-
 sycl::event woq_matmul_int4(
     Tensor& result, //torchao: [M, K]
     const Tensor& mat1_, //torchao: [M, K]
@@ -33,15 +25,13 @@ sycl::event woq_matmul_int4(
       dims);
   TORCH_CHECK(result.defined(), "oneDNN matmul result should be defined");
 
-  at::Device curDevice = at::Device(at::kXPU, at::xpu::current_device());
-  auto engine = GpuEngineManager::Instance().get_engine(curDevice);
-  auto engine_index = curDevice.index();
+  at::Device cur_device = at::Device(at::kXPU, at::xpu::current_device());
+  auto engine = GpuEngineManager::Instance().get_engine(cur_device);
+  auto engine_index = cur_device.index();
   auto stream = GpuStreamManager::Instance().get_stream();
 
   // make them all contiguous
   Tensor m1 = is_onednn_matmul_strides(mat1_) ? mat1_ : mat1_.contiguous();
-  //m2_ may be a 4 dims fake tensor in torchAO with shape {N / 8, K / (16 * innerKTiles), 32, innerKTiles / 2}
-  //Tensor m2 = mat2_.flatten(0, -2); //ToDo: change to the fke shape: mat2_.flatten(0, -2); // N1
   Tensor m2 = is_onednn_matmul_strides(mat2_) ? mat2_ : mat2_.contiguous();
   Tensor scale_ = is_onednn_matmul_strides(scale) ? scale : scale.contiguous();
   Tensor zp_ = is_onednn_matmul_strides(zp) ? zp : zp.contiguous();
@@ -144,7 +134,6 @@ sycl::event woq_matmul_int4(
       handle_b);
 
   dnnl::primitive_attr pattr;
-  pattr.set_post_ops(po);
   pattr.set_scratchpad_mode(dnnl::scratchpad_mode::user);
 
   // Set scales with multiple scales along K dimension and with groups along  K.
@@ -166,7 +155,6 @@ sycl::event woq_matmul_int4(
   else if(m1_dt == dnnl::memory::data_type::bf16)
     pattr.set_fpmath_mode(dnnl::fpmath_mode::bf16, true);
 
-
   matmul_pd = dnnl::matmul::primitive_desc(
         engine, m1_md, m2_u4_m.get_desc(), dst_md, pattr);
   matmul_p = dnnl::matmul(matmul_pd);
@@ -182,9 +170,6 @@ sycl::event woq_matmul_int4(
   auto scratchpad_memory = make_onednn_memory(
       matmul_pd.scratchpad_desc(), engine, scratchpad_tensor.data_ptr());
   args.insert({DNNL_ARG_SCRATCHPAD, scratchpad_memory});
-
-  if (attr.with_binary())
-    attr.construct_post_binary(matmul_pd, args);
 
   args.insert({DNNL_ARG_SRC, m1_m});
   args.insert({DNNL_ARG_WEIGHTS, m2_u4_m});

@@ -1195,16 +1195,16 @@ class TestBasicGEMM(TestCase):
             b_uint8, scales, zeros = self._group_quantize_tensor(
                 b, n_bit=4, q_group_size=q_group
             )
-            # b_int4pack [n, k//8]
+            # b_int4pack [k//8, n]
             b_int4pack = torch._convert_weight_to_int4pack(
                 b_uint8, inner_k_tiles
             )
 
             return b_int4pack, scales, zeros
 
-        def weight_int4pack_mm(a, b_int4pack, b_scales_and_zeros):
-            return torch._weight_int4pack_mm(
-                a, b_int4pack, q_group, b_scales_and_zeros
+        def weight_int4pack_mm(a, b_int4pack, qscale, qzeros):
+            return torch._weight_int4_pack_mm(
+                a, b_int4pack, q_group, qscale, qzeros
             )
 
         b_int4pack, b_scales, zeros_int8 = convert_weight_to_int4pack(b_bf16)
@@ -1213,14 +1213,12 @@ class TestBasicGEMM(TestCase):
             a = a_bf16.to(dtype=dtype)
             b = b_bf16.to(dtype=dtype)
             b_scales = b_scales.to(dtype=dtype)
-            # b_scales_and_zeros = b_scales_and_zeros_bf16.to(dtype=dtype)
             ref = torch.mm(a, b)
 
             # A[M, K]  # B[N, K]
             res = weight_int4pack_mm(a, b_int4pack, b_scales, zeros_int8)
 
             mean_err = ((res - ref).abs() / ref).mean()
-            print("mean error:", mean_err)
             self.assertTrue(mean_err < 0.05)
 
 
