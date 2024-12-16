@@ -222,6 +222,7 @@ class BaseSchedulerNode:
         buf.splice(
             f"""\
 {name}: {type(self).__name__}({type(getattr(self, 'node', None)).__name__})
+id({name}): {id(self)}
 {name}.writes = {pformat(self.read_writes.writes)}
 {name}.unmet_dependencies = {pformat(self.unmet_dependencies)}
 {name}.met_dependencies = {pformat(self.read_writes.reads - self.unmet_dependencies)}
@@ -1894,6 +1895,8 @@ class Scheduler:
             reduce_scatter_bucket_cap_mb=100,
             scheduler=self,
         )
+        for node in self.nodes:
+            log.warn(f"snode: {node}, snode.debug_str(): {node.debug_str()}")
         if config.reorder_for_compute_comm_overlap:
             self.nodes = comms.reorder_compute_and_comm_for_overlap(self.nodes)
         self.process_grouped_nodes()

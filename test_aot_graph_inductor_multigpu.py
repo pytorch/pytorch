@@ -50,7 +50,7 @@ def export_memory_snapshot(filepath_prefix) -> None:
 
 
 def create_example_inputs(device, times=10, repeat=10):
-    with open(os.path.join(os.path.dirname(__file__), 'aot_forward_graph_inputs.txt'), 'r') as file:
+    with open(os.path.join(os.path.dirname(__file__), 'aot_backward_graph_inputs.txt'), 'r') as file:
         graph_inputs_str = file.read()
     
     global_dict = {
@@ -83,7 +83,7 @@ if __name__ == "__main__":
     # NOTE: you usually find the FX graph from this Inductor generated code file's corresponding
     # aot_forward / aot_backward / aot_inference graph (you can find it in tlparse)
     with open(
-        os.path.join(os.path.dirname(__file__), "aot_forward_graph.txt"), "r"
+        os.path.join(os.path.dirname(__file__), "aot_backward_graph.txt"), "r"
     ) as file:
         module_string = file.read()
 
@@ -157,6 +157,8 @@ if __name__ == "__main__":
         "allow_buffer_reuse": False,
         "force_disable_caches": True,
         "reorder_for_locality": False,
+        "shape_padding": False,
+        "comprehensive_padding": False,
         "reorder_for_compute_comm_overlap": True,
         "reorder_for_peak_memory": True,
     }

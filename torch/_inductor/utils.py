@@ -1741,7 +1741,10 @@ def is_collective(node, op=None):
     return (
         type(node) == ir._CollectiveKernel and (op is None or node.op_overload is op)
     ) or (
-        type(node) == ir.FallbackKernel and "c10d_functional" in str(node.op_overload) and "wait_tensor" not in str(node.op_overload)
+        type(node) == ir.FallbackKernel and (
+            (op is None and "c10d_functional" in str(node.op_overload) and "wait_tensor" not in str(node.op_overload))
+            or node.op_overload is op
+        )
     )
 
 
