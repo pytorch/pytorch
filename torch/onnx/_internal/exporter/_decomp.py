@@ -70,6 +70,10 @@ def create_onnx_friendly_decomposition_table(
         # If it is HOP, we filter those out as well.
         if not hasattr(op_overload, "_schema"):
             continue
+        # NOTE: torch._decomp.decomposition_table covers more ops
+        # than torch.export.default_decompositions, but the latter is
+        # more critical to torch.onnx.export.
+        if op_overload in decomposition_table:
+            continue
         decomposition_table[op_overload] = decomp_fn
-
     return decomposition_table
