@@ -900,9 +900,6 @@ class SwapSavedVariables {
   StashedVars<at::IValue> stashed_ivalues;
 };
 
-template <class T>
-struct dependent_false : std::false_type {};
-
 // NOTE: [Compiled Autograd and backward functions]
 // Built-in autograd nodes have functional apply variants
 // (e.g. MulBackward0_apply_functional). Compiled Autograd's initial graph
@@ -981,7 +978,8 @@ struct IValuePacker {
       // define how to pack and unpack an object of this time into an IValue
       // by creating a specialization of IValuePacker for this type.
       // See NOTE: [Compiled Autograd and backward functions] for context.
-      static_assert(dependent_false<T>::value);
+      TORCH_INTERNAL_ASSERT(false, "IValuePacker not implemented for type");
+      return at::NoneType::get();
     }
   }
 };
