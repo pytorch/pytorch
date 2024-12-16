@@ -107,11 +107,7 @@ class CppBmmTemplate(CppGemmTemplate):
             name=name,
         )
         b = layout.size[0]
-        self.is_dynamic_B = has_free_symbols((b,))
-        if self.is_dynamic_B:
-            self.b_index = b.free_symbols.pop()
-        else:
-            self.b_index = sympy.Symbol("s_b_index", integer=True, nonnegative=True)
+        self.b_index = sympy.Symbol("s_b_index", integer=True, nonnegative=True)
 
     @staticmethod
     def get_padded_size(n, block_n, k, should_block_weight):
@@ -186,6 +182,8 @@ class CppBmmTemplate(CppGemmTemplate):
         )
 
         BX, BW, BY = options["X"], options["W"], options["Y"]
+        # Create the BMM size_vars in the kernel
+        kernel.size(BY, 0)
         options["BX"], options["BW"], options["BY"] = BX, BW, BY
         options["BY_2d"] = options["Y_2d"]
         for kword in ["X", "W", "Y", "GemmOut", "Y_2d"]:
@@ -229,8 +227,7 @@ class CppBmmTemplate(CppGemmTemplate):
             result = PartialRender(result, sub_mm_hooks).finalize_all()
             for name in sub_mm_hooks:
                 del kernel.render_hooks[name]
-            if not self.is_dynamic_B:
-                del kernel.args.sizevars[options["b_index"]]
+            del kernel.args.sizevars[options["b_index"]]
             return result
 
     def codegen_single_thread_gemm(self):
