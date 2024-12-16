@@ -133,6 +133,13 @@ struct TORCH_API Argument {
           "' to be of type 'Tensor' ",
           "because it was not annotated with an explicit type.\n");
     }
+
+    std::string symint_hint;
+    if (type()->repr_str() == "List[int]" && actual_type == "immutable_list") {
+        symint_hint = "\nHint: When using torch.compile(), consider using SymInt[] "
+                     "instead of int[] in your schema if you need to handle symbolic shapes.\n";
+    }
+
     return c10::str(
         "Expected a value of type '",
         type()->repr_str(),
@@ -141,7 +148,8 @@ struct TORCH_API Argument {
         "' but instead found type '",
         actual_type,
         "'.\n",
-        inferred_type_hint);
+        inferred_type_hint,
+        symint_hint);
   }
 
   Argument cloneWithType(const TypePtr& new_type) const {
