@@ -1654,7 +1654,8 @@ void launch_jitted_pwise_function(
     kBlockSize.z,
     smem,
     stream,
-    args,
+    // NOLINTNEXTLINE(*const-cast*)
+    const_cast<void**>(args),
     nullptr));
 }
 

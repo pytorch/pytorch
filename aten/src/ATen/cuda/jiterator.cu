@@ -13,7 +13,7 @@ namespace native {
 
 static inline void launch_jitted_vectorized_kernel_dynamic(
   const std::string& name, TensorIteratorBase& iter,
-  DeviceIndex dev_idx, int64_t N, const std::string& f, void* data_ptr,
+  DeviceIndex dev_idx, int64_t N, const std::string& f, const void* data_ptr,
   const c10::SmallVector<at::Scalar>& extra_args, bool return_by_ref) {
   TORCH_INTERNAL_ASSERT(N > 0 && N <= std::numeric_limits<int32_t>::max());
   // N is still int64_t for the computation, but it's always safe to cast result to int
@@ -76,9 +76,9 @@ static inline void launch_jitted_vectorized_kernel_dynamic(
     // pack args for kernel launch
     constexpr int kernel_args = 3;
     auto args = std::make_unique<const void*[]>(kernel_args + extra_args_size);
-    args[0] = static_cast<void*>(&N);
+    args[0] = &N;
     args[1] = data_ptr;
-    args[2] = static_cast<void*>(&scalar_val);
+    args[2] = &scalar_val;
 
     for (const auto i : c10::irange(extra_args_size)) {
       // since 3 slots are already filled in `args`
@@ -97,13 +97,13 @@ static inline void launch_jitted_vectorized_kernel_dynamic(
     // pack args for kernel launch
     constexpr int kernel_args = 7;
     auto args = std::make_unique<const void*[]>(kernel_args + extra_args_size);
-    args[0] = static_cast<void*>(&N);
+    args[0] = &N;
     args[1] = data_ptr;
     args[2] = ic_ptr;
     args[3] = oc_ptr;
-    args[4] = static_cast<void*>(&l);
-    args[5] = static_cast<void*>(&s);
-    args[6] = static_cast<void*>(&scalar_val);
+    args[4] = &l;
+    args[5] = &s;
+    args[6] = &scalar_val;
 
     for (const auto i : c10::irange(extra_args_size)) {
       // since 7 slots are already filled in `args`
@@ -116,8 +116,8 @@ static inline void launch_jitted_vectorized_kernel_dynamic(
 
 static inline void launch_jitted_unrolled_kernel_dynamic(
   const std::string& name, TensorIteratorBase& iter,
-  DeviceIndex dev_idx, int64_t N, const std::string& f, void* data_ptr,
-  void* ic_ptr, void* oc_ptr, void* l_ptr, void* s_ptr, bool contiguous, bool dynamic_casting,
+  DeviceIndex dev_idx, int64_t N, const std::string& f, const void* data_ptr,
+  const void* ic_ptr, const void* oc_ptr, const void* l_ptr, const void* s_ptr, bool contiguous, bool dynamic_casting,
   const c10::SmallVector<at::Scalar>& extra_args, bool return_by_ref) {
 
   TORCH_INTERNAL_ASSERT(N > 0 && N <= std::numeric_limits<int32_t>::max());
@@ -193,7 +193,7 @@ static void jitted_gpu_kernel_dynamic_impl(
   TORCH_INTERNAL_ASSERT(iter.ninputs() <= 8);
 
   ArrayVariant data(iter);
-  void* data_ptr = data.data_ptr();
+  const void* data_ptr = data.data_ptr();
 
   int64_t numel = iter.numel();
   bool contiguous = iter.is_contiguous();
@@ -216,14 +216,14 @@ static void jitted_gpu_kernel_dynamic_impl(
 
     // Case 2: no dynamic casting and noncontiguous
     OffsetCalculatorVariant</*is_input=*/true> input_offset_calculator(iter);
-    void* ic_ptr = input_offset_calculator.data_ptr();
+    const void* ic_ptr = input_offset_calculator.data_ptr();
     OffsetCalculatorVariant</*is_input=*/false> output_offset_calculator(iter);
-    void* oc_ptr = output_offset_calculator.data_ptr();
+    const void* oc_ptr = output_offset_calculator.data_ptr();
 
     auto loader = memory::LoadWithoutCast();
     auto storer = memory::StoreWithoutCast();
-    void* l_ptr = static_cast<void*>(&loader);
-    void* s_ptr = static_cast<void*>(&storer);
+    const void* l_ptr = &loader;
+    const void* s_ptr = &storer;
 
     launch_jitted_unrolled_kernel_dynamic(
       kernel_name, iter, iter.device().index(), numel, f, data_ptr,

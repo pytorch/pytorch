@@ -29,7 +29,7 @@ namespace at::native {
 
 template <typename Tuple, std::size_t... I>
 // warning : unused parameter when tuple is empty.
-constexpr auto tuple_to_array_helper(const Tuple& [[maybe_unused]] t, std::index_sequence<I...> seq) {
+constexpr auto tuple_to_array_helper(const Tuple& t [[maybe_unused]], std::index_sequence<I...> seq) {
     constexpr auto size = seq.size();
     return std::array<const void*, size>{static_cast<const void*>(&std::get<I>(t))...};
 }
