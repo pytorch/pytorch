@@ -24,7 +24,6 @@ from typing import (
     Optional,
     overload,
     Sequence,
-    Set,
     Tuple,
     TYPE_CHECKING,
     TypeVar,
@@ -773,7 +772,7 @@ class Loops(IRNode):
         threshold = max(threshold, config.realize_opcount_threshold)
         return self.inner_fn_opcount().num_ops > threshold
 
-    def inner_fn_free_unbacked_symbols(self) -> Set[Symbol]:
+    def inner_fn_free_unbacked_symbols(self) -> OrderedSet[Symbol]:
         index = self._index(self.ranges)
         return extract_free_unbacked_symbols(self.inner_fn, index)
 
@@ -1019,12 +1018,12 @@ class Reduction(Loops):
 
     def inner_fn_args(self) -> Sequence[Sequence[Expr]]:
         index = self._index(self.ranges)
-        rindex = self._index(self.reduction_ranges, SymT.RINDEX)
+        rindex = self._index(self.reduction_ranges, SymT.R0_INDEX)
         return (index, rindex)
 
-    def inner_fn_free_unbacked_symbols(self) -> Set[Symbol]:
+    def inner_fn_free_unbacked_symbols(self) -> OrderedSet[Symbol]:
         index = self._index(self.ranges)
-        rindex = self._index(self.reduction_ranges, SymT.RINDEX)
+        rindex = self._index(self.reduction_ranges, SymT.R0_INDEX)
         return extract_free_unbacked_symbols(self.inner_fn, index, rindex)
 
     def constant_to_device(self, device: torch.device) -> IRNode:
@@ -1989,13 +1988,13 @@ class Scan(Loops):
 
     def inner_fn_args(self) -> Sequence[Sequence[_IntLike]]:
         index = self._index(self.ranges)
-        rindex = self._index(self.scan_ranges, SymT.RINDEX)
+        rindex = self._index(self.scan_ranges, SymT.R0_INDEX)
         idx = self.reindex(index, rindex)
         return (idx,)
 
-    def inner_fn_free_unbacked_symbols(self) -> Set[Symbol]:
+    def inner_fn_free_unbacked_symbols(self) -> OrderedSet[Symbol]:
         index = self._index(self.ranges)
-        rindex = self._index(self.scan_ranges, SymT.RINDEX)
+        rindex = self._index(self.scan_ranges, SymT.R0_INDEX)
         idx = self.reindex(index, rindex)
         return extract_free_unbacked_symbols(self.inner_fn, idx)
 
@@ -2186,13 +2185,13 @@ class Sort(Loops):
 
     def inner_fn_args(self) -> Sequence[Sequence[Expr]]:
         index = self._index(self.ranges)
-        rindex = self._index(self.sort_ranges, SymT.RINDEX)
+        rindex = self._index(self.sort_ranges, SymT.R0_INDEX)
         idx = self.reindex(index, rindex)
         return (idx,)
 
-    def inner_fn_free_unbacked_symbols(self) -> Set[Symbol]:
+    def inner_fn_free_unbacked_symbols(self) -> OrderedSet[Symbol]:
         index = self._index(self.ranges)
-        rindex = self._index(self.sort_ranges, SymT.RINDEX)
+        rindex = self._index(self.sort_ranges, SymT.R0_INDEX)
         idx = self.reindex(index, rindex)
         return extract_free_unbacked_symbols(self.inner_fn, idx)
 
@@ -4442,7 +4441,7 @@ class InputsKernel(OperationBuffer):
     inputs: List[Buffer]
 
     def get_read_writes(self) -> dependencies.ReadWrites:
-        reads: OrderedSet[dependencies.Dep] = OrderedSet()
+        reads = OrderedSet[dependencies.Dep]()
         StarDep = dependencies.StarDep
         for input in self.inputs:
             if isinstance(input, list):
@@ -4453,7 +4452,7 @@ class InputsKernel(OperationBuffer):
             else:
                 reads.add(StarDep(input.get_name()))
 
-        writes: OrderedSet[dependencies.Dep] = OrderedSet(
+        writes = OrderedSet[dependencies.Dep](
             StarDep(buf.get_name()) for buf in self.get_outputs()
         )
 
@@ -5383,7 +5382,7 @@ class ExternKernel(InputsKernel):
     def get_unbacked_symbol_uses(self) -> OrderedSet[sympy.Symbol]:
         # NB: It's not necessary to check regular inputs as we automatically
         # have dependencies on them
-        r: OrderedSet[sympy.Symbol] = OrderedSet()
+        r = OrderedSet[sympy.Symbol]()
         for arg in self.constant_args:
             r |= maybe_free_unbacked_symbols(arg)
         for arg in self.kwargs.values():
@@ -5683,7 +5682,7 @@ class UserDefinedTritonKernel(ExternKernel):
         1. The arg is already tl.constexpr, so leave it in
         2. The arg is not tl.constexpr so we have to remove it
         """
-        constexpr_indices_set = set(constexpr_indices)
+        constexpr_indices_set = OrderedSet(constexpr_indices)
         REMOVED = object()
         raw_args = [
             (
@@ -5699,7 +5698,7 @@ class UserDefinedTritonKernel(ExternKernel):
         # We have to compute the constexpr indices for the new, filtered raw_args
         # We also have to adjust equal_to_1.
         if removed_none_args:
-            eq1_indices_set = set(triton_meta["configs"][0].equal_to_1)
+            eq1_indices_set = OrderedSet[int](triton_meta["configs"][0].equal_to_1)
             constexpr_indices = []
             equal_to_1 = []
             index_shift = 0
@@ -7612,7 +7611,7 @@ def maybe_free_unbacked_symbols(s: object) -> OrderedSet[Symbol]:
         # This branch should be impossible in return position
         return free_unbacked_symbols(s)
     elif isinstance(s, (tuple, list)):
-        r: OrderedSet[sympy.Symbol] = OrderedSet()
+        r = OrderedSet[sympy.Symbol]()
         for t in s:
             r |= maybe_free_unbacked_symbols(t)
         return r
