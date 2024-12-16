@@ -1129,6 +1129,7 @@ TEST(ListTest, canAccessOptionalStringByReference) {
   EXPECT_EQ("two", str1);
   EXPECT_FALSE(str2.has_value());
   EXPECT_TRUE(strRef1.has_value());
+  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
   EXPECT_EQ("two", strRef1.value().get());
   EXPECT_FALSE(strRef2.has_value());
 }
