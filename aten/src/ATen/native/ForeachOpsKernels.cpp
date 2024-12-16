@@ -19,6 +19,7 @@
 #include <ATen/ops/_foreach_ceil_native.h>
 #include <ATen/ops/_foreach_clamp_max_native.h>
 #include <ATen/ops/_foreach_clamp_min_native.h>
+#include <ATen/ops/_foreach_clone.h>
 #include <ATen/ops/_foreach_copy_native.h>
 #include <ATen/ops/_foreach_cos_native.h>
 #include <ATen/ops/_foreach_cosh_native.h>
@@ -55,6 +56,7 @@
 #include <ATen/ops/_foreach_tanh_native.h>
 #include <ATen/ops/_foreach_trunc_native.h>
 #include <ATen/ops/_foreach_zero_native.h>
+#include <ATen/ops/clone_native.h>
 #include <ATen/ops/copy.h>
 #include <ATen/ops/linalg_vector_norm.h>
 #include <ATen/ops/max.h>
@@ -492,6 +494,18 @@ std::vector<Tensor> foreach_scalar_pow_list_kernel_slow(
   result.reserve(exponent.size());
   for (const auto& t : exponent) {
     result.emplace_back(at::pow(self, t));
+  }
+  return result;
+}
+
+std::vector<Tensor> _foreach_clone(
+    TensorList tensors,
+    std::optional<c10::MemoryFormat> memory_format) {
+  check_foreach_api_restrictions(tensors);
+  std::vector<Tensor> result;
+  result.reserve(tensors.size());
+  for (const auto& t : tensors) {
+    result.emplace_back(at::native::clone(t, memory_format));
   }
   return result;
 }
