@@ -79,7 +79,9 @@ void addcmul_cuda_kernel(TensorIteratorBase& iter, const Scalar& value) {
   }
 }
 
+#if AT_USE_JITERATOR() && CUDA_VERSION >= 11050
 constexpr char addcmul_scalar_tensor2_name[] = "addcmul_scalar_tensor2";
+#endif
 void addcmul_cuda_scalar_tensor2_kernel(TensorIteratorBase& iter, const Scalar& tensor2_scalar, const Scalar& value) {
   auto dtype = iter.common_dtype();
 
