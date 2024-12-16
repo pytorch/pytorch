@@ -300,14 +300,12 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
             cur_stream.wait_stream(new_stream)
 
             x = torch.add(x, 4)
-            is_idle = cur_stream.query()
+            cur_stream.query()
             cur_stream.synchronize()
 
             with torch.cuda.stream(new_stream):
                 x = torch.add(x, 5)
             new_stream.synchronize()
-
-            is_equal = cur_stream == new_stream
 
             x = torch.relu(x)
             x = torch.cos(x)
@@ -471,7 +469,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
             x = torch.add(x, 3)
 
             event = cur_stream.record_event()
-            is_idle = event.query()
+            event.query()
 
             new_stream.wait_event(event)
             with torch.cuda.stream(new_stream):
@@ -513,7 +511,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
             x = torch.add(x, 3)
 
             event = cur_stream.record_event()
-            is_idle = event.query()
+            event.query()
 
             new_stream.wait_event(event)
             with torch.cuda.stream(new_stream):
@@ -599,7 +597,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
         real_device = real.device
         real_dtype = real.dtype
 
-        graph, guards = torch._dynamo.export(module)(torch.tensor([[0.0, 0], [0, 0]]))
+        graph, _ = torch._dynamo.export(module)(torch.tensor([[0.0, 0], [0, 0]]))
         exported = graph(torch.tensor([0.5]))
         self.assertEqual(exported.device, real_device)
         self.assertEqual(exported.dtype, real_dtype)
@@ -708,7 +706,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
         real_device = real.device
         real_dtype = real.dtype
 
-        graph, guards = torch._dynamo.export(module)(torch.tensor([[0.0, 0], [0, 0]]))
+        graph, _ = torch._dynamo.export(module)(torch.tensor([[0.0, 0], [0, 0]]))
         exported = graph(torch.tensor([0.5]))
         self.assertEqual(exported.device, real_device)
         self.assertEqual(exported.dtype, real_dtype)
@@ -882,7 +880,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
         real_device = real.device
         real_dtype = real.dtype
 
-        graph, guards = torch._dynamo.export(module)(torch.tensor([[0.0, 0], [0, 0]]))
+        graph, _ = torch._dynamo.export(module)(torch.tensor([[0.0, 0], [0, 0]]))
         exported = graph(torch.tensor([0.5]))
         self.assertEqual(exported.device, real_device)
         self.assertEqual(exported.dtype, real_dtype)
@@ -908,7 +906,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
         real_device = real.device
         real_dtype = real.dtype
 
-        graph, guards = torch._dynamo.export(module)(torch.tensor([[0.0, 0], [0, 0]]))
+        graph, _ = torch._dynamo.export(module)(torch.tensor([[0.0, 0], [0, 0]]))
         exported = graph(torch.tensor([0.5]))
         self.assertEqual(exported.device, real_device)
         self.assertEqual(exported.dtype, real_dtype)
@@ -1369,7 +1367,7 @@ class GraphModule(torch.nn.Module):
         eager = EagerAndRecordGraphs()
         torch.compile(fn, backend=eager, fullgraph=False)(torch.randn(()))
 
-        def check_graph(actual, expected):
+        def check_graph(actual, expected):  # noqa: F841
             self.assertExpectedInline(actual, expected)
 
         graph = eager.graphs[0]
@@ -1414,7 +1412,7 @@ class GraphModule(torch.nn.Module):
             for i in range(2):
                 torch._dynamo.reset()
 
-                ctx_wrapper, mode = ctx_wrappers[i]
+                ctx_wrapper, _ = ctx_wrappers[i]
                 ctx_wrapper_inverse, mode_inverse = ctx_wrappers[(i + 1) % 2]
 
                 def fn(x):
@@ -1445,7 +1443,7 @@ class GraphModule(torch.nn.Module):
             for i in range(2):
                 torch._dynamo.reset()
 
-                ctx_wrapper, mode = ctx_wrappers[i]
+                ctx_wrapper, _ = ctx_wrappers[i]
                 ctx_wrapper_inverse, mode_inverse = ctx_wrappers[(i + 1) % 2]
 
                 def fn(x):
