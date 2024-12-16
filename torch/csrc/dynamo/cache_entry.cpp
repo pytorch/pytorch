@@ -18,6 +18,8 @@ CacheEntry::CacheEntry(const py::handle& guarded_code, PyObject* backend)
   }
   this->root_mgr = torch::dynamo::convert_to_root_guard_manager(
       this->guard_manager.attr("root"));
+  this->diff_guard_root_mgr = torch::dynamo::convert_to_root_guard_manager(
+      this->guard_manager.attr("diff_guard_root"));
 }
 
 C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED(
@@ -50,6 +52,11 @@ void CacheEntry::invalidate(py::object deleted_guard_manager) {
   this->guard_manager = std::move(deleted_guard_manager);
   this->root_mgr = nullptr;
   this->trace_annotation = "Invalidated";
+}
+
+void CacheEntry::update_diff_guard_root_manager() {
+  this->diff_guard_root_mgr = torch::dynamo::convert_to_root_guard_manager(
+      this->guard_manager.attr("diff_guard_root"));
 }
 
 PyCodeObject* CacheEntry_get_code(CacheEntry* e) {

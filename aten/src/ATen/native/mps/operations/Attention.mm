@@ -56,7 +56,7 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math_mps(const Tensor& 
   int64_t maxSeqLength = key.size(2);
   auto out = at::empty({batchSize, num_head, qSize, headSize}, query.options());
   auto attn = at::empty({batchSize, num_head, qSize, maxSeqLength}, query.options());
-  auto scale_factor = sdp::calculate_scale(query, scale).as_float_unchecked();
+  auto scale_factor = sdp::calculate_scale(query, scale).expect_float();
   @autoreleasepool {
     auto mkey = __func__ + getTensorsStringKey({query, key, value}) + ":" + std::to_string(is_causal) + ":" +
         std::to_string(attn_mask.has_value());

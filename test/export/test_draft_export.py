@@ -1,15 +1,19 @@
 # Owner(s): ["oncall: export"]
 import copy
+import tempfile
+import unittest
+from typing import List, Tuple
 
 import torch
-from torch.export import Dim
+from torch.export import Dim, export
 from torch.export._draft_export import draft_export, FailureType
 from torch.testing import FileCheck
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import IS_WINDOWS, run_tests, TestCase
 from torch.testing._internal.torchbind_impls import (
     _empty_tensor_queue,
     init_torchbind_implementations,
 )
+from torch.utils._pytree import tree_leaves
 
 
 class TestDraftExport(TestCase):
@@ -104,6 +108,50 @@ class TestDraftExport(TestCase):
 
             inp = (torch.randn(3, 3), torch.randn(3, 3))
             self.assertEqual(ep.module()(*inp), M()(*inp))
+
+    @unittest.skipIf(not torch.cuda.is_available(), "Requires cuda")
+    def test_missing_meta_kernel_guard(self):
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+
+            @torch.library.custom_op("mylib::foo4", mutates_args={})
+            def foo4_impl(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
+                return a + b
+
+            class M(torch.nn.Module):
+                def forward(self, a, b):
+                    res1 = torch.ops.mylib.foo4(a, b)
+                    return res1
+
+            inp = (
+                torch.ones(3, 4),
+                torch.ones(3, 4),
+            )
+
+            ep, report = draft_export(
+                M(),
+                inp,
+                dynamic_shapes={
+                    "a": {0: Dim.DYNAMIC, 1: Dim.DYNAMIC},
+                    "b": {0: Dim.DYNAMIC, 1: Dim.DYNAMIC},
+                },
+            )
+
+            inp = (torch.randn(2, 3), torch.randn(2, 3))
+            self.assertEqual(ep.module()(*inp), M()(*inp))
+            m = ep.module()
+            with self.assertRaisesRegex(RuntimeError, "Tensor device mismatch!"):
+                bad_device_inps = (
+                    torch.randn(2, 3, device=torch.device("cuda")),
+                    torch.randn(2, 3, device=torch.device("cuda")),
+                )
+                m(*bad_device_inps)
+
+            with self.assertRaisesRegex(RuntimeError, "Tensor dtype mismatch!"):
+                bad_dtype_inps = (
+                    torch.randn(2, 3, dtype=torch.float16),
+                    torch.randn(2, 3, dtype=torch.float16),
+                )
+                m(*bad_dtype_inps)
 
     def test_data_dependent_failure(self):
         with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
@@ -270,6 +318,108 @@ class TestDraftExport(TestCase):
         self.assertEqual(tq2.size(), 0)
         self.assertEqual(tq3.size(), 2)
         self.assertEqual(tq.size(), 2)
+
+    def test_override_size_and_dtype_mismatched_fake_kernels(self):
+        class M(torch.nn.Module):
+            def forward(self, a):
+                return torch.ops.mylib.foo(a)
+
+        @torch.library.custom_op("mylib::foo", mutates_args={})
+        def foo(a: torch.Tensor) -> List[torch.Tensor]:
+            x = a * 2
+            y = a.repeat(2, 2)
+            z = a.to(torch.bfloat16)
+            return [x, y, z]
+
+        @foo.register_fake
+        def foo_fake_impl(a):
+            x = torch.empty_like(a)  # good
+            y = torch.empty_like(a)  # size mismatch
+            z = torch.empty_like(a)  # dtype mismatch
+            return [x, y, z]
+
+        mod = M()
+        inputs = (torch.randn(3, 3),)
+        with self.assertRaises(RuntimeError):
+            with torch._functorch.config.patch(fake_tensor_propagate_real_tensors=True):
+                export(mod, inputs)
+
+        ep, report = draft_export(mod, inputs)
+        for ep_out, eager_out in zip(ep.module()(*inputs), mod(*inputs)):
+            self.assertTrue(torch.allclose(ep_out, eager_out))
+            self.assertEqual(ep_out.dtype, eager_out.dtype)
+
+        self.assertEqual(len(report.failures), 2)
+        self.assertEqual(
+            report.failures[0].failure_type, FailureType.MISMATCHED_FAKE_KERNEL
+        )
+        self.assertEqual(
+            report.failures[1].failure_type, FailureType.MISMATCHED_FAKE_KERNEL
+        )
+        self.assertEqual(
+            sorted([f.data["reason"] for f in report.failures]),
+            [
+                "Dtypes torch.bfloat16 and torch.float32 are not equal!",
+                "mismatch between fake value 3 and real value 6 ",
+            ],
+        )
+
+    def test_override_incorrectly_aliasing_kernel(self):
+        class M(torch.nn.Module):
+            def forward(self, a):
+                return torch.ops.mylib.foo(a)
+
+        @torch.library.custom_op("mylib::foo", mutates_args={})
+        def foo(a: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+            return a * 2, a + 2
+
+        @foo.register_fake
+        def foo_fake_impl(a):
+            return a, torch.empty_like(a)  # incorrectly aliasing
+
+        mod = M()
+        inputs = (torch.randn(3, 3),)
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "Real tensor propagation found an aliasing mismatch",
+        ):
+            with torch._functorch.config.patch(fake_tensor_propagate_real_tensors=True):
+                export(mod, inputs)
+
+        ep, report = draft_export(mod, inputs)
+        for ep_out, eager_out in zip(
+            tree_leaves(ep.module()(*inputs)), tree_leaves(mod(*inputs))
+        ):
+            self.assertTrue(torch.allclose(ep_out, eager_out))
+            self.assertEqual(ep_out.dtype, eager_out.dtype)
+
+        self.assertEqual(len(report.failures), 1)
+        self.assertEqual(
+            report.failures[0].failure_type, FailureType.MISMATCHED_FAKE_KERNEL
+        )
+        self.assertTrue(
+            "Mismatched aliasing spec between fake kernel and real kernel"
+            in report.failures[0].data["reason"]
+        )
+
+    # https://github.com/pytorch/pytorch/issues/140625
+    @unittest.skipIf(IS_WINDOWS, "aoti_compile_and_package not supported on Windows")
+    def test_constantify_unbacked_symbol(self):
+        class M(torch.nn.Module):
+            def forward(self, x, y):
+                xt = torch.tensor(x.shape)
+                u0 = xt[0].item()
+                return y * torch.arange(u0)
+
+        mod = M()
+        example_inputs = (torch.randn(3, 5), torch.randn(3))
+        draft_ep, _ = draft_export(mod, example_inputs)
+        with tempfile.NamedTemporaryFile(suffix=".pt2") as f:
+            aoti_model_path = torch._inductor.aoti_compile_and_package(
+                draft_ep,
+                example_inputs,
+                package_path=f.name,
+            )
 
 
 if __name__ == "__main__":

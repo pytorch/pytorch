@@ -75,7 +75,6 @@ For more details on ``torch.export.export``, you can refer to the :ref:`torch.ex
         # then load it back using torch.export.load on your inference platform to run AOT compilation.
         output_path = torch._inductor.aoti_compile_and_package(
             exported,
-            example_inputs,
             # [Optional] Specify the generated shared library path. If not specified,
             # the generated artifact is stored in your system temp directory.
             package_path=os.path.join(os.getcwd(), "model.pt2"),
