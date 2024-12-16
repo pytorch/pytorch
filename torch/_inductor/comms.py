@@ -1010,7 +1010,7 @@ def bucket_fsdp_all_gather_concat_on_scheduler_ir(
     if ag_exists:
         assert len(ag_snode_to_wait_snode) > 0
     else:
-        return
+        return snodes
 
     # Step 2: Put all_gather nodes into buckets
     ag_buckets: List[List[BaseSchedulerNode]] = []
@@ -1246,7 +1246,7 @@ def bucket_fsdp_reduce_scatter_concat_on_scheduler_ir(
     if rs_exists:
         assert len(rs_snode_to_wait_snode) > 0
     else:
-        return
+        return snodes
 
     # Step 2: Put reduce_scatter nodes into buckets
     rs_buckets: List[List[BaseSchedulerNode]] = []
