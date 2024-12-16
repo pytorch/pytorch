@@ -21,6 +21,7 @@ __all__ = [
     "reference_representation_rewrite",
 ]
 
+
 def _qdq_quantized_linear(
     x_i8,
     x_scale,
