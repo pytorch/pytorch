@@ -451,7 +451,7 @@ if(NOT EMSCRIPTEN AND NOT INTERN_BUILD_MOBILE AND NOT (MSVC AND CMAKE_SYSTEM_PRO
     set(SLEEF_BUILD_TESTS OFF CACHE BOOL "Don't build sleef tests" FORCE)
     set(SLEEF_BUILD_SCALAR_LIB OFF CACHE BOOL "libsleefscalar will be built." FORCE)
     if(WIN32)
-      set(SLEEF_BUILD_WITH_LIBM OFF CACHE BOOL "build libsleef with libm, can turn off on Windows to solve mutiple math functions issue." FORCE)
+      set(SLEEF_BUILD_WITH_LIBM OFF CACHE BOOL "Don't build sleef with libm for Windows." FORCE)
     endif()
     if(CMAKE_SYSTEM_NAME STREQUAL "Darwin")
       if(CMAKE_SYSTEM_PROCESSOR STREQUAL "arm64" OR CMAKE_OSX_ARCHITECTURES MATCHES "arm64")
