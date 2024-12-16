@@ -15,8 +15,8 @@ import torch.fx
 import torch.nn
 from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.utils import get_fake_value
-from torch._dynamo.variables import ConstantVariable
 from torch._dynamo.variables.builtin import BuiltinVariable
+from torch._dynamo.variables.constant import ConstantVariable
 from torch._dynamo.variables.functions import UserFunctionVariable
 from torch._dynamo.variables.tensor import SymNodeVariable
 from torch._guards import Source
