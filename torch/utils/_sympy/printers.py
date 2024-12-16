@@ -250,9 +250,6 @@ class PythonPrinter(ExprPrinter):
         assert isinstance(ndigits, sympy.Integer)
         return f"round({self._print(number)}, {ndigits})"
 
-    def _print_isnan(self, expr: sympy.Expr) -> str:
-        return f"math.isnan({self._print(expr.args[0])})"
-
 
 class CppPrinter(ExprPrinter):
     def _print_Integer(self, expr: sympy.Expr) -> str:
@@ -460,6 +457,3 @@ class CppPrinter(ExprPrinter):
 
     def _print_BooleanFalse(self, expr: sympy.Expr) -> str:
         return "false"
-
-    def _print_isnan(self, expr: sympy.Expr) -> str:
-        return f"std::isnan({self._print(expr.args[0])})"
