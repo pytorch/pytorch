@@ -40,8 +40,8 @@ typedef struct CacheEntry CacheEntry;
 #ifdef __cplusplus
 
 typedef struct VISIBILITY_HIDDEN ExtraState {
-  // A pointer to the orig_code object to prevent race conditions in invalidate
-  // function.
+  // A pointer to the original PyCodeObject referring to this ExtraState.
+  // Used to delete this ExtraState at the right time if orig_code is deleted.
   PyCodeObject* orig_code;
   // List of cache entries for compiled code objects
   std::list<CacheEntry> cache_entry_list;

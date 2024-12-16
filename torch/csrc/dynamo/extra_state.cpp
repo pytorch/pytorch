@@ -7,12 +7,22 @@
 #include <torch/csrc/dynamo/guards.h>
 #include <torch/csrc/utils/python_compat.h>
 
+#include <unordered_map>
+#include <vector>
+
 #if IS_PYTHON_3_12_PLUS
 #define _PyCode_GetExtra PyUnstable_Code_GetExtra
 #define _PyCode_SetExtra PyUnstable_Code_SetExtra
 #endif
 
 Py_ssize_t extra_index = -1;
+
+// Manually manage the lifetime for ExtraState objects.
+// We don't tie the lifetime of ExtraState to PyCodeObject since
+// deletion of PyCodeObjects is unpredictable, leading to weird segfaults.
+static std::unordered_map<PyCodeObject*, ExtraState> _extra_states;
+// Used to delay deletion until it is safe to do so.
+static std::vector<PyCodeObject*> _deleted_code;
 
 CacheEntry* ExtraState::get_first_entry() {
   if (this->cache_entry_list.empty()) {
@@ -47,14 +57,6 @@ void ExtraState::move_to_back(CacheEntry* cache_entry) {
 void ExtraState::invalidate(
     CacheEntry* cache_entry,
     py::object deleted_guard_manager) {
-  // Sometimes setting the cache_entry->code to None causes the orig_code to be
-  // freed. This calls destroy_extra_state, which deletes the extra_state and
-  // all the cache_entries. This causes the `this` pointer to be a dangling
-  // pointer, causing a segfault. So, we manually inc/dec ref the original code
-  // pointer to prevent triggering of destroy_extra_state while the invalidate
-  // function is running.
-  Py_INCREF(this->orig_code);
-
   CHECK(cache_entry->_owner == this);
   CHECK(!this->cache_entry_list.empty());
   CHECK(cache_entry == &*cache_entry->_owner_loc);
@@ -62,7 +64,6 @@ void ExtraState::invalidate(
   // Move the cache entry to the end of the list because these will always
   // return False.
   cache_entry->_owner->move_to_back(cache_entry);
-  Py_DECREF(this->orig_code);
 }
 
 static bool is_extra_state_unset(ExtraState* extra_state) {
@@ -101,7 +102,7 @@ ExtraState* get_extra_state(PyCodeObject* code) {
 void destroy_extra_state(void* obj) {
   ExtraState* extra = (ExtraState*)obj;
   if (!is_extra_state_unset(extra)) {
-    delete extra;
+    _deleted_code.push_back(extra->orig_code);
   }
 }
 
@@ -115,7 +116,14 @@ ExtraState* init_and_set_extra_state(PyCodeObject* code) {
   // Invariant - Extra state should not have been set before, therefore it
   // should be nullptr.
   CHECK(get_extra_state(code) == nullptr);
-  ExtraState* extra_state = new ExtraState(code);
+  // clear old extra states
+  for (PyCodeObject* ptr : _deleted_code) {
+    _extra_states.erase(ptr);
+  }
+  _deleted_code.clear();
+  // create manually-memory-managed ExtraState
+  _extra_states.insert_or_assign(code, ExtraState(code));
+  ExtraState* extra_state = &_extra_states.at(code);
   NULL_CHECK(extra_state);
   set_extra_state(code, extra_state);
   // freed by destroy_extra_state (since we need to pass these objects to C)
