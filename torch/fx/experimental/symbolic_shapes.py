@@ -3915,6 +3915,7 @@ class ShapeEnv:
                 and ex_stride[i] != contiguous_stride
             ):
                 contiguous_striding = False
+                break
 
         if not contiguous_striding:
             for i, val in enumerate(ex_stride):

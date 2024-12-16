@@ -5827,6 +5827,7 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
         torch._dynamo.decorators.mark_unbacked(aot6_sub_58, 1)
         aot6_mul_170 = torch.randn(2)
 
+        # No assert necessary since this used to crash.
         fn(aot6_sub_58, aot6_mul_170)
 
     @torch._dynamo.config.patch(guard_nn_modules=False)
