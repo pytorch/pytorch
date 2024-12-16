@@ -1110,8 +1110,8 @@ def record_compilation_metrics(
     all_metrics["inductor_fx_remote_cache_hit_keys"] = collection_to_str(
         all_metrics, "inductor_fx_remote_cache_hit_keys"
     )
-    all_metrics["inductor_fx_remote_cache_miss_keys"] = (
-        collection_to_str(all_metrics, "inductor_fx_remote_cache_miss_keys"),
+    all_metrics["inductor_fx_remote_cache_miss_keys"] = collection_to_str(
+        all_metrics, "inductor_fx_remote_cache_miss_keys"
     )
 
     compilation_metrics = CompilationMetrics(**all_metrics)
