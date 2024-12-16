@@ -1846,9 +1846,9 @@ class CommonTemplate:
         from torch._inductor.runtime.runtime_utils import next_power_of_2
         from torch._inductor.runtime.triton_heuristics import triton_config_reduction
 
-        size_hints = [67108864, 8192]
+        size_hints = {"x": 67108864, "r0_": 8192}
         for i in range(4):
-            size_hints[0] = next_power_of_2(size_hints[0])
+            size_hints["x"] = next_power_of_2(size_hints["x"])
             triton_config_reduction(size_hints, 1, 2048, 1, 8)
 
     def test_prod(self):
@@ -2049,7 +2049,10 @@ class CommonTemplate:
 
     @skipCUDAIf(TEST_WITH_ROCM, "associative_scan is not supported on ROCm")
     @skip_if_halide  # scan ops
-    @skip_if_dynamic  # TODO: support lifted symints when dynamic
+    # TODO: support lifted symints when dynamic
+    @torch._dynamo.config.patch(
+        {"dynamic_shapes": False, "assume_static_by_default": True}
+    )
     def test_custom_scan_op(self):
         if self.device != "cuda":
             raise unittest.SkipTest("associative_scan only supported on GPU")
@@ -2075,7 +2078,10 @@ class CommonTemplate:
         self.assertEqual(expect, actual)
 
     @skip_if_halide  # scan ops
-    @skip_if_dynamic  # TODO: support lifted symints when dynamic
+    # TODO: support lifted symints when dynamic
+    @torch._dynamo.config.patch(
+        {"dynamic_shapes": False, "assume_static_by_default": True}
+    )
     def test_custom_scan_op_compiled(self):
         if self.device != "cuda":
             raise unittest.SkipTest("associative_scan only supported on GPU")
@@ -2103,7 +2109,10 @@ class CommonTemplate:
 
     @skipCUDAIf(TEST_WITH_ROCM, "associative_scan is not supported on ROCm")
     @skip_if_halide  # scan ops
-    @skip_if_dynamic  # TODO: support lifted symints when dynamic
+    # TODO: support lifted symints when dynamic
+    @torch._dynamo.config.patch(
+        {"dynamic_shapes": False, "assume_static_by_default": True}
+    )
     def test_custom_scan_op_multi_input(self):
         if self.device != "cuda":
             raise unittest.SkipTest("associative_scan only supported on GPU")
@@ -2128,7 +2137,10 @@ class CommonTemplate:
 
     @skipCUDAIf(TEST_WITH_ROCM, "associative_scan is not supported on ROCm")
     @skip_if_halide  # scan ops
-    @skip_if_dynamic  # TODO: support lifted symints when dynamic
+    # TODO: support lifted symints when dynamic
+    @torch._dynamo.config.patch(
+        {"dynamic_shapes": False, "assume_static_by_default": True}
+    )
     def test_custom_scan_would_split(self):
         if self.device != "cuda":
             raise unittest.SkipTest("associative_scan only supported on GPU")
@@ -3763,7 +3775,12 @@ class CommonTemplate:
         with torch.no_grad():
             _, code = run_and_get_code(foo, grouped_conv, input_tensor)
             # no to channels last permuting before kernel
-            FileCheck().check_not(".run(").check(".convolution(").run(code[0])
+            if config.cpp_wrapper:
+                FileCheck().check_not("launchKernel(triton").check("_convolution(").run(
+                    code[0]
+                )
+            else:
+                FileCheck().check_not(".run(").check(".convolution(").run(code[0])
 
         # in out should do channels last in inference
         in_channels = 8
@@ -3783,7 +3800,7 @@ class CommonTemplate:
                     code[0]
                 )
             else:
-                FileCheck().check(".run(").check(".convolution(").run(code[0])
+                FileCheck().check(".run(").check("convolution(").run(code[0])
 
     def test_upsample_cat_conv(self):
         if self.device == GPU_TYPE:
@@ -8842,7 +8859,6 @@ class CommonTemplate:
         result = fn(torch.randn([1, 2, 16, 4]).requires_grad_())
         result.sum().backward()
 
-    @skip_if_cpp_wrapper("fails due to two-pass GPU codegen")
     def test_dropout2(self):
         n = 100000
         weight = torch.ones(
@@ -8902,7 +8918,6 @@ class CommonTemplate:
         self.assertTrue(same(g2, g3))
 
     @config.patch(search_autotune_cache=False)
-    @skip_if_cpp_wrapper("fails due to two-pass GPU codegen")
     def test_dropout3(self):
         m = torch.nn.Sequential(
             torch.nn.Linear(32, 32, bias=False),
@@ -8942,11 +8957,8 @@ class CommonTemplate:
 
         _, source_codes = run_and_get_code(fn1)
         # cpp_wrapper does a 2-pass generation on GPU.
-        self.assertEqual(len(source_codes), 1 if not config.cpp_wrapper else 2)
+        self.assertEqual(len(source_codes), 1)
         self.assertEqual(source_codes[0].count("async_compile.triton"), 2)
-        if config.cpp_wrapper:
-            # The second pass should not involve triton at all.
-            self.assertEqual(source_codes[1].count("async_compile.triton"), 0)
 
     def test_roll(self):
         def fn(a):
@@ -11921,6 +11933,28 @@ class CommonTemplate:
         run(9)
         self.assertEqual(cnts.frame_count, 4)
 
+    def test_slice_after_split_dont_specialize_dynamic_dim(self):
+        N = 16
+
+        @torch.compile(backend="inductor", dynamic=False, fullgraph=True)
+        def fn(x):
+            # Creates an upper bound: x.shape[0] <= N
+            splits = torch.ops.aten.split.Tensor(x, N)
+            first = splits[0]
+            # Previously: creates a lower bound: x.shape[0] >= N
+            # Currenty: creates an upper bound: x.shape[0] <= N
+            #
+            # See: https://github.com/pytorch/pytorch/issues/141251
+            r = torch.ops.aten.slice.Tensor(first, 0, 0, N)
+            return r
+
+        x = torch.arange(N)
+        torch._dynamo.mark_dynamic(x, 0)
+
+        # Check it doesn't error because we have specialized a dimension
+        # marked as dynamic.
+        fn(x)
+
 
 @dataclasses.dataclass
 class TestFailure:
@@ -12366,7 +12400,6 @@ if HAS_GPU and not TEST_WITH_ASAN:
             self.assertFalse("out_ptr0" in code)
             self.assertEqual(fn_opt(*inps), fn(*inps))
 
-        @skip_if_cpp_wrapper("fails due to two-pass GPU codegen")
         def test_numpy_on_gpu(self):
             x = np.arange(10, dtype=np.float32)
 
@@ -12526,8 +12559,8 @@ if HAS_GPU and not TEST_WITH_ASAN:
                 self.assertExpectedInline(
                     "\n".join(lines),
                     """\
-        tmp0 = tl.load(in_ptr0 + (x1 + 512*x0 + 262144*r2), rmask, eviction_policy='evict_last', other=0.0)
-        tmp1 = tl.load(in_ptr1 + (x3 + 262144*r2), rmask, eviction_policy='evict_first', other=0.0)""",
+        tmp0 = tl.load(in_ptr0 + (x1 + 512*x0 + 262144*r0_2), r0_mask, eviction_policy='evict_last', other=0.0)
+        tmp1 = tl.load(in_ptr1 + (x3 + 262144*r0_2), r0_mask, eviction_policy='evict_first', other=0.0)""",
                 )
 
         @config.patch("triton.use_block_ptr", True)
@@ -12550,16 +12583,16 @@ if HAS_GPU and not TEST_WITH_ASAN:
                 self.assertExpectedInline(
                     "\n".join(lines),
                     """\
-    tmp0 = tl.load(in_ptr0 + (x1 + (512*x0) + (262144*r2)), rmask, eviction_policy='evict_last', other=0.0)
-    tmp1 = tl.load(tl.make_block_ptr(in_ptr1, shape=[262144, 512], strides=[1, 262144], block_shape=[XBLOCK, RBLOCK], order=[0, 1], offsets=[xoffset, roffset]), boundary_check=[1], padding_option='zero')
-        tmp0 = tl.load(in_ptr0 + (x1 + (512*x0) + (262144*r2)), rmask, eviction_policy='evict_last', other=0.0)
+    tmp0 = tl.load(in_ptr0 + (x1 + (512*x0) + (262144*r0_2)), rmask, eviction_policy='evict_last', other=0.0)
+    tmp1 = tl.load(tl.make_block_ptr(in_ptr1, shape=[262144, 512], strides=[1, 262144], block_shape=[XBLOCK, R0_BLOCK], order=[0, 1], offsets=[xoffset, roffset]), boundary_check=[1], padding_option='zero')
+        tmp0 = tl.load(in_ptr0 + (x1 + (512*x0) + (262144*r0_2)), rmask, eviction_policy='evict_last', other=0.0)
         tmp1 = tl.load(block_ptr0, boundary_check=[1], padding_option='zero', eviction_policy='evict_first')""",  # noqa: B950 line too long
                 )
             else:
                 self.assertExpectedInline(
                     "\n".join(lines),
                     """\
-        tmp0 = tl.reshape(tl.broadcast_to(tl.load(block_ptr0, boundary_check=[2], padding_option='zero', eviction_policy='evict_last')[:, None, :, :], [(511 + XBLOCK) // 512, ((1) * ((1) <= ((511 + XBLOCK) // 512)) + ((511 + XBLOCK) // 512) * (((511 + XBLOCK) // 512) < (1))), ((512) * ((512) <= (XBLOCK)) + (XBLOCK) * ((XBLOCK) < (512))), RBLOCK]), [XBLOCK, RBLOCK])
+        tmp0 = tl.reshape(tl.broadcast_to(tl.load(block_ptr0, boundary_check=[2], padding_option='zero', eviction_policy='evict_last')[:, None, :, :], [(511 + XBLOCK) // 512, ((1) * ((1) <= ((511 + XBLOCK) // 512)) + ((511 + XBLOCK) // 512) * (((511 + XBLOCK) // 512) < (1))), ((512) * ((512) <= (XBLOCK)) + (XBLOCK) * ((XBLOCK) < (512))), R0_BLOCK]), [XBLOCK, R0_BLOCK])
         tmp1 = tl.load(block_ptr1, boundary_check=[1], padding_option='zero', eviction_policy='evict_first')""",  # noqa: B950 line too long
                 )
 
@@ -12714,15 +12747,18 @@ if HAS_GPU and not TEST_WITH_ASAN:
             inp = torch.randn(4, 4, device=GPU_TYPE)
             code = run_and_get_triton_code(fn, inp)
             fn(inp)
-            self.assertTrue("Graph fragment" in code)
-            self.assertTrue(
-                "%sin : [num_users=1] = call_function[target=torch.ops.aten.sin.default]"
-                in code
-            )
-            self.assertTrue(
-                "%relu : [num_users=1] = call_function[target=torch.ops.aten.relu.default]"
-                in code
-            )
+            if config.cpp_wrapper:
+                self.assertTrue("fused_relu_sin" in code)
+            else:
+                self.assertTrue("Graph fragment" in code)
+                self.assertTrue(
+                    "%sin : [num_users=1] = call_function[target=torch.ops.aten.sin.default]"
+                    in code
+                )
+                self.assertTrue(
+                    "%relu : [num_users=1] = call_function[target=torch.ops.aten.relu.default]"
+                    in code
+                )
 
         def test_split_op_with_sym(self):
             def fn(x: torch.Tensor) -> torch.Tensor:
@@ -12780,7 +12816,6 @@ if HAS_GPU and not TEST_WITH_ASAN:
 
         @patch("torch._inductor.config.comment_origin", True)
         @patch("torch._functorch.config.max_dist_from_bw", 0)
-        @skip_if_cpp_wrapper("fails due to two-pass GPU codegen")
         def test_inductor_sequence_nr(self):
             class Model(torch.nn.Module):
                 def __init__(self) -> None:
@@ -12906,7 +12941,6 @@ if HAS_GPU and not TEST_WITH_ASAN:
 
                 print(p.key_averages().table(max_name_column_width=200))
 
-        @skip_if_cpp_wrapper("fails due to two-pass GPU codegen")
         def test_non_blocking_copy_codegen(self):
             # Checks non_blocking arg is present in codegen
             # (see https://github.com/pytorch/pytorch/issues/136260)
@@ -12975,13 +13009,7 @@ if HAS_GPU and not TEST_WITH_ASAN:
                 return fn_opt(inp, weight).sum().backward()
 
             _, code = run_and_get_code(wrapper, inp, weight)
-
-            if config.cpp_wrapper:
-                # when using cpp_wrapper, backward triton code is in code[2]
-                self.assertTrue("in_out_ptr" in code[2])
-            else:
-                # when not using cpp_wrapper, backward triton code is in code[1]
-                self.assertTrue("in_out_ptr" in code[1])
+            self.assertTrue("in_out_ptr" in code[1])
 
     class RNNTest(TestCase):
         device_type = GPU_TYPE
@@ -13013,14 +13041,13 @@ if HAS_GPU and not TEST_WITH_ASAN:
             actual, code = run_and_get_code(torch.compile(f), x)
             self.assertTrue(torch.allclose(ref, actual))
 
-            if config.cpp_wrapper:
-                code_cpp = code[1]
-                self.assertIn("aoti_torch_check_inf_and_nan", code_cpp)
-
             code = code[0]
-            self.assertIn("# make sure graph inputs are not nan/inf", code)
-            self.assertRegex(code, r"assert not .*\.isnan\(\)\.any\(\).item\(\)")
-            self.assertRegex(code, r"assert not .*\.isinf\(\)\.any\(\).item\(\)")
+            if config.cpp_wrapper:
+                self.assertIn("aoti_torch_check_inf_and_nan", code)
+            else:
+                self.assertIn("# make sure graph inputs are not nan/inf", code)
+                self.assertRegex(code, r"assert not .*\.isnan\(\)\.any\(\).item\(\)")
+                self.assertRegex(code, r"assert not .*\.isinf\(\)\.any\(\).item\(\)")
 
         @config.patch("nan_asserts", True)
         def test_nan_checker_fail(self):
