@@ -1013,30 +1013,28 @@ def record_compilation_metrics(
     exc_type: Optional[Type[BaseException]],
     exc_value: Optional[BaseException],
 ):
-    def us_to_s(field):
-        metric = metrics.get(field, None)
+    def us_to_s(m: Dict[str, Any], field: str) -> Optional[float]:
+        metric = m.get(field, None)
         return metric / 1e6 if metric is not None else None
 
-    def us_to_ms(field):
-        metric = metrics.get(field, None)
+    def us_to_ms(m: Dict[str, Any], field: str) -> Optional[int]:
+        metric = m.get(field, None)
         return metric // 1000 if metric is not None else None
 
-    def _convert_collection_to_str(field: str) -> Optional[str]:
+    def collection_to_str(m: Dict[str, Any], field: str) -> Optional[str]:
         def safe_str(item: Any) -> str:
             try:
                 return str(item)
             except Exception:
-                return str(None)
+                return "<unknown>"
 
-        metric = metrics.get(field, None)
-        if metric is None:
+        if metric := m.get(field, None) is None:
             return None
 
-        # Remove this field (list/set) from metrics to avoid clashes
-        del metrics[field]
-        if not isinstance(metric, set) and not isinstance(metric, list):
-            return None
-        return ",".join(safe_str(item) for item in metric)
+        if not isinstance(metric, (set, list)):
+            return "<unknown>"
+
+        return ",".join(safe_str(item) for item in sorted(metric))
 
     structured_logging_overhead_s = torch._logging.get_structured_logging_overhead()
 
@@ -1057,14 +1055,7 @@ def record_compilation_metrics(
         inductor_fx_remote_cache_backend_type = None
         remote_cache_version = None
 
-    # Populate the compile_id from the metrics context if it's set. Otherwise
-    # look for it in the compile context.
-    compile_id = metrics.get("compile_id")
-    if not compile_id:
-        compile_id = torch._guards.CompileContext.current_compile_id()
-
     common_metrics = {
-        "compile_id": str(compile_id) if compile_id else None,
         "start_time_us": start_time_ns // 1000,
         "end_time_us": end_time_ns // 1000,
         "duration_us": (end_time_ns - start_time_ns) // 1000,
@@ -1074,12 +1065,6 @@ def record_compilation_metrics(
         "inductor_config": _scrubbed_inductor_config_for_logging(),
         "cuda_version": torch.version.cuda,
         "triton_version": triton.__version__ if has_triton() else "",
-        "inductor_fx_remote_cache_hit_keys": _convert_collection_to_str(
-            "inductor_fx_remote_cache_hit_keys"
-        ),
-        "inductor_fx_remote_cache_miss_keys": _convert_collection_to_str(
-            "inductor_fx_remote_cache_miss_keys"
-        ),
         "remote_cache_version": remote_cache_version,
         "inductor_fx_remote_cache_backend_type": inductor_fx_remote_cache_backend_type,
     }
@@ -1088,23 +1073,48 @@ def record_compilation_metrics(
     # them. Remove these when we decide we can really deprecate them.
     legacy_metrics = {
         "start_time": start_time_ns / 1e9,
-        "entire_frame_compile_time_s": us_to_s("dynamo_cumulative_compile_time_us"),
-        "backend_compile_time_s": us_to_s("aot_autograd_cumulative_compile_time_us"),
-        "inductor_compile_time_s": us_to_s("inductor_cumulative_compile_time_us"),
-        "code_gen_time_s": us_to_s("inductor_code_gen_cumulative_compile_time_us"),
-        "remote_cache_time_saved_s": us_to_s("distributed_ephemeral_timeout_us"),
+        "entire_frame_compile_time_s": us_to_s(
+            metrics, "dynamo_cumulative_compile_time_us"
+        ),
+        "backend_compile_time_s": us_to_s(
+            metrics, "aot_autograd_cumulative_compile_time_us"
+        ),
+        "inductor_compile_time_s": us_to_s(
+            metrics, "inductor_cumulative_compile_time_us"
+        ),
+        "code_gen_time_s": us_to_s(
+            metrics, "inductor_code_gen_cumulative_compile_time_us"
+        ),
+        "remote_cache_time_saved_s": us_to_s(
+            metrics, "distributed_ephemeral_timeout_us"
+        ),
         "remote_fx_graph_cache_get_time_ms": us_to_ms(
-            "remote_fx_graph_cache_get_time_us"
+            metrics, "remote_fx_graph_cache_get_time_us"
         ),
         "remote_fx_graph_cache_put_time_ms": us_to_ms(
-            "remote_fx_graph_cache_put_time_us"
+            metrics, "remote_fx_graph_cache_put_time_us"
         ),
         "structured_logging_overhead_s": structured_logging_overhead_s,
     }
 
-    compilation_metrics = CompilationMetrics(
-        **{**legacy_metrics, **common_metrics, **metrics}
+    all_metrics = {**legacy_metrics, **common_metrics, **metrics}
+
+    # Populate the compile_id from the metrics context if it's set. Otherwise,
+    # look for it in the current compile context.
+    compile_id = metrics.get("compile_id")
+    if not compile_id:
+        compile_id = torch._guards.CompileContext.current_compile_id()
+    all_metrics["compile_id"] = str(compile_id) if compile_id else None
+
+    # Process a few of the fields before logging.
+    all_metrics["inductor_fx_remote_cache_hit_keys"] = collection_to_str(
+        all_metrics, "inductor_fx_remote_cache_hit_keys"
     )
+    all_metrics["inductor_fx_remote_cache_miss_keys"] = (
+        collection_to_str(all_metrics, "inductor_fx_remote_cache_miss_keys"),
+    )
+
+    compilation_metrics = CompilationMetrics(**all_metrics)
     _compilation_metrics.append(compilation_metrics)
 
     name = "compilation_metrics"
