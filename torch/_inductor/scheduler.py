@@ -1895,8 +1895,6 @@ class Scheduler:
             reduce_scatter_bucket_cap_mb=100,
             scheduler=self,
         )
-        for node in self.nodes:
-            log.warn(f"snode: {node}, snode.debug_str(): {node.debug_str()}")
         if config.reorder_for_compute_comm_overlap:
             self.nodes = comms.reorder_compute_and_comm_for_overlap(self.nodes)
         self.process_grouped_nodes()
