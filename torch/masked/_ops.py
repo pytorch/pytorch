@@ -1389,7 +1389,7 @@ elements, have ``nan`` values.
         dtype = input.dtype
         dtype_source = "Input"
 
-    if not (dtype.is_floating_point() or dtype.is_complex()):
+    if not (dtype.is_floating_point or dtype.is_complex):
         raise ValueError(
             f"mean(): Could not infer output dtype. {dtype_source} dtype must be either "
             f"a floating point or complex dtype. Got: {dtype}"
