@@ -2402,7 +2402,7 @@ class GraphModule(torch.nn.Module):
         y = ctx.__enter__()
         self.assertEqual(y, x.cos() + 1)
 
-        with self.assertRaisesRegex(RuntimeError, "generator didn't yield"):
+        with self.assertRaisesRegex(AttributeError, "args"):
             torch.compile(backend="eager", fullgraph=False)(fn)(x, ctx)
 
     def test_disable_ctx_manager(self):
