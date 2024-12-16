@@ -784,6 +784,10 @@ def tuned_fused_int_mm_mul(mat1, mat2, mat3, out_dtype, *, layout=None):
     m, n, k, layout, mat1, mat2, mat3 = mm_args(
         mat1, mat2, mat3, layout=layout, out_dtype=out_dtype
     )
+
+    def mul_epilogue(v1, v2):
+        return V.ops.mul(v1, v2)
+
     choices: List[Dict[Any, Any]] = []
     for config in int8_mm_configs(
         m, n, k, **mm_config_kwargs(ir.get_device_type(mat1))
@@ -794,6 +798,6 @@ def tuned_fused_int_mm_mul(mat1, mat2, mat3, out_dtype, *, layout=None):
             layout=layout,
             **dict(mm_options(config, m, n, k, layout), ACC_TYPE="tl.int32"),
             suffix_args=1,
-            epilogue_fn=V.ops.mul,
+            epilogue_fn=mul_epilogue,
         )
     return autotune_select_algorithm("int_mm", choices, [mat1, mat2, mat3], layout)
