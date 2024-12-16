@@ -373,6 +373,8 @@ def _get_aten_graph_module_for_pattern(
             [x.cuda() if isinstance(x, torch.Tensor) else x for x in example_inputs]
         )
 
+    # T199018392
+    # TODO: remove the using_training_ir flag from function
     if using_training_ir:
         aten_pattern = torch.export.export_for_training(
             pattern,  # type: ignore[arg-type]
