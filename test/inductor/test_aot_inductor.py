@@ -4058,6 +4058,10 @@ class AOTInductorTestsTemplate:
         )
         self.check_model(Model(), example_inputs)
 
+    @unittest.skipIf(
+        IS_FBCODE,
+        "To enable after the C shim FC window ends",
+    )
     def test_misaligned_input_1(self):
         if self.device != "cuda":
             raise unittest.SkipTest("CUDA test only")
@@ -4073,17 +4077,17 @@ class AOTInductorTestsTemplate:
         expected = model(*example_inputs)
         so_path = AOTIRunnerUtil.compile(model, example_inputs)
         optimized = AOTIRunnerUtil.load(self.device, so_path)
+        # If the model is compiled with aligned inputs, the generated
+        # code will check inputs alignment at runtime
+        self.code_check_count(
+            model, example_inputs, "aoti_torch_clone_preserve_strides", 1
+        )
 
         misaligned_arg = torch.zeros(N + 1, device=self.device)
         misaligned_arg = misaligned_arg[1:]
         misaligned_arg.copy_(arg)
-        # If the model is compiled with aligned inputs, the generated
-        # code will check inputs alignment at runtime, and throws an
-        # error if any alignment assumption is violated.
-        msg = ".* API call failed at .*"
-        with self.assertRaisesRegex(RuntimeError, msg):
-            actual = optimized(misaligned_arg)
-            torch.testing.assert_close(actual, expected)
+        actual = optimized(misaligned_arg)
+        torch.testing.assert_close(actual, expected)
 
     def test_misaligned_input_2(self):
         if self.device != "cuda":
@@ -4099,9 +4103,14 @@ class AOTInductorTestsTemplate:
         misaligned_arg = misaligned_arg[1:]
         misaligned_arg.copy_(arg)
         example_inputs = (misaligned_arg,)
+
+        model = Model()
+        self.check_model(model, example_inputs)
         # If the model is already compiled with a misaligned input, the
         # generated code should NOT contain an alignment check for that input.
-        self.check_model(Model(), example_inputs)
+        self.code_check_count(
+            model, example_inputs, "aoti_torch_clone_preserve_strides", 0
+        )
 
     def test_conv3d(self):
         if self.device != GPU_TYPE:
