@@ -388,7 +388,7 @@ class FakeTensorConverter:
         out = self.meta_converter(
             t,
             shape_env=shape_env,
-            callback=mk_fake_tensor,
+            callback=mk_fake_tensor,  # type: ignore[arg-type]
             source=source,
             symbolic_context=symbolic_context,
             trace=trace,
@@ -542,7 +542,7 @@ class FakeTensorConfig:
 #
 # Making this a descriptor may seem overly fancy, but actually it's the most
 # convenient way to ensure access to FakeTensor during access, which is
-# required for testing version counter and epoch validity.
+# required for testing version counter and epoch validity.​
 class SymNumberMemoDescriptor:
     _name: str
 
@@ -1311,7 +1311,8 @@ class FakeTensorMode(TorchDispatchMode):
             maybe_prev_only_lift_cpu_tensors,
         ) = self.enter_stack.pop()
         if live:
-            out = super().__exit__(a, b, c)
+            super().__exit__(a, b, c)
+
             # Re-enable the previous fake mode, if there was one.
             if maybe_prev_fake_mode is not None:
                 torch._C._set_dispatch_mode(maybe_prev_fake_mode)
@@ -1803,7 +1804,7 @@ class FakeTensorMode(TorchDispatchMode):
                 "%sFakeTensorMode.__torch_dispatch__: %s", " " * RECURSION_COUNT, func
             )
             # NOTE: incr is intentionally unused for a RAII pattern
-            incr = IncrementRecursionCount()
+            incr = IncrementRecursionCount()  # noqa: F841
 
         # Some attribute queries that can be serviced directly
         # See Note [is_coalesced is dispatched]

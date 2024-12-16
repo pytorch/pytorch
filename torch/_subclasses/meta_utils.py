@@ -271,7 +271,6 @@ class MetaTensorDescriber:
         is_batchedtensor_v = is_batchedtensor(t)
         is_legacy_batchedtensor_v = is_legacy_batchedtensor(t)
         is_gradtrackingtensor_v = is_gradtrackingtensor(t)
-        is_functorch_batched_or_grad = is_batchedtensor_v or is_gradtrackingtensor_v
         is_functional = torch._is_functional_tensor(t)
 
         storage = None
@@ -547,27 +546,11 @@ class _CustomViewFunc(ViewFunc[_TensorT], Generic[_TensorT]):
         return self.func(new_base, symint_visitor_fn, tensor_visitor_fn)
 
 
-# A callback where the device is either optional or required.
-# All of these satisfy this protocol:
-#   def mk(arg: Callable[[], torch.Tensor], device: Union[torch.device, str])
-#   def mk(arg: Callable[[], torch.Tensor], device: Union[torch.device, str] = "meta")
-#   def mk(arg: Callable[[], torch.Tensor], device: Optional[Union[torch.device, str]] = None)
-class _MetaTensorCallback(Protocol, Generic[_TensorT_cov]):
-    def __call__(
-        self, arg: Callable[[], torch.Tensor], /, *, device: Union[torch.device, str]
-    ) -> _TensorT_cov:
-        ...
-
-
 class _MetaTensorCallbackKwargs(TypedDict, total=False):
     device: Union[torch.device, str]
 
 
-# A callback where the device may not be provided (is optional).
-# All of these satisfy this protocol:
-#   def mk(arg: Callable[[], torch.Tensor], device: Union[torch.device, str] = "meta")
-#   def mk(arg: Callable[[], torch.Tensor], device: Optional[Union[torch.device, str]] = None)
-class _MetaTensorCallbackOptDevice(Protocol, Generic[_TensorT_cov]):
+class _MetaTensorCallback(Protocol, Generic[_TensorT_cov]):
     def __call__(
         self,
         arg: Callable[[], torch.Tensor],
@@ -854,13 +837,11 @@ class MetaConverter(Generic[_TensorT]):
         self,
         t: MetaTensorDesc,
         shape_env: Optional[ShapeEnv],
-        callback_: _MetaTensorCallback[_TensorT],
+        callback: _MetaTensorCallback[_TensorT],
         source: Optional[Source],
         symbolic_context: Optional[SymbolicContext],
     ) -> _TensorT:
-        callback: _MetaTensorCallbackOptDevice = functools.partial(
-            callback_, device=t.device
-        )
+        callback = functools.partial(callback, device=t.device)
         if source is None:
             from torch._dynamo.source import ConstantSource
 
@@ -876,7 +857,6 @@ class MetaConverter(Generic[_TensorT]):
         assert not torch._C._dispatch_tls_local_exclude_set().has(
             torch._C.DispatchKey.Python
         )
-        arg_cnt = self.arg_cnt
         self.arg_cnt += 1
 
         # When we make as_strided calls, we end up generating a guard
@@ -955,7 +935,7 @@ class MetaConverter(Generic[_TensorT]):
             (
                 inner_sizes,
                 inner_strides,
-                inner_storage_offset,
+                _inner_storage_offset,
             ) = sym_sizes_strides_storage_offset(inner_t, inner_src, symbolic_context)
             return torch.empty_strided(
                 inner_sizes,
@@ -1006,7 +986,7 @@ class MetaConverter(Generic[_TensorT]):
                 symbolic_context: Optional[
                     torch.fx.experimental.symbolic_shapes.SymbolicContext
                 ],
-                callback: _MetaTensorCallbackOptDevice[_TensorT],
+                callback: _MetaTensorCallback[_TensorT],
                 source: torch._guards.Source,
             ) -> _TensorT:
                 # We are hitting plain meta_desc tensor so actually
@@ -1241,7 +1221,7 @@ class MetaConverter(Generic[_TensorT]):
                 shape_env: Optional[
                     torch.fx.experimental.symbolic_shapes.ShapeEnv
                 ] = shape_env,
-                callback: _MetaTensorCallbackOptDevice[_TensorT] = callback,
+                callback: _MetaTensorCallback[_TensorT] = callback,
             ) -> torch.Tensor:
                 # It's possible to close over an undefined tensor (e.g. NJT's lengths).
                 if visited_t is None:

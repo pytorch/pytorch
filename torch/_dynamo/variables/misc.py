@@ -101,8 +101,6 @@ class SuperVariable(VariableTracker):
             type_to_use_source = self.objvar.source
 
         source = None
-        resolved_class = None
-        resolved_attr = None
         search_mro = type_to_use.__mro__
 
         try:
@@ -1214,12 +1212,6 @@ def get_np_to_tnp_map():
                     np_fn_to_tnp_fn[np_fn] = tnp_fn
 
     return np_fn_to_tnp_fn
-
-
-@functools.lru_cache(maxsize=1)
-def get_tnp_to_np_map():
-    m = get_np_to_tnp_map()
-    return {v: k for k, v in m.items()}
 
 
 class NumpyVariable(VariableTracker):
