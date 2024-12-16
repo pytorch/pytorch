@@ -1,7 +1,7 @@
 /* styles needed for the Google Search button */
 
-.pytorch-left-menu-search input[type=text] {
-    background-image: none;
+.gsc-overflow-hidden {
+    overflow: visible !important;
 }
 
 .gsc-control-cse {
