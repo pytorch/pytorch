@@ -3,7 +3,8 @@
 # AND SCRUB AWAY TORCH NOTIONS THERE.
 import collections
 import functools
-from typing import Any, Callable, OrderedDict
+from typing import Any, Callable, OrderedDict, TypeVar
+from typing_extensions import ParamSpec
 
 simple_call_counter: OrderedDict[str, int] = collections.OrderedDict()
 
@@ -11,7 +12,10 @@ def count_label(label: str) -> None:
     prev = simple_call_counter.setdefault(label, 0)
     simple_call_counter[label] = prev + 1
 
-def count(fn: Callable[..., Any]) -> Callable[..., Any]:
+_P = ParamSpec("_P")
+_T = TypeVar("_T")
+
+def count(fn: Callable[_P, _T]) -> Callable[_P, _T]:
     @functools.wraps(fn)
     def wrapper(*args: Any, **kwargs: Any) -> Any:
         if fn.__qualname__ not in simple_call_counter:
