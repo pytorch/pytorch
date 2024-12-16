@@ -930,7 +930,7 @@ graph():
                 return r * 2
 
         M()(torch.randn(7))
-        torch.export.export(M(), (torch.randn(7),))
+        export(M(), (torch.randn(7),))
 
     def test_unbacked_to_cond_passthrough(self):
         class M(torch.nn.Module):
@@ -947,7 +947,7 @@ graph():
                 return r * 2
 
         M()(torch.randn(7))
-        torch.export.export(M(), (torch.randn(7),))
+        export(M(), (torch.randn(7),))
 
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_cond_contains_unbacked_no_escape(self):
