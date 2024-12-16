@@ -4,6 +4,7 @@ import os
 
 import torch
 import torch.distributed._functional_collectives as funcol
+from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.distributed._tensor import DTensor
 from torch.distributed.device_mesh import _mesh_resources, DeviceMesh, init_device_mesh
 from torch.distributed.distributed_c10d import (
@@ -87,7 +88,7 @@ class DeviceMeshTest(DTensorTestBase):
     def test_assert_invalid_mesh_tensor(self):
         mesh = torch.arange(self.world_size).to(self.rank)
         with self.assertRaises(ValueError):
-            device_mesh = DeviceMesh(self.device_type, mesh)
+            DeviceMesh(self.device_type, mesh)
 
     @with_comms()
     def test_2d_mesh_non_eager_init_subgroup(self):
@@ -143,7 +144,7 @@ class DeviceMeshTest(DTensorTestBase):
             RuntimeError,
             "Optional kwarg `mesh_dim` needs to be specified when device_mesh.ndim > 1.",
         ):
-            local_rank = mesh_2d.get_local_rank()
+            mesh_2d.get_local_rank()
 
     @with_comms
     def test_get_local_rank(self):
@@ -257,7 +258,7 @@ class DeviceMeshTest(DTensorTestBase):
         ):
             # test init_device_mesh with an invalid device type that contains a GPU index
             mesh_shape = (2, self.world_size // 2)
-            mesh_2d = init_device_mesh(
+            init_device_mesh(
                 "cuda:0", mesh_shape=mesh_shape, mesh_dim_names=("dp", "tp")
             )
 
@@ -452,7 +453,7 @@ class InitDeviceMeshTest(DTensorTestBase):
             RuntimeError,
             "Each mesh_dim_name must be unique.",
         ):
-            mesh = init_device_mesh(
+            init_device_mesh(
                 self.device_type,
                 (2, 4),
                 mesh_dim_names=["dp", "dp"],
@@ -464,7 +465,7 @@ class InitDeviceMeshTest(DTensorTestBase):
             RuntimeError,
             "mesh_shape and mesh_dim_names should have same length!",
         ):
-            mesh = init_device_mesh(
+            init_device_mesh(
                 self.device_type,
                 (8,),
                 mesh_dim_names=["dp", "tp"],
@@ -482,7 +483,7 @@ class TestDeviceMeshGetItem(DTensorTestBase):
             RuntimeError, "Cannot slice a DeviceMesh without mesh_dim_names!"
         ):
             mesh = init_device_mesh(self.device_type, (2, 4))
-            child_mesh = mesh["DP"]
+            mesh["DP"]
 
     @with_comms
     def test_raises_invalid_mesh_dim_name(self):
@@ -492,7 +493,7 @@ class TestDeviceMeshGetItem(DTensorTestBase):
             mesh = init_device_mesh(
                 self.device_type, (2, 4), mesh_dim_names=mesh_dim_names
             )
-            child_mesh = mesh[child_mesh_dim_name]
+            mesh[child_mesh_dim_name]
 
     @with_comms
     def test_get_item_2d(self):
@@ -513,7 +514,6 @@ class TestDeviceMeshGetItem(DTensorTestBase):
         tp_group_idx = self.rank // 4
         self.assertEqual(tp_mesh.mesh, pg_ranks_by_dim_name["TP"][tp_group_idx])
 
-        dp_mesh = mesh_2d["DP"]
         dp_group_idx = self.rank % 4
         self.assertEqual(mesh_2d["DP"].mesh, pg_ranks_by_dim_name["DP"][dp_group_idx])
 
@@ -563,17 +563,15 @@ class TestDeviceMeshGetItem(DTensorTestBase):
     def test_cache_and_reuse_submesh_slice_result(self):
         mesh = init_device_mesh(self.device_type, (2, 4), mesh_dim_names=("dp", "tp"))
 
-        dp_mesh = mesh["dp"]
         ref_pg_count = _world.group_count
 
         # When we call the "dp" slice second time, it should not create any new pg.
         # As we are just using the cached result so the pg count should be the same.
-        dp_mesh_2 = mesh["dp"]
         self.assertEqual(ref_pg_count, _world.group_count)
 
         # When we call the "tp" slice, it should not create a new pg, as the "tp" slice would
         # just reuse the parent mesh pg.
-        tp_mesh = mesh["tp"]
+        mesh["tp"]
         self.assertEqual(_world.group_count, ref_pg_count)
 
     @with_comms
@@ -602,7 +600,7 @@ class TestDeviceMeshGetItem(DTensorTestBase):
             KeyError,
             "Invalid mesh_dim_names",
         ):
-            cp_dp_mesh = mesh_3d["cp", "dp"]
+            mesh_3d["cp", "dp"]
 
     @with_comms
     def test_flatten_mesh_3d(self):
@@ -756,6 +754,19 @@ class TestMeshEnv(DTensorTestBase):
         self.assertEqual(
             all(submesh.mesh.numel() == 2 for submesh in all_submeshes), True
         )
+
+    @with_comms
+    def test_mesh_slice_fake_tensor_mode(self):
+        mesh_shape = (2, self.world_size // 2)
+        mesh_dim_names = ("DP", "TP")
+        mesh_2d = init_device_mesh(
+            self.device_type, mesh_shape, mesh_dim_names=mesh_dim_names
+        )
+
+        with FakeTensorMode():
+            mesh_2d["DP"]
+            mesh_2d["TP"]
+            mesh_2d["DP", "TP"]
 
 
 class DeviceMeshCollectiveTest(DTensorTestBase):
