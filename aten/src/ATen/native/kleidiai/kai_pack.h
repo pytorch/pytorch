@@ -40,7 +40,7 @@ void kai_pack_rhs_groupwise_int4(
   auto& params = kernel.rhs_pack_params;
 
   kernel.kai_run_rhs_pack(
-      1,
+      /*num_groups=*/1,
       n,
       k,
       nr,
@@ -87,7 +87,7 @@ void kai_pack_rhs_channelwise_int4(
   auto& params = kernel.rhs_pack_params;
 
   kernel.kai_run_rhs_pack(
-      1,
+      /*num_groups=*/1,
       n,
       k,
       nr,

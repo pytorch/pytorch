@@ -133,7 +133,6 @@ class TestPublicBindings(TestCase):
             "GraphExecutorState",
             "has_cuda",
             "has_cudnn",
-            "has_kleidiai",
             "has_lapack",
             "has_mkl",
             "has_mkldnn",

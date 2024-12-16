@@ -21,7 +21,7 @@ void kai_pack_int4_rhs(
     const int64_t n,
     const int64_t k,
     const int64_t bl) {
-  // We prefer Channelwise kernel over Groupwise kernel for conflicting cases
+  // Prefer Channelwise kernel over Groupwise kernel for conflicting cases
   if (bl == k) {
     // Channelwise
     auto kernel_packet = kai_select_channelwise_matmul_ukernel(
@@ -65,7 +65,7 @@ size_t kai_pack_rhs_int4_size(
     const int64_t k,
     const int64_t bl) {
   size_t packed_size = n * k;
-  // We prefer Channelwise kernel over Groupwise kernel for conflicting cases
+  // Prefer Channelwise kernel over Groupwise kernel for conflicting cases
   if (bl == k) {
     // Channelwise
     auto kernel_packet = kai_select_channelwise_matmul_ukernel(
@@ -427,7 +427,7 @@ void kai_quant_pack_lhs_int4_mm(
     const int64_t n,
     const int64_t k,
     const int64_t bl) {
-  // We prefer Channelwise kernel over Groupwise kernel for conflicting cases
+  // Prefer Channelwise kernel over Groupwise kernel for conflicting cases
   if (bl == k) {
     kleidiai::kai_quant_pack_lhs_int4_mm_channelwise(
         output, input, weight, m, n, k);
