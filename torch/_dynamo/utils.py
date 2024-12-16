@@ -1028,7 +1028,8 @@ def record_compilation_metrics(
             except Exception:
                 return "<unknown>"
 
-        if metric := m.get(field, None) is None:
+        metric = m.get(field, None)
+        if metric is None:
             return None
 
         if not isinstance(metric, (set, list)):
