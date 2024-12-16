@@ -167,12 +167,14 @@ class PyCodegen:
         if (
             value.source is not None
             and allow_cache
-            and not isinstance(
-                value,
-                (
-                    FunctionDecoratedByContextlibContextManagerVariable,
-                    GeneratorObjectVariable,
-                ),
+            and not (
+                value.is_realized()
+                and isinstance(
+                    value, (
+                        FunctionDecoratedByContextlibContextManagerVariable,
+                        GeneratorObjectVariable,
+                    )
+                )
             )
         ):
             # There's a corner case for export: for instance, if the computation

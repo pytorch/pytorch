@@ -335,6 +335,7 @@ class GeneratorFunctionVariable(BaseUserFunctionVariable):
     """
 
     def __init__(self, vt: VariableTracker, **kwargs):
+        super().__init__(**kwargs)
         self.vt = vt
 
     def __getattr__(self, name):
