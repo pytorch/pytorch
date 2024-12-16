@@ -7,6 +7,7 @@ import torch
 import torch._inductor
 from torch._higher_order_ops import foreach_map
 from torch._inductor.test_case import TestCase
+from torch._inductor.utils import run_fw_bw_and_get_code
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_FBCODE,
@@ -1017,12 +1018,13 @@ class ForeachTests(TestCase):
         out_ref = ref_fn(*ref_inps)
         out_ref.backward()
 
-        fn_opt = torch.compile(fn, fullgraph=True)
-        out = fn_opt(*inps)
-        out.backward()
+        # unpacking result, (fw_code, bw_code)
+        _, (_, _) = run_fw_bw_and_get_code(lambda: torch.compile(fn)(*inps))
 
         for ref, act in zip(tree_flatten(ref_inps)[0], tree_flatten(inps)[0]):
             torch.allclose(ref.grad, act.grad)
+
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 5)
 
     @requires_cuda
     @foreach_map_un_ops
@@ -1048,12 +1050,13 @@ class ForeachTests(TestCase):
         out_ref = ref_fn(ref_inp)
         out_ref.backward()
 
-        fn_opt = torch.compile(fn, fullgraph=True)
-        out = fn_opt(inp)
-        out.backward()
+        # unpacking result, (fw_code, bw_code)
+        _, (_, _) = run_fw_bw_and_get_code(lambda: torch.compile(fn)(inp))
 
         for ref, act in zip(ref_inp, inp):
             torch.allclose(ref.grad, act.grad)
+
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 5)
 
 
 if __name__ == "__main__":
