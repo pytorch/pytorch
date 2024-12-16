@@ -1,5 +1,5 @@
-# mypy: allow-untyped-defs
 # Copyright (c) Meta Platforms, Inc. and affiliates
+from typing import Any
 
 from .core import MaskedTensor
 
@@ -15,9 +15,9 @@ __all__ = [
 #     torch.as_tensor - differentiable constructor that preserves the autograd history
 
 
-def masked_tensor(data, mask, requires_grad=False):
+def masked_tensor(data: Any, mask: Any, requires_grad: bool = False) -> MaskedTensor:
     return MaskedTensor(data, mask, requires_grad)
 
 
-def as_masked_tensor(data, mask):
+def as_masked_tensor(data: Any, mask: Any) -> MaskedTensor:
     return MaskedTensor._from_values(data, mask)
