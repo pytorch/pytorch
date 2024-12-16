@@ -145,6 +145,7 @@ if TYPE_CHECKING:
 
 log = logging.getLogger(__name__)
 perf_hint_log = torch._logging.getArtifactLogger(__name__, "perf_hints")
+pre_grad_graphs_log = torch._logging.getArtifactLogger(__name__, "pre_grad_graphs")
 post_grad_graphs_log = torch._logging.getArtifactLogger(__name__, "post_grad_graphs")
 static_inputs_log = torch._logging.getArtifactLogger(
     __name__, "cudagraph_static_inputs"
@@ -408,12 +409,14 @@ def split_const_gm(
 
 def is_tf32_warning_applicable(gm: GraphModule) -> bool:
     aten = torch.ops.aten
-    tf32_ops = {
-        aten.mm.default,
-        aten.addmm.default,
-        aten.bmm.default,
-        aten.baddbmm.default,
-    }
+    tf32_ops = OrderedSet(
+        [
+            aten.mm.default,
+            aten.addmm.default,
+            aten.bmm.default,
+            aten.baddbmm.default,
+        ]
+    )
     for target in tf32_ops:
         for node in gm.graph.find_nodes(op="call_function", target=target):
             if (
@@ -1424,7 +1427,7 @@ def fw_compiler_freezing(
         assert tracing_context.params_flat_unwrap_subclasses is not None
         params_flat_unwrap = tracing_context.params_flat_unwrap_subclasses
         max_offset_idx = max(0, len(params_flat_unwrap) - 1)
-        preserved_indices_params_flat = set()
+        preserved_indices_params_flat = OrderedSet[int]()
         unwrapped_idxs = tracing_context.params_unwrapped_to_flat_index
         assert unwrapped_idxs is not None
         current_offset = 0
@@ -1629,6 +1632,24 @@ def compile_fx(
         # having AOTAutograd trace it.
         # TODO: Get rid of this?
         if isinstance(model_, GraphModule):
+            trace_structured(
+                "inductor_pre_grad_graph",
+                payload_fn=lambda: model_.print_readable(
+                    print_output=False, include_stride=True, include_device=True
+                )
+                + f"\n\n # graph id: {id(model_.graph)}",
+            )
+            pre_grad_graphs_log.debug(
+                "%s",
+                lazy_format_graph_code(
+                    "BEFORE PRE GRAD",
+                    model_,
+                    include_stride=True,
+                    include_device=True,
+                    colored=True,
+                ),
+            )
+
             model_ = _recursive_pre_grad_passes(model_, example_inputs_)
 
         # TODO: Move this before recursive pre-grad passes
