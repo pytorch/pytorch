@@ -21,7 +21,7 @@ import warnings
 import weakref
 from contextlib import contextmanager
 from copy import deepcopy
-from inspect import currentframe, getframeinfo
+from inspect import currentframe
 from typing import (
     Any,
     Callable,
@@ -439,25 +439,8 @@ def _get_closure_vars():
     return _CLOSURE_VARS
 
 
-if sys.version_info[:2] <= (3, 8):
-    # [Note: Python Version <= 3.8]
-    # This branch should be dropped when we drop support for Python 3.8.
-    # Reason: 'ast.unparse' function was introduced in Python 3.9.
-
-    try:
-        import astunparse  # type: ignore[import]
-
-        def _ast_unparse(node: ast.AST) -> str:
-            return astunparse.unparse(node).replace("\n", "")
-
-        HAS_UNPARSE_FUNCTIONS = True
-    except ImportError:
-        HAS_UNPARSE_FUNCTIONS = False
-else:
-    HAS_UNPARSE_FUNCTIONS = True
-
-    def _ast_unparse(node: ast.AST) -> str:
-        return ast.unparse(node).replace("\n", "")
+def _ast_unparse(node: ast.AST) -> str:
+    return ast.unparse(node).replace("\n", "")
 
 
 def strip_function_call(name):
@@ -565,7 +548,6 @@ def getitem_on_dict_manager(
     source, base_guard_manager, base_example_value, example_value, guard_manager_enum
 ):
     base_source_name = source.base.name()
-    source_name = source.name()
     if isinstance(source.index, ConstDictKeySource):
         index = source.index.index
     else:
@@ -1256,7 +1238,7 @@ class GuardBuilder(GuardBuilderBase):
         # code_parts in a function object which is then passed on to the leaf
         # guard.
         make_guard_fn_args = ", ".join(closure_vars.keys())
-        guard_body, pycode = build_guard_function(code_parts, make_guard_fn_args)
+        _guard_body, pycode = build_guard_function(code_parts, make_guard_fn_args)
         out: Dict[str, Any] = {}
         globals_for_guard_fn = {"G": self.scope["G"]}
         exec(pycode, globals_for_guard_fn, out)
@@ -1531,7 +1513,6 @@ class GuardBuilder(GuardBuilderBase):
     def EQUALS_MATCH(self, guard: Guard):
         ref = self.arg_ref(guard)
         val = self.get(guard.name)
-        t = type(val)
         if np:
             np_types: Tuple[Type[Any], ...] = (
                 np.int8,
@@ -1670,7 +1651,6 @@ class GuardBuilder(GuardBuilderBase):
         # tuple, collections.deque etc
         ref = self.arg_ref(guard)
         value = self.get(guard.name)
-        t = type(value)
 
         if not isinstance(value, dict):
             # C++ DICT_LENGTH checks for type
@@ -1756,7 +1736,6 @@ class GuardBuilder(GuardBuilderBase):
         # Guard on the keys and their order
         ref = self.arg_ref(guard)
         value = self.get(guard.name)
-        t = type(value)
 
         self.TYPE_MATCH(guard)
         code = []
@@ -1788,7 +1767,6 @@ class GuardBuilder(GuardBuilderBase):
         """Constant keys match"""
         ref = self.arg_ref(guard)
         value = self.get(guard.name)
-        t = type(value)
 
         code = []
         code.append(f"list({ref}.keys()) == {list(value.keys())!r}")
@@ -1913,6 +1891,8 @@ class GuardBuilder(GuardBuilderBase):
         )
 
     def TENSOR_MATCH(self, guard: Guard, value=None):
+        if config._unsafe_skip_fsdp_module_guards and guard.is_fsdp_module():
+            return
         # For tensors that are part of the Dynamo extracted Fx graph module, an
         # ID_MATCH suffices. Once we turn on inline_inbuilt_nn_modules, these
         # will be lifted as inputs and have a TENSOR_MATCH guard.
@@ -2043,7 +2023,7 @@ class GuardBuilder(GuardBuilderBase):
             # this logic, be my guest!  -- ezyang 2024)
             #
             assert guard.source is not None
-            static, reason = tensor_always_has_static_shape(
+            static, _reason = tensor_always_has_static_shape(
                 value, is_tensor=True, tensor_source=guard.originating_source
             )
 
@@ -2079,18 +2059,17 @@ class GuardBuilder(GuardBuilderBase):
         caller = cur_frame.f_back
         del cur_frame
         assert caller is not None
-        func_name = getframeinfo(caller)[2]
+        func_name = caller.f_code.co_name
         del caller
         # We use func_name for export, so might as well get a nice defensive check out of it
-        assert func_name in dir(
-            self.__class__
+        assert (
+            func_name in self.__class__.__dict__
         ), f"_produce_guard_code must be called from inside GuardedCode. Called from {func_name}"
 
         # Not all guards have names, some can be installed globally (see asserts on HAS_GRAD)
         if provided_guarded_object is None:
-            name_valid = guard.name is not None and guard.name != ""
-
-            guarded_object = self.get(guard.name) if name_valid else None
+            name = guard.name
+            guarded_object = None if not name else self.get(name)
         else:
             guarded_object = provided_guarded_object
 
@@ -2593,17 +2572,11 @@ class CheckFunctionManager:
 def build_guard_function(code_parts, closure_args) -> Tuple[str, str]:
     from torch._inductor.utils import IndentedBuffer
 
-    if HAS_UNPARSE_FUNCTIONS:
-        csepass = PyExprCSEPass()
-        csepass.count(code_parts)
+    csepass = PyExprCSEPass()
+    csepass.count(code_parts)
 
-        def replace(expr: str) -> Tuple[List[str], str]:
-            return csepass.replace(expr)
-
-    else:
-
-        def replace(expr: str) -> Tuple[List[str], str]:
-            return [], expr
+    def replace(expr: str) -> Tuple[List[str], str]:
+        return csepass.replace(expr)
 
     # Generate the inner body of the guard function.
     # i.e. if-chain of the guard expressions.
@@ -2724,7 +2697,7 @@ def get_guard_fail_reason_helper(
             with report_compile_source_on_error():
                 try:
                     fail_reason = eval(part, global_scope, scope)
-                except Exception as e:
+                except Exception:
                     if is_recompiles_verbose_enabled():
                         continue
                     else:
@@ -2759,7 +2732,7 @@ def get_guard_fail_reason(
             guard_manager.guard_fail_fn(
                 GuardFail(reason_str or "unknown reason", orig_code_map[code])
             )
-    except Exception as e:
+    except Exception:
         log.exception(
             "Failure in guard_fail_fn callback - raising here will cause a NULL Error on guard eval",
         )
