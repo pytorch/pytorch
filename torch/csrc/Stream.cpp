@@ -263,6 +263,7 @@ static PyObject* THPStream_eq(THPStream* self, THPStream* other) {
 
 static PyObject* THPStream_enter(PyObject* _self, PyObject* unused) {
   HANDLE_TH_ERRORS
+  std::cout << "call THPStream_enter" << std::endl;
   auto self = (THPStream*)_self;
   c10::DeviceType stream_device_type =
       static_cast<c10::DeviceType>(self->device_type);
@@ -298,6 +299,7 @@ static PyObject* THPStream_enter(PyObject* _self, PyObject* unused) {
 
 static PyObject* THPStream_exit(PyObject* _self, PyObject* unused) {
   HANDLE_TH_ERRORS
+  std::cout << "call THPStream_exit" << std::endl;
   auto self = (THPStream*)_self;
   // No operation is performed if the stream does not belong to an accelerator.
   if (C10_UNLIKELY(!at::accelerator::isAccelerator(
