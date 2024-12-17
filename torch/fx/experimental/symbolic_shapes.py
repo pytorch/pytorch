@@ -4294,7 +4294,6 @@ class ShapeEnv:
                 sympy_expr = make_symbol(
                     SymT.FLOAT, len(self.var_to_val), positive=positive, real=True
                 )
-            breakpoint()
             self.source_to_var[source_name] = sympy_expr
             # We always associate vars to vals
             if isinstance(val, int):
@@ -4415,7 +4414,6 @@ class ShapeEnv:
             # This implements duck-shaping: input sizes that match are assigned
             # the same symint
             r = self.val_to_var[val]
-            breakpoint()
             self.source_to_var[source_name] = r
             self.log.debug("create_symbol %s duck sized %s", r, source.name())
 
