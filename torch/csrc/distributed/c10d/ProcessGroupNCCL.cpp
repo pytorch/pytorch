@@ -893,11 +893,7 @@ ProcessGroupNCCL::ProcessGroupNCCL(
   desyncDebug_ = getCvarBool(TORCH_NCCL_DESYNC_DEBUG, false) ||
       (dist_debug_level_ >= DebugLevel::Detail);
   rethrowCUDAErrors_ = getCvarBool(TORCH_NCCL_RETHROW_CUDA_ERRORS, true);
-  // TODO, we should either deprecate TORCH_NCCL_DUMP_ON_TIMEOUT
-  // or change its name to reflect that dump happens on exception including
-  // both timeout and other errors.
-  dumpOnTimeoutOrEx_ = getCvarBool(TORCH_NCCL_DUMP_ON_TIMEOUT, false) ||
-      (dist_debug_level_ >= DebugLevel::Detail);
+  dumpOnTimeoutOrEx_ = true;
   // logging C++ stack isn't safe. Introduce a variable to control it.
   logCppStackOnUncleanShutdown_ =
       getCvarBool(TORCH_NCCL_LOG_CPP_STACK_ON_UNCLEAN_SHUTDOWN, true);
