@@ -365,9 +365,19 @@ class _ReaderView(io.IOBase):
         return self.base_stream.seekable()
 
     def readinto(self, b):
+        max_size = self.len - self.tell()
+        if max_size == 0:
+            return 0
+        if len(b) > max_size:
+            b = memoryview(b)[:max_size]
         return self.base_stream.readinto(b)  # type: ignore[attr-defined]
 
     def read(self, size=-1):
+        max_size = self.len - self.tell()
+        if size == -1:
+            size = max_size
+        elif size > max_size:
+            size = max_size
         return self.base_stream.read(size)
 
 
