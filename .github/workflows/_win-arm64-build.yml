@@ -68,8 +68,66 @@ jobs:
       run:
         shell: bash
     steps:
-      # [see note: pytorch repo ref]
-      - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
+      - name: Git checkout Builder
+        uses: actions/checkout@v4
         with:
-          no-sudo: true
+          repository:  iremyux/pytorch-builder
+          ref:  nightly-for-win-arm64
+          path: "builder"
+      - name: Bootstrap Git
+        shell: cmd
+        run: |
+          "builder/windows/arm64/bootstrap_git.bat"
+      - name: Bootstrap Python
+        shell: cmd
+        run: |
+          "builder/windows/arm64/bootstrap_python.bat"
+      - name: Bootstrap Build Tools
+        shell: cmd
+        run: |
+          "builder/windows/arm64/bootstrap_buildtools.bat"
+      - name: Bootstrap APL
+        shell: cmd
+        run: |
+          "builder/windows/arm64/bootstrap_apl.bat"
+      - name: Bootstrap Rust
+        shell: cmd
+        run: |
+          "builder/windows/arm64/bootstrap_rust.bat"
+      - name: Bootstrap sccache
+        shell: cmd
+        run: |
+          "builder/windows/arm64/bootstrap_sccache.bat"
+      - name: Git checkout PyTorch
+        uses: actions/checkout@v4
+        with:
+          repository:  "iremyux/pytorch"
+          ref: "nightly-for-win-arm64"
+          path: "pytorch"
+          submodules: recursive
+      - name: Build
+        if: steps.filter.outputs.is-test-matrix-empty == 'False' || inputs.test-matrix == ''
+        id: build
+        shell: bash
+        env:
+          PYTORCH_FINAL_PACKAGE_DIR: /c/${{ github.run_id }}/build-results/
+          BRANCH: ${{ steps.parse-ref.outputs.branch }}
+          BUILD_ENVIRONMENT: ${{ inputs.build-environment }}
+          BUILD_WHEEL: 1
+          MAX_JOBS: 8
+          PYTHON_VERSION: "3.12"
+          SCCACHE_BUCKET: "ossci-compiler-cache"
+          SCCACHE_S3_KEY_PREFIX: ${{ github.workflow }}
+          SCCACHE_REGION: us-east-1
+          VC_PRODUCT: "BuildTools"
+          VC_VERSION: ""
+          VC_YEAR: "${{ inputs.vc-year }}"
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
+          DEBUG: ${{ inputs.build-with-debug && '1' || '0' }}
+          USE_CUDA: '0'
+          USE_XPU: '0'
+          XPU_VERSION: "${{ inputs.xpu-version }}"
+          OUR_GITHUB_JOB_ID: ${{ steps.get-job-id.outputs.job-id }}
+        run: |
+          .ci/pytorch/win-arm64-build.sh
