@@ -19,7 +19,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
 
-ROOT_PATH = Path(__file__).absolute().parents[2]
+ROOT_PATH = Path(__file__).absolute().parent.parent.parent
 SETUP_PY_PATH = ROOT_PATH / "setup.py"
 REQUIREMENTS_PATH = ROOT_PATH / "requirements.txt"
 
@@ -47,20 +47,17 @@ def interpreter_version(interpreter: str) -> str:
 @contextlib.contextmanager
 def venv(interpreter: str) -> Iterator[str]:
     # Should this use EnvBuilder? Probably, maybe a good todo in the future
-    try:
-        python_version = interpreter_version(interpreter)
-        with tempfile.TemporaryDirectory(
-            suffix=f"_pytorch_builder_{python_version}"
-        ) as tmp_dir:
-            logger.info(
-                "Creating virtual environment (Python %s) at %s",
-                python_version,
-                tmp_dir,
-            )
-            run_cmd([interpreter, "-m", "venv", tmp_dir])
-            yield str(Path(tmp_dir) / "bin" / "python3")
-    finally:
-        pass
+    python_version = interpreter_version(interpreter)
+    with tempfile.TemporaryDirectory(
+        suffix=f"_pytorch_builder_{python_version}"
+    ) as tmp_dir:
+        logger.info(
+            "Creating virtual environment (Python %s) at %s",
+            python_version,
+            tmp_dir,
+        )
+        run_cmd([interpreter, "-m", "venv", tmp_dir])
+        yield str(Path(tmp_dir) / "bin" / "python3")
 
 
 class Builder:
