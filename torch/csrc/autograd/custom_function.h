@@ -122,6 +122,9 @@ struct TORCH_API AutogradContext {
   AutogradContext() = default;
   AutogradContext(const AutogradContext& other) = delete;
   AutogradContext& operator=(const AutogradContext& other) = delete;
+  AutogradContext(AutogradContext&& other) = delete;
+  AutogradContext& operator=(AutogradContext&& other) = delete;
+  ~AutogradContext() = default;
 
   /// Can be used to save non-variable data for `backward`.
   ska::flat_hash_map<std::string, at::IValue> saved_data;
