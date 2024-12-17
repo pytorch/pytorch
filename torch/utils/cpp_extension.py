@@ -1844,6 +1844,14 @@ def _write_ninja_file_and_compile_objects(
     build_file_path = os.path.join(build_directory, 'build.ninja')
     if verbose:
         print(f'Emitting ninja build file {build_file_path}...', file=sys.stderr)
+
+    # Create build_directory if it does not exist
+    if not os.path.exists(build_directory):
+        if verbose:
+            print(f'Creating directory {build_directory}...', file=sys.stderr)
+        # This is like mkdir -p, i.e. will also create parent directories.
+        os.makedirs(build_directory, exist_ok=True)
+
     _write_ninja_file(
         path=build_file_path,
         cflags=cflags,
@@ -1892,6 +1900,14 @@ def _write_ninja_file_and_build_library(
     build_file_path = os.path.join(build_directory, 'build.ninja')
     if verbose:
         print(f'Emitting ninja build file {build_file_path}...', file=sys.stderr)
+
+    # Create build_directory if it does not exist
+    if not os.path.exists(build_directory):
+        if verbose:
+            print(f'Creating directory {build_directory}...', file=sys.stderr)
+        # This is like mkdir -p, i.e. will also create parent directories.
+        os.makedirs(build_directory, exist_ok=True)
+
     # NOTE: Emitting a new ninja build file does not cause re-compilation if
     # the sources did not change, so it's ok to re-emit (and it's fast).
     _write_ninja_file_to_build_library(
