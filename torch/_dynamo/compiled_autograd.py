@@ -64,12 +64,25 @@ def maybe_clone(x):
 # function is called. It's possible to avoid lazy binding and instead bind
 # all of this upfront (perhaps at import time) via codegen changes.
 class OpNamespace:
-    def add(self, name, fn):
-        assert not hasattr(self, name)
-        result = Op(name, fn)
+    def __init__(self):
+        self.custom_function_name_counter = {}
+
+    def add(self, name, fn, is_custom_function=False):
+        if is_custom_function:
+            # TODO(rzou): wut
+            name = "f" + name
+            if name not in self.custom_function_name_counter:
+                self.custom_function_name_counter[name] = 0
+            count = self.custom_function_name_counter[name]
+            self.custom_function_name_counter[name] += 1
+            name = name + str(count)
+        else:
+            assert not hasattr(self, name)
+
+        result = Op(name, fn, is_custom_function)
         torch._dynamo.allow_in_graph(result)
         setattr(self, name, result)
-        return result
+        return name
 
     def get(self, name):
         assert hasattr(self, name)
@@ -77,8 +90,9 @@ class OpNamespace:
 
 
 class Op:
-    def __init__(self, name, fn):
+    def __init__(self, name, fn, is_custom_function):
         self.fn = fn
+        self.is_custom_function = is_custom_function
         self.__name__ = name
         self.__module__ = "torch._dynamo.compiled_autograd.ops"
 
@@ -265,9 +279,9 @@ class AutogradCompilerInstance:
         with disable_proxy_modes_tracing():
             return torch.ops.aten.zeros(shape, **kwargs)
 
-    def bind_function(self, fn_name, fn):
+    def bind_function(self, fn_name, fn, is_custom_function):
         """Binds ops.fn_name = fn"""
-        op = ops.add(fn_name, fn)
+        return ops.add(fn_name, fn, is_custom_function)
 
     def apply_functional(self, fn_name, grads, args, output_metadata):
         """Proxies a call to ops.fn_name(grads, *args) into the graph"""
@@ -398,7 +412,10 @@ class AutogradCompilerInstance:
                         isinstance(user.target, torch._ops.OpOverload)
                         and user.target.namespace in ("prims", "aten")
                     )
-                    or isinstance(user.target, torch._dynamo.compiled_autograd.Op)
+                    or (
+                        isinstance(user.target, torch._dynamo.compiled_autograd.Op)
+                        and not user.target.is_custom_function
+                    )
                     for user in node_users
                 ):
                     # all users are prims/aten, can move safely

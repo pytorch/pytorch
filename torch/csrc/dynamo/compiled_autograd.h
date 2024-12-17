@@ -1329,6 +1329,28 @@ struct PackedArgs {
     return IValuePacker<T>::unpack(std::move(stack[idx++]));
   }
 
+  void pack_saved_data(const ska::flat_hash_map<std::string, at::IValue>& dct) {
+    std::vector<std::string> keys;
+    std::vector<at::IValue> values;
+    for (const auto& [key, value] : dct) {
+      keys.emplace_back(key);
+      values.emplace_back(value);
+    }
+    pack(keys);
+    for (const auto& value : values) {
+      pack(value);
+    }
+  }
+
+  ska::flat_hash_map<std::string, at::IValue> unpack_saved_data() {
+    ska::flat_hash_map<std::string, at::IValue> dct;
+    auto keys = unpack<std::vector<std::string>>();
+    for (const auto& key : keys) {
+      dct.insert({key, std::move(stack[idx++])});
+    }
+    return dct;
+  }
+
  private:
   std::vector<at::IValue> stack;
   int64_t idx = 0;
@@ -1348,13 +1370,14 @@ struct TORCH_API PyCompilerInterface {
   virtual ~PyCompilerInterface() = default;
 
   // Invokes py_compiler.bind_function(fn_name, fn)
-  virtual void bind_function(
+  virtual std::string bind_function(
       PyObject* py_compiler,
       const std::string& fn_name,
       // NOLINTNEXTLINE(performance-unnecessary-value-param)
       functional_apply_t fn,
       // NOLINTNEXTLINE(performance-unnecessary-value-param)
-      std::vector<at::TypePtr> packed_args_schema) {
+      std::vector<at::TypePtr> packed_args_schema,
+      bool is_custom_function = false) {
     TORCH_INTERNAL_ASSERT(false, "Needs to be overridden");
   }
 
