@@ -74,6 +74,7 @@ def _multistep_backprop_diff_lr_fn(
         for k, v in opt_differentiable_state.items()
     }
 
+    # This copy is necessary so the update on line 78 doesn't overwrite the original kwargs values
     kwargs = kwargs.copy()
     kwargs.update(
         {k: v.clone() if isinstance(v, torch.Tensor) else v for k, v in kwargs.items()}

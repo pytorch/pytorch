@@ -139,7 +139,6 @@ class SGD(Optimizer):  # noqa: D101
                 fused=group["fused"],
                 grad_scale=getattr(self, "grad_scale", None),
                 found_inf=getattr(self, "found_inf", None),
-                differentiable=group["differentiable"],
             )
 
             if group["momentum"] != 0:
@@ -257,7 +256,6 @@ def sgd(
     fused: Optional[bool] = None,
     grad_scale: Optional[Tensor] = None,
     found_inf: Optional[Tensor] = None,
-    differentiable: bool = False,
     *,
     weight_decay: float,
     momentum: float,
@@ -279,7 +277,7 @@ def sgd(
         # because JIT can't handle Optionals nor fancy conditionals when scripting
         if not torch.jit.is_scripting():
             fused, foreach = _default_to_fused_or_foreach(
-                params, differentiable=differentiable, use_fused=False
+                params, differentiable=False, use_fused=False
             )
         else:
             foreach = False
@@ -314,7 +312,6 @@ def sgd(
         maximize=maximize,
         grad_scale=grad_scale,
         found_inf=found_inf,
-        differentiable=differentiable,
     )
 
 
@@ -332,7 +329,6 @@ def _single_tensor_sgd(
     nesterov: bool,
     maximize: bool,
     has_sparse_grad: bool,
-    differentiable: bool,
 ):
     assert grad_scale is None and found_inf is None
 
@@ -355,7 +351,7 @@ def _single_tensor_sgd(
                 grad = grad.add(buf, alpha=momentum)
             else:
                 grad = buf
-        if differentiable and isinstance(lr, Tensor) and lr.requires_grad:
+        if isinstance(lr, Tensor):
             param.addcmul_(grad, -lr.to(param.device))
         else:
             param.add_(grad, alpha=-lr)
@@ -375,11 +371,8 @@ def _multi_tensor_sgd(
     nesterov: bool,
     maximize: bool,
     has_sparse_grad: bool,
-    differentiable: bool,
 ):
     assert grad_scale is None and found_inf is None
-    if differentiable:
-        raise RuntimeError("SGD with foreach=True does not support differentiable=True")
     if len(params) == 0:
         return
 
@@ -470,14 +463,11 @@ def _fused_sgd(
     nesterov: bool,
     maximize: bool,
     has_sparse_grad: bool,
-    differentiable: bool,
 ) -> None:
     if not params:
         return
     if has_sparse_grad:
         raise RuntimeError("`_fused_sgd` does not support sparse gradients")
-    if differentiable:
-        raise RuntimeError("`_fused_sgd` does not support differentiable=True")
     grad_scale_dict: DeviceDict = (
         {grad_scale.device: grad_scale} if grad_scale is not None else {}
     )
@@ -511,11 +501,9 @@ def _fused_sgd(
         torch._fused_sgd_(
             device_params,
             device_grads,
-            (
-                []
-                if no_momentum_buffer
-                else cast(List[Tensor], device_momentum_buffer_list)
-            ),
+            []
+            if no_momentum_buffer
+            else cast(List[Tensor], device_momentum_buffer_list),
             weight_decay=weight_decay,
             momentum=momentum,
             lr=lr,
