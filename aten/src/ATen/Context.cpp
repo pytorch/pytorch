@@ -86,7 +86,7 @@ void Context::setDeterministicFillUninitializedMemory(bool b) {
   _deterministic_fill_uninitialized_memory = b;
 }
 
-void Context::alertNotDeterministic(c10::string_view const& caller) {
+void Context::alertNotDeterministic(std::string_view const& caller) {
   if (globalContext().deterministicAlgorithms()) {
     if (globalContext().deterministicAlgorithmsWarnOnly()) {
       TORCH_WARN(
@@ -120,6 +120,20 @@ bool Context::allowTF32CuDNN() const {
 
 void Context::setAllowTF32CuDNN(bool b) {
   allow_tf32_cudnn = b;
+}
+
+void Context::setSDPPriorityOrder(const std::vector<int64_t>& order) {
+  // TODO*eqy): should it always be the number of backends - 1 (override backend excluded?)
+  TORCH_CHECK(at::num_sdp_backends == sdp_priority_order.size(),
+    "setSDPPriority order expected ", sdp_priority_order.size() - 1, " but got ",
+    at::num_sdp_backends, " unique backends specified in priority order.");
+  for (uint32_t i = 0; i < order.size(); i++) {
+    sdp_priority_order[i] = (at::SDPBackend) order[i];
+  }
+}
+
+std::array<at::SDPBackend, at::num_sdp_backends> Context::sDPPriorityOrder() {
+  return sdp_priority_order;
 }
 
 bool Context::userEnabledFlashSDP() const {
@@ -328,6 +342,40 @@ void Context::setBlasPreferredBackend(at::BlasBackend b) {
   blas_preferred_backend = b;
 #endif
 }
+
+at::ROCmFABackend Context::getROCmFAPreferredBackend() const {
+  return rocm_fa_preferred_backend;
+}
+
+void Context::setROCmFAPreferredBackend(at::ROCmFABackend b) {
+
+  // TODO: add plumbing for hasCK for validity checking
+  TORCH_CHECK((b != at::ROCmFABackend::Ck) || hasROCM(),
+      "Cannot set preferred flash attention backend to Ck if PyTorch has not been compiled for ROCm.");
+#ifdef USE_ROCM
+  if(b == at::ROCmFABackend::Ck) {
+    static const bool ck_unsupported = []() {
+      static const std::vector<std::string> archs = {
+          "gfx90a",  "gfx942"
+      };
+      for (auto index: c10::irange(getNumGPUs())) {
+        if (!detail::getCUDAHooks().isGPUArch(index, archs)) {
+          TORCH_WARN_ONCE(
+            "Attempting to use CK on an unsupported architecture! Cannot set backend to CK");
+          return true;
+        }
+      }
+      return false;
+    }();
+    if(!ck_unsupported) rocm_fa_preferred_backend = b;
+  }
+  else {
+     rocm_fa_preferred_backend = b;
+  }
+#endif
+  rocm_fa_preferred_backend = b;
+}
+
 
 bool Context::allowFP16ReductionCuBLAS() const {
   return allow_fp16_reduction_cublas;

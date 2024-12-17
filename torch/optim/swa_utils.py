@@ -453,14 +453,14 @@ class SWALR(LRScheduler):
         """Get learning rate."""
         # `_get_lr_called_within_step` is only available `_enable_get_lr_call`,
         # so we ignore the type error here. See `LRScheduler.step()` for more details.
-        if not self._get_lr_called_within_step:  # type: ignore[attr-defined]
+        if not self._get_lr_called_within_step:
             warnings.warn(
                 "To get the last learning rate computed by the scheduler, "
                 "please use `get_last_lr()`.",
                 UserWarning,
             )
         # Set in `LRScheduler._initial_step()`
-        step = self._step_count - 1  # type: ignore[attr-defined]
+        step = self._step_count - 1
         if self.anneal_epochs == 0:
             step = max(1, step)
         prev_t = max(0, min(1, (step - 1) / max(1, self.anneal_epochs)))
