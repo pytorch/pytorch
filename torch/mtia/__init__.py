@@ -151,8 +151,9 @@ def default_stream(device: Optional[_device_t] = None) -> Stream:
     return torch._C._mtia_getDefaultStream(_get_device_index(device, optional=True))
 
 
-
-def record_memory_history(enabled: Optional[str] = "all", stacks: str = "python", max_entries: int = 0) -> None:
+def record_memory_history(
+    enabled: Optional[str] = "all", stacks: str = "python", max_entries: int = 0
+) -> None:
     r"""Enable/Disable the memory profiler on MTIA allocator
 
     Args:
@@ -169,13 +170,10 @@ def record_memory_history(enabled: Optional[str] = "all", stacks: str = "python"
     torch._C._mtia_recordMemoryHistory(enabled, stacks, max_entries)
 
 
-
-def snapshot() ->  Dict[str, Any]: 
-    r""" Return a dictionary of MTIA memory allocator history
-    """
+def snapshot() -> Dict[str, Any]:
+    r"""Return a dictionary of MTIA memory allocator history"""
 
     return torch._C._mtia_memorySnapshot()
-
 
 
 def get_device_capability(device: Optional[_device_t] = None) -> Tuple[int, int]:

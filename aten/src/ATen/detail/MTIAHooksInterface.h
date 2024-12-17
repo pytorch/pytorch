@@ -114,7 +114,7 @@ struct TORCH_API MTIAHooksInterface : AcceleratorHooksInterface {
     FAIL_MTIAHOOKS_FUNC(__func__);
   }
 
-  	
+
   virtual void recordMemoryHistory(
     std::optional<std::string> enabled,
     const std::string& stacks,
