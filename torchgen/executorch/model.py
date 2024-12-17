@@ -1,5 +1,5 @@
 # Represents all kernels used by an Executorch model.
-# It maintains a Dict[OperatorName, Dict[ETKernelKey, BackendMetadata]] structure.
+# It maintains a dict[OperatorName, dict[ETKernelKey, BackendMetadata]] structure.
 
 from __future__ import annotations
 

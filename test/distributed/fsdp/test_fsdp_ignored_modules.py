@@ -8,9 +8,7 @@ import torch
 import torch.distributed.fsdp._traversal_utils as traversal_utils
 import torch.nn as nn
 from torch import distributed as dist
-from torch.distributed._composable import fully_shard
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
-from torch.distributed.fsdp._common_utils import _get_module_fsdp_state
 from torch.distributed.fsdp.wrap import ModuleWrapPolicy, transformer_auto_wrap_policy
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
@@ -116,21 +114,6 @@ class TestFSDPIgnoredModules(FSDPTest):
                 "use_orig_params": [False, True],
                 "ignore_modules": [True, False],
                 "use_auto_wrap": [False, True],
-                "composable": [False],
-            },
-            self._test_ignored_modules_transformer,
-        )
-
-    @skip_if_lt_x_gpu(2)
-    def test_ignored_modules_transformer_composable(self):
-        """Tests that ignored modules' parameters are not flattened for a
-        transformer model with shared parameters."""
-        self.run_subtests(
-            {
-                "use_orig_params": [True],
-                "ignore_modules": [True, False],
-                "use_auto_wrap": [False, True],
-                "composable": [True],
             },
             self._test_ignored_modules_transformer,
         )
@@ -140,7 +123,6 @@ class TestFSDPIgnoredModules(FSDPTest):
         use_orig_params: bool,
         ignore_modules: bool,  # as opposed to `ignored_states`
         use_auto_wrap: bool,
-        composable: bool,
     ):
         # Initialize an FSDP-wrapped transformer model that has FSDP ignore
         # the `nn.Transformer` module's parameters
@@ -155,14 +137,12 @@ class TestFSDPIgnoredModules(FSDPTest):
             # Unshare the output projection weight and embedding weight to be
             # able to auto wrap every linear correctly
             model.output_proj.weight = nn.Parameter(model.output_proj.weight.clone())
-            fsdp_kwargs[
-                "policy" if composable else "auto_wrap_policy"
-            ] = ModuleWrapPolicy({nn.Linear})
+            fsdp_kwargs["auto_wrap_policy"] = ModuleWrapPolicy({nn.Linear})
         if ignore_modules:
             fsdp_kwargs["ignored_modules"] = [model.transformer]
         else:
             fsdp_kwargs["ignored_states"] = list(model.transformer.parameters())
-        wrapper_cls = fully_shard if composable else FSDP
+        wrapper_cls = FSDP
         wrapped_model = wrapper_cls(model, **fsdp_kwargs)
         # Check that the wrapped model's flattened parameter does not include
         # the ignored transformer module's parameters
@@ -186,7 +166,7 @@ class TestFSDPIgnoredModules(FSDPTest):
             for handle in traversal_utils._get_fsdp_handles(wrapped_model):
                 flat_param = handle.flat_param
                 flat_param_numel = flat_param.numel()
-                if composable or use_orig_params:
+                if use_orig_params:
                     # Subtract the numel contributed from alignment padding
                     padding_numel = sum(
                         numel
@@ -210,36 +190,16 @@ class TestFSDPIgnoredModules(FSDPTest):
             {
                 "use_orig_params": [False, True],
                 "ignore_modules": [True, False],
-                "composable": [False],
             },
             self._test_ignored_modules_nested,
         )
 
-    @skip_if_lt_x_gpu(2)
-    def test_ignored_modules_nested_composable(self):
-        """Tests that passing a module with nested FSDP modules does not
-        error and still ignores non-FSDP modules' parameters."""
-        self.run_subtests(
-            {
-                "use_orig_params": [True],
-                "ignore_modules": [True, False],
-                "composable": [True],
-            },
-            self._test_ignored_modules_nested,
-        )
-
-    def _test_ignored_modules_nested(
-        self, use_orig_params: bool, ignore_modules: bool, composable: bool
-    ):
+    def _test_ignored_modules_nested(self, use_orig_params: bool, ignore_modules: bool):
         # Initialize an FSDP-wrapped nested model that first wraps the nested
         # sequential's second linear layer (`layer1[1]`) and then wraps the
         # overall model while ignoring the nested sequential (`layer1`)
         model = Model().cuda()
-        fsdp_fn = (
-            fully_shard
-            if composable
-            else functools.partial(FSDP, use_orig_params=use_orig_params)
-        )
+        fsdp_fn = functools.partial(FSDP, use_orig_params=use_orig_params)
         model.layer1[1] = fsdp_fn(model.layer1[1])
         if ignore_modules:
             wrapped_model = fsdp_fn(model, ignored_modules=[model.layer1])
@@ -254,13 +214,9 @@ class TestFSDPIgnoredModules(FSDPTest):
         ignored_numel = sum(p.numel() for p in nonwrapped_model.layer1.parameters())
         nonignored_numel = total_numel - ignored_numel
         with FSDP.summon_full_params(wrapped_model):
-            flat_param = (
-                wrapped_model.params[0]
-                if not composable
-                else _get_module_fsdp_state(wrapped_model).params[0]
-            )
+            flat_param = wrapped_model.params[0]
             flat_param_numel = flat_param.numel()
-            if composable or use_orig_params:
+            if use_orig_params:
                 # Subtract the numel contributed from alignment padding
                 padding_numel = sum(
                     numel
@@ -326,12 +282,11 @@ class TestFSDPIgnoredModules(FSDPTest):
         )
 
     @skip_if_lt_x_gpu(2)
-    @parametrize("composable", [True, False])
-    def test_ignored_modules_invalid(self, composable):
+    def test_ignored_modules_invalid(self):
         """Tests that passing an FSDP module as an ignored module or the
         top-level module itself errors."""
         model = Model().cuda()
-        wrap_cls = FSDP if composable else fully_shard
+        wrap_cls = FSDP
         model.layer1 = wrap_cls(model.layer1)
         # Passing an FSDP module as an ignored module should error
         with self.assertRaises(
@@ -345,7 +300,7 @@ class TestFSDPIgnoredModules(FSDPTest):
             "the FSDP constructor itself will result in all parameters being "
             "ignored",
         ):
-            # `fully_shard` does not allow to wrap the same model twice, so create
+            # FSDP does not allow to wrap the same model twice, so create
             # a new local model here.
             new_model = Model().cuda()
             wrap_cls(new_model, ignored_modules=[new_model])
@@ -366,7 +321,6 @@ class TestFSDPIgnoredModules(FSDPTest):
             {
                 "pass_ignored_modules_to_root": [False, True],
                 "ignore_modules": [True, False],
-                "composable": [True, False],
             },
             self._test_diff_ignored_modules_across_ranks,
         )
@@ -375,12 +329,11 @@ class TestFSDPIgnoredModules(FSDPTest):
         self,
         pass_ignored_modules_to_root: bool,
         ignore_modules: bool,
-        composable: bool,
     ):
         # To exercise different `FlatParameter` enumerations across ranks,
         # we wrap `layer3` with FSDP, where `layer3` is registered as a module
         # after `layer1`, which has the variable number of ignored modules
-        wrap_cls = FSDP if composable else fully_shard
+        wrap_cls = FSDP
         model = ModelWithIgnoredModules(num_ignored=self.rank + 1).cuda()
         layer1_ignored_modules = [
             m for m in model.layer1.modules() if isinstance(m, IgnoredModule)
@@ -416,10 +369,7 @@ class TestFSDPIgnoredModules(FSDPTest):
 
     @skip_if_lt_x_gpu(2)
     @parametrize("ignore_modules", [True, False])
-    @parametrize("composable", [True, False])
-    def test_ignored_modules_not_under_wrapped_root(
-        self, ignore_modules: bool, composable: bool
-    ):
+    def test_ignored_modules_not_under_wrapped_root(self, ignore_modules: bool):
         model = Model().cuda()
         ignored_modules = list(model.layer1.children())[1:]
 
@@ -431,7 +381,7 @@ class TestFSDPIgnoredModules(FSDPTest):
             }
         )
 
-        wrap_cls = FSDP if composable else fully_shard
+        wrap_cls = FSDP
 
         model.layer1 = wrap_cls(
             model.layer1,

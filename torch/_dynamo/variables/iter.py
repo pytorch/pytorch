@@ -48,9 +48,9 @@ class ItertoolsVariable(VariableTracker):
             and all(arg.has_unpack_var_sequence(tx) for arg in args)
         ):
             seqs = [arg.unpack_var_sequence(tx) for arg in args]
-            items = []
-            for item in itertools.product(*seqs):
-                items.append(variables.TupleVariable(list(item)))
+            items = [
+                variables.TupleVariable(list(item)) for item in itertools.product(*seqs)
+            ]
             return variables.ListIteratorVariable(
                 items, mutation_type=ValueMutationNew()
             )
@@ -483,3 +483,80 @@ class MapVariable(ZipVariable):
                 create_instruction("CALL_FUNCTION_EX", arg=0),
             ]
         )
+
+
+class FilterVariable(IteratorVariable):
+    """
+    Represents filter(fn, iterable)
+    """
+
+    _nonvar_fields = {
+        "index",
+        *IteratorVariable._nonvar_fields,
+    }
+
+    def __init__(
+        self,
+        fn: VariableTracker,
+        iterable: Union[List[VariableTracker], VariableTracker],
+        **kwargs,
+    ) -> None:
+        super().__init__(**kwargs)
+        self.fn = fn
+        self.iterable = iterable
+        self.index = 0
+
+    def python_type(self):
+        return filter
+
+    def has_unpack_var_sequence(self, tx) -> bool:
+        return isinstance(self.iterable, list) or self.iterable.has_unpack_var_sequence(
+            tx
+        )
+
+    def unpack_var_sequence(self, tx) -> List["VariableTracker"]:
+        assert self.has_unpack_var_sequence(tx)
+        it = None
+        if isinstance(self.iterable, list):
+            it = self.iterable[self.index :]
+        else:
+            it = self.iterable.unpack_var_sequence(tx)
+        filtered = self.fn.call_function(tx, it, {})
+        return [variables.TupleVariable([filtered])]
+
+    def next_variable(self, tx):
+        def _next():
+            old_index = self.index
+            if isinstance(self.iterable, list):
+                if old_index >= len(self.iterable):
+                    raise_observed_exception(StopIteration, tx)
+                return self.iterable[old_index]
+            else:
+                return self.iterable.next_variable(tx)
+
+        # A do-while loop to find elements that make fn return true
+        while True:
+            item = _next()
+            self.index += 1
+            res = self.fn.call_function(tx, [item], {})
+            pred_res = variables.UserFunctionVariable(
+                polyfills.predicate
+            ).call_function(tx, [res], {})
+            if pred_res.as_python_constant():
+                return item
+
+    def reconstruct_items(self, codegen):
+        if isinstance(self.iterable, list):
+            remaining_items = self.iterable[self.index :]
+            codegen.foreach(remaining_items)
+            codegen.append_output(
+                create_instruction("BUILD_TUPLE", arg=len(remaining_items))
+            )
+        else:
+            codegen(self.iterable)
+
+    def reconstruct(self, codegen):
+        codegen.add_push_null(lambda: codegen.load_import_from("builtins", "filter"))
+        codegen(self.fn)
+        self.reconstruct_items(codegen)
+        codegen.extend_output(create_call_function(2, False))

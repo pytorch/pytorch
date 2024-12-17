@@ -19,7 +19,6 @@ from torch.ao.quantization.pt2e.utils import (
 from torch.ao.quantization.quantizer import (
     QuantizationAnnotation,
     QuantizationSpec,
-    QuantizationSpecBase,
     SharedQuantizationSpec,
 )
 from torch.ao.quantization.quantizer.utils import (
@@ -152,6 +151,7 @@ def get_weight_qspec(quantization_config: Optional[QuantizationConfig]):
     if quantization_spec.qscheme not in [
         torch.per_tensor_symmetric,
         torch.per_channel_symmetric,
+        None,
     ]:
         raise ValueError(
             f"Unsupported quantization_spec {quantization_spec} for weight"
@@ -247,6 +247,10 @@ def _annotate_linear_relu(
             continue
 
         linear_node = maybe_linear_node
+        if len(linear_node.users) > 1:
+            # if linear node has multiple users, then it can't be fused with relu
+            continue
+
         input_qspec_map = {}
         input_act = linear_node.args[0]
         assert isinstance(input_act, Node)
@@ -350,6 +354,11 @@ def _do_annotate_conv_relu(
         if not isinstance(maybe_conv_node, Node) or not is_conv_node(maybe_conv_node):
             continue
         conv_node = maybe_conv_node
+
+        if len(conv_node.users) > 1:
+            # relu shouldn't be fuseable to conv if there are other users
+            # of convolution
+            continue
 
         input_qspec_map = {}
         input_act = conv_node.args[0]
@@ -603,7 +612,6 @@ def _annotate_gru_io_only(
             continue
         # inside each GRU partition, we should be able to annotate each linear
         # subgraph
-        input_qspec_map: Dict[Node, QuantizationSpecBase] = {}
         input_act = input_nodes[0]
         input_act_user = next(iter(input_act.users.keys()))
         assert isinstance(input_act, Node)
@@ -738,6 +746,12 @@ def _annotate_add_relu(
             continue
 
         add_node = maybe_add
+
+        if len(add_node.users) > 1:
+            # add can't be fused with ReLU if the result of add is being used
+            # else where in the graph
+            continue
+
         partition = [relu_node, add_node]
 
         if _is_annotated(partition):
@@ -860,6 +874,11 @@ def _annotate_mul_relu(
             continue
 
         mul_node = maybe_mul
+        if len(mul_node.users) > 1:
+            # mul can't be fused with ReLU if the result of mul is being used
+            # else where in the graph
+            continue
+
         partition = [relu_node, mul_node]
 
         if _is_annotated(partition):
@@ -988,8 +1007,9 @@ def _annotate_cat(
             input_qspec_map[input_act0] = input_act_qspec
 
         shared_with_input0_qspec = SharedQuantizationSpec((input_act0, cat_node))  # type: ignore[arg-type]
-        for input_act in inputs[1:]:  # type: ignore[index]
-            input_qspec_map[input_act] = shared_with_input0_qspec  # type: ignore[index]
+        for input_act in inputs[1:]:  # type: ignore[index, union-attr]
+            if input_act not in input_qspec_map:
+                input_qspec_map[input_act] = shared_with_input0_qspec  # type: ignore[index]
 
         output_act_qspec = shared_with_input0_qspec
 
@@ -1003,6 +1023,7 @@ def _annotate_cat(
 
 def _is_share_obs_or_fq_op(op: Callable) -> bool:
     return op in [
+        torch.ops.aten.relu.default,
         torch.ops.aten.hardtanh.default,
         torch.ops.aten.hardtanh_.default,
         torch.ops.aten.max_pool2d.default,

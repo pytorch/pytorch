@@ -151,12 +151,8 @@ Tensor tril_indices_mps(int64_t row,
     @autoreleasepool {
       auto computeEncoder = stream->commandEncoder();
       [computeEncoder setComputePipelineState:trilPSO];
-      mtl_setBuffer(computeEncoder, tensor, 0);
-      mtl_setBytes(computeEncoder, trapezoid_row_offset, 1);
-      mtl_setBytes(computeEncoder, m_first_row, 2);
-      mtl_setBytes(computeEncoder, col, 3);
-      mtl_setBytes(computeEncoder, tril_size - rectangle_size, 4);
-      mtl_setBytes(computeEncoder, tril_size, 5);
+      mtl_setArgs(
+          computeEncoder, tensor, trapezoid_row_offset, m_first_row, col, tril_size - rectangle_size, tril_size);
       mtl_dispatch1DJob(computeEncoder, trilPSO, tril_size);
     }
   });
@@ -194,12 +190,7 @@ Tensor triu_indices_mps(int64_t row,
     @autoreleasepool {
       auto computeEncoder = stream->commandEncoder();
       [computeEncoder setComputePipelineState:triuPSO];
-      mtl_setBuffer(computeEncoder, tensor, 0);
-      mtl_setBytes(computeEncoder, std::max<int64_t>(0, offset), 1);
-      mtl_setBytes(computeEncoder, m_first_row, 2);
-      mtl_setBytes(computeEncoder, col, 3);
-      mtl_setBytes(computeEncoder, rectangle_size, 4);
-      mtl_setBytes(computeEncoder, triu_size, 5);
+      mtl_setArgs(computeEncoder, tensor, std::max<int64_t>(0, offset), m_first_row, col, rectangle_size, triu_size);
       mtl_dispatch1DJob(computeEncoder, triuPSO, triu_size);
     }
   });

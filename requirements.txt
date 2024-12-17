@@ -1,15 +1,12 @@
 # Python dependencies required for development
 astunparse
-expecttest>=0.2.1
+expecttest>=0.3.0
 hypothesis
 numpy
 psutil
 pyyaml
 requests
-# Setuptools>=74.0.0 stopped support for directly using private funcs(_msvccompiler)
-# and consolidated all compiler logic in distutils used in Pytorch build, so older
-# is required until pytorch build not refactored to work for latest setuptools.
-setuptools<=72.1.0
+setuptools
 types-dataclasses
 typing-extensions>=4.10.0
 sympy==1.13.1 ; python_version >= "3.9"
@@ -17,7 +14,8 @@ filelock
 networkx
 jinja2
 fsspec
-lintrunner ; platform_system != "Windows"
+lintrunner ; platform_machine != "s390x"
 ninja
 packaging
 optree>=0.13.0
+cmake
