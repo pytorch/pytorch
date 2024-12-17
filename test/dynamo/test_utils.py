@@ -169,7 +169,8 @@ class TestDynamoTimed(TestCase):
  'compile_fx.<locals>.bw_compiler': [0.0],
  'compile_fx.<locals>.fw_compiler_base': [0.0],
  'compile_fx_inner': [0.0, 0.0],
- 'create_aot_dispatcher_function': [0.0]}""",  # noqa: B950
+ 'create_aot_dispatcher_function': [0.0],
+ 'gc': [0.0]}""",  # noqa: B950
         )
 
         # Now validate utils.calculate_time_spent(). Formatting the return
