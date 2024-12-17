@@ -16,6 +16,8 @@ import warnings
 import collections
 from pathlib import Path
 import errno
+from ctypes.util import find_library
+import functools
 
 import torch
 import torch._appdirs
@@ -202,6 +204,11 @@ def _join_rocm_home(*paths) -> str:
                       'ROCm and Windows is not supported.')
     return os.path.join(ROCM_HOME, *paths)
 
+@functools.lru_cache(maxsize=1)
+def is_level_zero_installed():
+    lib_path = find_library("ze_loader")  # No need to include 'lib' prefix or '.so'
+    return True if lib_path else False
+
 def _join_sycl_home(*paths) -> str:
     """
     Join paths with SYCL_HOME, or raises an error if it SYCL_HOME is not set.
@@ -212,19 +219,6 @@ def _join_sycl_home(*paths) -> str:
     if SYCL_HOME is None:
         raise OSError('SYCL_HOME environment variable is not set. '
                       'Please set it to your OneAPI install root.')
-
-    def is_level_zero_installed():
-        if IS_WINDOWS:
-            ze_loader = "ze_loader.dll"
-            common_paths = os.environ.get("PATH", "").split(";")
-        else:
-            ze_loader = "libze_loader.so"
-            common_paths = ["/lib/x86_64-linux-gnu"]
-
-        for path in common_paths:
-            if os.path.exists(os.path.join(path, ze_loader)):
-                return True
-        return False
 
     # First check level_zero is installed which sycl depends on.
     if not is_level_zero_installed():
