@@ -756,11 +756,13 @@ def _get_nv_config(query, mode: Mode) -> Tuple[int, int, int, int]:
                 return (64, 128, 8, 3)
             else:
                 return (64, 64, 4, 2)
-        elif capability >= (8, 0):  # A100
-            if head_dim == 64:
+        elif capability >= (8, 0):
+            if head_dim >= 64:
                 return (32, 128, 4, 3)
             elif head_dim == 128:
-                return (64, 128, 8, 3)
+                # SM86/89 have smaller shared memory sizes
+                num_stages = 3 if capability[-1] == 0 else 2
+                return (64, 64, 4, num_stages)
             else:
                 return (64, 64, 4, 2)
         else:  # modest hardware or extremely large head_dim
@@ -1787,6 +1789,21 @@ def bwd_dq_block_mn(
     if CHECK_BLOCK_BOUNDARY:
         grad_scores = tl.where(offs_n2[None, :] < KV_LEN, grad_scores, 0.0)
 
+    # ~~~~~~~~~~~~~~~~~~~ Apply other buffer grad writes ~~~~~~~~~~~~~
+    if WRITE_DQ:
+        scatter_mask = offs_m2[:, None] < Q_LEN and offs_n2[None, :] < KV_LEN
+        {{ modification(
+            subgraph_number=3,
+            output_name=None,
+            mask="scatter_mask",
+            score="pre_mod_scores",
+            b="off_z",
+            h="off_hq",
+            m="m",
+            n="n",
+            grad_score_mod="ds"
+        ) | indent_except_first(2) }}
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     ds = grad_scores
 
     if not IS_FULL_BLOCKS:
@@ -1975,22 +1992,23 @@ def bwd_dkdv_block_mn(
     ) | indent_except_first(1) }}
 
     # ~~~~~~~~~~~~~~~~~~~ Apply other buffer grad writes ~~~~~~~~~~~~~
-    idx_b = off_z
-    idx_h = off_hq
-    idx_m = m
-    idx_n = n
-    scatter_mask = offs_m1[None, :] < Q_LEN and offs_n1[:, None] < KV_LEN
-    {{ modification(
-        subgraph_number=3,
-        output_name=None,
-        mask="scatter_mask",
-        score="pre_mod_scores",
-        b="idx_b",
-        h="idx_h",
-        m="idx_m",
-        n="idx_n",
-        grad_score_mod="dsT"
-    ) | indent_except_first(1) }}
+    if not WRITE_DQ:
+        idx_b = off_z
+        idx_h = off_hq
+        idx_m = m
+        idx_n = n
+        scatter_mask = offs_m1[None, :] < Q_LEN and offs_n1[:, None] < KV_LEN
+        {{ modification(
+            subgraph_number=3,
+            output_name=None,
+            mask="scatter_mask",
+            score="pre_mod_scores",
+            b="idx_b",
+            h="idx_h",
+            m="idx_m",
+            n="idx_n",
+            grad_score_mod="dsT"
+        ) | indent_except_first(2) }}
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
     if CHECK_BLOCK_BOUNDARY:
@@ -2293,9 +2311,6 @@ def flex_attention_backward(*args, **kwargs):
             or SPARSE_KV_BLOCK_SIZE % BLOCK2 != 0
             or SPARSE_Q_BLOCK_SIZE % BLOCK2 != 0
         ):
-            continue
-        if num_warps == 8:
-            # Working around https://github.com/pytorch/pytorch/issues/141603
             continue
 
         # Performance tuning
