@@ -393,6 +393,9 @@ enable_cpp_guard_manager = True
 # Inline inbuilt nn modules
 inline_inbuilt_nn_modules = not is_fbcode()
 
+# Use C++ FrameLocalsMapping (raw array view of Python frame fastlocals)
+enable_cpp_framelocals_guard_eval = True
+
 # Whether to automatically find and replace identical graph
 # regions with a call to invoke_subgraph
 use_graph_deduplication = False
@@ -544,6 +547,11 @@ automatic_dynamic_local_pgo: bool = (
 # Like above, but using remote cache
 automatic_dynamic_remote_pgo: Optional[bool] = get_tristate_env(
     "TORCH_DYNAMO_AUTOMATIC_DYNAMIC_REMOTE_PGO"
+)
+
+# temporary config to kill later
+_unsafe_skip_fsdp_module_guards = (
+    os.environ.get("UNSAFE_SKIP_FSDP_MODULE_GUARDS", "0") == "1"
 )
 
 # HACK: this is for testing custom ops profiling only
