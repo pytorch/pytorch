@@ -421,6 +421,95 @@ class CompileEventLogger:
         else:
             chromium_log.add_instant_event(event_name, time.time_ns(), **metadata)
 
+    @staticmethod
+    def increment(
+        event_name: str, log_level: CompileEventLogLevel, key: str, value: int
+    ):
+        """
+        Increments an existing field, or adds it
+        """
+        chromium_log = get_chromium_event_logger()
+        if (
+            log_level == CompileEventLogLevel.CHROMIUM
+            or log_level == CompileEventLogLevel.PT2_COMPILE
+        ):
+            chromium_log.increment(event_name, key, value)
+        else:
+            assert log_level == CompileEventLogLevel.COMPILATION_METRIC
+            top_event = chromium_log.get_top()
+            if event_name != top_event:
+                raise RuntimeError(
+                    "Log level is COMPILATION_METRIC, but event_name isn't the toplevel event. "
+                    "CompilationMetrics must be logged to the toplevel event. Consider using `increment_toplevel` directly."
+                )
+
+            metrics_context = get_metrics_context()
+            if not metrics_context.in_progress():
+                raise RuntimeError(
+                    "No metrics context is in progress. Please only call this function within a metrics context/dynamo_timed."
+                )
+
+            metrics_context.increment(key, value)
+            chromium_log.increment(event_name, key, value)
+
+    @staticmethod
+    def increment_toplevel(
+        key: str,
+        value: int,
+        log_level: CompileEventLogLevel = CompileEventLogLevel.COMPILATION_METRIC,
+    ):
+        """
+        Increments a value on the toplevel metric. By default, logs to metric.
+        """
+        chromium_log = get_chromium_event_logger()
+        top_event = chromium_log.get_top()
+        if top_event is None:
+            raise RuntimeError(
+                "No toplevel event active. Please only call this function within a metrics context/dynamo_timed."
+            )
+        CompileEventLogger.increment(top_event, log_level, key, value)
+
+    @staticmethod
+    def add_to_set(
+        event_name: str, log_level: CompileEventLogLevel, key: str, value: Any
+    ):
+        chromium_log = get_chromium_event_logger()
+        if (
+            log_level == CompileEventLogLevel.CHROMIUM
+            or log_level == CompileEventLogLevel.PT2_COMPILE
+        ):
+            chromium_log.add_to_set(event_name, key, value)
+        else:
+            assert log_level == CompileEventLogLevel.COMPILATION_METRIC
+            top_event = chromium_log.get_top()
+            if event_name != top_event:
+                raise RuntimeError(
+                    "Log level is COMPILATION_METRIC, but event_name isn't the toplevel event. "
+                    "CompilationMetrics must be logged to the toplevel event. Consider using `add_to_set_metric` directly."
+                )
+
+            metrics_context = get_metrics_context()
+            if not metrics_context.in_progress():
+                raise RuntimeError(
+                    "No metrics context is in progress. Please only call this function within a metrics context/dynamo_timed."
+                )
+
+            metrics_context.add_to_set(key, value)
+            chromium_log.add_to_set(event_name, key, value)
+
+    @staticmethod
+    def add_to_set_toplevel(
+        key: str,
+        value: Any,
+        log_level: CompileEventLogLevel = CompileEventLogLevel.COMPILATION_METRIC,
+    ):
+        chromium_log = get_chromium_event_logger()
+        top_event = chromium_log.get_top()
+        if top_event is None:
+            raise RuntimeError(
+                "No toplevel event active. Please only call this function within a metrics context/dynamo_timed."
+            )
+        CompileEventLogger.add_to_set(top_event, log_level, key, value)
 
     # Helper functions that are syntactic sugar
 
@@ -1399,6 +1488,46 @@ class ChromiumEventLogger:
         if event_name not in event_data:
             event_data[event_name] = {}
         event_data[event_name].update(kwargs)
+
+    def increment(self, event_name: str, key: str, value: int):
+        """
+        Increment an integer event data field by the given amount
+        """
+        if event_name not in self.get_stack():
+            raise RuntimeError(
+                f"Event {repr(event_name)} not in {self.get_stack()}. "
+                "Cannot add metadata to events that aren't in progress. "
+                "Please make sure the event has started and hasn't ended."
+            )
+
+        event_data = self.get_event_data()
+        if event_name not in event_data:
+            event_data[event_name] = {}
+        if key not in event_data[event_name]:
+            event_data[event_name][key] = 0
+        event_data[event_name][key] += value
+
+    def add_to_set(
+        self,
+        event_name: str,
+        key: str,
+        value: Any,
+    ):
+        """
+        Increment an integer event data field if it exists
+        """
+        if event_name not in self.get_stack():
+            raise RuntimeError(
+                f"Event {repr(event_name)} not in {self.get_stack()}. "
+                "Cannot add metadata to events that aren't in progress. "
+                "Please make sure the event has started and hasn't ended."
+            )
+        event_data = self.get_event_data()
+        if event_name not in event_data:
+            event_data[event_name] = {}
+        if key not in event_data[event_name]:
+            event_data[event_name][key] = set()
+        event_data[event_name][key].add(value)
 
     def log_event_start(
         self,
