@@ -707,8 +707,7 @@ TRACE FX call mul from test_logging.py:N in fn (LoggingTests.test_trace_call_pre
             munge_shape_guards(record.getMessage()),
             """\
 +- LAMBDA_GUARD: L['x'].size()[0] == 2*L['y'].size()[0]  # torch._check(x.size(0) == y.size(0) * 2)  # #:# in # #:# in #
-+- LAMBDA_GUARD: 3 <= L['y'].size()[0]  # torch._check(x.size(0) > 5)  # #:# in # #:# in #
-+- LAMBDA_GUARD: L['y'].size()[0] <= 14  # torch._check(x.size(0) < 30)  # #:# in # #:# in #""",  # noqa: B950
++- LAMBDA_GUARD: 3 <= L['y'].size()[0] <= 14  # torch._check(x.size(0) > 5)  # #:# in # #:# in # and torch._check(x.size(0) < 30)  # #:# in # #:# in #""",  # noqa: B950
         )
 
     @make_logging_test(cudagraph_static_inputs=True)
