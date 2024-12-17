@@ -8,6 +8,7 @@ from contextlib import contextmanager
 import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
+from torch._dynamo.exc import InternalTorchDynamoError
 from torch._dynamo.testing import EagerAndRecordGraphs, normalize_gm, same
 from torch._dynamo.utils import counters
 from torch.nn import functional as F
@@ -19,6 +20,14 @@ from torch.testing._internal.common_utils import (
 )
 
 
+try:
+    from . import test_functions
+except ImportError:
+    import test_functions
+
+
+_variable = 0
+_variable1 = 0
 z_glb = 0
 k_glb = 0
 
@@ -1844,6 +1853,37 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(z, 100)
         self.assertEqual(k, 100)
 
+    @unittest.expectedFailure
+    def test_globals_change_in_other_file(self):
+        @contextmanager
+        def update_global_ctx():
+            global _variable, _variable1
+            try:
+                _variable += 1
+                _variable1 += 1
+                yield
+            finally:
+                pass
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x):
+            with update_global_ctx():
+                pass
+
+            with test_functions.update_global_ctx(x) as a:
+                # Ensure that the updated global values are read
+                test_functions.constant3(2, 3)
+                return x * a * (_variable + _variable1 + test_functions._variable)
+
+        res = fn(torch.ones(10))
+        self.assertEqual(_variable, 1)
+        self.assertEqual(_variable1, 1)
+        # Ensure that the reconstructed bytecode updates the global value in the
+        # other file.
+        self.assertEqual(test_functions._variable, 1)
+        self.assertEqual(res, 3 * torch.ones(10))
+
+    @unittest.expectedFailure
     def test_change_parent_global_0(self):
         # test if a global actually gets propagated
         global z_glb, k_glb
@@ -2075,12 +2115,8 @@ class GraphModule(torch.nn.Module):
             return y
 
         x = torch.tensor([1.0])
-        expected = fn(x)
-
-        eager = EagerAndRecordGraphs()
-        out = torch.compile(backend=eager, fullgraph=False)(fn)(x)
-        self.assertEqual(expected, out)
-        self.assertEqual(len(eager.graphs), 1)
+        with self.assertRaises(InternalTorchDynamoError):
+            torch.compile(fn, backend="eager", fullgraph=False)(x)
 
     def test_graph_break_in_finally(self):
         z = []
@@ -2235,12 +2271,8 @@ class GraphModule(torch.nn.Module):
             return y
 
         x = torch.tensor([1.0])
-        expected = fn(x)
-
-        eager = EagerAndRecordGraphs()
-        out = torch.compile(backend=eager, fullgraph=False)(fn)(x)
-        self.assertEqual(expected, out)
-        self.assertEqual(len(eager.graphs), 1)
+        with self.assertRaises(InternalTorchDynamoError):
+            torch.compile(fn, backend="eager", fullgraph=False)(x)
 
     def test_disable___exit__(self):
         def h(x):
@@ -2266,12 +2298,8 @@ class GraphModule(torch.nn.Module):
             return y
 
         x = torch.tensor([1.0])
-        expected = fn(x)
-
-        eager = EagerAndRecordGraphs()
-        out = torch.compile(backend=eager, fullgraph=False)(fn)(x)
-        self.assertEqual(expected, out)
-        self.assertEqual(len(eager.graphs), 1)
+        with self.assertRaises(InternalTorchDynamoError):
+            torch.compile(fn, backend="eager", fullgraph=False)(x)
 
     def test_contextmanager_as_argument(self):
         def h(x):
@@ -2297,7 +2325,6 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(expected, out)
         self.assertEqual(len(eager.graphs), 2)
 
-    @unittest.expectedFailure  # contextmanager is exhausted if reconstructed
     def test_return_new_contextmanager(self):
         L = []
 
@@ -2317,13 +2344,8 @@ class GraphModule(torch.nn.Module):
             return x + 1, ctx
 
         x = torch.tensor([1.0])
-        eager = EagerAndRecordGraphs()
-        y, ctx = torch.compile(backend=eager, fullgraph=False)(fn)(x)
-        self.assertEqual(y, x + 1)
-        self.assertEqual(L, [x.sin(), x.cos()])
-        ctx.__next__()
-        self.assertEqual(L, [x.sin()])
-        ctx.__exit__(None, None, None)
+        with self.assertRaises(InternalTorchDynamoError):
+            torch.compile(fn, backend="eager", fullgraph=False)(x)
 
     def test_return_advanced_contextmanager(self):
         L = []
@@ -2345,12 +2367,8 @@ class GraphModule(torch.nn.Module):
             return x + y, ctx
 
         x = torch.tensor([1.0])
-        eager = EagerAndRecordGraphs()
-        y, ctx = torch.compile(backend=eager, fullgraph=False)(fn)(x)
-        self.assertEqual(y, x + x.cos() + 1)
-        self.assertEqual(L, [x.sin()])
-        ctx.__exit__(None, None, None)
-        self.assertEqual(L, [x.sin(), x.cos()])  # Two items now
+        with self.assertRaises(InternalTorchDynamoError):
+            torch.compile(fn, backend="eager", fullgraph=False)(x)
 
     def test_contextmanager_as_argument_only___enter__(self):
         L = []
