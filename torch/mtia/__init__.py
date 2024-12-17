@@ -356,6 +356,8 @@ __all__ = [
     "memory_stats",
     "max_memory_allocated",
     "get_device_capability",
+    "record_memory_history",
+    "snapshot",
     "empty_cache",
     "set_device",
     "set_stream",
