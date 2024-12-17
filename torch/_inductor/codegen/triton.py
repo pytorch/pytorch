@@ -3792,6 +3792,7 @@ class TritonScheduling(SIMDScheduling):
             log.debug(
                 "kernel src code for %s written to: %s",
                 mod.__file__,
+                node_names if node_names is not None else "unknown",
             )
             ms = load_cache()
             if ms is not None:
