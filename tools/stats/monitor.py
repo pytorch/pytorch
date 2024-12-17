@@ -264,6 +264,7 @@ class UsageLogger:
                 # collect gpu metrics
                 if self._has_pynvml or self._has_amdsmi:
                     gpu_list = self._calculate_gpu_utilization(data_list)
+                    
                     stats.update(
                         {
                             "gpu_list": gpu_list,
