@@ -8,7 +8,6 @@ from torch._inductor.codegen.rocm.ck_universal_gemm_template import CKGemmTempla
 from torch.utils._triton import has_triton_tma_device
 
 from .. import config as inductor_config
-from ..codegen.common import WorkspaceArg, WorkspaceZeroMode
 from ..config import triton as triton_config
 from ..ir import _IntLike, ChoiceCaller, Layout, StorageBox, TensorBox
 from ..lowering import add_layout_constraint, constrain_to_fx_strides, register_lowering
@@ -19,18 +18,24 @@ from ..select_algorithm import (
     realize_inputs,
     TritonTemplate,
 )
-from ..utils import use_aten_gemm_kernels, use_ck_gemm_template, use_triton_template
+from ..utils import (
+    get_num_sms,
+    get_tma_workspace_arg,
+    TMA_DESCRIPTOR_SIZE,
+    use_aten_gemm_kernels,
+    use_ck_gemm_template,
+    use_triton_template,
+)
 from .mm_common import (
     _is_static_problem,
     mm_args,
     mm_grid,
-    persistent_grid,
-    persistent_mm_configs,
+    persistent_mm_grid,
     scaled_mm_configs,
+    scaled_persistent_mm_configs,
 )
 
 
-_TMA_SIZE = 128
 log = logging.getLogger(__name__)
 aten = torch.ops.aten
 
@@ -110,10 +115,9 @@ device_tma = r"""
     k_tiles = tl.cdiv(K, BLOCK_K)
     num_tiles = num_pid_m * num_pid_n
 
-    workspace_base = ws_ptr + start_pid * 3 * TMA_SIZE
+    workspace_base = ws_ptr + start_pid * 2 * TMA_SIZE
     a_desc_ptr = workspace_base
     b_desc_ptr = workspace_base + TMA_SIZE
-    c_desc_ptr = workspace_base + 2 * TMA_SIZE
 
     triton.language.extra.cuda.experimental_device_tensormap_create2d(
         desc_ptr=a_desc_ptr,
@@ -204,7 +208,7 @@ device_tma = r"""
 
 scaled_mm_device_tma_template = TritonTemplate(
     name="scaled_mm_device_tma",
-    grid=persistent_grid,
+    grid=persistent_mm_grid,
     source=device_tma + load_scales + apply_scaling,
 )
 
@@ -445,8 +449,8 @@ def scaled_mm_options_device_tma(  # type: ignore[no-untyped-def]
         num_warps=config.num_warps,
         # tensor-wise scaling if scalar scales
         SCALING_ROWWISE=len(scale_a.get_size()) == 2,
-        TMA_SIZE=_TMA_SIZE,
-        NUM_SMS=NUM_SMS,
+        TMA_SIZE=TMA_DESCRIPTOR_SIZE,
+        NUM_SMS=get_num_sms(),
         **config.kwargs,
     )
 
@@ -486,25 +490,6 @@ def scaled_mm_options(  # type: ignore[no-untyped-def]
 
 
 add_layout_constraint(aten._scaled_mm.default, constrain_to_fx_strides)
-
-
-def get_workspace_size(
-    num_sms: int, TMA_SIZE: int = _TMA_SIZE, NUM_TMA_DESCRIPTORS: int = 3
-) -> int:
-    """Device side TMA requires a workspace buffer to be allocated in global memory."""
-    return num_sms * NUM_TMA_DESCRIPTORS * TMA_SIZE
-
-
-def get_workspace_arg(num_sms: int, device: torch.device) -> WorkspaceArg:
-    """Builds and returns a WorkspaceArg for the device side TMA workspace buffer."""
-    size = get_workspace_size(num_sms)
-    zero_mode = WorkspaceZeroMode.from_bool(False)
-    return WorkspaceArg(
-        count=size,
-        zero_mode=zero_mode,
-        device=device,
-        outer_name=WorkspaceArg.unique_name(),
-    )
 
 
 def use_persistent_tma(k: sympy.core.numbers.Integer, has_bias: bool) -> bool:
@@ -553,11 +538,11 @@ def tuned_scaled_mm(
     if use_aten_gemm_kernels():
         choices.append(aten_choice)
 
-    _static_shape, is_nonzero = _is_static_problem(layout)
+    _, is_nonzero = _is_static_problem(layout)
 
     if is_nonzero and use_triton_template(layout, enable_float8=True):
         if use_persistent_tma(k, bias is not None):
-            for config in persistent_mm_configs(m, n, k):
+            for config in scaled_persistent_mm_configs(m, n, k):
                 kwargs = scaled_mm_options_device_tma(
                     config, m, n, k, layout, scale_a, scale_b, use_fast_accum
                 )
@@ -566,8 +551,9 @@ def tuned_scaled_mm(
                     choices,
                     input_nodes=input_nodes,
                     layout=layout,
-                    workspace_arg=get_workspace_arg(
-                        kwargs["NUM_SMS"], mat_a.get_device()
+                    workspace_arg=get_tma_workspace_arg(
+                        num_tma_descriptors=2,
+                        device=mat_a.get_device(),
                     ),
                     **kwargs,
                 )
