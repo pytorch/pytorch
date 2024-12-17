@@ -6264,6 +6264,9 @@ class ShapeEnv:
             else:
                 end = i
 
+        if start is None:
+            return
+
         # track values of involved locals
         last_lineno = f.f_lineno
         locals_ = {}
