@@ -1,4 +1,4 @@
-name: windows-build
+name: windows-arm64-build
 
 on:
   workflow_call:

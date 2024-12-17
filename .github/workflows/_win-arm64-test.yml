@@ -1,4 +1,4 @@
-name: win-test
+name: win-arm64-test
 
 on:
   workflow_call:
