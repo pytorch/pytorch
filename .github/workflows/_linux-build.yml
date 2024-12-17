@@ -227,8 +227,9 @@ jobs:
 
           # Leaving 1GB for the runner and other things
           TOTAL_AVAILABLE_MEMORY_IN_GB=$(awk '/MemTotal/ { printf "%.3f \n", $2/1024/1024 - 1 }' /proc/meminfo)
-          # https://docs.docker.com/engine/containers/resource_constraints/#--memory-swap-details
-          TOTAL_MEMORY_WITH_SWAP=$(("${TOTAL_AVAILABLE_MEMORY_IN_GB%.*}" * 2))
+          # https://docs.docker.com/engine/containers/resource_constraints/#--memory-swap-details, the 3GB swap
+          # comes from https://github.com/pytorch/test-infra/pull/6058
+          TOTAL_MEMORY_WITH_SWAP=$(("${TOTAL_AVAILABLE_MEMORY_IN_GB%.*}" + 3))
 
           # detached container should get cleaned up by teardown_ec2_linux
           # Used for JENKINS_USER, which can be empty
