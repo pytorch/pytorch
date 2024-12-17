@@ -70,7 +70,7 @@ variable_list CopyBackwards::apply_with_saved(
     SwapSavedVariables& saved) {
   saved.before(src_options);
 
-  static c10::once_flag flag;
+  static std::once_flag flag;
   std::call_once(flag, [&]() {
     std::vector<at::TypePtr> schema = {
         IValuePacker<std::array<bool, 2>>::packed_type(),
