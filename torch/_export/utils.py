@@ -352,12 +352,11 @@ def _check_input_constraints_for_graph(
                     # this means we deferred a guard from export analysis to runtime, let this pass
                     # we'll add a runtime assert checking equality to this replacement expression
                     continue
-                else:
-                    if arg_dim != node_dim:
-                        raise RuntimeError(
-                            f"Expected input at {get_keystr(key_path)}.shape[{j}] to be equal to "
-                            f"{node_dim}, but got {arg_dim}",
-                        )
+                elif arg_dim != node_dim:
+                    raise RuntimeError(
+                        f"Expected input at {get_keystr(key_path)}.shape[{j}] to be equal to "
+                        f"{node_dim}, but got {arg_dim}",
+                    )
         elif isinstance(node_val, (int, float, str)):
             if type(arg) != type(node_val) or arg != node_val:
                 raise RuntimeError(
