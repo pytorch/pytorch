@@ -55,6 +55,9 @@ on:
 
 env:
   GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+  PYTHON_VERSION: "3.12"
+  DOWNLOADS_DIR: c:\temp\downloads
+  DEPENDENCIES_DIR: c:\temp\dependencies
 
 jobs:
   build:
@@ -79,7 +82,7 @@ jobs:
         run: |
           "builder/windows/arm64/bootstrap_git.bat"
       - name: Bootstrap Python
-        shell: cmd
+        shell: cmd        
         run: |
           "builder/windows/arm64/bootstrap_python.bat"
       - name: Bootstrap Build Tools
