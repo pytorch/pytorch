@@ -95,6 +95,7 @@ from ..utils import (
     build_invoke_subgraph_variable,
     clone_input,
     common_constant_types,
+    dict_keys,
     get_fake_value,
     get_locals_to_steal,
     get_static_address_type,
@@ -134,6 +135,7 @@ from .dicts import (
     ConstDictVariable,
     CustomizedDictVariable,
     DefaultDictVariable,
+    DictKeysVariable,
     FrozensetVariable,
     HFPretrainedConfigVariable,
     PythonSysModulesVariable,
@@ -694,6 +696,14 @@ class VariableBuilder:
             items = [SourcelessBuilder.create(self.tx, v) for v in value]
             self.install_guards(GuardBuilder.ID_MATCH)
             return FrozensetVariable(items, source=self.source)
+        elif isinstance(value, dict_keys):
+            # breakpoint()
+            items = [SourcelessBuilder.create(self.tx, v) for v in value]
+            # mapping_source = AttrSource(self.get_source(), "mapping")
+            # install_guard(mapping_source.make_guard(GuardBuilder.DICT_CONST_KEYS))
+            # self.tx.output.guard_on_key_order.add(mapping_source.name())
+            self.install_guards(GuardBuilder.SEQUENCE_LENGTH)
+            return DictKeysVariable(items, source=self.source)
         elif isinstance(value, enum.Enum):
             self.install_guards(GuardBuilder.ID_MATCH)
             return EnumVariable(value=value, source=self.source)
