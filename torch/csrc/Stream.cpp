@@ -304,11 +304,17 @@ static PyObject* THPStream_exit(PyObject* _self, PyObject* unused) {
           static_cast<c10::DeviceType>(self->device_type)))) {
     Py_RETURN_NONE;
   }
-  THPStream* prev_stream =
-      (THPStream*)PyObject_GetAttrString(_self, "_ctx_stream");
-  PyObject* ctx_device_index =
-      PyObject_GetAttrString(_self, "_ctx_device_index");
-  auto prev_device_index = THPUtils_unpackDeviceIndex(ctx_device_index);
+  auto ctx_stream = THPObjectPtr(PyObject_GetAttrString(_self, "_ctx_stream"));
+  auto ctx_device_index =
+      THPObjectPtr(PyObject_GetAttrString(_self, "_ctx_device_index"));
+  if ((!ctx_stream) || (!ctx_device_index)) {
+    throw python_error();
+  }
+  Py_DECREF(ctx_stream.get());
+  Py_DECREF(ctx_device_index.get());
+  THPStream* prev_stream = (THPStream*)ctx_stream.release();
+  auto prev_device_index =
+      THPUtils_unpackDeviceIndex(ctx_device_index.release());
   at::accelerator::setCurrentStream(c10::Stream::unpack3(
       prev_stream->stream_id,
       static_cast<c10::DeviceIndex>(prev_stream->device_index),
@@ -317,8 +323,6 @@ static PyObject* THPStream_exit(PyObject* _self, PyObject* unused) {
   if (static_cast<c10::DeviceIndex>(self->device_index) != prev_device_index) {
     at::accelerator::setDeviceIndex(prev_device_index);
   }
-  Py_DECREF(prev_stream);
-  Py_DECREF(ctx_device_index);
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
