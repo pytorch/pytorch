@@ -2058,13 +2058,17 @@ class TritonKernel(SIMDKernel):
         more than one read dependency
         """
         depcount = 0
-        has_read_deps = True # by default, assume that this buffer has > 1 read dependencies
-        if config.triton.skip_l1_cache and self.current_node: # it can be that self.current_node is None (!)
+        has_read_deps = (
+            True  # by default, assume that this buffer has > 1 read dependencies
+        )
+        if (
+            config.triton.skip_l1_cache and self.current_node
+        ):  # it can be that self.current_node is None (!)
             for node in self.current_node.scheduler.nodes:
                 for l in list(node.read_writes.reads):
-                    if (l.name == name):
-                        depcount+=1
-            has_read_deps = depcount > 1 # has more than one read dep
+                    if l.name == name:
+                        depcount += 1
+            has_read_deps = depcount > 1  # has more than one read dep
 
         is_coalesced = any(
             i == 1 for i in self.get_strides_of_load(original_index).values()
@@ -2098,19 +2102,17 @@ class TritonKernel(SIMDKernel):
 
         """Skip L1 cache if we're (pretty?) sure the data is used only once
         """
-        skip_l1_cache = not(
+        skip_l1_cache = not (
             # in all these cases we're likely to reuse the buffer:
-            self.is_broadcasted(original_index) 
-            or not is_coalesced 
+            self.is_broadcasted(original_index)
+            or not is_coalesced
             or self.inside_reduction
             or has_read_deps
-        ) and (
-            config.triton.skip_l1_cache
-        )
+        ) and (config.triton.skip_l1_cache)
         # NOTE: controlled with env variable TORCHINDUCTOR_SKIP_L1
         cachemod = ""
         if skip_l1_cache:
-            cachemod=", cache_modifier='.cg'"
+            cachemod = ", cache_modifier='.cg'"
 
         advance_block_ptr = None
         append_broadcast = None

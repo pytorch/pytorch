@@ -1043,7 +1043,6 @@ class triton:
     skip_l1_cache = os.environ.get("TORCHINDUCTOR_SKIP_L1", "0") == "1"
 
 
-
 class aot_inductor:
     # AOTInductor output path
     # If an absolute path is specified, the generated lib files will be stored under the directory;
