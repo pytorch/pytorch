@@ -264,7 +264,7 @@ def _(subgraph, identifier, operands):
 @invoke_subgraph.py_functionalize_impl
 def _(ctx, subgraph, identifier, operands):
     unwrapped_operands = ctx.unwrap_tensors(operands)
-    with ctx.redispatch_to_next() as m:
+    with ctx.redispatch_to_next():
         # NB: There is an assumption that subgraph does not mutate inputs and
         # there is no aliasing. Its Dynamo responsibility to prevent formation
         # of invoke_subgraph ops if input aliasing/mutation is detected.
