@@ -8,6 +8,7 @@ from typing import List
 
 import torch
 import torch.nn.functional as F
+from torch.distributions import Distribution, Normal
 from torch.distributions import constraints
 from torch.distributions.utils import (
     _sum_rightmost,
@@ -136,7 +137,7 @@ class Transform:
         """
         raise NotImplementedError
     
-    def mean(self, base_mean):
+    def mean(self, base_dist: Distribution):
         """
         Returns the mean of the transformed distribution
         """
@@ -564,8 +565,12 @@ class ExpTransform(Transform):
     def log_abs_det_jacobian(self, x, y):
         return x
     
-    def mean(self, base_mean):
-        return super().mean(base_mean)
+    def mean(self, base_distribution):
+        if isinstance(base_distribution, Normal):
+            return torch.exp(base_distribution.variance/2 + base_distribution.mean)
+        else:
+             raise NotImplementedError
+    
 
 
 class PowerTransform(Transform):
@@ -750,8 +755,8 @@ class AffineTransform(Transform):
             return constraints.real
         return constraints.independent(constraints.real, self.event_dim)
     
-    def mean(self, base_mean):
-        return self.loc + self.scale * base_mean
+    def mean(self, base_distribution: Distribution):
+        return self.loc + self.scale * base_distribution.mean
 
     def with_cache(self, cache_size=1):
         if self._cache_size == cache_size:
