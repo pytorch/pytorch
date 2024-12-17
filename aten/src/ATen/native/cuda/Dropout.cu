@@ -50,14 +50,6 @@ fused_dropout_kernel_vec(at::cuda::detail::TensorInfo<const scalar_t, IndexType>
                          at::cuda::detail::TensorInfo<mask_t, IndexType> c,
                          IndexType totalElements, accscalar_t p,
                          PhiloxCudaState philox_args) {
-#ifdef USE_ROCM
-  // make sure we don't break assumption that we can't have > 16 elements / thread
-  static_assert(VEC <= 16, "Value of VEC must be in [2, 4, 8, 16]");
-#else
-  // make sure we don't break assumption that we can't have > 4 elements / thread
-  static_assert(VEC <= 4, "Value of VEC must be in [2, 4]");
-#endif
-
   using LoadT = memory::aligned_vector<scalar_t, VEC>;
   using MaskLoadT = memory::aligned_vector<mask_t, VEC>;
 
@@ -221,6 +213,13 @@ int get_vector_size(at::Tensor self, at::Tensor ret, at::Tensor mask) {
     vec_size = 1;
   } else {
     vec_size = memory::can_vectorize_up_to<scalar_t>((const char*)self.const_data_ptr());
+#ifdef USE_ROCM
+    // make sure we don't break assumption that we can't have > 16 elements / thread
+    TORCH_INTERNAL_ASSERT(vec_size <= 16, "Value of VEC must be in [2, 4, 8, 16]");
+#else
+    // make sure we don't break assumption that we can't have > 4 elements / thread
+    TORCH_INTERNAL_ASSERT(vec_size <= 4, "Value of VEC must be in [2, 4]");
+#endif
   }
 
   // check that we'd have no remainders - prefer a smaller vector size with no remainders over a larger vector and remainder.
@@ -265,7 +264,6 @@ inline void launcher(
 
         if (vec_size > 1) {
           switch (vec_size) {
-#ifdef USE_ROCM
             case 16:
               fused_dropout_kernel_vec<
                   scalar_t,
@@ -298,7 +296,6 @@ inline void launcher(
                       rng_engine_inputs);
               C10_CUDA_KERNEL_LAUNCH_CHECK();
               break;
-#endif
             case 4:
               fused_dropout_kernel_vec<
                   scalar_t,

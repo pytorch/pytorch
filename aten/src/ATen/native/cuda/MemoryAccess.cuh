@@ -359,18 +359,13 @@ inline C10_HOST_DEVICE int can_vectorize_up_to(const char *pointer) {
     return 16;
   } else if (type_size <= 2 && (address % vec8_alignment == 0)) {
     return 8;
-  } else if (address % vec4_alignment == 0) {
-    return 4;
-  } else if (address % vec2_alignment == 0) {
-    return 2;
-  }
-#else
+  } else
+#endif
   if (address % vec4_alignment == 0) {
     return 4;
   } else if (address % vec2_alignment == 0) {
     return 2;
   }
-#endif
   return 1;
 }
 
