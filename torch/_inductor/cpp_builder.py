@@ -1562,15 +1562,16 @@ class CppBuilder:
         self, file: str, append_src_only: bool = False
     ) -> None:
         srcs = self._remove_directory_from_file_paths(self._sources_args)
-        includes = " ".join(self._build_option.get_include_dirs())
         definitions = " ".join(self._build_option.get_definations())
-        cflags = " ".join(self._build_option.get_cflags())
 
         if not append_src_only:
             contents = textwrap.dedent(
                 f"""
                 cmake_minimum_required(VERSION 3.18 FATAL_ERROR)
                 project(aoti_model LANGUAGES CXX)
+
+                # May need to point CMAKE_PREFIX_PATH to the right torch location
+                find_package(Torch REQUIRED)
 
                 # Set a shared library target
                 add_library(aoti_model SHARED)
@@ -1580,9 +1581,6 @@ class CppBuilder:
 
                 # Set the compiler
                 set(CMAKE_CXX_COMPILER {self._compiler})
-
-                # Add include directories
-                target_include_directories(aoti_model PRIVATE {includes})
 
                 # Add macro definitions
                 target_compile_definitions(aoti_model PRIVATE {definitions})
@@ -1600,15 +1598,11 @@ class CppBuilder:
 
     def save_link_cmd_to_cmake(self, file: str) -> None:
         lflags = " ".join(self._build_option.get_ldflags())
-        ld_dirs = " ".join(self._build_option.get_libraries_dirs())
         libs = " ".join(self._build_option.get_libraries())
         contents = textwrap.dedent(
             f"""
             # Add linker flags
             target_link_options(aoti_model PRIVATE {lflags})
-
-            # Add library directories
-            target_link_directories(aoti_model PRIVATE {ld_dirs})
 
             # Add libraries
             target_link_libraries(aoti_model PRIVATE {libs})

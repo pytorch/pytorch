@@ -2,6 +2,7 @@
 import copy
 import functools
 import io
+import os
 import subprocess
 import sys
 import tempfile
@@ -212,7 +213,13 @@ class TestAOTInductorPackage(TestCase):
             assert not build_path.exists()
             # Create a build directory to run cmake
             build_path.mkdir()
-            subprocess.run(["cmake", ".."], cwd=build_path)
+            custom_env = os.environ.copy()
+            custom_env["CMAKE_PREFIX_PATH"] = str(Path(torch.__file__).parent)
+            subprocess.run(
+                ["cmake", ".."],
+                cwd=build_path,
+                env=custom_env,
+            )
             subprocess.run(["make"], cwd=build_path)
             # Check if the .so file was build successfully
             so_path = build_path / "libaoti_model.so"
