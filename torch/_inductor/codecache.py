@@ -1513,7 +1513,7 @@ class AotCodeCompiler:
             _, consts_s = write(
                 consts_asm,
                 "S",
-                specified_dir=specified_sub_dir,
+                specified_dir=str(specified_sub_dir),
             )
             consts_s = Path(consts_s)
             object_build_options = CppTorchDeviceOptions(

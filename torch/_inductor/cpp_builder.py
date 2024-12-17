@@ -1588,7 +1588,7 @@ class CppBuilder:
                 target_compile_definitions(aoti_model PRIVATE {definitions})
 
                 # Add compile flags
-                target_compile_options(aoti_model PRIVATE {self._cflags_args} {self._passthougn_parameters_args} -c)
+                target_compile_options(aoti_model PRIVATE {self._cflags_args} {self._passthrough_parameters_args} -c)
 
                 """
             )

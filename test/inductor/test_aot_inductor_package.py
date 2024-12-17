@@ -212,12 +212,8 @@ class TestAOTInductorPackage(TestCase):
             assert not build_path.exists()
             # Create a build directory to run cmake
             build_path.mkdir()
-            try:
-                subprocess.run(["cmake", ".."], cwd=build_path)
-                subprocess.run(["make"], cwd=build_path)
-            except subprocess.SubprocessError:
-                raise RuntimeError("Failed to compile AOTInductor model code")
-
+            subprocess.run(["cmake", ".."], cwd=build_path)
+            subprocess.run(["make"], cwd=build_path)
             # Check if the .so file was build successfully
             so_path = build_path / "libaoti_model.so"
             assert so_path.exists()
