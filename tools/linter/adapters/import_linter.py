@@ -8,10 +8,20 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import re
 import sys
+import token
 from enum import Enum
-from typing import List, NamedTuple, Set
+from pathlib import Path
+from typing import List, NamedTuple, Set, TYPE_CHECKING
+
+
+_PARENT = Path(__file__).parent.absolute()
+_PATH = [Path(p).absolute() for p in sys.path]
+
+if TYPE_CHECKING or _PARENT not in _PATH:
+    from . import _linter
+else:
+    import _linter
 
 
 class LintSeverity(str, Enum):
@@ -313,58 +323,68 @@ else:
         ]
     )
 
-# Add the allowed third party libraries.
+# Add the allowed third party libraries. Please avoid updating this unless you
+# understand the risks -- see `_ERROR_MESSAGE` for why.
 _MODULE_NAME_ALLOW_LIST.update(
     [
-        "torch",
         "sympy",
-        "torch_xla",
-        "_pytest",
-        "functorch",
         "einops",
-        "the",
         "libfb",
-        "typing_extensions",
-        "triton",
-        "numpy",
-        "torchrec",
+        "torch",
+        "tvm",
+        "_pytest",
         "tabulate",
         "optree",
-        "tvm",
+        "typing_extensions",
+        "triton",
+        "functorch",
+        "torchrec",
+        "numpy",
+        "torch_xla",
     ]
 )
 
+_ERROR_MESSAGE = """
+Please do not import third-party modules in PyTorch unless they're explicit
+requirements of PyTorch. Imports of a third-party library may have side effects
+and other unintentional behavior. If you're just checking if a module exists,
+use sys.modules.get("torchrec") or the like.
+"""
 
-def check_file(filename: str) -> List[LintMessage]:
-    with open(filename) as f:
-        lines = f.readlines()
 
-    # The pattern: from/import word_that_doesn't_start_with_dot
-    pattern = re.compile(r"^(?:import|from)\s+([a-zA-Z_][\w]*)")
-
+def check_file(filepath: str) -> List[LintMessage]:
+    path = Path(filepath)
+    file = _linter.PythonFile("import_linter", path)
     lint_messages = []
-    for line_number, line in enumerate(lines):
-        line_number += 1
-        line = line.lstrip()
-        match = pattern.search(line)
-        if match:
-            module_name = match.group(1)
-            if module_name not in _MODULE_NAME_ALLOW_LIST:
-                msg = LintMessage(
-                    path=filename,
-                    line=line_number,
-                    char=None,
-                    code="IMPORT",
-                    severity=LintSeverity.ERROR,
-                    name="Disallowed import",
-                    original=None,
-                    replacement=None,
-                    description=f"""
-importing from {module_name} is not allowed, if you believe there's a valid
-reason, please add it to _MODULE_NAME_ALLOW_LIST in {CURRENT_FILE_NAME}
-""",
-                )
-                lint_messages.append(msg)
+    for line_number, line_of_tokens in enumerate(file.token_lines):
+        # Skip indents
+        idx = 0
+        for tok in line_of_tokens:
+            if tok.type == token.INDENT:
+                idx += 1
+            else:
+                break
+
+        # Look for either "import foo..." or "from foo..."
+        if idx + 1 < len(line_of_tokens):
+            tok0 = line_of_tokens[idx]
+            tok1 = line_of_tokens[idx + 1]
+            if tok0.type == token.NAME and tok0.string in {"import", "from"}:
+                if tok1.type == token.NAME:
+                    module_name = tok1.string
+                    if module_name not in _MODULE_NAME_ALLOW_LIST:
+                        msg = LintMessage(
+                            path=filepath,
+                            line=line_number,
+                            char=None,
+                            code="IMPORT",
+                            severity=LintSeverity.ERROR,
+                            name="Disallowed import",
+                            original=None,
+                            replacement=None,
+                            description=_ERROR_MESSAGE,
+                        )
+                        lint_messages.append(msg)
     return lint_messages
 
 
@@ -374,16 +394,16 @@ if __name__ == "__main__":
         fromfile_prefix_chars="@",
     )
     parser.add_argument(
-        "filenames",
+        "filepaths",
         nargs="+",
-        help="paths to lint",
+        help="paths of files to lint",
     )
     args = parser.parse_args()
 
     # Check all files.
     all_lint_messages = []
-    for filename in args.filenames:
-        lint_messages = check_file(filename)
+    for filepath in args.filepaths:
+        lint_messages = check_file(filepath)
         all_lint_messages.extend(lint_messages)
 
     # Print out lint messages.
