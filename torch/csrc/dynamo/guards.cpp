@@ -1933,7 +1933,15 @@ class SYMBOLIC_SHAPE_GUARD : public RelationalGuard {
     bool result = check_nopybind(value);
 
     if (!result) {
-      return GuardDebugInfo(false, verbose_code_parts(), 0);
+      std::string msg = "Shape guard failed with values: ";
+      for (auto v : _args_int) {
+        msg += std::to_string(v) + ",";
+      }
+      for (auto v : _args_float) {
+        msg += std::to_string(v) + ",";
+      }
+      msg.pop_back();
+      return GuardDebugInfo(false, msg, 0);
     }
     return GuardDebugInfo(true, 1);
   }
