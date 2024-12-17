@@ -3904,54 +3904,43 @@ class ShapeEnv:
             ex_size, source, symbolic_context
         )
         stride: List[Optional[sympy.Expr]] = [None] * len(size)
-        for i, val in enumerate(ex_stride):
-            if val in (0, 1):
-                stride[i] = sympy.Integer(val)
-        while any(x is None for x in stride):
-            candidates = {
-                ex_size[i] * ex_stride[i]: size[i] * stride[i]
-                for i in range(len(size))
-                if stride[i] is not None
-            }
+        candidates: Dict[Union[int, SymInt], sympy.Expr] = {}
 
-            # iterate over unbound strides in sorted order
-            val_list = sorted(
-                [(ex_stride[i], i) for i in range(len(stride)) if stride[i] is None],
-                key=_nested_int_aware_sort,
+        # iterate over unbound strides in val sorted order ascending using
+        # descending index tie breaking
+        val_list = [(val, -i) for i, val in enumerate(ex_stride)]
+        val_list.sort(key=_nested_int_aware_sort)
+
+        for val, neg_i in val_list:
+            i = -neg_i
+            contiguous_stride = (
+                i != len(ex_stride) - 1
+                and ex_stride[i] == ex_size[i + 1] * ex_stride[i + 1]
             )
-            for _, i in val_list:
-                # Set stride to a candidate only for DimDynamic.INFER_STRIDE
-                if (
-                    stride[i] is None
-                    and dynamic_strides[i] == DimDynamic.INFER_STRIDE
-                    and ex_stride[i] in candidates
-                ):
-                    stride[i] = candidates[ex_stride[i]]
-                    candidates[ex_size[i] * ex_stride[i]] = size[i] * stride[i]  # type: ignore[operator]
-
-            if any(x is None for x in stride):
-                # bind the smallest unbound stride to a new variable
-                val, i = min(
-                    [
-                        (ex_stride[i], i)
-                        for i in range(len(stride))
-                        if stride[i] is None
-                    ],
-                    key=_nested_int_aware_sort,
-                )
-                # Set INFER_STRIDE to STATIC or DUCK depending on sizes
-                dyn_stride = dynamic_strides[i]
-                if dynamic_strides[i] == DimDynamic.INFER_STRIDE:
-                    dyn_stride = (
-                        DimDynamic.STATIC if are_sizes_static else DimDynamic.DUCK
+            if val in (0, 1) and not contiguous_stride:
+                out_stride = sympy.Integer(val)
+            else:
+                dynamic_stride = dynamic_strides[i]
+                if dynamic_stride == DimDynamic.INFER_STRIDE and val in candidates:
+                    # Set stride to a candidate only for DimDynamic.INFER_STRIDE
+                    out_stride = candidates[val]
+                else:
+                    # Set INFER_STRIDE to STATIC or DUCK depending on sizes
+                    dyn_stride = dynamic_stride
+                    if dynamic_stride == DimDynamic.INFER_STRIDE:
+                        dyn_stride = (
+                            DimDynamic.STATIC if are_sizes_static else DimDynamic.DUCK
+                        )
+                    out_stride = self.create_symbol(
+                        val,
+                        TensorPropertySource(source, TensorProperty.STRIDE, i),
+                        dynamic_dim=dyn_stride,
+                        constraint_dim=constraint_strides[i],
+                        symbolic_context=symbolic_context,
                     )
-                stride[i] = self.create_symbol(
-                    val,
-                    TensorPropertySource(source, TensorProperty.STRIDE, i),
-                    dynamic_dim=dyn_stride,
-                    constraint_dim=constraint_strides[i],
-                    symbolic_context=symbolic_context,
-                )
+            stride[i] = out_stride
+            candidates[ex_size[i] * val] = size[i] * out_stride
+
         assert all(x is not None for x in stride)
 
         sym_sizes = [
