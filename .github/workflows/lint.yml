@@ -207,8 +207,8 @@ jobs:
         conda activate "${CONDA_ENV}"
 
         # Test tools
-        PYTHONPATH=$(pwd) pytest tools/test/test_*.py
-        PYTHONPATH=$(pwd) pytest .github/scripts/test_*.py
+        PYTHONPATH=$(pwd) pytest tools/test -o "python_files=test*.py"
+        PYTHONPATH=$(pwd) pytest .github/scripts -o "python_files=test*.py"
 
   test_run_test:
     name: Test `run_test.py` is usable without boto3
