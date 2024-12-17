@@ -10,6 +10,7 @@ import logging
 import math
 import operator
 import os
+import re
 import sys
 import textwrap
 import time
@@ -1644,6 +1645,25 @@ class AlgorithmSelectorCache(PersistentCache):
         # TODO(nmacchioni): remove once CI tests are fixed
         choices = [choice for choice in choices if choice is not None]
 
+        if config.test_configs.autotune_choice_name_regex is not None:
+            choices = [
+                c
+                for c in choices
+                if re.search(
+                    config.test_configs.autotune_choice_name_regex,
+                    c.name,
+                )
+            ]
+        if config.test_configs.autotune_choice_desc_regex is not None:
+            choices = [
+                c
+                for c in choices
+                if re.search(
+                    config.test_configs.autotune_choice_desc_regex,
+                    c.description,
+                )
+            ]
+
         if mm_file_name := get_mm_log_filename():
             M, K = input_nodes[-2].get_size()[:2]
             N = input_nodes[-1].get_size()[-1]
@@ -1846,20 +1866,14 @@ class AlgorithmSelectorCache(PersistentCache):
 
                 return timings
 
-            # Assume the same base template, with same prologue support.
-            # We could relax this assumption by taking union of allowed prologue inputs,
-            # and within benchmark fusion not allow prologue fusion for choices which dont support it
-            # No use case of that yet.
-            allowed_prologue_inps: Optional[OrderedSet[str]] = None
+            # We take the union of allowed prologue inputs from all choices,
+            # and, within benchmark fusion, don't allow prologue fusion for
+            # choices which dont support the whole union.
+            allowed_prologue_inps: OrderedSet[str] = OrderedSet()
             for c in choices:
                 if isinstance(c, TritonTemplateCaller):
-                    if allowed_prologue_inps is None:
-                        allowed_prologue_inps = c.allowed_prologue_inps
-                    else:
-                        assert allowed_prologue_inps == c.allowed_prologue_inps
+                    allowed_prologue_inps |= c.allowed_prologue_inps
 
-            if allowed_prologue_inps is None:
-                allowed_prologue_inps = OrderedSet()
             return torch._inductor.ir.TensorBox.create(
                 torch._inductor.ir.MultiTemplateBuffer(
                     layout,
