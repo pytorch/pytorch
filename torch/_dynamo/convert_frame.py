@@ -6,6 +6,7 @@ import contextlib
 import cProfile
 import dis
 import functools
+import gc
 import itertools
 import json
 import logging
@@ -23,7 +24,6 @@ import weakref
 from pathlib import Path
 from types import CellType, CodeType, FunctionType, ModuleType
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple, TypeVar, Union
-from typing_extensions import ParamSpec
 from weakref import ReferenceType
 
 import torch
@@ -52,6 +52,7 @@ from torch.utils._python_dispatch import (
     is_in_torch_dispatch_mode,
 )
 from torch.utils._traceback import CapturedTraceback, format_traceback_short
+from typing_extensions import ParamSpec
 
 from . import config, exc, trace_rules
 from .bytecode_analysis import remove_dead_code, remove_pointless_jumps
@@ -349,9 +350,9 @@ def exception_handler(
 
 
 FRAME_COUNTER = 0
-FRAME_COMPILE_COUNTER: typing.Counter[
-    Union[int, FrameStateSizeEntry]
-] = collections.Counter()
+FRAME_COMPILE_COUNTER: typing.Counter[Union[int, FrameStateSizeEntry]] = (
+    collections.Counter()
+)
 
 
 def maybe_cprofile(func: Callable[_P, _T]) -> Callable[_P, _T]:
@@ -628,9 +629,9 @@ def _compile(
     output: Optional[OutputGraph] = None
     tracer: Optional[InstructionTranslator] = None
 
-    tf_mode_stack: List[
-        torch.overrides.TorchFunctionMode
-    ] = torch.overrides._get_current_function_mode_stack()
+    tf_mode_stack: List[torch.overrides.TorchFunctionMode] = (
+        torch.overrides._get_current_function_mode_stack()
+    )
 
     @preserve_global_state
     def transform(
@@ -1042,6 +1043,11 @@ def _compile(
             # dynamo_compile table, and we will not have telemetry.
             # Be extra careful when making changes here!
 
+            if torch._dynamo.config.run_gc_after_compile:
+                with dynamo_timed("gc", dynamo_compile_column_us="gc_time_us"):
+                    log.info("run_gc_after_compile: running gc")
+                    gc.collect(1)
+
             if tracer:
                 tracer.output.local_scope = {}
 
@@ -1299,8 +1305,7 @@ class ConvertFrameProtocol(typing.Protocol):
         frame_state: Dict[str, Union[int, FrameStateSizeEntry]],
         *,
         skip: int = 0,
-    ) -> Optional[GuardedCode]:
-        ...
+    ) -> Optional[GuardedCode]: ...
 
 
 class CatchErrorsWrapper:

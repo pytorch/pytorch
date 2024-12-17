@@ -10,7 +10,7 @@ from typing import Any, Callable, Dict, Optional, Set, Type, TYPE_CHECKING, Unio
 
 import torch
 from torch._environment import is_fbcode
-from torch.utils._config_module import get_tristate_env, install_config_module
+from torch.utils._config_module import Config, get_tristate_env, install_config_module
 
 
 # to configure logging for dynamo, aot, and inductor
@@ -555,14 +555,20 @@ _unsafe_skip_fsdp_module_guards = (
     os.environ.get("UNSAFE_SKIP_FSDP_MODULE_GUARDS", "0") == "1"
 )
 
+# Run GC at the end of compilation
+run_gc_after_compile = Config(
+    default=True,
+    justknob="pytorch/compiler:enable_run_gc_after_compile",
+    env_name_default="TORCH_DYNAMO_RUN_GC_AFTER_COMPILE",
+)
+
 # HACK: this is for testing custom ops profiling only
 _custom_ops_profile: Optional[Any] = None
 
 if TYPE_CHECKING:
     from torch.utils._config_typing import *  # noqa: F401, F403
 
-    def _make_closure_patcher(**changes):
-        ...
+    def _make_closure_patcher(**changes): ...
 
 
 install_config_module(sys.modules[__name__])
