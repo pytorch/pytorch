@@ -25,7 +25,11 @@ from torch.testing._internal.common_device_type import (
 )
 from torch.testing._internal.common_methods_invocations import op_db, SampleInput
 from torch.testing._internal.common_modules import module_db, modules
-from torch.testing._internal.common_nn import module_tests, get_new_module_tests, TestBase
+from torch.testing._internal.common_nn import (
+    get_new_module_tests,
+    module_tests,
+    TestBase,
+)
 from torch.testing._internal.common_utils import (
     freeze_rng_state,
     make_tensor,
