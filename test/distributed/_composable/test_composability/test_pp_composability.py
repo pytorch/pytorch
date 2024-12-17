@@ -548,6 +548,129 @@ class ComposabilityTest(MultiProcessTestCase):
 
         torch.distributed.destroy_process_group()
 
+    @requires_nccl()
+    @skip_if_lt_x_gpu(4)
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "Test requires 2+ GPUs")
+    @parametrize(
+        "schedule_class",
+        [
+            # ScheduleGPipe,
+            # Schedule1F1B,
+            # ScheduleInterleaved1F1B,
+            # ScheduleLoopedBFS,
+            ScheduleInterleavedZeroBubble,
+        ],
+    )
+    def test_pp_with_compile(self, schedule_class):
+        print("in test_pp_with_compile")
+        device = torch.device("cuda", self.device)
+        torch.cuda.set_device(self.device)
+        store = torch.distributed.FileStore(self.file_name, self.world_size)
+        torch.distributed.init_process_group(
+            backend="nccl",
+            store=store,
+            rank=self.rank,
+            world_size=self.world_size,
+            # TODO (kwen2501): disabled eager init below as this test is failing
+            # with bug fix #139013.  Temporarily use lazy init to cover the
+            # composability aspect of this test.
+            # device_id=device,
+        )
+        device_mesh = init_device_mesh(
+            "cuda", mesh_shape=(2, 2), mesh_dim_names=("dp", "pp")
+        )
+        pp_group = device_mesh["pp"].get_group()
+        dp_mesh = device_mesh["dp"]
+
+        # create "entire model"
+        total_layers = 8
+        dim = 10
+        full_model = nn.ModuleList([MLPModule(dim) for _ in range(total_layers)])
+        ref_model = nn.Sequential(*copy.deepcopy(full_model))
+        ref_model.to(self.device)
+
+        # Prepare inputs
+        num_microbatches = 8
+        inputs = [
+            torch.rand((num_microbatches, dim), device=self.device)
+            for _ in range(dp_mesh.size())
+        ]
+        input = inputs[dp_mesh.get_local_rank()]
+        input_mb = [[input[i].reshape((1, dim))] for i in range(num_microbatches)]
+
+        # dummy loss needed just to force backwards to run in schedule step
+        def loss_fn(y, target):
+            return y.sum()
+
+        # Create pipeline stage
+        def build_stage(stage_idx, num_stages):
+            partial_model, offset = get_stage_module(stage_idx, num_stages)
+            stage = PipelineStage(
+                partial_model,
+                stage_idx,
+                num_stages,
+                device,
+                group=pp_group,
+            )
+            return stage, offset
+
+        # Get stage module i from the entire model
+        def get_stage_module(stage_idx, num_stages):
+            # divide the model (8 layers) by the number of stages
+            layers_per_stage = total_layers // num_stages
+            assert layers_per_stage * num_stages == total_layers
+            # return offset so validation code can match partial layer back to orig model
+            offset = stage_idx * layers_per_stage
+            partial_model = nn.Sequential(
+                *full_model[offset : (stage_idx + 1) * layers_per_stage]
+            )
+            partial_model.to(self.device)
+
+            # TODO: ADDING THIS LINE FOR TORCH.COMPILE WILL SIGSEGV
+            # Wrap the partial model with torch.compile
+            partial_model = torch.compile(partial_model)
+
+            return partial_model, offset
+
+        # Attach to a schedule
+        if issubclass(schedule_class, PipelineScheduleSingle):
+            pipeline_stage, offset = build_stage(pp_group.rank(), pp_group.size())
+            partial_models = [pipeline_stage.submod]
+            offsets = [offset]
+            pipeline_schedule = schedule_class(
+                pipeline_stage,
+                n_microbatches=num_microbatches,
+                loss_fn=loss_fn,
+            )
+        else:
+            n_virtual = 2
+            num_stages = pp_group.size() * n_virtual
+            stages = []
+            offsets = []
+            for i in range(n_virtual):
+                stage, offset = build_stage(pp_group.rank() + n_virtual * i, num_stages)
+                stages.append(stage)
+                offsets.append(offset)
+                partial_models = [pipeline_stage.submod for pipeline_stage in stages]
+            pipeline_schedule = schedule_class(
+                stages,
+                n_microbatches=num_microbatches,
+                loss_fn=loss_fn,
+            )
+
+        if pp_group.rank() == 0:
+            pipeline_schedule._step_microbatches(arg_mbs=input_mb, target_mbs=input_mb)
+        else:
+            pipeline_schedule._step_microbatches(
+                arg_mbs=[[] for _ in input_mb], target_mbs=input_mb
+            )
+
+        # Ref model runs on 2 different inputs, accumulating grads across them.
+        # this ensures that we detect if the FSDP reduce becomes a no-op.
+        # (in fsdp case, we use one of these inputs on each DP rank)
+        (ref_model(inputs[0]).sum()).backward()
+        (ref_model(inputs[1]).sum()).backward()
+
 
 instantiate_parametrized_tests(ComposabilityTest)
 
