@@ -3906,8 +3906,10 @@ class ShapeEnv:
         stride: List[Optional[sympy.Expr]] = [None] * len(size)
         candidates: Dict[Union[int, SymInt], sympy.Expr] = {}
 
-        # iterate over unbound strides in val sorted order ascending using
-        # descending index tie breaking
+        # iterate over unbound strides in val ascending order with
+        # index descending as a tie breaker since for cases like
+        # [(1, 1), (1, 0)], we want to fill in the right most
+        # stride first.
         val_list = [(val, -i) for i, val in enumerate(ex_stride)]
         val_list.sort(key=_nested_int_aware_sort)
 
