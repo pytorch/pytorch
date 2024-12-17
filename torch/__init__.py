@@ -2530,13 +2530,28 @@ def compile(
     else:
         backend = _TorchCompileWrapper(backend, mode, options, dynamic)
 
-    return torch._dynamo.optimize(
+    optimized = torch._dynamo.optimize(
         backend=backend,
         nopython=fullgraph,
         dynamic=dynamic,
         disable=disable,
-    )(model)  # type: ignore[return-value]
+    )(model)
 
+    if fullgraph:
+        from torch._fullgraph import _bump_optimized_version, _get_model_name
+        optimized_version = _bump_optimized_version(model)
+
+        import functools
+        @functools.wraps(model)
+        def _(*args, **kwargs):
+            import torch.compiler
+            if package := torch.compiler._get_current_fullgraph_package():
+                return package(model, _get_model_name(model), optimized_version)(*args, **kwargs)
+
+            return optimized(*args, **kwargs)
+        return _ 
+
+    return optimized   # type: ignore[return-value]
 
 def _register_device_module(device_type, module):
     r"""Register an external runtime module of the specific :attr:`device_type`
