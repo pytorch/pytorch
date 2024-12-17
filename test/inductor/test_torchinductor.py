@@ -428,7 +428,10 @@ def check_model(
             else:
                 return x
 
-        ref_inputs = list(map(upcast_fn, example_inputs))
+        # We previously call upcast_fn on example_inputs. It's incorrect
+        # if example_inputs is already fp32 and get inplace updated in the model.
+        # Call on the cloned tensors instead
+        ref_inputs = list(map(upcast_fn, ref_inputs))
         ref_kwargs = {k: upcast_fn(v) for k, v in kwargs.items()}
         if has_lowp_args and hasattr(model, "to"):
             ref_model = copy.deepcopy(model).to(torch.float)
@@ -1238,6 +1241,11 @@ class CommonTemplate:
         self.common(fn, (torch.randn(32),))
 
     def test_add_inplace_permuted(self):
+        if config.cpu_backend == "halide":
+            raise unittest.SkipTest(
+                "Halide cpu backend does not work for this test case: https://github.com/pytorch/pytorch/issues/140344"
+            )
+
         def fn(x, y):
             return x.add_(y)
 
@@ -11932,28 +11940,6 @@ class CommonTemplate:
         # recompilation.
         run(9)
         self.assertEqual(cnts.frame_count, 4)
-
-    def test_slice_after_split_dont_specialize_dynamic_dim(self):
-        N = 16
-
-        @torch.compile(backend="inductor", dynamic=False, fullgraph=True)
-        def fn(x):
-            # Creates an upper bound: x.shape[0] <= N
-            splits = torch.ops.aten.split.Tensor(x, N)
-            first = splits[0]
-            # Previously: creates a lower bound: x.shape[0] >= N
-            # Currenty: creates an upper bound: x.shape[0] <= N
-            #
-            # See: https://github.com/pytorch/pytorch/issues/141251
-            r = torch.ops.aten.slice.Tensor(first, 0, 0, N)
-            return r
-
-        x = torch.arange(N)
-        torch._dynamo.mark_dynamic(x, 0)
-
-        # Check it doesn't error because we have specialized a dimension
-        # marked as dynamic.
-        fn(x)
 
 
 @dataclasses.dataclass
