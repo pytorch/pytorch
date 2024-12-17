@@ -181,6 +181,7 @@ class TestDynamoTimed(TestCase):
 {'_recursive_joint_graph_passes': 0.0,
  '_recursive_post_grad_passes': 0.0,
  '_recursive_pre_grad_passes': 0.0,
+ 'async_compile.wait': 0.0,
  'backend_compile': 0.0,
  'code_gen': 0.0,
  'entire_backward_compile': 0.0,
@@ -222,6 +223,7 @@ class TestDynamoTimed(TestCase):
  'co_name': 'forward',
  'code_gen_time_s': 0.0,
  'compile_id': '1/0',
+ 'compile_time_autotune_time_us': None,
  'compliant_custom_ops': set(),
  'config_inline_inbuilt_nn_modules': False,
  'config_suppress_errors': False,
@@ -255,6 +257,7 @@ class TestDynamoTimed(TestCase):
  'inductor_fx_remote_cache_miss_count': None,
  'inductor_fx_remote_cache_miss_keys': None,
  'is_forward': True,
+ 'is_runtime': False,
  'joint_graph_pass_time_us': 0,
  'log_format_version': 3,
  'non_compliant_ops': set(),
@@ -276,7 +279,7 @@ class TestDynamoTimed(TestCase):
  'start_time_us': 100,
  'structured_logging_overhead_s': 0.0,
  'structured_logging_overhead_us': 0,
- 'triton_compile_time_us': None,
+ 'triton_compile_time_us': 0,
  'triton_version': None}""",  # noqa: B950
         )
 
@@ -296,6 +299,7 @@ class TestDynamoTimed(TestCase):
  'co_name': None,
  'code_gen_time_s': 0.0,
  'compile_id': '1/0',
+ 'compile_time_autotune_time_us': None,
  'compliant_custom_ops': None,
  'config_inline_inbuilt_nn_modules': None,
  'config_suppress_errors': None,
@@ -329,6 +333,7 @@ class TestDynamoTimed(TestCase):
  'inductor_fx_remote_cache_miss_count': None,
  'inductor_fx_remote_cache_miss_keys': None,
  'is_forward': False,
+ 'is_runtime': False,
  'joint_graph_pass_time_us': None,
  'log_format_version': 3,
  'non_compliant_ops': None,
@@ -350,7 +355,7 @@ class TestDynamoTimed(TestCase):
  'start_time_us': 100,
  'structured_logging_overhead_s': 0.0,
  'structured_logging_overhead_us': 0,
- 'triton_compile_time_us': None,
+ 'triton_compile_time_us': 0,
  'triton_version': None}""",  # noqa: B950
         )
 

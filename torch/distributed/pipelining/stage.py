@@ -539,7 +539,7 @@ class _PipelineStageBase(ABC):
                 raise AssertionError(f"Expected _RecvInfo but got {type(info)}")
 
         tensors = map_aggregate(
-            recv_infos,
+            recv_infos,  # type: ignore[arg-type]
             get_recv_tensor,
         )
 
@@ -822,7 +822,8 @@ class _PipelineStageBase(ABC):
             # to return to the user in merge_output_chunks, therefore
             # this should be detached to release autograd graph context and free memory earlier
             for t in stage_output:
-                t.detach_()
+                if not t._is_view():  # views are not detachable in-place
+                    t.detach_()
 
         logger.debug("%s Backwarded chunk %s", self.log_prefix, bwd_chunk_id)
 
