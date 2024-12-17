@@ -13,7 +13,7 @@ namespace at::native {
 
 void addcmul_cuda_scalar_tensor2_kernel(
   TensorIteratorBase& iter,
-  const Scalar& tensor2_scalar,
+  const Scalar& scalar_tensor2,
   const Scalar& value
 );
 
@@ -96,7 +96,7 @@ void addcmul_cuda_kernel(TensorIteratorBase& iter, const Scalar& value) {
 #if AT_USE_JITERATOR() && CUDA_VERSION >= 11050
 constexpr char addcmul_scalar_tensor2_name[] = "addcmul_scalar_tensor2";
 #endif
-void addcmul_cuda_scalar_tensor2_kernel(TensorIteratorBase& iter, const Scalar& tensor2_scalar, const Scalar& value) {
+void addcmul_cuda_scalar_tensor2_kernel(TensorIteratorBase& iter, const Scalar& scalar_tensor2, const Scalar& value) {
   auto dtype = iter.common_dtype();
 
   if (at::isComplexType(dtype)) {
@@ -105,7 +105,7 @@ void addcmul_cuda_scalar_tensor2_kernel(TensorIteratorBase& iter, const Scalar& 
     // https://github.com/pytorch/pytorch/pull/74234#issuecomment-1100932209
     #if AT_USE_JITERATOR() && CUDA_VERSION >= 11050
       AT_DISPATCH_COMPLEX_TYPES(dtype, "addcmul_cuda", [&]() {
-        auto c = tensor2_scalar.to<scalar_t>();
+        auto c = scalar_tensor2.to<scalar_t>();
         auto alpha = value.to<scalar_t>();
 
         static const auto addcmul_scalar_tensor2_string = jiterator_stringify(
@@ -124,7 +124,7 @@ void addcmul_cuda_scalar_tensor2_kernel(TensorIteratorBase& iter, const Scalar& 
         });
     #else
       AT_DISPATCH_COMPLEX_TYPES(dtype, "addcmul_cuda", [&]() {
-        auto c = tensor2_scalar.to<scalar_t>();
+        auto c = scalar_tensor2.to<scalar_t>();
         auto alpha = value.to<scalar_t>();
         gpu_kernel(iter, [alpha, c]GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
           return a + alpha * (b * c);
@@ -136,7 +136,7 @@ void addcmul_cuda_scalar_tensor2_kernel(TensorIteratorBase& iter, const Scalar& 
       // note(mkozuki): If scalar_t is fp16 or bfloat16, cast scalar to float
       // and do math in fp32 for better accuracy.
       using accscalar_t = at::acc_type<scalar_t, true>;
-      auto c = tensor2_scalar.to<accscalar_t>();
+      auto c = scalar_tensor2.to<accscalar_t>();
       auto alpha = value.to<accscalar_t>();
       gpu_kernel(iter, [alpha, c]GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
         return a + alpha * (static_cast<accscalar_t>(b) * c);
