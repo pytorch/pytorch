@@ -352,9 +352,7 @@ def tensorify_python_scalars(
         metrics_context.set(
             "tensorify_float_failure", failed_tensorify_ops, overwrite=True
         )
-        metrics_context.set(
-            "tensorify_float_success", True, overwrite=True
-        )
+        metrics_context.set("tensorify_float_success", True, overwrite=True)
         raise TensorifyScalarRestartAnalysis
 
     graph_code_log.debug(
