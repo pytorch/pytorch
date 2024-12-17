@@ -78,8 +78,7 @@ def _all_gather_sharded_tensor(
     return tensor
 
 
-class CompanionMismatch(Exception):
-    ...
+class CompanionMismatch(Exception): ...
 
 
 def _iterate_state_dict(
@@ -549,6 +548,7 @@ def _distribute_tensors(
         _local_state = local_state_dict.get(key, None)
         if _local_state is None or torch.is_tensor(_local_state):
             continue
+
         local_state = _local_state[0]
         full_tensor = _local_state[1]
 
