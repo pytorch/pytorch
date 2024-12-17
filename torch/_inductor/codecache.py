@@ -1080,7 +1080,7 @@ class FxGraphCache:
 
         if pickled_content is not None:
             CacheArtifactManager.record_artifact(
-                CacheArtifactType.INDUCTOR_CACHE, key, pickled_content
+                CacheArtifactType.INDUCTOR, key, pickled_content
             )
 
         if bundle := graph._triton_bundle:
@@ -1134,6 +1134,18 @@ class FxGraphCache:
         return graph, cache_info
 
     @staticmethod
+    def _write_to_local_cache(key: str, content: bytes) -> None:
+        subdir = FxGraphCache._get_tmp_dir_for_key(key)
+        if not os.path.exists(subdir):
+            os.makedirs(subdir, exist_ok=True)
+
+        # Use a hash of the serialized CompiledFxGraph to get a unique file
+        # name. The specific name doesn't matter since a lookup involves
+        # iterating over all entries in the parent subdir.
+        path = os.path.join(subdir, sha256_hash(content))
+        write_atomic(path, content, make_dirs=True)
+
+    @staticmethod
     def _save_graph(
         key: str,
         compiled_graph: OutputCode,
@@ -1176,18 +1188,10 @@ class FxGraphCache:
 
         try:
             CacheArtifactManager.record_artifact(
-                CacheArtifactType.INDUCTOR_CACHE, key, content
+                CacheArtifactType.INDUCTOR, key, content
             )
             if local:
-                subdir = FxGraphCache._get_tmp_dir_for_key(key)
-                if not os.path.exists(subdir):
-                    os.makedirs(subdir, exist_ok=True)
-
-                # Use a hash of the serialized CompiledFxGraph to get a unique file
-                # name. The specific name doesn't matter since a lookup involves
-                # iterating over all entries in the parent subdir.
-                path = os.path.join(subdir, sha256_hash(content))
-                write_atomic(path, content, make_dirs=True)
+                FxGraphCache._write_to_local_cache(key, content)
 
             if remote_cache:
                 time_taken_ms = int((disk_compiled_graph._time_taken_ns or 0) // 1e6)

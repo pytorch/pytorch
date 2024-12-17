@@ -10,6 +10,7 @@ from typing import Dict, List, Optional, Tuple, TYPE_CHECKING
 from typing_extensions import override
 
 import torch
+from torch.compiler._cache import CacheArtifactManager, CacheArtifactType
 from torch.utils._triton import has_triton, has_triton_package
 
 from ..remote_cache import (
@@ -174,6 +175,9 @@ class AutotuneCache:
             cache, key = local_cache
             cache.put(key, data)
             AutotuneCacheBundler.put(key, data)
+            CacheArtifactManager.record_artifact(
+                CacheArtifactType.AUTOTUNE, os.path.basename(key), data
+            )
 
             if log.isEnabledFor(logging.DEBUG):
                 type_str = "coordesc" if found_by_coordesc else "heuristic"
@@ -467,12 +471,16 @@ class LocalAutotuneCache(RemoteCache[JsonDataTy]):
         AutotuneCacheBundler.sync()
         result = super()._get(key, sample)
         if result is not None:
+            assert isinstance(result, dict)
             # What? Why are we doing a put() here? Imagine we have a new model
             # that reuses some existing kernels that have already been
             # compiled. If we didn't do a `put` here (on cache hit) then the new
             # model would only bundle *newly* compiled kernels, not existing
             # kernels that were already compiled and cached.
             AutotuneCacheBundler.put(key, result)
+            CacheArtifactManager.record_artifact(
+                CacheArtifactType.AUTOTUNE, os.path.basename(key), result
+            )
         return result
 
     @override
