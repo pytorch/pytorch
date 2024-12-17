@@ -3333,7 +3333,7 @@ else:
                              a + scalar * c * alpha)
             self.assertEqual(torch.addcmul(a, scalar, c, value=alpha),
                              a + scalar * c * alpha)
-        elif device[0:4] == "cuda":
+        elif device.startswith("cuda"):
             with self.assertRaisesRegex(RuntimeError, r'CPU Scalar support for tensor1 argument'):
                 torch.addcmul(a, scalar, c, value=alpha)
             with self.assertRaisesRegex(RuntimeError, r'CPU Scalar support for self argument'):
