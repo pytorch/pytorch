@@ -25,7 +25,7 @@ kernel void scatter_kernel_n(uint linear_index              [[thread_position_in
 
     uint64_t dst_offs = 0;
     uint dst_idx = linear_index;
-    for(int dim = ndim; dim >= 0; --dim) {{
+    for(int dim = ndim - 1; dim >= 0; --dim) {{
       dst_offs += stride[dim] * (dst_idx % size[dim]);
       dst_idx /= size[dim];
     }}
@@ -134,7 +134,7 @@ kernel void gather_kernel_n(uint linear_index               [[thread_position_in
 
     uint64_t src_offs = 0;
     uint src_idx = linear_index;
-    for(int dim = ndim; dim >= 0; --dim) {{
+    for(int dim = ndim - 1; dim >= 0; --dim) {{
       src_offs += stride[dim] * (src_idx % size[dim]);
       src_idx /= size[dim];
     }}
