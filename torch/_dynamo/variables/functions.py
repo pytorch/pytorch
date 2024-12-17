@@ -1076,7 +1076,7 @@ class DynamoTritonHOPifier(TritonHOPifier):
     def call_prune_configs_if_required(  # type: ignore[no-untyped-def]
         self,
         autotuner,
-        args,
+        named_args,
         kwargs,
         configs,
         tx,
@@ -1085,46 +1085,45 @@ class DynamoTritonHOPifier(TritonHOPifier):
         from .builder import VariableBuilder
 
         # Reimplement autotuner.prune_configs(...) here
-        # see triton/runtime/autotuner.py for the upstream reference
+        # see: https://github.com/triton-lang/triton/blob/e57b46897191b3b3061c78d0d60e58e94be565b6/python/triton/runtime/autotuner.py#L214   # noqa: E501,B950
         # We do this to avoid calling prune_configs, which in turn calls early_config_prune and perf_model
         # These are both user-defined functions which can contain side effects, so we want to sandbox them in Dynamo
 
-        configs_variable = VariableBuilder(tx, AttrSource(autotuner.source, "configs"))(
+        configs = VariableBuilder(tx, AttrSource(autotuner.source, "configs"))(
             autotuner.kernel.configs
         )
         if autotuner.kernel.early_config_prune:
             # call the first user-defined function here (early_config_prune)
-            configs_variable = self.call_user_defined_fn(
+            configs = self.call_user_defined_fn(
                 autotuner.kernel.early_config_prune,
-                [configs_variable, args],
+                [configs, named_args],
                 kwargs,
                 tx,
             )
         # realize the pruned configs
-        configs_variable = [config.realize().value for config in configs_variable.items]
+        configs = [config.realize().value for config in configs.items]
 
         if autotuner.kernel.perf_model:
             top_k = autotuner.kernel.configs_top_k
             if isinstance(top_k, float) and top_k <= 1.0:
-                top_k = int(len(configs_variable) * top_k)
-            if len(configs_variable) > top_k:
+                top_k = int(len(configs) * top_k)
+            if len(configs) > top_k:
                 est_timing = {
                     # call the user-defined function here as well
                     config: self.call_user_defined_fn(
                         autotuner.kernel.perf_model,
-                        [args],
-                        {**kwargs, **config.all_kwargs()},
+                        [],
+                        # see: https://github.com/triton-lang/triton/blob/d7ebf7982adedb61095b93084dcbcaf1d28c8da4/python/triton/runtime/autotuner.py#L225   # noqa: E501,B950
+                        {**named_args, **kwargs, **config.all_kwargs()},
                         tx,
                     )
-                    for config in configs_variable
+                    for config in configs
                 }
                 # realize the results of calling perf_model
                 est_timing = {k: v.realize().value for k, v in est_timing.items()}
-                configs_variable = sorted(
-                    est_timing.keys(), key=lambda x: est_timing[x]
-                )[:top_k]
+                configs = sorted(est_timing.keys(), key=lambda x: est_timing[x])[:top_k]
 
-        return configs_variable
+        return configs
 
     def call_HOP(self, variable, grids, combined_args_raw, tx) -> ConstantVariable:
         from .constant import ConstantVariable

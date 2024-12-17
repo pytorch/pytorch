@@ -1210,13 +1210,10 @@ class TritonHOPifier:
                 )
             iter_kernel = iter_kernel.fn
         # These are the default values in upstream Triton
-        # see: triton/runtime/autotuner.py
+        # see: https://github.com/triton-lang/triton/blob/e57b46897191b3b3061c78d0d60e58e94be565b6/python/triton/runtime/autotuner.py#L84 # noqa: E501,B950
         default_perf_model = None
-        default_configs_top_k = 1.0
         default_early_config_prune = None
 
-        # Save the arguments length for prune_configs_by
-        # We need this to get the args from kwargs later in get_kernel_and_metadata
         if isinstance(variable.kernel, Autotuner) and (
             variable.kernel.perf_model != default_perf_model
             or variable.kernel.early_config_prune != default_early_config_prune
@@ -1228,6 +1225,10 @@ class TritonHOPifier:
             pruned_configs = self.call_prune_configs_if_required(
                 variable, named_args, kwargs, variable.kernel.configs, tx
             )
+
+            # after pruning the configs, create a new autotuner object with
+            # these configs and recurise.
+
             new_kernel = autotune(configs=pruned_configs, key=[])(variable.kernel.fn)
             # create a new variable to contain the new (wrapped) kernel;
             # skip kernel_idx to get a new record in the kernel side table
@@ -1249,27 +1250,13 @@ class TritonHOPifier:
                 for config in new_configs:
                     config.__dict__.update(special_kwargs)
 
-                prune_configs_by = {
-                    "perf_model": variable.kernel.perf_model,
-                    "early_config_prune": variable.kernel.early_config_prune,
-                    "configs_top_k": variable.kernel.configs_top_k,
-                }
-                new_kernel = autotune(
-                    configs=new_configs, prune_configs_by=prune_configs_by, key=[]
-                )(variable.kernel.fn)
+                new_kernel = autotune(configs=new_configs, key=[])(variable.kernel.fn)
             else:
                 # if there is no Autotuner, wrap the kernel into a
                 # new one with a single config with special kwargs
                 new_config = Config(kwargs={}, **special_kwargs)
-                prune_configs_by = {
-                    "perf_model": variable.kernel.perf_model,
-                    "early_config_prune": variable.kernel.early_config_prune,
-                    "configs_top_k": variable.kernel.configs_top_k,
-                }
 
-                new_kernel = autotune(
-                    configs=[new_config], prune_configs_by=prune_configs_by, key=[]
-                )(variable.kernel)
+                new_kernel = autotune(configs=[new_config], key=[])(variable.kernel)
 
             # create a new variable to contain the new (wrapped) kernel;
             # skip kernel_idx to get a new record in the kernel side table
