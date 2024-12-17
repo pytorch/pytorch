@@ -830,7 +830,7 @@ class FxGraphHashDetails:
                         if kernel.configs:
                             configs = str(
                                 sorted(
-                                    sorted(c.all_kwargs().items())
+                                    sorted(str(kv) for kv in c.all_kwargs().items())
                                     for c in kernel.configs
                                 )
                             )
