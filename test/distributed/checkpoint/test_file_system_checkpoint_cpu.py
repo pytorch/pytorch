@@ -15,11 +15,14 @@ from torch.distributed._shard.sharding_spec import (
     ShardMetadata,
 )
 from torch.distributed.checkpoint import (
+    DefaultLoadPlanner,
+    DefaultSavePlanner,
     FileSystemReader,
     FileSystemWriter,
     load_state_dict,
     save_state_dict,
 )
+from torch.distributed.checkpoint.extension import Rot13
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -119,6 +122,41 @@ class TestDistributedStateDictSaveLoad(TestCase):
                 assert_state_dict_equal(self, state_dict_to_load_to, state_dict_to_save)
 
             # Load from file without any resharding
+            fs_reader = FileSystemReader(path=path)
+            load_state_dict(
+                state_dict=state_dict_to_load_to,
+                storage_reader=fs_reader,
+                no_dist=True,
+            )
+
+            assert_state_dict_equal(self, state_dict_to_load_to, state_dict_to_save)
+
+
+class TestDistributedStateDictSaveLoadRot13(TestCase):
+    @parametrize("thread_count", _THREAD_COUNTS)
+    def test_read_write_only_tensor(self, thread_count) -> None:
+        with tempfile.TemporaryDirectory() as path:
+            state_dict_to_save = MyTestModule().state_dict()
+
+            fs_writer = FileSystemWriter(
+                path=path,
+                thread_count=thread_count,
+            )
+            save_planner = DefaultSavePlanner(extensions=[Rot13()])
+            save_state_dict(
+                state_dict=state_dict_to_save,
+                storage_writer=fs_writer,
+                no_dist=True,
+                planner=save_planner,
+            )
+
+            state_dict_to_load_to = MyTestModule().state_dict()
+
+            with self.assertRaises(AssertionError):
+                assert_state_dict_equal(self, state_dict_to_load_to, state_dict_to_save)
+
+            # Load from file without any resharding.  Note there is no extension
+            # specification here; it is determined dynamically from the metadata.
             fs_reader = FileSystemReader(path=path)
             load_state_dict(
                 state_dict=state_dict_to_load_to,
@@ -461,6 +499,7 @@ class TestDistributedReshardOnLoad(ShardedTensorTestBase):
 
 
 instantiate_parametrized_tests(TestDistributedStateDictSaveLoad)
+instantiate_parametrized_tests(TestDistributedStateDictSaveLoadRot13)
 instantiate_parametrized_tests(TestDistributedStateDictSaveLoadWithSharedTensor)
 instantiate_parametrized_tests(TestDistributedReshardOnLoad)
 

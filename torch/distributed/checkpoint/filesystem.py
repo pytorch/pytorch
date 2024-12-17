@@ -71,6 +71,7 @@ class _StorageInfo:
     relative_path: str
     offset: int
     length: int
+    transform_descriptors: Tuple[str] = ()
 
 
 @dataclass
@@ -248,6 +249,7 @@ def _split_by_size_and_type(bins: int, items: List[WriteItem]) -> List[List[Writ
 
 
 def _write_item(
+    planner: SavePlanner,
     stream: io.IOBase,
     data: Union[io.BytesIO, torch.Tensor],
     write_item: WriteItem,
@@ -255,19 +257,28 @@ def _write_item(
 ) -> WriteResult:
     offset = stream.tell()
 
+    (transform_to, transform_descriptors) = planner.transform_save_stream(write_item, stream)
+
     if write_item.type == WriteItemType.BYTE_IO:
         assert isinstance(data, io.BytesIO)
-        stream.write(data.getbuffer())
+        transform_to.write(data.getbuffer())
     else:
         assert isinstance(data, torch.Tensor)
         assert data.device == torch.device("cpu")
-        torch.save(data, cast(IO[bytes], stream))
+        torch.save(data, cast(IO[bytes], transform_to))
+    transform_to.close()
+
     length = stream.tell() - offset
 
     return WriteResult(
         index=write_item.index,
         size_in_bytes=length,
-        storage_data=_StorageInfo(storage_key, offset, length),
+        storage_data=_StorageInfo(
+            storage_key,
+            offset,
+            length,
+            transform_descriptors=transform_descriptors,
+        ),
     )
 
 
@@ -320,13 +331,13 @@ def _write_files_from_queue(
                 for write_item in bytes_w:
                     data = planner.resolve_data(write_item)
                     write_results.append(
-                        _write_item(stream, data, write_item, storage_key)
+                        _write_item(planner, stream, data, write_item, storage_key)
                     )
 
                 for tensor, write_item in loader.values():
                     assert tensor.is_cpu
                     write_results.append(
-                        _write_item(stream, tensor, write_item, storage_key)
+                        _write_item(planner, stream, tensor, write_item, storage_key)
                     )
 
                 if use_fsync:
@@ -334,6 +345,7 @@ def _write_files_from_queue(
                         os.fsync(stream.fileno())
                     except (AttributeError, UnsupportedOperation):
                         os.sync()
+                stream.close()
             result_queue.put(write_results)
     except queue.Empty:
         pass
@@ -615,7 +627,8 @@ class _FileSystemWriter(StorageWriter):
 
 
 class FileSystemReader(StorageReader):
-    def __init__(self, path: Union[str, os.PathLike]) -> None:
+    def __init__(self, path: Union[str, os.PathLike],
+    ) -> None:
         super().__init__()
         self.fs = FileSystem()
         self.path = self.fs.init_path(path)
@@ -646,15 +659,29 @@ class FileSystemReader(StorageReader):
                 for req in reqs:
                     item_md = self.storage_data[req.storage_index]
                     file_slice = self._slice_file(stream, item_md)
+                    transform_from = planner.transform_load_stream(
+                        req,
+                        item_md.transform_descriptors,
+                        file_slice,
+                    )
+
                     if req.type == LoadItemType.BYTE_IO:
-                        read_bytes = io.BytesIO(file_slice.read(item_md.length))
+                        read_bytes = io.BytesIO(transform_from.read(-1))
                         read_bytes.seek(0)
                         planner.load_bytes(req, read_bytes)
                     else:
+                        if transform_from.seekable():
+                            seekable = transform_from
+                        else:
+                            # torch.load requires a seekable input, so read the transform
+                            # stream now and store the output if needed
+                            seekable = io.BytesIO(transform_from.read(-1))
+                            seekable.seek(0)
+
                         tensor = cast(
                             Tensor,
                             torch.load(
-                                cast(IO[bytes], file_slice),
+                                cast(IO[bytes], seekable),
                                 map_location="cpu",
                                 weights_only=True,
                             ),
