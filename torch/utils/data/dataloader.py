@@ -1475,6 +1475,8 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
             if idx != self._rcvd_idx:
                 if not self._in_order:
                     # don't store it for later, process now
+                    # delete from self._task_info immediately
+                    # this keeps the object size manageable
                     worker_id = self._task_info.pop(idx)[0]
                     return self._process_data(data, worker_id)
                 # store out-of-order samples
