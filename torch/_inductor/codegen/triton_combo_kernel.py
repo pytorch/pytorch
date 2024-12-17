@@ -19,6 +19,8 @@ from typing import (
 import sympy
 from sympy import Integer, Symbol
 
+from torch.utils._ordered_set import OrderedSet
+
 from .. import config, metrics
 from ..runtime.hints import DeviceProperties
 from ..runtime.runtime_utils import next_power_of_2
@@ -616,7 +618,7 @@ class ComboKernel(Kernel):
             return heuristics_list[0], size_hints_list[0], self.sub_kernels[0]
 
     def get_mutated_args_sub_kernels(self) -> List[str]:
-        mutated_args = set()
+        mutated_args = OrderedSet[str]()
         for sub_kernel in self.sub_kernels:
             for mutation in sub_kernel.mutations:
                 if mutation in sub_kernel.args.input_buffers:
@@ -724,11 +726,11 @@ class ComboKernel(Kernel):
 
     def codegen_blocks(self, code: IndentedBuffer) -> None:
         for block in self.block_args:
-            assert block in {
+            assert block in (
                 "XBLOCK",
                 "YBLOCK",
                 "R0_BLOCK",
-            }, f"{block} is not supported without autotuning"
+            ), f"{block} is not supported without autotuning"
         if "YBLOCK" in self.block_args:
             code.splice(f"XBLOCK: tl.constexpr = {self.block_size_2d}")
             code.splice(f"YBLOCK: tl.constexpr = {self.block_size_2d}")
