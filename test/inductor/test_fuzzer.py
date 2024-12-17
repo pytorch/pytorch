@@ -5,7 +5,7 @@ from typing import List, Literal
 
 import torch
 from torch._inductor import config
-from torch._inductor.fuzzer import ConfigFuzzer, SamplingMethod
+from torch._inductor.fuzzer import ConfigFuzzer, SamplingMethod, Status
 from torch._inductor.test_case import run_tests, TestCase
 from torch.testing._internal import fake_config_module as fake_config
 from torch.testing._internal.inductor_utils import HAS_GPU
@@ -66,7 +66,7 @@ class TestConfigFuzzer(TestCase):
         self.assertIsNotNone(fuzzer.default)
         fuzzer.reproduce([{"max_fusion_size": 1}])
 
-    def test_config_fuzzer_bisector(self):
+    def test_config_fuzzer_bisector_exception(self):
         key_1 = {"e_bool": False, "e_optional": None}
 
         class MyException(Exception):
@@ -85,6 +85,41 @@ class TestConfigFuzzer(TestCase):
         self.assertEqual(len(results), 2)
         for res in results:
             self.assertEqual(res, key_1)
+
+    def test_config_fuzzer_bisector_boolean(self):
+        key_1 = {"e_bool": False, "e_optional": None}
+
+        def create_key_1():
+            def myfn():
+                if not fake_config.e_bool and fake_config.e_optional is None:
+                    return False
+                return True
+
+            return myfn
+
+        fuzzer = ConfigFuzzer(fake_config, create_key_1, seed=100, default={})
+        num_attempts = 2
+        results = fuzzer.bisect(num_attempts=num_attempts, p=1.0)
+        self.assertEqual(len(results), num_attempts)
+        for res in results:
+            self.assertEqual(res, key_1)
+
+    def test_config_fuzzer_n_tuple(self):
+        key_1 = {"e_bool": False, "e_optional": None}
+
+        def create_key_1():
+            def myfn():
+                if not fake_config.e_bool and fake_config.e_optional is None:
+                    return False
+                return True
+
+            return myfn
+
+        fuzzer = ConfigFuzzer(fake_config, create_key_1, seed=100, default={})
+        max_combo = 100
+        results = fuzzer.fuzz_n_tuple(2, max_combinations=max_combo)
+        self.assertEqual(len(results), max_combo)
+        self.assertEqual(results.lookup(tuple(key_1.keys())), Status.FAILED_RUN_RETURN)
 
 
 if __name__ == "__main__":

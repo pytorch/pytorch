@@ -356,8 +356,8 @@ class ResultType:
         combo = tuple(sorted(combo))
         self._vals[combo] = status
 
-    def size(self) -> int:
-        return self.size()
+    def __len__(self) -> int:
+        return len(self._vals)
 
     def lookup(self, combo: ComboType) -> Optional[Status]:
         combo = tuple(sorted(combo))
@@ -370,7 +370,7 @@ class ResultType:
 # Type that maps config strings to their default value
 ConfigType = Dict[str, Any]
 # Callable that returns a tupl
-FactoryOutputType = Callable[[], bool | Tuple[Any]]
+FactoryOutputType = Callable[[], bool]
 # input function factory
 FactoryType = Callable[[], FactoryOutputType]
 
@@ -387,9 +387,8 @@ class ConfigFuzzer:
 
     The main interface is a function factory that will return Callables to be torch.compiled. This function factory
       should return a test function when it's called. If said test function returns a boolean, then a False or True
-      determines whether the ConfigFuzzer considers it a successful run or not. If the test function returns a Tuple,
-      then the ConfigFuzzer assumes that this Tuple contains the return values function, and it will rerun the function
-      against Eager mode to check for accuracy using the best available technique (comparing to fp64 baseline).
+      determines whether the ConfigFuzzer considers it a successful run or not. Throwing an exception from within the
+      function will be considered a failure as well.
 
     # Example usage:
 
@@ -439,7 +438,7 @@ class ConfigFuzzer:
         seed: int,
         default: Optional[ConfigType] = None,
         sm: SamplingMethod = SamplingMethod.TOGGLE,
-        test_timeout: int = 1800,
+        test_timeout: int = 3600,
     ):
         """
         Args:
@@ -543,7 +542,7 @@ class ConfigFuzzer:
             new_config = self.new_config()
             new_config.update(conf)
             self.test_config(results, new_config)
-            print(f"Status of {conf}:\n{results.lookup(conf)}")
+            print(f"Status of {conf}:\n{results.lookup(tuple(conf.keys()))}")
         return results
 
     def _fuzz_helper(self, results: ResultType, combo: ComboType) -> None:
@@ -608,8 +607,7 @@ class ConfigFuzzer:
 
     def test_config(self, results: ResultType, config: ConfigType) -> Status:
         """
-        Tests a config. If the function factory returns a Tuple, then this will compare the output of that tuple
-          against an fp64 baseline.
+        Tests a config by calling the function produced by the factory function.
         """
         signal.signal(signal.SIGALRM, self.timeout_handler)
         signal.alarm(self.test_timeout)
@@ -617,13 +615,6 @@ class ConfigFuzzer:
         config_tuple = tuple(config.keys())
         if ret := results.lookup(config_tuple):
             return ret
-        torch._dynamo.reset()
-
-        def compile_with_options() -> Any:
-            self._reset_configs()
-            for name, value in config.items():
-                self._set_config(name, value)
-            return torch.compile()(self.test_model_fn_factory())
 
         def print_config() -> None:
             for field, value in config.items():
@@ -651,6 +642,12 @@ class ConfigFuzzer:
             results.set(config_tuple, return_status)
             return return_status
 
+        # reset config
+        torch._dynamo.reset()
+        self._reset_configs()
+        for name, value in config.items():
+            self._set_config(name, value)
+
         # try running eager
         test_model_fn = self.test_model_fn_factory()
         try:
@@ -662,7 +659,7 @@ class ConfigFuzzer:
 
         # try compilation
         try:
-            comp = compile_with_options()
+            comp = torch.compile()(self.test_model_fn_factory())
         except Exception as exc:  # noqa: E722
             return handle_return(
                 "Exception compiling", Status.FAILED_COMPILE, True, exc
@@ -670,7 +667,7 @@ class ConfigFuzzer:
 
         # try running compiled
         try:
-            success = comp()
+            compile_result = comp()
         except Exception as exc:  # noqa: E722
             return handle_return(
                 "Exception running compiled",
@@ -680,8 +677,8 @@ class ConfigFuzzer:
             )
 
         # bool return value means don't compare with eager
-        if type(success) is bool:
-            if not success:
+        if type(compile_result) is bool:
+            if not compile_result:
                 return handle_return(
                     "Function returned False", Status.FAILED_RUN_RETURN, False, None
                 )
@@ -689,24 +686,9 @@ class ConfigFuzzer:
                 ret = Status.PASSED
                 results.set(config_tuple, ret)
                 return ret
-        # try running in eager fp64
-        elif type(success) is tuple:
-            if isinstance(eager_results, bool):
-                raise RuntimeError("eager didn't return tuple, but compile did")
-            for er, cr in zip(eager_results, success):
-                if not torch.isclose(er, cr):
-                    return handle_return(
-                        "Results don't match eager",
-                        Status.FAILED_RUN_RETURN,
-                        False,
-                        None,
-                    )
-            ret = Status.PASSED
-            results.set(config_tuple, ret)
-            return ret
         else:
             raise ValueError(
-                f"Unable to process return type of test function: {type(success)}"
+                f"Unable to process return type of test function: {type(compile_result)}"
             )
 
     def bisect(self, num_attempts: int = 100, p: float = 0.5) -> List[ConfigType]:
@@ -811,7 +793,7 @@ def visualize_results(
     """
     # TODO support more dimensions
     assert n == 2
-    assert results.size() > 0
+    assert len(results) > 0
 
     input_set: OrderedSet[str] = OrderedSet({})
     for key in results.keys():
