@@ -14,7 +14,6 @@ from tools.stats.upload_stats_lib import (
     download_s3_artifacts,
     unzip,
     upload_to_dynamodb,
-    upload_to_rockset,
 )
 
 
@@ -26,7 +25,7 @@ ARTIFACT_REGEX = re.compile(
 )
 
 
-def upload_dynamo_perf_stats_to_rockset(
+def get_perf_stats(
     repo: str,
     workflow_run_id: int,
     workflow_run_attempt: int,
@@ -102,7 +101,7 @@ def generate_partition_key(repo: str, doc: Dict[str, Any]) -> str:
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description="Upload dynamo perf stats from S3 to Rockset"
+        description="Upload dynamo perf stats from S3 to DynamoDB"
     )
     parser.add_argument(
         "--workflow-run-id",
@@ -129,18 +128,6 @@ if __name__ == "__main__":
         help="head branch of the workflow",
     )
     parser.add_argument(
-        "--rockset-collection",
-        type=str,
-        required=True,
-        help="the name of the Rockset collection to store the stats",
-    )
-    parser.add_argument(
-        "--rockset-workspace",
-        type=str,
-        default="commons",
-        help="the name of the Rockset workspace to store the stats",
-    )
-    parser.add_argument(
         "--dynamodb-table",
         type=str,
         required=True,
@@ -153,20 +140,12 @@ if __name__ == "__main__":
         help="the regex to filter the list of CSV files containing the records to upload",
     )
     args = parser.parse_args()
-    perf_stats = upload_dynamo_perf_stats_to_rockset(
+    perf_stats = get_perf_stats(
         args.repo,
         args.workflow_run_id,
         args.workflow_run_attempt,
         args.head_branch,
         args.match_filename,
-    )
-    # TODO (huydhn): Write to both Rockset and DynamoDB, an one-off script to copy
-    # data from Rockset to DynamoDB is the next step before uploading to Rockset
-    # can be removed
-    upload_to_rockset(
-        collection=args.rockset_collection,
-        docs=perf_stats,
-        workspace=args.rockset_workspace,
     )
     upload_to_dynamodb(
         dynamodb_table=args.dynamodb_table,

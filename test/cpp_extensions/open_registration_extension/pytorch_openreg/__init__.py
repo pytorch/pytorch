@@ -4,6 +4,7 @@ import torch
 # can access it during its initialization
 # Also register aten impls
 from ._aten_impl import _IMPL_REGISTRY as _IMPL_REGISTRY  # noqa: F401
+from ._device_daemon import NUM_DEVICES as NUM_DEVICES
 
 
 # Load the C++ Module

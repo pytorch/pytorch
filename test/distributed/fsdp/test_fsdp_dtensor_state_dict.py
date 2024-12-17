@@ -247,7 +247,7 @@ class TestFSDPWithDeviceMeshAndDTensor(DTensorTestBase):
                     self.assertEqual(type(v1), DTensor)
                     self.assertEqual(type(v2), DTensor)
 
-    @with_comms
+    @with_comms()
     @skip_if_lt_x_gpu(2)
     @parametrize("offload_to_cpu", [True, False])
     @parametrize("is_even_sharded_model", [True, False])
@@ -303,13 +303,13 @@ class TestFSDPWithDeviceMeshAndDTensor(DTensorTestBase):
             RuntimeError, "DeviceMesh is not compatible with LOCAL_STATE_DICT."
         ):
             with FSDP.state_dict_type(model, StateDictType.LOCAL_STATE_DICT):
-                state_dict = model.state_dict()
+                model.state_dict()
 
         with self.assertRaisesRegex(
             RuntimeError, "DeviceMesh is not compatible with LOCAL_STATE_DICT."
         ):
             with FSDP.state_dict_type(model, StateDictType.LOCAL_STATE_DICT):
-                optim_state_dict = FSDP.optim_state_dict(model, optim)
+                FSDP.optim_state_dict(model, optim)
 
 
 instantiate_parametrized_tests(TestFSDPWithDeviceMeshAndDTensor)

@@ -10,7 +10,7 @@ if [[ -z "${USE_XPU}" ]]; then
     if [[ "$BRANCH" =~ .*release.* ]]; then
         pip install --index-url ${DOWNLOAD_PYTORCH_ORG}/test/ $TRITON_VERSION
     else
-        pip install --index-url ${DOWNLOAD_PYTORCH_ORG}/nightly/ $TRITON_VERSION+$(head -c 10 .ci/docker/ci_commit_pins/triton.txt)
+        pip install --index-url ${DOWNLOAD_PYTORCH_ORG}/nightly/ $TRITON_VERSION+git$(head -c 8 .ci/docker/ci_commit_pins/triton.txt)
     fi
 else
     # The Triton xpu logic is as follows:
@@ -19,7 +19,7 @@ else
     #    it will install Triton from the source.
 
     TRITON_VERSION="pytorch-triton-xpu==$(cat .ci/docker/triton_version.txt)"
-    TRITON_XPU_COMMIT_ID="$(head -c 10 .ci/docker/ci_commit_pins/triton-xpu.txt)"
+    TRITON_XPU_COMMIT_ID="git$(head -c 8 .ci/docker/ci_commit_pins/triton-xpu.txt)"
     if [[ -z "${TRITON_XPU_BUILD_FROM_SOURCE}" ]]; then
         pip install --index-url ${DOWNLOAD_PYTORCH_ORG}/nightly/ ${TRITON_VERSION}+${TRITON_XPU_COMMIT_ID}
     else

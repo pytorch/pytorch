@@ -56,7 +56,7 @@ except ModuleNotFoundError:
     np = None  # type: ignore[assignment]
 
 try:
-    from torch.distributed._composable.fsdp import _fsdp_param_group
+    from torch.distributed.fsdp._fully_shard import _fsdp_param_group
 except ModuleNotFoundError:
     _fsdp_param_group = None  # type: ignore[assignment]
 
@@ -467,7 +467,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
 
         @register(torch.numel)
         def handle_numel(self, tx: "InstructionTranslator", input):
-            if isinstance(input, TensorVariable) and input.size is not None:
+            if isinstance(input, TensorVariable) and input.valid_size():
                 return ConstantVariable.create(product(input.size))
             elif isinstance(input, TensorVariable):
                 # Workaround dynamic shapes issue
@@ -973,26 +973,27 @@ Either create the tensor outside the compiled region, or do not set the tensor t
             isinstance(kwargs["out"], variables.ConstantVariable)
             and kwargs["out"].as_python_constant() is None
         ):
-            # out variants of torch operators like torch.sort and
-            # torch.sigmoid mutate the tensors in the out field. Track such
-            # tensors and rewrite the symbolic locals.
+            # out variants of torch operators like torch.sort and torch.sigmoid
+            # mutate the tensors in the out field.
+            #
+            # However, it's non-trivial to update all references of the old
+            # `TensorVariable` to the new one returned (`result_var`), so we
+            # take the conservative approach to graph break on size changes, and
+            # assume other cases can fall through soundly.
+            #
+            # Note that although these tensor variablels would hold different
+            # proxies, the in-place mutation semantics is preserved in the FX
+            # graph, so we won't have correctness issues.
             if isinstance(tensor_variable, TupleVariable):
                 assert isinstance(kwargs["out"], (TupleVariable, ListVariable))
-                output_tensor_names = [
-                    tx.find_symbolic_locals_name(x) for x in kwargs["out"].items
-                ]
-                for idx, name in enumerate(output_tensor_names):
-                    if name in tx.symbolic_locals:
-                        tx.symbolic_locals[name] = tensor_variable.items[idx]
                 for out_tensor, result_tensor in zip(
                     kwargs["out"].items, tensor_variable.items
                 ):
                     if (
-                        out_tensor.source
-                        and out_tensor in tx.output.graphargs
-                        and isinstance(out_tensor, variables.TensorVariable)
+                        isinstance(out_tensor, variables.TensorVariable)
                         and isinstance(result_tensor, variables.TensorVariable)
-                        and out_tensor.size != result_tensor.size
+                        and out_tensor._size
+                        != result_tensor._size  # we actually want to compare None values here
                     ):
                         # It's hard to get out variants with resizing on graph inputs work
                         # properly across dynamo/aot/inductor, just fall back.
@@ -1002,11 +1003,7 @@ Either create the tensor outside the compiled region, or do not set the tensor t
                 assert "example_value" in kwargs["out"].proxy.node.meta
                 fake_tensor = tensor_variable.proxy.node.meta["example_value"]
                 fake_out = kwargs["out"].proxy.node.meta["example_value"]
-                if (
-                    kwargs["out"].source
-                    and kwargs["out"] in tx.output.graphargs
-                    and fake_out_shape != fake_tensor.shape
-                ):
+                if fake_out_shape != fake_tensor.shape:
                     # It's hard to get out variants with resizing on graph inputs work
                     # properly across dynamo/aot/inductor, just fall back.
                     unimplemented("out variants with resizing on graph inputs")
@@ -1016,9 +1013,6 @@ Either create the tensor outside the compiled region, or do not set the tensor t
                     unimplemented(
                         "out= op was called where output tensor was non-contiguous"
                     )
-                name = tx.find_symbolic_locals_name(kwargs["out"])
-                if name in tx.symbolic_locals:
-                    tx.symbolic_locals[name] = tensor_variable
             elif (
                 isinstance(tensor_variable, ConstantVariable)
                 and tensor_variable.value is None
@@ -1123,6 +1117,9 @@ Either create the tensor outside the compiled region, or do not set the tensor t
                 (data.as_proxy(), placeholder.as_proxy()),
                 {},
             ),
+            # In reconstruct() we should use the original parameter. The one
+            # returned by the graph will be an alias.
+            source=placeholder.source,
         )
         assert isinstance(result, variables.TensorVariable)
         result.class_type = torch.nn.Parameter
@@ -1132,9 +1129,6 @@ Either create the tensor outside the compiled region, or do not set the tensor t
         # grad_enabled. Since this is parameter, we can just override the
         # has_grad_fn field to False to workaround the issue.
         result.has_grad_fn = False
-
-        # In reconstruct() should use the original parameter.  The one returned by the graph will be an alias.
-        result.source = placeholder.source
 
         # TODO(jansel): if the new param falls out of scope, currently it won't get freed until
         # the end of the graph.  We should fix this.
@@ -1177,11 +1171,13 @@ Either create the tensor outside the compiled region, or do not set the tensor t
         return args[0].call_method(tx, self.get_function().__name__, args[1:], kwargs)
 
     def is_tensor_method(self):
+        from ..trace_rules import get_tensor_method
+
         return (
             inspect.ismethoddescriptor(self.get_function())
             and hasattr(self.get_function(), "__objclass__")
             and self.get_function().__objclass__ == torch._C.TensorBase
-        ) or self.get_function() is torch.Tensor.__contains__
+        ) or self.get_function() in get_tensor_method()
 
     def torch_function_override_enabled(self, tx, args, kwargs):
         return (

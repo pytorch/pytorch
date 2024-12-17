@@ -20,7 +20,7 @@ class _ConvNd(nn.modules.conv._ConvNd):
         out_channels: int,
         kernel_size: Tuple[int, ...],
         stride: Tuple[int, ...],
-        padding: Tuple[int, ...],
+        padding: Union[str, Tuple[int, ...]],
         dilation: Tuple[int, ...],
         transposed: bool,
         output_padding: Tuple[int, ...],
@@ -66,12 +66,12 @@ class _ConvNd(nn.modules.conv._ConvNd):
             "qat."
             + cls.__name__
             + ".from_float only works for "
-            + cls._FLOAT_MODULE.__name__  # type: ignore[attr-defined]
+            + cls._FLOAT_MODULE.__name__
         )
         assert hasattr(mod, "qconfig"), "Input float module must have qconfig defined"
         assert mod.qconfig, "Input float module must have a valid qconfig"
         if issubclass(type(mod), _FusedModule):
-            mod = mod[0]  # type: ignore[index]
+            mod = mod[0]
         qconfig = mod.qconfig
         qat_conv = cls(
             mod.in_channels,
@@ -94,13 +94,13 @@ class _ConvNd(nn.modules.conv._ConvNd):
         to convert the qat module to a floating point module
         """
         cls = type(self)
-        conv = cls._FLOAT_CONV_MODULE(  # type: ignore[attr-defined, operator]
+        conv = cls._FLOAT_CONV_MODULE(  # type: ignore[attr-defined]
             self.in_channels,
             self.out_channels,
-            self.kernel_size,  # type: ignore[arg-type]
-            self.stride,  # type: ignore[arg-type]
-            self.padding,  # type: ignore[arg-type]
-            self.dilation,  # type: ignore[arg-type]
+            self.kernel_size,
+            self.stride,
+            self.padding,
+            self.dilation,
             self.groups,
             self.bias is not None,
             self.padding_mode,
@@ -112,9 +112,9 @@ class _ConvNd(nn.modules.conv._ConvNd):
         if issubclass(cls, _FusedModule):
             modules = [conv]
             assert hasattr(cls, "_FLOAT_RELU_MODULE")
-            relu = cls._FLOAT_RELU_MODULE()  # type: ignore[attr-defined]
+            relu = cls._FLOAT_RELU_MODULE()
             modules.append(relu)
-            fused = cls._FLOAT_MODULE(*modules)  # type: ignore[arg-type, attr-defined, operator]
+            fused = cls._FLOAT_MODULE(*modules)
             fused.train(self.training)
             return fused
         else:
@@ -134,7 +134,7 @@ class Conv1d(_ConvNd, nn.Conv1d):
     Attributes:
         weight_fake_quant: fake quant module for weight
     """
-    _FLOAT_MODULE: ClassVar[Type[nn.Conv1d]] = nn.Conv1d  # type: ignore[assignment,misc]
+    _FLOAT_MODULE: ClassVar[Type[nn.Conv1d]] = nn.Conv1d
     _FLOAT_CONV_MODULE: ClassVar[Type[nn.Conv1d]] = nn.Conv1d
 
     def __init__(
@@ -195,7 +195,7 @@ class Conv2d(_ConvNd, nn.Conv2d):
     Attributes:
         weight_fake_quant: fake quant module for weight
     """
-    _FLOAT_MODULE: ClassVar[Type[nn.Conv2d]] = nn.Conv2d  # type: ignore[assignment,misc]
+    _FLOAT_MODULE: ClassVar[Type[nn.Conv2d]] = nn.Conv2d
     _FLOAT_CONV_MODULE: ClassVar[Type[nn.Conv2d]] = nn.Conv2d
 
     def __init__(
@@ -259,7 +259,7 @@ class Conv3d(_ConvNd, nn.Conv3d):
     Attributes:
         weight_fake_quant: fake quant module for weight
     """
-    _FLOAT_MODULE: ClassVar[Type[nn.Conv3d]] = nn.Conv3d  # type: ignore[assignment,misc]
+    _FLOAT_MODULE: ClassVar[Type[nn.Conv3d]] = nn.Conv3d
     _FLOAT_CONV_MODULE: ClassVar[Type[nn.Conv3d]] = nn.Conv3d
 
     def __init__(

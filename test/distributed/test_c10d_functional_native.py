@@ -406,17 +406,35 @@ class TestWithNCCL(MultiProcessTestCase):
         assert output.completed
 
     @skip_if_lt_x_gpu(2)
+    def test_wait_tensor(self) -> None:
+        self._init_process_group()
+
+        input = torch.full((10, 10), float(self.rank), device=self.device)
+        self.assertEqual(torch._C._distributed_c10d._get_work_registry_size(), 0)
+        output = torch.ops._c10d_functional.all_reduce(
+            input,
+            "avg",
+            "default",
+        )
+        self.assertEqual(torch._C._distributed_c10d._get_work_registry_size(), 1)
+        torch.ops._c10d_functional.wait_tensor(output)
+        # `wait_tensor(output)` will pop the work from the work registry immediately
+        self.assertEqual(torch._C._distributed_c10d._get_work_registry_size(), 0)
+
+    @skip_if_lt_x_gpu(2)
     def test_unwaited(self) -> None:
         # Verify that the process can terminate gracefully
         # even with unwaited tensors
         self._init_process_group()
 
         input = torch.full((10, 10), float(self.rank), device=self.device)
-        output = torch.ops._c10d_functional.all_reduce(
+        self.assertEqual(torch._C._distributed_c10d._get_work_registry_size(), 0)
+        torch.ops._c10d_functional.all_reduce(
             input,
             "avg",
             "default",
         )
+        self.assertEqual(torch._C._distributed_c10d._get_work_registry_size(), 1)
 
     @skip_if_lt_x_gpu(2)
     def test_py_work(self) -> None:
@@ -532,7 +550,7 @@ class CompileTest(TestCase):
         assert "= torch.ops._c10d_functional.wait_tensor.default" not in code
 
         # Test aoti
-        out = AOTIRunnerUtil.run("cuda", func, (arg,))
+        AOTIRunnerUtil.run("cuda", func, (arg,))
         torch.cuda.synchronize()
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
@@ -578,7 +596,7 @@ class CompileTest(TestCase):
         assert "= torch.ops._c10d_functional.wait_tensor.default" not in code
 
         # Test aoti
-        out = AOTIRunnerUtil.run("cuda", func, (args,))
+        out = AOTIRunnerUtil.run("cuda", func, (args,))  # noqa: F841
         torch.cuda.synchronize()
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
@@ -690,7 +708,7 @@ class CompileTest(TestCase):
         assert "= torch.ops._c10d_functional.wait_tensor.default" not in code
 
         # Test aoti
-        out = AOTIRunnerUtil.run("cuda", func, (arg,))
+        AOTIRunnerUtil.run("cuda", func, (arg,))
         torch.cuda.synchronize()
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
@@ -724,7 +742,7 @@ class CompileTest(TestCase):
         )
 
         # Test aoti
-        out = AOTIRunnerUtil.run("cuda", func, (args,))
+        out = AOTIRunnerUtil.run("cuda", func, (args,))  # noqa: F841
         torch.cuda.synchronize()
 
     @unittest.skipIf(not HAS_GPU, "This is a GPU test!")
@@ -746,7 +764,7 @@ class CompileTest(TestCase):
         )
 
         # Test aoti
-        out = AOTIRunnerUtil.run("cuda", func, (arg,))
+        AOTIRunnerUtil.run("cuda", func, (arg,))
         torch.cuda.synchronize()
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
@@ -772,7 +790,7 @@ class CompileTest(TestCase):
         )
 
         # Test aoti
-        out = AOTIRunnerUtil.run("cuda", func, (arg,))
+        AOTIRunnerUtil.run("cuda", func, (arg,))
         torch.cuda.synchronize()
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
@@ -892,7 +910,7 @@ class CompileTest(TestCase):
         )
 
         # Test aoti
-        out = AOTIRunnerUtil.run("cuda", func, (arg,))
+        AOTIRunnerUtil.run("cuda", func, (arg,))
         torch.cuda.synchronize()
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")

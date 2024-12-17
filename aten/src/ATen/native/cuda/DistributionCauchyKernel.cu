@@ -10,6 +10,6 @@ void cauchy_kernel(TensorIteratorBase& iter, double median, double sigma, std::o
   at::native::templates::cuda::cauchy_kernel(iter, median, sigma, generator);
 }
 
-REGISTER_DISPATCH(cauchy_stub, &cauchy_kernel);
+REGISTER_DISPATCH(cauchy_stub, &cauchy_kernel)
 
 } // namespace at::native

@@ -6,6 +6,7 @@
 #include <deque>
 #include <mutex>
 #include <thread>
+#include <utility>
 #include <vector>
 
 #include <gloo/algorithm.h>
@@ -20,6 +21,8 @@
 #include <torch/csrc/distributed/c10d/Store.hpp>
 #include <torch/csrc/distributed/c10d/Types.hpp>
 #include <torch/csrc/distributed/c10d/Utils.hpp>
+
+#include <ATen/ThreadLocalState.h>
 
 namespace c10d {
 
@@ -72,6 +75,10 @@ class TORCH_API ProcessGroupGloo : public Backend {
     c10::intrusive_ptr<c10::ivalue::Future> getFuture() override;
     uint64_t getSequencenumber() const override;
 
+    inline at::ThreadLocalState getTLS() const {
+      return tls_;
+    }
+
    protected:
     friend class ProcessGroupGloo;
 
@@ -86,12 +93,14 @@ class TORCH_API ProcessGroupGloo : public Backend {
     c10::intrusive_ptr<at::ivalue::Future> future_;
     std::function<void()> recordFunctionBeforeCallback_;
     const uint64_t seq_;
+    at::ThreadLocalState tls_;
   };
 
   // Wrap c10d store as Gloo store
   class TORCH_API GlooStore : public ::gloo::rendezvous::Store {
    public:
-    GlooStore(const c10::intrusive_ptr<::c10d::Store>& store) : store_(store) {}
+    GlooStore(c10::intrusive_ptr<::c10d::Store> store)
+        : store_(std::move(store)) {}
 
     void setUint(const std::string& key, const std::vector<uint8_t>& value) {
       store_->set(key, value);
