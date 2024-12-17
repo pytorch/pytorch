@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 import os
-from typing import Any, List, Union
+from typing import Any, List, Set, Union
 
 from sympy import Integer, Number, Symbol
 from sympy.logic.boolalg import BooleanAtom
@@ -299,7 +299,7 @@ def tensorify_python_scalars(
                     node.replace_all_uses_with(replacement_proxy.node)
                     graph.erase_node(node)
 
-    failed_tensorify_ops = set()
+    failed_tensorify_ops: Set[str] = set()
 
     # Now do one more pass that specializes all symfloats we didn't manage
     # to tensorify away.
@@ -344,10 +344,15 @@ def tensorify_python_scalars(
         # Sledgehammer time. Restart dynamo analysis, keeping track of which input sources
         # are no longer needed and should be specialized. Restarting analysis is necessary
         # because we need to instruct Dynamo to NOT make these as inputs.
-        get_metrics_context().set("tensorify_float_failure", failed_tensorify_ops, overwrite=True)
+        get_metrics_context().set(
+            "tensorify_float_failure", failed_tensorify_ops, overwrite=True
+        )
         raise TensorifyScalarRestartAnalysis
 
-    get_metrics_context().set("tensorify_float_success", TensorifyState.empty(), overwrite=True)
+    if get_metrics_context().in_progress():
+        get_metrics_context().set(
+            "tensorify_float_success", TensorifyState.empty(), overwrite=True
+        )
 
     graph_code_log.debug(
         "%s", lazy_format_graph_code("tensorify_python_scalars", gm, colored=True)
