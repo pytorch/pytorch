@@ -1,4 +1,6 @@
 # mypy: allow-untyped-decorators
+import math
+import os
 import socket
 import uuid
 from contextlib import contextmanager
@@ -110,6 +112,8 @@ def get_symm_mem_workspace(group_name: str, min_size: int) -> _SymmetricMemory:
         _SymmetricMemory: the symmetric memory workspace associated with the
         group.
     """
+    enable_symm_mem_for_group(group_name)
+
     tensor = _group_name_to_workspace_tensor.get(group_name)
     size = tensor.numel() * tensor.element_size() if tensor is not None else 0
     if tensor is None or size < min_size:
@@ -135,14 +139,13 @@ def get_symm_mem_workspace(group_name: str, min_size: int) -> _SymmetricMemory:
     return _SymmetricMemory.rendezvous(tensor)
 
 
-_backend_stream: Optional[torch.cuda.Stream] = None
+_backend_streams: Dict[int, torch.cuda.Stream] = {}
 
 
-def _get_backend_stream() -> torch.cuda.Stream:
-    global _backend_stream
-    if _backend_stream is None:
-        _backend_stream = torch.cuda.Stream()
-    return _backend_stream
+def _get_backend_stream(priority: int = 0) -> torch.cuda.Stream:
+    if priority not in _backend_streams:
+        _backend_streams[priority] = torch.cuda.Stream(priority=priority)
+    return _backend_streams[priority]
 
 
 def _pipelined_multi_all_gather_and_consume(
@@ -428,7 +431,8 @@ def _pipelined_produce_and_all2all(
 
 lib = torch.library.Library("symm_mem", "DEF")  # noqa: TOR901
 lib.define(
-    "fused_all_gather_matmul(Tensor A, Tensor[] Bs, int gather_dim, str group_name) -> (Tensor, Tensor[])"
+    "fused_all_gather_matmul(Tensor A, Tensor[] Bs, int gather_dim, str group_name) -> (Tensor, Tensor[])",
+    tags=[torch._C.Tag.needs_fixed_stride_order],
 )
 lib.define(
     "fused_all_gather_scaled_matmul("
@@ -437,10 +441,12 @@ lib.define(
     "Tensor?[] biases, "
     "Tensor?[] result_scales, "
     "ScalarType?[] out_dtypes, "
-    "bool[] use_fast_accum) -> (Tensor, Tensor[])"
+    "bool[] use_fast_accum) -> (Tensor, Tensor[])",
+    tags=[torch._C.Tag.needs_fixed_stride_order],
 )
 lib.define(
-    "fused_matmul_reduce_scatter(Tensor A, Tensor B, str reduce_op, int scatter_dim, str group_name) -> Tensor"
+    "fused_matmul_reduce_scatter(Tensor A, Tensor B, str reduce_op, int scatter_dim, str group_name) -> Tensor",
+    tags=[torch._C.Tag.needs_fixed_stride_order],
 )
 lib.define(
     "fused_scaled_matmul_reduce_scatter("
@@ -449,7 +455,8 @@ lib.define(
     "Tensor? bias = None, "
     "Tensor? result_scale = None, "
     "ScalarType? out_dtype = None, "
-    "bool use_fast_accum = False) -> Tensor"
+    "bool use_fast_accum = False) -> Tensor",
+    tags=[torch._C.Tag.needs_fixed_stride_order],
 )
 lib.define("_low_contention_all_gather(Tensor tensor, str group_name) -> Tensor")
 lib.define(
@@ -648,6 +655,15 @@ def _fused_all_gather_matmul(
     if _is_test_mode:
         return _fused_all_gather_matmul_fallback(A_shard, Bs, gather_dim, group_name)
 
+    if _should_use_fused_all_gather_matmul_native(A_shard, Bs, gather_dim, group_name):
+        group = c10d._resolve_process_group(group_name)
+        leading_dims = list(A_shard.shape[:-1])
+        leading_dims[0] *= group.size()
+        A, out = _fused_all_gather_matmul_native(
+            A_shard.flatten(0, -2), Bs[0], group_name
+        )
+        return A.view(*leading_dims, -1), [out.view(*leading_dims, -1)]
+
     with torch.profiler.record_function("fused_all_gather_matmul"):
         return _fused_all_gather_matmul_impl(
             torch.ops.aten.mm.out,
@@ -659,6 +675,83 @@ def _fused_all_gather_matmul(
             gather_dim,
             group_name,
         )
+
+
+def _should_use_fused_all_gather_matmul_native(
+    A_shard: torch.Tensor,
+    Bs: List[torch.Tensor],
+    gather_dim: int,
+    group_name: str,
+) -> bool:
+    group = c10d._resolve_process_group(group_name)
+    local_M = math.prod(A_shard.shape[:-1])
+
+    return (
+        "TORCH_SYMM_MEM_ENABLE_NATIVE_ASYNC_TP" in os.environ
+        and A_shard.is_contiguous()
+        and gather_dim == 0
+        # _async_input_mm requires local_M to be divisible by world_size.
+        and local_M % group.size() == 0
+        # _async_input_mm outperforms the decomposition-based approach when the
+        # global M is small.
+        and local_M * group.size() <= 4096
+        # _async_input_mm only supports a single B.
+        and len(Bs) == 1
+    )
+
+
+def _fused_all_gather_matmul_native(
+    A_shard: torch.Tensor,
+    B: torch.Tensor,
+    group_name: str,
+) -> Tuple[torch.Tensor, torch.Tensor]:
+    symm_mem = rendezvous(A_shard, group_name)
+    if symm_mem is None:
+        symm_mem = get_symm_mem_workspace(
+            group_name, A_shard.numel() * A_shard.element_size()
+        )
+        symm_mem.barrier()
+        buf = symm_mem.get_buffer(symm_mem.rank, A_shard.shape, A_shard.dtype)
+        buf.copy_(A_shard)
+        A_shard = buf
+
+    rank = symm_mem.rank
+    world_size = symm_mem.world_size
+
+    current_stream = torch.cuda.current_stream()
+    backend_stream = _get_backend_stream(priority=-1)
+
+    symm_mem.barrier()
+    backend_stream.wait_stream(current_stream)
+    current_stream.wait_stream(backend_stream)
+
+    A = A_shard.new_empty(A_shard.shape[0] * world_size, A_shard.shape[1])
+    A_signals = torch.zeros(world_size, dtype=torch.uint32, device=A_shard.device)
+    A_shards = A.chunk(world_size)
+
+    A_shards[rank].copy_(A_shard)
+    if not torch.cuda.is_current_stream_capturing():
+        _SymmetricMemory.stream_write_value32(A_signals, rank, 1)
+    else:
+        _SymmetricMemory.memset32(A_signals, offset=rank, val=1, count=1)
+
+    out = torch.ops.symm_mem._async_input_mm(A, B, A_signals, rank)
+    for step in range(1, world_size):
+        src_rank = (rank + step) % world_size
+        src_buf = symm_mem.get_buffer(src_rank, A_shard.shape, A_shard.dtype)
+        with torch.cuda.stream(backend_stream):
+            A_shards[src_rank].copy_(src_buf)
+            if not torch.cuda.is_current_stream_capturing():
+                # cuStreamWriteValue32 issues a system level fence before the write
+                _SymmetricMemory.stream_write_value32(A_signals, src_rank, 1)
+            else:
+                _SymmetricMemory.memset32(A_signals, offset=src_rank, val=1, count=1)
+
+    current_stream.wait_stream(backend_stream)
+    backend_stream.wait_stream(current_stream)
+
+    symm_mem.barrier()
+    return A, out
 
 
 @torch.library.impl(lib, "fused_all_gather_scaled_matmul", "Meta")
@@ -1186,7 +1279,7 @@ def _low_contention_all_gather(
           symmetric memory workspace.
         - Symmetric memory workspace size requirement: the size of `tensor`.
     """
-    symm_mem = _SymmetricMemory.rendezvous(tensor)
+    symm_mem = rendezvous(tensor, group_name)
     if symm_mem is not None:
         input_is_symm_mem = True
     else:
@@ -1327,7 +1420,7 @@ def _low_contention_reduce_scatter(
     TODO(yifu): the SM-based copy can be avoided with a list-based reduction
     kernel.
     """
-    symm_mem = _SymmetricMemory.rendezvous(tensor)
+    symm_mem = rendezvous(tensor, group_name)
     if symm_mem is not None:
         return _low_contention_reduce_scatter_with_symm_mem_input(
             tensor, reduce_op, symm_mem
@@ -1339,3 +1432,109 @@ def _low_contention_reduce_scatter(
         return _low_contention_reduce_scatter_with_workspace(
             tensor, reduce_op, workspace
         )
+
+
+# =============================================================================
+# User-facing APIs
+# =============================================================================
+
+
+from typing import Any, overload, Sequence, TYPE_CHECKING, Union
+
+from torch.types import _device, _dtype, _int
+
+
+if TYPE_CHECKING:
+    from torch._C._distributed_c10d import ProcessGroup
+
+
+@overload
+def empty(
+    *size: _int, dtype: Optional[_dtype] = None, device: Optional[_device] = None
+) -> torch.Tensor:
+    ...
+
+
+@overload
+def empty(
+    size: Sequence[_int],
+    *,
+    dtype: Optional[_dtype] = None,
+    device: Optional[_device] = None,
+) -> torch.Tensor:
+    ...
+
+
+def empty(  # type: ignore[misc]
+    *size: Any,
+    dtype: Optional[_dtype] = None,
+    device: Optional[_device] = None,
+) -> torch.Tensor:
+    r"""
+    empty(*size, *, dtype=None, device=None) -> Tensor
+
+    Similar to :func:`torch.empty()`. The returned tensor can be used by
+    :func:`torch._distributed._symmetric_memory.rendezvous()` to establish a
+    symmetric memory tensor among participating processes.
+
+    Args:
+        size (int...): a sequence of integers defining the shape of the output tensor.
+            Can be a variable number of arguments or a collection like a list or tuple.
+
+    Keyword args:
+        dtype (:class:`torch.dtype`, optional): the desired data type of returned tensor.
+            Default: if ``None``, uses a global default (see :func:`torch.set_default_dtype`).
+        device (:class:`torch.device`, optional): the desired device of returned tensor.
+            Default: if ``None``, uses the current device for the default tensor type
+            (see :func:`torch.set_default_device`). :attr:`device` will be the CPU
+            for CPU tensor types and the current CUDA device for CUDA tensor types.
+    """
+    if len(size) == 1 and isinstance(size[0], Sequence):
+        size = tuple(size[0])
+    else:
+        size = tuple(size)
+
+    if dtype is None:
+        dtype = torch.get_default_dtype()
+
+    if device is None:
+        device = torch.get_default_device()
+
+    return _SymmetricMemory.empty_strided_p2p(
+        size=size,
+        stride=torch._prims_common.make_contiguous_strides_for(size),
+        dtype=dtype,
+        device=torch.device(device),
+    )
+
+
+def rendezvous(
+    tensor: torch.Tensor, group: Union[str, "ProcessGroup"]
+) -> _SymmetricMemory:
+    r"""
+    rendezvous(tensor, group) -> _SymmetricMemory
+
+    Establish a symmetric memory tensor among participating processes. This is
+    a collective operation.
+
+    Args:
+        tensor (:class:`torch.Tensor`): the local tensor used to establish the symmetric memory tensor.
+            It must be allocated via :func:`torch._distributed._symmetric_memory.empty()`. The shape,
+            dtype, and device type must be identical across all participating processes.
+        group (Union[str, :class:`torch.distributed.ProcessGroup`]): The group identifying the
+            participating processes. This can be either a group name or a process group object.
+    """
+    from torch._C._distributed_c10d import ProcessGroup
+
+    if isinstance(group, str):
+        group_name = group
+    elif isinstance(group, ProcessGroup):
+        group_name = group.group_name
+    else:
+        raise TypeError(f"rendezvous: unsupported group type: {type(group)}")
+
+    enable_symm_mem_for_group(group_name)
+    return _SymmetricMemory.rendezvous(tensor, group_name)
+
+
+__all__ = ["empty", "rendezvous"]

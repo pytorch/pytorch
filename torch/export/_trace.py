@@ -285,7 +285,8 @@ def _normalize_nn_module_stack(gm_torch_level, root_cls):
 
                         class Path:
                             def __getattr__(self, name):
-                                parts.append(name)
+                                if name != "_modules":
+                                    parts.append(name)
                                 return self
 
                             def __getitem__(self, idx):
@@ -410,7 +411,7 @@ def _remap_constants(
 
 def _produce_aten_artifact(
     *,
-    gm,
+    gm: torch.fx.GraphModule,
     mod,
     constant_attrs,
     graph_signature,
@@ -443,6 +444,7 @@ def _produce_aten_artifact(
     )
     set_missing_meta_vals(gm, flat_fake_args, total_non_user_inputs)
 
+    export_graph_signature: Optional[ExportGraphSignature]
     export_graph_signature = _convert_to_export_graph_signature(
         graph_signature, gm, _get_non_persistent_buffers(mod)
     )
@@ -483,6 +485,7 @@ def _produce_aten_artifact(
                 node.meta.pop("stack_trace", None)
 
     # Prettify names for placeholder nodes.
+    assert export_graph_signature is not None
     placeholder_naming_pass(
         gm,
         export_graph_signature,
@@ -701,8 +704,8 @@ def _export_to_aten_ir(
     transform=lambda x: x,  # TODO(zhxchen17) Revisit if this is needed later.
     pre_dispatch=False,
     decomp_table=None,
-    _check_autograd_state=True,
-    _is_torch_jit_trace=False,
+    _check_autograd_state: bool = True,
+    _is_torch_jit_trace: bool = False,
 ) -> ATenExportArtifact:
     # [NOTE] If the user is exporting under training mode, we want to detect if there is any
     # state change in the autograd global state and error. If the user is exporting under inference
@@ -852,7 +855,7 @@ def _rewrite_dynamo_tensor_constants(
     traced_mod_buffers: Dict[str, torch.Tensor],
     graph_signature: ExportGraphSignature,
     constants: Dict[str, Union[torch.Tensor, FakeScriptObject, torch.ScriptObject]],
-):
+) -> None:
     """
     Dynamo erroneously marks tensor attributes on modules as buffers.
     Rewrite them to be tensor constants.
@@ -873,7 +876,7 @@ def _move_non_persistent_buffers_to_tensor_constants(
     orig_mod: torch.nn.Module,
     graph_signature: ExportGraphSignature,
     constants: Dict[str, Union[torch.Tensor, FakeScriptObject, torch.ScriptObject]],
-):
+) -> None:
     """
     Moves non-persistent buffers to tensor constants.
     """
@@ -953,7 +956,9 @@ def _verify_stack_trace(graph_module: torch.fx.GraphModule) -> None:
                     )
 
 
-def _verify_placeholder_names(gm: torch.fx.GraphModule, sig: ExportGraphSignature):
+def _verify_placeholder_names(
+    gm: torch.fx.GraphModule, sig: ExportGraphSignature
+) -> None:
     """
     Performs a sanity check on the placeholder node names.
     - User input nodes: no restrictions, should match the original forward() signature
@@ -1087,7 +1092,7 @@ def _get_module_call_graph(
     preserve_module_call_signature: Tuple[str, ...],
     strict_mode_export: bool,
     forward_arg_names: Optional[List[str]] = None,
-):
+) -> Tuple[torch.fx.GraphModule, List[ModuleCallEntry]]:
     """
     In-place modify the graph module in export_artifact, remove _export_tracepoint nodes and
     return module_call_graph.
@@ -1100,7 +1105,7 @@ def _get_module_call_graph(
     out_spec: TreeSpec = export_artifact.out_spec
 
     # Make module signatures.
-    module_call_signatures = {}
+    module_call_signatures: Dict[str, ModuleCallSignature] = {}
     for fqn, specs in module_call_specs.items():
         mod_fqn = _strip_root(fqn) if not strict_mode_export else fqn
         module_call_signatures[mod_fqn] = ModuleCallSignature(
@@ -1313,7 +1318,14 @@ def _strict_export_lower_to_aten_ir(
                 )
 
     # Fix the graph output signature to be tuple if scalar
-    out_spec = orig_out_spec = gm_torch_level._out_spec
+
+    # gm_torch_level.graph._codegen is made a _PyTreeCodeGen in rewrite_signature in eval_frame.py
+    assert isinstance(gm_torch_level.graph._codegen, torch.fx.graph._PyTreeCodeGen)
+
+    # Calling gm_torch_level._out_spec is not safe because gm_torch_level might be
+    # a _LazyGraphModule, which does not populate _out_spec when calling recompile().
+    # TODO: Fix recompile() in  _LazyGraphModule. T207713214
+    out_spec = orig_out_spec = gm_torch_level.graph._codegen.pytree_info.out_spec
 
     # Used to get rid of lint type error.
     assert out_spec is not None
@@ -1497,6 +1509,22 @@ def _export_to_aten_ir_make_fx(
                         new_node.meta = name_node.meta
 
                 hook.remove()  # type: ignore[possibly-undefined]
+
+            # In export, we ignore any op that is related to
+            # eager mode profiling call. The expectation is
+            # that either runtimes provide their own profiling
+            # OR user wrap the compiled region on a profiling in
+            # later stage.
+            def _is_impure(node):
+                if node.op == "call_function" and node.target in (
+                    torch.ops.profiler._record_function_enter.default,
+                    torch.ops.profiler._record_function_enter_new.default,
+                    torch.ops.profiler._record_function_exit._RecordFunction,
+                ):
+                    return False
+                return True
+
+            gm.graph.eliminate_dead_code(_is_impure)
 
         # create graph signature
         input_names = _graph_input_names(gm)
@@ -1771,7 +1799,6 @@ def _non_strict_export(
     )
 
 
-# TODO (tmanlaibaatar) We need to preserve aten.to here somehow
 @_log_export_wrapper
 @_disable_prexisiting_fake_mode
 def _export_for_training(
@@ -1923,16 +1950,6 @@ def _export(
 
     from torch._utils_internal import export_training_ir_rollout_check
 
-    if export_training_ir_rollout_check():
-        return _export_for_training(
-            mod,
-            args,
-            kwargs,
-            dynamic_shapes,
-            strict=strict,
-            preserve_module_call_signature=preserve_module_call_signature,
-        )
-
     global _EXPORT_FLAGS, _EXPORT_MODULE_HIERARCHY
     _EXPORT_MODULE_HIERARCHY = _get_module_hierarchy(mod)
 
@@ -1942,6 +1959,23 @@ def _export(
     _EXPORT_FLAGS = flags
 
     log_export_usage(event="export.enter", flags=_EXPORT_FLAGS)
+
+    # NOTE Export training IR rollout
+    # Old export calls export._trace(pre_dispatch=True)
+    # and there are still lot of internal/OSS callsites that
+    # use export._trace(pre_dispatch=True) directly. Therefore,
+    # it makes more sense to do the switch here.
+    # export_training_ir_rollout_check returns True in OSS
+    # while internally it returns False UNLESS otherwise specified.
+    if pre_dispatch and export_training_ir_rollout_check():
+        return _export_for_training(
+            mod,
+            args,
+            kwargs,
+            dynamic_shapes,
+            strict=strict,
+            preserve_module_call_signature=preserve_module_call_signature,
+        )
 
     (
         args,

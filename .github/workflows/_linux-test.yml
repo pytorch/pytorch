@@ -47,6 +47,14 @@ on:
         required: false
         type: string
         default: ""
+      disable-monitor:
+        description: |
+          [Experimental] Disable utilization monitoring for tests.
+          Currently, by default we disable the monitor job and only look for specific tests,
+          since we are investigating the behaviour of the monitor script with different tests.
+        required: false
+        type: boolean
+        default: false
     secrets:
       HUGGING_FACE_HUB_TOKEN:
         required: false
@@ -82,6 +90,8 @@ jobs:
 
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
+        with:
+          no-sudo: true
 
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
@@ -143,6 +153,7 @@ jobs:
 
       - name: Start monitoring script
         id: monitor-script
+        if: ${{ !inputs.disable-monitor }}
         shell: bash
         continue-on-error: true
         run: |
@@ -232,8 +243,6 @@ jobs:
           IS_A100_RUNNER: ${{ contains(matrix.runner, 'a100') && '1' || '0' }}
           ARTIFACTS_FILE_SUFFIX: ${{ github.job }}-${{ matrix.config }}-${{ matrix.shard }}-${{ matrix.num_shards }}-${{ matrix.runner }}_${{ steps.get-job-id.outputs.job-id }}
         run: |
-          # Fetch aws credential from IMDs
-          eval "$(python3 .github/scripts/get_aws_session_tokens.py)"
           set -x
 
           if [[ $TEST_CONFIG == 'multigpu' ]]; then
@@ -266,9 +275,6 @@ jobs:
             -e BRANCH \
             -e SHA1 \
             -e AWS_DEFAULT_REGION \
-            -e AWS_ACCESS_KEY_ID \
-            -e AWS_SECRET_ACCESS_KEY \
-            -e AWS_SESSION_TOKEN \
             -e IN_WHEEL_TEST \
             -e SHARD_NUMBER \
             -e TEST_CONFIG \
@@ -311,7 +317,7 @@ jobs:
           # Propagate download.pytorch.org IP to container
           grep download.pytorch.org /etc/hosts | docker exec -i "${container_name}" sudo bash -c "/bin/cat >> /etc/hosts"
           echo "DOCKER_CONTAINER_ID=${container_name}" >> "${GITHUB_ENV}"
-          docker exec -t "${container_name}" sh -c "pip install $(echo dist/*.whl)[opt-einsum] && ${TEST_COMMAND}"
+          docker exec -t "${container_name}" sh -c "python3 -m pip install $(echo dist/*.whl)[opt-einsum] && ${TEST_COMMAND}"
 
       - name: Upload pytest cache if tests failed
         uses: ./.github/actions/pytest-cache-upload
@@ -324,6 +330,14 @@ jobs:
           test_config: ${{ matrix.config }}
           job_identifier: ${{ github.workflow }}_${{ inputs.build-environment }}
 
+      - name: Upload the benchmark results
+        uses: pytorch/test-infra/.github/actions/upload-benchmark-results@main
+        with:
+          benchmark-results-dir: test/test-reports
+          dry-run: false
+          schema-version: v3
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Print remaining test logs
         shell: bash
         if: always() && steps.test.conclusion
@@ -331,7 +345,7 @@ jobs:
           cat test/**/*_toprint.log || true
 
       - name: Stop monitoring script
-        if: always() && steps.monitor-script.outputs.monitor-script-pid
+        if: ${{ always() && steps.monitor-script.outputs.monitor-script-pid }}
         shell: bash
         continue-on-error: true
         env:

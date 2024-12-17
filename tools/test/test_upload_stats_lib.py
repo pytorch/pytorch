@@ -6,7 +6,7 @@ import json
 import sys
 import unittest
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any
 from unittest import mock
 
 
@@ -14,12 +14,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 
 from tools.stats.upload_metrics import add_global_metric, emit_metric, global_metrics
-from tools.stats.upload_stats_lib import (
-    BATCH_SIZE,
-    get_s3_resource,
-    remove_nan_inf,
-    upload_to_rockset,
-)
+from tools.stats.upload_stats_lib import get_s3_resource, remove_nan_inf
 
 
 sys.path.remove(str(REPO_ROOT))
@@ -40,7 +35,7 @@ JOB_NAME = "some-job-name"
 
 @mock.patch("boto3.resource")
 class TestUploadStats(unittest.TestCase):
-    emitted_metric: Dict[str, Any] = {"did_not_emit": True}
+    emitted_metric: dict[str, Any] = {"did_not_emit": True}
 
     def mock_put_item(self, **kwargs: Any) -> None:
         # Utility for mocking putting items into s3.  THis will save the emitted
@@ -259,38 +254,6 @@ class TestUploadStats(unittest.TestCase):
         emit_metric("metric_name", metric)
 
         self.assertTrue(self.emitted_metric["did_not_emit"])
-
-    def test_upload_to_rockset_batch_size(self, _mocked_resource: Any) -> None:
-        cases = [
-            {
-                "batch_size": BATCH_SIZE - 1,
-                "expected_number_of_requests": 1,
-            },
-            {
-                "batch_size": BATCH_SIZE,
-                "expected_number_of_requests": 1,
-            },
-            {
-                "batch_size": BATCH_SIZE + 1,
-                "expected_number_of_requests": 2,
-            },
-        ]
-
-        for case in cases:
-            mock_client = mock.Mock()
-            mock_client.Documents.add_documents.return_value = "OK"
-
-            batch_size = case["batch_size"]
-            expected_number_of_requests = case["expected_number_of_requests"]
-
-            docs = list(range(batch_size))
-            upload_to_rockset(
-                collection="test", docs=docs, workspace="commons", client=mock_client
-            )
-            self.assertEqual(
-                mock_client.Documents.add_documents.call_count,
-                expected_number_of_requests,
-            )
 
     def test_remove_nan_inf(self, _mocked_resource: Any) -> None:
         checks = [

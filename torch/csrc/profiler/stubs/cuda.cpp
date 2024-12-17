@@ -15,7 +15,7 @@
 namespace torch::profiler::impl {
 namespace {
 
-static inline void cudaCheck(cudaError_t result, const char* file, int line) {
+static void cudaCheck(cudaError_t result, const char* file, int line) {
   if (result != cudaSuccess) {
     std::stringstream ss;
     ss << file << ":" << line << ": ";

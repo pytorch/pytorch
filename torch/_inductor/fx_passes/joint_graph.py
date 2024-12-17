@@ -4,7 +4,7 @@ import itertools
 import logging
 import typing
 from collections import Counter
-from typing import Any, Dict, List, Set, Union
+from typing import Any, Dict, List, Union
 
 import torch
 import torch._guards
@@ -16,8 +16,8 @@ from torch.fx.experimental.symbolic_shapes import (
     statically_known_true,
 )
 from torch.multiprocessing.reductions import StorageWeakRef
+from torch.utils._ordered_set import OrderedSet
 
-from ...utils._ordered_set import OrderedSet
 from .. import config
 from ..pattern_matcher import (
     CallFunction,
@@ -57,7 +57,9 @@ def lazy_init():
 
 
 def remove_no_ops(
-    gm: torch.fx.GraphModule, zeros: Set[torch.fx.Node], ones: Set[torch.fx.Node]
+    gm: torch.fx.GraphModule,
+    zeros: OrderedSet[torch.fx.Node],
+    ones: OrderedSet[torch.fx.Node],
 ):
     with torch.utils._python_dispatch._disable_current_modes():
         "Removes no-ops: (+ 0, - 0, * 1, / 1)"
@@ -214,7 +216,7 @@ class UniformValueConstantFolder(ConstantFolder):
         # initialize symint -> node mapping so that we can
         # use symint nodes in full constructors
         self.symint_nodes = _SymHashingDict()
-        for n in self.module.graph.nodes:
+        for n in self.module.graph.nodes:  # type: ignore[union-attr]
             if "val" in n.meta and isinstance(n.meta["val"], torch.SymInt):
                 self.symint_nodes[n.meta["val"]] = n
 
@@ -232,9 +234,11 @@ class UniformValueConstantFolder(ConstantFolder):
             aten.permute,
         ]
 
-        self.indexing_op_packets = {
-            aten.slice,
-        }
+        self.indexing_op_packets = OrderedSet(
+            [
+                aten.slice,
+            ]
+        )
 
     def _support_dynamic_shape(self):
         return True
@@ -248,7 +252,7 @@ class UniformValueConstantFolder(ConstantFolder):
         self.constant_data_ptrs[node] = StorageWeakRef(tensor.untyped_storage())
 
     def insert_placerholder_values(self, env: Dict[torch.fx.Node, Any]) -> None:
-        for n in self.module.graph.find_nodes(op="placeholder"):
+        for n in self.module.graph.find_nodes(op="placeholder"):  # type: ignore[operator, union-attr]
             if "val" in n.meta and isinstance(n.meta["val"], torch.SymInt):
                 env[n] = n.meta["val"]
             else:
@@ -350,8 +354,8 @@ def constant_fold_uniform_value(gm: torch.fx.GraphModule):
 
         graph = gm.graph
 
-        zeros = set()
-        ones = set()
+        zeros = OrderedSet[Any]()
+        ones = OrderedSet[Any]()
 
         # Got failures in `test_is_set_to_cuda` if we change aliasing on constants,
         # so just constant-ify if a Tensor is unaliased
@@ -520,7 +524,7 @@ def fix_iota_device(match: Match, length, start, step, dtype, device, requires_g
     Rewrite the arange to use CUDA.
     """
     (node,) = match.nodes
-    user_devices: OrderedSet[torch.device] = OrderedSet()
+    user_devices = OrderedSet[torch.device]()
     for user in node.users:
         if (
             user.op == "call_function"
@@ -567,7 +571,7 @@ def pointless_convert(match: Match, arg, dtype1: torch.dtype, dtype2: torch.dtyp
     """Remove chain of dtype conversions often created by AMP"""
     graph = match.graph
     node = match.output_node()
-    allowed = {torch.float16, torch.bfloat16, torch.float32, torch.float64}
+    allowed = torch.float16, torch.bfloat16, torch.float32, torch.float64
     if dtype1 in allowed and dtype2 in allowed:
         repl = graph.call_function(
             torch.ops.prims.convert_element_type.default, (arg, dtype2)

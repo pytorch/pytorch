@@ -297,6 +297,7 @@ flex_decoding_template = TritonTemplate(
 def get_split_k(B: int, H: int, Mk: int, SM: int = 128) -> int:
     """Heuristic for the number of splits from xformer"""
     bh = max(B * H, 1)  # NOTE: Handle B*h=0 case
+    assert isinstance(bh, (int, sympy.Integer)), "B and H must be concrete integers"
     split_k = SM // bh  # Each SM should at least get one block.
     split_k = max(split_k, 1)
 
@@ -311,7 +312,10 @@ def _get_decoding_default_config(key) -> Tuple[int, int, int]:
     if sm_version >= (9, 0):
         if head_dim > 128 and dtype == torch.float32:
             return default_config
-        return (64, 2, 3)
+        if torch.version.hip is None:
+            return (64, 2, 3)
+        else:
+            return (64, 2, 1)
     return default_config
 
 
@@ -329,6 +333,8 @@ def create_flex_decoding_kernel(*args, **kwargs):
         mask_mod_other_buffers,
     ) = args
     (
+        _,  # q_length
+        _,  # kv_length
         kv_num_blocks,
         kv_indices,
         full_kv_num_blocks,  # full_kv_num_blocks,
@@ -407,6 +413,11 @@ def create_flex_decoding_kernel(*args, **kwargs):
             (32, 2, 3),
             (128, 2, 3),
         ]
+
+        # Use num_stages=1 on ROCm to avoid shmem limitation
+        if torch.version.hip:
+            configs = [(c[0], c[1], 1) for c in configs]
+
     # TODO: fix autotuning.
 
     kernel_options.setdefault("SM_SCALE", scale)

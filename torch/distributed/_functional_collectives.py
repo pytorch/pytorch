@@ -2,7 +2,7 @@
 import contextlib
 import sys
 import warnings
-from typing import cast, List, Optional, Tuple, TYPE_CHECKING, Union
+from typing import Any, cast, List, Optional, Tuple, Type, TYPE_CHECKING, Union
 
 import torch
 import torch.distributed as dist
@@ -601,6 +601,14 @@ class AsyncCollectiveTensor(torch.Tensor):
         elem = inner_tensors["elem"]
         return AsyncCollectiveTensor(elem)
 
+    def __coerce_same_metadata_as_tangent__(
+        self, expected_metadata: Any, expected_type: Optional[Type] = None
+    ):
+        if expected_type is not torch.Tensor:
+            return None
+
+        return self.trigger_wait()
+
     def __repr__(self) -> str:  # type: ignore[override]
         return f"AsyncCollectiveTensor({self.trigger_wait()})"
 
@@ -799,13 +807,8 @@ class _FromTorchTensor(torch.autograd.Function):
 def _are_we_tracing() -> bool:
     if is_torchdynamo_compiling():
         return True
-    # If functionalization is turned on, we are almost definitely compiling/tracing.
-    # (In particular, AOTAutograd traces a model once with functionalization on
-    #  but proxy tracing turned of, so this is how we detect it).
-    if (
-        torch._C._get_dispatch_mode(torch._C._TorchDispatchModeKey.FUNCTIONAL)
-        is not None
-    ):
+    # If fake mode is turned on, we are almost definitely compiling/tracing.
+    if torch._C._get_dispatch_mode(torch._C._TorchDispatchModeKey.FAKE) is not None:
         return True
     return get_proxy_mode() is not None
 

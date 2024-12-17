@@ -191,8 +191,8 @@ def forward(self, a_1):
             torch.set_grad_enabled(True)
             return b + c.sin()
         a1 = torch.randn(4, requires_grad=True)
-        a2 = a1.clone().detach().requires_grad_(True)
-        a_tmp = a1.clone().detach().requires_grad_(True)
+        a2 = a1.detach().clone().requires_grad_(True)
+        a_tmp = a1.detach().clone().requires_grad_(True)
         fx_g = make_fx(f, pre_dispatch=True)(a_tmp)
         out1 = f(a1)
         out2 = fx_g(a2)
@@ -2054,7 +2054,6 @@ out_symbolic_tensor_failures = {
     xfail('scatter_add', ''),
     xfail('scatter', ''),
     xfail('take_along_dim', ''),
-    xfail('triangular_solve', ''),
 
     # SymIntArrayRef expected to contain only concrete
     xfail('ones', ''),

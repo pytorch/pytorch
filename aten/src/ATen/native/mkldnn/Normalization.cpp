@@ -85,8 +85,7 @@ std::tuple<Tensor, Tensor, Tensor> _new_batch_norm_backward_mkldnn(
 #include <ATen/native/layer_norm.h>
 #include <ideep/abstract_types.hpp>
 
-namespace at {
-namespace native {
+namespace at::native {
 
 std::tuple<Tensor, Tensor, Tensor> mkldnn_layer_norm_last_index_weight_bias_f32(
     const Tensor& input,
@@ -279,7 +278,6 @@ std::tuple<Tensor, Tensor, Tensor> mkldnn_batch_norm_backward(const Tensor& grad
                                               weight.options().device_opt())));
 }
 
-} // namespace native
 } // namespace at
 
 #endif // AT_MKLDNN_ENABLED
