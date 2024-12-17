@@ -277,7 +277,7 @@ class ConstDictVariable(VariableTracker):
         args: "List[VariableTracker]",
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
-        from . import BuiltinVariable, ConstantVariable, TupleVariable
+        from . import BuiltinVariable, ConstantVariable, TupleVariable, GeneratorObjectVariable
 
         Hashable = ConstDictVariable._HashableTracker
 

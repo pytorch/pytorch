@@ -25,7 +25,10 @@ from .exc import IncorrectUsage, unimplemented
 from .source import AttrSource, Source
 from .utils import is_safe_constant, rot_n_helper
 from .variables.base import ValueMutationExisting, VariableTracker
-from .variables.functions import FunctionDecoratedByContextlibContextManagerVariable
+from .variables.functions import (
+    FunctionDecoratedByContextlibContextManagerVariable,
+    GeneratorObjectVariable,
+)
 from .variables.nn_module import NNModuleVariable
 from .variables.tensor import (
     NumpyNdarrayVariable,
@@ -168,7 +171,11 @@ class PyCodegen:
             )
 
         # Dynamo normally prefers codegen from source to account for aliasing.
-        if value.source is not None and allow_cache:
+        if (
+            value.source is not None
+            and allow_cache
+            and not (value.is_realized() and isinstance(value, GeneratorObjectVariable))
+        ):
             # There's a corner case for export: for instance, if the computation
             # graph is just identity on an input tensor, Dynamo would just emit
             # a `LOAD_FAST` from the input source, rather than generating an
