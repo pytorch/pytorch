@@ -481,6 +481,7 @@ def _insert_fused_all_gather_matmul(
         return graph.call_function(
             torch.ops.symm_mem.fused_all_gather_matmul.default,
             args=(shard_node, B_nodes, gather_dim, group_name),
+            kwargs={"return_A": True},
         )
     elif mm_type == _ScaledMatmul:
         scaled_matmuls = cast(List[_ScaledMatmul], matmuls)
@@ -592,6 +593,14 @@ def fuse_all_gather_matmul(all_gather: _AllGatherMatch) -> None:
             matmul.erase()
         all_gather.replace_with(new_ag_node)
         all_gather.erase()
+
+        # If the new_ag_node has no users, we tell the fused op to not return
+        # it. This creates more optimization opportunities.
+        if len(new_ag_node.users) == 0:
+            graph.erase_node(new_ag_node)
+            kwargs = dict(fused_node.kwargs)
+            kwargs["return_A"] = False
+            fused_node.kwargs = kwargs
 
     # Raise ancestors of non-A args that are topologically ordered between
     # ag_res_node and the matmul above fused_node.
