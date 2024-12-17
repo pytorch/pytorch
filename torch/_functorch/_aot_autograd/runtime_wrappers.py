@@ -1719,6 +1719,10 @@ class AOTDispatchAutograd:
             runtime_subclass_keys, runtime_meta = x.__tensor_flatten__()
 
         def maybe_coerce(x):
+            # TODO(xmfan): make this function traceable
+            if torch._dynamo.compiled_autograd.in_compiled_autograd_region:
+                return x
+
             same_type: bool = expected_type == runtime_type
             same_meta: bool = expected_meta == runtime_meta
 
