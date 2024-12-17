@@ -3781,7 +3781,7 @@ class TritonScheduling(SIMDScheduling):
             def store_cache():
                 path = cache_file_path()
                 with open(path, "w") as fd:
-                    fd.write(str(ms))
+                    fd.write(str(ms))  # type: ignore[has-type]
 
             log.debug(
                 "kernel src code for %s written to: %s",
