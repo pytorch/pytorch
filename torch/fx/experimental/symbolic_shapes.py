@@ -5727,7 +5727,6 @@ class ShapeEnv:
     ) -> GuardOnDataDependentSymNode:
         # TODO: in a Dynamo context, having user code, and having the
         # name of the local, will be much better
-        self._log_frame_locals(_find_user_code_frame())
         size_like_symbols = []
         for s in expr.free_symbols:
             stacktrace = "".join(self.var_to_stack[s].format())
@@ -5764,6 +5763,7 @@ class ShapeEnv:
             # TODO: Help text about how to use our runtime tests to fix this
             # problem
         )
+        self._log_frame_locals(_find_user_code_frame())
         return GuardOnDataDependentSymNode(expr, msg)
 
     def _update_var_to_range(
@@ -6309,6 +6309,8 @@ class ShapeEnv:
                     continue  # ignore locals without symbols
                 self.log.info(f"{k}: {v}")
             # symbols
+            if all(s not in self.var_to_sources for s in free_symbols):
+                return
             self.log.info("\nSymbols:")
             for symbol in free_symbols:
                 if symbol in self.var_to_sources:
