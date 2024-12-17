@@ -27,7 +27,7 @@
 #if USE_ROCM
 #if defined(USE_FLASH_ATTENTION) || defined(USE_MEM_EFF_ATTENTION)
 #include <aotriton/flash.h>
-#define USE_AOTRITON 1
+#define USE_ROCM_ATTENTION 1
 #endif
 #endif
 
@@ -75,13 +75,7 @@ bool check_prefer_cudnn_attention() {
 
 // flash_attention V2 is universally faster than efficient_attention and Math
 std::array<SDPBackend, num_backends> priority_order(sdp_params const& params) {
-  constexpr std::array<SDPBackend, num_backends> default_order{
-      SDPBackend::flash_attention,
-      SDPBackend::efficient_attention,
-      SDPBackend::math,
-      SDPBackend::cudnn_attention,
-      };
-  return default_order;
+  return at::globalContext().sDPPriorityOrder();
 }
 
 bool use_tensor_cores(sdp_params const& params, cudaDeviceProp* dprops, bool is_half) {
@@ -109,6 +103,10 @@ int64_t minimum_gemm_alignment(sdp_params const& params) {
   return matmul_alignment_mn;
 }
 
+// On ROCM, ME and FA share the backend, and hence they share the checking
+// function for fundamental limitations by the GPU kernel
+// caller_is_meff is added to make the TORCH_WARN message showing the correct result
+template<bool caller_is_meff = false>
 bool check_head_dim_size_flash(sdp_params const& params, bool debug) {
   // All head_dim sizes must be equal and less than 256
   const auto max_size = c10::SymInt(256);
@@ -120,7 +118,8 @@ bool check_head_dim_size_flash(sdp_params const& params, bool debug) {
   if (!(same_head_dim_size && (query_size_last <= max_size))) {
     if (debug) {
       TORCH_WARN(
-          "Flash attention requires q,k,v to have the same last dimension and to be less than or equal to 256.",
+          caller_is_meff ? "Efficient attention on ROCM" : "Flash attention",
+          " requires q,k,v to have the same last dimension and to be less than or equal to 256.",
           " Got Query.size(-1): ",
           query_size_last,
           ", Key.size(-1): ",
@@ -134,6 +133,8 @@ bool check_head_dim_size_flash(sdp_params const& params, bool debug) {
   return true;
 }
 
+// See check_head_dim_size_flash above for the purpose of caller_is_meff
+template<bool caller_is_meff = false>
 bool check_head_dim_size_flash_nested(sdp_params const& params, bool debug) {
   const auto max_size = c10::SymInt(256);
   const auto query_size_last = params.query.sym_size(-1);
@@ -145,7 +146,9 @@ bool check_head_dim_size_flash_nested(sdp_params const& params, bool debug) {
         (query_size_last <= max_size))) {
     if (debug) {
       TORCH_WARN(
-          "For NestedTensor inputs, Flash attention requires q,k,v to have the same last dimension and to be a multiple of 8 and less than or equal to 256.",
+          "For NestedTensor inputs,",
+          caller_is_meff ? " Efficient attention on ROCM " : " Flash attention",
+          " requires q,k,v to have the same last dimension and to be a multiple of 8 and less than or equal to 256.",
           " Got Query.size(-1): ",
           query_size_last,
           ", Key.size(-1): ",
@@ -214,31 +217,28 @@ bool check_flash_attention_hardware_support(sdp_params const& params, bool debug
   // Check that the gpu is capable of running flash attention
   using sm80 = SMVersion<8, 0>;
   using sm90 = SMVersion<9, 0>;
-  auto dprops = at::cuda::getCurrentDeviceProperties();
 #if USE_ROCM
-#if USE_AOTRITON
-  auto stream = at::cuda::getCurrentCUDAStream().stream();
-  if (hipSuccess != aotriton::v2::flash::check_gpu(stream)) {
-      auto dprops = at::cuda::getCurrentDeviceProperties();
-      if (debug) {
-          TORCH_WARN(
-                  "Flash attention was not compiled for current AMD GPU architecture. Attempting to run on architecture ", dprops->gcnArchName);
-      }
-      return false;
-  }
-  c10::string_view arch(dprops->gcnArchName);
-  if (arch == "gfx1100") {
-    static const bool enable_navi3x = c10::utils::check_env("TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL") == true;
-    if (!enable_navi3x) {
-      TORCH_WARN_ONCE("Flash attention support on Navi31 GPU is still experimental."
-                      " Enable it with TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL=1.");
-      return false;
+#if USE_ROCM_ATTENTION
+  if(at::globalContext().getROCmFAPreferredBackend() == at::ROCmFABackend::Ck) {
+    // User explicitly set CK as the flash attention backend. Return true for now
+    // TODO: Flesh out sanity checks
+    return true;
+  } else {
+    auto stream = at::cuda::getCurrentCUDAStream().stream();
+    if (hipSuccess != aotriton::v2::flash::check_gpu(stream)) {
+        auto dprops = at::cuda::getCurrentDeviceProperties();
+        if (debug) {
+            TORCH_WARN(
+                    "Flash attention was not compiled for current AMD GPU architecture. Attempting to run on architecture ", dprops->gcnArchName);
+        }
+        return false;
     }
   }
 #else
   return false;
 #endif
 #else
+  auto dprops = at::cuda::getCurrentDeviceProperties();
   if (!check_sm_version<sm80, sm90>(dprops)) {
     if (debug) {
       TORCH_WARN(
@@ -258,9 +258,8 @@ bool check_mem_efficient_hardware_support(sdp_params const& params, bool debug) 
   // Mem Efficient attention supports hardware in the range [sm_50, sm_90]
   using sm50 = SMVersion<5, 0>;
   using sm90 = SMVersion<9, 0>;
-  auto dprops = at::cuda::getCurrentDeviceProperties();
 #if USE_ROCM
-#if USE_AOTRITON
+#if USE_ROCM_ATTENTION
   auto stream = at::cuda::getCurrentCUDAStream().stream();
   if (hipSuccess != aotriton::v2::flash::check_gpu(stream)) {
       auto dprops = at::cuda::getCurrentDeviceProperties();
@@ -270,19 +269,11 @@ bool check_mem_efficient_hardware_support(sdp_params const& params, bool debug) 
       }
       return false;
   }
-  c10::string_view arch(dprops->gcnArchName);
-  if (arch == "gfx1100") {
-    static const bool enable_navi3x = c10::utils::check_env("TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL") == true;
-    if (!enable_navi3x) {
-      TORCH_WARN_ONCE("Memory Efficient attention on Navi31 GPU is still experimental."
-                      " Enable it with TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL=1.");
-      return false;
-    }
-  }
 #else
   return false;
 #endif
 #else
+  auto dprops = at::cuda::getCurrentDeviceProperties();
   if (!check_sm_version<sm50, sm90>(dprops)) {
     if (debug) {
       TORCH_WARN(
@@ -621,7 +612,7 @@ bool can_use_flash_attention(sdp_params const& params, bool debug) {
       check_all_tensors_on_device,
       check_tensor_shapes,
       check_for_attn_mask,
-      check_head_dim_size_flash,
+      check_head_dim_size_flash<false /*caller_is_meff*/>,
       check_flash_attention_hardware_support,
       check_requires_grad_and_head_dim_gt192_constraints_on_sm86_89,
       check_flash_causal_non_square_seqlens,
@@ -635,7 +626,7 @@ bool can_use_flash_attention(sdp_params const& params, bool debug) {
   if (has_for_nested_inputs(params)) {
     constexpr auto nested_constraints = array_of<bool (*)(sdp_params const&, bool)>(
         check_batch_size_nested,
-        check_head_dim_size_flash_nested,
+        check_head_dim_size_flash_nested<false /*caller_is_meff*/>,
         check_for_seq_len_0_nested_tensor);
     for (auto& constraint : nested_constraints) {
       if (!constraint(params, debug)) {
@@ -643,11 +634,7 @@ bool can_use_flash_attention(sdp_params const& params, bool debug) {
       }
     }
   }
-#if USE_ROCM
-  constexpr bool backend_supports_grouped_query_attention = false;
-#else
   constexpr bool backend_supports_grouped_query_attention = true;
-#endif
   if (has_only_dense_inputs(params)) {
     constexpr auto dense_constraints = array_of<bool (*)(sdp_params const&, bool)>(
         check_batch_size_and_num_heads_dense<backend_supports_grouped_query_attention>,
@@ -685,7 +672,7 @@ bool can_use_mem_efficient_attention(sdp_params const& params, bool debug) {
       check_mem_efficient_hardware_support,
       check_tensor_shapes,
 #ifdef USE_ROCM
-      check_head_dim_size_flash
+      check_head_dim_size_flash<true /* caller_is_meff */>
 #else
       check_head_dim_size_mem_efficient
 #endif
@@ -697,12 +684,12 @@ bool can_use_mem_efficient_attention(sdp_params const& params, bool debug) {
   }
 
   if (has_for_nested_inputs(params)) {
-#ifdef USE_ROCM
-    TORCH_WARN_ONCE(false, "[ROCM] no support for nested tensors in memory efficient attention.");
-    return false;
-#endif
     constexpr auto nested_constraints = array_of<bool (*)(sdp_params const&, bool)>(
+#ifndef USE_ROCM  // ME and FA shares backend on ROCM and thus supports training
         check_requires_grad_and_nested,
+#else // Meanwhile ME on ROCM share the limits of FA about head dimensions
+        check_head_dim_size_flash_nested<true /* caller_is_meff */>,
+#endif
         check_batch_size_nested,
         check_for_seq_len_0_nested_tensor);
     for (auto& constraint : nested_constraints) {
