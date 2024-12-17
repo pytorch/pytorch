@@ -75,13 +75,11 @@ def _multistep_backprop_diff_lr_fn(
     }
 
     kwargs = kwargs.copy()
-    kwargs.update({
-        k: v.clone() if isinstance(v, torch.Tensor) else v
-        for k, v in kwargs.items()
-    })
+    kwargs.update(
+        {k: v.clone() if isinstance(v, torch.Tensor) else v for k, v in kwargs.items()}
+    )
     differentiable_kwargs = [
-        v for v in kwargs.values() 
-        if isinstance(v, torch.Tensor) and v.requires_grad
+        v for v in kwargs.values() if isinstance(v, torch.Tensor) and v.requires_grad
     ]
 
     criterion = nn.MSELoss()
