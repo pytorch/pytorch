@@ -556,7 +556,7 @@ _unsafe_skip_fsdp_module_guards = (
 )
 
 # Run GC at the end of compilation
-run_gc_after_compile = Config(  # type: ignore
+run_gc_after_compile = Config(  # type: ignore[assignment]
     default=True,
     justknob="pytorch/compiler:enable_run_gc_after_compile",
     env_name_default="TORCH_DYNAMO_RUN_GC_AFTER_COMPILE",
