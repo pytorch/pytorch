@@ -1203,6 +1203,7 @@ def forward(self, pred_1, x_1):
 
         return cond_outputs, cond_inputs
 
+    @unittest.skipIf(not SM70OrLater, "triton")
     @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
     @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
     def test_cond_autograd_zeros_unused_branch(self, compile_mode):
@@ -1303,6 +1304,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1):
     # TODO: The compile_mode = `compile_dynamic_shape` raises the Error
     # torch._inductor.exc.LoweringException: NotImplementedError: get_size() is not
     # implemented by <class 'torch._inductor.ir.NoneAsConstantBuffer'>!
+    @unittest.skipIf(not SM70OrLater, "triton")
     @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
     @parametrize("compile_mode", ["none", "eager", "compile"])
     def test_cond_autograd_zeros_unused_branch_complex(self, compile_mode):
@@ -1450,6 +1452,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1):
     # TODO: The compile_mode = `compile_dynamic_shape` raises the Error
     # torch._inductor.exc.LoweringException: NotImplementedError: get_size() is not
     # implemented by <class 'torch._inductor.ir.NoneAsConstantBuffer'>!
+    @unittest.skipIf(not SM70OrLater, "triton")
     @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
     @parametrize("compile_mode", ["compile_dynamic_shape"])
     @parametrize("scalar", [False])
