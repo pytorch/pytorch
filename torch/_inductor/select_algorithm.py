@@ -14,7 +14,7 @@ import re
 import sys
 import textwrap
 import time
-from concurrent.futures import as_completed
+from concurrent.futures import as_completed, ThreadPoolExecutor
 from io import StringIO
 from typing import (
     Any,
@@ -1760,9 +1760,9 @@ class AlgorithmSelectorCache(PersistentCache):
                 assert future in start_times
                 elapsed_times[future] = time.time() - start_times[future]
 
+            executor = ThreadPoolExecutor(max_workers=num_workers)
             async_compile = torch._inductor.async_compile.AsyncCompile()
 
-            executor = async_compile.pool()
             futures: Dict[concurrent.futures.Future[Any], ChoiceCaller] = {}
             start_times: Dict[concurrent.futures.Future[Any], float] = {}
             elapsed_times: Dict[concurrent.futures.Future[Any], float] = {}
