@@ -180,4 +180,6 @@ PyObject* get_backend(PyObject* callback);
 // Warning: returns references whose lifetimes are controlled by C++
 py::list _debug_get_cache_entry_list(const py::handle& code_obj);
 
+void _register_extra_state_memory_cleanup();
+
 #endif

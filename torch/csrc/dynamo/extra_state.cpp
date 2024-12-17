@@ -234,3 +234,8 @@ py::list _debug_get_cache_entry_list(const py::handle& code_obj) {
   }
   return result;
 }
+
+void _register_extra_state_memory_cleanup() {
+  auto atexit = py::module_::import("atexit");
+  atexit.attr("register")(py::cpp_function([]() { _extra_states.clear(); }));
+}
