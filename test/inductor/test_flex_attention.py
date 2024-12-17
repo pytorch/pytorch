@@ -4045,6 +4045,36 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
             block_mask = create_block_mask(doc_mask_mod, None, None, 1024 + i, 1024 + i)
             torch.compile(flex_attention)(q, k, v, block_mask=block_mask)
 
+    @supported_platform
+    def test_eager_tracing_correctness(self):
+        qk_dims = 64
+        v_dims = 128
+        q_heads = 4
+        kv_heads = 2
+        seq_len = 256
+        batch_size = 1
+
+        make_tensor = functools.partial(torch.randn, device="cuda", dtype=torch.float16)
+        q = make_tensor(*(batch_size, q_heads, seq_len, qk_dims))
+        k = make_tensor(*(batch_size, kv_heads, seq_len, qk_dims))
+        v = make_tensor(*(batch_size, kv_heads, seq_len, v_dims))
+
+        def flex_attention_fn():
+            out = flex_attention(q, k, v, enable_gqa=True)
+            return out.view(batch_size, q_heads, seq_len, 2, 64)
+
+        # Run with compilation
+        compiled_fn = torch.compile(flex_attention_fn, fullgraph=True)
+        result = compiled_fn()
+
+        # Assert expected output shape
+        expected_shape = (batch_size, q_heads, seq_len, 2, 64)
+        self.assertEqual(
+            result.shape,
+            expected_shape,
+            f"Expected output shape {expected_shape}, but got {result.shape}",
+        )
+
     @common_utils.parametrize("compile", [False, True])
     @supported_platform
     def test_block_mask_vs_sequence_lengths(self, compile):
