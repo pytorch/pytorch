@@ -1203,12 +1203,8 @@ def forward(self, pred_1, x_1):
 
         return cond_outputs, cond_inputs
 
-    # TODO: The compile_mode = `compile_dynamic_shape` raises the Error
-    # torch._inductor.exc.LoweringException: NotImplementedError: get_size() is not
-    # implemented by <class 'torch._inductor.ir.NoneAsConstantBuffer'>!
     @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
-    # @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
-    @parametrize("compile_mode", ["none", "eager", "compile"])
+    @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
     def test_cond_autograd_zeros_unused_branch(self, compile_mode):
         from torch._higher_order_ops.cond import create_fw_bw_graph_branches
 
@@ -1308,7 +1304,6 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1):
     # torch._inductor.exc.LoweringException: NotImplementedError: get_size() is not
     # implemented by <class 'torch._inductor.ir.NoneAsConstantBuffer'>!
     @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
-    # @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
     @parametrize("compile_mode", ["none", "eager", "compile"])
     def test_cond_autograd_zeros_unused_branch_complex(self, compile_mode):
         from torch._higher_order_ops.cond import create_fw_bw_graph_branches
@@ -1451,6 +1446,61 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1):
                 return x.mean() > 0
 
             self._test_cond_autograd(cond_fct, pred, true_fn, false_fn, operands)
+
+    # TODO: The compile_mode = `compile_dynamic_shape` raises the Error
+    # torch._inductor.exc.LoweringException: NotImplementedError: get_size() is not
+    # implemented by <class 'torch._inductor.ir.NoneAsConstantBuffer'>!
+    @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
+    @parametrize("compile_mode", ["compile_dynamic_shape"])
+    @parametrize("scalar", [False])
+    @unittest.expectedFailure
+    def test_cond_autograd_zeros_unused_branch_complex_compile_fail(
+        self, compile_mode, scalar
+    ):
+        device = torch.device("cuda")
+        cond_fct = compile_mode_helper(torch.cond, compile_mode)
+
+        autograd = [False, True, True, True, True]
+
+        if scalar:
+            # These operands work
+            x = torch.randn((), device=device, requires_grad=bool(autograd[0]))
+            w1 = torch.randn((), device=device, requires_grad=bool(autograd[1]))
+            b1 = torch.randn((), device=device, requires_grad=bool(autograd[2]))
+            w2 = torch.randn((), device=device, requires_grad=bool(autograd[3]))
+            b2 = torch.randn((), device=device, requires_grad=bool(autograd[4]))
+        else:
+            # These operands do not work
+            x = torch.randn(4, 5, device=device, requires_grad=bool(autograd[0]))
+            w1 = torch.randn(2, 4, device=device, requires_grad=bool(autograd[1]))
+            b1 = torch.randn(2, 1, device=device, requires_grad=bool(autograd[2]))
+            w2 = torch.randn(2, 4, device=device, requires_grad=bool(autograd[3]))
+            b2 = torch.randn(1, 5, device=device, requires_grad=bool(autograd[4]))
+
+        operands = [x, w1, b1, w2, b2]
+
+        def true_fn(x, w1, b1, w2, b2):
+            if scalar:
+                # This works
+                return ((w1 * x + b1),)
+            else:
+                # This does not work
+                return ((w1 @ x + b1).sum(),)
+
+        def false_fn(x, w1, b1, w2, b2):
+            if scalar:
+                # This works
+                return ((w2 * x + b2),)
+            else:
+                # This does not work
+                return ((w2 @ x + b2).sum(),)
+
+        def pred_fn(x, w1, b1, w2, b2):
+            return x.mean() > 0
+
+        cond_outputs, cond_inputs = self._test_cond_autograd(
+            cond_fct, pred_fn, true_fn, false_fn, operands
+        )
 
     @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
     def test_map_gpu(self):
