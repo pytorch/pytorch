@@ -329,10 +329,11 @@ static PyObject* THPStream_exit(PyObject* _self, PyObject* unused) {
 
 static void THPStream_maybe_init_context(THPStream* self) {
   if (!(self->context)) {
-    self->context = PyDict_New();
-    if (!(self->context)) {
+    auto dict = THPObjectPtr(PyDict_New());
+    if (!dict) {
       throw python_error();
     }
+    self->context = dict.release();
   }
 }
 
