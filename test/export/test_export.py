@@ -3808,7 +3808,8 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
 
     def test_sequential_slicing(self):
         # See https://github.com/pytorch/pytorch/issues/137455
-        class TestModule(torch.nn.Module):
+
+        class TestModule1(torch.nn.Module):
             def __init__(self) -> None:
                 super().__init__()
                 self.seq = torch.nn.Sequential(
@@ -3818,13 +3819,28 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
                 )
 
             def forward(self, x: torch.Tensor) -> torch.Tensor:
+                # seq_last as local variable works
                 seq_last = self.seq[1:]
                 return seq_last(x)
 
-        mod = TestModule()
+        class TestModule2(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.seq = torch.nn.Sequential(
+                    torch.nn.Linear(4, 4),
+                    torch.nn.Linear(4, 4),
+                    torch.nn.Linear(4, 4),
+                )
+                # seq_last as initialized submodule works
+                self.seq_last = self.seq[1:]
+
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                return self.seq_last(x)
+
         inp = (torch.randn(4, 4),)
-        epm = export(mod, inp).module()
-        self.assertTrue(torch.allclose(epm(*inp), mod(*inp)))
+        for mod in [TestModule1(), TestModule2()]:
+            epm = export(mod, inp).module()
+            self.assertTrue(torch.allclose(epm(*inp), mod(*inp)))
 
     def test_unflatten_asserts(self):
         # TODO: strict-export fails
