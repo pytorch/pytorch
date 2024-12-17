@@ -76,9 +76,20 @@ Windows llvm will not have this definition.
 #endif
 #define VECTOR_WIDTH 32
 #define int_vector __m256i
-#else // CPU_CAPABILITY_SVE128 || CPU_CAPABILITY_DEFAULT (NEON)
+#elif defined(CPU_CAPABILITY_SVE128) || defined(CPU_CAPABILITY_NEON) || defined(CPU_CAPABILITY_DEFAULT)
+// Define alignment and vector width for SVE128/Default (e.g., NEON)
 #if defined(__GNUC__)
 #define __at_align__ __attribute__((aligned(16)))
+#elif defined(_WIN32)
+#define __at_align__ __declspec(align(16))
+#else
+#define __at_align__
+#endif
+#define VECTOR_WIDTH 16
+#else
+// Fallback: define default alignment and vector width
+#if defined(__GNUC__)
+#define __at_align__ __attribute__((aligned(16))) // Fallback to 16-byte alignment
 #elif defined(_WIN32)
 #define __at_align__ __declspec(align(16))
 #else
