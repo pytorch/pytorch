@@ -170,6 +170,28 @@ struct PyCompilerInterfaceImpl : PyCompilerInterface {
         packed_args,
         output_metadata);
   }
+  variable_list call_copy_slices_prologue(
+      PyObject* py_compiler,
+      const variable_list& inputs,
+      const at::TensorGeometry& base,
+      const at::TensorGeometry& view) override {
+    py::handle handle(py_compiler);
+    py::object stuff =
+        handle.attr("call_copy_slices_prologue")(inputs, base, view);
+    return py::cast<std::vector<at::Tensor>>(stuff);
+  }
+  variable_list call_copy_slices_epilogue(
+      PyObject* py_compiler,
+      const std::vector<bool>& needs_input_grad,
+      const at::Tensor& result,
+      const variable_list& res,
+      const at::Tensor& grad_slice) override {
+    py::handle handle(py_compiler);
+    py::object stuff = handle.attr("call_copy_slices_epilogue")(
+        needs_input_grad, result, res, grad_slice);
+    auto output = py::cast<std::vector<std::optional<at::Tensor>>>(stuff);
+    return toTensorList(output);
+  }
 };
 
 static PyObject* wrap_int_list(const std::vector<int64_t>& inputs) {
@@ -634,6 +656,21 @@ void set_ivalue_proxies(
   }
 }
 
+static at::Tensor call_accumulate(
+    PyObject* py_compiler,
+    const at::Tensor& old_var,
+    const at::Tensor& new_var) {
+  if (!old_var.defined()) {
+    return new_var;
+  }
+  if (!new_var.defined()) {
+    return old_var;
+  }
+  py::handle handle(py_compiler);
+  py::object stuff = handle.attr("accumulate")(old_var, new_var);
+  return py::cast<at::Tensor>(stuff);
+}
+
 static TraceState call_begin_capture(
     PyObject* self,
     CacheNode& cache,
@@ -912,9 +949,9 @@ CacheNode* _compiled_autograd_impl(
         auto& output = outputs[i];
         const auto& next = call.node->next_edge(i);
         if (next.is_valid() && output.defined()) {
-          input_buffers.lookup(next.function.get())
-              .add(
-                  next.input_nr, std::move(output), std::nullopt, std::nullopt);
+          auto& buffer = input_buffers.lookup(next.function.get());
+          buffer.buffer[next.input_nr] = call_accumulate(
+              py_compiler, buffer.buffer[next.input_nr], output);
         }
       }
     }

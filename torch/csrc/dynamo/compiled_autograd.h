@@ -1392,6 +1392,22 @@ struct TORCH_API PyCompilerInterface {
       const c10::IValue& output_metadata) {
     TORCH_INTERNAL_ASSERT(false, "Needs to be overridden");
   }
+
+  virtual variable_list call_copy_slices_prologue(
+      PyObject* py_compiler,
+      const variable_list& inputs,
+      const at::TensorGeometry& base,
+      const at::TensorGeometry& view) {
+    TORCH_INTERNAL_ASSERT(false, "Needs to be overridden");
+  }
+  virtual variable_list call_copy_slices_epilogue(
+      PyObject* py_compiler,
+      const std::vector<bool>& needs_input_grad,
+      const at::Tensor& result,
+      const variable_list& res,
+      const at::Tensor& grad_slice) {
+    TORCH_INTERNAL_ASSERT(false, "Needs to be overridden");
+  }
 };
 
 TORCH_API const std::unique_ptr<PyCompilerInterface>& getPyCompilerInterface();
