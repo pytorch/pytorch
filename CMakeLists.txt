@@ -1349,7 +1349,6 @@ if(BUILD_JNI)
   endif()
   set(BUILD_LIBTORCH_WITH_JNI 1)
   set(FBJNI_SKIP_TESTS 1)
-  add_subdirectory(android/pytorch_android)
 endif()
 
 include(cmake/Summary.cmake)
