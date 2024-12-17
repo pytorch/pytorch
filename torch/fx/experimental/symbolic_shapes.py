@@ -6270,11 +6270,11 @@ class ShapeEnv:
         for instr in instructions[start : end + 1]:
             if (lineno := instr.starts_line) is not None:
                 last_lineno = max(last_lineno, lineno)
-                if (
-                    isinstance(instr.argval, str)
-                    and instr.argval in f.f_locals
-                ):
-                    locals_[instr.argval] = f.f_locals[instr.argval]
+            if (
+                isinstance(instr.argval, str)
+                and instr.argval in f.f_locals
+            ):
+                locals_[instr.argval] = f.f_locals[instr.argval]
 
         # track free symbols & print locals
         free_symbols = set()
