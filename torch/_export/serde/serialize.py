@@ -2498,7 +2498,6 @@ def _dataclass_to_dict(obj):
         return {
             f.name: _dataclass_to_dict(getattr(obj, f.name))
             for f in dataclasses.fields(obj)
-            if not (f.default is None and getattr(obj, f.name) is None)
         }
     elif isinstance(obj, list):
         return [_dataclass_to_dict(x) for x in obj]
