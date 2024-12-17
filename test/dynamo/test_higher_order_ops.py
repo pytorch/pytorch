@@ -6684,6 +6684,30 @@ class GraphModule(torch.nn.Module):
         actual = opt(x)
         self.assertEqual(expected, actual)
 
+    def test_bool_conversion_symnode(self):
+        import torch._dynamo.config
+
+        torch._dynamo.config.capture_scalar_outputs = True
+
+        class BoolConversionModule(torch.nn.Module):
+            def forward(self, x):
+                # Test both tensor ops and bool conversion
+                return bool(x.eq(0.1).any().item())
+
+        model = BoolConversionModule()
+        cnt = CompileCounter()
+        traced = torch.compile(model, backend=cnt)
+
+        # Test True case
+        x_true = torch.ones(64) * 0.1
+        result_true = traced(x_true)
+        self.assertTrue(result_true)
+
+        # Test False case
+        x_false = torch.zeros(64)
+        result_false = traced(x_false)
+        self.assertFalse(result_false)
+
 
 class ActivationCheckpointingTests(torch._dynamo.test_case.TestCase):
     def _validate(self, fn, backend, *args, skip_check=False, fullgraph=True):
