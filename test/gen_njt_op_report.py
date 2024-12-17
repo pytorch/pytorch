@@ -164,13 +164,11 @@ table {
   width: 98%;
   color: #333;
   font-family: Arial, sans-serif;
-  font-size: 14px;
+  font-size: 13px;
   text-align: left;
   border-radius: 10px;
   box-shadow: 0 0 20px rgba(0, 0, 0, 0.1);
-  margin: auto;
-  margin-top: 50px;
-  margin-bottom: 50px;
+  margin-top: 0px;
 }
 body: {
   background-color: #fdfdfd;
@@ -234,7 +232,7 @@ table tr:last-child td:last-child {
         for test_set in TEST_SETS:
             f.write(
                 f"""
-<th>{test_set.name} ({"contiguous" if contiguous else "non-contiguous"})</th>
+<th>{test_set.name}<br/>({"contiguous" if contiguous else "non-contiguous"})</th>
 """
             )
 
