@@ -214,3 +214,10 @@ class TransformedDistribution(Distribution):
         for transform in self.transforms:
             value = transform(value)
         return value
+
+    @property
+    def mean(self):
+        value = self.base_dist.mean
+        for transform in self.transforms:
+            value = transform.mean(value)
+        return value

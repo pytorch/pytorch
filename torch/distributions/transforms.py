@@ -135,6 +135,12 @@ class Transform:
         In general this only makes sense for bijective transforms.
         """
         raise NotImplementedError
+    
+    def mean(self, base_mean):
+        """
+        Returns the mean of the transformed distribution
+        """
+        raise NotImplementedError
 
     def with_cache(self, cache_size=1):
         if self._cache_size == cache_size:
@@ -740,6 +746,9 @@ class AffineTransform(Transform):
         if self.event_dim == 0:
             return constraints.real
         return constraints.independent(constraints.real, self.event_dim)
+    
+    def mean(self, base_mean):
+        return self.loc + self.scale * base_mean
 
     def with_cache(self, cache_size=1):
         if self._cache_size == cache_size:
