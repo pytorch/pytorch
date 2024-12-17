@@ -11,14 +11,16 @@ from torch._inductor.codecache import get_cpp_wrapper_cubin_path_name
 from torch._inductor.runtime.runtime_utils import dynamo_timed
 from torch._inductor.runtime.triton_heuristics import grid as default_grid_fn
 
+from .. import config
 from ..codecache import CudaKernelParamCache
-from ..ir import IRNode
-from ..utils import DeferredLineBase, get_gpu_type
+from ..ir import IRNode, TensorBox
+from ..utils import DeferredLineBase, get_gpu_type, GPU_ALIGN_BYTES
 from ..virtualized import V
 from .aoti_hipify_utils import maybe_hipify_code_wrapper
 from .common import get_device_op_overrides
 from .cpp_utils import cexpr
 from .cpp_wrapper_cpu import CppWrapperCpu
+from .multi_kernel import MultiKernelCall
 from .wrapper import PythonWrapperCodegen, SymbolicCallArg
 
 
@@ -47,6 +49,9 @@ class DeferredGpuKernelLine(DeferredLineBase):
         self.keys = keys
 
     def __call__(self):
+        if self.kernel_name.startswith("multi_kernel_"):
+            # MultiKernel will select one kernel after running the autotune block
+            self.kernel_name = MultiKernelCall.lookup_choice(self.kernel_name)
         params = CudaKernelParamCache.get(self.kernel_name)
         assert (
             params is not None
@@ -84,6 +89,11 @@ class DeferredGpuDefaultGrid:
         self.grid_callable = grid_callable
         self.grid_extra_kwargs = grid_extra_kwargs
 
+    def __iter__(self):
+        # DeferredGpuDefaultGrid can be passed to the base class, PythonWrapperCodegen,
+        # to generate the autotune code block, and thus we need this iterator
+        return iter(self.grid)
+
     def _process_grid(self, grid: Union[List[Any], Tuple[Any, ...]]):
         if isinstance(grid, (list, tuple)):
             return [self._process_grid(e) for e in grid]
@@ -91,6 +101,10 @@ class DeferredGpuDefaultGrid:
             return grid.inner_expr if isinstance(grid, SymbolicCallArg) else grid
 
     def __call__(self):
+        if self.kernel_name.startswith("multi_kernel_"):
+            # MultiKernel will select one kernel after running the autotune block
+            self.kernel_name = MultiKernelCall.lookup_choice(self.kernel_name)
+
         grid = self.grid
         assert isinstance(grid, (list, tuple)), f"expected {grid=} to be a list"
         grid = self._process_grid(grid)
@@ -127,6 +141,10 @@ class DeferredGpuGridLine(DeferredLineBase):
         self.autotune_configs = autotune_configs
 
     def __call__(self):
+        if self.kernel_name.startswith("multi_kernel_"):
+            # MultiKernel will select one kernel after running the autotune block
+            self.kernel_name = MultiKernelCall.lookup_choice(self.kernel_name)
+
         params = CudaKernelParamCache.get(self.kernel_name)
         assert (
             params is not None
@@ -208,6 +226,45 @@ class CppWrapperGpu(CppWrapperCpu):
         )
         return name
 
+    def codegen_inputs(self):
+        # See Note: [Input Alignment handling in Inductor]
+        #
+        # JIT Inductor does not guard on input alignment. It relies on copy_misaligned_inputs to
+        # copy misaligned inputs to aligned buffers. For AOTInductor, we need to do the same in cpp.
+
+        if config.is_fbcode():
+            # TODO: This is added because FC. Remove this once the newly added shim symbols,
+            # e.g. aoti_torch_clone_preserve_strides, have landed
+            return super().codegen_inputs()
+
+        if V.graph.aot_mode and V.graph.inputs_to_check:
+            for idx in V.graph.inputs_to_check:
+                input_name = V.graph.graph_input_names[idx]
+                assert (
+                    input_name in V.graph.graph_inputs
+                ), f"{input_name} not found in graph inputs"
+                value = V.graph.graph_inputs[input_name]
+                assert isinstance(
+                    value, TensorBox
+                ), f"{input_name} is expected to be tensor but found as {type(value)}"
+                warn_msg = (
+                    f"Input {idx} was compiled as {GPU_ALIGN_BYTES}-bytes aligned, "
+                    "but it is not aligned at run time. Copying to an aligned tensor "
+                    "to guarantee correctness, but expect a performance hit."
+                )
+                self.prefix.splice(
+                    f"""
+                    if ((long({input_name}.data_ptr()) & ({GPU_ALIGN_BYTES} -1)) != 0) {{
+                        AOTI_TORCH_WARN("{warn_msg}");
+                        AtenTensorHandle {input_name}_aligned;
+                        aoti_torch_clone_preserve_strides({input_name}, &{input_name}_aligned);
+                        {input_name} = std::move(RAIIAtenTensorHandle({input_name}_aligned));
+                    }}
+                    """
+                )
+
+        super().codegen_inputs()
+
     def define_kernel(
         self,
         kernel_name: str,
@@ -215,7 +272,13 @@ class CppWrapperGpu(CppWrapperCpu):
         metadata: Optional[str] = None,
         gpu=True,
     ):
-        if not gpu:
+        if gpu:
+            if config.triton.autotune_at_compile_time:
+                # Call PythonWrapperCodegen to create the autotune code block
+                PythonWrapperCodegen.define_kernel(
+                    self, kernel_name, kernel_body, metadata, gpu
+                )
+        else:
             return CppWrapperCpu.define_kernel(
                 self, kernel_name, kernel_body, metadata, gpu
             )
@@ -247,6 +310,21 @@ class CppWrapperGpu(CppWrapperCpu):
         triton_meta,
         constexprs,
     ):
+        if (
+            config.triton.autotune_at_compile_time
+            and kernel_name not in self.kernel_autotune_names
+        ):
+            # Call PythonWrapperCodegen to create the autotune code block
+            PythonWrapperCodegen.generate_user_defined_triton_kernel(
+                self,
+                kernel_name,
+                raw_args,
+                grid,
+                configs,
+                triton_meta,
+                constexprs,
+            )
+
         # in C++ wrapper, we don't pass constexpr args, as they don't
         # get added as parameters to the PTX code compiled from the
         # user-defined Triton kernel (only non-constexpr args do)
@@ -420,6 +498,27 @@ class CppWrapperGpu(CppWrapperCpu):
         if not gpu:
             # Even in CppWrapperGpu, we may see cpp kernels
             return CppWrapperCpu.generate_kernel_call(
+                self,
+                kernel_name,
+                call_args,
+                grid,
+                device_index,
+                gpu,
+                triton,
+                arg_types,
+                raw_args,
+                grid_fn,
+                triton_meta,
+                autotune_configs,
+                grid_extra_kwargs,
+            )
+
+        if (
+            config.triton.autotune_at_compile_time
+            and kernel_name not in self.kernel_autotune_names
+        ):
+            # Call PythonWrapperCodegen to create the autotune code block
+            PythonWrapperCodegen.generate_kernel_call(
                 self,
                 kernel_name,
                 call_args,
