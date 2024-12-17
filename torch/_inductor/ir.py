@@ -4172,7 +4172,7 @@ class TemplateBuffer(OperationBuffer):
     def __init__(
         self,
         layout: Layout,
-        inputs: List[IRNode],
+        inputs: Sequence[IRNode],
         make_kernel_render: Callable[..., Any],
     ) -> None:
         super().__init__(name=None, layout=layout)
