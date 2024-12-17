@@ -113,6 +113,30 @@ def call_backward(
     return grads
 
 
+def normalize_as_list(x: Any) -> List[Any]:
+    if isinstance(x, tuple):
+        return list(x)
+    elif isinstance(x, list):
+        return x
+    return [x]
+
+
+def call_aot_bwd_impl(
+    ctx: torch.autograd.function.BackwardCFunction,
+    saved_tensors: List[torch.Tensor],
+    all_args: List[
+        Union[torch.Tensor, torch.fx.experimental._backward_state.BackwardState]
+    ],
+    backward_state: Optional[torch.fx.experimental._backward_state.BackwardState],
+) -> List[torch.Tensor]:
+    fakectx = FakeBackwardCFunction(ctx, saved_tensors)
+    bw_module = fakectx._bw_module
+    if backward_state is not None:
+        all_args.append(backward_state)
+    out = bw_module(*all_args)
+    return normalize_as_list(out)
+
+
 def untyped_storage_size(x: torch.Tensor) -> int:
     return x.untyped_storage().size()
 
