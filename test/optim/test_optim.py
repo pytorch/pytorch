@@ -66,7 +66,7 @@ def _multistep_backprop_diff_lr_fn(
         kwargs["differentiable"] is True
     ), "Only call this test function when differentiable=True"
 
-    params = params.clone().requires_grad_(True).clone()
+    params = params.clone()
     params.grad = grad
 
     opt_differentiable_state = {
