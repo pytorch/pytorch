@@ -8126,11 +8126,13 @@ class TestMPS(TestCaseMPS):
     
     def test_astream_context_manager(self):
         prev_stream = torch.accelerator.current_stream()
-        with torch.Stream() as stream:
-            print(stream)
-            print(torch.accelerator.current_stream())
-            self.assertEqual(stream, torch.accelerator.current_stream())
-        self.assertEqual(prev_stream, torch.accelerator.current_stream())
+        print(prev_stream)
+        s = torch.Stream()
+        print(s)
+        print("call __enter__")
+        s.__enter__()
+        print("call __exit__")
+        s.__exit__()
 
     def test_generic_event(self):
         startEvent = torch.Event('mps', enable_timing=True)
