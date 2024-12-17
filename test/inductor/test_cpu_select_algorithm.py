@@ -2196,9 +2196,10 @@ class TestSelectAlgorithmDynamicShapes(_DynamicShapesTestBase):
     @patches
     @torch.no_grad
     @unittest.skipIf(not TEST_MKL, "Test requires MKL")
-    def test_bmm_dynamic_stride(self):
+    def test_bmm_dynamic_bm_stride(self):
         bs = 8
-        Mdim = 512
+        Mdim = 256
+        Kdim = 64
         dtype = torch.float
 
         class M(torch.nn.Module):
@@ -2206,19 +2207,16 @@ class TestSelectAlgorithmDynamicShapes(_DynamicShapesTestBase):
                 super().__init__()
 
             def forward(self, x, other):
-                return x.reshape(-1, Mdim, Mdim) @ other.reshape(
-                    Mdim, bs * 16, 64
-                ).permute(1, 0, 2)
+                return x @ other.permute(2, 0, 1)
 
         counters.clear()
-        u = torch.randn(bs, 16, Mdim, Mdim).to(dtype=dtype)
-        v = torch.randn(1, bs * Mdim, 2 * Mdim).to(dtype=dtype)
+        u = torch.randn(bs, Mdim, Kdim).to(dtype=dtype)
+        v = torch.randn(Kdim, Mdim, bs).to(dtype=dtype)
         torch._dynamo.mark_dynamic(u, 0)
-        torch._dynamo.mark_static(u, 1)
+        torch._dynamo.mark_dynamic(u, 1)
         torch._dynamo.mark_static(u, 2)
-        torch._dynamo.mark_static(u, 3)
+        torch._dynamo.mark_static(v, 0)
         torch._dynamo.mark_static(v, 1)
-        torch._dynamo.mark_static(v, 3)
         mod = M().to(dtype=dtype).eval()
         with verify(dtype) as (atol, rtol):
             self.common(mod, (u, v), atol=atol, rtol=rtol)
