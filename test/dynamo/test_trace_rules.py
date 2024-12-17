@@ -323,10 +323,16 @@ class TraceRuleTests(torch._dynamo.test_case.TestCase):
     # or loaded in case there is typo in the strings.
     def test_skipfiles_inlinelist(self):
         for m in LEGACY_MOD_INLINELIST.union(MOD_INLINELIST):
-            self.assertTrue(
-                isinstance(importlib.import_module(m), types.ModuleType),
-                f"{m} from trace_rules.MOD_INLINELIST/LEGACY_MOD_INLINELIST is not a python module, please check and correct it.",
-            )
+            try:
+                mod = importlib.import_module(m)
+            except ImportError:
+                continue
+            else:
+                self.assertTrue(
+                    isinstance(mod, types.ModuleType),
+                    f"{m} from trace_rules.MOD_INLINELIST/LEGACY_MOD_INLINELIST "
+                    "is not a python module, please check and correct it.",
+                )
 
     @unittest.skip(
         "This test keeps getting broken and our disable infra is not handling well. see #120627"

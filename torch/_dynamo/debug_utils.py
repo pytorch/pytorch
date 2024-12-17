@@ -370,7 +370,7 @@ def same_two_models(
 
     try:
         res = run_fwd_maybe_bwd(opt_gm, example_inputs, only_fwd)
-    except Exception as e:
+    except Exception:
         # This means that the minified graph is bad/exposes a different problem.
         # As we are checking accuracy here, lets log the exception and return True.
         log.exception(
@@ -455,7 +455,7 @@ def backend_accuracy_fails(
             require_fp64=require_fp64,
             ignore_non_fp=ignore_non_fp,
         )
-    except Exception as e:
+    except Exception:
         # This means that the minified graph is bad/exposes a different problem.
         # As we are checking accuracy here, lets log the exception and return False.
         log.exception(
@@ -679,6 +679,23 @@ class InputWriter:
             + ", ".join([storage, str(tuple(t.shape)), *args])
             + f")  # {name}"
         )
+
+    def unsupported(self, name, arg):
+        # NB: Try hard not to /print/ a tensor, that will be very slow
+        self._lines.append(f"# {name} was unsupported type for dumping: {type(arg)}")
+        # Best effort dump as much useful stuff we can lol, in case you want
+        # to repair the repro
+        if isinstance(arg, (list, tuple)):
+            self._lines.append('"""')
+            for i, a in enumerate(arg):
+                name_i = f"{name}[{i}]"
+                if isinstance(a, torch.Tensor):
+                    self.tensor(name_i, a)
+                elif isinstance(a, (int, torch.SymInt)):
+                    self.symint(name_i, a)
+                else:
+                    self.unsupported(name_i, a)
+            self._lines.append('"""')
 
     # write out that the arg was filtered out as it is constant
     def const(self, name) -> None:

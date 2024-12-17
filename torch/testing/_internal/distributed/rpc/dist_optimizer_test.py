@@ -146,8 +146,8 @@ class DistOptimizerTest(RpcAgentTestFixture):
         params = [module1.get_w(), module2.get_w()]
         local_optim = optim_cls(params, *args, **kwargs)
 
-        old_w1 = module1.w.clone().detach()
-        old_w2 = module2.w.clone().detach()
+        old_w1 = module1.w.detach().clone()
+        old_w2 = module2.w.detach().clone()
 
         g_cpu = torch.Generator()
         g_cpu.manual_seed(0)
@@ -217,8 +217,8 @@ class DistOptimizerTest(RpcAgentTestFixture):
         params = [module1.get_w(), module2.get_w()]
         local_optim = optim_cls(params, *args, **kwargs)
 
-        old_w1 = module1.w.clone().detach()
-        old_w2 = module2.w.clone().detach()
+        old_w1 = module1.w.detach().clone()
+        old_w2 = module2.w.detach().clone()
 
         g_cpu = torch.Generator()
         g_cpu.manual_seed(0)

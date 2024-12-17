@@ -393,7 +393,6 @@ utility
       main()
 
 """
-import logging
 import os
 import sys
 import uuid
@@ -673,7 +672,7 @@ def parse_min_max_nnodes(nnodes: str):
 
 def determine_local_world_size(nproc_per_node: str):
     try:
-        logging.info("Using nproc_per_node=%s.", nproc_per_node)
+        logger.info("Using nproc_per_node=%s.", nproc_per_node)
         return int(nproc_per_node)
     except ValueError as e:
         if nproc_per_node == "cpu":
@@ -762,7 +761,7 @@ def _get_logs_specs_class(logs_specs_name: Optional[str]) -> Type[LogsSpecs]:
                 f"Could not find entrypoint under 'torchrun.logs_specs[{logs_specs_name}]' key"
             )
 
-        logging.info(
+        logger.info(
             "Using logs_spec '%s' mapped to %s", logs_specs_name, str(logs_specs_cls)
         )
     else:

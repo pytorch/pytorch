@@ -69,6 +69,15 @@ class SymNode:
     End users don't touch this.  Magic methods are NOT defined on this object.
     """
 
+    # Note [optimized_summation]: indicates that SymNode is an Add expression of the form
+    # a + b + c + d... etc where all terms are unique symbols. This allows us to do some optimizations
+    # for common patterns see _optimized_add.
+
+    # The unfortunate reason we have this here is because sympy sets  __slots__ = () for add expression,
+    # so we cannot add the attribute directly to the sympy expression. Furthermore, we cannot use it as
+    # a weak dictionary key either! So instead, we attach the attribute here to the SymNode.
+    _optimized_summation: bool = False
+
     def __init__(
         self,
         expr,
@@ -77,10 +86,12 @@ class SymNode:
         hint: Optional[Union[int, float, bool]],
         constant=None,
         fx_node=None,
+        optimized_summation=False,
     ):
         self._expr = expr
         self.shape_env = shape_env
         self.pytype = pytype
+        self._optimized_summation = optimized_summation
 
         # What's the difference between hint and constant?
         #
@@ -110,14 +121,14 @@ class SymNode:
         # in sync, so we've deleted it for now.)
 
         def compute_hint():
-            from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
+            from torch.fx.experimental.symbolic_shapes import has_free_unbacked_symbols
 
             # This occasionally gets exercised by, e.g.,
             # convert_shape_to_symint.  It's just a nicety so you don't HAVE
             # to have a correct hint on hand when making a SymNode.
             # Don't attempt to compute for unbacked, this can be quite
             # expensive.
-            if free_unbacked_symbols(self.expr):
+            if has_free_unbacked_symbols(self.expr):
                 return None
             hint = self.shape_env._maybe_evaluate_static(self.expr, compute_hint=True)
             if hint is not None:
@@ -409,6 +420,13 @@ class SymNode:
     def sym_and(self, other):
         return self.and_(other)
 
+    # Integer bitwise ops
+    def bitwise_and(self, other):
+        return self._bitwise_and(other)  # type: ignore[attr-defined]
+
+    def bitwise_or(self, other):
+        return self._bitwise_or(other)  # type: ignore[attr-defined]
+
     # There is no int_truediv available from C++
     def truediv(self, other):
         return self.float_truediv(other)
@@ -571,6 +589,7 @@ METHOD_TO_OPERATOR = {
     "abs": operator.abs,
     "add": operator.add,
     "and": operator.and_,
+    "bitwise_and": operator.and_,
     "ceil": math.ceil,
     "eq": operator.eq,
     "floor": math.floor,
@@ -587,6 +606,7 @@ METHOD_TO_OPERATOR = {
     "ne": operator.ne,
     "neg": operator.neg,
     "or": operator.or_,
+    "bitwise_or": operator.or_,
     "float_pow": operator.pow,
     "pow_by_natural": operator.pow,
     "round": builtins.round,
@@ -665,6 +685,11 @@ only_float_magic_methods = {"is_integer", "round", "sym_int", "sym_log2"}
 
 
 magic_methods_on_operator_with_trailing_underscore = {"and", "or"}
+# remap necessary because an op name can have a bitwise and boolean implementation
+bitwise_ops = {
+    "bitwise_and": "and",
+    "bitwise_or": "or",
+}
 
 
 always_float_magic_methods = {"int_truediv", "float_truediv", "sym_float", "float_pow"}
@@ -755,15 +780,112 @@ def _sympy_rshift(a, b):
     return RShift(a, b)
 
 
+def _binary_search_insert_arg(ordered_args, new_arg):
+    """
+    If new_arg is found in ordered_args None is returned, else the new
+    ordered_args with new_arg inserted
+    """
+    if len(ordered_args) == 0:
+        return [new_arg]
+
+    from sympy.core.basic import _args_sortkey as sort_key, Basic
+
+    # Fast path when new_arg > ordered_args[-1].
+    if sort_key(ordered_args[-1]) < sort_key(new_arg):
+        return ordered_args + [new_arg]
+
+    # Fast path when new_arg < ordered_args[0].
+    if sort_key(ordered_args[0]) > sort_key(new_arg):
+        return [new_arg] + ordered_args
+
+    low, high = 0, len(ordered_args) - 1
+
+    while low <= high:
+        mid = (low + high) // 2
+        compare_result = Basic.compare(ordered_args[mid], new_arg)
+        if compare_result == 0:
+            return None
+        elif compare_result < 0:
+            low = mid + 1
+        else:
+            high = mid - 1
+
+    ordered_args.insert(low, new_arg)
+    return ordered_args
+
+
+def _optimized_add(
+    lhs, rhs, lhs_is_optimized_summation=False, rhs_is_optimized_summation=False
+):
+    """
+    Custom optimization for Add used to optimize incremental binary summations of certain properties. The idea
+    is when we know the expression is a summation of unique symbols all we need to know is the correct order of symbols,
+    and no other optimizations are needed. We pass evaluate=false, with the correct order of args and save the following.
+    1. Avoid running other optimizations when the Add is constructed.
+    2. Manually figure out the order of the args for the new expression in log(n) comparisons instead of nLog(n)
+    (comparing terms is expensive and shows in the profiles).
+    The function returns a tuple of (1) a boolean that indicates whether the output is a summation of unique symbols,
+    (2) the result sympy expression.
+    """
+    import sympy
+    from sympy.core.basic import _args_sortkey as sortkey
+
+    def make_optimized(ordered_args):
+        result = sympy.Add(*ordered_args, evaluate=False)
+        return (True, result)
+
+    from torch.utils._sympy.functions import _is_symbols_binary_summation
+
+    lhs_is_optimized_summation |= _is_symbols_binary_summation(lhs)
+    rhs_is_optimized_summation |= _is_symbols_binary_summation(rhs)
+
+    if lhs_is_optimized_summation and rhs_is_optimized_summation:
+        # (a0+a1..) + (a2+a3..) => (a0+a1+a2+a3)
+        if sortkey(lhs._args[-1]) < sortkey(rhs._args[0]):
+            return make_optimized(lhs._args + rhs._args)
+        #  (a2+a3..) + (a0+a1..) => (a0+a1+a2+a3)
+        if sortkey(lhs._args[0]) > sortkey(rhs._args[-1]):
+            return make_optimized(rhs._args + lhs._args)
+
+    # (a0+a2) + a1 => (a0+a1+a2)
+    if lhs_is_optimized_summation and rhs.is_symbol:
+        new_args = _binary_search_insert_arg(list(lhs._args), rhs)
+        if new_args is not None:
+            return make_optimized(new_args)
+
+    # a1 + (a0+a2)=> (a0+a1+a2)
+    if rhs_is_optimized_summation and lhs.is_symbol:
+        new_args = _binary_search_insert_arg(list(rhs._args), lhs)
+        if new_args is not None:
+            return make_optimized(new_args)
+
+    result = sympy.Add(lhs, rhs)
+    return (_is_symbols_binary_summation(result), result)
+
+
+def _bitwise_and(a, b):
+    from torch.utils._sympy.functions import BitwiseFn_bitwise_and
+
+    return BitwiseFn_bitwise_and(a, b)
+
+
+def _bitwise_or(a, b):
+    from torch.utils._sympy.functions import BitwiseFn_bitwise_or
+
+    return BitwiseFn_bitwise_or(a, b)
+
+
 reflectable_magic_methods = {
-    "add": operator.add,
+    "add": _optimized_add,
     "sub": operator.sub,
     "mul": operator.mul,
     "mod": _sympy_mod,
     "pow_by_natural": _sympy_pow_by_natural,
     "float_pow": _sympy_float_pow,
     "and": _sympy_and,
+    "bitwise_and": _bitwise_and,
     "or": _sympy_or,
+    "bitwise_or": _bitwise_or,
     "float_truediv": _sympy_float_truediv,
     "int_truediv": _sympy_int_truediv,
     "int_floordiv": _sympy_floordiv,
@@ -1117,6 +1239,7 @@ def _make_node_magic(method, func):
                 self, handle_sym_dispatch(op, (wrap_node(self), wrap_node(other)), {})
             )
         assert isinstance(other, SymNode)
+        optimized_summation = False
         try:
             if method == "mod":
                 from torch.utils._sympy.functions import Mod, PythonMod
@@ -1134,6 +1257,14 @@ def _make_node_magic(method, func):
                     out = Mod(self.expr, other.expr)
                 else:
                     out = PythonMod(self.expr, other.expr)
+            elif method == "add":
+                # see Note [optimized_summation]
+                (optimized_summation, out) = func(
+                    self.expr,
+                    other.expr,
+                    self._optimized_summation,
+                    other._optimized_summation,
+                )
             else:
                 # TODO: consider constant prop here
                 out = func(self.expr, other.expr)
@@ -1170,7 +1301,16 @@ def _make_node_magic(method, func):
         fx_node, _ = self.shape_env._create_fx_call_function(
             op, (self.fx_node, other.fx_node)
         )
-        return SymNode(out, self.shape_env, pytype, out_hint, fx_node=fx_node)
+
+        result = SymNode(
+            out,
+            self.shape_env,
+            pytype,
+            out_hint,
+            fx_node=fx_node,
+            optimized_summation=optimized_summation,  # see Note [optimized_summation]
+        )
+        return result
 
     def unary_magic_impl(self):
         from torch.fx.experimental.proxy_tensor import (
@@ -1570,9 +1710,12 @@ def _make_user_magic(method, user_type):
 
         setattr(user_type, f"__{method}__", round_magic_impl)
     else:
-        setattr(user_type, f"__{method}__", binary_magic_impl)
+        method_name = method
+        if method in bitwise_ops:
+            method_name = bitwise_ops[method]
+        setattr(user_type, f"__{method_name}__", binary_magic_impl)
         if method in reflectable_magic_methods:
-            setattr(user_type, f"__r{method}__", rbinary_magic_impl)
+            setattr(user_type, f"__r{method_name}__", rbinary_magic_impl)
 
 
 for method, func in magic_methods.items():  # type: ignore[assignment]
@@ -1585,7 +1728,8 @@ for method, func in magic_methods.items():  # type: ignore[assignment]
     if method in also_bool_magic_methods or method in bool_becomes_int_magic_methods:
         _make_user_magic(method, SymBool)
     _make_user_magic(method, SymInt)
-    _make_user_magic(method, SymFloat)
+    if method not in bitwise_ops:
+        _make_user_magic(method, SymFloat)
 
 del method
 del func

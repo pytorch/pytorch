@@ -10,6 +10,7 @@
 #include <c10/util/ScopeExit.h>
 #include <c10/util/UniqueVoidPtr.h>
 #include <c10/util/env.h>
+#include <c10/util/error.h>
 #include <c10/util/flat_hash_map.h>
 #include <c10/util/hash.h>
 #include <c10/util/llvmMathExtras.h>
@@ -486,7 +487,7 @@ struct ExpandableSegment {
         pidfd != -1 || errno != ENOSYS,
         "The kernel on this machine does not support the pidfd_open syscall needed to use IPC for CUDA tensors when expandable_segments:True is set. "
         "Consider using expandable_segments:False via torch.cuda.memory._set_allocator_settings('expandable_segments:False') for this allocation.");
-    TORCH_CHECK(pidfd != -1, "pidfd_open:", std::strerror(errno));
+    TORCH_CHECK(pidfd != -1, "pidfd_open:", c10::utils::str_error(errno));
     for (auto i : c10::irange(header.num_handles)) {
       (void)i;
       int fd = 0;
@@ -504,7 +505,7 @@ struct ExpandableSegment {
             err != ENOSYS,
             "The kernel on this machine does not support the pidfd_getfd syscall needed to use IPC for CUDA tensors when expandable_segments:True is set. "
             "Consider using expandable_segments:False via torch.cuda.memory._set_allocator_settings('expandable_segments:False') for this allocation.");
-        TORCH_CHECK(false, "pidfd_getfd: ", std::strerror(err));
+        TORCH_CHECK(false, "pidfd_getfd: ", c10::utils::str_error(err));
       }
       CUmemGenericAllocationHandle handle = 0;
       C10_CUDA_DRIVER_CHECK(DriverAPI::get()->cuMemImportFromShareableHandle_(
@@ -1576,6 +1577,19 @@ class DeviceCachingAllocator {
     if (C10_UNLIKELY(!captures_underway.empty())) {
       block_to_cudagraph_stream_uses[block].insert(stream);
     }
+  }
+
+  /** get memory fraction limiting maximum allocated memory **/
+  double getMemoryFraction() {
+    if (!set_fraction) {
+      return 1.0;
+    }
+
+    size_t device_free = 0;
+    size_t device_total = 0;
+    C10_CUDA_CHECK(cudaMemGetInfo(&device_free, &device_total));
+    return static_cast<double>(allowed_memory_maximum) /
+        static_cast<double>(device_total);
   }
 
   /** set memory fraction to limit maximum allocated memory **/
@@ -3388,6 +3402,16 @@ class NativeCachingAllocator : public CUDAAllocator {
     device_allocator[block->device]->free(block);
   }
 
+  double getMemoryFraction(c10::DeviceIndex device) override {
+    TORCH_INTERNAL_ASSERT(
+        0 <= device && static_cast<size_t>(device) < device_allocator.size(),
+        "Allocator not initialized for device ",
+        device,
+        ": did you call init?");
+    C10_CUDA_CHECK(c10::cuda::SetDevice(device));
+    return device_allocator[device]->getMemoryFraction();
+  }
+
   void setMemoryFraction(double fraction, c10::DeviceIndex device) override {
     TORCH_INTERNAL_ASSERT(
         0 <= device && static_cast<size_t>(device) < device_allocator.size(),
@@ -3997,6 +4021,10 @@ CUDACachingAllocator::CUDAAllocator* MemPool::allocator() {
 
 int MemPool::use_count() {
   return CUDACachingAllocator::getPoolUseCount(device_, id_);
+}
+
+c10::DeviceIndex MemPool::device() {
+  return device_;
 }
 
 MempoolId_t MemPool::graph_pool_handle(bool is_user_created) {
