@@ -3,6 +3,8 @@ import dataclasses
 import datetime
 import tempfile
 from collections import defaultdict
+from enum import Enum
+from functools import cached_property
 
 import torch
 from torch.autograd import DeviceType
@@ -12,46 +14,47 @@ from .runtime.benchmarking import benchmarker
 from .runtime.runtime_utils import create_bandwidth_info_str, get_num_bytes
 
 
-_kernel_category_choices = [
-    "foreach",
-    "persistent_reduction",
-    "pointwise",
-    "reduction",
-    "split_scan",
-    "template",
-]
+class KernelCategory(Enum):
+    FOREACH = "foreach"
+    PERSISTENT_REDUCTION = "persistent_reduction"
+    POINTWISE = "pointwise"
+    REDUCTION = "reduction"
+    SPLIT_SCAN = "split_scan"
+    TEMPLATE = "template"
+    UNKNOWN = "unknown"
 
+    @cached_property
+    def abbrev(self) -> str:
+        """Returns small string abbreviation for category"""
+        return self.value[:3]
 
-def get_kernel_category_by_source_code(src_code):
-    """
-    Similar to get_kernel_category but use the source code. Call this API
-    if we have not compile the src_code to module yet.
-    """
-    choices = [
-        ch for ch in _kernel_category_choices if f"@triton_heuristics.{ch}" in src_code
-    ]
-    if len(choices) == 1:
-        return choices[0]
-    else:
-        return "unknown"
+    @classmethod
+    def from_source_code(cls, src_code: str) -> "KernelCategory":
+        """
+        Similar to get_kernel_category but use the source code. Call this API
+        if we have not compile the src_code to module yet.
+        """
+        choices = [
+            cat
+            for cat in cls
+            if cat != cls.UNKNOWN and f"@triton_heuristics.{cat.value}" in src_code
+        ]
+        return choices[0] if len(choices) == 1 else cls.UNKNOWN
 
+    @classmethod
+    def from_module(cls, kernel_mod) -> "KernelCategory":
+        """
+        Given the module defining a triton kernel, return the category of the kernel.
 
-def get_kernel_category(kernel_mod):
-    """
-    Given the module defining a triton kernel, return the category of the kernel.
-    Category can be one of:
-    - pointwise
-    - reduction
-    - persistent_reduction
-
-    Currently we simply decide the category depending on what decorator is imported
-    by the kernel.
-    """
-    choices = [ch for ch in _kernel_category_choices if ch in kernel_mod.__dict__]
-    if len(choices) == 1:
-        return choices[0]
-    else:
-        return "unknown"
+        Currently we simply decide the category depending on what decorator is imported
+        by the kernel.
+        """
+        choices = [
+            cat
+            for cat in cls
+            if cat != cls.UNKNOWN and cat.value in kernel_mod.__dict__
+        ]
+        return choices[0] if len(choices) == 1 else cls.UNKNOWN
 
 
 def get_triton_kernel(mod):
@@ -85,7 +88,7 @@ def benchmark_all_kernels(benchmark_name, benchmark_all_configs):
             continue
 
         triton_kernel = get_triton_kernel(kernel_mod)
-        kernel_category = get_kernel_category(kernel_mod)
+        kernel_category = KernelCategory.from_module(kernel_mod)
         args = kernel_mod.get_args()
         num_in_out_ptrs = len(
             [
@@ -112,7 +115,7 @@ def benchmark_all_kernels(benchmark_name, benchmark_all_configs):
             )
 
         kernel_desc = (
-            f"{benchmark_name:20} {kernel_category[:3].upper()} {kernel_key[:10]}"
+            f"{benchmark_name:20} {kernel_category.abbrev.upper()} {kernel_key[:10]}"
         )
         if benchmark_all_configs:
             assert hasattr(kernel_mod, "benchmark_all_configs")
@@ -396,7 +399,7 @@ def compiled_module_main(benchmark_name, benchmark_compiled_module_fn):
 
         if torch.cuda.is_available():
             peak_mem = torch.cuda.max_memory_allocated()
-            print(f"Peak GPU memory usage {peak_mem/1e6:.3f} MB")
+            print(f"Peak GPU memory usage {peak_mem / 1e6:.3f} MB")
 
         if torch.cuda.is_available() and args.cuda_memory_snapshot:
             collect_memory_snapshot(benchmark_compiled_module_fn)

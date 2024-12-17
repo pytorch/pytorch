@@ -1157,7 +1157,7 @@ class TritonTemplate(KernelTemplate):
 
         def make_kernel_render(out_node):
             kernel = TritonTemplateKernel(
-                kernel_name=str(Placeholder.KERNEL_NAME),
+                kernel_name=kernel_name,
                 output_node=out_node,
                 workspace_arg=workspace_arg,
                 use_jit=False,

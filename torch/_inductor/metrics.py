@@ -12,6 +12,7 @@ from typing import Dict, List, Tuple, TYPE_CHECKING
 
 from torch._inductor import config
 from torch._inductor.utils import get_benchmark_name
+from torch._inductor.wrapper_benchmark import KernelCategory
 from torch.utils._ordered_set import OrderedSet
 
 
@@ -292,8 +293,8 @@ def _parse_kernel_line_of_code(proper_kernel_fn_code):
     return len(proper_kernel_fn_code.splitlines())
 
 
-def _parse_size_hints(kernel_module_code, kernel_category):
-    if kernel_category == "foreach":
+def _parse_size_hints(kernel_module_code, kernel_category: KernelCategory):
+    if kernel_category == KernelCategory.FOREACH:
         # foreach kernel does not have size_hints
         return None
     m = re.search(r"size_hints=(\[[0-9, ]*\]),", kernel_module_code)
@@ -301,8 +302,11 @@ def _parse_size_hints(kernel_module_code, kernel_category):
     return m.group(1)
 
 
-def _parse_reduction_hint(kernel_category, kernel_module_code):
-    if kernel_category not in ("reduction", "persistent_reduction"):
+def _parse_reduction_hint(kernel_module_code, kernel_category: KernelCategory):
+    if kernel_category not in (
+        KernelCategory.REDUCTION,
+        KernelCategory.PERSISTENT_REDUCTION,
+    ):
         return None
     m = re.search(r"reduction_hint=ReductionHint\.(\w*),", kernel_module_code)
     assert m, "reduction_hint not found in kernel source code!"
@@ -339,7 +343,7 @@ def _parse_numel(proper_kernel_fn_code, numel_arg_name):
         return None
 
 
-def _parse_kernel_args_num_gb(kernel_fn_code, kernel_category):
+def _parse_kernel_args_num_gb(kernel_fn_code):
     """
     inductor meta looks like:
         inductor_meta={... 'mutated_arg_names': [], 'no_x_dim': False, 'kernel_num_gb': 2.0},
@@ -365,10 +369,9 @@ def log_kernel_metadata(kernel_name, kernel_path, kernel_module_code):
     It's fine to parse the generated kernel code here since the logging is
     disabled by default. It would hurt compilation time.
     """
-    from .wrapper_benchmark import get_kernel_category_by_source_code
 
-    kernel_category = get_kernel_category_by_source_code(kernel_module_code)
-    reduction_hint = _parse_reduction_hint(kernel_category, kernel_module_code)
+    kernel_category = KernelCategory.from_source_code(kernel_module_code)
+    reduction_hint = _parse_reduction_hint(kernel_module_code, kernel_category)
     size_hints = _parse_size_hints(kernel_module_code, kernel_category)
     kernel_fn_code = _parse_kernel_fn_code(kernel_module_code)
 
@@ -393,9 +396,7 @@ def log_kernel_metadata(kernel_name, kernel_path, kernel_module_code):
             "xnumel": _parse_numel(proper_kernel_fn_code, "xnumel"),
             "ynumel": _parse_numel(proper_kernel_fn_code, "ynumel"),
             "rnumel": _parse_numel(proper_kernel_fn_code, "rnumel"),
-            "kernel_args_num_gb": _parse_kernel_args_num_gb(
-                kernel_fn_code, kernel_category
-            ),
+            "kernel_args_num_gb": _parse_kernel_args_num_gb(kernel_fn_code),
         }
     )
 

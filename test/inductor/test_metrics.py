@@ -3,7 +3,7 @@ import torch
 from torch._inductor import config, metrics
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import collect_defined_kernels
-from torch._inductor.wrapper_benchmark import get_kernel_category_by_source_code
+from torch._inductor.wrapper_benchmark import KernelCategory
 from torch.testing._internal.common_device_type import largeTensorTest
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 
@@ -71,10 +71,10 @@ class TestMetrics(TestCase):
         self.assertEqual(1, metrics._count_pattern(proper_kernel_fn_code, "for "))
 
     def test_parse_reduction_hint(self):
-        kernel_category = get_kernel_category_by_source_code(example_kernel)
-        self.assertEqual("reduction", kernel_category)
+        kernel_category = KernelCategory.from_source_code(example_kernel)
+        self.assertEqual(KernelCategory.REDUCTION, kernel_category)
         self.assertEqual(
-            "INNER", metrics._parse_reduction_hint(kernel_category, example_kernel)
+            "INNER", metrics._parse_reduction_hint(example_kernel, kernel_category)
         )
 
     @config.patch("fx_graph_remote_cache", False)
@@ -111,7 +111,8 @@ class TestMetrics(TestCase):
         self.assertEqual(len(kernel_list), 1)
         kernel_code = kernel_list[0]
         self.assertEqual(
-            metrics._parse_kernel_args_num_gb(kernel_code, "pointwise"), 2.0
+            metrics._parse_kernel_args_num_gb(kernel_code),
+            2.0,
         )
 
 

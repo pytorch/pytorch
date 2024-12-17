@@ -69,7 +69,7 @@ from ..utils import (
     upcast_compute_type,
 )
 from ..virtualized import _ops as ops, OpsHandler, ReductionType, StoreMode, V
-from ..wrapper_benchmark import get_kernel_category_by_source_code
+from ..wrapper_benchmark import KernelCategory
 from .block_analysis import BlockPatternMatcher
 from .common import (
     BackendFeature,
@@ -3715,9 +3715,19 @@ class TritonScheduling(SIMDScheduling):
                 if config.triton.descriptive_names
                 else ""
             )
-            kernel_category = get_kernel_category_by_source_code(src_code)[:3]
+            kernel_category = KernelCategory.from_source_code(src_code)
+            fused_name = (
+                kernel.kernel_name
+                if kernel_category == KernelCategory.TEMPLATE
+                else fused_name
+            )
             kernel_name = "_".join(
-                ["triton", kernel_category, fused_name, wrapper.next_kernel_suffix()]
+                [
+                    "triton",
+                    kernel_category.abbrev,
+                    fused_name,
+                    wrapper.next_kernel_suffix(),
+                ]
             )
             # use the original src_code as the key
             wrapper.src_to_kernel[src_code] = kernel_name
@@ -3728,6 +3738,8 @@ class TritonScheduling(SIMDScheduling):
             # to "triton_" to maximize caching opportunities (when unique_kernel_names = False).
             src_code = src_code.replace(str(Placeholder.DESCRIPTIVE_NAME), kernel_name)
             src_code = src_code.replace(str(Placeholder.KERNEL_NAME), subs_name)
+            if kernel_category == KernelCategory.TEMPLATE:
+                src_code = src_code.replace(kernel.kernel_name, kernel_name)
 
             # TODO(voz): Ostensibly, we should not need this. But there are cases where C++ codegen does
             # not use BracesBuffer, so we have no good indicator of a C++ buffer atm.

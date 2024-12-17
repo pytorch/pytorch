@@ -3286,6 +3286,11 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
         self.run_test_with_call(attention, Q_S=Q_S, KV_S=KV_S)
 
+    @supported_platform
+    def test_num_warps_8_error(self):
+        attention = functools.partial(flex_attention, score_mod=_identity)
+        self.run_test_with_call(attention, Q_S=128, KV_S=128, Q_D=128, V_D=128)
+
     @unittest.skipIf(not TEST_MULTIGPU, "detected only one GPU")
     def test_qkv_and_block_mask_on_the_same_device(self):
         make_tensor = functools.partial(
