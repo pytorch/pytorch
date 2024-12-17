@@ -1891,6 +1891,8 @@ class GuardBuilder(GuardBuilderBase):
         )
 
     def TENSOR_MATCH(self, guard: Guard, value=None):
+        if config._unsafe_skip_fsdp_module_guards and guard.is_fsdp_module():
+            return
         # For tensors that are part of the Dynamo extracted Fx graph module, an
         # ID_MATCH suffices. Once we turn on inline_inbuilt_nn_modules, these
         # will be lifted as inputs and have a TENSOR_MATCH guard.
