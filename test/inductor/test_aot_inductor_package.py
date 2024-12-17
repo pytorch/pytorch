@@ -2,9 +2,12 @@
 import copy
 import functools
 import io
+import subprocess
 import sys
 import tempfile
 import unittest
+import zipfile
+from pathlib import Path
 from typing import Callable
 
 from parameterized import parameterized_class
@@ -175,6 +178,49 @@ class TestAOTInductorPackage(TestCase):
             torch.randn(10, 10, device=self.device),
         )
         self.check_model(Model(), example_inputs)
+
+    def test_compile_after_package(self):
+        if not self.package_cpp_only:
+            raise unittest.SkipTest("Only meant to test cpp package")
+
+        class Model(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.linear = torch.nn.Linear(10, 10)
+
+            def forward(self, x, y):
+                return x + self.linear(y)
+
+        example_inputs = (
+            torch.randn(10, 10, device=self.device),
+            torch.randn(10, 10, device=self.device),
+        )
+        options = {
+            "aot_inductor.package_cpp_only": self.package_cpp_only,
+        }
+        ep = torch.export.export(Model().to(device=self.device), example_inputs)
+        package_path = torch._inductor.aoti_compile_and_package(
+            ep, inductor_configs=options
+        )
+        with tempfile.TemporaryDirectory() as tmp_dir, zipfile.ZipFile(
+            package_path, "r"
+        ) as zip_ref:
+            zip_ref.extractall(tmp_dir)
+            tmp_path = Path(tmp_dir) / "data" / "aotinductor" / "model"
+            assert tmp_path.exists()
+            build_path = tmp_path / "build"
+            assert not build_path.exists()
+            # Create a build directory to run cmake
+            build_path.mkdir()
+            try:
+                subprocess.run(["cmake", ".."], cwd=build_path)
+                subprocess.run(["make"], cwd=build_path)
+            except subprocess.SubprocessError:
+                raise RuntimeError("Failed to compile AOTInductor model code")
+
+            # Check if the .so file was build successfully
+            so_path = build_path / "libaoti_model.so"
+            assert so_path.exists()
 
     def test_metadata(self):
         class Model(torch.nn.Module):

@@ -14,6 +14,7 @@ import shutil
 import subprocess
 import sys
 import sysconfig
+import textwrap
 import warnings
 from ctypes import cdll
 from pathlib import Path
@@ -437,7 +438,7 @@ class BuildOptionsBase:
     def get_compile_only(self) -> bool:
         return self._compile_only
 
-    def save_flags_to_file(self, file: str) -> None:
+    def save_flags_to_json(self, file: str) -> None:
         attrs = {
             "compiler": self.get_compiler(),
             "definitions": self.get_definations(),
@@ -1409,6 +1410,7 @@ class CppBuilder:
         self._name = name
 
         # Code start here, initial self internal veriables firstly.
+        self._build_option = BuildOption
         self._compiler = BuildOption.get_compiler()
         self._use_absolute_path = BuildOption.get_use_absolute_path()
         self._aot_mode = BuildOption.get_aot_mode()
@@ -1545,3 +1547,76 @@ class CppBuilder:
 
         _remove_dir(_build_tmp_dir)
         return status, self._target_file
+
+    def _remove_directory_from_file_paths(self, file_paths: str) -> str:
+        # file_paths is already constructed as a string. This function removes
+        # the directory part of each path and still returns them as a combined
+        # string
+        files = file_paths.split()
+        base_names = []
+        for file in files:
+            base_names.append("${CMAKE_CURRENT_SOURCE_DIR}/" + Path(file).name)
+        return " ".join(base_names)
+
+    def save_compile_cmd_to_cmake(
+        self, file: str, append_src_only: bool = False
+    ) -> None:
+        srcs = self._remove_directory_from_file_paths(self._sources_args)
+        includes = " ".join(self._build_option.get_include_dirs())
+        definitions = " ".join(self._build_option.get_definations())
+        cflags = " ".join(self._build_option.get_cflags())
+
+        if not append_src_only:
+            contents = textwrap.dedent(
+                f"""
+                cmake_minimum_required(VERSION 3.18 FATAL_ERROR)
+                project(aoti_model LANGUAGES CXX)
+
+                # Set a shared library target
+                add_library(aoti_model SHARED)
+
+                # Set the C++ standard
+                set(CMAKE_CXX_STANDARD 17)
+
+                # Set the compiler
+                set(CMAKE_CXX_COMPILER {self._compiler})
+
+                # Add include directories
+                target_include_directories(aoti_model PRIVATE {includes})
+
+                # Add macro definitions
+                target_compile_definitions(aoti_model PRIVATE {definitions})
+
+                # Add compile flags
+                target_compile_options(aoti_model PRIVATE {self._cflags_args} {self._passthougn_parameters_args} -c)
+
+                """
+            )
+            with open(file, "w") as f:
+                f.write(contents)
+
+        with open(file, "a") as f:
+            f.write(f"target_sources(aoti_model PRIVATE {srcs})\n")
+
+    def save_link_cmd_to_cmake(self, file: str) -> None:
+        lflags = " ".join(self._build_option.get_ldflags())
+        ld_dirs = " ".join(self._build_option.get_libraries_dirs())
+        libs = " ".join(self._build_option.get_libraries())
+        contents = textwrap.dedent(
+            f"""
+            # Add linker flags
+            target_link_options(aoti_model PRIVATE {lflags})
+
+            # Add library directories
+            target_link_directories(aoti_model PRIVATE {ld_dirs})
+
+            # Add libraries
+            target_link_libraries(aoti_model PRIVATE {libs})
+         """
+        )
+
+        assert os.path.exists(
+            file
+        ), f"save_link_cmd_to_cmakefile expects {file} to already exist"
+        with open(file, "a") as f:
+            f.write(contents)
