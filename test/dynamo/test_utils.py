@@ -187,6 +187,7 @@ class TestDynamoTimed(TestCase):
  'code_gen': 0.0,
  'entire_backward_compile': 0.0,
  'entire_frame_compile': 0.0,
+ 'gc': 0.0,
  'inductor_compile': 0.0,
  'total_wall_time': 0.0}""",  # noqa: B950
         )
