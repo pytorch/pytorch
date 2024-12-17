@@ -349,8 +349,11 @@ def tensorify_python_scalars(
         )
         raise TensorifyScalarRestartAnalysis
 
-    if get_metrics_context().in_progress():
-        get_metrics_context().set(
+    # MiniOpTest.test_aot_dispatch_dynamic__test_delayed_error_no_requires_grad
+    # doesn't actually start a metrics context unlike normal compiles.
+    metrics_context = get_metrics_context()
+    if metrics_context.in_progress():
+        metrics_context.set(
             "tensorify_float_success", TensorifyState.empty(), overwrite=True
         )
 
