@@ -33,7 +33,7 @@ from torch._inductor.utils import run_and_get_code
 from torch._inductor.virtualized import V
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing import FileCheck
-from torch.testing._internal.common_cuda import SM80OrLater
+from torch.testing._internal.common_cuda import SM80OrLater, xfailIfSM89
 from torch.testing._internal.common_device_type import expectedFailureXPU, skipCUDAIf
 from torch.testing._internal.common_utils import IS_LINUX, skipIfRocm, skipIfXpu
 from torch.testing._internal.inductor_utils import (
@@ -148,6 +148,47 @@ class TestPatternMatcher(TestCase):
             return (out_dtype(torch.ops.aten.mm.default, torch.int32, a, b) * c).to(
                 torch.bfloat16
             )
+
+        args_list = [
+            (
+                torch.randint(-128, 127, (32, 32), dtype=torch.int8, device=GPU_TYPE),
+                torch.randint(-128, 127, (32, 8), dtype=torch.int8, device=GPU_TYPE),
+                torch.randn((32, 1), dtype=torch.float16, device=GPU_TYPE) * 0 + 0.5,
+            ),
+            (
+                torch.randint(-128, 127, (32, 32), dtype=torch.int8, device=GPU_TYPE),
+                torch.randint(-128, 127, (32, 8), dtype=torch.int8, device=GPU_TYPE),
+                torch.randn((1, 8), dtype=torch.bfloat16, device=GPU_TYPE),
+            ),
+            (
+                torch.randint(-128, 127, (32, 32), dtype=torch.int8, device=GPU_TYPE),
+                torch.randint(-128, 127, (32, 8), dtype=torch.int8, device=GPU_TYPE),
+                torch.randn((1, 8), dtype=torch.float32, device=GPU_TYPE),
+            ),
+        ]
+
+        for args in args_list:
+            self._test_fused_int_mm_mul_impl(fn1, args, True)
+            self._test_fused_int_mm_mul_impl(fn2, args, True)
+
+    @skipIfRocm
+    @skipIfXpu
+    @skipCUDAIf(not SM80OrLater, "need sm_80")
+    @inductor_config.patch(force_fuse_int_mm_with_mul=True)
+    @inductor_config.patch("test_configs.runtime_triton_dtype_assert", True)
+    def test_fused_int_mm_mul_epilogue(self):
+        def fn1(a, b, c):
+            return (
+                (out_dtype(torch.ops.aten.mm.default, torch.int32, a, b) * c) * 0.5
+            ).relu()
+
+        def fn2(a, b, c):
+            return (
+                (out_dtype(torch.ops.aten.mm.default, torch.int32, a, b) * c).to(
+                    torch.bfloat16
+                )
+                * 0.5
+            ).relu()
 
         args_list = [
             (
@@ -1309,6 +1350,7 @@ class TestPatternMatcher(TestCase):
                 self.assertTrue(pattern.pattern_eq(search_fn_pattern))
 
     @skipIfXpu
+    @xfailIfSM89
     @inductor_config.patch(
         {
             "triton.unique_kernel_names": "original_aten",

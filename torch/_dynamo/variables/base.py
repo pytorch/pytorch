@@ -357,19 +357,6 @@ class VariableTracker(metaclass=VariableTrackerMeta):
     def reconstruct(self, codegen):
         raise NotImplementedError
 
-    def can_reconstruct(self, tx):
-        """If it is possible to reconstruct the Python object this
-        VariableTracker represents."""
-        assert tx is tx.output.root_tx, "Only root tx can reconstruct"
-        try:
-            from ..codegen import PyCodegen
-
-            cg = PyCodegen(tx)
-            self.reconstruct(cg)
-            return True
-        except NotImplementedError:
-            return False
-
     def unpack_var_sequence(self, tx) -> List["VariableTracker"]:
         raise NotImplementedError
 
@@ -462,8 +449,6 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         source: Optional[Source] = None,
     ) -> Any:
         """Create a new VariableTracker from a value and optional Source"""
-        from . import builder
-
         if source is None:
             return builder.SourcelessBuilder.create(tx, value)
         else:
@@ -479,6 +464,23 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         self.source = source
         self.mutation_type = mutation_type
 
+        # NOTE sometimes mutation_type is set afterwards for implementation
+        # convenience, we don't validate those cases at the moment.
+        if mutation_type is not None:
+            if isinstance(mutation_type, (ValueMutationNew, AttributeMutationNew)):
+                # If this fails, it's either
+                # 1. one mistakenly passed in a source
+                # 2. `mutation_type` is incorrect
+                assert source is None
+            else:
+                assert isinstance(
+                    mutation_type, (ValueMutationExisting, AttributeMutationExisting)
+                )
+                # If this fails, it's either
+                # 1. one forgot to pass in a source
+                # 2. `mutation_type` is incorrect
+                assert source is not None
+
 
 def typestr(*objs):
     if len(objs) == 1:
@@ -489,3 +491,6 @@ def typestr(*objs):
             return type(obj).__name__
     else:
         return " ".join(map(typestr, objs))
+
+
+from . import builder
