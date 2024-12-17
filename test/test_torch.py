@@ -3319,6 +3319,30 @@ else:
             out = torch.addcmul(a, b, c, value=-1)
             self.assertTrue(not (out.isnan() or out.isinf()))
 
+    def test_addcmul_cpu_scalar_errors(self, device):
+        # Logic is dtype agnostic, so dtype isn't tested
+        alpha = 0.5
+
+        a = torch.rand((2, 2), device=device)
+        b = torch.rand((2, 2), device=device)
+        c = torch.rand((2, 2), device=device)
+        scalar = torch.rand([], device="cpu")
+
+        torch.addcmul(a, b, c, value=alpha)
+        torch.addcmul(a, b, scalar, value=alpha)  # supported on both
+
+        if device == "cpu":
+            torch.addcmul(a, scalar, c, value=alpha)
+            torch.addcmul(scalar, b, c, value=alpha)
+        elif device == "cuda:0":
+            with self.assertRaisesRegex(RuntimeError, r'CPU Scalar support for tensor1 argument'):
+                torch.addcmul(a, scalar, c, value=alpha)
+            with self.assertRaisesRegex(RuntimeError, r'CPU Scalar support for self argument'):
+                torch.addcmul(scalar, b, c, value=alpha)
+        else:
+            raise RuntimeError(f"Unexpected device {device} encountered")
+
+
     # FIXME: move to shape ops test suite
     def test_narrow_empty(self, device):
         x = torch.randn(2, 3, 4, device=device)

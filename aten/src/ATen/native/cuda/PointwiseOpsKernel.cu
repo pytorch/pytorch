@@ -23,12 +23,14 @@ constexpr char addcmul_name[] = "addcmul";
 void addcmul_cuda_kernel(TensorIteratorBase& iter, const Scalar& value) {
   TORCH_CHECK(
     !iter.is_cpu_scalar(1),
-    "CPU Scalar support for self argument is not supported."
+    "CPU Scalar support for self argument is not supported when "
+    "calling addcmul on CUDA tensors."
   );
 
   TORCH_CHECK(
     !iter.is_cpu_scalar(2),
-    "CPU Scalar support for tensor1 argument is not supported. "
+    "CPU Scalar support for tensor1 argument is not supported when "
+    "calling addcmul on CUDA tensors. "
     "However, CPU Scalar support for tensor2 is supported, "
     "please swap your tensor1 and tensor2 terms."
   );
