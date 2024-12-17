@@ -137,14 +137,6 @@ class MemoryBudgetTest(TestCase):
                 ws.append(torch.randn(512, dim * 512, requires_grad=True))
             return ws
 
-        def make_weights_chain(w_shapes):  # noqa: F841
-            ws = []
-            for idx, _ in enumerate(w_shapes):
-                old_dim = 512 if idx == 0 else w_shapes[idx - 1] * 512
-                new_dim = w_shapes[idx] * 512
-                ws.append(torch.randn(old_dim, new_dim, requires_grad=True))
-            return ws
-
         weight_configs = [
             (
                 [11, 3, 4, 2],

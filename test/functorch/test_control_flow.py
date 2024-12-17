@@ -1,5 +1,4 @@
 # Owner(s): ["module: functorch"]
-# ruff: noqa: F841
 import contextlib
 import functools
 import unittest
@@ -1976,7 +1975,7 @@ def forward(self, pred_1, x_1):
                 RuntimeError,
                 "xs leaves must have a scan dimension > 0",
             ):
-                result_init = scan_fct(
+                scan_fct(
                     get_scan_combine_fn("add", False),
                     init,
                     inp,
@@ -1988,7 +1987,7 @@ def forward(self, pred_1, x_1):
                 torch._dynamo.exc.Unsupported,
                 "Observed exception.*",
             ):
-                result_init = scan_fct(
+                scan_fct(
                     get_scan_combine_fn("add", False),
                     init,
                     inp,
@@ -2010,7 +2009,7 @@ def forward(self, pred_1, x_1):
                 RuntimeError,
                 "All init leaves must be a Tensor",
             ):
-                result_init = scan_fct(
+                scan_fct(
                     get_scan_combine_fn("add", False), init, x, dim=dim
                 )
         else:
@@ -2019,7 +2018,7 @@ def forward(self, pred_1, x_1):
                 torch._dynamo.exc.Unsupported,
                 "Observed exception.*",
             ):
-                result_init = scan_fct(
+                scan_fct(
                     get_scan_combine_fn("add", False), init, x, dim=dim
                 )
 
@@ -2036,7 +2035,7 @@ def forward(self, pred_1, x_1):
         init = torch.randn(1, 2)
         if compile_mode == "none":
             with self.assertRaisesRegex(RuntimeError, "The shape of the new_carry"):
-                result_init = scan_fct(
+                scan_fct(
                     get_scan_combine_fn("add", False),
                     init,
                     x,
@@ -2048,7 +2047,7 @@ def forward(self, pred_1, x_1):
                 torch._dynamo.exc.Unsupported,
                 "Observed exception.*",
             ):
-                result_init = scan_fct(
+                scan_fct(
                     get_scan_combine_fn("add", False),
                     init,
                     x,
@@ -2078,7 +2077,7 @@ def forward(self, pred_1, x_1):
                 RuntimeError,
                 "The number of leaves of the pytree of the new carry produced by the operator",
             ):
-                result_init = scan_fct(add_one_carry, init, x, dim=dim)
+                scan_fct(add_one_carry, init, x, dim=dim)
 
         else:
             with self.assertRaisesRegex(
@@ -2087,7 +2086,7 @@ def forward(self, pred_1, x_1):
                 torch._dynamo.exc.Unsupported,
                 "Observed exception.*",
             ):
-                result_init = scan_fct(add_one_carry, init, x, dim=dim)
+                scan_fct(add_one_carry, init, x, dim=dim)
 
     @requires_cuda
     @parametrize("reverse", [False, True])
@@ -3080,7 +3079,7 @@ class AssociativeScanTests(TestCase):
         device = torch.device("cuda")
 
         def combine_fn(x, y):
-            cnt = torch.zeros_like(y[0, :])
+            _cnt = torch.zeros_like(y[0, :])
             if loop_type == "while":
 
                 def cond_fn(ind, loop_val):
@@ -3335,7 +3334,7 @@ class AssociativeScanTests(TestCase):
             torch._dynamo.exc.Unsupported,
             "Observed exception.*",
         ):
-            out = associative_scan(
+            associative_scan(
                 get_scan_combine_fn("different_input_size_operator", True),
                 elements,
                 3,
@@ -3353,7 +3352,7 @@ class AssociativeScanTests(TestCase):
             RuntimeError,
             "torch.compile does not support sparse Tensors",
         ):
-            result = associative_scan(
+            associative_scan(
                 get_scan_combine_fn("add", True),
                 x,
                 0,
@@ -3384,7 +3383,7 @@ class AssociativeScanTests(TestCase):
                 torch._dynamo.exc.Unsupported,
                 "Observed exception.*",
             ):
-                result = associative_scan(fct, x, 0)
+                associative_scan(fct, x, 0)
 
     @unittest.skipIf(not SM70OrLater, "triton")
     @requires_cuda
@@ -3408,7 +3407,7 @@ class AssociativeScanTests(TestCase):
             torch._dynamo.exc.Unsupported,
             "Observed exception.*",
         ):
-            result = associative_scan(fct_wrong_pytree, inp, 0, combine_mode="generic")
+            associative_scan(fct_wrong_pytree, inp, 0, combine_mode="generic")
 
     @unittest.skipIf(not SM70OrLater, "triton")
     @requires_cuda
@@ -3419,7 +3418,7 @@ class AssociativeScanTests(TestCase):
             Exception,
             "For combine_mode='pointwise', the combine_fn needs to be pointwise",
         ):
-            out = associative_scan(
+            associative_scan(
                 get_scan_combine_fn("non_pointwise", True),
                 x,
                 0,
@@ -6243,7 +6242,7 @@ class TestHopSchema(TestCase):
             x,
         )
         model = M()
-        ep = torch.export.export(model, args)
+        torch.export.export(model, args)
         graph_str = self._check_export(model, args, None)
         self.assertExpectedInline(
             graph_str,

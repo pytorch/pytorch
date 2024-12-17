@@ -25,7 +25,7 @@ class TestConverter(TestCase):
         init_torchbind_implementations()
 
         @torch._library.register_fake_class("_TorchScriptTesting::_TensorQueue")
-        class FakeTensorQueue:  # noqa: F841
+        class _FakeTensorQueue:
             def __init__(self, queue):
                 self.queue = queue
 

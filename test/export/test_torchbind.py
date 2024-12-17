@@ -1128,12 +1128,12 @@ class TestCompileTorchbind(TestCase):
                 0,
             ).fill_(-1)
         )
-        tq3 = torch.classes._TorchScriptTesting._TensorQueue(  # noqa: F841
+        tq3 = torch.classes._TorchScriptTesting._TensorQueue(
             torch.empty(
                 0,
             ).fill_(-1)
         )
-        tq4 = torch.classes._TorchScriptTesting._TensorQueue(  # noqa: F841
+        tq4 = torch.classes._TorchScriptTesting._TensorQueue(
             torch.empty(
                 0,
             ).fill_(-1)

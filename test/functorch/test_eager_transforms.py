@@ -1,6 +1,4 @@
 # Owner(s): ["module: functorch"]
-# ruff: noqa: F841
-
 # Copyright (c) Facebook, Inc. and its affiliates.
 # All rights reserved.
 #
@@ -1553,7 +1551,7 @@ class TestAutogradFunctionVmapAPI(TestCase):
         B = 2
         x = torch.randn(B, 3)
         with self.assertRaisesRegex(RuntimeError, "to have two returns"):
-            result = vmap(Zeros.apply)(x)
+            vmap(Zeros.apply)(x)
 
         class TwoZeros(torch.autograd.Function):
             @staticmethod
@@ -1594,7 +1592,7 @@ class TestAutogradFunctionVmapAPI(TestCase):
         B = 2
         x = torch.randn(B, 3)
         with self.assertRaisesRegex(RuntimeError, "returned an incompatible"):
-            result = vmap(Zeros.apply)(x)
+            vmap(Zeros.apply)(x)
 
         class Zeros(torch.autograd.Function):
             @staticmethod

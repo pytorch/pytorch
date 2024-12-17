@@ -468,7 +468,7 @@ class TestFP8Lowering(TestCase):
             w_inverse_scale,
             bias,
         )
-        with config.patch({"triton.enable_persistent_tma_matmul": True}):
+        with config.patch({"triton.enable_persistent_tma_matmul": persistent_matmul}):
             linear_compiled = torch.compile(
                 linear, backend="inductor", mode="max-autotune"
             )
@@ -538,7 +538,7 @@ class TestFP8Lowering(TestCase):
             w_inverse_scale,
             bias,
         )
-        with config.patch({"triton.enable_persistent_tma_matmul": True}):
+        with config.patch({"triton.enable_persistent_tma_matmul": persistent_matmul}):
             linear_compiled = torch.compile(
                 linear, backend="inductor", mode="max-autotune"
             )
@@ -596,7 +596,7 @@ class TestFP8Lowering(TestCase):
             w_inverse_scale,
             bias,
         )
-        with config.patch({"triton.enable_persistent_tma_matmul": True}):
+        with config.patch({"triton.enable_persistent_tma_matmul": persistent_matmul}):
             linear_compiled = torch.compile(
                 linear, backend="inductor", mode="max-autotune"
             )
@@ -655,7 +655,7 @@ class TestFP8Lowering(TestCase):
             w_inverse_scale,
             bias,
         )
-        with config.patch({"triton.enable_persistent_tma_matmul": True}):
+        with config.patch({"triton.enable_persistent_tma_matmul": persistent_matmul}):
             linear_compiled = torch.compile(
                 linear, backend="inductor", mode="max-autotune"
             )

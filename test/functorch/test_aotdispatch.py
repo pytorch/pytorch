@@ -1983,8 +1983,6 @@ def forward(self, primals_1):
             out.t_()
             return out
 
-        inp = [torch.ones(2, 4, requires_grad=True)]  # noqa: F841
-
         # TODO: fix this test.
         # See https://github.com/pytorch/pytorch/issues/90507
         # self.verify_aot_autograd(f, inp, test_mutation=True)

@@ -1,5 +1,4 @@
 # Owner(s): ["module: fx"]
-# ruff: noqa: F841
 import operator
 import unittest
 
@@ -1012,7 +1011,7 @@ class HFOperations(unittest.TestCase):
                 size = x.size()
                 getitem = size[-1]
                 view = x.view(-1, getitem)
-                embed_tokens = self.embed_tokens(view)
+                _embed_tokens = self.embed_tokens(view)
                 getitem_1 = size[-1]
                 gt = getitem_1 > 1
                 return gt
@@ -1076,7 +1075,7 @@ class HFOperations(unittest.TestCase):
                 size = x.size()
                 getitem = size[-1]
                 view = x.view(-1, getitem)
-                embed_tokens = self.embed_tokens(view)
+                _embed_tokens = self.embed_tokens(view)
                 getitem_1 = size[-1]
                 lt = getitem_1 < 1
                 return lt
@@ -1666,12 +1665,7 @@ class TestSingleOperation(unittest.TestCase):
     def test_add(self):
         s1, s2, s3, s4 = z3.Ints("s1 s2 s3 s4")
         s11, s22, s33, s44 = z3.Ints("s11 s22 s33 s44")
-        d1, d2, _, d4 = (
-            D(s11, s1),
-            D(s22, s2),
-            D(s33, s3),
-            D(s44, s4),
-        )
+        d1, d2 = D(s11, s1), D(s22, s2)
 
         class BasicBlock(torch.nn.Module):
             def forward(self, x: Dyn, y: Dyn):
@@ -2120,12 +2114,7 @@ class TestSingleOperation(unittest.TestCase):
     def test_reshape_annotated(self):
         s1, s2, s3, s4 = z3.Ints("s1 s2 s3 s4")
         s11, s22, s33, s44 = z3.Ints("s11 s22 s33 s44")
-        d1, d2, _, d4 = (
-            D(s11, s1),
-            D(s22, s2),
-            D(s33, s3),
-            D(s44, s4),
-        )
+        d1, d2 = D(s11, s1), D(s22, s2)
 
         class BasicBlock(torch.nn.Module):
             def forward(self, x: TensorType([Dyn])):

@@ -1,6 +1,4 @@
 # Owner(s): ["module: fx"]
-# ruff: noqa: F841
-
 import copy
 import unittest
 from typing import Optional, Set, Type

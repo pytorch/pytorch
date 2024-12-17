@@ -3643,7 +3643,6 @@ as the input tensor excluding its innermost dimension'):
                 out_dtype = torch.bool  # output of all/any is bool irrespective of input dtype
 
             xb = x.to(dtype)
-            yb = x.to(dtype)  # noqa: F841
 
             # any
             self.assertEqual((2, 0), xb.any(2).shape)

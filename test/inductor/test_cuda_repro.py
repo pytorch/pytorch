@@ -120,7 +120,7 @@ class CudaReproTests(TestCase):
             check_lowp=False,
         )
 
-        @torch._dynamo.optimize()
+        @torch.compile()
         def foo(m, inp):
             return m(inp)
 
@@ -203,7 +203,7 @@ class CudaReproTests(TestCase):
     @config.patch({"triton.cudagraphs": True})
     @dynamo_config.patch(automatic_dynamic_shapes=True)
     def test_expanded_inputs_cudagraphs(self):
-        @torch._dynamo.optimize("inductor")
+        @torch.compile(backend="inductor")
         def fn(x, y):
             return x + y
 
@@ -222,7 +222,7 @@ class CudaReproTests(TestCase):
         for b in [False, True]:
             with config.patch({"triton.cudagraph_trees": b}):
 
-                @torch._dynamo.optimize("inductor")
+                @torch.compile(backend="inductor")
                 def fn(x, y):
                     r = x + y
                     return r, r.size(0)
@@ -267,7 +267,7 @@ class CudaReproTests(TestCase):
 
         cnts = torch._dynamo.testing.CompileCounterWithBackend("inductor")
 
-        f2 = torch._dynamo.optimize(cnts)(f)
+        f2 = torch.compile(f, backend=cnts)
 
         f2(torch.randn(32))
 
@@ -282,7 +282,7 @@ class CudaReproTests(TestCase):
     @config.patch({"triton.cudagraphs": True, "size_asserts": False})
     @dynamo_config.patch(automatic_dynamic_shapes=True)
     def test_expanded_inputs_cudagraphs_no_size_asserts(self):
-        @torch._dynamo.optimize("inductor")
+        @torch.compile(backend="inductor")
         def fn(x, y):
             return x + y
 
@@ -311,7 +311,7 @@ class CudaReproTests(TestCase):
 
         model = Repro().cuda()
         model_ref = deepcopy(model)
-        model_opt = torch._dynamo.optimize("inductor")(model)
+        model_opt = torch.compile(model, backend="inductor")
 
         input = torch.randn(10, 10, device="cuda", requires_grad=True)
 
@@ -334,7 +334,7 @@ class CudaReproTests(TestCase):
             out = x + x
             return out.t()
 
-        foo_opt = torch._dynamo.optimize("inductor")(foo)
+        foo_opt = torch.compile(foo, backend="inductor")
 
         inpt = torch.randn(10, 10, device="cuda", requires_grad=True)
         # TODO: this is broken, fix later
@@ -365,7 +365,7 @@ class CudaReproTests(TestCase):
                 return cross_entropy
 
         mod = Repro().cuda()
-        opt_mod = torch._dynamo.optimize("inductor")(mod)
+        opt_mod = torch.compile(mod, backend="inductor")
         mod.eval()
         opt_mod.eval()
 
@@ -483,7 +483,7 @@ class CudaReproTests(TestCase):
     def test_sort_stride_issue(self):
         # This minified testcase comes from detectron2_maskrcnn_r_50_fpn
         # There was a false error from our size_assert code
-        @torch._dynamo.optimize(nopython=True)
+        @torch.compile(fullgraph=True)
         def forward(pred_objectness_logits_3_: torch.Tensor):
             sort_3 = pred_objectness_logits_3_.sort(descending=True, dim=1)
             getitem_12 = sort_3[0]
@@ -507,7 +507,7 @@ class CudaReproTests(TestCase):
 
         a = torch.randn((8,), dtype=torch.float32, device="cuda")
 
-        fn_optimized = torch._dynamo.optimize("inductor")(fn)
+        fn_optimized = torch.compile(fn, backend="inductor")
         assert same(fn(a), fn_optimized(a))
 
     def test_indirect_indexing_dense_mask(self):
@@ -524,7 +524,7 @@ class CudaReproTests(TestCase):
         a = torch.zeros((1, 128), dtype=torch.int64, device="cuda")
         b = torch.zeros((1, 128), dtype=torch.int64, device="cuda")
 
-        fn_optimized = torch._dynamo.optimize("inductor")(fn)
+        fn_optimized = torch.compile(fn, backend="inductor")
         assert same(fn(a, b), fn_optimized(a, b))
 
     def test_simplify_dims(self):
@@ -553,7 +553,7 @@ class CudaReproTests(TestCase):
         ]
 
         mod = Repro()
-        opt_mod = torch._dynamo.optimize("inductor")(mod)
+        opt_mod = torch.compile(mod, backend="inductor")
 
         ref = mod(*args)
         res = opt_mod(*args)
@@ -659,7 +659,7 @@ class CudaReproTests(TestCase):
                 return self.head(out)
 
         mod = Repro().cuda()
-        opt_mod = torch._dynamo.optimize("inductor", dynamic=True)(mod)
+        opt_mod = torch.compile(mod, backend="inductor", dynamic=True)
         mod.eval()
         opt_mod.eval()
 
@@ -1015,7 +1015,7 @@ class CudaReproTests(TestCase):
         y = torch.zeros((512,), device="cuda", dtype=torch.int64)
         z = torch.ones((512, 512), device="cuda", dtype=torch.bool)
 
-        opt_fn = torch._dynamo.optimize("inductor")(fn)
+        opt_fn = torch.compile(fn, backend="inductor")
 
         ref = fn(x, y, z)
 
@@ -1038,7 +1038,7 @@ class CudaReproTests(TestCase):
             y = torch.zeros((512,), device="cuda", dtype=torch.int64)
             z = torch.ones((512, 512), device="cuda", dtype=torch.bool)
 
-            opt_fn = torch._dynamo.optimize("inductor")(fn)
+            opt_fn = torch.compile(fn, backend="inductor")
 
             ref = fn(x, y, z)
 
@@ -1108,7 +1108,7 @@ class CudaReproTests(TestCase):
         y = torch.zeros((512,), device="cuda", dtype=torch.int64)
         z = torch.ones((512, 512), device="cuda", dtype=torch.int32)
 
-        opt_fn = torch._dynamo.optimize("inductor")(fn)
+        opt_fn = torch.compile(fn, backend="inductor")
 
         ref = fn(x, y, z)
 

@@ -1275,7 +1275,6 @@ class TestOptimRenewed(TestCase):
             torch.randn(2, 3, requires_grad=False, device=device, dtype=dtype)
             for _ in range(2)
         ]
-        [p.detach().clone() for p in params]
 
         def closure():
             return torch.tensor([1], device=device, dtype=dtype)
