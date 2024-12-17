@@ -2105,13 +2105,13 @@ class TestSelectAlgorithmDynamicShapes(_DynamicShapesTestBase):
         self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
         self.assertEqual(counters["inductor"]["cpp_epilogue_fusion_counter"], 1)
 
-
     @patches
     @torch.no_grad
     @unittest.skipIf(not TEST_MKL, "Test requires MKL")
     @dtypes(torch.float, torch.bfloat16)
     def test_bmm_epilogue_dynamic_reshape(self, dtype):
         bs = 5
+
         class M(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -2119,40 +2119,62 @@ class TestSelectAlgorithmDynamicShapes(_DynamicShapesTestBase):
 
             def forward(self, x, w, arg5_1):
                 arg131_1 = x.shape[0]
-                mul_91 = arg131_1*8
-                view_422: "f32[8*s0, 512, 64]" = torch.ops.aten.reshape.default(x, [mul_91, 512, 64])
-                view_423: "f32[8*s0, 64, 512]" = torch.ops.aten.reshape.default(w, [mul_91, 64, 512])
-                bmm_36: "f32[8*s0, 512, 512]" = torch.ops.aten.bmm.default(view_422, view_423);  view_422 = view_423 = None
-                view_424: "f32[s0, 8, 512, 512]" = torch.ops.aten.reshape.default(bmm_36, [arg131_1, 8, 512, 512]);  bmm_36 = None
-                iota_5: "i64[512]" = torch.ops.prims.iota.default(512, start = 0, step = 1, dtype = torch.int64, device = torch.device(type='cpu'), requires_grad = False)
-                unsqueeze_19: "i64[512, 1]" = torch.ops.aten.unsqueeze.default(iota_5, 1)
-                unsqueeze_20: "i64[1, 512]" = torch.ops.aten.unsqueeze.default(iota_5, 0);  iota_5 = None
-                sub_1213: "i64[512, 512]" = torch.ops.aten.sub.Tensor(unsqueeze_20, unsqueeze_19);  unsqueeze_19 = None
-                gt_1: "b8[512, 512]" = torch.ops.aten.gt.Scalar(sub_1213, 0)
-                convert_element_type_7: "i64[512, 512]" = torch.ops.prims.convert_element_type.default(gt_1, torch.int64);  gt_1 = None
-                mul_4531: "i64[512, 512]" = torch.ops.aten.mul.Tensor(convert_element_type_7, 16);  convert_element_type_7 = None
-                add_5084: "i64[512, 512]" = torch.ops.aten.add.Tensor(mul_4531, 0);  mul_4531 = None
-                abs_2: "i64[512, 512]" = torch.ops.aten.abs.default(sub_1213)
-                lt_562: "b8[512, 512]" = torch.ops.aten.lt.Scalar(abs_2, 8)
-                convert_element_type_8: "f32[512, 512]" = torch.ops.prims.convert_element_type.default(abs_2, torch.float32)
-                div_22: "f32[512, 512]" = torch.ops.aten.div.Tensor(convert_element_type_8, 8);  convert_element_type_8 = None
-                log_2: "f32[512, 512]" = torch.ops.aten.log.default(div_22);  div_22 = None
-                div_23: "f32[512, 512]" = torch.ops.aten.div.Tensor(log_2, 2.772588722239781);  log_2 = None
-                mul_4532: "f32[512, 512]" = torch.ops.aten.mul.Tensor(div_23, 8);  div_23 = None
-                convert_element_type_9: "i64[512, 512]" = torch.ops.prims.convert_element_type.default(mul_4532, torch.int64);  mul_4532 = None
-                add_5085: "i64[512, 512]" = torch.ops.aten.add.Tensor(convert_element_type_9, 8);  convert_element_type_9 = None
-                full_default_1: "i64[512, 512]" = torch.ops.aten.full.default([512, 512], 15, dtype = torch.int64, layout = torch.strided, device = torch.device(type='cpu'), pin_memory = False)
-                minimum_3: "i64[512, 512]" = torch.ops.aten.minimum.default(add_5085, full_default_1);  add_5085 = full_default_1 = None
-                where_2: "i64[512, 512]" = torch.ops.aten.where.self(lt_562, abs_2, minimum_3);  lt_562 = abs_2 = minimum_3 = None
-                add_5086: "i64[512, 512]" = torch.ops.aten.add.Tensor(add_5084, where_2);  add_5084 = where_2 = None
-                embedding_5: "f32[512, 512, 8]" = torch.ops.aten.embedding.default(arg5_1, add_5086);  arg5_1 = add_5086 = None
-                permute_196: "f32[8, 512, 512]" = torch.ops.aten.permute.default(embedding_5, [2, 0, 1]);  embedding_5 = None
-                unsqueeze_21: "f32[1, 8, 512, 512]" = torch.ops.aten.unsqueeze.default(permute_196, 0);  permute_196 = None
-                full_default: "f32[s0, 1, 1, 512]" = torch.ops.aten.full.default([arg131_1, 1, 1, 512], -0.0, dtype = torch.float32, layout = torch.strided, device = torch.device(type='cpu'), pin_memory = False)
-                add_5087: "f32[s0, 8, 512, 512]" = torch.ops.aten.add.Tensor(unsqueeze_21, full_default);  unsqueeze_21 = full_default = None
-                add_5103: "f32[s0, 8, 512, 512]" = torch.ops.aten.add.Tensor(view_424, add_5087);  view_424 = None
-                view_425: "f32[8*s0, 512, 512]" = torch.ops.aten.reshape.default(add_5103, [mul_91, 512, 512]);  add_5103 = None
-                view_426: "f32[s0, 8, 512, 512]" = torch.ops.aten.reshape.default(view_425, [arg131_1, 8, 512, 512]);  view_425 = None
+                mul_91 = arg131_1 * 8
+                view_422 = torch.ops.aten.reshape.default(x, [mul_91, 512, 64])
+                view_423 = torch.ops.aten.reshape.default(w, [mul_91, 64, 512])
+                bmm_36 = torch.ops.aten.bmm.default(view_422, view_423)
+                view_424 = torch.ops.aten.reshape.default(
+                    bmm_36, [arg131_1, 8, 512, 512]
+                )
+                iota_5 = torch.ops.prims.iota.default(
+                    512,
+                    start=0,
+                    step=1,
+                    dtype=torch.int64,
+                    device=torch.device(type="cpu"),
+                    requires_grad=False,
+                )
+                unsqueeze_19 = torch.ops.aten.unsqueeze.default(iota_5, 1)
+                unsqueeze_20 = torch.ops.aten.unsqueeze.default(iota_5, 0)
+                sub_1213 = torch.ops.aten.sub.Tensor(unsqueeze_20, unsqueeze_19)
+                gt_1 = torch.ops.aten.gt.Scalar(sub_1213, 0)
+                type_7 = torch.ops.prims.convert_element_type.default(gt_1, torch.int64)
+                mul_4531 = torch.ops.aten.mul.Tensor(type_7, 16)
+                add_5084 = torch.ops.aten.add.Tensor(mul_4531, 0)
+                abs_2 = torch.ops.aten.abs.default(sub_1213)
+                lt_562 = torch.ops.aten.lt.Scalar(abs_2, 8)
+                type_8 = torch.ops.prims.convert_element_type.default(
+                    abs_2, torch.float32
+                )
+                div_22 = torch.ops.aten.div.Tensor(type_8, 8)
+                log_2 = torch.ops.aten.log.default(div_22)
+                div_23 = torch.ops.aten.div.Tensor(log_2, 2.772588722239781)
+                mul_4532 = torch.ops.aten.mul.Tensor(div_23, 8)
+                type_9 = torch.ops.prims.convert_element_type.default(
+                    mul_4532, torch.int64
+                )
+                add_5085 = torch.ops.aten.add.Tensor(type_9, 8)
+                full_default_1 = torch.ops.aten.full.default(
+                    [512, 512], 15, dtype=torch.int64, layout=torch.strided
+                )
+                minimum_3 = torch.ops.aten.minimum.default(add_5085, full_default_1)
+                where_2 = torch.ops.aten.where.self(lt_562, abs_2, minimum_3)
+                add_5086 = torch.ops.aten.add.Tensor(add_5084, where_2)
+                embedding_5 = torch.ops.aten.embedding.default(arg5_1, add_5086)
+                permute_196 = torch.ops.aten.permute.default(embedding_5, [2, 0, 1])
+                unsqueeze_21 = torch.ops.aten.unsqueeze.default(permute_196, 0)
+                full_default = torch.ops.aten.full.default(
+                    [arg131_1, 1, 1, 512],
+                    -0.0,
+                    dtype=torch.float32,
+                    layout=torch.strided,
+                )
+                add_5087 = torch.ops.aten.add.Tensor(unsqueeze_21, full_default)
+                add_5103 = torch.ops.aten.add.Tensor(view_424, add_5087)
+                view_425 = torch.ops.aten.reshape.default(add_5103, [mul_91, 512, 512])
+                view_426 = torch.ops.aten.reshape.default(
+                    view_425, [arg131_1, 8, 512, 512]
+                )
                 return view_426
 
         counters.clear()
@@ -2170,6 +2192,37 @@ class TestSelectAlgorithmDynamicShapes(_DynamicShapesTestBase):
             self.common(mod, (u, v, arg5), atol=atol, rtol=rtol)
         self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
         self.assertEqual(counters["inductor"]["cpp_epilogue_fusion_counter"], 1)
+
+    @patches
+    @torch.no_grad
+    @unittest.skipIf(not TEST_MKL, "Test requires MKL")
+    def test_bmm_dynamic_stride(self):
+        bs = 8
+        Mdim = 512
+        dtype = torch.float
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x, other):
+                return x.reshape(-1, Mdim, Mdim) @ other.reshape(
+                    Mdim, bs * 16, 64
+                ).permute(1, 0, 2)
+
+        counters.clear()
+        u = torch.randn(bs, 16, Mdim, Mdim).to(dtype=dtype)
+        v = torch.randn(1, bs * Mdim, 2 * Mdim).to(dtype=dtype)
+        torch._dynamo.mark_dynamic(u, 0)
+        torch._dynamo.mark_static(u, 1)
+        torch._dynamo.mark_static(u, 2)
+        torch._dynamo.mark_static(u, 3)
+        torch._dynamo.mark_static(v, 1)
+        torch._dynamo.mark_static(v, 3)
+        mod = M().to(dtype=dtype).eval()
+        with verify(dtype) as (atol, rtol):
+            self.common(mod, (u, v), atol=atol, rtol=rtol)
+        self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
 
 
 instantiate_device_type_tests(TestSelectAlgorithm, globals(), only_for="cpu")

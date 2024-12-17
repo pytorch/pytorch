@@ -5,7 +5,6 @@ from unittest.mock import patch
 
 import sympy
 
-from ...fx.experimental.symbolic_shapes import has_free_symbols
 from .. import ir
 from ..select_algorithm import PartialRender
 from ..virtualized import V
@@ -106,7 +105,6 @@ class CppBmmTemplate(CppGemmTemplate):
             should_block_weights=should_block_weights,
             name=name,
         )
-        b = layout.size[0]
         self.b_index = sympy.Symbol("s_b_index", integer=True, nonnegative=True)
 
     @staticmethod
