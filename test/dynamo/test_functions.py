@@ -58,6 +58,10 @@ def constant3(a, b):
     return a - b + (1.0 + 2)
 
 
+def call(f, *args, **kwargs):
+    return f(*args, **kwargs)
+
+
 _variable = 0
 
 
