@@ -95,7 +95,6 @@ static PyObject* THPStream_pynew(
   self->device_index = static_cast<int64_t>(stream_opt->device_index());
   self->device_type = static_cast<int64_t>(stream_opt->device_type());
   self->context = nullptr;
-  std::cout << "alloc stream: " << self->stream_id << std::endl;
 
   return (PyObject*)ptr.release();
   END_HANDLE_TH_ERRORS
@@ -115,17 +114,14 @@ PyObject* THPStream_Wrap(const c10::Stream& stream) {
   self->device_index = static_cast<int64_t>(stream.device_index());
   self->device_type = static_cast<int64_t>(stream.device_type());
   self->context = nullptr;
-  std::cout << "wrap stream: " << self->stream_id << std::endl;
   return ptr.release();
   END_HANDLE_TH_ERRORS
 }
 
 static void THPStream_dealloc(THPStream* self) {
   if (self->context) {
-    std::cout << "dealloc context" << std::endl;
     Py_DECREF(self->context);
   }
-  std::cout << "dealloc stream: " << self->stream_id << std::endl;
   Py_TYPE(self)->tp_free((PyObject*)self);
 }
 
@@ -267,7 +263,6 @@ static PyObject* THPStream_eq(THPStream* self, THPStream* other) {
 
 static PyObject* THPStream_enter(PyObject* _self, PyObject* unused) {
   HANDLE_TH_ERRORS
-  std::cout << "call THPStream_enter" << std::endl;
   auto self = (THPStream*)_self;
   c10::DeviceType stream_device_type =
       static_cast<c10::DeviceType>(self->device_type);
@@ -289,12 +284,12 @@ static PyObject* THPStream_enter(PyObject* _self, PyObject* unused) {
   at::accelerator::setCurrentStream(c10::Stream::unpack3(
       self->stream_id, stream_device_idx, stream_device_type));
   // Save the current device index and previous stream to the context.
-  auto ctx_device_index = THPUtils_packDeviceIndex(cur_device_idx);
-  auto ctx_stream = THPStream_Wrap(cur_stream);
-  PyObject_SetAttrString(_self, "_ctx_device_index", ctx_device_index);
-  PyObject_SetAttrString(_self, "_ctx_stream", ctx_stream);
-  Py_DECREF(ctx_device_index);
-  Py_DECREF(ctx_stream);
+  auto ctx_device_index = py::reinterpret_steal<py::object>(
+      THPUtils_packDeviceIndex(cur_device_idx));
+  auto ctx_stream =
+      py::reinterpret_steal<py::object>(THPStream_Wrap(cur_stream));
+  PyObject_SetAttrString(_self, "_ctx_device_index", ctx_device_index.ptr());
+  PyObject_SetAttrString(_self, "_ctx_stream", ctx_stream.ptr());
   // Support with torch.Stream() as stream: works
   Py_INCREF(_self);
   return _self;
@@ -303,7 +298,6 @@ static PyObject* THPStream_enter(PyObject* _self, PyObject* unused) {
 
 static PyObject* THPStream_exit(PyObject* _self, PyObject* unused) {
   HANDLE_TH_ERRORS
-  std::cout << "call THPStream_exit" << std::endl;
   auto self = (THPStream*)_self;
   // No operation is performed if the stream does not belong to an accelerator.
   if (C10_UNLIKELY(!at::accelerator::isAccelerator(
@@ -325,7 +319,6 @@ static PyObject* THPStream_exit(PyObject* _self, PyObject* unused) {
   }
   Py_DECREF(prev_stream);
   Py_DECREF(ctx_device_index);
-  std::cout << "exit THPStream_exit" << std::endl;
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
@@ -345,7 +338,10 @@ static PyObject* THPStream_getattro(PyObject* _self, PyObject* attr_name) {
   auto attr_name_str = THPUtils_unpackString(attr_name);
   if (attr_name_str == "_ctx_device_index" || attr_name_str == "_ctx_stream") {
     THPStream_maybe_init_context(self);
-    return PyDict_GetItem(self->context, attr_name);
+    // borrowed reference
+    auto value = THPObjectPtr(PyDict_GetItem(self->context, attr_name));
+    Py_INCREF(value.get());
+    return value.release();
   }
   return PyObject_GenericGetAttr(_self, attr_name);
   END_HANDLE_TH_ERRORS
