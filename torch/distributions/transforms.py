@@ -563,6 +563,9 @@ class ExpTransform(Transform):
 
     def log_abs_det_jacobian(self, x, y):
         return x
+    
+    def mean(self, base_mean):
+        return super().mean(base_mean)
 
 
 class PowerTransform(Transform):
