@@ -2009,18 +2009,14 @@ def forward(self, pred_1, x_1):
                 RuntimeError,
                 "All init leaves must be a Tensor",
             ):
-                scan_fct(
-                    get_scan_combine_fn("add", False), init, x, dim=dim
-                )
+                scan_fct(get_scan_combine_fn("add", False), init, x, dim=dim)
         else:
             with self.assertRaisesRegex(
                 # Should be: RuntimeError, "Init leaves must be a Tensor"
                 torch._dynamo.exc.Unsupported,
                 "Observed exception.*",
             ):
-                scan_fct(
-                    get_scan_combine_fn("add", False), init, x, dim=dim
-                )
+                scan_fct(get_scan_combine_fn("add", False), init, x, dim=dim)
 
     @requires_cuda
     @parametrize("compile_mode", ["none", "eager"])
