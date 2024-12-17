@@ -1282,6 +1282,7 @@ class GuardBuilder(GuardBuilderBase):
         guard_body, pycode = build_guard_function(code_parts, make_guard_fn_args)
         out: Dict[str, Any] = {}
         globals_for_guard_fn = {"G": self.scope["G"]}
+        guards_log.debug("Python shape guard function:\n%s", pycode)
         exec(pycode, globals_for_guard_fn, out)
         guard_fn = out["___make_guard_fn"](*closure_vars.values())
         if is_epilogue:
@@ -1300,8 +1301,10 @@ class GuardBuilder(GuardBuilderBase):
     # to this frame!)  Instead, you should be reading out some property
     # (like its type) which is what you permanently install into the
     # guard code.
-    def get(self, name: str) -> Any:
-        return eval(name, self.scope, _get_closure_vars())
+    def get(self, name: str, closure_vars: Optional[Dict[str, Any]] = None) -> Any:
+        if closure_vars is None:
+            closure_vars = _get_closure_vars()
+        return eval(name, self.scope, closure_vars)
 
     # Registers the usage of the source name referenced by the
     # string (or stored in the Guard) as being guarded upon.  It's important
@@ -1961,7 +1964,10 @@ class GuardBuilder(GuardBuilderBase):
                 if isinstance(source, ConstantSource):
                     python_fallback = True
                 else:
-                    example_value = self.get(source.name())
+                    example_value = self.get(
+                        source.name(),
+                        closure_vars={**SYMPY_INTERP, **_get_closure_vars()},
+                    )
                     if isinstance(example_value, int):
                         int_source_to_symbol.append((source, symbol))
                     elif isinstance(example_value, float):
@@ -2005,6 +2011,11 @@ class GuardBuilder(GuardBuilderBase):
                       return ({") && (".join(code_parts)});
                     }}
                     """
+                    )
+                    guards_log.debug(
+                        "C++ shape guard function: %s %s",
+                        func_str,
+                        verbose_code_parts.exprs,
                     )
                     clib = CppCodeCache.load(func_str)
                     cguard = ctypes.cast(clib.guard, ctypes.c_void_p).value
