@@ -71,6 +71,8 @@ from torch.testing._internal.common_utils import (
     TEST_TRANSFORMERS,
     TestCase as TorchTestCase,
 )
+from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
+from torch.testing._internal.triton_utils import requires_gpu
 from torch.utils._pytree import (
     LeafSpec,
     tree_flatten,
@@ -81,6 +83,12 @@ from torch.utils._pytree import (
     treespec_loads,
 )
 
+
+if HAS_GPU:
+    import triton
+    import triton.language as tl
+
+    from torch._library import capture_triton
 
 try:
     from torchrec.sparse.jagged_tensor import KeyedJaggedTensor
@@ -631,6 +639,137 @@ graph():
         self.assertEqual(gm(*args), m(*args))
         args = (torch.randn(15, 3, 256, 256), torch.ones(15, 32, 256, 256))
         self.assertEqual(gm(*args), m(*args))
+
+    @requires_gpu
+    def test_export_custom_triton_kernel(self):
+        @triton.jit
+        def add_kernel(
+            in_ptr0,
+            in_ptr1,
+            out_ptr,
+            n_elements,
+            BLOCK_SIZE: "tl.constexpr",
+        ):
+            pid = tl.program_id(axis=0)
+            block_start = pid * BLOCK_SIZE
+            offsets = block_start + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            x = tl.load(in_ptr0 + offsets, mask=mask)
+            y = tl.load(in_ptr1 + offsets, mask=mask)
+            output = x + y
+            tl.store(out_ptr + offsets, output, mask=mask)
+
+        @torch.library.triton_op("mylib::add", mutates_args=())
+        def custom_add(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+            output = torch.empty_like(x)
+            n_elements = output.numel()
+
+            def grid(meta):
+                return (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
+
+            capture_triton(add_kernel)[grid](x, y, output, n_elements, 16)
+            return output
+
+        class M(torch.nn.Module):
+            def forward(self, x, y):
+                return custom_add(x, y)
+
+        args = (
+            torch.randn(3, device=GPU_TYPE),
+            torch.randn(3, device=GPU_TYPE),
+        )
+        max_len = 128
+        dynamic_shapes = {
+            "x": {0: Dim("dim0_x", max=max_len)},
+            "y": {0: Dim("dim0_y", max=max_len)},
+        }
+        m = M()
+        ep = export(m, args, dynamic_shapes=dynamic_shapes)
+
+        FileCheck().check_count("torch.ops.mylib.add", 1, exactly=True).run(
+            ep.graph_module.code
+        )
+        ep_decomposed = ep.run_decompositions()
+        FileCheck().check_count("torch.ops.mylib.add", 1, exactly=True).run(
+            ep_decomposed.graph_module.code
+        )
+        exp_out = m(*args)
+        self.assertEqual(exp_out, ep.module()(*args))
+
+    @requires_gpu
+    def test_export_custom_triton_kernel_mutable(self):
+        @triton.jit
+        def add_kernel(
+            in_ptr0,
+            in_ptr1,
+            out_ptr,
+            n_elements,
+            BLOCK_SIZE: "tl.constexpr",
+        ):
+            pid = tl.program_id(axis=0)
+            block_start = pid * BLOCK_SIZE
+            offsets = block_start + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            x = tl.load(in_ptr0 + offsets, mask=mask)
+            y = tl.load(in_ptr1 + offsets, mask=mask)
+            output = x + y
+            tl.store(out_ptr + offsets, output, mask=mask)
+
+        @torch.library.triton_op("mylib::add", mutates_args={"output"})
+        def custom_add_out(
+            x: torch.Tensor, y: torch.Tensor, output: torch.Tensor
+        ) -> torch.Tensor:
+            n_elements = output.numel()
+
+            def grid(meta):
+                return (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
+
+            capture_triton(add_kernel)[grid](x, y, output, n_elements, 16)
+            return output.clone()
+
+        class M(torch.nn.Module):
+            def forward(self, x, y, out):
+                return custom_add_out(x, y, out)
+
+        args = (
+            torch.randn(3, device=GPU_TYPE),
+            torch.randn(3, device=GPU_TYPE),
+            torch.zeros(3, device=GPU_TYPE),
+        )
+        custom_add_out(*args)
+        max_len = 128
+        dynamic_shapes = {
+            "x": {0: Dim("dim0_x", max=max_len)},
+            "y": {0: Dim("dim0_y", max=max_len)},
+            "out": {0: Dim("dim0_z", max=max_len)},
+        }
+
+        m = M()
+        ep = export(m, args, dynamic_shapes=dynamic_shapes)
+
+        FileCheck().check_count("torch.ops.mylib.add", 1, exactly=True).run(
+            ep.graph_module.code
+        )
+        ep_decomposed = ep.run_decompositions()
+        FileCheck().check_count(
+            "torch.ops.higher_order.auto_functionalized", 1, exactly=True
+        ).run(ep_decomposed.graph_module.code)
+
+        x, y, out = (
+            torch.randn(3, device=GPU_TYPE),
+            torch.randn(3, device=GPU_TYPE),
+            torch.zeros(3, device=GPU_TYPE),
+        )
+        exp_out = m(x, y, out)
+        out_copy = out.clone()
+        out_copy2 = out.clone()
+        out_copy3 = out.clone()
+        self.assertEqual(exp_out, ep.module()(x, y, out_copy))
+        # For non-functional graph module, out_copy is mutated
+        self.assertEqual(out, out_copy)
+        self.assertEqual(exp_out, ep_decomposed.module()(x, y, out_copy2))
+        # For non-functional graph module, out_copy is not mutated
+        self.assertEqual(out_copy2, out_copy3)
 
     def test_masked_select_dynamic(self):
         class M(torch.nn.Module):
