@@ -12,6 +12,7 @@ need to make use of these APIs to setup dynamic shapes support appropriately.
 import abc
 import atexit
 import collections
+import dis
 import functools
 import inspect
 import itertools
@@ -27,6 +28,7 @@ from collections import defaultdict
 from contextlib import _GeneratorContextManager, contextmanager
 from dataclasses import dataclass, field
 from enum import Enum
+from types import FrameType
 from typing import (
     Any,
     Callable,
@@ -5725,6 +5727,7 @@ class ShapeEnv:
     ) -> GuardOnDataDependentSymNode:
         # TODO: in a Dynamo context, having user code, and having the
         # name of the local, will be much better
+        self._log_frame_locals(_find_user_code_frame())
         size_like_symbols = []
         for s in expr.free_symbols:
             stacktrace = "".join(self.var_to_stack[s].format())
@@ -6244,6 +6247,73 @@ class ShapeEnv:
         sloc, _ = self._get_stack_summary(framework_loc=framework_loc)
         return sloc
 
+    def _log_frame_locals(self, f: Optional[FrameType]):
+        if f is None:
+            return
+
+        # find bytecode instructions relevant to the frame
+        instructions = list(dis.Bytecode(f.f_code))
+        start, end, cur = None, None, None
+        for i, instr in enumerate(instructions):
+            if instr.starts_line is not None:
+                cur = instr.starts_line
+            if cur != f.f_lineno:
+                continue
+            if start is None:
+                start = end = i
+            else:
+                end = i
+
+        # track values of involved locals
+        last_lineno = f.f_lineno
+        locals_ = {}
+        for instr in instructions[start : end + 1]:
+            if (lineno := instr.starts_line) is not None:
+                last_lineno = max(last_lineno, lineno)
+                if (
+                    isinstance(instr.argval, str)
+                    and instr.argval in f.f_locals
+                ):
+                    locals_[instr.argval] = f.f_locals[instr.argval]
+
+        # track free symbols & print locals
+        free_symbols = set()
+        def go(x):
+            if isinstance(x, torch.Tensor):
+                for y in x.size():
+                    go(y)
+                for y in x.stride():
+                    go(y)
+                go(x.storage_offset())
+                return f"Tensor(shape: {x.size()}," \
+                    f"stride: {x.stride()}, " \
+                    f"storage_offset: {x.storage_offset()})"
+            elif isinstance(x, (SymBool, SymInt, SymFloat)):
+                free_symbols.update(x.node.expr.free_symbols)
+                return x
+            return None
+
+        locals_repr = {
+            name: pytree.tree_map(go, val)
+            for name, val in locals_.items()
+        }
+        if free_symbols:  # log is only interesting if symbols are found
+            co_lines, offset = inspect.getsourcelines(f.f_code)
+            # user code
+            self.log.info(f"{f.f_code.co_filename}({f.f_lineno}){f.f_code.co_name}()")
+            self.log.info("".join(co_lines[f.f_lineno - offset : last_lineno + 1 - offset]))
+            # local values
+            self.log.info("Values during FakeTensor propagation:")
+            for k, v in locals_repr.items():
+                if pytree.tree_all(lambda x: x is None, v):
+                    continue  # ignore locals without symbols
+                self.log.info(f"{k}: {v}")
+            # symbols
+            self.log.info("\nSymbols:")
+            for symbol in free_symbols:
+                if symbol in self.var_to_sources:
+                    self.log.info(f"{symbol}: {self.var_to_sources[symbol][0].name()}")
+
     def _log_guard(self, prefix: str, g: SympyBoolean, forcing_spec: bool) -> None:
         dtrace_structured(
             "guard_added",
@@ -6291,6 +6361,7 @@ class ShapeEnv:
                 maybe_extra_debug,
                 stack_info=is_debug,
             )
+            self._log_frame_locals(_find_user_code_frame())
 
     @lru_cache(256)
     @record_shapeenv_event(save_tracked_fakes=True)
@@ -6529,6 +6600,8 @@ class ShapeEnv:
                 return concrete_val
 
             if not self._suppress_guards_tls():
+                self._log_guard("eval", g, forcing_spec=forcing_spec)
+
                 if isinstance(g, sympy.Rel):
                     # TODO: If we successfully eliminate a symbol via equality, it
                     # is not actually necessary to save a guard for the equality,
@@ -6551,6 +6624,8 @@ class ShapeEnv:
                     # the _maybe_guard_rel() call above will set replacements if possible,
                     # and so the result here will be statically known
                     self.defer_runtime_assert(g, f"evaluate_expr: {orig_expr}")
+            else:
+                self._log_guard("eval [guard suppressed]", g, forcing_spec=forcing_spec)
 
         except Exception:
             if fresh:
@@ -6559,8 +6634,6 @@ class ShapeEnv:
         else:
             if not self._suppress_guards_tls():
                 if guard is not None:  # we might have deferred this to runtime assert
-                    self._log_guard("eval", g, forcing_spec=forcing_spec)
-
                     for s in g.free_symbols:
                         self.symbol_guard_counter[s] += 1
                         # Forcing_spec to avoid infinite recursion
@@ -6577,8 +6650,6 @@ class ShapeEnv:
                                 s,
                             )
                             self.evaluate_expr(s, forcing_spec=True)
-            else:
-                self._log_guard("eval [guard suppressed]", g, forcing_spec=forcing_spec)
 
         return concrete_val
 
@@ -6644,6 +6715,7 @@ class ShapeEnv:
                 self._add_fx_node_metadata(node)
 
         if not self._suppress_guards_tls():
+            self._log_guard("runtime_assert", orig_expr, forcing_spec=False)
             # If you're here because of this assert, read Note [Backwards runtime asserts]
             # in torch/_inductor/graph.py
             if self.runtime_asserts_frozen:
@@ -6670,7 +6742,6 @@ class ShapeEnv:
             self.axioms.update(dict(self.get_implications(self.simplify(expr))))
             self.num_deferred_runtime_asserts += 1
             self._update_version_counter()
-            self._log_guard("runtime_assert", orig_expr, forcing_spec=False)
         else:
             self._log_guard(
                 "runtime_assert [guard suppressed]", orig_expr, forcing_spec=False
