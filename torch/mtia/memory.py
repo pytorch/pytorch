@@ -10,6 +10,11 @@ from . import _device_t, is_initialized
 from ._utils import _get_device_index
 
 
+def empty_cache() -> None:
+    r"""Empty the MTIA device cache."""
+    return torch._C._mtia_emptyCache()
+
+
 def memory_stats(device: Optional[_device_t] = None) -> Dict[str, Any]:
     r"""Return a dictionary of MTIA memory allocator statistics for a given device.
 
@@ -36,6 +41,7 @@ def max_memory_allocated(device: Optional[_device_t] = None) -> int:
 
 
 __all__ = [
+    "empty_cache",
     "memory_stats",
     "max_memory_allocated",
 ]
