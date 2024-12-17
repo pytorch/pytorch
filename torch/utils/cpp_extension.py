@@ -206,7 +206,7 @@ def _join_rocm_home(*paths) -> str:
 
 @functools.lru_cache(maxsize=1)
 def is_level_zero_installed():
-    lib_path = find_library("ze_loader")  # No need to include 'lib' prefix or '.so'
+    lib_path = find_library("ze_loader")
     return True if lib_path else False
 
 def _join_sycl_home(*paths) -> str:
