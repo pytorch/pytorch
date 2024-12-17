@@ -731,11 +731,6 @@ class TritonBenchmarkRequest(BenchmarkRequest):
         mod = PyCodeCache.load_by_key_path(self.module_cache_key, self.module_path)
         getattr(mod, self.kernel_name).precompile()
 
-    # def get_mod(self):
-    #     return PyCodeCache.load_by_key_path(self.module_cache_key, self.module_path)
-    #     mod = PyCodeCache.load_by_key_path(self.module_cache_key, self.module_path)
-    #     getattr(mod, self.kernel_name).precompile()
-
     def __str__(self) -> str:
         return f"{self.kernel_name=}, {self.module_path=}, {self.module_cache_key=}"
 
