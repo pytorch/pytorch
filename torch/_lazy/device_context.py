@@ -1,5 +1,6 @@
+# mypy: allow-untyped-defs
 import threading
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 
 import torch._C._lazy
 
@@ -8,11 +9,11 @@ class DeviceContext:
     _CONTEXTS: Dict[str, Any] = {}
     _CONTEXTS_LOCK = threading.Lock()
 
-    def __init__(self, device: str) -> None:
+    def __init__(self, device):
         self.device = device
 
 
-def get_device_context(device: Optional[str] = None) -> DeviceContext:
+def get_device_context(device=None):
     if device is None:
         device = torch._C._lazy._get_default_device_type()
     else:
