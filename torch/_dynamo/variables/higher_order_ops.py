@@ -2272,7 +2272,7 @@ class FlexAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
         args: "List[VariableTracker]",
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
-        from torch._higher_order_ops.flex_attention import _permute_strides
+        from torch._higher_order_ops.flex_attention import flex_attention_fake_impl
 
         from .builder import wrap_fx_proxy
 
@@ -2313,15 +2313,7 @@ class FlexAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
         query_meta = query.as_proxy().node.meta["example_value"]
         value_meta = value.as_proxy().node.meta["example_value"]
         with torch._guards.TracingContext.try_get().fake_mode:
-            v_head_dim = value_meta.size(-1)
-            batch_size, num_heads, seq_len_q, _q_head_dim = query_meta.shape
-            lse_meta = query_meta.new_empty(
-                batch_size, num_heads, seq_len_q, dtype=torch.float32
-            )
-            out_shape = (batch_size, num_heads, seq_len_q, v_head_dim)
-            out = query_meta.new_empty(out_shape)
-            out_meta = _permute_strides(out, query_meta.stride())
-            # TODO: Figure out a better way to handle this for NJT than using sum()
+            out_meta, lse_meta = flex_attention_fake_impl(query_meta, value_meta)
         example_value = (out_meta, lse_meta)
 
         # Compose the ordered HOO args:
