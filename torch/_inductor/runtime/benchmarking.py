@@ -32,7 +32,7 @@ def time_and_count(
         counters["inductor"][f"benchmarking.{fn_qual_name}"] += 1
         with dynamo_timed(fn_qual_name, log_pt2_compile_event=True):
             return fn(self, *args, **kwargs)
-    
+
     return wrapper
 
 
