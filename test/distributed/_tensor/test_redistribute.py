@@ -309,7 +309,7 @@ class RedistributeTest(DTensorTestBase):
         shard_tensor = distribute_tensor(local_tensor, device_mesh, shard_spec)
         self.assertEqual(shard_tensor.placements[0].dim, 1)
         reshard_tensor = shard_tensor.redistribute(device_mesh, shard_minus_spec)
-        self.assertEqual(shard_tensor.placements[0].dim, 1)
+        self.assertEqual(reshard_tensor.placements[0].dim, 1)
 
     @with_comms
     def test_redistribute_uneven_sharding(self):

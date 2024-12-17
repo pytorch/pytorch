@@ -37,7 +37,7 @@ def _rename_dynamic_shapes_with_model_inputs(
 ) -> dict[str, Any] | tuple[Any] | list[Any]:
     """
 
-    This function renames the dynamic_shapes with the paramters of the model, since
+    This function renames the dynamic_shapes with the parameters of the model, since
     torch.export.export requires the dynamic_shapes to be named with the model's input names.
 
     NOTE: If the model input is nested, this function does nothing, and the users are responsible
