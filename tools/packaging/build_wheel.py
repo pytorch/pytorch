@@ -1,0 +1,134 @@
+#!/usr/bin/env python
+
+import contextlib
+import os
+import logging
+import sys
+import subprocess
+import argparse
+import tempfile
+
+from collections.abc import Iterator
+from pathlib import Path
+from typing import List
+
+
+logging.basicConfig(
+    level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
+)
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.DEBUG)
+
+ROOT_PATH = Path(__file__).absolute().parents[2]
+SETUP_PY_PATH = ROOT_PATH / "setup.py"
+REQUIREMENTS_PATH = ROOT_PATH / "requirements.txt"
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "-p",
+        "--python",
+        action="append",
+        type=str,
+        help=(
+            "Python interpreters to build packages for, can be set multiple times,"
+            " should ideally be full paths, (default: %(default)s)"
+        ),
+    )
+    parser.add_argument(
+        "-d",
+        "--destination",
+        default="dist/",
+        type=str,
+        help=("Destination to put the compailed binaries" ""),
+    )
+    return parser.parse_args()
+
+
+def run_cmd(
+    cmd: List[str], capture_output: bool = False
+) -> subprocess.CompletedProcess:
+    logger.debug("Running command: %s", " ".join(cmd))
+    return subprocess.run(
+        cmd,
+        # Give the parent environment to the subprocess
+        env={**os.environ},
+        capture_output=capture_output,
+        text=True if capture_output else False,
+        check=True,
+    )
+
+
+def interpreter_version(interpreter: str) -> str:
+    version_string = run_cmd(
+        [interpreter, "--version"], capture_output=True
+    ).stdout.strip()
+    return version_string.split(" ")[1]
+
+
+@contextlib.contextmanager
+def venv(interpreter: str) -> Iterator[str]:
+    # Should this use EnvBuilder? Probably, maybe a good todo in the future
+    try:
+        python_version = interpreter_version(interpreter)
+        with tempfile.TemporaryDirectory(
+            suffix=f"_pytorch_builder_{python_version}"
+        ) as tmp_dir:
+            logger.info(
+                "Creating virtual environment (Python %s) at %s",
+                python_version,
+                tmp_dir,
+            )
+            run_cmd([interpreter, "-m", "venv", tmp_dir])
+            yield str(Path(tmp_dir) / "bin" / "python3")
+    finally:
+        pass
+
+
+class Builder:
+    # The python interpeter that we should be using
+    interpreter: str
+
+    def __init__(self, interpreter: str) -> None:
+        self.interpreter = interpreter
+
+    def setup_py(self, cmd_args: List[str]) -> bool:
+        return (
+            run_cmd([self.interpreter, str(SETUP_PY_PATH), *cmd_args]).returncode == 0
+        )
+
+    def bdist_wheel(self, destination: str) -> bool:
+        logger.info("Running bdist_wheel -d %s", destination)
+        return self.setup_py(["bdist_wheel", "-d", destination])
+
+    def clean(self) -> bool:
+        logger.info("Running clean")
+        return self.setup_py(["clean"])
+
+    def install_requirements(self) -> None:
+        logger.info("Installing requirements")
+        run_cmd(
+            [self.interpreter, "-m", "pip", "install", "-r", str(REQUIREMENTS_PATH)]
+        )
+
+
+def main():
+    args = parse_args()
+    pythons = args.python or [sys.executable]
+    needs_clean = False
+
+    for interpreter in pythons:
+        with venv(interpreter) as venv_interpreter:
+            builder = Builder(venv_interpreter)
+            # clean actually requires setuptools so we need to ensure we
+            # install requriements before
+            builder.install_requirements()
+            if needs_clean:
+                builder.clean()
+            builder.bdist_wheel(args.destination)
+            needs_clean = True
+
+
+if __name__ == "__main__":
+    main()
