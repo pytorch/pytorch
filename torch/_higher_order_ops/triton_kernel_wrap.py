@@ -1210,7 +1210,7 @@ class TritonHOPifier:
                 )
             iter_kernel = iter_kernel.fn
         # These are the default values in upstream Triton
-        # see: https://github.com/triton-lang/triton/blob/e57b46897191b3b3061c78d0d60e58e94be565b6/python/triton/runtime/autotuner.py#L84 # noqa: E501,B950
+        # see: https://github.com/triton-lang/triton/blob/e57b46897191b3b3061c78d0d60e58e94be565b6/python/triton/runtime/autotuner.py # noqa: E501,B950
         default_perf_model = None
         default_early_config_prune = None
 

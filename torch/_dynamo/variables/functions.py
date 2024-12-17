@@ -1085,7 +1085,7 @@ class DynamoTritonHOPifier(TritonHOPifier):
         from .builder import VariableBuilder
 
         # Reimplement autotuner.prune_configs(...) here
-        # see: https://github.com/triton-lang/triton/blob/e57b46897191b3b3061c78d0d60e58e94be565b6/python/triton/runtime/autotuner.py#L214   # noqa: E501,B950
+        # see: https://github.com/triton-lang/triton/blob/e57b46897191b3b3061c78d0d60e58e94be565b6/python/triton/runtime/autotuner.py   # noqa: E501,B950
         # We do this to avoid calling prune_configs, which in turn calls early_config_prune and perf_model
         # These are both user-defined functions which can contain side effects, so we want to sandbox them in Dynamo
 
@@ -1113,7 +1113,7 @@ class DynamoTritonHOPifier(TritonHOPifier):
                     config: self.call_user_defined_fn(
                         autotuner.kernel.perf_model,
                         [],
-                        # see: https://github.com/triton-lang/triton/blob/d7ebf7982adedb61095b93084dcbcaf1d28c8da4/python/triton/runtime/autotuner.py#L225   # noqa: E501,B950
+                        # see: https://github.com/triton-lang/triton/blob/d7ebf7982adedb61095b93084dcbcaf1d28c8da4/python/triton/runtime/autotuner.py   # noqa: E501,B950
                         {**named_args, **kwargs, **config.all_kwargs()},
                         tx,
                     )
