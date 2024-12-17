@@ -908,15 +908,11 @@ class TestConvolutionNN(NNTestCase):
         weight = torch.randn((8, 4, 3, 3), dtype=torch.float16, device="cuda").to(
             memory_format=torch.channels_last
         )
-        torch.convolution(
-            input, weight, None, (1, 1), (1, 1), (1, 1), False, (0, 0), 4
-        )
+        torch.convolution(input, weight, None, (1, 1), (1, 1), (1, 1), False, (0, 0), 4)
         input = torch.randn((16, 8, 8, 8), dtype=torch.float16, device="cuda").to(
             memory_format=torch.channels_last
         )
-        torch.convolution(
-            input, weight, None, (1, 1), (1, 1), (1, 1), True, (0, 0), 4
-        )
+        torch.convolution(input, weight, None, (1, 1), (1, 1), (1, 1), True, (0, 0), 4)
 
     @unittest.expectedFailure
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
