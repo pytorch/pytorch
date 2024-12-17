@@ -421,7 +421,8 @@ def generate_wheels_matrix(
                         "use_split_build": "True" if use_split_build else "False",
                         "devtoolset": (
                             "cxx11-abi"
-                            if os == "linux"
+                            if (arch_version in ["cpu-cxx11-abi", "cpu-aarch64"])
+                            or os == "linux"
                             else ""
                         ),
                         "container_image": WHEEL_CONTAINER_IMAGES[arch_version],
