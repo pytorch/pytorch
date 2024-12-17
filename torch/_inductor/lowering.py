@@ -19,6 +19,7 @@ import torch
 import torch.ao.quantization.fx._decomposed
 import torch.fx
 import torch.utils._pytree as pytree
+from torch._dynamo.utils import counters
 from torch._higher_order_ops.associative_scan import associative_scan_op
 from torch._higher_order_ops.triton_kernel_wrap import triton_kernel_wrapper_mutation
 from torch._prims_common import (
@@ -3955,11 +3956,98 @@ def rev(x, dims):
     )
 
 
+def inplace_constant_pad_nd(
+    x: TensorBox, padding: Sequence[int], fill_value: float
+) -> Optional[TensorBox]:
+    """
+    This optimization changes the semantics of padding from 'clone'
+    style to 'view' style.
+
+    Thanks to functionalization, this change can still maintain numerical
+    correctness.
+    """
+
+    def _padding_can_be_fused():
+        """
+        Conservatively check if padding can be fused with downstream op.
+        1. if the downstream op is a sum, then there is little benefit to
+           do inplace padding
+        2. if the downstream op is a matmul, doing inplace padding can
+           save membw.
+        """
+        current_node = V.graph.current_node
+        if current_node is None:
+            return True  # be conservative
+        users = tuple(current_node.users)
+        if len(users) == 1 and users[0].target in (
+            aten.mm.default,
+            aten.addmm.default,
+        ):
+            return False
+
+        return True  # be conservative
+
+    if _padding_can_be_fused():
+        return None
+
+    # Only handle 2D case for now
+    if len(padding) != 4 or len(x.get_size()) != 2:
+        return None
+
+    # No harm to realize since we already know that
+    # the op can not be fused into the single user.
+    # It need to be realized later anyways.
+    x.realize()
+
+    # If x is a view (e.g. a SliceView), realizing it just realizing the
+    # underlying storage. x itself is still a view.
+    if not ir.is_storage_and_layout(x):
+        return None
+    x.freeze_layout()
+
+    _, layout = ir.as_storage_and_layout(x)
+    strides = layout.stride
+    if strides[1] != 1:
+        return None
+
+    if padding[0] != 0 or padding[2] != 0 or padding[3] != 0:
+        return None
+
+    npad = padding[1]
+    if npad == 0:
+        return None
+
+    stride0 = strides[0]
+    rowsize = layout.size[1]
+
+    if stride0 < rowsize + npad:
+        return None
+
+    resized_x = as_strided(
+        x,
+        [layout.size[0], layout.size[1] + npad],
+        layout.stride,
+        layout.offset,
+    )
+
+    sliced_x = slice_(resized_x, dim=1, start=rowsize, end=rowsize + npad)
+    fill_(sliced_x, fill_value)
+
+    counters["inductor"]["inplace_padding"] += 1
+    return resized_x
+
+
 @register_lowering(aten.constant_pad_nd, type_promotion_kind=None)
 def constant_pad_nd(x, padding, fill_value=0):
     assert (len(padding) % 2) == 0
     if all(p == 0 for p in padding):
         return clone(x)
+
+    if config.inplace_padding:
+        out = inplace_constant_pad_nd(x, padding, fill_value)
+        if out:
+            return out
+            # fall through if can not inplace the padding
 
     sizes = x.get_size()
 

@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 from typing import Any
 
 import torch
@@ -21,6 +22,6 @@ def _get_debug_info() -> dict[str, str]: ...
 def backward(
     context_id: int,
     roots: list[torch.Tensor],
-    retain_graph: bool = False,
+    retain_graph=False,
 ) -> None: ...
 def get_gradients(context_id: int) -> dict[torch.Tensor, torch.Tensor]: ...
