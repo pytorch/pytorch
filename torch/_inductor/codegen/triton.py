@@ -3758,9 +3758,10 @@ class TritonScheduling(SIMDScheduling):
         return kernel_name
 
     def benchmark_fused_nodes(self, nodes, n_spills_threshold=8):
-        with preserve_rng_state(), get_interface_for_device(V.graph.device_type).device(  # type: ignore[attr-defined]
+        device_interface = get_interface_for_device(V.graph.device_type)
+        with preserve_rng_state(), device_interface.device(
             V.graph.get_current_device_or_throw()
-        ):
+        ):  # type: ignore[attr-defined]
             src_code = self.generate_kernel_code_from_nodes(
                 nodes, benchmark_kernel=True
             )

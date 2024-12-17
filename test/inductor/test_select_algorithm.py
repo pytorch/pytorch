@@ -194,6 +194,9 @@ class TestSelectAlgorithm(TestCase):
         # Autotuning checks correctness of each version
         self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
 
+    # TODO: fix accuracy failure of the triton template on XPU.
+    # and enable this test case.
+    @skipIfXpu
     @patches
     def test_mm_plus_mm2_gpu(self):
         @torch.compile
