@@ -178,13 +178,22 @@ def _resize_output_check(out: TensorLikeType, shape: ShapeType):
 # TODO: handle tuples of tensors
 def _maybe_resize_out(
     out: TensorLikeType,
-    shape: ShapeType,
+    result: TensorLikeType,
     memory_format: Optional[torch.memory_format] = None,
 ):
+    # out.shape.numel() == 0 means there is a specific empty tensor for out,
+    # it may come from some specific ops, like conj_physical, it needs two
+    # operands, so it may allocate an empty tensor as out in some case, we
+    # have to keep the stride of out align with result.
+    is_empty = False
+    if out.shape.numel() == 0 and out.stride() != result.stride():
+        is_empty = True
+    shape = result.shape
     if _resize_output_check(out, shape):
-        return out.resize_(shape, memory_format=memory_format)
-    else:
-        return out
+        out = out.resize_(shape, memory_format=memory_format)
+    if is_empty:
+        out.as_strided_(size=result.shape, stride=result.stride())
+    return out
 
 
 def is_cpu_scalar(x: TensorLikeType) -> bool:
@@ -314,20 +323,10 @@ def out_wrapper(
                 # harmless.
                 if is_tensor:
                     assert isinstance(out, TensorLike)
-                    # out.shape.numel() == 0 means there is a specific empty tensor for out,
-                    # it may come from some specific ops, like conj_physical, it needs two
-                    # operands, so it may allocate an empty tensor as out in some case, we
-                    # have to keep the stride of out align with result.
-                    is_empty = False
-                    if out.shape.numel() == 0 and out.stride() != result.stride():
-                        is_empty = True
-
                     # These two operations are done in-place
                     _maybe_resize_out(
-                        out, result.shape, maybe_compute_memory_format(result)  # type: ignore[union-attr]
+                        out, result, maybe_compute_memory_format(result)  # type: ignore[union-attr]
                     )
-                    if is_empty:
-                        out.as_strided_(size=result.shape, stride=result.stride())
                     _safe_copy_out(copy_from=result, copy_to=out, exact_dtype=exact_dtype)  # type: ignore[arg-type]
                 else:
                     assert isinstance(out, Tuple)  # type: ignore[arg-type]
@@ -337,7 +336,7 @@ def out_wrapper(
                     )
                     for r, o in zip(result, out):  # type: ignore[arg-type]
                         # These two operations are done in-place
-                        _maybe_resize_out(o, r.shape, maybe_compute_memory_format(r))
+                        _maybe_resize_out(o, r, maybe_compute_memory_format(r))
                         _safe_copy_out(copy_from=r, copy_to=o, exact_dtype=exact_dtype)  # type: ignore[arg-type]
             else:
                 out = result

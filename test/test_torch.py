@@ -9119,8 +9119,8 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
 
     def test_conj_physical_meta_stride(self):
         a = torch.zeros((5, 3, 6), dtype=torch.complex128, device='meta')
-        b = torch.fft_c2c.default(a, [1], 1, True)
-        c = torch.conj_physical.default(b)
+        b = torch._fft_c2c(a, [1], 1, True)
+        c = torch.conj_physical(b)
         self.assertEqual(b.stride(), c.stride())
 
     # Tests to make sure we still handle .data properly until it is removed
