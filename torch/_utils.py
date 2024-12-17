@@ -726,9 +726,9 @@ class ExceptionWrapper:
             raise self.exc_type(message=msg)
         try:
             exception = self.exc_type(msg)
-        except TypeError:
-            # If the exception takes multiple arguments, don't try to
-            # instantiate since we don't know how to
+        except Exception:
+            # If the exception takes multiple arguments or otherwise can't
+            # be constructed, don't try to instantiate since we don't know how to
             raise RuntimeError(msg) from None
         raise exception
 
@@ -754,6 +754,8 @@ def _get_device_attr(get_member):
     device_type = _get_available_device_type()
     if device_type and device_type.lower() == "cuda":
         return get_member(torch.cuda)
+    if device_type and device_type.lower() == "mps":
+        return get_member(torch.mps)
     if device_type and device_type.lower() == "xpu":
         return get_member(torch.xpu)  # type: ignore[attr-defined]
     if device_type and device_type.lower() == "mtia":
@@ -1004,7 +1006,7 @@ class CallbackRegistry(Generic[P]):
         for cb in self.callback_list:
             try:
                 cb(*args, **kwargs)
-            except Exception as e:
+            except Exception:
                 logger.exception(
                     "Exception in callback for %s registered with gpu trace", self.name
                 )

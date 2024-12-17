@@ -117,8 +117,8 @@ class OpTestResultInfo:
 
 @dataclass
 class TestSet:
-    name: str = (None,)
-    skips_and_xfails: List[SampleRule] = (None,)
+    name: str = None
+    skips_and_xfails: List[SampleRule] = None
     needs_requires_grad: bool = False
 
     def __post_init__(self):
@@ -161,17 +161,28 @@ def write_header(f):
 <style>
 table {
   border-collapse: collapse;
-  width: 100%;
+  width: 98%;
   color: #333;
   font-family: Arial, sans-serif;
   font-size: 14px;
   text-align: left;
   border-radius: 10px;
-  overflow: hidden;
   box-shadow: 0 0 20px rgba(0, 0, 0, 0.1);
   margin: auto;
   margin-top: 50px;
   margin-bottom: 50px;
+}
+body: {
+  background-color: #fdfdfd;
+}
+thead, tbody: {
+  display: block;
+}
+table thead {
+  position: sticky;
+  top: 0;
+  background-color: #232a25;
+  border-radius: 10px;
 }
 table th {
   background-color: #232a25;
@@ -180,8 +191,15 @@ table th {
   padding: 10px;
   text-transform: uppercase;
   letter-spacing: 1px;
-  border-top: 1px solid #fff;
   border-bottom: 1px solid #ccc;
+}
+table th:first-child {
+  border-radius: 10px 0 0 0;
+  box-shadow: 0 -2.1rem 0 .6rem #fdfdfd
+}
+table th:last-child {
+  border-radius: 0 10px 0 0;
+  box-shadow: 1rem -2.1rem 0 .6rem #fdfdfd
 }
 table td {
   background-color: #ddd;
@@ -193,10 +211,21 @@ table td {
 table tr td:last-child {
   border-right: 0px solid #333
 }
+table tr:last-child td {
+  border-bottom: 0px solid #333
+}
+table tr:last-child td:first-child {
+  border-radius: 0 0 0 10px;
+}
+table tr:last-child td:last-child {
+  border-radius: 0 0 10px 0;
+}
 </style>
 </head>
 <body>
 <table>
+<thead>
+<tr>
 <th>Op Name</th>
 """
     )
@@ -205,16 +234,23 @@ table tr td:last-child {
         for test_set in TEST_SETS:
             f.write(
                 f"""
-<th>Success rate ({test_set.name}, {"contiguous" if contiguous else "non-contiguous"})</th>
+<th>{test_set.name} ({"contiguous" if contiguous else "non-contiguous"})</th>
 """
             )
 
-    f.write("</tr>")
+    f.write(
+        """
+</tr>
+</thead>
+<tbody>
+"""
+    )
 
 
 def write_footer(f):
     f.write(
         """
+</tbody>
 </table>
 </body>
 </html>
@@ -238,7 +274,7 @@ def success_colors(success_rate):
 
 
 def write_table_row(f, op, result):
-    table_row = f"<td>{op.full_name}</td>"
+    table_row = f"<tr><td>{op.full_name}</td>"
     for contiguous in [True, False]:
         for test_set in TEST_SETS:
             success_rate = None
@@ -267,7 +303,7 @@ def write_table_row(f, op, result):
             style = f'style="color: {fgcolor}; background-color: {bgcolor}"'
             table_row += f'<td {style}">{success_rate_text}</td>\n'
 
-    table_row += "<tr>"
+    table_row += "</tr>"
     f.write(table_row)
 
 
