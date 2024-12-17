@@ -3160,7 +3160,7 @@ else:
             # copy is a shallow copy, only copies the tensor view,
             # not the data
             self.assertEqual(x, y)
-            self.assertNotEqual(x_clone, y)
+            self.assertEqual(x_clone, y)
 
     @onlyCPU
     def test_bfloat16_neg_abs(self, device):

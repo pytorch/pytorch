@@ -15,7 +15,6 @@
 #include <ATen/ExpandUtils.h>
 #include <ATen/LegacyVmapMode.h>
 #include <ATen/LinalgBackend.h>
-
 #include <ATen/Parallel.h>
 #include <ATen/Utils.h>
 #include <ATen/core/Vitals.h>
@@ -109,7 +108,6 @@
 #include <sstream>
 
 #ifdef USE_CUDA
-#include <ATen/ROCmFABackend.h>
 #include <ATen/cuda/CUDAConfig.h>
 #include <ATen/native/transformers/cuda/sdp_utils.h>
 #ifdef __HIP_PLATFORM_AMD__
@@ -2178,18 +2176,6 @@ Call this whenever a new thread is created in order to propagate values from
   });
   py_module.def("_get_blas_preferred_backend", []() {
     return at::globalContext().blasPreferredBackend();
-  });
-
-  py::enum_<at::ROCmFABackend>(py_module, "_ROCmFABackend")
-      .value("Default", at::ROCmFABackend::Default)
-      .value("AOTriton", at::ROCmFABackend::AOTriton)
-      .value("Ck", at::ROCmFABackend::Ck);
-
-  py_module.def("_set_rocm_fa_preferred_backend", [](at::ROCmFABackend b) {
-    at::globalContext().setROCmFAPreferredBackend(b);
-  });
-  py_module.def("_get_rocm_fa_preferred_backend", []() {
-    return at::globalContext().getROCmFAPreferredBackend();
   });
 
   py_module.def(

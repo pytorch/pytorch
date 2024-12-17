@@ -865,6 +865,32 @@ class CPUReproTests(TestCase):
                     self.common(fn, (_x,))
                     check_metrics_vec_kernel_count(1)
 
+    @config.patch(fallback_random=True)
+    def test_require_stride_order_non_owning(self):
+        def test_concat_with_conv():
+            x1 = torch.randn(2, 3, 4, 4).to(memory_format=torch.channels_last)
+            x2 = torch.randn(2, 5, 4, 4).to(memory_format=torch.channels_last)
+
+            # First do the concatenation
+            cat_result = torch.cat([x1, x2], dim=1)
+
+            # Then use x1 (which was an input to the cat) in a conv
+            conv_weight = torch.randn(4, 3, 3, 3).to(memory_format=torch.channels_last)
+            x1_conv = torch.nn.functional.conv2d(x1, conv_weight, padding=1)
+
+            return cat_result, x1_conv
+
+        torch.manual_seed(1)
+        f_c = torch.compile(test_concat_with_conv)
+        out_result, code = run_and_get_cpp_code(f_c)
+
+        torch.manual_seed(1)
+        self.assertEqual(out_result, test_concat_with_conv())
+
+        # both inputs to conv should be channels last
+        FileCheck().check("empty_strided_cpu((4, 3, 3, 3), (27, 1, 9, 3)").run(code)
+        FileCheck().check("(2, 3, 4, 4), (128, 1, 32, 8)").run(code)
+
     @config.patch(implicit_fallbacks=True)
     def test_repeat_interleave(self):
         def fn(y):
