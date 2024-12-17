@@ -131,6 +131,11 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
   if (!ParameterClass)
     return nullptr;
 
+  py::class_<at::TensorGeometry>(m, "TensorGeometry")
+      .def("sizes", &at::TensorGeometry::sizes)
+      .def("strides", &at::TensorGeometry::strides)
+      .def("storage_offset", &at::TensorGeometry::storage_offset);
+
   py::class_<LegacyEvent>(m, "ProfilerEvent")
       .def("kind", &LegacyEvent::kindStr)
       .def("name", [](const LegacyEvent& e) { return e.name(); })

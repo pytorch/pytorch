@@ -337,29 +337,29 @@ class AutogradCompilerInstance:
             self.bind_tensors_to_proxies(grad_ins, proxies)
         return tuple(grad_ins)
 
-    # Guess what the outputs should be from the InputMetadata.
-    # This is not sound in general (we guess contiguous strides
-    # and no Tensor subclass-ness); we will stop guessing
-    # the output metadata in a follow-up.
-    def guess_output(self, input_metadata):
-        if input_metadata is None:
-            return None
-        tensoroptions, shape, _ = input_metadata
-        kwargs = {}
-        names = [
-            "requires_grad",
-            "memory_format",
-            "device",
-            "dtype",
-            "layout",
-            "pinned_memory",
-        ]
-        for name, option in zip(names, tensoroptions):
-            if option is not None:
-                kwargs[name] = option
+    def call_copy_slices_prologue(self, inputs, base, view):
+        args = (
+            inputs,
+            base.sizes(),
+            base.strides(),
+            base.storage_offset(),
+            view.sizes(),
+            view.strides(),
+            view.storage_offset(),
+        )
+        return self.proxy_call(copy_slices_prologue, args, [None] * 3)
 
+    def call_copy_slices_epilogue(self, needs_input_grad, result, res, grad_slice):
+        return self.proxy_call(
+            copy_slices_epilogue,
+            (needs_input_grad, result, res, grad_slice),
+            [None] * len(needs_input_grad),
+        )
+
+    def allocate_dummy(self):
         with disable_proxy_modes_tracing():
-            return torch.ops.aten.zeros(shape, **kwargs)
+            # Weird quantity so it's easy to grep
+            return torch.zeros([0, 123456789])
 
     def bind_function(self, fn_name, fn, is_custom_function):
         """Binds ops.fn_name = fn"""
@@ -377,7 +377,7 @@ class AutogradCompilerInstance:
         proxy_out = self.fx_tracer.create_proxy(
             "call_function", fn, args=proxy_args, kwargs={}
         )
-        result = [self.guess_output(metadata) for metadata in output_metadata]
+        result = [self.allocate_dummy() for _ in output_metadata]
         self.bind_tensors_to_proxies(result, [proxy_out[i] for i in range(len(result))])
         return result
 
@@ -389,12 +389,18 @@ class AutogradCompilerInstance:
             "call_function", op, args=proxy_args, kwargs={}
         )
         assert len(output_metadata) == len(outputs)
-        outputs = [
-            None if output is None or metadata is None else self.guess_output(metadata)
-            for output, metadata in zip(outputs, output_metadata)
-        ]
         self.bind_tensors_to_proxies(outputs, new_proxy_outputs)
         return outputs
+
+    def accumulate(self, old_var, new_var):
+        old_var_proxy = self.to_proxy(old_var)
+        new_var_proxy = self.to_proxy(new_var)
+        proxy_out = self.fx_tracer.create_proxy(
+            "call_function", torch.add, args=(old_var_proxy, new_var_proxy), kwargs={}
+        )
+        result = self.allocate_dummy()
+        self.bind_tensors_to_proxies([result], [proxy_out])
+        return result
 
     def proxy_call_hook(self, hook, *args, **kwargs):
         return self.fx_tracer.create_proxy(
@@ -560,10 +566,18 @@ class AutogradCompilerInstance:
             (self.fx_tracer.create_arg(self.to_proxy(outputs)),),
             {},
         )
+
+        # We traced using dummy tensors. Delete all the metadata of the dummy tensors.
+        # It's probably better to refactor this class to use a different tracer
+        # than the make_fx tracer, but that is a larger change.
+        for node in self.fx_tracer.graph.nodes:
+            if "tensor_meta" in node.meta:
+                del node.meta["tensor_meta"]
+
         runtime_inputs_to_move: List[int] = []
         if snapshot_cudagraph_enabled():
             runtime_inputs_to_move = self.move_graph_nodes_to_cuda(self.fx_tracer.graph)
-        # TODO(rzou): the guessed metadata is incorrect, we will remove it at the end of the PR stack.
+
         self.rename_aot_dispatcher_nodes()
         self.reorder_tensor_pre_hook_nodes()
         self.reorder_pre_hook_nodes_to_schedule_asap()
@@ -1080,3 +1094,39 @@ def reset() -> None:
     torch._C._dynamo.compiled_autograd.clear_cache()
     global COMPILE_COUNTER
     COMPILE_COUNTER = itertools.count()
+
+
+# Reimplementation of part of CopySlices::apply in Python.
+# The shared code is really similar so we're not going to try to deduplicate.
+def copy_slices_prologue(
+    inputs,
+    base_sizes,
+    base_strides,
+    base_storage_offset,
+    view_sizes,
+    view_strides,
+    view_storage_offset,
+):
+    grad = inputs[0]
+    result = grad.new_empty_strided(base_sizes, base_strides)
+    assert grad is not None
+    result.copy_(grad)
+    offset = view_storage_offset - base_storage_offset
+    grad_slice = result.as_strided(view_sizes, view_strides, offset)
+    return [result, grad_slice, grad_slice.clone(memory_format=torch.contiguous_format)]
+
+
+# Reimplementation of part of CopySlices::apply in Python.
+# The shared code is really similar so we're not going to try to deduplicate.
+def copy_slices_epilogue(needs_input_grad, result, res, grad_slice):
+    grad_inputs = [None] * len(needs_input_grad)
+    for i in range(len(needs_input_grad)):
+        if needs_input_grad[i]:
+            if res[i] is None:
+                continue
+            if i == 0:
+                grad_slice.copy_(res[i])
+                grad_inputs[i] = result
+            else:
+                grad_inputs[i] = res[i]
+    return grad_inputs
