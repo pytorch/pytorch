@@ -1,5 +1,5 @@
 from types import TracebackType
-from typing import Union
+from typing import Optional, Type, Union
 
 import torch
 
@@ -20,9 +20,9 @@ class _InsertPoint:
 
     def __exit__(
         self,
-        exc_type: type[BaseException] | None,
-        exc_val: BaseException | None,
-        exc_tb: TracebackType | None,
+        exc_type: Optional[Type[BaseException]],
+        exc_val: Optional[BaseException],
+        exc_tb: Optional[TracebackType],
     ) -> None:
         self.g.setInsertPoint(self.prev_insert_point)
 
