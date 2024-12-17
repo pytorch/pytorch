@@ -48,9 +48,9 @@ __global__ void upsample_nearest2d_out_frame(
     const size_t width2,
     float height_scale,
     float width_scale) {
-  size_t nc_iter = ((size_t) threadIdx.z) + blockIdx.z * blockDim.z;
+  size_t nc_iter = threadIdx.z + blockIdx.z * blockDim.z;
   int64_t w2 = ((int64_t) threadIdx.x) + blockIdx.x * blockDim.x;
-  int64_t h2 = ((int64_t) threadIdx.y) + blockIdx.y * blockDim.y;
+  int64_t h2 = threadIdx.y + blockIdx.y * blockDim.y;
 
   if (w2 >= width2 || h2 >= height2) {
     return;
