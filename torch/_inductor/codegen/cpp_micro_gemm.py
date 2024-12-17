@@ -803,7 +803,7 @@ class CppMicroBrgemm(CppMicroGemm):
 #include <ATen/native/CPUBlas.h>
 {{declare_kernel}} {
     at::native::cpublas::brgemm(
-      M, N, K,
+      M, N, K, int64_t(1),
       lda, ldb, ldc,
       accum,
       A,
