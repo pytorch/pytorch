@@ -422,16 +422,6 @@ class CompileEventLogger:
             chromium_log.add_instant_event(event_name, time.time_ns(), **metadata)
 
 
-    @staticmethod
-    def increment(event_name: str, event_data: str):
-        chromium_log = get_chromium_event_logger()
-
-        if log_level == CompileEventLogLevel.CHROMIUM:
-            event_data = chromium_log.get_event_data("event_name")
-
-
-
-
     # Helper functions that are syntactic sugar
 
     @staticmethod
