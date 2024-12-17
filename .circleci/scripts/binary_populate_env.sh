@@ -66,7 +66,7 @@ fi
 if [[ "$(uname)" == 'Darwin' ]] || [[ "$PACKAGE_TYPE" == conda ]]; then
   export PYTORCH_BUILD_VERSION="${BASE_BUILD_VERSION}"
 else
-  export PYTORCH_BUILD_VERSION="${BASE_BUILD_VERSION}+$DESIRED_CUDA"
+  export PYTORCH_BUILD_VERSION="${BASE_BUILD_VERSION}+poolside$DESIRED_CUDA"
 fi
 
 export PYTORCH_BUILD_NUMBER=1
