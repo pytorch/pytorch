@@ -57,7 +57,7 @@ class CppTemplateKernel(CppKernel):
         *all_buffers: Iterable[ir.Buffer],
         extra_sizevars: Optional[List[sympy.Expr]] = None,
     ) -> None:
-        unique_sizevars = OrderedSet()
+        unique_sizevars: OrderedSet[sympy.Expr] = OrderedSet()
         for buffers in all_buffers:
             unique_sizevars.update(
                 s
@@ -100,7 +100,9 @@ class CppTemplateKernel(CppKernel):
                 if orig in self.args.output_buffers:
                     self.args.output_buffers[alias] = self.args.output_buffers[orig]
 
-        self.set_sizevars_with_buffers(inputs.values(), outputs.values(), extra_sizevars=extra_sizevars)
+        self.set_sizevars_with_buffers(
+            inputs.values(), outputs.values(), extra_sizevars=extra_sizevars
+        )
 
         def hook():
             # remove all aliases before generate function definition
