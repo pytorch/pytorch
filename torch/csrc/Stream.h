@@ -10,6 +10,8 @@ struct THPStream {
   int64_t stream_id;
   int64_t device_type;
   int64_t device_index;
+  // Used to switch stream context management, initialized lazily.
+  PyObject* context;
 };
 extern TORCH_API PyTypeObject* THPStreamClass;
 

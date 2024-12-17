@@ -72,12 +72,15 @@ class LSTMCell(torch.nn.Module):
             self.hgates = torch.nn.ModuleDict()
             self.gates = torch.nn.ModuleDict()
             for g in ["input", "forget", "cell", "output"]:
+                # pyre-fixme[29]: `Union[torch._tensor.Tensor, torch.nn.modules.module.Module]`
                 self.igates[g] = torch.nn.Linear(
                     input_dim, hidden_dim, bias=bias, **factory_kwargs
                 )
+                # pyre-fixme[29]: `Union[torch._tensor.Tensor, torch.nn.modules.module.Module]`
                 self.hgates[g] = torch.nn.Linear(
                     hidden_dim, hidden_dim, bias=bias, **factory_kwargs
                 )
+                # pyre-fixme[29]: `Union[torch._tensor.Tensor, torch.nn.modules.module.Module]`
                 self.gates[g] = torch.ao.nn.quantized.FloatFunctional()
 
         self.input_gate = torch.nn.Sigmoid()
@@ -106,7 +109,7 @@ class LSTMCell(torch.nn.Module):
         if not self.split_gates:
             igates = self.igates(x)
             hgates = self.hgates(hx)
-            gates = self.gates.add(igates, hgates)
+            gates = self.gates.add(igates, hgates)  # type: ignore[operator]
 
             input_gate, forget_gate, cell_gate, out_gate = gates.chunk(4, 1)
 
@@ -118,7 +121,9 @@ class LSTMCell(torch.nn.Module):
             # apply each input + hidden projection and add together
             gate = {}
             for (key, gates), igates, hgates in zip(
-                self.gates.items(), self.igates.values(), self.hgates.values()
+                self.gates.items(),  # type: ignore[operator]
+                self.igates.values(),  # type: ignore[operator]
+                self.hgates.values(),  # type: ignore[operator]
             ):
                 gate[key] = gates.add(igates(x), hgates(hx))
 
@@ -185,11 +190,11 @@ class LSTMCell(torch.nn.Module):
         else:
             # split weight/bias
             for w, b, gates in zip([wi, wh], [bi, bh], [cell.igates, cell.hgates]):
-                for w_chunk, gate in zip(w.chunk(4, dim=0), gates.values()):
+                for w_chunk, gate in zip(w.chunk(4, dim=0), gates.values()):  # type: ignore[operator]
                     gate.weight = torch.nn.Parameter(w_chunk)
 
                 if b is not None:
-                    for b_chunk, gate in zip(b.chunk(4, dim=0), gates.values()):
+                    for b_chunk, gate in zip(b.chunk(4, dim=0), gates.values()):  # type: ignore[operator]
                         gate.bias = torch.nn.Parameter(b_chunk)
 
         return cell
@@ -442,7 +447,6 @@ class LSTM(torch.nn.Module):
         self.dropout = float(dropout)
         self.bidirectional = bidirectional
         self.training = False  # Default to eval mode. If we want to train, we will explicitly set to training.
-        num_directions = 2 if bidirectional else 1
 
         if (
             not isinstance(dropout, numbers.Number)
@@ -489,7 +493,7 @@ class LSTM(torch.nn.Module):
                 split_gates=split_gates,
                 **factory_kwargs,
             )
-            for layer in range(1, num_layers)
+            for _ in range(1, num_layers)
         )
         self.layers = torch.nn.ModuleList(layers)
 
