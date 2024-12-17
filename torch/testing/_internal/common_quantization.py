@@ -471,12 +471,10 @@ def _group_quantize_tensor(w, n_bit=4, q_group_size=16):
     scales = (max_val - min_val).clamp(min=1e-6) / max_int
     assert torch.isnan(scales).sum() == 0
 
-    zeros = min_int - min_val.div(scales).round()
-    zeros = torch.clamp(zeros, min_int, max_int)
-    zeros = zeros.to(torch.int8)
+    zeros = min_val + scales * (2 ** (n_bit - 1))
     assert torch.isnan(zeros).sum() == 0
 
-    out = to_quant.div(scales).add(zeros).round().clamp_(min_int, max_int)
+    out = to_quant.sub(min_val).div(scales).round().clamp_(min_int, max_int)
     assert torch.isnan(out).sum() == 0
 
     out = out.to(dtype=torch.int32).reshape(w.shape)

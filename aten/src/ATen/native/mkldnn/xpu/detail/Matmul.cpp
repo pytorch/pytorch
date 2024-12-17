@@ -208,14 +208,14 @@ sycl::event matmul(
   m2_usr_md = dnnl::memory::desc(m2_dims, m2_usr_dt, m2_strides);
   dst_usr_md = dnnl::memory::desc(dst_dims, dst_usr_dt, dst_strides);
 
-  auto expected_m1_md = matmul_pd.src_desc();
-  auto expected_m2_md = matmul_pd.weights_desc();
-  auto expected_dst_md = matmul_pd.dst_desc();
-
   // STEP4: create memory
   auto m1_usr_m = make_onednn_memory(m1_usr_md, engine, m1.data_ptr());
   auto m2_usr_m = make_onednn_memory(m2_usr_md, engine, m2.data_ptr());
   auto dst_usr_m = make_onednn_memory(dst_usr_md, engine, dst.data_ptr());
+
+  auto expected_m1_md = matmul_pd.src_desc();
+  auto expected_m2_md = matmul_pd.weights_desc();
+  auto expected_dst_md = matmul_pd.dst_desc();
 
   dnnl::memory m1_m = m1_usr_m, m2_m = m2_usr_m, dst_m = dst_usr_m;
   at::Tensor m1_, m2_, dst_;

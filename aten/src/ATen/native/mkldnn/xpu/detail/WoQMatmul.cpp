@@ -10,18 +10,18 @@
 namespace at::native::onednn {
 
 sycl::event woq_matmul_int4(
-    Tensor& result, //torchao: [M, K]
-    const Tensor& mat1_, //torchao: [M, K]
-    const Tensor& mat2_, //torchao quantized weight, [K/8, N]
-    const Tensor& scale, //torchao: [K/group_size, N]
-    const Tensor& zp, //torchao: [K/group_size, N]
+    Tensor& result, //torchao: [M, K], dtype: fp16
+    const Tensor& mat1_, //torchao: [M, K], dtype: fp16
+    const Tensor& mat2_, //torchao quantized weight, [K/8, N], dtype: uint4x8
+    const Tensor& scale, //torchao: [K/group_size, N], dtype: fp16
+    const Tensor& zp, //torchao: [K/group_size, N], dtype: int8
     int64_t group_size,
     Attr attr,
     const std::vector<sycl::event>& deps) {
   size_t dims = result.dim();
   TORCH_CHECK(
-      dims == 2 || dims == 3,
-      "oneDNN matmul only works with 2D or 3D, got ",
+      dims == 2,
+      "INT4 matmul at XPU only works with 2D input, got ",
       dims);
   TORCH_CHECK(result.defined(), "oneDNN matmul result should be defined");
 
@@ -37,9 +37,8 @@ sycl::event woq_matmul_int4(
   Tensor zp_ = is_onednn_matmul_strides(zp) ? zp : zp.contiguous();
   Tensor dst = is_onednn_matmul_strides(result, true) ? result : result.contiguous();
   int m = m1.size(-2); // M
-  int n = dst.size(-1);  //m2.size(0) * kNTileSize; 
+  int n = dst.size(-1);  // m2.size(0) * kNTileSize;
   int k = m1.size(-1); // K1
-  int64_t mb = 1;
 
   // Construct usr md from input
   // xxx_usr_md would describe the real layout of inputs
@@ -54,15 +53,15 @@ sycl::event woq_matmul_int4(
   dnnl::memory::dims m1_usr_strides, m2_usr_strides, scale_usr_strides, zp_usr_strides, dst_usr_strides;
   const uint64_t compressed_k = (uint64_t)(k / 8);
   const uint64_t compressed_n = (uint64_t)(n / 8);
-  const uint64_t num_groups = (uint64_t)(k / group_size); 
-    //wei: {compressed_k, n}:   shape:{n/8, 32, xxx , innerKTiles/2}
+  const uint64_t num_groups = (uint64_t)(k / group_size);
+  //wei: {compressed_k, n}:
   m1_usr_dims = {m, k};
   m1_usr_strides = {m1.stride(0), m1.stride(1)};
   // m2_usr_dims = {compressed_k, n};
   m2_usr_dims = {compressed_k, n};
   m2_usr_strides = {1, compressed_k}; // k dim contiguous, 4bit pack into s32
-  scale_usr_dims = {num_groups, n}; 
-  scale_usr_strides = {scale_.stride(1), scale_.stride(0)};//why? 
+  scale_usr_dims = {num_groups, n};
+  scale_usr_strides = {scale_.stride(1), scale_.stride(0)};
   zp_usr_dims = {num_groups, n};
   zp_usr_strides = {zp.stride(0), zp.stride(1)};
   dst_usr_dims = {m, n};
@@ -83,11 +82,11 @@ sycl::event woq_matmul_int4(
 
   // Construct md for primitive creation
   // The xxx_md describes what kinds of matmul the oneDNN does.
-  // The problem for this op is [m, k] x [k, n] => [m, n] matmul.  
+  // The problem for this op is [m, k] x [k, n] => [m, n] matmul.
   auto m1_dt = m1_usr_dt; //bf16
   // Tell oneDNN the weight dtype we want manipulate is u4,
   // library needs infer how to unpack u4 data based on the m2_usr_md (s32).
-  auto m2_dt = dnnl::memory::data_type::u4; 
+  auto m2_dt = dnnl::memory::data_type::u4;
   auto scale_dt = scale_usr_dt; //bf16
   // Tell oneDNN the zp dtype we want manipulate is s8
   // library needs infer how to unpack s8 data based on the m2_usr_md.
@@ -100,10 +99,10 @@ sycl::event woq_matmul_int4(
 
   m1_dims = m1_usr_dims; // {m, k}
   m1_strides = m1_usr_strides; // {k, 1}
-  m2_dims = {k, n}; 
+  m2_dims = {k, n};
   m2_strides = {n, 1};
   scale_dims = scale_usr_dims; // {k//group_size, n}
-  scale_strides = scale_usr_strides; 
+  scale_strides = scale_usr_strides;
   // zp_dims = {1};
   zp_dims ={num_groups, n};
   // zp_strides = {1};
@@ -125,7 +124,7 @@ sycl::event woq_matmul_int4(
 
   auto m1_usr_m = make_onednn_memory(m1_usr_md, engine, m1.data_ptr());
   auto m2_usr_m = make_onednn_memory(m2_usr_md, engine, m2.data_ptr());
-  
+
   void* handle_b = m2_usr_m.get_data_handle();
   // reinterpret m2_usr_memory as u4
   dnnl::memory m2_u4_m(

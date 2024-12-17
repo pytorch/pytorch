@@ -542,23 +542,18 @@ Tensor _weight_int4pack_mm_xpu(
       || qGroupSize == 256,
       __func__, ": expect qGroupSize to be 32, 64, 128 or 256, got ", qGroupSize);
 
-  TORCH_CHECK(qScale.dim() == 2 && qScale.size(1) == N, 
+  TORCH_CHECK(qScale.dim() == 2 && qScale.size(1) == N,
       __func__, ": expect qScale to be 2d tensor with sizes [:, ", N, "]");
     TORCH_CHECK(qZeros.dim() == 2 && qZeros.size(1) == N,
       __func__, ": expect qZeros to be 2d tensor with sizes [:, ", N, "]");
-  
+
   auto C = at::empty({M, N}, A.options());
-  
-  //qScaleAndZeros [K/qGroupSize, N, 2]
+
   //qscale:[K/qGroupSize, N]
   //qzp:[K/qGroupSize, N]
-  // auto qscale = qScaleAndZeros.select(2, 0).contiguous();
-  // auto qzp = qScaleAndZeros.select(2, 1).contiguous().to(kChar);
-  std::cout<<"At "<<__FILE__<<" Line:"<<__LINE__<<std::endl;
   woq_matmul_int4(C, A, B, qScale, qZeros, qGroupSize, onednn::Attr());
 
   return C;
 }
-
 
 } // namespace at::native
