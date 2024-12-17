@@ -10,6 +10,7 @@ import logging
 import math
 import operator
 import os
+import re
 import sys
 import textwrap
 import time
@@ -74,6 +75,7 @@ from .utils import (
     sympy_dot,
     sympy_index_symbol,
     sympy_product,
+    triton_type,
     triton_type_to_torch,
     unique,
 )
@@ -332,6 +334,8 @@ class TritonTemplateKernel(TritonKernel):
 
         # input buffers which we are fusing into
         self.prologue_fused_inputs: OrderedSet[str] = OrderedSet()
+        # input buffers which we are fusing into, which preserve a zero mask
+        self.prologue_fused_inputs_preserve_zero: OrderedSet[str] = OrderedSet()
 
         # The following attributes are all used for triton kernel codegen.
         # They are swapped onto the TritonTemplateKernel object by
@@ -711,9 +715,12 @@ class TritonTemplateKernel(TritonKernel):
             )
             contiguous_index = self.rename_indexing(contiguous_index)
             self.body.writeline("xindex = " + texpr(contiguous_index))
-            self.range_trees[0].lookup(
+
+            xindex_range_root = self.range_trees[0].lookup(
                 sympy.Integer(1), sympy_product(lengths)
-            ).set_name("xindex")
+            )
+            xindex_range_root.set_name("xindex")
+            xindex_expr = xindex_range_root.expr
 
             # Note - ["None" override_mask]
             # MM Templates work by taking out of bounds index values and wrapping them around to 0
@@ -746,14 +753,20 @@ class TritonTemplateKernel(TritonKernel):
                         # We load masked out values with 0, then apply a prologue.
                         # The masked out values may not necessariliy be 0 any more
                         # so we need to reapply the mask.
-                        # TODO: do analysis with value ranges if the prologue is 0 preserving, such as
-                        # type casting or multiplication, and omit reapplication of mask.
-                        if template_mask == "None":
-                            V.kernel.compute.writeline(f"{output_name} = {value}")
-                        else:
-                            V.kernel.compute.writeline(
-                                f"{output_name} = tl.where({template_mask}, {value}, {other})"
+                        value_dtype = value.dtype
+                        value_str = str(value)
+                        if template_mask != "None" and (
+                            name not in V.kernel.prologue_fused_inputs_preserve_zero
+                            or other != 0
+                        ):
+                            value_str = (
+                                f"tl.where({template_mask}, {value_str}, {other})"
                             )
+
+                        if value_dtype != V.graph.get_buffer(name).dtype:
+                            value_str = f"{value_str}.to({triton_type(V.graph.get_buffer(name).dtype)})"
+
+                        V.kernel.compute.writeline(f"{output_name} = {value_str}")
 
             self.ops_handler = StoreOutputSubstitution
 
@@ -1632,6 +1645,25 @@ class AlgorithmSelectorCache(PersistentCache):
         # TODO(nmacchioni): remove once CI tests are fixed
         choices = [choice for choice in choices if choice is not None]
 
+        if config.test_configs.autotune_choice_name_regex is not None:
+            choices = [
+                c
+                for c in choices
+                if re.search(
+                    config.test_configs.autotune_choice_name_regex,
+                    c.name,
+                )
+            ]
+        if config.test_configs.autotune_choice_desc_regex is not None:
+            choices = [
+                c
+                for c in choices
+                if re.search(
+                    config.test_configs.autotune_choice_desc_regex,
+                    c.description,
+                )
+            ]
+
         if mm_file_name := get_mm_log_filename():
             M, K = input_nodes[-2].get_size()[:2]
             N = input_nodes[-1].get_size()[-1]
@@ -1834,20 +1866,14 @@ class AlgorithmSelectorCache(PersistentCache):
 
                 return timings
 
-            # Assume the same base template, with same prologue support.
-            # We could relax this assumption by taking union of allowed prologue inputs,
-            # and within benchmark fusion not allow prologue fusion for choices which dont support it
-            # No use case of that yet.
-            allowed_prologue_inps: Optional[OrderedSet[str]] = None
+            # We take the union of allowed prologue inputs from all choices,
+            # and, within benchmark fusion, don't allow prologue fusion for
+            # choices which dont support the whole union.
+            allowed_prologue_inps: OrderedSet[str] = OrderedSet()
             for c in choices:
                 if isinstance(c, TritonTemplateCaller):
-                    if allowed_prologue_inps is None:
-                        allowed_prologue_inps = c.allowed_prologue_inps
-                    else:
-                        assert allowed_prologue_inps == c.allowed_prologue_inps
+                    allowed_prologue_inps |= c.allowed_prologue_inps
 
-            if allowed_prologue_inps is None:
-                allowed_prologue_inps = OrderedSet()
             return torch._inductor.ir.TensorBox.create(
                 torch._inductor.ir.MultiTemplateBuffer(
                     layout,

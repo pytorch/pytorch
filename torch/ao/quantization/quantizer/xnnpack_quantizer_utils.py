@@ -10,8 +10,6 @@ from torch._subclasses import FakeTensor
 from torch.ao.quantization.fx.utils import get_new_attr_name_with_prefix
 from torch.ao.quantization.pt2e.export_utils import _WrapperModule
 from torch.ao.quantization.pt2e.utils import (
-    _conv1d_bn_example_inputs,
-    _conv2d_bn_example_inputs,
     _get_aten_graph_module_for_pattern,
     _is_conv_node,
     _is_conv_transpose_node,
@@ -486,6 +484,28 @@ def _do_annotate_conv_bn(
     The output of the pattern must include a dictionary from string name to node
     for the following names: "input", "conv", "weight", "bias", and "output".
     """
+
+    # Example inputs for conv-bn1d patterns
+    _conv1d_bn_example_inputs = (
+        torch.randn(1, 1, 3),  # x
+        torch.randn(1, 1, 1),  # conv_weight
+        torch.randn(1),  # conv_bias
+        torch.randn(1),  # bn_weight
+        torch.randn(1),  # bn_bias
+        torch.randn(1),  # bn_running_mean
+        torch.randn(1),  # bn_running_var
+    )
+
+    # Example inputs for conv-bn2d patterns
+    _conv2d_bn_example_inputs = (
+        torch.randn(1, 1, 3, 3),  # x
+        torch.randn(1, 1, 1, 1),  # conv_weight
+        torch.randn(1),  # conv_bias
+        torch.randn(1),  # bn_weight
+        torch.randn(1),  # bn_bias
+        torch.randn(1),  # bn_running_mean
+        torch.randn(1),  # bn_running_var
+    )
 
     def get_pattern(conv_fn: Callable, relu_is_inplace: bool):
         def _conv_bn(x, conv_weight, conv_bias, bn_weight, bn_bias, bn_rm, bn_rv):
