@@ -261,9 +261,8 @@ def register_module_forward_hook(
 
     The input contains only the positional arguments given to the module.
     Keyword arguments won't be passed to the hooks and only to the ``forward``.
-    The hook can modify the output. It can modify the input inplace but
-    it will not have effect on forward since this is called after
-    :func:`forward` is called.
+    You can optionally modify the output of the module by returning a new value
+    that will replace the output from the :func:`forward` function.
 
     Parameters:
         hook (Callable): The user defined hook to be registered.
@@ -1832,8 +1831,6 @@ class Module:
 
             return result
 
-        from torch.compiler import is_compiling
-
         # This is technically not behavior equivalent when compiling, but it's
         # incredibly unlikely we will ever support throwing an exception in NN
         # module, and then catching it here, and then reraising it, and then
@@ -1841,7 +1838,7 @@ class Module:
         # The reraise here just gunks up our exception handling for no good
         # reason.  Don't try to run the always called hooks in event of
         # exception.
-        if is_compiling():
+        if torch.compiler.is_compiling():
             return inner()
 
         try:

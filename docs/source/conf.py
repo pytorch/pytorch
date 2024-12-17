@@ -92,6 +92,8 @@ templates_path = ["_templates"]
 
 # TODO: document these and remove them from here.
 
+html_domain_indices = False
+
 coverage_ignore_functions = [
     # torch
     "typename",
@@ -154,7 +156,6 @@ coverage_ignore_functions = [
     "DistributedDataParallelCPU",
     # torch.utils
     "set_module",
-    # torch.utils.model_dump
     "burn_in_info",
     "get_info_and_burn_skeleton",
     "get_inline_skeleton",
@@ -304,6 +305,7 @@ coverage_ignore_functions = [
     "node_arg_is_weight",
     "return_arg_list",
     # torch.ao.quantization.pt2e.graph_utils
+    "bfs_trace_with_node_process",
     "find_sequential_partitions",
     "get_equivalent_types",
     "update_equivalent_types_dict",
@@ -410,6 +412,7 @@ coverage_ignore_functions = [
     "change_current_allocator",
     "empty_cache",
     "get_allocator_backend",
+    "get_per_process_memory_fraction",
     "list_gpu_processes",
     "max_memory_allocated",
     "max_memory_cached",
@@ -2457,6 +2460,8 @@ coverage_ignore_classes = [
     "SharedQuantizationSpec",
     # torch.ao.quantization.quantizer.x86_inductor_quantizer
     "X86InductorQuantizer",
+    # torch.ao.quantization.quantizer.xpu_inductor_quantizer
+    "XPUInductorQuantizer",
     # torch.ao.quantization.quantizer.xnnpack_quantizer
     "XNNPACKQuantizer",
     # torch.ao.quantization.quantizer.xnnpack_quantizer_utils
@@ -2722,6 +2727,7 @@ coverage_ignore_classes = [
     "RelaxedUnspecConstraint",
     "RuntimeAssert",
     "ShapeGuardPrinter",
+    "ShapeGuardPythonPrinter",
     "SymDispatchMode",
     "SymbolicContext",
     # torch.fx.experimental.unification.match
