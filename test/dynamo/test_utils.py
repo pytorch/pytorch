@@ -244,7 +244,7 @@ class TestDynamoTimed(TestCase):
  'fail_user_frame_filename': None,
  'fail_user_frame_lineno': None,
  'frame_key': '1',
- 'gc_time_us': None,
+ 'gc_time_us': 0,
  'graph_input_count': 1,
  'graph_node_count': 3,
  'graph_op_count': 1,
