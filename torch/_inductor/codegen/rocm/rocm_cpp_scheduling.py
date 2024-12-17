@@ -77,6 +77,7 @@ class ROCmCPPScheduling(BaseScheduling):
         self,
         template_node: BaseSchedulerNode,
         epilogue_nodes: Sequence[BaseSchedulerNode],
+        prologue_nodes: Sequence[BaseSchedulerNode],
     ):
         """
         Codegen a ROCm template, possibly with fused epilogues
