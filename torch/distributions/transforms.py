@@ -8,7 +8,6 @@ from typing import List
 
 import torch
 import torch.nn.functional as F
-from torch.distributions import Distribution, Normal
 from torch.distributions import constraints
 from torch.distributions.utils import (
     _sum_rightmost,
@@ -137,7 +136,7 @@ class Transform:
         """
         raise NotImplementedError
     
-    def mean(self, base_dist: Distribution):
+    def mean(self, base_distribution):
         """
         Returns the mean of the transformed distribution
         """
@@ -566,7 +565,7 @@ class ExpTransform(Transform):
         return x
     
     def mean(self, base_distribution):
-        if isinstance(base_distribution, Normal):
+        if isinstance(base_distribution, torch.distributions.Normal):
             return torch.exp(base_distribution.variance/2 + base_distribution.mean)
         else:
              raise NotImplementedError
@@ -755,7 +754,7 @@ class AffineTransform(Transform):
             return constraints.real
         return constraints.independent(constraints.real, self.event_dim)
     
-    def mean(self, base_distribution: Distribution):
+    def mean(self, base_distribution):
         return self.loc + self.scale * base_distribution.mean
 
     def with_cache(self, cache_size=1):
