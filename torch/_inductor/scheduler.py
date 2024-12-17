@@ -2690,6 +2690,9 @@ class Scheduler:
                 mod,
             )
 
+        # After the succesful fusion with Template, we finalize its config.
+        # Subsequently we benchmark but dont update. Checking for SchedulerNode, instead of FusedSchedulerNode
+        # accomplishes this.
         if is_multi_template and any(
             n.get_template_node() is not None and isinstance(n, SchedulerNode)
             for n in (node1, node2)

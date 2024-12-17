@@ -6977,7 +6977,6 @@ class StorageBox(MutableBox):
         A heuristic to decide if we should realize a tensor
         that is used multiple times.
         """
-        return True
         if users > 1 and isinstance(self.data, (Pointwise, Reduction)):
             if is_cpu(self.data):
                 # Heuristic for realizing reused result of heavy ops on cpu

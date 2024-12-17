@@ -434,7 +434,7 @@ realize_opcount_threshold = 30
 realize_acc_reads_threshold = 8
 
 # fallback to eager for random/dropout, this is slow but useful for debugging
-fallback_random = True
+fallback_random = False
 
 # automatically create fallbacks when encountering an unhandled op
 implicit_fallbacks = True
