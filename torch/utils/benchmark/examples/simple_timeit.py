@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 """Trivial use of Timer API:
 
 $ python -m examples.simple_timeit
@@ -8,7 +9,7 @@ import torch
 import torch.utils.benchmark as benchmark_utils
 
 
-def main() -> None:
+def main():
     timer = benchmark_utils.Timer(
         stmt="x + y",
         globals={"x": torch.ones((4, 8)), "y": torch.ones((1, 8))},
