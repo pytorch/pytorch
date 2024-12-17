@@ -54,19 +54,9 @@ class CoordescTuner:
         self.size_hints = size_hints
         self.inductor_meta = inductor_meta or {}
 
-    def prefix_to_size_hint(self, prefix: str) -> Optional[int]:
-        size_hint_idx = {"X": 0, "Y": 1, "Z": 2, "R": -1}[prefix]
-
-        have_size_hint = (
-            self.size_hints is not None
-            and len(self.size_hints) > 0
-            and len(self.size_hints) > size_hint_idx
-        )
-        return self.size_hints[size_hint_idx] if have_size_hint else None
-
     def get_config_max(self, prefix: str) -> int:
-        max_block = TRITON_MAX_BLOCK[prefix]
-        size_hint = self.prefix_to_size_hint(prefix)
+        max_block = TRITON_MAX_BLOCK[prefix.upper()]
+        size_hint = self.size_hints.get(prefix) if self.size_hints is not None else None
         return min(max_block, size_hint) if size_hint is not None else max_block
 
     def get_warpsmax(self):
@@ -95,10 +85,11 @@ class CoordescTuner:
             "XBLOCK",
             "YBLOCK",
             "ZBLOCK",
-            # NOTE: we should not tune RBLOCK for persistent reduction.
+            # NOTE: we should not tune R0_BLOCK for persistent reduction.
             # We rely on the fact that persistent reduction's triton.Config
-            # does not have the RBLOCK field to guarantee that.
-            "RBLOCK",
+            # does not have the R0_BLOCK field to guarantee that.
+            "R0_BLOCK",
+            "R1_BLOCK",
             # the following 3 are for mm
             "BLOCK_M",
             "BLOCK_N",
@@ -111,8 +102,10 @@ class CoordescTuner:
         return out
 
     def value_too_large(self, name: str, val: int) -> bool:
-        if name in {"XBLOCK", "YBLOCK", "ZBLOCK", "RBLOCK"}:
-            return val > self.get_config_max(name[0])
+        block_suffix = "BLOCK"
+        if name.endswith(block_suffix):
+            prefix = name.strip(block_suffix).lower()
+            return val > self.get_config_max(prefix)
         if name == "num_warps":
             return val > self.get_warpsmax()
 
@@ -255,7 +248,7 @@ class CoordescTuner:
 
             for name in tunable_fields:
                 cur_val = get_field(best_config, name)
-                # some kernel don't have RBLOCK/YBLOCK/ZBLOCK. So cur_val may be None
+                # some kernel don't have R0_BLOCK/YBLOCK/ZBLOCK. So cur_val may be None
                 if cur_val is None:
                     continue
 

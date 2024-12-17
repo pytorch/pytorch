@@ -312,7 +312,8 @@ inline at::Tensor pack_weight_to_onednn_tensor(
 inline at::Tensor pack_weight_to_fp16_onednn_tensor(
     at::Tensor& weight,
     std::optional<torch::List<int64_t>>& input_shape) {
-  weight = at::_saturate_weight_to_fp16(weight);
+  TORCH_CHECK(weight.scalar_type() == at::kHalf || weight.scalar_type() == at::kFloat, "Weight should be of type float or float16");
+  weight = weight.scalar_type() == at::kHalf ? weight : at::_saturate_weight_to_fp16(weight);
   std::vector<int64_t> w_dims = weight.sizes().vec();
   auto weight_fp16 = weight.to(at::kHalf);
   ideep::tensor wei = ideep::tensor({w_dims, dnnl::memory::data_type::f16}, weight_fp16.data_ptr());
