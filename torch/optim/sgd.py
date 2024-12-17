@@ -373,6 +373,7 @@ def _multi_tensor_sgd(
     has_sparse_grad: bool,
 ):
     assert grad_scale is None and found_inf is None
+
     if len(params) == 0:
         return
 
