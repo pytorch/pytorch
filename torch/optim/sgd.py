@@ -257,6 +257,7 @@ def sgd(
     fused: Optional[bool] = None,
     grad_scale: Optional[Tensor] = None,
     found_inf: Optional[Tensor] = None,
+    differentiable: bool = False,
     *,
     weight_decay: float,
     momentum: float,
@@ -264,7 +265,6 @@ def sgd(
     dampening: float,
     nesterov: bool,
     maximize: bool,
-    differentiable: bool,
 ):
     r"""Functional API that performs SGD algorithm computation.
 
@@ -477,7 +477,7 @@ def _fused_sgd(
     if has_sparse_grad:
         raise RuntimeError("`_fused_sgd` does not support sparse gradients")
     if differentiable:
-        raise RuntimeError("SGD with fused=True does not support differentiable=True")
+        raise RuntimeError("`_fused_sgd` does not support differentiable=True")
     grad_scale_dict: DeviceDict = (
         {grad_scale.device: grad_scale} if grad_scale is not None else {}
     )
