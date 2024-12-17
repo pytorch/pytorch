@@ -1,16 +1,16 @@
 #!/usr/bin/env python
 
-import contextlib
-import os
-import logging
-import sys
-import subprocess
 import argparse
+import contextlib
+import logging
+import os
+import subprocess
+import sys
 import tempfile
-
+import time
 from collections.abc import Iterator
 from pathlib import Path
-from typing import List
+from typing import Dict, List
 
 
 logging.basicConfig(
@@ -26,14 +26,13 @@ REQUIREMENTS_PATH = ROOT_PATH / "requirements.txt"
 
 def run_cmd(
     cmd: List[str], capture_output: bool = False
-) -> subprocess.CompletedProcess:
+) -> subprocess.CompletedProcess[bytes]:
     logger.debug("Running command: %s", " ".join(cmd))
     return subprocess.run(
         cmd,
         # Give the parent environment to the subprocess
         env={**os.environ},
         capture_output=capture_output,
-        text=True if capture_output else False,
         check=True,
     )
 
@@ -41,8 +40,8 @@ def run_cmd(
 def interpreter_version(interpreter: str) -> str:
     version_string = run_cmd(
         [interpreter, "--version"], capture_output=True
-    ).stdout.strip()
-    return version_string.split(" ")[1]
+    ).stdout.decode("utf-8").strip()
+    return str(version_string.split(" ")[1])
 
 
 @contextlib.contextmanager
@@ -113,10 +112,15 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def main():
+def main() -> None:
     args = parse_args()
     pythons = args.python or [sys.executable]
-    needs_clean = False
+    build_times: Dict[str, float] = dict()
+
+    if len(pythons) > 1 and args.destination == "dist/":
+        logger.warning(
+            "dest is 'dist/' while multiple python versions specified, output will be overwritten"
+        )
 
     for interpreter in pythons:
         with venv(interpreter) as venv_interpreter:
@@ -124,10 +128,17 @@ def main():
             # clean actually requires setuptools so we need to ensure we
             # install requriements before
             builder.install_requirements()
-            if needs_clean:
-                builder.clean()
+            builder.clean()
+
+            start_time = time.time()
+
             builder.bdist_wheel(args.destination)
-            needs_clean = True
+
+            end_time = time.time()
+
+            build_times[interpreter_version(venv_interpreter)] = end_time - start_time
+    for version, build_time in build_times.items():
+        logger.info("Build time (%s): %fs", version, build_time)
 
 
 if __name__ == "__main__":
