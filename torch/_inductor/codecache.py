@@ -828,7 +828,12 @@ class FxGraphHashDetails:
                     configs = None
                     if isinstance(kernel, Autotuner):
                         if kernel.configs:
-                            configs = "|".join(sorted(str(c) for c in kernel.configs))
+                            configs = str(
+                                sorted(
+                                    sorted(c.all_kwargs().items())
+                                    for c in kernel.configs
+                                )
+                            )
                         kernel = kernel.fn
 
                     kernel_source = (
