@@ -57,64 +57,64 @@ def _diff_fn(p, grad, opt_differentiable_state, opt_class, kwargs, *ignored):
 def _multistep_backprop_diff_lr_fn(
     params: Tensor,
     grad: Tensor,
-    inner_opt_differentiable_state: dict[str, Any],
-    inner_opt_class: type[Optimizer],
-    inner_kwargs: dict[str, Any],
+    opt_differentiable_state: dict[str, Any],
+    opt_class: type[Optimizer],
+    kwargs: dict[str, Any],
     *ignored: Any,
 ) -> tuple[Tensor, ...]:
     assert (
-        inner_kwargs["differentiable"] is True
+        kwargs["differentiable"] is True
     ), "Only call this test function when differentiable=True"
 
     params = params.clone().requires_grad_(True).clone()
     params.grad = grad
 
-    inner_opt_differentiable_state = {
+    opt_differentiable_state = {
         k: v.clone() if isinstance(v, torch.Tensor) else v
-        for k, v in inner_opt_differentiable_state.items()
+        for k, v in opt_differentiable_state.items()
     }
 
-    inner_kwargs = inner_kwargs.copy()
-    inner_kwargs.update({
+    kwargs = kwargs.copy()
+    kwargs.update({
         k: v.clone() if isinstance(v, torch.Tensor) else v
-        for k, v in inner_kwargs.items()
+        for k, v in kwargs.items()
     })
     differentiable_kwargs = [
-        v for v in inner_kwargs.values() 
+        v for v in kwargs.values() 
         if isinstance(v, torch.Tensor) and v.requires_grad
     ]
 
     criterion = nn.MSELoss()
 
-    inner_optimizer = inner_opt_class([params], **inner_kwargs)
-    inner_optimizer.state[params].update(inner_opt_differentiable_state)
+    optimizer = opt_class([params], **kwargs)
+    optimizer.state[params].update(opt_differentiable_state)
 
     # Simple x, y pair
     x = torch.tensor([1.0], dtype=torch.float64)
     y = torch.tensor([2.0], dtype=torch.float64)
 
     for _ in range(2):
-        inner_loss = criterion(x * torch.sum(params), y)
-        inner_loss.backward(
+        loss = criterion(x * torch.sum(params), y)
+        loss.backward(
             inputs=(params,),
             create_graph=True,
         )
-        inner_optimizer.step()
-        inner_optimizer.zero_grad()
+        optimizer.step()
+        optimizer.zero_grad()
 
-    meta_loss = inner_loss
+    meta_loss = loss
     meta_loss.backward(inputs=(*differentiable_kwargs,), create_graph=True)
 
     return (
         (meta_loss,)
         + tuple(
             v
-            for v in inner_optimizer.state[params].values()
+            for v in optimizer.state[params].values()
             if isinstance(v, torch.Tensor) and v.requires_grad
         )
         + tuple(
             v
-            for v in inner_kwargs.values()
+            for v in kwargs.values()
             if isinstance(v, torch.Tensor) and v.requires_grad
         )
     )
@@ -406,29 +406,27 @@ class TestDifferentiableOptimizer(TestCase):
         )
 
     def test_differentiable_lr(self):
-        params = torch.rand(10, requires_grad=False, dtype=torch.float64)
-        grad = torch.rand_like(params, requires_grad=False, dtype=torch.float64)
+        params = torch.rand(10, requires_grad=True, dtype=torch.float64)
+        grad = torch.rand_like(params, requires_grad=True, dtype=torch.float64)
         lr = torch.tensor(0.001, requires_grad=True, dtype=torch.float64)
 
-        inner_mbuff = torch.rand_like(params, requires_grad=False, dtype=torch.float64)
-        inner_state = {"momentum_buffer": inner_mbuff}
-        inner_kwargs: dict[str, Any] = {"lr": lr, "differentiable": True}
+        mbuff = torch.rand_like(params, requires_grad=True, dtype=torch.float64)
+        state = {"momentum_buffer": mbuff}
+        kwargs: dict[str, Any] = {"lr": lr, "differentiable": True}
 
         gradcheck(
             _multistep_backprop_diff_lr_fn,
             (
                 params,
                 grad,
-                inner_state,
+                state,
                 SGD,
-                inner_kwargs,  # includes lr
-                *inner_state.values(),
-                *inner_kwargs.values(),
+                kwargs,  # includes lr
+                *state.values(),
+                *kwargs.values(),
             ),
         )
 
 
 if __name__ == "__main__":
-    A = TestDifferentiableOptimizer()
-    A.test_differentiable_lr()
-    # print("These tests should be run through test/test_optim.py instead")
+    print("These tests should be run through test/test_optim.py instead")
