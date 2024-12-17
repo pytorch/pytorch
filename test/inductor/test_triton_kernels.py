@@ -3554,8 +3554,8 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
     @common_utils.parametrize("backend", ["eager", "aot_eager", "inductor"])
     @common_utils.parametrize("with_perf_model", [False, True])
     def test_triton_kernel_prune_configs_by(self, backend, with_perf_model):
-        # We need to specify global records to get around an unknown Dynamo bug
-        # Dynamo appears not properly update the side effects in the case of an
+        # We need to specify global records to get around an unknown Dynamo bug.
+        # Dynamo appears to not properly update the side effects in the case of an
         # inline call with a nonlocal value.
         global records
         records = {}
