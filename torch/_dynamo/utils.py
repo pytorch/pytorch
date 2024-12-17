@@ -2582,11 +2582,7 @@ def get_fake_value(node, tx, allow_non_graph_fake=False):
         elif isinstance(
             cause, torch.fx.experimental.symbolic_shapes.GuardOnDataDependentSymNode
         ):
-            raise UserError(  # noqa: B904
-                UserErrorType.CONSTRAINT_VIOLATION,
-                str(cause),
-                case_name="constrain_as_size_example",
-            )
+            raise e
         elif isinstance(cause, ValueRangeError):
             raise UserError(UserErrorType.CONSTRAINT_VIOLATION, e.args[0]) from e
         elif isinstance(cause, TypeError) and "argument" in str(cause):
