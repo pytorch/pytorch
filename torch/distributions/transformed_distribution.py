@@ -217,7 +217,7 @@ class TransformedDistribution(Distribution):
 
     @property
     def mean(self):
-        value = self.base_dist.mean
-        for transform in self.transforms:
-            value = transform.mean(value)
-        return value
+        if len(self.transforms) == 1:
+            return = transform.mean(self.base_dist.mean)
+        else raise NotImplementedError
+
