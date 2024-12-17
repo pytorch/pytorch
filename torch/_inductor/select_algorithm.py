@@ -1772,7 +1772,7 @@ class AlgorithmSelectorCache(PersistentCache):
                     triton_cuda_choice = isinstance(
                         c, TritonTemplateCaller
                     ) and isinstance(c.bmreq, TritonGPUBenchmarkRequest)
-                    if triton_cuda_choice and async_compile._use_process_pool():
+                    if triton_cuda_choice and async_compile.use_process_pool():
                         with open(c.bmreq.module_path) as file:
                             source_code = file.read()
                         future = async_compile.triton(
