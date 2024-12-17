@@ -8125,10 +8125,12 @@ class TestMPS(TestCaseMPS):
         self.assertGreater(elapsedTime, 0.0)
     
     def test_astream_context_manager(self):
-        prev_stream = torch.xpu.current_stream()
-        with torch.xpu.Stream() as stream:
-            self.assertEqual(stream, torch.xpu.current_stream())
-        self.assertEqual(prev_stream, torch.xpu.current_stream())
+        prev_stream = torch.accelerator.current_stream()
+        with torch.Stream() as stream:
+            print(stream)
+            print(torch.accelerator.current_stream())
+            self.assertEqual(stream, torch.accelerator.current_stream())
+        self.assertEqual(prev_stream, torch.accelerator.current_stream())
 
     def test_generic_event(self):
         startEvent = torch.Event('mps', enable_timing=True)
