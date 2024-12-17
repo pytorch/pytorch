@@ -2416,11 +2416,11 @@ def sdpa_constraint(fx_node, *args, **kwargs):
             return arg
 
         meta_val = fx_arg.meta["val"]
-        meta_stride = [
+        meta_stride_expr = [
             s.node.expr if isinstance(s, torch.SymInt) else s for s in meta_val.stride()
         ]
 
-        stride_order = ir.get_stride_order(meta_stride)
+        stride_order = ir.get_stride_order(meta_val.stride())
 
         if stride_order and stride_order[-1] != 0:
             # contiguous stride order
@@ -2458,7 +2458,7 @@ def sdpa_constraint(fx_node, *args, **kwargs):
 
         if ir.is_aligned_realized_tensor(arg, ALIGNMENT):
             return ir.try_match_insignificant_strides(
-                ir.ExternKernel.realize_input(arg), meta_stride
+                ir.ExternKernel.realize_input(arg), meta_stride_expr
             )
 
         if (
@@ -2467,7 +2467,7 @@ def sdpa_constraint(fx_node, *args, **kwargs):
             and ir.is_aligned_realized_tensor(arg, ALIGNMENT)
         ):
             return ir.try_match_insignificant_strides(
-                ir.ExternKernel.realize_input(arg), meta_stride
+                ir.ExternKernel.realize_input(arg), meta_stride_expr
             )
 
         if effn_attn_fwd_bias:
@@ -2511,7 +2511,7 @@ def sdpa_constraint(fx_node, *args, **kwargs):
             if not is_aligned(arg):
                 if is_aligned(arg.unwrap_view()):
                     return ir.try_match_insignificant_strides(
-                        ir.ExternKernel.realize_input(arg), meta_stride
+                        ir.ExternKernel.realize_input(arg), meta_stride_expr
                     )
 
         return ir.ExternKernel.require_stride_order(arg, stride_order)
