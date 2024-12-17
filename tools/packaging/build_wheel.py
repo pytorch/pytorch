@@ -24,28 +24,6 @@ SETUP_PY_PATH = ROOT_PATH / "setup.py"
 REQUIREMENTS_PATH = ROOT_PATH / "requirements.txt"
 
 
-def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "-p",
-        "--python",
-        action="append",
-        type=str,
-        help=(
-            "Python interpreters to build packages for, can be set multiple times,"
-            " should ideally be full paths, (default: %(default)s)"
-        ),
-    )
-    parser.add_argument(
-        "-d",
-        "--destination",
-        default="dist/",
-        type=str,
-        help=("Destination to put the compailed binaries" ""),
-    )
-    return parser.parse_args()
-
-
 def run_cmd(
     cmd: List[str], capture_output: bool = False
 ) -> subprocess.CompletedProcess:
@@ -111,6 +89,28 @@ class Builder:
         run_cmd(
             [self.interpreter, "-m", "pip", "install", "-r", str(REQUIREMENTS_PATH)]
         )
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "-p",
+        "--python",
+        action="append",
+        type=str,
+        help=(
+            "Python interpreters to build packages for, can be set multiple times,"
+            " should ideally be full paths, (default: %(default)s)"
+        ),
+    )
+    parser.add_argument(
+        "-d",
+        "--destination",
+        default="dist/",
+        type=str,
+        help=("Destination to put the compailed binaries" ""),
+    )
+    return parser.parse_args()
 
 
 def main():
