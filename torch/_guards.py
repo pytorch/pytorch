@@ -90,7 +90,7 @@ class CompileId:
             if self.frame_id is not None:
                 frame_str = f"/{self.frame_id}/{self.frame_compile_id}"
 
-            return f"!{self.compiled_autograd_id}/{frame_str}"
+            return f"!{self.compiled_autograd_id}{frame_str}"
         else:
             assert self.frame_id is not None and self.frame_compile_id is not None
             return f"{self.frame_id}/{self.frame_compile_id}"
