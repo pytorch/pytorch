@@ -20,8 +20,10 @@ from copy import deepcopy
 from dataclasses import dataclass
 from itertools import product
 from pathlib import Path
+from unittest.mock import patch, MagicMock, ANY
 
 import torch
+from torch.utils.serialization import config as serialization_config
 from torch._subclasses.fake_tensor import FakeTensorMode, FakeTensorConverter
 from torch._utils import _rebuild_tensor
 from torch._utils_internal import get_file_path_2
@@ -4468,6 +4470,42 @@ class TestSerialization(TestCase, SerializationMixin):
             f.seek(0)
             loaded_sd = torch.load(f, weights_only=weights_only)
             self.assertEqual(sd_save, loaded_sd)
+
+    def test_use_pinned_memory_for_d2h(self):
+
+        def patched_write_record(self, filename, data, nbytes):
+            if isinstance(data, torch.TypedStorage) or isinstance(data, torch.UntypedStorage):
+                if not data.is_pinned():
+                    raise RuntimeError("Expected storage to be in pinned memory")
+                return None
+
+        sd = torch.nn.Linear(3, 5, device='cuda').state_dict()
+
+        # Test that CUDA actually get moved to pinned memory on CPU
+        with patch('torch._C.PyTorchFileWriter.write_record', patched_write_record):
+            with tempfile.NamedTemporaryFile() as f:
+                    with self.assertRaisesRegex(RuntimeError, "Expected storage to be in pinned memory"):
+                        torch.save(sd, f)
+
+            with tempfile.NamedTemporaryFile() as f:
+                pinned_before = serialization_config.save.use_pinned_memory_for_d2h
+                try:
+                    serialization_config.save.use_pinned_memory_for_d2h = True
+                    torch.save(sd, f)
+                finally:
+                    serialization_config.save.use_pinned_memory_for_d2h = pinned_before
+
+        # Test correctness
+        with tempfile.NamedTemporaryFile() as f:
+            pinned_before = serialization_config.save.use_pinned_memory_for_d2h
+            try:
+                serialization_config.save.use_pinned_memory_for_d2h = True
+                torch.save(sd, f)
+                f.seek(0)
+                sd_loaded = torch.load(f)
+                self.assertEqual(sd_loaded, sd)
+            finally:
+                serialization_config.save.use_pinned_memory_for_d2h = pinned_before
 
 
     def run(self, *args, **kwargs):
