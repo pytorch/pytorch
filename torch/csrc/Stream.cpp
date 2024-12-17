@@ -325,6 +325,7 @@ static PyObject* THPStream_exit(PyObject* _self, PyObject* unused) {
   }
   Py_DECREF(prev_stream);
   Py_DECREF(ctx_device_index);
+  std::cout << "exit THPStream_exit" << std::endl;
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
