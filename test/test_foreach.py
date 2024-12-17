@@ -1356,7 +1356,6 @@ class TestForeach(TestCase):
                 for t, ref_t in zip(out, ref_out):
                     self.assertTrue(torch.equal(t, ref_t))
 
-    # @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
     @dtypes(*get_all_dtypes())
     def test_foreach_clone_tensors(self, device, dtype):
         t1 = make_tensor((5, 5), dtype=dtype, device=device, low=1, high=100)
