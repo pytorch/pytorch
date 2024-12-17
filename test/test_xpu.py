@@ -15,6 +15,7 @@ from torch.testing._internal.common_device_type import (
     onlyXPU,
     OpDTypes,
     ops,
+    skipXPUIf,
 )
 from torch.testing._internal.common_methods_invocations import ops_and_refs
 from torch.testing._internal.common_utils import (
@@ -298,6 +299,14 @@ print(torch.xpu.device_count())
         self.assertTrue(issubclass(type(xpu_event), torch.Event))
         self.assertTrue(torch.Event in type(xpu_event).mro())
 
+    def test_stream_compatibility(self):
+        s1 = torch.xpu.Stream()
+        s2 = torch.xpu.Stream()
+        torch.accelerator.set_stream(s1)
+        self.assertEqual(torch.accelerator.current_stream().stream_id, s1.stream_id)
+        torch.accelerator.set_stream(s2)
+        self.assertEqual(torch.accelerator.current_stream().stream_id, s2.stream_id)
+
     def test_generator(self):
         torch.manual_seed(2024)
         g_state0 = torch.xpu.get_rng_state()
@@ -455,6 +464,22 @@ print(torch.xpu.device_count())
                 for idx in range(1, device_count)
             )
         )
+
+    @skipXPUIf(
+        int(torch.version.xpu) < 20250000,
+        "Test requires SYCL compiler version 2025.0.0 or newer.",
+    )
+    def test_mem_get_info(self):
+        torch.xpu.synchronize()
+        torch.xpu.empty_cache()
+        before_free_bytes, before_total_bytes = torch.xpu.mem_get_info()
+        # increasing to 1MB to force acquiring a new block.
+        t = torch.randn(1024 * 256, device="xpu")
+        torch.xpu.synchronize()
+        after_free_bytes, after_total_bytes = torch.xpu.mem_get_info()
+
+        self.assertGreaterEqual(before_free_bytes, after_free_bytes)
+        self.assertEqual(before_total_bytes, after_total_bytes)
 
     def test_get_arch_list(self):
         arch_list = torch.xpu.get_arch_list()
