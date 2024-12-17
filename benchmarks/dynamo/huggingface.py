@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# Disable the flake warnings for the imports. Flake8 does not provide a way to
+# disable just warning for the entire file. Disabling flake8 entirely.
+# flake8: noqa
 
 import importlib
 import logging
@@ -46,9 +49,6 @@ def pip_install(package):
     subprocess.check_call([sys.executable, "-m", "pip", "install", package])
 
 
-# Disable the flake warnings for the imports. Flake8 does not provide a way to
-# disable just warning for the entire file. Disabling flake8 entirely.
-# flake8: noqa
 imports = [
     "AlbertForPreTraining",
     "AutoConfig",

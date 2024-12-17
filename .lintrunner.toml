@@ -404,6 +404,20 @@ command = [
 is_formatter = true
 
 [[linter]]
+code = 'FLAKE8_COMMENT'
+include_patterns = ['**/*.py', '**/*.pyi']
+exclude_patterns = [
+    'torch/onnx/_internal/diagnostics/infra/sarif/**'
+]
+command = [
+    'python3',
+    'tools/linter/adapters/flake8_comment_linter.py',
+    '--',
+    '@{{PATHSFILE}}',
+]
+is_formatter = true
+
+[[linter]]
 code = 'SPACES'
 include_patterns = ['**']
 exclude_patterns = [

@@ -1,7 +1,7 @@
-"""Compatibility analyzer for PyTorch models."""
-
 # mypy: allow-untyped-defs
 # flake8: noqa: B950 We do not need flake8 as it complains line length
+"""Compatibility analyzer for PyTorch models."""
+
 from __future__ import annotations
 
 import dataclasses

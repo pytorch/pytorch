@@ -5750,8 +5750,7 @@ metadata incorrectly.
 
 class GradsNoForceContiguousContextManager(ContextDecorator):
     def __enter__(self):
-        # flake8: noqa: TOR901
-        self.lib = torch.library.Library("_mylib", "FRAGMENT")
+        self.lib = torch.library.Library("_mylib", "FRAGMENT")  # noqa: TOR901
         self.d = {
             torch.channels_last: 0,
             torch.contiguous_format: 0,
