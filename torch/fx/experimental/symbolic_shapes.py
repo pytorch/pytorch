@@ -289,6 +289,7 @@ def lru_cache(
 # which are unlikely to identify a particular interesting guard statement
 @lru_cache(None)
 def uninteresting_files() -> Set[str]:
+    import torch._compile
     import torch._dynamo.eval_frame
     import torch._inductor.sizevars
     import torch._library.custom_ops
@@ -302,6 +303,7 @@ def uninteresting_files() -> Set[str]:
         torch.fx.experimental.sym_node,
         torch.fx.interpreter,
         torch,
+        torch._compile,
         torch._dynamo.eval_frame,
         torch._inductor.sizevars,
         torch._library.custom_ops,
