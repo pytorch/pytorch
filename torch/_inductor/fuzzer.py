@@ -109,8 +109,10 @@ class Status(Enum):
     PASSED = "passed"
     # ConfigFuzzer failed to compile the test function
     FAILED_COMPILE = "failed_compile"
-    # ConfigFuzzer compiled the test function and it raised an exception
-    FAILED_RUN_EXCEPTION = "failed_run_exception"
+    # ConfigFuzzer compiled the test function and running it raised an exception
+    FAILED_RUN_COMPILE_EXCEPTION = "failed_run_compile_exception"
+    # ConfigFuzzer ran eager and it raised an exception
+    FAILED_RUN_EAGER_EXCEPTION = "failed_run_eager_exception"
     # ConfigFuzzer compiled the test function, but the return value indicated that the compiled value didn't match the
     # value from eager (or however else you set up the comparison in the test function)
     FAILED_RUN_RETURN = "failed_run_return"
@@ -121,7 +123,8 @@ class Status(Enum):
         """
         return (
             self == Status.FAILED_COMPILE
-            or self == Status.FAILED_RUN_EXCEPTION
+            or self == Status.FAILED_RUN_EAGER_EXCEPTION
+            or self == Status.FAILED_RUN_COMPILE_EXCEPTION
             or self == Status.FAILED_RUN_RETURN
         )
 
@@ -540,6 +543,7 @@ class ConfigFuzzer:
             new_config = self.new_config()
             new_config.update(conf)
             self.test_config(results, new_config)
+            print(f"Status of {conf}:\n{results.lookup(conf)}")
         return results
 
     def _fuzz_helper(self, results: ResultType, combo: ComboType) -> None:
@@ -647,6 +651,15 @@ class ConfigFuzzer:
             results.set(config_tuple, return_status)
             return return_status
 
+        # try running eager
+        test_model_fn = self.test_model_fn_factory()
+        try:
+            eager_results = test_model_fn()
+        except Exception as exc:  # noqa: E722
+            return handle_return(
+                "Eager exception", Status.FAILED_RUN_EAGER_EXCEPTION, True, exc
+            )
+
         # try compilation
         try:
             comp = compile_with_options()
@@ -660,7 +673,10 @@ class ConfigFuzzer:
             success = comp()
         except Exception as exc:  # noqa: E722
             return handle_return(
-                "Exception running compiled", Status.FAILED_RUN_EXCEPTION, True, exc
+                "Exception running compiled",
+                Status.FAILED_RUN_COMPILE_EXCEPTION,
+                True,
+                exc,
             )
 
         # bool return value means don't compare with eager
@@ -675,13 +691,6 @@ class ConfigFuzzer:
                 return ret
         # try running in eager fp64
         elif type(success) is tuple:
-            test_model_fn = self.test_model_fn_factory()
-            try:
-                eager_results = test_model_fn()
-            except Exception as exc:  # noqa: E722
-                return handle_return(
-                    "Eager exception", Status.FAILED_RUN_EXCEPTION, True, exc
-                )
             if isinstance(eager_results, bool):
                 raise RuntimeError("eager didn't return tuple, but compile did")
             for er, cr in zip(eager_results, success):
@@ -871,7 +880,10 @@ def visualize_results(
             elif status_enum == Status.PASSED:
                 status_class = "passed"
                 status_val = "O"
-            elif status_enum == Status.FAILED_RUN_EXCEPTION:
+            elif status_enum == Status.FAILED_RUN_EAGER_EXCEPTION:
+                status_class = "failed"
+                status_val = "e"
+            elif status_enum == Status.FAILED_RUN_COMPILE_EXCEPTION:
                 status_class = "failed"
                 status_val = "E"
             elif status_enum == Status.FAILED_RUN_RETURN:
