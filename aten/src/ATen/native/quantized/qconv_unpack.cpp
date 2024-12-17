@@ -28,13 +28,6 @@ and /cudnn/ConvUnpackImpl.cpp, for cudnn.
 #include <ATen/ops/from_blob.h>
 #endif
 
-template <int kSpatialDim = 2>
-int register_conv_params();
-
-extern template int register_conv_params<2>();
-extern template int register_conv_params<3>();
-
-
 
 namespace at::native {
 namespace {
