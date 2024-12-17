@@ -1420,7 +1420,13 @@ class SIMDScheduling(BaseScheduling):
         """
         _, (_numel, rnumel) = template_node.group
         assert rnumel == 1
-        kernel, render = template_node.node.make_kernel_render(template_node.node)
+        if template_node.node is None:
+            breakpoint()
+        try:
+            kernel, render = template_node.node.make_kernel_render(template_node.node)
+        except Exception as e:
+            breakpoint()
+            raise
 
         buf_name_to_prologue_group = {}
         template_reads = template_node.used_buffer_names()

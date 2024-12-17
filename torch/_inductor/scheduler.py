@@ -14,6 +14,7 @@ import textwrap
 import traceback
 import typing
 from collections import defaultdict
+from types import ModuleType
 from typing import (
     Any,
     Callable,
@@ -34,6 +35,7 @@ import sympy
 import torch
 import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncCompile pools
 from torch._dynamo.utils import counters, dynamo_timed
+from torch._inductor.codecache import PyCodeCache, TritonFuture
 from torch._inductor.metrics import get_metric_table, is_metric_table_enabled
 from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
 from torch.utils._ordered_set import OrderedSet
@@ -2500,6 +2502,30 @@ class Scheduler:
         ):
             return backend.benchmark_fused_nodes(nodes)
 
+    def generate_kernel_code_from_nodes(
+        self, nodes: Sequence[BaseSchedulerNode], benchmark_kernel: bool
+    ) -> Any:
+        """
+        Benchmark fused list of nodes and return the execution time
+        in milliseconds on randomly generated inputs.
+        """
+        assert len(nodes) > 0
+        device = nodes[0].get_device()
+        self.current_device = device
+        backend = self.get_backend(device)
+        with dynamo_timed("benchmark_fused_nodes"):
+            return backend.generate_kernel_code_from_nodes(nodes, benchmark_kernel)
+
+    def benchmark_codegened_module(self, module, device) -> Tuple[float, str]:
+        """
+        Benchmark fused list of nodes and return the execution time
+        in milliseconds on randomly generated inputs.
+        """
+        self.current_device = device
+        backend = self.get_backend(device)
+        with dynamo_timed("benchmark_fused_nodes"):
+            return backend.benchmark_codegened_module(module)
+
     def finalize_multi_template_buffers(self) -> None:
         def replace_operation_buffer(
             orig_node: ir.MultiTemplateBuffer, new_node: ir.OperationBuffer
@@ -2591,7 +2617,7 @@ class Scheduler:
 
     def speedup_by_fusion(
         self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
-    ) -> bool:
+    ) -> Union[bool, Callable[[], bool]]:
         """
         If config.benchmark_fusion is False, always return True.
         Otherwise, return True if fusion can brings speedup.
@@ -2652,9 +2678,18 @@ class Scheduler:
                         red_text(f"{ms_fused / (ms1 + ms2):.3f}"),
                     )
 
-        # After the succesful fusion with Template, we finalize its config.
-        # Subsequently we benchmark but dont update. Checking for SchedulerNode, instead of FusedSchedulerNode
-        # accomplishes this.
+        async_compile = torch._inductor.async_compile.AsyncCompile()
+
+        def compile_kernel(nodes) -> Tuple[TritonFuture, ModuleType]:
+            src_code = self.generate_kernel_code_from_nodes(
+                nodes, benchmark_kernel=True
+            )
+            mod = PyCodeCache.load(src_code)
+            return (
+                async_compile.triton(kernel_name="triton_", source_code=src_code),
+                mod,
+            )
+
         if is_multi_template and any(
             n.get_template_node() is not None and isinstance(n, SchedulerNode)
             for n in (node1, node2)
@@ -2668,11 +2703,14 @@ class Scheduler:
 
             non_template_nodes = node_list_2 if epilogue_fusion else node_list_1
 
-            ms2, path2 = self.benchmark_fused_nodes(non_template_nodes)
+            # Eagerly compile and benchmark non-template nodes
+            _, ms1 = multi_node.get_min_choice()
+            ms2, path2 = self.benchmark_fused_nodes(node_list_2)
 
-            min_ms_fused = float("inf")
-            ms_fused_choice = None
-
+            # Start compiling choices in parallel
+            future_choices: [
+                Tuple[Any, torch._inductor.codecache.TritonFuture, ModuleType]
+            ] = []
             triton_choices = 0
             for choice, unfused_time in sorted(
                 choice_timings.items(), key=lambda x: x[1]
@@ -2699,64 +2737,248 @@ class Scheduler:
                 if triton_choices > config.max_epilogue_benchmarked_choices:
                     break
 
-                # TODO - parallel compile triton templates
-                # TODO - should prune/skip choices that are not within certain % of best choice
                 with multi_node.swap_as_triton_caller(choice):
-                    ms_fused, path = self.benchmark_fused_nodes(node_list_fused)
+                    future_choices.append((choice, *compile_kernel(node_list_fused)))
 
-                    if ms_fused < min_ms_fused:
-                        min_ms_fused = ms_fused
-                        ms_fused_choice = choice
+            def benchmark_when_ready() -> bool:
+                min_ms_fused = float("inf")
+                ms_fused_choice = None
 
-            log_fusion(min_ms_fused, ms1, ms2)
+                # Benchmark each choice after compilation completes
+                for choice, future, mod_fused in future_choices:
+                    future.result()
+                    with multi_node.swap_as_triton_caller(choice):
+                        ms_fused, path = self.benchmark_codegened_module(
+                            mod_fused, node_list_fused[0].get_device()
+                        )
+                        if ms_fused < min_ms_fused:
+                            min_ms_fused = ms_fused
+                            ms_fused_choice = choice
 
-            # after we do a fusion, we finalize a triton template.
-            # TODO - could preserve multi template and choices for subsequent fusions
-            if min_ms_fused < (ms1 + ms2) and ms_fused_choice is not None:
-                multi_node.finalize_as_triton_caller(ms_fused_choice)
-                return True
-            else:
-                return False
-        else:
-            try:
-                ms1, path1 = self.benchmark_fused_nodes(node_list_1)
-                if math.isinf(ms1):
-                    why("register spilling of the first kernel")
-                    return False
-                ms2, path2 = self.benchmark_fused_nodes(node_list_2)
-                if math.isinf(ms2):
-                    why("register spilling of the second kernel")
-                    return False
-                ms_fused, path_fused = self.benchmark_fused_nodes(node_list_fused)
-                if math.isinf(ms_fused):
-                    why("register spilling of the fused kernel")
-                    return False
-            except CompilationError as e:
-                # workaround triton issue: https://github.com/openai/triton/issues/2151
-                if "Loop-carried variable" in str(e):
-                    return True  # allow fusion
+                log_fusion(min_ms_fused, ms1, ms2)
+
+                if min_ms_fused < (ms1 + ms2) and ms_fused_choice is not None:
+                    multi_node.finalize_as_triton_caller(ms_fused_choice)
+                    return True
                 else:
+                    return False
+
+            return benchmark_when_ready
+
+        else:
+            # Start parallel compilation for all three kernels
+            future_k1 = compile_kernel(node_list_1)
+            future_k2 = compile_kernel(node_list_2)
+            future_fused = compile_kernel(node_list_fused)
+
+            def benchmark_when_ready() -> bool:
+                try:
+                    # Wait for all compilations to complete
+                    mod1 = future_k1.result()
+                    mod2 = future_k2.result()
+                    mod_fused = future_fused.result()
+
+                    # Benchmark each kernel
+                    ms1, path1 = self.benchmark_compiled_module(mod1)
+                    if math.isinf(ms1):
+                        why("register spilling of the first kernel")
+                        return False
+
+                    ms2, path2 = self.benchmark_compiled_module(mod2)
+                    if math.isinf(ms2):
+                        why("register spilling of the second kernel")
+                        return False
+
+                    ms_fused, path_fused = self.benchmark_compiled_module(mod_fused)
+                    if math.isinf(ms_fused):
+                        why("register spilling of the fused kernel")
+                        return False
+
+                    log_fusion(ms_fused, ms1, ms2)
+
+                    if (
+                        is_metric_table_enabled("slow_fusion")
+                        and ms_fused >= ms1 + ms2
+                        and (path1, path2) not in self.logged_slow_fusion
+                    ):
+                        self.logged_slow_fusion.add((path1, path2))
+                        get_metric_table("slow_fusion").add_row(
+                            lambda: {
+                                "kernel1_path": path1,
+                                "kernel1_latency": ms1,
+                                "kernel2_path": path2,
+                                "kernel2_latency": ms2,
+                                "fused_kernel_path": path_fused,
+                                "fused_kernel_latency": ms_fused,
+                                "slow_down_ratio": ms_fused / (ms1 + ms2),
+                            }
+                        )
+
+                    return ms_fused < ms1 + ms2
+
+                except CompilationError as e:
+                    if "Loop-carried variable" in str(e):
+                        return True
                     raise
 
-        log_fusion(ms_fused, ms1, ms2)
-        if (
-            is_metric_table_enabled("slow_fusion")
-            and ms_fused >= ms1 + ms2
-            and (path1, path2) not in self.logged_slow_fusion
-        ):
-            self.logged_slow_fusion.add((path1, path2))
-            get_metric_table("slow_fusion").add_row(
-                lambda: {
-                    "kernel1_path": path1,
-                    "kernel1_latency": ms1,
-                    "kernel2_path": path2,
-                    "kernel2_latency": ms2,
-                    "fused_kernel_path": path_fused,
-                    "fused_kernel_latency": ms_fused,
-                    "slow_down_ratio": ms_fused / (ms1 + ms2),
-                }
-            )
-        return ms_fused < ms1 + ms2
+            return benchmark_when_ready
+
+    # def speedup_by_fusion(
+    #     self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
+    # ) -> Union[bool, Callable[[], bool]]:
+    #     """
+    #     If config.benchmark_fusion is False, always return True.
+    #     Otherwise, return True if fusion can brings speedup.
+    #     """
+
+    #     is_multi_template = any(
+    #         n.is_template()
+    #         and isinstance(n.get_template_node(), ir.MultiTemplateBuffer)
+    #         for n in (node1, node2)
+    #     )
+    #     if not config.benchmark_fusion and not is_multi_template:
+    #         return True
+
+    #     if (
+    #         node1.is_template()
+    #         and not isinstance(node1.get_template_node(), ir.TritonTemplateBuffer)
+    #         or node1.is_foreach()
+    #         or node2.is_foreach()
+    #     ):
+    #         # TODO support benchmarking epilogue fusion
+    #         return True
+
+    #     node_list_1 = node1.get_nodes()
+    #     device = node_list_1[0].get_device()
+    #     assert device
+
+    #     # don't support benchmark fusion for CPU right now.
+    #     if device.type == "cpu":
+    #         return True
+
+    #     node_list_2 = node2.get_nodes()
+    #     node_list_fused = list(itertools.chain(node_list_1, node_list_2))
+
+    #     # We can not accurately benchmark kernel using atomic_add
+    #     # due to how we generate random integer inputs.
+    #     # Skip benchmarking them by allowing fusion.
+    #     if self._any_atomic_add(node_list_fused):
+    #         return True
+
+    #     from triton.compiler.errors import CompilationError
+
+    #     why = WhyNoFuse(node1, node2)
+
+    #     def log_fusion(ms_fused: float, ms1: float, ms2: float) -> None:
+    #         if fusion_log.isEnabledFor(logging.DEBUG):
+    #             if ms_fused < ms1 + ms2:
+    #                 fusion_log.debug(
+    #                     "can fuse (benchmark): fusing %s with %s cause %sx speedup",
+    #                     node1.get_buffer_names(),
+    #                     node2.get_buffer_names(),
+    #                     green_text(f"{(ms1 + ms2) / ms_fused:.3f}"),
+    #                 )
+    #             else:
+    #                 fusion_log.debug(
+    #                     "cannot fuse (benchmark): fusing %s with %s cause %sx slowdown",
+    #                     node1.get_buffer_names(),
+    #                     node2.get_buffer_names(),
+    #                     red_text(f"{ms_fused / (ms1 + ms2):.3f}"),
+    #                 )
+
+    #     # After the succesful fusion with Template, we finalize its config.
+    #     # Subsequently we benchmark but dont update. Checking for SchedulerNode, instead of FusedSchedulerNode
+    #     # accomplishes this.
+    #     if is_multi_template and any(
+    #         n.get_template_node() is not None and isinstance(n, SchedulerNode)
+    #         for n in (node1, node2)
+    #     ):
+    #         epilogue_fusion = node1.get_template_node() is not None
+
+    #         multi_node = node1.node if epilogue_fusion else node2.node
+    #         assert isinstance(multi_node, ir.MultiTemplateBuffer)
+    #         choice_timings = multi_node.choice_timings
+    #         _, ms1 = multi_node.get_min_choice()
+
+    #         non_template_nodes = node_list_2 if epilogue_fusion else node_list_1
+
+    #         ms2, path2 = self.benchmark_fused_nodes(non_template_nodes)
+
+    #         min_ms_fused = float("inf")
+    #         ms_fused_choice = None
+
+    #         triton_choices = 0
+    #         for choice, unfused_time in sorted(
+    #             choice_timings.items(), key=lambda x: x[1]
+    #         ):
+    #             if not isinstance(choice, torch._inductor.ir.TritonTemplateCallerBase):
+    #                 continue
+
+    #             if unfused_time >= ms1 + ms2:
+    #                 break
+
+    #             triton_choices += 1
+    #             if triton_choices > config.max_epilogue_benchmarked_choices:
+    #                 break
+
+    #             # TODO - parallel compile triton templates
+    #             # TODO - should prune/skip choices that are not within certain % of best choice
+    #             with multi_node.swap_as_triton_caller(choice):
+    #                 ms_fused, path = self.benchmark_fused_nodes(node_list_fused)
+
+    #                 if ms_fused < min_ms_fused:
+    #                     min_ms_fused = ms_fused
+    #                     ms_fused_choice = choice
+
+    #         log_fusion(min_ms_fused, ms1, ms2)
+
+    #         # after we do a fusion, we finalize a triton template.
+    #         # TODO - could preserve multi template and choices for subsequent fusions
+    #         if min_ms_fused < (ms1 + ms2) and ms_fused_choice is not None:
+    #             multi_node.finalize_as_triton_caller(ms_fused_choice)
+    #             return True
+    #         else:
+    #             return False
+    #     else:
+    #         try:
+    #             ms1, path1 = self.benchmark_fused_nodes(node_list_1)
+    #             if math.isinf(ms1):
+    #                 why("register spilling of the first kernel")
+    #                 return False
+    #             ms2, path2 = self.benchmark_fused_nodes(node_list_2)
+    #             if math.isinf(ms2):
+    #                 why("register spilling of the second kernel")
+    #                 return False
+    #             ms_fused, path_fused = self.benchmark_fused_nodes(node_list_fused)
+    #             if math.isinf(ms_fused):
+    #                 why("register spilling of the fused kernel")
+    #                 return False
+    #         except CompilationError as e:
+    #             # workaround triton issue: https://github.com/openai/triton/issues/2151
+    #             if "Loop-carried variable" in str(e):
+    #                 return True  # allow fusion
+    #             else:
+    #                 raise
+
+    #     log_fusion(ms_fused, ms1, ms2)
+    #     if (
+    #         is_metric_table_enabled("slow_fusion")
+    #         and ms_fused >= ms1 + ms2
+    #         and (path1, path2) not in self.logged_slow_fusion
+    #     ):
+    #         self.logged_slow_fusion.add((path1, path2))
+    #         get_metric_table("slow_fusion").add_row(
+    #             lambda: {
+    #                 "kernel1_path": path1,
+    #                 "kernel1_latency": ms1,
+    #                 "kernel2_path": path2,
+    #                 "kernel2_latency": ms2,
+    #                 "fused_kernel_path": path_fused,
+    #                 "fused_kernel_latency": ms_fused,
+    #                 "slow_down_ratio": ms_fused / (ms1 + ms2),
+    #             }
+    #         )
+    #     return ms_fused < ms1 + ms2
 
     def fuse_nodes_once(
         self, nodes: List[BaseSchedulerNode]
@@ -2773,27 +2995,80 @@ class Scheduler:
             fusion_log.debug("fuse_nodes_once, candidates:")
             for node in fused_nodes:
                 fusion_log.debug("  " + node.debug_str_short())  # noqa: G003
+
+        pending_fusions: Dict[
+            BaseSchedulerNode,
+            Tuple[Callable[[], bool], BaseSchedulerNode, BaseSchedulerNode],
+        ] = {}
+
+        def get_fused_node(node: BaseSchedulerNode) -> BaseSchedulerNode:
+            return self.name_to_fused_node[node.get_first_name()]
+
+        def fuse_two_nodes(
+            node1: BaseSchedulerNode, node2: BaseSchedulerNode
+        ) -> BaseSchedulerNode:
+            fusion_log.debug("fusing %s with %s", node1.get_name(), node2.get_name())
+
+            # above can_fuse asserts that node2 has the same device
+            device = node1.get_device()
+            node3 = self.get_backend(device).fuse(node1, node2)
+            fused_nodes.remove(node1)
+            fused_nodes.remove(node2)
+            fused_nodes.add(node3)
+            self.name_to_fused_node.update(
+                {n.get_name(): node3 for n in node3.get_nodes()}
+            )
+            return node3
+
         for node1, node2 in self.get_possible_fusions(nodes):
-            node1 = self.name_to_fused_node[node1.get_first_name()]
-            node2 = self.name_to_fused_node[node2.get_first_name()]
+            while (
+                get_fused_node(node1) in pending_fusions
+                or get_fused_node(node2) in pending_fusions
+            ):
+                fused_node1 = get_fused_node(node1)
+                fused_node2 = get_fused_node(node2)
+                pending_fusion = pending_fusions.get(
+                    fused_node1, pending_fusions.get(fused_node2, None)
+                )
+                breakpoint()
+                assert pending_fusion is not None
+
+                is_speedup, node_key1, node_key2 = pending_fusion
+                pending_fusions.pop(node_key1, None)
+                pending_fusions.pop(node_key2, None)
+
+                if not is_speedup():
+                    continue
+
+                fuse_two_nodes(node_key1, node_key2)
+
+            node1 = get_fused_node(node1)
+            node2 = get_fused_node(node2)
+
             if self.can_fuse(node1, node2) and not self.will_fusion_create_cycle(
                 node1, node2
             ):
-                if not self.speedup_by_fusion(node1, node2):
+                speedup = self.speedup_by_fusion(node1, node2)
+                if callable(speedup):
+                    pending_fusions[node1] = (speedup, node1, node2)
+                    pending_fusions[node2] = (speedup, node1, node2)
                     continue
-                fusion_log.debug(
-                    "fusing %s with %s", node1.get_name(), node2.get_name()
-                )
 
-                # above can_fuse asserts that node2 has the same device
-                device = node1.get_device()
-                node3 = self.get_backend(device).fuse(node1, node2)
-                fused_nodes.remove(node1)
-                fused_nodes.remove(node2)
-                fused_nodes.add(node3)
-                self.name_to_fused_node.update(
-                    {n.get_name(): node3 for n in node3.get_nodes()}
-                )
+                if not speedup:
+                    continue
+
+                fuse_two_nodes(node1, node2)
+
+        seen_pair_speedup_fn: OrderedSet[Callable[[], bool]] = OrderedSet()
+        for is_speedup, node_key1, node_key2 in pending_fusions.values():
+            if is_speedup in seen_pair_speedup_fn:
+                continue
+
+            seen_pair_speedup_fn.add(is_speedup)
+
+            if is_speedup():
+                fuse_two_nodes(node_key1, node_key2)
+
         nodes = sorted(fused_nodes, key=lambda x: x.min_order)
         nodes = self.topological_sort_schedule(nodes)
         self.prune_redundant_deps(nodes)
@@ -3962,6 +4237,13 @@ class BaseScheduling:
     ) -> Tuple[float, str]:
         """
         Benchmark fused list of nodes and return the execution time
+        in milliseconds on randomly generated inputs.
+        """
+        raise NotImplementedError
+
+    def benchmark_codegened_module(self, module: ModuleType) -> Tuple[float, str]:
+        """
+        Benchmark a compiled module and return the execution time
         in milliseconds on randomly generated inputs.
         """
         raise NotImplementedError

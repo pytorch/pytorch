@@ -94,6 +94,9 @@ class CUDACombinedScheduling(BaseScheduling):
     def benchmark_fused_nodes(self, nodes):
         return self._triton_scheduling.benchmark_fused_nodes(nodes)
 
+    def benchmark_codegened_module(self, module):
+        return self._triton_scheduling.benchmark_codegened_module(module)
+
     def generate_kernel_code_from_nodes(self, nodes, benchmark_kernel=False):
         return self._triton_scheduling.generate_kernel_code_from_nodes(
             nodes, benchmark_kernel
