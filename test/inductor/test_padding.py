@@ -487,7 +487,7 @@ class PaddingTest(TestCaseBase):
 
         # make sure the load for softmax is aligned
         self.assertTrue(
-            "tl.load(in_ptr0 + (r1 + 30528*x0)" in forward_wrapper,
+            "tl.load(in_ptr0 + (r0_1 + 30528*x0)" in forward_wrapper,
             f"forward_wrapper: {forward_wrapper}",
         )
 
