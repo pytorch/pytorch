@@ -38,9 +38,11 @@ def run_cmd(
 
 
 def interpreter_version(interpreter: str) -> str:
-    version_string = run_cmd(
-        [interpreter, "--version"], capture_output=True
-    ).stdout.decode("utf-8").strip()
+    version_string = (
+        run_cmd([interpreter, "--version"], capture_output=True)
+        .stdout.decode("utf-8")
+        .strip()
+    )
     return str(version_string.split(" ")[1])
 
 
