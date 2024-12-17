@@ -407,3 +407,8 @@ struct TORCH_API PackedEmbeddingBagWeight : public EmbeddingPackedParamsBase {
       bool include_last_offset,
       bool is_embedding_op) override;
 };
+
+TORCH_API int register_linear_params();
+int register_embedding_params();
+
+template <int kSpatialDim = 2> TORCH_API int register_conv_params();
