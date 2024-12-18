@@ -39,9 +39,18 @@ def test_cpu():
 
 HAS_CPU = LazyVal(test_cpu)
 
-HAS_CUDA = torch.cuda.is_available() and has_triton()
+HAS_TRITON = has_triton()
 
-HAS_XPU = torch.xpu.is_available() and has_triton()
+if HAS_TRITON:
+    import triton
+    TRITON_HAS_CPU = "cpu" in triton.backends.backends
+else:
+    TRITON_HAS_CPU = False
+
+
+HAS_CUDA = torch.cuda.is_available() and HAS_TRITON
+
+HAS_XPU = torch.xpu.is_available() and HAS_TRITON
 
 HAS_GPU = HAS_CUDA or HAS_XPU
 
@@ -74,6 +83,7 @@ def _check_has_dynamic_shape(
 def skipDeviceIf(cond, msg, *, device):
     if cond:
         def decorate_fn(fn):
+            @functools.wraps(fn)
             def inner(self, *args, **kwargs):
                 if not hasattr(self, "device"):
                     warn_msg = "Expect the test class to have attribute device but not found. "
@@ -101,6 +111,7 @@ def skip_windows_ci(name: str, file: str) -> None:
         raise unittest.SkipTest("requires sympy/functorch/filelock")
 
 requires_gpu = functools.partial(unittest.skipIf, not HAS_GPU, "requires gpu")
+requires_triton = functools.partial(unittest.skipIf, not HAS_TRITON, "requires triton")
 
 skipCUDAIf = functools.partial(skipDeviceIf, device="cuda")
 skipXPUIf = functools.partial(skipDeviceIf, device="xpu")
@@ -116,4 +127,4 @@ IS_H100 = LazyVal(
     and get_gpu_shared_memory() == 232448
 )
 
-IS_BIG_GPU = LazyVal(lambda: HAS_CUDA and is_big_gpu(0))
+IS_BIG_GPU = LazyVal(lambda: HAS_CUDA and is_big_gpu())

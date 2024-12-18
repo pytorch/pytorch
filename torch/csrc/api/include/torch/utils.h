@@ -5,8 +5,8 @@
 #include <torch/csrc/api/include/torch/types.h>
 #include <torch/csrc/autograd/grad_mode.h>
 #include <torch/csrc/autograd/profiler.h>
-#include <cstdint>
 
+// NOLINTBEGIN(misc-unused-using-decls)
 namespace torch {
 
 /// A RAII, thread-local guard that disabled gradient calculation.
@@ -89,7 +89,7 @@ using at::get_num_interop_threads;
 using at::set_num_interop_threads;
 
 // Returns true if both t1, t2 are undefined or both are defined and equal
-inline bool equal_if_defined(Tensor t1, Tensor t2) {
+inline bool equal_if_defined(const Tensor& t1, const Tensor& t2) {
   return (
       (!t1.defined() && !t2.defined()) ||
       (t1.defined() && t2.defined() && torch::equal(t1, t2)));
@@ -114,3 +114,4 @@ using at::RecordFunctionGuard;
 using at::removeCallback;
 
 } // namespace torch
+// NOLINTEND(misc-unused-using-decls)

@@ -136,7 +136,8 @@ class StoreTestBase:
 
     def _test_append(self, store):
         if not store.has_extended_api():
-            self.skipTest("Store doesn't support extended APIs")
+            # Just return for stores that don't support extended APIs.
+            return
         store.set("foo", "po")
         store.append("foo", "tato")
         store.append("bar", "po")
@@ -149,7 +150,8 @@ class StoreTestBase:
 
     def _test_multi_set(self, store):
         if not store.has_extended_api():
-            self.skipTest("Store doesn't support extended APIs")
+            # Just return for stores that don't support extended APIs.
+            return
         store.multi_set(["foo", "bar"], ["po", "tato"])
         self.assertEqual(b"po", store.get("foo"))
         self.assertEqual(b"tato", store.get("bar"))
@@ -159,7 +161,8 @@ class StoreTestBase:
 
     def _test_multi_get(self, store):
         if not store.has_extended_api():
-            self.skipTest("Store doesn't support extended APIs")
+            # Just return for stores that don't support extended APIs.
+            return
         store.set("foo", "po")
         store.set("bar", "tato")
         v0, v1 = store.multi_get(["foo", "bar"])
@@ -246,6 +249,10 @@ class PrefixStoreTest(TestCase):
             with self.subTest(f"Testing getting underlying_store for {type(store)}"):
                 prefix_store = dist.PrefixStore("prefix", store)
                 self.assertEqual(prefix_store.underlying_store, store)
+
+        # We do not allow passing in None as the underlying store, this would cause a segfault if used
+        with self.assertRaises(ValueError):
+            dist.PrefixStore("prefix", None)
 
 
 class PrefixFileStoreTest(TestCase, StoreTestBase):
@@ -509,6 +516,11 @@ class TCPStoreTest(TestCase, StoreTestBase):
             use_libuv=self._use_libuv,
         )
 
+    @skip_if_win32()
+    def test_world_size_0_raises(self):
+        with self.assertRaisesRegex(ValueError, "TCPStore world size cannot be 0"):
+            dist.TCPStore("localhost", 0, world_size=0, is_master=False)
+
 
 class LibUvTCPStoreTest(TCPStoreTest):
     _use_libuv = True
@@ -541,7 +553,7 @@ class LibUvTCPStoreTest(TCPStoreTest):
         )
 
         with self.assertRaisesRegex(NotImplementedError, err_msg_reg):
-            store = dist.TCPStore(
+            dist.TCPStore(
                 addr,
                 port,
                 1,
@@ -736,7 +748,7 @@ class RendezvousTCPTest(TestCase):
         url = self.create_tcp_url()
         test_store_timeout = timedelta(seconds=0.1)
         gen0 = dist.rendezvous(url + "&rank=0", timeout=timedelta(seconds=10))
-        store0, rank0, size0 = next(gen0)
+        store0, _, _ = next(gen0)
         store0.set_timeout(test_store_timeout)
         # this should time out in 0.1s. If the timeout passed into rendezvous was
         # not respected, it will take much longer to timeout.
@@ -754,7 +766,7 @@ class RendezvousTCPTest(TestCase):
         url = self.create_tcp_url()
         test_store_timeout = timedelta(seconds=0.1)
         gen0 = dist.rendezvous(url + "&rank=0", timeout=timedelta(seconds=10))
-        store0, rank0, size0 = next(gen0)
+        store0, _, _ = next(gen0)
         store0.set_timeout(test_store_timeout)
         # this should time out in 10s. If the timeout passed into rendezvous was
         # not respected, it will take much longer to timeout.
@@ -775,7 +787,7 @@ class RendezvousTCPTest(TestCase):
     def test_tcp_store_url_with_libuv(self):
         url = self.create_tcp_url()
         gen0 = dist.rendezvous(url + "&rank=0&use_libuv=1")
-        store0, rank0, size0 = next(gen0)
+        store0, _, _ = next(gen0)
         self.assertTrue(store0.libuvBackend)
 
 
@@ -1066,7 +1078,7 @@ class TestClientProtocol(TestCase):
         thread = threading.Thread(target=listen)
         thread.start()
 
-        store = dist.TCPStore(
+        dist.TCPStore(
             host_name="localhost",
             port=port,
             world_size=2,

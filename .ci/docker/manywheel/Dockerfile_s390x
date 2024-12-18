@@ -1,17 +1,20 @@
-FROM --platform=linux/s390x docker.io/ubuntu:24.04 as base
+FROM quay.io/pypa/manylinux_2_28_s390x as base
 
 # Language variables
 ENV LC_ALL=C.UTF-8
 ENV LANG=C.UTF-8
 ENV LANGUAGE=C.UTF-8
 
+ARG DEVTOOLSET_VERSION=13
 # Installed needed OS packages. This is to support all
 # the binary builds (torch, vision, audio, text, data)
-RUN apt update ; apt upgrade -y
-RUN apt install -y \
-  build-essential \
+RUN yum -y install epel-release
+RUN yum -y update
+RUN yum install -y \
+  sudo \
   autoconf \
   automake \
+  bison \
   bzip2 \
   curl \
   diffutils \
@@ -24,19 +27,40 @@ RUN apt install -y \
   util-linux \
   wget \
   which \
-  xz-utils \
+  xz \
+  yasm \
   less \
   zstd \
+  libgomp \
+  gcc-toolset-${DEVTOOLSET_VERSION}-gcc \
+  gcc-toolset-${DEVTOOLSET_VERSION}-gcc-c++ \
+  gcc-toolset-${DEVTOOLSET_VERSION}-binutils \
+  gcc-toolset-${DEVTOOLSET_VERSION}-gcc-gfortran \
   cmake \
-  python3 \
-  python3-dev \
-  python3-setuptools \
-  python3-yaml \
-  python3-typing-extensions \
-  libblas-dev \
-  libopenblas-dev \
-  liblapack-dev \
-  libatlas-base-dev
+  rust \
+  cargo \
+  llvm-devel \
+  libzstd-devel \
+  python3.12-devel \
+  python3.12-setuptools \
+  python3.12-pip \
+  python3-virtualenv \
+  python3.12-pyyaml \
+  python3.12-numpy \
+  python3.12-wheel \
+  python3.12-cryptography \
+  blas-devel \
+  openblas-devel \
+  lapack-devel \
+  atlas-devel \
+  libjpeg-devel \
+  libxslt-devel \
+  libxml2-devel \
+  openssl-devel \
+  valgrind
+
+ENV PATH=/opt/rh/gcc-toolset-${DEVTOOLSET_VERSION}/root/usr/bin:$PATH
+ENV LD_LIBRARY_PATH=/opt/rh/gcc-toolset-${DEVTOOLSET_VERSION}/root/usr/lib64:/opt/rh/gcc-toolset-${DEVTOOLSET_VERSION}/root/usr/lib:$LD_LIBRARY_PATH
 
 # git236+ would refuse to run git commands in repos owned by other users
 # Which causes version check to fail, as pytorch repo is bind-mounted into the image
@@ -44,14 +68,8 @@ RUN apt install -y \
 # For more details see https://github.com/pytorch/pytorch/issues/78659#issuecomment-1144107327
 RUN git config --global --add safe.directory "*"
 
-FROM base as openssl
-# Install openssl (this must precede `build python` step)
-# (In order to have a proper SSL module, Python is compiled
-# against a recent openssl [see env vars above], which is linked
-# statically. We delete openssl afterwards.)
-ADD ./common/install_openssl.sh install_openssl.sh
-RUN bash ./install_openssl.sh && rm install_openssl.sh
-ENV SSL_CERT_FILE=/opt/_internal/certs.pem
+# installed python doesn't have development parts. Rebuild it from scratch
+RUN /bin/rm -rf /opt/_internal /opt/python /usr/local/*/*
 
 # EPEL for cmake
 FROM base as patchelf
@@ -64,10 +82,43 @@ FROM patchelf as python
 # build python
 COPY manywheel/build_scripts /build_scripts
 ADD ./common/install_cpython.sh /build_scripts/install_cpython.sh
+ENV SSL_CERT_FILE=
 RUN bash build_scripts/build.sh && rm -r build_scripts
 
-FROM openssl as final
+FROM base as final
 COPY --from=python             /opt/python                           /opt/python
 COPY --from=python             /opt/_internal                        /opt/_internal
-COPY --from=python             /opt/python/cp39-cp39/bin/auditwheel /usr/local/bin/auditwheel
+COPY --from=python             /opt/python/cp39-cp39/bin/auditwheel  /usr/local/bin/auditwheel
 COPY --from=patchelf           /usr/local/bin/patchelf               /usr/local/bin/patchelf
+
+RUN alternatives --set python /usr/bin/python3.12
+RUN alternatives --set python3 /usr/bin/python3.12
+
+RUN pip-3.12 install typing_extensions
+
+ENTRYPOINT []
+CMD ["/bin/bash"]
+
+# install test dependencies:
+# - grpcio requires system openssl, bundled crypto fails to build
+# - ml_dtypes 0.4.0 requires some fixes provided in later commits to build
+RUN dnf install -y \
+  protobuf-devel \
+  protobuf-c-devel \
+  protobuf-lite-devel \
+  wget \
+  patch
+
+RUN env GRPC_PYTHON_BUILD_SYSTEM_OPENSSL=True pip3 install grpcio==1.65.4
+RUN cd ~ && \
+  git clone https://github.com/jax-ml/ml_dtypes && \
+  cd ml_dtypes && \
+  git checkout v0.4.0 && \
+  git submodule update --init --recursive && \
+  wget https://github.com/jax-ml/ml_dtypes/commit/b969f76914d6b30676721bc92bf0f6021a0d1321.patch && \
+  wget https://github.com/jax-ml/ml_dtypes/commit/d4e6d035ecda073eab8bcf60f4eef572ee7087e6.patch && \
+  patch -p1 < b969f76914d6b30676721bc92bf0f6021a0d1321.patch && \
+  patch -p1 < d4e6d035ecda073eab8bcf60f4eef572ee7087e6.patch && \
+  python3 setup.py bdist_wheel && \
+  pip3 install dist/*.whl && \
+  rm -rf ml_dtypes

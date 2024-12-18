@@ -98,20 +98,14 @@ def _unwrap_shared_qspec(
     return qspec
 
 
-def _has_same_dtype(qspec_a: QuantizationSpecBase, qspec_b: QuantizationSpecBase):
+def _has_same_attr(
+    qspec_a: QuantizationSpecBase, qspec_b: QuantizationSpecBase, attr_name: str
+):
     return (
-        hasattr(qspec_a, "dtype")
-        and hasattr(qspec_b, "dtype")
-        and qspec_a.dtype == qspec_b.dtype
-    )
-
-
-def _has_same_is_dynamic(qspec_a: QuantizationSpecBase, qspec_b: QuantizationSpecBase):
-    return (
-        hasattr(qspec_a, "is_dynamic")
-        and hasattr(qspec_b, "is_dynamic")
-        and qspec_a.is_dynamic == qspec_b.is_dynamic
-    )
+        hasattr(qspec_a, attr_name)
+        and hasattr(qspec_b, attr_name)
+        and getattr(qspec_a, attr_name) == getattr(qspec_b, attr_name)
+    ) or (not hasattr(qspec_a, attr_name) and not hasattr(qspec_b, attr_name))
 
 
 def _get_edge_or_node_to_qspec(
@@ -148,10 +142,18 @@ def _union_input_edge_with(
         qspec = edge_or_node_to_qspec[edge_or_node]
         root_qspec = _unwrap_shared_qspec(qspec, edge_or_node_to_qspec, shared_with_map)
     # TODO: add assertions for types of root qspecs
-    if (
-        root_qspec is not None
-        and _has_same_dtype(root_qspec, input_edge_root_qspec)
-        and _has_same_is_dynamic(root_qspec, input_edge_root_qspec)
+    if root_qspec is not None and all(
+        _has_same_attr(root_qspec, input_edge_root_qspec, attr)
+        for attr in [
+            "dtype",
+            "is_dynamic",
+            "quant_min",
+            "quant_max",
+            "qscheme",
+            "ch_axis",
+            "scale",
+            "zero_point",
+        ]
     ):
         # the input arg to the node should reuse the existing output observer for arg
         # since dtype is the same (we may want to extend this to be a more strict check
@@ -371,7 +373,6 @@ def _maybe_insert_input_observer_for_arg_or_kwarg(
 
     # otherwise, we'll insert a new observer/fake_quant node
 
-    existing_obs_node = None
     # skip inserting new observers if the same observer instance is inserted before for another user
     # Example:
     # conv1 -> obs1 -> existing_obs -> conv2
@@ -387,6 +388,7 @@ def _maybe_insert_input_observer_for_arg_or_kwarg(
         if id(maybe_obs_mod) == id(input_edge_obs_or_fq):
             return maybe_obs_node
 
+    assert isinstance(model.graph, Graph)
     new_arg = _insert_obs_or_fq(
         arg, input_edge_obs_or_fq, model, named_modules, model.graph
     )
@@ -533,6 +535,7 @@ def prepare(
     model: GraphModule,
     node_name_to_scope: Dict[str, Tuple[str, type]],
     is_qat: bool,
+    obs_or_fq_callback=None,
 ) -> GraphModule:
     # Since we are mutating the graph as we go, we iterate over the original
     # nodes before observer insertion, instead of model.graph.nodes.
@@ -547,6 +550,8 @@ def prepare(
     obs_or_fq_map = _get_obs_or_fq_map(
         edge_or_node_to_group_id, edge_or_node_to_qspec, is_qat
     )
+    if obs_or_fq_callback:
+        obs_or_fq_callback(model, obs_or_fq_map)
 
     for node in nodes_before_observation:
         # TODO: simplify logic for inserting observers

@@ -5,9 +5,7 @@
 #include <utility>
 #include <vector>
 
-namespace torch {
-namespace data {
-namespace transforms {
+namespace torch::data::transforms {
 
 /// A transformation of a batch to a new batch.
 template <typename InputBatch, typename OutputBatch>
@@ -48,6 +46,4 @@ class Transform
     return output_batch;
   }
 };
-} // namespace transforms
-} // namespace data
-} // namespace torch
+} // namespace torch::data::transforms

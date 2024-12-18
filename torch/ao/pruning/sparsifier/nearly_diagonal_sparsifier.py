@@ -33,7 +33,9 @@ class NearlyDiagonalSparsifier(base_sparsifier.BaseSparsifier):
         defaults = {"nearliness": nearliness}
         super().__init__(defaults=defaults)
 
-    def update_mask(self, module, tensor_name, nearliness, **kwargs):
+    def update_mask(  # type:ignore[override]
+        self, module, tensor_name, nearliness, **kwargs
+    ):
         mask = getattr(module.parametrizations, tensor_name)[0].mask
         mask.data = torch.zeros_like(mask)
         if nearliness <= 0:

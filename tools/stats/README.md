@@ -8,7 +8,7 @@ We track various stats about each CI job.
 2. When a workflow completes, a `workflow_run` event [triggers
    `upload-test-stats.yml`](https://github.com/pytorch/pytorch/blob/d9fca126fca7d7780ae44170d30bda901f4fe35e/.github/workflows/upload-test-stats.yml#L4).
 3. `upload-test-stats` downloads the raw stats from the intermediate data store
-   and uploads them as JSON to Rockset, our metrics backend.
+   and uploads them as JSON to s3, which then uploads to our database backend
 
 ```mermaid
 graph LR
@@ -18,10 +18,11 @@ graph LR
     S3 --> uts[upload-test-stats.yml]
     GHA --> uts
 
-    uts --json--> R[(Rockset)]
+    uts --json--> s3[(s3)]
+    s3 --> DB[(database)]
 ```
 
-Why this weird indirection? Because writing to Rockset requires special
+Why this weird indirection? Because writing to the database requires special
 permissions which, for security reasons, we do not want to give to pull request
 CI. Instead, we implemented GitHub's [recommended
 pattern](https://securitylab.github.com/research/github-actions-preventing-pwn-requests/)

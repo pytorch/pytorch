@@ -208,7 +208,7 @@ class WeightNormSparsifier(BaseSparsifier):
         mask.data = mask_reshape.squeeze().reshape(mask.shape).contiguous()
         return mask
 
-    def update_mask(
+    def update_mask(  # type: ignore[call-override, override]
         self,
         module,
         tensor_name,

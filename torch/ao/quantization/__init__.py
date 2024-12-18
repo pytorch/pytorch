@@ -177,7 +177,7 @@ def default_eval_fn(model, calib_data):
     Default evaluation function takes a torch.utils.data.Dataset or a list of
     input Tensors and run the model on the dataset
     """
-    for data, target in calib_data:
+    for data, _target in calib_data:
         model(data)
 
 
@@ -216,5 +216,5 @@ class _DerivedObserverOrFakeQuantize(ObserverBase):
     def forward(self, x: Tensor) -> Tensor:
         return x
 
-    def calculate_qparams(self):
+    def calculate_qparams(self):  # type:ignore[override]
         return self.derive_qparams_fn(self.obs_or_fqs)

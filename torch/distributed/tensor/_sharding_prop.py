@@ -21,7 +21,7 @@ from torch.distributed.tensor._op_schema import (
     TupleStrategy,
 )
 from torch.distributed.tensor._utils import (
-    compute_local_shape,
+    compute_local_shape_and_global_offset,
     compute_local_stride,
     try_find_mesh_from_args,
 )
@@ -104,8 +104,7 @@ class ShardingPropagator:
         if schema_info is not None:
             self.op_to_schema_info[op_overload] = schema_info
 
-    @lru_cache  # noqa: B019
-    def _propagate_tensor_meta(
+    def _propagate_tensor_meta_non_cached(
         self, op_schema: OpSchema
     ) -> Union[None, TensorMeta, Sequence[Optional[TensorMeta]]]:
         """
@@ -149,6 +148,12 @@ class ShardingPropagator:
         else:
             # if fake is not a tensor or tuple of tensor, return as none
             return None
+
+    @lru_cache  # noqa: B019
+    def _propagate_tensor_meta(
+        self, op_schema: OpSchema
+    ) -> Union[None, TensorMeta, Sequence[Optional[TensorMeta]]]:
+        return self._propagate_tensor_meta_non_cached(op_schema)
 
     def _wrap_output_spec_tensor_meta(
         self,
@@ -211,7 +216,7 @@ class ShardingPropagator:
         if op_schema.op is aten._local_scalar_dense.default:
             return OutputSharding(None, op_schema)
 
-        out_tensor_meta = self._propagate_tensor_meta(op_schema)
+        out_tensor_meta = self._propagate_tensor_meta_non_cached(op_schema)
 
         def spec_to_strategy(spec: object) -> object:
             if isinstance(spec, DTensorSpec):
@@ -484,7 +489,7 @@ class ShardingPropagator:
         expected_input_schema = list(schema.args_schema)
         # adjust shape to be the same as that of the _local_tensor
         # of the DTensor input arg at index 0, which is inferred
-        expected_input_schema[shape_idx] = compute_local_shape(
+        expected_input_schema[shape_idx], _ = compute_local_shape_and_global_offset(
             out_tensor_meta.shape, mesh, spec.placements
         )
 

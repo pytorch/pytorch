@@ -16,8 +16,7 @@
 #include <string>
 #include <type_traits>
 
-namespace torch {
-namespace nn {
+namespace torch::nn {
 
 /// The base class for all modules in PyTorch.
 ///
@@ -698,5 +697,4 @@ void Module::to_impl(Ts&&... ts) {
   }
 }
 
-} // namespace nn
-} // namespace torch
+} // namespace torch::nn

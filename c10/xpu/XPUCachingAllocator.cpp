@@ -168,6 +168,8 @@ class DeviceCachingAllocator {
         !block->allocated && block->event_count == 0 &&
         block->stream_uses.empty());
 
+    size_t original_block_size = block->size;
+    size_t requested_size = block->requested_size;
     auto& pool = *block->pool;
     const std::array<Block*, 2> merge_candidates = {block->prev, block->next};
     for (Block* merge_candidate : merge_candidates) {
@@ -180,8 +182,8 @@ class DeviceCachingAllocator {
 
     StatTypes stat_types = get_stat_types_for_pool(pool);
     for_each_selected_stat_type(stat_types, [&](size_t stat_type) {
-      stats.active_bytes[stat_type].decrease(block->size);
-      stats.requested_bytes[stat_type].decrease(block->requested_size);
+      stats.active_bytes[stat_type].decrease(original_block_size);
+      stats.requested_bytes[stat_type].decrease(requested_size);
     });
   }
 

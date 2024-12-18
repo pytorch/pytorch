@@ -12,7 +12,7 @@ from torch._functorch.utils import exposed_in
 def functional_call(
     module: "torch.nn.Module",
     parameter_and_buffer_dicts: Union[Dict[str, Tensor], Sequence[Dict[str, Tensor]]],
-    args: Union[Any, Tuple],
+    args: Optional[Union[Any, Tuple]] = None,
     kwargs: Optional[Dict[str, Any]] = None,
     *,
     tie_weights: bool = True,
@@ -157,7 +157,7 @@ def functional_call(
 
 @exposed_in("torch.func")
 def stack_module_state(
-    models: List[nn.Module],
+    models: Union[Sequence[nn.Module], nn.ModuleList],
 ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     """stack_module_state(models) -> params, buffers
 

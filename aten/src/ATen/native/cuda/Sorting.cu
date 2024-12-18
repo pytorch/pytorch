@@ -177,15 +177,14 @@ struct KthValueLauncher {
       cuda::detail::TensorInfo<scalar_t, index_t> values_info,
       int collapse_values_dim,
       cuda::detail::TensorInfo<int64_t, index_t> indices_info,
-      int collapse_indices_dim,
+      [[maybe_unused]] int collapse_indices_dim,
       cuda::detail::TensorInfo<const scalar_t, index_t> self_info,
       int collapse_self_dim,
       int64_t num_slices,
       int64_t slice_size) {
-    (void)collapse_indices_dim; // Suppress unused variable warning
     dim3 grid;
     if (!getGridFromTiles(num_slices, grid)) {
-      AT_ERROR("slices are too many");
+      TORCH_CHECK(false, "slices are too many");
     }
 
     dim3 block(std::min(
@@ -213,18 +212,16 @@ struct MedianLauncher {
   template <typename scalar_t, typename index_t, int all_dims>
   inline void launch(
       cuda::detail::TensorInfo<scalar_t, index_t> values_info,
-      int collapse_values_dim,
+      [[maybe_unused]] int collapse_values_dim,
       cuda::detail::TensorInfo<int64_t, index_t> indices_info,
-      int collapse_indices_dim,
+      [[maybe_unused]] int collapse_indices_dim,
       cuda::detail::TensorInfo<const scalar_t, index_t> self_info,
       int collapse_self_dim,
       int64_t num_slices,
       int64_t slice_size) {
-    (void)collapse_values_dim; // Suppress unused variable warning
-    (void)collapse_indices_dim; // Suppress unused variable warning
     dim3 grid;
     if (!getGridFromTiles(num_slices, grid)) {
-      AT_ERROR("slices are too many");
+      TORCH_CHECK(false, "slices are too many");
     }
 
     dim3 block(std::min(

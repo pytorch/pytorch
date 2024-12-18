@@ -122,9 +122,7 @@ def _lazy_init():
         # just return without initializing in that case.
         _tls.is_initializing = True
 
-        for calls in _lazy_seed_tracker.get_calls():
-            if calls:
-                _queued_calls.append(calls)
+        _queued_calls.extend(calls for calls in _lazy_seed_tracker.get_calls() if calls)
 
         try:
             for queued_call, orig_traceback in _queued_calls:
@@ -232,8 +230,15 @@ def get_device_capability(device: Optional[_device_t] = None) -> Dict[str, Any]:
         Dict[str, Any]: the xpu capability dictionary of the device
     """
     props = get_device_properties(device)
+    # pybind service attributes are no longer needed and their presence breaks
+    # the further logic related to the serialization of the created dictionary.
+    # In particular it filters out `<bound method PyCapsule._pybind11_conduit_v1_ of _XpuDeviceProperties..>`
+    # to fix Triton tests.
+    # This field appears after updating pybind to 2.13.6.
     return {
-        prop: getattr(props, prop) for prop in dir(props) if not prop.startswith("__")
+        prop: getattr(props, prop)
+        for prop in dir(props)
+        if not prop.startswith(("__", "_pybind11_"))
     }
 
 
@@ -388,6 +393,24 @@ def synchronize(device: _device_t = None) -> None:
     return torch._C._xpu_synchronize(device)
 
 
+def get_arch_list() -> List[str]:
+    r"""Return list XPU architectures this library was compiled for."""
+    if not is_available():
+        return []
+    arch_flags = torch._C._xpu_getArchFlags()
+    if arch_flags is None:
+        return []
+    return arch_flags.split()
+
+
+def get_gencode_flags() -> str:
+    r"""Return XPU AOT(ahead-of-time) build flags this library was compiled with."""
+    arch_list = get_arch_list()
+    if len(arch_list) == 0:
+        return ""
+    return f'-device {",".join(arch for arch in arch_list)}'
+
+
 def _get_generator(device: torch.device) -> torch._C.Generator:
     r"""Return the XPU Generator object for the given device.
 
@@ -440,6 +463,7 @@ from .memory import (
     empty_cache,
     max_memory_allocated,
     max_memory_reserved,
+    mem_get_info,
     memory_allocated,
     memory_reserved,
     memory_stats,
@@ -471,9 +495,11 @@ __all__ = [
     "device_of",
     "device_count",
     "empty_cache",
+    "get_arch_list",
     "get_device_capability",
     "get_device_name",
     "get_device_properties",
+    "get_gencode_flags",
     "get_rng_state",
     "get_rng_state_all",
     "get_stream",
@@ -486,6 +512,7 @@ __all__ = [
     "manual_seed_all",
     "max_memory_allocated",
     "max_memory_reserved",
+    "mem_get_info",
     "memory_allocated",
     "memory_reserved",
     "memory_stats",

@@ -30,7 +30,7 @@ class CUDACombinedScheduling(BaseScheduling):
         self._cuda_cpp_scheduling = CUDACPPScheduling(scheduler)
         self._rocm_cpp_scheduling = ROCmCPPScheduling(scheduler)
 
-    def get_backend_features(self, device):
+    def get_backend_features(self, device):  # type:ignore[override]
         return self._triton_scheduling.get_backend_features(device)
 
     def choose_node_backend(self, node: BaseSchedulerNode) -> BaseScheduling:
@@ -60,20 +60,23 @@ class CUDACombinedScheduling(BaseScheduling):
         self,
         template_node: BaseSchedulerNode,
         epilogue_nodes: Sequence[BaseSchedulerNode],
+        prologue_nodes: Sequence[BaseSchedulerNode],
     ):
         if self._cuda_cpp_scheduling.is_cuda_cpp_template(template_node):
-            assert epilogue_nodes is None or len(epilogue_nodes) == 0
+            assert not epilogue_nodes
+            assert not prologue_nodes
             return self._cuda_cpp_scheduling.codegen_template(
-                template_node, epilogue_nodes
+                template_node, epilogue_nodes, prologue_nodes
             )
         elif self._rocm_cpp_scheduling.is_rocm_cpp_template(template_node):
-            assert epilogue_nodes is None or len(epilogue_nodes) == 0
+            assert not epilogue_nodes
+            assert not prologue_nodes
             return self._rocm_cpp_scheduling.codegen_template(
-                template_node, epilogue_nodes
+                template_node, epilogue_nodes, prologue_nodes
             )
         else:
             return self._triton_scheduling.codegen_template(
-                template_node, epilogue_nodes
+                template_node, epilogue_nodes, prologue_nodes
             )
 
     def codegen_node(self, node: Union[FusedSchedulerNode, SchedulerNode]):

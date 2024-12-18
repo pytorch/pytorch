@@ -17,8 +17,7 @@
 #include <cstddef>
 #include <vector>
 
-namespace torch {
-namespace nn {
+namespace torch::nn {
 
 /// Base class for all (dimension-specialized) convolution modules.
 template <size_t D, typename Derived>
@@ -447,5 +446,4 @@ class TORCH_API ConvTranspose3dImpl
 /// `ModuleHolder` to learn about PyTorch's module storage semantics.
 TORCH_MODULE(ConvTranspose3d);
 
-} // namespace nn
-} // namespace torch
+} // namespace torch::nn

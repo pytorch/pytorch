@@ -89,11 +89,6 @@ Tensor _logcumsumexp_cuda(const Tensor& self, int64_t dim) {
 }
 
 void cumsum_cuda_kernel(const Tensor& result, const Tensor& self, int64_t dim) {
-  if (self.is_floating_point() || self.is_complex()) {
-    // See Note [Writing Nondeterministic Operations]
-    // Issue reporting nondeterministic behavior: https://github.com/pytorch/pytorch/issues/75240
-    globalContext().alertNotDeterministic("cumsum_cuda_kernel");
-  }
   auto result_ = contiguous_out_arg(result);
   launch_cumsum_cuda_kernel(*result_, self, dim);
   if (!result.is_same(*result_)) {
@@ -109,7 +104,7 @@ void cumprod_cuda_kernel(const Tensor& result, const Tensor& self, int64_t dim) 
   }
 }
 
-REGISTER_CUDA_DISPATCH(cumsum_stub, &cumsum_cuda_kernel);
-REGISTER_CUDA_DISPATCH(cumprod_stub, &cumprod_cuda_kernel);
+REGISTER_CUDA_DISPATCH(cumsum_stub, &cumsum_cuda_kernel)
+REGISTER_CUDA_DISPATCH(cumprod_stub, &cumprod_cuda_kernel)
 
 } // namespace at::native

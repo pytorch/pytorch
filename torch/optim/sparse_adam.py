@@ -5,7 +5,7 @@ import torch
 from torch import Tensor
 
 from . import _functional as F
-from .optimizer import _maximize_doc, Optimizer, ParamsT
+from .optimizer import _maximize_doc, _params_doc, Optimizer, ParamsT
 
 
 __all__ = ["SparseAdam"]
@@ -170,8 +170,7 @@ SparseAdam.__doc__ = rf"""SparseAdam implements a masked version of the Adam alg
 
 
     Args:
-        params (iterable): iterable of parameters to optimize or dicts defining
-            parameter groups
+        {_params_doc}
         lr (float, Tensor, optional): learning rate (default: 1e-3)
         betas (Tuple[float, float], optional): coefficients used for computing
             running averages of gradient and its square (default: (0.9, 0.999))
