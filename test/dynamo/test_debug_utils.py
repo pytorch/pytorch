@@ -45,7 +45,7 @@ def forward(self, x_1):
     """,  # NOQA: B950
         )
 
-        fp64_model, fp64_examples = debug_utils.cast_to_fp64(fx, (x,))
+        _, fp64_examples = debug_utils.cast_to_fp64(fx, (x,))
         self.assertEqual(fp64_examples, (x.to(torch.float64),))
 
         self.assertExpectedInline(
@@ -79,7 +79,7 @@ def forward(self, x_1):
                 _tensor_constant0
             )
             _tensor_constant0 = None
-            index: "f32[6144, 4190]" = torch.ops.aten.index.Tensor(
+            index: "f32[6144, 4190]" = torch.ops.aten.index.Tensor(  # noqa: F841
                 primals_48, [None, lift_fresh_copy]
             )
             lift_fresh_copy = None

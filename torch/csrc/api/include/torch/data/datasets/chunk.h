@@ -74,7 +74,7 @@ class BatchDataBuffer {
     if (batch_queue_.empty()) {
       AT_ASSERT(stop_);
       // All batches have been retrieved. Return an empty batch.
-      return nullopt;
+      return std::nullopt;
     }
 
     UnwrappedBatchData batch = std::move(batch_queue_.front());

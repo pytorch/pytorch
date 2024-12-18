@@ -52,6 +52,6 @@ void cos_kernel_cuda(TensorIteratorBase& iter) {
   }
 }
 
-REGISTER_DISPATCH(cos_stub, &cos_kernel_cuda);
+REGISTER_DISPATCH(cos_stub, &cos_kernel_cuda)
 
 } // namespace at::native

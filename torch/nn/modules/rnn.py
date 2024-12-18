@@ -237,8 +237,8 @@ class RNNBase(Module):
         # Short-circuits if any tensor in self._flat_weights is not acceptable to cuDNN
         # or the tensors in _flat_weights are of different dtypes
 
-        first_fw = self._flat_weights[0]
-        dtype = first_fw.dtype
+        first_fw = self._flat_weights[0]  # type: ignore[union-attr]
+        dtype = first_fw.dtype  # type: ignore[union-attr]
         for fw in self._flat_weights:
             if (
                 not isinstance(fw, Tensor)
@@ -252,7 +252,9 @@ class RNNBase(Module):
         # a sufficient check, because overlapping parameter buffers that don't completely
         # alias would break the assumptions of the uniqueness check in
         # Module.named_parameters().
-        unique_data_ptrs = {p.data_ptr() for p in self._flat_weights}
+        unique_data_ptrs = {
+            p.data_ptr() for p in self._flat_weights  # type: ignore[union-attr]
+        }
         if len(unique_data_ptrs) != len(self._flat_weights):
             return
 
@@ -267,7 +269,7 @@ class RNNBase(Module):
                     if self.proj_size > 0:
                         num_weights += 1
                     torch._cudnn_rnn_flatten_weight(
-                        self._flat_weights,
+                        self._flat_weights,  # type: ignore[arg-type]
                         num_weights,
                         self.input_size,
                         rnn.get_cudnn_mode(self.mode),
@@ -297,11 +299,11 @@ class RNNBase(Module):
     def check_input(self, input: Tensor, batch_sizes: Optional[Tensor]) -> None:
         if not torch.jit.is_scripting():
             if (
-                input.dtype != self._flat_weights[0].dtype
+                input.dtype != self._flat_weights[0].dtype  # type: ignore[union-attr]
                 and not torch._C._is_any_autocast_enabled()
             ):
                 raise ValueError(
-                    f"input must have the type {self._flat_weights[0].dtype}, got type {input.dtype}"
+                    f"input must have the type {self._flat_weights[0].dtype}, got type {input.dtype}"  # type: ignore[union-attr]
                 )
         expected_input_dim = 2 if batch_sizes is not None else 3
         if input.dim() != expected_input_dim:
@@ -482,14 +484,14 @@ class RNN(RNNBase):
     .. code-block:: python
 
         # Efficient implementation equivalent to the following with bidirectional=False
-        def forward(x, h_0=None):
+        def forward(x, hx=None):
             if batch_first:
                 x = x.transpose(0, 1)
             seq_len, batch_size, _ = x.size()
-            if h_0 is None:
-                h_0 = torch.zeros(num_layers, batch_size, hidden_size)
-            h_t_minus_1 = h_0
-            h_t = h_0
+            if hx is None:
+                hx = torch.zeros(num_layers, batch_size, hidden_size)
+            h_t_minus_1 = hx
+            h_t = hx
             output = []
             for t in range(seq_len):
                 for layer in range(num_layers):
@@ -525,14 +527,14 @@ class RNN(RNNBase):
             :attr:`dropout`. Default: 0
         bidirectional: If ``True``, becomes a bidirectional RNN. Default: ``False``
 
-    Inputs: input, h_0
+    Inputs: input, hx
         * **input**: tensor of shape :math:`(L, H_{in})` for unbatched input,
           :math:`(L, N, H_{in})` when ``batch_first=False`` or
           :math:`(N, L, H_{in})` when ``batch_first=True`` containing the features of
           the input sequence.  The input can also be a packed variable length sequence.
           See :func:`torch.nn.utils.rnn.pack_padded_sequence` or
           :func:`torch.nn.utils.rnn.pack_sequence` for details.
-        * **h_0**: tensor of shape :math:`(D * \text{num\_layers}, H_{out})` for unbatched input or
+        * **hx**: tensor of shape :math:`(D * \text{num\_layers}, H_{out})` for unbatched input or
           :math:`(D * \text{num\_layers}, N, H_{out})` containing the initial hidden
           state for the input sequence batch. Defaults to zeros if not provided.
 
@@ -714,7 +716,7 @@ class RNN(RNNBase):
                 result = _VF.rnn_tanh(
                     input,
                     hx,
-                    self._flat_weights,
+                    self._flat_weights,  # type: ignore[arg-type]
                     self.bias,
                     self.num_layers,
                     self.dropout,
@@ -726,7 +728,7 @@ class RNN(RNNBase):
                 result = _VF.rnn_relu(
                     input,
                     hx,
-                    self._flat_weights,
+                    self._flat_weights,  # type: ignore[arg-type]
                     self.bias,
                     self.num_layers,
                     self.dropout,
@@ -740,7 +742,7 @@ class RNN(RNNBase):
                     input,
                     batch_sizes,
                     hx,
-                    self._flat_weights,
+                    self._flat_weights,  # type: ignore[arg-type]
                     self.bias,
                     self.num_layers,
                     self.dropout,
@@ -752,7 +754,7 @@ class RNN(RNNBase):
                     input,
                     batch_sizes,
                     hx,
-                    self._flat_weights,
+                    self._flat_weights,  # type: ignore[arg-type]
                     self.bias,
                     self.num_layers,
                     self.dropout,
@@ -1122,7 +1124,7 @@ class LSTM(RNNBase):
             result = _VF.lstm(
                 input,
                 hx,
-                self._flat_weights,
+                self._flat_weights,  # type: ignore[arg-type]
                 self.bias,
                 self.num_layers,
                 self.dropout,
@@ -1135,7 +1137,7 @@ class LSTM(RNNBase):
                 input,
                 batch_sizes,
                 hx,
-                self._flat_weights,
+                self._flat_weights,  # type: ignore[arg-type]
                 self.bias,
                 self.num_layers,
                 self.dropout,
@@ -1391,7 +1393,7 @@ class GRU(RNNBase):
             result = _VF.gru(
                 input,
                 hx,
-                self._flat_weights,
+                self._flat_weights,  # type: ignore[arg-type]
                 self.bias,
                 self.num_layers,
                 self.dropout,
@@ -1404,7 +1406,7 @@ class GRU(RNNBase):
                 input,
                 batch_sizes,
                 hx,
-                self._flat_weights,
+                self._flat_weights,  # type: ignore[arg-type]
                 self.bias,
                 self.num_layers,
                 self.dropout,

@@ -490,6 +490,24 @@ def sin_override(x):
 m.impl("sin", sin_override, "CompositeImplicitAutograd")
 x = torch.randn(3)
 y = torch.sin(x)
+
+# should be a no-op
+@torch.library.custom_op("mylib::foobar", mutates_args={})
+def foobar(x: torch.Tensor) -> torch.Tensor:
+    return x.sin()
+
+# should be a no-op
+@foobar.register_fake
+def _(x):
+    return torch.empty_like(x)
+
+# should be a no-op
+m2.define("foobarbaz9996(Tensor x) -> Tensor")
+
+# should be a no-op
+@torch.library.register_fake("mylib4392::foobarbaz9996")
+def _(x):
+    return torch.empty_like(x)
         """
         script = script.strip()
         env = os.environ.copy()
@@ -2125,7 +2143,7 @@ TORCH_LIBRARY(test_autograd_function_backed_op, m) {
         )
 
         x = torch.ones(2, 2, requires_grad=True)
-        temp = x.clone().detach()
+        temp = x.detach().clone()
         out = (
             torch.ops.test_autograd_function_backed_op.custom_op_backed_by_autograd_fn(
                 x

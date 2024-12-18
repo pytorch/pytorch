@@ -7,15 +7,15 @@
 template <class T>
 class TORCH_PYTHON_API THPPointer {
  public:
-  THPPointer() : ptr(nullptr){};
-  explicit THPPointer(T* ptr) noexcept : ptr(ptr){};
+  THPPointer() : ptr(nullptr) {}
+  explicit THPPointer(T* ptr) noexcept : ptr(ptr) {}
   THPPointer(THPPointer&& p) noexcept : ptr(std::exchange(p.ptr, nullptr)) {}
   THPPointer(const THPPointer& p) = delete;
   THPPointer& operator=(const THPPointer&) = delete;
 
   ~THPPointer() {
     free();
-  };
+  }
   T* get() {
     return ptr;
   }

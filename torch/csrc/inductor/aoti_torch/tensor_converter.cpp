@@ -4,7 +4,7 @@
 namespace torch::aot_inductor {
 
 std::vector<AtenTensorHandle> unsafe_alloc_new_handles_from_tensors(
-    std::vector<at::Tensor>& tensors) {
+    const std::vector<at::Tensor>& tensors) {
   std::vector<AtenTensorHandle> result;
   result.reserve(tensors.size());
   for (auto tensor : tensors) {
