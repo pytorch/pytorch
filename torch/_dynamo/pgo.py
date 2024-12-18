@@ -19,6 +19,7 @@ import torch.distributed as dist
 from torch._dynamo.utils import dynamo_timed, get_chromium_event_logger, warn_once
 from torch._environment import is_fbcode
 from torch._logging._internal import trace_structured_artifact
+from torch.compiler._cache import CacheArtifactManager, CacheArtifactType
 
 
 if TYPE_CHECKING:
@@ -573,13 +574,17 @@ def get_code_state() -> DefaultDict[CodeId, CodeState]:
             # the actual location
             with open(path, "rb") as f:
                 try:
-                    _CODE_STATE = pickle.load(f)
+                    content = f.read()
+                    _CODE_STATE = pickle.loads(content)
                     chromium_log.add_event_data(name, cache_size_bytes=f.tell())
                 except Exception:
                     log.warning(
                         "get_code_state failed while reading %s", path, exc_info=True
                     )
                 else:
+                    CacheArtifactManager.record_artifact(
+                        CacheArtifactType.PGO, cache_key, content
+                    )
                     return hit("local")
 
     # Attempt remote
@@ -612,6 +617,9 @@ def get_code_state() -> DefaultDict[CodeId, CodeState]:
                             exc_info=True,
                         )
                     else:
+                        CacheArtifactManager.record_artifact(
+                            CacheArtifactType.PGO, cache_key, payload
+                        )
                         return hit("remote")
                 else:
                     log.info("get_code_state remote miss on %s", cache_key)
@@ -640,42 +648,56 @@ def put_code_state() -> None:
     put_remote_code_state(cache_key)
 
 
+def write_local_impl(cache_key: str, pickled_code: bytes) -> Optional[Tuple[str, int]]:
+    path = code_state_path(cache_key)
+
+    if path is None:
+        return None
+
+    # If the user isn't misusing our API, we should have exclusive access to
+    # this directory.  But it's not too hard
+
+    tmp_path = path + ".tmp"
+    lock_path = path + ".lock"
+    # We /mostly/ don't need the lock but the tmp file could be clobbered
+    # TODO: use a safe tempfile create to eliminate lock
+    from torch.utils._filelock import FileLock
+
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+
+    with FileLock(lock_path, timeout=LOCK_TIMEOUT):
+        with open(tmp_path, "wb") as f:
+            f.write(pickled_code)
+            size = f.tell()
+        os.rename(tmp_path, path)
+    return path, size
+
+
 def put_local_code_state(cache_key: str) -> None:
     with dynamo_timed(name := "pgo.put_local_code_state", log_pt2_compile_event=True):
         chromium_log = get_chromium_event_logger()
         chromium_log.add_event_data(name, cache_key=cache_key)
         assert _CODE_STATE is not None
 
-        path = code_state_path(cache_key)
+        pickled_code = pickle.dumps(_CODE_STATE)
 
-        if path is None:
+        CacheArtifactManager.record_artifact(
+            CacheArtifactType.PGO, cache_key, pickled_code
+        )
+
+        meta = write_local_impl(cache_key, pickled_code)
+        if meta is None:
             log.info("put_code_state: local cache disabled")
             return
+        path, size = meta
 
-        # If the user isn't misusing our API, we should have exclusive access to
-        # this directory.  But it's not too hard
-
-        tmp_path = path + ".tmp"
-        lock_path = path + ".lock"
-        # We /mostly/ don't need the lock but the tmp file could be clobbered
-        # TODO: use a safe tempfile create to eliminate lock
-        from torch.utils._filelock import FileLock
-
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-
-        with FileLock(lock_path, timeout=LOCK_TIMEOUT):
-            with open(tmp_path, "wb") as f:
-                pickle.dump(_CODE_STATE, f)
-                chromium_log.add_event_data(name, cache_size_bytes=f.tell())
-            os.rename(tmp_path, path)
-            log.info(
-                "put_code_state: wrote local %s, %d entries", path, len(_CODE_STATE)
-            )
-            trace_structured_artifact(
-                "put_local_code_state",
-                "string",
-                lambda: render_code_state(_CODE_STATE),
-            )
+        chromium_log.add_event_data(name, cache_size_bytes=size)
+        log.info("put_code_state: wrote local %s, %d entries", path, len(_CODE_STATE))
+        trace_structured_artifact(
+            "put_local_code_state",
+            "string",
+            lambda: render_code_state(_CODE_STATE),
+        )
 
 
 def put_remote_code_state(cache_key: str) -> None:

@@ -1,7 +1,11 @@
 # mypy: allow-untyped-defs
-from typing import Any, Callable, List, Optional, TypeVar
+from typing import Any, Callable, List, Optional, Tuple, TYPE_CHECKING, TypeVar
 
 import torch
+
+
+if TYPE_CHECKING:
+    from ._cache import CacheInfo
 
 
 __all__ = [
@@ -406,19 +410,34 @@ def is_dynamo_compiling() -> bool:
     return False
 
 
-def save_cache_artifacts() -> Optional[bytes]:
+def save_cache_artifacts() -> Optional[Tuple[bytes, "CacheInfo"]]:
     """
-    Serializes cache artifacts for hot loading
+    Serializes all the cache artifacts that were recorded since
+    torch.compiler.config.record_cache_artifacts was enabled for hot loading
+
+    Example:
+
+    - Set torch.compiler.config.record_cache_artifacts = True
+    - Execute torch.compile
+    - Call torch.compiler.save_cache_artifacts()
     """
-    from ._cache import CacheArtifactManager
+    from ._cache import CacheArtifactManager, CacheInfo
 
     return CacheArtifactManager.serialize()
 
 
-def load_cache_artifacts(serialized_artifacts: bytes) -> None:
+def load_cache_artifacts(serialized_artifacts: bytes) -> Optional["CacheInfo"]:
     """
-    Hot loads cache artifacts that were previously serializes
-    """
-    from ._cache import CacheArtifactManager
+    Hot loads cache artifacts that were previously serialized via
+    save_cache_artifacts
 
-    CacheArtifactManager.deserialize(serialized_artifacts)
+    Example:
+
+    # From a previous invocation
+    artifacts = torch.compiler.save_cache_artifacts()
+
+    torch.compiler.load_cache_artifacts(artifacts[0])
+    """
+    from ._cache import CacheArtifactManager, CacheInfo
+
+    return CacheArtifactManager.deserialize(serialized_artifacts)

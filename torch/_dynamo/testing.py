@@ -248,6 +248,11 @@ class CompileCounterWithBackend:
         self.graphs.append(gm)
         return lookup_backend(self.backend)(gm, example_inputs)
 
+    def clear(self) -> None:
+        self.frame_count = 0
+        self.op_count = 0
+        self.graphs = []
+
 
 # Equivalent to backend="eager", but also records graphs that
 # we can assert on
