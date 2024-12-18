@@ -355,17 +355,21 @@ class TestFP8MatmulCuda(TestCase):
         if torch.version.hip is None:
             self._test_tautological_mm(device, e4m3_type, e5m2_type, size=32)
             self._test_tautological_mm(device, e5m2_type, e4m3_type, size=48)
-        # According to https://docs.nvidia.com/cuda/cublas/#id99 8F_E5M2 MM is unsupported
-        with self.assertRaises(RuntimeError):
+            # According to https://docs.nvidia.com/cuda/cublas/#id99 8F_E5M2 MM is unsupported
+            with self.assertRaises(RuntimeError):
+                self._test_tautological_mm(device, e5m2_type, e5m2_type)
+        else:
+            # ROCm does support e5m2 MM
             self._test_tautological_mm(device, e5m2_type, e5m2_type)
 
         self._test_tautological_mm(device, size=64, out_dtype=torch.float16)
         self._test_tautological_mm(device, size=96, out_dtype=torch.float32)
-        # hipblaslt does not yet support bfloat16 output
+        self._test_tautological_mm(device, size=80, out_dtype=torch.bfloat16)
+
         if torch.version.hip is None:
-            self._test_tautological_mm(device, size=80, out_dtype=torch.bfloat16)
-        with self.assertRaises(RuntimeError):
-            self._test_tautological_mm(device, out_dtype=e5m2_type)
+            # hipblasLT does not trigger a RuntimeError, however it's still not supported
+            with self.assertRaises(RuntimeError):
+                self._test_tautological_mm(device, out_dtype=e5m2_type)
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     def test_float8_scale(self, device) -> None:
