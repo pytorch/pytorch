@@ -559,8 +559,12 @@ class SymNode:
         an unbacked one size, or a tensor reporting as non-contiguous even if it's
         contiguous if it would have been reported contiguous due to being empty.
         """
-        # TODO: use the file/line for some useful diagnostic on why a
-        # guard occurred
+        log.info(
+            'guard_size_oblivious %s File "%s:%s"',
+            self.expr,
+            file,
+            line,
+        )
         r = self.shape_env.evaluate_expr(
             self.expr, self.hint, fx_node=self.fx_node, size_oblivious=True
         )
