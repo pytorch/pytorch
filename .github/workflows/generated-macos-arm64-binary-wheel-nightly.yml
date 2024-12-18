@@ -84,17 +84,6 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-      - name: Install sccache (only for non-forked PRs, and pushes to trunk)
-        uses: nick-fields/retry@v3.0.0
-        if: ${{ github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository }}
-        with:
-          timeout_minutes: 5
-          max_attempts: 3
-          retry_wait_seconds: 90
-          command: |
-            sudo curl --retry 3 --retry-all-errors https://s3.amazonaws.com/ossci-macos/sccache_v2.15 --output /usr/local/bin/sccache
-            sudo chmod +x /usr/local/bin/sccache
-            echo "SCCACHE_BUCKET=ossci-compiler-cache-circleci-v2" >> "${GITHUB_ENV}"
       - name: Populate binary env
         run: |
           # shellcheck disable=SC1091
@@ -199,17 +188,6 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-      - name: Install sccache (only for non-forked PRs, and pushes to trunk)
-        uses: nick-fields/retry@v3.0.0
-        if: ${{ github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository }}
-        with:
-          timeout_minutes: 5
-          max_attempts: 3
-          retry_wait_seconds: 90
-          command: |
-            sudo curl --retry 3 --retry-all-errors https://s3.amazonaws.com/ossci-macos/sccache_v2.15 --output /usr/local/bin/sccache
-            sudo chmod +x /usr/local/bin/sccache
-            echo "SCCACHE_BUCKET=ossci-compiler-cache-circleci-v2" >> "${GITHUB_ENV}"
       - name: Populate binary env
         run: |
           # shellcheck disable=SC1091
@@ -314,17 +292,6 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-      - name: Install sccache (only for non-forked PRs, and pushes to trunk)
-        uses: nick-fields/retry@v3.0.0
-        if: ${{ github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository }}
-        with:
-          timeout_minutes: 5
-          max_attempts: 3
-          retry_wait_seconds: 90
-          command: |
-            sudo curl --retry 3 --retry-all-errors https://s3.amazonaws.com/ossci-macos/sccache_v2.15 --output /usr/local/bin/sccache
-            sudo chmod +x /usr/local/bin/sccache
-            echo "SCCACHE_BUCKET=ossci-compiler-cache-circleci-v2" >> "${GITHUB_ENV}"
       - name: Populate binary env
         run: |
           # shellcheck disable=SC1091
@@ -429,17 +396,6 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-      - name: Install sccache (only for non-forked PRs, and pushes to trunk)
-        uses: nick-fields/retry@v3.0.0
-        if: ${{ github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository }}
-        with:
-          timeout_minutes: 5
-          max_attempts: 3
-          retry_wait_seconds: 90
-          command: |
-            sudo curl --retry 3 --retry-all-errors https://s3.amazonaws.com/ossci-macos/sccache_v2.15 --output /usr/local/bin/sccache
-            sudo chmod +x /usr/local/bin/sccache
-            echo "SCCACHE_BUCKET=ossci-compiler-cache-circleci-v2" >> "${GITHUB_ENV}"
       - name: Populate binary env
         run: |
           # shellcheck disable=SC1091
@@ -544,17 +500,6 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-      - name: Install sccache (only for non-forked PRs, and pushes to trunk)
-        uses: nick-fields/retry@v3.0.0
-        if: ${{ github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository }}
-        with:
-          timeout_minutes: 5
-          max_attempts: 3
-          retry_wait_seconds: 90
-          command: |
-            sudo curl --retry 3 --retry-all-errors https://s3.amazonaws.com/ossci-macos/sccache_v2.15 --output /usr/local/bin/sccache
-            sudo chmod +x /usr/local/bin/sccache
-            echo "SCCACHE_BUCKET=ossci-compiler-cache-circleci-v2" >> "${GITHUB_ENV}"
       - name: Populate binary env
         run: |
           # shellcheck disable=SC1091
