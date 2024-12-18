@@ -20,7 +20,7 @@ from copy import deepcopy
 from dataclasses import dataclass
 from itertools import product
 from pathlib import Path
-from unittest.mock import patch, MagicMock, ANY
+from unittest.mock import patch
 
 import torch
 from torch.utils.serialization import config as serialization_config
@@ -4474,7 +4474,7 @@ class TestSerialization(TestCase, SerializationMixin):
     def test_use_pinned_memory_for_d2h(self):
 
         def patched_write_record(self, filename, data, nbytes):
-            if isinstance(data, torch.TypedStorage) or isinstance(data, torch.UntypedStorage):
+            if isinstance(data, (torch.TypedStorage, torch.UntypedStorage)):
                 if not data.is_pinned():
                     raise RuntimeError("Expected storage to be in pinned memory")
                 return None
@@ -4484,8 +4484,8 @@ class TestSerialization(TestCase, SerializationMixin):
         # Test that CUDA actually get moved to pinned memory on CPU
         with patch('torch._C.PyTorchFileWriter.write_record', patched_write_record):
             with tempfile.NamedTemporaryFile() as f:
-                    with self.assertRaisesRegex(RuntimeError, "Expected storage to be in pinned memory"):
-                        torch.save(sd, f)
+                with self.assertRaisesRegex(RuntimeError, "Expected storage to be in pinned memory"):
+                    torch.save(sd, f)
 
             with tempfile.NamedTemporaryFile() as f:
                 pinned_before = serialization_config.save.use_pinned_memory_for_d2h
