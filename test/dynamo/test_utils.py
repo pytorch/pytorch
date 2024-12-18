@@ -406,12 +406,12 @@ class TestInductorConfigParsingForLogging(TestCase):
             },
         }
         expected = (
-            """{"some": {"name": "Value is not JSON serializable", "some": true}, """
-            """"data": {"name": "Value is not JSON serializable", "some": true}, """
+            """{"data": {"name": "Value is not JSON serializable", "some": true}, """
             """"list": [{"name": "Value is not JSON serializable", "some": true}, """
             """{"name": "Value is not JSON serializable", "some": true}], """
-            """"object": {"name": "Value is not JSON serializable", "some": true, """
-            """"data": {"name": "Value is not JSON serializable", "some": true}}}"""
+            """"object": {"data": {"name": "Value is not JSON serializable", "some": true}, """
+            """"name": "Value is not JSON serializable", "some": true}, """
+            """"some": {"name": "Value is not JSON serializable", "some": true}}"""
         )
         mocked_inductor_config.get_config_copy.return_value = test_mock_config
         inductor_config_json = utils._scrubbed_inductor_config_for_logging()
