@@ -1126,6 +1126,14 @@ class DelayReplaceLine(DeferredLineBase):
 
 @functools.lru_cache(None)
 def is_big_gpu(index_or_device: Union[int, torch.device] = 0) -> bool:
+    if torch.cuda.is_available():
+        return is_big_gpu_cuda(index_or_device)
+    else:
+        return False
+
+
+@functools.lru_cache(None)
+def is_big_gpu_cuda(index_or_device: Union[int, torch.device] = 0) -> bool:
     if isinstance(index_or_device, torch.device):
         device = index_or_device
     else:
