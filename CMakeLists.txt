@@ -1158,6 +1158,11 @@ int main() {
   endif()
 endif()
 
+if (CXX_SVE_FOUND)
+  string(APPEND CMAKE_C_FLAGS " -march=armv8.6-a+sve")
+  string(APPEND CMAKE_CXX_FLAGS " -march=armv8.6-a+sve")
+endif()
+
 # Add code coverage flags to supported compilers
 if(USE_CPP_CODE_COVERAGE)
   if("${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU")
