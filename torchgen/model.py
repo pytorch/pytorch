@@ -5,9 +5,13 @@ import itertools
 import re
 from dataclasses import dataclass
 from enum import auto, Enum
-from typing import Callable, Iterator, Sequence
+from typing import Callable, TYPE_CHECKING
 
 from torchgen.utils import assert_never, NamespaceHelper, OrderedSet
+
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator, Sequence
 
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
@@ -245,10 +249,9 @@ class _TorchDispatchModeKey(Enum):
 
 
 def codegen_per_backend_entries() -> str:
-    r = []
+    r: list[str] = []
     for fk in FUNCTIONALITY_KEYS:
-        for bc in BACKEND_COMPONENTS:
-            r.append(f"    {fk}{bc} = auto()")
+        r.extend(f"    {fk}{bc} = auto()" for bc in BACKEND_COMPONENTS)
     return "\n".join(r)
 
 
@@ -279,6 +282,7 @@ dispatch_keys = [
     DispatchKey.CUDA,
     DispatchKey.MPS,
     DispatchKey.XPU,
+    DispatchKey.SparseXPU,
     DispatchKey.SparseCUDA,
     DispatchKey.SparseCsrCUDA,
     DispatchKey.QuantizedCPU,
@@ -289,6 +293,7 @@ dispatch_keys = [
     DispatchKey.CompositeExplicitAutogradNonFunctional,
     DispatchKey.NestedTensorCPU,
     DispatchKey.NestedTensorCUDA,
+    DispatchKey.NestedTensorXPU,
     # Meta is a magic key: it is automatically generated for structured
     # kernels
     DispatchKey.Meta,
@@ -344,6 +349,9 @@ def is_structured_dispatch_key(dk: DispatchKey) -> bool:
 def is_ufunc_dispatch_key(dk: DispatchKey) -> bool:
     # For now, ufunc dispatch keys coincide with structured keys
     return dk in UFUNC_DISPATCH_KEYS
+
+
+dispatch_device_map = {is_cuda_dispatch_key: "cuda", is_xpu_dispatch_key: "xpu"}
 
 
 # This is oddly named ScalarType and not DType for symmetry with C++
@@ -1510,7 +1518,7 @@ class FunctionSchema:
                     and self.returns[0].annotation == self_a.argument.annotation
                 )
             else:
-                # You can't method chain on non-tensor self arguments though (like a List[Tensor])
+                # You can't method chain on non-tensor self arguments though (like a list[Tensor])
                 # so in all other cases we expect the return type to be none.
                 assert len(self.returns) == 0
 
@@ -1892,7 +1900,6 @@ class BaseTy(Enum):
     Stream = auto()
     SymInt = auto()
     SymBool = auto()
-    ConstQuantizerPtr = auto()  # TODO: rename
     GraphModule = auto()
 
 

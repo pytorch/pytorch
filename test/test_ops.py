@@ -71,7 +71,6 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ROCM,
     TEST_WITH_TORCHDYNAMO,
     TEST_WITH_TORCHINDUCTOR,
-    TEST_WITH_UBSAN,
     TestCase,
     unMarkDynamoStrictTest,
 )
@@ -121,7 +120,6 @@ _ops_and_refs_with_no_numpy_ref = [op for op in ops_and_refs if op.ref is None]
 aten = torch.ops.aten
 
 meta_consistency_out_dtype_mismatch_xfails = {
-    xfail("abs"),
     xfail("addbmm"),
     xfail("addmv"),
     xfail("alias_copy"),
@@ -133,7 +131,6 @@ meta_consistency_out_dtype_mismatch_xfails = {
     xfail("as_strided_copy"),
     xfail("baddbmm"),
     xfail("bucketize"),
-    xfail("ceil"),
     xfail("conj_physical"),
     xfail("cross"),
     xfail("cummax"),
@@ -144,8 +141,6 @@ meta_consistency_out_dtype_mismatch_xfails = {
     xfail("expand_copy"),
     xfail("fft.ihfft2"),
     xfail("fft.ihfftn"),
-    xfail("floor"),
-    xfail("frac"),
     xfail("frexp"),
     xfail("geqrf"),
     xfail("heaviside"),
@@ -154,8 +149,6 @@ meta_consistency_out_dtype_mismatch_xfails = {
     xfail("index_copy"),
     xfail("index_select"),
     xfail("isin"),
-    xfail("isneginf"),
-    xfail("isposinf"),
     xfail("kthvalue"),
     xfail("lerp"),
     xfail("linalg.cross"),
@@ -174,7 +167,6 @@ meta_consistency_out_dtype_mismatch_xfails = {
     xfail("linalg.solve"),
     xfail("linalg.solve_ex"),
     xfail("linalg.solve_triangular"),
-    xfail("log_softmax"),
     xfail("logcumsumexp"),
     xfail("lu_solve"),
     xfail("lu_unpack"),
@@ -209,21 +201,16 @@ meta_consistency_out_dtype_mismatch_xfails = {
     xfail("scatter_reduce", "prod"),
     xfail("scatter_reduce", "sum"),
     xfail("searchsorted"),
-    xfail("sgn"),
-    xfail("sign"),
-    xfail("signbit"),
     xfail("slice_scatter"),
     xfail("softmax"),
     xfail("sort"),
     xfail("sparse.sampled_addmm"),
-    xfail("square"),
     xfail("squeeze_copy"),
     xfail("t_copy"),
     xfail("take"),
     xfail("transpose_copy"),
     xfail("tril"),
     xfail("triu"),
-    xfail("trunc"),
     xfail("unfold_copy"),
     xfail("unsqueeze_copy"),
     xfail("vdot"),
@@ -646,6 +633,11 @@ class TestCommon(TestCase):
         # Direct calls to refs and prims are not translated
         if TEST_WITH_ROCM and op.name == "_refs.fft.ihfftn" and dtype == torch.float16:
             self.skipTest("Skipped on ROCm")
+        if op.full_name == "_refs.div.floor_rounding" and dtype == torch.bfloat16:
+            self.skipTest(
+                "Skipped _refs.div.floor_rounding with bfloat16"
+                "Divide by 0: _refs produces NaN, torch produces +/-inf"
+            )
         self._ref_test_helper(contextlib.nullcontext, device, dtype, op)
 
     @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
@@ -660,16 +652,6 @@ class TestCommon(TestCase):
             and dtype == torch.float16
         ):
             self.skipTest("Skipped on ROCm")
-        # skip zero-dim tensors for some composites of reduction operations and view
-        skip_zero_dim_ops = [
-            "_refs.logsumexp",
-            "_refs.log_softmax",
-            "_refs.native_group_norm",
-            "_refs.softmax",
-            "_refs.sum_to_size",
-            "ops.nvprims.view",
-        ]
-
         from copy import copy
 
         from torch._prims.executor import make_traced
@@ -1057,7 +1039,7 @@ class TestCommon(TestCase):
                 try:
                     info = torch.iinfo(t.dtype)
                     return torch.full_like(t, info.max)
-                except TypeError as te:
+                except TypeError:
                     # for non-integer types fills with NaN
                     return torch.full_like(t, float("nan"))
 
@@ -1094,17 +1076,15 @@ class TestCommon(TestCase):
                     )
 
             # Case 3: out= with correct shape and dtype, but wrong device.
-            wrong_device = None
-            if torch.device(device).type != "cpu":
-                wrong_device = "cpu"
-            elif torch.cuda.is_available():
-                wrong_device = "cuda"
-
+            #   Expected behavior: throws an error.
+            #   This case is ignored on CPU to allow some scalar operations to succeed.
             factory_fn_msg = (
                 "\n\nNOTE: If your op is a factory function (i.e., it accepts TensorOptions) you should mark its "
                 "OpInfo with `is_factory_function=True`."
             )
-            if wrong_device is not None:
+
+            if torch.device(device).type != "cpu":
+                wrong_device = "cpu"
 
                 def _case_three_transform(t):
                     return make_tensor(t.shape, dtype=t.dtype, device=wrong_device)
@@ -1454,7 +1434,6 @@ class TestCommon(TestCase):
             self.assertEqual(actual, expected, exact_dtype=False)
 
     @ops(op_db, allowed_dtypes=(torch.bool,))
-    @unittest.skipIf(TEST_WITH_UBSAN, "Test uses undefined behavior")
     def test_non_standard_bool_values(self, device, dtype, op):
         # Test boolean values other than 0x00 and 0x01 (gh-54789)
         def convert_boolean_tensors(x):
@@ -1898,22 +1877,22 @@ class TestCompositeCompliance(TestCase):
             # all inputs
             for idx, arg in enumerate(args_raw):
                 if is_strided_tensor(arg):
-                    args_copy.append(arg.clone().detach())
+                    args_copy.append(arg.detach().clone())
                     args.append(torch._lazy_clone(arg))
                 else:
                     if torch.is_tensor(arg):
-                        args_copy.append(arg.clone().detach())
+                        args_copy.append(arg.detach().clone())
                     else:
                         args_copy.append(copy.deepcopy(arg))
                     args.append(arg)
 
             for kw, arg in kwargs_raw.items():
                 if is_strided_tensor(arg):
-                    kwargs_copy[kw] = arg.clone().detach()
+                    kwargs_copy[kw] = arg.detach().clone()
                     kwargs[kw] = torch._lazy_clone(arg)
                 else:
                     if torch.is_tensor(arg):
-                        kwargs_copy[kw] = arg.clone().detach()
+                        kwargs_copy[kw] = arg.detach().clone()
                     else:
                         kwargs_copy[kw] = copy.deepcopy(arg)
                     kwargs[kw] = arg
@@ -1962,7 +1941,7 @@ class TestCompositeCompliance(TestCase):
 
                     # Convert output grads to COW tensors and make copies
                     for output_grad in output_grads_raw:
-                        output_grads_copy.append(output_grad.clone().detach())
+                        output_grads_copy.append(output_grad.detach().clone())
                         output_grads.append(torch._lazy_clone(output_grad))
 
                     input_grads = torch.autograd.grad(
@@ -2763,7 +2742,7 @@ class TestFakeTensor(TestCase):
 
             try:
                 op(input, *args, **kwargs)
-            except Exception as e:
+            except Exception:
                 continue
 
             with TestPointwiseMode():

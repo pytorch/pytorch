@@ -37,19 +37,17 @@
 #include <torch/csrc/jit/tensorexpr/llvm_codegen.h>
 #include <torch/csrc/jit/tensorexpr/loopnest.h>
 #include <iterator>
-#include <mutex>
-#include <unordered_map>
 
 #include <ATen/CompositeExplicitAutogradFunctions.h>
 
+// clang-format off
 C10_DEFINE_bool(
     static_runtime_enable_fast_math,
     true,
     "If on, static runtime may use use optimizations that cause accuracy loss "
-    "vs the jit interpreter");
+    "vs the jit interpreter")
 
 namespace at::native {
-
 static void repeat_out(
     at::Tensor& result,
     const Tensor& self,
@@ -140,9 +138,9 @@ static at::Tensor& flatten_copy_out(
 
   // We don't want to infer_size on the entire shape, because that can give us
   // an extra degree of freedom we don't want; for example, consider shape [0,
-  // 1, 3, 0], with start_dim=1, end_dim=2. It's clear we want result shape [0,
-  // 3, 0] but passing [0, -1, 0] to infer_size means the -1 can take on any
-  // value and satisfy the constraints.
+  // 1, 3, 0], with start_dim=1, end_dim=2. It's clear we want result shape
+  // [0, 3, 0] but passing [0, -1, 0] to infer_size means the -1 can take on
+  // any value and satisfy the constraints.
   auto iter = self.sizes().data();
   auto slice_numel = std::accumulate(
       iter + start_dim,
@@ -326,8 +324,8 @@ static Tensor& c2_argmin_out(
                     return true;
                   }
                   // if a is not nan and b is nan, then a is not less than b
-                  // with LessOrNan semantics otherwise, act normally. If `b` is
-                  // NaN then a < b will always return false, so this is
+                  // with LessOrNan semantics otherwise, act normally. If `b`
+                  // is NaN then a < b will always return false, so this is
                   // equivalent to the first snippet.
                   return a < b;
                 });
@@ -378,7 +376,7 @@ static at::Tensor& dequantize_copy_out(Tensor& out, const Tensor& self) {
 
 namespace torch::jit {
 
-C10_DEFINE_REGISTRY(SROperatorRegistry, SROperatorFunctor);
+C10_DEFINE_REGISTRY(SROperatorRegistry, SROperatorFunctor)
 
 bool opIsRegistered(const c10::Symbol& op_name) {
   const std::string name(op_name.toQualString());
@@ -505,7 +503,7 @@ REGISTER_OPERATOR_FUNCTOR(
         }
         listConstructSlowPath(type, size, p_node);
       };
-    });
+    })
 
 static void tupleConstructSlowPath(const size_t size, ProcessedNode* p_node) {
   // prepare inputs
@@ -557,7 +555,7 @@ REGISTER_OPERATOR_FUNCTOR(
         }
         tupleConstructSlowPath(size, p_node);
       };
-    });
+    })
 
 REGISTER_OPERATOR_FUNCTOR(aten::abs, aten_abs, [](Node* n) -> SROperator {
   if (!n->matches(torch::schema("aten::abs(Tensor self) -> Tensor"))) {
@@ -574,7 +572,7 @@ REGISTER_OPERATOR_FUNCTOR(aten::abs, aten_abs, [](Node* n) -> SROperator {
     fastResizeToZero(out_t);
     at::native::abs_out(in0_t, out_t);
   };
-});
+})
 
 REGISTER_OPERATOR_FUNCTOR(aten::mul, aten_mul, [](Node* n) -> SROperator {
   if (!n->matches(torch::schema(
@@ -594,7 +592,7 @@ REGISTER_OPERATOR_FUNCTOR(aten::mul, aten_mul, [](Node* n) -> SROperator {
     fastResizeToZero(out_t);
     at::cpu::mul_out(out_t, in0_t, in1_t);
   };
-});
+})
 
 REGISTER_OPERATOR_FUNCTOR(aten::addmm, aten_addmm, [](Node* n) -> SROperator {
   if (!n->matches(torch::schema(
@@ -616,7 +614,7 @@ REGISTER_OPERATOR_FUNCTOR(aten::addmm, aten_addmm, [](Node* n) -> SROperator {
     fastResizeToZero(out_t);
     at::cpu::addmm_out(out_t, in0_t, in1_t, in2_t, in3_s, in4_s);
   };
-});
+})
 
 #ifdef FBCODE_CAFFE2
 // Disable externally to avoid MSVC errors in open-source CI
@@ -678,7 +676,7 @@ REGISTER_OPERATOR_FUNCTOR(
              &nan,
              &output_size});
       };
-    });
+    })
 
 #endif
 
@@ -723,7 +721,7 @@ REGISTER_OPERATOR_FUNCTOR(aten::clamp, aten_clamp, [](Node* n) -> SROperator {
   }
   LogAndDumpSchema(n);
   return nullptr;
-});
+})
 
 REGISTER_OPERATOR_FUNCTOR(aten::bmm, aten_bmm, [](Node* n) -> SROperator {
   if (!n->matches(
@@ -741,7 +739,7 @@ REGISTER_OPERATOR_FUNCTOR(aten::bmm, aten_bmm, [](Node* n) -> SROperator {
     fastResizeToZero(out_t);
     at::cpu::bmm_out(out_t, in0_t, in1_t);
   };
-});
+})
 
 REGISTER_OPERATOR_FUNCTOR(aten::nan_to_num, aten_nan_to_num, [](Node* n) -> SROperator {
   if (!n->matches(torch::schema(
@@ -762,7 +760,7 @@ REGISTER_OPERATOR_FUNCTOR(aten::nan_to_num, aten_nan_to_num, [](Node* n) -> SROp
     fastResizeToZero(out_t);
     at::native::nan_to_num_out(in0_t, in1_d, in2_d, in3_d, out_t);
   };
-});
+})
 
 namespace {
 
@@ -895,7 +893,7 @@ static SROperator aten_stack(Node* n) {
   };
 }
 
-REGISTER_OPERATOR_FUNCTOR(aten::stack, aten_stack, aten_stack);
+REGISTER_OPERATOR_FUNCTOR(aten::stack, aten_stack, aten_stack)
 
 REGISTER_OPERATOR_FUNCTOR(
     prim::VarStack,
@@ -913,7 +911,7 @@ REGISTER_OPERATOR_FUNCTOR(
         }
         varStackOut(*p_node, dim);
       };
-    });
+    })
 
 REGISTER_OPERATOR_FUNCTOR(aten::leaky_relu, aten_leaky_relu, [](Node* n) -> SROperator {
   if (!n->matches(torch::schema(
@@ -931,7 +929,7 @@ REGISTER_OPERATOR_FUNCTOR(aten::leaky_relu, aten_leaky_relu, [](Node* n) -> SROp
     auto& out_t = p_node->Output(0).toTensor();
     at::cpu::leaky_relu_out(out_t, in0_t, in1_s);
   };
-});
+})
 
 REGISTER_OPERATOR_FUNCTOR(aten::relu, aten_relu, [](Node* n) -> SROperator {
   if (!n->matches(torch::schema("aten::relu(Tensor self) -> Tensor"))) {
@@ -954,7 +952,7 @@ REGISTER_OPERATOR_FUNCTOR(aten::relu, aten_relu, [](Node* n) -> SROperator {
     int64_t nn = in0_t.numel();
     te->call({out_t.data_ptr(), in0_t.data_ptr(), &nn});
   };
-});
+})
 
 REGISTER_OPERATOR_FUNCTOR(aten::tanh, aten_tanh, [](Node* n) -> SROperator {
   if (!n->matches(torch::schema("aten::tanh(Tensor self) -> Tensor"))) {
@@ -977,7 +975,7 @@ REGISTER_OPERATOR_FUNCTOR(aten::tanh, aten_tanh, [](Node* n) -> SROperator {
     int64_t nn = in0_t.numel();
     te->call({out_t.data_ptr(), in0_t.data_ptr(), &nn});
   };
-});
+})
 
 REGISTER_OPERATOR_FUNCTOR(
     prim::TensorExprDynamicGroup,
@@ -1012,7 +1010,7 @@ REGISTER_OPERATOR_FUNCTOR(
           }
         }
       };
-    });
+    })
 
 REGISTER_OPERATOR_FUNCTOR(
     aten::sigmoid,
@@ -1038,7 +1036,7 @@ REGISTER_OPERATOR_FUNCTOR(
         int64_t nn = in0_t.numel();
         te->call({out_t.data_ptr(), in0_t.data_ptr(), &nn});
       };
-    });
+    })
 
 REGISTER_OPERATOR_FUNCTOR(aten::logit, aten_logit, [](Node* n) -> SROperator {
   if (!n->matches(torch::schema(
@@ -1046,16 +1044,13 @@ REGISTER_OPERATOR_FUNCTOR(aten::logit, aten_logit, [](Node* n) -> SROperator {
     LogAndDumpSchema(n);
     return nullptr;
   }
-  std::optional<float> clamp = std::nullopt;
+  std::optional<double> clamp = std::nullopt;
   if (n->inputs()[1]->node()->kind() == prim::Constant) {
     auto clamp_d = toIValue(n->inputs()[1])->toOptional<double>();
-    clamp = clamp_d
-        ? std::make_optional<float>(static_cast<float>(clamp_d.value()))
-        : std::nullopt;
+    clamp = clamp_d;
   }
   auto te = clamp ? createLogit() : nullptr;
-  float clamp_value = clamp ? *clamp : 0.0f;
-  return [te, clamp_value](ProcessedNode* p_node) {
+  return [te, clamp](ProcessedNode* p_node) {
     const auto& in0_t = p_node->Input(0).toTensor();
     if (p_node->Output(0).isNone()) {
       p_node->Output(0) = create_empty_from(in0_t);
@@ -1070,10 +1065,10 @@ REGISTER_OPERATOR_FUNCTOR(aten::logit, aten_logit, [](Node* n) -> SROperator {
     }
     at::native::resize_(out_t, in0_t.sizes(), std::nullopt);
     int64_t nn = in0_t.numel();
-    float c = clamp_value;
+    float c = clamp.value() ? static_cast<float>(clamp.value()) : 0;
     te->call({out_t.data_ptr(), in0_t.data_ptr(), &nn, &c});
   };
-});
+})
 
 REGISTER_OPERATOR_FUNCTOR(aten::clone, aten_clone, [](Node* n) -> SROperator {
   if (!n->matches(torch::schema(
@@ -1114,7 +1109,7 @@ REGISTER_OPERATOR_FUNCTOR(aten::clone, aten_clone, [](Node* n) -> SROperator {
         out_t.unsafeGetTensorImpl(), src.sizes(), src.strides());
     at::native::copy_(out_t, src, false);
   };
-});
+})
 
 REGISTER_OPERATOR_FUNCTOR(
     quantized::embedding_bag_byte_rowwise_offsets,
@@ -1152,7 +1147,7 @@ REGISTER_OPERATOR_FUNCTOR(
             compressed_indices_mapping,
             include_last_offset);
       };
-    });
+    })
 
 REGISTER_OPERATOR_FUNCTOR(
     quantized::embedding_bag_4bit_rowwise_offsets,
@@ -1190,7 +1185,7 @@ REGISTER_OPERATOR_FUNCTOR(
             compressed_indices_mapping,
             include_last_offset);
       };
-    });
+    })
 
 REGISTER_OPERATOR_FUNCTOR(
     quantized::embedding_bag_byte_prepack,
@@ -1211,7 +1206,7 @@ REGISTER_OPERATOR_FUNCTOR(
         fastResizeToZero(out_t);
         at::native::qembeddingbag_byte_prepack_out(out_t, weight);
       };
-    });
+    })
 
 // The out variant takes precedence over native
 REGISTER_OPERATOR_FUNCTOR(aten::narrow_copy, aten_narrow_copy, [](Node* n) -> SROperator {
@@ -1241,7 +1236,7 @@ REGISTER_OPERATOR_FUNCTOR(aten::narrow_copy, aten_narrow_copy, [](Node* n) -> SR
     fastResizeToZero(output);
     at::native::narrow_copy_dense_cpu_out(self, dim, start, length, output);
   };
-});
+})
 REGISTER_OPERATOR_FUNCTOR(aten::index, aten_index, [](Node* n) -> SROperator {
   if (!n->matches(torch::schema(
           "aten::index.Tensor(Tensor self, Tensor?[] indices) -> Tensor"))) {
@@ -1260,7 +1255,7 @@ REGISTER_OPERATOR_FUNCTOR(aten::index, aten_index, [](Node* n) -> SROperator {
     fastResizeToZero(out_t);
     at::cpu::index_out(out_t, in0_t, in1_l);
   };
-});
+})
 
 REGISTER_OPERATOR_FUNCTOR(
     aten::index_select,
@@ -1283,7 +1278,7 @@ REGISTER_OPERATOR_FUNCTOR(
         fastResizeToZero(out);
         at::native::index_select_out_cpu_(self, dim, index, out);
       };
-    });
+    })
 
 REGISTER_OPERATOR_FUNCTOR(aten::pow, aten_pow, [](Node* n) -> SROperator {
   if (n->matches(torch::schema(
@@ -1345,7 +1340,7 @@ REGISTER_OPERATOR_FUNCTOR(aten::pow, aten_pow, [](Node* n) -> SROperator {
   }
   LogAndDumpSchema(n);
   return nullptr;
-});
+})
 
 namespace {
 
@@ -1623,7 +1618,7 @@ REGISTER_OPERATOR_FUNCTOR(
           return to_maybe_copy_out_functor<false, false>;
         }
       }
-    });
+    })
 
 // out variant takes precedence over native
 // NB: This impl doesn't work for cpu->cuda copy/cast or vice versa.
@@ -1646,7 +1641,7 @@ REGISTER_OPERATOR_FUNCTOR(
       const bool has_memory_format = n->inputs().size() == 5;
       return get_to_copy_functor(
           has_constant_non_tensor_dtype_and_flags, has_memory_format);
-    });
+    })
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_OPERATOR_FUNCTOR(
@@ -1671,7 +1666,7 @@ REGISTER_OPERATOR_FUNCTOR(
         fastResizeToZero(out_t);
         at::native::dequantize_copy_out(out_t, self);
       };
-    });
+    })
 
 // Out variants for view ops are registered to a separate registry because
 // their outputs (views) can't participate in memory reuse.
@@ -1695,7 +1690,7 @@ REGISTER_OPERATOR_FUNCTOR(
         auto& out = p_node->Output(0).toTensor();
         at::native::reshape_copy_out(out, self, proposed_shape, true);
       };
-    });
+    })
 
 REGISTER_OPERATOR_FUNCTOR(
     static_runtime::flatten_copy,
@@ -1718,7 +1713,7 @@ REGISTER_OPERATOR_FUNCTOR(
         auto& out = p_node->Output(0).toTensor();
         at::native::flatten_copy_out(out, self, start_dim, end_dim);
       };
-    });
+    })
 
 REGISTER_OPERATOR_FUNCTOR(aten::sum, aten_sum, [](Node* n) -> SROperator {
   if (n->inputs().size() != 2 && n->inputs().size() != 4) {
@@ -1758,7 +1753,7 @@ REGISTER_OPERATOR_FUNCTOR(aten::sum, aten_sum, [](Node* n) -> SROperator {
   }
   LogAndDumpSchema(n);
   return nullptr;
-});
+})
 
 REGISTER_OPERATOR_FUNCTOR(aten::mean, aten_mean, [](Node* n) -> SROperator {
   if (n->matches(torch::schema(
@@ -1795,7 +1790,7 @@ REGISTER_OPERATOR_FUNCTOR(aten::mean, aten_mean, [](Node* n) -> SROperator {
 
   LogAndDumpSchema(n);
   return nullptr;
-});
+})
 
 REGISTER_OPERATOR_FUNCTOR(aten::repeat, aten_repeat, [](Node* n) -> SROperator {
   if (!n->matches(torch::schema(
@@ -1814,7 +1809,7 @@ REGISTER_OPERATOR_FUNCTOR(aten::repeat, aten_repeat, [](Node* n) -> SROperator {
     at::Tensor& output = p_node->Output(0).toTensor();
     at::native::repeat_out(output, self, repeats);
   };
-});
+})
 
 REGISTER_OPERATOR_FUNCTOR(aten::max, aten_max, [](Node* n) -> SROperator {
   if (n->matches(torch::schema(
@@ -1869,7 +1864,7 @@ REGISTER_OPERATOR_FUNCTOR(aten::max, aten_max, [](Node* n) -> SROperator {
 
   LogAndDumpSchema(n);
   return nullptr;
-});
+})
 
 REGISTER_OPERATOR_FUNCTOR(aten::sign, aten_sign, [](Node* n) -> SROperator {
   if (!n->matches(torch::schema("aten::sign.Tensor(Tensor input) -> Tensor"))) {
@@ -1886,7 +1881,7 @@ REGISTER_OPERATOR_FUNCTOR(aten::sign, aten_sign, [](Node* n) -> SROperator {
     fastResizeToZero(out_t);
     at::cpu::sign_out(out_t, in0_t);
   };
-});
+})
 
 REGISTER_OPERATOR_FUNCTOR(aten::div, aten_div, [](Node* n) -> SROperator {
   if (!n->matches(torch::schema(
@@ -1905,7 +1900,7 @@ REGISTER_OPERATOR_FUNCTOR(aten::div, aten_div, [](Node* n) -> SROperator {
     const auto& in0_t = p_node->Input(0).toTensor();
     std::optional<std::string_view> rounding_mode = std::nullopt;
     if (p_node->num_inputs() > 2) {
-      rounding_mode = p_node->Input(2).toOptional<c10::string_view>();
+      rounding_mode = p_node->Input(2).toOptional<std::string_view>();
     }
     const auto& in1_t = p_node->Input(1).isTensor()
         ? p_node->Input(1).toTensor()
@@ -1944,7 +1939,7 @@ REGISTER_OPERATOR_FUNCTOR(aten::div, aten_div, [](Node* n) -> SROperator {
       at::cpu::div_out(out_t, in0_t, in1_t, rounding_mode);
     }
   };
-});
+})
 
 REGISTER_OPERATOR_FUNCTOR(aten::log, aten_log, [](Node* n) -> SROperator {
   if (!n->matches(torch::schema("aten::log.Tensor(Tensor input) -> Tensor"))) {
@@ -1961,7 +1956,7 @@ REGISTER_OPERATOR_FUNCTOR(aten::log, aten_log, [](Node* n) -> SROperator {
     fastResizeToZero(out_t);
     at::cpu::log_out(out_t, in0_t);
   };
-});
+})
 
 REGISTER_OPERATOR_FUNCTOR(aten::sub, aten_sub, [](Node* n) -> SROperator {
   if (n->matches(torch::schema(
@@ -1997,7 +1992,7 @@ REGISTER_OPERATOR_FUNCTOR(aten::sub, aten_sub, [](Node* n) -> SROperator {
   }
   LogAndDumpSchema(n);
   return nullptr;
-});
+})
 
 // TODO: support clamp_min.Tensor(Tensor self, Tensor min) -> Tensor
 REGISTER_OPERATOR_FUNCTOR(
@@ -2020,7 +2015,7 @@ REGISTER_OPERATOR_FUNCTOR(
         fastResizeToZero(out_t);
         at::cpu::clamp_min_out(out_t, in0_t, in1_s);
       };
-    });
+    })
 
 REGISTER_OPERATOR_FUNCTOR(aten::argmin, aten_argmin, [](Node* n) -> SROperator {
   if (!n->matches(torch::schema(
@@ -2044,7 +2039,7 @@ REGISTER_OPERATOR_FUNCTOR(aten::argmin, aten_argmin, [](Node* n) -> SROperator {
     }
     at::cpu::argmin_out(out_t, in0_t, dim, keepdim);
   };
-});
+})
 
 REGISTER_OPERATOR_FUNCTOR(aten::softmax, aten_softmax, [](Node* n) -> SROperator {
   if (!n->matches(torch::schema(
@@ -2066,7 +2061,7 @@ REGISTER_OPERATOR_FUNCTOR(aten::softmax, aten_softmax, [](Node* n) -> SROperator
         dtype == at::ScalarType::Float;
     at::cpu::_softmax_out(out_t, in_t, dim, half_to_float);
   };
-});
+})
 
 namespace {
 
@@ -2122,7 +2117,7 @@ REGISTER_OPERATOR_FUNCTOR(aten::layer_norm, aten_layer_norm, [](Node* n) -> SROp
     at::Tensor& output = p_node->Output(0).toTensor();
     at::native::layer_norm_cpu_out(output, *X, *gamma, *beta, eps, M, N);
   };
-});
+})
 
 REGISTER_OPERATOR_FUNCTOR(aten::norm, aten_norm, [](Node* n) -> SROperator {
   if (n->matches(torch::schema(
@@ -2187,7 +2182,7 @@ REGISTER_OPERATOR_FUNCTOR(aten::norm, aten_norm, [](Node* n) -> SROperator {
   }
   LogAndDumpSchema(n);
   return nullptr;
-});
+})
 
 REGISTER_OPERATOR_FUNCTOR(aten::matmul, aten_matmul, [](Node* n) -> SROperator {
   if (!n->matches(
@@ -2207,7 +2202,7 @@ REGISTER_OPERATOR_FUNCTOR(aten::matmul, aten_matmul, [](Node* n) -> SROperator {
     fastResizeToZero(out_t);
     at::native::matmul_out(in0_t, in1_t, out_t);
   };
-});
+})
 
 REGISTER_OPERATOR_FUNCTOR(quantized::linear, quantized_linear, [](Node* n) -> SROperator {
   if (!n->matches(torch::schema(
@@ -2249,7 +2244,7 @@ REGISTER_OPERATOR_FUNCTOR(quantized::linear, quantized_linear, [](Node* n) -> SR
           input, output_scale, output_zero_point, out_t);
     }
   };
-});
+})
 
 REGISTER_OPERATOR_FUNCTOR(
     fb::quantized_linear,
@@ -2296,7 +2291,7 @@ REGISTER_OPERATOR_FUNCTOR(
               input, output_scale, output_zero_point, out_t);
         }
       };
-    });
+    })
 
 namespace {
 
@@ -2376,7 +2371,7 @@ REGISTER_OPERATOR_FUNCTOR(
         return nullptr;
       }
       return quantized_linear_dynamic_fp16_impl<false>(n);
-    });
+    })
 
 REGISTER_OPERATOR_FUNCTOR(
     quantized::linear_relu_dynamic_fp16,
@@ -2389,7 +2384,7 @@ REGISTER_OPERATOR_FUNCTOR(
         return nullptr;
       }
       return quantized_linear_dynamic_fp16_impl<true>(n);
-    });
+    })
 
 // device & pin_memory matter only when CUDA is enabled.
 static bool hasTensorWithOptions(
@@ -2438,7 +2433,7 @@ REGISTER_OPERATOR_FUNCTOR(aten::full, aten_full, [](Node* n) -> SROperator {
     p_node->Output(0) =
         at::native::full_out(size, fill_value, p_node->Output(0).toTensor());
   };
-});
+})
 
 REGISTER_OPERATOR_FUNCTOR(aten::full_like, aten_full_like, [](Node* n) -> SROperator {
   if (!n->matches(torch::schema(
@@ -2464,7 +2459,7 @@ REGISTER_OPERATOR_FUNCTOR(aten::full_like, aten_full_like, [](Node* n) -> SROper
     at::native::resize_(out_t, in0_t.sizes(), std::nullopt);
     at::native::fill_out(out_t, in1_s);
   };
-});
+})
 
 REGISTER_OPERATOR_FUNCTOR(aten::ones, aten_ones, [](Node* n) -> SROperator {
   if (!n->matches(torch::schema(
@@ -2487,7 +2482,7 @@ REGISTER_OPERATOR_FUNCTOR(aten::ones, aten_ones, [](Node* n) -> SROperator {
     fastResizeToZero(out_t);
     at::native::ones_out(size, out_t);
   };
-});
+})
 
 REGISTER_OPERATOR_FUNCTOR(aten::ones_like, aten_ones_like, [](Node* n) -> SROperator {
   if (!n->matches(torch::schema(
@@ -2512,7 +2507,7 @@ REGISTER_OPERATOR_FUNCTOR(aten::ones_like, aten_ones_like, [](Node* n) -> SROper
     fastResizeToZero(out_t);
     at::native::ones_out(self.sizes(), out_t);
   };
-});
+})
 
 REGISTER_OPERATOR_FUNCTOR(aten::zeros, aten_zeros, [](Node* n) -> SROperator {
   if (!n->matches(torch::schema(
@@ -2533,7 +2528,7 @@ REGISTER_OPERATOR_FUNCTOR(aten::zeros, aten_zeros, [](Node* n) -> SROperator {
     fastResizeToZero(out_t);
     at::compositeexplicitautograd::zeros_out(out_t, size);
   };
-});
+})
 
 REGISTER_OPERATOR_FUNCTOR(aten::linear, aten_linear, [](Node* n) -> SROperator {
   if (!n->matches(torch::schema(
@@ -2555,7 +2550,7 @@ REGISTER_OPERATOR_FUNCTOR(aten::linear, aten_linear, [](Node* n) -> SROperator {
     fastResizeToZero(out_t);
     at::native::linear_out(out_t, in0_t, in1_t, in2_t);
   };
-});
+})
 
 REGISTER_OPERATOR_FUNCTOR(aten::linalg_norm, aten_linalg_norm, [](Node* n) -> SROperator {
   if (n->matches(torch::schema(
@@ -2605,7 +2600,7 @@ REGISTER_OPERATOR_FUNCTOR(aten::linalg_norm, aten_linalg_norm, [](Node* n) -> SR
   }
   LogAndDumpSchema(n);
   return nullptr;
-});
+})
 
 REGISTER_OPERATOR_FUNCTOR(aten::cat, aten_cat, [](Node* n) -> SROperator {
   if (!n->matches(
@@ -2625,7 +2620,7 @@ REGISTER_OPERATOR_FUNCTOR(aten::cat, aten_cat, [](Node* n) -> SROperator {
     fastResizeToZero(output);
     at::cpu::cat_outf(inputs, dim, output);
   };
-});
+})
 
 REGISTER_OPERATOR_FUNCTOR(aten::cumsum, aten_cumsum, [](Node* n) -> SROperator {
   if (!n->matches(torch::schema(
@@ -2645,7 +2640,7 @@ REGISTER_OPERATOR_FUNCTOR(aten::cumsum, aten_cumsum, [](Node* n) -> SROperator {
     fastResizeToZero(output);
     at::cpu::cumsum_out(output, input, dim, dtype);
   };
-});
+})
 
 REGISTER_OPERATOR_FUNCTOR(
     aten::nonzero,
@@ -2665,7 +2660,7 @@ REGISTER_OPERATOR_FUNCTOR(
         fastResizeToZero(output);
         at::native::nonzero_out_cpu(input, output);
       };
-    });
+    })
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_OPERATOR_FUNCTOR(
@@ -2690,7 +2685,7 @@ REGISTER_OPERATOR_FUNCTOR(
         fastResizeToZero(out_t);
         at::cpu::cat_outf(inputs, dim, out_t);
       };
-    });
+    })
 
 namespace {
 // This template and its specialization help us avoid compiler warnings
@@ -2752,7 +2747,7 @@ REGISTER_OPERATOR_FUNCTOR(
         int64_t nn = input.numel();
         te->call({out.data_ptr(), input.data_ptr(), &nn});
       };
-    });
+    })
 
 REGISTER_OPERATOR_FUNCTOR(
     aten::remainder,
@@ -2790,7 +2785,7 @@ REGISTER_OPERATOR_FUNCTOR(
       // Unrecognized overload
       LogAndDumpSchema(n);
       return nullptr;
-    });
+    })
 
 REGISTER_OPERATOR_FUNCTOR(aten::where, aten_where, [](Node* n) -> SROperator {
   if (n->matches(torch::schema(
@@ -2811,7 +2806,7 @@ REGISTER_OPERATOR_FUNCTOR(aten::where, aten_where, [](Node* n) -> SROperator {
 
   LogAndDumpSchema(n);
   return nullptr;
-});
+})
 
 REGISTER_OPERATOR_FUNCTOR(
     prim::NumToTensor,
@@ -2833,7 +2828,7 @@ REGISTER_OPERATOR_FUNCTOR(
       }
       LogAndDumpSchema(n);
       return nullptr;
-    });
+    })
 
 REGISTER_OPERATOR_FUNCTOR(
     quantized::embedding_bag_byte_unpack,
@@ -2855,6 +2850,6 @@ REGISTER_OPERATOR_FUNCTOR(
         auto& out = pnode->Output(0).toTensor();
         at::native::qembeddingbag_byte_unpack_out(out, weight);
       };
-    });
+    })
 
 } // namespace torch::jit

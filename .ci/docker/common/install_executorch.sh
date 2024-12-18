@@ -43,14 +43,12 @@ install_pip_dependencies() {
 
 setup_executorch() {
   pushd executorch
-  # Setup swiftshader and Vulkan SDK which are required to build the Vulkan delegate
-  as_jenkins bash .ci/scripts/setup-vulkan-linux-deps.sh
 
   export PYTHON_EXECUTABLE=python
   export EXECUTORCH_BUILD_PYBIND=ON
   export CMAKE_ARGS="-DEXECUTORCH_BUILD_XNNPACK=ON -DEXECUTORCH_BUILD_KERNELS_QUANTIZED=ON"
 
-  as_jenkins .ci/scripts/setup-linux.sh cmake
+  as_jenkins .ci/scripts/setup-linux.sh cmake || true
   popd
 }
 

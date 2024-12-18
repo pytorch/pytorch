@@ -3,14 +3,14 @@
 import logging
 import operator
 from abc import ABC, abstractmethod
-from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import torch
 import torch.distributed as dist
 import torch.fx as fx
 import torch.nn as nn
 from torch._subclasses.fake_tensor import FakeTensor
-from torch.distributed._composable.fsdp.fully_shard import FSDPModule, fully_shard
+from torch.distributed.fsdp import FSDPModule, fully_shard
 from torch.fx.node import map_aggregate
 from torch.nn.parallel import DistributedDataParallel
 from torch.utils._pytree import tree_map_only
@@ -177,6 +177,8 @@ class _PipelineStageBase(ABC):
         self._outputs_meta: Optional[Tuple[torch.Tensor, ...]] = None
         # map microbatch ID to list of forward tensor args
         self.fwd_cache: Dict[int, Tuple[Any, List[torch.Tensor]]] = {}
+        # map microbatch ID to list of backward grad tensor args
+        self.bwd_cache: Dict[int, Tuple[Optional[torch.Tensor], ...]] = {}
         # Caching chunk outputs for final output merge or reduction
         self.output_chunks: List[Any] = []
 
@@ -345,7 +347,7 @@ class _PipelineStageBase(ABC):
     should be called at the appropriate time during the pipeline schedule (after forward or backward execution).
     """
 
-    def set_local_fwd_input(self, prev_stage_outputs: Any, mb_index: int):
+    def set_local_fwd_input(self, prev_stage_outputs: Any, mb_index: int) -> None:
         """
         Moves 'prev_stage_outputs' from another stage on the same rank into place as inputs for this stage. Avoids
         copying tensor data or using send/recv op.  Detaches original tensor and sets requires_grad so the
@@ -381,18 +383,18 @@ class _PipelineStageBase(ABC):
         assert not self.is_first, "can't get bwd output if this stage is first"
 
         self._check_chunk_id(mb_index)
-        # TODO(whc) we should be indexing mb_index into self.grads_input, but it appears we are only storing
-        # the most recently created grads which needs to be fixed not only here but also for get_bwd_send_ops.
+        return self.bwd_cache.pop(mb_index)
 
-        return self.grads_input
-
-    def set_local_bwd_input(self, next_stage_bwd_outputs: Tuple[Any], mb_index: int):
+    def set_local_bwd_input(
+        self, next_stage_bwd_outputs: Tuple[Optional[torch.Tensor], ...], mb_index: int
+    ) -> None:
         """
         Moves 'grad input' tensors from the next stage to 'grad_output' on this stage, avoiding a copy or send/recv.
         Does not detach or set '_requires_grad'.
         """
-        # TODO(whc) discrepancy between list/tuple type here. need to clean up
-        # assert isinstance(next_stage_bwd_outputs, tuple), f"Expected tuple, got {type(next_stage_bwd_outputs)}"
+        assert isinstance(
+            next_stage_bwd_outputs, tuple
+        ), f"Expected tuple, got {type(next_stage_bwd_outputs)}"
 
         assert (
             self.has_backward
@@ -478,7 +480,8 @@ class _PipelineStageBase(ABC):
             self.grad_send_info = self._create_grad_send_info(self.args_recv_info[0])
 
         ops: List[dist.P2POp] = []
-        for grad, grad_recv_stage in zip(self.grads_input, self.grad_send_info):
+        grads_input = self.bwd_cache.pop(bwd_chunk_id)
+        for grad, grad_recv_stage in zip(grads_input, self.grad_send_info):
             if isinstance(grad, torch.Tensor) and grad_recv_stage is not None:
                 logger.debug(
                     "%s Sending gradient to Stage %s: %s",
@@ -536,7 +539,7 @@ class _PipelineStageBase(ABC):
                 raise AssertionError(f"Expected _RecvInfo but got {type(info)}")
 
         tensors = map_aggregate(
-            recv_infos,
+            recv_infos,  # type: ignore[arg-type]
             get_recv_tensor,
         )
 
@@ -573,7 +576,7 @@ class _PipelineStageBase(ABC):
 
     def backward_maybe_with_nosync(
         self, backward_type, bwd_kwargs: Dict, last_backward=False
-    ):
+    ) -> Tuple[Tuple[Optional[torch.Tensor], ...], Optional[List[Dict[str, Any]]]]:
         """
         Whether using PP with FSDP or DDP, there are some runtime differences between the last backward step and the
         other steps.  Namely, we need to accumulate gradients on previous steps and reduce them on the last step, but
@@ -581,12 +584,20 @@ class _PipelineStageBase(ABC):
         This helper should adapt any pipeline parallel schedule to work with common/supported data parallel libraries.
         """
 
-        def perform_backward(backward_type):
+        def perform_backward(
+            backward_type,
+        ) -> Callable[
+            [],
+            Tuple[Tuple[Optional[torch.Tensor], ...], Optional[List[Dict[str, Any]]]],
+        ]:
             if backward_type == "full":
-                return lambda: stage_backward(
-                    bwd_kwargs["stage_output"],
-                    bwd_kwargs["output_grads"],
-                    bwd_kwargs["input_values"],
+                return lambda: (
+                    stage_backward(
+                        bwd_kwargs["stage_output"],
+                        bwd_kwargs["output_grads"],
+                        bwd_kwargs["input_values"],
+                    ),
+                    None,
                 )
             elif backward_type == "input":
                 return lambda: stage_backward_input(
@@ -596,8 +607,11 @@ class _PipelineStageBase(ABC):
                     self.submod.parameters(),
                 )
             elif backward_type == "weight":
-                return lambda: stage_backward_weight(
-                    self.submod.parameters(), bwd_kwargs["param_groups"]
+                return lambda: (
+                    stage_backward_weight(
+                        self.submod.parameters(), bwd_kwargs["param_groups"]
+                    ),
+                    None,
                 )
             else:
                 raise RuntimeError(f"Unknown backward type: {backward_type}")
@@ -640,12 +654,7 @@ class _PipelineStageBase(ABC):
             # Non-DP submodule, regular backward
             result = perform_backward(backward_type)()
 
-        if isinstance(result, tuple) and len(result) == 2:
-            # for stage_backward_input()
-            grads, param_groups = result
-        else:
-            grads, param_groups = result, None
-
+        grads, param_groups = result
         return grads, param_groups
 
     def forward_one_chunk(
@@ -762,11 +771,13 @@ class _PipelineStageBase(ABC):
                 "input_values": input_values,
             }
 
+        grads_input: Tuple[Optional[torch.Tensor], ...] = ()
+
         # Custom backward function
         if self.dw_builder:
             # TODO: We may want to change our semantics so we are allowed to ignore
             # the 'dw_builder' and call full_backward directly when it is a full_backward op.
-            self.grads_input, _ = self.backward_maybe_with_nosync(
+            grads_input, _ = self.backward_maybe_with_nosync(
                 "full", bwd_kwargs, last_backward=last_backward
             )
             if full_backward:
@@ -775,12 +786,11 @@ class _PipelineStageBase(ABC):
                 self.dw_runner[bwd_chunk_id] = self.dw_builder()
         else:
             if full_backward:
-                self.grads_input, _ = self.backward_maybe_with_nosync(
+                grads_input, _ = self.backward_maybe_with_nosync(
                     "full", bwd_kwargs, last_backward=last_backward
                 )
             else:
-                grads_input = []
-                param_groups = []
+                param_groups: List[Dict[str, Any]] | None = None
                 # Skip the backward for the first stage since we will perform the weight update with
                 # autograd.backward in backward_weight_one_chunk
                 if not self.is_first:
@@ -800,9 +810,10 @@ class _PipelineStageBase(ABC):
                     bwd_kwargs["stage_output"],
                     bwd_kwargs["output_grads"],
                 )
-                self.grads_input = grads_input
                 # Save a placeholder for the dw_runner
                 self.dw_runner[bwd_chunk_id] = lambda: None
+
+        self.bwd_cache[bwd_chunk_id] = grads_input
 
         if self.is_last and not self.is_first:
             # Autograd dependencies:
@@ -811,7 +822,8 @@ class _PipelineStageBase(ABC):
             # to return to the user in merge_output_chunks, therefore
             # this should be detached to release autograd graph context and free memory earlier
             for t in stage_output:
-                t.detach_()
+                if not t._is_view():  # views are not detachable in-place
+                    t.detach_()
 
         logger.debug("%s Backwarded chunk %s", self.log_prefix, bwd_chunk_id)
 
@@ -1047,8 +1059,8 @@ class _PipelineStage(_PipelineStageBase):
 
         args_recv_info: List[InputInfo] = []
         # Filter out placeholder nodes from `self.submod` (a GraphModule)
-        placeholders = filter(
-            lambda node: node.op == "placeholder", self.submod.graph.nodes
+        placeholders = filter(  # type: ignore[var-annotated]
+            lambda node: node.op == "placeholder", self.submod.graph.nodes  # type: ignore[arg-type, union-attr]
         )
         # `placeholders` are nodes internal to submod.
         # `self.node.args` are dependency nodes in the outer graph.
@@ -1125,7 +1137,7 @@ class _PipelineStage(_PipelineStageBase):
         return act_send_info
 
     def _get_output_node(self):
-        output_nodes = [node for node in self.submod.graph.nodes if node.op == "output"]
+        output_nodes = [node for node in self.submod.graph.nodes if node.op == "output"]  # type: ignore[union-attr]
         assert len(output_nodes) == 1
         output_node = output_nodes[0]
         return output_node
@@ -1200,163 +1212,6 @@ def build_stage(
         device,
         group,
     )
-
-
-# Manual PipelineStage functions and definition
-
-METADATA_TENSOR_LEN = 100
-PLACEHOLDER_VAL = -1
-
-
-def _create_empty_tensors(
-    tensor: Union[torch.Tensor, Iterable[torch.Tensor]], device: torch.device
-) -> List[torch.Tensor]:
-    """
-    Creates a list of empty tensors with the same properties (like shape and dtype) as the input tensor(s),
-    and places them on the specified device.
-    Args:
-        tensor (Union[torch.Tensor, List[torch.tensor]]): The input tensor(s).
-        device (torch.device): The device where the new tensors will be placed.
-    Returns:
-        List[torch.Tensor]: A list of empty tensors with the same properties as the input tensor(s).
-    """
-    if isinstance(tensor, torch.Tensor):
-        return [torch.empty_like(tensor, device=device)]
-    elif isinstance(tensor, (list, tuple)):
-        return [torch.empty_like(t, device=device) for t in tensor]
-    raise TypeError(f"Unsupported type {type(tensor)} cannot create empty tensors")
-
-
-def _create_metadata_tensor(
-    tensors: Optional[List[torch.Tensor]] = None,
-    device: Optional[torch.device] = torch.device("cpu"),
-) -> torch.Tensor:
-    """
-    Create a metadata tensor that can be sent over the wire.
-    This tensor contains the number of dimensions and the shape of each tensor being sent.
-
-    The data is of format [num_dims, dim1, dim2, ...].
-    If the tensor is None, a tensor of only placeholder values will be returned.
-
-    Inputs:
-        tensors: A list of tensors, the tensors will converted into its shape dimensions and
-                 these dimensions will be concatenated.
-        device: The device where the metadata tensor will be created.
-    If the tensor is None, then this tensor will contain PLACEHOLDER_VALs.
-
-    """
-    metadata_tensor = torch.full(
-        (METADATA_TENSOR_LEN,),
-        PLACEHOLDER_VAL,
-        dtype=torch.int32,
-        device=device,
-    )
-    if tensors:
-        # Create a list of tensors containing the number of dimensions and the shape of each tensor
-        data = [
-            # data is of format [num_dims, dim1, dim2, ...]
-            torch.tensor(
-                [len(tensor.shape)] + list(tensor.shape),
-                dtype=torch.int32,
-                device=device,
-            )
-            for tensor in tensors
-        ]
-        # Concatenate the data into a single tensor
-        data_tensor = torch.cat(data)
-        dt_shape = data_tensor.shape[0]
-        if dt_shape > METADATA_TENSOR_LEN:
-            raise ValueError(
-                f"Metadata tensor size ({dt_shape}) exceeds maximum allowed length ({METADATA_TENSOR_LEN})."
-            )
-        metadata_tensor[:dt_shape] = data_tensor
-    return metadata_tensor
-
-
-def _extract_metadata_from_tensor(tensor: torch.Tensor) -> List[torch.Size]:
-    """
-    Extract the number of dimensions and the shape of each tensor from a metadata tensor.
-    """
-    metadata: List[torch.Size] = []
-    i = 0
-    while i < len(tensor) and tensor[i] != PLACEHOLDER_VAL:
-        num_dims = int(tensor[i].item())
-        shape = torch.Size(tensor[i + 1 : i + 1 + num_dims].tolist())
-        metadata.append(shape)
-        i += num_dims + 1
-    return metadata
-
-
-def _get_stage_shapes(
-    stage_modules: List[nn.Module],
-    stage_ids: List[int],
-    num_stages: int,
-    rank: int,
-    world_size: int,
-    device: torch.device,
-    microbatch: Optional[Union[torch.Tensor, List[torch.Tensor]]] = None,
-):
-    """
-    Performs a dry run through all the pipeline stages (a rank can have multiple pipeline stages in the case of
-    virtual pipelining) and returns the shape of the inputs and outputs of the module.
-    Only the first stage must pass in a microbatch.
-
-    Each rank must call _get_stage_shapes or the program will hang.
-
-    Args:
-        stage_modules: The chunks assigned to this rank. Rhe length should be 1 for any
-                non-interleaved schedules and >1 for any interleaved schedules.
-        stage_ids: The id of the stages assigned to this rank.
-        num_stages: Total number of stages.
-        rank: Rank of the current process.
-        world_size: Number of processes participating in the pipeline.
-        device: Device where the tensors are allocated.
-
-    Returns a dictionary containing the following keys:
-        "inputs": Shape of the inputs to the module
-        "outputs": Shape of the outputs of the module
-    """
-
-    stage_id_to_shapes: Dict[int, Dict[str, list[torch.Size]]] = {}
-    for stage_id, model in zip(stage_ids, stage_modules):
-        input_shape_metadata_tensor = _create_metadata_tensor(device=device)
-        # TODO: Assumes prev_stage == rank - 1 and next_stage == rank + 1
-        prev_rank = (rank - 1) % world_size
-        next_rank = (rank + 1) % world_size
-        shapes = {}
-
-        # first stage doesn't receive anything and uses a microbatch
-        if stage_id == 0:
-            if microbatch is None:
-                raise RuntimeError("Microbatch is required for first stage")
-            example_fwd_inputs = microbatch
-            if isinstance(example_fwd_inputs, torch.Tensor):
-                example_fwd_inputs = [example_fwd_inputs]
-        else:
-            # other stages must receive shape information
-            # TODO: send/recv should take a group, rather than use the default group
-            dist.recv(input_shape_metadata_tensor, prev_rank)
-            metadata = _extract_metadata_from_tensor(input_shape_metadata_tensor)
-            example_fwd_inputs = [
-                torch.empty(shape_list, device=device) for shape_list in metadata
-            ]
-        shapes["inputs"] = [fwd_input.shape for fwd_input in example_fwd_inputs]
-
-        # perform forward
-        # TODO: if forward fails raise a more descriptive error explaining which stage failed
-        fwd_outputs = model(*example_fwd_inputs)
-        fwd_outputs = _create_empty_tensors(fwd_outputs, device)
-        shapes["outputs"] = [fwd_output.shape for fwd_output in fwd_outputs]
-
-        # send shape dims
-        if stage_id != num_stages - 1:
-            output_shape_metadata_tensor = _create_metadata_tensor(
-                fwd_outputs, device=device
-            )
-            dist.send(output_shape_metadata_tensor, next_rank)
-        stage_id_to_shapes[stage_id] = shapes
-    logger.info(stage_id_to_shapes)
-    return stage_id_to_shapes
 
 
 class PipelineStage(_PipelineStageBase):
@@ -1650,100 +1505,3 @@ class PipelineStage(_PipelineStageBase):
             ops.append(dist.P2POp(dist.irecv, recv_tensor, self.next_rank, self.group))
 
         return True
-
-
-def _validate_stage_shapes(pipeline_stages: List[PipelineStage]):
-    """
-    Check that the buffer shapes match between stages was expected by performing an all_gather between
-    all stages.
-    """
-    if len(pipeline_stages) == 0:
-        raise ValueError("No pipeline stages provided.")
-
-    virtual_pipeline_size = len(pipeline_stages)
-    all_inputs = []
-    all_outputs = []
-    world_size = pipeline_stages[0].group_size
-    num_stages = pipeline_stages[0].num_stages
-
-    # perform all gathers between all stages
-    for virtual_id, stage in enumerate(pipeline_stages):
-        world_size = stage.group_size
-        stage_id: int = stage.stage_index
-        rank = stage.group_rank
-        # check that world_size and num_stages are consistent across all stages
-        if stage.group_size != world_size:
-            raise ValueError(
-                f"Stage id {stage_id} has world size ({stage.group_size}) \
-                which does not match world size ({world_size}) of other stages."
-            )
-        if stage.num_stages != num_stages:
-            raise ValueError(
-                f"Stage id {stage_id} has num stages ({stage.num_stages}) \
-                which does not match num stages ({num_stages}) of other stages."
-            )
-
-        pg_rank = dist.get_rank(stage.group)
-        if rank != pg_rank:
-            raise ValueError(
-                f"Rank {rank} is not equal to process group rank {pg_rank}"
-            )
-
-        if (num_stages := stage.num_stages) % world_size != 0:
-            raise ValueError(
-                f"Number of stages ({num_stages}) must be a multiple of the world_size ({world_size})"
-            )
-
-        # all gather each ranks inputs
-        tensor_list = [
-            _create_metadata_tensor(device=stage.device)
-            for _ in range(stage.group_size)
-        ]
-        expected_inputs = stage.inputs
-        stage_input = _create_metadata_tensor(expected_inputs, device=stage.device)
-        dist.all_gather(tensor_list, stage_input)
-        stage_input_shapes = [
-            _extract_metadata_from_tensor(tensor) for tensor in tensor_list
-        ]
-
-        # all gather each ranks outputs
-        tensor_list = [
-            _create_metadata_tensor(device=stage.device)
-            for _ in range(stage.group_size)
-        ]
-        outputs_meta = stage.get_outputs_meta()
-        # TODO, (1) are we deleting output validation when we move to shape inference?
-        # (2) if not, we should support multiple outputs
-        assert (
-            len(outputs_meta) == 1
-        ), f"validation logic assumes single output, got {len(outputs_meta)} outputs "
-        dist.all_gather(tensor_list, outputs_meta[0])
-        stage_output_shapes = [
-            _extract_metadata_from_tensor(tensor) for tensor in tensor_list
-        ]
-
-        logger.debug(
-            f"Rank: {pg_rank}",  # noqa: G004
-            f"Stage id: {stage_id}",
-            f"Stage num stages: {stage.num_stages}",
-            f"Stage rank: {rank}",
-            f"Stage world size: {world_size}",
-            f"Stage {virtual_id * world_size}-{(virtual_id + 1) * world_size - 1} input shapes: {stage_input_shapes}",  # noqa: G003
-            f"Stage {virtual_id * world_size}-{(virtual_id + 1) * world_size - 1} output shapes: {stage_output_shapes}",  # noqa: G003
-        )
-
-        all_inputs.extend(stage_input_shapes)
-        all_outputs.extend(stage_output_shapes)
-
-        # log only rank 0's view, they will all be equivalent
-        if pg_rank == 0:
-            logger.info(
-                "all stage inputs: %s \n all stage outputs: %s", all_inputs, all_outputs
-            )
-
-    # Check if the output for stage 0 matches the input at stage 1, and so forth
-    for i in range(virtual_pipeline_size * world_size - 1):
-        if (out := all_outputs[i]) != (inp := all_inputs[i + 1]):
-            raise ValueError(
-                f"Stage_id {i} output shape {out} at does not match stage_id {i + 1} input shape {inp}."
-            )

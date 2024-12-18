@@ -46,7 +46,29 @@ class CKGemmTemplate(CKTemplate):
     PT_EXPORT {{kernel_definition}} {
         auto gemm = {{instance_type}} {};
         auto invoker = gemm.MakeInvoker();
-
+        {% if is_batched %}
+        auto argument = gemm.MakeArgument(
+            reinterpret_cast<const {{a_element_dtype}}*>(X),
+            reinterpret_cast<const {{b_element_dtype}}*>(W),
+            std::array<const void*, {{ds_size}}>{ {{ds_names}} },
+            reinterpret_cast<{{c_element_dtype}}*>(Y),
+            M,
+            N,
+            K,
+            B,
+            LDA,
+            LDB,
+            std::array<ck::index_t, {{ds_size}}>{ {{ds_strides}} },
+            LDC,
+            M * K, // batch_stride_A
+            N * K, // batch_stride_B
+            std::array<ck::index_t, {{ds_size}}>{ {{ds_batch_strides}} },
+            M * N, // batch_stride_C
+            {{a_elementwise_op}},
+            {{b_elementwise_op}},
+            {{epilogue}} // c_elementwise_op
+        );
+        {% else %}
         auto argument = gemm.MakeArgument(
             reinterpret_cast<const {{a_element_dtype}}*>(X),
             reinterpret_cast<const {{b_element_dtype}}*>(W),
@@ -64,6 +86,7 @@ class CKGemmTemplate(CKTemplate):
             {{b_elementwise_op}},
             {{epilogue}} // c_elementwise_op
         );
+        {% endif %}
         if (!gemm.IsSupportedArgument(argument)) {
             // we do our best to statically avoid this case in `filter_op`
             std::cerr << "invalid argument for gemm instance " << gemm.GetTypeString() << std::endl;
@@ -108,6 +131,9 @@ class CKGemmTemplate(CKTemplate):
 
     extern "C" {
     int run_main(int argc, char** argv) {
+        {% if is_batched %}
+        const int32_t B = {{B}};
+        {% endif %}
         const int32_t M = {{M}};
         const int32_t N = {{N}};
         const int32_t K = {{K}};
@@ -145,19 +171,40 @@ class CKGemmTemplate(CKTemplate):
         using BiasLayout = {{bias_layout}};
         {% endif %}
 
+        {% if is_batched %}
+        using strides_t = std::array<int32_t, 3>;
+        auto get_strides = [](int32_t batch_stride, int32_t leading_dimension, auto layout) constexpr -> strides_t {
+            if constexpr (std::is_same_v<decltype(layout), Row>) {
+                return {batch_stride, leading_dimension, 1};
+            }
+            return {batch_stride, 1, leading_dimension};
+        };
+        auto a_size = strides_t{B, M, K};
+        auto a_stride = get_strides(M * K, LDA, ALayout{});
+        auto b_size = strides_t{B, N, K};
+        auto b_stride = get_strides(N * K, LDB, BLayout{});
+        auto c_size = strides_t{B, M, N};
+        auto c_stride = get_strides(M * N, LDC, CLayout{});
+        {% else %}
         using strides_t = std::array<int32_t, 2>;
-
         auto get_strides = [](int32_t leading_dimension, auto layout) constexpr -> strides_t {
             if constexpr (std::is_same_v<decltype(layout), Row>) {
                 return {leading_dimension, 1};
             }
             return {1, leading_dimension};
         };
+        auto a_size = strides_t{M, K};
+        auto a_stride = get_strides(LDA, ALayout{});
+        auto b_size = strides_t{N, K};
+        auto b_stride = get_strides(LDB, BLayout{});
+        auto c_size = strides_t{M, N};
+        auto c_stride = get_strides(LDC, CLayout{});
+        {% endif %}
 
-        Tensor<AElementType> a_m_k ( HostTensorDescriptor ( strides_t{M, K}, get_strides(LDA, ALayout{}) ) );
-        Tensor<BElementType> b_k_n ( HostTensorDescriptor ( strides_t{N, K}, get_strides(LDB, BLayout{}) ) );
+        Tensor<AElementType> a_m_k ( HostTensorDescriptor ( a_size, a_stride ) );
+        Tensor<BElementType> b_k_n ( HostTensorDescriptor ( b_size, b_stride ) );
         {% if has_bias %}
-        Tensor<BiasElementType> d_m_n ( HostTensorDescriptor ( strides_t{M, N}, get_strides(LDD, BiasLayout{}) ) );
+        Tensor<BiasElementType> d_m_n ( HostTensorDescriptor ( c_size, get_strides(LDD, BiasLayout{}) ) );
         {% endif %}
         {% if has_scale %}
         // NB: these are hardcoded
@@ -165,8 +212,8 @@ class CKGemmTemplate(CKTemplate):
         Tensor<ScaleAElementType> s_b_m_n ( HostTensorDescriptor ( strides_t{M, N}, get_strides(0, Col{}) ));
         {% endif %}
 
-        Tensor<CElementType> c_m_n_host ( HostTensorDescriptor ( strides_t{M, N}, get_strides(LDC, CLayout{}) ) );
-        Tensor<CElementType> c_m_n_device ( HostTensorDescriptor ( strides_t{M, N}, get_strides(LDC, CLayout{}) ) );
+        Tensor<CElementType> c_m_n_host ( HostTensorDescriptor ( c_size, c_stride ) );
+        Tensor<CElementType> c_m_n_device ( HostTensorDescriptor ( c_size, c_stride ) );
 
         a_m_k.GenerateTensorValue(GeneratorTensor_2<AElementType>());
         b_k_n.GenerateTensorValue(GeneratorTensor_2<BElementType>());
@@ -201,14 +248,17 @@ class CKGemmTemplate(CKTemplate):
         {{kernel_name}}(
             static_cast<const AArgType*>(a_m_k_device_buf.GetDeviceBuffer()),
             static_cast<const BArgType*>(b_k_n_device_buf.GetDeviceBuffer()),
-            {% if has_bias %}
-            static_cast<const BiasArgType*>(d_m_n_device_buf.GetDeviceBuffer()),
-            {% endif %}
             {% if has_scale %}
             static_cast<const ScaleAArgType*>(s_a_m_n_device_buf.GetDeviceBuffer()),
             static_cast<const ScaleBArgType*>(s_b_m_n_device_buf.GetDeviceBuffer()),
             {% endif %}
+            {% if has_bias %}
+            static_cast<const BiasArgType*>(d_m_n_device_buf.GetDeviceBuffer()),
+            {% endif %}
             static_cast<CArgType*>(c_m_n_device_buf.GetDeviceBuffer()),
+            {% if is_batched %}
+            B,
+            {% endif %}
             M,
             N,
             K,
@@ -241,24 +291,36 @@ class CKGemmTemplate(CKTemplate):
         beta: float,
         input_reorder: Optional[List[int]] = None,
     ) -> None:
+        is_batched = len(layout.size) == 3
+        name = "ck_batched_gemm_template" if is_batched else "ck_gemm_template"
         super().__init__(
-            "ck_gemm_template",
+            name=name,
             input_nodes=input_nodes,
             layout=layout,
             input_reorder=input_reorder,
         )
         self.alpha = alpha
         self.beta = beta
+        self.is_batched = is_batched
 
     def header(self) -> IndentedBuffer:
         res = super().header()
-        res.splice(
-            """
-                // CK GEMM header(s)
+        if self.is_batched:
+            res.splice(
+                """
+                    // CK GEMM header(s)
 
-                #include "ck/tensor_operation/gpu/device/impl/device_gemm_multiple_d_xdl_cshuffle_v3.hpp"
-            """
-        )
+                    #include "ck/tensor_operation/gpu/device/impl/device_batched_gemm_multiple_d_xdl_cshuffle_v3.hpp"
+                """
+            )
+        else:
+            res.splice(
+                """
+                    // CK GEMM header(s)
+
+                    #include "ck/tensor_operation/gpu/device/impl/device_gemm_multiple_d_xdl_cshuffle_v3.hpp"
+                """
+            )
         return res
 
     def globals(self) -> IndentedBuffer:
@@ -273,6 +335,19 @@ class CKGemmTemplate(CKTemplate):
                 using BlockGemmPipelineScheduler = ck::BlockGemmPipelineScheduler;
                 using GemmSpecialization = ck::tensor_operation::device::GemmSpecialization;
                 using BlockGemmPipelineVersion = ck::BlockGemmPipelineVersion;
+
+                struct MultiplyMultiplyAdd {
+                    template <typename E, typename C, typename D0, typename D1, typename D2>
+                    __host__ __device__ constexpr void
+                    operator()(E& e, const C& c, const D0& d0, const D1& d1, const D2& d2) const {
+                        e = ck::type_convert<E>(
+                           ck::type_convert<float>(c)
+                           * ck::type_convert<float>(d0)
+                           * ck::type_convert<float>(d1)
+                           + ck::type_convert<float>(d2)
+                        );
+                    }
+                };
             """
         )
         return res
@@ -362,10 +437,16 @@ class CKGemmTemplate(CKTemplate):
         c_contig_size = (
             N if op.c_layout == "Row" else M if op.c_layout == "Col" else None
         )
+        c_shuffle_block_transfer_scalar_per_vector_n_per_block = (
+            op.c_shuffle_block_transfer_scalar_per_vector_n_per_block[0]
+            if isinstance(
+                op.c_shuffle_block_transfer_scalar_per_vector_n_per_block, tuple
+            )
+            else op.c_shuffle_block_transfer_scalar_per_vector_n_per_block
+        )
         if (
             is_static_int(c_contig_size)
-            and c_contig_size
-            % op.c_shuffle_block_transfer_scalar_per_vector_n_per_block
+            and c_contig_size % c_shuffle_block_transfer_scalar_per_vector_n_per_block
             != 0
         ):
             return None
@@ -377,10 +458,15 @@ class CKGemmTemplate(CKTemplate):
 
     def emit_ck_instance(self, op: "CKGemmOperation"):
         # The Jinja template for generating a C++ type alias *definition* for a Universal GEMM instance
+        struct_name = (
+            "DeviceBatchedGemmMultiD_Xdl_CShuffle_V3"
+            if self.is_batched
+            else "DeviceGemmMultiD_Xdl_CShuffle_V3"
+        )
         template_definition = r"""
     // Gemm operator {{operation_name}}
     using Operation_{{operation_name}} =
-        ck::tensor_operation::device::DeviceGemmMultiD_Xdl_CShuffle_V3<
+        ck::tensor_operation::device::{{struct_name}}<
             {{template_params}}>;
 
 """
@@ -400,10 +486,14 @@ class CKGemmTemplate(CKTemplate):
             else:
                 if field_value is not None:
                     template_params.append(f"/* {field_name} */ {field_value}")
+        operation_name = op.name().replace("(", "").replace(",", "").replace(")", "")
         return self._template_from_string(template_definition).render(
-            operation_name=op.name(),
+            operation_name=operation_name,
             template_params=(",\n" + 12 * " ").join(template_params),
-        ), self._template_from_string(template_type).render(operation_name=op.name())
+            struct_name=struct_name,
+        ), self._template_from_string(template_type).render(
+            operation_name=operation_name
+        )
 
     def render(self, kernel: ROCmTemplateKernel, op: "CKGemmOperation", **kwargs) -> str:  # type: ignore[override]
         """
@@ -414,26 +504,49 @@ class CKGemmTemplate(CKTemplate):
         template_buffer_node = kwargs.get("template_buffer_node", None)
         if template_buffer_node is not None:
             self.output_node = template_buffer_node
+        # input nodes:
+        # * X, W for matmul
+        # * X, W, Bias for addmm
+        # * X, W, inv_scale_x, inv_scale_w for scaled_mm
+        # * X, W, inv_scale_x, inv_scale_w, Bias for scaled_mm with bias
         X, W = self.input_nodes[0], self.input_nodes[1]
         Y = self.output_node
-        Bias = self.input_nodes[2] if 3 == len(self.input_nodes) else None
-
+        Bias = (
+            self.input_nodes[2]
+            if 3 == len(self.input_nodes)
+            else self.input_nodes[4]
+            if 5 == len(self.input_nodes)
+            else None
+        )
+        has_bias = Bias is not None
+        has_scale = len(self.input_nodes) in (4, 5)
         op = copy.deepcopy(op)
 
         # This parameter is converted into tuple because of change
         # from DeviceGemm_Xdl_CShuffleV3 to DeviceGemmMultiD_Xdl_CShuffle_V3.
         # The first tuple element corresponds to matmul result...
-        op.c_shuffle_block_transfer_scalar_per_vector_n_per_block = (
-            op.c_shuffle_block_transfer_scalar_per_vector_n_per_block,
-        )
+        if not isinstance(
+            op.c_shuffle_block_transfer_scalar_per_vector_n_per_block, tuple
+        ):
+            op.c_shuffle_block_transfer_scalar_per_vector_n_per_block = (
+                op.c_shuffle_block_transfer_scalar_per_vector_n_per_block,
+            )
 
-        if len(self.input_nodes) == 4:
+        if has_scale:
             scale_x = self.input_nodes[2]
             scale_w = self.input_nodes[3]
             if 1 == scale_x.get_numel() and 1 == scale_w.get_numel():
-                op.c_elementwise_op = "Scale"
+                # tensorwise scale for both X, W
+                if has_bias:
+                    op.c_elementwise_op = "ScaleAdd"
+                else:
+                    op.c_elementwise_op = "Scale"
             else:
-                op.c_elementwise_op = "MultiplyMultiply"
+                # rowwise scale for both X, W
+                if has_bias:
+                    op.c_elementwise_op = "MultiplyMultiplyAdd"
+                else:
+                    op.c_elementwise_op = "MultiplyMultiply"
                 op.c_shuffle_dtype = "F32"
                 op.ds_layouts = (
                     torch_layout_to_ck_layout(scale_x.get_layout()),
@@ -448,22 +561,30 @@ class CKGemmTemplate(CKTemplate):
             scale_x = None
             scale_w = None
 
+        bias_dtype = ""
         if Bias is not None:
-            op.ds_layouts = (torch_layout_to_ck_layout(Bias.get_layout()),)
-            op.ds_element_dtypes = ((self._TORCH_DTYPE_TO_CK[Bias.get_layout().dtype]),)
-            op.c_elementwise_op = "Bilinear"
+            bias_layout = torch_layout_to_ck_layout(Bias.get_layout())
+            bias_dtype = self._TORCH_DTYPE_TO_CK[Bias.get_layout().dtype]
+            op.ds_layouts += (bias_layout,)
+            op.ds_element_dtypes += (bias_dtype,)
+            if not has_scale:
+                op.c_elementwise_op = "Bilinear"
             # c_shuffle_dtype is also used for adding bias to matmul result
             # before converting down to the result dtype
             op.c_shuffle_dtype = op.acc_dtype
             # this parameter needs to be set accordingly to bias stride for correct accumulation
-            if op.ds_layouts[0] == "Row":
+            if bias_layout == "Row":
                 # bias has (N, ) shape
                 bias_shuffle_block_transfer_scalar_per_vector_n_per_block = (
                     op.c_shuffle_block_transfer_scalar_per_vector_n_per_block
                 )
-            else:
+            elif bias_layout == "Col":
                 # bias has (M, 1) shape
                 bias_shuffle_block_transfer_scalar_per_vector_n_per_block = (1,)
+            else:
+                raise AssertionError(
+                    "Bias layout is neither row-major nor column-major"
+                )
             # ...and the second tuple element corresponds to the bias
             op.c_shuffle_block_transfer_scalar_per_vector_n_per_block += (
                 bias_shuffle_block_transfer_scalar_per_vector_n_per_block
@@ -483,19 +604,29 @@ class CKGemmTemplate(CKTemplate):
 """
         epilogue = None
 
-        if op.c_elementwise_op == "Bilinear":
+        if op.c_elementwise_op == "Bilinear" and scale_w is None:
             epilogue = f"Bilinear {{ {self.alpha}, {self.beta} }}"
 
         elif op.c_elementwise_op == "Scale":
             epilogue = "Scale { (inv_scale_w && inv_scale_x) ? (*inv_scale_w * *inv_scale_x) : 1.0f }"
 
+        elif op.c_elementwise_op == "ScaleAdd":
+            epilogue = "ScaleAdd { (inv_scale_w && inv_scale_x) ? (*inv_scale_w * *inv_scale_x) : 1.0f }"
+
         elif op.c_elementwise_op == "MultiplyMultiply":
             epilogue = "MultiplyMultiply {}"
+
+        elif op.c_elementwise_op == "MultiplyMultiplyAdd":
+            epilogue = "MultiplyMultiplyAdd {}"
 
         elif op.c_elementwise_op == "PassThrough":
             epilogue = "PassThrough {}"
 
         assert epilogue is not None, "CK GEMM epilogue is not set"
+
+        size_arg_strs = ["M", "N", "K", "LDA", "LDB", "LDC", "LDD"]
+        if self.is_batched:
+            size_arg_strs.insert(0, "B")
 
         res = self._template_from_string(self.gemm_template).render(
             inline_utils=self.inline_utils(),
@@ -507,69 +638,71 @@ class CKGemmTemplate(CKTemplate):
                 outputs=[Y],
                 names_str="X, W, inv_scale_x, inv_scale_w, Bias, Y",
                 input_reorder=self.input_reorder,
-                size_args=[
-                    f"int32_t {arg}"
-                    for arg in ["M", "N", "K", "LDA", "LDB", "LDC", "LDD"]
-                ],
+                size_args=[f"int32_t {arg}" for arg in size_arg_strs],
             ),
             instance_type=instance_type,
             a_element_dtype=op.a_element_dtype,
             b_element_dtype=op.b_element_dtype,
             c_element_dtype=op.c_element_dtype,
-            bias_element_dtype=op.ds_element_dtypes[0] if Bias is not None else "",
+            bias_element_dtype=bias_dtype,
             alpha=self.alpha,
             beta=self.beta,
             a_elementwise_op="PassThrough {}",
             b_elementwise_op="PassThrough {}",
             epilogue=epilogue,
-            has_bias=Bias is not None,
+            has_bias=has_bias,
             ds_size=1
-            if Bias is not None
+            if op.c_elementwise_op in ("Bilinear", "ScaleAdd")
             else 2
             if op.c_elementwise_op == "MultiplyMultiply"
+            else 3
+            if op.c_elementwise_op == "MultiplyMultiplyAdd"
             else 0,
             ds_names=", ".join(
                 ["Bias"]
-                if Bias is not None
+                if op.c_elementwise_op in ("Bilinear", "ScaleAdd")
                 else ["inv_scale_x", "inv_scale_w"]
                 if op.c_elementwise_op == "MultiplyMultiply"
+                else ["inv_scale_x", "inv_scale_w", "Bias"]
+                if op.c_elementwise_op == "MultiplyMultiplyAdd"
                 else []
             ),
             ds_strides=", ".join(
                 ["LDD"]
-                if Bias is not None
+                if op.c_elementwise_op in ("Bilinear", "ScaleAdd")
                 else ["0", "0"]
                 if op.c_elementwise_op == "MultiplyMultiply"
+                else ["0", "0", "LDD"]
+                if op.c_elementwise_op == "MultiplyMultiplyAdd"
                 else []
             ),
             version_comment=version_comment,
+            is_batched=self.is_batched,
+            ds_batch_strides=", ".join([]),  # FIXME when supporting baddbmm
         )
 
         if config.rocm.generate_test_runner:
             is_static_problem = all(is_static_int(arg) for arg in self.size_args())
-            M, N, K, LDA, LDB, LDC, LDD = (
+            if self.is_batched:
+                size_arg_strs = ["B", "M", "N", "K", "LDA", "LDB", "LDC", "LDD"]
+            else:
+                size_arg_strs = ["M", "N", "K", "LDA", "LDB", "LDC", "LDD"]
+            size_arg_vals = (
                 self.size_args()
                 if is_static_problem
                 else (
                     f"std::stoi(argv[{k}])" for k, _ in enumerate(self.size_args(), 1)
                 )
             )
-            has_bias = Bias is not None
-            has_scale = scale_x is not None and scale_w is not None
+            size_args = dict(zip(size_arg_strs, size_arg_vals, strict=True))
             runner_code = self._template_from_string(
                 self.standalone_runner_template
             ).render(
                 inline_utils=self.inline_utils().getvalue(),
                 kernel_name=kernel.kernel_name,
-                M=M,
-                N=N,
-                K=K,
-                LDA=LDA,
-                LDB=LDB,
-                LDC=LDC,
-                LDD=LDD,
                 has_bias=has_bias,
                 has_scale=has_scale,
+                is_batched=self.is_batched,
                 a_ck_dtype=op.a_element_dtype,
                 b_ck_dtype=op.b_element_dtype,
                 c_ck_dtype=op.c_element_dtype,
@@ -601,6 +734,7 @@ class CKGemmTemplate(CKTemplate):
                 compile_cmd=rocm_compile_command(
                     ["<source_file_name>"], "<executable_name>", "exe"
                 ),
+                **size_args,
             )
             res += runner_code
 
@@ -634,14 +768,28 @@ class CKGemmTemplate(CKTemplate):
         An instance may invalidate the GEMM configuration at runtime.
         Such instances will be assigned +inf runtime by the autotune process.
         """
-        unfiltered_instances = (
-            gen_ops_preselected()
-            if config.rocm.use_preselected_instances and self._is_rcr_f16()
-            else gen_ops_library()
-        )
-        filtered_instances = list(
-            filter(lambda op: self.filter_op(op), unfiltered_instances)
-        )
+        try:
+            from ck4inductor.batched_universal_gemm.gen_instances import (  # type: ignore[import]
+                gen_ops_library as gen_batched_gemm_ops_library,
+            )
+            from ck4inductor.universal_gemm.gen_instances import (  # type: ignore[import]
+                gen_ops_library as gen_gemm_ops_library,
+                gen_ops_preselected as gen_gemm_ops_preselected,
+            )
+        except ImportError:
+            return []
+
+        generator = None
+        if self.is_batched:
+            generator = gen_batched_gemm_ops_library
+        else:
+            generator = gen_gemm_ops_library
+        if config.rocm.use_preselected_instances and self._is_rcr_f16():
+            generator = gen_gemm_ops_preselected
+
+        assert generator is not None
+
+        filtered_instances = list(filter(lambda op: self.filter_op(op), generator()))
         # NB: when using a fixed list order, most likely we will pick the subset of instances
         # which are very similar to each other. Randomizing the choice seems to solve this.
         random.seed(-11)
@@ -689,19 +837,28 @@ class CKGemmTemplate(CKTemplate):
     def size_args(self):
         X = self.input_nodes[0]
         W = self.input_nodes[1]
-        Bias = self.input_nodes[2] if len(self.input_nodes) == 3 else None
+        Bias = (
+            self.input_nodes[2]
+            if len(self.input_nodes) == 3
+            else self.input_nodes[4]
+            if len(self.input_nodes) == 5
+            else None
+        )
         Y = self.output_node
 
-        M = X.get_size()[0]
-        K = X.get_size()[1]
-        N = W.get_size()[1]
-        LDA = X.get_stride()[0 if X.get_stride()[1] == 1 else 1]
-        LDB = W.get_stride()[0 if W.get_stride()[1] == 1 else 1]
-        LDC = Y.get_stride()[0 if Y.get_stride()[1] == 1 else 1]
+        M = X.get_size()[-2]
+        K = X.get_size()[-1]
+        N = W.get_size()[-1]
+        LDA = X.get_stride()[-2 if X.get_stride()[-1] == 1 else -1]
+        LDB = W.get_stride()[-2 if W.get_stride()[-1] == 1 else -1]
+        LDC = Y.get_stride()[-2 if Y.get_stride()[-1] == 1 else -1]
         LDD = (
             0
-            if Bias is None
-            else Bias.get_stride()[0 if Bias.get_stride()[1] == 1 else 1]
+            if (Bias is None or len(Bias.get_size()) == 1)
+            else Bias.get_stride()[-2 if Bias.get_stride()[-1] == 1 else -1]
         )
-
-        return M, N, K, LDA, LDB, LDC, LDD
+        if self.is_batched:
+            B = X.get_size()[0]
+            return B, M, N, K, LDA, LDB, LDC, LDD
+        else:
+            return M, N, K, LDA, LDB, LDC, LDD

@@ -9,6 +9,7 @@ import torch.fx.traceback as fx_traceback
 import torch.utils._pytree as pytree
 from torch._ops import OperatorBase
 from torch.fx.experimental.proxy_tensor import make_fx
+from torch.fx.passes.shape_prop import TensorMetadata
 from torch.multiprocessing.reductions import StorageWeakRef
 
 
@@ -388,9 +389,7 @@ def _unstack_pytree(xs):
 
     a = zip(*flat_xs)
 
-    pytrees = []
-    for tuple in a:
-        pytrees.append(pytree.tree_unflatten(tuple, inspec))
+    pytrees = [pytree.tree_unflatten(tuple, inspec) for tuple in a]
     return pytrees
 
 
@@ -483,6 +482,27 @@ def first_slice_copy(t: torch.Tensor, dim: int = 0) -> torch.Tensor:
     return torch.select_copy(t, dim, 0)
 
 
+# Reports the difference between meta of two tensors in a string
+def diff_tensor_meta(
+    meta1: TensorMetadata, meta2: TensorMetadata, check_grad=True
+) -> List[str]:
+    from torch.fx.experimental.symbolic_shapes import GuardOnDataDependentSymNode
+
+    pair_diffs = []
+    for meta_name in TensorMetadata._fields:
+        if not check_grad and meta_name == "requires_grad":
+            continue
+        val1 = getattr(meta1, meta_name)
+        val2 = getattr(meta2, meta_name)
+        try:
+            if val1 != val2:
+                pair_diffs.append(f"'{meta_name}: {val1} vs {val2}'")
+        except GuardOnDataDependentSymNode as _:
+            pair_diffs.append(f"'{meta_name}: {val1} vs {val2}'")
+            continue
+    return pair_diffs
+
+
 # Note [lifted arg types in hop]
 # For dynamoed hops, we automatically lift the free symbols in tensors as arguments.
 # This has implications for the types of lifted args for different dispatch keys:
@@ -492,7 +512,7 @@ def first_slice_copy(t: torch.Tensor, dim: int = 0) -> torch.Tensor:
 #      to support int arguments. In the eager run case, we re-trace the subgraph in AutogradKey, so inner
 #      hops may receive int inputs from the shape of outer tensor inputs.
 #      However, CompositeExplicitAutograd won't receive SymInt inputs because it only accepts real tensor inputs.
-def validate_subgraph_args_types(lifted_args: Union[Tuple[Any], List[Any]]):
+def validate_subgraph_args_types(lifted_args: Union[Tuple[Any, ...], List[Any]]):
     allowed_types = (torch.Tensor, int, torch.SymInt)
     assert all(
         isinstance(arg, (torch.Tensor, int, torch.SymInt)) for arg in lifted_args

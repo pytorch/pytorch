@@ -214,7 +214,6 @@ at::Tensor& PackedLinearWeight::apply_impl(
                 packA.getRowOffsetBuffer(),
                 col_offsets.data(),
                 bias_ptr,
-                // NOLINTNEXTLINE(bugprone-argument-comment)
                 N, /*nCol=*/
                 1, /* groups*/
                 act_times_w_scale.data());
@@ -925,11 +924,11 @@ static at::Tensor linear_int8_with_onednn_weight(
     std::optional<at::Tensor> other, // extra input for binary post-op
     double other_scale,
     int64_t other_zero_point,
-    const c10::string_view& binary_post_op, // e.g. "none", "sum", "add"
+    const std::string_view& binary_post_op, // e.g. "none", "sum", "add"
     double binary_alpha,
-    const c10::string_view& unary_post_op, // e.g. "none", "relu"
+    const std::string_view& unary_post_op, // e.g. "none", "relu"
     torch::List<std::optional<at::Scalar>>& unary_post_op_args,
-    c10::string_view& unary_post_op_algorithm) {
+    std::string_view& unary_post_op_algorithm) {
   using ideep::tensor;
   const int64_t dim = input.dim();
   TORCH_CHECK(input.scalar_type() == c10::ScalarType::Byte || input.scalar_type() == c10::ScalarType::Char,
@@ -1116,15 +1115,15 @@ namespace at::native {
       double output_scale,
       int64_t output_zero_point,
       std::optional<c10::ScalarType> output_dtype,
-      c10::string_view post_op_name,
+      std::string_view post_op_name,
       torch::List<std::optional<at::Scalar>> post_op_args,
-      c10::string_view post_op_algorithm) {
+      std::string_view post_op_algorithm) {
 #if AT_MKLDNN_ENABLED()
     // act_zero_point.numel() == 0 for symmetric quantization
     TORCH_CHECK(act_scale.numel() == 1 && act_zero_point.numel() <= 1,
         "onednn int8 linear: act scale/zp size should be 1/<=1");
     static std::optional<at::Tensor> other = std::nullopt;
-    static const c10::string_view binary_post_op = "none";
+    static const std::string_view binary_post_op = "none";
     int64_t act_zp = act_zero_point.numel() == 1 ? act_zero_point.item().toLong() : 0;
     return linear_int8_with_onednn_weight(
         act, act_scale.item().toDouble(), act_zp,
@@ -1152,11 +1151,11 @@ namespace at::native {
       std::optional<c10::ScalarType> output_dtype,
       double other_scale,
       int64_t other_zero_point,
-      c10::string_view binary_post_op, // e.g. "none", "sum", "add"
+      std::string_view binary_post_op, // e.g. "none", "sum", "add"
       double binary_alpha,
-      c10::string_view unary_post_op, // e.g. "none", "relu"
+      std::string_view unary_post_op, // e.g. "none", "relu"
       torch::List<std::optional<at::Scalar>> unary_post_op_args,
-      c10::string_view unary_post_op_algorithm) {
+      std::string_view unary_post_op_algorithm) {
 #if AT_MKLDNN_ENABLED()
     // act_zero_point.numel() == 0 for symmetric quantization
     TORCH_CHECK(act_scale.numel() == 1 && act_zero_point.numel() <= 1,
@@ -1274,12 +1273,12 @@ class QLinearOnednn final {
       double output_scale,
       int64_t output_zero_point,
       std::optional<c10::ScalarType> output_dtype,
-      c10::string_view post_op_name,
+      std::string_view post_op_name,
       torch::List<std::optional<at::Scalar>> post_op_args,
-      c10::string_view post_op_algorithm) {
+      std::string_view post_op_algorithm) {
 #if AT_MKLDNN_ENABLED()
     static std::optional<at::Tensor> other = std::nullopt;
-    static const c10::string_view binary_post_op = "none";
+    static const std::string_view binary_post_op = "none";
     return linear_int8_with_onednn_weight(
         act, act_scale, act_zero_point,
         onednn_weight, weight_scales, weight_zero_points,
@@ -1306,11 +1305,11 @@ class QLinearOnednn final {
       std::optional<c10::ScalarType> output_dtype,
       double other_scale,
       int64_t other_zero_point,
-      c10::string_view binary_post_op, // e.g. "none", "sum", "add"
+      std::string_view binary_post_op, // e.g. "none", "sum", "add"
       double binary_alpha,
-      c10::string_view unary_post_op, // e.g. "none", "relu"
+      std::string_view unary_post_op, // e.g. "none", "relu"
       torch::List<std::optional<at::Scalar>> unary_post_op_args,
-      c10::string_view unary_post_op_algorithm) {
+      std::string_view unary_post_op_algorithm) {
 #if AT_MKLDNN_ENABLED()
     return linear_int8_with_onednn_weight(
         act, act_scale, act_zero_point,

@@ -59,11 +59,19 @@ cuda_version_nodot=$(echo $CUDA_VERSION | tr -d '.')
 
 TORCH_CUDA_ARCH_LIST="5.0;6.0;7.0;7.5;8.0;8.6"
 case ${CUDA_VERSION} in
-    12.4)
+    12.6)
         if [[ "$GPU_ARCH_TYPE" = "cuda-aarch64" ]]; then
             TORCH_CUDA_ARCH_LIST="9.0"
         else
             TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST};9.0+PTX"
+        fi
+        EXTRA_CAFFE2_CMAKE_FLAGS+=("-DATEN_NO_TEST=ON")
+        ;;
+    12.4)
+        if [[ "$GPU_ARCH_TYPE" = "cuda-aarch64" ]]; then
+            TORCH_CUDA_ARCH_LIST="9.0"
+        else
+            TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST};9.0"
         fi
         EXTRA_CAFFE2_CMAKE_FLAGS+=("-DATEN_NO_TEST=ON")
         ;;
@@ -73,10 +81,6 @@ case ${CUDA_VERSION} in
         ;;
     11.8)
         TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST};3.7;9.0"
-        EXTRA_CAFFE2_CMAKE_FLAGS+=("-DATEN_NO_TEST=ON")
-        ;;
-    11.[67])
-        TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST};3.7"
         EXTRA_CAFFE2_CMAKE_FLAGS+=("-DATEN_NO_TEST=ON")
         ;;
     *)
@@ -129,7 +133,7 @@ if [[ $USE_CUSPARSELT == "1" && $CUDA_VERSION == "11.8" ]]; then
         )
 fi
 
-if [[ $CUDA_VERSION == "12.1" || $CUDA_VERSION == "12.4" ]]; then
+if [[ $CUDA_VERSION == "12.4" || $CUDA_VERSION == "12.6" ]]; then
     export USE_STATIC_CUDNN=0
     # Try parallelizing nvcc as well
     export TORCH_NVCC_FLAGS="-Xfatbin -compress-all --threads 2"

@@ -25,7 +25,7 @@ struct TORCH_API HIPHooksInterface : AcceleratorHooksInterface {
   }
 
   const Generator& getDefaultGenerator(
-      C10_UNUSED DeviceIndex device_index = -1) const override {
+      [[maybe_unused]] DeviceIndex device_index = -1) const override {
     TORCH_CHECK(false, "Cannot initialize HIP without ATen_hip library.");
   }
 

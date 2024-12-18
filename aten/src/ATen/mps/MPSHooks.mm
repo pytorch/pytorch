@@ -22,9 +22,15 @@ bool MPSHooks::hasMPS() const {
 bool MPSHooks::isOnMacOSorNewer(unsigned major, unsigned minor) const {
   switch (major) {
     case 15:
-      if (minor > 0)
-        TORCH_WARN("Can't check whether running on 15.", minor, "+ returning one for 15.0+");
-      return is_macos_13_or_newer(MacOSVersion::MACOS_VER_15_0_PLUS);
+      switch (minor) {
+        case 0:
+          return is_macos_13_or_newer(MacOSVersion::MACOS_VER_15_0_PLUS);
+        case 1:
+          return is_macos_13_or_newer(MacOSVersion::MACOS_VER_15_1_PLUS);
+        default:
+          TORCH_WARN("Can't check whether running on 15.", minor, "+ returning one for 15.1+");
+          return is_macos_13_or_newer(MacOSVersion::MACOS_VER_15_1_PLUS);
+      }
     case 14:
       switch (minor) {
         case 0:

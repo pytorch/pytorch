@@ -70,15 +70,15 @@ SIGNAL_HANDLER(
     SIGBUS,
     handler_SIGBUS,
     "ERROR: Unexpected bus error encountered in worker. "
-    "This might be caused by insufficient shared memory (shm).\n");
+    "This might be caused by insufficient shared memory (shm).\n")
 SIGNAL_HANDLER(
     SIGSEGV,
     handler_SIGSEGV,
-    "ERROR: Unexpected segmentation fault encountered in worker.\n");
+    "ERROR: Unexpected segmentation fault encountered in worker.\n")
 SIGNAL_HANDLER(
     SIGFPE,
     handler_SIGFPE,
-    "ERROR: Unexpected floating-point exception encountered in worker.\n");
+    "ERROR: Unexpected floating-point exception encountered in worker.\n")
 
 // When an error happened in DataLoader methods and Python starts to exit, the
 // error trace will keep the loader alive, and Python may kill the children
