@@ -135,7 +135,7 @@ from .dicts import (
     ConstDictVariable,
     CustomizedDictVariable,
     DefaultDictVariable,
-    DictKeysVariable,
+    DictKeySetVariable,
     FrozensetVariable,
     HFPretrainedConfigVariable,
     PythonSysModulesVariable,
@@ -696,14 +696,6 @@ class VariableBuilder:
             items = [SourcelessBuilder.create(self.tx, v) for v in value]
             self.install_guards(GuardBuilder.ID_MATCH)
             return FrozensetVariable(items, source=self.source)
-        elif isinstance(value, dict_keys):
-            # breakpoint()
-            items = [SourcelessBuilder.create(self.tx, v) for v in value]
-            # mapping_source = AttrSource(self.get_source(), "mapping")
-            # install_guard(mapping_source.make_guard(GuardBuilder.DICT_CONST_KEYS))
-            # self.tx.output.guard_on_key_order.add(mapping_source.name())
-            self.install_guards(GuardBuilder.SEQUENCE_LENGTH)
-            return DictKeysVariable(items, source=self.source)
         elif isinstance(value, enum.Enum):
             self.install_guards(GuardBuilder.ID_MATCH)
             return EnumVariable(value=value, source=self.source)
@@ -1246,6 +1238,21 @@ class VariableBuilder:
             self.install_guards(GuardBuilder.TYPE_MATCH)
             result = FrozenDataClassVariable.create(self.tx, value, source=self.source)
             return self.tx.output.side_effects.track_object_existing(value, result)
+        elif isinstance(value, dict_keys):
+            if all(ConstantVariable.is_literal(k) for k in value):
+                # If the dict_keys object is passed from outside the compile region, it must either be passed along with
+                # the corresponding dict object or treated as a set (when only the keys are passed into the compiled region).
+                # - If it is passed along with the dict, the dict object itself is already guarded.
+                # - If only the dict_keys object is passed, we add EQUALS_MATCH and SEQUENCE_LENGTH guards
+                #   to ensure it remains unchanged across multiple runs.
+                items = [SourcelessBuilder.create(self.tx, v) for v in value]
+                install_guard(
+                    self.get_source().make_guard(GuardBuilder.SEQUENCE_LENGTH),
+                    self.get_source().make_guard(GuardBuilder.EQUALS_MATCH),
+                )
+                return DictKeySetVariable(items, source=self.source)
+            else:
+                unimplemented("dict_keys with non-constant keys are not supported")
         else:
             return self.wrap_user_defined(value)
 

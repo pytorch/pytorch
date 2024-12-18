@@ -293,11 +293,11 @@ class ConstDictVariable(VariableTracker):
             return TupleVariable(
                 [TupleVariable([k.vt, v]) for k, v in self.items.items()]
             )
-        # elif name == "keys":
-        #     if self.source:
-        #         tx.output.guard_on_key_order.add(self.source.name())
-        #     assert not (args or kwargs)
-        #     return DictKeysVariable(self.as_python_constant().keys())
+        elif name == "keys":
+            if self.source:
+                tx.output.guard_on_key_order.add(self.source.name())
+            assert not (args or kwargs)
+            return DictKeys(self)
         elif name == "values":
             if self.source:
                 tx.output.guard_on_key_order.add(self.source.name())
@@ -601,7 +601,7 @@ class FrozensetVariable(SetVariable):
         return super().call_method(tx, name, args, kwargs)
 
 
-class DictKeysVariable(SetVariable):
+class DictKeySetVariable(SetVariable):
     def __init__(
         self,
         items: List[VariableTracker],
@@ -627,7 +627,7 @@ class DictKeysVariable(SetVariable):
         return dict_keys
 
     def as_python_constant(self):
-        unimplemented("DictKeysVariable.as_python_constant")
+        unimplemented("DictKeySetVariable.as_python_constant")
 
     def call_method(
         self,
