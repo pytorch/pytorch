@@ -530,7 +530,7 @@ def _get_optimization_cflags(cpp_compiler: str) -> List[str]:
     if _IS_WINDOWS:
         return ["O2"]
     else:
-        cflags = ["O0", "g"] if config.aot_inductor.debug_compile else ["O3", "DNDEBUG"]
+        cflags = ["O0", "g"] if config.aot_inductor.debug_compile else ["O1", "DNDEBUG"]
         cflags += _get_ffast_math_flags()
         cflags.append("fno-finite-math-only")
 
@@ -550,6 +550,7 @@ def _get_optimization_cflags(cpp_compiler: str) -> List[str]:
                     cflags.append("mcpu=native")
                 else:
                     cflags.append("march=native")
+                    cflags.append("mtune=native")
 
         return cflags
 
@@ -734,6 +735,9 @@ def _setup_standard_sys_libs(
             passthough_args.append(" -B" + build_paths.glibc_lib)
             passthough_args.append(" -L" + build_paths.glibc_lib)
 
+    if _is_clang(cpp_compiler) or _is_gcc(cpp_compiler):
+        passthough_args.append(" -Wl,-z,noexecstack")
+
     return cflags, include_dirs, passthough_args
 
 
@@ -765,11 +769,13 @@ def _get_torch_related_args(
     include_dirs = [
         os.path.join(_TORCH_PATH, "include"),
         os.path.join(_TORCH_PATH, "include", "torch", "csrc", "api", "include"),
+    ]
+    if config.is_fbcode():
         # Some internal (old) Torch headers don't properly prefix their includes,
         # so we need to pass -Itorch/lib/include/TH as well.
-        os.path.join(_TORCH_PATH, "include", "TH"),
-        os.path.join(_TORCH_PATH, "include", "THC"),
-    ]
+        include_dirs.append(os.path.join(_TORCH_PATH, "include", "TH"))
+        include_dirs.append(os.path.join(_TORCH_PATH, "include", "THC"))
+
     libraries_dirs = [TORCH_LIB_PATH]
     libraries = []
     if sys.platform != "darwin" and not config.is_fbcode():
