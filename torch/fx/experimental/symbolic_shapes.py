@@ -1057,6 +1057,35 @@ def compute_unbacked_bindings(
                 assert isinstance(real, int)
                 shape_env.set_unbacked_var_to_val(rhs, real // int(lhs))
             pending.remove(rhs)
+        # as previous, but for unbacked SymInt * backed SymInt e.g. s1*u0
+        elif (
+            isinstance(a, torch.SymInt)
+            and isinstance(s := a.node._expr, sympy.Mul)
+            and len(s.args) == 2
+            and isinstance(lhs := s.args[0], sympy.Symbol)
+            and isinstance(rhs := s.args[1], sympy.Symbol)
+            and ((rhs in pending) ^ (lhs in pending))
+            and (
+                (rhs in a.node.shape_env.var_to_val)
+                ^ (lhs in a.node.shape_env.var_to_val)
+            )
+        ):
+            unbacked, backed = (lhs, rhs) if lhs in pending else (rhs, lhs)
+            # NB: We need a SymInt to pass to DivideByKey.
+            # TODO: Is it really necessary to construct the SymInt here or can we get it
+            # from somewhere else?
+            key = DivideByKey(
+                a.node.shape_env.create_symintnode(
+                    backed,
+                    hint=int(a.node.shape_env.var_to_val[backed]),
+                    source=a.node.shape_env.var_to_sources.get(backed, [None])[0],
+                )
+            )
+            r[unbacked] = path + (key,)
+            if real is not None:
+                assert isinstance(real, int)
+                shape_env.set_unbacked_var_to_val(unbacked, CleanDiv(real, backed))
+            pending.remove(unbacked)
         # The annoyance here arises from the fact that SymBool is
         # allocated by allocating a SymInt and then testing if it's equal
         # to one.  So you have a complicated binding site logic for this.
