@@ -659,7 +659,7 @@ def put_local_code_state(cache_key: str) -> None:
         lock_path = path + ".lock"
         # We /mostly/ don't need the lock but the tmp file could be clobbered
         # TODO: use a safe tempfile create to eliminate lock
-        from filelock import FileLock
+        from torch.utils._filelock import FileLock
 
         os.makedirs(os.path.dirname(path), exist_ok=True)
 

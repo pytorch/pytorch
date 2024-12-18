@@ -157,7 +157,7 @@ class AOTAutogradCacheTests(InductorTestCase):
 
         with torch.autograd._force_original_view_tracking(True):
             compiled_fn = torch.compile(fn)
-            out = compiled_fn(torch.rand(2, 3))
+            compiled_fn(torch.rand(2, 3))
 
         self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
         self.assertEqual(counters["aot_autograd"]["autograd_cache_bypass"], 1)
@@ -654,7 +654,7 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
         def fn(x):
             return x.sin().cos()
 
-        def fn2(x):
+        def fn2(x):  # noqa: F841
             y = x.sin()
             z = y.cos()
             return z
