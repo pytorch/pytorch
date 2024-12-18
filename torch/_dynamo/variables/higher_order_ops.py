@@ -2473,7 +2473,6 @@ class AutogradFunctionApplyVariable(VariableTracker):
         unbacked_stride_symbols = []
         unbacked_stride_nodes = []
 
-        torch._dynamo.config.capture_dynamic_output_shape_ops = True
         from unittest.mock import patch
 
         with tx.output.subtracer(fwd_fn, fwd_tracer), tx.strict_translation_mode(
