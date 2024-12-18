@@ -4471,6 +4471,7 @@ class TestSerialization(TestCase, SerializationMixin):
             loaded_sd = torch.load(f, weights_only=weights_only)
             self.assertEqual(sd_save, loaded_sd)
 
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
     def test_use_pinned_memory_for_d2h(self):
 
         def patched_write_record(self, filename, data, nbytes):
