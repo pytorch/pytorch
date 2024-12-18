@@ -2239,7 +2239,6 @@ def forward(self, primals_1, primals_2):
             )
 
     # https://github.com/pytorch/pytorch/issues/106456
-    @skipIfTorchDynamo()
     def test_input_mutation_noncontiguous(self):
         def f(a):
             a.mul_(2)
@@ -6283,7 +6282,10 @@ metadata incorrectly.
             def __init__(self):
                 super().__init__()
                 self.p = torch.nn.Parameter(
-                    TwoTensor(torch.zeros(3, 4), torch.zeros(3, 4))
+                    TwoTensor(
+                        TwoTensor(torch.zeros(3, 4), torch.randn(3, 4)),
+                        torch.ones(3, 4),
+                    )
                 )
 
             def forward(self, x):
@@ -6294,7 +6296,10 @@ metadata incorrectly.
                 super().__init__()
                 self.p1 = torch.nn.Parameter(torch.ones(3, 4))
                 self.p2 = torch.nn.Parameter(
-                    TwoTensor(torch.zeros(3, 4), torch.zeros(3, 4))
+                    TwoTensor(
+                        torch.ones(3, 4),
+                        TwoTensor(torch.randn(3, 4), torch.randn(3, 4)),
+                    )
                 )
                 self._m = _M()
 
