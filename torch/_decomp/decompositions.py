@@ -433,7 +433,7 @@ def smooth_l1_loss_backward_out(
     grad_input: Tensor,
 ):
     result = smooth_l1_loss_backward(grad_output, self, target, reduction, beta)
-    _maybe_resize_out(grad_input, result.shape)
+    _maybe_resize_out(grad_input, result)
     return _safe_copy_out(copy_from=result, copy_to=grad_input, exact_dtype=True)
 
 
@@ -463,7 +463,7 @@ def huber_loss_backward_out(
     grad_input: Tensor,
 ):
     result = huber_loss_backward(grad_output, self, target, reduction, delta)
-    _maybe_resize_out(grad_input, result.shape)
+    _maybe_resize_out(grad_input, result)
     return _safe_copy_out(copy_from=result, copy_to=grad_input, exact_dtype=True)
 
 
@@ -1370,7 +1370,7 @@ def split_with_sizes_copy(
         return [s.clone(memory_format=torch.contiguous_format) for s in splits]
     else:
         for output, split in zip(out, splits):
-            _maybe_resize_out(output, split.shape)
+            _maybe_resize_out(output, split)
             _safe_copy_out(copy_from=split, copy_to=output, exact_dtype=True)
         return None
 
@@ -1605,7 +1605,7 @@ def native_group_norm_backward_out(
     grad_input = (out0, out1, out2)
     for i, r in enumerate(result):
         if r is not None:
-            _maybe_resize_out(grad_input[i], r.shape)
+            _maybe_resize_out(grad_input[i], r)
             _safe_copy_out(copy_from=r, copy_to=grad_input[i], exact_dtype=True)
 
     return grad_input
@@ -1720,7 +1720,7 @@ def native_layer_norm_backward_out(
     grad_input = (out0, out1, out2)
     for i, r in enumerate(result):
         if r is not None:
-            _maybe_resize_out(grad_input[i], r.shape)
+            _maybe_resize_out(grad_input[i], r)
             _safe_copy_out(copy_from=r, copy_to=grad_input[i], exact_dtype=True)
 
     return grad_input
@@ -2339,7 +2339,7 @@ def native_batch_norm_backward_out(
     grad_input = (out0, out1, out2)
     for i, r in enumerate(result):
         if r is not None:
-            _maybe_resize_out(grad_input[i], r.shape)
+            _maybe_resize_out(grad_input[i], r)
             _safe_copy_out(copy_from=r, copy_to=grad_input[i], exact_dtype=True)
 
     return grad_input

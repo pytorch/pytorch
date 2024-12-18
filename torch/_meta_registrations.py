@@ -310,7 +310,7 @@ def meta_fft_r2c(self, dim, normalization, onesided):
 
 @register_meta(aten.randperm.generator_out)
 def meta_randperm(n, *, generator=None, out):
-    return _maybe_resize_out(out, torch.Size([n]))
+    return _maybe_resize_out(out, torch.empty(n))
 
 
 @register_meta(aten.randperm.default)
@@ -1475,7 +1475,7 @@ def _linalg_solve_ex(
     if all(x is not None for x in out):
         for r, o in zip(res, out):
             # resize and copy operations are done in-place
-            _maybe_resize_out(o, r.shape)  # type: ignore[arg-type]
+            _maybe_resize_out(o, r)  # type: ignore[arg-type]
             # strides are not copied in out_wrapper
             o.as_strided_(r.shape, r.stride())  # type: ignore[union-attr]
             _safe_copy_out(copy_from=r, copy_to=o, exact_dtype=False)  # type: ignore[arg-type]
@@ -1499,7 +1499,7 @@ def linalg_solve_triangular_meta(
     B_, A_ = _linalg_broadcast_batch_dims_name(B, A, None)
     avoid_copy_A = A_.transpose(-2, -1).is_contiguous() and A_.is_conj()
     if avoid_copy_A:
-        out = _maybe_resize_out(out, B_.shape)
+        out = _maybe_resize_out(out, B_)
     else:
         # reimplementation of resize_output with result F-contig
         if _resize_output_check(out, B_.shape):
@@ -5863,8 +5863,8 @@ def meta_sort(self, stable=None, dim=-1, descending=False, values=None, indices=
         # these have different shapes, like (5, 10, 5) and (0) in msort.
         out_shape = v.shape
         out_stride = v.stride()
-        values = _maybe_resize_out(values, out_shape)
-        indices = _maybe_resize_out(indices, out_shape)
+        values = _maybe_resize_out(values, v)
+        indices = _maybe_resize_out(indices, v)
         values.as_strided_(out_shape, out_stride)
         indices.as_strided_(out_shape, out_stride)
         _safe_copy_out(copy_from=v, copy_to=values)  # type: ignore[arg-type]
