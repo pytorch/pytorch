@@ -809,6 +809,8 @@ class _NullDecorator(contextlib.nullcontext):  # type: ignore[type-arg]
 def check_if_dynamo_supported():
     if sys.version_info >= (3, 14):
         raise RuntimeError("Python 3.14+ not yet supported for torch.compile")
+    elif sys.version_info >= (3, 13) and not sys._is_gil_enabled():
+        raise RuntimeError("Dynamo is not supported on Python with GIL disabled")
 
 
 def is_dynamo_supported():
