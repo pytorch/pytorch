@@ -510,7 +510,8 @@ class BlockMask:
                 assert new_block_mask.kv_num_blocks.shape == (2,1,1)
                 assert new_block_mask.kv_indices.shape == (2,1,1,4)
         """
-
+        if not isinstance(index, tuple):
+            index = (index,)
         assert (
             len(index) <= 3
         ), "We only support block-level indexing on the first 3 dimensions. If you would like to slice on the last dimension we recommend calling the `_adjust` method on the block mask."
