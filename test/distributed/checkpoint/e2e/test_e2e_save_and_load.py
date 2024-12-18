@@ -277,7 +277,7 @@ class TestE2ESaveAndLoad(DTensorTestBase, VerifyStateDictMixin):
         self.assertEqual(loss, dist_loss)
 
         dist_msd, dist_osd = get_state_dict(dist_model, optimizers=dist_optim)
-        model_sd, optim_sd = get_state_dict(model, optimizers=optim)
+        model_sd, _ = get_state_dict(model, optimizers=optim)
 
         self._verify_msd(model_sd, dist_msd)
         self._verify_osd_by_load(model, optim, self._optim(model), dist_osd)

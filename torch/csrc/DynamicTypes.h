@@ -33,5 +33,5 @@ bool isStorage(PyObject* obj);
 
 // Both methods below return a borrowed reference!
 TORCH_PYTHON_API THPDtype* getTHPDtype(at::ScalarType scalarType);
-THPLayout* getTHPLayout(at::Layout layout);
+TORCH_PYTHON_API THPLayout* getTHPLayout(at::Layout layout);
 } // namespace torch

@@ -150,24 +150,23 @@ static void std_var_kernel_impl(TensorIterator& iter, double correction, bool ta
 
 static void prod_kernel_impl(TensorIterator& iter) {
   // Workaround for the error: '*' in boolean context, suggest '&&' instead
-  // [-Werror=int-in-bool-context]
   if (iter.dtype() == ScalarType::Bool) {
     using scalar_t = bool;
     binary_kernel_reduce_vec(
         iter,
         [=](scalar_t a, scalar_t b)
-            __ubsan_ignore_undefined__ -> scalar_t { return a && b; },
+            -> scalar_t { return a && b; },
         [=](Vectorized<scalar_t> a, Vectorized<scalar_t> b)
-            __ubsan_ignore_undefined__ { return a && b; },
+            { return a && b; },
         /*ident=*/1);
   } else {
     AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kBFloat16, kHalf, iter.dtype(), "prod_out_cpu", [&] {
       binary_kernel_reduce_vec(
           iter,
           [=](scalar_t a, scalar_t b)
-              __ubsan_ignore_undefined__ -> scalar_t { return a * b; },
+              -> scalar_t { return a * b; },
           [=](Vectorized<scalar_t> a, Vectorized<scalar_t> b)
-              __ubsan_ignore_undefined__ { return a * b; },
+              { return a * b; },
           /*ident=*/1);
     });
   }
