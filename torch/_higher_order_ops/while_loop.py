@@ -288,11 +288,10 @@ def while_loop_tracing(mode, cond_fn, body_fn, carried_inputs, additional_inputs
         #   users to be >= 0 (either before while_loop or inside body_fn) and it increments by 1 in each
         #   iteration. Ideally, we should know that the final output is >= 0 but we didn't constrain the
         #   unbacked symint output of subgraph as of today because this requires a smart range analysis.
+        fake_mode: FakeTensorMode = _find_or_create_fake_mode()
         unspecialized_carried_inputs = pytree.tree_map_only(
             (int, torch.SymInt),
-            lambda _: _create_unbacked_symint(
-                _find_or_create_fake_mode(), ignore_fresh_unbacked_symbols=True
-            ),
+            lambda _: _create_unbacked_symint(fake_mode),
             carried_inputs,
         )
 
@@ -444,7 +443,7 @@ def while_loop_fake_tensor_mode(
         return pytree.tree_map_only(
             (int, torch.SymInt),
             lambda _: _create_unbacked_symint(
-                _find_or_create_fake_mode(), ignore_fresh_unbacked_symbols=False
+                mode, ignore_fresh_unbacked_symbols=False
             ),
             body_outs,
         )
