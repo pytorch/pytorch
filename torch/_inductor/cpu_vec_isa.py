@@ -14,6 +14,7 @@ from torch._inductor import config
 
 
 _IS_WINDOWS = sys.platform == "win32"
+_IS_MACOS = sys.platform.startswith("darwin")
 
 
 def _get_torch_cpu_module_path() -> str:
@@ -22,10 +23,12 @@ def _get_torch_cpu_module_path() -> str:
 
     if _IS_WINDOWS:
         module_path = os.path.join(TORCH_LIB_PATH, f"{module_name}.dll")
+    elif _IS_MACOS:
+        module_path = os.path.join(TORCH_LIB_PATH, f"lib{module_name}.dylib")
     else:
         module_path = os.path.join(TORCH_LIB_PATH, f"lib{module_name}.so")
 
-    if not os.path.isfile(module_path):
+    if not os.path.exists(module_path):
         raise RuntimeError(f"{module_name} get wrong path {module_path}")
 
     return module_path
@@ -85,7 +88,7 @@ extern "C" void __avx_chk_kernel() {
     _avx_py_load = """
 # import torch
 from ctypes import cdll
-cdll.LoadLibrary("__torch_cpu__path__")
+cdll.LoadLibrary("__torch_cpu_path__")
 cdll.LoadLibrary("__lib_path__")
 """
 
@@ -130,6 +133,7 @@ cdll.LoadLibrary("__lib_path__")
                 buid_options,
                 output_dir,
             )
+            torch_cpu_path = _get_torch_cpu_module_path()
             try:
                 # Check if the output file exist, and compile when not.
                 output_path = normalize_path_separator(
@@ -139,14 +143,13 @@ cdll.LoadLibrary("__lib_path__")
                     status, target_file = x86_isa_help_builder.build()
 
                 # Check build result
-                torch_cpu_path = _get_torch_cpu_module_path()
                 subprocess.check_call(
                     [
                         sys.executable,
                         "-c",
                         VecISA._avx_py_load.replace(
                             "__lib_path__", output_path
-                        ).replace("__torch_cpu__path__", torch_cpu_path),
+                        ).replace("__torch_cpu_path__", torch_cpu_path),
                     ],
                     cwd=output_dir,
                     stderr=subprocess.DEVNULL,
