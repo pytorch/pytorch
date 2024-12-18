@@ -1179,6 +1179,21 @@ class TritonHOPifier:
                 "Please use a Config in @triton.autotune instead."
             )
 
+        # We support running a single Autotuner for each Triton kernel
+        # Currently, if there are multiple autotuning decorators, the subsequent ones will be silently ignored
+        # We raise an error here to avoid silent incorrectness
+        iter_kernel = variable.kernel
+        autotuner_count = 0
+        while not isinstance(iter_kernel, JITFunction):
+            if isinstance(iter_kernel, Autotuner):
+                autotuner_count += 1
+            if autotuner_count > 1:
+                self.raise_unsupported(
+                    "Passing multiple @triton.autotune decorators is not supported. "
+                    "Please use a single @triton.autotune decorator instead."
+                )
+            iter_kernel = iter_kernel.fn
+
         special_kwargs = {}
         for name in SPECIAL_CONFIG_NAMES:
             if name in kwargs:
