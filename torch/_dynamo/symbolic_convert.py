@@ -264,6 +264,10 @@ class TensorifyState:
     def clear(cls) -> None:
         cls.force_specializations.clear()
 
+    @classmethod
+    def empty(cls) -> bool:
+        return len(cls.force_specializations) == 0
+
 
 @functools.lru_cache(None)
 def _step_logger():
