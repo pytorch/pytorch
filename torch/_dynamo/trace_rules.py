@@ -322,6 +322,8 @@ manual_torch_name_rule_map = {
     f"torch/testing/_internal/distributed/_tensor/common_dtensor.py#{TORCH_DYNAMO_RESUME_IN_PREFIX}": UserFunctionVariable,
     "torch/testing/_internal/common_distributed.py#forward": UserFunctionVariable,
     f"torch/testing/_internal/common_distributed.py#{TORCH_DYNAMO_RESUME_IN_PREFIX}": UserFunctionVariable,
+    # Triton
+    "torch._higher_order_ops.triton_kernel_wrap.call_prune_configs": UserFunctionVariable,
 }
 
 
@@ -3294,6 +3296,7 @@ MOD_INLINELIST = [
     "torch._higher_order_ops.invoke_subgraph",
     "torch._higher_order_ops.scan",
     "torch._higher_order_ops.strict_mode",
+    "torch._higher_order_ops.triton_kernel_wrap",
     "torch._higher_order_ops.while_loop",
     "torch._inductor.test_operators",
     "torch._library.autograd",
