@@ -2046,8 +2046,7 @@ class GraphLowering(torch.fx.Interpreter):
         return [
             node.get_name()
             for node in self.graph_outputs
-            if not isinstance(node, ir.NoneAsConstantBuffer)
-            and not isinstance(node, ir.ShapeAsConstantBuffer)
+            if not isinstance(node, ir.ShapeAsConstantBuffer)
         ]
 
     def is_unspec_arg(self, name: str) -> bool:

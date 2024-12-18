@@ -3858,21 +3858,6 @@ class ConstantBuffer(InputBuffer):
 
 
 @ir_dataclass
-class NoneAsConstantBuffer(IRNode):
-    def get_unbacked_symbol_uses(self) -> OrderedSet[sympy.Symbol]:
-        return OrderedSet()
-
-    def codegen_reference(self, writer: Optional[IndentedBuffer] = None) -> str:
-        return V.graph.wrapper_code.none_str
-
-    def get_output_spec(self) -> OutputSpec:
-        return NoneLayout(device=None)
-
-    def has_tensor_output(self) -> bool:
-        return False
-
-
-@ir_dataclass
 class ShapeAsConstantBuffer(IRNode):
     expr: Expr
 
