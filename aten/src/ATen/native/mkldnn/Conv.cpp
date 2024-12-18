@@ -180,6 +180,11 @@ static void _mkldnn_convolution_out (
   auto weight = weight_t.is_mkldnn() ? weight_t : weight_t.contiguous(memory_format);
   const ideep::tensor x = itensor_from_tensor(input, /*from_const_data_ptr*/true);
   const ideep::tensor w = itensor_from_tensor(weight, /*from_const_data_ptr*/true);
+  auto algo = ideep::algorithm::convolution_direct;
+  auto aprop_kind = ideep::prop_kind::forward;
+  if (!((input.requires_grad() && at::GradMode::is_enabled()) || input._fw_grad(/*level */ 0).defined())) {
+    aprop_kind = ideep::prop_kind::forward_inference;
+  }
   if (bias.defined()) {
     const ideep::tensor b = itensor_from_tensor(bias, /*from_const_data_ptr*/true);
     ideep::convolution_forward::compute_v3(
@@ -194,7 +199,9 @@ static void _mkldnn_convolution_out (
         {padding.begin(), padding.end()},
         groups,
         is_channels_last,
-        op_attr);
+        op_attr,
+        algo,
+        aprop_kind);
   } else {
     ideep::convolution_forward::compute_v3(
         x,
@@ -207,7 +214,9 @@ static void _mkldnn_convolution_out (
         {padding.begin(), padding.end()},
         groups,
         is_channels_last,
-        op_attr);
+        op_attr,
+        algo,
+        aprop_kind);
   }
 }
 
