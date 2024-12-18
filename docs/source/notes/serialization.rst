@@ -487,3 +487,29 @@ The following utility functions are related to serialization:
 .. autofunction:: get_unsafe_globals_in_checkpoint
 .. autoclass:: safe_globals
 .. autoclass:: skip_data
+
+.. _serialization config:
+
+Config
+------
+
+.. py:module:: torch.utils.serialization
+.. py:module:: torch.utils.serialization.config
+
+``torch.utils.serialization.config`` provides a global config that can control the behavior of
+``torch.save`` and ``torch.load``.
+
+``torch.utils.serialization.config.save`` contains options that control the behavior of ``torch.save``.
+
+  * ``compute_crc32``: whether to compute and write crc32 for each storage (Default : ``True``).
+    See :func:`~torch.serialization.set_crc32_options`.
+
+``torch.utils.serialization.config.load`` contains options that control the behavior of ``torch.load``.
+
+  * ``mmap``: See the documentation for ``mmap`` argument in :func:`torch.load`.
+    This config will set the behavior of ``mmap`` for ``torch.load`` if it is not
+    already explicitly passed to the ``torch.load`` call (Default : ``False``).
+  * ``endianness``: See :func:`~torch.serialization.set_default_load_endianness`.
+    (Default : ``torch.serialization.LoadEndianness.NATIVE``)
+  * ``mmap_flags``: See :class:`~torch.serialization.set_default_mmap_options`.
+    (Default : ``MAP_PRIVATE``)

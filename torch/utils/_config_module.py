@@ -161,6 +161,11 @@ def install_config_module(module: ModuleType) -> None:
                 or (hasattr(value, "__module__") and value.__module__ == "typing")
                 # Handle from torch.utils._config_module import Config
                 or (isinstance(value, type) and issubclass(value, _Config))
+                # Handle from torch.serialization import LoadEndianness
+                or (
+                    hasattr(value, "__module__")
+                    and value.__module__ == "torch.serialization"
+                )
             ):
                 continue
 
