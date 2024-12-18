@@ -2000,7 +2000,6 @@
     "SymExprPrinter",
     "RelaxedUnspecConstraint",
     "RuntimeAssert",
-    "ShapeGuardCppPrinter",
     "ShapeGuardPrinter",
     "ShapeGuardPythonPrinter",
     "StrictMinMaxConstraint",
