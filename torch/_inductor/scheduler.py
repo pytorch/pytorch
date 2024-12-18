@@ -1003,7 +1003,9 @@ class SchedulerNode(BaseSchedulerNode):
             recompute_sizes_body_func=recompute_sizes_body_func,
         )
 
-    def refresh_dependencies(self, normalize: bool) -> None:
+    def refresh_dependencies(
+        self, normalize: bool, need_clear_tiling_cache: bool
+    ) -> None:
         # Fake dependencies are added manually. They can not be analyzed from
         # extract_read_writes. Find them out and apply manually.
         fake_deps = OrderedSet(
@@ -1018,22 +1020,36 @@ class SchedulerNode(BaseSchedulerNode):
             ).with_read(fake_deps)
         )
 
+        self.pointwise_read_writes.clear_cache(self)
+
+        if need_clear_tiling_cache:
+            from .codegen.simd import SIMDScheduling
+
+            # TODO(shunting) if this cause compilation time increase when
+            # enabling LOAF by default, try just clearing the specific cache
+            # entry by using a customized cache implemetation rather than
+            # lru_cache.
+            SIMDScheduling.candidate_tilings.cache_clear()
+
     def apply_new_loop_order(self, new_order: Sequence[int]) -> None:
         self._body = self._body.reorder_iter_loops(
             new_order,
         )
         self._sizes = self._body.sizes
 
-        self.refresh_dependencies(normalize=False)
+        self.refresh_dependencies(normalize=False, need_clear_tiling_cache=True)
 
-        from .codegen.simd import SIMDScheduling
+    def merge_loops(self) -> None:
+        self._body = self._body.merge_loops()
+        self._sizes = self._body.sizes
 
-        # TODO(shunting) if this cause compilation time increase when
-        # enabling LOAF by default, try just clearing the specific cache
-        # entry by using a customized cache implemetation rather than
-        # lru_cache.
-        SIMDScheduling.candidate_tilings.cache_clear()
-        self.pointwise_read_writes.clear_cache(self)
+        # merge_loops is called after loop reordering.
+        # We still need retain fake dependencies since codegen the
+        # estimated amount of memory access rely on them.
+        #
+        # Merge loops does not affect the tiling decision. So we
+        # don't need clear the tiling cache.
+        self.refresh_dependencies(normalize=True, need_clear_tiling_cache=False)
 
     def reorder_loops_by_dep_pair(
         self, self_dep: MemoryDep, other_dep: MemoryDep
@@ -1883,6 +1899,7 @@ class Scheduler:
             ]
         )
 
+        self.speedup_by_fusion_cache: Dict[str, Callable[[], bool]] = {}
         self.nodes = [self.create_scheduler_node(n) for n in nodes]
         self.update_zero_dim_cpu_tensor()
         # some new constants could have been created above
@@ -2423,13 +2440,7 @@ class Scheduler:
                 if not isinstance(snode, SchedulerNode) or snode.is_template():
                     continue
 
-                snode._body = snode._body.merge_loops()
-                snode._sizes = snode._body.sizes
-
-                # merge_loops is called after loop reordering.
-                # We still need retain fake dependencies since codegen the
-                # estimated amount of memory access rely on them.
-                snode.refresh_dependencies(normalize=True)
+                snode.merge_loops()
 
                 # Note that for CPU backend, merging loops will change
                 # snode.group. It's fine for Triton backend.
@@ -2678,13 +2689,16 @@ class Scheduler:
 
         def compile_kernel(
             nodes: Sequence[BaseSchedulerNode],
-        ) -> Tuple[TritonFuture, ModuleType]:
+            compile_future: bool = True,
+        ) -> Tuple[Optional[TritonFuture], ModuleType]:
             src_code = self.generate_kernel_code_from_nodes(
                 nodes, benchmark_kernel=True
             )
             mod = PyCodeCache.load(src_code)
             return (
-                async_compile.triton(kernel_name="triton_", source_code=src_code),
+                async_compile.triton(kernel_name="triton_", source_code=src_code)
+                if compile_future
+                else None,
                 mod,
             )
 
@@ -2700,7 +2714,15 @@ class Scheduler:
             multi_node = node1.node if epilogue_fusion else node2.node
             assert isinstance(multi_node, ir.MultiTemplateBuffer)
             choice_timings = multi_node.choice_timings
-            _, ms1 = multi_node.get_min_choice()
+            min_choice, ms1 = multi_node.get_min_choice()
+
+            multi_node_key = torch._inductor.select_algorithm.create_precompile_key(
+                name=repr(multi_node.origins),
+                inputs_key=torch._inductor.select_algorithm.create_inputs_key(
+                    multi_node.inputs
+                ),
+                choices=list(choice_timings.keys()),
+            )
 
             non_template_nodes = node_list_2 if epilogue_fusion else node_list_1
 
@@ -2708,9 +2730,17 @@ class Scheduler:
             _, ms1 = multi_node.get_min_choice()
             ms2, path2 = self.benchmark_fused_nodes(node_list_2)
 
+            # equivalent source code will get mapped to the same path
+            fusion_key = "f({multi_node_key}, {path2})"
+            cached_fusion = fusion_key in self.speedup_by_fusion_cache
+
             # Start compiling choices in parallel
             future_choices: List[
-                Tuple[Any, torch._inductor.codecache.TritonFuture, ModuleType]
+                Tuple[
+                    torch._inductor.select_algorithm.ChoiceCaller,
+                    Optional[torch._inductor.codecache.TritonFuture],
+                    ModuleType,
+                ]
             ] = []
             triton_choices = 0
             for choice, unfused_time in sorted(
@@ -2739,15 +2769,27 @@ class Scheduler:
                     break
 
                 with multi_node.swap_as_triton_caller(choice):
-                    future_choices.append((choice, *compile_kernel(node_list_fused)))
+                    future_choices.append(
+                        (
+                            choice,
+                            *compile_kernel(
+                                node_list_fused, compile_future=not cached_fusion
+                            ),
+                        )
+                    )
 
+            @functools.lru_cache
             def benchmark_when_ready() -> bool:
                 min_ms_fused = float("inf")
                 ms_fused_choice = None
 
+                if cached_fusion:
+                    self.speedup_by_fusion_cache[fusion_key]()
+
                 # Benchmark each choice after compilation completes
                 for choice, future, mod_fused in future_choices:
-                    future.result()
+                    if future:
+                        future.result()
                     with multi_node.swap_as_triton_caller(choice):
                         ms_fused, path = self.benchmark_codegened_module(
                             mod_fused, node_list_fused[0].get_device()
@@ -2764,14 +2806,23 @@ class Scheduler:
                 else:
                     return False
 
+            if not cached_fusion:
+                self.speedup_by_fusion_cache[fusion_key] = benchmark_when_ready
             return benchmark_when_ready
 
         else:
-            # Start parallel compilation for all three kernels
-            future_and_mod_l1 = compile_kernel(node_list_1)
-            future_and_mod_l2 = compile_kernel(node_list_2)
-            future_and_mod_l1_fused = compile_kernel(node_list_fused)
+            future_and_mod_l1_fused = compile_kernel(node_list_fused, compile_future=False)
 
+            cache_key = future_and_mod_l1_fused[1].__file__
+            if existing_benchmark := self.speedup_by_fusion_cache.get(cache_key, None):
+                return existing_benchmark
+
+            # Start parallel compilation for all three kernels
+            future_and_mod_l1_fused = compile_kernel(node_list_fused, compile_future=True)
+            future_and_mod_l1 = compile_kernel(node_list_1, compile_future=True)
+            future_and_mod_l2 = compile_kernel(node_list_2, compile_future=True)
+
+            @functools.lru_cache
             def benchmark_when_ready() -> bool:
                 try:
                     # Wait for all compilations to complete
@@ -2829,6 +2880,7 @@ class Scheduler:
                         return True
                     raise
 
+            self.speedup_by_fusion_cache[cache_key] = benchmark_when_ready
             return benchmark_when_ready
 
     def fuse_nodes_once(
@@ -2909,12 +2961,14 @@ class Scheduler:
 
                 fuse_two_nodes(node1, node2)
 
-        seen_pair_speedup_fn: OrderedSet[Callable[[], bool]] = OrderedSet()
+        seen_fusion: OrderedSet[
+            Tuple[Callable[[], bool], BaseSchedulerNode, BaseSchedulerNode]
+        ] = OrderedSet()
         for is_speedup, node_key1, node_key2 in pending_fusions.values():
-            if is_speedup in seen_pair_speedup_fn:
+            if (is_speedup, node_key1, node_key2) in seen_fusion:
                 continue
 
-            seen_pair_speedup_fn.add(is_speedup)
+            seen_fusion.add((is_speedup, node_key1, node_key2))
 
             if is_speedup():
                 fuse_two_nodes(node_key1, node_key2)
@@ -3438,7 +3492,10 @@ class Scheduler:
         del device2
 
         shared_data_score = self.score_fusion_memory(node1, node2)
-        if shared_data_score == 0:
+        if (
+            shared_data_score < config.score_fusion_memory_threshold
+            and config.loop_ordering_after_fusion
+        ):
             shared_data_score = self.shared_data_after_reordering_loop(node1, node2)
 
         if loop_ordering_log.isEnabledFor(logging.DEBUG):
@@ -3615,7 +3672,7 @@ class Scheduler:
         node2_dep_len = len(node1.read_writes.reads) + len(node2.read_writes.writes)
 
         # optimization: iter over smaller set
-        if max(node1_dep_len, node2_dep_len) * 4 > min(node1_dep_len, node2_dep_len):
+        if min(node1_dep_len, node2_dep_len) * 4 < max(node1_dep_len, node2_dep_len):
             if node1_dep_len > node2_dep_len:
                 tmp = node1
                 node1 = node2
@@ -4054,7 +4111,7 @@ class BaseScheduling:
         """
         raise NotImplementedError
 
-    def generate_kernel_code_from_nodes(self, nodes, benchmark_kernel=False):
+    def generate_kernel_code_from_nodes(self, nodes: Sequence[BaseSchedulerNode], benchmark_kernel: bool = False) -> str:
         raise NotImplementedError
 
     def codegen_node(self, node: Union[FusedSchedulerNode, SchedulerNode]) -> None:
