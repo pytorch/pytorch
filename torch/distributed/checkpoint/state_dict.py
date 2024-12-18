@@ -549,7 +549,12 @@ def _load_model_state_dict(
             if (
                 not info.broadcast_from_rank0 or dist.get_rank() == 0
             ) and fqn != fqn_with_prefix:
-                state_dict[fqn_with_prefix] = state_dict.pop(fqn)
+                load_value = state_dict.pop(fqn, None)
+                if load_value is None:
+                    if info.strict:
+                        raise RuntimeError(f"Missing key: {fqn}.")
+                else:
+                    state_dict[fqn_with_prefix] = load_value
             local_state_dict[fqn_with_prefix] = value
 
     assign = False
@@ -611,7 +616,11 @@ def _init_optim_state(optim: torch.optim.Optimizer) -> None:
     for param_group in optim.param_groups:
         if "lr" in param_group:
             lrs.append(param_group["lr"])
-            param_group["lr"] = 0.0
+            param_group["lr"] = (
+                torch.tensor(0.0)
+                if isinstance(param_group["lr"], torch.Tensor)
+                else 0.0
+            )
     optim.step(closure=None)
     # Whether to recover the "lr" should not matter too much as we will
     # restore checkpointing later.

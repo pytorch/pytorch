@@ -21,7 +21,7 @@
 #include <ATen/Parallel.h>
 #include <ATen/TensorIterator.h>
 
-namespace at { namespace native {
+namespace at::native {
 // In real-to-complex transform, MKL FFT only fills half of the values due to
 // conjugate symmetry. See native/SpectralUtils.h for more details.
 // The following structs are used to fill in the other half with symmetry in
@@ -200,7 +200,7 @@ Tensor& _fft_c2c_mkl_out(const Tensor& self, IntArrayRef dim, int64_t normalizat
   return out.copy_(result);
 }
 
-}} // namespace at::native
+} // namespace at::native
 #endif /* AT_MKL_ENABLED() || AT_POCKETFFT_ENABLED() */
 
 #if AT_POCKETFFT_ENABLED()
@@ -342,7 +342,7 @@ Tensor _fft_c2c_mkl(const Tensor& self, IntArrayRef dim, int64_t normalization, 
 #include <ATen/mkl/Limits.h>
 
 
-namespace at { namespace native {
+namespace at::native {
 
 // Constructs an mkl-fft plan descriptor representing the desired transform
 // For complex types, strides are in units of 2 * element_size(dtype)
@@ -570,7 +570,7 @@ Tensor _fft_c2c_mkl(const Tensor& self, IntArrayRef dim, int64_t normalization, 
   return _exec_fft(out, self, self.sizes(), sorted_dims, normalization, forward);
 }
 
-}} // namespace at::native
+} // namespace at::native
 
 #else
 
