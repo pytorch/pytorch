@@ -22,6 +22,7 @@ from torch.testing._internal.common_device_type import (
     onlyCUDA,
     onlyNativeDeviceTypes,
     ops,
+    skipCPUIf,
 )
 from torch.testing._internal.common_methods_invocations import (
     op_db,
@@ -608,6 +609,7 @@ class TestDecomp(TestCase):
         res = torch._decomp.decompositions.uniform(x, low=low, high=high)
         self.assertEqual(ref, res)
 
+    @skipCPUIf(True, "skip CPU device for testing bernoulli_p decomposition")
     def test_bernoulli_p(self, device):
         p = 0.3
         input_t = torch.rand(100, 100)

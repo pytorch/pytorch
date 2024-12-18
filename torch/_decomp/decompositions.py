@@ -5119,13 +5119,15 @@ def bernoulli(
 
 @register_decomposition(aten.bernoulli.p)
 def bernoulli_p(self, p, *, generator: Optional[torch.Generator] = None):
+    if self.device.type == "cpu":
+        return NotImplemented
     if generator is None:
         raw_p = torch.rand(self.size(), dtype=torch.float32, device=self.device)
     else:
         raw_p = torch.rand(
             self.size(),
             generator=generator,
-            dtype=self.float32,
+            dtype=torch.float32,
             device=self.device,
         )
     p = (raw_p < p).to(self.dtype)
