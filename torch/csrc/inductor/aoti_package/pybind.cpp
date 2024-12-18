@@ -30,8 +30,8 @@ class AOTIModelPackageLoaderPybind : public AOTIModelPackageLoader {
     // Explicitly clear the passed-in Python list
     inputs.clear();
 
-    std::vector<at::Tensor> result_tensors =
-        AOTIModelPackageLoader::boxed_run(input_tensors, stream_handle);
+    std::vector<at::Tensor> result_tensors = AOTIModelPackageLoader::boxed_run(
+        std::move(input_tensors), stream_handle);
 
     py::list outputs;
     for (const auto& tensor : result_tensors) {

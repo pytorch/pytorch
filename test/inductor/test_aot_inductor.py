@@ -5,7 +5,6 @@ import os
 import sys
 import tempfile
 import unittest
-import weakref
 from typing import Dict, Tuple
 from unittest import skip
 
@@ -23,14 +22,17 @@ from torch._inductor import config
 from torch._inductor.exc import CppWrapperCodegenError
 from torch._inductor.runtime.runtime_utils import cache_dir
 from torch._inductor.test_case import TestCase
-from torch._inductor.utils import run_and_get_cpp_code
+from torch._inductor.utils import is_big_gpu, run_and_get_cpp_code
 from torch.ao.quantization.quantize_pt2e import convert_pt2e, prepare_pt2e
 from torch.ao.quantization.quantizer.x86_inductor_quantizer import X86InductorQuantizer
 from torch.export import Dim, export, export_for_training
 from torch.testing import FileCheck
 from torch.testing._internal import common_utils
 from torch.testing._internal.common_cuda import SM80OrLater, SM90OrLater
-from torch.testing._internal.common_device_type import skipCUDAIf
+from torch.testing._internal.common_device_type import (
+    _has_sufficient_memory,
+    skipCUDAIf,
+)
 from torch.testing._internal.common_quantization import (
     skip_if_no_torchvision,
     skipIfNoFBGEMM,
@@ -4057,6 +4059,10 @@ class AOTInductorTestsTemplate:
         )
         self.check_model(Model(), example_inputs)
 
+    @unittest.skipIf(
+        IS_FBCODE,
+        "To enable after the C shim FC window ends",
+    )
     def test_misaligned_input_1(self):
         if self.device != "cuda":
             raise unittest.SkipTest("CUDA test only")
@@ -4072,17 +4078,17 @@ class AOTInductorTestsTemplate:
         expected = model(*example_inputs)
         so_path = AOTIRunnerUtil.compile(model, example_inputs)
         optimized = AOTIRunnerUtil.load(self.device, so_path)
+        # If the model is compiled with aligned inputs, the generated
+        # code will check inputs alignment at runtime
+        self.code_check_count(
+            model, example_inputs, "aoti_torch_clone_preserve_strides", 1
+        )
 
         misaligned_arg = torch.zeros(N + 1, device=self.device)
         misaligned_arg = misaligned_arg[1:]
         misaligned_arg.copy_(arg)
-        # If the model is compiled with aligned inputs, the generated
-        # code will check inputs alignment at runtime, and throws an
-        # error if any alignment assumption is violated.
-        msg = ".* API call failed at .*"
-        with self.assertRaisesRegex(RuntimeError, msg):
-            actual = optimized(misaligned_arg)
-            torch.testing.assert_close(actual, expected)
+        actual = optimized(misaligned_arg)
+        torch.testing.assert_close(actual, expected)
 
     def test_misaligned_input_2(self):
         if self.device != "cuda":
@@ -4098,9 +4104,70 @@ class AOTInductorTestsTemplate:
         misaligned_arg = misaligned_arg[1:]
         misaligned_arg.copy_(arg)
         example_inputs = (misaligned_arg,)
+
+        model = Model()
+        self.check_model(model, example_inputs)
         # If the model is already compiled with a misaligned input, the
         # generated code should NOT contain an alignment check for that input.
-        self.check_model(Model(), example_inputs)
+        self.code_check_count(
+            model, example_inputs, "aoti_torch_clone_preserve_strides", 0
+        )
+
+    def test_conv3d(self):
+        if self.device != GPU_TYPE or not is_big_gpu():
+            raise unittest.SkipTest("requires modern GPU to run max-autotune")
+
+        if not _has_sufficient_memory(self.device, 2**35):
+            raise unittest.SkipTest("insufficient memory")
+
+        class Model(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+
+            def forward(
+                self,
+                convert_element_type_1271,
+                convert_element_type_1272,
+                convert_element_type_1273,
+            ):
+                return torch.ops.aten.convolution.default(
+                    convert_element_type_1271,
+                    convert_element_type_1272,
+                    convert_element_type_1273,
+                    [1, 1],
+                    [1, 1],
+                    [1, 1],
+                    False,
+                    [0, 0],
+                    1,
+                )
+
+        example_inputs = (
+            torch.randn(1, 64, 5160, 5160, device=self.device),
+            torch.randn(3, 64, 3, 3, device=self.device),
+            torch.randn(3, device=self.device),
+        )
+        dynamic_shapes = {
+            "convert_element_type_1271": {
+                3: torch.export.Dim.DYNAMIC,
+                4: torch.export.Dim.DYNAMIC,
+            },
+            "convert_element_type_1272": None,
+            "convert_element_type_1273": None,
+        }
+        with config.patch(
+            {
+                "max_autotune": True,
+                "max_autotune_conv_backends": "TRITON",
+            }
+        ):
+            self.check_model(
+                Model(),
+                example_inputs,
+                atol=0.1,
+                rtol=1e-3,
+                dynamic_shapes=dynamic_shapes,
+            )
 
     def test_list_clearing(self):
         # Borrowed from test_torchinductor
@@ -4113,7 +4180,6 @@ class AOTInductorTestsTemplate:
             torch.rand(5, 5, device=self.device),
             torch.rand(5, 5, device=self.device),
         ]
-        inp_refs_0 = [weakref.ref(inp) for inp in inps]
 
         model = Model().to(device=self.device)
         # NOTE: There are additional references to inps if we use
@@ -4132,7 +4198,6 @@ class AOTInductorTestsTemplate:
                 kwargs = kwargs if kwargs else {}
 
                 nonlocal inps
-                nonlocal inp_refs_0
                 nonlocal test_self
                 nonlocal empty_strided_seen
 
@@ -4141,13 +4206,12 @@ class AOTInductorTestsTemplate:
                     and not empty_strided_seen
                 ):
                     # inputs should be deallocated by this point
-                    empty_strided_seen = True
-                    test_self.assertEqual(len(inps), 0)
                     # Unlike in test_torchinductor, boxed_run here
                     # will clear inps from C++ and make the weak
-                    # refs here invalid.
-                    # test_self.assertIsNone(inp_refs[0]())
-                    # test_self.assertIsNone(inp_refs[1]())
+                    # inp_refs in test_torchindutor invalid here.
+                    empty_strided_seen = True
+                    test_self.assertEqual(len(inps), 0)
+
                 return func(*args, **kwargs)
 
         with TestRefMode():

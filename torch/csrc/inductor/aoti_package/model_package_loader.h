@@ -22,7 +22,7 @@ class TORCH_API AOTIModelPackageLoader {
 
   // boxed_run will steal the ownership of the input tensors
   std::vector<at::Tensor> boxed_run(
-      std::vector<at::Tensor>& inputs,
+      std::vector<at::Tensor>&& inputs,
       void* stream_handle = nullptr);
 
   std::vector<std::string> get_call_spec();

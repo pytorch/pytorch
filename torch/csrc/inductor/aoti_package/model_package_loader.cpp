@@ -465,9 +465,9 @@ std::vector<at::Tensor> AOTIModelPackageLoader::run(
 }
 
 std::vector<at::Tensor> AOTIModelPackageLoader::boxed_run(
-    std::vector<at::Tensor>& inputs,
+    std::vector<at::Tensor>&& inputs,
     void* stream_handle) {
-  return runner_->boxed_run(inputs, stream_handle);
+  return runner_->boxed_run(std::move(inputs), stream_handle);
 }
 
 std::unordered_map<std::string, std::string> AOTIModelPackageLoader::
