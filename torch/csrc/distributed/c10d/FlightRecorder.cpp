@@ -121,17 +121,6 @@ bool recursive_mkdir(const std::string& dir) {
     return true;
   }
 
-  // Try to create current directory
-#ifdef _WIN32
-  int ret = _mkdir(dir.c_str());
-#else
-  int ret = mkdir(dir.c_str(), S_IRWXU | S_IRWXG);
-#endif
-  // Success
-  if (ret == 0) {
-    return true;
-  }
-
   // Find folder separator and check if we are at the top
   auto pos = dir.find_last_of("/\\");
   if (pos == std::string::npos) {
@@ -141,6 +130,17 @@ bool recursive_mkdir(const std::string& dir) {
   // Try to create parent directory
   if (!(recursive_mkdir(dir.substr(0, pos)))) {
     return false;
+  }
+
+  // Try to create current directory
+#ifdef _WIN32
+  int ret = _mkdir(dir.c_str());
+#else
+  int ret = mkdir(dir.c_str(), S_IRWXU | S_IRWXG);
+#endif
+  // Success
+  if (ret == 0) {
+    return true;
   }
 
   // Try to create complete path again
