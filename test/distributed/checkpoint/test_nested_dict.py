@@ -43,7 +43,7 @@ class TestFlattening(TestCase):
             "k3": ["x", 99, [{"k3": "y"}]],
         }
 
-        flatten_dict, mapping = flatten_state_dict(state_dict)
+        _, mapping = flatten_state_dict(state_dict)
         """
         flatten_dict:
         {'k0': [1], 'k2.0': tensor([1]), 'k2.1': 99, 'k2.2.0.k3': tensor(1), 'k3': ['x', 99, [{'k3': 'y'}]]}

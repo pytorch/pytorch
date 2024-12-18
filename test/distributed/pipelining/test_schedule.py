@@ -264,7 +264,7 @@ class TestSchedulePlan(TestCase):
                 ]
 
                 schedule = ScheduleClass(stages, num_microbatches)
-                formatted_pipeline_order = _format_pipeline_order(
+                _formatted_pipeline_order = _format_pipeline_order(
                     schedule.pipeline_order
                 )
 
@@ -305,10 +305,7 @@ class TestSchedulePlan(TestCase):
                     for i in range(num_local_stages)
                 ]
                 schedule = ScheduleClass(stages, num_microbatches)
-                formatted_pipeline_order = _format_pipeline_order(
-                    schedule.pipeline_order
-                )
-                # print(formatted_pipeline_order)
+                _format_pipeline_order(schedule.pipeline_order)
 
                 def stage_to_rank(stage):
                     return stage % group_size
