@@ -129,6 +129,33 @@ class Status(Enum):
         )
 
 
+# Sometime the types of configs aren't expressive enough to be captured by python type system, so the options can be
+# manually specified here:
+TYPE_OVERRIDES: Dict[str, List[Any]] = {
+    "post_grad_fusion_options": [
+        {
+            "batch_linear_post_grad": {
+                "shape_broadcast_batch_linear": True,
+                "fuse_nodes_with_same_users": True,
+            },
+            "batch_aten_mul": {"fuse_nodes_with_same_parent": False},
+            "batch_aten_sigmoid": {"fuse_nodes_with_same_parent": True},
+            "batch_aten_add": {"fuse_nodes_with_same_parent": True},
+            "normalization_aten_pass": {},
+            "unbind_stack_aten_pass": {},
+        },
+        {
+            "batch_aten_add": {},
+            "batch_aten_mul": {},
+            "batch_aten_sub": {},
+            "batch_aten_div": {},
+            "group_linear": {"require_fbgemm": True},
+        },
+    ]
+}
+SamplingType = Callable[[str, Type[Any], Any], Any]
+
+
 class SamplingMethod(Enum):
     """
     This class handles the process of assigning concrete values to type annotations. So a type annotation of
@@ -144,11 +171,15 @@ class SamplingMethod(Enum):
 
     @staticmethod
     def _generate_value_for_type(
-        random_sample: bool, type_hint: Type[Any], default: Any
+        random_sample: bool, field_name: str, type_hint: Type[Any], default: Any
     ) -> Any:
         """
         Generates a value of a type based on the setting.
         """
+        # look for name in type overrides
+        if field_name in TYPE_OVERRIDES:
+            return random.choice(TYPE_OVERRIDES[field_name])
+
         if type_hint == bool:
             return random.choice([True, False]) if random_sample else not default
         elif type_hint == int:
@@ -171,7 +202,7 @@ class SamplingMethod(Enum):
             new_default = default[0] if len(default) > 0 else None
             return [
                 SamplingMethod._generate_value_for_type(
-                    random_sample, elem_type, new_default
+                    random_sample, field_name, elem_type, new_default
                 )
                 for _ in range(random.randint(1, 3))
             ]
@@ -185,7 +216,7 @@ class SamplingMethod(Enum):
             new_default = indexable[0] if len(default) > 0 else None
             return {  # noqa: set_linter
                 SamplingMethod._generate_value_for_type(
-                    random_sample, elem_type, new_default
+                    random_sample, field_name, elem_type, new_default
                 )
                 for _ in range(random.randint(1, 3))
             }
@@ -200,7 +231,7 @@ class SamplingMethod(Enum):
             return OrderedSet(
                 [
                     SamplingMethod._generate_value_for_type(
-                        random_sample, elem_type, new_default
+                        random_sample, field_name, elem_type, new_default
                     )
                     for _ in range(random.randint(1, 3))
                 ]
@@ -219,9 +250,9 @@ class SamplingMethod(Enum):
                 default_key, default_val = None, None
             return {
                 SamplingMethod._generate_value_for_type(
-                    random_sample, key_type, default_key
+                    random_sample, field_name, key_type, default_key
                 ): SamplingMethod._generate_value_for_type(
-                    random_sample, value_type, default_val
+                    random_sample, field_name, value_type, default_val
                 )
                 for _ in range(random.randint(0, 3))
             }
@@ -244,7 +275,7 @@ class SamplingMethod(Enum):
                 new_default = None
 
             return SamplingMethod._generate_value_for_type(
-                random_sample, new_type, new_default
+                random_sample, field_name, new_type, new_default
             )
         elif is_type(type_hint, tuple):
             args = getattr(
@@ -256,7 +287,7 @@ class SamplingMethod(Enum):
             return tuple(
                 map(  # noqa: C417
                     lambda x: SamplingMethod._generate_value_for_type(
-                        random_sample, x[0], x[1]
+                        random_sample, field_name, x[0], x[1]
                     ),
                     zipped,
                 )
@@ -281,14 +312,14 @@ class SamplingMethod(Enum):
                     [
                         None,
                         SamplingMethod._generate_value_for_type(
-                            random_sample, elem_type, default
+                            random_sample, field_name, elem_type, default
                         ),
                     ]
                 )
             else:
                 if default is None:
                     return SamplingMethod._generate_value_for_type(
-                        random_sample, elem_type, None
+                        random_sample, field_name, elem_type, None
                     )
                 else:
                     return None
@@ -306,7 +337,7 @@ class SamplingMethod(Enum):
             @wraps(lambda *args, **kwargs: None)
             def dummy_function(*args, **kwargs):  # type: ignore[no-untyped-def]
                 return SamplingMethod._generate_value_for_type(
-                    random_sample, return_type, None
+                    random_sample, field_name, return_type, None
                 )
 
             return dummy_function
@@ -318,7 +349,7 @@ class SamplingMethod(Enum):
             raise ValueError(f"Unable to process type {type_hint}. PRs welcome :)")
 
     @staticmethod
-    def dispatch(sm: "SamplingMethod") -> Callable[[Type[Any], Any], Any]:
+    def dispatch(sm: "SamplingMethod") -> SamplingType:
         """
         Returns a function that will generate values from a type, based on the SamplingMethod passed in.
         """
@@ -429,7 +460,7 @@ class ConfigFuzzer:
     combo_kernels, benchmark_combo_kernel, profile_bandwidth, profile_bandwidth_regex
     """
 
-    sample: Callable[[Type[Any], Any], Any]
+    sample: SamplingType
 
     def __init__(
         self,
@@ -561,7 +592,7 @@ class ConfigFuzzer:
             if field_name.startswith("_"):
                 skip = True
             field = self.fields[field_name]
-            value = self.sample(field.value_type, field.default)
+            value = self.sample(field_name, field.value_type, field.default)
             config[field_name] = value
         if skip:
             results.set(combo, Status.SKIPPED)
@@ -712,7 +743,9 @@ class ConfigFuzzer:
                     and not field_name.startswith("_")
                     and random.random() < p
                 ):
-                    value = self.sample(config_entry.value_type, config_entry.default)
+                    value = self.sample(
+                        field_name, config_entry.value_type, config_entry.default
+                    )
                     config[field_name] = value
 
             status = self.test_config(results, config)
@@ -905,12 +938,18 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--method",
-        choices=["n_tuple", "random"],
-        default="n_tuple",
+        choices=["n_tuple", "bisect"],
+        default="bisect",
         help="Fuzzing method",
     )
     parser.add_argument(
         "--timeout", type=int, default=60, help="Test timeout in seconds"
+    )
+    parser.add_argument(
+        "--sampling_method",
+        choices=["toggle", "random"],
+        default="toggle",
+        help="Method of sampling config values",
     )
     parser.add_argument("--save_state", type=str, help="Save state to file")
     parser.add_argument("--load_state", type=str, help="Load state from file")
@@ -945,6 +984,10 @@ if __name__ == "__main__":
         return test_fn
 
     args = parser.parse_args()
+    if args.sampling_method == "toggle":
+        sm = SamplingMethod.TOGGLE
+    else:
+        sm = SamplingMethod.RANDOM
 
     fuzzer = ConfigFuzzer(
         config_module=torch._inductor.config,  # type: ignore[arg-type]
@@ -953,6 +996,7 @@ if __name__ == "__main__":
         else create_simple_test_model_cpu,
         seed=args.seed,
         test_timeout=args.timeout,
+        sm=sm,
     )
 
     if args.load_state:
@@ -963,4 +1007,4 @@ if __name__ == "__main__":
         if args.save_state:
             fuzzer.save_state(args.save_state)
     else:
-        print(fuzzer.bisect(num_attempts=args.num_attempts))
+        print(fuzzer.bisect(num_attempts=args.num_attempts, p=1.0))
