@@ -143,13 +143,9 @@ class TritonBundler:
         """
         if not TritonBundler.is_enabled():
             cls.end_compile()
-            set_feature_use(
-                "pytorch/remote_cache:bundle_triton_into_fx_graph_cache_v2", False
-            )
+            set_feature_use("triton_bundling", False)
             return [], None
-        set_feature_use(
-            "pytorch/remote_cache:bundle_triton_into_fx_graph_cache_v2", True
-        )
+        set_feature_use("triton_bundling", True)
 
         with dynamo_timed(key="TritonBundler.collect", log_pt2_compile_event=True):
             entries = cls._entries
