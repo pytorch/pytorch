@@ -171,7 +171,11 @@ GEMM_TEMPLATE_STUB_DEF = r"""
 {%- if x_scale is not none %}
     {%- set kernel_args = {"X": X, "W": W, "inp": inp, "x_scale": x_scale, "x_zp": x_zp, "w_scale": w_scale, "w_zp": w_zp,} %}
 {%- else %}
-    {%- set kernel_args = {"X": X, "W": W, "inp": inp} %}
+    {%- if w_scale is not none %}
+        {%- set kernel_args = {"X": X, "W": W, "w_scale": w_scale} %}
+    {%- else %}
+        {%- set kernel_args = {"X": X, "W": W, "inp": inp} %}
+    {%- endif %}
 {%- endif %}
 
 extern "C" {{export_declaration}}
@@ -223,16 +227,27 @@ GEMM_TEMPLATE = r"""
                     for (int64_t nci = nc; nci < nc_block_end; nci++) {
 {%- set acc_slice = kernel.slice_nd(acc, [("0", "m_end - m_start"), ("(nci - nc)*Nr", "(nci - nc + 1)*Nr")]) %}
 {%- if template.should_block_weights %}
-{%- set tile_W_3d = kernel.slice_nd(W, [("nci", "nci + 1"), ("k_start", "k_end"), ()]) %}
-{%- set tile_W = kernel.view(tile_W_3d, ["k_end - k_start", micro_gemm.register_blocking.block_n]) %}
+    {%- set tile_W_3d = kernel.slice_nd(W, [("nci", "nci + 1"), ("k_start", "k_end"), ()]) %}
+    {%- set tile_W = kernel.view(tile_W_3d, ["k_end - k_start", micro_gemm.register_blocking.block_n]) %}
+    {%- if x_scale is none and w_scale is not none %}
+        {%- set tile_scale = kernel.slice_nd(w_scale, [("(nci - nc)*Nr", "(nci - nc + 1)*Nr")]) %}
+    {%- endif %}
 {%- else %}
-{%- set tile_W = kernel.slice_nd(W, [("k_start", "k_end"), ("n_start", "n_start + n_size")]) %}
+    {%- set tile_W = kernel.slice_nd(W, [("k_start", "k_end"), ("n_start", "n_start + n_size")]) %}
 {%- endif %}
+{%- if x_scale is none and w_scale is not none %}
+                        if (kc == k_block_start) {
+                            {{ micro_gemm.codegen_call(kernel, tile_X, tile_W, tile_scale, acc_slice, accum=False)|indent(28, false) }}
+                        } else {
+                            {{ micro_gemm.codegen_call(kernel, tile_X, tile_W, tile_scale, acc_slice, accum=True)|indent(28, false) }}
+                        }
+{%- else %}
                         if (kc == k_block_start) {
                             {{ micro_gemm.codegen_call(kernel, tile_X, tile_W, acc_slice, accum=False)|indent(28, false) }}
                         } else {
                             {{ micro_gemm.codegen_call(kernel, tile_X, tile_W, acc_slice, accum=True)|indent(28, false) }}
                         }
+{%- endif %}
                     }
                 }
 {%- if maybe_k_slicing %}
@@ -1141,18 +1156,25 @@ class CppGemmTemplate(CppTemplate):
         x_zp = None
         w_scale = None
         w_zp = None
+        X, W = self.input_nodes[0], self.input_nodes[1]
+        Y = self.output_node
         if int8_gemm:
-            X, W = self.input_nodes[0], self.input_nodes[1]
             bias_idx = 2 if self.has_bias else 1
             inp = self.input_nodes[bias_idx] if self.has_bias else None
             x_scale = self.input_nodes[bias_idx + 1]
             x_zp = self.input_nodes[bias_idx + 2]
             w_scale = self.input_nodes[bias_idx + 3]
             w_zp = self.input_nodes[bias_idx + 4]
-            Y = self.output_node
+        elif (
+            self.input_nodes[0].get_dtype() == torch.bfloat16
+            and self.input_nodes[1].get_dtype() == torch.int8
+            and self.m <= 4
+            and self.n % 32 == 0
+            and torch._C._cpu._is_avx512_fp16_supported()
+        ):
+            w_scale = self.input_nodes[2]
+            inp = None
         else:
-            X, W = self.input_nodes[0], self.input_nodes[1]
-            Y = self.output_node
             inp = self.input_nodes[2] if self.has_bias else None
 
         template_buffer_has_other_users = None
@@ -1296,6 +1318,7 @@ class CppGemmTemplate(CppTemplate):
         output_dtype, compute_dtype = get_gemm_template_output_and_compute_dtype(
             X.get_dtype()
         )
+
         micro_gemm = create_micro_gemm(
             f"{kernel.kernel_name}_micro_gemm",
             self.m,
@@ -1349,7 +1372,7 @@ class CppGemmTemplate(CppTemplate):
             x_zp=x_zp,
             w_scale=w_scale,
             w_zp=w_zp,
-            acc_buf_dtype=torch.int32 if int8_gemm else torch.float,
+            acc_buf_dtype=micro_gemm.compute_dtype,
             DTYPE_TO_CPP=DTYPE_TO_CPP,
             L1_cache_size=L1_cache_size,
             L2_cache_size=L2_cache_size,

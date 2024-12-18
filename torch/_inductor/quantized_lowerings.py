@@ -1,6 +1,8 @@
 import logging
 from typing import Any
 
+import sympy
+
 import torch
 from torch._inductor.kernel.mm_common import mm_args
 
@@ -13,7 +15,8 @@ from .select_algorithm import (
     ExternKernelChoice,
     realize_inputs,
 )
-from .utils import use_aten_gemm_kernels, use_cpp_gemm_template
+from .utils import has_free_symbols, use_aten_gemm_kernels, use_cpp_gemm_template
+from .virtualized import V
 
 
 log = logging.getLogger(__name__)
@@ -49,7 +52,7 @@ def register_woq_mm_ops() -> None:
         *,
         layout: Any = None,
     ) -> Any:
-        _, _, _, layout, mat1, mat2 = mm_args(
+        m, n, _, layout, mat1, mat2 = mm_args(
             input, weight, layout=layout, mat2_transposed=True
         )
         assert (
@@ -65,6 +68,23 @@ def register_woq_mm_ops() -> None:
             else []
         )
 
+        def _fuse_scale(m, n):
+            if has_free_symbols((n,)):
+                return False
+            if n % 32 != 0:
+                return False
+            if isinstance(m, sympy.Expr):
+                m = V.graph.sizevars.size_hint(m, fallback=1)
+            if (
+                m <= 4
+                and mat1.get_dtype() == torch.bfloat16
+                and mat2.get_dtype() == torch.int8
+                and torch._C._cpu._is_avx512_fp16_supported()
+            ):
+                return True
+            else:
+                return False
+
         # scale is applied as an epilogue, and the scale tensor is expanded (with a view op)
         # for broadcasting, as it's 1D.
         def _mul_epilogue(buf: torch.Tensor) -> Any:
@@ -78,7 +98,7 @@ def register_woq_mm_ops() -> None:
                 aten_layout,
                 [mat1, mat2, scale],
                 trans_w=True,
-                epilogue_creator=_mul_epilogue,  # type: ignore[arg-type]
+                epilogue_creator=None if _fuse_scale(m, n) else _mul_epilogue,
             )
 
         if (

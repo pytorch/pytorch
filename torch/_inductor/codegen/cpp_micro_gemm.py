@@ -10,7 +10,7 @@ import torch
 
 from .. import cpp_builder, ir
 from ..cpu_vec_isa import pick_vec_isa, VecAMX, VecAVX2, VecAVX512, VecISA
-from ..utils import IndentedBuffer, parallel_num_threads
+from ..utils import has_free_symbols, IndentedBuffer, parallel_num_threads
 from ..virtualized import V
 from .common import KernelTemplate
 from .cpp_template_kernel import CppTemplateKernel
@@ -467,6 +467,226 @@ inline void {{kernel_name}}_kernel(
         return result
 
 
+def check_fp16_extra(config, m, n, k, alpha, num_threads):
+    return torch._C._cpu._is_avx512_fp16_supported() and m <= 4 and (n % 32 == 0)
+
+
+@register_micro_gemm(
+    *generate_gemm_config(
+        VecAVX512,
+        [(8, 64, 1), (8, 32, 1)],
+        input_dtype=torch.bfloat16,
+        input2_dtype=torch.int8,
+        output_dtype=torch.float16,
+        compute_dtype=torch.float16,
+        extra_check=check_fp16_extra,
+    ),
+)
+class CppFP16MicroGemm(CppMicroGemmFP32Vec):
+    """
+    This class generates the code for micro gemm using FP16 vec instructions for compute.
+    Both compute & accum are in FP16.
+    A should be bfloat16 and B should be int8.
+    Scale is fused because overflow would happen during accum if scale is a post-op.
+    """
+
+    DECLARE_KERNEL = r"""
+template <bool accum>
+inline void {{kernel_name}}(
+{%- if kernel_extra_args_declare %}
+    {{kernel_extra_args_declare}}
+{%- endif %}
+    const {{input_t}}* {{restrict_keyword}} A,
+    const {{input2_t}}* {{restrict_keyword}} B,
+    const {{input_t}}* {{restrict_keyword}} S,
+    {{output_t}}* {{restrict_keyword}} C,
+    int64_t M,
+    int64_t N,
+    int64_t K,
+    int64_t lda,
+    int64_t ldb,
+    int64_t ldc
+)
+"""
+
+    TEMPLATE_ENTRY = r"""
+{{declare_kernel}} {
+    {{kernel.assert_function}}(N % {{block_n}} == 0, "N dimension must be multiple of {{block_n}}");
+    {{kernel.assert_function}}(K % {{block_k}} == 0, "K dimension must be multiple of {{block_k}}");
+    // TODO(jgong5): loop unroll for M and N
+    for (int64_t m = 0; m < M; m += {{block_m}}) {
+        int64_t block_m = std::min<int64_t>(M - m, {{block_m}});
+        for (int64_t n = 0; n < N; n += {{block_n}}) {
+            if (block_m == {{block_m}}) {
+                {{kernel_name}}_kernel<{{block_m}}, {{block_n}}, accum>(
+                    A + m * lda,
+                    B + n,
+                    S + n,
+                    C + m * ldc + n,
+                    K,
+                    lda,
+                    ldb,
+                    ldc
+                );
+            } else {
+                switch (block_m) {
+{%- for b in range(block_m - 1, 0, -1) %}
+                case {{b}}:
+                    {{kernel_name}}_kernel<{{b}}, {{block_n}}, accum>(
+                        A + m * lda,
+                        B + n,
+                        S + n,
+                        C + m * ldc + n,
+                        K,
+                        lda,
+                        ldb,
+                        ldc
+                    );
+                    break;
+{%- endfor %}
+                default:
+                    {{kernel.assert_function}}(false, "Unsupported block_m: {{block_m}}");
+                }
+            }
+        }
+    }
+}
+"""
+
+    TEMPLATE_KERNEL = r"""
+template <int64_t BLOCK_M, int64_t BLOCK_N, bool accum>
+inline void {{kernel_name}}_kernel(
+    const {{input_t}}* {{restrict_keyword}} A,
+    const {{input2_t}}* {{restrict_keyword}} B,
+    const {{input_t}}* S,
+    {{output_t}}* {{restrict_keyword}} C,
+    int64_t K,
+    int64_t lda,
+    int64_t ldb,
+    int64_t ldc
+) {
+    constexpr auto VLEN = 32;
+    constexpr auto ROWS = BLOCK_M;
+    constexpr auto COLS = BLOCK_N / VLEN;
+
+    __m512h va;
+    __m512h vb[COLS];
+    __m512h scales[COLS];
+    __m512h vc[ROWS * COLS];
+
+    auto load_scales = [&](int i) {
+        auto bf16_scales = _mm512_loadu_si512((__m512i*)(S + i * VLEN));
+        __m512 first_16_floats;
+        __m512 next_16_floats;
+        cvtbf16_fp32(bf16_scales, first_16_floats, next_16_floats);
+        __m256i first_fp16_vector = _mm512_cvtps_ph(first_16_floats, _MM_FROUND_TO_NEAREST_INT | _MM_FROUND_NO_EXC);
+        __m256i second_fp16_vector = _mm512_cvtps_ph(next_16_floats, _MM_FROUND_TO_NEAREST_INT | _MM_FROUND_NO_EXC);
+        scales[i] = _mm512_castsi512_ph(_mm512_castsi256_si512(first_fp16_vector));
+        _mm512_inserti64x4(_mm512_castph_si512(scales[i]), second_fp16_vector, 1);
+    };
+    c10::ForcedUnroll<COLS>{}(load_scales);
+
+    auto loadc = [&](auto i) {
+        if constexpr (accum) {
+            constexpr int row = i / COLS;
+            constexpr int col = i % COLS;
+            vc[i] = _mm512_loadu_ph(C + row * ldc + col * VLEN);
+        } else {
+            vc[i] = _mm512_set1_ph(0.0f);
+        }
+    };
+    c10::ForcedUnroll<ROWS * COLS>{}(loadc);
+
+    auto compute = [&, COLS](auto i, int k) {
+        constexpr int row = i / COLS;
+        constexpr int col = i % COLS;
+
+        if constexpr (col == 0) {
+            va = _mm512_set1_ph(static_cast<float>(A[row * lda + k]));
+        }
+
+        if constexpr (row == 0) {
+            // Convert VLEN int8 elements to int32, and then fp32, then fp16, then apply scale
+            __m128i first_int8_vector = _mm_loadu_si128((__m128i*)(B + k * ldb + col * VLEN)); // Load 16 int8 values
+            __m128i second_int8_vector = _mm_loadu_si128((__m128i*)(B + k * ldb + col * VLEN + 16)); // Load 16 int8 values
+
+            __m512i first_int32_vector = _mm512_cvtepi8_epi32(first_int8_vector); // 16 int8 -> 16 int32
+            __m512i second_int32_vector = _mm512_cvtepi8_epi32(second_int8_vector); // 16 int8 -> 16 int32
+
+            __m512 first_float_vector = _mm512_cvtepi32_ps(first_int32_vector); // Convert 16 int32 -> 16 float
+            __m512 second_float_vector = _mm512_cvtepi32_ps(second_int32_vector); // Convert 16 int32 -> 16 float
+
+            __m256i first_fp16_vector = _mm512_cvtps_ph(first_float_vector, _MM_FROUND_TO_NEAREST_INT | _MM_FROUND_NO_EXC);
+            __m256i second_fp16_vector = _mm512_cvtps_ph(second_float_vector, _MM_FROUND_TO_NEAREST_INT | _MM_FROUND_NO_EXC);
+
+            vb[col] = _mm512_castsi512_ph(_mm512_castsi256_si512(first_fp16_vector));
+            _mm512_inserti64x4(_mm512_castph_si512(vb[col]), second_fp16_vector, 1);
+
+            vb[col] = _mm512_mul_ph(vb[col], scales[col]);
+        }
+
+        constexpr int idx = row * COLS + col;
+        vc[idx] = _mm512_fmadd_ph(va, vb[col], vc[idx]);
+    };
+
+    // Accumulate along k
+    for (int k = 0; k < K; k++) {
+      c10::ForcedUnroll<ROWS * COLS>{}(compute, k);
+    }
+
+    // store to C
+    auto storec = [&](auto i) {
+        constexpr int row = i / COLS;
+        constexpr int col = i % COLS;
+        _mm512_storeu_ph(C + row * ldc + col * VLEN, vc[i]);
+    };
+    c10::ForcedUnroll<ROWS * COLS>{}(storec);
+}
+"""
+
+    def codegen_call(
+        self,
+        kernel: CppTemplateKernel,
+        A: ir.Buffer,
+        B: ir.Buffer,
+        S: ir.Buffer,
+        Y: ir.Buffer,
+        accum: bool,
+    ) -> str:
+        """
+        Generate the code for calling the templated kernel that computes
+        `C += alpha * A @ B` if `accum` is True, or `C = alpha * A @ B` otherwise.
+        """
+        A_ptr = f"&({kernel.index(A, [0, 0])})"
+        B_ptr = f"&({kernel.index(B, [0, 0])})"
+        S_ptr = f"&({kernel.index(S, [0])})"
+        Y_ptr = f"&({kernel.index(Y, [0, 0])})"
+        M = kernel.size(Y, 0)
+        N = kernel.size(Y, 1)
+        K = kernel.size(A, 1)
+        lda = kernel.stride(A, 0)
+        ldb = kernel.stride(B, 0)
+        ldc = kernel.stride(Y, 0)
+        res = IndentedBuffer()
+        res.writeline(f"{self.name}<{value_to_cpp(accum, 'bool')}>(")
+        with res.indent():
+            extra_args = self.get_kernel_extra_args()
+            if extra_args:
+                res.writeline(extra_args)
+            res.writeline(f"{A_ptr},")
+            res.writeline(f"{B_ptr},")
+            res.writeline(f"{S_ptr},")
+            res.writeline(f"{Y_ptr},")
+            res.writeline(f"{M},")
+            res.writeline(f"{N},")
+            res.writeline(f"{K},")
+            res.writeline(f"{lda},")
+            res.writeline(f"{ldb},")
+            res.writeline(f"{ldc}")
+        res.writeline(");")
+        return res.getvalue()
+
+
 # extra check for CppMicroGemmAMX
 def check_amx_extra(config, m, n, k, alpha, num_threads):
     vnni_size = 4 if config.input_dtype == torch.uint8 else 2
@@ -867,12 +1087,26 @@ def create_micro_gemm(
     assert isinstance(k, int) or k.is_number, k
     m = V.graph.sizevars.size_hint(m, fallback=1) if isinstance(m, sympy.Expr) else m
     assert isinstance(m, int), m
+
     if output_dtype is None:
         output_dtype = input_dtype
     if compute_dtype is None:
         compute_dtype = output_dtype
     if num_threads < 0:
         num_threads = parallel_num_threads()
+
+    if (
+        m <= 4
+        and input_dtype == torch.bfloat16
+        and input2_dtype == torch.int8
+        and torch._C._cpu._is_avx512_fp16_supported()
+        and not has_free_symbols((n,))
+        and n % 32 == 0
+    ):
+        # We compute this GEMM with FP16 instructions
+        output_dtype = torch.float16
+        compute_dtype = torch.float16
+
     vec_isa = pick_vec_isa()
     matched_configs = []
     for cls, configs in micro_gemm_configs.items():
