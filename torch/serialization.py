@@ -14,20 +14,9 @@ import tempfile
 import threading
 import warnings
 from contextlib import closing, contextmanager
+from dataclasses import dataclass
 from enum import Enum
-from typing import (
-    Any,
-    BinaryIO,
-    Callable,
-    cast,
-    Dict,
-    IO,
-    List,
-    Optional,
-    Tuple,
-    Type,
-    Union,
-)
+from typing import Any, BinaryIO, Callable, cast, Dict, IO, List, Optional, Tuple, Union
 from typing_extensions import TypeAlias, TypeIs
 
 import torch
@@ -138,6 +127,41 @@ class LoadEndianness(Enum):
     NATIVE = 1
     LITTLE = 2
     BIG = 3
+
+
+@dataclass
+class SaveConfig:
+    """
+    Dataclass for configuring :func:`torch.save` behavior.
+
+    Instances of this class can be passed as the ``save_config`` argument to ``torch.save``.
+
+    Args:
+        compute_crc32 (bool): set whether to compute crc32 during save
+        use_pinned_memory_for_d2h (bool): set whether to use pinned memory when doing
+            device to host within ``torch.save``
+    """
+
+    compute_crc32: bool = True
+    use_pinned_memory_for_d2h: bool = False
+
+
+@dataclass
+class LoadConfig:
+    """
+    Dataclass for configuring :func:`torch.load` behavior.
+
+    Instances of this class can be passed as the ``load_config`` argument to ``torch.load``.
+
+    Args:
+        mmap (bool): set whether to mmap the checkpoint during load
+        endianness (LoadEndianness): set default endianness for loading
+        mmap_flags (Optional[int]): set flags to propagate to mmap call
+    """
+
+    mmap: bool = False
+    endianness: Optional[LoadEndianness] = None
+    mmap_flags: Optional[int] = MAP_PRIVATE
 
 
 def get_default_load_endianness() -> Optional[LoadEndianness]:
@@ -759,9 +783,10 @@ class _open_zipfile_reader(_opener):
 
 
 class _open_zipfile_writer_file(_opener):
-    def __init__(self, name) -> None:
+    def __init__(self, name, compute_crc32=None) -> None:
         self.file_stream = None
         self.name = str(name)
+        compute_crc32 = get_crc32_options() if compute_crc32 is None else compute_crc32
         try:
             self.name.encode("ascii")
         except UnicodeEncodeError:
@@ -770,10 +795,10 @@ class _open_zipfile_writer_file(_opener):
             # for writing out the file.
             self.file_stream = io.FileIO(self.name, mode="w")
             super().__init__(
-                torch._C.PyTorchFileWriter(self.file_stream, get_crc32_options())
+                torch._C.PyTorchFileWriter(self.file_stream, compute_crc32)
             )
         else:
-            super().__init__(torch._C.PyTorchFileWriter(self.name, get_crc32_options()))
+            super().__init__(torch._C.PyTorchFileWriter(self.name, compute_crc32))
 
     def __exit__(self, *args) -> None:
         self.file_like.write_end_of_file()
@@ -782,27 +807,28 @@ class _open_zipfile_writer_file(_opener):
 
 
 class _open_zipfile_writer_buffer(_opener):
-    def __init__(self, buffer) -> None:
+    def __init__(self, buffer, compute_crc32=None) -> None:
+        compute_crc32 = get_crc32_options() if compute_crc32 is None else compute_crc32
         if not callable(getattr(buffer, "write", None)):
             msg = f"Buffer of {str(type(buffer)).strip('<>')} has no callable attribute 'write'"
             if not hasattr(buffer, "write"):
                 raise AttributeError(msg)
             raise TypeError(msg)
         self.buffer = buffer
-        super().__init__(torch._C.PyTorchFileWriter(buffer, get_crc32_options()))
+        super().__init__(torch._C.PyTorchFileWriter(buffer, compute_crc32))
 
     def __exit__(self, *args) -> None:
         self.file_like.write_end_of_file()
         self.buffer.flush()
 
 
-def _open_zipfile_writer(name_or_buffer):
-    container: Type[_opener]
+def _open_zipfile_writer(name_or_buffer, compute_crc32=None):
+    container: type[_open_zipfile_writer_file | _open_zipfile_writer_buffer]
     if _is_path(name_or_buffer):
         container = _open_zipfile_writer_file
     else:
         container = _open_zipfile_writer_buffer
-    return container(name_or_buffer)
+    return container(name_or_buffer, compute_crc32)
 
 
 def _is_compressed_file(f) -> bool:
@@ -887,6 +913,7 @@ def save(
     f: FILE_LIKE,
     pickle_module: Any = pickle,
     pickle_protocol: int = DEFAULT_PROTOCOL,
+    save_config: Optional[SaveConfig] = None,
     _use_new_zipfile_serialization: bool = True,
     _disable_byteorder_record: bool = False,
 ) -> None:
@@ -895,7 +922,7 @@ def save(
     # documentation. We need it so that Sphinx doesn't leak `pickle`s path from
     # the build environment (e.g. `<module 'pickle' from '/leaked/path').
 
-    """save(obj, f, pickle_module=pickle, pickle_protocol=2, _use_new_zipfile_serialization=True)
+    """save(obj, f, pickle_module=pickle, pickle_protocol=2, save_config=None, _use_new_zipfile_serialization=True)
 
     Saves an object to a disk file.
 
@@ -907,7 +934,9 @@ def save(
            os.PathLike object containing a file name
         pickle_module: module used for pickling metadata and objects
         pickle_protocol: can be specified to override the default protocol
-
+        save_config: an instance of :class:`~torch.serialization.LoadConfig` that specifies
+            configurations for saving. If this argument is passed it will override global
+            configurations in ``torch.serialization.config.save``.
     .. note::
         A common PyTorch convention is to save tensors using .pt file extension.
 
@@ -934,14 +963,17 @@ def save(
     _check_dill_version(pickle_module)
     _check_save_filelike(f)
 
+    compute_crc32 = None if save_config is None else save_config.compute_crc32
+
     if _use_new_zipfile_serialization:
-        with _open_zipfile_writer(f) as opened_zipfile:
+        with _open_zipfile_writer(f, compute_crc32=compute_crc32) as opened_zipfile:
             _save(
                 obj,
                 opened_zipfile,
                 pickle_module,
                 pickle_protocol,
                 _disable_byteorder_record,
+                save_config=save_config,
             )
             return
     else:
@@ -949,6 +981,10 @@ def save(
         if _serialization_tls.skip_data:
             raise RuntimeError(
                 "Cannot use skip_data=True with _use_new_zipfile_serialization=False"
+            )
+        if save_config is not None:
+            raise RuntimeError(
+                "Cannot use save_config argument with _use_new_zipfile_serialization=False"
             )
         with _open_file_like(f, "wb") as opened_file:
             _legacy_save(obj, opened_file, pickle_module, pickle_protocol)
@@ -1118,6 +1154,7 @@ def _save(
     pickle_module,
     pickle_protocol,
     _disable_byteorder_record,
+    save_config: Optional[SaveConfig] = None,
 ):
     serialized_storages = {}
     id_map: Dict[int, str] = {}
@@ -1194,6 +1231,13 @@ def _save(
         zip_file.write_record("byteorder", sys.byteorder, len(sys.byteorder))
 
     # Write each tensor to a file named tensor/the_tensor_key in the zip archive
+    from torch.utils.serialization import config
+
+    use_pinned_memory_for_d2h = (
+        config.save.use_pinned_memory_for_d2h
+        if save_config is None
+        else save_config.use_pinned_memory_for_d2h
+    )
     for key in sorted(serialized_storages.keys()):
         name = f"data/{key}"
         storage = serialized_storages[key]
@@ -1206,9 +1250,7 @@ def _save(
             # this means to that to get tensors serialized, you need to implement
             # .cpu() on the underlying Storage
             if storage.device.type != "cpu":
-                from torch.utils.serialization import config
-
-                if config.save.use_pinned_memory_for_d2h:
+                if use_pinned_memory_for_d2h:
                     storage = storage.to(device="cpu", non_blocking=True)
                     torch.cuda.current_stream().synchronize()
                 else:
@@ -1224,6 +1266,7 @@ def load(
     *,
     weights_only: Optional[bool] = None,
     mmap: Optional[bool] = None,
+    load_config: Optional[LoadConfig] = None,
     **pickle_load_args: Any,
 ) -> Any:
     # Reference: https://github.com/pytorch/pytorch/issues/54354
@@ -1231,7 +1274,7 @@ def load(
     # documentation. We need it so that Sphinx doesn't leak `pickle`s path from
     # the build environment (e.g. `<module 'pickle' from '/leaked/path').
 
-    """load(f, map_location=None, pickle_module=pickle, *, weights_only=True, mmap=None, **pickle_load_args)
+    """load(f, map_location=None, pickle_module=pickle, *, weights_only=True, mmap=None, load_config=None, **pickle_load_args)
 
     Loads an object saved with :func:`torch.save` from a file.
 
@@ -1280,6 +1323,9 @@ def load(
             are moved to the location that they were tagged with when saving, or specified by ``map_location``. This
             second step is a no-op if the final location is CPU. When the ``mmap`` flag is set, instead of copying the
             tensor storages from disk to CPU memory in the first step, ``f`` is mmaped.
+        load_config: An instance of :class:`~torch.serialization.LoadConfig` that specifies configurations
+            for loading. If this argument is passed it will override global configurations
+            in ``torch.serialization.config.load``.
         pickle_load_args: (Python 3 only) optional keyword arguments passed over to
             :func:`pickle_module.load` and :func:`pickle_module.Unpickler`, e.g.,
             :attr:`errors=...`.
@@ -1422,9 +1468,19 @@ def load(
 
     # make flipping default BC-compatible
     if mmap is None:
-        from torch.utils.serialization import config
+        if load_config is not None:
+            mmap = load_config.mmap
+        else:
+            from torch.utils.serialization import config
 
-        mmap = config.load.mmap
+            mmap = config.load.mmap
+    else:
+        warnings.warn(
+            "the mmap argument of ``torch.load`` will be deprecated in a future release "
+            "please pass this option through the ``torch.serialization.LoadConfig`` argument instead",
+            FutureWarning,
+            stacklevel=2,
+        )
 
     _check_dill_version(pickle_module)
 
@@ -1454,8 +1510,13 @@ def load(
                             "f must be a file path in order to use the mmap argument"
                         )
                     size = os.path.getsize(f)
+                    default_mmap_options = (
+                        get_default_mmap_options()
+                        if load_config is None
+                        else load_config.mmap_flags
+                    )
                     if not IS_WINDOWS:
-                        shared = get_default_mmap_options() == MAP_SHARED
+                        shared = default_mmap_options == MAP_SHARED
                     else:
                         shared = False
                     overall_storage = torch.UntypedStorage.from_file(
@@ -1468,6 +1529,7 @@ def load(
                             map_location,
                             _weights_only_unpickler,
                             overall_storage=overall_storage,
+                            load_config=load_config,
                             **pickle_load_args,
                         )
                     except pickle.UnpicklingError as e:
@@ -1477,6 +1539,7 @@ def load(
                     map_location,
                     pickle_module,
                     overall_storage=overall_storage,
+                    load_config=load_config,
                     **pickle_load_args,
                 )
         if mmap:
@@ -1833,6 +1896,7 @@ def _load(
     pickle_module,
     pickle_file="data.pkl",
     overall_storage=None,
+    load_config=None,
     **pickle_load_args,
 ):
     restore_location = _get_restore_location(map_location)
@@ -1842,25 +1906,28 @@ def _load(
     # check if byteswapping is needed
     byteordername = "byteorder"
     byteorderdata = None
+    default_load_endianness = (
+        get_default_load_endianness() if load_config is None else load_config.endianness
+    )
     if zip_file.has_record(byteordername):
         byteorderdata = zip_file.get_record(byteordername)
         if byteorderdata not in [b"little", b"big"]:
             raise ValueError("Unknown endianness type: " + byteorderdata.decode())
     elif (
-        get_default_load_endianness() == LoadEndianness.LITTLE
-        or get_default_load_endianness() is None
+        default_load_endianness == LoadEndianness.LITTLE
+        or default_load_endianness is None
     ):
         byteorderdata = b"little"
-    elif get_default_load_endianness() == LoadEndianness.BIG:
+    elif default_load_endianness == LoadEndianness.BIG:
         byteorderdata = b"big"
-    elif get_default_load_endianness() == LoadEndianness.NATIVE:
+    elif default_load_endianness == LoadEndianness.NATIVE:
         pass
     else:
         raise ValueError("Invalid load endianness type")
 
     if (
         not zip_file.has_record(byteordername)
-        and get_default_load_endianness() is None
+        and default_load_endianness is None
         and sys.byteorder == "big"
     ):
         # Default behaviour was changed

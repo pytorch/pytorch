@@ -20,7 +20,7 @@ from copy import deepcopy
 from dataclasses import dataclass
 from itertools import product
 from pathlib import Path
-from unittest.mock import patch, MagicMock, ANY
+from unittest.mock import patch
 
 import torch
 from torch.utils.serialization import config as serialization_config
@@ -35,6 +35,8 @@ from torch.serialization import (
     set_default_load_endianness,
     skip_data,
     SourceChangeWarning,
+    LoadConfig,
+    SaveConfig,
 )
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_dtype import all_types_and_complex_and
@@ -4131,31 +4133,33 @@ class TestSerialization(TestCase, SerializationMixin):
             for v in result.values():
                 self.assertTrue(v.is_cuda)
 
-    def test_serialization_mmap_loading(self):
+    @parametrize("global_mmap_options", (MAP_SHARED, MAP_PRIVATE))
+    @parametrize("local_mmap_options", (MAP_SHARED, MAP_PRIVATE, None))
+    def test_serialization_mmap_loading(self, global_mmap_options, local_mmap_options):
         if IS_WINDOWS:
             with self.assertRaisesRegex(RuntimeError, "Changing the default mmap options is currently not supported"):
                 torch.serialization.set_default_mmap_options(2)
             return
+        is_shared = (local_mmap_options == MAP_SHARED) or (global_mmap_options == MAP_SHARED and local_mmap_options is None)
+        load_config = None if local_mmap_options is None else LoadConfig(mmap_flags=local_mmap_options)
         m = torch.nn.Linear(3, 5)
         sd = m.state_dict()
         with tempfile.NamedTemporaryFile() as f:
             torch.save(sd, f)
-            # with MmapVisibility.MAP_PRIVATE, should not be able to modify file
-            sd_loaded = torch.load(f.name, mmap=True, weights_only=True)
-            sd_loaded['weight'][0][0] = 0
-            sd_loaded2 = torch.load(f.name, mmap=True, weights_only=True)
-            self.assertEqual(sd_loaded2['weight'], sd['weight'])
-            # with MmapVisibility.MAP_SHARED, should be able to modify file
-            torch.serialization.set_default_mmap_options(MAP_SHARED)
             try:
-                sd_loaded = torch.load(f.name, mmap=True, weights_only=True)
+                torch.serialization.set_default_mmap_options(global_mmap_options)
+                sd_loaded = torch.load(f.name, mmap=True, weights_only=True, load_config=load_config)
                 sd_loaded['weight'][0][0] = 0
-                sd_loaded2 = torch.load(f.name, mmap=True, weights_only=True)
-                self.assertNotEqual(sd_loaded2['weight'], sd['weight'])
-                self.assertEqual(sd_loaded2['weight'][0][0].item(), 0)
-                self.assertEqual(sd_loaded2['weight'], sd_loaded['weight'])
+                sd_loaded2 = torch.load(f.name, mmap=True, weights_only=True, load_config=load_config)
+                if is_shared:
+                    self.assertNotEqual(sd_loaded2['weight'], sd['weight'])
+                    self.assertEqual(sd_loaded2['weight'][0][0].item(), 0)
+                    self.assertEqual(sd_loaded2['weight'], sd_loaded['weight'])
+                else:
+                    self.assertEqual(sd_loaded2['weight'], sd['weight'])
             finally:
                 torch.serialization.set_default_mmap_options(MAP_PRIVATE)
+
 
     @unittest.skipIf(IS_WINDOWS, "mmap ctx doesn't work on Windows")
     def test_serialization_mmap_loading_ctx(self):
@@ -4169,6 +4173,7 @@ class TestSerialization(TestCase, SerializationMixin):
                 self.assertNotEqual(sd_loaded2['weight'], sd['weight'])
                 self.assertEqual(sd_loaded2['weight'][0][0].item(), 0)
                 self.assertEqual(sd_loaded2['weight'], sd_loaded['weight'])
+            print(torch.serialization.get_default_mmap_options())
             self.assertTrue(torch.serialization.get_default_mmap_options() == MAP_PRIVATE)
 
     @parametrize('dtype',
@@ -4362,16 +4367,18 @@ class TestSerialization(TestCase, SerializationMixin):
                     os.environ[env_var] = old_value
 
     @unittest.skipIf(IS_FBCODE, "miniz version differs between fbcode and oss")
-    @parametrize("compute_crc32", (True, False))
+    @parametrize("global_compute_crc32", (True, False))
+    @parametrize("local_compute_crc32", (True, False, None))
     @parametrize("filename", (True, False))
-    def test_crc32_options(self, compute_crc32, filename):
+    def test_crc32_options(self, global_compute_crc32, local_compute_crc32, filename):
+        save_config = SaveConfig(compute_crc32=local_compute_crc32) if local_compute_crc32 is not None else None
         # test both path and buffer case
         file_creation_func = TemporaryFileName if filename else tempfile.NamedTemporaryFile
         sd = torch.nn.Linear(3, 5).state_dict()
         with file_creation_func() as f:
             try:
-                torch.serialization.set_crc32_options(compute_crc32)
-                torch.save(sd, f)
+                torch.serialization.set_crc32_options(global_compute_crc32)
+                torch.save(sd, f, save_config=save_config)
                 if not filename:
                     f.seek(0)
                 sd_loaded = torch.load(f, weights_only=True)
@@ -4379,8 +4386,9 @@ class TestSerialization(TestCase, SerializationMixin):
             finally:
                 torch.serialization.set_crc32_options(True)
 
-            args = () if compute_crc32 else (zipfile.BadZipFile, "Bad CRC-32 for file")
-            ctx = contextlib.nullcontext if compute_crc32 else self.assertRaisesRegex
+            crc32_computed = local_compute_crc32 or (global_compute_crc32 and local_compute_crc32 in (True, None))
+            args = () if crc32_computed else (zipfile.BadZipFile, "Bad CRC-32 for file")
+            ctx = contextlib.nullcontext if crc32_computed else self.assertRaisesRegex
 
             if not filename:
                 f.seek(0)
@@ -4471,10 +4479,14 @@ class TestSerialization(TestCase, SerializationMixin):
             loaded_sd = torch.load(f, weights_only=weights_only)
             self.assertEqual(sd_save, loaded_sd)
 
-    def test_use_pinned_memory_for_d2h(self):
+    @parametrize("global_use_pinned", (True, False))
+    @parametrize("local_use_pinned", (True, False, None))
+    def test_use_pinned_memory_for_d2h(self, global_use_pinned, local_use_pinned):
+        pinned_used = local_use_pinned or (global_use_pinned and local_use_pinned in (True, None))
+        save_config = None if local_use_pinned is None else SaveConfig(use_pinned_memory_for_d2h=local_use_pinned)
 
         def patched_write_record(self, filename, data, nbytes):
-            if isinstance(data, torch.TypedStorage) or isinstance(data, torch.UntypedStorage):
+            if isinstance(data, (torch.TypedStorage, torch.UntypedStorage)):
                 if not data.is_pinned():
                     raise RuntimeError("Expected storage to be in pinned memory")
                 return None
@@ -4483,15 +4495,19 @@ class TestSerialization(TestCase, SerializationMixin):
 
         # Test that CUDA actually get moved to pinned memory on CPU
         with patch('torch._C.PyTorchFileWriter.write_record', patched_write_record):
+            # with no modifications to global/local settings, should raise error
             with tempfile.NamedTemporaryFile() as f:
-                    with self.assertRaisesRegex(RuntimeError, "Expected storage to be in pinned memory"):
-                        torch.save(sd, f)
+                with self.assertRaisesRegex(RuntimeError, "Expected storage to be in pinned memory"):
+                    torch.save(sd, f)
 
             with tempfile.NamedTemporaryFile() as f:
                 pinned_before = serialization_config.save.use_pinned_memory_for_d2h
                 try:
-                    serialization_config.save.use_pinned_memory_for_d2h = True
-                    torch.save(sd, f)
+                    serialization_config.save.use_pinned_memory_for_d2h = global_use_pinned
+                    args = () if pinned_used else (RuntimeError, "Expected storage to be in pinned memory")
+                    ctx = contextlib.nullcontext if pinned_used else self.assertRaisesRegex
+                    with ctx(*args):
+                        torch.save(sd, f, save_config=save_config)
                 finally:
                     serialization_config.save.use_pinned_memory_for_d2h = pinned_before
 
@@ -4499,13 +4515,14 @@ class TestSerialization(TestCase, SerializationMixin):
         with tempfile.NamedTemporaryFile() as f:
             pinned_before = serialization_config.save.use_pinned_memory_for_d2h
             try:
-                serialization_config.save.use_pinned_memory_for_d2h = True
-                torch.save(sd, f)
+                serialization_config.save.use_pinned_memory_for_d2h = global_use_pinned
+                torch.save(sd, f, save_config=save_config)
                 f.seek(0)
                 sd_loaded = torch.load(f)
                 self.assertEqual(sd_loaded, sd)
             finally:
                 serialization_config.save.use_pinned_memory_for_d2h = pinned_before
+
 
 
     def run(self, *args, **kwargs):
