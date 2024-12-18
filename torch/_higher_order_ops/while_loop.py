@@ -76,7 +76,7 @@ def while_loop(cond_fn, body_fn, carried_inputs):
             return val
 
     Args:
-        cond_fn (Callable): A callable function that returns a boolean Scalar tensor or a non-const bool.
+        cond_fn (Callable): A callable function that returns a boolean Scalar tensor or a python boolean.
 
         body_fn (Callable): A callable function that takes the same inputs as `cond_fn` and returns a tuple of tensors or ints
 
@@ -221,16 +221,22 @@ while_loop_op.py_impl(DispatchKey.Autograd)(
 )
 
 
-def _create_unbacked_symint(ignore_fresh_unbacked_symbols) -> torch.SymInt:
-    from torch._subclasses.fake_tensor import FakeTensorMode
+def _find_or_create_fake_mode() -> FakeTensorMode:
     from torch.fx.experimental.symbolic_shapes import ShapeEnv
 
-    # It's possible that there is no active fake tenosr mode, if we're tracing with
-    # "real" mode. so we create a new one.
     fake_mode = torch._guards.detect_fake_mode()
     if fake_mode is None:
         fake_mode = FakeTensorMode(shape_env=ShapeEnv())
 
+    return fake_mode
+
+
+def _create_unbacked_symint(
+    fake_mode: FakeTensorMode, ignore_fresh_unbacked_symbols: bool
+) -> torch.SymInt:
+    assert (
+        fake_mode is not None and fake_mode.shape_env is not None
+    ), "Must provide a fake_mode with shape_env."
     ctx = (
         contextlib.nullcontext()
         if not ignore_fresh_unbacked_symbols
@@ -284,7 +290,9 @@ def while_loop_tracing(mode, cond_fn, body_fn, carried_inputs, additional_inputs
         #   unbacked symint output of subgraph as of today because this requires a smart range analysis.
         unspecialized_carried_inputs = pytree.tree_map_only(
             (int, torch.SymInt),
-            lambda _: _create_unbacked_symint(ignore_fresh_unbacked_symbols=True),
+            lambda _: _create_unbacked_symint(
+                _find_or_create_fake_mode(), ignore_fresh_unbacked_symbols=True
+            ),
             carried_inputs,
         )
 
@@ -343,16 +351,32 @@ def check_meta_consistency(
             rhs: Union[torch.Tensor, torch.SymInt, int],
         ) -> str:
             if isinstance(lhs, torch.Tensor) and isinstance(rhs, torch.Tensor):
-                # We have vmap x cond tests and querying is_contiguous inside of vmap for
-                # memory_format other than torch.contiguous_format is not yet implemented.
-                # And it seems the remaining metas are good enough for now.
                 return ", ".join(
                     diff_tensor_meta(
+                        # We set include contiguity=False because we have vmap x cond tests, where if
+                        # include_contiguity=True will call t.is_contiguous inside of vmap and get an error
+                        # "querying is_contiguous inside of vmap for memory_format other than
+                        # torch.contiguous_format is not yet implemented". This is good for now.
                         _extract_tensor_metadata(lhs, include_contiguity=False),
                         _extract_tensor_metadata(rhs, include_contiguity=False),
                         check_grad=False,
                     )
                 )
+            else:
+
+                def _both_int_types(lhs, rhs):
+                    return isinstance(lhs, (int, torch.SymInt)) and isinstance(
+                        rhs, (int, torch.SymInt)
+                    )
+
+                def _both_tensor(lhs, rhs):
+                    return isinstance(lhs, torch.Tensor) and isinstance(
+                        rhs, torch.Tensor
+                    )
+
+                if not _both_int_types(lhs, rhs) and not _both_tensor(lhs, rhs):
+                    return f"type: {lhs} vs {rhs}"
+
             return ""
 
         if len(lhs_list) != len(rhs_list):
@@ -419,7 +443,9 @@ def while_loop_fake_tensor_mode(
         # See NOTE [unspecialize int carry with unbacked symints]
         return pytree.tree_map_only(
             (int, torch.SymInt),
-            lambda _: _create_unbacked_symint(ignore_fresh_unbacked_symbols=False),
+            lambda _: _create_unbacked_symint(
+                _find_or_create_fake_mode(), ignore_fresh_unbacked_symbols=False
+            ),
             body_outs,
         )
 

@@ -305,7 +305,6 @@ def _while_loop_tests():
                 return it < x.shape[0]
 
             def body_fn(it, x):
-                x_clone = x.clone()
                 # Data dependent eerror when torch.compile torch.seleclt(0, it)
                 # even with torch._check. export is OK
                 # Issue tracked here: https://github.com/pytorch/pytorch/issues/143249
@@ -342,23 +341,6 @@ def _while_loop_tests():
                 return b, c1, c2, c3, a, 0, u0 + 1, x + 1
 
             carry = (a, b, 1, 1, 1, a + 1, t.sum().to(torch.int64).item(), t.sin())
-            out_it = torch.ops.higher_order.while_loop(cond_fn, body_fn, carry, tuple())
-            out_inc = pytree.tree_map(lambda x: x + 1, out_it)
-            out_add = pytree.tree_map(lambda x: x + t, out_it)
-            return out_inc, out_add
-
-    class ConstAndSymIntOutput(torch.nn.Module):
-        def forward(self, t):
-            a = t.shape[0]
-            b = t.shape[1]
-
-            def cond_fn(u0):
-                return u0 < a + b
-
-            def body_fn(u0):
-                return (u0 + 1,)
-
-            carry = (t.sum().to(torch.int64).item(),)
             out_it = torch.ops.higher_order.while_loop(cond_fn, body_fn, carry, tuple())
             out_inc = pytree.tree_map(lambda x: x + 1, out_it)
             out_add = pytree.tree_map(lambda x: x + t, out_it)
@@ -6428,31 +6410,33 @@ class GraphModule(torch.nn.Module):
         cond_fn_0 = self.cond_fn_0
         body_fn_0 = self.body_fn_0
         while_loop = torch.ops.higher_order.while_loop(cond_fn_0, body_fn_0, (s0, s1, 1, 1, 1, add, item, child), (s0, s1));  cond_fn_0 = body_fn_0 = s0 = s1 = add = item = child = None
-        getitem_4: "Sym(u8)" = while_loop[0]
-        getitem_5: "Sym(u9)" = while_loop[1]
-        getitem_6: "Sym(u10)" = while_loop[2]
-        getitem_7: "Sym(u11)" = while_loop[3]
-        getitem_8: "Sym(u12)" = while_loop[4]
-        getitem_9: "Sym(u13)" = while_loop[5]
-        getitem_10: "Sym(u14)" = while_loop[6]
+
+        getitem_12: "Sym(u8)" = while_loop[0]
+        getitem_13: "Sym(u9)" = while_loop[1]
+        getitem_14: "Sym(u10)" = while_loop[2]
+        getitem_15: "Sym(u11)" = while_loop[3]
+        getitem_16: "Sym(u12)" = while_loop[4]
+        getitem_17: "Sym(u13)" = while_loop[5]
+        getitem_18: "Sym(u14)" = while_loop[6]
+
         child_1: "f32[s0, s1]" = while_loop[7];  while_loop = None
 
-        add_1: "Sym(u8 + 1)" = getitem_4 + 1
-        add_2: "Sym(u9 + 1)" = getitem_5 + 1
-        add_3: "Sym(u10 + 1)" = getitem_6 + 1
-        add_4: "Sym(u11 + 1)" = getitem_7 + 1
-        add_5: "Sym(u12 + 1)" = getitem_8 + 1
-        add_6: "Sym(u13 + 1)" = getitem_9 + 1
-        add_7: "Sym(u14 + 1)" = getitem_10 + 1
+        add_1: "Sym(u8 + 1)" = getitem_12 + 1
+        add_2: "Sym(u9 + 1)" = getitem_13 + 1
+        add_3: "Sym(u10 + 1)" = getitem_14 + 1
+        add_4: "Sym(u11 + 1)" = getitem_15 + 1
+        add_5: "Sym(u12 + 1)" = getitem_16 + 1
+        add_6: "Sym(u13 + 1)" = getitem_17 + 1
+        add_7: "Sym(u14 + 1)" = getitem_18 + 1
         add_8: "f32[s0, s1]" = child_1 + 1
 
-        add_9: "f32[s0, s1]" = getitem_4 + l_t_;  getitem_4 = None
-        add_10: "f32[s0, s1]" = getitem_5 + l_t_;  getitem_5 = None
-        add_11: "f32[s0, s1]" = getitem_6 + l_t_;  getitem_6 = None
-        add_12: "f32[s0, s1]" = getitem_7 + l_t_;  getitem_7 = None
-        add_13: "f32[s0, s1]" = getitem_8 + l_t_;  getitem_8 = None
-        add_14: "f32[s0, s1]" = getitem_9 + l_t_;  getitem_9 = None
-        add_15: "f32[s0, s1]" = getitem_10 + l_t_;  getitem_10 = None
+        add_9: "f32[s0, s1]" = getitem_12 + l_t_;  getitem_12 = None
+        add_10: "f32[s0, s1]" = getitem_13 + l_t_;  getitem_13 = None
+        add_11: "f32[s0, s1]" = getitem_14 + l_t_;  getitem_14 = None
+        add_12: "f32[s0, s1]" = getitem_15 + l_t_;  getitem_15 = None
+        add_13: "f32[s0, s1]" = getitem_16 + l_t_;  getitem_16 = None
+        add_14: "f32[s0, s1]" = getitem_17 + l_t_;  getitem_17 = None
+        add_15: "f32[s0, s1]" = getitem_18 + l_t_;  getitem_18 = None
         add_16: "f32[s0, s1]" = child_1 + l_t_;  child_1 = l_t_ = None
         return (add_1, add_2, add_3, add_4, add_5, add_6, add_7, add_8, add_9, add_10, add_11, add_12, add_13, add_14, add_15, add_16)
 
@@ -6546,7 +6530,7 @@ class GraphModule(torch.nn.Module):
 
     @skipIfTorchDynamo("Graph is not captured correctly when test with dynamo")
     @parametrize("dynamic", [True, False])
-    @parametrize("backend", ["eager", "aot_eager"])
+    @parametrize("backend", ["eager", "aot_eager", "inductor"])
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_while_loop_op_pytree_int_carry_compile(self, dynamic, backend):
         from torch._dynamo.testing import EagerAndRecordGraphs
@@ -6569,21 +6553,23 @@ class GraphModule(torch.nn.Module):
         cond_fn_0 = self.cond_fn_0
         body_fn_0 = self.body_fn_0
         while_loop = torch.ops.higher_order.while_loop(cond_fn_0, body_fn_0, (s0, s1, 2, 2, 3, child), (s0, s1));  cond_fn_0 = body_fn_0 = s0 = s1 = child = None
-        getitem_4: "Sym(u5)" = while_loop[0]
-        getitem_5: "Sym(u6)" = while_loop[1]
-        getitem_6: "Sym(u7)" = while_loop[2]
-        getitem_7: "Sym(u8)" = while_loop[3]
-        getitem_8: "Sym(u9)" = while_loop[4]
+
+        getitem_10: "Sym(u5)" = while_loop[0]
+        getitem_11: "Sym(u6)" = while_loop[1]
+        getitem_12: "Sym(u7)" = while_loop[2]
+        getitem_13: "Sym(u8)" = while_loop[3]
+        getitem_14: "Sym(u9)" = while_loop[4]
+
         out_x: "f32[s0, s1]" = while_loop[5];  while_loop = None
 
-        add: "Sym(u7 + 1)" = getitem_6 + 1
-        add_1: "Sym(u8 + 1)" = getitem_7 + 1
-        add_2: "Sym(u9 + 1)" = getitem_8 + 1
+        add: "Sym(u7 + 1)" = getitem_12 + 1
+        add_1: "Sym(u8 + 1)" = getitem_13 + 1
+        add_2: "Sym(u9 + 1)" = getitem_14 + 1
 
-        add_3: "f32[s0, s1]" = getitem_6 + out_x;  getitem_6 = None
-        add_4: "f32[s0, s1]" = getitem_7 + out_x;  getitem_7 = None
-        add_5: "f32[s0, s1]" = getitem_8 + out_x;  getitem_8 = None
-        return (getitem_4, getitem_5, add, add_1, add_2, add_3, add_4, add_5, out_x)
+        add_3: "f32[s0, s1]" = getitem_12 + out_x;  getitem_12 = None
+        add_4: "f32[s0, s1]" = getitem_13 + out_x;  getitem_13 = None
+        add_5: "f32[s0, s1]" = getitem_14 + out_x;  getitem_14 = None
+        return (getitem_10, getitem_11, add, add_1, add_2, add_3, add_4, add_5, out_x)
 
     class cond_fn_0(torch.nn.Module):
         def forward(self, unbacked_symint: "Sym(u0)", unbacked_symint_0: "Sym(u1)", unbacked_symint_1: "Sym(u2)", unbacked_symint_2: "Sym(u3)", unbacked_symint_3: "Sym(u4)", child: "f32[s0, s1]", s0, s1):
