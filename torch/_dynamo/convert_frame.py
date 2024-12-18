@@ -6,6 +6,7 @@ import contextlib
 import cProfile
 import dis
 import functools
+import gc
 import itertools
 import json
 import logging
@@ -77,10 +78,10 @@ from .eval_frame import (
 from .exc import (
     augment_exc_message,
     BackendCompilerFailed,
-    CacheLimitExceeded,
-    FailOnCacheLimitHit,
+    FailOnRecompileLimitHit,
     format_error_msg,
     InternalTorchDynamoError,
+    RecompileLimitExceeded,
     SkipCodeRecursiveException,
     TorchRuntimeError,
     UncapturedHigherOrderOpError,
@@ -850,6 +851,7 @@ def _compile(
         CleanupManager.instance[out_code] = output.cleanups
         nonlocal cache_entry
         check_fn = CheckFunctionManager(
+            code,
             output,
             cache_entry,
             hooks.guard_fail_fn if hooks else None,
@@ -916,13 +918,13 @@ def _compile(
                 troubleshooting_url,
             )
             if config.fail_on_cache_limit_hit:
-                raise FailOnCacheLimitHit(
+                raise FailOnRecompileLimitHit(
                     f"{limit_type} reached, because fail_on_cache_limit_hit = True this is a HARD failure"
                 )
             elif config.skip_code_recursive_on_cache_limit_hit and justknobs_check(
                 "pytorch/compiler:skip_code_recursive_on_cache_limit_hit"
             ):
-                raise CacheLimitExceeded(f"{limit_type} reached")
+                raise RecompileLimitExceeded(f"{limit_type} reached")
             else:
                 # do not recursively skip frames
                 unimplemented(f"{limit_type} reached")
@@ -1041,6 +1043,11 @@ def _compile(
             # If you commit a bug here, it will suppress writing to
             # dynamo_compile table, and we will not have telemetry.
             # Be extra careful when making changes here!
+
+            if torch._dynamo.config.run_gc_after_compile:
+                with dynamo_timed("gc", dynamo_compile_column_us="gc_time_us"):
+                    log.info("run_gc_after_compile: running gc")
+                    gc.collect(1)
 
             if tracer:
                 tracer.output.local_scope = {}
@@ -1236,7 +1243,7 @@ class ConvertFrame:
             # to signal to Dynamo eval frame to skip the current frame and any recursive calls.
             if isinstance(e, SkipCodeRecursiveException):
                 return torch._C._dynamo.eval_frame.skip_code_recursive_flag
-            elif isinstance(e, CacheLimitExceeded):
+            elif isinstance(e, RecompileLimitExceeded):
                 # signal to Dynamo to run this frame on run-only mode, skipping recursively if
                 # no valid cache entry is found.
                 return torch._C._dynamo.eval_frame.cache_limit_hit_flag

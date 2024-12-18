@@ -32,8 +32,12 @@ static_weight_shapes = True
 # Applies CSE to the graph before partitioning
 cse = True
 
+from torch._inductor.config import is_fbcode
 
-enable_autograd_cache = os.environ.get("TORCHINDUCTOR_AUTOGRAD_CACHE", "0") == "1"
+
+enable_autograd_cache = (
+    os.environ.get("TORCHINDUCTOR_AUTOGRAD_CACHE", "0" if is_fbcode() else "1") == "1"
+)
 
 
 def remote_autograd_cache_default() -> Optional[bool]:
@@ -63,13 +67,12 @@ enable_remote_autograd_cache = remote_autograd_cache_default()
 # eventually: either default this config to false completely
 # once XLA pin update works,
 # or default config to true and fix relevant bugs
-from torch._inductor.config import is_fbcode
 
 
 # View replay is currently not compatible with AOTAutogradCache, since
 # FunctionalTensors are not serializable. We'll need to make them
 # serializable before enabling warm cache with this config turned on.
-view_replay_for_aliased_outputs = (not is_fbcode()) and (not enable_autograd_cache)
+view_replay_for_aliased_outputs = not is_fbcode()
 
 # Restricts the amount of computation AOTAutograd can do.
 # NB: We have essentially disabled this heuristic now. However, this is kept
@@ -204,6 +207,10 @@ generate_fake_kernels_from_real_mismatches = False
 # Error on BypassAOTAutogradCache instead of just a warning
 # Used for tests
 strict_autograd_cache = False
+
+# See Note [AOTAutograd Tangent Subclassness for mutated inputs]
+# TODO(ivankobzarev): Remove this config, being able to deduce it compile time.
+disable_guess_zero_tangent_for_mutated_input_subclass = False
 
 if TYPE_CHECKING:
     from torch.utils._config_typing import *  # noqa: F401, F403
