@@ -65,7 +65,7 @@ specialize_int = False
 # Whether or not to specialize on float inputs.  Dynamo will always promote
 # float inputs into Tensor inputs, but at the moment, backends inconsistently
 # support codegen on float (this is to be fixed).
-specialize_float = True
+specialize_float = False
 
 # legacy config, does nothing now!
 dynamic_shapes = True
@@ -85,6 +85,9 @@ assume_static_by_default = True
 # With this flag enabled, we always compile a frame as fully static for the first time, and, if we fail
 # any guards due to wobbles in shape, we recompile with *all* the wobbled shapes as being marked dynamic.
 automatic_dynamic_shapes = True
+
+# Valid options: "dynamic", "unbacked"
+automatic_dynamic_shapes_mark_as = "dynamic"
 
 # This flag changes how the shapes of parameters are treated.
 # If this flag is set to True, then the shapes of torch.nn.Parameter as well as of torch.Tensor are attempted to be dynamic
@@ -253,6 +256,14 @@ allow_complex_guards_as_runtime_asserts = False
 # compile this code; however, this can be useful for export.
 force_unspec_int_unbacked_size_like_on_torchrec_kjt = False
 
+# Currently, Dynamo will always specialize on int members of NN module.
+# However, there could be cases where this is undesirable, e.g., when tracking
+# step count leading to constant recompilation and eventually eager fallback.
+# Setting this flag to True will allow int members to be potentially unspecialized
+# through dynamic shape mechanism.
+# Defaults to False for BC.
+allow_unspec_int_on_nn_module = False
+
 # Specify how to optimize a compiled DDP module. The flag accepts a boolean
 # value or a string. There are 4 modes.
 # 1. "ddp_optimizer" (or True): with "ddp_ptimizer", Dynamo will automatically
@@ -382,6 +393,22 @@ enable_cpp_guard_manager = True
 # Inline inbuilt nn modules
 inline_inbuilt_nn_modules = not is_fbcode()
 
+# Use C++ FrameLocalsMapping (raw array view of Python frame fastlocals)
+enable_cpp_framelocals_guard_eval = True
+
+# Whether to automatically find and replace identical graph
+# regions with a call to invoke_subgraph
+use_graph_deduplication = False
+
+# Whether to track nodes for deduplication (testing only)
+# This flag is ignored if use_graph_deduplication is True
+track_nodes_for_deduplication = False
+
+# Issues a warning in Python 3.13.0 for possibly slower guard evaluation and
+# instructs user to attempt using 3.13.1+, where the CPython bug is fixed.
+# Should be disabled in dynamo-wrapped tests since some tests check that no warnings are issued.
+issue_3_13_0_warning = True
+
 # When set, total compile time instruction count is recorded using
 # torch._dynamo.utilsCompileTimeInstructionCounter.
 record_compile_time_instruction_count = False
@@ -441,6 +468,12 @@ log_compilation_metrics = True
 # limitations to this, such as how it does not correctly print objects that were
 # mutated after the print statement.
 reorderable_logging_functions: Set[Callable[[Any], None]] = set()
+
+# A set of methods that will be ignored while tracing,
+# to prevent graph breaks.
+# Add logging.Logger.<method> to ignore all calls for method,
+# or logger.<method> to ignore calls for method from this logger instance only.
+ignore_logger_methods: Set[Callable[..., Any]] = set()
 
 # simulates what would happen if we didn't have support for BUILD_SET opcode,
 # used for testing
@@ -514,6 +547,11 @@ automatic_dynamic_local_pgo: bool = (
 # Like above, but using remote cache
 automatic_dynamic_remote_pgo: Optional[bool] = get_tristate_env(
     "TORCH_DYNAMO_AUTOMATIC_DYNAMIC_REMOTE_PGO"
+)
+
+# temporary config to kill later
+_unsafe_skip_fsdp_module_guards = (
+    os.environ.get("UNSAFE_SKIP_FSDP_MODULE_GUARDS", "0") == "1"
 )
 
 # HACK: this is for testing custom ops profiling only
