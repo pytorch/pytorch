@@ -6,19 +6,26 @@ import io
 import logging
 import operator
 from collections import ChainMap
+from collections.abc import Sequence
 from functools import reduce
-from typing import Any, cast, Dict, List, Optional, Sequence, Tuple, Union
+from typing import Any, cast, Dict, List, Optional, Tuple, Union
+
+# introduced as collections.abc.Buffer in Python 3.12
+from typing_extensions import Buffer
 
 import torch
 from torch.distributed._shard._utils import narrow_tensor_by_index
 from torch.distributed.checkpoint._dedup_save_plans import dedup_save_plans
+from torch.distributed.checkpoint._extension import (
+    ExtensionRegistry,
+    StreamTransformExtension,
+)
 from torch.distributed.checkpoint._nested_dict import (
     FLATTEN_MAPPING,
     flatten_state_dict,
 )
 from torch.distributed.checkpoint._sharded_tensor_utils import _flatten_sharded_tensors
 from torch.distributed.checkpoint._traverse import set_element
-from torch.distributed.checkpoint.extension import ExtensionRegistry, StreamTransformExtension
 from torch.distributed.checkpoint.metadata import (
     BytesStorageMetadata,
     ChunkStorageMetadata,
@@ -152,10 +159,12 @@ class DefaultSavePlanner(SavePlanner):
             object = bytes
         return object
 
-    def transform_save_stream(self, write_item: WriteItem, raw_stream: io.IOBase) -> (
+    def transform_save_stream(
+        self, write_item: WriteItem, raw_stream: io.IOBase
+    ) -> Tuple[
         io.IOBase,
         List[str],
-    ):
+    ]:
         # In order to avoid leaking fds, transformers' close must
         # cascade to wrapped streams, but since this function can
         # append to the raw stream, we can't close the actual stream.
@@ -163,24 +172,27 @@ class DefaultSavePlanner(SavePlanner):
         # close() to make it a noop, and it gets closed once all files
         # are appended.
 
-        class NoCloseWriter(io.BufferedWriter):
+        class NoCloseWriter(io.IOBase):
             def __init__(self, raw: io.IOBase):
-                super().__init__(raw)
+                self.raw = raw
+
+            def writeable(self) -> bool:
+                return True
+
+            def write(self, b: Buffer) -> Optional[int]:
+                return self.raw.write(b)
 
             def close(self):
                 self.flush()
                 self.raw.flush()
                 # but not close.
 
-        transform_to = NoCloseWriter(raw_stream)
+        transform_to: io.IOBase = NoCloseWriter(raw_stream)
 
         for ex in self.extensions:
             transform_to = ex.transform_to(transform_to)
 
-        return (
-            transform_to,
-            [ex.get_descriptor() for ex in reversed(self.extensions)]
-        )
+        return (transform_to, [ex.get_descriptor() for ex in reversed(self.extensions)])
 
 
 class DefaultLoadPlanner(LoadPlanner):
@@ -313,7 +325,8 @@ class DefaultLoadPlanner(LoadPlanner):
         extensions = self.extension_registry.from_descriptor_list(transform_descriptors)
         transform_from = raw_stream
         for ex in extensions:
-            transform_from = ex.transform_from(transform_from)
+            if isinstance(ex, StreamTransformExtension):
+                transform_from = ex.transform_from(transform_from)
         return transform_from
 
 
