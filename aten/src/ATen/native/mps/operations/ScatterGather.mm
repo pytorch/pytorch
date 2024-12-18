@@ -91,8 +91,7 @@ TORCH_IMPL_FUNC(gather_out_mps)
       // If this op is failing and isMacos15_3 = 1, the OS level fix has not
       // landed and we'll need to increment the version check until it does.
       bool workaroundSingleDim = (self_arg.squeeze().sizes().size() == 1 && self_arg.sizes().size() > 1);
-      bool isMacos15_3 = is_macos_13_or_newer(MacOSVersion::MACOS_VER_15_3_PLUS);
-      if (workaroundSingleDim && !isMacos15_3) {
+      if (workaroundSingleDim) {
         const int64_t dims = self_arg.sizes().size();
         int64_t size = self_arg.squeeze().sizes()[0];
         auto shape = [[NSMutableArray alloc] initWithCapacity:dims];
