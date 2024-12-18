@@ -168,7 +168,7 @@ class AsyncCompile:
             return task()
         return cls.pool().submit(task)
 
-    def _use_process_pool(self):
+    def use_process_pool(self):
         return (
             get_compile_threads() > 1
             and self.process_pool().ready_future.done()  # type: ignore[attr-defined]
@@ -185,7 +185,7 @@ class AsyncCompile:
             )
 
         kernel = TritonCodeCache.load(kernel_name, source_code)
-        if self._use_process_pool():
+        if self.use_process_pool():
             set_feature_use(
                 "pytorch/inductor:enable_parallel_compile_version (post_warmup)", True
             )
