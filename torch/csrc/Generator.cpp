@@ -20,7 +20,7 @@ using namespace torch;
 
 PyObject* THPGeneratorClass = nullptr;
 
-PyObject* THPGenerator_initDefaultGenerator(const at::Generator& cdata) {
+PyObject* THPGenerator_initDefaultGenerator(at::Generator cdata) {
   auto type = (PyTypeObject*)THPGeneratorClass;
   auto self = THPObjectPtr{type->tp_alloc(type, 0)};
   if (!self)
@@ -376,8 +376,7 @@ PyObject* THPGenerator_Wrap(const Generator& gen) {
     return obj;
   }
 
-  return THPGenerator_NewWithVar(
-      (PyTypeObject*)THPGeneratorClass, std::move(gen));
+  return THPGenerator_NewWithVar((PyTypeObject*)THPGeneratorClass, gen);
 }
 
 at::Generator THPGenerator_Unwrap(PyObject* state) {

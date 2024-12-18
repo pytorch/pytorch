@@ -51,8 +51,7 @@ def _arg_str(a) -> str:
 # implementations make heavy use of __getattr__ magic, and pre-existing
 # stubs for methods would interfere with this mechanism.
 #
-# TODO: A superclass that does desugaring for operations like
-# reciprocal/square might be useful.
+# See OpDecompositions for superclass that desugars operations like reciprocal/square.
 class OpsHandler(Protocol[T]):
     """
     Protocol describing the set of valid operations on ``torch._inductor.virtualized.ops``,
@@ -975,7 +974,7 @@ class OpCounterCSE:
         self.parent_handler = inner
         self.op_count = 0
         self.var_names = {}
-        self._used_ops: OrderedSet[str] = OrderedSet()
+        self._used_ops = OrderedSet[str]()
         self._read_names: List[str] = []
         self._nontrivial_read_count = 0
 
