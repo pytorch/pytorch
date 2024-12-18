@@ -222,7 +222,7 @@ def run_single_backend_sdpa(
     with backend_context:
         device = torch.device("cuda")
         eager_sdpa = generate_eager_sdpa(
-            config.attn_type, config.shape, config.dtype, block_mask
+            config.attn_type, config.shape, config.dtype, block_mask, score_mod
         )
 
         if config.attn_type == "document_mask":
@@ -609,6 +609,7 @@ dropout_p = 0.0
 
 def generate_score_mod(attn_type: str, shape: Tuple[int]) -> Callable | None:
     B, Hq, M, Hkv, N, D = shape
+    is_decoding = M == 1
     from attn_gym.mods import generate_alibi_bias, generate_tanh_softcap
 
     def relative_bias(score, b, h, m, n):
@@ -830,7 +831,7 @@ def generate_FA_callable(
     FA_kwargs = {}
     if attn_type == "alibi":
         h = torch.arange(Hq, dtype=torch.float32, device="cuda")
-        alibi_slopes = -torch.exp2(-((h + 1) * 8.0 / Hq))
+        alibi_slopes = torch.exp2(-((h + 1) * 8.0 / Hq))
         FA_kwargs = dict(alibi_slopes=alibi_slopes)
     elif attn_type == "document_mask":
         FA_kwargs["cu_seqlens_q"] = kwargs["offsets"].to(torch.int32)
@@ -887,7 +888,7 @@ def generate_FD_callable(
     FA_kwargs = {}
     if attn_type == "alibi":
         h = torch.arange(Hq, dtype=torch.float32, device="cuda")
-        alibi_slopes = -torch.exp2(-((h + 1) * 8.0 / Hq))
+        alibi_slopes = torch.exp2(-((h + 1) * 8.0 / Hq))
         FA_kwargs = dict(alibi_slopes=alibi_slopes)
 
     FD_dict = {
@@ -911,11 +912,36 @@ def generate_FD_callable(
     return FD_dict[attn_type]
 
 
+def generate_attn_mask_linear_score_mod(
+    shape: Tuple[int], block_mask: BlockMask, score_mod: Callable, dtype: torch.dtype
+):
+    B, Hq, M, N = shape
+    if block_mask is None and score_mod is None:
+        return None
+    b = torch.arange(B, dtype=int, device="cuda")
+    h = torch.arange(Hq, dtype=int, device="cuda")
+    m = torch.arange(M, dtype=int, device="cuda")
+    n = torch.arange(N, dtype=int, device="cuda")
+
+    score = torch.zeros(B, Hq, M, N, dtype=dtype, device="cuda")
+    bias = score_mod(
+        score,
+        b[:, None, None, None],
+        h[None, :, None, None],
+        m[None, None, :, None],
+        n[None, None, None, :],
+    )
+    bool_mask = create_mask(block_mask.mask_mod, B, Hq, M, N, device="cuda")
+    attn_mask = bias.masked_fill(bool_mask.logical_not(), float("-inf"))
+    return attn_mask.to(dtype)
+
+
 def generate_eager_sdpa(
     attn_type: str,
     shape: Tuple[int],
     dtype: torch.dtype,
     block_mask: BlockMask,
+    score_mod: Callable | None = None,
     **kwargs,
 ) -> Callable | None:
     B, Hq, M, Hkv, N, D = shape
@@ -923,23 +949,16 @@ def generate_eager_sdpa(
     if attn_type == "sliding_window" or attn_type == "prefix_lm":
         attn_mask = create_mask(block_mask.mask_mod, 1, 1, M, N, device="cuda")
     elif attn_type == "rel":
-        m = torch.arange(M, dtype=int, device="cuda")
-        n = torch.arange(N, dtype=int, device="cuda")
-        attn_mask = (m[:, None] - n[None, :]).to(dtype)
+        attn_mask = generate_attn_mask_linear_score_mod(
+            [1, 1, M, N], block_mask, score_mod, dtype
+        )
     elif attn_type == "head_bias":
         h = torch.arange(Hq, dtype=int, device="cuda")
         attn_mask = (2 * h[None, :, None, None]).broadcast_to(1, Hq, M, N).to(dtype)
     elif attn_type == "alibi":
-        h = torch.arange(Hq, dtype=torch.float32, device="cuda")
-        scale = torch.exp2(-((h + 1) * 8.0 / Hq))
-        q = torch.arange(M, dtype=int, device="cuda")[None, None, :, None]
-        kv = torch.arange(N, dtype=int, device="cuda")[None, None, None, :]
-        causal_mask = torch.ones(M, N, dtype=torch.bool, device="cuda").tril(diagonal=0)
-        attn_mask = torch.zeros(1, Hq, M, N, dtype=torch.float32, device="cuda")
-        attn_mask.masked_fill_(causal_mask.logical_not(), float("-inf"))
-        attn_mask += (q - kv) * scale[None, :, None, None]
-
-        attn_mask = attn_mask.to(dtype)
+        attn_mask = generate_attn_mask_linear_score_mod(
+            [1, Hq, M, N], block_mask, score_mod, dtype
+        )
     else:
         attn_mask = None
 
