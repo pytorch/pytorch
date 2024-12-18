@@ -996,6 +996,7 @@ def call_prune_configs(  # type: ignore[no-untyped-def]
     early_config_prune: Callable,
     perf_model: Callable,
     top_k: float,
+    is_top_k_float: bool,
     configs: List,
     named_args: Dict,
     kwargs: Dict,
@@ -1012,7 +1013,7 @@ def call_prune_configs(  # type: ignore[no-untyped-def]
 
     if perf_model:
         # we assert top_k is a float before calling this
-        if top_k <= 1.0:
+        if is_top_k_float and top_k <= 1.0:
             top_k = int(len(configs) * top_k)
         if len(configs) > top_k:
             est_timing = {
@@ -1275,11 +1276,18 @@ class TritonHOPifier:
             # This has the equivalent behavior.
             # We don't need to restore it because we are going to create a new autotuner object
             # that won't have this attribute anyways.
+            is_top_k_float = True
             if not isinstance(variable.kernel.configs_top_k, float):
-                variable.kernel.configs_top_k = 2.0
+                is_top_k_float = False
 
             wrapped_configs_top_k = self.wrap_user_defined_obj(
                 variable.kernel.configs_top_k, tx, variable.source, "configs_top_k"
+            )
+
+            # There are no guards on this after
+            # So we just use a fake source here
+            wrapped_is_top_k_float = self.wrap_user_defined_obj(
+                is_top_k_float, tx, variable.source, "configs_top_k"
             )
 
             pruned_configs = self.call_user_defined_fn(
@@ -1289,6 +1297,7 @@ class TritonHOPifier:
                     wrapped_early_configs_prune,
                     wrapped_perf_model,
                     wrapped_configs_top_k,
+                    wrapped_is_top_k_float,
                     wrapped_configs,
                     named_args,
                     kwargs,
