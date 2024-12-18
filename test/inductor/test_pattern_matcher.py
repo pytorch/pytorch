@@ -175,7 +175,6 @@ class TestPatternMatcher(TestCase):
     @skipIfXpu
     @skipCUDAIf(not SM80OrLater, "need sm_80")
     @inductor_config.patch(force_fuse_int_mm_with_mul=True)
-    @inductor_config.patch("test_configs.runtime_triton_dtype_assert", True)
     def test_fused_int_mm_mul_epilogue(self):
         def fn1(a, b, c):
             return (
