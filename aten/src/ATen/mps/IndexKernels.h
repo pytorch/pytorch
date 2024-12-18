@@ -11,20 +11,20 @@ template<>
  return {2};
 }}
 
-kernel void scatter_kernel_n(uint linear_index              [[thread_position_in_grid]],
-                             constant void * src_           [[buffer(0)]],
-                             device void * dst_             [[buffer(1)]],
+kernel void scatter_kernel_n(uint linear_index          [[thread_position_in_grid]],
+                             constant void * src_       [[buffer(0)]],
+                             device void * dst_         [[buffer(1)]],
                              constant uint32_t * size   [[buffer(2)]],
                              constant uint32_t * stride [[buffer(3)]],
-                            constant uint32_t & numel       [[buffer(4)]],
-                            constant int32_t & ndim       [[buffer(5)]]) {{
+                            constant uint32_t & numel   [[buffer(4)]],
+                            constant int32_t & ndim     [[buffer(5)]]) {{
     if (linear_index >= numel) return;
 
     constant {0} * src = (constant {0} *)src_;
     device {1} * dst = (device {1} *)dst_;
 
     uint64_t dst_offs = 0;
-    uint dst_idx = linear_index;
+    auto dst_idx = linear_index;
     for(int dim = ndim - 1; dim >= 0; --dim) {{
       dst_offs += stride[dim] * (dst_idx % size[dim]);
       dst_idx /= size[dim];
@@ -119,13 +119,13 @@ template<>
  return {2};
 }}
 
-kernel void gather_kernel_n(uint linear_index               [[thread_position_in_grid]],
-                            constant void * src_            [[buffer(0)]],
-                            device void * dst_              [[buffer(1)]],
+kernel void gather_kernel_n(uint linear_index           [[thread_position_in_grid]],
+                            constant void * src_        [[buffer(0)]],
+                            device void * dst_          [[buffer(1)]],
                             constant uint32_t * size    [[buffer(2)]],
                             constant uint32_t * stride  [[buffer(3)]],
-                            constant uint32_t & numel       [[buffer(4)]],
-                            constant int32_t & ndim       [[buffer(5)]]) {{
+                            constant uint32_t & numel   [[buffer(4)]],
+                            constant int32_t & ndim     [[buffer(5)]]) {{
     if (linear_index >= numel) return;
 
     constant {0} * src = (constant {0} *)src_;
@@ -133,7 +133,7 @@ kernel void gather_kernel_n(uint linear_index               [[thread_position_in
 
 
     uint64_t src_offs = 0;
-    uint src_idx = linear_index;
+    auto src_idx = linear_index;
     for(int dim = ndim - 1; dim >= 0; --dim) {{
       src_offs += stride[dim] * (src_idx % size[dim]);
       src_idx /= size[dim];

@@ -38,6 +38,28 @@ static IntArrayRef updateTensorBaseShape(const Tensor& self) {
   return base_shape;
 }
 
+
+// For both scatter and gather kernels, there are 4 specized ones (for 1D to 4D tensor)
+// and one generic, for 5+D ones. Assumption (to be tested) about specialized kernels
+// is that reduction of n-dimentional vector, where n is 2, should be slower
+// than reduction of 2D one, as n is not known at compiler time, therefore compiler
+// could not do loop unrolls, that is
+// float sum(float* v, int n) {
+//   float rc = 0;
+//   for (int idx = 0; idx < n; idx++)
+//    rc += v[idx];
+//   return rc;
+// }
+// would be slower than
+// float sum2(float* v) { return v[0] + v[1]; }
+//
+// TODOS:
+//   - Benchmark on whether or not this is really the case
+//   - Instantiate specialized tensors from template
+//   - Have proper error checking for 64-bit tensors
+//   - Add flavors for 64-bit tensors
+//   - Merged both scatter and gather templates together, as they more or less alike
+
 static std::string getGatherScatterFunctionName(ScalarType scalarType, int64_t dim, bool needsScatter) {
   std::string kernelName = needsScatter ? "scatter" : "gather";
   return kernelName + "_kernel_" + (dim < 5 ? std::to_string(dim == 0 ? 1 : dim) : "n");
