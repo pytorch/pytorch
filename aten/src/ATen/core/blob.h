@@ -54,7 +54,7 @@ class TORCH_API Blob final : public c10::intrusive_ptr_target {
   /**
    * Returns a printable typename of the blob.
    */
-  c10::string_view TypeName() const noexcept {
+  std::string_view TypeName() const noexcept {
     return meta_.name();
   }
 
