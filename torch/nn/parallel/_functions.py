@@ -95,28 +95,20 @@ class Scatter(Function):
         ctx.dim = dim
         ctx.input_device = input.get_device() if input.device.type != "cpu" else -1
         streams = None
-        if ctx.input_device == -1:
+        if torch.accelerator.is_available() and ctx.input_device == -1:
             # Perform CPU to GPU copies in a background stream
-            if torch.cuda.is_available():
-                streams = [
-                    _get_stream(torch.device("cuda", device)) for device in target_gpus
-                ]
-            elif torch.xpu.is_available():
-                streams = [
-                    _get_stream(torch.device("xpu", device)) for device in target_gpus
-                ]
+            accelerator_device_type = torch.accelerator.current_accelerator().type
+            streams = [
+                _get_stream(torch.device(accelerator_device_type, device)) for device in target_gpus
+            ]
         outputs = comm.scatter(input, target_gpus, chunk_sizes, ctx.dim, streams)
         # Synchronize with the copy stream
         if streams is not None:
             for i, output in enumerate(outputs):
-                if torch.cuda.is_available():
-                    with torch.cuda.device(target_gpus[i]):
-                        main_stream = torch.cuda.current_stream()
-                        main_stream.wait_stream(streams[i])
-                        output.record_stream(main_stream)
-                elif torch.xpu.is_available():
-                    with torch.xpu.device(target_gpus[i]):
-                        main_stream = torch.xpu.current_stream()
+                if torch.accelerator.is_available():
+                    accelerator_device_type = torch.accelerator.current_accelerator().type
+                    with torch.device(accelerator_device_type, target_gpus[i]):
+                        main_stream = torch.accelerator.current_stream()
                         main_stream.wait_stream(streams[i])
                         output.record_stream(main_stream)
         return outputs
