@@ -100,6 +100,10 @@ ExtraState* get_extra_state(PyCodeObject* code) {
 }
 
 void destroy_extra_state(void* obj) {
+  if (_extra_states.empty()) {
+    // cleared - likely by atexit; prevent use-after-free
+    return;
+  }
   ExtraState* extra = (ExtraState*)obj;
   if (!is_extra_state_unset(extra)) {
     _deleted_code.push_back(extra->orig_code);
