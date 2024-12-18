@@ -498,7 +498,7 @@ std::vector<Tensor> foreach_scalar_pow_list_kernel_slow(
   return result;
 }
 
-std::vector<Tensor> foreach_tensor_where_tensor_kernel_slow(
+std::vector<Tensor> foreach_tensor_where_scalar_slow(
     TensorList conditions,
     TensorList tensors,
     const at::Scalar& other) {
