@@ -904,7 +904,7 @@ class TestFullyShardProcessGroupInit(FSDPTestMultiThread):
         )
         self.assertEqual(mesh.mesh, ref_mesh.mesh)
         self.assertEqual(mesh._coordinate_on_dim, ref_mesh._coordinate_on_dim)
-        for (tag, ranks, group_name), (ref_tag, ref_ranks, ref_group_name) in zip(
+        for (_, ranks, _), (_, ref_ranks, _) in zip(
             mesh._dim_group_infos, ref_mesh._dim_group_infos
         ):
             # Since we manually constructed new subgroups, the test and ref

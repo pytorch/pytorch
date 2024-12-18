@@ -1335,11 +1335,9 @@ def compute_registration_declarations(
     f: NativeFunction, backend_indices: dict[DispatchKey, BackendIndex]
 ) -> str:
     name = dispatcher.name(f.func)
-    returns_type = dispatcher.returns_type(
-        f.func.returns
-    ).cpp_type_registration_declarations()
+    returns_type = dispatcher.returns_type(f.func.returns).cpp_type()
     args = dispatcher.arguments(f.func)
-    args_str = ", ".join(a.no_default().decl_registration_declarations() for a in args)
+    args_str = ", ".join(a.no_default().decl() for a in args)
     comment_data: dict[str, str] = {
         "schema": f"aten::{f.func}",
         # TODO: What exactly is the semantics of the 'dispatch' field?

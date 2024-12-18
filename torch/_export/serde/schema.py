@@ -3,7 +3,7 @@
 
 from dataclasses import dataclass, field
 from enum import IntEnum
-from typing import Annotated, Dict, List, Optional, Tuple
+from typing import Annotated, Dict, List, Optional
 
 from torch._export.serde.union import _Union
 
@@ -151,7 +151,7 @@ class TokenArgument:
 @dataclass(repr=False)
 class OptionalTensorArgument(_Union):
     as_tensor: Annotated[TensorArgument, 20]
-    as_none: Annotated[Tuple[()], 10]
+    as_none: Annotated[bool, 10]
 
 
 @dataclass
@@ -169,7 +169,7 @@ class CustomObjArgument:
 # This is actually a union type
 @dataclass(repr=False)
 class Argument(_Union):
-    as_none: Annotated[Tuple[()], 10]
+    as_none: Annotated[bool, 10]
     as_tensor: Annotated[TensorArgument, 20]
     as_tensors: Annotated[List[TensorArgument], 30]
     as_int: Annotated[int, 50]
@@ -234,7 +234,7 @@ class UserInputSpec:
 
 @dataclass(repr=False)
 class ConstantValue(_Union):
-    as_none: Annotated[Tuple[()], 10]
+    as_none: Annotated[bool, 10]
     as_int: Annotated[int, 20]
     as_float: Annotated[float, 30]
     as_string: Annotated[str, 40]
