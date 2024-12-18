@@ -4479,6 +4479,7 @@ class TestSerialization(TestCase, SerializationMixin):
             loaded_sd = torch.load(f, weights_only=weights_only)
             self.assertEqual(sd_save, loaded_sd)
 
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
     @parametrize("global_use_pinned", (True, False))
     @parametrize("local_use_pinned", (True, False, None))
     def test_use_pinned_memory_for_d2h(self, global_use_pinned, local_use_pinned):
