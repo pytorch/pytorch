@@ -394,7 +394,6 @@ class PackedSequenceTest(TestCase):
                 sum(map(bool, filter(lambda x: x >= i, sorted_lengths)))
                 for i in range(1, max_length + 1)
             ]
-            offset = 0
             padded = torch.cat(
                 [
                     pad(
