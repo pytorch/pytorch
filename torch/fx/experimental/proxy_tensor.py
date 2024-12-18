@@ -1265,6 +1265,10 @@ class PreDispatchTorchFunctionMode(TorchFunctionMode):
         kwargs: Optional[Dict[str, object]] = None,
     ) -> object:
         kwargs = kwargs or {}
+        from torch.utils._python_dispatch import (
+            is_traceable_wrapper_subclass,
+        )
+        import builtins
         if func in _side_effectful_need_to_be_preserved_pre_dispatch:
             # It's for passing the export verifier which needs to verify the meta['val']
             # TODO(tmanlaibaatar): we should systematically couple it with expoert verifier,
@@ -1285,6 +1289,17 @@ class PreDispatchTorchFunctionMode(TorchFunctionMode):
             return node
             # Don't actually run the function! We just want to trace the calls
             # into a graph. We don't actualy want to change global autograd state.
+        
+        if func == builtins.getattr:
+            assert len(args) == 2 
+            potential_tensor_subclass, attr = args
+            if is_traceable_wrapper_subclass(potential_tensor_subclass):
+                assert isinstance(potential_tensor_subclass, torch.Tensor)
+                assert isinstance(attr, str)
+                proxy = get_proxy_slot(potential_tensor_subclass, self.tracer).proxy
+                inner_proxy = self.tracer.create_proxy("call_function", func, (proxy, attr), {})
+                track_tensor_tree(getattr(potential_tensor_subclass, attr), inner_proxy, constant=None, tracer=self.tracer)
+                return inner_proxy.node
         return func(*args, **kwargs)
 
 

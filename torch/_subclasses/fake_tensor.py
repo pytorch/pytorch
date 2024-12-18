@@ -181,7 +181,10 @@ def is_fake(x: object) -> TypeGuard[Tensor]:
         return True
     if is_traceable_wrapper_subclass(x):
         attrs, _ = type(x).__tensor_flatten__(x)
-        flattened_tensors = [getattr(x, attr) for attr in attrs]
+        try:
+            flattened_tensors = [getattr(x, attr) for attr in attrs]
+        except:
+            breakpoint()
         all_fake = all(is_fake(x) for x in flattened_tensors)
         any_fake = any(is_fake(x) for x in flattened_tensors)
         assert all_fake == any_fake, "got mixed fake and real tensors!"

@@ -1,16 +1,24 @@
 # mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
+import builtins
 import dataclasses
 import functools
 import inspect
 import logging
 import re
 import time
+import types
 import warnings
 from contextlib import contextmanager, nullcontext
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
+from functools import partial
 
 import torch
+
+from torch.utils._python_dispatch import (
+    is_traceable_wrapper_subclass,
+)
+
 import torch._dynamo
 import torch.fx
 import torch.utils._pytree as pytree
@@ -1468,11 +1476,68 @@ def _export_to_aten_ir_make_fx(
         )
         flat_args, in_spec = pytree.tree_flatten((params_buffers_args, kwargs))
 
+        def getattr_for_tensor_subclass_inner_tensor(self, *, attr_name):
+            if torch.overrides.has_torch_function_unary(self):
+                torch.overrides.handle_torch_function(builtins.getattr, (self, ), self, attr_name)
+            return getattr(self, "_patched_reserved_" + attr_name)
+        
+        def setattr_for_tensor_subclass_inner_tensor(self, value, *, attr_name):
+            setattr(self, "_patched_reserved_" + attr_name, value)
+        
+        def delattr_for_tensor_subclass_inner_tensor(self, *, attr_name):
+            delattr(self, "_patched_reserved_" + attr_name)
+
+        @contextmanager
+        def _monkey_patch_shadow_attrs_to_subclass(args):
+            wrapper_tensor_subclasses = [arg for arg in args if is_traceable_wrapper_subclass(arg)]
+            subclass_to_extra_attrs_to_be_deleted = {}
+            for ix, wrapper_tensor_subclass in enumerate(wrapper_tensor_subclasses):
+                extra_attrs_to_be_deleted = []
+                todos = [wrapper_tensor_subclass]
+                while todos:
+                    todo = todos.pop()
+                    if is_traceable_wrapper_subclass(todo):
+                        inner_keys, _ = todo.__tensor_flatten__()
+                        for key in inner_keys: 
+                            inner_tensor = getattr(todo, key)
+                            setattr(todo, "_patched_reserved_" + key, inner_tensor)
+                            extra_attrs_to_be_deleted.append((key, todo, inner_tensor))
+                            todos.append(inner_tensor)
+                subclass_to_extra_attrs_to_be_deleted[ix] = extra_attrs_to_be_deleted
+            try:
+                yield
+            finally:
+                deleted_monkey_patched_properties = set()
+                for ix, wrapper_tensor_subclass in enumerate(wrapper_tensor_subclasses):
+                    extra_attrs_to_be_deleted = subclass_to_extra_attrs_to_be_deleted[ix]
+                    for attr_name, parent_tensor, inner_tensor in extra_attrs_to_be_deleted:
+                        if (attr_name, type(parent_tensor)) not in deleted_monkey_patched_properties:
+                            breakpoint()
+                            prop = property(partial(builtins.getattr, obj=parent_tensor), partial(builtins.setattr, obj=parent_tensor), partial(builtins.delattr, obj=parent_tensor))
+                            setattr(type(parent_tensor), attr_name, prop)
+                            deleted_monkey_patched_properties.add((attr_name, type(parent_tensor)))
+
+
+        def _override_inner_tensor_getattr(wrapper_tensor_subclass):
+            inner_keys, _ = wrapper_tensor_subclass.__tensor_flatten__()
+            for key in inner_keys: 
+                inner_tensor = getattr(wrapper_tensor_subclass, key)
+                if is_traceable_wrapper_subclass(inner_tensor):
+                    _override_inner_tensor_getattr(inner_tensor)
+                else:
+                    prop= property(partial(getattr_for_tensor_subclass_inner_tensor, attr_name=key), partial(setattr_for_tensor_subclass_inner_tensor, attr_name=key), partial(delattr_for_tensor_subclass_inner_tensor, attr_name=key))
+                    setattr(type(wrapper_tensor_subclass), key, prop)
+        
+
         @functools.wraps(flat_fn)
         def wrapped_fn(*args):
             return tuple(flat_fn(*args))
 
-        with enable_python_dispatcher():
+        with enable_python_dispatcher(), _monkey_patch_shadow_attrs_to_subclass(flat_args):
+            with torch.overrides._enable_torch_function():
+                for arg in flat_args:
+                    if is_traceable_wrapper_subclass(arg):
+                        _override_inner_tensor_getattr(arg)
             ctx = nullcontext()
             non_strict_root = getattr(mod, "_export_root", None)
             if non_strict_root is not None:
