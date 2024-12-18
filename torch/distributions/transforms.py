@@ -9,6 +9,8 @@ from typing import List
 import torch
 import torch.nn.functional as F
 from torch.distributions import constraints
+from .normal import Normal
+from .uniform import Uniform
 from torch.distributions.utils import (
     _sum_rightmost,
     broadcast_all,
@@ -135,10 +137,16 @@ class Transform:
         In general this only makes sense for bijective transforms.
         """
         raise NotImplementedError
-    
+
     def mean(self, base_distribution):
         """
         Returns the mean of the transformed distribution
+        """
+        raise NotImplementedError
+
+    def variance(self, base_distribution):
+        """
+        Returns the variance of the transformed distribution
         """
         raise NotImplementedError
 
@@ -547,6 +555,7 @@ class ExpTransform(Transform):
     r"""
     Transform via the mapping :math:`y = \exp(x)`.
     """
+
     domain = constraints.real
     codomain = constraints.positive
     bijective = True
@@ -563,19 +572,39 @@ class ExpTransform(Transform):
 
     def log_abs_det_jacobian(self, x, y):
         return x
-    
+
     def mean(self, base_distribution):
-        if isinstance(base_distribution, torch.distributions.Normal):
-            return torch.exp(base_distribution.variance/2 + base_distribution.mean)
+        base_mean = base_distribution.mean
+        base_var = base_distribution.variance
+        high = base_distribution.high
+        low = base_distribution.low
+        if isinstance(base_distribution, Normal):
+            return torch.exp(base_var / 2 + base_mean)
+        elif isinstance(base_distribution, Uniform):
+            return (torch.exp(high) - torch.exp(low)) / (high - low)
         else:
-             raise NotImplementedError
-    
+            raise NotImplementedError
+
+    def variance(self, base_distribution):
+        base_mean = base_distribution.mean
+        base_var = base_distribution.variance
+        high = base_distribution.high
+        low = base_distribution.low
+        if isinstance(base_distribution, Normal):
+            return torch.exp(2 * base_mean + base_var) * (torch.exp(base_var) - 1)
+        elif isinstance(base_distribution, Uniform):
+            t1 = 1 / (2 * (high - low)) * (torch.exp(2 * high) - torch.exp(2 * low))
+            t2 = ((torch.exp(2 * high) - torch.exp(2 * low)) / (high - low)) ** 2
+            return t1 + t2
+        else:
+            raise NotImplementedError
 
 
 class PowerTransform(Transform):
     r"""
     Transform via the mapping :math:`y = x^{\text{exponent}}`.
     """
+
     domain = constraints.positive
     codomain = constraints.positive
     bijective = True
@@ -623,6 +652,7 @@ class SigmoidTransform(Transform):
     r"""
     Transform via the mapping :math:`y = \frac{1}{1 + \exp(-x)}` and :math:`x = \text{logit}(y)`.
     """
+
     domain = constraints.real
     codomain = constraints.unit_interval
     bijective = True
@@ -648,6 +678,7 @@ class SoftplusTransform(Transform):
     Transform via the mapping :math:`\text{Softplus}(x) = \log(1 + \exp(x))`.
     The implementation reverts to the linear function when :math:`x > 20`.
     """
+
     domain = constraints.real
     codomain = constraints.positive
     bijective = True
@@ -680,6 +711,7 @@ class TanhTransform(Transform):
     Note that one should use `cache_size=1` when it comes to `NaN/Inf` values.
 
     """
+
     domain = constraints.real
     codomain = constraints.interval(-1.0, 1.0)
     bijective = True
@@ -706,6 +738,7 @@ class AbsTransform(Transform):
     r"""
     Transform via the mapping :math:`y = |x|`.
     """
+
     domain = constraints.real
     codomain = constraints.positive
 
@@ -730,6 +763,7 @@ class AffineTransform(Transform):
             for univariate random variables, 1 for distributions over vectors,
             2 for distributions over matrices, etc.
     """
+
     bijective = True
 
     def __init__(self, loc, scale, event_dim=0, cache_size=0):
@@ -753,7 +787,7 @@ class AffineTransform(Transform):
         if self.event_dim == 0:
             return constraints.real
         return constraints.independent(constraints.real, self.event_dim)
-    
+
     def mean(self, base_distribution):
         return self.loc + self.scale * base_distribution.mean
 
@@ -840,6 +874,7 @@ class CorrCholeskyTransform(Transform):
            - Applies :math:`s_i = StickBreakingTransform(z_i)`.
            - Transforms back into signed domain: :math:`y_i = sign(r_i) * \sqrt{s_i}`.
     """
+
     domain = constraints.real_vector
     codomain = constraints.corr_cholesky
     bijective = True
@@ -915,6 +950,7 @@ class SoftmaxTransform(Transform):
     coordinate-wise (except for the final normalization), and thus is
     appropriate for coordinate-wise optimization algorithms.
     """
+
     domain = constraints.real_vector
     codomain = constraints.simplex
 
