@@ -91,14 +91,8 @@ def is_forbidden_context_manager(ctx):
     except ImportError:
         pass
 
-    try:
-        from torch.testing._internal.jit_utils import (
-            _AssertRaisesRegexWithHighlightContext,
-        )
-
-        f_ctxs.append(_AssertRaisesRegexWithHighlightContext)
-    except ImportError:
-        pass
+    if m := sys.modules.get("torch.testing._internal.jit_utils"):
+        f_ctxs.append(m._AssertRaisesRegexWithHighlightContext)
 
     return ctx in f_ctxs
 
@@ -791,15 +785,14 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 assert self.source  # OrderedDict, dict subtypes must always have source
                 return self.odict_getitem(tx, args[0])
 
-            if (
-                method in (object.__ne__, object.__eq__)
-                and len(args) == 1
-                and not kwargs
-                and hasattr(args[0], "value")
-            ):
-                return ConstantVariable(
-                    (self.value is args[0].value) is (method is object.__eq__)
-                )
+            if len(args) == 1 and not kwargs:
+                if method is object.__eq__:
+                    func_var = VariableTracker.build(tx, polyfills.object_eq)
+                    return func_var.call_function(tx, [self, *args], kwargs)
+
+                if method is object.__ne__:
+                    func_var = VariableTracker.build(tx, polyfills.object_ne)
+                    return func_var.call_function(tx, [self, *args], kwargs)
 
             # check for methods implemented in C++
             if isinstance(method, types.FunctionType):

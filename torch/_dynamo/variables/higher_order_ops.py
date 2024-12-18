@@ -15,8 +15,8 @@ import torch.fx
 import torch.nn
 from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.utils import get_fake_value
-from torch._dynamo.variables import ConstantVariable
 from torch._dynamo.variables.builtin import BuiltinVariable
+from torch._dynamo.variables.constant import ConstantVariable
 from torch._dynamo.variables.functions import UserFunctionVariable
 from torch._dynamo.variables.tensor import SymNodeVariable
 from torch._guards import Source
@@ -80,6 +80,34 @@ def discard_graph_changes(tx):
         yield
     finally:
         ctx.__exit__(None, None, None)
+
+
+def diff_meta(tensor_vars1, tensor_vars2) -> str:
+    from torch._higher_order_ops.utils import diff_tensor_meta
+
+    from . import TensorVariable
+
+    assert all(isinstance(var, TensorVariable) for var in tensor_vars1 + tensor_vars2)
+    all_diffs = []
+    for i, (var1, var2) in enumerate(zip(tensor_vars1, tensor_vars2)):
+        # We have vmap x cond tests and querying is_contiguous inside of vmap for
+        # memory_format other than torch.contiguous_format is not yet implemented.
+        # And it seems the remaining metas are good enough for now.
+        meta1 = _extract_tensor_metadata(
+            var1.proxy.node.meta["example_value"], include_contiguity=False
+        )
+        meta2 = _extract_tensor_metadata(
+            var2.proxy.node.meta["example_value"], include_contiguity=False
+        )
+        # We cannot get accurate require_grad. See Note [invariants for node meta 'val']
+        pair_diffs = diff_tensor_meta(meta1, meta2, check_grad=False)
+
+        if len(pair_diffs) > 0:
+            fmt_str = ", ".join(pair_diffs)
+            all_diffs.append(
+                f"pair[{i}] differ in {fmt_str}, where lhs is {meta1} and rhs is {meta2}"
+            )
+    return "\n".join(all_diffs)
 
 
 @contextlib.contextmanager
@@ -673,24 +701,6 @@ def make_attr(tx: "InstructionTranslator", name):
     return node
 
 
-def add_subgraph(tx: "InstructionTranslator", name, gm):
-    next_name = None
-    i = 0
-    while not next_name:
-        candidate = f"{name}_{i}"
-        if candidate in tx.output.nn_modules:
-            i += 1
-        else:
-            next_name = candidate
-
-    gm.__name__ = next_name
-    gm.torchdynamo_force_dynamic = False
-    # This graph module is not present in the user space, so it can't be
-    # accessed by a source. Set source=None.
-    tx.output.register_attr_or_module(gm, next_name, source=None)
-    return next_name
-
-
 class TorchHigherOrderOperatorVariable(VariableTracker):
     def __init__(
         self, value: HigherOrderOperator, source: Optional[Source] = None, **kwargs
@@ -888,35 +898,18 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
         if not same_treespec.as_python_constant():
             unimplemented("Expected branches to return the same pytree structure.")
 
-        def diff_meta(tensor_vars1, tensor_vars2):
-            assert all(
-                isinstance(var, TensorVariable) for var in tensor_vars1 + tensor_vars2
-            )
-            all_diffs = []
-            for i, (var1, var2) in enumerate(zip(tensor_vars1, tensor_vars2)):
-                # We check the meta data associated with meta["example_value"]
-                meta1 = _extract_tensor_metadata(
-                    var1.proxy.node.meta["example_value"], include_contiguity=False
-                )
-                meta2 = _extract_tensor_metadata(
-                    var2.proxy.node.meta["example_value"], include_contiguity=False
-                )
-                if meta1 != meta2:
-                    all_diffs.append((f"pair{i}:", meta1, meta2))
-            return all_diffs
-
         if diffs := diff_meta(
             true_r.unpack_var_sequence(tx), false_r.unpack_var_sequence(tx)
         ):
             unimplemented(
-                f"Expected branches to return tensors with same metadata. [(tensor_pair, difference)...]:{diffs}"
+                f"Expect branches to return tensors with same metadata but find {diffs}"
             )
 
         (
             true_graph,
             false_graph,
             true_shared,
-            false_shared,
+            _false_shared,
             unique_true,
             unique_false,
         ) = _merge_graph_inputs(
@@ -928,13 +921,11 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
             "false_branch",
         )
 
-        true_name = add_subgraph(
-            tx,
+        true_name = tx.output.install_subgraph(
             "cond_true",
             torch.fx.GraphModule(true_nn_modules, true_graph),
         )
-        false_name = add_subgraph(
-            tx,
+        false_name = tx.output.install_subgraph(
             "cond_false",
             torch.fx.GraphModule(false_nn_modules, false_graph),
         )
@@ -1049,7 +1040,7 @@ class WhileLoopHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
         # create cond subgrpahs
         (
-            (cond_r, cond_treespec),
+            (cond_r, _cond_treespec),
             cond_graph,
             cond_lifted_freevars,
         ) = speculate_subgraph(
@@ -1119,11 +1110,17 @@ class WhileLoopHigherOrderVariable(TorchHigherOrderOperatorVariable):
             set_subgraph_inputs="flatten_manual",
             should_flatten_outputs=True,
         )
+
+        if diffs := diff_meta(operands_seq, body_r.unpack_var_sequence(tx)):
+            unimplemented(
+                f"Expected carried_inputs and body outputs return tensors with same metadata but find:\n{diffs}"
+            )
+
         (
             cond_graph,
             body_graph,
             cond_shared,
-            body_shared,
+            _body_shared,
             cond_unique,
             body_unique,
         ) = _merge_graph_inputs(
@@ -1141,13 +1138,11 @@ class WhileLoopHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
         body_nn_modules = dict(tx.output.nn_modules)
 
-        cond_name = add_subgraph(
-            tx,
+        cond_name = tx.output.install_subgraph(
             "cond_fn",
             torch.fx.GraphModule(cond_nn_modules, cond_graph),
         )
-        body_name = add_subgraph(
-            tx,
+        body_name = tx.output.install_subgraph(
             "body_fn",
             torch.fx.GraphModule(body_nn_modules, body_graph),
         )
@@ -1217,7 +1212,7 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 for leaf in itertools.chain(xs.items, xs.items)
             ]
         (
-            (combine_result, combine_treespec),
+            (combine_result, _combine_treespec),
             combine_graph,
             combine_lifted_freevars,
         ) = speculate_subgraph(
@@ -1257,7 +1252,9 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 )
 
         combine_gm = torch.fx.GraphModule(dict(tx.output.nn_modules), combine_graph)
-        combine_fn_name = add_subgraph(tx, "associative_scan_combine_fn", combine_gm)
+        combine_fn_name = tx.output.install_subgraph(
+            "associative_scan_combine_fn", combine_gm
+        )
 
         p_args = (
             make_attr(tx, combine_fn_name),
@@ -1348,7 +1345,7 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
             ]
         sub_args = sub_args_init + sub_args_inp + sub_args_additional_inputs
         (
-            (combine_result, combine_treespec),
+            (combine_result, _combine_treespec),
             combine_graph,
             combine_lifted_freevars,
         ) = speculate_subgraph(
@@ -1410,7 +1407,7 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 )
 
         combine_gm = torch.fx.GraphModule(dict(tx.output.nn_modules), combine_graph)
-        combine_fn_name = add_subgraph(tx, "scan_combine_fn", combine_gm)
+        combine_fn_name = tx.output.install_subgraph("scan_combine_fn", combine_gm)
 
         p_args = (
             make_attr(tx, combine_fn_name),
@@ -1522,8 +1519,7 @@ class MapHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
         body_nn_modules = dict(tx.output.nn_modules)
 
-        body_name = add_subgraph(
-            tx,
+        body_name = tx.output.install_subgraph(
             "map_body",
             torch.fx.GraphModule(body_nn_modules, body_graph),
         )
@@ -1619,8 +1615,7 @@ class WrapHigherOrderVariable(TorchHigherOrderOperatorVariable):
     def install_subgraph_in_output_graph(
         self, tx, fn_vt, fn_args_vt, kwargs, body_gmod, attr_name="wrap_body"
     ):
-        return add_subgraph(
-            tx,
+        return tx.output.install_subgraph(
             f"{attr_name}",
             body_gmod,
         )
@@ -1687,7 +1682,7 @@ class WrapHigherOrderVariable(TorchHigherOrderOperatorVariable):
         (
             p_args,
             p_kwargs,
-            example_value,
+            _example_value,
             body_r,
             treespec,
             _,
@@ -1756,8 +1751,7 @@ class WrapWithSetGradEnabledHigherOrderVariable(TorchHigherOrderOperatorVariable
             )
 
         body_gmod = torch.fx.GraphModule(tx.output.nn_modules, body_graph)
-        body_name = add_subgraph(
-            tx,
+        body_name = tx.output.install_subgraph(
             "wrap_body",
             body_gmod,
         )
@@ -1837,8 +1831,7 @@ class WrapWithAutocastHigherOrderVariable(TorchHigherOrderOperatorVariable):
             )
 
         body_gmod = torch.fx.GraphModule(tx.output.nn_modules, body_graph)
-        body_name = add_subgraph(
-            tx,
+        body_name = tx.output.install_subgraph(
             "wrap_body",
             body_gmod,
         )
@@ -1909,8 +1902,7 @@ class HintsWrapperHigherOrderVariable(TorchHigherOrderOperatorVariable):
         )
 
         body_gmod = torch.fx.GraphModule(tx.output.nn_modules, body_graph)
-        body_name = add_subgraph(
-            tx,
+        body_name = tx.output.install_subgraph(
             "hints_wrapper_body",
             body_gmod,
         )
@@ -1982,8 +1974,6 @@ class StrictModeHigherOrderVariable(TorchHigherOrderOperatorVariable):
         args: "List[VariableTracker]",
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
-        callable = args[0]
-
         unpacked_sequence = args[1].unpack_var_sequence(tx)
         # TODO (tmanlaibaatar) support pytree here
         for arg in unpacked_sequence:
@@ -2011,8 +2001,7 @@ class StrictModeHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
         strict_mode_nn_modules = dict(tx.output.nn_modules)
 
-        strict_mode_name = add_subgraph(
-            tx,
+        strict_mode_name = tx.output.install_subgraph(
             "strict_mode_body",
             torch.fx.GraphModule(strict_mode_nn_modules, ret_graph),
         )
@@ -2073,7 +2062,7 @@ class CheckpointHigherOrderVariable(WrapHigherOrderVariable):
             p_args,
             _,
             example_value,
-            body_r,
+            _body_r,
             treespec,
             checkpointed_gmod,
             _,
@@ -2247,7 +2236,7 @@ class FlexAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
         with TransformGetItemToIndex():
             (
-                (body_output, body_treespec),
+                (_body_output, _body_treespec),
                 body_graph,
                 body_lifted_freevars,
             ) = speculate_subgraph(
@@ -2260,8 +2249,7 @@ class FlexAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 set_subgraph_inputs="flatten_manual",
             )
 
-        body_name = add_subgraph(
-            tx,
+        body_name = tx.output.install_subgraph(
             fn_name,
             torch.fx.GraphModule(tx.output.nn_modules, body_graph),
         )
@@ -2284,6 +2272,8 @@ class FlexAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
         args: "List[VariableTracker]",
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
+        from torch._higher_order_ops.flex_attention import flex_attention_fake_impl
+
         from .builder import wrap_fx_proxy
 
         (
@@ -2321,13 +2311,9 @@ class FlexAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
         inp_args, _ = proxy_args_kwargs(proxied_args, {})
 
         query_meta = query.as_proxy().node.meta["example_value"]
-        logsumexp_shape = query_meta.size()[:-1]  # [B, H, M]
+        value_meta = value.as_proxy().node.meta["example_value"]
         with torch._guards.TracingContext.try_get().fake_mode:
-            out_meta = torch.empty_like(
-                query_meta, memory_format=torch.contiguous_format
-            )
-            # TODO: Figure out a better way to handle this for NJT than using sum()
-            lse_meta = torch.empty_like(query_meta, dtype=torch.float32).sum(dim=-1)
+            out_meta, lse_meta = flex_attention_fake_impl(query_meta, value_meta)
         example_value = (out_meta, lse_meta)
 
         # Compose the ordered HOO args:
@@ -2544,8 +2530,7 @@ class AutogradFunctionApplyVariable(VariableTracker):
 
         # Store fwd_body
         fwd_nn_modules = tx.output.tracing_context.module_context.copy_graphstate()
-        fwd_name = add_subgraph(
-            tx,
+        fwd_name = tx.output.install_subgraph(
             "fwd_body",
             torch.fx.GraphModule(fwd_nn_modules.nn_modules, fwd_graph),
         )
@@ -2610,8 +2595,7 @@ class AutogradFunctionApplyVariable(VariableTracker):
 
         # Store bwd_body
         bwd_nn_modules = tx.output.tracing_context.module_context.copy_graphstate()
-        bwd_name = add_subgraph(
-            tx,
+        bwd_name = tx.output.install_subgraph(
             "bwd_body",
             torch.fx.GraphModule(bwd_nn_modules.nn_modules, bwd_graph),
         )
@@ -2681,7 +2665,7 @@ def maybe_positional_arg_names(func):
     except (Unsupported, NotImplementedError):
         return None
     try:
-        sig = inspect.signature(func.get_function())
+        sig = inspect.signature(fn)
     except ValueError:
         return None
     for name, param in sig.parameters.items():
