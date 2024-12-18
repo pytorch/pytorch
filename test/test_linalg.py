@@ -4743,24 +4743,32 @@ class TestLinalg(TestCase):
 
         # check the results files where written, one per gpu
         # get the size of the first result and make sure it
-        # is at least 250. The other results file will have
-        # the same size.
+        # greater than 100. Since the validator text should
+        # be at least that much.
+        # The other results file will have
+        # at least the size of the first results file - 80
         for i in range(total_gpus):
             result_filename = f"tunableop_results{i}.csv"
             self.assertTrue(os.path.exists(result_filename))
             if i == 0:  # Store for next loop
                 result_size = os.path.getsize(result_filename)
-            self.assertGreater(os.path.getsize(result_filename), 250)
+                self.assertGreater(os.path.getsize(result_filename), 0)
+            self.assertGreater(os.path.getsize(result_filename), result_size - 80)
 
 
         # Check the full results files was written, one per gpu
-        # check that the size of the full results file
-        # is greater than that of a single results file by
-        # a factor of 2.
+        # check that the size of the full results file for
+        # GPU 0 is greater than that of the individual results
+        # for GPU 0 by at least a factor of 2.
+        # Lastly, check that all tunableop_results_full{i} have
+        # the same size as tunableop_results_full0.
         for i in range(total_gpus):
             result_full_filename = f"tunableop_results_full{i}.csv"
             self.assertTrue(os.path.exists(result_full_filename))
-            self.assertGreater(os.path.getsize(result_full_filename), 2 * result_size)
+            if i == 0:  # Store for next subsequent iterations
+                result_full_size = os.path.getsize(result_full_filename)
+                self.assertGreater(result_full_size, 2 * result_size)
+            self.assertEqual(os.path.getsize(result_full_filename), result_full_size)
 
         # disables TunableOp
         torch.cuda.tunable.enable(False)
