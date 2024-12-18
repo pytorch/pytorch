@@ -12,7 +12,6 @@ from typing import Any, Callable, Dict, Generator, List, Optional, Tuple
 import torch
 import torch.distributed._functional_collectives as funcol
 import torch.distributed.distributed_c10d as c10d
-from torch._C._autograd import DeviceType
 from torch._C._distributed_c10d import _SymmetricMemory, Work as _Work
 
 
@@ -154,7 +153,6 @@ def _pipelined_multi_all_gather_and_consume(
     shard_consumer: Callable[[List[torch.Tensor], int], None],
     ag_out: List[torch.Tensor],
     group_name: str,
-    ag_out_needed: bool = True,
 ) -> None:
     """
     Perform the following logic with micro-pipelined computation and
@@ -281,15 +279,14 @@ def _pipelined_multi_all_gather_and_consume(
             copy_shard(dst=shards[remote_rank], src=remote_p2p_bufs)
             shard_consumer(shards[remote_rank], remote_rank)
 
-    if ag_out_needed:
-        # Copy from input to the all-gather output. Opportunistically overlap
-        # it with the last shard_consumer.
-        if group_size % 2 == 0:
-            stream = torch.cuda.current_stream()
-        else:
-            stream = backend_stream
-        with torch.cuda.stream(stream):
-            copy_shard(dst=shards[rank], src=shard)
+    # Copy from input to the all-gather output. Opportunistically overlap it
+    # with the last shard_consumer.
+    if group_size % 2 == 0:
+        stream = torch.cuda.current_stream()
+    else:
+        stream = backend_stream
+    with torch.cuda.stream(stream):
+        copy_shard(dst=shards[rank], src=shard)
 
     torch.cuda.current_stream().wait_stream(backend_stream)
     symm_mem.barrier(channel=0)
@@ -300,7 +297,6 @@ def _pipelined_all_gather_and_consume(
     shard_consumer: Callable[[torch.Tensor, int], None],
     ag_out: torch.Tensor,
     group_name: str,
-    ag_out_needed: bool = True,
 ) -> None:
     """
     Perform the following logic with micro-pipelined computation and
@@ -320,7 +316,6 @@ def _pipelined_all_gather_and_consume(
         adapter,
         [ag_out],
         group_name,
-        ag_out_needed,
     )
 
 
@@ -436,8 +431,7 @@ def _pipelined_produce_and_all2all(
 
 lib = torch.library.Library("symm_mem", "DEF")  # noqa: TOR901
 lib.define(
-    "fused_all_gather_matmul("
-    "Tensor A, Tensor[] Bs, int gather_dim, str group_name, *, bool return_A = True) -> (Tensor?, Tensor[])",
+    "fused_all_gather_matmul(Tensor A, Tensor[] Bs, int gather_dim, str group_name) -> (Tensor, Tensor[])",
     tags=[torch._C.Tag.needs_fixed_stride_order],
 )
 lib.define(
@@ -512,8 +506,7 @@ def _fused_all_gather_matmul_impl(
     out_dtypes: List[Optional[torch.dtype]],
     gather_dim: int,
     group_name: str,
-    return_A: bool,
-) -> Tuple[Optional[torch.Tensor], List[torch.Tensor]]:
+) -> Tuple[torch.Tensor, List[torch.Tensor]]:
     if A_shard.dim() < 2:
         raise ValueError("A_shard must be a matrix")
     for B in Bs:
@@ -579,7 +572,6 @@ def _fused_all_gather_matmul_impl(
             row_wise_sharded_consumer,
             [A_flat, A_scale_flat],
             group_name,
-            return_A,
         )
     elif scale_mode == _ScaleMode.ROW_WISE_REPLICATED:
         assert A_scale is not None
@@ -602,7 +594,6 @@ def _fused_all_gather_matmul_impl(
             row_wise_replicated_consumer,
             A_flat,
             group_name,
-            return_A,
         )
     else:
         if scale_mode == _ScaleMode.TENSOR_WISE:
@@ -621,11 +612,9 @@ def _fused_all_gather_matmul_impl(
             default_consumer,
             A_flat,
             group_name,
-            return_A,
         )
 
-    A = unflatten(A_flat) if return_A else None
-    return A, [unflatten(output) for output in outputs]
+    return unflatten(A_flat), [unflatten(output) for output in outputs]
 
 
 @torch.library.impl(lib, "fused_all_gather_matmul", "Meta")
@@ -634,20 +623,16 @@ def _fused_all_gather_matmul_fallback(
     Bs: List[torch.Tensor],
     gather_dim: int,
     group_name: str,
-    *,
-    return_A: bool = True,
-) -> Tuple[Optional[torch.Tensor], List[torch.Tensor]]:
+) -> Tuple[torch.Tensor, List[torch.Tensor]]:
     group_size = c10d._get_group_size_by_name(group_name)
     A = torch.ops._c10d_functional.all_gather_into_tensor(
         A_shard.contiguous(), group_size, group_name
     )
     A = torch.ops._c10d_functional.wait_tensor(A)
     A = A.view(group_size, *A_shard.shape).movedim(gather_dim + 1, 1).flatten(0, 1)
-    res = [torch.matmul(A, B).movedim(0, gather_dim) for B in Bs]
-    if return_A:
-        return A.movedim(0, gather_dim), res
-    else:
-        return None, res
+    return A.movedim(0, gather_dim), [
+        torch.matmul(A, B).movedim(0, gather_dim) for B in Bs
+    ]
 
 
 @torch.library.impl(lib, "fused_all_gather_matmul", "CUDA")
@@ -656,9 +641,7 @@ def _fused_all_gather_matmul(
     Bs: List[torch.Tensor],
     gather_dim: int,
     group_name: str,
-    *,
-    return_A: bool = True,
-) -> Tuple[Optional[torch.Tensor], List[torch.Tensor]]:
+) -> Tuple[torch.Tensor, List[torch.Tensor]]:
     """
     Perform the following logic with micro-pipelined computation and
     communication:
@@ -670,9 +653,7 @@ def _fused_all_gather_matmul(
     Otherwise A_shard needs to be copied once.
     """
     if _is_test_mode:
-        return _fused_all_gather_matmul_fallback(
-            A_shard, Bs, gather_dim, group_name, return_A=return_A
-        )
+        return _fused_all_gather_matmul_fallback(A_shard, Bs, gather_dim, group_name)
 
     if _should_use_fused_all_gather_matmul_native(A_shard, Bs, gather_dim, group_name):
         group = c10d._resolve_process_group(group_name)
@@ -682,11 +663,6 @@ def _fused_all_gather_matmul(
             A_shard.flatten(0, -2), Bs[0], group_name
         )
         return A.view(*leading_dims, -1), [out.view(*leading_dims, -1)]
-
-    if _should_use_multimem_all_gather_matmul(
-        A_shard, gather_dim, group_name, return_A
-    ):
-        return None, _multimem_all_gather_matmul(A_shard, Bs, group_name)
 
     with torch.profiler.record_function("fused_all_gather_matmul"):
         return _fused_all_gather_matmul_impl(
@@ -698,7 +674,6 @@ def _fused_all_gather_matmul(
             [B.dtype for B in Bs],
             gather_dim,
             group_name,
-            return_A,
         )
 
 
@@ -719,7 +694,7 @@ def _should_use_fused_all_gather_matmul_native(
         and local_M % group.size() == 0
         # _async_input_mm outperforms the decomposition-based approach when the
         # global M is small.
-        and 2048 < local_M * group.size() <= 4096
+        and local_M * group.size() <= 4096
         # _async_input_mm only supports a single B.
         and len(Bs) == 1
     )
@@ -777,47 +752,6 @@ def _fused_all_gather_matmul_native(
 
     symm_mem.barrier()
     return A, out
-
-
-def _should_use_multimem_all_gather_matmul(
-    A_shard: torch.Tensor,
-    gather_dim: int,
-    group_name: str,
-    return_A: bool,
-) -> bool:
-    group = c10d._resolve_process_group(group_name)
-    local_M = math.prod(A_shard.shape[:-1])
-    has_multicast_support = (
-        A_shard.device.type == "cuda"
-        and _SymmetricMemory.has_multicast_support(
-            DeviceType.CUDA, A_shard.device.index
-        )
-    )
-
-    return (
-        has_multicast_support
-        and not return_A
-        and A_shard.is_contiguous()
-        and gather_dim == 0
-        # The heuristic is empirical. We could refine it with a more
-        # sophisticated perf model.
-        and local_M * group.size() <= 2048
-    )
-
-
-def _multimem_all_gather_matmul(
-    A_shard: torch.Tensor,
-    Bs: List[torch.Tensor],
-    group_name: str,
-) -> List[torch.Tensor]:
-    group = c10d._resolve_process_group(group_name)
-    A_shape = torch.Size((A_shard.shape[0] * group.size(), *A_shard.shape[1:]))
-    symm_mem = get_symm_mem_workspace(
-        group_name, A_shape.numel() * A_shard.element_size()
-    )
-    A = symm_mem.get_buffer(symm_mem.rank, A_shape, A_shard.dtype)
-    torch.ops.symm_mem.multimem_all_gather_out(A_shard, group_name, A)
-    return [torch.matmul(A, B) for B in Bs]
 
 
 @torch.library.impl(lib, "fused_all_gather_scaled_matmul", "Meta")
@@ -949,7 +883,7 @@ def _fused_all_gather_scaled_matmul(
         )
 
     with torch.profiler.record_function("fused_all_gather_scaled_matmul"):
-        A, res = _fused_all_gather_matmul_impl(
+        return _fused_all_gather_matmul_impl(
             torch.ops.aten._scaled_mm.out,
             A_shard,
             Bs,
@@ -969,10 +903,7 @@ def _fused_all_gather_scaled_matmul(
             out_dtypes,
             gather_dim,
             group_name,
-            True,
         )
-        assert A is not None
-        return A, res
 
 
 def make_contiguous_for_perm(
