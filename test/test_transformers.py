@@ -323,9 +323,9 @@ class TestTransformers(NNTestCase):
                 test = torch.cat([torch.randn(1, 2, 2), torch.zeros(1, 2, 2)], dim=1).to(device)
 
                 # Expect uint8 type not supported
-                ex = None
+                e = None
                 try:
-                    test_train_uint8 = encoder(test, src_key_padding_mask=pad_mask.to(torch.uint8))
+                    encoder(test, src_key_padding_mask=pad_mask.to(torch.uint8))
                 except AssertionError as e:
                     continue
                 self.assertFalse(e, "Failed to catch unsupported uint8 type exception")  # noqa: F821
@@ -334,9 +334,9 @@ class TestTransformers(NNTestCase):
                 encoder.eval()
 
                 # Expect long type not supported
-                ex = None
+                e = None
                 try:
-                    test_eval_uint8 = encoder(test, src_key_padding_mask=pad_mask.to(torch.int64))
+                    encoder(test, src_key_padding_mask=pad_mask.to(torch.int64))
                 except AssertionError as e:
                     continue
                 self.assertFalse(e, "Failed to catch unsupported Long type exception")  # noqa: F821
@@ -845,7 +845,6 @@ class TestTransformers(NNTestCase):
         layer = torch.nn.TransformerEncoderLayer(d_model, 1, 6, batch_first=True)
         layer.eval()
         x = torch.randn(1, 5, d_model)
-        unmasked_output = layer(x)
         mask = torch.nn.Transformer.generate_square_subsequent_mask(x.size(1))
         is_causal_output = layer(x, src_mask=mask, is_causal=True)
         masked_output = layer(x, src_mask=mask)
@@ -1055,8 +1054,6 @@ class TestTransformers(NNTestCase):
     @onlyCUDA
     @unittest.skipIf(not TEST_FAIRSEQ, "Fairseq not found")
     def test_decoder_only_layer(self):
-        DEFAULT_PADDING_IDX = 0
-
         class FairseqDecoder(torch.nn.Module):
             def __init__(
                 self,
@@ -1384,9 +1381,8 @@ class TestTransformers(NNTestCase):
         attn_out, _ = mha(t_qvk, t_qvk, t_qvk, attn_mask=mask, is_causal=True)
 
         # Can't give only is_causal
-        attn_mask = torch.randint(0, 2, size=(L, L), device=device, dtype=torch.bool)
         with self.assertRaises(RuntimeError):
-            _ = mha(t_qvk, t_qvk, t_qvk, is_causal=True)
+            mha(t_qvk, t_qvk, t_qvk, is_causal=True)
 
         # # Passing a causal mask sets is_causal to 1
         causal_mask = torch.triu(
@@ -1453,7 +1449,7 @@ class TestTransformers(NNTestCase):
                 kwargs = {}
             with patch('torch._transformer_encoder_layer_fwd') as fastpath_mock:
                 fastpath_mock.return_value = return_value
-                output = model(*args, **kwargs)
+                model(*args, **kwargs)
                 self.assertTrue(fastpath_mock.called == is_called)
 
         def _test_mha_fastpath_called(model, args, kwargs=None, return_value=None, is_called=True):
@@ -1461,13 +1457,11 @@ class TestTransformers(NNTestCase):
                 kwargs = {}
             with patch('torch._native_multi_head_attention') as fastpath_mock:
                 fastpath_mock.return_value = return_value
-                output = model(*args, **kwargs)
+                model(*args, **kwargs)
                 self.assertTrue(fastpath_mock.called == is_called)
 
         inp = torch.tensor([[[1, 2], [3, 4], [5, 6]]], dtype=torch.float32, device=device)
-        aligned_key_padding_mask = torch.tensor([[0, 0, 1]], dtype=torch.bool, device=device)
         src_key_padding_mask = torch.tensor([[1, 0, 1]], dtype=torch.bool, device=device)
-        attn_mask = torch.tensor([[1, 0, 1], [0, 1, 0], [1, 0, 1]], dtype=torch.bool, device=device)
         te_return_value = torch.ones((1, 3, 2), dtype=torch.float32)
 
         encoder_layer = torch.nn.TransformerEncoderLayer(d_model=2, nhead=2, dim_feedforward=8, batch_first=True)
@@ -1914,8 +1908,6 @@ def _get_block_size_n(device, head_dim, is_dropout, is_causal):
     assert head_dim <= 256
     major, minor = torch.cuda.get_device_capability(device)
     is_sm8x = major == 8 and minor > 0  # Only include sm86 and sm89, exclude sm80 (A100)
-    is_sm80 = major == 8 and minor == 0
-    is_sm90 = major == 9 and minor == 0
     if head_dim <= 32:
         return 128
     if head_dim <= 64:
@@ -2488,7 +2480,6 @@ class TestSDPACudaOnly(NNTestCase):
         dtype = torch.bfloat16
         make_tensor = partial(torch.rand, device=device, dtype=dtype, requires_grad=True)
         batch, num_heads, head_dim_k, head_dim_v = 32, 16, 128, 64
-        seq_len = 640
         q_shape = SdpaShape(batch, num_heads, 1, head_dim_k)
         k_shape = SdpaShape(batch, num_heads, 2, head_dim_k)
         v_shape = SdpaShape(batch, num_heads, 2, head_dim_v)
@@ -2521,7 +2512,7 @@ class TestSDPACudaOnly(NNTestCase):
 
         with sdpa_kernel(backends=[SDPBackend.CUDNN_ATTENTION]):
             with self.assertRaisesRegex(RuntimeError, "No available kernel."):
-                o = torch.nn.functional.scaled_dot_product_attention(q, k, v)
+                torch.nn.functional.scaled_dot_product_attention(q, k, v)
 
     @skipIfRocm(msg="No cuDNN on ROCm")
     @unittest.skipIf(not PLATFORM_SUPPORTS_CUDNN_ATTENTION, "cudnn Attention is not supported on this system")
@@ -3524,7 +3515,7 @@ class TestSDPACudaOnly(NNTestCase):
         g = torch.cuda.CUDAGraph()
         # Create real output
         with torch.cuda.graph(g):
-            tmp = torch.rand_like(query, device=query.device)  # test non-zero intragraph offset
+            torch.rand_like(query, device=query.device)  # test non-zero intragraph offset
             # Create real output
             output_tuple = fused_op(query, key, value, **kwargs)
             assert all(not isinstance(o, torch.Tensor) or o.is_cuda for o in output_tuple)
@@ -3990,7 +3981,6 @@ class TestAttnBias(NNTestCase):
         make_kv_tensor = partial(make_tensor, SdpaShape(bsz, num_heads, seq_len_kv, head_dim))
 
         forw_tol = Tolerances(1e-3, 1e-3)
-        grad_tol = Tolerances(5e-3, 5e-3)
 
         query = make_q_tensor()
         key = make_kv_tensor()
@@ -4056,7 +4046,7 @@ class TestSDPAPrivateUse1Only(NNTestCase):
         q_privateuse1 = q_cpu.to("foo")
         k_privateuse1 = k_cpu.to("foo")
         v_privateuse1 = v_cpu.to("foo")
-        actual = torch.nn.functional.scaled_dot_product_attention(
+        torch.nn.functional.scaled_dot_product_attention(
             q_privateuse1, k_privateuse1, v_privateuse1, attn_mask=None, dropout_p=0.0)
 
     def test_scaled_dot_product_fused_attention_overrideable_backward(self):
