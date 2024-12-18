@@ -3903,6 +3903,26 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
             )
 
     @supported_platform
+    def test_seq_lengths(self):
+        from torch.nn.attention.flex_attention import create_block_mask
+
+        block_mask = create_block_mask(
+            lambda b, h, q_idx, kv_idx: q_idx >= kv_idx,
+            B=None,
+            H=None,
+            Q_LEN=1024,
+            KV_LEN=1025,  # it would be rounded up to 1280 = 1024 + 256
+            device="cuda",
+            BLOCK_SIZE=256,
+        )
+        self.assertEqual(block_mask[:, :, :1].shape, (1, 1, 256, 1025))
+        # This would select the last 3 block which is 3*256 = 768
+        self.assertEqual(block_mask[:, :, 1:].shape, (1, 1, 768, 1025))
+        # We actually hard error for slicing on the last dim..
+        # self.assertEqual(block_mask[:, :, :, 1].shape, (1, 1, 768, 256))
+        # self.assertEqual(block_mask[:, :, :, 1:].shape, (1, 1, 768, 768))
+
+    @supported_platform
     def test_init_mismatched_full_q(self):
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         kv_num_blocks, kv_indices, _, _ = self.generate_test_inputs(False, device)

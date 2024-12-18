@@ -468,6 +468,18 @@ class BlockMask:
         else:
             new_full_kv_num_blocks = None
             new_full_kv_indices = None
+
+        new_seq_lengths = (self.seq_lengths[0], self.seq_lengths[1])
+        q_length, kv_length = self.seq_lengths
+        new_seq_lengths = (
+            min(q_length, new_kv_indices.shape[-2] * self.BLOCK_SIZE[0])
+            if len(index) >= 3
+            else q_length,
+            min(kv_length, new_kv_indices.shape[-1] * self.BLOCK_SIZE[1])
+            if len(index) == 4
+            else kv_length,
+        )
+
         return BlockMask.from_kv_blocks(
             new_kv_num_blocks,
             new_kv_indices,
@@ -475,7 +487,7 @@ class BlockMask:
             new_full_kv_indices,
             BLOCK_SIZE=self.BLOCK_SIZE,
             mask_mod=None,
-            seq_lengths=self.seq_lengths,
+            seq_lengths=new_seq_lengths,
         )
 
     def __repr__(self):
