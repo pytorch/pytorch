@@ -8,7 +8,6 @@ from abc import ABC, abstractmethod
 from enum import Enum
 from functools import partial
 from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
-from typing_extensions import Self
 from warnings import warn
 
 import torch
@@ -23,6 +22,7 @@ from torch._C._profiler import (
 )
 from torch.autograd import kineto_available, ProfilerActivity
 from torch.profiler._memory_profiler import MemoryProfile, MemoryProfileTimeline
+from typing_extensions import Self
 
 
 __all__ = [
@@ -649,22 +649,16 @@ class profile(_KinetoProfile):
     The following sample shows how to setup up an Execution Trace Observer (`execution_trace_observer`)
 
     .. code-block:: python
-        # create an ET observer
-        et = ExecutionTraceObserver().register_callback("./execution_trace.json")
-        # enable extra resource collection, like Triton Kernels.
-        et.set_extra_resource_collection(True)
+
         with torch.profiler.profile(
             ...
-            execution_trace_observer=et,
+            execution_trace_observer=(
+                ExecutionTraceObserver().register_callback("./execution_trace.json")
+            ),
         ) as p:
             for iter in range(N):
                 code_iteration_to_profile(iter)
                 p.step()
-
-    Additionally, it is possible to trigger collection of Execution Traces without profiler modification
-    like above. Setting the environment variable ``ENABLE_PYTORCH_EXECUTION_TRACE=1`` will enable the
-    execution trace collection for the next profiling run. In this case, the exeuction trace will be in
-    a persistent temporary file.
 
     You can also refer to test_execution_trace_with_kineto() in tests/profiler/test_profiler.py.
     Note: One can also pass any object satisfying the _ITraceObserver interface.
@@ -888,6 +882,7 @@ class ExecutionTraceObserver(_ITraceObserver):
         self._execution_trace_running = False
         self.extra_resources_collection = False
         self.resources_dir: str = ""
+        self.output_file_path: str = ""
 
     def __del__(self):
         """
@@ -900,9 +895,19 @@ class ExecutionTraceObserver(_ITraceObserver):
         """
         Returns an ExecutionTraceObserver instance if the environment variable
         ENABLE_PYTORCH_EXECUTION_TRACE is set to 1, otherwise returns None.
+
+        Configures the observer to also collect extra resources if the environment variable
+        ``ENABLE_PYTORCH_EXECUTION_TRACE_EXTRAS=1``. These are resources such as generated kernels,
+        index tensor data etc. that are required to make the Execution Trace replayable.
         """
         if os.environ.get("ENABLE_PYTORCH_EXECUTION_TRACE", "0") == "1":
-            fp = tempfile.NamedTemporaryFile("w+t", suffix=".et.json", delete=False)
+            try:
+                fp = tempfile.NamedTemporaryFile("w+t", suffix=".et.json", delete=False)
+            except Exception as e:
+                warn(
+                    f"Execution trace will not be recorded. Exception on creating default temporary file: {e}"
+                )
+                return None
             fp.close()
             et = ExecutionTraceObserver()
             et.register_callback(fp.name)
@@ -921,12 +926,10 @@ class ExecutionTraceObserver(_ITraceObserver):
 
         The caller should call this method with val=True after calling register_callback() if they want
         to collect the extra resources.
-
-        ENABLE_PYTORCH_EXECUTION_TRACE_EXTRAS environment variable can be set to enable by force externally.
         """
         self.extra_resources_collection = val
         if self.extra_resources_collection:
-            self.get_or_create_resources_dir()
+            self.get_resources_dir(can_create=True)
         return
 
     def register_callback(self, output_file_path: str) -> Self:
@@ -935,11 +938,11 @@ class ExecutionTraceObserver(_ITraceObserver):
         written to output_file_path.
         """
         if not self._registered:
-            self._output_file_path = output_file_path
+            self.output_file_path = output_file_path
             self._registered = _add_execution_trace_observer(output_file_path)
         return self
 
-    def get_or_create_resources_dir(self) -> Optional[str]:
+    def get_resources_dir(self, can_create=False) -> Optional[str]:
         """
         Generates the resources directory for the generated kernels,
         or index tensor data or any other metadata that is required
@@ -948,15 +951,22 @@ class ExecutionTraceObserver(_ITraceObserver):
         The directory is created right where the ET file is being output.
 
         Only works if the observer has called set_extra_resource_collection(val=True).
+
+        Returns None if the observer is not configured with extra resource collection.
         """
-        if not self._registered or not self.extra_resources_collection:
+        if not self.extra_resources_collection:
             return None
         if self.resources_dir:
             # already created
             return self.resources_dir
-        return self.get_resources_dir_for_et_path(
-            self._output_file_path, create_dir=True
+        generated_path = ExecutionTraceObserver.get_resources_dir_for_et_path(
+            self.output_file_path, create_dir=can_create
         )
+        if not generated_path:
+            # could not find of create the resources dir
+            return None
+        self.resources_dir = generated_path
+        return self.resources_dir
 
     @staticmethod
     def get_resources_dir_for_et_path(
@@ -984,7 +994,7 @@ class ExecutionTraceObserver(_ITraceObserver):
 
         def _save_triton_kernels():
             try:
-                resource_dir = self.get_or_create_resources_dir()
+                resource_dir = self.get_resources_dir()
             except Exception as e:
                 warn(
                     f"Execution trace exception when generating resource directory: {e}"
@@ -1054,17 +1064,14 @@ class ExecutionTraceObserver(_ITraceObserver):
         """
         self.unregister_callback()
 
-    def get_output_file_path(self) -> str:
+    def get_output_file_path(self) -> Optional[str]:
         """
-        Returns the output file name.
+        Returns the output file name or None.
         """
-        if self.is_registered:
-            return self._output_file_path
+        if self.output_file_path:
+            return self.output_file_path
         else:
-            raise RuntimeError(
-                "A callback to the ET profiler needs to be registered "
-                "first before getting the output file path"
-            )
+            return None
 
     def _record_pg_config(self) -> None:
         # Records the PG config info to the trace as node:
