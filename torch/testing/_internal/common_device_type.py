@@ -44,6 +44,7 @@ from torch.testing._internal.common_utils import (
     IS_REMOTE_GPU,
     IS_SANDCASTLE,
     IS_WINDOWS,
+    IS_MACOS,
     NATIVE_DEVICES,
     PRINT_REPRO_ON_FAILURE,
     skipCUDANonDefaultStreamIf,
@@ -1968,9 +1969,17 @@ def get_all_device_types() -> List[str]:
     return ["cpu"] if not torch.cuda.is_available() else ["cpu", "cuda"]
 
 
+# skip since currently flex attention requires at least `avx2` support on CPU.
+IS_FLEX_ATTENTION_CPU_PLATFORM_SUPPORTED = (
+    not torch.xpu.is_available()
+    and not IS_MACOS
+    and torch.cpu._is_avx2_supported()
+    and os.getenv("ATEN_CPU_CAPABILITY") != "default"
+)
 flex_attention_supported_platform = unittest.skipUnless(
-    torch.cuda.is_available()
+    IS_FLEX_ATTENTION_CPU_PLATFORM_SUPPORTED
+    or (torch.cuda.is_available()
     and torch.utils._triton.has_triton()
-    and torch.cuda.get_device_capability() >= (8, 0),
-    "Requires CUDA and Triton",
+    and torch.cuda.get_device_capability() >= (8, 0)),
+    "Requires CUDA and Triton, or CPU with avx2 and later",
 )
