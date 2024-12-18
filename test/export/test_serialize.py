@@ -323,6 +323,8 @@ def forward(self, x):
             self.assertEqual(node.inputs[1].name, "dim")
 
     def test_serialize_sym_float(self) -> None:
+        # TODO(rec): This doesn't seem to test anything!
+
         class DynamicFloatSimpleModel(torch.nn.Module):
             def __init__(self, multiplier: torch.SymFloat):
                 super().__init__()
@@ -338,14 +340,14 @@ def forward(self, x):
                 return torch.cat([f, f])
 
         multiplier_sym = torch.SymFloat("multiplier_sym")
-        model = DynamicFloatSimpleModel(multiplier_sym)
-        inputs = (
+        _model = DynamicFloatSimpleModel(multiplier_sym)
+        _inputs = (
             torch.randn(2, 4),
             torch.randn(4, 7),
             torch.randn(2, 7),
         )
-        dim0_ac = Dim("dim0_ac")
-        dim1_bc = Dim("dim1_b")
+        _dim0_ac = Dim("dim0_ac")
+        _dim1_bc = Dim("dim1_b")
 
     def test_serialize_infinite_sym_int(self) -> None:
         class DynamicShapeSimpleModel(torch.nn.Module):
