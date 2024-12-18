@@ -1189,7 +1189,7 @@ class TritonHOPifier:
                 autotuner_count += 1
             if isinstance(iter_kernel, Heuristics):
                 self.raise_unsupported(
-                    "Passing @triton.heuristics decorators is not supported. "
+                    "Passing @triton.heuristics decorator after @triton.autotune decorator is not supported. is not supported. "
                 )
             if autotuner_count > 1:
                 self.raise_unsupported(
