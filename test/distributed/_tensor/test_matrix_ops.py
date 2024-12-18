@@ -16,7 +16,7 @@ from torch.distributed.tensor import (
     Shard,
 )
 from torch.distributed.tensor.debug import CommDebugMode
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import run_tests, skipIfRocm
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     skip_unless_torch_gpu,
@@ -119,6 +119,25 @@ class DistMatrixOpsTest(DTensorTestBase):
         shard_specs_comb = list(itertools.product(placement_specs, placement_specs))
         for spec in shard_specs_comb:
             test_placement_comb([spec[0]], [spec[1]])
+
+    @with_comms
+    def test_matmul(self):
+        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        dim = 128
+        x = torch.randn(8, dim)
+        A = torch.randn(dim, dim)
+        y = torch.matmul(x, A)
+
+        # Prepare DTensors
+        dx = distribute_tensor(x, device_mesh, [Replicate()])
+        dA = distribute_tensor(A, device_mesh, [Shard(0)])
+
+        # Use `inference_mode` to test DTensor's capability of decomposing
+        # `matmul` op
+        with torch.inference_mode():
+            dy = torch.matmul(dx, dA)
+
+        self.assertEqual(y, dy.full_tensor())
 
     @with_comms
     def test_t(self):
@@ -340,6 +359,7 @@ class DistMatrixOpsTest(DTensorTestBase):
                     self.assertTrue(dist_value.grad.placements[0].is_shard(dim=1))
                     self.assertEqual(dist_value.grad.full_tensor(), value.grad)
 
+    @skipIfRocm
     @skip_unless_torch_gpu
     @with_comms()
     def test_dtensor_mm(self):

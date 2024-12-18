@@ -148,10 +148,10 @@ inline std::ostream& operator<<(std::ostream& out, const BatchDim& bdim) {
 }
 
 // Use this to construct a BatchedTensor from a regular Tensor
-TORCH_API Tensor makeBatched(const Tensor& tensor, BatchDims bdims);
+TORCH_API Tensor makeBatched(Tensor tensor, BatchDims bdims);
 
 // Adds a batch dim to `tensor`, returning a BatchedTensor
-TORCH_API Tensor addBatchDim(const Tensor& tensor, int64_t level, int64_t dim);
+TORCH_API Tensor addBatchDim(Tensor tensor, int64_t level, int64_t dim);
 
 // Checks if an inplace operation on self and other is "vmap compatible".
 // See NOTE: [vmap-incompatible in-place operations] for the definition of this.

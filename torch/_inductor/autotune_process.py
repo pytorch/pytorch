@@ -36,6 +36,7 @@ from torch._inductor.codecache import (
     get_hash,
     PyCodeCache,
 )
+from torch.utils._ordered_set import OrderedSet
 
 
 if TYPE_CHECKING:
@@ -119,7 +120,7 @@ class TuningProcess:
         )
         try:
             TuningProcess.workloop(request_queue, response_queue)
-        except Exception as ex:
+        except Exception:
             log.exception("Exception in TuningProcess")
 
     @staticmethod
@@ -439,9 +440,11 @@ class TensorMeta:
 
         dtype = node.get_dtype()
         assert dtype is not None
+        device = node.get_device()
+        assert device is not None
 
         return TensorMeta(
-            device=node.get_device(),
+            device=device,
             dtype=dtype,
             sizes=V.graph.sizevars.size_hints(
                 node.get_size(),
@@ -583,13 +586,13 @@ class GPUDeviceBenchmarkMixin:
         *input_tensors: torch.Tensor,
         output_tensor: Optional[torch.Tensor] = None,
     ) -> float:
-        device_idx_set = {
+        device_idx_set = OrderedSet(
             tensor.device.index
             for tensor in [*input_tensors, output_tensor]
             if isinstance(tensor, torch.Tensor)
             and tensor.is_cuda
             and tensor.device.index is not None
-        }
+        )
         assert len(device_idx_set) <= 1, f"Can not mix devices {device_idx_set}"
         if len(device_idx_set) == 1:
             device_idx = next(iter(device_idx_set))
@@ -651,6 +654,7 @@ class TritonBenchmarkRequest(BenchmarkRequest):
 
         run_method = getattr(mod, self.kernel_name).run
         extra_args = list(self.extra_args)
+        run_method.__self__.with_bandwidth_info = False
 
         # Newer version of triton add warmup argument to JITFunction.run.
         # This code handles backward-compatibility.
@@ -689,8 +693,8 @@ class TritonBenchmarkRequest(BenchmarkRequest):
                 run_method(
                     *input_tensors,
                     output_tensor,
-                    workspace_tensor,
                     *extra_args,
+                    workspace_tensor,
                     grid=self.grid,
                     **warmup_arg,
                     stream=stream,
@@ -698,6 +702,19 @@ class TritonBenchmarkRequest(BenchmarkRequest):
                 )
 
             return run_with_workspace
+        if isinstance(
+            getattr(mod, self.kernel_name),
+            torch._inductor.runtime.triton_heuristics.DebugAutotuner,
+        ):
+            return functools.partial(
+                run_method,
+                *input_tensors,
+                output_tensor,
+                *extra_args,
+                grid=self.grid,
+                **warmup_arg,
+                stream=stream,
+            )
         else:
             return functools.partial(
                 run_method,
@@ -798,7 +815,9 @@ class CUDABenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest):
         if self._workspace_size_updated:
             return
         self.ensure_dll_loaded()
-        unique_input_count = len({meta.name for meta in self.input_tensor_meta})
+        unique_input_count = len(
+            {meta.name for meta in self.input_tensor_meta}  # noqa: set_linter
+        )
         args = [c_void_p(None) for _ in range(unique_input_count + 1)]
         stream_ptr = c_void_p(torch.cuda.current_stream().cuda_stream)
 

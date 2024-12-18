@@ -142,6 +142,19 @@ def register_op_impl(run_impl_check: Union[Callable[[OpOverload], bool], OpOverl
     return impl_decorator
 
 
+def _is_op_registered_to_fake_rule(op):
+    return op in op_implementations_dict
+
+
+def _deregister_op_impl(op):
+    if op in op_implementations_dict:
+        del op_implementations_dict[op]
+    for check, impl in op_implementations_checks:
+        if check is op:
+            op_implementations_checks.remove((check, impl))
+            break
+
+
 @register_op_impl(op_implementations_dict.__contains__)
 def dispatch_to_op_implementations_dict(fake_mode, func, *args, **kwargs):
     return op_implementations_dict[func](fake_mode, func, *args, **kwargs)
@@ -572,19 +585,18 @@ def has_meta(func):
     lambda func: is_builtin(func) and "foreach" in func.name() and has_meta(func)
 )
 def foreach_run_and_map_input_device(fake_mode, func, *args, **kwargs):
-    tensor_lists = []
-    for arg in itertools.chain(args, kwargs.values()):
-        if (
-            isinstance(arg, (list, tuple))
-            and len(arg)
-            and isinstance(arg[0], torch.Tensor)
-        ):
-            tensor_lists.append(arg)
+    tensor_lists = [
+        arg
+        for arg in itertools.chain(args, kwargs.values())
+        if isinstance(arg, (list, tuple))
+        and len(arg)
+        and isinstance(arg[0], torch.Tensor)
+    ]
 
     try:
         with in_kernel_invocation_manager(fake_mode):
             out_meta = func(*args, **kwargs)
-    except NotImplementedError as not_implemented_error:
+    except NotImplementedError:
         return NotImplemented
 
     if not out_meta:
@@ -862,15 +874,9 @@ def make_fast_binary_impl(slow_ref):
         operands = args
 
         # compute_shape
-        has_scalars = False
-        has_tensors = False
         final_shape = None
         for op in operands:
             shape = op.shape if isinstance(op, torch.Tensor) else ()
-            if len(shape) == 0:
-                has_scalars = True
-            else:
-                has_tensors = True
             if final_shape is None:
                 final_shape = shape
             # TODO: Minor optimization: track if the shapes
@@ -897,7 +903,6 @@ def make_fast_binary_impl(slow_ref):
         cpu = torch.device("cpu")
         common_device = cpu
         common_dtype = None
-        output_dtype = None
         has_different_input_dtypes = False
         for op in operands:
             if not isinstance(op, torch.Tensor):
