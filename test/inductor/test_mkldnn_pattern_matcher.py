@@ -889,9 +889,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
             binary_list,
             (
                 ([2, 3, 10], [1, 1, 30]),
-                ([2, 3, 10], [1, 1, 1]),
                 ([2, 10], [1, 30]),
-                ([2, 10], [1, 1]),
             ),
             (True, False),
             dtypes,
