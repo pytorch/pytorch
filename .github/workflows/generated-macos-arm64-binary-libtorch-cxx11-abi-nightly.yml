@@ -97,24 +97,30 @@ jobs:
           # shellcheck disable=SC1091
           source "${RUNNER_TEMP}/anaconda/bin/activate"
           set -eux -o pipefail
+          # shellcheck disable=SC1090
           source "${BINARY_ENV_FILE:-/Users/distiller/project/env}"
           mkdir -p "$PYTORCH_FINAL_PACKAGE_DIR"
 
           # Build
-          export USE_PYTORCH_METAL_EXPORT=1
-          export USE_COREML_DELEGATE=1
-          export TORCH_PACKAGE_NAME="$(echo $TORCH_PACKAGE_NAME | tr '-' '_')"
+          USE_PYTORCH_METAL_EXPORT=1
+          USE_COREML_DELEGATE=1
+          TORCH_PACKAGE_NAME="${TORCH_PACKAGE_NAME//-/_}"
+          export USE_PYTORCH_METAL_EXPORT
+          export USE_COREML_DELEGATE
+          export TORCH_PACKAGE_NAME
           "${PYTORCH_ROOT}/.ci/wheel/build_wheel.sh"
       - name: Test PyTorch wheel
         run: |
           # shellcheck disable=SC1091
           source "${RUNNER_TEMP}/anaconda/bin/activate"
           set -eux -o pipefail
+          # shellcheck disable=SC1090
+          source "${BINARY_ENV_FILE:-/Users/distiller/project/env}"
           pip uninstall -y "$TORCH_PACKAGE_NAME" || true
           pip uninstall -y "$TORCH_PACKAGE_NAME" || true
 
           # Create new "clean" conda environment for testing
-          conda create ${EXTRA_CONDA_INSTALL_FLAGS} -yn "test_conda_env" python="$desired_python"
+          conda create "${EXTRA_CONDA_INSTALL_FLAGS}" -yn "test_conda_env" python="$desired_python"
           conda activate test_conda_env
 
           pip install "$PYTORCH_FINAL_PACKAGE_DIR/*.whl" numpy -v
