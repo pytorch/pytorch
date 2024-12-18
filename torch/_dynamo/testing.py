@@ -207,7 +207,7 @@ def debug_insert_nops(
         torch_function_mode_stack=[],
     )
 
-    return GuardedCode(code, CheckFunctionManager(graph).guard_manager, CompileId(0, 0))  # type: ignore[arg-type]
+    return GuardedCode(code, CheckFunctionManager(frame.f_code, graph).guard_manager, CompileId(0, 0))  # type: ignore[arg-type]
 
 
 class CompileCounter:
