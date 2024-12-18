@@ -557,6 +557,20 @@ class TestPoolingNNDeviceType(NNTestCase):
                 fn(input2, output_size).sum().backward()
 
     @onlyNativeDeviceTypes
+    def test_adaptive_pooling_backward_fails(self, device):
+        grad_output = torch.randn(1, 2, 7, 7, device=device)
+        input = torch.randn(1, 2, 7, 7, device=device)
+        indices = torch.ones(1, 2, 3, 3, dtype=torch.long, device=device)
+        with self.assertRaisesRegex(RuntimeError, "expected sizes"):
+            torch.ops.aten.adaptive_max_pool2d_backward(grad_output, input, indices)
+
+        grad_output = torch.randn(1, 2, 7, 7, 7, device=device)
+        input = torch.randn(1, 2, 3, 3, 3, device=device)
+        indices = torch.ones(1, 2, 3, 3, dtype=torch.long, device=device)
+        with self.assertRaisesRegex(RuntimeError, "expected dimensions"):
+            torch.ops.aten.adaptive_max_pool3d_backward(grad_output, input, indices)
+
+    @onlyNativeDeviceTypes
     def test_FractionalMaxPool2d_zero_batch(self, device):
         mod = nn.FractionalMaxPool2d(3, output_ratio=(0.5, 0.5))
         inp = torch.ones(0, 16, 50, 32, device=device)
