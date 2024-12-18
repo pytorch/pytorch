@@ -15,14 +15,13 @@ from torch.distributed._shard.sharding_spec import (
     ShardMetadata,
 )
 from torch.distributed.checkpoint import (
-    DefaultLoadPlanner,
     DefaultSavePlanner,
     FileSystemReader,
     FileSystemWriter,
     load_state_dict,
     save_state_dict,
 )
-from torch.distributed.checkpoint.extension import Rot13, ZStandard
+from torch.distributed.checkpoint._extension import Rot13, ZStandard
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,

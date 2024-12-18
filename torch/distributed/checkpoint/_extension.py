@@ -4,7 +4,11 @@ import abc
 import io
 import os
 import zstandard
-from typing import Dict, Sequence, Type
+from collections.abc import MutableMapping, Sequence
+from typing import Optional, Type
+
+# introduced as collections.abc.Buffer in Python 3.12
+from typing_extensions import Buffer
 
 
 __all__ = ["Extension", "StreamTransformExtension", "Rot13", "ZStandard", "ExtensionRegistry"]
@@ -13,7 +17,7 @@ __all__ = ["Extension", "StreamTransformExtension", "Rot13", "ZStandard", "Exten
 class Extension(abc.ABC):
     """
     Extensions provide modular additions to functionality within distributed checkpointing,
-    which affect the layour or format of the written artifacts.  Extensions may be
+    which affect the layout or format of the written artifacts.  Extensions may be
     built into pytorch, or provided externally.
 
     When writing, the caller provides a list of extension instances of the appropriate
@@ -21,10 +25,25 @@ class Extension(abc.ABC):
     extension at read-time.
     """
 
+    @staticmethod
     @abc.abstractmethod
-    def get_descriptor() -> str:
+    def registry_name() -> str:
         """
-        Return descriptor name to be included in metadata
+        See ExtensionRegistry.from_descriptor_list
+        """
+
+    @staticmethod
+    @abc.abstractmethod
+    def from_descriptor(version: str) -> "Extension":
+        """
+        See ExtensionRegistry.from_descriptor_list
+        """
+
+    @abc.abstractmethod
+    def get_descriptor(self) -> str:
+        """
+        Return descriptor name to be included in metadata.  The form should be
+        "extension_name[@local-domain][/version]".
         """
 
 
@@ -56,7 +75,7 @@ class StreamTransformExtension(Extension):
 
 
 class Rot13(StreamTransformExtension):
-    def __init__(self, chunk_size: int = io.DEFAULT_BUFFER_SIZE):
+    def __init__(self, chunk_size: int = io.DEFAULT_BUFFER_SIZE) -> None:
         super().__init__()
         self._chunk_size = chunk_size
 
@@ -70,61 +89,62 @@ class Rot13(StreamTransformExtension):
     def registry_name() -> str:
         return "stream.rot13"
 
-    def get_descriptor(self):
+    def get_descriptor(self) -> str:
         return f"{self.registry_name()}/1"
 
     @staticmethod
-    def _rot13bytes(b, count):
+    def _rot13bytes(b: Buffer, count: int) -> None:
+        b = memoryview(b)
         for i in range(count):
             ch = b[i]
-            if ch >= ord('A') and ch <= ord('Z'):
-                ch += ord('a') - ord('A')
-            elif ch >= ord('a') and ch <= ord('z'):
-                ch += ord('A') - ord('a')
+            if ch >= ord("A") and ch <= ord("Z"):
+                ch += ord("a") - ord("A")
+            elif ch >= ord("a") and ch <= ord("z"):
+                ch += ord("A") - ord("a")
             b[i] = ch
 
     def transform_to(self, output: io.IOBase) -> io.RawIOBase:
         class Writer(io.RawIOBase):
-            def __init__(self, output: io.IOBase):
+            def __init__(self, output: io.IOBase) -> None:
                 self.output = output
 
-            def writeable(self):
+            def writeable(self) -> bool:
                 return True
 
-            def write(self, b):
+            def write(self, b: Buffer) -> Optional[int]:
                 # Don't mutate the input
                 chunk = bytearray(b)
                 Rot13._rot13bytes(chunk, len(chunk))
                 return self.output.write(chunk)
 
-            def flush(self):
+            def flush(self) -> None:
                 self.output.flush()
 
         return Writer(output)
 
     def transform_from(self, input: io.IOBase) -> io.RawIOBase:
         class Reader(io.RawIOBase):
-            def __init__(self, input: io.IOBase):
+            def __init__(self, input: io.IOBase) -> None:
                 self.input = input
 
-            def readable(self):
+            def readable(self) -> bool:
                 return True
 
-            def readinto(self, b):
-                count = self.input.readinto(b)
+            def readinto(self, b: Buffer) -> Optional[int]:
+                count = self.input.readinto(b)  # type: ignore[attr-defined]
                 if count == 0 or count is None:
                     return count
 
                 Rot13._rot13bytes(b, count)
                 return count
 
-            def seekable(self):
+            def seekable(self) -> bool:
                 return self.input.seekable()
 
-            def seek(self, offset, whence=os.SEEK_SET):
+            def seek(self, offset: int, whence: int = os.SEEK_SET) -> int:
                 return self.input.seek(offset, whence)
 
-            def tell(self):
+            def tell(self) -> int:
                 return self.input.tell()
 
         return Reader(input)
@@ -156,17 +176,30 @@ class ZStandard(StreamTransformExtension):
         return decompressor.stream_reader(input)
 
 class ExtensionRegistry:
-    def __init__(self):
+    def __init__(self) -> None:
         # Populate default registry contents
-        self.extensions: Dict[Type[Extension]] = {
+        self.extensions: MutableMapping[str, Type[Extension]] = {
             cls.registry_name(): cls for cls in [Rot13, ZStandard]
         }
 
     def register(self, cls: Type[Extension]) -> None:
-        self.extensions[cls.registry_name] = cls
+        self.extensions[cls.registry_name()] = cls
 
     def from_descriptor_list(self, descriptors: Sequence[str]) -> Sequence[Extension]:
+        """
+        Given a seuquence of descriptor strings as returned by
+        Extension.get_descriptor at save time, creates a sequence of
+        Extension instances.  The name[@local-domain] preceding the
+        version number is used to look up an implementation class in
+        the registry, and the version is passed to the class's
+        from_descriptor static method.  If the registry contains no
+        match, this will throw ValueError.  If the from_descriptor
+        method raises an exception, that will pass through to the
+        caller.
+        """
+
         def from_descriptor(desc: str) -> Extension:
+
             name, _, version = desc.partition("/")
             if version is None:
                 version = 0

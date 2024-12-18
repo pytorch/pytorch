@@ -1,10 +1,11 @@
 import abc
 import io
 import operator
+from collections.abc import Sequence
 from dataclasses import dataclass
 from enum import auto, Enum
 from functools import reduce
-from typing import Any, List, Optional, Sequence, Tuple, Union
+from typing import Any, List, Optional, Tuple, Union
 
 import torch
 from torch.distributed.checkpoint.metadata import (
@@ -266,10 +267,13 @@ class SavePlanner(abc.ABC):
         When returning tensors, they can be on any device or format, they can be views too.
         It's the storage layer responsibility to figure out how to save them.
         """
-    def transform_save_stream(self, write_item: WriteItem, raw_stream: io.IOBase) -> (
+
+    def transform_save_stream(
+        self, write_item: WriteItem, raw_stream: io.IOBase
+    ) -> Tuple[
         io.IOBase,
-        List[str],
-    ):
+        Sequence[str],
+    ]:
         """Provide a hook for stream-based transformation of saved checkpoints.
 
         ``write_item is an item to be written.  The first value of the
@@ -289,6 +293,7 @@ class SavePlanner(abc.ABC):
 
         """
         return (raw_stream, [])
+
 
 class LoadPlanner:
     """
