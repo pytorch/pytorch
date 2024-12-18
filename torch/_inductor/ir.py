@@ -6597,7 +6597,24 @@ class FallbackKernel(ExternKernelAlloc):
 
     def codegen(self, wrapper) -> None:  # type: ignore[no-untyped-def]
         kernel = self.op_overload
-        if kernel.namespace == "aten":  # type: ignore[union-attr]
+        if V.graph.cpp_wrapper and any(i.dtype.is_complex for i in self.inputs):
+            # If any inputs to this fallback op are complex, they may have the Conjugate
+            # or Negative dispatch keys applied.  The cpp_wrapper fallback ops that
+            # _aren't_ runtime dispatched implicitly bypass the conversions for those
+            # keys internally (since they're applied at dispatch time).  Since there's
+            # no way to tell at compile time whether a tensor will have these keys
+            # applied, pessimize complex fallback ops by always using the runtime
+            # dispatched fallback.
+            #
+            # This is not currently expected to be a performance issue, since few models
+            # utilized complex ops, but this decision may need to be reconsidered if
+            # that changes.
+            log_msg = (
+                f"Using proxy executor as fallback for {kernel} due to complex inputs."
+            )
+            log.warning(log_msg)
+            self.use_runtime_dispatch = True
+        elif kernel.namespace == "aten":  # type: ignore[union-attr]
             # Aten Fallback Ops
             assert isinstance(kernel, torch._ops.OpOverload)
             if V.graph.cpp_wrapper:
@@ -6614,10 +6631,9 @@ class FallbackKernel(ExternKernelAlloc):
         elif kernel.namespace == "_quantized":  # type: ignore[union-attr]
             # Internal Quantized Fallback Ops
             assert isinstance(kernel, torch._ops.OpOverload)
-        else:
+        elif V.graph.cpp_wrapper:
             # For non-aten OpOverload, i.e. custom ops
-            if V.graph.cpp_wrapper:
-                self.use_runtime_dispatch = True
+            self.use_runtime_dispatch = True
 
         if self.use_runtime_dispatch:
             self.codegen_comment(wrapper)

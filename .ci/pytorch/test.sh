@@ -395,7 +395,7 @@ test_inductor_cpp_wrapper_shard() {
     # shard 1.  Test specific things triggering past bugs, for now.
     python test/run_test.py \
       --include inductor/test_torchinductor_opinfo \
-      -k '(linalg and not linalg_eigvals) or to_sparse' \
+      -k 'linalg or to_sparse' \
       --verbose
   fi
 
