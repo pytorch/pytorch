@@ -151,7 +151,9 @@ TYPE_OVERRIDES: Dict[str, List[Any]] = {
             "batch_aten_div": {},
             "group_linear": {"require_fbgemm": True},
         },
-    ]
+    ],
+    "autoheuristic_collect": ["pad_mm", "mixed_mm"],
+    "autoheuristic_use": ["pad_mm", "mixed_mm"],
 }
 SamplingType = Callable[[str, Type[Any], Any], Any]
 
@@ -517,8 +519,6 @@ class ConfigFuzzer:
                     "max_autotune_subproc_result_timeout_seconds": DEFAULT,  # Timing
                     "max_autotune_subproc_graceful_timeout_seconds": DEFAULT,  # Timing
                     "max_autotune_subproc_terminate_timeout_seconds": DEFAULT,  # Timing
-                    "autoheuristic_collect": DEFAULT,  # Typing
-                    "autoheuristic_use": DEFAULT,  # Typing
                     "aot_inductor.presets": DEFAULT,  # Typing
                     "cuda.arch": DEFAULT,  # Out of Scope
                     "cuda.version": DEFAULT,  # Out of Scope
@@ -534,6 +534,7 @@ class ConfigFuzzer:
                     "enabled_metric_tables": DEFAULT,  # Typing
                     "triton.debug_sync_graph": DEFAULT,  # Known Failure
                     "triton.debug_sync_kernel": DEFAULT,  # Known Failure
+                    "triton.inject_relu_bug_TESTING_ONLY": DEFAULT,  # Testing
                     "profile_bandwidth_regex": DEFAULT,  # Known Failure
                     "disable_cpp_codegen": DEFAULT,  # Known Failure
                 }
@@ -576,11 +577,11 @@ class ConfigFuzzer:
             print(f"Status of {conf}:\n{results.lookup(tuple(conf.keys()))}")
         return results
 
-    def _fuzz_helper(self, results: ResultType, combo: ComboType) -> None:
+    def _fuzz_helper(self, results: ResultType, combo: ComboType) -> Status:
         print(combo)
-        if results.lookup(combo):
+        if st := results.lookup(combo):
             # we already processed this config
-            return
+            return st
 
         config = self.new_config()
 
@@ -596,9 +597,9 @@ class ConfigFuzzer:
             config[field_name] = value
         if skip:
             results.set(combo, Status.SKIPPED)
-            return
+            return Status.SKIPPED
 
-        self.test_config(results, config)
+        return self.test_config(results, config)
 
     def fuzz_n_tuple(self, n: int, max_combinations: int = 1000) -> ResultType:
         """
@@ -611,11 +612,12 @@ class ConfigFuzzer:
         random.seed(self.seed)
 
         for combo in itertools.combinations(self.fields, n):
-            self._fuzz_helper(results, combo)
-            max_combinations -= 1
-            if max_combinations <= 0:
-                print("Reached maximum combinations limit")
-                break
+            st = self._fuzz_helper(results, combo)
+            if st != Status.SKIPPED:
+                max_combinations -= 1
+                if max_combinations <= 0:
+                    print("Reached maximum combinations limit")
+                    break
 
         return results
 
