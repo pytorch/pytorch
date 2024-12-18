@@ -109,16 +109,9 @@ TORCH_META_FUNC(fractional_max_pool2d_backward)(
   /* get contiguous gradOutput */
   auto gradOutput = gradOutput_.contiguous();
 
-  TORCH_CHECK(numPlanes == gradOutput.size(planeDim),
-    "fractional_max_pool2d_backward(): gradOutput channels unexpected");
-  TORCH_CHECK(outputW == gradOutput.size(widthDim),
-    "fractional_max_pool2d_backward(): gradOutput width unexpected");
-  TORCH_CHECK(outputH == gradOutput.size(heightDim),
-    "fractional_max_pool2d_backward(): gradOutput height unexpected");
-  if (ndims == 4) {
-    TORCH_CHECK(numBatch == gradOutput.size(0),
-      "fractional_max_pool2d_backward(): gradOutput batch unexpected");
-  }
+  auto gradOutputSize = ndims == 3 ? IntArrayRef({numPlanes, outputH, outputW}) : IntArrayRef({numBatch, numPlanes, outputH, outputW});
+  TORCH_CHECK(gradOutput.sizes() == gradOutputSize,
+    "fractional_max_pool2d_backward(): gradOutput sizes unexpected");
 
   /* resize */
   if (ndims == 3) {
