@@ -760,6 +760,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         os.environ["TORCH_NCCL_ASYNC_ERROR_HANDLING"] = "0"
         os.environ["TORCH_NCCL_ENABLE_MONITORING"] = "0"
         # FileStore check() would be executed
+        os.environ["TORCH_NCCL_DUMP_ON_TIMEOUT"] = "1"
         os.environ["TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC"] = "0"
 
         # self.file_name is created using "delete=False"
@@ -1154,8 +1155,8 @@ class DistributedDataParallelTest(
         # otherwise process will be taken down and we can't check for errors.
         os.environ["TORCH_NCCL_ASYNC_ERROR_HANDLING"] = "0"
         os.environ["TORCH_NCCL_BLOCKING_WAIT"] = "1"
-        # Need to disable TORCH_NCCL_TRACE_BUFFER_SIZE otherwise this test times out
-        os.environ["TORCH_NCCL_TRACE_BUFFER_SIZE"] = "0"
+        # Need to disable TORCH_NCCL_DUMP_ON_TIMEOUT otherwise this test times out
+        os.environ["TORCH_NCCL_DUMP_ON_TIMEOUT"] = "0"
         store = c10d.FileStore(self.file_name, self.world_size)
         # provide sufficient timeout to initialize NCCL comm.
         pg = c10d.ProcessGroupNCCL(
@@ -4188,6 +4189,7 @@ class NCCLTraceTestBase(MultiProcessTestCase):
             "TORCH_NCCL_ENABLE_TIMING"
         ] = "0"  # see 'timing_enabled' parametrized tests
         os.environ["TORCH_NCCL_TRACE_BUFFER_SIZE"] = "1000"
+        os.environ["TORCH_NCCL_DUMP_ON_TIMEOUT"] = "1"
         self.tempdir = tempfile.TemporaryDirectory()
         os.environ["TORCH_NCCL_DEBUG_INFO_TEMP_FILE"] = self._trace_basename()
         os.environ["TORCH_NCCL_DEBUG_INFO_PIPE_FILE"] = self._trace_basename()
@@ -5010,6 +5012,7 @@ class NcclErrorDumpTest(NCCLTraceTestBase):
     def test_nccl_errors_dump(self):
         os.environ["TORCH_NCCL_ASYNC_ERROR_HANDLING"] = "1"
         os.environ["TORCH_NCCL_TRACE_BUFFER_SIZE"] = "1000"
+        os.environ["TORCH_NCCL_DUMP_ON_TIMEOUT"] = "1"
         # need rank0 to dump before abort
         os.environ["TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC"] = "5"
 

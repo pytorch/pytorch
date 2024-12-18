@@ -147,7 +147,7 @@ bool recursive_mkdir(const std::string& dir) {
 #ifdef _WIN32
   ret = _mkdir(dir.c_str());
 #else
-  ret = mkdir(dir.c_str(), S_IRWXU | S_IRWXG | S_IRWXO);
+  ret = mkdir(dir.c_str(), S_IRWXU | S_IRWXG);
 #endif
   return ret == 0;
 }

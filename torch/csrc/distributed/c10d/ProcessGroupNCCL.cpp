@@ -893,6 +893,11 @@ ProcessGroupNCCL::ProcessGroupNCCL(
   desyncDebug_ = getCvarBool(TORCH_NCCL_DESYNC_DEBUG, false) ||
       (dist_debug_level_ >= DebugLevel::Detail);
   rethrowCUDAErrors_ = getCvarBool(TORCH_NCCL_RETHROW_CUDA_ERRORS, true);
+  // TODO, we should either deprecate TORCH_NCCL_DUMP_ON_TIMEOUT
+  // or change its name to reflect that dump happens on exception including
+  // both timeout and other errors.
+  dumpOnTimeoutOrEx_ = getCvarBool(TORCH_NCCL_DUMP_ON_TIMEOUT, true) ||
+      (dist_debug_level_ >= DebugLevel::Detail);
   // logging C++ stack isn't safe. Introduce a variable to control it.
   logCppStackOnUncleanShutdown_ =
       getCvarBool(TORCH_NCCL_LOG_CPP_STACK_ON_UNCLEAN_SHUTDOWN, true);
@@ -972,6 +977,7 @@ ProcessGroupNCCL::ProcessGroupNCCL(
   LOG(INFO) << logPrefix() << "ProcessGroupNCCL environments: "
             << "NCCL version: " << ncclVersion
             << ", TORCH_NCCL_ASYNC_ERROR_HANDLING: " << asyncErrorHandling_
+            << ", TORCH_NCCL_DUMP_ON_TIMEOUT: " << dumpOnTimeoutOrEx_
             << ", TORCH_NCCL_WAIT_TIMEOUT_DUMP_MILSEC: "
             << waitTimeoutDumpInMilSec_
             << ", TORCH_NCCL_DESYNC_DEBUG: " << desyncDebug_
@@ -1610,7 +1616,7 @@ void ProcessGroupNCCL::heartbeatMonitor() {
   uint64_t heartBeatCounter = 0ULL;
   std::string errorMsg;
   std::string exitReason;
-  bool checkDumpSignal = (local_id_ == 0);
+  bool checkDumpSignal = (dumpOnTimeoutOrEx_ && local_id_ == 0);
   int monitorPollInterval = checkDumpSignal ? coordCheckIntervalMilSec_
                                             : heartbeatTimeoutInSec_ * 1000;
   auto lastTimePollStore = std::chrono::steady_clock::now();
@@ -2174,7 +2180,9 @@ void ProcessGroupNCCL::watchdogHandler() {
         // try to notify other ranks via global TCPStore to dump the flight
         // recorder when a collective timeout or exception happens. Flight
         // recorder behavior is independent of desync Debug.
-        broadcastDumpSignal();
+        if (dumpOnTimeoutOrEx_) {
+          broadcastDumpSignal();
+        }
 
         if (SHOULD_CLEAN_UP(asyncErrorHandling_)) {
           // Abort work and corresponding communicators
