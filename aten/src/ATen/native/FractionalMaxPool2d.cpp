@@ -112,6 +112,8 @@ TORCH_META_FUNC(fractional_max_pool2d_backward)(
   auto gradOutputSize = ndims == 3 ? IntArrayRef({numPlanes, outputH, outputW}) : IntArrayRef({numBatch, numPlanes, outputH, outputW});
   TORCH_CHECK(gradOutput.sizes() == gradOutputSize,
     "fractional_max_pool2d_backward(): gradOutput sizes unexpected");
+  TORCH_CHECK(indices.sizes() == gradOutputSize,
+    "fractional_max_pool2d_backward(): indices sizes unexpected");
 
   /* resize */
   if (ndims == 3) {
