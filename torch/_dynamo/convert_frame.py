@@ -6,6 +6,7 @@ import contextlib
 import cProfile
 import dis
 import functools
+import gc
 import itertools
 import json
 import logging
@@ -1042,6 +1043,11 @@ def _compile(
             # If you commit a bug here, it will suppress writing to
             # dynamo_compile table, and we will not have telemetry.
             # Be extra careful when making changes here!
+
+            if torch._dynamo.config.run_gc_after_compile:
+                with dynamo_timed("gc", dynamo_compile_column_us="gc_time_us"):
+                    log.info("run_gc_after_compile: running gc")
+                    gc.collect(1)
 
             if tracer:
                 tracer.output.local_scope = {}
