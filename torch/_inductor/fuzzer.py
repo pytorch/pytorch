@@ -390,7 +390,7 @@ class ResultType:
         Returns how many combos actually ran (weren't skipped).
         """
         ret = len(self._vals)
-        for _, status in self._vals.items():
+        for status in self._vals.values():
             if status == Status.SKIPPED:
                 ret -= 1
         return ret
