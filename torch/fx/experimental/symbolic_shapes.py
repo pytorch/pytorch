@@ -2208,7 +2208,7 @@ class ShapeGuardPrinter(ShapeGuardPythonPrinter):
     pass
 
 
-class ShapeGuardCppPrinter(_ShapeGuardPrinter, CppPrinter):
+class _ShapeGuardCppPrinter(_ShapeGuardPrinter, CppPrinter):
     def __init__(self, *args: Any) -> None:
         self.all_symbols: Set[str] = set()
         self.source_to_symbol: Dict[Source, sympy.Symbol] = {}
@@ -4729,7 +4729,7 @@ class ShapeEnv:
                 printers.append(py_printer)
             elif lang == "cpp":
                 printers.append(
-                    ShapeGuardCppPrinter(
+                    _ShapeGuardCppPrinter(
                         symbol_to_source, source_ref, self.var_to_sources
                     )
                 )
@@ -5326,7 +5326,7 @@ class ShapeEnv:
         helpers: List[_ShapeGuardsHelper] = []
         for exprs, printer, lang in zip(all_exprs, printers, langs):
             if lang == "cpp":
-                assert isinstance(printer, ShapeGuardCppPrinter)
+                assert isinstance(printer, _ShapeGuardCppPrinter)
                 helpers.append(_CppShapeGuardsHelper(exprs, printer.source_to_symbol))
             else:
                 helpers.append(_ShapeGuardsHelper(exprs))
