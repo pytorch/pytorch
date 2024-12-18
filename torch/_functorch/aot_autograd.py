@@ -27,11 +27,7 @@ from torch import Tensor
 from torch._decomp.decompositions_for_rng import PhiloxStateTracker, rng_decompositions
 from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo import compiled_autograd
-from torch._dynamo.utils import (
-    dynamo_timed,
-    get_chromium_event_logger,
-    preserve_rng_state,
-)
+from torch._dynamo.utils import CompileEventLogger, dynamo_timed, preserve_rng_state
 from torch._guards import detect_fake_mode
 from torch._inductor.output_code import OutputCode
 from torch._inductor.utils import BoxedBool, InputType
@@ -636,7 +632,7 @@ def _create_aot_dispatcher_function(
     python_dispatcher_mode = (
         enable_python_dispatcher() if shape_env is not None else nullcontext()
     )
-    chromium_log = get_chromium_event_logger()
+
     # See NOTE: [Deferring tensor pack/unpack hooks until runtime]
     # If any saved tensor hooks are active, we **don't** want to trace them.
     # Instead, we'll let them run at runtime, around the custom autograd.Function
@@ -690,7 +686,7 @@ def _create_aot_dispatcher_function(
                 req_subclass_dispatch = requires_subclass_dispatch(
                     fake_flat_args, fw_metadata
                 )
-                chromium_log.try_add_event_data(
+                CompileEventLogger.try_add(
                     "backend_compile", requires_subclass_dispatch=req_subclass_dispatch
                 )
 
@@ -810,19 +806,13 @@ or otherwise set torch._functorch.config.functionalize_rng_ops = False."""
             if aot_config.is_export:
                 # export uses just the "graph bits", whereas the other
                 # two dispatchers include some extra work around handling a runtime epilogue
-                chromium_log.try_add_event_data(
-                    "backend_compile", dispatch_mode="export"
-                )
+                CompileEventLogger.try_add("backend_compile", dispatch_mode="export")
                 return partial(aot_dispatch_export, needs_autograd=needs_autograd)
             elif needs_autograd and not aot_config.pre_dispatch:
-                chromium_log.try_add_event_data(
-                    "backend_compile", dispatch_mode="autograd"
-                )
+                CompileEventLogger.try_add("backend_compile", dispatch_mode="autograd")
                 return aot_dispatch_autograd
             else:
-                chromium_log.try_add_event_data(
-                    "backend_compile", dispatch_mode="inference"
-                )
+                CompileEventLogger.try_add("backend_compile", dispatch_mode="inference")
                 return aot_dispatch_base
 
         compiler_fn = choose_dispatcher(needs_autograd, aot_config)

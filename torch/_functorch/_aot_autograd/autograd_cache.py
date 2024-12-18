@@ -17,7 +17,7 @@ from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional, Tuple, TYPE_CHECKING, Union
 
 import torch
-from torch._dynamo.utils import counters, get_chromium_event_logger
+from torch._dynamo.utils import CompileEventLogger, CompileEventLogLevel, counters
 from torch._functorch import config
 from torch._inductor.codecache import (
     _ident,
@@ -500,16 +500,13 @@ class AOTAutogradCacheEntry:
 
         compiled_fw_func = self.compiled_fw.load(args, fx_config)
         compiled_bw_func = None
-        chromium_log = get_chromium_event_logger()
         if self.compiled_bw is not None:
             compiled_bw_func = self.compiled_bw.load(args, fx_config)
             needs_autograd = True
-            chromium_log.try_add_event_data("backend_compile", dispatch_mode="autograd")
+            CompileEventLogger.try_add("backend_compile", dispatch_mode="autograd")
         else:
             needs_autograd = False
-            chromium_log.try_add_event_data(
-                "backend_compile", dispatch_mode="inference"
-            )
+            CompileEventLogger.try_add("backend_compile", dispatch_mode="inference")
 
         # Wrap the forward function in post compile wrappers
         compiled_fw_func = AOTDispatchSubclassWrapper(
@@ -522,7 +519,7 @@ class AOTAutogradCacheEntry:
         )
 
         req_subclass_dispatch = self.maybe_subclass_meta is not None
-        chromium_log.add_event_data(
+        CompileEventLogger.pt2_compile(
             "backend_compile", requires_subclass_dispatch=req_subclass_dispatch
         )
 
@@ -760,11 +757,13 @@ class AOTAutogradCache:
                     "components": debug_lines,
                 }
             )
-            chromium_log = get_chromium_event_logger()
-            chromium_log.log_instant_event(
-                f"autograd_cache_{cache_state}", cache_event_time, metadata=cache_info
+            CompileEventLogger.log_instant_event(
+                f"autograd_cache_{cache_state}",
+                CompileEventLogLevel.CHROMIUM,
+                metadata=cache_info,
+                time_ns=cache_event_time,
             )
-            chromium_log.try_add_event_data(
+            CompileEventLogger.try_add(
                 "backend_compile",
                 cache_state=cache_state,
                 cache_event_time=cache_event_time,
