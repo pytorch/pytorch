@@ -7,6 +7,7 @@ import torch
 from torch import nn
 from torch._dynamo.utils import same
 from torch._inductor.test_case import run_tests, TestCase
+from torch.testing._internal.common_utils import requires_cuda
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 
 
@@ -117,6 +118,7 @@ class InplacePaddingTest(TestCase):
 
         self.assertEqual(num_inplace_padding(), 0)
 
+    @requires_cuda
     @unittest.skipIf(
         torch.cuda.is_available()
         and torch.cuda.get_device_properties().total_memory < 2e10,
