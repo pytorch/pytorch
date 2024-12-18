@@ -6988,7 +6988,6 @@ class StorageBox(MutableBox):
                 self.num_reads() > config.realize_reads_threshold
                 or self.has_large_inner_fn()
             )
-
         return False
 
     def mark_reuse(self, users: int) -> None:
