@@ -1315,7 +1315,7 @@ torch.cuda.synchronize()
     def test_max_pool2d_with_indices_backward_fails(self, device):
         grad_output = torch.randn(1, 2, 7, 7, device=device)
         input = torch.randn(1, 2, 7, 7, device=device)
-        indices = torch.ones(1, 2, 3, 3, dtype=torch.long)
+        indices = torch.ones(1, 2, 3, 3, dtype=torch.long, device=device)
         kernel_size = [3, 3]
         stride = [1, 1]
         padding = [1, 1]
