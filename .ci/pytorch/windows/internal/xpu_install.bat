@@ -2,6 +2,11 @@
 REM Description: Install Intel Support Packages on Windows
 REM BKM reference: https://www.intel.com/content/www/us/en/developer/articles/tool/pytorch-prerequisites-for-intel-gpus.html
 
+if not "%CUDA_VERSION%" == "xpu" (
+    echo Skipping for non XPU builds
+    exit /b 0
+)
+
 set XPU_INSTALL_MODE=%~1
 if "%XPU_INSTALL_MODE%"=="" goto xpu_bundle_install_start
 if "%XPU_INSTALL_MODE%"=="bundle" goto xpu_bundle_install_start

@@ -400,7 +400,7 @@ def register_dataclass_as_pytree_node(
         return cls(**dict(zip(flat_names, values)), **dict.fromkeys(none_names))
 
     def default_flatten_fn_with_keys(obj: Any) -> Tuple[List[Any], Context]:
-        flattened, (flat_names, none_names) = flatten_fn(obj)  # type: ignore[misc]
+        flattened, (flat_names, _none_names) = flatten_fn(obj)  # type: ignore[misc]
         return [(MappingKey(k), v) for k, v in zip(flat_names, flattened)], flat_names
 
     flatten_fn = flatten_fn if flatten_fn is not None else default_flatten_fn
@@ -701,7 +701,7 @@ def _get_torch_jit_trace_forward_signature(mod: torch.nn.Module) -> inspect.Sign
     # TODO: Directly provide inspect.signature compatible TS-d module.
     """
     ast_mod = ast.parse(mod.code)  # type: ignore[call-overload]
-    ast_func_def: ast.FunctionDef = ast_mod.body[0]  # type: ignore[assignment]
+    ast_func_def: ast.FunctionDef = ast_mod.body[0]
 
     # FIXME(jiashenc): TorchScript should only allow positional or keywords arguments.
     arg_type_map = {"args": Parameter.POSITIONAL_OR_KEYWORD}
@@ -834,7 +834,7 @@ def placeholder_naming_pass(
     ]
 
     # use pytree path to name nested user inputs
-    for (arg_path, arg), user_input_name in zip(flat_args_with_path, user_input_names):
+    for (arg_path, _arg), user_input_name in zip(flat_args_with_path, user_input_names):
         if user_input_name:
             _rename_without_collisions(
                 name_map,
