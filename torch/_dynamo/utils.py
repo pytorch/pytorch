@@ -330,7 +330,7 @@ class CompileEventLogger:
         event_name: str,
         log_level: CompileEventLogLevel,
         metadata: Dict[str, object],
-        time_ns: Optional[int],
+        time_ns: Optional[int] = None,
     ):
         if time_ns is None:
             time_ns = time.time_ns()
