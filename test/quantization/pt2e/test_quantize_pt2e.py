@@ -1863,7 +1863,10 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
             torch.ops.aten.batch_norm.default,
         )
 
-    @parametrize("device", ["cpu"] + (["cuda"] if TEST_CUDA else []) + (["hpu"] if TEST_HPU else []))
+    @parametrize(
+        "device",
+        ["cpu"] + (["cuda"] if TEST_CUDA else []) + (["hpu"] if TEST_HPU else []),
+    )
     def test_move_exported_model_bn(self, device):
         """
         Test switching batch_norm behavior between train and eval modes using
@@ -2410,14 +2413,11 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
                 self.assertEqual(n.args[1], 0.125)
                 self.assertEqual(n.args[2], 42)
 
+
 @skipIfNoQNNPACK
 class TestQuantizePT2EAffineQuantization(PT2EQuantizationTestCase):
     def test_channel_group_quantization(self):
-        from torch.ao.quantization.observer import (
-            MappingType,
-            PerToken,
-            PerGroup,
-        )
+        from torch.ao.quantization.observer import MappingType, PerGroup, PerToken
         from torch.ao.quantization.pt2e.affine_quantization import (
             AffineQuantizedMinMaxObserver,
         )

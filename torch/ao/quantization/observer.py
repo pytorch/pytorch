@@ -1583,12 +1583,14 @@ class ReuseInputObserver(ObserverBase):
             "calculate_qparams should not be called for ReuseInputObserver"
         )
 
+
 """
 ############## Experimental Affine Quantization Feature START ######################
 We plan to merge the following with torchao repo after we move pt2e flow to torchao
 """
-from enum import Enum, auto
 from dataclasses import dataclass
+from enum import auto, Enum
+
 
 class MappingType(Enum):
     """How floating point number is mapped to integer number
@@ -1625,6 +1627,7 @@ class ZeroPointDomain(Enum):
     INT = auto()
     FLOAT = auto()
     NONE = auto()
+
 
 class TorchAODType(Enum):
     """
@@ -1735,6 +1738,7 @@ class PerToken(Granularity):
 
     pass
 
+
 def get_block_size(
     input_shape: Tuple[int, ...], granularity: Granularity
 ) -> Tuple[int, ...]:
@@ -1744,7 +1748,9 @@ def get_block_size(
         input_shape: The input tensor shape possibly more than 2 dimensions
         granularity: The granularity type of the quantization
     """
-    assert isinstance(granularity, Granularity), "Please provide an instance of Granularity, not subclass of it"
+    assert isinstance(
+        granularity, Granularity
+    ), "Please provide an instance of Granularity, not subclass of it"
     if isinstance(granularity, PerTensor):
         return input_shape
     elif isinstance(granularity, PerAxis):
@@ -1754,13 +1760,16 @@ def get_block_size(
     elif isinstance(granularity, PerRow):
         return (1,) * (len(input_shape) - 1) + (input_shape[-1],)
     elif isinstance(granularity, PerGroup):
-        assert len(input_shape) == 2, f"Expecting input shape dim to be 2 for per group quantization, gotinput shape: {input_shape}"
+        assert (
+            len(input_shape) == 2
+        ), f"Expecting input shape dim to be 2 for per group quantization, gotinput shape: {input_shape}"
         return (1, granularity.group_size)
     elif isinstance(granularity, PerToken):
         block_size = list(input_shape)
         block_size[-1] = input_shape[-1]
         return tuple(block_size)
     raise ValueError(f"Unsupported Granularity: {granularity}")
+
 
 class AffineQuantizedObserverBase(ABC, torch.nn.Module):
     """Observer module for affine quantization (https://github.com/pytorch/ao/tree/main/torchao/quantization#affine-quantization)
@@ -1820,6 +1829,7 @@ class AffineQuantizedObserverBase(ABC, torch.nn.Module):
         """
         pass
 
+
 def _is_observer_script_module(mod, obs_type_name):
     """Returns true if given mod is an instance of Observer script module."""
     if isinstance(mod, torch.jit.RecursiveScriptModule):
@@ -1829,12 +1839,18 @@ def _is_observer_script_module(mod, obs_type_name):
         return obs_type_name in name
     return False
 
+
 ############## Experimental Affine Quantization Feature END ######################
+
 
 def _is_activation_post_process(module):
     return isinstance(
         module,
-        (torch.ao.quantization.ObserverBase, torch.ao.quantization.FakeQuantizeBase, AffineQuantizedObserverBase),
+        (
+            torch.ao.quantization.ObserverBase,
+            torch.ao.quantization.FakeQuantizeBase,
+            AffineQuantizedObserverBase,
+        ),
     ) or _is_observer_script_module(module, "quantization.observer")
 
 

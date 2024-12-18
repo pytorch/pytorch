@@ -1,19 +1,22 @@
+# type: ignore[block]
 # copied from https://github.com/pytorch/ao/blob/main/torchao/quantization/observer.py
 # and https://github.com/pytorch/ao/blob/main/torchao/quantization/quant_primitives.py
+# PLESE DON'T MODIFY THIS FILE SO THAT WE DON'T GET OUT OF SYNC
 import logging
-from abc import ABCMeta, abstractmethod
+from abc import ABCMeta
 from functools import partial
-from typing import Any, Optional, Tuple, List, Union, Dict
-from torch.fx import Node
-from torch.ao.quantization.observer import (
-    AffineQuantizedObserverBase,
-    MappingType,
-    ZeroPointDomain,
-    TorchAODType,
-    get_block_size,
-)
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import torch
+from torch.ao.quantization.observer import (
+    AffineQuantizedObserverBase,
+    get_block_size,
+    MappingType,
+    TorchAODType,
+    ZeroPointDomain,
+)
+from torch.fx import Node
+
 
 ABC: Any = ABCMeta("ABC", (object,), {})  # compatible with Python 2 *and* 3:
 
@@ -46,6 +49,17 @@ _DTYPE_TO_QVALUE_BOUNDS: Dict[Union[torch.dtype, TorchAODType], Tuple[int, int]]
     torch.int32: (-(2**31), 2**31 - 1),
 }
 _DTYPE_TO_QVALUE_BOUNDS.update(_SUB_BYTE_UINT_BOUNDS)
+
+
+def _is_float8_type(dtype: torch.dtype) -> bool:
+    fp8_types = {
+        torch.float8_e4m3fn,
+        torch.float8_e4m3fnuz,
+        torch.float8_e5m2,
+        torch.float8_e5m2fnuz,
+    }
+    return dtype in fp8_types
+
 
 # TODO: decide on if we want to allow custom quant_min/quant_max here
 def _get_and_check_qmin_qmax(dtype, quant_min, quant_max):
@@ -170,6 +184,7 @@ def _register_custom_op(lib):
 
     return decorator
 
+
 quant_lib = torch.library.Library("quant", "FRAGMENT")
 
 register_custom_op = _register_custom_op(quant_lib)
@@ -214,6 +229,7 @@ def choose_qparams_affine_with_min_max(
         min_val,
         max_val,
     )
+
 
 @register_custom_op
 def _choose_qparams_affine(
@@ -345,6 +361,7 @@ def _choose_qparams_affine(
     if zero_point is not None:
         zero_point = zero_point.to(dtype=zero_point_dtype)
     return scale.to(dtype=scale_dtype), zero_point
+
 
 @torch.no_grad()
 def quantize_affine(
@@ -658,6 +675,7 @@ def _dequantize_affine_no_dtype_check(
 
     return dequant.view(original_shape).to(output_dtype)
 
+
 class AffineQuantizedMinMaxObserver(AffineQuantizedObserverBase):
     def forward(self, input: torch.Tensor):
         if input.numel() == 0:
@@ -692,8 +710,8 @@ class AffineQuantizedMinMaxObserver(AffineQuantizedObserverBase):
         return input
 
     def calculate_qparams(self) -> Tuple[torch.Tensor, torch.Tensor]:
-        assert (
-            hasattr(self, "min_val") and hasattr(self, "max_val")
+        assert hasattr(self, "min_val") and hasattr(
+            self, "max_val"
         ), "Expecting the observer has min_val and max_val, please run the observer before calling calculate_qparams"
         return choose_qparams_affine_with_min_max(
             self.min_val,
@@ -713,21 +731,47 @@ class AffineQuantizedMinMaxObserver(AffineQuantizedObserverBase):
     def convert(self, model: torch.fx.GraphModule, observer_node: Node):
         print("calling convert")
         from torch.ao.quantization.fx.utils import create_getattr_from_value
+
         scale, zero_point = self.calculate_qparams()
         with model.graph.inserting_before(observer_node):
             assert self.block_size is not None, "Expecting block_size to be populated"
-            assert self.original_dtype is not None, "Expecting original_dtype to be populated"
+            assert (
+                self.original_dtype is not None
+            ), "Expecting original_dtype to be populated"
             scale_node = create_getattr_from_value(model, model.graph, "_scale", scale)
-            zero_point_node = create_getattr_from_value(model, model.graph, "_zero_point", zero_point)
+            zero_point_node = create_getattr_from_value(
+                model, model.graph, "_zero_point", zero_point
+            )
             q_node = model.graph.call_function(
                 torch.ops.quant.quantize_affine,
-                (observer_node.args[0], self.block_size, scale_node, zero_point_node, self.target_dtype, self.quant_min, self.quant_max, self.zero_point_domain.name),
+                (
+                    observer_node.args[0],
+                    self.block_size,
+                    scale_node,
+                    zero_point_node,
+                    self.target_dtype,
+                    self.quant_min,
+                    self.quant_max,
+                    self.zero_point_domain.name,
+                ),
                 {},
             )
             dq_node = model.graph.call_function(
                 torch.ops.quant.dequantize_affine,
-                (q_node, self.block_size, scale_node, zero_point_node, self.target_dtype, self.quant_min, self.quant_max, self.zero_point_domain.name),
+                (
+                    q_node,
+                    self.block_size,
+                    scale_node,
+                    zero_point_node,
+                    self.target_dtype,
+                    self.quant_min,
+                    self.quant_max,
+                    self.zero_point_domain.name,
+                ),
                 {"output_dtype": self.original_dtype},
             )
             observer_node.replace_all_uses_with(dq_node)
             model.graph.erase_node(observer_node)
+
+
+# type: ignore[end-block]
