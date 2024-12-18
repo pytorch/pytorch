@@ -118,7 +118,7 @@ class TestConfigFuzzer(TestCase):
         fuzzer = ConfigFuzzer(fake_config, create_key_1, seed=100, default={})
         max_combo = 100
         results = fuzzer.fuzz_n_tuple(2, max_combinations=max_combo)
-        self.assertEqual(len(results), max_combo)
+        self.assertEqual(results.num_ran(), max_combo)
         self.assertEqual(results.lookup(tuple(key_1.keys())), Status.FAILED_RUN_RETURN)
 
     def test_config_fuzzer_inductor_bisect(self):

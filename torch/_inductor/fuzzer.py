@@ -385,6 +385,16 @@ class ResultType:
     def __init__(self) -> None:
         self._vals = {}
 
+    def num_ran(self) -> int:
+        """
+        Returns how many combos actually ran (weren't skipped).
+        """
+        ret = len(self._vals)
+        for _, status in self._vals.items():
+            if status == Status.SKIPPED:
+                ret -= 1
+        return ret
+
     def set(self, combo: ComboType, status: Status) -> None:
         combo = tuple(sorted(combo))
         self._vals[combo] = status
@@ -642,11 +652,12 @@ class ConfigFuzzer:
         """
         Tests a config by calling the function produced by the factory function.
         """
-        signal.signal(signal.SIGALRM, self.timeout_handler)
+        original_handler = signal.signal(signal.SIGALRM, self.timeout_handler)
         signal.alarm(self.test_timeout)
         print(f"Testing config {config}")
         config_tuple = tuple(config.keys())
         if ret := results.lookup(config_tuple):
+            signal.signal(signal.SIGALRM, original_handler)
             return ret
 
         def print_config() -> None:
@@ -666,6 +677,7 @@ class ConfigFuzzer:
             print_traceback: bool,
             exc: Optional[Exception],
         ) -> Status:
+            signal.signal(signal.SIGALRM, original_handler)
             print(f"{message} with config combination:")
             print_config()
             if exc:
@@ -716,9 +728,7 @@ class ConfigFuzzer:
                     "Function returned False", Status.FAILED_RUN_RETURN, False, None
                 )
             else:
-                ret = Status.PASSED
-                results.set(config_tuple, ret)
-                return ret
+                return handle_return("Function succeeded", Status.PASSED, False, None)
         else:
             raise ValueError(
                 f"Unable to process return type of test function: {type(compile_result)}"
