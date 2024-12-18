@@ -415,7 +415,7 @@ convertIValue(
     if (tensor_impl->has_storage() &&
         !tensor_impl->has_symbolic_sizes_strides()) {
       auto& t_storage = tensor_impl->storage();
-      storage_id = getObjectID(ob, t_storage.data());
+      storage_id = t_storage.get_id();
       offset = tensor_impl->storage_offset();
       numel = tensor_impl->numel();
       itemsize = tensor_impl->itemsize();
