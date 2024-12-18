@@ -2487,25 +2487,25 @@ class Module:
             the call to :attr:`load_state_dict` unless
             :func:`~torch.__future__.get_swap_module_params_on_conversion` is ``True``.
 
-        Args:
-            state_dict (dict): a dict containing parameters and
-                persistent buffers.
-            strict (bool, optional): whether to strictly enforce that the keys
-                in :attr:`state_dict` match the keys returned by this module's
-                :meth:`~torch.nn.Module.state_dict` function. Default: ``True``
-            assign (bool, optional): When ``False``, the properties of the tensors
-                in the current module are preserved while when ``True``, the
-                properties of the Tensors in the state dict are preserved. The only
-                exception is the ``requires_grad`` field of :class:`~torch.nn.Parameter`s
-                for which the value from the module is preserved.
-                Default: ``False``
+    Args:
+        state_dict (dict): A dictionary containing parameters and
+            persistent buffers.
+        strict (bool, optional): Whether to strictly enforce that the keys
+            in :attr:`state_dict` match the keys returned by this module's
+            :meth:`~torch.nn.Module.state_dict` function. Default: ``True``.
+        assign (bool, optional): When ``False``, the properties of the tensors
+            in the current module are preserved. When ``True``, the properties
+            of the tensors in the state dict are preserved. The only
+            exception is the ``requires_grad`` field of :class:`~torch.nn.Parameter`,
+            for which the value from the module is preserved.
+            Default: ``False``.
 
-        Returns:
-            ``NamedTuple`` with ``missing_keys`` and ``unexpected_keys`` fields:
-                * **missing_keys** is a list of str containing any keys that are expected
-                    by this module but missing from the provided ``state_dict``.
-                * **unexpected_keys** is a list of str containing the keys that are not
-                    expected by this module but present in the provided ``state_dict``.
+    Returns:
+        NamedTuple: A ``NamedTuple`` with ``missing_keys`` and ``unexpected_keys`` fields:
+            * **missing_keys** (list of str): Contains any keys that are expected
+              by this module but missing from the provided ``state_dict``.
+            * **unexpected_keys** (list of str): Contains keys that are not
+              expected by this module but present in the provided ``state_dict``.
 
         Note:
             If a parameter or buffer is registered as ``None`` and its corresponding key
