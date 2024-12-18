@@ -2413,3 +2413,15 @@ def get_donated_idxs() -> Optional[List[int]]:
     if tracing_context is not None and tracing_context.fw_metadata:
         return tracing_context.fw_metadata.bw_donated_idxs
     return None
+
+
+def set_kernel_post_grad_provenance_tracing(node_schedule, kernel_name):
+    from .codegen.simd_kernel_features import DisableReduction, EnableReduction
+    from .virtualized import V
+
+    for node in node_schedule:
+        if node not in (EnableReduction, DisableReduction):
+            if node.node is not None:
+                V.debug._inductor_triton_kernel_to_post_grad_node_info[kernel_name] = [
+                    origin.name for origin in node.node.origins
+                ]
