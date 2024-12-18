@@ -15,7 +15,7 @@ from torch.types import Device
 from ._utils import _get_device_index
 
 
-_device_t = Union[_device, str, int, None]
+_device_t = Union[_device, str, int]
 
 # torch.mtia.Event/Stream is alias of torch.Event/Stream
 Event = torch.Event
@@ -151,19 +151,6 @@ def default_stream(device: Optional[_device_t] = None) -> Stream:
     return torch._C._mtia_getDefaultStream(_get_device_index(device, optional=True))
 
 
-def memory_stats(device: Optional[_device_t] = None) -> Dict[str, Any]:
-    r"""Return a dictionary of MTIA memory allocator statistics for a given device.
-
-    Args:
-        device (torch.device or int, optional) selected device. Returns
-            statistics for the current device, given by current_device(),
-            if device is None (default).
-    """
-    if not is_initialized():
-        return {}
-    return torch._C._mtia_memoryStats(_get_device_index(device, optional=True))
-
-
 def get_device_capability(device: Optional[_device_t] = None) -> Tuple[int, int]:
     r"""Return capability of a given device as a tuple of (major version, minor version).
 
@@ -173,6 +160,11 @@ def get_device_capability(device: Optional[_device_t] = None) -> Tuple[int, int]
             if device is None (default).
     """
     return torch._C._mtia_getDeviceCapability(_get_device_index(device, optional=True))
+
+
+def empty_cache() -> None:
+    r"""Empty the MTIA device cache."""
+    return torch._C._mtia_emptyCache()
 
 
 def set_stream(stream: Stream):
@@ -285,7 +277,7 @@ def stream(stream: Optional["torch.mtia.Stream"]) -> StreamContext:
     Arguments:
         stream (Stream): selected stream. This manager is a no-op if it's
             ``None``.
-    ..Note:: In eager mode stream is of type Stream class while in JIT it doesn't support torch.mtia.stream
+    .. note:: In eager mode stream is of type Stream class while in JIT it doesn't support torch.mtia.stream
     """
     return StreamContext(stream)
 
@@ -322,6 +314,9 @@ def set_rng_state(
     )
 
 
+from .memory import *  # noqa: F403
+
+
 __all__ = [
     "init",
     "is_available",
@@ -332,7 +327,9 @@ __all__ = [
     "current_stream",
     "default_stream",
     "memory_stats",
+    "max_memory_allocated",
     "get_device_capability",
+    "empty_cache",
     "set_device",
     "set_stream",
     "stream",
