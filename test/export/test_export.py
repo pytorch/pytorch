@@ -3572,7 +3572,6 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         ):
             em.module()(x)
 
-    @testing.expectedFailureRetraceabilityNonStrict
     def test_dont_duck_size_for_auto_dynamic(self):
         AUTO, STATIC = Dim.AUTO, Dim.STATIC
 
@@ -3799,12 +3798,48 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         nms_pre = torch.tensor(4)
         inputs = (score, score_thr, nms_pre, dict(bbox_pred=bbox_pred))
 
-        ep = torch.export.export(M(), inputs)
+        ep = export(M(), inputs)
         orig_res = M()(*inputs)
         ep_res = ep.module()(*inputs)
         self.assertTrue(torch.allclose(orig_res[0], ep_res[0]))
         self.assertTrue(torch.allclose(orig_res[1], ep_res[1]))
         self.assertTrue(torch.allclose(orig_res[2], ep_res[2]))
+
+    def test_sequential_slicing(self):
+        # See https://github.com/pytorch/pytorch/issues/137455
+
+        class TestModule1(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.seq = torch.nn.Sequential(
+                    torch.nn.Linear(4, 4),
+                    torch.nn.Linear(4, 4),
+                    torch.nn.Linear(4, 4),
+                )
+
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                # seq_last as local variable works
+                seq_last = self.seq[1:]
+                return seq_last(x)
+
+        class TestModule2(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.seq = torch.nn.Sequential(
+                    torch.nn.Linear(4, 4),
+                    torch.nn.Linear(4, 4),
+                    torch.nn.Linear(4, 4),
+                )
+                # seq_last as initialized submodule works
+                self.seq_last = self.seq[1:]
+
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                return self.seq_last(x)
+
+        inp = (torch.randn(4, 4),)
+        for mod in [TestModule1(), TestModule2()]:
+            epm = export(mod, inp).module()
+            self.assertTrue(torch.allclose(epm(*inp), mod(*inp)))
 
     def test_unflatten_asserts(self):
         # TODO: strict-export fails
@@ -5097,7 +5132,7 @@ def forward(self, x):
                 torch._check(pos <= 4)
                 return self.freq[pos] * self.freq[pos]
 
-        ep = torch.export.export(M(), (torch.tensor(1),))
+        ep = export(M(), (torch.tensor(1),))
         FileCheck().check_count(
             "torch.ops.aten._assert_scalar.default", 2, exactly=True
         ).run(ep.graph_module.code)
@@ -9557,7 +9592,6 @@ def forward(self, x, y):
         }
         export(f, (inputs,), dynamic_shapes=dynamic_shapes)
 
-    @testing.expectedFailureRetraceabilityNonStrict
     def test_disable_forced_specializations_ok(self):
         # check that we don't force specialization, and defer to runtime asserts
         # with allow_complex_guards_as_runtime_asserts=True to successfully export
@@ -10185,7 +10219,6 @@ def forward(self, x):
         self.assertTrue(torch.allclose(comp_mod(inp1), mod(inp1)))
         self.assertTrue(torch.allclose(comp_mod(inp2), mod(inp2)))
 
-    @testing.expectedFailureRetraceabilityNonStrict
     def test_automatic_dynamic_shapes_simple_equality(self):
         # The next 3 test cases tests for automatic dynamic shapes specs, verifying that automatic dynamism
         # leads to replacement symbols being set for equalities, and inferred relationships being checked
@@ -10257,7 +10290,6 @@ def forward(self, x):
             test_serdes=True,
         )
 
-    @testing.expectedFailureRetraceabilityNonStrict
     def test_automatic_dynamic_shapes_constant_relation(self):
         AUTO, STATIC = Dim.AUTO, Dim.STATIC
 
@@ -10303,7 +10335,6 @@ def forward(self, x):
             test_serdes=True,
         )
 
-    @testing.expectedFailureRetraceabilityNonStrict
     def test_automatic_dynamic_shapes_linear_relation(self):
         AUTO, STATIC = Dim.AUTO, Dim.STATIC
 
@@ -10612,7 +10643,6 @@ def forward(self, x):
         export(Foo(), inps)
 
     @testing.expectedFailureCppSerDes  # TODO(pianpwk): PowByNatural valuerange deserialization
-    @testing.expectedFailureRetraceabilityNonStrict
     def test_dim_dynamic(self):
         dynamic = Dim.DYNAMIC
 
