@@ -76,6 +76,30 @@ when they are created in output_graph.
     return output_replacements
 
 
+# flattens with support for slices
+# Note: a better way to do this would
+# be register/unregister slices as pytree nodes
+# but there is no unregister API in the pytorch
+# pytree impl
+def _flatten_args_kwargs(args: Any) -> List[Node]:
+    fully_flattened = []
+
+    def flatten(args: Any) -> None:
+        flattened, _ = tree_flatten(args)
+        for arg in flattened:
+            if isinstance(arg, slice):
+                start = arg.start
+                stop = arg.stop
+                step = arg.step
+                flatten((start, stop, step))
+            else:
+                fully_flattened.append(arg)
+
+    flatten(args)
+
+    return fully_flattened
+
+
 def _replace_region_with_subgraph(
     graph: torch.fx.Graph,
     region: Region,
@@ -89,7 +113,7 @@ def _replace_region_with_subgraph(
     sub_args = []
     for node_ind, arg_ind in node_ind_arg_ind:
         node = region[node_ind]
-        flattened_args_kwargs, _ = tree_flatten((node.args, node.kwargs))
+        flattened_args_kwargs = _flatten_args_kwargs((node.args, node.kwargs))
         sub_args.append(flattened_args_kwargs[arg_ind])
 
     invoke_args = (get_subgraph_node, subgraph_name, tuple(sub_args))
@@ -127,7 +151,7 @@ def _get_external_inputs(
     external_node_to_indices = dict()
     region_unique = set(region)
     for node_ind, node in enumerate(region):
-        flattened_args_kwargs, _ = tree_flatten((node.args, node.kwargs))
+        flattened_args_kwargs = _flatten_args_kwargs((node.args, node.kwargs))
         for arg_ind, in_node in enumerate(flattened_args_kwargs):
             if (
                 in_node not in region_unique
