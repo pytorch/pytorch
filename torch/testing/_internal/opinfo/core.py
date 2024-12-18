@@ -742,6 +742,9 @@ class OpInfo:
     # dtypes this function is expected to work with on XPU
     dtypesIfXPU: _dispatch_dtypes = None
 
+    # dtypes this function is expected to work with on MPS
+    dtypesIfMPS: _dispatch_dtypes = None
+
     # backward dtypes this function is expected to work with
     backward_dtypes: _dispatch_dtypes = None
 
@@ -752,6 +755,9 @@ class OpInfo:
     backward_dtypesIfROCM: _dispatch_dtypes = None
 
     backward_dtypesIfHpu: _dispatch_dtypes = None
+
+    # backward dtypes this function is expected to work with on ROCM
+    backward_dtypesIfMPS: _dispatch_dtypes = None
 
     # the following metadata describes the operators out= support
 
@@ -917,6 +923,7 @@ class OpInfo:
             self.dtypesIfCUDA,
             self.dtypesIfROCM,
             self.dtypesIfXPU,
+            self.dtypesIfMPS,
         )
 
         # Validates the dtypes are generated from the dispatch-related functions
@@ -981,6 +988,21 @@ class OpInfo:
                 else self.dtypes
             )
         )
+        self.backward_dtypesIfMPS = (
+            set(self.backward_dtypesIfMPS)
+            if self.backward_dtypesIfMPS is not None
+            else (
+                self.backward_dtypesIfCUDA
+                if self.backward_dtypesIfCUDA is not None
+                else self.backward_dtypes
+                if self.backward_dtypes is not None
+                else self.dtypesIfROCM
+                if self.dtypesIfROCM is not None
+                else self.dtypesIfCUDA
+                if self.dtypesIfCUDA is not None
+                else self.dtypes
+            )
+        )
 
         self.backward_dtypes = (
             set(self.backward_dtypes)
@@ -1002,6 +1024,9 @@ class OpInfo:
 
         self.dtypesIfHpu = (
             set(self.dtypesIfHpu) if self.dtypesIfHpu is not None else self.dtypes
+        )
+        self.dtypesIfMPS = (
+            set(self.dtypesIfMPS) if self.dtypesIfMPS is not None else self.dtypesIfCUDA
         )
 
         # NOTE: if the op is unspecified it is assumed to be under the torch namespace
@@ -1530,6 +1555,8 @@ def test_foo(self, device, dtype, op):
             return self.dtypesIfXPU
         if device_type == "hpu":
             return self.dtypesIfHpu
+        if device_type == "mps":
+            return self.dtypesIfMPS
         return self.dtypes
 
     def supported_backward_dtypes(self, device_type):
@@ -1548,6 +1575,8 @@ def test_foo(self, device, dtype, op):
             )
         elif device_type == "hpu":
             backward_dtypes = self.backward_dtypesIfHpu
+        elif device_type == "mps":
+            backward_dtypes = self.backward_dtypesIfMPS
         else:
             backward_dtypes = self.backward_dtypes
 
@@ -2957,6 +2986,7 @@ class ShapeFuncInfo(OpInfo):
         dtypesIfCUDA=None,
         dtypesIfROCM=None,
         dtypesIfXPU=None,
+        dtypesIfMPS=None,
         sample_inputs_func=None,
         **kwargs,
     ):
@@ -2966,6 +2996,7 @@ class ShapeFuncInfo(OpInfo):
             dtypesIfCUDA=dtypesIfCUDA,
             dtypesIfROCM=dtypesIfROCM,
             dtypesIfXPU=dtypesIfXPU,
+            dtypesIfMPS=dtypesIfMPS,
             sample_inputs_func=sample_inputs_func,
             **kwargs,
         )
