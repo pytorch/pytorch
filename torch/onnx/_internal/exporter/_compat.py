@@ -37,7 +37,7 @@ def _rename_dynamic_shapes_with_model_inputs(
 ) -> dict[str, Any] | tuple[Any] | list[Any]:
     """
 
-    This function renames the dynamic_shapes with the paramters of the model, since
+    This function renames the dynamic_shapes with the parameters of the model, since
     torch.export.export requires the dynamic_shapes to be named with the model's input names.
 
     NOTE: If the model input is nested, this function does nothing, and the users are responsible
@@ -250,8 +250,7 @@ def export_compat(
     **_,
 ) -> _onnx_program.ONNXProgram:
     if opset_version is None:
-        # TODO(justinchuby): Change the hardcoded opset version for it to be flexible
-        opset_version = 18
+        opset_version = onnxscript_apis.torchlib_opset_version()
 
     if isinstance(model, torch.export.ExportedProgram):
         # We know the model is already exported program, so the args, kwargs, and dynamic_shapes
