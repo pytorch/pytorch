@@ -181,8 +181,8 @@ convolution_backward_input_batch_rule(
     const auto result = at::convolution_backward_symint(
         grad_output_, dummy_input, weight_, std::nullopt, stride, padding,
         dilation, transposed, output_padding, groups * batch_size, mask);
-    const auto grad_input = reshape_dim_outof(1, batch_size, std::get<0>(result));
-    return std::make_tuple(grad_input, 1);
+    auto grad_input = reshape_dim_outof(1, batch_size, std::get<0>(result));
+    return std::make_tuple(std::move(grad_input), 1);
   } else if (grad_output_bdim && !weight_bdim) {
     // BNO, OI -> (BN)O, OI -> (BN)I
     // transposed is the same.
@@ -192,8 +192,8 @@ convolution_backward_input_batch_rule(
     const auto result = at::convolution_backward_symint(
         grad_output_, dummy_input, weight, std::nullopt, stride, padding,
         dilation, transposed, output_padding, groups, mask);
-    const auto grad_input = reshape_dim_outof(0, batch_size, std::get<0>(result));
-    return std::make_tuple(grad_input, 0);
+    auto grad_input = reshape_dim_outof(0, batch_size, std::get<0>(result));
+    return std::make_tuple(std::move(grad_input), 0);
   } else if (!grad_output_bdim && weight_bdim) {
     const auto batch_size = weight.size(*weight_bdim);
     if (groups == 1) {
@@ -359,24 +359,24 @@ static std::tuple<Tensor,Tensor,Tensor> convolution_backward_plumbing(
     const Tensor& grad_output_, const Tensor& input_, const Tensor& weight_,
     const c10::OptionalArrayRef<SymInt> bias_sizes_opt,
     c10::SymIntArrayRef stride, c10::SymIntArrayRef padding, c10::SymIntArrayRef dilation, bool transposed,
-    // NOLINTNEXTLINE(performance-unnecessary-value-param)
     c10::SymIntArrayRef output_padding, c10::SymInt groups, std::array<bool, 3> output_mask) {
   const auto maybe_layer = maybeCurrentDynamicLayer();
   vmap_check_escaped(maybe_layer, "convolution_backward_plumbing");
+  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
   int64_t cur_level = maybe_layer->layerId();
 
   if (!areAnyBatchedAtLevel({grad_output_, input_, weight_}, cur_level)){
     c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchBatched);
     return at::convolution_backward_symint(
         grad_output_, input_, weight_, bias_sizes_opt, stride, padding,
-        dilation, transposed, output_padding, groups, output_mask);
+        dilation, transposed, output_padding, std::move(groups), output_mask);
   }
 
   auto [grad_output, grad_output_bdim] = unwrapTensorAtLevel(grad_output_, cur_level);
   auto [input, input_bdim] = unwrapTensorAtLevel(input_, cur_level);
   auto [weight, weight_bdim] = unwrapTensorAtLevel(weight_, cur_level);
 
-  const auto grad_bias = compute_grad_bias(grad_output_, output_mask);
+  auto grad_bias = compute_grad_bias(grad_output_, output_mask);
   output_mask[2] = false;
 
   // TODO: A little bird says that unfold + matmul is actually faster than
@@ -408,14 +408,14 @@ static std::tuple<Tensor,Tensor,Tensor> convolution_backward_plumbing(
         grad_output, input, weight, std::nullopt, stride, padding, dilation,
         transposed, output_padding, batch_size * groups, output_mask);
     // N(BI), (BO)I -> NBI, BOI
-    const auto grad_input = output_mask[0] ?
+    auto grad_input = output_mask[0] ?
       reshape_dim_outof(1, batch_size, std::get<0>(result)) : Tensor();
-    const auto grad_weight = output_mask[1] ?
+    auto grad_weight = output_mask[1] ?
       reshape_dim_outof(0, batch_size, std::get<1>(result)) : Tensor();
     return std::make_tuple(
-        output_mask[0] ? makeBatched(grad_input, 1, cur_level) : grad_input,
-        output_mask[1] ? makeBatched(grad_weight, 0, cur_level) : grad_weight,
-        grad_bias);
+        output_mask[0] ? makeBatched(std::move(grad_input), 1, cur_level) : std::move(grad_input),
+        output_mask[1] ? makeBatched(std::move(grad_weight), 0, cur_level) : std::move(grad_weight),
+        std::move(grad_bias));
   }
 
   Tensor grad_input;
@@ -426,7 +426,7 @@ static std::tuple<Tensor,Tensor,Tensor> convolution_backward_plumbing(
         input, input_bdim,
         weight, weight_bdim,
         stride, padding, dilation, transposed, output_padding, groups);
-    grad_input = makeBatched(tensor, bdim, cur_level);
+    grad_input = makeBatched(std::move(tensor), bdim, cur_level);
   }
 
   Tensor grad_weight;
@@ -437,9 +437,9 @@ static std::tuple<Tensor,Tensor,Tensor> convolution_backward_plumbing(
         input, input_bdim,
         weight, weight_bdim,
         stride, padding, dilation, transposed, output_padding, groups);
-    grad_weight = makeBatched(tensor, bdim, cur_level);
+    grad_weight = makeBatched(std::move(tensor), bdim, cur_level);
   }
-  return std::make_tuple(grad_input, grad_weight, grad_bias);
+  return std::make_tuple(std::move(grad_input), std::move(grad_weight), std::move(grad_bias));
 
   // Someone's definitely going to find a problem with this batching rule so
   // I'm leaving the following fallback if we need it back.
