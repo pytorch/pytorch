@@ -360,6 +360,11 @@ class Guard:
         ), "Guarded object must be identical, None or ephemeral (dead weakref)"
         self.obj_weakref = obj_weakref
 
+class NoopGuard(Guard):
+    """In the case that a guard is trivially true (as it can be determined statically during tracing),
+    then we do not want to generate a guard.  This class will be ignored by the install_guard function
+    """
+    pass
 
 T = TypeVar("T")
 
@@ -956,7 +961,7 @@ class Source:
 
     def make_guard(self, fn) -> Guard:
         if self.guard_source() is GuardSource.CONSTANT:
-            raise NotImplementedError
+            return NoopGuard(self, fn)
         return Guard(self, fn)
 
     def is_specialized_nn_module(self) -> bool:
