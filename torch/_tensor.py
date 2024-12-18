@@ -1642,11 +1642,9 @@ class Tensor(torch._C.TensorBase):
         return (device_type, idx)
 
     def repeat(self, *repeats):
-        # Handle case where repeats is passed as a sequence
         if len(repeats) == 1 and isinstance(repeats[0], (tuple, list, torch.Size)):
             repeats = repeats[0]
 
-        # Validation checks
         if any(not isinstance(s, (int, torch.SymInt)) or s < 0 for s in repeats):
             raise ValueError(
                 f"Received negative or non-integer repeat sizes: {repeats}. "
@@ -1661,13 +1659,17 @@ class Tensor(torch._C.TensorBase):
                 f"Provided repeat sizes: {repeats}"
             )
 
+        max_size = torch.iinfo(torch.int64).max
+        for r in repeats:
+            if r > max_size // 2:
+                raise ValueError(f"Individual repeat size {r} is too large")
+
         try:
-            total_elements = self.numel() * torch.prod(torch.tensor(repeats)).item()
-            max_elements = torch.iinfo(torch.int64).max
-            if total_elements > max_elements:
+            total_elements = self.numel() * torch.prod(torch.tensor(repeats, dtype=torch.int64)).item()
+            if total_elements > max_size:
                 raise ValueError(
                     f"Repeat operation would result in tensor with {total_elements} elements, "
-                    f"which exceeds maximum supported size of {max_elements}."
+                    f"which exceeds maximum supported size of {max_size}."
                 )
         except OverflowError as err:
             raise ValueError(
