@@ -110,7 +110,7 @@ class CUDAKernel(Kernel):
         ndim = _normalize_idx(-1, len(W.get_size()))
         kdim = _normalize_idx(-1, len(X.get_size()))
         self.add_layout_arg("M", X, "size", mdim)
-        self.add_layout_arg("N", X, "size", ndim)
+        self.add_layout_arg("N", W, "size", ndim)
         self.add_layout_arg("K", X, "size", kdim)
 
         lda_dim = self.find_ld_idx(X)
@@ -120,7 +120,7 @@ class CUDAKernel(Kernel):
         self.add_layout_arg("lda", X, "stride", lda_dim)
         self.add_layout_arg("ldb", W, "stride", ldb_dim)
         self.add_layout_arg("ldc", Y, "stride", ldc_dim)
-        if Bias and ldd_dim:
+        if Bias is not None and ldd_dim is not None:
             self.add_layout_arg("ldd", Bias, "stride", ldd_dim)
 
     def get_layout_args(self) -> Tuple[Union[Expr, int], ...]:
@@ -324,9 +324,11 @@ class CUDATemplateKernel(CUDAKernel):
                 outer_name=WorkspaceArg.unique_name(),
             )
             wrapper.generate_workspace_allocation(ws)
-            data_ptr = f"{ws.outer_name}.data_ptr()"
+            workspace = str(ws.outer_name)
             call_args.append(
-                data_ptr if V.graph.cpp_wrapper else f"c_void_p({data_ptr})"
+                workspace
+                if V.graph.cpp_wrapper
+                else f"c_void_p({workspace}.data_ptr())"
             )
         else:
             ws = None
