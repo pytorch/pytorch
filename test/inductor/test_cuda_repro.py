@@ -104,6 +104,49 @@ class CudaReproTests(TestCase):
         compiled = compile_fx_inner(mod, inps)
         compiled(inps)
 
+    def test_effn_attn_bias_padding(self):
+        batch_size, num_heads, seq_len, head_dim = 2, 32, 512, 128
+
+        def fn(
+            query: torch.Tensor,
+            key: torch.Tensor,
+            value: torch.Tensor,
+            input_tensor: torch.Tensor,  # This will be our starting point
+        ):
+            # Input tensor should be [2, 1, 8192, 1] with appropriate strides
+            bias = torch.ops.aten.expand(
+                input_tensor, [2, 32, seq_len, seq_len]
+            )  # Expands with stride pattern [65536, 0, 8, 0]
+
+            return torch.ops.aten._scaled_dot_product_efficient_attention(
+                query,
+                key,
+                value,
+                bias,
+                compute_log_sumexp=True,
+                dropout_p=0.0,
+                is_causal=False,
+                scale=None,
+            )
+
+        query = torch.randn(batch_size, num_heads, seq_len, head_dim, device="cuda")
+        key = torch.randn(batch_size, num_heads, seq_len, head_dim, device="cuda")
+        value = torch.randn(batch_size, num_heads, seq_len, head_dim, device="cuda")
+
+        input_tensor = torch.rand([2, 1, seq_len, 1], device="cuda")
+
+        out, code = run_and_get_code(torch.compile(fn), query, key, value, input_tensor)
+
+        input_tensor2 = torch.rand([2, 32, seq_len, seq_len], device="cuda").copy_(
+            input_tensor
+        )
+        # even though the last dim is broadcasted, needs stride 1 for alignment
+        # but dim 1 stride can be 0
+        FileCheck().check("buf0").check("(262144, 0, 512, 1").run(code[0])
+
+        # dont check rng state
+        self.assertEqual(out[:2], fn(query, key, value, input_tensor2)[:2])
+
     @skipIfRocm
     def test_input_channels_last(self):
         m = torch.nn.Sequential(
