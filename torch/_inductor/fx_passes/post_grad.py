@@ -65,6 +65,108 @@ pass_patterns = [
     PatternMatcherPass(),
 ]
 
+def reorder_allgather_fsdp_param_to_right_before_first_usage(gm: fx.GraphModule) -> None:
+    # Strategy: delay the allgather nodes as much as possible, by first finding each allgather node's first compute usage,
+    # and then rebuild the graph to delay that AG to right before first compute usage.
+
+    def collect_ancestors(n: torch.fx.Node, collected_nodes) -> None:
+        if n.op == "placeholder":
+            return
+        collected_nodes.add(n)
+
+        def process_arg(arg: Any) -> None:
+            if isinstance(arg, fx.Node):
+                collect_ancestors(arg, collected_nodes)
+            elif isinstance(arg, list):
+                for item in arg:
+                    process_arg(item)
+
+        for arg in n.args:
+            process_arg(arg)
+        for kwarg in n.kwargs.values():
+            process_arg(kwarg)
+
+    def node_uses_ag_output(node):
+        for arg in node.args:
+            if (
+                isinstance(arg, torch.fx.Node)
+                and arg.op == "call_function"
+                and "wait_tensor" in str(arg.target)
+                and "all_gather_into_tensor" in str(arg.args[0].target)
+            ):
+                return True, arg
+        return False, None
+
+    # Step 1: find all FSDP all-gather and related nodes
+    node_list = list(gm.graph.nodes)
+    order = {node: idx for idx, node in enumerate(node_list)}
+    ag_wait_tensor_node_to_first_usage_idx = {}
+    tracked_ag_nodes = set()
+    for idx, node in enumerate(node_list):
+        uses_ag_output, ag_wait_tensor_node = node_uses_ag_output(node)
+        if uses_ag_output and ag_wait_tensor_node not in ag_wait_tensor_node_to_first_usage_idx:
+            ag_nodes = set()
+            collect_ancestors(ag_wait_tensor_node, ag_nodes)
+            assert len(ag_nodes) > 0
+            ag_wait_tensor_node_to_first_usage_idx[ag_wait_tensor_node] = idx
+            tracked_ag_nodes |= ag_nodes
+
+    if len(tracked_ag_nodes) == 0:
+        return
+
+    # DEBUG, remove when landing this pass
+    assert len(tracked_ag_nodes) > 0
+    # DEBUG
+
+    # Step 2: delay insertion of FSDP all-gather and related nodes until first compute usage
+    new_graph = fx.Graph()
+    env: Dict[fx.Node, fx.Node] = {}
+
+    # Add new placeholder nodes in the order specified by the inputs
+    for node in gm.graph.find_nodes(op="placeholder"):
+        env[node] = new_graph.node_copy(node, lambda x: env[x])
+
+    def insert_node_in_graph(node):
+        cur_nodes = [node]
+        insertable_nodes = set()
+        while len(cur_nodes) > 0:
+            node = cur_nodes.pop()
+            if node in insertable_nodes or node in env:
+                continue
+            insertable_nodes.add(node)
+
+            cur_nodes += node.all_input_nodes
+
+        insertable_nodes = sorted(insertable_nodes, key=lambda n: order[n])
+        for node in insertable_nodes:
+            env[node] = new_graph.node_copy(node, lambda x: env[x])
+
+    for node in list(gm.graph.nodes):
+        if node in tracked_ag_nodes:
+            # Tracked AG nodes should be added later during dependency traversal of its first compute usage
+            continue
+        insert_node_in_graph(node)
+
+    gm.graph = new_graph
+
+
+def remove_unused_allgather(gm: torch.fx.GraphModule):
+    node_list = list(gm.graph.nodes)
+    for node in node_list:
+        if (
+            node.op == "call_function"
+            and "wait_tensor" in str(node.target)
+            and len(node.users) == 0
+        ):
+            gm.graph.erase_node(node)
+    for node in node_list:
+        if (
+            node.op == "call_function"
+            and "all_gather_into_tensor" in str(node.target)
+            and len(node.users) == 0
+        ):
+            gm.graph.erase_node(node)
+
 
 def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
     """
@@ -151,6 +253,13 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
 
     fake_tensor_updater.incremental_update()
 
+    # from torch.distributed._composable.fsdp import _use_SimpleFSDP
+    _use_SimpleFSDP = True
+    if _use_SimpleFSDP:
+        reorder_allgather_fsdp_param_to_right_before_first_usage(gm)
+        remove_unused_allgather(gm)
+        gm.graph.eliminate_dead_code()
+
     # Keep these last, since they introduces mutation. Look at
     # ./fx_passes/README.md for a discussion of mutation invariants.
     GraphTransformObserver(gm, "reinplace_inplaceable_ops").apply_graph_pass(
@@ -164,6 +273,44 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
     )
     GraphTransformObserver(gm, "reinplace_fsdp_all_gather").apply_graph_pass(
         comms.reinplace_fsdp_all_gather
+    )
+
+    gm_str = gm.print_readable(
+        print_output=False, include_stride=True, include_device=True
+    )
+    torch._logging.trace_structured(
+        "artifact",
+        metadata_fn=lambda: {
+            "name": "inductor_post_grad_before_bucket_fsdp_AG_and_RS",
+            "encoding": "string",
+        },
+        payload_fn=lambda: gm_str,
+    )
+
+    # from torch.distributed._composable.fsdp import _use_SimpleFSDP
+    _use_SimpleFSDP = True
+    if _use_SimpleFSDP:
+        # 100MiB -> 25 buckets
+        # 500MiB -> 11 buckets
+        # 1000MiB -> 6 bucket
+        # TODO(yf225): these two passes cannot be passed in via post_grad_custom_post_pass config
+        # becuase they introduce mutation. Ideally we should use `torch.ops.higher_order.auto_functionalized_v2`
+        # to wrap those mutation ops, but we need to figure out how to auto-generate the metadata needed for auto_functionalized_v2
+        # (See tlparse of `pytest -rA test/distributed/_composable/fsdp/test_fully_shard_compile.py::TestFullyShardCompile::test_transformer_backend_inductor_fullgraph_True` for how it should look like)
+        # comms.bucket_fsdp_all_gather_concat(gm, all_gather_bucket_cap_mb=100)
+        # comms.bucket_fsdp_reduce_scatter_concat(gm, reduce_scatter_bucket_cap_mb=100)
+        pass
+
+    gm_str = gm.print_readable(
+        print_output=False, include_stride=True, include_device=True
+    )
+    torch._logging.trace_structured(
+        "artifact",
+        metadata_fn=lambda: {
+            "name": "inductor_post_grad_after_bucket_fsdp_AG_and_RS",
+            "encoding": "string",
+        },
+        payload_fn=lambda: gm_str,
     )
 
     gm.recompile()
