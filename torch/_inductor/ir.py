@@ -2952,14 +2952,22 @@ class SliceView(View):
         dim_size = x.get_size()[dim]
 
         if any(free_unbacked_symbols(x) for x in (start, end, dim_size)):
-
-            def clamp(x, lower, upper):  # type: ignore[no-untyped-def]
-                return sympy.Min(sympy.Max(x, lower), upper)
-
+            min_func = sympy.Min
+            max_func = sympy.Max
         else:
+            min_func = sizevars.evaluate_min
+            max_func = sizevars.evaluate_max
 
-            def clamp(x, lower, upper):  # type: ignore[no-untyped-def]
-                return sizevars.evaluate_min(sizevars.evaluate_max(x, lower), upper)
+        def clamp(x, lower, upper):  # type: ignore[no-untyped-def]
+            clamped_lower = (
+                x if sizevars.statically_known_geq(x, lower) else max_func(x, lower)
+            )
+            clamped_full = (
+                clamped_lower
+                if sizevars.statically_known_leq(clamped_lower, upper)
+                else min_func(clamped_lower, upper)
+            )
+            return clamped_full
 
         def clamp_wrap(val, lower, upper, default):  # type: ignore[no-untyped-def]
             if val is None:
