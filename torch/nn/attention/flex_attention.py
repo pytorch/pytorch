@@ -422,6 +422,57 @@ class BlockMask:
         s += "\n)"
         return s
 
+    def _get_new_seq_lens(self, new_kv_indices, index):
+        """
+        Calculate new sequence lengths based on the new kv_indices and index. We only support block level slicing
+        on the first 3 dimensions. So we maintain the kv_length
+        """
+        q_length, kv_length = self.seq_lengths
+
+        def has_partial_block(length, block_size):
+            return length % block_size != 0
+
+        def touches_last_block(slice_obj, total_blocks):
+            if slice_obj is None:
+                return False
+
+            # Convert to slice object if it's an integer
+            if isinstance(slice_obj, int):
+                slice_obj = slice(slice_obj, slice_obj + 1)
+
+            # Get the range of blocks this slice would touch
+            stop = slice_obj.stop if slice_obj.stop is not None else total_blocks
+            if stop < 0:
+                stop = total_blocks + stop
+
+            # If the slice touches the last block
+            return stop >= total_blocks
+
+        def calculate_length(orig_length, block_size, slice_info, index_position):
+            if not has_partial_block(orig_length, block_size):
+                return min(
+                    orig_length, new_kv_indices.shape[index_position] * block_size
+                )
+
+            total_blocks = (orig_length + block_size - 1) // block_size
+
+            # If we're touching the last block, calculate exact length
+            if touches_last_block(slice_info, total_blocks):
+                print("slice_info", slice_info)
+                partial_size = orig_length % block_size
+                full_blocks = new_kv_indices.shape[index_position] - 1
+                return min(orig_length, (full_blocks * block_size) + partial_size)
+
+            # If not touching last block, can use full block sizes
+            return min(orig_length, new_kv_indices.shape[index_position] * block_size)
+
+        # Extract slice information
+        q_slice = index[2] if len(index) >= 3 else None
+
+        new_q_length = calculate_length(q_length, self.BLOCK_SIZE[0], q_slice, -2)
+
+        return (new_q_length, kv_length)
+
     def __getitem__(self, index) -> "BlockMask":
         """
         Returns a new BlockMask instance by getting the mask for the given index position.
@@ -459,6 +510,10 @@ class BlockMask:
                 assert new_block_mask.kv_num_blocks.shape == (2,1,1)
                 assert new_block_mask.kv_indices.shape == (2,1,1,4)
         """
+
+        assert (
+            len(index) <= 3
+        ), "We only support block-level indexing on the first 3 dimensions. If you would like to slice on the last dimension we recommend calling the `_adjust` method on the block mask."
         new_kv_num_blocks = self.kv_num_blocks[index]
         new_kv_indices = self.kv_indices[index]
         if self.full_kv_num_blocks is not None:
@@ -469,16 +524,7 @@ class BlockMask:
             new_full_kv_num_blocks = None
             new_full_kv_indices = None
 
-        new_seq_lengths = (self.seq_lengths[0], self.seq_lengths[1])
-        q_length, kv_length = self.seq_lengths
-        new_seq_lengths = (
-            min(q_length, new_kv_indices.shape[-2] * self.BLOCK_SIZE[0])
-            if len(index) >= 3
-            else q_length,
-            min(kv_length, new_kv_indices.shape[-1] * self.BLOCK_SIZE[1])
-            if len(index) == 4
-            else kv_length,
-        )
+        new_seq_lengths = self._get_new_seq_lens(new_kv_indices, index)
 
         return BlockMask.from_kv_blocks(
             new_kv_num_blocks,
