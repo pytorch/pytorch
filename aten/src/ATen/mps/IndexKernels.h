@@ -131,7 +131,6 @@ kernel void gather_kernel_n(uint linear_index           [[thread_position_in_gri
     constant {0} * src = (constant {0} *)src_;
     device {1} * dst = (device {1} *)dst_;
 
-
     uint64_t src_offs = 0;
     auto src_idx = linear_index;
     for(int dim = ndim - 1; dim >= 0; --dim) {{

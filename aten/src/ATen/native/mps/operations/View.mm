@@ -38,7 +38,6 @@ static IntArrayRef updateTensorBaseShape(const Tensor& self) {
   return base_shape;
 }
 
-
 // For both scatter and gather kernels, there are 4 specized ones (for 1D to 4D tensor)
 // and one generic, for 5+D ones. Assumption (to be tested) about specialized kernels
 // is that reduction of n-dimentional vector, where n is 2, should be slower
