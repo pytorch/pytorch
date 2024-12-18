@@ -1,4 +1,5 @@
 # mypy: allow-untyped-defs
+import contextlib
 from typing import Callable, List, Tuple, Union
 
 import torch
@@ -220,7 +221,7 @@ while_loop_op.py_impl(DispatchKey.Autograd)(
 )
 
 
-def _create_unbacked_symint() -> torch.SymInt:
+def _create_unbacked_symint(ignore_fresh_unbacked_symbols) -> torch.SymInt:
     from torch._subclasses.fake_tensor import FakeTensorMode
     from torch.fx.experimental.symbolic_shapes import ShapeEnv
 
@@ -230,7 +231,12 @@ def _create_unbacked_symint() -> torch.SymInt:
     if fake_mode is None:
         fake_mode = FakeTensorMode(shape_env=ShapeEnv())
 
-    with fake_mode.shape_env.ignore_fresh_unbacked_symbols():
+    ctx = (
+        contextlib.nullcontext()
+        if not ignore_fresh_unbacked_symbols
+        else fake_mode.shape_env.ignore_fresh_unbacked_symbols()
+    )
+    with ctx:
         return fake_mode.shape_env.create_unbacked_symint()
 
 
@@ -277,7 +283,9 @@ def while_loop_tracing(mode, cond_fn, body_fn, carried_inputs, additional_inputs
         #   iteration. Ideally, we should know that the final output is >= 0 but we didn't constrain the
         #   unbacked symint output of subgraph as of today because this requires a smart range analysis.
         unspecialized_carried_inputs = pytree.tree_map_only(
-            (int, torch.SymInt), lambda _: _create_unbacked_symint(), carried_inputs
+            (int, torch.SymInt),
+            lambda _: _create_unbacked_symint(ignore_fresh_unbacked_symbols=True),
+            carried_inputs,
         )
 
         cond_graph = reenter_make_fx(cond_fn)(
@@ -410,7 +418,9 @@ def while_loop_fake_tensor_mode(
             check_meta_consistency(body_outs, carried_inputs)
         # See NOTE [unspecialize int carry with unbacked symints]
         return pytree.tree_map_only(
-            (int, torch.SymInt), lambda _: _create_unbacked_symint(), body_outs
+            (int, torch.SymInt),
+            lambda _: _create_unbacked_symint(ignore_fresh_unbacked_symbols=False),
+            body_outs,
         )
 
 

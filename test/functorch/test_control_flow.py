@@ -306,11 +306,13 @@ def _while_loop_tests():
 
             def body_fn(it, x):
                 x_clone = x.clone()
-                # Need these checks to select from x
-                torch._check(it >= 0)
-                torch._check(it < x.shape[0])
-                x_clone.select(0, it).copy_(x_clone.select(0, it) + it)
-                return it + 1, x_clone
+                # Data dependent eerror when torch.compile torch.seleclt(0, it)
+                # even with torch._check. export is OK
+                # Issue tracked here: https://github.com/pytorch/pytorch/issues/143249
+                # torch._check(it >= 0)
+                # torch._check(it < x.shape[0])
+                # x_clone.select(0, it).copy_(x_clone.select(0, it) + it)
+                return it + 1, x + it * 2
 
             # We invoke the hop directly to avoid triggering dyanmo tracing
             out_it, out_x = torch.ops.higher_order.while_loop(
@@ -340,6 +342,23 @@ def _while_loop_tests():
                 return b, c1, c2, c3, a, 0, u0 + 1, x + 1
 
             carry = (a, b, 1, 1, 1, a + 1, t.sum().to(torch.int64).item(), t.sin())
+            out_it = torch.ops.higher_order.while_loop(cond_fn, body_fn, carry, tuple())
+            out_inc = pytree.tree_map(lambda x: x + 1, out_it)
+            out_add = pytree.tree_map(lambda x: x + t, out_it)
+            return out_inc, out_add
+
+    class ConstAndSymIntOutput(torch.nn.Module):
+        def forward(self, t):
+            a = t.shape[0]
+            b = t.shape[1]
+
+            def cond_fn(u0):
+                return u0 < a + b
+
+            def body_fn(u0):
+                return (u0 + 1,)
+
+            carry = (t.sum().to(torch.int64).item(),)
             out_it = torch.ops.higher_order.while_loop(cond_fn, body_fn, carry, tuple())
             out_inc = pytree.tree_map(lambda x: x + 1, out_it)
             out_add = pytree.tree_map(lambda x: x + t, out_it)
@@ -6239,7 +6258,7 @@ class GraphModule(torch.nn.Module):
 
     @skipIfTorchDynamo("Graph is not captured correctly when test with dynamo")
     @parametrize("dynamic", [True, False])
-    @parametrize("backend", ["eager", "aot_eager"])
+    @parametrize("backend", ["eager", "aot_eager", "inductor"])
     def test_while_loop_op_int_carry_compile(self, dynamic, backend):
         from torch._dynamo.testing import EagerAndRecordGraphs
 
@@ -6382,7 +6401,7 @@ class GraphModule(torch.nn.Module):
 
     @skipIfTorchDynamo("Graph is not captured correctly when test with dynamo")
     @parametrize("dynamic", [True, False])
-    @parametrize("backend", ["eager", "aot_eager"])
+    @parametrize("backend", ["eager", "aot_eager", "inductor"])
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_while_loop_op_constant_and_symint_output_compile(self, dynamic, backend):
         from torch._dynamo.testing import EagerAndRecordGraphs

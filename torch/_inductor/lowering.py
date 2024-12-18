@@ -6492,7 +6492,16 @@ def while_loop(cond_fn, body_fn, carried_inputs, additional_inputs):
         V.graph.disable_cudagraphs_reason = msg
 
     result = ir.WhileLoop.create(cond_fn, body_fn, carried_inputs, additional_inputs)
-    return list(map(TensorBox.create, result))
+
+    def _map_output(x):
+        if isinstance(x, ir.MultiOutput):
+            return TensorBox.create(x)
+        elif isinstance(x, ir.ShapeAsConstantBuffer):
+            return x.expr
+        else:
+            raise NotImplementedError(f"Don't support {x} output yet")
+
+    return [_map_output(x) for x in result]
 
 
 @register_lowering(torch.ops.higher_order.invoke_subgraph, type_promotion_kind=None)
