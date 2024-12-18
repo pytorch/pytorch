@@ -10,6 +10,7 @@ import threading
 import uuid
 import warnings
 from abc import ABC, abstractmethod
+from collections.abc import Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
 from io import UnsupportedOperation
@@ -71,7 +72,7 @@ class _StorageInfo:
     relative_path: str
     offset: int
     length: int
-    transform_descriptors: Tuple[str] = ()
+    transform_descriptors: Sequence[str] = ()
 
 
 @dataclass
@@ -257,7 +258,9 @@ def _write_item(
 ) -> WriteResult:
     offset = stream.tell()
 
-    (transform_to, transform_descriptors) = planner.transform_save_stream(write_item, stream)
+    (transform_to, transform_descriptors) = planner.transform_save_stream(
+        write_item, stream
+    )
 
     if write_item.type == WriteItemType.BYTE_IO:
         assert isinstance(data, io.BytesIO)
@@ -356,41 +359,33 @@ class FileSystemBase(ABC):
     @abstractmethod
     def create_stream(
         self, path: Union[str, os.PathLike], mode: str
-    ) -> Generator[io.IOBase, None, None]:
-        ...
+    ) -> Generator[io.IOBase, None, None]: ...
 
     @abstractmethod
     def concat_path(
         self, path: Union[str, os.PathLike], suffix: str
-    ) -> Union[str, os.PathLike]:
-        ...
+    ) -> Union[str, os.PathLike]: ...
 
     @abstractmethod
     def rename(
         self, path: Union[str, os.PathLike], new_path: Union[str, os.PathLike]
-    ) -> None:
-        ...
+    ) -> None: ...
 
     @abstractmethod
-    def init_path(self, path: Union[str, os.PathLike]) -> Union[str, os.PathLike]:
-        ...
+    def init_path(self, path: Union[str, os.PathLike]) -> Union[str, os.PathLike]: ...
 
     @abstractmethod
-    def mkdir(self, path: Union[str, os.PathLike]) -> None:
-        ...
+    def mkdir(self, path: Union[str, os.PathLike]) -> None: ...
 
     @classmethod
     @abstractmethod
-    def validate_checkpoint_id(cls, checkpoint_id: Union[str, os.PathLike]) -> bool:
-        ...
+    def validate_checkpoint_id(cls, checkpoint_id: Union[str, os.PathLike]) -> bool: ...
 
     @abstractmethod
-    def exists(self, path: Union[str, os.PathLike]) -> bool:
-        ...
+    def exists(self, path: Union[str, os.PathLike]) -> bool: ...
 
     @abstractmethod
-    def rm_file(self, path: Union[str, os.PathLike]) -> None:
-        ...
+    def rm_file(self, path: Union[str, os.PathLike]) -> None: ...
 
 
 class FileSystem(FileSystemBase):
@@ -627,7 +622,9 @@ class _FileSystemWriter(StorageWriter):
 
 
 class FileSystemReader(StorageReader):
-    def __init__(self, path: Union[str, os.PathLike],
+    def __init__(
+        self,
+        path: Union[str, os.PathLike],
     ) -> None:
         super().__init__()
         self.fs = FileSystem()
