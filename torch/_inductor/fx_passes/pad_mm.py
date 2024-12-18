@@ -382,11 +382,7 @@ def should_pad_mm_bf16(dtype, M, N, K):
 
 
 def should_pad_bench(*args, **kwargs):
-    with dynamo_timed(
-        "pad_mm_benchmark",
-        log_pt2_compile_event=True,
-        dynamo_compile_column_us="compile_time_autotune_time_us",
-    ):
+    with dynamo_timed("pad_mm_benchmark"):
         return _should_pad_bench(*args, **kwargs)
 
 

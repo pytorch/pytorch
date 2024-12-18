@@ -23,20 +23,18 @@ ScriptCall::ScriptCall(
       isAsyncExecution_(isAsyncExecution) {}
 
 bool ScriptCall::hasOp() const {
-  return op_.has_value();
+  return op_ ? true : false;
 }
 
 std::shared_ptr<Operator> ScriptCall::op() const {
-  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
   return op_.value();
 }
 
 bool ScriptCall::hasQualifiedName() const {
-  return qualifiedName_.has_value();
+  return qualifiedName_ ? true : false;
 }
 
 const c10::QualifiedName& ScriptCall::qualifiedName() const {
-  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
   return qualifiedName_.value();
 }
 
@@ -53,7 +51,7 @@ void ScriptCall::toIValues(std::vector<at::IValue>& ivalues) const {
     ivalues.push_back(value);
   }
 
-  if (op_.has_value()) {
+  if (hasOp()) {
     TORCH_CHECK(
         !hasQualifiedName(),
         "It is builtin operator call, qualifiedName_ should not be set.");
@@ -75,7 +73,7 @@ void ScriptCall::toIValues(std::vector<at::IValue>& ivalues) const {
     TORCH_CHECK(
         !hasOp(),
         "It is TorchScript function call, operator should not be set.");
-    ivalues.emplace_back(qualifiedName().qualifiedName());
+    ivalues.emplace_back((*qualifiedName_).qualifiedName());
   } else {
     TORCH_INTERNAL_ASSERT(
         false,

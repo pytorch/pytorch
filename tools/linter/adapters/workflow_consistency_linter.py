@@ -11,13 +11,9 @@ import json
 from collections import defaultdict
 from enum import Enum
 from pathlib import Path
-from typing import Any, NamedTuple, TYPE_CHECKING
+from typing import Any, Iterable, NamedTuple
 
 from yaml import dump, load
-
-
-if TYPE_CHECKING:
-    from collections.abc import Iterable
 
 
 # Safely load fast C Yaml loader/dumper if they are available

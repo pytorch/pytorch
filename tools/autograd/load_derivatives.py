@@ -6,8 +6,8 @@
 from __future__ import annotations
 
 import re
-from collections import Counter, defaultdict
-from typing import Any, TYPE_CHECKING
+from collections import defaultdict
+from typing import Any, Counter, Dict, Sequence, Set, Tuple
 
 import yaml
 
@@ -53,11 +53,7 @@ from torchgen.utils import concatMap, IDENT_REGEX, split_name_params
 from torchgen.yaml_utils import YamlLoader
 
 
-if TYPE_CHECKING:
-    from collections.abc import Sequence
-
-
-DerivativeRet = tuple[dict[FunctionSchema, dict[str, DifferentiabilityInfo]], set[str]]
+DerivativeRet = Tuple[Dict[FunctionSchema, Dict[str, DifferentiabilityInfo]], Set[str]]
 
 _GLOBAL_LOAD_DERIVATIVE_CACHE: dict[tuple[str, str], DerivativeRet] = {}
 
@@ -635,7 +631,7 @@ def create_differentiability_info(
             raise RuntimeError(
                 f"Not supported: for {specification},"
                 f"output_differentiability must either be "
-                f"list[bool] or a list[str] where each str is a "
+                f"List[bool] or a List[str] where each str is a "
                 f"condition. In the case where it is a condition, "
                 f"we only support single-output functions. "
                 f"Please file us an issue. "

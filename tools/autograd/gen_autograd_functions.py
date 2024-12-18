@@ -7,7 +7,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import Sequence
 
 from torchgen.api.autograd import (
     Derivative,
@@ -45,10 +45,6 @@ from torchgen.model import Argument, FunctionSchema
 from torchgen.utils import FileManager
 
 from .gen_inplace_or_view_type import VIEW_FUNCTIONS
-
-
-if TYPE_CHECKING:
-    from collections.abc import Sequence
 
 
 FUNCTION_DECLARATION = CodeTemplate(

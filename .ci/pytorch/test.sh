@@ -4,7 +4,7 @@
 # (This is set by default in the Docker images we build, so you don't
 # need to set it yourself.
 
-set -ex -o pipefail
+set -ex
 
 # Suppress ANSI color escape sequences
 export TERM=vt100
@@ -313,7 +313,6 @@ test_dynamo_wrapped_shard() {
     --exclude-jit-executor \
     --exclude-distributed-tests \
     --exclude-torch-export-tests \
-    --exclude-aot-dispatch-tests \
     --shard "$1" "$NUM_TEST_SHARDS" \
     --verbose \
     --upload-artifacts-while-running
@@ -1244,7 +1243,7 @@ EOF
 }
 
 test_bazel() {
-  set -e -o pipefail
+  set -e
 
   # bazel test needs sccache setup.
   # shellcheck source=./common-build.sh

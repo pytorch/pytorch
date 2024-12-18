@@ -670,7 +670,7 @@ class TestAutogradFunctional(TestCase):
 
         x = ctors.randn(3)
         with warnings.catch_warnings(record=True) as wa:
-            api(foo, x, vectorize=True)
+            result = api(foo, x, vectorize=True)
         self.assertEqual(len(wa), 0)
 
     @base_and_logging_tensor
@@ -762,7 +762,7 @@ class TestAutogradFunctional(TestCase):
 
         inp = ctors.rand(4)
         with self.assertRaisesRegex(RuntimeError, "not supported together"):
-            autogradF.jacobian(foo, inp, strict=True, vectorize=True)
+            res = autogradF.jacobian(foo, inp, strict=True, vectorize=True)
 
     @base_and_logging_tensor
     def test_jacobian_no_grad(self, ctors):
@@ -1122,7 +1122,7 @@ class TestAutogradFunctional(TestCase):
 
         inp = ctors.rand(4)
         with self.assertRaisesRegex(RuntimeError, "not supported together"):
-            autogradF.hessian(foo, inp, strict=True, vectorize=True)
+            res = autogradF.hessian(foo, inp, strict=True, vectorize=True)
 
     @base_and_logging_tensor
     def test_hessian_no_grad(self, ctors):

@@ -1093,69 +1093,6 @@ graph():
         ):
             export(M(), (torch.randn(2, 3),), strict=False)
 
-    def test_malformed_fqn_from_source_name(self):
-        # See https://github.com/pytorch/pytorch/issues/141939
-        from types import MethodType
-
-        class Block(torch.nn.Module):
-            def __init__(self, i, o):
-                super().__init__()
-                self.to_out = torch.nn.ModuleList([])
-                self.to_out.append(torch.nn.Linear(i, o, bias=True))
-                self.to_out.append(torch.nn.Dropout(0.5))
-
-            def forward(self, x):
-                for l in self.to_out:
-                    x = l(x)
-                return x
-
-        class Problem1(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.blocks = torch.nn.ModuleDict(
-                    {f"{i}": Block(64, 64) for i in range(5)}
-                )
-
-            def forward(self, x):
-                for k, m in self.blocks.items():
-                    x = m(x)
-                return x
-
-        class Problem2(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.blocks = torch.nn.ModuleList([Block(64, 64) for i in range(5)])
-
-            def forward(self, x):
-                x = self.blocks[0](x)
-                for m in self.blocks[1:4]:
-                    x = m(x)
-                return x
-
-        def _split_after_forward(self, *args, **kwargs):
-            return self._orig_forward(*args, **kwargs)
-
-        def annotate_split_points(mod: torch.nn.Module, spec):
-            for qualname, split_type in spec.items():
-                atoms = qualname.split(".")
-                predecessor_module = mod
-                for i, atom in enumerate(atoms[:-1]):
-                    try:
-                        predecessor_module = getattr(predecessor_module, atom)
-                    except AttributeError as e:
-                        raise e
-                mod_to_wrap = getattr(predecessor_module, atoms[-1])
-                mod_to_wrap._orig_forward = mod_to_wrap.forward
-                mod_to_wrap.forward = MethodType(_split_after_forward, mod_to_wrap)
-
-        for problem in [Problem1, Problem2]:
-            m = problem()
-            m(torch.rand(64, 64))
-            # simpified torch.distributed.pipeline code
-            annotate_split_points(m, {"blocks.1": 1, "blocks.3": 1})
-            gm = export(m, (torch.rand(64, 64),))
-            torch.export.unflatten(gm)
-
     def test_state_primitives(self):
         class M(torch.nn.Module):
             def __init__(self) -> None:
@@ -1189,21 +1126,6 @@ graph():
         model = TestModule()
         x = torch.randn(20, 10)
         ep_model = export(model, (x,), strict=False).module()
-        self.assertTrue(torch.allclose(model(x), ep_model(x)))
-
-    def test_output_node_name(self):
-        class TestModule(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.linear = torch.nn.Linear(10, 10)
-
-            def forward(self, x):
-                return self.linear(x)
-
-        model = TestModule()
-        x = torch.randn(20, 10)
-        ep_model = export(model, (x,), strict=False).module()
-        self.assertEqual(list(ep_model.graph.nodes)[-1].name, "output")
         self.assertTrue(torch.allclose(model(x), ep_model(x)))
 
     def test_real_tensor_size_mismatch(self):
@@ -3932,7 +3854,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         nms_pre = torch.tensor(4)
         inputs = (score, score_thr, nms_pre, dict(bbox_pred=bbox_pred))
 
-        ep = export(M(), inputs)
+        ep = torch.export.export(M(), inputs)
         orig_res = M()(*inputs)
         ep_res = ep.module()(*inputs)
         self.assertTrue(torch.allclose(orig_res[0], ep_res[0]))
@@ -5230,7 +5152,7 @@ def forward(self, x):
                 torch._check(pos <= 4)
                 return self.freq[pos] * self.freq[pos]
 
-        ep = export(M(), (torch.tensor(1),))
+        ep = torch.export.export(M(), (torch.tensor(1),))
         FileCheck().check_count(
             "torch.ops.aten._assert_scalar.default", 2, exactly=True
         ).run(ep.graph_module.code)

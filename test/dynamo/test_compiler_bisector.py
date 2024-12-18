@@ -43,7 +43,7 @@ class TestCompilerBisector(TestCase):
         return lib
 
     def test_bad_decomp(self):
-        import_module("torch._inductor.compile_fx")
+        mod = import_module("torch._inductor.compile_fx")
 
         def bad_exp_decomp(self, rate=1, generator=None):
             assert generator is None
@@ -86,7 +86,7 @@ class TestCompilerBisector(TestCase):
                 vq_compiled = torch.compile(vq)
                 x = torch.randn(4, 400, 256).cuda()
                 with torch._dynamo.utils.preserve_rng_state():
-                    vq(x)
+                    out = vq(x)
                 out_compiled = vq_compiled(x)
 
             return not out_compiled.isnan().any()
@@ -150,6 +150,7 @@ class TestCompilerBisector(TestCase):
         self.assertTrue("inductor_fallback_random" in out.debug_info)
 
     def test_crossref(self):
+        test_ns = "bisect_ops"
         with _scoped_library(self.test_ns, "FRAGMENT") as lib:
             lib.define("foo(Tensor x) -> Tensor")
             op = self.get_op("foo")

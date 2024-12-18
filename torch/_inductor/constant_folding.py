@@ -3,7 +3,6 @@ from typing import Any, Callable, Dict, List, Optional
 
 import torch
 import torch.utils._pytree as pytree
-from torch.utils._ordered_set import OrderedSet
 
 
 aten = torch.ops.aten
@@ -143,7 +142,7 @@ class ConstantFolder(torch.fx.Interpreter):
 
     def node_to_last_non_output_use(self) -> Dict[torch.fx.Node, List[torch.fx.Node]]:
         last_non_output_use = collections.defaultdict(list)
-        seen_uses = OrderedSet[torch.fx.Node]()
+        seen_uses = set()
         output_node = next(iter(reversed(self.module.graph.nodes)))  # type: ignore[arg-type, union-attr]
 
         for node in reversed(self.module.graph.nodes):  # type: ignore[arg-type, union-attr]

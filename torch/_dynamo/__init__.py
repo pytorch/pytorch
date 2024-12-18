@@ -108,7 +108,7 @@ def reset() -> None:
         resume_execution.ContinueExecutionCache.cache.clear()
         _reset_guarded_backend_cache()
         reset_frame_count()
-        torch._dynamo.compiled_autograd.reset()
+        torch._C._dynamo.compiled_autograd.clear_cache()
         convert_frame.FRAME_COUNTER = 0
         convert_frame.FRAME_COMPILE_COUNTER.clear()
         callback_handler.clear()

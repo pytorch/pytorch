@@ -15,7 +15,6 @@ from torch.fx.experimental.symbolic_shapes import (
     sym_eq,
 )
 from torch.utils import _pytree as pytree
-from torch.utils._ordered_set import OrderedSet
 from torch.utils._pytree import tree_map
 
 from .virtualized import V
@@ -75,7 +74,7 @@ class FakeTensorUpdater:
     """
 
     def __init__(self, graph: torch.fx.Graph) -> None:
-        self.processed_hashes = OrderedSet[Any]()
+        self.processed_hashes = set()
         self.graph = graph
 
         for node in self.graph.nodes:
@@ -149,7 +148,7 @@ class FakeTensorUpdater:
                 or node.target == operator.getitem
             )
 
-        to_process = OrderedSet[int]()
+        to_process = set()
         for node in self.graph.nodes:
             if (
                 self.hash_node(node) in self.processed_hashes

@@ -55,13 +55,6 @@ def parse_args():
     )
 
     parser.add_argument(
-        "--output-json",
-        "--output_json",
-        help="JSON file path to write the results to",
-        default=None,
-    )
-
-    parser.add_argument(
         "--list-tests",
         "--list_tests",
         help="List all test cases without running them",

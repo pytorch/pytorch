@@ -18,8 +18,7 @@ SequenceNum::SequenceNum(const SequenceNum& other) {
 
 uint64_t SequenceNum::get() const {
   std::lock_guard<std::mutex> lock(lock_);
-  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
-  return num_.value();
+  return *num_;
 }
 
 void SequenceNum::increment() {

@@ -1,7 +1,6 @@
 # mypy: allow-untyped-defs
 import contextlib
 import functools
-import itertools
 import operator
 from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING, Union
 
@@ -67,8 +66,6 @@ _impure_targets = OrderedSet(
     ]
 )
 
-COMPILE_COUNTER = itertools.count()
-
 
 class AutogradCompilerInstance:
     def __init__(self, compiler_fn) -> None:
@@ -101,7 +98,6 @@ class AutogradCompilerInstance:
         origins: List[List[Tuple[int, str]]],
     ):
         counters["compiled_autograd"]["captures"] += 1
-        self.id = next(COMPILE_COUNTER)
         self.aot_graph_cls_name: Optional[str] = None
         self.aot_graph_infos: Dict[int, Dict[str, Any]] = {}
         self.fx_tracer.root = torch.nn.Module()
@@ -377,7 +373,7 @@ class AutogradCompilerInstance:
             runtime_inputs_to_move = self.move_graph_nodes_to_cuda(self.fx_tracer.graph)
 
         graph = GraphModule(
-            self.fx_tracer.root, self.fx_tracer.graph, f"CompiledAutograd{self.id}"
+            self.fx_tracer.root, self.fx_tracer.graph, "CompiledAutograd"
         )
         set_locals_to_steal(graph, ["inputs"])
         lazy_graph_code = lazy_format_graph_code(
@@ -867,6 +863,3 @@ def reset() -> None:
     assert not in_compiled_autograd_region
     torch._C._dynamo.compiled_autograd.set_autograd_compiler(None, False)
     torch._C._dynamo.compiled_autograd.set_verbose_logger(None)
-    torch._C._dynamo.compiled_autograd.clear_cache()
-    global COMPILE_COUNTER
-    COMPILE_COUNTER = itertools.count()

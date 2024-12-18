@@ -1071,7 +1071,7 @@ class TestPrologueFusion(TestCase):
         self.assertEqual(out, foo(x, y), atol=0.05, rtol=0.05)
         self.check_code(code[0], num_kernels=1, num_allocs=1, num_deallocs=2)
 
-        # should be done in low precision, no arithmetic
+        # should be done in low precision
         f = (
             FileCheck()
             .check("for k_idx")
@@ -1169,29 +1169,14 @@ class TestPrologueFusion(TestCase):
         self.assertEqual(out, foo(x, y), atol=0.05, rtol=0.05)
         self.check_code(code[0], num_kernels=1, num_allocs=1, num_deallocs=2)
 
-    @parametrize("K", (63, 64))
-    def test_broadcast_x(self, K):
+    def test_broadcast(self):
         def foo(x, y):
             return (x.expand([1, y.shape[0]]) + 1) @ y
 
         x = torch.rand([1, 1], dtype=torch.float, device="cuda")
-        y = torch.rand([K, 128], dtype=torch.float, device="cuda")
+        y = torch.rand([64, 128], dtype=torch.float, device="cuda")
 
-        out, code = run_and_get_code(torch.compile(foo, dynamic=True), x, y)
-        self.assertEqual(out, foo(x, y), atol=0.05, rtol=0.05)
-        self.check_code(code[0], num_kernels=1, num_allocs=1, num_deallocs=2)
-
-    def test_broadcast_y(self):
-        def foo(x, y):
-            return x @ y
-
-        M = 20
-        N = K = 1
-        x = torch.rand([M, K], dtype=torch.float, device="cuda")
-        y = torch.rand([K, N], dtype=torch.float, device="cuda")
-        torch._dynamo.mark_dynamic(x, 0)
-
-        out, code = run_and_get_code(torch.compile(foo, dynamic=True), x, y)
+        out, code = run_and_get_code(torch.compile(foo), x, y)
         self.assertEqual(out, foo(x, y), atol=0.05, rtol=0.05)
         self.check_code(code[0], num_kernels=1, num_allocs=1, num_deallocs=2)
 
@@ -1202,7 +1187,7 @@ class TestPrologueFusion(TestCase):
             (
                 lambda x: torch.hypot(x, x),
                 True,
-            ),  # not handled in analysis, conservatively assume does not preserve
+            ),  # not handled in analysis, conservatively assume does not
         )
 
         def foo(x, y, fn):

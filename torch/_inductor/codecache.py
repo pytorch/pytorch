@@ -67,7 +67,6 @@ from torch._inductor.custom_graph_pass import CustomGraphPass, CustomGraphPassTy
 from torch._inductor.output_code import has_frozen_params
 from torch._utils_internal import log_cache_bypass
 from torch.compiler import config as cconfig
-from torch.utils._ordered_set import OrderedSet
 
 from .remote_cache import create_cache
 from .runtime import autotune_cache
@@ -791,10 +790,10 @@ class FxGraphHashDetails:
         self.fx_kwargs: Dict[str, object] = {}
         for k, v in sorted(fx_kwargs.items()):
             if k not in self.EXCLUDED_KWARGS:
-                if type(v) in (set, OrderedSet):  # noqa: set_linter
+                if type(v) is set:
                     # Special case to handle set params. Python sets can't be
                     # ordered, so sort the elements and store them in a proxy.
-                    self.fx_kwargs[k] = OrderedSetHolder(sorted(v))  # type: ignore[call-overload]
+                    self.fx_kwargs[k] = OrderedSetHolder(sorted(v))
                 else:
                     self.fx_kwargs[k] = v
 
@@ -1486,7 +1485,7 @@ class AotCodeCompiler:
 
         def _compile_consts(consts: bytes, platform: str) -> str:
             if platform == "linux":
-                if graph.mutated_buffers & OrderedSet(graph.constants.keys()):
+                if graph.mutated_buffers & set(graph.constants.keys()):
                     # .data section is between .text and .bss. When the size of .data is large,
                     # during the linking, the relocation of .text against .bss may overflow.
                     # Rename it to .ldata so that it won't be in between the .text and .bss section
@@ -1568,7 +1567,7 @@ class AotCodeCompiler:
                         pos += rc
             return consts_o
 
-        from torch.utils._filelock import FileLock
+        from filelock import FileLock
 
         lock_dir = get_lock_dir()
         lock = FileLock(os.path.join(lock_dir, key + ".lock"), timeout=LOCK_TIMEOUT)
@@ -2003,7 +2002,7 @@ class CppCodeCache:
         key, input_path = write(source_code, "cpp", extra=vec_isa_cmd)
 
         if key not in cls.cache:
-            from torch.utils._filelock import FileLock
+            from filelock import FileLock
 
             lock_path = os.path.join(get_lock_dir(), key + ".lock")
             output_name, output_dir = get_name_and_dir_from_output_file_path(input_path)
@@ -2068,7 +2067,7 @@ def _worker_compile_cpp(
     fb_input_path: str,
     fb_output_path: str,
 ) -> None:
-    from torch.utils._filelock import FileLock
+    from filelock import FileLock
 
     with FileLock(lock_path, timeout=LOCK_TIMEOUT):
         binary_path = (
@@ -2646,11 +2645,10 @@ class HalideCodeCache(CppPythonBindingsCodeCache):
         afile = str(dirpath / "standalone_halide_runtime.a")
         sofile = str(dirpath / libname)
         if not os.path.exists(donefile):
+            import filelock
             import halide as hl  # type: ignore[import-untyped,import-not-found]
 
-            from torch.utils._filelock import FileLock
-
-            with FileLock(lockfile, LOCK_TIMEOUT):
+            with filelock.FileLock(lockfile, LOCK_TIMEOUT):
                 if not os.path.exists(donefile):
                     with open(hookfile, "w") as f:
                         if device_type == "cuda":
@@ -2681,7 +2679,7 @@ class HalideCodeCache(CppPythonBindingsCodeCache):
 
 
 def _worker_task_halide(lockfile: str, jobs: List[partial[Any]]) -> None:
-    from torch.utils._filelock import FileLock
+    from filelock import FileLock
 
     try:
         with FileLock(lockfile, LOCK_TIMEOUT):
@@ -3076,7 +3074,7 @@ class CUDACodeCache:
         """
         key, input_path = cls.write(source_code, dst_file_ext)
         if key not in cls.cache:
-            from torch.utils._filelock import FileLock
+            from filelock import FileLock
 
             lock_dir = get_lock_dir()
             lock = FileLock(os.path.join(lock_dir, key + ".lock"), timeout=LOCK_TIMEOUT)
@@ -3167,7 +3165,7 @@ class ROCmCodeCache:
 
         key, input_path = cls.write(source_code, dst_file_ext)
         if key not in cls.cache:
-            from torch.utils._filelock import FileLock
+            from filelock import FileLock
 
             lock_dir = get_lock_dir()
             lock = FileLock(os.path.join(lock_dir, key + ".lock"), timeout=LOCK_TIMEOUT)

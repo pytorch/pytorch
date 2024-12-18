@@ -625,13 +625,13 @@ struct TORCH_API TensorType : public SharedType {
     return strides_;
   }
 
-  const std::optional<at::Device>& device() const {
+  std::optional<at::Device> device() const {
     return device_;
   }
-  const std::optional<at::ScalarType>& scalarType() const {
+  std::optional<at::ScalarType> scalarType() const {
     return scalar_type_;
   }
-  const std::optional<bool>& requiresGrad() const {
+  std::optional<bool> requiresGrad() const {
     return requires_grad_;
   }
   bool requires_grad() const override {
@@ -656,7 +656,7 @@ struct TORCH_API TensorType : public SharedType {
     const auto& shape = sizes();
 
     for (size_t i = 0; i < shape.size(); i++) {
-      if (!shape[i].has_value()) {
+      if (!shape[i]) {
         return std::optional<size_t>{};
       }
       prod *= shape[i].value();

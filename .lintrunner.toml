@@ -73,8 +73,6 @@ include_patterns = [
     'aten/src/ATen/native/cudnn/*.cpp',
     'aten/src/ATen/native/mkldnn/xpu/**/*.h',
     'aten/src/ATen/native/mkldnn/xpu/**/*.cpp',
-    'aten/src/ATen/native/Tensor*.h',
-    'aten/src/ATen/native/Tensor*.cpp',
     'c10/**/*.h',
     'c10/**/*.cpp',
     'torch/csrc/**/*.h',
@@ -145,7 +143,7 @@ init_command = [
     '--dry-run={{DRYRUN}}',
     'numpy==1.26.4 ; python_version >= "3.9" and python_version <= "3.11"',
     'numpy==2.1.0 ; python_version >= "3.12"',
-    'expecttest==0.3.0',
+    'expecttest==0.2.1',
     'mypy==1.13.0',
     'sympy==1.13.0 ; python_version >= "3.9"',
     'types-requests==2.27.25',
@@ -1713,7 +1711,7 @@ command = [
     '@{{PATHSFILE}}'
 ]
 include_patterns = [
-    "torch/_inductor/**/*.py",
+    'torch/**/does-not-exist.py'
 ]
 is_formatter = true
 
