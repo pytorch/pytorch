@@ -1254,6 +1254,29 @@ class AOTInductorTestsTemplate:
             dynamic_shapes=dynamic_shapes,
         )
 
+    @common_utils.parametrize("dynamic", [False, True])
+    def test_cond_unbacked_symint_closure(self, dynamic):
+        inputs = (
+            torch.randn((10, 20), device=self.device),
+            torch.randn((15, 20), device=self.device),
+            torch.randn((10, 20), device=self.device),
+        )
+        dynamic_shapes = None
+        if dynamic:
+            dim0_a = Dim("s0", min=2, max=1024)
+            dim0_b = Dim("s1", min=2, max=1024)
+            dynamic_shapes = {
+                "p": {},
+                "x": {0: dim0_a, 1: None},
+                "y": {0: dim0_b, 1: None},
+                "z": {0: dim0_a, 1: None},
+            }
+        self.check_model_with_multiple_inputs(
+            CondModels.UnbackedSymIntClosure(),
+            prepend_predicates(inputs),
+            dynamic_shapes=dynamic_shapes,
+        )
+
     def test_cond_symint_input(self):
         class M(torch.nn.Module):
             def forward(self, x, y, z):
@@ -1386,6 +1409,26 @@ class AOTInductorTestsTemplate:
             WhileLoopModels.PytreeCarry(),
             [inputs],
             dynamic_shapes=None,
+        )
+
+    @common_utils.parametrize("dynamic", [False, True])
+    def test_while_loop_with_unbacked_symint_closure(self, dynamic):
+        inputs = (
+            torch.randn(10, 20, device=self.device),
+            torch.randn(10, 20, device=self.device),
+        )
+        dim0_ab = Dim("s0", min=2, max=1024)
+        dynamic_shapes = None
+        if dynamic:
+            dynamic_shapes = {
+                "c": {},
+                "a": {0: dim0_ab, 1: None},
+                "b": {0: dim0_ab, 1: None},
+            }
+        self.check_model_with_multiple_inputs(
+            WhileLoopModels.UnbackedSymIntClosure(),
+            prepend_counters(inputs),
+            dynamic_shapes=dynamic_shapes,
         )
 
     @config.patch({"is_predispatch": True})
