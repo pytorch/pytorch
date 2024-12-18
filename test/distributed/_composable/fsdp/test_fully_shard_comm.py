@@ -11,30 +11,30 @@ import torch.distributed as dist
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.distributed._composable import checkpoint, replicate
-from torch.distributed._composable.fsdp import (
+from torch.distributed.device_mesh import DeviceMesh, init_device_mesh
+from torch.distributed.fsdp import (
     FSDPModule,
     fully_shard,
     MixedPrecisionPolicy,
     OffloadPolicy,
 )
-from torch.distributed._composable.fsdp._fsdp_collectives import (
+from torch.distributed.fsdp._fully_shard._fsdp_collectives import (
     _div_if_needed,
     _get_gradient_divide_factors,
     foreach_all_gather,
     foreach_all_gather_copy_out,
     foreach_reduce,
 )
-from torch.distributed._composable.fsdp._fsdp_common import FSDPMeshInfo, TrainingState
-from torch.distributed._composable.fsdp._fsdp_init import (
+from torch.distributed.fsdp._fully_shard._fsdp_common import FSDPMeshInfo, TrainingState
+from torch.distributed.fsdp._fully_shard._fsdp_init import (
     _get_post_forward_mesh_info,
     _init_default_fully_shard_mesh,
 )
-from torch.distributed._composable.fsdp._fsdp_param import ShardedState
-from torch.distributed._composable.fsdp._fsdp_param_group import FSDPParamGroup
-from torch.distributed._tensor import DTensor
-from torch.distributed._tensor.experimental import implicit_replication
-from torch.distributed.device_mesh import DeviceMesh, init_device_mesh
+from torch.distributed.fsdp._fully_shard._fsdp_param import ShardedState
+from torch.distributed.fsdp._fully_shard._fsdp_param_group import FSDPParamGroup
+from torch.distributed.tensor import DTensor
 from torch.distributed.tensor.debug import CommDebugMode
+from torch.distributed.tensor.experimental import implicit_replication
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
@@ -250,8 +250,8 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
         self.assertEqual(group.size(), self.world_size)
         all_reduce_stream = torch.cuda.Stream()
         (
-            reduce_scatter_input,
-            reduce_scatter_event,
+            _,
+            _,
             post_reduce_event,
             _,
             _,
@@ -406,7 +406,7 @@ class TestFullyShardCommunication(FSDPTest):
         torch.manual_seed(42 + self.rank)
         inp = torch.randint(0, model_args.vocab_size, (2, 16), device="cuda")
 
-        for iter_idx in range(10):
+        for _ in range(10):
             ref_loss = ref_model(inp).sum()
             ref_loss.backward()
             for param in ref_model.parameters():
@@ -501,7 +501,7 @@ class TestFullyShardPrefetch(FSDPTest):
         self, reshard_after_forward: Union[bool, int], checkpoint_impl: Optional[str]
     ):
         n_layers = 3
-        model, optim, inp = self._init_transformer(
+        model, _, inp = self._init_transformer(
             n_layers, reshard_after_forward, checkpoint_impl
         )
         events: List[EventType] = []
@@ -843,7 +843,7 @@ class TestFullyShardPrefetch(FSDPTest):
         with patch_unshard(unshard_with_record), patch_post_backward(
             post_backward_with_record
         ):
-            for iter_idx in range(3):
+            for _ in range(3):
                 loss = model(inp)
                 expected_events = [
                     (
@@ -922,7 +922,7 @@ class TestFullyShardPrefetch(FSDPTest):
         with patch_unshard(unshard_with_record), patch_post_backward(
             post_backward_with_record
         ):
-            for iter_idx in range(3):
+            for _ in range(3):
                 loss = model(inp)
                 expected_events = [
                     ("unshard", "", TrainingState.FORWARD),

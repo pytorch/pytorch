@@ -5,7 +5,7 @@
 
 using namespace at::native::mps;
 TEST(MPSTestMetalLibrary, ShaderCreation) {
-   MetalShaderLibrary lib("// Empty library");
+   DynamicMetalShaderLibrary lib("// Empty library");
    ASSERT_EQ(lib.getFunctionNames().size(), 0);
 }
 

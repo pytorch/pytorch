@@ -115,7 +115,7 @@ def _vmap_for_bhqkv(
     ]
 
     for dims in dimensions:
-        fn = torch.vmap(fn, in_dims=prefix + dims + suffix, out_dims=out_dims)
+        fn = torch.vmap(fn, in_dims=prefix + dims + suffix, out_dims=out_dims)  # type: ignore[arg-type]
     return fn
 
 
@@ -1083,6 +1083,8 @@ def _apply_kernel_options(
     kernel_options.setdefault("PRESCALE_QK", False)
     kernel_options.setdefault("ROWS_GUARANTEED_SAFE", False)
     kernel_options.setdefault("BLOCKS_ARE_CONTIGUOUS", False)
+    # This forces all biases grad scatters to be done in the DQ iteration loop of the backwards
+    kernel_options.setdefault("WRITE_DQ", True)
 
     # If forward kernel needs to return logsumexp is decided by this rule internally.
     assert "OUTPUT_LOGSUMEXP" not in kernel_options
@@ -1092,6 +1094,15 @@ def _apply_kernel_options(
         # we always write unless in no_grad
         output_logsumexp = torch.is_grad_enabled()
         kernel_options["OUTPUT_LOGSUMEXP"] = output_logsumexp
+        any_inputs_on_cpu_device = (
+            query.device.type == "cpu"
+            or key.device.type == "cpu"
+            or value.device.type == "cpu"
+        )
+        if any_inputs_on_cpu_device:
+            # CPU with torch.compile now supports infernece, and will not return lse
+            # TODO: support CPU for training and return lse
+            kernel_options["OUTPUT_LOGSUMEXP"] = False
 
     return kernel_options
 
@@ -1114,12 +1125,12 @@ def _validate_embed_dim(query: Tensor, key: Tensor, value: Tensor):
 
 
 def _validate_device(query: Tensor, key: Tensor, value: Tensor):
-    """TODO: Remove once non cuda device support is added
+    """TODO: Remove once non cuda/cpu devices support is added
     We only need to check query since we have already that q,k,v are on the same device
     """
-    if query.device.type != "cuda":
+    if query.device.type != "cuda" and query.device.type != "cpu":
         raise ValueError(
-            "FlexAttention is only supported on CUDA devices. "
+            "FlexAttention is only supported on CUDA or CPU devices. "
             f"Found input tensors on {query.device.type} device."
         )
 
