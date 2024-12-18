@@ -1,5 +1,4 @@
 # Owner(s): ["module: sdpa"]
-# ruff: noqa: F841
 
 import contextlib
 from functools import partial
