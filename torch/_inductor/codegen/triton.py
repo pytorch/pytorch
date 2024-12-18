@@ -30,7 +30,7 @@ from sympy.printing.precedence import PRECEDENCE
 
 import torch
 import torch._logging
-from torch._dynamo.utils import identity, preserve_rng_state
+from torch._dynamo.utils import identity
 from torch._prims_common import is_integer_dtype
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.functions import CeilDiv, FloorDiv, ModularIndexing
@@ -3756,35 +3756,43 @@ class TritonScheduling(SIMDScheduling):
 
         return kernel_name
 
-    def benchmark_fused_nodes(self, nodes, n_spills_threshold=8):
-        with preserve_rng_state(), torch.cuda.device(
-            V.graph.get_current_device_or_throw()
-        ):
-            src_code = self.generate_kernel_code_from_nodes(
-                nodes, benchmark_kernel=True
-            )
-            mod = PyCodeCache.load(src_code)
+    def benchmark_fused_nodes(self, nodes, n_spills_threshold=8) -> Tuple[float, str]:
+        """
+        Benchmark fused list of nodes and return the execution time
+        in milliseconds on randomly generated inputs.
+        """
+        src_code = self.generate_kernel_code_from_nodes(nodes, benchmark_kernel=True)
+        mod = PyCodeCache.load(src_code)
+        return self.benchmark_codegened_module(
+            mod, n_spills_threshold, node_names=OrderedSet(n.get_name() for n in nodes)
+        )
 
-            def cache_file_path():
-                assert mod.__file__ is not None
-                return os.path.splitext(mod.__file__)[0] + ".kernel_perf"
+    def benchmark_codegened_module(
+        self, mod, n_spills_threshold=8, node_names: Optional[OrderedSet[str]] = None
+    ) -> Tuple[float, str]:
+        """Benchmark an already compiled module"""
 
-            def load_cache():
-                path = cache_file_path()
-                if os.path.exists(path):
-                    with open(path) as fd:
-                        return float(fd.read())
-                return None
+        def cache_file_path():
+            assert mod.__file__ is not None
+            return os.path.splitext(mod.__file__)[0] + ".kernel_perf"
 
-            def store_cache():
-                path = cache_file_path()
-                with open(path, "w") as fd:
-                    fd.write(str(ms))
+        def load_cache():
+            path = cache_file_path()
+            if os.path.exists(path):
+                with open(path) as fd:
+                    return float(fd.read())
+            return None
 
+        def store_cache():
+            path = cache_file_path()
+            with open(path, "w") as fd:
+                fd.write(str(ms))
+
+        with torch.cuda.device(V.graph.get_current_device_or_throw()):
             log.debug(
                 "kernel src code for %s written to: %s",
-                OrderedSet(n.get_name() for n in nodes),
                 mod.__file__,
+                node_names if node_names is not None else "unknown",
             )
             ms = load_cache()
             if ms is not None:
@@ -3793,7 +3801,6 @@ class TritonScheduling(SIMDScheduling):
             args = mod.get_args()
             call = mod.call
             wrapped_jit_function = mod.triton_
-
             # call once to trigger the compilation
             try:
                 call(wrapped_jit_function.clone_args(*args)[0])
@@ -3801,7 +3808,7 @@ class TritonScheduling(SIMDScheduling):
                 log.debug(
                     "Exception (%s) in compiling fused nodes %s",
                     e,
-                    OrderedSet(n.get_name() for n in nodes),
+                    node_names if node_names is not None else "unknown",
                 )
                 ms = float("inf")
                 store_cache()
@@ -3820,7 +3827,6 @@ class TritonScheduling(SIMDScheduling):
                 ms = benchmarker.benchmark_gpu(
                     lambda: call(wrapped_jit_function.clone_args(*args)[0])
                 )
-
                 # overhead of cloning args gives bias for fusing the kernel
                 # in the case of mutating/in-placeable second fusion
                 # TODO - would be better as a hook in triton do_bench that reset
@@ -3832,7 +3838,7 @@ class TritonScheduling(SIMDScheduling):
 
             log.debug(
                 "The fused kernel for %s took %.3f ms to run",
-                OrderedSet(n.get_name() for n in nodes),
+                node_names if node_names is not None else "unknown",
                 ms,
             )
             store_cache()
