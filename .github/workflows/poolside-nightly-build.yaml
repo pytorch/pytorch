@@ -41,7 +41,7 @@ env:
   TORCH_CUDA_ARCH_LIST: "8.6;9.0+PTX"
   # For publish:
   CODEARTIFACT_DOMAIN: poolside
-  CODEARTIFACT_REPOSITORY: poolside-packages-python-unstable
+  CODEARTIFACT_REPOSITORY: poolside-packages-python
 
 concurrency:
   # for now we only allow one build at a time
