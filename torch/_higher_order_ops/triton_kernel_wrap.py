@@ -992,9 +992,9 @@ triton_kernel_wrapper_functional.fallthrough(DispatchKey.AutogradCPU)
 
 
 def call_prune_configs(  # type: ignore[no-untyped-def]
-    autotuner,
-    early_config_prune: Callable,
-    perf_model: Callable,
+    autotuner: "TritonAutotunerType",
+    early_config_prune: Optional[Callable],
+    perf_model: Optional[Callable],
     top_k: float,
     is_top_k_float: bool,
     configs: List,
@@ -1008,6 +1008,40 @@ def call_prune_configs(  # type: ignore[no-untyped-def]
     # We do this to avoid calling prune_configs, which in turn calls early_config_prune and perf_model
     # These are both user-defined functions which can contain side effects, so we want to sandbox them in Dynamo
 
+    # yes, we really have to roll our own sort here.
+    # Dynamo doesn't like calling sorted with non-constant keys:
+    # tracking issue: https://github.com/pytorch/pytorch/issues/143505
+    # When this is fixed, this should be deleted and replaced with sorted()
+
+    # yes we really needed a custom filter for dynamo also...
+    # dynamo has issues with the return type of filter
+    def custom_filter(lst: List[Tuple["TritonConfig", float]], pred: Callable) -> List:
+        temp = []
+        for item in lst:
+            if pred(item):
+                temp.append(item)
+        return temp
+
+    # quicksort, but modified to satisfy dynamo
+    def custom_sort_that_should_be_deleted_eventually(
+        lst: List[Tuple["TritonConfig", float]]
+    ) -> List:
+        if len(lst) == 0 or len(lst) == 1:
+            return lst
+        # we don't need to really pick an optimal pivot
+        # as this function should be deleted eventually
+        pivot = lst[0][1]
+        lst = lst[1:]
+        lesser = custom_filter(lst, lambda x: x[1] < pivot)
+        greater = custom_filter(lst, lambda x: x[1] >= pivot)
+        result = []
+        lhs = custom_sort_that_should_be_deleted_eventually(lesser)
+        rhs = custom_sort_that_should_be_deleted_eventually(greater)
+        result.extend(lhs)
+        result.extend([pivot])
+        result.extend(rhs)
+        return result
+
     if early_config_prune:
         configs = early_config_prune(configs, named_args, **kwargs)
 
@@ -1015,15 +1049,26 @@ def call_prune_configs(  # type: ignore[no-untyped-def]
         # we assert top_k is a float before calling this
         if is_top_k_float and top_k <= 1.0:
             top_k = int(len(configs) * top_k)
+        else:
+            """
+            if top_k was a float > 1.0, convert to int
+            This differs from upstream Triton right now (which doesn't typecheck with mypy yet)
+            without this we get:
+              Slice index must be an integer, SupportsIndex or None
+                custom_sort_that_should_be_deleted_eventually(est_timing)[:top_k]
+            """
+            top_k = int(top_k)
         if len(configs) > top_k:
-            est_timing = {
-                # call the user-defined function here as well
-                config: perf_model(**named_args, **kwargs, **config.all_kwargs())
+            est_timing = [
+                (
+                    config,
+                    float(perf_model(**named_args, **kwargs, **config.all_kwargs())),
+                )
                 for config in configs
-            }
-            # realize the results of calling perf_model
-            est_timing = {k: v for k, v in est_timing.items()}
-            configs = sorted(est_timing.keys(), key=lambda x: est_timing[x])[:top_k]
+            ]
+            configs = custom_sort_that_should_be_deleted_eventually(est_timing)[:top_k]
+            # return just the list of configs after the sort
+            configs = [config[0] for config in configs[:top_k]]
     return configs
 
 
@@ -1284,8 +1329,6 @@ class TritonHOPifier:
                 variable.kernel.configs_top_k, tx, variable.source, "configs_top_k"
             )
 
-            # There are no guards on this after
-            # So we just use a fake source here
             wrapped_is_top_k_float = self.wrap_user_defined_obj(
                 is_top_k_float, tx, variable.source, "configs_top_k"
             )
