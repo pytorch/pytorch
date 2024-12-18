@@ -470,6 +470,7 @@ class ConfigFuzzer:
     cpp_wrapper, triton_debug_sync_kernel
     cpp_wrapper, disable_cpp_codegen
     combo_kernels, benchmark_combo_kernel, profile_bandwidth, profile_bandwidth_regex
+    trace.enabled, trace.save_real_tensors
     """
 
     sample: SamplingType
@@ -513,7 +514,7 @@ class ConfigFuzzer:
                 # Known Failure: Disabled due to known failure. Hopefully re-enable. Known failures are listed in the
                 #   docstring of this file.
                 # Required: Required for the fuzzer to operate (removing caching, etc.)
-                # FSDP: flag meant for FSDP that fails in non FSDP envs. Re-enable these if you're testing FSDP.
+                # FSDP: Flag meant for FSDP that fails in non FSDP envs. Re-enable these if you're testing FSDP.
                 # Typing: disabled because the type annotation of the config isn't constrained enough to produce
                 #   meaningful fuzz values. These could be improved.
                 # Timing: These take too long to compile, feel free to enable.
@@ -547,6 +548,7 @@ class ConfigFuzzer:
                     "triton.inject_relu_bug_TESTING_ONLY": DEFAULT,  # Testing
                     "profile_bandwidth_regex": DEFAULT,  # Known Failure
                     "disable_cpp_codegen": DEFAULT,  # Known Failure
+                    "trace.save_real_tensors": DEFAULT,  # Known Failure
                 }
             else:
                 raise ValueError("No default passed to ConfigFuzzer.")
