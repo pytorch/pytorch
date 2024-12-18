@@ -46,6 +46,7 @@
 #include <torch/csrc/Dtype.h>
 #include <torch/csrc/DynamicTypes.h>
 #include <torch/csrc/Event.h>
+#include <torch/csrc/Export.h>
 #include <torch/csrc/Generator.h>
 #include <torch/csrc/Layout.h>
 #include <torch/csrc/MemoryFormat.h>
@@ -1717,7 +1718,7 @@ class WeakTensorRef {
   }
 };
 
-extern "C" C10_EXPORT PyObject* initModule();
+extern "C" TORCH_PYTHON_API PyObject* initModule();
 // separate decl and defn for msvc error C2491
 PyObject* initModule() {
   HANDLE_TH_ERRORS
@@ -1938,6 +1939,8 @@ Call this whenever a new thread is created in order to propagate values from
   ASSERT_TRUE(
       set_module_attr("has_openmp", at::hasOpenMP() ? Py_True : Py_False));
   ASSERT_TRUE(set_module_attr("has_mkl", at::hasMKL() ? Py_True : Py_False));
+  ASSERT_TRUE(
+      set_module_attr("_has_kleidiai", at::hasKleidiAI() ? Py_True : Py_False));
   ASSERT_TRUE(
       set_module_attr("has_lapack", at::hasLAPACK() ? Py_True : Py_False));
 

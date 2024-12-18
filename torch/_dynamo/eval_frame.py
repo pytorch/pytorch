@@ -51,6 +51,7 @@ from torch import _guards
 # see discussion at https://github.com/pytorch/pytorch/issues/120699
 from torch._C._dynamo.eval_frame import (  # noqa: F401
     reset_code,
+    set_eval_frame,
     set_guard_error_hook,
     set_skip_guard_eval_unsafe,
     skip_code,
@@ -538,49 +539,53 @@ class _TorchDynamoContext:
 
         @functools.wraps(fn)
         def _fn(*args, **kwargs):
-            if is_fx_tracing():
-                if config.error_on_nested_fx_trace:
+            prior = set_eval_frame(None)
+            try:
+                if is_fx_tracing():
+                    if config.error_on_nested_fx_trace:
+                        raise RuntimeError(
+                            "Detected that you are using FX to symbolically trace "
+                            "a dynamo-optimized function. This is not supported at the moment."
+                        )
+                    else:
+                        return fn(*args, **kwargs)
+
+                if is_jit_tracing():
                     raise RuntimeError(
-                        "Detected that you are using FX to symbolically trace "
+                        "Detected that you are using FX to torch.jit.trace "
                         "a dynamo-optimized function. This is not supported at the moment."
                     )
-                else:
+
+                cleanups = [enter() for enter in self.enter_exit_hooks]
+                prior_skip_guard_eval_unsafe = set_skip_guard_eval_unsafe(
+                    _is_skip_guard_eval_unsafe_stance()
+                )
+
+                # Ensure that if an assertion occurs after graph pushes
+                # something onto the DynamicLayerStack then we pop it off (the
+                # constructed graph code isn't guarded with try/finally).
+                #
+                # This used to be a context but putting a `with` here is a noticible
+                # perf regression (#126293)
+                saved_dynamic_layer_stack_depth = (
+                    torch._C._functorch.get_dynamic_layer_stack_depth()
+                )
+                _maybe_set_eval_frame(_callback_from_stance(callback))
+
+                try:
                     return fn(*args, **kwargs)
+                finally:
+                    # Restore the dynamic layer stack depth if necessary.
+                    set_eval_frame(None)
+                    torch._C._functorch.pop_dynamic_layer_stack_and_undo_to_depth(
+                        saved_dynamic_layer_stack_depth
+                    )
 
-            if is_jit_tracing():
-                raise RuntimeError(
-                    "Detected that you are using FX to torch.jit.trace "
-                    "a dynamo-optimized function. This is not supported at the moment."
-                )
-
-            cleanups = [enter() for enter in self.enter_exit_hooks]
-            prior = _maybe_set_eval_frame(_callback_from_stance(callback))
-            prior_skip_guard_eval_unsafe = set_skip_guard_eval_unsafe(
-                _is_skip_guard_eval_unsafe_stance()
-            )
-
-            # Ensure that if an assertion occurs after graph pushes
-            # something onto the DynamicLayerStack then we pop it off (the
-            # constructed graph code isn't guarded with try/finally).
-            #
-            # This used to be a context but putting a `with` here is a noticible
-            # perf regression (#126293)
-            saved_dynamic_layer_stack_depth = (
-                torch._C._functorch.get_dynamic_layer_stack_depth()
-            )
-
-            try:
-                return fn(*args, **kwargs)
+                    set_skip_guard_eval_unsafe(prior_skip_guard_eval_unsafe)
+                    for cleanup in cleanups:
+                        cleanup()
             finally:
-                # Restore the dynamic layer stack depth if necessary.
-                torch._C._functorch.pop_dynamic_layer_stack_and_undo_to_depth(
-                    saved_dynamic_layer_stack_depth
-                )
-
                 _maybe_set_eval_frame(prior)
-                set_skip_guard_eval_unsafe(prior_skip_guard_eval_unsafe)
-                for cleanup in cleanups:
-                    cleanup()
 
         # hooks to properly handle inlining
         _fn._torchdynamo_inline = fn  # type: ignore[attr-defined]
@@ -736,15 +741,19 @@ class DisableContext(_TorchDynamoContext):
 
         @functools.wraps(fn)
         def _fn(*args, **kwargs):
-            prior = _maybe_set_eval_frame(_callback_from_stance(self.callback))
-            prior_skip_guard_eval_unsafe = set_skip_guard_eval_unsafe(
-                _is_skip_guard_eval_unsafe_stance()
-            )
+            prior = set_eval_frame(None)
             try:
-                return fn(*args, **kwargs)
+                prior_skip_guard_eval_unsafe = set_skip_guard_eval_unsafe(
+                    _is_skip_guard_eval_unsafe_stance()
+                )
+                _maybe_set_eval_frame(_callback_from_stance(self.callback))
+                try:
+                    return fn(*args, **kwargs)
+                finally:
+                    set_eval_frame(None)
+                    set_skip_guard_eval_unsafe(prior_skip_guard_eval_unsafe)
             finally:
                 _maybe_set_eval_frame(prior)
-                set_skip_guard_eval_unsafe(prior_skip_guard_eval_unsafe)
 
         _fn._torchdynamo_disable = True  # type: ignore[attr-defined]
 
@@ -1813,7 +1822,6 @@ class TorchPatcher:
         for opt_mod in optimizer_modules:
             opt_name = opt_mod.__name__.split(".")[-1]
             fused_fn_name = f"_fused_{opt_name}"
-            single_tensor_fn_name = f"_single_tensor_{opt_name}"
 
             if hasattr(opt_mod, fused_fn_name):
                 setattr(
