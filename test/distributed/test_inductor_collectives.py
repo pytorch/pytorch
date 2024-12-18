@@ -3,6 +3,7 @@ import datetime
 import functools
 import unittest
 from unittest.mock import patch
+from typing import List
 
 import torch
 import torch._dynamo
@@ -479,6 +480,108 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
             eager_out = example(*inputs)
             compiled_fn = compile(example, inputs)
             inductor_out = compiled_fn(*inputs)
+            self.assertTrue(same(eager_out, inductor_out, tol=0.001))
+
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @skip_if_lt_x_gpu(2)
+    @patch.object(torch._dynamo.config, "capture_scalar_outputs", True)
+    def test_all_to_all_single_custom_autograd_function(self):
+        class AllToAllSingle(torch.autograd.Function):
+            @staticmethod
+            # pyre-fixme[14]: `forward` overrides method defined in `Function` inconsistently.
+            def forward(
+                # pyre-fixme[2]: Parameter must be annotated.
+                ctx,
+                input: torch.Tensor,
+                output_split_sizes: List[int],
+                input_split_sizes: List[int],
+                group_name: str,
+                group_size: int,
+                gradient_division: bool,
+            ) -> torch.Tensor:
+                ctx.output_split_sizes = input_split_sizes
+                ctx.input_split_sizes = output_split_sizes
+                ctx.group_name = group_name
+                ctx.group_size = group_size
+                ctx.gradient_division = gradient_division
+                return torch.distributed._functional_collectives.all_to_all_single(
+                    input, output_split_sizes, input_split_sizes, group_name
+                )
+
+            @staticmethod
+            # pyre-ignore
+            def backward(ctx, grad):
+                # TODO(ivankobzarev): Support codecs(quantization) on backward
+                grad = torch.distributed._functional_collectives.all_to_all_single(
+                    grad,
+                    ctx.output_split_sizes,
+                    ctx.input_split_sizes,
+                    ctx.group_name,
+                )
+                if ctx.gradient_division:
+                    grad.div_(ctx.group_size)
+
+                return grad, None, None, None, None, None
+
+        def example(
+            inp,
+            input_split_sizes_tensor,
+            output_split_sizes_tensor,
+            *,
+            tag,
+            ranks,
+            group_size,
+        ):
+            input_split_sizes = _tolist_with_constrain_as_size(input_split_sizes_tensor)
+            output_split_sizes = _tolist_with_constrain_as_size(
+                output_split_sizes_tensor
+            )
+            process_group = torch.distributed.distributed_c10d._get_default_group()
+            a2a = AllToAllSingle.apply(
+                inp,
+                output_split_sizes,
+                input_split_sizes,
+                process_group.group_name,
+                process_group.size(),
+                True,
+            )
+            out = a2a / a2a.sum(dim=0)
+            return out
+
+        with _dynamo_dist_per_rank_init(
+            self.rank, self.world_size
+        ), torch._dynamo.config.patch(
+            dynamic_shapes=True,
+            capture_dynamic_output_shape_ops=True,
+            capture_scalar_outputs=True,
+        ):
+            row = self.world_size * (self.rank + 1) * (self.world_size + 1) / 2
+            input_split_sizes_tensor = torch.tensor(
+                [(i + 1) * (self.rank + 1) for i in range(self.world_size)],
+                dtype=torch.int64,
+            )
+            output_split_sizes_tensor = torch.tensor(
+                [(i + 1) * (self.rank + 1) for i in range(self.world_size)],
+                dtype=torch.int64,
+            )
+
+            def create_inputs():
+                torch.manual_seed(self.rank + 1)
+                inputs = (
+                    torch.randn(int(row), 5, device="cuda", requires_grad=True) * (self.rank + 1),
+                    input_split_sizes_tensor,
+                    output_split_sizes_tensor,
+                )
+                return inputs
+
+            trs = self.get_world_trs()
+
+            compiled_fn = torch.compile(example, fullgraph=True, dynamic=True)
+
+            eager_out = example(*create_inputs(), **trs)
+            eager_out.sum().backward()
+            inductor_out = compiled_fn(*create_inputs(), **trs)
+            inductor_out.sum().backward()
             self.assertTrue(same(eager_out, inductor_out, tol=0.001))
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
