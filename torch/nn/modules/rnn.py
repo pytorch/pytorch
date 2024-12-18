@@ -127,7 +127,7 @@ class RNNBase(Module):
                 f"num_layers={num_layers}"
             )
 
-        if not isinstance(hidden_size, int):
+        if not isinstance(hidden_size, int) or isinstance(hidden_size, bool):
             raise TypeError(
                 f"hidden_size should be of type int, got: {type(hidden_size).__name__}"
             )
