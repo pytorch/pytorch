@@ -567,9 +567,12 @@ def _load_model_state_dict(
         # In lora state_dict, ther could be multiple devices, with meta device inside.
         # Take the other device in the broadcast/distribtue, and set assign to True
         elif len(devices) == 2:
-            devices.remove(torch.device("meta"))
-            device = devices.pop()
-            assign = True
+            if torch.device("meta") in devices:
+                devices.remove(torch.device("meta"))
+                device = devices.pop()
+                assign = True
+            else:
+                raise ValueError("Multiple devices found")
         else:
             raise ValueError("Multiple devices found")
 

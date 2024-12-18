@@ -875,6 +875,55 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
             )
             self.assertEqual(cpu_model_value, meta_model_value)
 
+    @with_comms
+    @skip_if_lt_x_gpu(1)
+    def test_memory_between_view_and_clone(self) -> None:
+        torch.manual_seed(0)
+        with torch.device("cuda"):
+            model = nn.Sequential(
+                *[nn.Linear(10000, 10000, bias=False) for _ in range(4)]
+            )
+        sd = model.state_dict()
+        local_view = sd["0.weight"][1:10, 1:10]
+        self.assertEqual(local_view.storage().nbytes(), 4 * 10000 * 10000)
+        local_clone = sd["1.weight"][1:10, 1:10].detach().clone()
+        self.assertEqual(local_clone.storage().nbytes(), 4 * 9 * 9)
+
+    @with_comms
+    @skip_if_lt_x_gpu(2)
+    def test_multi_device_load_model_state_dict(self) -> None:
+        torch.manual_seed(0)
+        with torch.device("meta"):
+            meta_submodel = nn.Linear(4, 4, bias=False)
+        with torch.device("cpu"):
+            cpu_submodel = nn.Linear(4, 4, bias=False)
+        with torch.device("cuda"):
+            cuda_submodel = nn.Linear(4, 4, bias=False)
+
+        two_device_model_with_meta = nn.Sequential(meta_submodel, cuda_submodel)
+        two_device_model_without_meta = nn.Sequential(cpu_submodel, cuda_submodel)
+
+        with torch.device("cpu"):
+            model_to_set = nn.Sequential(
+                *[nn.Linear(4, 4, bias=False) for _ in range(2)]
+            )
+            full_sd = model_to_set.state_dict()
+        set_model_state_dict(
+            two_device_model_with_meta,
+            model_state_dict=full_sd,
+            options=StateDictOptions(
+                broadcast_from_rank0=True, full_state_dict=True, strict=False
+            ),
+        )
+        with self.assertRaisesRegex(ValueError, "Multiple devices found"):
+            set_model_state_dict(
+                two_device_model_without_meta,
+                model_state_dict=full_sd,
+                options=StateDictOptions(
+                    broadcast_from_rank0=True, full_state_dict=True, strict=False
+                ),
+            )
+
 
 class TestNoComm(MultiProcessTestCase):
     def setUp(self) -> None:
