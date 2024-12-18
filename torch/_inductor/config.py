@@ -1336,6 +1336,9 @@ class trace:
 
     log_autotuning_results: bool = False
 
+    # Save mapping info from inductor generated triton kernel to post_grad fx nodes
+    log_inductor_triton_kernel_to_post_grad_node_info: bool = True
+
 
 _save_config_ignore = [
     # workaround: "Can't pickle <function ...>"

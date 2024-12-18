@@ -3431,6 +3431,14 @@ class TestMPS(TestCaseMPS):
         x_cpu = x_cpu + 2
         self.assertEqual(x, x_cpu)
 
+        # Regression test for https://github.com/pytorch/pytorch/issues/143140
+        def slice_and_reshape(t):
+            return t[:, :, :, :3, :3].reshape(18, 1, 3)
+
+        x = torch.rand(1, 1, 1, 4, 5, 6, dtype=torch.cfloat, device="mps")
+        x_cpu = x.detach().clone().cpu()
+        self.assertEqual(slice_and_reshape(x_cpu), slice_and_reshape(x).cpu())
+
     def test_reshape_storage_offset(self):
         # https://github.com/pytorch/pytorch/issues/95883
         B = 4
