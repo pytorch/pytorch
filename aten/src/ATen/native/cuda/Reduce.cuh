@@ -899,7 +899,7 @@ inline void launch_jitted_reduce_kernel(
     std::mutex &jiterator_mutex,
     std::array<at::cuda::jit::NvrtcFunction, 3> &fn_cache,
     const at::cuda::jit::KernelDescriptor &desc,
-    int vt0, const ReduceConfig& config, void *reduction) {
+    int vt0, const ReduceConfig& config, const void *reduction) {
   dim3 block = config.block();
   dim3 grid = config.grid();
 
@@ -924,7 +924,7 @@ inline void launch_jitted_reduce_kernel(
     *fn_ptr = at::cuda::jit::jit_pwise_function(code, "reduction_" + desc.name);
   }
   constexpr int kernel_args = 1;
-  void* args[kernel_args];
+  const void* args[kernel_args];
   args[0] = reduction;
   at::cuda::jit::launch_jitted_pwise_function(*fn_ptr, args, grid, block, shared_memory);
 }
