@@ -1528,6 +1528,23 @@ class MatmulTest(TestCaseMPS):
 
         self.assertEqual(matmul_cpu, matmul_mps.to("cpu"))
 
+    # Regression test for https://github.com/pytorch/pytorch/issues/104832
+    def test_sliced_matmul(self):
+        x_cpu = torch.randn(256, 256, device="cpu")
+        x_mps = x_cpu.detach().clone().to("mps")
+
+        y_cpu = torch.randn(256, 256, device="cpu")
+        y_mps = y_cpu.detach().clone().to("mps")
+
+        out_cpu = torch.zeros(256, 2 * 256, device="cpu")
+        out_mps = out_cpu.detach().clone().to("mps")
+
+        torch.matmul(x_cpu, y_cpu, out=out_cpu[:, 128:(128+256)])
+        torch.matmul(x_mps, y_mps, out=out_mps[:, 128:(128+256)])
+
+        self.assertEqual(out_cpu, out_mps)
+
+
 class MPSLeakyReluTest(TestCaseMPS):
     def _npLeakyRelu(self, np_features, negative_slope=0.1):
         return np.maximum(np_features, negative_slope * np_features).astype(np_features.dtype)
