@@ -15,8 +15,8 @@ import torch.fx
 import torch.nn
 from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.utils import get_fake_value
-from torch._dynamo.variables import ConstantVariable
 from torch._dynamo.variables.builtin import BuiltinVariable
+from torch._dynamo.variables.constant import ConstantVariable
 from torch._dynamo.variables.functions import UserFunctionVariable
 from torch._dynamo.variables.tensor import SymNodeVariable
 from torch._guards import Source
@@ -909,7 +909,7 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
             true_graph,
             false_graph,
             true_shared,
-            false_shared,
+            _false_shared,
             unique_true,
             unique_false,
         ) = _merge_graph_inputs(
@@ -1040,7 +1040,7 @@ class WhileLoopHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
         # create cond subgrpahs
         (
-            (cond_r, cond_treespec),
+            (cond_r, _cond_treespec),
             cond_graph,
             cond_lifted_freevars,
         ) = speculate_subgraph(
@@ -1120,7 +1120,7 @@ class WhileLoopHigherOrderVariable(TorchHigherOrderOperatorVariable):
             cond_graph,
             body_graph,
             cond_shared,
-            body_shared,
+            _body_shared,
             cond_unique,
             body_unique,
         ) = _merge_graph_inputs(
@@ -1212,7 +1212,7 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 for leaf in itertools.chain(xs.items, xs.items)
             ]
         (
-            (combine_result, combine_treespec),
+            (combine_result, _combine_treespec),
             combine_graph,
             combine_lifted_freevars,
         ) = speculate_subgraph(
@@ -1345,7 +1345,7 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
             ]
         sub_args = sub_args_init + sub_args_inp + sub_args_additional_inputs
         (
-            (combine_result, combine_treespec),
+            (combine_result, _combine_treespec),
             combine_graph,
             combine_lifted_freevars,
         ) = speculate_subgraph(
@@ -1682,7 +1682,7 @@ class WrapHigherOrderVariable(TorchHigherOrderOperatorVariable):
         (
             p_args,
             p_kwargs,
-            example_value,
+            _example_value,
             body_r,
             treespec,
             _,
@@ -1974,8 +1974,6 @@ class StrictModeHigherOrderVariable(TorchHigherOrderOperatorVariable):
         args: "List[VariableTracker]",
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
-        callable = args[0]
-
         unpacked_sequence = args[1].unpack_var_sequence(tx)
         # TODO (tmanlaibaatar) support pytree here
         for arg in unpacked_sequence:
@@ -2064,7 +2062,7 @@ class CheckpointHigherOrderVariable(WrapHigherOrderVariable):
             p_args,
             _,
             example_value,
-            body_r,
+            _body_r,
             treespec,
             checkpointed_gmod,
             _,
@@ -2238,7 +2236,7 @@ class FlexAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
         with TransformGetItemToIndex():
             (
-                (body_output, body_treespec),
+                (_body_output, _body_treespec),
                 body_graph,
                 body_lifted_freevars,
             ) = speculate_subgraph(
@@ -2274,6 +2272,8 @@ class FlexAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
         args: "List[VariableTracker]",
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
+        from torch._higher_order_ops.flex_attention import flex_attention_fake_impl
+
         from .builder import wrap_fx_proxy
 
         (
@@ -2311,13 +2311,9 @@ class FlexAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
         inp_args, _ = proxy_args_kwargs(proxied_args, {})
 
         query_meta = query.as_proxy().node.meta["example_value"]
-        logsumexp_shape = query_meta.size()[:-1]  # [B, H, M]
+        value_meta = value.as_proxy().node.meta["example_value"]
         with torch._guards.TracingContext.try_get().fake_mode:
-            out_meta = torch.empty_like(
-                query_meta, memory_format=torch.contiguous_format
-            )
-            # TODO: Figure out a better way to handle this for NJT than using sum()
-            lse_meta = torch.empty_like(query_meta, dtype=torch.float32).sum(dim=-1)
+            out_meta, lse_meta = flex_attention_fake_impl(query_meta, value_meta)
         example_value = (out_meta, lse_meta)
 
         # Compose the ordered HOO args:
@@ -2669,7 +2665,7 @@ def maybe_positional_arg_names(func):
     except (Unsupported, NotImplementedError):
         return None
     try:
-        sig = inspect.signature(func.get_function())
+        sig = inspect.signature(fn)
     except ValueError:
         return None
     for name, param in sig.parameters.items():
