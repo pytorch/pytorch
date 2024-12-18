@@ -25,11 +25,14 @@ from torch.nested._internal.nested_tensor import (
     jagged_from_tensor_and_lengths,
     nested_view_from_values_offsets,
 )
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     NestedTensorTestCase,
     parametrize,
+    skipIfHpu,
     subtest,
+    TEST_HPU,
 )
 from torch.testing._internal.inductor_utils import HAS_CUDA
 from torch.testing._internal.two_tensor import TwoTensor
@@ -3096,10 +3099,6 @@ class GraphModule(torch.nn.Module):
     def test_basic_autograd(self):
         self._test_autograd("aot_eager")
 
-    @requires_cuda
-    def test_basic_autograd_inductor(self):
-        self._test_autograd("inductor")
-
     def test_subclass_with_mutation_in_graph(self):
         # In this graph, we have an in-graph mutation, i.e. a mutation that is allowed
         # to remain in the graph. Normally this is allowed, but it's not allowed if
@@ -3281,6 +3280,43 @@ Eq(s12, s10)""",
     def test_subclass_dense_subclass_dense_view(self):
         self._input_view_test("subclass_dense_subclass_dense")
 
+
+class TestNestedTensorDevice(torch._dynamo.test_case.TestCase):
+    def _test_autograd(self, backend, device):
+        a = torch.randn(2, 3, requires_grad=True, dtype=torch.float64, device=device)
+        b = torch.randn(3, 3, requires_grad=True, dtype=torch.float64, device=device)
+        c = torch.randn(4, 3, requires_grad=True, dtype=torch.float64, device=device)
+        nt = torch.nested.as_nested_tensor([a, b, c], layout=torch.jagged)
+        # TODO: Switch to public API when it exists
+        nt2, _ = jagged_from_list([a, b, c], nt.offsets())
+
+        def fn1(nt1, nt2):
+            return (nt1 + nt2).sin().cos()
+
+        compiled_f = torch.compile(fn1, fullgraph=True, backend=backend, dynamic=True)
+        out = compiled_f(nt, nt2)
+        out_buffer = out.values()
+        ga, gb, gc = torch.autograd.grad(out_buffer.sum(), (a, b, c))
+
+        out_ref = fn1(nt, nt2)
+        out_buffer_ref = out_ref.values()
+        ga_ref, gb_ref, gc_ref = torch.autograd.grad(out_buffer_ref.sum(), (a, b, c))
+
+        self.assertTrue(torch.allclose(ga, ga_ref))
+        self.assertTrue(torch.allclose(gb, gb_ref))
+        self.assertTrue(torch.allclose(gc, gc_ref))
+
+    @skipIfHpu
+    def test_basic_autograd_inductor(self, device):
+        self._test_autograd("inductor", device)
+
+
+instantiate_parametrized_tests(TestNestedTensor)
+
+devices = ["cuda"]
+if TEST_HPU:
+    devices.append("hpu")
+instantiate_device_type_tests(TestNestedTensorDevice, globals(), only_for=devices)
 
 instantiate_parametrized_tests(TestNestedTensor)
 
