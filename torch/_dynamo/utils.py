@@ -917,6 +917,7 @@ class CompilationMetrics:
     feature_usage: Optional[dict[str, bool]] = None
     compile_time_autotune_time_us: Optional[int] = None
     is_runtime: Optional[bool] = False
+    gc_time_us: Optional[int] = None
 
 
 DEFAULT_COMPILATION_METRICS_LIMIT = 64

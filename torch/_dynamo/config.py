@@ -10,7 +10,7 @@ from typing import Any, Callable, Dict, Optional, Set, Type, TYPE_CHECKING, Unio
 
 import torch
 from torch._environment import is_fbcode
-from torch.utils._config_module import get_tristate_env, install_config_module
+from torch.utils._config_module import Config, get_tristate_env, install_config_module
 
 
 # to configure logging for dynamo, aot, and inductor
@@ -393,6 +393,9 @@ enable_cpp_guard_manager = True
 # Inline inbuilt nn modules
 inline_inbuilt_nn_modules = not is_fbcode()
 
+# Use C++ FrameLocalsMapping (raw array view of Python frame fastlocals)
+enable_cpp_framelocals_guard_eval = True
+
 # Whether to automatically find and replace identical graph
 # regions with a call to invoke_subgraph
 use_graph_deduplication = False
@@ -549,6 +552,13 @@ automatic_dynamic_remote_pgo: Optional[bool] = get_tristate_env(
 # temporary config to kill later
 _unsafe_skip_fsdp_module_guards = (
     os.environ.get("UNSAFE_SKIP_FSDP_MODULE_GUARDS", "0") == "1"
+)
+
+# Run GC at the end of compilation
+run_gc_after_compile = Config(  # type: ignore[var-annotated]
+    default=True,
+    justknob="pytorch/compiler:enable_run_gc_after_compile",
+    env_name_default="TORCH_DYNAMO_RUN_GC_AFTER_COMPILE",
 )
 
 # HACK: this is for testing custom ops profiling only
