@@ -141,6 +141,16 @@ compare_op_handlers["not in"] = lambda tx, args, _: handle_not(
 PT2_ISSUE_TRACKER_URL = "https://github.com/pytorch/pytorch/issues/new?&labels=oncall%3A+pt2&projects=&template=pt2-bug-report.yml"
 
 
+@functools.cache
+def _import_module(name: str) -> types.ModuleType:
+    """
+    Import the named module and cache the result. importlib.import_module()
+    seems to do some filesystem checking to validate the name so not caching
+    this can be slow.
+    """
+    return importlib.import_module(name)
+
+
 @dataclasses.dataclass
 class SpeculationEntry:
     filename: str
@@ -1176,7 +1186,7 @@ class InstructionTranslatorBase(
     def nn_modules_globals_vt(self):
         module_name = "torch.nn.modules.module"
         module_source = self.import_source(module_name)
-        fglobals_value = importlib.import_module(module_name)  # type: ignore[assignment]
+        fglobals_value = _import_module(module_name)
         return VariableTracker.build(self, fglobals_value, module_source)
 
     def LOAD_GLOBAL(self, inst):
@@ -1212,7 +1222,7 @@ class InstructionTranslatorBase(
                 module_name.replace(">", "_").replace("<", "_").replace(".", "_dot_")
             )
         else:
-            value = importlib.import_module(module_name)
+            value = _import_module(module_name)
             alias = f"__import_{module_name.replace('.', '_dot_')}"
         f_globals = self.output.global_scope
         assert alias not in f_globals or f_globals[alias] is value
@@ -3300,7 +3310,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             if "torch_package" in module_name:
                 fglobals_value = torch.package.package_importer._package_imported_modules[module_name]  # type: ignore[assignment]
             else:
-                fglobals_value = importlib.import_module(module_name)  # type: ignore[assignment]
+                fglobals_value = _import_module(module_name)
             fglobals_vt = VariableTracker.build(self, fglobals_value, module_source)
             global_source = AttrSource(module_source, name)
         else:
