@@ -2581,6 +2581,19 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(f(torch.ones(3, 3)), opt_f(torch.ones(3, 3)))
         self.assertEqual(cnts.frame_count, 3)
 
+    def test_two_point_iter(self):
+        def fn(x, y):
+            it = map(lambda n: n + 1, range(6))
+            for i in it:
+                x = x + i
+                y = y + next(it)
+            return x, y
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.ones(3)
+        y = torch.ones(3)
+        self.assertEqual(fn(x, y), opt_fn(x, y))
+
     def test_pow_int(self):
         def fn(a, b):
             return torch.pow(a, b)
