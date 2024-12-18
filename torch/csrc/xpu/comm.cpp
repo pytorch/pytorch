@@ -5,7 +5,8 @@
 #include <ATen/ATen.h>
 #include <ATen/WrapDimUtils.h>
 #include <ATen/xpu/XPUContext.h>
-#include <c10/xpu/XPUGuard.h>
+#include <c10/core/DeviceGuard.h>
+#include <c10/core/StreamGuard.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/autograd/variable.h>
 #include <optional>
@@ -154,7 +155,8 @@ tensor_list2d broadcast_coalesced(
     o.reserve(tensors.size());
 
   unique_type_checker type_checker;
-  at::xpu::XPUGuard device_guard(static_cast<DeviceIndex>(devices[0]));
+  c10::Device device(at::getAccelerator(true).value(), devices[0]);
+  c10::DeviceGuard device_guard(device);
   for (auto& chunk : torch::utils::take_tensors(tensors, buffer_size)) {
     auto type_id = chunk.type_id();
     type_checker.show(type_id);
@@ -257,7 +259,7 @@ std::vector<at::Tensor>& scatter_out(
 
   auto chunks =
       tensor.split_with_sizes(/*split_sizes=*/chunk_sizes, /*dim=*/dim);
-  at::xpu::OptionalXPUStreamGuard xpu_guard;
+  c10::OptionalStreamGuard stream_guard;
   for (const auto i : c10::irange(chunks.size())) {
     if (i < (streams ? streams->size() : 0U) && (*streams)[i]) {
       const auto device_index = out_tensors[i].get_device();
@@ -272,7 +274,7 @@ std::vector<at::Tensor>& scatter_out(
           "(expected ",
           static_cast<int16_t>(device_index),
           ")");
-      xpu_guard.reset_stream(*(*streams)[i]);
+      stream_guard.reset_stream(*(*streams)[i]);
     }
     // NB: We don't detect the case where `out_tensor` is already the correct
     //     view of `tensor` since that would be nontrivial and involve checking
@@ -305,7 +307,7 @@ std::vector<at::Tensor> scatter(
       ? tensor.split_with_sizes(/*split_sizes=*/*chunk_sizes, /*dim=*/dim)
       : tensor.chunk(
             /*chunks=*/static_cast<int64_t>(devices.size()), /*dim=*/dim);
-  at::xpu::OptionalXPUStreamGuard xpu_guard;
+  c10::OptionalStreamGuard stream_guard;
   for (const auto i : c10::irange(chunks.size())) {
     const auto device_index = static_cast<int16_t>(devices[i]);
     if (device_index != tensor.get_device()) {
@@ -321,7 +323,7 @@ std::vector<at::Tensor> scatter(
             "(expected ",
             device_index,
             ")");
-        xpu_guard.reset_stream(*(*streams)[i]);
+        stream_guard.reset_stream(*(*streams)[i]);
       }
       TORCH_CHECK(
           device_index >= 0,
