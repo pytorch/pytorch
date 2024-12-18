@@ -1,5 +1,9 @@
 # mypy: allow-untyped-defs
-from typing import Any, Callable, List, TypeVar
+import contextlib
+import dataclasses
+import functools
+import os
+from typing import Any, Callable, List, Optional, TYPE_CHECKING, TypeVar
 
 import torch
 
@@ -402,3 +406,36 @@ def is_dynamo_compiling() -> bool:
         >>>     # ...rest of the function...
     """
     return False
+
+
+
+if TYPE_CHECKING:
+    from torch._fullgraph import _Package
+
+_fullgraph_package: Optional["_Package"] = None
+
+
+@contextlib.contextmanager
+def fullgraph_package(**kwargs):
+    """
+    Configurate the fullgraph package to be used by torch.compile(fullgraph=True).
+    """
+    from torch._fullgraph import _Package
+    global _fullgraph_package
+    if _fullgraph_package is not None:
+        raise RuntimeError("fullgraph_package() is already enabled")
+
+    package = _Package(**kwargs)
+    _fullgraph_package = package
+    try:
+        yield
+    finally:
+        package.finalize()
+        _fullgraph_package = None
+
+
+def _get_current_fullgraph_package() -> Optional["_Package"]:
+    """
+    Get the fullgraph package to be used by torch.compile(fullgraph=True).
+    """
+    return _fullgraph_package
