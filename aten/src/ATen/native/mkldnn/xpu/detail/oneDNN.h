@@ -97,7 +97,7 @@ TORCH_API sycl::event woq_matmul_int4(
     const at::Tensor& zp, // [k/group_size, N]
     int64_t group_size,
     Attr attr,
-    const std::vector<sycl::event>& deps={});
+    const std::vector<sycl::event>& deps = {});
 
 dnnl::memory::dims conv_dst_size(
     int64_t ndim,
