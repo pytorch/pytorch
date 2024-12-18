@@ -192,38 +192,47 @@ class TestAOTInductorPackage(TestCase):
             def forward(self, x, y):
                 return x + self.linear(y)
 
-        example_inputs = (
-            torch.randn(10, 10, device=self.device),
-            torch.randn(10, 10, device=self.device),
-        )
-        options = {
-            "aot_inductor.package_cpp_only": self.package_cpp_only,
-        }
-        ep = torch.export.export(Model().to(device=self.device), example_inputs)
-        package_path = torch._inductor.aoti_compile_and_package(
-            ep, inductor_configs=options
-        )
-        with tempfile.TemporaryDirectory() as tmp_dir, zipfile.ZipFile(
-            package_path, "r"
-        ) as zip_ref:
-            zip_ref.extractall(tmp_dir)
-            tmp_path = Path(tmp_dir) / "data" / "aotinductor" / "model"
-            assert tmp_path.exists()
-            build_path = tmp_path / "build"
-            assert not build_path.exists()
-            # Create a build directory to run cmake
-            build_path.mkdir()
-            custom_env = os.environ.copy()
-            custom_env["CMAKE_PREFIX_PATH"] = str(Path(torch.__file__).parent)
-            subprocess.run(
-                ["cmake", ".."],
-                cwd=build_path,
-                env=custom_env,
+        with torch.no_grad():
+            example_inputs = (
+                torch.randn(10, 10, device=self.device),
+                torch.randn(10, 10, device=self.device),
             )
-            subprocess.run(["make"], cwd=build_path)
-            # Check if the .so file was build successfully
-            so_path = build_path / "libaoti_model.so"
-            assert so_path.exists()
+            model = Model().to(device=self.device)
+            expected = model(*example_inputs)
+
+            options = {
+                "aot_inductor.package_cpp_only": self.package_cpp_only,
+            }
+            ep = torch.export.export(model, example_inputs)
+            package_path = torch._inductor.aoti_compile_and_package(
+                ep, inductor_configs=options
+            )
+            with tempfile.TemporaryDirectory() as tmp_dir, zipfile.ZipFile(
+                package_path, "r"
+            ) as zip_ref:
+                zip_ref.extractall(tmp_dir)
+                tmp_path = Path(tmp_dir) / "data" / "aotinductor" / "model"
+                self.assertTrue(tmp_path.exists())
+                build_path = tmp_path / "build"
+                self.assertTrue(not build_path.exists())
+
+                # Create a build directory to run cmake
+                build_path.mkdir()
+                custom_env = os.environ.copy()
+                custom_env["CMAKE_PREFIX_PATH"] = str(Path(torch.__file__).parent)
+                subprocess.run(
+                    ["cmake", ".."],
+                    cwd=build_path,
+                    env=custom_env,
+                )
+                subprocess.run(["make"], cwd=build_path)
+
+                # Check if the .so file was build successfully
+                so_path = build_path / "libaoti_model.so"
+                self.assertTrue(so_path.exists())
+                optimized = torch._export.aot_load(str(so_path), self.device)
+                actual = optimized(*example_inputs)
+                self.assertTrue(torch.allclose(actual, expected))
 
     def test_metadata(self):
         class Model(torch.nn.Module):

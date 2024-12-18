@@ -1553,14 +1553,8 @@ class AotCodeCompiler:
                         rc = f.write(consts[pos:])
                         pos += rc
 
-            if config.aot_inductor.package_cpp_only:
-                object_builder.save_compile_cmd_to_cmake(
-                    cmake_path, append_src_only=True
-                )
-                generated_files.append(str(consts_s))
-            else:
-                # Remove the .S file to save space
-                os.remove(consts_s)
+            # Remove the .S file to save space
+            os.remove(consts_s)
 
             return consts_o
 
@@ -1680,6 +1674,7 @@ class AotCodeCompiler:
                 object_build_options.save_flags_to_json(compile_flags)
                 generated_files.append(compile_flags)
                 object_builder.save_compile_cmd_to_cmake(cmake_path)
+                object_builder.save_src_to_cmake(cmake_path, cpp_path)
                 generated_files.append(cmake_path)
             else:
                 if fbcode_aot_cpu_re:
@@ -1742,7 +1737,6 @@ class AotCodeCompiler:
                 )
                 so_build_options.save_flags_to_json(linker_flags)
                 generated_files.append(linker_flags)
-                so_builder.save_link_cmd_to_cmake(cmake_path)
 
                 # If we only want to package the cpp, then we need to save the
                 # weights separately into a bin, and we also need to prevent compiling the so
@@ -1762,6 +1756,10 @@ class AotCodeCompiler:
                 generated_files.append(consts_o)
                 generated_files.append(kernels_o)
 
+                so_builder.save_src_to_cmake(cmake_path, consts_o)
+                for kernel_o in kernels_o.split():
+                    so_builder.save_src_to_cmake(cmake_path, kernel_o)
+                so_builder.save_link_cmd_to_cmake(cmake_path)
             else:
                 if fbcode_aot_cpu_re:
                     output_so = (
