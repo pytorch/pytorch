@@ -52,6 +52,9 @@ jobs:
   build:
     if: ${{ github.repository_owner == 'poolsideai' }}
     runs-on: "ubuntu-22.04-64-pytorchci"
+    permissions: # required for AWS Credentials
+      id-token: write
+      contents: read
     strategy:
       matrix:
         desired_python: ["3.10", "3.12"]
