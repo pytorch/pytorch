@@ -67,7 +67,8 @@ record_cache_artifacts: bool = Config(
     env_name_default="TORCH_COMPILE_RECORD_CACHE_ARTIFACTS", default=False
 )
 """
-Prepare for hotloading
+Indicates to the compiler that it should record cache artifacts. This config
+is to be used together with torch.compiler.save_cache_artifacts()
 """
 
 

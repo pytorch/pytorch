@@ -127,6 +127,9 @@ class CacheArtifactManager:
 
     @staticmethod
     def deserialize(serialized_artifacts: bytes) -> Optional[CacheInfo]:
+        """
+        Converst the portable format back into various filesystem caches
+        """
         try:
             artifacts = pickle.loads(serialized_artifacts)
         except Exception:
