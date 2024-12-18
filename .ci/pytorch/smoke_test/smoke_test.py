@@ -338,6 +338,7 @@ def smoke_test_modules():
             else:
                 print(f"Output: \n{output}\n")
 
+
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument(
