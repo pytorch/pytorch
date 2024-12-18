@@ -365,6 +365,9 @@ def main() -> None:
     options = parser.parse_args()
     print(f"torch: {torch.__version__}")
     print(torch.__config__.parallel_info())
+    # All PyTorch binary builds should be built with OpenMP
+    if not torch.backends.openmp.is_available():
+        raise RuntimeError("PyTorch must be built with OpenMP support")
 
     check_version(options.package)
     smoke_test_conv2d()
