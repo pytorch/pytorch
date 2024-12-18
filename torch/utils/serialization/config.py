@@ -9,7 +9,7 @@ class load:
     mmap: bool = False
     endianness: Optional[LoadEndianness] = None
     # MAP_PRIVATE = 2
-    mmap_flags: Optional[int] = 2 if sys.platform == "win32" else None
+    mmap_flags: Optional[int] = None if sys.platform == "win32" else 2
 
 
 class save:
