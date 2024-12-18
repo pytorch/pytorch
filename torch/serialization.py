@@ -16,7 +16,19 @@ import warnings
 from contextlib import closing, contextmanager
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, BinaryIO, Callable, cast, Dict, IO, List, Optional, Tuple, Union
+from typing import (
+    Any,
+    BinaryIO,
+    Callable,
+    cast,
+    Dict,
+    IO,
+    List,
+    Optional,
+    Tuple,
+    Type,
+    Union,
+)
 from typing_extensions import TypeAlias, TypeIs
 
 import torch
@@ -823,7 +835,7 @@ class _open_zipfile_writer_buffer(_opener):
 
 
 def _open_zipfile_writer(name_or_buffer, compute_crc32=None):
-    container: type[_open_zipfile_writer_file | _open_zipfile_writer_buffer]
+    container: Type[_open_zipfile_writer_file | _open_zipfile_writer_buffer]
     if _is_path(name_or_buffer):
         container = _open_zipfile_writer_file
     else:
