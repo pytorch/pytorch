@@ -3197,61 +3197,6 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         torch.testing.assert_close(grads_eager, grads_compile)
 
     @supported_platform
-    def test_dynamic_shapes_bug_dynamic_batch(self):
-        def _flex_attention_mask(b, h, q_idx, kv_idx, input_lengths):
-            padding_condition = (q_idx < input_lengths[b]) & (kv_idx < input_lengths[b])
-            return padding_condition
-
-        counter = CompileCounterWithBackend("inductor")
-
-        class Model(torch.nn.Module):
-            def __init__(self, dim=1024):
-                super().__init__()
-                self.subsampler = torch.nn.Conv1d(256, 256, 5)
-                self.projector = torch.nn.Linear(256, dim)
-                self.num_heads = 4
-
-            def forward(self, x, input_lengths):
-                x = self.subsampler(x.transpose(-1, -2)).transpose(-1, -2)
-                x = self.projector(x).transpose(0, 1)
-                head_dim = x.size(-1) // self.num_heads
-                x = x.view(-1, x.size(1), self.num_heads, head_dim)
-                x = x.permute(1, 2, 0, 3)
-
-                max_time = x.size(-2)
-                mask = torch.compile(create_block_mask, dynamic=True, fullgraph=False)(
-                    functools.partial(
-                        _flex_attention_mask,
-                        input_lengths=input_lengths,
-                    ),
-                    B=input_lengths.size(0),
-                    H=None,
-                    Q_LEN=max_time,
-                    KV_LEN=max_time,
-                )
-
-                x = torch.compile(
-                    flex_attention, dynamic=True, fullgraph=True, backend=counter
-                )(
-                    query=x,
-                    key=x,
-                    value=x,
-                    block_mask=mask,
-                )
-                return x
-
-        model = Model(128).cuda()
-        B, F, T = 16, 256, 12
-        for _ in range(5):
-            x = torch.randn(B, T, F, device="cuda")
-            l = torch.randint(0, T, (B,), device="cuda")
-            model(x, l)
-
-        assert (
-            counter.frame_count == 1
-        ), f"Expected 1 graph, but got {counter.frame_count} graphs"
-
-    @supported_platform
     def test_causal_block_non_divisible_with_captured_buffer(self):
         Q_S = S - 3
         KV_S = S - 3
@@ -3442,7 +3387,7 @@ class GraphModule(torch.nn.Module):
 
         score_mod_0 = self.score_mod_0
         mask_fn_0 = self.mask_fn_0
-        flex_attention = torch.ops.higher_order.flex_attention(l_query_, l_key_, l_value_, score_mod_0, (128, 128, l_block_mask_kv_num_blocks, l_block_mask_kv_indices, l_block_mask_full_kv_num_blocks, l_block_mask_full_kv_indices, l_block_mask_q_num_blocks, l_block_mask_q_indices, l_block_mask_full_q_num_blocks, l_block_mask_full_q_indices, 128, 128, mask_fn_0), 0.5, {'PRESCALE_QK': False, 'ROWS_GUARANTEED_SAFE': False, 'BLOCKS_ARE_CONTIGUOUS': False, 'WRITE_DQ': True, 'OUTPUT_LOGSUMEXP': True}, (), ());  l_query_ = l_key_ = l_value_ = score_mod_0 = l_block_mask_kv_num_blocks = l_block_mask_kv_indices = l_block_mask_full_kv_num_blocks = l_block_mask_full_kv_indices = l_block_mask_q_num_blocks = l_block_mask_q_indices = l_block_mask_full_q_num_blocks = l_block_mask_full_q_indices = mask_fn_0 = None
+        flex_attention = torch.ops.higher_order.flex_attention(l_query_, l_key_, l_value_, score_mod_0, (128, 128, l_block_mask_kv_num_blocks, l_block_mask_kv_indices, l_block_mask_full_kv_num_blocks, l_block_mask_full_kv_indices, l_block_mask_q_num_blocks, l_block_mask_q_indices, l_block_mask_full_q_num_blocks, l_block_mask_full_q_indices, 128, 128, mask_fn_0), 0.5, {'PRESCALE_QK': False, 'ROWS_GUARANTEED_SAFE': False, 'BLOCKS_ARE_CONTIGUOUS': False, 'OUTPUT_LOGSUMEXP': True}, (), ());  l_query_ = l_key_ = l_value_ = score_mod_0 = l_block_mask_kv_num_blocks = l_block_mask_kv_indices = l_block_mask_full_kv_num_blocks = l_block_mask_full_kv_indices = l_block_mask_q_num_blocks = l_block_mask_q_indices = l_block_mask_full_q_num_blocks = l_block_mask_full_q_indices = mask_fn_0 = None
         out: "f64[2, 2, 128, 4]" = flex_attention[0];  flex_attention = None
         return (out,)
 
@@ -3483,7 +3428,7 @@ class GraphModule(torch.nn.Module):
         fw_graph0 = self.fw_graph0
         joint_graph0 = self.joint_graph0
         mask_graph0 = self.mask_graph0
-        flex_attention_backward = torch.ops.higher_order.flex_attention_backward(primals_1, primals_2, primals_3, getitem_2, getitem_3, tangents_1, full_default_4, fw_graph0, joint_graph0, (1, 1, full, full_default, None, None, convert_element_type, convert_element_type_1, None, None, 1073741824, 1073741824, mask_graph0), 0.5, {'PRESCALE_QK': False, 'ROWS_GUARANTEED_SAFE': False, 'BLOCKS_ARE_CONTIGUOUS': False, 'WRITE_DQ': True, 'OUTPUT_LOGSUMEXP': True}, (), ());  primals_1 = primals_2 = primals_3 = getitem_2 = getitem_3 = tangents_1 = full_default_4 = fw_graph0 = joint_graph0 = full = full_default = convert_element_type = convert_element_type_1 = mask_graph0 = None
+        flex_attention_backward = torch.ops.higher_order.flex_attention_backward(primals_1, primals_2, primals_3, getitem_2, getitem_3, tangents_1, full_default_4, fw_graph0, joint_graph0, (1, 1, full, full_default, None, None, convert_element_type, convert_element_type_1, None, None, 1073741824, 1073741824, mask_graph0), 0.5, {'PRESCALE_QK': False, 'ROWS_GUARANTEED_SAFE': False, 'BLOCKS_ARE_CONTIGUOUS': False, 'OUTPUT_LOGSUMEXP': True}, (), ());  primals_1 = primals_2 = primals_3 = getitem_2 = getitem_3 = tangents_1 = full_default_4 = fw_graph0 = joint_graph0 = full = full_default = convert_element_type = convert_element_type_1 = mask_graph0 = None
         getitem_4: "f64[2, 2, 128, 4]" = flex_attention_backward[0]
         getitem_5: "f64[2, 2, 128, 4]" = flex_attention_backward[1]
         getitem_6: "f64[2, 2, 128, 4]" = flex_attention_backward[2];  flex_attention_backward = None

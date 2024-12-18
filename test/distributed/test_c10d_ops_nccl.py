@@ -162,6 +162,7 @@ class ProcessGroupNCCLOpTest(MultiProcContinousTest):
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
     def test_allreduce_ops(self):
+        device_count = torch.cuda.device_count()
         pg = self.pg
         local_device_id = self.rank_to_GPU[self.rank][0]
 
@@ -302,8 +303,9 @@ class ProcessGroupNCCLOpTest(MultiProcContinousTest):
         pg = self.pg
         rank = self.rank_to_GPU[self.rank][0]
         with torch.cuda.device(rank):
-            for _ in range(10):
+            for i in range(10):
                 xs = [torch.FloatTensor([1]).cuda(rank)]
+                ys = [torch.FloatTensor([4]).cuda(rank)]
                 for _ in range(30):
                     pg.allreduce(xs[0]).wait()
 
@@ -408,7 +410,7 @@ class ProcessGroupNCCLOpTest(MultiProcContinousTest):
             output_tensors.append([t.cuda(device=gpu) for t in output_per_gpu])
             expected_output.append([t.cuda(device=gpu) for t in expected_per_gpu])
 
-        allgather(output_tensors, tensors)
+        result = allgather(output_tensors, tensors)
 
         # Verification
         self.assertEqual(output_tensors, expected_output)
@@ -556,7 +558,7 @@ class ProcessGroupNCCLOpTest(MultiProcContinousTest):
 
         # init output
         output_ts = []
-        for _ in range(self.world_size):
+        for rank in range(self.world_size):
             output_ts.append(torch.tensor([-1]).cuda(device_id))
 
         with self.assertRaisesRegex(ValueError, "invalid root rank"):
@@ -912,6 +914,7 @@ class ProcessGroupNCCLOpTest(MultiProcContinousTest):
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
     def test_send_recv(self):
+        pg = self.pg
         device = self.rank_to_GPU[self.rank][0]
 
         # Generate the same random tensor
@@ -927,6 +930,7 @@ class ProcessGroupNCCLOpTest(MultiProcContinousTest):
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
     def test_send_recv_complex(self):
+        pg = self.pg
         device = self.rank_to_GPU[self.rank][0]
 
         # Generate the same random tensor

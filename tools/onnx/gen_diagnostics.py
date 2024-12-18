@@ -17,8 +17,7 @@ import os
 import string
 import subprocess
 import textwrap
-from collections.abc import Mapping, Sequence
-from typing import Any
+from typing import Any, Mapping, Sequence
 
 import yaml
 
@@ -57,7 +56,7 @@ class _{pascal_case_name}(infra.Rule):
         self,
         level: infra.Level,
         {message_arguments}
-    ) -> tuple[infra.Rule, infra.Level, str]:
+    ) -> Tuple[infra.Rule, infra.Level, str]:
         \"\"\"Returns a tuple of (Rule, Level, message) for this Rule.
 
         Message template: {message_template}

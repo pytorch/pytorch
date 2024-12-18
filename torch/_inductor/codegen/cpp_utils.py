@@ -5,7 +5,7 @@ import functools
 import math
 import sys
 from collections import namedtuple
-from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, List, Optional, Sequence, Set, Tuple
 from unittest.mock import patch
 
 import sympy
@@ -185,7 +185,7 @@ class CppCSEVariable(CSEVariable):
     ) -> None:
         super().__init__(name, bounds, dtype)
         self.is_vec = False
-        self.dependent_itervars = OrderedSet[sympy.Symbol]()
+        self.dependent_itervars: Set[sympy.Symbol] = set()
 
     def __repr__(self) -> str:
         return (
@@ -293,9 +293,7 @@ def rewrite_index_for_nodes(
     index: sympy.Expr,
     global_buf_name: str,
 ):
-    used_vars = OrderedSet(
-        s for s in index.free_symbols if symbol_is_type(s, SymT.INDEX)
-    )
+    used_vars = {s for s in index.free_symbols if symbol_is_type(s, SymT.INDEX)}
     index_vars = []
     local_buf = localize_buffer_handler.global_to_local[global_buf_name]
     for i in range(len(local_buf.get_size())):
@@ -494,17 +492,6 @@ def unify_mask_base_type(
         for var in vars
     )
     return new_vars
-
-
-def may_unify_binary_op_mask_type(a, b):
-    """
-    Given two cse variables, when dtype is bool, unify them to the same mask dtype and return casted cse variable.
-    """
-    if a.dtype == torch.bool:
-        assert b.dtype == torch.bool
-        mask_dtype = torch.int32
-        return unify_mask_base_type(V.kernel.compute, (a, b), mask_dtype)
-    return a, b
 
 
 def codegen_rand(offset, code, rand_function, dst_dtype=torch.float32):
@@ -727,7 +714,7 @@ def _get_loop_body(fn_list):
 
 
 def _get_dtype_from_loopbodies(loop_bodies):
-    dtypes = OrderedSet[torch.dtype]()
+    dtypes = set()
     for loop_body in loop_bodies:
         graphs = [loop_body.root_block.graph] + [
             body.graph for body in list(loop_body.subblocks.values())
@@ -756,7 +743,7 @@ def template_fusion_with_epilogues_supported(
         index_of_template_buf_read: Sequence[sympy.Expr],
         epilogue_writes: OrderedSet[Dep],
     ) -> Tuple[bool, bool]:
-        num_indexes = len(OrderedSet(index_of_template_buf_read))
+        num_indexes = len(set(index_of_template_buf_read))
 
         if num_indexes > 1:
             same_index = False

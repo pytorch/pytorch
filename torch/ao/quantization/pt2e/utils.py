@@ -5,6 +5,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import torch
 import torch.nn.functional as F
+from torch._export import capture_pre_autograd_graph
 
 # Makes sure that quantized_decomposed ops are registered
 from torch.ao.quantization.fx._decomposed import quantized_decomposed_lib  # noqa: F401
@@ -380,9 +381,10 @@ def _get_aten_graph_module_for_pattern(
             kwargs,
         ).module()
     else:
-        raise RuntimeError(
-            "capture_pre_autograd_graph is deprecated and will be deleted soon."
-            "Please use torch.export.export_for_training instead."
+        aten_pattern = capture_pre_autograd_graph(
+            pattern,  # type: ignore[arg-type]
+            example_inputs,
+            kwargs,
         )
     aten_pattern.graph.eliminate_dead_code()  # type: ignore[operator, union-attr]
     aten_pattern.recompile()  # type: ignore[operator]

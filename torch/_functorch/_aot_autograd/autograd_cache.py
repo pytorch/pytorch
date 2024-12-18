@@ -95,6 +95,10 @@ def should_use_local_autograd_cache():
     return config.enable_autograd_cache
 
 
+def autograd_cache_enabled():
+    return should_use_local_autograd_cache() or should_use_remote_autograd_cache()
+
+
 def check_node_safe(node: Node):
     """
     Checks that the node only uses supported operators. We are starting with very

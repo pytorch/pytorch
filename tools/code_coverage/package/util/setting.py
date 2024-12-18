@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 from enum import Enum
+from typing import Dict, List, Set
 
 
 # <project folder>
@@ -42,8 +43,8 @@ class Test:
         self.test_type = test_type
 
 
-TestList = list[Test]
-TestStatusType = dict[str, set[str]]
+TestList = List[Test]
+TestStatusType = Dict[str, Set[str]]
 
 
 # option

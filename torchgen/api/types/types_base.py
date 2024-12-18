@@ -72,6 +72,10 @@ class CType(ABC):
         raise NotImplementedError
 
     @abstractmethod
+    def cpp_type_registration_declarations(self) -> str:
+        raise NotImplementedError
+
+    @abstractmethod
     def remove_const_ref(self) -> CType:
         return self
 
@@ -82,6 +86,11 @@ class BaseCType(CType):
 
     def cpp_type(self, *, strip_ref: bool = False) -> str:
         return str(self.type)
+
+    # For BC reasons, we don't want to introduce at:: namespaces to RegistrationDeclarations.yaml
+    # TODO: Kill this when we eventually remove it!
+    def cpp_type_registration_declarations(self) -> str:
+        return str(self.type).replace("at::", "")
 
     def remove_const_ref(self) -> CType:
         return self
@@ -96,6 +105,9 @@ class ConstRefCType(CType):
             return self.elem.cpp_type(strip_ref=strip_ref)
         return f"const {self.elem.cpp_type()} &"
 
+    def cpp_type_registration_declarations(self) -> str:
+        return f"const {self.elem.cpp_type_registration_declarations()} &"
+
     def remove_const_ref(self) -> CType:
         return self.elem.remove_const_ref()
 
@@ -107,6 +119,9 @@ class VectorCType(CType):
     def cpp_type(self, *, strip_ref: bool = False) -> str:
         # Do not pass `strip_ref` recursively.
         return f"::std::vector<{self.elem.cpp_type()}>"
+
+    def cpp_type_registration_declarations(self) -> str:
+        return f"::std::vector<{self.elem.cpp_type_registration_declarations()}>"
 
     def remove_const_ref(self) -> CType:
         return VectorCType(self.elem.remove_const_ref())
@@ -121,6 +136,9 @@ class ArrayCType(CType):
         # Do not pass `strip_ref` recursively.
         return f"::std::array<{self.elem.cpp_type()},{self.size}>"
 
+    def cpp_type_registration_declarations(self) -> str:
+        return f"::std::array<{self.elem.cpp_type_registration_declarations()},{self.size}>"
+
     def remove_const_ref(self) -> CType:
         return ArrayCType(self.elem.remove_const_ref(), self.size)
 
@@ -132,6 +150,9 @@ class TupleCType(CType):
     def cpp_type(self, *, strip_ref: bool = False) -> str:
         # Do not pass `strip_ref` recursively.
         return f'::std::tuple<{",".join([e.cpp_type() for e in self.elems])}>'
+
+    def cpp_type_registration_declarations(self) -> str:
+        return f'::std::tuple<{",".join([e.cpp_type_registration_declarations() for e in self.elems])}>'
 
     def remove_const_ref(self) -> CType:
         return TupleCType([e.remove_const_ref() for e in self.elems])
@@ -145,6 +166,9 @@ class MutRefCType(CType):
         if strip_ref:
             return self.elem.cpp_type(strip_ref=strip_ref)
         return f"{self.elem.cpp_type()} &"
+
+    def cpp_type_registration_declarations(self) -> str:
+        return f"{self.elem.cpp_type_registration_declarations()} &"
 
     def remove_const_ref(self) -> CType:
         return self.elem.remove_const_ref()
@@ -165,6 +189,11 @@ class NamedCType:
 
     def cpp_type(self, *, strip_ref: bool = False) -> str:
         return self.type.cpp_type(strip_ref=strip_ref)
+
+    # For BC reasons, we don't want to introduce at:: namespaces to RegistrationDeclarations.yaml
+    # TODO: Kill this when we eventually remove it!
+    def cpp_type_registration_declarations(self) -> str:
+        return self.type.cpp_type_registration_declarations()
 
     def remove_const_ref(self) -> NamedCType:
         return NamedCType(self.name, self.type.remove_const_ref())
@@ -218,6 +247,15 @@ class Binding:
             return f"{self.type}"
         else:
             return f"{self.type} {self.name}{mb_default}"
+
+    # For BC reasons, we don't want to introduce at:: namespaces to RegistrationDeclarations.yaml
+    # TODO: Kill this when we eventually remove it!
+    def decl_registration_declarations(self) -> str:
+        type_s = self.nctype.cpp_type_registration_declarations()
+        mb_default = ""
+        if self.default is not None:
+            mb_default = f"={self.default}"
+        return f"{type_s} {self.name}{mb_default}"
 
     def defn(self) -> str:
         return f"{self.type} {self.name}"

@@ -14,8 +14,7 @@ TRITON_MAX_BLOCK = {
     "X": 4096,
     "Y": 1024,
     "Z": 1024,
-    "R0_": 4096 * 16,  # * 16 is multi-kernel only
-    "R1_": 2048 * 16,  # * 16 is multi-kernel only
+    "R": 4096 * 16,  # * 16 is multi-kernel only
 }
 TRITON_MAX_RSPLIT = 64
 

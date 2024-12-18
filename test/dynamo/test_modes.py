@@ -582,29 +582,6 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
         run_checks(setups_and_oplists, skips, BUILTIN_TO_TENSOR_FN_MAP)
         run_checks(rsetups_and_oplists, rskips, BUILTIN_TO_TENSOR_RFN_MAP)
 
-    def test_expand(self):
-        from torch.distributions import (
-            AffineTransform,
-            ComposeTransform,
-            Normal,
-            TanhTransform,
-            TransformedDistribution,
-        )
-
-        # https://github.com/pytorch/pytorch/issues/141232
-        with torch.device("cpu"):
-
-            @torch.compile(fullgraph=True)
-            def func(a):
-                d = TransformedDistribution(
-                    Normal(a, 1),
-                    ComposeTransform([TanhTransform(), AffineTransform(2, 2)]),
-                )
-                b = d.log_prob(d.rsample((10,)))
-                return b
-
-            func(torch.randn(3))
-
     @requires_cuda
     def test_flex_attention(self):
         import torch
@@ -620,7 +597,7 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
             return prefix_lengths[b] >= kv
 
         # This runs in fullgraph already
-        create_block_mask(prefix_lm, 8, None, 512, 512, _compile=True)
+        mask = create_block_mask(prefix_lm, 8, None, 512, 512, _compile=True)
 
     def test_register_hook(self):
         import functools
@@ -641,7 +618,7 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
         x = torch.ones(4, requires_grad=True)
 
         with torch.device("cpu"):
-            torch.compile(mod, fullgraph=True)(x)
+            out = torch.compile(mod, fullgraph=True)(x)
 
 
 if __name__ == "__main__":

@@ -12,11 +12,12 @@ from __future__ import annotations
 
 import argparse
 from collections import defaultdict
+from typing import Dict, Set
 
 import yaml
 
 
-DepGraph = dict[str, set[str]]
+DepGraph = Dict[str, Set[str]]
 
 
 def canonical_name(opname: str) -> str:

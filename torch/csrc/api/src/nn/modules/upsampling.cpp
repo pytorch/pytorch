@@ -1,22 +1,23 @@
 #include <torch/nn/modules/upsampling.h>
 
+#include <string>
+
 namespace F = torch::nn::functional;
 
 namespace torch::nn {
 
-UpsampleImpl::UpsampleImpl(const UpsampleOptions& options_)
+UpsampleImpl::UpsampleImpl(
+    const UpsampleOptions& options_) // NOLINT(modernize-pass-by-value)
     : options(options_) {}
 
 void UpsampleImpl::reset() {}
 
 void UpsampleImpl::pretty_print(std::ostream& stream) const {
   stream << "torch::nn::Upsample(";
-  if (options.scale_factor().has_value()) {
-    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+  if (options.scale_factor() != std::nullopt) {
     stream << "scale_factor=" << at::ArrayRef<double>(*options.scale_factor());
   } else {
-    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
-    stream << "size=" << at::ArrayRef<int64_t>(options.size().value());
+    stream << "size=" << at::ArrayRef<int64_t>(*options.size());
   }
   stream << ", mode=" << enumtype::get_enum_name(options.mode()) << ")";
 }

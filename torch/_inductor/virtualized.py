@@ -61,8 +61,6 @@ from contextlib import AbstractContextManager, contextmanager
 from threading import local
 from typing import Any, Callable, Generic, List, Type, TYPE_CHECKING, TypeVar, Union
 
-from torch.utils._ordered_set import OrderedSet
-
 from .ops_handler import (  # noqa: F401
     KernelFormatterHandler,
     MockHandler,
@@ -149,8 +147,8 @@ class NullKernelHandler(NullHandler):
 
     def __init__(self):
         super().__init__()
-        self.removed_buffers = OrderedSet[Any]()
-        self.inplaced_to_remove = OrderedSet[Any]()
+        self.removed_buffers = set()
+        self.inplaced_to_remove = set()
         self.index_dtype = "tl.int64"
 
 

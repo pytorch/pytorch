@@ -46,7 +46,6 @@
 #include <torch/csrc/Dtype.h>
 #include <torch/csrc/DynamicTypes.h>
 #include <torch/csrc/Event.h>
-#include <torch/csrc/Export.h>
 #include <torch/csrc/Generator.h>
 #include <torch/csrc/Layout.h>
 #include <torch/csrc/MemoryFormat.h>
@@ -1718,7 +1717,7 @@ class WeakTensorRef {
   }
 };
 
-extern "C" TORCH_PYTHON_API PyObject* initModule();
+extern "C" C10_EXPORT PyObject* initModule();
 // separate decl and defn for msvc error C2491
 PyObject* initModule() {
   HANDLE_TH_ERRORS

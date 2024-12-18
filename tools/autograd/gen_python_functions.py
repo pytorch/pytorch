@@ -36,7 +36,7 @@ from __future__ import annotations
 import itertools
 import re
 from collections import defaultdict
-from typing import Callable, TYPE_CHECKING
+from typing import Callable, Iterable, Sequence
 
 import yaml
 
@@ -74,10 +74,6 @@ from torchgen.yaml_utils import YamlLoader
 
 from .gen_inplace_or_view_type import is_tensor_list_type
 from .gen_trace_type import should_trace
-
-
-if TYPE_CHECKING:
-    from collections.abc import Iterable, Sequence
 
 
 #

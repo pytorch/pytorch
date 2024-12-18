@@ -29,9 +29,8 @@ void dumpTensor(std::ostream& ss, const Tensor& tensor) {
     return;
   }
   ss << "Wrapper[";
-  auto level = wrapped->level();
-  if (level.has_value()) {
-    ss << "lvl=" << level.value() << ", ";
+  if (wrapped->level().has_value()) {
+    ss << "lvl=" << wrapped->level().value() << ", ";
   } else {
     ss << "dead, ";
   }

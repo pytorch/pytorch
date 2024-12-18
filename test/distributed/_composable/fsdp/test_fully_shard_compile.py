@@ -662,7 +662,7 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
             def __init__(self, n_layers):
                 super().__init__()
                 self.layers = torch.nn.ModuleList()
-                for _ in range(n_layers):
+                for layer_id in range(n_layers):
                     self.layers.append(TestSubmodule(hidden_dim))
 
             def forward(self, x):
@@ -684,7 +684,7 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
             fsdp_config = {}
             mesh = init_device_mesh("cuda", (self.world_size,))
             model = TestModule(n_layers=3)
-            for mod in model.layers:
+            for layer_id, mod in enumerate(model.layers):
                 fully_shard(mod, mesh=mesh, reshard_after_forward=True, **fsdp_config)
             model = fully_shard(
                 model, mesh=mesh, reshard_after_forward=True, **fsdp_config
@@ -731,6 +731,8 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
         self.skipTestForOldSm()
         for fwd_fullgraph in [True]:
             with self._reinplace_all_gather_with_optional_checks(
+                fwd_fullgraph
+            ), self._maybe_run_decide_global_ordering_of_comms_with_checks(
                 fwd_fullgraph
             ), torch._inductor.config.patch(
                 post_grad_custom_post_pass=functools.partial(
@@ -789,10 +791,9 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
                         last_all_gather=True,
                     ),
                 ]:
-                    # file_check = self.inductor_code_check_fsdp_all_gather(
-                    #     file_check, **fwd_ag_block_info
-                    # )
-                    pass
+                    file_check = self.inductor_code_check_fsdp_all_gather(
+                        file_check, **fwd_ag_block_info
+                    )
                 file_check.run(fwd_code)
 
                 bwd_code = triton_codes[1]
@@ -807,10 +808,9 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
                         last_all_gather=True,
                     ),
                 ]:
-                    # file_check = self.inductor_code_check_fsdp_all_gather(
-                    #     file_check, **bwd_ag_block_info
-                    # )
-                    pass
+                    file_check = self.inductor_code_check_fsdp_all_gather(
+                        file_check, **bwd_ag_block_info
+                    )
                 for bwd_rs_block_info in [
                     dict(overlapped_compute_op_str="extern_kernels.addmm("),
                     dict(
@@ -818,10 +818,9 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
                     ),  # TODO: improve compute/comm overlap, so that `overlapped_compute_op_str` is not None
                     dict(overlapped_compute_op_str=None),
                 ]:
-                    # file_check = self.inductor_code_check_fsdp_reduce_scatter(
-                    #     file_check, **bwd_rs_block_info
-                    # )
-                    pass
+                    file_check = self.inductor_code_check_fsdp_reduce_scatter(
+                        file_check, **bwd_rs_block_info
+                    )
                 file_check.run(bwd_code)
 
     @unittest.skip("TODO: fix fwd_fullgraph=False case")
@@ -872,7 +871,7 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
                         else:
                             v.requires_grad_(False)
                 assert requires_grad_param_count == n_layers * len(requires_grad_params)
-            for _, mod in enumerate(model.layers):
+            for layer_id, mod in enumerate(model.layers):
                 fully_shard(mod, mesh=mesh, reshard_after_forward=True, **fsdp_config)
             model = fully_shard(
                 model, mesh=mesh, reshard_after_forward=True, **fsdp_config
@@ -955,6 +954,8 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
             )
             with self._reinplace_all_gather_with_optional_checks(
                 fwd_fullgraph
+            ), self._maybe_run_decide_global_ordering_of_comms_with_checks(
+                fwd_fullgraph
             ), torch._inductor.config.patch(
                 post_grad_custom_post_pass=functools.partial(
                     self._check_fsdp_copy_and_resize_ops_count_in_graph,
@@ -1005,10 +1006,9 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
                         last_all_gather=True,
                     ),
                 ]:
-                    # file_check = self.inductor_code_check_fsdp_all_gather(
-                    #     file_check, **fwd_ag_block_info
-                    # )
-                    pass
+                    file_check = self.inductor_code_check_fsdp_all_gather(
+                        file_check, **fwd_ag_block_info
+                    )
                 file_check.run(fwd_code)
 
                 bwd_code = triton_codes[1]
@@ -1025,11 +1025,10 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
                         last_all_gather=True,
                     ),
                 ]:
-                    # if bwd_ag_block_info is not None:
-                    #     file_check = self.inductor_code_check_fsdp_all_gather(
-                    #         file_check, **bwd_ag_block_info
-                    #     )
-                    pass
+                    if bwd_ag_block_info is not None:
+                        file_check = self.inductor_code_check_fsdp_all_gather(
+                            file_check, **bwd_ag_block_info
+                        )
                 for bwd_rs_block_info in [
                     dict(overlapped_compute_op_str="extern_kernels.mm(")
                     if all_requires_grad
@@ -1040,11 +1039,10 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
                     dict(overlapped_compute_op_str=None),
                     dict(overlapped_compute_op_str=None) if all_requires_grad else None,
                 ]:
-                    # if bwd_rs_block_info is not None:
-                    #     file_check = self.inductor_code_check_fsdp_reduce_scatter(
-                    #         file_check, **bwd_rs_block_info
-                    #     )
-                    pass
+                    if bwd_rs_block_info is not None:
+                        file_check = self.inductor_code_check_fsdp_reduce_scatter(
+                            file_check, **bwd_rs_block_info
+                        )
                 file_check.run(bwd_code)
 
     @unittest.skip("TODO: fix fwd_fullgraph=False case")
@@ -1089,7 +1087,7 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
                 setattr(m.encoder, name, new_child)
         m = FSDP(m, sharding_strategy=ShardingStrategy.FULL_SHARD, use_orig_params=True)
         inp = torch.randn(32, 784, device="cuda")
-        m(inp)
+        out = m(inp)
 
 
 if __name__ == "__main__":

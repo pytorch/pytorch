@@ -560,19 +560,17 @@ else:
                     # numbers of API calls are equal to the number of subgroups for each mesh dimension. In a 2 * 4
                     # mesh, we need to make 2 + 4 = 6 API calls per ranks to create all the subgroups.
                     dim_group = None
-                    has_split_group = False
                     if (
                         bound_device_id := getattr(
                             default_group, "bound_device_id", None
                         )
-                    ) is not None and torch.cuda.is_available():
+                    ) is not None:
                         dim_group = split_group(
                             parent_pg=default_group,
                             pg_options=pg_options,
                             split_ranks=pg_ranks_by_dim.tolist(),
                             group_desc=group_desc,
                         )
-                        has_split_group = True
 
                     # If the subgroup has been already created through `split_group`, we simply loop over `pg_ranks_by_dim`
                     # and append the `(group_tag, subgroup_ranks, and group_name)` tuple to the `dim_group_infos` list when
@@ -585,7 +583,7 @@ else:
                         # We temporarily revert the re-use subgroup, since it breaks two internal tests.
                         # Temporarily reverting to resolve test timeout while root-causing.
                         # TODO: Add two tests to cover internal tests scenarios and re-enable reuse subgroup if exists.
-                        if bound_device_id is None or not has_split_group:
+                        if bound_device_id is None:
                             dim_group = new_group(
                                 ranks=subgroup_ranks,
                                 backend=backend,

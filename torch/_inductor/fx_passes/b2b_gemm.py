@@ -1,10 +1,9 @@
 # mypy: allow-untyped-defs
 import functools
 from collections import deque
-from typing import Dict, List, Tuple
+from typing import Dict, List, Set, Tuple
 
 import torch
-from torch.utils._ordered_set import OrderedSet
 from torch.utils._pytree import tree_map
 
 from ..._dynamo.utils import counters
@@ -612,7 +611,7 @@ def b2b_gemm_handler(match: Match, mat1: torch.fx.Node, mat2: torch.fx.Node) -> 
     def all_reach_via_pointwise_with_no_other_inputs(
         src: torch.fx.Node,
         dst: torch.fx.Node,
-    ) -> Tuple[bool, OrderedSet[torch.fx.Node]]:
+    ) -> Tuple[bool, Set[torch.fx.Node]]:
         """
         check whether every user path from src reaches dst via pointwise nodes,
         with no other input nodes for the intermediates and dst;
@@ -620,7 +619,7 @@ def b2b_gemm_handler(match: Match, mat1: torch.fx.Node, mat2: torch.fx.Node) -> 
         (1) the Boolean value
         (2) the subgraph node set including src and dst (which only makes sense when the Boolean value is True)
         """
-        visited = OrderedSet[torch.fx.Node]()
+        visited: Set[torch.fx.Node] = set()
         input_counter: Dict[torch.fx.Node, int] = {}
 
         all_reachable = True

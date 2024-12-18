@@ -845,26 +845,6 @@ class CPUReproTests(TestCase):
                     (_x,),
                 )
 
-    @requires_vectorization
-    def test_asinh_with_corner_inputs(self):
-        # https://github.com/pytorch/pytorch/issues/142345
-
-        def fn(input):
-            out = torch.asinh(input)
-            return out
-
-        x = torch.tensor([0, 0, 0, -10000.1]).repeat(3, 4)
-
-        bit_widths = [isa._bit_width for isa in cpu_vec_isa.valid_vec_isa_list()]
-        for dtype in [torch.float32, torch.bfloat16, torch.float16, torch.double]:
-            for simdlen in bit_widths:
-                with torch.no_grad(), config.patch({"cpp.simdlen": simdlen}):
-                    torch._dynamo.reset()
-                    metrics.reset()
-                    _x = x.to(dtype)
-                    self.common(fn, (_x,))
-                    check_metrics_vec_kernel_count(1)
-
     @config.patch(implicit_fallbacks=True)
     def test_repeat_interleave(self):
         def fn(y):
@@ -2480,31 +2460,6 @@ class CPUReproTests(TestCase):
                     res_scalar = torch.compile(func)(2024)
                     # Check the same result between scalar and vec
                     self.assertEqual(res_vec, res_scalar)
-
-    @requires_vectorization
-    def test_bitwise_logical_op_bool(self):
-        bitwise_fns = [
-            torch.bitwise_and,
-            torch.bitwise_or,
-            torch.bitwise_xor,
-            torch.logical_and,
-            torch.logical_or,
-            torch.logical_xor,
-        ]
-
-        for bitwise_fn in bitwise_fns:
-
-            def fn(a, b):
-                c = bitwise_fn((a > 1), (b > 1))
-                return c
-
-            a = torch.ones((64), dtype=torch.int64)
-            b = torch.ones((64), dtype=torch.uint8)
-
-            with config.patch({"cpp.simdlen": None}):
-                torch._dynamo.reset()
-                metrics.reset()
-                self.common(fn, (a, b))
 
     @requires_vectorization
     @patch("torch.cuda.is_available", lambda: False)

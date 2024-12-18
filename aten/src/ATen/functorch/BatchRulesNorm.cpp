@@ -218,8 +218,6 @@ std::tuple<at::Tensor,at::Tensor,at::Tensor> batch_norm_backward_plumbing(
   c10::MaybeOwned<Tensor> running_var_maybe_owned = at::borrow_from_optional_tensor(running_var_opt);
   const Tensor& running_var = *running_var_maybe_owned;
   // NB: not sure why these are optional...these are required from the forward
-  TORCH_INTERNAL_ASSERT(save_mean_opt.has_value());
-  TORCH_INTERNAL_ASSERT(save_rstd_opt.has_value());
   const Tensor& save_mean = *save_mean_opt;
   const Tensor& save_rstd = *save_rstd_opt;
   TORCH_INTERNAL_ASSERT(save_mean.defined());
@@ -228,7 +226,6 @@ std::tuple<at::Tensor,at::Tensor,at::Tensor> batch_norm_backward_plumbing(
   // plumbing
   auto maybe_layer = maybeCurrentDynamicLayer();
   vmap_check_escaped(maybe_layer, "batch_norm_backward_plumbing");
-  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
   int64_t cur_level = maybe_layer->layerId();
 
   auto [grad_out_value, grad_out_bdim] = unwrapTensorAtLevel(grad_out, cur_level);
@@ -301,7 +298,6 @@ static std::tuple<Tensor,Tensor,Tensor> native_group_norm_plumbing(
 
   auto maybe_layer = maybeCurrentDynamicLayer();
   vmap_check_escaped(maybe_layer, "native_group_norm_plumbing");
-  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
   int64_t cur_level = maybe_layer->layerId();
 
   if (!areAnyBatchedAtLevel({input, weight_opt, bias_opt}, cur_level)) {
@@ -384,7 +380,6 @@ static std::tuple<Tensor,Tensor,Tensor> native_group_norm_backward_plumbing(
   // plumbing
   auto maybe_layer = maybeCurrentDynamicLayer();
   vmap_check_escaped(maybe_layer, "native_group_norm_backward_plumbing");
-  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
   int64_t cur_level = maybe_layer->layerId();
 
   if (!areAnyBatchedAtLevel({grad_out, input, mean, rstd, weight_opt}, cur_level)) {
@@ -584,7 +579,6 @@ static std::tuple<at::Tensor,at::Tensor,at::Tensor> native_layer_norm_backward_p
   // plumbing
   auto maybe_layer = maybeCurrentDynamicLayer();
   vmap_check_escaped(maybe_layer, "native_layer_norm_backward_plumbing");
-  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
   int64_t cur_level = maybe_layer->layerId();
   if (!areAnyBatchedAtLevel({grad_out, input, mean, rstd, weight_opt, bias_opt}, cur_level)) {
     c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchBatched);
@@ -727,7 +721,6 @@ struct NativeBatchNormBackwardBatchRuleHelper {
 
     auto maybe_layer = maybeCurrentDynamicLayer();
     vmap_check_escaped(maybe_layer, "NativeBatchNormBackwardBatchRuleHelper.apply");
-    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
     int64_t cur_level = maybe_layer->layerId();
 
     if (!areAnyBatchedAtLevel({grad_out, input, weight_opt, running_mean_opt,
@@ -758,7 +751,6 @@ struct CudnnBatchNormBackwardBatchRuleHelper {
 
     auto maybe_layer = maybeCurrentDynamicLayer();
     vmap_check_escaped(maybe_layer, "CudnnBatchNormBackwardBatchRuleHelper.apply");
-    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
     int64_t cur_level = maybe_layer->layerId();
 
     if (!areAnyBatchedAtLevel({input, grad_out, weight, running_mean_opt,
@@ -787,7 +779,6 @@ struct MiopenBatchNormBackwardBatchRuleHelper {
 
     auto maybe_layer = maybeCurrentDynamicLayer();
     vmap_check_escaped(maybe_layer, "MiopenBatchNormBackwardBatchRuleHelper.apply");
-    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
     int64_t cur_level = maybe_layer->layerId();
 
     if (!areAnyBatchedAtLevel({input, grad_out, weight, running_mean_opt,

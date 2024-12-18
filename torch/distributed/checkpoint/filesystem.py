@@ -12,7 +12,6 @@ import warnings
 from abc import ABC, abstractmethod
 from contextlib import contextmanager
 from dataclasses import dataclass
-from io import UnsupportedOperation
 from pathlib import Path
 from typing import (
     Any,
@@ -332,7 +331,7 @@ def _write_files_from_queue(
                 if use_fsync:
                     try:
                         os.fsync(stream.fileno())
-                    except (AttributeError, UnsupportedOperation):
+                    except AttributeError:
                         os.sync()
             result_queue.put(write_results)
     except queue.Empty:

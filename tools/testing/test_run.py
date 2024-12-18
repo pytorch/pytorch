@@ -2,11 +2,7 @@ from __future__ import annotations
 
 from copy import copy
 from functools import total_ordering
-from typing import Any, TYPE_CHECKING
-
-
-if TYPE_CHECKING:
-    from collections.abc import Iterable
+from typing import Any, Iterable
 
 
 class TestRun:
@@ -25,10 +21,6 @@ class TestRun:
     _included: frozenset[
         str
     ]  # If non-empy, only these tests should be run in this test run
-
-    # NB: Also the class is called TestRun, it's not a test class, so having this field set
-    # will allow pytest to ignore this accordingly
-    __test__ = False
 
     def __init__(
         self,

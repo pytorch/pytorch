@@ -74,7 +74,6 @@ hop_that_doesnt_have_opinfo_test_allowlist = [
     "triton_kernel_wrapper_mutation",
     "triton_kernel_wrapper_functional",
     "hints_wrapper",
-    "foreach_map",
 ]
 
 torch.library.define(

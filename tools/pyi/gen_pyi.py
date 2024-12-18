@@ -5,7 +5,7 @@ import collections
 import importlib
 import sys
 from pprint import pformat
-from typing import TYPE_CHECKING
+from typing import Sequence
 from unittest.mock import Mock, patch
 from warnings import warn
 
@@ -23,10 +23,6 @@ from torchgen.api.python import (
 from torchgen.gen import parse_native_yaml, parse_tags_yaml
 from torchgen.model import _TorchDispatchModeKey, DispatchKey, Variant
 from torchgen.utils import FileManager
-
-
-if TYPE_CHECKING:
-    from collections.abc import Sequence
 
 
 """
@@ -233,7 +229,7 @@ all_ops = binary_ops + comparison_ops + unary_ops + to_py_type_ops
 
 
 def sig_for_ops(opname: str) -> list[str]:
-    """sig_for_ops(opname : str) -> list[str]
+    """sig_for_ops(opname : str) -> List[str]
 
     Returns signatures for operator special functions (__add__ etc.)"""
 
@@ -334,11 +330,11 @@ def get_max_pool_dispatch(name: str, arg_list: list[str]) -> dict[str, list[str]
             ),
             tmpl.format(name=name, args=", ".join(arg_list_positional)).format(
                 return_indices="return_indices: Literal[True]",
-                return_type="tuple[Tensor, Tensor]",
+                return_type="Tuple[Tensor, Tensor]",
             ),
             tmpl.format(name=name, args=", ".join(arg_list_keyword)).format(
                 return_indices="return_indices: Literal[True]",
-                return_type="tuple[Tensor, Tensor]",
+                return_type="Tuple[Tensor, Tensor]",
             ),
         ]
     }
@@ -384,13 +380,13 @@ def gen_nn_functional(fm: FileManager) -> None:
                                 "_random_samples: Tensor",
                             ]
                         ),
-                        "tuple[Tensor, Tensor]",
+                        "Tuple[Tensor, Tensor]",
                     )
                 ],
                 f"adaptive_max_pool{d}d": [
                     f"def adaptive_max_pool{d}d({{}}) -> {{}}: ...".format(
                         ", ".join([f"{INPUT}", "output_size: Union[_int, _size]"]),
-                        "tuple[Tensor, Tensor]",
+                        "Tuple[Tensor, Tensor]",
                     )
                 ],
             }
@@ -694,9 +690,9 @@ def gen_pyi(
                     f"def sparse_{n}_tensor({{}}) -> Tensor: ...".format(
                         ", ".join(
                             [
-                                f"{n1}_indices: Union[Tensor, list]",
-                                f"{n2}_indices: Union[Tensor, list]",
-                                "values: Union[Tensor, list]",
+                                f"{n1}_indices: Union[Tensor, List]",
+                                f"{n2}_indices: Union[Tensor, List]",
+                                "values: Union[Tensor, List]",
                                 "size: Optional[_size] = None",
                                 "*",
                                 "dtype: Optional[_dtype] = None",
@@ -771,7 +767,7 @@ def gen_pyi(
                     ", ".join(
                         [
                             "indices: Tensor",
-                            "values: Union[Tensor, list]",
+                            "values: Union[Tensor, List]",
                             "size: Optional[_size] = None",
                             "*",
                             "dtype: Optional[_dtype] = None",
@@ -787,9 +783,9 @@ def gen_pyi(
                 "def sparse_compressed_tensor({}) -> Tensor: ...".format(
                     ", ".join(
                         [
-                            "compressed_indices: Union[Tensor, list]",
-                            "plain_indices: Union[Tensor, list]",
-                            "values: Union[Tensor, list]",
+                            "compressed_indices: Union[Tensor, List]",
+                            "plain_indices: Union[Tensor, List]",
+                            "values: Union[Tensor, List]",
                             "size: Optional[_size] = None",
                             "*",
                             "dtype: Optional[_dtype] = None",
@@ -977,7 +973,7 @@ def gen_pyi(
                             "size: _size",
                             "fill_value: Union[Number, _complex]",
                             "*",
-                            "names: list[Union[str, None]]",
+                            "names: List[Union[str, None]]",
                             "layout: _layout = strided",
                             FACTORY_PARAMS,
                         ]
@@ -990,7 +986,7 @@ def gen_pyi(
             ],
             "nonzero": [
                 "def nonzero(input: Tensor, *, as_tuple: Literal[False] = False, out: Optional[Tensor] = None) -> Tensor: ...",
-                "def nonzero(input: Tensor, *, as_tuple: Literal[True]) -> tuple[Tensor, ...]: ...",
+                "def nonzero(input: Tensor, *, as_tuple: Literal[True]) -> Tuple[Tensor, ...]: ...",
             ],
             "dsmm": ["def dsmm(input: Tensor, mat2: Tensor) -> Tensor: ..."],
             "hsmm": ["def hsmm(input: Tensor, mat2: Tensor) -> Tensor: ..."],
@@ -1091,7 +1087,7 @@ def gen_pyi(
                 "def size(self, dim: _int) -> _int: ...",
             ],
             "stride": [
-                "def stride(self, dim: None = None) -> tuple[_int, ...]: ...",
+                "def stride(self, dim: None = None) -> Tuple[_int, ...]: ...",
                 "def stride(self, dim: _int) -> _int: ...",
             ],
             "new_ones": [
@@ -1135,7 +1131,7 @@ def gen_pyi(
             "__setitem__": [
                 f"def __setitem__(self, {INDICES}, val: Union[Tensor, Number]) -> None: ..."
             ],
-            "tolist": ["def tolist(self) -> list: ..."],
+            "tolist": ["def tolist(self) -> List: ..."],
             "requires_grad_": [
                 "def requires_grad_(self, mode: _bool = True) -> Tensor: ..."
             ],
@@ -1144,7 +1140,7 @@ def gen_pyi(
             "dim": ["def dim(self) -> _int: ..."],
             "nonzero": [
                 "def nonzero(self, *, as_tuple: Literal[False] = False) -> Tensor: ...",
-                "def nonzero(self, *, as_tuple: Literal[True]) -> tuple[Tensor, ...]: ...",
+                "def nonzero(self, *, as_tuple: Literal[True]) -> Tuple[Tensor, ...]: ...",
             ],
             "numel": ["def numel(self) -> _int: ..."],
             "ndimension": ["def ndimension(self) -> _int: ..."],
@@ -1237,7 +1233,7 @@ def gen_pyi(
             ],
             "split": [
                 "def split(self, split_size: _int, dim: _int = 0) -> Sequence[Tensor]: ...",
-                "def split(self, split_size: tuple[_int, ...], dim: _int = 0) -> Sequence[Tensor]: ...",
+                "def split(self, split_size: Tuple[_int, ...], dim: _int = 0) -> Sequence[Tensor]: ...",
             ],
             "div": [
                 "def div(self, other: Union[Tensor, Number], *, rounding_mode: Optional[str] = None) -> Tensor: ..."

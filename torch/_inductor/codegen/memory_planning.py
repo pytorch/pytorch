@@ -10,7 +10,6 @@ from typing import Any, Dict, Iterable, List, Optional, Protocol
 import sympy
 
 import torch
-from torch.utils._ordered_set import OrderedSet
 
 from .. import config
 from ..utils import _align, align, cache_on_self, CachedMethod, IndentedBuffer
@@ -652,7 +651,7 @@ class MemoryPlanner:
                     name_to_group[old_name].names.append(new_name)
                     name_to_group[new_name] = name_to_group[old_name]
 
-        outputs = OrderedSet(V.graph.get_output_names())
+        outputs = set(V.graph.get_output_names())
         unique_groups = [*{id(g): g for g in name_to_group.values()}.values()]
         for group in unique_groups:
             group.is_output = any(x in outputs for x in group.names)
@@ -749,7 +748,7 @@ class MemoryPlanner:
         DeallocFromPoolLine.is_last_pool_usage fields so that pools
         are created/destroyed.
         """
-        seen = OrderedSet[AllocationPool]()
+        seen = set()
         for line in lines:
             if isinstance(line, AllocFromPoolLine):
                 assert line.group.allocation
@@ -759,7 +758,7 @@ class MemoryPlanner:
                     line.is_first_pool_usage = True
                     seen.add(pool)
 
-        seen = OrderedSet[AllocationPool]()
+        seen = set()
         for line in reversed(lines):
             if isinstance(line, DeallocFromPoolLine):
                 assert line.group.allocation

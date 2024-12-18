@@ -1,7 +1,6 @@
 #pragma once
 
 #include <c10/core/TensorOptions.h>
-#include <torch/csrc/Export.h>
 
 // device_lazy_init() is always compiled, even for CPU-only builds.
 
@@ -24,21 +23,13 @@ namespace torch::utils {
  * try to use CUDA or XPU functionality from a CPU-only build, which is not good
  * UX.
  */
-TORCH_PYTHON_API void device_lazy_init(at::DeviceType device_type);
+void device_lazy_init(at::DeviceType device_type);
 void set_requires_device_init(at::DeviceType device_type, bool value);
 
-inline bool is_device_lazy_init_supported(at::DeviceType device_type) {
-  // Add more devices here to enable lazy initialization.
-  return (
-      device_type == at::DeviceType::CUDA ||
-      device_type == at::DeviceType::XPU ||
-      device_type == at::DeviceType::HPU ||
-      device_type == at::DeviceType::MTIA ||
-      device_type == at::DeviceType::PrivateUse1);
-}
-
 inline void maybe_initialize_device(at::Device& device) {
-  if (is_device_lazy_init_supported(device.type())) {
+  // Add more devices here to enable lazy initialization.
+  if (device.is_cuda() || device.is_xpu() || device.is_privateuseone() ||
+      device.is_hpu() || device.is_mtia()) {
     device_lazy_init(device.type());
   }
 }
