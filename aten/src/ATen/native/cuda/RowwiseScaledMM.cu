@@ -174,7 +174,7 @@ void f8f8bf16_rowwise_impl(
 
   // Implement rowwise scaling epilogue.
   constexpr int ColBroadcastStages = 0;
-  constexpr int RowBroadcastStages = PingPong::value ? 2 : 1;
+  constexpr int RowBroadcastStages = 0;//PingPong::value ? 2 : 1;
 
   using XScale = cutlass::epilogue::fusion::
       Sm90ColBroadcast<ColBroadcastStages, TileShape, DtypeScale>;
@@ -191,15 +191,21 @@ void f8f8bf16_rowwise_impl(
 
   using Accum = cutlass::epilogue::fusion::Sm90AccFetch;
 
-  using EpilogueEVT = cutlass::epilogue::fusion::Sm90EVT<
-      Cast,
-      cutlass::epilogue::fusion::Sm90EVT<
-          Add,
-          Bias,
-          cutlass::epilogue::fusion::Sm90EVT<
-              Multiply,
-              XScale,
-              cutlass::epilogue::fusion::Sm90EVT<Multiply, WScale, Accum>>>>;
+  //using EpilogueEVT = cutlass::epilogue::fusion::Sm90EVT<
+  //    Cast,
+  //    cutlass::epilogue::fusion::Sm90EVT<
+  //        Add,
+  //        Bias,
+  //        cutlass::epilogue::fusion::Sm90EVT<
+  //            Multiply,
+  //            XScale,
+  //            cutlass::epilogue::fusion::Sm90EVT<Multiply, WScale, Accum>>>>;
+
+   using EpilogueEVT = cutlass::epilogue::fusion::Sm90EVT<Cast,
+      cutlass::epilogue::fusion::Sm90EVT<Add, Bias,
+        cutlass::epilogue::fusion::Sm90EVT<Multiply, WScale, 
+          cutlass::epilogue::fusion::Sm90EVT<Multiply, XScale,
+            Accum>>>>;
 
   using CollectiveEpilogue =
       typename cutlass::epilogue::collective::CollectiveBuilder<
@@ -264,12 +270,31 @@ void f8f8bf16_rowwise_impl(
        stride_b},
       {{{{bias.has_value() ? reinterpret_cast<DtypeBias*>(bias->data_ptr())
                            : nullptr},
-         {{reinterpret_cast<DtypeScale*>(x_scale.data_ptr())},
-          {{reinterpret_cast<DtypeScale*>(w_scale.data_ptr())}}}}},
+         {{reinterpret_cast<DtypeScale*>(w_scale.data_ptr())},
+          {{reinterpret_cast<DtypeScale*>(x_scale.data_ptr())}}}}},
        reinterpret_cast<DtypeOutput*>(out.data_ptr()),
        stride_output,
        reinterpret_cast<DtypeOutput*>(out.data_ptr()),
        stride_output}};
+
+
+  //typename Gemm::Arguments arguments{
+  //    cutlass::gemm::GemmUniversalMode::kGemm,
+  //    {M, N, K},
+  //    {reinterpret_cast<DtypeA*>(XQ.data_ptr()),
+  //     stride_a,
+  //     reinterpret_cast<DtypeB*>(WQ.data_ptr()),
+  //     stride_b},
+  //    {{{{bias.has_value() ? reinterpret_cast<DtypeBias*>(bias->data_ptr())
+  //                         : nullptr},
+  //        {{reinterpret_cast<DtypeScale*>(w_scale.data_ptr())}},
+  //       {{reinterpret_cast<DtypeScale*>(x_scale.data_ptr())}
+  //     }}},
+  //     reinterpret_cast<DtypeOutput*>(out.data_ptr()),
+  //     stride_output,
+  //     reinterpret_cast<DtypeOutput*>(out.data_ptr()),
+  //     stride_output}};
+
 
   Gemm gemm;
 
