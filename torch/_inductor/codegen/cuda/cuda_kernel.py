@@ -110,18 +110,18 @@ class CUDAKernel(Kernel):
         ndim = _normalize_idx(-1, len(W.get_size()))
         kdim = _normalize_idx(-1, len(X.get_size()))
         self.add_layout_arg("M", X, "size", mdim)
-        self.add_layout_arg("N", X, "size", ndim)
+        self.add_layout_arg("N", W, "size", ndim)
         self.add_layout_arg("K", X, "size", kdim)
 
         lda_dim = self.find_ld_idx(X)
         ldb_dim = self.find_ld_idx(W)
-        ldc_dim = self.find_ld_idx(Y)
-        ldd_dim = self.find_ld_idx(Bias) if Bias else None
+        ldc_dim = self.find_ld_idx(Bias) if Bias else None
+        ldd_dim = self.find_ld_idx(Y)
         self.add_layout_arg("lda", X, "stride", lda_dim)
         self.add_layout_arg("ldb", W, "stride", ldb_dim)
-        self.add_layout_arg("ldc", Y, "stride", ldc_dim)
-        if Bias and ldd_dim:
-            self.add_layout_arg("ldd", Bias, "stride", ldd_dim)
+        if Bias is not None and ldc_dim is not None:
+            self.add_layout_arg("ldc", Bias, "stride", ldc_dim)
+        self.add_layout_arg("ldd", Y, "stride", ldd_dim)
 
     def get_layout_args(self) -> Tuple[Union[Expr, int], ...]:
         X = self.named_nodes["X"]
@@ -141,8 +141,8 @@ class CUDAKernel(Kernel):
         K = X.get_size()[kdim]
         LDA = get_ld(X)
         LDB = get_ld(W)
-        LDC = get_ld(Y)
-        LDD = get_ld(Bias) if Bias else 0
+        LDC = get_ld(Bias) if Bias else 0
+        LDD = get_ld(Y)
         return (M, N, K, LDA, LDB, LDC, LDD)
 
     @staticmethod
@@ -324,9 +324,11 @@ class CUDATemplateKernel(CUDAKernel):
                 outer_name=WorkspaceArg.unique_name(),
             )
             wrapper.generate_workspace_allocation(ws)
-            data_ptr = f"{ws.outer_name}.data_ptr()"
+            workspace = str(ws.outer_name)
             call_args.append(
-                data_ptr if V.graph.cpp_wrapper else f"c_void_p({data_ptr})"
+                workspace
+                if V.graph.cpp_wrapper
+                else f"c_void_p({workspace}.data_ptr())"
             )
         else:
             ws = None
