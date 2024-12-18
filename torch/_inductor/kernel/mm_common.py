@@ -26,7 +26,18 @@ from ..utils import (
 log = logging.getLogger(__name__)
 
 
-def _extract_configs(
+def triton_config(num_stages, num_warps, **kwargs):
+    from triton import Config  # type: ignore[attr-defined]
+
+    return Config(kwargs, num_stages=num_stages, num_warps=num_warps)
+
+
+def build_rocm_gemm_configs(configs):
+    rocm_num_stages = get_backend_num_stages()
+    return tuple((c[0], c[1], c[2], rocm_num_stages, c[4]) for c in configs)
+
+
+def extract_configs(
     configs: List[Dict[str, Any]]
 ) -> Tuple[List[Tuple[int, int, int, int, int]], List[Optional[Dict[str, Any]]]]:
     """
@@ -54,17 +65,6 @@ def _extract_configs(
             }
             extra_args.append(filtered_args)
     return triton_configs, extra_args
-
-
-def triton_config(num_stages, num_warps, **kwargs):
-    from triton import Config  # type: ignore[attr-defined]
-
-    return Config(kwargs, num_stages=num_stages, num_warps=num_warps)
-
-
-def build_rocm_gemm_configs(configs):
-    rocm_num_stages = get_backend_num_stages()
-    return tuple((c[0], c[1], c[2], rocm_num_stages, c[4]) for c in configs)
 
 
 def filtered_configs(
@@ -741,15 +741,15 @@ scaled_persistent_mm_kernel_configs = [
 
 # Create filtered list of configs based on cond evaluation
 # and parse other params as extra_args
-mm_platform_configs, mm_args = _extract_configs(mm_kernel_configs)
-extra_mm_platform_configs, extra_mm_args = _extract_configs(extra_mm_kernel_configs)
-int8_mm_platform_configs, int8_mm_args = _extract_configs(int8_mm_kernel_configs)
-mixed_mm_platform_configs, mixed_mm_args = _extract_configs(mixed_mm_kernel_configs)
-persistent_mm_platform_configs, persistent_mm_args = _extract_configs(
+mm_platform_configs, mm_args = extract_configs(mm_kernel_configs)
+extra_mm_platform_configs, extra_mm_args = extract_configs(extra_mm_kernel_configs)
+int8_mm_platform_configs, int8_mm_args = extract_configs(int8_mm_kernel_configs)
+mixed_mm_platform_configs, mixed_mm_args = extract_configs(mixed_mm_kernel_configs)
+persistent_mm_platform_configs, persistent_mm_args = extract_configs(
     persistent_mm_kernel_configs
 )
-scaled_mm_platform_configs, scaled_mm_args = _extract_configs(scaled_mm_kernel_configs)
-scaled_persistent_mm_platform_configs, scaled_persistent_mm_args = _extract_configs(
+scaled_mm_platform_configs, scaled_mm_args = extract_configs(scaled_mm_kernel_configs)
+scaled_persistent_mm_platform_configs, scaled_persistent_mm_args = extract_configs(
     scaled_persistent_mm_kernel_configs
 )
 
