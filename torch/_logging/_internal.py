@@ -1214,8 +1214,17 @@ def trace_structured(
                     # special case to look better
                     payload = "[\n" + ",\n".join(json.dumps(i) for i in payload) + "\n]"
                 else:
+
+                    def json_default(obj):
+                        # Sets aren't json serializable
+                        if isinstance(obj, set):
+                            return list(obj)
+                        raise TypeError(
+                            f"Object of type {type(obj)} is not JSON serializable"
+                        )
+
                     # force newlines so we are unlikely to overflow line limit
-                    payload = json.dumps(payload, indent=0)
+                    payload = json.dumps(payload, default=json_default, indent=0)
             h = hashlib.md5()
             h.update(payload.encode("utf-8"))
             record["has_payload"] = h.hexdigest()

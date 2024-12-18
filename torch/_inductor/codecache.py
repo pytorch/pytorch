@@ -51,12 +51,7 @@ from typing import (
 import torch
 import torch.distributed as dist
 from torch import SymInt, Tensor
-from torch._dynamo.utils import (
-    CompileEventLogger,
-    counters,
-    dynamo_timed,
-    get_metrics_context,
-)
+from torch._dynamo.utils import CompileEventLogger, counters, dynamo_timed
 from torch._inductor import config, exc, metrics
 from torch._inductor.codegen.cuda import cuda_env
 from torch._inductor.codegen.rocm.compile_command import (
@@ -1082,7 +1077,7 @@ class FxGraphCache:
                     "inductor_compile", cached_kernel_names=meta.cached_kernel_names
                 )
                 if len(meta.cached_kernel_names) > 0:
-                    get_metrics_context().increment("num_triton_bundles", 1)
+                    CompileEventLogger.increment_toplevel("num_triton_bundles", 1)
 
         try:
             artifact_path = graph.after_deserialization(constants)
@@ -1318,14 +1313,16 @@ class FxGraphCache:
             cache_info["cache_state"] = "hit"
             if remote_cache:
                 # Count remote cache hit stats
-                get_metrics_context().increment("inductor_fx_remote_cache_hit_count", 1)
-                get_metrics_context().add_to_set(
+                CompileEventLogger.increment_toplevel(
+                    "inductor_fx_remote_cache_hit_count", 1
+                )
+                CompileEventLogger.add_to_set_toplevel(
                     "inductor_fx_remote_cache_hit_keys", key
                 )
 
             if (time_saved_ns := compiled_graph._time_taken_ns) is not None:
                 cache_info["time_saved_ns"] = time_saved_ns
-                get_metrics_context().increment(
+                CompileEventLogger.increment_toplevel(
                     "distributed_ephemeral_timeout_us", time_saved_ns // 1000
                 )
                 if (
@@ -1337,10 +1334,10 @@ class FxGraphCache:
         else:
             if remote_cache:
                 # Count remote cache miss stats
-                get_metrics_context().increment(
+                CompileEventLogger.increment_toplevel(
                     "inductor_fx_remote_cache_miss_count", 1
                 )
-                get_metrics_context().add_to_set(
+                CompileEventLogger.add_to_set_toplevel(
                     "inductor_fx_remote_cache_miss_keys", key
                 )
             log.info("fx graph cache miss for key %s", key)
