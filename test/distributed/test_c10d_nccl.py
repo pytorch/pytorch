@@ -2901,6 +2901,8 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
         )
         # avoid watchdog thread interference
         os.environ["TORCH_NCCL_ASYNC_ERROR_HANDLING"] = "0"
+        # avoid flight recorder interference
+        os.environ["TORCH_NCCL_DUMP_ON_TIMEOUT"] = "false"
         store = c10d.FileStore(self.file_name, self.world_size)
         process_group = c10d.ProcessGroupNCCL(
             store,

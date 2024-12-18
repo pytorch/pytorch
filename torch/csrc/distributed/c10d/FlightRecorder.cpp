@@ -125,7 +125,7 @@ bool recursive_mkdir(const std::string& dir) {
 #ifdef _WIN32
   int ret = _mkdir(dir.c_str());
 #else
-  int ret = mkdir(dir.c_str(), S_IRWXU | S_IRWXG | S_IRWXO);
+  int ret = mkdir(dir.c_str(), S_IRWXU | S_IRWXG);
 #endif
   // Success
   if (ret == 0) {
@@ -178,7 +178,7 @@ DebugInfoWriter& DebugInfoWriter::getWriter(int rank) {
     // Attempt to write to running user's HOME directory cache folder - if it
     // exists.
     auto homeDir = getCvarString({"HOME"}, "/tmp");
-    std::string cacheDirPath = homeDir + "/.cache/fr_trace";
+    std::string cacheDirPath = homeDir + "/.cache/torch";
     // Create the .cache directory if it doesn't exist
     recursive_mkdir(cacheDirPath);
     std::string defaultLocation = cacheDirPath + "/" + "nccl_trace_rank_";
