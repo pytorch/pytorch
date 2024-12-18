@@ -1968,6 +1968,20 @@ class Scheduler:
                 OrderedSet(V.graph.graph_inputs.keys()),
                 OrderedSet(V.graph.get_output_names()),
             )
+        self.nodes = comms.bucket_fsdp_all_gather_concat_on_scheduler_ir(
+            self.nodes,
+            self.name_to_buf,
+            self.name_to_fused_node,
+            all_gather_bucket_cap_mb=100,
+            scheduler=self,
+        )
+        self.nodes = comms.bucket_fsdp_reduce_scatter_concat_on_scheduler_ir(
+            self.nodes,
+            self.name_to_buf,
+            self.name_to_fused_node,
+            reduce_scatter_bucket_cap_mb=100,
+            scheduler=self,
+        )
         if config.reorder_for_compute_comm_overlap:
             self.nodes = comms.reorder_compute_and_comm_for_overlap(self.nodes)
         self.process_grouped_nodes()

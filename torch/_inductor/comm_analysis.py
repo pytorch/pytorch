@@ -38,7 +38,7 @@ def get_gpu_type() -> NVIDIA_GPU_TYPE:
 
 
 def get_collective_type(node: ir.IRNode) -> NCCL_COLL:
-    if not isinstance(node, ir._CollectiveKernel):
+    if not isinstance(node, (ir._CollectiveKernel, ir.FallbackKernel)):
         raise ValueError(f"node is not a collective kernel: {node}")
 
     kernel_name = node.python_kernel_name
@@ -67,7 +67,7 @@ def get_collective_input_size_bytes(node: ir.IRNode) -> int:
 
 
 def get_collective_group_size(node: ir.IRNode) -> int:
-    if type(node) == ir._CollectiveKernel:
+    if type(node) in (ir._CollectiveKernel, ir.FallbackKernel):
         from torch.distributed.distributed_c10d import _get_group_size_by_name
 
         return _get_group_size_by_name(node.constant_args[-1])

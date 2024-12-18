@@ -276,8 +276,8 @@ reorder_for_compute_comm_overlap = False
 # hence custom IR passes built on top of it might break in the future.
 reorder_for_compute_comm_overlap_passes = [
     "reorder_compute_for_overlap",
-    "sink_waits",
-    "raise_comms",
+    # "sink_waits",
+    # "raise_comms",
 ]
 
 # enable operator reordering for peak memory optimization

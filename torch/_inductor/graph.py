@@ -134,6 +134,9 @@ else:
     def log_module_code(*args: Any, **kwargs: Any) -> None:
         pass
 
+from itertools import count
+op_count = count()
+
 
 def supported_dtype_of_cpp_wrapper(dtype: torch.dtype, device_type: str) -> bool:
     supported_dtype = OrderedSet(
@@ -859,9 +862,10 @@ class GraphLowering(torch.fx.Interpreter):
             return super().run(*args)
 
     def register_operation(self, op: ir.Operation) -> str:
+        global op_count
         assert op.operation_name is None, f"Operation registered twice: {op}"
         assert isinstance(op, ir.Operation)
-        name = self.qualify_name(f"op{len(self.operations)}")
+        name = self.qualify_name(f"op{next(op_count)}")
         self.operations.append(op)
         self.name_to_op[name] = op
         op.operation_name = name

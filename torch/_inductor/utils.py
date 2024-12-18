@@ -1842,13 +1842,22 @@ def is_collective(node, op=None):
                 and node.op_overload == torch.ops.torchrec.reduce_scatter_tensor.default
             )
         )
+    ) or (
+        type(node) == ir.FallbackKernel and (
+            (op is None and "c10d_functional" in str(node.op_overload) and "wait_tensor" not in str(node.op_overload))
+            or node.op_overload is op
+        )
     )
 
 
 def is_wait(node):
     from . import ir
 
-    return type(node) == ir._WaitKernel
+    return (
+        type(node) == ir._WaitKernel
+    ) or (
+        type(node) == ir.FallbackKernel and "wait_tensor" in str(node.op_overload)
+    )
 
 
 def contains_collective(snode):
@@ -1883,19 +1892,22 @@ def buf_name_to_fused_snode(buf_name, name_to_buf, name_to_fused_node):
     return name_to_fused_node[name_to_buf[buf_name].defining_op.get_name()]
 
 
-def find_recursive_deps_of_node(
-    snode, collected_node_set, name_to_buf, name_to_fused_node, criteria_cb=None
+def find_recursive_deps_of_snode(
+    snode, collected_node_set, name_to_buf, name_to_fused_node, criteria_cb=None, allow_weak_dep=True
 ):
+    from .dependencies import WeakDep
     if criteria_cb and criteria_cb(snode):
         return
     collected_node_set.add(snode)
     for dep in snode.unmet_dependencies:
+        if isinstance(dep, WeakDep) and not allow_weak_dep:
+            continue
         defining_op_for_dep = buf_name_to_fused_snode(
             dep.name, name_to_buf, name_to_fused_node
         )
         if defining_op_for_dep in collected_node_set:
             continue
-        find_recursive_deps_of_node(
+        find_recursive_deps_of_snode(
             defining_op_for_dep,
             collected_node_set,
             name_to_buf,
@@ -1904,7 +1916,7 @@ def find_recursive_deps_of_node(
         )
 
 
-def find_recursive_users_of_node(
+def find_recursive_users_of_snode(
     snode, collected_node_set, name_to_buf, name_to_fused_node, criteria_cb=None
 ):
     if criteria_cb and criteria_cb(snode):
@@ -1920,7 +1932,7 @@ def find_recursive_users_of_node(
             user_op = name_to_fused_node[user.node.get_name()]
             if user_op in collected_node_set:
                 continue
-            find_recursive_users_of_node(
+            find_recursive_users_of_snode(
                 user_op,
                 collected_node_set,
                 name_to_buf,
