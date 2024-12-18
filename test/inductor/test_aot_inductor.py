@@ -22,7 +22,7 @@ from torch._inductor import config
 from torch._inductor.exc import CppWrapperCodegenError
 from torch._inductor.runtime.runtime_utils import cache_dir
 from torch._inductor.test_case import TestCase
-from torch._inductor.utils import run_and_get_cpp_code
+from torch._inductor.utils import is_big_gpu, run_and_get_cpp_code
 from torch.ao.quantization.quantize_pt2e import convert_pt2e, prepare_pt2e
 from torch.ao.quantization.quantizer.x86_inductor_quantizer import X86InductorQuantizer
 from torch.export import Dim, export, export_for_training
@@ -4113,8 +4113,8 @@ class AOTInductorTestsTemplate:
         )
 
     def test_conv3d(self):
-        if self.device != GPU_TYPE:
-            raise unittest.SkipTest("requires GPU")
+        if self.device != GPU_TYPE or not is_big_gpu():
+            raise unittest.SkipTest("requires modern GPU to run max-autotune")
 
         if not _has_sufficient_memory(self.device, 2**35):
             raise unittest.SkipTest("insufficient memory")
