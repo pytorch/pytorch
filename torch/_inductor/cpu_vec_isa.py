@@ -16,6 +16,21 @@ from torch._inductor import config
 _IS_WINDOWS = sys.platform == "win32"
 
 
+def _get_torch_cpu_module_path() -> str:
+    module_name = "torch_cpu"
+    from torch.utils.cpp_extension import TORCH_LIB_PATH
+
+    if _IS_WINDOWS:
+        module_path = os.path.join(TORCH_LIB_PATH, f"{module_name}.dll")
+    else:
+        module_path = os.path.join(TORCH_LIB_PATH, f"lib{module_name}.so")
+
+    if not os.path.isfile(module_path):
+        raise RuntimeError(f"{module_name} get wrong path {module_path}")
+
+    return module_path
+
+
 def _get_isa_dry_compile_fingerprint(isa_flags: str) -> str:
     # ISA dry compile will cost about 1 sec time each startup time.
     # Please check the issue: https://github.com/pytorch/pytorch/issues/100378
@@ -68,8 +83,9 @@ extern "C" void __avx_chk_kernel() {
 """  # noqa: B950
 
     _avx_py_load = """
-import torch
+# import torch
 from ctypes import cdll
+cdll.LoadLibrary("__torch_cpu__path__")
 cdll.LoadLibrary("__lib_path__")
 """
 
@@ -123,11 +139,14 @@ cdll.LoadLibrary("__lib_path__")
                     status, target_file = x86_isa_help_builder.build()
 
                 # Check build result
+                torch_cpu_path = _get_torch_cpu_module_path()
                 subprocess.check_call(
                     [
                         sys.executable,
                         "-c",
-                        VecISA._avx_py_load.replace("__lib_path__", output_path),
+                        VecISA._avx_py_load.replace(
+                            "__lib_path__", output_path
+                        ).replace("__torch_cpu__path__", torch_cpu_path),
                     ],
                     cwd=output_dir,
                     stderr=subprocess.DEVNULL,
