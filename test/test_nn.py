@@ -8841,6 +8841,35 @@ class TestNNDeviceType(NNTestCase):
             inp = torch.randn(3, 0, 10, 10, 10, device=device, dtype=dtype)
             mod(inp)
 
+    @onlyNativeDeviceTypes
+    def test_ReflectionPad_fails(self, device):
+        with self.assertRaisesRegex(RuntimeError, 'Only 2D, 3D, 4D, 5D'):
+            mod = torch.nn.ReflectionPad1d(2)
+            inp = torch.randn(3, 3, 10, 10, device=device)
+            mod(inp)
+
+        with self.assertRaisesRegex(RuntimeError, '2D or 3D'):
+            inp = torch.randn(3, 3, 10, 10, device=device)
+            torch.ops.aten.reflection_pad1d(inp, (2, 2))
+
+        with self.assertRaisesRegex(RuntimeError, 'Only 2D, 3D, 4D, 5D'):
+            mod = torch.nn.ReflectionPad2d(2)
+            inp = torch.randn(3, 3, 10, 10, 10, device=device)
+            mod(inp)
+
+        with self.assertRaisesRegex(RuntimeError, '3D or 4D'):
+            inp = torch.randn(3, 3, 10, 10, 10, device=device)
+            torch.ops.aten.reflection_pad2d(inp, (2, 2, 2, 2))
+
+        with self.assertRaisesRegex(RuntimeError, 'Only 2D, 3D, 4D, 5D'):
+            mod = torch.nn.ReflectionPad3d(3)
+            inp = torch.randn(3, 3, 10, 10, 10, 10, device=device)
+            mod(inp)
+
+        with self.assertRaisesRegex(RuntimeError, '4D or 5D'):
+            inp = torch.randn(3, 3, 10, 10, 10, 10, device=device)
+            torch.ops.aten.reflection_pad3d(inp, (2, 2, 2, 2, 2, 2))
+
     @onlyCUDA   # Test if CPU and GPU results match
     def test_ReflectionPad2d_large(self, device):
         shapes = ([2, 65736, 6, 6], [65736, 2, 6, 6])
