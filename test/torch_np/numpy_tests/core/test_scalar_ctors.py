@@ -15,7 +15,7 @@ from torch.testing._internal.common_utils import (
     subtest,
     TEST_WITH_TORCHDYNAMO,
     TestCase,
-    xpassIfTorchDynamo,
+    xpassIfTorchDynamo_np,
 )
 
 
@@ -31,7 +31,7 @@ skip = functools.partial(skipif, True)
 
 
 class TestFromString(TestCase):
-    @xpassIfTorchDynamo  # (reason="XXX: floats from strings")
+    @xpassIfTorchDynamo_np  # (reason="XXX: floats from strings")
     def test_floating(self):
         # Ticket #640, floats from string
         fsingle = np.single("1.234")
@@ -39,7 +39,7 @@ class TestFromString(TestCase):
         assert_almost_equal(fsingle, 1.234)
         assert_almost_equal(fdouble, 1.234)
 
-    @xpassIfTorchDynamo  # (reason="XXX: floats from strings")
+    @xpassIfTorchDynamo_np  # (reason="XXX: floats from strings")
     def test_floating_overflow(self):
         """Strings containing an unrepresentable float overflow"""
         fhalf = np.half("1e10000")

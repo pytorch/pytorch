@@ -193,9 +193,9 @@ max_pool2d_backward_shape_check(
   check_dim_size(indices, ndim, ndim-1, outputWidth);
 
   if (ndim == 4) {
-    const int64_t BatchSize = input.size(0);
-    check_dim_size(gradOutput, ndim, 0, BatchSize);
-    check_dim_size(indices, ndim, 0, BatchSize);
+    const int64_t batchSize = input.size(0);
+    check_dim_size(gradOutput, ndim, 0, batchSize);
+    check_dim_size(indices, ndim, 0, batchSize);
   }
 }
 

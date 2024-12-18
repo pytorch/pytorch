@@ -602,7 +602,7 @@ class TestPoolingNNDeviceType(NNTestCase):
 
         inp1 = torch.randn([1, 16, 32, 32], device=device)
         with self.assertRaisesRegex(RuntimeError, "Expect _random_samples"):
-            out1 = mod(inp1)
+            mod(inp1)
 
     @onlyNativeDeviceTypes
     def test_FractionalMaxPool3d_zero_samples(self, device):
@@ -616,7 +616,7 @@ class TestPoolingNNDeviceType(NNTestCase):
 
         inp1 = torch.randn([1, 16, 50, 32, 32], device=device)
         with self.assertRaisesRegex(RuntimeError, "Expect _random_samples"):
-            out1 = mod(inp1)
+            mod(inp1)
 
     @onlyNativeDeviceTypes
     def test_MaxPool_zero_batch_dim(self, device):
@@ -935,7 +935,7 @@ torch.cuda.synchronize()
                 module = module_cls(output_size)
                 input = torch.randn((4,) * (numel + 1), device=device).to(dtype)
                 with self.assertRaisesRegex(RuntimeError, "not implemented"):
-                    output = module(input)
+                    module(input)
 
     @onlyNativeDeviceTypes
     @gcIfJetson
@@ -1310,6 +1310,28 @@ torch.cuda.synchronize()
 
         helper(2, 8, 4, 4, ks=2)
         helper(None, 3, 50, 50, ks=5)
+
+    @onlyNativeDeviceTypes
+    def test_max_pool2d_with_indices_backward_fails(self, device):
+        grad_output = torch.randn(1, 2, 7, 7, device=device)
+        input = torch.randn(1, 2, 7, 7, device=device)
+        indices = torch.ones(1, 2, 3, 3, dtype=torch.long)
+        kernel_size = [3, 3]
+        stride = [1, 1]
+        padding = [1, 1]
+        dilation = [1, 1]
+        ceil_mode = False
+        with self.assertRaisesRegex(RuntimeError, "Expected a tensor of dimension"):
+            torch.ops.aten.max_pool2d_with_indices_backward(
+                grad_output,
+                input,
+                kernel_size,
+                stride,
+                padding,
+                dilation,
+                ceil_mode,
+                indices,
+            )
 
     @onlyCPU
     @dtypes(torch.half, torch.bfloat16)
@@ -1868,7 +1890,7 @@ torch.cuda.synchronize()
                 2**7 + 10, 2**8, 2**8, 2**8, dtype=torch.half, device="cuda"
             )
             self.assertTrue(inp.numel() > 2**31 - 1)
-            out = pool(inp)
+            pool(inp)
             torch.cuda.synchronize()  # asserts test finishes normally without raising errors
 
         helper(nn.MaxPool2d(4, 4))
@@ -1894,10 +1916,10 @@ torch.cuda.synchronize()
                 x = torch.ones([1, 1] + num_dim * [4], device=device, dtype=dtype)
                 with self.assertRaisesRegex(RuntimeError, r"too small|smaller than"):
                     try:
-                        res = fn(x, 3, stride=2, padding=0, dilation=2)
+                        fn(x, 3, stride=2, padding=0, dilation=2)
                     except TypeError:
                         # some implementations do not support dilation
-                        res = fn(x, 6, stride=2, padding=0)
+                        fn(x, 6, stride=2, padding=0)
 
     @onlyCUDA
     def test_pooling_bfloat16(self, device):
@@ -1956,13 +1978,13 @@ torch.cuda.synchronize()
         # See https://github.com/pytorch/pytorch/issues/81409
         Ih, Iw, Oh, Ow = 5873, 3693, 3527, 2219
         imgs = torch.randint(low=0, high=256, size=(11, Ih, Iw), dtype=torch.float)
-        imgs_ = F.adaptive_avg_pool2d(imgs, (Oh, Ow))
-        imgs_ = F.adaptive_max_pool2d(imgs, (Oh, Ow))
+        _imgs = F.adaptive_avg_pool2d(imgs, (Oh, Ow))
+        _imgs = F.adaptive_max_pool2d(imgs, (Oh, Ow))
 
         Id, Ih, Iw, Od, Oh, Ow = 3, 5873, 3693, 3, 3527, 2219
         imgs = torch.randint(low=0, high=256, size=(3, Id, Ih, Iw), dtype=torch.float)
-        imgs_ = F.adaptive_avg_pool3d(imgs, (Od, Oh, Ow))
-        imgs_ = F.adaptive_max_pool3d(imgs, (Od, Oh, Ow))
+        F.adaptive_avg_pool3d(imgs, (Od, Oh, Ow))
+        F.adaptive_max_pool3d(imgs, (Od, Oh, Ow))
 
 
 instantiate_device_type_tests(TestPoolingNNDeviceType, globals(), allow_mps=True)
