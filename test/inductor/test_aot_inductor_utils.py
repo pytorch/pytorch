@@ -1,14 +1,20 @@
 # Owner(s): ["module: inductor"]
 
+import copy
 import os
 import shutil
 import tempfile
+import types
 
 import torch
 import torch._export
 import torch._inductor
 import torch.export._trace
 import torch.fx._pytree as fx_pytree
+from torch._dynamo.testing import same
+from torch._inductor import config
+from torch._inductor.test_case import TestCase
+from torch.testing import FileCheck
 from torch.testing._internal.common_utils import IS_FBCODE
 from torch.utils import _pytree as pytree
 
@@ -86,11 +92,12 @@ class AOTIRunnerUtil:
                     temp_so_path, device == "cpu"
                 )
         else:
-            return (
-                torch._C._aoti.AOTIModelContainerRunnerCpu(so_path, 1)
-                if device == "cpu"
-                else torch._C._aoti.AOTIModelContainerRunnerCuda(so_path, 1, device)
-            )
+            if device == "cpu":
+                return torch._C._aoti.AOTIModelContainerRunnerCpu(so_path, 1)
+            elif device == "xpu":
+                return torch._C._aoti.AOTIModelContainerRunnerXpu(so_path, 1, device)
+            else:
+                return torch._C._aoti.AOTIModelContainerRunnerCuda(so_path, 1, device)
 
     @staticmethod
     def load(device, so_path):
@@ -149,3 +156,90 @@ class AOTIRunnerUtil:
         for example_inputs in list_example_inputs:
             list_output_tensors.append(optimized(*example_inputs))
         return list_output_tensors
+
+
+def check_model(
+    self: TestCase,
+    model,
+    example_inputs,
+    options=None,
+    dynamic_shapes=None,
+    disable_constraint_solver=False,
+    atol=None,
+    rtol=None,
+):
+    with torch.no_grad(), config.patch(
+        {
+            "aot_inductor.allow_stack_allocation": self.allow_stack_allocation,
+            "aot_inductor.use_minimal_arrayref_interface": self.use_minimal_arrayref_interface,
+        }
+    ):
+        torch.manual_seed(0)
+        if not isinstance(model, types.FunctionType):
+            model = model.to(self.device)
+        ref_model = copy.deepcopy(model)
+        ref_inputs = copy.deepcopy(example_inputs)
+        expected = ref_model(*ref_inputs)
+
+        torch.manual_seed(0)
+        actual = AOTIRunnerUtil.run(
+            self.device,
+            model,
+            example_inputs,
+            options,
+            dynamic_shapes,
+            disable_constraint_solver,
+        )
+
+    self.assertEqual(actual, expected, atol=atol, rtol=rtol)
+
+
+def check_model_with_multiple_inputs(
+    self: TestCase,
+    model,
+    list_example_inputs,
+    options=None,
+    dynamic_shapes=None,
+):
+    with torch.no_grad(), config.patch(
+        {
+            "aot_inductor.allow_stack_allocation": self.allow_stack_allocation,
+            "aot_inductor.use_minimal_arrayref_interface": self.use_minimal_arrayref_interface,
+        }
+    ):
+        torch.manual_seed(0)
+        model = model.to(self.device)
+        ref_model = copy.deepcopy(model)
+        ref_inputs = copy.deepcopy(list_example_inputs)
+        list_expected = [ref_model(*inputs) for inputs in ref_inputs]
+
+        torch.manual_seed(0)
+        list_actual = AOTIRunnerUtil.run_multiple(
+            self.device, model, list_example_inputs, options, dynamic_shapes
+        )
+
+    self.assertTrue(same(list_actual, list_expected))
+
+
+def code_check_count(
+    self: TestCase,
+    model,
+    example_inputs,
+    target_str: str,
+    target_count: int,
+):
+    with torch.no_grad(), config.patch(
+        {
+            "aot_inductor.allow_stack_allocation": self.allow_stack_allocation,
+            "aot_inductor.use_minimal_arrayref_interface": self.use_minimal_arrayref_interface,
+        }
+    ):
+        so_path = torch._export.aot_compile(model, example_inputs)
+
+    with open(os.path.splitext(so_path)[0] + ".cpp") as cpp:
+        src_code = cpp.read()
+        FileCheck().check_count(
+            target_str,
+            target_count,
+            exactly=True,
+        ).run(src_code)

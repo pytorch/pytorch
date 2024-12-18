@@ -1,6 +1,7 @@
 #pragma once
 
 #include <torch/csrc/inductor/aoti_runtime/utils.h>
+#include <torch/csrc/inductor/aoti_torch/c/shim.h>
 
 #include <cassert>
 #include <cstdint>
@@ -145,6 +146,7 @@ class MiniArrayRef final {
   /// continues to select the move assignment operator.
   template <typename U>
   std::enable_if_t<std::is_same_v<U, T>, MiniArrayRef<T>>& operator=(
+      // NOLINTNEXTLINE(cppcoreguidelines-missing-std-forward)
       U&& Temporary) = delete;
 
   /// Disallow accidental assignment from a temporary.
@@ -225,6 +227,24 @@ class ArrayRefTensor {
     return expensiveCopyToTensor();
   }
 
+  AtenTensorHandle borrowAsTensor() const {
+    AtenTensorHandle result = nullptr;
+    AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_create_tensor_from_blob_v2(
+        data(),
+        sizes_.size(),
+        sizes_.data(),
+        strides_.data(),
+        0,
+        aoti_torch_dtype<std::remove_const_t<T>>(),
+        device_type_,
+        device_idx_,
+        &result,
+        aoti_torch_layout_strided(),
+        nullptr,
+        0));
+    return result;
+  }
+
   // We don't need to free any memory.
   void reset() {}
 
@@ -275,18 +295,6 @@ static_assert(
             (alignof(ArrayRefTensor<int>) > 4 ? sizeof(int32_t) : 0),
     "changing the size of ArrayRefTensor breaks ABI compatibility!");
 
-inline AtenTensorHandle reinterpret_tensor_wrapper(
-    AtenTensorHandle self,
-    int64_t ndim,
-    const int64_t* sizes_ptr,
-    const int64_t* strides_ptr,
-    int64_t storage_offset) {
-  AtenTensorHandle result = nullptr;
-  AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch__reinterpret_tensor(
-      self, ndim, sizes_ptr, strides_ptr, storage_offset, &result));
-  return result;
-}
-
 template <typename T>
 inline ArrayRefTensor<T> reinterpret_tensor_wrapper(
     const ArrayRefTensor<T>& self,
@@ -306,12 +314,6 @@ inline ArrayRefTensor<T> reinterpret_tensor_wrapper(
       self.device_idx());
 }
 
-inline void* get_data_ptr_wrapper(AtenTensorHandle tensor) {
-  void* result = nullptr;
-  AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_get_data_ptr(tensor, &result));
-  return result;
-}
-
 template <typename T>
 inline T* get_data_ptr_wrapper(ArrayRefTensor<T>& tensor) {
   return tensor.data();
@@ -320,11 +322,6 @@ inline T* get_data_ptr_wrapper(ArrayRefTensor<T>& tensor) {
 template <typename T>
 inline T* get_data_ptr_wrapper(const MiniArrayRef<T>& arr) {
   return arr.data();
-}
-
-inline AtenTensorHandle unwrap_raii_handle_if_needed(
-    const RAIIAtenTensorHandle& handle) {
-  return handle.get();
 }
 
 template <typename T>
@@ -337,11 +334,6 @@ template <typename T>
 inline ArrayRefTensor<T>& unwrap_raii_handle_if_needed(
     ArrayRefTensor<T>& tensor) {
   return tensor;
-}
-
-inline RAIIAtenTensorHandle wrap_with_raii_handle_if_needed(
-    AtenTensorHandle handle) {
-  return RAIIAtenTensorHandle(handle);
 }
 
 template <typename T>
@@ -368,14 +360,25 @@ inline AtenTensorHandle expensive_copy_to_tensor_if_needed(
 }
 
 template <typename T>
-const T& convert_arrayref_tensor_to_tensor(const T& t) {
+const T& copy_arrayref_tensor_to_tensor(const T& t) {
   return t;
 }
 
 template <typename T>
-RAIIAtenTensorHandle convert_arrayref_tensor_to_tensor(
+RAIIAtenTensorHandle copy_arrayref_tensor_to_tensor(
     const ArrayRefTensor<T>& art) {
   return art.expensiveCopyToTensor();
+}
+
+template <typename T>
+const T& borrow_arrayref_tensor_as_tensor(const T& t) {
+  return t;
+}
+
+template <typename T>
+RAIIAtenTensorHandle borrow_arrayref_tensor_as_tensor(
+    const ArrayRefTensor<T>& art) {
+  return art.borrowAsTensor();
 }
 
 } // namespace torch::aot_inductor

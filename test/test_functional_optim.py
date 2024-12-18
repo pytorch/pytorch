@@ -111,10 +111,10 @@ class TestFunctionalOptimParity(TestCase):
         )
         # Save old parameters to verify optimizer modifies them.
         old_module_optim_params = [
-            param.clone().detach() for param in module_optim.parameters()
+            param.detach().clone() for param in module_optim.parameters()
         ]
         old_module_functional_params = [
-            param.clone().detach() for param in module_functional.parameters()
+            param.detach().clone() for param in module_functional.parameters()
         ]
 
         t1 = torch.randn(3, 3)

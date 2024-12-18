@@ -30,13 +30,13 @@ dill==0.3.7
 #Pinned versions: 0.3.7
 #test that import: dynamo/test_replay_record.py test_dataloader.py test_datapipe.py test_serialization.py
 
-expecttest==0.2.1
+expecttest==0.3.0
 #Description: method for writing tests where test framework auto populates
 # the expected output based on previous runs
-#Pinned versions: 0.2.1
+#Pinned versions: 0.3.0
 #test that import:
 
-fbscribelogger==0.1.6
+fbscribelogger==0.1.7
 #Description: write to scribe from authenticated jobs on CI
 #Pinned versions: 0.1.6
 #test that import:
@@ -90,7 +90,7 @@ librosa>=0.6.2 ; python_version < "3.11"
 #Pinned versions:
 #test that import:
 
-mypy==1.11.2
+mypy==1.13.0
 # Pin MyPy version because new errors are likely to appear with each release
 #Description: linter
 #Pinned versions: 1.10.0
@@ -132,6 +132,9 @@ numpy==1.22.4; python_version == "3.9" or python_version == "3.10"
 numpy==1.26.2; python_version == "3.11" or python_version == "3.12"
 numpy==2.1.2; python_version >= "3.13"
 
+pandas==2.0.3; python_version < "3.13"
+pandas==2.2.3; python_version >= "3.13"
+
 #onnxruntime
 #Description: scoring engine for Open Neural Network Exchange (ONNX) models
 #Pinned versions: 1.9.0
@@ -155,7 +158,7 @@ optree==0.13.0
 #test_pointwise_ops.py, test_dtensor_ops.py, test_torchinductor.py, test_fx.py,
 #test_fake_tensor.py, test_mps.py
 
-pillow==10.3.0
+pillow==11.0.0
 #Description:  Python Imaging Library fork
 #Pinned versions: 10.3.0
 #test that import:
@@ -187,6 +190,11 @@ pytest-flakefinder==1.1.0
 
 pytest-rerunfailures>=10.3
 #Description: plugin for rerunning failure tests in pytest
+#Pinned versions:
+#test that import:
+
+pytest-subtests==0.13.1
+#Description: plugin for subtest support
 #Pinned versions:
 #test that import:
 
@@ -237,7 +245,7 @@ scikit-image==0.22.0 ; python_version >= "3.10"
 #test that import:
 
 scipy==1.10.1 ; python_version <= "3.11"
-scipy==1.12.0 ; python_version == "3.12"
+scipy==1.14.1 ; python_version >= "3.12"
 # Pin SciPy because of failing distribution tests (see #60347)
 #Description: scientific python
 #Pinned versions: 1.10.1
@@ -272,19 +280,14 @@ unittest-xml-reporting<=3.2.0,>=2.0.0
 #test that import:
 
 #lintrunner is supported on aarch64-linux only from 0.12.4 version
-lintrunner==0.12.5
+lintrunner==0.12.7
 #Description: all about linters!
-#Pinned versions: 0.12.5
+#Pinned versions: 0.12.7
 #test that import:
 
 redis>=4.0.0
 #Description: redis database
 #test that import: anything that tests OSS caching/mocking (inductor/test_codecache.py, inductor/test_max_autotune.py)
-
-rockset==1.0.3
-#Description: queries Rockset
-#Pinned versions: 1.0.3
-#test that import:
 
 ghstack==0.8.0
 #Description: ghstack tool
@@ -306,19 +309,20 @@ z3-solver==4.12.2.0
 #Pinned versions:
 #test that import:
 
-tensorboard==2.13.0
+tensorboard==2.13.0 ; python_version < "3.13"
+tensorboard==2.18.0 ; python_version >= "3.13"
 #Description: Also included in .ci/docker/requirements-docs.txt
 #Pinned versions:
 #test that import: test_tensorboard
 
 pywavelets==1.4.1 ; python_version < "3.12"
-pywavelets==1.5.0 ; python_version >= "3.12"
+pywavelets==1.7.0 ; python_version >= "3.12"
 #Description: This is a requirement of scikit-image, we need to pin
 # it here because 1.5.0 conflicts with numpy 1.21.2 used in CI
 #Pinned versions: 1.4.1
 #test that import:
 
-lxml==5.0.0
+lxml==5.3.0
 #Description: This is a requirement of unittest-xml-reporting
 
 # Python-3.9 binaries
