@@ -2811,14 +2811,19 @@ class Scheduler:
             return benchmark_when_ready
 
         else:
-            future_and_mod_l1_fused = compile_kernel(node_list_fused, compile_future=False)
+            future_and_mod_l1_fused = compile_kernel(
+                node_list_fused, compile_future=False
+            )
 
             cache_key = future_and_mod_l1_fused[1].__file__
+            assert cache_key is not None
             if existing_benchmark := self.speedup_by_fusion_cache.get(cache_key, None):
                 return existing_benchmark
 
             # Start parallel compilation for all three kernels
-            future_and_mod_l1_fused = compile_kernel(node_list_fused, compile_future=True)
+            future_and_mod_l1_fused = compile_kernel(
+                node_list_fused, compile_future=True
+            )
             future_and_mod_l1 = compile_kernel(node_list_1, compile_future=True)
             future_and_mod_l2 = compile_kernel(node_list_2, compile_future=True)
 
@@ -4111,7 +4116,9 @@ class BaseScheduling:
         """
         raise NotImplementedError
 
-    def generate_kernel_code_from_nodes(self, nodes: Sequence[BaseSchedulerNode], benchmark_kernel: bool = False) -> str:
+    def generate_kernel_code_from_nodes(
+        self, nodes: Sequence[BaseSchedulerNode], benchmark_kernel: bool = False
+    ) -> str:
         raise NotImplementedError
 
     def codegen_node(self, node: Union[FusedSchedulerNode, SchedulerNode]) -> None:
