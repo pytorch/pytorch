@@ -21,21 +21,6 @@ def vec_isa_ok_default() -> Optional[bool]:
         return False
     return None
 
-def vec_isa_ok_default() -> Optional[bool]:
-    if os.environ.get("TORCHINDUCTOR_VEC_ISA_OK") == "1":
-        return True
-    if os.environ.get("TORCHINDUCTOR_VEC_ISA_OK") == "0":
-        return False
-    return None
-
-def vec_isa_ok_default() -> Optional[bool]:
-    if os.environ.get("TORCHINDUCTOR_VEC_ISA_OK") == "1":
-        return True
-    if os.environ.get("TORCHINDUCTOR_VEC_ISA_OK") == "0":
-        return False
-    return None
-
-
 def autotune_remote_cache_default() -> Optional[bool]:
     return get_tristate_env("TORCHINDUCTOR_AUTOTUNE_REMOTE_CACHE")
 
@@ -848,7 +833,7 @@ class cpp:
 
     # If None, autodetect whether or not AVX512/AVX2 can be used.  Otherwise,
     # force usage as specified, without testing. Default None.
-    vec_isa_ok: Optional[bool] = _get_tristate_env("TORCHINDUCTOR_VEC_ISA_OK")
+    vec_isa_ok: Optional[bool] = get_tristate_env("TORCHINDUCTOR_VEC_ISA_OK")
 
     # similar to config.triton.descriptive_names
     descriptive_names = "original_aten"
