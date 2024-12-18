@@ -506,7 +506,6 @@ def mgpu_tune_gemm_in_file(filename_pattern: str, num_gpus: int) -> None:
 
     mp_context = mp.get_context("spawn")
 
-    checks = []  # empty list to hold futures
     futures = []  # empty list to hold futures
     flush_results = []  # empty list to hold futures
 
