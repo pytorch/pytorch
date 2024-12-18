@@ -1169,7 +1169,7 @@ class TritonHOPifier:
         tx: Optional["InstructionTranslator"],
     ) -> Optional["ConstantVariable"]:
         from triton import JITFunction
-        from triton.runtime.autotuner import autotune, Autotuner, Config
+        from triton.runtime.autotuner import autotune, Autotuner, Config, Heuristics
 
         SPECIAL_CONFIG_NAMES = {"num_warps", "num_stages", "num_ctas"}
 
@@ -1179,14 +1179,18 @@ class TritonHOPifier:
                 "Please use a Config in @triton.autotune instead."
             )
 
-        # We support running a single Autotuner for each Triton kernel
-        # Currently, if there are multiple autotuning decorators, the subsequent ones will be silently ignored
-        # We raise an error here to avoid silent incorrectness
+        # Currently, if there are multiple autotuning decorators, the subsequent ones will be silently ignored.
+        # We also don't support the @triton.heuristics wrapper yet.
+        # We raise an error here to avoid silent incorrectness in these cases
         iter_kernel = variable.kernel
         autotuner_count = 0
         while not isinstance(iter_kernel, JITFunction):
             if isinstance(iter_kernel, Autotuner):
                 autotuner_count += 1
+            if isinstance(iter_kernel, Heuristics):
+                self.raise_unsupported(
+                    "Passing @triton.heuristics decorators is not supported. "
+                )
             if autotuner_count > 1:
                 self.raise_unsupported(
                     "Passing multiple @triton.autotune decorators is not supported. "
