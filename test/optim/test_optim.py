@@ -54,7 +54,7 @@ def _diff_fn(p, grad, opt_differentiable_state, opt_class, kwargs, *ignored):
     )
 
 
-def _multistep_backprop_diff_lr_fn(
+def _multistep_backprop_diff_hyperparams_fn(
     params: Tensor,
     grad: Tensor,
     opt_differentiable_state: dict[str, Any],
@@ -414,7 +414,7 @@ class TestDifferentiableOptimizer(TestCase):
         kwargs: dict[str, Any] = {"lr": lr, "differentiable": True}
 
         gradcheck(
-            _multistep_backprop_diff_lr_fn,
+            _multistep_backprop_diff_hyperparams_fn,
             (
                 params,
                 grad,

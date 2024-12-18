@@ -352,7 +352,7 @@ def _single_tensor_sgd(
             else:
                 grad = buf
         if isinstance(lr, Tensor):
-            param.addcmul_(grad, -lr.to(param.device))
+            param.addcmul_(grad, lr, value=-1)
         else:
             param.add_(grad, alpha=-lr)
 
