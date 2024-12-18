@@ -503,6 +503,8 @@ Config
 
   * ``compute_crc32``: whether to compute and write crc32 for each storage (Default : ``True``).
     See :func:`~torch.serialization.set_crc32_options`.
+  * ``use_pinned_memory_for_d2h``: for storages that are on CUDA when passed to ``torch.save``, whether to
+    move storage to pinned memory or pageable memory on CPU within ``torch.save``. (Default: ``False`` (i.e. pageable))
 
 ``torch.utils.serialization.config.load`` contains options that control the behavior of ``torch.load``.
 

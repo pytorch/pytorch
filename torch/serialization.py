@@ -1206,7 +1206,13 @@ def _save(
             # this means to that to get tensors serialized, you need to implement
             # .cpu() on the underlying Storage
             if storage.device.type != "cpu":
-                storage = storage.cpu()
+                from torch.utils.serialization import config
+
+                if config.save.use_pinned_memory_for_d2h:
+                    storage = storage.to(device="cpu", non_blocking=True)
+                    torch.cuda.current_stream().synchronize()
+                else:
+                    storage = storage.cpu()
             # Now that it is on the CPU we can directly copy it into the zip file
             zip_file.write_record(name, storage, num_bytes)
 
