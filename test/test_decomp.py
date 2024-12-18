@@ -612,7 +612,7 @@ class TestDecomp(TestCase):
     @skipCPUIf(True, "skip CPU device for testing bernoulli_p decomposition")
     def test_bernoulli_p(self, device):
         p = 0.3
-        input_t = torch.rand(100, 100)
+        input_t = torch.rand(100, 100).to(device)
         torch.manual_seed(123)
         ref = torch.ops.aten.bernoulli.p(input_t, p)
         torch.manual_seed(123)
