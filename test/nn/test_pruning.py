@@ -516,7 +516,6 @@ class TestPruningNN(NNTestCase):
         AXIS = 2
         p = prune.RandomStructured(amount=AMOUNT, dim=AXIS)
         t = 2 * torch.randint(low=-1, high=2, size=(5, 4, 2)).to(dtype=torch.float32)
-
         prune._compute_nparams_toprune(AMOUNT, t.shape[AXIS])
 
         computed_mask = p.compute_mask(t, default_mask=torch.ones_like(t))

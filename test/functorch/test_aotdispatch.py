@@ -1,5 +1,4 @@
 # Owner(s): ["oncall: pt2"]
-# ruff: noqa: F841
 
 # Copyright (c) Facebook, Inc. and its affiliates.
 # All rights reserved.
@@ -1671,7 +1670,7 @@ def forward(self, primals_1):
             inp2.mul_(2)
             # In eager mode, if we mutate a tensor, any multi-output-view aliases
             # get their grad_fn replaced with error nodes, so accessing grad_fn should error
-            grad_fn = out_test2[0].grad_fn
+            out_test2[0].grad_fn
 
         with self.assertRaisesRegex(
             RuntimeError, "Such functions do not allow the output views"
