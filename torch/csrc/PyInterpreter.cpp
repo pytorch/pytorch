@@ -159,6 +159,10 @@ class PyInterpreterHolder {
         is_main_interpreter_(
             at::impl::PythonOpRegistrationTrampoline::registerInterpreter(
                 impl_)) {}
+  PyInterpreterHolder(const PyInterpreterHolder&) = delete;
+  PyInterpreterHolder(PyInterpreterHolder&&) = delete;
+  PyInterpreterHolder& operator=(const PyInterpreterHolder&) = delete;
+  PyInterpreterHolder& operator=(PyInterpreterHolder&&) = delete;
   // NB: intentionally leaks the PyInterpreter, as there may still be
   // references to it that are live, living in objects that aren't being
   // destructed while Python is being cleaned up.

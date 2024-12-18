@@ -7,10 +7,12 @@ from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 class UnwrapTensorSubclass(torch.nn.Module):
     def forward(self, *tensors) -> torch.Tensor:  # type: ignore[no-untyped-def]
         todo: List[torch.Tensor] = list(tensors)
-        for tp, meta, inner_tensors in reversed(self.rebuild_stack):
-            nb_tensor: int = len(inner_tensors)
-            d = {a: b for a, b in zip(inner_tensors, todo[-nb_tensor:])}  # noqa: C416
-            todo = todo[nb_tensor:]
+        for tp, meta, inner_tensors_attrs in reversed(self.rebuild_stack):
+            num_children: int = len(inner_tensors_attrs)
+            d = {  # noqa: C416
+                a: b for a, b in zip(inner_tensors_attrs, todo[-num_children:])
+            }
+            todo = todo[:-num_children]
             rebuilt = tp.__tensor_unflatten__(d, meta, None, None)  # type: ignore[attr-defined]
             todo.append(rebuilt)
 
@@ -24,18 +26,24 @@ class UnwrapTensorSubclass(torch.nn.Module):
         todo = [tensor]
         while todo:
             obj = todo.pop()
-            inner_tensors, metadata = obj.__tensor_flatten__()  # type: ignore[attr-defined]
-            rebuild_stack.append((type(obj), metadata, inner_tensors))
-            for attr_name in inner_tensors:
+            inner_tensors_attrnames, metadata = obj.__tensor_flatten__()  # type: ignore[attr-defined]
+            inner_tensors_attrnames_stack_order = []
+            subclasses_attrnames = []
+            for attr_name in inner_tensors_attrnames:
                 val = getattr(obj, attr_name)
                 if type(val) is torch.Tensor:
                     plain_tensors.append(val)
+                    inner_tensors_attrnames_stack_order.append(attr_name)
                 else:
                     assert isinstance(val, torch.Tensor)
                     todo.append(val)
+                    subclasses_attrnames.append(attr_name)
+            inner_tensors_attrnames_stack_order.extend(subclasses_attrnames)
+            rebuild_stack.append(
+                (type(obj), metadata, inner_tensors_attrnames_stack_order)
+            )
 
         self.rebuild_stack = rebuild_stack
-
         return plain_tensors
 
 

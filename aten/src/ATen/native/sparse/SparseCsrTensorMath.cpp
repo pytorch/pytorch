@@ -1359,7 +1359,7 @@ Tensor _sparse_csr_prod_cpu(const Tensor& input, IntArrayRef dims_to_reduce, boo
 std::tuple<Tensor, Tensor> _sparse_mm_reduce_impl_sparse_csr_cpu(
     const Tensor& self,
     const Tensor& other,
-    const c10::string_view reduce) {
+    const std::string_view reduce) {
 
   auto layout = self.layout();
   TORCH_CHECK(layout == kSparseCsr,
@@ -1411,7 +1411,7 @@ std::tuple<Tensor, Tensor> _sparse_mm_reduce_impl_backward_sparse_csr_cpu(
     const Tensor& self,
     const Tensor& grad_out,
     const Tensor& other,
-    const c10::string_view reduce,
+    const std::string_view reduce,
     const Tensor& arg_out,
     std::array<bool, 2> output_mask) {
 

@@ -50,16 +50,11 @@ from ast import literal_eval
 from datetime import datetime
 from pathlib import Path
 from platform import system as platform_system
-from typing import (
-    Any,
-    Callable,
-    cast,
-    Generator,
-    Iterable,
-    Iterator,
-    NamedTuple,
-    TypeVar,
-)
+from typing import Any, Callable, cast, NamedTuple, TYPE_CHECKING, TypeVar
+
+
+if TYPE_CHECKING:
+    from collections.abc import Generator, Iterable, Iterator
 
 
 try:
