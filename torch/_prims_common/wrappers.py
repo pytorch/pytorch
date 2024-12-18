@@ -323,6 +323,7 @@ def out_wrapper(
                 # harmless.
                 if is_tensor:
                     assert isinstance(out, TensorLike)
+                    assert isinstance(result, TensorLike)
                     # These two operations are done in-place
                     _maybe_resize_out(
                         out, result, maybe_compute_memory_format(result)  # type: ignore[union-attr]
