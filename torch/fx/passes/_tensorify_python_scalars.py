@@ -299,9 +299,11 @@ def tensorify_python_scalars(
                     node.replace_all_uses_with(replacement_proxy.node)
                     graph.erase_node(node)
 
-                    get_metrics_context().set(
-                        "tensorify_float_success", True, overwrite=True
-                    )
+                    metrics_context = get_metrics_context()
+                    if metrics_context.in_progress():
+                        metrics_context.set(
+                            "tensorify_float_success", True, overwrite=True
+                        )
 
     failed_tensorify_ops: Set[str] = set()
 
@@ -349,10 +351,11 @@ def tensorify_python_scalars(
         # are no longer needed and should be specialized. Restarting analysis is necessary
         # because we need to instruct Dynamo to NOT make these as inputs.
         metrics_context = get_metrics_context()
-        metrics_context.set(
-            "tensorify_float_failure", failed_tensorify_ops, overwrite=True
-        )
-        metrics_context.set("tensorify_float_success", True, overwrite=True)
+        if metrics_context.in_progress():
+            metrics_context.set(
+                "tensorify_float_failure", failed_tensorify_ops, overwrite=True
+            )
+            metrics_context.set("tensorify_float_success", True, overwrite=True)
         raise TensorifyScalarRestartAnalysis
 
     graph_code_log.debug(
