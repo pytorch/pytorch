@@ -6,8 +6,6 @@ from functools import lru_cache
 from typing import Any, Callable, cast, Dict, List, Optional, Union
 from unittest.mock import patch
 
-import sympy
-
 import torch
 import torch.utils
 from torch.utils._ordered_set import OrderedSet
@@ -854,23 +852,10 @@ class CppGemmTemplate(CppTemplate):
             new_inputs = list(inputs)
             if not is_mkldnn_wgt and isinstance(new_inputs[1], torch.Tensor):
                 if has_free_symbols(view_size):
-                    # If batch size B is dynamic, we need to infer the batch size from the input
+                    # If batch size B is dynamic, we need to set the batch size and possibly stride
                     assert not has_free_symbols(view_size[1:])
-                    size = torch.tensor(new_inputs[1].size()).prod()
-                    fixed_size = torch.tensor(view_size[1:], dtype=torch.int).prod()
-                    eq = sympy.Eq(view_size[0], int(size // fixed_size))
-                    view_size[0] = (size // fixed_size).item()
-
-                    # solve for any free symbols, since they might exist in stride (in HF XLNetLMHeadModel dynamic case)
-                    free_symbols_prod = math.prod(eq.free_symbols)
-                    free_symbols_equivalent = sympy.solve(eq, free_symbols_prod)[0]
-                    if has_free_symbols(view_stride):
-                        for i, sym in enumerate(view_stride):
-                            if has_free_symbols((sym,)):
-                                view_stride[i] = sym.xreplace(
-                                    {free_symbols_prod: free_symbols_equivalent}
-                                )
-
+                    view_size[:] = V.graph.sizevars.size_hints(view_size)
+                    view_stride[:] = V.graph.sizevars.size_hints(view_stride)
                 # With the assumptation that W is the storage of unwrap view
                 # thus view it back here
                 new_inputs[1] = new_inputs[1].as_strided(

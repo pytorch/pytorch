@@ -180,7 +180,9 @@ class CppBmmTemplate(CppGemmTemplate):
         )
 
         BX, BW, BY = options["X"], options["W"], options["Y"]
-        # Create the BMM size_vars in the kernel
+        # Create the BMM output sizevars in the kernel.
+        # If sizevars are not present before adding the b_index to the kernel, then sizevars
+        # are off by 1 in naming convention, causing compiler errors for some epilogue nodes
         kernel.set_sizevars_with_buffers([BY])
         options["BX"], options["BW"], options["BY"] = BX, BW, BY
         options["BY_2d"] = options["Y_2d"]

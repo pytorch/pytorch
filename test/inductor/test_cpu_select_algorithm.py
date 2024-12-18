@@ -2206,8 +2206,8 @@ class TestSelectAlgorithmDynamicShapes(_DynamicShapesTestBase):
             def __init__(self):
                 super().__init__()
 
-            def forward(self, x, other):
-                return x @ other.permute(2, 0, 1)
+            def forward(self, x, weight):
+                return x @ weight.permute(2, 0, 1)
 
         counters.clear()
         u = torch.randn(bs, Mdim, Kdim).to(dtype=dtype)
