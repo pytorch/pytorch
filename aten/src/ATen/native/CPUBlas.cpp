@@ -1141,9 +1141,9 @@ struct Brgemm : public KernelCache <BrgemmKey, GemmHelper> {
     } else if (dtype == ScalarType::BFloat16) {
       static bool bf16_support = dnnl::get_effective_cpu_isa() >= dnnl::cpu_isa::avx512_core;
       return bf16_support;
-    } else if (dtype == ScalarType::Byte) {
-      static bool u8_support = dnnl::get_effective_cpu_isa() >= dnnl::cpu_isa::avx512_core;
-      return u8_support;
+    } else if (dtype == ScalarType::Byte || dtype == ScalarType::Char) {
+      static bool bit8_support = dnnl::get_effective_cpu_isa() >= dnnl::cpu_isa::avx512_core;
+      return bit8_support;
     }
     return false;
   }
@@ -1194,9 +1194,9 @@ struct Pack : public KernelCache <PackKey, pack_t> {
     } else if (dtype == ScalarType::BFloat16) {
       static bool bf16_pack = dnnl::get_effective_cpu_isa() >= dnnl::cpu_isa::avx512_core_amx;
       return bf16_pack;
-    } else if (dtype == ScalarType::Byte) {
-      static bool u8_pack = dnnl::get_effective_cpu_isa() >= dnnl::cpu_isa::avx512_core_amx;
-      return u8_pack;
+    } else if (dtype == ScalarType::Byte || dtype == ScalarType::Char) {
+      static bool bit8_pack = dnnl::get_effective_cpu_isa() >= dnnl::cpu_isa::avx512_core_amx;
+      return bit8_pack;
     }
     return false;
   }
@@ -1334,6 +1334,32 @@ void brgemm(
   // raise an error if the path is not supported
   TORCH_CHECK(false,
     "U8 Brgemm is only supported on X64 when oneDNN ukernel is enabled and `amx` is supported");
+}
+
+void brgemm(
+    int64_t M,
+    int64_t N,
+    int64_t K,
+    int64_t batch_size,
+    int64_t ld_a,
+    int64_t ld_b,
+    int64_t ld_c,
+    const bool add_C,
+    const unsigned char* A,
+    const signed char* B,
+    int32_t* C,
+    bool is_vnni,
+    std::vector<std::pair<int64_t, int64_t>> A_B_offsets_batch) {
+#if defined(ONEDNN_UKERNEL_ENABLED)
+  if (is_vnni && Brgemm::device_check(ScalarType::Char)) {
+    Brgemm::call<unsigned char, signed char, int32_t>(
+      M, N, K, batch_size, ld_a, ld_b, ld_c, add_C, A, B, C, A_B_offsets_batch);
+    return;
+  }
+#endif
+  // raise an error if the path is not supported
+  TORCH_CHECK(false,
+    "I8 Brgemm is only supported on X64 when oneDNN ukernel is enabled and `amx` is supported");
 }
 
 void brgemm_release(bool is_vnni) {

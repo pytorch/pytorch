@@ -254,6 +254,21 @@ TORCH_API void brgemm(
     bool is_vnni = true,
     std::vector<std::pair<int64_t, int64_t>> A_B_offsets_batch = std::vector<std::pair<int64_t, int64_t>>());
 
+TORCH_API void brgemm(
+    int64_t M,
+    int64_t N,
+    int64_t K,
+    int64_t batch_size,
+    int64_t ld_a,
+    int64_t ld_b,
+    int64_t ld_c,
+    const bool add_C,
+    const unsigned char* A,
+    const signed char* B,
+    int32_t* C,
+    bool is_vnni = true,
+    std::vector<std::pair<int64_t, int64_t>> A_B_offsets_batch = std::vector<std::pair<int64_t, int64_t>>());
+
 // Release brgemm hardware context
 TORCH_API void brgemm_release(bool is_vnni = true);
 
