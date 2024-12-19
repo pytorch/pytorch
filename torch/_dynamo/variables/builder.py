@@ -2666,28 +2666,13 @@ def _automatic_dynamic(
         dim = e.dim()
 
         stride = [None] * dim
-        while any(x is None for x in stride):
-            candidates = {
-                ex_size[i] * ex_stride[i]: InferStride(i)
-                for i in range(dim)
-                if stride[i] is not None and ex_stride[i] >= 0
-            }
-            val_list = sorted(
-                [(ex_stride[i], i) for i in range(dim) if stride[i] is None],
-                key=_nested_int_aware_sort,
-            )
-            for _, i in val_list:
-                if stride[i] is None and ex_stride[i] in candidates:
-                    stride[i] = candidates[ex_stride[i]]
-                    candidates[ex_stride[i] * ex_size[i]] = InferStride(i)
-
-            if any(x is None for x in stride):
-                # bind the smallest unbound stride to a new variable
-                val, i = min(
-                    [(ex_stride[i], i) for i in range(dim) if stride[i] is None],
-                    key=_nested_int_aware_sort,
-                )
-                stride[i] = val
+        pending = [(ex_stride[i], -i) for i in range(dim)]
+        pending.sort(key=_nested_int_aware_sort)
+        candidates = {}
+        for i_stride, neg_i in pending:
+            i = -neg_i
+            stride[i] = candidates.get(i_stride, i_stride)
+            candidates.setdefault(i_stride * ex_size[i], InferStride(i))
     else:
         stride = []
 
