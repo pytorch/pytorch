@@ -258,10 +258,13 @@ class GraphRegionTracker:
                 region_group = []
                 min_rank = math.inf
                 for node in group:
-                    min_rank = min(min_rank, topological_ranking[node])
-                    region_group.append([node])
+                    # some nodes aren't in the topo ranking?
+                    if node in topological_ranking:
+                        min_rank = min(min_rank, topological_ranking[node])
+                        region_group.append([node])
 
-                region_groups_with_rank.append((region_group, min_rank))
+                if len(region_group) > 1:
+                    region_groups_with_rank.append((region_group, min_rank))
 
         region_groups_with_rank.sort(key=lambda rg: -rg[1])
         region_groups = [rg for rg, _ in region_groups_with_rank]
@@ -272,6 +275,9 @@ class GraphRegionTracker:
         seen_nodes: Set[Node] = set()
         for region_group in region_groups:
             fully_expand_region_group(region_group, seen_nodes, self._is_identical)
+            # sort topologically
+            for region in region_group:
+                region.sort(key=lambda n: topological_ranking[n])
 
         return [
             region_group for region_group in region_groups if len(region_group[0]) > 1
@@ -326,6 +332,7 @@ def fully_expand_region_group(
                 add_node &= (
                     node not in seen_nodes
                     and node not in nodes_to_add_set
+                    and node.op != "placeholder"
                     and is_identical_fn(node, current_node)
                 )
                 nodes_to_add.append(node)
