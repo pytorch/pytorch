@@ -1857,31 +1857,10 @@ class SIMDScheduling(BaseScheduling):
                 cls.get_nd_tilings(node_schedule, is_pointwise) + ranked_tilings
             )
 
-        def is_compatible_with_numels(tiling: Dict[str, sympy.Expr]) -> bool:
-            """
-            Check if the tiling agrees with the global pointwise and reduction numels.
-            """
-            tiling_total_numel = sympy_product(tiling.values())
-            tiling_reduction_numel = sympy_product(
-                size for var, size in tiling.items() if var[0] == "r"
-            )
-            tiling_pointwise_numel = sympy_product(
-                size for var, size in tiling.items() if var[0] != "r"
-            )
-            sizevars = V.graph.sizevars
-            return sizevars.statically_known_equals(
-                tiling_pointwise_numel, numel
-            ) and sizevars.statically_known_equals(
-                tiling_reduction_numel, reduction_numel
-            )
-
         for tiling in ranked_tilings:
             assert isinstance(tiling, dict)
             if all(
-                (
-                    is_compatible_with_numels(tiling)
-                    and SIMDKernel.is_compatible(tiling.values(), node.get_ranges())
-                )
+                SIMDKernel.is_compatible(tiling.values(), node.get_ranges())
                 for node in node_schedule
                 if isinstance(node, scheduler.SchedulerNode)
             ):
