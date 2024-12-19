@@ -4,6 +4,7 @@
 #include <ATen/native/sparse/cuda/StaticSort.h>
 #include <cutlass/bfloat16.h>
 #include <cutlass/half.h>
+#include <cutlass/version.h>
 
 // Given 4x4 values, computes the selected indices that will remain after 2:4
 // sparsification, as a bitmask.
@@ -68,7 +69,11 @@ template <typename Op = IdentityOp>
 struct LargestValuesGreedy {
   template <typename T>
   static CUTLASS_DEVICE T outOfBoundsFillValue() {
+    #if CUTLASS_VERSION == 351
+    return -std::numeric_limits<T>::infinity();
+    #else
     return -platform::numeric_limits<T>::infinity();
+    #endif
   }
 
   template <typename Tile4x4Accessor>
@@ -128,7 +133,11 @@ template <typename Op = IdentityOp>
 struct Causal1122 {
   template <typename T>
   static CUTLASS_DEVICE T outOfBoundsFillValue() {
+    #if CUTLASS_VERSION == 351
+    return -std::numeric_limits<T>::infinity();
+    #else
     return -platform::numeric_limits<T>::infinity();
+    #endif
   }
 
   template <typename Tile4x4Accessor>
