@@ -58,6 +58,7 @@ torch.manual_seed(0)
 class MockPipelineStage(_PipelineStageBase):
     def __init__(self, *args, **kwargs):
         # Mock the necessary attributes
+        self.submod = None
         self.num_stages = kwargs.get("num_stages", 1)
         self.group_size = kwargs.get("group_size", 1)
         self.group_rank = kwargs.get("group_rank", 0)
