@@ -1194,6 +1194,14 @@ class cuda:
     cutlass_op_denylist_regex: Optional[str] = "pingpong"
 
 
+class xpu:
+    # The big_gpu_threshold is the minimum number of Xe Cores suitable for max autotune.
+    # Due to the evolution of the architecture, we are not sure if this
+    # threadhold will still be applicable in the future, so we open it
+    # up to users.
+    big_gpu_threshold = 16
+
+
 class rocm:
     # Offload arch list for device code compilation, e.g. ["gfx941", "gfx942"].
     # If empty, the `native` arch is used

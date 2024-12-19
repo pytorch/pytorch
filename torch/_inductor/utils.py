@@ -1126,10 +1126,11 @@ class DelayReplaceLine(DeferredLineBase):
 
 @functools.lru_cache(None)
 def is_big_gpu(index_or_device: Union[int, torch.device] = 0) -> bool:
+    gpu_type = get_gpu_type()
     if isinstance(index_or_device, torch.device):
         device = index_or_device
     else:
-        device = torch.device("cuda", index_or_device)
+        device = torch.device(gpu_type, index_or_device)
 
     prop = DeviceProperties.create(device)
 
@@ -1142,7 +1143,7 @@ def is_big_gpu(index_or_device: Union[int, torch.device] = 0) -> bool:
             return False
         return True
 
-    min_sms = 68  # 3080
+    min_sms = config.xpu.big_gpu_threshold if gpu_type == "xpu" else 68  # 3080
     avail_sms = prop.multi_processor_count
     if avail_sms < min_sms:
         log.warning(
