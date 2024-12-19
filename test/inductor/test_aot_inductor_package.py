@@ -181,6 +181,7 @@ class TestAOTInductorPackage(TestCase):
         )
         self.check_model(Model(), example_inputs)
 
+    @unittest.skipIf(IS_FBCODE, "cmake won't work in fbcode")
     def test_compile_after_package(self):
         if not self.package_cpp_only:
             raise unittest.SkipTest("Only meant to test cpp package")
@@ -507,6 +508,5 @@ class TestAOTInductorPackage(TestCase):
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
 
-    # cpp_extension N/A in fbcode
     if HAS_GPU or sys.platform == "darwin":
         run_tests(needs="filelock")
