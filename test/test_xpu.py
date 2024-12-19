@@ -410,7 +410,7 @@ print(torch.xpu.device_count())
             self.assertEqual(copy.get_device(), original.get_device())
 
     def test_out_of_memory(self):
-        tensor = torch.zeros(1024, device="xpu")
+        tensor = torch.zeros(1024, device="xpu")  # noqa: F841
 
         with self.assertRaisesRegex(RuntimeError, "Tried to allocate 800000000.00 GiB"):
             torch.empty(1024 * 1024 * 1024 * 800000000, dtype=torch.int8, device="xpu")
@@ -456,7 +456,7 @@ print(torch.xpu.device_count())
     def test_device_memory_allocated(self):
         device_count = torch.xpu.device_count()
         current_alloc = [torch.xpu.memory_allocated(idx) for idx in range(device_count)]
-        x = torch.ones(10, device="xpu:0")
+        torch.ones(10, device="xpu:0")
         self.assertGreater(torch.xpu.memory_allocated(0), current_alloc[0])
         self.assertTrue(
             all(
@@ -474,7 +474,7 @@ print(torch.xpu.device_count())
         torch.xpu.empty_cache()
         before_free_bytes, before_total_bytes = torch.xpu.mem_get_info()
         # increasing to 1MB to force acquiring a new block.
-        t = torch.randn(1024 * 256, device="xpu")
+        torch.randn(1024 * 256, device="xpu")
         torch.xpu.synchronize()
         after_free_bytes, after_total_bytes = torch.xpu.mem_get_info()
 
