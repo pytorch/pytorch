@@ -2,6 +2,7 @@
 import operator
 import types
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+import logging
 
 import torch
 import torch.nn.functional as F
@@ -577,6 +578,255 @@ def _replace_literals_with_existing_placeholders(
                 new_args.append(arg)
         new_args = tuple(new_args)
         node.args = new_args
+    return gm
+
+def _replace_node_literals_with_existing_placeholders(
+    gm: torch.fx.GraphModule,
+    node_arg_map: Dict[str, Dict[int, str]]
+):
+    """
+    A more generalized version of literal -> placeholder replacement where the
+    user explicitly specifies the mapping between a node's literal arguments
+    and the corresponding placeholder nodes.
+
+    Suppose we have a `nn.Module` that we'd like to compile into a pattern
+    using torch.export(...) 
+
+    class LayerNormPattern(torch.nn.Module):
+
+        def forward(self, x: torch.Tensor, normalized_shape: List[int], 
+                    weight: torch.Tensor, bias: torch.Tensor, 
+                    eps: float) -> torch.Tensor:
+
+            # match LayerNorm
+            y = torch.nn.functional.layer_norm(x, normalized_shape, weight, bias, eps)
+
+            # ... optionally, match other functionality ...
+
+            return y
+
+    The compiled pattern graph looks like this:
+
+    code         name                target                   args                                    kwargs
+    -------------  ------------------  -----------------------  --------------------------------------  --------
+    placeholder    x                   x                        ()                                      {}
+    placeholder    normalized_shape_0  normalized_shape_0       ()                                      {}
+    placeholder    normalized_shape_1  normalized_shape_1       ()                                      {}
+    placeholder    normalized_shape_2  normalized_shape_2       ()                                      {}
+    placeholder    weight              weight                   ()                                      {}
+    placeholder    bias                bias                     ()                                      {}
+    placeholder    eps                 eps                      ()                                      {}
+    call_function  layer_norm          aten.layer_norm.default  (x, [5, 10, 10], weight, bias, 0.0001)  {}
+    output         output_1            output                   ((layer_norm,),)                        {}
+
+    As such, this pattern has two problems:
+
+    - the literals are burned-in and not connected to the corresponding
+      placeholders (thereby producing "dead code").
+    - the array literal (normalized_shape) is expanded across each array index
+      which is not desirable.
+
+    This pattern, as such, won't work with `SubgraphMatcher` or
+    `replace_pattern`. This function allows the user to explicitly specify the
+    rules to map literals to placeholders using a simple dictionary mapping.
+
+    For this example, the mapping in this case would look like this where we
+    map the call_function node's argument index to the corresponding
+    placeholder name.
+
+    #
+    # Define the mapping between a node's arguments and its corresponding placeholder nodes.
+    #
+    LN_REPL_LITERAL_MAP = {
+        'my_lib::my_layer_norm': {     # the node (call_function) for which this replacement applies
+            1: 'normalized_shape',     # <node_arg_idx> -> <op_placeholder_name> mapping.
+            4: 'eps',
+        }
+    }
+
+    Using this we can restore the pattern to its right form which works with
+    SubgraphMatcher and replace_pattern:
+
+    pattern_gm = torch.export.export(pattern_model, cls.example_inputs).module()
+    _replace_node_literals_with_existing_placeholders(cls.pattern_gm, LN_PATTERN_LITERAL_MAP)
+
+    ... this producing the following output which is what we want.
+
+    code         name              target                   args                                      kwargs
+    -------------  ----------------  -----------------------  ----------------------------------------  --------
+    placeholder    x                 x                        ()                                        {}
+    placeholder    normalized_shape  normalized_shape         ()                                        {}
+    placeholder    weight            weight                   ()                                        {}
+    placeholder    bias              bias                     ()                                        {}
+    placeholder    eps               eps                      ()                                        {}
+    call_function  layer_norm        aten.layer_norm.default  (x, normalized_shape, weight, bias, eps)  {}
+    output         output_1          output                   ((layer_norm,),)                          {}
+
+    Args:
+        `gm`: input GraphModule that we'll transform.
+        `node_arg_map`: A mapping between a node's arguments and the
+        corresponding placeholder nodes. See documentation above.
+    """
+    def _ph_name(_node, _arg_idx, _node_arg_map, repl_map):
+        """
+        Returns a potential replacement placeholder name if it is specified in
+        _node_arg_map.
+        """
+
+        # must be a target with a name (not a built-in).
+        name_fn = getattr(_node.target, 'name', None)
+        if not name_fn:
+            return None
+
+        # the _node must have an entry in the _node/arg.
+        arg_map = _node_arg_map.get(name_fn())
+        if not arg_map:
+            return None
+
+        # if an entry exist, check if there is a index match. 
+        # - if so return it, else return None.
+        entry = arg_map.get(_arg_idx)
+        if not entry:
+            return None
+
+        # make sure that the node's argument is a literal 
+        assert _is_literal(_node.args[_arg_idx]), f"{_node.name}'s argument is not a literal!"
+
+        # mark this node as replaced in the replacement map.
+        repl_map[name_fn()][_arg_idx] = True
+
+        return entry
+
+    def _check_default_usage(
+            node: torch.fx.Node, 
+            node_arg_map: Dict[str, Dict[int, str]]
+    ):
+        """
+        A sanity check to make sure we are handling default Op arguments
+        correctly i.e., it is an error to refer to default arguments in
+        node_arg_map if it doesn't show up in node.args. Best way to handle
+        this would be to use a non-default value for the purpose of pattern
+        matching.
+        """
+        # log.info(f"Node{node} invoked with some defaulted arguments.")
+        # There are some default valued arguments in use
+        if (
+                hasattr(node.target, 'name') and 
+                node.target.name() in node_arg_map and
+                hasattr(node.target, '_schema')
+        ):
+            arg_map = node_arg_map[node.target.name()]
+            # node.args excludes trailing default arguments
+            for arg_idx in range(len(node.args), len(node.target._schema.arguments)):
+                if arg_idx in arg_map:
+                    # Note: Rather than using _schema.arguments in the replacement below,
+                    # still use node.args, so we have the option of default (ignored) arguments in our patterns
+                    raise RuntimeError(f"Node({node}) literal argument {arg_map[arg_idx]} is default valued."
+                                       f"\n\tPlease change to allow replacement in graph.")
+
+    def _handle_list_literals(
+            gm: torch.fx.GraphModule, 
+            ph_map: Dict[str, torch.fx.graph.Node], 
+            ph_name: str, 
+            arg: List[int], 
+    ):
+        """
+        For list literals (ex: List[int]), torch.export creates an array of
+        placeholder nodes (ex: shape_0, shape_1, ... for a list literal argument
+        named "shape"). 
+
+        What we would ideally like to do would to be collapse all the placeholder
+        nodes into a single placeholder node called "shape" and connect it to the
+        corresponding node's argument.
+
+        Args:
+            gm: Graph Module to be modified.
+            ph_map: A mapping of placeholder name -> placeholder node.
+            ph_name: Placeholder name corresponding to this list literal.
+            arg: The argument that was used in compilation (from node.args).
+        """
+
+        # modify the first placeholder node in the list it to remove the index and
+        # associate the entire argument with this node. this node will represent
+        # the entire list literal.
+        ph_node = ph_map[ph_name + '_0']
+        ph_node.name = ph_name
+        ph_node.target = ph_name
+        ph_node.meta['val'] = arg
+
+        # erase all subsequent placeholder nodes ("shape_1", "shape_2", ...).
+        for idx in range(1, len(arg)):
+            list_node_name = ph_name + '_' + str(idx)
+            gm.graph.erase_node(ph_map[list_node_name])
+
+        # check that we don't have any more placeholder array nodes (more than the
+        # argument length).
+        if ph_name + '_' + str(len(arg)) in ph_map:
+            raise RuntimeError(f'Unexpected List Node: {ph_name + "_" + str(len(arg))}')
+
+        # return the modified first placeholder node that now represents the entire
+        # list literal.
+        return ph_node
+
+    log = logging.getLogger('REPLACE_LITERALS')
+    if node_arg_map is None:
+        node_arg_map = {}
+
+    # create a copy of the node_arg_map to keep track of replaced nodes.
+    repl_check: Dict[str, Dict[int, bool]] = {}
+    for node, args in node_arg_map.items():
+        repl_check[node] = {}
+        for idx, _ in args.items():
+            repl_check[node][idx] = False
+
+    # create a mapping between placeholder_node's name -> placeholder_node
+    ph_map: Dict[str, torch.fx.graph.Node] = {}
+    for node in gm.graph.nodes:
+        if node.op == 'placeholder':
+            ph_map[node.name] = node
+
+    for node in gm.graph.nodes:
+
+        # this transformation is only relevant for call_function nodes.
+        if node.op != "call_function":
+            continue
+
+        # Catch if default valued literals are being used for replacement
+        if hasattr(node.target, '_schema') and len(node.target._schema.arguments) != len(node.args):
+            _check_default_usage(node, node_arg_map)
+
+        # go over the node's argument and see if you can replace all of the
+        # them with placeholder nodes aspecified using node_arg_map.
+        new_args = []
+        for arg_idx, arg in enumerate(node.args):
+            # see if you can find a placeholder code corresponding to this
+            # node/argument combination.
+            ph_name = _ph_name(node, arg_idx, node_arg_map, repl_check)
+            # if so, add the placeholder node.
+            if ph_name:
+                # list literals require special handling as torch.export
+                # expands them into multiple disconnected placeholder nodes.
+                if isinstance(arg, torch.fx.immutable_collections.immutable_list):
+                    ph_node = _handle_list_literals(gm, ph_map, ph_name, arg)
+                else:
+                    ph_node = ph_map[ph_name]
+                new_args.append(ph_node)
+                log.debug('Matched {} to {} ...'.format(arg, ph_node))
+            # if not, keep the original argument as it is.
+            else:
+                new_args.append(arg)
+        # replace the node's argument with the new argument list.
+        new_args = tuple(new_args)
+        node.args = new_args
+
+    # check that all the nodes in node_arg_map were replaced.
+    for node, args in repl_check.items():
+        for idx, _ in args.items():
+            if not repl_check[node][idx]:
+                raise RuntimeError(f"Node({node})'s argument {idx} was not replaced!")
+
+    # recompile, so everything takes effect.
+    gm.recompile()
     return gm
 
 
