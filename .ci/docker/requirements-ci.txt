@@ -10,9 +10,9 @@ boto3==1.19.12
 #Pinned versions: 1.19.12, 1.16.34
 #test that import:
 
-click
+click==8.1.7
 #Description: Command Line Interface Creation Kit
-#Pinned versions:
+#Pinned versions: 8.1.7
 #test that import:
 
 sympy==1.12.1
@@ -166,9 +166,9 @@ protobuf==3.20.2
 #Pinned versions: 3.20.1
 #test that import: test_tensorboard.py
 
-psutil
+psutil==6.0.0
 #Description: information on running processes and system utilization
-#Pinned versions:
+#Pinned versions: 6.0.0
 #test that import: test_profiler.py, test_openmp.py, test_dataloader.py
 
 pytest==7.3.2
@@ -186,7 +186,7 @@ pytest-flakefinder==1.1.0
 #Pinned versions: 1.1.0
 #test that import:
 
-pytest-rerunfailures>=10.3
+pytest-rerunfailures==14.0
 #Description: plugin for rerunning failure tests in pytest
 #Pinned versions:
 #test that import:
