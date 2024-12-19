@@ -1,6 +1,8 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/core/Tensor.h>
 #include <ATen/native/Resize.h>
+#include <ATen/ExpandUtils.h>
+#include <ATen/native/mkldnn/MKLDNNCommon.h>
 #include <ATen/native/xnnpack/Engine.h>
 #include <ATen/WrapDimUtilsMulti.h>
 #include <ATen/TensorOperators.h>
@@ -91,7 +93,43 @@ Tensor linear(const Tensor& input, const Tensor& weight, const std::optional<Ten
     return xnnpack::linear(input, weight, *bias);
   }
 #endif
-  if (input_dim == 2 && bias->defined()) {
+
+  // Weight has been prepacked
+  if (weight.is_mkldnn()) {
+    Tensor bias_ = *bias;
+    Tensor input_ = input;
+
+    if (input_dim == 2) {
+      if (!(bias->defined())) {
+        bias_ =
+            at::zeros({input.sizes()[0], weight.sizes()[1]}, input.options());
+      }
+      return mkldnn_linear(input_, weight, bias_);
+    } else {
+      int64_t flattened_dim = 1;
+      for (int64_t i = 0, ndim = input.sizes().size(); i < ndim - 1; ++i) {
+        flattened_dim = flattened_dim * input.sizes()[i];
+      }
+      input_ = input.reshape_symint({flattened_dim, input.sizes().at(input.sizes().size() - 1)});
+      if (!input_.is_contiguous()) {
+        // If user forces flattening via env var
+        input_ = input_.contiguous();
+      }
+      
+      if (!(bias->defined())) {
+        bias_ = at::zeros({flattened_dim, weight.sizes()[1]}, input.options());
+      }
+    }
+
+    auto result = mkldnn_linear(input_, weight, bias_);
+
+    auto new_size = input.sizes().slice(0, input.sizes().size() - 1);
+    c10::SymDimVector sizes_vec(new_size.begin(), new_size.end());
+    sizes_vec.push_back(result.sym_size(1));
+    return result.view_symint(sizes_vec);
+  }
+
+  if ((input_dim == 2 && bias->defined())) {
     // Fused op is marginally faster.
     return at::addmm(*bias, input, weight.t());
   }
