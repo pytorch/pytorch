@@ -71,9 +71,6 @@ jobs:
       run:
         shell: bash
     steps:
-      - name: Print test matrix
-        shell: cmd
-        run: echo ${{ steps.filter.outputs.test-matrix }}
       - name: Git checkout Builder
         uses: actions/checkout@v4
         with:
