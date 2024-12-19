@@ -608,7 +608,6 @@ class TestDecomp(TestCase):
         res = torch._decomp.decompositions.uniform(x, low=low, high=high)
         self.assertEqual(ref, res)
 
-
     def test_bernoulli_default(self, device):
         p = 0.3
         p_t = p * torch.ones(5, 5)
