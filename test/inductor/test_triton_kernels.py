@@ -3617,7 +3617,7 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
 
         if with_perf_model:
             # Disabled for now, some dynamo weirdness at play here
-            # self.assertEqual(len(records_perf_model), 1)
+            self.assertEqual(len(records), 1)
             self.assertEqual(src + 1.5, dst)
         else:
             # We require the largest config to be picked for the correct result (BLOCK_SIZE==128)
@@ -3626,55 +3626,6 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
             self.assertTrue(records["run_early_config_prune"] is not None)
             self.assertTrue(records["capture_kwargs"] is not None)
             self.assertTrue(records["capture_named_args"] is not None)
-
-    @requires_gpu
-    def test_triton_single_autotune(self):
-        @triton.autotune(
-            configs=[
-                triton.Config(
-                    {"BLOCK_SIZE": 4096},
-                )
-            ],
-            key=["n_elements"],
-        )
-        # Currently, this autotuning decorator will never run!
-        # We only support having a single autotuning decorator on each Triton kernel
-        @triton.autotune(
-            configs=[
-                triton.Config(
-                    {"BLOCK_SIZE": 1024},
-                )
-            ],
-            key=["n_elements"],
-        )
-        @triton.jit
-        def add_kernel(x_ptr, y_ptr, output_ptr, n_elements, BLOCK_SIZE: tl.constexpr):
-            pid = tl.program_id(axis=0)
-
-            block_start = pid * BLOCK_SIZE
-            offsets = block_start + tl.arange(0, BLOCK_SIZE)
-            mask = offsets < n_elements
-
-            x = tl.load(x_ptr + offsets, mask=mask)
-            y = tl.load(y_ptr + offsets, mask=mask)
-            output = x + y
-            tl.atomic_add(output_ptr + offsets, output, mask=mask)
-
-        def add(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
-            output = torch.ones(x.shape, device=x.device, dtype=x.dtype)
-            n_elements = output.numel()
-            grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
-            add_kernel[grid](x, y, output, n_elements)
-            return output
-
-        x = torch.ones((4096,), device=GPU_TYPE, dtype=torch.float16)
-        y = torch.ones((4096,), device=GPU_TYPE, dtype=torch.float16)
-
-        # this should cause an exception, since pre_hook is not allowed
-        msg = "Passing multiple @triton.autotune decorators is not supported. Please use a single @triton.autotune decorator instead."
-        with self.assertRaisesRegex(torch._dynamo.exc.Unsupported, msg):
-            add_compiled = torch.compile(add, mode="reduce-overhead", fullgraph=True)
-            add_compiled(x, y).mean()
 
 
 common_utils.instantiate_parametrized_tests(KernelTests)
