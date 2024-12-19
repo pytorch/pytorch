@@ -197,6 +197,28 @@ class ScheduleTest(TestCase):
 
         torch.distributed.destroy_process_group()
 
+    def test_zero_bubble_schedule_errors_with_compile(self):
+        """
+        Test that zero bubble schedules raise an error when used with torch.compile.
+        """
+        store = FakeStore()
+        torch.distributed.init_process_group(
+            backend="fake", rank=0, world_size=1, store=store
+        )
+        n_stages = 1
+        device = torch.device("cpu")
+        model = MultiMLP(8, n_layers=n_stages)
+        # full_mod
+        compiled_model = torch.compile(model)
+        stage = PipelineStage(
+            compiled_model,
+            0,
+            n_stages,
+            device,
+        )
+        with self.assertRaises(RuntimeError):
+            ScheduleInterleavedZeroBubble([stage], 2)
+
 
 instantiate_parametrized_tests(ScheduleTest)
 
