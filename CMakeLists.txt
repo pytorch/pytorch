@@ -1050,7 +1050,6 @@ if(NOT MSVC)
   append_cxx_flag_if_supported("-Wconstant-conversion" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Wno-aligned-allocation-unavailable"
                                CMAKE_CXX_FLAGS)
-  append_cxx_flag_if_supported("-Wno-missing-braces" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Qunused-arguments" CMAKE_CXX_FLAGS)
 
   if(${USE_COLORIZE_OUTPUT})
