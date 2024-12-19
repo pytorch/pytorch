@@ -557,6 +557,7 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
                 [mat1, mat2, inp_expanded],
                 alpha=alpha,
                 beta=beta,
+                input_reorder=[2, 0, 1],
             )
 
     if is_nonzero and use_ck_gemm_template(layout, m, n, k):
