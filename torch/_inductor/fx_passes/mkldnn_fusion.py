@@ -7,6 +7,7 @@ from typing import Any, Tuple
 import torch
 from torch._dynamo.utils import counters
 from torch.fx.experimental.symbolic_shapes import has_free_symbols
+from torch.utils._ordered_set import OrderedSet
 
 from .. import ir
 from ..lowering import lowerings as L
@@ -429,7 +430,7 @@ if torch._C._has_mkldnn:
         def _is_ancestor_node(_current_node, _ancestor_node):
             # Check whether _ancestor_node is the ancestor node of _current_node
             _node_list = [_current_node]
-            _visited_nodes = set()
+            _visited_nodes = OrderedSet[torch.fx.Node]()
             while len(_node_list) != 0:
                 _current_node = _node_list.pop(0)
                 if _current_node not in _visited_nodes:
@@ -520,13 +521,10 @@ if torch._C._has_mkldnn:
         return fn
 
     def _can_be_inplace(_other):
-        if isinstance(_other.data, ir.View):
-            return _can_be_inplace(_other.data)
-        else:
-            return not (
-                isinstance(_other.data, ir.ReinterpretView)
-                or len(_other.get_inputs_that_alias_output()) > 0
-            )
+        return not (
+            isinstance(_other.data, ir.BaseView)
+            or len(_other.get_inputs_that_alias_output()) > 0
+        )
 
     def _register_binary_unary_maybe_inplace_fusion_lowering(
         pattern,
@@ -1125,7 +1123,6 @@ if torch._C._has_mkldnn:
 
             graph = match.graph
             lstm_node = match.output_node()
-            input = args[0]
             weight0, weight1 = args[1:3]
             reverse = kwargs.get("reverse")
             packed_lstm_op = aten.mkldnn_rnn_layer.default

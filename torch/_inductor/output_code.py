@@ -35,7 +35,6 @@ from typing import (
     List,
     Optional,
     Sequence,
-    Set,
     Tuple,
     TYPE_CHECKING,
     Union,
@@ -43,7 +42,7 @@ from typing import (
 from typing_extensions import TypeAlias
 
 import torch
-from torch._dynamo.utils import counters
+from torch._dynamo.utils import counters, get_runtime_metrics_context
 from torch._inductor.cudagraph_utils import (
     BoxedDeviceIndex,
     CudagraphCachedInfo,
@@ -57,6 +56,7 @@ from torch._inductor.utils import (
     output_node,
     set_tracing_context_output_strides,
 )
+from torch.utils._ordered_set import OrderedSet
 
 from . import config
 from .runtime.autotune_cache import AutotuneCacheBundler
@@ -158,7 +158,6 @@ def cudagraph_post_compile(
     assert compiled_graph.cudagraph_info is not None
     cached_info = compiled_graph.cudagraph_info
     cudagraph_fail_reasons = cached_info.cudagraph_fail_reasons
-    inputs_to_check = compiled_graph.inputs_to_check
     boxed_forward_device_index = compiled_graph.boxed_forward_device_index
     is_inference = compiled_graph.fx_kwargs["is_inference"]
     is_backward = compiled_graph.fx_kwargs["is_backward"]
@@ -311,10 +310,10 @@ class CompiledFxGraph(OutputCode):
     cache_key: str
     source_code: str = dataclasses.field(repr=False)  # Do not display source_code
     cache_linemap: Optional[List[Tuple[int, str]]]
-    device_types: Set[str]
-    device_idxs: Set[int]
-    mutated_inputs: Set[str]
-    mutated_input_idxs: Set[int]
+    device_types: OrderedSet[str]
+    device_idxs: OrderedSet[int]
+    mutated_inputs: OrderedSet[str]
+    mutated_input_idxs: OrderedSet[int]
     # We populate exactly one of the next two fields. In the common case, we store the
     # constant attirbutes in the cache entry and re-attach them to the module created in
     # PyCodeCache.load_by_key_path. In the case that the graph has frozen parameters,
@@ -367,10 +366,10 @@ class CompiledFxGraph(OutputCode):
                 self.source_code = f.read()
         self.cache_linemap = graph.cache_linemap
         # TODO - ordered set
-        self.device_types = set(graph.device_types)
-        self.device_idxs = set(graph.device_idxs)
-        self.mutated_inputs = set(graph.mutated_inputs)
-        self.mutated_input_idxs = set(graph.mutated_input_idxs)
+        self.device_types = OrderedSet(graph.device_types)
+        self.device_idxs = OrderedSet(graph.device_idxs)
+        self.mutated_inputs = OrderedSet(graph.mutated_inputs)
+        self.mutated_input_idxs = OrderedSet(graph.mutated_input_idxs)
         if has_frozen_params(gm):
             self.allocated_constant_name = graph.allocated_constant_name
             self.constants = None
@@ -465,6 +464,7 @@ class CompiledFxGraph(OutputCode):
         try:
             return self.current_callable(inputs)
         finally:
+            get_runtime_metrics_context().finish()
             AutotuneCacheBundler.end_compile()
 
     def post_compile(
