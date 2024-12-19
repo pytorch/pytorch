@@ -4690,9 +4690,6 @@ class ExternKernel(InputsKernel):
     def get_outputs(self) -> List[Buffer]:
         return [self, *self.mutation_outputs]
 
-    def get_unbacked_symbol_defs(self) -> OrderedSet[sympy.Symbol]:
-        return OrderedSet()
-
     def collect_arg_kwarg_properties(self):  # type: ignore[no-untyped-def]
         # if self.op_overload is torch._ops.OpOverload, we can use its schema to collect additional
         # information for args and kwargs, e.g. type and default value, to help with the cpp wrapper codegen
@@ -7202,7 +7199,7 @@ class WhileLoop(ExternKernel):
     additional_inputs: Optional[List[Union[TensorBox, ShapeAsConstantBuffer]]] = None
     cond_subgraph: Optional[Subgraph] = None
     body_subgraph: Optional[Subgraph] = None
-    outputs: Optional[List[MultiOutput]] = None
+    outputs: Optional[List[Union[MultiOutput, ShapeAsConstantBuffer]]] = None
 
     def __init__(
         self,
@@ -7211,7 +7208,7 @@ class WhileLoop(ExternKernel):
         cond_subgraph: Subgraph,
         body_subgraph: Subgraph,
         layout: MultiOutputLayout,
-        unbacked_bindings: Dict[sympy.Symbol, pytree.KeyPath],
+        unbacked_bindings: Optional[Dict[sympy.Symbol, pytree.KeyPath]],
     ) -> None:
         self.carried_inputs = carried_inputs
         self.additional_inputs = additional_inputs
@@ -7225,23 +7222,74 @@ class WhileLoop(ExternKernel):
         )
 
         self.name = V.graph.register_buffer(self)
-        self.unbacked_bindings = unbacked_bindings
+        if unbacked_bindings is not None:
+            self.unbacked_bindings = unbacked_bindings
         V.graph.register_operation(self)
 
-    @staticmethod
-    def check_cond_fn_outputs(cond_outputs: List[IRNode]) -> None:
+    @classmethod
+    def create(  # type: ignore[no-untyped-def]
+        cls,
+        cond_fn: Subgraph,
+        body_fn: Subgraph,
+        carried_inputs: List[Union[TensorBox, ShapeAsConstantBuffer]],
+        additional_inputs: List[Union[TensorBox, ShapeAsConstantBuffer]],
+    ):
+        carried_inputs = [cls.realize_input(x) for x in carried_inputs]
+        additional_inputs = [cls.realize_input(x) for x in additional_inputs]
+        all_inputs = carried_inputs + additional_inputs
+
+        fx_all_inputs = V.graph.current_node.args[-2] + V.graph.current_node.args[-1]  # type: ignore[operator]
+
+        # constant ints are not fx.Node
+        fake_while_loop_inputs = [
+            x.meta["val"] if isinstance(x, torch.fx.Node) else x for x in fx_all_inputs  # type: ignore[union-attr]
+        ]
+
+        for subgraph in (cond_fn, body_fn):
+            # For front-end design, see NOTE [unspecialize int carry with unbacked symints]
+            # We cannot create new unbacked symints and use them to lower subgraph because graph lowering
+            # doesn't do a re-compute of the sym magic methods during lowering: it makes use the
+            # meta["val"] directly. See the tracking issue: https://github.com/pytorch/pytorch/issues/127789.
+            # So the idea is to re-use the unbacked symbols we've created in the front end.
+            # However, current_node.args.meta["val"] contains constant ints (the initial values),
+            # we therefore need to look at the meta["val"] of placeholders of subgraph.
+            fake_subgraph_inputs = [
+                node.meta["val"]
+                for node in subgraph.graph_module.graph.find_nodes(op="placeholder")
+            ]
+
+            from torch._higher_order_ops.while_loop import check_meta_consistency
+
+            check_meta_consistency(fake_while_loop_inputs, fake_subgraph_inputs)  # type: ignore[arg-type]
+            if subgraph.graph is None:
+                # create and lower subgraphs
+                subgraph.graph = V.graph.make_subgraph(
+                    gm=subgraph.graph_module,
+                    example_inputs=fx_all_inputs,  # type: ignore[arg-type]
+                    subgraph_name=subgraph.name,
+                )
+                with V.set_graph_handler(subgraph.graph):
+                    subgraph.graph.run(*fake_subgraph_inputs)
+
+        cond_outputs = cond_fn.graph.graph_outputs  # type: ignore[union-attr]
+        body_outputs = body_fn.graph.graph_outputs  # type: ignore[union-attr]
+
+        if _has_aliased_buffers(body_outputs):
+            raise AssertionError(
+                "Output aliasing is currently not supported in compiled torch.while_loop. "
+                f"The outputs of the body_fn subgraph of torch.while_loop are aliased: {body_outputs}"
+            )
+
         assert len(cond_outputs) == 1, cond_outputs
         p = cond_outputs[0]
-        assert isinstance(p, (TensorBox, StorageBox, ShapeAsConstantBuffer)), p
-        if isinstance(p, (TensorBox, StorageBox)):
+        if not isinstance(p, ShapeAsConstantBuffer):
             assert p.get_dtype() == torch.bool, p
             assert len(p.get_size()) == 0, p
 
-    @staticmethod
-    def check_body_fn_outputs(
-        carried_inputs: List[IRNode],
-        body_outputs: List[IRNode],
-    ) -> None:
+        assert (
+            len(all_inputs) > 0
+        ), "torch.while_loop is assumed to have at least one operand."
+
         device = next(
             (
                 t.get_device()
@@ -7250,6 +7298,7 @@ class WhileLoop(ExternKernel):
             ),
             None,
         )
+        assert isinstance(device, torch.device), device
         # make sure carried_inputs and body outputs are structurally equivalent
         assert len(carried_inputs) == len(body_outputs), (carried_inputs, body_outputs)
         for i, (op, bo) in enumerate(zip(carried_inputs, body_outputs)):
@@ -7276,82 +7325,9 @@ class WhileLoop(ExternKernel):
                     bo, ShapeAsConstantBuffer
                 ), (i, op, bo)
 
-    @classmethod
-    def create(  # type: ignore[no-untyped-def]
-        cls,
-        cond_fn: Subgraph,
-        body_fn: Subgraph,
-        carried_inputs: List[Union[TensorBox, ShapeAsConstantBuffer]],
-        additional_inputs: List[Union[TensorBox, ShapeAsConstantBuffer]],
-    ):
-        carried_inputs = [cls.realize_input(x) for x in carried_inputs]
-        additional_inputs = [cls.realize_input(x) for x in additional_inputs]
-        all_inputs = carried_inputs + additional_inputs
-
-        fx_all_inputs = V.graph.current_node.args[-2] + V.graph.current_node.args[-1]  # type: ignore[operator]
-        # For constant ints don't have fx.Node
-        fake_while_loop_inputs = [
-            x.meta["val"] if isinstance(x, torch.fx.Node) else x for x in fx_all_inputs
-        ]
-
-        for subgraph in (cond_fn, body_fn):
-            # For front-end design, see NOTE [unspecialize int carry with unbacked symints]
-            #
-            # We cannot create new unbacked symints and use them to lower subgraph because graph lowering
-            # doesn't do a re-compute of the sym magic methods during lowering: it makes use the
-            # meta["val"] directly. See the tracking issue: https://github.com/pytorch/pytorch/issues/127789.
-            #
-            # So the idea is to re-use the unbacked symbols we've created in the front end.
-            # However, current_node.args.meta["val"] contains constant ints (the initial values),
-            # we therefore need to look at the meta["val"] of placeholders of subgraph.
-            fake_subgraph_inputs = [
-                node.meta["val"]
-                for node in subgraph.graph_module.graph.find_nodes(op="placeholder")
-            ]
-            # Safety check
-            from torch._higher_order_ops.while_loop import check_meta_consistency
-
-            check_meta_consistency(fake_while_loop_inputs, fake_subgraph_inputs)
-            if subgraph.graph is None:
-                # create and lower subgraphs
-                subgraph.graph = V.graph.make_subgraph(
-                    gm=subgraph.graph_module,
-                    # TODO: this looks suspicious: aot_inductor need real tensor/fake tensor as inputs example_inputs
-                    # but fx_all_inputs are fx.Node
-                    example_inputs=fx_all_inputs,  # type: ignore[arg-type]
-                    subgraph_name=subgraph.name,
-                )
-                with V.set_graph_handler(subgraph.graph):
-                    subgraph.graph.run(*fake_subgraph_inputs)
-
-        cond_outputs = cond_fn.graph.graph_outputs  # type: ignore[union-attr]
-        body_outputs = body_fn.graph.graph_outputs  # type: ignore[union-attr]
-
-        if _has_aliased_buffers(body_outputs):
-            raise AssertionError(
-                "Output aliasing is currently not supported in compiled torch.while_loop. "
-                f"The outputs of the body_fn subgraph of torch.while_loop are aliased: {body_outputs}"
-            )
-
-        # make sure cond_fn returns a boolean scalar Tensor, bool or SymBool
-        WhileLoop.check_cond_fn_outputs(cond_outputs)
-
-        assert (
-            len(all_inputs) > 0
-        ), "torch.while_loop is assumed to have at least one operand."
-        device = next(
-            (
-                t.get_device()
-                for t in all_inputs
-                if not isinstance(t, ShapeAsConstantBuffer)
-            ),
-            None,
-        )
-
-        WhileLoop.check_body_fn_outputs(carried_inputs, body_outputs)
-
         unbacked_bindings = resolve_unbacked_bindings(
-            V.graph.sizevars.shape_env, V.graph.current_node.meta["unbacked_bindings"]
+            V.graph.sizevars.shape_env,
+            V.graph.current_node.meta.get("unbacked_bindings", None),
         )
         while_loop = WhileLoop(
             carried_inputs=carried_inputs,
@@ -7363,7 +7339,7 @@ class WhileLoop(ExternKernel):
             unbacked_bindings=unbacked_bindings,
         )
 
-        outputs = []
+        outputs: List[Union[MultiOutput, ShapeAsConstantBuffer]] = []
         for i, (body_out, example_out) in enumerate(
             zip(body_outputs, V.graph.current_node.meta["val"])
         ):

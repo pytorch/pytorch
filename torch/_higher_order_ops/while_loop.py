@@ -291,7 +291,10 @@ def while_loop_tracing(mode, cond_fn, body_fn, carried_inputs, additional_inputs
         fake_mode: FakeTensorMode = _find_or_create_fake_mode()
         unspecialized_carried_inputs = pytree.tree_map_only(
             (int, torch.SymInt),
-            lambda _: _create_unbacked_symint(fake_mode),
+            # For temporarily created unbacked symints, we don't need to bind them to any proxy
+            lambda _: _create_unbacked_symint(
+                fake_mode, ignore_fresh_unbacked_symbols=True
+            ),
             carried_inputs,
         )
 
@@ -441,6 +444,8 @@ def while_loop_fake_tensor_mode(
         # See NOTE [unspecialize int carry with unbacked symints]
         return pytree.tree_map_only(
             (int, torch.SymInt),
+            # For while_loop's unbacked symint output, we want them to be bound
+            # to the proxy of while_loop's output.
             lambda _: _create_unbacked_symint(
                 mode, ignore_fresh_unbacked_symbols=False
             ),
