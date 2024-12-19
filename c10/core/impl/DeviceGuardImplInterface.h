@@ -105,7 +105,7 @@ struct C10_API DeviceGuardImplInterface {
   /**
    * Get the current stream for a given device.
    */
-  virtual Stream getStream(Device) const noexcept = 0;
+  virtual Stream getStream(Device) const = 0;
 
   /**
    * Get the default stream for a given device.

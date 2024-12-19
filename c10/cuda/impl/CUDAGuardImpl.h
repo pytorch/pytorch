@@ -56,7 +56,7 @@ struct CUDAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
   void uncheckedSetDevice(Device d) const noexcept override {
     C10_CUDA_CHECK_WARN(c10::cuda::MaybeSetDevice(d.index()));
   }
-  Stream getStream(Device d) const noexcept override {
+  Stream getStream(Device d) const override {
     return getCurrentCUDAStream(d.index()).unwrap();
   }
   Stream getDefaultStream(Device d) const override {
