@@ -2287,11 +2287,9 @@ class TritonKernel(SIMDKernel):
         value,  # value: Union[CSEVariable, Tuple[CSEVariable, ...]],
     ) -> Union[CSEVariable, Tuple[CSEVariable, ...]]:
         assert self.inside_reduction
-
         masks = OrderedSet(f"{tree.prefix}mask" for tree in self.range_trees)
         self.filter_masks(masks)
         masks = sorted(masks)
-
         if self._load_mask:
             masks.append(self._load_mask)
         reduction_range_prefix = self.range_trees[-1].prefix[0]
