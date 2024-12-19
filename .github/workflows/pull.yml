@@ -411,15 +411,15 @@ jobs:
         ]}
     secrets: inherit
 
-  linux-focal-rocm6_2-py3_10-build:
+  linux-focal-rocm6_3-py3_10-build:
     # don't run build twice on main
     if: github.event_name == 'pull_request'
-    name: linux-focal-rocm6.2-py3.10
+    name: linux-focal-rocm6.3-py3.10
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      build-environment: linux-focal-rocm6.2-py3.10
+      build-environment: linux-focal-rocm6.3-py3.10
       docker-image-name: pytorch-linux-focal-rocm-n-py3
       sync-tag: rocm-build
       test-matrix: |
