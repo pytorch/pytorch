@@ -1058,7 +1058,9 @@ class WhileLoopHigherOrderVariable(TorchHigherOrderOperatorVariable):
             # See NOTE [unspecialize int carry with unbacked symints]
             # Note: this must be run under discard graph changes.
             def create_unbacked_sym_node_var(tx) -> SymNodeVariable:
-                example_value = _create_unbacked_symint(tx.output.fake_mode)
+                example_value = _create_unbacked_symint(
+                    tx.output.fake_mode, ignore_fresh_unbacked_symbols=True
+                )
                 proxy = tx.output.current_tracer.create_graph_input(
                     "unbacked_symint", type(example_value), example_value
                 )
@@ -1200,7 +1202,9 @@ class WhileLoopHigherOrderVariable(TorchHigherOrderOperatorVariable):
         )
         unspecialized_flat_example_value = pytree.tree_map_only(
             (int, torch.SymInt),
-            lambda _: _create_unbacked_symint(tx.output.fake_mode),
+            lambda _: _create_unbacked_symint(
+                tx.output.fake_mode, ignore_fresh_unbacked_symbols=False
+            ),
             flat_example_value,
         )
         return _call_function_and_unflatten_output(
