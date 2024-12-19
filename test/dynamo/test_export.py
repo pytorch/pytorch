@@ -1923,7 +1923,7 @@ def forward(self, l_x_):
             )
             with self.assertRaisesRegex(
                 torch._dynamo.exc.UncapturedHigherOrderOpError,
-                "Cond doesn't work unless it is captured completely with torch.compile",
+                "Expected to return tensors with same metadata but found",
             ):
                 # True branch and false branch return tensors of different shape
                 torch._dynamo.export(mod)(torch.randn(3, 2))
