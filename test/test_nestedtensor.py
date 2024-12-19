@@ -8725,11 +8725,12 @@ class TestNestedTensorOpInfo(NestedTensorTestCase):
 
                     self.assertEqualNoncontigAware(grads, grads_ref)
 
-    @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
     @ops(
         [op for op in njt_op_db if op.supports_njt],
         allowed_dtypes=(torch.float32,),
     )
+    @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
     @sample_skips_and_xfails(COMPILE_FORWARD_SKIPS_AND_XFAILS)
     def test_compile_forward(self, device, dtype, op):
         for sample, subtest_ctx, skip_xfail_ctx in op.sample_inputs(
@@ -8737,9 +8738,6 @@ class TestNestedTensorOpInfo(NestedTensorTestCase):
         ):
             with subtest_ctx(self), skip_xfail_ctx(self):
                 torch.compiler.reset()
-                # must be set to avoid:
-                # DataDependentOutputException: aten._local_scalar_dense.default
-                torch._dynamo.config.capture_scalar_outputs = True
 
                 op_fn = op.op
 
@@ -8785,6 +8783,7 @@ class TestNestedTensorOpInfo(NestedTensorTestCase):
         allowed_dtypes=(torch.float32,),
     )
     @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
     @sample_skips_and_xfails(COMPILE_BACKWARD_SKIPS_AND_XFAILS)
     def test_compile_backward(self, device, dtype, op):
         for sample, subtest_ctx, skip_xfail_ctx in op.sample_inputs(
@@ -8792,9 +8791,6 @@ class TestNestedTensorOpInfo(NestedTensorTestCase):
         ):
             with subtest_ctx(self), skip_xfail_ctx(self):
                 torch.compiler.reset()
-                # must be set to avoid:
-                # DataDependentOutputException: aten._local_scalar_dense.default
-                torch._dynamo.config.capture_scalar_outputs = True
 
                 op_fn = op.op
 
