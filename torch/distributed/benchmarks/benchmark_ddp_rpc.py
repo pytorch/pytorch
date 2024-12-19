@@ -142,8 +142,7 @@ def _run_trainer(emb_rref_list, rank):
         )
 
     # model.parameters() only includes local parameters.
-    for param in model.parameters():
-        model_parameter_rrefs.append(RRef(param))
+    model_parameter_rrefs.extend(RRef(param) for param in model.parameters())
 
     # Setup distributed optimizer
     opt = DistributedOptimizer(optim.SGD, model_parameter_rrefs, lr=0.05)

@@ -122,9 +122,7 @@ def _lazy_init():
         # just return without initializing in that case.
         _tls.is_initializing = True
 
-        for calls in _lazy_seed_tracker.get_calls():
-            if calls:
-                _queued_calls.append(calls)
+        _queued_calls.extend(calls for calls in _lazy_seed_tracker.get_calls() if calls)
 
         try:
             for queued_call, orig_traceback in _queued_calls:
@@ -465,6 +463,7 @@ from .memory import (
     empty_cache,
     max_memory_allocated,
     max_memory_reserved,
+    mem_get_info,
     memory_allocated,
     memory_reserved,
     memory_stats,
@@ -513,6 +512,7 @@ __all__ = [
     "manual_seed_all",
     "max_memory_allocated",
     "max_memory_reserved",
+    "mem_get_info",
     "memory_allocated",
     "memory_reserved",
     "memory_stats",

@@ -38,7 +38,7 @@ from torch.testing._internal.common_utils import (  # type: ignore[attr-defined]
     TEST_WITH_TORCHINDUCTOR, TEST_WITH_ROCM, run_tests, IS_JETSON,
     IS_WINDOWS, IS_FILESYSTEM_UTF8_ENCODING, NO_MULTIPROCESSING_SPAWN,
     IS_SANDCASTLE, IS_FBCODE, IS_REMOTE_GPU, skipIfTorchInductor, load_tests, slowTest, slowTestIf,
-    TEST_WITH_CROSSREF, skipIfTorchDynamo, skipRocmIfTorchInductor, set_default_dtype,
+    skipIfCrossRef, TEST_WITH_CROSSREF, skipIfTorchDynamo, skipRocmIfTorchInductor, set_default_dtype,
     skipCUDAMemoryLeakCheckIf, BytesIOContext,
     skipIfRocm, skipIfNoSciPy, TemporaryFileName, TemporaryDirectoryName,
     wrapDeterministicFlagAPITest, DeterministicGuard, CudaSyncGuard,
@@ -51,7 +51,7 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyCUDA, onlyCPU,
     dtypes, dtypesIfCUDA, dtypesIfCPU, deviceCountAtLeast,
-    skipMeta, PYTORCH_CUDA_MEMCHECK, largeTensorTest, onlyNativeDeviceTypes,
+    skipMeta, PYTORCH_CUDA_MEMCHECK, largeTensorTest, onlyNativeDeviceTypes, skipCUDAIfNotRocm,
     get_all_device_types, skipXLA)
 from typing import Tuple
 import torch.backends.quantized
@@ -1740,17 +1740,45 @@ else:
             'embedding_bag_backward_cuda_max',
             torch.device(device).type == 'cuda')
 
-    @dtypes(*all_types_and_complex_and(torch.bool))
     @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
-    def test_nondeterministic_alert_cumsum(self, device, dtype):
-        input = make_tensor((10,), dtype=dtype, device=device, low=-9, high=9)
-        should_alert = torch.device(device).type == 'cuda' and (dtype.is_floating_point or dtype.is_complex)
+    @onlyCUDA
+    def test_deterministic_cumsum(self, device):
+        test_cases = [
+            # size, dim
+            [(1025,), 0],
+            [(8193,), 0],
+            [(8191,), 0],
+            [(128256,), 0],
+            [(1282560,), 0],
+            [(12825600,), 0],
+        ]
+        for size, dim in test_cases:
+            input = 100 * torch.rand(*size, device=device)
+            with DeterministicGuard(True):
+                res0 = input.cumsum(dim)
+                for _ in range(3):
+                    res1 = input.cumsum(dim)
+                    self.assertEqual(res0, res1, atol=0, rtol=0)
 
-        for op_call in [torch.Tensor.cumsum, torch.cumsum]:
-            self.check_nondeterministic_alert(
-                lambda: op_call(input, 0),
-                'cumsum_cuda_kernel',
-                should_alert)
+            res_cpu = input.cpu().cumsum(dim)
+            self.assertEqual(res0, res_cpu, atol=1e-3, rtol=1e-2)
+            # test double complex that has fewer threads than CTAs
+            # that's a problem for large GPUS (H100 with 132 sms)
+            # test is very tailored for that and will provide 0 signal
+            # on smaller GPUs
+            num_sms = 132
+            elems_per_cta = 256 * 16
+            N = num_sms * elems_per_cta
+            input = torch.rand(N, dtype=torch.complex128, device=device)
+            with DeterministicGuard(True):
+                res0 = input.cumsum(dim)
+                for _ in range(3):
+                    res1 = input.cumsum(dim)
+                    self.assertEqual(res0, res1, atol=0, rtol=0)
+
+            res_cpu = input.cpu().cumsum(dim)
+            self.assertEqual(res0, res_cpu, atol=1e-3, rtol=1e-2)
+
 
     @expectedFailureMeta  # expected a non-determinitic error, but it was not raised
     @onlyNativeDeviceTypes
@@ -3261,9 +3289,10 @@ else:
         self.assertTrue(y.stride() == (1, 4))
 
     # FIXME: move to elementwise ternary test suite
+    @parametrize("use_cpu_scalar", [True, False])
     @dtypesIfCUDA(*set(get_all_math_dtypes('cuda')))
     @dtypes(*set(get_all_math_dtypes('cpu')))
-    def test_addcmul(self, device, dtype):
+    def test_addcmul(self, device, dtype, use_cpu_scalar):
         # Returns floating or integral scalar corresponding to dtype
         def _number(floating, integer, dtype):
             if dtype in [torch.half, torch.float, torch.double, torch.bfloat16]:
@@ -3283,7 +3312,10 @@ else:
 
         a = rand_tensor((2, 2), dtype=dtype, device=device)
         b = rand_tensor((2, 2), dtype=dtype, device=device)
-        c = rand_tensor((2, 2), dtype=dtype, device=device)
+        if use_cpu_scalar:
+            c = rand_tensor([], device="cpu", dtype=dtype)
+        else:
+            c = rand_tensor((2, 2), dtype=dtype, device=device)
 
         alpha = _number(0.5, 3, dtype)
 
@@ -3302,6 +3334,21 @@ else:
             c = torch.tensor([2.0], device=device, dtype=dtype)
             out = torch.addcmul(a, b, c, value=-1)
             self.assertTrue(not (out.isnan() or out.isinf()))
+
+    @onlyCUDA
+    def test_addcmul_cuda_errors_with_cpu_scalars(self, device):
+        # Logic is dtype agnostic, so dtype isn't tested
+        alpha = 0.5
+
+        a = torch.rand((2, 2), device=device)
+        b = torch.rand((2, 2), device=device)
+        c = torch.rand((2, 2), device=device)
+        scalar = torch.rand([], device="cpu")
+
+        with self.assertRaisesRegex(RuntimeError, r'CPU Scalar support for tensor1 argument'):
+            torch.addcmul(a, scalar, c, value=alpha)
+        with self.assertRaisesRegex(RuntimeError, r'CPU Scalar support for self argument'):
+            torch.addcmul(scalar, b, c, value=alpha)
 
     # FIXME: move to shape ops test suite
     def test_narrow_empty(self, device):
@@ -4415,6 +4462,26 @@ else:
             ind.index_add_(0, ind, ind.clone())
         with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
             ind.index_add_(0, ind.clone(), ind)
+
+    @onlyCUDA
+    @skipCUDAIfNotRocm  # This UT throws an OOM error on CUDA
+    def test_index_add_large_inputs(self, device):
+        D = 6144
+        x = torch.zeros([16384, D], device=device, dtype=torch.bfloat16)
+        index = torch.randint(0, 16384, (1, 32, 16384), device=device, dtype=torch.int64)
+        output = torch.ones([1, 32, 16384, D], device=device, dtype=torch.bfloat16)  # Use random values for test
+
+        x_before = x.clone()
+        # Manually update x_before to generate expected values
+        for batch in range(output.shape[1]):  # Loop over batch size (32 in this case)
+            for idx in range(output.shape[2]):  # Loop over index
+                idx_val = index[0, batch, idx].item()
+                x_before[idx_val] += output[0, batch, idx]
+
+        # Run index_add to get actual values
+        x.index_add_(0, index.view(-1), output.view(-1, D))
+
+        self.assertEqual(x_before, x)
 
     # FIXME: convert to ErrorInputs
     # (but have to extend ErrorInputs to handle inplace-only errors!)
@@ -8661,11 +8728,13 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         test_helper((3, 3), (3, 3, 3, 3), torch.channels_last)
         test_helper((3, 3, 3), (3, 3, 3, 3, 3), torch.channels_last_3d)
 
+    @skipIfCrossRef
     def test_dim_order(self):
         shape = (2, 3, 5, 7)
 
         t = torch.empty(shape)
         self.assertSequenceEqual(t.dim_order(), (0, 1, 2, 3), seq_type=tuple)
+        self.assertSequenceEqual(t.dim_order(ambiguity_check=True), (0, 1, 2, 3), seq_type=tuple)
         # transpose doesn't really change the underlying physical memory
         # so expecting dim_order change to reflect that (like strides)
         self.assertSequenceEqual(t.transpose(0, 1).dim_order(), (1, 0, 2, 3))
@@ -8681,15 +8750,36 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
                 dim_order, torch.empty_permuted(shape, dim_order).dim_order()
             )
 
-        for shape in [(2, 2, 2, 2), (2, 1, 2, 2), (2, 2, 1, 2), (2, 2, 2, 1), (2, 2, 1, 1), (2, 1, 1, 2)]:
+        target_shapes = [[2, 2, 1, 2], [1, 2, 2, 2], [2, 2, 2, 1], [1, 2, 2, 1], [1, 2, 1, 2]]
+
+        for shape in target_shapes:
             for memory_format in (torch.contiguous_format, torch.channels_last):
                 t = torch.empty(shape).to(memory_format=memory_format)
+                with self.assertRaises(RuntimeError):
+                    t.dim_order(ambiguity_check=True)
+
                 if memory_format == torch.contiguous_format:
                     dim_order_target = list(range(len(shape)))
                 elif memory_format == torch.channels_last:
                     dim_order_target = [0, *list(range(2, len(shape))), 1]
 
-                self.assertSequenceEqual(dim_order_target, t.dim_order())
+                self.assertSequenceEqual(
+                    dim_order_target, t.dim_order(ambiguity_check=[torch.contiguous_format, torch.channels_last])
+                )
+
+
+        ambiguous_shapes = [[2, 1, 2, 2], [2, 2, 1, 1], [1, 2, 1, 1], [2, 1, 1, 2], [2, 1, 2, 1],
+                            [1, 1, 1, 2], [1, 1, 2, 2], [1, 1, 1, 1], [2, 1, 1, 1], [1, 1, 2, 1]]
+
+        for shape in ambiguous_shapes:
+            for memory_format in (torch.contiguous_format, torch.channels_last):
+                t = torch.empty(shape).to(memory_format=memory_format)
+                with self.assertRaises(RuntimeError):
+                    t.dim_order(ambiguity_check=True)
+                    t.dim_order(ambiguity_check=[torch.contiguous_format, torch.channels_last])
+
+        with self.assertRaises(TypeError):
+            torch.empty((1, 2, 3, 4)).dim_order(ambiguity_check="ILLEGAL_STR")
 
     def test_subclass_tensors(self):
         # raise an error when trying to subclass FloatTensor
@@ -10276,6 +10366,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
                 m2[0] = True
 
         x = SlotTensor1(torch.empty(2))
+        x_ref = weakref.ref(x)
         y = SlotTensor2(torch.empty(2))
 
         x.slot1 = y
@@ -10290,6 +10381,13 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         gc.collect()
         self.assertTrue(m1[0])
         self.assertTrue(m2[0])
+
+        self.assertIsNone(x_ref())
+
+        # At this point, we know the finalizer ran and the weakref
+        # was cleared. But is the object really gone?
+        self.assertFalse(any(isinstance(o, SlotTensor1) for o in gc.get_objects()))
+
 
     def test_storage_cycle_via_slots(self):
         m1 = [False]
