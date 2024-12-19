@@ -28,6 +28,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
     TEST_WITH_ROCM,
 )
+from torch.utils._triton import has_triton_tma_device
 
 
 aten = torch.ops.aten
@@ -212,6 +213,76 @@ class TestMaxAutotune(TestCase):
         with config.patch({"max_autotune": True, "autotune_in_subproc": True}):
             torch.compile(mm, dynamic=dynamic)(a, b)
 
+    @unittest.skipIf(
+        not has_triton_tma_device(), "Need device-side TMA support in Triton"
+    )
+    @parametrize("a_transposed", (False, True))
+    @parametrize("b_transposed", (False, True))
+    @parametrize("dynamic", (False, True))
+    def test_max_autotune_regular_mm_persistent_tma(
+        self,
+        a_transposed: bool,
+        b_transposed: bool,
+        dynamic: bool,
+    ):
+        def mm(a, b):
+            # TMA requires 16-byte alignment: here we repeat the dims
+            # by the factor of 8, as float16 is 2-byte. All dims are
+            # repeated due to the possible transpositions below.
+            a = a.repeat(8, 8)
+            b = b.repeat(8, 8)
+
+            if a_transposed:
+                a = a.T
+            if b_transposed:
+                b = b.T
+
+            return torch.mm(a, b)
+
+        M, N, K = 21, 31, 11
+        a = torch.randn(*((K, M) if a_transposed else (M, K))).to(torch.float16).cuda()
+        b = torch.randn(*((N, K) if b_transposed else (K, N))).to(torch.float16).cuda()
+
+        with config.patch(
+            {
+                "max_autotune": True,
+                "autotune_fallback_to_aten": False,
+                "triton.enable_persistent_tma_matmul": "1",
+                "test_configs.autotune_choice_name_regex": "mm_persistent_tma",
+            }
+        ):
+            c_actual = torch.compile(mm, dynamic=dynamic)(a, b)
+            c_expected = mm(a, b)
+
+        torch.testing.assert_close(c_actual, c_expected, atol=1e-2, rtol=1e-2)
+
+    @unittest.skipIf(
+        not has_triton_tma_device(), "Need device-side TMA support in Triton"
+    )
+    @parametrize("dynamic", (False, True))
+    def test_max_autotune_regular_mm_persistent_tma_illegal_alignment(self, dynamic):
+        def mm(a, b):
+            return torch.mm(a, b)
+
+        M, N, K = 21, 31, 11
+        a = torch.randn(M, K).to(torch.float16).cuda()
+        b = torch.randn(K, N).to(torch.float16).cuda()
+
+        with self.assertRaises(BackendCompilerFailed) as context, config.patch(
+            {
+                "max_autotune": True,
+                "autotune_fallback_to_aten": False,
+                "triton.enable_persistent_tma_matmul": "1",
+                "test_configs.autotune_choice_name_regex": "mm_persistent_tma",
+            }
+        ):
+            torch.compile(mm, dynamic=dynamic)(a, b)
+
+        # Lowering to the persistent+TMA Triton template should be skipped
+        # if any of the input inner dims are not 16-byte aligned. As a result,
+        # given the config flags above, we should have no choices left.
+        self.assertIn("NoValidChoicesError", str(context.exception))
+
     @parametrize("dynamic", (False, True))
     def test_max_autotune_regular_mm_zero_size_input(self, dynamic: bool):
         """
@@ -315,6 +386,79 @@ class TestMaxAutotune(TestCase):
             Y_compiled = torch.compile(addmm, dynamic=dynamic)(x, a, b)
             Y = addmm(x, a, b)
             torch.testing.assert_close(Y_compiled, Y, atol=1e-2, rtol=1e-2)
+
+    @unittest.skipIf(
+        not has_triton_tma_device(), "Need device-side TMA support in Triton"
+    )
+    @parametrize("a_transposed", (False, True))
+    @parametrize("b_transposed", (False, True))
+    @parametrize("dynamic", (False, True))
+    def test_max_autotune_addmm_persistent_tma(
+        self,
+        a_transposed: bool,
+        b_transposed: bool,
+        dynamic: bool,
+    ):
+        def addmm(x, a, b):
+            # TMA requires 16-byte alignment: here we repeat the dims
+            # by the factor of 8, as float16 is 2-byte. All dims are
+            # repeated due to the possible transpositions below.
+            x = x.repeat(8)
+            a = a.repeat(8, 8)
+            b = b.repeat(8, 8)
+
+            if a_transposed:
+                a = a.T
+            if b_transposed:
+                b = b.T
+
+            return torch.addmm(x, a, b)
+
+        M, N, K = 21, 31, 11
+        a = torch.randn(*((K, M) if a_transposed else (M, K))).to(torch.float16).cuda()
+        b = torch.randn(*((N, K) if b_transposed else (K, N))).to(torch.float16).cuda()
+        x = torch.randn(N).to(torch.float16).cuda()
+
+        with config.patch(
+            {
+                "max_autotune": True,
+                "autotune_fallback_to_aten": False,
+                "triton.enable_persistent_tma_matmul": "1",
+                "test_configs.autotune_choice_name_regex": "mm_persistent_tma",
+            }
+        ):
+            c_actual = torch.compile(addmm, dynamic=dynamic)(x, a, b)
+            c_expected = addmm(x, a, b)
+
+        torch.testing.assert_close(c_actual, c_expected, atol=1e-2, rtol=1e-2)
+
+    @unittest.skipIf(
+        not has_triton_tma_device(), "Need device-side TMA support in Triton"
+    )
+    @parametrize("dynamic", (False, True))
+    def test_max_autotune_addmm_persistent_tma_illegal_alignment(self, dynamic):
+        def addmm(x, a, b):
+            return torch.addmm(x, a, b)
+
+        M, N, K = 21, 31, 11
+        a = torch.randn(M, K).to(torch.float16).cuda()
+        b = torch.randn(K, N).to(torch.float16).cuda()
+        x = torch.randn(N).to(torch.float16).cuda()
+
+        with self.assertRaises(BackendCompilerFailed) as context, config.patch(
+            {
+                "max_autotune": True,
+                "autotune_fallback_to_aten": False,
+                "triton.enable_persistent_tma_matmul": "1",
+                "test_configs.autotune_choice_name_regex": "mm_persistent_tma",
+            }
+        ):
+            torch.compile(addmm, dynamic=dynamic)(x, a, b)
+
+        # Lowering to the persistent+TMA Triton template should be skipped
+        # if any of the input inner dims are not 16-byte aligned. As a result,
+        # given the config flags above, we should have no choices left.
+        self.assertIn("NoValidChoicesError", str(context.exception))
 
     @parametrize("dynamic", (False, True))
     def test_max_autotune_addmm_zero_size_input(self, dynamic):
@@ -1048,7 +1192,7 @@ class TestPrologueFusion(TestCase):
         self.check_code(code[0], num_kernels=1, num_allocs=1, num_deallocs=3)
 
         # should be done in low precision
-        f = (
+        (
             FileCheck()
             .check("for k_idx")
             .check_not("to(tl.float32)")
@@ -1072,7 +1216,7 @@ class TestPrologueFusion(TestCase):
         self.check_code(code[0], num_kernels=1, num_allocs=1, num_deallocs=2)
 
         # should be done in low precision, no arithmetic
-        f = (
+        (
             FileCheck()
             .check("for k_idx")
             .check_not("to(tl.float32)")
@@ -1088,7 +1232,7 @@ class TestPrologueFusion(TestCase):
         self.check_code(code[0], num_kernels=1, num_allocs=1, num_deallocs=2)
 
         # should not be done in low precision
-        f = (
+        (
             FileCheck()
             .check("for k_idx")
             .check("to(tl.float32)")
@@ -1225,7 +1369,7 @@ class TestPrologueFusion(TestCase):
     @config.patch(realize_reads_threshold=1, realize_opcount_threshold=1)
     @parametrize("benchmark_fusion", (True, False))
     def test_prologue_read_into_both_inputs(self, benchmark_fusion):
-        M = K = N = 256
+        M = K = 256
 
         # not supported today. it could be, but typically the pointwise nodes would get
         # inlined into separate nodes.
