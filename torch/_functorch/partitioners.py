@@ -1850,10 +1850,10 @@ def min_cut_rematerialization_partition(
 
         # Log total theoretical activations stored
         total_activations_size_gb = sum(_size_of(i) for i in saved_values) / 1e9
-        log.debug("Theoretical Activations Stored: %.2f GB", total_activations_size_gb)
+        log.info("Theoretical Activations Stored: %.2f GB", total_activations_size_gb)
 
         # Log theoretical per activation storage sizes
-        log.debug("Theoretical Per Activation Storage Sizes: %s", sorted_sizes)
+        log.info("Theoretical Per Activation Storage Sizes: %s", sorted_sizes)
         fw_module_nodes = {
             node.name for node in fw_module.graph.nodes if node.op == "call_function"
         }
@@ -1866,14 +1866,14 @@ def min_cut_rematerialization_partition(
         for node in fw_module.graph.nodes:
             if node.name in remat_nodes and hasattr(node.target, "_overloadpacket"):
                 counts[str(node.target._overloadpacket)] += 1
-        log.debug(
+        log.info(
             "# remat/fw/bw: %d/%d/%d",
             len(remat_nodes),
             len(fw_module_nodes),
             len(bw_module_nodes),
         )
         rematerialized_ops = sorted(counts.items(), key=lambda x: x[1], reverse=True)
-        log.debug("Count of Ops Rematerialized: %s", rematerialized_ops)
+        log.info("Count of Ops Rematerialized: %s", rematerialized_ops)
     return fw_module, bw_module
 
 
