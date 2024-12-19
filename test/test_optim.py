@@ -1331,7 +1331,6 @@ class TestOptimRenewed(TestCase):
             optimizer.step(closure)
             self.assertEqual(old_param, params[0])
 
-
     @optims(optim_db, dtypes=[torch.float32])
     def test_grads_are_never_inplaced_into(self, device, dtype, optim_info):
         optim_cls = optim_info.optim_cls
@@ -1369,7 +1368,6 @@ class TestOptimRenewed(TestCase):
             for _ in range(5):
                 optimizer.step(closure)
                 self.assertEqual(params[0].grad._version, old_version)
-
 
     @optims(optim_db, dtypes=[torch.float32])
     def test_optimizer_can_be_printed(self, device, dtype, optim_info):
