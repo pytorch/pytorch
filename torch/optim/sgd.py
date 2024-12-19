@@ -354,6 +354,7 @@ def _single_tensor_sgd(
         if isinstance(lr, Tensor) and lr.requires_grad:
             param.addcmul_(grad, lr, value=-1)
         else:
+            # CPU scalar tensors w/out grad works but isn't supported in typehints
             lr = cast(float, lr)
             param.add_(grad, alpha=-lr)
 
