@@ -1,6 +1,7 @@
 macro(get_target_gpus_from_pytorch target_gpus)
    set(gfx90a_key MI200)
    set(gfx942_key MI300X)
+   set(gfx1100_key Navi31)
 
    foreach(X IN LISTS PYTORCH_ROCM_ARCH)
        set(key ${X})
@@ -46,6 +47,8 @@ if(NOT __AOTRITON_INCLUDED)
     set(__AOTRITON_INSTALL_DIR "$ENV{AOTRITON_INSTALLED_PREFIX}")
     message(STATUS "Using Preinstalled AOTriton at ${__AOTRITON_INSTALL_DIR}")
   elseif(DEFINED ENV{AOTRITON_INSTALL_FROM_SOURCE})
+    set(target_gpus "")
+    get_target_gpus_from_pytorch(target_gpus)
     ExternalProject_Add(aotriton_external
       GIT_REPOSITORY https://github.com/ROCm/aotriton.git
       GIT_TAG ${__AOTRITON_CI_COMMIT}
