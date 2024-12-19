@@ -7,7 +7,7 @@ from torch.fx.traceback import get_graph_provenance_json, NodeSource, NodeSource
 from torch.testing._internal.common_utils import TestCase
 
 
-CREATE_STR = str(NodeSourceAction.CREATE)
+CREATE_STR = NodeSourceAction.CREATE.name.lower()
 
 
 class TestFXNodeSource(TestCase):

@@ -36,6 +36,10 @@ class GraphTransformObserver:
         self.passname = passname
         self.subsystem = subsystem
 
+        self.erased_nodes = set()
+        self.created_nodes = set()
+        self.name_to_node = {}
+
         # If log_url is None, we don't log anything
         if log_url is None:
             from torch._inductor.config import trace
@@ -84,12 +88,16 @@ class GraphTransformObserver:
         )
 
     def __enter__(self):
-        self.erased_nodes = set()
-        self.created_nodes = set()
-        self.replaced_nodes = {}
         self.gm._register_create_node_hook(self.on_node_creation)
         self.gm._register_erase_node_hook(self.on_node_erase)
         self.gm._register_replace_node_hook(self.on_node_replace)
+
+        self.erased_nodes.clear()
+        self.created_nodes.clear()
+        self.name_to_node.clear()
+
+        for node in self.gm.graph.nodes:
+            self.name_to_node[node.name] = node
 
         return self
 
@@ -97,25 +105,6 @@ class GraphTransformObserver:
         self.gm._unregister_create_node_hook(self.on_node_creation)
         self.gm._unregister_erase_node_hook(self.on_node_erase)
         self.gm._unregister_replace_node_hook(self.on_node_replace)
-
-        for node in self.gm.graph.nodes:
-            if node.name in self.replaced_nodes:
-                action = [NodeSourceAction.REPLACE]
-                if node.name in self.created_nodes:
-                    action.append(NodeSourceAction.CREATE)
-                replaced = self.replaced_nodes[node.name]
-                new_node_source = NodeSource(replaced, self.passname, action)
-                if "from_node" not in node.meta:
-                    node.meta["from_node"] = [new_node_source]
-                else:
-                    node.meta["from_node"].append(new_node_source)
-
-            elif node.name in self.created_nodes:
-                source = NodeSource(None, self.passname, NodeSourceAction.CREATE)
-                if "from_node" not in node.meta:
-                    node.meta["from_node"] = [source]
-                else:
-                    node.meta["from_node"].append(source)
 
         if self.log_url is None or self.gm is None:
             return
@@ -153,9 +142,37 @@ class GraphTransformObserver:
 
     def on_node_creation(self, node):
         self.created_nodes.add(node.name)
+        self.name_to_node[node.name] = node
+        source = NodeSource(None, self.passname, NodeSourceAction.CREATE)
+        if "from_node" not in node.meta:
+            node.meta["from_node"] = [source]
+        else:
+            node.meta["from_node"].append(source)
 
     def on_node_erase(self, node):
         self.erased_nodes.add(node.name)
+        self.name_to_node.pop(node.name, None)
 
     def on_node_replace(self, old: Node, new: str, user: Node):
-        self.replaced_nodes[new] = old
+        # Update node meta when replacing old node with new node
+        new_node = self.name_to_node.get(new, None)
+
+        action = [NodeSourceAction.REPLACE]
+        if new_node.name in self.created_nodes:
+            action.append(NodeSourceAction.CREATE)
+
+        def created_this_pass(source):
+            return source.passname == self.passname and source.action == [
+                NodeSourceAction.CREATE
+            ]
+
+        # remove redundant source added on node creation
+        new_from_node = new_node.meta.get("from_node", [])
+        new_from_node = [
+            source for source in new_from_node if not created_this_pass(source)
+        ]
+
+        # add new source
+        new_node_source = NodeSource(old, self.passname, action)
+        new_from_node.append(new_node_source)
+        new_node.meta["from_node"] = new_from_node
