@@ -851,12 +851,11 @@ class CppGemmTemplate(CppTemplate):
         def normalize_shapes(inputs, layout_or_out):
             new_inputs = list(inputs)
             if not is_mkldnn_wgt and isinstance(new_inputs[1], torch.Tensor):
-                if view_size[0].is_symbol:
-                    # If batch size B is dynamic, we need to infer the batch size from the input
-                    assert all(not dim.is_symbol for dim in view_size[1:])
-                    size = torch.tensor(new_inputs[1].size()).prod()
-                    fixed_size = torch.tensor(view_size[1:], dtype=torch.int).prod()
-                    view_size[0] = (size // fixed_size).item()
+                if has_free_symbols(view_size):
+                    # If batch size B is dynamic, we need to set the batch size and possibly stride
+                    assert not has_free_symbols(view_size[1:])
+                    view_size[:] = V.graph.sizevars.size_hints(view_size)
+                    view_stride[:] = V.graph.sizevars.size_hints(view_stride)
                 # With the assumptation that W is the storage of unwrap view
                 # thus view it back here
                 new_inputs[1] = new_inputs[1].as_strided(
