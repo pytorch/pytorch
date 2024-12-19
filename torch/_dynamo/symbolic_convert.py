@@ -26,6 +26,7 @@ import torch
 import torch._logging
 from torch._dynamo.exc import TensorifyScalarRestartAnalysis
 from torch._guards import tracing, TracingContext
+from torch.utils._functools import cache_method
 
 from . import config, exc, logging as torchdynamo_logging, trace_rules, variables
 from .bytecode_analysis import (
@@ -247,17 +248,16 @@ class DistributedState:
 
 
 class TensorifyState:
-    # These are the set of string symfloats names (eg. "zf0") that we collect
-    # from the tensorify_python_scalars.py joint fx pass to inform us about
-    # which float inputs we should specialize when we restart analysis.
-    force_specializations: Set[str] = set()
+    # These are the set of source that we collect from the tensorify_python_scalars.py joint
+    # fx pass to inform us about which float inputs we should specialize when we restart analysis.
+    force_specializations: Set[Source] = set()
 
     @classmethod
-    def specialize(cls, index: str) -> None:
+    def specialize(cls, index: Source) -> None:
         cls.force_specializations.add(index)
 
     @classmethod
-    def should_specialize(cls, index: str) -> bool:
+    def should_specialize(cls, index: Source) -> bool:
         return index in cls.force_specializations
 
     @classmethod
@@ -1199,6 +1199,9 @@ class InstructionTranslatorBase(
             unimplemented("Storing handles in globals - NYI")
         self.output.side_effects.store_global(variable, name, value)
 
+    # Cache note: This cache only exists for the duration of this
+    # InstructionTranslator - so it should be safe to do.
+    @cache_method
     def import_source(self, module_name):
         """Create an alias to a module for use in guards"""
         if "torch_package" in module_name:
@@ -1858,14 +1861,13 @@ class InstructionTranslatorBase(
     @break_graph_if_unsupported(push=0)
     def STORE_SUBSCR(self, inst):
         val, obj, key = self.popn(3)
-        result = obj.call_method(self, "__setitem__", [key, val], {})
+        obj.call_method(self, "__setitem__", [key, val], {})
 
     def DELETE_SUBSCR(self, inst):
         obj, key = self.popn(2)
         obj.call_method(self, "__delitem__", [key], {})
 
     def BUILD_TUPLE(self, inst):
-        name_tuple = None
         items = self.popn(inst.argval)
         self.push(TupleVariable(items))
 
@@ -1971,7 +1973,6 @@ class InstructionTranslatorBase(
 
     def MAKE_FUNCTION(self, inst):
         flags = inst.arg
-        old_stack = list(self.stack)
         if sys.version_info < (3, 11):
             fn_name = self.pop()
         code = self.pop()
@@ -3209,7 +3210,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             msg = f"SKIPPED INLINING {code}: {e}"
             log.debug(msg)
             raise Unsupported(msg) from e
-        except Exception as e:
+        except Exception:
             log.debug("FAILED INLINING %s", code)
             raise
         assert tracer.symbolic_result is not None
@@ -3314,6 +3315,8 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
 
     def _load_global(self, inst):
         if self.output.global_scope is self.f_globals:
+            # If the global scope matches that of the root frame, use handler in
+            # root frame instruction translator, to enforce consistency.
             super()._load_global(inst)
         else:
             name = inst.argval
@@ -3330,14 +3333,16 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                 self.push(VariableTracker.build(self, value, global_source))
 
     def STORE_GLOBAL(self, inst):
-        if self.f_globals is self.parent.f_globals:
+        if self.output.global_scope is self.f_globals:
+            # If the global scope matches that of the root frame, use handler in
+            # root frame instruction translator, to enforce consistency.
             super().STORE_GLOBAL(inst)
         else:
             value = self.pop()
             if isinstance(value, RemovableHandleVariable):
                 unimplemented("Storing handles in globals - NYI")
             name = inst.argval
-            fglobals_value, fglobals_vt, _ = self.get_globals_source_and_value(name)
+            _fglobals_value, fglobals_vt, _ = self.get_globals_source_and_value(name)
             self.output.side_effects.store_attr(fglobals_vt, name, value)
 
 

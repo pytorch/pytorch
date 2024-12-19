@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 import logging
-from typing import Callable, Dict, List, Optional, TYPE_CHECKING, Union
+from typing import Callable, Dict, List, Optional, Sequence, TYPE_CHECKING, Union
 
 from torch._inductor.codegen.cpp_wrapper_cpu import CppWrapperCpu
 
@@ -217,7 +217,9 @@ class ROCmTemplateCaller(ChoiceCaller):
         category: str,
         input_nodes: List[Buffer],
         layout: Layout,
-        make_kernel_render: Callable[[ROCmTemplateBuffer, Optional[List[IRNode]]], str],
+        make_kernel_render: Callable[
+            [ROCmTemplateBuffer, Optional[Sequence[IRNode]]], str
+        ],
         bmreq: ROCmBenchmarkRequest,
         template: "ROCmTemplate",  # type: ignore[name-defined]
         info_kwargs: Optional[Dict[str, Union[PrimitiveInfoType, List[PrimitiveInfoType]]]],  # type: ignore[type-arg]
