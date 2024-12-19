@@ -5340,9 +5340,18 @@ class ExternKernel(InputsKernel):
         return index, tuple(new_sizes)
 
     def get_unbacked_symbol_uses(self) -> OrderedSet[sympy.Symbol]:
-        # NB: It's not necessary to check regular inputs as we automatically
-        # have dependencies on them
         r: OrderedSet[sympy.Symbol] = OrderedSet()
+        # NB: It's not necessary to check regular tensor inputs as we automatically
+        # have dependencies on them.
+        #
+        # For unbacked sympy expr input, we need to explicitly add them to r because the
+        # dependency tracking logic assumes we have the buffer names to create
+        # the read write dependencies. But for unbacked exprs, we calculate the mapping
+        # of symbol to buf on the fly during compute depdencies in scheduler. So we just
+        # look at the inputs and track the used unbacked symbols here.
+        for arg in self.inputs:
+            if isinstance(arg, ShapeAsConstantBuffer):
+                r |= maybe_free_unbacked_symbols(arg.expr)
         for arg in self.constant_args:
             r |= maybe_free_unbacked_symbols(arg)
         for arg in self.kwargs.values():
