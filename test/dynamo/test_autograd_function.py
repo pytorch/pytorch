@@ -994,7 +994,6 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(W1.grad, W2.grad)
         self.assertEqual(cnts.frame_count, 1)
 
-    @unittest.skip("Temparory for testing")
     def test_smuggle_symint_issue_111031(self):
         from torch.autograd import Function
 
@@ -1077,7 +1076,6 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(x_ref.grad, x_test.grad)
         self.assertEqual(y_ref.grad, y_test.grad)
 
-    @unittest.skip("Temparory for testing")
     def test_smuggle_tensor_and_complex_structures(self):
         from torch.autograd import Function
 

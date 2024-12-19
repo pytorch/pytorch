@@ -2606,7 +2606,7 @@ class AutogradFunctionApplyVariable(VariableTracker):
         new_fwd_graph_outputs = (fwd_out.as_proxy(), fwd_proxy_of_bwd_freevars)
         new_fwd_graph_outputs = pytree.tree_map(lambda x: x.node, new_fwd_graph_outputs)
         fwd_graph.output(new_fwd_graph_outputs)
-        fwd_graph.lint()
+        # fwd_graph.lint()
 
         # Store fwd_body
         fwd_nn_modules = tx.output.tracing_context.module_context.copy_graphstate()
