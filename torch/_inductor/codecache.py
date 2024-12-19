@@ -820,7 +820,15 @@ class FxGraphHashDetails:
                     from triton.runtime.autotuner import Autotuner
 
                     kernel = kernel_side_table.get_kernel(node.kwargs["kernel_idx"])
+                    configs = None
                     if isinstance(kernel, Autotuner):
+                        if kernel.configs:
+                            configs = str(
+                                sorted(
+                                    sorted(str(kv) for kv in c.all_kwargs().items())
+                                    for c in kernel.configs
+                                )
+                            )
                         kernel = kernel.fn
 
                     kernel_source = (
@@ -832,7 +840,7 @@ class FxGraphHashDetails:
                         node.kwargs["constant_args_idx"]
                     )
                     self.user_defined_triton_source.append(
-                        (kernel_source, constant_args)
+                        (kernel_source, constant_args, configs)
                     )
 
         # Alignment checks

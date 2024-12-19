@@ -419,7 +419,7 @@ class CompileEventLogger:
         if in_stack:
             chromium_log.add_event_data(event_name, **metadata)
         else:
-            chromium_log.add_instant_event(event_name, time.time_ns(), **metadata)
+            chromium_log.log_instant_event(event_name, time.time_ns(), **metadata)
 
     @staticmethod
     def increment(
