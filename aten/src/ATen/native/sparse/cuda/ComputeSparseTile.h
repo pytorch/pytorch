@@ -25,7 +25,7 @@ template <>
 struct numeric_limits<cutlass::half_t> {
   CUTLASS_HOST_DEVICE
   static cutlass::half_t infinity() {
-    return std::numeric_limits<cutlass::half_t>::infinity();
+    return cutlass::half_t::bitcast(0x7c00);
   }
 };
 #endif
