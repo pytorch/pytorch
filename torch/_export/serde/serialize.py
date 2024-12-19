@@ -142,6 +142,8 @@ _TORCH_TO_SERIALIZE_DTYPE = {
     torch.complex128: ScalarType.COMPLEXDOUBLE,
     torch.bool: ScalarType.BOOL,
     torch.bfloat16: ScalarType.BFLOAT16,
+    torch.float8_e4m3fn: ScalarType.FLOAT8E4M3FN,
+    torch.float8_e5m2: ScalarType.FLOAT8E5M2,
 }
 
 
@@ -2498,7 +2500,6 @@ def _dataclass_to_dict(obj):
         return {
             f.name: _dataclass_to_dict(getattr(obj, f.name))
             for f in dataclasses.fields(obj)
-            if not (f.default is None and getattr(obj, f.name) is None)
         }
     elif isinstance(obj, list):
         return [_dataclass_to_dict(x) for x in obj]

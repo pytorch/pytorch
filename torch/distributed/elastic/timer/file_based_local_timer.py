@@ -27,6 +27,32 @@ __all__ = ["FileTimerClient", "FileTimerRequest", "FileTimerServer"]
 logger = get_logger(__name__)
 
 
+def _retry(max_retries: int, sleep_time: float) -> Callable:
+    """
+    A simple retry wrapper.
+
+    Args:
+        max_retries: int, the maximum number of retries.
+        sleep_time: float, the time to sleep between retries.
+    """
+
+    def wrapper(func: Callable) -> Callable:
+        def wrapper(*args, **kwargs):
+            for i in range(max_retries):
+                try:
+                    return func(*args, **kwargs)
+                except Exception as e:
+                    logger.exception("Error running %s. Retrying...", func.__name__)
+                    if i < max_retries - 1:
+                        time.sleep(sleep_time)
+                    else:
+                        raise
+
+        return wrapper
+
+    return wrapper
+
+
 class FileTimerRequest(TimerRequest):
     """
     Data object representing a countdown timer acquisition and release
@@ -99,23 +125,22 @@ class FileTimerClient(TimerClient):
         self._file_path = file_path
         self.signal = signal
 
+    @_retry(max_retries=10, sleep_time=0.1)
     def _open_non_blocking(self) -> Optional[io.TextIOWrapper]:
-        try:
-            fd = os.open(self._file_path, os.O_WRONLY | os.O_NONBLOCK)
-            return os.fdopen(fd, "wt")
-        except Exception:
-            return None
-
-    def _send_request(self, request: FileTimerRequest) -> None:
         # The server may have crashed or may haven't started yet.
         # In such case, calling open() in blocking model blocks the client.
         # To avoid such issue, open it in non-blocking mode, and an OSError will
         # be raised if the server is not there.
-        file = self._open_non_blocking()
-        if file is None:
+        fd = os.open(self._file_path, os.O_WRONLY | os.O_NONBLOCK)
+        return os.fdopen(fd, "wt")
+
+    def _send_request(self, request: FileTimerRequest) -> None:
+        try:
+            file = self._open_non_blocking()
+        except Exception as e:
             raise BrokenPipeError(
                 "Could not send the FileTimerRequest because FileTimerServer is not available."
-            )
+            ) from e
         with file:
             json_request = request.to_json()
             # Write request with no greater than select.PIPE_BUF is guarantee to be atomic.
@@ -250,7 +275,13 @@ class FileTimerServer:
         #  1. No client case usually does not happen.
         #  2. We are running the watchdog loop in a separate daemon
         #     thread, which will not block the process to stop.
-        with open(self._file_path) as fd:
+        try:
+            fd = open(self._file_path)
+        except Exception as e:
+            logger.exception("Could not open the FileTimerServer pipe")
+            raise
+
+        with fd:
             self._is_client_started = True
             while not self._stop_signaled:
                 try:
@@ -267,6 +298,8 @@ class FileTimerServer:
         self.register_timers(timer_requests)
         now = time.time()
         reaped_worker_pids = set()
+        kill_process = False
+        reap_signal = 0
 
         all_expired_timers = self.get_expired_timers(now)
         log_debug_info_for_expired_timers(
@@ -305,11 +338,20 @@ class FileTimerServer:
                     "Successfully reaped worker=[%s] with signal=%s", worker_pid, signal
                 )
                 self._log_event("kill worker process", expired_timer)
+                kill_process = True
+                reap_signal = signal
             else:
                 logger.error(
                     "Error reaping worker=[%s]. Will retry on next watchdog.",
                     worker_pid,
                 )
+        if kill_process and reap_signal > 0:
+            logger.info(
+                "Terminating the server process=[%s] because of expired timers",
+                os.getpid(),
+            )
+            self._reap_worker(os.getpid(), reap_signal)
+
         self.clear_timers(reaped_worker_pids)
 
     def _get_scopes(self, timer_requests: List[FileTimerRequest]) -> List[str]:
