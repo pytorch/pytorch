@@ -303,9 +303,9 @@ python3 setup.py develop
 
 If you want to build legacy python code, please refer to [Building on legacy code and CUDA](https://github.com/pytorch/pytorch/blob/main/CONTRIBUTING.md#building-on-legacy-code-and-cuda)
 
-**CPU-only builds**
+**CPU-only or Intel GPU builds**
 
-In this mode PyTorch computations will run on your CPU, not your GPU
+In this mode PyTorch computations will run on your CPU. The command also applies for Intel GPU builds, if [the prerequisites](#intel-gpu-support) are installed and `USE_XPU=0` is not exported.
 
 ```cmd
 python setup.py develop
