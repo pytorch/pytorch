@@ -143,6 +143,7 @@ class Adam(Optimizer):
         state_steps,
     ):
         has_complex = False
+        beta1, _ = group["betas"]
         for p in group["params"]:
             if p.grad is not None:
                 has_complex |= torch.is_complex(p)
@@ -171,9 +172,14 @@ class Adam(Optimizer):
                         else torch.tensor(0.0, dtype=_get_scalar_dtype())
                     )
                     # Exponential moving average of gradient values
-                    state["exp_avg"] = torch.zeros_like(
-                        p, memory_format=torch.preserve_format
+                    # case beta1 == 0, we don't need exp_avg
+
+                    state["exp_avg"] = (
+                        torch.zeros_like(p, memory_format=torch.preserve_format)
+                        if beta1 > 0
+                        else torch.zeros(0)
                     )
+
                     # Exponential moving average of squared gradient values
                     state["exp_avg_sq"] = torch.zeros_like(
                         p, memory_format=torch.preserve_format
@@ -183,8 +189,8 @@ class Adam(Optimizer):
                         state["max_exp_avg_sq"] = torch.zeros_like(
                             p, memory_format=torch.preserve_format
                         )
-
-                exp_avgs.append(state["exp_avg"])
+                if beta1 > 0:
+                    exp_avgs.append(state["exp_avg"])
                 exp_avg_sqs.append(state["exp_avg_sq"])
 
                 if group["amsgrad"]:
@@ -244,7 +250,7 @@ class Adam(Optimizer):
             adam(
                 params_with_grad,
                 grads,
-                exp_avgs,
+                exp_avgs if beta1 > 0 else grads,
                 exp_avg_sqs,
                 max_exp_avg_sqs,
                 state_steps,
