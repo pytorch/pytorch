@@ -1,4 +1,5 @@
 # mypy: allow-untyped-defs
+import contextlib
 from typing import Callable, List, Tuple, Union
 
 import torch
@@ -230,11 +231,18 @@ def _find_or_create_fake_mode() -> FakeTensorMode:
     return fake_mode
 
 
-def _create_unbacked_symint(fake_mode: FakeTensorMode) -> torch.SymInt:
+def _create_unbacked_symint(
+    fake_mode: FakeTensorMode, ignore_fresh_unbacked_symbols: bool
+) -> torch.SymInt:
     assert (
         fake_mode is not None and fake_mode.shape_env is not None
     ), "Must provide a fake_mode with shape_env."
-    with fake_mode.shape_env.ignore_fresh_unbacked_symbols():
+    ctx = (
+        contextlib.nullcontext()
+        if not ignore_fresh_unbacked_symbols
+        else fake_mode.shape_env.ignore_fresh_unbacked_symbols()
+    )
+    with ctx:
         return fake_mode.shape_env.create_unbacked_symint()
 
 
@@ -283,7 +291,10 @@ def while_loop_tracing(mode, cond_fn, body_fn, carried_inputs, additional_inputs
         fake_mode: FakeTensorMode = _find_or_create_fake_mode()
         unspecialized_carried_inputs = pytree.tree_map_only(
             (int, torch.SymInt),
-            lambda _: _create_unbacked_symint(fake_mode),
+            # For temporarily created unbacked symints, we don't need to bind them to any proxy
+            lambda _: _create_unbacked_symint(
+                fake_mode, ignore_fresh_unbacked_symbols=True
+            ),
             carried_inputs,
         )
 
@@ -437,7 +448,13 @@ def while_loop_fake_tensor_mode(
             )
         # See NOTE [unspecialize int carry with unbacked symints]
         return pytree.tree_map_only(
-            (int, torch.SymInt), lambda _: _create_unbacked_symint(mode), body_outs
+            (int, torch.SymInt),
+            # For while_loop's unbacked symint output, we want them to be bound
+            # to the proxy of while_loop's output.
+            lambda _: _create_unbacked_symint(
+                mode, ignore_fresh_unbacked_symbols=False
+            ),
+            body_outs,
         )
 
 
