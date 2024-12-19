@@ -2012,12 +2012,41 @@ class GraphModule(torch.nn.Module):
             with whoo(x) as z:
                 y += z.neg()
             y += x.cos()
+            return y
 
         x = torch.randn(2)
         expected = f(x)
         eager = EagerAndRecordGraphs()
         out = torch.compile(backend=eager, fullgraph=False)(f)(x)
         self.assertEqual(expected, out)
+        # no graph will be generated as we will skip all frames due to the graph break
+        self.assertEqual(len(eager.graphs), 0)
+
+    def test_graph_break_inside_ctx_with_side_effects(self):
+        L = []
+
+        @contextlib.contextmanager
+        def whoo(x):
+            y = x.tan()
+            try:
+                L.append(x.sin())
+                torch._dynamo.graph_break()
+                yield y
+            finally:
+                L.append(x.cos())
+
+        def f(x):
+            y = x.sin()
+            with whoo(x) as z:
+                y += z.neg()
+            y += x.cos()
+            return y
+
+        x = torch.randn(2)
+        eager = EagerAndRecordGraphs()
+        y = torch.compile(backend=eager, fullgraph=False)(f)(x)
+        self.assertEqual(y, x.sin() + x.tan().neg() + x.cos())
+        self.assertEqual(L, [x.sin(), x.cos()])
         # no graph will be generated as we will skip all frames due to the graph break
         self.assertEqual(len(eager.graphs), 0)
 
