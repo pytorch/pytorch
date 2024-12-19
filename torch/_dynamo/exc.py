@@ -105,7 +105,7 @@ class ShortenTraceback(TorchDynamoException):
         if (
             self.first_useful_frame is None
             or tb is None
-            or os.environ.get("TORCHDYNAMO_FULL_TRACEBACK") == "1"
+            or os.environ.get("TORCHDYNAMO_VERBOSE") == "1"
         ):
             return self
         while tb.tb_frame is not self.first_useful_frame:

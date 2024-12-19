@@ -577,7 +577,7 @@ class _TorchDynamoContext:
                 except ShortenTraceback as e:
                     # Failures in the backend likely don't have useful
                     # data in the TorchDynamo frames, so we strip them out.
-                    raise e.remove_dynamo_frames() from None  # see TORCHDYNAMO_FULL_TRACEBACK=1
+                    raise e.remove_dynamo_frames() from None  # see TORCHDYNAMO_VERBOSE=1
                 finally:
                     # Restore the dynamic layer stack depth if necessary.
                     set_eval_frame(None)
