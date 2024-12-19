@@ -124,6 +124,12 @@ guard_nn_modules = True
 # once we have reached stability for the guard_nn_modules_using_dict_tags.
 guard_nn_modules_using_dict_tags = True
 
+# Flag to enable preparation for graph freezing, so that the named parameters and
+# buffers are passed as params_flat in tracing context by AOT autograd.
+# Non-Inductor backends can use this list for graph freezing.
+prepare_freezing = os.environ.get("TORCHDYNAMO_PREPARE_FREEZING", "0") == "1"
+
+
 # This feature doesn't really work.  We offer this flag for experimental
 # purposes / if you want to help us build out support.
 #
