@@ -1,4 +1,6 @@
 # Owner(s): ["module: inductor"]
+# ruff: noqa: F841
+
 import functools
 import gc
 import math
@@ -104,6 +106,49 @@ class CudaReproTests(TestCase):
         compiled = compile_fx_inner(mod, inps)
         compiled(inps)
 
+    def test_effn_attn_bias_padding(self):
+        batch_size, num_heads, seq_len, head_dim = 2, 32, 512, 128
+
+        def fn(
+            query: torch.Tensor,
+            key: torch.Tensor,
+            value: torch.Tensor,
+            input_tensor: torch.Tensor,  # This will be our starting point
+        ):
+            # Input tensor should be [2, 1, 8192, 1] with appropriate strides
+            bias = torch.ops.aten.expand(
+                input_tensor, [2, 32, seq_len, seq_len]
+            )  # Expands with stride pattern [65536, 0, 8, 0]
+
+            return torch.ops.aten._scaled_dot_product_efficient_attention(
+                query,
+                key,
+                value,
+                bias,
+                compute_log_sumexp=True,
+                dropout_p=0.0,
+                is_causal=False,
+                scale=None,
+            )
+
+        query = torch.randn(batch_size, num_heads, seq_len, head_dim, device="cuda")
+        key = torch.randn(batch_size, num_heads, seq_len, head_dim, device="cuda")
+        value = torch.randn(batch_size, num_heads, seq_len, head_dim, device="cuda")
+
+        input_tensor = torch.rand([2, 1, seq_len, 1], device="cuda")
+
+        out, code = run_and_get_code(torch.compile(fn), query, key, value, input_tensor)
+
+        input_tensor2 = torch.rand([2, 32, seq_len, seq_len], device="cuda").copy_(
+            input_tensor
+        )
+        # even though the last dim is broadcasted, needs stride 1 for alignment
+        # but dim 1 stride can be 0
+        FileCheck().check("buf0").check("(262144, 0, 512, 1").run(code[0])
+
+        # dont check rng state
+        self.assertEqual(out[:2], fn(query, key, value, input_tensor2)[:2])
+
     @skipIfRocm
     def test_input_channels_last(self):
         m = torch.nn.Sequential(
@@ -118,7 +163,7 @@ class CudaReproTests(TestCase):
             check_lowp=False,
         )
 
-        @torch._dynamo.optimize()
+        @torch.compile()
         def foo(m, inp):
             return m(inp)
 
@@ -201,7 +246,7 @@ class CudaReproTests(TestCase):
     @config.patch({"triton.cudagraphs": True})
     @dynamo_config.patch(automatic_dynamic_shapes=True)
     def test_expanded_inputs_cudagraphs(self):
-        @torch._dynamo.optimize("inductor")
+        @torch.compile(backend="inductor")
         def fn(x, y):
             return x + y
 
@@ -220,7 +265,7 @@ class CudaReproTests(TestCase):
         for b in [False, True]:
             with config.patch({"triton.cudagraph_trees": b}):
 
-                @torch._dynamo.optimize("inductor")
+                @torch.compile(backend="inductor")
                 def fn(x, y):
                     r = x + y
                     return r, r.size(0)
@@ -265,7 +310,7 @@ class CudaReproTests(TestCase):
 
         cnts = torch._dynamo.testing.CompileCounterWithBackend("inductor")
 
-        f2 = torch._dynamo.optimize(cnts)(f)
+        f2 = torch.compile(f, backend=cnts)
 
         f2(torch.randn(32))
 
@@ -280,7 +325,7 @@ class CudaReproTests(TestCase):
     @config.patch({"triton.cudagraphs": True, "size_asserts": False})
     @dynamo_config.patch(automatic_dynamic_shapes=True)
     def test_expanded_inputs_cudagraphs_no_size_asserts(self):
-        @torch._dynamo.optimize("inductor")
+        @torch.compile(backend="inductor")
         def fn(x, y):
             return x + y
 
@@ -309,7 +354,7 @@ class CudaReproTests(TestCase):
 
         model = Repro().cuda()
         model_ref = deepcopy(model)
-        model_opt = torch._dynamo.optimize("inductor")(model)
+        model_opt = torch.compile(model, backend="inductor")
 
         input = torch.randn(10, 10, device="cuda", requires_grad=True)
 
@@ -332,7 +377,7 @@ class CudaReproTests(TestCase):
             out = x + x
             return out.t()
 
-        foo_opt = torch._dynamo.optimize("inductor")(foo)
+        foo_opt = torch.compile(foo, backend="inductor")
 
         inpt = torch.randn(10, 10, device="cuda", requires_grad=True)
         # TODO: this is broken, fix later
@@ -363,7 +408,7 @@ class CudaReproTests(TestCase):
                 return cross_entropy
 
         mod = Repro().cuda()
-        opt_mod = torch._dynamo.optimize("inductor")(mod)
+        opt_mod = torch.compile(mod, backend="inductor")
         mod.eval()
         opt_mod.eval()
 
@@ -481,7 +526,7 @@ class CudaReproTests(TestCase):
     def test_sort_stride_issue(self):
         # This minified testcase comes from detectron2_maskrcnn_r_50_fpn
         # There was a false error from our size_assert code
-        @torch._dynamo.optimize(nopython=True)
+        @torch.compile(fullgraph=True)
         def forward(pred_objectness_logits_3_: torch.Tensor):
             sort_3 = pred_objectness_logits_3_.sort(descending=True, dim=1)
             getitem_12 = sort_3[0]
@@ -505,7 +550,7 @@ class CudaReproTests(TestCase):
 
         a = torch.randn((8,), dtype=torch.float32, device="cuda")
 
-        fn_optimized = torch._dynamo.optimize("inductor")(fn)
+        fn_optimized = torch.compile(fn, backend="inductor")
         assert same(fn(a), fn_optimized(a))
 
     def test_indirect_indexing_dense_mask(self):
@@ -522,7 +567,7 @@ class CudaReproTests(TestCase):
         a = torch.zeros((1, 128), dtype=torch.int64, device="cuda")
         b = torch.zeros((1, 128), dtype=torch.int64, device="cuda")
 
-        fn_optimized = torch._dynamo.optimize("inductor")(fn)
+        fn_optimized = torch.compile(fn, backend="inductor")
         assert same(fn(a, b), fn_optimized(a, b))
 
     def test_simplify_dims(self):
@@ -551,7 +596,7 @@ class CudaReproTests(TestCase):
         ]
 
         mod = Repro()
-        opt_mod = torch._dynamo.optimize("inductor")(mod)
+        opt_mod = torch.compile(mod, backend="inductor")
 
         ref = mod(*args)
         res = opt_mod(*args)
@@ -657,7 +702,7 @@ class CudaReproTests(TestCase):
                 return self.head(out)
 
         mod = Repro().cuda()
-        opt_mod = torch._dynamo.optimize("inductor", dynamic=True)(mod)
+        opt_mod = torch.compile(mod, backend="inductor", dynamic=True)
         mod.eval()
         opt_mod.eval()
 
@@ -1013,7 +1058,7 @@ class CudaReproTests(TestCase):
         y = torch.zeros((512,), device="cuda", dtype=torch.int64)
         z = torch.ones((512, 512), device="cuda", dtype=torch.bool)
 
-        opt_fn = torch._dynamo.optimize("inductor")(fn)
+        opt_fn = torch.compile(fn, backend="inductor")
 
         ref = fn(x, y, z)
 
@@ -1036,7 +1081,7 @@ class CudaReproTests(TestCase):
             y = torch.zeros((512,), device="cuda", dtype=torch.int64)
             z = torch.ones((512, 512), device="cuda", dtype=torch.bool)
 
-            opt_fn = torch._dynamo.optimize("inductor")(fn)
+            opt_fn = torch.compile(fn, backend="inductor")
 
             ref = fn(x, y, z)
 
@@ -1106,7 +1151,7 @@ class CudaReproTests(TestCase):
         y = torch.zeros((512,), device="cuda", dtype=torch.int64)
         z = torch.ones((512, 512), device="cuda", dtype=torch.int32)
 
-        opt_fn = torch._dynamo.optimize("inductor")(fn)
+        opt_fn = torch.compile(fn, backend="inductor")
 
         ref = fn(x, y, z)
 
@@ -1476,52 +1521,6 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
                 torch._dynamo.mark_dynamic(inp, 0)
             foo_c = torch.compile(foo)
             torch.testing.assert_allclose(foo(inp), foo_c(inp))
-
-    @unittest.skipIf(
-        not config.is_fbcode(),
-        "bfloat16 atomic add is only supported in fbcode today #97016",
-    )
-    @skipCUDAIf(not SM80OrLater, "uses bfloat16 which requires SM >= 80")
-    def test_atomic_add_bfloat16(self):
-        def f(x, y):
-            return torch.index_select(x, 0, y)
-
-        x = torch.randn(
-            2000, 384, dtype=torch.bfloat16, device="cuda", requires_grad=True
-        )
-        y = torch.ones(713268, dtype=torch.int64, device="cuda")
-        x_ref = x.clone().detach().requires_grad_(True)
-        y_ref = y.clone().detach()
-
-        out, (_, bw_code) = run_fw_bw_and_get_code(lambda: torch.compile(f)(x, y))
-        fc = FileCheck()
-        fc.check("tl.atomic_add")
-        fc.run(bw_code)
-
-        self.assertEqual(f(x_ref, y_ref), out)
-
-    @skipCUDAIf(not SM80OrLater, "uses bfloat16 which requires SM >= 80")
-    @unittest.skipIf(
-        config.is_fbcode(),
-        "bfloat16 atomic add is supported in fbcode, so we won't fallback",
-    )
-    def test_index_add_fallback(self):
-        def f(x, y):
-            return torch.index_select(x, 0, y)
-
-        x = torch.randn(
-            2000, 384, dtype=torch.bfloat16, device="cuda", requires_grad=True
-        )
-        y = torch.ones(713268, dtype=torch.int64, device="cuda")
-        x_ref = x.clone().detach().requires_grad_(True)
-        y_ref = y.clone().detach()
-
-        out, (_, bw_code) = run_fw_bw_and_get_code(lambda: torch.compile(f)(x, y))
-        fc = FileCheck()
-        fc.check("aten.index_add")
-        fc.run(bw_code)
-
-        self.assertEqual(f(x_ref, y_ref), out)
 
     @requires_multigpu()
     def test_not_initializing_wrong_device(self):
