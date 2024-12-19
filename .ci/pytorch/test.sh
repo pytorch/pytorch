@@ -477,7 +477,7 @@ elif [[ "${TEST_CONFIG}" == *aot_eager* ]]; then
 elif [[ "${TEST_CONFIG}" == *aot_inductor* ]]; then
   DYNAMO_BENCHMARK_FLAGS+=(--export-aot-inductor)
 elif [[ "${TEST_CONFIG}" == *max_autotune_inductor* ]]; then
-  DYNAMO_BENCHMARK_FLAGS+=(--inductor-compile-mode max-autotune)
+  DYNAMO_BENCHMARK_FLAGS+=(--inductor --inductor-compile-mode max-autotune)
 elif [[ "${TEST_CONFIG}" == *inductor* && "${TEST_CONFIG}" != *perf* ]]; then
   DYNAMO_BENCHMARK_FLAGS+=(--inductor)
 fi
