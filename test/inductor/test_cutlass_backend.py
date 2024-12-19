@@ -612,7 +612,6 @@ class TestCutlassBackend(TestCase):
                     size=(w.size(1), x.size(0)), dtype=torch.float16, device="cuda"
                 ).t()
                 return torch.addmm(bias, x, w)
-                # return torch.mm(x, w)
 
         with config.patch(
             {
