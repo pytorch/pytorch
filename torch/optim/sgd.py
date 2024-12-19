@@ -351,8 +351,12 @@ def _single_tensor_sgd(
                 grad = grad.add(buf, alpha=momentum)
             else:
                 grad = buf
+        # Nested if is necessary to bypass jitscript rules
         if isinstance(lr, Tensor):
-            param.addcmul_(grad, lr, value=-1)
+            if lr.requires_grad:
+                param.addcmul_(grad, lr, value=-1)
+            else:
+                param.add_(grad, alpha=-lr)
         else:
             param.add_(grad, alpha=-lr)
 
