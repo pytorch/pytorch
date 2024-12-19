@@ -1195,11 +1195,11 @@ class cuda:
 
 
 class xpu:
-    # The minimum number of Xe Cores suitable for max autotune.
+    # The big_gpu_threshold is the minimum number of Xe Cores suitable for max autotune.
     # Due to the evolution of the architecture, we are not sure if this
     # threadhold will still be applicable in the future, so we open it
     # up to users.
-    max_autotune_min_xe_core = 16
+    big_gpu_threshold = 16
 
 
 class rocm:
