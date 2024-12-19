@@ -26,4 +26,5 @@ leak:crypto
 leak:torch::detail::(anonymous namespace)::get_set_cached_attr
 leak:torch::jit::tensorexpr::TensorExprKernel::preAllocIntermediateBufs
 leak:optree
+leak:python
 leak:torch::tensors::initialize_aten_types
