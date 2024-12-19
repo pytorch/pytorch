@@ -1983,7 +1983,7 @@ class TestMPS(TestCaseMPS):
 
     @parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16])
     def test_take_along_dim(self, dtype):
-        if dtype == torch.bfloat16 and MACOS_VERSION  < 14.0:
+        if dtype == torch.bfloat16 and MACOS_VERSION < 14.0:
             raise unittest.SkipTest("bfloat16 needs MacOS14+")
 
         x = torch.tensor([[-5.], [0.], [5.]], dtype=dtype)
