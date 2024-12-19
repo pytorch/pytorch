@@ -38,6 +38,7 @@ from ..pattern_matcher import (
     KeywordArg,
     ListOf,
     Match,
+    MultiOutputPattern,
     MULTIPLE,
     PatternMatcherPass,
     register_graph_pattern,
@@ -1004,6 +1005,75 @@ def addmm(match, mat1, mat2, *, inp):
         return aten.addmm(inp, mat1, mat2)
 
     match.replace_by_example(repl, [inp, mat1, mat2])
+
+
+def register_partial_reduction_pattern():
+    """
+    If a tensor will be used both in a partial reduction, and in a complete reduction that
+    will get split, split the complete reduction such that it aligns with the partial reduciton.
+
+    TODO: when cooperative reductions get rolled out, fuse these two automatically in inductor.
+    This will be more robust to intermediary pointwise ops and other patterns.
+    """
+    # TODO: reduction tag: https://github.com/pytorch/pytorch/issues/129020
+    reduce_ops = [aten.amax.default, aten.amin.default]
+
+    # these ops dont support reducing on multiple dimensions, but since this is a post grad pass,
+    # they are equivalent with their replacements
+    reduce_ops_replacements = {
+        aten.max.default: aten.amax.default,
+        aten.min.default: aten.amin.default,
+    }
+
+    input_op = KeywordArg("input")
+    partial_reduc = CallFunction(
+        reduce_ops, input_op, KeywordArg("reduced_dims"), KeywordArg("keepdim")
+    )
+    full_reduc = CallFunction(
+        list(reduce_ops_replacements.keys()) + reduce_ops, input_op
+    )
+
+    @register_graph_pattern(
+        MultiOutputPattern([partial_reduc, full_reduc]),
+        pass_dict=pass_patterns[2],
+    )
+    def reuse_partial(match, input, reduced_dims, keepdim):
+        fake_inp = input.meta["val"]
+        if fake_inp.device.type == "cpu" or isinstance(fake_inp.numel(), torch.SymInt):
+            return
+
+        if config.cuda_backend != "triton" or not config.split_reductions:
+            return
+
+        from torch._inductor.choices import InductorChoices
+
+        split_factor = InductorChoices.reduction_split_factor(
+            fake_inp.device, fake_inp.numel(), 1, True
+        )
+        if split_factor <= 1:
+            return
+
+        partial_reduction, full_reduction = match.output_nodes()
+
+        def replacement(inp):
+            partial = partial_reduction.target(inp, reduced_dims, keepdim)
+
+            # replace ops which dont support reducing over dims with equivalent
+            replaced_target = reduce_ops_replacements.get(
+                full_reduction.target, full_reduction.target
+            )
+            assert isinstance(replaced_target, torch._ops.OpOverload)
+            complete = full_reduction.target(
+                replaced_target(inp, reduced_dims, keepdim)
+            )
+
+            return (partial, complete)
+
+        counters["inductor"]["partial_reduction_reuse"] += 1
+        match.replace_by_example(replacement, [input])
+
+
+register_partial_reduction_pattern()
 
 
 def check_shape_cuda_and_fused_int_mm_mul_enabled(match):
