@@ -6599,6 +6599,20 @@ class GraphModule(torch.nn.Module):
 """,  # noqa: B950
             )
 
+    @skipIfTorchDynamo("Graph is not captured correctly when test with dynamo")
+    def test_while_loop_unbacked_bindings(self):
+        from torch._dynamo.testing import EagerAndRecordGraphs
+
+        m, args = WHILE_LOOP_TESTS["pytree_int_carry"]
+        backend = EagerAndRecordGraphs()
+        self._check_compile(m, args, dynamic=True, backend=backend)
+        self.assertEqual(len(backend.graphs), 1)
+        while_loop_nodes = backend.graphs[0].graph.find_nodes(
+            op="call_function", target=torch.ops.higher_order.while_loop
+        )
+        self.assertEqual(len(while_loop_nodes), 1)
+        self.assertEqual(len(while_loop_nodes[0].meta.get("unbacked_bindings")), 5)
+
 
 _hop_schema_test_schema_types = [
     "bool",
