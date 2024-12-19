@@ -506,7 +506,9 @@ void check_variable_result(
 AutogradContext::AutogradContext(PackedArgs& packed_args) {
   saved_data = packed_args.unpack_saved_data();
   saved_variables_override_ = packed_args.unpack<variable_list>();
+  // NOLINTNEXTLINE(cppcoreguidelines-prefer-member-initializer)
   materialize_grads_ = packed_args.unpack<bool>();
+  // NOLINTNEXTLINE(cppcoreguidelines-prefer-member-initializer)
   has_freed_buffers_ = packed_args.unpack<bool>();
   needs_input_grad_override_ = packed_args.unpack<std::vector<bool>>();
 }
