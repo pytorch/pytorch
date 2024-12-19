@@ -225,7 +225,6 @@ class TestAOTInductorPackage(TestCase):
             def forward(self, a, b):
                 return torch.cat([a, b], dim=0)
 
-        b = torch.randn(3, 4, device=self.device)
         dim0_a = Dim("dim0_a", min=1, max=10)
         dim0_b = Dim("dim0_b", min=1, max=20)
         dynamic_shapes = {"a": {0: dim0_a}, "b": {0: dim0_b}}
@@ -369,10 +368,11 @@ class TestAOTInductorPackage(TestCase):
         buffer = torch._inductor.aoti_compile_and_package(
             ep, package_path=buffer
         )  # type: ignore[arg-type]
-        loaded = load_package(buffer)
-        self.assertTrue(
-            torch.allclose(loaded(*example_inputs), ep.module()(*example_inputs))
-        )
+        for _ in range(2):
+            loaded = load_package(buffer)
+            self.assertTrue(
+                torch.allclose(loaded(*example_inputs), ep.module()(*example_inputs))
+            )
 
     @skipif(
         lambda device, package_cpp_only: device == "cpu" or package_cpp_only,

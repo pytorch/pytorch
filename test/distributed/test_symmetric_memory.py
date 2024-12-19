@@ -12,7 +12,6 @@ from torch._inductor.utils import fresh_inductor_cache, run_and_get_triton_code
 from torch.distributed._functional_collectives import all_gather_tensor
 from torch.distributed._symmetric_memory import (
     _fused_all_gather_matmul_fallback,
-    _fused_all_gather_matmul_native,
     _fused_all_gather_scaled_matmul_fallback,
     _fused_matmul_reduce_scatter_fallback,
     _fused_scaled_matmul_reduce_scatter_fallback,
@@ -333,7 +332,6 @@ class SymmetricMemoryTest(MultiProcessTestCase):
         K = 32
         group = dist.group.WORLD
         rank = self.rank
-        world_size = self.world_size
 
         torch.manual_seed(42 + rank)
         A_shard = torch.rand(BATCH, M // self.world_size, K, device="cuda")
@@ -365,21 +363,23 @@ class SymmetricMemoryTest(MultiProcessTestCase):
     def test_fused_all_gather_matmul_native(
         self, symm_mem_input: bool, is_b_row_major: bool
     ) -> None:
+        os.environ["TORCH_SYMM_MEM_ENABLE_NATIVE_ASYNC_TP"] = "1"
         self._init_process()
 
-        M = 1024
+        # See _should_use_fused_all_gather_matmul_native() for the algo
+        # selection criteria of _fused_all_gather_matmul_native().
+        M = 4096
         N = 1024
         K = 1024
         group_name = dist.group.WORLD.group_name
 
         torch.manual_seed(42 + self.rank)
         if symm_mem_input:
-            A_shard = _SymmetricMemory.empty_strided_p2p(
-                size=(M // self.world_size, K),
-                stride=(K, 1),
+            A_shard = symm_mem.empty(
+                M // self.world_size,
+                K,
                 dtype=torch.bfloat16,
                 device=self.device,
-                group_name="0",
             ).normal_()
         else:
             A_shard = torch.rand(
@@ -394,12 +394,62 @@ class SymmetricMemoryTest(MultiProcessTestCase):
         ag_baseline, mm_baseline = _fused_all_gather_matmul_fallback(
             A_shard, [B], gather_dim=0, group_name=group_name
         )
-        ag_target, mm_target = _fused_all_gather_matmul_native(
-            A_shard, B, group_name=group_name
+        with torch.profiler.profile(
+            activities=[
+                torch.profiler.ProfilerActivity.CUDA,
+            ],
+        ) as prof:
+            ag_target, mm_target = torch.ops.symm_mem.fused_all_gather_matmul(
+                A_shard, [B], gather_dim=0, group_name=group_name
+            )
+
+        self.assertTrue(
+            any("PersistentAsyncInputScheduler" in event.key for event in prof.events())
         )
 
         torch.testing.assert_close(ag_target, ag_baseline)
-        torch.testing.assert_close(mm_target, mm_baseline[0])
+        torch.testing.assert_close(mm_target[0], mm_baseline[0])
+
+        dist.destroy_process_group()
+
+    @skipIfRocm
+    @skip_if_lt_x_gpu(2)
+    @requires_multicast_support()
+    def test_multimem_all_gather_matmul(self) -> None:
+        self._init_process()
+
+        # See _should_use_multimem_all_gather_matmul() for the algo
+        # selection criteria of _multimem_gather_matmul().
+        M = 1024
+        N = 1024
+        K = 1024
+        group_name = dist.group.WORLD.group_name
+
+        torch.manual_seed(42 + self.rank)
+        A_shard = torch.rand(
+            M // self.world_size, K, dtype=torch.bfloat16, device="cuda"
+        )
+
+        B = torch.rand(K, N, dtype=torch.bfloat16, device="cuda")
+
+        ag_baseline, mm_baseline = _fused_all_gather_matmul_fallback(
+            A_shard, [B], gather_dim=0, group_name=group_name, return_A=False
+        )
+        with torch.profiler.profile(
+            activities=[
+                torch.profiler.ProfilerActivity.CUDA,
+            ],
+        ) as prof:
+            ag_target, mm_target = torch.ops.symm_mem.fused_all_gather_matmul(
+                A_shard, [B], gather_dim=0, group_name=group_name, return_A=False
+            )
+
+        self.assertTrue(
+            any("multimem_all_gather_kernel" in event.key for event in prof.events())
+        )
+
+        torch.testing.assert_close(ag_target, ag_baseline)
+        torch.testing.assert_close(mm_target[0], mm_baseline[0])
 
         dist.destroy_process_group()
 
@@ -420,7 +470,6 @@ class SymmetricMemoryTest(MultiProcessTestCase):
         K = 32
         group = dist.group.WORLD
         rank = self.rank
-        world_size = self.world_size
 
         if gather_dim == 0:
             leading_dims = (BATCH // self.world_size, M)
@@ -505,7 +554,6 @@ class SymmetricMemoryTest(MultiProcessTestCase):
         K = 32
         group = dist.group.WORLD
         rank = self.rank
-        world_size = self.world_size
 
         torch.manual_seed(42 + rank)
         A = torch.rand(BATCH, M, K, device="cuda")
@@ -538,7 +586,6 @@ class SymmetricMemoryTest(MultiProcessTestCase):
         K = 32
         group = dist.group.WORLD
         rank = self.rank
-        world_size = self.world_size
 
         torch.manual_seed(42 + rank)
         A = torch.rand(BATCH, M, K, device="cuda").to(torch.float8_e4m3fn)
@@ -722,7 +769,7 @@ class SubgroupTest(MultiProcessTestCase):
 
 @instantiate_parametrized_tests
 @requires_cuda_p2p_access()
-class SymmMemAllReduceTest(MultiProcessTestCase):
+class SymmMemCollectiveTest(MultiProcessTestCase):
     def setUp(self) -> None:
         super().setUp()
         self._spawn_processes()
@@ -871,6 +918,32 @@ class SymmMemAllReduceTest(MultiProcessTestCase):
         torch.testing.assert_close(
             gathered_inps.sum(dim=0), res, rtol=1e-01, atol=1e-01
         )
+
+    @skip_if_lt_x_gpu(4)
+    @parametrize("align_bytes", [4, 8, 16])
+    def test_multimem_all_gather(self, align_bytes: int) -> None:
+        self._init_process()
+        group_name = dist.group.WORLD.group_name
+
+        input_numel = 32
+        shift = align_bytes // 4
+        input = torch.zeros(shift + input_numel, device=self.device)[shift:].fill_(
+            self.rank
+        )
+
+        out = symm_mem.empty(
+            shift + input_numel * self.world_size, device=self.device
+        ).zero_()[shift:]
+        symm_mem.rendezvous(out, group=group_name)
+
+        torch.ops.symm_mem.multimem_all_gather_out(input, group_name, out)
+        ref = torch.ops._c10d_functional.all_gather_into_tensor(
+            input, self.world_size, group_name
+        )
+        ref = torch.ops._c10d_functional.wait_tensor(ref)
+
+        self.assertTrue(out.eq(ref).all())
+        dist.destroy_process_group()
 
 
 @instantiate_parametrized_tests

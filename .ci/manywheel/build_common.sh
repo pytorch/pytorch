@@ -490,9 +490,9 @@ if [[ -z "$BUILD_PYTHONLESS" ]]; then
   echo "$(date) :: Running tests"
   pushd "$PYTORCH_ROOT"
 
-  #TODO: run_tests.sh and check_binary.sh should be moved to pytorch/pytorch project
+
   LD_LIBRARY_PATH=/usr/local/nvidia/lib64 \
-          "/builder/run_tests.sh" manywheel "${py_majmin}" "$DESIRED_CUDA"
+          "${PYTORCH_ROOT}/.ci/pytorch/run_tests.sh" manywheel "${py_majmin}" "$DESIRED_CUDA"
   popd
   echo "$(date) :: Finished tests"
 fi
