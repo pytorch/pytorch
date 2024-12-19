@@ -1541,7 +1541,7 @@ class SIMDScheduling(BaseScheduling):
                 if dep.name not in V.graph.removed_buffers
                 and isinstance(dep, MemoryDep)
             ]
-            write_names = {dep.name for dep in rw.writes}
+            write_names = OrderedSet([dep.name for dep in rw.writes])
 
             def collapse_ranges(ranges: Sequence[sympy.Expr]) -> sympy.Expr:
                 return V.graph.sizevars.simplify(sympy_product(ranges))
