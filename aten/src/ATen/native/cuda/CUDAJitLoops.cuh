@@ -28,19 +28,19 @@
 namespace at::native {
 
 template <typename Tuple, std::size_t... I>
-constexpr auto tuple_to_array_helper(Tuple& t, std::index_sequence<I...> seq) {
+// warning : unused parameter when tuple is empty.
+constexpr auto tuple_to_array_helper(const Tuple& t [[maybe_unused]], std::index_sequence<I...> seq) {
     constexpr auto size = seq.size();
-    (void)t; // warning : unused parameter when tuple is empty.
-    return std::array<void*, size>{static_cast<void*>(&std::get<I>(t))...};
+    return std::array<const void*, size>{static_cast<const void*>(&std::get<I>(t))...};
 }
 
-// Helper function convert tuple to std::array<void*, N>
+// Helper function convert tuple to std::array<const void*, N>
 // for passing the arguments to CUDA Kernel
 // NOTE: We capture tuple by reference,
 // so the pointers in returned array are only valid
 // till tuple is alive.
 template <typename ...Args>
-constexpr auto tuple_to_array(std::tuple<Args...>& extra_args) {
+constexpr auto tuple_to_array(const std::tuple<Args...>& extra_args) {
     constexpr auto tuple_size = sizeof...(Args);
     return tuple_to_array_helper(extra_args, std::make_index_sequence<tuple_size>{});
 }
@@ -59,10 +59,10 @@ struct JittedKernelVariantCache {
   at::cuda::jit::NvrtcFunction dynamic_noncontiguous;
 };
 
-inline c10::SmallBuffer<void*, 64> pack_kernel_args(
-    std::initializer_list<void*> args,
-    c10::ArrayRef<void*> extra_args) {
-  c10::SmallBuffer<void*, 64> ret(args.size() + extra_args.size());
+inline c10::SmallBuffer<const void*, 64> pack_kernel_args(
+    std::initializer_list<const void*> args,
+    c10::ArrayRef<const void*> extra_args) {
+  c10::SmallBuffer<const void*, 64> ret(args.size() + extra_args.size());
   std::copy(args.begin(), args.end(), ret.data());
   std::copy(extra_args.begin(), extra_args.end(), ret.data() + args.size());
   return ret;
@@ -85,8 +85,8 @@ void launch_jitted_unrolled_kernel(
     storer_t s,
     bool contiguous,
     at::cuda::jit::BinaryFuncVariant scalar_pos,
-    void* scalar_val,
-    c10::ArrayRef<void*> extra_args) {
+    const void* scalar_val,
+    c10::ArrayRef<const void*> extra_args) {
 
   TORCH_INTERNAL_ASSERT(N > 0 && N <= std::numeric_limits<int32_t>::max());
   //casting result to int is always safe, intermediate is int64 and won't overflow
@@ -113,7 +113,7 @@ void launch_jitted_vectorized_kernel(
     std::mutex &jiterator_mutex, JittedVecKernelCache &fn_cache,
     const at::cuda::jit::KernelDescriptor &desc, int64_t N, array_t data,
     at::cuda::jit::BinaryFuncVariant scalar_pos,
-    void *scalar_val, c10::ArrayRef<void*> extra_args) {
+    const void *scalar_val, c10::ArrayRef<const void*> extra_args) {
   TORCH_INTERNAL_ASSERT(N > 0 && N <= std::numeric_limits<int32_t>::max());
   // N is still int64_t for the computation, but it's always safe to cast result to int
   const uint32_t grid = (N + block_work_size() - 1) / block_work_size();
@@ -122,7 +122,7 @@ void launch_jitted_vectorized_kernel(
 
   // Different kernels are compiled depending on what we're vectorizing up to (1, 2 or 4 elements)
   //   fn_ptr is set to the appropriate function based on the vec size and GPU used
-  at::cuda::jit::NvrtcFunction* fn_ptr;
+  at::cuda::jit::NvrtcFunction* fn_ptr = nullptr;
   if (vec_size == 4) {
     fn_ptr = &fn_cache.vec4;
   } else if (vec_size == 2) {
@@ -178,10 +178,10 @@ void jitted_gpu_kernel_generic(
     JittedKernelVariantCache &cache,
     const at::cuda::jit::KernelDescriptor &desc,
     at::cuda::jit::BinaryFuncVariant scalar_pos,
-    c10::ArrayRef<void*> extra_args,
+    c10::ArrayRef<const void*> extra_args,
     TensorIteratorBase& iter,
     const bool dynamic_casting,
-    void *scalar_val) {
+    const void *scalar_val) {
   TORCH_INTERNAL_ASSERT(iter.can_use_32bit_indexing());
   TORCH_INTERNAL_ASSERT(iter.ninputs() == arity);
   TORCH_INTERNAL_ASSERT(iter.noutputs() == 1);
@@ -265,7 +265,7 @@ static void jitted_gpu_kernel_impl(
     const std::string &f,
     const bool dynamic_casting,
     at::opmath_type<f_inputs_type> scalar_val,
-    std::tuple<ExtraArgs...> extra_args) {
+    const std::tuple<ExtraArgs...>& extra_args) {
 
   // TODO: Memory use can probably be optimized by re-using kernels across GPUs with
   //   the same compute capability

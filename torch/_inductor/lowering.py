@@ -19,6 +19,7 @@ import torch
 import torch.ao.quantization.fx._decomposed
 import torch.fx
 import torch.utils._pytree as pytree
+from torch._dynamo.utils import counters
 from torch._higher_order_ops.associative_scan import associative_scan_op
 from torch._higher_order_ops.triton_kernel_wrap import triton_kernel_wrapper_mutation
 from torch._prims_common import (
@@ -82,7 +83,6 @@ from .virtualized import ops, V
 FALLBACK_ALLOW_LIST = OrderedSet(
     [
         "torchvision::roi_align",
-        "aten::index_add",
     ]
 )
 
@@ -728,10 +728,6 @@ def _foreach_map(subgraph, *args, **kwargs):
     The graph outputs represent the vertically fused sequence of ops, and then register_operation_list
     below registers the buffers as horizontally fuseable in the scheduler.
     """
-    realize_outputs = (
-        len(V.graph.current_node.users) == 0 or cur_node_has_non_foreach_users()
-    )
-
     from .subgraph_lowering import PointwiseSubgraphLowering
 
     inputs = args[0]  # nested tuple
@@ -755,11 +751,7 @@ def _foreach_map(subgraph, *args, **kwargs):
         ) in group:
             outputs[output_ind] = output
 
-            if (
-                V.graph.has_feature(device, BackendFeature.FOREACH)
-                and use_foreach
-                and realize_outputs
-            ):
+            if V.graph.has_feature(device, BackendFeature.FOREACH) and use_foreach:
                 output.realize()
                 operation_list.append(output.get_operation_name())
 
@@ -1949,10 +1941,8 @@ def fallback_node_due_to_unsupported_type(node: torch.fx.Node, allow_cpu_inputs=
     return check_skip_condition(node, node, is_output=True)
 
 
-def make_fallback(op, layout_constraint=None, warn=True, override_decomp=False):
-    assert (
-        op not in decompositions or override_decomp
-    ), f"both a fallback and a decomp for same op: {op}"
+def make_fallback(op, layout_constraint=None, warn=True):
+    assert op not in decompositions, f"both a fallback and a decomp for same op: {op}"
     if (
         warn
         and bool(os.getenv("CI"))
@@ -1962,7 +1952,6 @@ def make_fallback(op, layout_constraint=None, warn=True, override_decomp=False):
             config.fallback_random
             and op in torch._decomp.decompositions_for_rng.extra_random_decomps
         )
-        and not override_decomp
     ):
         # Note: 'warn' is holdover from when this was a warning, but for ops that previously
         # set warn=False we do not want a CI error.
@@ -2416,9 +2405,11 @@ def sdpa_constraint(fx_node, *args, **kwargs):
             return arg
 
         meta_val = fx_arg.meta["val"]
-        meta_stride = meta_val.stride()
+        meta_stride_expr = [
+            s.node.expr if isinstance(s, torch.SymInt) else s for s in meta_val.stride()
+        ]
 
-        stride_order = ir.get_stride_order(meta_stride)
+        stride_order = ir.get_stride_order(meta_val.stride())
 
         if stride_order and stride_order[-1] != 0:
             # contiguous stride order
@@ -2443,14 +2434,64 @@ def sdpa_constraint(fx_node, *args, **kwargs):
         # This value can be found in pytorch/aten/src/ATen/native/transformers/attention.cpp preprocess_mask
         ALIGNMENT = 8
 
+        # effn_attn_fwd does requires dense last dim, not just alignment
+        effn_attn_fwd_bias = (
+            fx_node.target
+            == torch.ops.aten._scaled_dot_product_efficient_attention.default
+            and idx == 3
+        )
+
         assert isinstance(arg, TensorBox)
         if len(arg.get_size()) not in (3, 4):
             return arg
 
         if ir.is_aligned_realized_tensor(arg, ALIGNMENT):
-            return V.graph.try_match_insignificant_strides(
-                ir.ExternKernel.realize_input(arg), meta_stride
+            return ir.try_match_insignificant_strides(
+                ir.ExternKernel.realize_input(arg), meta_stride_expr
             )
+
+        if (
+            isinstance(arg, IRNode)
+            and arg.maybe_get_stride() is not None
+            and ir.is_aligned_realized_tensor(arg, ALIGNMENT)
+        ):
+            return ir.try_match_insignificant_strides(
+                ir.ExternKernel.realize_input(arg), meta_stride_expr
+            )
+
+        if effn_attn_fwd_bias:
+            out_size = list(arg.get_size())
+
+            expanded_dims = []
+            if arg.maybe_get_stride() is not None:
+                # We require a dense last dimension, but the other strides
+                # can be expanded, which results in a smaller tensor
+                for i, s in enumerate(arg.get_stride()[0:-1]):
+                    if V.graph.sizevars.statically_known_equals(s, 0):
+                        expanded_dims.append(i)
+
+            # Now, pad strides to alignment
+            out_strides = [-1] * len(out_size)
+            out_strides[-1] = 1
+            stride = 1
+            for i in range(len(out_size) - 2, -1, -1):
+                if out_strides[i + 1] != 0:
+                    stride = stride * out_size[i + 1]
+
+                # the expanded dims still need to be aligned, if they are,
+                # we can make them expanded by setting the stride equal to 0
+                if i in expanded_dims:
+                    if V.graph.sizevars.statically_known_equals(
+                        out_strides[i + 1] % ALIGNMENT, 0
+                    ):
+                        out_strides[i] = 0
+                        continue
+
+                if not V.graph.sizevars.statically_known_equals(stride % ALIGNMENT, 0):
+                    stride = ceildiv(stride, ALIGNMENT) * ALIGNMENT
+
+                out_strides[i] = stride
+            return ir.ExternKernel.require_exact_strides(arg, out_strides)
 
         def is_aligned(x):
             return (V.graph.sizevars.size_hint(x.get_size()[-1]) % ALIGNMENT) == 0
@@ -2458,8 +2499,8 @@ def sdpa_constraint(fx_node, *args, **kwargs):
         if isinstance(arg.data, ir.BaseView):
             if not is_aligned(arg):
                 if is_aligned(arg.unwrap_view()):
-                    return V.graph.try_match_insignificant_strides(
-                        ir.ExternKernel.realize_input(arg), meta_stride
+                    return ir.try_match_insignificant_strides(
+                        ir.ExternKernel.realize_input(arg), meta_stride_expr
                     )
 
         return ir.ExternKernel.require_stride_order(arg, stride_order)
@@ -3416,12 +3457,16 @@ def _unsafe_index(x, indices):
 # https://github.com/pytorch/torchdynamo/issues/1863
 @register_lowering(aten.index_put)
 def index_put(x, indices, values, accumulate=False):
-    return index_put_(clone(x), indices, values, accumulate)
+    return index_put_impl_(
+        clone(x), indices, values, accumulate, check=True, may_realize=False
+    )
 
 
 @register_lowering(aten._unsafe_index_put)
 def _unsafe_index_put(x, indices, values, accumulate=False):
-    return index_put_impl_(clone(x), indices, values, accumulate, check=False)
+    return index_put_impl_(
+        clone(x), indices, values, accumulate, check=False, may_realize=False
+    )
 
 
 def index_put_as_masked_fill(self, indices, value, accumulate):
@@ -3450,15 +3495,54 @@ def index_put_fallback(self, indices, values, accumulate):
 
 @register_lowering(aten.index_put_, type_promotion_kind=None)
 def index_put_(self, indices, values, accumulate=False):
-    return index_put_impl_(self, indices, values, accumulate, check=True)
+    return index_put_impl_(
+        self, indices, values, accumulate, check=True, may_realize=True
+    )
 
 
 @register_lowering(inductor_prims._unsafe_index_put_, type_promotion_kind=None)
 def _unsafe_index_put_(self, indices, values, accumulate=False):
-    return index_put_impl_(self, indices, values, accumulate, check=False)
+    return index_put_impl_(
+        self, indices, values, accumulate, check=False, may_realize=True
+    )
 
 
-def index_put_impl_(self, indices, values, accumulate, check):
+def index_put_impl_(self, indices, values, accumulate, check, may_realize=False):
+    if may_realize:
+
+        def try_get_name(x):
+            if isinstance(x, ir.TensorBox):
+                x = x.data
+            if isinstance(x, ir.BaseView):
+                x = x.unwrap_view()
+            if isinstance(x, ir.StorageBox):
+                x = x.data
+            return x.get_name() if isinstance(x, ir.Buffer) else None
+
+        def indice_slice_from_randperm(indice):
+            # Refer to: https://github.com/pytorch/pytorch/pull/139366#discussion_r1825424660
+            # For this specific pattern, indices is unique as coming from torch.randperm.
+            # However, as the content of the indices is unknown, we have to check this specific pattern.
+            if isinstance(indice, TensorBox) and isinstance(indice.data, ir.BaseView):
+                indice = indice.data.unwrap_view()
+                return (
+                    isinstance(indice, ir.StorageBox)
+                    and isinstance(indice.data, ir.ExternKernel)
+                    and getattr(indice.data, "fx_node", None)
+                    and indice.data.fx_node.target == torch.ops.aten.randperm.default
+                )
+            return False
+
+        if try_get_name(self) in values.get_read_names() and not all(
+            indice_slice_from_randperm(indice) for indice in indices
+        ):
+            # Fix issue: https://github.com/pytorch/pytorch/issues/138908
+            # When self and values have memory overlapping, indices may
+            # contain duplicate values, potentially causing incorrect results since
+            # the load of `values` might contain modified value from the store of `self`.
+            # To address this, store values in a temporary buffer in such cases.
+            values.realize()
+
     # Dispatch to masked fill for single boolean index with single value
     if (
         values.get_numel() == 1
@@ -3912,11 +3996,98 @@ def rev(x, dims):
     )
 
 
+def inplace_constant_pad_nd(
+    x: TensorBox, padding: Sequence[int], fill_value: float
+) -> Optional[TensorBox]:
+    """
+    This optimization changes the semantics of padding from 'clone'
+    style to 'view' style.
+
+    Thanks to functionalization, this change can still maintain numerical
+    correctness.
+    """
+
+    def _padding_can_be_fused():
+        """
+        Conservatively check if padding can be fused with downstream op.
+        1. if the downstream op is a sum, then there is little benefit to
+           do inplace padding
+        2. if the downstream op is a matmul, doing inplace padding can
+           save membw.
+        """
+        current_node = V.graph.current_node
+        if current_node is None:
+            return True  # be conservative
+        users = tuple(current_node.users)
+        if len(users) == 1 and users[0].target in (
+            aten.mm.default,
+            aten.addmm.default,
+        ):
+            return False
+
+        return True  # be conservative
+
+    if _padding_can_be_fused():
+        return None
+
+    # Only handle 2D case for now
+    if len(padding) != 4 or len(x.get_size()) != 2:
+        return None
+
+    # No harm to realize since we already know that
+    # the op can not be fused into the single user.
+    # It need to be realized later anyways.
+    x.realize()
+
+    # If x is a view (e.g. a SliceView), realizing it just realizing the
+    # underlying storage. x itself is still a view.
+    if not ir.is_storage_and_layout(x):
+        return None
+    x.freeze_layout()
+
+    _, layout = ir.as_storage_and_layout(x)
+    strides = layout.stride
+    if strides[1] != 1:
+        return None
+
+    if padding[0] != 0 or padding[2] != 0 or padding[3] != 0:
+        return None
+
+    npad = padding[1]
+    if npad == 0:
+        return None
+
+    stride0 = strides[0]
+    rowsize = layout.size[1]
+
+    if stride0 < rowsize + npad:
+        return None
+
+    resized_x = as_strided(
+        x,
+        [layout.size[0], layout.size[1] + npad],
+        layout.stride,
+        layout.offset,
+    )
+
+    sliced_x = slice_(resized_x, dim=1, start=rowsize, end=rowsize + npad)
+    fill_(sliced_x, fill_value)
+
+    counters["inductor"]["inplace_padding"] += 1
+    return resized_x
+
+
 @register_lowering(aten.constant_pad_nd, type_promotion_kind=None)
 def constant_pad_nd(x, padding, fill_value=0):
     assert (len(padding) % 2) == 0
     if all(p == 0 for p in padding):
         return clone(x)
+
+    if config.inplace_padding:
+        out = inplace_constant_pad_nd(x, padding, fill_value)
+        if out:
+            return out
+            # fall through if can not inplace the padding
 
     sizes = x.get_size()
 
