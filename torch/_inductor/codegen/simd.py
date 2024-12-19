@@ -484,14 +484,12 @@ class SIMDKernel(Kernel):
 
     def dense_size_list(self) -> List[str]:
         sizes = ["1"] * self.triton_tensor_ndim()
-
         for tree in self.range_trees:
             if tree.tensor_dim is None:
                 continue
 
             if not tree.is_reduction or self.inside_reduction:
                 sizes[tree.tensor_dim] = f"{tree.prefix.upper()}BLOCK"
-
         return sizes
 
     def dense_size_str(self):
