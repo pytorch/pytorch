@@ -2023,6 +2023,64 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
 
                     gradcheck(fn, (m.weight_orig,))
 
+    def test_groupnorm_nhwc(self):
+        def helper(self, size, groups, memory_format, is_mixed, device, dtype):
+            channels = size[1]
+            input = torch.randn(size, dtype=dtype, device=device, requires_grad=True)
+            input = input.contiguous(memory_format=memory_format)
+            input.retain_grad()
+            grad = torch.randn(size, dtype=dtype, device=device)
+            grad = grad.contiguous(memory_format=memory_format)
+            if dtype == torch.bfloat16 and is_mixed:
+                gn = nn.GroupNorm(groups, channels).to(device).to(torch.float)
+            else:
+                gn = nn.GroupNorm(groups, channels).to(device).to(dtype)
+            gn.weight.data.uniform_()
+            gn.bias.data.uniform_()
+
+            ref_input = input.detach().clone().contiguous(memory_format=torch.contiguous_format).requires_grad_(True)
+            ref_grad = grad.detach().clone().contiguous(memory_format=torch.contiguous_format)
+            if dtype == torch.bfloat16 and is_mixed:
+                ref_gn = nn.GroupNorm(groups, channels).to(device).to(torch.float)
+            else:
+                ref_gn = nn.GroupNorm(groups, channels).to(device).to(dtype)
+            ref_gn.load_state_dict(gn.state_dict())
+            out = gn(input)
+            out.backward(grad)
+            ref_out = ref_gn(ref_input)
+            ref_out.backward(ref_grad)
+
+            self.assertTrue(out.is_contiguous(memory_format=memory_format))
+            print(f'{memory_format}')
+            self.assertTrue(ref_out.is_contiguous(memory_format=torch.contiguous_format))
+
+            self.assertEqual(out, ref_out)
+            # parameters in bfloat16/Half is not recommended
+            atol = 5e-4
+            rtol = 8e-3
+
+            self.assertEqual(gn.weight.grad, ref_gn.weight.grad, atol=atol, rtol=rtol)
+            self.assertEqual(gn.bias.grad, ref_gn.bias.grad, atol=atol, rtol=rtol)
+            self.assertEqual(input.grad, ref_input.grad, atol=atol, rtol=rtol)
+
+        for device in ['cpu'] + (['cuda'] if TEST_CUDA else []):
+            for dtype in [torch.float, torch.double]:
+                if device == 'cuda' and dtype not in [torch.float, torch.double]:
+                    continue
+                for is_mixed in [True, False]:
+                    helper(self, (4, 8, 10, 10), 4, torch.channels_last, is_mixed, device, dtype)
+                    helper(self, (2, 30, 9, 9), 3, torch.channels_last, is_mixed, device, dtype)
+                    helper(self, (4, 8, 40, 40), 4, torch.channels_last, is_mixed, device, dtype)
+                    helper(self, (4, 40, 40, 40), 2, torch.channels_last, is_mixed, device, dtype)
+                    helper(self, (2, 30, 50, 50), 3, torch.channels_last, is_mixed, device, dtype)
+                    helper(self, (2, 60, 50, 50), 3, torch.channels_last, is_mixed, device, dtype)
+
+                    # channels_last_3d is currently not supported for cuda
+                    if device == 'cpu':
+                        helper(self, (2, 9, 7, 11, 15), 3, torch.channels_last_3d, is_mixed, device, dtype)
+                        helper(self, (2, 9, 7, 200, 15), 3, torch.channels_last_3d, is_mixed, device, dtype)
+                        helper(self, (2, 60, 7, 200, 15), 3, torch.channels_last_3d, is_mixed, device, dtype)
+
     @skipIfNoLapack
     def test_spectral_norm_load_state_dict(self):
         inp = torch.randn(2, 3)
@@ -8473,57 +8531,6 @@ class TestNNDeviceType(NNTestCase):
         if self.device_type == 'cuda' and self.has_cudnn():
             with torch.backends.cudnn.flags(enabled=False):
                 _test_module_empty_input(self, mod, inp)
-
-    @onlyCPU
-    @dtypes(torch.float, torch.double, torch.bfloat16, torch.half)
-    def test_groupnorm_nhwc(self, device, dtype):
-        def helper(self, size, groups, memory_format, is_mixed):
-            channels = size[1]
-            input = torch.randn(size, dtype=dtype, device=device, requires_grad=True)
-            input = input.contiguous(memory_format=memory_format)
-            input.retain_grad()
-            grad = torch.randn(size, dtype=dtype, device=device)
-            grad = grad.contiguous(memory_format=memory_format)
-            if dtype == torch.bfloat16 and is_mixed:
-                gn = nn.GroupNorm(groups, channels).to(device).to(torch.float)
-            else:
-                gn = nn.GroupNorm(groups, channels).to(device).to(dtype)
-            gn.weight.data.uniform_()
-            gn.bias.data.uniform_()
-
-            ref_input = input.detach().clone().contiguous(memory_format=torch.contiguous_format).requires_grad_(True)
-            ref_grad = grad.detach().clone().contiguous(memory_format=torch.contiguous_format)
-            if dtype == torch.bfloat16 and is_mixed:
-                ref_gn = nn.GroupNorm(groups, channels).to(device).to(torch.float)
-            else:
-                ref_gn = nn.GroupNorm(groups, channels).to(device).to(dtype)
-            ref_gn.load_state_dict(gn.state_dict())
-            out = gn(input)
-            out.backward(grad)
-            ref_out = ref_gn(ref_input)
-            ref_out.backward(ref_grad)
-
-            self.assertTrue(out.is_contiguous(memory_format=memory_format))
-            self.assertTrue(ref_out.is_contiguous(memory_format=torch.contiguous_format))
-            self.assertEqual(out, ref_out)
-            # parameters in bfloat16/Half is not recommended
-            atol = 5e-4
-            rtol = 8e-3
-
-            self.assertEqual(gn.weight.grad, ref_gn.weight.grad, atol=atol, rtol=rtol)
-            self.assertEqual(gn.bias.grad, ref_gn.bias.grad, atol=atol, rtol=rtol)
-            self.assertEqual(input.grad, ref_input.grad, atol=atol, rtol=rtol)
-
-        for is_mixed in [True, False]:
-            helper(self, (4, 8, 10, 10), 4, torch.channels_last, is_mixed)
-            helper(self, (2, 30, 9, 9), 3, torch.channels_last, is_mixed)
-            helper(self, (4, 8, 40, 40), 4, torch.channels_last, is_mixed)
-            helper(self, (4, 40, 40, 40), 2, torch.channels_last, is_mixed)
-            helper(self, (2, 30, 50, 50), 3, torch.channels_last, is_mixed)
-            helper(self, (2, 60, 50, 50), 3, torch.channels_last, is_mixed)
-            helper(self, (2, 9, 7, 11, 15), 3, torch.channels_last_3d, is_mixed)
-            helper(self, (2, 9, 7, 200, 15), 3, torch.channels_last_3d, is_mixed)
-            helper(self, (2, 60, 7, 200, 15), 3, torch.channels_last_3d, is_mixed)
 
     @onlyNativeDeviceTypes
     def test_GroupNorm_memory_format(self, device):
