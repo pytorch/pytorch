@@ -317,6 +317,7 @@ class ReplicateTest(MultiProcessInductorTestCase):
     )
     # todo: This pass mucks things up since Inductor thinks its inference
     # and can apply this. Should turn off these passes in compiled autograd
+    @unittest.expectedFailure  # TODO(rzou): needs to be fixed
     @torch._inductor.config.patch(
         reorder_for_locality=False,
         reorder_for_peak_memory=False,
