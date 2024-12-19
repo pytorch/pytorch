@@ -860,6 +860,23 @@ static PyObject* THPModule_userEnabledCuDNN(
     Py_RETURN_FALSE;
 }
 
+PyObject* THPModule_setUserForceCuDNN(PyObject* _unused, PyObject* arg) {
+  TORCH_CHECK(
+      PyBool_Check(arg),
+      "set_force_cudnn expects a bool, "
+      "but got %s",
+      THPUtils_typename(arg));
+  at::globalContext().setUserForceCuDNN(arg == Py_True);
+  Py_RETURN_NONE;
+}
+
+PyObject* THPModule_userForceCuDNN(PyObject* _unused, PyObject* noargs) {
+  if (at::globalContext().userForceCuDNN())
+    Py_RETURN_TRUE;
+  else
+    Py_RETURN_FALSE;
+}
+
 static PyObject* THPModule_setUserEnabledMkldnn(
     PyObject* _unused,
     PyObject* arg) {
@@ -1490,6 +1507,8 @@ static std::initializer_list<PyMethodDef> TorchMethods = {
     {"_set_sdp_use_cudnn", THPModule_setSDPUseCuDNN, METH_O, nullptr},
     {"_get_cudnn_enabled", THPModule_userEnabledCuDNN, METH_NOARGS, nullptr},
     {"_set_cudnn_enabled", THPModule_setUserEnabledCuDNN, METH_O, nullptr},
+    {"_get_force_cudnn", THPModule_userForceCuDNN, METH_NOARGS, nullptr},
+    {"_set_force_cudnn", THPModule_setUserForceCuDNN, METH_O, nullptr},
     {"_get_mkldnn_enabled", THPModule_userEnabledMkldnn, METH_NOARGS, nullptr},
     {"_set_mkldnn_enabled", THPModule_setUserEnabledMkldnn, METH_O, nullptr},
     {"_get_cudnn_allow_tf32", THPModule_allowTF32CuDNN, METH_NOARGS, nullptr},
