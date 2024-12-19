@@ -191,6 +191,7 @@ struct TORCH_API AutogradContext {
 
 template <typename T>
 inline variable_list CppNode_apply_functional(
+    // NOLINTNEXTLINE(cppcoreguidelines-rvalue-reference-param-not-moved)
     variable_list&& inputs,
     AutogradContext& ctx_,
     const std::vector<bool>& is_variable_input_,
