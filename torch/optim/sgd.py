@@ -351,7 +351,7 @@ def _single_tensor_sgd(
                 grad = grad.add(buf, alpha=momentum)
             else:
                 grad = buf
-        if isinstance(lr, Tensor):
+        if isinstance(lr, Tensor) and lr.requires_grad:
             param.addcmul_(grad, lr, value=-1)
         else:
             param.add_(grad, alpha=-lr)

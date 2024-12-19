@@ -69,9 +69,6 @@ def _multistep_backprop_diff_hyperparams_fn(
     params = params.clone()
     params.grad = grad
 
-    params = params.clone()
-    params.grad = grad
-
     opt_differentiable_state = {
         k: v.clone() if isinstance(v, torch.Tensor) else v
         for k, v in opt_differentiable_state.items()
