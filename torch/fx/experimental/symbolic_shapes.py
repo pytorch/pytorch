@@ -289,6 +289,7 @@ def lru_cache(
 # which are unlikely to identify a particular interesting guard statement
 @lru_cache(None)
 def uninteresting_files() -> Set[str]:
+    import torch._compile
     import torch._dynamo.eval_frame
     import torch._inductor.sizevars
     import torch._library.custom_ops
@@ -302,6 +303,7 @@ def uninteresting_files() -> Set[str]:
         torch.fx.experimental.sym_node,
         torch.fx.interpreter,
         torch,
+        torch._compile,
         torch._dynamo.eval_frame,
         torch._inductor.sizevars,
         torch._library.custom_ops,
@@ -1018,9 +1020,11 @@ def compute_unbacked_bindings(
                 free_unbacked_symbols_with_path(
                     a.storage_offset(),
                     path + (CallMethodKey("storage_offset"),),
-                    real=a.real_tensor.storage_offset()
-                    if a.real_tensor is not None
-                    else None,
+                    real=(
+                        a.real_tensor.storage_offset()
+                        if a.real_tensor is not None
+                        else None
+                    ),
                 )
             )
 
@@ -2873,7 +2877,7 @@ class DimConstraints:
                 assert op == "==", t
                 try:
                     results[left]["eq"] = sympy.sympify(right)
-                except TypeError as e:  # rhs source is not linked to Dim name
+                except TypeError:  # rhs source is not linked to Dim name
                     pass
 
         # order forced specializations based on name
@@ -3901,56 +3905,16 @@ class ShapeEnv:
         size: List[sympy.Expr] = self._produce_dyn_sizes_from_int_tuple(
             ex_size, source, symbolic_context
         )
-        stride: List[Optional[sympy.Expr]] = [None] * len(size)
-        for i, val in enumerate(ex_stride):
-            if val in (0, 1):
-                stride[i] = sympy.Integer(val)
-        while any(x is None for x in stride):
-            candidates = {
-                ex_size[i] * ex_stride[i]: size[i] * stride[i]
-                for i in range(len(size))
-                if stride[i] is not None
-            }
-
-            # iterate over unbound strides in sorted order
-            val_list = sorted(
-                [(ex_stride[i], i) for i in range(len(stride)) if stride[i] is None],
-                key=_nested_int_aware_sort,
-            )
-            for _, i in val_list:
-                # Set stride to a candidate only for DimDynamic.INFER_STRIDE
-                if (
-                    stride[i] is None
-                    and dynamic_strides[i] == DimDynamic.INFER_STRIDE
-                    and ex_stride[i] in candidates
-                ):
-                    stride[i] = candidates[ex_stride[i]]
-                    candidates[ex_size[i] * ex_stride[i]] = size[i] * stride[i]  # type: ignore[operator]
-
-            if any(x is None for x in stride):
-                # bind the smallest unbound stride to a new variable
-                val, i = min(
-                    [
-                        (ex_stride[i], i)
-                        for i in range(len(stride))
-                        if stride[i] is None
-                    ],
-                    key=_nested_int_aware_sort,
-                )
-                # Set INFER_STRIDE to STATIC or DUCK depending on sizes
-                dyn_stride = dynamic_strides[i]
-                if dynamic_strides[i] == DimDynamic.INFER_STRIDE:
-                    dyn_stride = (
-                        DimDynamic.STATIC if are_sizes_static else DimDynamic.DUCK
-                    )
-                stride[i] = self.create_symbol(
-                    val,
-                    TensorPropertySource(source, TensorProperty.STRIDE, i),
-                    dynamic_dim=dyn_stride,
-                    constraint_dim=constraint_strides[i],
-                    symbolic_context=symbolic_context,
-                )
-        assert all(x is not None for x in stride)
+        stride = self._compute_symbolic_stride(
+            source,
+            size,
+            ex_size,
+            ex_stride,
+            dynamic_strides,
+            constraint_strides,
+            are_sizes_static,
+            symbolic_context,
+        )
 
         sym_sizes = [
             self.create_symintnode(
@@ -3984,6 +3948,56 @@ class ShapeEnv:
             source=TensorPropertySource(source, TensorProperty.STORAGE_OFFSET),
         )
         return tuple(sym_sizes), tuple(sym_stride), sym_storage_offset
+
+    def _compute_symbolic_stride(
+        self,
+        source: Source,
+        size: Sequence[sympy.Expr],
+        ex_size: Sequence[Union[int, SymInt]],
+        ex_stride: Sequence[Union[int, SymInt]],
+        dynamic_strides: Sequence[DimDynamic],
+        constraint_strides: Sequence[
+            Optional[Union[StrictMinMaxConstraint, RelaxedUnspecConstraint]]
+        ],
+        are_sizes_static: bool,
+        symbolic_context: SymbolicContext,
+    ) -> List[sympy.Expr]:
+        from torch._dynamo.source import TensorProperty, TensorPropertySource
+
+        stride: List[Optional[sympy.Expr]] = [None] * len(size)
+        candidates: Dict[Union[int, SymInt], sympy.Expr] = {}
+
+        # iterate over unbound strides in sorted order
+        val_list = [(val, i) for i, val in enumerate(ex_stride)]
+        val_list.sort(key=_nested_int_aware_sort)
+
+        for val, i in val_list:
+            if val in (0, 1):
+                out_stride = sympy.Integer(val)
+            else:
+                dynamic_stride = dynamic_strides[i]
+                if dynamic_stride == DimDynamic.INFER_STRIDE and val in candidates:
+                    # Set stride to a candidate only for DimDynamic.INFER_STRIDE
+                    out_stride = candidates[val]
+                else:
+                    # Set INFER_STRIDE to STATIC or DUCK depending on sizes
+                    dyn_stride = dynamic_stride
+                    if dynamic_stride == DimDynamic.INFER_STRIDE:
+                        dyn_stride = (
+                            DimDynamic.STATIC if are_sizes_static else DimDynamic.DUCK
+                        )
+                    out_stride = self.create_symbol(
+                        val,
+                        TensorPropertySource(source, TensorProperty.STRIDE, i),
+                        dynamic_dim=dyn_stride,
+                        constraint_dim=constraint_strides[i],
+                        symbolic_context=symbolic_context,
+                    )
+            stride[i] = out_stride
+            candidates[ex_size[i] * val] = size[i] * out_stride
+
+        assert all(x is not None for x in stride)
+        return stride
 
     @record_shapeenv_event()
     def create_symintnode(
@@ -5951,9 +5965,9 @@ class ShapeEnv:
                     "stack": structured.from_traceback(
                         CapturedTraceback.extract(skip=1).summary()
                     ),
-                    "user_stack": structured.from_traceback(user_tb)
-                    if user_tb
-                    else None,
+                    "user_stack": (
+                        structured.from_traceback(user_tb) if user_tb else None
+                    ),
                 },
             )
 

@@ -415,6 +415,11 @@ class FSDPParam:
     def init_dtype_attrs(self, mp_policy: MixedPrecisionPolicy):
         param_dtype, reduce_dtype = (mp_policy.param_dtype, mp_policy.reduce_dtype)
         self.orig_dtype = self.sharded_param.dtype
+        # Clamp `reduce_dtype` to `None` if no casting is required: since
+        # gradients are computed in `param_dtype`, if `reduce_dtype` matches,
+        # then we do not need extra casting
+        if reduce_dtype == param_dtype:
+            reduce_dtype = None
         # Clamp `param_dtype` to `None` if no casting is required
         if param_dtype == self.orig_dtype:
             param_dtype = None

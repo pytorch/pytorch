@@ -1,10 +1,8 @@
-# mypy: allow-untyped-decorators
-# mypy: allow-untyped-defs
 import torch.nn as nn
 from torch._functorch.utils import exposed_in
 
 
-def batch_norm_without_running_stats(module: nn.Module):
+def batch_norm_without_running_stats(module: nn.Module) -> None:
     if (
         isinstance(module, nn.modules.batchnorm._BatchNorm)
         and module.track_running_stats

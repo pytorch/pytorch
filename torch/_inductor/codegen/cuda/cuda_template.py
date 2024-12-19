@@ -90,7 +90,7 @@ class CUDATemplate(KernelTemplate):
             call_args,
             expected_args,
         )
-        extra_args = V.graph.sizevars.size_hints(
+        V.graph.sizevars.size_hints(
             map(sympy.expand, call_args[len(expected_args) :])
         )
         size_args = V.graph.sizevars.size_hints(kernel.get_layout_args())
@@ -222,7 +222,7 @@ class CUTLASSTemplate(CUDATemplate):
 
     def cute_int(self, int_str: str, var_name: str) -> str:
         res = ""
-        if int_str in {"1", "1L"}:
+        if int_str in ("1", "1L"):
             res = "cute::Int<1>{}"
         else:
             res = int_str
