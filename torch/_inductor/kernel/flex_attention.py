@@ -687,6 +687,8 @@ class Mode(Enum):
     fwd = auto()
     bwd = auto()
 
+def _get_xpu_config(query, mode: Mode) -> Tuple[int, int, int, int]:
+    return (64, 64, 4, 3)
 
 def _get_rocm_config(query, mode: Mode) -> Tuple[int, int, int, int]:
     dtype = query.get_dtype()
@@ -770,18 +772,29 @@ def _get_nv_config(query, mode: Mode) -> Tuple[int, int, int, int]:
 
 
 def _get_default_config_fwd(query) -> Tuple[int, int, int, int]:
-    if torch.version.hip is None:
-        return _get_nv_config(query, mode=Mode.fwd)
+    device_type = query.device.type
+    if device_type == "cuda": 
+        if torch.version.hip is None:
+            return _get_nv_config(query, mode=Mode.fwd)
+        else:
+            return _get_rocm_config(query, mode=Mode.fwd)
+    elif device_type == "xpu":
+        return _get_xpu_config(query, mode=Mode.fwd)
     else:
-        return _get_rocm_config(query, mode=Mode.fwd)
+        raise NotImplementedError(f"Unsupported device type: {device_type}")
 
 
 def _get_default_config_bwd(query) -> Tuple[int, int, int, int]:
-    if torch.version.hip is None:
-        return _get_nv_config(query, mode=Mode.bwd)
+    device_type = query.device.type
+    if device_type == "cuda": 
+        if torch.version.hip is None:
+            return _get_nv_config(query, mode=Mode.bwd)
+        else:
+            return _get_rocm_config(query, mode=Mode.bwd)
+    elif device_type == "xpu":
+        return _get_xpu_config(query, mode=Mode.bwd)
     else:
-        return _get_rocm_config(query, mode=Mode.bwd)
-
+        raise NotImplementedError(f"Unsupported device type: {device_type}")
 
 def create_num_blocks_fake_generator(sparse_indices):
     # The idea here is that we need to create a real tensor with real data
