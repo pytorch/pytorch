@@ -9,7 +9,6 @@ import torch
 import torch.nn as nn
 from torch._prims_common import make_contiguous_strides_for
 from torch.distributed._functional_collectives import AsyncCollectiveTensor
-from torch.distributed.device_mesh import _mesh_resources
 from torch.distributed.tensor import DTensor, Replicate, Shard
 from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
 from torch.distributed.tensor.device_mesh import _mesh_resources
