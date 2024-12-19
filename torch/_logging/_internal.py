@@ -18,6 +18,7 @@ from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
 from weakref import WeakSet
 
 import torch._logging.structured
+from torch._guards import CompileId
 from torch._utils_internal import log_trace_structured_event
 from torch.utils._traceback import CapturedTraceback
 
@@ -241,6 +242,7 @@ def set_logs(
     compiled_autograd_verbose: bool = False,
     cudagraph_static_inputs: bool = False,
     benchmarking: bool = False,
+    graph_region_expansion: bool = False,
 ):
     """
     Sets the log level for individual components and toggles individual log
@@ -420,6 +422,9 @@ def set_logs(
         cudagraph_static_inputs (:class:`bool`):
             Whether to emit debug info for cudagraph static input detection. Default: ``False``
 
+        graph_region_expansion (:class:`bool`):
+            Whether to emit the detailed steps of the duplicate graph region tracker expansion algorithm. Default: ``False``
+
 
     Example::
 
@@ -519,6 +524,7 @@ def set_logs(
         compiled_autograd_verbose=compiled_autograd_verbose,
         cudagraph_static_inputs=cudagraph_static_inputs,
         benchmarking=benchmarking,
+        graph_region_expansion=graph_region_expansion,
     )
 
 
@@ -1026,10 +1032,8 @@ class LazyTraceHandler(logging.StreamHandler):
 
     def emit(self, record):
         if self.stream is None:
-            ok = False
             if self.root_dir is None:
                 TRACE_LOG_DIR = "/logs"
-                open_func = self._builtin_open
 
                 import torch.version as torch_version
 
@@ -1159,6 +1163,7 @@ def trace_structured(
     suppress_context: bool = False,
     expect_trace_id: bool = True,  # Whether or not we expect to have a current trace id
     record_logging_overhead: bool = True,  # Whether or not to record the time spent on structured logging
+    compile_id: Optional[CompileId] = None,  # Optional if unavailable in the trace
 ) -> None:
     """
     metadata is an arbitrary JSON compatible struct, but it's expected to not be
@@ -1192,6 +1197,9 @@ def trace_structured(
                 record["frame_id"] = trace_id.compile_id.frame_id
                 record["frame_compile_id"] = trace_id.compile_id.frame_compile_id
                 record["attempt"] = trace_id.attempt
+            elif compile_id is not None:
+                record["frame_id"] = compile_id.frame_id
+                record["frame_compile_id"] = compile_id.frame_compile_id
             else:
                 if expect_trace_id:
                     # Record the stack of the log call to better diagnose why we
