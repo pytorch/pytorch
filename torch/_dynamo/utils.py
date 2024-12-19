@@ -1105,7 +1105,14 @@ def record_compilation_metrics(
         inductor_fx_remote_cache_backend_type = None
         remote_cache_version = None
 
+    # Populate the compile_id from the metrics context if it's set. Otherwise,
+    # look for it in the current compile context.
+    compile_id = metrics.get("compile_id")
+    if not compile_id:
+        compile_id = torch._guards.CompileContext.current_compile_id()
+
     common_metrics = {
+        "compile_id": str(compile_id) if compile_id else None,
         "start_time_us": start_time_ns // 1000,
         "end_time_us": end_time_ns // 1000,
         "duration_us": (end_time_ns - start_time_ns) // 1000,
@@ -1121,16 +1128,7 @@ def record_compilation_metrics(
         "inductor_fx_remote_cache_backend_type": inductor_fx_remote_cache_backend_type,
     }
 
-    all_metrics = {**common_metrics, **metrics}
-
-    # Populate the compile_id from the metrics context if it's set. Otherwise,
-    # look for it in the current compile context.
-    compile_id = metrics.get("compile_id")
-    if not compile_id:
-        compile_id = torch._guards.CompileContext.current_compile_id()
-    all_metrics["compile_id"] = str(compile_id) if compile_id else None
-
-    compilation_metrics = CompilationMetrics.create(all_metrics)
+    compilation_metrics = CompilationMetrics.create({**metrics, **common_metrics})
     _compilation_metrics.append(compilation_metrics)
 
     name = "compilation_metrics"
