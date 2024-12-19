@@ -1208,9 +1208,18 @@ def _save(
             if storage.device.type != "cpu":
                 from torch.utils.serialization import config
 
-                if config.save.use_pinned_memory_for_d2h:
-                    storage = storage.to(device="cpu", non_blocking=True)
-                    torch.cuda.current_stream().synchronize()
+                if (
+                    config.save.use_pinned_memory_for_d2h
+                    and torch.accelerator.is_available()
+                    and torch.accelerator.current_accelerator().type
+                    == storage.device.type
+                ):
+                    new_storage = torch.empty(
+                        num_bytes, dtype=torch.uint8, device="cpu", pin_memory=True
+                    ).untyped_storage()
+                    new_storage.copy_(storage)
+                    torch.accelerator.current_stream(storage.device.index).synchronize()
+                    storage = new_storage
                 else:
                     storage = storage.cpu()
             # Now that it is on the CPU we can directly copy it into the zip file

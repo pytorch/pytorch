@@ -4471,16 +4471,17 @@ class TestSerialization(TestCase, SerializationMixin):
             loaded_sd = torch.load(f, weights_only=weights_only)
             self.assertEqual(sd_save, loaded_sd)
 
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
+    @unittest.skipIf(not torch.accelerator.is_available(), "accelerator not available")
     def test_use_pinned_memory_for_d2h(self):
+        device = torch.accelerator.current_accelerator().type
 
         def patched_write_record(self, filename, data, nbytes):
             if isinstance(data, (torch.TypedStorage, torch.UntypedStorage)):
-                if not data.is_pinned():
+                if not data.is_pinned(device=device):
                     raise RuntimeError("Expected storage to be in pinned memory")
                 return None
 
-        sd = torch.nn.Linear(3, 5, device='cuda').state_dict()
+        sd = torch.nn.Linear(3, 5, device=device).state_dict()
 
         # Test that CUDA actually get moved to pinned memory on CPU
         with patch('torch._C.PyTorchFileWriter.write_record', patched_write_record):
