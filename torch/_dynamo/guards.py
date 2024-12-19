@@ -1748,15 +1748,16 @@ class GuardBuilder(GuardBuilderBase):
         ) or is_from_optimizer_source(source_b):
             return
 
-        code = [f"{ref_b} is {ref_a}"]
-        self._set_guard_export_info(guard, code)
-
         # Check that the guard has not been inserted already
         key = (ref_a, ref_b)
         if key in self._cached_duplicate_input_guards:
             return
+
         self._cached_duplicate_input_guards.add((ref_a, ref_b))
         self._cached_duplicate_input_guards.add((ref_b, ref_a))
+
+        code = [f"{ref_b} is {ref_a}"]
+        self._set_guard_export_info(guard, code)
 
         install_object_aliasing_guard(
             self.get_guard_manager(guard),
