@@ -68,7 +68,7 @@ runs:
         fi
 
     - name: Runner diskspace health check
-      uses: ./.github/actions/diskspace-cleanup
+      uses: pytorch/pytorch/.github/actions/diskspace-cleanup@main
       if: always()
 
     - name: Runner health check disconnect on failure
@@ -77,14 +77,36 @@ runs:
       run: |
         killall runsvc.sh
 
+    - name: Setup useful environment variables
+      shell: bash
+      run: |
+        RUNNER_ARTIFACT_DIR="${RUNNER_TEMP}/artifacts"
+        rm -rf "${RUNNER_ARTIFACT_DIR}"
+        mkdir -p "${RUNNER_ARTIFACT_DIR}"
+        echo "RUNNER_ARTIFACT_DIR=${RUNNER_ARTIFACT_DIR}" >> "${GITHUB_ENV}"
+
+        RUNNER_TEST_RESULTS_DIR="${RUNNER_TEMP}/test-results"
+        rm -rf "${RUNNER_TEST_RESULTS_DIR}"
+        mkdir -p "${RUNNER_TEST_RESULTS_DIR}"
+        echo "RUNNER_TEST_RESULTS_DIR=${RUNNER_TEST_RESULTS_DIR}" >> "${GITHUB_ENV}"
+
+        RUNNER_DOCS_DIR="${RUNNER_TEMP}/docs"
+        rm -rf "${RUNNER_DOCS_DIR}"
+        mkdir -p "${RUNNER_DOCS_DIR}"
+        echo "RUNNER_DOCS_DIR=${RUNNER_DOCS_DIR}" >> "${GITHUB_ENV}"
+
     - name: Preserve github env variables for use in docker
       shell: bash
       run: |
-        env | grep '^GITHUB' >> "/tmp/github_env_${GITHUB_RUN_ID}"
-        env | grep '^CI' >> "/tmp/github_env_${GITHUB_RUN_ID}"
+        env | grep '^GITHUB' >> "${RUNNER_TEMP}/github_env_${GITHUB_RUN_ID}"
+        env | grep '^CI' >> "${RUNNER_TEMP}/github_env_${GITHUB_RUN_ID}"
 
     - name: ROCm set GPU_FLAG
       shell: bash
       run: |
         # All GPUs are visible to the runner; visibility, if needed, will be set by run_test.py.
-        echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
+        # The --group-add daemon and --group-add bin are needed in the Ubuntu 24.04 and Almalinux OSs respectively.
+        # This is due to the device files (/dev/kfd & /dev/dri) being owned by video group on bare metal.
+        # This video group ID maps to subgid 1 inside the docker image due to the /etc/subgid entries.
+        # The group name corresponding to group ID 1 can change depending on the OS, so both are necessary.
+        echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon --group-add bin" >> "${GITHUB_ENV}"
