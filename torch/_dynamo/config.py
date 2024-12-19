@@ -342,10 +342,6 @@ skip_nnmodule_hook_guards = True
 # notice and lead to incorrect result.
 skip_no_tensor_aliasing_guards_on_parameters = True
 
-# Considers a tensor immutable if it is one of the values of a dictionary, and
-# the dictionary tag is same across invocation calls.
-skip_tensor_guards_with_matching_dict_tags = True
-
 # If True, raises exception if TorchDynamo is called with a context manager
 raise_on_ctx_manager_usage = True
 
@@ -396,6 +392,9 @@ enable_cpp_guard_manager = True
 
 # Inline inbuilt nn modules
 inline_inbuilt_nn_modules = not is_fbcode()
+
+# Use C++ FrameLocalsMapping (raw array view of Python frame fastlocals)
+enable_cpp_framelocals_guard_eval = True
 
 # Whether to automatically find and replace identical graph
 # regions with a call to invoke_subgraph
