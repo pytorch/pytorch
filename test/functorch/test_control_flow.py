@@ -3648,8 +3648,8 @@ def forward(self, L_ctx_saved_tensors_0_ : torch.Tensor, L_ctx_pred : torch.Tens
                 )
 
         with self.assertRaisesRegex(
-            RuntimeError,
-            "Expected to return tensors with same metadata but found",
+            torch._dynamo.exc.UncapturedHigherOrderOpError,
+            "Expected carried_inputs and body_output to same metadata but found",
         ):
             make_fx(Mod(), tracing_mode="fake")(
                 torch.tensor(
@@ -4695,7 +4695,7 @@ def forward(self, arg0_1):
         x = torch.randn(4)
         with self.assertRaisesRegex(
             torch._dynamo.exc.UncapturedHigherOrderOpError,
-            "Expected to return tensors with same metadata but found",
+            "Expected true_fn_output and false_fn_output to same metadata but found",
         ):
             make_fx(f)(x, torch.tensor(False))
 
@@ -4868,7 +4868,7 @@ def forward(self, arg0_1):
         x = torch.randn(4)
         with self.assertRaisesRegex(
             torch._dynamo.exc.UncapturedHigherOrderOpError,
-            "Expected to return tensors with same metadata but found",
+            "Expected true_fn_output and false_fn_output to same metadata but found",
         ):
             make_fx(f, tracing_mode="fake")(x, torch.tensor(False))
 
@@ -6396,7 +6396,11 @@ class GraphModule(torch.nn.Module):
         if backend == "eager":
             backend = EagerAndRecordGraphs()
         self._check_compile(m, args, dynamic=dynamic, backend=backend)
-        if isinstance(backend, EagerAndRecordGraphs) and dynamic:
+        if (
+            isinstance(backend, EagerAndRecordGraphs)
+            and dynamic
+            and not TEST_WITH_CROSSREF
+        ):
             self.assertEqual(len(backend.graphs), 1)
             self.assertExpectedInline(
                 normalize_gm(backend.graphs[0].print_readable(print_output=False)),
