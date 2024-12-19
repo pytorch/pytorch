@@ -1913,11 +1913,12 @@ class TritonKernel(SIMDKernel):
                 offset = index_relative_to_xyr_index - sum(index_subexprs)
 
                 # Form the block pointer.
+                self.filter_masks(mask_vars)
                 return BlockPtrOptions.create(
                     params=block_params,
                     constant_offset=offset,
                     range_trees=range_trees,
-                    mask_vars=self.filter_masks(mask_vars),
+                    mask_vars=mask_vars,
                     get_max_block=self.max_block,
                 )
 
@@ -1949,7 +1950,7 @@ class TritonKernel(SIMDKernel):
         if self._load_mask:
             mask_vars.add(self._load_mask)
 
-        mask_vars = self.filter_masks(mask_vars)
+        self.filter_masks(mask_vars)
 
         mask_str = " & ".join(sorted(map(str, mask_vars))) if mask_vars else "None"
         return IndexingOptions(index_str, mask_vars, mask_str, expand_str, has_rindex, index)  # type: ignore[arg-type]
@@ -2287,9 +2288,12 @@ class TritonKernel(SIMDKernel):
     ) -> Union[CSEVariable, Tuple[CSEVariable, ...]]:
         assert self.inside_reduction
 
-        masks = self.get_active_masks()
+        masks = OrderedSet(f"{tree.prefix}mask" for tree in self.range_trees)
+        self.filter_masks(masks)
+        masks = sorted(masks)
+
         if self._load_mask:
-            masks.add(self._load_mask)
+            masks.append(self._load_mask)
         reduction_range_prefix = self.range_trees[-1].prefix[0]
 
         # Say we have
@@ -2780,7 +2784,8 @@ class TritonKernel(SIMDKernel):
     ) -> Tuple[CSEVariable, ...]:
         assert self.inside_reduction
         assert not self.cooperative_reduction, "TODO"
-        masks = self.get_active_masks()
+        masks = OrderedSet(f"{tree.prefix}mask" for tree in self.range_trees)
+        self.filter_masks(masks)
         masks = sorted(masks)
         assert not self._load_mask, "ops.scan not supported inside ops.masked"
         reduction_range_prefix = self.range_trees[-1].prefix[0]
@@ -2888,7 +2893,9 @@ class TritonKernel(SIMDKernel):
     ) -> Tuple[CSEVariable, ...]:
         assert self.inside_reduction
         assert not self.cooperative_reduction, "TODO"
-        masks = self.get_active_masks()
+        masks = OrderedSet(f"{tree.prefix}mask" for tree in self.range_trees)
+        self.filter_masks(masks)
+        masks = sorted(masks)
         assert not self._load_mask, "ops.sort not supported inside ops.masked"
         assert (
             self.persistent_reduction
@@ -3633,24 +3640,10 @@ class TritonKernel(SIMDKernel):
 
         return False
 
-    def filter_masks(self, mask_vars: Iterable[str]) -> OrderedSet[str]:
-        """
-        Remove non-active masks.
-        """
-        discard_set = {
-            f"{tree.prefix}mask"
-            for tree in self.range_trees
-            if self._has_constant_mask(tree)
-        }
-        return OrderedSet(var for var in mask_vars if var not in discard_set)
-
-    def get_active_masks(self) -> OrderedSet[str]:
-        """
-        Codegen shortcut to get all the active mask names.
-        """
-        return self.filter_masks(
-            sorted(f"{tree.prefix}mask" for tree in self.range_trees)
-        )
+    def filter_masks(self, mask_vars):
+        for tree in self.range_trees:
+            if self._has_constant_mask(tree):
+                mask_vars.discard(f"{tree.prefix}mask")
 
     @cache_on_self
     def get_reduction_prefixes(self) -> List[str]:
