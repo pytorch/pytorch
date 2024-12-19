@@ -1587,6 +1587,7 @@ class ReuseInputObserver(ObserverBase):
 """
 ############## Experimental Affine Quantization Feature START ######################
 We plan to merge the following with torchao repo after we move pt2e flow to torchao
+copied from https://github.com/pytorch/ao/blob/main/torchao/quantization/observer.py
 """
 from dataclasses import dataclass
 from enum import auto, Enum

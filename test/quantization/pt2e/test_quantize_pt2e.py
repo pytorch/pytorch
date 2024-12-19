@@ -2483,7 +2483,7 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
 class TestQuantizePT2EAffineQuantization(PT2EQuantizationTestCase):
     def test_channel_group_quantization(self):
         from torch.ao.quantization.observer import MappingType, PerGroup, PerToken
-        from torch.ao.quantization.pt2e.affine_quantization import (
+        from torch.ao.quantization.pt2e._affine_quantization import (
             AffineQuantizedMinMaxObserver,
         )
 
