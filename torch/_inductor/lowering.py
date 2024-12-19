@@ -83,7 +83,6 @@ from .virtualized import ops, V
 FALLBACK_ALLOW_LIST = OrderedSet(
     [
         "torchvision::roi_align",
-        "aten::index_add",
     ]
 )
 
@@ -729,10 +728,6 @@ def _foreach_map(subgraph, *args, **kwargs):
     The graph outputs represent the vertically fused sequence of ops, and then register_operation_list
     below registers the buffers as horizontally fuseable in the scheduler.
     """
-    realize_outputs = (
-        len(V.graph.current_node.users) == 0 or cur_node_has_non_foreach_users()
-    )
-
     from .subgraph_lowering import PointwiseSubgraphLowering
 
     inputs = args[0]  # nested tuple
@@ -756,11 +751,7 @@ def _foreach_map(subgraph, *args, **kwargs):
         ) in group:
             outputs[output_ind] = output
 
-            if (
-                V.graph.has_feature(device, BackendFeature.FOREACH)
-                and use_foreach
-                and realize_outputs
-            ):
+            if V.graph.has_feature(device, BackendFeature.FOREACH) and use_foreach:
                 output.realize()
                 operation_list.append(output.get_operation_name())
 
@@ -1950,10 +1941,8 @@ def fallback_node_due_to_unsupported_type(node: torch.fx.Node, allow_cpu_inputs=
     return check_skip_condition(node, node, is_output=True)
 
 
-def make_fallback(op, layout_constraint=None, warn=True, override_decomp=False):
-    assert (
-        op not in decompositions or override_decomp
-    ), f"both a fallback and a decomp for same op: {op}"
+def make_fallback(op, layout_constraint=None, warn=True):
+    assert op not in decompositions, f"both a fallback and a decomp for same op: {op}"
     if (
         warn
         and bool(os.getenv("CI"))
@@ -1963,7 +1952,6 @@ def make_fallback(op, layout_constraint=None, warn=True, override_decomp=False):
             config.fallback_random
             and op in torch._decomp.decompositions_for_rng.extra_random_decomps
         )
-        and not override_decomp
     ):
         # Note: 'warn' is holdover from when this was a warning, but for ops that previously
         # set warn=False we do not want a CI error.

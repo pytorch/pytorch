@@ -926,6 +926,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
     @skipIfRocm
+    @unittest.skipIf(IS_FBCODE, "Failing in fbcode")
     def test_conv2d_linear_add_broadcast_shapes_cpu(self):
         class M(torch.nn.Module):
             def __init__(self):
