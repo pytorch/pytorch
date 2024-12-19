@@ -1313,7 +1313,7 @@ class GraphModuleSerializer(metaclass=Final):
             # a singleton tensor, we will serialize this to be a singleton
             # tensor list so that the deserializer knows to insert getitem nodes.
 
-            if len(meta_val) == 1:
+            if len(meta_val) == 1 and not isinstance(node.target, torch._higher_order_ops.run_const_graph.RunConstGraph):
                 assert isinstance(meta_val[0], torch.Tensor)
                 name = self._output_node_name_at_index(node, 0)
                 return [Argument.create(as_tensors=[self.serialize_tensor_output(name, meta_val[0])])]
@@ -1808,6 +1808,7 @@ class GraphModuleDeserializer(metaclass=Final):
                 serialized_node.outputs[0].as_tensor.name
                 if len(serialized_node.outputs) == 1
                 and hasattr(serialized_node.outputs[0], "as_tensor")
+                and "torch.ops.higher_order.run_const_graph" not in serialized_node.target
                 else None
             )
             fx_node = self.graph.create_node(
@@ -2200,6 +2201,15 @@ class GraphModuleDeserializer(metaclass=Final):
             len(serialized_node.outputs) == 1
             and serialized_node.outputs[0].type == "as_tensor"
         ):
+            if serialized_node.target == "torch.ops.higher_order.run_const_graph":
+                meta_val: List[Any] = []
+                arg = serialized_node.outputs[0].as_tensor
+                deserialized_metadata = self.deserialize_metadata(serialized_node.metadata)
+                self.generate_getitem(meta_val, fx_node, arg, 0, deserialized_metadata)
+                fx_node.meta["val"] = tuple(meta_val)
+                self.serialized_name_to_node[fx_node.name] = fx_node
+                return
+
             self.sync_fx_node(serialized_node.outputs[0].as_tensor.name, fx_node)
             return
         elif len(serialized_node.outputs) == 1 and isinstance(
@@ -2207,82 +2217,95 @@ class GraphModuleDeserializer(metaclass=Final):
         ):
             self.sync_fx_node(serialized_node.outputs[0].value.as_name, fx_node)
             return
+        elif len(serialized_node.outputs) == 1 and serialized_node.outputs[0].type == "as_none":
+            fx_node.meta["val"] = None
+            # manually rename the node to a unused name to avoid naming conflicts
+            fx_node._rename(f"{self.graph._target_to_str(fx_node.target)}_unused")
+            return
 
         self.deserialize_multiple_outputs(serialized_node, fx_node)
+
+    def generate_getitem(
+        self,
+        meta_val,
+        fx_node: torch.fx.Node,
+        arg: Union[TensorArgument, SymIntArgument, SymFloatArgument],
+        idx: int,
+        deserialized_metadata: Dict[str, Any],
+    ):
+        if isinstance(arg, TensorArgument):
+            name = arg.name
+        elif isinstance(arg, SymIntArgument):
+            name = arg.as_name
+        elif isinstance(arg, SymFloatArgument):
+            name = arg.as_name
+        else:
+            raise AssertionError(
+                f"generate_getitem got unknown argument type {type(arg)}"
+            )
+        individual_output = self.graph.create_node(
+            "call_function",
+            operator.getitem,
+            (fx_node, idx),
+            name=name,
+        )
+        self.sync_fx_node(name, individual_output)
+        meta_val.append(self.serialized_name_to_meta[name])
+        # The derived `getitem` nodes should have the same stacktrace as the
+        # original `fx_node`
+        individual_output.meta.update(deserialized_metadata)
+
+    def generate_getitems(
+        self,
+        meta_val,
+        fx_node: torch.fx.Node,
+        args,
+        deserialized_metadata: Dict[str, Any],
+    ):
+        for idx, arg in enumerate(args):
+            if isinstance(arg, (TensorArgument, SymIntArgument, SymFloatArgument)):
+                self.generate_getitem(meta_val, fx_node, arg, idx, deserialized_metadata)
+                continue
+
+            assert isinstance(arg, Argument)
+            if arg.type in ("as_tensor", "as_sym_int", "as_sym_float"):
+                self.generate_getitem(meta_val, fx_node, arg.value, idx, deserialized_metadata)
+            elif arg.type in (
+                "as_tensors",
+                "as_sym_ints",
+                "as_sym_floats",
+                "as_ints",
+                "as_floats",
+                "as_strings",
+                "as_bools",
+                "as_sym_bools",
+            ):
+                list_output = self.graph.create_node(
+                    "call_function",
+                    operator.getitem,
+                    (fx_node, idx),
+                )
+                meta_val.append([])
+                self.generate_getitems(meta_val[-1], list_output, arg.value, deserialized_metadata)
+                list_output.meta.update(deserialized_metadata)
+                list_output.meta["val"] = meta_val[-1]
+            elif arg.type == "as_none":
+                individual_output = self.graph.create_node(
+                    "call_function",
+                    operator.getitem,
+                    (fx_node, idx),
+                    name="as_none",
+                )
+                meta_val.append(None)
+                individual_output.meta['val'] = None
+                individual_output.meta.update(deserialized_metadata)
+            else:
+                raise NotImplementedError(f"Unimplemented node output type: {arg}")
 
     def deserialize_multiple_outputs(
         self, serialized_node: Node, fx_node: torch.fx.Node
     ) -> None:
         deserialized_metadata = self.deserialize_metadata(serialized_node.metadata)
-
-        def generate_getitem(
-            meta_val,
-            fx_node: torch.fx.Node,
-            arg: Union[TensorArgument, SymIntArgument, SymFloatArgument],
-            idx: int,
-        ):
-            if isinstance(arg, TensorArgument):
-                name = arg.name
-            elif isinstance(arg, SymIntArgument):
-                name = arg.as_name
-            elif isinstance(arg, SymFloatArgument):
-                name = arg.as_name
-            else:
-                raise AssertionError(
-                    f"generate_getitem got unknown argument type {type(arg)}"
-                )
-            individual_output = self.graph.create_node(
-                "call_function",
-                operator.getitem,
-                (fx_node, idx),
-                name=name,
-            )
-            self.sync_fx_node(name, individual_output)
-            meta_val.append(self.serialized_name_to_meta[name])
-            # The derived `getitem` nodes should have the same stacktrace as the
-            # original `fx_node`
-            individual_output.meta.update(deserialized_metadata)
-
-        def generate_getitems(meta_val, fx_node: torch.fx.Node, args):
-            for idx, arg in enumerate(args):
-                if isinstance(arg, (TensorArgument, SymIntArgument, SymFloatArgument)):
-                    generate_getitem(meta_val, fx_node, arg, idx)
-                    continue
-
-                assert isinstance(arg, Argument)
-                if arg.type in ("as_tensor", "as_sym_int", "as_sym_float"):
-                    generate_getitem(meta_val, fx_node, arg.value, idx)
-                elif arg.type in (
-                    "as_tensors",
-                    "as_sym_ints",
-                    "as_sym_floats",
-                    "as_ints",
-                    "as_floats",
-                    "as_strings",
-                    "as_bools",
-                    "as_sym_bools",
-                ):
-                    list_output = self.graph.create_node(
-                        "call_function",
-                        operator.getitem,
-                        (fx_node, idx),
-                    )
-                    meta_val.append([])
-                    generate_getitems(meta_val[-1], list_output, arg.value)
-                    list_output.meta.update(deserialized_metadata)
-                    list_output.meta["val"] = meta_val[-1]
-                elif arg.type == "as_none":
-                    individual_output = self.graph.create_node(
-                        "call_function",
-                        operator.getitem,
-                        (fx_node, idx),
-                        name="as_none",
-                    )
-                    meta_val.append(None)
-                    individual_output.meta['val'] = None
-                    individual_output.meta.update(deserialized_metadata)
-                else:
-                    raise NotImplementedError(f"Unimplemented node output type: {arg}")
 
         # Convert multiple return types to FX format.
         # In FX, each node only returns one value. So in order to represent
@@ -2294,9 +2317,9 @@ class GraphModuleDeserializer(metaclass=Final):
         if len(serialized_node.outputs) == 1:
             assert isinstance(serialized_node.outputs[0].value, list)
             assert isinstance(serialized_node.outputs[0].value[0], TensorArgument)
-            generate_getitems(meta_val, fx_node, serialized_node.outputs[0].as_tensors)
+            self.generate_getitems(meta_val, fx_node, serialized_node.outputs[0].as_tensors, deserialized_metadata)
         else:
-            generate_getitems(meta_val, fx_node, serialized_node.outputs)
+            self.generate_getitems(meta_val, fx_node, serialized_node.outputs, deserialized_metadata)
 
         # also update the metaval for `fx_node` to be a list(meta)
         fx_node.meta["val"] = tuple(meta_val)
