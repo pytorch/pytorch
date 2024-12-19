@@ -164,7 +164,7 @@ SymInt computeStorageNbytes(
 }
 
 template <typename T>
-TensorBase _empty_generic(
+static TensorBase _empty_generic(
     ArrayRef<T> size,
     c10::Allocator* allocator,
     c10::DispatchKeySet ks,
@@ -217,7 +217,7 @@ TensorBase empty_generic_symint(
 }
 
 template <typename T>
-TensorBase _empty_strided_generic(
+static TensorBase _empty_strided_generic(
     T size,
     T stride,
     c10::Allocator* allocator,
