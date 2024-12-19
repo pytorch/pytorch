@@ -1853,7 +1853,6 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(z, 100)
         self.assertEqual(k, 100)
 
-    @unittest.expectedFailure
     def test_globals_change_in_other_file(self):
         @contextmanager
         def update_global_ctx():
@@ -1883,7 +1882,6 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(test_functions._variable, 1)
         self.assertEqual(res, 3 * torch.ones(10))
 
-    @unittest.expectedFailure
     def test_change_parent_global_0(self):
         # test if a global actually gets propagated
         global z_glb, k_glb
