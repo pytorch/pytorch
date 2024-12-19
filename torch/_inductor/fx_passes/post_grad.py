@@ -1051,6 +1051,8 @@ def register_partial_reduction_pattern():
             return
 
         partial_red, full_red = match.output_nodes()
+        if partial_red.meta["val"].numel() == 1 or full_red.meta["val"].numel() != 1:
+            return
 
         def replacement(inp: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
             partial = partial_red.target(inp, reduced_dims, keepdim)
