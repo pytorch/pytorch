@@ -45,6 +45,7 @@ from . import comms, config, dependencies, ir, metrics
 from .codegen.common import BackendFeature, get_scheduling_for_device, Kernel
 from .comm_analysis import estimate_nccl_collective_runtime
 from .dependencies import Dep, MemoryDep, StarDep, WeakDep
+from .exc import GPUTooOldForTriton, TritonMissing
 from .ir import ComputedBuffer, get_device_type, MultiOutput, MultiOutputLayout
 from .loop_body import LoopBody
 from .memory import MemoryPlanningInfoForBuffer, MemoryPlanningInfoForNode
@@ -3613,8 +3614,6 @@ class Scheduler:
             raise RuntimeError(f"Unsupported device type: {device.type}")
 
         if not has_triton():
-            from torch._dynamo.exc import GPUTooOldForTriton, TritonMissing
-
             if (
                 device.type == "cuda"
                 and (device_props := torch.cuda.get_device_properties(device)).major < 7
