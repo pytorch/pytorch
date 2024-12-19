@@ -27,6 +27,10 @@ _dtype_abbrs = {
     torch.int64: "i64",
     torch.bool: "b8",
     torch.uint8: "u8",
+    torch.float8_e4m3fn: "f8e4m3fn",
+    torch.float8_e5m2: "f8e5m2",
+    torch.float8_e4m3fnuz: "f8e4m3fnuz",
+    torch.float8_e5m2fnuz: "f8e5m2fnuz",
 }
 
 # How the chain of calls works for LoggingTensor:

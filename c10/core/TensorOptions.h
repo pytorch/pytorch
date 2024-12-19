@@ -438,7 +438,7 @@ struct C10_API TensorOptions {
       std::optional<MemoryFormat> optional_memory_format) const noexcept {
     TensorOptions merged = *this;
     if (optional_memory_format.has_value()) {
-      merged.set_memory_format(*optional_memory_format);
+      merged.set_memory_format(optional_memory_format);
     }
     return merged;
   }
