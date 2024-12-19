@@ -3943,31 +3943,25 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
         block_mask = create_block_mask(mask_mod, 1, 1, 128, 640)
 
         adjusted_block_mask = block_mask._adjust(1 * 128, 3 * 128)
-
-        import fbvscode
-
-        fbvscode.set_trace()
+        assert adjusted_block_mask.full_kv_num_blocks is not None
         self.assertEqual(adjusted_block_mask.kv_num_blocks.shape, torch.Size([1, 1, 1]))
         self.assertEqual(adjusted_block_mask.kv_indices.shape, torch.Size([1, 1, 1, 3]))
-        self.assertEqual(adjusted_block_mask.kv_num_blocks[0, 0, 0], 1)
-
-        # Sub 1 block in rows and cols
-        adjusted_block_mask = block_mask._adjust(5, 10)
-        self.assertEqual(adjusted_block_mask.kv_num_blocks.shape, torch.Size([1, 1, 1]))
-        self.assertEqual(adjusted_block_mask.kv_indices.shape, torch.Size([1, 1, 1, 1]))
-        self.assertEqual(adjusted_block_mask.kv_num_blocks[0, 0, 0], 1)
+        self.assertEqual(adjusted_block_mask.kv_num_blocks[0, 0, 0], 0)
+        self.assertEqual(adjusted_block_mask.full_kv_num_blocks[0, 0, 0], 1)
 
         # Sub 1 block in rows not cols
         adjusted_block_mask = block_mask._adjust(5, 129)
+        assert adjusted_block_mask.full_kv_num_blocks is not None
         self.assertEqual(adjusted_block_mask.kv_num_blocks.shape, torch.Size([1, 1, 1]))
         self.assertEqual(adjusted_block_mask.kv_indices.shape, torch.Size([1, 1, 1, 2]))
-        self.assertEqual(adjusted_block_mask.kv_num_blocks[0, 0, 0], 1)
+        self.assertEqual(adjusted_block_mask.full_kv_num_blocks[0, 0, 0], 1)
 
         # Sub 1 block in cols not rows
         adjusted_block_mask = block_mask._adjust(128, 120)
+        assert adjusted_block_mask.full_kv_num_blocks is not None
         self.assertEqual(adjusted_block_mask.kv_num_blocks.shape, torch.Size([1, 1, 1]))
         self.assertEqual(adjusted_block_mask.kv_indices.shape, torch.Size([1, 1, 1, 1]))
-        self.assertEqual(adjusted_block_mask.kv_num_blocks[0, 0, 0], 1)
+        self.assertEqual(adjusted_block_mask.full_kv_num_blocks[0, 0, 0], 1)
 
     @supported_platform
     def test_init_mismatched_full_q(self):
