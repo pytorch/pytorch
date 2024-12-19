@@ -2126,34 +2126,10 @@ class TestSelectAlgorithmDynamicShapes(_DynamicShapesTestBase):
                 view_424 = torch.ops.aten.reshape.default(
                     bmm_36, [arg131_1, 8, 512, 512]
                 )
-                iota_5 = torch.ops.prims.iota.default(
-                    512,
-                    start=0,
-                    step=1,
-                    dtype=torch.int64,
-                    device=torch.device(type="cpu"),
-                    requires_grad=False,
-                )
-                unsqueeze_19 = torch.ops.aten.unsqueeze.default(iota_5, 1)
-                unsqueeze_20 = torch.ops.aten.unsqueeze.default(iota_5, 0)
-                sub_1213 = torch.ops.aten.sub.Tensor(unsqueeze_20, unsqueeze_19)
-                gt_1 = torch.ops.aten.gt.Scalar(sub_1213, 0)
-                type_7 = torch.ops.prims.convert_element_type.default(gt_1, torch.int64)
-                mul_4531 = torch.ops.aten.mul.Tensor(type_7, 16)
-                add_5084 = torch.ops.aten.add.Tensor(mul_4531, 0)
-                abs_2 = torch.ops.aten.abs.default(sub_1213)
+                abs_2 = torch.ones(512, 512, dtype=torch.int64)
                 lt_562 = torch.ops.aten.lt.Scalar(abs_2, 8)
-                type_8 = torch.ops.prims.convert_element_type.default(
-                    abs_2, torch.float32
-                )
-                div_22 = torch.ops.aten.div.Tensor(type_8, 8)
-                log_2 = torch.ops.aten.log.default(div_22)
-                div_23 = torch.ops.aten.div.Tensor(log_2, 2.772588722239781)
-                mul_4532 = torch.ops.aten.mul.Tensor(div_23, 8)
-                type_9 = torch.ops.prims.convert_element_type.default(
-                    mul_4532, torch.int64
-                )
-                add_5085 = torch.ops.aten.add.Tensor(type_9, 8)
+                add_5084 = torch.ones(512, 512, dtype=torch.int64)
+                add_5085 = torch.ones(512, 512, dtype=torch.int64)
                 full_default_1 = torch.ops.aten.full.default(
                     [512, 512], 15, dtype=torch.int64, layout=torch.strided
                 )
@@ -2171,11 +2147,7 @@ class TestSelectAlgorithmDynamicShapes(_DynamicShapesTestBase):
                 )
                 add_5087 = torch.ops.aten.add.Tensor(unsqueeze_21, full_default)
                 add_5103 = torch.ops.aten.add.Tensor(view_424, add_5087)
-                view_425 = torch.ops.aten.reshape.default(add_5103, [mul_91, 512, 512])
-                view_426 = torch.ops.aten.reshape.default(
-                    view_425, [arg131_1, 8, 512, 512]
-                )
-                return view_426
+                return add_5103
 
         counters.clear()
         u = torch.randn(bs, 8, 512, 64).to(dtype=dtype)

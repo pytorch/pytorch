@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 import itertools
-from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import sympy
 from sympy.parsing.sympy_parser import parse_expr
@@ -52,31 +52,6 @@ class CppTemplateKernel(CppKernel):
             template.render(kernel=self, **kwargs), self.render_hooks
         ).finalize_all()
 
-    def set_sizevars_with_buffers(
-        self,
-        *all_buffers: Iterable[ir.Buffer],
-        extra_sizevars: Optional[List[sympy.Expr]] = None,
-    ) -> None:
-        unique_sizevars: OrderedSet[sympy.Expr] = OrderedSet()
-        for buffers in all_buffers:
-            unique_sizevars.update(
-                s
-                for buf in buffers
-                if buf is not None
-                for sym in itertools.chain(buf.get_size(), buf.get_stride())
-                if isinstance(sym, sympy.Expr)
-                for s in sym.free_symbols
-            )
-        unique_sizevars.update(
-            s
-            for sym in extra_sizevars or []
-            if isinstance(sym, sympy.Expr)
-            for s in sym.free_symbols
-        )
-        sizevars = sorted(unique_sizevars, key=str)
-        for sizevar in sizevars:
-            self.args.sizevars[sizevar] = f"k{sizevar}"
-
     def def_kernel(
         self,
         inputs: Dict[str, ir.Buffer],
@@ -100,9 +75,32 @@ class CppTemplateKernel(CppKernel):
                 if orig in self.args.output_buffers:
                     self.args.output_buffers[alias] = self.args.output_buffers[orig]
 
-        self.set_sizevars_with_buffers(
-            inputs.values(), outputs.values(), extra_sizevars=extra_sizevars
+        unique_sizevars = OrderedSet(
+            s
+            for input in inputs.values()
+            if input is not None
+            for sym in itertools.chain(input.get_size(), input.get_stride())
+            if isinstance(sym, sympy.Expr)
+            for s in sym.free_symbols
         )
+        unique_sizevars.update(
+            s
+            for sym in extra_sizevars or []
+            if isinstance(sym, sympy.Expr)
+            for s in sym.free_symbols
+        )
+        unique_sizevars.update(
+            s
+            for output in outputs.values()
+            for sym in itertools.chain(output.get_size(), output.get_stride())
+            if isinstance(sym, sympy.Expr)
+            for s in sym.free_symbols
+        )
+        sizevars = sorted(unique_sizevars, key=str)
+        for sizevar in sizevars:
+            # For BMM, ensure that sizevars from previous codegen are not overwritten
+            if sizevar not in self.args.sizevars:
+                self.args.sizevars[sizevar] = f"k{sizevar}"
 
         def hook():
             # remove all aliases before generate function definition
