@@ -8,6 +8,8 @@ import torch.nn.functional as F
 from torch.backends.cuda import (
     can_use_efficient_attention,
     can_use_flash_attention,
+    can_use_cudnn_attention,
+    cudnn_sdp_enabled,
     flash_sdp_enabled,
     math_sdp_enabled,
     mem_efficient_sdp_enabled,
@@ -109,6 +111,33 @@ def _check_head_dim_size_flash_nested(params: SDPAParams, debug=False) -> bool:
             )
         return False
     return True
+
+
+def _check_head_dim_size_cudnn_nested(params: SDPAParams, debug=False) -> bool:
+    max_size = 128
+    query_size_last = params.query.size(-1)
+    key_size_last = params.key.size(-1)
+    value_size_last = params.value.size(-1)
+    same_head_dim_size = (
+        query_size_last == key_size_last and query_size_last == value_size_last
+    )
+    if not (
+        same_head_dim_size
+        and (query_size_last % 8 == 0)
+        and (query_size_last <= max_size)
+    ):
+        if debug:
+            log.warning(
+                "For NestedTensor inputs, cuDNN attention requires q,k,v to have the same "
+                "last dimension and to be a multiple of 8 and less than or equal to 128. "
+                "Got Query.size(-1): %d, Key.size(-1): %d, Value.size(-1): %d instead.",
+                query_size_last,
+                key_size_last,
+                value_size_last,
+            )
+        return False
+    return True
+
 
 
 def _check_for_seq_len_0_and_consistent_head_dim_nested_helper(
@@ -261,12 +290,12 @@ def _can_use_math_sdpa_jagged(params: SDPAParams, debug=False) -> bool:
         return False
     return True
 
-
 def _select_sdp_backend(query, key, value, attn_mask, dropout, is_causal, enable_gqa):
     if (
         not flash_sdp_enabled()
         and not mem_efficient_sdp_enabled()
         and not math_sdp_enabled()
+        and not cudnn_sdp_enabled()
     ):
         return SDPBackend.ERROR
 
@@ -274,11 +303,15 @@ def _select_sdp_backend(query, key, value, attn_mask, dropout, is_causal, enable
         SDPBackend.FLASH_ATTENTION,
         SDPBackend.EFFICIENT_ATTENTION,
         SDPBackend.MATH,
+        SDPBackend.CUDNN_ATTENTION,
     )
 
     params = SDPAParams(query, key, value, attn_mask, dropout, is_causal, enable_gqa)
 
     for backend in ordering:
+        if backend == SDPBackend.CUDNN_ATTENTION:
+            if can_use_cudnn_attention(params):
+                return SDPBackend.CUDNN_ATTENTION
         if backend == SDPBackend.FLASH_ATTENTION:
             if can_use_flash_attention(params) and _can_use_flash_sdpa_jagged(params):
                 return SDPBackend.FLASH_ATTENTION
@@ -299,6 +332,8 @@ def _select_sdp_backend(query, key, value, attn_mask, dropout, is_causal, enable
     _can_use_flash_sdpa_jagged(params, debug=True)
     log.warning("Math attention kernel not used because:")
     _can_use_math_sdpa_jagged(params, debug=True)
+    log.warning("cuDNN attention kernel not used because:")
+    can_use_cudnn_attention(params, debug=True)
     return SDPBackend.ERROR
 
 
@@ -725,6 +760,7 @@ def jagged_scaled_dot_product_attention(
     backend_choice = _select_sdp_backend(
         query, key, value, attn_mask, dropout_p, is_causal, enable_gqa
     )
+    print(backend_choice)
 
     if _is_computing_meta_flops(query):
         # Backend choice will probably not be correct if we have a meta device,
@@ -750,7 +786,7 @@ def jagged_scaled_dot_product_attention(
             max_seqlen_batch_kv,
             output_nt_info,
         ) = _sdpa_nested_preprocessing(query_padded, key_padded, value_padded)
-
+        print("CALLING FLASH")
         (
             attention,
             _logsumexp,
@@ -770,7 +806,7 @@ def jagged_scaled_dot_product_attention(
             False,
             scale=og_scale,
         )
-
+        print("FINISH ATEN OP")
         # Reshape output to convert nnz to batch_size and seq_len
         attention = nested_view_from_values_offsets_lengths(
             attention,  # output from flash_attn is [total_q, num_heads, head_size_og]
@@ -788,6 +824,7 @@ def jagged_scaled_dot_product_attention(
             max_seqlen_batch_kv,
             output_nt_info,
         ) = _sdpa_nested_preprocessing(query, key, value)
+        print("CALLING EFF")
         (
             attention,
             log_sumexp,
@@ -809,10 +846,54 @@ def jagged_scaled_dot_product_attention(
             compute_logsumexp,
             scale=scale,
         )
-
+        print("FINISH ATEN OP")
         # Reshape output to convert nnz to batch_size and seq_len
         return nested_view_from_values_offsets_lengths(
             attention.squeeze(0),
+            **output_nt_info,
+        ).transpose(1, 2)
+    elif backend_choice == SDPBackend.CUDNN_ATTENTION:
+        # (
+        #    query_reshaped,
+        #    key_reshaped,
+        #    value_reshaped,
+        #    cumulative_sequence_length_q,
+        #    cumulative_sequence_length_kv,
+        #    max_seqlen_batch_q,
+        #    max_seqlen_batch_kv,
+        #    output_nt_info,
+        #) = _sdpa_nested_preprocessing(query, key, value)
+        print("before not implemented???")
+        print("CALLING CUDNN")
+        (
+            attention,
+            logsumexp,
+            cum_seqlen_q,
+            cum_seqlen_kv,
+            max_seqlen_q,
+            max_seqlen_kv,
+            seed,
+            offset,
+            _
+        ) = torch.ops.aten._scaled_dot_product_cudnn_attention(
+            query,
+            key,
+            value,
+            attn_mask,
+            compute_logsumexp,
+            dropout_p,
+            is_causal,
+            False,
+            scale=scale)
+        q_t = query.transpose(1, 2)
+        output_nt_info = {
+            "offsets": q_t.offsets(),
+            "lengths": q_t.lengths(),
+            "max_seqlen": q_t._get_max_seqlen(),
+            "min_seqlen": q_t._get_min_seqlen(),
+        }
+        return nested_view_from_values_offsets_lengths(
+            attention
             **output_nt_info,
         ).transpose(1, 2)
     elif backend_choice == SDPBackend.MATH:

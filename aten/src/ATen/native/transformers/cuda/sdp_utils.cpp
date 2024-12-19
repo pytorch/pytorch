@@ -511,6 +511,10 @@ bool check_for_nested_inputs(sdp_params const& params, bool debug) {
       TORCH_WARN("Experimental cuDNN SDPA nested tensor support is not enabled.");
     }
     return false;
+  } else if (params.query.requires_grad() || params.key.requires_grad() || params.value.requires_grad()) {
+    if (debug) {
+      TORCH_WARN("Experimental cuDNN SDPA nested tensor support does not support backward.");
+    }
   }
 
   const auto dprop = at::cuda::getCurrentDeviceProperties();

@@ -231,8 +231,12 @@ register_jagged_func = functools.partial(register_func, JAGGED_OPS_TABLE)
 
 def lookup_jagged(func, *args, **kwargs) -> Optional[Callable]:
     dispatch_func = JAGGED_OPS_TABLE.get(func, None)
+    print(func)
     if dispatch_func is not None:
+        print("GOT TO DISPATCH FUNC")
         return dispatch_func
+    else:
+        print("NONe")
 
     # Handle pointwise fallbacks
     if torch.Tag.pointwise in func.tags:
