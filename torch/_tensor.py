@@ -1760,6 +1760,45 @@ class Tensor(torch._C.TensorBase):
             raise ValueError(f"Unknown device type {torch_device_type} for Dlpack")
         return (device_type, idx)
 
+    def repeat(self, *repeats):
+        if len(repeats) == 1 and isinstance(repeats[0], (tuple, list, torch.Size)):
+            repeats = repeats[0]
+
+        if any(not isinstance(s, (int, torch.SymInt)) or s < 0 for s in repeats):
+            raise ValueError(
+                f"Received negative or non-integer repeat sizes: {repeats}. "
+                f"All repeat sizes must be non-negative integers."
+            )
+
+        if len(repeats) < len(self.shape):
+            raise RuntimeError(
+                f"Invalid number of repeat dimensions: got {len(repeats)} repeat sizes "
+                f"for tensor with {len(self.shape)} dimensions.\n"
+                f"Input tensor shape: {self.shape}\n"
+                f"Provided repeat sizes: {repeats}"
+            )
+
+        max_size = torch.iinfo(torch.int64).max
+        for r in repeats:
+            if r > max_size // 2:
+                raise ValueError(f"Individual repeat size {r} is too large")
+
+        try:
+            total_elements = self.numel() * torch.prod(torch.tensor(repeats, dtype=torch.int64)).item()
+            if total_elements > max_size:
+                raise ValueError(
+                    f"Repeat operation would result in tensor with {total_elements} elements, "
+                    f"which exceeds maximum supported size of {max_size}."
+                )
+        except OverflowError as err:
+            raise ValueError(
+                f"Repeat sizes would result in tensor too large to allocate.\n"
+                f"Input tensor shape: {self.shape}\n"
+                f"Requested repeat sizes: {repeats}"
+            ) from err
+
+        return torch._C._TensorBase.repeat(self, repeats)
+
     __module__ = "torch"
 
 

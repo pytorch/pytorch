@@ -4170,6 +4170,12 @@ Unlike :meth:`~Tensor.expand`, this function copies the tensor's data.
 Args:
     repeat (torch.Size, int..., tuple of int or list of int): The number of times to repeat this tensor along each dimension
 
+Raises:
+    ValueError: If any repeat size is negative
+    ValueError: If the resulting tensor would be too large to allocate
+    RuntimeError: If the number of repeat dimensions is smaller than the input tensor dimensions
+    TypeError: If repeat sizes are not integers
+
 Example::
 
     >>> x = torch.tensor([1, 2, 3])
