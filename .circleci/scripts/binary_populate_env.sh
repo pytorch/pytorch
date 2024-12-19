@@ -50,23 +50,26 @@ fi
 PIP_UPLOAD_FOLDER='nightly/'
 # We put this here so that OVERRIDE_PACKAGE_VERSION below can read from it
 export DATE="$(date -u +%Y%m%d)"
-BASE_BUILD_VERSION="$(cat ${PYTORCH_ROOT}/version.txt|cut -da -f1).dev${DATE}"
 
-# Change BASE_BUILD_VERSION to git tag when on a git tag
-# Use 'git -C' to make doubly sure we're in the correct directory for checking
-# the git tag
-if tagged_version >/dev/null; then
-  # Switch upload folder to 'test/' if we are on a tag
-  PIP_UPLOAD_FOLDER='test/'
-  # Grab git tag, remove prefixed v and remove everything after -
-  # Used to clean up tags that are for release candidates like v1.6.0-rc1
-  # Turns tag v1.6.0-rc1 -> v1.6.0
-  BASE_BUILD_VERSION="$(tagged_version | sed -e 's/^v//' -e 's/-.*$//')"
-fi
-if [[ "$(uname)" == 'Darwin' ]] || [[ "$PACKAGE_TYPE" == conda ]]; then
-  export PYTORCH_BUILD_VERSION="${BASE_BUILD_VERSION}"
-else
-  export PYTORCH_BUILD_VERSION="${BASE_BUILD_VERSION}+poolside$DESIRED_CUDA"
+if [[ -z "$PYTORCH_BUILD_VERSION" ]]; then
+  BASE_BUILD_VERSION="$(cat ${PYTORCH_ROOT}/version.txt|cut -da -f1).dev${DATE}"
+
+  # Change BASE_BUILD_VERSION to git tag when on a git tag
+  # Use 'git -C' to make doubly sure we're in the correct directory for checking
+  # the git tag
+  if tagged_version >/dev/null; then
+    # Switch upload folder to 'test/' if we are on a tag
+    PIP_UPLOAD_FOLDER='test/'
+    # Grab git tag, remove prefixed v and remove everything after -
+    # Used to clean up tags that are for release candidates like v1.6.0-rc1
+    # Turns tag v1.6.0-rc1 -> v1.6.0
+    BASE_BUILD_VERSION="$(tagged_version | sed -e 's/^v//' -e 's/-.*$//')"
+  fi
+  if [[ "$(uname)" == 'Darwin' ]] || [[ "$PACKAGE_TYPE" == conda ]]; then
+    export PYTORCH_BUILD_VERSION="${BASE_BUILD_VERSION}"
+  else
+    export PYTORCH_BUILD_VERSION="${BASE_BUILD_VERSION}+$DESIRED_CUDA"
+  fi
 fi
 
 export PYTORCH_BUILD_NUMBER=1
