@@ -1835,17 +1835,8 @@ class SIMDScheduling(BaseScheduling):
                     "z": a0,
                     "y": FloorDiv(a1, b1),
                     "x": b1,
-                    "r0_": reduction_numel,
+                    "r0_": tiling0["r0_"],
                 }
-
-                # Copy the existing reduction tiling
-                new_tiling.update(
-                    {
-                        dim: split
-                        for dim, split in tiling0.items()
-                        if dim not in new_tiling
-                    }
-                )
 
                 return new_tiling
 
