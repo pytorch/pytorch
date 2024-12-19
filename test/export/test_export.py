@@ -1619,15 +1619,17 @@ graph():
 graph():
     %p_p1 : [num_users=1] = placeholder[target=p_p1]
     %p_p2 : [num_users=1] = placeholder[target=p_p2]
-    %c_lifted_tensor_0 : [num_users=1] = placeholder[target=c_lifted_tensor_0]
     %x : [num_users=1] = placeholder[target=x]
     %mul : [num_users=1] = call_function[target=torch.ops.aten.mul.Tensor](args = (%p_p1, 2), kwargs = {})
     %add : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%mul, %p_p2), kwargs = {})
-    %sum_1 : [num_users=0] = call_function[target=torch.ops.aten.sum.default](args = (%add,), kwargs = {})
-    %add_1 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%x, %c_lifted_tensor_0), kwargs = {})
+    %sum_1 : [num_users=1] = call_function[target=torch.ops.aten.sum.default](args = (%add,), kwargs = {})
+    %getattr_17 : [num_users=2] = call_function[target=builtins.getattr](args = (%sum_1, a), kwargs = {})
+    %detach : [num_users=0] = call_function[target=torch.ops.aten.detach.default](args = (%getattr_17,), kwargs = {})
+    %getattr_18 : [num_users=1] = call_function[target=builtins.getattr](args = (%getattr_17, b), kwargs = {})
+    %add_1 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%x, %getattr_18), kwargs = {})
     return (add_1,)"""
         )
-        ep = torch.export.export(m, (ref_x,))
+        ep = export(m, (ref_x,), strict=False)
         self.assertTrue(torch.allclose(ep.module()(ref_x), ref_out))
 
     def test_real_tensor_errors_on_aliasing_custom_op(self):
