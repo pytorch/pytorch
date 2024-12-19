@@ -324,7 +324,7 @@ def _single_tensor_sgd(
     *,
     weight_decay: float,
     momentum: float,
-    lr: float | Tensor,
+    lr: float,
     dampening: float,
     nesterov: bool,
     maximize: bool,
