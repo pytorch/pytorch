@@ -3550,6 +3550,83 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
 
         self.assertEqual(y + increment, x)
 
+    @requires_gpu
+    @common_utils.parametrize("backend", ["eager", "aot_eager", "inductor"])
+    @common_utils.parametrize("with_perf_model", [True, False])
+    def test_triton_kernel_prune_configs_by(self, backend, with_perf_model):
+        # We need to specify global records to get around an unknown Dynamo bug.
+        # Dynamo appears to not properly update the side effects in the case of an
+        # inline call with a nonlocal value.
+        global records
+        records = {}
+
+        def early_config_prune(configs, named_args, **kwargs):
+            # we need to save the records to the returned config
+            records["run_early_config_prune"] = True
+            if "N" in kwargs and kwargs["N"] == 1024:
+                records["capture_kwargs"] = True
+            if "dst" in named_args and "src" in named_args and len(named_args) == 5:
+                records["capture_named_args"] = True
+            return [configs[0]]
+
+        # this will pick the Config with the largest block size  (128)
+
+        def perf_model(*args, **kwargs):
+            records["run_perf_model"] = True
+            return kwargs["BLOCK_SIZE"] * -1
+
+        if with_perf_model:
+            prune_configs_by = {"perf_model": perf_model, "top_k": 1}
+        else:
+            prune_configs_by = {"early_config_prune": early_config_prune}
+
+        @triton.autotune(
+            configs=[
+                triton.Config(kwargs={"BLOCK_SIZE": 32}),
+                triton.Config(kwargs={"BLOCK_SIZE": 128}),
+            ],
+            key=["N"],
+            prune_configs_by=prune_configs_by,
+        )
+        @triton.jit
+        def prune_by_kernel(
+            dst,
+            src,
+            add_float,
+            string_arg: tl.constexpr,
+            bool_var: tl.constexpr,
+            N,
+            BLOCK_SIZE: tl.constexpr,
+        ):
+            offsets = tl.program_id(0) * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+            x = tl.load(src + offsets, mask=offsets < N)
+            # Let's make sure we always select a block size of 128 based on our perf_model
+            if (string_arg == "TEST" and bool_var) and BLOCK_SIZE == 128:
+                x = x + add_float
+            tl.store(dst + offsets, x, mask=offsets < N)
+
+        @torch.compile(fullgraph=True, backend=backend)
+        def f(dst, src, add_float, string_arg, bool_var, N):
+            grid = lambda META: (triton.cdiv(N, META["BLOCK_SIZE"]),)
+            prune_by_kernel[grid](dst, src, add_float, string_arg, bool_var, N=N)
+
+        N = 1024
+        src = torch.randn(N, device=GPU_TYPE)
+        dst = torch.empty(N, device=GPU_TYPE)
+        f(dst, src, 1.5, "TEST", True, N)
+
+        if with_perf_model:
+            # Disabled for now, some dynamo weirdness at play here
+            self.assertEqual(len(records), 1)
+            self.assertEqual(src + 1.5, dst)
+        else:
+            # We require the largest config to be picked for the correct result (BLOCK_SIZE==128)
+            self.assertNotEqual(src + 1.5, dst)
+            self.assertEqual(len(records), 3)
+            self.assertTrue(records["run_early_config_prune"] is not None)
+            self.assertTrue(records["capture_kwargs"] is not None)
+            self.assertTrue(records["capture_named_args"] is not None)
+
 
 common_utils.instantiate_parametrized_tests(KernelTests)
 common_utils.instantiate_parametrized_tests(CustomOpTests)
