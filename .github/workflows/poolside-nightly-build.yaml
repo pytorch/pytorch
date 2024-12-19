@@ -19,7 +19,7 @@ on:
 env:
   # version for uploading to CodeArtifact
   # current date will be added to it later as a suffix
-  PYTORCH_BUILD_VERSION_PREFIX: 2.6.0.dev20241210+cu126.poolside
+  PYTORCH_BUILD_VERSION_PREFIX: "2.6.0.dev20241210+cu126.poolside"
   # Needed for conda builds
   ANACONDA_USER: pytorch
   BINARY_ENV_FILE: /tmp/env
@@ -39,7 +39,6 @@ env:
   GPU_ARCH_TYPE: cuda
   # Note: we might need to fix a specific version of this image or build one ourselves
   DOCKER_IMAGE: pytorch/manylinux-builder:cuda12.6-main
-  USE_SPLIT_BUILD: False
   PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu12==12.6.80; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu12==9.5.1.17; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu12==12.6.4.1; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu12==11.3.0.4; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu12==10.3.7.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu12==11.7.1.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu12==12.5.4.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparselt-cu12==0.6.3; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu12==2.21.5; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvjitlink-cu12==12.6.85; platform_system == 'Linux' and platform_machine == 'x86_64'
   MAX_JOBS: 32
   TORCH_CUDA_ARCH_LIST: "8.6;9.0+PTX"
@@ -92,14 +91,13 @@ jobs:
             echo "BINARY_ENV_FILE=${{ env.BINARY_ENV_FILE }}"
             echo "BUILD_ENVIRONMENT=${{ env.BUILD_ENVIRONMENT }}"
             echo "BUILD_NAME=${{ env.BUILD_NAME }}"
-            echo "PR_NUMBER=${{ env.PR_NUMBER }}"
             echo "PYTORCH_FINAL_PACKAGE_DIR=${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
             echo "SHA1=${{ env.SHA1 }}"
-            echo "USE_SPLIT_BUILD=${{ env.use_split_build }}"
             echo "MAX_JOBS=${{ env.MAX_JOBS }}"
             echo "TORCH_CUDA_ARCH_LIST=${{ env.TORCH_CUDA_ARCH_LIST }}"
-            echo "PYTORCH_BUILD_VERSION=${{ env.PYTORCH_BUILD_VERSION_PREFIX }}.$(date -u +%Y%m%d)"
-          } >> "${GITHUB_ENV} }}"
+            DATE=$(date -u +%Y%m%d)
+            echo "PYTORCH_BUILD_VERSION=${{ env.PYTORCH_BUILD_VERSION_PREFIX }}.$DATE"
+          } >> "$GITHUB_ENV"
 
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
@@ -134,8 +132,9 @@ jobs:
 
       - name: Build PyTorch binary
         run: |
-          echo "Building torch==$PYTORCH_BUILD_VERSION"
           set -x
+
+          echo "Building torch==$PYTORCH_BUILD_VERSION"
           
           mkdir -p ${RUNNER_TEMP}/artifacts
           container_name=$(docker run \
