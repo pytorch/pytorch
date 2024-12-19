@@ -168,9 +168,28 @@ file(GLOB flash_attention_cuda_cu "native/transformers/cuda/flash_attn/*.cu")
 file(GLOB flash_attention_cuda_kernels_cu "native/transformers/cuda/flash_attn/kernels/*.cu")
 file(GLOB flash_attention_cuda_cpp "native/transformers/cuda/flash_attn/*.cpp")
 
-# flash_attention sources
+# flash_attention hip sources
 file(GLOB flash_attention_hip_hip "native/transformers/hip/flash_attn/*.hip")
-file(GLOB flash_attention_src_hip_hip "native/transformers/hip/flash_attn/src/*.hip")
+# if USE_FLASH_ATTENTION is set, ensure CK instances get generated
+if(USE_FLASH_ATTENTION)
+  if(DEFINED ENV{USE_CK_FLASH_ATTENTION})
+    set(USE_CK_FLASH_ATTENTION $ENV{USE_CK_FLASH_ATTENTION})
+      if(USE_CK_FLASH_ATTENTION STREQUAL "1")
+	if(DEFINED ENV{PYTORCH_ROCM_ARCH})
+          list(LENGTH PYTORCH_ROCM_ARCH NUM_ARCHS)
+          if(NUM_ARCHS GREATER 1)
+            message(WARNING "Building CK for multiple archs can increase build time considerably!
+            Consider setting PYTORCH_ROCM_ARCH env var value as the gfx arch you need to build for")
+	  endif()
+	endif()
+        message(STATUS "USE_CK_FLASH_ATTENTION is set; building PyTorch with CK Flash Attention enabled")
+        file(GLOB flash_attention_hip_ck_hip "native/transformers/hip/flash_attn/ck/*.hip")
+        list(APPEND native_transformers_hip_hip ${flash_attention_hip_ck_hip})
+      endif()
+  endif()
+  file(GLOB flash_attention_hip_aot_hip "native/transformers/hip/flash_attn/aot/*.hip")
+  file(GLOB flash_attention_src_hip_hip "native/transformers/hip/flash_attn/src/*.hip")
+endif()
 
 #Mem_eff attention sources
 file(GLOB mem_eff_attention_cuda_cu "native/transformers/cuda/mem_eff_attention/*.cu")
@@ -185,6 +204,7 @@ if(USE_FLASH_ATTENTION)
   list(APPEND ATen_ATTENTION_KERNEL_SRCS ${flash_attention_cuda_kernels_cu})
 
   list(APPEND native_transformers_hip_hip ${flash_attention_hip_hip})
+  list(APPEND native_transformers_hip_hip ${flash_attention_hip_aot_hip})
   list(APPEND native_transformers_src_hip_hip ${flash_attention_src_hip_hip})
 endif()
 
@@ -317,6 +337,9 @@ if(USE_ROCM)
   # Next two lines are needed because TunableOp uses third-party/fmt
   list(APPEND ATen_HIP_INCLUDE $<TARGET_PROPERTY:fmt::fmt-header-only,INTERFACE_INCLUDE_DIRECTORIES>)
   list(APPEND ATen_HIP_DEPENDENCY_LIBS fmt::fmt-header-only)
+if(USE_FLASH_ATTENTION)
+  list(APPEND ATen_HIP_INCLUDE ${CMAKE_CURRENT_SOURCE_DIR}/native/transformers/hip/flash_attn/ck)
+endif()
   list(APPEND ATen_HIP_SRCS
     ${ATen_HIP_SRCS}
     ${hip_hip}
