@@ -2,6 +2,7 @@ r"""
 This package introduces support for the current :ref:`accelerator<accelerators>` in python.
 """
 
+from typing import Any, Optional
 from typing_extensions import deprecated
 
 import torch
@@ -106,6 +107,57 @@ set_device_idx = deprecated(
     "Use `set_device_index` instead.",
     category=FutureWarning,
 )(set_device_index)
+
+
+class StreamContext:
+    r"""Context-manager that selects a given stream.
+
+    All kernels queued within its context will be enqueued on a selected
+    stream.
+
+    Args:
+        Stream (Stream): selected stream. This manager is a no-op if it's
+            ``None``.
+    .. note:: Streams are per-device.
+    """
+    cur_stream: Optional["torch.Stream"]
+
+    def __init__(self, stream: Optional["torch.Stream"]):
+        self.stream = stream
+        self.idx = _get_device_index(None, True)
+        if self.idx is None:
+            self.idx = -1
+
+    def __enter__(self):
+        cur_stream = self.stream
+        if cur_stream is None or self.idx == -1:
+            return
+        self.src_prev_stream = torch.accelerator.current_stream(None)
+
+        # If the stream is not on the current device, then set the current stream on the device
+        if self.src_prev_stream.device != cur_stream.device:
+            with torch.device(cur_stream.device):
+                self.dst_prev_stream = torch.accelerator.current_stream(cur_stream.device)
+        torch.accelerator.set_stream(cur_stream)
+
+    def __exit__(self, type: Any, value: Any, traceback: Any):
+        cur_stream = self.stream
+        if cur_stream is None or self.idx == -1:
+            return
+
+        # Reset the stream on the original device and destination device
+        if self.src_prev_stream.device != cur_stream.device:
+            torch.accelerator.set_stream(self.dst_prev_stream)
+        torch.accelerator.set_stream(self.src_prev_stream)
+
+
+def stream(stream: Optional["torch.Stream"]) -> StreamContext:
+    r"""Wrap around the Context-manager StreamContext that selects a given stream.
+
+    Arguments:
+        stream (Stream): selected stream. This manager is a no-op if it's ``None``.
+    """
+    return StreamContext(stream)
 
 
 def current_stream(device: _device_t = None, /) -> torch.Stream:
