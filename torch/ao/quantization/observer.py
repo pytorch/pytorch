@@ -1585,7 +1585,7 @@ class ReuseInputObserver(ObserverBase):
 
 
 """
-############## Experimental Affine Quantization Feature START ######################
+# Experimental Affine Quantization Feature START
 We plan to merge the following with torchao repo after we move pt2e flow to torchao
 copied from https://github.com/pytorch/ao/blob/main/torchao/quantization/observer.py
 """
@@ -1659,12 +1659,27 @@ class Granularity:
 
 
 @dataclass(frozen=True)
+class PerBlock(Granularity):
+    """
+    Represents per-block granularity in quantization. See
+    :func:`~torchao.quantization.quant_primitives.quantize_affine` for docs for
+    `block_size`
+
+    Attributes:
+        block_size (Tuple[int, ...]): The size of each quantization group
+    """
+
+    block_size: Tuple[int, ...]
+
+
+@dataclass(frozen=True)
 class PerTensor(Granularity):
     """
     Represents per-tensor granularity in quantization.
 
     This granularity type calculates the quantization parameters
     based off the entire tensor.
+
     """
 
     pass
@@ -1841,7 +1856,7 @@ def _is_observer_script_module(mod, obs_type_name):
     return False
 
 
-############## Experimental Affine Quantization Feature END ######################
+# Experimental Affine Quantization Feature END
 
 
 def _is_activation_post_process(module):
