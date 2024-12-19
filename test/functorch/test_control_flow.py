@@ -3649,7 +3649,7 @@ def forward(self, L_ctx_saved_tensors_0_ : torch.Tensor, L_ctx_pred : torch.Tens
 
         with self.assertRaisesRegex(
             RuntimeError,
-            "Expected carried_inputs and body outputs return tensors with same metadata",
+            "Expected to return tensors with same metadata but found",
         ):
             make_fx(Mod(), tracing_mode="fake")(
                 torch.tensor(
@@ -3859,15 +3859,20 @@ def forward(self, arg0_1):
     # - "simple_with_linear" and "nested_with_linear" doesn't work becaue parameters and buffers
     #   are not inputs so they're not wrapped by functionalization and tracing.
     #
-    # - torch.compile and export "int_carry" and "pytree_int_carry" are good but
-    #   fails with data dependent error when the make_fx with "real" mode.
-    #   because the unspecialized unbacked symints are not properly dispatched
-    #   to fake kernel because the tensors are real.
+    # - make_fx tracing mode "real" fails for "int_carry", "pytree_int_carry" and "const_and_symint_output"
+    #   because tensors are real but we unspecialize the ints with unbacked symints causing
+    #   data dependent errors.
     #   Since this is not the common use path, we skip them for now.
     @parametrize(
         "while_loop_test",
         set(WHILE_LOOP_TESTS.keys())
-        - {"simple_with_linear", "nested_with_linear", "int_carry", "pytree_int_carry"},
+        - {
+            "simple_with_linear",
+            "nested_with_linear",
+            "int_carry",
+            "pytree_int_carry",
+            "const_and_symint_output",
+        },
     )
     def test_while_loop_functionalize(self, func_type, while_loop_test):
         fn, inp = WHILE_LOOP_TESTS[while_loop_test]
@@ -3876,14 +3881,14 @@ def forward(self, arg0_1):
         with mode:
             self._check_tracing(fn, inp)
 
-    # - torch.compile and export "int_carry" and "pytree_int_carry" are good but
-    #   fails with data dependent error when the make_fx with "real" mode.
-    #   because the unspecialized unbacked symints are not properly dispatched
-    #   to fake kernel because the tensors are real.
+    # - make_fx tracing mode "real" fails for "int_carry", "pytree_int_carry" and "const_and_symint_output"
+    #   because tensors are real but we unspecialize the ints with unbacked symints causing
+    #   data dependent errors.
     #   Since this is not the common use path, we skip them for now.
     @parametrize(
         "while_loop_test",
-        set(WHILE_LOOP_TESTS.keys()) - {"int_carry", "pytree_int_carry"},
+        set(WHILE_LOOP_TESTS.keys())
+        - {"int_carry", "pytree_int_carry", "const_and_symint_output"},
     )
     def test_while_loop_tracing(self, while_loop_test):
         fn, inp = WHILE_LOOP_TESTS[while_loop_test]
