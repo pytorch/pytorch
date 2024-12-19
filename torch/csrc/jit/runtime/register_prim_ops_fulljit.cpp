@@ -543,7 +543,7 @@ at::Tensor interpolate(
         input,
         _output_size(input, 1, size, scale_factors),
         *align_corners,
-        std::make_optional(scale_factors_1));
+        scale_factors_1);
   if (input_dim == dim1d && mode == "bilinear")
     throw std::runtime_error("Got 3D input, but bilinear mode needs 4D input");
   if (input_dim == dim1d && mode == "bicubic")
