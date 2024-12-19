@@ -728,10 +728,6 @@ def _foreach_map(subgraph, *args, **kwargs):
     The graph outputs represent the vertically fused sequence of ops, and then register_operation_list
     below registers the buffers as horizontally fuseable in the scheduler.
     """
-    realize_outputs = (
-        len(V.graph.current_node.users) == 0 or cur_node_has_non_foreach_users()
-    )
-
     from .subgraph_lowering import PointwiseSubgraphLowering
 
     inputs = args[0]  # nested tuple
@@ -755,11 +751,7 @@ def _foreach_map(subgraph, *args, **kwargs):
         ) in group:
             outputs[output_ind] = output
 
-            if (
-                V.graph.has_feature(device, BackendFeature.FOREACH)
-                and use_foreach
-                and realize_outputs
-            ):
+            if V.graph.has_feature(device, BackendFeature.FOREACH) and use_foreach:
                 output.realize()
                 operation_list.append(output.get_operation_name())
 
