@@ -1223,20 +1223,14 @@ class TritonHOPifier:
 
         """
         Order of checks while running call_triton_kernel
-        1) Raise an exception if num_ctas is in kwargs
-        2) Handle special configs
+        1) Handle special configs
+        2) Raise an exception if num_ctas is in kwargs
         3) Check variable.grid
         4) Run config pruning (if applicable)
         5) precompute the grid
         6) specialize constexprs
         """
         SPECIAL_CONFIG_NAMES = {"num_warps", "num_stages", "num_ctas"}
-
-        if "num_ctas" in kwargs:
-            self.raise_unsupported(
-                "Passing num_ctas directly to the Triton kernel is not supported. "
-                "Please use a Config in @triton.autotune instead."
-            )
 
         special_kwargs = {}
         for name in SPECIAL_CONFIG_NAMES:
@@ -1264,7 +1258,6 @@ class TritonHOPifier:
             # create a new variable to contain the new (wrapped) kernel;
             # skip kernel_idx to get a new record in the kernel side table
             new_var = type(variable)(new_kernel, None, variable.grid)
-            breakpoint()
             return self.call_triton_kernel(new_var, args, kwargs, tx)
 
         if isinstance(variable.kernel, Autotuner):
@@ -1304,6 +1297,12 @@ class TritonHOPifier:
                     )(variable.kernel.fn)
                     new_var = type(variable)(new_kernel, None, variable.grid)
                     return self.call_triton_kernel(new_var, args, kwargs, tx)
+
+        if "num_ctas" in kwargs:
+            self.raise_unsupported(
+                "Passing num_ctas directly to the Triton kernel is not supported. "
+                "Please use a Config in @triton.autotune instead."
+            )
 
         if variable.grid is None:
             self.raise_unsupported("Triton kernels should always be called with a grid")
