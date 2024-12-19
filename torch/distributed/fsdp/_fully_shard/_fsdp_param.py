@@ -25,7 +25,7 @@ from ._fsdp_common import (
     FSDPMeshInfo,
     HSDPMeshInfo,
 )
-from torch.distributed.device_mesh import _MeshEnv
+from torch.distributed.device_mesh import _mesh_resources
 
 
 """
@@ -807,7 +807,7 @@ class FSDPParam:
             assert mesh.mesh_dim_names is not None
             shard_dim_name = mesh.mesh_dim_names[-1]
 
-            root_mesh = _MeshEnv.get_root_mesh(mesh)
+            root_mesh = _mesh_resources.get_root_mesh(mesh)
             return root_mesh[shard_dim_name]
 
     def _assert_in_states(self, *states: ShardedState) -> None:
