@@ -45,7 +45,7 @@ class TestMultipleWrapping(FSDPTest):
         inner_model = InnerModel(device)
         model = FSDP(inner_model).to(device_type.type)
         optim = SGD(model.parameters(), lr=0.1)
-        for i in range(3):
+        for _ in range(3):
             input = torch.rand((1, 5), dtype=torch.float).to(device_type.type)
             input.requires_grad = True
             output = model(input)
