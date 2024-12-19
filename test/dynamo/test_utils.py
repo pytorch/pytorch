@@ -282,6 +282,9 @@ class TestDynamoTimed(TestCase):
  'start_time_us': 100,
  'structured_logging_overhead_s': 0.0,
  'structured_logging_overhead_us': 0,
+ 'tensorify_float_attempt': None,
+ 'tensorify_float_failure': None,
+ 'tensorify_float_success': None,
  'triton_compile_time_us': 0,
  'triton_version': None}""",  # noqa: B950
         )
@@ -359,6 +362,9 @@ class TestDynamoTimed(TestCase):
  'start_time_us': 100,
  'structured_logging_overhead_s': 0.0,
  'structured_logging_overhead_us': 0,
+ 'tensorify_float_attempt': None,
+ 'tensorify_float_failure': None,
+ 'tensorify_float_success': None,
  'triton_compile_time_us': 0,
  'triton_version': None}""",  # noqa: B950
         )
