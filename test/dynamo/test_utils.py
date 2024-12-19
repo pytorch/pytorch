@@ -393,8 +393,8 @@ class TestInductorConfigParsingForLogging(TestCase):
         """
         obj = TestCase
         test_mock_config = {
-            "some": { "name": obj, "some": True},
-            "data": { "name": obj, "some": True},
+            "some": {"name": obj, "some": True},
+            "data": {"name": obj, "some": True},
             "list": [
                 {"name": obj, "some": True},
                 {"name": obj, "some": True},
@@ -402,7 +402,7 @@ class TestInductorConfigParsingForLogging(TestCase):
             "object": {
                 "name": obj,
                 "some": True,
-                "data": { "name": obj, "some": True},
+                "data": {"name": obj, "some": True},
             },
         }
         expected = (
