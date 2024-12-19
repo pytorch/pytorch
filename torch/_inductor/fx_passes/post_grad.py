@@ -1056,8 +1056,12 @@ def register_partial_reduction_pattern():
 
         def replacement(inp: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
             partial = partial_red.target(inp, reduced_dims, keepdim)
+
             replaced_target = replacements.get(full_red.target, full_red.target)
-            complete = full_red.target(replaced_target(inp, reduced_dims, keepdim))
+            if replaced_target is partial_red.target:
+                complete = full_red.target(partial)
+            else:
+                complete = full_red.target(replaced_target(inp, reduced_dims, keepdim))
             return (partial, complete)
 
         counters["inductor"]["partial_reduction_reuse"] += 1
