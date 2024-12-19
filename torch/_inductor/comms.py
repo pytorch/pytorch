@@ -363,6 +363,7 @@ def bucket_fsdp_all_gather_concat(gm: torch.fx.GraphModule, all_gather_bucket_ca
         return
 
     ag_nodes: List[torch.fx.Node] = []
+    cast_nodes: List[torch.fx.Node] = []
     ag_node_to_wait_node: Dict[torch.fx.Node, torch.fx.Node] = {}
 
     # Step 1: Find all all_gather nodes
@@ -380,10 +381,13 @@ def bucket_fsdp_all_gather_concat(gm: torch.fx.GraphModule, all_gather_bucket_ca
             ), f"Assume all_gather_into_tensor input is either graph input or dtype conversion of graph input, but got {ag_node.args[0]}"
             ag_nodes.append(ag_node)
             ag_node_to_wait_node[ag_node] = ag_wait_node
+            if ag_node.args[0].op == "call_function" and ag_node.args[0].target == torch.ops.prims.convert_element_type.default:
+                cast_nodes.append(ag_node.args[0])
     
     # Step 2: Put all_gather nodes into buckets
     ag_buckets: List[List[torch.fx.Node]] = []
     ag_node_to_bucket_id = {}
+    cast_node_to_bucket_id = {}
     bucket_id_to_actual_bucket_size = {}
     cur_bucket: List[torch.fx.Node] = []
     cur_bucket_size_bytes: int = 0
@@ -399,6 +403,8 @@ def bucket_fsdp_all_gather_concat(gm: torch.fx.GraphModule, all_gather_bucket_ca
             ag_buckets.append(cur_bucket)
             for n in cur_bucket:
                 ag_node_to_bucket_id[n] = cur_bucket_id
+                if n.args[0].op == "call_function" and n.args[0].target == torch.ops.prims.convert_element_type.default:
+                    cast_node_to_bucket_id[n.args[0]] = cur_bucket_id
             bucket_id_to_actual_bucket_size[cur_bucket_id] = cur_bucket_size_bytes
             cur_bucket = []
             cur_bucket_size_bytes = 0
@@ -410,6 +416,8 @@ def bucket_fsdp_all_gather_concat(gm: torch.fx.GraphModule, all_gather_bucket_ca
         ag_buckets.append(cur_bucket)
         for n in cur_bucket:
             ag_node_to_bucket_id[n] = cur_bucket_id
+            if n.args[0].op == "call_function" and n.args[0].target == torch.ops.prims.convert_element_type.default:
+                cast_node_to_bucket_id[n.args[0]] = cur_bucket_id
         bucket_id_to_actual_bucket_size[cur_bucket_id] = cur_bucket_size_bytes
 
     assert len(ag_buckets) > 0
@@ -419,6 +427,7 @@ def bucket_fsdp_all_gather_concat(gm: torch.fx.GraphModule, all_gather_bucket_ca
     # Step 3: Create new (bucketed) all_gather nodes
     bucket_id_to_bucketed_op_info = {}
     bucket_id_is_scheduled = {}
+    cast_bucket_id_is_scheduled = {}
     for bucket_id, ag_bucket in enumerate(ag_buckets):
         _, group_size, group_name = list(ag_node_to_wait_node.keys())[0].args
         ag_input_nodes = []
@@ -431,6 +440,7 @@ def bucket_fsdp_all_gather_concat(gm: torch.fx.GraphModule, all_gather_bucket_ca
 
     ag_wait_nodes = list(ag_node_to_wait_node.values())
     ag_and_wait_nodes = OrderedSet(ag_nodes + ag_wait_nodes)
+    cast_nodes = OrderedSet(cast_nodes)
     new_graph: torch.fx.Graph = torch.fx.Graph()
     env: Dict[torch.fx.Node, torch.fx.Node] = {}
 
@@ -466,9 +476,60 @@ def bucket_fsdp_all_gather_concat(gm: torch.fx.GraphModule, all_gather_bucket_ca
         return new_node
 
     for node in node_list:
-        if node not in ag_and_wait_nodes:
-            # not all_gather or its wait_tensor - schedule it normally
+        if node not in ag_and_wait_nodes and node not in cast_nodes:
+            # not cast-before-all_gather, all_gather or its wait_tensor - schedule it normally
             node_copy(node, lambda x: env_lookup(x, node))
+        elif node in cast_nodes:
+            # group cast nodes together
+            assert node in cast_node_to_bucket_id
+            bucket_id = cast_node_to_bucket_id[node]
+            if bucket_id not in cast_bucket_id_is_scheduled:
+                ag_input_nodes, group_size, group_name, orig_wait_nodes = bucket_id_to_bucketed_op_info[bucket_id]
+                # device = ag_input_nodes[0].meta["val"].device
+                # rank = device.index
+                # dtype = ag_input_nodes[0].meta["val"].dtype
+                if all(n.op == "call_function" and n.target == torch.ops.prims.convert_element_type.default for n in ag_input_nodes):
+                    param_all_gather_inputs = [
+                        new_graph_call_function(
+                            torch.ops.aten.empty.memory_format,
+                            (n.meta["val"].shape,),
+                            {
+                                "dtype": n.args[1],  # n.meta["val"].dtype,
+                                "device": n.meta["val"].device,
+                                "pin_memory": False,
+                            },
+                        )
+                        for n in ag_input_nodes
+                    ]
+                    for pp, n in zip(param_all_gather_inputs, ag_input_nodes):
+                        pp.meta = n.meta.copy()
+
+                    cast_input_nodes = [env[n.args[0]] for n in ag_input_nodes]
+                    foreach_copy = new_graph_call_function(
+                        torch.ops.aten._foreach_copy.default,
+                        (param_all_gather_inputs, cast_input_nodes),
+                        {}
+                    )
+                    foreach_copy.meta["val"] = [n.meta["val"] for n in ag_input_nodes]
+                    getitems = [
+                        new_graph_call_function(
+                            operator.getitem,
+                            (foreach_copy, i),
+                            {},
+                        )
+                        for i in range(len(ag_input_nodes))
+                    ]
+
+                    for new_n, old_n in zip(getitems, ag_input_nodes):
+                        env[old_n] = new_n
+                else:
+                    param_all_gather_inputs_orig = [
+                        node_copy(ag_input_node, lambda x: env_lookup(x, ag_input_node))
+                        for ag_input_node in ag_input_nodes
+                    ]
+                cast_bucket_id_is_scheduled[bucket_id] = True
+            else:
+                continue
         elif node in ag_node_to_wait_node:
             assert node in ag_node_to_bucket_id
             bucket_id = ag_node_to_bucket_id[node]
