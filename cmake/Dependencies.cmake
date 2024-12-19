@@ -1531,7 +1531,7 @@ add_subdirectory(${PROJECT_SOURCE_DIR}/third_party/fmt)
 # configurations (notably the mobile build analyzer) will populate
 # CMAKE_CXX_FLAGS in ways that break feature checks. Since we already know
 # `fmt` is compatible with a superset of the compilers that PyTorch is, it
-# shouldn't be too bad to just disable the checks.
+# shouldn't be too bad to just disable the checks.(dummy)
 set_target_properties(fmt-header-only PROPERTIES INTERFACE_COMPILE_FEATURES "")
 
 list(APPEND Caffe2_DEPENDENCY_LIBS fmt::fmt-header-only)
