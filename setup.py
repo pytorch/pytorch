@@ -142,6 +142,10 @@
 #   USE_ROCM_KERNEL_ASSERT=1
 #     Enable kernel assert in ROCm platform
 #
+#   PYTORCH_LAYERNORM_FAST_RECIPROCAL
+#     If set, enables the use of builtin functions for fast reciprocals (1/x) w.r.t.
+#     layer normalization. Default: enabled.
+#
 # Environment variables we respect (these environment variables are
 # conventional and are often understood/set by other software.)
 #
