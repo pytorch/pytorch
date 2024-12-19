@@ -9,6 +9,7 @@ import torch
 import torch.nn as nn
 from torch._prims_common import make_contiguous_strides_for
 from torch.distributed._functional_collectives import AsyncCollectiveTensor
+from torch.distributed.device_mesh import _mesh_resources
 from torch.distributed.tensor import DTensor, Replicate, Shard
 from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
 from torch.distributed.tensor.device_mesh import _mesh_resources
@@ -25,7 +26,6 @@ from ._fsdp_common import (
     FSDPMeshInfo,
     HSDPMeshInfo,
 )
-from torch.distributed.device_mesh import _mesh_resources
 
 
 """
@@ -703,7 +703,9 @@ class FSDPParam:
                     (
                         all_gather_inputs,
                         self._extensions_data.all_gather_metadata,
-                    ) = sharded_local_tensor.fsdp_pre_all_gather(self.shard_mesh_from_root)
+                    ) = sharded_local_tensor.fsdp_pre_all_gather(
+                        self.shard_mesh_from_root
+                    )
                 else:
                     (
                         all_gather_inputs,
