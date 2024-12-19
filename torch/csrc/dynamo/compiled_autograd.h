@@ -943,31 +943,31 @@ struct IValuePacker {
   // That's what the TypePtr is for: it contains the information to do the
   // parsing. See torch::jit::toIValue for more information.
   static at::TypePtr packed_type() {
-    if constexpr (std::is_same_v<T, at::Tensor>) {
+    if constexpr (::std::is_same_v<T, at::Tensor>) {
       return at::TensorType::get();
-    } else if constexpr (std::is_same_v<T, int64_t>) {
+    } else if constexpr (::std::is_same_v<T, int64_t>) {
       return at::IntType::get();
-    } else if constexpr (std::is_same_v<T, c10::SymInt>) {
+    } else if constexpr (::std::is_same_v<T, c10::SymInt>) {
       return at::SymIntType::get();
-    } else if constexpr (std::is_same_v<T, bool>) {
+    } else if constexpr (::std::is_same_v<T, bool>) {
       return at::BoolType::get();
-    } else if constexpr (std::is_same_v<T, double>) {
+    } else if constexpr (::std::is_same_v<T, double>) {
       return at::FloatType::get();
-    } else if constexpr (std::is_same_v<T, c10::SymFloat>) {
+    } else if constexpr (::std::is_same_v<T, c10::SymFloat>) {
       return at::SymFloatType::get();
-    } else if constexpr (std::is_same_v<T, c10::SymBool>) {
+    } else if constexpr (::std::is_same_v<T, c10::SymBool>) {
       return at::SymBoolType::get();
-    } else if constexpr (std::is_same_v<T, c10::Layout>) {
+    } else if constexpr (::std::is_same_v<T, c10::Layout>) {
       return at::LayoutType::get();
-    } else if constexpr (std::is_same_v<T, std::string>) {
+    } else if constexpr (::std::is_same_v<T, ::std::string>) {
       return at::StringType::get();
-    } else if constexpr (std::is_same_v<T, at::Device>) {
+    } else if constexpr (::std::is_same_v<T, at::Device>) {
       return at::DeviceObjType::get();
-    } else if constexpr (std::is_same_v<T, at::Scalar>) {
+    } else if constexpr (::std::is_same_v<T, at::Scalar>) {
       return at::NumberType::get();
-    } else if constexpr (std::is_same_v<T, at::MemoryFormat>) {
+    } else if constexpr (::std::is_same_v<T, at::MemoryFormat>) {
       return at::MemoryFormatType::get();
-    } else if constexpr (std::is_same_v<T, at::ScalarType>) {
+    } else if constexpr (::std::is_same_v<T, at::ScalarType>) {
       return at::ScalarTypeType::get();
     } else {
       // If you got here, you have probably added a member of a new type
@@ -1375,6 +1375,13 @@ TORCH_API const std::unique_ptr<PyCompilerInterface>& getPyCompilerInterface();
 TORCH_API void setPyCompilerInterface(
     std::unique_ptr<PyCompilerInterface>&& impl);
 TORCH_API void resetPyCompilerInterface();
+
+// including torch/csrc/autograd/engine.h breaks BC by somehow introducing
+// symbol resolution issues. Instead requiring downstream users to include
+// engine.h to access collect_input_metadata, we provide it here (with a
+// different name to avoid ambigous symbols...)
+TORCH_API std::vector<c10::optional<InputMetadata>> get_input_metadata(
+    const edge_list& edges);
 
 } // namespace torch::dynamo::autograd
 
