@@ -2237,7 +2237,7 @@ def _reduction(
             raise RuntimeError(
                 "Expected the dtype of reduction result and out to match"
             )
-        out = _maybe_resize_out(out, result.shape)
+        out = _maybe_resize_out(out, result)
         return _safe_copy_out(copy_from=result, copy_to=out)  # type: ignore[arg-type]
 
     if result.dtype != result_dtype and result_dtype is not None:
@@ -2545,7 +2545,7 @@ def mean(
     result = _maybe_convert_to_dtype(result, result_dtype)  # type: ignore[method-assign]
     if out is not None:
         assert isinstance(out, TensorLike)
-        out = _maybe_resize_out(out, result.shape)
+        out = _maybe_resize_out(out, result)
         return _safe_copy_out(copy_from=result, copy_to=out)  # type: ignore[arg-type]
     return result
 
