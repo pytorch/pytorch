@@ -455,7 +455,7 @@ default settings on this script:
         )
 
     subparsers = parser.add_subparsers(
-        dest="command", metavar="{run,minify,analyze}", required=True
+        dest="command", metavar="{run,minify}", required=True
     )
 
     parser_run = subparsers.add_parser(
