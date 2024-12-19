@@ -99,7 +99,19 @@ jobs:
         run: |
           # shellcheck disable=SC1091
           source "${RUNNER_TEMP}/anaconda/bin/activate"
-          "${PYTORCH_ROOT}/.circleci/scripts/binary_macos_build.sh"
+          set -eux -o pipefail
+          # shellcheck disable=SC1090
+          source "${BINARY_ENV_FILE:-/Users/distiller/project/env}"
+          mkdir -p "$PYTORCH_FINAL_PACKAGE_DIR"
+
+          # Build
+          USE_PYTORCH_METAL_EXPORT=1
+          USE_COREML_DELEGATE=1
+          TORCH_PACKAGE_NAME="${TORCH_PACKAGE_NAME//-/_}"
+          export USE_PYTORCH_METAL_EXPORT
+          export USE_COREML_DELEGATE
+          export TORCH_PACKAGE_NAME
+          "${PYTORCH_ROOT}/.ci/wheel/build_wheel.sh"
       - uses: actions/upload-artifact@v4.4.0
         if: always()
         with:

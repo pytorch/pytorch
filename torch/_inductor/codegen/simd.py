@@ -56,6 +56,7 @@ from ..utils import (
     IndentedBuffer,
     Placeholder,
     prefix_is_reduction,
+    set_kernel_post_grad_provenance_tracing,
     sympy_index_symbol,
     sympy_product,
     sympy_subs,
@@ -1319,6 +1320,8 @@ class SIMDScheduling(BaseScheduling):
             with V.set_kernel_handler(kernel):
                 src_code = kernel.codegen_kernel()
             kernel_name = self.define_kernel(src_code, node_schedule, kernel)
+            if config.trace.enabled:
+                set_kernel_post_grad_provenance_tracing(node_schedule, kernel_name)
             log.debug("Generating kernel code with kernel_name: %s", kernel_name)
             kernel.kernel_name = kernel_name
             kernel.code_hash = code_hash(src_code)
@@ -1519,6 +1522,9 @@ class SIMDScheduling(BaseScheduling):
                 return src_code
 
             kernel_name = self.define_kernel(src_code, node_schedule, kernel)
+
+            if config.trace.enabled:
+                set_kernel_post_grad_provenance_tracing(node_schedule, kernel_name)
 
         self.codegen_comment(node_schedule)
         kernel.call_kernel(kernel_name, template_node.node)
