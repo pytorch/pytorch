@@ -632,9 +632,11 @@ class OutputGraph:
         """
         global_state = cast(
             Dict[str, Tuple[Callable[..., Any], bool]],
-            out
-            if out is not None
-            else self.tracing_context.global_context.global_state,
+            (
+                out
+                if out is not None
+                else self.tracing_context.global_context.global_state
+            ),
         )
 
         # TODO - Consider having a torch level API for torch_function_state. As

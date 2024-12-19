@@ -76,8 +76,8 @@ def raise_hard_error_if_graph_break(reason):
 def discard_graph_changes(tx):
     ctx = tx.output.subtracer("subgraph_wrapper", None)
     try:
-        ctx.__enter__()
-        yield
+        tracer = ctx.__enter__()
+        yield tracer
     finally:
         ctx.__exit__(None, None, None)
 
@@ -2434,33 +2434,9 @@ class AutogradFunctionApplyVariable(VariableTracker):
             ):
                 unimplemented("NYI")
 
-        bwd_tracer = torch._dynamo.output_graph.SubgraphTracer(
-            tx.output,
-            parent=fwd_tracer,
-            source_target="autograd.Function",
-        )
-
         # Speculate subgraph on the backward. We make the
         # bwd tracer a child of the fwd tracer, because backward may rely on
         # tensors/attrs created in the fwd tracer.
-
-        if isinstance(fwd_out, variables.BaseListVariable):
-            bwd_args = [ctx, *fwd_out.items]
-        else:
-            bwd_args = [ctx, fwd_out]
-
-        bwd_src = AttrSource(self.parent_source, member="backward")
-        if isinstance(self.bwd_graph, types.FunctionType):
-            bwd_fn = UserFunctionVariable(self.bwd_graph, source=bwd_src)
-        elif isinstance(self.bwd_graph, types.MethodType):
-            bwd_fn = UserMethodVariable(
-                self.bwd_graph.__func__,
-                UserDefinedClassVariable(self.bwd_graph.__class__),
-                source=bwd_src,
-            )
-            bwd_args = [bwd_fn.obj, *bwd_args]
-        else:
-            unimplemented("non-function or method")
 
         def is_strict_for(v: VariableTracker):
             if isinstance(v, variables.TensorVariable):
@@ -2468,20 +2444,107 @@ class AutogradFunctionApplyVariable(VariableTracker):
                 return v.proxy.tracer is not fwd_tracer
             return True
 
+        @torch.library.custom_op("mylib::clone_unknown_strides", mutates_args=())
+        def clone_unknown_strides(x: torch.Tensor) -> torch.Tensor:
+            ctx = torch.library.get_ctx()
+            strides = []
+            for _ in range(x.dim()):
+                s = ctx.new_dynamic_size(min=1)
+                strides.append(s)
+            return torch.empty_strided(x.shape, strides, dtype=x.dtype, device=x.device)
+
+        @clone_unknown_strides.register_fake
+        def _(x: torch.Tensor) -> torch.Tensor:
+            ctx = torch.library.get_ctx()
+            strides = []
+            for _ in range(x.dim()):
+                s = ctx.new_dynamic_size(min=1)
+                strides.append(s)
+            return torch.empty_strided(x.shape, strides, dtype=x.dtype, device=x.device)
+
+        # We can't get the real grad_out during Dynamo tracing, so we generate a fake one
+        # whose size is the same as fwd_out tensor and stride is represented by
+        # unbacked SymInts of range >= 1.
+        def generate_fake_grad_out(tx, fwd_out):
+            stride_unbacked_symbols = []
+            grad_out = variables.TorchInGraphFunctionVariable(
+                torch.ops.mylib.clone_unknown_strides
+            ).call_function(tx, [fwd_out], {})
+
+            if "unbacked_bindings" in grad_out.as_proxy().node.meta:
+                for x in grad_out.as_proxy().node.meta["unbacked_bindings"].keys():
+                    stride_unbacked_symbols.append(str(x))
+            return grad_out, stride_unbacked_symbols
+
+        # We have to track the unbacked symbols from grad_out's stride and
+        # remove them from the fwd_graph and bwd_graph later.
+        stride_unbacked_symbols = []
+        stride_unbacked_nodes = []
+
+        from unittest.mock import patch
+
         with tx.output.subtracer(fwd_fn, fwd_tracer), tx.strict_translation_mode(
             is_strict_for
         ):
-            (bwd_out, _), bwd_graph, bwd_freevars = speculate_subgraph(
-                tx,
-                bwd_fn,
-                bwd_args,
-                kwargs,
-                "autograd.Function",
-                enable_grad=False,
-                set_subgraph_inputs="manual",
-                restore_side_effects=False,
-                tracer=bwd_tracer,
-            )
+            with discard_graph_changes(tx) as dummy_tracer, patch.object(
+                torch.fx.experimental.symbolic_shapes.ShapeEnv,
+                "allow_dynamic_output_shape_ops",
+                True,
+            ):
+                bwd_tracer = torch._dynamo.output_graph.SubgraphTracer(
+                    tx.output,
+                    parent=dummy_tracer,
+                    source_target="autograd.Function",
+                )
+                if isinstance(fwd_out, variables.BaseListVariable):
+                    bwd_args = [ctx, *fwd_out.items]
+                    new_bwd_args = []
+                    for arg in bwd_args:
+                        if isinstance(arg, variables.TensorVariable):
+                            grad_out, _stride_unbacked_symbols = generate_fake_grad_out(
+                                tx, arg
+                            )
+                            stride_unbacked_symbols.extend(_stride_unbacked_symbols)
+                            new_bwd_args.append(grad_out)
+                        else:
+                            new_bwd_args.append(arg)
+                    bwd_args = new_bwd_args
+                else:
+                    assert isinstance(fwd_out, variables.TensorVariable)
+                    grad_out, stride_unbacked_symbols = generate_fake_grad_out(
+                        tx, fwd_out
+                    )
+                    bwd_args = [ctx, grad_out]
+
+                bwd_src = AttrSource(self.parent_source, member="backward")
+                if isinstance(self.bwd_graph, types.FunctionType):
+                    bwd_fn = UserFunctionVariable(self.bwd_graph, source=bwd_src)
+                elif isinstance(self.bwd_graph, types.MethodType):
+                    bwd_fn = UserMethodVariable(
+                        self.bwd_graph.__func__,
+                        UserDefinedClassVariable(self.bwd_graph.__class__),
+                        source=bwd_src,
+                    )
+                    bwd_args = [bwd_fn.obj, *bwd_args]
+                else:
+                    unimplemented("non-function or method")
+
+                (bwd_out, _), bwd_graph, bwd_freevars = speculate_subgraph(
+                    tx,
+                    bwd_fn,
+                    bwd_args,
+                    kwargs,
+                    "autograd.Function",
+                    enable_grad=False,
+                    set_subgraph_inputs="manual",
+                    restore_side_effects=False,
+                    tracer=bwd_tracer,
+                )
+
+            # Collect the unbacked SymInt nodes from grad_out's stride.
+            for x in bwd_args:
+                if isinstance(x, variables.TensorVariable):
+                    stride_unbacked_nodes.extend(x.as_proxy().node.users)
 
         # TODO: assert that bwd_graph didn't capture values that were
         # not created inside fwd_graph.
@@ -2512,6 +2575,21 @@ class AutogradFunctionApplyVariable(VariableTracker):
             fwd_graph.erase_node(node)
             break
 
+        # Remove unbacked symbols from grad_out's stride for fwd_graph and bwd_graph
+        for node in fwd_graph.find_nodes(op="placeholder"):
+            if (
+                node.type is torch.SymInt
+                and str(node.target) in stride_unbacked_symbols
+            ):
+                fwd_graph.erase_node(node)
+
+        for node in bwd_graph.find_nodes(op="placeholder"):
+            if (
+                node.type is torch.SymInt
+                and str(node.target) in stride_unbacked_symbols
+            ):
+                bwd_graph.erase_node(node)
+
         # Because we lift the bwd_freevars as inputs of the bwd_graph,
         # we have to manually add the bwd_freevars as output of fwd_graph.
         # However, the bwd_freevars got from speculate_subgraph use the Proxies in the bwd_graph,
@@ -2520,13 +2598,15 @@ class AutogradFunctionApplyVariable(VariableTracker):
         for k in bwd_freevars.keys():
             if k in fwd_freevars:
                 fwd_proxy_of_bwd_freevars.append(fwd_freevars[k])
+            elif k.node in stride_unbacked_nodes:
+                continue
             else:
                 fwd_proxy_of_bwd_freevars.append(k)
 
         new_fwd_graph_outputs = (fwd_out.as_proxy(), fwd_proxy_of_bwd_freevars)
         new_fwd_graph_outputs = pytree.tree_map(lambda x: x.node, new_fwd_graph_outputs)
         fwd_graph.output(new_fwd_graph_outputs)
-        fwd_graph.lint()
+        # fwd_graph.lint()
 
         # Store fwd_body
         fwd_nn_modules = tx.output.tracing_context.module_context.copy_graphstate()
