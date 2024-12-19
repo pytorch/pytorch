@@ -137,11 +137,11 @@ class DocstringLinter(_linter.FileLinter):
                 print()
             top = sorted(v, reverse=True)[:REPORT_TOP_RESULTS]
             if len(top) == 1:
-                s = "s"
-                t = ""
-            else:
                 s = ""
                 t = f"{len(top)} "
+            else:
+                s = "es" if k.endswith("s") else "s"
+                t = ""
             print(f"Top {t}undocumented {k}{s}:")
             for lines, path, tname in top:
                 print(f"    {lines} lines: {path}:{tname}")
