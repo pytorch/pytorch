@@ -648,7 +648,7 @@ def _replace_node_literals_with_existing_placeholders(
     placeholder    eps                 eps                      ()                                      {}
     call_function  layer_norm          aten.layer_norm.default  (x, [5, 10, 10], weight, bias, 0.0001)  {}
     output         output_1            output                   ((layer_norm,),)                        {}
-    
+
     As such, this pattern has two problems:
 
     - the literals are burned-in and not connected to the corresponding
@@ -712,7 +712,7 @@ def _replace_node_literals_with_existing_placeholders(
         arg_map = _node_arg_map.get(name_fn())
         if not arg_map:
             return None
-        
+
         # if an entry exist, check if there is a index match. 
         # - if so return it, else return None.
         entry = arg_map.get(_arg_idx)
@@ -720,21 +720,32 @@ def _replace_node_literals_with_existing_placeholders(
             return None
 
         # make sure that the node's argument is a literal 
-        assert _is_literal(_node.args[_arg_idx]), f"{node.name}'s argument is not a literal!"
+        assert _is_literal(_node.args[_arg_idx]), f"{_node.name}'s argument is not a literal!"
 
         # mark this node as replaced in the replacement map.
         repl_map[name_fn()][_arg_idx] = True
 
         return entry
 
-    def _check_default_usage(node: torch.fx.Node, node_arg_map):
+    def _check_default_usage(
+            node: torch.fx.Node, 
+            node_arg_map: Dict[str, Dict[int, str]]
+    ):
         """
-        A sanity check to make sure we are handling default Op arguments correctly.
+        A sanity check to make sure we are handling default Op arguments
+        correctly i.e., it is an error to refer to default arguments in
+        node_arg_map if it doesn't show up in node.args. Best way to handle
+        this would be to use a non-default value for the purpose of pattern
+        matching.
         """
         # log.info(f"Node{node} invoked with some defaulted arguments.")
         # There are some default valued arguments in use
-        if node.target.name and node.target.name() in node_arg_map:
-            arg_map = node_arg_map.get(node.target.name())
+        if (
+                hasattr(node.target, 'name') and 
+                node.target.name() in node_arg_map and
+                hasattr(node.target, '_schema')
+        ):
+            arg_map = node_arg_map[node.target.name()]
             # node.args excludes trailing default arguments
             for arg_idx in range(len(node.args), len(node.target._schema.arguments)):
                 if arg_idx in arg_map:
@@ -748,7 +759,7 @@ def _replace_node_literals_with_existing_placeholders(
             ph_map: Dict[str, torch.fx.graph.Node], 
             ph_name: str, 
             arg: List[int], 
-            ):
+    ):
         """
         For list literals (ex: List[int]), torch.export creates an array of
         placeholder nodes (ex: shape_0, shape_1, ... for a list literal argument
@@ -764,7 +775,7 @@ def _replace_node_literals_with_existing_placeholders(
             ph_name: Placeholder name corresponding to this list literal.
             arg: The argument that was used in compilation (from node.args).
         """
-        
+
         # modify the first placeholder node in the list it to remove the index and
         # associate the entire argument with this node. this node will represent
         # the entire list literal.
@@ -792,12 +803,12 @@ def _replace_node_literals_with_existing_placeholders(
         node_arg_map = {}
 
     # create a copy of the node_arg_map to keep track of replaced nodes.
-    repl_check = {}
+    repl_check: Dict[str, Dict[int, bool]] = {}
     for node, args in node_arg_map.items():
         repl_check[node] = {}
         for idx, _ in args.items():
             repl_check[node][idx] = False
-    
+
     # create a mapping between placeholder_node's name -> placeholder_node
     ph_map: Dict[str, torch.fx.graph.Node] = {}
     for node in gm.graph.nodes:
@@ -830,7 +841,7 @@ def _replace_node_literals_with_existing_placeholders(
                 else:
                     ph_node = ph_map[ph_name]
                 new_args.append(ph_node)
-                log.debug(f'Matched {arg} to {ph_node} ...')
+                log.debug('Matched {} to {} ...'.format(arg, ph_node))
             # if not, keep the original argument as it is.
             else:
                 new_args.append(arg)

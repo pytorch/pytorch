@@ -24,11 +24,11 @@ def ln_example_inputs():
     """
     N, C, H, W = 20, 5, 10, 10
     return (
-      torch.randn(N, C, H, W),  
-      torch.Size([C, H, W]), 
-      torch.randn(C, H, W), 
-      torch.randn(C, H, W),  
-      0.0001
+        torch.randn(N, C, H, W),  
+        torch.Size([C, H, W]), 
+        torch.randn(C, H, W), 
+        torch.randn(C, H, W),  
+        0.0001
     )
 
 class LayerNormPattern(torch.nn.Module):
@@ -73,7 +73,7 @@ def my_layer_norm(x: torch.Tensor, normalized_shape: List[int],
 
 @torch.library.register_fake("my_lib::my_layer_norm")
 def _(x: torch.Tensor, normalized_shape: List[int], 
-      weight: torch.Tensor, bias:torch.Tensor, 
+      weight: torch.Tensor, bias: torch.Tensor, 
       eps: float):
 
     return torch.empty_like(x)
@@ -101,7 +101,7 @@ LN_REPL_LITERAL_MAP = {
 }
 
 class TestLayerNormRepl(TestCase):
-    
+
     @classmethod
     def setUpClass(cls): 
 
@@ -112,7 +112,7 @@ class TestLayerNormRepl(TestCase):
         cls.pattern_gm = torch.export.export(pattern_model, cls.example_inputs).module()
         _replace_node_literals_with_existing_placeholders(cls.pattern_gm, LN_PATTERN_LITERAL_MAP)
         # to_svg(cls.pattern_gm, 'pattern_before.svg')
-        
+
         repl_model = LayerNormReplacement()
         cls.repl_gm = torch.export.export(repl_model, cls.example_inputs).module()
         _replace_node_literals_with_existing_placeholders(cls.repl_gm, LN_REPL_LITERAL_MAP)
@@ -130,12 +130,12 @@ class TestLayerNormRepl(TestCase):
         return matches, model_gm
 
     def test_layernorm_models(self):
-        
-        shape_arr = [ (5, 10, 10) ]
-        eps_arr = [ 1e-5 ]
-        elementwise_affine_arr = [ False, True ]
-        bias_arr = [ False, True ]
-        dtype_arr = [ torch.float32, torch.float64 ]
+
+        shape_arr = [(5, 10, 10)]
+        eps_arr = [1e-5]
+        elementwise_affine_arr = [False, True]
+        bias_arr = [False, True]
+        dtype_arr = [torch.float32, torch.float64]
 
         for shape, eps, affine, bias, dtype in itertools.product(
                 shape_arr, eps_arr, elementwise_affine_arr, bias_arr, dtype_arr):
