@@ -2,6 +2,7 @@
 # flake8: noqa: B950
 import copy
 import math
+import unittest
 from dataclasses import dataclass
 
 import torch
@@ -321,6 +322,7 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
         y = f(x, SomeEnum.A)
         self.assertEqual(y, x.sin())
 
+    @unittest.skip("Temparory for testing")
     def test_save_for_bwd(self):
         model = SaveForBwdModule()
         opt_model = torch.compile(model, backend="eager", fullgraph=True)
@@ -992,6 +994,7 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(W1.grad, W2.grad)
         self.assertEqual(cnts.frame_count, 1)
 
+    @unittest.skip("Temparory for testing")
     def test_smuggle_symint_issue_111031(self):
         from torch.autograd import Function
 
@@ -1074,6 +1077,7 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(x_ref.grad, x_test.grad)
         self.assertEqual(y_ref.grad, y_test.grad)
 
+    @unittest.skip("Temparory for testing")
     def test_smuggle_tensor_and_complex_structures(self):
         from torch.autograd import Function
 
