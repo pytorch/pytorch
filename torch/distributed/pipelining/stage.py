@@ -700,7 +700,12 @@ class _PipelineStageBase(ABC):
         output_tuple = _normalize_model_output_as_tuple(output)
 
         # Prepare for final output merge or reduction
-        self.output_chunks.append(output)
+
+        # The output kept in fwd_cache is not detached
+        # The output given to the user is detached so that the graph is freed after backward pass
+        # see issue #142229
+        detached_output = tree_map_only(torch.Tensor, lambda x: x.detach().requires_grad_(False), output)
+        self.output_chunks.append(detached_output)
 
         # Save activations and inputs for backward
         flat_args = flatten_args(composite_args)
@@ -815,15 +820,8 @@ class _PipelineStageBase(ABC):
 
         self.bwd_cache[bwd_chunk_id] = grads_input
 
-        if self.is_last and not self.is_first:
-            # Autograd dependencies:
-            #    rest_of_autograd_graph -> stage_output -> loss
-            # stage_output is no longer used in the last stage for backward and only needed
-            # to return to the user in merge_output_chunks, therefore
-            # this should be detached to release autograd graph context and free memory earlier
-            for t in stage_output:
-                if not t._is_view():  # views are not detachable in-place
-                    t.detach_()
+        # stage_output is freed after this function returns and
+        # the output given to the user was detached, so there is no ref to the graph anymore and it is freed
 
         logger.debug("%s Backwarded chunk %s", self.log_prefix, bwd_chunk_id)
 

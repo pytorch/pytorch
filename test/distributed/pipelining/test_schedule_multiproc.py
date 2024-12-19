@@ -1,12 +1,14 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 # Owner(s): ["oncall: distributed"]
 import copy
+import gc
 import logging
+import math
 import os
 import sys
 import tempfile
 
-from model_registry import ModelWithKwargs, MultiMLP, MultiMLPWithDw
+from model_registry import ModelWithKwargs, MultiMLP, MultiMLPWithDw, MultiMLPWithView
 from schedule_registry import (
     ScheduleUnbalanced,
     ScheduleVShaped,
@@ -931,6 +933,201 @@ class ScheduleTest(MultiProcContinousTest):
             for name, p in stage_module.named_parameters():
                 ref_p = ref_submod.get_parameter(name)
                 torch.testing.assert_close(p.grad, ref_p.grad, rtol=1e-5, atol=4e-5)
+
+    @requires_nccl()
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
+    @parametrize("ScheduleClass", [ScheduleGPipe, Schedule1F1B])
+    @parametrize("ModelClass", [MultiMLP, MultiMLPWithView])
+    @parametrize("LossType", ["mse", "mse_view"])
+    def test_schedule_memory_usage(self, ScheduleClass, ModelClass, LossType):
+        mod = ModelClass(d_hid, n_layers=self.world_size)
+        mod.to(self.device)
+
+        x = torch.randn(batch_size, d_hid, device=self.device)
+
+        # pre-run to allocate cuBLAS workspaces (see in test_fully_shard_memory.py)
+        mod(x).sum().backward()
+        torch.cuda.empty_cache()
+
+        x = torch.randn(batch_size, d_hid, device=self.device)
+        target = torch.randn(batch_size, d_hid, device=self.device)
+
+        mod.zero_grad(set_to_none=True)  # reset grads memory
+        base_mem = self._get_curr_active_memory()
+
+        if LossType == "mse":
+            loss_fn = torch.nn.MSELoss(reduction="sum")
+        elif LossType == "mse_view":
+            loss_fn = lambda x, y: torch.nn.functional.mse_loss(
+                x.view(x.size(0), -1), y.view(y.size(0), -1)
+            )
+
+        chunks = 4
+        x_mb = x.chunk(chunks)[0]
+
+        my_part = mod.get_submodule(f"layers.{self.rank}")
+        my_params_size = (
+            sum(p.numel() * p.element_size() for p in my_part.parameters()) / 1e6
+        )
+
+        split_spec = mod.split_spec if hasattr(mod, "split_spec") else None
+        pipe = pipeline(
+            mod,
+            mb_args=(x_mb,),
+            split_spec=split_spec,
+        )
+
+        stage = pipe.build_stage(
+            self.rank,
+            self.device,
+        )
+
+        schedule = ScheduleClass(stage, chunks, loss_fn=loss_fn)
+
+        current_mem = self._get_curr_active_memory()
+        self.assertLessEqual(
+            current_mem,
+            base_mem,
+            f"Rank {self.rank}: Creating the pipeline should not increase memory usage",
+        )
+
+        # Stage uses buffers internally for communications, we have to account for them
+        buffer_mem = x.numel() * x.element_size() / 1e6
+
+        if self.rank == 0:
+            schedule.step(x)
+            output_mem = 0
+
+            buffer_mem *= 1  # recv grads
+        elif self.rank == self.world_size - 1:
+            losses = []
+            output = schedule.step(target=target, losses=losses)
+
+            output_mem = (output.numel() * output.element_size()) / 1e6
+            buffer_mem *= 1  # recv acts
+        else:
+            schedule.step()
+            output_mem = 0
+
+        # these states are cleared at the beginning of each step, but not the end, so we need to clear them here
+        stage.clear_runtime_states()
+        gc.collect()
+        torch.cuda.empty_cache()
+
+        current_mem = self._get_curr_active_memory()
+
+        expected_mem = math.ceil(base_mem + output_mem + my_params_size + buffer_mem) # ceil to allow a small margin
+        print(
+            f"Rank {self.rank} current_mem: {current_mem} ; expected: {base_mem} + {output_mem} + {my_params_size} + {buffer_mem} = {expected_mem}"
+        )
+
+        # Gradients were also allocated during backward pass, with size `my_params_size`
+        self.assertLessEqual(
+            current_mem,
+            expected_mem,
+            f"Rank {self.rank}: Memory usage should not be increased after the end of backward pass",
+        )
+
+    @requires_nccl()
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
+    @parametrize("ScheduleClass", [ScheduleInterleavedZeroBubble])
+    def test_schedule_memory_usage_zero_bubble(self, ScheduleClass):
+        stages_per_rank = 2
+        n_stages = stages_per_rank * self.world_size
+
+        mod = MultiMLP(d_hid, n_layers=n_stages)
+        mod.to(self.device)
+
+        x = torch.randn(batch_size, d_hid, device=self.device)
+
+        # pre-run to allocate cuBLAS workspaces (see in test_fully_shard_memory.py)
+        mod(x).sum().backward()
+        torch.cuda.empty_cache()
+
+        x = torch.randn(batch_size, d_hid, device=self.device)
+        target = torch.randn(batch_size, d_hid, device=self.device)
+
+        mod.zero_grad(set_to_none=True)  # reset grads memory
+        base_mem = self._get_curr_active_memory()
+
+        loss_fn = torch.nn.MSELoss(reduction="sum")
+
+        chunks = 4
+
+        stage_indices = [
+            self.rank + i * self.world_size for i in range(stages_per_rank)
+        ]
+        submod_names = [f"layers.{i}" for i in stage_indices]
+        stage_modules = [mod.get_submodule(submod_name) for submod_name in submod_names]
+
+        my_params_size = (
+            sum(
+                sum(p.numel() * p.element_size() for p in part.parameters())
+                for part in stage_modules
+            )
+            / 1e6
+        )
+
+        stages = [
+            PipelineStage(
+                stage_module,
+                stage_idx,
+                n_stages,
+                self.device,
+            )
+            for stage_module, stage_idx in zip(stage_modules, stage_indices)
+        ]
+
+        schedule = ScheduleClass(stages, chunks, loss_fn=loss_fn)
+
+        current_mem = self._get_curr_active_memory()
+        self.assertLessEqual(
+            current_mem,
+            base_mem,
+            f"Rank {self.rank}: Creating the pipeline should not increase memory usage",
+        )
+
+        buffer_mem = x.numel() * x.element_size() / 1e6
+
+        if self.rank == 0:
+            schedule.step(x)
+            output_mem = 0
+
+            buffer_mem *= 3  # recv grads (0) + recv acts (2) + recv grads (2)
+        elif self.rank == self.world_size - 1:
+            losses = []
+            output = schedule.step(target=target, losses=losses)
+
+            output_mem = (output.numel() * output.element_size()) / 1e6
+            buffer_mem *= 3  # recv acts (1) + recv acts (3) + recv grads (1)
+        else:
+            schedule.step()
+            output_mem = 0
+
+        # these states are cleared at the beginning of each step, but not the end, so we need to clear them here
+        for stage in stages:
+            stage.clear_runtime_states()
+
+        gc.collect()
+        torch.cuda.empty_cache()
+
+        current_mem = self._get_curr_active_memory()
+
+        expected_mem = math.ceil(base_mem + output_mem + my_params_size + buffer_mem)
+        print(
+            f"Rank {self.rank} current_mem: {current_mem} ; expected: {base_mem} + {output_mem} + {my_params_size} + {buffer_mem} = {expected_mem}"
+        )
+
+        # Gradients were also allocated during backward pass, with size `my_params_size`
+        self.assertLessEqual(
+            current_mem,
+            expected_mem,
+            f"Rank {self.rank}: Memory usage should not be increased after the end of backward pass",
+        )
+
+    def _get_curr_active_memory(self) -> int:
+        mem_stats = torch.cuda.memory_stats(self.device)
+        return round(mem_stats["active_bytes.all.current"] / 1e6)
 
 
 instantiate_parametrized_tests(ScheduleTest)
