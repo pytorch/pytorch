@@ -1,0 +1,215 @@
+# @generated DO NOT EDIT MANUALLY
+
+# Template is at:    .github/templates/windows_arm64_binary_build_workflow.yml.j2
+# Generation script: .github/scripts/generate_ci_workflows.py
+name: windows-arm64-binary-wheel
+
+on:
+  push:
+    # NOTE: Meta Employees can trigger new nightlies using: https://fburl.com/trigger_pytorch_nightly_build
+    branches:
+      - nightly
+    tags:
+      # NOTE: Binary build pipelines should only get triggered on release candidate builds
+      # Release candidate tags look like: v1.11.0-rc1
+      - v[0-9]+.[0-9]+.[0-9]+-rc[0-9]+
+      - 'ciflow/binaries/*'
+      - 'ciflow/binaries_wheel/*'
+  workflow_dispatch:
+
+env:
+  BUILD_ENVIRONMENT: windows-arm64-binary-wheel
+  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  PR_NUMBER: ${{ github.event.pull_request.number }}
+  SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
+  SKIP_ALL_TESTS: 1
+  BUILDER_ROOT: /builder
+  PYTORCH_ROOT: /pytorch
+  DOWNLOADS_DIR: c:\temp\downloads
+  DEPENDENCIES_DIR: c:\temp\dependencies
+  ENABLE_APL: 1
+  MSVC_VERSION : '14.36'
+
+jobs:
+  get-label-type:
+    if: github.repository_owner == 'pytorch'
+    name: get-label-type
+    uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@main
+    with:
+      triggering_actor: ${{ github.triggering_actor }}
+      issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
+      curr_branch: ${{ github.head_ref || github.ref_name }}
+      curr_ref_type: ${{ github.ref_type }}
+  wheel-py3_12-cpu-build:
+    if: ${{ github.repository_owner == 'pytorch' }}
+    needs: get-label-type
+    runs-on: "windows-11-arm64"
+    timeout-minutes: 240
+    env:
+      PYTORCH_ROOT: ${{ github.workspace }}/pytorch
+      BUILDER_ROOT: ${{ github.workspace }}/builder
+      PACKAGE_TYPE: wheel
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: cpu
+      GPU_ARCH_TYPE: cpu
+      SKIP_ALL_TESTS: 1
+      DESIRED_PYTHON: "3.12"
+      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu12==9.1.0.70; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu12==12.4.5.8; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu12==11.2.1.3; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu12==10.3.5.147; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu12==11.6.1.9; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu12==12.3.1.170; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparselt-cu12==0.6.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu12==2.21.5; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvjitlink-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64'
+    steps:
+      # NOTE: These environment variables are put here so that they can be applied on every job equally
+      #       They are also here because setting them at a workflow level doesn't give us access to the
+      #       runner.temp variable, which we need.
+      - name: Populate binary env
+        shell: cmd
+        run: |
+          echo BINARY_ENV_FILE=%RUNNER_TEMP%/env>> %GITHUB_ENV%
+          echo PYTORCH_FINAL_PACKAGE_DIR=%RUNNER_TEMP%/artifacts>> %GITHUB_ENV%
+          echo WIN_PACKAGE_WORK_DIR=%RUNNER_TEMP%>> %GITHUB_ENV%
+      - name: Git checkout Builder
+        uses: actions/checkout@v4
+        with:
+          repository:  iremyux/pytorch-builder
+          ref:  nightly-for-win-arm64
+          path: "builder"
+      - name: Bootstrap folders
+        shell: cmd
+        run: |
+          mkdir "%NIGHTLIES_PYTORCH_ROOT%"
+          mkdir "%PYTORCH_FINAL_PACKAGE_DIR%"
+      - name: Bootstrap Git
+        shell: cmd
+        run: |
+          "builder/windows/arm64/bootstrap_git.bat"
+      - name: Bootstrap Python
+        shell: cmd
+        run: |
+          "builder/windows/arm64/bootstrap_python.bat"
+      - name: Bootstrap Build Tools
+        shell: cmd
+        run: |
+          "builder/windows/arm64/bootstrap_buildtools.bat"
+      - name: Bootstrap APL
+        shell: cmd
+        run: |
+          "builder/windows/arm64/bootstrap_apl.bat"
+      - name: Bootstrap Rust
+        shell: cmd
+        run: |
+          "builder/windows/arm64/bootstrap_rust.bat"
+      - name: Bootstrap sccache
+        shell: cmd
+        run: |
+          "builder/windows/arm64/bootstrap_sccache.bat"
+      - name: Git checkout PyTorch
+        uses: actions/checkout@v4
+        with:
+          repository:  "iremyux/pytorch"
+          ref: "nightly-for-win-arm64"
+          path: "pytorch"
+          submodules: recursive
+      - name: Populate binary env
+        shell: bash
+        run: |
+          "${PYTORCH_ROOT}/.circleci/scripts/binary_populate_env.sh"
+      - name: Build PyTorch binary
+        shell: bash
+        run: |
+          "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_arm64_build.sh"
+      - uses: actions/upload-artifact@v4.4.0
+        if: always()
+        with:
+          name: wheel-py3_12-cpu
+          retention-days: 14
+          if-no-files-found: error
+          path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
+  wheel-py3_12-cpu-test:  # Testing
+    if: ${{ github.repository_owner == 'pytorch' }}
+    needs:
+      - wheel-py3_12-cpu-build
+      - get-label-type
+    runs-on: "windows-11-arm64"
+    timeout-minutes: 240
+    env:
+      PYTORCH_ROOT: ${{ github.workspace }}/pytorch
+      BUILDER_ROOT: ${{ github.workspace }}/builder
+      PACKAGE_TYPE: wheel
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: cpu
+      GPU_ARCH_TYPE: cpu
+      SKIP_ALL_TESTS: 1
+      DESIRED_PYTHON: "3.12"
+    steps:
+      # NOTE: These environment variables are put here so that they can be applied on every job equally
+      #       They are also here because setting them at a workflow level doesn't give us access to the
+      #       runner.temp variable, which we need.
+      - name: Populate binary env
+        shell: cmd
+        run: |
+          echo BINARY_ENV_FILE=%RUNNER_TEMP%/env>> %GITHUB_ENV%
+          echo PYTORCH_FINAL_PACKAGE_DIR=%RUNNER_TEMP%/artifacts>> %GITHUB_ENV%
+          echo WIN_PACKAGE_WORK_DIR=%RUNNER_TEMP%>> %GITHUB_ENV%
+      - uses: actions/download-artifact@v4.1.7
+        name: Download Build Artifacts
+        with:
+          name: wheel-py3_12-cpu
+          path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
+      - name: Git checkout Builder
+        uses: actions/checkout@v4
+        with:
+          repository:  iremyux/pytorch-builder
+          ref:  nightly-for-win-arm64
+          path: "builder"
+      - name: Bootstrap Git
+        shell: cmd
+        run: |
+          "builder/windows/arm64/bootstrap_git.bat"
+      - name: Bootstrap APL
+        shell: cmd
+        run: |
+          "builder/windows/arm64/bootstrap_apl.bat"
+      - name: Bootstrap Python
+        shell: cmd
+        run: |
+          "builder/windows/arm64/bootstrap_python.bat"
+      - name: Bootstrap Build Tools
+        shell: cmd
+        run: |
+          "builder/windows/arm64/bootstrap_buildtools.bat"
+      - name: Git checkout PyTorch
+        uses: actions/checkout@v4
+        with:
+          repository:  "iremyux/pytorch"
+          ref: "nightly-for-win-arm64"
+          path: "pytorch"
+          submodules: recursive
+      - name: Populate binary env
+        shell: bash
+        run: |
+          "${PYTORCH_ROOT}/.circleci/scripts/binary_populate_env.sh"
+      - name: Test PyTorch binary
+        shell: bash
+        run: |
+          "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_arm64_test.sh"
+  wheel-py3_12-cpu-upload:  # Uploading
+    if: ${{ github.repository_owner == 'pytorch' }}
+    permissions:
+      id-token: write
+      contents: read
+    needs: wheel-py3_12-cpu-test
+    with:
+      PYTORCH_ROOT: ${{ github.workspace }}/pytorch
+      BUILDER_ROOT: ${{ github.workspace }}/builder
+      PACKAGE_TYPE: wheel
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: cpu
+      GPU_ARCH_TYPE: cpu
+      DESIRED_PYTHON: "3.12"
+      build_name: wheel-py3_12-cpu
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+      conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
+      conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
+    uses: ./.github/workflows/_binary-upload.yml

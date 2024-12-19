@@ -1,0 +1,141 @@
+name: windows-arm64-build
+
+on:
+  workflow_call:
+    inputs:
+      build-environment:
+        required: true
+        type: string
+        description: Top-level label for what's being built/tested.
+      cuda-version:
+        required: true
+        type: string
+        description: What CUDA version to build with, "cpu" for none.
+        default: "cpu"
+      use-xpu:
+        required: false
+        type: boolean
+        default: false
+        description: If set, build with XPU support.
+      vc-year:
+        required: false
+        type: string
+        default: "2022"
+        description: The Visual Studio year to use for building.
+      build-with-debug:
+        required: false
+        type: boolean
+        default: false
+        description: If set, build in debug mode.
+      sync-tag:
+        required: false
+        type: string
+        default: ""
+        description: |
+          If this is set, our linter will use this to make sure that every other
+          job with the same `sync-tag` is identical.
+      test-matrix:
+        required: false
+        type: string
+        description: |
+          An option JSON description of what test configs to run later on. This
+          is moved here from the Linux test workflow so that we can apply filter
+          logic using test-config labels earlier and skip unnecessary builds
+      runner:
+        required: false
+        type: string
+        default: windows-11-arm64
+        description: |
+          Label of the runner this job should run on.
+
+    outputs:
+      test-matrix:
+        value: ${{ jobs.build.outputs.test-matrix }}
+        description: An optional JSON description of what test configs to run later on.
+
+env:
+  GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+  PYTHON_VERSION: "3.12"
+  DOWNLOADS_DIR: c:\temp\downloads
+  DEPENDENCIES_DIR: c:\temp\dependencies
+
+jobs:
+  build:
+    # Don't run on forked repos.
+    if: github.repository_owner == 'pytorch'
+    runs-on: ${{ inputs.runner }}
+    timeout-minutes: 240
+    outputs:
+      test-matrix: ${{ steps.filter.outputs.test-matrix }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Print test matrix
+        shell: cmd
+        run: echo ${{ steps.filter.outputs.test-matrix }}
+      - name: Git checkout Builder
+        uses: actions/checkout@v4
+        with:
+          repository:  iremyux/pytorch-builder
+          ref:  nightly-for-win-arm64
+          path: "builder"
+      - name: Bootstrap Git
+        shell: cmd
+        run: |
+          "builder/windows/arm64/bootstrap_git.bat"
+      - name: Bootstrap Python
+        shell: cmd        
+        run: |
+          "builder/windows/arm64/bootstrap_python.bat"
+      - name: Bootstrap Build Tools
+        shell: cmd
+        run: |
+          "builder/windows/arm64/bootstrap_buildtools.bat"
+      - name: Bootstrap APL
+        shell: cmd
+        run: |
+          "builder/windows/arm64/bootstrap_apl.bat"
+      - name: Bootstrap Rust
+        shell: cmd
+        run: |
+          "builder/windows/arm64/bootstrap_rust.bat"
+      - name: Bootstrap sccache
+        shell: cmd
+        run: |
+          "builder/windows/arm64/bootstrap_sccache.bat"
+      - name: Git checkout PyTorch
+        uses: actions/checkout@v4
+        with:
+          repository:  "iremyux/pytorch"
+          ref: "nightly-for-win-arm64"
+          path: "pytorch"
+          submodules: recursive
+      - name: Build
+        if: steps.filter.outputs.is-test-matrix-empty == 'False' || inputs.test-matrix == ''
+        id: build
+        shell: bash
+        env:
+          PYTORCH_FINAL_PACKAGE_DIR: /c/${{ github.run_id }}/build-results/
+          BRANCH: ${{ steps.parse-ref.outputs.branch }}
+          BUILD_ENVIRONMENT: ${{ inputs.build-environment }}
+          BUILD_WHEEL: 1
+          MAX_JOBS: 8
+          PYTHON_VERSION: "3.12"
+          SCCACHE_BUCKET: "ossci-compiler-cache"
+          SCCACHE_S3_KEY_PREFIX: ${{ github.workflow }}
+          SCCACHE_REGION: us-east-1
+          VC_PRODUCT: "BuildTools"
+          VC_VERSION: ""
+          VC_YEAR: "${{ inputs.vc-year }}"
+          ALPINE_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/alpine"
+          AWS_DEFAULT_REGION: us-east-1
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
+          DEBUG: ${{ inputs.build-with-debug && '1' || '0' }}
+          USE_CUDA: '0'
+          USE_XPU: '0'
+          XPU_VERSION: "${{ inputs.xpu-version }}"
+          OUR_GITHUB_JOB_ID: ${{ steps.get-job-id.outputs.job-id }}
+        run: |
+          .ci/pytorch/win-arm64-build.sh
