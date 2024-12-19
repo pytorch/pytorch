@@ -492,16 +492,16 @@ The following utility functions are related to serialization:
 
 Config
 ------
-
 .. py:module:: torch.utils.serialization
 .. py:module:: torch.utils.serialization.config
 
 ``torch.utils.serialization.config`` provides a global config that can control the behavior of
 ``torch.save`` and ``torch.load``.
 
+
 ``torch.utils.serialization.config.save`` contains options that control the behavior of ``torch.save``.
 
-  * ``compute_crc32``: whether to compute and write crc32 for each storage (Default : ``True``).
+  * ``compute_crc32``: whether to compute and write the zip file checksum (Default : ``True``).
     See :func:`~torch.serialization.set_crc32_options`.
 
 ``torch.utils.serialization.config.load`` contains options that control the behavior of ``torch.load``.
