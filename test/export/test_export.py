@@ -4870,6 +4870,29 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         for op in ops:
             self.assertIn(op, (torch.ops.aten._to_copy.default,))
 
+    def test_float_conversion_from_int(self):
+        class Module(torch.nn.Module):
+            def forward(self, x):
+                return x.float()
+
+        ep = export(Module(), (torch.tensor(1, dtype=torch.int32),)).run_decompositions(
+            {}
+        )
+        ops = []
+        for node in ep.graph.nodes:
+            if node.op == "call_function":
+                ops.append(node.target)
+        self.assertGreater(len(ops), 0)
+        self.assertIn(torch.ops.aten._to_copy.default, ops)
+        self.assertIn(torch.ops.aten._assert_tensor_metadata.default, ops)
+
+        self.assertEqual(ep.module()(torch.tensor(1, dtype=torch.int32)), 1)
+
+        # Raises error because the input dtype is not the same as the input
+        # tensor when exporting.
+        with self.assertRaisesRegex(RuntimeError, "Tensor dtype mismatch!"):
+            ep.module()(torch.tensor(1, dtype=torch.float32))
+
     def test_device_to_mutation_float(self):
         class Module(torch.nn.Module):
             def forward(self, x):
