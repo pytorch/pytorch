@@ -8,6 +8,7 @@
 #include <c10/util/irange.h>
 #include <ATen/cpu/vec/functional.h>
 #include <algorithm>
+#include <array>
 
 namespace at::native {
 namespace {
@@ -354,9 +355,10 @@ std::array<scalar_t, nrows> multi_row_sum(
   const int64_t level_step = (1 << level_power);
   const int64_t level_mask = level_step - 1;
 
-  // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
-  scalar_t acc[num_levels][nrows];
-  std::fill_n(&acc[0][0], num_levels * nrows, scalar_t(0));
+  std::array<std::array<scalar_t, nrows>, num_levels> acc{};
+  for (auto &row:acc) {
+    row.fill(scalar_t(0));
+  }
 
   int64_t i = 0;
   for (; i + level_step <= size;) {
@@ -404,12 +406,7 @@ std::array<scalar_t, nrows> multi_row_sum(
       acc[0][k] += acc[j][k];
     }
   }
-
-  std::array<scalar_t, nrows> ret{};
-  for (const auto k : c10::irange(nrows)) {
-    ret[k] = acc[0][k];
-  }
-  return ret;
+  return acc[0];
 }
 
 template <typename scalar_t, typename LoadPolicy>
