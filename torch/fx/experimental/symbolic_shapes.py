@@ -933,7 +933,7 @@ class InnerTensorKey:
 
 @dataclass(frozen=True)
 class DivideByKey:
-    divisor: int
+    divisor: Union[int, SymInt]
 
     def __str__(self) -> str:
         return f".__floordiv__({self.divisor})"
@@ -1047,44 +1047,38 @@ def compute_unbacked_bindings(
             isinstance(a, torch.SymInt)
             and isinstance(s := a.node._expr, sympy.Mul)
             and len(s.args) == 2
-            and isinstance(lhs := s.args[0], sympy.Integer)
+            and isinstance(lhs := s.args[0], (sympy.Integer, sympy.Symbol))
             and isinstance(rhs := s.args[1], sympy.Symbol)
-            and rhs in pending
-        ):
-            # TODO: DivideByKey needs to test divisibility at runtime!
-            r[rhs] = path + (DivideByKey(int(lhs)),)
-            if real is not None:
-                assert isinstance(real, int)
-                shape_env.set_unbacked_var_to_val(rhs, real // int(lhs))
-            pending.remove(rhs)
-        # as previous, but for unbacked SymInt * backed SymInt e.g. s1*u0
-        elif (
-            isinstance(a, torch.SymInt)
-            and isinstance(s := a.node._expr, sympy.Mul)
-            and len(s.args) == 2
-            and isinstance(lhs := s.args[0], sympy.Symbol)
-            and isinstance(rhs := s.args[1], sympy.Symbol)
+            # support exactly one unbacked for now
             and ((rhs in pending) ^ (lhs in pending))
+            # support constant coefficient or backed symbolic coefficient
             and (
-                (rhs in a.node.shape_env.var_to_val)
-                ^ (lhs in a.node.shape_env.var_to_val)
+                isinstance(coeff := lhs if lhs not in pending else rhs, sympy.Integer)
+                or coeff in a.node.shape_env.var_to_val
             )
         ):
-            unbacked, backed = (lhs, rhs) if lhs in pending else (rhs, lhs)
-            # NB: We need a SymInt to pass to DivideByKey.
-            # TODO: Is it really necessary to construct the SymInt here or can we get it
-            # from somewhere else?
-            key = DivideByKey(
-                a.node.shape_env.create_symintnode(
-                    backed,
-                    hint=int(a.node.shape_env.var_to_val[backed]),
-                    source=a.node.shape_env.var_to_sources.get(backed, [None])[0],
+
+            def _symint_wrap(s: sympy.Symbol) -> SymInt:
+                return a.node.shape_env.create_symintnode(
+                    s,
+                    hint=int(a.node.shape_env.var_to_val[s]),
+                    source=a.node.shape_env.var_to_sources.get(s, [None])[0],
                 )
+
+            unbacked = lhs if lhs in pending else rhs
+            divisor: Union[int, SymInt] = (
+                int(coeff) if isinstance(coeff, sympy.Integer) else _symint_wrap(coeff)
             )
-            r[unbacked] = path + (key,)
+            # TODO: DivideByKey needs to test divisibility at runtime!
+            r[unbacked] = path + (DivideByKey(divisor),)
             if real is not None:
                 assert isinstance(real, int)
-                shape_env.set_unbacked_var_to_val(unbacked, CleanDiv(real, backed))
+                val = (
+                    real // int(coeff)
+                    if isinstance(coeff, sympy.Integer)
+                    else CleanDiv(real, coeff)
+                )
+                shape_env.set_unbacked_var_to_val(unbacked, val)
             pending.remove(unbacked)
         # The annoyance here arises from the fact that SymBool is
         # allocated by allocating a SymInt and then testing if it's equal
