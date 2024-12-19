@@ -39,6 +39,9 @@ def _manual_update_dict(dict_from, dict_to):
 
 
 def _manual_update_dict_restricted(dict_from, dict_to, mro_index):
+    # mro_index is used to find the dict or OrderedDict class, so that we call
+    # the lowest level `clear` or `__setitem__` methods.
+    type(dict_to).__mro__[mro_index].clear(dict_to)
     for k, v in dict_from.items():
         type(dict_to).__mro__[mro_index].__setitem__(dict_to, k, v)
 
@@ -750,19 +753,12 @@ class SideEffects:
                         ]
                     )
 
-                    # TODO(aniain2305) - Fix this. Can't call clear.
-                    cg(var.source)  # type: ignore[attr-defined]
-                    cg.load_method("clear")
-
-                    # unfortunately can't just use DICT_MERGE due to possible custom behaviors
                     dict_update_insts = bytecode_from_template(
                         _manual_update_dict_restricted, varname_map=varname_map
                     )
 
                     suffixes.append(
                         [
-                            *create_call_method(0),  # clear
-                            create_instruction("POP_TOP"),
                             *dict_update_insts,
                             create_instruction("POP_TOP"),
                         ]
