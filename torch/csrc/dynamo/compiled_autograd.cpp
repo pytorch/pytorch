@@ -1,3 +1,4 @@
+#include <torch/csrc/autograd/engine.h>
 #include <torch/csrc/dynamo/compiled_autograd.h>
 
 namespace torch::dynamo::autograd {
@@ -16,6 +17,11 @@ void setPyCompilerInterface(std::unique_ptr<PyCompilerInterface>&& impl) {
 
 void resetPyCompilerInterface() {
   kPyCompilerInterface.reset();
+}
+
+std::vector<c10::optional<InputMetadata>> get_input_metadata(
+    const edge_list& edges) {
+  return torch::autograd::collect_input_metadata(edges);
 }
 
 } // namespace torch::dynamo::autograd
