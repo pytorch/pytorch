@@ -1,6 +1,10 @@
 # mypy: allow-untyped-defs
+from __future__ import annotations
+
+import logging
 import os
 import textwrap
+import typing
 from enum import auto, Enum
 from traceback import extract_stack, format_exc, format_list, StackSummary
 from typing import Any, cast, NoReturn, Optional, Tuple, TYPE_CHECKING
@@ -12,6 +16,8 @@ from .utils import counters
 
 
 if TYPE_CHECKING:
+    import types
+
     from torch._guards import CompileId
 
 
@@ -21,9 +27,6 @@ def exportdb_error_message(case_name):
         + "https://pytorch.org/docs/main/generated/exportdb/index.html#"
         + case_name.replace("_", "-")
     )
-
-
-import logging
 
 
 log = logging.getLogger(__name__)
@@ -89,12 +92,38 @@ class ResetRequired(TorchDynamoException):
         )
 
 
-class BackendCompilerFailed(TorchDynamoException):
-    def __init__(self, backend_fn, inner_exception) -> None:
+class ShortenTraceback(TorchDynamoException):
+    def __init__(
+        self, *args, first_useful_frame: Optional[types.FrameType], **kwargs
+    ) -> None:
+        super().__init__(*args, **kwargs)
+        self.first_useful_frame = first_useful_frame
+
+    def remove_dynamo_frames(self) -> typing.Self:
+        tb = self.__traceback__
+        if (
+            self.first_useful_frame is None
+            or tb is None
+            or os.environ.get("TORCHDYNAMO_VERBOSE") == "1"
+        ):
+            return self
+        while tb.tb_frame is not self.first_useful_frame:
+            tb = tb.tb_next
+            assert tb is not None, "internal error, please report a bug"
+        return self.with_traceback(tb)
+
+
+class BackendCompilerFailed(ShortenTraceback):
+    def __init__(
+        self,
+        backend_fn: Any,
+        inner_exception: Exception,
+        first_useful_frame: Optional[types.FrameType],
+    ) -> None:
         self.backend_name = getattr(backend_fn, "__name__", "?")
         self.inner_exception = inner_exception
         msg = f"backend={self.backend_name!r} raised:\n{type(inner_exception).__name__}: {inner_exception}"
-        super().__init__(msg)
+        super().__init__(msg, first_useful_frame=first_useful_frame)
 
 
 class Unsupported(TorchDynamoException):
@@ -385,7 +414,7 @@ def augment_exc_message(exc: Exception, msg: str = "\n", export: bool = False) -
 
 
 def get_exc_message(
-    e: Exception, compile_id: "CompileId"
+    e: Exception, compile_id: CompileId
 ) -> Tuple[Optional[str], Optional[int]]:
     filename = None
     lineno = None
