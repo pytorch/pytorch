@@ -82,32 +82,30 @@ def discard_graph_changes(tx):
         ctx.__exit__(None, None, None)
 
 
-def diff_meta(tensor_vars1, tensor_vars2) -> str:
-    from torch._higher_order_ops.utils import diff_tensor_meta
+def check_meta_consistency_vt(
+    vars1: List[VariableTracker],
+    vars2: List[VariableTracker],
+    lhs_name: str,
+    rhs_name: str,
+) -> None:
+    from torch._higher_order_ops.while_loop import check_meta_consistency
 
     from . import TensorVariable
 
-    assert all(isinstance(var, TensorVariable) for var in tensor_vars1 + tensor_vars2)
-    all_diffs = []
-    for i, (var1, var2) in enumerate(zip(tensor_vars1, tensor_vars2)):
-        # We have vmap x cond tests and querying is_contiguous inside of vmap for
-        # memory_format other than torch.contiguous_format is not yet implemented.
-        # And it seems the remaining metas are good enough for now.
-        meta1 = _extract_tensor_metadata(
-            var1.proxy.node.meta["example_value"], include_contiguity=False
-        )
-        meta2 = _extract_tensor_metadata(
-            var2.proxy.node.meta["example_value"], include_contiguity=False
-        )
-        # We cannot get accurate require_grad. See Note [invariants for node meta 'val']
-        pair_diffs = diff_tensor_meta(meta1, meta2, check_grad=False)
+    def _unwrap_var(var):
+        if isinstance(var, TensorVariable):
+            return var.proxy.node.meta["example_value"]
+        elif isinstance(var, SymNodeVariable):
+            return var.sym_num
+        elif isinstance(var, ConstantVariable):
+            return var.as_python_constant()
+        else:
+            unimplemented(f"Cannot unwrap var {var}")
 
-        if len(pair_diffs) > 0:
-            fmt_str = ", ".join(pair_diffs)
-            all_diffs.append(
-                f"pair[{i}] differ in {fmt_str}, where lhs is {meta1} and rhs is {meta2}"
-            )
-    return "\n".join(all_diffs)
+    unwrapped1 = [_unwrap_var(var) for var in vars1]
+    unwrapped2 = [_unwrap_var(var) for var in vars2]
+
+    return check_meta_consistency(unwrapped1, unwrapped2, lhs_name, rhs_name)
 
 
 @contextlib.contextmanager
@@ -898,12 +896,12 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
         if not same_treespec.as_python_constant():
             unimplemented("Expected branches to return the same pytree structure.")
 
-        if diffs := diff_meta(
-            true_r.unpack_var_sequence(tx), false_r.unpack_var_sequence(tx)
-        ):
-            unimplemented(
-                f"Expect branches to return tensors with same metadata but find {diffs}"
-            )
+        check_meta_consistency_vt(
+            true_r.unpack_var_sequence(tx),
+            false_r.unpack_var_sequence(tx),
+            "true_fn_output",
+            "false_fn_output",
+        )
 
         (
             true_graph,
@@ -1094,7 +1092,6 @@ class WhileLoopHigherOrderVariable(TorchHigherOrderOperatorVariable):
             unimplemented(
                 f"Expected cond_fn to return a tensor with shape (,) but got {cond_r_meta.shape}"
             )
-
         # create body subgraph
         (
             (body_r, body_treespec),
@@ -1111,10 +1108,12 @@ class WhileLoopHigherOrderVariable(TorchHigherOrderOperatorVariable):
             should_flatten_outputs=True,
         )
 
-        if diffs := diff_meta(operands_seq, body_r.unpack_var_sequence(tx)):
-            unimplemented(
-                f"Expected carried_inputs and body outputs return tensors with same metadata but find:\n{diffs}"
-            )
+        check_meta_consistency_vt(
+            body_r.unpack_var_sequence(tx),
+            operands_seq,
+            "body_fn_output",
+            "carried_inputs",
+        )
 
         (
             cond_graph,
@@ -1236,20 +1235,12 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
             )
 
         xs_proxy = xs.as_proxy()
-        combine_result_proxy = combine_result.as_proxy()
-        for result, inp_proxy in zip(combine_result_proxy, xs_proxy):
-            inp_meta = inp_proxy.node.meta["example_value"]
-            combine_result_meta = result.node.meta["example_value"]
-            if combine_result_meta.device != inp_meta.device:
-                unimplemented(
-                    f"Expected combine_fn to return a tensor on device {inp_meta.device} but "
-                    + f"got {combine_result_meta.device}"
-                )
-            if combine_result_meta.dtype != inp_meta.dtype:
-                unimplemented(
-                    f"Expected combine_fn to return a tensor of {inp_meta.dtype} but "
-                    + f"got {combine_result_meta.dtype}"
-                )
+        check_meta_consistency_vt(
+            [_make_inlined(tx, first_slice_copy)(t, dim) for t in xs.items],
+            combine_result.unpack_var_sequence(tx),
+            "initial_xs",
+            "combine_fn_output",
+        )
 
         combine_gm = torch.fx.GraphModule(dict(tx.output.nn_modules), combine_graph)
         combine_fn_name = tx.output.install_subgraph(
@@ -1389,22 +1380,14 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
         carry_vars, y_vars = _extract_carry_and_out(
             combine_result.items, num_init_leaves
         )
-        carry_proxies = [carry_var.as_proxy() for carry_var in carry_vars]
         y_proxies = [y_var.as_proxy() for y_var in y_vars]
 
-        # Checks for carry and init
-        for ini_proxy, carry in zip(init_proxy, carry_proxies):
-            ini_meta = ini_proxy.node.meta["example_value"]
-            carry_meta = carry.node.meta["example_value"]
-            if (
-                carry_meta.device != ini_meta.device
-                or carry_meta.dtype != ini_meta.dtype
-                or carry_meta.shape != ini_meta.shape
-            ):
-                unimplemented(
-                    f"Expected metadata of the combine_fn result {carry_meta} to be the same as "
-                    + f"the metadata of init with {ini_meta}"
-                )
+        check_meta_consistency_vt(
+            init.unpack_var_sequence(tx),
+            carry_vars,
+            "init",
+            "carry",
+        )
 
         combine_gm = torch.fx.GraphModule(dict(tx.output.nn_modules), combine_graph)
         combine_fn_name = tx.output.install_subgraph("scan_combine_fn", combine_gm)
