@@ -3,7 +3,7 @@
 torch.export Programming Model
 ==============================
 
-This document provides an introduction to the behavior and capabilities of
+This document aims to explain the behaviors and capabilities of
 :func:`torch.export.export`. It is intended to help build your intuition
 for how :func:`torch.export.export` handles code.
 
@@ -12,9 +12,8 @@ Basics of Tracing
 
 :func:`torch.export.export` captures a graph representing your model by
 tracing its execution on "example" inputs and recording the PyTorch operations
-it observes while tracing, along with conditions observed along the traced
-path. This graph can then be run on different inputs as long as they satisfy
-the same conditions.
+and conditions observed along the traced path. This graph can then be run
+on different inputs as long as they satisfy the same conditions.
 
 The basic output of :func:`torch.export.export` is a single graph of PyTorch
 operations, with associated metadata. The exact format of this output is
@@ -28,10 +27,11 @@ Strict vs. Non-Strict Tracing
 In *non-strict mode*, we trace through the program using the normal Python
 interpreter. Your code executes exactly as it would in eager mode; the only
 difference is that **all Tensors are replaced by
-:ref:`fake Tensors <torch.compiler_fake_tensor>`, which have shapes and other
-forms of metadata but no data**, wrapped in :ref:`Proxy objects <fx>` that
-record all operations on them into a graph. We also capture
-**:ref:`conditions on Tensor shapes <torch.compiler_dynamic_shapes#the-guard-model>`
+`fake Tensors <https://pytorch.org/docs/main/torch.compiler_fake_tensor.html>`_,
+which have shapes and other forms of metadata but no data**, wrapped in
+`Proxy objects <https://pytorch.org/docs/main/fx.html>`_ that record all
+operations on them into a graph. We also capture
+**`conditions on Tensor shapes <https://pytorch.org/docs/main/torch.compiler_dynamic_shapes.html#the-guard-model>`_
 that guard the correctness of the generated code**.
 
 In *strict mode*, we first trace through the program using
@@ -43,16 +43,16 @@ additional guarantees on Python-level safety (beyond capturing conditions on
 Tensor shapes, as in non-strict mode). On the other hand, not all Python
 features are supported by this analysis.
 
-Currently the default mode of tracing is strict. But **we strongly recommend
-using non-strict**, which will become the default mode in the near future.
+Although currently the default mode of tracing is strict, **we strongly
+recommend using non-strict**, which will soon become the default.
 For most models, conditions on Tensor shapes are enough for soundness, and
 the additional guarantees on Python-level safety have no impact; at the same
 time, the possibility of hitting unsupported Python features in TorchDynamo
 presents an unnecessary risk.
 
 In the rest of this document we assume we are tracing in
-:ref:`non-strict mode <export#non-strict-export>`; in particular, we assume
-that **all Python features are supported**.
+`non-strict mode <https://pytorch.org/docs/main/export.html#non-strict-export>`_;
+in particular, we assume that **all Python features are supported**.
 
 Values: Static vs. Dynamic
 --------------------------
@@ -109,11 +109,15 @@ Which values are static vs. dynamic?
 Whether a value is static or dynamic depends on its type:
 
 - For Tensor:
+
   - Tensor *data* is treated as dynamic.
+
   - Tensor *shapes* can be treated by the system as static or dynamic.
+
     - By default, shapes of all input Tensors are considered static.
       The user can override this behavior for any input Tensor by specifying
-      a :ref:`dynamic shape <export#expressing-dynamism>` for it.
+      a `dynamic shape <https://pytorch.org/docs/main/export.html#expressing-dynamism>`_
+      for it.
 
     - Tensors that are part of module state, i.e., parameters and buffers,
       always have static shapes.
@@ -121,10 +125,12 @@ Whether a value is static or dynamic depends on its type:
   - Other forms of Tensor *metadata* (e.g. `device`, `dtype`) are static.
 
 - Python *primitives* (`int`, `float`, `bool`, `str`, `None`) are static.
+
   - There are dynamic variants for some primitive types (`SymInt`,
     `SymFloat`, `SymBool`). Typically users do not have to deal with them.
 
 - For Python *standard containers* (`list`, `tuple`, `dict`, `namedtuple`):
+
   - The structure (i.e., length for `list` and `tuple` values, and key
     sequence for `dict` and `namedtuple` values) is static.
 
@@ -140,21 +146,22 @@ Whether a value is static or dynamic depends on its type:
 Input types
 -----------
 
-Inputs will either be treated as static or dynamic, based on their type
+Inputs will be treated as either static or dynamic, based on their type
 (as explained above).
 
 - A static input will get hard-coded into the graph, and passing a different
-  value at runtime than you gave at export time will result in an error.
-  Recall that these are mostly values of primitive types.
+  value at run time will result in an error. Recall that these are mostly
+  values of primitive types.
 
 - A dynamic input behaves like a "normal" function input. Recall that these
   are mostly values of Tensor types.
 
-These are the types you are allowed by default to use as inputs to your
-program:
+By default, the types of inputs you can use for your program are:
 
 - Tensor
+
 - Python primitives (`int`, `float`, `bool`, `str`, `None`)
+
 - Python standard containers (`list`, `tuple`, `dict`, `namedtuple`)
 
 Custom Input Types
@@ -254,9 +261,10 @@ Dynamic Shape-Dependent Control Flow
 """"""""""""""""""""""""""""""""""""
 
 When the value involved in a control flow is a
-:ref:`dynamic shape <torch.compiler_dynamic_shapes>`, **in most cases we will
-also know the concrete value of the dynamic shape during tracing**: see the
-following section for more details on how the compiler tracks this information.
+`dynamic shape <https://pytorch.org/docs/main/torch.compiler_dynamic_shapes.html>`_,
+**in most cases we will also know the concrete value of the dynamic shape
+during tracing**: see the following section for more details on how the
+compiler tracks this information.
 
 In these cases we say that the control flow is shape-dependent. **We use the
 concrete value of the dynamic shape to evaluate the condition** to either
@@ -304,7 +312,7 @@ traced.
           )
 
 A special case of data-dependent control flow is where it involves a
-*:ref:`data-dependent dynamic shape<torch.compiler_dynamic_shapes#unbacked-symints>`*:
+*`data-dependent dynamic shape <https://pytorch.org/docs/main/torch.compiler_dynamic_shapes.html#unbacked-symints>`_*:
 typically, the shape of some intermediate Tensor that depends on input data
 rather than on input shapes (thus not shape-dependent). Instead of using a
 control flow operator, in this case you can provide an assertion that decides
@@ -360,7 +368,7 @@ Moreover, as we encounter control flow in the program, we create boolean
 expressions, typically involving relational operators, describing conditions
 along the traced path. These **expressions are evaluated to decide which path
 to trace through the program**, and recorded in a
-*:ref:`shape environment <torch.compiler_dynamic_shapes#overall-architecture>`*
+*`shape environment <https://pytorch.org/docs/main/torch.compiler_dynamic_shapes.html#overall-architecture>`_*
 to guard the correctness of the traced path and to evaluate subsequently
 created expressions.
 
@@ -370,12 +378,12 @@ Fake Implementations of PyTorch Operators
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 Recall that during tracing, we are executing the program with
-:ref:`fake Tensors <torch.compiler_fake_tensor>`, which have no data.
-In general we cannot call the actual implementations of PyTorch operators
-with fake Tensors. Thus each operator needs to have an additional fake
-(a.k.a. "meta") implementation, which inputs and outputs fake Tensors, that
-matches the behavior of the actual implementation in terms of shapes and
-other forms of metadata carried by fake Tensors.
+`fake Tensors <https://pytorch.org/docs/main/torch.compiler_fake_tensor.html>`_,
+which have no data. In general we cannot call the actual implementations of
+PyTorch operators with fake Tensors. Thus each operator needs to have an
+additional fake (a.k.a. "meta") implementation, which inputs and outputs fake
+Tensors, that matches the behavior of the actual implementation in terms of
+shapes and other forms of metadata carried by fake Tensors.
 
 For example, note how the fake implementation of `torch.index_select`
 computes the shape of the output using the shape of the input (while ignoring
@@ -504,7 +512,9 @@ Module State: Reads vs. Updates
 -------------------------------
 
 Module states include parameters, buffers, and regular attributes.
+
 - A regular attribute can be of any type.
+
 - On the other hand, parameters and buffers are always Tensors.
 
 Module states can be dynamic or static, based on their types as outlined
@@ -524,6 +534,7 @@ not already initialized causes an error to be raised at export time.
 **Reading module states is always permitted**.
 
 Updating module states is possible, but must follow the rules below:
+
 - **A static regular attribute** (e.g., of primitive type) **can be updated**.
   Reads and updates can be freely interleaved, and as expected, any reads
   will always see the values of the latest updates. Because these attributes
