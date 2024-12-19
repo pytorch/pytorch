@@ -1,6 +1,5 @@
 #include <torch/csrc/autograd/functions/tensor.h>
 
-#include <torch/csrc/autograd/engine.h>
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/functions/basic_ops.h>
 #include <torch/csrc/autograd/functions/utils.h>
@@ -90,7 +89,7 @@ variable_list CopyBackwards::apply_with_saved(
 
   auto output_metadata = torch::dynamo::autograd::
       IValuePacker<std::vector<std::optional<InputMetadata>>>::pack(
-          collect_input_metadata(next_edges()));
+          torch::dynamo::autograd::get_input_metadata(next_edges()));
 
   const auto& interface = torch::dynamo::autograd::getPyCompilerInterface();
   auto result = interface->call_function(

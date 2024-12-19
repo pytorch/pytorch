@@ -1268,7 +1268,7 @@ class TestPatternMatcher(TestCase):
         def fn(a, b):
             return torch.mm(a, b).clone()
 
-        result, (code) = run_and_get_code(fn, torch.randn(8, 8), torch.randn(8, 8))
+        _, (code) = run_and_get_code(fn, torch.randn(8, 8), torch.randn(8, 8))
         # clone would create a buf1
         self.assertIn("return (buf0, )", code[0])
         self.assertNotIn("async_compile.cpp", code[0])
@@ -1679,7 +1679,7 @@ class TestPatternMatcher(TestCase):
         ) -> None:
             print("vllm::fused_rms_norm_quant_static")
             result_rms = torch.mul(input, weight) + epsilon
-            result = torch.mul(result_rms, scale).to(torch.int8)
+            _result = torch.mul(result_rms, scale).to(torch.int8)
             scale.fill_(0.5)
 
         @torch.library.custom_op("vllm::rms_norm", mutates_args=["result"])
@@ -1690,7 +1690,7 @@ class TestPatternMatcher(TestCase):
             epsilon: float,
         ) -> None:
             # bogus implementation doesn't matter
-            result = torch.mul(input, weight) + epsilon
+            _result = torch.mul(input, weight) + epsilon
 
         @torch.library.custom_op(
             "vllm::static_scaled_int8_quant", mutates_args=["result", "scale"]
@@ -1702,7 +1702,7 @@ class TestPatternMatcher(TestCase):
             azp: Optional[torch.Tensor] = None,
         ) -> None:
             # bogus implementation doesn't matter
-            result = torch.mul(input, scale).to(torch.int8)
+            _result = torch.mul(input, scale).to(torch.int8)
             scale.fill_(0.5)
 
         def rms_pattern_static(
@@ -1766,8 +1766,8 @@ class TestPatternMatcher(TestCase):
         )
 
         def custom_pass(graph: torch.fx.Graph) -> torch.fx.Graph:
-            count = my_patterns.apply(graph)
-            # print(f"Count: {count}")
+            _count = my_patterns.apply(graph)
+            # print(f"Count: {_count}")
             graph.eliminate_dead_code()
             # graph.print_tabular()
             return graph
