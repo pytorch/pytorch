@@ -1670,7 +1670,6 @@ class Granularity:
     quantization operations, such as per-tensor or per-axis quantization.
     """
 
-    pass
 
 
 @dataclass(frozen=True)
@@ -1697,7 +1696,6 @@ class PerTensor(Granularity):
 
     """
 
-    pass
 
 
 @dataclass(frozen=True)
@@ -1749,7 +1747,6 @@ class PerRow(Granularity):
     is quantized with a block_size of (1, weight.shape[1]).
     """
 
-    pass
 
 
 class PerToken(Granularity):
@@ -1767,7 +1764,6 @@ class PerToken(Granularity):
     equivalent to `PerAxis(axis=0)`, which yields 8 sets of quantization parameters.
     """
 
-    pass
 
 
 def get_block_size(
@@ -1851,14 +1847,12 @@ class AffineQuantizedObserverBase(ABC, torch.nn.Module):
         """forward function should take the input tensor
         and updates internal stats and return the original input Tensor
         """
-        pass
 
     @abstractmethod
     def calculate_qparams(self) -> Tuple[torch.Tensor, torch.Tensor]:
         """Calculate quantization parameter based on the stats attached to the observer module
         and returns a tuple of scale and zero_point Tensor
         """
-        pass
 
 
 def _is_observer_script_module(mod, obs_type_name):

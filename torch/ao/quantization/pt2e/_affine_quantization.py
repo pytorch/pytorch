@@ -3,7 +3,6 @@
 # PLESE DON'T MODIFY THIS FILE SO THAT WE DON'T GET OUT OF SYNC
 import logging
 from abc import ABCMeta
-from functools import partial
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 import torch
@@ -116,7 +115,8 @@ def _get_reduction_params(block_size, input_size):
         if block_size[i] != input_size[i] and block_size[i] > 1:
             assert (
                 input_size[i] % block_size[i] == 0
-            ), f"Expecting input size at {i} dimension: {input_size[i]} to be divisible by block_size at {i} dimension: {block_size[i]}"
+            ), f"Expecting input size at {i} dimension: " \
+            f"{input_size[i]} to be divisible by block_size at {i} dimension: {block_size[i]}"
             shape_for_reduction.append(input_size[i] // block_size[i])
             shape_for_reduction.append(block_size[i])
             # reduce over the block_size[i] dim
@@ -184,7 +184,7 @@ def _register_custom_op(lib):
     return decorator
 
 
-quant_lib = torch.library.Library("quant", "FRAGMENT")
+quant_lib = torch.library.Library("quant", "FRAGMENT")  # noqa: TOR901
 
 register_custom_op = _register_custom_op(quant_lib)
 
@@ -376,7 +376,8 @@ def quantize_affine(
     """
     Args:
       input (torch.Tensor): original float32, float16 or bfloat16 Tensor
-      block_size: (Tuple[int, ...]): granularity of quantization, this means the size of the tensor elements that's sharing the same qparam
+      block_size: (Tuple[int, ...]): granularity of quantization,
+           this means the size of the tensor elements that's sharing the same qparam
            e.g. when size is the same as the input tensor dimension, we are using per tensor quantization
       scale (float): quantization parameter for affine quantization
       zero_point (int): quantization parameter for affine quantization
@@ -534,8 +535,9 @@ def dequantize_affine(
     """
     Args:
       input (torch.Tensor): quantized tensor, should match the dtype `dtype` argument
-      block_size: (List[int]): granularity of quantization, this means the size of the tensor elements that's sharing the same qparam
-                               e.g. when size is the same as the input tensor dimension, we are using per tensor quantization
+      block_size: (List[int]): granularity of quantization,
+        this means the size of the tensor elements that's sharing the same qparam
+        e.g. when size is the same as the input tensor dimension, we are using per tensor quantization
       scale (Tensor): quantization parameter for affine quantization
       zero_point (Tensor): quantization parameter for affine quantization
       input_dtype (torch.dtype): requested dtype (e.g. torch.uint8) for output Tensor
