@@ -48,6 +48,17 @@ typedef at::BFloat16 bfloat16;
 typedef at::Float8_e4m3fn float8_e4m3fn;
 typedef at::Float8_e5m2 float8_e5m2;
 
+static inline void cvtbf16_fp32(const __m256i& a, __m512& o) {
+  o = _mm512_castsi512_ps(_mm512_slli_epi32(_mm512_cvtepu16_epi32(a), 16));
+}
+
+static inline void cvtbf16_fp32(const __m512i& a, __m512& o1, __m512& o2) {
+  __m256i lo = _mm512_extracti32x8_epi32(a, 0);
+  __m256i hi = _mm512_extracti32x8_epi32(a, 1);
+  cvtbf16_fp32(lo, o1);
+  cvtbf16_fp32(hi, o2);
+}
+
 template <typename T>
 struct Welford {
   T mean = T(0);

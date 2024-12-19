@@ -15,6 +15,9 @@ TORCH_API bool is_avx512_vnni_supported();
 // Detect if CPU supports AVX512_BF16 ISA
 TORCH_API bool is_avx512_bf16_supported();
 
+// Detect if CPU supports AVX512_FP16 ISA
+TORCH_API bool is_avx512_fp16_supported();
+
 // Detect if CPU support Advanced Matrix Extension.
 TORCH_API bool is_amx_tile_supported();
 
