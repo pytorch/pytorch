@@ -1,7 +1,5 @@
 # mypy: allow-untyped-defs
 r"""Implementation for Stochastic Gradient Descent optimizer."""
-from __future__ import annotations
-
 from typing import cast, List, Optional, Union
 
 import torch
