@@ -596,6 +596,16 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 [self, *args],
                 kwargs,
             )
+        elif (
+            inspect.getattr_static(self.value, "__new__") is dict.__new__
+            and inspect.getattr_static(self.value, "__getattribute__")
+            is dict.__getattribute__
+            and self.source
+        ):
+            var = tx.output.side_effects.track_object_new_from_user_defined_class(self)
+            with do_not_convert_to_tracable_parameter():
+                var.call_method(tx, "__init__", args, kwargs)
+                return var
 
         return super().call_function(tx, args, kwargs)
 
@@ -1418,6 +1428,41 @@ class RemovableHandleVariable(VariableTracker):
 
     def python_type(self):
         return RemovableHandleClass
+
+
+class UserDefinedDictVariable(UserDefinedObjectVariable):
+    _nonvar_fields = UserDefinedObjectVariable._nonvar_fields
+
+    def __init__(self, value, dict_vt=None, **kwargs):
+        super().__init__(value, **kwargs)
+        self._dict_vt = dict_vt
+        if self._dict_vt is None:
+            assert (
+                self.source is None
+            ), "dict_vt must be constructed when source is present"
+            self._dict_vt = variables.ConstDictVariable(
+                {}, mutation_type=ValueMutationNew()
+            )
+        # Move this to _dynamo/utils. Include OrderedDict methods as well.
+        self._dict_methods = [
+            method
+            for method in itertools.chain(
+                dict.__dict__.values(), collections.OrderedDict.__dict__.values()
+            )
+            if callable(method)
+        ]
+
+    def call_method(
+        self,
+        tx,
+        name,
+        args: "List[VariableTracker]",
+        kwargs: "Dict[str, VariableTracker]",
+    ) -> "VariableTracker":
+        method = self._maybe_get_baseclass_method(name)
+        if method in self._dict_methods:
+            return self._dict_vt.call_method(tx, name, args, kwargs)
+        return super().call_method(tx, name, args, kwargs)
 
 
 class MutableMappingVariable(UserDefinedObjectVariable):

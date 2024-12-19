@@ -240,6 +240,11 @@ class SuperVariable(VariableTracker):
                 self.objvar, attr, variables.DeletedVariable()
             )
             return variables.ConstantVariable(None)
+        elif inner_fn in (
+            dict.__setitem__,
+            collections.OrderedDict.__setitem__,
+        ) and isinstance(self.objvar, variables.UserDefinedDictVariable):
+            return self.objvar._dict_vt.call_method(tx, "__setitem__", args, kwargs)
 
         unimplemented(f"non-function or method super: {inner_fn}")
 
