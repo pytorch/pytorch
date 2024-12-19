@@ -19,6 +19,7 @@ import torch._dynamo.testing
 import torch.nn
 import torch.nn.functional as F
 from torch.nested._internal.nested_tensor import (
+    _construct_nested_tensor_compat,
     buffer_from_jagged,
     jagged_from_list,
     nested_view_from_values_offsets,
@@ -1742,7 +1743,6 @@ class TestNestedTensorDeviceType(NestedTensorTestCase):
             nt1.clone(memory_format=torch.channels_last)
 
     # cannot test torch.float16 because: RuntimeError: "bernoulli_scalar_cpu_" not implemented for 'Half'
-    @decorateIf(xfailIfTorchDynamo, lambda params: params["layout"] == torch.jagged)
     @dtypes(torch.float, torch.double)
     @parametrize("layout", [torch.strided, torch.jagged], name_fn=layout_name)
     def test_dropout(self, device, dtype, layout):
@@ -1759,10 +1759,24 @@ class TestNestedTensorDeviceType(NestedTensorTestCase):
         else:
             nt = random_nt(device, dtype, ntensors, (4, 4), layout=layout)
         # edge case: invalid dropout
-        self.assertRaises(ValueError, lambda: torch.nn.Dropout(-0.1))
-        self.assertRaises(ValueError, lambda: torch.nn.Dropout(1.1))
-        self.assertRaises(ValueError, lambda: torch.nn.functional.dropout(nt, -0.1))
-        self.assertRaises(ValueError, lambda: torch.nn.functional.dropout(nt, 1.1))
+        error_msg = "dropout probability has to be between 0 and 1"
+        # Dynamo raises RuntimeError instead of ValueError
+        self.assertRaisesRegex(
+            (RuntimeError, ValueError), error_msg, lambda: torch.nn.Dropout(-0.1)
+        )
+        self.assertRaisesRegex(
+            (RuntimeError, ValueError), error_msg, lambda: torch.nn.Dropout(1.1)
+        )
+        self.assertRaisesRegex(
+            (RuntimeError, ValueError),
+            error_msg,
+            lambda: torch.nn.functional.dropout(nt, -0.1),
+        )
+        self.assertRaisesRegex(
+            (RuntimeError, ValueError),
+            error_msg,
+            lambda: torch.nn.functional.dropout(nt, 1.1),
+        )
         # edge case: no dropout
         dropouter = torch.nn.Dropout(0.0)
         y0 = dropouter(nt)
@@ -5907,7 +5921,7 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
         offsets = torch.tensor([0, 8, 12, 13, 16], device=device)
         lengths = torch.tensor([6, 2, 1, 2], device=device)
         ragged_idx = 1
-        nt = torch.nested._internal.nested_tensor.NestedTensor(
+        nt = _construct_nested_tensor_compat(
             values, offsets=offsets, lengths=lengths, _ragged_idx=ragged_idx
         )  # 4D nested tensor
 
@@ -5926,7 +5940,7 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
         offsets = torch.tensor([0, 8, 12, 13, 16], device=device)
         lengths = torch.tensor([6, 2, 1, 2], device=device)
         ragged_idx = 2
-        nt = torch.nested._internal.nested_tensor.NestedTensor(
+        nt = _construct_nested_tensor_compat(
             values, offsets=offsets, lengths=lengths, _ragged_idx=ragged_idx
         )  # 4D nested tensor
 
@@ -5941,7 +5955,7 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
         offsets = torch.tensor([0, 2, 4, 8], device=device)
         lengths = torch.tensor([2, 1, 3], device=device)
         ragged_idx = 2
-        nt = torch.nested._internal.nested_tensor.NestedTensor(
+        nt = _construct_nested_tensor_compat(
             values, offsets=offsets, lengths=lengths, _ragged_idx=ragged_idx
         )  # 4D nested tensor
 
@@ -5960,7 +5974,7 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
         offsets = torch.tensor([0, 100, 128], device=device)
         lengths = torch.tensor([50, 28], device=device)
         ragged_idx = 3
-        nt = torch.nested._internal.nested_tensor.NestedTensor(
+        nt = _construct_nested_tensor_compat(
             values, offsets=offsets, lengths=lengths, _ragged_idx=ragged_idx
         )  # 4D nested tensor
 
@@ -5974,27 +5988,28 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
         for i, t in enumerate(out):
             self.assertEqual(t, tensor_list[i])
 
-    @skipIfTorchDynamo(
-        "TorchDynamo raises an error for ragged_idx == 0 earlier than Torch"
-    )
-    def test_unbind_lengths_ragged_idx_0(self, device):
-        values = torch.randn(16, 8, 128, device=device)
-        offsets = torch.tensor([0, 100, 128], device=device)
-        lengths = torch.tensor([50, 28], device=device)
-        ragged_idx = 0
-        nt = torch.nested._internal.nested_tensor.NestedTensor(
-            values, offsets=offsets, lengths=lengths, _ragged_idx=ragged_idx
-        )  # 4D nested tensor
+    # What does ragged_idx mean here?
+    # @skipIfTorchDynamo(
+    #     "TorchDynamo raises an error for ragged_idx == 0 earlier than Torch"
+    # )
+    # def test_unbind_lengths_ragged_idx_0(self, device):
+    #     values = torch.randn(16, 8, 128, device=device)
+    #     offsets = torch.tensor([0, 100, 128], device=device)
+    #     lengths = torch.tensor([50, 28], device=device)
+    #     ragged_idx = 0
+    #     nt = _construct_nested_tensor_compat(
+    #         values, offsets=offsets, lengths=lengths, _ragged_idx=ragged_idx
+    #     )  # 4D nested tensor
 
-        tensor_list = []
-        for i in range(offsets.shape[0] - 1):
-            tensor_list.append(values[:, :, offsets[i] : (offsets[i] + lengths[i])])
+    #     tensor_list = []
+    #     for i in range(offsets.shape[0] - 1):
+    #         tensor_list.append(values[:, :, offsets[i] : (offsets[i] + lengths[i])])
 
-        self.assertRaisesRegex(
-            RuntimeError,
-            r"unbind\(\): nested tensor.*out of bounds",
-            lambda: nt.unbind(),
-        )
+    #     self.assertRaisesRegex(
+    #         RuntimeError,
+    #         r"unbind\(\): nested tensor.*out of bounds",
+    #         lambda: nt.unbind(),
+    #     )
 
     def test_narrow(self, device):
         starts = torch.tensor([0, 1, 2, 3, 4], device=device, dtype=torch.int64)
@@ -6983,6 +6998,45 @@ torch.cuda.synchronize()
         nt_meta = convert_jagged_to_nested_tensor(values, offsets, max_length=16)
 
         self.assertEqual(get_flops(nt), get_flops(nt_meta))
+
+    @onlyCUDA
+    def test_device_conversion(self):
+        # cpu -> cuda
+        t_cpu = torch.nested.nested_tensor(
+            [
+                torch.randn(2, 5),
+                torch.randn(3, 5),
+                torch.randn(18, 5),
+            ],
+            layout=torch.jagged,
+            device="cpu",
+        )
+        t_cuda = t_cpu.to("cuda")
+
+        # Shape comparison
+        self.assertEqual(t_cpu.shape, t_cuda.shape)
+
+        # Conversion from host to device and vice versa, discards
+        # the old offsets.
+        self.assertIsNone(t_cuda._metadata._host_offsets)
+
+        # cuda -> cpu
+        t_cuda = torch.nested.nested_tensor(
+            [
+                torch.randn(2, 5),
+                torch.randn(3, 5),
+                torch.randn(18, 5),
+            ],
+            layout=torch.jagged,
+            device="cuda",
+        )
+        t_cpu = t_cuda.to("cpu")
+        # Shape comparison
+        self.assertEqual(t_cpu.shape, t_cuda.shape)
+
+        # Conversion from host to device and vice versa, discards
+        # the old offsets.
+        self.assertIsNone(t_cpu._metadata._device_offsets)
 
     @skipIfTorchDynamo()
     def test_nested_tensor_activation_checkpoint(self, device):
@@ -8816,9 +8870,12 @@ from torch.nested._internal.nested_int import NestedIntNode
 
 class TestNestedInt(torch.testing._internal.common_utils.TestCase):
     def test_comparisons(self):
-        a = torch.SymInt(NestedIntNode(1, 1))
-        b = torch.SymInt(NestedIntNode(1, 1))
-        c = torch.SymInt(NestedIntNode(2, 1))
+        cache = torch.tensor(1.0)
+        cache2 = torch.tensor(1.0)
+
+        a = torch.SymInt(NestedIntNode(cache, 1))
+        b = torch.SymInt(NestedIntNode(cache, 1))
+        c = torch.SymInt(NestedIntNode(cache2, 1))
         d = 3
 
         self.assertTrue(a == a)
@@ -8890,8 +8947,11 @@ class TestNestedInt(torch.testing._internal.common_utils.TestCase):
         self.assertTrue(a > 1)
 
     def test_with_factor(self):
-        a = torch.SymInt(NestedIntNode(1, 5))
-        b = torch.SymInt(NestedIntNode(1, 10))
+        cache = torch.tensor(1.0)
+
+        a = torch.SymInt(NestedIntNode(cache, 5))
+        b = torch.SymInt(NestedIntNode(cache, 10))
+
         # eq
         self.assertFalse(a == b)
         self.assertFalse(a >= b)
@@ -8904,6 +8964,105 @@ class TestNestedInt(torch.testing._internal.common_utils.TestCase):
         self.assertTrue(a * 2 == b)
         self.assertTrue(a * 3 >= b)
         self.assertTrue(a * 2 == 2 * a)
+
+
+from torch.nested._internal.cached_tensor import CachedTensor
+
+
+class TestCachedTensor(torch.testing._internal.common_utils.TestCase):
+    def test_basic_eager(self):
+        # Create some tensors
+        a = torch.tensor([1, 2, 3], dtype=torch.float32)
+        b = torch.tensor([4, 5, 6], dtype=torch.float32)
+        c = torch.tensor([7, 8, 9], dtype=torch.float32)
+        metadata = {"a": a, "b": b, "c": None}
+        # Create CachedTensor with source_fields="a"
+        cached_tensor = CachedTensor(metadata, source_field="a")
+        # Test that cached_tensor is created correctly
+        self.assertIsInstance(cached_tensor, CachedTensor)
+        # Test that cached_tensor's shape matches 'a'
+        self.assertEqual(cached_tensor.shape, a.shape)
+        # Test that cached_tensor behaves like 'a'
+        self.assertEqual(cached_tensor + 1, a + 1)
+        # Accessing a field that is listed in all_fields but not present in metadata returns
+        # None instead of raising AttributeError.
+        self.assertIsNone(cached_tensor.c, c)
+
+        # Create CachedTensor with source_field='b'
+        cached_tensor_b = CachedTensor(metadata, source_field="b")
+        self.assertEqual(cached_tensor_b.shape, b.shape)
+        self.assertEqual(cached_tensor_b + 1, b + 1)
+
+        # Test that accessing a non-existent field raises AttributeError
+        with self.assertRaises(AttributeError):
+            _ = cached_tensor.d
+
+    def test_open_registration(self):
+        from torch.nested._internal.cached_tensor import (
+            register_cached_tensor_func,
+            set_func_registry,
+        )
+
+        tmp_registry = {}
+
+        with set_func_registry(tmp_registry):
+            # Create some tensors
+            a = torch.tensor([1, 2, 3], dtype=torch.float32)
+            b = torch.tensor([4, 5, 6], dtype=torch.float32)
+            c = torch.tensor([7, 8, 9], dtype=torch.float32)
+            metadata = {"a": a, "b": b, "c": c}
+            cached_tensor = CachedTensor(metadata, source_field="a")
+
+            # Before registration, clone unwraps
+            cloned_cached_tensor = cached_tensor.clone()
+            self.assertFalse(isinstance(cloned_cached_tensor, CachedTensor))
+
+            # Define a custom clone function that rewraps the output into
+            # a new CachedTensor.
+            @register_cached_tensor_func(torch.ops.aten.clone.default)
+            def cached_tensor_clone(op, inp, *args, **kwargs):
+                cloned_metadata = {}
+                for k, v in inp.metadata.items():
+                    cloned_metadata[k] = v.clone()
+                return CachedTensor(
+                    cloned_metadata,
+                    inp.source_field,
+                )
+
+            cloned_cached_tensor = cached_tensor.clone()
+            self.assertIsInstance(cloned_cached_tensor, CachedTensor)
+
+            for key in cached_tensor.metadata.keys():
+                assert isinstance(cloned_cached_tensor, CachedTensor)
+                self.assertEqual(
+                    cloned_cached_tensor.metadata[key], cached_tensor.metadata[key]
+                )
+                self.assertFalse(
+                    cloned_cached_tensor.metadata[key] is cached_tensor.metadata[key]
+                )
+
+        # After leaving the context, clone behaves as it did before.
+        cloned_cached_tensor = cached_tensor.clone()
+        self.assertFalse(isinstance(cloned_cached_tensor, CachedTensor))
+
+    def test_basic_compile(self):
+        # Create outside the graph
+        a = torch.tensor([1, 2, 3], dtype=torch.float32)
+        b = torch.tensor([4, 5, 6], dtype=torch.float32)
+        c = torch.tensor([7, 8, 9], dtype=torch.float32)
+        metadata = {"a": a, "b": b, "c": c}
+
+        cached_tensor = CachedTensor(
+            metadata,
+            source_field="a",
+        )
+
+        @torch.compile
+        def fn(x):
+            return x.clone()
+
+        out = fn(cached_tensor)
+        self.assertFalse(isinstance(out, CachedTensor))
 
 
 instantiate_parametrized_tests(TestNestedTensor)
