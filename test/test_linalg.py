@@ -34,7 +34,8 @@ from torch.testing._internal.common_dtype import (
 )
 from torch.testing._internal.common_cuda import SM53OrLater, SM80OrLater, SM90OrLater, tf32_on_and_off, _get_magma_version, \
     _get_torch_cuda_version, CDNA2OrLater, TEST_MULTIGPU
-from torch.testing._internal.common_quantization import _group_quantize_tensor, _dynamically_quantize_per_channel
+from torch.testing._internal.common_quantization import _group_quantize_tensor, _dynamically_quantize_per_channel, \
+    _group_quantize_tensor_symmetric
 from torch.testing._internal.common_mkldnn import bf32_on_and_off
 from torch.distributions.binomial import Binomial
 import torch.backends.opt_einsum as opt_einsum
@@ -909,7 +910,6 @@ class TestLinalg(TestCase):
             torch.randn((3, 52, 52), device=device, dtype=dtype),
             torch.randn((4, 2, 26, 26), device=device, dtype=dtype))
 
-
         ops = (torch.det, torch.Tensor.det,
                torch.linalg.det)
         for t in tensors:
@@ -1437,7 +1437,6 @@ class TestLinalg(TestCase):
                    (torch.device(device).type == 'cpu' and not torch._C.has_lapack)):
                     continue
             run_test_case(make_arg(shape), ord, dim, keepdim)
-
 
     @onlyCUDA
     @dtypes(torch.bfloat16, torch.float16)
@@ -4344,7 +4343,6 @@ class TestLinalg(TestCase):
             triangular_solve_zero_batch_helper((batchsize, 5, 5), (batchsize, 5, 10),
                                                upper, unitriangular, transpose)
 
-
     @slowTest
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
@@ -4464,7 +4462,6 @@ class TestLinalg(TestCase):
             self.assertEqual(len(w), 2)
             self.assertTrue("An output with one or more elements was resized" in str(w[0].message))
             self.assertTrue("An output with one or more elements was resized" in str(w[1].message))
-
 
     def check_single_matmul(self, x, y):
 
@@ -5689,7 +5686,6 @@ class TestLinalg(TestCase):
                     else:
                         self.assertEqual(B_, X_ @ A)
 
-
         sizes = ((3, 3), (5, 5), (4, 2), (3, 4), (0, 0), (0, 1), (1, 0))
         batches = ((0,), (), (1,), (2,), (3,), (1, 0), (3, 5))
         # Non pivoting just implemented for CUDA
@@ -5722,7 +5718,6 @@ class TestLinalg(TestCase):
                 with self.assertRaisesRegex(RuntimeError, 'LU without pivoting is not implemented on the CPU'):
                     f(torch.empty(1, 2, 2), pivot=False)
 
-
     @precisionOverride({torch.float32: 1e-2, torch.complex64: 1e-2})
     @skipCUDAIfNoMagmaAndNoCusolver
     @skipCPUIfNoLapack
@@ -5750,7 +5745,6 @@ class TestLinalg(TestCase):
             for b, n in shapes:
                 yield make_arg((b, n, n)), make_arg((b, n, rhs))
 
-
         for A, B in gen_matrices():
             LU, pivots = torch.linalg.lu_factor(A)
             for backend in backends:
@@ -5764,7 +5758,6 @@ class TestLinalg(TestCase):
                         self.assertEqual(B_left, A_adj @ X)
                     else:
                         self.assertEqual(B_left, X @ A_adj)
-
 
     @onlyCPU
     @dtypes(*floating_and_complex_types())
@@ -5806,7 +5799,6 @@ class TestLinalg(TestCase):
         with self.assertRaisesRegex(RuntimeError, r"between 1 and LU.size\(-2\)."):
             torch.lu_unpack(LU, pivots)
 
-
         # Rectangular tests
         sample = torch.randn(2, 3, 5, device=device, dtype=dtype)
         B = torch.randn(2, 3, 5, device=device, dtype=dtype)
@@ -5822,7 +5814,6 @@ class TestLinalg(TestCase):
         pivots[0] = 4
         with self.assertRaisesRegex(RuntimeError, r"between 1 and LU.size\(-2\)."):
             torch.lu_unpack(LU, pivots)
-
 
     @skipCPUIfNoLapack
     @skipCUDAIfNoMagma
@@ -6432,7 +6423,6 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
             y = torch.baddbmm(input_tensor, batch1, batch2, beta=0.0, out=out)
             self.assertEqual(out, y_ref)
 
-
     @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "cublas runtime error")
     @onlyCUDA
     def test_matmul_45724(self, device):
@@ -6605,7 +6595,6 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
         torch._int_mm(a_int8, b_int8, out=c_int32_result)
         self.assertEqual(c_int32_result.float(), torch.mm(a_float, b_float))
 
-
     @unittest.skipIf(IS_WINDOWS, "Skipped on Windows!")
     @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "cublas runtime error")
     @onlyNativeDeviceTypes
@@ -6668,7 +6657,6 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
             mean_err = ((res - ref).abs() / ref).mean()
             self.assertTrue(mean_err < 0.05)
 
-
     @unittest.skipIf(IS_WINDOWS, "Skipped on Windows!")
     @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "cublas runtime error")
     @onlyNativeDeviceTypes
@@ -6720,6 +6708,168 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
 
         mean_err = ((res - ref).abs() / ref).mean()
         self.assertTrue(mean_err < 0.05)
+
+    @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "cublas runtime error")
+    @unittest.skipIf(TEST_WITH_ROCM and IS_REMOTE_GPU, "ROCM is unsupported")
+    @onlyNativeDeviceTypes
+    @parametrize("k", [64, 256])
+    @parametrize("n", [32, 48, 64, 128])
+    def test__dyn_quant_pack_4bit_weight(self, device, k, n):
+        # TODO: Fix https://github.com/pytorch/pytorch/issues/131425 and use OpInfo instead
+        # Weight shape is [K x N]
+        if self.device_type == "cuda":
+            self.skipTest("CUDA Backend is unsupported")
+
+        torch.manual_seed(1)
+        block_size = 32
+        b = torch.rand((k, n), dtype=torch.bfloat16, device=device)
+        in_features = b.size(0)
+        out_features = b.size(1)
+        b_uint8, b_scales_and_zeros = _group_quantize_tensor_symmetric(
+            b, n_bit=4, groupsize=block_size
+        )
+        b_int4pack = torch._dyn_quant_pack_4bit_weight(
+            b_uint8, b_scales_and_zeros, None, block_size, in_features, out_features
+        )
+        b_int4pack_meta = torch._dyn_quant_pack_4bit_weight(
+            b_uint8, b_scales_and_zeros, None, block_size, in_features, out_features
+        )
+        self.assertEqual(b_int4pack.shape, b_int4pack_meta.shape)
+
+    @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "cublas runtime error")
+    @unittest.skipIf(TEST_WITH_ROCM and IS_REMOTE_GPU, "ROCM is unsupported")
+    @onlyNativeDeviceTypes
+    @parametrize("m", [1, 32])
+    @parametrize("k", [64, 128])
+    @parametrize("n", [4096, 11008])
+    def test__dyn_quant_matmul_4bit(self, device, m, k, n):
+        if self.device_type == "cuda":
+            self.skipTest("CUDA is unsupported")
+
+        q_group = 32
+
+        torch.manual_seed(1)
+        a_float32 = torch.rand((m, k), dtype=torch.float32, device=device)
+        b_float32 = torch.rand((k, n), dtype=torch.float32, device=device)
+        in_features = b_float32.size(0)
+        out_features = b_float32.size(1)
+
+        def dyn_quant_pack_4bit_weight(b, in_features, out_features):
+            b_uint8, b_scales_and_zeros = _group_quantize_tensor_symmetric(
+                b, n_bit=4, groupsize=q_group
+            )
+
+            if q_group == in_features:
+                b_scales_and_zeros = b_scales_and_zeros.to(torch.float)
+            else:
+                b_scales_and_zeros = b_scales_and_zeros.to(torch.bfloat16)
+            b_int4pack = torch._dyn_quant_pack_4bit_weight(
+                b_uint8, b_scales_and_zeros, None, q_group, in_features, out_features
+            )
+
+            return b_int4pack, b_scales_and_zeros
+
+        def dyn_quant_matmul_4bit(
+            a, b_int4pack, q_group, in_features, out_features
+        ):
+            return torch._dyn_quant_matmul_4bit(
+                a,
+                b_int4pack,
+                q_group,
+                in_features,
+                out_features,
+            )
+
+        b_int4pack, b_scales_and_zeros = dyn_quant_pack_4bit_weight(
+            b_float32, in_features, out_features
+        )
+
+        dtypes = [torch.float32]
+
+        for dtype in dtypes:
+            a = a_float32.to(dtype=dtype)
+            b = b_float32.to(dtype=dtype)
+            ref = torch.mm(a, b)
+            res = dyn_quant_matmul_4bit(
+                a,
+                b_int4pack,
+                q_group,
+                in_features,
+                out_features,
+            )
+            mean_err = ((res - ref).abs() / ref).mean()
+            self.assertTrue(mean_err < 0.05)
+            elementwise_diff = (res - ref).abs()
+            elementwise_relative_error = elementwise_diff / ref.abs().clamp(
+                min=torch.finfo(ref.dtype).eps
+            )
+            all_elements_within_threshold = torch.all(elementwise_relative_error < 0.06)
+            self.assertTrue(
+                all_elements_within_threshold, "Some elements have error >= 0.06"
+            )
+
+    @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "cublas runtime error")
+    @unittest.skipIf(TEST_WITH_ROCM and IS_REMOTE_GPU, "ROCM is unsupported")
+    @onlyNativeDeviceTypes
+    @parametrize("m", [1, 32])
+    @parametrize("k", [64, 128])
+    @parametrize("n", [4096, 11008])
+    def test_compile_dyn_quant_matmul_4bit(self, device, m, k, n):
+        if self.device_type == "cuda":
+            self.skipTest("CUDA is unsupported")
+
+        q_group = 32
+
+        torch.manual_seed(1)
+        a_float32 = torch.rand((m, k), dtype=torch.float32, device=device)
+        b_float32 = torch.rand((k, n), dtype=torch.float32, device=device)
+        in_features = b_float32.size(0)
+        out_features = b_float32.size(1)
+
+        b_uint8, b_scales_and_zeros = _group_quantize_tensor_symmetric(
+            b_float32, n_bit=4, groupsize=q_group
+        )
+
+        if q_group == in_features:
+            b_scales_and_zeros = b_scales_and_zeros.to(dtype=torch.float)
+        else:
+            b_scales_and_zeros = b_scales_and_zeros.to(dtype=torch.bfloat16)
+
+        @torch.compile
+        def dyn_quant_matmul_4bit(
+            a, b_uint8, b_scales_and_zeros, q_group, in_features, out_features
+        ):
+            b_int4pack = torch._dyn_quant_pack_4bit_weight(
+                b_uint8, b_scales_and_zeros, None, q_group, in_features, out_features
+            )
+            return torch._dyn_quant_matmul_4bit(
+                a,
+                b_int4pack,
+                q_group,
+                in_features,
+                out_features,
+            )
+
+        res = dyn_quant_matmul_4bit(
+            a_float32,
+            b_uint8,
+            b_scales_and_zeros,
+            q_group,
+            in_features,
+            out_features,
+        )
+        ref = torch.mm(a_float32, b_float32)
+
+        mean_err = ((res - ref).abs() / ref).mean()
+        self.assertTrue(mean_err < 0.05)
+        elementwise_diff = (res - ref).abs()
+        elementwise_relative_error = elementwise_diff / ref.abs().clamp(
+            min=torch.finfo(ref.dtype).eps
+        )
+        all_elements_within_threshold = torch.all(elementwise_relative_error < 0.06)
+        self.assertTrue(
+            all_elements_within_threshold, "Some elements have error >= 0.06"
+        )
 
     @onlyCPU
     @parametrize("m", [32, 64])
@@ -8652,8 +8802,6 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
 
         self.assertEqual(ck_out, cpu_out)
 
-
-
     def test_permute_matmul(self):
         a = torch.ones([2, 5, 24, 24])
         b = torch.ones([3, 2, 5, 24, 24])
@@ -8732,7 +8880,6 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
         rc = torch.addmm(C, A, B, alpha=alpha, beta=beta)
         ref = alpha * A @ B + beta * C
         self.assertEqual(rc, ref)
-
 
     @dtypes(torch.float, torch.double)
     @precisionOverride({torch.float32: 1e-4})
