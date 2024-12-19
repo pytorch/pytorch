@@ -382,7 +382,6 @@ def check_meta_consistency(
             raise torch._dynamo.exc.UncapturedHigherOrderOpError(
                 f"Expected to have same number of outputs but got lhs:{lhs_list} and rhs:{rhs_list}"
             )
-        assert len(lhs_list) == len(rhs_list)
         all_diffs = []
         for i, (lhs, rhs) in enumerate(zip(lhs_list, rhs_list)):
             if diff := diff_meta(lhs, rhs):

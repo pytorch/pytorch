@@ -1136,7 +1136,6 @@ class WhileLoopHigherOrderVariable(TorchHigherOrderOperatorVariable):
             set_subgraph_inputs="flatten_manual",
             should_flatten_outputs=True,
         )
-        body_nn_modules = dict(tx.output.nn_modules)
         validate_subgraph_output_types(body_r)
 
         check_meta_consistency_vt(body_r.unpack_var_sequence(tx), operands_seq)
@@ -1160,6 +1159,8 @@ class WhileLoopHigherOrderVariable(TorchHigherOrderOperatorVariable):
         # Note: cond_shared and body_shared refer to the same proxy in parent graph
         # so using either of them is OK. Use cond_shared as it doesnt matter.
         additional_lifted_inputs = cond_shared + cond_unique + body_unique
+
+        body_nn_modules = dict(tx.output.nn_modules)
 
         cond_name = tx.output.install_subgraph(
             "cond_fn",
@@ -1265,20 +1266,10 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
             )
 
         xs_proxy = xs.as_proxy()
-        combine_result_proxy = combine_result.as_proxy()
-        for result, inp_proxy in zip(combine_result_proxy, xs_proxy):
-            inp_meta = inp_proxy.node.meta["example_value"]
-            combine_result_meta = result.node.meta["example_value"]
-            if combine_result_meta.device != inp_meta.device:
-                unimplemented(
-                    f"Expected combine_fn to return a tensor on device {inp_meta.device} but "
-                    + f"got {combine_result_meta.device}"
-                )
-            if combine_result_meta.dtype != inp_meta.dtype:
-                unimplemented(
-                    f"Expected combine_fn to return a tensor of {inp_meta.dtype} but "
-                    + f"got {combine_result_meta.dtype}"
-                )
+        check_meta_consistency_vt(
+            [_make_inlined(tx, first_slice_copy)(t, dim) for t in xs.items],
+            combine_result.unpack_var_sequence(tx),
+        )
 
         combine_gm = torch.fx.GraphModule(dict(tx.output.nn_modules), combine_graph)
         combine_fn_name = tx.output.install_subgraph(
@@ -1418,22 +1409,9 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
         carry_vars, y_vars = _extract_carry_and_out(
             combine_result.items, num_init_leaves
         )
-        carry_proxies = [carry_var.as_proxy() for carry_var in carry_vars]
         y_proxies = [y_var.as_proxy() for y_var in y_vars]
 
-        # Checks for carry and init
-        for ini_proxy, carry in zip(init_proxy, carry_proxies):
-            ini_meta = ini_proxy.node.meta["example_value"]
-            carry_meta = carry.node.meta["example_value"]
-            if (
-                carry_meta.device != ini_meta.device
-                or carry_meta.dtype != ini_meta.dtype
-                or carry_meta.shape != ini_meta.shape
-            ):
-                unimplemented(
-                    f"Expected metadata of the combine_fn result {carry_meta} to be the same as "
-                    + f"the metadata of init with {ini_meta}"
-                )
+        check_meta_consistency_vt(init.unpack_var_sequence(tx), carry_vars)
 
         combine_gm = torch.fx.GraphModule(dict(tx.output.nn_modules), combine_graph)
         combine_fn_name = tx.output.install_subgraph("scan_combine_fn", combine_gm)
