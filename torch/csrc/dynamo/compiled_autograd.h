@@ -1177,7 +1177,7 @@ struct IValuePacker<std::optional<T>> {
 template <typename T>
 struct IValuePacker<std::vector<T>> {
   static at::IValue pack(const std::vector<T>& t) {
-    if constexpr (std::is_constructible_v<at::IValue, T>) {
+    if constexpr (::std::is_constructible_v<at::IValue, T>) {
       return t;
     }
     if (t.empty()) {
@@ -1192,8 +1192,8 @@ struct IValuePacker<std::vector<T>> {
     return lst;
   }
   static std::vector<T> unpack(const at::IValue& t) {
-    if constexpr (std::is_constructible_v<at::IValue, T>) {
-      return t.to<std::vector<T>>();
+    if constexpr (::std::is_constructible_v<at::IValue, T>) {
+      return t.to<::std::vector<T>>();
     }
     std::vector<T> result;
     auto lst = t.toList();
