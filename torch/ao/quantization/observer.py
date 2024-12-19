@@ -1,5 +1,8 @@
 # mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
+# temporarily skip RUF for this file for now, we can re-enable
+# after move the affine quantization related things to torchao
+# noqa: RUF
 """
 This module implements observers which are used to collect statistics about
 the values observed during calibration (PTQ) or training (QAT).
