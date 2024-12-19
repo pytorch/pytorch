@@ -324,7 +324,7 @@ def _single_tensor_sgd(
     *,
     weight_decay: float,
     momentum: float,
-    lr: float,  # | Tensor
+    lr: float | Tensor,
     dampening: float,
     nesterov: bool,
     maximize: bool,
@@ -351,7 +351,7 @@ def _single_tensor_sgd(
                 grad = grad.add(buf, alpha=momentum)
             else:
                 grad = buf
-        if isinstance(lr, Tensor) and lr.requires_grad:
+        if isinstance(lr, Tensor):
             param.addcmul_(grad, lr, value=-1)
         else:
             param.add_(grad, alpha=-lr)
