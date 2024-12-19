@@ -2453,6 +2453,10 @@ Arguments:
               "supports_splitting",
               &::c10d::Backend::supportsSplitting,
               "(test whether the backend supports splitting)")
+          .def_property_readonly(
+              "supports_coalescing",
+              &::c10d::Backend::supportsCoalescing,
+              "(test whether the backend supports coalescing)")
           .def(
               "broadcast",
               &::c10d::Backend::broadcast,
