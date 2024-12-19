@@ -1,5 +1,5 @@
 # Owner(s): ["module: mps"]
-
+# ruff: noqa: F841
 import io
 import sys
 import math
@@ -1516,6 +1516,17 @@ class MatmulTest(TestCaseMPS):
     def test_batched_matrix_x_broadcasted_matrix(self):
         self._helper((10, 3, 4), (4, 5))
 
+    def test_large_matmul(self):
+        # Issue: #141909
+        tensor1_mps = torch.randn(1, 1, 72250, dtype=torch.half)
+        tensor2_mps = torch.randn(1, 72250, 1, dtype=torch.half)
+        matmul_mps = torch.matmul(tensor1_mps, tensor2_mps)
+
+        tensor1_cpu = tensor1_mps.to("cpu")
+        tensor2_cpu = tensor2_mps.to("cpu")
+        matmul_cpu = torch.matmul(tensor1_cpu, tensor2_cpu)
+
+        self.assertEqual(matmul_cpu, matmul_mps.to("cpu"))
 
 class MPSLeakyReluTest(TestCaseMPS):
     def _npLeakyRelu(self, np_features, negative_slope=0.1):
@@ -3419,6 +3430,14 @@ class TestMPS(TestCaseMPS):
         x = x + 2
         x_cpu = x_cpu + 2
         self.assertEqual(x, x_cpu)
+
+        # Regression test for https://github.com/pytorch/pytorch/issues/143140
+        def slice_and_reshape(t):
+            return t[:, :, :, :3, :3].reshape(18, 1, 3)
+
+        x = torch.rand(1, 1, 1, 4, 5, 6, dtype=torch.cfloat, device="mps")
+        x_cpu = x.detach().clone().cpu()
+        self.assertEqual(slice_and_reshape(x_cpu), slice_and_reshape(x).cpu())
 
     def test_reshape_storage_offset(self):
         # https://github.com/pytorch/pytorch/issues/95883
@@ -8136,6 +8155,21 @@ class TestMPS(TestCaseMPS):
         elapsedTime = startEvent.elapsed_time(endEvent)
         self.assertGreater(elapsedTime, 0.0)
 
+    def test_generic_device_synchronize(self):
+        event = torch.Event('mps')
+        a = torch.randn(1000)
+        b = torch.randn(1000)
+        c = a + b
+        a_acc = a.to("mps", non_blocking=True)
+        b_acc = b.to("mps", non_blocking=True)
+        event.record()
+        event.synchronize()
+        c_acc = a_acc + b_acc
+        event.record()
+        torch.accelerator.synchronize()
+        self.assertTrue(event.query())
+        self.assertEqual(c_acc.cpu(), c)
+
     def test_jit_save_load(self):
         m = torch.nn.Module()
         m.x = torch.rand(3, 3, device='mps')
@@ -10592,20 +10626,22 @@ class TestConvolutionMPS(TestCaseMPS):
         helper(shape=(1024, 376, 9), in_channels=9, out_channels=9, groups=3)
 
         # Regression test for https://github.com/pytorch/pytorch/issues/140902
+        # And https://github.com/pytorch/pytorch/issues/142344 (adding grad for input)
         ic, oc, ks, f = 2, 5, 3, 7
         conv = torch.nn.Conv1d(ic, oc, kernel_size=ks, padding=1).to("mps")
-        inp = torch.rand(1, ic, f, device="mps")
+        inp = torch.rand(1, ic, f, device="mps", requires_grad=True)
         out = conv(inp)
         grad_in = torch.rand(1, oc, f, device="mps")
         grad_in_cl = torch.empty(1, f, oc, device="mps").transpose(1, 2)
         grad_in_cl[:] = grad_in
 
         # It does not matter whether grad_in contigous, or channels last, results should equal to each other
-        grad_rc = torch.autograd.grad((out,), (conv.weight, conv.bias), (grad_in,), retain_graph=True)
-        grad_rc_cl = torch.autograd.grad((out,), (conv.weight, conv.bias), (grad_in_cl,), retain_graph=True)
+        grad_rc = torch.autograd.grad((out,), (inp, conv.weight, conv.bias), (grad_in,), retain_graph=True)
+        grad_rc_cl = torch.autograd.grad((out,), (inp, conv.weight, conv.bias), (grad_in_cl,), retain_graph=True)
 
         self.assertEqual(grad_rc[0], grad_rc_cl[0])
         self.assertEqual(grad_rc[1], grad_rc_cl[1])
+        self.assertEqual(grad_rc[2], grad_rc_cl[2])
 
     def test_conv1d_contiguous(self):
         model_cpu = torch.nn.Conv1d(1, 128, 3)

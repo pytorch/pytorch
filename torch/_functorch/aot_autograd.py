@@ -1100,8 +1100,6 @@ def aot_module_simplified(
                     )
 
     if aot_autograd_arg_pos_to_source is not None:
-        if not len(full_args) == len(aot_autograd_arg_pos_to_source):
-            breakpoint()
         assert len(full_args) == len(aot_autograd_arg_pos_to_source)
 
     dynamic_shapes = False

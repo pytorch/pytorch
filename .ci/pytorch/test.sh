@@ -1538,13 +1538,13 @@ elif [[ "${TEST_CONFIG}" == *dynamo_wrapped* ]]; then
   if [[ "${SHARD_NUMBER}" == 1 ]]; then
     test_aten
   fi
-elif [[ "${TEST_CONFIG}" == *aot_eager* ]]; then
+elif [[ "${TEST_CONFIG}" == *aot_eager_wrapped* ]]; then
   install_torchvision
   test_aot_eager_wrapped_shard "${SHARD_NUMBER}"
   if [[ "${SHARD_NUMBER}" == 1 ]]; then
     test_aten
   fi
-elif [[ "${TEST_CONFIG}" == *subclasses* ]]; then
+elif [[ "${TEST_CONFIG}" == *subclasses_wrapped* ]]; then
   install_torchvision
   test_subclasses_wrapped_shard "${SHARD_NUMBER}"
   if [[ "${SHARD_NUMBER}" == 1 ]]; then

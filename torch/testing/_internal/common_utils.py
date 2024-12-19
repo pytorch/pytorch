@@ -2574,7 +2574,7 @@ try:
         "pytorch_ci" if IS_CI else os.getenv('PYTORCH_HYPOTHESIS_PROFILE', 'dev')
     )
 except ImportError:
-    print('Fail to import hypothesis in common_utils, tests are not derandomized')
+    warnings.warn('Fail to import hypothesis in common_utils, tests are not derandomized', ImportWarning)
 
 # Used in check_if_enable to see if a test method should be disabled by an issue,
 # sanitizes a test method name from appended suffixes by @dtypes parametrization.
@@ -3124,7 +3124,7 @@ class TestCase(expecttest.TestCase):
         test_cls = super_run.__self__
 
         # Are we compiling?
-        compiled = TEST_WITH_TORCHDYNAMO or TEST_WITH_AOT_EAGER or TEST_WITH_TORCHINDUCTOR or TEST_WITH_SUBCLASSES
+        compiled = TEST_WITH_TORCHDYNAMO or TEST_WITH_TORCHINDUCTOR
         # Is the class strict and compiling?
         strict_default = False
         should_reset_dynamo = False
@@ -3174,12 +3174,13 @@ class TestCase(expecttest.TestCase):
         else:
             suppress_errors = torch._dynamo.config.suppress_errors
         with unittest.mock.patch("torch._dynamo.config.suppress_errors", suppress_errors):
+            override_backend: Optional[str] = None
             if TEST_WITH_TORCHINDUCTOR:
                 super_run = torch._dynamo.optimize("inductor")(super_run)
             elif TEST_WITH_AOT_EAGER:
-                super_run = torch._dynamo.optimize("aot_eager_decomp_partition")(super_run)
+                override_backend = "aot_eager_decomp_partition"
             elif TEST_WITH_SUBCLASSES:
-                super_run = torch._dynamo.optimize("test_subclasses")(super_run)
+                override_backend = "test_subclasses"
             elif TEST_WITH_TORCHDYNAMO:
                 # TorchDynamo optimize annotation
                 # Assume eager-generated GraphModules will not error out.
@@ -3220,7 +3221,8 @@ class TestCase(expecttest.TestCase):
                     method = getattr(self, self._testMethodName)
                     setattr(self, self._testMethodName, ignore_failure(method, key))
 
-            super_run(result=result)
+            with torch._dynamo.eval_frame.dynamo_override_backend(override_backend):
+                super_run(result=result)
 
         if strict_mode or should_reset_dynamo:
             torch._dynamo.reset()

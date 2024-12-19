@@ -138,7 +138,6 @@ jobs:
             echo "PYTORCH_FINAL_PACKAGE_DIR=${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
             echo "SHA1=${{ env.SHA1 }}"
             echo "USE_SPLIT_BUILD=${{ env.USE_SPLIT_BUILD }}"
-            echo "PYTORCH_TEST_WITH_SUBCLASSES=${{ env.PYTORCH_TEST_WITH_SUBCLASSES }}"
           } >> "${GITHUB_ENV} }}"
 
       - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
@@ -171,10 +170,11 @@ jobs:
           mkdir "${GITHUB_WORKSPACE}"
 
       - name: Checkout PyTorch to pytorch dir
-        uses: malfet/checkout@silent-checkout
+        uses: actions/checkout@v4
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
+          show-progress: false
           path: pytorch
 
       - name: Clean PyTorch checkout

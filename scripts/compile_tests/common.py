@@ -269,7 +269,7 @@ def parse_xmls(xmls):
     print(f"XXX PRE_ASSERT tc_total_tests:{tc_total_tests}")
     print(f"XXX PRE_ASSERT tc_total_failed:{tc_total_failed}")
     print(f"XXX PRE_ASSERT tc_total_skipped:{tc_total_skipped}")
-    
+
     assert total_tests == tc_total_tests
     assert total_failed == tc_total_failed
     assert total_skipped == tc_totak_skipped
