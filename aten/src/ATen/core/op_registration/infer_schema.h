@@ -9,9 +9,7 @@
 #include <c10/util/Metaprogramming.h>
 
 namespace c10 {
-namespace detail {
-
-namespace infer_schema {
+namespace detail::infer_schema {
 
 /// The templated inference code creates `ArgumentDef` instead of `Argument`,
 /// because that can be constructed at compile time and has a much smaller
@@ -142,7 +140,6 @@ FunctionSchema createFunctionSchemaFromTraitsSingleReturn(std::string&& name, st
  return make_function_schema(std::move(name), std::move(overload_name), arguments, returns);
 }
 
-}
 }
 
 template<class FuncType>
