@@ -1166,19 +1166,21 @@ def _set_gpu_runtime_env() -> None:
 
 def _transform_cuda_paths(lpaths: List[str]) -> None:
     # This handles two cases:
-    # 1. Meta internal cuda-12 where libs are in lib/cuda-12 and lib/cuda-12/stubs
+    # 1. Cases where libs are in (e.g.) lib/cuda-12 and lib/cuda-12/stubs
     # 2. Linux machines may have CUDA installed under either lib64/ or lib/
     for i, path in enumerate(lpaths):
-        if (
-            "CUDA_HOME" in os.environ
-            and path.startswith(os.environ["CUDA_HOME"])
-            and not os.path.exists(f"{path}/libcudart_static.a")
-        ):
-            for root, _dirs, files in os.walk(path):
-                if "libcudart_static.a" in files:
-                    lpaths[i] = os.path.join(path, root)
-                    lpaths.append(os.path.join(lpaths[i], "stubs"))
-                    break
+        if "CUDA_HOME" in os.environ and path.startswith(os.environ["CUDA_HOME"]):
+            try:
+                lib_dir = next(Path(path).rglob("libcudart_static.a")).resolve().parent
+            except StopIteration:
+                log_msg = f'"libcudart_static.a" not found under {path}'
+                log.info(log_msg)
+                continue
+
+            lpaths[i] = str(lib_dir)
+            stub_dir = lib_dir / "stubs"
+            if stub_dir.exists():
+                lpaths.append(str(stub_dir))
 
 
 def get_cpp_torch_device_options(
@@ -1219,6 +1221,7 @@ def get_cpp_torch_device_options(
                 libraries += ["cuda"]
             else:
                 libraries += ["c10_cuda", "cuda", "torch_cuda"]
+            _transform_cuda_paths(libraries_dirs)
 
     if device_type == "xpu":
         definations.append(" USE_XPU")
@@ -1236,9 +1239,6 @@ def get_cpp_torch_device_options(
 
             cpp_prefix_include_dir = [f"{os.path.dirname(cpp_prefix_path())}"]
             include_dirs += cpp_prefix_include_dir
-
-        if device_type == "cuda" and torch.version.hip is None:
-            _transform_cuda_paths(libraries_dirs)
 
     if config.is_fbcode():
         include_dirs.append(build_paths.sdk_include)
@@ -1561,6 +1561,7 @@ class CppBuilder:
             f"""
             cmake_minimum_required(VERSION 3.18 FATAL_ERROR)
             project(aoti_model LANGUAGES CXX)
+            set(CMAKE_CXX_STANDARD 17)
 
             # May need to point CMAKE_PREFIX_PATH to the right torch location
             find_package(Torch REQUIRED)
@@ -1568,17 +1569,13 @@ class CppBuilder:
             # Set a shared library target
             add_library(aoti_model SHARED)
 
-            # Set the C++ standard
-            set(CMAKE_CXX_STANDARD 17)
-
-            # Set the compiler
-            set(CMAKE_CXX_COMPILER {self._compiler})
-
             # Add macro definitions
             target_compile_definitions(aoti_model PRIVATE {definitions})
 
             # Add compile flags
-            target_compile_options(aoti_model PRIVATE {self._cflags_args} {self._passthrough_parameters_args} -c)
+            target_compile_options(aoti_model PRIVATE {self._cflags_args})
+            # Backend specific flags
+            target_compile_options(aoti_model PRIVATE {self._passthrough_parameters_args} -c)
 
             """
         )

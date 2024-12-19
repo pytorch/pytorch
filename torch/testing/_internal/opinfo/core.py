@@ -1212,7 +1212,7 @@ class OpInfo:
     # I'd love to combine these into one but I haven't figured out how to do it
     # in a way that works like it should, and I tried a LOT of things.
     def _maybe_skip_or_xfail(self, rules, device, sample, idx):
-        def _subtest_fn(test_case, sample=sample, idx=idx):
+        def _subtest_fn(test_case, sample=sample.name, idx=idx):
             return test_case.subTest(sample=sample, idx=idx)
 
         if rules is None or len(rules) == 0:
