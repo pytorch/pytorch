@@ -2337,18 +2337,6 @@ class TritonKernel(SIMDKernel):
 
             return value
 
-        def final_reduction_new_var(
-            buffer,
-            value: CSEVariable,
-            result_type: Optional[str],
-        ) -> CSEVariable:
-            """
-            Generate a reduction and assign it to a new variable.
-            """
-            dtype = value.dtype
-            value = _final_reduction(buffer, str(value), result_type)
-            return self.cse.generate(buffer, value, dtype=dtype)
-
         def final_reduction_define(
             buffer,
             result_var: str,
@@ -2369,15 +2357,6 @@ class TritonKernel(SIMDKernel):
                 {result_var}_val, {result_var}_idx = triton_helpers.{root_op}_with_index({value}, {index}, {dim})
                 {result_var} = {self.reduction_resize(f'{result_var}_idx')}
                 """
-            )
-
-        def welford_new_vars(buffer, mean, m2, weight) -> Tuple[CSEVariable, ...]:
-            """
-            Calls triton_helpers.welford, assigning the results to new CSE variables.
-            """
-            values = self._welford(buffer, mean, m2, weight, dim, dtype)
-            return tuple(
-                self.cse.generate(buffer, value, dtype=dtype) for value in values
             )
 
         cache_key = (src_dtype, reduction_type, value)
@@ -2438,10 +2417,19 @@ class TritonKernel(SIMDKernel):
             elif reduction_type == "welford_combine":
                 assert isinstance(masked_value, Sequence)
                 (mean, m2, weight) = masked_value
-                result_var = welford_new_vars(self.compute, mean, m2, weight)
+                result_var = tuple(
+                    self.cse.generate(self.compute, value, dtype=dtype)
+                    for value in self._welford(
+                        self.compute, mean, m2, weight, dim, dtype
+                    )
+                )
             else:
                 assert isinstance(masked_value, CSEVariable)
-                result_var = final_reduction_new_var(self.compute, masked_value, None)
+                result_var = self.cse.generate(
+                    self.compute,
+                    _final_reduction(self.compute, str(masked_value), None),
+                    dtype=masked_value.dtype,
+                )
         else:
             accumulator = self.cse.namedvar(f"_{result_var}", dtype=torch_acc_type)
             default = ir.Reduction.default_accumulator(reduction_type, src_dtype)
