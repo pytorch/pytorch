@@ -136,21 +136,23 @@ else:
 
 
 def supported_dtype_of_cpp_wrapper(dtype: torch.dtype, device_type: str) -> bool:
-    supported_dtype = {
-        torch.float32,
-        torch.float64,
-        torch.int64,
-        torch.int32,
-        torch.int16,
-        torch.int8,
-        torch.uint8,
-        torch.bool,
-        torch.bfloat16,
-        torch.complex32,
-        torch.complex64,
-        torch.complex128,
-        torch.float16,
-    }
+    supported_dtype = OrderedSet(
+        [
+            torch.float32,
+            torch.float64,
+            torch.int64,
+            torch.int32,
+            torch.int16,
+            torch.int8,
+            torch.uint8,
+            torch.bool,
+            torch.bfloat16,
+            torch.complex32,
+            torch.complex64,
+            torch.complex128,
+            torch.float16,
+        ]
+    )
     if device_type == "cuda":
         supported_dtype.add(torch.float8_e4m3fn)
         supported_dtype.add(torch.float8_e5m2)
@@ -179,7 +181,7 @@ def may_get_constant_buffer_dtype(constant_buffer: sympy.Expr) -> Optional[torch
 
 
 def is_magic_method(op: Any) -> bool:
-    magic_ops = {method_to_operator(m) for m in magic_methods}
+    magic_ops = OrderedSet(method_to_operator(m) for m in magic_methods)
     return op in magic_ops
 
 
@@ -223,26 +225,30 @@ def mark_nodes_dislike_padding(
     """
     if not config.comprehensive_padding:
         return
-    ops_dislike_padding = {
-        aten.convolution,
-        aten.convolution_backward,
-        aten._scaled_mm,
-    }
+    ops_dislike_padding = OrderedSet(
+        [
+            aten.convolution,
+            aten.convolution_backward,
+            aten._scaled_mm,
+        ]
+    )
     # what's a better way to collect the reduction ops?
-    ops_like_padding = {
-        aten.var_mean,
-        aten.sum,
-        aten.mean,
-        aten.prod,
-        aten.any,
-        aten.amin,
-        aten.amax,
-        aten.min,
-        aten.max,
-        aten.argmin,
-        aten.argmax,
-        aten.scatter_reduce,
-    }
+    ops_like_padding = OrderedSet(
+        [
+            aten.var_mean,
+            aten.sum,
+            aten.mean,
+            aten.prod,
+            aten.any,
+            aten.amin,
+            aten.amax,
+            aten.min,
+            aten.max,
+            aten.argmin,
+            aten.argmax,
+            aten.scatter_reduce,
+        ]
+    )
 
     def _get_overload_packet(
         node: torch.fx.Node,
@@ -255,8 +261,6 @@ def mark_nodes_dislike_padding(
             and hasattr(node.target, "_overloadpacket")
             else None
         )
-
-    output_node = g.find_nodes(op="output")[0]
 
     for cur in reversed(g.nodes):
         op = _get_overload_packet(cur)
@@ -379,12 +383,12 @@ class GraphLowering(torch.fx.Interpreter):
         self.ras_by_symbol: Dict[
             Optional[sympy.Symbol], List[RuntimeAssert]
         ] = shape_env.deferred_runtime_asserts.copy()
-        self.bound_unbacked_symbols: OrderedSet[sympy.Symbol] = OrderedSet()
+        self.bound_unbacked_symbols = OrderedSet[sympy.Symbol]()
         self.sizevars = SizeVarAllocator(shape_env)
         self.graph_input_names: List[str] = []
         self.graph_inputs: Dict[str, TensorBox] = {}
         self.graph_inputs_original: Dict[str, InputBuffer] = {}
-        self.zero_dim_cpu_tensor_list: OrderedSet[str] = OrderedSet()
+        self.zero_dim_cpu_tensor_list = OrderedSet[str]()
         self.device_types: OrderedSet[str] = (
             const_module.device_types if const_module else OrderedSet()
         )
@@ -408,12 +412,12 @@ class GraphLowering(torch.fx.Interpreter):
         self.torchbind_constants: Dict[str, torch._C.ScriptObject] = {}
         self.seen_subgraphs: Dict[str, ir.Subgraph] = {}
         self.constant_reprs: Dict[str, str] = {}
-        self.removed_operations: OrderedSet[str] = OrderedSet()
-        self.removed_buffers: OrderedSet[str] = OrderedSet()
-        self.removed_inplace_buffers: OrderedSet[str] = OrderedSet()
-        self.mutated_buffers: OrderedSet[str] = OrderedSet()
-        self.never_reuse_buffers: OrderedSet[str] = OrderedSet()
-        self.inplaced_to_remove: OrderedSet[str] = OrderedSet()
+        self.removed_operations = OrderedSet[str]()
+        self.removed_buffers = OrderedSet[str]()
+        self.removed_inplace_buffers = OrderedSet[str]()
+        self.mutated_buffers = OrderedSet[str]()
+        self.never_reuse_buffers = OrderedSet[str]()
+        self.inplaced_to_remove = OrderedSet[str]()
         self.device_ops: DeviceOpOverrides = None  # type: ignore[assignment]
         self.wrapper_code: PythonWrapperCodegen = None  # type: ignore[assignment]
         # See `ProxyExecutor Design Note` in ir.py for more details
@@ -429,7 +433,7 @@ class GraphLowering(torch.fx.Interpreter):
 
         self.current_node: torch.fx.Node = None  # type: ignore[assignment]
         self.lists: Dict[str, List[str]] = {}
-        self.mutated_inputs: OrderedSet[str] = OrderedSet()
+        self.mutated_inputs = OrderedSet[str]()
         self.mutated_input_idxs: List[int] = []
         self.name_to_buffer: Dict[str, ir.Buffer] = {}
         self.name_to_users: DefaultDict[str, List[ir.IRNode]] = defaultdict(list)
@@ -456,7 +460,7 @@ class GraphLowering(torch.fx.Interpreter):
         self.nodes_prefer_channels_last = (
             self.find_nodes_prefer_channels_last() if self.layout_opt else OrderedSet()
         )
-        self._warned_fallback = {"aten.convolution_backward"}
+        self._warned_fallback = OrderedSet(["aten.convolution_backward"])
         self.user_visible_output_strides = get_user_visible_output_strides(gm.graph)
         mark_nodes_dislike_padding(gm.graph, self.user_visible_output_strides)
         self.cache_key: str = ""  # This is the cache key for the compiled artifact
@@ -482,11 +486,11 @@ class GraphLowering(torch.fx.Interpreter):
         self.get_backend_features = functools.lru_cache(None)(get_backend_features)
 
         self.effectful_ops: Dict[_EffectType, ir.Buffer] = {}
-        self.aligned_inputs: OrderedSet[str] = OrderedSet()
-        self.no_fuse_buffer_names: OrderedSet[str] = OrderedSet()
+        self.aligned_inputs = OrderedSet[str]()
+        self.no_fuse_buffer_names = OrderedSet[str]()
 
         # Below field is related to printing debug intermediate tensor values info for debugging
-        self.all_codegen_kernel_names: OrderedSet[str] = OrderedSet()
+        self.all_codegen_kernel_names = OrderedSet[str]()
 
         # state used by for Kernel.workspace
         self.workspace_id = itertools.count()
@@ -742,7 +746,7 @@ class GraphLowering(torch.fx.Interpreter):
         With rule 2, we makes sure all the tensors in the chain uses channels last layout. So both copies
         can be saved.
         """
-        output_set: OrderedSet[Node] = OrderedSet()
+        output_set = OrderedSet[Node]()
         for n in reversed(self.module.graph.nodes):  # type: ignore[arg-type, union-attr]
             if n.target == torch.ops.aten.convolution.default:
                 output_set.add(n)
@@ -1086,7 +1090,7 @@ class GraphLowering(torch.fx.Interpreter):
             ), f"{target} is not an OpOverload"
             base_name = target.name().split(".")[0]
             if base_name in FALLBACK_ALLOW_LIST:
-                make_fallback(target, warn=False, override_decomp=True)
+                make_fallback(target)
             elif config.implicit_fallbacks:
                 error = (
                     MissingOperatorWithDecomp
@@ -1242,10 +1246,15 @@ class GraphLowering(torch.fx.Interpreter):
             else:
                 # AOT Autograd tries to detect stride divergence of inductor from output metadata.
                 # Here, we try to avoid spurious divergence by matching insignificant strides such as
+
+                # should have already been realized
+                assert torch._inductor.ir.is_storage_and_layout(r)
+                meta_strides = [
+                    s.node.expr if isinstance(s, torch.SymInt) else s
+                    for s in fx_node.meta["val"].stride()
+                ]
                 result_correct_strides.append(
-                    self.try_match_insignificant_strides(
-                        r, fx_node.meta["val"].stride()
-                    )
+                    ir.try_match_insignificant_strides(r, meta_strides)
                 )
 
         self.graph_outputs = result_correct_strides
@@ -1293,67 +1302,6 @@ class GraphLowering(torch.fx.Interpreter):
             yield
         finally:
             self.current_node = old
-
-    def try_match_insignificant_strides(
-        self,
-        tensor: Union[ir.TensorBox, ir.BaseView],
-        meta_strides_inp: Tuple[Union[int, torch.SymInt], ...],
-    ) -> Union[ir.TensorBox, ir.BaseView]:
-        """
-        Tries to match the strides of the tensor to those in the meta_strides. Strides of insignificant
-        dimensions - size 0 or 1 - will be updated.
-
-        If there are real stride differences (NHWC vs NCHW) then the input will be returned.
-        """
-
-        # should have already been realized
-        assert torch._inductor.ir.is_storage_and_layout(tensor)
-
-        meta_strides = [
-            s.node.expr if isinstance(s, torch.SymInt) else s for s in meta_strides_inp
-        ]
-
-        if all(
-            self.sizevars.statically_known_equals(s1, s2)
-            for s1, s2 in zip(meta_strides, tensor.get_stride())
-        ):
-            return tensor  # type: ignore[arg-type]
-
-        def significant_strides_equal(
-            shape: Sequence[Union[Expr, int]],
-            meta_strides: Sequence[Union[Expr, int]],
-            tensor_strides: Sequence[Union[Expr, int]],
-        ) -> bool:
-            for dim, s1, s2 in zip(shape, meta_strides, tensor_strides):
-                if self.sizevars.statically_known_leq(dim, 1):  # type: ignore[arg-type]
-                    continue
-
-                if not self.sizevars.statically_known_equals(s1, s2):
-                    return False
-
-            return True
-
-        if not significant_strides_equal(
-            tensor.get_size(), meta_strides, tensor.get_stride()
-        ):
-            return tensor
-
-        storage, old_layout = torch._inductor.ir.as_storage_and_layout(tensor)
-        new_stride = [*old_layout.stride]
-        for i, s in enumerate(tensor.get_size()):
-            if self.sizevars.statically_known_leq(s, 1):  # type: ignore[arg-type]
-                new_stride[i] = meta_strides[i]
-
-        new_layout = torch._inductor.ir.FixedLayout(
-            old_layout.device,
-            old_layout.dtype,
-            old_layout.size,
-            new_stride,
-            old_layout.offset,
-        )
-        return ir.TensorBox(
-            torch._inductor.ir.ReinterpretView(data=storage, layout=new_layout)
-        )
 
     def propagate_mutation(
         self,
@@ -1437,7 +1385,7 @@ class GraphLowering(torch.fx.Interpreter):
         buffer_watermark = len(self.buffers)
         operation_watermark = len(self.operations)
 
-        origins = {n}
+        origins = OrderedSet([n])
         is_call_function = n.op == "call_function"
         if is_call_function:
             args, kwargs = self.fetch_args_kwargs_from_env(n)
@@ -1693,7 +1641,7 @@ class GraphLowering(torch.fx.Interpreter):
 
         self.register_users_of(result)
 
-        new_unbacked_defs: OrderedSet[sympy.Symbol] = OrderedSet()
+        new_unbacked_defs = OrderedSet[sympy.Symbol]()
         for buf in self.buffers[buffer_watermark:]:
             new_unbacked_defs |= buf.get_unbacked_symbol_defs()
         for op in self.operations[operation_watermark:]:
@@ -1971,6 +1919,9 @@ class GraphLowering(torch.fx.Interpreter):
                 "Finished codegen for all nodes. The list of kernel names available: %s",
                 V.graph.all_codegen_kernel_names,
             )
+
+            # Dump the inductor_triton_kernel_to_post_grad_node_info to a json file for debugging trace
+            V.debug.log_inductor_triton_kernel_to_post_grad_node_info()
 
             result = self.wrapper_code.generate(self.is_inference)
             self.wrapper_code.pop_codegened_graph()

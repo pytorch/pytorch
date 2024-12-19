@@ -36,7 +36,7 @@ import sympy
 
 import torch
 from torch import SymInt
-from torch._guards import GuardSource, TracingContext
+from torch._guards import TracingContext
 from torch._higher_order_ops.torchbind import call_torchbind
 from torch._ops import HigherOrderOperator
 from torch._subclasses.fake_tensor import FakeTensor, is_fake, maybe_get_fake_mode
@@ -73,7 +73,6 @@ from ..source import (
     AttrProxySource,
     AttrSource,
     CallMethodItemSource,
-    ConstantSource,
     ConstDictKeySource,
     ConvertIntSource,
     FloatTensorSource,
@@ -90,18 +89,13 @@ from ..source import (
     SubclassAttrListSource,
     TupleIteratorGetItemSource,
 )
-from ..trace_rules import (
-    is_callable_allowed,
-    is_numpy,
-    is_numpy_dtype,
-    is_numpy_type_info,
-)
 from ..utils import (
     _extract_tensor_dict,
     build_checkpoint_variable,
     build_invoke_subgraph_variable,
     clone_input,
     common_constant_types,
+    dict_keys,
     get_fake_value,
     get_locals_to_steal,
     get_static_address_type,
@@ -141,6 +135,7 @@ from .dicts import (
     ConstDictVariable,
     CustomizedDictVariable,
     DefaultDictVariable,
+    DictKeySetVariable,
     FrozensetVariable,
     HFPretrainedConfigVariable,
     PythonSysModulesVariable,
@@ -424,12 +419,11 @@ class VariableBuilder:
 
     def install_guards(self, *guards):
         source = self.get_source()
-        if (
-            isinstance(source, ConstantSource)
-            or source.guard_source() == GuardSource.CONSTANT
-        ):
+        try:
+            tmp = [source.make_guard(guard) for guard in guards]
+        except NotImplementedError:
             return None
-        install_guard(*[source.make_guard(guard) for guard in guards], skip=1)
+        install_guard(*tmp, skip=1)
         return {}
 
     @classmethod
@@ -753,7 +747,7 @@ class VariableBuilder:
         elif np is not None and isinstance(value, np.generic):
             # numpy array scalars: convert to 0D arrays
             return self.wrap_numpy_ndarray(np.asarray(value))
-        elif is_numpy(value):
+        elif trace_rules.is_numpy(value):
             assert np
             self.install_guards(
                 GuardBuilder.FUNCTION_MATCH
@@ -761,10 +755,10 @@ class VariableBuilder:
                 else GuardBuilder.TYPE_MATCH
             )
             return NumpyVariable(value, source=self.source)
-        elif is_numpy_dtype(value):
+        elif trace_rules.is_numpy_dtype(value):
             self.install_guards(GuardBuilder.ID_MATCH)
             return NumpyDTypeVariable(value, source=self.source)
-        elif is_numpy_type_info(value):
+        elif trace_rules.is_numpy_type_info(value):
             if isinstance(value, np.iinfo):
                 self.install_guards(GuardBuilder.TYPE_MATCH)
                 dt_source = AttrSource(self.source, "dtype")
@@ -850,7 +844,7 @@ class VariableBuilder:
                 )
             )
         elif callable(value) and trace_rules.lookup_callable(value) is not None:
-            if is_callable_allowed(value):
+            if trace_rules.is_callable_allowed(value):
                 self.tx.output.has_user_defined_allowed_in_graph = True
             return trace_rules.lookup_callable(value).create_with_source(
                 value, source=self.source
@@ -1244,6 +1238,21 @@ class VariableBuilder:
             self.install_guards(GuardBuilder.TYPE_MATCH)
             result = FrozenDataClassVariable.create(self.tx, value, source=self.source)
             return self.tx.output.side_effects.track_object_existing(value, result)
+        elif isinstance(value, dict_keys):
+            if all(ConstantVariable.is_literal(k) for k in value):
+                # If the dict_keys object is passed from outside the compile region, it must either be passed along with
+                # the corresponding dict object or treated as a set (when only the keys are passed into the compiled region).
+                # - If it is passed along with the dict, the dict object itself is already guarded.
+                # - If only the dict_keys object is passed, we add EQUALS_MATCH and SEQUENCE_LENGTH guards
+                #   to ensure it remains unchanged across multiple runs.
+                items = [SourcelessBuilder.create(self.tx, v) for v in value]
+                install_guard(
+                    self.get_source().make_guard(GuardBuilder.SEQUENCE_LENGTH),
+                    self.get_source().make_guard(GuardBuilder.EQUALS_MATCH),
+                )
+                return DictKeySetVariable(items, source=self.source)
+            else:
+                unimplemented("dict_keys with non-constant keys are not supported")
         else:
             return self.wrap_user_defined(value)
 
@@ -1499,9 +1508,15 @@ class VariableBuilder:
                 not self.source.guard_source().is_local()
                 # Assume that integers that came from NN modules want to be
                 # specialized (as we don't expect users to be changing the
-                # NN modules on the fly)
-                or self.source.guard_source().is_specialized_nn_module()
-                or self.source.guard_source().is_unspecialized_builtin_nn_module()
+                # NN modules on the fly), unless explicitly disabled
+                or (
+                    self.source.guard_source().is_specialized_nn_module()
+                    and not config.allow_unspec_int_on_nn_module
+                )
+                or (
+                    self.source.guard_source().is_unspecialized_builtin_nn_module()
+                    and not config.allow_unspec_int_on_nn_module
+                )
                 or is_from_defaults(self.source)
                 # TODO: Delete this condition when rollout is done.  NB: this
                 # condition never evaluates True in open source
@@ -1903,8 +1918,6 @@ class VariableBuilder:
                 raise AssertionError(
                     f"Dynamo attempts to add additional input during export: value={wrapped_value}, source={self.get_source()}"
                 )
-
-            example_value = unspec_var.proxy.node.meta["example_value"]
 
             proxy.node.meta["grapharg"] = GraphArg(
                 self.get_source(),
@@ -2843,7 +2856,7 @@ def wrap_to_fake_tensor_and_record(
         or is_traceable_wrapper_subclass(e)
     ):
         assert source is not None
-        static_shapes, reason = tensor_always_has_static_shape(
+        static_shapes, _reason = tensor_always_has_static_shape(
             e,
             is_tensor,
             tensor_source=source,
@@ -2965,7 +2978,7 @@ class SourcelessBuilder:
         elif ConstantVariable.is_literal(value):
             return ConstantVariable.create(value)
         elif callable(value) and trace_rules.lookup_callable(value) is not None:
-            if is_callable_allowed(value):
+            if trace_rules.is_callable_allowed(value):
                 tx.output.has_user_defined_allowed_in_graph = True
             return trace_rules.lookup_callable(value)(value)
         elif is_function_or_wrapper(value):
