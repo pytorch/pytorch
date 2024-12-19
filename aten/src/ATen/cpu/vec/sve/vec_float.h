@@ -3,15 +3,15 @@
 #include <ATen/cpu/vec/intrinsics.h>
 #include <ATen/cpu/vec/vec_base.h>
 #include <ATen/cpu/vec/sve/sve_helper.h>
+#include <c10/util/irange.h>
 #include <cmath>
-#if defined(__aarch64__) && defined(AT_BUILD_ARM_VEC256_WITH_SLEEF)
+#if defined(__aarch64__) && defined(AT_BUILD_ARM_VECSVE_WITH_SLEEF)
 #include <sleef.h>
 #define USE_SLEEF(sleef_code, non_sleef_code) sleef_code
 #else
 #define USE_SLEEF(sleef_code, non_sleef_code) non_sleef_code
 #endif
-namespace at {
-namespace vec {
+namespace at::vec {
 // Note [CPU_CAPABILITY namespace]
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 // This header, and all of its subheaders, will be compiled with
@@ -491,7 +491,6 @@ inline void convert(const float* src, float* dst, int64_t n) {
   for (int64_t i = 0; i < n - fraction; i += Vectorized<float>::size()) {
     svst1_f32(ptrue, dst + i, svldnt1_f32(ptrue, src + i));
   }
-#pragma unroll
   for (int64_t i = n - fraction; i < n; i += Vectorized<float>::size()) {
     svbool_t pg = svwhilelt_b32(i, n);
     svst1_f32(pg, dst + i, svldnt1_f32(pg, src + i));
@@ -509,7 +508,6 @@ inline void convert(const float *src, at::Half *dst, int64_t n) {
                                     ZERO_F16);
     svst1_f16(pg_16, reinterpret_cast<float16_t*>(dst) + i, src_vec);
   }
-#pragma unroll
   for (int64_t i = n - fraction; i < n; i += Vectorized<float>::size()) {
     pg_16 = svwhilelt_b16(i, n);
     pg_32 = svwhilelt_b32(i, n);
@@ -530,7 +528,6 @@ inline void convert(const at::Half *src, float *dst, int64_t n) {
                                     ZERO_F16);
     svst1_f32(pg_32, dst + i, svcvt_f32_f16_x(ptrue, src_vec));
   }
-#pragma unroll
   for (int64_t i =  n - fraction; i < n; i += Vectorized<float>::size()) {
     pg_16 = svwhilelt_b16(i, n);
     pg_32 = svwhilelt_b32(i, n);
@@ -552,7 +549,6 @@ inline void convert(const bool *src, float *dst, int64_t n) {
     svbool_t mask = svcmpne_u32(pg_32, src_vec_u32, ZERO_U32);
     svst1_f32(pg_32, dst + i, svsel_f32(mask, ONE_F32, ZERO_F32));
   }
-#pragma unroll
   for (int64_t i = n - fraction; i < n; i += Vectorized<float>::size()) {
     pg_8 = svwhilelt_b8(i, n);
     pg_32 = svwhilelt_b32(i, n);
@@ -570,4 +566,4 @@ Vectorized<float> inline fmadd(const Vectorized<float>& a, const Vectorized<floa
 
 #endif // defined(CPU_CAPABILITY_SVE)
 
-}}}
+}}

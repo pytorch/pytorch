@@ -100,6 +100,17 @@ bool is_arm_sve_supported() {
 #endif
 }
 
+uint32_t get_max_arm_sve_length() {
+#if !defined(__s390x__) && !defined(__powerpc__)
+  if (!cpuinfo_initialize()) {
+    return 0; // Return 0 if initialization fails
+  }
+  return cpuinfo_get_max_arm_sve_length();
+#else
+  return 0;
+#endif
+}
+
 static uint32_t get_cache_size(int level) {
 #if !defined(__s390x__) && !defined(__powerpc__)
   if (!cpuinfo_initialize()) {
