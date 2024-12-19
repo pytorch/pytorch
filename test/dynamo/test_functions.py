@@ -11,7 +11,6 @@ import sys
 import unittest
 from dataclasses import dataclass, field
 from typing import Any, Dict, Generic, List, TypeVar
-from typing_extensions import NamedTuple
 from unittest.mock import patch
 
 import numpy as np
@@ -35,6 +34,7 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
 )
+from typing_extensions import NamedTuple
 
 # Defines all the kernels for tests
 from torch.testing._internal.triton_utils import *  # noqa: F403
@@ -56,6 +56,10 @@ clip01 = functools.partial(torch.clip, min=0.0, max=1.0)
 
 def constant3(a, b):
     return a - b + (1.0 + 2)
+
+
+def call(f, *args, **kwargs):
+    return f(*args, **kwargs)
 
 
 _variable = 0
@@ -2580,6 +2584,19 @@ class GraphModule(torch.nn.Module):
         opt_f = torch.compile(f, backend=cnts)
         self.assertEqual(f(torch.ones(3, 3)), opt_f(torch.ones(3, 3)))
         self.assertEqual(cnts.frame_count, 3)
+
+    def test_two_point_iter(self):
+        def fn(x, y):
+            it = map(lambda n: n + 1, range(6))
+            for i in it:
+                x = x + i
+                y = y + next(it)
+            return x, y
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.ones(3)
+        y = torch.ones(3)
+        self.assertEqual(fn(x, y), opt_fn(x, y))
 
     # Test dict_keys passed along with the corresponding dict object
     def test_dict_key_set1(self):
