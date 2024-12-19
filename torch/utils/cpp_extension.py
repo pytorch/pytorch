@@ -148,25 +148,11 @@ def _find_sycl_home() -> Optional[str]:
         libsycl = "sycl.lib" if IS_WINDOWS else "libsycl.so"
         return os.path.exists(os.path.join(sycl_home, 'lib', libsycl))
 
-    sycl_home_from_env = os.environ.get('ONEAPI_ROOT')
-    icpx_path = shutil.which('icpx')
     sycl_home = None
-    # Guess #1
-    if sycl_home_from_env and valid_sycl_home(sycl_home_from_env):
-        sycl_home = sycl_home_from_env
-
-    # Guess #2
-    elif sycl_home_from_env:
-        new_sycl_home = os.path.join(sycl_home_from_env, 'compiler', 'latest')
-        if valid_sycl_home(new_sycl_home):
-            sycl_home = new_sycl_home
-
-    # Guess #3
-    elif icpx_path is not None:
+    icpx_path = shutil.which('icpx')
+    if icpx_path is not None:
         sycl_home = os.path.dirname(os.path.dirname(
             os.path.realpath(icpx_path)))
-
-    # Guess #4
     else:
         files = importlib.metadata.files('intel-sycl-rt') or []
         for f in files:
@@ -174,19 +160,10 @@ def _find_sycl_home() -> Optional[str]:
                 sycl_home = os.path.dirname(Path(f.locate()).parent.resolve())
                 break
 
-    # Guess #5: find in default position.
-    if not sycl_home:
-        if IS_WINDOWS:
-            default_sycl_home = "C:\\Program Files (x86)\\Intel\\oneAPI\\compiler\\latest\\"
-        else:
-            default_sycl_home = "/opt/intel/oneapi/compiler/latest"
-        if valid_sycl_home(default_sycl_home):
-            sycl_home = default_sycl_home
-
     if sycl_home and not torch.xpu.is_available():
         print(f"No XPU runtime is found, using ONEAPI_ROOT='{sycl_home}'",
               file=sys.stderr)
-
+    print("ETAF:", sycl_home)
     return sycl_home
 
 def _join_rocm_home(*paths) -> str:
