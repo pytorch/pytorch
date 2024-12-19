@@ -1920,6 +1920,9 @@ class GraphLowering(torch.fx.Interpreter):
                 V.graph.all_codegen_kernel_names,
             )
 
+            # Dump the inductor_triton_kernel_to_post_grad_node_info to a json file for debugging trace
+            V.debug.log_inductor_triton_kernel_to_post_grad_node_info()
+
             result = self.wrapper_code.generate(self.is_inference)
             self.wrapper_code.pop_codegened_graph()
             return result
