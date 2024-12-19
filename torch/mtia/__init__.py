@@ -353,6 +353,7 @@ __all__ = [
     "default_stream",
     "memory_stats",
     "max_memory_allocated",
+    "reset_peak_memory_stats",
     "get_device_capability",
     "record_memory_history",
     "snapshot",

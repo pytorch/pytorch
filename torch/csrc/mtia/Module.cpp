@@ -101,6 +101,10 @@ void initModule(PyObject* module) {
     PyObject* raw_pyobject = at::detail::getMTIAHooks().memorySnapshot();
     return py::reinterpret_steal<py::object>(raw_pyobject);
   });
+
+  m.def("_mtia_resetPeakMemoryStats", [](c10::DeviceIndex device_index) {
+    at::detail::getMTIAHooks().resetPeakMemoryStats(device_index);
+  });
 }
 
 } // namespace torch::mtia

@@ -23,6 +23,20 @@ def max_memory_allocated(device: Optional[_device_t] = None) -> int:
     return memory_stats(device).get("dram", 0).get("peak_bytes", 0)
 
 
+def reset_peak_memory_stats(device: Optional[_device_t] = None) -> None:
+    r"""Reset the peak memory stats for a given device.
+
+
+    Args:
+        device (torch.device, str, or int, optional) selected device. Returns
+            statistics for the current device, given by current_device(),
+            if device is None (default).
+    """
+    if not is_initialized():
+        return
+    torch._C._mtia_resetPeakMemoryStats(_get_device_index(device, optional=True))
+
+
 def memory_stats(device: Optional[_device_t] = None) -> Dict[str, Any]:
     r"""Return a dictionary of MTIA memory allocator statistics for a given device.
 
@@ -39,4 +53,5 @@ def memory_stats(device: Optional[_device_t] = None) -> Dict[str, Any]:
 __all__ = [
     "memory_stats",
     "max_memory_allocated",
+    "reset_peak_memory_stats",
 ]
