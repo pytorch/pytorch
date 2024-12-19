@@ -750,6 +750,7 @@ class SideEffects:
                         ]
                     )
 
+                    # TODO(aniain2305) - Fix this. Can't call clear.
                     cg(var.source)  # type: ignore[attr-defined]
                     cg.load_method("clear")
 
