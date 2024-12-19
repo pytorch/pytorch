@@ -89,7 +89,7 @@ class ConstDictVariable(VariableTracker):
                 Hashable = ConstDictVariable._HashableTracker
                 x = tuple(Hashable(e).underlying_value for e in self.vt.items)
             elif isinstance(self.vt, variables.NNModuleVariable):
-                return self.vt.module
+                return self.vt.value
             elif isinstance(self.vt, variables.UnspecializedNNModuleVariable):
                 return self.vt.value
             elif isinstance(self.vt, variables.UserFunctionVariable):
@@ -277,14 +277,7 @@ class ConstDictVariable(VariableTracker):
         args: "List[VariableTracker]",
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
-        from . import (
-            BuiltinVariable,
-            ConstantVariable,
-            ListIteratorVariable,
-            ListVariable,
-            TupleVariable,
-            UserDefinedObjectVariable,
-        )
+        from . import BuiltinVariable, ConstantVariable, TupleVariable
 
         Hashable = ConstDictVariable._HashableTracker
 
@@ -344,33 +337,25 @@ class ConstDictVariable(VariableTracker):
             self.items.clear()
             return ConstantVariable.create(None)
         elif name == "update" and self.is_mutable():
-            is_args_supported = len(args) == 1 and isinstance(
-                args[0],
-                (
-                    ConstDictVariable,
-                    ListVariable,
-                    TupleVariable,
-                    ListIteratorVariable,
-                    variables.IteratorVariable,
-                    UserDefinedObjectVariable,
-                ),
-            )
-
-            is_kwargs_supported = len(kwargs) > 0 and len(args) == 0
-
-            if is_args_supported or is_kwargs_supported:
+            # In general, this call looks like `a.update(b, x=1, y=2, ...)`.
+            # Either `b` or the kwargs is omittable, but not both.
+            has_arg = len(args) == 1
+            has_kwargs = len(kwargs) > 0
+            if has_arg or has_kwargs:
                 tx.output.side_effects.mutation(self)
-                if len(args) == 1:
+                if has_arg:
                     if isinstance(args[0], ConstDictVariable):
                         dict_vt = args[0]
                     else:
                         dict_vt = BuiltinVariable.call_custom_dict(tx, dict, args[0])
                     self.items.update(dict_vt.items)
-                # Wrap strings
-                kwargs = {
-                    Hashable(ConstantVariable.create(k)): v for k, v in kwargs.items()
-                }
-                self.items.update(kwargs)
+                if has_kwargs:
+                    # Handle kwargs
+                    kwargs = {
+                        Hashable(ConstantVariable.create(k)): v
+                        for k, v in kwargs.items()
+                    }
+                    self.items.update(kwargs)
                 return ConstantVariable.create(None)
             else:
                 return super().call_method(tx, name, args, kwargs)
@@ -613,6 +598,46 @@ class FrozensetVariable(SetVariable):
     ) -> "VariableTracker":
         if name in ["add", "pop", "update", "remove", "discard", "clear"]:
             raise RuntimeError(f"Illegal call_method {name} on a frozenset")
+        return super().call_method(tx, name, args, kwargs)
+
+
+class DictKeySetVariable(SetVariable):
+    def __init__(
+        self,
+        items: List[VariableTracker],
+        **kwargs,
+    ) -> None:
+        super().__init__(items, **kwargs)
+
+    def debug_repr(self):
+        if not self.items:
+            return "dict_keys([])"
+        else:
+            return (
+                "dict_keys(["
+                + ",".join(k.vt.debug_repr() for k in self.items.keys())
+                + "])"
+            )
+
+    @property
+    def set_items(self):
+        return self.items
+
+    def python_type(self):
+        return dict_keys
+
+    def as_python_constant(self):
+        unimplemented("DictKeySetVariable.as_python_constant")
+
+    def call_method(
+        self,
+        tx,
+        name,
+        args: List[VariableTracker],
+        kwargs: Dict[str, VariableTracker],
+    ) -> "VariableTracker":
+        if name in ["add", "pop", "update", "remove", "discard", "clear"]:
+            raise RuntimeError(f"Illegal call_method {name} on a dict_keys")
         return super().call_method(tx, name, args, kwargs)
 
 
@@ -940,7 +965,8 @@ class CustomizedDictVariable(ConstDictVariable):
 
 @functools.lru_cache(None)
 def _install_PretrainedConfig_patch():
-    import transformers
+    mod = sys.modules.get("transformers.configuration_utils")
+    assert mod is not None, "Caller is responsible for ensuring this was imported"
 
     # We need to monkeypatch transformers here, sadly.
     # TODO(voz): Upstream to transformers lib
@@ -950,9 +976,7 @@ def _install_PretrainedConfig_patch():
             return False
         return self.__dict__ == other.__dict__
 
-    transformers.configuration_utils.PretrainedConfig.__eq__ = (
-        _dynamo_overriden_transformers_eq
-    )
+    mod.PretrainedConfig.__eq__ = _dynamo_overriden_transformers_eq
 
 
 class HFPretrainedConfigVariable(VariableTracker):
@@ -1038,7 +1062,7 @@ class PythonSysModulesVariable(VariableTracker):
         return k, has_key
 
     def call_contains(self, tx: "InstructionTranslator", key: VariableTracker):
-        k, has_key = self._contains_helper(tx, key)
+        _k, has_key = self._contains_helper(tx, key)
         return ConstantVariable.create(value=has_key)
 
     def call_get(
@@ -1059,6 +1083,6 @@ class PythonSysModulesVariable(VariableTracker):
         return ConstantVariable.create(value=None)
 
     def call_getitem(self, tx: "InstructionTranslator", key: VariableTracker):
-        k, has_key = self._contains_helper(tx, key)
+        k, _has_key = self._contains_helper(tx, key)
         source = self.source and GetItemSource(self.source, k)
         return VariableTracker.build(tx, sys.modules[k], source)

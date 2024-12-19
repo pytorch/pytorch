@@ -1,4 +1,5 @@
 # Owner(s): ["module: inductor"]
+# ruff: noqa: F841
 # flake8: noqa: E731
 # Skip do not assign a lambda expression, use a def
 import functools
@@ -3427,7 +3428,7 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
 
         output = "\n".join(record.getMessage() for record in log.records)
         # correct grid example values updated per block size
-        FileCheck().check("Compile-time auto-tuning code").check(
+        FileCheck().check("Compile-time auto-tuning block:").check(
             "grid_wrapper_for_op_zeros_0"
         ).check_next("return (256").check_next("return (64").run(output)
 
