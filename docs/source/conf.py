@@ -1137,6 +1137,7 @@ coverage_ignore_functions = [
     "fd_id",
     "init_reductions",
     "rebuild_cuda_tensor",
+    "rebuild_device_tensor",
     "rebuild_meta_tensor",
     "rebuild_event",
     "rebuild_nested_tensor",
