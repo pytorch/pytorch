@@ -280,7 +280,7 @@ struct NoOpDeviceGuardImpl final : public DeviceGuardImplInterface {
   }
 
   // NB: These do NOT set the current device
-  Stream exchangeStream(Stream) const noexcept override {
+  Stream exchangeStream(Stream) const override {
     // no-op
     return Stream(Stream::DEFAULT, Device(D, -1));
   }
