@@ -1,8 +1,10 @@
 import itertools
+import logging
 import pickle
 import random
 import signal
 import string
+import sys
 import traceback
 from enum import Enum
 from functools import partial, wraps
@@ -28,6 +30,9 @@ from torch._inductor.custom_graph_pass import CustomGraphPass
 from torch._inductor.scheduler import BaseSchedulerNode
 from torch.utils._config_module import _ConfigEntry, ConfigModule
 from torch.utils._ordered_set import OrderedSet
+
+
+log = logging.getLogger(__name__)
 
 
 def is_type(type_hint, comp_type) -> bool:  # type: ignore[no-untyped-def]
@@ -494,6 +499,9 @@ class ConfigFuzzer:
             sm: How type value samples are generated, default TOGGLE.
             test_timeout: max time a test can take.
         """
+        if sys.version_info < (3, 10):
+            log.error("Only python 3.10 and later supported")
+            return
         self.seed = seed
         self.test_timeout = test_timeout
         self.detailed_results: Dict[ComboType, Dict[str, Any]] = {}

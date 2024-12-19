@@ -1,5 +1,6 @@
 # Owner(s): ["module: dynamo"]
 
+import sys
 import unittest
 from typing import List, Literal
 
@@ -41,6 +42,7 @@ def create_simple_test_model_gpu():
 
 
 class TestConfigFuzzer(TestCase):
+    @unittest.skipIf(sys.version_info < (3, 10), "python < 3.10 not supported")
     def test_sampling_method_toggle(self):
         toggle = SamplingMethod.dispatch(SamplingMethod.TOGGLE)
         self.assertEqual(toggle("", bool, False), True)
@@ -50,22 +52,26 @@ class TestConfigFuzzer(TestCase):
         self.assertTrue("bar" in toggle("", List[Literal["foo", "bar"]], ["foo"]))
         self.assertTrue("foo" in toggle("", List[Literal["foo", "bar"]], ["bar"]))
 
+    @unittest.skipIf(sys.version_info < (3, 10), "python < 3.10 not supported")
     def test_sampling_method_random(self):
         random = SamplingMethod.dispatch(SamplingMethod.RANDOM)
         samp = [random("", bool, False) for i in range(1000)]
         self.assertTrue(not all(samp))
 
     @unittest.skipIf(not HAS_GPU, "requires gpu")
+    @unittest.skipIf(sys.version_info < (3, 10), "python < 3.10 not supported")
     def test_config_fuzzer_inductor_gpu(self):
         fuzzer = ConfigFuzzer(inductor_config, create_simple_test_model_gpu, seed=30)
         self.assertIsNotNone(fuzzer.default)
         fuzzer.reproduce([{"max_fusion_size": 1}])
 
+    @unittest.skipIf(sys.version_info < (3, 10), "python < 3.10 not supported")
     def test_config_fuzzer_inductor_cpu(self):
         fuzzer = ConfigFuzzer(inductor_config, create_simple_test_model_cpu, seed=100)
         self.assertIsNotNone(fuzzer.default)
         fuzzer.reproduce([{"max_fusion_size": 1}])
 
+    @unittest.skipIf(sys.version_info < (3, 10), "python < 3.10 not supported")
     def test_config_fuzzer_bisector_exception(self):
         key_1 = {"e_bool": False, "e_optional": None}
 
@@ -86,6 +92,7 @@ class TestConfigFuzzer(TestCase):
         for res in results:
             self.assertEqual(res, key_1)
 
+    @unittest.skipIf(sys.version_info < (3, 10), "python < 3.10 not supported")
     def test_config_fuzzer_bisector_boolean(self):
         key_1 = {"e_bool": False, "e_optional": None}
 
@@ -104,6 +111,7 @@ class TestConfigFuzzer(TestCase):
         for res in results:
             self.assertEqual(res, key_1)
 
+    @unittest.skipIf(sys.version_info < (3, 10), "python < 3.10 not supported")
     def test_config_fuzzer_n_tuple(self):
         key_1 = {"e_bool": False, "e_optional": None}
 
@@ -121,6 +129,7 @@ class TestConfigFuzzer(TestCase):
         self.assertEqual(results.num_ran(), max_combo)
         self.assertEqual(results.lookup(tuple(key_1.keys())), Status.FAILED_RUN_RETURN)
 
+    @unittest.skipIf(sys.version_info < (3, 10), "python < 3.10 not supported")
     def test_config_fuzzer_inductor_bisect(self):
         # these values just chosen randomly, change to different ones if necessary
         key_1 = {"split_reductions": False, "compute_all_bounds": True}
