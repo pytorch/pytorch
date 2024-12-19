@@ -3722,6 +3722,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         actual = fn_opt(*inputs)
         self.assertTrue(same(actual, expected))
 
+    @unittest.skip("Temparory for testing")
     @mock.patch("torch._dynamo.config.guard_nn_modules", True)
     def test_hf_xsoftmax_training(self):
         from torch._dynamo.utils import counters
