@@ -705,6 +705,12 @@ bool can_use_mem_efficient_attention(sdp_params const& params, bool debug) {
   }
 
 #ifdef USE_ROCM
+  if (params.attn_mask.has_value()) {
+    if (params.attn_mask.value().dtype() != params.query.dtype()) {
+      TORCH_WARN("Efficient attention on ROCM requires attn_mask has the same datatype as of q,k,v");
+      return false;
+    }
+  }
   return check_tensor_dtype(params, aotriton_mem_efficient_dtypes, debug);
 #else
   auto dprop = at::cuda::getCurrentDeviceProperties();
