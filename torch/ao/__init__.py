@@ -1,6 +1,7 @@
-# mypy: allow-untyped-defs
 # torch.ao is a package with a lot of interdependencies.
 # We will use lazy import to avoid cyclic dependencies here.
+
+from typing import Any
 
 
 __all__ = [
@@ -11,7 +12,7 @@ __all__ = [
 ]
 
 
-def __getattr__(name):
+def __getattr__(name: str) -> Any:
     if name in __all__:
         import importlib
 
