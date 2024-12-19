@@ -709,7 +709,7 @@ def _post_state_dict_hook(
     if fsdp_state.sharding_strategy == ShardingStrategy.NO_SHARD:
         context = _replace_with_full_state_dict_type(fsdp_state)
         warnings.warn(
-            "When using ``NO_SHARD`` for ``ShardingStrategy``, full_state_dict will"
+            "When using ``NO_SHARD`` for ``ShardingStrategy``, full_state_dict will "
             "be returned."
         )
     else:
@@ -771,7 +771,7 @@ def _pre_state_dict_hook(
     if fsdp_state.sharding_strategy == ShardingStrategy.NO_SHARD:
         context = _replace_with_full_state_dict_type(fsdp_state)
         warnings.warn(
-            "When using ``NO_SHARD`` for ``ShardingStrategy``, full_state_dict will"
+            "When using ``NO_SHARD`` for ``ShardingStrategy``, full_state_dict will "
             "be returned."
         )
     else:
