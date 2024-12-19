@@ -1016,8 +1016,8 @@ def register_partial_reduction_pattern():
         aten.amin.default: aten.min.default,
     }
 
-    # TODO - could support more reductions. they have different signatures which makes
-    # this a bit more annoying
+    # TODO: to support other reductions like sum, would need to skip
+    # lower precision reductions since partial output would need to be kept at fp32.
     for red_op in (aten.amax.default, aten.amin.default):
         inp = KeywordArg("input")
         partial_reduc = CallFunction(
