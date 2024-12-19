@@ -141,7 +141,7 @@ variable_list ${op}::apply_with_saved(const variable_list& grads, SwapSavedVaria
   auto packed_args = get_packed_args();
   auto output_metadata = torch::dynamo::autograd::IValuePacker<
     std::vector<std::optional<InputMetadata>>>::pack(
-      collect_input_metadata(next_edges()));
+      torch::dynamo::autograd::get_input_metadata(next_edges()));
   const auto& interface = torch::dynamo::autograd::getPyCompilerInterface();
   result = interface->call_function(
       saved.get_py_compiler(),
