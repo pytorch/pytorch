@@ -6,9 +6,8 @@ import sys
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, Type, TYPE_CHECKING, TypeVar
 
-from packaging import version
-
 import torch
+from torch._vendor.packaging.version import Version
 from torch.utils._contextlib import _DecoratorContextManager
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
@@ -413,7 +412,7 @@ def substitute_in_graph(
 def _apply_func_to_inner_tensors_of_same_dim(func, t, *args, **kwargs):
     assert is_traceable_wrapper_subclass(t)
 
-    attrs, ctx = t.__tensor_flatten__()
+    attrs, _ctx = t.__tensor_flatten__()
     assert isinstance(t, torch.Tensor)
     for attr in attrs:
         inner = getattr(t, attr)
@@ -616,7 +615,7 @@ def _allow_in_graph_einops():
         return
     else:
         # version > 0.7.0 does allow_in_graph out of tree
-        if version.Version(mod.__version__) < version.Version("0.7.0"):
+        if Version(mod.__version__) < Version("0.7.0"):
             import einops
 
             try:

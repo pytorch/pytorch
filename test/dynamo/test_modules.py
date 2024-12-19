@@ -1,4 +1,5 @@
 # Owner(s): ["module: dynamo"]
+# ruff: noqa: F841
 
 import collections
 import contextlib
@@ -22,6 +23,7 @@ from torch._dynamo.debug_utils import same_two_models
 from torch._dynamo.eval_frame import unsupported
 from torch._dynamo.mutation_guard import GenerationTracker
 from torch._dynamo.testing import expectedFailureDynamic, same
+from torch._dynamo.utils import ifdynstaticdefault
 from torch._dynamo.variables.torch_function import TensorWithTFOverrideVariable
 from torch.nn.modules.lazy import LazyModuleMixin
 from torch.nn.parameter import Parameter, UninitializedParameter
@@ -1130,6 +1132,35 @@ class UnspecNonInlinableToplevelModule(torch.nn.Module):
         return self.m(x)
 
 
+class ModuleWithIntAttr(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.layer = torch.nn.Linear(4, 4)
+        self.step = 10
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x = x + 1
+        return self.layer(x) + self.step
+
+
+class UnspecInlinableModule(torch.nn.Module):
+    torchdynamo_force_dynamic = True  # forced to be a UnspecializedNNModule
+
+    def forward(self, x):
+        return torch.sin(x)
+
+
+class UnspecModuleWithIntAttr(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.layer = UnspecInlinableModule()
+        self.step = 10
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x = x + 1
+        return self.layer(x) + self.step
+
+
 def make_test(fn, expected_ops=None):
     def test_fn(self):
         return torch._dynamo.testing.standard_test(
@@ -1753,6 +1784,38 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         opt_m = torch.compile(backend="eager", fullgraph=True)(m)
         res = opt_m(x)
         self.assertTrue(torch.allclose(ref, res))
+
+    @torch._dynamo.config.patch("allow_unspec_int_on_nn_module", True)
+    def test_nn_module_unspec_int_attr(self):
+        for module_class in [ModuleWithIntAttr, UnspecModuleWithIntAttr]:
+            mod = module_class()
+            cnt = torch._dynamo.testing.CompileCounter()
+            opt_mod = torch.compile(backend=cnt)(copy.deepcopy(mod))
+            x = torch.rand(3, 4)
+
+            # Compiling `self.step` as static
+            ref1 = mod(x)
+            res1 = opt_mod(x)
+            self.assertTrue(torch.allclose(ref1, res1))
+            self.assertEqual(cnt.frame_count, 1)
+
+            mod.step += 1
+            opt_mod.step += 1
+
+            # Second time: compiling `self.step` as dynamic
+            ref2 = mod(x)
+            res2 = opt_mod(x)
+            self.assertTrue(torch.allclose(ref2, res2))
+            self.assertEqual(cnt.frame_count, ifdynstaticdefault(2, 1))
+
+            mod.step += 1
+            opt_mod.step += 1
+
+            # Third time: no re-compilation!
+            ref3 = mod(x)
+            res3 = opt_mod(x)
+            self.assertTrue(torch.allclose(ref3, res3))
+            self.assertEqual(cnt.frame_count, ifdynstaticdefault(2, 1))
 
 
 class MockModule(torch.nn.Module):
@@ -2989,7 +3052,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
                 self.x = res
                 return self.Linear2(res)
 
-        N, D_in, H, D_out, inner = 2, 2, 2, 2, 4
+        N, D_in, H, inner = 2, 2, 2, 4
         model = ReplayMutation(D_in, H, inner)
         model2 = copy.deepcopy(model)
         input = torch.ones(N, D_in)
@@ -3007,7 +3070,9 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
     def test_globals_change_in_other_file(self):
         @torch.compile(backend="eager", fullgraph=True)
         def fn(x):
-            update_global()
+            # Let `update_global` get invoked in a nested frame, to make sure
+            # Dynamo is properly modelling globals across frames and files.
+            test_functions.call(update_global)
             a = test_functions.update_global(x)
             # Ensure that the updated global values are read
             return x * a * (_variable + _variable1 + test_functions._variable)
