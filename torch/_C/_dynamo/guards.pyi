@@ -22,6 +22,13 @@ class GuardManager:
         example_value,
         guard_manager_enum,
     ) -> GuardManager: ...
+    def framelocals_manager(
+        self,
+        key: tuple[str, int],
+        source,
+        example_value,
+        guard_manager_enum,
+    ) -> GuardManager: ...
     def dict_getitem_manager(
         self,
         key,

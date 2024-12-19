@@ -143,6 +143,8 @@ __all__ = [
     "read_file",
     "tune_gemm_in_file",
     "mgpu_tune_gemm_in_file",
+    "set_rotating_buffer_size",
+    "get_rotating_buffer_size",
 ]
 
 
@@ -263,6 +265,19 @@ def read_file(filename: Optional[str] = None) -> bool:
     if filename is None:
         filename = get_filename()
     return torch._C._cuda_tunableop_read_file(filename)  # type: ignore[attr-defined]
+
+
+def set_rotating_buffer_size(buffer_size: int) -> None:
+    r"""Set rotating buffer size to this value in MB, if the buffer size is greater than zero.
+
+    If less than zero, query L2 cache size. If equal to zero, means deactivate rotating buffer.
+    """
+    return torch._C._cuda_tunableop_set_rotating_buffer_size(buffer_size)  # type: ignore[attr-defined]
+
+
+def get_rotating_buffer_size() -> int:
+    r"""Get the rotating buffer size in kilobytes."""
+    return torch._C._cuda_tunableop_get_rotating_buffer_size()  # type: ignore[attr-defined]
 
 
 def tune_gemm_in_file(filename: str) -> None:
