@@ -27,11 +27,11 @@ Strict vs. Non-Strict Tracing
 In *non-strict mode*, we trace through the program using the normal Python
 interpreter. Your code executes exactly as it would in eager mode; the only
 difference is that **all Tensors are replaced by
-`fake Tensors <https://pytorch.org/docs/main/torch.compiler_fake_tensor.html>`_,
+`fake Tensors <https://pytorch.org/docs/main/torch.compiler_fake_tensor.html>`__,
 which have shapes and other forms of metadata but no data**, wrapped in
-`Proxy objects <https://pytorch.org/docs/main/fx.html>`_ that record all
+`Proxy objects <https://pytorch.org/docs/main/fx.html>`__ that record all
 operations on them into a graph. We also capture
-**`conditions on Tensor shapes <https://pytorch.org/docs/main/torch.compiler_dynamic_shapes.html#the-guard-model>`_
+**`conditions on Tensor shapes <https://pytorch.org/docs/main/torch.compiler_dynamic_shapes.html#the-guard-model>`__
 that guard the correctness of the generated code**.
 
 In *strict mode*, we first trace through the program using
@@ -51,7 +51,7 @@ time, the possibility of hitting unsupported Python features in TorchDynamo
 presents an unnecessary risk.
 
 In the rest of this document we assume we are tracing in
-`non-strict mode <https://pytorch.org/docs/main/export.html#non-strict-export>`_;
+`non-strict mode <https://pytorch.org/docs/main/export.html#non-strict-export>`__;
 in particular, we assume that **all Python features are supported**.
 
 Values: Static vs. Dynamic
@@ -116,7 +116,7 @@ Whether a value is static or dynamic depends on its type:
 
     - By default, shapes of all input Tensors are considered static.
       The user can override this behavior for any input Tensor by specifying
-      a `dynamic shape <https://pytorch.org/docs/main/export.html#expressing-dynamism>`_
+      a `dynamic shape <https://pytorch.org/docs/main/export.html#expressing-dynamism>`__
       for it.
 
     - Tensors that are part of module state, i.e., parameters and buffers,
@@ -136,7 +136,7 @@ Whether a value is static or dynamic depends on its type:
 
   - The contained elements have these rules applied to them recursively
     (basically the
-    `PyTree <https://jax.readthedocs.io/en/latest/pytrees.html>`_ scheme)
+    `PyTree <https://jax.readthedocs.io/en/latest/pytrees.html>`__ scheme)
     with leaves that are either Tensor or primitive types.
 
 - Other *classes* (including data classes) can be registered with PyTree
@@ -261,7 +261,7 @@ Dynamic Shape-Dependent Control Flow
 """"""""""""""""""""""""""""""""""""
 
 When the value involved in a control flow is a
-`dynamic shape <https://pytorch.org/docs/main/torch.compiler_dynamic_shapes.html>`_,
+`dynamic shape <https://pytorch.org/docs/main/torch.compiler_dynamic_shapes.html>`__,
 **in most cases we will also know the concrete value of the dynamic shape
 during tracing**: see the following section for more details on how the
 compiler tracks this information.
@@ -312,7 +312,7 @@ traced.
           )
 
 A special case of data-dependent control flow is where it involves a
-*`data-dependent dynamic shape <https://pytorch.org/docs/main/torch.compiler_dynamic_shapes.html#unbacked-symints>`_*:
+*`data-dependent dynamic shape <https://pytorch.org/docs/main/torch.compiler_dynamic_shapes.html#unbacked-symints>`__*:
 typically, the shape of some intermediate Tensor that depends on input data
 rather than on input shapes (thus not shape-dependent). Instead of using a
 control flow operator, in this case you can provide an assertion that decides
@@ -368,7 +368,7 @@ Moreover, as we encounter control flow in the program, we create boolean
 expressions, typically involving relational operators, describing conditions
 along the traced path. These **expressions are evaluated to decide which path
 to trace through the program**, and recorded in a
-*`shape environment <https://pytorch.org/docs/main/torch.compiler_dynamic_shapes.html#overall-architecture>`_*
+*`shape environment <https://pytorch.org/docs/main/torch.compiler_dynamic_shapes.html#overall-architecture>`__*
 to guard the correctness of the traced path and to evaluate subsequently
 created expressions.
 
@@ -378,7 +378,7 @@ Fake Implementations of PyTorch Operators
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 Recall that during tracing, we are executing the program with
-`fake Tensors <https://pytorch.org/docs/main/torch.compiler_fake_tensor.html>`_,
+`fake Tensors <https://pytorch.org/docs/main/torch.compiler_fake_tensor.html>`__,
 which have no data. In general we cannot call the actual implementations of
 PyTorch operators with fake Tensors. Thus each operator needs to have an
 additional fake (a.k.a. "meta") implementation, which inputs and outputs fake
@@ -474,7 +474,7 @@ Custom operators
 ^^^^^^^^^^^^^^^^
 
 In addition, you can define and use
-`custom operators <https://pytorch.org/tutorials/advanced/python_custom_ops#python-custom-ops-tutorial>`_.
+`custom operators <https://pytorch.org/tutorials/advanced/python_custom_ops#python-custom-ops-tutorial>`__.
 Defining a custom operator includes defining a fake implementation for it,
 just like any other PyTorch operator (see previous section).
 
