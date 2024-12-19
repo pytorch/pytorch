@@ -138,7 +138,7 @@ struct C10_API DeviceGuardImplInterface {
    * Return the previous stream for that device. You are NOT required
    * to set the current device to match the device of this stream.
    */
-  virtual Stream exchangeStream(Stream) const noexcept = 0;
+  virtual Stream exchangeStream(Stream) const = 0;
 
   /**
    * Destroys the given event.
@@ -280,7 +280,7 @@ struct NoOpDeviceGuardImpl final : public DeviceGuardImplInterface {
   }
 
   // NB: These do NOT set the current device
-  Stream exchangeStream(Stream) const override {
+  Stream exchangeStream(Stream) const noexcept override {
     // no-op
     return Stream(Stream::DEFAULT, Device(D, -1));
   }
