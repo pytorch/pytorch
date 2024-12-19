@@ -345,7 +345,8 @@ def check_outputs_carry_consistency(
                         # We set include contiguity=False because we have vmap x cond tests, where if
                         # include_contiguity=True will call t.is_contiguous inside of vmap and get an error
                         # "querying is_contiguous inside of vmap for memory_format other than
-                        # torch.contiguous_format is not yet implemented". This is good for now.
+                        # torch.contiguous_format is not yet implemented". This is good for because stride
+                        # is still checked.
                         _extract_tensor_metadata(lhs, include_contiguity=False),
                         _extract_tensor_metadata(rhs, include_contiguity=False),
                         check_grad=False,
