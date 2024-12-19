@@ -24,6 +24,7 @@ from typing import (
 
 import torch
 import torch.distributed as dist
+from torch._dynamo import OptimizedModule
 from torch.distributed.fsdp import FSDPModule, UnshardHandle
 from torch.profiler import record_function
 
@@ -2020,6 +2021,15 @@ class ScheduleInterleavedZeroBubble(PipelineScheduleMulti):
         kwargs_chunk_spec: Optional[Dict[str, TensorChunkSpec]] = None,
         output_merge_spec: Optional[Union[Dict[str, Any], Tuple[Any]]] = None,
     ):
+        # TODO: we don't support Zero Bubble with torch.compile so we
+        # should disable it for now
+        for stage in stages:
+            if isinstance(stage.submod, OptimizedModule):
+                raise RuntimeError(
+                    "The Zero Bubble schedule is not supported with \
+stage modules that have used torch.compile"
+                )
+
         self.pp_group_size = stages[0].group_size
         super().__init__(
             stages=stages,
