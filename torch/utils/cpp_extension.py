@@ -144,10 +144,6 @@ def _find_rocm_home() -> Optional[str]:
     return rocm_home
 
 def _find_sycl_home() -> Optional[str]:
-    def valid_sycl_home(sycl_home):
-        libsycl = "sycl.lib" if IS_WINDOWS else "libsycl.so"
-        return os.path.exists(os.path.join(sycl_home, 'lib', libsycl))
-
     sycl_home = None
     icpx_path = shutil.which('icpx')
     if icpx_path is not None:
