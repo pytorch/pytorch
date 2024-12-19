@@ -27,10 +27,18 @@ namespace torch::utils {
 TORCH_PYTHON_API void device_lazy_init(at::DeviceType device_type);
 void set_requires_device_init(at::DeviceType device_type, bool value);
 
-inline void maybe_initialize_device(at::Device& device) {
+inline bool is_device_lazy_init_supported(at::DeviceType device_type) {
   // Add more devices here to enable lazy initialization.
-  if (device.is_cuda() || device.is_xpu() || device.is_privateuseone() ||
-      device.is_hpu() || device.is_mtia()) {
+  return (
+      device_type == at::DeviceType::CUDA ||
+      device_type == at::DeviceType::XPU ||
+      device_type == at::DeviceType::HPU ||
+      device_type == at::DeviceType::MTIA ||
+      device_type == at::DeviceType::PrivateUse1);
+}
+
+inline void maybe_initialize_device(at::Device& device) {
+  if (is_device_lazy_init_supported(device.type())) {
     device_lazy_init(device.type());
   }
 }
@@ -45,6 +53,14 @@ inline void maybe_initialize_device(std::optional<at::Device>& device) {
 inline void maybe_initialize_device(const at::TensorOptions& options) {
   auto device = options.device();
   maybe_initialize_device(device);
+}
+
+inline void maybe_initialize_device(
+    std::optional<at::DeviceType>& device_type) {
+  if (!device_type.has_value()) {
+    return;
+  }
+  maybe_initialize_device(device_type.value());
 }
 
 bool is_device_initialized(at::DeviceType device_type);
