@@ -638,9 +638,9 @@ class SIMDKernel(Kernel):
                     )
             return_getters_groups.append(return_getters)
 
-        # Check that the total number of iterations matches.
-        if not all(V.graph.sizevars.size_hint(s) == 1 for s in remaining):
-            raise CantSplit
+        assert all(
+            V.graph.sizevars.size_hint(s) == 1 for s in remaining
+        ), f"failed to set ranges {remaining} {lengths}"
 
         return new_ranges, return_getters_groups
 
