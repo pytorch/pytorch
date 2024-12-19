@@ -1289,6 +1289,7 @@ def main():
         "include/torch/csrc/inductor/aoti_torch/*.h",
         "include/torch/csrc/inductor/aoti_torch/c/*.h",
         "include/torch/csrc/inductor/aoti_torch/generated/*.h",
+        "include/torch/csrc/inductor/aoti_torch/generated/extend/*.h",
         "include/torch/csrc/jit/*.h",
         "include/torch/csrc/jit/backends/*.h",
         "include/torch/csrc/jit/generated/*.h",
@@ -1337,6 +1338,7 @@ def main():
         "_inductor/codegen/*.h",
         "_inductor/codegen/aoti_runtime/*.cpp",
         "_export/serde/*.yaml",
+        "_export/serde/*.thrift",
         "share/cmake/ATen/*.cmake",
         "share/cmake/Caffe2/*.cmake",
         "share/cmake/Caffe2/public/*.cmake",
@@ -1371,6 +1373,13 @@ def main():
                 "lib/*.lib",
             ]
         )
+        aotriton_image_path = os.path.join(lib_path, "aotriton.images")
+        aks2_files = []
+        for root, dirs, files in os.walk(aotriton_image_path):
+            subpath = os.path.relpath(root, start=aotriton_image_path)
+            for fn in files:
+                aks2_files.append(os.path.join("lib/aotriton.images", subpath, fn))
+        torch_package_data += aks2_files
     if get_cmake_cache_vars()["USE_TENSORPIPE"]:
         torch_package_data.extend(
             [

@@ -2,8 +2,6 @@
 
 set -ex
 
-GPU_ARCH_TYPE=${GPU_ARCH_TYPE:-cpu}
-
 export TH_BINARY_BUILD=1
 export USE_CUDA=0
 
@@ -17,22 +15,13 @@ if [[ -z "$EXTRA_CAFFE2_CMAKE_FLAGS" ]]; then
     EXTRA_CAFFE2_CMAKE_FLAGS=()
 fi
 
-DIR_SUFFIX=cpu
-if [[ "$GPU_ARCH_TYPE" == "xpu" ]]; then
-    DIR_SUFFIX=xpu
-    # Refer https://www.intel.com/content/www/us/en/developer/articles/tool/pytorch-prerequisites-for-intel-gpus.html
-    source /opt/intel/oneapi/compiler/latest/env/vars.sh
-    source /opt/intel/oneapi/pti/latest/env/vars.sh
-    export USE_STATIC_MKL=1
-fi
-
-WHEELHOUSE_DIR="wheelhouse$DIR_SUFFIX"
-LIBTORCH_HOUSE_DIR="libtorch_house$DIR_SUFFIX"
+WHEELHOUSE_DIR="wheelhousecpu"
+LIBTORCH_HOUSE_DIR="libtorch_housecpu"
 if [[ -z "$PYTORCH_FINAL_PACKAGE_DIR" ]]; then
     if [[ -z "$BUILD_PYTHONLESS" ]]; then
-        PYTORCH_FINAL_PACKAGE_DIR="/remote/wheelhouse$DIR_SUFFIX"
+        PYTORCH_FINAL_PACKAGE_DIR="/remote/wheelhousecpu"
     else
-        PYTORCH_FINAL_PACKAGE_DIR="/remote/libtorch_house$DIR_SUFFIX"
+        PYTORCH_FINAL_PACKAGE_DIR="/remote/libtorch_housecpu"
     fi
 fi
 mkdir -p "$PYTORCH_FINAL_PACKAGE_DIR" || true
@@ -59,24 +48,6 @@ DEPS_LIST=(
 DEPS_SONAME=(
     "libgomp.so.1"
 )
-
-if [[ "$GPU_ARCH_TYPE" == "xpu" ]]; then
-    echo "Bundling with xpu support package libs."
-    DEPS_LIST+=(
-        "/opt/intel/oneapi/compiler/latest/lib/libOpenCL.so.1"
-        "/opt/intel/oneapi/compiler/latest/lib/libsvml.so"
-        "/opt/intel/oneapi/compiler/latest/lib/libirng.so"
-        "/opt/intel/oneapi/compiler/latest/lib/libimf.so"
-        "/opt/intel/oneapi/compiler/latest/lib/libintlc.so.5"
-    )
-    DEPS_SONAME+=(
-        "libOpenCL.so.1"
-        "libsvml.so"
-        "libirng.so"
-        "libimf.so"
-        "libintlc.so.5"
-    )
-fi
 
 rm -rf /usr/local/cuda*
 

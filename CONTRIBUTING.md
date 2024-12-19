@@ -79,7 +79,7 @@ cd pytorch
 git remote add upstream git@github.com:pytorch/pytorch.git
 
 make setup-env  # or make setup-env-cuda for pre-built CUDA binaries
-conda activate pytorch-deps
+source venv/bin/activate  # or `& .\venv\Scripts\Activate.ps1` on Windows
 ```
 
 ### Tips and Debugging
@@ -166,7 +166,7 @@ conda activate pytorch-deps
 ## Nightly Checkout & Pull
 
 The `tools/nightly.py` script is provided to ease pure Python development of
-PyTorch. This uses `conda` and `git` to check out the nightly development
+PyTorch. This uses `venv` and `git` to check out the nightly development
 version of PyTorch and installs pre-built binaries into the current repository.
 This is like a development or editable install, but without needing the ability
 to compile any C++ code.
@@ -175,33 +175,33 @@ You can use this script to check out a new nightly branch with the following:
 
 ```bash
 ./tools/nightly.py checkout -b my-nightly-branch
-conda activate pytorch-deps
+source venv/bin/activate  # or `& .\venv\Scripts\Activate.ps1` on Windows
 ```
 
 Or if you would like to re-use an existing conda environment, you can pass in
-the regular environment parameters (`--name` or `--prefix`):
+the prefix argument (`--prefix`):
 
 ```bash
-./tools/nightly.py checkout -b my-nightly-branch -n my-env
-conda activate my-env
+./tools/nightly.py checkout -b my-nightly-branch -p my-env
+source my-env/bin/activate  # or `& .\my-env\Scripts\Activate.ps1` on Windows
 ```
 
 To install the nightly binaries built with CUDA, you can pass in the flag `--cuda`:
 
 ```bash
 ./tools/nightly.py checkout -b my-nightly-branch --cuda
-conda activate pytorch-deps
+source venv/bin/activate  # or `& .\venv\Scripts\Activate.ps1` on Windows
 ```
 
 You can also use this tool to pull the nightly commits into the current branch:
 
 ```bash
-./tools/nightly.py pull -n my-env
-conda activate my-env
+./tools/nightly.py pull -p my-env
+source my-env/bin/activate  # or `& .\venv\Scripts\Activate.ps1` on Windows
 ```
 
-Pulling will reinstall the PyTorch dependencies as well as the nightly binaries
-into the repo directory.
+Pulling will recreate a fresh virtual environment and reinstall the development
+dependencies as well as the nightly binaries into the repo directory.
 
 ## Codebase structure
 
@@ -288,7 +288,7 @@ The following packages should be installed with either `conda` or `pip`:
 - `pytest` - recommended to run tests more selectively
 Running
 ```
-pip install -r requirements
+pip install -r requirements.txt
 ```
 will install these dependencies for you.
 
