@@ -339,9 +339,9 @@ def _run_compile_cmd(cmd_line: str, cwd: str) -> None:
         raise exc.CppCompileError(cmd, output) from e
 
 
-def run_compile_cmd(cmd_line: str, cwd: str) -> bytes:
+def run_compile_cmd(cmd_line: str, cwd: str) -> None:
     with dynamo_timed("compile_file"):
-        return _run_compile_cmd(cmd_line, cwd)
+        _run_compile_cmd(cmd_line, cwd)
 
 
 def normalize_path_separator(orig_path: str) -> str:
