@@ -93,7 +93,7 @@ __global__ void upsample_nearest2d_nhwc_out_frame(
     float width_scale,
     const size_t out_numel) {
 
-  const int64_t index = blockIdx.x * blockDim.x + threadIdx.x;
+  const int64_t index = ((int64_t) blockIdx.x) * blockDim.x + threadIdx.x;
 
   if (index < out_numel) {
     const auto c = index % channels;
@@ -122,7 +122,7 @@ __global__ void upsample_nearest2d_backward_out_frame(
     scalar_t* grad_i,
     float height_scale,
     float width_scale) {
-  int64_t dst_idx = blockIdx.x * blockDim.x + threadIdx.x;
+  int64_t dst_idx = ((int64_t) blockIdx.x) * blockDim.x + threadIdx.x;
   if (dst_idx >= dim_c * dst_dim_h * dst_dim_w)
     return;
 

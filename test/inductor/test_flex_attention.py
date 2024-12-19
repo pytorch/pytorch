@@ -932,7 +932,6 @@ class TestFlexAttention(InductorTestCase):
             test_inference_only = True
         else:
             test_inference_only = False
-        MAX_S = S
         block_mask1 = create_block_mask(noop_mask, 1, 1, S, S, device=self.device)
         sdpa_partial1 = create_attention(score_mod, block_mask=block_mask1)
         # The first eager batch, shape (B, H, S, D)
@@ -3357,7 +3356,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
             # Run forward pass
             x = torch.randn(batch_shape, sequence_len, 512).cuda()
-            y = model(x, block_mask=block_mask)
+            model(x, block_mask=block_mask)
 
         self.assertEqual(torch._dynamo.utils.counters["aot_autograd"]["ok"], 2)
 
@@ -3925,8 +3924,6 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
     @supported_platform
     @common_utils.parametrize("compile", [False, True])
     def test_no_q_info(self, compile: bool):
-        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
         def causal_mask(b, h, q_idx, kv_idx):
             return q_idx >= kv_idx
 
@@ -4001,7 +3998,7 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
 
         device = "cuda"
         max_seq_len, doc_count = 128, 4
-        B, H, SEQ_LEN, HEAD_DIM = 1, 1, max_seq_len, 8
+        SEQ_LEN = max_seq_len
 
         lengths = generate_random_lengths(max_seq_len, doc_count)
         offsets = length_to_offsets(lengths, device)
@@ -4031,7 +4028,6 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
             lengths = generate_random_lengths(1024 + i, 5)
             offsets = length_to_offsets(lengths, "cuda")
             doc_ids = _offsets_to_doc_ids_tensor(offsets)
-            total_seq_len = 1024 + i
 
             def doc_mask_mod(b, h, q_idx, kv_idx):
                 return (
