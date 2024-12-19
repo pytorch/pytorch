@@ -1647,7 +1647,7 @@ class GuardBuilder(GuardBuilderBase):
         return self.FUNCTION_MATCH(guard)
 
     def SEQUENCE_LENGTH(self, guard):
-        # This guard is used to check lenght of PySequence objects like list,
+        # This guard is used to check length of PySequence objects like list,
         # tuple, collections.deque etc
         ref = self.arg_ref(guard)
         value = self.get(guard.name)

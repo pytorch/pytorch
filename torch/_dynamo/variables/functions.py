@@ -6,7 +6,17 @@ import functools
 import inspect
 import itertools
 import types
-from typing import Any, Callable, Dict, List, Optional, Tuple, TYPE_CHECKING, TypeVar
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    List,
+    Optional,
+    Sequence,
+    Tuple,
+    TYPE_CHECKING,
+    TypeVar,
+)
 from typing_extensions import Never
 
 import torch
@@ -1038,6 +1048,44 @@ class DynamoTritonHOPifier(TritonHOPifier):
         meta = {variables.ConstantVariable.create(k): v for k, v in meta.items()}
         grid = grid.call_function(tx, [meta], {})
         return grid
+
+    # We use this function to wrap user-defined functions (e.g., early_config_prune, perf_model)
+    def call_user_defined_fn(self, user_fn, args, kwargs, tx, source):
+        from .builder import VariableBuilder
+
+        wrapped_user_function = VariableBuilder(tx, source)._wrap(user_fn)
+        result = wrapped_user_function.call_function(tx, args, kwargs)
+        return result
+
+    # We use this function to wrap early_config_prune and perf_model
+    # These are both user-defined functions that we need to run.
+    # We also wrap the configs to pass into the functions we call.
+    def wrap_user_defined_obj(self, user_obj, tx, source, name):
+        from .builder import VariableBuilder
+
+        wrapped_user_obj = VariableBuilder(tx, AttrSource(source, f"{name}"))._wrap(
+            user_obj
+        )
+        return wrapped_user_obj
+
+    # We need to override call_getitem here so that we can call GetItemSource
+    def call_getitem(
+        self,
+        variable: "TritonKernelVariable",
+        args: Sequence[Any],
+    ) -> "TritonKernelVariable":
+        # __getitem__ should only be called if we don't already have a grid
+        # Only grid needs to be passed
+        if variable.grid is not None or len(args) != 1:
+            self.raise_unsupported(
+                "Triton kernels should be called with only a single grid"
+            )
+        return type(variable)(
+            kernel=variable.kernel,
+            kernel_idx=variable.kernel_idx,
+            grid=args[0],
+            source=variable.source,
+        )
 
     def call_HOP(self, variable, grids, combined_args_raw, tx) -> ConstantVariable:
         from .constant import ConstantVariable
