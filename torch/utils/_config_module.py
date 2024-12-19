@@ -187,14 +187,17 @@ def install_config_module(module: ModuleType) -> None:
                 continue
 
             name = f"{prefix}{key}"
+            annotated_type = type_hints.get(key, None)
             if isinstance(value, CONFIG_TYPES):
-                annotated_type = type_hints.get(key, None)
                 config[name] = _ConfigEntry(
                     _Config(default=value, value_type=annotated_type)
                 )
                 if dest is module:
                     delattr(module, key)
             elif isinstance(value, _Config):
+                if annotated_type is not None and value.value_type is None:
+                    value.value_type = annotated_type
+
                 config[name] = _ConfigEntry(value)
 
                 if dest is module:
