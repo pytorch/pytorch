@@ -629,7 +629,7 @@ class UnflattenedModule(torch.nn.Module):
                     if fqn not in redirected_call_indices:
                         *prefix, name = fqn.split(".")
                         _get_attr_via_attr_list(self, prefix)._modules.pop(name)
-                self.set_submodule(
+                self.replace_or_create_new_leaf_module(
                     orig_fqn,
                     InterpreterModuleDispatcher(attrs_map[orig_fqn], call_modules),
                 )
@@ -1528,7 +1528,7 @@ def _deduplicate_modules(partitions):
                         # was actually called. However, it is possible that the current call name
                         # will be optimized away when we find another seen module with the same fqn,
                         # so we do not break out of the loop yet.
-                        parent.set_submodule(target, seen.module)
+                        parent.replace_or_create_new_leaf_module(target, seen.module)
                         deduplicated = True
 
     return redirected_call_indices

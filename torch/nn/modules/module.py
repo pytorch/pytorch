@@ -750,7 +750,7 @@ class Module:
         submodule ``net_b``, which itself has two submodules ``net_c``
         and ``linear``. ``net_c`` then has a submodule ``conv``.)
 
-        To overide the ``Conv2d`` with a new submodule ``Linear``, you
+        To override the ``Conv2d`` with a new submodule ``Linear``, you
         would call
         ``set_submodule("net_b.net_c.conv", nn.Linear(33, 16))``.
 
@@ -770,22 +770,83 @@ class Module:
             raise ValueError("Cannot set the submodule without a target name!")
 
         atoms: List[str] = target.split(".")
-        name = atoms.pop(-1)
-        mod: torch.nn.Module = self
+        if not isinstance(module, torch.nn.Module):
+            raise AttributeError("`" + atoms[-1] + "` is not an nn.Module")
+        if len(atoms) == 1:
+            parent: torch.nn.Module = self
+        else:
+            parent_key = ".".join(atoms[:-1])
+            parent = self.get_submodule(parent_key)
+        if not hasattr(parent, atoms[-1]):
+            raise AttributeError(
+                parent._get_name() + " has no attribute `" + atoms[-1] + "`"
+            )
+        mod = getattr(parent, atoms[-1])
+        if not isinstance(mod, torch.nn.Module):
+            raise AttributeError("`" + atoms[-1] + "` is not an nn.Module")
 
-        for item in atoms:
-            if not hasattr(mod, item):
-                raise AttributeError(
-                    mod._get_name() + " has no attribute `" + item + "`"
+        setattr(parent, atoms[-1], module)
+
+    def replace_or_create_new_leaf_module(self, target: str, module: "Module"):
+        """
+        Replace the submodule given by ``target`` if it exists, or see if the
+        parent module of target exists and create target, otherwise throw an error.
+
+        For example, let's say you have an ``nn.Module`` ``A`` that
+        looks like this:
+
+        .. code-block:: text
+
+            A(
+                (net_b): Module(
+                    (net_c): Module(
+                        (conv): Conv2d(16, 33, kernel_size=(3, 3), stride=(2, 2))
+                    )
+                    (linear): Linear(in_features=100, out_features=200, bias=True)
                 )
+            )
 
-            mod = getattr(mod, item)
+        (The diagram shows an ``nn.Module`` ``A``. ``A`` has a nested
+        submodule ``net_b``, which itself has two submodules ``net_c``
+        and ``linear``. ``net_c`` then has a submodule ``conv``.)
 
-            # Use isinstance instead of type here to also handle subclass of nn.Module
-            if not isinstance(mod, torch.nn.Module):
-                raise AttributeError("`" + item + "` is not an nn.Module")
+        To override the ``Conv2d`` with a new submodule ``Linear``, you
+        would call
+        ``replace_or_create_new_leaf_module("net_b.net_c.conv", nn.Linear(33, 16))``.
 
-        setattr(mod, name, module)
+        To create a new leaf node of ``net_b``, called ``net_d``, you would call
+        ``replace_or_create_new_leaf_module("net_b.net_d", nn.Linear(33, 16))``
+
+
+        Args:
+            target: The fully-qualified string name of the submodule
+                to look for. (See above example for how to specify a
+                fully-qualified string.)
+            module: The module to set the submodule to.
+
+        Raises:
+            ValueError: If the target string is empty
+            AttributeError: If the attribute on the path referenced by target
+                exists but is not an instance of ``nn.Module``.
+                If the module to replace with is not an instance of ``nn.Module``.
+                If the leaf node does not exist
+                and the parent node is not an ``nn.Module``.
+        """
+        atoms: List[str] = target.split(".")
+        if not isinstance(module, torch.nn.Module):
+            raise AttributeError("`" + atoms[-1] + "` is not an nn.Module")
+        try:
+            self.set_submodule(target, module)
+        except AttributeError as err:
+            parent_key = ".".join(atoms[:-1])
+            parent = self.get_submodule(parent_key)
+            if hasattr(parent, atoms[-1]):
+                mod = getattr(parent, atoms[-1])
+                if not isinstance(mod, torch.nn.Module):
+                    raise AttributeError(
+                        "`" + atoms[-1] + "` is not an nn.Module"
+                    ) from err
+            setattr(parent, atoms[-1], module)
 
     def get_parameter(self, target: str) -> "Parameter":
         """Return the parameter given by ``target`` if it exists, otherwise throw an error.
