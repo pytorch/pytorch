@@ -110,6 +110,11 @@ def load(f, map_location=None, _extra_files=None, _restore_shapes=False):
     Returns:
         A :class:`ScriptModule` object.
 
+    .. warning::
+        It is possible to construct malicious pickle data which will execute arbitrary code
+        during func:`torch.jit.load`. Never load data that could have come from an untrusted
+        source, or that could have been tampered with. **Only load data you trust**.
+
     Example:
     .. testcode::
 
