@@ -455,16 +455,6 @@ auto build_graph_and_tensors(
                               .set_stride(attn_bias.value().strides().vec()));
     scaled_dot_product_flash_attention_options.set_bias(bias.value());
   }
-  auto seq_q = mha_graph->tensor(fe::graph::Tensor_attributes()
-                                     .set_name("Seq_q")
-                                     .set_dim({b, 1, 1, 1})
-                                     .set_stride({1, 1, 1, 1})
-                                     .set_data_type(fe::DataType_t::INT32));
-  auto seq_kv = mha_graph->tensor(fe::graph::Tensor_attributes()
-                                      .set_name("Seq_kv")
-                                      .set_dim({b, 1, 1, 1})
-                                      .set_stride({1, 1, 1, 1})
-                                      .set_data_type(fe::DataType_t::INT32));
 
   auto [O, Stats] =
       mha_graph->sdpa(Q, K, V, scaled_dot_product_flash_attention_options);
@@ -492,6 +482,179 @@ auto build_graph_and_tensors(
       std::move(offset),
       std::move(O),
       std::move(Stats));
+}
+
+auto build_graph_and_tensors_nestedtensor(
+    int64_t b,
+    int64_t h_q,
+    int64_t h_k,
+    int64_t h_v,
+    int64_t s_q,
+    int64_t s_kv,
+    int64_t d_qk,
+    int64_t d_v,
+    float scaling_factor,
+    bool return_softmaxstats,
+    bool is_causal,
+    double dropout_probability,
+    const Tensor& cum_seqlen_q,
+    const Tensor& cum_seqlen_kv,
+    const Tensor& output_shape,
+    const Tensor& q,
+    const Tensor& k,
+    const Tensor& v,
+    const std::optional<Tensor>& attn_bias,
+    Tensor& softmaxstats,
+    Tensor& o,
+    Tensor& dropoutseed,
+    Tensor& dropoutoffset,
+    cudnnHandle_t& handle) {
+  auto dtype = fe::DataType_t::HALF;
+  if (q.scalar_type() == kBFloat16) {
+    dtype = fe::DataType_t::BFLOAT16;
+  }
+  auto mha_graph = std::make_shared<fe::graph::Graph>();
+  // We're baking in float accumulation and scale types
+  // in theory the graph may support other types, but they
+  // have not been tested
+  mha_graph->set_io_data_type(dtype)
+      .set_intermediate_data_type(fe::DataType_t::FLOAT)
+      .set_compute_data_type(fe::DataType_t::FLOAT);
+  auto attn_scale =
+      mha_graph->tensor(fe::graph::Tensor_attributes()
+                            .set_name("Attn_scale")
+                            .set_dim({1, 1, 1, 1})
+                            .set_stride({1, 1, 1, 1})
+                            .set_is_pass_by_value(true)
+                            .set_data_type(fe::DataType_t::FLOAT));
+  auto seed = mha_graph->tensor(fe::graph::Tensor_attributes()
+                                    .set_name("Seed")
+                                    .set_dim({1, 1, 1, 1})
+                                    .set_stride({1, 1, 1, 1})
+                                    .set_data_type(fe::DataType_t::INT32));
+  auto offset = mha_graph->tensor(fe::graph::Tensor_attributes()
+                                      .set_name("Offset")
+                                      .set_dim({1, 1, 1, 1})
+                                      .set_stride({1, 1, 1, 1})
+                                      .set_data_type(fe::DataType_t::INT32));
+  auto SEQ_LEN_Q = mha_graph->tensor(fe::graph::Tensor_attributes()
+                                     .set_name("Seq_q")
+                                     .set_dim({b, 1, 1, 1})
+                                     .set_stride({1, 1, 1, 1})
+                                     .set_data_type(fe::DataType_t::INT32));
+  auto SEQ_LEN_KV = mha_graph->tensor(fe::graph::Tensor_attributes()
+                                     .set_name("Seq_kv")
+                                     .set_dim({b, 1, 1, 1})
+                                     .set_stride({1, 1, 1, 1})
+                                     .set_data_type(fe::DataType_t::INT32));
+
+  auto scaled_dot_product_flash_attention_options =
+      fe::graph::SDPA_attributes()
+          .set_name("CUDNN_SDPA_NESTEDTENSOR")
+          .set_is_inference(return_softmaxstats == false)
+          .set_causal_mask(is_causal)
+          .set_attn_scale(attn_scale)
+          .set_dropout(dropout_probability, seed, offset)
+	  .set_seq_len_q(SEQ_LEN_Q)
+          .set_seq_len_kv(SEQ_LEN_KV)
+	  .set_padding_mask(true);
+  // We hardcode BSHD to cuDNN even though the underlying layout is THD
+  auto q_strides = q.strides();
+  auto k_strides = k.strides();
+  auto v_strides = v.strides();
+  constexpr int strideidx0 = 1;
+  constexpr int strideidx1 = 0;
+  constexpr int strideidx2 = 2;
+  auto Q = mha_graph->tensor(
+      fe::graph::Tensor_attributes()
+          .set_name("Q")
+	  .set_dim({b, h_q, s_q, d_qk})
+	  .set_stride({INT_MAX, q_strides[strideidx0], q_strides[strideidx1], q_strides[strideidx2]}));
+  auto K = mha_graph->tensor(
+      fe::graph::Tensor_attributes()
+          .set_name("K")
+	  .set_dim({b, h_k, s_kv, d_qk})
+	  .set_stride({INT_MAX, k_strides[strideidx0], k_strides[strideidx1], k_strides[strideidx2]}));
+  auto V = mha_graph->tensor(
+      fe::graph::Tensor_attributes()
+          .set_name("V")
+	  .set_dim({b, h_v, s_kv, d_v})
+	  .set_stride({INT_MAX, v_strides[strideidx0], v_strides[strideidx1], v_strides[strideidx2]}));
+  std::optional<std::shared_ptr<fe::graph::Tensor_attributes>> bias;
+  if (attn_bias.has_value()) {
+    TORCH_CHECK(false, "attn_bias not yet supportd with cuDNN Attention and NestedTensor");
+    bias =
+        mha_graph->tensor(fe::graph::Tensor_attributes()
+                              .set_name("bias")
+                              .set_dim(attn_bias.value().sizes().vec())
+                              .set_stride(attn_bias.value().strides().vec()));
+    scaled_dot_product_flash_attention_options.set_bias(bias.value());
+  }
+  auto RAG_Q_OFF = mha_graph->tensor(fe::graph::Tensor_attributes()
+                                     .set_name("cum_seq_q")
+                                     .set_dim({b + 1, 1, 1, 1})
+                                     .set_stride({1, 1, 1, 1})
+                                     .set_data_type(fe::DataType_t::INT32));
+  auto RAG_K_OFF = mha_graph->tensor(fe::graph::Tensor_attributes()
+                                      .set_name("cum_seq_k")
+                                      .set_dim({b + 1, 1, 1, 1})
+                                      .set_stride({1, 1, 1, 1})
+                                      .set_data_type(fe::DataType_t::INT32));
+  auto RAG_V_OFF = mha_graph->tensor(fe::graph::Tensor_attributes()
+                                     .set_name("cum_seq_v")
+                                     .set_dim({b + 1, 1, 1, 1})
+                                     .set_stride({1, 1, 1, 1})
+                                     .set_data_type(fe::DataType_t::INT32));
+  auto RAG_O_OFF = mha_graph->tensor(fe::graph::Tensor_attributes()
+                                      .set_name("cum_seq_o")
+                                      .set_dim({b + 1, 1, 1, 1})
+                                      .set_stride({1, 1, 1, 1})
+                                      .set_data_type(fe::DataType_t::INT32));
+  //auto RAG_STATS_OFF = mha_graph->tensor(fe::graph::Tensor_attributes()
+  //                                    .set_name("cum_seq_stats")
+  //                                    .set_dim({b + 1, 1, 1, 1})
+  //                                    .set_stride({1, 1, 1, 1})
+  //                                    .set_data_type(fe::DataType_t::INT32));
+  auto RAG_STATS_OFF = nullptr;
+  Q->set_ragged_offset(RAG_Q_OFF);
+  K->set_ragged_offset(RAG_K_OFF);
+  V->set_ragged_offset(RAG_V_OFF);
+  auto [O, Stats] =
+      mha_graph->sdpa(Q, K, V, scaled_dot_product_flash_attention_options);
+  auto o_strides = o.strides();
+  O->set_output(true).set_dim({b, h_q, s_q, d_v}).set_stride({INT_MAX, o_strides[strideidx0], o_strides[strideidx1], o_strides[strideidx2]});
+
+  O->set_ragged_offset(RAG_O_OFF); 
+  if (Stats) {
+    // TODO(eqy): fix  when stats (backward) support is added
+    Stats->set_output(true).set_data_type(fe::DataType_t::FLOAT).set_dim({b, h_q, s_q, 1}).set_stride({h_q * s_q * d_v, d_v, s_q * d_v, 1});
+    Stats->set_ragged_offset(RAG_STATS_OFF);
+  }
+  AT_CUDNN_FRONTEND_CHECK(mha_graph->validate());
+  AT_CUDNN_FRONTEND_CHECK(mha_graph->build_operation_graph(handle));
+  AT_CUDNN_FRONTEND_CHECK(
+      mha_graph->create_execution_plans({fe::HeurMode_t::A}));
+  AT_CUDNN_FRONTEND_CHECK(mha_graph->check_support(handle));
+  AT_CUDNN_FRONTEND_CHECK(mha_graph->build_plans(handle));
+  return std::make_tuple(
+      std::move(mha_graph),
+      std::move(Q),
+      std::move(K),
+      std::move(V),
+      std::move(bias),
+      std::move(attn_scale),
+      std::move(seed),
+      std::move(offset),
+      std::move(O),
+      std::move(Stats),
+      std::move(RAG_Q_OFF), 
+      std::move(RAG_K_OFF),
+      std::move(RAG_V_OFF),
+      std::move(RAG_O_OFF),
+      std::move(RAG_STATS_OFF),
+      std::move(SEQ_LEN_Q),
+      std::move(SEQ_LEN_KV)      
+      );
 }
 
 auto build_graph_and_tensors_backward(
@@ -712,6 +875,122 @@ void run_cudnn_SDP_fprop(
   TORCH_CHECK(
       mha_graph->execute(handle, variant_pack, workspace_ptr.get()).is_good());
   mhagraphcache.update(key, graph_and_tensors_values);
+}
+
+void run_cudnn_SDP_fprop_nestedtensor(
+    int64_t b,
+    int64_t h_q,
+    int64_t h_k,
+    int64_t h_v,
+    int64_t s_q,
+    int64_t s_kv,
+    int64_t d_qk,
+    int64_t d_v,
+    float scaling_factor,
+    bool return_softmaxstats,
+    bool is_causal,
+    double dropout_probability,
+    const Tensor& cum_seqlen_q,
+    const Tensor& cum_seqlen_kv,
+    const Tensor& output_shape,
+    const Tensor& q,
+    const Tensor& k,
+    const Tensor& v,
+    const std::optional<Tensor>& attn_bias,
+    Tensor& softmaxstats,
+    Tensor& o,
+    Tensor& dropoutseed,
+    Tensor& dropoutoffset) {
+  cudnnHandle_t handle = getCudnnHandle();
+
+  // do nothing if we got 0-element tensors
+  if (!q.numel() || !k.numel() || !v.numel()) {
+    return;
+  }
+
+  if (!o.defined()) {
+    o = at::empty({q.size(0), h_q, d_v}, q.options());
+  }
+
+  if (return_softmaxstats && !softmaxstats.defined()) {
+    softmaxstats = at::empty({q.size(0), h_q, 1}, q.options().dtype(kFloat));
+  }
+
+  auto [mha_graph,
+        Q,
+        K,
+        V,
+        bias,
+        attn_scale,
+        seed,
+        offset,
+        O,
+        Stats,
+        RAG_Q_OFF, 
+        RAG_K_OFF,
+        RAG_V_OFF,
+        RAG_O_OFF,
+        RAG_STATS_OFF,
+        SEQ_LEN_Q,
+        SEQ_LEN_KV] = 
+  build_graph_and_tensors_nestedtensor(
+    b,
+    h_q,
+    h_k,
+    h_v,
+    s_q,
+    s_kv,
+    d_qk,
+    d_v,
+    scaling_factor,
+    return_softmaxstats,
+    is_causal,
+    dropout_probability,
+    cum_seqlen_q,
+    cum_seqlen_kv,
+    output_shape,
+    q,
+    k,
+    v,
+    attn_bias,
+    softmaxstats,
+    o,
+    dropoutseed,
+    dropoutoffset,
+    handle);
+  auto seqlen_q = at::diff(cum_seqlen_q, 1, 0);
+  auto seqlen_kv = at::diff(cum_seqlen_kv, 1, 0);
+  auto rag_q_off = cum_seqlen_q.mul(h_q * d_qk);
+  auto rag_k_off = cum_seqlen_kv.mul(h_k * d_qk);
+  auto rag_v_off = cum_seqlen_kv.mul(h_v * d_v);
+  auto rag_stats_off = cum_seqlen_q.mul(h_q);
+  std::unordered_map<std::shared_ptr<fe::graph::Tensor_attributes>, void*>
+      variant_pack = {
+          {Q, q.data_ptr()},
+          {K, k.data_ptr()},
+          {V, v.data_ptr()},
+          {attn_scale, &scaling_factor},
+          {seed, dropoutseed.data_ptr()},
+          {offset, dropoutoffset.data_ptr()},
+          {O, o.data_ptr()},
+          {RAG_Q_OFF, rag_q_off.data_ptr()},
+          {RAG_O_OFF, rag_q_off.data_ptr()},
+          {RAG_K_OFF, rag_k_off.data_ptr()},
+          {RAG_V_OFF, rag_v_off.data_ptr()},
+          {SEQ_LEN_Q, seqlen_q.data_ptr()},
+          {SEQ_LEN_KV, seqlen_kv.data_ptr()}};
+  if (return_softmaxstats) {
+    variant_pack[Stats] = softmaxstats.data_ptr();
+    variant_pack[RAG_STATS_OFF] =  cum_seqlen_q.data_ptr();
+  }
+  if (attn_bias.has_value()) {
+     TORCH_CHECK("bias not supported with nestedtensor");
+  }
+  auto workspace_size = mha_graph->get_workspace_size();
+  auto workspace_ptr =
+      c10::cuda::CUDACachingAllocator::get()->allocate(workspace_size);
+  TORCH_CHECK(
+      mha_graph->execute(handle, variant_pack, workspace_ptr.get()).is_good());
 }
 
 void run_cudnn_SDP_bprop(

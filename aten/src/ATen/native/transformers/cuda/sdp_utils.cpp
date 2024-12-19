@@ -498,10 +498,19 @@ bool check_cudnn_hardware_support(sdp_params const& params, bool debug) {
 }
 
 bool check_for_nested_inputs(sdp_params const& params, bool debug) {
-  // Check that the input is nested
-  if (has_for_nested_inputs(params)) {
+  static const bool enable_cudnn_nested = c10::utils::check_env("TORCH_CUDNN_SDPA_NESTED_TENSOR_ENABLED") == true;
+  if (!enable_cudnn_nested) {
     if (debug) {
-      TORCH_WARN("CuDNN currently does not support nested inputs.");
+      TORCH_WARN("Experimental cuDNN SDPA nested tensor support is not enabled.");
+    }
+    return false;
+  }
+
+  const auto dprop = at::cuda::getCurrentDeviceProperties();
+  // Check that the input is nested
+  if (dprop->major != 9 && has_for_nested_inputs(params)) {
+    if (debug) {
+      TORCH_WARN("CuDNN SDPA supports nested tensors on SM 9.0.");
     }
     return false;
   }
@@ -567,7 +576,6 @@ bool can_use_cudnn_attention(const sdp_params& params, bool debug) {
           check_runtime_disabled_cudnn,
           check_for_nested_inputs,
           check_nonzero_sequence_lengths_dense,
-          check_last_dim_stride_equals_1_dense<true /*ignore_singleton_dim>*/>,
           check_all_tensors_on_device,
           check_tensor_shapes,
           check_cudnn_tensor_shapes,
@@ -579,6 +587,18 @@ bool can_use_cudnn_attention(const sdp_params& params, bool debug) {
   for (auto& constraint : general_constraints) {
     if (!constraint(params, debug)) {
       return false;
+    }
+  }
+  constexpr auto dense_constraints = 
+      array_of<bool (*)(sdp_params const&, bool)>(
+      check_last_dim_stride_equals_1_dense<true /*ignore_singleton_dim=*/>
+  );
+
+  if (has_only_dense_inputs(params)) {
+    for (auto& constraint : dense_constraints) {
+      if (!constraint(params, debug)) {
+        return false;
+      }
     }
   }
   return true;

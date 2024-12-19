@@ -87,6 +87,25 @@
 
 namespace at {
 
+namespace cuda::philox {
+
+__global__ void unpack_cudnn(at::PhiloxCudaState arg, int64_t* seed_ptr, int64_t* offset_ptr) {
+  if (arg.captured_) {
+    *seed_ptr = static_cast<int64_t>(*arg.seed_.ptr);
+    *offset_ptr = static_cast<int64_t>(
+                    *(arg.offset_.ptr) + static_cast<int64_t>(arg.offset_intragraph_));
+  } else {
+    *seed_ptr = static_cast<int64_t>(arg.seed_.val);
+    *offset_ptr = static_cast<int64_t>(arg.offset_.val);
+  }
+}
+
+void unpack_cudnn_wrapper(at::PhiloxCudaState arg, int64_t* seed_ptr, int64_t* offset_ptr, cudaStream_t stream) {
+at::cuda::philox::unpack_cudnn<<<1, 1, 0, stream>>>(arg, seed_ptr, offset_ptr);
+}
+
+} // namespace cuda::philox
+
 namespace native {
 
 namespace {
@@ -732,19 +751,6 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt, Tensor, Ten
   return std::make_tuple(attention, logsumexp, Tensor(), Tensor(), max_seqlen_batch_q, max_seqlen_batch_k, philox_seed, philox_offset, debug_attn_mask);
 }
 
-// Adapted from TE
-// extract seed and offset from PhiloxCudaState
-__global__ void unpack_cudnn(at::PhiloxCudaState arg, int64_t* seed_ptr, int64_t* offset_ptr) {
-  if (arg.captured_) {
-    *seed_ptr = static_cast<int64_t>(*arg.seed_.ptr);
-    *offset_ptr = static_cast<int64_t>(
-                    *(arg.offset_.ptr) + static_cast<int64_t>(arg.offset_intragraph_));
-  } else {
-    *seed_ptr = static_cast<int64_t>(arg.seed_.val);
-    *offset_ptr = static_cast<int64_t>(arg.offset_.val);
-  }
-}
-
 std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt, Tensor, Tensor, Tensor> _scaled_dot_product_cudnn_attention_cuda(
     const Tensor& query,
     const Tensor& key,
@@ -807,8 +813,8 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt, Tensor, Ten
     // attention tensor
     // TODO(eqy): should state be advanced per thread (local) amount or per call/launch (global) amount
     philox_state = gen->philox_cuda_state(batch_size * num_heads * max_seqlen_batch_q * max_seqlen_batch_k);
-    unpack_cudnn<<<1, 1, 0, at::cuda::getCurrentCUDAStream()>>>(
-                                      philox_state, static_cast<int64_t*>(cudnn_seed.data_ptr()), static_cast<int64_t*>(cudnn_offset.data_ptr()));
+    at::cuda::philox::unpack_cudnn_wrapper(
+                                      philox_state, static_cast<int64_t*>(cudnn_seed.data_ptr()), static_cast<int64_t*>(cudnn_offset.data_ptr()), at::cuda::getCurrentCUDAStream());
   }
 
   const auto softmax_scale = sdp::calculate_scale(query, scale).expect_float();
