@@ -2415,9 +2415,16 @@ class PythonWrapperCodegen(CodeGen):
         self.codegen_subgraph(
             while_loop.cond_subgraph, cond_outer_inputs, cond_outer_outputs
         )
-        self.writeline(
-            f"if not {cond_outer_outputs[0]}.item(): break"
-        )  # condition doesn't hold
+        predicate = (
+            cond_outer_outputs[0]
+            if isinstance(
+                while_loop.cond_subgraph.graph.graph_outputs[0],
+                ir.ShapeAsConstantBuffer,
+            )
+            else cond_outer_outputs[0] + ".item()"
+        )
+        self.writeline(f"if not {predicate}: break")  # condition doesn't hold
+
         self.writeline(ExitSubgraphLine(self))
         self.writeline(EnterSubgraphLine(self, while_loop.body_subgraph.graph))
         self.codegen_subgraph(
