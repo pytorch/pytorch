@@ -150,9 +150,9 @@ class StateDictOptions:
 
 @dataclass
 class _StateDictInfo(StateDictOptions):
-    fqn_param_mapping: Dict[
-        Union[str, torch.Tensor], Union[FQNS_T, torch.Tensor]
-    ] = field(default_factory=dict)
+    fqn_param_mapping: Dict[Union[str, torch.Tensor], Union[FQNS_T, torch.Tensor]] = (
+        field(default_factory=dict)
+    )
     shared_params_mapping: Dict[
         Union[str, torch.Tensor], Union[FQNS_T, torch.Tensor]
     ] = field(default_factory=dict)
@@ -286,9 +286,9 @@ def _verify_options(
 
     options = options or StateDictOptions()
 
-    fqn_param_mapping: Dict[
-        Union[str, torch.Tensor], Union[Set[str], torch.Tensor]
-    ] = {}
+    fqn_param_mapping: Dict[Union[str, torch.Tensor], Union[Set[str], torch.Tensor]] = (
+        {}
+    )
     shared_params_mapping: Dict[
         Union[str, torch.Tensor], Union[Set[str], torch.Tensor]
     ] = {}
@@ -552,6 +552,7 @@ def _load_model_state_dict(
                 state_dict[fqn_with_prefix] = state_dict.pop(fqn)
             local_state_dict[fqn_with_prefix] = value
 
+    assign = False
     if info.broadcast_from_rank0 or info.full_state_dict:
         devices = set()
         for key, value in local_state_dict.items():
@@ -561,6 +562,7 @@ def _load_model_state_dict(
         # Take the other device in the broadcast/distribtue, and set assign to True
         if torch.device("meta") in devices:
             devices.remove(torch.device("meta"))
+            assign = True
         if len(devices) == 0:
             devices.add(dist.distributed_c10d._get_pg_default_device())
         elif len(devices) > 1:
@@ -583,7 +585,7 @@ def _load_model_state_dict(
         return cast(
             _IncompatibleKeys,
             _state_dict_fn(model, "load_state_dict")(
-                state_dict=state_dict, strict=info.strict, assign=True
+                state_dict=state_dict, strict=info.strict, assign=assign
             ),
         )
 
