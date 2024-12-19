@@ -4,6 +4,7 @@ import dataclasses
 import functools
 import io
 import itertools
+import json
 import logging
 import os
 import os.path
@@ -308,6 +309,7 @@ def enable_aot_logging() -> Iterator[None]:
 
 class DebugContext:
     _counter = itertools.count()
+    _inductor_triton_kernel_to_post_grad_node_info: Dict[str, List[str]] = {}
 
     @staticmethod
     def create_debug_dir(folder_name: str) -> Optional[str]:
@@ -545,6 +547,13 @@ class DebugFormatter:
     def output_code(self, filename: str) -> None:
         shutil.copy(filename, self.filename("output_code.py"))
 
+    def log_inductor_triton_kernel_to_post_grad_node_info(
+        self, filename: str = "inductor_triton_kernel_to_post_grad_nodes.json"
+    ) -> None:
+        with self.fopen(filename, "w") as fd:
+            log.info("Writing provenance tracing debugging info to %s", fd.name)
+            json.dump(DebugContext._inductor_triton_kernel_to_post_grad_node_info, fd)
+
     def log_autotuning_results(
         self,
         name: str,
@@ -553,8 +562,6 @@ class DebugFormatter:
         elapse: float,
         precompile_elapse: float,
     ) -> None:
-        import json
-
         from .ir import FixedLayout
 
         def build_node_info(node: ir.IRNode) -> Dict[str, str]:
