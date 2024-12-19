@@ -437,11 +437,26 @@ def output_json(filename, headers, row):
                     "backend": current_backend,
                     "origins": [origin],
                 },
-                "metric": {
+            }
+
+            # NB: When the metric is accuracy, its value is actually a string, i.e. pass, and
+            # not a number. ClickHouse doesn't support mix types atm. It has a Variant type
+            # https://clickhouse.com/docs/en/sql-reference/data-types/variant, but this isn't
+            # recommended by CH team themselves. The workaround here is to store that value
+            # in the extra_info field instead.
+            if isinstance(value, str):
+                record["metric"] = {
+                    "name": header,
+                    "extra_info": {
+                        "benchmark_values": [value]
+                    }
+                }
+            else:
+                record["metric"] = {
                     "name": header,
                     "benchmark_values": [value],
-                },
-            }
+                }
+
             print(json.dumps(record), file=f)
 
 
