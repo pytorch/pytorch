@@ -798,7 +798,7 @@ class CppGemmTemplate(CppTemplate):
         trans_w=False,
         input_indices=None,
         epilogue_creator: Optional[Callable[[ir.Buffer], ir.Pointwise]] = None,
-        da8w8_gemm_sym_act=False,
+        sym_quantized_int8_act=False,
     ):
         if input_indices is None:
             input_indices = list(range(len(input_nodes)))
@@ -904,7 +904,11 @@ class CppGemmTemplate(CppTemplate):
             if only_one_input and isinstance(new_inputs[0], torch.Tensor):
                 return new_inputs[1:], new_layout
             return cls.prep_weight(
-                new_inputs, new_layout, micro_gemm, block_weights, da8w8_gemm_sym_act
+                new_inputs,
+                new_layout,
+                micro_gemm,
+                block_weights,
+                sym_quantized_int8_act,
             )
 
         def postprocessor(output):
@@ -927,7 +931,7 @@ class CppGemmTemplate(CppTemplate):
                     new_layout,
                     micro_gemm,
                     block_weights,
-                    da8w8_gemm_sym_act,
+                    sym_quantized_int8_act,
                 )
                 W_packed = new_input_nodes[1]
                 W_packed_constant = V.graph.add_tensor_constant(W_packed)
@@ -972,7 +976,7 @@ class CppGemmTemplate(CppTemplate):
         layout: ir.Layout,
         micro_gemm: CppMicroGemm,
         should_block_weight: bool,
-        da8w8_gemm_sym_act: bool,
+        sym_quantized_int8_act: bool,
     ):
         """
         NOTE Weight prep consists of 2 separate steps:
@@ -1020,7 +1024,7 @@ class CppGemmTemplate(CppTemplate):
                 and inputs[0].dtype in [torch.uint8, torch.int8]
             )
 
-        if _is_int8_gemm(new_inputs) and not da8w8_gemm_sym_act:
+        if _is_int8_gemm(new_inputs) and not sym_quantized_int8_act:
             BCompensate = None
             if isinstance(W, ir.IRNode):
                 BCompensate = V.graph.add_tensor_constant(

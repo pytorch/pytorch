@@ -2142,6 +2142,7 @@ class TestSelectAlgorithmDynamicShapes(_DynamicShapesTestBase):
 
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
     @patches
     @torch.no_grad
     @unittest.skipIf(not TEST_MKL, "Test requires MKL")
@@ -2284,15 +2285,10 @@ class TestSelectAlgorithmDynamicShapes(_DynamicShapesTestBase):
         self, has_bias, dtype, per_channel_quant, reshape_a
     ):
         r"""
-        This testcase check if we can match the int8_dynamic_activation_int8_weight int8 linear pattern from torchao,
-        when activation is symmetrically quantized dynamically & weights are symmetrically quantized (statically)
-        The pattern is:
-            (no bias) _int_mm -> convert_element_type -> ([expand_a] -> mul) -> mul
-        or
-            (with bias) pattern_no_bias -> add
-        Expansion of the scale of activation is optional.
-        The pattern depiction doesn't mean that convert_element_type output is fed into expand_a as input,
-        but simply that activation scale may be applied after an expand operation on it.
+        We created a separate test for dynamic shapes with test_da8w8_sym_act_sym_wgt_with_int_mm
+        because only dynamic M dim can be supported with GEMM auto-tuning, and because of expanding
+        activation scale in this UT, M & K dims become symbolic when K is not explcitly marked
+        dynamic with torch._dynamo.mark_static(a, 1).
         """
         if dtype == torch.bfloat16 and not torch.ops.mkldnn._is_mkldnn_bf16_supported():
             return
