@@ -845,18 +845,22 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
 
     @with_comms
     @skip_if_lt_x_gpu(2)
-    def test_setting_meta_device_model_broadcasting(self) -> None:
+    def test_setting_meta_device_model_broadcasting_and_memory(self) -> None:
         # This test verifies that we can set model state dict by a meta device model
         # With the correlated changes in state_dict, meta device model should be accepted
         # in broadcasting and get copied successfully.
         torch.manual_seed(0)
         with torch.device("meta"):
-            meta_model = nn.Sequential(*[nn.Linear(4, 4, bias=False) for _ in range(2)])
+            meta_model = nn.Sequential(
+                *[nn.Linear(10000, 10000, bias=False) for _ in range(4)]
+            )
             for layer in meta_model:
                 fully_shard(layer)
             fully_shard(meta_model)
         with torch.device("cpu"):
-            cpu_model = nn.Sequential(*[nn.Linear(4, 4, bias=False) for _ in range(2)])
+            cpu_model = nn.Sequential(
+                *[nn.Linear(10000, 10000, bias=False) for _ in range(4)]
+            )
             full_sd = cpu_model.state_dict()
         set_model_state_dict(
             meta_model,
@@ -874,20 +878,12 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
                 .to(device=cpu_model_value.device)
             )
             self.assertEqual(cpu_model_value, meta_model_value)
-
-    @with_comms
-    @skip_if_lt_x_gpu(1)
-    def test_memory_between_view_and_clone(self) -> None:
-        torch.manual_seed(0)
-        with torch.device("cuda"):
-            model = nn.Sequential(
-                *[nn.Linear(10000, 10000, bias=False) for _ in range(4)]
-            )
-        sd = model.state_dict()
-        local_view = sd["0.weight"][1:10, 1:10]
-        self.assertEqual(local_view.storage().nbytes(), 4 * 10000 * 10000)
-        local_clone = sd["1.weight"][1:10, 1:10].detach().clone()
-        self.assertEqual(local_clone.storage().nbytes(), 4 * 9 * 9)
+        # Memory allocated and reserved are lower due to the change at _distribute_tensors
+        # from view to clone. This test would fail if with view due to higher memory cost.
+        memory_allocated = torch.cuda.memory_allocated(0) / 1024 / 1024
+        memory_reserved = torch.cuda.memory_reserved(0) / 1024 / 1024
+        self.assertTrue(memory_allocated <= 384)
+        self.assertTrue(memory_reserved <= 768)
 
     @with_comms
     @skip_if_lt_x_gpu(2)

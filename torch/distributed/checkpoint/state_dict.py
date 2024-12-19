@@ -552,40 +552,30 @@ def _load_model_state_dict(
                 state_dict[fqn_with_prefix] = state_dict.pop(fqn)
             local_state_dict[fqn_with_prefix] = value
 
-    assign = False
     if info.broadcast_from_rank0 or info.full_state_dict:
-        device = None
         devices = set()
         for key, value in local_state_dict.items():
             if torch.is_tensor(value) and value.dim() > 0:
                 devices.add(value.device)
-        if len(devices) == 1:
-            device = devices.pop()
-            if device == torch.device("meta"):
-                device = dist.distributed_c10d._get_pg_default_device()
-                assign = True
-        # In lora state_dict, ther could be multiple devices, with meta device inside.
+        # In lora state_dict, there could be multiple devices, with meta device inside.
         # Take the other device in the broadcast/distribtue, and set assign to True
-        elif len(devices) == 2:
-            if torch.device("meta") in devices:
-                devices.remove(torch.device("meta"))
-                device = devices.pop()
-                assign = True
-            else:
-                raise ValueError("Multiple devices found")
-        else:
+        if torch.device("meta") in devices:
+            devices.remove(torch.device("meta"))
+        if len(devices) == 0:
+            devices.add(dist.distributed_c10d._get_pg_default_device())
+        elif len(devices) > 1:
             raise ValueError("Multiple devices found")
 
         if info.broadcast_from_rank0:
             _broadcast_state_dict(
                 state_dict,
                 local_state_dict,
-                device=device,
+                device=devices.pop(),
                 strict=info.strict,
                 cpu_offload=info.cpu_offload,
             )
         elif info.full_state_dict:
-            _distribute_state_dict(state_dict, local_state_dict, device=device)
+            _distribute_state_dict(state_dict, local_state_dict, device=devices.pop())
         for fqn, local_state in local_state_dict.items():
             state_dict[fqn] = local_state
 
@@ -593,7 +583,7 @@ def _load_model_state_dict(
         return cast(
             _IncompatibleKeys,
             _state_dict_fn(model, "load_state_dict")(
-                state_dict=state_dict, strict=info.strict, assign=assign
+                state_dict=state_dict, strict=info.strict, assign=True
             ),
         )
 
