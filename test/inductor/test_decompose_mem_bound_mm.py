@@ -389,7 +389,7 @@ class TestDecomposeMemMM(TestCase):
         def foo(x, y):
             return x.T.contiguous() @ y
 
-        out, code = run_and_get_code(foo, input1, input2)
+        _, code = run_and_get_code(foo, input1, input2)
 
         if GPU_TYPE == "xpu":
             # only 1 kernel generated on the XPU stack
