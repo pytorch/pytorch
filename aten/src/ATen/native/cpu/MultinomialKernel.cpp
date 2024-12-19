@@ -90,14 +90,14 @@ multinomial_with_replacement_apply(
       double uniform_sample = uniform(gen);
       /* Do a binary search for the slot in which the prob falls
       ie cum_dist[row][slot-1] < uniform_prob < cum_distr[row][slot] */
-      int left_pointer = 0;
-      int right_pointer = n_categories;
+      int64_t left_pointer = 0;
+      int64_t right_pointer = n_categories;
       /* Make sure the last cumulative distribution bucket sums to 1 */
       cum_dist_ptr[(n_categories - 1) * cum_dist_stride_0] = 1;
 
       while (right_pointer - left_pointer > 0) {
-        auto mid_pointer = left_pointer + (right_pointer - left_pointer) / 2;
-        auto cum_prob = cum_dist_ptr[mid_pointer * cum_dist_stride_0];
+        int64_t mid_pointer = left_pointer + (right_pointer - left_pointer) / 2;
+        scalar_t cum_prob = cum_dist_ptr[mid_pointer * cum_dist_stride_0];
         if (cum_prob < uniform_sample) {
           left_pointer = mid_pointer + 1;
         } else {
@@ -186,13 +186,13 @@ multinomial_with_replacement_apply(
       double uniform_sample = uniform(gen);
       /* Do a binary search for the slot in which the prob falls
       ie cum_dist[row][slot-1] < uniform_prob < cum_distr[row][slot] */
-      int left_pointer = 0;
-      int right_pointer = n_categories;
+      int64_t left_pointer = 0;
+      int64_t right_pointer = n_categories;
       /* Make sure the last cumulative distribution bucket sums to 1 */
       cum_dist_ptr[(n_categories - 1) * cum_dist_stride_0] = 1;
 
       while (right_pointer - left_pointer > 0) {
-        auto mid_pointer = left_pointer + (right_pointer - left_pointer) / 2;
+        int64_t mid_pointer = left_pointer + (right_pointer - left_pointer) / 2;
         float cum_prob = cum_dist_ptr[mid_pointer * cum_dist_stride_0];
         if (cum_prob < uniform_sample) {
           left_pointer = mid_pointer + 1;
