@@ -152,7 +152,7 @@ class CPUReproTests(TestCase):
                     return func(*args, **kwargs)
 
             with RecordFunctions():
-                out = fn_compiled(inps)
+                fn_compiled(inps)
 
             self.assertTrue(conv_seen)
 
@@ -2385,8 +2385,6 @@ class CPUReproTests(TestCase):
             x[0, 0] = torch.nan
             x[1, -1] = torch.nan
 
-            tol = 1e-2 if dtype == torch.bfloat16 else 1e-4
-
             with config.patch({"cpp.simdlen": None}):
                 for cpp_wrapper_flag in [True, False]:
                     with config.patch({"cpp_wrapper": cpp_wrapper_flag}):
@@ -3121,7 +3119,6 @@ class CPUReproTests(TestCase):
             x1 = torch.randn((5, 20), dtype=dtype)
             x2 = torch.randn((5, 20), dtype=dtype)
 
-            tol = 1e-2 if dtype == torch.bfloat16 else 1e-4
             with config.patch({"cpp.simdlen": 1}):
                 torch._dynamo.reset()
                 metrics.reset()
@@ -3365,7 +3362,7 @@ class CPUReproTests(TestCase):
                 permute_2, [16, 32], -1
             )
             getitem = split_with_sizes[0]
-            getitem_1 = split_with_sizes[1]
+            _getitem_1 = split_with_sizes[1]
             permute_3 = torch.ops.aten.permute.default(getitem, [0, 1, 3, 2])
             expand_1 = torch.ops.aten.expand.default(permute_3, [8, 4, 16, 144])
             clone_3 = torch.ops.aten.clone.default(
@@ -4615,7 +4612,7 @@ class CPUReproTests(TestCase):
                     )
                 )
                 permute_default_8 = None
-                permute_default_10 = torch.ops.aten.permute.default(
+                _permute_default_10 = torch.ops.aten.permute.default(
                     convert_element_type_default_19, [0, 2, 1, 3]
                 )
                 convert_element_type_default_19 = None
