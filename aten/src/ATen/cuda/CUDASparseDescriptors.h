@@ -139,10 +139,10 @@ class TORCH_CUDA_CPP_API CuSparseConstDnMatDescriptor
  public:
   explicit CuSparseConstDnMatDescriptor(const Tensor& input, int64_t batch_offset = -1);
   cusparseDnMatDescr* unsafe_mutable_descriptor() const {
-    return const_cast<cusparseDnMatDescr*>(descriptor());
+    return descriptor();
   }
   cusparseDnMatDescr* unsafe_mutable_descriptor() {
-    return const_cast<cusparseDnMatDescr*>(descriptor());
+    return descriptor();
   }
 };
 
@@ -175,10 +175,10 @@ class TORCH_CUDA_CPP_API CuSparseSpMatDescriptor
         const Tensor& input,
         int64_t batch_offset = -1);
   cusparseDnMatDescr* unsafe_mutable_descriptor() const {
-    return const_cast<cusparseDnMatDescr*>(descriptor());
+    return descriptor();
   }
   cusparseDnMatDescr* unsafe_mutable_descriptor() {
-    return const_cast<cusparseDnMatDescr*>(descriptor());
+    return descriptor();
   }
   };
 
