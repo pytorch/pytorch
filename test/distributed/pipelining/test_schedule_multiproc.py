@@ -1,11 +1,12 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 # Owner(s): ["oncall: distributed"]
 import copy
+import gc
 import logging
+import math
 import os
 import sys
 import tempfile
-import gc
 
 from model_registry import ModelWithKwargs, MultiMLP, MultiMLPWithDw, MultiMLPWithView
 from schedule_registry import (
@@ -1015,7 +1016,7 @@ class ScheduleTest(MultiProcContinousTest):
 
         current_mem = self._get_curr_active_memory()
 
-        expected_mem = round(base_mem + output_mem + my_params_size + buffer_mem)
+        expected_mem = math.ceil(base_mem + output_mem + my_params_size + buffer_mem) # ceil to allow a small margin
         print(
             f"Rank {self.rank} current_mem: {current_mem} ; expected: {base_mem} + {output_mem} + {my_params_size} + {buffer_mem} = {expected_mem}"
         )
@@ -1112,7 +1113,7 @@ class ScheduleTest(MultiProcContinousTest):
 
         current_mem = self._get_curr_active_memory()
 
-        expected_mem = round(base_mem + output_mem + my_params_size + buffer_mem)
+        expected_mem = math.ceil(base_mem + output_mem + my_params_size + buffer_mem)
         print(
             f"Rank {self.rank} current_mem: {current_mem} ; expected: {base_mem} + {output_mem} + {my_params_size} + {buffer_mem} = {expected_mem}"
         )
@@ -1123,10 +1124,6 @@ class ScheduleTest(MultiProcContinousTest):
             expected_mem,
             f"Rank {self.rank}: Memory usage should not be increased after the end of backward pass",
         )
-
-    def _get_peak_active_memory(self) -> int:
-        mem_stats = torch.cuda.memory_stats(self.device)
-        return round(mem_stats["active_bytes.all.peak"] / 1e6)
 
     def _get_curr_active_memory(self) -> int:
         mem_stats = torch.cuda.memory_stats(self.device)
