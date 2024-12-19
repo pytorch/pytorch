@@ -2643,7 +2643,6 @@ def _automatic_dynamic(
     # Prep for automatic dynamic
 
     # This mimics stride inference algorithm in _create_symbolic_sizes_strides_storage_offset
-
     ex_size = e.size()
     if not is_sparse_any(e):
         ex_stride = e.stride()
