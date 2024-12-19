@@ -87,7 +87,7 @@ def run_and_compare(
     return result, code
 
 
-class TestUtils:
+class BlockPointerTestBase(InductorTestCase):
     def _discontiguous_tensor(
         self, view_size: Tuple[int, ...], device=torch.device(GPU_TYPE)
     ) -> torch.Tensor:
@@ -815,7 +815,7 @@ class CommonTemplate:
 @unittest.skipIf(not TRITON_HAS_CPU, "requires triton CPU backend")
 @config.patch(cpu_backend="triton")
 @config.patch("triton.use_block_ptr", True)
-class TritonBlockPointerTestCPU(InductorTestCase, TestUtils):
+class TritonBlockPointerTestCPU(BlockPointerTestBase):
     device = "cpu"
 
 
@@ -824,7 +824,7 @@ test_torchinductor.copy_tests(CommonTemplate, TritonBlockPointerTestCPU, "cpu")
 
 @unittest.skipIf(not HAS_GPU, "requires triton GPU backend")
 @config.patch("triton.use_block_ptr", True)
-class TritonBlockPointerTestGPU(InductorTestCase, TestUtils):
+class TritonBlockPointerTestGPU(BlockPointerTestBase):
     device = GPU_TYPE
 
 
