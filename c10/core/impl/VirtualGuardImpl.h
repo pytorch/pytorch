@@ -50,7 +50,7 @@ class VirtualGuardImpl final : public DeviceGuardImplInterface {
       const override {
     return impl_->getStreamFromGlobalPool(d, isHighPriority);
   }
-  Stream exchangeStream(Stream s) const noexcept override {
+  Stream exchangeStream(Stream s) const override {
     return impl_->exchangeStream(s);
   }
   DeviceIndex deviceCount() const noexcept override {

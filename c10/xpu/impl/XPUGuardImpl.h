@@ -58,7 +58,7 @@ struct XPUGuardImpl final : public c10::impl::DeviceGuardImplInterface {
   }
 
   // NB: These do NOT set the current device
-  Stream exchangeStream(Stream s) const noexcept override {
+  Stream exchangeStream(Stream s) const override {
     const XPUStream stream(s);
     const auto old_stream = getCurrentXPUStream(s.device().index());
     setCurrentXPUStream(stream);
