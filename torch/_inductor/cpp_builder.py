@@ -318,10 +318,10 @@ def _remove_dir(path_dir: str) -> None:
         os.rmdir(path_dir)
 
 
-def _run_compile_cmd(cmd_line: str, cwd: str) -> bytes:
+def _run_compile_cmd(cmd_line: str, cwd: str) -> None:
     cmd = shlex.split(cmd_line)
     try:
-        status = subprocess.check_output(args=cmd, cwd=cwd, stderr=subprocess.STDOUT)
+        subprocess.check_output(args=cmd, cwd=cwd, stderr=subprocess.STDOUT)
     except subprocess.CalledProcessError as e:
         output = e.output.decode("utf-8")
         openmp_problem = "'omp.h' file not found" in output or "libomp" in output
@@ -337,12 +337,11 @@ def _run_compile_cmd(cmd_line: str, cwd: str) -> bytes:
             )
             output += instruction
         raise exc.CppCompileError(cmd, output) from e
-    return status
 
 
-def run_compile_cmd(cmd_line: str, cwd: str) -> bytes:
+def run_compile_cmd(cmd_line: str, cwd: str) -> None:
     with dynamo_timed("compile_file"):
-        return _run_compile_cmd(cmd_line, cwd)
+        _run_compile_cmd(cmd_line, cwd)
 
 
 def normalize_path_separator(orig_path: str) -> str:
@@ -1527,7 +1526,7 @@ class CppBuilder:
     def get_target_file_path(self) -> str:
         return normalize_path_separator(self._target_file)
 
-    def build(self) -> Tuple[bytes, str]:
+    def build(self) -> None:
         """
         It is must need a temperary directory to store object files in Windows.
         After build completed, delete the temperary directory to save disk space.
@@ -1539,8 +1538,5 @@ class CppBuilder:
         _create_if_dir_not_exist(_build_tmp_dir)
 
         build_cmd = self.get_command_line()
-
-        status = run_compile_cmd(build_cmd, cwd=_build_tmp_dir)
-
+        run_compile_cmd(build_cmd, cwd=_build_tmp_dir)
         _remove_dir(_build_tmp_dir)
-        return status, self._target_file
