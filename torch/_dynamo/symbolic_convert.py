@@ -2541,6 +2541,7 @@ class InstructionTranslatorBase(
             self.lineno,
             getattr(self.f_code, "co_name", "<unknown>"),
             lookup_line=False,
+            locals=self.f_locals,
         )
 
     def is_co_filename_from_nn_modules(self):
