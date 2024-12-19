@@ -76,28 +76,17 @@ jobs:
             echo "DEVELOPER_DIR=/Applications/Xcode_13.3.1.app/Contents/Developer" >> "${GITHUB_ENV}"
           fi
       - name: Checkout PyTorch
-        uses: malfet/checkout@silent-checkout
+        uses: actions/checkout@v4
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
           path: pytorch
-          quiet-checkout: true
+          show-progress: false
       - name: Clean PyTorch checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-      - name: Install sccache (only for non-forked PRs, and pushes to trunk)
-        uses: nick-fields/retry@v3.0.0
-        if: ${{ github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository }}
-        with:
-          timeout_minutes: 5
-          max_attempts: 3
-          retry_wait_seconds: 90
-          command: |
-            sudo curl --retry 3 --retry-all-errors https://s3.amazonaws.com/ossci-macos/sccache_v2.15 --output /usr/local/bin/sccache
-            sudo chmod +x /usr/local/bin/sccache
-            echo "SCCACHE_BUCKET=ossci-compiler-cache-circleci-v2" >> "${GITHUB_ENV}"
       - name: Populate binary env
         run: |
           # shellcheck disable=SC1091
@@ -107,7 +96,19 @@ jobs:
         run: |
           # shellcheck disable=SC1091
           source "${RUNNER_TEMP}/anaconda/bin/activate"
-          "${PYTORCH_ROOT}/.circleci/scripts/binary_macos_build.sh"
+          set -eux -o pipefail
+          # shellcheck disable=SC1090
+          source "${BINARY_ENV_FILE:-/Users/distiller/project/env}"
+          mkdir -p "$PYTORCH_FINAL_PACKAGE_DIR"
+
+          # Build
+          USE_PYTORCH_METAL_EXPORT=1
+          USE_COREML_DELEGATE=1
+          TORCH_PACKAGE_NAME="${TORCH_PACKAGE_NAME//-/_}"
+          export USE_PYTORCH_METAL_EXPORT
+          export USE_COREML_DELEGATE
+          export TORCH_PACKAGE_NAME
+          "${PYTORCH_ROOT}/.ci/wheel/build_wheel.sh"
       - uses: actions/upload-artifact@v4.4.0
         if: always()
         with:

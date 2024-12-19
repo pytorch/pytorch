@@ -569,6 +569,16 @@ class BaseSchedulerNode:
     def get_read_write_buffers_sizes_impl(
         self, include_reads: bool, include_writes: bool
     ) -> int:
+        return sum(
+            self.get_read_write_buffer_accesses(
+                include_reads=include_reads, include_writes=include_writes
+            ).values(),
+            start=0,
+        )
+
+    def get_read_write_buffer_accesses(
+        self, include_reads: bool, include_writes: bool
+    ) -> Dict[str, int]:
         """
         Counting the number of bytes accessed for a kernel is
         surprisingly tricky. In particular, there is a differentiation
@@ -590,14 +600,16 @@ class BaseSchedulerNode:
 
         1. Numel in ranges multiplied by number of deps the buffer has
         2. The buffer size
+
+        Returns memory accesses per buffer.
         """
         if isinstance(self, NopKernelSchedulerNode):
-            return 0
+            return {}
         if isinstance(self, ExternKernelSchedulerNode) and isinstance(
             self.node, MultiOutput
         ):
             # todo: Calculate this - it's kinda annoying.
-            return 0
+            return {}
 
         def try_size_hint(s: sympy.Expr) -> int:
             return V.graph.sizevars.size_hint(s, fallback=0)
@@ -641,7 +653,8 @@ class BaseSchedulerNode:
             )
             writes = writes - removed_buffers
             reads = reads - removed_buffers
-        node_bytes = 0
+
+        buf_byte_accesses: Dict[str, int] = {}
 
         for buf_name in reads | writes:
             buf_accessed_elems = sum(node_numel for dep in buf_accesses[buf_name])
@@ -683,9 +696,13 @@ class BaseSchedulerNode:
                         buf_accessed_elems, buf_elems
                     )
 
-            node_bytes += get_buf_bytes(buf)
+            buf_bytes = get_buf_bytes(buf)
+            if buf_name not in buf_byte_accesses:
+                buf_byte_accesses[buf_name] = buf_bytes
+            else:
+                buf_byte_accesses[buf_name] += buf_bytes
 
-        return node_bytes
+        return buf_byte_accesses
 
     @cache_on_self
     def get_estimated_runtime(self) -> float:
@@ -980,7 +997,9 @@ class SchedulerNode(BaseSchedulerNode):
             recompute_sizes_body_func=recompute_sizes_body_func,
         )
 
-    def refresh_dependencies(self, normalize: bool) -> None:
+    def refresh_dependencies(
+        self, normalize: bool, need_clear_tiling_cache: bool
+    ) -> None:
         # Fake dependencies are added manually. They can not be analyzed from
         # extract_read_writes. Find them out and apply manually.
         fake_deps = OrderedSet(
@@ -995,22 +1014,36 @@ class SchedulerNode(BaseSchedulerNode):
             ).with_read(fake_deps)
         )
 
+        self.pointwise_read_writes.clear_cache(self)
+
+        if need_clear_tiling_cache:
+            from .codegen.simd import SIMDScheduling
+
+            # TODO(shunting) if this cause compilation time increase when
+            # enabling LOAF by default, try just clearing the specific cache
+            # entry by using a customized cache implemetation rather than
+            # lru_cache.
+            SIMDScheduling.candidate_tilings.cache_clear()
+
     def apply_new_loop_order(self, new_order: Sequence[int]) -> None:
         self._body = self._body.reorder_iter_loops(
             new_order,
         )
         self._sizes = self._body.sizes
 
-        self.refresh_dependencies(normalize=False)
+        self.refresh_dependencies(normalize=False, need_clear_tiling_cache=True)
 
-        from .codegen.simd import SIMDScheduling
+    def merge_loops(self) -> None:
+        self._body = self._body.merge_loops()
+        self._sizes = self._body.sizes
 
-        # TODO(shunting) if this cause compilation time increase when
-        # enabling LOAF by default, try just clearing the specific cache
-        # entry by using a customized cache implemetation rather than
-        # lru_cache.
-        SIMDScheduling.candidate_tilings.cache_clear()
-        self.pointwise_read_writes.clear_cache(self)
+        # merge_loops is called after loop reordering.
+        # We still need retain fake dependencies since codegen the
+        # estimated amount of memory access rely on them.
+        #
+        # Merge loops does not affect the tiling decision. So we
+        # don't need clear the tiling cache.
+        self.refresh_dependencies(normalize=True, need_clear_tiling_cache=False)
 
     def reorder_loops_by_dep_pair(
         self, self_dep: MemoryDep, other_dep: MemoryDep
@@ -1895,16 +1928,19 @@ class Scheduler:
         # in codegen we only use buf0, never buf1
         self.mutation_renames: Dict[str, str] = {}
 
-        self.compute_dependencies()
-        self.nodes = self.topological_sort_schedule(self.nodes)
-        self.dead_node_elimination()
-        self.name_to_fused_node = {n.get_name(): n for n in self.nodes}
-        self.compute_ancestors()
+        # Must run first to correctly set dependencies, before all other passes that rely on
+        # reading from .read_writes.reads or .unmet_dependencies
         self.nodes = comms.decide_global_ordering_of_comms(
             self.nodes,
             self.name_to_buf,
             self.name_to_fused_node,
         )
+
+        self.compute_dependencies()
+        self.nodes = self.topological_sort_schedule(self.nodes)
+        self.dead_node_elimination()
+        self.name_to_fused_node = {n.get_name(): n for n in self.nodes}
+        self.compute_ancestors()
 
         metrics.ir_nodes_pre_fusion += len(self.nodes)
         V.debug.ir_pre_fusion(self.nodes)
@@ -1915,6 +1951,13 @@ class Scheduler:
         if config._pre_fusion_custom_pass is not None:
             self.nodes = config._pre_fusion_custom_pass(self.nodes)
         self.nodes = self.fuse_nodes(self.nodes)
+        self.merge_loops()
+        self.finalize_multi_template_buffers()
+        if config.combo_kernels:
+            self.create_combo_kernel_nodes(num_ck_nodes=None)
+
+        # Peak memory pass and overlap pass must run last, otherwise
+        # other reordering passes could undo their effects.
         if config.reorder_for_peak_memory:
             from .memory import reorder_for_peak_memory
 
@@ -1925,12 +1968,8 @@ class Scheduler:
                 OrderedSet(V.graph.graph_inputs.keys()),
                 OrderedSet(V.graph.get_output_names()),
             )
-        self.merge_loops()
-        self.finalize_multi_template_buffers()
         if config.reorder_for_compute_comm_overlap:
             self.nodes = comms.reorder_compute_and_comm_for_overlap(self.nodes)
-        if config.combo_kernels:
-            self.create_combo_kernel_nodes(num_ck_nodes=None)
         self.process_grouped_nodes()
         self.compute_last_usage()
         V.debug.ir_post_fusion(self.nodes)
@@ -2394,13 +2433,7 @@ class Scheduler:
                 if not isinstance(snode, SchedulerNode) or snode.is_template():
                     continue
 
-                snode._body = snode._body.merge_loops()
-                snode._sizes = snode._body.sizes
-
-                # merge_loops is called after loop reordering.
-                # We still need retain fake dependencies since codegen the
-                # estimated amount of memory access rely on them.
-                snode.refresh_dependencies(normalize=True)
+                snode.merge_loops()
 
                 # Note that for CPU backend, merging loops will change
                 # snode.group. It's fine for Triton backend.
@@ -2645,6 +2678,18 @@ class Scheduler:
                 choice_timings.items(), key=lambda x: x[1]
             ):
                 if not isinstance(choice, torch._inductor.ir.TritonTemplateCallerBase):
+                    continue
+
+                # For prologue fusion we check if the underlying template of the choice
+                # supports all allowed prologue inputs. If not, we skip this choice in
+                # the fusion benchmark.
+                # TODO: Remove this check after all Triton templates support prologue fusion.
+                # Currently, persistent+TMA Triton template does not due to the TMA-based loads.
+                if (
+                    not epilogue_fusion
+                    and hasattr(choice, "allowed_prologue_inps")
+                    and choice.allowed_prologue_inps != multi_node.allowed_prologue_inps
+                ):
                     continue
 
                 if unfused_time >= ms1 + ms2:
@@ -3222,8 +3267,28 @@ class Scheduler:
             # we also want to avoid benchmarking reliably unprofitable fusions like downcasts from fp32 -> fp16 inside kernel.
             # allowing gathers by allowing increasing write_bytes by small factor
             # TODO - make configurable per input, for insance, bias can fuse fp32 -> fp16 profitably
-            if read_bytes > (write_bytes * 1.1):
+
+            BYTES_THRESHOLD_MULTIPLIER = 1.1
+            if read_bytes > (write_bytes * BYTES_THRESHOLD_MULTIPLIER):
                 why("prologue fusion will not increase amount of bytes read in kernel")
+                return False
+
+            # we want to avoid attempting to fuse predictably unprofitable prologues
+            # such as increasing the unaligned reads or writes.
+            # TODO - would be nice to generalize this, however, we would need more explicit
+            # knowledge of memory access patterns in the TritonTemplate in order to know
+            # the stride order to check alignment.
+            origins = tuple(
+                e.target
+                for n in node1.get_nodes()
+                if n.node is not None
+                for e in n.node.get_origins()
+                if e.op == "call_function"
+            )
+            if origins == (torch.ops.aten.constant_pad_nd.default,):
+                why(
+                    "prologue fusion will not increase attempt to fuse in padding bc it increases unaligned reads"
+                )
                 return False
 
         if node1.is_template() and (
@@ -3248,7 +3313,10 @@ class Scheduler:
         del device2
 
         shared_data_score = self.score_fusion_memory(node1, node2)
-        if shared_data_score == 0:
+        if (
+            shared_data_score < config.score_fusion_memory_threshold
+            and config.loop_ordering_after_fusion
+        ):
             shared_data_score = self.shared_data_after_reordering_loop(node1, node2)
 
         if loop_ordering_log.isEnabledFor(logging.DEBUG):
@@ -3425,7 +3493,7 @@ class Scheduler:
         node2_dep_len = len(node1.read_writes.reads) + len(node2.read_writes.writes)
 
         # optimization: iter over smaller set
-        if max(node1_dep_len, node2_dep_len) * 4 > min(node1_dep_len, node2_dep_len):
+        if min(node1_dep_len, node2_dep_len) * 4 < max(node1_dep_len, node2_dep_len):
             if node1_dep_len > node2_dep_len:
                 tmp = node1
                 node1 = node2
