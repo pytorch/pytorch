@@ -275,7 +275,7 @@ static std::vector<std::optional<c10::SymInt>> wrapIntegersInOptional(
       intArray.begin(),
       intArray.end(),
       optVec.begin(),
-      [](const c10::SymInt& value) { return std::make_optional(value); });
+      [](const c10::SymInt& value) { return value; });
   return optVec;
 }
 
