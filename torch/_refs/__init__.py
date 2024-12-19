@@ -6543,7 +6543,7 @@ def _recursive_build(
     # seq can be a list of tensors
     seq = obj
     return (
-        torch.tensor([])
+        torch.empty(0)
         if not seq
         else torch.stack([_recursive_build(scalarType, item) for item in seq])
     )
