@@ -164,7 +164,7 @@ class PyCodegen:
             value, FunctionDecoratedByContextlibContextManagerVariable
         ):
             raise IncorrectUsage(
-                "NYI: Return @contextmanager object from a torch.compile function"
+                "NYI: Returning a @contextmanager object from a torch.compile function"
             )
 
         # Dynamo normally prefers codegen from source to account for aliasing.
