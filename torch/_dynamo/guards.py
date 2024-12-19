@@ -2319,7 +2319,7 @@ class CheckFunctionManager:
         if not justknobs_check("pytorch/compiler:guard_nn_modules"):
             log.warning("guard_nn_modules is turned off using justknobs killswitch")
 
-        for guard in sorted(guards or [], key=Guard.sort_key):
+        for guard in sorted(guards or (), key=Guard.sort_key):
             if (
                 not guard_on_nn_modules
                 and guard.is_specialized_nn_module()
