@@ -736,7 +736,7 @@ def _setup_standard_sys_libs(
             passthrough_args.append(" -L" + build_paths.glibc_lib)
 
     if _is_clang(cpp_compiler) or _is_gcc(cpp_compiler):
-        passthough_args.append(" -Wl,-z,noexecstack")
+        passthrough_args.append(" -Wl,-z,noexecstack")
 
     return cflags, include_dirs, passthrough_args
 
