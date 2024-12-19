@@ -163,7 +163,6 @@ def _find_sycl_home() -> Optional[str]:
     if sycl_home and not torch.xpu.is_available():
         print(f"No XPU runtime is found, using ONEAPI_ROOT='{sycl_home}'",
               file=sys.stderr)
-    print("ETAF:", sycl_home)
     return sycl_home
 
 def _join_rocm_home(*paths) -> str:
