@@ -36,6 +36,7 @@ import sympy
 
 import torch
 from torch import SymInt
+from torch._dynamo.utils import get_metrics_context
 from torch._guards import TracingContext
 from torch._higher_order_ops.torchbind import call_torchbind
 from torch._ops import HigherOrderOperator
@@ -2066,6 +2067,8 @@ class VariableBuilder:
             ),
         )
         self.tx.output.tracked_fakes.append(TrackedFake(r.sym_num, self.source, None))
+
+        get_metrics_context().set("tensorify_float_attempt", True, overwrite=True)
 
         return r
 
