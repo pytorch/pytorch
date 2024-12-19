@@ -518,11 +518,6 @@ class UserDefinedClassVariable(UserDefinedVariable):
             with do_not_convert_to_tracable_parameter():
                 var.call_method(tx, "__init__", args, kwargs)
                 return var
-        elif variables.CustomizedDictVariable.is_matching_cls(self.value):
-            options = {"mutation_type": ValueMutationNew()}
-            return variables.CustomizedDictVariable.create(
-                self.value, args, kwargs, options
-            )
         elif (
             variables.RestrictedListSubclassVariable.is_matching_cls(self.value)
             and self.source

@@ -610,39 +610,6 @@ class SideEffects:
                     ]
                 )
 
-            elif isinstance(var, variables.CustomizedDictVariable):
-                # need to update the dict manually since update method may be invalid
-                varname_map = {}
-                for name in _manual_update_dict.__code__.co_varnames:
-                    varname_map[name] = cg.tx.output.new_var()
-
-                cg(var.source)  # type: ignore[attr-defined]
-                cg.extend_output(
-                    [create_instruction("STORE_FAST", argval=varname_map["dict_to"])]
-                )
-
-                cg(var, allow_cache=False)  # Don't codegen via source
-                cg.extend_output(
-                    [create_instruction("STORE_FAST", argval=varname_map["dict_from"])]
-                )
-
-                cg(var.source)  # type: ignore[attr-defined]
-                cg.load_method("clear")
-
-                # unfortunately can't just use DICT_MERGE due to possible custom behaviors
-                dict_update_insts = bytecode_from_template(
-                    _manual_update_dict, varname_map=varname_map
-                )
-
-                suffixes.append(
-                    [
-                        *create_call_method(0),  # clear
-                        create_instruction("POP_TOP"),
-                        *dict_update_insts,
-                        create_instruction("POP_TOP"),
-                    ]
-                )
-
             elif isinstance(var, variables.ConstDictVariable):
                 # Reconstruct works as follow:
                 # (1) Skip codegen if there are no new items
