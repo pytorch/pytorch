@@ -1194,6 +1194,14 @@ class cuda:
     cutlass_op_denylist_regex: Optional[str] = "pingpong"
 
 
+class xpu:
+    # The minimum number of Xe Cores suitable for max autotune.
+    # Due to the evolution of the architecture, we are not sure if this
+    # threadhold will still be applicable in the future, so we open it
+    # up to users.
+    max_autotune_min_xe_core = 16
+
+
 class rocm:
     # Offload arch list for device code compilation, e.g. ["gfx941", "gfx942"].
     # If empty, the `native` arch is used
@@ -1335,6 +1343,9 @@ class trace:
     upload_tar: Optional[Callable[[str], None]] = None
 
     log_autotuning_results: bool = False
+
+    # Save mapping info from inductor generated triton kernel to post_grad fx nodes
+    log_inductor_triton_kernel_to_post_grad_node_info: bool = True
 
 
 _save_config_ignore = [
