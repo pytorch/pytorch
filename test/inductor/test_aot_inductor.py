@@ -47,6 +47,7 @@ from torch.testing._internal.common_utils import (
     skipIfXpu,
     TEST_WITH_ROCM,
 )
+from torch.testing._internal.custom_tensor import CustomTensorPlainOut
 from torch.testing._internal.inductor_utils import GPU_TYPE
 from torch.testing._internal.logging_utils import LoggingTestCase, make_logging_test
 from torch.testing._internal.triton_utils import HAS_GPU, requires_gpu
@@ -260,6 +261,36 @@ class AOTInductorTestsTemplate:
         model = Model()
         model = model.to(self.device)
         AOTIRunnerUtil.compile(model, example_inputs)
+
+    def test_subclasses(self):
+        device_to_init = self.device
+
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.p1 = torch.nn.Parameter(torch.ones(3, 4, device=device_to_init))
+                self.p2 = torch.nn.Parameter(
+                    CustomTensorPlainOut(
+                        torch.ones(3, 4, device=device_to_init),
+                        torch.ones(3, 4, device=device_to_init),
+                    )
+                )
+
+            def forward(self, x):
+                a = (2 * self.p1 + self.p2).sum()
+                return x + a
+
+        m = Foo()
+        ref_x = torch.randn(3, 4, device=device_to_init)
+
+        with torch.no_grad():
+            result = AOTIRunnerUtil.run(
+                self.device,
+                m,
+                (ref_x,),
+            )
+        actual = m(ref_x)
+        self.assertTrue(same(result, actual))
 
     def test_large_mmaped_weights(self):
         class Model(torch.nn.Module):
