@@ -183,6 +183,19 @@ class CondModels:
 
             return torch.cond(a.size(0) > b.size(0), true_fn, false_fn, [a, b])
 
+    class UnbackedSymIntClosure(torch.nn.Module):
+        def forward(self, p, x, y, z):
+            a = y.shape[0]
+            b = z.sum().to(torch.int64).item()
+
+            def true_fn(x):
+                return x + a
+
+            def false_fn(x):
+                return x + b * z
+
+            return torch.cond(x.shape[0] > 5, true_fn, false_fn, (x,))
+
 
 class CondTests(TestCase):
     def _run_test(
@@ -246,6 +259,22 @@ class CondTests(TestCase):
                 torch.randn(10, 20),
             ),
             device=device,
+        )
+
+    @requires_gpu
+    @parametrize("device", ["cpu", GPU_TYPE])
+    @parametrize("dynamic", [False, True])
+    @torch._dynamo.config.patch("capture_scalar_outputs", True)
+    def test_cond_unbacked_symint_closure(self, device, dynamic):
+        self._run_test(
+            model=CondModels.UnbackedSymIntClosure(),
+            inputs=(
+                torch.randn(10, 20),
+                torch.randn(10, 20),
+                torch.randn(10, 20),
+            ),
+            device=device,
+            dynamic=dynamic,
         )
 
     @requires_gpu
@@ -763,6 +792,23 @@ class WhileLoopModels:
                 [c, a, b],
             )
 
+    class UnbackedSymIntClosure(torch.nn.Module):
+        def forward(self, c, a, b):
+            d = a.sum().to(torch.int64).item()
+            e = torch.nonzero(b).size(0)
+
+            def cond_fn(c, a, b):
+                return c > d + e + a.shape[0] - b.shape[0]
+
+            def body_fn(c, a, b):
+                return c - 1, a + e, b + d
+
+            return torch._higher_order_ops.while_loop(
+                cond_fn,
+                body_fn,
+                [c, a, b],
+            )
+
 
 class WhileLoopTests(TestCase):
     def _run_test(
@@ -980,6 +1026,23 @@ class WhileLoopTests(TestCase):
                     device="cpu",
                     dynamic=dynamic,
                 )
+
+    @requires_gpu
+    @parametrize("device", ["cpu", GPU_TYPE])
+    @parametrize("dynamic", [True, False])
+    @torch._dynamo.config.patch(
+        {"capture_scalar_outputs": True, "capture_dynamic_output_shape_ops": True}
+    )
+    def test_while_loop_with_unbacked_symint_closure(self, device, dynamic):
+        self._run_test(
+            model=WhileLoopModels.UnbackedSymIntClosure(),
+            inputs=(
+                torch.randn(10, 20),
+                torch.randn(10, 20),
+            ),
+            device=device,
+            dynamic=dynamic,
+        )
 
 
 class AssociativeScanTests(TestCase):
