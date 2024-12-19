@@ -864,7 +864,7 @@ CacheNode* _compiled_autograd_impl(
       saved.debug_asserts();
       saved.before(call.node->next_edges());
 
-      auto input_metadata = collect_input_metadata(call.node->next_edges());
+      auto input_metadata = get_input_metadata(call.node->next_edges());
       TORCH_INTERNAL_ASSERT(input_metadata.size() == outputs.size());
 
       // Lazily bind the `validate_outputs` function to Python.
