@@ -597,9 +597,8 @@ class UserDefinedClassVariable(UserDefinedVariable):
             and self.source
         ):
             var = tx.output.side_effects.track_object_new_from_user_defined_class(self)
-            with do_not_convert_to_tracable_parameter():
-                var.call_method(tx, "__init__", args, kwargs)
-                return var
+            var.call_method(tx, "__init__", args, kwargs)
+            return var
 
         return super().call_function(tx, args, kwargs)
 

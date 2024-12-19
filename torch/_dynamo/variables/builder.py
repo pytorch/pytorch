@@ -1230,9 +1230,8 @@ class VariableBuilder:
                 fake_script_obj,
                 source=self.source,
             )
-        elif isinstance(value, (dict, collections.OrderedDict)):
+        elif isinstance(value, (dict, collections.OrderedDict)) and type(value).__new__ is dict.__new__:
             self.install_guards(GuardBuilder.TYPE_MATCH)
-
             self.install_guards(GuardBuilder.SEQUENCE_LENGTH)
 
             # Guard on the key order

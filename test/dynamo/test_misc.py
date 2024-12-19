@@ -10571,7 +10571,7 @@ ShapeEnv not equal: field values don't match:
 
         foo()
 
-    def test_dict_subclass_cannot_be_initialized_in_graph(self):
+    def test_dict_subclass_initialization_in_graph(self):
         for super_class in (
             collections.OrderedDict,
             dict,
@@ -10587,11 +10587,10 @@ ShapeEnv not equal: field values don't match:
                 assert "key" in c
                 return c["key"] + 1
 
-            fn_opt = torch.compile(fn, backend="eager", fullgraph=True)
-            with self.assertRaisesRegex(
-                torch._dynamo.exc.Unsupported, "call_function UserDefinedClassVariable"
-            ):
-                print(fn_opt(torch.zeros(1)))
+            opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+
+            x = torch.rand(4)
+            self.assertEqual(fn(x), opt_fn(x))
 
     @wrapDeterministicFlagAPITest
     def test_backward_deterministic_mode_mismatch_warning(self):
