@@ -2985,7 +2985,6 @@ class AOTInductorTestsTemplate:
             dynamic_shapes=dynamic_shapes,
         )
 
-    @skipIfRocm  # USE_MEM_EFF_ATTENTION was not enabled for build.
     def test_scaled_dot_product_efficient_attention(self):
         if self.device != "cuda":
             raise unittest.SkipTest("requires CUDA")
