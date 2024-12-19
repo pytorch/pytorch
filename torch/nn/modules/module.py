@@ -693,9 +693,9 @@ class Module:
             torch.nn.Module: The submodule referenced by ``target``
 
         Raises:
-            AttributeError: If the target string references an invalid
-                path or resolves to something that is not an
-                ``nn.Module``
+            AttributeError: If at any point along the path resulting from
+                the target string the (sub)path resolves to a non-existent
+                attribute name or an object that is not an instance of ``nn.Module``.
         """
         if target == "":
             return self
@@ -750,9 +750,9 @@ class Module:
 
         Raises:
             ValueError: If the target string is empty
-            AttributeError: If the target string references an invalid
-                path or resolves to something that is not an
-                ``nn.Module``
+            AttributeError: If at any point along the path resulting from
+                the target string the (sub)path resolves to a non-existent
+                attribute name or an object that is not an instance of ``nn.Module``.
         """
         if target == "":
             raise ValueError("Cannot set the submodule without a target name!")
