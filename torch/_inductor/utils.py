@@ -1132,15 +1132,6 @@ def is_big_gpu(index_or_device: Union[int, torch.device] = 0) -> bool:
     else:
         device = torch.device(gpu_type, index_or_device)
 
-    if gpu_type == "cuda":
-        return is_big_gpu_cuda(device)
-    elif gpu_type == "xpu":
-        return is_big_gpu_xpu(device)
-    else:
-        return False
-
-
-def is_big_gpu_cuda(device: torch.device) -> bool:
     prop = DeviceProperties.create(device)
 
     # SM logic is not relevant to ROCm gpus
@@ -1152,7 +1143,7 @@ def is_big_gpu_cuda(device: torch.device) -> bool:
             return False
         return True
 
-    min_sms = 68  # 3080
+    min_sms = config.xpu.big_gpu_threshold if gpu_type == "xpu" else 68  # 3080
     avail_sms = prop.multi_processor_count
     if avail_sms < min_sms:
         log.warning(
@@ -1161,11 +1152,6 @@ def is_big_gpu_cuda(device: torch.device) -> bool:
         )
         return False
     return True
-
-
-def is_big_gpu_xpu(device: torch.device) -> bool:
-    prop = DeviceProperties.create(device)
-    return prop.multi_processor_count > config.xpu.max_autotune_min_xe_core
 
 
 @functools.lru_cache
@@ -2032,13 +2018,8 @@ def device_need_guard(device: str):
 
 
 def needs_fallback_due_to_atomic_add_limitations(dtype):
-    # tl.atomic add has bfloat16 support in fbcode
-    # but not in OSS https://github.com/pytorch/pytorch/issues/97016
-    # we will fallback until the code is upstreamed to OSS
-    if config.is_fbcode() and dtype == torch.bfloat16:
-        return False
-    else:
-        return dtype in (torch.int64, torch.bool, torch.bfloat16)
+    # tl.atomic_add does NOT support the following types
+    return dtype in (torch.int64, torch.bool, torch.bfloat16)
 
 
 def use_scatter_fallback(
