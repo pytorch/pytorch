@@ -18,8 +18,7 @@
 
 #include <algorithm>
 
-namespace ao {
-namespace sparse {
+namespace ao::sparse {
 
 int register_linear_params();
 
@@ -246,4 +245,4 @@ TORCH_LIBRARY_IMPL(sparse, QuantizedCPU, m) {
       TORCH_FN(QLinearPackWeightInt8::run));
 }
 }  // namespace
-}}  // namespace ao::sparse
+}  // namespace ao::sparse

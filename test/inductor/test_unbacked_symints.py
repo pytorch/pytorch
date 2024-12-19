@@ -53,7 +53,7 @@ class TestUnbackedSymints(InductorTestCase):
             return nz.expand([128, -1, 2])
 
         x = make_tensor(32, 4, device=device, dtype=torch.float32, exclude_zero=True)
-        actual = torch.compile(fn, fullgraph=True)(x)
+        torch.compile(fn, fullgraph=True)(x)
 
     @skipGPUIf(not HAS_GPU, "requires gpu and triton")
     @dynamo_config.patch({"capture_dynamic_output_shape_ops": True})
@@ -300,5 +300,5 @@ instantiate_device_type_tests(TestUnbackedSymints, globals(), allow_xpu=True)
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
 
-    if IS_LINUX and HAS_GPU and (not HAS_CUDA or is_big_gpu(0)):
+    if IS_LINUX and HAS_GPU and (not HAS_CUDA or is_big_gpu()):
         run_tests()

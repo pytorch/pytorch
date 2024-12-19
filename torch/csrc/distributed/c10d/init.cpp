@@ -24,6 +24,10 @@
 #include <torch/csrc/distributed/c10d/ProcessGroupWrapper.hpp>
 #endif
 
+#ifdef USE_C10D_XCCL
+#include <torch/csrc/distributed/c10d/ProcessGroupXCCL.hpp>
+#endif
+
 #ifdef USE_C10D_NCCL
 #include <torch/csrc/distributed/c10d/NCCLUtils.hpp>
 #include <torch/csrc/distributed/c10d/ProcessGroupNCCL.hpp>
@@ -2430,6 +2434,7 @@ Arguments:
       .value("UNDEFINED", ::c10d::ProcessGroup::BackendType::UNDEFINED)
       .value("GLOO", ::c10d::ProcessGroup::BackendType::GLOO)
       .value("NCCL", ::c10d::ProcessGroup::BackendType::NCCL)
+      .value("XCCL", ::c10d::ProcessGroup::BackendType::XCCL)
       .value("UCC", ::c10d::ProcessGroup::BackendType::UCC)
       .value("MPI", ::c10d::ProcessGroup::BackendType::MPI)
       .value("CUSTOM", ::c10d::ProcessGroup::BackendType::CUSTOM)
@@ -2876,7 +2881,6 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
 #endif
 
 #ifdef USE_C10D_NCCL
-
   auto processGroupNCCL =
       intrusive_ptr_no_gil_destructor_class_<::c10d::ProcessGroupNCCL>(
           module, "ProcessGroupNCCL", backend)
@@ -2970,10 +2974,6 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
           .def(
               "_is_initialized",
               &::c10d::ProcessGroupNCCL::isInitialized,
-              py::call_guard<py::gil_scoped_release>())
-          .def(
-              "get_error",
-              &::c10d::ProcessGroupNCCL::getError,
               py::call_guard<py::gil_scoped_release>());
 
   module.def(
@@ -3075,6 +3075,23 @@ Example::
       py::call_guard<py::gil_scoped_release>());
 #endif
 
+#ifdef USE_C10D_XCCL
+  auto processGroupXCCL =
+      intrusive_ptr_no_gil_destructor_class_<::c10d::ProcessGroupXCCL>(
+          module, "ProcessGroupXCCL", backend)
+          .def(
+              py::init([](const c10::intrusive_ptr<::c10d::Store>& store,
+                          int rank,
+                          int size) {
+                return c10::make_intrusive<::c10d::ProcessGroupXCCL>(
+                    store, rank, size);
+              }),
+              py::arg("store"),
+              py::arg("rank"),
+              py::arg("size"),
+              py::call_guard<py::gil_scoped_release>());
+#endif
+
 #ifdef USE_C10D_UCC
   auto processGroupUCC =
       intrusive_ptr_no_gil_destructor_class_<::c10d::ProcessGroupUCC>(
@@ -3121,12 +3138,6 @@ Example::
       .value("TIMEOUT", ::c10d::WorkResult::TIMEOUT)
       .value("COMM_ERROR", ::c10d::WorkResult::COMM_ERROR)
       .value("UNKNOWN", ::c10d::WorkResult::UNKNOWN);
-
-  py::enum_<::c10d::ErrorType>(module, "ErrorType")
-      .value("SUCCESS", ::c10d::ErrorType::SUCCESS)
-      .value("TIMEOUT", ::c10d::ErrorType::TIMEOUT)
-      .value("COMM_ERROR", ::c10d::ErrorType::COMM_ERROR)
-      .value("REMOTE_ERROR", ::c10d::ErrorType::REMOTE_ERROR);
 
   py::class_<::c10d::WorkInfo, std::shared_ptr<::c10d::WorkInfo>>(
       module, "WorkInfo")

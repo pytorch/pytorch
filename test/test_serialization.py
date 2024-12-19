@@ -1,4 +1,5 @@
 # Owner(s): ["module: serialization"]
+# ruff: noqa: F841
 
 import contextlib
 import copy
@@ -9,6 +10,7 @@ import os
 import pathlib
 import pickle
 import platform
+import re
 import shutil
 import sys
 import tempfile
@@ -1012,7 +1014,13 @@ class TestSerialization(TestCase, SerializationMixin):
         with tempfile.NamedTemporaryFile() as f:
             torch.jit.save(torch.jit.script(torch.nn.Linear(3, 4)), f)
             f.seek(0)
-            torch.load(f)
+            with self.assertRaisesRegex(
+                RuntimeError,
+                re.escape("Cannot use ``weights_only=True`` with TorchScript archives passed to ``torch.load``")
+            ):
+                torch.load(f)
+            f.seek(0)
+            torch.load(f, weights_only=False)
 
     # Ensure large zip64 serialization works properly
     @serialTest()
@@ -1099,12 +1107,9 @@ class TestSerialization(TestCase, SerializationMixin):
             # Safe load should assert
             with self.assertRaisesRegex(pickle.UnpicklingError, "Unsupported global: GLOBAL builtins.print"):
                 torch.load(f, weights_only=True)
-            try:
-                torch.serialization.add_safe_globals([print])
+            with torch.serialization.safe_globals([print]):
                 f.seek(0)
                 torch.load(f, weights_only=True)
-            finally:
-                torch.serialization.clear_safe_globals()
 
     def test_weights_only_safe_globals_newobj(self):
         # This will use NEWOBJ
@@ -1116,12 +1121,9 @@ class TestSerialization(TestCase, SerializationMixin):
                                         "GLOBAL __main__.Point was not an allowed global by default"):
                 torch.load(f, weights_only=True)
             f.seek(0)
-            try:
-                torch.serialization.add_safe_globals([Point])
+            with torch.serialization.safe_globals([Point]):
                 loaded_p = torch.load(f, weights_only=True)
                 self.assertEqual(loaded_p, p)
-            finally:
-                torch.serialization.clear_safe_globals()
 
     def test_weights_only_safe_globals_build(self):
         counter = 0
@@ -1138,21 +1140,20 @@ class TestSerialization(TestCase, SerializationMixin):
                                         "GLOBAL __main__.ClassThatUsesBuildInstruction was not an allowed global by default"):
                 torch.load(f, weights_only=True)
             try:
-                torch.serialization.add_safe_globals([ClassThatUsesBuildInstruction])
-                # Test dict update path
-                f.seek(0)
-                loaded_c = torch.load(f, weights_only=True)
-                self.assertEqual(loaded_c.num, 2)
-                self.assertEqual(loaded_c.foo, 'bar')
-                # Test setstate path
-                ClassThatUsesBuildInstruction.__setstate__ = fake_set_state
-                f.seek(0)
-                loaded_c = torch.load(f, weights_only=True)
-                self.assertEqual(loaded_c.num, 2)
-                self.assertEqual(counter, 1)
-                self.assertFalse(hasattr(loaded_c, 'foo'))
+                with torch.serialization.safe_globals([ClassThatUsesBuildInstruction]):
+                    # Test dict update path
+                    f.seek(0)
+                    loaded_c = torch.load(f, weights_only=True)
+                    self.assertEqual(loaded_c.num, 2)
+                    self.assertEqual(loaded_c.foo, 'bar')
+                    # Test setstate path
+                    ClassThatUsesBuildInstruction.__setstate__ = fake_set_state
+                    f.seek(0)
+                    loaded_c = torch.load(f, weights_only=True)
+                    self.assertEqual(loaded_c.num, 2)
+                    self.assertEqual(counter, 1)
+                    self.assertFalse(hasattr(loaded_c, 'foo'))
             finally:
-                torch.serialization.clear_safe_globals()
                 ClassThatUsesBuildInstruction.__setstate__ = None
 
     @parametrize("slots", ['some', 'all'])
@@ -4629,10 +4630,12 @@ class TestSubclassSerialization(TestCase):
                 sd = torch.load(f, weights_only=True)
 
             # Loading tensor subclass should work if the class is marked safe
+            safe_globals_before = torch.serialization.get_safe_globals()
             f.seek(0)
             try:
                 torch.serialization.add_safe_globals([TwoTensor])
-                self.assertTrue(torch.serialization.get_safe_globals() == [TwoTensor])
+                expected_safe_globals = set(safe_globals_before + [TwoTensor])
+                self.assertEqual(set(torch.serialization.get_safe_globals()), expected_safe_globals)
                 sd = torch.load(f, weights_only=True)
                 self.assertEqual(sd['t'], t)
                 self.assertEqual(sd['p'], p)
@@ -4645,6 +4648,7 @@ class TestSubclassSerialization(TestCase):
                     torch.load(f, weights_only=True)
             finally:
                 torch.serialization.clear_safe_globals()
+                torch.serialization.add_safe_globals(safe_globals_before)
 
     def test_safe_globals_context_manager_weights_only(self):
         '''
@@ -4654,6 +4658,7 @@ class TestSubclassSerialization(TestCase):
         p = torch.nn.Parameter(t)
         sd = OrderedDict([('t', t), ('p', p)])
 
+        safe_globals_before = torch.serialization.get_safe_globals()
         try:
             torch.serialization.add_safe_globals([TestEmptySubclass])
             with tempfile.NamedTemporaryFile() as f:
@@ -4661,13 +4666,15 @@ class TestSubclassSerialization(TestCase):
                 with safe_globals([TwoTensor]):
                     f.seek(0)
                     torch.load(f, weights_only=True)
-                self.assertTrue(torch.serialization.get_safe_globals() == [TestEmptySubclass])
+                expected_safe_globals = set(safe_globals_before + [TestEmptySubclass])
+                self.assertEqual(set(torch.serialization.get_safe_globals()), expected_safe_globals)
                 f.seek(0)
                 with self.assertRaisesRegex(pickle.UnpicklingError,
                                             "Unsupported global: GLOBAL torch.testing._internal.two_tensor.TwoTensor"):
                     torch.load(f, weights_only=True)
         finally:
             torch.serialization.clear_safe_globals()
+            torch.serialization.add_safe_globals(safe_globals_before)
 
     def test_sets_are_loadable_with_weights_only(self):
         s = {1, 2, 3}
