@@ -4,12 +4,14 @@
 #include <ATen/native/sparse/cuda/StaticSort.h>
 #include <cutlass/bfloat16.h>
 #include <cutlass/half.h>
+#include <cutlass/platform/platform.h>
+#include <cutlass/version.h>
 
 // Given 4x4 values, computes the selected indices that will remain after 2:4
 // sparsification, as a bitmask.
 // NOTE: Algorithms might select LESS than 8 values in total in some cases.
 
-namespace platform {
+namespace cutlass::platform {
 template <>
 struct numeric_limits<cutlass::bfloat16_t> {
   CUTLASS_HOST_DEVICE
@@ -17,7 +19,18 @@ struct numeric_limits<cutlass::bfloat16_t> {
     return cutlass::bfloat16_t::bitcast(0x7f80);
   }
 };
-} // namespace platform
+
+#if CUTLASS_VERSION == 341
+template <>
+struct numeric_limits<cutlass::half_t> {
+  CUTLASS_HOST_DEVICE
+  static cutlass::half_t infinity() {
+    return cutlass::half_t::bitcast(0x7c00);
+  }
+};
+#endif
+
+} // namespace cutlass::platform
 
 namespace at::native{
 
@@ -68,7 +81,7 @@ template <typename Op = IdentityOp>
 struct LargestValuesGreedy {
   template <typename T>
   static CUTLASS_DEVICE T outOfBoundsFillValue() {
-    return -platform::numeric_limits<T>::infinity();
+    return -cutlass::platform::numeric_limits<T>::infinity();
   }
 
   template <typename Tile4x4Accessor>
@@ -128,7 +141,7 @@ template <typename Op = IdentityOp>
 struct Causal1122 {
   template <typename T>
   static CUTLASS_DEVICE T outOfBoundsFillValue() {
-    return -platform::numeric_limits<T>::infinity();
+    return -cutlass::platform::numeric_limits<T>::infinity();
   }
 
   template <typename Tile4x4Accessor>
