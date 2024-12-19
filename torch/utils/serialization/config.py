@@ -1,13 +1,16 @@
 import sys
-from typing import Optional as _Optional
+from typing import Optional as _Optional, TYPE_CHECKING as _TYPE_CHECKING
 
-from torch.serialization import LoadEndianness as _LoadEndianess
+
+if _TYPE_CHECKING:
+    from torch.serialization import LoadEndianness as _LoadEndianess
+
 from torch.utils._config_module import install_config_module as _install_config_module
 
 
 class load:
     mmap: bool = False
-    endianness: _Optional[_LoadEndianess] = None
+    endianness: _Optional["_LoadEndianess"] = None
     # MAP_PRIVATE = 2
     mmap_flags: _Optional[int] = None if sys.platform == "win32" else 2
 
