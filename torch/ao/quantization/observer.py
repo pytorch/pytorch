@@ -1670,8 +1670,6 @@ class Granularity:
     quantization operations, such as per-tensor or per-axis quantization.
     """
 
-
-
 @dataclass(frozen=True)
 class PerBlock(Granularity):
     """
@@ -1695,8 +1693,6 @@ class PerTensor(Granularity):
     based off the entire tensor.
 
     """
-
-
 
 @dataclass(frozen=True)
 class PerAxis(Granularity):
@@ -1747,8 +1743,6 @@ class PerRow(Granularity):
     is quantized with a block_size of (1, weight.shape[1]).
     """
 
-
-
 class PerToken(Granularity):
     """
     Represents per-token granularity in quantization.
@@ -1763,8 +1757,6 @@ class PerToken(Granularity):
     If the input tensor has only two dimensions, e.g. [8, 16], then this is
     equivalent to `PerAxis(axis=0)`, which yields 8 sets of quantization parameters.
     """
-
-
 
 def get_block_size(
     input_shape: Tuple[int, ...], granularity: Granularity

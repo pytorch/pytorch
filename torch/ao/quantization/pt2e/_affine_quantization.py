@@ -113,10 +113,10 @@ def _get_reduction_params(block_size, input_size):
     cur_dim = 0
     for i in range(len(block_size)):
         if block_size[i] != input_size[i] and block_size[i] > 1:
-            assert (
-                input_size[i] % block_size[i] == 0
-            ), f"Expecting input size at {i} dimension: " \
-            f"{input_size[i]} to be divisible by block_size at {i} dimension: {block_size[i]}"
+            assert input_size[i] % block_size[i] == 0, (
+                f"Expecting input size at {i} dimension: "
+                f"{input_size[i]} to be divisible by block_size at {i} dimension: {block_size[i]}"
+            )
             shape_for_reduction.append(input_size[i] // block_size[i])
             shape_for_reduction.append(block_size[i])
             # reduce over the block_size[i] dim
