@@ -225,7 +225,6 @@ class TestAOTInductorPackage(TestCase):
             def forward(self, a, b):
                 return torch.cat([a, b], dim=0)
 
-        b = torch.randn(3, 4, device=self.device)
         dim0_a = Dim("dim0_a", min=1, max=10)
         dim0_b = Dim("dim0_b", min=1, max=20)
         dynamic_shapes = {"a": {0: dim0_a}, "b": {0: dim0_b}}

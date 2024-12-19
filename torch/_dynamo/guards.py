@@ -122,6 +122,7 @@ from .types import (  # noqa: F401
 )
 from .utils import (
     common_constant_types,
+    dict_keys,
     dict_keys_repr,
     get_custom_getattr,
     get_torch_function_mode_stack,
@@ -1567,6 +1568,7 @@ class GuardBuilder(GuardBuilderBase):
                 frozenset,
                 slice,
                 range,
+                dict_keys,
                 torch.Size,
                 *np_types,
                 *ok_mutable_types,
