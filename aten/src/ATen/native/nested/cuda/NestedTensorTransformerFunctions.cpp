@@ -18,6 +18,10 @@
 #include <ATen/native/transformers/cuda/sdp_utils.h>
 
 #include <ATen/cuda/CUDAContext.h>
+#include <ATen/cuda/CUDAGeneratorImpl.h>
+#include <ATen/cuda/CUDAGraphsUtils.cuh>
+
+#include <ATen/native/cudnn/MHA.h>
 
 namespace at::native {
 namespace {
@@ -318,6 +322,116 @@ _scaled_dot_product_efficient_attention_nestedtensor_cuda(
   // Reshape output to convert nnz to batch_size and seq_len
   attention = wrap_buffer(attention.view(-1), output_shape).transpose(1, 2);
   return std::make_tuple(std::move(attention), std::move(log_sumexp), std::move(seed), std::move(offset));
+}
+
+std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt, Tensor, Tensor, Tensor>
+_scaled_dot_product_cudnn_attention_nestedtensor_cuda( 
+    const Tensor& query,
+    const Tensor& key,
+    const Tensor& value,
+    const std::optional<Tensor>& attn_bias,
+    bool compute_logsumexp,
+    double dropout_p,
+    bool is_causal,
+    bool return_debug_mask,
+    std::optional<double> scale) {
+  auto [
+      query_buffer_reshaped,
+      key_buffer_reshaped,
+      value_buffer_reshaped,
+      cumulative_sequence_length_q,
+      cumulative_sequence_length_kv,
+      max_seqlen_batch_q,
+      max_seqlen_batch_kv,
+      output_shape] = preprocessing::sdpa_nested_preprocessing(query, key, value);
+  // (Tensor output, Tensor logsumexp, Tensor cum_seq_q, Tensor cum_seq_k, SymInt max_q, SymInt max_k, Tensor philox_seed, Tensor philox_offset, Tensor debug_attn_mask)
+
+  //auto [attention, logsumexp, cum_seqlen_q, cum_seqlen_k, max_seqlen_q, max_seqlen_k, philox_seed, philox_offset, debug_attn_mask] = _scaled_dot_product_cudnn_attention(
+  //  query_buffer_reshaped,
+  //  key_buffer_reshaped,
+  //  value_buffer_reshaped,
+  //  std::nullopt,
+  //  compute_logsumexp,
+  //  dropout_p,
+  //  is_causal,
+  //  return_debug_mask,
+  //  scale);
+  //
+  // C10_LOG_API_USAGE_ONCE("torch.sdpa.flash_attention_cudnn");
+  // TODO(eqy): debug mask support
+  // BHSD ...
+  const int64_t batch_size = query.size(0);
+  const int64_t num_heads_q = query.size(-3);
+  const int64_t num_heads_k = key.size(-3);
+  const int64_t num_heads_v = value.size(-3);
+  const int64_t head_dim_qk = query.size(-1);
+  const int64_t head_dim_v = value.size(-1);
+  auto attn_bias_ = attn_bias;
+  if (attn_bias_.has_value()) {
+    const auto bias_dim = attn_bias_.value().dim();
+    if (bias_dim == 2) {
+      attn_bias_ = attn_bias_.value().expand({batch_size, 1, max_seqlen_batch_q, max_seqlen_batch_kv});
+    } else if (bias_dim == 3) {
+      attn_bias_ = attn_bias_.value().expand({batch_size, 1, max_seqlen_batch_q, max_seqlen_batch_kv});
+    } else {
+      attn_bias_ = attn_bias_.value().expand({batch_size, attn_bias_.value().size(1), max_seqlen_batch_q, max_seqlen_batch_kv});
+      TORCH_CHECK(bias_dim == 4, "cuDNN SDPA expects either a 2D, 3D, or 4D attn_bias but got ", attn_bias_.value().dim(), "D");
+    }
+  }
+
+  Tensor attention, log_sumexp;
+
+  at::Tensor cudnn_seed, cudnn_offset;
+  cudnn_seed = at::empty({}, at::dtype(at::kLong).device(at::kCUDA));
+  cudnn_offset = at::empty({}, at::dtype(at::kLong).device(at::kCUDA));
+
+  const bool use_dropout = std::fpclassify(dropout_p) != FP_ZERO;
+
+  // See Note [Seed and Offset Device] in _efficient_attention_forward
+  at::PhiloxCudaState philox_state;
+  const bool in_capture_stream =
+      at::cuda::currentStreamCaptureStatus() != at::cuda::CaptureStatus::None;
+  if (use_dropout) {
+    // Device
+    auto gen = at::get_generator_or_default<at::CUDAGeneratorImpl>(
+        std::nullopt, at::cuda::detail::getDefaultCUDAGenerator());
+
+    // See Note [Acquire lock when using random generators]
+    std::lock_guard<std::mutex> lock(gen->mutex_);
+    // if using dropout, we produce 1 random number for each element of the
+    // attention tensor
+    // TODO(eqy): should state be advanced per thread (local) amount or per call/launch (global) amount
+    philox_state = gen->philox_cuda_state(batch_size * num_heads_q * max_seqlen_batch_q * max_seqlen_batch_kv);
+    at::cuda::philox::unpack_cudnn_wrapper(philox_state, static_cast<int64_t*>(cudnn_seed.data_ptr()), static_cast<int64_t*>(cudnn_offset.data_ptr()), at::cuda::getCurrentCUDAStream());
+  }
+
+  const auto softmax_scale = sdp::calculate_scale(query, scale).as_float_unchecked();
+
+  run_cudnn_SDP_fprop_nestedtensor(batch_size/*int64_t b*/,
+                                   num_heads_q/*int64_t h*/,
+				   num_heads_k,
+				   num_heads_v,
+                                   max_seqlen_batch_q/*int64_t s_q*/,
+                                   max_seqlen_batch_kv/*int64_t s_kv*/,
+                                   head_dim_qk/*int64_t d_qk*/,
+                                   head_dim_v/*int64_t d_v*/,
+                                   softmax_scale/*float scaling_factor*/,
+                                   compute_logsumexp/* bool */,
+                                   is_causal/* bool */,
+                                   dropout_p/*double dropout_probability*/,
+				   cumulative_sequence_length_q,
+				   cumulative_sequence_length_kv,
+				   output_shape,
+                                   query_buffer_reshaped/* Tensor q*/,
+                                   key_buffer_reshaped/* Tensor k*/,
+                                   value_buffer_reshaped/* Tensor v*/,
+                                   attn_bias_ /* std::optional<Tensor> */,
+                                   log_sumexp/*Tensor softmaxstats*/,
+                                   attention/*Tensor o*/,
+                                   cudnn_seed/*Tensor dropoutseed*/,
+                                   cudnn_offset/*Tensor dropoutoffset*/);
+  attention = wrap_buffer(attention.view(-1), output_shape).transpose(1, 2);
+  return std::make_tuple(std::move(attention), std::move(log_sumexp), cumulative_sequence_length_q, cumulative_sequence_length_kv, max_seqlen_batch_q, max_seqlen_batch_kv, std::move(cudnn_seed), std::move(cudnn_offset), Tensor());
 }
 
 std::tuple<at::Tensor, at::Tensor, at::Tensor> _scaled_dot_product_flash_attention_backward_nested(
