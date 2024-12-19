@@ -219,7 +219,8 @@ static inline scalar_t get_value_bounded(
     int64_t sW,
     int64_t sH,
     GridSamplerPadding padding_mode,
-    bool align_corners) {
+    bool align_corners,
+    const double value) {
 
   x = compute_coordinates(x, W, padding_mode, align_corners);
   y = compute_coordinates(y, H, padding_mode, align_corners);
@@ -230,7 +231,7 @@ static inline scalar_t get_value_bounded(
   if (within_bounds_2d(iy, ix, H, W)) {
     return data[iy * sH + ix * sW];
   }
-  return static_cast<scalar_t>(0);
+  return static_cast<scalar_t>(value);
 }
 
 template<typename scalar_t>
