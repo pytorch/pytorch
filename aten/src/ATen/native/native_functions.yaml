@@ -13470,6 +13470,173 @@
     CompositeExplicitAutograd: special_zeta_out
   tags: pointwise
 
+- func: special_betainc(Tensor self, Tensor a, Tensor b) -> Tensor
+  device_check: NoCheck   # TensorIterator
+  python_module: special
+  variants: function
+  structured_delegate: special_betainc.out
+
+- func: special_betainc.x_scalar(Scalar self, Tensor a, Tensor b) -> Tensor
+  device_check: NoCheck   # TensorIterator
+  python_module: special
+  variants: function
+  dispatch:
+    CompositeExplicitAutograd: special_betainc
+
+- func: special_betainc.a_scalar(Tensor self, Scalar a, Tensor b) -> Tensor
+  device_check: NoCheck   # TensorIterator
+  python_module: special
+  variants: function
+  dispatch:
+    CompositeExplicitAutograd: special_betainc
+
+- func: special_betainc.b_scalar(Tensor self, Tensor a, Scalar b) -> Tensor
+  device_check: NoCheck   # TensorIterator
+  python_module: special
+  variants: function
+  dispatch:
+    CompositeExplicitAutograd: special_betainc
+
+- func: special_betainc.ab_scalar(Tensor self, Scalar a, Scalar b) -> Tensor
+  device_check: NoCheck   # TensorIterator
+  python_module: special
+  variants: function
+  dispatch:
+    CompositeExplicitAutograd: special_betainc
+
+- func: special_betainc.out(Tensor self, Tensor a, Tensor b, *, Tensor(a!) out) -> Tensor(a!)
+  device_check: NoCheck   # TensorIterator
+  structured: True
+  structured_inherits: TensorIteratorBase
+  python_module: special
+  variants: function
+  dispatch:
+    CPU, CUDA: special_betainc_out
+
+- func: special_betainc.x_scalar_out(Scalar self, Tensor a, Tensor b, *, Tensor(a!) out) -> Tensor(a!)
+  device_check: NoCheck   # TensorIterator
+  python_module: special
+  variants: function
+  dispatch:
+    CompositeExplicitAutograd: special_betainc_out
+
+- func: special_betainc.a_scalar_out(Tensor self, Scalar a, Tensor b, *, Tensor(a!) out) -> Tensor(a!)
+  device_check: NoCheck   # TensorIterator
+  python_module: special
+  variants: function
+  dispatch:
+    CompositeExplicitAutograd: special_betainc_out
+
+- func: special_betainc.b_scalar_out(Tensor self, Tensor a, Scalar b, *, Tensor(a!) out) -> Tensor(a!)
+  device_check: NoCheck   # TensorIterator
+  python_module: special
+  variants: function
+  dispatch:
+    CompositeExplicitAutograd: special_betainc_out
+
+- func: special_betainc.ab_scalar_out(Tensor self, Scalar a, Scalar b, *, Tensor(a!) out) -> Tensor(a!)
+  device_check: NoCheck   # TensorIterator
+  python_module: special
+  variants: function
+  dispatch:
+    CompositeExplicitAutograd: special_betainc_out
+
+- func: special_betaln(Tensor a, Tensor b) -> Tensor
+  python_module: special
+  variants: function
+  dispatch:
+    CompositeExplicitAutograd: special_betaln
+
+- func: special_betaln.a_scalar(Scalar a, Tensor b) -> Tensor
+  python_module: special
+  variants: function
+  dispatch:
+    CompositeExplicitAutograd: special_betaln
+
+- func: special_betaln.b_scalar(Tensor a, Scalar b) -> Tensor
+  python_module: special
+  variants: function
+  dispatch:
+    CompositeExplicitAutograd: special_betaln
+
+- func: special_betaln.out(Tensor a, Tensor b, *, Tensor(a!) out) -> Tensor(a!)
+  python_module: special
+  variants: function
+  dispatch:
+    CompositeExplicitAutograd: special_betaln_out
+
+- func: special_betaln.a_scalar_out(Scalar a, Tensor b, *, Tensor(a!) out) -> Tensor(a!)
+  python_module: special
+  variants: function
+  dispatch:
+    CompositeExplicitAutograd: special_betaln_out
+
+- func: special_betaln.b_scalar_out(Tensor a, Scalar b, *, Tensor(a!) out) -> Tensor(a!)
+  python_module: special
+  variants: function
+  dispatch:
+    CompositeExplicitAutograd: special_betaln_out
+
+- func: special_betaincinv(Tensor self, Tensor a, Tensor b) -> Tensor
+  python_module: special
+  variants: function
+  dispatch:
+    CompositeExplicitAutograd: special_betaincinv
+
+- func: special_betaincinv.x_scalar(Scalar self, Tensor a, Tensor b) -> Tensor
+  python_module: special
+  variants: function
+  dispatch:
+    CompositeExplicitAutograd: special_betaincinv
+
+- func: special_betaincinv.a_scalar(Tensor self, Scalar a, Tensor b) -> Tensor
+  python_module: special
+  variants: function
+  dispatch:
+    CompositeExplicitAutograd: special_betaincinv
+
+- func: special_betaincinv.b_scalar(Tensor self, Tensor a, Scalar b) -> Tensor
+  python_module: special
+  variants: function
+  dispatch:
+    CompositeExplicitAutograd: special_betaincinv
+
+- func: special_betaincinv.ab_scalar(Tensor self, Scalar a, Scalar b) -> Tensor
+  python_module: special
+  variants: function
+  dispatch:
+    CompositeExplicitAutograd: special_betaincinv
+
+- func: special_betaincinv.out(Tensor self, Tensor a, Tensor b, *, Tensor(a!) out) -> Tensor(a!)
+  python_module: special
+  variants: function
+  dispatch:
+    CompositeExplicitAutograd: special_betaincinv_out
+
+- func: special_betaincinv.x_scalar_out(Scalar self, Tensor a, Tensor b, *, Tensor(a!) out) -> Tensor(a!)
+  python_module: special
+  variants: function
+  dispatch:
+    CompositeExplicitAutograd: special_betaincinv_out
+
+- func: special_betaincinv.a_scalar_out(Tensor self, Scalar a, Tensor b, *, Tensor(a!) out) -> Tensor(a!)
+  python_module: special
+  variants: function
+  dispatch:
+    CompositeExplicitAutograd: special_betaincinv_out
+
+- func: special_betaincinv.b_scalar_out(Tensor self, Tensor a, Scalar b, *, Tensor(a!) out) -> Tensor(a!)
+  python_module: special
+  variants: function
+  dispatch:
+    CompositeExplicitAutograd: special_betaincinv_out
+
+- func: special_betaincinv.ab_scalar_out(Tensor self, Scalar a, Scalar b, *, Tensor(a!) out) -> Tensor(a!)
+  python_module: special
+  variants: function
+  dispatch:
+    CompositeExplicitAutograd: special_betaincinv_out
+
 - func: special_i0(Tensor self) -> Tensor
   python_module: special
   variants: function

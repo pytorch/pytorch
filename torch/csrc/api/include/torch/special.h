@@ -452,6 +452,116 @@ inline Tensor& zeta_out(
   return torch::special_zeta_out(result, self, other);
 }
 
+/// Computes betaln
+/// ```
+inline Tensor betaln(const Tensor& a, const Tensor& b) {
+  return torch::special_betaln(a, b);
+}
+
+inline Tensor betaln(const Scalar& a, const Tensor& b) {
+  return torch::special_betaln(a, b);
+}
+
+inline Tensor betaln(const Tensor& a, const Scalar& b) {
+  return torch::special_betaln(a, b);
+}
+
+inline Tensor& betaln_out(Tensor& result, const Tensor& a, const Tensor& b) {
+  return torch::special_betaln_out(result, a, b);
+}
+
+inline Tensor& betaln_out(Tensor& result, const Tensor& a, const Scalar& b) {
+  return torch::special_betaln_out(result, a, b);
+}
+
+inline Tensor& betaln_out(Tensor& result, const Scalar& a, const Tensor& b) {
+  return torch::special_betaln_out(result, a, b);
+}
+
+/// Computes betainc
+/// ```
+inline Tensor betainc(const Tensor& self, const Tensor& a, const Tensor& b) {
+  return torch::special_betainc(self, a, b);
+}
+
+inline Tensor betainc(const Scalar& self, const Tensor& a, const Tensor& b) {
+  return torch::special_betainc(self, a, b);
+}
+
+inline Tensor betainc(const Tensor& self, const Tensor& a, const Scalar& b) {
+  return torch::special_betainc(self, a, b);
+}
+
+inline Tensor betainc(const Tensor& self, const Scalar& a, const Tensor& b) {
+  return torch::special_betainc(self, a, b);
+}
+
+inline Tensor betainc(const Tensor& self, const Scalar& a, const Scalar& b) {
+  return torch::special_betainc(self, a, b);
+}
+
+inline Tensor& betainc_out(Tensor& result, const Tensor& self, const Tensor& a, const Tensor& b) {
+  return torch::special_betainc_out(result, self, a, b);
+}
+
+inline Tensor& betainc_out(Tensor& result, const Scalar& self, const Tensor& a, const Tensor& b) {
+  return torch::special_betainc_out(result, self, a, b);
+}
+
+inline Tensor& betainc_out(Tensor& result, const Tensor& self, const Tensor& a, const Scalar& b) {
+  return torch::special_betainc_out(result, self, a, b);
+}
+
+inline Tensor& betainc_out(Tensor& result, const Tensor& self, const Scalar& a, const Tensor& b) {
+  return torch::special_betainc_out(result, self, a, b);
+}
+
+inline Tensor& betainc_out(Tensor& result, const Tensor& self, const Scalar& a, const Scalar& b) {
+  return torch::special_betainc_out(result, self, a, b);
+}
+
+/// Computes betaincinv
+/// ```
+inline Tensor betaincinv(const Tensor& self, const Tensor& a, const Tensor& b) {
+  return torch::special_betaincinv(self, a, b);
+}
+
+inline Tensor betaincinv(const Scalar& self, const Tensor& a, const Tensor& b) {
+  return torch::special_betaincinv(self, a, b);
+}
+
+inline Tensor betaincinv(const Tensor& self, const Tensor& a, const Scalar& b) {
+  return torch::special_betaincinv(self, a, b);
+}
+
+inline Tensor betaincinv(const Tensor& self, const Scalar& a, const Tensor& b) {
+  return torch::special_betaincinv(self, a, b);
+}
+
+inline Tensor betaincinv(const Tensor& self, const Scalar& a, const Scalar& b) {
+  return torch::special_betaincinv(self, a, b);
+}
+
+inline Tensor& betaincinv_out(Tensor& result, const Tensor& self, const Tensor& a, const Tensor& b) {
+  return torch::special_betaincinv_out(result, self, a, b);
+}
+
+inline Tensor& betaincinv_out(Tensor& result, const Scalar& self, const Tensor& a, const Tensor& b) {
+  return torch::special_betaincinv_out(result, self, a, b);
+}
+
+inline Tensor& betaincinv_out(Tensor& result, const Tensor& self, const Tensor& a, const Scalar& b) {
+  return torch::special_betaincinv_out(result, self, a, b);
+}
+
+inline Tensor& betaincinv_out(Tensor& result, const Tensor& self, const Scalar& a, const Tensor& b) {
+  return torch::special_betaincinv_out(result, self, a, b);
+}
+
+inline Tensor& betaincinv_out(Tensor& result, const Tensor& self, const Scalar& a, const Scalar& b) {
+  return torch::special_betaincinv_out(result, self, a, b);
+}
+
 /// Computes the zeroth order modified Bessel function of the first kind of
 /// input, elementwise See
 /// https://pytorch.org/docs/main/special.html#torch.special.i0
