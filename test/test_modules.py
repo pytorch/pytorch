@@ -915,7 +915,6 @@ class TestModule(TestCase):
                 # parameters will be wrapped in an nn.Parameter before swapping
                 # which will cause the ._cdata to change
                 g_no_swap = device_ == prev_device and dtype_ == prev_dtype
-                prev_prev_device, prev_prev_dtype = prev_device, prev_dtype
                 prev_device, prev_dtype = device_, dtype_
 
                 p_ids_before = [id(p) for p in m.parameters()]
