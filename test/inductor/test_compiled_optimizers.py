@@ -407,7 +407,7 @@ def make_test(
                 scheduler_eager.last_epoch = 1
 
             with torch.set_grad_enabled(False):
-                for i in range(2):
+                for _ in range(2):
                     compiled_step()
                     opt_eager.step()
                     if scheduler_cls:
@@ -698,7 +698,7 @@ class CompiledOptimizerTests(TestCase):
 
             return step_list
 
-        compiled_training_loop = torch._dynamo.optimize("eager")(training_loop)
+        compiled_training_loop = torch.compile(training_loop, backend="eager")
         actual_steps = compiled_training_loop()
         expected_steps = training_loop()
         self.assertEqual(actual_steps, expected_steps)
@@ -794,7 +794,7 @@ class CompiledOptimizerTests(TestCase):
         def loop(opt, c):
             opt.step(c)
 
-        compiled_loop = torch._dynamo.optimize("eager")(loop)
+        compiled_loop = torch.compile(loop, backend="eager")
 
         compiled_loop(optimizer, closure)
         loop(optimizer_c, closure_c)

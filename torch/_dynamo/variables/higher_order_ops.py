@@ -315,7 +315,6 @@ def validate_args_and_maybe_create_graph_inputs(
             # Weird special case, we probably want to delete it or fold it
             # into the next case (of `a` being placeable into a graph)
             elif isinstance(a, AutogradFunctionContextVariable):
-                # breakpoint()
                 example_value = a.as_proxy().node.meta["example_value"]
                 arg_name = (
                     a.as_proxy().node.name
@@ -2273,6 +2272,8 @@ class FlexAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
         args: "List[VariableTracker]",
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
+        from torch._higher_order_ops.flex_attention import flex_attention_fake_impl
+
         from .builder import wrap_fx_proxy
 
         (
@@ -2310,12 +2311,9 @@ class FlexAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
         inp_args, _ = proxy_args_kwargs(proxied_args, {})
 
         query_meta = query.as_proxy().node.meta["example_value"]
+        value_meta = value.as_proxy().node.meta["example_value"]
         with torch._guards.TracingContext.try_get().fake_mode:
-            out_meta = torch.empty_like(
-                query_meta, memory_format=torch.contiguous_format
-            )
-            # TODO: Figure out a better way to handle this for NJT than using sum()
-            lse_meta = torch.empty_like(query_meta, dtype=torch.float32).sum(dim=-1)
+            out_meta, lse_meta = flex_attention_fake_impl(query_meta, value_meta)
         example_value = (out_meta, lse_meta)
 
         # Compose the ordered HOO args:
@@ -2436,6 +2434,12 @@ class AutogradFunctionApplyVariable(VariableTracker):
             ):
                 unimplemented("NYI")
 
+        bwd_tracer = torch._dynamo.output_graph.SubgraphTracer(
+            tx.output,
+            parent=fwd_tracer,
+            source_target="autograd.Function",
+        )
+
         # Speculate subgraph on the backward. We make the
         # bwd tracer a child of the fwd tracer, because backward may rely on
         # tensors/attrs created in the fwd tracer.
@@ -2478,17 +2482,11 @@ class AutogradFunctionApplyVariable(VariableTracker):
         with tx.output.subtracer(fwd_fn, fwd_tracer), tx.strict_translation_mode(
             is_strict_for
         ):
-            with discard_graph_changes(tx) as dummy_tracer, patch.object(
+            with discard_graph_changes(tx), patch.object(
                 torch.fx.experimental.symbolic_shapes.ShapeEnv,
                 "allow_dynamic_output_shape_ops",
                 True,
             ):
-                bwd_tracer = torch._dynamo.output_graph.SubgraphTracer(
-                    tx.output,
-                    parent=dummy_tracer,
-                    source_target="autograd.Function",
-                )
-
                 if isinstance(fwd_out, variables.BaseListVariable):
                     bwd_args = [ctx, *fwd_out.items]
                     new_bwd_args = []
@@ -2525,21 +2523,21 @@ class AutogradFunctionApplyVariable(VariableTracker):
                 else:
                     unimplemented("non-function or method")
 
-                (bwd_out, _), bwd_graph, bwd_freevars = speculate_subgraph(
-                    tx,
-                    bwd_fn,
-                    bwd_args,
-                    kwargs,
-                    "autograd.Function",
-                    enable_grad=False,
-                    set_subgraph_inputs="manual",
-                    restore_side_effects=False,
-                    tracer=bwd_tracer,
-                )
+            (bwd_out, _), bwd_graph, bwd_freevars = speculate_subgraph(
+                tx,
+                bwd_fn,
+                bwd_args,
+                kwargs,
+                "autograd.Function",
+                enable_grad=False,
+                set_subgraph_inputs="manual",
+                restore_side_effects=False,
+                tracer=bwd_tracer,
+            )
 
-                for x in bwd_args:
-                    if isinstance(x, variables.TensorVariable):
-                        unbacked_stride_nodes.extend(x.as_proxy().node.users)
+            for x in bwd_args:
+                if isinstance(x, variables.TensorVariable):
+                    unbacked_stride_nodes.extend(x.as_proxy().node.users)
 
         # TODO: assert that bwd_graph didn't capture values that were
         # not created inside fwd_graph.
@@ -2600,6 +2598,7 @@ class AutogradFunctionApplyVariable(VariableTracker):
         new_fwd_graph_outputs = (fwd_out.as_proxy(), fwd_proxy_of_bwd_freevars)
         new_fwd_graph_outputs = pytree.tree_map(lambda x: x.node, new_fwd_graph_outputs)
         fwd_graph.output(new_fwd_graph_outputs)
+        fwd_graph.lint()
 
         # Store fwd_body
         fwd_nn_modules = tx.output.tracing_context.module_context.copy_graphstate()
