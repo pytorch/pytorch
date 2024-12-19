@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import torch
 from torch import Tensor
 from torch.ao.quantization.experimental.quantizer import dequantize_APoT, quantize_APoT
@@ -6,7 +7,7 @@ from torch.ao.quantization.experimental.quantizer import dequantize_APoT, quanti
 class fake_quantize_function(torch.autograd.Function):
     @staticmethod
     def forward(  # type: ignore[override]
-        ctx: torch.autograd.function.FunctionCtx,
+        ctx,
         x: Tensor,
         alpha: Tensor,
         gamma: Tensor,
@@ -27,6 +28,6 @@ class fake_quantize_function(torch.autograd.Function):
         return result
 
     @staticmethod
-    def backward(ctx: torch.autograd.function.FunctionCtx, grad_output: Tensor) -> Tensor:  # type: ignore[override]
-        mask = ctx.saved_tensors  # type: ignore[attr-defined]
+    def backward(ctx, grad_output: Tensor) -> Tensor:  # type: ignore[override]
+        mask = ctx.saved_tensors
         return grad_output * mask
