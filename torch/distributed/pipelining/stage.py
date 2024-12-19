@@ -111,20 +111,6 @@ def _make_tensor_from_meta(
     )
 
 
-def _detach_model_output(output):
-    """
-    Returns the model output with all tensors detached recursively
-    """
-    if isinstance(output, torch.Tensor):
-        return output.detach()
-    elif isinstance(output, (tuple, list)):
-        return tuple(
-            _detach_model_output(t) for t in output
-        )
-
-    return output
-
-
 class _PipelineStageBase(ABC):
     """
     Base class for pipeline stages.
@@ -718,7 +704,7 @@ class _PipelineStageBase(ABC):
         # The output kept in fwd_cache is not detached
         # The output given to the user is detached so that the graph is freed after backward pass
         # see issue #142229
-        detached_output = _detach_model_output(output)
+        detached_output = tree_map_only(torch.Tensor, lambda x: x.detach().requires_grad_(False), output)
         self.output_chunks.append(detached_output)
 
         # Save activations and inputs for backward

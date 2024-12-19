@@ -288,8 +288,10 @@ class _PipelineSchedule(ABC):
 
             # Clean external container first
             losses.clear()
+
             # Copy internal losses to external container
-            losses.extend(self._internal_losses)
+            # Detach and clone them to make sure the graph is freed even if the user keeps the losses around
+            losses.extend([loss.detach().clone() for loss in self._internal_losses])
 
         self._internal_losses.clear()
 

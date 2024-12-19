@@ -231,3 +231,33 @@ class MultiMLPWithDw(torch.nn.Module):
 
         for i in reversed(range(len(self.layers))):
             self.layers[i].compute_dW()
+
+# MLP Layer
+class MLPModuleWithView(torch.nn.Module):
+    def __init__(self, d_hid: int):
+        super().__init__()
+        self.net1 = torch.nn.Linear(d_hid, d_hid)
+        self.relu = torch.nn.ReLU()
+        self.net2 = torch.nn.Linear(d_hid, d_hid)
+
+    def forward(self, x):
+        x = self.net1(x)
+        x = self.relu(x)
+        x = self.net2(x)
+        return x.view(x.size(0), -1)
+
+
+# Multi-MLP model
+class MultiMLPWithView(torch.nn.Module):
+    def __init__(self, d_hid: int, n_layers: int = 2):
+        super().__init__()
+        self.layers = torch.nn.ModuleList([MLPModuleWithView(d_hid) for _ in range(n_layers)])
+        # For testing purpose only, this should be defined by user
+        self.split_spec = {
+            f"layers.{i}": SplitPoint.BEGINNING for i in range(1, n_layers)
+        }
+
+    def forward(self, x):
+        for layer in self.layers:
+            x = layer(x)
+        return x
