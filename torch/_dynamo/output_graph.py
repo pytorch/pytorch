@@ -3,6 +3,7 @@ import collections
 import contextlib
 import copy
 import functools
+import inspect
 import itertools
 import logging
 import operator
@@ -32,7 +33,7 @@ import torch.distributed as dist
 import torch.nn
 import torch.utils._pytree as pytree
 from torch import fx
-from torch._dynamo.exc import TensorifyScalarRestartAnalysis
+from torch._dynamo.exc import ShortenTraceback, TensorifyScalarRestartAnalysis
 from torch._guards import (
     CompileContext,
     CompileId,
@@ -1462,13 +1463,13 @@ class OutputGraph:
             compiled_fn = compiler_fn(gm, self.example_inputs())
             _step_logger()(logging.INFO, f"done compiler function {name}")
             assert callable(compiled_fn), "compiler_fn did not return callable"
-        except TensorifyScalarRestartAnalysis:
+        except (TensorifyScalarRestartAnalysis, ShortenTraceback):
             raise
         except exceptions_allowed_to_be_fallback as e:
             if self.has_user_defined_allowed_in_graph:
-                raise BackendCompilerFailed(self.compiler_fn, e).with_traceback(
-                    e.__traceback__
-                ) from None
+                raise BackendCompilerFailed(
+                    self.compiler_fn, e, inspect.currentframe()
+                ).with_traceback(e.__traceback__) from None
             msg = (
                 "Backend compiler failed with a fake tensor exception at \n"
                 f"{self.root_tx.format_frame_summary()}"
@@ -1480,9 +1481,9 @@ class OutputGraph:
             # aborting execution.
             raise e
         except Exception as e:
-            raise BackendCompilerFailed(self.compiler_fn, e).with_traceback(
-                e.__traceback__
-            ) from None
+            raise BackendCompilerFailed(
+                self.compiler_fn, e, inspect.currentframe()
+            ).with_traceback(e.__traceback__) from None
 
         signpost_event(
             "dynamo",
