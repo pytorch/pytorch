@@ -87,11 +87,11 @@ TORCH_IMPL_FUNC(gather_out_mps)
       }
 
       // PyTorch issue #135240: MPS reshape underneath goes haywire in
-      // gatherAlongAxis. Fix is coming in future OS, until then requires workaround.
-      // If this op is failing and isMacos15_3 = 1, the OS level fix has not
-      // landed and we'll need to increment the version check until it does.
+      // gatherAlongAxis before MacOS 15.2 if it has multiple dimensions but can
+      // be squeezed into 1D. We need to squeeze out the extra dims pre 15.2
       bool workaroundSingleDim = (self_arg.squeeze().sizes().size() == 1 && self_arg.sizes().size() > 1);
-      if (workaroundSingleDim) {
+      bool isMacos15_2 = is_macos_13_or_newer(MacOSVersion::MACOS_VER_15_2_PLUS);
+      if (workaroundSingleDim and !isMacos15_2) {
         const int64_t dims = self_arg.sizes().size();
         int64_t size = self_arg.squeeze().sizes()[0];
         auto shape = [[NSMutableArray alloc] initWithCapacity:dims];
