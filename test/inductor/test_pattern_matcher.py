@@ -567,7 +567,6 @@ class TestPatternMatcher(TestCase):
     @parametrize(
         "case",
         [
-            ((64, 128, 256), "cpu"),
             ((4, 8), GPU_TYPE),
             ("dynamic", GPU_TYPE),
         ],
@@ -581,7 +580,7 @@ class TestPatternMatcher(TestCase):
             return partial, full
 
         if shape == "dynamic":
-            x = torch.rand([2048, 2048], device=GPU_TYPE)
+            x = torch.rand([2048, 64], device=GPU_TYPE)
             torch._dynamo.mark_dynamic(x, 0)
         else:
             x = torch.randn(*shape, device=device)

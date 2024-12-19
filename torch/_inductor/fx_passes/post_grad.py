@@ -1008,64 +1008,40 @@ def addmm(match, mat1, mat2, *, inp):
 
 
 def register_partial_reduction_pattern():
-    """
-    If a tensor will be used both in a partial reduction, and in a complete reduction that
-    will get split, split the complete reduction such that it aligns with the partial reduciton.
+    "Reuse partial reductions in complete reductions"
 
-    TODO: when cooperative reductions get rolled out, remove.
-    """
-    reduce_ops = [aten.amax.default, aten.amin.default]
-
-    # dont support reducing over multiple dims, but since this is post grad pass, replace
-    # with equivalents
-    replacements = {
-        aten.max.default: aten.amax.default,
-        aten.min.default: aten.amin.default,
+    # post grad equivalents
+    equiv_red = {
+        aten.amax.default: aten.max.default,
+        aten.amin.default: aten.min.default,
     }
 
-    input_op = KeywordArg("input")
-    partial_reduc = CallFunction(
-        reduce_ops, input_op, KeywordArg("reduced_dims"), KeywordArg("keepdim")
-    )
-    full_reduc = CallFunction(list(replacements.keys()) + reduce_ops, input_op)
-
-    @register_graph_pattern(
-        MultiOutputPattern([partial_reduc, full_reduc]), pass_dict=pass_patterns[2]
-    )
-    def reuse_partial(match, input, reduced_dims, keepdim):
-        fake_inp = input.meta["val"]
-        if (
-            fake_inp.device.type == "cpu"
-            or isinstance(fake_inp.numel(), torch.SymInt)
-            or config.cuda_backend != "triton"
-            or not config.split_reductions
-        ):
-            return
-
-        from torch._inductor.choices import InductorChoices
-
-        split_factor = InductorChoices.reduction_split_factor(
-            fake_inp.device, fake_inp.numel(), 1, True
+    # TODO - could support more reductions. they have different signatures which makes
+    # this a bit more annoying
+    for red_op in (aten.amax.default, aten.amin.default):
+        inp = KeywordArg("input")
+        partial_reduc = CallFunction(
+            red_op, inp, KeywordArg("reduced_dims"), KeywordArg("keepdim")
         )
-        if split_factor <= 1:
-            return
+        full_reduc = CallFunction([red_op, equiv_red[red_op]], inp)
 
-        partial_red, full_red = match.output_nodes()
-        if partial_red.meta["val"].numel() == 1 or full_red.meta["val"].numel() != 1:
-            return
+        @register_graph_pattern(
+            MultiOutputPattern([partial_reduc, full_reduc]), pass_dict=pass_patterns[2]
+        )
+        def reuse_partial(match, input, reduced_dims, keepdim):
+            partial_red, full_red = match.output_nodes()
 
-        def replacement(inp: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
-            partial = partial_red.target(inp, reduced_dims, keepdim)
+            # if theyre small, reuse not worth it
+            if not statically_known_true(input.meta["val"].numel() >= 4096):
+                return True
 
-            replaced_target = replacements.get(full_red.target, full_red.target)
-            if replaced_target is partial_red.target:
+            def replacement(inp: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+                partial = partial_red.target(inp, reduced_dims, keepdim)
                 complete = full_red.target(partial)
-            else:
-                complete = full_red.target(replaced_target(inp, reduced_dims, keepdim))
-            return (partial, complete)
+                return (partial, complete)
 
-        counters["inductor"]["partial_reduction_reuse"] += 1
-        match.replace_by_example(replacement, [input])
+            counters["inductor"]["partial_reduction_reuse"] += 1
+            match.replace_by_example(replacement, [input])
 
 
 register_partial_reduction_pattern()
