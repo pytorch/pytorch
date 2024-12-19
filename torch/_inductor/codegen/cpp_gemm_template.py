@@ -798,6 +798,7 @@ class CppGemmTemplate(CppTemplate):
         trans_w=False,
         input_indices=None,
         epilogue_creator: Optional[Callable[[ir.Buffer], ir.Pointwise]] = None,
+        da8w8_gemm_sym_act=False,
     ):
         if input_indices is None:
             input_indices = list(range(len(input_nodes)))
@@ -903,7 +904,9 @@ class CppGemmTemplate(CppTemplate):
             )
             if only_one_input and isinstance(new_inputs[0], torch.Tensor):
                 return new_inputs[1:], new_layout
-            return cls.prep_weight(new_inputs, new_layout, micro_gemm, block_weights)
+            return cls.prep_weight(
+                new_inputs, new_layout, micro_gemm, block_weights, da8w8_gemm_sym_act
+            )
 
         def postprocessor(output):
             if isinstance(output, ir.TensorBox):
@@ -921,7 +924,11 @@ class CppGemmTemplate(CppTemplate):
                     *maybe_to_dense(new_input_nodes, layout)
                 )
                 new_input_nodes, _ = cls.prep_weight(
-                    new_input_nodes, new_layout, micro_gemm, block_weights
+                    new_input_nodes,
+                    new_layout,
+                    micro_gemm,
+                    block_weights,
+                    da8w8_gemm_sym_act,
                 )
                 W_packed = new_input_nodes[1]
                 W_packed_constant = V.graph.add_tensor_constant(W_packed)
@@ -966,6 +973,7 @@ class CppGemmTemplate(CppTemplate):
         layout: ir.Layout,
         micro_gemm: CppMicroGemm,
         should_block_weight: bool,
+        da8w8_gemm_sym_act: bool,
     ):
         """
         NOTE Weight prep consists of 2 separate steps:
@@ -1007,12 +1015,13 @@ class CppGemmTemplate(CppTemplate):
         def _is_int8_gemm(inputs):
             return (
                 isinstance(inputs[0], ir.IRNode)
-                and inputs[0].get_dtype() == torch.uint8
+                and inputs[0].get_dtype() in [torch.uint8, torch.int8]
             ) or (
-                isinstance(inputs[0], torch.Tensor) and inputs[0].dtype == torch.uint8
+                isinstance(inputs[0], torch.Tensor)
+                and inputs[0].dtype in [torch.uint8, torch.int8]
             )
 
-        if _is_int8_gemm(new_inputs):
+        if _is_int8_gemm(new_inputs) and not da8w8_gemm_sym_act:
             BCompensate = None
             if isinstance(W, ir.IRNode):
                 BCompensate = V.graph.add_tensor_constant(
@@ -1136,7 +1145,7 @@ class CppGemmTemplate(CppTemplate):
     ) -> Dict[str, Any]:
         assert len(self.input_nodes) >= 2
 
-        int8_gemm = self.input_nodes[0].get_dtype() == torch.uint8
+        int8_gemm = self.input_nodes[0].get_dtype() in [torch.uint8, torch.int8]
         x_scale = None
         x_zp = None
         w_scale = None
