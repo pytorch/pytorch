@@ -1042,6 +1042,8 @@ class triton:
     enable_persistent_tma_matmul = (
         os.environ.get("ENABLE_PERSISTENT_TMA_MATMUL", "0") == "1"
     )
+    # Skip L1 cache for buffers that are used only once.  Disabled by default
+    skip_l1_cache = os.environ.get("TORCHINDUCTOR_SKIP_L1", "0") == "1"
 
 
 class aot_inductor:

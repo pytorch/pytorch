@@ -2054,6 +2054,22 @@ class TritonKernel(SIMDKernel):
         #   3.2) Its not its last use
         #   3.3) This load will not be lifted to the body
         #
+        """Check if the buffer we're about to load, has
+        more than one read dependency
+        """
+        depcount = 0
+        has_read_deps = (
+            True  # by default, assume that this buffer has > 1 read dependencies
+        )
+        if (
+            config.triton.skip_l1_cache and self.current_node
+        ):  # it can be that self.current_node is None (!)
+            for node in self.current_node.scheduler.nodes:
+                for l in list(node.read_writes.reads):
+                    if l.name == name:
+                        depcount += 1
+            has_read_deps = depcount > 1  # has more than one read dep
+
         is_coalesced = any(
             i == 1 for i in self.get_strides_of_load(original_index).values()
         )
@@ -2084,6 +2100,20 @@ class TritonKernel(SIMDKernel):
         else:
             other = ""
 
+        """Skip L1 cache if we're (pretty?) sure the data is used only once
+        """
+        skip_l1_cache = not (
+            # in all these cases we're likely to reuse the buffer:
+            self.is_broadcasted(original_index)
+            or not is_coalesced
+            or self.inside_reduction
+            or has_read_deps
+        ) and (config.triton.skip_l1_cache)
+        # NOTE: controlled with env variable TORCHINDUCTOR_SKIP_L1
+        cachemod = ""
+        if skip_l1_cache:
+            cachemod = ", cache_modifier='.cg'"
+
         advance_block_ptr = None
         append_broadcast = None
         dtype = V.graph.get_dtype(name)
@@ -2095,7 +2125,7 @@ class TritonKernel(SIMDKernel):
                 block_ptr, advance_block_ptr, other = self.codegen_block_ptr(
                     name, var, indexing, other
                 )
-                line = f"tl.load({block_ptr}{other}{ep})"
+                line = f"tl.load({block_ptr}{other}{ep}{cachemod})"
                 line = indexing.codegen_broadcast_and_reshape(
                     line, indexing.block_shape, indexing.final_shape, True
                 )
@@ -2104,7 +2134,7 @@ class TritonKernel(SIMDKernel):
                 line = f"tl.load({var} + ({original_index}))"
                 append_broadcast = indexing.expand_str
             else:
-                line = f"tl.load({var} + ({indexing.index_str}), {indexing.mask_str}{ep}{other})"
+                line = f"tl.load({var} + ({indexing.index_str}), {indexing.mask_str}{ep}{other}{cachemod})"
 
             if (
                 dtype in (torch.float16, torch.bfloat16)
