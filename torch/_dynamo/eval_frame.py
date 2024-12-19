@@ -410,6 +410,7 @@ class _TorchDynamoContext:
         export=False,
         dynamic=None,
         compiler_config=None,
+        fullgraph=False,
     ) -> None:
         super().__init__()
         assert callable(callback) or callback is False or callback is None
@@ -420,6 +421,7 @@ class _TorchDynamoContext:
         self.export = export
         self._dynamic = dynamic
         self.compiler_config = compiler_config
+        self.fullgraph = fullgraph
         self.cleanup_fns: List[Callable[[], Any]] = []
         self.enter_exit_hooks = []
         patch_fn()
@@ -539,6 +541,18 @@ class _TorchDynamoContext:
 
         @functools.wraps(fn)
         def _fn(*args, **kwargs):
+            if self.fullgraph and not self.export:
+                from torch._fullgraph import _bump_optimized_version, _get_model_name
+
+                optimized_version = _bump_optimized_version(fn)
+
+                from torch.compiler import _get_current_fullgraph_package
+
+                if package := _get_current_fullgraph_package():
+                    return package(fn, _get_model_name(fn), optimized_version)(
+                        *args, **kwargs
+                    )
+
             prior = set_eval_frame(None)
             try:
                 if is_fx_tracing():
@@ -654,6 +668,7 @@ class OptimizeContext(_TorchDynamoContext):
         rebuild_ctx: Optional[
             Callable[[], Union[OptimizeContext, _NullDecorator]]
         ] = None,
+        fullgraph=False,
     ) -> None:
         def on_enter():
             install_generation_tagging_init()
@@ -667,6 +682,7 @@ class OptimizeContext(_TorchDynamoContext):
             export=export,
             dynamic=dynamic,
             compiler_config=compiler_config,
+            fullgraph=fullgraph,
         )
 
         if config.compiled_autograd:
@@ -775,6 +791,7 @@ def _optimize_catch_errors(
     dynamic=None,
     compiler_config=None,
     rebuild_ctx=None,
+    fullgraph=False,
 ):
     return OptimizeContext(
         convert_frame.catch_errors_wrapper(compile_fn, hooks),
@@ -784,6 +801,7 @@ def _optimize_catch_errors(
         dynamic=dynamic,
         compiler_config=compiler_config,
         rebuild_ctx=rebuild_ctx,
+        fullgraph=fullgraph,
     )
 
 
@@ -1769,6 +1787,7 @@ def optimize_assert(
         export=export,
         dynamic=dynamic,
         rebuild_ctx=rebuild_ctx,
+        fullgraph=True,
     )
 
 
