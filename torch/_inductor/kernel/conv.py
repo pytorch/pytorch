@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from typing import cast, List, Optional, Sequence, Tuple, TYPE_CHECKING, TypedDict
+from typing import List, Optional, Sequence, TYPE_CHECKING, TypedDict
 
 import torch
 from torch._inductor.codegen.rocm.ck_conv_template import CKGroupedConvFwdTemplate
@@ -30,7 +30,7 @@ from ..utils import (
     use_triton_template,
 )
 from ..virtualized import V
-from .mm_common import build_rocm_gemm_configs, filtered_configs
+from .mm_common import build_rocm_gemm_configs, extract_configs, filtered_configs
 
 
 if TYPE_CHECKING:
@@ -72,11 +72,7 @@ kernel_configs = [
 ]
 
 # Create filtered list of configs based on conv
-platform_configs = tuple(
-    cast(Tuple[int, int, int, int, int], config["config"])
-    for config in kernel_configs
-    if config["cond"]
-)
+platform_configs, platform_args = extract_configs(kernel_configs)
 
 # On ROCm convert num_stages to 1 as pipelining provides no benefit
 if torch.version.hip:
@@ -97,10 +93,11 @@ def conv_configs(m, n, k, *, device_type, **kwargs):
             n,
             k,
             configs=platform_configs,
+            extra_args={},
             scale=0.5,
             exclude=_is_large_block_for_cpu,
         )
-    return filtered_configs(m, n, k, configs=platform_configs)
+    return filtered_configs(m, n, k, configs=platform_configs, extra_args=platform_args)
 
 
 LOOP_BODY_2D = """
