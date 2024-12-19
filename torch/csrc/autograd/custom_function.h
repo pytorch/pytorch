@@ -4,7 +4,6 @@
 #include <c10/core/SymInt.h>
 #include <c10/util/flat_hash_map.h>
 #include <c10/util/irange.h>
-#include <torch/csrc/autograd/engine.h>
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/autograd/variable_info.h>
@@ -350,7 +349,7 @@ struct CppNode : public Node {
 
     auto output_metadata = torch::dynamo::autograd::
         IValuePacker<std::vector<std::optional<InputMetadata>>>::pack(
-            collect_input_metadata(next_edges()));
+            torch::dynamo::autograd::get_input_metadata(next_edges()));
 
     const auto& interface = torch::dynamo::autograd::getPyCompilerInterface();
 
