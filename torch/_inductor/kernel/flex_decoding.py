@@ -298,7 +298,10 @@ flex_decoding_template = TritonTemplate(
 
 
 def get_split_k(B: int, H: int, Mk: int) -> int:
-    num_SM = torch.cuda.get_device_properties("cuda").multi_processor_count
+    if torch.xpu.is_available():
+        num_SM = torch.xpu.get_device_properties("xpu").gpu_subslice_count
+    else:
+        num_SM = torch.cuda.get_device_properties("cuda").multi_processor_count
     bh = max(B * H, 1)  # NOTE: Handle B*h=0 case
     assert isinstance(bh, (int, sympy.Integer)), "B and H must be concrete integers"
     split_k = num_SM // bh * 2  # Each SM should at least get one block.
@@ -312,8 +315,10 @@ def get_split_k(B: int, H: int, Mk: int) -> int:
 def _get_decoding_default_config(key) -> Tuple[int, int, int]:
     dtype = key.get_dtype()
     head_dim = key.get_size()[-1]
-    sm_version = torch.cuda.get_device_capability()
     default_config = (64, 2, 1)
+    if key.get_device().type == "xpu":
+        return default_config
+    sm_version = torch.cuda.get_device_capability()    
     if sm_version >= (9, 0):
         if head_dim > 128 and dtype == torch.float32:
             return default_config

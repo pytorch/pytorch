@@ -239,6 +239,7 @@ _HIGHER_ORDER_OP_DEFAULT_FALLTHROUGH_DISPATCH_KEYS = [
     DispatchKey.BackendSelect,
     DispatchKey.AutocastCPU,  # type: ignore[attr-defined]
     DispatchKey.AutocastCUDA,  # type: ignore[attr-defined]
+    DispatchKey.AutocastXPU,
 ]
 
 
