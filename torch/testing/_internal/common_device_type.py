@@ -25,7 +25,7 @@ from typing import (
 )
 
 import torch
-from torch._inductor.utils import GPU_TYPES
+from torch._inductor.utils import GPU_TYPES, HAS_XPU
 from torch.testing._internal.common_cuda import (
     _get_torch_cuda_version,
     _get_torch_rocm_version,
@@ -1969,6 +1969,7 @@ def get_all_device_types() -> List[str]:
 
 
 flex_attention_supported_platform = unittest.skipUnless(
+    HAS_XPU or
     torch.cuda.is_available()
     and torch.utils._triton.has_triton()
     and torch.cuda.get_device_capability() >= (8, 0),
