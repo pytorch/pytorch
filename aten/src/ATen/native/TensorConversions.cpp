@@ -1884,6 +1884,8 @@ void convert_indices_from_coo_to_csr_cpu(
         for (const auto i : c10::irange(start, end)) {
           next_value = data_in[i + 1];
           for (; curr_value < next_value; curr_value++)
+            TORCH_CHECK_INDEX(curr_value + 1 < size,
+                              "Row index ", (curr_value + 1 ), " is out of bounds.");
             data_out[curr_value + 1] = static_cast<output_t>(i + 1);
         }
       });
