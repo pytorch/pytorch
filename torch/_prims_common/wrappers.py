@@ -191,8 +191,14 @@ def _maybe_resize_out(
     shape = result.shape
     if _resize_output_check(out, shape):
         out = out.resize_(shape, memory_format=memory_format)
+    out_size = out.untyped_storage().nbytes()
+    result_size = result.untyped_storage().nbytes()
     if is_empty:
-        out.as_strided_(size=result.shape, stride=result.stride())
+        if out_size < result_size:
+            # For some case the stroage of out is not enough for restriding
+            # it same as result, we should first resize it.
+            out = out.resize_(result_size, memory_format=memory_format)
+        out = out.as_strided_(size=shape, stride=result.stride())
     return out
 
 
