@@ -11,7 +11,7 @@ import unittest
 from itertools import product, combinations, combinations_with_replacement, permutations
 import random
 import tempfile
-from typing import Any, Dict, List, Tuple
+from typing import Any
 
 from torch.testing import make_tensor
 from torch.testing._internal.common_utils import (
@@ -4137,7 +4137,7 @@ class TestAsArray(TestCase):
     def test_default_device(self, device):
         original = torch.arange(5)
 
-        examples: List[Tuple[Any, Dict]] = [
+        examples: list[tuple[Any, dict]] = [
             (3, {}),
             (original, {}),
             (to_numpy(original), {}),
