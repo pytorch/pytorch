@@ -83,8 +83,11 @@ def discard_graph_changes(tx):
 
 
 def check_meta_consistency_vt(
-    vars1: List[VariableTracker], vars2: List[VariableTracker]
-) -> str:
+    vars1: List[VariableTracker],
+    vars2: List[VariableTracker],
+    lhs_name: str,
+    rhs_name: str,
+) -> None:
     from torch._higher_order_ops.while_loop import check_meta_consistency
 
     from . import TensorVariable
@@ -102,7 +105,7 @@ def check_meta_consistency_vt(
     unwrapped1 = [_unwrap_var(var) for var in vars1]
     unwrapped2 = [_unwrap_var(var) for var in vars2]
 
-    return check_meta_consistency(unwrapped1, unwrapped2)
+    return check_meta_consistency(unwrapped1, unwrapped2, lhs_name, rhs_name)
 
 
 @contextlib.contextmanager
@@ -894,7 +897,10 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
             unimplemented("Expected branches to return the same pytree structure.")
 
         check_meta_consistency_vt(
-            true_r.unpack_var_sequence(tx), false_r.unpack_var_sequence(tx)
+            true_r.unpack_var_sequence(tx),
+            false_r.unpack_var_sequence(tx),
+            "true_fn_output",
+            "false_fn_output",
         )
 
         (
@@ -1102,7 +1108,12 @@ class WhileLoopHigherOrderVariable(TorchHigherOrderOperatorVariable):
             should_flatten_outputs=True,
         )
 
-        check_meta_consistency_vt(body_r.unpack_var_sequence(tx), operands_seq)
+        check_meta_consistency_vt(
+            body_r.unpack_var_sequence(tx),
+            operands_seq,
+            "body_fn_output",
+            "carried_inputs",
+        )
 
         (
             cond_graph,
@@ -1227,6 +1238,8 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
         check_meta_consistency_vt(
             [_make_inlined(tx, first_slice_copy)(t, dim) for t in xs.items],
             combine_result.unpack_var_sequence(tx),
+            "initial_xs",
+            "combine_fn_output",
         )
 
         combine_gm = torch.fx.GraphModule(dict(tx.output.nn_modules), combine_graph)
@@ -1369,7 +1382,12 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
         )
         y_proxies = [y_var.as_proxy() for y_var in y_vars]
 
-        check_meta_consistency_vt(init.unpack_var_sequence(tx), carry_vars)
+        check_meta_consistency_vt(
+            init.unpack_var_sequence(tx),
+            carry_vars,
+            "init",
+            "carry",
+        )
 
         combine_gm = torch.fx.GraphModule(dict(tx.output.nn_modules), combine_graph)
         combine_fn_name = tx.output.install_subgraph("scan_combine_fn", combine_gm)

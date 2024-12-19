@@ -1923,7 +1923,7 @@ def forward(self, l_x_):
             )
             with self.assertRaisesRegex(
                 torch._dynamo.exc.UncapturedHigherOrderOpError,
-                "Expected to return tensors with same metadata but found",
+                "Expected true_fn_output and false_fn_output to same metadata but found",
             ):
                 # True branch and false branch return tensors of different shape
                 torch._dynamo.export(mod)(torch.randn(3, 2))
@@ -3423,7 +3423,7 @@ def forward(self, x):
         example_inputs = (torch.rand(5),)
         with self.assertRaisesRegex(
             torch._dynamo.exc.UncapturedHigherOrderOpError,
-            "Expected to return tensors with same metadata but found",
+            "Expected true_fn_output and false_fn_output to same metadata but found",
         ):
             torch._dynamo.export(f_return_tensor_mismatch, aten_graph=True)(
                 *example_inputs,

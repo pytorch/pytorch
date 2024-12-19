@@ -328,8 +328,10 @@ def while_loop_tracing(mode, cond_fn, body_fn, carried_inputs, additional_inputs
 
 
 def check_meta_consistency(
-    outs: List[Union[torch.Tensor, torch.SymInt, int]],
-    carries: List[Union[torch.Tensor, torch.SymInt, int]],
+    lhs_list: List[Union[torch.Tensor, torch.SymInt, int]],
+    rhs_list: List[Union[torch.Tensor, torch.SymInt, int]],
+    lhs_name: str,
+    rhs_name: str,
 ) -> None:
     def diff_meta_pairs(
         lhs_list: List[Union[torch.Tensor, torch.SymInt, int]],
@@ -345,7 +347,8 @@ def check_meta_consistency(
                         # We set include contiguity=False because we have vmap x cond tests, where if
                         # include_contiguity=True will call t.is_contiguous inside of vmap and get an error
                         # "querying is_contiguous inside of vmap for memory_format other than
-                        # torch.contiguous_format is not yet implemented". This is good for now.
+                        # torch.contiguous_format is not yet implemented". This is good for because stride
+                        # is still checked.
                         _extract_tensor_metadata(lhs, include_contiguity=False),
                         _extract_tensor_metadata(rhs, include_contiguity=False),
                         check_grad=False,
@@ -380,10 +383,10 @@ def check_meta_consistency(
                 )
         return all_diffs
 
-    if all_diffs := diff_meta_pairs(outs, carries):
+    if all_diffs := diff_meta_pairs(lhs_list, rhs_list):
         diff_str = "\n".join(all_diffs)
         raise torch._dynamo.exc.UncapturedHigherOrderOpError(
-            f"Expected to return tensors with same metadata but found:\n{diff_str}"
+            f"Expected {lhs_name} and {rhs_name} to same metadata but found:\n{diff_str}"
         )
 
 
@@ -427,7 +430,9 @@ def while_loop_fake_tensor_mode(
             # body_fn return output with the same pytree and tensor meta data as carried_inputs
             # so we could just return the output after one iteration.
             body_outs = body_fn(*carried_inputs, *additional_inputs)
-            check_meta_consistency(body_outs, carried_inputs)
+            check_meta_consistency(
+                carried_inputs, body_outs, "carried_inputs", "body_output"
+            )
         # See NOTE [unspecialize int carry with unbacked symints]
         return pytree.tree_map_only(
             (int, torch.SymInt), lambda _: _create_unbacked_symint(mode), body_outs
