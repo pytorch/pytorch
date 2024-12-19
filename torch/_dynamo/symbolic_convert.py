@@ -3315,6 +3315,8 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
 
     def _load_global(self, inst):
         if self.output.global_scope is self.f_globals:
+            # If the global scope matches that of the root frame, use handler in
+            # root frame instruction translator, to enforce consistency.
             super()._load_global(inst)
         else:
             name = inst.argval
@@ -3331,7 +3333,9 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                 self.push(VariableTracker.build(self, value, global_source))
 
     def STORE_GLOBAL(self, inst):
-        if self.f_globals is self.parent.f_globals:
+        if self.output.global_scope is self.f_globals:
+            # If the global scope matches that of the root frame, use handler in
+            # root frame instruction translator, to enforce consistency.
             super().STORE_GLOBAL(inst)
         else:
             value = self.pop()

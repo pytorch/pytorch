@@ -18,7 +18,7 @@ from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.test_operators import realize
 from torch._inductor.utils import sympy_index_symbol
 from torch._inductor.virtualized import ops, V
-from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FP8, xfailIfSM89
+from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FP8
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 from torch.utils._pytree import tree_map
 from torch.utils._sympy.functions import ModularIndexing
@@ -134,6 +134,21 @@ class ImplDetailTest(TestCase):
         new_sizes = new_body.sizes
         self.assertTrue(tuple(new_sizes[0]) == (np.prod(sizes),), f"{new_sizes=}")
 
+    def test_merge_loops_invalidate_pw_dep_cache(self):
+        sizes = (1024, 2048)
+        strides = (2048, 1)
+        buf = self._create_computed_buffer_ax2(sizes, strides)
+
+        snode = SchedulerNode(V.graph.scheduler, buf)
+        old_var_ranges = snode.pointwise_read_writes().var_ranges
+        self.assertTrue(len(old_var_ranges) == 2)  # 2 dimension not merged
+        snode.merge_loops()
+        new_var_ranges = snode.pointwise_read_writes().var_ranges
+
+        # we cache pointwise_read_writes result on a scheduler node
+        # make sure new_var_ranges is refreshed by invalidating the cache.
+        self.assertTrue(len(new_var_ranges) == 1)  # 2 dimensions get merged
+
     def test_reorder_modular_indexing(self):
         """
         There was a bug that we wrongly map i0 to the dimension with size 49
@@ -143,7 +158,7 @@ class ImplDetailTest(TestCase):
 
         def _create_computed_buffer():
             def inner_fn(index):
-                i0, i1, i2, i3 = index
+                i0, _, i2, i3 = index
                 return ops.load(
                     "primal", i3 + 49 * i2 + 2401 * ModularIndexing(i0, 1, 64)
                 )
@@ -406,7 +421,6 @@ class LoopOrderingTest(TestCase):
         self.assertEqual(1, metrics.generated_kernel_count)
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, "FP8 requires H100+ and MI300+")
-    @xfailIfSM89
     def test_fp8_pattern_2(self):
         """
         This test repros the fp8 fusion relation issue here:
@@ -421,7 +435,6 @@ class LoopOrderingTest(TestCase):
         scale = torch.Tensor([10.0]).to("cuda")
 
         E4M3_MAX_POS = torch.finfo(torch.float8_e4m3fn).max
-        E5M2_MAX_POS = torch.finfo(torch.float8_e5m2).max
 
         def test_pattern2(tensor_x_inp, scale_x):
             tensor_x = tensor_x_inp * scale_x
