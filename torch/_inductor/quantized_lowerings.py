@@ -94,6 +94,3 @@ def register_woq_mm_ops() -> None:
         return autotune_select_algorithm(
             "_weight_int8pack_mm", choices, [mat1, mat2, scale], aten_layout
         )
-
-    lowering.make_fallback(aten._dyn_quant_matmul_4bit)
-    lowering.make_fallback(aten._dyn_quant_pack_4bit_weight)
