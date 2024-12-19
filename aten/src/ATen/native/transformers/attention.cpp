@@ -544,7 +544,7 @@ std::optional<Tensor> convert_boolean_attn_mask(const std::optional<Tensor>& att
 // TODO(eqy): delete this when cuDNN -inf issue is resolved
 std::optional<Tensor> convert_boolean_attn_mask_cudnn(const std::optional<Tensor>& attn_mask, caffe2::TypeMeta dtype) {
   // TODO Use the max type of the input and output
-  return convert_boolean_attn_mask_(attn_mask, dtype, -65504.0);
+  return convert_boolean_attn_mask_(attn_mask, dtype, -1024.0);
 }
 
 // Memory Efficient Attention requires a padded attn mask bias
