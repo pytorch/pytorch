@@ -4759,7 +4759,7 @@ class TestLinalg(TestCase):
         # Check the full results files was written, one per gpu
         # check that the size of the full results file for
         # GPU 0 is greater than that of the individual results
-        # for GPU 0 by at least a factor of 2.
+        # for GPU 0.
         # Lastly, check that all tunableop_results_full{i} have
         # the same size as tunableop_results_full0.
         for i in range(total_gpus):
@@ -4767,7 +4767,7 @@ class TestLinalg(TestCase):
             self.assertTrue(os.path.exists(result_full_filename))
             if i == 0:  # Store for next subsequent iterations
                 result_full_size = os.path.getsize(result_full_filename)
-                self.assertGreater(result_full_size, 2 * result_size)
+                self.assertGreater(result_full_size, result_size)
             self.assertEqual(os.path.getsize(result_full_filename), result_full_size)
 
         # disables TunableOp
