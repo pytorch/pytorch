@@ -375,8 +375,10 @@ class CompiledFxGraph(OutputCode):
         self.mutated_inputs = OrderedSet(graph.mutated_inputs)
         self.mutated_input_idxs = OrderedSet(graph.mutated_input_idxs)
         if has_frozen_params(gm):
+            # When freezing turns on, the frozen parameters can be fetched
+            # from the Graph Module by name. So we only need to store the
+            # constant added by the graph lowering.
             self.allocated_constant_name = graph.allocated_constant_name
-            # skip the constant from freeze module to save storage
             self.constants = {
                 key: value
                 for key, value in graph.constants.items()
