@@ -1,5 +1,4 @@
 # Owner(s): ["module: functorch"]
-
 # Copyright (c) Facebook, Inc. and its affiliates.
 # All rights reserved.
 #
@@ -310,7 +309,7 @@ class TestMin(TestCase):
     def test_stack(self):
         i, j, d = dims()
         A = torch.rand(4, 5)
-        r = stack([A[i, j]], d, j)
+        _r = stack([A[i, j]], d, j)
         # a, b = r.unbind(d)
         # self.assertTrue(torch.allclose(a.order(i, j), i.expand(j).order(i, j)))
         # self.assertTrue(torch.allclose(b.order(i, j), j.expand(i).order(i, j)))
@@ -329,7 +328,7 @@ class TestMin(TestCase):
         a_ = a[i, k]
         b_ = b[k, j]
         q.size = 1
-        r = (a_.expand(j, q) * b_.expand(i, q)).sum(k).order(q, i, j)
+        _r = (a_.expand(j, q) * b_.expand(i, q)).sum(k).order(q, i, j)
         # r = (a_*b_).sum(k).order(q, i, j)
         # print(r)
         # print(a @ b)
@@ -362,15 +361,8 @@ class TestMin(TestCase):
         # XXX - chunk changes the size of a dimension, has to take a new dimension...
         # assert torch.allclose(A.chunk(2,1)[0], A[i, k].chunk(2, k)[0].order(i, k))
         assert torch.allclose(A[i].renorm(1, i, 7).order(i), A.renorm(1, 0, 7))
-        kk = dims()
-        # assert torch.allclose( torch.stack([A, A], 1), stack([A[i,k], A[i, k]], kk, k).order(i, kk, k))
-
-        k2 = dims()
-        # r = cat((A[i, k], A[i,k]), k, k2)
-        # assert torch.allclose(torch.cat([A, A], 1), r.order(i, k2))
-        # assert k2.size == 2*k.size
-
         assert torch.allclose(A.expand(5, -1, -1), A[i, k].expand(j).order(j, i, k))
+
         z = dims()
         C = torch.arange(2)
         assert torch.allclose(A[:, 0:2], A[i, k].index(k, C[z]).order(i, z))
@@ -497,11 +489,10 @@ class TestMin(TestCase):
         _test_c()
 
     def test_seg(self):
-        A = torch.rand(3, 4)
         i, k = dims()
         i.size = 4
         k.size = 3
-        r = i + k - 1
+        i + k - 1
 
     def test_expand(self):
         A = torch.rand(3, 4)
@@ -582,7 +573,6 @@ class TestMin(TestCase):
 
     def test_index(self):
         A = torch.rand(3, 4)
-        B = torch.rand(4, 5)
         i, j, k = dims()
 
         o, l = dims()

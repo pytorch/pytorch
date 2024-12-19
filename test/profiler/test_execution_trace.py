@@ -397,7 +397,7 @@ class TestExecutionTrace(TestCase):
         def fn(nt):
             return nt.sin().cos()
 
-        with torch.profiler.profile(execution_trace_observer=observer) as prof:
+        with torch.profiler.profile(execution_trace_observer=observer):
             for i in range(3):
                 values = torch.rand((8 + i, 4 + i))
                 offsets = torch.tensor([0, 2, 4, 6, 8 + i])
