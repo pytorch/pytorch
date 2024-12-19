@@ -9,9 +9,11 @@ import subprocess
 import sys
 import threading
 import traceback
+import typing
 from concurrent.futures import Future, ProcessPoolExecutor
 from concurrent.futures.process import BrokenProcessPool
-from typing import Any, BinaryIO, Callable, Dict, Tuple, TypeVar
+from enum import Enum
+from typing import Any, BinaryIO, Callable, Dict, Optional, Tuple, TypeVar
 from typing_extensions import Never, ParamSpec
 
 # _thread_safe_fork is needed because the subprocesses in the pool can read
@@ -88,14 +90,39 @@ class SubprocException(Exception):
         super().__init__(f"An exception occurred in a subprocess:\n\n{details}")
 
 
+class SubprocPickler:
+    """
+    Allows a caller to provide a custom pickler for passing data with the
+    subprocess.
+    """
+
+    def dumps(self, obj: object) -> bytes:
+        return pickle.dumps(obj, pickle.HIGHEST_PROTOCOL)
+
+    def loads(self, data: bytes) -> object:
+        return pickle.loads(data)
+
+
+class SubprocKind(Enum):
+    FORK = "fork"
+    SPAWN = "spawn"
+
+
 class SubprocPool:
     """
     Mimic a concurrent.futures.ProcessPoolExecutor, but wrap it in
     a subprocess.Popen() to try to avoid issues with forking/spawning
     """
 
-    def __init__(self, nprocs: int) -> None:
+    def __init__(
+        self,
+        nprocs: int,
+        pickler: Optional[SubprocPickler] = None,
+        kind: SubprocKind = SubprocKind.FORK,
+    ) -> None:
         entry = os.path.join(os.path.dirname(__file__), "__main__.py")
+        self.pickler = pickler or SubprocPickler()
+        self.kind = kind
 
         subproc_read_fd, write_fd = os.pipe()
         read_fd, subproc_write_fd = os.pipe()
@@ -105,6 +132,8 @@ class SubprocPool:
         cmd = [
             sys.executable,
             entry,
+            f"--pickler={self.pickler.__class__.__module__}.{self.pickler.__class__.__name__}",
+            f"--kind={self.kind.value}",
             f"--workers={nprocs}",
             f"--parent={os.getpid()}",
             f"--read-fd={str(subproc_read_fd)}",
@@ -143,7 +172,7 @@ class SubprocPool:
     ) -> Future[_T]:
         if args or kwargs:
             job_fn = functools.partial(job_fn, *args, **kwargs)
-        job_data = pickle.dumps(job_fn, pickle.HIGHEST_PROTOCOL)
+        job_data = self.pickler.dumps(job_fn)
         future: Future[_T]
         with self.futures_lock:
             job_id = next(self.job_id_count)
@@ -156,31 +185,48 @@ class SubprocPool:
         return future
 
     def _read_thread(self) -> None:
-        try:
-            while True:
+        while True:
+            data = b""
+            try:
                 job_id, data = _recv_msg(self.read_pipe)
-                if job_id < 0:
-                    if self.running:
-                        log.warning("SubprocPool unclean exit")
-                    self.read_pipe.close()
+            except Exception as e:
+                # Something went wrong during the read. There's no way we have a
+                # valid job_id.
+                log.exception("failure in subproc_pool._recv_msg")
+                job_id = -1
+
+            if job_id < 0:
+                # read_pipe returned None or got exception
+                if self.running:
+                    log.warning("SubprocPool unclean exit")
+                    self.running = False
+                self.read_pipe.close()
+                # Cancel all the pending futures.
+                self.shutdown()
+                return
+
+            try:
+                result = self.pickler.loads(data)
+            except Exception as e:
+                # Something went wrong unpickling. We have a job_id so just
+                # notify that particular future and continue on.
+                log.exception("unpickle failure in SubprocPool._read_thread")
+                result = e
+
+            with self.futures_lock:
+                if not self.running:
                     return
-                result = pickle.loads(data)
-                with self.futures_lock:
-                    if not self.running:
-                        return
-                    if isinstance(result, _SubprocExceptionInfo):
-                        # An exception occurred in the submitted job
-                        self.pending_futures[job_id].set_exception(
-                            SubprocException(result.details)
-                        )
-                    elif isinstance(result, Exception):
-                        # An exception occurred in some of our subprocess machinery.
-                        self.pending_futures[job_id].set_exception(result)
-                    else:
-                        self.pending_futures[job_id].set_result(result)
-                    del self.pending_futures[job_id]
-        except Exception:
-            log.exception("failure in SubprocPool._read_thread")
+                if isinstance(result, _SubprocExceptionInfo):
+                    # An exception occurred in the submitted job
+                    self.pending_futures[job_id].set_exception(
+                        SubprocException(result.details)
+                    )
+                elif isinstance(result, Exception):
+                    # An exception occurred in some of our subprocess machinery.
+                    self.pending_futures[job_id].set_exception(result)
+                else:
+                    self.pending_futures[job_id].set_result(result)
+                del self.pending_futures[job_id]
 
     def shutdown(self) -> None:
         try:
@@ -204,7 +250,16 @@ class SubprocPool:
 class SubprocMain:
     """Communicates with a SubprocPool in the parent process, called by __main__.py"""
 
-    def __init__(self, nprocs: int, read_pipe: BinaryIO, write_pipe: BinaryIO) -> None:
+    def __init__(
+        self,
+        pickler: SubprocPickler,
+        kind: SubprocKind,
+        nprocs: int,
+        read_pipe: BinaryIO,
+        write_pipe: BinaryIO,
+    ) -> None:
+        self.pickler = pickler
+        self.kind = kind
         self.read_pipe = read_pipe
         self.write_pipe = write_pipe
         self.write_lock = threading.Lock()
@@ -215,7 +270,7 @@ class SubprocMain:
     def _new_pool(self, nprocs: int, warm: bool) -> ProcessPoolExecutor:
         pool = ProcessPoolExecutor(
             nprocs,
-            mp_context=multiprocessing.get_context("fork"),
+            mp_context=multiprocessing.get_context(self.kind.value),
             initializer=functools.partial(_async_compile_initializer, os.getpid()),
         )
         multiprocessing.util.Finalize(None, pool.shutdown, exitpriority=sys.maxsize)
@@ -253,7 +308,9 @@ class SubprocMain:
                 self.pool = self._new_pool(self.nprocs, False)
 
     def _submit_inner(self, job_id: int, data: bytes) -> None:
-        future = self.pool.submit(functools.partial(SubprocMain.do_job, data))
+        future = self.pool.submit(
+            functools.partial(SubprocMain.do_job, self.pickler, data)
+        )
 
         def callback(_: Future[Any]) -> None:
             if not self.running:
@@ -262,7 +319,7 @@ class SubprocMain:
                 result = future.result()
             except Exception as e:
                 log.exception("Error in subprocess")
-                result = pickle.dumps(e, pickle.HIGHEST_PROTOCOL)
+                result = self.pickler.dumps(e)
             assert isinstance(result, bytes)
             with self.write_lock:
                 if self.running:
@@ -272,14 +329,15 @@ class SubprocMain:
         future.add_done_callback(callback)
 
     @staticmethod
-    def do_job(data: bytes) -> bytes:
+    def do_job(pickler: SubprocPickler, data: bytes) -> bytes:
         # do the pickle/unpickle in the sub-subproc
-        job = pickle.loads(data)
+        job = typing.cast(Callable[[], object], pickler.loads(data))
+
         try:
             result = job()
-        except Exception as e:
+        except Exception:
             result = _SubprocExceptionInfo(traceback.format_exc())
-        return pickle.dumps(result, pickle.HIGHEST_PROTOCOL)
+        return pickler.dumps(result)
 
 
 def _warm_process_pool(pool: ProcessPoolExecutor, n: int) -> None:
