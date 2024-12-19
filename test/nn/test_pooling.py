@@ -1753,7 +1753,7 @@ torch.cuda.synchronize()
         input = torch.randn(1, 2, 7, 7, device=device)
         kernel_size = (2, 2)
         output_size = (3, 3)
-        indices = torch.ones(1, 2, 3, 3, dtype=torch.long)
+        indices = torch.ones(1, 2, 3, 3, dtype=torch.long, device=device)
 
         with self.assertRaisesRegex(RuntimeError, "gradOutput sizes unexpected"):
             torch.ops.aten.fractional_max_pool2d_backward(
