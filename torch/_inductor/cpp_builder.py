@@ -537,8 +537,7 @@ def _get_optimization_cflags(cpp_compiler: str) -> List[str]:
 
         if not config.cpp.enable_unsafe_math_opt_flag:
             cflags.append("fno-unsafe-math-optimizations")
-        if not config.cpp.enable_floating_point_contract_flag:
-            cflags.append("ffp-contract=off")
+        cflags.append(f"ffp-contract={config.cpp.enable_floating_point_contract_flag}")
 
         if sys.platform != "darwin":
             # on macos, unknown argument: '-fno-tree-loop-vectorize'
