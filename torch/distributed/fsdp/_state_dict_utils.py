@@ -784,6 +784,7 @@ def _pre_state_dict_hook(
             StateDictType.LOCAL_STATE_DICT: _local_pre_state_dict_hook,
             StateDictType.SHARDED_STATE_DICT: _sharded_pre_state_dict_hook,
         }
+        dist.barrier()
         _pre_state_dict_hook_fn[fsdp_state._state_dict_type](
             fsdp_state,
             module,
