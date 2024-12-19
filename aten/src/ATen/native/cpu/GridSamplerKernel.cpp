@@ -50,6 +50,7 @@ namespace at::native { namespace {
  *      //           from the beginning of this slice.
  *      //      iii. `len` as the number of valid locations in the vectors.
  *      //           (There might not be enough near boundary.)
+ *      //      iiii. 'value' as the default value for out-of-bound locations.
  *      for (const auto n : c10::irange(input_accessor.size(0))) {
  *        grid_sample_2d_grid_slice_iterator(
  *          grid_accessor[n],
@@ -57,7 +58,7 @@ namespace at::native { namespace {
  *              const Vectorized<scalar_t>& grid_y,
  *              int64_t spatial_offset, int64_t len) {
  *            grid_sample.forward(out_accessor[n], input_accessor[n],
- *                                spatial_offset, grid_x, grid_y, len);
+ *                                spatial_offset, grid_x, grid_y, len, value);
  *          });
  *      }
  *
@@ -103,8 +104,8 @@ namespace at::native { namespace {
  *          // Applies grid sampling (forward) procedure:
  *          //   1. computes interpolation locations from grid values `grid_x`
  *          //      and `grid_y`,
- *          //   2. interpolates output values using the locations and input
- *          //      data in `inp_slice`, and
+ *          //   2. interpolates output values using the locations, input data
+ *          //      in `inp_slice`, and default value `value`, and
  *          //   3. writes the first `len` values in the interpolated vector to
  *          //      `out_slice` with spatial offset being `offset`.
  *          //
@@ -116,7 +117,7 @@ namespace at::native { namespace {
  *          void forward(TensorAccessor<scalar_t, 3>& out_slice,
  *                       const TensorAccessor<scalar_t, 3>& inp_slice,
  *                       int64_t offset, const Vec& grid_x, const Vec& grid_y,
- *                       int64_t len) const;
+ *                       int64_t len, const double value) const;
  *
  *          // Applies grid sampling (backward) procedure. Arguments semantics
  *          // and strategy are similar to those of `forward`, with the
@@ -370,6 +371,28 @@ struct ComputeLocation<scalar_t, GridSamplerPadding::Zeros, align_corners>
 };
 
 template<typename scalar_t, bool align_corners>
+struct ComputeLocation<scalar_t, GridSamplerPadding::Constant, align_corners>
+  : ComputeLocationBase<scalar_t, align_corners> {
+  using Vec = Vectorized<scalar_t>;
+  using ComputeLocationBase<scalar_t, align_corners>::unnormalize;
+  using ComputeLocationBase<scalar_t, align_corners>::scaling_factor;
+
+  using ComputeLocationBase<scalar_t, align_corners>::ComputeLocationBase;
+
+  inline Vec apply(const Vec &in) const {
+    return unnormalize(in);
+  }
+
+  inline Vec compute_coordinates(const Vec &in) const {
+    return in;
+  }
+
+  inline std::pair<Vec, Vec> apply_get_grad(const Vec &in) const {
+    return std::make_pair(unnormalize(in), Vec(scaling_factor));
+  }
+};
+
+template<typename scalar_t, bool align_corners>
 struct ComputeLocation<scalar_t, GridSamplerPadding::Border, align_corners>
   : ComputeLocationBase<scalar_t, align_corners> {
   using Vec = Vectorized<scalar_t>;
@@ -470,7 +493,8 @@ struct ApplyGridSample<scalar_t, 2, GridSamplerInterpolation::Bilinear,
   const int64_t inp_sC;
   const ComputeLocation<scalar_t, padding, align_corners> compute_H;
   const ComputeLocation<scalar_t, padding, align_corners> compute_W;
-  const bool must_in_bound = padding != GridSamplerPadding::Zeros;
+  const bool must_in_bound = (padding != GridSamplerPadding::Zeros) &&
+                             (padding != GridSamplerPadding::Constant);
 
   ApplyGridSample(const TensorAccessor<const scalar_t, 4>& input)
     : inp_H(input.size(2))
@@ -540,7 +564,7 @@ struct ApplyGridSample<scalar_t, 2, GridSamplerInterpolation::Bilinear,
   inline void forward(TensorAccessor<scalar_t, 3>& out_slice,
                       const TensorAccessor<const scalar_t, 3>& inp_slice,
                       int64_t offset, const Vec& grid_x, const Vec& grid_y,
-                      int64_t len) const {
+                      int64_t len, const double value) const {
     auto x = compute_W.apply(grid_x);
     auto y = compute_H.apply(grid_y);
 
@@ -575,10 +599,10 @@ struct ApplyGridSample<scalar_t, 2, GridSamplerInterpolation::Bilinear,
       Vec ne_mask_copy = ne_mask;
       Vec sw_mask_copy = sw_mask;
       Vec se_mask_copy = se_mask;
-      auto nw_val = mask_gather<sizeof(scalar_t)>(Vec(0), inp_slice_C_ptr, i_nw_offset, nw_mask_copy);
-      auto ne_val = mask_gather<sizeof(scalar_t)>(Vec(0), inp_slice_C_ptr, i_ne_offset, ne_mask_copy);
-      auto sw_val = mask_gather<sizeof(scalar_t)>(Vec(0), inp_slice_C_ptr, i_sw_offset, sw_mask_copy);
-      auto se_val = mask_gather<sizeof(scalar_t)>(Vec(0), inp_slice_C_ptr, i_se_offset, se_mask_copy);
+      auto nw_val = mask_gather<sizeof(scalar_t)>(Vec(value), inp_slice_C_ptr, i_nw_offset, nw_mask_copy);
+      auto ne_val = mask_gather<sizeof(scalar_t)>(Vec(value), inp_slice_C_ptr, i_ne_offset, ne_mask_copy);
+      auto sw_val = mask_gather<sizeof(scalar_t)>(Vec(value), inp_slice_C_ptr, i_sw_offset, sw_mask_copy);
+      auto se_val = mask_gather<sizeof(scalar_t)>(Vec(value), inp_slice_C_ptr, i_se_offset, se_mask_copy);
 
       auto interpolated = (nw_val * nw) + (ne_val * ne) + (sw_val * sw) + (se_val * se);
       interpolated.store(out_slice[c].data() + offset, len);
@@ -713,7 +737,8 @@ struct ApplyGridSample<scalar_t, 2, GridSamplerInterpolation::Nearest,
   const int64_t inp_sC;
   const ComputeLocation<scalar_t, padding, align_corners> compute_H;
   const ComputeLocation<scalar_t, padding, align_corners> compute_W;
-  const bool must_in_bound = padding != GridSamplerPadding::Zeros;
+  const bool must_in_bound = (padding != GridSamplerPadding::Zeros) &&
+                             (padding != GridSamplerPadding::Constant);
 
   ApplyGridSample(const TensorAccessor<const scalar_t, 4>& input)
     : inp_H(input.size(2))
@@ -728,7 +753,7 @@ struct ApplyGridSample<scalar_t, 2, GridSamplerInterpolation::Nearest,
   inline void forward(TensorAccessor<scalar_t, 3>& out_slice,
                       const TensorAccessor<const scalar_t, 3>& inp_slice,
                       int64_t offset, const Vec& grid_x, const Vec& grid_y,
-                      int64_t len) const {
+                      int64_t len, const double value) const {
     auto x = compute_W.apply(grid_x);
     auto y = compute_H.apply(grid_y);
 
@@ -754,7 +779,7 @@ struct ApplyGridSample<scalar_t, 2, GridSamplerInterpolation::Nearest,
     for (int64_t c = 0; c < C; ++c, out_ptr += out_sC, inp_slice_ptr += inp_sC) {
       // mask_gather zeros out the mask, so we need to make a copy
       auto mask_copy = mask;
-      auto inp_val = mask_gather<sizeof(scalar_t)>(Vec(0), inp_slice_ptr, i_offset, mask_copy);
+      auto inp_val = mask_gather<sizeof(scalar_t)>(Vec(value), inp_slice_ptr, i_offset, mask_copy);
       inp_val.store(static_cast<void*>(out_ptr), len);
     }
   }
@@ -821,7 +846,8 @@ struct ApplyGridSample<scalar_t, 2, GridSamplerInterpolation::Bicubic,
   const int64_t inp_sC;
   const ComputeLocation<scalar_t, padding, align_corners> compute_H;
   const ComputeLocation<scalar_t, padding, align_corners> compute_W;
-  const bool must_in_bound = padding != GridSamplerPadding::Zeros;
+  const bool must_in_bound = (padding != GridSamplerPadding::Zeros) &&
+                             (padding != GridSamplerPadding::Constant);
 
   // constant used in cubic convolution
   // could be -0.5 or -0.75, use the same value in UpSampleBicubic2d.h
@@ -865,7 +891,7 @@ struct ApplyGridSample<scalar_t, 2, GridSamplerInterpolation::Bicubic,
     coeffs[3] = (Vec(3) * A * x - Vec(10) * A) * x + Vec(8) * A;
   }
 
-  inline Vec get_value_bounded(const scalar_t* data, const Vec& x, const Vec& y) const {
+  inline Vec get_value_bounded(const scalar_t* data, const Vec& x, const Vec& y, const double value) const {
     auto ix = convert_to_int_of_same_size(compute_W.compute_coordinates(x));
     auto iy = convert_to_int_of_same_size(compute_H.compute_coordinates(y));
 
@@ -875,7 +901,7 @@ struct ApplyGridSample<scalar_t, 2, GridSamplerInterpolation::Bicubic,
 
     auto offset = iy * iVec(inp_sH) + ix * iVec(inp_sW);
 
-    auto val = mask_gather<sizeof(scalar_t)>(Vec(0), data, offset, mask);
+    auto val = mask_gather<sizeof(scalar_t)>(Vec(value), data, offset, mask);
     return val;
   }
 
@@ -908,7 +934,7 @@ struct ApplyGridSample<scalar_t, 2, GridSamplerInterpolation::Bicubic,
   inline void forward(TensorAccessor<scalar_t, 3>& out_slice,
                       const TensorAccessor<const scalar_t, 3>& inp_slice,
                       int64_t offset, const Vec& grid_x, const Vec& grid_y,
-                      int64_t len) const {
+                      int64_t len, const double value) const {
 
     auto x = compute_W.unnormalize(grid_x);
     auto y = compute_H.unnormalize(grid_y);
@@ -934,10 +960,10 @@ struct ApplyGridSample<scalar_t, 2, GridSamplerInterpolation::Bicubic,
       Vec interp_x[4];
       for (const auto i : c10::irange(4)) {
         interp_x[i] =
-          coeff_x[0] * get_value_bounded(inp_slice_C_ptr, ix - Vec(1), iy + Vec(-1 + i)) +
-          coeff_x[1] * get_value_bounded(inp_slice_C_ptr, ix + Vec(0), iy + Vec(-1 + i)) +
-          coeff_x[2] * get_value_bounded(inp_slice_C_ptr, ix + Vec(1), iy + Vec(-1 + i)) +
-          coeff_x[3] * get_value_bounded(inp_slice_C_ptr, ix + Vec(2), iy + Vec(-1 + i));
+          coeff_x[0] * get_value_bounded(inp_slice_C_ptr, ix - Vec(1), iy + Vec(-1 + i), value) +
+          coeff_x[1] * get_value_bounded(inp_slice_C_ptr, ix + Vec(0), iy + Vec(-1 + i), value) +
+          coeff_x[2] * get_value_bounded(inp_slice_C_ptr, ix + Vec(1), iy + Vec(-1 + i), value) +
+          coeff_x[3] * get_value_bounded(inp_slice_C_ptr, ix + Vec(2), iy + Vec(-1 + i), value);
       }
 
       // Interpolate the 4 values in the y direction
@@ -994,7 +1020,7 @@ struct ApplyGridSample<scalar_t, 2, GridSamplerInterpolation::Bicubic,
             add_value_bounded(gInp_slice_C_ptr, len, xx, yy, gOut * coeff_x[i] * coeff_y[j]);
           }
 
-          auto val = get_value_bounded(inp_slice_C_ptr, xx, yy);
+          auto val = get_value_bounded(inp_slice_C_ptr, xx, yy, 0);
           gx = gx - val * gOut * coeff_x_grad[i] * coeff_y[j];
           gy = gy - val * gOut * coeff_y_grad[j] * coeff_x[i];
         }
@@ -1140,7 +1166,7 @@ static inline void grid_sample_2d_grid_slice_iterator(
 
 void grid_sampler_2d_cpu_kernel_impl(
     const TensorBase &output, const TensorBase &input, const TensorBase &grid,
-    int64_t interpolation_mode, int64_t padding_mode, bool align_corners) {
+    int64_t interpolation_mode, int64_t padding_mode, bool align_corners, std::optional<double> value) {
   auto N = input.size(0);
   auto H = grid.size(1);
   auto W = grid.size(2);
@@ -1164,7 +1190,7 @@ void grid_sampler_2d_cpu_kernel_impl(
           [&](const Vectorized<scalar_t>& grid_x, const Vectorized<scalar_t>& grid_y,  \
               int64_t spatial_offset, int64_t len) {                           \
             grid_sample.forward(out_slice, inp_slice, spatial_offset,          \
-                                grid_x, grid_y, len);                          \
+                                grid_x, grid_y, len, value.value_or(0.));      \
           });                                                                  \
         }                                                                      \
       });                                                                      \
@@ -1177,6 +1203,7 @@ void grid_sampler_2d_cpu_kernel_impl(
       HANDLE_CASE(interp, GridSamplerPadding::Zeros, align_corners);           \
       HANDLE_CASE(interp, GridSamplerPadding::Border, align_corners);          \
       HANDLE_CASE(interp, GridSamplerPadding::Reflection, align_corners);      \
+      HANDLE_CASE(interp, GridSamplerPadding::Constant, align_corners);        \
     }                                                                          \
     return;                                                                    \
   }
@@ -1265,6 +1292,7 @@ void grid_sampler_2d_backward_cpu_kernel_impl(
       HANDLE_CASE(interp, GridSamplerPadding::Zeros, align_corners, input_requires_grad);      \
       HANDLE_CASE(interp, GridSamplerPadding::Border, align_corners, input_requires_grad);     \
       HANDLE_CASE(interp, GridSamplerPadding::Reflection, align_corners, input_requires_grad); \
+      HANDLE_CASE(interp, GridSamplerPadding::Constant, align_corners, input_requires_grad);   \
     }                                                                       \
     return;                                                                 \
   }
