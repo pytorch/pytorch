@@ -2,6 +2,7 @@
 import os
 import pickle
 import shutil
+import sys
 import tempfile
 import unittest
 from typing import List, Optional, Union
@@ -34,6 +35,7 @@ from torch.testing._internal.common_device_type import largeTensorTest
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
+    TEST_MKL,
 )
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
@@ -51,6 +53,16 @@ if HAS_TRITON:
     import triton  # @manual
 
     from torch.testing._internal.triton_utils import add_kernel, sub_kernel
+
+try:
+    try:
+        from . import test_cpu_select_algorithm
+    except ImportError:
+        import test_cpu_select_algorithm  # @manual=fbcode//caffe2/test/inductor:test_cpu_select_algorithm-library
+except unittest.SkipTest:
+    if __name__ == "__main__":
+        sys.exit(0)
+    raise
 
 torch._dynamo.config.fake_tensor_cache_enabled = True
 torch._dynamo.config.fake_tensor_cache_crosscheck_enabled = True
@@ -1295,6 +1307,36 @@ class TestAutotuneCache(TestCase):
             self.assertRegex(k, r"pt2:bundled-autotune-v1::[0-9a-z]{64}:c[0-9]+")
         for k in global_stats.triton.cache.keys():
             self.assertRegex(k, r"triton:[0-9a-f]{64}::[0-9a-f]{64}:c[0-9]+")
+
+    @test_cpu_select_algorithm.patches
+    @torch.no_grad
+    @unittest.skipIf(not TEST_MKL, "Test requires MKL")
+    @config.patch({"freezing": True})
+    @config.patch({"fx_graph_cache": True})
+    @config.patch({"fx_graph_remote_cache": True})
+    def test_cpp_max_autotune(self):
+        class M(torch.nn.Module):
+            def __init__(self, in_feature, out_feature):
+                super().__init__()
+                self.linear = torch.nn.Linear(in_feature, out_feature, bias=True)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        with torch.no_grad():
+            m = M(16, 128)
+            input = torch.randn(4, 4, 16)
+            ref_res = m(input)
+            cm = torch.compile(m, dynamic=True, mode="max-autotune")
+            res = cm(input)
+            self.reset()
+            counters.clear()
+            cm2 = torch.compile(m, dynamic=True, mode="max-autotune")
+            res2 = cm2(input)
+            self.assertEqual(ref_res, res, rtol=1e-3, atol=1e-3)
+            self.assertEqual(ref_res, res2, rtol=1e-3, atol=1e-3)
+            self.assertGreater(counters["inductor"]["fxgraph_cache_hit"], 0)
+            self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
 
 
 class TestRemoteAOTAutogradCache(TestCase):
