@@ -42,7 +42,7 @@ env:
   PYTORCH_EXTRA_INSTALL_REQUIREMENTS: nvidia-cuda-nvrtc-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-runtime-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cuda-cupti-cu12==12.6.80; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cudnn-cu12==9.5.1.17; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cublas-cu12==12.6.4.1; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cufft-cu12==11.3.0.4; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-curand-cu12==10.3.7.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusolver-cu12==11.7.1.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparse-cu12==12.5.4.2; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-cusparselt-cu12==0.6.3; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nccl-cu12==2.21.5; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvtx-cu12==12.6.77; platform_system == 'Linux' and platform_machine == 'x86_64' | nvidia-nvjitlink-cu12==12.6.85; platform_system == 'Linux' and platform_machine == 'x86_64'
   MAX_JOBS: 32
   TORCH_CUDA_ARCH_LIST: "8.6;9.0+PTX"
-  # For publish:
+  # To publish:
   CODEARTIFACT_DOMAIN: poolside
   CODEARTIFACT_REPOSITORY: poolside-packages-python
 
@@ -59,6 +59,7 @@ jobs:
       id-token: write
       contents: read
     strategy:
+      fail-fast: false
       matrix:
         desired_python: ["3.10", "3.12"]
         include:
@@ -131,6 +132,7 @@ jobs:
         working-directory: builder
 
       - name: Build PyTorch binary
+        id: package
         run: |
           set -x
 
@@ -172,6 +174,7 @@ jobs:
             docker exec -t "${container_name}" bash -c "source ${BINARY_ENV_FILE} && bash /pytorch/.ci/${{ env.PACKAGE_TYPE }}/build.sh"
           fi
           docker exec -t "${container_name}" chown -R "$(id -u):$(id -g)" /artifacts
+          echo "##[set-output name=version;]$(echo ${{ runner.temp }}/artifacts/*.whl | cut -d- -f2)"
 
       - name: Cleanup docker
         if: always()
@@ -184,24 +187,35 @@ jobs:
 
       # upload to github artifacts (as we might not publish)
       - uses: actions/upload-artifact@v4.4.0
+        if: github.event.inputs.publish == 'false'
         with:
           name: ${{ env.BUILD_NAME }}
           if-no-files-found: error
           path:
             ${{ runner.temp }}/artifacts/*
 
+
       - name: Install publish dependencies
         if: github.event.inputs.publish == 'true'
         run: |
+          set -x
           python -m pip install --upgrade pip
-          pip install twine
+          python -m pip install twine
+          sudo npm install -g badgen-cli
 
-      - name: Configure AWS credentials for publish
+      - name: Configure AWS credentials for publishing
         if: github.event.inputs.publish == 'true'
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/gh-action-publish-artifacts-role
           aws-region: us-east-1
+
+      - name: Upload version badge
+        if: github.event.inputs.publish == 'true' && matrix.desired_python == '3.10'
+        run: |
+          set -x
+          badgen --subject version --status ${{ steps.package.outputs.version }} --color blue > version.svg
+          aws s3 cp --region us-east-2 --cache-control no-cache --acl public-read version.svg s3://pytorch-version/version.svg
 
       - name: Publish to CodeArtifact
         if: github.event.inputs.publish == 'true'
@@ -209,4 +223,5 @@ jobs:
           export TWINE_USERNAME=aws
           export TWINE_PASSWORD=$(aws codeartifact get-authorization-token --domain ${{ env.CODEARTIFACT_DOMAIN }} --domain-owner ${{ secrets.AWS_ACCOUNT_ID }} --query authorizationToken --output text)
           export TWINE_REPOSITORY_URL=$(aws codeartifact get-repository-endpoint --domain ${{ env.CODEARTIFACT_DOMAIN }} --domain-owner ${{ secrets.AWS_ACCOUNT_ID }} --repository ${{ env.CODEARTIFACT_REPOSITORY }}  --region us-east-1 --format pypi --query repositoryEndpoint --output text)
+          set -x
           twine upload --verbose ${{ runner.temp }}/artifacts/*
