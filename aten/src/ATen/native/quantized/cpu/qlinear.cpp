@@ -1200,9 +1200,20 @@ class QLinearLeakyReluInt8 final {
       double output_scale,
       int64_t output_zero_point,
       double negative_slope) {
-#if AT_MKLDNN_ENABLED() || !defined(STRIP_ERROR_MESSAGES)
+
     auto& ctx = at::globalContext();
-#endif
+#if  defined(__aarch64__)
+    if (ctx.qEngine() == at::QEngine::Arm) {
+      #if AT_MKLDNN_ENABLED()
+      return dynamic_cast<PackedLinearWeightsOnednn*>(packed_weight.get())->apply_leaky_relu(
+          std::move(input), output_scale, output_zero_point, negative_slope);
+      #endif
+      TORCH_CHECK(
+        false,
+        "linear_leaky_relu :: is not supported without ONEDNN in qengine",
+        toString(ctx.qEngine()));
+    }
+#endif//__aarch64__
 #if AT_MKLDNN_ENABLED()
     if (ctx.qEngine() == at::QEngine::ONEDNN) {
       return dynamic_cast<PackedLinearWeightsOnednn*>(packed_weight.get())->apply_leaky_relu(
@@ -1224,9 +1235,20 @@ class QLinearTanhInt8 final {
       const c10::intrusive_ptr<LinearPackedParamsBase>& packed_weight,
       double output_scale,
       int64_t output_zero_point) {
-#if AT_MKLDNN_ENABLED() || !defined(STRIP_ERROR_MESSAGES)
+
     auto& ctx = at::globalContext();
-#endif
+#if  defined(__aarch64__)
+      if (ctx.qEngine() == at::QEngine::Arm) {
+        #if AT_MKLDNN_ENABLED()
+          return dynamic_cast<PackedLinearWeightsOnednn*>(packed_weight.get())->apply_tanh(
+          std::move(input), output_scale, output_zero_point);
+        #endif
+        TORCH_CHECK(
+        false,
+        "linear_tanh :: is not supported without ONEDNN in qengine",
+        toString(ctx.qEngine()));
+    }
+#endif//__aarch64__
 #if AT_MKLDNN_ENABLED()
     if (ctx.qEngine() == at::QEngine::ONEDNN) {
       return dynamic_cast<PackedLinearWeightsOnednn*>(packed_weight.get())->apply_tanh(

@@ -435,6 +435,11 @@ at::QEngine Context::qEngine() const {
       qengine = at::kX86;
     }
 #endif
+
+#if defined(__aarch64__)
+    qengine = at::kArm;
+#endif//__aarch64__
+
     return qengine;
   }();
   return quantized_engine.value_or(_quantized_engine);
@@ -455,6 +460,9 @@ const std::vector<at::QEngine>& Context::supportedQEngines() {
     // Engines are listed in priority order: later one wins
     // By default we prefer FBGEMM if we're running on server side
     // QNNPACK on server side has some issue, so we disable it by default.
+#if defined(__aarch64__)
+    engines.push_back(at::kArm);
+#endif//__aarch64__
 #ifdef C10_MOBILE
     engines.push_back(at::kNoQEngine);
 #ifdef USE_PYTORCH_QNNPACK

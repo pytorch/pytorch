@@ -46,6 +46,12 @@ class QConvUnpackWeightsInt8 final {
       const c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>>& packed_weight) {
     auto& ctx = at::globalContext();
 
+#if defined(__aarch64__)
+  if (ctx.qEngine() == at::QEngine::Arm) {
+      return packed_weight->unpack();
+    }
+#endif//__aarch64__
+
 #ifdef USE_FBGEMM
     if (ctx.qEngine() == at::QEngine::FBGEMM ||
         ctx.qEngine() == at::QEngine::X86) {
@@ -83,6 +89,16 @@ class QConv1dUnpackWeightsInt8 final {
     auto& ctx = at::globalContext();
     at::Tensor weight;
     std::optional<at::Tensor> bias;
+
+#if defined(__aarch64__)
+    if (ctx.qEngine() == at::QEngine::Arm) {
+      std::tie(weight, bias) = packed_weight->unpack();
+      at::Tensor new_weight = weight.clone();
+      new_weight.squeeze_(quant_utils::kConv1dSqueezeDim + 2);
+      return std::tuple<at::Tensor, std::optional<at::Tensor>>(new_weight, bias);
+    }
+#endif//__aarch64__
+
 #ifdef USE_FBGEMM
     if (ctx.qEngine() == at::QEngine::FBGEMM ||
         ctx.qEngine() == at::QEngine::X86) {
