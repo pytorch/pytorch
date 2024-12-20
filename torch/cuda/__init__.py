@@ -655,11 +655,11 @@ def _parse_visible_devices() -> Union[List[int], List[str]]:
         # the number of GPUs that HIP can select from. The HIP env var can accept
         # either a list of ints or a list of UUIDs prefixed with 'GPU-'.
         if rocr_devices is not None:
-            rocr_count = len(rocr_devics.split(","))
+            rocr_count = len(rocr_devices.split(","))
             if hip_devices is not None:
                 if hip_devices.startswith("GPU-"):
                     raise RuntimeError(
-                        "Cannot specifiy both ROCR_VISIBLE_DEVICES "
+                        "Cannot specify both ROCR_VISIBLE_DEVICES "
                         "and HIP_VISIBLE_DEVICES using UUIDs"
                     )
                 if any(int(dev) >= rocr_count for dev in hip_devices.split(",")):
