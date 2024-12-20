@@ -1273,6 +1273,8 @@ class PT2EQuantizationTestCase(QuantizationTestCase):
             m = prepare_qat_pt2e(m, quantizer)
         else:
             m = prepare_pt2e(m, quantizer)
+        if is_debug_mode:
+            print("prepared model:", m)
         # Calibrate
         m(*example_inputs)
         m = convert_pt2e(m)
