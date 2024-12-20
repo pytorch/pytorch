@@ -1,5 +1,4 @@
 # Owner(s): ["oncall: export"]
-# ruff: noqa: F841
 
 import copy
 import unittest

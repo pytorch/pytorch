@@ -1,5 +1,4 @@
 # Owner(s): ["module: decompositions"]
-# ruff: noqa: F841
 
 import itertools
 import torch

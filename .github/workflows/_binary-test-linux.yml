@@ -170,11 +170,10 @@ jobs:
           mkdir "${GITHUB_WORKSPACE}"
 
       - name: Checkout PyTorch to pytorch dir
-        uses: actions/checkout@v4
+        uses: malfet/checkout@silent-checkout
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
-          show-progress: false
           path: pytorch
 
       - name: Clean PyTorch checkout

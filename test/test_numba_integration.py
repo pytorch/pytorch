@@ -186,7 +186,7 @@ class TestNumbaIntegration(common.TestCase):
         with self.assertRaises(TypeError):
             numba.cuda.as_cuda_array(sparset)
 
-        sparset.cuda()
+        sparse_cuda_t = sparset.cuda()
 
         self.assertFalse(numba.cuda.is_cuda_array(sparset))
         with self.assertRaises(TypeError):

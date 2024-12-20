@@ -10,7 +10,7 @@ from torch.fx.experimental.sym_node import SymNode
 try:
     from functorch.experimental import functionalize
     HAS_FUNCTIONALIZATION = True
-except Exception:
+except Exception as e:
     HAS_FUNCTIONALIZATION = False
 
 class TestReinplacePass(TestCase):
@@ -44,8 +44,7 @@ def forward(self, x_1):
             a = x.clone()
             a_view = a.view(-1)
             # We shouldn't re-inplace the first add(), because an alias of a is re-used later in the program
-            b = a.add(1)  # noqa: F841
-
+            b = a.add(1)
             # Second add() is fine to re-inplace
             c = a_view.add(1)
             return c
@@ -288,8 +287,8 @@ def forward(self, a__1):
 
         inpt = torch.ones(4, 4)
         f2 = reinplace(make_fx(f)(inpt), inpt)
-        expected_out = f(inpt)  # noqa: F841
-        actual_out = f2(inpt)  # noqa: F841
+        expected_out = f(inpt)
+        actual_out = f2(inpt)
         # self.assertEqual(actual_out, expected_out)
         self.assertExpectedInline(f2.code, """\
 

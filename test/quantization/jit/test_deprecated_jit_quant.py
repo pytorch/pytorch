@@ -1,5 +1,4 @@
 # Owner(s): ["oncall: quantization"]
-# ruff: noqa: F841
 
 import torch
 from torch.testing._internal.common_quantization import skipIfNoFBGEMM

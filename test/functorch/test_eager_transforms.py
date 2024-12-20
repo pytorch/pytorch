@@ -1,4 +1,5 @@
 # Owner(s): ["module: functorch"]
+
 # Copyright (c) Facebook, Inc. and its affiliates.
 # All rights reserved.
 #
@@ -1301,6 +1302,8 @@ class TestAutogradFunction(TestCase):
     # https://github.com/pytorch/pytorch/issues/90224
     @unittest.expectedFailure
     def test_once_differentiable_grad_vjp(self, device):
+        NumpyCubeNotComposable = self._get_NumpyCubeNotComposable()
+
         # grad x vjp
         x = torch.randn([], device=device)
         grad_y = torch.randn_like(x)
@@ -1551,7 +1554,7 @@ class TestAutogradFunctionVmapAPI(TestCase):
         B = 2
         x = torch.randn(B, 3)
         with self.assertRaisesRegex(RuntimeError, "to have two returns"):
-            vmap(Zeros.apply)(x)
+            result = vmap(Zeros.apply)(x)
 
         class TwoZeros(torch.autograd.Function):
             @staticmethod
@@ -1571,7 +1574,7 @@ class TestAutogradFunctionVmapAPI(TestCase):
         B = 2
         x = torch.randn(B, 3)
         with self.assertRaisesRegex(RuntimeError, "to have two returns"):
-            vmap(Zeros.apply)(x)
+            result = vmap(Zeros.apply)(x)
 
     def test_incompatible_out_dims_error_msg(self, device):
         class Zeros(torch.autograd.Function):
@@ -1592,7 +1595,7 @@ class TestAutogradFunctionVmapAPI(TestCase):
         B = 2
         x = torch.randn(B, 3)
         with self.assertRaisesRegex(RuntimeError, "returned an incompatible"):
-            vmap(Zeros.apply)(x)
+            result = vmap(Zeros.apply)(x)
 
         class Zeros(torch.autograd.Function):
             @staticmethod
@@ -1612,7 +1615,7 @@ class TestAutogradFunctionVmapAPI(TestCase):
         B = 2
         x = torch.randn(B, 3)
         with self.assertRaisesRegex(RuntimeError, "returned an incompatible"):
-            vmap(Zeros.apply)(x)
+            result = vmap(Zeros.apply)(x)
 
     def test_kwarg_only_tensors(self, device):
         with self.assertRaisesRegex(NotImplementedError, "kwarg-only Tensor args"):
@@ -3151,7 +3154,7 @@ class TestHelpers(TestCase):
 
             @staticmethod
             def backward(ctx, gy):
-                wrapped = torch._functorch.autograd_function.CtxWithSavedTensors(  # noqa: F841
+                wrapped = torch._functorch.autograd_function.CtxWithSavedTensors(
                     ctx, (y,)
                 )
                 return gy
@@ -3165,7 +3168,7 @@ class TestHelpers(TestCase):
 
             @staticmethod
             def backward(ctx, gy):
-                wrapped = torch._functorch.autograd_function.CtxWithSavedTensors(  # noqa: F841
+                wrapped = torch._functorch.autograd_function.CtxWithSavedTensors(
                     ctx, (y,)
                 )
                 return gy
@@ -3304,6 +3307,8 @@ class TestHelpers(TestCase):
 @markDynamoStrictTest
 class TestComposability(TestCase):
     def test_deprecation_vmap(self, device):
+        x = torch.randn(3, device=device)
+
         # functorch version of the API is deprecated
         with self.assertWarnsRegex(FutureWarning, "Please use `torch.vmap`"):
             vmap(torch.sin)
@@ -4753,9 +4758,9 @@ def forward(self, x_1, indices_1) -> torch.Tensor:
             y = x.detach()
             return y + y
 
-        with FakeTensorMode():
+        with FakeTensorMode() as mode:
             x = torch.ones(2, device=device, requires_grad=True)
-            functionalize(f)(x)
+            out = functionalize(f)(x)
         self.assertEqual(x.size(), (2,))
 
     def test_functionalize_fx_simple(self, device):
@@ -5181,7 +5186,7 @@ class TestCompileTransforms(TestCase):
 
         actual = wrapper_fn(x, y)
         expected = torch.compile(wrapper_fn, backend="eager", fullgraph=True)(x, y)
-        torch.compile(wrapper_fn, backend="eager", fullgraph=True)
+        fn = torch.compile(wrapper_fn, backend="eager", fullgraph=True)
         self.assertEqual(actual, expected)
 
         def wrapper_fn(x, y):

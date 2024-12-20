@@ -467,10 +467,7 @@ class ForeachTests(TestCase):
             check_lowp=False,
         )
 
-        kernel_count = 1
-        if "foreach_map" in op.__name__:
-            kernel_count = 2
-        self.assertEqual(torch._inductor.metrics.generated_kernel_count, kernel_count)
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
     @requires_cuda
     @all_ops

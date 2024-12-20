@@ -559,30 +559,23 @@ def _load_model_state_dict(
 
     assign = False
     if info.broadcast_from_rank0 or info.full_state_dict:
-        devices = set()
+        device = None
         for key, value in local_state_dict.items():
             if torch.is_tensor(value) and value.dim() > 0:
-                devices.add(value.device)
-        # In lora state_dict, there could be multiple devices, with meta device inside.
-        # Take the other device in the broadcast/distribtue, and set assign to True
-        if torch.device("meta") in devices:
-            devices.remove(torch.device("meta"))
+                if device is None:
+                    device = value.device
+                else:
+                    assert device == value.device
+        assert device is not None
+        if device == torch.device("meta"):
+            device = dist.distributed_c10d._get_pg_default_device()
             assign = True
-        if len(devices) == 0:
-            devices.add(dist.distributed_c10d._get_pg_default_device())
-        elif len(devices) > 1:
-            raise ValueError("Multiple devices found")
-
         if info.broadcast_from_rank0:
             _broadcast_state_dict(
-                state_dict,
-                local_state_dict,
-                device=devices.pop(),
-                strict=info.strict,
-                cpu_offload=info.cpu_offload,
+                state_dict, local_state_dict, device=device, strict=info.strict
             )
         elif info.full_state_dict:
-            _distribute_state_dict(state_dict, local_state_dict, device=devices.pop())
+            _distribute_state_dict(state_dict, local_state_dict, device=device)
         for fqn, local_state in local_state_dict.items():
             state_dict[fqn] = local_state
 

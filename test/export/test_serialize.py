@@ -665,11 +665,7 @@ class TestDeserialize(TestCase):
 
             for orig, loaded in zip(flat_orig_outputs, flat_loaded_outputs):
                 self.assertEqual(type(orig), type(loaded))
-                # torch.allclose doesn't work for float8
-                if isinstance(orig, torch.Tensor) and orig.dtype not in [
-                    torch.float8_e4m3fn,
-                    torch.float8_e5m2,
-                ]:
+                if isinstance(orig, torch.Tensor):
                     if orig.is_meta:
                         self.assertEqual(orig, loaded)
                     else:
@@ -1152,17 +1148,6 @@ def forward(self, x):
         ep._example_inputs = None
         roundtrip_ep = deserialize(serialize(ep))
         self.assertTrue(torch.allclose(ep.module()(), roundtrip_ep.module()()))
-
-    def test_serialize_float8(self):
-        for dtype in [torch.float8_e5m2, torch.float8_e4m3fn]:
-
-            class MyModule(torch.nn.Module):
-                def forward(self, x):
-                    return x.to(dtype)
-
-            m = MyModule()
-            inputs = (torch.ones(2, 3),)
-            self.check_graph(m, inputs, strict=False)
 
 
 instantiate_parametrized_tests(TestDeserialize)

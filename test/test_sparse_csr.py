@@ -1,5 +1,4 @@
 # Owner(s): ["module: sparse"]
-# ruff: noqa: F841
 
 import torch
 import random
