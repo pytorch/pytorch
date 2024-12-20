@@ -23,7 +23,6 @@ from .ctx_manager import (
 )
 from .dicts import (
     ConstDictVariable,
-    CustomizedDictVariable,
     DefaultDictVariable,
     DictKeySetVariable,
     FrozensetVariable,
@@ -131,7 +130,6 @@ __all__ = [
     "CountIteratorVariable",
     "CreateTMADescriptorVariable",
     "CUDADeviceVariable",
-    "CustomizedDictVariable",
     "CycleIteratorVariable",
     "DataPtrVariable",
     "DefaultDictVariable",
