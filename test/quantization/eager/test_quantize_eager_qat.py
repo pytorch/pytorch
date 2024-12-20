@@ -855,7 +855,7 @@ class TestQuantizeEagerQATNumerics(QuantizationTestCase):
             ref_op = compose([conv_op, bn_op, relu_op])
 
         input_clone = input.detach().clone().requires_grad_()
-        for i in range(2):
+        for _ in range(2):
             result_ref = ref_op(input)
             result_actual = qat_op(input_clone)
             self.assertEqual(result_ref, result_actual)
