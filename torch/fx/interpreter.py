@@ -227,8 +227,7 @@ class Interpreter:
             args, kwargs = self.fetch_args_kwargs_from_env(n)
             assert isinstance(args, tuple)
             assert isinstance(kwargs, dict)
-            a = getattr(self, n.op)(n.target, args, kwargs)
-            return a
+            return getattr(self, n.op)(n.target, args, kwargs)
 
     # Main Node running APIs
     @compatibility(is_backward_compatible=True)
