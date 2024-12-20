@@ -54,7 +54,6 @@ if TYPE_CHECKING:
     TritonGridType = Union[TritonGridTupleType, TritonGridCallableType]
 
     if has_triton():
-        from triton import Config as TritonConfig
         from triton.runtime.autotuner import Autotuner
         from triton.runtime.jit import JITFunction
     else:
@@ -65,14 +64,8 @@ if TYPE_CHECKING:
         class JITFunction:  # type: ignore[no-redef]
             pass
 
-        class TritonConfig:  # type: ignore[no-redef]
-            pass
-
     TritonKernelType = Union[Autotuner, JITFunction]
-
-    # types for prune_configs_by
     TritonAutotunerType = Union[Autotuner]
-    TritonConfigType = Union[TritonConfig]
 
 log = logging.getLogger("torch._dynamo")
 
