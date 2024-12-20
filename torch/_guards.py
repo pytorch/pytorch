@@ -6,6 +6,7 @@ import dataclasses
 import enum
 import functools
 import logging
+import re
 import threading
 import traceback
 import unittest.mock
@@ -52,6 +53,11 @@ torch._guards is the definitional source of truth for general purpose guard stru
 An important thing to keep in mind here is the preservation of layering. There should be no dynamo notions,
 and no guard installation notions here.
 """
+
+COMPILE_ID_PATTERN = re.compile(r"^(?P<frame_id>\d+)/(?P<frame_compile_id>\d+)$")
+CA_COMPILE_ID_PATTERN = re.compile(
+    r"^!(?P<compiled_autograd_id>\d+)(?:/(?P<frame_id>\d+)/(?P<frame_compile_id>\d+))?$"
+)
 
 # [Note: Updating CompiledId]
 #
@@ -104,37 +110,15 @@ class CompileId:
         if compile_id is None:
             return None
         try:
-            string_ids = compile_id.split("/")
-            if len(string_ids) == 2:
-                frame_id, frame_compile_id = string_ids
-                return cls(
-                    frame_id=int(frame_id), frame_compile_id=int(frame_compile_id)
-                )
+            for pattern in (COMPILE_ID_PATTERN, CA_COMPILE_ID_PATTERN):
+                if match := pattern.match(compile_id):
+                    groups = match.groupdict()
+                    for k, v in groups.items():
+                        if v is not None:
+                            groups[k] = int(v)
+                    return cls(**groups)  # type: ignore[arg-type]
             else:
-                unparsed = set(range(len(string_ids)))
-
-                compiled_autograd_id = None
-                for i, string_id in enumerate(string_ids):
-                    if string_id.startswith("!"):
-                        compiled_autograd_id = int(string_id[1:])
-                        unparsed.remove(i)
-                    # Add other special symbols here
-
-                assert len(unparsed) == 2
-                idxs = list(unparsed)
-                lower_idx, higher_idx = (
-                    (idxs[0], idxs[1]) if idxs[0] < idxs[1] else (idxs[1], idxs[0])
-                )
-                assert lower_idx + 1 == higher_idx
-                frame_id, frame_compile_id = (
-                    string_ids[lower_idx],
-                    string_ids[higher_idx],
-                )
-                return cls(
-                    compiled_autograd_id=compiled_autograd_id,
-                    frame_id=int(frame_id),
-                    frame_compile_id=int(frame_compile_id),
-                )
+                raise ValueError
 
         except Exception as e:
             raise ValueError(f"Invalid compile_id '{compile_id}'") from e
