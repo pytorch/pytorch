@@ -25,6 +25,11 @@ from pathlib import Path
 
 import torch
 from torch._subclasses.fake_tensor import FakeTensorMode, FakeTensorConverter
+from torch.io import (
+    open_file_like,
+    open_zipfile_reader,
+    open_zipfile_writer
+)
 from torch._utils import _rebuild_tensor
 from torch._utils_internal import get_file_path_2
 from torch.serialization import (
@@ -163,14 +168,14 @@ class SerializationMixin:
         }
 
         def test(name_or_buffer):
-            with torch.serialization._open_zipfile_writer(name_or_buffer) as zip_file:
+            with open_zipfile_writer(name_or_buffer) as zip_file:
                 for key in data:
                     zip_file.write_record(key, data[key], len(data[key]))
 
             if hasattr(name_or_buffer, 'seek'):
                 name_or_buffer.seek(0)
 
-            with torch.serialization._open_zipfile_reader(name_or_buffer) as zip_file:
+            with open_zipfile_reader(name_or_buffer) as zip_file:
                 for key in data:
                     actual = zip_file.get_record(key)
                     expected = data[key]
@@ -1255,7 +1260,7 @@ class TestSerialization(TestCase, SerializationMixin):
         torch.save(lstm.state_dict(), databuffer)
         databuffer.seek(0)
 
-        with torch.serialization._open_zipfile_reader(databuffer) as zip_file:
+        with open_zipfile_reader(databuffer) as zip_file:
             byteordername = 'byteorder'
             self.assertTrue(zip_file.has_record(byteordername))
             byteorderdata = zip_file.get_record(byteordername)
@@ -4225,8 +4230,8 @@ class TestSerialization(TestCase, SerializationMixin):
             if not filename:
                 f.seek(0)
             # extract 'data.pkl' for use in our fake checkpoint
-            with torch.serialization._open_file_like(f, 'rb') as opened_file:
-                with torch.serialization._open_zipfile_reader(opened_file) as zip_file:
+            with open_file_like(f, 'rb') as opened_file:
+                with open_zipfile_reader(opened_file) as zip_file:
                     data_file = io.BytesIO(zip_file.get_record('data.pkl'))
                     data_0_offset = zip_file.get_record_offset('data/0')
                     data_1_offset = zip_file.get_record_offset('data/1')
@@ -4238,7 +4243,7 @@ class TestSerialization(TestCase, SerializationMixin):
                 opened_f.seek(data_1_offset)
                 opened_f.write(b'0' * bias_nbytes)
 
-            with torch.serialization._open_zipfile_writer(g) as zip_file:
+            with open_zipfile_writer(g) as zip_file:
                 data_value = data_file.getvalue()
                 zip_file.write_record('data.pkl', data_value, len(data_value))
                 zip_file.write_record('byteorder', sys.byteorder, len(sys.byteorder))

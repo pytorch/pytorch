@@ -25,7 +25,6 @@ from typing import (
     List,
     Optional,
     Tuple,
-    Type,
     Union,
 )
 from typing_extensions import TypeAlias, TypeIs
@@ -36,6 +35,7 @@ from torch._sources import get_source_lines_and_file
 from torch._utils import _import_dotted_name
 from torch.storage import _get_dtype_from_pickle_storage_type
 from torch.types import Storage
+from torch.io import *
 
 
 __all__ = [
@@ -705,104 +705,6 @@ def storage_to_tensor_type(storage):
     return getattr(module, storage_type.__name__.replace("Storage", "Tensor"))
 
 
-def _is_path(name_or_buffer) -> TypeIs[Union[str, os.PathLike]]:
-    return isinstance(name_or_buffer, (str, os.PathLike))
-
-
-class _opener:
-    def __init__(self, file_like):
-        self.file_like = file_like
-
-    def __enter__(self):
-        return self.file_like
-
-    def __exit__(self, *args):
-        pass
-
-
-class _open_file(_opener):
-    def __init__(self, name, mode):
-        super().__init__(open(name, mode))
-
-    def __exit__(self, *args):
-        self.file_like.close()
-
-
-class _open_buffer_reader(_opener):
-    def __init__(self, buffer):
-        super().__init__(buffer)
-        _check_seekable(buffer)
-
-
-class _open_buffer_writer(_opener):
-    def __exit__(self, *args):
-        self.file_like.flush()
-
-
-def _open_file_like(name_or_buffer, mode):
-    if _is_path(name_or_buffer):
-        return _open_file(name_or_buffer, mode)
-    else:
-        if "w" in mode:
-            return _open_buffer_writer(name_or_buffer)
-        elif "r" in mode:
-            return _open_buffer_reader(name_or_buffer)
-        else:
-            raise RuntimeError(f"Expected 'r' or 'w' in mode but got {mode}")
-
-
-class _open_zipfile_reader(_opener):
-    def __init__(self, name_or_buffer) -> None:
-        super().__init__(torch._C.PyTorchFileReader(name_or_buffer))
-
-
-class _open_zipfile_writer_file(_opener):
-    def __init__(self, name) -> None:
-        self.file_stream = None
-        self.name = str(name)
-        try:
-            self.name.encode("ascii")
-        except UnicodeEncodeError:
-            # PyTorchFileWriter only supports ascii filename.
-            # For filenames with non-ascii characters, we rely on Python
-            # for writing out the file.
-            self.file_stream = io.FileIO(self.name, mode="w")
-            super().__init__(
-                torch._C.PyTorchFileWriter(self.file_stream, _compute_crc32)
-            )
-        else:
-            super().__init__(torch._C.PyTorchFileWriter(self.name, _compute_crc32))
-
-    def __exit__(self, *args) -> None:
-        self.file_like.write_end_of_file()
-        if self.file_stream is not None:
-            self.file_stream.close()
-
-
-class _open_zipfile_writer_buffer(_opener):
-    def __init__(self, buffer) -> None:
-        if not callable(getattr(buffer, "write", None)):
-            msg = f"Buffer of {str(type(buffer)).strip('<>')} has no callable attribute 'write'"
-            if not hasattr(buffer, "write"):
-                raise AttributeError(msg)
-            raise TypeError(msg)
-        self.buffer = buffer
-        super().__init__(torch._C.PyTorchFileWriter(buffer, _compute_crc32))
-
-    def __exit__(self, *args) -> None:
-        self.file_like.write_end_of_file()
-        self.buffer.flush()
-
-
-def _open_zipfile_writer(name_or_buffer):
-    container: Type[_opener]
-    if _is_path(name_or_buffer):
-        container = _open_zipfile_writer_file
-    else:
-        container = _open_zipfile_writer_buffer
-    return container(name_or_buffer)
-
-
 def _is_compressed_file(f) -> bool:
     compress_modules = ["gzip"]
     try:
@@ -825,27 +727,6 @@ def _should_read_directly(f):
         return False
     except AttributeError:
         return False
-
-
-def _check_seekable(f) -> bool:
-    def raise_err_msg(patterns, e):
-        for p in patterns:
-            if p in str(e):
-                msg = (
-                    str(e)
-                    + ". You can only torch.load from a file that is seekable."
-                    + " Please pre-load the data into a buffer like io.BytesIO and"
-                    + " try to load from it instead."
-                )
-                raise type(e)(msg)
-        raise e
-
-    try:
-        f.seek(f.tell())
-        return True
-    except (io.UnsupportedOperation, AttributeError) as e:
-        raise_err_msg(["seek", "tell"], e)
-    return False
 
 
 def _check_dill_version(pickle_module) -> None:
@@ -873,7 +754,7 @@ def _check_dill_version(pickle_module) -> None:
 
 
 def _check_save_filelike(f):
-    if not _is_path(f) and not hasattr(f, "write"):
+    if not is_path(f) and not is_protocol(f) and not hasattr(f, "write"):
         raise AttributeError(
             "expected 'f' to be string, path, or a file-like object with "
             "a 'write' attribute"
@@ -902,7 +783,8 @@ def save(
     Args:
         obj: saved object
         f: a file-like object (has to implement write and flush) or a string or
-           os.PathLike object containing a file name
+           os.PathLike object containing a file name or
+           a url-like path like `scheme://netloc/path?key1=value1&key2=value2`
         pickle_module: module used for pickling metadata and objects
         pickle_protocol: can be specified to override the default protocol
 
@@ -927,28 +809,26 @@ def save(
         >>> # Save to io.BytesIO buffer
         >>> buffer = io.BytesIO()
         >>> torch.save(x, buffer)
+
+        >>> # Save to HDFS
+        >>> torch.save(x, 'hdfs://ip:port/tensor.pt')
     """
     torch._C._log_api_usage_once("torch.save")
     _check_dill_version(pickle_module)
     _check_save_filelike(f)
 
-    if _use_new_zipfile_serialization:
-        with _open_zipfile_writer(f) as opened_zipfile:
-            _save(
-                obj,
-                opened_zipfile,
-                pickle_module,
-                pickle_protocol,
-                _disable_byteorder_record,
-            )
-            return
-    else:
-        global _serialization_tls
-        if _serialization_tls.skip_data:
-            raise RuntimeError(
-                "Cannot use skip_data=True with _use_new_zipfile_serialization=False"
-            )
-        with _open_file_like(f, "wb") as opened_file:
+    with open_file_like(f, "wb") as opened_file:
+        if _use_new_zipfile_serialization:
+            with open_zipfile_writer(opened_file) as opened_zipfile:
+                _save(
+                    obj,
+                    opened_zipfile,
+                    pickle_module,
+                    pickle_protocol,
+                    _disable_byteorder_record,
+                )
+                return
+        else:
             _legacy_save(obj, opened_file, pickle_module, pickle_protocol)
 
 
@@ -1258,7 +1138,8 @@ def load(
 
     Args:
         f: a file-like object (has to implement :meth:`read`, :meth:`readline`, :meth:`tell`, and :meth:`seek`),
-            or a string or os.PathLike object containing a file name
+            or a string or os.PathLike object containing a file name,
+            or a url-like path like `scheme://netloc/path?key1=value1&key2=value2`
         map_location: a function, :class:`torch.device`, string or a dict specifying how to remap storage
             locations
         pickle_module: module used for unpickling metadata and objects (has to
@@ -1322,6 +1203,10 @@ def load(
         # Load a module with 'ascii' encoding for unpickling
         # Loading from a module setting weights_only=False, warning this can be unsafe
         >>> torch.load("module.pt", encoding="ascii", weights_only=False)
+        # Load a module from HDFS
+        >>> torch.load('hdfs://ip:port/tensor.pt', weights_only=True)
+        # Load a module from HTTP
+        >>> torch.load('http://ip:port/tensor.pt', weights_only=True)
     """
     torch._C._log_api_usage_once("torch.load")
     UNSAFE_MESSAGE = (
@@ -1421,14 +1306,14 @@ def load(
     if "encoding" not in pickle_load_args.keys():
         pickle_load_args["encoding"] = "utf-8"
 
-    with _open_file_like(f, "rb") as opened_file:
+    with open_file_like(f, "rb") as opened_file:
         if _is_zipfile(opened_file):
             # The zipfile reader is going to advance the current file position.
             # If we want to actually tail call to torch.jit.load, we need to
             # reset back to the original position.
             orig_position = opened_file.tell()
             overall_storage = None
-            with _open_zipfile_reader(opened_file) as opened_zipfile:
+            with open_zipfile_reader(opened_file) as opened_zipfile:
                 if _is_torchscript_zip(opened_zipfile):
                     warnings.warn(
                         "'torch.load' received a zip file that looks like a TorchScript archive"
@@ -1444,7 +1329,7 @@ def load(
                     opened_file.seek(orig_position)
                     return torch.jit.load(opened_file, map_location=map_location)
                 if mmap:
-                    if not _is_path(f):
+                    if not is_path(f):
                         raise ValueError(
                             "f must be a file path in order to use the mmap argument"
                         )
@@ -1711,7 +1596,7 @@ def _legacy_load(f, map_location, pickle_module, **pickle_load_args):
         else:
             raise RuntimeError(f"Unknown saved id type: {saved_id[0]}")
 
-    _check_seekable(f)
+    check_seekable(f)
     f_should_read_directly = _should_read_directly(f)
 
     if f_should_read_directly and f.tell() == 0:
