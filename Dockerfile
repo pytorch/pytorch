@@ -18,8 +18,8 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-ins
     curl \
     git \
     libjpeg-dev \
-    libpng-dev \
-    && rm -rf /var/lib/apt/lists/*
+        libpng-dev && \
+    rm -rf /var/lib/apt/lists/*
 RUN /usr/sbin/update-ccache-symlinks
 RUN mkdir /opt/ccache && ccache --set-config=cache_dir=/opt/ccache
 ENV PATH /opt/conda/bin:$PATH
@@ -36,7 +36,7 @@ RUN case ${TARGETPLATFORM} in \
     esac && \
     curl -fsSL -v -o ~/miniconda.sh "https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-Linux-${MINICONDA_ARCH}.sh"
 COPY requirements.txt .
-# Manually invoke bash on Miniconda script as per https://github.com/conda/conda/issues/10431
+# Manually invoke bash on miniconda script per https://github.com/conda/conda/issues/10431
 RUN chmod +x ~/miniconda.sh && \
     bash ~/miniconda.sh -b -p /opt/conda && \
     rm ~/miniconda.sh && \
@@ -58,10 +58,8 @@ COPY --from=conda /opt/conda /opt/conda
 COPY --from=submodule-update /opt/pytorch /opt/pytorch
 RUN make triton
 RUN --mount=type=cache,target=/opt/ccache \
-    set -eux; \
-    eval "${CMAKE_VARS}"; \
-    TORCH_CUDA_ARCH_LIST="7.0 7.2 7.5 8.0 8.6 8.7 8.9 9.0 9.0a" \
-    TORCH_NVCC_FLAGS="-Xfatbin -compress-all" \
+    export eval ${CMAKE_VARS} && \
+    TORCH_CUDA_ARCH_LIST="7.0 7.2 7.5 8.0 8.6 8.7 8.9 9.0 9.0a" TORCH_NVCC_FLAGS="-Xfatbin -compress-all" \
     CMAKE_PREFIX_PATH="$(dirname $(which conda))/../" \
     python setup.py install
 
