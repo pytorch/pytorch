@@ -12,18 +12,18 @@ import torch
 import torch.distributed as dist
 import torch.nn as nn
 from torch.distributed._composable import checkpoint, replicate
-from torch.distributed._composable.fsdp import (
+from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
+    _CHECKPOINT_PREFIX,
+    apply_activation_checkpointing,
+)
+from torch.distributed.device_mesh import DeviceMesh
+from torch.distributed.fsdp import (
     CPUOffloadPolicy,
     FSDPModule,
     fully_shard,
     OffloadPolicy,
     register_fsdp_forward_method,
 )
-from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
-    _CHECKPOINT_PREFIX,
-    apply_activation_checkpointing,
-)
-from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.tensor import DTensor, init_device_mesh, Shard
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.testing._internal.common_cuda import TEST_CUDA
@@ -590,7 +590,7 @@ class TestFullyShard1DTrainingCore(FSDPTest):
 
         torch.manual_seed(42 + self.rank)
         inp = torch.randint(0, model_args.vocab_size, (2, 8), device="cuda")
-        for iter_idx in range(10):
+        for _ in range(10):
             losses: List[torch.Tensor] = []
             for _model, _optim in ((ref_model, ref_optim), (model, optim)):
                 _optim.zero_grad()
@@ -624,12 +624,12 @@ class TestFullyShard1DTrainingCore(FSDPTest):
         # sync point after each iteration
         ref_losses: List[torch.Tensor] = []
         losses: List[torch.Tensor] = []
-        for iter_idx in range(10):
+        for _ in range(10):
             ref_optim.zero_grad()
             ref_losses.append(ref_model(inp).sum())
             ref_losses[-1].backward()
             ref_optim.step()
-        for iter_idx in range(10):
+        for _ in range(10):
             optim.zero_grad()
             losses.append(model(inp).sum())
             losses[-1].backward()
@@ -671,7 +671,7 @@ class TestFullyShard1DTrainingCompose(FSDPTest):
         module_grouping: str,
     ):
         assert checkpoint_impl in ("composable", "utils", "wrapper")
-        testing_compile = fully_shard != torch.distributed._composable.fsdp.fully_shard
+        testing_compile = fully_shard != torch.distributed.fsdp.fully_shard
         if testing_compile and checkpoint_impl == "composable":
             return
         torch.manual_seed(42)
@@ -1185,7 +1185,7 @@ class TestFullyShardNDTraining(FSDPTest):
         foreach: bool,
     ):
         global_mesh = self.init_global_mesh()
-        pp_mesh, dp_mesh, tp_mesh = (
+        _, dp_mesh, tp_mesh = (
             global_mesh["pp"],
             global_mesh["dp"],
             global_mesh["tp"],
@@ -1217,7 +1217,7 @@ class TestFullyShardNDTraining(FSDPTest):
                 _optim.step()
             self.assertEqual(losses[0], losses[1])
 
-        for n, p in model.named_parameters():
+        for _, p in model.named_parameters():
             self.assertIsInstance(p, DTensor)
             self.assertEqual(p.device_mesh.ndim, 2)
             self.assertEqual(len(p.placements), 2)
@@ -1288,7 +1288,7 @@ class TestFullyShardHSDP3DTraining(FSDPTest):
                 _optim.step()
             self.assertEqual(losses[0], losses[1])
 
-        for n, p in model.named_parameters():
+        for _, p in model.named_parameters():
             self.assertIsInstance(p, DTensor)
             self.assertEqual(p.device_mesh.ndim, 3)
             self.assertEqual(len(p.placements), 3)

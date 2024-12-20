@@ -443,9 +443,7 @@ inline __device__ void compute_dq_dk_dv_1colblock(const Params &params, const in
         cute::copy(smem_tiled_copy_KV, tdPsV, tdPrV_copy_view);
     }
 
-    auto seeds = at::cuda::philox::unpack(params.philox_args);
-    unsigned long long seed = std::get<0>(seeds);
-    unsigned long long offset = std::get<1>(seeds);
+    const auto [seed, offset] = at::cuda::philox::unpack(params.philox_args);
     pytorch_flash::Dropout dropout(seed, offset, params.p_dropout_in_uint8_t,
                            bidb, bidh, tidx, params.h);
 

@@ -6,7 +6,6 @@ import importlib
 import sys
 import unittest
 import warnings
-from unittest import mock
 
 import torch
 import torch._dynamo.config as dynamo_config
@@ -595,18 +594,9 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                 inp = torch.rand([20, 20], device="cuda", requires_grad=True)
                 out = foo(inp)
 
-                def complex_memory_overlap_new(t):
-                    return True
-
-                try:
-                    prev = torch._inductor.compile_fx.complex_memory_overlap
-                    torch._inductor.compile_fx.complex_memory_overlap = (
-                        complex_memory_overlap_new
-                    )
+                with config.patch(always_complex_memory_overlap_TESTING_ONLY=True):
                     back_inp = torch.empty_strided([20, 20], [0, 1], device="cuda")
                     out.backward(back_inp)
-                finally:
-                    torch._inductor.compile_fx.complex_memory_overlap = prev
 
             # we should not have cudagraph'd the backwards
             new_id = self.get_manager().new_graph_id().id
@@ -617,15 +607,14 @@ if HAS_CUDA and not TEST_WITH_ASAN:
         @torch._functorch.config.patch("enable_autograd_cache", True)
         @torch._inductor.config.patch("fx_graph_cache", True)
         @torch._inductor.config.patch("fx_graph_remote_cache", False)
+        # Currently fx graph cache is turned off for specialize_float=False
+        @torch._dynamo.config.patch("specialize_float", True)
         def test_cache_hit_forward_miss_backward(self):
             # Test that we don't cache cudagraphs, skipping cudagraphs on backward on a cache miss
 
             @torch.compile(mode="reduce-overhead")
             def foo(x):
                 return x * x * x
-
-            def complex_memory_overlap_new(t):
-                return True
 
             # Run forwards, fx graph should cache miss
             for _ in range(3):
@@ -634,10 +623,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                 FxGraphCache.clear()
                 AOTAutogradCache.clear()
 
-                with mock.patch(
-                    "torch._inductor.compile_fx.complex_memory_overlap",
-                    new=complex_memory_overlap_new,
-                ):
+                with config.patch(always_complex_memory_overlap_TESTING_ONLY=True):
                     inp = torch.rand([20, 20], device="cuda", requires_grad=True)
                     out = foo(inp)
                     self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
@@ -677,6 +663,8 @@ if HAS_CUDA and not TEST_WITH_ASAN:
         @torch._functorch.config.patch("enable_autograd_cache", True)
         @torch._inductor.config.patch("fx_graph_cache", True)
         @torch._inductor.config.patch("fx_graph_remote_cache", False)
+        # Currently fx graph cache is turned off for specialize_float=False
+        @torch._dynamo.config.patch("specialize_float", True)
         def test_backward_gets_cached_cudagraphs(self):
             # We pass cpu tensors to foo and save that into the cache
             # On a subsequent run in a new process, cudagraphs should be
@@ -721,6 +709,8 @@ if HAS_CUDA and not TEST_WITH_ASAN:
         @torch._functorch.config.patch("enable_autograd_cache", True)
         @torch._inductor.config.patch("fx_graph_cache", True)
         @torch._inductor.config.patch("fx_graph_remote_cache", False)
+        # Currently fx graph cache is turned off for specialize_float=False
+        @torch._dynamo.config.patch("specialize_float", True)
         def test_cached_forward_backward(self):
             counters.clear()
             AOTAutogradCache.clear()
