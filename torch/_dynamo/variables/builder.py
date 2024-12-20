@@ -227,6 +227,7 @@ from .user_defined import (
     MutableMappingVariable,
     SourcelessGraphModuleVariable,
     UserDefinedClassVariable,
+    UserDefinedDictVariable,
     UserDefinedObjectVariable,
 )
 
@@ -1232,6 +1233,46 @@ class VariableBuilder:
                 fake_script_obj,
                 source=self.source,
             )
+        elif (
+            isinstance(value, (dict, collections.OrderedDict))
+            and type(value).__new__ is dict.__new__
+        ):
+            # Construct a dict_vt that will reside inside the UserDefinedDictVariable
+            self.install_guards(GuardBuilder.TYPE_MATCH)
+            self.install_guards(GuardBuilder.SEQUENCE_LENGTH)
+
+            # Guard on the key order
+            self.tx.output.guard_on_key_order.add(self.source.name())
+
+            # We need all the keys to be hashable. We do this within the
+            # _HashableTracker class in dicts.py
+            def build_key_value(i, k, v):
+                source_key = ConstDictKeySource(self.get_source(), i)
+                key = LazyVariableTracker.create(k, source_key)
+
+                source_value = GetItemSource(self.get_source(), source_key)
+                value = LazyVariableTracker.create(v, source_value)
+
+                return key, value
+
+            result = dict(
+                build_key_value(i, k, v) for i, (k, v) in enumerate(value.items())
+            )
+
+            # NB: This is deliberately kept ValueMutationNew because dict_vt is
+            # an internal representation. dict_vt tracks the mutation on the
+            # dict side. side_effects infra uses the UserDefinedDictVariable to
+            # apply side-effects of this dict_vt.
+            dict_vt = ConstDictVariable(
+                result,
+                user_cls=collections.OrderedDict
+                if isinstance(value, collections.OrderedDict)
+                else dict,
+                mutation_type=ValueMutationNew(),
+            )
+
+            result = UserDefinedDictVariable(value, dict_vt=dict_vt, source=self.source)
+            return self.tx.output.side_effects.track_object_existing(value, result)
         elif issubclass(type(value), MutableMapping):
             self.install_guards(GuardBuilder.TYPE_MATCH)
             return MutableMappingVariable(value, source=self.source)

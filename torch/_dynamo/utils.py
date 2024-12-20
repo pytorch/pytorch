@@ -1896,6 +1896,14 @@ tuple_iterator: Type[Iterator[Any]] = type(iter(()))
 range_iterator: Type[Iterator[Any]] = type(iter(range(0)))
 tuple_iterator_len = tuple_iterator.__length_hint__  # type: ignore[attr-defined]
 object_new = object.__new__
+dict_new = dict.__new__
+dict_methods = {
+    method
+    for method in itertools.chain(
+        dict.__dict__.values(), collections.OrderedDict.__dict__.values()
+    )
+    if callable(method)
+}
 
 
 def nn_module_new(cls):

@@ -1,4 +1,5 @@
 # mypy: allow-untyped-defs
+import collections
 import contextlib
 import functools
 import inspect
@@ -20,7 +21,7 @@ from .bytecode_transformation import (
 from .codegen import PyCodegen
 from .exc import unimplemented
 from .source import GlobalSource, LocalCellSource, LocalSource, Source
-from .utils import is_frozen_dataclass, nn_module_new, object_new
+from .utils import dict_new, is_frozen_dataclass, nn_module_new, object_new
 from .variables.base import (
     AttributeMutation,
     AttributeMutationExisting,
@@ -35,6 +36,17 @@ from .variables.user_defined import FrozenDataClassVariable
 def _manual_update_dict(dict_from, dict_to):
     for k, v in dict_from.items():
         dict_to[k] = v
+
+
+def _manual_dict_setitem(dict_from, dict_to, mro_index):
+    # Carefully calls the dict or OrderedDict `clear` or `__setitem__`. We have
+    # to be careful because we don't want to trigger the user defined object
+    # setitem or clear. The mro_index is used to find the dict/OrderedDict from
+    # the class mro.
+    dict_class = type(dict_to).__mro__[mro_index]
+    dict_class.clear(dict_to)
+    for k, v in dict_from.items():
+        dict_class.__setitem__(dict_to, k, v)
 
 
 class SideEffects:
@@ -181,9 +193,9 @@ class SideEffects:
 
     @staticmethod
     def cls_supports_mutation_side_effects(cls):
-        return (
-            inspect.getattr_static(cls, "__getattribute__", None)
-            is object.__getattribute__
+        return inspect.getattr_static(cls, "__getattribute__", None) in (
+            object.__getattribute__,
+            dict.__getattribute__,
         )
 
     def is_attribute_mutation(self, item):
@@ -254,6 +266,8 @@ class SideEffects:
                 obj = torch.autograd.Function()
         elif issubclass(user_cls, torch.nn.Module):
             obj = nn_module_new(user_cls)
+        elif issubclass(user_cls, (dict, collections.OrderedDict)):
+            obj = dict_new(user_cls)
         else:
             try:
                 obj = object_new(user_cls)
@@ -284,6 +298,8 @@ class SideEffects:
         ] = variables.UserDefinedObjectVariable
         if issubclass(user_cls, torch.nn.Module):
             variable_cls = variables.UnspecializedNNModuleVariable
+        elif issubclass(user_cls, (dict, collections.OrderedDict)):
+            variable_cls = variables.UserDefinedDictVariable
         elif issubclass(user_cls, MutableMapping):
             variable_cls = variables.MutableMappingVariable
         elif is_frozen_dataclass(user_cls):
@@ -442,7 +458,12 @@ class SideEffects:
                 if isinstance(var, variables.AutogradFunctionContextVariable):
                     unimplemented("AutogradFunctionContextVariable escaped")
                 cg.add_push_null(
-                    lambda: cg.load_import_from(utils.__name__, "object_new")
+                    lambda: cg.load_import_from(
+                        utils.__name__,
+                        "dict_new"
+                        if isinstance(var, variables.UserDefinedDictVariable)
+                        else "object_new",
+                    )
                 )
                 cg(var.mutation_type.cls_source)
                 cg.extend_output(create_call_function(1, False))
@@ -695,6 +716,58 @@ class SideEffects:
                     suffixes.append([cg.create_store_deref(var.local_name)])
 
             elif self.is_attribute_mutation(var):
+                if isinstance(var, variables.UserDefinedDictVariable):
+                    # Do dict related update manually here. The store_attr
+                    # mutations will be applied later.
+                    varname_map = {}
+                    for name in _manual_dict_setitem.__code__.co_varnames:
+                        varname_map[name] = cg.tx.output.new_var()
+
+                    try:
+                        mro_index = type(var.value).__mro__.index(
+                            collections.OrderedDict
+                        )
+                    except ValueError:
+                        mro_index = type(var.value).__mro__.index(dict)
+
+                    cg.extend_output(
+                        [
+                            create_instruction("LOAD_CONST", argval=mro_index),
+                            create_instruction(
+                                "STORE_FAST", argval=varname_map["mro_index"]
+                            ),
+                        ]
+                    )
+
+                    cg(var.source)  # type: ignore[attr-defined]
+                    cg.extend_output(
+                        [
+                            create_instruction(
+                                "STORE_FAST", argval=varname_map["dict_to"]
+                            )
+                        ]
+                    )
+
+                    cg(var._dict_vt, allow_cache=False)  # Don't codegen via source
+                    cg.extend_output(
+                        [
+                            create_instruction(
+                                "STORE_FAST", argval=varname_map["dict_from"]
+                            )
+                        ]
+                    )
+
+                    dict_update_insts = bytecode_from_template(
+                        _manual_dict_setitem, varname_map=varname_map
+                    )
+
+                    suffixes.append(
+                        [
+                            *dict_update_insts,
+                            create_instruction("POP_TOP"),
+                        ]
+                    )
+
                 # Applying mutations involves two steps: 1) Push all
                 # reconstructed objects onto the stack.  2) Call STORE_ATTR to
                 # apply the mutations.
