@@ -1694,43 +1694,71 @@ class SIMDScheduling(BaseScheduling):
             if not isinstance(node, scheduler.SchedulerNode):
                 continue
 
-            # If we have modular indexing expressions, try to subdivide ranges into
-            # their parameters.
-            range_idx = 0 if is_pointwise else 1
+            # Use the node ranges as the default tiling candidate.
             node_ranges = node.get_ranges()
-            node_tilings = [node_ranges[range_idx]]
+            ranges_to_tile = node_ranges[0 if is_pointwise else 1]
+            node_tilings = [ranges_to_tile]
+            pointwise_numel = sympy_product(node_ranges[0])
+
+            # Search the indexing expressions for more candidates.
+            # If we see modular indexing, try to subdivide ranges into their implied
+            # block shape.
             for dep in node.read_writes.reads_and_writes():
-                # Check if the variable ranges coincide with the node ranges.
-                # This lets us partition the variables into pointwise and reduction
-                # splits.
-                # FIXME right now we mishandle cases like [[], [8,8]]. In those cases, we
-                # should count all variables towards reduction splits.
-                var_ranges = tuple(dep.ranges.values())
-                if len(var_ranges) != len(node_ranges) or var_ranges != tuple(
-                    itertools.chain.from_iterable(node_ranges)
+                # Check if we have any index variables in the first place.
+                all_var_ranges = [*dep.ranges.items()]
+                if len(all_var_ranges) == 0:
+                    continue
+
+                # Attempt to partition variable ranges into pointwise and reduction groups.
+                # To achieve this, merge the leading ranges until we reach the pointwise numel.
+                pointwise_vars_numel = sympy.S.One
+                sizevars = V.graph.sizevars
+                for pointwise_end_idx, (var, numel) in enumerate(all_var_ranges):
+                    pointwise_vars_numel *= numel
+                    if sizevars.statically_known_geq(
+                        pointwise_vars_numel, pointwise_numel
+                    ):
+                        break
+
+                # Reject the split if it does not match the total pointwise numel.
+                if not sizevars.statically_known_equals(
+                    pointwise_vars_numel, pointwise_numel
                 ):
                     continue
 
+                # Partition var ranges into pointwise and reduction splits.
+                reduction_start_idx = pointwise_end_idx + 1
+                var_ranges = (
+                    all_var_ranges[:reduction_start_idx]
+                    if is_pointwise
+                    else all_var_ranges[reduction_start_idx:]
+                )
+
                 # Pattern match the subexpression pertaining to each index variable.
-                var, numel = list(dep.ranges.items())[range_idx]
-                index = BlockPatternMatcher.get_subexpr_involving_symbol(dep.index, var)
+                index_tiling = []
+                for var, numel in var_ranges:
+                    index = BlockPatternMatcher.get_subexpr_involving_symbol(
+                        dep.index, var
+                    )
 
-                # Heuristic to bound the maximum dimensionality of the block.
-                num_dims = max(
-                    2,
-                    index.count(FloorDiv) + index.count(ModularIndexing),
-                    len(node_ranges[range_idx]),
-                )
+                    # Heuristic to bound the maximum dimensionality of the block.
+                    num_dims = max(
+                        2,
+                        index.count(FloorDiv) + index.count(ModularIndexing),
+                        len(ranges_to_tile),
+                    )
 
-                # Attempt to pattern match the index expr.
-                # Failed matches default to the full range.
-                match_result = BlockPatternMatcher.match_mod_div_block_expr(
-                    index, var, numel, num_dims
-                )
-                dims = match_result[0] if match_result is not None else [numel]
-                node_tilings.append(dims)
+                    # Attempt to pattern match the index expr.
+                    # Failed matches default to the full range.
+                    match_result = BlockPatternMatcher.match_mod_div_block_expr(
+                        index, var, numel, num_dims
+                    )
+                    dims = match_result[0] if match_result is not None else [numel]
+                    index_tiling.extend(dims)
 
-            # Flatten leading dimensions, and assign labels to each dim.
+                node_tilings.append(index_tiling)
+
+            # Flatten leading dimensions, assigning labels to each dim.
             for node_tiling in node_tilings:
                 num_leading_dims = max(0, len(node_tiling) - config.triton.max_tiles)
                 first_trailing_dim = num_leading_dims + 1
