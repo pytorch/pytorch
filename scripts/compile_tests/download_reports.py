@@ -28,20 +28,22 @@ CONFIGS = {
         "linux-focal-py3.11-clang10 / test (dynamo_wrapped, 2, 3, linux.2xlarge)",
         "linux-focal-py3.11-clang10 / test (dynamo_wrapped, 3, 3, linux.2xlarge)",
     },
-    "eager311": {
-        "linux-focal-py3.11-clang10 / test (default, 1, 3, linux.2xlarge)",
-        "linux-focal-py3.11-clang10 / test (default, 2, 3, linux.2xlarge)",
-        "linux-focal-py3.11-clang10 / test (default, 3, 3, linux.2xlarge)",
+    "eager313": {
+        "linux-focal-py3.13-clang10 / test (default, 1, 5, lf.linux.4xlarge)",
+        "linux-focal-py3.13-clang10 / test (default, 2, 5, lf.linux.4xlarge)",
+        "linux-focal-py3.13-clang10 / test (default, 3, 5, lf.linux.4xlarge)",
+        "linux-focal-py3.13-clang10 / test (default, 4, 5, lf.linux.4xlarge)",
+        "linux-focal-py3.13-clang10 / test (default, 5, 5, lf.linux.4xlarge)",
     },
-    "aot_eager311": {
-        "linux-focal-py3.11-clang10 / test (aot_eager_wrapped, 1, 3, linux.12xlarge)",
-        "linux-focal-py3.11-clang10 / test (aot_eager_wrapped, 2, 3, linux.12xlarge)",
-        "linux-focal-py3.11-clang10 / test (aot_eager_wrapped, 3, 3, linux.12xlarge)",
+    "aot_eager313": {
+        "linux-focal-py3.13-clang10 / test (aot_eager_wrapped, 1, 3, lf.linux.12xlarge)",
+        "linux-focal-py3.13-clang10 / test (aot_eager_wrapped, 2, 3, lf.linux.12xlarge)",
+        "linux-focal-py3.13-clang10 / test (aot_eager_wrapped, 3, 3, lf.linux.12xlarge)",
     },
-    "subclasses311": {
-        "linux-focal-py3.11-clang10 / test (subclasses_wrapped, 1, 3, linux.12xlarge)",
-        "linux-focal-py3.11-clang10 / test (subclasses_wrapped, 2, 3, linux.12xlarge)",
-        "linux-focal-py3.11-clang10 / test (subclasses_wrapped, 3, 3, linux.12xlarge)",
+    "subclasses313": {
+        "linux-focal-py3.13-clang10 / test (subclasses_wrapped, 1, 3, lf.linux.12xlarge)",
+        "linux-focal-py3.13-clang10 / test (subclasses_wrapped, 2, 3, lf.linux.12xlarge)",
+        "linux-focal-py3.13-clang10 / test (subclasses_wrapped, 3, 3, lf.linux.12xlarge)",
     },
 }
 
@@ -71,7 +73,7 @@ def download_reports(commit_sha, configs=("dynamo39", "dynamo311", "eager311")):
     output = subprocess.check_output(
         ["gh", "run", "list", "-c", commit_sha, "-w", "pull", "--json", "databaseId"]
     ).decode()
-    print(f"XXX download_reports output:{output}")
+    print(f"download_reports output:{output}")
     workflow_run_id = str(json.loads(output)[0]["databaseId"])
     output = subprocess.check_output(["gh", "run", "view", workflow_run_id])
     workflow_jobs = parse_workflow_jobs(output)

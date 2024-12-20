@@ -196,17 +196,32 @@ class TestCaseResult:
     key: str
     testcase: Any
 
+    def is_passed(self):
+        return self.status == TestCaseStatus.PASSED
+
+    def is_failed(self):
+        return self.status == TestCaseStatus.FAILED
+
+    def is_skipped(self):
+        return self.status == TestCaseStatus.SKIPPED
+
 def parse_testcase(testcase) -> TestCaseResult:
     children = list(testcase.iter())
     k = key(testcase)
     tags = {child.tag for child in children}
-    if len(children) == 0:
+    #if len(tags) > 1:
+    #    breakpoint()
+    if tags <= {"testcase", "system-out", "system-err", "properties", "property"}:
         return TestCaseResult(TestCaseStatus.PASSED, k, testcase)
 
     if "skipped" in tags:
         return TestCaseResult(TestCaseStatus.SKIPPED, k, testcase)
 
-    return TestCaseResult(TestCaseStatus.FAILED, k, testcase)
+    if "failure" in tags:
+        return TestCaseResult(TestCaseStatus.FAILED, k, testcase)
+
+    breakpoint()
+    assert False
 
 
 def get_testsuites(xmls):
@@ -226,76 +241,66 @@ def parse_xmls(xmls):
         total_tests += int(ts.attrib["tests"])
         total_failed += int(ts.attrib["failures"])
         total_skipped += int(ts.attrib["skipped"])
-    print(f"XXX total_tests:{total_tests}")
-    print(f"XXX total_failed:{total_failed}")
-    print(f"XXX total_skipped:{total_skipped}")
     total_passed = total_tests - total_skipped - total_failed
-    print(f"XXX total_passed:{total_passed}")
+
+    # print("--- HEADER DATA ---")
+    # print(f"total_tests:{total_tests}")
+    # print(f"total_failed:{total_failed}")
+    # print(f"total_skipped:{total_skipped}")
+    # print(f"total_passed:{total_passed}")
+    # print("=== === ===")
 
     testcases = get_testcases(xmls)
+
     tc_total_tests = 0
     tc_total_skipped = 0
     tc_total_failed = 0
+    tc_total_passed = 0
     tcs = dict()
     for testcase in testcases:
         k = key(testcase)
         v = parse_testcase(testcase)
         tcs[k] = v
         tc_total_tests += 1
-        #print(f"XXX {tc_total_tests} TC_TESTCASE:{k}")
-        if v.status == TestCaseStatus.FAILED:
+        if v.is_failed():
+            print(f"XXX FAILED_TC:{k}")
             tc_total_failed += 1
-            #print(f"XXX FAILED")
-        elif v.status == TestCaseStatus.SKIPPED:
+        elif v.is_skipped():
             tc_total_skipped += 1
-            #print(f"XXX SKIPPED")
+        elif v.is_passed():
+            tc_total_passed += 1
         else:
             assert False
 
-    print(f"XXX tc_total_tests:{tc_total_tests}")
-    print(f"XXX tc_total_failed:{tc_total_failed}")
-    print(f"XXX tc_total_skipped:{tc_total_skipped}")
-    tc_total_passed = tc_total_tests - tc_total_skipped - tc_total_failed
-    print(f"XXX tc_total_passed:{tc_total_passed}")
+    print(f"XXX HEADER vs PER_TC total_tests:{total_tests} vs {tc_total_tests}")
+    print(f"XXX HEADER vs PER_TC total_failed:{total_failed} vs {tc_total_failed}")
+    print(f"XXX HEADER vs PER_TC total_skipped:{total_skipped} vs {tc_total_skipped}")
+    print(f"XXX HEADER vs PER_TC total_passed:{total_passed} vs {tc_total_passed}")
 
     #for k, v in tcs.items():
     #    if v.status == TestCaseStatus.FAILED:
     #        print(f"XXX FAILED_TC {k}")
-
-    print(f"XXX PRE_ASSERT total_tests:{total_tests}")
-    print(f"XXX PRE_ASSERT total_failed:{total_failed}")
-    print(f"XXX PRE_ASSERT total_skipped:{total_skipped}")
-
-    print(f"XXX PRE_ASSERT tc_total_tests:{tc_total_tests}")
-    print(f"XXX PRE_ASSERT tc_total_failed:{tc_total_failed}")
-    print(f"XXX PRE_ASSERT tc_total_skipped:{tc_total_skipped}")
-
-    assert total_tests == tc_total_tests
-    assert total_failed == tc_total_failed
-    assert total_skipped == tc_totak_skipped
+    return tcs
 
 
+def compute_pass_rate_tcs(control_tcs, test_tcs):
+    # passed - passed
+    # 0 - passed
+    # passed - 0
+    # passed - failed
+    # failed - failed
 
+    for k, v in test_tcs.items():
+        if v.is_passed():
 
-def compute_pass_rate_aot_eager_subclasses(control_dir, test_dir):
-    print("parsing xmls")
-    print(f"XXX PARSE CONTROL XMLS")
-    control_xmls = open_test_results(control_dir)
-    parse_xmls(control_xmls)
-
-    print(f"XXX PARSE TEST XMLS")
-    test_xmls = open_test_results(test_dir)
-    parse_xmls(test_xmls)
-
-    print("computing pass rate")
     control_passed = get_passed_testcases(control_xmls)
     test_passed = get_passed_testcases(test_xmls)
-    print(f"TEST passed:{test_passed}")
+    # print(f"TEST passed:{test_passed}")
     test_pass_keys = {key(testcase) for testcase in test_passed}
-    print(f"TEST test_pass_keys:{test_pass_keys}")
+    # print(f"TEST test_pass_keys:{test_pass_keys}")
     # test_pass_keys = {key_ for key_ in test_pass_keys if not should_exclude(key_)}
     tmp_control_pass_keys = {key(testcase) for testcase in control_passed}
-    print(f"CONTROL tmp_control_pass_keys:{tmp_control_pass_keys}")
+    # print(f"CONTROL tmp_control_pass_keys:{tmp_control_pass_keys}")
     # tmp_control_pass_keys = {
     #     key_ for key_ in tmp_control_pass_keys if not should_exclude(key_)
     # }
@@ -311,14 +316,38 @@ def compute_pass_rate_aot_eager_subclasses(control_dir, test_dir):
     total_tests = len(control_pass_keys)
     print("pass rate", total_subset / total_tests, total_subset, total_tests)
 
-    test_testcases = get_testcases(test_xmls)
-    tc = {key(t): t for t in test_testcases}
 
-    # Useful for debugging
-    not_there_keys = set()
-    for key_ in control_pass_keys:
-        if key_ not in tc:
-            not_there_keys.add(key_)
 
-    fail_keys = control_pass_keys - subset
-    return fail_keys
+def compute_pass_rate_aot_eager_subclasses(e_dir, ae_dir, sc_dir):
+    print("parsing xmls")
+    print(f"-- PARSE EAGER XMLS {e_dir}")
+    e_xmls = open_test_results(e_dir)
+    tcs_e = parse_xmls(e_xmls)
+    
+    print(f"-- PARSE AOT_EAGER XMLS {ae_dir}")
+    ae_xmls = open_test_results(ae_dir)
+    tcs_ae = parse_xmls(ae_xmls)
+
+    print(f"-- PARSE SC XMLS {sc_dir}")
+    sc_xmls = open_test_results(sc_dir)
+    tcs_sc = parse_xmls(sc_xmls)
+    print("===")
+
+    print("computing pass rate EAGER vs AOT_EAGER")
+    compute_pass_rate_tcs(tcs_e, tcs_ae)
+
+    print("computing pass rate AOT_EAGER vs SC")
+    compute_pass_rate_tcs(tcs_ae, tcs_sc)
+
+
+    # test_testcases = get_testcases(test_xmls)
+    # tc = {key(t): t for t in test_testcases}
+
+    # # Useful for debugging
+    # not_there_keys = set()
+    # for key_ in control_pass_keys:
+    #     if key_ not in tc:
+    #         not_there_keys.add(key_)
+
+    # fail_keys = control_pass_keys - subset
+    # return fail_keys

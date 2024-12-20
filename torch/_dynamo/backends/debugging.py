@@ -338,7 +338,7 @@ def test_subclasses(gm, inputs, **kwargs):
             factory_fn=lambda t: TwoTensor(t, t),
         ),
     ]
-    if bool(os.getenv("PYTORCH_TEST_WITH_SUBCLASSES_NONTRIVIAL", default=0)):
+    if bool(os.getenv("PYTORCH_TEST_WITH_SUBCLASSES_NONTRIVIAL", default=1)):
         TRANSFORMATIONS.extend(
             [
                 TensorToSubclassTransform(
@@ -369,7 +369,7 @@ def test_subclasses(gm, inputs, **kwargs):
             return gm
 
     MAX_SUBCLASSES_NESTING: int = int(
-        os.getenv("PYTORCH_TEST_WITH_SUBCLASSES_MAX_NESTING", default=1)
+        os.getenv("PYTORCH_TEST_WITH_SUBCLASSES_MAX_NESTING", default=2)
     )
     N: int = len(TRANSFORMATIONS)
 
