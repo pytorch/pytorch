@@ -930,7 +930,7 @@ class CompilationMetrics:
         we transform some fields to comma-separated strings for scuba logging.
         """
 
-        def us_to_s(metric: Optional[float]) -> Optional[float]:
+        def us_to_s(metric: Optional[int]) -> Optional[float]:
             return metric / 1e6 if metric is not None else None
 
         def us_to_ms(metric: Optional[int]) -> Optional[int]:
