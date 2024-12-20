@@ -616,11 +616,10 @@ def make_pointwise(
                 inputs_loaded = []
                 for inp_index, load in enumerate(loaders):
                     out = load(index)
-                    if emulate_precision_casts and inputs[inp_index].get_dtype() in (
-                        low_pr_fp
-                    ):
-                        downcast = ops.to_dtype(out, dtype, use_compute_types=False)
-                        out = ops.to_dtype(downcast, dtype)
+                    inp_dtype = inputs[inp_index].get_dtype()
+                    if emulate_precision_casts and inp_dtype in low_pr_fp:
+                        downcast = ops.to_dtype(out, inp_dtype, use_compute_types=False)
+                        out = ops.to_dtype(downcast, inp_dtype)
                     inputs_loaded.append(out)
 
                 out = fn(*inputs_loaded)
