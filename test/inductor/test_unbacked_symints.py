@@ -294,6 +294,95 @@ class TestUnbackedSymints(InductorTestCase):
         expected = fn(*example_inputs)
         torch.testing.assert_close(actual, expected)
 
+    @dynamo_config.patch({"capture_scalar_outputs": True})
+    @parametrize("dynamic", [False, True, None])
+    def test_unbacked_slice_on_subclass(self, device, dynamic):
+        from torch.testing._internal.common_subclass import WrapperTensor
+        from torch.utils._pytree import tree_map
+
+        # NB: the error we're testing for only triggers when unbacked SymInts
+        # are created within a subclass's torch_dispatch, because they're not seen
+        # by Dynamo and thus are considered freshly-created when the subclass instance
+        # return value of the torch_dispatch is handled.
+        # Subclass forwards everything along to the single underlying dense tensor
+        # component, except for slice(), which it handles via data-dependent bounds access
+        class CustomSliceSubclass(WrapperTensor):
+            @classmethod
+            def get_wrapper_properties(cls, t, slice_bounds=None):
+                return t, {}
+
+            def __init__(self, t, slice_bounds=None):
+                self.t = t
+                self.slice_bounds = slice_bounds
+
+            def __repr__(self):
+                t_repr = repr(self.t)
+                slice_bounds_repr = repr(self.slice_bounds)
+                return f"CustomSliceSubclass({t_repr}, {slice_bounds_repr})"
+
+            def __tensor_flatten__(self):
+                return ["t", "slice_bounds"], None
+
+            @classmethod
+            def __tensor_unflatten__(
+                cls, inner_tensors, meta, outer_size, outer_stride
+            ):
+                t = inner_tensors["t"]
+                slice_bounds = inner_tensors["slice_bounds"]
+                return cls(t, slice_bounds)
+
+            @classmethod
+            def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+                if func is torch.ops.aten.slice.Tensor:
+                    inp = args[0]
+
+                    start = inp.slice_bounds[0].item()
+                    torch._check_is_size(start)
+                    torch._check(start <= inp.size(0))
+
+                    length = (args[0].slice_bounds[1] - args[0].slice_bounds[0]).item()
+                    torch._check_is_size(length)
+                    torch._check(start + length <= inp.size(0))
+
+                    return CustomSliceSubclass(
+                        func(args[0].t, dim=0, start=start, end=(start + length)),
+                        slice_bounds=args[0].slice_bounds,
+                    )
+
+                if not all(issubclass(cls, t) for t in types):
+                    return NotImplemented
+
+                if kwargs is None:
+                    kwargs = {}
+
+                def unwrap(e):
+                    return e.t if isinstance(e, CustomSliceSubclass) else e
+
+                def wrap(e):
+                    return CustomSliceSubclass(e) if isinstance(e, torch.Tensor) else e
+
+                rs = tree_map(
+                    wrap,
+                    func(*tree_map(unwrap, args), **tree_map(unwrap, kwargs or {})),
+                )
+                return rs
+
+        def fn(t, start, length):
+            return torch.ops.aten.slice.Tensor(
+                t, dim=0, start=start, end=start + length
+            )
+
+        t = make_tensor(22, 5, dtype=torch.float32, device=device)
+        sub = CustomSliceSubclass(t, slice_bounds=torch.tensor([2, 5], device=t.device))
+        start = 2
+        length = 3
+        ragged_idx = 1
+        example_inputs = (sub, start, length)
+
+        actual = torch.compile(fn, dynamic=dynamic, fullgraph=True)(*example_inputs)
+        expected = fn(*example_inputs)
+        torch.testing.assert_close(actual.t, expected.t)
+
 
 instantiate_device_type_tests(TestUnbackedSymints, globals(), allow_xpu=True)
 
