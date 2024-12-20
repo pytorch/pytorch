@@ -36,6 +36,7 @@ from torch._prims_common import (
     Number,
 )
 from torch.fx.experimental.sym_node import magic_methods, method_to_operator
+from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.functions import (
     CeilDiv,
@@ -69,6 +70,7 @@ from .utils import (
     is_dynamic,
     is_gpu,
     is_pointwise_use,
+    is_view,
     needs_fallback_due_to_atomic_add_limitations,
     pad_listlike,
     register_op_dtype_propagation_rules,
@@ -997,8 +999,9 @@ if hasattr(aten, "lift_fresh"):
 @register_lowering(aten.squeeze, type_promotion_kind=None)
 def squeeze(x, dim=None):
     assert isinstance(x, TensorBox)
-    if dim is None:
-        return TensorBox(SqueezeView.create(x.data))
+    if dim is None or free_unbacked_symbols(x.get_size()):
+        # Symbolic shapes need special care to get the correct strides
+        return TensorBox(SqueezeView.create(x.data, dim=dim))
 
     dim = (
         V.graph.sizevars.evaluate_static_shape(dim)
@@ -1085,8 +1088,6 @@ def trunc(x):
 
 @register_lowering(aten.expand, type_promotion_kind=None)
 def expand(x, sizes):
-    from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
-
     (x,) = promote_constants([x])
     if isinstance(x, ir.BaseConstant):
         return ExpandView.create(x, tuple(sizes))
@@ -1672,6 +1673,11 @@ def cat(inputs, dim=0):
             is_pointwise_use(use, additional_pointwise_ops)
             for use in V.current_node.users
         )
+        has_symbolic_shape = any(
+            free_unbacked_symbols(inp.get_size()) for inp in inputs
+        )
+        has_view_use = any(is_view(use.target) for use in V.current_node.users)
+
         # fuse in case we will be used in a pointwise node, and there are any inputs we
         # we can prevent materialization of.
         fuse_pointwise_use = (
@@ -1683,7 +1689,10 @@ def cat(inputs, dim=0):
         horizontal_fuse_cat = all(
             should_lower_cat_input(inp) for inp in inputs
         ) and not any(can_fuse_reduction(t) for t in inputs)
-        if fuse_pointwise_use or (horizontal_fuse_cat and not fusable_reduction):
+
+        if (
+            fuse_pointwise_use or (horizontal_fuse_cat and not fusable_reduction)
+        ) and not (has_symbolic_shape and has_view_use):
             return pointwise_cat(inputs, dim)
 
     return TensorBox(ir.ConcatKernel.create(inputs, dim))
