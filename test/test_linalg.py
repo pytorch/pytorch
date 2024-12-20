@@ -4720,92 +4720,80 @@ class TestLinalg(TestCase):
         # Offline tuning with multiple GPUs.
         # Case where you record GEMMs on one GPU, but then tune
         # on multiple GPUs
-        import tempfile
         import os
-
-        tmp_dir = tempfile.mkdtemp()
+        set_tunableop_defaults()
 
         # Use all available GPUs for this test
         total_gpus = torch.cuda.device_count()
 
-        # Test in try-finally block to avoid leaking state
-        # if test is interrupted.
+        ordinal = torch.cuda.current_device()
+        untuned_filename = f"tunableop_untuned{ordinal}.csv"
+
+        #  turn on untuned GEMM recording and turn off tuning
+        torch.cuda.tunable.enable(True)
+        torch.cuda.tunable.tuning_enable(False)
+        torch.cuda.tunable.record_untuned_enable(True)
+
+        # Choose matrix sizes that have not been used before
+        m = n = k = 23
+
+        # Create at least one GEMM per GPU, so when the GEMMs
+        # are distributed to the GPUs there is at least one
+        # GEMM per GPU.
+        for g in range(1, total_gpus + 1):
+            A = torch.rand(m * g, k * g, device=device, dtype=dtype)
+            B = torch.rand(k * g, n * g, device=device, dtype=dtype)
+            C = torch.matmul(A, B)
+
+        # check the untuned file was written and make sure that it is not zero
+        self.assertTrue(os.path.exists(untuned_filename))
+        self.assertGreater(os.path.getsize(untuned_filename), 0)
+
+        # Perform multi-GPU tuning
+        torch.cuda.tunable.mgpu_tune_gemm_in_file(untuned_filename, total_gpus)
+
+        # check the results files where written, one per gpu
+        # get the size of the first result and make sure it
+        # greater than 100. Since the validator text should
+        # be at least that much.
+        # The other results file will have
+        # at least the size of the first results file - 80
+        for i in range(total_gpus):
+            result_filename = f"tunableop_results{i}.csv"
+            self.assertTrue(os.path.exists(result_filename))
+            if i == 0:  # Store for next loop
+                result_size = os.path.getsize(result_filename)
+                self.assertGreater(os.path.getsize(result_filename), 0)
+            self.assertGreater(os.path.getsize(result_filename), result_size - 80)
+
+
+        # Check the full results files was written, one per gpu
+        # check that the size of the full results file for
+        # GPU 0 is greater than that of the individual results
+        # for GPU 0.
+        # Lastly, check that all tunableop_results_full{i} have
+        # the same size as tunableop_results_full0.
+        for i in range(total_gpus):
+            result_full_filename = f"tunableop_results_full{i}.csv"
+            self.assertTrue(os.path.exists(result_full_filename))
+            if i == 0:  # Store for next subsequent iterations
+                result_full_size = os.path.getsize(result_full_filename)
+                self.assertGreater(result_full_size, result_size)
+            self.assertEqual(os.path.getsize(result_full_filename), result_full_size)
+
+        # disables TunableOp
+        torch.cuda.tunable.enable(False)
+
+        # clean up, remove any files that were generated
         try:
-            set_tunableop_defaults()
-
-            # Pointing to temp files. The test cannot remove them on Windows because
-            # they are in use and locked
-            os.putenv("PYTORCH_TUNABLEOP_UNTUNED_FILENAME", os.path.join(tmp_dir, "tunableop_untuned.csv"))
-            os.putenv("PYTORCH_TUNABLEOP_FILENAME", os.path.join(tmp_dir, "tunableop_results.csv"))
-
-            #  turn on untuned GEMM recording and turn off tuning
-            torch.cuda.tunable.enable(True)
-            torch.cuda.tunable.tuning_enable(False)
-            torch.cuda.tunable.record_untuned_enable(True)
-
-            # Choose matrix sizes that have not been used before
-            m = n = k = 23
-
-            # Create at least one GEMM per GPU, so when the GEMMs
-            # are distributed to the GPUs there is at least one
-            # GEMM per GPU.
-            for g in range(1, total_gpus + 1):
-                A = torch.rand(m * g, k * g, device=device, dtype=dtype)
-                B = torch.rand(k * g, n * g, device=device, dtype=dtype)
-                C = torch.matmul(A, B)
-
-            # check the untuned file was written
-            ordinal = torch.cuda.current_device()
-            untuned_filename = os.path.join(tmp_dir, f"tunableop_untuned{ordinal}.csv")
-            self.assertTrue(os.path.exists(untuned_filename))
-
-            # turn off untuned GEMM recording and turn on tuning
-            # We need to set the environment variables here instead of using
-            # the Python API, so that the child processes created will inherit
-            # these operations
-            os.environ["PYTORCH_TUNABLEOP_ENABLED"] = "1"
-            os.environ["PYTORCH_TUNABLEOP_TUNING"] = "1"
-            os.environ["PYTORCH_TUNABLEOP_MAX_TUNING_ITERATIONS"] = "1"
-
-            torch.cuda.tunable.mgpu_tune_gemm_in_file(untuned_filename, total_gpus)
-            assert torch.cuda.tunable.write_file()
-
-            # check the results files where written, one per gpu
+            os.remove(untuned_filename)
             for i in range(total_gpus):
-                result_filename = os.path.join(tmp_dir, f"tunableop_results{i}.csv")
-                self.assertTrue(os.path.exists(result_filename))
-
-            # Check the full results files was written, one per gpu
-            for i in range(total_gpus):
-                result_full_filename = os.path.join(tmp_dir, f"tunableop_results_full{i}.csv")
-                self.assertTrue(os.path.exists(result_full_filename))
-
-        finally:
-            # disables TunableOp
-            torch.cuda.tunable.enable(False)
-
-            # undo all the environment variables set
-            try:
-                del os.environ["PYTORCH_TUNABLEOP_ROTATING_BUFFER_SIZE"]
-                del os.environ["PYTORCH_TUNABLEOP_UNTUNED_FILENAME"]
-                del os.environ["PYTORCH_TUNABLEOP_FILENAME"]
-                del os.environ["PYTORCH_TUNABLEOP_ENABLED"]
-                del os.environ["PYTORCH_TUNABLEOP_TUNING"]
-                del os.environ["PYTORCH_TUNABLEOP_MAX_TUNING_ITERATIONS"]
-            except KeyError:
-                pass
-
-            # # clean up, remove any files that were generated
-            try:
-                untuned_filename = os.path.join(tmp_dir, "tunableop_untuned0.csv")
-                os.remove(untuned_filename)
-                for i in range(total_gpus):
-                    result_filename = os.path.join(tmp_dir, f"tunableop_results{i}.csv")
-                    result_full_filename = os.path.join(tmp_dir, f"tunableop_results_full{i}.csv")
-                    os.remove(result_filename)
-                    os.remove(result_full_filename)
-            except FileNotFoundError:
-                pass
+                result_filename = f"tunableop_results{i}.csv"
+                result_full_filename = f"tunableop_results_full{i}.csv"
+                os.remove(result_filename)
+                os.remove(result_full_filename)
+        except FileNotFoundError:
+            pass
 
     @onlyCUDA
     @dtypes(torch.float)
