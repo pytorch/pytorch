@@ -450,7 +450,7 @@ class TestExecutionTrace(TestCase):
         self.assertTrue(et_path is not None)
         # et_res_path should be an empty directory
         self.assertTrue(os.path.isdir(et_res_path))
-        self.assertEqual(len(os.listdir(et_res_path)), 1)
+        self.assertEqual(len(os.listdir(et_res_path)), 2)
         nodes = self.get_execution_trace_root()
         found_captured_triton_kernel_node = False
         for n in nodes:
