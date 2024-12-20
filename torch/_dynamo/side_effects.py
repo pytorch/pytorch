@@ -38,12 +38,15 @@ def _manual_update_dict(dict_from, dict_to):
         dict_to[k] = v
 
 
-def _manual_update_dict_restricted(dict_from, dict_to, mro_index):
-    # mro_index is used to find the dict or OrderedDict class, so that we call
-    # the lowest level `clear` or `__setitem__` methods.
-    type(dict_to).__mro__[mro_index].clear(dict_to)
+def _manual_dict_setitem(dict_from, dict_to, mro_index):
+    # Carefully calls the dict or OrderedDict `clear` or `__setitem__`. We have
+    # to be careful because we don't want to trigger the user defined object
+    # setitem or clear. The mro_index is used to find the dict/OrderedDict from
+    # the class mro.
+    dict_class = type(dict_to).__mro__[mro_index]
+    dict_class.clear(dict_to)
     for k, v in dict_from.items():
-        type(dict_to).__mro__[mro_index].__setitem__(dict_to, k, v)
+        dict_class.__setitem__(dict_to, k, v)
 
 
 class SideEffects:
@@ -190,9 +193,9 @@ class SideEffects:
 
     @staticmethod
     def cls_supports_mutation_side_effects(cls):
-        return (
-            inspect.getattr_static(cls, "__getattribute__", None)
-            is object.__getattribute__
+        return inspect.getattr_static(cls, "__getattribute__", None) in (
+            object.__getattribute__,
+            dict.__getattribute__,
         )
 
     def is_attribute_mutation(self, item):
@@ -714,9 +717,10 @@ class SideEffects:
 
             elif self.is_attribute_mutation(var):
                 if isinstance(var, variables.UserDefinedDictVariable):
-                    # need to update the dict manually since update method may be invalid
+                    # Do dict related update manually here. The store_attr
+                    # mutations will be applied later.
                     varname_map = {}
-                    for name in _manual_update_dict_restricted.__code__.co_varnames:
+                    for name in _manual_dict_setitem.__code__.co_varnames:
                         varname_map[name] = cg.tx.output.new_var()
 
                     try:
@@ -754,7 +758,7 @@ class SideEffects:
                     )
 
                     dict_update_insts = bytecode_from_template(
-                        _manual_update_dict_restricted, varname_map=varname_map
+                        _manual_dict_setitem, varname_map=varname_map
                     )
 
                     suffixes.append(
