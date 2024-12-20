@@ -22,7 +22,7 @@ import os
 import os.path
 
 import numpy as np
-import torchvision.transforms as transforms
+from torchvision import transforms
 from PIL import Image
 
 import torch

@@ -1,6 +1,6 @@
 import time
 
-import torchvision.models as models
+from torchvision import models
 from opacus import PrivacyEngine
 from opacus.utils.module_modification import convert_batchnorm_modules
 
