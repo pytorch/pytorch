@@ -1125,7 +1125,7 @@ class WhileLoopHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 or not cond_r_meta.shape == torch.Size([])
             ):
                 unimplemented(
-                    f"Expected cond_fn to return a tensor with shape (,) but got {cond_r_meta.shape}"
+                    f"Expected cond_fn to return a scalar tensor or a bool but got {cond_r_meta.shape}"
                 )
         # create body subgraph
         (
