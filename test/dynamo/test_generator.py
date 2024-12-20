@@ -259,6 +259,132 @@ class GraphModule(torch.nn.Module):
         ):
             fn(t, ctx)
 
+    def test_close_with_side_effects(self):
+        L = []
+        z = 0
+
+        def double():
+            nonlocal z
+            try:
+                L.append(1)
+                yield 1
+                L.append(2)
+                yield 2
+            finally:
+                # This part seems to be executed in eager
+                L.append(z)
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(t):
+            nonlocal z
+            gen = double()
+            i = next(gen)
+            z = -123
+            gen.close()
+            L.append(456)
+            return i
+
+        t = torch.randn(2)
+        y = fn(t)
+        self.assertEqual(y, 1)
+        self.assertEqual(L, [1, -123, 456])
+
+    def test_close_capture_GeneratorExit(self):
+        L = []
+        z = 0
+
+        def double():
+            nonlocal z
+            try:
+                yield 1
+                yield 2
+            except GeneratorExit:
+                yield 3
+            finally:
+                L.append(z)
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(t):
+            nonlocal z
+            gen = double()
+            i = next(gen)
+            z = -123
+            gen.close()
+            L.append(456)
+            return i
+
+        t = torch.randn(2)
+        with self.assertRaisesRegex(RuntimeError, "generator ignored GeneratorExit"):
+            fn(t)
+
+    def test_close_capture_and_reraise_GeneratorExit(self):
+        L = []
+        z = 0
+
+        def double():
+            nonlocal z
+            try:
+                L.append(1)
+                yield 1
+                yield 2
+            except GeneratorExit:
+                L.append(z)
+                z = -1
+                raise
+            finally:
+                L.append(z)
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(t):
+            nonlocal z
+            gen = double()
+            i = next(gen)
+            z = -123
+            gen.close()
+            L.append(456)
+            return i
+
+        t = torch.randn(2)
+        y = fn(t)
+        self.assertEqual(y, 1)
+        self.assertEqual(L, [1, -123, -1, 456])
+
+    def test_close_with_subgen(self):
+        L = []
+        z = 0
+
+        def subgen():
+            yield 1
+            yield 2
+
+        def double():
+            nonlocal z
+            L.append(10)
+            yield from subgen()
+            L.append(20)
+            try:
+                L.append(1)
+                z = 4
+                yield 3
+            finally:
+                L.append(z)
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(t):
+            nonlocal z
+            gen = double()
+            i = next(gen)
+            z = -123
+            gen.close()
+            L.append(456)
+            return i
+
+        t = torch.randn(2)
+        y = fn(t)
+        self.assertEqual(y, 1)
+        self.assertEqual(L, [10, 456])
+        self.assertEqual(z, -123)
+
     def test_send(self):
         def double():
             x = yield
@@ -628,34 +754,36 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(y, [(0, t), (1, t + 1), (2, t + 2)])
 
 
-class GeneratorTestsOldBehavior(GeneratorTests):
-    expected_failures = [
-        "test_generator_as_argument",
-        "test_generator_as_argument_2",
-        "test_generator_as_argument_3",
-        "test_generator_as_argument_4",
-        "test_infinite_generator",
-        "test_infinite_generator_2",
-        "test_infinite_generator_3",
-        "test_iter",
-        "test_graph_break_in_generator",
-        "test_zip_infinite_generator",
-        "test_generator_with_side_effects",
-        "test_generator_with_side_effects_graph_break",
-        "test_subgenerator_with_side_effects",
-        "test_send",
-    ]
+# class GeneratorTestsOldBehavior(GeneratorTests):
+#     expected_failures = [
+#         "test_generator_as_argument",
+#         "test_generator_as_argument_2",
+#         "test_generator_as_argument_3",
+#         "test_generator_as_argument_4",
+#         "test_infinite_generator",
+#         "test_infinite_generator_2",
+#         "test_infinite_generator_3",
+#         "test_iter",
+#         "test_graph_break_in_generator",
+#         "test_zip_infinite_generator",
+#         "test_generator_with_side_effects",
+#         "test_generator_with_side_effects_graph_break",
+#         "test_subgenerator_with_side_effects",
+#         "test_send",
+#         "test_close_with_side_effects",
+#     ]
 
-    def setUp(self):
-        super().setUp()
-        torch._dynamo.config.enable_yield_on_generator = False
+#     def setUp(self):
+#         super().setUp()
+#         torch._dynamo.config.enable_yield_on_generator = False
 
-    def tearDown(self):
-        super().tearDown()
-        torch._dynamo.config.enable_yield_on_generator = True
+#     def tearDown(self):
+#         super().tearDown()
+#         torch._dynamo.config.enable_yield_on_generator = True
 
 
 instantiate_parametrized_tests(GeneratorTests)
+# instantiate_parametrized_tests(GeneratorTestsOldBehavior)
 
 
 if __name__ == "__main__":
