@@ -2289,6 +2289,49 @@ class CommonTemplate:
             ),
         )
 
+    @torch._dynamo.config.patch(dynamic_shapes=True)
+    @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
+    def test_issue_143498(self):
+        def fn(arg0_1, arg1_1, arg2_1):
+            index = torch.ops.aten.index.Tensor(arg1_1, [arg2_1])
+            index_1 = torch.ops.aten.index.Tensor(arg0_1, [arg2_1])
+            unsqueeze = torch.ops.aten.unsqueeze.default(index, 1)
+            unsqueeze_1 = torch.ops.aten.unsqueeze.default(index_1, 1)
+            cat = torch.ops.aten.cat.default([unsqueeze, unsqueeze_1], -1)
+            select = torch.ops.aten.select.int(cat, 1, 0)
+            return select
+
+        self.common(
+            fn,
+            (
+                torch.tensor(
+                    [-1, -1, 14, -1, -1, -1, -1, -1, -1, -1, 49, -1],
+                    dtype=torch.int64,
+                ),
+                torch.tensor(
+                    [0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2, 2],
+                    dtype=torch.int64,
+                ),
+                torch.tensor(
+                    [
+                        False,
+                        False,
+                        True,
+                        False,
+                        False,
+                        False,
+                        False,
+                        False,
+                        False,
+                        False,
+                        True,
+                        False,
+                    ],
+                    dtype=torch.bool,
+                ),
+            ),
+        )
+
     def test_sum_int(self):
         def fn(x):
             return 2 * x.sum(-1) + x.sum()

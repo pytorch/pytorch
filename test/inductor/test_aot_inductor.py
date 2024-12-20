@@ -4168,6 +4168,61 @@ class AOTInductorTestsTemplate:
                 dynamic_shapes=dynamic_shapes,
             )
 
+    def test_issue_143498(self):
+        class Model(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+
+            def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1, arg6_1):
+                index = torch.ops.aten.index.Tensor(arg1_1, [arg2_1])
+                index_1 = torch.ops.aten.index.Tensor(arg0_1, [arg2_1])
+                unsqueeze = torch.ops.aten.unsqueeze.default(index, 1)
+                unsqueeze_1 = torch.ops.aten.unsqueeze.default(index_1, 1)
+                cat = torch.ops.aten.cat.default([unsqueeze, unsqueeze_1], -1)
+                select = torch.ops.aten.select.int(cat, 1, 0)
+                return select
+                index_put = torch.ops.aten.index_put.default(
+                    arg5_1, [select, arg6_1], arg4_1
+                )
+                return index_put
+
+        example_inputs = (
+            torch.tensor(
+                [-1, -1, 14, -1, -1, -1, -1, -1, -1, -1, 49, -1],
+                device=self.device,
+                dtype=torch.int64,
+            ),
+            torch.tensor(
+                [0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2, 2],
+                device=self.device,
+                dtype=torch.int64,
+            ),
+            torch.tensor(
+                [
+                    False,
+                    False,
+                    True,
+                    False,
+                    False,
+                    False,
+                    False,
+                    False,
+                    False,
+                    False,
+                    True,
+                    False,
+                ],
+                device=self.device,
+                dtype=torch.bool,
+            ),
+            torch.tensor([2, 10], device=self.device, dtype=torch.int64),
+            torch.tensor([34, 33], device=self.device, dtype=torch.int64),
+            torch.zeros(3, 50, device=self.device, dtype=torch.int64),
+            torch.tensor([14, 49], device=self.device, dtype=torch.int64),
+        )
+        model = Model()
+        self.check_model(model, example_inputs)
+
 
 class AOTInductorLoggingTest(LoggingTestCase):
     @make_logging_test(dynamic=logging.DEBUG)
