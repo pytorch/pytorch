@@ -1132,6 +1132,9 @@ def _compile(
                     dynamo_time_before_restart
                 ),
             }
+            # TODO: replace with CompileEventLogger.compilation_metrics
+            # There are some columns here not in PT2 Compile Events
+            # so we need to slightly change it
             metrics_context.update_outer(metrics)
             # === END WARNING WARNING WARNING ===
 
