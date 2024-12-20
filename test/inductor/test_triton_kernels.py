@@ -3834,15 +3834,9 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
             tl.store(dst + offsets, x, mask=offsets < N)
 
         torch._dynamo.reset()
-        counter = 0
+        counter = torch._dynamo.testing.CompileCounterWithBackend(backend=backend)
 
-        # Track how many compiles occur
-        @torch._dynamo.on_compile_start
-        def start_callback():
-            nonlocal counter
-            counter += 1
-
-        @torch.compile(fullgraph=True, backend=backend)
+        @torch.compile(fullgraph=True, backend=counter)
         def f(dst, src, add_float, N):
             grid = lambda META: (triton.cdiv(N, META["BLOCK_SIZE"]),)
             prune_by_kernel[grid](dst, src, add_float, N=N)
@@ -3854,14 +3848,14 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
         # first compilation, this prunes the configs
         f(dst, src, 1.5, N)
 
-        self.assertEqual(counter, 1)
+        self.assertEqual(counter.op_count, 1)
 
         f(dst, src, 1.5, N)
 
         # this should not trigger a recompilation
         # this is because we modified the test to not touch the records dict
         # as in the other test. If we kept it, it would trigger a recompile here.
-        self.assertEqual(counter, 1)
+        self.assertEqual(counter.op_count, 1)
 
         # Modify the autotuner object
         prune_by_kernel.configs = [triton.Config(kwargs={"BLOCK_SIZE": 64})]
@@ -3870,12 +3864,12 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
         # trigger a recompile
         f(dst, src, 1.5, N)
 
-        self.assertEqual(counter, 2)
+        self.assertEqual(counter.op_count, 2)
 
         # there should be no recompile here
         f(dst, src, 1.5, N)
 
-        self.assertEqual(counter, 2)
+        self.assertEqual(counter.op_count, 2)
 
 
 common_utils.instantiate_parametrized_tests(KernelTests)
