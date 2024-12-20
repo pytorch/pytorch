@@ -146,9 +146,14 @@ def _find_rocm_home() -> Optional[str]:
 def _find_sycl_home() -> Optional[str]:
     sycl_home = None
     icpx_path = shutil.which('icpx')
+    # Guess 1: for source code build developer/user, we'll have icpx in PATH,
+    # which will tell us the SYCL_HOME location.
     if icpx_path is not None:
         sycl_home = os.path.dirname(os.path.dirname(
             os.path.realpath(icpx_path)))
+
+    # Guess 2: for users install Pytorch with XPU support, the sycl runtime is
+    # inside intel-sycl-rt, which is automatically installed via pip dependency.
     else:
         files = importlib.metadata.files('intel-sycl-rt') or []
         for f in files:
@@ -157,7 +162,7 @@ def _find_sycl_home() -> Optional[str]:
                 break
 
     if sycl_home and not torch.xpu.is_available():
-        print(f"No XPU runtime is found, using ONEAPI_ROOT='{sycl_home}'",
+        print(f"No XPU runtime is found, using SYCL_HOME='{sycl_home}'",
               file=sys.stderr)
     return sycl_home
 
