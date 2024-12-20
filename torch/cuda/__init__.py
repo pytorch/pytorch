@@ -650,26 +650,28 @@ def _parse_visible_devices() -> Union[List[int], List[str]]:
         hip_devices = os.getenv("HIP_VISIBLE_DEVICES")
         rocr_devices = os.getenv("ROCR_VISIBLE_DEVICES")
 
+        # You must take care if both HIP and ROCR env vars are set as they have
+        # different meanings. ROCR only accepts a list of ints which then reduces
+        # the number of GPUs that HIP can select from. The HIP env var can accept
+        # either a list of ints or a list of UUIDs prefixed with 'GPU-'.
         if rocr_devices is not None:
-            # Mostly required for ROCm to make sure ROCr visible devices
-            # is respected, this ensures we do not return a list of devices
-            # that exceeds the total available supplied via ROCR_VISIBLE_DEVICES
-            var = rocr_devices
-
-        if hip_devices is not None:
-            # If ROCr devices have been set, the hip visible devices would
-            # be a subset of those. HIP_VISIBLE_DEVICES can only contain
-            # integer indices so we can use the ROCr visible devices as a key
-            if rocr_devices is not None:
-                hip_device_list = [int(dev) for dev in hip_devices.split(",")]
-                rocr_device_list = rocr_devices.split(",")
-                var = ",".join(
-                    rocr_device_list[dev]
-                    for dev in hip_device_list
-                    if dev in rocr_device_list
-                )
-            else:
+            rocr_count = len(rocr_devics.split(","))
+            if hip_devices is not None:
+                if hip_devices.startswith("GPU-"):
+                    raise RuntimeError(
+                        "Cannot specifiy both ROCR_VISIBLE_DEVICES "
+                        "and HIP_VISIBLE_DEVICES using UUIDs"
+                    )
+                if any(int(dev) >= rocr_count for dev in hip_devices.split(",")):
+                    raise RuntimeError(
+                        "HIP_VISIBLE_DEVICES out of bounds index "
+                        "after applying ROCR_VISIBLE_DEVICES"
+                    )
                 var = hip_devices
+            else:
+                return list(range(rocr_count))
+        else:
+            var = hip_devices
 
     if var is None:
         return list(range(64))
