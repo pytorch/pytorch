@@ -9,7 +9,7 @@ import math
 import operator
 import types
 from collections import defaultdict, OrderedDict
-from collections.abc import KeysView
+from collections.abc import KeysView, MutableMapping
 from typing import Dict, List, TYPE_CHECKING
 
 import torch
@@ -54,7 +54,7 @@ from .ctx_manager import EventVariable, StreamVariable
 from .dicts import (
     ConstDictVariable,
     DefaultDictVariable,
-    DictView,
+    DictViewVariable,
     FrozensetVariable,
     is_hashable,
     SetVariable,
@@ -273,7 +273,7 @@ class BuiltinVariable(VariableTracker):
         # combinations. Handlers are attempted in order, and will be used if the type checks
         # match. They are expected to have the signature:
         # fn(tx, arg0: VariableTracker, arg1: VariableTracker) -> VariableTracker
-        from .dicts import DictKeys, SetVariable
+        from .dicts import DictKeysVariable, SetVariable
         from .functions import BaseUserFunctionVariable, UserFunctionVariable
         from .nn_module import NNModuleVariable
         from .tensor import supported_const_comparison_ops
@@ -460,7 +460,7 @@ class BuiltinVariable(VariableTracker):
         op_handlers[operator.mul].extend(list_like_expansion_handlers)
 
         size_or_tuple = (SizeVariable, TupleVariable)
-        has_set_items = (SetVariable, DictKeys)
+        has_set_items = (SetVariable, DictKeysVariable)
 
         def create_cmp_op_handlers(op):
             def compare_by_value(tx: "InstructionTranslator", a, b):
@@ -1375,7 +1375,9 @@ class BuiltinVariable(VariableTracker):
                     arg, user_cls, mutation_type=ValueMutationNew()
                 )
             elif isinstance(arg, variables.ConstDictVariable):
-                return arg.clone(user_cls=user_cls, mutation_type=ValueMutationNew())
+                return arg.clone(
+                    user_cls=user_cls, source=None, mutation_type=ValueMutationNew()
+                )
             elif isinstance(
                 arg,
                 (
@@ -1392,18 +1394,28 @@ class BuiltinVariable(VariableTracker):
                 return ConstDictVariable(
                     items, user_cls, mutation_type=ValueMutationNew()
                 )
-            elif isinstance(arg, variables.MutableMappingVariable):
-                # This is applicable for user defined objects which seem like dict, but are not really dicts. For
-                # example, TensorDict derives from MutableMapping. For such cases, we can directly inline the .items
-                # method and create a new dict.
+            elif hasattr(arg, "value") and isinstance(arg.value, MutableMapping):
+                # This handles all other `MutableMapping` instances; for
+                # example, TensorDict which derives from MutableMapping.
+                #
+                # TODO(#142414) `hasattr(arg, 'value')` is a local workaround
+                # for lack of generall multiple inheritance in Dynamo. We can't
+                # use `isinstance(arg, MutableMappingVariable)` here because
+                # `arg` could be, e.g., a `UnspecializedNNModuleVariable` when
+                # `arg.value` has multiple inheritace.
                 if does_not_override_dict_iter_methods(type(arg.value)):
-                    # These are implemeted in C, so we will have to manually construct the items
-
+                    # In this case, `arg.value.items()` uses the default impls,
+                    # which are implemented in C and cannot be traced, so we
+                    # will have to manually construct the items. This is safe
+                    # because we know they are side-effect free.
+                    #
+                    # Mutation tracked by Dynamo isn't reflected in `arg.value`,
+                    # so we can't handle such cases by just calling
+                    # `arg.value.items()`
                     if tx.output.side_effects.has_pending_mutation(arg):
                         unimplemented(
                             f"{user_cls.__name__}.items(): {args} {kwargs} - object is mutated"
                         )
-
                     new_dict = dict(arg.value.items())
                     return VariableTracker.build(tx, new_dict)
                 else:
@@ -1896,29 +1908,12 @@ class BuiltinVariable(VariableTracker):
         if obj.has_force_unpack_var_sequence(tx) and not isinstance(
             obj, variables.TensorVariable
         ):
-            unpacked = obj.force_unpack_var_sequence(tx)
-            if not all(x.is_python_constant() for x in unpacked):
-                # TODO: support `key(x)` is Python constant and sortable. The `key` function should
-                #       be a pure function and should not have any side effects.
-                return  # try next handler
-            key_fn = kwargs.pop("key", ConstantVariable.create(None))
-            reverse = kwargs.pop(
-                "reverse", ConstantVariable.create(False)
-            ).as_python_constant()
-            assert len(kwargs) == 0
-
-            if key_fn.is_python_constant() and key_fn.as_python_constant() is None:
-
-                def key(x):
-                    return x.as_python_constant()
-
-            else:
-
-                def key(x):
-                    return key_fn.call_function(tx, [x], {}).as_python_constant()
-
-            items = sorted(unpacked, key=key, reverse=reverse)
-            return variables.ListVariable(items)
+            list_var = variables.ListVariable(
+                obj.force_unpack_var_sequence(tx),
+                mutation_type=ValueMutationNew(),
+            )
+            list_var.call_method(tx, "sort", [], kwargs)
+            return list_var
 
     # neg is a constant fold function, so we only get here if constant fold is not valid
     def call_neg(self, tx: "InstructionTranslator", a):
@@ -2065,7 +2060,7 @@ class BuiltinVariable(VariableTracker):
             )
 
         # Unwrap the underlying ConstDictVariable
-        if isinstance(a, DictView):
+        if isinstance(a, DictViewVariable):
             a = a.dv_dict
         if isinstance(a, (ListVariable, ConstDictVariable)):
             return ConstantVariable.create(len(a.items) == 0)
@@ -2082,7 +2077,6 @@ class BuiltinVariable(VariableTracker):
 def dynamo_disable_grad(tx):
     from . import GradModeVariable
 
-    org_value = torch.is_grad_enabled()
     gmv = GradModeVariable.create(tx, False)
     try:
         gmv.enter(tx)
