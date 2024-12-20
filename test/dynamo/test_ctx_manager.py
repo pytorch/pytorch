@@ -1,13 +1,35 @@
 # Owner(s): ["module: dynamo"]
+import contextlib
+import sys
+import traceback
 import unittest
+from contextlib import contextmanager
 
 import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
+from torch._dynamo.exc import InternalTorchDynamoError
 from torch._dynamo.testing import EagerAndRecordGraphs, normalize_gm, same
+from torch._dynamo.utils import counters
 from torch.nn import functional as F
 from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FLASH_ATTENTION
-from torch.testing._internal.common_utils import TEST_WITH_ROCM
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+    TEST_WITH_ROCM,
+)
+
+
+try:
+    from . import test_functions
+except ImportError:
+    import test_functions
+
+
+_variable = 0
+_variable1 = 0
+z_glb = 0
+k_glb = 0
 
 
 class CustomizedCtxManager:
@@ -22,10 +44,29 @@ class CustomizedCtxManager:
         torch._C._set_grad_enabled(self.prev)
 
 
+@contextlib.contextmanager
+def customized_ctx_manager(mode):
+    prev = torch.is_grad_enabled()
+    try:
+        yield torch._C._set_grad_enabled(mode)
+    finally:
+        torch._C._set_grad_enabled(prev)
+
+
 class CustomizedCtxManagerWithGraphBreak(CustomizedCtxManager):
     def __enter__(self):
         torch._dynamo.graph_break()
         super().__enter__()
+
+
+@contextlib.contextmanager
+def customized_ctx_manager_with_graph_break(mode):
+    prev = torch.is_grad_enabled()
+    try:
+        torch._dynamo.graph_break()
+        yield torch._C._set_grad_enabled(mode)
+    finally:
+        torch._C._set_grad_enabled(prev)
 
 
 class CtxManagerTests(torch._dynamo.test_case.TestCase):
@@ -947,17 +988,29 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(res[0].dtype == torch.float16)
         self.assertTrue(res[1].dtype == torch.float16)
 
-    def test_generic_ctx_manager_with_graph_break(self):
+    @parametrize(
+        "Ctx",
+        [CustomizedCtxManagerWithGraphBreak, customized_ctx_manager_with_graph_break],
+        name_fn=lambda x: x.__name__,
+    )
+    def test_generic_ctx_manager_with_graph_break(self, Ctx):
         def fn(x):
-            with CustomizedCtxManagerWithGraphBreak(False):
+            with Ctx(False):
                 # body runs on eager
-                y = x * 2
-                z = y.sin() + 3
+                if torch.is_grad_enabled():
+                    z = x + 1000
+                else:
+                    y = x * 2
+                    z = y.sin() + 3
             return z
 
-        x = torch.randn(2, 3)
-        opt_fn = torch.compile(backend="eager", fullgraph=False)(fn)
-        self.assertEqual(fn(x), opt_fn(x))
+        self.assertTrue(torch.is_grad_enabled())
+        x = torch.randn(2, 3, requires_grad=True)
+        expected = fn(x)
+        got = torch.compile(backend="eager", fullgraph=False)(fn)(x)
+        self.assertEqual(expected, got)
+        self.assertTrue(torch.is_grad_enabled())
+        self.assertFalse(got.requires_grad)  # since it was run under torch.no_grad.
 
     def test_return_context_manager(self):
         @torch.compile(backend="eager", fullgraph=True)
@@ -984,9 +1037,15 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
         cm = f(x)
         self.assertFalse(cm.mode)
 
-    def test_generic_context_manager(self):
+    @torch._dynamo.config.patch(enable_trace_contextlib=True)
+    @parametrize(
+        "Ctx",
+        [CustomizedCtxManager, customized_ctx_manager],
+        name_fn=lambda x: x.__name__,
+    )
+    def test_generic_context_manager(self, Ctx):
         def fn(x):
-            with CustomizedCtxManager(True):
+            with Ctx(True):
                 x = x + 1
                 if torch.is_grad_enabled():
                     x = x * 2
@@ -1011,13 +1070,19 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
             self.assertEqual(cnts.frame_count, 2)
             self.assertEqual(cnts.op_count, 12)
 
-    def test_nested_generic_context_manager(self):
+    @torch._dynamo.config.patch(enable_trace_contextlib=True)
+    @parametrize(
+        "Ctx",
+        [CustomizedCtxManager, customized_ctx_manager],
+        name_fn=lambda x: x.__name__,
+    )
+    def test_nested_generic_context_manager(self, Ctx):
         def fn(x):
-            with CustomizedCtxManager(True):
+            with Ctx(True):
                 x = x + 1
                 if torch.is_grad_enabled():
                     x = x * 2
-                with CustomizedCtxManager(False):
+                with Ctx(False):
                     if torch.is_grad_enabled():
                         x = x - 3
                     x = x * 1.5
@@ -1042,9 +1107,15 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
             self.assertEqual(cnts.frame_count, 2)
             self.assertEqual(cnts.op_count, 18)
 
-    def test_generic_context_manager_with_graph_break(self):
+    @torch._dynamo.config.patch(enable_trace_contextlib=True)
+    @parametrize(
+        "Ctx",
+        [CustomizedCtxManager, customized_ctx_manager],
+        name_fn=lambda x: x.__name__,
+    )
+    def test_generic_context_manager_with_graph_break(self, Ctx):
         def fn(x):
-            with CustomizedCtxManager(True):
+            with Ctx(True):
                 x = x + 1
                 if torch.is_grad_enabled():
                     x = x * 2
@@ -1060,23 +1131,31 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
             ref = fn(x)
             res = opt_fn(x)
             self.assertTrue(same(ref, res))
-            self.assertEqual(cnts.frame_count, 2)
-            self.assertEqual(cnts.op_count, 2)
+            if Ctx is CustomizedCtxManager:
+                self.assertEqual(cnts.frame_count, 2)
+                self.assertEqual(cnts.op_count, 2)
 
         with torch.enable_grad():
             ref = fn(x)
             res = opt_fn(x)
             self.assertTrue(same(ref, res))
-            self.assertEqual(cnts.frame_count, 4)
-            self.assertEqual(cnts.op_count, 4)
+            if Ctx is CustomizedCtxManager:
+                self.assertEqual(cnts.frame_count, 4)
+                self.assertEqual(cnts.op_count, 4)
 
-    def test_nested_generic_context_manager_with_graph_break(self):
+    @torch._dynamo.config.patch(enable_trace_contextlib=True)
+    @parametrize(
+        "Ctx",
+        [CustomizedCtxManager, customized_ctx_manager],
+        name_fn=lambda x: x.__name__,
+    )
+    def test_nested_generic_context_manager_with_graph_break(self, Ctx):
         def fn(x):
-            with CustomizedCtxManager(True):
+            with Ctx(True):
                 x = x + 1
                 if torch.is_grad_enabled():
                     x = x * 2
-                with CustomizedCtxManager(False):
+                with Ctx(False):
                     if torch.is_grad_enabled():
                         x = x - 3
                     torch._dynamo.graph_break()
@@ -1092,8 +1171,9 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
             ref = fn(x)
             res = opt_fn(x)
             self.assertTrue(same(ref, res))
-            self.assertEqual(cnts.frame_count, 4)
-            self.assertEqual(cnts.op_count, 4)
+            if Ctx is CustomizedCtxManager:
+                self.assertEqual(cnts.frame_count, 4)
+                self.assertEqual(cnts.op_count, 4)
 
         torch._dynamo.reset()
         cnts = torch._dynamo.testing.CompileCounter()
@@ -1103,8 +1183,9 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
             ref = fn(x)
             res = opt_fn(x)
             self.assertTrue(same(ref, res))
-            self.assertEqual(cnts.frame_count, 4)
-            self.assertEqual(cnts.op_count, 4)
+            if Ctx is CustomizedCtxManager:
+                self.assertEqual(cnts.frame_count, 4)
+                self.assertEqual(cnts.op_count, 4)
 
     def test_graph_break_inlining_grad(self):
         def gn(z):
@@ -1640,6 +1721,1268 @@ class GraphModule(torch.nn.Module):
 
         opt_f = torch.compile(f, backend="eager")
         opt_f(torch.randn(2, 2))
+
+
+class ContextlibContextManagerTests(torch._dynamo.test_case.TestCase):
+    def setUp(self):
+        torch._dynamo.config.enable_trace_contextlib = True
+
+    def tearDown(self):
+        torch._dynamo.config.enable_trace_contextlib = False
+
+    def test_ctx_basic0(self):
+        @contextlib.contextmanager
+        def set_default_dtype(dtype):
+            old_dtype = torch.get_default_dtype()
+            try:
+                torch.set_default_dtype(dtype)
+                yield
+            finally:
+                torch.set_default_dtype(old_dtype)
+
+        eager = EagerAndRecordGraphs()
+
+        @torch.compile(backend=eager, fullgraph=True)
+        def fn():
+            with set_default_dtype(torch.float64):
+                x = torch.tensor([3.0, 3.0 + 5.0j])
+            return x
+
+        y = fn()
+        self.assertEqual(y.dtype, torch.complex128)
+        graph = eager.graphs[0]
+        actual = normalize_gm(graph.print_readable(False))
+
+        self.assertExpectedInline(
+            actual,
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self):
+        set_default_dtype = torch.set_default_dtype(torch.float64);  set_default_dtype = None
+
+        x: "c128[2]" = torch.tensor([3.0, (3+5j)])
+
+        set_default_dtype_1 = torch.set_default_dtype(torch.float32);  set_default_dtype_1 = None
+        return (x,)
+""",
+        )
+
+    def test_ctx_basic1(self):
+        @contextlib.contextmanager
+        def compute_sin(x):
+            try:
+                yield x.sin()
+            finally:
+                pass
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x):
+            with compute_sin(x) as y:
+                return y.cos()
+
+        x = torch.tensor([1.0])
+        y = fn(x)
+        self.assertEqual(y, x.sin().cos())
+
+    def test_change_parent_nonlocal_0(self):
+        # test if a nonlocal actually gets propagated
+        z = 0
+        k = 0
+
+        def create_ctx():
+            @contextmanager
+            def ctx(x):
+                nonlocal z
+                nonlocal k
+                try:
+                    k = 100
+                    yield x.sin()
+                finally:
+                    pass
+
+            return ctx
+
+        def run_ctx(ctx, x):
+            nonlocal z
+            with ctx(x) as y:
+                z = k
+                return y.cos()
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x):
+            ctx = create_ctx()
+            return run_ctx(ctx, x)
+
+        x = torch.tensor([1.0])
+        y = fn(x)
+        self.assertEqual(y, x.sin().cos())
+        self.assertEqual(z, 100)
+        self.assertEqual(k, 100)
+
+    def test_change_parent_nonlocal_1(self):
+        # test if finally is executed and it is reading the correct variable
+        z = 1
+        k = 2
+
+        def create_ctx():
+            @contextmanager
+            def ctx(x):
+                nonlocal z
+                nonlocal k
+                try:
+                    yield x.sin()
+                finally:
+                    k = z
+
+            return ctx
+
+        def run_ctx(ctx, x):
+            nonlocal z
+            z = 100
+            with ctx(x) as y:
+                return y.cos()
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x):
+            ctx = create_ctx()
+            return run_ctx(ctx, x)
+
+        x = torch.tensor([1.0])
+        y = fn(x)
+        self.assertEqual(y, x.sin().cos())
+        self.assertEqual(z, 100)
+        self.assertEqual(k, 100)
+
+    def test_globals_change_in_other_file(self):
+        @contextmanager
+        def update_global_ctx():
+            global _variable, _variable1
+            try:
+                _variable += 1
+                _variable1 += 1
+                yield
+            finally:
+                pass
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x):
+            with update_global_ctx():
+                pass
+
+            with test_functions.update_global_ctx(x) as a:
+                # Ensure that the updated global values are read
+                test_functions.constant3(2, 3)
+                return x * a * (_variable + _variable1 + test_functions._variable)
+
+        res = fn(torch.ones(10))
+        self.assertEqual(_variable, 1)
+        self.assertEqual(_variable1, 1)
+        # Ensure that the reconstructed bytecode updates the global value in the
+        # other file.
+        self.assertEqual(test_functions._variable, 1)
+        self.assertEqual(res, 3 * torch.ones(10))
+
+    def test_change_parent_global_0(self):
+        # test if a global actually gets propagated
+        global z_glb, k_glb
+        z_glb, k_glb = 0, 0
+
+        def create_ctx():
+            @contextmanager
+            def ctx(x):
+                global k_glb
+                try:
+                    k_glb = 100
+                    yield x.sin()
+                finally:
+                    pass
+
+            return ctx
+
+        def run_ctx(ctx, x):
+            global z_glb
+            with ctx(x) as y:
+                z_glb = k_glb
+                return y.cos()
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x):
+            ctx = create_ctx()
+            return run_ctx(ctx, x)
+
+        x = torch.tensor([1.0])
+        y = fn(x)
+        self.assertEqual(y, x.sin().cos())
+        self.assertEqual(z_glb, 100)
+        self.assertEqual(k_glb, 100)
+
+    def test_change_parent_global_1(self):
+        # test if finally is executed and it is reading the correct variable
+        global z_glb, k_glb
+        z_glb, k_glb = 0, 0
+
+        def create_ctx():
+            @contextmanager
+            def ctx(x):
+                global z_glb, k_glb
+                try:
+                    yield x.sin()
+                finally:
+                    k_glb = z_glb
+
+            return ctx
+
+        def run_ctx(ctx, x):
+            global z_glb
+            z_glb = 100
+            with ctx(x) as y:
+                return y.cos()
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x):
+            ctx = create_ctx()
+            return run_ctx(ctx, x)
+
+        x = torch.tensor([1.0])
+        y = fn(x)
+        self.assertEqual(y, x.sin().cos())
+        self.assertEqual(z_glb, 100)
+        self.assertEqual(k_glb, 100)
+
+    def test_change_parent_0(self):
+        def create_ctx():
+            @contextlib.contextmanager
+            def ctx(x):
+                try:
+                    yield x.sin()
+                finally:
+                    pass
+
+            return ctx
+
+        def run_ctx(ctx, x):
+            with ctx(x) as y:
+                return y.cos()
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x):
+            ctx = create_ctx()
+            return run_ctx(ctx, x)
+
+        x = torch.tensor([1.0])
+        y = fn(x)
+        self.assertEqual(y, x.sin().cos())
+
+    def test_change_parent_1(self):
+        def create_ctx(x):
+            @contextlib.contextmanager
+            def ctx():
+                try:
+                    yield x.sin()
+                finally:
+                    pass
+
+            return ctx
+
+        def run_ctx(ctx):
+            with ctx() as y:
+                return y.cos()
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x):
+            ctx = create_ctx(x)
+            return run_ctx(ctx)
+
+        x = torch.tensor([1.0])
+        y = fn(x)
+        self.assertEqual(y, x.sin().cos())
+
+    def test_graph_break_inside_ctx(self):
+        @contextlib.contextmanager
+        def whoo(x):
+            y = x.tan()
+            try:
+                torch._dynamo.graph_break()
+                yield y
+            finally:
+                pass
+
+        def f(x):
+            y = x.sin()
+            with whoo(x) as z:
+                y += z.neg()
+            y += x.cos()
+            return y
+
+        x = torch.randn(2)
+        expected = f(x)
+        eager = EagerAndRecordGraphs()
+        out = torch.compile(backend=eager, fullgraph=False)(f)(x)
+        self.assertEqual(expected, out)
+        # no graph will be generated as we will skip all frames due to the graph break
+        self.assertEqual(len(eager.graphs), 0)
+
+    def test_graph_break_inside_ctx_with_side_effects(self):
+        L = []
+
+        @contextlib.contextmanager
+        def whoo(x):
+            y = x.tan()
+            try:
+                L.append(x.sin())
+                torch._dynamo.graph_break()
+                yield y
+            finally:
+                L.append(x.cos())
+
+        def f(x):
+            y = x.sin()
+            with whoo(x) as z:
+                y += z.neg()
+            y += x.cos()
+            return y
+
+        x = torch.randn(2)
+        eager = EagerAndRecordGraphs()
+        y = torch.compile(backend=eager, fullgraph=False)(f)(x)
+        self.assertEqual(y, x.sin() + x.tan().neg() + x.cos())
+        self.assertEqual(L, [x.sin(), x.cos()])
+        # no graph will be generated as we will skip all frames due to the graph break
+        self.assertEqual(len(eager.graphs), 0)
+
+    def test_graph_break_inside_ctx_1(self):
+        @contextlib.contextmanager
+        def whoo(x):
+            y = x.tan()
+            try:
+                torch._dynamo.graph_break()
+                yield y
+            finally:
+                pass
+
+        def bar(x):
+            with whoo(x) as z:
+                return z.neg()
+
+        def f(x):
+            return x.sin() + bar(x) + x.cos()
+
+        x = torch.randn(2)
+        expected = f(x)
+        eager = EagerAndRecordGraphs()
+        out = torch.compile(backend=eager, fullgraph=False)(f)(x)
+        self.assertEqual(expected, out)
+        self.assertEqual(len(eager.graphs), 2)
+        self.assertExpectedInline(
+            normalize_gm(eager.graphs[0].print_readable(False)),
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_x_: "f32[2]"):
+        l_x_ = L_x_
+
+        sin: "f32[2]" = l_x_.sin();  l_x_ = None
+        return (sin,)
+""",
+        )
+        self.assertExpectedInline(
+            normalize_gm(eager.graphs[1].print_readable(False)),
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_stack0_: "f32[2]", L_stack1_: "f32[2]", L_x_: "f32[2]"):
+        l_stack0_ = L_stack0_
+        l_stack1_ = L_stack1_
+        l_x_ = L_x_
+
+        add: "f32[2]" = l_stack0_ + l_stack1_;  l_stack0_ = l_stack1_ = None
+        cos: "f32[2]" = l_x_.cos();  l_x_ = None
+        add_1: "f32[2]" = add + cos;  add = cos = None
+        return (add_1,)
+""",
+        )
+
+    def test_graph_break_inside_ctx_2(self):
+        @contextlib.contextmanager
+        def whoo(x):
+            try:
+                torch._dynamo.graph_break()
+                yield x.cos()
+            finally:
+                pass
+
+        def g(x):
+            return x.neg() + x.acos()
+
+        def f(x):
+            y = x.sin()
+            with whoo(x) as z:
+                y += g(z)
+            y += y.tan()
+            return y
+
+        x = torch.randn(2)
+        expected = f(x)
+        eager = EagerAndRecordGraphs()
+        out = torch.compile(backend=eager, fullgraph=False)(f)(x)
+        self.assertEqual(expected, out)
+        self.assertEqual(len(eager.graphs), 1)
+
+    def test_graph_break_before___enter__(self):
+        @contextlib.contextmanager
+        def whoo(x):
+            try:
+                yield x + 1
+            finally:
+                pass
+
+        def fn(x):
+            ctx = whoo(x)
+            torch._dynamo.graph_break()
+            y = ctx.__enter__()
+            ctx.__exit__(None, None, None)
+            return y
+
+        x = torch.tensor([1.0])
+        with self.assertRaises(InternalTorchDynamoError):
+            torch.compile(fn, backend="eager", fullgraph=False)(x)
+
+    def test_graph_break_in_finally(self):
+        z = []
+
+        @contextlib.contextmanager
+        def whoo(x):
+            nonlocal z
+            try:
+                z.append(x)
+                yield x.sin()
+            finally:
+                torch._dynamo.graph_break()
+                z.append(x.cos())
+
+        def fn(x):
+            ctx = whoo(x)
+            y = ctx.__enter__()
+            ctx.__exit__(None, None, None)
+            return y
+
+        x = torch.tensor([1.0])
+        eager = EagerAndRecordGraphs()
+        out = torch.compile(backend=eager, fullgraph=False)(fn)(x)
+        self.assertEqual(out, x.sin())
+        self.assertEqual(z, [x, x.cos()])
+        self.assertEqual(len(eager.graphs), 0)
+
+    def test_graph_break_inside___enter__(self):
+        @contextlib.contextmanager
+        def whoo(x):
+            try:
+                torch._dynamo.graph_break()
+                yield x + 1
+            finally:
+                pass
+
+        def fn(x):
+            ctx = whoo(x)
+            y = ctx.__enter__()
+            ctx.__exit__(None, None, None)
+            return y
+
+        x = torch.tensor([1.0])
+        expected = fn(x)
+
+        eager = EagerAndRecordGraphs()
+        out = torch.compile(backend=eager, fullgraph=False)(fn)(x)
+        self.assertEqual(expected, out)
+        self.assertEqual(len(eager.graphs), 0)
+
+    def test_graph_break_after___enter__(self):
+        @contextlib.contextmanager
+        def whoo(x):
+            try:
+                yield x + 1
+            finally:
+                pass
+
+        def fn(x):
+            ctx = whoo(x)
+            try:
+                y = ctx.__enter__()
+                torch._dynamo.graph_break()
+            finally:
+                ctx.__exit__(None, None, None)
+            return y
+
+        x = torch.tensor([1.0])
+        expected = fn(x)
+
+        eager = EagerAndRecordGraphs()
+        out = torch.compile(backend=eager, fullgraph=False)(fn)(x)
+        self.assertEqual(expected, out)
+        self.assertEqual(len(eager.graphs), 1)
+
+    def test_graph_break_before_and_after___enter__(self):
+        @contextlib.contextmanager
+        def whoo(x):
+            try:
+                yield x + 1
+            finally:
+                pass
+
+        def fn(x):
+            ctx = whoo(x)
+            try:
+                torch._dynamo.graph_break()
+                y = ctx.__enter__()
+                torch._dynamo.graph_break()
+            finally:
+                ctx.__exit__(None, None, None)
+            return y
+
+        x = torch.tensor([1.0])
+        expected = fn(x)
+
+        eager = EagerAndRecordGraphs()
+        out = torch.compile(backend=eager, fullgraph=False)(fn)(x)
+        self.assertEqual(expected, out)
+        self.assertEqual(len(eager.graphs), 1)
+
+    def test_graph_break_before___enter___and_disable___exit__(self):
+        @contextlib.contextmanager
+        def whoo(x):
+            try:
+                yield x + 1
+            finally:
+                pass
+
+        def fn(x):
+            ctx = whoo(x)
+            try:
+                torch._dynamo.graph_break()
+                y = ctx.__enter__()
+            finally:
+
+                @torch._dynamo.disable
+                def g():
+                    ctx.__exit__(None, None, None)
+
+                g()
+            return y
+
+        x = torch.tensor([1.0])
+        expected = fn(x)
+
+        eager = EagerAndRecordGraphs()
+        out = torch.compile(backend=eager, fullgraph=False)(fn)(x)
+        self.assertEqual(expected, out)
+        self.assertEqual(len(eager.graphs), 1)
+
+    def test_disable___enter__(self):
+        def h(x):
+            return x.cos()
+
+        @contextlib.contextmanager
+        def whoo(x):
+            try:
+                yield h(x) + 1
+            finally:
+                pass
+
+        def fn(x):
+            ctx = whoo(x)
+
+            @torch._dynamo.disable
+            def g():
+                return ctx.__enter__()
+
+            y = g()
+            ctx.__exit__(None, None, None)
+            return y
+
+        x = torch.tensor([1.0])
+        with self.assertRaises(InternalTorchDynamoError):
+            torch.compile(fn, backend="eager", fullgraph=False)(x)
+
+    def test_disable___exit__(self):
+        def h(x):
+            return x.cos()
+
+        @contextlib.contextmanager
+        def whoo(x):
+            try:
+                yield h(x) + 1
+            finally:
+                pass
+
+        def fn(x):
+            ctx = whoo(x)
+            y = ctx.__enter__()
+
+            @torch._dynamo.disable
+            def g():
+                ctx.__exit__(None, None, None)
+
+            g()
+
+            return y
+
+        x = torch.tensor([1.0])
+        with self.assertRaises(InternalTorchDynamoError):
+            torch.compile(fn, backend="eager", fullgraph=False)(x)
+
+    def test_contextmanager_as_argument(self):
+        def h(x):
+            return x.cos()
+
+        @contextlib.contextmanager
+        def whoo(x):
+            try:
+                yield h(x) + 1
+            finally:
+                pass
+
+        def fn(x, ctx):
+            y = ctx.__enter__()
+            ctx.__exit__(None, None, None)
+            return x + y
+
+        x = torch.tensor([1.0])
+        expected = fn(x, whoo(x))
+
+        eager = EagerAndRecordGraphs()
+        out = torch.compile(backend=eager, fullgraph=False)(fn)(x, whoo(x))
+        self.assertEqual(expected, out)
+        self.assertEqual(len(eager.graphs), 2)
+
+    def test_return_new_contextmanager(self):
+        L = []
+
+        def h(x):
+            return x.cos()
+
+        @contextlib.contextmanager
+        def whoo(x):
+            try:
+                L.append(x.sin())
+                yield h(x) + 1
+            finally:
+                L.append(x.cos())
+
+        def fn(x):
+            ctx = whoo(x)
+            return x + 1, ctx
+
+        x = torch.tensor([1.0])
+        with self.assertRaises(InternalTorchDynamoError):
+            torch.compile(fn, backend="eager", fullgraph=False)(x)
+
+    def test_return_advanced_contextmanager(self):
+        L = []
+
+        def h(x):
+            return x.cos()
+
+        @contextlib.contextmanager
+        def whoo(x):
+            try:
+                L.append(x.sin())
+                yield h(x) + 1
+            finally:
+                L.append(x.cos())
+
+        def fn(x):
+            ctx = whoo(x)
+            y = ctx.__enter__()
+            return x + y, ctx
+
+        x = torch.tensor([1.0])
+        with self.assertRaises(InternalTorchDynamoError):
+            torch.compile(fn, backend="eager", fullgraph=False)(x)
+
+    def test_contextmanager_as_argument_only___enter__(self):
+        L = []
+
+        def h(x):
+            return x.cos()
+
+        @contextlib.contextmanager
+        def whoo(x):
+            try:
+                L.append(x.sin())
+                yield h(x) + 1
+            finally:
+                L.append(x.cos())
+
+        def fn(x, ctx):
+            y = ctx.__enter__()
+            return x + y
+
+        x = torch.tensor([1.0])
+        ctx = whoo(x)
+        eager = EagerAndRecordGraphs()
+        y = torch.compile(backend=eager, fullgraph=False)(fn)(x, ctx)
+        self.assertEqual(y, x + x.cos() + 1)
+        self.assertEqual(L, [x.sin()])  # we should only have one item in L
+
+        ctx.__exit__(None, None, None)
+        self.assertEqual(L, [x.sin(), x.cos()])  # Two items now
+
+        self.assertEqual(len(eager.graphs), 2)
+
+    def test_contextmanager_as_argument_only___exit__(self):
+        L = []
+
+        def h(x):
+            return x.cos()
+
+        @contextlib.contextmanager
+        def whoo(x):
+            try:
+                L.append(x.sin())
+                yield h(x) + 1
+            finally:
+                L.append(x.cos())
+
+        def fn(x, ctx):
+            ctx.__exit__(None, None, None)
+            return x.sin()
+
+        x = torch.tensor([1.0])
+        ctx = whoo(x)
+        ctx.__enter__()
+        self.assertEqual(L, [x.sin()])
+
+        eager = EagerAndRecordGraphs()
+        y = torch.compile(backend=eager, fullgraph=False)(fn)(x, ctx)
+        self.assertEqual(y, x.sin())
+        self.assertEqual(L, [x.sin(), x.cos()])
+        self.assertEqual(len(eager.graphs), 1)
+
+    def test_advanced_contextmanager_as_argument(self):
+        def h(x):
+            return x.cos()
+
+        @contextlib.contextmanager
+        def whoo(x):
+            try:
+                yield h(x) + 1
+            finally:
+                pass
+
+        def fn(x, ctx):
+            ctx.__exit__(None, None, None)
+            return x + 1
+
+        x = torch.tensor([1.0])
+        ctx = whoo(x)
+        y = ctx.__enter__()
+        self.assertEqual(y, x.cos() + 1)
+        z = torch.compile(backend="eager", fullgraph=False)(fn)(x, ctx)
+        self.assertEqual(z, x + 1)
+
+    def test_advanced_contextmanager_as_argument_error(self):
+        def h(x):
+            return x.cos()
+
+        @contextlib.contextmanager
+        def whoo(x):
+            try:
+                yield h(x) + 1
+            finally:
+                pass
+
+        def fn(x, ctx):
+            y = ctx.__enter__()
+            ctx.__exit__(None, None, None)
+            return y
+
+        x = torch.tensor([1.0])
+        ctx = whoo(x)
+        y = ctx.__enter__()
+        self.assertEqual(y, x.cos() + 1)
+
+        with self.assertRaisesRegex(AttributeError, "args"):
+            torch.compile(backend="eager", fullgraph=False)(fn)(x, ctx)
+
+    def test_disable_ctx_manager(self):
+        @contextlib.contextmanager
+        def whoo(x):
+            try:
+                yield x + 1
+            finally:
+                pass
+
+        @torch._dynamo.disable
+        def g(x):
+            with whoo(x) as y:
+                return y
+
+        def fn(x):
+            return g(x)
+
+        x = torch.tensor([1.0])
+        expected = fn(x)
+
+        eager = EagerAndRecordGraphs()
+        out = torch.compile(backend=eager, fullgraph=False)(fn)(x)
+        self.assertEqual(expected, out)
+        self.assertEqual(len(eager.graphs), 0)
+
+    def test_graph_break_and_disable___enter__(self):
+        @contextlib.contextmanager
+        def whoo(x):
+            try:
+                yield x + 1
+            finally:
+                pass
+
+        def fn(x):
+            ctx = whoo(x)
+            try:
+                torch._dynamo.graph_break()
+
+                @torch._dynamo.disable
+                def g():
+                    return ctx.__enter__()
+
+                y = g()
+            finally:
+                ctx.__exit__(None, None, None)
+            return y
+
+        x = torch.tensor([1.0])
+        expected = fn(x)
+
+        eager = EagerAndRecordGraphs()
+        out = torch.compile(backend=eager, fullgraph=False)(fn)(x)
+        self.assertEqual(expected, out)
+        self.assertEqual(len(eager.graphs), 1)
+
+    def test_dynamo_disable_ctx(self):
+        @contextlib.contextmanager
+        def whoo(x):
+            try:
+                yield x + 1
+            finally:
+                pass
+
+        @torch._dynamo.disable
+        def g(x):
+            with whoo(x) as y:
+                return y
+
+        def fn(x):
+            return g(x)
+
+        x = torch.tensor([1.0])
+        expected = fn(x)
+
+        eager = EagerAndRecordGraphs()
+        out = torch.compile(backend=eager, fullgraph=False)(fn)(x)
+        self.assertEqual(expected, out)
+        self.assertEqual(len(eager.graphs), 0)
+
+    @torch._dynamo.config.patch(enable_trace_contextlib=False)
+    def test_disable_trace_contextmanager(self):
+        @contextlib.contextmanager
+        def whoo(x):
+            try:
+                yield x.cos()
+            finally:
+                pass
+
+        def g(x):
+            return x.neg() + x.acos()
+
+        def f(x):
+            y = x.sin()
+            with whoo(x) as z:
+                y += g(z)
+            y += y.tan()
+            return y
+
+        x = torch.randn(2)
+        expected = f(x)
+        eager = EagerAndRecordGraphs()
+        out = torch.compile(backend=eager, fullgraph=False, dynamic=False)(f)(x)
+        self.assertEqual(expected, out)
+        self.assertEqual(len(eager.graphs), 3)
+
+    @parametrize("name", ("suppress", "stdout", "stderr"))
+    def test_contextlib_suppress(self, name):
+        counters.clear()
+        eager = EagerAndRecordGraphs()
+
+        def fn(t):
+            y = t.sin()
+            # ensure we graph break on the suppress call below
+            if name == "suppress":
+                ctx = contextlib.suppress(ValueError)
+            elif name == "stdout":
+                ctx = contextlib.redirect_stdout(sys.stderr)
+            else:
+                ctx = contextlib.redirect_stderr(sys.stdout)
+
+            with ctx:
+                y += t.cos()
+            return y.tan()
+
+        t = torch.randn(2)
+        expected = fn(t)
+        got = torch.compile(backend=eager, fullgraph=False)(fn)(t)
+        self.assertEqual(expected, got)
+        self.assertEqual(len(counters["graph_break"]), 1)
+        name = f"redirect_{name}" if name in ("stdout", "stderr") else name
+        self.assertRegex(
+            next(iter(counters["graph_break"])),
+            f"<class 'contextlib.{name}'> not supported",
+        )
+
+    def test_contextlib_nullcontext(self):
+        counters.clear()
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(t):
+            with contextlib.nullcontext():
+                return t.sin()
+
+        t = torch.randn(2)
+        y = fn(t)
+        # nullcontext is correctly handled in dynamo
+        self.assertEqual(len(counters["graph_break"]), 0)
+        self.assertEqual(y, t.sin())
+
+
+class CPythonContextManagerTestCase(torch._dynamo.test_case.TestCase):
+    # Tests taken from CPython source code in cpython/Lib/test/test_contextlib.py
+    # https://github.com/python/cpython/blob/d48cc82ed25e26b02eb97c6263d95dcaa1e9111b/Lib/test/test_contextlib.py#L70
+
+    @unittest.expectedFailure
+    def test_contextmanager_plain(self):
+        state = []
+
+        @contextmanager
+        def woohoo():
+            state.append(1)
+            yield 42
+            state.append(999)
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(t):
+            y = t.sum()
+            with woohoo() as x:
+                assert state == [1]
+                assert x == 42
+                self.assertEqual(state, [1])
+                self.assertEqual(x, 42)
+                state.append(x)
+                y += x
+            return y
+
+        t = torch.randn(2, 3)
+        y = fn(t)
+        self.assertEqual(state, [1, 42, 999])
+        self.assertEqual(y, t.sum() + 42)
+
+    @unittest.expectedFailure
+    def test_contextmanager_finally(self):
+        state = []
+
+        @contextmanager
+        def woohoo():
+            state.append(1)
+            try:
+                yield 42
+            finally:
+                state.append(999)
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(t):
+            y = t.sum()
+            with self.assertRaises(ZeroDivisionError):
+                with woohoo() as x:
+                    self.assertEqual(state, [1])
+                    self.assertEqual(x, 42)
+                    state.append(x)
+                    raise ZeroDivisionError
+
+        fn(torch.randn(2, 3))
+        self.assertEqual(state, [1, 42, 999])
+
+    @unittest.expectedFailure
+    def test_contextmanager_traceback(self):
+        @contextmanager
+        def f():
+            yield
+
+        frames = []
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(t):
+            nonlocal frames
+            y = t.sum()
+            try:
+                with f():
+                    1 / 0
+            except ZeroDivisionError as e:
+                frames = traceback.extract_tb(e.__traceback__)
+
+        fn(torch.randn(2, 3))
+        self.assertEqual(len(frames), 1)
+        self.assertEqual(frames[0].name, "test_contextmanager_traceback")
+        self.assertEqual(frames[0].line, "1 / 0")
+
+    @unittest.expectedFailure
+    def test_contextmanager_traceback2(self):
+        @contextmanager
+        def f():
+            yield
+
+        # Repeat with RuntimeError (which goes through a different code path)
+        class RuntimeErrorSubclass(RuntimeError):
+            pass
+
+        frames = []
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(t):
+            nonlocal frames
+            y = t.sum()
+            try:
+                with f():
+                    raise RuntimeErrorSubclass(42)
+            except RuntimeErrorSubclass as e:
+                frames = traceback.extract_tb(e.__traceback__)
+
+        fn(torch.randn(2, 3))
+        self.assertEqual(len(frames), 1)
+        self.assertEqual(frames[0].name, "test_contextmanager_traceback")
+        self.assertEqual(frames[0].line, "raise RuntimeErrorSubclass(42)")
+
+    @unittest.expectedFailure
+    def test_contextmanager_traceback3(self):
+        @contextmanager
+        def f():
+            yield
+
+        frames = []
+
+        class StopIterationSubclass(StopIteration):
+            pass
+
+        for stop_exc in (
+            StopIteration("spam"),
+            StopIterationSubclass("spam"),
+        ):
+            with self.subTest(type=type(stop_exc)):
+
+                @torch.compile(backend="eager", fullgraph=True)
+                def fn(t):
+                    nonlocal frames
+                    y = t.sum()
+                    try:
+                        with f():
+                            raise stop_exc
+                    except type(stop_exc) as e:
+                        self.assertIs(e, stop_exc)
+                        frames = traceback.extract_tb(e.__traceback__)
+                    else:
+                        self.fail(f"{stop_exc} was suppressed")
+
+                fn(torch.randn(2, 3))
+                self.assertEqual(len(frames), 1)
+                self.assertEqual(frames[0].name, "test_contextmanager_traceback")
+                self.assertEqual(frames[0].line, "raise stop_exc")
+
+    @unittest.expectedFailure
+    def test_contextmanager_no_reraise(self):
+        @contextmanager
+        def whee():
+            yield
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(t):
+            ctx = whee()
+            ctx.__enter__()
+            # Calling __exit__ should not result in an exception
+            self.assertFalse(ctx.__exit__(TypeError, TypeError("foo"), None))
+            return t.sum()
+
+        fn(torch.randn(2, 3))
+
+    @unittest.expectedFailure
+    def test_contextmanager_trap_yield_after_throw(self):
+        @contextmanager
+        def whoo():
+            try:
+                yield
+            except Exception:
+                yield
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(t):
+            ctx = whoo()
+            ctx.__enter__()
+            with self.assertRaises(RuntimeError):
+                ctx.__exit__(TypeError, TypeError("foo"), None)
+            return t.sum()
+
+        fn(torch.randn(2, 3))
+
+    @unittest.expectedFailure
+    def test_contextmanager_trap_no_yield(self):
+        @contextmanager
+        def whoo():
+            if False:
+                yield
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(t):
+            ctx = whoo()
+            with self.assertRaises(RuntimeError):
+                ctx.__enter__()
+            return t.sum()
+
+        fn(torch.randn(2, 3))
+
+    @unittest.expectedFailure
+    def test_contextmanager_trap_second_yield(self):
+        @contextmanager
+        def whoo():
+            yield
+            yield
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def f(t):
+            ctx = whoo()
+            ctx.__enter__()
+            with self.assertRaises(RuntimeError):
+                ctx.__exit__(None, None, None)
+
+        f(torch.randn(2))
+
+    @unittest.expectedFailure
+    def test_contextmanager_except(self):
+        state = []
+
+        @contextmanager
+        def woohoo():
+            state.append(1)
+            try:
+                yield 42
+            except ZeroDivisionError as e:
+                state.append(e.args[0])
+                self.assertEqual(state, [1, 42, 999])
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(t):
+            with woohoo() as x:
+                self.assertEqual(state, [1])
+                self.assertEqual(x, 42)
+                state.append(x)
+                raise ZeroDivisionError(999)
+
+        fn(torch.randn(2, 3))
+        self.assertEqual(state, [1, 42, 999])
+
+    @unittest.expectedFailure
+    def test_contextmanager_do_not_unchain_non_stopiteration_exceptions(self):
+        @contextmanager
+        def test_issue29692():
+            try:
+                yield
+            except Exception as exc:
+                raise RuntimeError("issue29692:Chained") from exc
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def f(t):
+            try:
+                with test_issue29692():
+                    raise ZeroDivisionError
+            except Exception as ex:
+                self.assertIs(type(ex), RuntimeError)
+                self.assertEqual(ex.args[0], "issue29692:Chained")
+                self.assertIsInstance(ex.__cause__, ZeroDivisionError)
+
+            try:
+                with test_issue29692():
+                    raise StopIteration("issue29692:Unchained")
+            except Exception as ex:
+                self.assertIs(type(ex), StopIteration)
+                self.assertEqual(ex.args[0], "issue29692:Unchained")
+                self.assertIsNone(ex.__cause__)
+
+        f(torch.randn(2))
+
+    @unittest.expectedFailure
+    def test_contextmanager_wrap_runtimeerror(self):
+        @contextmanager
+        def woohoo():
+            try:
+                yield
+            except Exception as exc:
+                raise RuntimeError(f"caught {exc}") from exc
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(t):
+            with self.assertRaises(RuntimeError):
+                with woohoo():
+                    1 / 0
+
+        fn(torch.randn(2, 3))
+
+        # If the context manager wrapped StopIteration in a RuntimeError,
+        # we also unwrap it, because we can't tell whether the wrapping was
+        # done by the generator machinery or by the generator itself.
+        with self.assertRaises(StopIteration):
+            with woohoo():
+                raise StopIteration
+
+    @unittest.expectedFailure
+    def test_keywords(self):
+        # Ensure no keyword arguments are inhibited
+        @contextmanager
+        def woohoo(self, func, args, kwds):
+            yield (self, func, args, kwds)
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(t):
+            with woohoo(self=11, func=22, args=33, kwds=44) as target:
+                self.assertEqual(target, (11, 22, 33, 44))
+
+        fn(torch.randn(2, 3))
+
+    @unittest.expectedFailure
+    def test_recursive(self):
+        depth = 0
+        ncols = 0
+
+        @contextmanager
+        def woohoo():
+            nonlocal ncols
+            ncols += 1
+            nonlocal depth
+            before = depth
+            depth += 1
+            yield
+            depth -= 1
+            self.assertEqual(depth, before)
+
+        @woohoo()
+        def recursive():
+            if depth < 10:
+                recursive()
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(t):
+            recursive()
+
+        fn(torch.randn(2, 3))
+
+        self.assertEqual(ncols, 10)
+        self.assertEqual(depth, 0)
+
+
+instantiate_parametrized_tests(CtxManagerTests)
+instantiate_parametrized_tests(ContextlibContextManagerTests)
 
 
 if __name__ == "__main__":
