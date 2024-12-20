@@ -209,7 +209,7 @@ def debug_insert_nops(
 
     return GuardedCode(
         code,
-        CheckFunctionManager(graph).guard_manager,  # type: ignore[arg-type]
+        CheckFunctionManager(frame.f_code, graph).guard_manager,  # type: ignore[arg-type]
         CompileId(frame_id=0, frame_compile_id=0),
     )
 
