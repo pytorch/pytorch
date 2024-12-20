@@ -864,6 +864,16 @@ def jagged_scaled_dot_product_attention(
         #    output_nt_info,
         #) = _sdpa_nested_preprocessing(query, key, value)
         print("before not implemented???")
+        (
+            query_reshaped,
+            key_reshaped,
+            value_reshaped,
+            cumulative_sequence_length_q,
+            cumulative_sequence_length_kv,
+            max_seqlen_batch_q,
+            max_seqlen_batch_kv,
+            output_nt_info,
+        ) = _sdpa_nested_preprocessing(query, key, value)
         print("CALLING CUDNN")
         (
             attention,
@@ -875,23 +885,20 @@ def jagged_scaled_dot_product_attention(
             seed,
             offset,
             _
-        ) = torch.ops.aten._scaled_dot_product_cudnn_attention(
-            query,
-            key,
-            value,
+        ) = torch.ops.aten._cudnn_attention_forward(
+            query_reshaped,
+            key_reshaped,
+            value_reshaped,
             attn_mask,
+            cumulative_sequence_length_q,
+            cumulative_sequence_length_kv,
+            max_seqlen_batch_q,
+            max_seqlen_batch_kv,
             compute_logsumexp,
             dropout_p,
             is_causal,
             False,
             scale=scale)
-        q_t = query.transpose(1, 2)
-        output_nt_info = {
-            "offsets": q_t.offsets(),
-            "lengths": q_t.lengths(),
-            "max_seqlen": q_t._get_max_seqlen(),
-            "min_seqlen": q_t._get_min_seqlen(),
-        }
         return nested_view_from_values_offsets_lengths(
             attention
             **output_nt_info,

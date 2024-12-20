@@ -6662,6 +6662,9 @@ torch.cuda.synchronize()
                     q_nt_t, k_nt_t, v_nt_t
                 ).transpose(1, 2)
             else:
+                q_nt.requires_grad = False
+                k_nt.requires_grad = False
+                v_nt.requires_grad = False
                 with torch.no_grad():
                     attn_nt = torch.nn.functional.scaled_dot_product_attention(
                         q_nt_t, k_nt_t, v_nt_t

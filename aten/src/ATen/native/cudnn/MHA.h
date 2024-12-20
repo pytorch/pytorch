@@ -38,7 +38,6 @@ void run_cudnn_SDP_fprop_nestedtensor(
     double dropout_probability,
     const Tensor& cum_seqlen_q,
     const Tensor& cum_seqlen_kv,
-    const Tensor& output_shape,
     const Tensor& q,
     const Tensor& k,
     const Tensor& v,
