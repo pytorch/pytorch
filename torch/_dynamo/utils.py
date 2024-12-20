@@ -891,7 +891,7 @@ class CompilationMetrics:
     inductor_cumulative_compile_time_us: Optional[int] = None
     inductor_code_gen_cumulative_compile_time_us: Optional[int] = None
     triton_compile_time_us: Optional[int] = None
-    runtime_cudagraphify_time_us: Optional[int] = None  # TODO: instrument
+    runtime_cudagraphify_time_us: Optional[int] = None
     runtime_triton_autotune_time_us: Optional[int] = None
     dynamo_compile_time_before_restart_us: Optional[int] = None
     cuda_synchronize_time_us: Optional[int] = None  # TODO: instrument

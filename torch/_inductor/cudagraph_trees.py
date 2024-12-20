@@ -100,6 +100,7 @@ from torch.utils.weak import TensorWeakRef
 
 
 if TYPE_CHECKING:
+    from torch._guards import CompileId
     from torch._inductor.utils import InputType
     from torch.types import _bool
 
@@ -404,6 +405,31 @@ def cudagraphify_impl(
     return deferred_cudagraphify
 
 
+@contextlib.contextmanager
+def dynamo_timed_cudagraph(
+    name: str,
+    compile_id: Optional[CompileId],
+    mode: Optional[CompilationMode],
+    dynamo_compile: bool = False,
+) -> Generator[Any, None, None]:
+    """
+    Makes usages of dynamo_timed in this file less verbose. Pay careful attention
+    to the 'dynamo_compile' param; if True, then we add the timing to the overall
+    cudagraphify overhead logged to dynamo_compile. We only want to count those
+    regions that are purely cudagraph overhead.
+    """
+    with dynamo_timed(
+        name,
+        log_pt2_compile_event=True,
+        compile_id=compile_id,
+        is_forward=mode != CompilationMode.BACKWARD,
+        dynamo_compile_runtime_column_us="runtime_cudagraphify_time_us"
+        if dynamo_compile
+        else None,
+    ):
+        yield
+
+
 def cudagraphify(
     model: ModelType,
     inputs: List[InputType],
@@ -416,8 +442,8 @@ def cudagraphify(
     constants: Tuple[torch.Tensor, ...] = (),
     placeholders: Tuple[PlaceholderInfo, ...] = (),
     mutated_input_idxs: Tuple[int, ...] = (),
+    compile_id: Optional[CompileId] = None,
 ) -> Tuple[ModelType, OutputType]:
-    manager = get_container(device_index).get_tree_manager()
     assert not (is_backward and is_inference)
     mode = (
         CompilationMode.BACKWARD
@@ -425,16 +451,23 @@ def cudagraphify(
         else (CompilationMode.INFERENCE if is_inference else CompilationMode.FORWARD)
     )
 
-    return manager.add_function(
-        model,
-        inputs,
-        static_input_idxs,
-        stack_traces,
-        mode,
-        constants,
-        placeholders,
-        mutated_input_idxs,
-    )
+    with dynamo_timed_cudagraph(
+        "cudagraphify.get_container", compile_id, mode, dynamo_compile=True
+    ):
+        manager = get_container(device_index).get_tree_manager()
+
+    with dynamo_timed_cudagraph("CUDAGraphTreeManager.add_function", compile_id, mode):
+        return manager.add_function(
+            model,
+            inputs,
+            static_input_idxs,
+            stack_traces,
+            mode,
+            constants,
+            placeholders,
+            mutated_input_idxs,
+            compile_id,
+        )
 
 
 class StorageWeakRefWrapper:
@@ -778,6 +811,8 @@ class CUDAGraphNode:
         device_index: int,
         stack_traces: Optional[StackTraces],
         stream: torch.cuda.Stream,
+        mode: Optional[CompilationMode],
+        compile_id: Optional[CompileId],
     ) -> None:
         assert isinstance(inputs, (list, tuple))
 
@@ -981,9 +1016,12 @@ class CUDAGraphNode:
         self.static_output_tensors: OutputList[Optional[Tensor]] = []
 
         # Cleared after recording
-        self.recording_outputs: Optional[OutputType] = self._record(
-            wrapped_function.model, recording_inputs
-        )
+        with dynamo_timed_cudagraph(
+            "CUDAGraphNode.record", compile_id, mode, dynamo_compile=True
+        ):
+            self.recording_outputs: Optional[OutputType] = self._record(
+                wrapped_function.model, recording_inputs
+            )
         self.outputs_metadata: OutputList[Union[Dict[str, Any], int, None]] = []
 
         # As with inputs, we do not want to keep the outputs permanently alive because that would prevent
@@ -999,7 +1037,8 @@ class CUDAGraphNode:
                 assert isinstance(out, (int, type(None))), type(out)
                 self.outputs_metadata.append(out)
 
-        self.graph.replay()
+        with dynamo_timed_cudagraph("CUDAGraphNode.replay", compile_id, mode):
+            self.graph.replay()
 
     def _copy_inputs_and_remove_from_src(
         self, dsts: List[InputType], srcs: List[InputType]
@@ -1918,6 +1957,7 @@ class CUDAGraphTreeManager:
         self.debug_checkpointing_counter = 0
 
         self.id_to_mode: Dict[FunctionID, CompilationMode] = {}
+        self.id_to_compile_id: Dict[FunctionID, Optional[CompileId]] = {}
 
         # Note: [Backward Generation Handling]
         # We generally perform a sequence of forward executions followed by backward executions.
@@ -1947,6 +1987,7 @@ class CUDAGraphTreeManager:
     def run(self, new_inputs: List[InputType], function_id: FunctionID) -> OutputType:
         assert self.graph is not None, "Running CUDAGraph after shutdown"
         self.mode = self.id_to_mode[function_id]
+        self.compile_id = self.id_to_compile_id[function_id]
         out = self._run(new_inputs, function_id)
 
         # The forwards are only pending following invocation, not before
@@ -2051,9 +2092,8 @@ class CUDAGraphTreeManager:
             if self.path_state == ExecutionState.EXECUTION:
                 self.apply_checkpoint_execution_state_in_allocator()
 
-            with dynamo_timed(
-                "CUDAGraphTreeManager.run_eager",
-                log_pt2_compile_event=True,
+            with dynamo_timed_cudagraph(
+                "CUDAGraphTreeManager.run_eager", self.compile_id, self.mode
             ):
                 out = self.run_eager(new_inputs, function_id)
 
@@ -2123,9 +2163,8 @@ class CUDAGraphTreeManager:
                 self.apply_checkpoint_execution_state_in_allocator()
 
         # now, we are in a recording state !
-        with dynamo_timed(
-            "CUDAGraphTreeManager.record_function",
-            log_pt2_compile_event=True,
+        with dynamo_timed_cudagraph(
+            "CUDAGraphTreeManager.record_function", self.compile_id, self.mode
         ):
             out = self.record_function(new_inputs, function_id)
 
@@ -2172,6 +2211,8 @@ class CUDAGraphTreeManager:
             self.device_index,
             self.ids_to_stack_traces[function_id],
             self.stream,
+            self.mode,
+            self.compile_id,
         )
         if self.current_node is None:
             self.roots[function_id].append(node)
@@ -2237,6 +2278,7 @@ class CUDAGraphTreeManager:
         constants: Tuple[torch.Tensor, ...],
         placeholders: Tuple[PlaceholderInfo, ...],
         mutated_input_idxs: Tuple[int, ...],
+        compile_id: Optional[CompileId],
     ) -> Tuple[ModelType, OutputType,]:
         id = self.new_func_id()
         self.ids_to_stack_traces[id] = stack_traces
@@ -2249,6 +2291,7 @@ class CUDAGraphTreeManager:
             mutated_input_idxs,
         )
         self.id_to_mode[id] = mode
+        self.id_to_compile_id[id] = compile_id
         fn = functools.partial(self.run, function_id=id)
 
         # container needs to set clean up when fn dies
