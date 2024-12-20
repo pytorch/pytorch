@@ -917,11 +917,17 @@ class _InProcessFxCompile(FxCompile):
                         colored=True,
                     ),
                 )
+                provenance_tracking_json = torch.fx.traceback.get_graph_provenance_json(
+                    gm.graph
+                )
+                post_grad_graphs_log.debug("%s", provenance_tracking_json)
                 trace_structured(
                     "inductor_post_grad_graph",
                     payload_fn=lambda: gm.print_readable(
                         print_output=False, include_stride=True, include_device=True
-                    ),
+                    )
+                    + "# "
+                    + provenance_tracking_json,
                 )
                 if config.is_fbcode():
                     log_optimus_to_scuba(
@@ -1625,7 +1631,7 @@ def compile_fx(
 
     with _use_lazy_graph_module(
         dynamo_config.use_lazy_graph_module
-    ), enable_python_dispatcher():
+    ), enable_python_dispatcher(), torch.fx.traceback.preserve_node_meta():
         # Pre-grad passes cannot be run if we weren't given a GraphModule.
         # Dynamo will always produce a GraphModule, but this handles cases
         # where a user directly passes a plain Module with the intention of

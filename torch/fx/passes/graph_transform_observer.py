@@ -1,10 +1,11 @@
 # mypy: allow-untyped-defs
 import os
-from typing import Callable, Optional, TypeVar
+from typing import Callable, Dict, List, Optional, Set, TypeVar
 
-from torch.fx import Graph
+from torch.fx import Graph, Node
 from torch.fx._compatibility import compatibility
 from torch.fx.graph_module import GraphModule
+from torch.fx.traceback import NodeSource, NodeSourceAction
 
 
 T = TypeVar("T")
@@ -34,6 +35,17 @@ class GraphTransformObserver:
         self.gm = gm
         self.passname = passname
         self.subsystem = subsystem
+
+        self.erased_nodes: Set[str] = set()
+        self.created_nodes: Set[str] = set()
+        self.name_to_node: Dict[str, Node] = {}
+        # record graph modules deepcopied from self.gm, so we can remove hoooks on them when exiting the context
+        self.copied_gms: List[GraphModule] = []
+
+        self._node_creation_hook = self.get_node_creation_hook()
+        self._node_erase_hook = self.get_node_erase_hook()
+        self._node_replace_hook = self.get_node_replace_hook()
+        self._deepcopy_hook = self.get_deepcopy_hook()
 
         # If log_url is None, we don't log anything
         if log_url is None:
@@ -83,22 +95,30 @@ class GraphTransformObserver:
         )
 
     def __enter__(self):
-        if self.log_url is None or self.gm is None:
-            return self
+        self.gm._register_create_node_hook(self._node_creation_hook)
+        self.gm._register_erase_node_hook(self._node_erase_hook)
+        self.gm._register_replace_node_hook(self._node_replace_hook)
+        self.gm._register_deepcopy_hook(self._deepcopy_hook)
 
-        self.erased_nodes = set()
-        self.created_nodes = set()
-        self.gm._register_create_node_hook(self.on_node_creation)
-        self.gm._register_erase_node_hook(self.on_node_erase)
+        self.erased_nodes.clear()
+        self.created_nodes.clear()
+        self.name_to_node.clear()
+        self.copied_gms.clear()
+
+        for node in self.gm.graph.nodes:
+            self.name_to_node[node.name] = node
 
         return self
 
     def __exit__(self, type, value, tb):
+        for gm in self.copied_gms + [self.gm]:
+            gm._unregister_create_node_hook(self._node_creation_hook)
+            gm._unregister_erase_node_hook(self._node_erase_hook)
+            gm._unregister_replace_node_hook(self._node_replace_hook)
+            gm._unregister_deepcopy_hook(self._deepcopy_hook)
+
         if self.log_url is None or self.gm is None:
             return
-
-        self.gm._unregister_create_node_hook(self.on_node_creation)
-        self.gm._unregister_erase_node_hook(self.on_node_erase)
 
         if len(self.created_nodes) > 0 or len(self.erased_nodes) > 0:
             for e in self.input_dot_graph.get_node_list():
@@ -131,8 +151,61 @@ class GraphTransformObserver:
                 )
             )
 
-    def on_node_creation(self, node):
-        self.created_nodes.add(node.name)
+    def get_node_creation_hook(self):
+        # We have to return a function instead of using a class method directly
+        # to avoid max recursion issue when deepcopy a graph module within the context manager.
+        def on_node_creation(node):
+            self.created_nodes.add(node.name)
+            self.name_to_node[node.name] = node
+            source = NodeSource(None, self.passname, NodeSourceAction.CREATE)
+            if "from_node" not in node.meta:
+                node.meta["from_node"] = [source]
+            else:
+                node.meta["from_node"].append(source)
 
-    def on_node_erase(self, node):
-        self.erased_nodes.add(node.name)
+        return on_node_creation
+
+    def get_node_erase_hook(self):
+        def on_node_erase(node):
+            self.erased_nodes.add(node.name)
+            self.name_to_node.pop(node.name, None)
+
+        return on_node_erase
+
+    def get_node_replace_hook(self):
+        def on_node_replace(old: Node, new: str, user: Node):
+            # Update node meta when replacing old node with new node
+            new_node = self.name_to_node.get(new, None)
+
+            if not new_node:
+                return
+
+            assert isinstance(new_node, Node)
+
+            action = [NodeSourceAction.REPLACE]
+            if new_node.name in self.created_nodes:
+                action.append(NodeSourceAction.CREATE)
+
+            def created_this_pass(source):
+                return source.pass_name == self.passname and source.action == [
+                    NodeSourceAction.CREATE
+                ]
+
+            # remove redundant source added on node creation
+            new_from_node = new_node.meta.get("from_node", [])
+            new_from_node = [
+                source for source in new_from_node if not created_this_pass(source)
+            ]
+
+            # add new source
+            new_node_source = NodeSource(old, self.passname, action)
+            new_from_node.append(new_node_source)
+            new_node.meta["from_node"] = new_from_node
+
+        return on_node_replace
+
+    def get_deepcopy_hook(self):
+        def on_deepcopy(gm):
+            self.copied_gms.append(gm)
+
+        return on_deepcopy
