@@ -3,6 +3,7 @@ import contextlib
 import functools
 import itertools
 import operator
+import time
 from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING, Union
 
 import torch
@@ -12,7 +13,12 @@ from torch._dynamo.external_utils import (
     FakeCompiledAutogradEngine,
 )
 from torch._dynamo.source import GetItemSource, LocalSource
-from torch._dynamo.utils import counters, lazy_format_graph_code, set_locals_to_steal
+from torch._dynamo.utils import (
+    counters,
+    get_chromium_event_logger,
+    lazy_format_graph_code,
+    set_locals_to_steal,
+)
 from torch._guards import compile_context, CompileContext, CompileId
 from torch._logging import getArtifactLogger, trace_structured
 from torch._prims_common import clone_preserve_strides
@@ -117,6 +123,14 @@ class AutogradCompilerInstance:
         self.id = next(COMPILE_COUNTER)
         self.compile_context = make_compile_context(self.id)
         self.compile_context.__enter__()
+        self.start_time_ns = time.time_ns()
+        get_chromium_event_logger().log_event_start(
+            "compiled_autograd",
+            self.start_time_ns,
+            {"graph_id": self.id},
+            log_pt2_compile_event=True,
+        )
+
         self.aot_graph_cls_name: Optional[str] = None
         self.aot_graph_infos: Dict[int, Dict[str, Any]] = {}
         self.fx_tracer.root = torch.nn.Module()
@@ -421,6 +435,13 @@ class AutogradCompilerInstance:
             finally:
                 in_compiled_autograd_region = False
 
+        get_chromium_event_logger().log_event_end(
+            "compiled_autograd",
+            time.time_ns(),
+            {"graph_id": self.id},
+            self.start_time_ns,
+            log_pt2_compile_event=True,
+        )
         self.compile_context.__exit__(None, None, None)
         return runtime_wrapper, self.compiler_fn(graph)
 
