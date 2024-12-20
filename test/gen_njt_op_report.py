@@ -92,6 +92,12 @@ class TestResultInfo:
             / float(num_samples)
         )
 
+    def get_sample_infos(self, contiguous=None):
+        if contiguous is None:
+            return self.sample_infos
+        else:
+            return [si for si in self.sample_infos if si.contiguous == contiguous]
+
 
 # Status around op support for NJT OpInfo tests.
 # We're only able to get info for those ops that have an NJT-compatible OpInfo entry.
@@ -218,6 +224,10 @@ table tr:last-child td:first-child {
 table tr:last-child td:last-child {
   border-radius: 0 0 10px 0;
 }
+.nowrapdiv {
+  white-space: nowrap;
+  overflow: hidden;
+}
 </style>
 </head>
 <body>
@@ -276,20 +286,29 @@ def write_table_row(f, op, result):
     for contiguous in [True, False]:
         for test_set in TEST_SETS:
             success_rate = None
+            detailed_skip_xfail_text = ""
             if result.status == OpInfoStatus.VALID_OPINFO:
                 set_result = result.test_results[test_set.name]
                 success_rate = set_result.success_rate(contiguous)
                 if success_rate is None:
                     success_rate_text = "N/A"
                 elif success_rate == 1.0:
-                    success_rate_text = f"{success_rate:.2f}"
+                    success_rate_text = ""
                 else:
-                    success_rate_text = f"{success_rate:.2f}"
-                    success_rate_text += (
-                        f" (xfails: {set_result.num_xfails(contiguous)}, "
-                        f"skips: {set_result.num_skips(contiguous)}, "
-                        f"samples: {set_result.num_samples(contiguous)})"
+                    success_rate_text = (
+                        f"{set_result.num_xfails(contiguous)} xfails, "
+                        f"{set_result.num_skips(contiguous)} skips, "
+                        f"{set_result.num_samples(contiguous)} total samples"
                     )
+                # generate text with expanded xfail / skip details
+                for idx, sample_info in enumerate(
+                    set_result.get_sample_infos(contiguous)
+                ):
+                    if sample_info.matched_rule is not None:
+                        detailed_skip_xfail_text += (
+                            f'<div class="nowrapdiv">[{idx}] {sample_info.matched_rule.type} '
+                            f"{sample_info.matched_rule.name}</div>"
+                        )
             elif result.status == OpInfoStatus.NO_OPINFO:
                 success_rate_text = "N/A (no OpInfo)"
             elif result.status == OpInfoStatus.NO_FLOAT32_SUPPORT:
@@ -299,7 +318,13 @@ def write_table_row(f, op, result):
 
             fgcolor, bgcolor = success_colors(success_rate)
             style = f'style="color: {fgcolor}; background-color: {bgcolor}"'
-            table_row += f'<td {style}">{success_rate_text}</td>\n'
+            if detailed_skip_xfail_text == "":
+                table_row += f'<td {style}">{success_rate_text}</td>\n'
+            else:
+                table_row += (
+                    f'<td {style}"><details><summary>{success_rate_text}'
+                    f"</summary>{detailed_skip_xfail_text}</details></td>\n"
+                )
 
     table_row += "</tr>"
     f.write(table_row)
