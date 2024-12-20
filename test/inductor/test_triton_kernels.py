@@ -3692,19 +3692,15 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
         A recompile event should occur, which we check with Dynamo counters
         This tests that we are installing guards on input objects properly
         """
-        records = {}
 
+        # We don't modify records here because we are testing whether or not
+        # recompiles occur/guards are installed
+        # If we modified the non-local records dict here, this would trigger
+        # recompile events.
         def early_config_prune(configs, named_args, **kwargs):
-            # we need to save the records to the returned config
-            records["run_early_config_prune"] = True
-            if "N" in kwargs and kwargs["N"] == 1024:
-                records["capture_kwargs"] = True
-            if "dst" in named_args and "src" in named_args and len(named_args) == 5:
-                records["capture_named_args"] = True
             return [configs[0]]
 
         def perf_model(*args, **kwargs):
-            records["run_perf_model"] = True
             return kwargs["BLOCK_SIZE"] * -1
 
         if with_perf_model:
@@ -3760,16 +3756,12 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
 
         self.assertEqual(counter, 1)
 
-        # configs has changed, prune_configs_by dict has been removed (because of the pruning), so this will recompile
         f(dst, src, 1.5, "TEST", True, N)
 
-        self.assertEqual(counter, 2)
-
-        # this should not trigger a recompile
-        # as the configs have not changed here
-        f(dst, src, 1.5, "TEST", True, N)
-
-        self.assertEqual(counter, 2)
+        # this should not trigger a recompilation
+        # this is because we modified the test to not touch the records dict
+        # as in the other test. If we kept it, it would trigger a recompile here.
+        self.assertEqual(counter, 1)
 
         # Modify the autotuner object
         prune_by_kernel.configs = [triton.Config(kwargs={"BLOCK_SIZE": 64})]
@@ -3778,8 +3770,12 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
         # trigger a recompile
         f(dst, src, 1.5, "TEST", True, N)
 
-        # We should observe three compile events if guards are installed correctly
-        self.assertEqual(counter, 3)
+        self.assertEqual(counter, 2)
+
+        # there should be no recompile here
+        f(dst, src, 1.5, "TEST", True, N)
+
+        self.assertEqual(counter, 2)
 
 
 common_utils.instantiate_parametrized_tests(KernelTests)
