@@ -11,13 +11,13 @@ ARG PYTHON_VERSION=3.11
 # Stage 1: Base Development Environment
 FROM ${BASE_IMAGE} as dev-base
 RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-    build-essential \
-    ca-certificates \
-    ccache \
-    cmake \
-    curl \
-    git \
-    libjpeg-dev \
+        build-essential \
+        ca-certificates \
+        ccache \
+        cmake \
+        curl \
+        git \
+        libjpeg-dev \
         libpng-dev && \
     rm -rf /var/lib/apt/lists/*
 RUN /usr/sbin/update-ccache-symlinks
@@ -29,12 +29,12 @@ FROM dev-base as conda
 ARG PYTHON_VERSION=3.11
 # Automatically set by buildx
 ARG TARGETPLATFORM
-# Translate Docker's TARGETPLATFORM into Miniconda architectures
+# translating Docker's TARGETPLATFORM into miniconda arches
 RUN case ${TARGETPLATFORM} in \
     "linux/arm64")  MINICONDA_ARCH=aarch64  ;; \
     *)              MINICONDA_ARCH=x86_64   ;; \
     esac && \
-    curl -fsSL -v -o ~/miniconda.sh "https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-Linux-${MINICONDA_ARCH}.sh"
+    curl -fsSL -v -o ~/miniconda.sh -O  "https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-Linux-${MINICONDA_ARCH}.sh"
 COPY requirements.txt .
 # Manually invoke bash on miniconda script per https://github.com/conda/conda/issues/10431
 RUN chmod +x ~/miniconda.sh && \
