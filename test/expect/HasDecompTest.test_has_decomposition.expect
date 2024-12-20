@@ -704,6 +704,7 @@ aten::bernoulli.Tensor
 aten::bernoulli.Tensor_out
 aten::bernoulli.float_out
 aten::bernoulli.out
+aten::bernoulli.p
 aten::bernoulli_.Tensor
 aten::bernoulli_.float
 aten::bincount
