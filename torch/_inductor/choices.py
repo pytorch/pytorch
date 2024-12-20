@@ -60,8 +60,8 @@ class InductorChoices:
 
         split = self.reduction_split_factor(
             device,
-            V.graph.sizevars.size_hint(features.numel, fallback=8192),
             V.graph.sizevars.size_hint(features.reduction_numel, fallback=8192),
+            V.graph.sizevars.size_hint(features.numel, fallback=8192),
             features.memory_stats().persistent.reads.dim[1].contiguous_score >= 0.5,
         )
         return split > 1
@@ -125,6 +125,9 @@ class InductorChoices:
         max_elements_per_device = max_elements_per_thread * num_sm * threads_per_sm
         num_warps = 8
         num_threads = 32 * num_warps
+
+        if reduction_numel_hint <= 32 or numel_hint >= num_sm * 64:
+            return 1
 
         if inner_reduction:
             # do heuristics that's close to eager mode for split inner reduction
@@ -299,8 +302,18 @@ class InductorChoices:
             abs(node1.min_order - node2.max_order),
             abs(node2.min_order - node1.max_order),
         )
+
+        # prologue fusion always last
+        if node2.is_template():
+            template_score = 0
+        else:
+            template_score = 1 + (
+                (node1.is_template() == config.epilogue_fusion_first)
+                and memory_score > 0
+            )
+
         return (
-            node1.is_template() == config.epilogue_fusion_first and memory_score > 0,
+            template_score,
             node1.is_reduction() == node2.is_reduction() and memory_score > 0,
             memory_score,
             proximity_score,

@@ -1,5 +1,5 @@
 # Owner(s): ["module: mps"]
-
+# ruff: noqa: F841
 import io
 import sys
 import math
@@ -948,8 +948,7 @@ def mps_ops_modifier(ops):
         # See https://github.com/pytorch/pytorch/issues/111479
         'nn.functional.multi_head_attention_forward': [torch.float32, torch.float16, torch.bfloat16],
 
-        # duplicate indices are used in the testcase - undefined behaviour
-        'index_put': None,
+        'index_put': [torch.bool, torch.uint8, torch.int8, torch.int16, torch.int64, torch.float16, torch.bfloat16],
         # zero to negative integer powers are undefined
         '__rpow__': [torch.int8, torch.int16, torch.int32, torch.int64],
         'resize_': [torch.float16, torch.float32, torch.bfloat16],
@@ -1517,6 +1516,17 @@ class MatmulTest(TestCaseMPS):
     def test_batched_matrix_x_broadcasted_matrix(self):
         self._helper((10, 3, 4), (4, 5))
 
+    def test_large_matmul(self):
+        # Issue: #141909
+        tensor1_mps = torch.randn(1, 1, 72250, dtype=torch.half)
+        tensor2_mps = torch.randn(1, 72250, 1, dtype=torch.half)
+        matmul_mps = torch.matmul(tensor1_mps, tensor2_mps)
+
+        tensor1_cpu = tensor1_mps.to("cpu")
+        tensor2_cpu = tensor2_mps.to("cpu")
+        matmul_cpu = torch.matmul(tensor1_cpu, tensor2_cpu)
+
+        self.assertEqual(matmul_cpu, matmul_mps.to("cpu"))
 
 class MPSLeakyReluTest(TestCaseMPS):
     def _npLeakyRelu(self, np_features, negative_slope=0.1):
@@ -3420,6 +3430,14 @@ class TestMPS(TestCaseMPS):
         x = x + 2
         x_cpu = x_cpu + 2
         self.assertEqual(x, x_cpu)
+
+        # Regression test for https://github.com/pytorch/pytorch/issues/143140
+        def slice_and_reshape(t):
+            return t[:, :, :, :3, :3].reshape(18, 1, 3)
+
+        x = torch.rand(1, 1, 1, 4, 5, 6, dtype=torch.cfloat, device="mps")
+        x_cpu = x.detach().clone().cpu()
+        self.assertEqual(slice_and_reshape(x_cpu), slice_and_reshape(x).cpu())
 
     def test_reshape_storage_offset(self):
         # https://github.com/pytorch/pytorch/issues/95883
@@ -8125,6 +8143,33 @@ class TestMPS(TestCaseMPS):
         elapsedTime = startEvent.elapsed_time(endEvent)
         self.assertGreater(elapsedTime, 0.0)
 
+    def test_generic_event(self):
+        startEvent = torch.Event('mps', enable_timing=True)
+        startEvent.record()
+        net1 = torch.nn.ConvTranspose2d(128, 64, kernel_size=3, stride=2, padding=1, output_padding=1)\
+            .to(device='mps', dtype=torch.float)
+        x = torch.rand(1, 128, 6, 6, device='mps', dtype=torch.float, requires_grad=True)
+        x = net1(x)
+        endEvent = torch.Event('mps', enable_timing=True)
+        endEvent.record()
+        elapsedTime = startEvent.elapsed_time(endEvent)
+        self.assertGreater(elapsedTime, 0.0)
+
+    def test_generic_device_synchronize(self):
+        event = torch.Event('mps')
+        a = torch.randn(1000)
+        b = torch.randn(1000)
+        c = a + b
+        a_acc = a.to("mps", non_blocking=True)
+        b_acc = b.to("mps", non_blocking=True)
+        event.record()
+        event.synchronize()
+        c_acc = a_acc + b_acc
+        event.record()
+        torch.accelerator.synchronize()
+        self.assertTrue(event.query())
+        self.assertEqual(c_acc.cpu(), c)
+
     def test_jit_save_load(self):
         m = torch.nn.Module()
         m.x = torch.rand(3, 3, device='mps')
@@ -10581,20 +10626,22 @@ class TestConvolutionMPS(TestCaseMPS):
         helper(shape=(1024, 376, 9), in_channels=9, out_channels=9, groups=3)
 
         # Regression test for https://github.com/pytorch/pytorch/issues/140902
+        # And https://github.com/pytorch/pytorch/issues/142344 (adding grad for input)
         ic, oc, ks, f = 2, 5, 3, 7
         conv = torch.nn.Conv1d(ic, oc, kernel_size=ks, padding=1).to("mps")
-        inp = torch.rand(1, ic, f, device="mps")
+        inp = torch.rand(1, ic, f, device="mps", requires_grad=True)
         out = conv(inp)
         grad_in = torch.rand(1, oc, f, device="mps")
         grad_in_cl = torch.empty(1, f, oc, device="mps").transpose(1, 2)
         grad_in_cl[:] = grad_in
 
         # It does not matter whether grad_in contigous, or channels last, results should equal to each other
-        grad_rc = torch.autograd.grad((out,), (conv.weight, conv.bias), (grad_in,), retain_graph=True)
-        grad_rc_cl = torch.autograd.grad((out,), (conv.weight, conv.bias), (grad_in_cl,), retain_graph=True)
+        grad_rc = torch.autograd.grad((out,), (inp, conv.weight, conv.bias), (grad_in,), retain_graph=True)
+        grad_rc_cl = torch.autograd.grad((out,), (inp, conv.weight, conv.bias), (grad_in_cl,), retain_graph=True)
 
         self.assertEqual(grad_rc[0], grad_rc_cl[0])
         self.assertEqual(grad_rc[1], grad_rc_cl[1])
+        self.assertEqual(grad_rc[2], grad_rc_cl[2])
 
     def test_conv1d_contiguous(self):
         model_cpu = torch.nn.Conv1d(1, 128, 3)
@@ -12479,6 +12526,89 @@ class TestCommon(TestCase):
             mps_tensor = ones(device)
             cpu_tensor = ones("cpu")
             self.assertEqual(mps_tensor.cpu(), cpu_tensor)
+
+class TestMetalLibrary(TestCaseMPS):
+    def test_metal_arange(self):
+        x = torch.zeros(12, device="mps", dtype=torch.half)
+        lib = torch.mps._compile_shader("""
+            kernel void arange(device half* x, uint idx [[thread_position_in_grid]]) {
+              x[idx] = idx;
+            }
+        """)
+        lib.arange(x)
+        self.assertEqual(x, torch.arange(x.numel(), device='mps', dtype=x.dtype))
+
+    def test_metal_dispatch_3d(self):
+        x = torch.empty(12, device="mps")
+        y = torch.empty_like(x)
+        z = torch.empty_like(x)
+        lib = torch.mps._compile_shader("""
+            kernel void arange_x(device float* x, uint3 idx [[thread_position_in_grid]]) {
+              x[idx.x + idx.y + idx.z] = idx.x;
+            }
+
+            kernel void arange_y(device float* x, uint3 idx [[thread_position_in_grid]]) {
+              x[idx.x + idx.y + idx.z] = idx.y;
+            }
+
+            kernel void arange_z(device float* x, uint3 idx [[thread_position_in_grid]]) {
+              x[idx.x + idx.y + idx.z] = idx.z;
+            }
+        """)
+
+        # Check that one can enumerate all shaders
+        self.assertEqual(set(dir(lib)), {f"arange_{i}" for i in ["x", "y", "z"]})
+
+        lib.arange_x(x)
+        lib.arange_y(y, threads=(1, y.numel()))
+        lib.arange_z(z, threads=(1, 1, z.numel()))
+
+        self.assertEqual(x, torch.arange(x.numel(), device='mps', dtype=x.dtype))
+        self.assertEqual(x, y)
+        self.assertEqual(x, z)
+
+    def test_metal_arange_with_arg(self):
+        x = torch.zeros(12, device="mps")
+        lib = torch.mps._compile_shader("""
+            kernel void arange(device float* x, constant float& start, constant float& step,
+                               uint idx [[thread_position_in_grid]]) {
+              x[idx] = start + idx * step;
+            }
+        """)
+        lib.arange(x, 3.14, .5)
+        self.assertEqual(x, torch.arange(3.14, 8.66, .5, device='mps'))
+
+    def test_metal_arange_with_arg_and_cast(self):
+        x = torch.zeros(12, device="mps", dtype=torch.half)
+        y = torch.zeros(12, device="mps", dtype=torch.half)
+        lib = torch.mps._compile_shader("""
+            kernel void arange_all_half(device half* x, constant half2& start_step,
+                               uint idx [[thread_position_in_grid]]) {
+              x[idx] = start_step.x + idx * start_step.y;
+            }
+
+            kernel void arange_half_float(device half* x, constant half& start, constant float& step,
+                               uint idx [[thread_position_in_grid]]) {
+              x[idx] = start + idx * step;
+            }
+        """)
+        lib.arange_all_half(x, [3.14, .5], arg_casts="fp16")
+        lib.arange_half_float(y, 3.14, .5, arg_casts={1: "fp16"})
+        self.assertEqual(x, torch.arange(3.14, 8.66, .5, device='mps', dtype=x.dtype))
+        self.assertEqual(x, y)
+
+    def test_metal_error_checking(self):
+        # Syntax error asserts
+        self.assertRaises(RuntimeError, lambda: torch.mps._compile_shader("Syntax error"))
+        cpu_tensor = torch.rand(3)
+        mps_tensor = torch.rand(3, device="mps")
+        lib = torch.mps._compile_shader("kernel void full(device half* x) { x[0] = 1.0; }")
+        # Passing CPU tensor asserts
+        self.assertRaises(RuntimeError, lambda: lib.full(cpu_tensor))
+        # Passing invalid shader name asserts
+        self.assertRaises(RuntimeError, lambda: lib.non_existing(mps_tensor))
+        # Passing no tensors asserts
+        self.assertRaises(RuntimeError, lambda: lib.full(12))
 
 
 # TODO: Actually instantiate that test for the "mps" device to better reflect what it is doing.

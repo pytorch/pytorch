@@ -10,8 +10,6 @@ from torch._subclasses import FakeTensor
 from torch.ao.quantization.fx.utils import get_new_attr_name_with_prefix
 from torch.ao.quantization.pt2e.export_utils import _WrapperModule
 from torch.ao.quantization.pt2e.utils import (
-    _conv1d_bn_example_inputs,
-    _conv2d_bn_example_inputs,
     _get_aten_graph_module_for_pattern,
     _is_conv_node,
     _is_conv_transpose_node,
@@ -19,7 +17,6 @@ from torch.ao.quantization.pt2e.utils import (
 from torch.ao.quantization.quantizer import (
     QuantizationAnnotation,
     QuantizationSpec,
-    QuantizationSpecBase,
     SharedQuantizationSpec,
 )
 from torch.ao.quantization.quantizer.utils import (
@@ -488,6 +485,28 @@ def _do_annotate_conv_bn(
     for the following names: "input", "conv", "weight", "bias", and "output".
     """
 
+    # Example inputs for conv-bn1d patterns
+    _conv1d_bn_example_inputs = (
+        torch.randn(1, 1, 3),  # x
+        torch.randn(1, 1, 1),  # conv_weight
+        torch.randn(1),  # conv_bias
+        torch.randn(1),  # bn_weight
+        torch.randn(1),  # bn_bias
+        torch.randn(1),  # bn_running_mean
+        torch.randn(1),  # bn_running_var
+    )
+
+    # Example inputs for conv-bn2d patterns
+    _conv2d_bn_example_inputs = (
+        torch.randn(1, 1, 3, 3),  # x
+        torch.randn(1, 1, 1, 1),  # conv_weight
+        torch.randn(1),  # conv_bias
+        torch.randn(1),  # bn_weight
+        torch.randn(1),  # bn_bias
+        torch.randn(1),  # bn_running_mean
+        torch.randn(1),  # bn_running_var
+    )
+
     def get_pattern(conv_fn: Callable, relu_is_inplace: bool):
         def _conv_bn(x, conv_weight, conv_bias, bn_weight, bn_bias, bn_rm, bn_rv):
             conv = conv_fn(x, conv_weight, conv_bias)
@@ -511,10 +530,6 @@ def _do_annotate_conv_bn(
     gm.graph.eliminate_dead_code()
     gm.recompile()
 
-    from torch._export import gm_using_training_ir
-
-    using_training_ir = gm_using_training_ir(gm)
-
     matches = []
     if is_conv_transpose:
         combinations = [
@@ -537,7 +552,7 @@ def _do_annotate_conv_bn(
     # Match against all conv dimensions and cuda variants
     for (conv_fn, example_inputs), is_cuda, relu_is_inplace in combinations:  # type: ignore[misc]
         pattern = get_pattern(conv_fn, relu_is_inplace)  # type: ignore[has-type]
-        pattern = _get_aten_graph_module_for_pattern(pattern, example_inputs, is_cuda, using_training_ir=using_training_ir)  # type: ignore[has-type]
+        pattern = _get_aten_graph_module_for_pattern(pattern, example_inputs, is_cuda)  # type: ignore[has-type]
         pattern.graph.eliminate_dead_code()
         pattern.recompile()
         matcher = SubgraphMatcherWithNameNodeMap(pattern, ignore_literals=True)
@@ -613,7 +628,6 @@ def _annotate_gru_io_only(
             continue
         # inside each GRU partition, we should be able to annotate each linear
         # subgraph
-        input_qspec_map: Dict[Node, QuantizationSpecBase] = {}
         input_act = input_nodes[0]
         input_act_user = next(iter(input_act.users.keys()))
         assert isinstance(input_act, Node)
