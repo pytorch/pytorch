@@ -14,7 +14,6 @@ import shutil
 import subprocess
 import sys
 import sysconfig
-import textwrap
 import warnings
 from ctypes import cdll
 from pathlib import Path
@@ -438,7 +437,7 @@ class BuildOptionsBase:
     def get_compile_only(self) -> bool:
         return self._compile_only
 
-    def save_flags_to_json(self, file: str) -> None:
+    def save_flags_to_file(self, file: str) -> None:
         attrs = {
             "compiler": self.get_compiler(),
             "definitions": self.get_definations(),
@@ -1410,7 +1409,6 @@ class CppBuilder:
         self._name = name
 
         # Code start here, initial self internal veriables firstly.
-        self._build_option = BuildOption
         self._compiler = BuildOption.get_compiler()
         self._use_absolute_path = BuildOption.get_use_absolute_path()
         self._aot_mode = BuildOption.get_aot_mode()
@@ -1547,62 +1545,3 @@ class CppBuilder:
 
         _remove_dir(_build_tmp_dir)
         return status, self._target_file
-
-    def _remove_directory_from_file_path(self, file_path: str) -> str:
-        # Remove the directory part of file_path
-        return "${CMAKE_CURRENT_SOURCE_DIR}/" + Path(file_path).name
-
-    def save_compile_cmd_to_cmake(
-        self,
-        cmake_path: str,
-    ) -> None:
-        definitions = " ".join(self._build_option.get_definations())
-        contents = textwrap.dedent(
-            f"""
-            cmake_minimum_required(VERSION 3.18 FATAL_ERROR)
-            project(aoti_model LANGUAGES CXX)
-            set(CMAKE_CXX_STANDARD 17)
-
-            # May need to point CMAKE_PREFIX_PATH to the right torch location
-            find_package(Torch REQUIRED)
-
-            # Set a shared library target
-            add_library(aoti_model SHARED)
-
-            # Add macro definitions
-            target_compile_definitions(aoti_model PRIVATE {definitions})
-
-            # Add compile flags
-            target_compile_options(aoti_model PRIVATE {self._cflags_args})
-            # Backend specific flags
-            target_compile_options(aoti_model PRIVATE {self._passthrough_parameters_args} -c)
-
-            """
-        )
-        with open(cmake_path, "w") as f:
-            f.write(contents)
-
-    def save_src_to_cmake(self, cmake_path: str, src_path: str) -> None:
-        with open(cmake_path, "a") as f:
-            f.write(
-                f"target_sources(aoti_model PRIVATE {self._remove_directory_from_file_path(src_path)})\n"
-            )
-
-    def save_link_cmd_to_cmake(self, src_path: str) -> None:
-        lflags = " ".join(self._build_option.get_ldflags())
-        libs = " ".join(self._build_option.get_libraries())
-        contents = textwrap.dedent(
-            f"""
-            # Add linker flags
-            target_link_options(aoti_model PRIVATE {lflags})
-
-            # Add libraries
-            target_link_libraries(aoti_model PRIVATE {libs})
-         """
-        )
-
-        assert os.path.exists(
-            src_path
-        ), f"save_link_cmd_to_cmakefile expects {src_path} to already exist"
-        with open(src_path, "a") as f:
-            f.write(contents)
