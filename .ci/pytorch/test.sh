@@ -505,8 +505,7 @@ test_perf_for_dashboard() {
       if [[ "$DASHBOARD_TAG" == *default-true* ]]; then
         $TASKSET python "benchmarks/dynamo/$suite.py" \
             "${target_flag[@]}" --"$mode" --"$dtype" --backend "$backend" --disable-cudagraphs "$@" \
-            --output "$TEST_REPORTS_DIR/${backend}_no_cudagraphs_${suite}_${dtype}_${mode}_${device}_${target}.csv" \
-            --only BERT_pytorch  # DEBUG: TO BE REMOVE
+            --output "$TEST_REPORTS_DIR/${backend}_no_cudagraphs_${suite}_${dtype}_${mode}_${device}_${target}.csv"
       fi
       if [[ "$DASHBOARD_TAG" == *cudagraphs-true* ]]; then
         $TASKSET python "benchmarks/dynamo/$suite.py" \
