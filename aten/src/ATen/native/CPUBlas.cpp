@@ -406,8 +406,8 @@ void gemm(
     float *c, int64_t ldc) {
   internal::normalize_last_dims(transa, transb, m, n, k, &lda, &ldb, &ldc);
 
+#if defined(__aarch64__) && AT_MKLDNN_ENABLED()
 // TODO: ADI: add heuristic based on shape to dispatch to sbgemm_ vs MKLDNN
-#if AT_MKLDNN_ENABLED()
    if (mkldnn_bf16f32_gemm(transa, transb, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc)) {
      return;
    }
@@ -434,6 +434,7 @@ void gemm(
     return;
   }
 #endif
+
   // for the fallback path, first compute gemm with beta = 0,
   // and then add c in full precision.
   int64_t c_size = n * m;

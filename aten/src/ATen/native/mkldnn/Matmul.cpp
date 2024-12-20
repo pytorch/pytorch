@@ -201,9 +201,11 @@ mkldnn_gemm(
     const scalar_t *b_data, int64_t ldb,
     float beta,
     float* c_data, int64_t ldc) {
+// TODO: ADI
+// introduce heuristic to validate dispatch to MKLDNN
+// (m * n * k <= 16 * 16 * 16)
   bool bf16_usable = std::is_same_v<scalar_t, c10::BFloat16> && use_mkldnn_bf16_matmul();
-  if ( !(bf16_usable) ||
-      (m * n * k <= 16 * 16 * 16) || (alpha == 0.0f)) {
+  if ( !(bf16_usable) ) {
     return false;
   }
 
