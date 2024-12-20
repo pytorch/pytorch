@@ -4029,8 +4029,11 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
 
     def test_unflatten_isinstance(self):
         class N(torch.nn.Module):
-            def forward(self, x):
-                return x + 1
+            def forward(self, x, b):
+                if b:
+                    return x + 1
+                else:
+                    return x + 2
 
         class M(torch.nn.Module):
             def __init__(self):
@@ -4038,7 +4041,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
                 self.n = N()
 
             def forward(self, x):
-                return self.n(x + 1) + 1
+                return self.n(x + 1, True) + self.n(x + 1, False)
 
         x = torch.zeros(4)
         types = {} if is_retracebility_test(self._testMethodName) else {"n": N}
@@ -4048,7 +4051,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
             preserve_module_call_signature=tuple(types.keys()),
         )
         ufm = torch.export.unflatten(ep)
-        self.assertTrue(torch.allclose(ufm(x), x + 3))
+        self.assertTrue(torch.allclose(ufm(x), x + 5))
         for fqn, mod in ufm.named_modules(remove_duplicate=False):
             if cls := types.get(fqn):
                 ty = f"{cls.__module__}.{cls.__qualname__}"

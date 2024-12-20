@@ -121,9 +121,9 @@ def _assign_attr(
 
 
 class _SubmoduleBase:
-    _ty: str
+    _ty: Optional[str]
 
-    def type_name(self):
+    def type_name(self) -> Optional[str]:
         return self._ty
 
 
@@ -228,7 +228,7 @@ class InterpreterModuleDispatcher(_SubmoduleBase, torch.nn.Module):
         self._modules = call_modules[0]._modules
         for accessor in attrs:
             setattr(self, accessor, getattr(call_modules[0], accessor))
-        self._ty = call_modules[0].ty
+        self._ty = call_modules[0]._ty
         self._call_modules = call_modules
         self._num_calls = 0
 
