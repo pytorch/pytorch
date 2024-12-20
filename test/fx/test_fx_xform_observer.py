@@ -1,5 +1,6 @@
 # Owner(s): ["module: fx"]
 
+import copy
 import os
 import tempfile
 
@@ -92,6 +93,11 @@ class TestGraphTransformObserver(TestCase):
             self.assertTrue("relu" in ob.created_nodes)
             self.assertTrue("neg" in ob.erased_nodes)
 
+        self.assertEqual(len(traced._replace_hooks), 0)
+        self.assertEqual(len(traced._create_node_hooks), 0)
+        self.assertEqual(len(traced._erase_node_hooks), 0)
+        self.assertEqual(len(traced._deepcopy_hooks), 0)
+
         for node in traced.graph.nodes:
             if node.name == "relu":
                 from_node = node.meta["from_node"]
@@ -131,3 +137,50 @@ class TestGraphTransformObserver(TestCase):
                     "replace_neg_with_relu",
                     [NodeSourceAction.REPLACE, NodeSourceAction.CREATE],
                 )
+
+        class SimpleLinearModel(torch.nn.Module):
+            def forward(self, x):
+                return torch.neg(x)
+
+        model = SimpleLinearModel()
+        gm = torch.export.export(model, (torch.rand(10),)).module()
+
+        with GraphTransformObserver(gm, "test"):
+            add_node = gm.graph.call_function(torch.ops.aten.add.default, (1, 1))
+            neg_node = next(
+                iter([node for node in gm.graph.nodes if node.name == "neg"])
+            )
+            neg_node.replace_all_uses_with(replace_with=add_node)
+
+        from_node = add_node.meta["from_node"]
+        self.assertTrue(len(from_node) == 1)
+        check_node_source(
+            from_node[0],
+            "neg",
+            str(torch.ops.aten.neg.default),
+            id(gm.graph),
+            "test",
+            [NodeSourceAction.REPLACE, NodeSourceAction.CREATE],
+        )
+
+    def test_graph_transform_observer_deepcopy(self):
+        class SimpleLinearModel(torch.nn.Module):
+            def forward(self, x):
+                return torch.neg(x)
+
+        model = SimpleLinearModel()
+        gm = torch.export.export(model, (torch.rand(10),)).module()
+
+        with GraphTransformObserver(gm, "test"):
+            gm2 = copy.deepcopy(gm)
+
+        nodes = [node.name for node in gm.graph.nodes]
+        nodes2 = [node.name for node in gm2.graph.nodes]
+        self.assertEqual(nodes, nodes2)
+
+        # deepcopied graph modules should not have hooks after exiting
+        # the context
+        self.assertEqual(len(gm2._replace_hooks), 0)
+        self.assertEqual(len(gm2._create_node_hooks), 0)
+        self.assertEqual(len(gm2._erase_node_hooks), 0)
+        self.assertEqual(len(gm2._deepcopy_hooks), 0)

@@ -531,6 +531,8 @@ class GraphModule(torch.nn.Module):
         self._replace_hooks: List[Callable] = []
         self._create_node_hooks: List[Callable] = []
         self._erase_node_hooks: List[Callable] = []
+        # Used to remove hooks from deepcopied graph modules within a context manager.
+        self._deepcopy_hooks: List[Callable] = []
 
     # TorchScript breaks trying to compile the graph setter because of the
     # continued string literal. Issue here: https://github.com/pytorch/pytorch/issues/44842
@@ -888,6 +890,7 @@ class {module_name}(torch.nn.Module):
             "_replace_hooks",
             "_create_node_hooks",
             "_erase_node_hooks",
+            "_deepcopy_hooks",
         ]
         for attr in extra_preserved_attrs:
             if attr in self.__dict__:
@@ -896,6 +899,8 @@ class {module_name}(torch.nn.Module):
         if _USER_PRESERVED_ATTRIBUTES_KEY in res.meta:
             for attr_name, attr in res.meta[_USER_PRESERVED_ATTRIBUTES_KEY].items():
                 setattr(res, attr_name, attr)
+        for hook in self._deepcopy_hooks:
+            hook(res)
         return res
 
     def __copy__(self):
@@ -1001,6 +1006,22 @@ class {module_name}(torch.nn.Module):
         """
         assert callable(f), "erase_node hook must be a callable."
         self._erase_node_hooks.remove(f)
+
+    def _register_deepcopy_hook(self, f):
+        """
+        Takes a callable which will be called when we deepcopy this graph module. The
+        callable takes the resulting deepcopied graph module.
+        """
+        assert callable(f), "deepcopy hook must be a callable."
+        self._deepcopy_hooks.append(f)
+
+    def _unregister_deepcopy_hook(self, f):
+        """
+        Takes a callable which was previously registered to be called after deepcopy.
+        This function will unregister that callable so it is no longer invoked on deepcopy.
+        """
+        assert callable(f), "deepcopy hook must be a callable."
+        self._deepcopy_hooks.remove(f)
 
 
 # workarounds for issues in __torch_function__
