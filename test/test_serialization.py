@@ -1020,7 +1020,7 @@ class TestSerialization(TestCase, SerializationMixin):
                 RuntimeError,
                 re.escape("Cannot use ``weights_only=True`` with TorchScript archives passed to ``torch.load``")
             ):
-                torch.load(f)
+                torch.load(f, weights_only=True)
             f.seek(0)
             torch.load(f, weights_only=False)
 
