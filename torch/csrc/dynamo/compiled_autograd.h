@@ -1019,7 +1019,10 @@ struct IValuePacker<VariableInfo> {
     return tuple;
   }
   static VariableInfo unpack(const at::IValue& t) {
-    const auto& elements = t.toTupleRef().elements();
+    auto tuple = t.toTuple();
+    const auto& tuple_elements = tuple->elements();
+    const auto elements = tuple_elements.asArrayRef();
+    TORCH_INTERNAL_ASSERT(elements.size() == 6);
     // auto tuple = t.to<std::tuple<
     //     at::Layout,
     //     at::Device,
