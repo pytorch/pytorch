@@ -57,6 +57,20 @@ kernel void copysign_integral(
   *out = copysign(static_cast<float>(*input), static_cast<float>(*other));
 }
 
+template <typename T>
+kernel void real_mul(
+    constant void* input_ [[buffer(0)]],
+    constant void* other_ [[buffer(1)]],
+    device void* out_ [[buffer(2)]],
+    constant uint3* offsets [[buffer(3)]],
+    uint tid [[thread_position_in_grid]]) {
+  device T* out = (device T*)((device uint8_t*)out_ + offsets[tid].x);
+  constant T* input = (constant T*)((constant uint8_t*)input_ + offsets[tid].y);
+  constant T* other = (constant T*)((constant uint8_t*)other_ + offsets[tid].z);
+
+  *out = *input * *other;
+}
+
 #define REGISTER_FMAX_OP(DTYPE)                                   \
   template [[host_name("fmax_" #DTYPE)]] kernel void fmax<DTYPE>( \
       constant void* input_ [[buffer(0)]],                        \
@@ -90,16 +104,35 @@ kernel void copysign_integral(
       constant uint3* offsets [[buffer(3)]],             \
       uint tid [[thread_position_in_grid]]);
 
+#define REGISTER_REAL_MUL_OP(DTYPE)                               \
+  template [[host_name("real_mul_" #DTYPE)]] kernel void real_mul<DTYPE>( \
+      constant void* input_ [[buffer(0)]],                        \
+      constant void* other_ [[buffer(1)]],                        \
+      device void* out_ [[buffer(2)]],                            \
+      constant uint3* offsets [[buffer(3)]],                      \
+      uint tid [[thread_position_in_grid]]);
+
 REGISTER_FMAX_OP(float);
 REGISTER_FMAX_OP(half);
 REGISTER_FMIN_OP(float);
 REGISTER_FMIN_OP(half);
 REGISTER_COPYSIGN_OP(float);
 REGISTER_COPYSIGN_OP(half);
+REGISTER_REAL_MUL_OP(float);
+REGISTER_REAL_MUL_OP(half);
+REGISTER_REAL_MUL_OP(int);
+REGISTER_REAL_MUL_OP(uint);
+REGISTER_REAL_MUL_OP(long);
+REGISTER_REAL_MUL_OP(short);
+REGISTER_REAL_MUL_OP(ushort);
+REGISTER_REAL_MUL_OP(char);
+REGISTER_REAL_MUL_OP(uchar);
+REGISTER_REAL_MUL_OP(bool);
 #if __METAL_VERSION__ >= 310
 REGISTER_FMAX_OP(bfloat);
 REGISTER_FMIN_OP(bfloat);
 REGISTER_COPYSIGN_OP(bfloat);
+REGISTER_REAL_MUL_OP(bfloat);
 #endif
 REGISTER_COPYSIGN_INTEGRAL_OP(int);
 REGISTER_COPYSIGN_INTEGRAL_OP(long);

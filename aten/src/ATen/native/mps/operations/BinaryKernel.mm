@@ -83,6 +83,22 @@ void complex_mul_out(const Tensor& input, const Tensor& other, const Tensor& out
   mps::binary_mps_impl(iter, "complex_mul");
 }
 
+void real_mul_out(const Tensor& input, const Tensor& other, const Tensor& output) {
+  auto new_size = at::infer_size(input.sizes(), other.sizes());
+  if (!output.sizes().equals(new_size)) {
+    output.resize_(new_size);
+  }
+  uint32_t length = output.numel();
+  if (length == 0) {
+    return;
+  }
+  auto common_dtype = output.scalar_type();
+  auto iter =
+    TensorIteratorConfig().add_output(output).add_owned_input(input.to(kMPS, common_dtype)).add_owned_input(other.to(kMPS, common_dtype)).build();
+
+  mps::binary_mps_impl(iter, "real_mul");
+}
+
 } // namespace mps
 
 static void fmax_mps_kernel(TensorIteratorBase& iter) {
