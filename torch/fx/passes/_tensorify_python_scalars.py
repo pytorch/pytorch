@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 import os
-from typing import Any, List, Union
+from typing import Any, List, Set, Union
 
 from sympy import Integer, Number, Symbol
 from sympy.logic.boolalg import BooleanAtom
@@ -11,6 +11,7 @@ import torch
 import torch.fx as fx
 from torch._dynamo.exc import TensorifyScalarRestartAnalysis
 from torch._dynamo.symbolic_convert import TensorifyState
+from torch._dynamo.utils import get_metrics_context
 from torch._prims_common import get_computation_dtype
 from torch._subclasses import fake_tensor  # noqa: TCH001
 from torch._subclasses.fake_tensor import FakeTensor
@@ -298,6 +299,14 @@ def tensorify_python_scalars(
                     node.replace_all_uses_with(replacement_proxy.node)
                     graph.erase_node(node)
 
+                    metrics_context = get_metrics_context()
+                    if metrics_context.in_progress():
+                        metrics_context.set(
+                            "tensorify_float_success", True, overwrite=True
+                        )
+
+    failed_tensorify_ops: Set[str] = set()
+
     # Now do one more pass that specializes all symfloats we didn't manage
     # to tensorify away.
     for node in reversed(graph.nodes):
@@ -325,6 +334,8 @@ def tensorify_python_scalars(
                     #
                     # It's better to guard on zf // 2 == 2.0 than zf == 5.0
 
+                    failed_tensorify_ops.update(str(key) for key in node.users.keys())
+
                     node.replace_all_uses_with(guard_scalar(val))
                     graph.erase_node(node)
 
@@ -339,6 +350,12 @@ def tensorify_python_scalars(
         # Sledgehammer time. Restart dynamo analysis, keeping track of which input sources
         # are no longer needed and should be specialized. Restarting analysis is necessary
         # because we need to instruct Dynamo to NOT make these as inputs.
+        metrics_context = get_metrics_context()
+        if metrics_context.in_progress():
+            metrics_context.set(
+                "tensorify_float_failure", failed_tensorify_ops, overwrite=True
+            )
+            metrics_context.set("tensorify_float_success", True, overwrite=True)
         raise TensorifyScalarRestartAnalysis
 
     graph_code_log.debug(

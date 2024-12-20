@@ -339,7 +339,7 @@ def smoke_test_modules():
                 print(f"Output: \n{output}\n")
 
 
-def main() -> None:
+def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--package",
@@ -362,7 +362,11 @@ def main() -> None:
         choices=["enabled", "disabled"],
         default="enabled",
     )
-    options = parser.parse_args()
+    return parser.parse_args()
+
+
+def main() -> None:
+    options = parse_args()
     print(f"torch: {torch.__version__}")
     print(torch.__config__.parallel_info())
     # All PyTorch binary builds should be built with OpenMP
