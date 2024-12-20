@@ -342,6 +342,10 @@ skip_nnmodule_hook_guards = True
 # notice and lead to incorrect result.
 skip_no_tensor_aliasing_guards_on_parameters = True
 
+# Considers a tensor immutable if it is one of the values of a dictionary, and
+# the dictionary tag is same across invocation calls.
+skip_tensor_guards_with_matching_dict_tags = True
+
 # If True, raises exception if TorchDynamo is called with a context manager
 raise_on_ctx_manager_usage = True
 
@@ -389,6 +393,9 @@ use_numpy_random_stream = False
 
 # Use C++ guard manager (deprecated: always true)
 enable_cpp_guard_manager = True
+
+# Enable tracing through contextlib.contextmanager
+enable_trace_contextlib = True
 
 # Inline inbuilt nn modules
 inline_inbuilt_nn_modules = not is_fbcode()
