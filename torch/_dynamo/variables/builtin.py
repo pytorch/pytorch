@@ -718,7 +718,13 @@ class BuiltinVariable(VariableTracker):
                 tx, [v.realize() for v in args], kwargs
             )
 
-        if inspect.isclass(fn) and issubclass(fn, Exception):
+        if inspect.isclass(fn) and (
+            issubclass(fn, Exception)
+            # GeneratorExit doens't inherit from Exception
+            # >>> issubclass(GeneratorExit, Exception)
+            # False
+            or fn is GeneratorExit
+        ):
 
             def create_exception_class_object(
                 tx: "InstructionTranslator", args, kwargs
