@@ -4027,6 +4027,33 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
             epm = export(mod, inp).module()
             self.assertTrue(torch.allclose(epm(*inp), mod(*inp)))
 
+    def test_unflatten_isinstance(self):
+        class N(torch.nn.Module):
+            def forward(self, x):
+                return x + 1
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.n = N()
+
+            def forward(self, x):
+                return self.n(x + 1) + 1
+
+        x = torch.zeros(4)
+        types = {} if is_retracebility_test(self._testMethodName) else {"n": N}
+        ep = export(
+            M(),
+            (x,),
+            preserve_module_call_signature=tuple(types.keys()),
+        )
+        ufm = torch.export.unflatten(ep)
+        self.assertTrue(torch.allclose(ufm(x), x + 3))
+        for fqn, mod in ufm.named_modules(remove_duplicate=False):
+            if cls := types.get(fqn):
+                ty = f"{cls.__module__}.{cls.__qualname__}"
+                self.assertTrue(ty, mod.type_name())
+
     def test_unflatten_asserts(self):
         # TODO: strict-export fails
         class M1(torch.nn.Module):
