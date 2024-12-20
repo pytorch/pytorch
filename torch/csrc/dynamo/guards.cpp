@@ -524,7 +524,7 @@ static PyTypeObject TensorGuardsType = { PyVarObject_HEAD_INIT(nullptr, 0)
 };
 
 struct AutocastState {
-  static constexpr auto& DEVICES = at::autocast::_AUTOCAST_SUPPORTED_DTYPES;
+  static constexpr auto& DEVICES = at::autocast::_AUTOCAST_SUPPORTED_DEVICES;
   std::array<bool, DEVICES.size()> enabled;
   std::array<at::ScalarType, DEVICES.size()> dtype;
   bool cache_enabled;
