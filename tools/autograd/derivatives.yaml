@@ -1693,6 +1693,14 @@
       # TODO: replace this function once semantics for nested tensor expand have been settled on
       self: _nested_sum_backward(grad, self, dim, keepdim)
 
+- name: narrow(Tensor(a) self, int dim, SymInt start, SymInt length) -> Tensor(a)
+  dispatch:
+    Default:
+      # CompositeImplicit for dense tensors
+      self: not_implemented("narrow()")
+    AutogradNestedTensor:
+      self: _nested_narrow_backward(grad, self, dim, start, length)
+
 - name: nansum(Tensor self, int[1]? dim=None, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
   self: nansum_backward(grad.to(self.scalar_type()), self, dim, keepdim)
   result: at::where(self_p.isnan(), 0, self_t).sum(dim, keepdim, dtype)

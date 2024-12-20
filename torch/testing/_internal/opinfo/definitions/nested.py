@@ -837,8 +837,10 @@ def batchwise_reference_chunk(op, sample):
 
 
 def batchwise_reference_narrow(op, sample):
-    # TODO: write this!
-    raise NotImplementedError
+    start, length = sample.kwargs["start"], sample.kwargs["length"]
+    components = list(sample.input.unbind())
+    narrowed = components[start : start + length]
+    return torch.nested.as_nested_tensor(narrowed, layout=torch.jagged)
 
 
 def batchwise_reference_select(op, sample):
