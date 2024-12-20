@@ -187,11 +187,6 @@ def get_device_capability(device: Optional[_device_t] = None) -> Tuple[int, int]
     return torch._C._mtia_getDeviceCapability(_get_device_index(device, optional=True))
 
 
-def empty_cache() -> None:
-    r"""Empty the MTIA device cache."""
-    return torch._C._mtia_emptyCache()
-
-
 def set_stream(stream: Stream):
     r"""Set the current stream.This is a wrapper API to set the stream.
         Usage of this function is discouraged in favor of the ``stream``
