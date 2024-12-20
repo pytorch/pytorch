@@ -571,7 +571,7 @@ def register_onednn_fusion_ops():
                 ) or (
                     isinstance(
                         ir.InputsKernel.unwrap_storage_for_input(w_zp),
-                        ir.ComputedBuffer,
+                        ir.ConstantBuffer,
                     )
                     and torch.equal(
                         torch.zeros_like(V.graph.constants[w_zp.get_name()]),
