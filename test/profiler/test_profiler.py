@@ -2161,6 +2161,57 @@ assert KinetoStepTracker.current_step() == initial_step + 2 * niters
                 self.payload(use_cuda=True)
             validate_json(prof, disable_external_correlation)
 
+    @skipIfTorchDynamo("profiler gets ignored if dynamo activated")
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
+    @unittest.skipIf(not kineto_available(), "Kineto is required")
+    def test_profile_all_threads(self):
+
+        profiling_started = threading.Event()
+        profiling_ended = threading.Event()
+        n_rep = 5
+
+        def main_thread_fn(profile_all_threads, returned_events):
+            x = torch.randn(1024, 1024, device="cuda")
+            y = torch.randn(1024, 1024, device="cuda")
+            experimental_config = torch._C._profiler._ExperimentalConfig(
+                profile_all_threads=profile_all_threads
+            )
+            with torch.profiler.profile(
+                experimental_config=experimental_config, record_shapes=True
+            ) as p:
+                profiling_started.set()
+                for _ in range(n_rep):
+                    _ = x @ y
+                profiling_ended.wait()
+            returned_events.append(p.events())
+
+        def side_thread_fn():
+            x = torch.randn(1024, 1024, device="cuda")
+            y = torch.randn(1024, 1024, device="cuda")
+            profiling_started.wait()
+            for _ in range(n_rep):
+                _ = x @ y
+            profiling_ended.set()
+
+        for profile_all_threads in (True, False):
+            returned_events = []
+            main_thread = threading.Thread(
+                target=main_thread_fn, args=(profile_all_threads, returned_events)
+            )
+            side_thread = threading.Thread(target=side_thread_fn)
+            main_thread.start()
+            side_thread.start()
+            main_thread.join()
+            side_thread.join()
+            mm_events = collections.defaultdict(int)
+            for e in returned_events[0]:
+                if e.name == "aten::mm":
+                    mm_events[e.thread] += 1
+                    self.assertEqual(e.input_shapes, [[1024, 1024], [1024, 1024]])
+            self.assertEqual(len(mm_events), 1 + int(profile_all_threads))
+            for _, v in mm_events.items():
+                self.assertEqual(v, n_rep)
+
 
 class SimpleNet(nn.Module):
     def __init__(self) -> None:
