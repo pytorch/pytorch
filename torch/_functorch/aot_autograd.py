@@ -658,9 +658,11 @@ def _create_aot_dispatcher_function(
         # won't be affected.
         def _dup_fake_script_obj(fake_flat_args):
             return [
-                maybe_to_fake_obj(detect_fake_mode(fake_flat_args), arg.real_obj)
-                if isinstance(arg, FakeScriptObject)
-                else arg
+                (
+                    maybe_to_fake_obj(detect_fake_mode(fake_flat_args), arg.real_obj)
+                    if isinstance(arg, FakeScriptObject)
+                    else arg
+                )
                 for arg in fake_flat_args
             ]
 

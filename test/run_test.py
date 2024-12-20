@@ -1694,6 +1694,16 @@ def parse_args():
         action="store_true",
         help="Run tests with TorchInductor turned on",
     )
+    group.add_argument(
+        "--aot-eager",
+        action="store_true",
+        help="Run tests with aot_eager backend",
+    )
+    group.add_argument(
+        "--subclasses",
+        action="store_true",
+        help="Run tests with subclasses testing backend",
+    )
 
     args, extra = parser.parse_known_args()
     if "--" in extra:
@@ -2207,6 +2217,12 @@ def main():
 
     elif options.inductor:
         os.environ["PYTORCH_TEST_WITH_INDUCTOR"] = "1"
+
+    elif options.aot_eager:
+        os.environ["PYTORCH_TEST_WITH_AOT_EAGER"] = "1"
+
+    elif options.subclasses:
+        os.environ["PYTORCH_TEST_WITH_SUBCLASSES"] = "1"
 
     if not options.no_translation_validation:
         os.environ["PYTORCH_TEST_WITH_TV"] = "1"

@@ -320,6 +320,31 @@ test_dynamo_wrapped_shard() {
   assert_git_not_dirty
 }
 
+test_aot_eager_wrapped_shard() {
+  if [[ -z "$NUM_TEST_SHARDS" ]]; then
+    echo "NUM_TEST_SHARDS must be defined to run a Python test shard"
+    exit 1
+  fi
+  time python test/run_test.py --aot-eager \
+    --shard "$1" "$NUM_TEST_SHARDS" \
+    --verbose \
+    --upload-artifacts-while-running
+  assert_git_not_dirty
+}
+
+test_subclasses_wrapped_shard() {
+  if [[ -z "$NUM_TEST_SHARDS" ]]; then
+    echo "NUM_TEST_SHARDS must be defined to run a Python test shard"
+    exit 1
+  fi
+  python tools/dynamo/verify_dynamo.py
+  time python test/run_test.py --subclasses \
+    --shard "$1" "$NUM_TEST_SHARDS" \
+    --verbose \
+    --upload-artifacts-while-running
+  assert_git_not_dirty
+}
+
 test_inductor_distributed() {
   # Smuggle a few multi-gpu tests here so that we don't have to request another large node
   echo "Testing multi_gpu tests in test_torchinductor"
@@ -1510,6 +1535,18 @@ elif [[ "${TEST_CONFIG}" == *inductor* ]]; then
 elif [[ "${TEST_CONFIG}" == *dynamo_wrapped* ]]; then
   install_torchvision
   test_dynamo_wrapped_shard "${SHARD_NUMBER}"
+  if [[ "${SHARD_NUMBER}" == 1 ]]; then
+    test_aten
+  fi
+elif [[ "${TEST_CONFIG}" == *aot_eager_wrapped* ]]; then
+  install_torchvision
+  test_aot_eager_wrapped_shard "${SHARD_NUMBER}"
+  if [[ "${SHARD_NUMBER}" == 1 ]]; then
+    test_aten
+  fi
+elif [[ "${TEST_CONFIG}" == *subclasses_wrapped* ]]; then
+  install_torchvision
+  test_subclasses_wrapped_shard "${SHARD_NUMBER}"
   if [[ "${SHARD_NUMBER}" == 1 ]]; then
     test_aten
   fi
