@@ -2286,9 +2286,8 @@ class TestSelectAlgorithmDynamicShapes(_DynamicShapesTestBase):
     ):
         r"""
         We created a separate test for dynamic shapes with test_da8w8_sym_act_sym_wgt_with_int_mm
-        because only dynamic M dim can be supported with GEMM auto-tuning, and because of expanding
-        activation scale in this UT, M & K dims become symbolic when K is not explcitly marked
-        dynamic with torch._dynamo.mark_static(a, 1).
+        because only dynamic M dim can be supported with GEMM auto-tuning, K is being treated as
+        dynamic even with torch._dynamo.mark_static(a, 1).
         """
         if dtype == torch.bfloat16 and not torch.ops.mkldnn._is_mkldnn_bf16_supported():
             return
