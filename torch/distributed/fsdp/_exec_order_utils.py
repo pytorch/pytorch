@@ -86,10 +86,10 @@ class _ExecOrderData:
     def is_first_iter(self) -> bool:
         return self._iter == 0
 
-    def get_handle_to_backward_prefetch(
+    def get_handles_to_backward_prefetch(
         self,
         current_handle: FlatParamHandle,
-    ) -> Optional[FlatParamHandle]:
+    ) -> List[FlatParamHandle]:
         """
         Returns a :class:`list` of the handles keys of the handles to backward
         prefetch given the current handles key. If there are no valid handles
@@ -97,20 +97,20 @@ class _ExecOrderData:
         """
         current_index = current_handle._post_forward_index
         if current_index is None:
-            return None
+            return []
         target_index = current_index - 1
-        target_handle: Optional[FlatParamHandle] = None
+        target_handles: List[FlatParamHandle] = []
         for _ in range(self._backward_prefetch_limit):
             if target_index < 0:
                 break
-            target_handle = self.handles_post_forward_order[target_index]
+            target_handles.append(self.handles_post_forward_order[target_index])
             target_index -= 1
-        return target_handle
+        return target_handles
 
-    def get_handle_to_forward_prefetch(
+    def get_handles_to_forward_prefetch(
         self,
         current_handle: FlatParamHandle,
-    ) -> Optional[FlatParamHandle]:
+    ) -> List[FlatParamHandle]:
         """
         Returns a :class:`list` of the handles keys of the handles to forward
         prefetch given the current handles key. If there are no valid handles
@@ -118,15 +118,15 @@ class _ExecOrderData:
         """
         current_index = current_handle._pre_forward_order_index
         if current_index is None:
-            return None
+            return []
         target_index = current_index + 1
-        target_handle: Optional[FlatParamHandle] = None
+        target_handles: List[FlatParamHandle] = []
         for _ in range(self._forward_prefetch_limit):
             if target_index >= len(self.handles_pre_forward_order):
                 break
-            target_handle = self.handles_pre_forward_order[target_index]
+            target_handles.append(self.handles_pre_forward_order[target_index])
             target_index += 1
-        return target_handle
+        return target_handles
 
     def record_post_forward(self, handle: Optional[FlatParamHandle]) -> None:
         """

@@ -1206,30 +1206,31 @@ def _prefetch_handle(
     """
     if not current_handle:
         return
-    handle = _get_handle_to_prefetch(state, current_handle)
-    if not handle:
+    handles = _get_handles_to_prefetch(state, current_handle)
+    if not handles or len(handles) == 0:
         return
-    # Temporarily emulate the training state while calling `_unshard` to
-    # ensure the correct `as_params` for `_use_unsharded_views()`
-    prev_training_state = handle._training_state
-    if prefetch_mode == _PrefetchMode.BACKWARD:
-        handle._training_state = HandleTrainingState.BACKWARD_PRE
-    elif prefetch_mode == _PrefetchMode.FORWARD:
-        handle._training_state = HandleTrainingState.FORWARD
-    else:
-        raise ValueError(f"Invalid prefetch mode on rank {state.rank}: {prefetch_mode}")
-    # Prefetch the next set of handles without synchronizing to allow
-    # the sync to happen as late as possible to maximize overlap
-    _unshard(state, handle, state._unshard_stream, state._pre_unshard_stream)
-    handle._training_state = prev_training_state
-    handle._prefetched = True
+    for handle in handles:
+        # Temporarily emulate the training state while calling `_unshard` to
+        # ensure the correct `as_params` for `_use_unsharded_views()`
+        prev_training_state = handle._training_state
+        if prefetch_mode == _PrefetchMode.BACKWARD:
+            handle._training_state = HandleTrainingState.BACKWARD_PRE
+        elif prefetch_mode == _PrefetchMode.FORWARD:
+            handle._training_state = HandleTrainingState.FORWARD
+        else:
+            raise ValueError(f"Invalid prefetch mode on rank {state.rank}: {prefetch_mode}")
+        # Prefetch the next set of handles without synchronizing to allow
+        # the sync to happen as late as possible to maximize overlap
+        _unshard(state, handle, state._unshard_stream, state._pre_unshard_stream)
+        handle._training_state = prev_training_state
+        handle._prefetched = True
 
 
 @no_type_check
-def _get_handle_to_prefetch(
+def _get_handles_to_prefetch(
     state: _FSDPState,
     current_handle: FlatParamHandle,
-) -> FlatParamHandle:
+) -> List[FlatParamHandle]:
     """
     Returns a :class:`list` of the handles keys to prefetch for the next
     module(s), where ``current_handle`` represents the current module.
@@ -1250,7 +1251,7 @@ def _get_handle_to_prefetch(
         f"currently in {training_state}",
     )
     eod = state._exec_order_data
-    target_handle: Optional[FlatParamHandle] = None
+    target_handles: List[FlatParamHandle] = []
     if (
         training_state == HandleTrainingState.BACKWARD_PRE
         and state.backward_prefetch == BackwardPrefetch.BACKWARD_PRE
@@ -1258,27 +1259,25 @@ def _get_handle_to_prefetch(
         training_state == HandleTrainingState.BACKWARD_POST
         and state.backward_prefetch == BackwardPrefetch.BACKWARD_POST
     ):
-        target_handle_candidate = eod.get_handle_to_backward_prefetch(current_handle)
-        if (
-            target_handle_candidate
-            and target_handle_candidate._needs_pre_backward_unshard
-            and not target_handle_candidate._prefetched
-        ):
-            target_handle = target_handle_candidate
-        else:
-            target_handle = None
+        target_handle_candidates = eod.get_handles_to_backward_prefetch(current_handle)
+        for handle_candidate in target_handle_candidates:
+            if (
+                handle_candidate
+                and handle_candidate._needs_pre_backward_unshard
+                and not handle_candidate._prefetched
+            ):
+                target_handles.append(handle_candidate)
     elif training_state == HandleTrainingState.FORWARD and state.forward_prefetch:
-        target_handle_candidate = eod.get_handle_to_forward_prefetch(current_handle)
-        if (
-            target_handle_candidate
-            and target_handle_candidate._needs_pre_forward_unshard
-            and not target_handle_candidate._prefetched
-        ):
-            target_handle = target_handle_candidate
-        else:
-            target_handle = None
+        target_handle_candidates = eod.get_handles_to_forward_prefetch(current_handle)
+        for handle_candidate in target_handle_candidates:
+            if (
+                handle_candidate
+                and handle_candidate._needs_pre_forward_unshard
+                and not handle_candidate._prefetched
+            ):
+                target_handles.append(handle_candidate)
 
-    return target_handle
+    return target_handles
 
 
 def _get_training_state(

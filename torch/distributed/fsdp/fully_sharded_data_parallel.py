@@ -430,6 +430,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
             Optional[Iterable[torch.nn.Parameter]], Optional[Iterable[torch.nn.Module]]
         ] = None,
         device_mesh: Optional[DeviceMesh] = None,
+        num_modules_to_prefetch: int = 1,
     ):
         torch._C._log_api_usage_once("torch.distributed.fsdp")
         super().__init__()
@@ -489,8 +490,9 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
                 FullyShardedDataParallel,
             )
 
-        backward_prefetch_limit = 1
-        forward_prefetch_limit = 1
+        assert num_modules_to_prefetch >= 1, f"num_modules_to_prefetch should be >= 1, but found {num_modules_to_prefetch}"
+        backward_prefetch_limit = num_modules_to_prefetch
+        forward_prefetch_limit = num_modules_to_prefetch
         _init_core_state(
             self,
             sharding_strategy,
