@@ -671,6 +671,9 @@ if(ANDROID
   message(WARNING "INTERN_BUILD_MOBILE is on, disabling BUILD_LAZY_TS_BACKEND")
   set(BUILD_LAZY_TS_BACKEND OFF)
 
+  set(USE_KLEIDIAI OFF)
+  message(WARNING "KleidiAI cannot be used on Mobile builds. Set it to OFF")
+
   # Set -ffunction-sections and -fdata-sections so that each method has its own
   # text section. This allows the linker to remove unused section when the flag
   # -Wl,-gc-sections is provided at link time.
