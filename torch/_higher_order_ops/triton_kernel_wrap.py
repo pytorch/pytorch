@@ -1232,7 +1232,7 @@ class TritonHOPifier:
         tx: Optional["InstructionTranslator"],
     ) -> Optional["ConstantVariable"]:
         from triton import JITFunction
-        from triton.runtime.autotuner import autotune, Autotuner, Config
+        from triton.runtime.autotuner import autotune, Autotuner, Config, Heuristics
 
         # Check if num_ctas is in kwargs
         if "num_ctas" in kwargs:
@@ -1244,6 +1244,27 @@ class TritonHOPifier:
         # Make sure the kernel has a grid
         if variable.grid is None:
             self.raise_unsupported("Triton kernels should always be called with a grid")
+
+        """
+        Currently, if there are multiple autotuning decorators, the subsequent ones will be silently ignored.
+        We also don't support the @triton.heuristics wrapper yet.
+        We raise an error here to avoid silent incorrectness in these cases
+        """
+        iter_kernel = variable.kernel
+        autotuner_count = 0
+        while not isinstance(iter_kernel, JITFunction):
+            if isinstance(iter_kernel, Autotuner):
+                autotuner_count += 1
+            if isinstance(iter_kernel, Heuristics):
+                self.raise_unsupported(
+                    "Passing @triton.heuristics decorator after @triton.autotune decorator is not supported. is not supported. "
+                )
+            if autotuner_count > 1:
+                self.raise_unsupported(
+                    "Passing multiple @triton.autotune decorators is not supported. "
+                    "Please use a single @triton.autotune decorator instead."
+                )
+            iter_kernel = iter_kernel.fn
 
         SPECIAL_CONFIG_NAMES = {"num_warps", "num_stages", "num_ctas"}
 
@@ -1320,9 +1341,6 @@ class TritonHOPifier:
                     )(variable.kernel.fn)
                     new_var = type(variable)(new_kernel, None, variable.grid)
                     return self.call_triton_kernel(new_var, args, kwargs, tx)
-
-        if variable.grid is None:
-            self.raise_unsupported("Triton kernels should always be called with a grid")
 
         # These are the default values in upstream Triton
         # see: https://github.com/triton-lang/triton/blob/e57b46897191b3b3061c78d0d60e58e94be565b6/python/triton/runtime/autotuner.py # noqa: E501,B950

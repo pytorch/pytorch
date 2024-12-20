@@ -154,6 +154,7 @@ manual_torch_name_rule_map = {
     "torch._dynamo.external_utils.is_compiling": TorchInGraphFunctionVariable,
     "torch.compiler.is_compiling": TorchInGraphFunctionVariable,
     "torch.compiler.is_dynamo_compiling": TorchInGraphFunctionVariable,
+    "torch.compiler.is_exporting": TorchInGraphFunctionVariable,
     "torch.autograd._profiler_enabled": SkipFunctionVariable,
     "torch._C._to_dlpack": SkipFunctionVariable,
     "torch.to_dlpack": SkipFunctionVariable,
