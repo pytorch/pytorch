@@ -4,8 +4,15 @@ import os
 import tempfile
 import textwrap
 from functools import lru_cache
-from typing import Any, List
+from typing import Any, List, Optional, TYPE_CHECKING
 
+from torch._dynamo.exc import ShortenTraceback
+
+
+if TYPE_CHECKING:
+    import types
+
+    from torch.cuda import _CudaDeviceProperties
 
 if os.environ.get("TORCHINDUCTOR_WRITE_MISSING_OPS") == "1":
 
@@ -104,3 +111,27 @@ class CppCompileError(RuntimeError):
 
 class CUDACompileError(CppCompileError):
     pass
+
+
+class TritonMissing(ShortenTraceback):
+    def __init__(self, first_useful_frame: Optional[types.FrameType]) -> None:
+        super().__init__(
+            "Cannot find a working triton installation. "
+            "Either the package is not installed or it is too old. "
+            "More information on installing Triton can be found at: https://github.com/triton-lang/triton",
+            first_useful_frame=first_useful_frame,
+        )
+
+
+class GPUTooOldForTriton(ShortenTraceback):
+    def __init__(
+        self,
+        device_props: _CudaDeviceProperties,
+        first_useful_frame: Optional[types.FrameType],
+    ) -> None:
+        super().__init__(
+            f"Found {device_props.name} which is too old to be supported by the triton GPU compiler, "
+            "which is used as the backend. Triton only supports devices of CUDA Capability >= 7.0, "
+            f"but your device is of CUDA capability {device_props.major}.{device_props.minor}",
+            first_useful_frame=first_useful_frame,
+        )
