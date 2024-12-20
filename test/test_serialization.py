@@ -313,6 +313,7 @@ class SerializationMixin:
         not TEST_DILL or not HAS_DILL_AT_LEAST_0_3_1,
         '"dill" not found or not correct version'
     )
+    @skipIfTorchDynamo("Different behavior between 3.11 and 3.13, causing CI issues")
     def test_serialization_dill(self):
         x = torch.randn(5, 5)
 

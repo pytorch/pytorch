@@ -236,6 +236,11 @@ class SuperVariable(VariableTracker):
                 self.objvar, attr, variables.DeletedVariable()
             )
             return variables.ConstantVariable(None)
+        elif (
+            isinstance(self.objvar, variables.UserDefinedDictVariable)
+            and inner_fn in self.objvar._dict_methods
+        ):
+            return self.objvar._dict_vt.call_method(tx, name, args, kwargs)
 
         unimplemented(f"non-function or method super: {inner_fn}")
 

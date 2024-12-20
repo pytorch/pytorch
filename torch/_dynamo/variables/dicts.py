@@ -283,7 +283,14 @@ class ConstDictVariable(VariableTracker):
 
         arg_hashable = args and is_hashable(args[0])
 
-        if name == "__getitem__":
+        if name == "__init__":
+            temp_dict_vt = variables.BuiltinVariable(dict).call_dict(
+                tx, *args, **kwargs
+            )
+            tx.output.side_effects.mutation(self)
+            self.items.update(temp_dict_vt.items)
+            return ConstantVariable.create(None)
+        elif name == "__getitem__":
             assert len(args) == 1
             return self.getitem_const_raise_exception_if_absent(tx, args[0])
         elif name == "items":
