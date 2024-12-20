@@ -1231,6 +1231,7 @@ class VariableBuilder:
             isinstance(value, (dict, collections.OrderedDict))
             and type(value).__new__ is dict.__new__
         ):
+            # Construct a dict_vt that will reside inside the UserDefinedDictVariable
             self.install_guards(GuardBuilder.TYPE_MATCH)
             self.install_guards(GuardBuilder.SEQUENCE_LENGTH)
 
@@ -1252,6 +1253,10 @@ class VariableBuilder:
                 build_key_value(i, k, v) for i, (k, v) in enumerate(value.items())
             )
 
+            # NB: This is deliberately kept ValueMutationNew because dict_vt is
+            # an internal representation. dict_vt tracks the mutation on the
+            # dict side. side_effects infra uses the UserDefinedDictVariable to
+            # apply side-effects of this dict_vt.
             dict_vt = ConstDictVariable(
                 result,
                 user_cls=collections.OrderedDict
@@ -1259,6 +1264,7 @@ class VariableBuilder:
                 else dict,
                 mutation_type=ValueMutationNew(),
             )
+
             result = UserDefinedDictVariable(value, dict_vt=dict_vt, source=self.source)
             return self.tx.output.side_effects.track_object_existing(value, result)
         elif issubclass(type(value), MutableMapping):

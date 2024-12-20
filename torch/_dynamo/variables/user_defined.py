@@ -42,6 +42,7 @@ from ..utils import (
     build_checkpoint_variable,
     build_invoke_subgraph_variable,
     check_constant_args,
+    dict_methods,
     get_custom_getattr,
     has_torch_function,
     is_frozen_dataclass,
@@ -585,15 +586,6 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 [self, *args],
                 kwargs,
             )
-        elif (
-            inspect.getattr_static(self.value, "__new__") is dict.__new__
-            and inspect.getattr_static(self.value, "__getattribute__")
-            is dict.__getattribute__
-            and self.source
-        ):
-            var = tx.output.side_effects.track_object_new_from_user_defined_class(self)
-            var.call_method(tx, "__init__", args, kwargs)
-            return var
 
         return super().call_function(tx, args, kwargs)
 
@@ -602,7 +594,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
         new_fn = inspect.getattr_static(self.value, "__new__", None)
         if isinstance(new_fn, staticmethod):
             new_fn = new_fn.__func__
-        return new_fn in (object.__new__, Generic.__new__)
+        return new_fn in (object.__new__, Generic.__new__, dict.__new__)
 
     def call_hasattr(self, tx: "InstructionTranslator", name: str) -> "VariableTracker":
         if self.source:
@@ -1407,6 +1399,14 @@ class RemovableHandleVariable(VariableTracker):
 
 
 class UserDefinedDictVariable(UserDefinedObjectVariable):
+    """
+    Represents user defined objects that are subclasses of dict/OrderedDict.
+
+    Internally, it uses a ConstDictVariable to represent the dict part of the
+    variable tracker. For everything else, it falls back to
+    UserDefinedObjectVariable.
+    """
+
     _nonvar_fields = UserDefinedObjectVariable._nonvar_fields
 
     def __init__(self, value, dict_vt=None, **kwargs):
@@ -1415,18 +1415,11 @@ class UserDefinedDictVariable(UserDefinedObjectVariable):
         if self._dict_vt is None:
             assert (
                 self.source is None
-            ), "dict_vt must be constructed when source is present"
+            ), "dict_vt must be constructed by builder.py when source is present"
             self._dict_vt = variables.ConstDictVariable(
                 {}, mutation_type=ValueMutationNew()
             )
-        # Move this to _dynamo/utils. Include OrderedDict methods as well.
-        self._dict_methods = [
-            method
-            for method in itertools.chain(
-                dict.__dict__.values(), collections.OrderedDict.__dict__.values()
-            )
-            if callable(method)
-        ]
+        self._dict_methods = dict_methods
 
     def call_method(
         self,
