@@ -424,7 +424,8 @@ def _single_tensor_adam(
             device_beta1 = beta1
 
         # Decay the first and second moment running average coefficient
-        exp_avg.lerp_(grad, 1 - device_beta1)
+        if device_beta1 > 0: 
+            exp_avg.lerp_(grad, 1 - device_beta1)
 
         exp_avg_sq.mul_(beta2).addcmul_(grad, grad.conj(), value=1 - beta2)
 
@@ -620,7 +621,8 @@ def _multi_tensor_adam(
         # Decay the first and second moment running average coefficient
         # Use device beta1 if beta1 is a tensor to ensure all
         # tensors are on the same device
-        torch._foreach_lerp_(device_exp_avgs, device_grads, 1 - device_beta1)
+        if device_beta1 > 0:
+            torch._foreach_lerp_(device_exp_avgs, device_grads, 1 - device_beta1)
 
         torch._foreach_mul_(device_exp_avg_sqs, beta2)
 
