@@ -43,6 +43,7 @@
   {"CUDA_VERSION", "${CUDA_VERSION}"}, \
   {"ROCM_VERSION", "${ROCM_VERSION}"}, \
   {"USE_CUDNN", "${USE_CUDNN}"}, \
+  {"COMMIT_SHA", "${COMMIT_SHA}"}, \
   {"CUDNN_VERSION", "${CUDNN_VERSION}"}, \
   {"USE_NCCL", "${USE_NCCL}"}, \
   {"USE_MPI", "${USE_MPI}"}, \
