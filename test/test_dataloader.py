@@ -45,10 +45,11 @@ from torch.testing._internal.common_utils import (
     xfailIfLinux,
 )
 from torch.utils.data import (
-    dataloader, _utils,
+    _utils,
     ChainDataset,
     ConcatDataset,
     DataLoader,
+    dataloader,
     Dataset,
     IterableDataset,
     IterDataPipe,
@@ -2854,9 +2855,7 @@ except RuntimeError as e:
     def test_default_collate_bad_sequence_type(self):
         batch = [["X"], ["X", "X"]]
         self.assertRaises(RuntimeError, lambda: dataloader.default_collate(batch))
-        self.assertRaises(
-            RuntimeError, lambda: dataloader.default_collate(batch[::-1])
-        )
+        self.assertRaises(RuntimeError, lambda: dataloader.default_collate(batch[::-1]))
 
     @unittest.skipIf(not TEST_NUMPY, "numpy unavailable")
     def test_default_collate_shared_tensor(self):
