@@ -208,6 +208,31 @@ class StructuredTraceTest(TestCase):
         finally:
             shutil.rmtree(out, ignore_errors=True)
 
+    def test_compile_id_serialization_deserialization(self):
+        cid = torch._guards.CompileId(
+            frame_id=1,
+            frame_compile_id=2,
+        )
+        assert cid == torch._guards.CompileId.from_string(str(cid))
+
+        cid = torch._guards.CompileId(
+            compiled_autograd_id=1,
+            frame_id=2,
+            frame_compile_id=3,
+        )
+        assert cid == torch._guards.CompileId.from_string(str(cid))
+
+        cid = torch._guards.CompileId(
+            compiled_autograd_id=1,
+            frame_id=None,
+            frame_compile_id=None,
+        )
+        assert cid == torch._guards.CompileId.from_string(str(cid))
+
+        for bad_cid in ["-/-", "-/1", "1/-", "!1/2", "!1/-/-"]:
+            with self.assertRaises(ValueError):
+                torch._guards.CompileId.from_string(bad_cid)
+
     @requires_cuda
     def test_schedule(self):
         fn_opt = torch.compile(inductor_schedule_fn, backend="inductor")
@@ -873,8 +898,96 @@ def forward(self, x_1: "f32[2][1]cpu"):
         fn_opt(x)
         # Should print twice, including inductor_output_code
         self.assertParses()
-        chromium_event = '{"chromium_event": {}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}'
+        chromium_event = (
+            '{"chromium_event": {}, "frame_id": 0, "frame_compile_id": 0, '
+            '"attempt": 0, "has_payload": "HASH"}'
+        )
         self.assertTrue(chromium_event in self.buffer.getvalue())
+
+    @requires_tlparse
+    @torch._dynamo.config.patch("compiled_autograd", True)
+    @torch._inductor.config.patch("fx_graph_cache", True)
+    @show_chrome_events
+    def test_compiled_autograd_id(self):
+        def fn(a):
+            return a.sin().sum().backward()
+
+        x = torch.tensor([1.0], requires_grad=True)
+        fn_opt = torch._dynamo.optimize("inductor")(fn)
+        fn_opt(x)
+        torch._dynamo.reset()
+        # Trigger a cache hit
+        fn_opt(x)
+        # Should print twice, including inductor_output_code
+        self.assertParses()
+        chromium_events = [
+            (
+                '{"chromium_event": {}, "frame_id": 0, "frame_compile_id": 0, '
+                '"attempt": 0, "has_payload": "HASH"}'
+            ),
+            (
+                '{"compiled_autograd_graph": {}, "compiled_autograd_id": 0, '
+                '"attempt": 0, "has_payload": "HASH"}'
+            ),
+            (
+                '{"chromium_event": {}, "compiled_autograd_id": 0, "frame_id": 1, "frame_compile_id": 0, '
+                '"attempt": 0, "has_payload": "HASH"}'
+            ),
+        ]
+        logs = self.buffer.getvalue()
+        self.assertTrue(all(event in logs for event in chromium_events))
+
+    @requires_tlparse
+    @torch._dynamo.config.patch("compiled_autograd", True)
+    def test_compiled_autograd_attribution(self):
+        # multiple dynamo recompiles should still be attributed to the parent compiled autograd id
+        def fn():
+            class MySin(torch.autograd.Function):
+                @staticmethod
+                def forward(ctx, x):
+                    ctx.save_for_backward(x)
+                    return torch.sin(x)
+
+                @staticmethod
+                def backward(ctx, gO):
+                    print("graph break")
+                    (x,) = ctx.saved_tensors
+                    print("graph break")
+                    return gO * torch.cos(x)
+
+            grads = []
+            for i in [10, 100, 10, 15, 20, 25]:
+                x = torch.arange(0.0, i, requires_grad=True)
+                out = MySin.apply(x)
+                loss = out.sum()
+                loss.backward()
+                grads.append(x.grad)
+
+            return grads
+
+        fn_opt = torch.compile(fn)
+        fn_opt()
+        self.assertParses()
+        expected = [
+            '{"dynamo_start": {"stack": "STACK"}, "frame_id": 0, "frame_compile_id": 0, "attempt": 0}',
+            '{"dynamo_start": {"stack": "STACK"}, "frame_id": 1, "frame_compile_id": 0, "attempt": 0}',
+            '{"dynamo_start": {"stack": "STACK"}, "compiled_autograd_id": 0, "frame_id": 2, "frame_compile_id": 0, "attempt": 0}',
+            '{"dynamo_start": {"stack": "STACK"}, "compiled_autograd_id": 0, "frame_id": 3, "frame_compile_id": 0, "attempt": 0}',
+            '{"dynamo_start": {"stack": "STACK"}, "compiled_autograd_id": 0, "frame_id": 4, "frame_compile_id": 0, "attempt": 0}',
+            '{"dynamo_start": {"stack": "STACK"}, "compiled_autograd_id": 0, "frame_id": 5, "frame_compile_id": 0, "attempt": 0}',
+            '{"dynamo_start": {"stack": "STACK"}, "compiled_autograd_id": 0, "frame_id": 6, "frame_compile_id": 0, "attempt": 0}',
+            '{"dynamo_start": {"stack": "STACK"}, "compiled_autograd_id": 0, "frame_id": 7, "frame_compile_id": 0, "attempt": 0}',
+            '{"dynamo_start": {"stack": "STACK"}, "compiled_autograd_id": 0, "frame_id": 8, "frame_compile_id": 0, "attempt": 0}',
+            '{"dynamo_start": {"stack": "STACK"}, "frame_id": 1, "frame_compile_id": 1, "attempt": 0}',
+            '{"dynamo_start": {"stack": "STACK"}, "compiled_autograd_id": 1, "frame_id": 9, "frame_compile_id": 0, "attempt": 0}',
+            '{"dynamo_start": {"stack": "STACK"}, "compiled_autograd_id": 1, "frame_id": 5, "frame_compile_id": 1, "attempt": 0}',
+            '{"dynamo_start": {"stack": "STACK"}, "compiled_autograd_id": 1, "frame_id": 6, "frame_compile_id": 1, "attempt": 0}',
+            '{"dynamo_start": {"stack": "STACK"}, "compiled_autograd_id": 1, "frame_id": 10, "frame_compile_id": 0, "attempt": 0}',
+            '{"dynamo_start": {"stack": "STACK"}, "compiled_autograd_id": 1, "frame_id": 9, "frame_compile_id": 1, "attempt": 0}',
+            '{"dynamo_start": {"stack": "STACK"}, "compiled_autograd_id": 1, "frame_id": 10, "frame_compile_id": 1, "attempt": 0}',
+        ]
+        logs = self.buffer.getvalue()
+        self.assertTrue(all(event in logs for event in expected))
 
 
 if __name__ == "__main__":
