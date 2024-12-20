@@ -31,8 +31,8 @@ ARG PYTHON_VERSION=3.11
 ARG TARGETPLATFORM
 # translating Docker's TARGETPLATFORM into miniconda arches
 RUN case ${TARGETPLATFORM} in \
-    "linux/arm64")  MINICONDA_ARCH=aarch64  ;; \
-    *)              MINICONDA_ARCH=x86_64   ;; \
+        "linux/arm64")  MINICONDA_ARCH=aarch64  ;; \
+        *)              MINICONDA_ARCH=x86_64   ;; \
     esac && \
     curl -fsSL -v -o ~/miniconda.sh -O  "https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-Linux-${MINICONDA_ARCH}.sh"
 COPY requirements.txt .
@@ -145,11 +145,11 @@ ARG TARGETPLATFORM
 ARG CUDA_VERSION
 LABEL com.nvidia.volumes.needed="nvidia_driver"
 RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-    ca-certificates \
-    g++ \
-    libjpeg-dev \
-    libpng-dev \
-    && rm -rf /var/lib/apt/lists/*
+        ca-certificates \
+        g++ \
+        libjpeg-dev \
+        libpng-dev \
+        && rm -rf /var/lib/apt/lists/*
 
 # Copy the Conda environment with dependencies only
 COPY --from=conda /opt/conda /opt/conda
