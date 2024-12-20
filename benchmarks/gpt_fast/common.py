@@ -1,5 +1,6 @@
 import dataclasses
-from typing import Callable, Dict
+from typing import Callable, Dict, Optional
+
 
 all_experiments: Dict[str, Callable] = {}
 
@@ -16,7 +17,7 @@ class Experiment:
     is_model: bool = False
 
 
-def register_experiment(name: str = None):
+def register_experiment(name: Optional[str] = None):
     def decorator(func):
         key = name or func.__name__
         all_experiments[key] = func
