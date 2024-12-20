@@ -3854,7 +3854,7 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
 
         # this should not trigger a recompilation
         # this is because we modified the test to not touch the records dict
-        # as in the other test. If we kept it, it would trigger a recompile here.
+        # as we do in test_triton_kernel_prune_configs_by. If we kept it, it would trigger a recompile here.
         self.assertEqual(counter.op_count, 1)
 
         # Modify the autotuner object
