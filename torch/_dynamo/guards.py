@@ -445,35 +445,7 @@ def _ast_unparse(node: ast.AST) -> str:
     return ast.unparse(node).replace("\n", "")
 
 
-def strip_function_call(name):
-    """
-    "___odict_getitem(a, 1)" => "a"
-    "a.layers[slice(2)][0]._xyz" ==> "a"
-    "getattr(a.layers[slice(2)][0]._abc, '0')" ==> "a"
-    "getattr(getattr(a.x[3], '0'), '3')" ==> "a"
-    "a.layers[slice(None, -1, None)][0]._xyz" ==> "a"
-    """
-    # recursively find valid object name in function
-    valid_name = re.compile("[A-Za-z_].*")
-    curr = ""
-    for char in name:
-        if char in " (":
-            curr = ""
-        elif char in "),[]":
-            if curr and curr != "None" and valid_name.match(curr):
-                return strip_function_call(curr)
-        else:
-            curr += char
-
-    return strip_getattr_getitem(name)
-
-
-def strip_getattr_getitem(name):
-    """
-    "a[1]" => "a"
-    "a.foo" => "a"
-    """
-    return re.split(r"[.\[]", name)[0]
+strip_function_call = torch._C._dynamo.strip_function_call
 
 
 def get_verbose_code_part(code_part: str, guard: Guard) -> str:
@@ -1304,7 +1276,7 @@ class GuardBuilder(GuardBuilderBase):
             name = guard
         else:
             name = guard.name
-        base = strip_getattr_getitem(strip_function_call(name))
+        base = strip_function_call(name)
         if base not in self.argnames:
             if re.match(r"[a-zA-Z0-9_]+", base):
                 if re.match(r"^\d+$", base):
