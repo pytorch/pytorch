@@ -447,9 +447,7 @@ def output_json(filename, headers, row):
             if isinstance(value, str):
                 record["metric"] = {
                     "name": header,
-                    "extra_info": {
-                        "benchmark_values": [value]
-                    }
+                    "extra_info": {"benchmark_values": [value]},
                 }
             else:
                 record["metric"] = {
