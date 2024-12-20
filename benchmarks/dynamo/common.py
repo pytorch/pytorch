@@ -1070,7 +1070,7 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
         if args.export_aot_inductor:
             frozen_model_iter_fn = export_aot_inductor(model, example_inputs)
         else:
-            frozen_model_iter_fn = torch._dynamo.run(model_iter_fn)
+            frozen_model_iter_fn = optimize_ctx(model_iter_fn)
 
         for rep in trange(args.repeat, desc="running benchmark"):
             inputs = (
@@ -1126,8 +1126,8 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
             timings,
         )
 
-    first_headers = ["dev", "name", "batch_size"]
-    first_fields = [current_device, current_name, current_batch_size]
+    first_headers = ["dev", "name", "batch_size", "eager_median", "optimized_median"]
+    first_fields = [current_device, current_name, current_batch_size, str(median[0]), str(median[1])]
     if "tag" in kwargs:
         first_headers.append("tag")
         first_fields.append(kwargs["tag"])
@@ -3221,7 +3221,7 @@ class BenchmarkRunner:
             peak_mem = 0
             start_stats = get_dynamo_stats()
             try:
-                if current_device == "cuda":
+                if current_device in ["cuda", "hpu"]:
                     torch.cuda.reset_peak_memory_stats()
                     empty_gpu_cache(current_device)
                 t0 = time.perf_counter()
@@ -3229,7 +3229,7 @@ class BenchmarkRunner:
                     fn(model, example_inputs)
                 t1 = time.perf_counter()
                 latency = t1 - t0
-                if current_device == "cuda":
+                if current_device in ["cuda", "hpu"]:
                     peak_mem = get_peak_memory()
                 elif current_device == "cpu":
                     total = psutil.virtual_memory().total
@@ -3379,7 +3379,7 @@ class BenchmarkRunner:
             peak_mem = 0
             start_stats = get_dynamo_stats()
             try:
-                if current_device == "cuda":
+                if current_device in ["cuda", "hpu"]:
                     torch.cuda.reset_peak_memory_stats()
                     empty_gpu_cache(current_device)
                 t0 = time.perf_counter()
@@ -3387,7 +3387,7 @@ class BenchmarkRunner:
                     fn(model, example_inputs)
                 t1 = time.perf_counter()
                 latency = t1 - t0
-                if current_device == "cuda":
+                if current_device in ["cuda", "hpu"]:
                     peak_mem = get_peak_memory()
                 elif current_device == "cpu":
                     total = psutil.virtual_memory().total
@@ -3707,7 +3707,7 @@ def parse_args(args=None):
         help="ID of the benchmark suite partition to be run. Used to divide CI tasks",
     )
     parser.add_argument(
-        "--devices", "--device", "-d", action="append", help="cpu or cuda"
+        "--devices", "--device", "-d", action="append", help="cpu, cuda or hpu"
     )
     parser.add_argument("--device-index", help="CUDA device index")
     parser.add_argument(
@@ -4070,6 +4070,13 @@ def parse_args(args=None):
         help="Enables Memory Snapshot tool for memory deep dives: https://pytorch.org/blog/understanding-gpu-memory-1/",
     )
 
+    parser.add_argument(
+        "--retain-output",
+        action="store_true",
+        help="Enables appending to the already existing output file if it exists \
+            instead of deleting it and creating a new one."
+    )
+
     group_latency = parser.add_mutually_exclusive_group()
     group_latency.add_argument(
         "--cold-start-latency",
@@ -4275,6 +4282,7 @@ def main(runner, original_dir=None, args=None):
     if original_dir:
         os.chdir(original_dir)
     args = parse_args() if not args else parse_args(args)
+
     if args.baseline:
         args.baseline = os.path.abspath(args.baseline)
 
@@ -4985,7 +4993,7 @@ def run(runner, args, original_dir=None):
             )
     else:
         metrics.purge_old_log_files()
-        if output_filename and os.path.exists(output_filename):
+        if output_filename and os.path.exists(output_filename) and not args.retain_output:
             os.unlink(output_filename)
         if original_dir:
             os.chdir(original_dir)
