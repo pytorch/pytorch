@@ -8,7 +8,7 @@ import os
 from collections import defaultdict, namedtuple, OrderedDict
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Literal, Sequence, TypeVar
+from typing import Any, Callable, Literal, TYPE_CHECKING, TypeVar
 
 import yaml
 
@@ -94,6 +94,10 @@ from torchgen.utils import (
     Target,
 )
 from torchgen.yaml_utils import YamlDumper, YamlLoader
+
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 
 T = TypeVar("T")
@@ -229,7 +233,7 @@ def parse_tags_yaml_struct(es: object, path: str = "<stdin>") -> set[str]:
     return rs
 
 
-@functools.lru_cache(maxsize=None)
+@functools.cache
 def parse_tags_yaml(path: str) -> set[str]:
     global _GLOBAL_PARSE_TAGS_YAML_CACHE
     if path not in _GLOBAL_PARSE_TAGS_YAML_CACHE:
@@ -1331,11 +1335,9 @@ def compute_registration_declarations(
     f: NativeFunction, backend_indices: dict[DispatchKey, BackendIndex]
 ) -> str:
     name = dispatcher.name(f.func)
-    returns_type = dispatcher.returns_type(
-        f.func.returns
-    ).cpp_type_registration_declarations()
+    returns_type = dispatcher.returns_type(f.func.returns).cpp_type()
     args = dispatcher.arguments(f.func)
-    args_str = ", ".join(a.no_default().decl_registration_declarations() for a in args)
+    args_str = ", ".join(a.no_default().decl() for a in args)
     comment_data: dict[str, str] = {
         "schema": f"aten::{f.func}",
         # TODO: What exactly is the semantics of the 'dispatch' field?

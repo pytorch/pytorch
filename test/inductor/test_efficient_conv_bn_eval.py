@@ -13,7 +13,6 @@ from torch import nn
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
 
-from torch._dynamo import config as dynamo_config
 from torch._dynamo.utils import counters
 from torch._inductor import config as inductor_config
 from torch._inductor.test_case import TestCase
@@ -95,9 +94,6 @@ class MultiUserConvOp(nn.Module):
 
 
 class EfficientConvBNEvalTemplate(TestCase):
-    # With specialize_float = False, momentum becomes an input and so
-    # the number of bytes accessed wobbles
-    @dynamo_config.patch(specialize_float=True)
     @inductor_config.patch({"efficient_conv_bn_eval_fx_passes": True})
     def test_basic(self):
         def test_conv_bn_eval(
