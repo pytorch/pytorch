@@ -337,6 +337,7 @@ def _single_tensor_sgd(
             # Nested if is necessary to bypass jitscript rules
             if isinstance(weight_decay, Tensor):
                 if weight_decay.requires_grad:
+                    # usually this is the differentiable path, which is why the param.clone() is needed
                     grad = grad.addcmul_(param.clone(), weight_decay)
                 else:
                     grad = grad.add(param, alpha=weight_decay)
