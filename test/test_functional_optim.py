@@ -92,7 +92,6 @@ class TestFunctionalOptimParity(TestCase):
         module_optim = MyModule()
         module_functional = MyModule()
         optim_params = module_optim.parameters()
-        functional_params = module_functional.parameters()
         optim = optim_cls(optim_params, *args, **kwargs)
         functional_optim_cls = functional_optim_map.get(optim_cls, None)
         if not functional_optim_cls:
