@@ -17,6 +17,7 @@ class load:
 
 class save:
     compute_crc32: bool = True
+    use_pinned_memory_for_d2h: bool = False
 
 
 _install_config_module(sys.modules[__name__])
