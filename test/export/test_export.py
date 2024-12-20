@@ -1595,8 +1595,8 @@ graph():
 
     @testing.expectedFailureLegacyExportNonStrict  # Old export doesn't work with subclasses
     @testing.expectedFailureLegacyExportStrict  # Old export doesn't work with subclasses
-    @testing.expectedFailureSerDerNonStrict  # builtins.getattr is not supported
-    @testing.expectedFailureSerDer  # builtins.getattr is not supported
+    @testing.expectedFailureSerDerNonStrict  # builtins.getattr is not supported  T211130564
+    @testing.expectedFailureSerDer  # builtins.getattr is not supported  T211130564
     def test_subclass_nested_attr_access(self):
         from torch.testing._internal.two_tensor import TwoTensor
 
