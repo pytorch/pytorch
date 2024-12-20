@@ -1077,8 +1077,22 @@ class TritonHOPifier:
     ) -> Union[Tuple[Union[int, sympy.Expr, SymInt], ...], Tuple["Proxy", ...]]:
         raise NotImplementedError("abstract method")
 
+    def wrap_user_defined_obj(
+        self,
+        user_obj: Any,
+        tx: Optional["InstructionTranslator"],
+        source: Any | None,
+        name: str,
+    ) -> Any:
+        raise NotImplementedError("abstract method")
+
     def call_user_defined_fn(
-        self, user_fn: Callable[..., Any], args: List, kwargs: Dict
+        self,
+        user_fn: Callable[..., Any],
+        args: List,
+        kwargs: Dict,
+        tx: Optional["InstructionTranslator"],
+        source: Any | None,
     ) -> Any:
         raise NotImplementedError("abstract method")
 
@@ -1240,6 +1254,12 @@ class TritonHOPifier:
                 special_kwargs[name] = self.get_value(val)
 
         if special_kwargs:
+            prune_configs_by = {
+                "perf_model": variable.kernel.perf_model,
+                "early_config_prune": variable.kernel.early_config_prune,
+                "configs_top_k": variable.kernel.configs_top_k,
+            }
+
             if isinstance(variable.kernel, Autotuner):
                 # if there is Autotuner already, set
                 # special kwargs to each of its configs
@@ -1247,13 +1267,17 @@ class TritonHOPifier:
                 for config in new_configs:
                     config.__dict__.update(special_kwargs)
 
-                new_kernel = autotune(configs=new_configs, key=[])(variable.kernel.fn)
+                new_kernel = autotune(
+                    configs=new_configs, key=[], prune_configs_by=prune_configs_by
+                )(variable.kernel.fn)
             else:
                 # if there is no Autotuner, wrap the kernel into a
                 # new one with a single config with special kwargs
                 new_config = Config(kwargs={}, **special_kwargs)
 
-                new_kernel = autotune(configs=[new_config], key=[])(variable.kernel)
+                new_kernel = autotune(
+                    configs=[new_config], key=[], prune_configs_by=prune_configs_by
+                )(variable.kernel)
 
             # create a new variable to contain the new (wrapped) kernel;
             # skip kernel_idx to get a new record in the kernel side table
@@ -1321,30 +1345,30 @@ class TritonHOPifier:
 
             assert tx is not None
 
-            # These functions need to be wrapped since in the TritonKernelVariable they are just
-            # "regular" functions and objects
             # The source information is important here so the guards are installed correctly
+
+            if hasattr(variable, "source"):
+                variable_source = variable.source
+            else:
+                varibale_source = None
 
             wrapped_early_configs_prune = self.wrap_user_defined_obj(
                 variable.kernel.early_config_prune,
                 tx,
-                variable.source,
+                variable_source,
                 "early_config_prune",
             )
+
             wrapped_perf_model = self.wrap_user_defined_obj(
-                variable.kernel.perf_model, tx, variable.source, "perf_model"
+                variable.kernel.perf_model, tx, variable_source, "perf_model"
             )
 
             wrapped_configs_top_k = self.wrap_user_defined_obj(
-                variable.kernel.configs_top_k, tx, variable.source, "configs_top_k"
+                variable.kernel.configs_top_k, tx, variable_source, "configs_top_k"
             )
 
             wrapped_configs = self.wrap_user_defined_obj(
-                variable.kernel.configs, tx, variable.source, "configs"
-            )
-
-            wrapped_configs_top_k = self.wrap_user_defined_obj(
-                variable.kernel.configs_top_k, tx, variable.source, "configs_top_k"
+                variable.kernel.configs, tx, variable_source, "configs"
             )
 
             pruned_configs = self.call_user_defined_fn(
@@ -1360,18 +1384,18 @@ class TritonHOPifier:
                 ],
                 {},
                 tx,
-                variable.source,
+                variable_source,
             )
 
             # The result of prune_configs must be a var sequence
-            # (this is true in OSS as well)
             # Similar to guard_as_python_constant, this function inserts
-            # guards for Dynamo
+            # guards for Dynamo.
             pruned_configs = pruned_configs.unpack_var_sequence(tx)
             # guard_as_python_constant inserts some guards for Dynamo to check if the configs object changed.
             pruned_configs = [
                 config.guard_as_python_constant() for config in pruned_configs
             ]
+
             # after pruning the configs, create a new autotuner object with
             # these configs and recurise.
             new_kernel = autotune(configs=pruned_configs, key=[])(variable.kernel.fn)
@@ -1469,8 +1493,23 @@ class TracingTritonHOPifier(TritonHOPifier):
         assert callable(grid)
         return grid(meta)
 
+    def wrap_user_defined_obj(
+        self,
+        user_obj: Any,
+        tx: Optional["InstructionTranslator"],
+        source: Any | None,
+        name: str,
+    ) -> Any:
+        assert tx is None
+        return user_obj
+
     def call_user_defined_fn(
-        self, user_fn: Callable[..., Any], args: List, kwargs: Dict
+        self,
+        user_fn: Callable[..., Any],
+        args: List,
+        kwargs: Dict,
+        tx: Optional["InstructionTranslator"],
+        source: Any | None,
     ) -> Any:
         assert isinstance(args, list)
         assert isinstance(kwargs, dict)
