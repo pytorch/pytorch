@@ -32,6 +32,7 @@ from torch._dynamo.utils import (
     dynamo_timed,
     get_chromium_event_logger,
     preserve_rng_state,
+    set_feature_use,
 )
 from torch._guards import detect_fake_mode
 from torch._inductor.output_code import OutputCode
@@ -1165,6 +1166,7 @@ def aot_module_simplified(
         local = should_use_local_autograd_cache()
         remote = should_use_remote_autograd_cache()
         if local or remote:
+            set_feature_use("aot_autograd_remote_cache", remote)
             compiled_fn = AOTAutogradCache.load(
                 dispatch_and_compile,
                 mod,
