@@ -177,6 +177,11 @@ class GraphTransformObserver:
             # Update node meta when replacing old node with new node
             new_node = self.name_to_node.get(new, None)
 
+            if not new_node:
+                return
+
+            assert isinstance(new_node, Node)
+
             action = [NodeSourceAction.REPLACE]
             if new_node.name in self.created_nodes:
                 action.append(NodeSourceAction.CREATE)
