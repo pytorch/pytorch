@@ -89,7 +89,7 @@ from torch.monitor import _WaitCounter
 from torch.utils._ordered_set import OrderedSet
 
 from .._dynamo.backends.common import aot_autograd
-from .._dynamo.exc import ShortenTraceback
+from .._dynamo.exc import ShortenTraceback, SkipFrame
 from ..fx._lazy_graph_module import _use_lazy_graph_module
 from ..fx.graph import _PyTreeCodeGen
 from ..utils._triton import has_triton
@@ -698,7 +698,7 @@ def _compile_fx_inner(
                     triton_bundler_meta,
                 ) = TritonBundler.collect()
                 mb_compiled_graph.set_triton_bundle(triton_bundle)
-            except ShortenTraceback:
+            except (ShortenTraceback, SkipFrame):
                 raise
             except Exception as e:
                 raise InductorError(e, currentframe()).with_traceback(

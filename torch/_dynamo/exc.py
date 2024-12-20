@@ -3,7 +3,6 @@ from __future__ import annotations
 import logging
 import os
 import textwrap
-import types
 import typing
 from enum import auto, Enum
 from traceback import extract_stack, format_exc, format_list, StackSummary
