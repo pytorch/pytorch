@@ -1487,7 +1487,8 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
                 return self._process_data(data, worker_id)
 
     def _try_put_index(self):
-        assert self._tasks_outstanding < self._prefetch_factor * self._num_workers
+        max_tasks = self._prefetch_factor * self._num_workers
+        assert self._tasks_outstanding < max_tasks
 
         try:
             index = self._next_index()
@@ -1498,7 +1499,9 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
             if self._workers_status[worker_queue_idx]:
                 if self._in_order:
                     break
-                elif self._workers_num_tasks[worker_queue_idx] < self._prefetch_factor:
+                elif self._workers_num_tasks[worker_queue_idx] < max_tasks // sum(
+                    self._workers_status
+                ):
                     # when self._in_order is False, distribute work to a worker if it has capacity
                     break
         else:
