@@ -725,6 +725,9 @@ SDPBackend select_sdp_backend(sdp_params const& kernel_params) {
       !ctx.userEnabledMemEfficientSDP() && !ctx.userEnabledCuDNNSDP()) {
     return SDPBackend::error;
   }
+  if (ctx.userForceCuDNN()) {
+    return SDPBackend::cudnn_attention;
+  }
   // Get ideal kernel ordering
   const auto ordering = priority_order(kernel_params);
 
