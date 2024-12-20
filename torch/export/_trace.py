@@ -660,7 +660,7 @@ def _export_to_torch_ir(
             module_call_specs: Dict[str, Dict[str, pytree.TreeSpec]] = {}
             ctx = nullcontext()
             if not isinstance(f, torch.fx.GraphModule):
-                ctx = _wrap_submodules(
+                ctx = _wrap_submodules(  # type: ignore[assignment]
                     f, preserve_module_call_signature, module_call_specs
                 )
             with ctx, _ignore_backend_decomps():
@@ -1685,7 +1685,7 @@ def _non_strict_export(
             ]
             ctx = nullcontext()
             if not isinstance(mod, torch.fx.GraphModule):
-                ctx = _wrap_submodules(
+                ctx = _wrap_submodules(  # type: ignore[assignment]
                     wrapped_mod, new_preserved_call_signatures, module_call_specs
                 )
             with ctx:
