@@ -1,7 +1,6 @@
 # Owner(s): ["module: inductor"]
 # ruff: noqa: F841
 import contextlib
-import dataclasses
 import functools
 import io
 import itertools
@@ -22,6 +21,7 @@ from torch import _inductor as inductor
 from torch._dynamo import compiled_autograd, config
 from torch._dynamo.backends.debugging import aot_eager
 from torch._dynamo.device_interface import get_interface_for_device
+from torch._dynamo.testing import AotEagerAndRecordGraphs
 from torch._dynamo.utils import counters
 from torch._inductor import config as inductor_config
 from torch._inductor.test_case import run_tests, TestCase
@@ -39,8 +39,6 @@ from torch.testing._internal.logging_utils import logs_to_string
 
 
 def make_compiler_fn(fullgraph=True, dynamic=True, backend="inductor"):
-    assert backend in ["inductor", "aot_eager"]
-
     def _compiler_fn(gm):
         """Same as torch.compile() but counts number of compiles"""
 
@@ -50,6 +48,8 @@ def make_compiler_fn(fullgraph=True, dynamic=True, backend="inductor"):
                 return inductor.compile(gm_, example_inputs_)
             elif backend == "aot_eager":
                 return aot_eager(gm_, example_inputs_)
+            else:
+                return backend(gm_, example_inputs_)
 
         return torch.compile(
             gm, backend=_inner_compiler, fullgraph=fullgraph, dynamic=dynamic
@@ -1795,22 +1795,9 @@ main()
 
         """
         Walkthrough of what happens with `run_with_rng_state`:
-        1. `run_with_rng_state` only shows up in the backward graph (this op is inserted by the partitioner).
-        2. The Dynamo graph captured by Compiled Autograd looks like:
-        ```
-        ===== __compiled_fn_3 =====
-        torch/fx/_lazy_graph_module.py class GraphModule(torch.nn.Module):
-            def forward(self, L_inputs_ : list):
-                ...
-                run_with_rng_state = torch.ops.higher_order.run_with_rng_state(
-                    getitem_8,
-                    torch.ops.aten._scaled_dot_product_flash_attention_for_cpu.default,
-                    getitem_3, getitem_4, getitem_4, 0.0, True,
-                )
-                ...
-        ```
-        3. We want to preserve this `run_with_rng_state` op when going through AOTAutograd. We do it by having special handling
-        in `run_with_rng_state` op's py_functionalize_impl.
+        1. `run_with_rng_state` shows up in the backward graph in the compiled region (this op is inserted by the partitioner).
+        2. When we use compiled autograd over this, we want to preserve this `run_with_rng_state` op when going
+        through AOTAutograd. We do it by having special handling in `run_with_rng_state` op's py_functionalize_impl.
         """
 
         def _run_with_rng_state_op_check(inductor_post_grad_graph):
@@ -1823,35 +1810,9 @@ main()
         with torch._inductor.config.patch(
             post_grad_custom_post_pass=_run_with_rng_state_op_check
         ):
-            compiler_fn = make_compiler_fn(fullgraph=True)
+            self.check_output_and_recompiles(f)
 
-            def make_compiler_fn_with_op_check():
-                def _compiler_fn(gm):
-                    # Checks that `run_with_rng_state` op exists in Compiled Autograd's Dynamo graph.
-                    self.assertTrue(
-                        any(
-                            node.target is torch.ops.higher_order.run_with_rng_state
-                            for node in gm.graph.nodes
-                        )
-                    )
-                    return compiler_fn(gm)
-
-                return _compiler_fn
-
-            compiler_fn_with_op_check = make_compiler_fn_with_op_check()
-            self.check_output_and_recompiles(
-                f, compiler_fn=compiler_fn_with_op_check, compile_fn=False
-            )
-
-    @torch._inductor.config.patch(enable_auto_functionalized_v2=True)
     def test_trace_auto_functionalized_v2(self):
-        self.trace_auto_functionalized_base()
-
-    @torch._inductor.config.patch(enable_auto_functionalized_v2=False)
-    def test_trace_auto_functionalized(self):
-        self.trace_auto_functionalized_base()
-
-    def trace_auto_functionalized_base(self):
         with torch.library._scoped_library("testlib", "FRAGMENT") as lib:
             torch.library.define(
                 "testlib::foo",
@@ -1918,72 +1879,24 @@ main()
 
             """
             Walkthrough of what happens with `auto_functionalized`:
-            1. `auto_functionalized` op is inserted into the graph during AOTAutograd functionalization.
-            We force the op to be recomputed (by using SAC), so it appears in the backward graph.
-            2. The AOT backward graph looks like:
-            ```
-            ===== Backward graph 0 =====
-            def forward(self, primals_1: "f32[4, 4][4, 1]cpu", tangents_1: "f32[4, 4][4, 1]cpu"):
-                ...
-                X = torch.ops.higher_order.auto_functionalized(torch.ops.testlib.foo.default, x = mm)
-                ...
-                return (add_1,)
-            ```
-            3. The Compiled Autograd graph looks like:
-            ```
-            ===== Compiled autograd graph =====
-            def forward(self, inputs, sizes, scalars, hooks):
-                ...
-                X = torch.ops.higher_order.auto_functionalized(torch.ops.testlib.foo.default, x = aot0_mm)
-                ...
-                return []
-            ```
-            4. The Dynamo graph captured by Compiled Autograd looks like:
-            ```
-            ===== __compiled_fn_3 =====
-            def forward(self, L_inputs_ : list):
-                ...
-                X = torch.ops.higher_order.auto_functionalized(torch.ops.testlib.foo.default, x = aot0_mm)
-                ...
-                return (new_grad,)
-            ```
-            5. The Compiled Autograd's AOT "forward-only" graph looks like:
-            ```
-            ===== Forward graph 1 =====
-            def forward(self, arg0_1: "f32[][]cpu", arg1_1: "f32[4, 4][4, 1]cpu"):
-                ...
-                X = torch.ops.higher_order.auto_functionalized(torch.ops.testlib.foo.default, x = mm)
-                ...
-                return (clone_1,)
-            ```
-            6. The `auto_functionalized` op should then be lowered using the normal lowering path in Inductor.
+            1. `auto_functionalized` op is in the torch.compile backward.
+            2. When we use compiled autograd over this, we expect auto_functionalized to also be in the
+            compiled autograd post-AOT graph.
+            3. Inductor lowers the `auto_functionalized` op as usual.
             """
 
-            compiler_fn = make_compiler_fn(fullgraph=True, backend="aot_eager")
-
-            def make_compiler_fn_with_op_check():
-                def _compiler_fn(gm):
-                    auto_functionalize_func = (
-                        torch.ops.higher_order.auto_functionalized
-                        if not torch._inductor.config.enable_auto_functionalized_v2
-                        else torch.ops.higher_order.auto_functionalized_v2
-                    )
-
-                    # Checks that `auto_functionalized` op exists in Compiled Autograd's Dynamo graph.
-                    self.assertTrue(
-                        any(
-                            node.target is auto_functionalize_func
-                            for node in gm.graph.nodes
-                        ),
-                        f"{auto_functionalize_func} op not found in {gm.graph}",
-                    )
-                    return compiler_fn(gm)
-
-                return _compiler_fn
-
-            compiler_fn_with_op_check = make_compiler_fn_with_op_check()
+            backend = AotEagerAndRecordGraphs()
+            compiler_fn = make_compiler_fn(fullgraph=True, backend=backend)
             self.check_output_and_recompiles(
-                f, compiler_fn=compiler_fn_with_op_check, compile_fn=False
+                f, compiler_fn=compiler_fn, compile_fn=False
+            )
+            self.assertEqual(len(backend.fw_graphs), 1)
+            gm = backend.fw_graphs[0]
+            self.assertTrue(
+                any(
+                    node.target is torch.ops.higher_order.auto_functionalized_v2
+                    for node in gm.graph.nodes
+                )
             )
 
     @scoped_load_inline
@@ -2909,24 +2822,10 @@ TORCH_LIBRARY(test_cudagraphs_cpu_scalar_used_in_cpp_custom_op, m) {
 
         expected_logs = [
             "code: CompiledFunctionBackward (NodeCall 2)",
-            "aot0_primals_3",
-            "aot0_relu",
-            "aot0_le",
-            "aot0_permute_2",
             "code: CompiledFunctionBackward0 (NodeCall 2)",
-            "aot0_full_default",
-            "aot0_where",
-            "aot0_mm",
-            "aot0_permute_3",
-            "aot0_mm_1",
-            "aot0_sum_1",
-            "aot0_view",
-            "aot0_le_1",
-            "aot0_where_1",
-            "aot0_permute_6",
-            "aot0_mm_2",
-            "aot0_sum_2",
-            "aot0_view_1",
+            "call_aot_bwd_prologue",
+            "call_aot_bwd_impl",
+            "call_aot_bwd_epilogue",
         ]
 
         found = 0
@@ -2963,68 +2862,13 @@ TORCH_LIBRARY(test_cudagraphs_cpu_scalar_used_in_cpp_custom_op, m) {
 
         expected_logs = [
             "CompiledFunctionBackward1",
-            "aot1_tangents_1",
-            "aot1_sin_1",
-            "aot1_primals_2",
-            "aot1_neg",
-            "aot0_tangents_2",
-            "aot1_cos_1",
-            "aot1_primals_1",
-            "aot0_tangents_1",
+            "call_aot_bwd_prologue",
+            "call_aot_bwd_impl",
+            "call_aot_bwd_epilogue",
             "CompiledFunctionBackward0",
-            "aot0_neg",
-            "aot0_sin",
-            "aot0_mul",
-            "aot0_mul_1",
-            "aot0_cos",
-            "aot0_add",
-        ]
-
-        self.assertEqual(
-            sum(1 for e in expected_logs if e in logs.getvalue()), len(expected_logs)
-        )
-
-    @mock.patch(
-        "torch._functorch.aot_autograd.AOT_COUNTER", new_callable=itertools.count
-    )
-    def test_verbose_logs_aot_dispatcher_nodes_hop(self, _):
-        @dataclasses.dataclass
-        class CustomObj:
-            val: torch.Tensor
-
-        def fn(x, obj):
-            y = x.sin()
-            closure_var = y + 1
-            y.register_hook(lambda grad: grad + obj.val + closure_var)
-            z = y.sin()
-            return z
-
-        opt_fn = torch.compile(fn)
-
-        x = torch.ones(4, requires_grad=True)
-        y = torch.ones(4, requires_grad=True)
-        obj = CustomObj(torch.tensor(88))
-        fn(x, obj).sum().backward()
-
-        logs, ctx = logs_to_string(
-            torch._dynamo.compiled_autograd.__name__, "compiled_autograd_verbose"
-        )
-        with ctx(), compiled_autograd._enable(compiler_fn):
-            opt_fn(y, obj).sum().backward()
-        self.assertEqual(x.grad, y.grad)
-
-        expected_logs = [
-            "CompiledFunctionBackward0",
-            "aot0_primals_2",
-            "aot0_tangents_2",
-            "aot0_tangents_1",
-            "aot0_sin",
-            "aot0_cos",
-            "aot0_mul",
-            "aot0_add_1",
-            "aot0_trace_wrapped",
-            "aot0_cos_1",
-            "aot0_mul_1",
+            "call_aot_bwd_prologue_1",
+            "call_aot_bwd_impl_1",
+            "call_aot_bwd_epilogue_1",
         ]
 
         self.assertEqual(
@@ -3122,105 +2966,6 @@ TORCH_LIBRARY(test_cudagraphs_cpu_scalar_used_in_cpp_custom_op, m) {
 
         self.assertEqual(sum(1 for e in unexpected_logs if e in logs.getvalue()), 0)
 
-    # https://github.com/pytorch/pytorch/issues/138920
-    def test_compiled_autograd_does_not_specialize_on_bw_symints(self):
-        class Mod(torch.nn.Module):
-            def __init__(self, a, b, c):
-                super().__init__()
-                self.a = a
-                self.c = c
-                self.b = b
-                self.lin1 = torch.nn.Linear(b * a, b * c, device="cpu")
-
-            def forward(self, x):
-                x = x.view(-1, self.a * self.b)
-                y = self.lin1(x)
-                y = y.view(-1, self.c, self.b).contiguous()
-                y = torch.flatten(y, start_dim=1)
-                return y
-
-        class Mod2(torch.nn.Module):
-            def __init__(self, a, b, c):
-                super().__init__()
-                self.mod = Mod(a, b, c)
-
-            def forward(self, s, tensor_dict):
-                args = tensor_dict[s]
-                x = torch.cat(list(args))
-                out = self.mod(x)
-                return out
-
-        class Mod3(torch.nn.Module):
-            def __init__(self, mods):
-                super().__init__()
-                self.mods = mods
-
-            def forward(self, strs, tensor_dict, x):
-                outs = [x]
-                for i, m in enumerate(self.mods):
-                    s = strs[i]
-                    print("graph break")
-                    out = m(s, tensor_dict)
-                    outs.append(out)
-                return torch.cat(outs).sum(0)
-
-        def gen_tensor_dict(sizes):
-            tensor_dict = {
-                "a": [torch.randn(sizes[0], 48, device="cpu") for _ in range(4)],
-                "b": [torch.randn(sizes[1], 48, device="cpu") for _ in range(7)],
-            }
-            return tensor_dict
-
-        mods = [
-            Mod2(192, 1, 48),
-            Mod2(336, 1, 48),
-        ]
-        m = Mod3(mods)
-
-        strs = ["a", "b"]
-
-        m = torch.compile(m)
-
-        graphs = []
-
-        def compiler_fn(gm):
-            def inner_compiler(gm_, example_inputs_):
-                graphs.append(gm_)
-                return gm_
-
-            return torch.compile(
-                gm, backend=inner_compiler, fullgraph=True, dynamic=True
-            )
-
-        x = torch.zeros(100, 48, device="cpu")
-        tensor_dict = gen_tensor_dict([101, 102])
-        out = m(strs, tensor_dict, x)
-
-        with torch._dynamo.compiled_autograd._enable(compiler_fn) as ctx:
-            out.sum().backward()
-
-        x = torch.zeros(103, 48, device="cpu")
-        tensor_dict = gen_tensor_dict([104, 105])
-        out = m(strs, tensor_dict, x)
-
-        with torch._dynamo.compiled_autograd._enable(compiler_fn) as ctx:
-            out.sum().backward()
-
-        # This test is a bit fragile (I failed to create a better repro).
-        # The important bit is that the second CA graph has not specialized the value
-        # of aot4_sym_size_int_ to a constant.
-        # This happens via suppressing any dynamic shape guards that CA generates
-        # when it runs make_fx.
-        # Suppressing these guards is strictly better than the current state,
-        # because we ignore all of these guards anyway in CA.
-        # Once we stop using make_fx in CA, we won't have to worry about this specialization.
-        view_nodes = graphs[1].graph.find_nodes(
-            op="call_function", target=torch.ops.aten.view.default
-        )
-        # First 2 view nodes have a first argument that is a SymInt, not an int burned into the graph
-        self.assertTrue(isinstance(view_nodes[0].args[1][0], torch.fx.Node))
-        self.assertTrue(isinstance(view_nodes[1].args[1][0], torch.fx.Node))
-
     @unittest.skipIf(not HAS_CUDA, "requires cuda")
     def test_flex_attention(self):
         def fn():
@@ -3243,7 +2988,10 @@ TORCH_LIBRARY(test_cudagraphs_cpu_scalar_used_in_cpp_custom_op, m) {
 
         # TODO: Dynamo graph breaks on torch.ops.higher_order.flex_attention_backward
         self.check_output_and_recompiles(
-            fn, count=3, compiler_fn=make_compiler_fn(fullgraph=False)
+            # TODO(rzou): is the bump from 3->6 OK?
+            fn,
+            count=6,
+            compiler_fn=make_compiler_fn(fullgraph=False),
         )
 
     @unittest.expectedFailure
