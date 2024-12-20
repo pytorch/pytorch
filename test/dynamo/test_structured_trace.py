@@ -222,6 +222,17 @@ class StructuredTraceTest(TestCase):
         )
         assert cid == torch._guards.CompileId.from_string(str(cid))
 
+        cid = torch._guards.CompileId(
+            compiled_autograd_id=1,
+            frame_id=None,
+            frame_compile_id=None,
+        )
+        assert cid == torch._guards.CompileId.from_string(str(cid))
+
+        for bad_cid in ["-/-", "-/1", "1/-", "!1/2", "!1/-/-"]:
+            with self.assertRaises(ValueError):
+                torch._guards.CompileId.from_string(bad_cid)
+
     @requires_cuda
     def test_schedule(self):
         fn_opt = torch.compile(inductor_schedule_fn, backend="inductor")
