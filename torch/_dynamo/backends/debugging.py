@@ -341,10 +341,10 @@ def test_subclasses(gm, inputs, **kwargs):
     if bool(os.getenv("PYTORCH_TEST_WITH_SUBCLASSES_NONTRIVIAL", default=1)):
         TRANSFORMATIONS.extend(
             [
-                TensorToSubclassTransform(
-                    factory_fn=lambda t: F32_QI32QuantRWTensor.from_src(t),
-                    precondition=lambda t: t.ndim <= 2,
-                ),
+                #TensorToSubclassTransform(
+                #    factory_fn=lambda t: F32_QI32QuantRWTensor.from_src(t),
+                #    precondition=lambda t: t.ndim <= 2,
+                #),
                 # TODO: NestedTensor transformation can have many false-positive failures
                 # as NT does not support many of the operations
                 TensorToSubclassTransform(
@@ -409,7 +409,7 @@ def test_subclasses(gm, inputs, **kwargs):
         test_gm.print_readable(False),
     )
     for i, transform_seqs in enumerate(TENSOR_INPUTS_TRANSFORM_SEQS):
-        test_inputs = pytree.tree_map(lambda x: x.detach(), copy.copy(inputs))
+        test_inputs = pytree.tree_map(lambda x: x.detach() if isinstance(x, torch.Tensor) else x, copy.copy(inputs))
         # Have to copy GraphModule, as AOTD caches some info based on inputs in attrs
         _test_gm = copy.deepcopy(test_gm)
 

@@ -263,7 +263,6 @@ def parse_xmls(xmls):
         tcs[k] = v
         tc_total_tests += 1
         if v.is_failed():
-            print(f"XXX FAILED_TC:{k}")
             tc_total_failed += 1
         elif v.is_skipped():
             tc_total_skipped += 1
@@ -272,14 +271,11 @@ def parse_xmls(xmls):
         else:
             assert False
 
-    print(f"XXX HEADER vs PER_TC total_tests:{total_tests} vs {tc_total_tests}")
-    print(f"XXX HEADER vs PER_TC total_failed:{total_failed} vs {tc_total_failed}")
-    print(f"XXX HEADER vs PER_TC total_skipped:{total_skipped} vs {tc_total_skipped}")
-    print(f"XXX HEADER vs PER_TC total_passed:{total_passed} vs {tc_total_passed}")
+    print(f"XXX   total_tests:{tc_total_tests:5} (h:{total_tests:5})")
+    print(f"XXX  total_failed:{tc_total_failed:5} (h:{total_failed:5})")
+    print(f"XXX total_skipped:{tc_total_skipped:5} (h:{total_skipped:5})")
+    print(f"XXX  total_passed:{tc_total_passed:5} (h:{total_passed:5})")
 
-    #for k, v in tcs.items():
-    #    if v.status == TestCaseStatus.FAILED:
-    #        print(f"XXX FAILED_TC {k}")
     return tcs
 
 
@@ -290,31 +286,37 @@ def compute_pass_rate_tcs(control_tcs, test_tcs):
     # passed - failed
     # failed - failed
 
-    for k, v in test_tcs.items():
-        if v.is_passed():
+    # number of tests, that passed or fail in both
+    base_count = 0
+    c_passed_t_failed = 0
+    for k, tv in test_tcs.items():
+        if tv.is_skipped():
+            continue
 
-    control_passed = get_passed_testcases(control_xmls)
-    test_passed = get_passed_testcases(test_xmls)
-    # print(f"TEST passed:{test_passed}")
-    test_pass_keys = {key(testcase) for testcase in test_passed}
-    # print(f"TEST test_pass_keys:{test_pass_keys}")
-    # test_pass_keys = {key_ for key_ in test_pass_keys if not should_exclude(key_)}
-    tmp_control_pass_keys = {key(testcase) for testcase in control_passed}
-    # print(f"CONTROL tmp_control_pass_keys:{tmp_control_pass_keys}")
-    # tmp_control_pass_keys = {
-    #     key_ for key_ in tmp_control_pass_keys if not should_exclude(key_)
-    # }
-    excluded = [key(t) for t in get_excluded_testcases(test_xmls)]
-    # print(f"EXCLUDED testcases:{excluded}")
-    control_pass_keys = tmp_control_pass_keys - set(excluded)
-    # print(f"CONTROL PASS KEYS(without EXCLUDED):{control_pass_keys}")
+        if (cv := control_tcs.get(k, None)) is None:
+            continue
 
-    subset = control_pass_keys.intersection(test_pass_keys)
-    # print(f"pass_subset:{subset}")
-    # print(f"base_subset:{control_pass_keys}")
-    total_subset = len(subset)
-    total_tests = len(control_pass_keys)
-    print("pass rate", total_subset / total_tests, total_subset, total_tests)
+        if cv.is_skipped():
+            continue
+
+        if cv.is_passed() and tv.is_failed():
+            base_count += 1
+            c_passed_t_failed += 1
+            print(f"CONTROL_PASSED_TEST_FAILED:{k}")
+        elif cv.is_failed() and tv.is_passed():
+            c_failed_t_passed +=1
+            print(f"STRANGE! CONTROL_FAILED_TEST_PASSED:{k}")
+        elif cv.is_failed() and tv.is_failed():
+            c_failed_t_failed += 1
+            print(f"BOTH FAILED:{k}")
+        else:
+            assert cv.is_passed() and tv.is_passed()
+            base_count += 1
+
+    print(f"XXX base_count:{base_count}")
+    print(f"XXX passed_failed_count:{c_passed_t_failed}")
+
+    print(f"Pass ratio:{c_passed_t_failed / base_count}")
 
 
 
