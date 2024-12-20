@@ -132,7 +132,7 @@ def call_aot_bwd_impl(
     fakectx = FakeBackwardCFunction(ctx, saved_tensors)
     bw_module = fakectx._bw_module
     if backward_state is not None:
-        all_args.append(backward_state)
+        all_args = [*all_args, backward_state]
     out = bw_module(*all_args)
     return normalize_as_list(out)
 

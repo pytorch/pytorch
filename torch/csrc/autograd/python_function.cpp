@@ -30,6 +30,7 @@
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/jit/python/python_tracer.h>
 #include <torch/csrc/profiler/api.h>
+#include <torch/csrc/utils/python_numbers.h>
 #include <torch/csrc/utils/python_strings.h>
 #include <torch/csrc/utils/tensor_dtypes.h>
 
@@ -136,6 +137,7 @@ namespace torch::autograd {
 // NOTE: this function is written in a way that assumes it's only called for
 // backward; it's used by engine.cpp.  This is responsible for forwarding a call
 // from C++'s Node::apply to a Python method "apply".
+// NOLINTNEXTLINE(cppcoreguidelines-rvalue-reference-param-not-moved)
 auto PyNode::apply(variable_list&& inputs) -> variable_list {
   pybind11::gil_scoped_acquire gil;
   at::OptionalDeviceGuard _device_guard;
@@ -184,6 +186,7 @@ auto PyNode::apply(variable_list&& inputs) -> variable_list {
 }
 
 auto PyNode::defer_to_dynamo(
+    // NOLINTNEXTLINE(cppcoreguidelines-rvalue-reference-param-not-moved)
     variable_list&& inputs,
     const std::optional<PyObject*>& compiler) -> variable_list {
   pybind11::gil_scoped_acquire gil;
@@ -238,7 +241,7 @@ auto PyNode::defer_to_dynamo(
       "indices should already be set by compiled_args, called before apply_with_saved");
   PyObject* backward_state_idx = Py_None;
   if (_backward_state_idx.has_value()) {
-    backward_state_idx = PyLong_FromLong(_backward_state_idx.value());
+    backward_state_idx = THPUtils_packInt64(_backward_state_idx.value());
     // this might be simplifiable now that we no longer inline
     Py_CLEAR(py_fn->compiled_autograd_backward_state);
   }
@@ -1074,6 +1077,7 @@ PyObject* process_outputs(
     THPFunction* grad_fn,
     const UnpackedInput& unpacked,
     PyObject* inputs,
+    // NOLINTNEXTLINE(cppcoreguidelines-rvalue-reference-param-not-moved)
     THPObjectPtr&& raw_output,
     bool is_executable,
     torch::jit::Node* node,
