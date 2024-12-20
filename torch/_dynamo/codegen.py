@@ -26,7 +26,7 @@ from .source import AttrSource, Source
 from .utils import is_safe_constant, rot_n_helper
 from .variables.base import ValueMutationExisting, VariableTracker
 from .variables.functions import (
-    FunctionDecoratedByContextlibContextManagerVariable,
+    ContextlibContextManagerGeneratorObjectVariable,
     GeneratorObjectVariable,
 )
 from .variables.nn_module import NNModuleVariable
@@ -164,7 +164,7 @@ class PyCodegen:
                 return
 
         if value.is_realized() and isinstance(
-            value, FunctionDecoratedByContextlibContextManagerVariable
+            value, ContextlibContextManagerGeneratorObjectVariable
         ):
             raise IncorrectUsage(
                 "NYI: Returning a @contextmanager object from a torch.compile function"
