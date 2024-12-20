@@ -63,13 +63,5 @@ Tag to be included in the cache key generation for all torch compile caching.
 A common use case for such a tag is to break caches.
 """
 
-record_cache_artifacts: bool = Config(
-    env_name_default="TORCH_COMPILE_RECORD_CACHE_ARTIFACTS", default=False
-)
-"""
-Indicates to the compiler that it should record cache artifacts. This config
-is to be used together with torch.compiler.save_cache_artifacts()
-"""
-
 
 install_config_module(sys.modules[__name__])

@@ -304,9 +304,7 @@ class TestFxGraphCache(TestCase):
         b = torch.rand(100, 100, dtype=dtype, device=device)
 
         # Record artifacts
-        with torch.compiler.config.patch(
-            {"record_cache_artifacts": True}
-        ), fresh_inductor_cache():
+        with fresh_inductor_cache():
             compiled_fn = torch.compile(fn, dynamic=dynamic)
 
             # A first call should miss in the cache.
@@ -379,9 +377,7 @@ class TestFxGraphCache(TestCase):
             return x * 2
 
         # Record artifacts
-        with torch.compiler.config.patch(
-            {"record_cache_artifacts": True, "job_id": self.id()}
-        ), fresh_inductor_cache():
+        with torch.compiler.config.patch(job_id=self.id()), fresh_inductor_cache():
             f(torch.randn(2, 3))
             f(torch.randn(2, 4))
             self.assertEqual(backend.frame_count, 2)
@@ -662,7 +658,7 @@ class TestFxGraphCache(TestCase):
             compiled_fn = torch.compile(fn, dynamic=True, fullgraph=True)
 
             x = torch.randn(4, 4, device=GPU_TYPE)
-            result = compiled_fn(x)
+            compiled_fn(x)
 
             self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 0)
             self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
@@ -701,7 +697,7 @@ class TestFxGraphCache(TestCase):
             x = torch.randn(4, device=GPU_TYPE)
             y = torch.randn(4, device=GPU_TYPE)
 
-            result = compiled_fn(x, y)
+            compiled_fn(x, y)
 
             self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
             self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
@@ -715,7 +711,7 @@ class TestFxGraphCache(TestCase):
             PyCodeCache.cache_clear()
             shutil.rmtree(os.path.join(cache_dir(), "triton"), ignore_errors=True)
 
-            result = compiled_fn(x, y)
+            compiled_fn(x, y)
 
             self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
             self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
@@ -729,7 +725,7 @@ class TestFxGraphCache(TestCase):
             PyCodeCache.cache_clear()
             shutil.rmtree(os.path.join(cache_dir(), "triton"), ignore_errors=True)
 
-            result = compiled_fn2(x, y)
+            compiled_fn2(x, y)
 
             self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 2)
             self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
@@ -848,7 +844,7 @@ class TestFxGraphCache(TestCase):
             x = torch.randn(4, device=GPU_TYPE)
             y = torch.randn(4, device=GPU_TYPE)
 
-            result = compiled_fn(x, y)
+            compiled_fn(x, y)
 
             self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
             self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
@@ -862,7 +858,7 @@ class TestFxGraphCache(TestCase):
             PyCodeCache.cache_clear()
             shutil.rmtree(os.path.join(cache_dir(), "triton"), ignore_errors=True)
 
-            result = compiled_fn(x, y)
+            compiled_fn(x, y)
 
             self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
             self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
@@ -918,7 +914,6 @@ class TestFxGraphCache(TestCase):
 
         # Verify the "hit" case.
         self.reset()
-        counter_val = 5
         self.assertEqual(fn(a, b), compiled_fn(a, b))
         self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
 

@@ -432,12 +432,10 @@ def is_exporting() -> bool:
 
 def save_cache_artifacts() -> Optional[Tuple[bytes, "CacheInfo"]]:
     """
-    Serializes all the cache artifacts that were recorded since
-    torch.compiler.config.record_cache_artifacts was enabled for hot loading
+    Serializes all the cache artifacts that were created during the compilation
 
     Example:
 
-    - Set torch.compiler.config.record_cache_artifacts = True
     - Execute torch.compile
     - Call torch.compiler.save_cache_artifacts()
     """

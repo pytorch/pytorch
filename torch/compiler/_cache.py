@@ -8,8 +8,6 @@ from typing import List, Optional, Tuple, Union
 from torch._inductor.remote_cache import JsonDataTy, RemoteCacheJsonSerde
 from torch._inductor.runtime.runtime_utils import cache_dir
 
-from . import config
-
 
 log = logging.getLogger(__name__)
 
@@ -67,7 +65,6 @@ class CacheArtifactManager:
     hot loading
 
     Intended Lifecycle:
-    - Set torch.compiler.config.record_cache_artifacts = True
     - Execute code via torch.compile, this will call
         CacheArtifactManager.record_artifact on each cache artifact
     - Call CacheArtifactManager.serialize to convert all the cache artifacts
@@ -81,10 +78,6 @@ class CacheArtifactManager:
 
     # Protected by the compile_lock
     _cache_artifacts: List[CacheArtifact] = []
-
-    @staticmethod
-    def is_enabled() -> bool:
-        return config.record_cache_artifacts
 
     @classmethod
     def clear(cls) -> None:
@@ -101,8 +94,6 @@ class CacheArtifactManager:
         Called from each caching operation to record the artifact in this
         "mega" list
         """
-        if not CacheArtifactManager.is_enabled():
-            return
         if artifact_type == CacheArtifactType.AUTOTUNE:
             assert not isinstance(content, bytes)
             serde = RemoteCacheJsonSerde()
