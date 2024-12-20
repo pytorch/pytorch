@@ -6662,13 +6662,19 @@ torch.cuda.synchronize()
                     q_nt_t, k_nt_t, v_nt_t
                 ).transpose(1, 2)
             else:
+                x_nt.requires_grad = False
                 q_nt.requires_grad = False
                 k_nt.requires_grad = False
                 v_nt.requires_grad = False
+                tq = q_nt_t.detach()
+                tk = k_nt_t.detach()
+                tv = v_nt_t.detach() 
+                print("NO GRAD")
                 with torch.no_grad():
                     attn_nt = torch.nn.functional.scaled_dot_product_attention(
-                        q_nt_t, k_nt_t, v_nt_t
+                        tq, tk, tv 
                     ).transpose(1, 2)
+                print("FIINISH NO GRAD")
 
             attn_nts = attn_nt.unbind()
             self.assertEqual(

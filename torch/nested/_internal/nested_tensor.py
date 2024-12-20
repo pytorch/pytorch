@@ -312,7 +312,6 @@ class NestedTensor(torch.Tensor):
 
     @classmethod
     def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
-        print("DISPATCH")
         # If you're wondering why there's a nested tensor with one of its
         # size = -1, see note: [NJT outer_size in AOTDispatcher]
         kwargs = {} if kwargs is None else kwargs
@@ -322,7 +321,6 @@ class NestedTensor(torch.Tensor):
 
         fn = lookup_jagged(func, *args, **kwargs)
         if fn is not None:
-            print("?1", fn)
             return fn(*args, **kwargs)
 
         # Poor man's redispatch for composite ops. This becomes relevant under inference
@@ -343,7 +341,6 @@ class NestedTensor(torch.Tensor):
 
     @classmethod
     def __torch_function__(cls, func, types, args=(), kwargs=None):
-        print("FUNCTION")
         if kwargs is None:
             kwargs = {}
 
@@ -355,14 +352,10 @@ class NestedTensor(torch.Tensor):
         # https://github.com/pytorch/pytorch/pull/125941/ lands
         with maybe_enable_thunkify():
             try:
-                print("CALLING JAGGED TORCH")
                 return jagged_torch_function(func, *args, **kwargs)
             except NotImplementedError:
-                print("NOT IMPLEMENTED ERROR CAUGHT")
                 pass
             with torch._C.DisableTorchFunctionSubclass():
-                print("CALLING DISABLETORCHFUCNTIONSUBCLASS")
-                print(func)
                 return func(*args, **kwargs)
 
 

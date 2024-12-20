@@ -333,6 +333,8 @@ _scaled_dot_product_cudnn_attention_nestedtensor_cuda(
     bool is_causal,
     bool return_debug_mask,
     std::optional<double> scale) {
+
+  std::cout << "COMPUTE LOGSUMEXP? " << (int) compute_logsumexp  << std::endl; 
   auto [
       query_buffer_reshaped,
       key_buffer_reshaped,

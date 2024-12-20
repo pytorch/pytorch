@@ -760,7 +760,6 @@ def jagged_scaled_dot_product_attention(
     backend_choice = _select_sdp_backend(
         query, key, value, attn_mask, dropout_p, is_causal, enable_gqa
     )
-    print(backend_choice)
 
     if _is_computing_meta_flops(query):
         # Backend choice will probably not be correct if we have a meta device,
@@ -786,7 +785,6 @@ def jagged_scaled_dot_product_attention(
             max_seqlen_batch_kv,
             output_nt_info,
         ) = _sdpa_nested_preprocessing(query_padded, key_padded, value_padded)
-        print("CALLING FLASH")
         (
             attention,
             _logsumexp,
@@ -806,7 +804,6 @@ def jagged_scaled_dot_product_attention(
             False,
             scale=og_scale,
         )
-        print("FINISH ATEN OP")
         # Reshape output to convert nnz to batch_size and seq_len
         attention = nested_view_from_values_offsets_lengths(
             attention,  # output from flash_attn is [total_q, num_heads, head_size_og]
@@ -824,7 +821,6 @@ def jagged_scaled_dot_product_attention(
             max_seqlen_batch_kv,
             output_nt_info,
         ) = _sdpa_nested_preprocessing(query, key, value)
-        print("CALLING EFF")
         (
             attention,
             log_sumexp,
@@ -846,7 +842,6 @@ def jagged_scaled_dot_product_attention(
             compute_logsumexp,
             scale=scale,
         )
-        print("FINISH ATEN OP")
         # Reshape output to convert nnz to batch_size and seq_len
         return nested_view_from_values_offsets_lengths(
             attention.squeeze(0),
@@ -863,7 +858,6 @@ def jagged_scaled_dot_product_attention(
         #    max_seqlen_batch_kv,
         #    output_nt_info,
         #) = _sdpa_nested_preprocessing(query, key, value)
-        print("before not implemented???")
         (
             query_reshaped,
             key_reshaped,
@@ -874,7 +868,6 @@ def jagged_scaled_dot_product_attention(
             max_seqlen_batch_kv,
             output_nt_info,
         ) = _sdpa_nested_preprocessing(query, key, value)
-        print("CALLING CUDNN")
         (
             attention,
             logsumexp,

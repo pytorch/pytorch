@@ -924,7 +924,6 @@ void run_cudnn_SDP_fprop_nestedtensor(
     Tensor& dropoutoffset) {
   std::cout << "RUN" << std::endl;
   cudnnHandle_t handle = getCudnnHandle();
-
   // do nothing if we got 0-element tensors
   if (!q.numel() || !k.numel() || !v.numel()) {
     return;
@@ -1001,7 +1000,7 @@ void run_cudnn_SDP_fprop_nestedtensor(
           {RAG_V_OFF, rag_v_off.data_ptr()},
           {SEQ_LEN_Q, seqlen_q.data_ptr()},
           {SEQ_LEN_KV, seqlen_kv.data_ptr()}};
-  TORCH_WARN("RETURN ? ", return_softmaxstats);
+  std::cout << "RETURN? " << (int) return_softmaxstats << std::endl;
   if (return_softmaxstats) {
     variant_pack[Stats] = softmaxstats.data_ptr();
     variant_pack[RAG_STATS_OFF] =  cum_seqlen_q.data_ptr();
