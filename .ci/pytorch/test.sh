@@ -1417,6 +1417,28 @@ test_linux_aarch64() {
        --shard "$SHARD_NUMBER" "$NUM_TEST_SHARDS" --verbose
 }
 
+test_operator_benchmark() {
+  TEST_REPORTS_DIR=$(pwd)/test/test-reports
+  mkdir -p "$TEST_REPORTS_DIR"
+  TEST_DIR=$(pwd)
+  CORES=$(lscpu | grep Core | awk '{print $4}')
+  end_core=$(( CORES-1 ))
+
+  cd benchmarks/operator_benchmark/pt_extension
+  python setup.py install
+
+  cd "${TEST_DIR}"/benchmarks/operator_benchmark
+  taskset -c 0-"$end_core" python -m benchmark_all_test --device "$1" --tag-filter "$2" \
+      --output-dir "${TEST_REPORTS_DIR}/operator_benchmark_eager_float32_cpu.csv"
+
+  cd "${TEST_DIR}"/benchmarks/operator_benchmark
+  pip_install pandas
+  python check_perf_csv.py \
+      --actual "${TEST_REPORTS_DIR}/operator_benchmark_eager_float32_cpu.csv" \
+      --expected "expected_ci_operator_benchmark_eager_float32_cpu.csv"
+}
+
+
 if ! [[ "${BUILD_ENVIRONMENT}" == *libtorch* || "${BUILD_ENVIRONMENT}" == *-bazel-* ]]; then
   (cd test && python -c "import torch; print(torch.__config__.show())")
   (cd test && python -c "import torch; print(torch.__config__.parallel_info())")
@@ -1446,6 +1468,19 @@ elif [[ "$TEST_CONFIG" == distributed ]]; then
   # Only run RPC C++ tests on the first shard
   if [[ "${SHARD_NUMBER}" == 1 ]]; then
     test_rpc
+  fi
+elif [[ "${TEST_CONFIG}" == *operator_benchmark* ]]; then
+  TEST_MODE="short"
+
+  if [[ "${TEST_CONFIG}" == *cpu* ]]; then
+    if [[ "${TEST_CONFIG}" == *long* ]]; then
+      TEST_MODE="long"
+    elif [[ "${TEST_CONFIG}" == *all* ]]; then
+      TEST_MODE="all"
+    fi
+
+    test_operator_benchmark cpu ${TEST_MODE}
+
   fi
 elif [[ "${TEST_CONFIG}" == *inductor_distributed* ]]; then
   test_inductor_distributed
