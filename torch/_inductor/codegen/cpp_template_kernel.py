@@ -335,6 +335,10 @@ class CppTemplateKernel(CppKernel):
                 assert dst.layout == src.layout, f"{dst=}, {src=}"
                 return ""
 
+    def check_bounds(self, expr, size, lower, upper):
+        # CppTemplateKernel does not need codegen related operations
+        return
+
 
 class CppTemplateCaller(ir.ChoiceCaller):
     """
