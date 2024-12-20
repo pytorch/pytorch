@@ -158,6 +158,7 @@ Algorithms
     SparseAdam
     Adamax
     ASGD
+    BFGS
     LBFGS
     NAdam
     RAdam
@@ -202,6 +203,7 @@ Below is a table showing the available and default implementations of each algor
     :class:`SparseAdam`;for-loop;no;no
     :class:`Adamax`;foreach;yes;no
     :class:`ASGD`;foreach;yes;no
+    :class:`BFGS`;for-loop;no;no
     :class:`LBFGS`;for-loop;no;no
     :class:`NAdam`;foreach;yes;no
     :class:`RAdam`;foreach;yes;no
@@ -224,6 +226,7 @@ Below table is showing the stability status for fused implementations:
     :class:`SparseAdam`;unsupported;unsupported;unsupported
     :class:`Adamax`;unsupported;unsupported;unsupported
     :class:`ASGD`;unsupported;unsupported;unsupported
+    :class:`BFGS`;unsupported;unsupported;unsupported
     :class:`LBFGS`;unsupported;unsupported;unsupported
     :class:`NAdam`;unsupported;unsupported;unsupported
     :class:`RAdam`;unsupported;unsupported;unsupported
@@ -665,6 +668,7 @@ We train the model for a total of 300 epochs and start to collect EMA averages i
 .. py:module:: torch.optim.adamax
 .. py:module:: torch.optim.adamw
 .. py:module:: torch.optim.asgd
+.. py:module:: torch.optim.bfgs
 .. py:module:: torch.optim.lbfgs
 .. py:module:: torch.optim.lr_scheduler
 .. py:module:: torch.optim.nadam

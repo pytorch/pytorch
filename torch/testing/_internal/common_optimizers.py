@@ -19,6 +19,7 @@ from torch.optim import (
     Adamax,
     AdamW,
     ASGD,
+    BFGS,
     LBFGS,
     NAdam,
     Optimizer,
@@ -807,6 +808,39 @@ def optim_error_inputs_func_asgd(device, dtype):
                 error_regex="Invalid weight_decay value: -0.5",
             ),
         ]
+    return error_inputs
+
+
+def optim_inputs_func_bfgs(device, dtype=None):
+    return [
+        OptimizerInput(params=None, kwargs={}, desc="default"),
+        OptimizerInput(params=None, kwargs={"lr": 0.01}, desc="non-default lr"),
+        OptimizerInput(
+            params=None, kwargs={"lr": torch.tensor(0.001)}, desc="Tensor lr"
+        ),
+        OptimizerInput(
+            params=None, kwargs={"tolerance_grad": 1e-6}, desc="tolerance_grad"
+        ),
+        OptimizerInput(
+            params=None,
+            kwargs={"line_search_fn": "strong_wolfe"},
+            desc="strong_wolfe",
+        ),
+        OptimizerInput(
+            params=None,
+            kwargs={"line_search_fn": "hager_zhang"},
+            desc="hager_zhang",
+        ),
+        OptimizerInput(
+            params=None,
+            kwargs={"max_iter": 10, "tolerance_change": 1e-8},
+            desc="custom max_iter and tolerance",
+        ),
+    ]
+
+
+def optim_error_inputs_func_bfgs(device, dtype):
+    error_inputs = get_error_inputs_for_all_optims(device, dtype)
     return error_inputs
 
 
@@ -1872,6 +1906,43 @@ optim_db: List[OptimizerInfo] = [
                 ),
                 "TestOptimRenewed",
                 "test_step_is_noop_for_zero_grads",
+            ),
+        ),
+    ),
+    OptimizerInfo(
+        BFGS,
+        optim_inputs_func=optim_inputs_func_bfgs,
+        optim_error_inputs_func=optim_error_inputs_func_bfgs,
+        supported_impls=(),  # BFGS doesn't support foreach/fused/differentiable implementations
+        step_requires_closure=True,  # Like L-BFGS, BFGS requires a closure
+        supports_param_groups=False,  # BFGS doesn't support parameter groups
+        supports_multiple_devices=False,  # Currently only supports single device
+        skips=(
+            DecorateInfo(
+                unittest.skip("Does not support param groups"),
+                "TestOptimRenewed",
+                "test_param_groups_lr",
+            ),
+            DecorateInfo(
+                unittest.skip("Does not support param groups"),
+                "TestOptimRenewed",
+                "test_param_groups_weight_decay",
+            ),
+            DecorateInfo(
+                unittest.skip("BFGS doesn't support multidevice"),
+                "TestOptimRenewed",
+                "test_forloop_goes_right_direction_multigpu",
+            ),
+            DecorateInfo(
+                unittest.skip("Does not support param groups"),
+                "TestOptimRenewed",
+                "test_param_group_with_lrscheduler_goes_right_direction",
+            ),
+            # Skip MPS tests if needed
+            DecorateInfo(
+                skipIfMps,
+                "TestOptimRenewed",
+                "test_can_load_older_state_dict",
             ),
         ),
     ),
