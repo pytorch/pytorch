@@ -5577,6 +5577,7 @@ def _in_projection_packed(
     q: Tensor,
     k: Tensor,
     v: Tensor,
+    qk_proj_dim: int,
     w: Tensor,
     b: Optional[Tensor] = None,
 ) -> List[Tensor]:
@@ -5590,6 +5591,7 @@ def _in_projection_packed(
             k and v are typically the same tensor. (We take advantage of these
             identities for performance if they are present.) Regardless, q, k and v
             must share a common embedding dimension; otherwise their shapes may vary.
+        qk_proj_dim: the dimension of the projected query and key.
         w: projection weights for q, k and v, packed into a single tensor. Weights
             are packed along dimension 0, in q, k, v order.
         b: optional projection biases for q, k and v, packed into a single tensor
@@ -5600,51 +5602,38 @@ def _in_projection_packed(
         - q: :math:`(..., E)` where E is the embedding dimension
         - k: :math:`(..., E)` where E is the embedding dimension
         - v: :math:`(..., E)` where E is the embedding dimension
-        - w: :math:`(E * 3, E)` where E is the embedding dimension
-        - b: :math:`E * 3` where E is the embedding dimension
+        - w: :math:`(Eqk * 2 + E, E)` where Eqk is the dimension of the projected query and key, E is the embedding dimension
+        - b: :math:`Eqk * 2 + E` where Eqk is the dimension of the projected query and key, E is the embedding dimension
 
         Output:
-        - in output list :math:`[q', k', v']`, each output tensor will have the
-            same shape as the corresponding input tensor.
+        - q: :math:`(..., Eqk)`
+        - k: :math:`(..., Eqk)`
+        - v: :math:`(..., E)`
     """
     E = q.size(-1)
     if k is v:
         if q is k:
             # self-attention
             proj = linear(q, w, b)
-            # reshape to 3, E and not E, 3 is deliberate for better memory coalescing and keeping same order as chunk()
-            proj = (
-                proj.unflatten(-1, (3, E))
-                .unsqueeze(0)
-                .transpose(0, -2)
-                .squeeze(-2)
-                .contiguous()
-            )
-            return proj[0], proj[1], proj[2]
+            proj = proj.split([qk_proj_dim, qk_proj_dim, E], dim=-1)
+            return proj[0].contiguous(), proj[1].contiguous(), proj[2].contiguous()
         else:
             # encoder-decoder attention
-            w_q, w_kv = w.split([E, E * 2])
+            w_q, w_kv = w.split([qk_proj_dim, qk_proj_dim + E])
             if b is None:
                 b_q = b_kv = None
             else:
-                b_q, b_kv = b.split([E, E * 2])
+                b_q, b_kv = b.split([qk_proj_dim, qk_proj_dim + E])
             q_proj = linear(q, w_q, b_q)
             kv_proj = linear(k, w_kv, b_kv)
-            # reshape to 2, E and not E, 2 is deliberate for better memory coalescing and keeping same order as chunk()
-            kv_proj = (
-                kv_proj.unflatten(-1, (2, E))
-                .unsqueeze(0)
-                .transpose(0, -2)
-                .squeeze(-2)
-                .contiguous()
-            )
-            return (q_proj, kv_proj[0], kv_proj[1])
+            kv_proj = kv_proj.split([qk_proj_dim, E], dim=-1)
+            return (q_proj, kv_proj[0].contiguous(), kv_proj[1].contiguous())
     else:
-        w_q, w_k, w_v = w.chunk(3)
+        w_q, w_k, w_v = w.split([qk_proj_dim, qk_proj_dim, E])
         if b is None:
             b_q = b_k = b_v = None
         else:
-            b_q, b_k, b_v = b.chunk(3)
+            b_q, b_k, b_v = b.split([qk_proj_dim, qk_proj_dim, E])
         return linear(q, w_q, b_q), linear(k, w_k, b_k), linear(v, w_v, b_v)
 
 
@@ -5679,38 +5668,39 @@ def _in_projection(
             number of leading dimensions.
         - v: :math:`(Vdims..., Ev)` where Ev is the value embedding dimension and Vdims are any
             number of leading dimensions.
-        - w_q: :math:`(Eq, Eq)`
-        - w_k: :math:`(Eq, Ek)`
+        - w_q: :math:`(Eqk, Eq)` where Eqk is the value embedding dimension for projected query and key
+        - w_k: :math:`(Eqk, Ek)`
         - w_v: :math:`(Eq, Ev)`
-        - b_q: :math:`(Eq)`
-        - b_k: :math:`(Eq)`
+        - b_q: :math:`(Eqk)`
+        - b_k: :math:`(Eqk)`
         - b_v: :math:`(Eq)`
 
         Output: in output triple :math:`(q', k', v')`,
-         - q': :math:`[Qdims..., Eq]`
-         - k': :math:`[Kdims..., Eq]`
+         - q': :math:`[Qdims..., Eqk]`
+         - k': :math:`[Kdims..., Eqk]`
          - v': :math:`[Vdims..., Eq]`
 
     """
     Eq, Ek, Ev = q.size(-1), k.size(-1), v.size(-1)
-    assert w_q.shape == (
-        Eq,
-        Eq,
-    ), f"expecting query weights shape of {(Eq, Eq)}, but got {w_q.shape}"
-    assert w_k.shape == (
-        Eq,
-        Ek,
-    ), f"expecting key weights shape of {(Eq, Ek)}, but got {w_k.shape}"
+    assert (
+        w_q.shape[1] == Eq
+    ), f"expecting query weights shape of (*, {Eq}), but got {w_q.shape}"
+    assert (
+        w_k.shape[1] == Ek
+    ), f"expecting key weights shape of (*, {Ek}), but got {w_k.shape}"
     assert w_v.shape == (
         Eq,
         Ev,
     ), f"expecting value weights shape of {(Eq, Ev)}, but got {w_v.shape}"
+    assert (
+        w_q.shape[0] == w_k.shape[0]
+    ), f"expecting query weights shape[0] equal to key weights shape[0], but got query weights shape {w_q.shape}, key weights shape {w_k.shape}"
     assert b_q is None or b_q.shape == (
-        Eq,
-    ), f"expecting query bias shape of {(Eq,)}, but got {b_q.shape}"
+        w_q.shape[0],
+    ), f"expecting query bias shape equal to query weights shape[0], but got query bias shape {b_q.shape}, query weights shape {w_q.shape}"
     assert b_k is None or b_k.shape == (
-        Eq,
-    ), f"expecting key bias shape of {(Eq,)}, but got {b_k.shape}"
+        w_k.shape[0],
+    ), f"expecting key bias shape equal to key weights shape[0], but got key bias shape {b_k.shape}, key weights shape {w_k.shape}"
     assert b_v is None or b_v.shape == (
         Eq,
     ), f"expecting value bias shape of {(Eq,)}, but got {b_v.shape}"
@@ -6215,6 +6205,31 @@ def multi_head_attention_forward(
             key.shape == value.shape
         ), f"key shape {key.shape} does not match value shape {value.shape}"
 
+    # get qk_proj_dim and compute head_qk_dim
+    if not use_separate_proj_weight:
+        assert (
+            in_proj_weight is not None
+        ), "use_separate_proj_weight is False but in_proj_weight is None"
+        in_proj_weight_dim, _ = in_proj_weight.shape
+        if isinstance(in_proj_weight_dim, torch.Tensor):
+            qk_proj_dim = in_proj_weight_dim.sub(embed_dim).div(
+                2, rounding_mode="trunc"
+            )
+        else:
+            qk_proj_dim = (in_proj_weight_dim - embed_dim) // 2
+    else:
+        assert (
+            k_proj_weight is not None
+        ), "use_separate_proj_weight is True but k_proj_weight is None"
+        qk_proj_dim, _ = k_proj_weight.shape
+    if isinstance(qk_proj_dim, torch.Tensor):
+        head_qk_dim = qk_proj_dim.div(num_heads, rounding_mode="trunc")
+    else:
+        head_qk_dim = qk_proj_dim // num_heads
+    assert (
+        head_qk_dim * num_heads == qk_proj_dim
+    ), f"qk_proj_dim {qk_proj_dim} not divisible by num_heads {num_heads}"
+
     #
     # compute in-projection
     #
@@ -6222,7 +6237,9 @@ def multi_head_attention_forward(
         assert (
             in_proj_weight is not None
         ), "use_separate_proj_weight is False but in_proj_weight is None"
-        q, k, v = _in_projection_packed(query, key, value, in_proj_weight, in_proj_bias)
+        q, k, v = _in_projection_packed(
+            query, key, value, qk_proj_dim, in_proj_weight, in_proj_bias
+        )
     else:
         assert (
             q_proj_weight is not None
@@ -6236,7 +6253,7 @@ def multi_head_attention_forward(
         if in_proj_bias is None:
             b_q = b_k = b_v = None
         else:
-            b_q, b_k, b_v = in_proj_bias.chunk(3)
+            b_q, b_k, b_v = in_proj_bias.split([qk_proj_dim, qk_proj_dim, embed_dim])
         q, k, v = _in_projection(
             query,
             key,
@@ -6288,17 +6305,17 @@ def multi_head_attention_forward(
     #
     # reshape q, k, v for multihead attention and make them batch first
     #
-    q = q.view(tgt_len, bsz * num_heads, head_dim).transpose(0, 1)
+    q = q.view(tgt_len, bsz * num_heads, head_qk_dim).transpose(0, 1)
     if static_k is None:
-        k = k.view(k.shape[0], bsz * num_heads, head_dim).transpose(0, 1)
+        k = k.view(k.shape[0], bsz * num_heads, head_qk_dim).transpose(0, 1)
     else:
         # TODO finish disentangling control flow so we don't do in-projections when statics are passed
         assert (
             static_k.size(0) == bsz * num_heads
         ), f"expecting static_k.size(0) of {bsz * num_heads}, but got {static_k.size(0)}"
         assert (
-            static_k.size(2) == head_dim
-        ), f"expecting static_k.size(2) of {head_dim}, but got {static_k.size(2)}"
+            static_k.size(2) == head_qk_dim
+        ), f"expecting static_k.size(2) of {head_qk_dim}, but got {static_k.size(2)}"
         k = static_k
     if static_v is None:
         v = v.view(v.shape[0], bsz * num_heads, head_dim).transpose(0, 1)
@@ -6398,8 +6415,8 @@ def multi_head_attention_forward(
             else:
                 attn_mask = attn_mask.view(bsz, num_heads, -1, src_len)
 
-        q = q.view(bsz, num_heads, tgt_len, head_dim)
-        k = k.view(bsz, num_heads, src_len, head_dim)
+        q = q.view(bsz, num_heads, tgt_len, head_qk_dim)
+        k = k.view(bsz, num_heads, src_len, head_qk_dim)
         v = v.view(bsz, num_heads, src_len, head_dim)
 
         attn_output = scaled_dot_product_attention(
