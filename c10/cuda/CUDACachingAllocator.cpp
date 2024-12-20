@@ -16,7 +16,7 @@
 #include <c10/util/llvmMathExtras.h>
 #include <c10/util/static_tracepoint.h>
 
-#if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
+#if defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
 #include <c10/cuda/driver_api.h>
 #include <sys/syscall.h>
 #include <sys/types.h>
@@ -259,7 +259,7 @@ struct SegmentRange {
   SegmentRange(void* p, size_t s) : ptr(static_cast<char*>(p)), size(s) {}
 };
 
-#if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
+#if defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
 
 /*
 Note [Expandable Segments]
@@ -974,6 +974,7 @@ class RingBuffer {
 
 static std::string reportProcessMemoryInfo(c10::DeviceIndex device) {
 #ifdef PYTORCH_C10_DRIVER_API_SUPPORTED
+#ifndef USE_ROCM
   void* nvml_handle = DriverAPI::get_nvml_handle();
   if (!nvml_handle) {
     return "";
@@ -1024,6 +1025,8 @@ static std::string reportProcessMemoryInfo(c10::DeviceIndex device) {
     ss << " has " << format_size(proc.usedGpuMemory) << " memory in use. ";
   }
   return ss.str();
+#endif
+  return "";
 #else
   return "";
 #endif

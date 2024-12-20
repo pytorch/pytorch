@@ -86,6 +86,12 @@ CUDA_TYPE_NAME_MAP = collections.OrderedDict(
             ("hipIpcEventHandle", CONV_TYPE, API_DRIVER, HIP_UNSUPPORTED),
         ),
         ("CUipcMemHandle", ("hipIpcMemHandle", CONV_TYPE, API_DRIVER, HIP_UNSUPPORTED)),
+        ("CUmemGenericAllocationHandle", ("hipMemGenericAllocationHandle_t", CONV_TYPE, API_DRIVER)),
+        ("CUmemAllocationProp", ("hipMemAllocationProp", CONV_TYPE, API_DRIVER)),
+        ("CUmemAccessDesc", ("hipMemAccessDesc", CONV_TYPE, API_DRIVER)),
+        ("CU_MEM_ALLOCATION_TYPE_PINNED", ("hipMemAllocationTypePinned", CONV_TYPE, API_DRIVER)),
+        ("CU_MEM_LOCATION_TYPE_DEVICE", ("hipMemLocationTypeDevice", CONV_TYPE, API_DRIVER)),
+        ("CU_MEM_ACCESS_FLAGS_PROT_READWRITE", ("hipMemAccessFlagsProtReadWrite", CONV_TYPE, API_DRIVER)),
         ("CUaddress_mode", ("hipAddress_mode", CONV_TYPE, API_DRIVER, HIP_UNSUPPORTED)),
         (
             "CUarray_cubemap_face",
@@ -2530,6 +2536,10 @@ CUDA_IDENTIFIER_MAP = collections.OrderedDict(
             ("hipMemAttachSingle", CONV_TYPE, API_DRIVER, HIP_UNSUPPORTED),
         ),
         (
+            "CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR",
+            ("hipMemHandleTypePosixFileDescriptor", CONV_TYPE, API_DRIVER),
+        ),
+        (
             "CU_MEMORYTYPE_HOST",
             ("hipMemTypeHost", CONV_TYPE, API_DRIVER, HIP_UNSUPPORTED),
         ),
@@ -3002,6 +3012,15 @@ CUDA_IDENTIFIER_MAP = collections.OrderedDict(
             "cuStreamWriteValue32",
             ("hipStreamWriteValue32", CONV_STREAM, API_DRIVER, HIP_UNSUPPORTED),
         ),
+        ("cuMemGetAllocationGranularity",
+         ("hipMemGetAllocationGranularity", CONV_MEM, API_DRIVER)
+        ),
+        ("cuMemExportToShareableHandle",
+         ("hipMemExportToShareableHandle", CONV_MEM, API_DRIVER)
+        ),
+        ("cuMemImportFromShareableHandle",
+         ("hipMemImportFromShareableHandle", CONV_MEM, API_DRIVER)
+        ),
         (
             "cuStreamBatchMemOp",
             ("hipStreamBatchMemOp", CONV_STREAM, API_DRIVER, HIP_UNSUPPORTED),
@@ -3037,6 +3056,13 @@ CUDA_IDENTIFIER_MAP = collections.OrderedDict(
             "cuIpcOpenMemHandle",
             ("hipIpcOpenMemHandle", CONV_MEM, API_DRIVER, HIP_UNSUPPORTED),
         ),
+        ("cuMemAddressReserve", ("hipMemAddressReserve", CONV_MEM, API_DRIVER)),
+        ("cuMemRelease", ("hipMemRelease", CONV_MEM, API_DRIVER)),
+        ("cuMemMap", ("hipMemMap", CONV_MEM, API_DRIVER)),
+        ("cuMemAddressFree", ("hipMemAddressFree", CONV_MEM, API_DRIVER)),
+        ("cuMemSetAccess", ("hipMemSetAccess", CONV_MEM, API_DRIVER)),
+        ("cuMemUnmap", ("hipMemUnmap", CONV_MEM, API_DRIVER)),
+        ("cuMemCreate", ("hipMemCreate", CONV_MEM, API_DRIVER)),
         ("cuMemAlloc_v2", ("hipMalloc", CONV_MEM, API_DRIVER)),
         ("cuMemAllocHost", ("hipMemAllocHost", CONV_MEM, API_DRIVER, HIP_UNSUPPORTED)),
         (
@@ -8684,6 +8710,7 @@ C10_MAPPINGS = collections.OrderedDict(
         ("c10/cuda/CUDACachingAllocator.h", ("c10/hip/HIPCachingAllocator.h", API_C10)),
         ("c10/cuda/impl/CUDATest.h", ("c10/hip/impl/HIPTest.h", API_C10)),
         ("c10/cuda/impl/CUDAGuardImpl.h", ("c10/hip/impl/HIPGuardImpl.h", API_C10)),
+        ("c10/cuda/driver_api.h", ("c10/hip/driver_api.h", API_C10)),
         (
             "c10/cuda/impl/cuda_cmake_macros.h",
             ("c10/hip/impl/hip_cmake_macros.h", API_C10),
