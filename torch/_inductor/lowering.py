@@ -592,12 +592,13 @@ def make_pointwise(
         # in tracing, we will annotate pointwise nodes that correspond to the output of
         # a pointwise node that would have been run in eager. intermediary pointwise nodes
         # during decompositions are not annotated.
+        low_pr_fp = (torch.bfloat16, torch.float16)
         emulate_precision_casts = (
             V.graph is not None
             and getattr(V.graph, "current_node", None) is not None
             and V.graph.current_node.meta is not None
             and V.graph.current_node.meta.get("low_precision_pointwise_barrier", False)
-            and dtype in (torch.bfloat16, torch.float16)
+            and dtype in low_pr_fp
         )
 
         def inner_fn(index):
@@ -612,11 +613,12 @@ def make_pointwise(
                 return override_fn_when_gpu_float64(*[load(index) for load in loaders])
             else:
                 inputs_loaded = []
-                for load in loaders:
+                for inp_index, load in enumerate(loaders):
                     out = load(index)
-                    if emulate_precision_casts:
-                        downcast = ops.to_dtype(out, dtype, use_compute_types=False)
-                        out = ops.to_dtype(downcast, dtype)
+                    inp_dtype = inputs[inp_index].get_dtype()
+                    if emulate_precision_casts and inp_dtype in low_pr_fp:
+                        downcast = ops.to_dtype(out, inp_dtype, use_compute_types=False)
+                        out = ops.to_dtype(downcast, inp_dtype)
                     inputs_loaded.append(out)
 
                 out = fn(*inputs_loaded)
