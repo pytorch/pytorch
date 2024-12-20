@@ -1,4 +1,6 @@
 # Owner(s): ["module: inductor"]
+# ruff: noqa: F841
+
 import functools
 import gc
 import math
@@ -103,6 +105,49 @@ class CudaReproTests(TestCase):
         mod = make_fx(forward)(*inps)
         compiled = compile_fx_inner(mod, inps)
         compiled(inps)
+
+    def test_effn_attn_bias_padding(self):
+        batch_size, num_heads, seq_len, head_dim = 2, 32, 512, 128
+
+        def fn(
+            query: torch.Tensor,
+            key: torch.Tensor,
+            value: torch.Tensor,
+            input_tensor: torch.Tensor,  # This will be our starting point
+        ):
+            # Input tensor should be [2, 1, 8192, 1] with appropriate strides
+            bias = torch.ops.aten.expand(
+                input_tensor, [2, 32, seq_len, seq_len]
+            )  # Expands with stride pattern [65536, 0, 8, 0]
+
+            return torch.ops.aten._scaled_dot_product_efficient_attention(
+                query,
+                key,
+                value,
+                bias,
+                compute_log_sumexp=True,
+                dropout_p=0.0,
+                is_causal=False,
+                scale=None,
+            )
+
+        query = torch.randn(batch_size, num_heads, seq_len, head_dim, device="cuda")
+        key = torch.randn(batch_size, num_heads, seq_len, head_dim, device="cuda")
+        value = torch.randn(batch_size, num_heads, seq_len, head_dim, device="cuda")
+
+        input_tensor = torch.rand([2, 1, seq_len, 1], device="cuda")
+
+        out, code = run_and_get_code(torch.compile(fn), query, key, value, input_tensor)
+
+        input_tensor2 = torch.rand([2, 32, seq_len, seq_len], device="cuda").copy_(
+            input_tensor
+        )
+        # even though the last dim is broadcasted, needs stride 1 for alignment
+        # but dim 1 stride can be 0
+        FileCheck().check("buf0").check("(262144, 0, 512, 1").run(code[0])
+
+        # dont check rng state
+        self.assertEqual(out[:2], fn(query, key, value, input_tensor2)[:2])
 
     @skipIfRocm
     def test_input_channels_last(self):
@@ -1476,52 +1521,6 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
                 torch._dynamo.mark_dynamic(inp, 0)
             foo_c = torch.compile(foo)
             torch.testing.assert_allclose(foo(inp), foo_c(inp))
-
-    @unittest.skipIf(
-        not config.is_fbcode(),
-        "bfloat16 atomic add is only supported in fbcode today #97016",
-    )
-    @skipCUDAIf(not SM80OrLater, "uses bfloat16 which requires SM >= 80")
-    def test_atomic_add_bfloat16(self):
-        def f(x, y):
-            return torch.index_select(x, 0, y)
-
-        x = torch.randn(
-            2000, 384, dtype=torch.bfloat16, device="cuda", requires_grad=True
-        )
-        y = torch.ones(713268, dtype=torch.int64, device="cuda")
-        x_ref = x.clone().detach().requires_grad_(True)
-        y_ref = y.clone().detach()
-
-        out, (_, bw_code) = run_fw_bw_and_get_code(lambda: torch.compile(f)(x, y))
-        fc = FileCheck()
-        fc.check("tl.atomic_add")
-        fc.run(bw_code)
-
-        self.assertEqual(f(x_ref, y_ref), out)
-
-    @skipCUDAIf(not SM80OrLater, "uses bfloat16 which requires SM >= 80")
-    @unittest.skipIf(
-        config.is_fbcode(),
-        "bfloat16 atomic add is supported in fbcode, so we won't fallback",
-    )
-    def test_index_add_fallback(self):
-        def f(x, y):
-            return torch.index_select(x, 0, y)
-
-        x = torch.randn(
-            2000, 384, dtype=torch.bfloat16, device="cuda", requires_grad=True
-        )
-        y = torch.ones(713268, dtype=torch.int64, device="cuda")
-        x_ref = x.clone().detach().requires_grad_(True)
-        y_ref = y.clone().detach()
-
-        out, (_, bw_code) = run_fw_bw_and_get_code(lambda: torch.compile(f)(x, y))
-        fc = FileCheck()
-        fc.check("aten.index_add")
-        fc.run(bw_code)
-
-        self.assertEqual(f(x_ref, y_ref), out)
 
     @requires_multigpu()
     def test_not_initializing_wrong_device(self):

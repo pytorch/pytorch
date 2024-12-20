@@ -8,9 +8,6 @@ from torch._environment import is_fbcode
 from torch.utils._config_module import get_tristate_env, install_config_module
 
 
-inplace_padding = os.environ.get("TORCHINDUCTOR_INPLACE_PADDING", "1") == "1"
-
-
 def fx_graph_remote_cache_default() -> Optional[bool]:
     return get_tristate_env("TORCHINDUCTOR_FX_GRAPH_REMOTE_CACHE")
 
@@ -294,6 +291,12 @@ intra_node_bw = 300
 # unit: GB/s, uni-directional P2P bandwidth per node
 # default value is InfiniBand
 inter_node_bw = 25
+
+# use Inductor's experimental benchmarker (runtime/benchmarking.py)
+# to benchmark kernels during autotuning, otherwise fall back to
+# Triton's `do_bench`. the experimental benchmarker may produce
+# results that are not consistent with `do_bench`'s results
+use_experimental_benchmarker = False
 
 # enable slow autotuning passes to select algorithms
 max_autotune = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE") == "1"
@@ -1335,6 +1338,9 @@ class trace:
     upload_tar: Optional[Callable[[str], None]] = None
 
     log_autotuning_results: bool = False
+
+    # Save mapping info from inductor generated triton kernel to post_grad fx nodes
+    log_inductor_triton_kernel_to_post_grad_node_info: bool = True
 
 
 _save_config_ignore = [

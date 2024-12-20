@@ -7,6 +7,7 @@ from typing_extensions import Concatenate, ParamSpec, Self, TypeVar
 
 import torch
 from torch._dynamo.utils import counters, dynamo_timed
+from torch._inductor.config import use_experimental_benchmarker
 
 
 logger = torch._logging.getArtifactLogger(__name__, "benchmarking")
@@ -407,4 +408,4 @@ class GroupedInductorBenchmarker(InductorBenchmarker):
         ]
 
 
-benchmarker = GroupedInductorBenchmarker()
+benchmarker = GroupedInductorBenchmarker() if use_experimental_benchmarker else TritonBenchmarker()
