@@ -65,7 +65,7 @@ seeds = make_prim(
 lookup_seed = make_prim(
     # if inductor_lookup_seed changes, update partitioners.py
     "inductor_lookup_seed(Tensor seeds, int index) -> Tensor",
-    lambda seeds, index: seeds[index],
+    lambda seeds, index: seeds[index].clone(),
     doc="Extract a single seed from the result of inductor_seeds()",
 )
 # inductor_random() doesn't accept a dtype.
