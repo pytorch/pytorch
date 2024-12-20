@@ -24,7 +24,6 @@
 #include <ATen/native/cpu/SerialStackImpl.h>
 #include <ATen/native/cpu/StackKernel.h>
 #include <ATen/quantized/QTensorImpl.h>
-#include <c10/core/GradMode.h>
 #include <c10/util/Exception.h>
 #include <c10/util/SmallVector.h>
 #include <c10/util/accumulate.h>
@@ -4906,8 +4905,8 @@ void split_with_sizes_copy_out(
       ", got size ",
       out.size());
   for (const auto i : c10::irange(out.size())) {
-    if (resize_output_check(out[i], array[i].sizes())) {
-      out[i].resize_(array[i].sizes());
+    if (resize_output_check(out[i], tmp[i].sizes())) {
+      out[i].resize_(tmp[i].sizes());
     }
     TORCH_CHECK(
         out[i].dtype() == tmp[i].dtype(),
@@ -4942,9 +4941,6 @@ void unbind_copy_int_out(
   for (const auto i : c10::irange(out.size())) {
     out[i].copy_(tmp[i]);
   }
-
-  auto tmp = self.unbind(dim);
-  copy_tensor_array_to_out("unbind_copy_int_out()", tmp, out);
 }
 
 int64_t sparse_dim_default(const Tensor& self) {
