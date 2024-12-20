@@ -17,7 +17,9 @@ from ..bytecode_transformation import create_call_function, create_rot_n, is_gen
 from ..exc import (
     handle_observed_exception,
     ObservedException,
+    ObservedGeneratorExit,
     ObservedUserStopIteration,
+    raise_observed_exception,
     SkipFrame,
     unimplemented,
     Unsupported,
@@ -427,6 +429,19 @@ class GeneratorObjectVariable(VariableTracker):
             return self
         elif name == "__next__":
             return self.next_variable(tx)
+        elif name == "close":
+            # * Upon receiving close, the generator must raise GeneratorExit at
+            # the point the generator was paused (last yield)
+            # * If the generator has a finally block, it will execute before
+            # the generator closes
+            # * If the generator handles (catches) the GeneratorExit exception,
+            # Python raises a RuntimeError because we are not suppose to capture it
+            # XXX: Result is correct but the order of the instructions seems wrong
+            try:
+                raise_observed_exception(GeneratorExit, tx)
+            except ObservedGeneratorExit:
+                handle_observed_exception(tx)
+            return
         elif name == "send":
             tracer = self._get_inline_tracer(tx)
             tracer.push_many(args)
