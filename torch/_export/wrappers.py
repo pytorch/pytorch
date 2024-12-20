@@ -102,9 +102,7 @@ def _wrap_submodules(f, preserve_signature, module_call_signatures):
 
     try:
         for path in preserve_signature:
-            handle_pair = _wrap_submodule(f, path, module_call_signatures)
-            if handle_pair is not None:
-                handles.extend(handle_pair)
+            handles.extend(_wrap_submodule(f, path, module_call_signatures))
         yield
     finally:
         for handle in handles:
