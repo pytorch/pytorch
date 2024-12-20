@@ -36,6 +36,7 @@ import sympy
 
 import torch
 from torch import SymInt
+from torch._dynamo.utils import get_metrics_context
 from torch._guards import TracingContext
 from torch._higher_order_ops.torchbind import call_torchbind
 from torch._ops import HigherOrderOperator
@@ -1931,9 +1932,6 @@ class VariableBuilder:
         return unspec_var
 
     def wrap_symfloat(self, value):
-        # To prevent circular import
-        from ..symbolic_convert import TensorifyState
-
         # SymFloat wrapping is special.  We first wrap it in the same way we
         # do an unspecialized primitive, and then we item() it into a
         # SymFloat.  Removal of the item() call is left to a later FX pass,
@@ -1965,7 +1963,6 @@ class VariableBuilder:
             or torch._inductor.config.triton.cudagraphs
             or justknobs_check("pytorch/compiler:unspecialize_float_killswitch", False)
             or frame_state_entry.scalar is not auto_dynamic
-            or TensorifyState.should_specialize(self.source)
         ):
             self.install_guards(GuardBuilder.CONSTANT_MATCH)
             return ConstantVariable.create(value=value, source=self.source)
@@ -2066,6 +2063,8 @@ class VariableBuilder:
             ),
         )
         self.tx.output.tracked_fakes.append(TrackedFake(r.sym_num, self.source, None))
+
+        get_metrics_context().set("tensorify_float_attempt", True, overwrite=True)
 
         return r
 
@@ -2666,28 +2665,13 @@ def _automatic_dynamic(
         dim = e.dim()
 
         stride = [None] * dim
-        while any(x is None for x in stride):
-            candidates = {
-                ex_size[i] * ex_stride[i]: InferStride(i)
-                for i in range(dim)
-                if stride[i] is not None and ex_stride[i] >= 0
-            }
-            val_list = sorted(
-                [(ex_stride[i], i) for i in range(dim) if stride[i] is None],
-                key=_nested_int_aware_sort,
-            )
-            for _, i in val_list:
-                if stride[i] is None and ex_stride[i] in candidates:
-                    stride[i] = candidates[ex_stride[i]]
-                    candidates[ex_stride[i] * ex_size[i]] = InferStride(i)
-
-            if any(x is None for x in stride):
-                # bind the smallest unbound stride to a new variable
-                val, i = min(
-                    [(ex_stride[i], i) for i in range(dim) if stride[i] is None],
-                    key=_nested_int_aware_sort,
-                )
-                stride[i] = val
+        pending = [(ex_stride[i], -i) for i in range(dim)]
+        pending.sort(key=_nested_int_aware_sort)
+        candidates = {}
+        for i_stride, neg_i in pending:
+            i = -neg_i
+            stride[i] = candidates.get(i_stride, i_stride)
+            candidates.setdefault(i_stride * ex_size[i], InferStride(i))
     else:
         stride = []
 
