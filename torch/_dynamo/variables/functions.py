@@ -326,81 +326,6 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         return super().call_function(tx, args, kwargs)
 
 
-class GeneratorFunctionVariable(BaseUserFunctionVariable):
-    """functions that behaves like iterators
-
-    .. note::
-
-        This is a wrapper around (Nested)UserFunctionVariable
-    """
-
-    def __init__(self, vt: VariableTracker, **kwargs):
-        super().__init__(**kwargs)
-        self.vt = vt
-
-    def __getattr__(self, name):
-        if name in self.__class__.__dict__.keys():
-            return getattr(self, name)
-        return getattr(self.vt, name)
-
-    def _build_inline_tracer(self, tx, args, kwargs):
-        from torch._dynamo.symbolic_convert import InliningInstructionTranslator
-
-        return InliningInstructionTranslator.build_inline_tracer(
-            tx,
-            self,
-            args,
-            kwargs,
-        )
-
-    def call_function(
-        self,
-        tx: "InstructionTranslator",
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
-    ) -> "VariableTracker":
-        assert is_generator(self.vt.get_code())
-
-        inline_tracer = self._build_inline_tracer(tx, args, kwargs)
-        code = self.vt.get_code()
-        f_globals = self.vt.get_globals()
-
-        # This seems super odd but it is to prevent Dynamo on Python 3.11+ to
-        # trace a generator frame without going from this path (GeneratorFunctionVariable -> GeneratorObjectVariable)
-        # A good reproducer for this is to comment this code and run the
-        # test_generator.py::test_generator_with_side_effects test case.
-        # Dynamo will trace both "fn" and "whoo" frames.
-        torch._C._dynamo.eval_frame.skip_code(code)
-
-        # calling a generator returns a generator object
-        return GeneratorObjectVariable(
-            code,
-            f_globals,
-            inline_tracer,
-            source=self.source,
-        )
-
-
-class FunctionDecoratedByContextlibContextManagerVariable(GeneratorFunctionVariable):
-    """
-    .. note::
-
-        This is only used when the function is annotated with @contextlib.contextmanager
-    """
-
-    def _build_inline_tracer(self, tx, args, kwargs):
-        # NOTE: This only exists to not break support for context manager when
-        # config.enable_yield_on_generator is False. We can safely remove this
-        # once generators are fully supported
-        tracer = super()._build_inline_tracer(tx, args, kwargs)
-        assert isinstance(
-            tracer,
-            torch._dynamo.symbolic_convert.InliningGeneratorInstructionTranslator,
-        )
-        tracer.is_generator_from_ctx_manager = True
-        return tracer
-
-
 class GeneratorObjectVariable(VariableTracker):
     def __init__(
         self,
@@ -468,8 +393,8 @@ class GeneratorObjectVariable(VariableTracker):
             tx.exn_vt_stack.extend(tracer.exn_vt_stack)
             raise e
         except Unsupported as e:
-            if "graph_break" not in e.msg:
-                raise e
+            # if "graph_break" not in e.msg:
+            #     raise e
 
             torch._C._dynamo.eval_frame.skip_code(self.get_code())
             raise SkipFrame from e
@@ -507,6 +432,97 @@ class GeneratorObjectVariable(VariableTracker):
             tracer.push_many(args)
             return self.next_variable(tx)
         super().call_method(tx, name, args, kwargs)
+
+
+class ContextlibContextManagerGeneratorObjectVariable(GeneratorObjectVariable):
+    """
+    .. note::
+
+        This is only used when the function is annotated with @contextlib.contextmanager
+    """
+
+
+class GeneratorFunctionVariable(BaseUserFunctionVariable):
+    """functions that behaves like iterators
+
+    .. note::
+
+        This is a wrapper around (Nested)UserFunctionVariable
+    """
+
+    def __init__(
+        self, vt: VariableTracker, *, generator_cls=GeneratorObjectVariable, **kwargs
+    ):
+        super().__init__(**kwargs)
+        self.vt = vt
+        self.generator_cls = generator_cls
+
+    def __getattr__(self, name):
+        if name in self.__class__.__dict__.keys():
+            return getattr(self, name)
+        return getattr(self.vt, name)
+
+    def _build_inline_tracer(self, tx, args, kwargs):
+        from torch._dynamo.symbolic_convert import InliningInstructionTranslator
+
+        return InliningInstructionTranslator.build_inline_tracer(
+            tx,
+            self,
+            args,
+            kwargs,
+        )
+
+    def call_function(
+        self,
+        tx: "InstructionTranslator",
+        args: "List[VariableTracker]",
+        kwargs: "Dict[str, VariableTracker]",
+    ) -> "VariableTracker":
+        assert is_generator(self.vt.get_code())
+
+        inline_tracer = self._build_inline_tracer(tx, args, kwargs)
+        code = self.vt.get_code()
+        f_globals = self.vt.get_globals()
+
+        # This seems super odd but it is to prevent Dynamo on Python 3.11+ to
+        # trace a generator frame without going from this path (GeneratorFunctionVariable -> GeneratorObjectVariable)
+        # A good reproducer for this is to comment this code and run the
+        # test_generator.py::test_generator_with_side_effects test case.
+        # Dynamo will trace both "fn" and "whoo" frames.
+        torch._C._dynamo.eval_frame.skip_code(code)
+
+        # calling a generator returns a generator object
+        return self.generator_cls(
+            code,
+            f_globals,
+            inline_tracer,
+            source=self.source,
+        )
+
+
+class FunctionDecoratedByContextlibContextManagerVariable(GeneratorFunctionVariable):
+    """
+    .. note::
+
+        This is only used when the function is annotated with @contextlib.contextmanager
+    """
+
+    def __init__(self, vt, **kwargs):
+        super().__init__(
+            vt, generator_cls=ContextlibContextManagerGeneratorObjectVariable, **kwargs
+        )
+
+    def _build_inline_tracer(self, tx, args, kwargs):
+        # NOTE: This only exists to not break support for context manager when
+        # config.enable_yield_on_generator is False. We can safely remove this
+        # once generators are fully supported
+        tracer = super()._build_inline_tracer(tx, args, kwargs)
+        assert isinstance(
+            tracer,
+            torch._dynamo.symbolic_convert.InliningGeneratorInstructionTranslator,
+        )
+        tracer.is_generator_from_ctx_manager = True
+        return tracer
 
 
 class UserMethodVariable(UserFunctionVariable):
