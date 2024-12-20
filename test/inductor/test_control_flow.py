@@ -1008,7 +1008,7 @@ class WhileLoopTests(TestCase):
     def test_while_loop_with_data_dependent_in_out_mismatch(self, dynamic):
         with self.assertRaisesRegex(
             torch._dynamo.exc.UncapturedHigherOrderOpError,
-            "Expected body_fn_output and carried_inputs to same metadata but found",
+            "Expected body_fn_output and carried_inputs to have same metadata but found",
         ):
             with torch._dynamo.config.patch(
                 {
