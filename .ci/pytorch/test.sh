@@ -444,6 +444,8 @@ elif [[ "${TEST_CONFIG}" == *aot_eager* ]]; then
   DYNAMO_BENCHMARK_FLAGS+=(--backend aot_eager)
 elif [[ "${TEST_CONFIG}" == *aot_inductor* ]]; then
   DYNAMO_BENCHMARK_FLAGS+=(--export-aot-inductor)
+elif [[ "${TEST_CONFIG}" == *max_autotune_inductor* ]]; then
+  DYNAMO_BENCHMARK_FLAGS+=(--inductor --inductor-compile-mode max-autotune)
 elif [[ "${TEST_CONFIG}" == *inductor* && "${TEST_CONFIG}" != *perf* ]]; then
   DYNAMO_BENCHMARK_FLAGS+=(--inductor)
 fi
@@ -663,6 +665,8 @@ test_dynamo_benchmark() {
         test_single_dynamo_benchmark "inference" "$suite" "$shard_id" --inference --"$dt" "$@"
       fi
     elif [[ "${TEST_CONFIG}" == *aot_inductor* ]]; then
+      test_single_dynamo_benchmark "inference" "$suite" "$shard_id" --inference --bfloat16 "$@"
+    elif [[ "${TEST_CONFIG}" == *max_autotune_inductor* ]]; then
       test_single_dynamo_benchmark "inference" "$suite" "$shard_id" --inference --bfloat16 "$@"
     else
       test_single_dynamo_benchmark "inference" "$suite" "$shard_id" --inference --bfloat16 "$@"
