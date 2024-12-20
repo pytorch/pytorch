@@ -58,6 +58,7 @@ class TestArgumentHandler(TestCase):
         out = torch.split(a, 2)
         argument_handler.parse_outputs(split_func._schema, out, is_factory=False)
 
+        outputs = {out[0].data_ptr(), out[1].data_ptr(), out[2].data_ptr()}
         # Split is a view op, no data is read or written!
         self.assertEqual(len(argument_handler.dataptrs_read), 0)
         self.assertEqual(len(argument_handler.dataptrs_written), 0)
@@ -513,8 +514,8 @@ class TestMessages(TestCase):
 
             # These two tests ensure that subclass creation
             # happens smoothly under the mode used by csan
-            TwoTensor(torch.rand(2), torch.rand(2))
-            MyT(torch.rand(2))
+            t = TwoTensor(torch.rand(2), torch.rand(2))
+            t = MyT(torch.rand(2))
         finally:
             csan.cuda_sanitizer.disable()
 

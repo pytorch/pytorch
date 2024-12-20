@@ -147,7 +147,6 @@ tracing_state_functions = {
     torch._utils.is_compiling: True,
     torch.compiler.is_compiling: True,
     torch.compiler.is_dynamo_compiling: True,
-    torch.compiler.is_exporting: True,
     torch.nn.modules.activation._is_make_fx_tracing: False,
 }
 
@@ -411,7 +410,6 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 torch._dynamo.external_utils.is_compiling,
                 torch.compiler.is_compiling,
                 torch.compiler.is_dynamo_compiling,
-                torch.compiler.is_exporting,
             ):
                 tx.mark_inconsistent_side_effects()
             return ConstantVariable.create(tracing_state_functions[self.value])

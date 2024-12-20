@@ -10,7 +10,7 @@ from typing import Any, Callable, Dict, Optional, Set, Type, TYPE_CHECKING, Unio
 
 import torch
 from torch._environment import is_fbcode
-from torch.utils._config_module import Config, get_tristate_env, install_config_module
+from torch.utils._config_module import get_tristate_env, install_config_module
 
 
 # to configure logging for dynamo, aot, and inductor
@@ -342,10 +342,6 @@ skip_nnmodule_hook_guards = True
 # notice and lead to incorrect result.
 skip_no_tensor_aliasing_guards_on_parameters = True
 
-# Considers a tensor immutable if it is one of the values of a dictionary, and
-# the dictionary tag is same across invocation calls.
-skip_tensor_guards_with_matching_dict_tags = True
-
 # If True, raises exception if TorchDynamo is called with a context manager
 raise_on_ctx_manager_usage = True
 
@@ -556,13 +552,6 @@ automatic_dynamic_remote_pgo: Optional[bool] = get_tristate_env(
 # temporary config to kill later
 _unsafe_skip_fsdp_module_guards = (
     os.environ.get("UNSAFE_SKIP_FSDP_MODULE_GUARDS", "0") == "1"
-)
-
-# Run GC at the end of compilation
-run_gc_after_compile = Config(  # type: ignore[var-annotated]
-    default=True,
-    justknob="pytorch/compiler:enable_run_gc_after_compile",
-    env_name_default="TORCH_DYNAMO_RUN_GC_AFTER_COMPILE",
 )
 
 # HACK: this is for testing custom ops profiling only

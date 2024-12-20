@@ -193,12 +193,12 @@ jobs:
           fi
 
       - name: Checkout PyTorch to pytorch dir
-        uses: actions/checkout@v4
+        uses: malfet/checkout@silent-checkout
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
           path: pytorch
-          show-progress: false
+          quiet-checkout: true
 
       - name: Clean PyTorch checkout
         run: |

@@ -14,7 +14,6 @@ except ImportError:
     pass
 
 import json
-import os
 import sys
 import tempfile
 import unittest
@@ -209,6 +208,7 @@ class TestExecutionTrace(TestCase):
     @skipIfTorchDynamo("profiler gets ignored if dynamo activated")
     def test_execution_trace_env_enabled_with_kineto(self, device):
         import os
+
         os.environ["ENABLE_PYTORCH_EXECUTION_TRACE"] = "1"
         os.environ["ENABLE_PYTORCH_EXECUTION_TRACE_EXTRAS"] = "1"
         trace_called_num = 0
@@ -289,7 +289,6 @@ class TestExecutionTrace(TestCase):
             f"  rf_ids_kineto = {rf_ids_kineto}\n",
         )
 
-    
     def test_execution_trace_alone(self, device):
         use_device = (
             torch.profiler.ProfilerActivity.CUDA
@@ -329,9 +328,10 @@ class TestExecutionTrace(TestCase):
                 assert len(n["inputs"]["values"][3][0]) == tensor_tuple_size
         assert found_root_node
         assert loop_count == expected_loop_events
-    
+
     def test_execution_trace_env_disabled(self, device):
         import os
+
         os.environ["ENABLE_PYTORCH_EXECUTION_TRACE"] = "0"
         os.environ["ENABLE_PYTORCH_EXECUTION_TRACE_EXTRAS"] = "0"
         use_device = (
@@ -351,7 +351,7 @@ class TestExecutionTrace(TestCase):
                 with record_function(f"## LOOP {idx} ##"):
                     self.payload(device, use_device=use_device)
                 p.step()
-        
+
         self.assertTrue(p.execution_trace_observer is None)
 
     @unittest.skipIf(IS_WINDOWS, "torch.compile does not support WINDOWS")
@@ -418,8 +418,10 @@ class TestExecutionTrace(TestCase):
     @skipCPUIf(True, "skip CPU device for testing profiling triton")
     def test_execution_trace_env_enabled_with_pt2(self, device):
         import os
+
         os.environ["ENABLE_PYTORCH_EXECUTION_TRACE"] = "1"
         os.environ["ENABLE_PYTORCH_EXECUTION_TRACE_EXTRAS"] = "1"
+
         @torchdynamo.optimize("inductor")
         def fn(a, b, c):
             x = torch.nn.functional.linear(a, b)
@@ -563,7 +565,7 @@ class TestExecutionTrace(TestCase):
         def fn(nt):
             return nt.sin().cos()
 
-        with torch.profiler.profile(execution_trace_observer=observer):
+        with torch.profiler.profile(execution_trace_observer=observer) as prof:
             for i in range(3):
                 values = torch.rand((8 + i, 4 + i))
                 offsets = torch.tensor([0, 2, 4, 6, 8 + i])
@@ -577,38 +579,6 @@ class TestExecutionTrace(TestCase):
             if "cos" in n["name"]:
                 found_cos = True
         assert found_cos
-
-    @unittest.skipIf(
-        not TEST_CUDA,
-        "need CUDA device availability to run",
-    )
-    def test_execution_trace_record_integral_tensor_range(self):
-        fp = tempfile.NamedTemporaryFile("w+t", suffix=".et.json", delete=False)
-        fp.close()
-
-        os.environ["ENABLE_PYTORCH_EXECUTION_TRACE_INTEGRAL_TENSOR_RANGE"] = "1"
-        t1 = torch.tensor([[1, 2], [3, 4]]).cuda()
-        t2 = torch.tensor([[0, 0], [1, 0]]).cuda()
-        with profile(
-            activities=supported_activities(),
-            schedule=torch.profiler.schedule(
-                skip_first=0, wait=0, warmup=0, active=1, repeat=1
-            ),
-            record_shapes=True,
-            execution_trace_observer=(
-                ExecutionTraceObserver().register_callback(fp.name)
-            ),
-        ) as p:
-            torch.gather(t1, 1, t2)
-            p.step()
-
-        nodes = self.get_execution_trace_root(fp.name)
-        for n in nodes:
-            assert "name" in n
-            if "aten::gather" in n["name"]:
-                for attr in n["attrs"]:
-                    if attr["name"] == "tensor_range":
-                        assert attr["value"] == '{"0":[1,4],"1":[0,1]}'
 
 
 devices = ["cpu", "cuda"]

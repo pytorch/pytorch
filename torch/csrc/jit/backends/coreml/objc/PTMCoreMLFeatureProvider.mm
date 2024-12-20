@@ -15,9 +15,7 @@
 }
 
 - (void)clearInputTensors {
-  @synchronized(_featureValuesForName) {
-    [_featureValuesForName removeAllObjects];
-  }
+  [_featureValuesForName removeAllObjects];
 }
 
 - (void)setInputTensor:(const at::Tensor&)tensor forFeatureName:(NSString *)name {
@@ -42,16 +40,12 @@
      error:&error];
   MLFeatureValue *value = [MLFeatureValue featureValueWithMultiArray:mlArray];
   if (value) {
-    @synchronized(_featureValuesForName) {
-      _featureValuesForName[name] = value;
-    }
+    _featureValuesForName[name] = value;
   }
 }
 
 - (nullable MLFeatureValue *)featureValueForName:(NSString *)featureName {
-  @synchronized(_featureValuesForName) {
-    return _featureValuesForName[featureName];
-  }
+  return _featureValuesForName[featureName];
 }
 
 @end

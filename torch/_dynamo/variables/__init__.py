@@ -25,7 +25,6 @@ from .dicts import (
     ConstDictVariable,
     CustomizedDictVariable,
     DefaultDictVariable,
-    DictKeySetVariable,
     FrozensetVariable,
     SetVariable,
 )
@@ -135,7 +134,6 @@ __all__ = [
     "DefaultDictVariable",
     "DeletedVariable",
     "DeterministicAlgorithmsVariable",
-    "DictKeySetVariable",
     "EnumVariable",
     "FakeItemVariable",
     "GetAttrVariable",

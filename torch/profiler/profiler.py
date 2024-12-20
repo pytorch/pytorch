@@ -8,6 +8,7 @@ from abc import ABC, abstractmethod
 from enum import Enum
 from functools import partial
 from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
+from typing_extensions import Self
 from warnings import warn
 
 import torch
@@ -22,7 +23,6 @@ from torch._C._profiler import (
 )
 from torch.autograd import kineto_available, ProfilerActivity
 from torch.profiler._memory_profiler import MemoryProfile, MemoryProfileTimeline
-from typing_extensions import Self
 
 
 __all__ = [

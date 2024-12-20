@@ -118,7 +118,7 @@ class TestBasicVitalSigns(TestCase):
             inps = torch.arange(10 * 5, dtype=torch.float32).view(10, 5)
             tgts = torch.arange(10 * 5, dtype=torch.float32).view(10, 5)
             dataset = torch.utils.data.TensorDataset(inps, tgts)
-            torch.utils.data.DataLoader(dataset, batch_size=2)
+            loader = torch.utils.data.DataLoader(dataset, batch_size=2)
             self.assertIn('Dataloader.enabled\t\t True', torch.read_vitals())
 
 # FIXME: document or deprecate whatever this is
@@ -392,7 +392,7 @@ class TestTorchDeviceType(TestCase):
         # Test fix for issue #80733
         # See https://github.com/pytorch/pytorch/issues/80733
         model = torch.nn.Linear(3, 1)
-        _model_cuda = model.to('cuda')
+        model_cuda = model.to('cuda')
         model.share_memory()
 
     @dtypes(torch.float32, torch.complex64)
@@ -644,8 +644,8 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual((1,), torch.masked_select(zero_d_bool, one_d_bool).shape)
         self.assertEqual((1,), torch.masked_select(one_d_bool, zero_d_bool).shape)
 
-        torch.tensor(1, dtype=torch.uint8, device=device)
-        torch.tensor([1], dtype=torch.uint8, device=device)
+        zero_d_uint8 = torch.tensor(1, dtype=torch.uint8, device=device)
+        one_d_uint8 = torch.tensor([1], dtype=torch.uint8, device=device)
 
         # mode
         self.assertEqual([(), ()], [x.shape for x in torch.mode(zero_d, dim=0, keepdim=True)])
@@ -955,7 +955,7 @@ class TestTorchDeviceType(TestCase):
             t = torch.cuda.FloatTensor([0])
 
         with self.assertWarnsOnceRegex(UserWarning, msg):
-            torch.cuda.DoubleTensor([0])
+            t = torch.cuda.DoubleTensor([0])
 
     def test_set_default_tensor_type_warnings(self, device):
         msg = '.*is deprecated as of PyTorch 2.1, please use torch.set_default_dtype().*'
@@ -1007,7 +1007,7 @@ class TestTorchDeviceType(TestCase):
             stride=2, padding=2, output_padding=1).to(device)
 
         x = torch.rand([1, 64, 8, 128, 172]).to(device)
-        conv(x)
+        y = conv(x)
 
     def test_is_set_to(self, device):
         t1 = torch.empty(3, 4, 9, 10, device=device)
@@ -1222,6 +1222,7 @@ class TestTorchDeviceType(TestCase):
             return f'function "{fn_name}" with config "{"" if config is None else config}"'
 
         # Create processes to test each combination of test cases and config settings
+        processes = []
         for fn_name, arg_sizes in test_cases:
             for config, is_config_deterministic in test_configs:
                 env = os.environ.copy()
@@ -2613,6 +2614,7 @@ else:
             x = torch.randn(sizex, device=device, dtype=torch.float)
             dist_grad = torch.randn((1, 27, 27), device=device, dtype=torch.float)
             y = x.clone()
+            eps = 1e-6
             x.requires_grad = True
             d = torch.cdist(x, y)
             d.backward(dist_grad)
@@ -3170,7 +3172,7 @@ else:
         from copy import copy
         for dt in all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16):
             x = torch.tensor([1, 2, 3, 4], dtype=dt, device=device)
-            _x_clone = x.clone()
+            x_clone = x.clone()
             y = copy(x)
             y.fill_(1)
             # copy is a shallow copy, only copies the tensor view,
@@ -3992,6 +3994,10 @@ else:
     # FIXME: find a test suite for the masked select operator
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
     def test_masked_select(self, device, dtype):
+        if device == 'cpu':
+            warn = 'masked_select received a mask with dtype torch.uint8,'
+        else:
+            warn = 'indexing with dtype torch.uint8 is now deprecated, pl'
         for maskType in integral_types_and(torch.bool):
             num_src = 10
             src = torch.tensor([0, 0, 0, 0, 0, 0, 0, 0, 0, 0], dtype=dtype, device=device)
@@ -4500,7 +4506,9 @@ else:
     @onlyNativeDeviceTypes
     def test_index_fill_mem_overlap(self, device):
         x = torch.rand((1,), device=device).expand((6,))
+        y = torch.rand((6,), device=device)
         ind = torch.tensor([2, 1, 0], device=device)
+        value = torch.rand((3,), device=device)
 
         with self.assertWarnsRegex(UserWarning, "index_fill_ on expanded tensors"):
             x.index_fill_(0, ind, 1.0)
@@ -4863,7 +4871,7 @@ else:
 
             sparse = x.to_sparse()
             with self.assertRaises(RuntimeError):
-                torch.empty_like(sparse, memory_format=torch.preserve_format)
+                z = torch.empty_like(sparse, memory_format=torch.preserve_format)
 
         test_helper(torch.randn(4, 3, 8, 8, device=device), torch.channels_last)
         test_helper(torch.randn(4, 3, 8, 8, 8, device=device), torch.channels_last_3d)
@@ -5269,7 +5277,7 @@ else:
     def test_lazy_clone_binary_op_no_materialize(self, device, dtype):
         t = torch.tensor([[0, 1], [2, 3]], device=device, dtype=dtype)
         clone = t._lazy_clone()
-        t + clone
+        res = t + clone
         self.assertTrue(torch._C._is_cow_tensor(t))
         self.assertTrue(torch._C._is_cow_tensor(clone))
 
@@ -5396,6 +5404,7 @@ else:
             sample_indices = torch.multinomial(prob_dist, n_sample, True)
             for sample_index in sample_indices:
                 self.assertNotEqual(sample_index, zero_prob_idx, msg="sampled an index with zero probability")
+            s_dim = sample_indices.dim()
             self.assertEqual(sample_indices.dim(), 1, msg="wrong number of dimensions")
             self.assertEqual(prob_dist.dim(), 1, msg="wrong number of prob_dist dimensions")
             self.assertEqual(sample_indices.size(0), n_sample, msg="wrong number of samples")
@@ -6605,9 +6614,9 @@ class TestDevicePrecision(TestCase):
         def test(x: torch.Tensor, ia: torch.Tensor, ib: torch.Tensor) -> None:
             # test getitem
             with self.assertRaisesRegex(RuntimeError, fr"indices should be either .* \({x.device}\)"):
-                x[:, ia, None, ib, 0]
+                value = x[:, ia, None, ib, 0]
             with self.assertRaisesRegex(RuntimeError, fr"indices should be either .* \({x.device}\)"):
-                x[ib]
+                value = x[ib]
 
         cpu = torch.device('cpu')
         for device in devices:
@@ -7172,6 +7181,7 @@ class TestTorch(TestCase):
     # NOTE: test_equal will be deprecated in favor of torch.testing.assert_close
     #   once torch.testing is out of beta
     def test_equal(self):
+        devices = [torch.cpu, torch.cuda]
         for device in ["cpu", "cuda"]:
             if device == "cuda" and not torch.cuda.is_available():
                 continue
@@ -8510,7 +8520,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
             weight = torch.nn.Parameter(torch.zeros(1, 1, 1, 3, dtype=torch.double))
             model = torch.nn.Conv2d(1, 1, (1, 3), stride=1, padding=0, bias=False)
             model.weight = weight
-            model(input)
+            out = model(input)
 
     def test_apply(self):
         x = torch.arange(1, 6)
@@ -8686,7 +8696,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         self.assertEqual(torch._debug_has_internal_overlap(c), OVERLAP_TOO_HARD)
 
     def test_allow_tensor_metadata_change(self):
-        torch.ones(2, 3)
+        a = torch.ones(2, 3)
         # Metadata changes are allowed on view tensors that are created from detach().
 
     def test_memory_format(self):
@@ -8981,6 +8991,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         self.assertEqual(y.size(), x.size())
 
     def test_normal_shape(self):
+        warned = False
         for device in get_all_device_types():
             tensor1 = torch.rand(1, device=device)
             tensor4 = torch.rand(4, device=device)
@@ -9120,7 +9131,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
             weight = torch.zeros(1, 1, 1, 3, dtype=torch.complex64)
             model = torch.nn.Conv2d(1, 1, (1, 3), stride=1, padding=0, bias=False)
             model.weight.data = weight
-            model(input)
+            out = model(input)
 
     def test_empty_storage_view(self):
         # we should be able to "modify" slices of a 0-element
@@ -9923,7 +9934,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
                 return super().__new__(cls, x, *args, **kwargs)
 
         x = torch.ones(5)
-        TestTensor(x)
+        test_tensor = TestTensor(x)
 
     def test_storage_base_new(self):
 
@@ -9935,7 +9946,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
                 return super().__new__(cls, x, *args, **kwargs)
 
         x = torch.UntypedStorage(5)
-        TestStorage(x)
+        test_storage = TestStorage(x)
 
     def test_pyobj_preserved(self):
         x = torch.empty(2)
@@ -10536,7 +10547,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         def callback(w):
             nonlocal called
             called = True
-        _wa = weakref.ref(a, callback)
+        wa = weakref.ref(a, callback)
         a._fix_weakref()
         del a
 
@@ -10553,7 +10564,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         def callback(w):
             nonlocal called
             called = True
-        _wa = weakref.ref(a, callback)
+        wa = weakref.ref(a, callback)
         a._fix_weakref()
         del a
 
@@ -10734,7 +10745,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
                 with self.assertRaisesRegex(RuntimeError, "AccumulateGrad node that was poisoned by swap_tensors"):
                     out.sum().backward()
 
-            _wr = weakref.ref(t1)
+            wr = weakref.ref(t1)
             with self.assertRaisesRegex(RuntimeError, "has weakref"):
                 torch.utils.swap_tensors(t1, t2)
 

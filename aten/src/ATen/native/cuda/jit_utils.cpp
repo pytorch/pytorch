@@ -1636,7 +1636,7 @@ NvrtcFunction jit_pwise_function(
 // TODO: may need/want to initialize CUDA context here (refactor into nvrtc call)
 void launch_jitted_pwise_function(
     NvrtcFunction function,
-    const void* args[],
+    void* args[],
     const dim3 nBlocks,
     const dim3 kBlockSize,
     const int smem) {
@@ -1654,8 +1654,7 @@ void launch_jitted_pwise_function(
     kBlockSize.z,
     smem,
     stream,
-    // NOLINTNEXTLINE(*const-cast*)
-    const_cast<void**>(args),
+    args,
     nullptr));
 }
 

@@ -36,9 +36,8 @@ jobs:
     outputs:
       pt_release_name: ${{ steps.release_name.outputs.pt_release_name }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: malfet/checkout@silent-checkout
         with:
-          show-progress: false
           submodules: 'recursive'
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
       - name: Fake name for PRs

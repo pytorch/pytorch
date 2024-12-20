@@ -66,10 +66,10 @@ jobs:
           sysctl machdep.cpu.brand_string kern.osproductversion
 
       - name: Checkout PyTorch
-        uses: actions/checkout@v4
+        uses: malfet/checkout@silent-checkout
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          show-progress: false
+          quiet-checkout: true
 
       - name: Clean checkout
         run: |
