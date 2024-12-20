@@ -168,27 +168,24 @@ class TestFP8Matmul(TestCase):
         if device != "cpu" and torch.cuda.is_available() and not PLATFORM_SUPPORTS_FP8:
             raise unittest.SkipTest(f8_msg)
         self._test_tautological_mm(device, e4m3_type, e4m3_type, size=16)
-        # hipblaslt does not yet support mixed e4m3_type input
-        if torch.version.hip is None:
-            if device != "cpu":
-                # TODO: The following 2 tests are mixed dtypes between src and weight,
-                # which will be enabled in oneDNN v3.6 in CPU.
-                self._test_tautological_mm(device, e4m3_type, e5m2_type, size=32)
-                self._test_tautological_mm(device, e5m2_type, e4m3_type, size=48)
-        if device == "cpu":
+        if device == "cpu" or torch.version.hip:
             self._test_tautological_mm(device, e5m2_type, e5m2_type)
         else:
             # According to https://docs.nvidia.com/cuda/cublas/#id99 8F_E5M2 MM is unsupported
             with self.assertRaises(RuntimeError):
                 self._test_tautological_mm(device, e5m2_type, e5m2_type)
 
+        if device != "cpu":
+            # TODO: The following 2 tests are mixed dtypes between src and weight,
+            # which will be enabled in oneDNN v3.6 in CPU.
+            self._test_tautological_mm(device, e4m3_type, e5m2_type, size=32)
+            self._test_tautological_mm(device, e5m2_type, e4m3_type, size=48)
+
         self._test_tautological_mm(device, size=64, out_dtype=torch.float16)
         self._test_tautological_mm(device, size=96, out_dtype=torch.float32)
-        # hipblaslt does not yet support bfloat16 output
-        if torch.version.hip is None:
-            self._test_tautological_mm(device, size=80, out_dtype=torch.bfloat16)
+        self._test_tautological_mm(device, size=80, out_dtype=torch.bfloat16)
         if device != "cpu":
-            with self.assertRaises(RuntimeError):
+            with self.assertRaises(AssertionError if torch.version.hip else RuntimeError):
                 self._test_tautological_mm(device, out_dtype=e5m2_type)
         else:
             # TODO: e4m3 and e5m2 naturally has numerical gap, maybe relax the tolerance later.
@@ -200,9 +197,8 @@ class TestFP8Matmul(TestCase):
             raise unittest.SkipTest(f8_msg)
         size = (16, 16)
         x = torch.full(size, 0.5, device=device, dtype=e4m3_type)
-        # hipblaslt does not yet support mixed e4m3_type input
         # TODO: will use e5m2_type after upgrading oneDNN to v3.6.
-        y_type = e4m3_type if torch.version.hip or device == "cpu" else e5m2_type
+        y_type = e4m3_type if device == "cpu" else e5m2_type
         y = torch.full(size, 0.5, device=device, dtype=y_type).t()
         scale_a = torch.tensor(1.5, device=device)
         scale_b = torch.tensor(0.66, device=device)

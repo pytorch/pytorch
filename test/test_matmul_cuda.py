@@ -4,6 +4,8 @@ import unittest
 from itertools import product
 from functools import partial
 
+import torch.version
+
 import torch
 
 from torch.quantization._quantized_conversions import (
