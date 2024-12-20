@@ -3616,36 +3616,32 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
         f(dst, src, 1.5, "TEST", True, N)
 
         if with_perf_model:
-            # Disabled for now, some dynamo weirdness at play here
             self.assertEqual(len(records), 1)
             self.assertEqual(src + 1.5, dst)
         else:
             # We require the largest config to be picked for the correct result (BLOCK_SIZE==128)
-            self.assertNotEqual(src + 1.5, dst)
+            self.assertEqual(src, dst)
             self.assertEqual(len(records), 3)
-            self.assertTrue(records["run_early_config_prune"] is not None)
-            self.assertTrue(records["capture_kwargs"] is not None)
-            self.assertTrue(records["capture_named_args"] is not None)
-
-    """
-    We want to recompile if anyone changes configs in the autotuner object
-    In short if for example the following sequence of events happens:
-     1. foo = torch.compile(bar)
-     1. call foo
-     2. autotuner.configs = [new configs list]
-     3. call foo
-
-    A recompile event should occur, which we check with Dynamo counters
-    This tests that we are installing guards on input objects properly
-    """
+            self.assertTrue(records["run_early_config_prune"])
+            self.assertTrue(records["capture_kwargs"])
+            self.assertTrue(records["capture_named_args"])
 
     @requires_gpu
     @common_utils.parametrize("backend", ["eager", "aot_eager", "inductor"])
     @common_utils.parametrize("with_perf_model", [True, False])
     def test_triton_kernel_prune_configs_by_recompile(self, backend, with_perf_model):
-        # We need to specify global records to get around an unknown Dynamo bug.
-        # Dynamo appears to not properly update the side effects in the case of an
-        # inline call with a nonlocal value.
+        """
+        We want to recompile if anyone changes configs in the autotuner object
+        In short if for example the following sequence of events happens:
+        1. foo = torch.compile(bar)
+        1. call foo
+        2. autotuner.configs = [new configs list]
+        3. call foo
+
+        A recompile event should occur, which we check with Dynamo counters
+        This tests that we are installing guards on input objects properly
+        """
+
         global records
         records = {}
 
@@ -3657,8 +3653,6 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
             if "dst" in named_args and "src" in named_args and len(named_args) == 5:
                 records["capture_named_args"] = True
             return [configs[0]]
-
-        # this will pick the Config with the largest block size  (128)
 
         def perf_model(*args, **kwargs):
             records["run_perf_model"] = True
@@ -3817,11 +3811,11 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
             self.assertEqual(len(records), 1)
             self.assertEqual(src + 1.5, dst)
         else:
-            self.assertNotEqual(src + 1.5, dst)
+            self.assertEqual(src, dst)
             self.assertEqual(len(records), 3)
-            self.assertTrue(records["run_early_config_prune"] is not None)
-            self.assertTrue(records["capture_kwargs"] is not None)
-            self.assertTrue(records["capture_named_args"] is not None)
+            self.assertTrue(records["run_early_config_prune"])
+            self.assertTrue(records["capture_kwargs"])
+            self.assertTrue(records["capture_named_args"])
 
 
 common_utils.instantiate_parametrized_tests(KernelTests)

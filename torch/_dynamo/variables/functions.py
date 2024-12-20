@@ -1049,26 +1049,24 @@ class DynamoTritonHOPifier(TritonHOPifier):
         grid = grid.call_function(tx, [meta], {})
         return grid
 
-    # We use this function to wrap user-defined functions (e.g., early_config_prune, perf_model)
-    def call_user_defined_fn(self, user_fn, args, kwargs, tx, source):
+    # We use this function to wrap call_prune_configs
+    def call_user_defined_fn(self, user_fn, args, kwargs, tx, variable):
         from .builder import VariableBuilder
 
-        wrapped_user_function = VariableBuilder(tx, source)._wrap(user_fn)
+        wrapped_user_function = VariableBuilder(tx, variable.source)._wrap(user_fn)
         result = wrapped_user_function.call_function(tx, args, kwargs)
         return result
 
-    # We use this function to wrap early_config_prune and perf_model
-    # These are both user-defined functions that we need to run.
-    # We also wrap the configs to pass into the functions we call.
-    def wrap_user_defined_obj(self, user_obj, tx, source, name):
+    def wrap_user_defined_obj(self, user_obj, tx, variable, name):
         from .builder import VariableBuilder
 
-        wrapped_user_obj = VariableBuilder(tx, AttrSource(source, f"{name}"))._wrap(
-            user_obj
-        )
+        wrapped_user_obj = VariableBuilder(
+            tx, AttrSource(variable.source, f"{name}")
+        )._wrap(user_obj)
         return wrapped_user_obj
 
-    # We need to override call_getitem here so that we can call GetItemSource
+    # We need to override call_getitem here so that we can add the source in the case
+    # where we call the triton kernel with a grid
     def call_getitem(
         self,
         variable: "TritonKernelVariable",
@@ -1080,6 +1078,7 @@ class DynamoTritonHOPifier(TritonHOPifier):
             self.raise_unsupported(
                 "Triton kernels should be called with only a single grid"
             )
+
         return type(variable)(
             kernel=variable.kernel,
             kernel_idx=variable.kernel_idx,

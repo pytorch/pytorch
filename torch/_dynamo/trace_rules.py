@@ -293,6 +293,7 @@ manual_torch_name_rule_map = {
     "torch._functorch.deprecated.grad_and_value": UserFunctionVariable,
     "torch._functorch.deprecated.vjp": UserFunctionVariable,
     # everything else
+    "torch._higher_order_ops.triton_kernel_wrap.do_prune_configs": UserFunctionVariable,
     "torch._higher_order_ops.foreach_map.foreach_map": UserFunctionVariable,
     "torch._constrain_as_size": UserFunctionVariable,
     "torch._tensor._convert": UserFunctionVariable,
@@ -322,8 +323,6 @@ manual_torch_name_rule_map = {
     f"torch/testing/_internal/distributed/_tensor/common_dtensor.py#{TORCH_DYNAMO_RESUME_IN_PREFIX}": UserFunctionVariable,
     "torch/testing/_internal/common_distributed.py#forward": UserFunctionVariable,
     f"torch/testing/_internal/common_distributed.py#{TORCH_DYNAMO_RESUME_IN_PREFIX}": UserFunctionVariable,
-    # Triton
-    "torch._higher_order_ops.triton_kernel_wrap.call_prune_configs": UserFunctionVariable,
 }
 
 
