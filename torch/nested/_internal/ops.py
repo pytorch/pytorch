@@ -435,7 +435,31 @@ def jagged_torch_function(func, *args, **kwargs):
 
         with torch._C.DisableTorchFunctionSubclass():
             return func(*args, **kwargs)
-
+    
+    if (
+        func.__name__ == "__getitem__"
+        and len(args) == 2
+        and isinstance(args[1], tuple)
+        # only support a slice for every dimension
+        and len(indexing := args[1]) == (inp := args[0]).dim()
+        # only support indexing the entire batch dimension
+        and (indexing[0] is Ellipsis or indexing[0] == slice(*(None for _ in range(inp.dim()))))
+        # only support slice(None, tensor, None) i.e. "up to" lengths specified in tensor
+        and (ragged_slice := indexing[inp._ragged_idx]).start is None
+        and isinstance((lengths := ragged_slice.stop), torch.Tensor)
+        and ragged_slice.step is None
+        and lengths.dim() == 1
+        and lengths.size(0) == inp.size(0)
+    ):
+        return torch.nested.nested_tensor_from_jagged(
+            inp._values,
+            inp._offsets,
+          lengths=lengths,
+            jagged_dim=inp._ragged_idx,
+            min_seqlen=inp._maybe_min_seqlen,
+            max_seqlen=inp._maybe_max_seqlen,
+        )
+        
     raise NotImplementedError(func)
 
 
