@@ -324,6 +324,8 @@ class TORCH_API Context {
   void setFloat32MatmulPrecision(const std::string& s);
   bool allowTF32CuDNN() const;
   void setAllowTF32CuDNN(bool);
+  bool allowTF32OneDNN() const;
+  void setAllowTF32OneDNN(bool);
   bool allowTF32CuBLAS() const;
   void setAllowTF32CuBLAS(bool);
   Float32MatmulPrecision float32MatmulPrecision() const;
@@ -413,6 +415,7 @@ class TORCH_API Context {
   bool allow_fp16_reduction_cublas = true;
   bool allow_bf16_reduction_cublas = true;
   bool enabled_mkldnn = true;
+  bool allow_tf32_onednn = false;
   bool enabled_nnpack = true;
   at::LinalgBackend linalg_preferred_backend =
       c10::utils::check_env("TORCH_LINALG_PREFER_CUSOLVER") == true

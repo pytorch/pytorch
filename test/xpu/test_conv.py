@@ -1264,6 +1264,17 @@ class TestConvolutionNNDeviceType(NNTestCase):
             # input NHWC, output NHWC
             assert_size_stride(out, (2, 512, 7, 7), (25088, 1, 3584, 512))
 
+    @onlyXPU
+    def test_onednn_allow_tf32_get_set(self):
+        with torch.backends.mkldnn.flags(
+            enabled=None, deterministic=None, allow_tf32=False
+        ):
+            self.assertFalse(torch.backends.mkldnn.allow_tf32)
+        with torch.backends.mkldnn.flags(
+            enabled=None, deterministic=None, allow_tf32=True
+        ):
+            self.assertTrue(torch.backends.mkldnn.allow_tf32)
+
 
 instantiate_device_type_tests(
     TestConvolutionNNDeviceType, globals(), only_for="xpu", allow_xpu=True
