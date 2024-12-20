@@ -1580,11 +1580,11 @@ graph():
     %add : [num_users=4] = call_function[target=torch.ops.aten.add.Tensor](args = (%x, %mul), kwargs = {})
     %add_1 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%add, %p_parametrizations_p2_original0), kwargs = {})
     %add_2 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%add, %p_parametrizations_p2_original1), kwargs = {})
-    %add_3 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%add, %p_parametrizations_p2_original2), kwargs = {})
-    %add_4 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%add, %p_parametrizations_p2_original3), kwargs = {})
-    %add_5 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%add_3, %add_4), kwargs = {})
-    %add_6 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%add_2, %add_5), kwargs = {})
-    %add_7 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%add_1, %add_6), kwargs = {})
+    %add_3 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%add_1, %add_2), kwargs = {})
+    %add_4 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%add, %p_parametrizations_p2_original2), kwargs = {})
+    %add_5 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%add, %p_parametrizations_p2_original3), kwargs = {})
+    %add_6 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%add_4, %add_5), kwargs = {})
+    %add_7 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%add_3, %add_6), kwargs = {})
     %sum_1 : [num_users=1] = call_function[target=torch.ops.aten.sum.default](args = (%add_7,), kwargs = {})
     %sum_2 : [num_users=1] = call_function[target=torch.ops.aten.sum.default](args = (%sum_1,), kwargs = {})
     %add_8 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%x, %sum_2), kwargs = {})
@@ -1592,6 +1592,50 @@ graph():
         )
         res = ep.module()(ref_x)
         self.assertEqual(res, ref_out)
+
+    @testing.expectedFailureLegacyExportNonStrict  # Old export doesn't work with subclasses
+    @testing.expectedFailureLegacyExportStrict  # Old export doesn't work with subclasses
+    @testing.expectedFailureSerDerNonStrict  # builtins.getattr is not supported
+    @testing.expectedFailureSerDer  # builtins.getattr is not supported
+    def test_subclass_nested_attr_access(self):
+        from torch.testing._internal.two_tensor import TwoTensor
+
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.p1 = torch.nn.Parameter(torch.ones(3, 4))
+                self.p2 = torch.nn.Parameter(
+                    TwoTensor(
+                        TwoTensor(torch.ones(3, 4), torch.ones(3, 4)),
+                        TwoTensor(torch.ones(3, 4), torch.ones(3, 4)),
+                    )
+                )
+
+            def forward(self, x):
+                res = (2 * self.p1 + self.p2).sum()
+                return x + res.a.b
+
+        m = Foo()
+        ref_x = torch.randn(3, 4)
+        ref_out = m(ref_x)
+        ep_training = torch.export.export_for_training(m, (ref_x,))
+        self.assertExpectedInline(
+            str(ep_training.graph).strip(),
+            """\
+graph():
+    %p_p1 : [num_users=1] = placeholder[target=p_p1]
+    %p_p2 : [num_users=1] = placeholder[target=p_p2]
+    %x : [num_users=1] = placeholder[target=x]
+    %mul : [num_users=1] = call_function[target=torch.ops.aten.mul.Tensor](args = (%p_p1, 2), kwargs = {})
+    %add : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%mul, %p_p2), kwargs = {})
+    %sum_1 : [num_users=1] = call_function[target=torch.ops.aten.sum.default](args = (%add,), kwargs = {})
+    %getattr_13 : [num_users=1] = call_function[target=builtins.getattr](args = (%sum_1, a), kwargs = {})
+    %getattr_15 : [num_users=1] = call_function[target=builtins.getattr](args = (%getattr_13, b), kwargs = {})
+    %add_1 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%x, %getattr_15), kwargs = {})
+    return (add_1,)""",
+        )
+        ep = export(m, (ref_x,))
+        self.assertTrue(torch.allclose(ep.module()(ref_x), ref_out))
 
     def test_real_tensor_errors_on_aliasing_custom_op(self):
         @torch.library.custom_op("export::foo_alias", mutates_args={})

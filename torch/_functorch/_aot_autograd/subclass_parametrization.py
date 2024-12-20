@@ -14,7 +14,7 @@ class UnwrapTensorSubclass(torch.nn.Module):
             }
             todo = todo[:-num_children]
             rebuilt = tp.__tensor_unflatten__(d, meta, None, None)  # type: ignore[attr-defined]
-            todo.append(rebuilt)
+            todo.insert(0, rebuilt)
 
         assert len(todo) == 1
         return todo[0]
