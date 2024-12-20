@@ -3604,7 +3604,8 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
             records["run_early_config_prune"] = True
             if "N" in kwargs and kwargs["N"] == 1024:
                 records["capture_kwargs"] = True
-            if "dst" in named_args and "src" in named_args and len(named_args) == 5:
+            # named args are: dst, src, add_float
+            if "dst" in named_args and "src" in named_args and len(named_args) == 3:
                 records["capture_named_args"] = True
             return [configs[0]]
 
@@ -3632,15 +3633,13 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
             dst,
             src,
             add_float,
-            string_arg: tl.constexpr,
-            bool_var: tl.constexpr,
             N,
             BLOCK_SIZE: tl.constexpr,
         ):
             offsets = tl.program_id(0) * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
             x = tl.load(src + offsets, mask=offsets < N)
             # Let's make sure we always select a block size of 128 based on our perf_model
-            if (string_arg == "TEST" and bool_var) and BLOCK_SIZE == 128:
+            if BLOCK_SIZE == 128:
                 x = x + add_float
             tl.store(dst + offsets, x, mask=offsets < N)
 
@@ -3654,17 +3653,15 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
             dst: torch.Tensor,
             src: torch.Tensor,
             add_float: float,
-            string_arg: str,
-            bool_var: bool,
             N: int,
         ) -> None:
             grid = lambda META: (triton.cdiv(N, META["BLOCK_SIZE"]),)
-            prune_by_kernel[grid](dst, src, add_float, string_arg, bool_var, N=N)
+            prune_by_kernel[grid](dst, src, add_float, N=N)
 
         N = 1024
         src = torch.randn(N, device=GPU_TYPE)
         dst = torch.empty(N, device=GPU_TYPE)
-        f(dst, src, 1.5, "TEST", True, N)
+        f(dst, src, 1.5, N)
 
         if with_perf_model:
             self.assertEqual(len(records), 1)
@@ -3721,15 +3718,13 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
             dst,
             src,
             add_float,
-            string_arg: tl.constexpr,
-            bool_var: tl.constexpr,
             N,
             BLOCK_SIZE: tl.constexpr,
         ):
             offsets = tl.program_id(0) * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
             x = tl.load(src + offsets, mask=offsets < N)
             # Let's make sure we always select a block size of 128 based on our perf_model
-            if (string_arg == "TEST" and bool_var) and BLOCK_SIZE == 128:
+            if BLOCK_SIZE == 128:
                 x = x + add_float
             tl.store(dst + offsets, x, mask=offsets < N)
 
@@ -3743,20 +3738,20 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
             counter += 1
 
         @torch.compile(fullgraph=True, backend=backend)
-        def f(dst, src, add_float, string_arg, bool_var, N):
+        def f(dst, src, add_float, N):
             grid = lambda META: (triton.cdiv(N, META["BLOCK_SIZE"]),)
-            prune_by_kernel[grid](dst, src, add_float, string_arg, bool_var, N=N)
+            prune_by_kernel[grid](dst, src, add_float, N=N)
 
         N = 1024
         src = torch.randn(N, device=GPU_TYPE)
         dst = torch.empty(N, device=GPU_TYPE)
 
         # first compilation, this prunes the configs
-        f(dst, src, 1.5, "TEST", True, N)
+        f(dst, src, 1.5, N)
 
         self.assertEqual(counter, 1)
 
-        f(dst, src, 1.5, "TEST", True, N)
+        f(dst, src, 1.5, N)
 
         # this should not trigger a recompilation
         # this is because we modified the test to not touch the records dict
@@ -3768,12 +3763,12 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
 
         # Calling the kernel after modifying the autotuner should
         # trigger a recompile
-        f(dst, src, 1.5, "TEST", True, N)
+        f(dst, src, 1.5, N)
 
         self.assertEqual(counter, 2)
 
         # there should be no recompile here
-        f(dst, src, 1.5, "TEST", True, N)
+        f(dst, src, 1.5, N)
 
         self.assertEqual(counter, 2)
 

@@ -65,7 +65,8 @@ if TYPE_CHECKING:
             pass
 
     TritonKernelType = Union[Autotuner, JITFunction]
-    TritonAutotunerType = Autotuner
+    # mypy specifically complains that TritonAutotunerType is not a valid type if Autotuner is not inside of a Union.
+    TritonAutotunerType = Union[Autotuner]
 
 log = logging.getLogger("torch._dynamo")
 
@@ -1233,27 +1234,20 @@ class TritonHOPifier:
         from triton import JITFunction
         from triton.runtime.autotuner import autotune, Autotuner, Config
 
-        """
-        Order of checks while running call_triton_kernel
-        1) Handle special configs
-        2) Raise an exception if num_ctas is in kwargs
-        3) Check variable.grid
-        4) Run config pruning (if applicable)
-        5) precompute the grid
-        6) specialize constexprs
-        """
-
+        # Check if num_ctas is in kwargs
         if "num_ctas" in kwargs:
             self.raise_unsupported(
                 "Passing num_ctas directly to the Triton kernel is not supported. "
                 "Please use a Config in @triton.autotune instead."
             )
 
+        # Make sure the kernel has a grid
         if variable.grid is None:
             self.raise_unsupported("Triton kernels should always be called with a grid")
 
         SPECIAL_CONFIG_NAMES = {"num_warps", "num_stages", "num_ctas"}
 
+        # move special config names to configs out of kwargs
         special_kwargs = {}
         for name in SPECIAL_CONFIG_NAMES:
             if name in kwargs:
@@ -1335,6 +1329,7 @@ class TritonHOPifier:
         default_perf_model = None
         default_early_config_prune = None
 
+        # run prune_configs_by
         if isinstance(variable.kernel, Autotuner) and (
             variable.kernel.perf_model != default_perf_model
             or variable.kernel.early_config_prune != default_early_config_prune
@@ -1399,6 +1394,7 @@ class TritonHOPifier:
         # args and kwargs combined and normalized
         combined_args_raw = {**dict(zip(variable.kernel.arg_names, args)), **kwargs}
 
+        # precompute the grid for the kernel
         configs = (
             [config.kwargs for config in variable.kernel.configs]
             if isinstance(variable.kernel, Autotuner)
