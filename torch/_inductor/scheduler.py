@@ -1899,7 +1899,6 @@ class Scheduler:
             ]
         )
 
-        self.speedup_by_fusion_cache: Dict[str, Callable[[], bool]] = {}
         self.nodes = [self.create_scheduler_node(n) for n in nodes]
         self.update_zero_dim_cpu_tensor()
         # some new constants could have been created above
@@ -2689,16 +2688,13 @@ class Scheduler:
 
         def compile_kernel(
             nodes: Sequence[BaseSchedulerNode],
-            compile_future: bool = True,
-        ) -> Tuple[Optional[TritonFuture], ModuleType]:
+        ) -> Tuple[TritonFuture, ModuleType]:
             src_code = self.generate_kernel_code_from_nodes(
                 nodes, benchmark_kernel=True
             )
             mod = PyCodeCache.load(src_code)
             return (
-                async_compile.triton(kernel_name="triton_", source_code=src_code)
-                if compile_future
-                else None,
+                async_compile.triton(kernel_name="triton_", source_code=src_code),
                 mod,
             )
 
@@ -2714,15 +2710,7 @@ class Scheduler:
             multi_node = node1.node if epilogue_fusion else node2.node
             assert isinstance(multi_node, ir.MultiTemplateBuffer)
             choice_timings = multi_node.choice_timings
-            min_choice, ms1 = multi_node.get_min_choice()
-
-            multi_node_key = torch._inductor.select_algorithm.create_precompile_key(
-                name=repr(multi_node.origins),
-                inputs_key=torch._inductor.select_algorithm.create_inputs_key(
-                    multi_node.inputs
-                ),
-                choices=list(choice_timings.keys()),
-            )
+            _, ms1 = multi_node.get_min_choice()
 
             non_template_nodes = node_list_2 if epilogue_fusion else node_list_1
 
@@ -2730,17 +2718,9 @@ class Scheduler:
             _, ms1 = multi_node.get_min_choice()
             ms2, path2 = self.benchmark_fused_nodes(node_list_2)
 
-            # equivalent source code will get mapped to the same path
-            fusion_key = "f({multi_node_key}, {path2})"
-            cached_fusion = fusion_key in self.speedup_by_fusion_cache
-
             # Start compiling choices in parallel
             future_choices: List[
-                Tuple[
-                    torch._inductor.select_algorithm.ChoiceCaller,
-                    Optional[torch._inductor.codecache.TritonFuture],
-                    ModuleType,
-                ]
+                Tuple[Any, torch._inductor.codecache.TritonFuture, ModuleType]
             ] = []
             triton_choices = 0
             for choice, unfused_time in sorted(
@@ -2769,27 +2749,15 @@ class Scheduler:
                     break
 
                 with multi_node.swap_as_triton_caller(choice):
-                    future_choices.append(
-                        (
-                            choice,
-                            *compile_kernel(
-                                node_list_fused, compile_future=not cached_fusion
-                            ),
-                        )
-                    )
+                    future_choices.append((choice, *compile_kernel(node_list_fused)))
 
-            @functools.lru_cache
             def benchmark_when_ready() -> bool:
                 min_ms_fused = float("inf")
                 ms_fused_choice = None
 
-                if cached_fusion:
-                    self.speedup_by_fusion_cache[fusion_key]()
-
                 # Benchmark each choice after compilation completes
                 for choice, future, mod_fused in future_choices:
-                    if future:
-                        future.result()
+                    future.result()
                     with multi_node.swap_as_triton_caller(choice):
                         ms_fused, path = self.benchmark_codegened_module(
                             mod_fused, node_list_fused[0].get_device()
@@ -2806,28 +2774,14 @@ class Scheduler:
                 else:
                     return False
 
-            if not cached_fusion:
-                self.speedup_by_fusion_cache[fusion_key] = benchmark_when_ready
             return benchmark_when_ready
 
         else:
-            future_and_mod_l1_fused = compile_kernel(
-                node_list_fused, compile_future=False
-            )
-
-            cache_key = future_and_mod_l1_fused[1].__file__
-            assert cache_key is not None
-            if existing_benchmark := self.speedup_by_fusion_cache.get(cache_key, None):
-                return existing_benchmark
-
             # Start parallel compilation for all three kernels
-            future_and_mod_l1_fused = compile_kernel(
-                node_list_fused, compile_future=True
-            )
-            future_and_mod_l1 = compile_kernel(node_list_1, compile_future=True)
-            future_and_mod_l2 = compile_kernel(node_list_2, compile_future=True)
+            future_and_mod_l1 = compile_kernel(node_list_1)
+            future_and_mod_l2 = compile_kernel(node_list_2)
+            future_and_mod_l1_fused = compile_kernel(node_list_fused)
 
-            @functools.lru_cache
             def benchmark_when_ready() -> bool:
                 try:
                     # Wait for all compilations to complete
@@ -2885,7 +2839,6 @@ class Scheduler:
                         return True
                     raise
 
-            self.speedup_by_fusion_cache[cache_key] = benchmark_when_ready
             return benchmark_when_ready
 
     def fuse_nodes_once(
@@ -2966,14 +2919,12 @@ class Scheduler:
 
                 fuse_two_nodes(node1, node2)
 
-        seen_fusion: OrderedSet[
-            Tuple[Callable[[], bool], BaseSchedulerNode, BaseSchedulerNode]
-        ] = OrderedSet()
+        seen_pair_speedup_fn: OrderedSet[Callable[[], bool]] = OrderedSet()
         for is_speedup, node_key1, node_key2 in pending_fusions.values():
-            if (is_speedup, node_key1, node_key2) in seen_fusion:
+            if is_speedup in seen_pair_speedup_fn:
                 continue
 
-            seen_fusion.add((is_speedup, node_key1, node_key2))
+            seen_pair_speedup_fn.add(is_speedup)
 
             if is_speedup():
                 fuse_two_nodes(node_key1, node_key2)
@@ -4116,9 +4067,7 @@ class BaseScheduling:
         """
         raise NotImplementedError
 
-    def generate_kernel_code_from_nodes(
-        self, nodes: Sequence[BaseSchedulerNode], benchmark_kernel: bool = False
-    ) -> str:
+    def generate_kernel_code_from_nodes(self, nodes, benchmark_kernel=False):
         raise NotImplementedError
 
     def codegen_node(self, node: Union[FusedSchedulerNode, SchedulerNode]) -> None:
