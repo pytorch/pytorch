@@ -6022,6 +6022,7 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
                 nt.values()[nt.offsets()[i] : (nt.offsets()[i] + nt.lengths()[i])],
             )
 
+    @skipIfTorchDynamo("Test compiles internally")
     @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
     @torch._dynamo.utils.disable_cache_limit()
     @dtypes(torch.float32)
@@ -8448,6 +8449,14 @@ BACKWARD_SKIPS_AND_XFAILS = [
 
 COMPILE_FORWARD_SKIPS_AND_XFAILS = [
     *FORWARD_SKIPS_AND_XFAILS,
+    # select(): pending unbacked symints not in returned output (needs fix)
+    XFailRule(
+        error_type=torch._dynamo.exc.InternalTorchDynamoError,
+        error_msg="Pending unbacked symbols",
+        op_match_fn=lambda device, op: (op.full_name == "select"),
+        sample_match_fn=lambda device, sample: ("batch_dim" in sample.name),
+        name="broken_select_backward_unbacked",
+    ),
     # Bug: cross-device conversions with to() result in new nested ints within compile only
     XFailRule(
         error_type=AssertionError,
@@ -8459,8 +8468,7 @@ COMPILE_FORWARD_SKIPS_AND_XFAILS = [
     # clone() -> contiguous format on an non-contiguous NJT with holes currently uses
     # unbind(), leading to data-dependent error in torch.compile
     XFailRule(
-        error_type=torch._dynamo.exc.Unsupported,
-        error_msg="data dependent operator: aten._local_scalar_dense.default",
+        error_msg="Could not guard on data-dependent expression",
         op_match_fn=lambda device, op: (op.full_name == "clone"),
         sample_match_fn=lambda device, sample: (
             "noncontig_holes" in sample.name
@@ -8468,13 +8476,15 @@ COMPILE_FORWARD_SKIPS_AND_XFAILS = [
         ),
         name="clone_unbind_data_dependency",
     ),
-    # chunk() on the batch dim reads the values of offsets to determine shape, leading to
-    # data-dependent error in torch.compile
+    # chunk() on the batch dim with chunks=1 causes an unbacked SymInt problem; this
+    # needs to be investigated
     XFailRule(
-        error_type=torch._dynamo.exc.Unsupported,
-        error_msg="data dependent operator: aten._local_scalar_dense.default",
+        error_type=AssertionError,
+        error_msg="s1",
         op_match_fn=lambda device, op: (op.full_name == "chunk"),
-        sample_match_fn=lambda device, sample: ("batch_dim" in sample.name),
+        sample_match_fn=lambda device, sample: (
+            "batch_dim" in sample.name and sample.kwargs["chunks"] == 1
+        ),
         name="chunk_batch_dim_data_dependency",
     ),
     # select on dim=0 currently uses unbind(), leading to data-dependent error in torch.compile
@@ -8624,22 +8634,14 @@ COMPILE_BACKWARD_SKIPS_AND_XFAILS = [
         ),
         name="clone_unbind_data_dependency_backward",
     ),
-    # select(): pending unbacked symints not in returned output (needs fix)
-    XFailRule(
-        error_type=torch._dynamo.exc.InternalTorchDynamoError,
-        error_msg="Pending unbacked symbols",
-        op_match_fn=lambda device, op: (op.full_name == "select"),
-        sample_match_fn=lambda device, sample: ("batch_dim" in sample.name),
-        name="broken_select_backward_unbacked",
-    ),
     *COMPILE_FORWARD_SKIPS_AND_XFAILS,
     *BACKWARD_SKIPS_AND_XFAILS,
 ]
 
 COMPARE_TENSOR_COMPONENT_EQUALITY = {
-    # masked_select is expected to output a different shape
+    # these ops are expected to output a different shape
+    "chunk",
     "masked_select",
-    # narrow is expected to output a new shape
     "narrow",
 }
 
