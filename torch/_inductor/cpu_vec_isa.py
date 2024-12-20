@@ -176,7 +176,7 @@ class VecSVE256(VecISA):
         "CPU_CAPABILITY_SVE256",
         "AT_BUILD_ARM_VEC256_WITH_SLEEF",
     ]
-    _arch_flags = "-march=armv8-a+sve -msve-vector-bits=256"
+    _arch_flags = "-march=armv8.2-a+sve -msve-vector-bits=256"
     _dtype_nelements = {torch.float: 8, torch.bfloat16: 16, torch.float16: 16}
 
     def __str__(self) -> str:
