@@ -57,19 +57,42 @@ kernel void copysign_integral(
   *out = copysign(static_cast<float>(*input), static_cast<float>(*other));
 }
 
-template <typename T>
-kernel void real_mul(
-    constant void* input_ [[buffer(0)]],
-    constant void* other_ [[buffer(1)]],
-    device void* out_ [[buffer(2)]],
-    constant uint3* offsets [[buffer(3)]],
-    uint tid [[thread_position_in_grid]]) {
-  device T* out = (device T*)((device uint8_t*)out_ + offsets[tid].x);
-  constant T* input = (constant T*)((constant uint8_t*)input_ + offsets[tid].y);
-  constant T* other = (constant T*)((constant uint8_t*)other_ + offsets[tid].z);
-
-  *out = *input * *other;
+#define BINARY_OP_KERNEL(op_name, op) \
+template <typename T> \
+kernel void op_name( \
+    constant void* input_ [[buffer(0)]], \
+    constant void* other_ [[buffer(1)]], \
+    device void* out_ [[buffer(2)]], \
+    constant uint3* offsets [[buffer(3)]], \
+    uint tid [[thread_position_in_grid]]) { \
+  device T* out = (device T*)((device uint8_t*)out_ + offsets[tid].x); \
+  constant T* input = (constant T*)((constant uint8_t*)input_ + offsets[tid].y); \
+  constant T* other = (constant T*)((constant uint8_t*)other_ + offsets[tid].z); \
+ \
+  *out = *input op *other; \
 }
+BINARY_OP_KERNEL(real_mul, *)
+BINARY_OP_KERNEL(add, +)
+BINARY_OP_KERNEL(sub, -)
+
+// always float op T -> float for ease of PoC implementation
+#define MIXED_DTYPE_TO_FLOAT_BINARY_OP_KERNEL(op_name, op) \
+template <typename T> \
+kernel void op_name##_mixed( \
+    constant void* input_ [[buffer(0)]], \
+    constant void* other_ [[buffer(1)]], \
+    device void* out_ [[buffer(2)]], \
+    constant uint3* offsets [[buffer(3)]], \
+    uint tid [[thread_position_in_grid]]) { \
+  device float* out = (device float*)((device uint8_t*)out_ + offsets[tid].x); \
+  constant float* input = (constant float*)((constant uint8_t*)input_ + offsets[tid].y); \
+  constant T* other = (constant T*)((constant uint8_t*)other_ + offsets[tid].z); \
+ \
+  *out = static_cast<float>(*input op *other);  \
+}
+
+MIXED_DTYPE_TO_FLOAT_BINARY_OP_KERNEL(add, +)
+MIXED_DTYPE_TO_FLOAT_BINARY_OP_KERNEL(sub, -)
 
 #define REGISTER_FMAX_OP(DTYPE)                                   \
   template [[host_name("fmax_" #DTYPE)]] kernel void fmax<DTYPE>( \
@@ -112,27 +135,69 @@ kernel void real_mul(
       constant uint3* offsets [[buffer(3)]],                      \
       uint tid [[thread_position_in_grid]]);
 
+#define REGISTER_ADD_OP(DTYPE)                               \
+  template [[host_name("add_" #DTYPE)]] kernel void add<DTYPE>( \
+      constant void* input_ [[buffer(0)]],                        \
+      constant void* other_ [[buffer(1)]],                        \
+      device void* out_ [[buffer(2)]],                            \
+      constant uint3* offsets [[buffer(3)]],                      \
+      uint tid [[thread_position_in_grid]]);
+#define REGISTER_SUB_OP(DTYPE)                               \
+  template [[host_name("sub_" #DTYPE)]] kernel void sub<DTYPE>( \
+      constant void* input_ [[buffer(0)]],                        \
+      constant void* other_ [[buffer(1)]],                        \
+      device void* out_ [[buffer(2)]],                            \
+      constant uint3* offsets [[buffer(3)]],                      \
+      uint tid [[thread_position_in_grid]]);
+
+#define REGISTER_MIXED_ADD_OP(DTYPE) \
+  template [[host_name("add_mixed_" #DTYPE)]] kernel void add_mixed<DTYPE>( \
+      constant void* input_ [[buffer(0)]],                        \
+      constant void* other_ [[buffer(1)]],                        \
+      device void* out_ [[buffer(2)]],                            \
+      constant uint3* offsets [[buffer(3)]],                      \
+      uint tid [[thread_position_in_grid]]);
+#define REGISTER_MIXED_SUB_OP(DTYPE) \
+  template [[host_name("sub_mixed_" #DTYPE)]] kernel void sub_mixed<DTYPE>( \
+      constant void* input_ [[buffer(0)]],                        \
+      constant void* other_ [[buffer(1)]],                        \
+      device void* out_ [[buffer(2)]],                            \
+      constant uint3* offsets [[buffer(3)]],                      \
+      uint tid [[thread_position_in_grid]]);
+
+#define FOR_EACH_ARITHMETIC_TYPE(_) \
+_(float) \
+_(half) \
+_(int) \
+_(uint) \
+_(long) \
+_(short) \
+_(ushort) \
+_(char) \
+_(uchar) \
+_(bool) \
+
+
 REGISTER_FMAX_OP(float);
 REGISTER_FMAX_OP(half);
 REGISTER_FMIN_OP(float);
 REGISTER_FMIN_OP(half);
 REGISTER_COPYSIGN_OP(float);
 REGISTER_COPYSIGN_OP(half);
-REGISTER_REAL_MUL_OP(float);
-REGISTER_REAL_MUL_OP(half);
-REGISTER_REAL_MUL_OP(int);
-REGISTER_REAL_MUL_OP(uint);
-REGISTER_REAL_MUL_OP(long);
-REGISTER_REAL_MUL_OP(short);
-REGISTER_REAL_MUL_OP(ushort);
-REGISTER_REAL_MUL_OP(char);
-REGISTER_REAL_MUL_OP(uchar);
-REGISTER_REAL_MUL_OP(bool);
+FOR_EACH_ARITHMETIC_TYPE(REGISTER_REAL_MUL_OP)
+FOR_EACH_ARITHMETIC_TYPE(REGISTER_ADD_OP)
+FOR_EACH_ARITHMETIC_TYPE(REGISTER_SUB_OP)
+FOR_EACH_ARITHMETIC_TYPE(REGISTER_MIXED_ADD_OP)
+FOR_EACH_ARITHMETIC_TYPE(REGISTER_MIXED_SUB_OP)
 #if __METAL_VERSION__ >= 310
 REGISTER_FMAX_OP(bfloat);
 REGISTER_FMIN_OP(bfloat);
 REGISTER_COPYSIGN_OP(bfloat);
 REGISTER_REAL_MUL_OP(bfloat);
+REGISTER_ADD_OP(bfloat);
+REGISTER_SUB_OP(bfloat);
+REGISTER_MIXED_ADD_OP(bfloat);
+REGISTER_MIXED_SUB_OP(bfloat);
 #endif
 REGISTER_COPYSIGN_INTEGRAL_OP(int);
 REGISTER_COPYSIGN_INTEGRAL_OP(long);

@@ -45,7 +45,8 @@ static void binary_mps_impl(TensorIteratorBase& iter, const std::string func_nam
   dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
     @autoreleasepool {
       id<MTLComputeCommandEncoder> computeEncoder = mpsStream->commandEncoder();
-      const std::string kernel = func_name + "_" + scalarToMetalTypeString(input);
+      // HACK: changing to other here should make our mixed kernels just work
+      const std::string kernel = func_name + "_" + scalarToMetalTypeString(other);
       auto kernelDataOffsets = generateKernelDataOffsets(computeEncoder, iter);
 
       id<MTLComputePipelineState> binaryPSO = lib.getPipelineStateForFunc(kernel);
@@ -61,6 +62,34 @@ static void binary_mps_impl(TensorIteratorBase& iter, const std::string func_nam
       getMPSProfiler().endProfileKernel(binaryPSO);
     }
   });
+}
+
+static void binary_mps_kernel(const Tensor& input, const Tensor& other, const Tensor& output, const char* func_name) {
+  auto new_size = at::infer_size(input.sizes(), other.sizes());
+  if (!output.sizes().equals(new_size)) {
+    output.resize_(new_size);
+  }
+  uint32_t length = output.numel();
+  if (length == 0) {
+    return;
+  }
+  auto common_dtype = output.scalar_type();
+  TensorIterator iter;
+  try {
+    if (common_dtype == kFloat && input.dtype() == kFloat && (!strcmp(func_name, "add") || !strcmp(func_name, "sub"))) {
+      auto func_name_str = func_name + std::string("_mixed");
+      iter = TensorIteratorConfig().add_output(output).add_owned_input(input.to(kMPS)).add_owned_input(other.to(kMPS)).check_all_same_dtype(false).build();
+      mps::binary_mps_impl(iter, func_name_str);
+      return;
+    }
+    iter =
+      TensorIteratorConfig().add_output(output).add_owned_input(input.to(kMPS, common_dtype)).add_owned_input(other.to(kMPS, common_dtype)).build();
+  } catch (const std::exception& e) {
+    std::cerr << " poop: " << e.what() << std::endl;
+    throw;
+  }
+
+  mps::binary_mps_impl(iter, func_name);
 }
 
 void complex_mul_out(const Tensor& input, const Tensor& other, const Tensor& output) {
@@ -84,19 +113,15 @@ void complex_mul_out(const Tensor& input, const Tensor& other, const Tensor& out
 }
 
 void real_mul_out(const Tensor& input, const Tensor& other, const Tensor& output) {
-  auto new_size = at::infer_size(input.sizes(), other.sizes());
-  if (!output.sizes().equals(new_size)) {
-    output.resize_(new_size);
-  }
-  uint32_t length = output.numel();
-  if (length == 0) {
-    return;
-  }
-  auto common_dtype = output.scalar_type();
-  auto iter =
-    TensorIteratorConfig().add_output(output).add_owned_input(input.to(kMPS, common_dtype)).add_owned_input(other.to(kMPS, common_dtype)).build();
+  binary_mps_kernel(input, other, output, "real_mul");
+}
 
-  mps::binary_mps_impl(iter, "real_mul");
+void add_out(const Tensor& input, const Tensor& other, const Tensor& output) {
+  binary_mps_kernel(input, other, output, "add");
+}
+
+void sub_out(const Tensor& input, const Tensor& other, const Tensor& output) {
+  binary_mps_kernel(input, other, output, "sub");
 }
 
 } // namespace mps
