@@ -29,6 +29,7 @@ import sympy
 from sympy.printing.precedence import PRECEDENCE
 
 import torch
+from torch._inductor.async_compile import AsyncCompile
 import torch._logging
 from torch._dynamo.utils import identity
 from torch._prims_common import is_integer_dtype
@@ -3739,6 +3740,9 @@ class TritonScheduling(SIMDScheduling):
             compile_wrapper.writeline(f"async_compile.triton({subs_name!r}, '''")
             compile_wrapper.splice(src_code, strip=True)
             current_device = V.graph.get_current_device_or_throw()
+            if current_device.type == "cuda":
+                AsyncCompile().triton(kernel_name=subs_name, source_code=src_code)
+
             compile_wrapper.writeline(f"''', device_str='{current_device.type}')")
 
             metadata_comment = f"# kernel path: {kernel_path}"
