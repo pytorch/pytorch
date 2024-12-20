@@ -183,8 +183,9 @@ class DataLoader(Generic[_T_co]):
         persistent_workers (bool, optional): If ``True``, the data loader will not shut down
             the worker processes after a dataset has been consumed once. This allows to
             maintain the workers `Dataset` instances alive. (default: ``False``)
-        pin_memory_device (str, optional): the device to :attr:`pin_memory` to if ``pin_memory`` is
-            ``True``.
+        pin_memory_device (str, optional): the device to :attr:`pin_memory` on if ``pin_memory`` is
+            ``True``. If not given, the current :ref:`accelerator<accelerators>` will be the
+            default. This argument is discouraged and subject to deprecated.
         in_order (bool, optional): If ``False``, the data loader will not enforce that batches
             are returned in a first-in, first-out order. Only applies when ``num_workers > 0``. (default: ``True``)
 
@@ -651,17 +652,25 @@ class _BaseDataLoaderIter:
         ws, rank = _get_distributed_settings()
         self._world_size = ws
         self._rank = rank
-        # for other backends, pin_memory_device need to set. if not set
-        # default behaviour is CUDA device. if pin_memory_device is selected
-        # and pin_memory is not set, the default behaviour false.
+        # If pin_memory_device not set, default behaviour is current accelerator.
+        # If pin_memory_device is set but pin_memory is not set, the default
+        # behaviour false.
         if len(loader.pin_memory_device) == 0:
-            self._pin_memory = loader.pin_memory and torch.cuda.is_available()
+            if loader.pin_memory and not torch.accelerator.is_available():
+                warn_msg = (
+                    "'pin_memory' argument is set as true but no accelerator is found, "
+                    "then device pinned memory won't be used."
+                )
+                warnings.warn(warn_msg)
+
+            self._pin_memory = loader.pin_memory and torch.accelerator.is_available()
             self._pin_memory_device = None
         else:
             if not loader.pin_memory:
                 warn_msg = (
-                    "pin memory device is set and pin_memory flag is not used then device pinned memory won't be used"
-                    "please set pin_memory to true, if you need to use the device pin memory"
+                    "'pin_memory_device' is set but 'pin_memory' argument is not set, "
+                    "then device pinned memory won't be used."
+                    "please set 'pin_memory' to true, if you need to use the device pin memory"
                 )
                 warnings.warn(warn_msg)
 
@@ -1152,15 +1161,18 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
 
             # Queue is not type-annotated
             self._data_queue = queue.Queue()  # type: ignore[var-annotated]
-            if self._pin_memory_device == "xpu":
-                current_device = torch.xpu.current_device()  # type: ignore[attr-defined]
+            current_device = -1
+            if self._pin_memory_device == "cuda":
+                current_device = torch.cuda.current_device()
+            elif self._pin_memory_device == "xpu":
+                current_device = torch.xpu.current_device()
             elif self._pin_memory_device == torch._C._get_privateuse1_backend_name():
                 custom_device_mod = getattr(
                     torch, torch._C._get_privateuse1_backend_name()
                 )
                 current_device = custom_device_mod.current_device()
-            else:
-                current_device = torch.cuda.current_device()  # choose cuda for default
+            elif self._pin_memory_device is None:
+                current_device = torch.accelerator.current_device_idx()
             pin_memory_thread = threading.Thread(
                 target=_utils.pin_memory._pin_memory_loop,
                 args=(

@@ -3095,17 +3095,15 @@ class TestDictDataLoader(TestCase):
             self.dataset, batch_size=2, pin_memory=True, pin_memory_device="cuda"
         )
         for sample in loader:
-            self.assertTrue(sample["a_tensor"].is_pinned(device="cuda"))
-            self.assertTrue(sample["another_dict"]["a_number"].is_pinned(device="cuda"))
+            self.assertTrue(sample["a_tensor"].is_pinned())
+            self.assertTrue(sample["another_dict"]["a_number"].is_pinned())
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     def test_pin_memory_with_only_device(self):
         loader = DataLoader(self.dataset, batch_size=2, pin_memory_device="cuda")
         for sample in loader:
-            self.assertFalse(sample["a_tensor"].is_pinned(device="cuda"))
-            self.assertFalse(
-                sample["another_dict"]["a_number"].is_pinned(device="cuda")
-            )
+            self.assertFalse(sample["a_tensor"].is_pinned())
+            self.assertFalse(sample["another_dict"]["a_number"].is_pinned())
 
 
 class DummyDataset(torch.utils.data.Dataset):
