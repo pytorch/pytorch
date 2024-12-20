@@ -6,12 +6,14 @@ import dataclasses
 import enum
 import functools
 import logging
+import re
 import threading
 import traceback
 import unittest.mock
 import weakref
 from abc import abstractmethod
 from contextlib import contextmanager
+from dataclasses import dataclass
 from typing import (
     Any,
     Callable,
@@ -48,29 +50,72 @@ An important thing to keep in mind here is the preservation of layering. There s
 and no guard installation notions here.
 """
 
+COMPILE_ID_PATTERN = re.compile(r"^(?P<frame_id>\d+)/(?P<frame_compile_id>\d+)$")
+CA_COMPILE_ID_PATTERN = re.compile(
+    r"^!(?P<compiled_autograd_id>\d+)(?:/(?P<frame_id>\d+)/(?P<frame_compile_id>\d+))?$"
+)
 
-class CompileId(NamedTuple):
-    frame_id: int
+# [Note: Updating CompiledId]
+#
+# CompiledId represents a unique program-level identifier, and we want to keep that
+# property as the codebase evolves. This property is relied on even outside of the pytorch
+# repo, e.g. tlparse or other internal tooling. The in-memory format can be freely changed,
+# as those dependencies only consume the string serialization.
+#
+# The string form should be:
+# 1. Program-level uid: CompileId can uniquely identify a compiled graph.
+# 2. Storage efficient: This object is logged in nearly every entry. We should elide symbols when possible.
+# 3. Compact: The string form is directly displayed by some tools. Special symbols are okay.
+
+
+# TODO: mark as kw_only=True once we drop support for <Python 3.10
+@dataclass(frozen=True)
+class CompileId:
+    frame_id: Optional[int]
     # This id is per-frame, and counts how many times we've compiled this
     # frame.  This could have been a global id but having this be per-frame
     # gives you a better intuitive sense for how many recompiles have occurred
     # so far.
-    frame_compile_id: int
+    frame_compile_id: Optional[int]
+
+    # torch.compiling a compiled autograd graph
+    compiled_autograd_id: Optional[int] = None
+
     # TODO: consider also tracking the recompilation count
+    # See Note: Updating CompileId
 
     def __str__(self):
-        return f"{self.frame_id}/{self.frame_compile_id}"
+        # NOTE: Keep this in sync with both from_string and the tlparse repo
+        if self.compiled_autograd_id is not None:
+            assert (self.frame_id is None) == (self.frame_compile_id is None)
+            frame_str = ""
+            if self.frame_id is not None:
+                frame_str = f"/{self.frame_id}/{self.frame_compile_id}"
+
+            return f"!{self.compiled_autograd_id}{frame_str}"
+        else:
+            assert self.frame_id is not None and self.frame_compile_id is not None
+            return f"{self.frame_id}/{self.frame_compile_id}"
 
     @classmethod
     def from_string(cls, compile_id: Optional[str]):
         """
         Factory method that creates a CompileId from its string representation.
+        Keep this in sync with the __str__ method.
         """
         if compile_id is None:
             return None
         try:
-            frame_id, frame_compile_id = compile_id.split("/")
-            return cls(int(frame_id), int(frame_compile_id))
+            for pattern in (COMPILE_ID_PATTERN, CA_COMPILE_ID_PATTERN):
+                if match := pattern.match(compile_id):
+                    groups = match.groupdict()
+                    for k, v in groups.items():
+                        if v is not None:
+                            groups[k] = int(v)
+                    return cls(**groups)  # type: ignore[arg-type]
+            else:
+                raise ValueError
+
         except Exception as e:
             raise ValueError(f"Invalid compile_id '{compile_id}'") from e
 
@@ -82,6 +127,7 @@ class TraceId(NamedTuple):
     attempt: int
 
     def __str__(self):
+        # Keep this in sync with tlparse repo
         if self.attempt == 0:
             return str(self.compile_id)
         else:
