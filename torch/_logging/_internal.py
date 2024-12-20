@@ -1216,7 +1216,7 @@ def trace_structured(
                 else:
                     # force newlines so we are unlikely to overflow line limit
                     payload = json.dumps(payload, indent=0)
-            h = hashlib.md5()
+            h = hashlib.sha256()
             h.update(payload.encode("utf-8"))
             record["has_payload"] = h.hexdigest()
         trace_log.debug(
