@@ -1,4 +1,5 @@
 # mypy: ignore-errors
+# ruff: noqa: F841
 
 # Owner(s): ["module: dataloader"]
 

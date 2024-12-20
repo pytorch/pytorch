@@ -264,6 +264,10 @@ class TensorifyState:
     def clear(cls) -> None:
         cls.force_specializations.clear()
 
+    @classmethod
+    def empty(cls) -> bool:
+        return len(cls.force_specializations) == 0
+
 
 @functools.lru_cache(None)
 def _step_logger():
@@ -637,11 +641,10 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
                         self.push(value)
                     self.jump(inst)
             else:
-                # TODO link the torch.cond doc later
                 raise exc.UserError(
                     exc.UserErrorType.DYNAMIC_CONTROL_FLOW,
                     "Dynamic control flow is not supported at the moment. Please use "
-                    "functorch.experimental.control_flow.cond to explicitly capture the control flow.",
+                    "torch.cond to explicitly capture the control flow.",
                     case_name="cond_operands",
                 )
 
@@ -3315,6 +3318,8 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
 
     def _load_global(self, inst):
         if self.output.global_scope is self.f_globals:
+            # If the global scope matches that of the root frame, use handler in
+            # root frame instruction translator, to enforce consistency.
             super()._load_global(inst)
         else:
             name = inst.argval
@@ -3331,7 +3336,9 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                 self.push(VariableTracker.build(self, value, global_source))
 
     def STORE_GLOBAL(self, inst):
-        if self.f_globals is self.parent.f_globals:
+        if self.output.global_scope is self.f_globals:
+            # If the global scope matches that of the root frame, use handler in
+            # root frame instruction translator, to enforce consistency.
             super().STORE_GLOBAL(inst)
         else:
             value = self.pop()
