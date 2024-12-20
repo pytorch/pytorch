@@ -1745,6 +1745,7 @@ class PerRow(Granularity):
     is quantized with a block_size of (1, weight.shape[1]).
     """
 
+
 class PerToken(Granularity):
     """
     Represents per-token granularity in quantization.
