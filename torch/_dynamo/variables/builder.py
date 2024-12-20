@@ -134,7 +134,6 @@ from .ctx_manager import (
 )
 from .dicts import (
     ConstDictVariable,
-    CustomizedDictVariable,
     DefaultDictVariable,
     DictKeySetVariable,
     FrozensetVariable,
@@ -606,10 +605,6 @@ class VariableBuilder:
         elif value is sys.modules:
             self.install_guards(GuardBuilder.FUNCTION_MATCH)
             return PythonSysModulesVariable(source=self.source)
-        elif CustomizedDictVariable.is_matching_cls_hf(type(value)):
-            self.install_guards(GuardBuilder.TYPE_MATCH)
-            result = CustomizedDictVariable.wrap(self, value)
-            return self.tx.output.side_effects.track_object_existing(value, result)
         elif istype(value, (dict, collections.defaultdict, collections.OrderedDict)):
             self.install_guards(GuardBuilder.SEQUENCE_LENGTH)
 
@@ -2172,8 +2167,6 @@ class VariableBuilder:
 def _dataclasses_fields_lambda(obj):
     if isinstance(obj, UserDefinedObjectVariable):
         value = obj.value
-    elif isinstance(obj, CustomizedDictVariable):
-        value = obj.user_cls
     else:
         unimplemented(f"Dataclass fields handling fails for type {obj}")
     items = []
