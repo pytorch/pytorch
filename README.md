@@ -1,3 +1,5 @@
+![Poolside package version](https://pytorch-version.s3.us-east-2.amazonaws.com/version.svg)
+
 This is a poolside-specific fork of pytorch. For now we do not have any custom code, only some changes to CI/build workflows.
 See [poolside.md](poolside.md) for more info about this fork.
 
