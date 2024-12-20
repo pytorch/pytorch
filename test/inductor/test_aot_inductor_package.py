@@ -15,7 +15,7 @@ from torch._inductor.test_case import TestCase
 from torch._inductor.utils import fresh_inductor_cache
 from torch.export import Dim
 from torch.testing._internal.common_utils import IS_FBCODE, TEST_CUDA
-from torch.testing._internal.triton_utils import HAS_CUDA
+from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 
 
 def skipif(predicate: Callable[[str, bool], bool], reason: str):
@@ -69,8 +69,8 @@ def compile(
     )
     + (
         [
-            {"device": "cuda", "package_cpp_only": False},
-            {"device": "cuda", "package_cpp_only": True},
+            {"device": GPU_TYPE, "package_cpp_only": False},
+            {"device": GPU_TYPE, "package_cpp_only": True},
         ]
         if sys.platform != "darwin"
         else []
@@ -225,7 +225,6 @@ class TestAOTInductorPackage(TestCase):
             def forward(self, a, b):
                 return torch.cat([a, b], dim=0)
 
-        b = torch.randn(3, 4, device=self.device)
         dim0_a = Dim("dim0_a", min=1, max=10)
         dim0_b = Dim("dim0_b", min=1, max=20)
         dynamic_shapes = {"a": {0: dim0_a}, "b": {0: dim0_b}}
@@ -369,10 +368,11 @@ class TestAOTInductorPackage(TestCase):
         buffer = torch._inductor.aoti_compile_and_package(
             ep, package_path=buffer
         )  # type: ignore[arg-type]
-        loaded = load_package(buffer)
-        self.assertTrue(
-            torch.allclose(loaded(*example_inputs), ep.module()(*example_inputs))
-        )
+        for _ in range(2):
+            loaded = load_package(buffer)
+            self.assertTrue(
+                torch.allclose(loaded(*example_inputs), ep.module()(*example_inputs))
+            )
 
     @skipif(
         lambda device, package_cpp_only: device == "cpu" or package_cpp_only,
@@ -445,5 +445,5 @@ if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
 
     # cpp_extension N/A in fbcode
-    if HAS_CUDA or sys.platform == "darwin":
+    if HAS_GPU or sys.platform == "darwin":
         run_tests(needs="filelock")
