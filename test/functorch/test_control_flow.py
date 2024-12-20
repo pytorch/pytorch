@@ -6252,7 +6252,11 @@ class GraphModule(torch.nn.Module):
         if backend == "eager":
             backend = EagerAndRecordGraphs()
         self._check_compile(m, args, dynamic=dynamic, backend=backend)
-        if isinstance(backend, EagerAndRecordGraphs) and dynamic:
+        if (
+            isinstance(backend, EagerAndRecordGraphs)
+            and dynamic
+            and not TEST_WITH_CROSSREF
+        ):
             self.assertEqual(len(backend.graphs), 1)
             self.assertExpectedInline(
                 normalize_gm(backend.graphs[0].print_readable(print_output=False)),
@@ -6545,7 +6549,11 @@ class GraphModule(torch.nn.Module):
         if backend == "eager":
             backend = EagerAndRecordGraphs()
         self._check_compile(m, args, dynamic=dynamic, backend=backend)
-        if isinstance(backend, EagerAndRecordGraphs) and dynamic:
+        if (
+            isinstance(backend, EagerAndRecordGraphs)
+            and dynamic
+            and not TEST_WITH_CROSSREF
+        ):
             self.assertEqual(len(backend.graphs), 1)
             self.assertExpectedInline(
                 normalize_gm(backend.graphs[0].print_readable(print_output=False)),
