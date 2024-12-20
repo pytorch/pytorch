@@ -657,12 +657,10 @@ def _parse_visible_devices() -> Union[List[int], List[str]]:
         if rocr_devices is not None:
             rocr_count = len(rocr_devices.split(","))
             if hip_devices is not None:
-                if hip_devices.startswith("GPU-"):
-                    raise RuntimeError(
-                        "Cannot specify both ROCR_VISIBLE_DEVICES "
-                        "and HIP_VISIBLE_DEVICES using UUIDs"
-                    )
-                if any(int(dev) >= rocr_count for dev in hip_devices.split(",")):
+                # sanity check if ROCR env var set and HIP env var not having UUIDs
+                if not hip_devices.startswith("GPU-") and any(
+                    int(dev) >= rocr_count for dev in hip_devices.split(",")
+                ):
                     raise RuntimeError(
                         "HIP_VISIBLE_DEVICES out of bounds index "
                         "after applying ROCR_VISIBLE_DEVICES"
