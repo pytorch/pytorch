@@ -3629,10 +3629,11 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
 
     """
     We want to recompile if anyone changes configs in the autotuner object
-    In short if the following sequence of events happens:
-     1. torch.compile(foo)
+    In short if for example the following sequence of events happens:
+     1. foo = torch.compile(bar)
+     1. call foo
      2. autotuner.configs = [new configs list]
-     3. torch.compile(foo)
+     3. call foo
 
     A recompile event should occur, which we check with Dynamo counters
     This tests that we are installing guards on input objects properly
