@@ -3312,6 +3312,7 @@ MOD_INLINELIST = [
     "torch.fx._symbolic_trace",
     "torch.fx.experimental.proxy_tensor",
     "torch.fx.passes.shape_prop",
+    "torch.nested._internal.triton_kernels.grouped_mm",
     "torch.nn",
     "torch.overrides",
     "torch.random",
