@@ -16,6 +16,7 @@ import sys
 import sysconfig
 import warnings
 from ctypes import cdll
+from ctypes.util import find_library
 from pathlib import Path
 from typing import Any, List, Optional, Sequence, Tuple, Union
 
@@ -1225,6 +1226,11 @@ def get_cpp_torch_device_options(
     if device_type == "xpu":
         definations.append(" USE_XPU")
         libraries += ["c10_xpu", "sycl", "ze_loader", "torch_xpu"]
+        if not find_library("ze_loader"):
+            raise OSError(
+                "Intel GPU driver is not properly installed, please follow the instruction "
+                "in https://github.com/pytorch/pytorch?tab=readme-ov-file#intel-gpu-support."
+            )
 
     if aot_mode:
         if config.is_fbcode():

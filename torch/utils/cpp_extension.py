@@ -16,8 +16,6 @@ import warnings
 import collections
 from pathlib import Path
 import errno
-from ctypes.util import find_library
-import functools
 
 import torch
 import torch._appdirs
@@ -181,11 +179,6 @@ def _join_rocm_home(*paths) -> str:
                       'ROCm and Windows is not supported.')
     return os.path.join(ROCM_HOME, *paths)
 
-@functools.lru_cache(maxsize=1)
-def _is_level_zero_installed():
-    lib_path = find_library("ze_loader")
-    return True if lib_path else False
-
 def _join_sycl_home(*paths) -> str:
     """
     Join paths with SYCL_HOME, or raises an error if it SYCL_HOME is not found.
@@ -194,18 +187,10 @@ def _join_sycl_home(*paths) -> str:
     only once we need to get any SYCL-specific path.
     """
     if SYCL_HOME is None:
-        raise OSError('''
-    SYCL runtime is not dected.
-    For local source build Pytorch, please source the OneAPI env following the instruction in
-    "https://github.com/pytorch/pytorch?tab=readme-ov-file#intel-gpu-support".
-    For pip installed Pytorch, the package intel-sycl-rt should automatically be installed,
-    if not, please install via: pip install intel-sycl-rt.''')
-
-    # Also need to check level_zero is installed which sycl depends on.
-    if not _is_level_zero_installed():
-        raise OSError('''
-    Level-zero runtime is not detected, please install it following the instruction in
-    "https://github.com/pytorch/pytorch?tab=readme-ov-file#intel-gpu-support".''')
+        raise OSError('SYCL runtime is not dected. Please setup the pytorch '
+                      'prerequisites for Intel GPU following the instruction in '
+                      'https://github.com/pytorch/pytorch?tab=readme-ov-file#intel-gpu-support '
+                       'or install intel-sycl-rt via pip.')
 
     return os.path.join(SYCL_HOME, *paths)
 
