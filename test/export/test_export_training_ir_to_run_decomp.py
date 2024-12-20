@@ -23,7 +23,6 @@ def mocked_training_ir_to_run_decomp_export_non_strict(*args, **kwargs):
         ep = torch.export.export_for_training(*args, **kwargs)
     else:
         ep = torch.export.export_for_training(*args, **kwargs, strict=False)
-
     return ep.run_decompositions({})
 
 

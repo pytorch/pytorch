@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import builtins
 import functools
 import inspect
 import logging
@@ -66,6 +67,7 @@ from torch.utils._python_dispatch import (
     _disable_infra_mode,
     _push_mode,
     _unset_infra_mode,
+    is_traceable_wrapper_subclass,
     TorchDispatchMode,
 )
 from torch.utils._stats import count
@@ -581,6 +583,18 @@ def track_tensor(
             ),
         )
     set_proxy_slot(tensor, tracer, _ProxyTensor(proxy, constant))
+
+    if is_traceable_wrapper_subclass(tensor):
+        inner_tensor_keys, _ = tensor.__tensor_flatten__()
+        for inner_tensor_key in inner_tensor_keys:
+            inner_tensor = getattr(tensor, inner_tensor_key)
+            proxy = get_proxy_slot(tensor, tracer).proxy
+            inner_proxy = tracer.create_proxy(
+                "call_function", builtins.getattr, (proxy, inner_tensor_key), {}
+            )
+            set_meta(inner_proxy, inner_tensor)
+            inner_const = getattr(constant, inner_tensor_key) if constant else None
+            track_tensor(inner_tensor, inner_proxy, constant=inner_const, tracer=tracer)
 
 
 _NestedProxys = Union[
