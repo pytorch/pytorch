@@ -125,38 +125,7 @@ CopySlices::CopySlices(
   }
 }
 
-// common code between apply/apply_with_saved
-template <typename T>
-inline variable_list CopySlices::apply_impl(
-    variable_list&& inputs,
-    const T& call_fn) {
-  check_input_variables("CopySlices", inputs, 1, -1, true);
-  auto& grad = std::move(inputs)[0];
-  if (!grad.defined()) {
-    return variable_list(num_outputs());
-  }
-
-  // Acquire lock to here protect thread safety on fn
-  // see Note [Thread Safety on Autograd Node]
-  std::lock_guard<std::mutex> lock(mutex_);
-
-  if (!fn) {
-    throw std::runtime_error(ERR_BACKWARD_TWICE);
-  }
-
-  auto result =
-      grad.new_empty_strided_symint(base.sym_sizes(), base.sym_strides());
-  result.copy_(grad);
-
-  at::Tensor grad_slice;
-  if (view_fn) {
-    grad_slice = (*view_fn)(result);
-  } else {
-    auto offset = view.sym_storage_offset() - base.sym_storage_offset();
-    grad_slice =
-        result.as_strided_symint(view.sym_sizes(), view.sym_strides(), offset);
-  }
-
+void CopySlices::update_exec_info() {
   // See Note [View + Inplace update for view tensor] For more details on this
   // block Since the gradient edge for the 0th input is different between `this`
   // and `fn`, make sure that the one from `fn` has the same metadata in the
@@ -199,6 +168,41 @@ inline variable_list CopySlices::apply_impl(
     TORCH_INTERNAL_ASSERT(
         fn->next_edge(i).function.get() == this->next_edge(i).function.get());
   }
+}
+
+// common code between apply/apply_with_saved
+template <typename T>
+inline variable_list CopySlices::apply_impl(
+    variable_list&& inputs,
+    const T& call_fn) {
+  check_input_variables("CopySlices", inputs, 1, -1, true);
+  auto& grad = std::move(inputs)[0];
+  if (!grad.defined()) {
+    return variable_list(num_outputs());
+  }
+
+  // Acquire lock to here protect thread safety on fn
+  // see Note [Thread Safety on Autograd Node]
+  std::lock_guard<std::mutex> lock(mutex_);
+
+  if (!fn) {
+    throw std::runtime_error(ERR_BACKWARD_TWICE);
+  }
+
+  auto result =
+      grad.new_empty_strided_symint(base.sym_sizes(), base.sym_strides());
+  result.copy_(grad);
+
+  at::Tensor grad_slice;
+  if (view_fn) {
+    grad_slice = (*view_fn)(result);
+  } else {
+    auto offset = view.sym_storage_offset() - base.sym_storage_offset();
+    grad_slice =
+        result.as_strided_symint(view.sym_sizes(), view.sym_strides(), offset);
+  }
+
+  update_exec_info();
 
   // TODO: We clone grad_slice because we modify it below and "fn" might save
   // it for the backward of res. We might be able to avoid the clone() if
@@ -246,17 +250,38 @@ variable_list CopySlices::apply_with_saved(
     SwapSavedVariables& saved) {
   saved.before(base);
   saved.before(view);
-  int call_count = 0;
-  variable_list result = apply_impl(
-      variable_list(grads),
-      [this, &saved, &call_count](const variable_list& inputs2) {
-        call_count++;
-        return fn->apply_with_saved(inputs2, saved);
-      });
-  TORCH_INTERNAL_ASSERT(call_count == 1);
+
+  auto results = variable_list(num_outputs());
+  if (grads[0].defined()) {
+    if (!fn) {
+      throw std::runtime_error(ERR_BACKWARD_TWICE);
+    }
+    update_exec_info();
+
+    std::vector<bool> needs_input_grad;
+    for (const auto i : c10::irange(num_outputs())) {
+      needs_input_grad.emplace_back(task_should_compute_output(i));
+    }
+    // Not yet supported, also doesn't happen in typical eager mode execution
+    // (this only happens by default with torch-xla).
+    TORCH_INTERNAL_ASSERT(!view_fn);
+    const auto& interface = torch::dynamo::autograd::getPyCompilerInterface();
+    variable_list stuff = interface->call_copy_slices_prologue(
+        saved.get_py_compiler(), grads, base, view);
+    TORCH_INTERNAL_ASSERT(stuff.size() == 3);
+    // These variables are named the same as in CopySlices::apply_impl.
+    // Follow along there.
+    auto result = stuff[0];
+    auto grad_slice = stuff[1];
+    auto grad_slice_clone = stuff[2];
+    auto res = fn->apply_with_saved({grad_slice_clone}, saved);
+    results = interface->call_copy_slices_epilogue(
+        saved.get_py_compiler(), needs_input_grad, result, res, grad_slice);
+  }
+
   saved.after(base);
   saved.after(view);
-  return result;
+  return results;
 }
 
 auto CopySlices::apply(variable_list&& inputs1) -> variable_list {

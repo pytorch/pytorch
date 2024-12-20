@@ -3284,6 +3284,7 @@ if torch.distributed.is_available():
 MOD_INLINELIST = [
     "torch._decomp",
     "torch._dynamo._trace_wrapped_higher_order_op",
+    "torch._dynamo.compiled_autograd",
     "torch._dynamo.comptime",
     "torch._dynamo.polyfills",
     "torch._functorch._aot_autograd.subclass_parametrization",
