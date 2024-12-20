@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
 
-# NOTE: Building this image requires Docker version >= 23.0.
+# NOTE: Building this image require's docker version >= 23.0.
 #
 # For reference:
 # - https://docs.docker.com/build/dockerfile/frontend/#stable-channel
@@ -157,11 +157,10 @@ COPY --from=conda /opt/conda /opt/conda
 # Install main Torch packages in the official stage
 COPY --from=torch-packages /opt/conda /opt/conda
 
-RUN if [ -n "${TRITON_VERSION}" ] && [ "${TARGETPLATFORM}" != "linux/arm64" ]; then \
-    DEBIAN_FRONTEND=noninteractive apt install -y --no-install-recommends gcc && \
+RUN if test -n "${TRITON_VERSION}" -a "${TARGETPLATFORM}" != "linux/arm64"; then \
+        DEBIAN_FRONTEND=noninteractive apt install -y --no-install-recommends gcc; \
     rm -rf /var/lib/apt/lists/*; \
     fi
-
 ENV PATH /opt/conda/bin:$PATH
 ENV NVIDIA_VISIBLE_DEVICES all
 ENV NVIDIA_DRIVER_CAPABILITIES compute,utility
@@ -172,5 +171,5 @@ WORKDIR /workspace
 
 # Stage 7: Development Environment
 FROM official as dev
-# Override the already installed version from the official-image stage
+# Should override the already installed version from the official-image stage
 COPY --from=build /opt/conda /opt/conda
