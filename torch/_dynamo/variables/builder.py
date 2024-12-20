@@ -89,18 +89,13 @@ from ..source import (
     SubclassAttrListSource,
     TupleIteratorGetItemSource,
 )
-from ..trace_rules import (
-    is_callable_allowed,
-    is_numpy,
-    is_numpy_dtype,
-    is_numpy_type_info,
-)
 from ..utils import (
     _extract_tensor_dict,
     build_checkpoint_variable,
     build_invoke_subgraph_variable,
     clone_input,
     common_constant_types,
+    dict_keys,
     get_fake_value,
     get_locals_to_steal,
     get_static_address_type,
@@ -140,6 +135,7 @@ from .dicts import (
     ConstDictVariable,
     CustomizedDictVariable,
     DefaultDictVariable,
+    DictKeySetVariable,
     FrozensetVariable,
     HFPretrainedConfigVariable,
     PythonSysModulesVariable,
@@ -751,7 +747,7 @@ class VariableBuilder:
         elif np is not None and isinstance(value, np.generic):
             # numpy array scalars: convert to 0D arrays
             return self.wrap_numpy_ndarray(np.asarray(value))
-        elif is_numpy(value):
+        elif trace_rules.is_numpy(value):
             assert np
             self.install_guards(
                 GuardBuilder.FUNCTION_MATCH
@@ -759,10 +755,10 @@ class VariableBuilder:
                 else GuardBuilder.TYPE_MATCH
             )
             return NumpyVariable(value, source=self.source)
-        elif is_numpy_dtype(value):
+        elif trace_rules.is_numpy_dtype(value):
             self.install_guards(GuardBuilder.ID_MATCH)
             return NumpyDTypeVariable(value, source=self.source)
-        elif is_numpy_type_info(value):
+        elif trace_rules.is_numpy_type_info(value):
             if isinstance(value, np.iinfo):
                 self.install_guards(GuardBuilder.TYPE_MATCH)
                 dt_source = AttrSource(self.source, "dtype")
@@ -848,7 +844,7 @@ class VariableBuilder:
                 )
             )
         elif callable(value) and trace_rules.lookup_callable(value) is not None:
-            if is_callable_allowed(value):
+            if trace_rules.is_callable_allowed(value):
                 self.tx.output.has_user_defined_allowed_in_graph = True
             return trace_rules.lookup_callable(value).create_with_source(
                 value, source=self.source
@@ -1242,6 +1238,21 @@ class VariableBuilder:
             self.install_guards(GuardBuilder.TYPE_MATCH)
             result = FrozenDataClassVariable.create(self.tx, value, source=self.source)
             return self.tx.output.side_effects.track_object_existing(value, result)
+        elif isinstance(value, dict_keys):
+            if all(ConstantVariable.is_literal(k) for k in value):
+                # If the dict_keys object is passed from outside the compile region, it must either be passed along with
+                # the corresponding dict object or treated as a set (when only the keys are passed into the compiled region).
+                # - If it is passed along with the dict, the dict object itself is already guarded.
+                # - If only the dict_keys object is passed, we add EQUALS_MATCH and SEQUENCE_LENGTH guards
+                #   to ensure it remains unchanged across multiple runs.
+                items = [SourcelessBuilder.create(self.tx, v) for v in value]
+                install_guard(
+                    self.get_source().make_guard(GuardBuilder.SEQUENCE_LENGTH),
+                    self.get_source().make_guard(GuardBuilder.EQUALS_MATCH),
+                )
+                return DictKeySetVariable(items, source=self.source)
+            else:
+                unimplemented("dict_keys with non-constant keys are not supported")
         else:
             return self.wrap_user_defined(value)
 
@@ -2655,28 +2666,13 @@ def _automatic_dynamic(
         dim = e.dim()
 
         stride = [None] * dim
-        while any(x is None for x in stride):
-            candidates = {
-                ex_size[i] * ex_stride[i]: InferStride(i)
-                for i in range(dim)
-                if stride[i] is not None and ex_stride[i] >= 0
-            }
-            val_list = sorted(
-                [(ex_stride[i], i) for i in range(dim) if stride[i] is None],
-                key=_nested_int_aware_sort,
-            )
-            for _, i in val_list:
-                if stride[i] is None and ex_stride[i] in candidates:
-                    stride[i] = candidates[ex_stride[i]]
-                    candidates[ex_stride[i] * ex_size[i]] = InferStride(i)
-
-            if any(x is None for x in stride):
-                # bind the smallest unbound stride to a new variable
-                val, i = min(
-                    [(ex_stride[i], i) for i in range(dim) if stride[i] is None],
-                    key=_nested_int_aware_sort,
-                )
-                stride[i] = val
+        pending = [(ex_stride[i], -i) for i in range(dim)]
+        pending.sort(key=_nested_int_aware_sort)
+        candidates = {}
+        for i_stride, neg_i in pending:
+            i = -neg_i
+            stride[i] = candidates.get(i_stride, i_stride)
+            candidates.setdefault(i_stride * ex_size[i], InferStride(i))
     else:
         stride = []
 
@@ -2967,7 +2963,7 @@ class SourcelessBuilder:
         elif ConstantVariable.is_literal(value):
             return ConstantVariable.create(value)
         elif callable(value) and trace_rules.lookup_callable(value) is not None:
-            if is_callable_allowed(value):
+            if trace_rules.is_callable_allowed(value):
                 tx.output.has_user_defined_allowed_in_graph = True
             return trace_rules.lookup_callable(value)(value)
         elif is_function_or_wrapper(value):
