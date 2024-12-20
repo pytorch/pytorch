@@ -34,6 +34,8 @@ from .functions import (
     CreateTMADescriptorVariable,
     FunctionDecoratedByContextlibContextManagerVariable,
     FunctoolsPartialVariable,
+    GeneratorFunctionVariable,
+    GeneratorObjectVariable,
     NestedUserFunctionVariable,
     PolyfilledFunctionVariable,
     SkipFunctionVariable,
