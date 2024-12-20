@@ -1712,6 +1712,13 @@ class AOTDispatchAutograd:
             expected_meta = meta.meta
 
         runtime_type = type(x)
+        if torch._dynamo.compiled_autograd.in_compiled_autograd_region:
+            # When we're inside compiled autograd's AOTDispatcher step,
+            # regular Tensors look like FunctionalTensors.
+            # Tensor subclasses still look like Tensor subclasses though.
+            if isinstance(x, torch._subclasses.functional_tensor.FunctionalTensor):
+                runtime_type = torch.Tensor
+
         runtime_meta = None
         runtime_subclass_keys: Sequence[str] = []
 
@@ -1719,10 +1726,6 @@ class AOTDispatchAutograd:
             runtime_subclass_keys, runtime_meta = x.__tensor_flatten__()
 
         def maybe_coerce(x):
-            # TODO(xmfan): make this function traceable
-            if torch._dynamo.compiled_autograd.in_compiled_autograd_region:
-                return x
-
             same_type: bool = expected_type == runtime_type
             same_meta: bool = expected_meta == runtime_meta
 
