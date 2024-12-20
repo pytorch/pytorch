@@ -155,15 +155,15 @@ def _find_sycl_home() -> Optional[str]:
     # Guess 2: for users install Pytorch with XPU support, the sycl runtime is
     # inside intel-sycl-rt, which is automatically installed via pip dependency.
     else:
-        files = importlib.metadata.files('intel-sycl-rt') or []
-        for f in files:
-            if f.name == "libsycl.so":
-                sycl_home = os.path.dirname(Path(f.locate()).parent.resolve())
-                break
-
-    if sycl_home and not torch.xpu.is_available():
-        print(f"No XPU runtime is found, using SYCL_HOME='{sycl_home}'",
-              file=sys.stderr)
+        try:
+            files = importlib.metadata.files('intel-sycl-rt') or []
+            for f in files:
+                if f.name == "libsycl.so":
+                    sycl_home = os.path.dirname(Path(f.locate()).parent.resolve())
+                    break
+        except importlib.metadata.PackageNotFoundError:
+            print("Trying to find SYCL_HOME from intel-sycl-rt package, but it is not installed.",
+                  file=sys.stderr)
     return sycl_home
 
 def _join_rocm_home(*paths) -> str:
@@ -188,18 +188,24 @@ def _is_level_zero_installed():
 
 def _join_sycl_home(*paths) -> str:
     """
-    Join paths with SYCL_HOME, or raises an error if it SYCL_HOME is not set.
+    Join paths with SYCL_HOME, or raises an error if it SYCL_HOME is not found.
 
-    This is basically a lazy way of raising an error for missing $SYCL_HOME
+    This is basically a lazy way of raising an error for missing SYCL_HOME
     only once we need to get any SYCL-specific path.
     """
     if SYCL_HOME is None:
-        raise OSError('SYCL_HOME environment variable is not set. '
-                      'Please set it to your OneAPI install root.')
+        raise OSError('''
+    SYCL runtime is not dected.
+    For local source build Pytorch, please source the OneAPI env following the instruction in
+    "https://github.com/pytorch/pytorch?tab=readme-ov-file#intel-gpu-support".
+    For pip installed Pytorch, the package intel-sycl-rt should automatically be installed,
+    if not, please install via: pip install intel-sycl-rt.''')
 
-    # First check level_zero is installed which sycl depends on.
+    # Also need to check level_zero is installed which sycl depends on.
     if not _is_level_zero_installed():
-        raise OSError('Level-zero runtime is not detected, please install it first.')
+        raise OSError('''
+    Level-zero runtime is not detected, please install it following the instruction in
+    "https://github.com/pytorch/pytorch?tab=readme-ov-file#intel-gpu-support".''')
 
     return os.path.join(SYCL_HOME, *paths)
 

@@ -2598,6 +2598,64 @@ class GraphModule(torch.nn.Module):
         y = torch.ones(3)
         self.assertEqual(fn(x, y), opt_fn(x, y))
 
+    # Test dict_keys passed along with the corresponding dict object
+    def test_dict_key_set1(self):
+        d = {"a": 1, "b": 2}
+
+        def fn(x, d, keys):
+            if "c" in keys:
+                return x + d["c"]
+            else:
+                return x + 1
+
+        x = torch.zeros(2, 3)
+        opt_fn = torch.compile(fullgraph=True, backend="eager")(fn)
+        self.assertEqual(opt_fn(x, d, d.keys()), fn(x, d, d.keys()))
+
+        d.update({"c": 3})
+        opt_fn = torch.compile(fullgraph=True, backend="eager")(fn)
+        self.assertEqual(opt_fn(x, d, d.keys()), fn(x, d, d.keys()))
+
+    # Test only dict_keys passed into the compiled region
+    def test_dict_key_set2(self):
+        d = {"a": 1, "b": 2}
+
+        def fn(x, keys):
+            if "c" in keys:
+                return x - 1
+            else:
+                return x + 1
+
+        x = torch.zeros(2, 3)
+        opt_fn = torch.compile(fullgraph=True, backend="eager")(fn)
+        self.assertEqual(opt_fn(x, d.keys()), fn(x, d.keys()))
+
+        d.update({"c": 3})
+        opt_fn = torch.compile(fullgraph=True, backend="eager")(fn)
+        self.assertEqual(opt_fn(x, d.keys()), fn(x, d.keys()))
+
+    def test_dict_key_set3(self):
+        a = {
+            "domains": {
+                "d1": {"attr": 1},
+                "d2": {"attr": 2},
+            }
+        }
+        b = a["domains"].keys()
+
+        def fn(x, a, b):
+            for e in b:
+                x += a["domains"][e]["attr"]
+            return x
+
+        x = torch.ones(2, 3)
+        opt_fn = torch.compile(fullgraph=True, backend="eager")(fn)
+        self.assertEqual(opt_fn(x, a, b), fn(x, a, b))
+
+        a["domains"].update({"d3": {"attr": 3}})
+        opt_fn = torch.compile(fullgraph=True, backend="eager")(fn)
+        self.assertEqual(opt_fn(x, a, b), fn(x, a, b))
+
     def test_pow_int(self):
         def fn(a, b):
             return torch.pow(a, b)
