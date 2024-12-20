@@ -1,8 +1,8 @@
 # https://developercommunity.visualstudio.com/t/install-specific-version-of-vs-component/1142479
 # https://learn.microsoft.com/en-us/visualstudio/releases/2022/release-history#evergreen-bootstrappers
 
-# 17.4.3 BuildTools
-$VS_DOWNLOAD_LINK = "https://download.visualstudio.microsoft.com/download/pr/8f480125-28b8-4a2c-847c-c2b02a8cdd1b/64be21d4ada005d7d07896ed0b004c322409bd04d6e8eba4c03c9fa39c928e7a/vs_BuildTools.exe"
+# 17.12.35527.113 BuildTools
+$VS_DOWNLOAD_LINK = "https://download.visualstudio.microsoft.com/download/pr/f2819554-a618-400d-bced-774bb5379965/ab3cff3d3a8c48804f47eb521cf138480f5ed4fe86476dd449a420777d7f2ead/vs_BuildTools.exe"
 $COLLECT_DOWNLOAD_LINK = "https://aka.ms/vscollect.exe"
 $VS_INSTALL_ARGS = @("--nocache","--quiet","--wait", "--add Microsoft.VisualStudio.Workload.VCTools",
                                                      "--add Microsoft.Component.MSBuild",
