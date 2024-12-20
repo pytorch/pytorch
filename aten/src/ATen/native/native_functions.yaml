@@ -11489,6 +11489,12 @@
   dispatch:
     CompositeExplicitAutograd: _foreach_copy
 
+- func: _foreach_clone(Tensor[] self, *, MemoryFormat? memory_format=None) -> Tensor[]
+  device_check: NoCheck
+  variants: function
+  dispatch:
+    CompositeExplicitAutograd: _foreach_clone
+
 - func: bucketize.Tensor(Tensor self, Tensor boundaries, *, bool out_int32=False, bool right=False) -> Tensor
   dispatch:
     CPU: bucketize_cpu
