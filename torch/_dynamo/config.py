@@ -482,11 +482,13 @@ _autograd_backward_strict_mode_banned_ops = [
     "storage_offset",
     "layout",
     "data",
+    "is_neg",
+    "is_nonzero",
+    "is_pinned",
+    "is_set_to",
+    "is_shared",
+    "is_signed",
 ]
-
-# _autograd_backward_strict_mode_banned_ops.extend(
-#     [name for name, _ in inspect.getmembers(torch.Tensor) if re.match(r"^is_.*", name)]
-# )
 
 # Enables caching of dispatches to fake tensors.
 fake_tensor_cache_enabled = (
