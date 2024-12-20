@@ -2291,7 +2291,7 @@ class CPUReproTests(TestCase):
         self.assertEqual(res_aten_eager, res)
 
     def test_bitwise_shift_left_corner_inputs(self):
-        # Fix https://github.com/pytorch/pytorch/issues/143555
+        # Fix https://github.com/pytorch/pytorch/issues/143566
         x = torch.tensor(1000, dtype=torch.int64)
         bit_num = torch.tensor(64, dtype=torch.int64)
         res_aten_eager = torch.bitwise_left_shift(x, bit_num)
