@@ -13,7 +13,7 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     skipGPUIf,
 )
-from torch.testing._internal.common_utils import decorateIf, IS_LINUX, parametrize
+from torch.testing._internal.common_utils import IS_LINUX, parametrize
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
     HAS_CUDA,
@@ -295,7 +295,6 @@ class TestUnbackedSymints(InductorTestCase):
         torch.testing.assert_close(actual, expected)
 
     @dynamo_config.patch({"capture_scalar_outputs": True})
-    @decorateIf(unittest.expectedFailure, lambda params: params["dynamic"])
     @parametrize("dynamic", [False, True, None])
     def test_unbacked_slice_on_subclass(self, device, dynamic):
         from torch.testing._internal.common_subclass import WrapperTensor
