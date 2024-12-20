@@ -308,6 +308,7 @@ static Tensor rrelu_with_noise_batch(
   c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchBatched);
   auto maybe_layer = maybeCurrentDynamicLayer();
   vmap_check_escaped(maybe_layer, "gen_vmap_plumbing");
+  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
   int64_t cur_level = maybe_layer->layerId();
   auto [self_value, self_bdim] = unwrapTensorAtLevel(self, cur_level);
   auto [noise_value, noise_bdim] = unwrapTensorAtLevel(noise, cur_level);
