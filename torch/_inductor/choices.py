@@ -50,28 +50,21 @@ class InductorChoices:
         """Hook to change the kwargs passed to TritonKernel, used to apply fixed configurations"""
         return kernel_kwargs
 
-    @staticmethod
-    def should_use_cooperative_reduction(features: SIMDKernelFeatures) -> bool:
+    def should_use_cooperative_reduction(self, features: SIMDKernelFeatures) -> bool:
         """Heuristic to decide if a cooperative reduction should be used."""
         if config.triton.force_cooperative_reductions:
             return True
-        if (
-            not config.triton.cooperative_reductions
-            or V.graph.get_current_device_or_throw().type == "cpu"
-        ):
+        device = V.graph.get_current_device_or_throw()
+        if not config.triton.cooperative_reductions or device.type == "cpu":
             return False
 
-        xhint = V.graph.sizevars.size_hint(features.numel, fallback=2)
-        if xhint <= 8:
-            threshold = 32768 * xhint
-        elif xhint <= 16:
-            threshold = 2097152
-        else:
-            return False
-        # TODO(jansel): should this default on for dynamic shapes?
-        return V.graph.sizevars.statically_known_geq(
-            features.reduction_numel, threshold
+        split = self.reduction_split_factor(
+            device,
+            V.graph.sizevars.size_hint(features.reduction_numel, fallback=8192),
+            V.graph.sizevars.size_hint(features.numel, fallback=8192),
+            features.memory_stats().persistent.reads.dim[1].contiguous_score >= 0.5,
         )
+        return split > 1
 
     @staticmethod
     def should_use_persistent_reduction(
@@ -132,6 +125,9 @@ class InductorChoices:
         max_elements_per_device = max_elements_per_thread * num_sm * threads_per_sm
         num_warps = 8
         num_threads = 32 * num_warps
+
+        if reduction_numel_hint <= 32 or numel_hint >= num_sm * 64:
+            return 1
 
         if inner_reduction:
             # do heuristics that's close to eager mode for split inner reduction
