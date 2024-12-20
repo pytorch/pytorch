@@ -2054,22 +2054,6 @@ class TritonKernel(SIMDKernel):
         #   3.2) Its not its last use
         #   3.3) This load will not be lifted to the body
         #
-        """Check if the buffer we're about to load, has
-        more than one read dependency
-        """
-        depcount = 0
-        has_read_deps = (
-            True  # by default, assume that this buffer has > 1 read dependencies
-        )
-        if (
-            config.triton.skip_l1_cache and self.current_node
-        ):  # it can be that self.current_node is None (!)
-            for node in self.current_node.scheduler.nodes:
-                for l in list(node.read_writes.reads):
-                    if l.name == name:
-                        depcount += 1
-            has_read_deps = depcount > 1  # has more than one read dep
-
         is_coalesced = any(
             i == 1 for i in self.get_strides_of_load(original_index).values()
         )
@@ -2100,16 +2084,22 @@ class TritonKernel(SIMDKernel):
         else:
             other = ""
 
+        """Check if the buffer we're about to load, has
+        more than one read dependency
+        NOTE: enabled with env variable TORCHINDUCTOR_SKIP_L1
+        """
+        has_read_deps = True
+        if config.triton.skip_l1_cache:
+            buffer_read_counts = self.features.buffer_read_counts()
+            has_read_deps = buffer_read_counts[name] > 1
         """Skip L1 cache if we're (pretty?) sure the data is used only once
         """
-        skip_l1_cache = not (
-            # in all these cases we're likely to reuse the buffer:
-            self.is_broadcasted(original_index)
-            or not is_coalesced
-            or self.inside_reduction
-            or has_read_deps
-        ) and (config.triton.skip_l1_cache)
-        # NOTE: controlled with env variable TORCHINDUCTOR_SKIP_L1
+        skip_l1_cache = (
+            not self.is_broadcasted(original_index)
+            and not self.inside_reduction
+            and not has_read_deps
+            and is_coalesced  # for indirect loads is_coalesced is False?
+        )
         cachemod = ""
         if skip_l1_cache:
             cachemod = ", cache_modifier='.cg'"
