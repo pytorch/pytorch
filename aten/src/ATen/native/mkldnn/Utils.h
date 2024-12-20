@@ -74,13 +74,13 @@ inline Tensor may_convert_to_default_contiguous_strides(const Tensor& input) {
 
 using AttrFunction = std::function<ideep::attr_t(
     torch::List<std::optional<at::Scalar>>,
-    std::optional<c10::string_view>)>;
+    std::optional<std::string_view>)>;
 
-const std::map<c10::string_view, AttrFunction>& fusion_unary_attr_map();
+const std::map<std::string_view, AttrFunction>& fusion_unary_attr_map();
 
-const std::map<c10::string_view, ideep::algorithm>& fusion_unary_alg_map();
+const std::map<std::string_view, ideep::algorithm>& fusion_unary_alg_map();
 
-const std::map<c10::string_view, ideep::algorithm>& fusion_binary_alg_map();
+const std::map<std::string_view, ideep::algorithm>& fusion_binary_alg_map();
 
 #endif // AT_MKLDNN_ENABLED()
 }

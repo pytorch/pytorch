@@ -727,8 +727,7 @@ struct LSTMCell : Cell<std::tuple<Tensor, Tensor>, cell_params> {
       const hidden_type& hidden,
       const cell_params& params,
       bool pre_compute_input = false) const override {
-    const auto& hx = std::get<0>(hidden);
-    const auto& cx = std::get<1>(hidden);
+    const auto& [hx, cx] = hidden;
 
     if (input.is_cuda() || input.is_xpu() || input.is_privateuseone()) {
       TORCH_CHECK(!pre_compute_input);

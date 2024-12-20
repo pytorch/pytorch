@@ -85,11 +85,9 @@ class TestDistributedCheckpointing(ShardedTensorTestBase):
         )
 
         st = sharded_tensor.zeros(spec, 4, 4, dtype=torch.float64)
-        mapping = {}
-
         md = _create_default_local_metadata({"st": st})
-
         st_md = md.state_dict_metadata["st"]
+
         self.assertEqual(1, len(st_md.chunks))
 
     @with_comms(init_rpc=False)

@@ -29,7 +29,7 @@
 from __future__ import annotations
 
 import re
-from typing import Callable, Sequence
+from typing import Callable, TYPE_CHECKING
 
 from torchgen.api import cpp
 from torchgen.api.autograd import (
@@ -46,7 +46,6 @@ from torchgen.api.types import (
     BaseCppType,
     BaseCType,
     Binding,
-    DispatcherSignature,
     intArrayRefT,
     iTensorListRefT,
     ListCType,
@@ -104,6 +103,10 @@ from .gen_trace_type import (
     tie_return_values,
     type_wrapper_name,
 )
+
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 
 # We don't set or modify grad_fn on these methods. Generally, they return
@@ -1535,9 +1538,6 @@ def emit_body(
         f: NativeFunction, input_base: str, unpacked_args: Sequence[str]
     ) -> str:
         """Dispatch call via function in a namespace or method on Tensor."""
-        dispatcher_sig = DispatcherSignature.from_schema(f.func)
-        dispatcher_exprs = dispatcher_sig.exprs()
-
         # code-generated autograd kernels plumb and recompute dispatch keys directly through the kernel for performance.
         # Ops also always have a function variant of the redispatch API.
         # See Note [Plumbing Keys Through The Dispatcher] for details.

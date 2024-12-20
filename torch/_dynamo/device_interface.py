@@ -109,9 +109,9 @@ class DeviceInterface:
     def synchronize(device: _device_t = None):
         raise NotImplementedError
 
-    @staticmethod
-    def get_device_properties(device: _device_t = None):
-        raise NotImplementedError
+    @classmethod
+    def get_device_properties(cls, device: _device_t = None):
+        return cls.Worker.get_device_properties(device)
 
     @staticmethod
     def get_compute_capability(device: _device_t = None):

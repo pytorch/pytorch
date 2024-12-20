@@ -117,7 +117,7 @@ def forward(self, L_x_ : torch.Tensor):
 
             return y + 3
 
-        def munge_disas(s):
+        def munge_disas(s):  # noqa: F841
             re.sub(
                 r"^(?: +\d+)?(?: +(-->)) \+\d+ ([A-Za-z0-9_]+)",
                 "\1 \3",
@@ -271,7 +271,7 @@ y = FakeTensor(..., size=(2,))
             y = g(y)
             return y + 3
 
-        def munge_filenames(s):
+        def munge_filenames(s):  # noqa: F841
             return re.sub(r'File "[^"]+", line \d+', 'File "X", line X', s)
 
         f(torch.randn(2))
@@ -389,7 +389,7 @@ y = FakeTensor(..., size=(2,))
         @torch.compile(backend=cnt)
         def f(x):
             y = x * 2
-            lit = 2
+            lit = 2  # noqa: F841
 
             @comptime
             def _(ctx):

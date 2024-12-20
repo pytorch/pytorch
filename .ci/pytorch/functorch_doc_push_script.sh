@@ -5,7 +5,7 @@ pt_checkout="/var/lib/jenkins/workspace"
 source "$pt_checkout/.ci/pytorch/common_utils.sh"
 echo "functorch_doc_push_script.sh: Invoked with $*"
 
-set -ex
+set -ex -o pipefail
 
 version=${DOCS_VERSION:-nightly}
 echo "version: $version"

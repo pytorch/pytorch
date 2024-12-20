@@ -61,8 +61,8 @@ std::ostream& operator<<(std::ostream & out, const Type & t) {
     } else {
       out << "Tensor";
     }
-    if (auto ndim = value->sizes().size()) {
-      bool has_valid_strides_info = *ndim > 0 &&
+    if (auto ndim = value->sizes().size(); ndim.has_value()) {
+      bool has_valid_strides_info = ndim > 0 &&
           value->strides().isComplete() && value->strides().size() == ndim;
 
       out << "(";
@@ -87,7 +87,7 @@ std::ostream& operator<<(std::ostream & out, const Type & t) {
           if (i > 0) {
             out << ", ";
           }
-          out << *value->strides()[i];
+          out << value->strides()[i].value();
         }
         out << "]";
       }
@@ -728,7 +728,7 @@ TupleTypePtr TupleType::createNamed(
 
 TupleTypePtr TupleType::createNamed(
     const std::optional<c10::QualifiedName>& qualName,
-    const std::vector<c10::string_view>& field_names,
+    const std::vector<std::string_view>& field_names,
     const std::vector<TypePtr>& field_types) {
   std::vector<IValue> empty_defaults;
   return createWithSpec(qualName, field_names, field_types, empty_defaults);
@@ -784,11 +784,11 @@ TupleTypePtr TupleType::createWithSpec(const std::optional<c10::QualifiedName>& 
       field_types, qualName, std::move(schema))); // NOLINT(modernize-make-shared)
 }
 
-std::optional<std::vector<c10::string_view>> TupleType::names() const {
+std::optional<std::vector<std::string_view>> TupleType::names() const {
   if (!schema_) {
     return {};
   }
-  std::vector<c10::string_view> ret;
+  std::vector<std::string_view> ret;
   for (const auto& arg : schema_->arguments()) {
     ret.emplace_back(arg.name());
   }
@@ -903,7 +903,7 @@ bool ListType::isSubtypeOfExt(const Type& rhs_, std::ostream* why_not) const {
 
 std::string TupleType::str() const {
   std::stringstream ss;
-  if (schema_ && name()) {
+  if (schema_ && name().has_value()) {
     ss << name()->qualifiedName();
   } else {
     ss << "(";
@@ -997,8 +997,7 @@ bool InterfaceType::isSubTypeImpl(
         }
         return false;
       }
-      // NOLINTNEXTLINE(bugprone-argument-comment)
-      if (!self_schema->isSubtypeOf(schema, /*is_method=*/true, why_not)) {
+      if (!self_schema->isSubtypeOf(schema, /*as_method=*/true, why_not)) {
         if (why_not) {
           *why_not << "Method on interface '" << lhs.repr_str()
                    << "' (1) is not compatible with interface '"

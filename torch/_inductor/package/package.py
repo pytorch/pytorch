@@ -1,8 +1,10 @@
+import io
 import json
 import logging
 import os
 import shlex
 import subprocess
+import tempfile
 import zipfile
 from pathlib import Path
 from typing import Dict, List, Optional, Union
@@ -21,8 +23,8 @@ log = logging.getLogger(__name__)
 
 
 class PT2ArchiveWriter:
-    def __init__(self, archive_path: str) -> None:
-        self.archive_path: str = archive_path
+    def __init__(self, archive_path: Union[str, io.BytesIO]) -> None:
+        self.archive_path: Union[str, io.BytesIO] = archive_path
         self.archive_file: Optional[zipfile.ZipFile] = None
 
     def __enter__(self) -> "PT2ArchiveWriter":
@@ -156,8 +158,9 @@ def compile_so(aoti_dir: str, aoti_files: List[str], so_path: str) -> str:
 
 
 def package_aoti(
-    archive_file: str, aoti_files: Union[List[str], Dict[str, List[str]]]
-) -> str:
+    archive_file: Union[str, io.BytesIO],
+    aoti_files: Union[List[str], Dict[str, List[str]]],
+) -> Union[str, io.BytesIO]:
     """
     Saves the AOTInductor generated files to the PT2Archive format.
 
@@ -176,7 +179,9 @@ def package_aoti(
         "files. You can get this list of files through calling "
         "`torch._inductor.aot_compile(..., options={aot_inductor.package=True})`"
     )
-    assert archive_file.endswith(".pt2")
+    assert isinstance(archive_file, io.BytesIO) or (
+        isinstance(archive_file, str) and archive_file.endswith(".pt2")
+    ), f"Expect archive file to be a file ending in .pt2, or is a buffer. Instead got {archive_file}"
 
     # Save using the PT2 packaging format
     # (https://docs.google.com/document/d/1jLPp8MN8Whs0-VW9PmJ93Yg02W85tpujvHrTa1pc5x8/edit#heading=h.v2y2jgnwc56a)
@@ -217,6 +222,8 @@ def package_aoti(
                     file,
                 )
 
+    if isinstance(archive_file, io.BytesIO):
+        archive_file.seek(0)
     return archive_file
 
 
@@ -240,10 +247,42 @@ class AOTICompiledModel:
     def get_metadata(self) -> Dict[str, str]:
         return self.loader.get_metadata()  # type: ignore[attr-defined]
 
+    def load_constants(
+        self,
+        constants_map: Dict[str, torch.Tensor],
+        *,
+        check_full_update: bool,
+    ) -> None:
+        """
+        Given a mapping of constant fqns to tensors, load the constants into the model.
+        You can use ``get_constant_fqns`` to get the list of constant fqns that
+        are needed in the compiled model.
 
-def load_package(path: str, model_name: str = "model") -> AOTICompiledModel:  # type: ignore[type-arg]
-    if not path.endswith(".pt2"):
-        raise RuntimeError("Unable to load package. Path must be a .pt2 file.")
+        Args:
+            constants_map: A mapping of constant fqns to tensors.
+            check_full_update: Whether to add check to see if all the constants
+            are updated and have values.
+        """
+        self.loader.load_constants(constants_map, False, check_full_update)  # type: ignore[attr-defined]
+
+    def get_constant_fqns(self) -> List[str]:
+        return self.loader.get_constant_fqns()  # type: ignore[attr-defined]
+
+
+def load_package(path: Union[str, io.BytesIO], model_name: str = "model") -> AOTICompiledModel:  # type: ignore[type-arg]
+    assert isinstance(path, io.BytesIO) or (
+        isinstance(path, str) and path.endswith(".pt2")
+    ), f"Unable to load package. Path must be a buffer or a file ending in .pt2. Instead got {path}"
+
+    if isinstance(path, io.BytesIO):
+        with tempfile.NamedTemporaryFile(suffix=".pt2") as f:
+            # TODO(angelayi): We shouldn't need to do this -- miniz should
+            # handle reading the buffer. This is just a temporary workaround
+            f.write(path.read())
+            path.seek(0)
+            log.debug("Writing buffer to tmp file located at %s.", f.name)
+            loader = torch._C._aoti.AOTIModelPackageLoader(f.name, model_name)  # type: ignore[call-arg]
+            return AOTICompiledModel(loader)
 
     loader = torch._C._aoti.AOTIModelPackageLoader(path, model_name)  # type: ignore[call-arg]
     return AOTICompiledModel(loader)

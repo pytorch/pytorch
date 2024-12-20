@@ -148,7 +148,7 @@ template <typename T>
 inline void transpose(int64_t M, int64_t N, const T* src, int64_t ld_src, T* dst, int64_t ld_dst) {
   for (int64_t j = 0; j < N; j++) {
     for (int64_t i = 0; i < M; i++) {
-      dst[j * ld_dst + i] = src[i * ld_src + j];
+      dst[j * ld_dst + i] = c10::load(&(src[i * ld_src + j]));
     }
   }
 }

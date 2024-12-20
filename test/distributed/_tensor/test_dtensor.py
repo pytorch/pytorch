@@ -25,6 +25,7 @@ from torch.distributed._tensor.placement_types import (
     Shard,
     TensorMeta,
 )
+from torch.distributed.tensor._api import _shard_tensor
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.distributed.tensor.parallel import (
     ColwiseParallel,
@@ -154,14 +155,12 @@ class DTensorTest(DTensorTestBase):
         device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
         shard0_spec = [Shard(0)]
         local_tensor = torch.randn(4, 8)
-        global_shape = torch.Size([self.world_size * 4, 8])
         dist_tensor = DTensor.from_local(local_tensor, device_mesh, shard0_spec)
         # won't affect stride
         self.assertEqual(dist_tensor.stride(), (8, 1))
 
         shard1_spec = [Shard(1)]
         local_tensor = torch.randn(8, 4)
-        global_shape = torch.Size([8, self.world_size * 4])
         dist_tensor = DTensor.from_local(local_tensor, device_mesh, shard1_spec)
         # will affect stride after DT initialized
         self.assertEqual(dist_tensor.stride(), (4 * self.world_size, 1))
@@ -169,7 +168,6 @@ class DTensorTest(DTensorTestBase):
         # if initialized from a transposed mat
         local_tensor = torch.randn(8, 4, 8)
         local_tensor_t = local_tensor.permute(1, 2, 0)
-        global_shape = torch.Size([4, self.world_size * 8, 8])
         self.assertEqual(local_tensor_t.stride(), (8, 1, 32))
         dist_tensor = DTensor.from_local(local_tensor_t, device_mesh, shard1_spec)
         global_stride = (8 * self.world_size, 1, 32 * self.world_size)
@@ -256,7 +254,7 @@ class DTensorTest(DTensorTestBase):
         with self.assertRaisesRegex(
             RuntimeError, "Please pass both shape and stride at the same time."
         ):
-            dtensor = DTensor.from_local(
+            DTensor.from_local(
                 tensor_list[self.rank],
                 device_mesh,
                 (Shard(0),),
@@ -266,7 +264,7 @@ class DTensorTest(DTensorTestBase):
         with self.assertRaisesRegex(
             RuntimeError, "Please pass both shape and stride at the same time."
         ):
-            dtensor = DTensor.from_local(
+            DTensor.from_local(
                 tensor_list[self.rank],
                 device_mesh,
                 (Shard(0),),
@@ -571,6 +569,45 @@ class DTensorTest(DTensorTestBase):
                     else None
                 )
                 self._attempt_load_from_subprocess(filename, import_string, err_msg)
+
+    @with_comms
+    def test_shard_tensor(self):
+        ws = self.world_size
+        device_mesh = DeviceMesh(self.device_type, list(range(ws)))
+        full_tensor = torch.arange(ws * ws).reshape(ws, ws)
+
+        # Shard by row
+        placements = [Shard(0)]
+        sharded_tensor = _shard_tensor(full_tensor, placements, device_mesh)
+        self.assertEqual(sharded_tensor.size(), torch.Size([ws, ws]))
+        self.assertEqual(sharded_tensor.placements, placements)
+        local_tensor = sharded_tensor.to_local()
+        self.assertEqual(local_tensor, full_tensor[range(self.rank, self.rank + 1), :])
+
+        # Shard by column
+        placements = [Shard(1)]
+        sharded_tensor = _shard_tensor(full_tensor, placements, device_mesh)
+        self.assertEqual(sharded_tensor.size(), torch.Size([ws, ws]))
+        self.assertEqual(sharded_tensor.placements, placements)
+        local_tensor = sharded_tensor.to_local()
+        self.assertEqual(local_tensor, full_tensor[:, range(self.rank, self.rank + 1)])
+
+        # assert full tensor is not changed
+        self.assertEqual(full_tensor, torch.arange(ws * ws).reshape(ws, ws))
+
+    @with_comms
+    def test_shard_tensor_2d(self):
+        ws = self.world_size
+        full_tensor = torch.arange(ws).reshape(2, ws // 2)
+        device_mesh = DeviceMesh(self.device_type, full_tensor)
+
+        # Shard by row and column
+        placements = [Shard(0), Shard(1)]
+        sharded_tensor = _shard_tensor(full_tensor, placements, device_mesh)
+        self.assertEqual(sharded_tensor.size(), torch.Size([2, ws // 2]))
+        self.assertEqual(sharded_tensor.placements, placements)
+        local_tensor = sharded_tensor.to_local()
+        self.assertEqual(local_tensor.item(), self.rank)
 
 
 class DTensorMeshTest(DTensorTestBase):
@@ -1003,7 +1040,7 @@ class DTensorLogTest(LoggingTestCase):
         env["MASTER_PORT"] = "12345"
         env["MASTER_ADDR"] = "localhost"
 
-        stdout, stderr = self.run_process_no_exception(
+        _, stderr = self.run_process_no_exception(
             """\
 import logging
 import torch

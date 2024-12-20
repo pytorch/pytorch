@@ -885,7 +885,7 @@ at::Tensor complex_convolution_mode(
     const at::Tensor& weight,
     const std::optional<at::Tensor>& bias_opt,
     c10::SymIntArrayRef stride,
-    c10::string_view padding,
+    std::string_view padding,
     c10::SymIntArrayRef dilation,
     const c10::SymInt& groups) {
   auto bias = bias_opt.value_or(Tensor());
@@ -1055,7 +1055,7 @@ static Tensor convolution_same(
 
 Tensor _convolution_mode_symint(
     const Tensor& input, const Tensor& weight, const std::optional<Tensor>& bias_opt,
-    SymIntArrayRef stride, c10::string_view padding, SymIntArrayRef dilation,
+    SymIntArrayRef stride, std::string_view padding, SymIntArrayRef dilation,
     c10::SymInt groups) {
   // See [Note: hacky wrapper removal for optional tensor]
   c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias_opt);
@@ -1073,7 +1073,7 @@ Tensor _convolution_mode_symint(
 
 at::Tensor conv1d_padding_symint(
     const Tensor& input_, const Tensor& weight, const std::optional<Tensor>& bias,
-    c10::SymIntArrayRef stride, c10::string_view padding, c10::SymIntArrayRef dilation,
+    c10::SymIntArrayRef stride, std::string_view padding, c10::SymIntArrayRef dilation,
     c10::SymInt groups) {
   auto [input, is_batched] = batchify(input_, /*num_spatial_dims=*/ 1, "conv1d");
   Tensor output;
@@ -1087,7 +1087,7 @@ at::Tensor conv1d_padding_symint(
 
 at::Tensor conv2d_padding_symint(
     const Tensor& input_, const Tensor& weight, const std::optional<Tensor>& bias,
-    c10::SymIntArrayRef stride, c10::string_view padding, c10::SymIntArrayRef dilation,
+    c10::SymIntArrayRef stride, std::string_view padding, c10::SymIntArrayRef dilation,
     c10::SymInt groups) {
   auto [input, is_batched] = batchify(input_, /*num_spatial_dims=*/ 2, "conv2d");
   Tensor output;
@@ -1101,7 +1101,7 @@ at::Tensor conv2d_padding_symint(
 
 at::Tensor conv3d_padding_symint(
     const Tensor& input_, const Tensor& weight, const std::optional<Tensor>& bias,
-    c10::SymIntArrayRef stride, c10::string_view padding, c10::SymIntArrayRef dilation,
+    c10::SymIntArrayRef stride, std::string_view padding, c10::SymIntArrayRef dilation,
     c10::SymInt groups) {
   auto [input, is_batched] = batchify(input_, /*num_spatial_dims=*/ 3, "conv3d");
   Tensor output;
@@ -1732,11 +1732,10 @@ std::tuple<Tensor,Tensor,Tensor> _convolution_double_backward( const std::option
   // See [Note: hacky wrapper removal for optional tensor]
   c10::MaybeOwned<Tensor> ggI_maybe_owned = at::borrow_from_optional_tensor(ggI_opt);
   const Tensor& ggI = *ggI_maybe_owned;
-  const Tensor& ggW_r = ggW_r_opt.value_or(Tensor());
+  Tensor ggW = ggW_r_opt.value_or(Tensor());
   const Tensor& ggb = ggb_opt.value_or(Tensor());
 
 
-  auto ggW = ggW_r;
   auto gO = gO_r;
   auto weight = weight_r;
 

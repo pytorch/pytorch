@@ -7,7 +7,6 @@
 #include <torch/csrc/lazy/core/lazy_graph_executor.h>
 #include <torch/csrc/lazy/core/shape.h>
 #include <torch/csrc/lazy/core/tensor.h>
-#include <atomic>
 
 namespace torch::lazy {
 

@@ -56,7 +56,7 @@ except ModuleNotFoundError:
     np = None  # type: ignore[assignment]
 
 try:
-    from torch.distributed._composable.fsdp import _fsdp_param_group
+    from torch.distributed.fsdp._fully_shard import _fsdp_param_group
 except ModuleNotFoundError:
     _fsdp_param_group = None  # type: ignore[assignment]
 
@@ -147,6 +147,7 @@ tracing_state_functions = {
     torch._utils.is_compiling: True,
     torch.compiler.is_compiling: True,
     torch.compiler.is_dynamo_compiling: True,
+    torch.compiler.is_exporting: True,
     torch.nn.modules.activation._is_make_fx_tracing: False,
 }
 
@@ -410,6 +411,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 torch._dynamo.external_utils.is_compiling,
                 torch.compiler.is_compiling,
                 torch.compiler.is_dynamo_compiling,
+                torch.compiler.is_exporting,
             ):
                 tx.mark_inconsistent_side_effects()
             return ConstantVariable.create(tracing_state_functions[self.value])
@@ -1117,6 +1119,9 @@ Either create the tensor outside the compiled region, or do not set the tensor t
                 (data.as_proxy(), placeholder.as_proxy()),
                 {},
             ),
+            # In reconstruct() we should use the original parameter. The one
+            # returned by the graph will be an alias.
+            source=placeholder.source,
         )
         assert isinstance(result, variables.TensorVariable)
         result.class_type = torch.nn.Parameter
@@ -1126,9 +1131,6 @@ Either create the tensor outside the compiled region, or do not set the tensor t
         # grad_enabled. Since this is parameter, we can just override the
         # has_grad_fn field to False to workaround the issue.
         result.has_grad_fn = False
-
-        # In reconstruct() should use the original parameter.  The one returned by the graph will be an alias.
-        result.source = placeholder.source
 
         # TODO(jansel): if the new param falls out of scope, currently it won't get freed until
         # the end of the graph.  We should fix this.
@@ -1171,11 +1173,13 @@ Either create the tensor outside the compiled region, or do not set the tensor t
         return args[0].call_method(tx, self.get_function().__name__, args[1:], kwargs)
 
     def is_tensor_method(self):
+        from ..trace_rules import get_tensor_method
+
         return (
             inspect.ismethoddescriptor(self.get_function())
             and hasattr(self.get_function(), "__objclass__")
             and self.get_function().__objclass__ == torch._C.TensorBase
-        ) or self.get_function() is torch.Tensor.__contains__
+        ) or self.get_function() in get_tensor_method()
 
     def torch_function_override_enabled(self, tx, args, kwargs):
         return (

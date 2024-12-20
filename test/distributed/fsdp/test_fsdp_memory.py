@@ -108,8 +108,6 @@ class TestFSDPMemory(FSDPTest):
 
     def _dist_train(self, with_checkpoint, expected, model_hidden_dim, iterations):
         gpu_id = self.rank
-        world_size = self.world_size
-
         batch = torch.randn(size=(2, 3, 224, 224)).cuda()
 
         model = create_model(

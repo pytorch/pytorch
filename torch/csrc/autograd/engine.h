@@ -43,6 +43,10 @@ TORCH_API void validate_outputs(
     const edge_list& edges,
     variable_list& grads,
     const std::function<std::string(const std::string&)>& format_error);
+TORCH_API void validate_outputs(
+    const std::vector<std::optional<InputMetadata>>& input_metadata,
+    variable_list& grads,
+    const std::function<std::string(const std::string&)>& format_error);
 
 struct NodeTask {
   std::weak_ptr<GraphTask> base_;

@@ -124,6 +124,16 @@ TORCH_API inline void set_autocast_gpu_dtype(at::ScalarType dtype) {
 // deprecated other backend specific autocast APIs
 AT_FORALL_DEPRECATED_AUTOCAST_BAKCNEDS(DECLARE_DEPRECATED_AUTOCAST_APIS)
 
+const std::array<at::DeviceType, 8> _AUTOCAST_SUPPORTED_DTYPES{
+    at::kCPU,
+    at::kCUDA,
+    at::kXPU,
+    at::kIPU,
+    at::kHPU,
+    at::kXLA,
+    at::kPrivateUse1,
+    at::kMPS};
+
 namespace {
 inline bool is_autocast_eligible(
     const Tensor& tensor,
@@ -179,10 +189,10 @@ inline DispatchKey get_autocast_dispatch_key_from_device_type(
 }
 
 inline bool is_autocast_available(c10::DeviceType device_type) {
-  if (device_type == at::kCPU || device_type == at::kCUDA ||
-      device_type == at::kXPU || device_type == at::kIPU ||
-      device_type == at::kHPU || device_type == at::kXLA ||
-      device_type == at::kPrivateUse1 || device_type == at::kMPS) {
+  if (std::find(
+          _AUTOCAST_SUPPORTED_DTYPES.begin(),
+          _AUTOCAST_SUPPORTED_DTYPES.end(),
+          device_type) != _AUTOCAST_SUPPORTED_DTYPES.end()) {
     return true;
   } else {
     return false;

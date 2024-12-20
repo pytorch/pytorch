@@ -99,7 +99,7 @@ class RendezvousTimeoutTest(TestCase):
                     ValueError,
                     rf"^The join timeout \({join_timeout}\) must be positive.$",
                 ):
-                    timeout = RendezvousTimeout(join_timeout)
+                    RendezvousTimeout(join_timeout)
 
 
 class NodeDescTest(TestCase):
@@ -1637,7 +1637,7 @@ class CreateHandlerTest(TestCase):
 def _ignore_exception(exception_type: Exception, fn: Callable):
     try:
         fn()
-    except exception_type as e:
+    except exception_type:
         pass
 
 

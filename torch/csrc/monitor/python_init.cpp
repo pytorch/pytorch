@@ -54,7 +54,7 @@ struct type_caster<torch::monitor::data_value_t> {
         Py_RETURN_FALSE;
       }
     } else if (std::holds_alternative<std::string>(src)) {
-      std::string str = std::get<std::string>(src);
+      std::string& str = std::get<std::string>(src);
       return THPUtils_packString(str);
     }
     throw std::runtime_error("unknown data_value_t type");

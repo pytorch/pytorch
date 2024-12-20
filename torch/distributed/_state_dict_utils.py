@@ -516,7 +516,6 @@ def _broadcast_tensors(
                 device=device,
                 dtype=tensor_info.dtype,
             )
-
         tensors.append(full_tensor)
         local_state = local_state_dict.get(key, None)
         if local_state is None:
@@ -560,16 +559,23 @@ def _distribute_tensors(
             slice(cur_offset, cur_offset + cur_shape)
             for cur_shape, cur_offset in zip(shape, offset)
         ]
-        local_tensor = full_tensor[slices]
-        # TODO: currently, we cannot handle strided sharding if the dp dimension is not even. For example,
-        # one of the case that is not yet supported is when placements = (Shard(0), _StridedShard(0, sf=2)).
-        local_state_dict[key] = DTensor.from_local(
-            local_tensor,
-            local_state.device_mesh,
-            local_state.placements,
-            shape=local_state.shape,
-            stride=local_state.stride(),
-        )
+        if local_state.is_meta:
+            # Use .clone() here rather than view to clone and return only the sliced portion, minimizing memory access and cost.
+            local_tensor = full_tensor[slices].detach().clone()
+            # TODO: currently, we cannot handle strided sharding if the dp dimension is not even. For example,
+            # one of the case that is not yet supported is when placements = (Shard(0), _StridedShard(0, sf=2)).
+            ret = DTensor.from_local(
+                local_tensor,
+                local_state.device_mesh,
+                local_state.placements,
+                shape=local_state.shape,
+                stride=local_state.stride(),
+            )
+        else:
+            ret = local_state
+            # Copy full_tensor[slices] into local_state.to_local() to reduce memory footprint.
+            ret.to_local().copy_(full_tensor[slices])
+        local_state_dict[key] = ret
 
 
 def _broadcast_state_dict(
@@ -578,6 +584,7 @@ def _broadcast_state_dict(
     device: torch.device,
     pg: Optional[dist.ProcessGroup] = None,
     strict: bool = False,
+    cpu_offload: bool = False,
 ) -> None:
     # Broadcast from rank0's `full_state_dict` to all ranks' `local_state_dict`.
     # If strict is True, any keys in `local_state_dict` but not in `full_state_dict`
@@ -595,7 +602,6 @@ def _broadcast_state_dict(
     broadcast_list = [ret]
     dist.broadcast_object_list(broadcast_list, src=0, group=pg)
     ret = broadcast_list[0]
-
     # Gather values
     keys = []
     local_state_dict_keys = set(local_state_dict.keys())
@@ -614,6 +620,9 @@ def _broadcast_state_dict(
         # Broadcast every tensor to avoid OOM for now.
         if len(keys) >= 1:
             _broadcast_tensors(ret, local_state_dict, keys, device, pg)
+            if cpu_offload:
+                for key in keys:
+                    local_state_dict[key] = local_state_dict[key].cpu()
             keys.clear()
 
     if strict:
@@ -623,6 +632,9 @@ def _broadcast_state_dict(
 
     if keys:
         _broadcast_tensors(ret, local_state_dict, keys, device, pg)
+        if cpu_offload:
+            for key in keys:
+                local_state_dict[key] = local_state_dict[key].cpu()
 
 
 def _distribute_state_dict(

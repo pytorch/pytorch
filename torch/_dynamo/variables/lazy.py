@@ -1,6 +1,6 @@
 import collections
 import functools
-from typing import Any, Callable, Dict, Optional, Tuple, Union
+from typing import Any, Callable, Dict, final, Optional, Tuple, Union
 from typing_extensions import Self
 
 from .base import VariableTracker
@@ -33,6 +33,7 @@ class LazyCache:
         del self.source
 
 
+@final
 class LazyVariableTracker(VariableTracker):
     """
     A structure that defers the creation of the actual VariableTracker

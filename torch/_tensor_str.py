@@ -328,18 +328,14 @@ def _tensor_str(self, indent):
     if self.is_neg():
         self = self.resolve_neg()
 
+    # TODO: Remove me when `masked_select` is implemented for FP8
     if self.dtype in [
-        torch.float16,
-        torch.bfloat16,
         torch.float8_e5m2,
         torch.float8_e5m2fnuz,
         torch.float8_e4m3fn,
         torch.float8_e4m3fnuz,
     ]:
-        self = self.float()
-
-    if self.dtype is torch.complex32:
-        self = self.cfloat()
+        self = self.half()
 
     if self.dtype.is_complex:
         # handle the conjugate bit
@@ -704,5 +700,5 @@ def _functorch_wrapper_str_intern(tensor, *, tensor_contents=None):
 
 def _str(self, *, tensor_contents=None):
     with torch.no_grad(), torch.utils._python_dispatch._disable_current_modes():
-        guard = torch._C._DisableFuncTorch()
+        guard = torch._C._DisableFuncTorch()  # noqa: F841
         return _str_intern(self, tensor_contents=tensor_contents)

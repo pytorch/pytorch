@@ -37,12 +37,17 @@ thread_local std::unique_ptr<StreamId[]> current_streams = nullptr;
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~
 // How do we assign stream IDs?
 //
-// -- 57 bits --  -- 5 bits -----  -- 3 bits --
-//     zeros      StreamIdIndex    StreamIdType
+// -- 56 bits --  -- 5 bits -----  -- 3 bits --  -- 1 bits --
+//     zeros      StreamIdIndex    StreamIdType  Ext/native stream
 //
 // Where StreamIdType:
 //  000 = normal priority queue
 //  001 = high priority queue
+//
+// for external stream, StreamID is a sycl::queue* pointer
+// this means that last bit will always be 0
+// so when constructing StreamId for a native stream we set last bit to 1
+// to distinguish between native and external streams
 //
 // StreamId is 64-bit, so we can just rely on regular promotion rules.
 // We rely on StreamIdIndex and StreamIdType being non-negative;
@@ -50,8 +55,10 @@ thread_local std::unique_ptr<StreamId[]> current_streams = nullptr;
 using StreamIdIndex = uint8_t;
 enum class StreamIdType : uint8_t {
   // The higher the type number, the higher the priority.
+  // EXT is used for external streams, which we don't know the priority of.
   NORMAL = 0x0,
   HIGH = 0X1,
+  EXT = 0x7,
 };
 
 inline std::ostream& operator<<(std::ostream& stream, StreamIdType q) {
@@ -60,6 +67,8 @@ inline std::ostream& operator<<(std::ostream& stream, StreamIdType q) {
       return stream << "NORMAL";
     case StreamIdType::HIGH:
       return stream << "HIGH";
+    case StreamIdType::EXT:
+      return stream << "EXT";
     default:
       break;
   }
@@ -67,8 +76,13 @@ inline std::ostream& operator<<(std::ostream& stream, StreamIdType q) {
 }
 
 inline StreamIdType streamIdType(StreamId s) {
+  // Externally allocated streams have their id being the sycl:queue* pointer
+  // so the last bit will be 0
+  if ((!(s & 1) && s)) {
+    return StreamIdType(StreamIdType::EXT);
+  }
   int mask_for_type = (1 << kStreamTypeBits) - 1;
-  auto st = static_cast<StreamIdType>(s & mask_for_type);
+  auto st = static_cast<StreamIdType>((s >> 1) & mask_for_type);
   TORCH_CHECK(
       st == StreamIdType::NORMAL || st == StreamIdType::HIGH,
       "invalid StreamId: ",
@@ -78,12 +92,12 @@ inline StreamIdType streamIdType(StreamId s) {
 
 inline StreamIdIndex streamIdIndex(StreamId s) {
   return static_cast<StreamIdIndex>(
-      (s >> kStreamTypeBits) & ((1 << kStreamsPerPoolBits) - 1));
+      (s >> (kStreamTypeBits + 1)) & ((1 << kStreamsPerPoolBits) - 1));
 }
 
 inline StreamId makeStreamId(StreamIdType st, StreamIdIndex si) {
-  return (static_cast<StreamId>(si) << kStreamTypeBits) |
-      static_cast<StreamId>(st);
+  return (static_cast<StreamId>(si) << (kStreamTypeBits + 1)) |
+      (static_cast<StreamId>(st) << 1) | 1;
 }
 
 void initGlobalStreamState() {
@@ -166,6 +180,14 @@ XPUStream XPUStreamForId(DeviceIndex device_index, StreamId stream_id) {
 int XPUStream::priority() const {
   StreamId stream_id = stream_.id();
   StreamIdType st = streamIdType(stream_id);
+  // For an external queue which is not created in XPUStream, we can not trace
+  // the priority. Workaround here since sycl doesn't support get priority from
+  // a sycl::queue, like cudaStreamGetPriority .
+  // TODO: remove this workaround when sycl supports get priority from a
+  // sycl::queue.
+  if (st == StreamIdType::EXT) {
+    st = StreamIdType::NORMAL;
+  }
   // StreamIdType and priority number are inversely related.
   return -static_cast<int>(st);
 }
@@ -177,6 +199,8 @@ sycl::queue& XPUStream::queue() const {
   StreamIdType st = streamIdType(stream_id);
   StreamIdIndex si = streamIdIndex(stream_id);
   switch (st) {
+    case StreamIdType::EXT:
+      return *(reinterpret_cast<sycl::queue*>(stream_id));
     case StreamIdType::NORMAL:
     case StreamIdType::HIGH:
       return *streams[device_index][static_cast<uint8_t>(st)][si];
@@ -219,6 +243,15 @@ XPUStream getStreamFromPool(const bool isHighPriority, DeviceIndex device) {
   // If isHighPriority is true, return the stream with the highest priority.
   int priority = isHighPriority ? -max_compile_time_stream_priorities + 1 : 0;
   return getStreamFromPool(priority, device);
+}
+
+XPUStream getStreamFromExternal(
+    sycl::queue* ext_stream,
+    DeviceIndex device_index) {
+  // The sycl::queue* will be the actual id
+
+  TORCH_CHECK(ext_stream, "External stream must not be a nullptr.");
+  return XPUStreamForId(device_index, reinterpret_cast<int64_t>(ext_stream));
 }
 
 // Note: The stream pools will be initialized if needed, at the first invocation

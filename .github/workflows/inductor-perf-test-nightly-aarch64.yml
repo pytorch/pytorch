@@ -107,8 +107,7 @@ jobs:
           { config: "inductor_torchbench_perf_cpu_aarch64", shard: 12, num_shards: 12, runner: "linux.arm64.m7g.metal" },
         ]}
       selected-test-configs: ${{ inputs.benchmark_configs }}
-    secrets:
-      HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}
+    secrets: inherit
 
 
   linux-jammy-aarch64-py3_10-inductor-test-nightly:
@@ -125,8 +124,9 @@ jobs:
       test-matrix: ${{ needs.linux-jammy-aarch64-py3_10-inductor-build.outputs.test-matrix }}
       use-gha: anything-non-empty-to-use-gha
       timeout-minutes: 720
-    secrets:
-      HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}
+      # disable monitor in perf tests for more investigation
+      disable-monitor: true
+    secrets: inherit
 
 
   linux-jammy-aarch64-py3_10-inductor-test:
@@ -141,5 +141,4 @@ jobs:
       test-matrix: ${{ needs.linux-jammy-aarch64-py3_10-inductor-build.outputs.test-matrix }}
       use-gha: anything-non-empty-to-use-gha
       timeout-minutes: 720
-    secrets:
-      HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}
+    secrets: inherit

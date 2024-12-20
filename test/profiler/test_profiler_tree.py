@@ -3,6 +3,7 @@
 import functools
 import os
 import re
+import sys
 import textwrap
 import traceback
 import unittest
@@ -559,6 +560,7 @@ class TestProfilerTree(TestCase):
         )
 
     @skipIfTorchDynamo("too slow")
+    @unittest.skipIf(sys.version_info >= (3, 13), "segfaults")
     @unittest.skipIf(
         TEST_WITH_CROSSREF, "crossref intercepts calls and changes the callsite."
     )
@@ -729,6 +731,7 @@ class TestProfilerTree(TestCase):
                   ...""",
         )
 
+    @skipIfTorchDynamo("segfaults in 3.13+")
     @unittest.skipIf(
         TEST_WITH_CROSSREF, "crossref intercepts calls and changes the callsite."
     )

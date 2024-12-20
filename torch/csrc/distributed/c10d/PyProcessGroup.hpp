@@ -59,11 +59,59 @@ class PyProcessGroup : public ProcessGroup {
   using ProcessGroup::ProcessGroup;
 
   const std::string getBackendName() const override {
-    PYBIND11_OVERRIDE_PURE(
+    PYBIND11_OVERRIDE(
         std::string, /* Return type */
         ProcessGroup, /* Parent class */
         getBackendName, /* Name of function in C++ */
     );
+  }
+
+  int getRank() const override {
+    PYBIND11_OVERRIDE(
+        int, /* Return type */
+        ProcessGroup, /* Parent class */
+        getRank, /* Name of function in C++ */
+    );
+  }
+
+  int getSize() const override {
+    PYBIND11_OVERRIDE(
+        int, /* Return type */
+        ProcessGroup, /* Parent class */
+        getSize, /* Name of function in C++ */
+    );
+  }
+
+  const std::string& getGroupName() const override {
+    PYBIND11_OVERRIDE(
+        const std::string&, /* Return type */
+        ProcessGroup, /* Parent class */
+        getGroupName, /* Name of function in C++ */
+    );
+  }
+
+  void setGroupName(const std::string& group_name) override {
+    PYBIND11_OVERRIDE(
+        void, /* Return type */
+        ProcessGroup, /* Parent class */
+        setGroupName, /* Name of function in C++ */
+        group_name);
+  }
+
+  const std::string& getGroupDesc() const override {
+    PYBIND11_OVERRIDE(
+        const std::string&, /* Return type */
+        ProcessGroup, /* Parent class */
+        getGroupDesc, /* Name of function in C++ */
+    );
+  }
+
+  void setGroupDesc(const std::string& group_desc) override {
+    PYBIND11_OVERRIDE(
+        void, /* Return type */
+        ProcessGroup, /* Parent class */
+        setGroupDesc, /* Name of function in C++ */
+        group_desc);
   }
 
   c10::intrusive_ptr<Work> allgather(

@@ -59,7 +59,7 @@ class PackedSequenceTest(TestCase):
                     )
                     # Apply cast to `PackedSequence` instance and unpack
                     masked = getattr(packed, cast_str)()
-                    unpacked, lengths_out = rnn_utils.pad_packed_sequence(masked)
+                    unpacked, _ = rnn_utils.pad_packed_sequence(masked)
                     self.assertEqual(unpacked.type(), expected_type_str)
 
     def test_wrong_order(self):
@@ -394,7 +394,6 @@ class PackedSequenceTest(TestCase):
                 sum(map(bool, filter(lambda x: x >= i, sorted_lengths)))
                 for i in range(1, max_length + 1)
             ]
-            offset = 0
             padded = torch.cat(
                 [
                     pad(

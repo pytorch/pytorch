@@ -440,7 +440,7 @@ def schedule(
     active: int,
     repeat: int = 0,
     skip_first: int = 0,
-    skip_first_wait: bool = False,
+    skip_first_wait: int = 0,
 ) -> Callable:
     """
     Returns a callable that can be used as profiler ``schedule`` argument. The profiler will skip
@@ -452,8 +452,8 @@ def schedule(
     The ``skip_first_wait`` parameter controls whether the first ``wait`` stage should be skipped.
     This can be useful if a user wants to wait longer than ``skip_first`` between cycles, but not
     for the first profile. For example, if ``skip_first`` is 10 and ``wait`` is 20, the first cycle will
-    wait 10 + 20 = 30 steps before warmup if ``skip_first_wait`` is False, but will wait only 10
-    steps if ``skip_first_wait`` is True. All subsequent cycles will then wait 20 steps between the
+    wait 10 + 20 = 30 steps before warmup if ``skip_first_wait`` is zero, but will wait only 10
+    steps if ``skip_first_wait`` is non-zero. All subsequent cycles will then wait 20 steps between the
     last active and warmup.
     """
 
@@ -464,7 +464,7 @@ def schedule(
         else:
             step -= skip_first
         # If wait >> skip_first and we want to grab profiling early, shift left by wait if skip_first_wait is True
-        if skip_first_wait:
+        if skip_first_wait != 0:
             step += wait
         num_steps = wait + warmup + active
         if repeat > 0 and step / num_steps >= repeat:

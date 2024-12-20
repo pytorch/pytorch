@@ -3,7 +3,7 @@
 #include <gmock/gmock.h>
 
 // NOLINTBEGIN(modernize*, readability*, bugprone-string-constructor)
-using c10::string_view;
+using string_view = c10::c10_string_view;
 
 namespace {
 namespace testutils {

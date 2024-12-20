@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Sequence
+from typing import TYPE_CHECKING
 
 from torchgen import local
 from torchgen.api.types import (
@@ -51,6 +51,10 @@ from torchgen.model import (
 from torchgen.utils import assert_never
 
 
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+
+
 # This file describes the translation of JIT schema to the public C++
 # API, which is what people use when they call functions like at::add.
 #
@@ -95,22 +99,16 @@ def valuetype_type(
     *,
     binds: ArgName,
     mutable: bool = True,
-    remove_non_owning_ref_types: bool = False,
     symint: bool = False,
 ) -> NamedCType | None:
     if isinstance(t, BaseType):
-        if t.name == BaseTy.Tensor or t.name == BaseTy.Scalar:
+        if t.name in (BaseTy.Tensor, BaseTy.Scalar):
             return None
         elif str(t) == "SymInt":
             if symint:
                 return NamedCType(binds, BaseCType(SymIntT))
             else:
                 return NamedCType(binds, BaseCType(longT))
-        if remove_non_owning_ref_types:
-            if t.name == BaseTy.str:
-                raise AssertionError(
-                    "string ref->value conversion: not implemented yet"
-                )
         # All other BaseType currently map directly to BaseCppTypes.
         return NamedCType(binds, BaseCType(BaseTypeToCppMapping[t.name]))
     elif isinstance(t, OptionalType):
@@ -146,7 +144,6 @@ def argumenttype_type(
         binds=binds,
         mutable=mutable,
         symint=symint,
-        remove_non_owning_ref_types=remove_non_owning_ref_types,
     )
     if r is not None:
         return r

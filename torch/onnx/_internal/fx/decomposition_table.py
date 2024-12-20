@@ -94,7 +94,7 @@ def create_onnx_friendly_decomposition_table(
     # NOTE: If we import torch._decomp, we will get RuntimeError: Only a single
     # TORCH_LIBRARY can be used to register the namespace nvprims; please put all of your
     # definitions in a single TORCH_LIBRARY block.
-    for op_overload, decomp_fn in torch._decomp.decomposition_table.items():  # type: ignore[attr-defined]
+    for op_overload, decomp_fn in torch._decomp.decomposition_table.items():
         # Skip decomposition into "prim::*" ops (defined in 'torch._refs'), because they
         # are not generally supported by ONNX.
         # Skip decomposition for op_overload as long as that op_overload has a corresponding ONNX

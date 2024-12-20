@@ -89,7 +89,9 @@ struct WarnNotImplemented : public Node {
   size_t num_outputs;
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-rvalue-reference-param-not-moved)
 auto WarnNotImplemented::apply(variable_list&& inputs) -> variable_list {
+  auto inputsLocal = std::move(inputs);
   warnAutogradNotImplemented(op_name);
   std::vector<at::Tensor> output(num_outputs);
   return output;
@@ -334,8 +336,8 @@ static void autogradNotImplementedFallbackImpl(
 
 #ifndef NDEBUG
   // See NOTE [ TensorImpl and Storage Pointer Sanity Checks ]
-  auto stack_args_copy =
-      std::vector<c10::IValue>(stack->begin() + stack_start, stack->end());
+  auto stack_args_copy = std::vector<c10::IValue>(
+      stack->begin() + static_cast<int64_t>(stack_start), stack->end());
   std::vector<c10::intrusive_ptr<c10::TensorImpl>> impl_saved;
   impl_saved.reserve(num_tensor_inputs);
   std::vector<std::optional<c10::Storage>> storage_saved;
@@ -345,7 +347,7 @@ static void autogradNotImplementedFallbackImpl(
         storage_saved.push_back(
             t.has_storage() ? std::optional<c10::Storage>(t.storage())
                             : std::nullopt);
-        impl_saved.push_back(t.getIntrusivePtr());
+        impl_saved.emplace_back(t.getIntrusivePtr());
       },
       &stack_args_copy,
       0,
@@ -406,7 +408,8 @@ static void autogradNotImplementedFallbackImpl(
         if (!is_aliased_output[idx_ret] && t.has_storage() &&
             op_name != "aten::_foreach_norm" &&
             op_name != "aten::_transformer_encoder_layer_fwd" &&
-            op_name != "aten::native_channel_shuffle")
+            op_name != "aten::native_channel_shuffle" &&
+            op_name != "aten::_sparse_semi_structured_tile")
           TORCH_INTERNAL_ASSERT(t.storage().use_count() == 1);
       },
       stack,

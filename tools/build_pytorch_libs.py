@@ -4,10 +4,19 @@ import os
 import platform
 from glob import glob
 
-from setuptools import distutils  # type: ignore[import]
-
 from .setup_helpers.cmake import CMake, USE_NINJA
 from .setup_helpers.env import check_negative_env_flag, IS_64BIT, IS_WINDOWS
+
+
+def _get_vc_env(vc_arch: str) -> dict[str, str]:
+    try:
+        from setuptools import distutils  # type: ignore[import]
+
+        return distutils._msvccompiler._get_vc_env(vc_arch)  # type: ignore[no-any-return]
+    except AttributeError:
+        from setuptools._distutils import _msvccompiler  # type: ignore[import]
+
+        return _msvccompiler._get_vc_env(vc_arch)  # type: ignore[no-any-return]
 
 
 def _overlay_windows_vcvars(env: dict[str, str]) -> dict[str, str]:
@@ -33,7 +42,7 @@ def _overlay_windows_vcvars(env: dict[str, str]) -> dict[str, str]:
                 "emulation is enabled!"
             )
 
-    vc_env: dict[str, str] = distutils._msvccompiler._get_vc_env(vc_arch)
+    vc_env = _get_vc_env(vc_arch)
     # Keys in `_get_vc_env` are always lowercase.
     # We turn them into uppercase before overlaying vcvars
     # because OS environ keys are always uppercase on Windows.

@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+import torchvision
+
 import torch
 from torch.onnx._internal.exporter import _testing as onnx_testing
 from torch.testing._internal import common_utils
@@ -124,6 +126,23 @@ class DynamoExporterTest(common_utils.TestCase):
         onnx_testing.assert_onnx_program(onnx_program)
         onnx_testing.assert_onnx_program(onnx_program, args=(torch.tensor([0, 0]),))
         onnx_testing.assert_onnx_program(onnx_program, args=(torch.tensor([43, 43]),))
+
+    def test_onnx_export_torchvision_ops(self):
+        class VisionModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, *x):
+                out = torchvision.ops.nms(x[0], x[1], x[2])
+                return out
+
+        args = (
+            torch.tensor([[0, 0, 1, 1], [0.5, 0.5, 1, 1]], dtype=torch.float),
+            torch.tensor([0.1, 0.2]),
+            0,
+        )
+        onnx_program = torch.onnx.export(VisionModel(), args, dynamo=True)
+        onnx_testing.assert_onnx_program(onnx_program)
 
     # TODO(justinchuby): Test multi-output HOPs
 

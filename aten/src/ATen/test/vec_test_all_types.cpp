@@ -75,6 +75,7 @@ namespace {
     template <typename T>
     class VecMaskTests : public ::testing::Test {};
     using RealFloatTestedTypes = ::testing::Types<vfloat, vdouble>;
+    using RealFloatReducedFloatTestedTypes = ::testing::Types<vfloat, vdouble, vBFloat16, vHalf>;
     using FloatTestedTypes = ::testing::Types<vfloat, vdouble, vcomplex, vcomplexDbl>;
     using ALLTestedTypes = ::testing::Types<vfloat, vdouble, vcomplex, vlong, vint, vshort, vqint8, vquint8, vqint>;
     using QuantTestedTypes = ::testing::Types<vqint8, vquint8, vqint>;
@@ -560,8 +561,8 @@ namespace {
         bool expected = std::isnan(val);
         CACHE_ALIGN c10::Half actual_vals[vHalf::size()];
         vHalf(val).isnan().store(actual_vals);
-        for (int jj = 0; jj < vHalf::size(); ++jj) {
-          EXPECT_EQ(expected, c10::bit_cast<uint16_t>(actual_vals[jj]) != 0) << "fp16 isnan failure for bit pattern " << std::hex << ii << std::dec;
+        for (auto actual_val : actual_vals) {
+          EXPECT_EQ(expected, c10::bit_cast<uint16_t>(actual_val) != 0) << "fp16 isnan failure for bit pattern " << std::hex << ii << std::dec;
         }
       }
     }
@@ -925,6 +926,24 @@ namespace {
             test_case,
             RESOLVE_OVERLOAD(filter_fmadd));
     }
+    TYPED_TEST(BitwiseFloatsAdditional, Fmsub) {
+        using vec = TypeParam;
+        using VT = ValueType<TypeParam>;
+
+        auto test_case = TestingCase<vec>::getBuilder()
+          .addDomain(CheckWithinDomains<VT>{
+              {{(VT)-1000, (VT)1000}, {(VT)-1000, (VT)1000}, {(VT)-1000, (VT)1000}},
+              true, getDefaultTolerance<VT>()})
+          .setTestSeed(TestSeed());
+
+        test_ternary<vec>(
+            NAME_INFO(fmsub), RESOLVE_OVERLOAD(local_fmsub),
+            [](const vec& v0, const vec& v1, const vec& v2) {
+                return at::vec::fmsub(v0, v1, v2);
+            },
+            test_case,
+            RESOLVE_OVERLOAD(filter_fmadd));
+    }
     TYPED_TEST(BitwiseFloatsAdditional, FmaddVecN) {
         using VT = ValueType<TypeParam>;
         using vec = at::vec::VectorizedN<VT, 1>;
@@ -1027,7 +1046,7 @@ namespace {
           mask[idx] = (VT)0;
         }
         else {
-          int64_t hex_mask = 0xFFFFFFFFFFFFFFFF;
+          uint64_t hex_mask = 0xFFFFFFFFFFFFFFFF;
           std::memcpy(&mask[idx], &hex_mask, sizeof(VT));
         }
         if (!test_blendv<vec, VT, idx+1, N>(expected_val, a, b, mask)) return false;
@@ -1296,8 +1315,8 @@ namespace {
         ValueGen<float> generator_sc(1.f, 15.f, seed.add(2));
         for ([[maybe_unused]] const auto i : c10::irange(trials)) {
           float scale = generator_sc.get();
-          int32_t zero_point_val = generator.get();
-          float scale_zp_premul = -(scale * zero_point_val);
+          auto zero_point_val = generator.get();
+          float scale_zp_premul = -(scale * static_cast<float>(zero_point_val));
           vfloat vf_scale = vfloat{scale};
           vfloat vf_zp = vfloat{static_cast<float>(zero_point_val)};
           vfloat vf_scale_zp = vfloat{scale_zp_premul};
@@ -1638,18 +1657,16 @@ namespace {
     TEST(HalfConversionTest, HalfFloat) {
       float f32s[100];
       for (const auto i : c10::irange(100)) {
-        f32s[i] = i + 0.3;
+        f32s[i] = static_cast<float>(i + 0.3);
       }
-      uint16_t u16;
-      float x;
       for (const auto i : c10::irange(100)) {
       #if (defined(CPU_CAPABILITY_AVX2) || defined(CPU_CAPABILITY_AVX512)) && \
           !defined(__APPLE__)
-        u16 = at::vec::float2half_scalar(f32s[i]);
-        x = at::vec::half2float_scalar(u16);
+        uint16_t u16 = at::vec::float2half_scalar(f32s[i]);
+        float x = at::vec::half2float_scalar(u16);
       #else
-        u16 = c10::detail::fp16_ieee_from_fp32_value(f32s[i]);
-        x = c10::detail::fp16_ieee_to_fp32_value(u16);
+        uint16_t u16 = c10::detail::fp16_ieee_from_fp32_value(f32s[i]);
+        float x = c10::detail::fp16_ieee_to_fp32_value(u16);
       #endif
 
         EXPECT_EQ(u16, c10::detail::fp16_ieee_from_fp32_value(f32s[i]))
@@ -1678,7 +1695,7 @@ namespace {
       VT v_pinf = static_cast<VT>(*(float *)&infBits);
       values[index] = v_pinf;
       auto vec_pinf = vec::loadu(values);
-      int negInfBits = 0xFF800000;
+      unsigned int negInfBits = 0xFF800000;
       VT v_ninf  = static_cast<VT>(*(float *)&negInfBits);
       values[index] = v_ninf;
       auto vec_ninf = vec::loadu(values);
@@ -1760,8 +1777,8 @@ namespace {
         const auto expected = static_cast<float>(val);
         CACHE_ALIGN float actual_vals[vfloat::size()];
         at::vec::convert<float>(vBFloat16(val)).store(actual_vals);
-        for (int jj = 0; jj < vfloat::size(); ++jj) {
-          EXPECT_EQ(c10::bit_cast<uint32_t>(expected), c10::bit_cast<uint32_t>(actual_vals[jj]))
+        for (auto actual_val : actual_vals) {
+          EXPECT_EQ(c10::bit_cast<uint32_t>(expected), c10::bit_cast<uint32_t>(actual_val))
             << "convert-to-float failure for bf16 bit pattern "
             << std::hex << ii << std::dec;
         }
@@ -1775,19 +1792,20 @@ namespace {
 
     #define TEST_MASK_LOAD(dst_t, mask_t, mask_n)                           \
       do {                                                                  \
-        CACHE_ALIGN dst_t x[mask_n * size];                                 \
-        CACHE_ALIGN dst_t y[mask_n * size];                                 \
-        CACHE_ALIGN dst_t ref[mask_n * size];                               \
-        auto seed = TestSeed();                                             \
-        ValueGen<dst_t> generator(dst_t(-100), dst_t(100), seed);           \
-        for (const auto i : c10::irange(mask_n * size)) {                   \
-          x[i] = generator.get();                                           \
-        }                                                                   \
-        auto vec_mask = generate_vec_mask<mask_t, mask_n>(seed);            \
         constexpr int dst_size = at::vec::Vectorized<dst_t>::size();        \
         constexpr int dst_n = mask_n * size / dst_size;                     \
-        constexpr int rnd_n = (mask_n * size + dst_size - 1) / dst_size;    \
         if constexpr(dst_n * dst_size >= mask_n * size) {                   \
+            CACHE_ALIGN dst_t x[mask_n * size];                             \
+            CACHE_ALIGN dst_t y[mask_n * size];                             \
+            CACHE_ALIGN dst_t ref[mask_n * size];                           \
+            auto seed = TestSeed();                                         \
+            dst_t generator_min = std::numeric_limits<dst_t>::is_signed ? dst_t(-100) : dst_t(0); \
+            ValueGen<dst_t> generator(generator_min, dst_t(100), seed);     \
+            for (const auto i : c10::irange(mask_n * size)) {               \
+              x[i] = generator.get();                                       \
+            }                                                               \
+            auto vec_mask = generate_vec_mask<mask_t, mask_n>(seed);        \
+            constexpr int rnd_n = (mask_n * size + dst_size - 1) / dst_size;\
             auto x_vec = vec_mask.template loadu<dst_t, rnd_n>(x);          \
             x_vec.store(y);                                                 \
             for (const auto i : c10::irange(mask_n * size)) {               \

@@ -1052,10 +1052,7 @@ static inline void grid_sample_2d_grid_slice_iterator(
                              std::min(step, len * 2));
       auto vec2 = Vec::loadu(grid_ptr + grid_offset + step,
                              std::max(static_cast<int64_t>(0), len * 2 - step));
-      auto vec_xy_pair = deinterleave2(vec1, vec2);
-
-      auto x = std::get<0>(vec_xy_pair);
-      auto y = std::get<1>(vec_xy_pair);
+      auto [x, y] = deinterleave2(vec1, vec2);
 
       // make sure that x and y are valid grid sample locations
       if (len < step) {

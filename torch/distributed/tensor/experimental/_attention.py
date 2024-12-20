@@ -31,7 +31,7 @@ from torch.distributed.tensor import distribute_module, DTensor, Replicate, Shar
 from torch.distributed.tensor.parallel.style import ParallelStyle
 
 
-__all__ = ["context_parallel"]
+__all__ = ["context_parallel", "set_rotate_method"]
 
 
 class _CausalBehavior(Enum):
@@ -443,6 +443,8 @@ def _templated_ring_attention(
         raise NotImplementedError(
             "is_causal requires the same query and context sequence lengths"
         )
+    if not is_causal and _cp_options.enable_load_balance:
+        raise RuntimeError("Load balancing requires `is_causal=True`.")
 
     if isinstance(mesh, dist.ProcessGroup):
         pg: Union[dist.ProcessGroup, List[dist.ProcessGroup]] = mesh
@@ -616,6 +618,8 @@ def _templated_ring_attention_backward(
     **kwargs: Any,
 ) -> Tuple[torch.Tensor, ...]:
     """This API implements the backward of the ring attention."""
+    if not is_causal and _cp_options.enable_load_balance:
+        raise RuntimeError("Load balancing requires `is_causal=True`.")
     pg = mesh.get_group()
     assert isinstance(pg, dist.ProcessGroup), "must be single dimension"
     rank = dist.get_rank(pg)
@@ -1280,6 +1284,15 @@ def context_parallel_unshard(
 ) -> List[torch.Tensor]:
     """
     Unshard the tensors (e.g., output) that are sharded due to context parallelism.
+
+    Args:
+        mesh (:class:`DeviceMesh`): the device mesh for the context parallelism.
+        buffers (List[torch.Tensor]): the buffers to be unsharded.
+        seq_dims (List[int]): the sequence dimensions of ``buffers``. This list
+            must have the same length as ``buffers``.
+
+    Returns:
+        List[torch.Tensor]: the unsharded buffers.
     """
     sharder = (
         _RoundRobinLoadBalancer
@@ -1287,3 +1300,30 @@ def context_parallel_unshard(
         else _SequentialSharder
     )
     return [sharder.unshard(b, mesh, dim) for b, dim in zip(buffers, seq_dims)]
+
+
+def set_rotate_method(rotate_method: str) -> None:
+    """
+    Context Parallel SDPA requires the rotation of kv shards. Users can call this
+    API to specify which rotation method to use. "alltoall" shuffles the kv shards
+    using all-to-all collective. While "allgather" gathers the kv shards using
+    all-gather collective after the first sub-SDPA computation. If this API has not
+    been called, the default rotate method is "allgather".
+
+    Args:
+        rotate_method (str): the rotate method to use. Currently only supports
+        "allgather" and "alltoall". If a different string other than these two
+        is passed in, the function will raise an error.
+
+    Returns:
+        None
+    """
+    if rotate_method == "allgather":
+        _cp_options.rotate_method = _RotateMethod.ALL_GATHER
+    elif rotate_method == "alltoall":
+        _cp_options.rotate_method = _RotateMethod.ALL_TO_ALL
+    else:
+        raise NotImplementedError(
+            "Context Parallel does not support "
+            f"using {rotate_method} for kv shards rotation"
+        )

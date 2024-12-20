@@ -240,4 +240,8 @@ inline AtenTensorHandle wrap_with_raii_handle_if_needed(
 #define CACHE_TORCH_LAYOUT(layout) \
   static auto cached_torch_layout_##layout = aoti_torch_layout_##layout()
 
+#define CACHE_TORCH_MEMORY_FORMAT(format)           \
+  static auto cached_torch_memory_format_##format = \
+      aoti_torch_memory_format_##format()
+
 } // namespace torch::aot_inductor

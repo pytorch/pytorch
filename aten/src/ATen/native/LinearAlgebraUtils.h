@@ -369,7 +369,7 @@ inline Tensor _move_to_end(const Tensor& self, IntArrayRef axes) {
 }
 
 // parse the "mode" param in linalg_qr: return a tuple of bools (compute_q, reduced)
-inline std::tuple<bool, bool> _parse_qr_mode(c10::string_view mode) {
+inline std::tuple<bool, bool> _parse_qr_mode(std::string_view mode) {
   bool compute_q;
   bool reduced;
   if (mode == "reduced") {
@@ -485,7 +485,7 @@ inline int64_t computeLRWorkDim(const char jobz, int64_t m, int64_t n) {
 
 // This function checks whether the uplo argument input is valid
 // Allowed strings are "u", "U", "l", "L"
-inline void checkUplo(const c10::string_view uplo) {
+inline void checkUplo(const std::string_view uplo) {
   // To use std::toupper safely with plain chars (or signed chars), the argument should first be converted to unsigned char
   char uplo_uppercase = static_cast<char>(std::toupper(static_cast<unsigned char>(uplo[0])));
   TORCH_CHECK(uplo.size() == 1 && (uplo_uppercase == 'U' || uplo_uppercase == 'L'),
@@ -524,7 +524,7 @@ inline void checkLinalgCompatibleDtype(const std::string& fn_name, ScalarType ou
       out_name, " with dtype ", out_type);
 }
 
-inline void checkNotComplexTolerance(const Tensor& tol, const c10::string_view f_name, const c10::string_view tol_name) {
+inline void checkNotComplexTolerance(const Tensor& tol, const std::string_view f_name, const std::string_view tol_name) {
   TORCH_CHECK(!at::isComplexType(tol.scalar_type()),
               f_name, ": ", tol_name, " tensor of complex type is not supported. Got ", tol.scalar_type());
 }

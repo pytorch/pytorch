@@ -12,8 +12,7 @@
 #include <ATen/ops/cudnn_convolution_transpose_native.h>
 #endif
 
-namespace at {
-namespace native {
+namespace at::native {
 
 // ---------------------------------------------------------------------
 //
@@ -244,5 +243,4 @@ Tensor cudnn_convolution_add_relu(
 
 #endif // AT_CUDNN_ENABLED
 
-} // namespace native
-} // namespace at
+} // namespace at::native

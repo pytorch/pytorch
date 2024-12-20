@@ -82,6 +82,8 @@ void initDynamoBindings(PyObject* torch) {
   m.def("_debug_get_cache_entry_list", &_debug_get_cache_entry_list);
   py::bind_vector<std::vector<uint8_t>>(m, "VectorUInt8");
   m.attr("py_opcode_caches") = _PyOpcode_Caches_vec;
+
+  m.def("code_framelocals_names", &code_framelocals_names);
 }
 
 } // namespace torch::dynamo

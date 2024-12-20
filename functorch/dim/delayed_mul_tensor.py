@@ -62,7 +62,6 @@ class DelayedMulTensor(_Tensor):
 
         plhs, levelslhs = self._lhs._tensor, self._lhs._levels
         prhs, levelsrhs = self._rhs._tensor, self._rhs._levels
-        new_dims = tuple(d for d in self.dims if d not in dims)
         new_levels = [l for l in self._levels if l not in dims]
         fmt = "".join(
             [

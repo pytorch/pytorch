@@ -1274,16 +1274,16 @@ std::vector<Shape> compute_shape_select_scatter(
   auto self_meta = at::native::empty_strided_meta_symint(
       self.sym_sizes(),
       self.sym_strides(),
-      /*dtype=*/::std::make_optional(self.scalar_type()),
-      /*layout=*/::std::make_optional(self.layout()),
-      /*device=*/::std::make_optional(c10::Device(c10::kMeta)),
+      /*dtype=*/self.scalar_type(),
+      /*layout=*/self.layout(),
+      /*device=*/c10::Device(c10::kMeta),
       /*pin_memory=*/::std::nullopt);
   auto src_meta = at::native::empty_strided_meta_symint(
       src.sym_sizes(),
       src.sym_strides(),
-      /*dtype=*/::std::make_optional(src.scalar_type()),
-      /*layout=*/::std::make_optional(src.layout()),
-      /*device=*/::std::make_optional(c10::Device(c10::kMeta)),
+      /*dtype=*/src.scalar_type(),
+      /*layout=*/src.layout(),
+      /*device=*/c10::Device(c10::kMeta),
       /*pin_memory=*/::std::nullopt);
   auto out_meta = at::compositeexplicitautogradnonfunctional::select_scatter(
       self_meta, src_meta, dim, index);
@@ -1299,16 +1299,16 @@ std::vector<Shape> compute_shape_diagonal_scatter(
   auto self_meta = at::native::empty_strided_meta_symint(
       self.sym_sizes(),
       self.sym_strides(),
-      /*dtype=*/::std::make_optional(self.scalar_type()),
-      /*layout=*/::std::make_optional(self.layout()),
-      /*device=*/::std::make_optional(c10::Device(c10::kMeta)),
+      /*dtype=*/self.scalar_type(),
+      /*layout=*/self.layout(),
+      /*device=*/c10::Device(c10::kMeta),
       /*pin_memory=*/::std::nullopt);
   auto src_meta = at::native::empty_strided_meta_symint(
       src.sym_sizes(),
       src.sym_strides(),
-      /*dtype=*/::std::make_optional(src.scalar_type()),
-      /*layout=*/::std::make_optional(src.layout()),
-      /*device=*/::std::make_optional(c10::Device(c10::kMeta)),
+      /*dtype=*/src.scalar_type(),
+      /*layout=*/src.layout(),
+      /*device=*/c10::Device(c10::kMeta),
       /*pin_memory=*/::std::nullopt);
   auto out_meta = at::compositeexplicitautogradnonfunctional::diagonal_scatter(
       self_meta, src_meta, offset, dim1, dim2);
@@ -1325,16 +1325,16 @@ std::vector<Shape> compute_shape_slice_scatter_symint(
   auto self_meta = at::native::empty_strided_meta_symint(
       self.sym_sizes(),
       self.sym_strides(),
-      /*dtype=*/::std::make_optional(self.scalar_type()),
-      /*layout=*/::std::make_optional(self.layout()),
-      /*device=*/::std::make_optional(c10::Device(c10::kMeta)),
+      /*dtype=*/self.scalar_type(),
+      /*layout=*/self.layout(),
+      /*device=*/c10::Device(c10::kMeta),
       /*pin_memory=*/::std::nullopt);
   auto src_meta = at::native::empty_strided_meta_symint(
       src.sym_sizes(),
       src.sym_strides(),
-      /*dtype=*/::std::make_optional(src.scalar_type()),
-      /*layout=*/::std::make_optional(src.layout()),
-      /*device=*/::std::make_optional(c10::Device(c10::kMeta)),
+      /*dtype=*/src.scalar_type(),
+      /*layout=*/src.layout(),
+      /*device=*/c10::Device(c10::kMeta),
       /*pin_memory=*/::std::nullopt);
   auto out_meta =
       at::compositeexplicitautogradnonfunctional::slice_scatter_symint(
@@ -1356,16 +1356,16 @@ std::vector<Shape> compute_shape_as_strided_scatter_symint(
   auto self_meta = at::native::empty_strided_meta_symint(
       self.sym_sizes(),
       self.sym_strides(),
-      /*dtype=*/::std::make_optional(self.scalar_type()),
-      /*layout=*/::std::make_optional(self.layout()),
-      /*device=*/::std::make_optional(c10::Device(c10::kMeta)),
+      /*dtype=*/self.scalar_type(),
+      /*layout=*/self.layout(),
+      /*device=*/c10::Device(c10::kMeta),
       /*pin_memory=*/::std::nullopt);
   auto src_meta = at::native::empty_strided_meta_symint(
       src.sym_sizes(),
       src.sym_strides(),
-      /*dtype=*/::std::make_optional(src.scalar_type()),
-      /*layout=*/::std::make_optional(src.layout()),
-      /*device=*/::std::make_optional(c10::Device(c10::kMeta)),
+      /*dtype=*/src.scalar_type(),
+      /*layout=*/src.layout(),
+      /*device=*/c10::Device(c10::kMeta),
       /*pin_memory=*/::std::nullopt);
   auto out_meta =
       at::compositeexplicitautogradnonfunctional::as_strided_scatter_symint(

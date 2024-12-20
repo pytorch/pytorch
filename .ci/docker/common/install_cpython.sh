@@ -70,7 +70,7 @@ function do_cpython_build {
     # install setuptools since python 3.12 is required to use distutils
     ${prefix}/bin/pip install wheel==0.34.2 setuptools==68.2.2
     local abi_tag=$(${prefix}/bin/python -c "from wheel.pep425tags import get_abbr_impl, get_impl_ver, get_abi_tag; print('{0}{1}-{2}'.format(get_abbr_impl(), get_impl_ver(), get_abi_tag()))")
-    ln -s ${prefix} /opt/python/${abi_tag}
+    ln -sf ${prefix} /opt/python/${abi_tag}
 }
 
 function build_cpython {

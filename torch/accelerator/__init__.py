@@ -2,9 +2,25 @@ r"""
 This package introduces support for the current :ref:`accelerator<accelerators>` in python.
 """
 
+from typing_extensions import deprecated
+
 import torch
 
 from ._utils import _device_t, _get_device_index
+
+
+__all__ = [
+    "current_accelerator",
+    "current_device_idx",  # deprecated
+    "current_device_index",
+    "current_stream",
+    "device_count",
+    "is_available",
+    "set_device_idx",  # deprecated
+    "set_device_index",
+    "set_stream",
+    "synchronize",
+]
 
 
 def device_count() -> int:
@@ -37,7 +53,7 @@ def current_accelerator() -> torch.device:
         torch.device: return the current accelerator as :class:`torch.device`.
 
     .. note:: The index of the returned :class:`torch.device` will be ``None``, please use
-        :func:`torch.accelerator.current_device_idx` to know the current index being used.
+        :func:`torch.accelerator.current_device_index` to know the current index being used.
         And ensure to use :func:`torch.accelerator.is_available` to check if there is an available
         accelerator. If there is no available accelerator, this function will raise an exception.
 
@@ -58,7 +74,7 @@ def current_accelerator() -> torch.device:
     return torch._C._accelerator_getAccelerator()
 
 
-def current_device_idx() -> int:
+def current_device_index() -> int:
     r"""Return the index of a currently selected device for the current :ref:`accelerator<accelerators>`.
 
     Returns:
@@ -67,7 +83,13 @@ def current_device_idx() -> int:
     return torch._C._accelerator_getDeviceIndex()
 
 
-def set_device_idx(device: _device_t, /) -> None:
+current_device_idx = deprecated(
+    "Use `current_device_index` instead.",
+    category=FutureWarning,
+)(current_device_index)
+
+
+def set_device_index(device: _device_t, /) -> None:
     r"""Set the current device index to a given device.
 
     Args:
@@ -80,13 +102,19 @@ def set_device_idx(device: _device_t, /) -> None:
     torch._C._accelerator_setDeviceIndex(device_index)
 
 
+set_device_idx = deprecated(
+    "Use `set_device_index` instead.",
+    category=FutureWarning,
+)(set_device_index)
+
+
 def current_stream(device: _device_t = None, /) -> torch.Stream:
     r"""Return the currently selected stream for a given device.
 
     Args:
         device (:class:`torch.device`, str, int, optional): a given device that must match the current
             :ref:`accelerator<accelerators>` device type. If not given,
-            use :func:`torch.accelerator.current_device_idx` by default.
+            use :func:`torch.accelerator.current_device_index` by default.
 
     Returns:
         torch.Stream: the currently selected stream for a given device.
@@ -112,7 +140,7 @@ def synchronize(device: _device_t = None, /) -> None:
     Args:
         device (:class:`torch.device`, str, int, optional): device for which to synchronize. It must match
             the current :ref:`accelerator<accelerators>` device type. If not given,
-            use :func:`torch.accelerator.current_device_idx` by default.
+            use :func:`torch.accelerator.current_device_index` by default.
 
     .. note:: This function is a no-op if the current :ref:`accelerator<accelerators>` is not initialized.
 
@@ -131,15 +159,3 @@ def synchronize(device: _device_t = None, /) -> None:
     """
     device_index = _get_device_index(device, True)
     torch._C._accelerator_synchronizeDevice(device_index)
-
-
-__all__ = [
-    "current_accelerator",
-    "current_device_idx",
-    "current_stream",
-    "device_count",
-    "is_available",
-    "set_device_idx",
-    "set_stream",
-    "synchronize",
-]

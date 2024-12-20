@@ -339,10 +339,12 @@ std::unique_ptr<KinetoObserverContext> ThreadLocalSubqueue::begin_op(
     torch_ops_.inputs_outputs_.push(fn.inputs());
     torch_ops_.kwinputs_.emplace_back(fn.kwinputs());
   }
-  if (fn.scope() == at::RecordScope::USER_SCOPE) {
-    torch::profiler::impl::kineto::pushUserCorrelationId(corr_id);
-  } else {
-    torch::profiler::impl::kineto::pushCorrelationId(corr_id);
+  if (!config_.experimental_config.disable_external_correlation) {
+    if (fn.scope() == at::RecordScope::USER_SCOPE) {
+      torch::profiler::impl::kineto::pushUserCorrelationId(corr_id);
+    } else {
+      torch::profiler::impl::kineto::pushCorrelationId(corr_id);
+    }
   }
 
 #if !defined BUILD_LITE_INTERPRETER && !defined C10_MOBILE

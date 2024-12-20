@@ -19,7 +19,7 @@ fi
 
 # if lintrunner is not installed, install it
 if ! command -v lintrunner &> /dev/null; then
-    python3 -m pip install lintrunner==0.12.5
+    python3 -m pip install lintrunner==0.12.7
 fi
 
 # This has already been cached in the docker image

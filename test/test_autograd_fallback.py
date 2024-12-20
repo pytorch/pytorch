@@ -137,7 +137,7 @@ class TestAutogradFallback(TestCase):
                 warnings.simplefilter("error")
                 x = torch.randn([], requires_grad=True)
                 y = x.clone()
-                z = op(y)
+                op(y)
                 y.backward()
                 self.assertEqual(x.grad, torch.ones_like(x))
 
@@ -320,7 +320,7 @@ class TestAutogradFallback(TestCase):
                 "foo", lambda a: (a.clone(), a.detach().clone().requires_grad_()), "CPU"
             )
             x = torch.randn(3, requires_grad=True)
-            y, z = op(x)
+            _, z = op(x)
             with self._check_ctx(mode):
                 z.sum().backward()
 
@@ -338,7 +338,7 @@ class TestAutogradFallback(TestCase):
 
             x = torch.randn(3, requires_grad=True)
             # NB: PyTorch dispatcher treats "None" as undefined Tensor.
-            y, z = op(None, x)
+            _, z = op(None, x)
             with self._check_ctx(mode):
                 z.sum().backward()
 

@@ -168,7 +168,7 @@ const Tensor& resize__plumbing(
   // TODO: The following algorithm only works for batch dim == 0.
   // To get it to work for something else we need the ability to modify
   // the BatchDims attribute of BatchedTensorImpl
-  TORCH_INTERNAL_ASSERT(self_bdim.value() == 0, "NYI: resize_ batch rule for batch dim != 0");
+  TORCH_INTERNAL_ASSERT(self_bdim == 0, "NYI: resize_ batch rule for batch dim != 0");
 
   // Resize the wrapped tensor
   c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchBatched);

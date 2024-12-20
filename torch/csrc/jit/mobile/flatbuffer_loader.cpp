@@ -70,9 +70,10 @@ static_assert(
 
 namespace {
 
-static constexpr auto kCustomClassPrefix = "__torch__.torch.classes";
-static constexpr auto kTorchPrefix = "__torch__";
-static constexpr auto kJitPrefix = "torch.jit";
+static constexpr std::string_view kCustomClassPrefix =
+    "__torch__.torch.classes";
+static constexpr std::string_view kTorchPrefix = "__torch__";
+static constexpr std::string_view kJitPrefix = "torch.jit";
 
 class FlatbufferLoader final {
  public:
@@ -188,13 +189,13 @@ TypePtr resolveType(
     const std::shared_ptr<CompilationUnit>& cu) {
   TypePtr type;
   std::string_view type_str(type_string);
-  if (c10::string_view_starts_with(type_str, kCustomClassPrefix)) {
+  if (c10::starts_with(type_str, kCustomClassPrefix)) {
     type = getCustomClass(type_string);
     TORCH_CHECK(
         type, "The implementation of class ", type_string, " cannot be found.");
   } else if (
-      c10::string_view_starts_with(type_str, kTorchPrefix) ||
-      c10::string_view_starts_with(type_str, kJitPrefix)) {
+      c10::starts_with(type_str, kTorchPrefix) ||
+      c10::starts_with(type_str, kJitPrefix)) {
     c10::QualifiedName qn(type_string);
     if (cu->get_class(qn) == nullptr) {
       auto classtype = ClassType::create(qn, cu, true);
@@ -609,8 +610,8 @@ ClassTypePtr FlatbufferLoader::getOrCreateClassTypeForObject(
   if (cls == nullptr) {
     std::string_view qn_str(
         obj_type->type_name()->c_str(), obj_type->type_name()->size());
-    if (c10::string_view_starts_with(qn_str, kTorchPrefix) ||
-        c10::string_view_starts_with(qn_str, kJitPrefix)) {
+    if (c10::starts_with(qn_str, kTorchPrefix) ||
+        c10::starts_with(qn_str, kJitPrefix)) {
       c10::QualifiedName qn(obj_type->type_name()->str());
       cls = cu_->get_class(qn);
       if (cls == nullptr) {

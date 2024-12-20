@@ -2,8 +2,11 @@
 
 import os
 import re
+import subprocess
+import sys
 import unittest
 from itertools import repeat
+from pathlib import Path
 from typing import get_args, get_origin, Union
 
 import torch
@@ -13,6 +16,7 @@ import torch.utils.cpp_extension
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_utils import (
     IS_WINDOWS,
+    shell,
     skipIfTorchDynamo,
     xfailIfTorchDynamo,
 )
@@ -22,7 +26,7 @@ try:
     import pytest
 
     HAS_PYTEST = True
-except ImportError as e:
+except ImportError:
     HAS_PYTEST = False
 
 # TODO: Rewrite these tests so that they can be collected via pytest without
@@ -164,6 +168,48 @@ class TestCppExtensionAOT(common.TestCase):
         test = cuda_dlink.add(a, b)
         self.assertEqual(test, ref)
 
+    @unittest.skipIf(not TEST_CUDA, "python_agnostic is a CUDA extension + needs CUDA")
+    @unittest.skipIf(not common.IS_LINUX, "test requires linux tools ldd and nm")
+    def test_python_agnostic(self):
+        # For this test, run_test.py will call `python setup.py bdist_wheel` in the
+        # cpp_extensions/python_agnostic_extension folder, where the extension and
+        # setup calls specify py_limited_api to `True`. To approximate that the
+        # extension is indeed python agnostic, we test
+        #   a. The extension wheel name contains "cp39-abi3", meaning the wheel
+        # should be runnable for any Python 3 version after and including 3.9
+        #   b. The produced shared library does not have libtorch_python.so as a
+        # dependency from the output of "ldd _C.so"
+        #   c. The .so does not need any python related symbols. We approximate
+        # this by running "nm -u _C.so" and grepping that nothing starts with "Py"
+
+        dist_root = os.path.join("cpp_extensions", "python_agnostic_extension", "dist")
+        matches = list(Path(dist_root).glob("*.whl"))
+        self.assertEqual(len(matches), 1, msg=str(matches))
+        whl_file = matches[0]
+        self.assertRegex(str(whl_file), r".*python_agnostic-0\.0-cp39-abi3-.*\.whl")
+
+        build_root = os.path.join(
+            "cpp_extensions", "python_agnostic_extension", "build"
+        )
+        matches = list(Path(build_root).glob("**/*.so"))
+        self.assertEqual(len(matches), 1, msg=str(matches))
+        so_file = matches[0]
+        lddtree = subprocess.check_output(["ldd", so_file]).decode("utf-8")
+        self.assertFalse("torch_python" in lddtree)
+
+        missing_symbols = subprocess.check_output(["nm", "-u", so_file]).decode("utf-8")
+        self.assertFalse("Py" in missing_symbols)
+
+        # finally, clean up the folder
+        cmd = [sys.executable, "setup.py", "clean"]
+        return_code = shell(
+            cmd,
+            cwd=os.path.join("cpp_extensions", "python_agnostic_extension"),
+            env=os.environ.copy(),
+        )
+        if return_code != 0:
+            return return_code
+
 
 @torch.testing._internal.common_utils.markDynamoStrictTest
 class TestPybindTypeCasters(common.TestCase):
@@ -265,9 +311,9 @@ class TestPybindTypeCasters(common.TestCase):
 @torch.testing._internal.common_utils.markDynamoStrictTest
 class TestMAIATensor(common.TestCase):
     def test_unregistered(self):
-        a = torch.arange(0, 10, device="cpu")
+        torch.arange(0, 10, device="cpu")
         with self.assertRaisesRegex(RuntimeError, "Could not run"):
-            b = torch.arange(0, 10, device="maia")
+            torch.arange(0, 10, device="maia")
 
     @skipIfTorchDynamo("dynamo cannot model maia device")
     def test_zeros(self):
@@ -290,7 +336,7 @@ class TestMAIATensor(common.TestCase):
         b = torch.empty(5, 5, device="maia")
         self.assertEqual(maia_extension.get_test_int(), 0)
 
-        c = a + b
+        a + b
         self.assertEqual(maia_extension.get_test_int(), 1)
 
     def test_conv_backend_override(self):

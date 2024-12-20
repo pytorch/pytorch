@@ -296,7 +296,7 @@ class TestFunctionalizationRngOps(TestCase):
         x = torch.ones(2, 2, device="cuda", requires_grad=True)
         y = torch.rand(2, 2, device="cuda", requires_grad=True)
         torch.cuda.manual_seed(123)
-        ref = fn(x, y)
+        fn(x, y)
 
         # With checkpointing we should recompute dropout in bwd, and philox_rand is passed from fwd
         fwd_compiler = functools.partial(count_philox_rand, freq=1)

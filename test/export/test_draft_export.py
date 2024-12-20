@@ -1,5 +1,6 @@
 # Owner(s): ["oncall: export"]
 import copy
+import tempfile
 import unittest
 from typing import List, Tuple
 
@@ -7,7 +8,7 @@ import torch
 from torch.export import Dim, export
 from torch.export._draft_export import draft_export, FailureType
 from torch.testing import FileCheck
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import IS_WINDOWS, run_tests, TestCase
 from torch.testing._internal.torchbind_impls import (
     _empty_tensor_queue,
     init_torchbind_implementations,
@@ -55,7 +56,7 @@ class TestDraftExport(TestCase):
         )
 
     def test_missing_meta_kernel_custom_op(self):
-        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+        with torch.library._scoped_library("mylib", "FRAGMENT"):
 
             @torch.library.custom_op("mylib::foo2", mutates_args={})
             def foo2_impl(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
@@ -110,7 +111,7 @@ class TestDraftExport(TestCase):
 
     @unittest.skipIf(not torch.cuda.is_available(), "Requires cuda")
     def test_missing_meta_kernel_guard(self):
-        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+        with torch.library._scoped_library("mylib", "FRAGMENT"):
 
             @torch.library.custom_op("mylib::foo4", mutates_args={})
             def foo4_impl(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
@@ -400,6 +401,25 @@ class TestDraftExport(TestCase):
             "Mismatched aliasing spec between fake kernel and real kernel"
             in report.failures[0].data["reason"]
         )
+
+    # https://github.com/pytorch/pytorch/issues/140625
+    @unittest.skipIf(IS_WINDOWS, "aoti_compile_and_package not supported on Windows")
+    def test_constantify_unbacked_symbol(self):
+        class M(torch.nn.Module):
+            def forward(self, x, y):
+                xt = torch.tensor(x.shape)
+                u0 = xt[0].item()
+                return y * torch.arange(u0)
+
+        mod = M()
+        example_inputs = (torch.randn(3, 5), torch.randn(3))
+        draft_ep, _ = draft_export(mod, example_inputs)
+        with tempfile.NamedTemporaryFile(suffix=".pt2") as f:
+            torch._inductor.aoti_compile_and_package(
+                draft_ep,
+                example_inputs,
+                package_path=f.name,
+            )
 
 
 if __name__ == "__main__":

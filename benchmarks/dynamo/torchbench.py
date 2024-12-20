@@ -29,6 +29,10 @@ torch.backends.cuda.matmul.allow_tf32 = True
 if "TORCHINDUCTOR_FX_GRAPH_CACHE" not in os.environ:
     torch._inductor.config.fx_graph_cache = True
 
+# Enable Autograd caching
+if "TORCHINDUCTOR_AUTOGRAD_CACHE" not in os.environ:
+    torch._functorch.config.enable_autograd_cache = True
+
 
 def _reassign_parameters(model):
     # torch_geometric models register parameter as tensors due to
@@ -232,7 +236,6 @@ class TorchBenchmarkRunner(BenchmarkRunner):
             )
         is_training = self.args.training
         use_eval_mode = self.args.use_eval_mode
-        dynamic_shapes = self.args.dynamic_shapes
         candidates = [
             f"torchbenchmark.models.{model_name}",
             f"torchbenchmark.canary_models.{model_name}",

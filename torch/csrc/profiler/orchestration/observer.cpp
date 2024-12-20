@@ -18,6 +18,7 @@ ExperimentalConfig::ExperimentalConfig(
     std::vector<std::string> performance_events,
     bool enable_cuda_sync_events,
     bool adjust_profiler_step,
+    bool disable_external_correlation,
     bool adjust_timestamps)
     : profiler_metrics{std::move(profiler_metrics)},
       profiler_measure_per_kernel{profiler_measure_per_kernel},
@@ -25,6 +26,7 @@ ExperimentalConfig::ExperimentalConfig(
       performance_events(std::move(performance_events)),
       enable_cuda_sync_events{enable_cuda_sync_events},
       adjust_profiler_step{adjust_profiler_step},
+      disable_external_correlation{disable_external_correlation},
       adjust_timestamps{adjust_timestamps} {}
 
 /*explicit*/ ExperimentalConfig::operator bool() const {

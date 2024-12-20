@@ -63,7 +63,6 @@ def inductor_meta_from_config() -> _InductorMetaTy:
 @dataclasses.dataclass
 class AutotuneCache:
     configs_hash: str
-    filename: str
     local_cache: Optional[Tuple[RemoteCache[JsonDataTy], str]] = None
     remote_cache: Optional[Tuple[RemoteCache[JsonDataTy], str]] = None
 
@@ -72,13 +71,22 @@ class AutotuneCache:
     def create(
         inductor_meta: _InductorMetaTy, filename: str, configs_hash: str
     ) -> Optional[AutotuneCache]:
-        cache = AutotuneCache(configs_hash, filename)
-        cache._setup_local_cache(inductor_meta, filename)
-        cache._setup_remote_autotune_cache(inductor_meta, filename)
+        cache = AutotuneCache(configs_hash)
+        key = AutotuneCache._prepare_key(filename)
+        cache._setup_local_cache(inductor_meta, os.path.dirname(filename), key)
+        cache._setup_remote_autotune_cache(inductor_meta, key)
         if cache.local_cache or cache.remote_cache:
             return cache
         else:
             return None
+
+    @staticmethod
+    def _prepare_key(filename: str) -> str:
+        from torch.compiler import config as cconfig
+
+        # base of filename is already sha256 hash the source contents
+        key = f"{os.path.basename(filename)}:{cconfig.cache_key_tag}"
+        return hashlib.sha256(key.encode("utf-8")).hexdigest()
 
     # Read the best config options from the most local cache and return it.
     def _read(self) -> Optional[Dict[str, JsonDataTy]]:
@@ -108,17 +116,19 @@ class AutotuneCache:
         return None
 
     # Set up local filesystem caching information
-    def _setup_local_cache(self, inductor_meta: _InductorMetaTy, filename: str) -> None:
+    def _setup_local_cache(
+        self, inductor_meta: _InductorMetaTy, dirname: str, cache_key: str
+    ) -> None:
         if not inductor_meta.get("autotune_local_cache", True):
             return
 
-        cache_filename = os.path.splitext(filename)[0] + ".best_config"
+        cache_filename = f"{dirname}/{cache_key}.best_config"
         local_cache = LocalAutotuneCache()
         self.local_cache = (local_cache, cache_filename)
 
     # Set up remote caching information
     def _setup_remote_autotune_cache(
-        self, inductor_meta: _InductorMetaTy, filename: str
+        self, inductor_meta: _InductorMetaTy, cache_key: str
     ) -> None:
         if not _should_use_remote_autotune_cache(inductor_meta):
             return
@@ -145,9 +155,7 @@ class AutotuneCache:
         if not remote_cache:
             return
 
-        # we already sha256 hash the source contents
-        remote_cache_key = os.path.basename(filename)
-        self.remote_cache = (remote_cache, remote_cache_key)
+        self.remote_cache = (remote_cache, cache_key)
 
     # Save the config in the caches
     def save(
@@ -251,8 +259,6 @@ class _AutotuneCacheBundlerImpl:
             # We couldn't load the cache - so mark _entries as non-None so we
             # store local cache values.
             return False
-
-        cache_dir = torch._inductor.runtime.runtime_utils.cache_dir()
 
         # Go through the entries we got from the cache and save them locally.
         time_saved_ns = 0
@@ -366,10 +372,6 @@ class AutotuneCacheBundler:
             # we could reconstruct (because it's possible for the caller to
             # customize the path).
             basename = os.path.basename(filename)
-            root, ext = _splitext_nodot(basename)
-            _, _, expected = torch._inductor.codecache.get_path(root, ext)
-            if filename != expected:
-                return
 
             # TODO: check cache_dir() vs filename, then strip dirname
             bundler.put(basename, data)

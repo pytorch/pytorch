@@ -288,7 +288,7 @@ The following packages should be installed with either `conda` or `pip`:
 - `pytest` - recommended to run tests more selectively
 Running
 ```
-pip install -r requirements
+pip install -r requirements.txt
 ```
 will install these dependencies for you.
 

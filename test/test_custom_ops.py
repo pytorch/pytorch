@@ -1,4 +1,5 @@
 # Owner(s): ["module: custom-operators"]
+# ruff: noqa: F841
 
 import collections
 import itertools
@@ -189,6 +190,21 @@ class TestCustomOpTesting(CustomOpTestCaseBase):
             "Argument x is not defined to alias output but was aliasing",
         ):
             torch.library.opcheck(op, (x,), {})
+
+    # https://github.com/pytorch/pytorch/issues/142410
+    def test_opcheck_unbacked_stride(self, device):
+        @torch.library.custom_op("test::f", mutates_args=[])
+        def f(x: torch.Tensor) -> torch.Tensor:
+            return x.new_zeros((x.size(0), 18))
+
+        @f.register_fake
+        def _(x: torch.Tensor) -> torch.Tensor:
+            ctx = torch.library.get_ctx()
+            s = ctx.new_dynamic_size()
+            return torch.empty(x.shape[0], s, device=x.device, dtype=x.dtype)
+
+        example = torch.zeros([10, 20], device=device)
+        torch.library.opcheck(f, args=[example])
 
     def test_missing_abstract_impl(self, device):
         lib = self.lib()

@@ -1,4 +1,5 @@
 # Owner(s): ["module: serialization"]
+# ruff: noqa: F841
 
 import contextlib
 import copy
@@ -9,6 +10,7 @@ import os
 import pathlib
 import pickle
 import platform
+import re
 import shutil
 import sys
 import tempfile
@@ -1012,7 +1014,13 @@ class TestSerialization(TestCase, SerializationMixin):
         with tempfile.NamedTemporaryFile() as f:
             torch.jit.save(torch.jit.script(torch.nn.Linear(3, 4)), f)
             f.seek(0)
-            torch.load(f)
+            with self.assertRaisesRegex(
+                RuntimeError,
+                re.escape("Cannot use ``weights_only=True`` with TorchScript archives passed to ``torch.load``")
+            ):
+                torch.load(f)
+            f.seek(0)
+            torch.load(f, weights_only=False)
 
     # Ensure large zip64 serialization works properly
     @serialTest()

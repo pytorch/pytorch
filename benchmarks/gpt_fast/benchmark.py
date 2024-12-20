@@ -1,6 +1,7 @@
 import argparse
 import csv
 import dataclasses
+import json
 import os
 
 from generate import (
@@ -261,13 +262,53 @@ def output_csv(output_file, headers, row):
             writer.writerow(list(line) + ["0"] * (len(headers) - len(line)))
 
 
+def output_json(output_file, headers, row):
+    """
+    Write the result into JSON format, so that it can be uploaded to the benchmark database
+    to be displayed on OSS dashboard. The JSON format is defined at
+    https://github.com/pytorch/pytorch/wiki/How-to-integrate-with-PyTorch-OSS-benchmark-database
+    """
+    mapping_headers = {headers[i]: v for i, v in enumerate(row)}
+    record = {
+        "benchmark": {
+            "name": "PyTorch gpt-fast benchmark",
+            "mode": "inference",
+            "dtype": mapping_headers["dtype"],
+            "extra_info": {
+                "device": mapping_headers["device"],
+                "arch": mapping_headers["arch"],
+            },
+        },
+        "model": {
+            "name": mapping_headers["name"],
+            "type": "OSS model" if mapping_headers["is_model"] else "micro-benchmark",
+            "origins": ["pytorch"],
+        },
+        "metric": {
+            "name": mapping_headers["metric"],
+            "benchmark_values": [mapping_headers["actual"]],
+            "target_value": mapping_headers["target"],
+        },
+    }
+
+    with open(f"{os.path.splitext(output_file)[0]}.json", "a") as f:
+        print(json.dumps(record), file=f)
+
+
 DEFAULT_OUTPUT_FILE = "gpt_fast_benchmark.csv"
 
 all_experiments = {
     # A list of GPT models: LlaMa, Mixtral, etc.
+    # waiting for A100-80G machine to be available in CI
+    # https://github.com/pytorch/pytorch/actions/runs/12018005803/job/33503683582?pr=140627
+    # before we can turn on autoquant
+    # or alterantively, we can save the model after autoquant and just load here to track
+    # the performance
+    # run_llama2_7b_autoquant,
     run_llama2_7b_bf16,
     run_llama2_7b_int8,
     run_mixtral_8x7b_int8,
+    # run_mixtral_8x7b_autoquant,
     # A list of micro-benchmarks.
     run_mlp_layer_norm_gelu,
     run_layer_norm,
@@ -286,6 +327,7 @@ def main(output_file=DEFAULT_OUTPUT_FILE):
             # This happens when torch is compiled with CUDA turning off completely
             device = "cpu"
 
+        torch.compiler.cudagraph_mark_step_begin()
         lst = func(device)
         for x in lst:
             results.append(dataclasses.astuple(x))
@@ -294,6 +336,8 @@ def main(output_file=DEFAULT_OUTPUT_FILE):
 
     for row in results:
         output_csv(output_file, headers, row)
+        # Also write the output in JSON format so that it can be ingested into the OSS benchmark database
+        output_json(output_file, headers, row)
 
 
 if __name__ == "__main__":

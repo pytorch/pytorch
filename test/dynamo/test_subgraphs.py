@@ -342,7 +342,7 @@ class SubGraphTests(torch._dynamo.test_case.TestCase):
             tmp = [a + 1, b + 2, a + b]
             x = a
             x = unsupported(x, x)
-            for i in range(3):
+            for _ in range(3):
                 x += tmp.pop(-1)
             return x
 
@@ -369,7 +369,6 @@ class SubGraphTests(torch._dynamo.test_case.TestCase):
         opt_fn = torch.compile(fn, backend=cnt_dynamic, dynamic=True)
         start = 2
         end = 12
-        steps = end - start
         for i in range(start, end):
             opt_fn(torch.randn(i), torch.randn(i))
 
@@ -557,7 +556,7 @@ class SubGraphTests(torch._dynamo.test_case.TestCase):
         cnt = torch._dynamo.testing.CompileCounter()
         opt_fn = torch.compile(fn, backend=cnt)
         v3, it3 = opt_fn(v1)
-        v4, it4 = opt_fn(v1)
+        v4, _ = opt_fn(v1)
         self.assertEqual(v2.tolist(), v3.tolist())
         self.assertEqual(v2.tolist(), v4.tolist())
         self.assertEqual(list(it2), list(it3))

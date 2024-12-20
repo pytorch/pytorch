@@ -71,8 +71,7 @@ kernel void index_put_serial(
     constant void* inputData [[buffer(4)]],
     device void* outputData [[buffer(5)]],
     constant uint32_t& num_indices [[buffer(6)]],
-    constant uint* numIters [[buffer(7)]],
-    uint thread_index [[thread_position_in_grid]]) {
+    constant uint* numIters [[buffer(7)]]) {
   constant int64_t* index_sizes = (constant int64_t*)indexSizes;
   constant int64_t* index_strides = (constant int64_t*)indexStrides;
 
@@ -124,7 +123,7 @@ kernel void index_put(
           constant void* inputData [[buffer(4)]],              \
           device void* outputData [[buffer(5)]],               \
           constant uint32_t& num_indices [[buffer(6)]],        \
-          uint thread_index [[thread_position_in_grid]]);
+          uint thread_index [[thread_position_in_grid]])
 
 #define REGISTER_INDEX_OP_ALL_DTYPES(INDEX_OP_TYPE)              \
   REGISTER_INDEX_OP(8bit, idx32, char, INDEX_OP_TYPE, uint3);    \
@@ -151,8 +150,7 @@ REGISTER_INDEX_OP_ALL_DTYPES(put);
           constant void* inputData [[buffer(4)]],              \
           device void* outputData [[buffer(5)]],               \
           constant uint32_t& num_indices [[buffer(6)]],        \
-          constant uint* numIters [[buffer(7)]],               \
-          uint thread_index [[thread_position_in_grid]]);
+          constant uint* numIters [[buffer(7)]])
 
 #define REGISTER_SINGLE_THREADED_INDEX_OP_ALL_DTYPES(INDEX_OP_TYPE)            \
   REGISTER_SINGLE_THREADED_INDEX_OP(8bit, idx32, char, INDEX_OP_TYPE, uint3);  \

@@ -17,12 +17,12 @@
 #include <type_traits>
 #include <unordered_map>
 
-#if !defined(USE_ROCM) && \
-    ((NCCL_MAJOR > 2) || ((NCCL_MAJOR == 2) && (NCCL_MINOR >= 13)))
+#if (NCCL_MAJOR > 2) || ((NCCL_MAJOR == 2) && (NCCL_MINOR >= 13))
 #define NCCL_HAS_REMOTE_ERROR 1
-#if (NCCL_MAJOR > 2) || (NCCL_MINOR >= 14)
-#define NCCL_HAS_COMM_NONBLOCKING 1
 #endif
+
+#if (NCCL_MAJOR > 2) || ((NCCL_MAJOR == 2) && (NCCL_MINOR >= 14))
+#define NCCL_HAS_COMM_NONBLOCKING 1
 #endif
 
 ncclComm_t* to_nccl_comm(torch::cuda::nccl::ncclComm_t* var) {
@@ -841,7 +841,7 @@ void all2all_single_equal_split(
 
   auto type = to_nccl_data_type(input);
   size_t count = input.numel() / size;
-  size_t rankdiff = input.nbytes() / size;
+  [[maybe_unused]] size_t rankdiff = input.nbytes() / size;
   const auto* sendbuff = reinterpret_cast<const char*>(input.const_data_ptr());
   auto* recvbuff = reinterpret_cast<char*>(output.data_ptr());
   auto comm = to_nccl_comm(_comm);

@@ -94,7 +94,7 @@ inline bool THPUtils_checkScalar(PyObject* obj) {
 
 namespace torch {
 
-bool should_allow_numbers_as_tensors(const std::string& name);
+TORCH_PYTHON_API bool should_allow_numbers_as_tensors(const std::string& name);
 
 enum class ParameterType {
   TENSOR,

@@ -10,18 +10,19 @@ In particular, the following analyses are provided:
 2. We also analyze the function signature for export graphs.
 """
 
+import contextlib
 import itertools
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 import torch
 import torch.utils._pytree as pytree
 from torch import Tensor
-from torch._dynamo.exc import Unsupported
+from torch._C._dynamo.guards import compute_overlapping_tensors
 from torch._functorch._aot_autograd.schemas import PlainTensorMeta
+from torch._guards import StorageOverlap
 from torch._subclasses.functional_tensor import FunctionalTensor
 from torch.fx.experimental.symbolic_shapes import is_concrete_int
 
-from .. import config
 from .collect_metadata_analysis import coerce_tangent_and_suggest_memory_format
 from .schemas import (
     BackwardSignature,
@@ -142,9 +143,6 @@ def create_synthetic_base_metadata(
             else m.input_info[outer_indices[0]].mutates_metadata
         )
         requires_grad = any(m.input_info[x].requires_grad for x in outer_indices)
-        mutations_hidden_from_autograd = all(
-            m.input_info[x].mutations_hidden_from_autograd for x in outer_indices
-        )
         mutations_under_no_grad_or_inference_mode = all(
             m.input_info[x].mutations_under_no_grad_or_inference_mode
             for x in outer_indices
@@ -271,145 +269,65 @@ def create_synthetic_base_metadata(
     )
 
 
-def _get_last_mem_address(x):
-    out = x.storage_offset()
-    for size, stride in zip(x.size(), x.stride()):
-        out += (size - 1) * stride
-    return out
+def compute_overlapping_inputs(aot_config, fwd_inputs, aliased_input_indices):
+    num_aliases = len(aliased_input_indices)
 
+    shape_env = None
+    maybe_suppress_guards = contextlib.nullcontext
+    tracing_context = torch._guards.TracingContext.try_get()
 
-# Assumption: x and y are known to share a storage, and we are trying to determine
-# if their memory is actually completely disjoint, based on sizes/strides/storage_offset
-def _tensors_definitely_do_not_overlap(x, y):
-    if x is y:
-        return False
-    if x.numel() == 0 or y.numel() == 0:
-        return True
+    if tracing_context is not None:
+        shape_env = tracing_context.fake_mode.shape_env
 
-    # Make x always on the left
-    if x.storage_offset() > y.storage_offset():
-        x, y = y, x
-    # Short-circuit in the "obvious" overlapping case: both tensors are contiguous
-    if x.is_contiguous() and y.is_contiguous():
-        if x.storage_offset() + x.numel() > y.storage_offset():
-            # definitely overlap
-            return False
-        else:
-            # definitely no overlap
-            return True
+        # Check whether we can actually get the dynamo sources from within AOTAutograd.
+        if aot_config.aot_autograd_arg_pos_to_source and shape_env is not None:
+            maybe_suppress_guards = shape_env.suppress_guards
 
-    # Short-circuit: if last memory address of x is < start of y, then not overlapping.
-    x_last = _get_last_mem_address(x)
-    if x_last < y.storage_offset():
-        return True
-
-    if x.dim() == 2 and y.dim() == 2 and x.stride(1) == 1 and y.stride(1) == 1:
-        # This cases is needed for the shampoo optimizer.
-        # All tensors are 2d (non-contiguous), have the same outer stride, and have an inner stride of 1
-        # (so rows are contiguous)
-        if x.stride(0) == y.stride(0):
-            offset_delta = y.storage_offset() - x.storage_offset()
-            if offset_delta < x.size(1):
-                # definitely overlaps (row 0 of y overlaps with row 0 of x)
-                # Example:
-                #   base = torch.arange(32).reshape(4, 8)
-                #   x = base.narrow(1, 0, 4)
-                #     x: size=(4, 4), stride=(8, 1), offset=0
-                #   y = base.narrow(1, 3, 4)
-                #     y: size=(4, 4), stride=(8, 1), offset=3
-                return False
-            x_total_elems_covered = x.stride(0) * (x.size(0) - 1) + x.size(1)
-            if x_total_elems_covered <= offset_delta:
-                # definitely does not overlap (last byte of x is before start of y)
-                # Example:
-                #   x: size=(4, 4), stride=(8, 1), offset=0 (last byte is 27)
-                #   y: size=(4, 4), stride=(8, 1), offset=28 (start byte is 28)
-                return True
-            # At this point, we want to check if the 0th row of y
-            # overlaps with **some** row of x.
-            # We can check this by shifting y backward by the shared stride, repeatedly,
-            # until the first row of y is before the first row of x.
-            # Then we can check if these rows overlap.
-            # We can accomplish this by modding our offset by the stride.
-            offset_delta_mod = offset_delta % x.stride(0)
-            # Example:
-            # 0 1 2 3
-            # 9 10 11 12
-            # 18 19 20 21
-            # 27 28 29 30
-            #   x: size=(4, 4), stride=(9, 1), offset=0
-            #   y: size=(4, 4), stride=(9, 1), offset=22 (this would not overlap)
-            #   y: size=(4, 4), stride=(9, 1), offset=23 (this would not overlap)
-            #   y: size=(4, 4), stride=(9, 1), offset=24 (this would overlap)
-            #   y: size=(4, 4), stride=(9, 1), offset=25 (this would overlap)
-            # If the interval [modded_offset, modded_offset + x_size] falls entirely
-            # without
-            if offset_delta_mod + y.size(1) <= x.stride(0):
-                return True
-    return False
-
-
-def compute_overlapping_inputs(fwd_inputs, aliased_input_indices):
-    max_aliased_inps_w_dyn_shapes = (
-        config._max_aliased_inputs_with_dynamic_shapes_enabled
+    # Check whether there are any symbolic values being used.
+    # We do this for 2 reasons:
+    #   1. StorageOverlap guard is only issued whenever dynamic shapes is turned on
+    #   2. Triggers the fast-path for computing storage overlapping
+    symbolic = any(
+        isinstance(x, torch.SymInt)
+        for i in aliased_input_indices
+        for x in [
+            *fwd_inputs[i].shape,
+            *fwd_inputs[i].stride(),
+            fwd_inputs[i].storage_offset(),
+        ]
     )
-    definitely_error_on_dyn_shapes = False
-    # If the JK is false / not set, we will fall back to obeying the config above
-    # If it is true, we will always error when there are aliased + mutated inps with dynamic shapes
-    if torch._inductor.config.is_fbcode():
-        definitely_error_on_dyn_shapes = torch._utils_internal.justknobs_check(
-            "pytorch/dynamo:disable_aliased_inputs_with_mutation_and_dyn_shapes"
+
+    with maybe_suppress_guards():
+        aliased_fwd_inputs = [fwd_inputs[i] for i in aliased_input_indices]
+        actual_aliased_indices = {
+            aliased_input_indices[i]
+            for i in compute_overlapping_tensors(aliased_fwd_inputs, symbolic=symbolic)
+        }
+
+    # Add the StorageOverlap AOTAutograd guard only if we are actually keeping track of
+    # dynamo sources inside AOTAutograd.
+    if (
+        tracing_context is not None
+        # Make sure dynamic shapes is currently being used.
+        and symbolic
+        # We check that we have more than 1 aliased tensor, which should be true at
+        # this point, anyway.
+        and num_aliases > 1
+        and aot_config.aot_autograd_arg_pos_to_source
+    ):
+        no_overlap_indices = list(set(aliased_input_indices) - actual_aliased_indices)
+
+        overlapping_sources = [
+            aot_config.aot_autograd_arg_pos_to_source[i] for i in actual_aliased_indices
+        ]
+        non_overlapping_sources = [
+            aot_config.aot_autograd_arg_pos_to_source[i] for i in no_overlap_indices
+        ]
+
+        tracing_context.guards_context.aotautograd_guards.append(
+            StorageOverlap(overlapping_sources, non_overlapping_sources)
         )
 
-    actual_aliased_indices = set()
-    num_aliases = len(aliased_input_indices)
-    # > 2 check because num_aliases==1 means no aliasing
-    if num_aliases >= 2 and (
-        definitely_error_on_dyn_shapes or num_aliases > max_aliased_inps_w_dyn_shapes
-    ):
-        dynamic_shape_indices = set()
-        for j in range(num_aliases):
-            j_ = aliased_input_indices[j]
-            curr_inp = fwd_inputs[j_]
-            if any(
-                isinstance(x, torch.SymInt)
-                for x in itertools.chain(
-                    curr_inp.shape, curr_inp.stride(), [curr_inp.storage_offset()]
-                )
-            ):
-                dynamic_shape_indices.add(j_)
-        err_message = f"""\
-Encountered a graph where:
-- {num_aliases} graph inputs all share the same storage (input indices: {str(aliased_input_indices)})
-- at least one of these aliased inputs was mutated
-- at least one of these inputs is being compiled with dynamic shapes (indices: {str(dynamic_shape_indices)})
-
-Current limit: {str(max_aliased_inps_w_dyn_shapes)}
-Killswitch enabled: {str(definitely_error_on_dyn_shapes)}
-
-The most common way to run into this situation is when your model parameters are allocated as one giant buffer
-and are all mutated by the optimizer, and some of your parameters end up getting compiled with dynamic shapes.
-
-You can avoid this problem by marking your parameters so they explicitly do not participate in dynamic shapes,
-by marking each dim of your parameter static:
-
-torch._dynamo.mark_static(param, 0) # (1, 2, ... for every dimension on the parameter).
-
-If you are running into this issue in a situation where your parameters are static but some other inputs
-are aliased and mutated, and they should be dynamic, please file an issue.
-"""
-        if len(dynamic_shape_indices) != 0:
-            raise Unsupported(
-                err_message,
-                case_name="dynamic_shapes_validation",
-            )
-    for j in range(num_aliases):
-        for i in range(j):
-            j_ = aliased_input_indices[j]
-            i_ = aliased_input_indices[i]
-            if not _tensors_definitely_do_not_overlap(fwd_inputs[i_], fwd_inputs[j_]):
-                actual_aliased_indices.add(i_)
-                actual_aliased_indices.add(j_)
     return actual_aliased_indices
 
 

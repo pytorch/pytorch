@@ -7,6 +7,7 @@ from typing import Any, overload
 import torch
 from torch import Tensor
 from torch._C import ScriptObject
+from torch._C._autograd import DeviceType
 from torch.futures import Future
 
 # This module is defined in torch/csrc/distributed/c10d/init.cpp
@@ -302,6 +303,7 @@ class ProcessGroup:
         NCCL = ...
         UCC = ...
         MPI = ...
+        XCCL = ...
         CUSTOM = ...
 
     def __init__(
@@ -658,6 +660,11 @@ class _SymmetricMemory:
         group_name: str | None = None,
         alloc_id: int | None = None,
     ) -> torch.Tensor: ...
+    @staticmethod
+    def has_multicast_support(
+        device_type: DeviceType,
+        device_idx: int,
+    ) -> bool: ...
     @property
     def rank(self) -> int: ...
     @property
@@ -684,3 +691,11 @@ class _SymmetricMemory:
     def stream_write_value32(
         tensor: torch.Tensor, offset: int, val: int
     ) -> torch.Tensor: ...
+
+class ProcessGroupXCCL(Backend):
+    def __init__(
+        self,
+        store: Store,
+        rank: int,
+        size: int,
+    ): ...

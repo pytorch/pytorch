@@ -653,7 +653,6 @@ def gen_inplace_or_view_type(
 ) -> None:
     # NOTE: see Note [Sharded File] at the top of the VariableType.cpp
     # template regarding sharding of the generated files.
-    num_shards = 2
 
     fm = FileManager(install_dir=out, template_dir=template_path, dry_run=False)
     fm.write_sharded(

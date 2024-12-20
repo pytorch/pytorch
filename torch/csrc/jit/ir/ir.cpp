@@ -2104,20 +2104,19 @@ std::vector<Value*> inlineCallTo(
   if (to_replace->kind() == prim::CallMethod) {
     auto class_type_ptr = to_replace->input(0)->type()->cast<c10::ClassType>();
     if (to_replace->input(0)->node()->kind() == prim::GetAttr) {
-      module_instance_info = std::make_optional(ModuleInstanceInfo(
-          class_type_ptr, to_replace->input(0)->node()->s(attr::name)));
+      module_instance_info = ModuleInstanceInfo(
+          class_type_ptr, to_replace->input(0)->node()->s(attr::name));
     } else if (
         !to_replace->owningGraph()->inputs().empty() &&
         to_replace->input(0) == to_replace->owningGraph()->inputs()[0]) {
       // This CallMethod must correspond to method of the same object
       // to which this graph belongs.
-      module_instance_info =
-          std::make_optional(ModuleInstanceInfo(class_type_ptr, "SELF"));
+      module_instance_info = ModuleInstanceInfo(class_type_ptr, "SELF");
     } else {
       // Not sure if it is possible to come here ever.
       // TODO: Remove this else. Or add assert
-      module_instance_info = std::make_optional(
-          ModuleInstanceInfo(class_type_ptr, "INSTANCE_NAME_UNKNOWN"));
+      module_instance_info =
+          ModuleInstanceInfo(class_type_ptr, "INSTANCE_NAME_UNKNOWN");
     }
   }
 

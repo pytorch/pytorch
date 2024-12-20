@@ -223,7 +223,7 @@ class TensorParallelStyleTest(DTensorTestBase):
             AssertionError,
             "input_layouts and desired_input_layouts should have same length!",
         ):
-            prepare_inps_dimension_mismatch = PrepareModuleInput(
+            PrepareModuleInput(
                 input_layouts=Shard(0), desired_input_layouts=(Replicate(), None)
             )
         # Raise assertion error if module inputs and input_layouts do not have same length.

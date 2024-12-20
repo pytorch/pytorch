@@ -80,7 +80,7 @@ def update_wheel(wheel_path) -> None:
         "/usr/local/cuda/lib64/libnvToolsExt.so.1",
         "/usr/local/cuda/lib64/libnvJitLink.so.12",
         "/usr/local/cuda/lib64/libnvrtc.so.12",
-        "/usr/local/cuda/lib64/libnvrtc-builtins.so.12.4",
+        "/usr/local/cuda/lib64/libnvrtc-builtins.so.12.6",
         "/usr/local/cuda/lib64/libcudnn_adv.so.9",
         "/usr/local/cuda/lib64/libcudnn_cnn.so.9",
         "/usr/local/cuda/lib64/libcudnn_graph.so.9",

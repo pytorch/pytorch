@@ -26,7 +26,7 @@ def custom_op(
     mutates_args: Union[str, Iterable[str]],
     device_types: device_types_t = None,
     schema: Optional[str] = None,
-) -> Callable:
+) -> Any:
     """Wraps a function into custom operator.
 
     Reasons why you may want to create a custom op include:
@@ -493,6 +493,10 @@ class CustomOpDef:
         they may not directly access :meth:`torch.Tensor.data_ptr` and they must
         not depend on or mutate global state. If you need a non-traceable backward,
         you can make it a separate custom_op that you call inside ``backward_fn``.
+
+        If you need different autograd behavior on different devices, then we
+        recommend creating two different custom operators, one for each device
+        that needs different behavior, and switching between them at runtime.
 
         Examples:
             >>> import torch

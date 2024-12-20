@@ -406,6 +406,9 @@ public:
   Vectorized<T> asin() const {
     return map(std::asin);
   }
+  Vectorized<T> asinh() const {
+    return map(std::asinh);
+  }
   Vectorized<T> atan() const {
     return map(std::atan);
   }

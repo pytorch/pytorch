@@ -77,8 +77,7 @@ Tensor TransformerEncoderLayerImpl::forward(
   } else if (std::holds_alternative<std::function<Tensor(const Tensor&)>>(
                  options.activation())) {
     auto callable_activation =
-        *std::get_if<std::function<Tensor(const Tensor&)>>(
-            &options.activation());
+        std::get<std::function<Tensor(const Tensor&)>>(options.activation());
     src2 = linear2(dropout(callable_activation(linear1(ret))));
   } else {
     TORCH_CHECK(false, "activation should be kGELU, kReLU, or a callable");
@@ -204,8 +203,7 @@ Tensor TransformerDecoderLayerImpl::activation(const Tensor& input) {
   } else if (std::holds_alternative<std::function<Tensor(const Tensor&)>>(
                  options.activation())) {
     auto callable_activation =
-        *std::get_if<std::function<Tensor(const Tensor&)>>(
-            &options.activation());
+        std::get<std::function<Tensor(const Tensor&)>>(options.activation());
     return callable_activation(input);
   } else {
     TORCH_CHECK(false, "activation should be kGELU, kReLU, or a callable");

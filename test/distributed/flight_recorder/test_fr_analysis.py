@@ -7,7 +7,7 @@ import sys
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent.parent.parent
 
 sys.path.insert(0, str(REPO_ROOT))
-from tools.flight_recorder.components.types import MatchState
+from tools.flight_recorder.components.types import COLLECTIVES, MatchState
 from tools.flight_recorder.components.utils import match_one_event
 
 
@@ -18,7 +18,7 @@ from torch.testing._internal.common_utils import run_tests, TestCase
 
 
 def create_one_event(
-    collectcive_name,
+    collective_name,
     pg_info,
     input_sizes,
     output_sizes,
@@ -28,7 +28,7 @@ def create_one_event(
     output_dtypes="float32",
 ):
     return {
-        "profiling_name": f"nccl:{collectcive_name}",
+        "profiling_name": f"nccl:{collective_name}",
         "state": state,
         "process_group": pg_info,
         "input_sizes": input_sizes,
@@ -110,6 +110,17 @@ class FlightRecorderEventTest(TestCase):
             match_one_event(e10, e9, membership, "0"),
             MatchState.COLLECTIVE_DTYPE_MISMATCH,
         )
+
+    def test_all_events(self):
+        for collective in COLLECTIVES:
+            event = create_one_event(
+                collective, ("0", "default"), [[4, 4]], [[4, 4]], "scheduled", 1
+            )
+            membership = {"0": {0, 1}}
+            self.assertEqual(
+                match_one_event(event, event, membership, "0"), MatchState.FULLY_MATCHED
+            )
+            break
 
 
 if __name__ == "__main__":

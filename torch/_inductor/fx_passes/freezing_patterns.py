@@ -3,6 +3,7 @@ import functools
 
 import torch
 from torch._inductor.compile_fx import fake_tensor_prop
+from torch._inductor.utils import GPU_TYPES
 
 from ..._dynamo.utils import counters
 from .. import config
@@ -118,17 +119,16 @@ def register_binary_folding_pattern(pattern, extra_check=_return_true):
 
 @functools.lru_cache(None)
 def addmm_patterns_init():
-    if torch.cuda.is_available():
-        # workaround https://github.com/pytorch/pytorch/issues/97894
-        device = "cuda"
-    else:
-        device = "cpu"
-        if not config.cpp.enable_concat_linear:
-            return
-
+    device = next(
+        (gpu for gpu in GPU_TYPES if getattr(torch, gpu).is_available()), "cpu"
+    )
     val = functools.partial(torch.empty, (10, 10), device=device, requires_grad=False)
 
     def check_concat_weights(match):
+        is_cpu = match.kwargs["inp"].meta["val"].is_cpu
+        if is_cpu and not config.cpp.enable_concat_linear:
+            return False
+
         weight_inputs = ["w1", "w2"]
         if "w3" in match.kwargs:
             weight_inputs.append("w3")

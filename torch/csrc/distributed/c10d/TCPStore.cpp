@@ -350,7 +350,7 @@ TCPStore::~TCPStore() = default;
 
 void TCPStore::waitForWorkers() {
   STATIC_SCOPED_WAIT_COUNTER(pytorch.wait_counter.TCPStore__waitForWorkers);
-  if (numWorkers_ == std::nullopt) {
+  if (!numWorkers_.has_value()) {
     return;
   }
 

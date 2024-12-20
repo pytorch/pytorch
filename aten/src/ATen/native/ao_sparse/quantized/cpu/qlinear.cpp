@@ -15,8 +15,7 @@
 #include <ATen/ops/empty.h>
 #endif
 
-namespace ao {
-namespace sparse {
+namespace ao::sparse {
 
 int register_linear_params();
 
@@ -257,4 +256,4 @@ TORCH_LIBRARY_IMPL(sparse, QuantizedCPU, m) {
 }
 
 } // namespace
-}} // namespace ao::sparse
+} // namespace ao::sparse

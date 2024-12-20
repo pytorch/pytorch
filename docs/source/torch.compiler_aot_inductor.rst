@@ -121,10 +121,9 @@ enabling us to conduct model predictions directly within a C++ environment.
         c10::InferenceMode mode;
 
         torch::inductor::AOTIModelPackageLoader loader("model.pt2");
-        torch::inductor::AOTIModelContainerRunner* runner = loader.get_runner();
         // Assume running on CUDA
         std::vector<torch::Tensor> inputs = {torch::randn({8, 10}, at::kCUDA)};
-        std::vector<torch::Tensor> outputs = runner->run(inputs);
+        std::vector<torch::Tensor> outputs = loader.run(inputs);
         std::cout << "Result from the first inference:"<< std::endl;
         std::cout << outputs[0] << std::endl;
 
@@ -132,7 +131,7 @@ enabling us to conduct model predictions directly within a C++ environment.
         // specified that dimension as dynamic when compiling model.pt2.
         std::cout << "Result from the second inference:"<< std::endl;
         // Assume running on CUDA
-        std::cout << runner->run({torch::randn({1, 10}, at::kCUDA)})[0] << std::endl;
+        std::cout << loader.run({torch::randn({1, 10}, at::kCUDA)})[0] << std::endl;
 
         return 0;
     }

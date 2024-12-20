@@ -5,7 +5,7 @@ import itertools
 import logging
 import operator
 from collections import Counter, defaultdict
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional, Union
 
 import torch
 import torch._inductor as inductor
@@ -18,6 +18,7 @@ from torch._inductor.virtualized import ops
 from torch._prims_common import is_boolean_dtype, is_expandable_to, is_integer_dtype
 from torch._utils_internal import upload_graph
 from torch.fx.experimental.symbolic_shapes import statically_known_true, sym_eq
+from torch.utils._ordered_set import OrderedSet
 
 from .. import config, ir, pattern_matcher
 from ..codegen.common import BackendFeature, has_backend_feature
@@ -191,7 +192,7 @@ def reorder_for_locality(graph: torch.fx.Graph):
             # move node's producers right before it
             node.prepend(other_node)
 
-    seen_nodes = set()
+    seen_nodes = OrderedSet[torch.fx.Node]()
 
     # only reorder nodes before the first copy_ in the graph.
     # copy_ will appear at the end of functionalized graphs when there is mutation on inputs,
@@ -232,13 +233,13 @@ def is_valid_mm_plus_mm(match: Match):
     if not torch._inductor.utils.use_max_autotune():
         return False
 
-    *b1, m1, k1 = match.kwargs["mat1"].meta.get("tensor_meta").shape
-    *b2, k2, n1 = match.kwargs["mat2"].meta.get("tensor_meta").shape
+    *_b1, m1, k1 = match.kwargs["mat1"].meta.get("tensor_meta").shape
+    *_b2, k2, n1 = match.kwargs["mat2"].meta.get("tensor_meta").shape
     if k1 != k2:
         return False
 
-    *b1, m2, k3 = match.kwargs["mat3"].meta.get("tensor_meta").shape
-    *b2, k4, n2 = match.kwargs["mat4"].meta.get("tensor_meta").shape
+    *_b1, m2, k3 = match.kwargs["mat3"].meta.get("tensor_meta").shape
+    *_b2, k4, n2 = match.kwargs["mat4"].meta.get("tensor_meta").shape
     if k3 != k4:
         return False
 
@@ -554,13 +555,13 @@ def is_valid_splitwithsizes_cat(match):
     # The dim of split and cat should match for passthrough
     if get_arg_value(split_node, 2, "dim") != get_arg_value(cat_node, 1, "dim"):
         return False
-    get_item_args = {
+    get_item_args = OrderedSet(
         get_arg_value(get_item_node, 1) for get_item_node in get_item_nodes
-    }
+    )
     assert None not in get_item_args
     split_sizes = get_arg_value(split_node, 1, "split_sizes")
     # All parts of split should be included in the cat
-    if get_item_args != set(range(len(split_sizes))):
+    if get_item_args != OrderedSet(range(len(split_sizes))):
         return False
     # The order of get_item_args should same with cat_node used.
     # For example, if the split_node like split_with_sizes(input, [2, 2, 3], 1),
@@ -681,9 +682,9 @@ def remove_noop_ops(graph: torch.fx.Graph):
     """
     Removes both operations that are essentially aten.clone and operations that are essentially aten.alias from the graph.
     """
-    inputs = set()
-    input_storages = set()
-    output_storages = set()
+    inputs = OrderedSet[torch.fx.Node]()
+    input_storages = OrderedSet[Union[int, None]]()
+    output_storages = OrderedSet[Union[int, None]]()
 
     for node in graph.find_nodes(op="placeholder"):
         inputs.add(node)
@@ -841,12 +842,12 @@ def decompose_auto_functionalized(graph):
 
     graph_pass.apply(graph)
 
-    for node in graph.find_nodes(
+    for _ in graph.find_nodes(
         op="call_function", target=torch.ops.higher_order.auto_functionalized
     ):
         raise AssertionError("auto_functionalized was not removed")
 
-    for node in graph.find_nodes(
+    for _ in graph.find_nodes(
         op="call_function", target=torch.ops.higher_order.auto_functionalized_v2
     ):
         raise AssertionError("auto_functionalized_v2 was not removed")
@@ -1060,7 +1061,7 @@ def is_index_put_and_requires_h2d_sync_for_gpu_value(node):
     # if the value we are putting is a cpu scalar.
     # Therefore, when inductor sees an index_put_ with byte tensor indices,
     # it should *not* convert the cpu scalar value into a gpu tensor.
-    args_, kwargs_ = normalize_function(node.target, node.args, node.kwargs)  # type: ignore[misc]
+    args_, _kwargs = normalize_function(node.target, node.args, node.kwargs)  # type: ignore[misc]
     any_byte_bool_indices = False
     indices = args_[1]
     for i in indices:
@@ -1161,7 +1162,7 @@ class ConstructorMoverPass:
         return cpu_indeg
 
     def __call__(self, graph: fx.Graph) -> None:
-        target_devices = set()
+        target_devices = OrderedSet[torch.device]()
         constructors = []
 
         for node in graph.nodes:
@@ -1196,7 +1197,7 @@ class ConstructorMoverPass:
 
     def find_movable_constructors(
         self, graph: fx.Graph, constructors: List[fx.Node]
-    ) -> Set[fx.Node]:
+    ) -> OrderedSet[fx.Node]:
         """
         Starting from the cpu constructors, iterate through the graph and test that all of their
         downstream uses can safely be moved to cpu.
@@ -1204,21 +1205,23 @@ class ConstructorMoverPass:
         cpu_indeg: Dict[fx.Node, int] = self.get_cpu_indeg_count(graph)
 
         # which constructors cannot be moved to gpu
-        cannot_move_to_gpu: Set[fx.Node] = set()
+        cannot_move_to_gpu = OrderedSet[fx.Node]()
 
         # For any node in the graph, which constructors does it have a dependency on
-        constructor_dependencies: Dict[fx.Node, Set[fx.Node]] = defaultdict(set)
+        constructor_dependencies: Dict[fx.Node, OrderedSet[fx.Node]] = defaultdict(
+            OrderedSet
+        )
 
         # if a cpu node has a dependency on two different cpu constructors,
         # then if either constructor cannot be moved to gpu, the other cannot as well.
         # In this case any node with a dependency on one will have a dependency on the other
-        equal_constructor_sets: Dict[fx.Node, Set[fx.Node]] = {
-            c: {c} for c in constructors
+        equal_constructor_sets: Dict[fx.Node, OrderedSet[fx.Node]] = {
+            c: OrderedSet([c]) for c in constructors
         }
 
         def make_dependencies_equivalent(
-            set1: Set[fx.Node], set2: Set[fx.Node]
-        ) -> Set[fx.Node]:
+            set1: OrderedSet[fx.Node], set2: OrderedSet[fx.Node]
+        ) -> OrderedSet[fx.Node]:
             # could use union find but not worth complexity here
             set1.update(set2)
             for obj in set1:
@@ -1268,7 +1271,7 @@ class ConstructorMoverPass:
         for constructor in cannot_move_to_gpu:
             all_cannot_move_to_gpu.update(equal_constructor_sets[constructor])
 
-        return set(constructors) - all_cannot_move_to_gpu
+        return OrderedSet(constructors) - all_cannot_move_to_gpu
 
 
 def move_constructors_to_gpu(graph: fx.Graph) -> None:

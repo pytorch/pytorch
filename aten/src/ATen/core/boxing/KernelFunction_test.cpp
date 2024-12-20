@@ -353,7 +353,7 @@ void expectOutOfPlaceMultiUnboxedCallingWorks(const KernelFunction& func) {
   auto t1 = at::zeros({1});
   auto t2 = at::zeros({1});
 
-  std::tuple<at::Tensor&, at::Tensor&> tup = func.call<
+  const auto [t1_out, t2_out] = func.call<
     std::tuple<at::Tensor&, at::Tensor&>, at::Scalar, at::Scalar, at::Tensor&, at::Tensor&
   >(dummy, CPU_TEST_SET, s1, s2, t1, t2);
 
@@ -361,11 +361,9 @@ void expectOutOfPlaceMultiUnboxedCallingWorks(const KernelFunction& func) {
   EXPECT_EQ(t1.item().toFloat(), 1.0f);
   EXPECT_EQ(t2.item().toFloat(), 2.0f);
 
-  auto t1_out = std::get<0>(tup);
   EXPECT_EQ(t1_out.item().toFloat(), 1.0f);
   EXPECT_TRUE(t1_out.is_same(t1));
 
-  auto t2_out = std::get<1>(tup);
   EXPECT_EQ(t2_out.item().toFloat(), 2.0f);
   EXPECT_TRUE(t2_out.is_same(t2));
 }

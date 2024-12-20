@@ -56,7 +56,7 @@ from ..utils import (
     tensortype_to_dtype,
     unpatched_nn_module_getattr,
 )
-from .base import ValueMutationNew, VariableTracker
+from .base import AttributeMutationExisting, ValueMutationNew, VariableTracker
 from .dicts import DefaultDictVariable
 
 
@@ -91,14 +91,8 @@ def is_forbidden_context_manager(ctx):
     except ImportError:
         pass
 
-    try:
-        from torch.testing._internal.jit_utils import (
-            _AssertRaisesRegexWithHighlightContext,
-        )
-
-        f_ctxs.append(_AssertRaisesRegexWithHighlightContext)
-    except ImportError:
-        pass
+    if m := sys.modules.get("torch.testing._internal.jit_utils"):
+        f_ctxs.append(m._AssertRaisesRegexWithHighlightContext)
 
     return ctx in f_ctxs
 
@@ -435,6 +429,10 @@ class UserDefinedClassVariable(UserDefinedVariable):
             from torch.overrides import TorchFunctionMode
 
             from .ctx_manager import GenericContextWrappingVariable
+            from .functions import (
+                BaseUserFunctionVariable,
+                FunctionDecoratedByContextlibContextManagerVariable,
+            )
             from .torch_function import TorchFunctionModeVariable
 
             if issubclass(
@@ -445,6 +443,41 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 var_cls = TorchFunctionModeVariable
             else:
                 var_cls = GenericContextWrappingVariable
+
+            # graph break on any contextlib.* that it is not contextlib.contextmanager
+            # Some of the APIs below are not supported because they rely on features
+            # that Dynamo doesn't play well today (i.e. contextlib.suppress)
+            if self.value in (
+                contextlib._AsyncGeneratorContextManager,
+                contextlib.closing,
+                contextlib.redirect_stdout,
+                contextlib.redirect_stderr,
+                contextlib.suppress,
+                contextlib.ExitStack,
+                contextlib.AsyncExitStack,
+            ):
+                # We are not changing the behavior of Dynamo as these function were
+                # already ignored on trace_rules.py before #136033 landed
+                unimplemented(
+                    f"{self.value} not supported. This may be due to its use of "
+                    "context-specific operations that are not supported in "
+                    "Dynamo yet (i.e. Exception handling)"
+                )
+
+            if self.value is contextlib._GeneratorContextManager and isinstance(
+                args[0], BaseUserFunctionVariable
+            ):
+                if not torch._dynamo.config.enable_trace_contextlib:
+                    unimplemented("contextlib.contextmanager")
+                # Replace UserFunctionVariable by FunctionDecoratedBycontextlibContextManagerVariable
+                # if the function is annotated with @contextlib.contextmanager
+                # This shouldn't be necessary once generator functions are fully
+                # supported in dynamo
+                args = [
+                    FunctionDecoratedByContextlibContextManagerVariable(
+                        args[0], source=args[0].source
+                    )
+                ] + args[1:]
 
             cm_obj = tx.output.side_effects.track_object_new(
                 self.source, self.value, var_cls, {}
@@ -791,15 +824,14 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 assert self.source  # OrderedDict, dict subtypes must always have source
                 return self.odict_getitem(tx, args[0])
 
-            if (
-                method in (object.__ne__, object.__eq__)
-                and len(args) == 1
-                and not kwargs
-                and hasattr(args[0], "value")
-            ):
-                return ConstantVariable(
-                    (self.value is args[0].value) is (method is object.__eq__)
-                )
+            if len(args) == 1 and not kwargs:
+                if method is object.__eq__:
+                    func_var = VariableTracker.build(tx, polyfills.object_eq)
+                    return func_var.call_function(tx, [self, *args], kwargs)
+
+                if method is object.__ne__:
+                    func_var = VariableTracker.build(tx, polyfills.object_ne)
+                    return func_var.call_function(tx, [self, *args], kwargs)
 
             # check for methods implemented in C++
             if isinstance(method, types.FunctionType):
@@ -1415,6 +1447,7 @@ class MutableMappingVariable(UserDefinedObjectVariable):
     def __init__(self, value, **kwargs):
         super().__init__(value, **kwargs)
         self.generic_dict_vt = variables.ConstDictVariable({})
+        self.mutation_type = AttributeMutationExisting()
 
     def var_getattr(self, tx: "InstructionTranslator", name: str) -> "VariableTracker":
         # A common pattern in the init code of MutableMapping objects is to

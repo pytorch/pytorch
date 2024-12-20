@@ -41,7 +41,10 @@ html-stable:
 	# See conf.py for more details.
 	RELEASE=1 make html
 
-.PHONY: help Makefile docset onnx exportdb
+.PHONY: help Makefile docset onnx exportdb serve
+
+serve:
+	@cd $(BUILDDIR)/html && $(PYCMD) -m http.server $(PORT)
 
 # Catch-all target: route all unknown targets to Sphinx using the new
 # "make mode" option.  $(O) is meant as a shortcut for $(SPHINXOPTS).

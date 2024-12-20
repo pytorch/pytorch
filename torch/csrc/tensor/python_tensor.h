@@ -3,6 +3,7 @@
 #include <c10/core/Device.h>
 #include <c10/core/DispatchKey.h>
 #include <c10/core/ScalarType.h>
+#include <torch/csrc/Export.h>
 #include <torch/csrc/python_headers.h>
 
 namespace at {
@@ -13,13 +14,13 @@ namespace torch::tensors {
 
 // Initializes the Python tensor type objects: torch.FloatTensor,
 // torch.DoubleTensor, etc. and binds them in their containing modules.
-void initialize_python_bindings();
+TORCH_PYTHON_API void initialize_python_bindings();
 
 // Same as set_default_tensor_type() but takes a PyObject*
-void py_set_default_tensor_type(PyObject* type_obj);
+TORCH_PYTHON_API void py_set_default_tensor_type(PyObject* type_obj);
 
 // Same as py_set_default_tensor_type, but only changes the dtype (ScalarType).
-void py_set_default_dtype(PyObject* dtype_obj);
+TORCH_PYTHON_API void py_set_default_dtype(PyObject* dtype_obj);
 
 // Gets the DispatchKey for the default tensor type.
 //

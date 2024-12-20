@@ -1104,7 +1104,7 @@ void LibUVStoreDaemon::init(const TCPStoreOptions& opts) {
   TORCH_CHECK(
       port_ == opts.port || opts.port == 0, // zero means use any port
       "listen fd ",
-      *opts.masterListenFd,
+      opts.masterListenFd,
       " is bound to port ",
       port_,
       ", expected to be bound to port ",

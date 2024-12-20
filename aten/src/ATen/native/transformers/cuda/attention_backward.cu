@@ -77,7 +77,7 @@ std::tuple<Tensor, Tensor, Tensor> _flash_attention_backward(
     std::optional<int64_t> window_size_left,
     std::optional<int64_t> window_size_right) {
 #if defined(USE_FLASH_ATTENTION)
-  const auto softmax_scale = sdp::calculate_scale(query, scale).as_float_unchecked();
+  const auto softmax_scale = sdp::calculate_scale(query, scale).expect_float();
   //  CUDA code assumes that dout is contiguous
   auto contiguous_grad_out = grad_out.contiguous();
   auto contiguous_out = out.contiguous();
@@ -216,7 +216,7 @@ std::tuple<Tensor, Tensor, Tensor> _scaled_dot_product_cudnn_attention_backward_
       }
     }
 
-    const auto softmax_scale = sdp::calculate_scale(query, scale).as_float_unchecked();
+    const auto softmax_scale = sdp::calculate_scale(query, scale).expect_float();
     auto dq = at::empty_like(query);
     auto dk = at::empty_like(key);
     auto dv = at::empty_like(value);
@@ -419,7 +419,7 @@ _efficient_attention_backward(
                 "[AOTriton] Accelerated SDPA only supports MI200/MI300X/Navi31 GPUs"
                 " (gfx90a:sramecc+:xnack-/gfx942:sramecc+:xnack-/gfx1100)")
   }
-  const auto softmax_scale = sdp::calculate_scale(query, scale).as_float_unchecked();
+  const auto softmax_scale = sdp::calculate_scale(query, scale).expect_float();
   bool is_causal;
   if (static_cast<int64_t>(sdp::CustomMaskType::CausalFromTopLeft) == custom_mask_type) {
     is_causal = true;
@@ -441,29 +441,57 @@ _efficient_attention_backward(
 
   hipError_t err;
   using aotriton::v2::flash::attn_bwd;
+  using aotriton::v2::flash::attn_bwd_compact_varlen;
   using sdp::aotriton_adapter::mk_aotensor;
   using sdp::aotriton_adapter::mk_aoscalartensor;
   using sdp::aotriton_adapter::cast_dtype;
   aotriton::TensorView<4> empty_t4(0, {0, 0, 0, 0}, {0, 0, 0, 0}, cast_dtype(query.dtype()));
-  err = attn_bwd(mk_aotensor(q_t, "q"),
-                 mk_aotensor(k_t, "k"),
-                 mk_aotensor(v_t, "v"),
-                 bias.has_value() ? mk_aotensor(bias.value(), "bias") : empty_t4,
-                 softmax_scale,
-                 mk_aotensor(out_t, "out"),
-                 mk_aotensor(dout_t, "dout"),
-                 mk_aotensor(dq_t, "dq"),
-                 mk_aotensor(dk_t, "dk"),
-                 mk_aotensor(dv_t, "dv"),
-                 bias_requires_grad ? mk_aotensor(grad_bias, "db") : empty_t4,
-                 mk_aotensor<2>(softmax_lse, "L"),
-                 mk_aotensor<2>(delta, "delta"),
-                 float(dropout_p),
-                 mk_aoscalartensor(philox_seed),
-                 mk_aoscalartensor(philox_offset),
-                 0,
-                 is_causal,
-                 stream);
+  if (cu_seqlens_q.has_value()) {
+    // varlen aka Nested tensor
+    err = attn_bwd_compact_varlen(mk_aotensor(q_t, "q"),
+                                  mk_aotensor(k_t, "k"),
+                                  mk_aotensor(v_t, "v"),
+                                  mk_aotensor<1>(cu_seqlens_q.value(), "cu_seqlens_q"),
+                                  mk_aotensor<1>(cu_seqlens_k.value(), "cu_seqlens_k"),
+                                  max_seqlen_q,
+                                  max_seqlen_k,
+                                  bias.has_value() ? mk_aotensor(bias.value(), "bias") : empty_t4,
+                                  softmax_scale,
+                                  mk_aotensor(out_t, "out"),
+                                  mk_aotensor(dout_t, "dout"),
+                                  mk_aotensor(dq_t, "dq"),
+                                  mk_aotensor(dk_t, "dk"),
+                                  mk_aotensor(dv_t, "dv"),
+                                  bias_requires_grad ? mk_aotensor(grad_bias, "db") : empty_t4,
+                                  mk_aotensor<2>(softmax_lse, "L"),
+                                  mk_aotensor<2>(delta, "delta"),
+                                  float(dropout_p),
+                                  mk_aoscalartensor(philox_seed),
+                                  mk_aoscalartensor(philox_offset),
+                                  0,
+                                  is_causal,
+                                  stream);
+  } else {
+    err = attn_bwd(mk_aotensor(q_t, "q"),
+                   mk_aotensor(k_t, "k"),
+                   mk_aotensor(v_t, "v"),
+                   bias.has_value() ? mk_aotensor(bias.value(), "bias") : empty_t4,
+                   softmax_scale,
+                   mk_aotensor(out_t, "out"),
+                   mk_aotensor(dout_t, "dout"),
+                   mk_aotensor(dq_t, "dq"),
+                   mk_aotensor(dk_t, "dk"),
+                   mk_aotensor(dv_t, "dv"),
+                   bias_requires_grad ? mk_aotensor(grad_bias, "db") : empty_t4,
+                   mk_aotensor<2>(softmax_lse, "L"),
+                   mk_aotensor<2>(delta, "delta"),
+                   float(dropout_p),
+                   mk_aoscalartensor(philox_seed),
+                   mk_aoscalartensor(philox_offset),
+                   0,
+                   is_causal,
+                   stream);
+  }
 #else
   at::Tensor workspace;
   cudaDeviceProp* p = at::cuda::getDeviceProperties(query.device().index());
@@ -538,7 +566,7 @@ _efficient_attention_backward(
     p.num_batches = cu_seqlens_q.has_value() ? cu_seqlens_q->size(0) - 1 : B;
     p.num_heads = nH;
     p.custom_mask_type = custom_mask_type;
-    p.scale = sdp::calculate_scale(query, scale).as_float_unchecked();
+    p.scale = sdp::calculate_scale(query, scale).expect_float();
     if (cu_seqlens_q.has_value()) {
       p.cu_seqlens_q_ptr = (const int32_t*)cu_seqlens_q->const_data_ptr();
       p.cu_seqlens_k_ptr = (const int32_t*)cu_seqlens_k->const_data_ptr();

@@ -11,8 +11,7 @@
 #include <pack_block_sparse.h>
 #include <ATen/native/ao_sparse/quantized/cpu/packed_params.h>
 
-namespace ao {
-namespace sparse {
+namespace ao::sparse {
 
 struct TORCH_API PackedLinearWeightQnnp
     : public LinearPackedParamsBase {
@@ -87,6 +86,6 @@ struct TORCH_API PackedLinearWeightQnnp
   at::Tensor apply_dynamic_impl(const at::Tensor& input);
 };
 
-}}  // namespace ao::sparse
+}  // namespace ao::sparse
 
 #endif // USE_PYTORCH_QNNPACK

@@ -136,9 +136,10 @@ __global__ void EmbeddingBag_updateOutputKernel_sum_mean(
       accscalar_t weightFeatSum = 0;
       int64_t bag_size_ = 0;
       for (int64_t emb = begin; emb < end; emb++) {
-        bool pad = (input[emb] == padding_idx);
-        CUDA_KERNEL_ASSERT(input[emb] < numRows);
-        const int64_t weightRow = input[emb] * weight_stride0;
+        index_t input_idx = input[emb];
+        bool pad = (input_idx == padding_idx);
+        CUDA_KERNEL_ASSERT(0 <= input_idx && input_idx < numRows);
+        const int64_t weightRow = input_idx * weight_stride0;
         scalar_t weightValue = weightFeat[weightRow];
         weightValue = pad ? static_cast<scalar_t>(0) : weightValue;
         if (per_sample_weights) {
@@ -209,7 +210,7 @@ Tensor embedding_bag_backward_cuda_sum_avg(
       auto count_data = count.mutable_data_ptr<index_t>();
       cuda::cub::inclusive_sum_by_key(
         sorted_data,
-        at_cuda_detail::cub::ConstantInputIterator<index_t>(1),
+        NO_ROCM(at_cuda_detail)ROCM_HIPCUB(::cub)::ConstantInputIterator<index_t>(1),
         count_data,
         num_indices
       );
@@ -221,7 +222,7 @@ Tensor embedding_bag_backward_cuda_sum_avg(
         thrust::make_reverse_iterator(sorted_data + num_indices),
         thrust::make_reverse_iterator(count_data + num_indices),
         thrust::make_reverse_iterator(count_data + num_indices),
-        at_cuda_detail::cub::Max(),
+        NO_ROCM(at_cuda_detail)ROCM_HIPCUB(::cub)::Max(),
         num_indices
       );
     });

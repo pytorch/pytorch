@@ -416,6 +416,9 @@ class TestUnflatten(TestCase):
         self.compare_outputs(orig_eager, unflattened, inputs)
         self.assertEqual(len(eb.graphs), 1)
 
+        unflattened.compile()
+        self.compare_outputs(orig_eager, unflattened, inputs)
+
     def test_fx_trace(self):
         class MyModule(torch.nn.Module):
             def __init__(self) -> None:
@@ -495,7 +498,8 @@ class TestUnflatten(TestCase):
 
         inp = (torch.randn(4, 4), [torch.randn(4, 4), torch.randn(4, 4)])
         mod = Foo()
-        ep_strict = torch.export.export(mod, inp)
+
+        ep_strict = torch.export.export(mod, inp)  # noqa: F841
         ep_non_strict = torch.export.export(mod, inp, strict=False)
 
         gm_unflat_non_strict = unflatten(ep_non_strict)
@@ -607,7 +611,7 @@ class TestUnflatten(TestCase):
         init_torchbind_implementations()
 
         @torch._library.register_fake_class("_TorchScriptTesting::_Foo")
-        class FakeFoo:
+        class FakeFoo:  # noqa: F841
             def __init__(self, x: int, y: int):
                 self.x = x
                 self.y = y
@@ -684,7 +688,7 @@ class TestUnflatten(TestCase):
         # The call chain looks like this:
         # A -> B -> C -> A.d
         ep = torch.export.export(a, (torch.randn(3),), strict=False)
-        unflattened = unflatten(ep)
+        unflatten(ep)
 
     def test_nested_leaf_non_strict(self):
         class Leaf(torch.nn.Module):
@@ -942,8 +946,8 @@ class TestUnflatten(TestCase):
         with _disable_interpreter():
             unflattened = unflatten(export_module)
 
-        self.assertEqual(unflattened._run_with_interpeter, False)
-        self.assertEqual(unflattened.foo._run_with_interpeter, False)
+        self.assertEqual(unflattened._run_with_interpreter, False)
+        self.assertEqual(unflattened.foo._run_with_interpreter, False)
 
         inputs = (torch.rand(2, 3),)
 

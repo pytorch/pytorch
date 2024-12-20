@@ -474,7 +474,7 @@ TEST_F(LazyOpsTest, TestDiv) {
 }
 
 TEST_F(LazyOpsTest, TestDivWithRoundingMode) {
-  std::optional<c10::string_view> rounding_modes[] = {
+  std::optional<std::string_view> rounding_modes[] = {
       "trunc", "floor", std::nullopt};
   for (const auto& rounding_mode : rounding_modes) {
     for (torch::ScalarType scalar_type1 :
@@ -534,7 +534,7 @@ TEST_F(LazyOpsTest, TestDivInPlace) {
 }
 
 TEST_F(LazyOpsTest, TestDivInPlaceWithRoundingMode) {
-  std::optional<c10::string_view> rounding_modes[] = {
+  std::optional<std::string_view> rounding_modes[] = {
       "trunc", "floor", std::nullopt};
   for (const auto& rounding_mode : rounding_modes) {
     for (torch::ScalarType scalar_type1 : {torch::kFloat}) {

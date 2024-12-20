@@ -277,7 +277,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> sparse_semi_structured_tile_t
 // <packed, packed_meta_reordered, packed_trans, packed_trans_meta_reorderd, threads_masks>
 std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _sparse_semi_structured_tile(
   const Tensor& input,
-  c10::string_view algorithm,
+  std::string_view algorithm,
   bool use_cutlass)
 {
 #if defined(USE_ROCM) || defined(_MSC_VER) || (defined(CUDA_VERSION) && CUDA_VERSION < 11080)

@@ -190,13 +190,7 @@ Tensor layer_norm_symint(
     c10::SymIntArrayRef normalized_shape, const std::optional<Tensor>& weight_opt /* optional */, const std::optional<Tensor>& bias_opt /* optional */,
     double eps,
     bool /* cudnn_enable, deprecated */) {
-  // See [Note: hacky wrapper removal for optional tensor]
-  c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
-  const Tensor& weight = *weight_maybe_owned;
-  c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias_opt);
-  const Tensor& bias = *bias_maybe_owned;
-
-  return std::get<0>(at::native_layer_norm_symint(input, normalized_shape, weight, bias, eps));
+  return std::get<0>(at::native_layer_norm_symint(input, normalized_shape, weight_opt, bias_opt, eps));
 }
 
 DEFINE_DISPATCH(LayerNormKernel);
@@ -241,7 +235,7 @@ std::tuple<Tensor, Tensor, Tensor> math_native_layer_norm(
   auto outputs = at::native_batch_norm(
       input_reshaped, /*weight=*/{}, /*bias=*/{}, /*running_mean=*/{},
       /*running_var=*/{}, /*training=*/true, /*momentum=*/0, eps);
-  at::Tensor out = std::get<0>(outputs);
+  auto& [out, mean, rstd] = outputs;
   out = out.view(input_shape);
   if (weight.defined() && bias.defined()) {
     out = bias.addcmul(out, weight, 1);
@@ -250,8 +244,6 @@ std::tuple<Tensor, Tensor, Tensor> math_native_layer_norm(
   } else if (bias.defined()) {
     out = out.add(bias);
   }
-  at::Tensor mean = std::get<1>(outputs);
-  at::Tensor rstd = std::get<2>(outputs);
   std::vector<int64_t> stat_shape;
   for (const auto idx : c10::irange(axis)) {
     stat_shape.push_back(input_shape[idx]);
@@ -261,7 +253,7 @@ std::tuple<Tensor, Tensor, Tensor> math_native_layer_norm(
   }
   mean = mean.view(stat_shape);
   rstd = rstd.view(stat_shape);
-  return std::make_tuple(out, mean, rstd);
+  return outputs;
 }
 
 Tensor rms_norm_symint(
@@ -297,7 +289,7 @@ Tensor rms_norm_symint(
     c10::ScalarType opmath_t = toOpMathType(input.scalar_type());
     Tensor upcasted_input = input.to(opmath_t);
 
-    Tensor rqrst_input = rsqrt(at::pow(upcasted_input, 2).mean(dims_to_reduce_ref, /*keep_dim=*/true).add_(eps_val));
+    auto rqrst_input = rsqrt(at::pow(upcasted_input, 2).mean(dims_to_reduce_ref, /*keepdim=*/true).add_(eps_val));
     Tensor result = upcasted_input.mul(rqrst_input).type_as(input);
 
     if (weight_opt.has_value()) {

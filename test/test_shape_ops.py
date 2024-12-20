@@ -751,7 +751,7 @@ class TestShapeOps(TestCase):
             return tuple_result, nontuple_result, out
 
         with self.assertRaises(RuntimeError):
-            scripted_foo = torch.jit.script(_foo)
+            torch.jit.script(_foo)
 
         # Verifies that JIT tracing works fine
         traced_foo = torch.jit.trace(_foo, t)

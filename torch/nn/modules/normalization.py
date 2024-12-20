@@ -106,7 +106,7 @@ class LayerNorm(Module):
     the last 2 dimensions of the input (i.e. ``input.mean((-2, -1))``).
     :math:`\gamma` and :math:`\beta` are learnable affine transform parameters of
     :attr:`normalized_shape` if :attr:`elementwise_affine` is ``True``.
-    The standard-deviation is calculated via the biased estimator, equivalent to
+    The variance is calculated via the biased estimator, equivalent to
     `torch.var(input, unbiased=False)`.
 
     .. note::
@@ -240,7 +240,7 @@ class GroupNorm(Module):
     separately over the each group. :math:`\gamma` and :math:`\beta` are learnable
     per-channel affine transform parameter vectors of size :attr:`num_channels` if
     :attr:`affine` is ``True``.
-    The standard-deviation is calculated via the biased estimator, equivalent to
+    The variance is calculated via the biased estimator, equivalent to
     `torch.var(input, unbiased=False)`.
 
     This layer uses statistics computed from input data in both training and

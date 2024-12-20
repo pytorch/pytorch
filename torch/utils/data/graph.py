@@ -12,7 +12,7 @@ from torch.utils.data.datapipes.datapipe import IterDataPipe, MapDataPipe
 __all__ = ["traverse", "traverse_dps"]
 
 DataPipe = Union[IterDataPipe, MapDataPipe]
-DataPipeGraph = Dict[int, Tuple[DataPipe, "DataPipeGraph"]]  # type: ignore[misc]
+DataPipeGraph = Dict[int, Tuple[DataPipe, "DataPipeGraph"]]
 
 
 def _stub_unpickler():
@@ -39,10 +39,10 @@ def _list_connected_datapipes(
     def getstate_hook(ori_state):
         state = None
         if isinstance(ori_state, dict):
-            state = {}  # type: ignore[assignment]
+            state = {}
             for k, v in ori_state.items():
                 if isinstance(v, (IterDataPipe, MapDataPipe, Collection)):
-                    state[k] = v  # type: ignore[attr-defined]
+                    state[k] = v
         elif isinstance(ori_state, (tuple, list)):
             state = []  # type: ignore[assignment]
             for v in ori_state:
