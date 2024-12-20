@@ -304,12 +304,12 @@ class ConstDictVariable(VariableTracker):
             if self.source:
                 tx.output.guard_on_key_order.add(self.source.name())
             assert not (args or kwargs)
-            return DictKeys(self)
+            return DictKeysVariable(self)
         elif name == "values":
             if self.source:
                 tx.output.guard_on_key_order.add(self.source.name())
             assert not (args or kwargs)
-            return DictValues(self)
+            return DictValuesVariable(self)
         elif name == "copy":
             assert not (args or kwargs)
             return self.clone(
@@ -648,7 +648,7 @@ class DictKeySetVariable(SetVariable):
         return super().call_method(tx, name, args, kwargs)
 
 
-class DictView(VariableTracker):
+class DictViewVariable(VariableTracker):
     """
     Models _PyDictViewObject
 
@@ -696,7 +696,7 @@ class DictView(VariableTracker):
         return super().call_method(tx, name, args, kwargs)
 
 
-class DictKeys(DictView):
+class DictKeysVariable(DictViewVariable):
     kv = "keys"
 
     @property
@@ -723,8 +723,8 @@ class DictKeys(DictView):
         return super().call_method(tx, name, args, kwargs)
 
 
-class DictValues(DictView):
-    # DictValues is an iterable but cannot be compared.
+class DictValuesVariable(DictViewVariable):
+    # DictValuesVariable is an iterable but cannot be compared.
     kv = "values"
 
     @property
