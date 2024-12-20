@@ -145,6 +145,7 @@ if TYPE_CHECKING:
 
 log = logging.getLogger(__name__)
 perf_hint_log = torch._logging.getArtifactLogger(__name__, "perf_hints")
+pre_grad_graphs_log = torch._logging.getArtifactLogger(__name__, "pre_grad_graphs")
 post_grad_graphs_log = torch._logging.getArtifactLogger(__name__, "post_grad_graphs")
 static_inputs_log = torch._logging.getArtifactLogger(
     __name__, "cudagraph_static_inputs"
@@ -1629,6 +1630,24 @@ def compile_fx(
         # having AOTAutograd trace it.
         # TODO: Get rid of this?
         if isinstance(model_, GraphModule):
+            trace_structured(
+                "inductor_pre_grad_graph",
+                payload_fn=lambda: model_.print_readable(
+                    print_output=False, include_stride=True, include_device=True
+                )
+                + f"\n\n # graph id: {id(model_.graph)}",
+            )
+            pre_grad_graphs_log.debug(
+                "%s",
+                lazy_format_graph_code(
+                    "BEFORE PRE GRAD",
+                    model_,
+                    include_stride=True,
+                    include_device=True,
+                    colored=True,
+                ),
+            )
+
             model_ = _recursive_pre_grad_passes(model_, example_inputs_)
 
         # TODO: Move this before recursive pre-grad passes

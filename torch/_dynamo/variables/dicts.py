@@ -601,6 +601,46 @@ class FrozensetVariable(SetVariable):
         return super().call_method(tx, name, args, kwargs)
 
 
+class DictKeySetVariable(SetVariable):
+    def __init__(
+        self,
+        items: List[VariableTracker],
+        **kwargs,
+    ) -> None:
+        super().__init__(items, **kwargs)
+
+    def debug_repr(self):
+        if not self.items:
+            return "dict_keys([])"
+        else:
+            return (
+                "dict_keys(["
+                + ",".join(k.vt.debug_repr() for k in self.items.keys())
+                + "])"
+            )
+
+    @property
+    def set_items(self):
+        return self.items
+
+    def python_type(self):
+        return dict_keys
+
+    def as_python_constant(self):
+        unimplemented("DictKeySetVariable.as_python_constant")
+
+    def call_method(
+        self,
+        tx,
+        name,
+        args: List[VariableTracker],
+        kwargs: Dict[str, VariableTracker],
+    ) -> "VariableTracker":
+        if name in ["add", "pop", "update", "remove", "discard", "clear"]:
+            raise RuntimeError(f"Illegal call_method {name} on a dict_keys")
+        return super().call_method(tx, name, args, kwargs)
+
+
 class DictView(VariableTracker):
     """
     Models _PyDictViewObject
