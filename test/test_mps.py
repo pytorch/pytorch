@@ -1981,6 +1981,18 @@ class TestMPS(TestCaseMPS):
         self.assertEqual(output_cpu, output_mps, atol=tol, rtol=tol)
         self.assertEqual(output_cpu.size(), output_mps.size())
 
+    @parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16])
+    def test_take_along_dim(self, dtype):
+        if dtype == torch.bfloat16 and MACOS_VERSION < 14.0:
+            raise unittest.SkipTest("bfloat16 needs MacOS14+")
+
+        x = torch.tensor([[-5.], [0.], [5.]], dtype=dtype)
+        inds = torch.tensor([[0], [1], [2]])
+        ref = torch.take_along_dim(x, inds, 0)
+        x_mps = x.detach().clone().to('mps')
+        inds_mps = inds.detach().clone().to('mps')
+        res = torch.take_along_dim(x_mps, inds_mps, 0)
+        self.assertEqual(res, ref)
 
     def test_addr(self):
         A = torch.ones(5, 10).to("mps")
