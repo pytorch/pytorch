@@ -4471,7 +4471,8 @@ class TestSerialization(TestCase, SerializationMixin):
             loaded_sd = torch.load(f, weights_only=weights_only)
             self.assertEqual(sd_save, loaded_sd)
 
-    @unittest.skipIf(not torch.accelerator.is_available(), "accelerator not available")
+    @unittest.skipIf(not torch.accelerator.is_available() or torch.accelerator.current_accelerator().type == 'mps',
+                     "accelerator not available, on mps pin memory allocator is not registered")
     def test_use_pinned_memory_for_d2h(self):
         device = torch.accelerator.current_accelerator().type
 
