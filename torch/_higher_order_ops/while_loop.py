@@ -375,7 +375,7 @@ def check_meta_consistency(
 
         if len(lhs_list) != len(rhs_list):
             raise torch._dynamo.exc.UncapturedHigherOrderOpError(
-                f"Expected to have same number of outputs but got lhs:{lhs_list} and rhs:{rhs_list}"
+                f"Expected {lhs_name} and {rhs_name} to have same number of outputs but got lhs:{lhs_list} and rhs:{rhs_list}"
             )
         all_diffs = []
         for i, (lhs, rhs) in enumerate(zip(lhs_list, rhs_list)):
@@ -388,7 +388,7 @@ def check_meta_consistency(
     if all_diffs := diff_meta_pairs(lhs_list, rhs_list):
         diff_str = "\n".join(all_diffs)
         raise torch._dynamo.exc.UncapturedHigherOrderOpError(
-            f"Expected {lhs_name} and {rhs_name} to same metadata but found:\n{diff_str}"
+            f"Expected {lhs_name} and {rhs_name} to have same metadata but found:\n{diff_str}"
         )
 
 
