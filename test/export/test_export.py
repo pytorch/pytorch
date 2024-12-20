@@ -1,4 +1,5 @@
 # Owner(s): ["oncall: export"]
+# ruff: noqa: F841
 # flake8: noqa
 import copy
 import dataclasses
@@ -1093,6 +1094,69 @@ graph():
         ):
             export(M(), (torch.randn(2, 3),), strict=False)
 
+    def test_malformed_fqn_from_source_name(self):
+        # See https://github.com/pytorch/pytorch/issues/141939
+        from types import MethodType
+
+        class Block(torch.nn.Module):
+            def __init__(self, i, o):
+                super().__init__()
+                self.to_out = torch.nn.ModuleList([])
+                self.to_out.append(torch.nn.Linear(i, o, bias=True))
+                self.to_out.append(torch.nn.Dropout(0.5))
+
+            def forward(self, x):
+                for l in self.to_out:
+                    x = l(x)
+                return x
+
+        class Problem1(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.blocks = torch.nn.ModuleDict(
+                    {f"{i}": Block(64, 64) for i in range(5)}
+                )
+
+            def forward(self, x):
+                for k, m in self.blocks.items():
+                    x = m(x)
+                return x
+
+        class Problem2(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.blocks = torch.nn.ModuleList([Block(64, 64) for i in range(5)])
+
+            def forward(self, x):
+                x = self.blocks[0](x)
+                for m in self.blocks[1:4]:
+                    x = m(x)
+                return x
+
+        def _split_after_forward(self, *args, **kwargs):
+            return self._orig_forward(*args, **kwargs)
+
+        def annotate_split_points(mod: torch.nn.Module, spec):
+            for qualname, split_type in spec.items():
+                atoms = qualname.split(".")
+                predecessor_module = mod
+                for i, atom in enumerate(atoms[:-1]):
+                    try:
+                        predecessor_module = getattr(predecessor_module, atom)
+                    except AttributeError as e:
+                        raise e
+                mod_to_wrap = getattr(predecessor_module, atoms[-1])
+                mod_to_wrap._orig_forward = mod_to_wrap.forward
+                mod_to_wrap.forward = MethodType(_split_after_forward, mod_to_wrap)
+
+        for problem in [Problem1, Problem2]:
+            m = problem()
+            m(torch.rand(64, 64))
+            # simpified torch.distributed.pipeline code
+            annotate_split_points(m, {"blocks.1": 1, "blocks.3": 1})
+            gm = export(m, (torch.rand(64, 64),))
+            torch.export.unflatten(gm)
+
     def test_state_primitives(self):
         class M(torch.nn.Module):
             def __init__(self) -> None:
@@ -1126,6 +1190,21 @@ graph():
         model = TestModule()
         x = torch.randn(20, 10)
         ep_model = export(model, (x,), strict=False).module()
+        self.assertTrue(torch.allclose(model(x), ep_model(x)))
+
+    def test_output_node_name(self):
+        class TestModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(10, 10)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        model = TestModule()
+        x = torch.randn(20, 10)
+        ep_model = export(model, (x,), strict=False).module()
+        self.assertEqual(list(ep_model.graph.nodes)[-1].name, "output")
         self.assertTrue(torch.allclose(model(x), ep_model(x)))
 
     def test_real_tensor_size_mismatch(self):
@@ -1802,6 +1881,52 @@ def forward(self, p_linear_weight, p_linear_bias, x):
             ("sin_1", "method_descriptor.sin"),
         ]
         self.assertEqual(actual_torch_fns, exp_torch_fns)
+
+    def test_is_exporting(self):
+        class Mod(torch.nn.Module):
+            def forward(self, pred, x):
+                def f(x):
+                    return x.sin() if torch.compiler.is_exporting() else x.cos()
+
+                y = f(x)
+
+                def true_fn(x):
+                    return f(x) - 1 if torch.compiler.is_exporting() else f(x) + 1
+
+                def false_fn(x):
+                    return f(x) + 1 if torch.compiler.is_exporting() else f(x) - 1
+
+                return torch.cond(pred, true_fn, false_fn, (x,)) * y
+
+        ep = export(
+            Mod(),
+            (
+                torch.tensor(False),
+                torch.randn(3, 4),
+            ),
+        )
+        FileCheck().check_count("torch.ops.aten.sin", 1, exactly=True).run(
+            ep.graph_module.code
+        )
+        FileCheck().check_count("torch.ops.higher_order.cond", 1, exactly=True).run(
+            ep.graph_module.code
+        )
+
+        # True graph should contain sin and sub
+        FileCheck().check_count("torch.ops.aten.sub", 1, exactly=True).run(
+            ep.graph_module.true_graph_0.code
+        )
+        FileCheck().check_count("torch.ops.aten.sin", 1, exactly=True).run(
+            ep.graph_module.true_graph_0.code
+        )
+
+        # False graph should contain sin and add
+        FileCheck().check_count("torch.ops.aten.add", 1, exactly=True).run(
+            ep.graph_module.false_graph_0.code
+        )
+        FileCheck().check_count("torch.ops.aten.sin", 1, exactly=True).run(
+            ep.graph_module.false_graph_0.code
+        )
 
     def test_duplicate_modules_with_non_persistent_buffers(self):
         class FooWithBuf(torch.nn.Module):
@@ -3494,7 +3619,6 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         ):
             em.module()(x)
 
-    @testing.expectedFailureRetraceabilityNonStrict
     def test_dont_duck_size_for_auto_dynamic(self):
         AUTO, STATIC = Dim.AUTO, Dim.STATIC
 
@@ -3721,12 +3845,48 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         nms_pre = torch.tensor(4)
         inputs = (score, score_thr, nms_pre, dict(bbox_pred=bbox_pred))
 
-        ep = torch.export.export(M(), inputs)
+        ep = export(M(), inputs)
         orig_res = M()(*inputs)
         ep_res = ep.module()(*inputs)
         self.assertTrue(torch.allclose(orig_res[0], ep_res[0]))
         self.assertTrue(torch.allclose(orig_res[1], ep_res[1]))
         self.assertTrue(torch.allclose(orig_res[2], ep_res[2]))
+
+    def test_sequential_slicing(self):
+        # See https://github.com/pytorch/pytorch/issues/137455
+
+        class TestModule1(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.seq = torch.nn.Sequential(
+                    torch.nn.Linear(4, 4),
+                    torch.nn.Linear(4, 4),
+                    torch.nn.Linear(4, 4),
+                )
+
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                # seq_last as local variable works
+                seq_last = self.seq[1:]
+                return seq_last(x)
+
+        class TestModule2(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.seq = torch.nn.Sequential(
+                    torch.nn.Linear(4, 4),
+                    torch.nn.Linear(4, 4),
+                    torch.nn.Linear(4, 4),
+                )
+                # seq_last as initialized submodule works
+                self.seq_last = self.seq[1:]
+
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                return self.seq_last(x)
+
+        inp = (torch.randn(4, 4),)
+        for mod in [TestModule1(), TestModule2()]:
+            epm = export(mod, inp).module()
+            self.assertTrue(torch.allclose(epm(*inp), mod(*inp)))
 
     def test_unflatten_asserts(self):
         # TODO: strict-export fails
@@ -5019,7 +5179,7 @@ def forward(self, x):
                 torch._check(pos <= 4)
                 return self.freq[pos] * self.freq[pos]
 
-        ep = torch.export.export(M(), (torch.tensor(1),))
+        ep = export(M(), (torch.tensor(1),))
         FileCheck().check_count(
             "torch.ops.aten._assert_scalar.default", 2, exactly=True
         ).run(ep.graph_module.code)
@@ -6836,6 +6996,1214 @@ graph():
 
         self.assertEqual(gm_flat_non_strict(*inp), gm_flat_strict(*inp))
 
+    def test_unflatten_random_dag_5(self):
+        # dag: {0: [1, 2, 3], 1: [2, 4], 2: [4], 3: [], 4: []}
+
+        class N4(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                return x + 1
+
+        class N3(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.n4 = N4()
+
+            def forward(self, x):
+                return x + 1
+
+        class N2(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.n3 = N3()
+
+            def forward(self, x):
+                x = self.n3.n4(x + 1)
+                return x + 1
+
+        class N1(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.n2 = N2()
+
+            def forward(self, x):
+                x = self.n2(x + 1)
+                x = self.n2.n3.n4(x + 1)
+                return x + 1
+
+        class N0(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.n1 = N1()
+
+            def forward(self, x):
+                x = self.n1(x + 1)
+                x = self.n1.n2(x + 1)
+                x = self.n1.n2.n3(x + 1)
+                return x + 1
+
+        n0 = N0()
+        inp = (torch.ones(1),)
+        eager = n0(*inp)
+        ep = export(n0, inp)
+        epm = ep.module()
+        ufm = torch.export.unflatten(ep)
+        self.assertTrue(torch.allclose(epm(*inp), eager))
+        self.assertTrue(torch.allclose(ufm(*inp), eager))
+
+    def test_unflatten_random_dag_6(self):
+        # dag: {0: [1, 2, 4, 5], 1: [3, 5], 2: [4, 5], 3: [], 4: [5], 5: []}
+
+        class N5(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                return x + 1
+
+        class N4(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.n5 = N5()
+
+            def forward(self, x):
+                x = self.n5(x + 1)
+                return x + 1
+
+        class N3(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.n4 = N4()
+
+            def forward(self, x):
+                return x + 1
+
+        class N2(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.n3 = N3()
+
+            def forward(self, x):
+                x = self.n3.n4(x + 1)
+                x = self.n3.n4.n5(x + 1)
+                return x + 1
+
+        class N1(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.n2 = N2()
+
+            def forward(self, x):
+                x = self.n2.n3(x + 1)
+                x = self.n2.n3.n4.n5(x + 1)
+                return x + 1
+
+        class N0(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.n1 = N1()
+
+            def forward(self, x):
+                x = self.n1(x + 1)
+                x = self.n1.n2(x + 1)
+                x = self.n1.n2.n3.n4(x + 1)
+                x = self.n1.n2.n3.n4.n5(x + 1)
+                return x + 1
+
+        n0 = N0()
+        inp = (torch.ones(1),)
+        eager = n0(*inp)
+        ep = export(n0, inp)
+        epm = ep.module()
+        ufm = torch.export.unflatten(ep)
+        self.assertTrue(torch.allclose(epm(*inp), eager))
+        self.assertTrue(torch.allclose(ufm(*inp), eager))
+
+    def test_unflatten_random_dag_buf_8(self):
+        class N7(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.buf = torch.nn.Buffer(torch.ones(1))
+
+            def forward(self, x):
+                return x + 1
+
+        class N6(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.buf = torch.nn.Buffer(torch.ones(1))
+                self.n7 = N7()
+
+            def forward(self, x):
+                x = self.n7(x + 1)
+                return x + 1
+
+        class N5(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.buf = torch.nn.Buffer(torch.ones(1))
+                self.n6 = N6()
+
+            def forward(self, x):
+                x = x + self.n6.n7.buf
+                x = self.n6(x + 1)
+                return x + 1
+
+        class N4(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.buf = torch.nn.Buffer(torch.ones(1))
+                self.n5 = N5()
+
+            def forward(self, x):
+                x = x + self.n5.buf
+                x = self.n5(x + 1)
+                x = self.n5.n6(x + 1)
+                return x + 1
+
+        class N3(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.buf = torch.nn.Buffer(torch.ones(1))
+                self.n4 = N4()
+
+            def forward(self, x):
+                x = x + self.n4.buf
+                x = x + self.n4.n5.n6.n7.buf
+                x = self.n4(x + 1)
+                x = self.n4.n5.n6(x + 1)
+                return x + 1
+
+        class N2(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.buf = torch.nn.Buffer(torch.ones(1))
+                self.n3 = N3()
+
+            def forward(self, x):
+                x = x + self.n3.n4.n5.n6.n7.buf
+                x = self.n3(x + 1)
+                x = self.n3.n4(x + 1)
+                return x + 1
+
+        class N1(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.buf = torch.nn.Buffer(torch.ones(1))
+                self.n2 = N2()
+
+            def forward(self, x):
+                x = x + self.n2.n3.n4.n5.buf
+                x = x + self.n2.n3.n4.n5.n6.n7.buf
+                x = self.n2(x + 1)
+                x = self.n2.n3.n4(x + 1)
+                x = self.n2.n3.n4.n5(x + 1)
+                x = self.n2.n3.n4.n5.n6.n7(x + 1)
+                return x + 1
+
+        class N0(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.buf = torch.nn.Buffer(torch.ones(1))
+                self.n1 = N1()
+
+            def forward(self, x):
+                x = x + self.n1.n2.buf
+                x = x + self.n1.n2.n3.n4.buf
+                x = self.n1(x + 1)
+                x = self.n1.n2(x + 1)
+                x = self.n1.n2.n3.n4(x + 1)
+                x = self.n1.n2.n3.n4.n5.n6.n7(x + 1)
+                return x + 1
+
+        n0 = N0()
+        inp = (torch.ones(1),)
+        eager = n0(*inp)
+        ep = export(n0, inp)
+        epm = ep.module()
+        ufm = torch.export.unflatten(ep)
+        assert torch.allclose(epm(*inp), eager)
+        assert torch.allclose(ufm(*inp), eager)
+
+    def test_unflatten_random_dag_mutating_buf_4(self):
+        class N3(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.buf = torch.nn.Buffer(torch.ones(1))
+
+            def forward(self, x):
+                return x + 1
+
+        class N2(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.buf = torch.nn.Buffer(torch.ones(1))
+                self.n3 = N3()
+
+            def forward(self, x):
+                x = x + self.n3.buf
+                x = self.n3(x + 1)
+                return x + 1
+
+        class N1(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.buf = torch.nn.Buffer(torch.ones(1))
+                self.n2 = N2()
+
+            def forward(self, x):
+                x = x + self.n2.n3.buf
+                x = self.n2(x + 1)
+                x = self.n2.n3(x + 1)
+                self.n2.n3.buf.add_(1)
+                return x + 1
+
+        class N0(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.buf = torch.nn.Buffer(torch.ones(1))
+                self.n1 = N1()
+
+            def forward(self, x):
+                x = x + self.n1.buf
+                x = x + self.n1.n2.n3.buf
+                x = self.n1(x + 1)
+                x = self.n1.n2(x + 1)
+                x = self.n1.n2.n3(x + 1)
+                self.n1.buf.add_(1)
+                self.n1.n2.buf.add_(1)
+                return x + 1
+
+        n0 = N0()
+        inp = (torch.ones(1),)
+        eager = n0(*inp)
+        ep = export(N0(), inp)
+        epm = ep.module()
+        ufm = torch.export.unflatten(ep)
+        assert torch.allclose(epm(*inp), eager)
+        assert torch.allclose(ufm(*inp), eager)
+
+    def test_unflatten_random_dag_mutating_buf_6(self):
+        class N5(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.buf = torch.nn.Buffer(torch.ones(1))
+
+            def forward(self, x):
+                return x + 1
+
+        class N4(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.buf = torch.nn.Buffer(torch.ones(1))
+                self.n5 = N5()
+
+            def forward(self, x):
+                x = x + self.n5.buf
+                self.n5.buf.add_(1)
+                return x + 1
+
+        class N3(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.buf = torch.nn.Buffer(torch.ones(1))
+                self.n4 = N4()
+
+            def forward(self, x):
+                x = x + self.n4.buf
+                x = self.n4(x + 1)
+                return x + 1
+
+        class N2(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.buf = torch.nn.Buffer(torch.ones(1))
+                self.n3 = N3()
+
+            def forward(self, x):
+                x = x + self.n3.buf
+                x = x + self.n3.n4.n5.buf
+                x = self.n3(x + 1)
+                x = self.n3.n4(x + 1)
+                x = self.n3.n4.n5(x + 1)
+                self.n3.n4.buf.add_(1)
+                return x + 1
+
+        class N1(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.buf = torch.nn.Buffer(torch.ones(1))
+                self.n2 = N2()
+
+            def forward(self, x):
+                x = x + self.n2.n3.n4.buf
+                x = self.n2.n3(x + 1)
+                x = self.n2.n3.n4(x + 1)
+                x = self.n2.n3.n4.n5(x + 1)
+                self.n2.buf.add_(1)
+                self.n2.n3.buf.add_(1)
+                self.n2.n3.n4.n5.buf.add_(1)
+                return x + 1
+
+        class N0(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.buf = torch.nn.Buffer(torch.ones(1))
+                self.n1 = N1()
+
+            def forward(self, x):
+                x = x + self.n1.n2.buf
+                x = x + self.n1.n2.n3.buf
+                x = x + self.n1.n2.n3.n4.buf
+                x = self.n1(x + 1)
+                x = self.n1.n2(x + 1)
+                x = self.n1.n2.n3(x + 1)
+                x = self.n1.n2.n3.n4(x + 1)
+                x = self.n1.n2.n3.n4.n5(x + 1)
+                self.n1.n2.buf.add_(1)
+                self.n1.n2.n3.n4.buf.add_(1)
+                return x + 1
+
+        n0 = N0()
+        inp = (torch.ones(1),)
+        eager = n0(*inp)
+        ep = export(N0(), inp)
+        epm = ep.module()
+        ufm = torch.export.unflatten(ep)
+        assert torch.allclose(epm(*inp), eager)
+        assert torch.allclose(ufm(*inp), eager)
+
+    def test_unflatten_random_dag_mutating_buf_9(self):
+        class N8(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.buf = torch.nn.Buffer(torch.ones(1))
+
+            def forward(self, x):
+                return x + 1
+
+        class N7(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.buf = torch.nn.Buffer(torch.ones(1))
+                self.n8 = N8()
+
+            def forward(self, x):
+                x = self.n8(x + 1)
+                self.n8.buf.add_(1)
+                return x + 1
+
+        class N6(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.buf = torch.nn.Buffer(torch.ones(1))
+                self.n7 = N7()
+
+            def forward(self, x):
+                x = x + self.n7.buf
+                x = x + self.n7.n8.buf
+                x = self.n7.n8(x + 1)
+                self.n7.buf.add_(1)
+                self.n7.n8.buf.add_(1)
+                return x + 1
+
+        class N5(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.buf = torch.nn.Buffer(torch.ones(1))
+                self.n6 = N6()
+
+            def forward(self, x):
+                x = x + self.n6.n7.buf
+                x = self.n6.n7(x + 1)
+                self.n6.buf.add_(1)
+                self.n6.n7.n8.buf.add_(1)
+                return x + 1
+
+        class N4(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.buf = torch.nn.Buffer(torch.ones(1))
+                self.n5 = N5()
+
+            def forward(self, x):
+                x = x + self.n5.buf
+                x = x + self.n5.n6.buf
+                x = self.n5(x + 1)
+                x = self.n5.n6.n7(x + 1)
+                x = self.n5.n6.n7.n8(x + 1)
+                self.n5.n6.n7.buf.add_(1)
+                self.n5.n6.n7.n8.buf.add_(1)
+                return x + 1
+
+        class N3(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.buf = torch.nn.Buffer(torch.ones(1))
+                self.n4 = N4()
+
+            def forward(self, x):
+                x = x + self.n4.buf
+                x = x + self.n4.n5.n6.n7.buf
+                x = x + self.n4.n5.n6.n7.n8.buf
+                x = self.n4(x + 1)
+                x = self.n4.n5.n6(x + 1)
+                self.n4.n5.n6.n7.buf.add_(1)
+                self.n4.n5.n6.n7.n8.buf.add_(1)
+                return x + 1
+
+        class N2(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.buf = torch.nn.Buffer(torch.ones(1))
+                self.n3 = N3()
+
+            def forward(self, x):
+                x = x + self.n3.n4.n5.n6.buf
+                x = x + self.n3.n4.n5.n6.n7.buf
+                x = self.n3(x + 1)
+                x = self.n3.n4(x + 1)
+                x = self.n3.n4.n5(x + 1)
+                x = self.n3.n4.n5.n6.n7.n8(x + 1)
+                self.n3.n4.buf.add_(1)
+                self.n3.n4.n5.buf.add_(1)
+                self.n3.n4.n5.n6.buf.add_(1)
+                self.n3.n4.n5.n6.n7.n8.buf.add_(1)
+                return x + 1
+
+        class N1(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.buf = torch.nn.Buffer(torch.ones(1))
+                self.n2 = N2()
+
+            def forward(self, x):
+                x = x + self.n2.n3.buf
+                x = x + self.n2.n3.n4.n5.buf
+                x = x + self.n2.n3.n4.n5.n6.buf
+                x = x + self.n2.n3.n4.n5.n6.n7.n8.buf
+                x = self.n2(x + 1)
+                x = self.n2.n3.n4(x + 1)
+                self.n2.buf.add_(1)
+                self.n2.n3.n4.n5.n6.buf.add_(1)
+                self.n2.n3.n4.n5.n6.n7.buf.add_(1)
+                return x + 1
+
+        class N0(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.buf = torch.nn.Buffer(torch.ones(1))
+                self.n1 = N1()
+
+            def forward(self, x):
+                x = x + self.n1.buf
+                x = x + self.n1.n2.n3.n4.buf
+                x = x + self.n1.n2.n3.n4.n5.n6.n7.buf
+                x = self.n1(x + 1)
+                x = self.n1.n2(x + 1)
+                x = self.n1.n2.n3(x + 1)
+                x = self.n1.n2.n3.n4(x + 1)
+                x = self.n1.n2.n3.n4.n5.n6.n7(x + 1)
+                self.n1.n2.n3.buf.add_(1)
+                self.n1.n2.n3.n4.n5.n6.buf.add_(1)
+                self.n1.n2.n3.n4.n5.n6.n7.n8.buf.add_(1)
+                return x + 1
+
+        n0 = N0()
+        inp = (torch.ones(1),)
+        eager = n0(*inp)
+        ep = export(N0(), inp)
+        epm = ep.module()
+        ufm = torch.export.unflatten(ep)
+        assert torch.allclose(epm(*inp), eager)
+        assert torch.allclose(ufm(*inp), eager)
+
+    def test_unflatten_random_dag_preserving_4(self):
+        # {0: [1, 2, 3], 1: [2], 2: [], 3: []}
+        class N3(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                return x + 1
+
+        class N2(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.n3 = N3()
+
+            def forward(self, x):
+                return x + 1
+
+        class N1(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.n2 = N2()
+
+            def forward(self, x):
+                x = self.n2(x + 1)
+                return x + 1
+
+        class N0(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.n1 = N1()
+
+            def forward(self, x):
+                x = self.n1(x + 1)
+                x = self.n1.n2(x + 1)
+                x = self.n1.n2.n3(x + 1)
+                return x + 1
+
+        inp = (torch.ones(1),)
+        eager = N0()(*inp)
+        if is_retracebility_test(self._testMethodName):
+            fqns = ()
+        else:
+            fqns = (
+                "n1",
+                "n1.n2",
+                "n1.n2.n3",
+            )
+        ep = export(N0(), inp, preserve_module_call_signature=fqns)
+        epm = ep.module()
+        ufm = torch.export.unflatten(ep)
+        assert torch.allclose(epm(*inp), eager)
+        assert torch.allclose(ufm(*inp), eager)
+
+    def test_unflatten_random_dag_mutating_buf_preserving_4(self):
+        # {0: [2, 3], 1: [2], 2: [3], 3: []}
+        # {0: [], 1: [3], 2: [3], 3: []}
+        # {0: [2, 3], 1: [2], 2: [3], 3: []}
+        class N3(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.buf = torch.nn.Buffer(torch.ones(1))
+
+            def forward(self, x):
+                return x + 1
+
+        class N2(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.buf = torch.nn.Buffer(torch.ones(1))
+                self.n3 = N3()
+
+            def forward(self, x):
+                x = x + self.n3.buf
+                x = self.n3(x + 1)
+                self.n3.buf.add_(1)
+                return x + 1
+
+        class N1(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.buf = torch.nn.Buffer(torch.ones(1))
+                self.n2 = N2()
+
+            def forward(self, x):
+                x = x + self.n2.buf
+                x = self.n2(x + 1)
+                self.n2.n3.buf.add_(1)
+                return x + 1
+
+        class N0(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.buf = torch.nn.Buffer(torch.ones(1))
+                self.n1 = N1()
+
+            def forward(self, x):
+                x = x + self.n1.n2.buf
+                x = x + self.n1.n2.n3.buf
+                x = self.n1.n2(x + 1)
+                x = self.n1.n2.n3(x + 1)
+                return x + 1
+
+        inp = (torch.ones(1),)
+        eager = N0()(*inp)
+        if is_retracebility_test(self._testMethodName):
+            fqns = ()
+        else:
+            fqns = (
+                "n1",
+                "n1.n2",
+                "n1.n2.n3",
+            )
+        ep = export(N0(), inp, preserve_module_call_signature=fqns)
+        epm = ep.module()
+        ufm = torch.export.unflatten(ep)
+        assert torch.allclose(epm(*inp), eager)
+        assert torch.allclose(ufm(*inp), eager)
+
+    def test_unflatten_random_dag_mutating_buf_preserving_4_1(self):
+        # {0: [2], 1: [3], 2: [3], 3: []}
+        # {0: [2, 3], 1: [3], 2: [3], 3: []}
+        # {0: [1], 1: [3], 2: [], 3: []}
+        class N3(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.buf = torch.nn.Buffer(torch.ones(1))
+
+            def forward(self, x):
+                return x + 1
+
+        class N2(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.buf = torch.nn.Buffer(torch.ones(1))
+                self.n3 = N3()
+
+            def forward(self, x):
+                x = x + self.n3.buf
+                self.n3.buf.add_(1)
+                return x + 1
+
+        class N1(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.buf = torch.nn.Buffer(torch.ones(1))
+                self.n2 = N2()
+
+            def forward(self, x):
+                x = x + self.n2.n3.buf
+                x = self.n2.n3(x + 1)
+                self.n2.n3.buf.add_(1)
+                return x + 1
+
+        class N0(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.buf = torch.nn.Buffer(torch.ones(1))
+                self.n1 = N1()
+
+            def forward(self, x):
+                x = x + self.n1.n2.buf
+                x = self.n1(x + 1)
+                self.n1.n2.buf.add_(1)
+                self.n1.n2.n3.buf.add_(1)
+                return x + 1
+
+        inp = (torch.ones(1),)
+        eager = N0()(*inp)
+        if is_retracebility_test(self._testMethodName):
+            fqns = ()
+        else:
+            fqns = (
+                "n1",
+                "n1.n2",
+                "n1.n2.n3",
+            )
+        ep = export(N0(), inp, preserve_module_call_signature=fqns)
+        epm = ep.module()
+        ufm = torch.export.unflatten(ep)
+        assert torch.allclose(epm(*inp), eager)
+        assert torch.allclose(ufm(*inp), eager)
+
+    def test_unflatten_random_dag_mutating_buf_preserving_5(self):
+        # {0: [1, 2, 3], 1: [3, 4], 2: [3, 4], 3: [4], 4: []}
+        # {0: [3], 1: [4], 2: [3, 4], 3: [4], 4: []}
+        # {0: [1, 2], 1: [2, 3], 2: [3, 4], 3: [], 4: []}
+        class N4(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.buf = torch.nn.Buffer(torch.ones(1))
+
+            def forward(self, x):
+                return x + 1
+
+        class N3(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.buf = torch.nn.Buffer(torch.ones(1))
+                self.n4 = N4()
+
+            def forward(self, x):
+                x = x + self.n4.buf
+                self.n4.buf.add_(1)
+                return x + 1
+
+        class N2(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.buf = torch.nn.Buffer(torch.ones(1))
+                self.n3 = N3()
+
+            def forward(self, x):
+                x = x + self.n3.buf
+                x = x + self.n3.n4.buf
+                x = self.n3(x + 1)
+                x = self.n3.n4(x + 1)
+                self.n3.buf.add_(1)
+                self.n3.n4.buf.add_(1)
+                return x + 1
+
+        class N1(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.buf = torch.nn.Buffer(torch.ones(1))
+                self.n2 = N2()
+
+            def forward(self, x):
+                x = x + self.n2.n3.buf
+                x = x + self.n2.n3.n4.buf
+                x = self.n2(x + 1)
+                x = self.n2.n3(x + 1)
+                self.n2.n3.n4.buf.add_(1)
+                return x + 1
+
+        class N0(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.buf = torch.nn.Buffer(torch.ones(1))
+                self.n1 = N1()
+
+            def forward(self, x):
+                x = x + self.n1.buf
+                x = x + self.n1.n2.buf
+                x = x + self.n1.n2.n3.buf
+                x = self.n1(x + 1)
+                x = self.n1.n2(x + 1)
+                self.n1.n2.n3.buf.add_(1)
+                return x + 1
+
+        inp = (torch.ones(1),)
+        eager = N0()(*inp)
+        if is_retracebility_test(self._testMethodName):
+            fqns = ()
+        else:
+            fqns = (
+                "n1",
+                "n1.n2",
+                "n1.n2.n3",
+                "n1.n2.n3.n4",
+            )
+        ep = export(N0(), inp, preserve_module_call_signature=fqns)
+        epm = ep.module()
+        ufm = torch.export.unflatten(ep)
+        assert torch.allclose(epm(*inp), eager)
+        assert torch.allclose(ufm(*inp), eager)
+
+    def test_unflatten_random_dag_mutating_buf_preserving_7(self):
+        # {0: [3, 4, 5, 6], 1: [2, 3, 4, 5, 6], 2: [3, 4, 5], 3: [5, 6], 4: [6], 5: [6], 6: []}
+        # {0: [2, 4, 5, 6], 1: [3, 4, 6], 2: [6], 3: [5], 4: [], 5: [], 6: []}
+        # {0: [1, 2, 3, 4, 5, 6], 1: [2, 3, 4], 2: [4, 5, 6], 3: [4, 5, 6], 4: [5, 6], 5: [6], 6: []}
+        class N6(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.buf = torch.nn.Buffer(torch.ones(1))
+
+            def forward(self, x):
+                return x + 1
+
+        class N5(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.buf = torch.nn.Buffer(torch.ones(1))
+                self.n6 = N6()
+
+            def forward(self, x):
+                x = x + self.n6.buf
+                x = self.n6(x + 1)
+                return x + 1
+
+        class N4(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.buf = torch.nn.Buffer(torch.ones(1))
+                self.n5 = N5()
+
+            def forward(self, x):
+                x = x + self.n5.n6.buf
+                x = self.n5(x + 1)
+                x = self.n5.n6(x + 1)
+                return x + 1
+
+        class N3(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.buf = torch.nn.Buffer(torch.ones(1))
+                self.n4 = N4()
+
+            def forward(self, x):
+                x = x + self.n4.n5.buf
+                x = x + self.n4.n5.n6.buf
+                x = self.n4(x + 1)
+                x = self.n4.n5(x + 1)
+                x = self.n4.n5.n6(x + 1)
+                self.n4.n5.buf.add_(1)
+                return x + 1
+
+        class N2(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.buf = torch.nn.Buffer(torch.ones(1))
+                self.n3 = N3()
+
+            def forward(self, x):
+                x = x + self.n3.buf
+                x = x + self.n3.n4.buf
+                x = x + self.n3.n4.n5.buf
+                x = self.n3.n4(x + 1)
+                x = self.n3.n4.n5(x + 1)
+                x = self.n3.n4.n5.n6(x + 1)
+                self.n3.n4.n5.n6.buf.add_(1)
+                return x + 1
+
+        class N1(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.buf = torch.nn.Buffer(torch.ones(1))
+                self.n2 = N2()
+
+            def forward(self, x):
+                x = x + self.n2.buf
+                x = x + self.n2.n3.buf
+                x = x + self.n2.n3.n4.buf
+                x = x + self.n2.n3.n4.n5.buf
+                x = x + self.n2.n3.n4.n5.n6.buf
+                x = self.n2(x + 1)
+                x = self.n2.n3(x + 1)
+                x = self.n2.n3.n4(x + 1)
+                self.n2.n3.buf.add_(1)
+                self.n2.n3.n4.buf.add_(1)
+                self.n2.n3.n4.n5.n6.buf.add_(1)
+                return x + 1
+
+        class N0(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.buf = torch.nn.Buffer(torch.ones(1))
+                self.n1 = N1()
+
+            def forward(self, x):
+                x = x + self.n1.n2.n3.buf
+                x = x + self.n1.n2.n3.n4.buf
+                x = x + self.n1.n2.n3.n4.n5.buf
+                x = x + self.n1.n2.n3.n4.n5.n6.buf
+                x = self.n1(x + 1)
+                x = self.n1.n2(x + 1)
+                x = self.n1.n2.n3(x + 1)
+                x = self.n1.n2.n3.n4(x + 1)
+                x = self.n1.n2.n3.n4.n5(x + 1)
+                x = self.n1.n2.n3.n4.n5.n6(x + 1)
+                self.n1.n2.buf.add_(1)
+                self.n1.n2.n3.n4.buf.add_(1)
+                self.n1.n2.n3.n4.n5.buf.add_(1)
+                self.n1.n2.n3.n4.n5.n6.buf.add_(1)
+                return x + 1
+
+        inp = (torch.ones(1),)
+        eager = N0()(*inp)
+        if is_retracebility_test(self._testMethodName):
+            fqns = ()
+        else:
+            fqns = (
+                "n1",
+                "n1.n2",
+                "n1.n2.n3",
+                "n1.n2.n3.n4",
+                "n1.n2.n3.n4.n5",
+                "n1.n2.n3.n4.n5.n6",
+            )
+        ep = export(N0(), inp, preserve_module_call_signature=fqns)
+        epm = ep.module()
+        ufm = torch.export.unflatten(ep)
+        assert torch.allclose(epm(*inp), eager)
+        assert torch.allclose(ufm(*inp), eager)
+
+    def test_unflatten_random_dag_mutating_buf_preserving_10(self):
+        class N9(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.buf = torch.nn.Buffer(torch.ones(1))
+
+            def forward(self, x):
+                return x + 1
+
+        class N8(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.buf = torch.nn.Buffer(torch.ones(1))
+                self.n9 = N9()
+
+            def forward(self, x):
+                x = x + self.n9.buf
+                self.n9.buf.add_(1)
+                return x + 1
+
+        class N7(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.buf = torch.nn.Buffer(torch.ones(1))
+                self.n8 = N8()
+
+            def forward(self, x):
+                x = self.n8(x + 1)
+                x = self.n8.n9(x + 1)
+                self.n8.buf.add_(1)
+                return x + 1
+
+        class N6(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.buf = torch.nn.Buffer(torch.ones(1))
+                self.n7 = N7()
+
+            def forward(self, x):
+                x = x + self.n7.n8.buf
+                x = self.n7(x + 1)
+                x = self.n7.n8.n9(x + 1)
+                return x + 1
+
+        class N5(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.buf = torch.nn.Buffer(torch.ones(1))
+                self.n6 = N6()
+
+            def forward(self, x):
+                x = x + self.n6.buf
+                x = x + self.n6.n7.buf
+                x = x + self.n6.n7.n8.buf
+                x = self.n6(x + 1)
+                x = self.n6.n7.n8.n9(x + 1)
+                self.n6.n7.buf.add_(1)
+                self.n6.n7.n8.buf.add_(1)
+                return x + 1
+
+        class N4(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.buf = torch.nn.Buffer(torch.ones(1))
+                self.n5 = N5()
+
+            def forward(self, x):
+                x = x + self.n5.n6.buf
+                x = x + self.n5.n6.n7.n8.buf
+                x = x + self.n5.n6.n7.n8.n9.buf
+                x = self.n5(x + 1)
+                x = self.n5.n6(x + 1)
+                x = self.n5.n6.n7.n8(x + 1)
+                x = self.n5.n6.n7.n8.n9(x + 1)
+                self.n5.buf.add_(1)
+                self.n5.n6.buf.add_(1)
+                self.n5.n6.n7.buf.add_(1)
+                self.n5.n6.n7.n8.buf.add_(1)
+                return x + 1
+
+        class N3(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.buf = torch.nn.Buffer(torch.ones(1))
+                self.n4 = N4()
+
+            def forward(self, x):
+                x = x + self.n4.buf
+                x = x + self.n4.n5.n6.buf
+                x = x + self.n4.n5.n6.n7.buf
+                x = x + self.n4.n5.n6.n7.n8.n9.buf
+                x = self.n4(x + 1)
+                x = self.n4.n5(x + 1)
+                x = self.n4.n5.n6(x + 1)
+                x = self.n4.n5.n6.n7.n8(x + 1)
+                x = self.n4.n5.n6.n7.n8.n9(x + 1)
+                self.n4.n5.n6.buf.add_(1)
+                self.n4.n5.n6.n7.n8.buf.add_(1)
+                return x + 1
+
+        class N2(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.buf = torch.nn.Buffer(torch.ones(1))
+                self.n3 = N3()
+
+            def forward(self, x):
+                x = x + self.n3.buf
+                x = x + self.n3.n4.buf
+                x = x + self.n3.n4.n5.n6.n7.n8.buf
+                x = self.n3(x + 1)
+                x = self.n3.n4(x + 1)
+                x = self.n3.n4.n5(x + 1)
+                x = self.n3.n4.n5.n6(x + 1)
+                x = self.n3.n4.n5.n6.n7.n8(x + 1)
+                x = self.n3.n4.n5.n6.n7.n8.n9(x + 1)
+                self.n3.buf.add_(1)
+                self.n3.n4.buf.add_(1)
+                self.n3.n4.n5.buf.add_(1)
+                self.n3.n4.n5.n6.buf.add_(1)
+                self.n3.n4.n5.n6.n7.buf.add_(1)
+                self.n3.n4.n5.n6.n7.n8.n9.buf.add_(1)
+                return x + 1
+
+        class N1(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.buf = torch.nn.Buffer(torch.ones(1))
+                self.n2 = N2()
+
+            def forward(self, x):
+                x = x + self.n2.buf
+                x = x + self.n2.n3.buf
+                x = x + self.n2.n3.n4.n5.n6.buf
+                x = x + self.n2.n3.n4.n5.n6.n7.n8.buf
+                x = self.n2(x + 1)
+                x = self.n2.n3(x + 1)
+                x = self.n2.n3.n4(x + 1)
+                x = self.n2.n3.n4.n5(x + 1)
+                x = self.n2.n3.n4.n5.n6(x + 1)
+                x = self.n2.n3.n4.n5.n6.n7(x + 1)
+                self.n2.buf.add_(1)
+                self.n2.n3.n4.n5.n6.n7.n8.buf.add_(1)
+                self.n2.n3.n4.n5.n6.n7.n8.n9.buf.add_(1)
+                return x + 1
+
+        class N0(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.buf = torch.nn.Buffer(torch.ones(1))
+                self.n1 = N1()
+
+            def forward(self, x):
+                x = x + self.n1.n2.buf
+                x = x + self.n1.n2.n3.buf
+                x = x + self.n1.n2.n3.n4.n5.buf
+                x = x + self.n1.n2.n3.n4.n5.n6.buf
+                x = x + self.n1.n2.n3.n4.n5.n6.n7.buf
+                x = self.n1(x + 1)
+                x = self.n1.n2(x + 1)
+                x = self.n1.n2.n3.n4(x + 1)
+                x = self.n1.n2.n3.n4.n5.n6.n7(x + 1)
+                x = self.n1.n2.n3.n4.n5.n6.n7.n8(x + 1)
+                x = self.n1.n2.n3.n4.n5.n6.n7.n8.n9(x + 1)
+                self.n1.n2.n3.buf.add_(1)
+                self.n1.n2.n3.n4.n5.n6.n7.n8.buf.add_(1)
+                self.n1.n2.n3.n4.n5.n6.n7.n8.n9.buf.add_(1)
+                return x + 1
+
+        inp = (torch.ones(1),)
+        eager = N0()(*inp)
+        if is_retracebility_test(self._testMethodName):
+            fqns = ()
+        else:
+            fqns = (
+                "n1",
+                "n1.n2",
+                "n1.n2.n3",
+                "n1.n2.n3.n4",
+                "n1.n2.n3.n4.n5",
+                "n1.n2.n3.n4.n5.n6",
+                "n1.n2.n3.n4.n5.n6.n7",
+                "n1.n2.n3.n4.n5.n6.n7.n8",
+                "n1.n2.n3.n4.n5.n6.n7.n8.n9",
+            )
+        ep = export(
+            N0(),
+            inp,
+            strict=False,  # strict export is slow with large random dags
+            preserve_module_call_signature=fqns,
+        )
+        epm = ep.module()
+        ufm = torch.export.unflatten(ep)
+        assert torch.allclose(epm(*inp), eager)
+        assert torch.allclose(ufm(*inp), eager)
+
+    def test_unflatten_random_dag_const_preserving_3(self):
+        class N2(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.const = torch.ones(1)
+
+            def forward(self, x):
+                return x + 1
+
+        class N1(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.const = torch.ones(1)
+                self.n2 = N2()
+
+            def forward(self, x):
+                x = x + self.n2.const
+                x = self.n2(x + 1)
+                return x + 1
+
+        class N0(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.const = torch.ones(1)
+                self.n1 = N1()
+
+            def forward(self, x):
+                x = x + self.n1.n2.const
+                x = self.n1(x + 1)
+                x = self.n1.n2(x + 1)
+                return x + 1
+
+        inp = (torch.ones(1),)
+        eager = N0()(*inp)
+        if is_retracebility_test(self._testMethodName):
+            fqns = ()
+        else:
+            fqns = (
+                "n1",
+                "n1.n2",
+            )
+        ep = export(N0(), inp, preserve_module_call_signature=fqns)
+        epm = ep.module()
+        ufm = torch.export.unflatten(ep)
+        assert torch.allclose(epm(*inp), eager)
+        assert torch.allclose(ufm(*inp), eager)
+
+    def test_unflatten_random_dag_const_preserving_3_1(self):
+        class N2(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.const = torch.ones(1)
+
+            def forward(self, x):
+                return x + 1
+
+        class N1(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.const = torch.ones(1)
+                self.n2 = N2()
+
+            def forward(self, x):
+                x = x + self.n2.const
+                x = self.n2(x + 1)
+                return x + 1
+
+        class N0(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.const = torch.ones(1)
+                self.n1 = N1()
+
+            def forward(self, x):
+                x = x + self.n1.const
+                x = self.n1(x + 1)
+                x = self.n1.n2(x + 1)
+                return x + 1
+
+        inp = (torch.ones(1),)
+        eager = N0()(*inp)
+        if is_retracebility_test(self._testMethodName):
+            fqns = ()
+        else:
+            fqns = (
+                "n1",
+                "n1.n2",
+            )
+        ep = export(N0(), inp, preserve_module_call_signature=fqns)
+        epm = ep.module()
+        ufm = torch.export.unflatten(ep)
+        assert torch.allclose(epm(*inp), eager)
+        assert torch.allclose(ufm(*inp), eager)
+
     def test_unflatten_no_unroll(self):
         inp = (torch.ones(1),)
 
@@ -6851,7 +8219,15 @@ graph():
                 else:
                     return x + 2 * (self.buf + 1) - self.const
 
-        class M(torch.nn.Module):
+        class K(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.n = N()
+
+            def forward(self, x0):
+                return self.n(x0, True)
+
+        class P(torch.nn.Module):
             def __init__(self):
                 super().__init__()
                 self.n = N()
@@ -6862,29 +8238,27 @@ graph():
                 x2 = self.n(x0, False)
                 return x1 + x2
 
-        m = M()
-        eager_result = m(*inp)
+        class Q(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.k = K()
 
-        def test(ep, swap):
-            epm = ep.module()
-            ufm = torch.export.unflatten(ep)
+            def forward(self, x):
+                x0 = x + 3
+                x1 = self.k.n(x0, True)
+                x2 = self.k.n(x0, False)
+                return x1 + x2
 
-            exported_result = epm(*inp)
-            self.assertTrue(torch.allclose(exported_result, eager_result))
+        class R(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.k = K()
 
-            unflattened_result = ufm(*inp)
-            self.assertTrue(torch.allclose(unflattened_result, eager_result))
-
-            for fqn, mod in swap.items():
-                ufm.set_submodule(fqn, mod)
-            unflattened_result = ufm(*inp)
-            self.assertTrue(torch.allclose(unflattened_result, eager_result))
-
-        if not is_retracebility_test(self._testMethodName):
-            test(
-                export(M(), inp, preserve_module_call_signature=("n",)),
-                swap={"n": N()},
-            )
+            def forward(self, x):
+                x0 = x + 3
+                x1 = self.k(x0)
+                x2 = self.k.n(x0, False)
+                return x1 + x2
 
         class _N(torch.nn.Module):
             def forward(self, x):
@@ -6894,10 +8268,35 @@ graph():
             def forward(self, x):
                 return x + 6
 
-        test(
-            export(M(), inp),
-            swap={"n": _N(), "n@1": _N_1()},
-        )
+        for Mod, path_n in [(P, "n"), (Q, "k.n"), (R, "k.n")]:
+            m = Mod()
+            eager_result = m(*inp)
+
+            def test(ep, swap):
+                epm = ep.module()
+                ufm = torch.export.unflatten(ep)
+
+                exported_result = epm(*inp)
+                self.assertTrue(torch.allclose(exported_result, eager_result))
+
+                unflattened_result = ufm(*inp)
+                self.assertTrue(torch.allclose(unflattened_result, eager_result))
+
+                for fqn, mod in swap.items():
+                    ufm.set_submodule(fqn, mod)
+                unflattened_result = ufm(*inp)
+                self.assertTrue(torch.allclose(unflattened_result, eager_result))
+
+            if not is_retracebility_test(self._testMethodName):
+                test(
+                    export(Mod(), inp, preserve_module_call_signature=(path_n,)),
+                    swap={path_n: N()},
+                )
+
+            test(
+                export(Mod(), inp),
+                swap={path_n: _N(), path_n + "@1": _N_1()},
+            )
 
     def test_preserve_module_call_signature_unflatten_specialization(self):
         class N(torch.nn.Module):
@@ -7618,6 +9017,25 @@ def forward(self, x, b_t, y):
         self.assertEqual(copied_m.state_dict(), m.state_dict())
         self.assertEqual(ep.state_dict, m.state_dict())
 
+    def test_module_list_slice(self):
+        class ModuleListTruncated(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.fcs = torch.nn.ModuleList(
+                    [torch.nn.Linear(1, 1) for _ in range(2)]
+                )
+
+            def forward(self, x):
+                for fc in self.fcs[:1]:
+                    x = fc(x)
+                return x
+
+        x = torch.rand(2, 1)
+        mod = ModuleListTruncated()
+
+        epm = export(mod, (x,)).module()
+        self.assertTrue(torch.allclose(mod(x), epm(x)))
+
     def test_non_persistent_buffer(self):
         class MyModule(torch.nn.Module):
             def __init__(self) -> None:
@@ -8221,7 +9639,6 @@ def forward(self, x, y):
         }
         export(f, (inputs,), dynamic_shapes=dynamic_shapes)
 
-    @testing.expectedFailureRetraceabilityNonStrict
     def test_disable_forced_specializations_ok(self):
         # check that we don't force specialization, and defer to runtime asserts
         # with allow_complex_guards_as_runtime_asserts=True to successfully export
@@ -8849,7 +10266,6 @@ def forward(self, x):
         self.assertTrue(torch.allclose(comp_mod(inp1), mod(inp1)))
         self.assertTrue(torch.allclose(comp_mod(inp2), mod(inp2)))
 
-    @testing.expectedFailureRetraceabilityNonStrict
     def test_automatic_dynamic_shapes_simple_equality(self):
         # The next 3 test cases tests for automatic dynamic shapes specs, verifying that automatic dynamism
         # leads to replacement symbols being set for equalities, and inferred relationships being checked
@@ -8921,7 +10337,6 @@ def forward(self, x):
             test_serdes=True,
         )
 
-    @testing.expectedFailureRetraceabilityNonStrict
     def test_automatic_dynamic_shapes_constant_relation(self):
         AUTO, STATIC = Dim.AUTO, Dim.STATIC
 
@@ -8967,7 +10382,6 @@ def forward(self, x):
             test_serdes=True,
         )
 
-    @testing.expectedFailureRetraceabilityNonStrict
     def test_automatic_dynamic_shapes_linear_relation(self):
         AUTO, STATIC = Dim.AUTO, Dim.STATIC
 
@@ -9276,7 +10690,6 @@ def forward(self, x):
         export(Foo(), inps)
 
     @testing.expectedFailureCppSerDes  # TODO(pianpwk): PowByNatural valuerange deserialization
-    @testing.expectedFailureRetraceabilityNonStrict
     def test_dim_dynamic(self):
         dynamic = Dim.DYNAMIC
 
