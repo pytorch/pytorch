@@ -19,6 +19,8 @@ if TYPE_CHECKING:
 
     from torch._guards import CompileId
 
+    from .types import DynamoFrameType
+
 
 def exportdb_error_message(case_name: str) -> str:
     return (
@@ -93,7 +95,7 @@ class ResetRequired(TorchDynamoException):
 
 class ShortenTraceback(TorchDynamoException):
     def __init__(
-        self, *args, first_useful_frame: Optional[types.FrameType], **kwargs
+        self, *args: Any, first_useful_frame: Optional[types.FrameType], **kwargs: Any
     ) -> None:
         super().__init__(*args, **kwargs)
         self.first_useful_frame = first_useful_frame
@@ -429,7 +431,7 @@ def get_exc_message(
 
 
 def get_real_stack(
-    exc: Exception, frame: Optional[types.FrameType] = None
+    exc: Exception, frame: Optional[DynamoFrameType] = None
 ) -> Optional[StackSummary]:
     real_stack = getattr(exc, "real_stack", None)
     if real_stack is None:
@@ -481,7 +483,7 @@ def format_error_msg_verbose(
     exc: Exception,
     code: types.CodeType,
     record_filename: Optional[str] = None,
-    frame: Optional[types.FrameType] = None,
+    frame: Optional[DynamoFrameType] = None,
 ) -> str:
     msg = (
         f"WON'T CONVERT {code.co_name} {code.co_filename} line {code.co_firstlineno}\n"
@@ -508,7 +510,7 @@ def format_error_msg(
     exc: Exception,
     code: types.CodeType,
     record_filename: Optional[str] = None,
-    frame: Optional[types.FrameType] = None,
+    frame: Optional[DynamoFrameType] = None,
 ) -> str:
     if config.verbose:
         return format_error_msg_verbose(exc, code, record_filename, frame)
