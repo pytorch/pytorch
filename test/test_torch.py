@@ -10825,7 +10825,10 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
 
             self.assertEqual(len(w), 1)
             self.assertTrue(issubclass(w[0].category, UserWarning))
-            self.assertIn("Converting a tensor with requires_grad=True to a scalar may lead to unexpected behavior.", str(w[0].message))
+            self.assertIn(
+                "Converting a tensor with requires_grad=True to a scalar may lead to unexpected behavior.",
+                str(w[0].message)
+            )
 
             y = math.pow(x, 3)  # calling it again does not result in a second warning
             self.assertEqual(len(w), 1)
