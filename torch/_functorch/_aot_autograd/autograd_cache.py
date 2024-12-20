@@ -17,7 +17,7 @@ from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional, Tuple, TYPE_CHECKING, Union
 
 import torch
-from torch._dynamo.utils import CompileEventLogger, CompileEventLogLevel, counters
+from torch._dynamo.utils import CompileEventLogger, counters
 from torch._functorch import config
 from torch._inductor.codecache import (
     _ident,
@@ -503,10 +503,14 @@ class AOTAutogradCacheEntry:
         if self.compiled_bw is not None:
             compiled_bw_func = self.compiled_bw.load(args, fx_config)
             needs_autograd = True
-            CompileEventLogger.try_add("backend_compile", dispatch_mode="autograd")
+            CompileEventLogger.try_add_pt2_compile(
+                "backend_compile", dispatch_mode="autograd"
+            )
         else:
             needs_autograd = False
-            CompileEventLogger.try_add("backend_compile", dispatch_mode="inference")
+            CompileEventLogger.try_add_pt2_compile(
+                "backend_compile", dispatch_mode="inference"
+            )
 
         # Wrap the forward function in post compile wrappers
         compiled_fw_func = AOTDispatchSubclassWrapper(
@@ -757,13 +761,12 @@ class AOTAutogradCache:
                     "components": debug_lines,
                 }
             )
-            CompileEventLogger.log_instant_event(
+            CompileEventLogger.instant(
                 f"autograd_cache_{cache_state}",
-                CompileEventLogLevel.CHROMIUM,
                 metadata=cache_info,
                 time_ns=cache_event_time,
             )
-            CompileEventLogger.try_add(
+            CompileEventLogger.try_add_pt2_compile(
                 "backend_compile",
                 cache_state=cache_state,
                 cache_event_time=cache_event_time,
