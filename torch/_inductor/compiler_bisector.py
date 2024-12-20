@@ -289,8 +289,10 @@ class CompilerBisector:
 
     @classmethod
     def delete_bisect_status(cls) -> None:
-        if os.path.exists(cls.get_dir()):
-            shutil.rmtree(cls.get_dir())
+        # in process_cache we have created if it exists, just the subdirectory of non created dir
+        dir_name = cls.in_process_cache if cls.in_process_cache else cls.get_dir()
+        if os.path.exists(dir_name):
+            shutil.rmtree(dir_name)
             print("Bisection status deleted.")
         else:
             print("No bisection status found.")
