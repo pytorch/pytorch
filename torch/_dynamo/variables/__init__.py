@@ -25,12 +25,14 @@ from .dicts import (
     ConstDictVariable,
     CustomizedDictVariable,
     DefaultDictVariable,
+    DictKeySetVariable,
     FrozensetVariable,
     SetVariable,
 )
 from .distributed import BackwardHookVariable, DistributedVariable, PlacementVariable
 from .functions import (
     CreateTMADescriptorVariable,
+    FunctionDecoratedByContextlibContextManagerVariable,
     FunctoolsPartialVariable,
     NestedUserFunctionVariable,
     PolyfilledFunctionVariable,
@@ -134,6 +136,7 @@ __all__ = [
     "DefaultDictVariable",
     "DeletedVariable",
     "DeterministicAlgorithmsVariable",
+    "DictKeySetVariable",
     "EnumVariable",
     "FakeItemVariable",
     "GetAttrVariable",
