@@ -16,6 +16,7 @@ import sys
 import sysconfig
 import warnings
 from ctypes import cdll
+from ctypes.util import find_library
 from pathlib import Path
 from typing import Any, List, Optional, Sequence, Tuple, Union
 
@@ -1222,13 +1223,12 @@ def get_cpp_torch_device_options(
 
     if device_type == "xpu":
         definations.append(" USE_XPU")
-        # Add "-Wno-unsupported-floating-point-opt" here to
-        # suppress compiler warning:
-        # "warning: overriding currently unsupported use of floating point
-        # exceptions on this target [-Wunsupported-floating-point-opt]".
-        # Since the compiler has not support some features.
-        cflags += ["fsycl", "Wno-unsupported-floating-point-opt"]
         libraries += ["c10_xpu", "sycl", "ze_loader", "torch_xpu"]
+        if not find_library("ze_loader"):
+            raise OSError(
+                "Intel GPU driver is not properly installed, please follow the instruction "
+                "in https://github.com/pytorch/pytorch?tab=readme-ov-file#intel-gpu-support."
+            )
 
     if aot_mode:
         if config.is_fbcode():
@@ -1276,12 +1276,6 @@ class CppTorchDeviceOptions(CppTorchOptions):
         shared: bool = True,
         extra_flags: Sequence[str] = (),
     ) -> None:
-        if device_type == "xpu":
-            from torch.utils.cpp_extension import _join_sycl_home
-
-            compiler = _join_sycl_home("bin", "icpx")
-        else:
-            compiler = ""
         super().__init__(
             vec_isa=vec_isa,
             include_pytorch=include_pytorch,
@@ -1290,7 +1284,6 @@ class CppTorchDeviceOptions(CppTorchOptions):
             use_absolute_path=use_absolute_path,
             use_mmap_weights=use_mmap_weights,
             extra_flags=extra_flags,
-            compiler=compiler,
         )
 
         device_definations: List[str] = []
