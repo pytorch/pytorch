@@ -567,16 +567,16 @@ class AutogradCompilerInstance:
             {},
         )
 
+        runtime_inputs_to_move: List[int] = []
+        if snapshot_cudagraph_enabled():
+            runtime_inputs_to_move = self.move_graph_nodes_to_cuda(self.fx_tracer.graph)
+
         # We traced using dummy tensors. Delete all the metadata of the dummy tensors.
         # It's probably better to refactor this class to use a different tracer
         # than the make_fx tracer, but that is a larger change.
         for node in self.fx_tracer.graph.nodes:
             if "tensor_meta" in node.meta:
                 del node.meta["tensor_meta"]
-
-        runtime_inputs_to_move: List[int] = []
-        if snapshot_cudagraph_enabled():
-            runtime_inputs_to_move = self.move_graph_nodes_to_cuda(self.fx_tracer.graph)
 
         self.rename_aot_dispatcher_nodes()
         self.reorder_tensor_pre_hook_nodes()

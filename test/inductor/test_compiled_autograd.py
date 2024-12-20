@@ -3346,8 +3346,6 @@ known_failing_tests = {
     "test_backward_hook_relative_ordering",  # compiled autograd collects breadth first, and module backward hook not supported
     # Uncategorized
     "test_not_implemented_grad",  # Dynamo changes the types of exceptions
-    "test_dependent_backward",  # TODO(rzou): investigate
-    "test_return_leaf",  # TODO(rzou): investigate
 }
 
 if not HAS_CUDA:
