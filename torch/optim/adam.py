@@ -143,6 +143,7 @@ class Adam(Optimizer):
         state_steps,
     ):
         has_complex = False
+        beta1, _ = group["betas"]
         for p in group["params"]:
             if p.grad is not None:
                 has_complex |= torch.is_complex(p)
@@ -171,9 +172,14 @@ class Adam(Optimizer):
                         else torch.tensor(0.0, dtype=_get_scalar_dtype())
                     )
                     # Exponential moving average of gradient values
-                    state["exp_avg"] = torch.zeros_like(
-                        p, memory_format=torch.preserve_format
+                    # case beta1 == 0, we don't need exp_avg
+
+                    state["exp_avg"] = (
+                        torch.zeros_like(p, memory_format=torch.preserve_format)
+                        if beta1 > 0
+                        else torch.zeros(0)
                     )
+
                     # Exponential moving average of squared gradient values
                     state["exp_avg_sq"] = torch.zeros_like(
                         p, memory_format=torch.preserve_format
@@ -183,8 +189,8 @@ class Adam(Optimizer):
                         state["max_exp_avg_sq"] = torch.zeros_like(
                             p, memory_format=torch.preserve_format
                         )
-
-                exp_avgs.append(state["exp_avg"])
+                if beta1 > 0:
+                    exp_avgs.append(state["exp_avg"])
                 exp_avg_sqs.append(state["exp_avg_sq"])
 
                 if group["amsgrad"]:
@@ -244,7 +250,7 @@ class Adam(Optimizer):
             adam(
                 params_with_grad,
                 grads,
-                exp_avgs,
+                exp_avgs if beta1 > 0 else grads,
                 exp_avg_sqs,
                 max_exp_avg_sqs,
                 state_steps,
@@ -418,7 +424,8 @@ def _single_tensor_adam(
             device_beta1 = beta1
 
         # Decay the first and second moment running average coefficient
-        exp_avg.lerp_(grad, 1 - device_beta1)
+        if device_beta1 > 0: 
+            exp_avg.lerp_(grad, 1 - device_beta1)
 
         exp_avg_sq.mul_(beta2).addcmul_(grad, grad.conj(), value=1 - beta2)
 
@@ -614,7 +621,8 @@ def _multi_tensor_adam(
         # Decay the first and second moment running average coefficient
         # Use device beta1 if beta1 is a tensor to ensure all
         # tensors are on the same device
-        torch._foreach_lerp_(device_exp_avgs, device_grads, 1 - device_beta1)
+        if device_beta1 > 0:
+            torch._foreach_lerp_(device_exp_avgs, device_grads, 1 - device_beta1)
 
         torch._foreach_mul_(device_exp_avg_sqs, beta2)
 
