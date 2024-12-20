@@ -190,7 +190,7 @@ def _join_sycl_home(*paths) -> str:
         raise OSError('SYCL runtime is not dected. Please setup the pytorch '
                       'prerequisites for Intel GPU following the instruction in '
                       'https://github.com/pytorch/pytorch?tab=readme-ov-file#intel-gpu-support '
-                       'or install intel-sycl-rt via pip.')
+                      'or install intel-sycl-rt via pip.')
 
     return os.path.join(SYCL_HOME, *paths)
 
