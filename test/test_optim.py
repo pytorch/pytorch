@@ -665,6 +665,17 @@ class TestOptimRenewed(TestCase):
             self.assertTrue(a1_grad_imags.all_popped())
             self.assertTrue(losses.all_popped())
 
+    def test_adamw_serialization(self, device):
+        model = torch.nn.Linear(5, 5).to(device)
+        optim = torch.optim.AdamW(model.parameters())
+
+        loaded_dict = optim.state_dict()
+
+        new_optim = torch.optim.Adam(model.parameters())
+        new_optim.load_state_dict(loaded_dict)
+
+        self.assertTrue(new_optim.param_groups[0]["decoupled_weight_decay"])
+
     def _compare_between(
         self, inputs, models, optimizers, assert_eq_kwargs=None, assert_step_dtype=None
     ):
@@ -2150,6 +2161,8 @@ class TestOptimRenewed(TestCase):
     def test_defaults_changed_to_foreach(self, device, dtype, optim_info):
         # Test that the default implementations for optimizers are changed to foreach
         # except Adafactor, which defaults to the single tensor impl for memory efficiency.
+        from torch.optim import Adam, AdamW
+
         optim_cls = optim_info.optim_cls
         model = torch.nn.Linear(5, 5)
         model.to(dtype=dtype, device=device)
@@ -2157,7 +2170,13 @@ class TestOptimRenewed(TestCase):
 
         import inspect
 
-        module = inspect.getmodule(optim_cls)
+        # AdamW dispatches to superclass' adam
+        if optim_cls is AdamW:
+            module = inspect.getmodule(Adam)
+            module_name = "_multi_tensor_adam"
+        else:
+            module = inspect.getmodule(optim_cls)
+            module_name = f"_multi_tensor_{optim_cls.__name__.lower()}"
 
         for optim_input in optim_info.optim_inputs_func(device=device):
             optim = optim_cls(model.parameters(), **optim_input.kwargs)
@@ -2165,9 +2184,7 @@ class TestOptimRenewed(TestCase):
             output = model(inpt)
             loss = output.sum()
             loss.backward()
-            with patch.object(
-                module, f"_multi_tensor_{optim_cls.__name__.lower()}"
-            ) as mocked_foreach_impl:
+            with patch.object(module, module_name) as mocked_foreach_impl:
                 optim.step()
                 self.assertTrue(mocked_foreach_impl.called)
 

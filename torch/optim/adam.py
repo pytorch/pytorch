@@ -46,6 +46,7 @@ class Adam(Optimizer):
         capturable: bool = False,
         differentiable: bool = False,
         fused: Optional[bool] = None,
+        decoupled_weight_decay: bool = False,
     ):
         if isinstance(lr, Tensor):
             if foreach and not capturable:
@@ -95,6 +96,7 @@ class Adam(Optimizer):
             capturable=capturable,
             differentiable=differentiable,
             fused=fused,
+            decoupled_weight_decay=decoupled_weight_decay,
         )
         super().__init__(params, defaults)
 
@@ -117,6 +119,7 @@ class Adam(Optimizer):
             group.setdefault("foreach", None)
             group.setdefault("capturable", False)
             group.setdefault("differentiable", False)
+            group.setdefault("decoupled_weight_decay", False)
             fused = group.setdefault("fused", None)
             for p in group["params"]:
                 p_state = self.state.get(p, [])
@@ -262,6 +265,7 @@ class Adam(Optimizer):
                 fused=group["fused"],
                 grad_scale=getattr(self, "grad_scale", None),
                 found_inf=getattr(self, "found_inf", None),
+                decoupled_weight_decay=group["decoupled_weight_decay"],
             )
 
         return loss
@@ -355,6 +359,7 @@ def _single_tensor_adam(
     maximize: bool,
     capturable: bool,
     differentiable: bool,
+    decoupled_weight_decay: bool,
 ):
     assert grad_scale is None and found_inf is None
 
@@ -393,7 +398,11 @@ def _single_tensor_adam(
         step_t += 1
 
         if weight_decay != 0:
-            grad = grad.add(param, alpha=weight_decay)
+            if decoupled_weight_decay:
+                # Perform stepweight decay
+                param.mul_(1 - lr * weight_decay)
+            else:
+                grad = grad.add(param, alpha=weight_decay)
 
         if torch.is_complex(param):
             grad = torch.view_as_real(grad)
@@ -500,6 +509,7 @@ def _multi_tensor_adam(
     maximize: bool,
     capturable: bool,
     differentiable: bool,
+    decoupled_weight_decay: bool,
 ):
     if len(params) == 0:
         return
@@ -603,13 +613,17 @@ def _multi_tensor_adam(
             torch._foreach_add_(device_state_steps, 1)
 
         if weight_decay != 0:
-            # Re-use the intermediate memory (device_grads) already allocated for maximize
-            if maximize:
-                torch._foreach_add_(device_grads, device_params, alpha=weight_decay)
+            if decoupled_weight_decay:
+                # Perform stepweight decay
+                torch._foreach_mul_(device_params, 1 - lr * weight_decay)
             else:
-                device_grads = torch._foreach_add(  # type: ignore[assignment]
-                    device_grads, device_params, alpha=weight_decay
-                )
+                # Re-use the intermediate memory (device_grads) already allocated for maximize
+                if maximize:
+                    torch._foreach_add_(device_grads, device_params, alpha=weight_decay)
+                else:
+                    device_grads = torch._foreach_add(  # type: ignore[assignment]
+                        device_grads, device_params, alpha=weight_decay
+                    )
 
         # Decay the first and second moment running average coefficient
         # Use device beta1 if beta1 is a tensor to ensure all
@@ -727,6 +741,7 @@ def _fused_adam(
     maximize: bool,
     capturable: bool,  # Needed for consistency.
     differentiable: bool,
+    decoupled_weight_decay: bool,
 ) -> None:
     if not params:
         return
@@ -781,7 +796,8 @@ def _fused_adam(
             lr_dict[device] = lr.to(device=device, non_blocking=True)  # type: ignore[union-attr]
             lr = lr_dict[device]
         torch._foreach_add_(device_state_steps, 1)
-        torch._fused_adam_(
+        func = torch._fused_adam_ if not decoupled_weight_decay else torch._fused_adamw_
+        func(
             device_params,
             device_grads,
             device_exp_avgs,
@@ -821,6 +837,7 @@ def adam(
     grad_scale: Optional[Tensor] = None,
     found_inf: Optional[Tensor] = None,
     has_complex: bool = False,
+    decoupled_weight_decay: bool = False,
     *,
     amsgrad: bool,
     beta1: float,
@@ -890,4 +907,5 @@ def adam(
         differentiable=differentiable,
         grad_scale=grad_scale,
         found_inf=found_inf,
+        decoupled_weight_decay=decoupled_weight_decay,
     )
