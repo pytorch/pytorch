@@ -704,7 +704,9 @@ class _PipelineStageBase(ABC):
         # The output kept in fwd_cache is not detached
         # The output given to the user is detached so that the graph is freed after backward pass
         # see issue #142229
-        detached_output = tree_map_only(torch.Tensor, lambda x: x.detach().requires_grad_(False), output)
+        detached_output = tree_map_only(
+            torch.Tensor, lambda x: x.detach().requires_grad_(False), output
+        )
         self.output_chunks.append(detached_output)
 
         # Save activations and inputs for backward
@@ -822,6 +824,9 @@ class _PipelineStageBase(ABC):
 
         # stage_output is freed after this function returns and
         # the output given to the user was detached, so there is no ref to the graph anymore and it is freed
+        # for the loss however, it was not detached yet, so we need to do it here
+        if self.is_last:
+            loss.detach_()
 
         logger.debug("%s Backwarded chunk %s", self.log_prefix, bwd_chunk_id)
 

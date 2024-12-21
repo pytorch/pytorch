@@ -1,7 +1,6 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 # Owner(s): ["oncall: distributed"]
 import copy
-import gc
 import logging
 import math
 import os
@@ -958,9 +957,13 @@ class ScheduleTest(MultiProcContinousTest):
         if LossType == "mse":
             loss_fn = torch.nn.MSELoss(reduction="sum")
         elif LossType == "mse_view":
-            loss_fn = lambda x, y: torch.nn.functional.mse_loss(
-                x.view(x.size(0), -1), y.view(y.size(0), -1)
-            )
+
+            def view_loss_fn(x, y):
+                return torch.nn.functional.mse_loss(
+                    x.view(x.size(0), -1), y.view(y.size(0), -1)
+                )
+
+            loss_fn = view_loss_fn
 
         chunks = 4
         x_mb = x.chunk(chunks)[0]
@@ -994,38 +997,51 @@ class ScheduleTest(MultiProcContinousTest):
         # Stage uses buffers internally for communications, we have to account for them
         buffer_mem = x.numel() * x.element_size() / 1e6
 
-        if self.rank == 0:
-            schedule.step(x)
-            output_mem = 0
-
-            buffer_mem *= 1  # recv grads
-        elif self.rank == self.world_size - 1:
-            losses = []
-            output = schedule.step(target=target, losses=losses)
-
-            output_mem = (output.numel() * output.element_size()) / 1e6
-            buffer_mem *= 1  # recv acts
+        # First and last rank only need one buffer (inputs or grads)
+        # The other ranks need both
+        if self.rank == 0 or self.rank == self.world_size - 1:
+            total_buffer_mem = buffer_mem
         else:
-            schedule.step()
-            output_mem = 0
+            total_buffer_mem = buffer_mem * 2
 
-        # these states are cleared at the beginning of each step, but not the end, so we need to clear them here
-        stage.clear_runtime_states()
-        gc.collect()
-        torch.cuda.empty_cache()
+        for _ in range(5):
+            if self.rank == 0:
+                schedule.step(x)
+                output_mem = 0
 
-        current_mem = self._get_curr_active_memory()
+            elif self.rank == self.world_size - 1:
+                losses = []
+                output = schedule.step(target=target, losses=losses)
 
-        expected_mem = math.ceil(base_mem + output_mem + my_params_size + buffer_mem) # ceil to allow a small margin
+                output_mem = (output.numel() * output.element_size()) / 1e6
+
+                # Everything should be detached to free memory
+                assert output.grad_fn is None
+                for loss in losses:
+                    assert loss.grad_fn is None
+            else:
+                schedule.step()
+                output_mem = 0
+
+            # these states are cleared at the beginning of each step, but not the end, so we need to clear them here
+            stage.clear_runtime_states()
+
+            current_mem = self._get_curr_active_memory()
+
+            expected_mem = math.ceil(
+                base_mem + output_mem + my_params_size + total_buffer_mem
+            )  # ceil to allow a small margin
+
+            # Gradients were also allocated during backward pass, with size `my_params_size`
+            self.assertLessEqual(
+                current_mem,
+                expected_mem,
+                f"Rank {self.rank}: Memory usage should not be increased after the end of backward pass",
+            )
+
         print(
-            f"Rank {self.rank} current_mem: {current_mem} ; expected: {base_mem} + {output_mem} + {my_params_size} + {buffer_mem} = {expected_mem}"
-        )
-
-        # Gradients were also allocated during backward pass, with size `my_params_size`
-        self.assertLessEqual(
-            current_mem,
-            expected_mem,
-            f"Rank {self.rank}: Memory usage should not be increased after the end of backward pass",
+            f"Rank {self.rank} current_mem: {current_mem} ; expected: {expected_mem}"
+            + f" ({base_mem} + {output_mem} + {my_params_size} + {total_buffer_mem})"
         )
 
     @requires_nccl()
@@ -1089,45 +1105,54 @@ class ScheduleTest(MultiProcContinousTest):
 
         buffer_mem = x.numel() * x.element_size() / 1e6
 
-        if self.rank == 0:
-            schedule.step(x)
-            output_mem = 0
+        # Each stage needs 2 buffers, except for the first and last that need only one
+        total_buffer_mem = buffer_mem * stages_per_rank * 2
+        if self.rank == 0 or self.rank == self.world_size - 1:
+            total_buffer_mem -= buffer_mem
 
-            buffer_mem *= 3  # recv grads (0) + recv acts (2) + recv grads (2)
-        elif self.rank == self.world_size - 1:
-            losses = []
-            output = schedule.step(target=target, losses=losses)
+        for _ in range(5):
+            if self.rank == 0:
+                schedule.step(x)
+                output_mem = 0
+            elif self.rank == self.world_size - 1:
+                losses = []
+                output = schedule.step(target=target, losses=losses)
 
-            output_mem = (output.numel() * output.element_size()) / 1e6
-            buffer_mem *= 3  # recv acts (1) + recv acts (3) + recv grads (1)
-        else:
-            schedule.step()
-            output_mem = 0
+                output_mem = (output.numel() * output.element_size()) / 1e6
 
-        # these states are cleared at the beginning of each step, but not the end, so we need to clear them here
-        for stage in stages:
-            stage.clear_runtime_states()
+                # Everything should be detached to free memory
+                assert output.grad_fn is None
+                for loss in losses:
+                    assert loss.grad_fn is None
+            else:
+                schedule.step()
+                output_mem = 0
 
-        gc.collect()
-        torch.cuda.empty_cache()
+            # these states are cleared at the beginning of each step, but not the end, so we need to clear them here
+            for stage in stages:
+                stage.clear_runtime_states()
 
-        current_mem = self._get_curr_active_memory()
+            current_mem = self._get_curr_active_memory()
 
-        expected_mem = math.ceil(base_mem + output_mem + my_params_size + buffer_mem)
+            expected_mem = math.ceil(
+                base_mem + output_mem + my_params_size + total_buffer_mem
+            )
+
+            # Gradients were also allocated during backward pass, with size `my_params_size`
+            self.assertLessEqual(
+                current_mem,
+                expected_mem,
+                f"Rank {self.rank}: Memory usage should not be increased after the end of backward pass",
+            )
+
         print(
-            f"Rank {self.rank} current_mem: {current_mem} ; expected: {base_mem} + {output_mem} + {my_params_size} + {buffer_mem} = {expected_mem}"
-        )
-
-        # Gradients were also allocated during backward pass, with size `my_params_size`
-        self.assertLessEqual(
-            current_mem,
-            expected_mem,
-            f"Rank {self.rank}: Memory usage should not be increased after the end of backward pass",
+            f"Rank {self.rank} current_mem: {current_mem} ; expected: {expected_mem}"
+            + f" ({base_mem} + {output_mem} + {my_params_size} + {total_buffer_mem}"
         )
 
     def _get_curr_active_memory(self) -> int:
         mem_stats = torch.cuda.memory_stats(self.device)
-        return round(mem_stats["active_bytes.all.current"] / 1e6)
+        return round(mem_stats["allocated_bytes.all.current"] / 1e6)
 
 
 instantiate_parametrized_tests(ScheduleTest)
