@@ -93,6 +93,7 @@ namespace CPU_CAPABILITY {
   }
 
 #ifdef __ARM_FEATURE_BF16
+#error You shall not pass
 using at_bfloat16x8_t = bfloat16x8_t;
 using at_bfloat16x4_t = bfloat16x4_t;
 using at_bfloat16_t = bfloat16_t;
