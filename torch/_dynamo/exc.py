@@ -60,6 +60,10 @@ class CompileCollectiveRestartAnalysis(RestartAnalysis):
     pass
 
 
+class TensorifyScalarRestartAnalysis(RestartAnalysis):
+    pass
+
+
 class SkipFrame(TorchDynamoException):
     pass
 
@@ -175,7 +179,7 @@ class SkipCodeRecursiveException(TorchDynamoException):
     pass
 
 
-class CacheLimitExceeded(Unsupported):
+class RecompileLimitExceeded(Unsupported):
     pass
 
 
@@ -194,7 +198,7 @@ class IncorrectUsage(Exception):
 # TODO: I'm a little uncertain about what error classification we should have
 # for this.  This is potentially a user error, but regressions in
 # specialization in PyTorch proper could also trigger this problem
-class FailOnCacheLimitHit(Exception):
+class FailOnRecompileLimitHit(Exception):
     pass
 
 
@@ -237,12 +241,17 @@ class ObservedAttributeError(ObservedException):
     pass
 
 
+class ObservedRuntimeError(ObservedException):
+    pass
+
+
 observed_exception_map = {
     StopIteration: ObservedUserStopIteration,
     LookupError: ObservedLookupError,
     IndexError: ObservedIndexError,
     KeyError: ObservedKeyError,
     AttributeError: ObservedAttributeError,
+    RuntimeError: ObservedRuntimeError,
 }
 
 

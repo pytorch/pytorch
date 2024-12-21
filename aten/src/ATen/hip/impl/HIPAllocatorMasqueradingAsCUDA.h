@@ -5,7 +5,7 @@
 
 // Use of c10::hip namespace here makes hipification easier, because
 // I don't have to also fix namespaces.  Sorry!
-namespace c10 { namespace hip {
+namespace c10::hip {
 
 // Takes a valid HIPAllocator (of any sort) and turns it into
 // an allocator pretending to be a CUDA allocator.  See
@@ -28,4 +28,4 @@ public:
   }
 };
 
-}} // namespace c10::hip
+} // namespace c10::hip

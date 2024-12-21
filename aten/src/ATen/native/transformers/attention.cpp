@@ -5,6 +5,7 @@
 #include <ATen/AccumulateType.h>
 #include <ATen/Dispatch.h>
 #include <ATen/OpMathType.h>
+#include <ATen/mps/MPSDevice.h>
 #include <ATen/native/DispatchStub.h>
 #include <ATen/NestedTensorImpl.h>
 #include <ATen/TensorIndexing.h>
@@ -365,11 +366,8 @@ std::tuple<Tensor, Tensor> native_multi_head_attention_cpu(
   }
 #endif
   // shape: 3 x [B, num_head, T, dim_per_head]
-  auto q_k_v = _transform_bias_rescale_qkv(qkv, qkv_bias, num_head);
+  auto [q, k, v] = _transform_bias_rescale_qkv(qkv, qkv_bias, num_head);
   qkv = Tensor(); // Not used any more, allow free
-  auto& q = std::get<0>(q_k_v);
-  const auto& k = std::get<1>(q_k_v);
-  const auto& v = std::get<2>(q_k_v);
 #ifndef NDEBUG
   debug_assert_shape(__LINE__, q, {B, num_head, T, dim_per_head});
   debug_assert_shape(__LINE__, k, {B, num_head, T, dim_per_head});
@@ -663,7 +661,8 @@ Tensor _safe_softmax(
   const auto masked = self.isneginf();
   const auto masked_rows = all(masked, dim, true);
   const auto zero = at::scalar_tensor(0.0, at::TensorOptions().dtype(out.dtype()).device(out.device()));
-  return at::where(masked_rows, zero, out);
+  // reuse storage for out
+  return at::where_out(out, masked_rows, zero, out);
 }
 // Computes scaled dot product attention on query, key and value tensors, using
 // an optional attention mask if passed, and applying dropout if a probability
@@ -730,7 +729,7 @@ Tensor scaled_dot_product_attention(
         // We need to calculate the scale based off the OG head dim size
         auto og_scale = sdp::calculate_scale(query_, scale);
         auto out_lse_softmax = at::_scaled_dot_product_flash_attention(
-            query_padded, key_padded, value_padded, dropout_p, is_causal, false /*return_debug_mask*/, og_scale.as_float_unchecked());
+            query_padded, key_padded, value_padded, dropout_p, is_causal, false /*return_debug_mask*/, og_scale.guard_float("attention.cpp", 735));
         return post_process_flash_output(std::get<0>(out_lse_softmax), og_size);
       }
       // For the CPU case we do not need to pad the last dim
@@ -752,12 +751,13 @@ Tensor scaled_dot_product_attention(
       return std::get<0>(out_lse_softmax);
     }
     case SDPBackend::math: {
+#ifdef USE_MPS
       const auto any_nested = query_.is_nested() || key.is_nested() || value.is_nested();
       const bool any_inputs_require_grad = query_.requires_grad() || key.requires_grad() || value.requires_grad();
       const auto all_contiguous = query_.is_contiguous() && key.is_contiguous() && value.is_contiguous();
       if (query_device_type == DeviceType::MPS && dropout_p == 0.0
           && !(GradMode::is_enabled() && any_inputs_require_grad)
-          && all_contiguous
+          && (all_contiguous || mps::is_macos_13_or_newer(mps::MacOSVersion::MACOS_VER_15_0_PLUS))
           && !any_nested) {
         return std::get<0>(at::_scaled_dot_product_attention_math_for_mps(
             query_,
@@ -769,6 +769,7 @@ Tensor scaled_dot_product_attention(
             std::nullopt, /*dropout_mask*/
             scale));
       }
+#endif
       return std::get<0>(at::_scaled_dot_product_attention_math(
           query_,
           key,

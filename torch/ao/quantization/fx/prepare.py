@@ -608,8 +608,6 @@ def _get_target_activation_dtype_for_node(
         # with the output activation being in fp32.
         # In the future this may change as we add more fields
         # to the `QConfig` object.
-        output_act_dtype = act_dtype if (not input_act_is_dynamic) else torch.float
-
         bias_dtype = (
             torch.float16
             if (
@@ -665,7 +663,7 @@ def _get_output_act_obs_or_fq(
     named_modules: Dict[str, torch.nn.Module],
     obs_or_fq_map: Dict[EdgeOrNode, ObserverOrFakeQuantize],
     is_qat: bool,
-) -> ObserverOrFakeQuantize:
+) -> Optional[ObserverOrFakeQuantize]:
     """Get the constructor for observer or fake quant object for
     the argument in the original graph as the output of previous node,
     skipping inserted observers
@@ -1219,13 +1217,12 @@ def _maybe_insert_observers_before_graph_output(
             else:
                 return maybe_node
         elif isinstance(maybe_node, (list, tuple)):
-            results = []
-            for inner_node in maybe_node:
-                results.append(
-                    _recursive_maybe_replace_node_with_obs(
-                        inner_node, model, named_modules, graph
-                    )
+            results = [
+                _recursive_maybe_replace_node_with_obs(
+                    inner_node, model, named_modules, graph
                 )
+                for inner_node in maybe_node
+            ]
             if isinstance(maybe_node, list):
                 return results
             else:
@@ -1244,11 +1241,10 @@ def _maybe_insert_observers_before_graph_output(
                 "Unhandled type for returned node:", maybe_node
             )
 
-    new_args = []
-    for old_arg in graph_output_node.args:
-        new_args.append(
-            _recursive_maybe_replace_node_with_obs(old_arg, model, named_modules, graph)
-        )
+    new_args = [
+        _recursive_maybe_replace_node_with_obs(old_arg, model, named_modules, graph)
+        for old_arg in graph_output_node.args
+    ]
 
     graph_output_node.args = tuple(new_args)  # type: ignore[assignment]
 
@@ -1267,11 +1263,11 @@ def _maybe_propagate_dtype_for_node(
     node.meta["target_dtype_info"]["output_act_obs_or_fq_ctr"] = None
     # if this is a copy node, propagate to first arg
     (
-        root_node,
+        _root_node,
         _,
-        pattern,
+        _pattern,
         qhandler,
-        qconfig,
+        _qconfig,
     ) = node_name_to_match_result_with_qconfig.get(
         node.name, (None, None, None, None, None)
     )
@@ -1923,7 +1919,7 @@ def _run_prepare_fx_on_standalone_modules(
     for (
         root_node,
         _,
-        pattern,
+        _pattern,
         qhandler,
         qconfig,
     ) in node_name_to_match_result_with_qconfig.values():

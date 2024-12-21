@@ -10,7 +10,7 @@ from torch._inductor.utils import is_linux
 log = logging.getLogger(__name__)
 
 
-def _rocm_include_paths() -> List[str]:
+def _rocm_include_paths(dst_file_ext: str) -> List[str]:
     from torch.utils import cpp_extension
 
     rocm_include = (
@@ -38,10 +38,13 @@ def _rocm_include_paths() -> List[str]:
     paths = [
         os.path.realpath(p) for p in (ck_include, ck_library_include, rocm_include)
     ]
+    if dst_file_ext == "exe":
+        ck_utility_include = os.path.join(ck_path, "library", "src", "utility")
+        paths.append(os.path.realpath(ck_utility_include))
     return paths
 
 
-def _rocm_lib_options() -> List[str]:
+def _rocm_lib_options(dst_file_ext: str) -> List[str]:
     from torch.utils import cpp_extension
 
     rocm_lib_dir = (
@@ -55,12 +58,15 @@ def _rocm_lib_options() -> List[str]:
         else cpp_extension._join_rocm_home("hip", "lib")
     )
 
-    return [
+    opts = [
         "-include __clang_hip_runtime_wrapper.h",
         f"-L{os.path.realpath(rocm_lib_dir)}",
         f"-L{os.path.realpath(hip_lib_dir)}",
         "-lamdhip64",
     ]
+    if dst_file_ext == "exe":
+        opts += ["-lpthread", "-lstdc++"]
+    return opts
 
 
 def _rocm_compiler_options() -> List[str]:
@@ -118,25 +124,24 @@ def rocm_compile_command(
     dst_file_ext: str,
     extra_args: Optional[List[str]] = None,
 ) -> str:
-    include_paths = _rocm_include_paths()
-    lib_options = _rocm_lib_options()
+    include_paths = _rocm_include_paths(dst_file_ext)
+    lib_options = _rocm_lib_options(dst_file_ext)
     compiler_options = _rocm_compiler_options()
     compiler = rocm_compiler()
     options = (
         compiler_options
-        + (extra_args if extra_args else [])
-        + ["-I" + path for path in include_paths]
+        + (extra_args or [])
+        + [f"-I{path}" for path in include_paths]
         + lib_options
     )
     src_file = " ".join(src_files)
-    res = ""
+    # supported extensions: .o, .so, .exe
     if dst_file_ext == "o":
-        res = f"{compiler} {' '.join(options)} -c -o {dst_file} {src_file}"
+        options.append("-c")
     elif dst_file_ext == "so":
         options.append("-shared")
-        res = f"{compiler} {' '.join(options)} -o {dst_file} {src_file}"
     elif dst_file_ext == "exe":
-        res = f"{compiler} {' '.join(options)} -o {dst_file} {src_file}"
+        options.append("-DGENERATE_CK_STANDALONE_RUNNER")
     else:
         raise NotImplementedError(f"Unsupported output file suffix {dst_file_ext}!")
-    return res
+    return f"{compiler} {' '.join(options)} -o {dst_file} {src_file}"

@@ -159,6 +159,10 @@ class PyInterpreterHolder {
         is_main_interpreter_(
             at::impl::PythonOpRegistrationTrampoline::registerInterpreter(
                 impl_)) {}
+  PyInterpreterHolder(const PyInterpreterHolder&) = delete;
+  PyInterpreterHolder(PyInterpreterHolder&&) = delete;
+  PyInterpreterHolder& operator=(const PyInterpreterHolder&) = delete;
+  PyInterpreterHolder& operator=(PyInterpreterHolder&&) = delete;
   // NB: intentionally leaks the PyInterpreter, as there may still be
   // references to it that are live, living in objects that aren't being
   // destructed while Python is being cleaned up.
@@ -273,14 +277,14 @@ void ConcretePyInterpreterVTable::decref(PyObject* pyobj, bool has_pyobj_slot)
     }
   }
   Py_DECREF(pyobj);
-};
+}
 
 void ConcretePyInterpreterVTable::incref(PyObject* pyobj) const {
   if (!Py_IsInitialized())
     return;
   pybind11::gil_scoped_acquire gil;
   Py_INCREF(pyobj);
-};
+}
 
 bool isPythonTensor(const at::Tensor& tensor) {
   return tensor.unsafeGetTensorImpl()->key_set().has(c10::DispatchKey::Python);
