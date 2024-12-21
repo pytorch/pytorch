@@ -11,10 +11,10 @@ from typing import Iterator, Sequence, TYPE_CHECKING
 _PARENT = Path(__file__).parent.absolute()
 _PATH = [Path(p).absolute() for p in sys.path]
 
-if not TYPE_CHECKING and _PARENT in _PATH:
-    import _linter
-else:
+if TYPE_CHECKING or _PARENT not in _PATH:
     from . import _linter
+else:
+    import _linter
 
 if TYPE_CHECKING:
     from tokenize import TokenInfo
@@ -131,7 +131,11 @@ class TokenLine:
         return True
 
     def is_braced_set(self, begin: int, end: int) -> bool:
-        if begin + 1 == end or self.tokens[begin].string != "{":
+        if (
+            begin + 1 == end
+            or self.tokens[begin].string != "{"
+            or self.tokens[begin - 1].type in _linter.FSTRING_TOKENS
+        ):
             return False
         i = begin + 1
         empty = True
