@@ -8752,7 +8752,6 @@ def sample_inputs_scaled_mm(op_info, device, dtype, requires_grad, **kwargs):
 def sample_inputs_scaled_dot_product_attention(op_info, device, dtype, requires_grad, **kwargs):
     make = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
     batch, seq_q, seq_kv, num_heads, head_dim = 4, 3, 6, 4, 8
-    num_heads_q_gqa, num_heads_kv_gqa = 32, 8
 
     dim_3_q_shape = (batch, seq_q, head_dim)
     dim_3_kv_shape = (batch, seq_kv, head_dim)

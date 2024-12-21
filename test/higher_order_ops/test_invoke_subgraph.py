@@ -612,7 +612,7 @@ class GraphModule(torch.nn.Module):
 
         r1 = run(ones, train=False)
         r1.sum().backward()
-        g1 = weight.grad.clone()
+        weight.grad.clone()
 
     def test_dynamic(self):
         @mark_compile_region

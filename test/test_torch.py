@@ -952,7 +952,7 @@ class TestTorchDeviceType(TestCase):
     def test_dtypetensor_warnings(self, device):
         msg = 'The torch.cuda.*DtypeTensor constructors are no longer recommended'
         with self.assertWarnsOnceRegex(UserWarning, msg):
-            t = torch.cuda.FloatTensor([0])
+            torch.cuda.FloatTensor([0])
 
         with self.assertWarnsOnceRegex(UserWarning, msg):
             torch.cuda.DoubleTensor([0])

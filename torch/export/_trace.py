@@ -1548,10 +1548,6 @@ def _export_to_aten_ir_make_fx(
         strict=True,
         stack_weights=True,
     ), _ignore_backend_decomps(), _compiling_state_context():  # type: ignore[attr-defined]
-        param_len = len(dict(mod.named_parameters(remove_duplicate=False)))
-        buffer_len = len(dict(mod.named_buffers(remove_duplicate=False)))
-        params_len = param_len + buffer_len
-
         gm, graph_signature = transform(_make_fx_helper)(
             mod,
             fake_args,
