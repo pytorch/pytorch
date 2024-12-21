@@ -84,7 +84,7 @@ inline void {{kernel_name}}(
         self.alpha = alpha
 
     def get_common_options(self):
-        if self.input_dtype == torch.uint8:
+        if self.input_dtype in [torch.uint8, torch.int8]:
             assert self.compute_dtype == torch.int32
             assert self.output_dtype == torch.int32
             assert self.input2_dtype == torch.int8
@@ -101,8 +101,8 @@ inline void {{kernel_name}}(
             "compute_t": DTYPE_TO_CPP[self.compute_dtype],
             "alpha": self.alpha,
             "kernel_extra_args_declare": self.get_kernel_extra_args_declare(),
-            "int8_gemm": self.input_dtype == torch.uint8,
-            "vnni_size": 4 if self.input_dtype == torch.uint8 else 2,
+            "int8_gemm": self.input_dtype in [torch.uint8, torch.int8],
+            "vnni_size": 4 if self.input_dtype in [torch.uint8, torch.int8] else 2,
             "restrict_keyword": get_restrict_keyword(),
             "is_msvc_compiler": cpp_builder.is_msvc_cl(),
         }
@@ -469,11 +469,20 @@ inline void {{kernel_name}}_kernel(
 
 # extra check for CppMicroGemmAMX
 def check_amx_extra(config, m, n, k, alpha, num_threads):
-    vnni_size = 4 if config.input_dtype == torch.uint8 else 2
+    vnni_size = 4 if config.input_dtype in [torch.uint8, torch.int8] else 2
     return k % vnni_size == 0 and alpha == 1
 
 
 @register_micro_gemm(
+    *generate_gemm_config(
+        VecAMX,
+        [(32, 32, 64), (48, 16, 64)],
+        input_dtype=torch.int8,
+        input2_dtype=torch.int8,
+        output_dtype=torch.int32,
+        compute_dtype=torch.int32,
+        extra_check=check_amx_extra,
+    ),
     *generate_gemm_config(
         VecAMX,
         [(32, 32, 32), (48, 16, 32), (16, 48, 32)],
@@ -682,7 +691,11 @@ inline void {{kernel_name}}_amx_kernel_{{num_rows}}_{{num_columns}}(
         _tile_loadd({{tile_idx_b}}, B + k * ldb + {{tile_col * 16 * vnni_size}}, ldb * {{vnni_size}} * sizeof({{input_t}}));
         {%- endif %}
         {%- if int8_gemm %}
+            {%- if input_dtype == torch.int8 %}
+        _tile_dpbssd({{tile_idx_c}}, {{tile_idx_a}}, {{tile_idx_b}});
+            {%- else %}
         _tile_dpbusd({{tile_idx_c}}, {{tile_idx_a}}, {{tile_idx_b}});
+            {%- endif %}
         {%- else %}
         _tile_dpbf16ps({{tile_idx_c}}, {{tile_idx_a}}, {{tile_idx_b}});
         {%- endif %}
@@ -723,7 +736,7 @@ inline void {{kernel_name}}_amx_kernel_{{num_rows}}_{{num_columns}}(
         block_m, block_n, block_k = self.register_blocking
         assert block_m % 16 == 0, "Only support block_m % 16 == 0 for AMX"
         assert block_n % 16 == 0, "Only support block_n % 16 == 0 for AMX"
-        if self.input_dtype == torch.uint8:
+        if self.input_dtype in [torch.uint8, torch.int8]:
             assert block_k == 64, "Only support block_k = 64 for AMX INT8"
         else:
             assert block_k == 32, "Only support block_k = 32 for AMX Bfloat16/Float16"
@@ -770,7 +783,7 @@ inline void {{kernel_name}}_amx_kernel_{{num_rows}}_{{num_columns}}(
         return "amx_state,"
 
     def get_b_layout(self):
-        if self.input_dtype == torch.uint8:
+        if self.input_dtype in [torch.uint8, torch.int8]:
             return LayoutType.VNNI4
         else:
             return LayoutType.VNNI2
