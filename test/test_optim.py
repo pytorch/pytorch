@@ -1275,7 +1275,6 @@ class TestOptimRenewed(TestCase):
             torch.randn(2, 3, requires_grad=False, device=device, dtype=dtype)
             for _ in range(2)
         ]
-        old_params = [p.detach().clone() for p in params]
 
         def closure():
             return torch.tensor([1], device=device, dtype=dtype)
@@ -1331,6 +1330,44 @@ class TestOptimRenewed(TestCase):
                 params[0].grad = torch.zeros_like(params[0])
             optimizer.step(closure)
             self.assertEqual(old_param, params[0])
+
+    @optims(optim_db, dtypes=[torch.float32])
+    def test_grads_are_never_inplaced_into(self, device, dtype, optim_info):
+        optim_cls = optim_info.optim_cls
+        all_optim_inputs = _get_optim_inputs_including_global_cliquey_kwargs(
+            device, dtype, optim_info
+        )
+        param = torch.randn((5, 1), device=device, dtype=dtype, requires_grad=True)
+
+        def closure():
+            return torch.tensor([1], device=device, dtype=dtype)
+
+        for optim_input in all_optim_inputs:
+            kwargs = optim_input.kwargs
+
+            if kwargs.get("differentiable", False):
+                params = [param.clone()]
+            else:
+                params = [param]
+
+            optimizer = optim_cls(params, **kwargs)
+            if optim_info.only_supports_sparse_grads:
+                # Intentionally construct a multidimensional empty v for the sparse grad
+                # Single dim v passes the test while multidim correctly repros the issue
+                # https://github.com/pytorch/pytorch/issues/82486
+                i = torch.empty((1, 0), device=device, dtype=dtype)
+                v = torch.empty((0, 1), device=device, dtype=dtype)
+                params[0].grad = torch.sparse_coo_tensor(
+                    i, v, (5, 1), device=device, dtype=dtype
+                )
+            else:
+                params[0].grad = torch.rand_like(params[0])
+
+            old_version = params[0].grad._version
+
+            for _ in range(5):
+                optimizer.step(closure)
+                self.assertEqual(params[0].grad._version, old_version)
 
     @optims(optim_db, dtypes=[torch.float32])
     def test_optimizer_can_be_printed(self, device, dtype, optim_info):
@@ -1632,7 +1669,6 @@ class TestOptimRenewed(TestCase):
             return closure_loss if optim_info.step_requires_closure else None
 
         for optim_input in all_optim_inputs:
-            kwargs = optim_input.kwargs
             optimizer = optim_cls(params, **optim_input.kwargs)
             for _ in range(3):
                 optimizer.step(closure)
