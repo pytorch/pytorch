@@ -16,7 +16,12 @@ import torch._dynamo.config
 import torch._utils_internal
 import torch.compiler.config
 import torch.distributed as dist
-from torch._dynamo.utils import dynamo_timed, get_chromium_event_logger, warn_once
+from torch._dynamo.utils import (
+    dynamo_timed,
+    get_chromium_event_logger,
+    set_feature_use,
+    warn_once,
+)
 from torch._environment import is_fbcode
 from torch._logging._internal import trace_structured_artifact
 
@@ -458,6 +463,8 @@ def get_cache_key() -> Optional[str]:
     if dist.is_available() and dist.is_initialized():
         rank = dist.get_rank()
 
+    tag = torch.compiler.config.cache_key_tag
+
     # NB: We namespace the cache keys so that only user-specified job id
     # can alias with each other.
     if (r := torch.compiler.config.job_id) is not None:
@@ -467,11 +474,11 @@ def get_cache_key() -> Optional[str]:
                 "automatically generated job id associated with a specific MAST job "
                 "name and version."
             )
-        return f"{r}:{rank}"
+        return f"{r}:{rank}:{tag}"
 
     if (name_version := torch._utils_internal.get_mast_job_name_version()) is not None:
         mast_job_name, mast_job_version = name_version
-        return f"mast:{mast_job_name}:{mast_job_version}:{rank}"
+        return f"mast:{mast_job_name}:{mast_job_version}:{rank}:{tag}"
 
     return None
 
@@ -557,6 +564,7 @@ def get_code_state() -> DefaultDict[CodeId, CodeState]:
             "string",
             lambda: render_code_state(_CODE_STATE),
         )
+        set_feature_use("pgo", True)
         _INIT_CODE_STATE = copy.deepcopy(_CODE_STATE)
         return _CODE_STATE
 
@@ -657,7 +665,7 @@ def put_local_code_state(cache_key: str) -> None:
         lock_path = path + ".lock"
         # We /mostly/ don't need the lock but the tmp file could be clobbered
         # TODO: use a safe tempfile create to eliminate lock
-        from filelock import FileLock
+        from torch.utils._filelock import FileLock
 
         os.makedirs(os.path.dirname(path), exist_ok=True)
 

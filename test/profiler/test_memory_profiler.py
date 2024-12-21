@@ -2,6 +2,7 @@
 import functools
 import gc
 import itertools as it
+import sys
 import textwrap
 import unittest
 from typing import Callable, Dict, Iterator, List, Optional, Tuple
@@ -102,6 +103,7 @@ class RecordInputOutputDispatchMode(torch.utils._python_dispatch.TorchDispatchMo
         return out
 
 
+@unittest.skipIf(sys.version_info >= (3, 13), "many segfaults")
 @skipIfTorchDynamo("TorchDynamo changes Python calls that memory profiling relies on.")
 class TestIdentifyGradients(TestCase):
     def gradient_detected(
@@ -494,7 +496,7 @@ class TestDataFlow(TestCase):
             z = x.mul(y)
             return {"z": z.view_as(z)}
 
-        def f1(x, y):
+        def f1(x, y):  # noqa: F841
             with torch.no_grad():
                 return f0(x, y)
 
@@ -825,6 +827,7 @@ class TestDataFlow(TestCase):
         )
 
 
+@unittest.skipIf(sys.version_info >= (3, 13), "many segfaults")
 @skipIfTorchDynamo("TorchDynamo changes Python calls that memory profiling relies on.")
 class TestMemoryProfilerE2E(TestCase):
     @staticmethod
@@ -1121,8 +1124,8 @@ class TestMemoryProfilerE2E(TestCase):
         w1 = torch.ones((1,), requires_grad=True)
 
         def step_fn(_):
-            x = torch.ones((2, 2))
-            y = torch.cat([x * w0, x * w1], dim=1)
+            x = torch.ones((2, 2))  # noqa: F841
+            y = torch.cat([x * w0, x * w1], dim=1)  # noqa: F841
 
         # NOTE: We expect that all unknown categories. This is simply a sanity
         #       check to ensure that we do not over-label.

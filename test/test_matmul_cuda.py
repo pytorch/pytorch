@@ -16,7 +16,6 @@ from torch.quantization._quantized_conversions import (
 from torch.testing import make_tensor
 from torch.testing._internal.common_cuda import (
     SM53OrLater,
-    SM90OrLater,
     _get_torch_cuda_version,
     PLATFORM_SUPPORTS_FP8
 )
@@ -35,14 +34,17 @@ from torch.testing._internal.common_utils import (
     parametrize,
     run_tests,
     skipIfRocmVersionLessThan,
+    TEST_CUDA,
     TEST_WITH_ROCM,
     skipIfRocm,
     TestCase,
 )
 
 _IS_SM8X = False
-if torch.cuda.is_available():
+_IS_SM9X = False
+if TEST_CUDA:
     _IS_SM8X = torch.cuda.get_device_capability(0)[0] == 8
+    _IS_SM9X = torch.cuda.get_device_capability(0)[0] == 9
 
 # Protects against includes accidentally setting the default dtype
 assert torch.get_default_dtype() is torch.float32
@@ -560,7 +562,7 @@ class TestFP8MatmulCuda(TestCase):
         self.assertEqual(out_fp8, out_fp8_s)
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8 or IS_WINDOWS, f8_msg)
-    @unittest.skipIf(not SM90OrLater, "rowwise implementation is currently sm90 specific")
+    @unittest.skipIf(not _IS_SM9X, "rowwise implementation is currently sm90 specific")
     @skipIfRocm()
     @parametrize("use_fast_accum", [True, False])
     def test_float8_rowwise_scaling_sanity(self, device, use_fast_accum: bool) -> None:
@@ -666,7 +668,7 @@ class TestFP8MatmulCuda(TestCase):
             )
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8 or IS_WINDOWS, f8_msg)
-    @unittest.skipIf(not SM90OrLater, "rowwise implementation is currently sm90 specific")
+    @unittest.skipIf(not _IS_SM9X, "rowwise implementation is currently sm90 specific")
     @skipIfRocm()
     @parametrize("base_dtype", [torch.bfloat16])
     def test_scaled_mm_vs_emulated_row_wise(self, base_dtype):
@@ -699,6 +701,33 @@ class TestFP8MatmulCuda(TestCase):
             atol, rtol = 2e-3, 2e-3
 
         torch.testing.assert_close(out_scaled_mm, out_emulated, atol=atol, rtol=rtol)
+
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
+    @parametrize("which_dim_zero", [0, 1, 2])
+    @parametrize("use_torch_compile", [False, True])
+    def test_zero_dim_tensorwise(self, which_dim_zero, use_torch_compile) -> None:
+        device = "cuda"
+        x_dtype, y_dtype = torch.float8_e4m3fn, torch.float8_e4m3fn
+        out_dtype = torch.bfloat16
+        M, K, N = 32, 32, 32
+        if which_dim_zero == 0:
+            M = 0
+        elif which_dim_zero == 1:
+            K = 0
+        elif which_dim_zero == 2:
+            N = 0
+
+        x_fp8 = torch.zeros(M, K, device=device).to(x_dtype)
+        y_fp8 = torch.zeros(N, K, device=device, dtype=y_dtype).t()
+        out_fp32 = torch.mm(x_fp8.to(torch.float), y_fp8.to(torch.float))
+        scale_a = torch.tensor(float('-inf'), device=device)
+        scale_b = torch.tensor(float('-inf'), device=device)
+        f = torch._scaled_mm
+        if use_torch_compile:
+            f = torch.compile(torch._scaled_mm)
+        out_fp8 = f(x_fp8, y_fp8, scale_a, scale_b, out_dtype=out_dtype)
+        self.assertEqual(out_dtype, out_fp8.dtype)
+        self.assertEqual(out_fp32, out_fp8.to(torch.float))
 
 
 @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support CUTLASS")
