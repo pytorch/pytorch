@@ -548,6 +548,7 @@ def update_schema():
         match = re.search("checksum<<([A-Fa-f0-9]{64})>>", content)
         _check(match is not None, "checksum not found in schema.yaml")
         assert match is not None
+
         checksum_head = match.group(1)
 
         thrift_content = importlib.resources.read_text(
@@ -562,8 +563,13 @@ def update_schema():
         assert thrift_content[1].startswith("// checksum<<")
         thrift_checksum_real = _hash_content("\n".join(thrift_content[2:]))
 
-        from yaml import load, Loader
-
+        from yaml import load        
+        # Safely load fast C Yaml loader/dumper if they are available
+        try:
+            from yaml import CSafeLoader as Loader
+        except ImportError:
+            from yaml import SafeLoader as Loader #type:ignore[assignment, misc]
+    
         dst = load(content, Loader=Loader)
         assert isinstance(dst, dict)
     else:
