@@ -430,6 +430,7 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._C._cpu._is_arm_sve_supported",
         "torch._C._crash_if_aten_asan",
         "torch._C._crash_if_csrc_asan",
+        "torch._C._crash_if_csrc_lsan",
         "torch._C._crash_if_csrc_ubsan",
         "torch._C._crash_if_debug_asserts_fail",
         "torch._C._crash_if_vptr_ubsan",

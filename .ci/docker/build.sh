@@ -366,7 +366,7 @@ case "$image" in
     TRITON=yes
     ;;
   pytorch-linux-jammy-py3-clang15-asan)
-    ANACONDA_PYTHON_VERSION=3.10
+    ANACONDA_PYTHON_VERSION=3.12
     CLANG_VERSION=15
     CONDA_CMAKE=yes
     VISION=yes
