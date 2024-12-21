@@ -849,7 +849,6 @@ class AOTAutogradCache:
     def save(key: str, entry: AOTAutogradCacheEntry, remote: bool):
         """Save a single entry into the cache."""
         try:
-            check_metadata_cacheable(entry.runtime_metadata)
             content = pickle.dumps(entry)
         except BypassAOTAutogradCache as e:
             counters["aot_autograd"]["autograd_cache_bypass"] += 1

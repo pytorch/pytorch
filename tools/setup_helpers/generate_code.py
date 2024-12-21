@@ -74,6 +74,21 @@ def generate_code(
             autograd_dir,
         )
 
+    # Generate the python bindings for functionalization's `ViewMeta` classes.
+    from torchgen.gen_functionalization_type import (
+        gen_functionalization_view_meta_classes,
+    )
+
+    functionalization_install_dir = os.path.join(
+        install_dir, "functionalization", "generated"
+    )
+    gen_functionalization_view_meta_classes(
+        native_functions_path or NATIVE_FUNCTIONS_PATH,
+        tags_path or TAGS_PATH,
+        selector=operator_selector,
+        install_dir=functionalization_install_dir,
+    )
+
 
 def get_selector_from_legacy_operator_selection_list(
     selected_op_list_path: str,
