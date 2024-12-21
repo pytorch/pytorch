@@ -135,3 +135,16 @@ class GPUTooOldForTriton(ShortenTraceback):
             f"but your device is of CUDA capability {device_props.major}.{device_props.minor}",
             first_useful_frame=first_useful_frame,
         )
+
+
+class InductorError(ShortenTraceback):
+    def __init__(
+        self,
+        inner_exception: Exception,
+        first_useful_frame: Optional[types.FrameType],
+    ) -> None:
+        self.inner_exception = inner_exception
+        super().__init__(
+            f"{type(inner_exception).__name__}: {inner_exception}",
+            first_useful_frame=first_useful_frame,
+        )
