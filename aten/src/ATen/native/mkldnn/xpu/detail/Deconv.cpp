@@ -1,14 +1,15 @@
-#include <c10/xpu/XPUFunctions.h>
 #include <ATen/ATen.h>
+#include <c10/xpu/XPUFunctions.h>
 
-#include <oneapi/dnnl/dnnl.hpp>
-#include <ATen/native/mkldnn/xpu/detail/oneDNNContext.h>
-#include <ATen/native/mkldnn/xpu/detail/Utils.h>
 #include <ATen/native/mkldnn/xpu/detail/Attr.h>
+#include <ATen/native/mkldnn/xpu/detail/Utils.h>
+#include <ATen/native/mkldnn/xpu/detail/oneDNNContext.h>
+#include <oneapi/dnnl/dnnl.hpp>
 
 namespace at::native::onednn {
 
-static inline dnnl::memory::dims deconv_compatible_dilation(IntArrayRef& dilation) {
+static inline dnnl::memory::dims deconv_compatible_dilation(
+    IntArrayRef& dilation) {
   dnnl::memory::dims ret = dilation.vec();
   for (auto it = ret.begin(); it != ret.end(); it++) {
     *it -= 1;
@@ -96,8 +97,9 @@ static inline dnnl::memory::dims deconv_compatible_weight_dims(
     IntArrayRef weight_size) {
   if (ndim == 3) {
     auto kw = weight_size[2];
-    return (groups != 1) ? dnnl::memory::dims({groups, oc / groups, ic / groups, kw})
-                         : dnnl::memory::dims({oc, ic, kw});
+    return (groups != 1)
+        ? dnnl::memory::dims({groups, oc / groups, ic / groups, kw})
+        : dnnl::memory::dims({oc, ic, kw});
   } else if (ndim == 4) {
     auto kh = weight_size[2];
     auto kw = weight_size[3];
@@ -116,10 +118,7 @@ static inline dnnl::memory::dims deconv_compatible_weight_dims(
   }
 }
 
-static std::tuple<
-    dnnl::memory::desc,
-    dnnl::memory::desc,
-    dnnl::memory::desc>
+static std::tuple<dnnl::memory::desc, dnnl::memory::desc, dnnl::memory::desc>
 deconv_get_plain_md(
     const at::Tensor& src,
     const at::Tensor& weight,
@@ -141,7 +140,8 @@ deconv_get_plain_md(
   auto weight_dt = get_onednn_dtype_include_double(weight);
   auto fmt_weight = deconv_weight_fmt(
       weight, ndim, weight_size, groups != 1, is_channels_last_suggested);
-  dnnl::memory::desc weight_usr_md = dnnl::memory::desc(weight_size, weight_dt, fmt_weight);
+  dnnl::memory::desc weight_usr_md =
+      dnnl::memory::desc(weight_size, weight_dt, fmt_weight);
 
   return {src_usr_md, weight_usr_md, dst_usr_md};
 }
@@ -158,11 +158,11 @@ sycl::event deconvolution(
     int64_t groups,
     Attr& attr,
     const std::vector<sycl::event>& deps) {
-  auto engine =
-      GpuEngineManager::Instance().get_engine({c10::kXPU, c10::xpu::current_device()});
+  auto engine = GpuEngineManager::Instance().get_engine(
+      {c10::kXPU, c10::xpu::current_device()});
   auto stream = GpuStreamManager::Instance().get_stream();
 
-  bool is_channels_last_suggested = use_channels_last_for_conv(src, weight, /*is_transposed=*/true);
+  bool is_channels_last_suggested = use_channels_last_for_conv(src, weight);
 
   // create usr_md for tensors, and md for conv primitive
   auto [src_md, weight_md, dst_md] =
@@ -183,10 +183,11 @@ sycl::event deconvolution(
   dnnl::primitive_attr pattr;
   dnnl::post_ops po = attr.extract_post_ops(dst);
   pattr.set_post_ops(po);
-  #if ONEDNN_SUPPORT_DETERMINISTIC
-    if(at::globalContext().deterministicAlgorithms() || at::globalContext().deterministicMkldnn())
-        pattr.set_deterministic(true);
-  #endif
+#if ONEDNN_SUPPORT_DETERMINISTIC
+  if (at::globalContext().deterministicAlgorithms() ||
+      at::globalContext().deterministicMkldnn())
+    pattr.set_deterministic(true);
+#endif
 
   pattr.set_scratchpad_mode(dnnl::scratchpad_mode::user);
 
@@ -225,15 +226,17 @@ sycl::event deconvolution(
 
   size_t scratchpad_size = deconv_fwd_pd.scratchpad_desc().get_size();
   at::Tensor scratchpad_tensor = at::empty(
-      {static_cast<int64_t>(scratchpad_size)}, src.options().dtype(at::kByte), std::nullopt);
+      {static_cast<int64_t>(scratchpad_size)},
+      src.options().dtype(at::kByte),
+      std::nullopt);
   auto scratchpad_m = make_onednn_memory(
       deconv_fwd_pd.scratchpad_desc(), engine, scratchpad_tensor.data_ptr());
   args.insert({DNNL_ARG_SCRATCHPAD, scratchpad_m});
 
   auto deconv_fwd = dnnl::deconvolution_forward(deconv_fwd_pd);
-  sycl::event deconv_event = dnnl::sycl_interop::execute(deconv_fwd, stream, args, deps);
+  sycl::event deconv_event =
+      dnnl::sycl_interop::execute(deconv_fwd, stream, args, deps);
   return deconv_event;
-
 }
 
 sycl::event deconvolution_backward_data(
@@ -246,29 +249,30 @@ sycl::event deconvolution_backward_data(
     int64_t groups,
     bool bias_defined,
     const std::vector<sycl::event>& deps) {
-  auto engine =
-      GpuEngineManager::Instance().get_engine({c10::kXPU, c10::xpu::current_device()});
+  auto engine = GpuEngineManager::Instance().get_engine(
+      {c10::kXPU, c10::xpu::current_device()});
   auto stream = GpuStreamManager::Instance().get_stream();
 
   bool is_channels_last_suggested =
-      use_channels_last_for_conv(diff_dst, weight, /*is_transposed=*/true);
+      use_channels_last_for_conv(diff_dst, weight);
   // create memory desc
-  auto [src_md, weight_md, dst_md] =
-      deconv_get_plain_md(
-          diff_src, weight, diff_dst, groups, is_channels_last_suggested);
+  auto [src_md, weight_md, dst_md] = deconv_get_plain_md(
+      diff_src, weight, diff_dst, groups, is_channels_last_suggested);
 
   dnnl::memory::format_tag bia_fmt = dnnl::memory::format_tag::x;
   auto bias_md = bias_defined
-      ? dnnl::memory::desc({diff_dst.size(1)}, weight_md.get_data_type(), bia_fmt)
+      ? dnnl::memory::desc(
+            {diff_dst.size(1)}, weight_md.get_data_type(), bia_fmt)
       : dnnl::memory::desc();
 
   // create fwd primitive desc hint
   dnnl::primitive_attr pattr;
   pattr.set_scratchpad_mode(dnnl::scratchpad_mode::user);
-  #if ONEDNN_SUPPORT_DETERMINISTIC
-    if(at::globalContext().deterministicAlgorithms() || at::globalContext().deterministicMkldnn())
-        pattr.set_deterministic(true);
-  #endif
+#if ONEDNN_SUPPORT_DETERMINISTIC
+  if (at::globalContext().deterministicAlgorithms() ||
+      at::globalContext().deterministicMkldnn())
+    pattr.set_deterministic(true);
+#endif
 
   dnnl::memory::dims _stride = stride.vec();
   dnnl::memory::dims _padding = padding.vec();
@@ -288,17 +292,18 @@ sycl::event deconvolution_backward_data(
       pattr);
 
   // create bwd primitive desc
-  auto deconv_backward_data_pd = dnnl::deconvolution_backward_data::primitive_desc(
-      engine,
-      dnnl::algorithm::deconvolution_direct,
-      src_md,
-      weight_md,
-      dst_md,
-      _stride,
-      _dilation,
-      _padding,
-      _padding,
-      deconv_fwd_pd);
+  auto deconv_backward_data_pd =
+      dnnl::deconvolution_backward_data::primitive_desc(
+          engine,
+          dnnl::algorithm::deconvolution_direct,
+          src_md,
+          weight_md,
+          dst_md,
+          _stride,
+          _dilation,
+          _padding,
+          _padding,
+          deconv_fwd_pd);
 
   // create memory
   dnnl::memory diff_dst_m, wei_m, diff_src_m;
@@ -311,7 +316,9 @@ sycl::event deconvolution_backward_data(
   std::unordered_map<int, dnnl::memory> args;
   size_t scratchpad_size = deconv_backward_data_pd.scratchpad_desc().get_size();
   at::Tensor scratchpad_tensor = at::empty(
-      {static_cast<int64_t>(scratchpad_size)}, diff_dst.options().dtype(at::kByte), std::nullopt);
+      {static_cast<int64_t>(scratchpad_size)},
+      diff_dst.options().dtype(at::kByte),
+      std::nullopt);
   auto scratchpad_memory = make_onednn_memory(
       deconv_backward_data_pd.scratchpad_desc(),
       engine,
@@ -324,9 +331,9 @@ sycl::event deconvolution_backward_data(
   // execute primitive
   auto deconv_backward_data =
       dnnl::deconvolution_backward_data(deconv_backward_data_pd);
-  sycl::event deconv_bwd_data_event = dnnl::sycl_interop::execute(deconv_backward_data, stream, args, deps);
+  sycl::event deconv_bwd_data_event =
+      dnnl::sycl_interop::execute(deconv_backward_data, stream, args, deps);
   return deconv_bwd_data_event;
-
 }
 
 sycl::event deconvolution_backward_weights(
@@ -339,16 +346,15 @@ sycl::event deconvolution_backward_weights(
     IntArrayRef dilation,
     int64_t groups,
     const std::vector<sycl::event>& deps) {
-  auto engine =
-      GpuEngineManager::Instance().get_engine({c10::kXPU, c10::xpu::current_device()});
+  auto engine = GpuEngineManager::Instance().get_engine(
+      {c10::kXPU, c10::xpu::current_device()});
   auto stream = GpuStreamManager::Instance().get_stream();
 
-  bool is_channels_last_suggested =
-      use_channels_last_for_conv(src, diff_dst, /*is_transposed=*/true);
+  bool is_channels_last_suggested = use_channels_last_for_conv(src, diff_dst);
 
   // create memory desc
   auto [src_md, weight_md, dst_md] = deconv_get_plain_md(
-          src, diff_weight, diff_dst, groups, is_channels_last_suggested);
+      src, diff_weight, diff_dst, groups, is_channels_last_suggested);
 
   dnnl::memory::format_tag bia_fmt = dnnl::memory::format_tag::x;
   auto bia_md = diff_bia.defined()
@@ -361,10 +367,11 @@ sycl::event deconvolution_backward_weights(
   dnnl::memory::dims _dilation = deconv_compatible_dilation(dilation);
   dnnl::primitive_attr pattr;
 
-  #if ONEDNN_SUPPORT_DETERMINISTIC
-    if(at::globalContext().deterministicAlgorithms() || at::globalContext().deterministicMkldnn())
-        pattr.set_deterministic(true);
-  #endif
+#if ONEDNN_SUPPORT_DETERMINISTIC
+  if (at::globalContext().deterministicAlgorithms() ||
+      at::globalContext().deterministicMkldnn())
+    pattr.set_deterministic(true);
+#endif
   pattr.set_scratchpad_mode(dnnl::scratchpad_mode::user);
   auto deconv_fwd_pd = dnnl::deconvolution_forward::primitive_desc(
       engine,
@@ -415,7 +422,9 @@ sycl::event deconvolution_backward_weights(
 
   size_t scratchpad_size = deconv_bwd_w_pd.scratchpad_desc().get_size();
   at::Tensor scratchpad_tensor = at::empty(
-      {static_cast<int64_t>(scratchpad_size)}, src.options().dtype(at::kByte), std::nullopt);
+      {static_cast<int64_t>(scratchpad_size)},
+      src.options().dtype(at::kByte),
+      std::nullopt);
   auto scratchpad_m = make_onednn_memory(
       deconv_bwd_w_pd.scratchpad_desc(), engine, scratchpad_tensor.data_ptr());
   args.insert({DNNL_ARG_SCRATCHPAD, scratchpad_m});
@@ -423,9 +432,9 @@ sycl::event deconvolution_backward_weights(
   // execute primitive
   auto deconv_bwd_w = dnnl::deconvolution_backward_weights(deconv_bwd_w_pd);
 
-  sycl::event deconv_bwd_w_event = dnnl::sycl_interop::execute(deconv_bwd_w, stream, args, deps);
+  sycl::event deconv_bwd_w_event =
+      dnnl::sycl_interop::execute(deconv_bwd_w, stream, args, deps);
   return deconv_bwd_w_event;
-
 }
 
 } // namespace at::native::onednn

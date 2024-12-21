@@ -539,7 +539,8 @@ void Pickler::pushSpecializedList(
   push<PickleOpCode>(PickleOpCode::REDUCE);
 }
 
-static inline double swapDouble(double value) {
+#if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
+static double swapDouble(double value) {
   const char* bytes = reinterpret_cast<const char*>(&value);
   double flipped = 0;
   char* out_bytes = reinterpret_cast<char*>(&flipped);
@@ -548,6 +549,7 @@ static inline double swapDouble(double value) {
   }
   return *reinterpret_cast<double*>(out_bytes);
 }
+#endif
 
 void Pickler::pushDouble(double value) {
   push<PickleOpCode>(PickleOpCode::BINFLOAT);

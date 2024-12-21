@@ -331,9 +331,6 @@ def _replace_observer_with_quantize_dequantize_node_decomposed(
                 add_dequantize_op_kwargs(dequantize_op, input_node),
             )
 
-            def remap_fn(x):
-                return dequantized_node if x is node else x
-
             node.replace_all_uses_with(dequantized_node)
             # propagate numeric debug handle from observer/fake_quant node to dequantize node
             if NUMERIC_DEBUG_HANDLE_KEY in node.meta:
@@ -342,7 +339,18 @@ def _replace_observer_with_quantize_dequantize_node_decomposed(
                 ]
             graph.erase_node(node)
     elif dtype == torch.float16:
-        raise NotImplementedError("decomposed to float16 op not implemented yet")
+        # Insert to_fp16 -> to_fp32 node
+        dtype_convert_op = torch.ops.quantized_decomposed.convert_element_type.no_fuse
+        with graph.inserting_before(node):
+            input_node = node.args[0]
+            convert_fp16_node = graph.create_node(
+                "call_function", dtype_convert_op, (input_node, torch.float16), {}
+            )
+            convert_fp32_node = graph.create_node(
+                "call_function", dtype_convert_op, (convert_fp16_node, torch.float), {}
+            )
+            node.replace_all_uses_with(convert_fp32_node)
+            graph.erase_node(node)
 
     # should not reach since we have checks in the beginning to make sure the
     # activation_post_process is supported
@@ -921,7 +929,6 @@ def convert_custom_module(
         it later.
     """
     observed_custom_module = modules[str(node.target)]
-    maybe_obs = _maybe_get_observer_for_node(node, modules)
     qconfig = observed_custom_module.qconfig
     if activation_is_statically_quantized(qconfig):
         statically_quantized_custom_module_nodes.add(node)
@@ -1116,10 +1123,9 @@ def convert(
     # for dynamic quant ops or weight only quant ops
     _run_weight_observers(model, backend_config)
 
-    graph_inputs: List[str] = []
-    for node in model.graph.nodes:
-        if node.op == "placeholder":
-            graph_inputs.append(node.name)
+    graph_inputs: List[str] = [
+        node.name for node in model.graph.nodes if node.op == "placeholder"
+    ]
 
     # additional state to override inputs to be quantized, if specified
     # by the user

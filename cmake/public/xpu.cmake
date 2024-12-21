@@ -5,6 +5,9 @@ if(TARGET torch::xpurt)
   return()
 endif()
 
+set(XPU_HOST_CXX_FLAGS)
+set(XPU_DEVICE_CXX_FLAGS)
+
 # Find SYCL library.
 find_package(SYCLToolkit REQUIRED)
 if(NOT SYCL_FOUND)
@@ -33,3 +36,11 @@ set_property(
 torch_xpu_get_arch_list(XPU_ARCH_FLAGS)
 # propagate to torch-xpu-ops
 set(TORCH_XPU_ARCH_LIST ${XPU_ARCH_FLAGS})
+
+if(CMAKE_SYSTEM_NAME MATCHES "Linux" AND SYCL_COMPILER_VERSION VERSION_LESS_EQUAL PYTORCH_2_5_SYCL_TOOLKIT_VERSION)
+  # for ABI compatibility on Linux
+  string(APPEND XPU_HOST_CXX_FLAGS " -D__INTEL_PREVIEW_BREAKING_CHANGES")
+  string(APPEND XPU_DEVICE_CXX_FLAGS " -fpreview-breaking-changes")
+endif()
+
+string(APPEND XPU_HOST_CXX_FLAGS " -DSYCL_COMPILER_VERSION=${SYCL_COMPILER_VERSION}")

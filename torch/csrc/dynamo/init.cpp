@@ -15,7 +15,7 @@
 static struct PyModuleDef _module =
     {PyModuleDef_HEAD_INIT, "torch._C._dynamo", "", -1, nullptr};
 
-PYBIND11_MAKE_OPAQUE(std::vector<uint8_t>);
+PYBIND11_MAKE_OPAQUE(std::vector<uint8_t>)
 
 namespace torch::dynamo {
 
@@ -71,7 +71,10 @@ void initDynamoBindings(PyObject* torch) {
       .def_readonly("code", &CacheEntry::code)
       .def_readonly("compile_id", &CacheEntry::compile_id)
       .def_readonly("trace_annotation", &CacheEntry::trace_annotation)
-      .def_property_readonly("next", &CacheEntry::next);
+      .def_property_readonly("next", &CacheEntry::next)
+      .def(
+          "update_diff_guard_root_manager",
+          &CacheEntry::update_diff_guard_root_manager);
 
   py::class_<ExtraState>(m, "_ExtraState")
       .def("invalidate", &ExtraState::invalidate);
@@ -79,6 +82,8 @@ void initDynamoBindings(PyObject* torch) {
   m.def("_debug_get_cache_entry_list", &_debug_get_cache_entry_list);
   py::bind_vector<std::vector<uint8_t>>(m, "VectorUInt8");
   m.attr("py_opcode_caches") = _PyOpcode_Caches_vec;
+
+  m.def("code_framelocals_names", &code_framelocals_names);
 }
 
 } // namespace torch::dynamo

@@ -19,7 +19,6 @@ from torch._inductor.test_operators import realize
 from torch._inductor.utils import sympy_index_symbol
 from torch._inductor.virtualized import ops, V
 from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FP8
-from torch.testing._internal.common_device_type import expectedFailureXPU
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 from torch.utils._pytree import tree_map
 from torch.utils._sympy.functions import ModularIndexing
@@ -118,10 +117,10 @@ class ImplDetailTest(TestCase):
         snode = SchedulerNode(V.graph.scheduler, buf)
         snode.apply_new_loop_order([1, 0])
         prefix1 = self._get_snode_body_sym_prefix(snode)
-        self.assertTrue(prefix1 == "z")
+        self.assertTrue(prefix1 == "p")
         snode.apply_new_loop_order([1, 0])
         prefix2 = self._get_snode_body_sym_prefix(snode)
-        self.assertTrue(prefix2 == "z")
+        self.assertTrue(prefix2 == "p")
 
     def test_reorder_and_merge_loops(self):
         sizes = (1024, 2048)
@@ -135,6 +134,21 @@ class ImplDetailTest(TestCase):
         new_sizes = new_body.sizes
         self.assertTrue(tuple(new_sizes[0]) == (np.prod(sizes),), f"{new_sizes=}")
 
+    def test_merge_loops_invalidate_pw_dep_cache(self):
+        sizes = (1024, 2048)
+        strides = (2048, 1)
+        buf = self._create_computed_buffer_ax2(sizes, strides)
+
+        snode = SchedulerNode(V.graph.scheduler, buf)
+        old_var_ranges = snode.pointwise_read_writes().var_ranges
+        self.assertTrue(len(old_var_ranges) == 2)  # 2 dimension not merged
+        snode.merge_loops()
+        new_var_ranges = snode.pointwise_read_writes().var_ranges
+
+        # we cache pointwise_read_writes result on a scheduler node
+        # make sure new_var_ranges is refreshed by invalidating the cache.
+        self.assertTrue(len(new_var_ranges) == 1)  # 2 dimensions get merged
+
     def test_reorder_modular_indexing(self):
         """
         There was a bug that we wrongly map i0 to the dimension with size 49
@@ -144,7 +158,7 @@ class ImplDetailTest(TestCase):
 
         def _create_computed_buffer():
             def inner_fn(index):
-                i0, i1, i2, i3 = index
+                i0, _, i2, i3 = index
                 return ops.load(
                     "primal", i3 + 49 * i2 + 2401 * ModularIndexing(i0, 1, 64)
                 )
@@ -164,7 +178,7 @@ class ImplDetailTest(TestCase):
         _, body = buf.simplify_and_reorder()
         new_body = body.reorder_iter_loops([1, 2, 3, 0])
 
-        z0, z1, z2, z3 = (sympy_index_symbol(f"z{i}") for i in range(4))
+        z0, z1, z2, z3 = (sympy_index_symbol(f"p{i}") for i in range(4))
         self.assertEqual(body.var_ranges, {z0: 128, z1: 4, z2: 49, z3: 49})
         self.assertEqual(
             body.indexing_exprs["index0"],
@@ -241,8 +255,6 @@ class LoopOrderingTest(TestCase):
         expected_num_bytes *= x.itemsize
         self.assertEqual(expected_num_bytes, metrics.num_bytes_accessed)
 
-    # xpu generate 2 kernels
-    @expectedFailureXPU
     def test_apbt_realize(self):
         M = 1024
         N = 2048
@@ -262,8 +274,6 @@ class LoopOrderingTest(TestCase):
         self.do_acc_test(f, x, y)
         self.assertEqual(1, metrics.generated_kernel_count)
 
-    # xpu generate 2 kernels
-    @expectedFailureXPU
     def test_sum_and_t(self):
         N = 1024
 
@@ -274,8 +284,6 @@ class LoopOrderingTest(TestCase):
         self.do_acc_test(f, x)
         self.assertEqual(1, metrics.generated_kernel_count)
 
-    # xpu generate 2 kernels
-    @expectedFailureXPU
     def test_pw_outer_red(self):
         def f(x):
             x = realize(x + 1)
@@ -286,8 +294,6 @@ class LoopOrderingTest(TestCase):
         self.do_acc_test(f, x)
         self.assertEqual(1, metrics.generated_kernel_count)
 
-    # xpu generate 2 kernels
-    @expectedFailureXPU
     def test_pw_outer_red_2(self):
         """
         The pointwise kernel is a fused kernel
@@ -361,8 +367,6 @@ class LoopOrderingTest(TestCase):
         # some buffer is used before being defined.
         f(input_ids, labels, position_ids)
 
-    # xpu generate 2 kernels
-    @expectedFailureXPU
     def test_different_broadcast_shapes(self):
         def f(x, y, c):
             return x + c, y + c
@@ -431,7 +435,6 @@ class LoopOrderingTest(TestCase):
         scale = torch.Tensor([10.0]).to("cuda")
 
         E4M3_MAX_POS = torch.finfo(torch.float8_e4m3fn).max
-        E5M2_MAX_POS = torch.finfo(torch.float8_e5m2).max
 
         def test_pattern2(tensor_x_inp, scale_x):
             tensor_x = tensor_x_inp * scale_x
@@ -473,7 +476,7 @@ class LoopOrderingTest(TestCase):
             M, N = 1024 * 32, 1024 * 8
         else:
             M, N = 200, 100
-        x = torch.randn(M, N, device="cuda")
+        x = torch.randn(M, N, device=GPU_TYPE)
         actual = f(x)
         opt_f = torch.compile(f)
         expected = opt_f(x)
