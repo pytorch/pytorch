@@ -98,7 +98,9 @@ class CppTemplateKernel(CppKernel):
         )
         sizevars = sorted(unique_sizevars, key=str)
         for sizevar in sizevars:
-            self.args.sizevars[sizevar] = f"k{sizevar}"
+            # For BMM, ensure that sizevars from previous codegen are not overwritten
+            if sizevar not in self.args.sizevars:
+                self.args.sizevars[sizevar] = f"k{sizevar}"
 
         def hook():
             # remove all aliases before generate function definition

@@ -14,10 +14,13 @@ from .cpp_template_kernel import CppTemplateKernel
 from .cpp_utils import DTYPE_TO_CPP, GemmBlocking
 
 
+# We use BY as the output in order to cause sizevars in the batch dim to be set in the kernel
+# Otherwise, sizevars can be off by 1 in naming convention, causing compiler errors for epilogue nodes
+# with a dynamic size in the non-bmm inputs
 GEMM_SINGLE_THREAD_MM_STUB = r"""
 {{kernel.def_kernel(
     inputs={"X": X, "W": W},
-    outputs={"Y": Y},
+    outputs={"Y": BY},
     aliases=aliases,
     function_name="single_thread_mm",
     extra_sizevars=[b_index],
@@ -26,7 +29,7 @@ GEMM_SINGLE_THREAD_MM_STUB = r"""
 GEMM_THREADED_MM_STUB = r"""
 {{kernel.def_kernel(
     inputs={"X": X, "W": W},
-    outputs={"Y": Y},
+    outputs={"Y": BY},
     aliases=aliases,
     function_name="threaded_mm",
     extra_sizevars=[b_index],
