@@ -6,7 +6,6 @@
 
 #include <ATen/OpMathType.h>
 #include <ATen/TensorIterator.h>
-#include <ATen/core/Array.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/detail/OffsetCalculator.cuh>
 #include <ATen/native/cuda/jit_utils.h>
@@ -26,24 +25,6 @@
 #include <mutex>
 
 namespace at::native {
-
-template <typename Tuple, std::size_t... I>
-// warning : unused parameter when tuple is empty.
-constexpr auto tuple_to_array_helper(const Tuple& t [[maybe_unused]], std::index_sequence<I...> seq) {
-    constexpr auto size = seq.size();
-    return std::array<const void*, size>{static_cast<const void*>(&std::get<I>(t))...};
-}
-
-// Helper function convert tuple to std::array<const void*, N>
-// for passing the arguments to CUDA Kernel
-// NOTE: We capture tuple by reference,
-// so the pointers in returned array are only valid
-// till tuple is alive.
-template <typename ...Args>
-constexpr auto tuple_to_array(const std::tuple<Args...>& extra_args) {
-    constexpr auto tuple_size = sizeof...(Args);
-    return tuple_to_array_helper(extra_args, std::make_index_sequence<tuple_size>{});
-}
 
 struct JittedVecKernelCache {
   // Different kernels are compiled depending on what we're vectorizing up to (1, 2 or 4 elements)
@@ -278,7 +259,7 @@ static void jitted_gpu_kernel_impl(
     result_type, f_inputs_type, ExtraArgs...>(name, f, nInputs, nOutputs);
 
   auto &cache = device_caches[iter.device().index()];
-  auto extra_args_array = tuple_to_array(extra_args);
+  auto extra_args_array = c10::array_of(extra_args);
   return jitted_gpu_kernel_generic<arity>(
       jiterator_mutex,
       cache,

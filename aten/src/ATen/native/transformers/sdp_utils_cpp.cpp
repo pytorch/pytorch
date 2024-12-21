@@ -1,4 +1,5 @@
 #include <ATen/native/transformers/sdp_utils_cpp.h>
+#include <c10/util/Array.h>
 namespace sdp {
 namespace {
 
@@ -34,10 +35,10 @@ bool check_head_dim_size_cpp(sdp_params const& params, bool debug) {
 
 bool use_flash_attention_cpp(sdp_params const& params, bool debug) {
   constexpr auto cpp_supported_flash_dtypes =
-      array_of<at::ScalarType>(at::kFloat, at::kDouble, at::kBFloat16, at::kHalf);
+      c10::array_of<at::ScalarType>(at::kFloat, at::kDouble, at::kBFloat16, at::kHalf);
 
   // Define gate functions that determine if a flash kernel can be run
-  constexpr auto constraints = array_of<bool (*)(sdp_params const&, bool)>(
+  constexpr auto constraints = c10::array_of<bool (*)(sdp_params const&, bool)>(
       check_runtime_disabled_flash,
       check_nested_tensor,
       check_for_dropout,
