@@ -1580,7 +1580,7 @@ def gen_pattern(
     search_gm = trace_fn(search_fn, flat_inputs)
     return fx_to_pattern(
         search_gm,
-        ignore_types=(int, float, list, torch.device, torch.dtype),
+        ignore_types=(int, float, list, torch.device),
         argnames=argnames,
         scalar_workaround=scalar_workaround,
         exclusive_arg_names=exclusive_arg_names,
