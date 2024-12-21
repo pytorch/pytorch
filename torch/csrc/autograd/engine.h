@@ -187,7 +187,7 @@ struct TORCH_API Engine {
   virtual void thread_on_exception(
       const std::shared_ptr<GraphTask>& graph_task,
       const std::shared_ptr<Node>& fn,
-      std::exception& e);
+      std::exception&);
 
   void queue_callback(std::function<void()> callback);
 
@@ -227,7 +227,7 @@ struct TORCH_API Engine {
   void increment_non_reentrant_thread_count();
   void decrement_non_reentrant_thread_count();
   virtual void thread_main(const std::shared_ptr<GraphTask>& task);
-  void reentrant_thread_init();
+  [[noreturn]] void reentrant_thread_init();
   void add_thread_pool_task(const std::weak_ptr<GraphTask>& graph_task);
 
   // Ensures device_ready_queues_ are initialized only once
