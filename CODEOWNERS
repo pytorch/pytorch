@@ -178,3 +178,8 @@ torch/cuda/ @eqy @syed-ahmed
 torch/csrc/cuda/ @eqy @syed-ahmed
 torch/backends/cuda/ @eqy @syed-ahmed
 torch/backends/cudnn/ @eqy @syed-ahmed
+
+# C++ PyTree utilities
+/torch/utils/_cxx_pytree.py @XuehaiPan
+/torch/utils/pytree.py @XuehaiPan
+/torch/_dynamo/polyfills/pytree.py @XuehaiPan
