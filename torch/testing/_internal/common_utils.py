@@ -1574,7 +1574,7 @@ TEST_WITH_TORCHDYNAMO: bool = TestEnvironment.def_flag(
 if TEST_WITH_TORCHDYNAMO:
     import torch._dynamo
     # Do not spend time on helper functions that are called with different inputs
-    torch._dynamo.config.accumulated_cache_size_limit = 64
+    torch._dynamo.config.accumulated_recompile_limit = 64
     # Do not log compilation metrics from unit tests
     torch._dynamo.config.log_compilation_metrics = False
     # Silence 3.13.0 guard performance warnings

@@ -26,7 +26,7 @@ from torch.nn.attention.flex_attention import (
 
 torch._dynamo.config.automatic_dynamic_shapes = False
 # Needed since changing args to function causes recompiles
-torch._dynamo.config.cache_size_limit = 1000
+torch._dynamo.config.recompile_limit = 1000
 
 
 from torch._inductor.runtime.benchmarking import benchmarker
