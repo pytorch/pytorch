@@ -1,4 +1,5 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/TensorUtils.h>
 #include <ATen/ceil_div.h>
 #include <ATen/mps/MPSProfiler.h>
 #include <ATen/native/BucketizationUtils.h>
@@ -31,6 +32,11 @@ static void searchsorted_mps_contiguous(Tensor& result,
   TORCH_INTERNAL_ASSERT(input.is_contiguous());
   TORCH_INTERNAL_ASSERT(boundaries.is_contiguous());
   TORCH_INTERNAL_ASSERT(!sorter.defined() || sorter.is_contiguous());
+
+  auto input_arg = TensorArg(input, "input", 1);
+  auto boundaries_arg = TensorArg(boundaries, "boundaries", 1);
+  auto result_arg = TensorArg(result, "result", 1);
+  checkAllSameGPU("searchsorted_mps_contiguous", {input_arg, boundaries_arg, result_arg});
 
   int64_t numel_in = input.numel();
   bool is_scalar_input = input.dim() == 0 && numel_in == 1;
