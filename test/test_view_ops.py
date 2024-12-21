@@ -74,7 +74,7 @@ def _generate_input(shape, dtype, device, with_extremal):
 # TODO: replace this with make_tensor() in common_utils.py
 def _rand_shape(dim, min_size, max_size):
     shape = []
-    for i in range(dim):
+    for _ in range(dim):
         shape.append(random.randint(min_size, max_size))
     return tuple(shape)
 
@@ -996,7 +996,7 @@ class TestViewOps(TestCase):
     # Testing that the generated view_copy kernel and its derivative are implemented correctly
     def test_view_copy(self, device):
         a = torch.randn(4, device=device, requires_grad=True)
-        a_ref = a.clone().detach().requires_grad_()
+        a_ref = a.detach().clone().requires_grad_()
         a_view = a_ref.view(2, 2)
         a_view_copy = torch.view_copy(a, (2, 2))
 
@@ -1546,7 +1546,7 @@ class TestOldViewOps(TestCase):
     def _test_atleast_dim(self, torch_fn, np_fn, device, dtype):
         for ndims in range(0, 5):
             shape = _rand_shape(ndims, min_size=5, max_size=10)
-            for n in range(ndims + 1):
+            for _ in range(ndims + 1):
                 for with_extremal in [False, True]:
                     for contiguous in [False, True]:
                         # Generate Input.

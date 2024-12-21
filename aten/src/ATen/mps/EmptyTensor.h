@@ -12,8 +12,7 @@ C10_EXPORT TensorBase empty_mps(
     std::optional<Device> device_opt,
     std::optional<bool> pin_memory_opt,
     std::optional<c10::MemoryFormat> memory_format_opt);
-C10_EXPORT TensorBase empty_mps(
-    IntArrayRef size, const TensorOptions &options);
+C10_EXPORT TensorBase empty_mps(IntArrayRef size, const TensorOptions& options);
 
 C10_EXPORT TensorBase empty_strided_mps(
     IntArrayRef size,
@@ -24,6 +23,6 @@ C10_EXPORT TensorBase empty_strided_mps(
 C10_EXPORT TensorBase empty_strided_mps(
     IntArrayRef size,
     IntArrayRef stride,
-    const TensorOptions &options);
+    const TensorOptions& options);
 
 } // namespace at::detail

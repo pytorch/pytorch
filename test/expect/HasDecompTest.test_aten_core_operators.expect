@@ -506,8 +506,6 @@ aten::triu_indices.out
 aten::trunc
 aten::trunc.out
 aten::trunc_
-aten::unbind_copy.int
-aten::unbind_copy.int_out
 aten::unfold
 aten::uniform
 aten::uniform.out
