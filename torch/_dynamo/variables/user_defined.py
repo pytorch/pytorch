@@ -42,6 +42,7 @@ from ..utils import (
     build_checkpoint_variable,
     build_invoke_subgraph_variable,
     check_constant_args,
+    dict_methods,
     get_custom_getattr,
     has_torch_function,
     is_frozen_dataclass,
@@ -557,11 +558,6 @@ class UserDefinedClassVariable(UserDefinedVariable):
             with do_not_convert_to_tracable_parameter():
                 var.call_method(tx, "__init__", args, kwargs)
                 return var
-        elif variables.CustomizedDictVariable.is_matching_cls(self.value):
-            options = {"mutation_type": ValueMutationNew()}
-            return variables.CustomizedDictVariable.create(
-                self.value, args, kwargs, options
-            )
         elif (
             variables.RestrictedListSubclassVariable.is_matching_cls(self.value)
             and self.source
@@ -637,7 +633,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
         new_fn = inspect.getattr_static(self.value, "__new__", None)
         if isinstance(new_fn, staticmethod):
             new_fn = new_fn.__func__
-        return new_fn in (object.__new__, Generic.__new__)
+        return new_fn in (object.__new__, Generic.__new__, dict.__new__)
 
     def call_hasattr(self, tx: "InstructionTranslator", name: str) -> "VariableTracker":
         if self.source:
@@ -1439,6 +1435,42 @@ class RemovableHandleVariable(VariableTracker):
 
     def python_type(self):
         return RemovableHandleClass
+
+
+class UserDefinedDictVariable(UserDefinedObjectVariable):
+    """
+    Represents user defined objects that are subclasses of dict/OrderedDict.
+
+    Internally, it uses a ConstDictVariable to represent the dict part of the
+    variable tracker. For everything else, it falls back to
+    UserDefinedObjectVariable.
+    """
+
+    _nonvar_fields = UserDefinedObjectVariable._nonvar_fields
+
+    def __init__(self, value, dict_vt=None, **kwargs):
+        super().__init__(value, **kwargs)
+        self._dict_vt = dict_vt
+        if self._dict_vt is None:
+            assert (
+                self.source is None
+            ), "dict_vt must be constructed by builder.py when source is present"
+            self._dict_vt = variables.ConstDictVariable(
+                {}, mutation_type=ValueMutationNew()
+            )
+        self._dict_methods = dict_methods
+
+    def call_method(
+        self,
+        tx,
+        name,
+        args: "List[VariableTracker]",
+        kwargs: "Dict[str, VariableTracker]",
+    ) -> "VariableTracker":
+        method = self._maybe_get_baseclass_method(name)
+        if method in self._dict_methods:
+            return self._dict_vt.call_method(tx, name, args, kwargs)
+        return super().call_method(tx, name, args, kwargs)
 
 
 class MutableMappingVariable(UserDefinedObjectVariable):
