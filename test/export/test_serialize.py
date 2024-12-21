@@ -322,6 +322,61 @@ def forward(self, x):
             self.assertEqual(node.inputs[0].name, "self")
             self.assertEqual(node.inputs[1].name, "dim")
 
+    def test_serialize_sym_float(self) -> None:
+        # TODO(rec): This doesn't seem to test anything!
+
+        class DynamicFloatSimpleModel(torch.nn.Module):
+            def __init__(self, multiplier: torch.SymFloat):
+                super().__init__()
+                self.multiplier = multiplier
+
+            def forward(self, a, b, c) -> torch.Tensor:
+                d = (torch.matmul(a, b) + c) / 2
+                e = d * self.multiplier
+                e_s0 = e.shape[0]
+                e_s1 = e.shape[1]
+                e_s3 = e_s0 * e_s1
+                f = e.view(e_s3)
+                return torch.cat([f, f])
+
+        multiplier_sym = torch.SymFloat("multiplier_sym")
+        _model = DynamicFloatSimpleModel(multiplier_sym)
+        _inputs = (
+            torch.randn(2, 4),
+            torch.randn(4, 7),
+            torch.randn(2, 7),
+        )
+        _dim0_ac = Dim("dim0_ac")
+        _dim1_bc = Dim("dim1_b")
+
+    def test_serialize_infinite_sym_int(self) -> None:
+        class DynamicShapeSimpleModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, a, b, c) -> torch.Tensor:
+                d = (torch.matmul(a, b) + c) / 2
+                d_s0 = d.shape[0]
+                d_s1 = d.shape[1]
+                d_s3 = d_s0 * d_s1
+                e = d.view(d_s3)
+                return torch.cat([e, e])
+
+        inputs = (torch.randn(2, 4), torch.randn(4, 7), torch.randn(2, 7))
+        dim0_ac = torch.export.Dim("dim0_ac")
+        dim1_bc = torch.export.Dim("dim1_b")
+        dynamic_shapes = {
+            "a": {0: dim0_ac},
+            "b": {1: dim1_bc},
+            "c": {0: dim0_ac, 1: dim1_bc},
+        }
+        exported_module = export_for_training(
+            DynamicShapeSimpleModel(), inputs, dynamic_shapes=dynamic_shapes
+        ).run_decompositions()
+        serialized = ExportedProgramSerializer().serialize(exported_module)
+        for v in serialized.exported_program.range_constraints.values():
+            self.assertEqual(v.max_val, None)
+
     def test_serialize_list_returns(self) -> None:
         class MyModule(torch.nn.Module):
             def __init__(self) -> None:
@@ -610,7 +665,11 @@ class TestDeserialize(TestCase):
 
             for orig, loaded in zip(flat_orig_outputs, flat_loaded_outputs):
                 self.assertEqual(type(orig), type(loaded))
-                if isinstance(orig, torch.Tensor):
+                # torch.allclose doesn't work for float8
+                if isinstance(orig, torch.Tensor) and orig.dtype not in [
+                    torch.float8_e4m3fn,
+                    torch.float8_e5m2,
+                ]:
                     if orig.is_meta:
                         self.assertEqual(orig, loaded)
                     else:
@@ -649,6 +708,20 @@ class TestDeserialize(TestCase):
                     return torch.ops.mylib.foo(a, b, c)
 
             self.check_graph(M(), (torch.randn(3), torch.randn(3), torch.randn(3)))
+
+    def test_sym_bool_dynamic_shapes(self) -> None:
+        class MyModule(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+
+            def forward(self, x, y):
+                z = x[:, -y.shape[0] :, :]
+                return z
+
+        inputs = (torch.ones(4, 5, 10), torch.ones(3))
+        dynamic_shapes = {"x": {}, "y": {0: Dim("seqlen", max=4)}}
+        # Compile with dynamic_shapes set to get operator.neg involved
+        self.check_graph(MyModule(), inputs, dynamic_shapes=dynamic_shapes)
 
     def test_auto_functionalize(self):
         with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
@@ -764,6 +837,7 @@ class TestDeserialize(TestCase):
         dynamic_shapes = {"a": {0: dim0_ac}, "b": None, "c": {0: dim0_ac}}
         self.check_graph(DynamicShapeSimpleModel(), inputs, dynamic_shapes)
 
+    @unittest.expectedFailure  # T206587081
     def test_sym_bool(self):
         class Module(torch.nn.Module):
             def forward(self, x, y):
@@ -1078,6 +1152,17 @@ def forward(self, x):
         ep._example_inputs = None
         roundtrip_ep = deserialize(serialize(ep))
         self.assertTrue(torch.allclose(ep.module()(), roundtrip_ep.module()()))
+
+    def test_serialize_float8(self):
+        for dtype in [torch.float8_e5m2, torch.float8_e4m3fn]:
+
+            class MyModule(torch.nn.Module):
+                def forward(self, x):
+                    return x.to(dtype)
+
+            m = MyModule()
+            inputs = (torch.ones(2, 3),)
+            self.check_graph(m, inputs, strict=False)
 
 
 instantiate_parametrized_tests(TestDeserialize)

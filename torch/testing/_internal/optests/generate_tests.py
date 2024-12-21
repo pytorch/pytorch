@@ -157,7 +157,7 @@ def generate_opcheck_tests(
     testcase: Any,
     namespaces: List[str],
     failures_dict_path: Optional[str] = None,
-    additional_decorators: Dict[str, Callable] = None,
+    additional_decorators: Optional[Dict[str, Callable]] = None,
     test_utils: List[str] = DEFAULT_TEST_UTILS,
 ) -> None:
     """Given an existing TestCase, use the existing tests to generate

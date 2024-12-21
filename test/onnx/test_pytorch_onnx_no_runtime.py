@@ -111,7 +111,7 @@ class TestONNXExport(pytorch_test_common.ExportTestCase):
 
     def test_export_tensoroption_to(self):
         def foo(x):
-            return x[0].clone().detach().cpu() + x
+            return x[0].detach().clone().cpu() + x
 
         traced = torch.jit.trace(foo, (torch.rand([2])))
 
@@ -122,7 +122,7 @@ class TestONNXExport(pytorch_test_common.ExportTestCase):
         class ModuleToExport(torch.jit.ScriptModule):
             @torch.jit.script_method
             def forward(self, x):
-                y = x - x
+                y = x - x  # noqa: F841
                 return x + x
 
         mte = ModuleToExport()
@@ -506,7 +506,7 @@ class TestONNXExport(pytorch_test_common.ExportTestCase):
         box_regression = torch.randn([4, 4])
         proposal = [torch.randn(2, 4), torch.randn(2, 4)]
 
-        with self.assertRaises(RuntimeError) as cm:
+        with self.assertRaises(RuntimeError):
             f = io.BytesIO()
             torch.onnx.export(
                 model,

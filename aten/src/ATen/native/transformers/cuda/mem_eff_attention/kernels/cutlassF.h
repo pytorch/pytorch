@@ -283,31 +283,31 @@ template <typename T> void dispatch_cutlassF_f32_sm80(T cb, int cc) {
 template <typename DT, typename T>
 void dispatch_cutlassF(T cb, int cc = 0) {
 
-    if (std::is_same<DT, cutlass::bfloat16_t>::value && 80 <= cc && cc < 100) {
+    if (std::is_same_v<DT, cutlass::bfloat16_t> && 80 <= cc && cc < 100) {
         dispatch_cutlassF_bf16_sm80(cb, cc);
     }
-    if (std::is_same<DT, cutlass::half_t>::value && 50 <= cc && cc < 70) {
+    if (std::is_same_v<DT, cutlass::half_t> && 50 <= cc && cc < 70) {
         dispatch_cutlassF_f16_sm50(cb, cc);
     }
-    if (std::is_same<DT, cutlass::half_t>::value && 70 <= cc && cc < 75) {
+    if (std::is_same_v<DT, cutlass::half_t> && 70 <= cc && cc < 75) {
         dispatch_cutlassF_f16_sm70(cb, cc);
     }
-    if (std::is_same<DT, cutlass::half_t>::value && 75 <= cc && cc < 80) {
+    if (std::is_same_v<DT, cutlass::half_t> && 75 <= cc && cc < 80) {
         dispatch_cutlassF_f16_sm75(cb, cc);
     }
-    if (std::is_same<DT, cutlass::half_t>::value && 80 <= cc && cc < 100) {
+    if (std::is_same_v<DT, cutlass::half_t> && 80 <= cc && cc < 100) {
         dispatch_cutlassF_f16_sm80(cb, cc);
     }
-    if (std::is_same<DT, float>::value && 50 <= cc && cc < 70) {
+    if (std::is_same_v<DT, float> && 50 <= cc && cc < 70) {
         dispatch_cutlassF_f32_sm50(cb, cc);
     }
-    if (std::is_same<DT, float>::value && 70 <= cc && cc < 75) {
+    if (std::is_same_v<DT, float> && 70 <= cc && cc < 75) {
         dispatch_cutlassF_f32_sm70(cb, cc);
     }
-    if (std::is_same<DT, float>::value && 75 <= cc && cc < 80) {
+    if (std::is_same_v<DT, float> && 75 <= cc && cc < 80) {
         dispatch_cutlassF_f32_sm75(cb, cc);
     }
-    if (std::is_same<DT, float>::value && 80 <= cc && cc < 100) {
+    if (std::is_same_v<DT, float> && 80 <= cc && cc < 100) {
         dispatch_cutlassF_f32_sm80(cb, cc);
     }
 }

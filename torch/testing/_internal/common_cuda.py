@@ -9,6 +9,7 @@ from torch.testing._internal.common_utils import LazyVal, TEST_NUMBA, TEST_WITH_
 import inspect
 import contextlib
 import os
+import unittest
 
 
 CUDA_ALREADY_INITIALIZED_ON_IMPORT = torch.cuda.is_initialized()
@@ -33,6 +34,7 @@ SM89OrLater = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_devic
 SM90OrLater = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability() >= (9, 0))
 
 IS_JETSON = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability() in [(7, 2), (8, 7)])
+IS_SM89 = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability() == (8, 9))
 
 def CDNA2OrLater():
     if TEST_WITH_ROCM:
@@ -152,6 +154,23 @@ def tf32_on(self, tf32_precision=1e-5):
     finally:
         torch.backends.cuda.matmul.allow_tf32 = old_allow_tf32_matmul
         self.precision = old_precision
+
+
+@contextlib.contextmanager
+def tf32_enabled():
+    """
+    Context manager to temporarily enable TF32 for CUDA operations.
+    Restores the previous TF32 state after exiting the context.
+    """
+    old_allow_tf32_matmul = torch.backends.cuda.matmul.allow_tf32
+    try:
+        torch.backends.cuda.matmul.allow_tf32 = True
+        with torch.backends.cudnn.flags(
+            enabled=None, benchmark=None, deterministic=None, allow_tf32=True
+        ):
+            yield
+    finally:
+        torch.backends.cuda.matmul.allow_tf32 = old_allow_tf32_matmul
 
 
 # This is a wrapper that wraps a test to run this test twice, one with
@@ -297,6 +316,10 @@ def _create_scaling_case(device="cuda", dtype=torch.float, optimizer_ctor=torch.
     return _create_scaling_models_optimizers(
         device=device, optimizer_ctor=optimizer_ctor, optimizer_kwargs=optimizer_kwargs,
     ) + (data, loss_fn, skip_iter)
+
+
+def xfailIfSM89(func):
+    return func if not IS_SM89 else unittest.expectedFailure(func)
 
 
 # Importing this module should NOT eagerly initialize CUDA

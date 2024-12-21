@@ -26,7 +26,6 @@ from typing_extensions import ParamSpec, Self, TypeAlias
 
 import torch
 import torch.utils.hooks as hooks
-from torch._utils import is_compiling
 from torch.utils._foreach_utils import (
     _get_foreach_kernels_supported_devices,
     _get_fused_kernels_supported_devices,
@@ -41,6 +40,7 @@ Args: TypeAlias = Tuple[Any, ...]
 Kwargs: TypeAlias = Dict[str, Any]
 StateDict: TypeAlias = Dict[str, Any]
 DeviceDict = Dict[Optional[torch.device], torch.Tensor]
+DeviceDtypeDict = Dict[Optional[Tuple[torch.device, torch.dtype]], torch.Tensor]
 
 
 GlobalOptimizerPreHook: TypeAlias = Callable[
@@ -100,14 +100,14 @@ def _use_grad_for_differentiable(func):
 
 def _get_value(x):
     # item is significantly faster than a cpu tensor in eager mode
-    if not torch.jit.is_scripting() and is_compiling():
+    if not torch.jit.is_scripting() and torch.compiler.is_compiling():
         return x
     else:
         return x.item() if isinstance(x, torch.Tensor) else x
 
 
 def _stack_if_compiling(x):
-    if not torch.jit.is_scripting() and is_compiling():
+    if not torch.jit.is_scripting() and torch.compiler.is_compiling():
         return torch.stack(x)
     else:
         return x
@@ -139,7 +139,7 @@ def _disable_dynamo_if_unsupported(single_tensor_fn=None):
         # the capturable flag. If capturable=True, this is not a problem.
         @functools.wraps(func)
         def maybe_fallback(*args, **kwargs):
-            if is_compiling() and (
+            if torch.compiler.is_compiling() and (
                 not kwargs.get("capturable", False)
                 and has_state_steps
                 and (args[state_steps_ind] and args[state_steps_ind][0].is_cuda)
@@ -429,7 +429,7 @@ class Optimizer:
         # Thus, when compiling, inductor will determine if cudagraphs
         # can be enabled based on whether there is input mutation or CPU tensors.
         if (
-            not is_compiling()
+            not torch.compiler.is_compiling()
             and torch.backends.cuda.is_built()
             and torch.cuda.is_available()
         ):
@@ -516,7 +516,7 @@ class Optimizer:
 
         Skips this step if we are compiling since this will occur during inductor lowering.
         """
-        if is_compiling():
+        if torch.compiler.is_compiling():
             return {(None, None): (tensorlistlist, list(range(len(tensorlistlist[0]))))}
         else:
             return _group_tensors_by_device_and_dtype(tensorlistlist, with_indices)  # type: ignore[return-value, arg-type]

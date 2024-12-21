@@ -9,7 +9,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).absolute().parent.parent
 sys.path.append(str(REPO_ROOT))
 
-from tools.build_pytorch_libs import build_caffe2
+from tools.build_pytorch_libs import build_pytorch
 from tools.setup_helpers.cmake import CMake
 
 
@@ -24,7 +24,7 @@ if __name__ == "__main__":
     )
     options = parser.parse_args()
 
-    build_caffe2(
+    build_pytorch(
         version=None,
         cmake_python_library=None,
         build_python=False,

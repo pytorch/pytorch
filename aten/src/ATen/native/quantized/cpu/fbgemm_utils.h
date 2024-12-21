@@ -6,7 +6,7 @@
 #include <c10/core/QScheme.h>
 #include <c10/util/irange.h>
 
-#ifdef USE_FBGEMM
+#if defined(USE_FBGEMM) && __has_include(<fbgemm/Fbgemm.h>)
 #include <fbgemm/Fbgemm.h>
 C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Winconsistent-missing-destructor-override")
 #include <fbgemm/FbgemmFP16.h>
@@ -293,9 +293,7 @@ inline void convert_int8_uint8(
   }
 }
 
-namespace at {
-namespace native {
-namespace fbgemm_utils {
+namespace at::native::fbgemm_utils {
 
 template <int kSpatialDim = 2>
 fbgemm::conv_param_t<kSpatialDim> MakeFbgemmConvParam(
@@ -348,9 +346,7 @@ Tensor ConvertConvWeightsToChannelLastTensor(
     const at::Tensor& src,
     int groups,
     bool transpose);
-} // namespace fbgemm_utils
-} // namespace native
-} // namespace at
+} // at::native::namespace fbgemm_utils
 
 #endif // USE_FBGEMM
 
@@ -411,3 +407,8 @@ struct TORCH_API PackedEmbeddingBagWeight : public EmbeddingPackedParamsBase {
       bool include_last_offset,
       bool is_embedding_op) override;
 };
+
+TORCH_API int register_linear_params();
+int register_embedding_params();
+
+template <int kSpatialDim = 2> TORCH_API int register_conv_params();

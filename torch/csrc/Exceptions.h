@@ -339,7 +339,7 @@ struct noop_gil_scoped_release {
   // user-defined constructor (i.e. not defaulted) to avoid
   // unused-variable warnings at usage sites of this class
   // NOLINTNEXTLINE(modernize-use-equals-default)
-  noop_gil_scoped_release(){};
+  noop_gil_scoped_release() {}
 };
 
 template <bool release_gil>
