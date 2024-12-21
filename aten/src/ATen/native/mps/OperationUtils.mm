@@ -962,11 +962,15 @@ void MetalKernelFunction::dispatch(uint64_t length, std::optional<uint64_t> grou
   [encoder dispatchThreads:MTLSizeMake(length, 1, 1) threadsPerThreadgroup:MTLSizeMake(group_size_val, 1, 1)];
 }
 
-void MetalKernelFunction::dispatch(std::array<uint64_t, 2> length, std::optional<std::array<uint64_t, 2>> group_size) {
-  auto group_size_val =
-      group_size.value_or(std::array<uint64_t, 2>{std::min(length[0], getMaxThreadsPerThreadgroup()), 1});
-  [encoder dispatchThreads:MTLSizeMake(length[0], length[1], 1)
-      threadsPerThreadgroup:MTLSizeMake(group_size_val[0], group_size_val[1], 1)];
+void MetalKernelFunction::dispatch(c10::ArrayRef<uint64_t> length, c10::OptionalArrayRef<uint64_t> group_size) {
+  TORCH_CHECK(length.size() > 0 && length.size() < 4, "Dispatch dimentions must be less than 3 and non-empty");
+  TORCH_CHECK(!group_size.has_value() || group_size->size() == length.size(),
+              "size and group_size must have same number of dimentions");
+  auto group_size_length = group_size.has_value() ? group_size->size() : 0;
+  [encoder dispatchThreads:MTLSizeMake(length[0], length.size() > 1 ? length[1] : 1, length.size() == 3 ? length[2] : 1)
+      threadsPerThreadgroup:MTLSizeMake(group_size_length > 0 ? group_size->at(0) : getMaxThreadsPerThreadgroup(),
+                                        group_size_length > 1 ? group_size->at(1) : 1,
+                                        group_size_length == 3 ? group_size->at(2) : 1)];
 }
 
 void MetalKernelFunction::setArg(unsigned idx, const at::TensorBase& t) {

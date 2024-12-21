@@ -40,7 +40,7 @@ class TestTritonHeuristics(TestCase):
         """
         Make sure block size does not exceed the maximum defined in inductor config.
         """
-        cfg = triton_config([2048, 2], 64, 64)
+        cfg = triton_config({"x": 2048, "y": 2}, 64, 64)
         for label in "XYZ":
             key = f"{label}BLOCK"
             if key not in cfg.kwargs:
@@ -115,8 +115,8 @@ class TestTritonHeuristics(TestCase):
         }
 
         configs = [
-            triton_config([16], 64),
-            triton_config([256], 64),
+            triton_config({"x": 16}, 64),
+            triton_config({"x": 256}, 64),
         ]
 
         inductor_meta = {}
@@ -146,7 +146,7 @@ class TestTritonHeuristics(TestCase):
             cfg.pre_hook = pre_hook
 
         with self.assertRaisesRegex(AssertionError, "pre_hook"):
-            autotuner = CachingAutotuner(**args)
+            CachingAutotuner(**args)
 
     def test_autotune_hints_to_configs(self):
         device_props = DeviceProperties.create(torch.device(GPU_TYPE))
