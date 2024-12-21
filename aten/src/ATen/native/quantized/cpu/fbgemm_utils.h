@@ -6,7 +6,7 @@
 #include <c10/core/QScheme.h>
 #include <c10/util/irange.h>
 
-#ifdef USE_FBGEMM
+#if defined(USE_FBGEMM) && __has_include(<fbgemm/Fbgemm.h>)
 #include <fbgemm/Fbgemm.h>
 C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Winconsistent-missing-destructor-override")
 #include <fbgemm/FbgemmFP16.h>

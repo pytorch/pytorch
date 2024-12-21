@@ -412,6 +412,11 @@ template <int kSpatialDim> int register_conv_params() {
   return 0;
 }
 
+template
+TORCH_API int register_conv_params<2>();
+template
+TORCH_API int register_conv_params<3>();
+
 int register_linear_params() {
   using SerializationType = std::tuple<at::Tensor, std::optional<at::Tensor>>;
   static auto register_linear_params =
