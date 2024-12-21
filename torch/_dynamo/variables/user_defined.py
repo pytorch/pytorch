@@ -34,7 +34,6 @@ from ..guards import GuardBuilder, install_guard
 from ..source import (
     AttrSource,
     GetItemSource,
-    ODictGetItemSource,
     RandomValueSource,
     UnspecializedParamBufferSource,
 )
@@ -1225,23 +1224,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         except ObservedAttributeError:
             handle_observed_exception(tx)
             return variables.ConstantVariable.create(False)
-
-    def odict_getitem(self, tx: "InstructionTranslator", key):
-        from .dicts import is_hashable
-
-        # TODO this should probably be merged with the dict handling
-
-        index = (
-            key.source
-            if is_hashable(key) and key.source is not None
-            else key.as_python_constant()
-        )
-
-        return VariableTracker.build(
-            tx,
-            collections.OrderedDict.__getitem__(self.value, key.as_python_constant()),
-            self.source and ODictGetItemSource(self.source, index),
-        )
 
 
 class FrozenDataClassVariable(UserDefinedObjectVariable):
