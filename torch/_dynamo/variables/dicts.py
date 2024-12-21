@@ -11,7 +11,7 @@ from .. import polyfills, variables
 from ..bytecode_transformation import create_call_function, create_instruction
 from ..exc import raise_observed_exception, unimplemented
 from ..guards import GuardBuilder, install_guard
-from ..source import AttrSource, GetItemSource, is_from_local_source
+from ..source import GetItemSource, is_from_local_source
 from ..utils import dict_keys, dict_values, specialize_symnode
 from .base import ValueMutationNew, VariableTracker
 from .constant import ConstantVariable
@@ -730,59 +730,6 @@ class DictValuesVariable(DictViewVariable):
 
     def python_type(self):
         return dict_values
-
-
-@functools.lru_cache(None)
-def _install_PretrainedConfig_patch():
-    mod = sys.modules.get("transformers.configuration_utils")
-    assert mod is not None, "Caller is responsible for ensuring this was imported"
-
-    # We need to monkeypatch transformers here, sadly.
-    # TODO(voz): Upstream to transformers lib
-
-    def _dynamo_overriden_transformers_eq(self, other):
-        if not hasattr(other, "__dict__"):
-            return False
-        return self.__dict__ == other.__dict__
-
-    mod.PretrainedConfig.__eq__ = _dynamo_overriden_transformers_eq
-
-
-class HFPretrainedConfigVariable(VariableTracker):
-    """
-    Hack for HuggingFace PretrainedConfig
-    """
-
-    @staticmethod
-    def is_matching_cls(cls):
-        mod = sys.modules.get("transformers.configuration_utils")
-        is_match = mod is not None and issubclass(cls, mod.PretrainedConfig)
-
-        # Lazily install monkeypatch the first time we see it in dynamo
-        if is_match:
-            _install_PretrainedConfig_patch()
-        return is_match
-
-    @classmethod
-    def is_matching_object(cls, obj):
-        return cls.is_matching_cls(type(obj))
-
-    def __init__(self, obj, **kwargs) -> None:
-        super().__init__(**kwargs)
-        self.obj = obj
-        assert self.is_matching_cls(type(obj))
-
-    def var_getattr(self, tx: "InstructionTranslator", name: str) -> "VariableTracker":
-        try:
-            attr_value = getattr(self.obj, name)
-            source = self.source and AttrSource(self.source, name)
-            return VariableTracker.build(tx, attr_value, source)
-
-        except AttributeError:
-            unimplemented(f"getattr({self.value}, {name})")
-
-    def call_hasattr(self, tx: "InstructionTranslator", name: str) -> "VariableTracker":
-        return variables.ConstantVariable.create(hasattr(self.obj, name))
 
 
 class PythonSysModulesVariable(VariableTracker):
