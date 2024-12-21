@@ -17,7 +17,7 @@ import threading
 import time
 import unittest
 from dataclasses import dataclass, field
-from typing import List, Optional
+from typing import Optional
 from unittest.mock import patch
 
 import expecttest
@@ -2204,7 +2204,7 @@ class MockProfilerEvent:
     start_time_ns: int
     duration_time_ns: int
     correlation_id: int = 0
-    children: List["MockProfilerEvent"] = field(default_factory=list)
+    children: list["MockProfilerEvent"] = field(default_factory=list)
     parent: Optional["MockProfilerEvent"] = None
 
     @property
@@ -2228,7 +2228,7 @@ class MockNode:
 
 @unittest.skipIf(sys.version_info >= (3, 13), "segfaults")
 class TestExperimentalUtils(TestCase):
-    def make_tree(self) -> List[MockNode]:
+    def make_tree(self) -> list[MockNode]:
         tree = {
             "root_0": {
                 "1": {"2": {}},

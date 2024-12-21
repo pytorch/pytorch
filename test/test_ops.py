@@ -11,7 +11,6 @@ from collections import defaultdict
 from collections.abc import Sequence
 from functools import partial
 from importlib import import_module
-from typing import Dict, List
 
 import torch
 import torch._prims as prims
@@ -1483,7 +1482,7 @@ class TestCommon(TestCase):
         unsupported_dtypes = set()
         supported_backward_dtypes = set()
         unsupported_backward_dtypes = set()
-        dtype_error: Dict[torch.dtype, Exception] = {}
+        dtype_error: dict[torch.dtype, Exception] = {}
 
         def unsupported(dtype, e):
             dtype_error[dtype] = e
@@ -1987,7 +1986,7 @@ class TestCompositeCompliance(TestCase):
             for sample in op.sample_inputs(device, dtype, requires_grad=False):
                 inp = sample.input
                 outs = op(inp, *sample.args, **sample.kwargs)
-                if not isinstance(outs, (tuple, List)):
+                if not isinstance(outs, (tuple, list)):
                     outs = [outs]
 
                 # for all outputs that are views of the input, we should be able to replay the

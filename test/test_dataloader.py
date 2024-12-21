@@ -1261,14 +1261,12 @@ class TestDataLoader(TestCase):
             list(iter(loader))
 
     def test_typing(self):
-        from typing import List
-
         # Make sure there is no TypeError
 
-        class SomeDatasetClass(Dataset[List[torch.Tensor]]):
+        class SomeDatasetClass(Dataset[list[torch.Tensor]]):
             pass
 
-        def _create_dataloader(is_train: bool) -> DataLoader[List[torch.Tensor]]:
+        def _create_dataloader(is_train: bool) -> DataLoader[list[torch.Tensor]]:
             pass
 
     @unittest.skipIf(IS_SANDCASTLE, "subprocess doesn't work in FB internal CI")
