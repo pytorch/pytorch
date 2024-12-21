@@ -781,6 +781,29 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         assert counter.op_count == 3
         assert same(outputs, correct_outputs)
 
+    def test_dynamo_rewrite_dist_all_gather_with_default_pg(self):
+        def func(inp, out):
+            torch.distributed.all_gather_into_tensor(
+                out,
+                inp,
+            )
+
+        local_size = [4, 4]
+        # single-proc test
+        global_size = local_size
+
+        inputs = torch.ones(local_size, device=self.device)
+        outputs = torch.empty(global_size, device=self.device)
+        counter = CompileCounter()
+        compiled = torch.compile(func, backend=counter, fullgraph=True)
+        compiled(inputs, outputs)
+        correct_outputs = torch.empty(global_size, device=self.device)
+        func(inputs, correct_outputs)
+        assert counter.frame_count == 1
+        # should test more precisely, but the 3 is supposed to be (all_gather, wait, copy_)
+        assert counter.op_count == 3
+        assert same(outputs, correct_outputs)
+
     def test_dynamo_rewrite_dist_all_gather_list(self):
         def func(inp, out, *, pg):
             torch.distributed.all_gather(
