@@ -81,10 +81,6 @@ std::string getArrayRefString(const IntArrayRef s);
 // use has_storage() on the returned tensor to determine if src actually is a view
 Tensor gatherViewTensor(const Tensor& src, Tensor& dst);
 Tensor& scatterViewTensor(const Tensor& src, Tensor& output);
-bool canSliceViewTensor(const TensorBase& src, MPSShape* mpsShape);
-MPSGraphTensorData* getMPSGraphTensorDataForView(const TensorBase& src,
-                                                 MPSShape* mpsShape,
-                                                 const MPSDataType mpsDataType);
 MPSGraphTensor* castToIHFTypes(MPSGraph* mpsGraph,
                                MPSGraphTensor* inputTensor,
                                const TensorBase& input,
@@ -342,23 +338,6 @@ size_t compute_storage_numel_distance(const TensorBase& t);
 inline bool is_dense_in_storage(const TensorBase& t) {
   return compute_storage_numel_distance(t) == static_cast<size_t>(t.numel());
 }
-
-namespace detail {
-template <typename T>
-class has_size_type {
-  template <typename U>
-  static constexpr std::true_type check(typename U::size_type*);
-  template <typename>
-  static constexpr std::false_type check(...);
-
- public:
-  static constexpr bool value = decltype(check<T>(nullptr))::value;
-};
-
-template <typename T>
-constexpr bool has_size_type_v = has_size_type<T>::value;
-
-} // namespace detail
 
 template <typename encoder_t,
           typename = std::enable_if_t<std::is_same_v<id<MTLComputeCommandEncoder>, encoder_t> ||

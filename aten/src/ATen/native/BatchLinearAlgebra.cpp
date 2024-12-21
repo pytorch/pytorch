@@ -690,7 +690,7 @@ TORCH_META_FUNC(linalg_cholesky_ex)(const Tensor& A,
 }
 
 TORCH_META_FUNC(linalg_qr)(const Tensor& A,
-                           c10::string_view mode) {
+                           std::string_view mode) {
   at::native::checkIsMatrix(A, "linalg.qr");
   at::native::checkFloatingOrComplex(A, "linalg.qr");
   auto [compute_q, reduced_mode] = at::native::_parse_qr_mode(mode);
@@ -720,7 +720,7 @@ TORCH_META_FUNC(linalg_qr)(const Tensor& A,
 TORCH_META_FUNC(_linalg_svd)(const Tensor& A,
                              bool full_matrices,
                              bool compute_uv,
-                             std::optional<c10::string_view> driver) {
+                             std::optional<std::string_view> driver) {
   at::native::checkIsMatrix(A, "linalg.svd");
   at::native::checkFloatingOrComplex(A, "linalg.svd");
 
@@ -792,7 +792,7 @@ TORCH_META_FUNC(lu_unpack)(const Tensor& LU, const Tensor& pivots, bool unpack_d
 }
 
 TORCH_META_FUNC(_linalg_eigh)(const Tensor& A,
-                              c10::string_view uplo,
+                              std::string_view uplo,
                               bool compute_v) {
   at::native::squareCheckInputs(A, "linalg.eigh");
   at::native::checkUplo(uplo);
@@ -1558,7 +1558,7 @@ template<> void blasTriangularSolve<float>(char side, char uplo, char trans, cha
 
 void _linalg_check_errors(
     const Tensor& infos,
-    const c10::string_view api_name,
+    const std::string_view api_name,
     bool is_matrix) {
   TORCH_INTERNAL_ASSERT(infos.scalar_type() == kInt);
   TORCH_INTERNAL_ASSERT(infos.is_contiguous());
@@ -2425,7 +2425,7 @@ std::tuple<Tensor, Tensor> geqrf(const Tensor& input) {
   For further details, please see the LAPACK documentation for GEQRF and ORGQR.
 */
 TORCH_IMPL_FUNC(linalg_qr_out)(const Tensor& A,
-                               c10::string_view mode,
+                               std::string_view mode,
                                const Tensor & Q,
                                const Tensor & R) {
   auto m = A.size(-2);
@@ -2801,7 +2801,7 @@ DEFINE_DISPATCH(linalg_eigh_stub);
 */
 
 TORCH_IMPL_FUNC(_linalg_eigh_out)(const Tensor& A,
-                                  c10::string_view uplo,
+                                  std::string_view uplo,
                                   bool compute_v,
                                   const Tensor& L,
                                   const Tensor& V) {
@@ -2826,22 +2826,22 @@ TORCH_IMPL_FUNC(_linalg_eigh_out)(const Tensor& A,
   at::_linalg_check_errors(info, "linalg.eigh", /*is_matrix*/A.dim() == 2);
 }
 
-std::tuple<Tensor, Tensor> linalg_eigh(const Tensor& A, c10::string_view uplo) {
+std::tuple<Tensor, Tensor> linalg_eigh(const Tensor& A, std::string_view uplo) {
   // TODO (Good intro task) Implement linalg_eigh_ex_out
   return at::_linalg_eigh(A, uplo, /*compute_v*/true);
 }
 
-std::tuple<Tensor&, Tensor&> linalg_eigh_out(const Tensor& A, c10::string_view uplo, Tensor& L, Tensor& V) {
+std::tuple<Tensor&, Tensor&> linalg_eigh_out(const Tensor& A, std::string_view uplo, Tensor& L, Tensor& V) {
   return at::_linalg_eigh_out(L, V, A, uplo, /*compute_v=*/true);
 }
 
 
-Tensor linalg_eigvalsh(const Tensor& A, c10::string_view uplo) {
+Tensor linalg_eigvalsh(const Tensor& A, std::string_view uplo) {
   return std::get<0>(at::_linalg_eigh(A, uplo,
                      /*compute_v=*/_may_require_fw_or_bw_grad(A)));
 }
 
-Tensor& linalg_eigvalsh_out(const Tensor& A, c10::string_view uplo, Tensor& L) {
+Tensor& linalg_eigvalsh_out(const Tensor& A, std::string_view uplo, Tensor& L) {
   auto V = at::empty({0}, A.options());
   at::_linalg_eigh_out(L, V, A, uplo, /*compute_v=*/false);
   return L;
@@ -3197,7 +3197,7 @@ DEFINE_DISPATCH(svd_stub);
 TORCH_IMPL_FUNC(_linalg_svd_out)(const Tensor& A,
                                  const bool full_matrices,
                                  const bool compute_uv,
-                                 std::optional<c10::string_view> driver,
+                                 std::optional<std::string_view> driver,
                                  const Tensor & U,
                                  const Tensor & S,
                                  const Tensor & Vh) {
@@ -3246,7 +3246,7 @@ TORCH_IMPL_FUNC(_linalg_svd_out)(const Tensor& A,
 std::tuple<Tensor&, Tensor&, Tensor&>
 linalg_svd_out(const Tensor& A,
                bool full_matrices,
-               std::optional<c10::string_view> driver,
+               std::optional<std::string_view> driver,
                Tensor & U,
                Tensor & S,
                Tensor & Vh) {
@@ -3265,12 +3265,12 @@ linalg_svd_out(const Tensor& A,
 }
 
 std::tuple<Tensor, Tensor, Tensor> linalg_svd(const Tensor& A, bool full_matrices,
-    std::optional<c10::string_view> driver) {
+    std::optional<std::string_view> driver) {
   return at::_linalg_svd(A, full_matrices, /*compute_uv=*/true, driver);
 }
 
 // See note in linalg_svd for why this function does not have an _ex variant
-Tensor& linalg_svdvals_out(const Tensor& A, std::optional<c10::string_view> driver, Tensor & S) {
+Tensor& linalg_svdvals_out(const Tensor& A, std::optional<std::string_view> driver, Tensor & S) {
   // Dummies
   auto U = at::empty({0}, A.options());
   auto Vh = at::empty({0}, A.options());
@@ -3278,7 +3278,7 @@ Tensor& linalg_svdvals_out(const Tensor& A, std::optional<c10::string_view> driv
   return S;
 }
 
-Tensor linalg_svdvals(const Tensor& A, std::optional<c10::string_view> driver) {
+Tensor linalg_svdvals(const Tensor& A, std::optional<std::string_view> driver) {
   return std::get<1>(at::_linalg_svd(A, /*full_matrices=*/false,
                      /*compute_uv=*/_may_require_fw_or_bw_grad(A),
                      /*driver=*/driver));
@@ -3538,7 +3538,7 @@ static void linalg_lstsq_out_info(
   }
 }
 
-static std::string get_default_lstsq_driver(std::optional<c10::string_view> driver, const Tensor& input) {
+static std::string get_default_lstsq_driver(std::optional<std::string_view> driver, const Tensor& input) {
   // if `driver` is empty, we set driver_str to "gels" if working with CUDA tensors,
   // otherwise to "gelsy" driver.
   std::string driver_str;
@@ -3548,7 +3548,7 @@ static std::string get_default_lstsq_driver(std::optional<c10::string_view> driv
     // convert `driver_str` to lower case inplace.
     std::transform(driver_str.begin(), driver_str.end(), driver_str.begin(),
       [](unsigned char c) { return std::tolower(c); });
-    static std::unordered_set<c10::string_view> allowed_drivers = {
+    static std::unordered_set<std::string_view> allowed_drivers = {
       "gels", "gelsy", "gelsd", "gelss"
     };
     if (input.device() == at::kCPU) {
@@ -3575,7 +3575,7 @@ std::tuple<Tensor&, Tensor&, Tensor&, Tensor&> linalg_lstsq_out(
     const Tensor& input,
     const Tensor& other,
     std::optional<double> rcond,
-    std::optional<c10::string_view> driver,
+    std::optional<std::string_view> driver,
     Tensor& solution,
     Tensor& residuals,
     Tensor& rank,
@@ -3739,7 +3739,7 @@ std::tuple<Tensor&, Tensor&, Tensor&, Tensor&> linalg_lstsq_out(
 std::tuple<Tensor, Tensor, Tensor, Tensor> linalg_lstsq(
     const Tensor& input, const Tensor& other,
     std::optional<double> rcond,
-    std::optional<c10::string_view> driver) {
+    std::optional<std::string_view> driver) {
   Tensor solution = at::empty({0}, input.options());
   Tensor residuals = at::empty({0}, input.options().dtype(toRealValueType(input.scalar_type())));
   Tensor rank = at::empty({0}, input.options().dtype(at::kLong));

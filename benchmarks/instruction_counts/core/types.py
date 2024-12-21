@@ -2,7 +2,7 @@
 
 # mypy: ignore-errors
 
-from typing import Any, Dict, Optional, Tuple, Union
+from typing import Dict, Optional, Tuple, Union
 
 from core.api import AutoLabels, GroupedBenchmark, TimerArgs
 
@@ -69,21 +69,9 @@ TL;DR
 Label = Tuple[str, ...]
 _Label = Union[Label, Optional[str]]
 
-# MyPy does not currently support recursive types:
-#   https://github.com/python/mypy/issues/731
-#
-# So while the correct type definition would be:
-#   _Value = Union[
-#       # Base case:
-#       Union[TimerArgs, GroupedBenchmark],
-#
-#       # Recursive case:
-#       Dict[Label, "_Value"],
-#   ]
-# we instead have to use Any and rely on runtime asserts when flattening.
 _Value = Union[
     Union[TimerArgs, GroupedBenchmark],
-    Dict[_Label, Any],
+    Dict[_Label, "_Value"],
 ]
 
 Definition = Dict[_Label, _Value]

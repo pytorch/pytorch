@@ -50,10 +50,32 @@ try:
             copy_tests,
             TestFailure,
         )
-except (unittest.SkipTest, ImportError) as e:
+except (unittest.SkipTest, ImportError):
     if __name__ == "__main__":
         sys.exit(0)
     raise
+
+
+@torch.library.custom_op(
+    "aoti_custom_ops::fn_with_incorrect_optional_tensor", mutates_args=()
+)
+def fn_with_incorrect_optional_tensor(
+    x: torch.Tensor, y: torch.Tensor, z: torch.Tensor
+) -> torch.Tensor:
+    if z is None:
+        return x + y
+    else:
+        return x + y + z
+
+
+@fn_with_incorrect_optional_tensor.register_fake
+def fn_with_incorrect_optional_tensor_fake(
+    x: torch.Tensor, y: torch.Tensor, z: torch.Tensor
+) -> torch.Tensor:
+    if z is None:
+        return x + y
+    else:
+        return x + y + z
 
 
 class AOTInductorTestsTemplate:
@@ -178,6 +200,21 @@ class AOTInductorTestsTemplate:
 
         self.check_model(m, args)
 
+    def test_custom_op_out_variant_without_return(self) -> None:
+        class Model(torch.nn.Module):
+            def forward(self, x, y):
+                torch.ops.aoti_custom_ops.fn_out_variant_without_return(x, y)
+                return y
+
+        m = Model().to(device=self.device)
+        args = (
+            torch.randn(10, 10, device=self.device),
+            torch.randn(10, 10, device=self.device),
+        )
+        m(*args)
+
+        self.check_model(m, args)
+
     def test_custom_op_with_reinterpret_view_inputs(self) -> None:
         class Model(torch.nn.Module):
             def forward(self, x):
@@ -213,6 +250,23 @@ class AOTInductorTestsTemplate:
         args = (torch.randn(2, 3, device=self.device),)
 
         self.check_model(m, args)
+
+    @unittest.skipIf(IS_FBCODE, "FbProxyExecutor doesn't have these error msgs")
+    def test_incorrect_custom_op_schema(self):
+        class M(torch.nn.Module):
+            def forward(self, x, y):
+                return torch.ops.aoti_custom_ops.fn_with_incorrect_optional_tensor(
+                    x, y, None
+                )
+
+        m = M().to(device=self.device)
+        args = (
+            torch.randn(2, 3, device=self.device),
+            torch.randn(2, 3, device=self.device),
+        )
+
+        with self.assertRaisesRegex(RuntimeError, "Expected extern kernel"):
+            self.check_model(m, args)
 
 
 class AOTInductorLoggingTest(LoggingTestCase):

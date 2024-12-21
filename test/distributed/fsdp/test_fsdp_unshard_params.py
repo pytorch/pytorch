@@ -634,7 +634,7 @@ class TestUnshardParams(TestUnshardParamsBase):
         model = FSDP(model, auto_wrap_policy=ModuleWrapPolicy((nn.Sequential,)))
         with FSDP.summon_full_params(model[0]):
             # Check that the summoned module does not have its flat parameter
-            for param_name, param in model[0].named_parameters():
+            for param_name, _ in model[0].named_parameters():
                 self.assertFalse(FLAT_PARAM in param_name)
             self.assertGreater(len(list(model[0].parameters())), 1)
 
