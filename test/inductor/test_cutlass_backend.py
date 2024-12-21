@@ -825,7 +825,7 @@ class TestCutlassBackend(TestCase):
                     wraps=select_no_algorithm,
                 ) as sa:
                     torch.compile(my_addmm, dynamic=False)(x, a, b, 1.0, 2.0)
-                    args, kwargs = sa.call_args
+                    args, _ = sa.call_args
                     op_name, choices, _, __ = args
                     assert op_name == "addmm"
                     cuda_template_count = 0
@@ -873,7 +873,7 @@ class TestCutlassBackend(TestCase):
                     wraps=select_no_algorithm,
                 ) as sa:
                     torch.compile(addmm, dynamic=False)(x, a, b, 1.0, 1.0)
-                    args, kwargs = sa.call_args
+                    args, _ = sa.call_args
                     op_name, choices, _, __ = args
                     assert op_name == "addmm"
                     cuda_template_count = 0
@@ -937,5 +937,5 @@ if __name__ == "__main__":
     from torch._inductor.utils import is_big_gpu
 
     # Set env to make it work in CI.
-    if HAS_CUDA and HAS_CPU and is_big_gpu(0):
+    if HAS_CUDA and HAS_CPU and is_big_gpu():
         run_tests()

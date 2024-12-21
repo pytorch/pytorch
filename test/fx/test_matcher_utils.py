@@ -176,7 +176,7 @@ class TestMatcher(JitTestCase):
             WrapperModule(pattern), example_inputs
         ).module()
         before_split_res = pattern_gm(*example_inputs)
-        pattern_gm, name_node_map = _split_to_graph_and_name_node_map(pattern_gm)
+        pattern_gm, _ = _split_to_graph_and_name_node_map(pattern_gm)
         after_split_res = pattern_gm(*example_inputs)
         self.assertEqual(before_split_res[0], after_split_res[0])
         self.assertEqual(before_split_res[1], after_split_res[1])

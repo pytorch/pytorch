@@ -4,6 +4,7 @@ import dataclasses
 import functools
 import io
 import itertools
+import json
 import logging
 import os
 import os.path
@@ -22,6 +23,7 @@ from torch._dynamo.utils import get_debug_dir
 from torch.fx.graph_module import GraphModule
 from torch.fx.passes.shape_prop import _extract_tensor_metadata, TensorMetadata
 from torch.fx.passes.tools_common import legalize_graph
+from torch.utils._ordered_set import OrderedSet
 from torch.utils._pytree import tree_map
 
 from . import config, ir  # noqa: F811, this is needed
@@ -236,7 +238,7 @@ def get_node_name_to_buf_meta(
     buf_name_to_n_node = {}
     for node_name, buf_name in node_name_to_buf_name.items():
         if buf_name not in buf_name_to_n_node:
-            buf_name_to_n_node[buf_name] = {node_name}
+            buf_name_to_n_node[buf_name] = OrderedSet([node_name])
         else:
             buf_name_to_n_node[buf_name].add(node_name)
 
@@ -307,6 +309,7 @@ def enable_aot_logging() -> Iterator[None]:
 
 class DebugContext:
     _counter = itertools.count()
+    _inductor_triton_kernel_to_post_grad_node_info: Dict[str, List[str]] = {}
 
     @staticmethod
     def create_debug_dir(folder_name: str) -> Optional[str]:
@@ -544,6 +547,13 @@ class DebugFormatter:
     def output_code(self, filename: str) -> None:
         shutil.copy(filename, self.filename("output_code.py"))
 
+    def log_inductor_triton_kernel_to_post_grad_node_info(
+        self, filename: str = "inductor_triton_kernel_to_post_grad_nodes.json"
+    ) -> None:
+        with self.fopen(filename, "w") as fd:
+            log.info("Writing provenance tracing debugging info to %s", fd.name)
+            json.dump(DebugContext._inductor_triton_kernel_to_post_grad_node_info, fd)
+
     def log_autotuning_results(
         self,
         name: str,
@@ -552,8 +562,6 @@ class DebugFormatter:
         elapse: float,
         precompile_elapse: float,
     ) -> None:
-        import json
-
         from .ir import FixedLayout
 
         def build_node_info(node: ir.IRNode) -> Dict[str, str]:
@@ -588,29 +596,29 @@ class DebugFormatter:
                     node_info["layout"] = str(static_layout)
                 else:
                     node_info["layout"] = str(layout)
-            except Exception as e:
+            except Exception:
                 pass
             try:
                 node_info["dtype"] = str(node.get_dtype())
-            except Exception as e:
+            except Exception:
                 pass
             try:
                 node_info["device"] = str(node.get_device())
-            except Exception as e:
+            except Exception:
                 pass
             try:
                 node_info["stride"] = str(
                     V.graph.sizevars.size_hints(node.get_stride())
                 )
-            except Exception as e:
+            except Exception:
                 pass
             try:
                 node_info["size"] = str(V.graph.sizevars.size_hints(node.get_size()))  # type: ignore[arg-type]
-            except Exception as e:
+            except Exception:
                 pass
             try:
                 node_info["numel"] = str(V.graph.sizevars.size_hint(node.get_numel()))
-            except Exception as e:
+            except Exception:
                 pass
             if hasattr(node, "data") and isinstance(node.data, ir.IRNode):
                 node_info["data"] = build_node_info(node.data)

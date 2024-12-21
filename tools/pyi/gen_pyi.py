@@ -28,7 +28,7 @@ import argparse
 import collections
 import importlib
 import sys
-from typing import Sequence
+from typing import TYPE_CHECKING
 from unittest.mock import Mock, patch
 from warnings import warn
 
@@ -47,6 +47,10 @@ from torchgen.api.python import (
 from torchgen.gen import parse_native_yaml, parse_tags_yaml
 from torchgen.model import _TorchDispatchModeKey, DispatchKey, Variant
 from torchgen.utils import FileManager
+
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 
 def get_py_torch_functions(
