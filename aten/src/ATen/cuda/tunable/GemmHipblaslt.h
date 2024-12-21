@@ -59,12 +59,12 @@ constexpr hipblasDatatype_t HipDataTypeFor<c10::Float8_e5m2fnuz>() {
 }
 
 template <>
-constexpr hipblasDatatype_t HipBlasDataTypeFor<c10::Float8_e4m3fn>() {
+constexpr hipblasDatatype_t HipDataTypeFor<c10::Float8_e4m3fn>() {
   return HIP_R_8F_E4M3;
 }
 
 template <>
-constexpr hipblasDatatype_t HipBlasDataTypeFor<c10::Float8_e5m2>() {
+constexpr hipblasDatatype_t HipDataTypeFor<c10::Float8_e5m2>() {
   return HIP_R_8F_E5M2;
 }
 
