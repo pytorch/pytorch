@@ -22,8 +22,8 @@ import os
 import os.path
 
 import numpy as np
-from torchvision import transforms
 from PIL import Image
+from torchvision import transforms
 
 import torch
 import torch.utils.data as data
