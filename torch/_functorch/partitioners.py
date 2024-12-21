@@ -1393,7 +1393,6 @@ def _optimize_runtime_with_given_memory(
     memory: List[float],
     runtimes: List[float],
     max_memory: float,
-    node_info: NodeInfo,
     all_recomputable_banned_nodes: List[fx.Node],
 ) -> Tuple[float, List[int], List[int]]:
     SOLVER = config.activation_memory_budget_solver
@@ -1404,10 +1403,11 @@ def _optimize_runtime_with_given_memory(
     elif SOLVER == "dp":
         return dp_knapsack(memory, runtimes, max_memory)
     elif callable(SOLVER):
-        saved_node_idx, recomp_node_idx = SOLVER(
-            memory, joint_graph, max_memory, node_info, all_recomputable_banned_nodes
+        solver_instance = SOLVER()
+        expected_runtime, saved_node_idx, recomp_node_idx = solver_instance(
+            joint_graph, all_recomputable_banned_nodes, memory, runtimes, max_memory
         )
-        return (0.0, saved_node_idx, recomp_node_idx)
+        return (expected_runtime, saved_node_idx, recomp_node_idx)
     else:
         raise RuntimeError(f"Not aware of memory budget knapsack solver: {SOLVER}")
 
@@ -1586,7 +1586,6 @@ def choose_saved_values_set(
                 memories_banned_nodes,
                 runtimes_banned_nodes,
                 max(memory_budget, 0),
-                node_info,
                 all_recomputable_banned_nodes,
             )
             if AOT_PARTITIONER_DEBUG:
