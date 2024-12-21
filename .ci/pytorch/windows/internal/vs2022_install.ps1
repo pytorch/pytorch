@@ -4,15 +4,7 @@
 # 17.12.35527.113 BuildTools
 $VS_DOWNLOAD_LINK = "https://download.visualstudio.microsoft.com/download/pr/f2819554-a618-400d-bced-774bb5379965/ab3cff3d3a8c48804f47eb521cf138480f5ed4fe86476dd449a420777d7f2ead/vs_BuildTools.exe"
 $COLLECT_DOWNLOAD_LINK = "https://aka.ms/vscollect.exe"
-$VS_INSTALL_ARGS = @("--nocache","--quiet","--wait", "--add Microsoft.VisualStudio.Workload.VCTools",
-                                                     "--add Microsoft.Component.MSBuild",
-                                                     "--add Microsoft.VisualStudio.Component.Roslyn.Compiler",
-                                                     "--add Microsoft.VisualStudio.Component.TextTemplating",
-                                                     "--add Microsoft.VisualStudio.Component.VC.CoreIde",
-                                                     "--add Microsoft.VisualStudio.Component.VC.Redist.14.Latest",
-                                                     "--add Microsoft.VisualStudio.ComponentGroup.NativeDesktop.Core",
-                                                     "--add Microsoft.VisualStudio.Component.VC.Tools.x86.x64",
-                                                     "--add Microsoft.VisualStudio.ComponentGroup.VC.Tools.142.x86.x64")
+$VS_INSTALL_ARGS = @("--nocache","--quiet","--wait", "--add Microsoft.VisualStudio.Workload.VCTools")
 
 curl.exe --retry 3 -kL $VS_DOWNLOAD_LINK --output vs_installer.exe
 if ($LASTEXITCODE -ne 0) {
