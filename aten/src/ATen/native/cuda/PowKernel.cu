@@ -38,7 +38,7 @@ void pow_scalar_tensor_impl(TensorIteratorBase& iter, c10::complex<value_t> base
 }
 
 /* complex<Half> support impl */
-CONSTEXPR_EXCEPT_WIN_CUDA char pow_scalar_base_name[] = "pow_scalar_base_kernel";
+constexpr char pow_scalar_base_name[] = "pow_scalar_base_kernel";
 template <>
 void pow_scalar_tensor_impl(TensorIteratorBase& iter, c10::complex<at::Half> base) {
   using scalar_t = c10::complex<at::Half>;
@@ -68,7 +68,7 @@ namespace {
 
 #if AT_USE_JITERATOR()
 /* complex<Half> support impl */
-CONSTEXPR_EXCEPT_WIN_CUDA char pow_name[] = "pow_kernel";
+constexpr char pow_name[] = "pow_kernel";
 static const auto pow_kernel_string =
     jiterator_stringify(template <typename T> T pow_kernel(T base, T exp) {
       return std::pow(base, exp);
@@ -203,7 +203,7 @@ void pow_tensor_scalar_kernel(TensorIteratorBase& iter, const Scalar& exp_scalar
 
 } // anonymous namespace
 
-REGISTER_DISPATCH(pow_tensor_tensor_stub, &pow_tensor_tensor_kernel);
-REGISTER_DISPATCH(pow_tensor_scalar_stub, &pow_tensor_scalar_kernel);
+REGISTER_DISPATCH(pow_tensor_tensor_stub, &pow_tensor_tensor_kernel)
+REGISTER_DISPATCH(pow_tensor_scalar_stub, &pow_tensor_scalar_kernel)
 
 } // namespace at::native
