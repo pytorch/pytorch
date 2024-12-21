@@ -91,7 +91,7 @@ struct TORCH_API ExperimentalConfig {
   bool disable_external_correlation;
 
   /* controls whether profiler records cpu events on threads
-   * that are not spawned from the main thread on which the 
+   * that are not spawned from the main thread on which the
    * profiler was enabled, similar to on_demand mode */
   bool profile_all_threads;
 
@@ -121,6 +121,7 @@ struct TORCH_API ProfilerConfig {
 
   bool disabled() const;
   bool global() const;
+  bool pushGlobalCallbacks() const;
 
   ProfilerState state;
   ExperimentalConfig experimental_config;

@@ -61,6 +61,10 @@ bool ProfilerConfig::global() const {
   return state == torch::profiler::impl::ProfilerState::KINETO_ONDEMAND;
 }
 
+bool ProfilerConfig::pushGlobalCallbacks() const {
+  return global() || experimental_config.profile_all_threads;
+}
+
 namespace {
 enum ProfilerIValueIdx {
   STATE = 0,
@@ -117,17 +121,14 @@ ProfilerStateBase::~ProfilerStateBase() {
       : static_cast<ProfilerStateBase*>(
             c10::ThreadLocalDebugInfo::get(c10::DebugInfoKind::PROFILER_STATE));
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-      !out || out->config().global() == global ||
-      out->config().experimental_config.profile_all_threads == global);
+      !out || out->config().pushGlobalCallbacks() == global);
   return out;
 }
 
 /*static*/ void ProfilerStateBase::push(
     std::shared_ptr<ProfilerStateBase>&& state) {
   TORCH_INTERNAL_ASSERT(state != nullptr);
-  if (state->config().global() ||
-      state->config().experimental_config.profile_all_threads) {
-    std::cout << "Pushing global profiler state" << std::endl;
+  if (state->config().pushGlobalCallbacks()) {
     GlobalManager::push(std::move(state));
   } else {
     c10::ThreadLocalDebugInfo::_push(c10::DebugInfoKind::PROFILER_STATE, state);

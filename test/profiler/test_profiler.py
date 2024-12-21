@@ -2165,14 +2165,15 @@ assert KinetoStepTracker.current_step() == initial_step + 2 * niters
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
     @unittest.skipIf(not kineto_available(), "Kineto is required")
     def test_profile_all_threads(self):
-
         profiling_started = threading.Event()
         profiling_ended = threading.Event()
         n_rep = 5
 
+        def prep_inputs():
+            return [torch.randn(1024, 1024, device="cuda") for _ in range(2)]
+
         def main_thread_fn(profile_all_threads, returned_events):
-            x = torch.randn(1024, 1024, device="cuda")
-            y = torch.randn(1024, 1024, device="cuda")
+            x, y = prep_inputs()
             experimental_config = torch._C._profiler._ExperimentalConfig(
                 profile_all_threads=profile_all_threads
             )
@@ -2186,12 +2187,26 @@ assert KinetoStepTracker.current_step() == initial_step + 2 * niters
             returned_events.append(p.events())
 
         def side_thread_fn():
-            x = torch.randn(1024, 1024, device="cuda")
-            y = torch.randn(1024, 1024, device="cuda")
+            x, y = prep_inputs()
             profiling_started.wait()
             for _ in range(n_rep):
                 _ = x @ y
             profiling_ended.set()
+
+        def main_with_thread_fn(profile_all_threads):
+            x, y = prep_inputs()
+            experimental_config = torch._C._profiler._ExperimentalConfig(
+                profile_all_threads=profile_all_threads
+            )
+            with torch.profiler.profile(
+                experimental_config=experimental_config, record_shapes=True
+            ) as p:
+                side_thread = threading.Thread(target=side_thread_fn)
+                side_thread.start()
+                for _ in range(n_rep):
+                    _ = x @ y
+                side_thread.join()
+            return p.events()
 
         for profile_all_threads in (True, False):
             returned_events = []
@@ -2203,14 +2218,21 @@ assert KinetoStepTracker.current_step() == initial_step + 2 * niters
             side_thread.start()
             main_thread.join()
             side_thread.join()
-            mm_events = collections.defaultdict(int)
-            for e in returned_events[0]:
-                if e.name == "aten::mm":
-                    mm_events[e.thread] += 1
-                    self.assertEqual(e.input_shapes, [[1024, 1024], [1024, 1024]])
-            self.assertEqual(len(mm_events), 1 + int(profile_all_threads))
-            for _, v in mm_events.items():
-                self.assertEqual(v, n_rep)
+
+            def verify_events(events):
+                mm_events = collections.defaultdict(int)
+                for e in events:
+                    if e.name == "aten::mm":
+                        mm_events[e.thread] += 1
+                        self.assertEqual(e.input_shapes, [[1024, 1024], [1024, 1024]])
+                self.assertEqual(len(mm_events), 1 + int(profile_all_threads))
+                for v in mm_events.values():
+                    self.assertEqual(v, n_rep)
+
+            verify_events(returned_events[0])
+            # test spawning thread from within the profiled region
+            events = main_with_thread_fn(profile_all_threads)
+            verify_events(events)
 
 
 class SimpleNet(nn.Module):

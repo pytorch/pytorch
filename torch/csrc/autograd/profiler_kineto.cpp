@@ -771,7 +771,7 @@ void enableProfiler(
   KinetoThreadLocalState::push(state_ptr);
 
   if (has_cpu) {
-    config.global() || config.experimental_config.profile_all_threads
+    config.pushGlobalCallbacks()
         ? pushProfilingCallbacks</*global=*/true>(scopes)
         : pushProfilingCallbacks</*global=*/false>(scopes);
   }
