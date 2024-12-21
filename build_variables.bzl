@@ -1206,6 +1206,7 @@ aten_native_source_codegen_list = [
     "aten/src/ATen/native/cpu/FusedAdamKernel.cpp",
     "aten/src/ATen/native/cpu/FusedSGDKernel.cpp",
     "aten/src/ATen/native/cpu/FusedAdagradKernel.cpp",
+    "aten/src/ATen/native/cpu/BetaOpsKernel.cpp",
 ]
 
 # This aten native source file list will not go through aten codegen process
@@ -1305,6 +1306,7 @@ aten_native_source_non_codegen_list = [
     "aten/src/ATen/native/Cross.cpp",
     "aten/src/ATen/native/DilatedMaxPool2d.cpp",
     "aten/src/ATen/native/DilatedMaxPool3d.cpp",
+    "aten/src/Aten/native/BetaOps.cpp",
     # Referenced by both native and ATen/Version.cpp. Does not reference to other native symbols
     # "aten/src/ATen/native/DispatchStub.cpp",
     # "aten/src/ATen/native/quantized/cpu/init_qnnpack.cpp",
