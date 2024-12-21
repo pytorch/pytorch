@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 import os
+from dataclasses import dataclass
 from typing import Callable, TYPE_CHECKING
 
 from torchgen.api import cpp, dispatcher, functionalization
@@ -9,13 +9,10 @@ from torchgen.api.translate import translate
 from torchgen.api.types import (
     BaseCType,
     Binding,
-    boolT,
     CType,
     DispatcherSignature,
     iTensorListRefT,
-    longT,
     NativeSignature,
-    NamedCType,
     OptionalCType,
     optionalSymIntArrayRefT,
     symIntArrayRefT,
@@ -759,7 +756,7 @@ class ViewMetaSpecialization:
 
     @property
     def is_as_strided(func: FunctionSchema) -> bool:
-        return str(func.name) == 'as_strided'
+        return str(func.name) == "as_strided"
 
     @property
     def out_index(self) -> str:
@@ -784,14 +781,13 @@ class ViewMetaSpecialization:
 
         # Arguments used for forwarding the tuple elements to the constructor.
         destructure_tuple_args = ", ".join(
-            f"std::get<{i}>(tpl)" 
+            f"std::get<{i}>(tpl)"
             for i in range(len(base_ctor_arguments) + len(extra_ctor_arguments))
         )
 
         # List of constructor parameters
         ctor_parameters = ", ".join(
-            binding.decl() 
-            for binding in (base_ctor_arguments + extra_ctor_arguments)
+            binding.decl() for binding in (base_ctor_arguments + extra_ctor_arguments)
         )
 
         # Call the base class `ViewMeta` constructor.
@@ -801,15 +797,17 @@ class ViewMetaSpecialization:
         is_multi_output_str = str(self.is_multi_output).lower()
         is_as_strided_str = str(self.is_as_strided).lower()
 
-        base_ctor_bindings = ", ".join([
-            # `has_symbolic_inputs` is always taken as parameter.
-            functionalization.has_symbolic_inputs_binding.name,
-            f"/*is_multi_output=*/{is_multi_output_str}",
-            f"/*is_as_strided=*/{is_as_strided_str}",
-            # `out_index` is know if the operation returns only one value. Otherwise,
-            # we also take it as parameter.
-            f"/*out_index=*/{self.out_index}"
-        ])
+        base_ctor_bindings = ", ".join(
+            [
+                # `has_symbolic_inputs` is always taken as parameter.
+                functionalization.has_symbolic_inputs_binding.name,
+                f"/*is_multi_output=*/{is_multi_output_str}",
+                f"/*is_as_strided=*/{is_as_strided_str}",
+                # `out_index` is know if the operation returns only one value. Otherwise,
+                # we also take it as parameter.
+                f"/*out_index=*/{self.out_index}",
+            ]
+        )
 
         # Assignments of `extra_ctor_arguments` to their corresponding fields.
         # These are extra fields to-be-declared in this specialization.
@@ -818,24 +816,31 @@ class ViewMetaSpecialization:
         # of the non-owning arguments.
         ctor_assignments = ",\n".join(
             f"        {e.type.name}({e.expr})"
-            for e in translate(extra_ctor_arguments, attributes, method=False, allow_expensive_conversions=True)
+            for e in translate(
+                extra_ctor_arguments,
+                attributes,
+                method=False,
+                allow_expensive_conversions=True,
+            )
         )
 
         # List of arguments for constructing the `SerializableTuple` from an instance.
-        tuple_arguments = ", ".join(binding.name for binding in (base_ctor_arguments + attributes))
+        tuple_arguments = ", ".join(
+            binding.name for binding in (base_ctor_arguments + attributes)
+        )
 
         # List of field declarations.
-        attr_declarations = "\n".join(
-            f"  {binding.decl()};"
-            for binding in attributes
-        )
+        attr_declarations = "\n".join(f"  {binding.decl()};" for binding in attributes)
 
         # Override `to_out_index` if this operation returns more than 1 value.
         to_out_index_decl = ""
         if self.is_multi_output:
-            to_out_index_decl = "  std::shared_ptr<ViewMeta> to_out_index(int64_t out_idx) override;"
+            to_out_index_decl = (
+                "  std::shared_ptr<ViewMeta> to_out_index(int64_t out_idx) override;"
+            )
 
-        return [f"""
+        return [
+            f"""
 struct TORCH_API {self.name} : public ViewMeta {{
   FUNCTIONALIZATION_VIEWMETA_NAME({self.name});
   FUNCTIONALIZATION_VIEWMETA_SERIALIZABLE_TUPLE(\n{serializable_tuple_args});
@@ -857,7 +862,8 @@ struct TORCH_API {self.name} : public ViewMeta {{
 
 {attr_declarations}
 }};
-"""]
+"""
+        ]
 
     # Generate a call to the actual operation.
     def opcall(self, is_reverse: bool, reapply_views: bool) -> str:
@@ -882,10 +888,9 @@ struct TORCH_API {self.name} : public ViewMeta {{
         if is_reverse:
             context.append(functionalization.mutated_view_binding)
 
-        arguments = ", ".join([
-            e.expr
-            for e in translate(context, op_arguments, method=False)
-        ])
+        arguments = ", ".join(
+            [e.expr for e in translate(context, op_arguments, method=False)]
+        )
 
         # Index the result if this operation returns multiple values.
         maybe_index = ""
@@ -929,10 +934,9 @@ std::shared_ptr<at::functionalization::ViewMeta> {self.name}::to_out_index(int64
     # Generate an instanciation of this specialized class.
     def new(self, out_index: str = "0") -> str:
         name = functionalization.name(self.f.func, with_namespace=True)
-        ctor_arguments = (
-            functionalization.base_ctor_arguments(self.f.func)
-            + functionalization.extra_ctor_arguments(self.f.func)
-        )
+        ctor_arguments = functionalization.base_ctor_arguments(
+            self.f.func
+        ) + functionalization.extra_ctor_arguments(self.f.func)
         # Replace the `out_index` parameter with the given `out_index`.
         arguments = ", ".join(
             binding.name if binding.name != "out_index" else out_index
@@ -941,17 +945,22 @@ std::shared_ptr<at::functionalization::ViewMeta> {self.name}::to_out_index(int64
         return f"std::make_shared<{name}>({arguments})"
 
     # Run the function `run` for both: `view` and `view_inplace` functions.
-    def map(g: NativeFunctionsViewGroup, run: Callable[["ViewMetaSpecialization"], list[str]]) -> list[str]:
+    def map(
+        g: NativeFunctionsViewGroup, run: Callable[[ViewMetaSpecialization], list[str]]
+    ) -> list[str]:
         def maybe_run(f: Optional[NativeFunction]) -> list[str]:
             if f is None:
                 return []
             with native_function_manager(f):
                 return run(ViewMetaSpecialization(g, f))
+
         return list(concatMap(maybe_run, (g.view, g.view_inplace)))
 
 
 def gen_functionalization_view_meta_classes_base(
-        selector: SelectiveBuilder, g: NativeFunctionsViewGroup, run: [["ViewMetaSpecialization"], list[str]]
+    selector: SelectiveBuilder,
+    g: NativeFunctionsViewGroup,
+    run: [[ViewMetaSpecialization], list[str]],
 ) -> list[str]:
     if not selector.include_all_operators:
         return []
@@ -965,19 +974,25 @@ def gen_functionalization_view_meta_classes_base(
 def gen_functionalization_view_meta_classes_decl(
     selector: SelectiveBuilder, g: NativeFunctionsViewGroup
 ) -> list[str]:
-    return gen_functionalization_view_meta_classes_base(selector, g, ViewMetaSpecialization.decl)
+    return gen_functionalization_view_meta_classes_base(
+        selector, g, ViewMetaSpecialization.decl
+    )
 
 
 def gen_functionalization_view_meta_classes_impl(
     selector: SelectiveBuilder, g: NativeFunctionsViewGroup
 ) -> list[str]:
-    return gen_functionalization_view_meta_classes_base(selector, g, ViewMetaSpecialization.impl)
+    return gen_functionalization_view_meta_classes_base(
+        selector, g, ViewMetaSpecialization.impl
+    )
 
 
 def gen_functionalization_view_meta_classes_binding(
     selector: SelectiveBuilder, g: NativeFunctionsViewGroup
 ) -> list[str]:
-    return gen_functionalization_view_meta_classes_base(selector, g, ViewMetaSpecialization.binding)
+    return gen_functionalization_view_meta_classes_base(
+        selector, g, ViewMetaSpecialization.binding
+    )
 
 
 # Generates the Python bindings for the `ViewMeta` specialized classes.
@@ -985,7 +1000,7 @@ def gen_functionalization_view_meta_classes(
     native_functions_path: str,
     tags_path: str,
     selector: SelectiveBuilder,
-    install_dir: str
+    install_dir: str,
 ) -> None:
     from torchgen.gen import get_grouped_by_view_native_functions, parse_native_yaml
 
@@ -993,8 +1008,12 @@ def gen_functionalization_view_meta_classes(
     # Then, group them into `NativeFunctionsViewGroup`.
     #
     # This is the same steps we do in gen.py (ATen codegen).
-    native_functions = parse_native_yaml(native_functions_path, tags_path).native_functions
-    native_functions_with_view_groups = get_grouped_by_view_native_functions(native_functions)
+    native_functions = parse_native_yaml(
+        native_functions_path, tags_path
+    ).native_functions
+    native_functions_with_view_groups = get_grouped_by_view_native_functions(
+        native_functions
+    )
     view_groups = [
         g
         for g in native_functions_with_view_groups
@@ -1015,7 +1034,7 @@ def gen_functionalization_view_meta_classes(
                     view_groups,
                 )
             ),
-        }
+        },
     )
 
 

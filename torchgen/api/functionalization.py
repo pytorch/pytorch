@@ -44,7 +44,10 @@ has_symbolic_inputs_binding = Binding(
     name="has_symbolic_inputs",
     nctype=NamedCType(name="has_symbolic_inputs", type=BaseCType(boolT)),
     argument=Argument(
-        name="has_symbolic_inputs", type=BaseType(BaseTy.bool), default=None, annotation=None
+        name="has_symbolic_inputs",
+        type=BaseType(BaseTy.bool),
+        default=None,
+        annotation=None,
     ),
     default=None,
 )
@@ -179,9 +182,7 @@ def attributes(func: FunctionSchema, owning: bool = True) -> list[Binding]:
     return [
         reapply_views_binding,
         inverse_return_mode_binding,
-        *[
-            dispatcher.argument(a, remove_non_owning_ref_types=owning) for a in args[1:]
-        ]
+        *[dispatcher.argument(a, remove_non_owning_ref_types=owning) for a in args[1:]],
     ]
 
 

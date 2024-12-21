@@ -13,14 +13,18 @@ enum class InverseReturnMode {
   AlwaysView,
   /// Specifies that functional inverses should always return a non-view / copy.
   NeverView,
-  /// Specifies that functional inverses should return a view unless a (copying) scatter
+  /// Specifies that functional inverses should return a view unless a (copying)
+  /// scatter
   /// inverse exists, in which case that will be used instead.
-  /// This avoids as_strided() calls that can be difficult for subclasses to handle.
+  /// This avoids as_strided() calls that can be difficult for subclasses to
+  /// handle.
   ViewOrScatterInverse,
 };
 
 #define FUNCTIONALIZATION_VIEWMETA_NAME(TYPE) \
-  static const char* name() { return #TYPE; }
+  static const char* name() {                 \
+    return #TYPE;                             \
+  }
 
 #define FUNCTIONALIZATION_VIEWMETA_SERIALIZABLE_TUPLE(...) \
   using SerializableTuple = std::tuple<__VA_ARGS__>;
@@ -28,35 +32,36 @@ enum class InverseReturnMode {
 // ViewMeta is a class used by the functionalization pass to navigate between
 // a base tensor and a view tensor.
 // For example, if I call `b = a.view1(...)`
-// the functionalization pass will generate and store a ViewMeta specialization for
-// `view1` operation on b that looks like:
+// the functionalization pass will generate and store a ViewMeta specialization
+// for `view1` operation on b that looks like:
 //
 // struct TORCH_API view1_ViewMeta : public ViewMeta {
 //   FUNCTIONALIZATION_VIEWMETA_NAME(view1_ViewMeta);
 //   FUNCTIONALIZATION_VIEWMETA_SERIALIZABLE_TUPLE(
 //       bool /* reapply_views */,
 //       const std::vector<int64_t>&);
-// 
+//
 //   view1_ViewMeta(const SerializableTuple& tpl)
 //       : view1_ViewMeta(std::get<0>(tpl), std::get<1>(tpl)) {}
-// 
+//
 //   view1_ViewMeta(bool reapply_views, const std::vector<int64_t>& size)
 //       : ViewMeta(/*has_symbolic_inputs=*/false),
 //         reapply_views(reapply_views),
 //         size(size) {}
-// 
-//   Tensor forward(const Tensor& base) override { 
-//       return base.view1(...); 
+//
+//   Tensor forward(const Tensor& base) override {
+//       return base.view1(...);
 //   }
 //
 //   Tensor reverse(const Tensor& base, const Tensor& mutated_view) override {
-//       return at::functionalization::impl::view1_inverse(base, mutated_view, ...);
+//       return at::functionalization::impl::view1_inverse(base, mutated_view,
+//       ...);
 //   }
-// 
+//
 //   SerializableTuple to_serializable_tuple() {
 //     return std::make_tuple(reapply_views, size);
 //   }
-// 
+//
 //   bool reapply_views;
 //   std::vector<int64_t> size;
 // };
@@ -67,9 +72,9 @@ enum class InverseReturnMode {
 // how to get the corresponding base tensor. See Note [Functionalization Pass:
 // View Inverses] for details.
 //
-// `SerializedTuple` is a typedef that defines an `std::tuple<...>` type representing
-// the `ViewMeta` instance state. Methods that take in/return such a type are used
-// for supporting pickle serialization.
+// `SerializedTuple` is a typedef that defines an `std::tuple<...>` type
+// representing the `ViewMeta` instance state. Methods that take in/return such
+// a type are used for supporting pickle serialization.
 struct ViewMeta {
   ViewMeta(
       bool has_symbolic_inputs,

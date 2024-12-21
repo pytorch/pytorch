@@ -12,10 +12,13 @@ void initModule(PyObject* module) {
       "_functionalization", "functionalization related pybind.");
 
   // Binding for InverseReturnMode.
-  py::enum_<at::functionalization::InverseReturnMode>(functionalization, "InverseReturnMode")
+  py::enum_<at::functionalization::InverseReturnMode>(
+      functionalization, "InverseReturnMode")
       .value("AlwaysView", at::functionalization::InverseReturnMode::AlwaysView)
       .value("NeverView", at::functionalization::InverseReturnMode::AlwaysView)
-      .value("ViewOrScatterInverse", at::functionalization::InverseReturnMode::AlwaysView);
+      .value(
+          "ViewOrScatterInverse",
+          at::functionalization::InverseReturnMode::AlwaysView);
 
   // Bindings for `ViewMeta` specializations manually implemented.
   create_binding_with_pickle<at::functionalization::resize__ViewMeta>(

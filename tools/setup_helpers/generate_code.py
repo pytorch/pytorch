@@ -75,9 +75,13 @@ def generate_code(
         )
 
     # Generate the python bindings for functionalization's `ViewMeta` classes.
-    from torchgen.gen_functionalization_type import gen_functionalization_view_meta_classes
+    from torchgen.gen_functionalization_type import (
+        gen_functionalization_view_meta_classes,
+    )
 
-    functionalization_install_dir = os.path.join(install_dir, "functionalization", "generated")
+    functionalization_install_dir = os.path.join(
+        install_dir, "functionalization", "generated"
+    )
     gen_functionalization_view_meta_classes(
         native_functions_path or NATIVE_FUNCTIONS_PATH,
         tags_path or TAGS_PATH,

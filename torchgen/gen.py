@@ -2679,13 +2679,11 @@ codegen to generate the correct cpp call for this op. Contact AOTInductor team f
         lambda: {
             "view_meta_declarations": list(
                 concatMap(
-                    lambda g: gen_functionalization_view_meta_classes_decl(
-                        selector, g
-                    ),
+                    lambda g: gen_functionalization_view_meta_classes_decl(selector, g),
                     view_groups,
                 )
             )
-        }
+        },
     )
 
     cpu_fm.write(
@@ -2693,14 +2691,12 @@ codegen to generate the correct cpp call for this op. Contact AOTInductor team f
         lambda: {
             "view_meta_implementations": list(
                 concatMap(
-                    lambda g: gen_functionalization_view_meta_classes_impl(
-                        selector, g
-                    ),
+                    lambda g: gen_functionalization_view_meta_classes_impl(selector, g),
                     view_groups,
                 )
             ),
             "op_headers": list(concatMap(gen_op_headers, view_groups)),
-        }
+        },
     )
 
     # Note [view_copy NativeFunctions]

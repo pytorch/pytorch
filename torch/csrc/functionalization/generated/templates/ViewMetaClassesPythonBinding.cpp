@@ -5,7 +5,9 @@ namespace torch::functionalization {
 
 void initGenerated(PyObject* module) {
   auto functionalization = py::handle(module).cast<py::module>();
-${view_meta_bindings}
+  $ {
+    view_meta_bindings
+  }
 }
 
-} // namespace at::functionalization
+} // namespace torch::functionalization
