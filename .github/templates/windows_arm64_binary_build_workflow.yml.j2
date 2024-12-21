@@ -1,0 +1,191 @@
+{% import 'common.yml.j2' as common %}
+{% import 'upload.yml.j2' as upload %}
+
+{%- block name -%}
+# Template is at:    .github/templates/windows_arm64_binary_build_workflow.yml.j2
+# Generation script: .github/scripts/generate_ci_workflows.py
+name: !{{ build_environment }}
+{%- endblock %}
+
+{%- macro set_runner_specific_vars() -%}
+      # NOTE: These environment variables are put here so that they can be applied on every job equally
+      #       They are also here because setting them at a workflow level doesn't give us access to the
+      #       runner.temp variable, which we need.
+      - name: Populate binary env
+        shell: cmd
+        run: |
+          echo BINARY_ENV_FILE=%RUNNER_TEMP%/env>> %GITHUB_ENV%
+          echo PYTORCH_FINAL_PACKAGE_DIR=%RUNNER_TEMP%/artifacts>> %GITHUB_ENV%
+          echo WIN_PACKAGE_WORK_DIR=%RUNNER_TEMP%>> %GITHUB_ENV%
+{%- endmacro %}
+
+on:
+  push:
+    {%- if branches == "nightly" %}
+    # NOTE: Meta Employees can trigger new nightlies using: https://fburl.com/trigger_pytorch_nightly_build
+    {%- endif %}
+    branches:
+      - !{{ branches }}
+    {%- if branches == "nightly" %}
+    tags:
+      # NOTE: Binary build pipelines should only get triggered on release candidate builds
+      # Release candidate tags look like: v1.11.0-rc1
+      - v[0-9]+.[0-9]+.[0-9]+-rc[0-9]+
+    {%- endif %}
+{%- for label in ciflow_config.labels | sort %}
+    {%- if loop.first and branches != "nightly" %}
+    tags:
+    {%- endif %}
+      - '!{{ label }}/*'
+{%- endfor %}
+  workflow_dispatch:
+
+env:
+  BUILD_ENVIRONMENT: !{{ build_environment }}
+  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  PR_NUMBER: ${{ github.event.pull_request.number }}
+  SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
+  SKIP_ALL_TESTS: 1
+  BUILDER_ROOT: /builder
+  PYTORCH_ROOT: /pytorch
+  DOWNLOADS_DIR: c:\temp\downloads
+  DEPENDENCIES_DIR: c:\temp\dependencies
+  ENABLE_APL: 1
+  MSVC_VERSION : '14.36'
+
+jobs:
+  get-label-type:
+    if: github.repository_owner == 'pytorch'
+    name: get-label-type
+    uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@main
+    with:
+      triggering_actor: ${{ github.triggering_actor }}
+      issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
+      curr_branch: ${{ github.head_ref || github.ref_name }}
+      curr_ref_type: ${{ github.ref_type }}
+
+{%- for config in build_configs %}
+  !{{ config["build_name"] }}-build:
+    if: ${{ github.repository_owner == 'pytorch' }}
+    needs: get-label-type
+    runs-on: "windows-11-arm64"
+    timeout-minutes: !{{ common.timeout_minutes }}
+    !{{ upload.binary_env(config, True) }}
+    {%- if config.pytorch_extra_install_requirements is defined and config.pytorch_extra_install_requirements|d('')|length > 0  %}
+      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: !{{ config.pytorch_extra_install_requirements }}
+    {%- endif %}
+    steps:
+      !{{ set_runner_specific_vars() }}
+      - name: Git checkout Builder
+        uses: actions/checkout@v4
+        with:
+          repository:  iremyux/pytorch-builder
+          ref:  nightly-for-win-arm64
+          path: "builder"
+      - name: Bootstrap folders
+        shell: cmd
+        run: |
+          mkdir "%NIGHTLIES_PYTORCH_ROOT%"
+          mkdir "%PYTORCH_FINAL_PACKAGE_DIR%"
+      - name: Bootstrap Git
+        shell: cmd
+        run: |
+          "builder/windows/arm64/bootstrap_git.bat"
+      - name: Bootstrap Python
+        shell: cmd
+        run: |
+          "builder/windows/arm64/bootstrap_python.bat"
+      - name: Bootstrap Build Tools
+        shell: cmd
+        run: |
+          "builder/windows/arm64/bootstrap_buildtools.bat"
+      - name: Bootstrap APL
+        shell: cmd
+        run: |
+          "builder/windows/arm64/bootstrap_apl.bat"
+      - name: Bootstrap Rust
+        shell: cmd
+        run: |
+          "builder/windows/arm64/bootstrap_rust.bat"
+      - name: Bootstrap sccache
+        shell: cmd
+        run: |
+          "builder/windows/arm64/bootstrap_sccache.bat"
+      - name: Git checkout PyTorch
+        uses: actions/checkout@v4
+        with:
+          repository:  "iremyux/pytorch"
+          ref: "nightly-for-win-arm64"
+          path: "pytorch"
+          submodules: recursive
+      - name: Populate binary env
+        shell: bash
+        run: |
+          "${PYTORCH_ROOT}/.circleci/scripts/binary_populate_env.sh"
+      - name: Build PyTorch binary
+        shell: bash
+        run: |
+          "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_arm64_build.sh"
+      - uses: !{{ common.upload_artifact_action }}
+        if: always()
+        with:
+          name: !{{ config["build_name"] }}
+          retention-days: 14
+          if-no-files-found: error
+          path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
+  !{{ config["build_name"] }}-test:  # Testing
+    if: ${{ github.repository_owner == 'pytorch' }}
+    needs:
+      - !{{ config["build_name"] }}-build
+      - get-label-type
+    runs-on: "windows-11-arm64"
+    timeout-minutes: !{{ common.timeout_minutes }}
+    !{{ upload.binary_env(config, True) }}
+    steps:
+      !{{ set_runner_specific_vars() }}
+      - uses: !{{ common.download_artifact_action }}
+        name: Download Build Artifacts
+        with:
+          name: !{{ config["build_name"] }}
+          path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
+      - name: Git checkout Builder
+        uses: actions/checkout@v4
+        with:
+          repository:  iremyux/pytorch-builder
+          ref:  nightly-for-win-arm64
+          path: "builder"
+      - name: Bootstrap Git
+        shell: cmd
+        run: |
+          "builder/windows/arm64/bootstrap_git.bat"
+      - name: Bootstrap APL
+        shell: cmd
+        run: |
+          "builder/windows/arm64/bootstrap_apl.bat"
+      - name: Bootstrap Python
+        shell: cmd
+        run: |
+          "builder/windows/arm64/bootstrap_python.bat"
+      - name: Bootstrap Build Tools
+        shell: cmd
+        run: |
+          "builder/windows/arm64/bootstrap_buildtools.bat"
+      - name: Git checkout PyTorch
+        uses: actions/checkout@v4
+        with:
+          repository:  "iremyux/pytorch"
+          ref: "nightly-for-win-arm64"
+          path: "pytorch"
+          submodules: recursive
+      - name: Populate binary env
+        shell: bash
+        run: |
+          "${PYTORCH_ROOT}/.circleci/scripts/binary_populate_env.sh"
+      - name: Test PyTorch binary
+        shell: bash
+        run: |
+          "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_arm64_test.sh"
+  {%- if branches == "nightly" %}
+  !{{ upload.upload_binaries(config, True) }}
+  {%- endif %}
+{%- endfor %}
