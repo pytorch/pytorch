@@ -426,6 +426,54 @@ class RecompileTests(torch._dynamo.test_case.TestCase):
         with self.assertRaises(torch._dynamo.exc.UserError):
             opt_f(torch.randn(0))
 
+    def test_ambient_autocast_recompile(self):
+        weights = torch.randn(10, 10)
+        counter = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
+
+        @torch.compile(backend=counter, fullgraph=True)
+        def fn(x):
+            return torch.mm(x, weights)
+
+        x = torch.randn(1, 10)
+
+        self.assertEqual(fn(x).dtype, torch.float32)
+
+        with torch.autocast("cpu", torch.float16):
+            self.assertEqual(fn(x).dtype, torch.float16)
+
+        with torch.autocast("cpu", torch.bfloat16):
+            self.assertEqual(fn(x).dtype, torch.bfloat16)
+
+        # should recompile each time
+        self.assertEqual(counter.frame_count, 3)
+
+    def test_autocast_constant_fold(self):
+        # test that constant-folded autocast functions
+        # work properly - it should work if the global autocast
+        # state is guarded.
+
+        weights = torch.randn(10, 10)
+        counter = torch._dynamo.testing.CompileCounterWithBackend("eager")
+
+        def fn(x):
+            if torch.get_autocast_dtype("cpu") == torch.float16:
+                x = x + 1
+            else:
+                x = x - 1
+            return torch.mm(x, weights)
+
+        opt_fn = torch.compile(fn, backend=counter, fullgraph=True)
+
+        x = torch.randn(1, 10)
+
+        with torch.autocast("cpu", torch.float16):
+            self.assertEqual(fn(x), opt_fn(x))
+
+        with torch.autocast("cpu", torch.bfloat16):
+            self.assertEqual(fn(x), opt_fn(x))
+
+        self.assertEqual(counter.frame_count, 2)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
