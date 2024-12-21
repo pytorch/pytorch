@@ -7,6 +7,7 @@ from torch import Tensor
 from torch._C import DispatchKey
 from torch._higher_order_ops.utils import (
     _has_potential_branch_input_mutation,
+    _maybe_reenter_make_fx,
     autograd_not_implemented,
     reenter_make_fx,
     save_tensors_and_symints_for_backward,
@@ -414,7 +415,7 @@ def flex_attention_functionalize(
         + [query_unwrapped.new_zeros((), dtype=torch.int) for _ in range(4)]
         + list(score_mod_other_buffers_unwrapped)
     )
-    with ctx.redispatch_to_next() as m:
+    with ctx.redispatch_to_next():
         functional_score_mod = ctx.functionalize(score_mod)
         pre_dispatch = hasattr(ctx, "mode") and ctx.mode.pre_dispatch
         with TransformGetItemToIndex():
@@ -440,6 +441,24 @@ def flex_attention_functionalize(
     return ctx.wrap_tensors(out)  # type: ignore[return-value, arg-type]
 
 
+def flex_attention_fake_impl(
+    query: torch.Tensor, value: torch.Tensor
+) -> Tuple[torch.Tensor, torch.Tensor]:
+    # TODO: Figure out a better way to handle this for NJT than using sum()
+    if query.is_nested:
+        out = torch.empty_like(query, memory_format=torch.contiguous_format)
+        logsumexp = query.sum(dim=-1)
+        return out, logsumexp
+
+    v_head_dim = value.size(-1)
+    batch_size, num_heads, seq_len_q, _q_head_dim = query.shape
+    logsumexp = query.new_empty(batch_size, num_heads, seq_len_q, dtype=torch.float32)
+    out_shape = (batch_size, num_heads, seq_len_q, v_head_dim)
+    out = query.new_empty(out_shape)
+    out = _permute_strides(out, query.stride())
+    return out, logsumexp
+
+
 @flex_attention.py_impl(FakeTensorMode)
 def flex_attention_fake_tensor_mode(
     mode: FakeTensorMode,
@@ -454,14 +473,7 @@ def flex_attention_fake_tensor_mode(
     mask_mod_other_buffers: Tuple = (),
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     with mode:
-        v_head_dim = value.size(-1)
-        batch_size, num_heads, seq_len_q, q_head_dim = query.shape
-        logsumexp = query.new_empty(
-            batch_size, num_heads, seq_len_q, dtype=torch.float32
-        )
-        out_shape = (batch_size, num_heads, seq_len_q, v_head_dim)
-        out = query.new_empty(out_shape)
-        out = _permute_strides(out, query.stride())
+        out, logsumexp = flex_attention_fake_impl(query, value)
         return out, logsumexp
 
 
@@ -945,11 +957,14 @@ def trace_flex_attention_backward(
     mask_example_vals = [query.new_zeros((), dtype=torch.int) for _ in range(4)]
     mask_graph = block_mask[-1]
     with TransformGetItemToIndex():
-        fw_graph = reenter_make_fx(fw_graph)(*fw_example_vals, *score_mod_other_buffers)
-        joint_graph = reenter_make_fx(joint_graph)(
+        # There's no active make_fx during the compiled autograd graph's initial capture
+        fw_graph = _maybe_reenter_make_fx(fw_graph)(
+            *fw_example_vals, *score_mod_other_buffers
+        )
+        joint_graph = _maybe_reenter_make_fx(joint_graph)(
             *bw_example_vals, *score_mod_other_buffers
         )
-        mask_graph = reenter_make_fx(mask_graph)(
+        mask_graph = _maybe_reenter_make_fx(mask_graph)(
             *mask_example_vals, *mask_mod_other_buffers
         )
     assert isinstance(proxy_mode.tracer, torch.fx.Tracer)
@@ -1080,7 +1095,7 @@ def flex_attention_backward_functionalize(
     assert isinstance(score_mod_other_buffers_unwrapped, tuple)
     assert isinstance(mask_mod_other_buffers_unwrapped, tuple)
 
-    with ctx.redispatch_to_next() as m:
+    with ctx.redispatch_to_next():
         functional_fw_graph = ctx.functionalize(fw_graph)
         functional_joint_graph = ctx.functionalize(joint_graph)
 

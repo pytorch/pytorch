@@ -74,7 +74,7 @@ def parse_stmts(stmts: str) -> Tuple[str, str]:
     assert len(lines) >= 3, f"Invalid string:\n{stmts}"
 
     column_header_pattern = r"^Python\s{35}\| C\+\+(\s*)$"
-    signature_pattern = r"^: f\((.*)\)( -> (.+))?\s*$"
+    signature_pattern = r"^: f\((.*)\)( -> (.+))?\s*$"  # noqa: F841
     separation_pattern = r"^[-]{40} | [-]{40}$"
     code_pattern = r"^(.{40}) \|($| (.*)$)"
 
