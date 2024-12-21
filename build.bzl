@@ -123,7 +123,7 @@ def define_targets(rules):
             ":ts_native_functions.cpp",
             ":ts_native_functions.yaml",
         ],
-        outs = GENERATED_AUTOGRAD_CPP + GENERATED_AUTOGRAD_PYTHON + GENERATED_TESTING_PY,
+        outs = GENERATED_AUTOGRAD_CPP + GENERATED_AUTOGRAD_PYTHON + GENERATED_PYTHON_CPP + GENERATED_TESTING_PY,
         cmd = "$(execpath //tools/setup_helpers:generate_code) " +
               "--gen-dir=$(RULEDIR) " +
               "--native-functions-path $(location :native_functions.yaml) " +
@@ -317,6 +317,10 @@ GENERATED_AUTOGRAD_CPP = [
     "torch/csrc/lazy/generated/RegisterAutogradLazy.cpp",
     "torch/csrc/lazy/generated/RegisterLazy.cpp",
 ] + _GENERATED_AUTOGRAD_CPP_HEADERS + GENERATED_LAZY_H
+
+GENERATED_PYTHON_CPP = [
+    "torch/csrc/functionalization/generated/ViewMetaClassesPythonBinding.cpp"
+]
 
 GENERATED_AOTI_CPP = [
     "torch/csrc/inductor/aoti_torch/generated/c_shim_cpu.cpp",
