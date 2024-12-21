@@ -194,7 +194,7 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
 
         x = torch.randn(2, 3)
         with torch.no_grad():
-            exported_program = torch.export.export(Model(), args=(x,))
+            exported_program = torch.export.export(Model(), args=(x,), strict=True)
             _ = torch.onnx.dynamo_export(
                 exported_program,
                 x,

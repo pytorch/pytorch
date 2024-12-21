@@ -1885,7 +1885,7 @@ class AOTInductorTestsTemplate:
         example_inputs = (torch.randn(10, 10), torch.randn(10, 10))
 
         # Export on CPU
-        exported_program = export(Model(), example_inputs)
+        exported_program = export(Model(), example_inputs, strict=True)
 
         # Compile exported model on GPU
         gm = exported_program.graph_module.to(self.device)

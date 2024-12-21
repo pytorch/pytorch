@@ -61,11 +61,10 @@ class TestOutDtypeOp(TestCase):
         weight = torch.randint(-128, 127, (5, 5), dtype=torch.int8)
         m = M(weight)
         x = torch.randint(-128, 127, (5, 5), dtype=torch.int8)
-        ep = torch.export.export(
-            m,
-            (x,),
-        )
-        FileCheck().check("torch.ops.higher_order.out_dtype").check("aten.mm.default").run(ep.graph_module.code)
+        ep = torch.export.export(m, (x,), strict=True)
+        FileCheck().check("torch.ops.higher_order.out_dtype").check(
+            "aten.mm.default"
+        ).run(ep.graph_module.code)
         self.assertTrue(torch.allclose(m(x), ep.module()(x)))
         for node in ep.graph.nodes:
             if node.op == "call_function" and node.target is out_dtype:
@@ -128,7 +127,12 @@ class TestOutDtypeOp(TestCase):
 
         with self.assertRaisesRegex(ValueError, "out_dtype's first argument needs to be a functional operator"):
             _ = torch.export.export(
-                M(), (torch.randint(-128, 127, (5, 5), dtype=torch.int8), torch.randint(-128, 127, (5, 5), dtype=torch.int8)),
+                M(),
+                (
+                    torch.randint(-128, 127, (5, 5), dtype=torch.int8),
+                    torch.randint(-128, 127, (5, 5), dtype=torch.int8),
+                ),
+                strict=True,
             )
 
     def test_out_dtype_non_op_overload(self):
