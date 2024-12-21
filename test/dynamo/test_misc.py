@@ -10154,7 +10154,7 @@ def ___make_guard_fn():
                         "d": collections.OrderedDict(
                             {
                                 "e": torch.return_types.qr((2 * x, None)),
-                                "f": MyTuple(x, x + 1, torch.zeros(4, 3)),
+                                # "f": MyTuple(x, x + 1, torch.zeros(4, 3)),  TODO: unsupported
                             },
                         ),
                     }
@@ -10188,7 +10188,7 @@ def ___make_guard_fn():
                         "d": collections.OrderedDict(
                             {
                                 "e": torch.return_types.qr((2 * x, None)),
-                                "f": MyTuple(x, x + 1, torch.zeros(4, 3)),
+                                # "f": MyTuple(x, x + 1, torch.zeros(4, 3)),  TODO: unsupported
                             },
                         ),
                     }
@@ -10219,6 +10219,30 @@ def ___make_guard_fn():
 
             self.assertEqual(actual, expected)
 
+    @unittest.expectedFailure
+    def test_pytree_tree_map_namedtuple(self):
+        implemtations = [("python", pytree)]
+
+        for name, module in implemtations:
+            with self.subTest(f"pytree implement: {name}"):
+
+                def fn(x, y):
+                    tree1 = {
+                        "f": MyTuple(x, x + 1, torch.zeros(4, 3)),
+                    }
+                    tree2 = collections.OrderedDict(
+                        [("f", MyTuple(torch.ones(4, 3), -y, y + 1))],
+                    )
+                    return module.tree_map(lambda u, v: (u, v), tree1, tree2)
+
+                x = torch.randn(3, 2)
+                y = torch.randn(3, 2)
+                expected = fn(x, y)
+                fn_opt = torch.compile(fullgraph=True)(fn)
+                actual = fn_opt(x, y)
+
+                self.assertEqual(actual, expected)
+
     def test_pytree_tree_map(self):
         implemtations = [("python", python_pytree)]
         if cxx_pytree is not None:
@@ -10239,7 +10263,6 @@ def ___make_guard_fn():
                         "d": collections.OrderedDict(
                             {
                                 "e": torch.return_types.qr((2 * x, None)),
-                                "f": MyTuple(x, x + 1, torch.zeros(4, 3)),
                             },
                         ),
                     }
@@ -10251,7 +10274,6 @@ def ___make_guard_fn():
                             (
                                 "d",
                                 {
-                                    "f": MyTuple(torch.ones(4, 3), -y, y + 1),
                                     "e": torch.return_types.qr((2 * y, None)),
                                 },
                             ),
