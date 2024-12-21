@@ -6255,12 +6255,12 @@
     CompositeExplicitAutogradNonFunctional: _nested_view_from_buffer_copy
   autogen: _nested_view_from_buffer_copy.out
 
-- func: _nested_view_from_jagged(Tensor(a) self, Tensor offsets, Tensor dummy, Tensor? lengths=None, int ragged_idx=1, Tensor? min_seqlen=None, Tensor? max_seqlen=None) -> Tensor(a)
+- func: _nested_view_from_jagged(Tensor(a) self, Tensor metadata, Tensor? non_contig_offsets, int ragged_idx=1) -> Tensor(a)
   variants: function
   device_check: NoCheck
   dispatch: {}
 
-- func: _nested_view_from_jagged_copy(Tensor self, Tensor offsets, Tensor dummy, Tensor? lengths=None, int ragged_idx=1, Tensor? min_seqlen=None, Tensor? max_seqlen=None) -> Tensor
+- func: _nested_view_from_jagged_copy(Tensor self, Tensor metadata, Tensor? non_contig_offsets, int ragged_idx=1) -> Tensor
   variants: function
   device_check: NoCheck
   tags: view_copy
@@ -6281,13 +6281,7 @@
     CompositeExplicitAutogradNonFunctional: _nested_get_values_copy
   autogen: _nested_get_values_copy.out
 
-- func: _nested_get_offsets(Tensor self) -> Tensor
-  variants: function
-  device_check: NoCheck
-  dispatch: {}
-
-# returns undefined Tensor if no lengths present
-- func: _nested_get_lengths(Tensor self) -> Tensor
+- func: _nested_get_non_contig_offsets(Tensor self) -> Tensor
   variants: function
   device_check: NoCheck
   dispatch: {}
@@ -6297,18 +6291,8 @@
   device_check: NoCheck
   dispatch: {}
 
-- func: _nested_get_min_seqlen(Tensor self) -> Tensor
-  variants: function
-  device_check: NoCheck
-  dispatch: {}
-
-- func: _nested_get_max_seqlen(Tensor self) -> Tensor
-  variants: function
-  device_check: NoCheck
-  dispatch: {}
-
-- func: _nested_get_jagged_dummy(Tensor any) -> Tensor
-  category_override: dummy
+- func: _nested_get_jagged_metadata(Tensor any) -> Tensor
+  category_override: dummy  # Is the "dummy" str special-cased
   dispatch: {}
 
 - func: _nested_compute_contiguous_strides_offsets(Tensor nested_size) -> (Tensor, Tensor)
@@ -14803,7 +14787,7 @@
     CUDA: _fbgemm_dense_to_jagged_forward_symint
     CPU: _padded_dense_to_jagged_forward_cpu
 
-- func: _nested_from_padded_tensor(Tensor padded, Tensor offsets, Tensor dummy, int ragged_idx=1, Tensor? min_seqlen=None, Tensor? max_seqlen=None, SymInt? sum_S=None) -> Tensor
+- func: _nested_from_padded_tensor(Tensor padded, Tensor metadata, int ragged_idx=1, SymInt? sum_S=None) -> Tensor
   variants: function
   device_check: NoCheck
   dispatch: {}

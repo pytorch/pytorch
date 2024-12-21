@@ -364,10 +364,8 @@ Example::
 
     >>> values = torch.randn(12, 5)
     >>> offsets = torch.tensor([0, 3, 5, 6, 10, 12])
-    >>> nt = nested_tensor_from_jagged(values, offsets)
     >>> # 3D shape with the middle dimension jagged
-    >>> nt.shape
-    torch.Size([5, j2, 5])
+    >>> nt = nested_tensor_from_jagged(values, offsets)
     >>> # Length of each item in the batch:
     >>> offsets.diff()
     tensor([3, 2, 1, 4, 2])
@@ -429,8 +427,6 @@ def masked_select(tensor: Tensor, mask: Tensor) -> Tensor:
     >>> tensor = torch.randn(3, 3)
     >>> mask = torch.tensor([[False, False, True], [True, False, True], [False, False, True]])
     >>> nt = torch.nested.masked_select(tensor, mask)
-    >>> nt.shape
-    torch.Size([3, j4])
     >>> # Length of each item in the batch:
     >>> nt.offsets().diff()
     tensor([1, 2, 1])
@@ -438,8 +434,6 @@ def masked_select(tensor: Tensor, mask: Tensor) -> Tensor:
     >>> tensor = torch.randn(6, 5)
     >>> mask = torch.tensor([False])
     >>> nt = torch.nested.masked_select(tensor, mask)
-    >>> nt.shape
-    torch.Size([6, j5])
     >>> # Length of each item in the batch:
     >>> nt.offsets().diff()
     tensor([0, 0, 0, 0, 0, 0])
