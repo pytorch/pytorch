@@ -8313,6 +8313,15 @@ class TestNNDeviceType(NNTestCase):
             torch._C._nn.thnn_conv2d(torch.rand([1, 1, 1, 1]), kernel_size=[1, 1], padding=[], stride=[1, 1],
                                      weight=torch.rand([1, 1]))
 
+    @onlyCPU
+    @dtypes(torch.double, torch.float, torch.bfloat16, torch.half)
+    def test_instanceNorm_neg_epsilon(self, device, dtype):
+        input = torch.rand((1, 3, 256, 256), dtype=dtype, device=device)
+        eps = -0.5
+        m = torch.nn.InstanceNorm2d(num_features=3, eps=eps)
+        out = m(input)
+        self.assertEqual(torch.any(torch.isnan(out)), False)
+
     def test_InstanceNorm1d_general(self, device):
         b = random.randint(3, 5)
         c = random.randint(3, 5)
