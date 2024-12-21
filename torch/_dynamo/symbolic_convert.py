@@ -3229,7 +3229,6 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
     def inline_call_(self):
         parent = self.parent
         code = self.f_code
-        func = self.funcvar
 
         strict_ctx: Any = contextlib.nullcontext()
         if parent.strict_checks_fn:

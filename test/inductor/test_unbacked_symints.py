@@ -376,7 +376,6 @@ class TestUnbackedSymints(InductorTestCase):
         sub = CustomSliceSubclass(t, slice_bounds=torch.tensor([2, 5], device=t.device))
         start = 2
         length = 3
-        ragged_idx = 1
         example_inputs = (sub, start, length)
 
         actual = torch.compile(fn, dynamic=dynamic, fullgraph=True)(*example_inputs)
