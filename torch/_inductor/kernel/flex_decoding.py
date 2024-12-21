@@ -140,8 +140,7 @@ flex_decoding_template = TritonTemplate(
     sparse_idx_hz_offset = sparse_idx_z * stride_kv_z + sparse_idx_h * stride_kv_h
 
     # Calculate KV blocks that belong this CTA.
-    block_n_start = off_t * TILE_KV_MULTIPLE                        # n_offset inside sparse block
-    block_n_end = block_n_start + TILE_KV_MULTIPLE                  # end BLOCK_N
+    block_n_start = off_t
 
     q_range = stride_qg * off_g[:, None, None] + stride_qm * off_m[None, :, None] + stride_qk * offs_d[None, None, :]
 
@@ -196,9 +195,10 @@ flex_decoding_template = TritonTemplate(
         off_z, offs_hq[:, None], offs_m[:, None], offs_n[None, :],
         #block sparse data
         kv_indices, kv_num_blocks,
-        block_n_start, block_n_end if block_n_end <= block_n_last_valid else block_n_last_valid,
+        block_n_start, block_n_last_valid,
         MATMUL_PRECISION,
         IS_FULL_BLOCKS=False,
+        SPLIT_KV_STRIDE=SPLIT_KV,
     )
 
 
@@ -216,7 +216,7 @@ flex_decoding_template = TritonTemplate(
         off_n = tl.load(kv_indices + indices_idx) * SPARSE_KV_BLOCK_SIZE + off_n_block_in_sparse * BLOCK_N
 
         # last valid block according to sparse mask
-        block_n_last_valid = tl.minimum(kv_num_blocks * SPARSE_KV_MULTIPLE, tl.maximum(tl.cdiv(KV_LEN, BLOCK_N), 1))
+        block_n_last_valid = tl.minimum(kv_num_blocks * SPARSE_KV_MULTIPLE, tl.maximum(tl.cdiv(KV_LEN, BLOCK_N), 1)*BLOCK_N)
 
         K_block_ptr = tl.make_block_ptr(
             base=K + k_offset,
@@ -245,9 +245,10 @@ flex_decoding_template = TritonTemplate(
             off_z, offs_hq[:, None], offs_m[:, None], offs_n[None, :],
             #block sparse data
             kv_indices, kv_num_blocks,
-            block_n_start, block_n_end if block_n_end <= block_n_last_valid else block_n_last_valid,
+            block_n_start, block_n_last_valid,
             MATMUL_PRECISION,
             IS_FULL_BLOCKS=True,
+            SPLIT_KV_STRIDE=SPLIT_KV,
         )
 
     m_offset = off_t * stride_mt + off_z * stride_mz
