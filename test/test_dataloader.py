@@ -3506,11 +3506,15 @@ class TestSlowIndexDataset(Dataset):
     def __init__(self, end: int, slow_index: int):
         self.end = end
         self.slow_index = slow_index
+        self._worker_id = None
 
     def __getitem__(self, idx):
+        if not self._worker_id:
+            worker_info = torch.utils.data.get_worker_info()
+            self._worker_id = worker_info.id
         if idx == self.slow_index:
-            time.sleep(0.5)
-        return idx
+            time.sleep(1.0)
+        return (self._worker_id, idx)
 
     def __len__(self):
         return self.end
@@ -3522,11 +3526,11 @@ class TestSlowIterableDataset(IterableDataset):
         self.end = end
         self.mid = math.ceil((self.end - self.start) / 2)
 
-    def give_data(self, iter_start, iter_end):
+    def give_data(self, worker_id, iter_start, iter_end):
         for i in range(iter_start, iter_end):
-            if i >= self.mid:
-                time.sleep(0.5)
-            yield i
+            if i == self.mid:
+                time.sleep(1.0)
+            yield (worker_id, i)
 
     def __iter__(self):
         worker_info = torch.utils.data.get_worker_info()
@@ -3536,7 +3540,7 @@ class TestSlowIterableDataset(IterableDataset):
         worker_id = worker_info.id
         iter_start = self.start + worker_id * per_worker
         iter_end = min(iter_start + per_worker, self.end)
-        return self.give_data(iter_start, iter_end)
+        return self.give_data(worker_id, iter_start, iter_end)
 
 
 class TestOutOfOrderDataLoader(TestCase):
@@ -3549,9 +3553,13 @@ class TestOutOfOrderDataLoader(TestCase):
             in_order=True,
         )
 
-        expected_order = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
-        output = [sample.item() for sample in dataloader]
-        self.assertEqual(expected_order, output)
+        expected_worker_ids = [0, 1, 0, 1, 0, 1, 0, 1, 0, 1]
+        expected_data = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+        outputs = list(dataloader)
+        worker_ids = [o[0] for o in outputs]
+        data = [o[1] for o in outputs]
+        self.assertEqual(expected_worker_ids, worker_ids)
+        self.assertEqual(expected_data, data)
 
     def test_out_of_order_index_ds(self):
         dataset = TestSlowIndexDataset(end=10, slow_index=2)
@@ -3559,17 +3567,22 @@ class TestOutOfOrderDataLoader(TestCase):
         dataloader = torch.utils.data.DataLoader(
             dataset,
             num_workers=2,
+            prefetch_factor=2,
             in_order=False,
         )
 
-        # normally, this should be [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
-        expected_order = [0, 1, 3, 5, 7, 2, 4, 6, 8, 9]
-        output = [sample.item() for sample in dataloader]
-        self.assertNotEqual(output, list(range(10)))
-        self.assertEqual(len(output), len(expected_order))
-        self.assertEqual(set(output), set(range(10)))
-        self.assertEqual(set(output[:5]), set(expected_order[:5]))
-        self.assertEqual(set(output[5:]), set(expected_order[5:]))
+        # worker_id = 0 gets 0, then 'stuck' on index = 2, and gets one more
+        # due to prefetch_factor being 2
+        expected_worker_ids = [0, 1, 1, 1, 1, 1, 1, 1, 0, 0]
+        expected_data = [0, 1, 3, 5, 6, 7, 8, 9, 2, 4]
+        outputs = list(dataloader)
+        worker_ids = [o[0].item() for o in outputs]
+        data = [o[1].item() for o in outputs]
+        self.assertEqual(set(expected_worker_ids[:8]), set(worker_ids[:8]))
+        self.assertEqual(set(expected_worker_ids[8:]), set(worker_ids[8:]))
+        self.assertNotEqual(data, list(range(10)))
+        self.assertEqual(set(expected_data), set(data))
+        self.assertIn(2, data[8:])
 
     def test_in_order_iterable_ds(self):
         dataset = TestSlowIterableDataset(start=0, end=10)
@@ -3580,9 +3593,13 @@ class TestOutOfOrderDataLoader(TestCase):
             in_order=True,
         )
 
-        expected_order = [0, 5, 1, 6, 2, 7, 3, 8, 4, 9]
-        output = [sample.item() for sample in dataloader]
-        self.assertEqual(expected_order, output)
+        expected_worker_ids = [0, 1, 0, 1, 0, 1, 0, 1, 0, 1]
+        expected_data = [0, 5, 1, 6, 2, 7, 3, 8, 4, 9]
+        outputs = list(dataloader)
+        worker_ids = [o[0] for o in outputs]
+        data = [o[1] for o in outputs]
+        self.assertEqual(expected_worker_ids, worker_ids)
+        self.assertEqual(expected_data, data)
 
     def test_out_of_order_iterable_ds(self):
         dataset = TestSlowIterableDataset(start=0, end=10)
@@ -3593,14 +3610,17 @@ class TestOutOfOrderDataLoader(TestCase):
             in_order=False,
         )
 
-        # normally, this should be [0, 5, 1, 6, 2, 7, 3, 8, 4, 9]
-        expected_order = [0, 1, 2, 3, 5, 4, 6, 7, 8, 9]
-        output = [sample.item() for sample in dataloader]
-        self.assertNotEqual(output, [0, 5, 1, 6, 2, 7, 3, 8, 4, 9])
-        self.assertEqual(len(output), len(expected_order))
-        self.assertEqual(set(output), set(range(10)))
-        self.assertEqual(set(output[:4]), set(expected_order[:4]))
-        self.assertEqual(set(output[4:]), set(expected_order[4:]))
+        # worker 0 has [0, 1, 2, 3, 4], worker 1 has [5, 6, 7, 8, 9]
+        # index 5 is slow, so expect all of worker 0 before worker 1
+        expected_worker_ids = [0, 0, 0, 0, 0, 1, 1, 1, 1, 1]
+        expected_data = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+        outputs = list(dataloader)
+        worker_ids = [o[0] for o in outputs]
+        data = [o[1] for o in outputs]
+        self.assertEqual(expected_worker_ids, worker_ids)
+        self.assertEqual(sum(worker_ids), 5)
+        self.assertNotEqual(data, [0, 5, 1, 6, 2, 7, 3, 8, 4, 9])
+        self.assertEqual(expected_data, data)
 
 
 instantiate_device_type_tests(TestDataLoaderDeviceType, globals())
