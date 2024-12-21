@@ -3,7 +3,7 @@ import os
 import textwrap
 from enum import auto, Enum
 from traceback import extract_stack, format_exc, format_list, StackSummary
-from typing import Any, cast, NoReturn, Optional, Tuple, TYPE_CHECKING
+from typing import Any, cast, Dict, List, NoReturn, Optional, Tuple, Type, TYPE_CHECKING
 
 import torch._guards
 
@@ -13,6 +13,8 @@ from .utils import counters
 
 if TYPE_CHECKING:
     from torch._guards import CompileId
+
+    from .symbolic_convert import InstructionTranslator
 
 
 def exportdb_error_message(case_name):
@@ -219,7 +221,17 @@ class ObservedUserStopIteration(ObservedException):
             self.value = None
 
 
-class ObservedKeyError(ObservedException):
+class ObservedLookupError(ObservedException):
+    # A LookupError exception to be raised from inside Dynamo tracing. This can happen on __getitem__
+    pass
+
+
+class ObservedIndexError(ObservedLookupError):
+    # An IndexError exception to be raised from inside Dynamo tracing. This can happen on list __getitem__
+    pass
+
+
+class ObservedKeyError(ObservedLookupError):
     # A KeyError exception to be raised from inside Dynamo tracing. This can happen on dict __getitem__
     pass
 
@@ -235,20 +247,28 @@ class ObservedRuntimeError(ObservedException):
 
 observed_exception_map = {
     StopIteration: ObservedUserStopIteration,
+    LookupError: ObservedLookupError,
+    IndexError: ObservedIndexError,
     KeyError: ObservedKeyError,
     AttributeError: ObservedAttributeError,
     RuntimeError: ObservedRuntimeError,
 }
 
 
-def raise_observed_exception(e, tx):
+def raise_observed_exception(
+    exc_type: Type[Exception],
+    tx: "InstructionTranslator",
+    *,
+    args: Optional[List[Any]] = None,
+    kwargs: Optional[Dict[str, Any]] = None,
+) -> NoReturn:
     from .variables import BuiltinVariable
 
     # CPython here raises an exception. Since there is no python code, we have to manually setup the exception
     # stack and raise the exception.
-    exception_vt = BuiltinVariable(e).call_function(tx, [], {})
+    exception_vt = BuiltinVariable(exc_type).call_function(tx, args or [], kwargs or {})
     tx.exn_vt_stack.append(exception_vt)
-    raise observed_exception_map[e]
+    raise observed_exception_map[exc_type]
 
 
 def handle_observed_exception(tx):
