@@ -1316,6 +1316,7 @@ Tensor randn_like(
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ randperm ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 namespace {
+
 template <typename scalar_t>
 void randperm_cpu(Tensor& result, int64_t n, CPUGeneratorImpl* generator) {
   scalar_t* r__data = result.data_ptr<scalar_t>();
@@ -1333,12 +1334,28 @@ void randperm_cpu(Tensor& result, int64_t n, CPUGeneratorImpl* generator) {
         }
       });
 
-  for (int64_t i = 0; i < n - 1; i++) {
-    // NOLINTNEXTLINE(clang-analyzer-security.insecureAPI.rand)
-    int64_t z = generator->random() % (n - i);
-    scalar_t sav = r__data[i * r__stride_0];
-    r__data[i * r__stride_0] = r__data[(z + i) * r__stride_0];
-    r__data[(z + i) * r__stride_0] = sav;
+  // we need to pick a number uniformly distributed between 0 and n
+  // when n is of the same order of magnitude as the biggest number returned by
+  // random the % result is not uniformly distributed
+  bool use_32bit = n <= std::numeric_limits<uint32_t>::max() / 20;
+  // I've tried different ways of specifying random function to not duplicate
+  // this loop but they all come with perf penalty
+  if (use_32bit) {
+    for (int64_t i = 0; i < n - 1; i++) {
+      // NOLINTNEXTLINE(clang-analyzer-security.insecureAPI.rand)
+      int64_t z = generator->random() % (n - i);
+      scalar_t sav = r__data[i * r__stride_0];
+      r__data[i * r__stride_0] = r__data[(z + i) * r__stride_0];
+      r__data[(z + i) * r__stride_0] = sav;
+    }
+  } else {
+    for (int64_t i = 0; i < n - 1; i++) {
+      // NOLINTNEXTLINE(clang-analyzer-security.insecureAPI.rand)
+      int64_t z = generator->random64() % (n - i);
+      scalar_t sav = r__data[i * r__stride_0];
+      r__data[i * r__stride_0] = r__data[(z + i) * r__stride_0];
+      r__data[(z + i) * r__stride_0] = sav;
+    }
   }
 }
 } // namespace
