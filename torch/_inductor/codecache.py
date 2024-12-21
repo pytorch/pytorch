@@ -1476,10 +1476,7 @@ class AotCodeCompiler:
         # is scoped to the 'key', so make sure the consts_s is protected
         # by the same lock:
         cpp_path_operator = Path(cpp_path)
-        specified_sub_dir = cpp_path_operator.parent / key
-        if not specified_sub_dir.exists():
-            specified_sub_dir.mkdir(exist_ok=True)
-        cmake_path = str(Path(specified_sub_dir) / "CMakeLists.txt")
+        consts_specified_dir = os.path.join(cpp_path_operator.parent, key)
 
         def _compile_consts(consts: bytes, platform: str) -> str:
             if platform == "linux":
@@ -1521,7 +1518,7 @@ class AotCodeCompiler:
             _, consts_s = write(
                 consts_asm,
                 "S",
-                specified_dir=str(specified_sub_dir),
+                specified_dir=consts_specified_dir,
             )
             consts_s = Path(consts_s)
             object_build_options = CppTorchDeviceOptions(
@@ -1560,10 +1557,6 @@ class AotCodeCompiler:
                     while pos < len(consts):
                         rc = f.write(consts[pos:])
                         pos += rc
-
-            # Remove the .S file to save space
-            os.remove(consts_s)
-
             return consts_o
 
         from torch.utils._filelock import FileLock
@@ -1672,25 +1665,22 @@ class AotCodeCompiler:
             output_o = object_builder.get_target_file_path()
 
             log.debug("aot compilation command: %s", compile_cmd)
-            if config.aot_inductor.package_cpp_only:
-                # Not doing the actual compilation here
-                compile_flags = str(
-                    cpp_path_operator.with_name(
-                        f"{cpp_path_operator.stem}_compile_flags.json"
-                    )
-                )
-                object_build_options.save_flags_to_json(compile_flags)
-                generated_files.append(compile_flags)
-                object_builder.save_compile_cmd_to_cmake(cmake_path)
-                object_builder.save_src_to_cmake(cmake_path, cpp_path)
-                generated_files.append(cmake_path)
-            else:
+            if not config.aot_inductor.package_cpp_only:
                 if fbcode_aot_cpu_re:
                     output_o = str(cpp_path_operator.with_suffix(".o"))
                     compile_file(cpp_path, output_o, compile_cmd.split())
                     os.chmod(output_o, 0o644)
                 else:
                     run_command_and_check(compile_cmd)
+
+            if config.aot_inductor.package_cpp_only:
+                compile_flags = str(
+                    cpp_path_operator.with_name(
+                        f"{cpp_path_operator.stem}_compile_flags.json"
+                    )
+                )
+                object_build_options.save_flags_to_file(compile_flags)
+                generated_files.append(compile_flags)
 
             if not use_mmap_weights:
                 aot_constants = serialized_weights
@@ -1743,7 +1733,7 @@ class AotCodeCompiler:
                         f"{cpp_path_operator.stem}_linker_flags.json"
                     )
                 )
-                so_build_options.save_flags_to_json(linker_flags)
+                so_build_options.save_flags_to_file(linker_flags)
                 generated_files.append(linker_flags)
 
                 # If we only want to package the cpp, then we need to save the
@@ -1764,10 +1754,6 @@ class AotCodeCompiler:
                 generated_files.append(consts_o)
                 generated_files.append(kernels_o)
 
-                so_builder.save_src_to_cmake(cmake_path, consts_o)
-                for kernel_o in kernels_o.split():
-                    so_builder.save_src_to_cmake(cmake_path, kernel_o)
-                so_builder.save_link_cmd_to_cmake(cmake_path)
             else:
                 if fbcode_aot_cpu_re:
                     output_so = (
@@ -1783,6 +1769,7 @@ class AotCodeCompiler:
                 for o_file in [
                     output_o,
                     consts_o,
+                    str(Path(consts_o).with_suffix(".S")),
                 ]:
                     # Remove these as they are not needed anymore
                     os.remove(o_file)

@@ -14,9 +14,9 @@ import shutil
 import subprocess
 import sys
 import sysconfig
-import textwrap
 import warnings
 from ctypes import cdll
+from ctypes.util import find_library
 from pathlib import Path
 from typing import Any, List, Optional, Sequence, Tuple, Union
 
@@ -319,10 +319,10 @@ def _remove_dir(path_dir: str) -> None:
         os.rmdir(path_dir)
 
 
-def _run_compile_cmd(cmd_line: str, cwd: str) -> bytes:
+def _run_compile_cmd(cmd_line: str, cwd: str) -> None:
     cmd = shlex.split(cmd_line)
     try:
-        status = subprocess.check_output(args=cmd, cwd=cwd, stderr=subprocess.STDOUT)
+        subprocess.check_output(args=cmd, cwd=cwd, stderr=subprocess.STDOUT)
     except subprocess.CalledProcessError as e:
         output = e.output.decode("utf-8")
         openmp_problem = "'omp.h' file not found" in output or "libomp" in output
@@ -338,12 +338,11 @@ def _run_compile_cmd(cmd_line: str, cwd: str) -> bytes:
             )
             output += instruction
         raise exc.CppCompileError(cmd, output) from e
-    return status
 
 
-def run_compile_cmd(cmd_line: str, cwd: str) -> bytes:
+def run_compile_cmd(cmd_line: str, cwd: str) -> None:
     with dynamo_timed("compile_file"):
-        return _run_compile_cmd(cmd_line, cwd)
+        _run_compile_cmd(cmd_line, cwd)
 
 
 def normalize_path_separator(orig_path: str) -> str:
@@ -438,7 +437,7 @@ class BuildOptionsBase:
     def get_compile_only(self) -> bool:
         return self._compile_only
 
-    def save_flags_to_json(self, file: str) -> None:
+    def save_flags_to_file(self, file: str) -> None:
         attrs = {
             "compiler": self.get_compiler(),
             "definitions": self.get_definations(),
@@ -537,8 +536,7 @@ def _get_optimization_cflags(cpp_compiler: str) -> List[str]:
 
         if not config.cpp.enable_unsafe_math_opt_flag:
             cflags.append("fno-unsafe-math-optimizations")
-        if not config.cpp.enable_floating_point_contract_flag:
-            cflags.append("ffp-contract=off")
+        cflags.append(f"ffp-contract={config.cpp.enable_floating_point_contract_flag}")
 
         if sys.platform != "darwin":
             # on macos, unknown argument: '-fno-tree-loop-vectorize'
@@ -1225,13 +1223,12 @@ def get_cpp_torch_device_options(
 
     if device_type == "xpu":
         definations.append(" USE_XPU")
-        # Add "-Wno-unsupported-floating-point-opt" here to
-        # suppress compiler warning:
-        # "warning: overriding currently unsupported use of floating point
-        # exceptions on this target [-Wunsupported-floating-point-opt]".
-        # Since the compiler has not support some features.
-        cflags += ["fsycl", "Wno-unsupported-floating-point-opt"]
         libraries += ["c10_xpu", "sycl", "ze_loader", "torch_xpu"]
+        if not find_library("ze_loader"):
+            raise OSError(
+                "Intel GPU driver is not properly installed, please follow the instruction "
+                "in https://github.com/pytorch/pytorch?tab=readme-ov-file#intel-gpu-support."
+            )
 
     if aot_mode:
         if config.is_fbcode():
@@ -1279,12 +1276,6 @@ class CppTorchDeviceOptions(CppTorchOptions):
         shared: bool = True,
         extra_flags: Sequence[str] = (),
     ) -> None:
-        if device_type == "xpu":
-            from torch.utils.cpp_extension import _join_sycl_home
-
-            compiler = _join_sycl_home("bin", "icpx")
-        else:
-            compiler = ""
         super().__init__(
             vec_isa=vec_isa,
             include_pytorch=include_pytorch,
@@ -1293,7 +1284,6 @@ class CppTorchDeviceOptions(CppTorchOptions):
             use_absolute_path=use_absolute_path,
             use_mmap_weights=use_mmap_weights,
             extra_flags=extra_flags,
-            compiler=compiler,
         )
 
         device_definations: List[str] = []
@@ -1410,7 +1400,6 @@ class CppBuilder:
         self._name = name
 
         # Code start here, initial self internal veriables firstly.
-        self._build_option = BuildOption
         self._compiler = BuildOption.get_compiler()
         self._use_absolute_path = BuildOption.get_use_absolute_path()
         self._aot_mode = BuildOption.get_aot_mode()
@@ -1530,7 +1519,7 @@ class CppBuilder:
     def get_target_file_path(self) -> str:
         return normalize_path_separator(self._target_file)
 
-    def build(self) -> Tuple[bytes, str]:
+    def build(self) -> None:
         """
         It is must need a temperary directory to store object files in Windows.
         After build completed, delete the temperary directory to save disk space.
@@ -1542,67 +1531,5 @@ class CppBuilder:
         _create_if_dir_not_exist(_build_tmp_dir)
 
         build_cmd = self.get_command_line()
-
-        status = run_compile_cmd(build_cmd, cwd=_build_tmp_dir)
-
+        run_compile_cmd(build_cmd, cwd=_build_tmp_dir)
         _remove_dir(_build_tmp_dir)
-        return status, self._target_file
-
-    def _remove_directory_from_file_path(self, file_path: str) -> str:
-        # Remove the directory part of file_path
-        return "${CMAKE_CURRENT_SOURCE_DIR}/" + Path(file_path).name
-
-    def save_compile_cmd_to_cmake(
-        self,
-        cmake_path: str,
-    ) -> None:
-        definitions = " ".join(self._build_option.get_definations())
-        contents = textwrap.dedent(
-            f"""
-            cmake_minimum_required(VERSION 3.18 FATAL_ERROR)
-            project(aoti_model LANGUAGES CXX)
-            set(CMAKE_CXX_STANDARD 17)
-
-            # May need to point CMAKE_PREFIX_PATH to the right torch location
-            find_package(Torch REQUIRED)
-
-            # Set a shared library target
-            add_library(aoti_model SHARED)
-
-            # Add macro definitions
-            target_compile_definitions(aoti_model PRIVATE {definitions})
-
-            # Add compile flags
-            target_compile_options(aoti_model PRIVATE {self._cflags_args})
-            # Backend specific flags
-            target_compile_options(aoti_model PRIVATE {self._passthrough_parameters_args} -c)
-
-            """
-        )
-        with open(cmake_path, "w") as f:
-            f.write(contents)
-
-    def save_src_to_cmake(self, cmake_path: str, src_path: str) -> None:
-        with open(cmake_path, "a") as f:
-            f.write(
-                f"target_sources(aoti_model PRIVATE {self._remove_directory_from_file_path(src_path)})\n"
-            )
-
-    def save_link_cmd_to_cmake(self, src_path: str) -> None:
-        lflags = " ".join(self._build_option.get_ldflags())
-        libs = " ".join(self._build_option.get_libraries())
-        contents = textwrap.dedent(
-            f"""
-            # Add linker flags
-            target_link_options(aoti_model PRIVATE {lflags})
-
-            # Add libraries
-            target_link_libraries(aoti_model PRIVATE {libs})
-         """
-        )
-
-        assert os.path.exists(
-            src_path
-        ), f"save_link_cmd_to_cmakefile expects {src_path} to already exist"
-        with open(src_path, "a") as f:
-            f.write(contents)
