@@ -127,7 +127,7 @@ class _FunctionalAdamW:
                 grad_scale=None,
                 found_inf=None,
                 has_complex=has_complex,
-                decoupled_weight_decay=True,
+                decoupled_weight_decay=True,  # AdamW is just adam w/ this parameter set to True
             )
 
     def step(self, gradients: List[Optional[Tensor]]):
@@ -201,5 +201,5 @@ class _FunctionalAdamW:
                 grad_scale=None,
                 found_inf=None,
                 has_complex=has_complex,
-                decoupled_weight_decay=True,
+                decoupled_weight_decay=True,  # AdamW is just adam w/ this parameter set to True
             )
