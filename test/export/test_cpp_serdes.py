@@ -18,7 +18,7 @@ test_classes = {}
 
 
 def mocked_cpp_serdes_export(*args, **kwargs):
-    ep = export(*args, **kwargs)
+    ep = export(*args, **kwargs, strict=True)
     try:
         payload = serialize(ep)
     except Exception:

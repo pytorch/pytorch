@@ -133,7 +133,7 @@ class TestNumericDebugger(TestCase):
     def test_copy_preserve_handle(self):
         m = TestHelperModules.Conv2dThenConv1d()
         example_inputs = m.example_inputs()
-        ep = torch.export.export(m, example_inputs)
+        ep = torch.export.export(m, example_inputs, strict=True)
         generate_numeric_debug_handle(ep)
 
         self._assert_each_node_has_debug_handle(ep)
@@ -148,7 +148,7 @@ class TestNumericDebugger(TestCase):
     def test_deepcopy_preserve_handle(self):
         m = TestHelperModules.Conv2dThenConv1d()
         example_inputs = m.example_inputs()
-        ep = torch.export.export(m, example_inputs)
+        ep = torch.export.export(m, example_inputs, strict=True)
         generate_numeric_debug_handle(ep)
 
         debug_handle_map_ref = self._extract_debug_handles(ep)

@@ -13,18 +13,18 @@ test_classes = {}
 
 
 def mocked_retraceability_export_strict(*args, **kwargs):
-    ep = export(*args, **kwargs)
+    ep = export(*args, **kwargs, strict=True)
     if "dynamic_shapes" in kwargs:
         if isinstance(kwargs["dynamic_shapes"], dict):
             kwargs["dynamic_shapes"] = tuple(kwargs["dynamic_shapes"].values())
 
-    ep = export(ep.module(), *(args[1:]), **kwargs)
+    ep = export(ep.module(), *(args[1:]), **kwargs, strict=True)
     return ep
 
 
 def mocked_retraceability_export_non_strict(*args, **kwargs):
     if "strict" in kwargs:
-        ep = export(*args, **kwargs)
+        ep = export(*args, **kwargs, strict=True)
     else:
         ep = export(*args, **kwargs, strict=False)
     if "dynamic_shapes" in kwargs:
@@ -32,7 +32,7 @@ def mocked_retraceability_export_non_strict(*args, **kwargs):
             kwargs["dynamic_shapes"] = tuple(kwargs["dynamic_shapes"].values())
 
     if "strict" in kwargs:
-        ep = export(ep.module(), *(args[1:]), **kwargs)
+        ep = export(ep.module(), *(args[1:]), **kwargs, strict=True)
     else:
         ep = export(ep.module(), *(args[1:]), **kwargs, strict=False)
     return ep

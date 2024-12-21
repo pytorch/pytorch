@@ -141,7 +141,7 @@ class TestSparseProp(TestCase):
             index_dtype=itype,
         ):
             # Build the traced graph.
-            prog = torch.export.export(net, (sparse_input,))
+            prog = torch.export.export(net, (sparse_input,), strict=True)
             # Test arg/output.
             for i, node in enumerate(prog.graph.nodes):
                 meta = node.meta.get("val", None)
@@ -163,7 +163,7 @@ class TestSparseProp(TestCase):
         ):
             result = net(sparse_input)
             # Build the traced graph.
-            prog = torch.export.export(net, (sparse_input,))
+            prog = torch.export.export(net, (sparse_input,), strict=True)
             # Test arg/sum/output.
             for i, node in enumerate(prog.graph.nodes):
                 meta = node.meta.get("val", None)
@@ -187,7 +187,7 @@ class TestSparseProp(TestCase):
         ):
             result = net(sparse_input)
             # Build the traced graph.
-            prog = torch.export.export(net, (sparse_input,))
+            prog = torch.export.export(net, (sparse_input,), strict=True)
             # Test arg/neg/abs/mul/relu/output.
             for i, node in enumerate(prog.graph.nodes):
                 meta = node.meta.get("val", None)
@@ -209,7 +209,7 @@ class TestSparseProp(TestCase):
         ):
             result = net(sparse_input)
             # Build the traced graph.
-            prog = torch.export.export(net, (sparse_input,))
+            prog = torch.export.export(net, (sparse_input,), strict=True)
             # Test arg/todense/output.
             for i, node in enumerate(prog.graph.nodes):
                 meta = node.meta.get("val", None)
@@ -235,7 +235,7 @@ class TestSparseProp(TestCase):
         S = A.to_sparse_csr()
         result = net(S, Y)
         # Build the traced graph.
-        prog = torch.export.export(net, (S, Y))
+        prog = torch.export.export(net, (S, Y), strict=True)
         # Test args/add/output.
         for i, node in enumerate(prog.graph.nodes):
             meta = node.meta.get("val", None)
@@ -253,7 +253,7 @@ class TestSparseProp(TestCase):
         x = [torch.randn(3, 3) for _ in range(3)]
         result = net(x)
         # Build the traced graph.
-        prog = torch.export.export(net, args=(x,))
+        prog = torch.export.export(net, args=(x,), strict=True)
         # Test args/to_sparse/output.
         for i, node in enumerate(prog.graph.nodes):
             meta = node.meta.get("val", None)
@@ -269,7 +269,7 @@ class TestSparseProp(TestCase):
         x = [torch.randn(3, 3) for _ in range(3)]
         result = net(x)
         # Build the traced graph.
-        prog = torch.export.export(net, args=(x,))
+        prog = torch.export.export(net, args=(x,), strict=True)
         # Test args/to_sparse/output.
         for i, node in enumerate(prog.graph.nodes):
             meta = node.meta.get("val", None)

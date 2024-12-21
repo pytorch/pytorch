@@ -16,7 +16,7 @@ test_classes = {}
 
 
 def mocked_serder_export_strict(*args, **kwargs):
-    ep = export(*args, **kwargs)
+    ep = export(*args, **kwargs, strict=True)
     buffer = io.BytesIO()
     save(ep, buffer)
     buffer.seek(0)
@@ -26,7 +26,7 @@ def mocked_serder_export_strict(*args, **kwargs):
 
 def mocked_serder_export_non_strict(*args, **kwargs):
     if "strict" in kwargs:
-        ep = export(*args, **kwargs)
+        ep = export(*args, **kwargs, strict=True)
     else:
         ep = export(*args, **kwargs, strict=False)
     buffer = io.BytesIO()
