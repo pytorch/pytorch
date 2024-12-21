@@ -1250,8 +1250,11 @@ class VariableBuilder:
 
                 return key, value
 
+            # dict.__getitem__ ensures that we don't call user defined getitem
+            # here.
             result = dict(
-                build_key_value(i, k, v) for i, (k, v) in enumerate(value.items())
+                build_key_value(i, k, dict.__getitem__(value, k))
+                for i, k in enumerate(value.keys())
             )
 
             # NB: This is deliberately kept ValueMutationNew because dict_vt is
