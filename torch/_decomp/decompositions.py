@@ -3788,7 +3788,7 @@ def _upsample_linear(
     scales: List[Optional[float]],
 ) -> Tensor:
     # get dimensions of original image
-    n_batch, n_channels = input.shape[:2]
+    n_channels = input.shape[1]
     inp_sizes = input.shape[2:]
     n_dims = len(inp_sizes)
 
@@ -4952,7 +4952,6 @@ def scaled_dot_product_flash_attention_for_cpu(
     attn_mask: Optional[Tensor] = None,
     scale: Optional[float] = None,
 ) -> Tuple[Tensor, Tensor]:
-    dtype = query.dtype
     torch._check(
         torch.is_floating_point(query),
         lambda: f"query must be FP32, FP64, BF16, FP16 but got {query.dtype}",
@@ -5115,21 +5114,6 @@ def bernoulli(
             device=self.device,
         )
     p = (raw_p < self).to(self.dtype)
-    return p
-
-
-@register_decomposition(aten.bernoulli.p)
-def bernoulli_p(self, p, *, generator: Optional[torch.Generator] = None):
-    if generator is None:
-        raw_p = torch.rand(self.size(), dtype=torch.float32, device=self.device)
-    else:
-        raw_p = torch.rand(
-            self.size(),
-            generator=generator,
-            dtype=self.float32,
-            device=self.device,
-        )
-    p = (raw_p < p).to(self.dtype)
     return p
 
 

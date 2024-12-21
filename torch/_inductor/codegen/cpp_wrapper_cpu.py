@@ -4,7 +4,7 @@ import math
 import os
 import sys
 from itertools import count
-from typing import Callable, Dict, List, Optional, Sequence, Set, Tuple
+from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
 import sympy
 from sympy import Expr
@@ -14,6 +14,7 @@ import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncComp
 import torch._ops
 from torch._inductor.runtime.runtime_utils import dynamo_timed
 from torch.fx.experimental.symbolic_shapes import ConvertIntKey, DivideByKey, SymTypes
+from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.symbol import symbol_is_type, SymT
 
 from .. import config, ir
@@ -46,21 +47,19 @@ class CppWrapperCpu(PythonWrapperCodegen):
         self.comment = "//"
         self.none_str = "nullptr"
         self.supports_intermediate_hooks = False
-        self.outputs_need_copy = set()
         self.kernel_callsite_id = count()
         self.var_array_id = (
             count()
         )  # for different types of local array variable declarations
-        self.declared_var_array_vars = set()
         self.int_array_id = count()  # for int array local variable declarations
-        self.declared_int_array_vars = set()
+        self.declared_int_array_vars = OrderedSet[str]()
         self.tmp_tensor_id = count()  # for tmp tensor local variable declarations
         self.arg_var_id = count()
-        self.used_cached_devices = set()
-        self.used_cached_dtypes = set()
-        self.used_cached_layouts = set()
-        self.used_cached_memory_formats = set()
-        self.used_cond_predicate = set()
+        self.used_cached_devices = OrderedSet[str]()
+        self.used_cached_dtypes = OrderedSet[str]()
+        self.used_cached_layouts = OrderedSet[str]()
+        self.used_cached_memory_formats = OrderedSet[str]()
+        self.used_cond_predicate = OrderedSet[str]()
         self.cached_output_id = count()
         self.scalar_to_tensor_id = count()
         self.custom_op_wrapper_loaded = False
@@ -257,11 +256,12 @@ class CppWrapperCpu(PythonWrapperCodegen):
 
     def codegen_input_symbol_assignment(
         self,
-        code: IndentedBuffer,
         name: str,
         value: ir.TensorBox,
-        bound_vars: Set[sympy.Symbol],
+        bound_vars: OrderedSet[sympy.Symbol],
     ):
+        code = self.prefix
+
         @functools.lru_cache(None)
         def sizeof(name):
             self.codegen_input_size_var_decl(code, name)
@@ -522,7 +522,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
                         f"[[maybe_unused]] auto {constants_key} = std::move(inputs[{constants_idx}]);"
                     )
 
-            self.codegen_inputs(self.prefix, V.graph.graph_inputs)
+            self.codegen_inputs()
 
             if V.graph.aot_mode:
                 if not V.graph.is_const_graph:
@@ -539,10 +539,10 @@ class CppWrapperCpu(PythonWrapperCodegen):
         )
 
     def codegen_input_size_var_decl(self, code: IndentedBuffer, name):
-        code.writeline(f"int64_t* {name}_size = {name}.sizes();")
+        code.writeline(f"auto {name}_size = {name}.sizes();")
 
     def codegen_input_stride_var_decl(self, code: IndentedBuffer, name):
-        code.writeline(f"int64_t* {name}_stride = {name}.strides();")
+        code.writeline(f"auto {name}_stride = {name}.strides();")
 
     def codegen_model_kernels(self):
         self.prefix.writeline("namespace {")
@@ -559,7 +559,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
             "class AOTInductorModelKernels : public AOTInductorModelKernelsBase {"
         )
         self.prefix.writeline("  public:")
-        declare_kernel = set(self.src_to_kernel.values()) - set(
+        declare_kernel = OrderedSet(self.src_to_kernel.values()) - OrderedSet(
             self.initialized_kernels.keys()
         )
         declare_kernel.update(
@@ -1261,10 +1261,6 @@ class CppWrapperCpu(PythonWrapperCodegen):
             'RECORD_FUNCTION("inductor_wrapper_call", c10::ArrayRef<c10::IValue>());'
         )
 
-    @cache_on_self
-    def write_triton_header_once(self) -> None:
-        pass
-
     def generate_start_graph(self):
         pass
 
@@ -1566,7 +1562,6 @@ class CppWrapperCpu(PythonWrapperCodegen):
         )
 
     def codegen_conditional(self, conditional):
-        name = conditional.get_name()
         outer_inputs = [f"{buf.codegen_reference()}" for buf in conditional.operands]
         outer_outputs = []
         for out in conditional.outputs:
@@ -1837,7 +1832,10 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 raise AssertionError(f"Unexpected output: {type(out)}")
 
         # output_args has the same pytree structure as outputs
-        if outputs is None:
+        if op_overload and not op_overload._schema.returns:
+            # kernel does not return a value
+            output_args = []
+        elif outputs is None:
             # outputs is not specified, the default is to write to buf_name
             output_args = [buf_name]
         else:
