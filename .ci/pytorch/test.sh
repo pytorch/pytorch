@@ -129,7 +129,7 @@ if [[ "$TEST_CONFIG" == 'default' ]]; then
 fi
 
 if [[ "$TEST_CONFIG" == 'distributed' ]] && [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
-  export HIP_VISIBLE_DEVICES=0,1
+  export HIP_VISIBLE_DEVICES=0,1,2,3
 fi
 
 if [[ "$TEST_CONFIG" == 'slow' ]]; then
