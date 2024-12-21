@@ -48,9 +48,9 @@ class ExportTests(torch._dynamo.test_case.TestCase):
             lc_key = state[0]
             lc_val = state[1]
             bar = []
-            for i in range(0, 4):
+            for _ in range(0, 4):
                 bar2 = []
-                for j in range(0, 3):
+                for _ in range(0, 3):
                     bar2.append(
                         lc_key + lc_val + torch.tensor([0.1, 0.25, 0.4, 0.5, 0.1])
                     )
@@ -73,7 +73,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
             )
             return pre_attention_state_ops(i, mems, state)
 
-        opt_func = torch._dynamo.optimize("eager", nopython=True, dynamic=True)(func)
+        opt_func = torch.compile(func, backend="eager", fullgraph=True, dynamic=True)
         real_result = opt_func()
 
         torch._dynamo.reset()
@@ -96,7 +96,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
             def func(x, y):
                 return x
 
-            exported = torch._dynamo.export(func, same_signature=False)(*inps)
+            torch._dynamo.export(func, same_signature=False)(*inps)
 
     def test_no_tensor_computation(self):
         inp = [torch.randn(3)]
@@ -106,7 +106,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         def func(x, y):
             return x
 
-        opt_func = torch._dynamo.optimize("eager", nopython=True, dynamic=True)(func)
+        opt_func = torch.compile(func, backend="eager", fullgraph=True, dynamic=True)
         real_result = opt_func(*inps)
 
         torch._dynamo.reset()
@@ -134,7 +134,7 @@ def forward(self, x, y):
         def func(x, y):
             return y
 
-        opt_func = torch._dynamo.optimize("eager", nopython=True, dynamic=True)(func)
+        opt_func = torch.compile(func, backend="eager", fullgraph=True, dynamic=True)
         real_result = opt_func(*inps)
 
         torch._dynamo.reset()
@@ -159,7 +159,7 @@ def forward(self, x, y):
             y = x + 1
             return ([x, x], (y, y))
 
-        opt_func = torch._dynamo.optimize("eager", nopython=True, dynamic=True)(func)
+        opt_func = torch.compile(func, backend="eager", fullgraph=True, dynamic=True)
         real_result = opt_func(torch.tensor([[[1.3737, 0.1]]]))
 
         torch._dynamo.reset()
@@ -177,7 +177,7 @@ def forward(self, x, y):
                 return x.cos()
             return x.sin()
 
-        opt_func = torch._dynamo.optimize("eager")(func)
+        opt_func = torch.compile(func, backend="eager")
         real_result = opt_func(torch.ones(6, 4))
 
         torch._dynamo.reset()
@@ -196,7 +196,7 @@ def forward(self, x, y):
                 hit = True
                 self.assertExpectedInline(
                     guard.code_list,
-                    """["L['x'].stride()[0] == L['x'].size()[1]", "L['x'].stride()[1] == 1", "L['x'].storage_offset() == 0", "2 <= L['x'].size()[0] <= 10", "2 <= L['x'].size()[1]"]""",  # noqa: B950
+                    """["L['x'].stride()[0] == L['x'].size()[1]", "L['x'].stride()[1] == 1", "L['x'].storage_offset() == 0", "2 <= L['x'].size()[0] and L['x'].size()[0] <= 10", "2 <= L['x'].size()[1]"]""",  # noqa: B950
                 )
                 break
 
@@ -236,7 +236,7 @@ def forward(self, x, y):
             second = x[2]
             return first * second
 
-        opt_func = torch._dynamo.optimize("eager", nopython=True, dynamic=True)(func)
+        opt_func = torch.compile(func, backend="eager", fullgraph=True, dynamic=True)
         real_result = opt_func(inp)
 
         torch._dynamo.reset()
@@ -260,7 +260,7 @@ def forward(self, x, y):
             second = x[2]
             return x[0], first * second, x[1], x[2]
 
-        opt_func = torch._dynamo.optimize("eager", nopython=True, dynamic=True)(func)
+        opt_func = torch.compile(func, backend="eager", fullgraph=True, dynamic=True)
         real_result = opt_func(inp)
 
         torch._dynamo.reset()
@@ -304,7 +304,7 @@ def forward(self, x, y):
             y = x + 1
             return ([x, x], (y, y))
 
-        opt_func = torch._dynamo.optimize("eager", nopython=True, dynamic=True)(func)
+        opt_func = torch.compile(func, backend="eager", fullgraph=True, dynamic=True)
         real_result = opt_func(torch.tensor([[[1.3737, 0.1]]]))
 
         torch._dynamo.reset()
@@ -329,7 +329,7 @@ def forward(self, x, y):
             second = x[2]
             return first * second, x
 
-        opt_func = torch._dynamo.optimize("eager", nopython=True, dynamic=True)(func)
+        opt_func = torch.compile(func, backend="eager", fullgraph=True, dynamic=True)
         real_result = opt_func(inp)
 
         torch._dynamo.reset()
@@ -355,7 +355,7 @@ def forward(self, x, y):
             third = x[2]
             return third, first, second, first * second, first * third
 
-        opt_func = torch._dynamo.optimize("eager", nopython=True, dynamic=True)(func)
+        opt_func = torch.compile(func, backend="eager", fullgraph=True, dynamic=True)
         real_result = opt_func(inp)
 
         torch._dynamo.reset()
@@ -374,7 +374,7 @@ def forward(self, x, y):
             y = x + 1
             return y, y
 
-        opt_func = torch._dynamo.optimize("eager", nopython=True, dynamic=True)(func)
+        opt_func = torch.compile(func, backend="eager", fullgraph=True, dynamic=True)
         real_result = opt_func(inp)
 
         torch._dynamo.reset()
@@ -393,7 +393,7 @@ def forward(self, x, y):
             y = x + 1
             return y, y
 
-        opt_func = torch._dynamo.optimize("eager", nopython=True, dynamic=True)(func)
+        opt_func = torch.compile(func, backend="eager", fullgraph=True, dynamic=True)
         real_result = opt_func(inp)
 
         torch._dynamo.reset()
@@ -414,7 +414,7 @@ def forward(self, x, y):
             y = x + 1
             return y, y, z
 
-        opt_func = torch._dynamo.optimize("eager", nopython=True, dynamic=True)(func)
+        opt_func = torch.compile(func, backend="eager", fullgraph=True, dynamic=True)
         real_result = opt_func(*inps)
 
         torch._dynamo.reset()
@@ -436,7 +436,7 @@ def forward(self, x, y):
             y = x + k
             return y, y, z
 
-        opt_func = torch._dynamo.optimize("eager", nopython=True, dynamic=True)(func)
+        opt_func = torch.compile(func, backend="eager", fullgraph=True, dynamic=True)
         real_result = opt_func(*inps)
 
         torch._dynamo.reset()
@@ -458,7 +458,7 @@ def forward(self, x, y):
             y = x + k
             return z, y, y
 
-        opt_func = torch._dynamo.optimize("eager", nopython=True, dynamic=True)(func)
+        opt_func = torch.compile(func, backend="eager", fullgraph=True, dynamic=True)
         real_result = opt_func(*inps)
 
         torch._dynamo.reset()
@@ -481,7 +481,7 @@ def forward(self, x, y):
             y = x + k
             return y[0].item(), y, z
 
-        opt_func = torch._dynamo.optimize("eager", nopython=True, dynamic=True)(func)
+        opt_func = torch.compile(func, backend="eager", fullgraph=True, dynamic=True)
         real_result = opt_func(*inps)
 
         torch._dynamo.reset()
@@ -504,7 +504,7 @@ def forward(self, x, y):
         def func(a, b, c):
             return [[a], [b, c], [a + b], [[c + c]]]
 
-        opt_func = torch._dynamo.optimize("eager", nopython=True, dynamic=True)(func)
+        opt_func = torch.compile(func, backend="eager", fullgraph=True, dynamic=True)
         real_result = opt_func(*inps_rand)
 
         torch._dynamo.reset()
@@ -528,7 +528,7 @@ def forward(self, x, y):
         def func(a, b, c):
             return a[0].item() + b[0].item() + c[0].item()
 
-        opt_func = torch._dynamo.optimize("eager", nopython=True, dynamic=True)(func)
+        opt_func = torch.compile(func, backend="eager", fullgraph=True, dynamic=True)
         real_result = opt_func(*inps_rand)
 
         torch._dynamo.reset()
@@ -552,7 +552,7 @@ def forward(self, x, y):
         def func(a, b, c):
             return b[0].item() + c[0].item() + a[0].item() + a[0].item()
 
-        opt_func = torch._dynamo.optimize("eager", nopython=True, dynamic=True)(func)
+        opt_func = torch.compile(func, backend="eager", fullgraph=True, dynamic=True)
         real_result = opt_func(*inps_rand)
 
         torch._dynamo.reset()
@@ -576,7 +576,7 @@ def forward(self, x, y):
         def func(a, b, c):
             return a, b[0].item() + c[0].item() + a[0].item() + a[0].item(), a
 
-        opt_func = torch._dynamo.optimize("eager", nopython=True, dynamic=True)(func)
+        opt_func = torch.compile(func, backend="eager", fullgraph=True, dynamic=True)
         real_result = opt_func(*inps_rand)
 
         torch._dynamo.reset()
@@ -604,7 +604,7 @@ def forward(self, x, y):
 
             return func2(x)
 
-        opt_func = torch._dynamo.optimize("eager", nopython=True, dynamic=True)(func)
+        opt_func = torch.compile(func, backend="eager", fullgraph=True, dynamic=True)
         real_result = opt_func(*inps_rand)
 
         torch._dynamo.reset()
@@ -628,7 +628,7 @@ def forward(self, x, y):
             x = a + b + c
             return {"a": x}
 
-        opt_func = torch._dynamo.optimize("eager", nopython=True, dynamic=True)(func)
+        opt_func = torch.compile(func, backend="eager", fullgraph=True, dynamic=True)
         real_result = opt_func(*inps_rand)
 
         torch._dynamo.reset()
@@ -645,9 +645,9 @@ def forward(self, x, y):
             lc_key = state[0]
             lc_val = state[1]
             bar = []
-            for i in range(0, 4):
+            for _ in range(0, 4):
                 bar2 = []
-                for j in range(0, 3):
+                for _ in range(0, 3):
                     bar2.append(
                         lc_key + lc_val + torch.tensor([0.1, 0.25, 0.4, 0.5, 0.1])
                     )
@@ -670,7 +670,7 @@ def forward(self, x, y):
             )
             return pre_attention_state_ops(i, mems, state)
 
-        opt_func = torch._dynamo.optimize("eager", nopython=True, dynamic=True)(func)
+        opt_func = torch.compile(func, backend="eager", fullgraph=True, dynamic=True)
         real_result = opt_func()
 
         torch._dynamo.reset()
@@ -689,7 +689,7 @@ def forward(self, x, y):
         def func(x, y):
             return x
 
-        opt_func = torch._dynamo.optimize("eager", nopython=True, dynamic=True)(func)
+        opt_func = torch.compile(func, backend="eager", fullgraph=True, dynamic=True)
         real_result = opt_func(*inps)
 
         torch._dynamo.reset()
@@ -717,7 +717,7 @@ def forward(self, x, y):
         def func(x, y):
             return y
 
-        opt_func = torch._dynamo.optimize("eager", nopython=True, dynamic=True)(func)
+        opt_func = torch.compile(func, backend="eager", fullgraph=True, dynamic=True)
         real_result = opt_func(*inps)
 
         torch._dynamo.reset()
@@ -742,7 +742,7 @@ def forward(self, x, y):
             y = x + 1
             return ([x, x], (y, y))
 
-        opt_func = torch._dynamo.optimize("eager", nopython=True, dynamic=True)(func)
+        opt_func = torch.compile(func, backend="eager", fullgraph=True, dynamic=True)
         real_result = opt_func(torch.tensor([[[1.3737, 0.1]]]))
 
         torch._dynamo.reset()
@@ -768,7 +768,7 @@ def forward(self, x, y):
             second = x[2]
             return first * second
 
-        opt_func = torch._dynamo.optimize("eager", nopython=True, dynamic=True)(func)
+        opt_func = torch.compile(func, backend="eager", fullgraph=True, dynamic=True)
         real_result = opt_func(inp)
 
         torch._dynamo.reset()
@@ -792,7 +792,7 @@ def forward(self, x, y):
             second = x[2]
             return x[0], first * second, x[1], x[2]
 
-        opt_func = torch._dynamo.optimize("eager", nopython=True, dynamic=True)(func)
+        opt_func = torch.compile(func, backend="eager", fullgraph=True, dynamic=True)
         real_result = opt_func(inp)
 
         torch._dynamo.reset()
@@ -809,7 +809,7 @@ def forward(self, x, y):
             y = x + 1
             return ([x, x], (y, y))
 
-        opt_func = torch._dynamo.optimize("eager", nopython=True, dynamic=True)(func)
+        opt_func = torch.compile(func, backend="eager", fullgraph=True, dynamic=True)
         real_result = opt_func(torch.tensor([[[1.3737, 0.1]]]))
 
         torch._dynamo.reset()
@@ -836,7 +836,7 @@ def forward(self, x, y):
             second = x[2]
             return first * second, x
 
-        opt_func = torch._dynamo.optimize("eager", nopython=True, dynamic=True)(func)
+        opt_func = torch.compile(func, backend="eager", fullgraph=True, dynamic=True)
         real_result = opt_func(inp)
 
         torch._dynamo.reset()
@@ -862,7 +862,7 @@ def forward(self, x, y):
             third = x[2]
             return third, first, second, first * second, first * third
 
-        opt_func = torch._dynamo.optimize("eager", nopython=True, dynamic=True)(func)
+        opt_func = torch.compile(func, backend="eager", fullgraph=True, dynamic=True)
         real_result = opt_func(inp)
 
         torch._dynamo.reset()
@@ -881,7 +881,7 @@ def forward(self, x, y):
             y = x + 1
             return y, y
 
-        opt_func = torch._dynamo.optimize("eager", nopython=True, dynamic=True)(func)
+        opt_func = torch.compile(func, backend="eager", fullgraph=True, dynamic=True)
         real_result = opt_func(inp)
 
         torch._dynamo.reset()
@@ -900,7 +900,7 @@ def forward(self, x, y):
             y = x + 1
             return y, y
 
-        opt_func = torch._dynamo.optimize("eager", nopython=True, dynamic=True)(func)
+        opt_func = torch.compile(func, backend="eager", fullgraph=True, dynamic=True)
         real_result = opt_func(inp)
 
         torch._dynamo.reset()
@@ -921,7 +921,7 @@ def forward(self, x, y):
             y = x + 1
             return y, y, z
 
-        opt_func = torch._dynamo.optimize("eager", nopython=True, dynamic=True)(func)
+        opt_func = torch.compile(func, backend="eager", fullgraph=True, dynamic=True)
         real_result = opt_func(*inps)
 
         torch._dynamo.reset()
@@ -943,7 +943,7 @@ def forward(self, x, y):
             y = x + k
             return y, y, z
 
-        opt_func = torch._dynamo.optimize("eager", nopython=True, dynamic=True)(func)
+        opt_func = torch.compile(func, backend="eager", fullgraph=True, dynamic=True)
         real_result = opt_func(*inps)
 
         torch._dynamo.reset()
@@ -965,7 +965,7 @@ def forward(self, x, y):
             y = x + k
             return z, y, y
 
-        opt_func = torch._dynamo.optimize("eager", nopython=True, dynamic=True)(func)
+        opt_func = torch.compile(func, backend="eager", fullgraph=True, dynamic=True)
         real_result = opt_func(*inps)
 
         torch._dynamo.reset()
@@ -988,7 +988,7 @@ def forward(self, x, y):
             y = x + k
             return y[0].item(), y, z
 
-        opt_func = torch._dynamo.optimize("eager", nopython=True, dynamic=True)(func)
+        opt_func = torch.compile(func, backend="eager", fullgraph=True, dynamic=True)
         real_result = opt_func(*inps)
 
         torch._dynamo.reset()
@@ -1011,7 +1011,7 @@ def forward(self, x, y):
         def func(a, b, c):
             return [[a], [b, c], [a + b], [[c + c]]]
 
-        opt_func = torch._dynamo.optimize("eager", nopython=True, dynamic=True)(func)
+        opt_func = torch.compile(func, backend="eager", fullgraph=True, dynamic=True)
         real_result = opt_func(*inps_rand)
 
         torch._dynamo.reset()
@@ -1039,7 +1039,7 @@ def forward(self, x, y):
 
             return func2(x)
 
-        opt_func = torch._dynamo.optimize("eager", nopython=True, dynamic=True)(func)
+        opt_func = torch.compile(func, backend="eager", fullgraph=True, dynamic=True)
         real_result = opt_func(*inps_rand)
 
         torch._dynamo.reset()
@@ -1063,7 +1063,7 @@ def forward(self, x, y):
             x = a + b + c
             return {"a": x}
 
-        opt_func = torch._dynamo.optimize("eager", nopython=True, dynamic=True)(func)
+        opt_func = torch.compile(func, backend="eager", fullgraph=True, dynamic=True)
         real_result = opt_func(*inps_rand)
 
         torch._dynamo.reset()
@@ -1182,7 +1182,7 @@ def forward(self, x, y):
 
             return fw
 
-        opt_func = torch._dynamo.optimize(compiler, nopython=True, dynamic=True)(func)
+        opt_func = torch.compile(func, backend=compiler, fullgraph=True, dynamic=True)
         make_fx_result_through_backend = opt_func(inp)
 
         fx_g = make_fx(func)(inp)
@@ -1394,7 +1394,7 @@ def forward(self, x, y):
 
         module = MyModule()
         real_result = module(torch.tensor([1.0, 1.0]))
-        graph, guards = torch._dynamo.export(module)(torch.tensor([1.0, 1.0]))
+        graph, _ = torch._dynamo.export(module)(torch.tensor([1.0, 1.0]))
 
         # Tensor input can be almost anything here, and the result will capture what we
         # made constant at compile time.
@@ -1418,7 +1418,7 @@ def forward(self, x, y):
 
         module = MyModule()
         real_result = module(torch.tensor([1.0, 1.0]))
-        graph, guards = torch._dynamo.export(module)(torch.tensor([1.0, 1.0]))
+        graph, _ = torch._dynamo.export(module)(torch.tensor([1.0, 1.0]))
 
         # Tensor input can be almost anything here, and the result will capture what we
         # made constant at compile time.
@@ -1442,7 +1442,7 @@ def forward(self, x, y):
 
         module = MyModule()
         real_result = module(torch.tensor([1.0, 1.0]))
-        graph, guards = torch._dynamo.export(module)(torch.tensor([1.0, 1.0]))
+        graph, _ = torch._dynamo.export(module)(torch.tensor([1.0, 1.0]))
 
         # Tensor input can be almost anything here, and the result will capture what we
         # made constant at compile time.
@@ -1464,7 +1464,7 @@ def forward(self, x, y):
 
         module = MyModule()
         real_result = module(torch.tensor([2.0, 2.0]))
-        graph, guards = torch._dynamo.export(module)(torch.tensor([2.0, 2.0]))
+        graph, _ = torch._dynamo.export(module)(torch.tensor([2.0, 2.0]))
 
         # Tensor input can be almost anything here, and the result will capture what we
         # made constant at compile time.
@@ -1493,7 +1493,7 @@ def forward(self, x, y):
         # X is negative, so .item() < 0, which means we return y
         self.assertEqual(real_result, torch.tensor([0.5]))
 
-        graph, guards = torch._dynamo.export(module)(torch.tensor([-1]))
+        graph, _ = torch._dynamo.export(module)(torch.tensor([-1]))
         result = graph(torch.tensor([2]))
         # X is positive, but we compiled helper_fn to return None, so it will still return y
         self.assertTrue(torch._dynamo.utils.same(result, real_result))
@@ -1520,7 +1520,7 @@ def forward(self, x, y):
         # X is positive, so .item() > 0, which means we return y * x
         self.assertEqual(real_result, torch.tensor([1.0]))
 
-        graph, guards = torch._dynamo.export(module)(torch.tensor([2]))
+        graph, _ = torch._dynamo.export(module)(torch.tensor([2]))
         result = graph(torch.tensor([-0.5]))
         # X is negative, but we compiled helper_fn to return x, so it will still return y * x
         self.assertTrue(torch._dynamo.utils.same(result, real_result))
@@ -1547,7 +1547,7 @@ def forward(self, x, y):
         # X is negative, so .item() < 0, which means we return y
         self.assertEqual(real_result, torch.tensor([0.5]))
 
-        graph, guards = torch._dynamo.export(module)(torch.tensor([-1]))
+        graph, _ = torch._dynamo.export(module)(torch.tensor([-1]))
         result = graph(torch.tensor([2]))
         # X is positive, but we compiled helper_fn to return None, so it will still return y
         self.assertTrue(torch._dynamo.utils.same(result, real_result))
@@ -1574,7 +1574,7 @@ def forward(self, x, y):
         # X is positive, so .item() > 0, which means we return y * x
         self.assertEqual(real_result, torch.tensor([1.0]))
 
-        graph, guards = torch._dynamo.export(module)(torch.tensor([2]))
+        graph, _ = torch._dynamo.export(module)(torch.tensor([2]))
         result = graph(torch.tensor([-0.5]))
         # X is negative, but we compiled helper_fn to return x, so it will still return y * x
         self.assertTrue(torch._dynamo.utils.same(result, real_result))
@@ -1601,7 +1601,7 @@ def forward(self, x, y):
         # X is positive, so .item() > 0, which means we return y * x
         self.assertEqual(real_result, torch.tensor([1.0]))
 
-        graph, guards = torch._dynamo.export(module)(torch.tensor([2]))
+        graph, _ = torch._dynamo.export(module)(torch.tensor([2]))
         result = graph(torch.tensor([-0.5]))
         # X is negative, but we compiled helper_fn to return x, so it will still return y * x
         self.assertTrue(torch._dynamo.utils.same(result, real_result))
@@ -1622,7 +1622,7 @@ def forward(self, x, y):
         module = MyModule()
         module.val = "A"
         resA = module(torch.tensor([2]))
-        graph, guards = torch._dynamo.export(module)(torch.tensor([2]))
+        graph, _ = torch._dynamo.export(module)(torch.tensor([2]))
         module.val = "B"
         resB = graph(torch.tensor([2]))
         self.assertTrue(torch._dynamo.utils.same(resA, resB))
@@ -1647,7 +1647,7 @@ def forward(self, x, y):
 
         model = Bob(0.5, 0.3)
         inp = torch.ones(3, 4)
-        graph, guards = torch._dynamo.export(model)(inp)
+        graph, _ = torch._dynamo.export(model)(inp)
         self.assertEqual(model(inp), graph(inp))
 
     def test_export_with_constant_in_unspecialized_nn_module(self):
@@ -1707,7 +1707,7 @@ def forward(self, x, y):
             return x.cos()
 
         with self.assertRaises(AssertionError):
-            graph, _ = torch._dynamo.export(
+            torch._dynamo.export(
                 f,
                 (torch.randn(5)),
                 aten_graph=False,
@@ -1889,7 +1889,7 @@ def forward(self, x, y):
         mods = [Module(), Module2()]
         for mod in mods:
             x = torch.randn(2, 2)
-            out_graph, guards = torch._dynamo.export(mod)(x)
+            out_graph, _ = torch._dynamo.export(mod)(x)
             self.assertExpectedInline(
                 out_graph.code.strip(),
                 """\
@@ -1978,7 +1978,7 @@ def forward(self, l_x_):
             torch._dynamo.exc.Unsupported,
             "zero-sized tensor",
         ):
-            out_graph, _ = torch._dynamo.export(mod)(xs)
+            torch._dynamo.export(mod)(xs)
 
     def test_export_meta_val(self):
         def f(x, y, z):
@@ -2785,7 +2785,7 @@ def forward(self, x):
             return b
 
         y = torch.tensor([8, 8, 6])
-        gm, _ = torch._dynamo.export(
+        torch._dynamo.export(
             f,
             aten_graph=True,
             tracing_mode="symbolic",
@@ -2939,7 +2939,7 @@ def forward(self, x):
             return x + x
 
         inps = (torch.randn(1, 5),)
-        opt_func = torch._dynamo.optimize("eager", nopython=True, dynamic=True)(func)
+        opt_func = torch.compile(func, backend="eager", fullgraph=True, dynamic=True)
         real_result = opt_func(*inps)
 
         torch._dynamo.reset()
@@ -2958,7 +2958,7 @@ def forward(self, x):
             return x + x
 
         inps = (torch.randn(1, 5),)
-        opt_func = torch._dynamo.optimize("eager", nopython=True, dynamic=True)(func)
+        opt_func = torch.compile(func, backend="eager", fullgraph=True, dynamic=True)
         real_result = opt_func(*inps)
 
         torch._dynamo.reset()
@@ -3039,7 +3039,7 @@ def forward(self, x):
                 return self.my_lin(x)
 
         mod, input_tensor = BasicModule(), torch.randn(2, 3)
-        gm, guard = torch._dynamo.export(mod, aten_graph=True)(input_tensor)
+        gm, _ = torch._dynamo.export(mod, aten_graph=True)(input_tensor)
         ref = mod(x=input_tensor)
         res = gm(x=input_tensor)
         self.assertTrue(torch._dynamo.utils.same(ref, res))
@@ -3058,9 +3058,7 @@ def forward(self, x):
             torch.randn(2, 3),
             torch.randn(2, 3),
         )
-        gm, guard = torch._dynamo.export(mod, aten_graph=True)(
-            input_tensor, input_tensor2
-        )
+        gm, _ = torch._dynamo.export(mod, aten_graph=True)(input_tensor, input_tensor2)
         ref = mod(input_tensor, input_tensor2)
         res = gm(input_tensor, input_tensor2)
         self.assertTrue(torch._dynamo.utils.same(ref, res))
@@ -3086,7 +3084,7 @@ def forward(self, x):
             torch._dynamo.exc.UserError,
             "Dynamic control flow is not supported at the moment",
         ):
-            gm, _ = torch._dynamo.export(f, aten_graph=True)(torch.randn(5, 6))
+            torch._dynamo.export(f, aten_graph=True)(torch.randn(5, 6))
 
     @config.patch(assume_static_by_default=False)
     def test_export_persist_assert(self):
@@ -3094,7 +3092,7 @@ def forward(self, x):
             assert x[0].sum() > 4, "Shape must be more than 4"
             return x.cos() + x.sin()
 
-        gm, guard = torch._dynamo.export(f, aten_graph=True, tracing_mode="symbolic")(
+        gm, _ = torch._dynamo.export(f, aten_graph=True, tracing_mode="symbolic")(
             torch.ones(5, 4, 6)
         )
 
@@ -3264,10 +3262,11 @@ def forward(self, x):
         def f(x):
             return cond(x.shape[0] > 10, true_fn, false_fn)
 
+        # Now we allow torch.cond to handle empty args
         example_inputs = (torch.rand(5),)
         with self.assertRaisesRegex(
             TypeError,
-            r"cond\(\) missing 1 required positional argument: 'operands'",
+            r"false_fn\(\) missing 1 required positional argument: 'x'",
         ):
             f(*example_inputs)
 
@@ -3434,7 +3433,7 @@ def forward(self, x):
             return tensor + tensor
 
         text = "".join(chr(a % 90 + 40) for a in range(111))
-        opt_func = torch._dynamo.optimize("eager", dynamic=True)(func)
+        opt_func = torch.compile(func, backend="eager", dynamic=True)
         for i in [99, 100]:
             input = text[:i]
             opt_func(input)
@@ -3569,7 +3568,7 @@ class GraphModule(torch.nn.Module):
             "cast_symbool_to_symint_guardless(L['pred']) == 1",
         ]
         false_guard_code = [
-            "Ne(cast_symbool_to_symint_guardless(L['pred']), 1)",
+            "cast_symbool_to_symint_guardless(L['pred']) != 1",
         ]
         test_symbool_guards(
             f,
@@ -3641,7 +3640,7 @@ G['macademia'], accessed at:
         arglebargle = torch.randn(3)
 
         def f(y):
-            x = arglebargle
+            x = arglebargle  # noqa: F841
             return y
 
         torch._dynamo.export(f)(torch.randn(3))
@@ -3700,7 +3699,7 @@ G['macademia'], accessed at:
             inputs = (torch.randn(10, 2, 2),)
             dynamic_shapes = ({0: torch.export.Dim("dim")},)
             for aten_graph in [True, False]:
-                gm = torch._dynamo.export(
+                torch._dynamo.export(
                     model,
                     dynamic_shapes=dynamic_shapes,
                     aten_graph=aten_graph,
@@ -4127,7 +4126,7 @@ def forward(self, a, b, l_x_, d_true_branch, c_false_branch):
         with self.assertRaises(
             torch._dynamo.exc.Unsupported,
         ):
-            out_graph, _ = torch._dynamo.export(mod, xs)
+            torch._dynamo.export(mod, xs)
 
     def test_param_buffer_safe_from_mutation_simple(self):
         class Module(torch.nn.Module):
@@ -4169,7 +4168,7 @@ def forward(self, a, b, l_x_, d_true_branch, c_false_branch):
                 return x.sum() + self.buffer1.sum() + self.child(x)
 
         gm, _ = torch._dynamo.export(Module(), torch.ones(5), aten_graph=False)
-        for name, buffer in gm.named_buffers():
+        for _, buffer in gm.named_buffers():
             self.assertTrue(torch.allclose(buffer, torch.zeros(5)))
 
     def test_predispatch_with_higher_order(self):
@@ -4377,7 +4376,7 @@ def forward(self, x):
 
         gm, _ = torch._dynamo.export(fn)(torch.randn(3, 3))
         do_export = torch._dynamo.export(gm)
-        torch._dynamo.optimize("eager")(fn)(torch.randn(3, 3))
+        torch.compile(fn, backend="eager")(torch.randn(3, 3))
         gm1, _ = do_export(torch.randn(3, 3))
         gm2, _ = do_export(torch.randn(5, 3))
 
@@ -4604,6 +4603,38 @@ def forward(self, x, b, y):
         graph, _ = torch._dynamo.export(fn)(tensor)
         out = graph(tensor)
         self.assertEqual(out, tensor[:, 0])
+
+    def test_subclass_parameters(self):
+        from torch.testing._internal.two_tensor import TwoTensor
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.p1 = torch.nn.Parameter(torch.ones(3, 4))
+                self.p2 = torch.nn.Parameter(
+                    TwoTensor(torch.zeros(3, 4), torch.zeros(3, 4))
+                )
+
+            def forward(self, x):
+                return x + 2 * self.p1 + self.p2
+
+        m = M()
+        ref_x = torch.randn(3, 4)
+        ref_out = m(ref_x)
+
+        from torch._functorch._aot_autograd.subclass_parametrization import (
+            unwrap_tensor_subclass_parameters,
+        )
+
+        unwrap_tensor_subclass_parameters(m)
+        ref_x2 = ref_x.detach().clone()
+        ref_out2 = m(ref_x2)
+        self.assertEqual(ref_out2, ref_out)
+
+        x = ref_x.detach().clone()
+        graph, _ = torch._dynamo.export(m)(x)
+        out = graph(x)
+        self.assertEqual(ref_out, out)
 
 
 common_utils.instantiate_parametrized_tests(ExportTests)

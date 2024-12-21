@@ -101,7 +101,7 @@ cdll.LoadLibrary("__lib_path__")
             "cpp",
             extra=_get_isa_dry_compile_fingerprint(self._arch_flags),
         )
-        from filelock import FileLock
+        from torch.utils._filelock import FileLock
 
         lock_dir = get_lock_dir()
         lock = FileLock(os.path.join(lock_dir, key + ".lock"), timeout=LOCK_TIMEOUT)
@@ -120,7 +120,7 @@ cdll.LoadLibrary("__lib_path__")
                     x86_isa_help_builder.get_target_file_path()
                 )
                 if not os.path.isfile(output_path):
-                    status, target_file = x86_isa_help_builder.build()
+                    x86_isa_help_builder.build()
 
                 # Check build result
                 subprocess.check_call(
@@ -133,15 +133,18 @@ cdll.LoadLibrary("__lib_path__")
                     stderr=subprocess.DEVNULL,
                     env={**os.environ, "PYTHONPATH": ":".join(sys.path)},
                 )
-            except Exception as e:
+            except Exception:
                 return False
 
             return True
 
-    @functools.lru_cache(None)  # noqa: B019
     def __bool__(self) -> bool:
-        if config.cpp.vec_isa_ok is not None:
-            return config.cpp.vec_isa_ok
+        return self.__bool__impl(config.cpp.vec_isa_ok)
+
+    @functools.lru_cache(None)  # noqa: B019
+    def __bool__impl(self, vec_isa_ok) -> bool:
+        if vec_isa_ok is not None:
+            return vec_isa_ok
 
         if config.is_fbcode():
             return True
@@ -151,10 +154,10 @@ cdll.LoadLibrary("__lib_path__")
 
 @dataclasses.dataclass
 class VecNEON(VecISA):
-    _bit_width = 256  # This is required to leverage the compute implemented in aten/src/ATen/cpu/vec/vec256/vec256_float_neon.h
+    _bit_width = 128  # This is required to leverage the compute implemented in aten/src/ATen/cpu/vec/vec128/vec128_float_neon.h
     _macro = ["CPU_CAPABILITY_NEON", "AT_BUILD_ARM_VEC256_WITH_SLEEF"]
     _arch_flags = ""  # Unused
-    _dtype_nelements = {torch.float: 8, torch.bfloat16: 16, torch.float16: 16}
+    _dtype_nelements = {torch.float: 4, torch.bfloat16: 8, torch.float16: 8}
 
     def __str__(self) -> str:
         return "asimd"  # detects the presence of advanced SIMD on armv8-a kernels
@@ -395,9 +398,11 @@ def valid_vec_isa_list() -> List[VecISA]:
         arch value is x86_64 on Linux, and the value is AMD64 on Windows.
         """
         _cpu_supported_x86_isa = x86_isa_checker()
-        for isa in supported_vec_isa_list:
-            if all(flag in _cpu_supported_x86_isa for flag in str(isa).split()) and isa:
-                isa_list.append(isa)
+        isa_list.extend(
+            isa
+            for isa in supported_vec_isa_list
+            if all(flag in _cpu_supported_x86_isa for flag in str(isa).split()) and isa
+        )
 
     return isa_list
 

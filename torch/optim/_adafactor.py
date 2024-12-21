@@ -505,7 +505,7 @@ def _multi_tensor_adafactor(
         # If steps are on CPU, foreach will fall back to the slow path, which is a for-loop calling t.add(1) over
         # and over. 1 will then be wrapped into a Tensor over and over again, which is slower than if we just
         # wrapped it once now. The alpha is required to assure we go to the right overload.
-        if not torch._utils.is_compiling() and device_state_steps[0].is_cpu:
+        if not torch.compiler.is_compiling() and device_state_steps[0].is_cpu:
             torch._foreach_add_(
                 device_state_steps, torch.tensor(1.0, device="cpu"), alpha=1.0
             )
@@ -541,9 +541,7 @@ def _multi_tensor_adafactor(
             ]
             torch._foreach_mul_(row_means, row_means)
             torch._foreach_div_(row_means, [grad.size(-1) for grad in device_grads])
-            torch._foreach_mul_(device_row_vars, beta2_ts)
-            torch._foreach_mul_(row_means, one_minus_beta2_ts)
-            torch._foreach_add_(device_row_vars, row_means)
+            torch._foreach_lerp_(device_row_vars, row_means, one_minus_beta2_ts)
             del row_means
 
             # same as (g * g).mean(dim=-2) w/o materializing an intermediate size g
@@ -552,9 +550,7 @@ def _multi_tensor_adafactor(
             ]
             torch._foreach_mul_(col_means, col_means)
             torch._foreach_div_(col_means, [grad.size(-2) for grad in device_grads])
-            torch._foreach_mul_(device_col_vars, beta2_ts)
-            torch._foreach_mul_(col_means, one_minus_beta2_ts)
-            torch._foreach_add_(device_col_vars, col_means)
+            torch._foreach_lerp_(device_col_vars, col_means, one_minus_beta2_ts)
             del col_means
 
             var_estimates = [
@@ -574,9 +570,7 @@ def _multi_tensor_adafactor(
             ), "variance should be defined when grad is a vector"
 
             grads_squared = torch._foreach_mul(device_grads, device_grads)
-            torch._foreach_mul_(device_variances, beta2_ts)
-            torch._foreach_mul_(grads_squared, one_minus_beta2_ts)
-            torch._foreach_add_(device_variances, grads_squared)
+            torch._foreach_lerp_(device_variances, grads_squared, one_minus_beta2_ts)
             del grads_squared
 
             # avoid writing into variance during update
@@ -584,8 +578,7 @@ def _multi_tensor_adafactor(
 
         # square the eps1 as we sqrt after to keep eps1's magnitude
         torch._foreach_clamp_min_(var_estimates, eps1 * eps1)
-        torch._foreach_sqrt_(var_estimates)
-        torch._foreach_reciprocal_(var_estimates)
+        torch._foreach_rsqrt_(var_estimates)
         torch._foreach_mul_(var_estimates, device_grads)
         updates = var_estimates
 
@@ -624,7 +617,7 @@ def adafactor(
 
     See :class:`~torch.optim.Adafactor` for details.
     """
-    if not torch._utils.is_compiling() and not all(
+    if not torch.compiler.is_compiling() and not all(
         isinstance(t, torch.Tensor) for t in state_steps
     ):
         raise RuntimeError(
