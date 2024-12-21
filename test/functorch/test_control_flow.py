@@ -5861,7 +5861,7 @@ def forward(self, arg0_1, arg1_1):
 
         inp = torch.ones(3, 4)
         exp_out = inp.sin()
-        iter_n = torch._dynamo.config.cache_size_limit + 1
+        iter_n = torch._dynamo.config.recompile_limit + 1
 
         # Need functions that cause recompilations
         def get_dummy_fns(str):
