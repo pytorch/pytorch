@@ -21,7 +21,7 @@ import warnings
 import weakref
 from contextlib import contextmanager
 from copy import deepcopy
-from inspect import currentframe, getframeinfo
+from inspect import currentframe
 from typing import (
     Any,
     Callable,
@@ -39,14 +39,15 @@ from weakref import ReferenceType
 import torch
 import torch.overrides
 import torch.utils._device
+from torch._C._dynamo.eval_frame import code_framelocals_names
 from torch._C._dynamo.guards import (
     check_obj_id,
     check_type_id,
     dict_version,
     DictGuardManager,
-    GuardManager,
     install_no_tensor_aliasing_guard,
     install_object_aliasing_guard,
+    install_storage_overlapping_guard,
     profile_guard_manager,
     RootGuardManager,
 )
@@ -66,6 +67,7 @@ from torch._guards import (
     GuardEnvExpr,
     GuardSource,
     Source,
+    StorageOverlap,
 )
 from torch._logging import structured
 from torch._utils_internal import justknobs_check
@@ -83,7 +85,6 @@ from .eval_frame import set_guard_error_hook
 from .source import (
     AttrProxySource,
     AttrSource,
-    AutoDerefLocalSource,
     CallFunctionNoArgsSource,
     ChainedSource,
     ConstDictKeySource,
@@ -121,6 +122,7 @@ from .types import (  # noqa: F401
 )
 from .utils import (
     common_constant_types,
+    dict_keys,
     dict_keys_repr,
     get_custom_getattr,
     get_torch_function_mode_stack,
@@ -129,6 +131,7 @@ from .utils import (
     istype,
     key_is_id,
     key_to_id,
+    normalize_range_iter,
     orig_code_map,
     tensor_always_has_static_shape,
     tuple_iterator_getitem,
@@ -421,6 +424,7 @@ def _get_closure_vars():
             "___dict_version": dict_version,
             "___dict_contains": lambda a, b: a in b,
             "___tuple_iterator_len": tuple_iterator_len,
+            "___normalize_range_iter": normalize_range_iter,
             "___tuple_iterator_getitem": tuple_iterator_getitem,
             "___get_torch_function_mode_stack_at": get_torch_function_mode_stack_at,
             "__math_isnan": math.isnan,
@@ -437,25 +441,8 @@ def _get_closure_vars():
     return _CLOSURE_VARS
 
 
-if sys.version_info[:2] <= (3, 8):
-    # [Note: Python Version <= 3.8]
-    # This branch should be dropped when we drop support for Python 3.8.
-    # Reason: 'ast.unparse' function was introduced in Python 3.9.
-
-    try:
-        import astunparse  # type: ignore[import]
-
-        def _ast_unparse(node: ast.AST) -> str:
-            return astunparse.unparse(node).replace("\n", "")
-
-        HAS_UNPARSE_FUNCTIONS = True
-    except ImportError:
-        HAS_UNPARSE_FUNCTIONS = False
-else:
-    HAS_UNPARSE_FUNCTIONS = True
-
-    def _ast_unparse(node: ast.AST) -> str:
-        return ast.unparse(node).replace("\n", "")
+def _ast_unparse(node: ast.AST) -> str:
+    return ast.unparse(node).replace("\n", "")
 
 
 def strip_function_call(name):
@@ -491,14 +478,14 @@ def strip_getattr_getitem(name):
 
 def get_verbose_code_part(code_part: str, guard: Guard) -> str:
     extra = ""
-    if guard.user_stack:
-        for fs in reversed(guard.user_stack):
-            if fs.filename not in uninteresting_files():
-                extra = f"  # {format_frame(fs, line=True)}"
-                break
-    elif guard.stack:
-        extra = f"  # {format_frame(guard.stack.summary()[-1])}"
-
+    if guard is not None:
+        if guard.user_stack:
+            for fs in reversed(guard.user_stack):
+                if fs.filename not in uninteresting_files():
+                    extra = f"  # {format_frame(fs, line=True)}"
+                    break
+        elif guard.stack:
+            extra = f"  # {format_frame(guard.stack.summary()[-1])}"
     return f"{code_part:<60}{extra}"
 
 
@@ -563,7 +550,6 @@ def getitem_on_dict_manager(
     source, base_guard_manager, base_example_value, example_value, guard_manager_enum
 ):
     base_source_name = source.base.name()
-    source_name = source.name()
     if isinstance(source.index, ConstDictKeySource):
         index = source.index.index
     else:
@@ -615,9 +601,15 @@ class GuardManagerType(enum.Enum):
     DICT_SUBCLASS_GUARD_MANAGER = 3
 
 
+@functools.lru_cache(None)
+def code_framelocals_names_reversed_cached(code: types.CodeType):
+    return list(reversed(code_framelocals_names(code)))
+
+
 class GuardBuilder(GuardBuilderBase):
     def __init__(
         self,
+        f_code: types.CodeType,
         id_ref: Callable[[Any, str], str],
         source_ref: Callable[[Source], str],
         lookup_weakrefs: Callable[[object], ReferenceType[object]],
@@ -626,6 +618,7 @@ class GuardBuilder(GuardBuilderBase):
         guard_manager: GuardManagerWrapper,
         check_fn_manager: CheckFunctionManager,
     ):
+        self.f_code = f_code
         self.id_ref = id_ref
         self.source_ref = source_ref
         self.lookup_weakrefs = lookup_weakrefs
@@ -740,7 +733,11 @@ class GuardBuilder(GuardBuilderBase):
         # reported in https://github.com/python/cpython/issues/125608,
         # fixed by https://github.com/python/cpython/pull/125611), we cannot take
         # advantage of __dict__ versions to speed up guard checks.
-        if sys.version_info >= (3, 13) and sys.version_info < (3, 13, 1):
+        if (
+            config.issue_3_13_0_warning
+            and sys.version_info >= (3, 13)
+            and sys.version_info < (3, 13, 1)
+        ):
             warnings.warn(
                 "Guards may run slower on Python 3.13.0. Consider upgrading to Python 3.13.1+.",
                 RuntimeWarning,
@@ -907,13 +904,16 @@ class GuardBuilder(GuardBuilderBase):
     def get_guard_manager_type(self, source, example_value):
         guard_manager_enum = GuardManagerType.GUARD_MANAGER
         if self.requires_key_order_guarding(source):
-            assert isinstance(example_value, dict)
-            # If keys method is not overriden, we can use PyDict_Next to get key
-            # orderings. Read more in guards.cpp
-            if type(example_value).keys is type({}).keys:
+            if isinstance(example_value, dict_keys):
                 guard_manager_enum = GuardManagerType.DICT_GUARD_MANAGER
             else:
-                guard_manager_enum = GuardManagerType.DICT_SUBCLASS_GUARD_MANAGER
+                assert isinstance(example_value, dict)
+                # If keys method is not overriden, we can use PyDict_Next to get key
+                # orderings. Read more in guards.cpp
+                if type(example_value).keys is type({}).keys:
+                    guard_manager_enum = GuardManagerType.DICT_GUARD_MANAGER
+                else:
+                    guard_manager_enum = GuardManagerType.DICT_SUBCLASS_GUARD_MANAGER
         return guard_manager_enum
 
     def manager_guards_on_keys(self, mgr_enum):
@@ -959,23 +959,34 @@ class GuardBuilder(GuardBuilderBase):
 
         # Use istype instead of isinstance to check for exact type of source.
         if istype(source, LocalSource):
-            # RootGuardManager accepts a dict but still its not a
-            # DictGuardManager because we will eventually move to
-            # fastlocals.
-            out = root_guard_manager.dict_getitem_manager(
-                key=source.local_name,
-                source=source_name,
-                example_value=example_value,
-                guard_manager_enum=guard_manager_enum,
-            )
-        elif istype(source, AutoDerefLocalSource):
-            # Guard checks run on f_locals, in which the python level
-            # auto-dereferenced cell objects are also dereferenced (e.g., rather
-            # than `f_locals` being `{ 'cell' : <cell object of int> }`, it'll
-            # be `{ 'cell' : <int> }`. So the guard manager is the same as the
-            # base guard manager.
-            assert isinstance(base_guard_manager, GuardManager)  # tame mypy
-            out = base_guard_manager
+            # Refer to index in the frame's localsplus directly.
+            # NOTE: name order for a code object doesn't change.
+            # NOTE: we need to find the LAST matching index because <= 3.10 contains
+            # duplicate names in the case of cells: a name can be both local and cell
+            # and will take up 2 slots of the frame's localsplus. The correct behavior
+            # is to refer to the cell, which has a higher index.
+            if config.enable_cpp_framelocals_guard_eval:
+                framelocals_names_reversed = code_framelocals_names_reversed_cached(
+                    self.f_code
+                )
+                framelocals_idx = (
+                    len(framelocals_names_reversed)
+                    - framelocals_names_reversed.index(source.local_name)
+                    - 1
+                )
+                out = root_guard_manager.framelocals_manager(
+                    key=(source.local_name, framelocals_idx),
+                    source=source_name,
+                    example_value=example_value,
+                    guard_manager_enum=guard_manager_enum,
+                )
+            else:
+                out = root_guard_manager.dict_getitem_manager(
+                    key=source.local_name,
+                    source=source_name,
+                    example_value=example_value,
+                    guard_manager_enum=guard_manager_enum,
+                )
         elif istype(source, GlobalSource):
             # Global manager accepts a dict but it is not a DictGuardManager
             # because globals dict is big and we typically guard on a very
@@ -1258,7 +1269,7 @@ class GuardBuilder(GuardBuilderBase):
         # code_parts in a function object which is then passed on to the leaf
         # guard.
         make_guard_fn_args = ", ".join(closure_vars.keys())
-        guard_body, pycode = build_guard_function(code_parts, make_guard_fn_args)
+        _guard_body, pycode = build_guard_function(code_parts, make_guard_fn_args)
         out: Dict[str, Any] = {}
         globals_for_guard_fn = {"G": self.scope["G"]}
         exec(pycode, globals_for_guard_fn, out)
@@ -1533,7 +1544,6 @@ class GuardBuilder(GuardBuilderBase):
     def EQUALS_MATCH(self, guard: Guard):
         ref = self.arg_ref(guard)
         val = self.get(guard.name)
-        t = type(val)
         if np:
             np_types: Tuple[Type[Any], ...] = (
                 np.int8,
@@ -1561,6 +1571,7 @@ class GuardBuilder(GuardBuilderBase):
                 frozenset,
                 slice,
                 range,
+                dict_keys,
                 torch.Size,
                 *np_types,
                 *ok_mutable_types,
@@ -1672,7 +1683,6 @@ class GuardBuilder(GuardBuilderBase):
         # tuple, collections.deque etc
         ref = self.arg_ref(guard)
         value = self.get(guard.name)
-        t = type(value)
 
         if not isinstance(value, dict):
             # C++ DICT_LENGTH checks for type
@@ -1710,6 +1720,24 @@ class GuardBuilder(GuardBuilderBase):
             tuple_iterator_len(value), obj_id, get_verbose_code_parts(code, guard)
         )
 
+    def RANGE_ITERATOR_MATCH(self, guard):
+        ref = self.arg_ref(guard)
+        value = self.get(guard.name)
+        t = type(value)
+
+        code = []
+        normalized_range_iter = normalize_range_iter(value)
+        code.append(f"___normalize_range_iter({ref}) == {normalized_range_iter}")
+        self._set_guard_export_info(guard, code)
+
+        t = type(value)
+        obj_id = self.id_ref(t, f"type({guard.name})")
+
+        start, stop, step = normalized_range_iter
+        self.get_guard_manager(guard).add_range_iterator_match_guard(
+            start, stop, step, obj_id, get_verbose_code_parts(code, guard)
+        )
+
     # TODO(voz): Deduplicate w/ AOTAutograd dupe input guards
     def DUPLICATE_INPUT(self, guard, source_b):
         ref_a = self.arg_ref(guard)
@@ -1720,15 +1748,16 @@ class GuardBuilder(GuardBuilderBase):
         ) or is_from_optimizer_source(source_b):
             return
 
-        code = [f"{ref_b} is {ref_a}"]
-        self._set_guard_export_info(guard, code)
-
         # Check that the guard has not been inserted already
         key = (ref_a, ref_b)
         if key in self._cached_duplicate_input_guards:
             return
+
         self._cached_duplicate_input_guards.add((ref_a, ref_b))
         self._cached_duplicate_input_guards.add((ref_b, ref_a))
+
+        code = [f"{ref_b} is {ref_a}"]
+        self._set_guard_export_info(guard, code)
 
         install_object_aliasing_guard(
             self.get_guard_manager(guard),
@@ -1740,7 +1769,6 @@ class GuardBuilder(GuardBuilderBase):
         # Guard on the keys and their order
         ref = self.arg_ref(guard)
         value = self.get(guard.name)
-        t = type(value)
 
         self.TYPE_MATCH(guard)
         code = []
@@ -1772,7 +1800,6 @@ class GuardBuilder(GuardBuilderBase):
         """Constant keys match"""
         ref = self.arg_ref(guard)
         value = self.get(guard.name)
-        t = type(value)
 
         code = []
         code.append(f"list({ref}.keys()) == {list(value.keys())!r}")
@@ -1883,16 +1910,23 @@ class GuardBuilder(GuardBuilderBase):
         for code in code_parts:
             self._set_guard_export_info(guard, [code])
 
+        # Make ShapeEnv guards available for testing.
+        if compile_context := CompileContext.try_get():
+            compile_context.shape_env_guards.extend(verbose_code_parts)
+
         # Install all the symbolic guards in one lambda guard. These are run
         # at the very end of the RootGuardManager via epilogue guards.
         # TODO(anijain2305,williamwen42) - Consider moving this to C++.
-        self.add_python_lambda_leaf_guard_to_root(
-            code_parts,
-            verbose_code_parts,
-            closure_vars={**SYMPY_INTERP, **_get_closure_vars()},
-        )
+        if code_parts:
+            self.add_python_lambda_leaf_guard_to_root(
+                code_parts,
+                verbose_code_parts,
+                closure_vars={**SYMPY_INTERP, **_get_closure_vars()},
+            )
 
     def TENSOR_MATCH(self, guard: Guard, value=None):
+        if config._unsafe_skip_fsdp_module_guards and guard.is_fsdp_module():
+            return
         # For tensors that are part of the Dynamo extracted Fx graph module, an
         # ID_MATCH suffices. Once we turn on inline_inbuilt_nn_modules, these
         # will be lifted as inputs and have a TENSOR_MATCH guard.
@@ -2023,7 +2057,7 @@ class GuardBuilder(GuardBuilderBase):
             # this logic, be my guest!  -- ezyang 2024)
             #
             assert guard.source is not None
-            static, reason = tensor_always_has_static_shape(
+            static, _reason = tensor_always_has_static_shape(
                 value, is_tensor=True, tensor_source=guard.originating_source
             )
 
@@ -2059,18 +2093,17 @@ class GuardBuilder(GuardBuilderBase):
         caller = cur_frame.f_back
         del cur_frame
         assert caller is not None
-        func_name = getframeinfo(caller)[2]
+        func_name = caller.f_code.co_name
         del caller
         # We use func_name for export, so might as well get a nice defensive check out of it
-        assert func_name in dir(
-            self.__class__
+        assert (
+            func_name in self.__class__.__dict__
         ), f"_produce_guard_code must be called from inside GuardedCode. Called from {func_name}"
 
         # Not all guards have names, some can be installed globally (see asserts on HAS_GRAD)
         if provided_guarded_object is None:
-            name_valid = guard.name is not None and guard.name != ""
-
-            guarded_object = self.get(guard.name) if name_valid else None
+            name = guard.name
+            guarded_object = None if not name else self.get(name)
         else:
             guarded_object = provided_guarded_object
 
@@ -2080,10 +2113,11 @@ class GuardBuilder(GuardBuilderBase):
         obj_ref = None
         # Not necessary to have weakref for Enum type, but there is a bug that
         # makes hasattr(guarded_object.__class__, "__weakref__") return True.
+        supports_weakref = (
+            getattr(guarded_object.__class__, "__weakrefoffset__", 0) != 0
+        )
         # See D64140537 for why we are checking for tuple.
-        if hasattr(guarded_object.__class__, "__weakref__") and not isinstance(
-            guarded_object, (enum.Enum, tuple)
-        ):
+        if supports_weakref and not isinstance(guarded_object, (enum.Enum, tuple)):
             obj_ref = weakref.ref(guarded_object)
 
         guard.set_export_info(
@@ -2227,6 +2261,7 @@ class DeletedGuardManagerWrapper(GuardManagerWrapper):
 class CheckFunctionManager:
     def __init__(
         self,
+        f_code,
         output_graph=None,
         cache_entry=None,
         guard_fail_fn: Optional[Callable[[GuardFail], None]] = None,
@@ -2259,6 +2294,7 @@ class CheckFunctionManager:
             return r_builder.arg_ref(source.name())
 
         builder = GuardBuilder(
+            f_code,
             self.id_ref,
             source_ref,
             self.lookup_weakrefs,
@@ -2284,7 +2320,7 @@ class CheckFunctionManager:
         if not justknobs_check("pytorch/compiler:guard_nn_modules"):
             log.warning("guard_nn_modules is turned off using justknobs killswitch")
 
-        for guard in sorted(guards or [], key=Guard.sort_key):
+        for guard in sorted(guards or (), key=Guard.sort_key):
             if (
                 not guard_on_nn_modules
                 and guard.is_specialized_nn_module()
@@ -2386,12 +2422,12 @@ class CheckFunctionManager:
                     "code": code_part,
                     "stack": (
                         structured.from_traceback(guard.stack.summary())
-                        if guard.stack
+                        if guard and guard.stack
                         else None
                     ),
                     "user_stack": (
                         structured.from_traceback(guard.user_stack)
-                        if guard.user_stack
+                        if guard and guard.user_stack
                         else None
                     ),
                 }
@@ -2457,6 +2493,26 @@ class CheckFunctionManager:
                 install_object_aliasing_guard(
                     builder.get_guard_manager_from_source(source_a),
                     builder.get_guard_manager_from_source(source_b),
+                    [code_part],
+                )
+                add_code_part(code_part, None, True)
+            elif isinstance(guard, StorageOverlap):
+                overlapping_guard_managers = [
+                    builder.get_guard_manager_from_source(s)
+                    for s in guard.overlapping_sources
+                ]
+                non_overlapping_guard_managers = [
+                    builder.get_guard_manager_from_source(s)
+                    for s in guard.non_overlapping_sources
+                ]
+                code_part = (
+                    """check_overlapping("""
+                    f"""overlapping=[{", ".join(s.name() for s in guard.overlapping_sources)}], """
+                    f"""non_overlapping=[{", ".join(s.name() for s in guard.non_overlapping_sources)}])"""
+                )
+                install_storage_overlapping_guard(
+                    overlapping_guard_managers,
+                    non_overlapping_guard_managers,
                     [code_part],
                 )
                 add_code_part(code_part, None, True)
@@ -2552,17 +2608,11 @@ class CheckFunctionManager:
 def build_guard_function(code_parts, closure_args) -> Tuple[str, str]:
     from torch._inductor.utils import IndentedBuffer
 
-    if HAS_UNPARSE_FUNCTIONS:
-        csepass = PyExprCSEPass()
-        csepass.count(code_parts)
+    csepass = PyExprCSEPass()
+    csepass.count(code_parts)
 
-        def replace(expr: str) -> Tuple[List[str], str]:
-            return csepass.replace(expr)
-
-    else:
-
-        def replace(expr: str) -> Tuple[List[str], str]:
-            return [], expr
+    def replace(expr: str) -> Tuple[List[str], str]:
+        return csepass.replace(expr)
 
     # Generate the inner body of the guard function.
     # i.e. if-chain of the guard expressions.
@@ -2683,7 +2733,7 @@ def get_guard_fail_reason_helper(
             with report_compile_source_on_error():
                 try:
                     fail_reason = eval(part, global_scope, scope)
-                except Exception as e:
+                except Exception:
                     if is_recompiles_verbose_enabled():
                         continue
                     else:
@@ -2718,7 +2768,7 @@ def get_guard_fail_reason(
             guard_manager.guard_fail_fn(
                 GuardFail(reason_str or "unknown reason", orig_code_map[code])
             )
-    except Exception as e:
+    except Exception:
         log.exception(
             "Failure in guard_fail_fn callback - raising here will cause a NULL Error on guard eval",
         )

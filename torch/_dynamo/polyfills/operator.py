@@ -12,7 +12,7 @@ from ..decorators import substitute_in_graph
 
 
 # Most unary and binary operators are handled by BuiltinVariable (e.g., `pos`, `add`)
-__all__ = ["attrgetter", "itemgetter"]
+__all__ = ["attrgetter", "itemgetter", "methodcaller"]
 
 
 _T = TypeVar("_T")
@@ -95,3 +95,15 @@ def itemgetter(*items: Any) -> Callable[[Any], Any | tuple[Any, ...]]:
             return tuple(obj[item] for item in items)
 
     return getter
+
+
+# Reference: https://docs.python.org/3/library/operator.html#operator.methodcaller
+@substitute_in_graph(operator.methodcaller, is_embedded_type=True)  # type: ignore[arg-type]
+def methodcaller(name: str, /, *args: Any, **kwargs: Any) -> Callable[[Any], Any]:
+    if not isinstance(name, str):
+        raise TypeError("method name must be a string")
+
+    def caller(obj: Any) -> Any:
+        return getattr(obj, name)(*args, **kwargs)
+
+    return caller

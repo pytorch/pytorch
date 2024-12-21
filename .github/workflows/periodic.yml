@@ -65,6 +65,8 @@ jobs:
           { config: "nogpu_NO_AVX2", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
           { config: "jit_legacy", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge.nvidia.gpu" },
         ]}
+    secrets: inherit
+
   linux-focal-cuda12_1-py3_10-gcc9-test:
     name: linux-focal-cuda12.1-py3.10-gcc9
     uses: ./.github/workflows/_linux-test.yml
@@ -75,6 +77,7 @@ jobs:
       build-environment: linux-focal-cuda12.1-py3.10-gcc9
       docker-image: ${{ needs.linux-focal-cuda12_1-py3_10-gcc9-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-focal-cuda12_1-py3_10-gcc9-build.outputs.test-matrix }}
+    secrets: inherit
 
   linux-focal-cuda12_4-py3_10-gcc9-build:
     name: linux-focal-cuda12.4-py3.10-gcc9
@@ -97,6 +100,7 @@ jobs:
           { config: "nogpu_NO_AVX2", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
           { config: "jit_legacy", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge.nvidia.gpu" },
         ]}
+    secrets: inherit
 
   linux-focal-cuda12_4-py3_10-gcc9-test:
     name: linux-focal-cuda12.4-py3.10-gcc9
@@ -109,6 +113,7 @@ jobs:
       build-environment: linux-focal-cuda12.4-py3.10-gcc9
       docker-image: ${{ needs.linux-focal-cuda12_4-py3_10-gcc9-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-focal-cuda12_4-py3_10-gcc9-build.outputs.test-matrix }}
+    secrets: inherit
 
   linux-focal-cuda11_8-py3_9-gcc9-build:
     name: linux-focal-cuda11.8-py3.9-gcc9
@@ -124,6 +129,7 @@ jobs:
           { config: "multigpu", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g5.12xlarge.nvidia.gpu", owners: ["oncall:distributed"] },
         ]}
       build-with-debug: false
+    secrets: inherit
 
   linux-focal-cuda11_8-py3_9-gcc9-test:
     name: linux-focal-cuda11.8-py3.9-gcc9
@@ -133,6 +139,7 @@ jobs:
       build-environment: linux-focal-cuda11.8-py3.9-gcc9
       docker-image: ${{ needs.linux-focal-cuda11_8-py3_9-gcc9-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-focal-cuda11_8-py3_9-gcc9-build.outputs.test-matrix }}
+    secrets: inherit
 
   linux-focal-cuda11_8-py3_10-gcc9-debug-build:
     name: linux-focal-cuda11.8-py3.10-gcc9-debug
@@ -145,12 +152,15 @@ jobs:
       build-with-debug: true
       test-matrix: |
         { include: [
-          { config: "default", shard: 1, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge.nvidia.gpu", owners: ["oncall:debug-build"] },
-          { config: "default", shard: 2, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge.nvidia.gpu", owners: ["oncall:debug-build"] },
-          { config: "default", shard: 3, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge.nvidia.gpu", owners: ["oncall:debug-build"] },
-          { config: "default", shard: 4, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge.nvidia.gpu", owners: ["oncall:debug-build"] },
-          { config: "default", shard: 5, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge.nvidia.gpu", owners: ["oncall:debug-build"] },
+          { config: "default", shard: 1, num_shards: 7, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge.nvidia.gpu", owners: ["oncall:debug-build"] },
+          { config: "default", shard: 2, num_shards: 7, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge.nvidia.gpu", owners: ["oncall:debug-build"] },
+          { config: "default", shard: 3, num_shards: 7, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge.nvidia.gpu", owners: ["oncall:debug-build"] },
+          { config: "default", shard: 4, num_shards: 7, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge.nvidia.gpu", owners: ["oncall:debug-build"] },
+          { config: "default", shard: 5, num_shards: 7, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge.nvidia.gpu", owners: ["oncall:debug-build"] },
+          { config: "default", shard: 6, num_shards: 7, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge.nvidia.gpu", owners: ["oncall:debug-build"] },
+          { config: "default", shard: 7, num_shards: 7, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge.nvidia.gpu", owners: ["oncall:debug-build"] },
         ]}
+    secrets: inherit
 
   linux-focal-cuda11_8-py3_10-gcc9-debug-test:
     name: linux-focal-cuda11.8-py3.10-gcc9-debug
@@ -162,6 +172,7 @@ jobs:
       build-environment: linux-focal-cuda11.8-py3.10-gcc9-debug
       docker-image: ${{ needs.linux-focal-cuda11_8-py3_10-gcc9-debug-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-focal-cuda11_8-py3_10-gcc9-debug-build.outputs.test-matrix }}
+    secrets: inherit
 
   linux-focal-rocm6_2-py3_10-build:
     name: linux-focal-rocm6.2-py3.10
@@ -177,6 +188,7 @@ jobs:
           { config: "distributed", shard: 2, num_shards: 3, runner: "linux.rocm.gpu", owners: ["module:rocm", "oncall:distributed"] },
           { config: "distributed", shard: 3, num_shards: 3, runner: "linux.rocm.gpu", owners: ["module:rocm", "oncall:distributed"] },
         ]}
+    secrets: inherit
 
   linux-focal-rocm6_2-py3_10-test:
     permissions:
@@ -191,6 +203,7 @@ jobs:
       build-environment: linux-focal-rocm6.2-py3.10
       docker-image: ${{ needs.linux-focal-rocm6_2-py3_10-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-focal-rocm6_2-py3_10-build.outputs.test-matrix }}
+    secrets: inherit
 
   linux-focal-cuda12_1-py3_10-gcc9-experimental-split-build:
     name: linux-focal-cuda12.1-py3.10-gcc9-experimental-split-build
@@ -210,6 +223,7 @@ jobs:
           { config: "nogpu_NO_AVX2", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
           { config: "jit_legacy", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge.nvidia.gpu" },
         ]}
+    secrets: inherit
 
   linux-focal-cuda12_1-py3_10-gcc9-experimental-split-build-test:
     name: linux-focal-cuda12.1-py3.10-gcc9-experimental-split-build
@@ -221,6 +235,7 @@ jobs:
       build-environment: linux-focal-cuda12.1-py3.10-gcc9-experimental-split-build
       docker-image: ${{ needs.linux-focal-cuda12_1-py3_10-gcc9-experimental-split-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-focal-cuda12_1-py3_10-gcc9-experimental-split-build.outputs.test-matrix }}
+    secrets: inherit
 
 
   linux-focal-cuda11_8-py3_9-gcc9-experimental-split-build:
@@ -239,6 +254,7 @@ jobs:
           { config: "multigpu", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g5.12xlarge.nvidia.gpu", owners: ["oncall:distributed"] },
         ]}
       build-with-debug: false
+    secrets: inherit
 
   linux-focal-cuda11_8-py3_9-gcc9-experimental-split-build-test:
     name: linux-focal-cuda11.8-py3.9-gcc9-experimental-split-build-test
@@ -250,6 +266,7 @@ jobs:
       build-environment: linux-focal-cuda11.8-py3.9-gcc9-experimental-split-build
       docker-image: ${{ needs.linux-focal-cuda11_8-py3_9-gcc9-experimental-split-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-focal-cuda11_8-py3_9-gcc9-experimental-split-build.outputs.test-matrix }}
+    secrets: inherit
 
   linux-focal-cuda11_8-py3_10-gcc9-experimental-split-build:
     name: linux-focal-cuda11.8-py3.10-gcc9-experimental-split-build
@@ -268,6 +285,7 @@ jobs:
           { config: "distributed", shard: 2, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g4dn.12xlarge.nvidia.gpu", owners: ["oncall:distributed"] },
           { config: "distributed", shard: 3, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g4dn.12xlarge.nvidia.gpu", owners: ["oncall:distributed"] },
         ]}
+    secrets: inherit
 
   linux-focal-cuda11_8-py3_10-gcc9-experimental-split-build-test:
     name: linux-focal-cuda11.8-py3.10-gcc9-experimental-split-build-test
@@ -280,6 +298,7 @@ jobs:
       build-environment: linux-focal-cuda11.8-py3.10-gcc9-experimental-split-build
       docker-image: ${{ needs.linux-focal-cuda11_8-py3_10-gcc9-experimental-split-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-focal-cuda11_8-py3_10-gcc9-experimental-split-build.outputs.test-matrix }}
+    secrets: inherit
 
   linux-focal-cuda12_1-py3-gcc9-slow-gradcheck-build:
     name: linux-focal-cuda12.1-py3-gcc9-slow-gradcheck
@@ -301,6 +320,7 @@ jobs:
           { config: "default", shard: 7, num_shards: 8, runner: "linux.g5.4xlarge.nvidia.gpu", owners: ["module:slowgradcheck"] },
           { config: "default", shard: 8, num_shards: 8, runner: "linux.g5.4xlarge.nvidia.gpu", owners: ["module:slowgradcheck"] },
         ]}
+    secrets: inherit
 
   linux-focal-cuda12_1-py3-gcc9-slow-gradcheck-test:
     name: linux-focal-cuda12.1-py3-gcc9-slow-gradcheck
@@ -313,3 +333,19 @@ jobs:
       docker-image: ${{ needs.linux-focal-cuda12_1-py3-gcc9-slow-gradcheck-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-focal-cuda12_1-py3-gcc9-slow-gradcheck-build.outputs.test-matrix }}
       timeout-minutes: 300
+    secrets: inherit
+
+  linux-focal-cuda12_4-py3_10-gcc9-bazel-test:
+    name: linux-focal-cuda12.4-py3.10-gcc9-bazel-test
+    uses: ./.github/workflows/_bazel-build-test.yml
+    needs: get-label-type
+    with:
+      runner: "${{ needs.get-label-type.outputs.label-type }}linux.large"
+      build-environment: linux-focal-cuda12.4-py3.10-gcc9-bazel-test
+      docker-image-name: pytorch-linux-focal-cuda12.4-cudnn9-py3-gcc9
+      cuda-version: "12.4"
+      test-matrix: |
+        { include: [
+          { config: "default", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge.nvidia.gpu" },
+        ]}
+    secrets: inherit

@@ -17,12 +17,12 @@
 #include <type_traits>
 #include <unordered_map>
 
-#if !defined(USE_ROCM) && \
-    ((NCCL_MAJOR > 2) || ((NCCL_MAJOR == 2) && (NCCL_MINOR >= 13)))
+#if (NCCL_MAJOR > 2) || ((NCCL_MAJOR == 2) && (NCCL_MINOR >= 13))
 #define NCCL_HAS_REMOTE_ERROR 1
-#if (NCCL_MAJOR > 2) || (NCCL_MINOR >= 14)
-#define NCCL_HAS_COMM_NONBLOCKING 1
 #endif
+
+#if (NCCL_MAJOR > 2) || ((NCCL_MAJOR == 2) && (NCCL_MINOR >= 14))
+#define NCCL_HAS_COMM_NONBLOCKING 1
 #endif
 
 ncclComm_t* to_nccl_comm(torch::cuda::nccl::ncclComm_t* var) {
@@ -173,9 +173,10 @@ bool nccl_use_nonblocking() {
 static int nccl_nonblocking_timeout() {
   static int timeout = -2; // -2 means not initialized
   if (timeout == -2) {
-    const auto val = c10::utils::get_env("TORCH_NCCL_NONBLOCKING_TIMEOUT");
-    if (val && !val.value().empty()) {
-      timeout = std::stoi(val.value());
+    const char* val = getenv("TORCH_NCCL_NONBLOCKING_TIMEOUT");
+    if (val && strlen(val) > 0) {
+      // NOLINTNEXTLINE(*-narrowing-conversions)
+      timeout = strtol(val, nullptr, 0);
     } else {
       // Default value consistent with kBackendDefaultTimeout
       timeout = 30 * 60;
@@ -840,7 +841,7 @@ void all2all_single_equal_split(
 
   auto type = to_nccl_data_type(input);
   size_t count = input.numel() / size;
-  size_t rankdiff = input.nbytes() / size;
+  [[maybe_unused]] size_t rankdiff = input.nbytes() / size;
   const auto* sendbuff = reinterpret_cast<const char*>(input.const_data_ptr());
   auto* recvbuff = reinterpret_cast<char*>(output.data_ptr());
   auto comm = to_nccl_comm(_comm);
