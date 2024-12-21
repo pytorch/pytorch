@@ -156,7 +156,7 @@ template<typename ElementInputA, typename ElementInputB>
 Tensor
 mixed_dtypes_linear_dispatch_bias_activation(
     const Tensor& input, const Tensor& weight, const Tensor& scale,
-    const Tensor& bias, const c10::string_view& activation) {
+    const Tensor& bias, const std::string_view& activation) {
     if (bias.numel() == 0) {
       if (activation == "none") {
         return mixed_dtypes_linear_cutlass<
@@ -195,8 +195,8 @@ mixed_dtypes_linear_dispatch_bias_activation(
 Tensor
 _mixed_dtypes_linear(const Tensor& input, const Tensor& weight,
                      const Tensor& scale,
-                     const c10::optional<Tensor>& bias_opt,
-                     const c10::optional<c10::string_view> activation_opt) {
+                     const std::optional<Tensor>& bias_opt,
+                     const std::optional<std::string_view> activation_opt) {
   TORCH_WARN_ONCE("_mixed_dtypes_linear is deprecated and will be removed in a "
                   "future PyTorch release.  Please use _mixed_dtypes_mm or "
                   "_mixed_dtypes_addmm instead.");

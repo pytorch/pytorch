@@ -61,6 +61,7 @@ Memory management
      empty_cache
      max_memory_allocated
      max_memory_reserved
+     mem_get_info
      memory_allocated
      memory_reserved
      memory_stats

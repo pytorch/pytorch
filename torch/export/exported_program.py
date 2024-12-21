@@ -24,7 +24,7 @@ from typing import (
 )
 
 from torch._higher_order_ops.utils import autograd_not_implemented
-from torch._library.fake_class_registry import FakeScriptObject, maybe_to_fake_obj
+from torch._library.fake_class_registry import FakeScriptObject
 from torch._subclasses.fake_impls import (
     _deregister_op_impl,
     _is_op_registered_to_fake_rule,
@@ -80,6 +80,7 @@ from .graph_signature import (  # noqa: F401
     OutputKind,
     OutputSpec,
     SymBoolArgument,
+    SymFloatArgument,
     SymIntArgument,
     TensorArgument,
     TokenArgument,
@@ -377,11 +378,29 @@ def _decompose_and_get_gm_with_new_signature_constants(
 
     if not _is_joint_ir_decomp(ep, joint_loss_index):
         mod = ep.module()
+
+        wrapped_params = dict(mod.named_parameters(remove_duplicate=False))
+
+        from torch._functorch._aot_autograd.subclass_parametrization import (
+            unwrap_tensor_subclass_parameters,
+        )
+
+        # [NOTE] Unwrapping subclasses AOT
+        # In torch.compile, the subclass unwrapping/wrapping happen at runtime
+        # but at export, this is impossible as it is intented to be run on
+        # C++ environment. As a result, we unwrap subclass parameters AOT. After this,
+        # ExportedProgram state_dict won't be same as eager model because eager model
+        # could have subclass weights while ExportedProgram will have desugared versions.
+        # This is fine because run_decompositions is supposed to specialize to post-autograd
+        # graph where the subclass desugaring is supposed to happen.
+        unwrap_tensor_subclass_parameters(mod)
+        unwrapped_params = dict(mod.named_parameters(remove_duplicate=False))
+
         # TODO T204030333
         fake_mode = _detect_fake_mode_from_gm(ep.graph_module)
         if fake_mode is None:
             fake_mode = FakeTensorMode(shape_env=ShapeEnv(), export=True)
-        fake_args = []
+        retracing_args = []
         for node in mod.graph.nodes:
             if node.op == "placeholder":
                 if isinstance(node.meta["val"], CustomObjArgument):
@@ -390,15 +409,15 @@ def _decompose_and_get_gm_with_new_signature_constants(
                         real_script_obj = ep.constants[node.meta["val"].name]
                     else:
                         real_script_obj = node.meta["val"].fake_val.real_obj
-                    fake_args.append(maybe_to_fake_obj(fake_mode, real_script_obj))
+                    retracing_args.append(real_script_obj)
                 else:
-                    fake_args.append(node.meta["val"])
+                    retracing_args.append(node.meta["val"])
 
-        fake_args_unwrapped = pytree.tree_unflatten(fake_args, mod._in_spec)
+        retracing_args_unwrapped = pytree.tree_unflatten(retracing_args, mod._in_spec)
         # Fix the graph output signature to be tuple if scalar
         out_spec = mod._out_spec
 
-        orig_arg_names = mod.graph._codegen.pytree_info.orig_args  # type: ignore[attr-defined]
+        orig_arg_names = mod.graph._codegen.pytree_info.orig_args
 
         # aot_export expect the return type to always be a tuple.
         if out_spec.type not in (list, tuple):
@@ -417,33 +436,56 @@ def _decompose_and_get_gm_with_new_signature_constants(
         # the exported module will store constants & non-persistent buffers such that
         # retracing treats them as persistent buffers, so we inform the constants lifting pass
         # and overwrite the new graph signature using the previous program.
-        constant_attrs = _collect_and_set_constant_attrs(
-            ep.graph_signature, ep.constants, mod
-        )
+        _collect_and_set_constant_attrs(ep.graph_signature, ep.constants, mod)
 
         # get params & buffers after excluding constants
         fake_params_buffers = _fakify_params_buffers(fake_mode, mod)
 
         params_buffers_to_node_meta = _collect_param_buffer_metadata(mod)
 
-        with _ignore_backend_decomps(), (
+        # TODO (tmanlaibaatar) Ideally run_decomp should just call _non_strict_export
+        # but due to special handling of constants as non-persistent buffers make it little
+        # diffucult. But we should unify this code path together. T206837815
+        from torch._export.non_strict_utils import _fakify_script_objects
+
+        with (
             fake_mode
         ), _override_decomp_aten_to_variants(), _override_composite_implicit_decomp(
             cia_to_decomp,
         ):
-            aten_export_artifact = _export_to_aten_ir(
+            # this requires empty kwargs, but not in pytree.flattened format
+            with _fakify_script_objects(
                 mod,
-                # this requires empty kwargs, but not in pytree.flattened format
                 (
-                    *fake_args_unwrapped[0],
-                    *fake_args_unwrapped[1].values(),
+                    *retracing_args_unwrapped[0],
+                    *retracing_args_unwrapped[1].values(),
                 ),
                 {},
-                fake_params_buffers,
-                constant_attrs,
-                decomp_table=python_decomp_table,
-                _check_autograd_state=False,
-            )
+                fake_mode,
+            ) as (
+                patched_mod,
+                new_fake_args,
+                new_fake_kwargs,
+                new_fake_constant_attrs,
+                map_fake_to_real,
+            ):
+                aten_export_artifact = _export_to_aten_ir(
+                    patched_mod,
+                    new_fake_args,
+                    new_fake_kwargs,
+                    fake_params_buffers,
+                    new_fake_constant_attrs,
+                    decomp_table=python_decomp_table,
+                    _check_autograd_state=False,
+                )
+
+                # aten_export_artifact.constants contains only fake script objects, we need to map them back
+                aten_export_artifact.constants = {
+                    fqn: map_fake_to_real[obj]
+                    if isinstance(obj, FakeScriptObject)
+                    else obj
+                    for fqn, obj in aten_export_artifact.constants.items()
+                }
 
         gm = aten_export_artifact.gm
         new_graph_signature = aten_export_artifact.sig
@@ -461,7 +503,27 @@ def _decompose_and_get_gm_with_new_signature_constants(
         _verify_stack_trace(gm)
         _verify_placeholder_names(gm, new_graph_signature)
 
-        return _remove_unneccessary_copy_op_pass(gm, new_graph_signature)
+        gm, new_graph_signature = _remove_unneccessary_copy_op_pass(
+            gm, new_graph_signature
+        )
+
+        # When we apply parameterixzation rule to unwrap
+        # subclasses, the state dict will now have different
+        # desugared parameters. We need to manually filter those
+        # and update the ep.state_dict. Ideally, we should just return
+        # the state dict of ep.module but ep.module only stores params
+        # buffers that participate in forward. If we undo this behaviour,
+        # it would break some downstream users.
+        for name, p in unwrapped_params.items():
+            if name not in wrapped_params:
+                ep.state_dict[name] = p
+
+        for name, p in wrapped_params.items():
+            assert name in ep.state_dict
+            if name not in unwrapped_params:
+                ep.state_dict.pop(name)
+
+        return gm, new_graph_signature, ep.state_dict
 
     old_placeholders = [
         node for node in ep.graph_module.graph.nodes if node.op == "placeholder"
@@ -498,6 +560,8 @@ def _decompose_and_get_gm_with_new_signature_constants(
             return TensorArgument(name=new_ph.name)
         elif isinstance(old_arg, SymIntArgument):
             return SymIntArgument(name=new_ph.name)
+        elif isinstance(old_arg, SymFloatArgument):
+            return SymFloatArgument(name=new_ph.name)
         elif isinstance(old_arg, SymBoolArgument):
             return SymBoolArgument(name=new_ph.name)
         raise RuntimeError(f"Type of old_arg not supported: {type(old_arg)}")
@@ -571,7 +635,7 @@ def _decompose_and_get_gm_with_new_signature_constants(
 
     output_specs = [
         OutputSpec(
-            OutputKind.LOSS_OUTPUT if joint_loss_index is not None else spec.kind,
+            OutputKind.LOSS_OUTPUT if i == joint_loss_index else spec.kind,
             update_arg(spec.arg, new_outputs[i]),
             old_new_placeholder_map.get(spec.target, spec.target),
         )
@@ -625,7 +689,7 @@ def _decompose_and_get_gm_with_new_signature_constants(
         ):
             for k, v in old_node.meta.items():
                 new_node.meta[k] = v
-    return gm, new_graph_signature
+    return gm, new_graph_signature, ep.state_dict
 
 
 def _remove_unneccessary_copy_op_pass(
@@ -693,7 +757,7 @@ def _get_updated_module_call_graph(
     provenance: Dict[str, str] = {}
     for node in gm.graph.nodes:
         if history := node.meta.get("from_node", []):
-            provenance[history[-1][0]] = node.name
+            provenance[history[-1].name] = node.name
 
     # map old names to new names in module call signatures
     for entry in new_module_call_graph:
@@ -713,7 +777,11 @@ def _decompose_exported_program(
     python_decomp_table: Dict[torch._ops.OperatorBase, Callable],
     joint_loss_index: Optional[int],
 ):
-    gm, new_graph_signature = _decompose_and_get_gm_with_new_signature_constants(
+    (
+        gm,
+        new_graph_signature,
+        state_dict,
+    ) = _decompose_and_get_gm_with_new_signature_constants(
         ep,
         cia_to_decomp=cia_to_decomp,
         python_decomp_table=python_decomp_table,
@@ -743,7 +811,7 @@ def _decompose_exported_program(
         root=gm,
         graph=gm.graph,
         graph_signature=new_graph_signature,
-        state_dict=ep.state_dict,
+        state_dict=state_dict,
         range_constraints=new_range_constraints,
         module_call_graph=new_module_call_graph,
         example_inputs=ep.example_inputs,
@@ -1025,7 +1093,7 @@ class ExportedProgram:
             kwargs = reorder_kwargs(kwargs, in_spec)
         flat_args_with_path, received_spec = pytree.tree_flatten_with_path(
             (args, kwargs)
-        )  # type: ignore[possibly-undefined]
+        )
         self._check_input_constraints(flat_args_with_path)
         flat_args = tuple(x[1] for x in flat_args_with_path)
         return flat_args, received_spec
