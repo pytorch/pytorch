@@ -22,7 +22,7 @@ from torch.testing._internal.inductor_utils import HAS_CUDA
 class PadMMTest(TestCase):
     def setUp(self):
         super().setUp()
-        if not is_big_gpu(0):
+        if not is_big_gpu():
             return self.skipTest("Need a big GPU to run max_autotune=True")
 
     @inductor_config.patch(max_autotune=True, max_autotune_gemm_backends="TRITON")
@@ -172,7 +172,7 @@ class PadMMTest(TestCase):
         ):
             res1 = fn(a, b)
             compiled_fn = torch.compile(fn)
-            res2, (code,) = run_and_get_code(compiled_fn, a, b)
+            res2, (_,) = run_and_get_code(compiled_fn, a, b)
         self.assertEqual(res1, res2)
 
     @inductor_config.patch(force_shape_pad=True)

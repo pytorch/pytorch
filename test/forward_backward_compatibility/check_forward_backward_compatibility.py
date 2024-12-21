@@ -137,6 +137,7 @@ ALLOW_LIST = [
     ("_quantized::wrapped_linear_prepack", datetime.date(2024, 12, 31)),
     ("_quantized::wrapped_linear_prepacked", datetime.date(2024, 12, 31)),
     ("_quantized::wrapped_quantized_linear_prepacked", datetime.date(2024, 12, 31)),
+    ("aten::rrelu_with_noise", datetime.date(2024, 12, 31)),
 ]
 
 ALLOW_LIST_COMPILED = [

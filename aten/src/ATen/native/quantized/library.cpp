@@ -1,13 +1,5 @@
 #include <torch/library.h>
-
-int register_linear_params();
-
-template <int kSpatialDim = 2>
-int register_conv_params();
-
-extern template int register_conv_params<2>();
-extern template int register_conv_params<3>();
-int register_embedding_params();
+#include <aten/src/ATen/native/quantized/cpu/fbgemm_utils.h>
 
 TORCH_LIBRARY(quantized, m) {
   m.set_python_module("caffe2.torch.fb.model_transform.splitting.split_dispatcher");

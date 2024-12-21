@@ -2293,9 +2293,9 @@ and :func:`torch.chunk`.
     :func:`torch.stack` concatenates the given sequence along a new dimension.
 
 Args:
-    tensors (sequence of Tensors): any python sequence of tensors of the same type.
-        Non-empty tensors provided must have the same shape, except in the
-        cat dimension.
+    tensors (sequence of Tensors): Non-empty tensors provided must have the same shape,
+        except in the cat dimension.
+
     dim (int, optional): the dimension over which the tensors are concatenated
 
 Keyword args:
@@ -6697,6 +6697,12 @@ add_docstr(
     r"""
 mean(input, *, dtype=None) -> Tensor
 
+.. note::
+    If the `input` tensor is empty, ``torch.mean()`` returns ``nan``.
+    This behavior is consistent with NumPy and follows the definition
+    that the mean over an empty set is undefined.
+
+
 Returns the mean value of all elements in the :attr:`input` tensor. Input must be floating point or complex.
 
 Args:
@@ -9121,6 +9127,12 @@ arange(start=0, end, step=1, *, out=None, dtype=None, layout=torch.strided, devi
 Returns a 1-D tensor of size :math:`\left\lceil \frac{\text{end} - \text{start}}{\text{step}} \right\rceil`
 with values from the interval ``[start, end)`` taken with common difference
 :attr:`step` beginning from `start`.
+
+Note: When using floating-point dtypes (especially reduced precision types like ``bfloat16``),
+the results may be affected by floating-point rounding behavior. Some values in the sequence
+might not be exactly representable in certain floating-point formats, which can lead to
+repeated values or unexpected rounding. For precise sequences, it is recommended to use
+integer dtypes instead of floating-point dtypes.
 
 Note that non-integer :attr:`step` is subject to floating point rounding errors when
 comparing against :attr:`end`; to avoid inconsistency, we advise subtracting a small epsilon from :attr:`end`

@@ -413,14 +413,6 @@ def get_statuses(for_subset=None, invert=False):
                     result.remove(decorator.test_name)
         return result
 
-    def get_all_aliases(op):
-        opinfos = op_to_opinfo[op]
-        result = []
-        for opinfo in opinfos:
-            result.append(opinfo.name)
-            result.extend(opinfo.aliases)
-        return set(result)
-
     for name, op in get_covered_ops(overridable_outplace_we_care_about).items():
         successful_tests = get_covered_tests(op)
         failed_tests = tests - successful_tests
