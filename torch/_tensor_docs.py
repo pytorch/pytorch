@@ -3644,7 +3644,7 @@ Example:
     # Example 1: Padding
     >>> input_tensor = torch.tensor([[1, 0], [3, 2]])
     >>> static_size = 4
-    >>> t = torch.nonzero_static(input_tensor, size = static_size)
+    >>> t = torch.nonzero_static(input_tensor, size=static_size)
     tensor([[  0,   0],
             [  1,   0],
             [  1,   1],
@@ -3653,20 +3653,20 @@ Example:
     # Example 2: Truncating
     >>> input_tensor = torch.tensor([[1, 0], [3, 2]])
     >>> static_size = 2
-    >>> t = torch.nonzero_static(input_tensor, size = static_size)
+    >>> t = torch.nonzero_static(input_tensor, size=static_size)
     tensor([[  0,   0],
             [  1,   0]], dtype=torch.int64)
 
     # Example 3: 0 size
     >>> input_tensor = torch.tensor([10])
     >>> static_size = 0
-    >>> t = torch.nonzero_static(input_tensor, size = static_size)
+    >>> t = torch.nonzero_static(input_tensor, size=static_size)
     tensor([], size=(0, 1), dtype=torch.int64)
 
     # Example 4: 0 rank input
     >>> input_tensor = torch.tensor(10)
     >>> static_size = 2
-    >>> t = torch.nonzero_static(input_tensor, size = static_size)
+    >>> t = torch.nonzero_static(input_tensor, size=static_size)
     tensor([], size=(2, 0), dtype=torch.int64)
 """,
 )

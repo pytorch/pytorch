@@ -1,5 +1,5 @@
 from enum import Enum
-from typing import Any, Literal, Optional
+from typing import Literal
 from typing_extensions import TypeAlias
 
 from torch._C import device, dtype, layout
@@ -72,7 +72,7 @@ class ProfilerConfig:
         with_flops: bool,
         with_modules: bool,
         experimental_config: _ExperimentalConfig,
-        trace_id: Optional[str] = None,
+        trace_id: str | None = None,
     ) -> None: ...
 
 class _ProfilerEvent:
@@ -242,4 +242,4 @@ class _RecordFunctionFast:
         keyword_values: dict | None = None,
     ) -> None: ...
     def __enter__(self) -> None: ...
-    def __exit__(self, *args: Any) -> None: ...
+    def __exit__(self, *args: object) -> None: ...
