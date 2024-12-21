@@ -48,10 +48,18 @@ def _patch_dynamo_unsupported_functions():
     jit_isinstance = torch.jit.isinstance
     torch.jit.isinstance = isinstance
     logger.info("Replaced torch.jit.isinstance with isinstance to allow dynamo tracing")
+
+    mark_static_address = torch._dynamo.mark_static_address
+    torch._dynamo.mark_static_address = lambda *_, **__: None
+    logger.info(
+        "Replaced torch._dynamo.mark_static_address with empty function to allow dynamo tracing"
+    )
+
     try:
         yield
     finally:
         torch.jit.isinstance = jit_isinstance
+        torch._dynamo.mark_static_address = mark_static_address
 
 
 @dataclasses.dataclass
