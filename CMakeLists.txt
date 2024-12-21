@@ -23,7 +23,7 @@ if(${CMAKE_SOURCE_DIR} STREQUAL ${CMAKE_BINARY_DIR})
 endif()
 
 # ---[ Project and semantic versioning.
-project(Torch CXX C)
+project(Torch CXX C HIP)
 
 if(${CMAKE_SYSTEM_NAME} STREQUAL "Linux")
   set(LINUX TRUE)
