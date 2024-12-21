@@ -211,7 +211,7 @@ def get_method_definitions(
     # 3. Remove first argument after self (unless it is "*datapipes"), default args, and spaces
     """
     if root == "":
-        root = str(pathlib.Path(__file__).parent.resolve())
+        root = str(pathlib.Path(__file__).absolute().parent)
     file_path = [file_path] if isinstance(file_path, str) else file_path
     file_path = [os.path.join(root, path) for path in file_path]
     file_paths = find_file_paths(
@@ -288,7 +288,7 @@ def main() -> None:
         mapDP_method_to_special_output_type,
     )
 
-    path = pathlib.Path(__file__).parent.resolve()
+    path = pathlib.Path(__file__).absolute().parent
     replacements = [
         ("${IterDataPipeMethods}", iter_method_definitions, 4),
         ("${MapDataPipeMethods}", map_method_definitions, 4),
