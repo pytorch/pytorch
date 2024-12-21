@@ -3246,7 +3246,7 @@ class TritonKernel(SIMDKernel):
         # https://github.com/pytorch/pytorch/issues/120478#issuecomment-1962822307
         # https://github.com/openai/triton/blob/231efe9ed2d200be0f69a07c298e4342b08efe3d/python/triton/runtime/jit.py#L384
         for arg_num in triton_meta["configs"][0].equal_to_1:  # type: ignore[index]
-            triton_meta["constants"][signature[arg_num].name] = 1  # type: ignore[index]
+            triton_meta["constants"][signature[arg_num[0]].name] = 1  # type: ignore[index]
 
         self.triton_meta = triton_meta
 
