@@ -31,8 +31,6 @@
 #include <algorithm>
 #include <string>
 
-int register_linear_params();
-
 #ifdef USE_FBGEMM
 template <bool ReluFused>
 at::Tensor& PackedLinearWeight::apply_impl(
