@@ -1233,8 +1233,7 @@ Tensor diagonal(
   auto outnames = namedinference::compute_diagonal_outnames(self, dim1, dim2);
   NoNamesGuard no_names_guard;
 
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  int64_t diag_size;
+  int64_t diag_size = 0;
   int64_t storage_offset = self.storage_offset();
   // compute storage offset and size for the diagonal
   // for positive values of offset (above the main diagonal)

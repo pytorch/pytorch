@@ -1701,11 +1701,10 @@ static void apply_cholesky_solve(Tensor& b, Tensor& A, bool upper, Tensor& infos
   auto ldab = std::max<int64_t>(1, n);
   auto nrhs = b.size(-1);
 
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  int info;
   for (const auto i : c10::irange(batch_size)) {
     const scalar_t* A_working_ptr = &A_data[i * A_mat_stride];
     scalar_t* b_working_ptr = &b_data[i * b_mat_stride];
+    int info = 0;
     lapackCholeskySolve<scalar_t>(uplo, n, nrhs, const_cast<scalar_t*>(A_working_ptr), ldab, b_working_ptr, ldab, &info);
     infos_data[i] = info;
     if (info != 0) {

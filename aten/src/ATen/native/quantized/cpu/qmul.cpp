@@ -220,10 +220,8 @@ Tensor _mul_scalar_out(Tensor& out, const Tensor& self, const Scalar& other) {
   double self_scale = self.q_scale();
   double other_val = other.toDouble();
 
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  double scale_prime;
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  int64_t zero_point_prime;
+  double scale_prime = 0;
+  int64_t zero_point_prime = 0;
 
   AT_DISPATCH_QINT_TYPES(out.scalar_type(), "qmul_scalar", [&]() {
     // NOLINTNEXTLINE(bugprone-signed-char-misuse)
