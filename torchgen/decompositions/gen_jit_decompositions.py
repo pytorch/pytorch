@@ -86,7 +86,7 @@ def write_decomposition_util_file(path: str) -> None:
 
 
 def main() -> None:
-    pytorch_dir = Path(__file__).resolve().parents[3]
+    pytorch_dir = Path(__file__).absolute().parents[3]
     upgrader_path = pytorch_dir / "torch" / "csrc" / "jit" / "runtime"
     write_decomposition_util_file(str(upgrader_path))
 

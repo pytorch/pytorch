@@ -13,7 +13,7 @@ import jinja2
 
 Arch = Literal["windows", "linux", "macos"]
 
-GITHUB_DIR = Path(__file__).resolve().parent.parent
+GITHUB_DIR = Path(__file__).absolute().parent.parent
 
 LABEL_CIFLOW_TRUNK = "ciflow/trunk"
 LABEL_CIFLOW_UNSTABLE = "ciflow/unstable"
