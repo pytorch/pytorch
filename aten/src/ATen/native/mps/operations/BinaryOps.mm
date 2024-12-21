@@ -266,9 +266,18 @@ static void add_sub_lerp_template(const Tensor& self,
   }
 
   const bool alpha_has_value = alpha.toDouble() != 1.0;
+  const bool is_complex = c10::isComplexType(self.scalar_type()) || c10::isComplexType(other.scalar_type());
+  auto commonDtype = at::result_type(self, other);
   if (alpha_has_value) {
-    auto commonDtype = at::result_type(self, other);
     at::native::alpha_check(commonDtype, alpha);
+  } else if (!is_complex && self.dtype() != kDouble && other.dtype() != kDouble && commonDtype != kDouble) {
+    if (op_name == "add") {
+      mps::add_out(self, other, output);
+      return;
+    } else if (op_name == "sub") {
+      mps::sub_out(self, other, output);
+      return;
+    }
   }
 
   if (!alpha_has_value && op_name == "lerp") {
@@ -384,9 +393,11 @@ CREATE_MPS_BINARY_COMPARISON_OP_FUNC(logical_or_out_mps, logicalOR, Tensor);
 CREATE_MPS_BINARY_COMPARISON_OP_FUNC(logical_xor_out_mps, logicalXOR, Tensor);
 
 TORCH_IMPL_FUNC(mul_out_mps)(const Tensor& self, const Tensor& other, const Tensor& output) {
-  if (!mps::supportsComplex() && (c10::isComplexType(self.scalar_type()) || c10::isComplexType(other.scalar_type()))) {
+  if (c10::isComplexType(self.scalar_type()) || c10::isComplexType(other.scalar_type())) {
     return mps::complex_mul_out(self, other, output);
   }
+  return mps::real_mul_out(self, other, output);
+#if 0
   mps::binaryOpTensor(
       self, other, Scalar(1.0), output, "mul", ^BinaryOpFn(cachedGraph, primaryCastTensor, secondaryCastTensor) {
         MPSGraph* mpsGraph = cachedGraph->graph();
@@ -394,6 +405,7 @@ TORCH_IMPL_FUNC(mul_out_mps)(const Tensor& self, const Tensor& other, const Tens
                                          secondaryTensor:secondaryCastTensor
                                                     name:nil];
       });
+#endif
 }
 TORCH_IMPL_FUNC(atan2_out_mps)(const Tensor& self, const Tensor& other, const Tensor& output) {
   TORCH_CHECK(self.scalar_type() != ScalarType::Long, "MPS does not support atan2 op with int64 input");
