@@ -1057,7 +1057,6 @@ if(NOT MSVC)
   append_cxx_flag_if_supported("-Wconstant-conversion" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Wno-aligned-allocation-unavailable"
                                CMAKE_CXX_FLAGS)
-  append_cxx_flag_if_supported("-Wno-missing-braces" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Qunused-arguments" CMAKE_CXX_FLAGS)
 
   if(${USE_COLORIZE_OUTPUT})
@@ -1102,9 +1101,6 @@ if(NOT MSVC)
     append_cxx_flag_if_supported("-Wno-error=redundant-move" CMAKE_CXX_FLAGS)
   endif()
 else()
-  # Define export functions for AOTI.
-  add_compile_definitions(EXPORT_AOTI_FUNCTIONS)
-
   # skip unwanted includes from windows.h
   add_compile_definitions(WIN32_LEAN_AND_MEAN)
   # Windows SDK broke compatibility since version 25131, but introduced this

@@ -989,6 +989,31 @@ def forward(self, x_1: "f32[2][1]cpu"):
         logs = self.buffer.getvalue()
         self.assertTrue(all(event in logs for event in expected))
 
+    @requires_tlparse
+    @show_chrome_events
+    def test_compiled_autograd_chromium(self):
+        with torch._dynamo.compiled_autograd._enable(torch.compile):
+            for i in [10, 100, 10, 15, 20, 25]:
+                x = torch.arange(0.0, i, requires_grad=True)
+                loss = x.sum()
+                loss.backward()
+
+        self.assertParses()
+        expected = [
+            '{"chromium_event": {}, "compiled_autograd_id": 0, "attempt": 0, "has_payload": "HASH"}',
+            '{"chromium_event": {}, "compiled_autograd_id": 0, "frame_id": 0, "frame_compile_id": 0, "attempt": 0, '
+            '"has_payload": "HASH"}',
+            '{"chromium_event": {}, "compiled_autograd_id": 1, "frame_id": 1, "frame_compile_id": 1, "attempt": 0, '
+            '"has_payload": "HASH"}',
+            '{"chromium_event": {}, "compiled_autograd_id": 1, "attempt": 0, "has_payload": "HASH"}',
+            '{"chromium_event": {}, "compiled_autograd_id": 1, "frame_id": 1, "frame_compile_id": 0, "attempt": 0, '
+            '"has_payload": "HASH"}',
+            '{"chromium_event": {}, "compiled_autograd_id": 1, "frame_id": 1, "frame_compile_id": 1, "attempt": 0, '
+            '"has_payload": "HASH"}',
+        ]
+        logs = self.buffer.getvalue()
+        self.assertTrue(all(event in logs for event in expected))
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

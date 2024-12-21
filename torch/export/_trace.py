@@ -658,9 +658,12 @@ def _export_to_torch_ir(
     with torch._dynamo.config.patch(dataclasses.asdict(DEFAULT_EXPORT_DYNAMO_CONFIG)):
         try:
             module_call_specs: Dict[str, Dict[str, pytree.TreeSpec]] = {}
-            with _wrap_submodules(
-                f, preserve_module_call_signature, module_call_specs
-            ), _ignore_backend_decomps():
+            ctx = nullcontext()
+            if not isinstance(f, torch.fx.GraphModule):
+                ctx = _wrap_submodules(  # type: ignore[assignment]
+                    f, preserve_module_call_signature, module_call_specs
+                )
+            with ctx, _ignore_backend_decomps():
                 gm_torch_level, _ = torch._dynamo.export(
                     f,
                     dynamic_shapes=dynamic_shapes,  # type: ignore[arg-type]
@@ -1684,9 +1687,12 @@ def _non_strict_export(
             new_preserved_call_signatures = [
                 "_export_root." + i for i in preserve_module_call_signature
             ]
-            with _wrap_submodules(
-                wrapped_mod, new_preserved_call_signatures, module_call_specs
-            ):
+            ctx = nullcontext()
+            if not isinstance(mod, torch.fx.GraphModule):
+                ctx = _wrap_submodules(  # type: ignore[assignment]
+                    wrapped_mod, new_preserved_call_signatures, module_call_specs
+                )
+            with ctx:
                 gm, sig = aot_export(wrapped_mod, args, kwargs=kwargs, **flags)
                 log.debug("Exported program from AOTAutograd:\n%s", gm)
 
