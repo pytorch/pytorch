@@ -904,13 +904,16 @@ class GuardBuilder(GuardBuilderBase):
     def get_guard_manager_type(self, source, example_value):
         guard_manager_enum = GuardManagerType.GUARD_MANAGER
         if self.requires_key_order_guarding(source):
-            assert isinstance(example_value, dict)
-            # If keys method is not overriden, we can use PyDict_Next to get key
-            # orderings. Read more in guards.cpp
-            if type(example_value).keys is type({}).keys:
+            if isinstance(example_value, dict_keys):
                 guard_manager_enum = GuardManagerType.DICT_GUARD_MANAGER
             else:
-                guard_manager_enum = GuardManagerType.DICT_SUBCLASS_GUARD_MANAGER
+                assert isinstance(example_value, dict)
+                # If keys method is not overriden, we can use PyDict_Next to get key
+                # orderings. Read more in guards.cpp
+                if type(example_value).keys is type({}).keys:
+                    guard_manager_enum = GuardManagerType.DICT_GUARD_MANAGER
+                else:
+                    guard_manager_enum = GuardManagerType.DICT_SUBCLASS_GUARD_MANAGER
         return guard_manager_enum
 
     def manager_guards_on_keys(self, mgr_enum):
@@ -1745,15 +1748,16 @@ class GuardBuilder(GuardBuilderBase):
         ) or is_from_optimizer_source(source_b):
             return
 
-        code = [f"{ref_b} is {ref_a}"]
-        self._set_guard_export_info(guard, code)
-
         # Check that the guard has not been inserted already
         key = (ref_a, ref_b)
         if key in self._cached_duplicate_input_guards:
             return
+
         self._cached_duplicate_input_guards.add((ref_a, ref_b))
         self._cached_duplicate_input_guards.add((ref_b, ref_a))
+
+        code = [f"{ref_b} is {ref_a}"]
+        self._set_guard_export_info(guard, code)
 
         install_object_aliasing_guard(
             self.get_guard_manager(guard),
@@ -2316,7 +2320,7 @@ class CheckFunctionManager:
         if not justknobs_check("pytorch/compiler:guard_nn_modules"):
             log.warning("guard_nn_modules is turned off using justknobs killswitch")
 
-        for guard in sorted(guards or [], key=Guard.sort_key):
+        for guard in sorted(guards or (), key=Guard.sort_key):
             if (
                 not guard_on_nn_modules
                 and guard.is_specialized_nn_module()
