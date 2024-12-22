@@ -38,6 +38,7 @@ from weakref import ReferenceType
 import torch
 import torch.overrides
 import torch.utils._device
+from torch._C._dynamo.eval_frame import code_framelocals_names
 from torch._C._dynamo.guards import (
     check_obj_id,
     check_type_id,
@@ -120,6 +121,7 @@ from .types import (  # noqa: F401
 )
 from .utils import (
     common_constant_types,
+    dict_keys,
     dict_keys_repr,
     get_custom_getattr,
     get_torch_function_mode_stack,
@@ -570,9 +572,15 @@ class GuardManagerType(enum.Enum):
     DICT_SUBCLASS_GUARD_MANAGER = 3
 
 
+@functools.lru_cache(None)
+def code_framelocals_names_reversed_cached(code: types.CodeType):
+    return list(reversed(code_framelocals_names(code)))
+
+
 class GuardBuilder(GuardBuilderBase):
     def __init__(
         self,
+        f_code: types.CodeType,
         id_ref: Callable[[Any, str], str],
         source_ref: Callable[[Source], str],
         lookup_weakrefs: Callable[[object], ReferenceType[object]],
@@ -581,6 +589,7 @@ class GuardBuilder(GuardBuilderBase):
         guard_manager: GuardManagerWrapper,
         check_fn_manager: CheckFunctionManager,
     ):
+        self.f_code = f_code
         self.id_ref = id_ref
         self.source_ref = source_ref
         self.lookup_weakrefs = lookup_weakrefs
@@ -866,13 +875,16 @@ class GuardBuilder(GuardBuilderBase):
     def get_guard_manager_type(self, source, example_value):
         guard_manager_enum = GuardManagerType.GUARD_MANAGER
         if self.requires_key_order_guarding(source):
-            assert isinstance(example_value, dict)
-            # If keys method is not overriden, we can use PyDict_Next to get key
-            # orderings. Read more in guards.cpp
-            if type(example_value).keys is type({}).keys:
+            if isinstance(example_value, dict_keys):
                 guard_manager_enum = GuardManagerType.DICT_GUARD_MANAGER
             else:
-                guard_manager_enum = GuardManagerType.DICT_SUBCLASS_GUARD_MANAGER
+                assert isinstance(example_value, dict)
+                # If keys method is not overriden, we can use PyDict_Next to get key
+                # orderings. Read more in guards.cpp
+                if type(example_value).keys is type({}).keys:
+                    guard_manager_enum = GuardManagerType.DICT_GUARD_MANAGER
+                else:
+                    guard_manager_enum = GuardManagerType.DICT_SUBCLASS_GUARD_MANAGER
         return guard_manager_enum
 
     def manager_guards_on_keys(self, mgr_enum):
@@ -918,15 +930,34 @@ class GuardBuilder(GuardBuilderBase):
 
         # Use istype instead of isinstance to check for exact type of source.
         if istype(source, LocalSource):
-            # RootGuardManager accepts a dict but still its not a
-            # DictGuardManager because we will eventually move to
-            # fastlocals.
-            out = root_guard_manager.dict_getitem_manager(
-                key=source.local_name,
-                source=source_name,
-                example_value=example_value,
-                guard_manager_enum=guard_manager_enum,
-            )
+            # Refer to index in the frame's localsplus directly.
+            # NOTE: name order for a code object doesn't change.
+            # NOTE: we need to find the LAST matching index because <= 3.10 contains
+            # duplicate names in the case of cells: a name can be both local and cell
+            # and will take up 2 slots of the frame's localsplus. The correct behavior
+            # is to refer to the cell, which has a higher index.
+            if config.enable_cpp_framelocals_guard_eval:
+                framelocals_names_reversed = code_framelocals_names_reversed_cached(
+                    self.f_code
+                )
+                framelocals_idx = (
+                    len(framelocals_names_reversed)
+                    - framelocals_names_reversed.index(source.local_name)
+                    - 1
+                )
+                out = root_guard_manager.framelocals_manager(
+                    key=(source.local_name, framelocals_idx),
+                    source=source_name,
+                    example_value=example_value,
+                    guard_manager_enum=guard_manager_enum,
+                )
+            else:
+                out = root_guard_manager.dict_getitem_manager(
+                    key=source.local_name,
+                    source=source_name,
+                    example_value=example_value,
+                    guard_manager_enum=guard_manager_enum,
+                )
         elif istype(source, GlobalSource):
             # Global manager accepts a dict but it is not a DictGuardManager
             # because globals dict is big and we typically guard on a very
@@ -1512,6 +1543,7 @@ class GuardBuilder(GuardBuilderBase):
                 frozenset,
                 slice,
                 range,
+                dict_keys,
                 torch.Size,
                 *np_types,
                 *ok_mutable_types,
@@ -1857,13 +1889,16 @@ class GuardBuilder(GuardBuilderBase):
         # Install all the symbolic guards in one lambda guard. These are run
         # at the very end of the RootGuardManager via epilogue guards.
         # TODO(anijain2305,williamwen42) - Consider moving this to C++.
-        self.add_python_lambda_leaf_guard_to_root(
-            code_parts,
-            verbose_code_parts,
-            closure_vars={**SYMPY_INTERP, **_get_closure_vars()},
-        )
+        if code_parts:
+            self.add_python_lambda_leaf_guard_to_root(
+                code_parts,
+                verbose_code_parts,
+                closure_vars={**SYMPY_INTERP, **_get_closure_vars()},
+            )
 
     def TENSOR_MATCH(self, guard: Guard, value=None):
+        if config._unsafe_skip_fsdp_module_guards and guard.is_fsdp_module():
+            return
         # For tensors that are part of the Dynamo extracted Fx graph module, an
         # ID_MATCH suffices. Once we turn on inline_inbuilt_nn_modules, these
         # will be lifted as inputs and have a TENSOR_MATCH guard.
@@ -2198,6 +2233,7 @@ class DeletedGuardManagerWrapper(GuardManagerWrapper):
 class CheckFunctionManager:
     def __init__(
         self,
+        f_code,
         output_graph=None,
         cache_entry=None,
         guard_fail_fn: Optional[Callable[[GuardFail], None]] = None,
@@ -2230,6 +2266,7 @@ class CheckFunctionManager:
             return r_builder.arg_ref(source.name())
 
         builder = GuardBuilder(
+            f_code,
             self.id_ref,
             source_ref,
             self.lookup_weakrefs,
