@@ -3043,7 +3043,7 @@ def main() -> None:
         gen_declarations_yaml(native_functions=native_functions, cpu_fm=cpu_fm)
 
     if options.output_dependencies:
-        depfile_path = Path(options.output_dependencies).resolve()
+        depfile_path = Path(options.output_dependencies).absolute()
         depfile_name = depfile_path.name
         depfile_stem = depfile_path.stem
 

@@ -157,7 +157,7 @@ def _find_sycl_home() -> Optional[str]:
             files = importlib.metadata.files('intel-sycl-rt') or []
             for f in files:
                 if f.name == "libsycl.so":
-                    sycl_home = os.path.dirname(Path(f.locate()).parent.resolve())
+                    sycl_home = os.path.dirname(Path(f.locate()).resolve().parent)
                     break
         except importlib.metadata.PackageNotFoundError:
             print("Trying to find SYCL_HOME from intel-sycl-rt package, but it is not installed.",
