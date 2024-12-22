@@ -112,7 +112,7 @@ jobs:
           pip uninstall -y "$TORCH_PACKAGE_NAME" || true
 
           # Create new "clean" conda environment for testing
-          conda create -yn "test_conda_env" python="$desired_python"
+          conda create -yn "test_conda_env" python="$DESIRED_PYTHON"
           conda activate test_conda_env
 
           pip install "$PYTORCH_FINAL_PACKAGE_DIR/*.whl" numpy -v
