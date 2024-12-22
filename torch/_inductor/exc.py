@@ -6,7 +6,7 @@ import textwrap
 from functools import lru_cache
 from typing import Any, List, Optional, TYPE_CHECKING
 
-from torch._dynamo.exc import ShortenTraceback
+from torch._dynamo.exc import BackendCompilerFailed, ShortenTraceback
 
 
 if TYPE_CHECKING:
@@ -133,5 +133,21 @@ class GPUTooOldForTriton(ShortenTraceback):
             f"Found {device_props.name} which is too old to be supported by the triton GPU compiler, "
             "which is used as the backend. Triton only supports devices of CUDA Capability >= 7.0, "
             f"but your device is of CUDA capability {device_props.major}.{device_props.minor}",
+            first_useful_frame=first_useful_frame,
+        )
+
+
+class InductorError(BackendCompilerFailed):
+    backend_name = "inductor"
+
+    def __init__(
+        self,
+        inner_exception: Exception,
+        first_useful_frame: Optional[types.FrameType],
+    ) -> None:
+        self.inner_exception = inner_exception
+        ShortenTraceback.__init__(
+            self,
+            f"{type(inner_exception).__name__}: {inner_exception}",
             first_useful_frame=first_useful_frame,
         )
