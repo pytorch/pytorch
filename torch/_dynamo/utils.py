@@ -2401,16 +2401,16 @@ def format_func_info(code):
 
 @contextlib.contextmanager
 def disable_cache_limit():
-    prior = config.cache_size_limit
-    config.cache_size_limit = sys.maxsize
-    prior_acc_limit = config.accumulated_cache_size_limit
-    config.accumulated_cache_size_limit = sys.maxsize
+    prior = config.recompile_limit
+    config.recompile_limit = sys.maxsize
+    prior_acc_limit = config.accumulated_recompile_limit
+    config.accumulated_recompile_limit = sys.maxsize
 
     try:
         yield
     finally:
-        config.cache_size_limit = prior
-        config.accumulated_cache_size_limit = prior_acc_limit
+        config.recompile_limit = prior
+        config.accumulated_recompile_limit = prior_acc_limit
 
 
 # map from transformed code back to original user code
