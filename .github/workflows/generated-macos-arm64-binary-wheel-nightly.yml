@@ -120,7 +120,7 @@ jobs:
           conda create -yn "test_conda_env" python="$DESIRED_PYTHON"
           conda activate test_conda_env
 
-          pip install "$PYTORCH_FINAL_PACKAGE_DIR/*.whl" numpy -v
+          pip install "$PYTORCH_FINAL_PACKAGE_DIR"/*.whl numpy -v
           python .ci/pytorch/smoke_test/smoke_test.py --package torchonly
       - uses: actions/upload-artifact@v4.4.0
         if: always()
@@ -240,7 +240,7 @@ jobs:
           conda create -yn "test_conda_env" python="$DESIRED_PYTHON"
           conda activate test_conda_env
 
-          pip install "$PYTORCH_FINAL_PACKAGE_DIR/*.whl" numpy -v
+          pip install "$PYTORCH_FINAL_PACKAGE_DIR"/*.whl numpy -v
           python .ci/pytorch/smoke_test/smoke_test.py --package torchonly
       - uses: actions/upload-artifact@v4.4.0
         if: always()
@@ -360,7 +360,7 @@ jobs:
           conda create -yn "test_conda_env" python="$DESIRED_PYTHON"
           conda activate test_conda_env
 
-          pip install "$PYTORCH_FINAL_PACKAGE_DIR/*.whl" numpy -v
+          pip install "$PYTORCH_FINAL_PACKAGE_DIR"/*.whl numpy -v
           python .ci/pytorch/smoke_test/smoke_test.py --package torchonly
       - uses: actions/upload-artifact@v4.4.0
         if: always()
@@ -480,7 +480,7 @@ jobs:
           conda create -yn "test_conda_env" python="$DESIRED_PYTHON"
           conda activate test_conda_env
 
-          pip install "$PYTORCH_FINAL_PACKAGE_DIR/*.whl" numpy -v
+          pip install "$PYTORCH_FINAL_PACKAGE_DIR"/*.whl numpy -v
           python .ci/pytorch/smoke_test/smoke_test.py --package torchonly
       - uses: actions/upload-artifact@v4.4.0
         if: always()
@@ -600,7 +600,7 @@ jobs:
           conda create -yn "test_conda_env" python="$DESIRED_PYTHON"
           conda activate test_conda_env
 
-          pip install "$PYTORCH_FINAL_PACKAGE_DIR/*.whl" numpy -v
+          pip install "$PYTORCH_FINAL_PACKAGE_DIR"/*.whl numpy -v
           python .ci/pytorch/smoke_test/smoke_test.py --package torchonly
       - uses: actions/upload-artifact@v4.4.0
         if: always()
