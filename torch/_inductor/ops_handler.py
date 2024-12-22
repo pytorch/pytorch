@@ -974,7 +974,7 @@ class OpCounterCSE:
         self.parent_handler = inner
         self.op_count = 0
         self.var_names = {}
-        self._used_ops: OrderedSet[str] = OrderedSet()
+        self._used_ops = OrderedSet[str]()
         self._read_names: List[str] = []
         self._nontrivial_read_count = 0
 
