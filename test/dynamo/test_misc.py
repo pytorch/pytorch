@@ -1,4 +1,5 @@
 # Owner(s): ["module: dynamo"]
+# ruff: noqa: F841
 import abc
 import collections
 import collections.abc
@@ -216,7 +217,7 @@ class MiscTests(torch._inductor.test_case.TestCase):
         self.assertTrue(same(val4, correct1))
         self.assertEqual(counter.frame_count, 3)
 
-    @torch._dynamo.config.patch(accumulated_cache_size_limit=1)
+    @torch._dynamo.config.patch(accumulated_recompile_limit=1)
     def test_dynamo_disabled_in_custom_op_kernels(self):
         counters.clear()
 
@@ -2563,7 +2564,7 @@ utils_device.CURRENT_DEVICE == None""".split(
 
         cnts = torch._dynamo.testing.CompileCounter()
         opt_fn = torch.compile(mandelbrot_numpy, backend=cnts, fullgraph=True)
-        n_iter = torch._dynamo.config.cache_size_limit - 2
+        n_iter = torch._dynamo.config.recompile_limit - 2
         for i in range(n_iter):
             x = i + 3
             ref = mandelbrot_numpy(x)
@@ -2756,7 +2757,7 @@ utils_device.CURRENT_DEVICE == None""".split(
         self.assertEqual(cnts.frame_count, 1)
 
     # cache size limit needs to be larger than the `dtypes` list size
-    @torch._dynamo.config.patch(cache_size_limit=12)
+    @torch._dynamo.config.patch(recompile_limit=12)
     def test_dtypes_no_graphbreaks(self):
         dtypes = [
             # floats
@@ -3014,6 +3015,45 @@ utils_device.CURRENT_DEVICE == None""".split(
         # Different order recompiles
         self.assertEqual(fn(args2, x), opt_fn(args2, x))
         self.assertEqual(cnts.frame_count, 2)
+
+    def test_mutable_mapping_multiple_inheritance(self):
+        class MyWeirdDict(collections.abc.MutableMapping, torch.nn.Module):
+            def __init__(self, **kwargs):
+                super().__init__()
+                self._items = kwargs
+
+            def keys(self):
+                return self._items.keys()
+
+            def __getitem__(self, item):
+                return self._items[item]
+
+            def __setitem__(self, key, value):
+                self._items[key] = value
+
+            def __delitem__(self, item):
+                del self._items[item]
+
+            def __len__(self):
+                return len(self._items)
+
+            def __iter__(self):
+                yield from self._items
+
+            def __hash__(self):
+                return hash(id(self))
+
+            def items(self):
+                for k, v in self._items.items():
+                    yield (k, v)
+
+        @torch.compile(fullgraph=True)
+        def to_weird_dict(td):
+            return MyWeirdDict(**td)
+
+        d = MyWeirdDict(a=1, b=2, c=3)
+        res = to_weird_dict(d)
+        self.assertEqual(tuple(d.items()), tuple(res.items()))
 
     def test_dunder_new_function_inlining(self):
         # https://github.com/pytorch/pytorch/issues/107460
@@ -9384,6 +9424,34 @@ def ___make_guard_fn():
         self.assertEqual(eager, compiled)
         self.assertEqual(counter.frame_count, 0)
 
+    # just to be sure in case anyone tries to run this in older versions of Python
+    @unittest.skipIf(sys.version_info < (3, 7), "Made default on Python 3.7")
+    def test_pep0479_convert_stopiteration(self):
+        # https://peps.python.org/pep-0479/
+        def generator_with_stop_iteration():
+            yield 1
+            # Explicitly raising StopIteration inside the generator
+            raise StopIteration("StopIteration raised within generator")
+            yield 2  # This should never be reached
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(t):
+            try:
+                # Try to consume the generator
+                gen = generator_with_stop_iteration()
+                next(gen)
+                next(gen)
+            except RuntimeError as e:
+                # Check that StopIteration was converted to RuntimeError
+                # See STOPITERATION_ERROR opcode in symbolic_convert.py
+                return 100
+            except StopIteration:
+                return 200
+
+        t = torch.randn(2)
+        y = fn(t)
+        self.assertEqual(y, 100)
+
     def test_yield_send_to_subgenerator_graph_break(self):
         def subgenerator(tensor):
             multiplier = yield
@@ -10102,6 +10170,8 @@ def ___make_guard_fn():
 
     def test_pytree_tree_flatten_unflatten(self):
         implemtations = [("python", python_pytree)]
+        if cxx_pytree is not None:
+            implemtations.append(("cxx", cxx_pytree))
 
         for name, module in implemtations:
             with self.subTest(f"pytree implement: {name}"):
@@ -10138,7 +10208,7 @@ def ___make_guard_fn():
                         torch.ones(3, 2),
                         1,
                     ]
-                    new_tree = module.tree_unflatten(leaves, treespec)
+                    new_tree = module.tree_unflatten(new_leaves, treespec)
                     return leaves, new_tree
 
             x = torch.randn(3, 2)
@@ -10151,6 +10221,8 @@ def ___make_guard_fn():
 
     def test_pytree_tree_map(self):
         implemtations = [("python", python_pytree)]
+        if cxx_pytree is not None:
+            implemtations.append(("cxx", cxx_pytree))
 
         for name, module in implemtations:
             with self.subTest(f"pytree implement: {name}"):
@@ -10527,7 +10599,7 @@ ShapeEnv not equal: field values don't match:
 
         foo()
 
-    def test_dict_subclass_cannot_be_initialized_in_graph(self):
+    def test_dict_subclass_initialization_in_graph(self):
         for super_class in (
             collections.OrderedDict,
             dict,
@@ -10543,11 +10615,10 @@ ShapeEnv not equal: field values don't match:
                 assert "key" in c
                 return c["key"] + 1
 
-            fn_opt = torch.compile(fn, backend="eager", fullgraph=True)
-            with self.assertRaisesRegex(
-                torch._dynamo.exc.Unsupported, "call_function UserDefinedClassVariable"
-            ):
-                print(fn_opt(torch.zeros(1)))
+            opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+
+            x = torch.rand(4)
+            self.assertEqual(fn(x), opt_fn(x))
 
     @wrapDeterministicFlagAPITest
     def test_backward_deterministic_mode_mismatch_warning(self):

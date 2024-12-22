@@ -327,8 +327,7 @@ class TestMisc(TestCase):
 
     @skipif(sys.version_info >= (3, 9), reason="Requires python 3.9")
     def test_class_getitem_38(self) -> None:
-        match = "Type subscription requires python >= 3.9"
-        with pytest.raises(TypeError):  # , match=match):
+        with pytest.raises(TypeError):
             np.dtype[Any]
 
 
