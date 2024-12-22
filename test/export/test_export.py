@@ -1,4 +1,5 @@
 # Owner(s): ["oncall: export"]
+# ruff: noqa: F841
 # flake8: noqa
 import copy
 import dataclasses
@@ -1093,6 +1094,69 @@ graph():
         ):
             export(M(), (torch.randn(2, 3),), strict=False)
 
+    def test_malformed_fqn_from_source_name(self):
+        # See https://github.com/pytorch/pytorch/issues/141939
+        from types import MethodType
+
+        class Block(torch.nn.Module):
+            def __init__(self, i, o):
+                super().__init__()
+                self.to_out = torch.nn.ModuleList([])
+                self.to_out.append(torch.nn.Linear(i, o, bias=True))
+                self.to_out.append(torch.nn.Dropout(0.5))
+
+            def forward(self, x):
+                for l in self.to_out:
+                    x = l(x)
+                return x
+
+        class Problem1(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.blocks = torch.nn.ModuleDict(
+                    {f"{i}": Block(64, 64) for i in range(5)}
+                )
+
+            def forward(self, x):
+                for k, m in self.blocks.items():
+                    x = m(x)
+                return x
+
+        class Problem2(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.blocks = torch.nn.ModuleList([Block(64, 64) for i in range(5)])
+
+            def forward(self, x):
+                x = self.blocks[0](x)
+                for m in self.blocks[1:4]:
+                    x = m(x)
+                return x
+
+        def _split_after_forward(self, *args, **kwargs):
+            return self._orig_forward(*args, **kwargs)
+
+        def annotate_split_points(mod: torch.nn.Module, spec):
+            for qualname, split_type in spec.items():
+                atoms = qualname.split(".")
+                predecessor_module = mod
+                for i, atom in enumerate(atoms[:-1]):
+                    try:
+                        predecessor_module = getattr(predecessor_module, atom)
+                    except AttributeError as e:
+                        raise e
+                mod_to_wrap = getattr(predecessor_module, atoms[-1])
+                mod_to_wrap._orig_forward = mod_to_wrap.forward
+                mod_to_wrap.forward = MethodType(_split_after_forward, mod_to_wrap)
+
+        for problem in [Problem1, Problem2]:
+            m = problem()
+            m(torch.rand(64, 64))
+            # simpified torch.distributed.pipeline code
+            annotate_split_points(m, {"blocks.1": 1, "blocks.3": 1})
+            gm = export(m, (torch.rand(64, 64),))
+            torch.export.unflatten(gm)
+
     def test_state_primitives(self):
         class M(torch.nn.Module):
             def __init__(self) -> None:
@@ -1126,6 +1190,21 @@ graph():
         model = TestModule()
         x = torch.randn(20, 10)
         ep_model = export(model, (x,), strict=False).module()
+        self.assertTrue(torch.allclose(model(x), ep_model(x)))
+
+    def test_output_node_name(self):
+        class TestModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(10, 10)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        model = TestModule()
+        x = torch.randn(20, 10)
+        ep_model = export(model, (x,), strict=False).module()
+        self.assertEqual(list(ep_model.graph.nodes)[-1].name, "output")
         self.assertTrue(torch.allclose(model(x), ep_model(x)))
 
     def test_real_tensor_size_mismatch(self):
@@ -1979,6 +2058,52 @@ def forward(self, p_linear_weight, p_linear_bias, x):
             ("sin_1", "method_descriptor.sin"),
         ]
         self.assertEqual(actual_torch_fns, exp_torch_fns)
+
+    def test_is_exporting(self):
+        class Mod(torch.nn.Module):
+            def forward(self, pred, x):
+                def f(x):
+                    return x.sin() if torch.compiler.is_exporting() else x.cos()
+
+                y = f(x)
+
+                def true_fn(x):
+                    return f(x) - 1 if torch.compiler.is_exporting() else f(x) + 1
+
+                def false_fn(x):
+                    return f(x) + 1 if torch.compiler.is_exporting() else f(x) - 1
+
+                return torch.cond(pred, true_fn, false_fn, (x,)) * y
+
+        ep = export(
+            Mod(),
+            (
+                torch.tensor(False),
+                torch.randn(3, 4),
+            ),
+        )
+        FileCheck().check_count("torch.ops.aten.sin", 1, exactly=True).run(
+            ep.graph_module.code
+        )
+        FileCheck().check_count("torch.ops.higher_order.cond", 1, exactly=True).run(
+            ep.graph_module.code
+        )
+
+        # True graph should contain sin and sub
+        FileCheck().check_count("torch.ops.aten.sub", 1, exactly=True).run(
+            ep.graph_module.true_graph_0.code
+        )
+        FileCheck().check_count("torch.ops.aten.sin", 1, exactly=True).run(
+            ep.graph_module.true_graph_0.code
+        )
+
+        # False graph should contain sin and add
+        FileCheck().check_count("torch.ops.aten.add", 1, exactly=True).run(
+            ep.graph_module.false_graph_0.code
+        )
+        FileCheck().check_count("torch.ops.aten.sin", 1, exactly=True).run(
+            ep.graph_module.false_graph_0.code
+        )
 
     def test_duplicate_modules_with_non_persistent_buffers(self):
         class FooWithBuf(torch.nn.Module):
@@ -3671,7 +3796,6 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         ):
             em.module()(x)
 
-    @testing.expectedFailureRetraceabilityNonStrict
     def test_dont_duck_size_for_auto_dynamic(self):
         AUTO, STATIC = Dim.AUTO, Dim.STATIC
 
@@ -3898,12 +4022,78 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         nms_pre = torch.tensor(4)
         inputs = (score, score_thr, nms_pre, dict(bbox_pred=bbox_pred))
 
-        ep = torch.export.export(M(), inputs)
+        ep = export(M(), inputs)
         orig_res = M()(*inputs)
         ep_res = ep.module()(*inputs)
         self.assertTrue(torch.allclose(orig_res[0], ep_res[0]))
         self.assertTrue(torch.allclose(orig_res[1], ep_res[1]))
         self.assertTrue(torch.allclose(orig_res[2], ep_res[2]))
+
+    def test_sequential_slicing(self):
+        # See https://github.com/pytorch/pytorch/issues/137455
+
+        class TestModule1(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.seq = torch.nn.Sequential(
+                    torch.nn.Linear(4, 4),
+                    torch.nn.Linear(4, 4),
+                    torch.nn.Linear(4, 4),
+                )
+
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                # seq_last as local variable works
+                seq_last = self.seq[1:]
+                return seq_last(x)
+
+        class TestModule2(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.seq = torch.nn.Sequential(
+                    torch.nn.Linear(4, 4),
+                    torch.nn.Linear(4, 4),
+                    torch.nn.Linear(4, 4),
+                )
+                # seq_last as initialized submodule works
+                self.seq_last = self.seq[1:]
+
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                return self.seq_last(x)
+
+        inp = (torch.randn(4, 4),)
+        for mod in [TestModule1(), TestModule2()]:
+            epm = export(mod, inp).module()
+            self.assertTrue(torch.allclose(epm(*inp), mod(*inp)))
+
+    def test_unflatten_isinstance(self):
+        class N(torch.nn.Module):
+            def forward(self, x, b):
+                if b:
+                    return x + 1
+                else:
+                    return x + 2
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.n = N()
+
+            def forward(self, x):
+                return self.n(x + 1, True) + self.n(x + 1, False)
+
+        x = torch.zeros(4)
+        types = {"n": N}
+        ep = export(
+            M(),
+            (x,),
+            preserve_module_call_signature=tuple(types.keys()),
+        )
+        ufm = torch.export.unflatten(ep)
+        self.assertTrue(torch.allclose(ufm(x), x + 5))
+        for fqn, mod in ufm.named_modules(remove_duplicate=False):
+            if cls := types.get(fqn):
+                ty = f"{cls.__module__}.{cls.__qualname__}"
+                self.assertTrue(ty, mod.type_name())
 
     def test_unflatten_asserts(self):
         # TODO: strict-export fails
@@ -5196,7 +5386,7 @@ def forward(self, x):
                 torch._check(pos <= 4)
                 return self.freq[pos] * self.freq[pos]
 
-        ep = torch.export.export(M(), (torch.tensor(1),))
+        ep = export(M(), (torch.tensor(1),))
         FileCheck().check_count(
             "torch.ops.aten._assert_scalar.default", 2, exactly=True
         ).run(ep.graph_module.code)
@@ -7576,14 +7766,11 @@ graph():
 
         inp = (torch.ones(1),)
         eager = N0()(*inp)
-        if is_retracebility_test(self._testMethodName):
-            fqns = ()
-        else:
-            fqns = (
-                "n1",
-                "n1.n2",
-                "n1.n2.n3",
-            )
+        fqns = (
+            "n1",
+            "n1.n2",
+            "n1.n2.n3",
+        )
         ep = export(N0(), inp, preserve_module_call_signature=fqns)
         epm = ep.module()
         ufm = torch.export.unflatten(ep)
@@ -7641,14 +7828,11 @@ graph():
 
         inp = (torch.ones(1),)
         eager = N0()(*inp)
-        if is_retracebility_test(self._testMethodName):
-            fqns = ()
-        else:
-            fqns = (
-                "n1",
-                "n1.n2",
-                "n1.n2.n3",
-            )
+        fqns = (
+            "n1",
+            "n1.n2",
+            "n1.n2.n3",
+        )
         ep = export(N0(), inp, preserve_module_call_signature=fqns)
         epm = ep.module()
         ufm = torch.export.unflatten(ep)
@@ -7705,14 +7889,11 @@ graph():
 
         inp = (torch.ones(1),)
         eager = N0()(*inp)
-        if is_retracebility_test(self._testMethodName):
-            fqns = ()
-        else:
-            fqns = (
-                "n1",
-                "n1.n2",
-                "n1.n2.n3",
-            )
+        fqns = (
+            "n1",
+            "n1.n2",
+            "n1.n2.n3",
+        )
         ep = export(N0(), inp, preserve_module_call_signature=fqns)
         epm = ep.module()
         ufm = torch.export.unflatten(ep)
@@ -7788,15 +7969,12 @@ graph():
 
         inp = (torch.ones(1),)
         eager = N0()(*inp)
-        if is_retracebility_test(self._testMethodName):
-            fqns = ()
-        else:
-            fqns = (
-                "n1",
-                "n1.n2",
-                "n1.n2.n3",
-                "n1.n2.n3.n4",
-            )
+        fqns = (
+            "n1",
+            "n1.n2",
+            "n1.n2.n3",
+            "n1.n2.n3.n4",
+        )
         ep = export(N0(), inp, preserve_module_call_signature=fqns)
         epm = ep.module()
         ufm = torch.export.unflatten(ep)
@@ -7914,17 +8092,14 @@ graph():
 
         inp = (torch.ones(1),)
         eager = N0()(*inp)
-        if is_retracebility_test(self._testMethodName):
-            fqns = ()
-        else:
-            fqns = (
-                "n1",
-                "n1.n2",
-                "n1.n2.n3",
-                "n1.n2.n3.n4",
-                "n1.n2.n3.n4.n5",
-                "n1.n2.n3.n4.n5.n6",
-            )
+        fqns = (
+            "n1",
+            "n1.n2",
+            "n1.n2.n3",
+            "n1.n2.n3.n4",
+            "n1.n2.n3.n4.n5",
+            "n1.n2.n3.n4.n5.n6",
+        )
         ep = export(N0(), inp, preserve_module_call_signature=fqns)
         epm = ep.module()
         ufm = torch.export.unflatten(ep)
@@ -8102,20 +8277,17 @@ graph():
 
         inp = (torch.ones(1),)
         eager = N0()(*inp)
-        if is_retracebility_test(self._testMethodName):
-            fqns = ()
-        else:
-            fqns = (
-                "n1",
-                "n1.n2",
-                "n1.n2.n3",
-                "n1.n2.n3.n4",
-                "n1.n2.n3.n4.n5",
-                "n1.n2.n3.n4.n5.n6",
-                "n1.n2.n3.n4.n5.n6.n7",
-                "n1.n2.n3.n4.n5.n6.n7.n8",
-                "n1.n2.n3.n4.n5.n6.n7.n8.n9",
-            )
+        fqns = (
+            "n1",
+            "n1.n2",
+            "n1.n2.n3",
+            "n1.n2.n3.n4",
+            "n1.n2.n3.n4.n5",
+            "n1.n2.n3.n4.n5.n6",
+            "n1.n2.n3.n4.n5.n6.n7",
+            "n1.n2.n3.n4.n5.n6.n7.n8",
+            "n1.n2.n3.n4.n5.n6.n7.n8.n9",
+        )
         ep = export(
             N0(),
             inp,
@@ -8161,13 +8333,10 @@ graph():
 
         inp = (torch.ones(1),)
         eager = N0()(*inp)
-        if is_retracebility_test(self._testMethodName):
-            fqns = ()
-        else:
-            fqns = (
-                "n1",
-                "n1.n2",
-            )
+        fqns = (
+            "n1",
+            "n1.n2",
+        )
         ep = export(N0(), inp, preserve_module_call_signature=fqns)
         epm = ep.module()
         ufm = torch.export.unflatten(ep)
@@ -8208,13 +8377,10 @@ graph():
 
         inp = (torch.ones(1),)
         eager = N0()(*inp)
-        if is_retracebility_test(self._testMethodName):
-            fqns = ()
-        else:
-            fqns = (
-                "n1",
-                "n1.n2",
-            )
+        fqns = (
+            "n1",
+            "n1.n2",
+        )
         ep = export(N0(), inp, preserve_module_call_signature=fqns)
         epm = ep.module()
         ufm = torch.export.unflatten(ep)
@@ -8305,6 +8471,7 @@ graph():
                 self.assertTrue(torch.allclose(unflattened_result, eager_result))
 
             if not is_retracebility_test(self._testMethodName):
+                # swapping will not work with retrace
                 test(
                     export(Mod(), inp, preserve_module_call_signature=(path_n,)),
                     swap={path_n: N()},
@@ -8338,6 +8505,7 @@ graph():
         eager_result = m(*inp)
 
         if not is_retracebility_test(self._testMethodName):
+            # swapping will not work with retrace
             ep = export(M(), inp, preserve_module_call_signature=("n",))
             epm = ep.module()
             ufm = torch.export.unflatten(ep)
@@ -8389,18 +8557,17 @@ graph():
             unflattened_result = ufm(*inp)
             self.assertTrue(torch.allclose(unflattened_result, eager_result))
 
-        if not is_retracebility_test(self._testMethodName):
-            if is_training_ir_test(self._testMethodName):
-                test(
-                    torch.export.export_for_training(
-                        M(),
-                        inp,
-                        strict=not is_non_strict_test(self._testMethodName),
-                        preserve_module_call_signature=("n",),
-                    )
+        if is_training_ir_test(self._testMethodName):
+            test(
+                torch.export.export_for_training(
+                    M(),
+                    inp,
+                    strict=not is_non_strict_test(self._testMethodName),
+                    preserve_module_call_signature=("n",),
                 )
+            )
 
-            test(export(M(), inp, preserve_module_call_signature=("n",)))
+        test(export(M(), inp, preserve_module_call_signature=("n",)))
 
     def test_unflatten_multiple_graphs_preserve_signature_no_error(self):
         class N(torch.nn.Module):
@@ -8444,6 +8611,7 @@ graph():
                 self.assertTrue(torch.allclose(unflattened_result, eager_result))
 
         if not is_retracebility_test(self._testMethodName):
+            # swapping will not work with retrace
             test(
                 export(M(), inp, preserve_module_call_signature=("n",)),
                 swap={"n": N()},
@@ -8500,6 +8668,7 @@ graph():
                 self.assertTrue(torch.allclose(unflattened_result, eager_result))
 
         if not is_retracebility_test(self._testMethodName):
+            # swapping will not work with retrace
             test(
                 export(M(), inp, preserve_module_call_signature=("n",)),
                 swap={"n": N()},
@@ -8644,15 +8813,13 @@ graph():
                         id(getattr(unflattened, a)), id(getattr(unflattened, b))
                     )
 
-            if not is_retracebility_test(self._testMethodName):
-                # preserving module call signatures
-                ep = export(m, inp, preserve_module_call_signature=("n", "p"))
-                exported_result = ep.module()(*inp)
-                self.assertTrue(torch.allclose(exported_result, eager_result))
+            ep = export(m, inp, preserve_module_call_signature=("n", "p"))
+            exported_result = ep.module()(*inp)
+            self.assertTrue(torch.allclose(exported_result, eager_result))
 
-                unflattened = torch.export.unflatten(ep)
-                unflattened_result = unflattened(*inp)
-                self.assertTrue(torch.allclose(unflattened_result, eager_result))
+            unflattened = torch.export.unflatten(ep)
+            unflattened_result = unflattened(*inp)
+            self.assertTrue(torch.allclose(unflattened_result, eager_result))
 
         test(
             gen_m(n=True, n_1=False, p=False, p_1=False),
@@ -9656,7 +9823,6 @@ def forward(self, x, y):
         }
         export(f, (inputs,), dynamic_shapes=dynamic_shapes)
 
-    @testing.expectedFailureRetraceabilityNonStrict
     def test_disable_forced_specializations_ok(self):
         # check that we don't force specialization, and defer to runtime asserts
         # with allow_complex_guards_as_runtime_asserts=True to successfully export
@@ -10284,7 +10450,6 @@ def forward(self, x):
         self.assertTrue(torch.allclose(comp_mod(inp1), mod(inp1)))
         self.assertTrue(torch.allclose(comp_mod(inp2), mod(inp2)))
 
-    @testing.expectedFailureRetraceabilityNonStrict
     def test_automatic_dynamic_shapes_simple_equality(self):
         # The next 3 test cases tests for automatic dynamic shapes specs, verifying that automatic dynamism
         # leads to replacement symbols being set for equalities, and inferred relationships being checked
@@ -10356,7 +10521,6 @@ def forward(self, x):
             test_serdes=True,
         )
 
-    @testing.expectedFailureRetraceabilityNonStrict
     def test_automatic_dynamic_shapes_constant_relation(self):
         AUTO, STATIC = Dim.AUTO, Dim.STATIC
 
@@ -10402,7 +10566,6 @@ def forward(self, x):
             test_serdes=True,
         )
 
-    @testing.expectedFailureRetraceabilityNonStrict
     def test_automatic_dynamic_shapes_linear_relation(self):
         AUTO, STATIC = Dim.AUTO, Dim.STATIC
 
@@ -10711,7 +10874,6 @@ def forward(self, x):
         export(Foo(), inps)
 
     @testing.expectedFailureCppSerDes  # TODO(pianpwk): PowByNatural valuerange deserialization
-    @testing.expectedFailureRetraceabilityNonStrict
     def test_dim_dynamic(self):
         dynamic = Dim.DYNAMIC
 

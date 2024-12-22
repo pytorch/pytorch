@@ -1,1 +1,3 @@
 from . import compiled_autograd, eval_frame, guards  # noqa: F401
+
+def strip_function_call(name: str) -> str: ...
