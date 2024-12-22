@@ -35,7 +35,13 @@ from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import SM80OrLater, xfailIfSM89
 from torch.testing._internal.common_device_type import expectedFailureXPU, skipCUDAIf
-from torch.testing._internal.common_utils import IS_LINUX, skipIfRocm, skipIfXpu
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    IS_LINUX,
+    parametrize,
+    skipIfRocm,
+    skipIfXpu,
+)
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
     HAS_GPU,
@@ -48,6 +54,7 @@ from torch.utils import _pytree as pytree
 aten = torch.ops.aten
 
 
+@instantiate_parametrized_tests
 class TestPatternMatcher(TestCase):
     device_type = GPU_TYPE
 
@@ -556,6 +563,55 @@ class TestPatternMatcher(TestCase):
             torch.randint(-128, 127, (8, 8), dtype=torch.int8),
         )
         self._test_mixed_impl(fn, args, False, False)
+
+    @parametrize(
+        "case",
+        [
+            ((4, 8), GPU_TYPE),
+            ("dynamic", GPU_TYPE),
+        ],
+    )
+    def test_unsuccessful_partial_reuse(self, case):
+        shape, device = case
+
+        def test_fn(x):
+            partial = torch.amax(x, [0], True)
+            full = torch.amax(x)
+            return partial, full
+
+        if shape == "dynamic":
+            x = torch.rand([2048, 64], device=GPU_TYPE)
+            torch._dynamo.mark_dynamic(x, 0)
+        else:
+            x = torch.randn(*shape, device=device)
+
+        compiled_fn = torch.compile(test_fn)
+
+        self.assertEqual(compiled_fn(x), test_fn(x))
+        self.assertEqual(counters["inductor"]["partial_reduction_reuse"], 0)
+
+    @parametrize(
+        "case",
+        [
+            ((2048, 2048), (torch.amax, torch.amax)),
+            ((1024, 1024), (torch.amin, torch.min)),
+            ((4096, 512), (torch.amax, torch.max)),
+        ],
+    )
+    def test_successful_partial_reuse(self, case):
+        shape, (partial_fn, full_fn) = case
+
+        def test_fn(x):
+            partial = partial_fn(x, [0], True)
+            full = full_fn(x)
+            return partial, full
+
+        x = torch.randn(*shape, device=GPU_TYPE)
+
+        compiled_fn = torch.compile(test_fn)
+
+        self.assertEqual(compiled_fn(x), test_fn(x))
+        self.assertEqual(counters["inductor"]["partial_reduction_reuse"], 1)
 
     @expectedFailureXPU
     @skipCUDAIf(not SM80OrLater, "need sm_80")
