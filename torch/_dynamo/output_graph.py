@@ -141,37 +141,7 @@ graph_sizes_log = torch._logging.getArtifactLogger(__name__, "graph_sizes")
 trace_call_log = torch._logging.getArtifactLogger(__name__, "trace_call")
 
 
-@dataclass(frozen=True)
-class VariableTrackerCacheKey:
-    vt_id: int
-    # Two different source can point to the same object. However, Dynamo handles
-    # globals and local source differently when it comes to guards and possibly
-    # some other parts as well. So, cache also relies on the source.
-    source: Source
-
-
-class VariableTrackerCache:
-    def __init__(self):
-        self.cache = {}
-
-    def lookup(self, value, source):
-        key = VariableTrackerCacheKey(id(value), source)
-        if key not in self.cache:
-            return None
-        return self.cache[key]
-
-    def add(self, value, source, vt):
-        key = VariableTrackerCacheKey(id(value), source)
-        self.cache[key] = vt
-
-    def clone(self):
-        # Needed for copy and restore graph state
-        new_cache = VariableTrackerCache()
-        new_cache.cache.update(self.cache)
-        return new_cache
-
-    def clear(self):
-        self.cache.clear()
+VariableTrackerCache = torch._C._dynamo.VariableTrackerCache
 
 
 @functools.lru_cache(None)
@@ -638,9 +608,11 @@ class OutputGraph:
         """
         global_state = cast(
             Dict[str, Tuple[Callable[..., Any], bool]],
-            out
-            if out is not None
-            else self.tracing_context.global_context.global_state,
+            (
+                out
+                if out is not None
+                else self.tracing_context.global_context.global_state
+            ),
         )
 
         # TODO - Consider having a torch level API for torch_function_state. As
