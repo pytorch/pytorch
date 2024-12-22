@@ -523,7 +523,7 @@ def get_tensor_guard_code_part(value, name, sizes, strides):
 
 
 def get_key_index(dct, key):
-    return list(dct.keys()).index(key)
+    return list(dict.keys(dct)).index(key)
 
 
 def get_key_index_source(source, index):
@@ -556,7 +556,7 @@ def getitem_on_dict_manager(
         index = get_key_index(base_example_value, source.index)
 
     key_source = get_key_index_source(base_source_name, index)
-    key_example_value = list(base_example_value.keys())[index]
+    key_example_value = list(dict.keys(base_example_value))[index]
     if isinstance(key_example_value, (int, str)):
         value_source = f"{base_source_name}[{key_example_value!r}]"
     else:
@@ -597,7 +597,6 @@ class GuardCodeList:
 class GuardManagerType(enum.Enum):
     GUARD_MANAGER = 1
     DICT_GUARD_MANAGER = 2
-    DICT_SUBCLASS_GUARD_MANAGER = 3
 
 
 @functools.lru_cache(None)
@@ -679,7 +678,7 @@ class GuardBuilder(GuardBuilderBase):
 
         # Iterate over the dicts and install a dict_getitem_manager.
         dict_source = guard.originating_source.name()
-        for key in example_value.keys():
+        for key in dict.keys(example_value):
             value = example_value[key]
             value_source = GetItemSource(guard.originating_source, index=key)
             guard_manager_enum = self.get_guard_manager_type(
@@ -703,7 +702,7 @@ class GuardBuilder(GuardBuilderBase):
             )
         assert isinstance(dict_mgr, DictGuardManager)
 
-        for idx, key in enumerate(value.keys()):
+        for idx, key in enumerate(dict.keys(value)):
             key_source = get_key_index_source(guard.name, idx)
             key_manager = dict_mgr.get_key_manager(
                 index=idx,
@@ -903,23 +902,16 @@ class GuardBuilder(GuardBuilderBase):
     def get_guard_manager_type(self, source, example_value):
         guard_manager_enum = GuardManagerType.GUARD_MANAGER
         if self.requires_key_order_guarding(source):
+            # Fix this if condition
             if isinstance(example_value, dict_keys):
                 guard_manager_enum = GuardManagerType.DICT_GUARD_MANAGER
             else:
                 assert isinstance(example_value, dict)
-                # If keys method is not overriden, we can use PyDict_Next to get key
-                # orderings. Read more in guards.cpp
-                if type(example_value).keys is type({}).keys:
-                    guard_manager_enum = GuardManagerType.DICT_GUARD_MANAGER
-                else:
-                    guard_manager_enum = GuardManagerType.DICT_SUBCLASS_GUARD_MANAGER
+                guard_manager_enum = GuardManagerType.DICT_GUARD_MANAGER
         return guard_manager_enum
 
     def manager_guards_on_keys(self, mgr_enum):
-        return (
-            mgr_enum == GuardManagerType.DICT_GUARD_MANAGER
-            or mgr_enum == GuardManagerType.DICT_SUBCLASS_GUARD_MANAGER
-        )
+        return mgr_enum == GuardManagerType.DICT_GUARD_MANAGER
 
     def get_global_guard_manager(self):
         return self.guard_manager.root.globals_dict_manager(
@@ -1752,7 +1744,7 @@ class GuardBuilder(GuardBuilderBase):
 
         self.TYPE_MATCH(guard)
         code = []
-        any_key_is_id = any(key_is_id(k) for k in value.keys())
+        any_key_is_id = any(key_is_id(k) for k in dict.keys(value))
         const_keys_repr = dict_keys_repr(
             key_to_id(value),
             local=is_from_local_source(guard.originating_source),
@@ -1782,7 +1774,7 @@ class GuardBuilder(GuardBuilderBase):
         value = self.get(guard.name)
 
         code = []
-        code.append(f"list({ref}.keys()) == {list(value.keys())!r}")
+        code.append(f"list({ref}.keys()) == {list(dict.keys(value))!r}")
         self._set_guard_export_info(guard, code)
 
         if self.requires_key_order_guarding(guard.originating_source):
