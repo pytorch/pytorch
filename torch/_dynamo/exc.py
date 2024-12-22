@@ -258,10 +258,15 @@ class ObservedAttributeError(ObservedException):
     pass
 
 
+class ObservedRuntimeError(ObservedException):
+    pass
+
+
 observed_exception_map = {
     StopIteration: ObservedUserStopIteration,
     KeyError: ObservedKeyError,
     AttributeError: ObservedAttributeError,
+    RuntimeError: ObservedRuntimeError,
 }
 
 
