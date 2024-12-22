@@ -1622,7 +1622,7 @@ def export(model, example_inputs):
     )
 
     ep = torch.export.export(
-        model, example_args, example_kwargs, dynamic_shapes=dynamic_shapes
+        model, example_args, example_kwargs, dynamic_shapes=dynamic_shapes, strict=True
     )
 
     def opt_export(_, example_inputs):
