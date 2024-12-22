@@ -2281,6 +2281,23 @@ class CPUReproTests(TestCase):
         res = cfn(x, bit_num)
         self.assertEqual(res_aten_eager, res)
 
+    def test_bitwise_shift_corner_inputs(self):
+        # Fix https://github.com/pytorch/pytorch/issues/143555
+        # and https://github.com/pytorch/pytorch/issues/143566
+        bitwise_fns = (
+            torch.bitwise_left_shift,
+            torch.bitwise_right_shift,
+        )
+        for bitwise_fn in bitwise_fns:
+            torch._dynamo.reset()
+            metrics.reset()
+            x = torch.tensor(1000, dtype=torch.int64)
+            bit_num = torch.tensor(64, dtype=torch.int64)
+            res_aten_eager = bitwise_fn(x, bit_num)
+            cfn = torch.compile(bitwise_fn)
+            res = cfn(x, bit_num)
+            self.assertEqual(res_aten_eager, res)
+
     def test_view_dtype(self):
         def f(x):
             return x.view(torch.int32) >> 2
