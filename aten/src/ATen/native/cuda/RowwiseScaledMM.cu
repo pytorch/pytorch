@@ -43,6 +43,7 @@ static CUresult CUDAAPI nvrtc_cuTensorMapEncodeTiled(
 }
 
 
+#include <cutlass/version.h>
 #include <cutlass/core_io.h>
 #include <cutlass/cutlass.h>
 #include <cutlass/gemm/device/gemm.h>
@@ -174,7 +175,11 @@ void f8f8bf16_rowwise_impl(
 
   // Implement rowwise scaling epilogue.
   constexpr int ColBroadcastStages = 0;
+  #if CUTLASS_VERSION == 351
+  constexpr int RowBroadcastStages = 0;
+  #else
   constexpr int RowBroadcastStages = PingPong::value ? 2 : 1;
+  #endif
 
   using XScale = cutlass::epilogue::fusion::
       Sm90ColBroadcast<ColBroadcastStages, TileShape, DtypeScale>;
@@ -191,15 +196,24 @@ void f8f8bf16_rowwise_impl(
 
   using Accum = cutlass::epilogue::fusion::Sm90AccFetch;
 
+  #if CUTLASS_VERSION == 351
+  using AccumScale = cutlass::epilogue::fusion::Sm90EVT<
+              Multiply,
+              WScale,
+              cutlass::epilogue::fusion::Sm90EVT<Multiply, XScale, Accum>>;
+  #else
+  using AccumScale = cutlass::epilogue::fusion::Sm90EVT<
+              Multiply,
+              XScale,
+              cutlass::epilogue::fusion::Sm90EVT<Multiply, WScale, Accum>>;
+  #endif
+
   using EpilogueEVT = cutlass::epilogue::fusion::Sm90EVT<
       Cast,
       cutlass::epilogue::fusion::Sm90EVT<
           Add,
           Bias,
-          cutlass::epilogue::fusion::Sm90EVT<
-              Multiply,
-              XScale,
-              cutlass::epilogue::fusion::Sm90EVT<Multiply, WScale, Accum>>>>;
+          AccumScale>>;
 
   using CollectiveEpilogue =
       typename cutlass::epilogue::collective::CollectiveBuilder<
