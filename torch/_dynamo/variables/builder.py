@@ -1251,7 +1251,7 @@ class VariableBuilder:
                 return key, value
 
             result = dict(
-                build_key_value(i, k, v) for i, (k, v) in enumerate(value.items())
+                build_key_value(i, k, value[k]) for i, k in enumerate(dict.keys(value))
             )
 
             # NB: This is deliberately kept ValueMutationNew because dict_vt is
