@@ -504,8 +504,8 @@ class GetItemSource(ChainedSource):
                 raise ValueError(
                     "GetItemSource index must be a constant, enum or ConstDictKeySource"
                 )
-            # TODO(anijain2305): Introduce a DictGetItemSource to better
-            # encapsulate all non-dict getitem access.
+            # TODO(anijain2305) - Consider separating out GetItemSource and DictGetItemSource.
+            # Prevent any overridden __getitem__ method call.
             # Ensure that we don't call the user defined getitem method.
             return f"dict.__getitem__({self.base.name()}, {self.index.name()})"
         elif self.index_is_slice:
