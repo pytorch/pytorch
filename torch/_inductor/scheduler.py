@@ -3619,7 +3619,7 @@ class Scheduler:
                 and (device_props := torch.cuda.get_device_properties(device)).major < 7
             ):
                 raise GPUTooOldForTriton(device_props, inspect.currentframe())
-            elif is_gpu(device.type):
+            elif is_gpu(device.type) and not device.type == "mps":
                 raise TritonMissing(inspect.currentframe())
 
         return device_scheduling(self)

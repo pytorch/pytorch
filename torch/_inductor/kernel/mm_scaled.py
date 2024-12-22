@@ -438,7 +438,6 @@ def scaled_mm_options_device_tma(  # type: ignore[no-untyped-def]
         "Expect scale_a and scale_b to be either both scalars (including single-element tensors) "
         f"or 1-dimensional tensors with the same size. Got scale_a: {len(size_a)} and scale_b: {len(size_b)}."
     )
-    NUM_SMS = torch.cuda.get_device_properties("cuda").multi_processor_count
     return dict(
         GROUP_M=8,
         EVEN_K=even_k_symbolic,
