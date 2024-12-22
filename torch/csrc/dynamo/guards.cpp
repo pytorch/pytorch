@@ -3061,8 +3061,7 @@ std::unique_ptr<GuardManager> make_guard_manager(
     py::handle example_value,
     py::handle guard_manager_enum) {
 #if IS_PYBIND_2_13_PLUS
-  using threeobjects =
-      std::tuple<py::object, py::object, py::object>;
+  using threeobjects = std::tuple<py::object, py::object, py::object>;
   PYBIND11_CONSTINIT static py::gil_safe_call_once_and_store<threeobjects>
       storage;
 
