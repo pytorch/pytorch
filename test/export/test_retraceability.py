@@ -13,7 +13,11 @@ test_classes = {}
 
 
 def mocked_retraceability_export_strict(*args, **kwargs):
-    ep = export(*args, **kwargs)
+    if "strict" in kwargs:
+        assert kwargs["strict"] == True
+        ep = export(*args, **kwargs)
+    else:
+        ep = export(*args, **kwargs, strict=True)
     if "dynamic_shapes" in kwargs:
         if isinstance(kwargs["dynamic_shapes"], dict):
             kwargs["dynamic_shapes"] = tuple(kwargs["dynamic_shapes"].values())
