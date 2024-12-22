@@ -2900,7 +2900,7 @@ class DimConstraints:
                 assert op == "==", t
                 try:
                     results[left]["eq"] = sympy.sympify(right)
-                except TypeError as e:  # rhs source is not linked to Dim name
+                except TypeError:  # rhs source is not linked to Dim name
                     pass
 
         # order forced specializations based on name
