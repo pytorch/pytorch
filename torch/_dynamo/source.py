@@ -531,7 +531,7 @@ class ConstDictKeySource(GetItemSource):
 
     def name(self):
         # The list creation will be CSE'd by PyExprCSEPass
-        return f"list({self.base.name()}.keys())[{self.index!r}]"
+        return f"list(dict.keys({self.base.name()}))[{self.index!r}]"
 
 
 @dataclasses.dataclass(frozen=True)
