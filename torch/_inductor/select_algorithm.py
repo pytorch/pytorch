@@ -695,8 +695,6 @@ class TritonTemplateKernel(TritonKernel):
             lengths = [V.graph.sizevars.simplify(s) for s in input_node.get_size()]
             assert len(indices) == len(lengths)
 
-            stride = self.named_input_nodes[input_name].get_stride()
-
             index_symbols = [sympy.Symbol(x, integer=True) for x in indices]
             assert len(indices) == len(lengths)
 
@@ -722,7 +720,6 @@ class TritonTemplateKernel(TritonKernel):
                 sympy.Integer(1), sympy_product(lengths)
             )
             xindex_range_root.set_name("xindex")
-            xindex_expr = xindex_range_root.expr
 
             # Note - ["None" override_mask]
             # MM Templates work by taking out of bounds index values and wrapping them around to 0
