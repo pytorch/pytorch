@@ -6,7 +6,7 @@ import textwrap
 from functools import lru_cache
 from typing import Any, List, Optional, TYPE_CHECKING
 
-from torch._dynamo.exc import ShortenTraceback
+from torch._dynamo.exc import BackendCompilerFailed, ShortenTraceback
 
 
 if TYPE_CHECKING:
@@ -137,14 +137,17 @@ class GPUTooOldForTriton(ShortenTraceback):
         )
 
 
-class InductorError(ShortenTraceback):
+class InductorError(BackendCompilerFailed):
+    backend_name = "inductor"
+
     def __init__(
         self,
         inner_exception: Exception,
         first_useful_frame: Optional[types.FrameType],
     ) -> None:
         self.inner_exception = inner_exception
-        super().__init__(
+        ShortenTraceback.__init__(
+            self,
             f"{type(inner_exception).__name__}: {inner_exception}",
             first_useful_frame=first_useful_frame,
         )

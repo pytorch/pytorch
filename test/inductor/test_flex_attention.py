@@ -3525,7 +3525,7 @@ class GraphModule(torch.nn.Module):
         query, key, value = make_tensor(), make_tensor(), make_tensor()
         attention = torch.compile(flex_attention)
         with self.assertRaisesRegex(
-            torch._dynamo.exc.BackendCompilerFailed,
+            torch._inductor.exc.InductorError,
             r"NotImplementedError: torch.compile on CPU only supports inference and `return_lse` is not supported yet.",
         ):
             attention(query, key, value, return_lse=True)
