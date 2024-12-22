@@ -1,4 +1,5 @@
 # Owner(s): ["module: fx"]
+# ruff: noqa: F841
 
 import functools
 import math
@@ -50,7 +51,7 @@ from torch.testing._internal.common_device_type import (
     ops,
 )
 from torch.testing._internal.common_methods_invocations import op_db
-from torch.testing._internal.common_nn import module_tests, new_module_tests
+from torch.testing._internal.common_nn import module_tests, get_new_module_tests
 from torch.testing._internal.common_utils import TEST_Z3, run_tests, TestCase
 from torch.testing._internal.jit_utils import JitTestCase
 import torch.utils._pytree as pytree
@@ -1006,7 +1007,7 @@ terrible spacing
         Exhaustively test `Node.normalized_arguments` on all standard
         torch.nn Module classes
         """
-        for test_params in module_tests + new_module_tests:
+        for test_params in module_tests + get_new_module_tests():
             if "constructor" not in test_params:
                 constructor = getattr(torch.nn, test_params["module_name"])
             else:

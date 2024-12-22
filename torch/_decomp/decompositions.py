@@ -740,10 +740,8 @@ def slice_forward(
 
     if guard_size_oblivious(end_val < start_val):
         end_val = start_val
-    elif (
-        statically_known_true(end_val == sys.maxsize)
-        or statically_known_true(end_val >= sizes[dim])
-        or guard_size_oblivious(end_val > sizes[dim])
+    elif statically_known_true(end_val == sys.maxsize) or guard_size_oblivious(
+        end_val > sizes[dim]
     ):
         end_val = sizes[dim]
 
@@ -5116,21 +5114,6 @@ def bernoulli(
             device=self.device,
         )
     p = (raw_p < self).to(self.dtype)
-    return p
-
-
-@register_decomposition(aten.bernoulli.p)
-def bernoulli_p(self, p, *, generator: Optional[torch.Generator] = None):
-    if generator is None:
-        raw_p = torch.rand(self.size(), dtype=torch.float32, device=self.device)
-    else:
-        raw_p = torch.rand(
-            self.size(),
-            generator=generator,
-            dtype=self.float32,
-            device=self.device,
-        )
-    p = (raw_p < p).to(self.dtype)
     return p
 
 
