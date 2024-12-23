@@ -17,7 +17,7 @@ import threading
 import time
 import unittest
 from dataclasses import dataclass, field
-from typing import List, Optional
+from typing import List, Optional, TYPE_CHECKING
 from unittest.mock import patch
 
 import expecttest
@@ -70,6 +70,10 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ROCM,
     TestCase,
 )
+
+
+if TYPE_CHECKING:
+    from torch.autograd.profiler_util import FunctionEvent, FunctionEventAvg
 
 
 # if tqdm is not shutdown properly, it will leave the monitor thread alive.
@@ -1282,8 +1286,9 @@ class TestProfiler(TestCase):
 
     def test_profiler_fwd_bwd_link(self):
         with _profile(use_kineto=True) as prof:
-            t1, t2 = torch.ones(1, requires_grad=True), torch.ones(
-                1, requires_grad=True
+            t1, t2 = (
+                torch.ones(1, requires_grad=True),
+                torch.ones(1, requires_grad=True),
             )
             z = torch.add(t1, t2)
             y = torch.ones(1)
@@ -1337,8 +1342,9 @@ class TestProfiler(TestCase):
             torch._C._profiler._set_fwd_bwd_enabled_val(False)
 
             with _profile(use_kineto=True) as prof:
-                t1, t2 = torch.ones(1, requires_grad=True), torch.ones(
-                    1, requires_grad=True
+                t1, t2 = (
+                    torch.ones(1, requires_grad=True),
+                    torch.ones(1, requires_grad=True),
                 )
                 z = torch.add(t1, t2)
                 y = torch.ones(1)
@@ -2389,8 +2395,9 @@ class TestExperimentalUtils(TestCase):
 
     def test_utils_compute_self_time(self):
         with profile() as prof:
-            t1, t2 = torch.ones(1, requires_grad=True), torch.ones(
-                1, requires_grad=True
+            t1, t2 = (
+                torch.ones(1, requires_grad=True),
+                torch.ones(1, requires_grad=True),
             )
             z = torch.add(t1, t2)
             y = torch.ones(1)
@@ -2848,6 +2855,53 @@ aten::mm""",
         addr2line = torch._C._profiler.symbolize_addresses(addrs, "addr2line")
         self.assertEqual(len(fast), len(addrs))
         self.assertEqual(len(addr2line), len(fast))
+
+    def test_profiler_metrics_with_fallthrough_kernels(self):
+        from torch.library import _scoped_library, fallthrough_kernel
+
+        with _scoped_library("aten", "IMPL") as my_lib:
+            my_lib.impl("add.Tensor", fallthrough_kernel, "CPU")
+            with profile() as prof:
+                torch.add(1, 5)
+
+            # Expected format
+            #
+            # Dispatch trace:
+            # [call] op=[aten::add.Tensor], key=[AutogradCPU]
+            #   [redispatch] op=[aten::add.Tensor], key=[Undefined]
+            #     [call] op=[aten::empty.memory_format], key=[BackendSelect]
+            #       [redispatch] op=[aten::empty.memory_format], key=[CPU]
+            #     [call] op=[aten::add.out], key=[CPU]
+            #
+            # prof.table()
+            # ---------------  ------------  ------------  ------------  ------------  ------------  ------------
+            #            Name    Self CPU %      Self CPU   CPU total %     CPU total  CPU time avg    # of Calls
+            # ---------------  ------------  ------------  ------------  ------------  ------------  ------------
+            #       aten::add        58.13%     191.820us       100.00%     329.978us     329.978us             1
+            #     aten::empty         9.35%      30.868us         9.35%      30.868us      30.868us             1
+            #       aten::add        32.51%     107.290us        32.51%     107.290us     107.290us             1
+            # ---------------  ------------  ------------  ------------  ------------  ------------  ------------
+
+            # aten::add.out and aten::empty.memory_format are children of aten::add.Tensor
+            aten_add_parent: FunctionEvent = [
+                event for event in prof.events() if len(event.cpu_children) == 2
+            ]
+            assert len(aten_add_parent) == 1
+            aten_add_parent = aten_add_parent[0]
+            averages = [
+                event for event in prof.key_averages() if event.key == "aten::add"
+            ]
+            assert len(averages) == 1
+            add_averages: FunctionEventAvg = averages[0]
+            metrics = [
+                "cpu_time_total",
+                "self_cpu_time_total",
+                "cpu_memory_usage",
+                "self_cpu_memory_usage",
+                "count",
+            ]
+            for m in metrics:
+                self.assertEqual(getattr(aten_add_parent, m), getattr(add_averages, m))
 
 
 if __name__ == "__main__":
