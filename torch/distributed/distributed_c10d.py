@@ -1868,6 +1868,20 @@ def _new_process_group_helper(
     # Note: _new_process_group_helper is only called from init_process_group, which always provides a timeout value
     _check_valid_timeout(timeout)
 
+    # When init_process_group is called with MPI back-end, it does not create any Store objects,
+    # as MPI is fully self-sufficient. As a result the "underlying_store" in PrefixStore is None.
+    # The absence of underlying_store causes inability to create new non-MPI process groups,
+    # as they require a functional Store object. Here, it attempts to create a TCPStore for
+    # non-MPI back-ends for its subsequent usage in new group.
+    if is_initialized() and "mpi" not in backend:
+        default_pg = _get_default_group()
+        if store.underlying_store is None and "mpi" in default_pg.name():
+            rendezvous_iterator = rendezvous("env://", timeout=timeout)
+            store, _, _ = next(rendezvous_iterator)
+            store.set_timeout(timeout)
+            store = PrefixStore("default_pg", store)
+            _world.pg_map[default_pg] = (backend, store)
+
     if pg_tag not in [None, ""]:
         # creating with the same tag and rank set results in the same underlying PG
         existing_group = _find_pg_by_ranks_and_tag(pg_tag, global_ranks_in_group)
