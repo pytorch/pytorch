@@ -1,0 +1,107 @@
+# Workflow: Inductor Cu126 Unit Test
+# 1. runs unit tests for inductor-cu126.
+# 2. perfoms daily memory leak checks and reruns of disabled tests, scheduled at `29 8 * * *`.
+name: inductor-cu126-unittest
+
+on:
+  workflow_call:
+  workflow_dispatch:
+  schedule:
+    - cron: 29 8 * * *  # about 1:29am PDT, for mem leak check and rerun disabled tests
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref_name }}-${{ github.ref_type == 'branch' && github.sha }}-${{ github.event_name == 'workflow_dispatch' }}-unittest
+  cancel-in-progress: true
+
+permissions: read-all
+
+jobs:
+  get-default-label-prefix:
+    name: get-default-label-prefix
+    uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@main
+    if: ${{ (github.event_name != 'schedule' || github.repository == 'pytorch/pytorch') && github.repository_owner == 'pytorch' }}
+    with:
+      triggering_actor: ${{ github.triggering_actor }}
+      issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
+      curr_branch: ${{ github.head_ref || github.ref_name }}
+      curr_ref_type: ${{ github.ref_type }}
+
+  linux-focal-cuda12_6-py3_10-gcc9-inductor-build:
+    name: cuda12.6-py3.10-gcc9-sm86
+    uses: ./.github/workflows/_linux-build.yml
+    needs: get-default-label-prefix
+    with:
+      runner_prefix: "${{ needs.get-default-label-prefix.outputs.label-type }}"
+      sync-tag: linux-focal-cuda12_6-py3_10-gcc9-inductor-build
+      build-environment: linux-focal-cuda12.6-py3.10-gcc9-sm86
+      docker-image-name: pytorch-linux-focal-cuda12.6-cudnn9-py3-gcc9-inductor-benchmarks
+      cuda-arch-list: '8.6'
+      test-matrix: |
+        { include: [
+          { config: "inductor", shard: 1, num_shards: 2, runner: "linux.g5.4xlarge.nvidia.gpu" },
+          { config: "inductor", shard: 2, num_shards: 2, runner: "linux.g5.4xlarge.nvidia.gpu" },
+          { config: "inductor_distributed", shard: 1, num_shards: 1, runner: "linux.g5.12xlarge.nvidia.gpu" },
+          { config: "inductor_cpp_wrapper", shard: 1, num_shards: 1, runner: "linux.g5.4xlarge.nvidia.gpu" },
+        ]}
+    secrets: inherit
+
+  linux-focal-cuda12_6-py3_10-gcc9-inductor-test:
+    name: cuda12.6-py3.10-gcc9-sm86
+    uses: ./.github/workflows/_linux-test.yml
+    needs: linux-focal-cuda12_6-py3_10-gcc9-inductor-build
+    with:
+      sync-tag: linux-focal-cuda12_6-py3_10-gcc9-inductor-test
+      build-environment: linux-focal-cuda12.6-py3.10-gcc9-sm86
+      docker-image: ${{ needs.linux-focal-cuda12_6-py3_10-gcc9-inductor-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-focal-cuda12_6-py3_10-gcc9-inductor-build.outputs.test-matrix }}
+    secrets: inherit
+
+  linux-focal-cuda12_6-py3_12-gcc9-inductor-build:
+    if: github.repository_owner == 'pytorch'
+    name: cuda12.6-py3.12-gcc9-sm86
+    uses: ./.github/workflows/_linux-build.yml
+    with:
+      build-environment: linux-focal-cuda12.6-py3.12-gcc9-sm86
+      docker-image-name: pytorch-linux-focal-cuda12.6-cudnn9-py3.12-gcc9-inductor-benchmarks
+      cuda-arch-list: '8.6'
+      test-matrix: |
+        { include: [
+          { config: "inductor", shard: 1, num_shards: 2, runner: "linux.g5.4xlarge.nvidia.gpu" },
+          { config: "inductor", shard: 2, num_shards: 2, runner: "linux.g5.4xlarge.nvidia.gpu" },
+        ]}
+    secrets: inherit
+
+  linux-focal-cuda12_6-py3_12-gcc9-inductor-test:
+    name: cuda12.6-py3.12-gcc9-sm86
+    uses: ./.github/workflows/_linux-test.yml
+    needs: linux-focal-cuda12_6-py3_12-gcc9-inductor-build
+    with:
+      build-environment: linux-focal-cuda12.6-py3.12-gcc9-sm86
+      docker-image: ${{ needs.linux-focal-cuda12_6-py3_12-gcc9-inductor-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-focal-cuda12_6-py3_12-gcc9-inductor-build.outputs.test-matrix }}
+    secrets: inherit
+
+  linux-focal-cuda12_6-py3_13-gcc9-inductor-build:
+    if: github.repository_owner == 'pytorch'
+    name: cuda12.6-py3.13-gcc9-sm86
+    uses: ./.github/workflows/_linux-build.yml
+    with:
+      build-environment: linux-focal-cuda12.6-py3.13-gcc9-sm86
+      docker-image-name: pytorch-linux-focal-cuda12.6-cudnn9-py3.13-gcc9-inductor-benchmarks
+      cuda-arch-list: '8.6'
+      test-matrix: |
+        { include: [
+          { config: "inductor", shard: 1, num_shards: 2, runner: "linux.g5.4xlarge.nvidia.gpu" },
+          { config: "inductor", shard: 2, num_shards: 2, runner: "linux.g5.4xlarge.nvidia.gpu" },
+        ]}
+    secrets: inherit
+
+  linux-focal-cuda12_6-py3_13-gcc9-inductor-test:
+    name: cuda12.6-py3.13-gcc9-sm86
+    uses: ./.github/workflows/_linux-test.yml
+    needs: linux-focal-cuda12_6-py3_13-gcc9-inductor-build
+    with:
+      build-environment: linux-focal-cuda12.6-py3.13-gcc9-sm86
+      docker-image: ${{ needs.linux-focal-cuda12_6-py3_13-gcc9-inductor-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-focal-cuda12_6-py3_13-gcc9-inductor-build.outputs.test-matrix }}
+    secrets: inherit
