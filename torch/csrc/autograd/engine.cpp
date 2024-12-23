@@ -410,7 +410,7 @@ const std::unordered_set<Node*>* get_current_graph_task_nodes_in_graph() {
 }
 
 int get_current_graph_task_id() {
-  return current_graph_task ? current_graph_task->id_ : -1;
+  return current_graph_task ? static_cast<int>(current_graph_task->id_) : -1;
 }
 
 bool get_current_graph_task_keep_graph() {
@@ -563,7 +563,7 @@ auto Engine::thread_main(const std::shared_ptr<GraphTask>& graph_task) -> void {
           // and restores it on exit. The current_graph_task variable helps
           // queue_callback() to find the target GraphTask to append final
           // callbacks.
-          GraphTaskGuard guard(local_graph_task);
+          GraphTaskGuard guard2(local_graph_task);
           NodeGuard ndguard(task.fn_);
           {
             RECORD_FUNCTION(
@@ -615,7 +615,7 @@ auto Engine::thread_main(const std::shared_ptr<GraphTask>& graph_task) -> void {
 // While we can create separate ready queue for each new reentrant
 // thread, but sharing the same cpu_ready_queue with parent thread is a
 // performance improvement and cuda thread still have to do the same thing.
-void Engine::reentrant_thread_init() {
+[[noreturn]] void Engine::reentrant_thread_init() {
   c10::set_terminate_handler();
   at::init_num_threads();
   auto tp_shared = thread_pool_shared_;
@@ -646,7 +646,7 @@ void Engine::reentrant_thread_init() {
 void Engine::thread_on_exception(
     const std::shared_ptr<GraphTask>& graph_task,
     const std::shared_ptr<Node>& fn,
-    std::exception& e) {
+    std::exception&) {
   graph_task->set_exception(std::current_exception(), fn);
 }
 
@@ -998,6 +998,19 @@ void validate_outputs(
   return validate_outputs_impl(input_metadata, grads, format_error);
 }
 
+template <typename T>
+std::ostream& operator<<(std::ostream& os, const std::vector<T>& vec) {
+    os << "[";
+    for (size_t i = 0; i < vec.size(); ++i) {
+        os << vec[i];
+        if (i != vec.size() - 1) {
+            os << ", ";
+        }
+    }
+    os << "]";
+    return os;
+}
+
 static variable_list call_function(
     std::shared_ptr<GraphTask>& graph_task,
     Node* func,
@@ -1073,7 +1086,7 @@ void Engine::evaluate_function(
           *func, InputBuffer::variables(std::move(inputs)));
     }
     if (auto* capture_vec = fn_info.captures_.get()) {
-      auto opt_parent_stream = (*func).stream();
+      auto opt_parent_stream2 = (*func).stream();
       // Lock mutex for writing to graph_task->captured_vars_.
       std::lock_guard<std::mutex> lock(graph_task->mutex_);
       for (const auto& capture : *capture_vec) {
@@ -1084,9 +1097,9 @@ void Engine::evaluate_function(
              capture.DO_NOT_USE_DEPRECATED_get_capture_hooks()) {
           captured_grad = (*hook)(captured_grad);
         }
-        if (opt_parent_stream) {
+        if (opt_parent_stream2) {
           // No need to take graph_task->mutex_ here, we already hold it
-          graph_task->leaf_streams.emplace(*opt_parent_stream);
+          graph_task->leaf_streams.emplace(*opt_parent_stream2);
         }
       }
     }
@@ -1122,7 +1135,23 @@ void Engine::evaluate_function(
       if (output.defined() && isnan(output)._is_any_true().item<bool>()) {
         std::stringstream ss;
         ss << "Function '" << fn.name() << "' returned nan values in its " << i
-           << "th output.";
+           << "th output; search for 'Traceback of forward call' in the log. "
+           << "num_outputs = " << num_outputs
+           << "; outputs[i].shape = " << outputs.at(i).sizes()
+           << "; num_inputs = " << inputs.buffer.size();
+
+        for (const auto j: c10::irange(inputs.buffer.size())) {
+          ss << "; inputs[" << j << "].shape = " << inputs.buffer.at(j).sizes();
+        }
+        for (const auto j: c10::irange(outputs.size())) {
+          ss << "; outputs[" << j << "].shape = " << outputs.at(j).sizes();
+        }
+        for (const auto j: c10::irange(inputs.buffer.size())) {
+          ss << "; inputs[" << j << "] = " << inputs.buffer.at(j);
+        }
+        for (const auto j: c10::irange(outputs.size())) {
+          ss << "; outputs[" << j << "] = " << outputs.at(j);
+        }
         throw std::runtime_error(ss.str());
       }
     }
@@ -1156,8 +1185,8 @@ void Engine::evaluate_function(
     if (not_ready_it == not_ready.end()) {
       // Skip functions that aren't supposed to be executed
       if (!exec_info_.empty()) {
-        auto it = exec_info_.find(next.function.get());
-        if (it == exec_info_.end() || !it->second.should_execute()) {
+        auto it2 = exec_info_.find(next.function.get());
+        if (it2 == exec_info_.end() || !it2->second.should_execute()) {
           continue;
         }
       }
