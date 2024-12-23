@@ -3718,17 +3718,20 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
             N: int,
         ) -> None:
             grid = lambda META: (triton.cdiv(N, META["BLOCK_SIZE"]),)
-            prune_by_kernel[grid](dst, src, add_float, N=N)
+            if tracing == "non-strict":
+                capture_triton(prune_by_kernel)[grid](dst, src, add_float, N=N)
+            else:
+                prune_by_kernel[grid](dst, src, add_float, N=N)
 
         if tracing == "non-strict":
             decorator = torch.library.triton_op(
                 f"{libname}::{opname}", mutates_args={"dst"}
-            )
+            )(f)
         else:
             # we can just pass the function 'f' for dynamo
             decorator = f
 
-        compiled_f = torch.compile(f, fullgraph=True, backend=backend)
+        compiled_f = torch.compile(decorator, backend=backend)
 
         N = 1024
         src = torch.randn(N, device=GPU_TYPE)
