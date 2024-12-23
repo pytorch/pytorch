@@ -21,10 +21,11 @@ from .bytecode_transformation import (
     create_rot_n,
     Instruction,
 )
-from .exc import unimplemented
+from .exc import IncorrectUsage, unimplemented
 from .source import AttrSource, Source
 from .utils import is_safe_constant, rot_n_helper
 from .variables.base import ValueMutationExisting, VariableTracker
+from .variables.functions import FunctionDecoratedByContextlibContextManagerVariable
 from .variables.nn_module import NNModuleVariable
 from .variables.tensor import (
     NumpyNdarrayVariable,
@@ -158,6 +159,13 @@ class PyCodegen:
                 output.append(self.create_load(self.tempvars[value]))
                 self.top_of_stack = value
                 return
+
+        if value.is_realized() and isinstance(
+            value, FunctionDecoratedByContextlibContextManagerVariable
+        ):
+            raise IncorrectUsage(
+                "NYI: Returning a @contextmanager object from a torch.compile function"
+            )
 
         # Dynamo normally prefers codegen from source to account for aliasing.
         if value.source is not None and allow_cache:
