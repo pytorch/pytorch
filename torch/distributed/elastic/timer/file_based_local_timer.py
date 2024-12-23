@@ -41,7 +41,7 @@ def _retry(max_retries: int, sleep_time: float) -> Callable:
             for i in range(max_retries):
                 try:
                     return func(*args, **kwargs)
-                except Exception as e:
+                except Exception:
                     logger.exception("Error running %s. Retrying...", func.__name__)
                     if i < max_retries - 1:
                         time.sleep(sleep_time)
@@ -277,7 +277,7 @@ class FileTimerServer:
         #     thread, which will not block the process to stop.
         try:
             fd = open(self._file_path)
-        except Exception as e:
+        except Exception:
             logger.exception("Could not open the FileTimerServer pipe")
             raise
 
