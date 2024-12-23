@@ -150,8 +150,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
 
                 cpp_wrapper_src = (
                 '''
-                #include <pybind11/pybind11.h>
-                namespace py = pybind11;
+                #include <Python.h>
 
                 class RAIIPyObject {
                 public:
@@ -176,6 +175,36 @@ class CppWrapperCpu(PythonWrapperCodegen):
                     }
                 private:
                     PyObject* obj_;
+                };
+
+                // minimal re-implementation of PyBind11 gil_scoped_acquire and
+                // gil_scoped_release to reduce header dependencies on build
+                class gil_scoped_acquire {
+                public:
+                    gil_scoped_acquire() = default;
+                    gil_scoped_acquire(const gil_scoped_acquire&) = delete;
+                    gil_scoped_acquire(gil_scoped_acquire&&) noexcept = delete;
+                    ~gil_scoped_acquire() { PyGILState_Release(gil_state); }
+
+                    gil_scoped_acquire& operator=(const gil_scoped_acquire&) = delete;
+                    gil_scoped_acquire& operator=(gil_scoped_acquire&&) noexcept = delete;
+
+                private:
+                    PyGILState_STATE gil_state{PyGILState_Ensure()};
+                };
+
+                class gil_scoped_release {
+                public:
+                    gil_scoped_release() = default;
+                    gil_scoped_release(const gil_scoped_release&) = delete;
+                    gil_scoped_release(gil_scoped_release&&) noexcept = delete;
+                    ~gil_scoped_release() { PyEval_RestoreThread(thread_state); }
+
+                    gil_scoped_release& operator=(const gil_scoped_release&) = delete;
+                    gil_scoped_release& operator=(gil_scoped_release&&) noexcept = delete;
+
+                private:
+                    PyThreadState* thread_state{PyEval_SaveThread()};
                 };
 
                 #include <torch/csrc/inductor/aoti_runtime/device_utils.h>
@@ -468,7 +497,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
                     # Weights are promoted in the JIT mode
                     num_args = len(V.graph.graph_inputs) + len(V.graph.constants)
                     # release GIL to support multiple instances inference (in different threads of the same process)
-                    self.prefix.splice("py::gil_scoped_release release;")
+                    self.prefix.splice("gil_scoped_release release;")
 
                 self.prefix.splice(
                     f"""
@@ -1873,7 +1902,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
 
         scoped_lines.writeline("{")
         with scoped_lines.indent():
-            scoped_lines.writeline("py::gil_scoped_acquire acquire;")
+            scoped_lines.writeline("gil_scoped_acquire acquire;")
             scoped_lines.writelines(lines_in_scope.split("\n"))
         scoped_lines.writelines("}")
         return scoped_lines._lines
