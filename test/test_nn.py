@@ -1472,13 +1472,32 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         net.t = nn.Module()
         l = nn.Linear(1, 2)
         target = "t.l"
-        net.set_submodule(target, l)
+        net.t.l = l
         self.assertEqual(net.get_submodule(target), l)
         l2 = nn.Linear(2, 1)
         net.set_submodule(target, l2)
         self.assertEqual(net.get_submodule(target), l2)
         self.assertRaises(ValueError, net.set_submodule, "", l)
         self.assertRaises(AttributeError, net.set_submodule, "a.l", l)
+        self.assertRaises(AttributeError, net.set_submodule, "0", l)
+        net.foo = "bar"
+        self.assertRaises(AttributeError, net.set_submodule, "foo", l)
+        self.assertRaises(AttributeError, net.set_submodule, "t.l", "bazz")
+
+    def test_replace_or_create_new_leaf_module(self):
+        net = nn.Module()
+        l = nn.Linear(1, 2)
+        self.assertRaises(ValueError, net.replace_or_create_new_leaf_module, "", l)
+        net.replace_or_create_new_leaf_module("l", l)
+        self.assertEqual(net.get_submodule("l"), l)
+        l2 = nn.Linear(1, 3)
+        net.replace_or_create_new_leaf_module("l", l2)
+        self.assertEqual(net.get_submodule("l"), l2)
+        net.replace_or_create_new_leaf_module("l.old_l", l)
+        self.assertEqual(net.get_submodule("l.old_l"), l)
+        net.foo = "bar"
+        self.assertRaises(AttributeError, net.replace_or_create_new_leaf_module, "foo", l)
+        self.assertRaises(AttributeError, net.replace_or_create_new_leaf_module, "l", "bazz")
 
     def test_module_to_argparse(self):
         net = nn.Sequential(nn.Linear(3, 3))
