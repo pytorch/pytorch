@@ -628,8 +628,10 @@ _efficient_attention_backward(
       TORCH_CHECK(
           bias->size(3) == key.size(1),
           "attn_bias: wrong shape (seqlenKV dimension)");
+      // TODO(Wenqin): maybe we could remove this check, because we have already
+      // do it on above CHECK_NOSPARSE_LASTCONTIGUOUS_CUDA((*bias)) check?
       TORCH_CHECK(
-          bias->stride(3) == 1,
+          bias->stride(3) == 1 || bias->size(3) == 1,
           "attn_bias: wrong alignment (last dimension must be contiguous)");
       ASSIGN_CHECK_OVERFLOW(p.bias_strideB, bias->stride(0));
       ASSIGN_CHECK_OVERFLOW(p.bias_strideH, bias->stride(1));
