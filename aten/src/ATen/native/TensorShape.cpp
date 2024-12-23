@@ -213,9 +213,46 @@
 #include <utility>
 #include <vector>
 
+namespace at::native {
+// Check to see if the shape of tensors is compatible
+// for being concatenated along a given dimension.
+static void check_cat_shape_except_dim(
+    const Tensor& first,
+    const Tensor& second,
+    int64_t dimension,
+    size_t index) {
+  int64_t first_dims = first.dim();
+  int64_t second_dims = second.dim();
+  TORCH_CHECK(
+      first_dims == second_dims,
+      "Tensors must have same number of dimensions: got ",
+      first_dims,
+      " and ",
+      second_dims);
+  for (const auto dim : c10::irange(first_dims)) {
+    if (dim == dimension) {
+      continue;
+    }
+    int64_t first_dim_size = first.sizes()[dim];
+    int64_t second_dim_size = second.sizes()[dim];
+    TORCH_CHECK(
+        first_dim_size == second_dim_size,
+        "Sizes of tensors must match except in dimension ",
+        dimension,
+        ". Expected size ",
+        static_cast<long long>(first_dim_size),
+        " but got size ",
+        static_cast<long long>(second_dim_size),
+        " for tensor number ",
+        index,
+        " in the list.");
+  }
+}
+} // namespace at::native
+
 namespace at::meta {
 
-inline c10::MemoryFormat cat_compute_output_memory_format(
+static c10::MemoryFormat cat_compute_output_memory_format(
     const MaterializedITensorListRef& inputs) {
   std::optional<c10::MemoryFormat> format = std::nullopt;
   for (const Tensor& t : inputs) {
@@ -300,7 +337,7 @@ TORCH_PRECOMPUTE_META_FUNC(cat)(const ITensorListRef& tensors, int64_t dim) {
     // Compute the output tensor size.
     // It should have the same shape as any other valid tensor,
     // except in the dimension 'dim'.
-    size_t size_at_dim = 0;
+    int64_t size_at_dim = 0;
     for (const auto i : c10::irange(materialized.size())) {
       const Tensor& t = materialized[i];
       all_same_dtype = all_same_dtype && out_dtype == t.scalar_type();
@@ -335,7 +372,7 @@ TORCH_PRECOMPUTE_META_FUNC(cat)(const ITensorListRef& tensors, int64_t dim) {
 
   return TORCH_PRECOMPUTE_STRUCT(cat)()
       .set_dim(dim)
-      .set_valid(valid)
+      .set_valid(static_cast<int64_t>(valid))
       .set_all_contiguous(all_contiguous)
       .set_all_same_dtype(all_same_dtype)
       .set_all_same_sizes_and_stride(all_same_sizes_and_stride)
@@ -404,12 +441,12 @@ Tensor& set_storage_meta__symint(
   c10::SymDimVector contiguous_strides;
   if (stride.data() == nullptr) {
     // TODO: dedupe this with empty() symbolic logic
-    int64_t dim = size.size();
+    auto dim = size.size();
     contiguous_strides.resize(dim);
     if (dim > 0) {
       const auto last_idx = dim - 1;
       contiguous_strides.at(last_idx) = 1;
-      for (auto i = last_idx - 1; i >= 0; --i) {
+      for (size_t i = 0; i < last_idx; i++) {
         // TODO: max with 1
         contiguous_strides.at(i) =
             contiguous_strides.at(i + 1) * size.at(i + 1);
@@ -432,12 +469,12 @@ Tensor& set_storage_meta__symint(
     // All meta data pointers are the same, so we don't have to "re" allocate
     // it.  TODO: Actually this might not quite be correct if we use special
     // pointers to track whether or not fake cuda tensors are pinned or not
-    const auto itemsize = result.dtype().itemsize();
+    const auto itemsize = static_cast<int64_t>(result.dtype().itemsize());
     c10::SymInt new_size_bytes = result.is_contiguous()
         ? at::detail::computeStorageNbytesContiguous(
-              size, itemsize, std::move(storage_offset))
+              size, itemsize, storage_offset)
         : at::detail::computeStorageNbytes(
-              size, stride, itemsize, std::move(storage_offset));
+              size, stride, itemsize, storage_offset);
     // TODO: When there are unbacked SymInts, we unconditionally skip the
     // setter.  This is technically wrong, but we cannot conveniently test
     // the real condition in many cases, because a lot of people are using
@@ -812,7 +849,7 @@ static bool sizes_match_except(
 // for being concatenated along a given dimension.
 static void check_cat_sparse_dims(
     Tensor const& t,
-    int64_t pos /* used only for debug messages */,
+    size_t pos /* used only for debug messages */,
     IntArrayRef sizes,
     int64_t wrapped,
     int64_t sparse_dim,
@@ -1112,7 +1149,7 @@ std::vector<Tensor> tensor_split_sections_symint(
 }
 
 template <typename T>
-std::vector<Tensor> _tensor_split_indices(
+static std::vector<Tensor> _tensor_split_indices(
     const Tensor& self,
     ArrayRef<T> indices,
     int64_t dim) {
@@ -1381,7 +1418,7 @@ static Tensor make_qtensor(
     const Tensor& self,
     IntArrayRef size,
     IntArrayRef stride,
-    QuantizerPtr quantizer) {
+    const QuantizerPtr& quantizer) {
   auto result = at::detail::make_tensor<QTensorImpl>(
       c10::TensorImpl::VIEW,
       Storage(self.storage()),
@@ -1411,7 +1448,7 @@ Tensor as_strided_tensorimpl(
 }
 
 template <typename T>
-inline void setStridedUnchecked(
+inline static void setStridedUnchecked(
     const Tensor& self,
     ArrayRef<T> size,
     ArrayRef<T> stride,
@@ -1474,7 +1511,7 @@ static Tensor as_strided_qtensorimpl(
     IntArrayRef size,
     IntArrayRef stride,
     std::optional<int64_t> storage_offset_,
-    QuantizerPtr quantizer) {
+    const QuantizerPtr& quantizer) {
   auto storage_offset = storage_offset_.value_or(self.storage_offset());
   TORCH_CHECK(
       (quantizer->qscheme() == QScheme::PER_TENSOR_AFFINE) ||
@@ -1495,7 +1532,8 @@ const Tensor& as_strided__symint(
     SymIntArrayRef size,
     SymIntArrayRef stride,
     std::optional<c10::SymInt> storage_offset_) {
-  auto storage_offset = storage_offset_.value_or(self.sym_storage_offset());
+  auto storage_offset =
+      std::move(storage_offset_).value_or(self.sym_storage_offset());
   setStrided(self, size, stride, std::move(storage_offset));
   return self;
 }
@@ -1576,7 +1614,7 @@ Tensor& narrow_copy_dense_cpu_out(
 
   // wrap dim if negative and do bound check
   if (dim < 0) {
-    dim = at::maybe_wrap_dim(dim, self_sizes.size());
+    dim = at::maybe_wrap_dim(dim, static_cast<int64_t>(self_sizes.size()));
   } else {
     TORCH_CHECK(dim < static_cast<int64_t>(self_sizes.size()));
   }
@@ -1918,7 +1956,7 @@ Tensor tile_symint(const Tensor& self, SymIntArrayRef reps) {
 // templated for ArrayRef<int64_t> and SmallVector<int64_t> use cases
 //
 template <typename Vec>
-Tensor alias_with_sizes_and_strides(
+static Tensor alias_with_sizes_and_strides(
     const Tensor& self,
     const Vec& sizes,
     const Vec& strides) {
@@ -1954,7 +1992,7 @@ Tensor alias_with_sizes_and_strides(
 // SymIntArrayRef/ArrayRef<c10::SymInt> and
 // SmallVector<c10::SymInt>/SymDimVector
 template <template <typename...> typename Container>
-Tensor alias_with_sizes_and_strides(
+static Tensor alias_with_sizes_and_strides(
     const Tensor& self,
     const Container<c10::SymInt>& sizes,
     const Container<c10::SymInt>& strides) {
@@ -2267,8 +2305,8 @@ Tensor select_symint(const Tensor& self, int64_t dim, c10::SymInt index) {
 
     auto quantizer = create_subtensor_quantizer(
         self, true, local_index, local_index + 1, dim, 1);
-    result = as_strided_qtensorimpl(
-        self, sizes, strides, storage_offset, std::move(quantizer));
+    result =
+        as_strided_qtensorimpl(self, sizes, strides, storage_offset, quantizer);
   } else {
     std::vector<c10::SymInt> sizes(
         self.sym_sizes().begin(), self.sym_sizes().end());
@@ -2456,8 +2494,8 @@ Tensor index_select_sparse_cpu(
       // src is a source of indices to binary search in sorted
       Tensor sorted, sorted_idx, src;
       std::tie(sorted, sorted_idx, src) =
-          [&dim_indices, &nneg_index, &self, search_in_dim_indices, dim, nnz](
-              void) -> std::tuple<Tensor, Tensor, Tensor> {
+          [&dim_indices, &nneg_index, &self, search_in_dim_indices, dim, nnz]()
+          -> std::tuple<Tensor, Tensor, Tensor> {
         // sort dim_indices to binary search into it
         if (search_in_dim_indices) {
           // dim_indices is already sorted if self is coalesced and dim == 0
@@ -3062,8 +3100,8 @@ Tensor slice(
   if (self.is_quantized()) {
     auto quantizer =
         create_subtensor_quantizer(self, false, start_val, end_val, dim, step);
-    result = as_strided_qtensorimpl(
-        self, sizes, strides, storage_offset, std::move(quantizer));
+    result =
+        as_strided_qtensorimpl(self, sizes, strides, storage_offset, quantizer);
   } else {
     // NB: it is extremely important to perform a redispatch here for
     // the MPS backend; if you call directly to as_strided_tensorimpl,
@@ -3195,13 +3233,11 @@ std::vector<Tensor> split_with_sizes(
     int64_t dim) {
   TORCH_CHECK(self.dim() != 0, "split expects at least a 1-dimensional tensor");
   const int64_t dim_size = self.size(dim);
-  const int64_t num_splits = split_sizes.size();
   int64_t start_idx = 0;
 
   std::vector<Tensor> splits;
-  splits.reserve(num_splits);
-  for (const auto i : c10::irange(num_splits)) {
-    auto length = split_sizes[i];
+  splits.reserve(split_sizes.size());
+  for (const auto length : split_sizes) {
     TORCH_CHECK(
         length >= 0,
         "split_with_sizes expects split_sizes have only non-negative ",
@@ -3286,7 +3322,7 @@ static inline std::vector<Tensor> get_stack_inputs(
   return inputs;
 }
 
-bool inline maybe_native_stack(
+static bool inline maybe_native_stack(
     Tensor& result,
     TensorList tensors,
     int64_t dim) {
@@ -3931,7 +3967,7 @@ Tensor squeeze_qtensor(const Tensor& self, c10::OptionalIntArrayRef dims) {
       self,
       C10_AS_INTARRAYREF_SLOW(sizes),
       C10_AS_INTARRAYREF_SLOW(strides),
-      std::move(quantizer));
+      quantizer);
   auto maybe_outnames = namedinference::compute_squeeze_outnames(self, mask);
   namedinference::propagate_names_if_nonempty(result, maybe_outnames);
   return result;
@@ -4017,7 +4053,7 @@ Tensor& squeeze_(Tensor& self, IntArrayRef dims) {
 // This is a hack because in-place operations on tensors treated like views
 // can be much more expensive than the same operations on non-view tensors.
 
-inline Tensor view_impl(const Tensor& self, IntArrayRef size) {
+inline static Tensor view_impl(const Tensor& self, IntArrayRef size) {
   at::DimVector inferred_size = at::infer_size_dv(size, self.numel());
   auto stride =
       at::detail::computeStride(self.sizes(), self.strides(), inferred_size);
@@ -4091,7 +4127,7 @@ Tensor unsqueeze_quantized(const Tensor& self, int64_t dim) {
         axis,
         quantizer->scalar_type());
   }
-  return make_qtensor(self, g.sizes, g.strides, std::move(quantizer));
+  return make_qtensor(self, g.sizes, g.strides, quantizer);
 }
 
 Tensor& unsqueeze_(Tensor& self, int64_t dim) {
@@ -4314,7 +4350,7 @@ std::vector<Tensor> meshgrid(TensorList tensors) {
 }
 
 std::vector<Tensor> meshgrid(TensorList tensors, std::string_view indexing) {
-  int64_t size = tensors.size();
+  auto size = tensors.size();
   TORCH_CHECK(size > 0, "meshgrid expects a non-empty TensorList");
 
   for (const auto i : c10::irange(size - 1)) {
@@ -4591,7 +4627,7 @@ Tensor movedim(const Tensor& self, IntArrayRef src, IntArrayRef dst) {
       dst,
       " dims)");
 
-  size_t self_dim = self.dim();
+  auto self_dim = self.dim();
   DimVector normalized_src(src.size());
   DimVector normalized_dst(dst.size());
 
@@ -4670,7 +4706,7 @@ Tensor movedim(const Tensor& self, IntArrayRef src, IntArrayRef dst) {
   auto destination_iter =
       std::remove(destination_dims.begin(), destination_dims.end(), -1);
 
-  int64_t rest_dim = self.dim() - src.size();
+  int64_t rest_dim = self.dim() - static_cast<int64_t>(src.size());
   TORCH_INTERNAL_ASSERT(
       std::distance(source_dims.begin(), source_iter) == rest_dim);
   TORCH_INTERNAL_ASSERT(
@@ -4731,7 +4767,7 @@ std::vector<Tensor> unflatten_dense_tensors(
     TensorList tensors) {
   std::vector<Tensor> outputs;
   outputs.reserve(tensors.size());
-  size_t offset = 0;
+  int64_t offset = 0;
   for (const auto& tensor : tensors) {
     auto numel = tensor.numel();
     // If unflatten an empty tensor, create a new empty tensor using
