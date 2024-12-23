@@ -174,6 +174,6 @@ TORCH_LIBRARY(cuda, m) {
       .def("record", &CUDAEvent::record)
       .def("synchronize", &CUDAEvent::synchronize)
       .def("wait", &CUDAEvent::wait);
-};
+}
 
 } // namespace torch::jit
