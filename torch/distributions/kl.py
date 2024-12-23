@@ -38,12 +38,12 @@ from .uniform import Uniform
 from .utils import _sum_rightmost, euler_constant as _euler_gamma
 
 
-_KL_REGISTRY: Dict[
-    Tuple[Type, Type], Callable
-] = {}  # Source of truth mapping a few general (type, type) pairs to functions.
-_KL_MEMOIZE: Dict[
-    Tuple[Type, Type], Callable
-] = {}  # Memoized version mapping many specific (type, type) pairs to functions.
+_KL_REGISTRY: Dict[Tuple[Type, Type], Callable] = (
+    {}
+)  # Source of truth mapping a few general (type, type) pairs to functions.
+_KL_MEMOIZE: Dict[Tuple[Type, Type], Callable] = (
+    {}
+)  # Memoized version mapping many specific (type, type) pairs to functions.
 
 __all__ = ["register_kl", "kl_divergence"]
 
@@ -224,7 +224,8 @@ def _kl_beta_beta(p, q):
     t3 = (p.concentration1 - q.concentration1) * torch.digamma(p.concentration1)
     t4 = (p.concentration0 - q.concentration0) * torch.digamma(p.concentration0)
     t5 = (sum_params_q - sum_params_p) * torch.digamma(sum_params_p)
-    return t1 - t2 + t3 + t4 + t5
+    t6 = torch.log(p.scale / q.scale)
+    return t1 - t2 + t3 + t4 + t5 + t6
 
 
 @register_kl(Binomial, Binomial)
@@ -516,12 +517,21 @@ def _kl_bernoulli_poisson(p, q):
 
 @register_kl(Beta, ContinuousBernoulli)
 def _kl_beta_continuous_bernoulli(p, q):
-    return (
+    kl_unscaled = (
         -p.entropy()
         - p.mean * q.logits
         - torch.log1p(-q.probs)
         - q._cont_bern_log_norm()
     )
+    if p._has_default_scale_parameters():
+        return kl_unscaled
+
+    scale_adjustment = (
+        p.scale
+        * (p.scale - 1)
+        * torch.digamma(p.concentration1 + p.concentration0)  # Scaling term
+    )
+    return kl_unscaled + scale_adjustment
 
 
 @register_kl(Beta, Pareto)
@@ -531,12 +541,11 @@ def _kl_beta_infinity(p, q):
 
 @register_kl(Beta, Exponential)
 def _kl_beta_exponential(p, q):
-    return (
-        -p.entropy()
-        - q.rate.log()
-        + q.rate * (p.concentration1 / (p.concentration1 + p.concentration0))
-    )
-
+    kl_unscaled = -p.entropy() - q.rate.log() + q.rate * p.mean
+    if p._has_default_scale_parameters():
+        return kl_unscaled
+    scaled_beta_term = q.rate * (p.mean * p.scale + p.location)
+    return kl_unscaled + scaled_beta_term
 
 @register_kl(Beta, Gamma)
 def _kl_beta_gamma(p, q):
@@ -545,7 +554,7 @@ def _kl_beta_gamma(p, q):
     t3 = (q.concentration - 1) * (
         p.concentration1.digamma() - (p.concentration1 + p.concentration0).digamma()
     )
-    t4 = q.rate * p.concentration1 / (p.concentration1 + p.concentration0)
+    t4 = q.rate * p.mean
     return t1 + t2 - t3 + t4
 
 
