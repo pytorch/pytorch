@@ -1059,6 +1059,22 @@ if(USE_ROCM)
        list(APPEND HIP_HIPCC_FLAGS -fdebug-info-for-profiling)
     endif(CMAKE_BUILD_TYPE MATCHES Debug)
 
+    # Get EnVar 'PYTORCH_LAYERNORM_FAST_RECIPROCAL' (or default to on).
+    if(DEFINED ENV{PYTORCH_LAYERNORM_FAST_RECIPROCAL})
+      set(PYTORCH_LAYERNORM_FAST_RECIPROCAL_CMAKE $ENV{PYTORCH_LAYERNORM_FAST_RECIPROCAL})
+    else()
+      set(PYTORCH_LAYERNORM_FAST_RECIPROCAL_CMAKE ON)
+    endif()
+
+    set(PYTORCH_LAYERNORM_FAST_RECIPROCAL
+      ${PYTORCH_LAYERNORM_FAST_RECIPROCAL_CMAKE}
+      CACHE BOOL "Enable fast reciprocals within layer normalization." FORCE
+    )
+
+    if(PYTORCH_LAYERNORM_FAST_RECIPROCAL)
+      add_definitions(-DPYTORCH_LAYERNORM_FAST_RECIPROCAL)
+    endif()
+
     # needed for compat with newer versions of hip-clang that introduced C++20 mangling rules
     list(APPEND HIP_HIPCC_FLAGS -fclang-abi-compat=17)
 
