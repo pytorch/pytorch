@@ -82,7 +82,7 @@ class TestIgnoreContextManager(JitTestCase):
                 a: int = 4
                 b: int = 5
                 with torch.jit._IgnoreContextManager(a="inp:int", b="inp:int"):
-                    l = [2 + b for i in range(a) if i > 2]
+                    l = [2 + b for i in range(a) if i > 2]  # noqa: F841
                 return a
 
         model = A()

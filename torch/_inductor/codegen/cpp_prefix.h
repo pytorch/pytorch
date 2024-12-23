@@ -24,6 +24,7 @@
 #include <c10/util/BFloat16.h>
 #include <c10/util/BFloat16-math.h>
 #include <c10/util/generic_math.h>
+#include <c10/util/irange.h>
 #include <c10/util/Half.h>
 #include <c10/util/TypeCast.h>
 #include <torch/csrc/inductor/aoti_torch/c/shim.h>
