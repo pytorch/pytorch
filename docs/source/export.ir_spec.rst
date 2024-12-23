@@ -103,15 +103,25 @@ of the Graph of GraphModule.
 
 Example::
 
-   from torch import nn
+  import torch
+  from torch import nn
 
-   class MyModule(nn.Module):
+  class MyModule(nn.Module):
 
-       def forward(self, x, y):
-         return x + y
+      def forward(self, x, y):
+        return x + y
 
-   mod = torch.export.export(MyModule())
-   print(mod.graph)
+  example_args = (torch.randn(1), torch.randn(1))
+  mod = torch.export.export(MyModule(), example_args)
+  print(mod.graph)
+
+.. code-block:: python
+
+   graph():
+     %x : [num_users=1] = placeholder[target=x]
+     %y : [num_users=1] = placeholder[target=y]
+     %add : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%x, %y), kwargs = {})
+     return (add,)
 
 The above is the textual representation of a Graph, with each line being a node.
 
@@ -212,7 +222,7 @@ A ``call_function`` node represents a call to an operator.
 2. In Export IR, constant arguments will be embedded within the graph.
 
 3. In FX graph, a get_attr node can represent reading any attribute stored in
-   the graph module. However, in Export IR this is restricted to readign only
+   the graph module. However, in Export IR this is restricted to reading only
    submodules as all parameters/buffers will be passed in as inputs to the graph
    module.
 
@@ -435,9 +445,9 @@ The following types are defined as **leaf type**:
    * - Scalar
      - Any numerical types from Python, including integral types, floating point types, and zero dimensional tensors.
    * - int
-     - Python int (binded as int64_t in C++)
+     - Python int (bound as int64_t in C++)
    * - float
-     - Python float (binded as double in C++)
+     - Python float (bound as double in C++)
    * - bool
      - Python bool
    * - str

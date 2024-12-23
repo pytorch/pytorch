@@ -570,8 +570,8 @@ static void isposinf_kernel_mps(TensorIteratorBase& iter) {
   mps::is_posneginf_helper(iter, false);
 }
 
-REGISTER_DISPATCH(where_kernel, &where_kernel_mps);
-REGISTER_DISPATCH(isneginf_stub, &isneginf_kernel_mps);
-REGISTER_DISPATCH(isposinf_stub, &isposinf_kernel_mps);
+REGISTER_DISPATCH(where_kernel, &where_kernel_mps)
+REGISTER_DISPATCH(isneginf_stub, &isneginf_kernel_mps)
+REGISTER_DISPATCH(isposinf_stub, &isposinf_kernel_mps)
 
 } // namespace at::native

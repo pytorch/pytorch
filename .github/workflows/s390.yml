@@ -16,9 +16,11 @@ permissions: read-all
 
 jobs:
   linux-manylinux-2_28-py3-cpu-s390x-build:
+    if: github.repository_owner == 'pytorch'
     name: linux-manylinux-2_28-py3-cpu-s390x
     uses: ./.github/workflows/_linux-build.yml
     with:
       build-environment: linux-s390x-binary-manywheel
       docker-image-name: pytorch/manylinuxs390x-builder:cpu-s390x-main
       runner: linux.s390x
+    secrets: inherit

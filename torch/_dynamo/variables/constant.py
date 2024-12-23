@@ -4,11 +4,10 @@ import operator
 from typing import Dict, List, TYPE_CHECKING
 
 import torch
-from torch._dynamo.source import GetItemSource
+from torch._dynamo.source import AttrSource, GetItemSource
 
 from .. import variables
-from ..exc import unimplemented, UserError, UserErrorType
-from ..guards import GuardBuilder, install_guard
+from ..exc import unimplemented
 from ..utils import common_constant_types, istype, np
 from .base import typestr, VariableTracker
 
@@ -17,44 +16,30 @@ if TYPE_CHECKING:
     from torch._dynamo.symbolic_convert import InstructionTranslator
 
 
-_type_to_assert_reason = {
-    # NB - We CAN have ConstantVariable.create(set) because of how sets interact with guards.
-    # A locally created set should always become a SetVariable, as the items in the set will already either be sourced
-    # from somewhere else, or unsourced. An input set would imply sources derived from set contents. For example, an
-    # input list's contents will have a source like some_list[0], some_list[1][1], etc. For a set, arbitrary access is
-    # not possible. This is a solvable problem, but one we have not taken on yet. As such, input sets are not allowed to
-    # become SetVariables. The solution here is to create a ConstantSetVariable that is more like a ConstantVariable.
-    # As this does not exist, we cannot add sets to this invariant.
-    list: "List types must use ListVariable.",
-    dict: "Dict types must use ConstDictVariable.",
-    torch.Tensor: "Tensor types must use TensorVariable.",
-    torch.SymInt: "SymInts must use SymNodeVariable. "
-    "If the underlying value is static, we will create a ConstantVariable and specialize.",
-    torch.SymFloat: "SymInts must use SymNodeVariable",
-}
-
-
 class ConstantVariable(VariableTracker):
     @staticmethod
     def create(value, **kwargs) -> VariableTracker:
-        source = kwargs.get("source", None)
-        is_literal = ConstantVariable.is_literal(value)
-        if not is_literal:
-            for disallowed_type, reason in _type_to_assert_reason.items():
-                assert not isinstance(value, disallowed_type), reason
+        """
+        Create a `ConstantVariable` based on the given value, and supports
+        automatic routing for collection types like `tuple` (in which case we'd
+        create `ConstantVariable` for the leaf items).
 
-        # Routing for list and tuple literals.
-        if is_literal and isinstance(value, (set, frozenset)):
-            items = []
-            for i, x in enumerate(value):
-                items.append(ConstantVariable.create(x))
+        NOTE: the caller must install the proper guards if needed; most often
+        the guard will be `CONSTANT_MATCH`.
+        """
+        source = kwargs.get("source", None)
+
+        # Routing for supported collection literals.
+        if isinstance(value, set):
+            items = [ConstantVariable.create(x) for x in value]
             return variables.SetVariable(items, **kwargs)
-        elif is_literal and isinstance(value, (list, tuple)):
+        elif isinstance(value, frozenset):
+            items = [ConstantVariable.create(x) for x in value]
+            return variables.FrozensetVariable(items, **kwargs)
+        elif isinstance(value, (list, tuple)):
             items = []
             for i, x in enumerate(value):
                 item_source = GetItemSource(source, i) if source else None
-                if item_source:
-                    install_guard(item_source.make_guard(GuardBuilder.CONSTANT_MATCH))
                 items.append(
                     ConstantVariable.create(
                         x,
@@ -67,13 +52,17 @@ class ConstantVariable(VariableTracker):
 
     def __init__(self, value, **kwargs) -> None:
         super().__init__(**kwargs)
-        if not ConstantVariable.is_literal(value):
-            for disallowed_type, reason in _type_to_assert_reason.items():
-                assert not isinstance(value, disallowed_type), reason
+        assert ConstantVariable.is_base_literal(
+            value
+        ), f"""
+Cannot construct `ConstantVariable` for value of type {type(value)}.
 
-        assert not isinstance(
-            value, (list, tuple)
-        ), "ConstantVariable(list) is banned - please create a ListVariable(items)"
+This failure likely due to PyTorch-internal use of `ConstantVariable` on
+non-literal python values, please try using `VariableTracker.build` instead. If
+you believe it's a necessary and legitimate use case (the value is immutable and
+can't easily be represented with another `VariableTracker` class), please add
+its type to `common_constant_types`.
+"""
         if np is not None and isinstance(value, np.number):
             self.value = value.item()
         else:
@@ -105,13 +94,14 @@ class ConstantVariable(VariableTracker):
         )
 
     @staticmethod
+    def is_base_literal(obj):
+        return type(obj) in common_constant_types
+
+    @staticmethod
     def is_literal(obj):
-        if type(obj) in common_constant_types:
-            return True
-        # The structure within is_literal get routed to variables.BaseListVariable
         if type(obj) in (list, tuple, set, frozenset, torch.Size):
             return all(ConstantVariable.is_literal(x) for x in obj)
-        return False
+        return ConstantVariable.is_base_literal(obj)
 
     def unpack_var_sequence(self, tx):
         try:
@@ -120,13 +110,6 @@ class ConstantVariable(VariableTracker):
             raise NotImplementedError from e
 
     def const_getattr(self, tx: "InstructionTranslator", name):
-        if isinstance(self.value, type):
-            raise UserError(
-                UserErrorType.ANTI_PATTERN,
-                "Can't access members of type(obj) for a generated custom object. "
-                "Please use __class__ instead",
-                case_name="type_reflection_method",
-            )
         member = getattr(self.value, name)
         if callable(member):
             raise NotImplementedError
@@ -195,6 +178,10 @@ class ConstantVariable(VariableTracker):
 
         if name == "__len__" and not (args or kwargs):
             return ConstantVariable.create(len(self.value))
+        elif name == "__round__" and len(args) == 1 and args[0].is_python_constant():
+            return ConstantVariable.create(
+                round(self.value, args[0].is_python_constant())
+            )
         elif name == "__contains__" and len(args) == 1 and args[0].is_python_constant():
             assert not kwargs
             search = args[0].as_python_constant()
@@ -232,8 +219,7 @@ class EnumVariable(VariableTracker):
     def as_python_constant(self):
         return self.value
 
-    def const_getattr(self, tx: "InstructionTranslator", name):
+    def var_getattr(self, tx: "InstructionTranslator", name):
         member = getattr(self.value, name)
-        if callable(member):
-            raise NotImplementedError
-        return member
+        source = self.source and AttrSource(self.source, name)
+        return VariableTracker.build(tx, member, source=source)

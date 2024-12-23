@@ -20,15 +20,12 @@ class ReferenceQuantizedModule(torch.nn.Module):
             }
         self.weight_qscheme: torch.qscheme = weight_qparams["qscheme"]
         self.weight_dtype = weight_qparams["dtype"]
-        assert (
-            self.weight_qscheme
-            in (
-                None,
-                torch.per_tensor_affine,
-                torch.per_channel_affine,
-                torch.per_channel_affine_float_qparams,
-            )
-        ), f"qscheme: {self.weight_qscheme} is not support in reference quantized {self._get_name()}"
+        assert self.weight_qscheme in [
+            None,
+            torch.per_tensor_affine,
+            torch.per_channel_affine,
+            torch.per_channel_affine_float_qparams,
+        ], f"qscheme: {self.weight_qscheme} is not support in reference quantized {self._get_name()}"
         if self.weight_dtype in [
             torch.quint8,
             torch.qint8,
@@ -42,14 +39,14 @@ class ReferenceQuantizedModule(torch.nn.Module):
             )
             w_scale = weight_qparams["scale"]
             w_scale_tensor = (
-                w_scale.clone().detach()
+                w_scale.detach().clone()
                 if isinstance(w_scale, torch.Tensor)
                 else torch.tensor(w_scale, dtype=torch.float, device=device)
             )
             self.register_buffer("weight_scale", w_scale_tensor)
             w_zp = weight_qparams["zero_point"]
             w_zp_tensor = (
-                w_zp.clone().detach()
+                w_zp.detach().clone()
                 if isinstance(w_zp, torch.Tensor)
                 else torch.tensor(w_zp, dtype=zero_point_dtype, device=device)
             )
@@ -60,7 +57,7 @@ class ReferenceQuantizedModule(torch.nn.Module):
             ]:
                 w_axis = weight_qparams["axis"]
                 w_axis_tensor = (
-                    w_axis.clone().detach()
+                    w_axis.detach().clone()
                     if isinstance(w_axis, torch.Tensor)
                     else torch.tensor(w_axis, dtype=torch.int, device=device)
                 )

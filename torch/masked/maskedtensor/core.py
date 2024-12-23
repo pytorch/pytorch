@@ -3,7 +3,7 @@
 
 import warnings
 from typing import Any
-from typing_extensions import TypeGuard
+from typing_extensions import TypeIs
 
 import torch
 from torch.overrides import get_default_nowrap_functions
@@ -15,7 +15,7 @@ __all__ = [
 ]
 
 
-def is_masked_tensor(obj: Any, /) -> TypeGuard["MaskedTensor"]:
+def is_masked_tensor(obj: Any, /) -> TypeIs["MaskedTensor"]:
     r"""Returns True if the input is a MaskedTensor, else False
 
     Args:
@@ -25,7 +25,7 @@ def is_masked_tensor(obj: Any, /) -> TypeGuard["MaskedTensor"]:
 
         >>> # xdoctest: +SKIP
         >>> from torch.masked import MaskedTensor
-        >>> data = torch.arange(6).reshape(2, 3)
+        >>> data = torch.arange(6).reshape(2,3)
         >>> mask = torch.tensor([[True, False, False], [True, True, False]])
         >>> mt = MaskedTensor(data, mask)
         >>> is_masked_tensor(mt)

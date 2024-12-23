@@ -132,6 +132,7 @@ class ChunkShardingSpec(ShardingSpec):
         local_shards = []
         local_tensor = None
         local_metadata = None
+
         tensors_to_scatter = cast(
             List[Optional[torch.Tensor]],
             [None] * dist.get_world_size(process_group),
@@ -192,9 +193,16 @@ class ChunkShardingSpec(ShardingSpec):
                 process_group, src_for_scatter
             )
 
+        tensors_to_scatter_: Optional[List[torch.Tensor]] = None
+        if current_rank == src_rank:
+            tensors_to_scatter_ = []
+            for t in tensors_to_scatter:
+                assert isinstance(t, torch.Tensor)
+                tensors_to_scatter_.append(t)
+
         dist.scatter(
             local_tensor,
-            scatter_list=tensors_to_scatter if current_rank == src_rank else None,
+            scatter_list=tensors_to_scatter_,
             src=src_for_scatter,
             group=process_group,
         )

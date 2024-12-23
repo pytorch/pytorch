@@ -23,10 +23,16 @@ struct Array {
   C10_HOST_DEVICE Array() = default;
   C10_HOST_DEVICE Array(const Array&) = default;
   C10_HOST_DEVICE Array& operator=(const Array&) = default;
+  C10_HOST_DEVICE Array(Array&&) = default;
+  C10_HOST_DEVICE Array& operator=(Array&&) = default;
+  C10_HOST_DEVICE ~Array() = default;
 #else
   Array() = default;
   Array(const Array&) = default;
   Array& operator=(const Array&) = default;
+  Array(Array&&) noexcept = default;
+  Array& operator=(Array&&) noexcept = default;
+  ~Array() = default;
 #endif
   static constexpr int size() {
     return size_;

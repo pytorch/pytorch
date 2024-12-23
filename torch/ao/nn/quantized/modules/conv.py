@@ -32,8 +32,7 @@ def _reverse_repeat_padding(padding: List[int]) -> List[int]:
     _reversed_padding_repeated_twice: List[int] = []
     N = len(padding)
     for idx in range(N):
-        for _ in range(2):
-            _reversed_padding_repeated_twice.append(padding[N - idx - 1])
+        _reversed_padding_repeated_twice.extend(padding[N - idx - 1] for _ in range(2))
     return _reversed_padding_repeated_twice
 
 
@@ -518,7 +517,6 @@ class Conv2d(_ConvNd):
         >>> output = m(q_input)
 
     """
-
     _FLOAT_MODULE: ClassVar[Type[nn.Conv2d]] = nn.Conv2d
     _NNIQAT_CONV_BN_MODULE: ClassVar[Optional[Type[nn.Module]]] = nniqat.ConvBn2d
     _NNI_CONV_RELU_MODULE: ClassVar[Optional[Type[nn.Module]]] = nni.ConvReLU2d
@@ -648,7 +646,6 @@ class Conv3d(_ConvNd):
         >>> output = m(q_input)
 
     """
-
     _FLOAT_MODULE: ClassVar[Type[nn.Conv3d]] = nn.Conv3d
     _NNIQAT_CONV_BN_MODULE: ClassVar[Optional[Type[nn.Module]]] = nniqat.ConvBn3d
     _NNI_CONV_RELU_MODULE: ClassVar[Optional[Type[nn.Module]]] = nni.ConvReLU3d
@@ -810,7 +807,7 @@ class _ConvTransposeNd(_ConvNd):
         )
         assert type(mod) == cls._FLOAT_MODULE, msg
         assert hasattr(mod, "qconfig"), "Input float module must have qconfig defined."
-        weight_post_process = mod.qconfig.weight()
+        weight_post_process = mod.qconfig.weight()  # type: ignore[operator, union-attr]
         weight_post_process(mod.weight)
         assert (
             weight_post_process.dtype == torch.qint8
@@ -836,7 +833,7 @@ class _ConvTransposeNd(_ConvNd):
         ):
             return qconv  # dynamic quantization doesn't need scale/zero_point
         else:
-            act_scale, act_zp = mod.activation_post_process.calculate_qparams()
+            act_scale, act_zp = mod.activation_post_process.calculate_qparams()  # type: ignore[operator, union-attr]
             qconv.scale = float(act_scale)
             qconv.zero_point = int(act_zp)
             return qconv

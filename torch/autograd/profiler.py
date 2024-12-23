@@ -1,4 +1,5 @@
 # mypy: allow-untyped-defs
+import uuid
 from collections import defaultdict
 from dataclasses import dataclass
 from time import perf_counter_ns
@@ -93,7 +94,6 @@ def _run_on_profiler_stop():
 @dataclass
 class _ProfilerStats:
     "Profiler timing and stats used by developers to catch issues/regressions"
-
     profiling_window_duration_sec: float = 0
     number_of_events: int = 0
     profiler_prepare_call_duration_us: int = 0
@@ -210,6 +210,7 @@ class profile:
         use_cpu=True,
         experimental_config=None,
         acc_events=False,
+        custom_trace_id_callback=None,
     ):
         self.enabled: bool = enabled
         if not self.enabled:
@@ -246,7 +247,8 @@ class profile:
         self.profiling_start_time_ns = 0
         self.profiling_end_time_ns = 0
         self._stats = _ProfilerStats()
-
+        self.custom_trace_id_callback = custom_trace_id_callback
+        self.trace_id = ""
         if not self.use_cpu:
             assert (
                 use_kineto
@@ -306,7 +308,22 @@ class profile:
             len(self.kineto_activities) > 0
         ), "No activities specified for the profiler"
 
-    def config(self):
+    def default_trace_id(self):
+        # Generate a UUID
+        uuid_raw = uuid.uuid4()
+
+        return f"{uuid_raw.int:032X}"
+
+    def create_trace_id(self):
+        if self.custom_trace_id_callback:
+            return self.custom_trace_id_callback()
+        return self.default_trace_id()
+
+    def config(self, create_trace_id=False):
+        # only need to generate new trace id upon prepare trace not start trace
+        if create_trace_id:
+            trace_id = self.create_trace_id()
+            self.trace_id = trace_id
         return ProfilerConfig(
             self.profiler_kind,
             self.record_shapes,
@@ -315,6 +332,7 @@ class profile:
             self.with_flops,
             self.with_modules,
             self.experimental_config,
+            self.trace_id,
         )
 
     def __enter__(self):
@@ -329,7 +347,7 @@ class profile:
     def _prepare_trace(self):
         self.entered = True
         t0 = perf_counter_ns()
-        _prepare_profiler(self.config(), self.kineto_activities)
+        _prepare_profiler(self.config(create_trace_id=True), self.kineto_activities)
         t1 = perf_counter_ns()
         self._stats.profiler_prepare_call_duration_us = int((t1 - t0) / 1000)
 
@@ -337,7 +355,7 @@ class profile:
         self.entered = True
         _run_on_profiler_start()
         t0 = perf_counter_ns()
-        _enable_profiler(self.config(), self.kineto_activities)
+        _enable_profiler(self.config(create_trace_id=False), self.kineto_activities)
         t1 = perf_counter_ns()
         self._stats.profiler_enable_call_duration_us = int((t1 - t0) / 1000)
         self.profiling_start_time_ns = t1
@@ -696,10 +714,11 @@ class record_function(_ContextDecorator):
         >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_AUTOGRAD_PROFILER)
         >>> x = torch.randn((1, 1), requires_grad=True)
         >>> with torch.autograd.profiler.profile() as prof:
-        ...     y = x**2
-        ...     with torch.autograd.profiler.record_function("label-z"):  # label the block
-        ...         z = y**3
+        ...     y = x ** 2
+        ...     with torch.autograd.profiler.record_function("label-z"): # label the block
+        ...         z = y ** 3
         ...     y.backward()
+        ...
         >>> # xdoctest: +IGNORE_WANT
         >>> # NOTE: some columns were removed for brevity
         >>> print(prof.key_averages().table(sort_by="self_cpu_time_total"))
