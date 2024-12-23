@@ -376,12 +376,16 @@ def export(
     )
 
 
+DEFAULT_PICKLE_PROTOCOL = 2
+
+
 def save(
     ep: ExportedProgram,
     f: Union[str, os.PathLike, io.BytesIO],
     *,
     extra_files: Optional[Dict[str, Any]] = None,
     opset_version: Optional[Dict[str, int]] = None,
+    pickle_protocol: int = DEFAULT_PICKLE_PROTOCOL,
 ) -> None:
     """
 
@@ -404,6 +408,7 @@ def save(
         opset_version (Optional[Dict[str, int]]): A map of opset names
          to the version of this opset
 
+        pickle_protocol: can be specified to override the default protocol
 
     Example::
 
@@ -436,7 +441,7 @@ def save(
     from torch._export.serde.schema import SCHEMA_VERSION
     from torch._export.serde.serialize import serialize, SerializedArtifact
 
-    artifact: SerializedArtifact = serialize(ep, opset_version)
+    artifact: SerializedArtifact = serialize(ep, opset_version, pickle_protocol)
 
     if isinstance(f, (str, os.PathLike)):
         f = os.fspath(f)
