@@ -86,7 +86,7 @@ log = logging.getLogger(__name__)
 
 # correctness checks struggle with fp16/tf32
 VERIFY: Dict[str, Any] = {}
-PRINT_AUTOTUNE = True
+PRINT_AUTOTUNE = False
 DEBUG = False
 
 if TYPE_CHECKING:
