@@ -277,6 +277,10 @@ class ValueCache {
  public:
   ValueCache() = default;
   ValueCache(const ValueCache&) = delete;
+  ValueCache& operator==(const ValueCache&) = delete;
+  ValueCache(ValueCache&&) = default;
+  ValueCache& operator==(ValueCache&&) = delete;
+  ~ValueCache() = default;
 
   template <CallType C>
   void store(const typename Config<C>::key_t&, typename Config<C>::ephemeral_t);
@@ -457,8 +461,9 @@ ExtraFields<EventType::PyCall>::args_t ValueCache::load<
   OptimizerInfo info{
       key, cls, cache.cls_names_.at(cls), cls_and_parameters.parameters_};
   return {
-      // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
-      /*frame_state_=*/std::get<CallType::PyCall>(state_).at(*cache.location_),
+      /*frame_state_=*/std::get<CallType::PyCall>(state_).at(
+          // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+          cache.location_.value()),
       /*module_info_=*/std::nullopt,
       /*optimizer_info_=*/std::move(info)};
 }

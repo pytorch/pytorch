@@ -2,13 +2,13 @@ from __future__ import annotations
 
 import os
 import subprocess
-from typing import IO, Tuple
+from typing import IO
 
 from ..oss.utils import get_pytorch_folder
 from ..util.setting import SUMMARY_FOLDER_DIR, TestList, TestStatusType
 
 
-CoverageItem = Tuple[str, float, int, int]
+CoverageItem = tuple[str, float, int, int]
 
 
 def key_by_percentage(x: CoverageItem) -> float:

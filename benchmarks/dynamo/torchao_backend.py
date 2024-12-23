@@ -8,7 +8,7 @@ def setup_baseline():
 
     recommended_inductor_config_setter()
     torch._dynamo.config.automatic_dynamic_shapes = False
-    torch._dynamo.config.cache_size_limit = 10000
+    torch._dynamo.config.recompile_limit = 10000
 
 
 def torchao_optimize_ctx(quantization: str):
