@@ -5355,6 +5355,7 @@ def meta__scaled_dot_product_flash_attention_for_cpu(
     max_seqlen_batch_q = query.size(2)
 
     attention = torch.empty_like(query)
+    attention = attention.permute(2, 0, 1, 3).contiguous().permute(1, 2, 0, 3)
     logsumexp = torch.empty(
         (
             batch_size,
