@@ -1019,6 +1019,7 @@ class MultiheadAttention(Module):
             Default: ``False``.
         kdim: Total number of features for keys. Default: ``None`` (uses ``kdim=embed_dim``).
         vdim: Total number of features for values. Default: ``None`` (uses ``vdim=embed_dim``).
+        qk_proj_dim: Dimension for projected query and key. Default: ``None`` (uses ``qk_proj_dim=embed_dim``).
         batch_first: If ``True``, then the input and output tensors are provided
             as (batch, seq, feature). Default: ``False`` (seq, batch, feature).
 
@@ -1047,6 +1048,7 @@ class MultiheadAttention(Module):
         add_zero_attn=False,
         kdim=None,
         vdim=None,
+        qk_proj_dim=None,
         batch_first=False,
         device=None,
         dtype=None,
@@ -1062,6 +1064,7 @@ class MultiheadAttention(Module):
         self.kdim = kdim if kdim is not None else embed_dim
         self.vdim = vdim if vdim is not None else embed_dim
         self._qkv_same_embed_dim = self.kdim == embed_dim and self.vdim == embed_dim
+        self.qk_proj_dim = qk_proj_dim if qk_proj_dim is not None else embed_dim
 
         self.num_heads = num_heads
         self.dropout = dropout
@@ -1070,13 +1073,17 @@ class MultiheadAttention(Module):
         assert (
             self.head_dim * num_heads == self.embed_dim
         ), "embed_dim must be divisible by num_heads"
+        self.head_qk_dim = self.qk_proj_dim // num_heads
+        assert (
+            self.head_qk_dim * num_heads == self.qk_proj_dim
+        ), "qk_proj_dim must be divisible by num_heads"
 
         if not self._qkv_same_embed_dim:
             self.q_proj_weight = Parameter(
-                torch.empty((embed_dim, embed_dim), **factory_kwargs)
+                torch.empty((self.qk_proj_dim, embed_dim), **factory_kwargs)
             )
             self.k_proj_weight = Parameter(
-                torch.empty((embed_dim, self.kdim), **factory_kwargs)
+                torch.empty((self.qk_proj_dim, self.kdim), **factory_kwargs)
             )
             self.v_proj_weight = Parameter(
                 torch.empty((embed_dim, self.vdim), **factory_kwargs)
@@ -1084,14 +1091,18 @@ class MultiheadAttention(Module):
             self.register_parameter("in_proj_weight", None)
         else:
             self.in_proj_weight = Parameter(
-                torch.empty((3 * embed_dim, embed_dim), **factory_kwargs)
+                torch.empty(
+                    (2 * self.qk_proj_dim + embed_dim, embed_dim), **factory_kwargs
+                )
             )
             self.register_parameter("q_proj_weight", None)
             self.register_parameter("k_proj_weight", None)
             self.register_parameter("v_proj_weight", None)
 
         if bias:
-            self.in_proj_bias = Parameter(torch.empty(3 * embed_dim, **factory_kwargs))
+            self.in_proj_bias = Parameter(
+                torch.empty(2 * self.qk_proj_dim + embed_dim, **factory_kwargs)
+            )
         else:
             self.register_parameter("in_proj_bias", None)
         self.out_proj = NonDynamicallyQuantizableLinear(
@@ -1099,7 +1110,9 @@ class MultiheadAttention(Module):
         )
 
         if add_bias_kv:
-            self.bias_k = Parameter(torch.empty((1, 1, embed_dim), **factory_kwargs))
+            self.bias_k = Parameter(
+                torch.empty((1, 1, self.qk_proj_dim), **factory_kwargs)
+            )
             self.bias_v = Parameter(torch.empty((1, 1, embed_dim), **factory_kwargs))
         else:
             self.bias_k = self.bias_v = None
@@ -1270,6 +1283,8 @@ class MultiheadAttention(Module):
                                  is not supported with NestedTensor input"
         elif torch.is_autocast_enabled():
             why_not_fast_path = "autocast is enabled"
+        elif self.qk_proj_dim != self.embed_dim:
+            why_not_fast_path = "qk_proj_dim is not equal to embed_dim"
 
         if not why_not_fast_path:
             tensor_args = (
