@@ -196,7 +196,7 @@ class TestRemoveMutation(JitTestCase):
 
         def intermediary_use():
             a = [1, 2]
-            b = len(a)
+            b = len(a)  # noqa: F841
             a.append(3)
             return a
 

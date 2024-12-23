@@ -146,7 +146,7 @@ class ObserverBase(ABC, nn.Module):
         or static quantization
     """
 
-    def __init__(self, dtype, is_dynamic=False):
+    def __init__(self, dtype, is_dynamic: bool = False):
         super().__init__()
         self.dtype = dtype
         self.is_dynamic = is_dynamic
@@ -1510,7 +1510,7 @@ class RecordingObserver(ObserverBase):
     __annotations__ = {"tensor_val": List[Optional[torch.Tensor]]}
 
     def __init__(self, dtype=torch.quint8):
-        super().__init__(dtype=dtype, is_dynamic=False)  # type: ignore[call-arg]
+        super().__init__(dtype=dtype, is_dynamic=False)
         self.tensor_val = []
 
     def forward(self, x):
