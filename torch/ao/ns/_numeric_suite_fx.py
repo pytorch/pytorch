@@ -9,7 +9,7 @@ across models. Example usage::
     import torch.ao.ns._numeric_suite_fx as ns
 
     m = torch.nn.Sequential(torch.nn.Conv2d(1, 1, 1)).eval()
-    mp = quantize_fx.prepare_fx(m, {"": torch.ao.quantization.default_qconfig})
+    mp = quantize_fx.prepare_fx(m, {'': torch.ao.quantization.default_qconfig})
     # We convert a copy because we need the original prepared model
     # to be available for comparisons, and `quantize_fx.convert_fx` is inplace.
     mq = quantize_fx.convert_fx(copy.deepcopy(mp))
@@ -19,12 +19,12 @@ across models. Example usage::
     #
 
     # extract weight pairs
-    weight_comparison = ns.extract_weights("a", mp, "b", mq)
+    weight_comparison = ns.extract_weights('a', mp, 'b', mq)
 
     # add SQNR for each comparison, inplace
     ns.extend_logger_results_with_comparison(
-        weight_comparison, "a", "b", torch.ao.ns.fx.utils.compute_sqnr, "sqnr"
-    )
+        weight_comparison, 'a', 'b', torch.ao.ns.fx.utils.compute_sqnr,
+        'sqnr')
 
     # weight_comparison contains the weights from `mp` and `mq` stored
     # in pairs, and can be used for further analysis.
@@ -36,8 +36,9 @@ across models. Example usage::
 
     # add loggers
     mp_ns, mq_ns = ns.add_loggers(
-        "a", copy.deepcopy(mp), "b", copy.deepcopy(mq), ns.OutputLogger
-    )
+        'a', copy.deepcopy(mp),
+        'b', copy.deepcopy(mq),
+        ns.OutputLogger)
 
     # send an example datum to capture intermediate activations
     datum = torch.randn(1, 1, 1, 1)
@@ -45,12 +46,13 @@ across models. Example usage::
     mq_ns(datum)
 
     # extract intermediate activations
-    act_comparison = ns.extract_logger_info(mp_ns, mq_ns, ns.OutputLogger, "b")
+    act_comparison = ns.extract_logger_info(
+        mp_ns, mq_ns, ns.OutputLogger, 'b')
 
     # add SQNR for each comparison, inplace
     ns.extend_logger_results_with_comparison(
-        act_comparison, "a", "b", torch.ao.ns.fx.utils.compute_sqnr, "sqnr"
-    )
+        act_comparison, 'a', 'b', torch.ao.ns.fx.utils.compute_sqnr,
+        'sqnr')
 
     # act_comparison contains the activations from `mp_ns` and `mq_ns` stored
     # in pairs, and can be used for further analysis.
@@ -61,8 +63,9 @@ across models. Example usage::
 
     # create shadow model
     mp_shadows_mq = ns.add_shadow_loggers(
-        "a", copy.deepcopy(mp), "b", copy.deepcopy(mq), ns.OutputLogger
-    )
+        'a', copy.deepcopy(mp),
+        'b', copy.deepcopy(mq),
+        ns.OutputLogger)
 
     # send an example datum to capture intermediate activations
     datum = torch.randn(1, 1, 1, 1)
@@ -70,13 +73,12 @@ across models. Example usage::
 
     # extract intermediate activations
     shadow_act_comparison = ns.extract_shadow_logger_info(
-        mp_shadows_mq, ns.OutputLogger, "b"
-    )
+        mp_shadows_mq, ns.OutputLogger, 'b')
 
     # add SQNR for each comparison, inplace
     ns.extend_logger_results_with_comparison(
-        shadow_act_comparison, "a", "b", torch.ao.ns.fx.utils.compute_sqnr, "sqnr"
-    )
+        shadow_act_comparison, 'a', 'b', torch.ao.ns.fx.utils.compute_sqnr,
+        'sqnr')
 
     # shadow_act_comparison contains the activations from `mp_ns` and `mq_ns` stored
     # in pairs, and can be used for further analysis.
@@ -89,10 +91,7 @@ from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Type, TYPE_C
 import torch
 import torch.ao.quantization.quantize_fx as quantize_fx
 import torch.nn as nn
-from torch.ao.ns.fx.graph_matcher import (
-    get_matching_subgraph_pairs,
-    get_type_a_related_to_b,
-)
+from torch.ao.ns.fx.graph_matcher import get_matching_subgraph_pairs
 from torch.ao.ns.fx.mappings import get_base_name_to_sets_of_related_ops
 from torch.ao.ns.fx.n_shadows_utils import (
     _get_dedup_subgraphs,
@@ -408,7 +407,6 @@ def extract_weights(
     torch._C._log_api_usage_once("quantization_api._numeric_suite_fx.extract_weights")
     if base_name_to_sets_of_related_ops is None:
         base_name_to_sets_of_related_ops = get_base_name_to_sets_of_related_ops()
-    type_a_related_to_b = get_type_a_related_to_b(base_name_to_sets_of_related_ops)
 
     # TODO(future PR): expose these
     skipped_module_names: List[str] = []
@@ -588,7 +586,7 @@ def _extract_logger_info_one_model(
     torch._C._log_api_usage_once(
         "quantization_api._numeric_suite_fx._extract_logger_info_one_model"
     )
-    for gm_name, mod in model.named_modules():
+    for _gm_name, mod in model.named_modules():
         # TODO(future PR): better check when scripted
         is_logger = isinstance(mod, logger_cls) or (  # type: ignore[arg-type]
             isinstance(mod, torch.jit.RecursiveScriptModule)
@@ -1066,7 +1064,7 @@ def loggers_set_enabled(model: torch.nn.Module, enabled: bool) -> None:
     """
     Sets the `enabled` setting on a `model`'s loggers
     """
-    for name, child in model.named_modules():
+    for _, child in model.named_modules():
         if isinstance(child, OutputLogger):
             child.enabled = enabled
 
@@ -1080,7 +1078,7 @@ def loggers_set_save_activations(
     """
     Sets the `save_activations` setting on a `model`'s loggers
     """
-    for name, child in model.named_modules():
+    for _name, child in model.named_modules():
         if isinstance(child, OutputLogger):
             child.save_activations = save_activations
 

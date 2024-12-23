@@ -1,4 +1,5 @@
 # Owner(s): ["module: inductor"]
+# ruff: noqa: F841
 import contextlib
 import functools
 import gc
@@ -6,7 +7,6 @@ import importlib
 import sys
 import unittest
 import warnings
-from unittest import mock
 
 import torch
 import torch._dynamo.config as dynamo_config
@@ -595,18 +595,9 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                 inp = torch.rand([20, 20], device="cuda", requires_grad=True)
                 out = foo(inp)
 
-                def complex_memory_overlap_new(t):
-                    return True
-
-                try:
-                    prev = torch._inductor.compile_fx.complex_memory_overlap
-                    torch._inductor.compile_fx.complex_memory_overlap = (
-                        complex_memory_overlap_new
-                    )
+                with config.patch(always_complex_memory_overlap_TESTING_ONLY=True):
                     back_inp = torch.empty_strided([20, 20], [0, 1], device="cuda")
                     out.backward(back_inp)
-                finally:
-                    torch._inductor.compile_fx.complex_memory_overlap = prev
 
             # we should not have cudagraph'd the backwards
             new_id = self.get_manager().new_graph_id().id
@@ -617,15 +608,14 @@ if HAS_CUDA and not TEST_WITH_ASAN:
         @torch._functorch.config.patch("enable_autograd_cache", True)
         @torch._inductor.config.patch("fx_graph_cache", True)
         @torch._inductor.config.patch("fx_graph_remote_cache", False)
+        # Currently fx graph cache is turned off for specialize_float=False
+        @torch._dynamo.config.patch("specialize_float", True)
         def test_cache_hit_forward_miss_backward(self):
             # Test that we don't cache cudagraphs, skipping cudagraphs on backward on a cache miss
 
             @torch.compile(mode="reduce-overhead")
             def foo(x):
                 return x * x * x
-
-            def complex_memory_overlap_new(t):
-                return True
 
             # Run forwards, fx graph should cache miss
             for _ in range(3):
@@ -634,10 +624,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                 FxGraphCache.clear()
                 AOTAutogradCache.clear()
 
-                with mock.patch(
-                    "torch._inductor.compile_fx.complex_memory_overlap",
-                    new=complex_memory_overlap_new,
-                ):
+                with config.patch(always_complex_memory_overlap_TESTING_ONLY=True):
                     inp = torch.rand([20, 20], device="cuda", requires_grad=True)
                     out = foo(inp)
                     self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
@@ -677,6 +664,8 @@ if HAS_CUDA and not TEST_WITH_ASAN:
         @torch._functorch.config.patch("enable_autograd_cache", True)
         @torch._inductor.config.patch("fx_graph_cache", True)
         @torch._inductor.config.patch("fx_graph_remote_cache", False)
+        # Currently fx graph cache is turned off for specialize_float=False
+        @torch._dynamo.config.patch("specialize_float", True)
         def test_backward_gets_cached_cudagraphs(self):
             # We pass cpu tensors to foo and save that into the cache
             # On a subsequent run in a new process, cudagraphs should be
@@ -721,6 +710,8 @@ if HAS_CUDA and not TEST_WITH_ASAN:
         @torch._functorch.config.patch("enable_autograd_cache", True)
         @torch._inductor.config.patch("fx_graph_cache", True)
         @torch._inductor.config.patch("fx_graph_remote_cache", False)
+        # Currently fx graph cache is turned off for specialize_float=False
+        @torch._dynamo.config.patch("specialize_float", True)
         def test_cached_forward_backward(self):
             counters.clear()
             AOTAutogradCache.clear()
@@ -1050,6 +1041,34 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             first_node = next(node._path_from_root)
             self.assertFalse(first_node.unaliased_in_all_paths[0])
             self.assertTrue(first_node.cached_tensor_outputs[0] is None)
+
+        @torch._inductor.config.patch("implicit_fallbacks", True)
+        def test_multinomial(self):
+            def sample_multinomial(probs, num_samples, replacement=True):
+                return torch.multinomial(probs, num_samples, replacement=replacement)
+
+            # Create and prepare probability tensor on GPU
+            probs = torch.tensor([0.1, 0.2, 0.3, 0.4]).cuda()
+            probs = probs / probs.sum()
+
+            # Sample using the function
+            num_skipped = counters["inductor"]["cudagraph_skips"]
+
+            with torch._dynamo.utils.preserve_rng_state():
+                samples = self.run_twc(
+                    sample_multinomial, probs, num_samples=5, replacement=True
+                )
+
+            with torch._dynamo.utils.preserve_rng_state():
+                samples_compiled = self.run_twc(
+                    torch.compile(sample_multinomial),
+                    probs,
+                    num_samples=5,
+                    replacement=True,
+                )
+
+            self.assertEqual(samples, samples_compiled)
+            self.assertEqual(num_skipped, counters["inductor"]["cudagraph_skips"])
 
         @skipIfRocm
         def test_checkpointing_resets_persistent_refs(self):
@@ -1967,8 +1986,8 @@ if HAS_CUDA and not TEST_WITH_ASAN:
 
             with self.assertRaisesRegex(
                 Exception,
-                r"static input data pointer changed.\n"
-                r"input name: primals_2. data pointer changed from .* to .*. input stack trace:(?s).*"
+                r"(?s)static input data pointer changed.\n"
+                r"input name: primals_2. data pointer changed from .* to .*. input stack trace:.*"
                 r"input name: primals_3. data pointer changed from .* to .*. input stack trace:.*,"
                 r" in forward\n.* self.static_tensor.add\_\(torch.ones\(\(2, 2\), device=\"cuda\"\)\).*\n",
             ):
@@ -1979,7 +1998,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
         def _run_iter(self, param, fn):
             fwd_output = fn(torch.ones(2, 2), param)
             fwd_output.sum().backward()
-            grad_output = param.grad.clone().detach()
+            grad_output = param.grad.detach().clone()
             param.grad = None
             return fwd_output, grad_output
 
@@ -2016,7 +2035,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                 def run_test_iter(mod, fn):
                     fwd_output = fn(torch.ones(2, 2), mod)
                     fwd_output.sum().backward()
-                    grad_output = mod.weight.grad.clone().detach()
+                    grad_output = mod.weight.grad.detach().clone()
                     mod.zero_grad()
                     return fwd_output, grad_output
 

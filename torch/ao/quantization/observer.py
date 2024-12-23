@@ -146,7 +146,7 @@ class ObserverBase(ABC, nn.Module):
         or static quantization
     """
 
-    def __init__(self, dtype, is_dynamic=False):
+    def __init__(self, dtype, is_dynamic: bool = False):
         super().__init__()
         self.dtype = dtype
         self.is_dynamic = is_dynamic
@@ -476,7 +476,6 @@ class MinMaxObserver(UniformQuantizationObserverBase):
     .. note:: If the running minimum equals to the running maximum, the scale
               and zero_point are set to 1.0 and 0.
     """
-
     min_val: torch.Tensor
     max_val: torch.Tensor
 
@@ -686,7 +685,6 @@ class PerChannelMinMaxObserver(UniformQuantizationObserverBase):
     .. note:: If the running minimum equals to the running maximum, the scales
               and zero_points are set to 1.0 and 0.
     """
-
     min_val: torch.Tensor
     max_val: torch.Tensor
 
@@ -982,7 +980,6 @@ class HistogramObserver(UniformQuantizationObserverBase):
     3. Compute the scale and zero point the same way as in the
         :class:`~torch.ao.quantization.MinMaxObserver`
     """
-
     histogram: torch.Tensor
     min_val: torch.Tensor
     max_val: torch.Tensor
@@ -1288,10 +1285,7 @@ class HistogramObserver(UniformQuantizationObserverBase):
             # new_min and new_max should already have requires_grad set to False
             new_min, new_max = new_min.detach(), new_max.detach()
             update_histogram = torch.histc(
-                x,
-                self.bins,
-                min=new_min,  # type: ignore[arg-type]
-                max=new_max,  # type: ignore[arg-type]
+                x, self.bins, min=new_min, max=new_max  # type: ignore[arg-type]
             ).to(self.histogram.device)
             if new_min == current_min and new_max == current_max:
                 combined_histogram = self.histogram + update_histogram
@@ -1513,11 +1507,10 @@ class RecordingObserver(ObserverBase):
         qscheme: Quantization scheme to be used
         reduce_range: Reduces the range of the quantized data type by 1 bit
     """
-
     __annotations__ = {"tensor_val": List[Optional[torch.Tensor]]}
 
     def __init__(self, dtype=torch.quint8):
-        super().__init__(dtype=dtype, is_dynamic=False)  # type: ignore[call-arg]
+        super().__init__(dtype=dtype, is_dynamic=False)
         self.tensor_val = []
 
     def forward(self, x):

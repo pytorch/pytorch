@@ -20,6 +20,7 @@ jobs:
   get-label-type:
     name: get-label-type
     uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@main
+    if: ${{ (github.event_name != 'schedule' || github.repository == 'pytorch/pytorch') && github.repository_owner == 'pytorch' }}
     with:
       triggering_actor: ${{ github.triggering_actor }}
       issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
@@ -34,6 +35,7 @@ jobs:
       runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge"
       build-environment: linux-jammy-py3.9-gcc11
       docker-image-name: pytorch-linux-jammy-py3.9-gcc11
+    secrets: inherit
 
   docs-push:
     name: docs push
@@ -53,7 +55,7 @@ jobs:
   update-vision-commit-hash:
     runs-on: ubuntu-latest
     environment: update-commit-hash
-    if: ${{ github.event_name == 'schedule' }}
+    if: ${{ github.event_name == 'schedule' && github.repository_owner == 'pytorch' }}
     steps:
       - name: update-vision-commit-hash
         uses: pytorch/test-infra/.github/actions/update-commit-hash@main
@@ -68,7 +70,7 @@ jobs:
   update-audio-commit-hash:
     runs-on: ubuntu-latest
     environment: update-commit-hash
-    if: ${{ github.event_name == 'schedule' }}
+    if: ${{ github.event_name == 'schedule' && github.repository_owner == 'pytorch' }}
     steps:
       - name: update-audio-commit-hash
         uses: pytorch/test-infra/.github/actions/update-commit-hash@main
@@ -83,7 +85,7 @@ jobs:
   update-executorch-commit-hash:
     runs-on: ubuntu-latest
     environment: update-commit-hash
-    if: ${{ github.event_name == 'schedule' }}
+    if: ${{ github.event_name == 'schedule' && github.repository_owner == 'pytorch' }}
     steps:
       - name: update-executorch-commit-hash
         uses: pytorch/test-infra/.github/actions/update-commit-hash@main

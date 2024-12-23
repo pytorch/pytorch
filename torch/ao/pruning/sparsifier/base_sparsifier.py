@@ -146,7 +146,7 @@ class BaseSparsifier(abc.ABC):
         stack = [model]
         while stack:
             module = stack.pop()
-            for name, child in module.named_children():
+            for _name, child in module.named_children():
                 if type(child) in SUPPORTED_MODULES:
                     module_fqn = module_to_fqn(model, child)
                     assert isinstance(module_fqn, str)  # for mypy
@@ -243,23 +243,22 @@ class BaseSparsifier(abc.ABC):
             >>> # xdoctest: +SKIP("locals are undefined")
             >>> # Don't save any sparse params
             >>> sparsifier.squash_mask()
-            >>> hasattr(model.submodule1, "sparse_params")
+            >>> hasattr(model.submodule1, 'sparse_params')
             False
 
             >>> # Keep sparse params per layer
             >>> sparsifier.squash_mask(
             ...     params_to_keep_per_layer={
-            ...         "submodule1.linear1": ("foo", "bar"),
-            ...         "submodule2.linear42": ("baz",),
-            ...     }
-            ... )
+            ...         'submodule1.linear1': ('foo', 'bar'),
+            ...         'submodule2.linear42': ('baz',)
+            ...     })
             >>> print(model.submodule1.linear1.sparse_params)
             {'foo': 42, 'bar': 24}
             >>> print(model.submodule2.linear42.sparse_params)
             {'baz': 0.1}
 
             >>> # Keep sparse params for all layers
-            >>> sparsifier.squash_mask(params_to_keep=("foo", "bar"))
+            >>> sparsifier.squash_mask(params_to_keep=('foo', 'bar'))
             >>> print(model.submodule1.linear1.sparse_params)
             {'foo': 42, 'bar': 24}
             >>> print(model.submodule2.linear42.sparse_params)
@@ -268,9 +267,10 @@ class BaseSparsifier(abc.ABC):
             >>> # Keep some sparse params for all layers, and specific ones for
             >>> # some other layers
             >>> sparsifier.squash_mask(
-            ...     params_to_keep=("foo", "bar"),
-            ...     params_to_keep_per_layer={"submodule2.linear42": ("baz",)},
-            ... )
+            ...     params_to_keep=('foo', 'bar'),
+            ...     params_to_keep_per_layer={
+            ...         'submodule2.linear42': ('baz',)
+            ...     })
             >>> print(model.submodule1.linear1.sparse_params)
             {'foo': 42, 'bar': 24}
             >>> print(model.submodule2.linear42.sparse_params)

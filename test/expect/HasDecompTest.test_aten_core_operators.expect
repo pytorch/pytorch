@@ -391,6 +391,8 @@ aten::normal.float_float_out
 aten::normal.out
 aten::normal_
 aten::permute
+aten::permute_copy
+aten::permute_copy.out
 aten::polar
 aten::polar.out
 aten::pow.Scalar

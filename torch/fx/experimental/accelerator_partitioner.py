@@ -450,9 +450,9 @@ class Partitioner:
                         device = find_device_based_on_size(node)
                         occupied_devices.append(device)
                         # Update partition and its left mem size
-                        partition_to_left_mem_bytes[partition] = (
-                            device.available_mem_bytes
-                        )
+                        partition_to_left_mem_bytes[
+                            partition
+                        ] = device.available_mem_bytes
                         # Update available mem for the current partition
                         partition.logical_device_ids.append(device.logical_id)
                     else:
@@ -475,9 +475,9 @@ class Partitioner:
                             total_size_of_input_nodes = get_extra_size_of(
                                 node, partition.nodes
                             )
-                            partition_to_left_mem_bytes[partition] = (
-                                device.available_mem_bytes
-                            )
+                            partition_to_left_mem_bytes[
+                                partition
+                            ] = device.available_mem_bytes
                             partition.logical_device_ids.append(device.logical_id)
                     partition.add_node(node)
                     partition_to_left_mem_bytes[partition] -= total_size_of_input_nodes
@@ -1015,10 +1015,11 @@ class Partitioner:
         # Keep tracking the partition pair of node pair
         partition_pair: List[Partition] = []
         # Collect all the op nodes from the graph
-        op_nodes = []
-        for n in self.graph_module.graph.nodes:
-            if n.op not in {"placeholder", "get_attr", "output"}:
-                op_nodes.append(n)
+        op_nodes = [
+            n
+            for n in self.graph_module.graph.nodes
+            if n.op not in {"placeholder", "get_attr", "output"}
+        ]
         for node in op_nodes:
             # Find which partition the current node belongs
             p0_index = self.node_to_partition[node]

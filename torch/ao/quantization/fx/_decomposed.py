@@ -439,14 +439,11 @@ def choose_qparams_tensor(
        scale (float): quantization parameter for the target quantized Tensor
        zero_point (int): quantization parameter for the target quantized Tensor
     """
-    assert (
-        input.dtype
-        in [
-            torch.float32,
-            torch.float16,
-            torch.bfloat16,
-        ]
-    ), f"Expecting input to have dtype torch.float32/16/b16, but got dtype: {input.dtype}"
+    assert input.dtype in [
+        torch.float32,
+        torch.float16,
+        torch.bfloat16,
+    ], f"Expecting input to have dtype torch.float32/16/b16, but got dtype: {input.dtype}"
     assert (
         dtype in _DTYPE_TO_QVALUE_BOUNDS
     ), f"Expecting target dtype to be one of {_DTYPE_TO_QVALUE_BOUNDS.keys()}, but got: {dtype}"
@@ -492,14 +489,11 @@ def choose_qparams_symmetric_tensor(
        scale (float): quantization parameter for the target quantized Tensor
        zero_point (int): quantization parameter for the target quantized Tensor
     """
-    assert (
-        input.dtype
-        in [
-            torch.float32,
-            torch.float16,
-            torch.bfloat16,
-        ]
-    ), f"Expecting input to have dtype torch.float32/16/b16, but got dtype: {input.dtype}"
+    assert input.dtype in [
+        torch.float32,
+        torch.float16,
+        torch.bfloat16,
+    ], f"Expecting input to have dtype torch.float32/16/b16, but got dtype: {input.dtype}"
     assert (
         dtype in _DTYPE_TO_QVALUE_BOUNDS
     ), f"Expecting target dtype to be one of {_DTYPE_TO_QVALUE_BOUNDS.keys()}, but got: {dtype}"
@@ -522,14 +516,11 @@ def choose_qparams_symmetric_tensor(
 def choose_qparams_tensor_meta(
     input: torch.Tensor, quant_min: int, quant_max: int, eps: float, dtype: torch.dtype
 ) -> Tuple[torch.Tensor, torch.Tensor]:
-    assert (
-        input.dtype
-        in [
-            torch.float32,
-            torch.float16,
-            torch.bfloat16,
-        ]
-    ), f"Expecting input to have dtype torch.float32/16/b16, but got dtype: {input.dtype}"
+    assert input.dtype in [
+        torch.float32,
+        torch.float16,
+        torch.bfloat16,
+    ], f"Expecting input to have dtype torch.float32/16/b16, but got dtype: {input.dtype}"
     assert (
         quant_min < quant_max
     ), f"Expecting quant_min to be smaller than quant_max but received min: \
@@ -1194,3 +1185,22 @@ def fake_quant_per_channel_meta(
     quant_max: int,
 ) -> torch.Tensor:
     return torch.empty_like(input)
+
+
+quantized_decomposed_lib.define(
+    "convert_element_type.no_fuse(Tensor input, ScalarType dtype) -> Tensor"
+)
+
+
+@impl(
+    quantized_decomposed_lib,
+    "convert_element_type.no_fuse",
+    "CompositeExplicitAutograd",
+)
+def convert_element_type(input: torch.Tensor, dtype: torch.dtype) -> torch.Tensor:
+    return torch.ops.prims.convert_element_type.default(input, dtype)
+
+
+@impl(quantized_decomposed_lib, "convert_element_type.no_fuse", "Meta")
+def convert_element_type_meta(input: torch.Tensor, dtype: torch.dtype) -> torch.Tensor:
+    return torch.empty_like(input, dtype=dtype)

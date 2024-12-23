@@ -1,4 +1,5 @@
 # Owner(s): ["module: inductor"]
+# ruff: noqa: F841
 import contextlib
 import os
 import subprocess
@@ -13,6 +14,7 @@ from torch._inductor.codecache import PyCodeCache
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import fresh_inductor_cache
 from torch.testing import FileCheck
+from torch.testing._internal.common_cuda import xfailIfSM89
 from torch.testing._internal.common_device_type import expectedFailureXPU
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 
@@ -40,11 +42,11 @@ class TestKernelBenchmark(TestCase):
 
     def setUp(self):
         super().setUp()
-        PyCodeCache.cache.clear()
+        PyCodeCache.cache_clear()
 
     def get_compiled_module(self):
         compiled_module = None
-        for v in PyCodeCache.cache.values():
+        for v in PyCodeCache.modules:
             if hasattr(v, "benchmark_compiled_module"):
                 self.assertTrue(
                     compiled_module is None, "Found multiple compiled modules"
@@ -384,6 +386,7 @@ class TestKernelBenchmark(TestCase):
         self.check_bandwidth(compiled_module, "0.006")
 
     @expectedFailureXPU
+    @xfailIfSM89
     @config.patch(max_autotune=True, max_autotune_gemm_backends="TRITON")
     def test_slice_mm_bandwidth_computation(self):
         M, N, K = 1000, 2000, 3000

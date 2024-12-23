@@ -17,9 +17,7 @@
 
 #include <iterator>
 #include <string>
-#include <unordered_map>
 #include <utility>
-#include <vector>
 
 namespace torch::python {
 namespace detail {
@@ -48,7 +46,7 @@ using PyModuleClass =
 /// to which it delegates all calls.
 template <typename ModuleType>
 void bind_cpp_module_wrapper(
-    py::module module,
+    const py::module& module,
     PyModuleClass<ModuleType> cpp_class,
     const char* name) {
   // Grab the `torch.nn.cpp.ModuleWrapper` class, which we'll subclass

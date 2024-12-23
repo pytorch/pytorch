@@ -157,11 +157,9 @@ def _register_activation_post_process_hook(module, pre_hook=False):
         module, "activation_post_process"
     ), "Expect activation_post_process attribute already attached to the module"
     if pre_hook:
-        handle = module.register_forward_pre_hook(
-            _observer_forward_pre_hook, prepend=True
-        )
+        module.register_forward_pre_hook(_observer_forward_pre_hook, prepend=True)
     else:
-        handle = module.register_forward_hook(_observer_forward_hook, prepend=True)
+        module.register_forward_hook(_observer_forward_hook, prepend=True)
 
 
 def _add_observer_(
@@ -263,16 +261,14 @@ def _add_observer_(
             needs_observation(child)
             and type_before_parametrizations(child) in custom_module_class_mapping
         ):
-            observed_child = custom_module_class_mapping[
+            observed_class = custom_module_class_mapping[
                 type_before_parametrizations(child)
-            ].from_float(child)
+            ]
+            observed_child = observed_class.from_float(child)
             setattr(module, name, observed_child)
             # TODO: These are the modules that cannot be observed
             #       Once there are more, we should move them to a separate list
-            if (
-                custom_module_class_mapping[type_before_parametrizations(child)]
-                not in no_observer_set()
-            ):
+            if not issubclass(observed_class, tuple(no_observer_set())):
                 insert_activation_post_process(observed_child)
         else:
             _add_observer_(
@@ -365,8 +361,10 @@ def prepare(
            # user will manually define the corresponding observed
            # module class which has a from_float class method that converts
            # float custom module to observed custom module
-           "float_to_observed_custom_module_class": {CustomModule: ObservedCustomModule}
-       }
+           "float_to_observed_custom_module_class": {
+               CustomModule: ObservedCustomModule
+           }
+        }
 
     """
     torch._C._log_api_usage_once("quantization_api.quantize.prepare")
@@ -802,9 +800,9 @@ def _get_observer_dict(mod, target_dict, prefix=""):
         return prefix if prefix == "" else prefix + "."
 
     if hasattr(mod, "activation_post_process"):
-        target_dict[get_prefix(prefix) + "activation_post_process"] = (
-            mod.activation_post_process
-        )
+        target_dict[
+            get_prefix(prefix) + "activation_post_process"
+        ] = mod.activation_post_process
     for name, child in mod.named_children():
         module_prefix = get_prefix(prefix) + name if prefix else name
         _get_observer_dict(child, target_dict, module_prefix)

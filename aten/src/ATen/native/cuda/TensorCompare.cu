@@ -93,13 +93,13 @@ void clamp_max_scalar_kernel_impl(TensorIteratorBase& iter, Scalar max) {
 } // anonymous namespace
 
 
-REGISTER_DISPATCH(where_kernel, &where_kernel_impl);
-REGISTER_DISPATCH(isposinf_stub, &isposinf_kernel_impl);
-REGISTER_DISPATCH(isneginf_stub, &isneginf_kernel_impl);
-REGISTER_DISPATCH(clamp_stub, &clamp_kernel_impl);
-REGISTER_DISPATCH(clamp_scalar_stub, &clamp_scalar_kernel_impl);
-REGISTER_DISPATCH(clamp_min_scalar_stub, &clamp_min_scalar_kernel_impl);
-REGISTER_DISPATCH(clamp_max_scalar_stub, &clamp_max_scalar_kernel_impl);
+REGISTER_DISPATCH(where_kernel, &where_kernel_impl)
+REGISTER_DISPATCH(isposinf_stub, &isposinf_kernel_impl)
+REGISTER_DISPATCH(isneginf_stub, &isneginf_kernel_impl)
+REGISTER_DISPATCH(clamp_stub, &clamp_kernel_impl)
+REGISTER_DISPATCH(clamp_scalar_stub, &clamp_scalar_kernel_impl)
+REGISTER_DISPATCH(clamp_min_scalar_stub, &clamp_min_scalar_kernel_impl)
+REGISTER_DISPATCH(clamp_max_scalar_stub, &clamp_max_scalar_kernel_impl)
 
 struct Msg {
  static constexpr size_t MAX_MSG_LENGTH = 256;
@@ -117,7 +117,7 @@ __global__ void _assert_async_cuda_kernel(const c10::complex<double>* input, Msg
   CUDA_KERNEL_ASSERT_MSG(input[0] != c10::complex<double>(0, 0), msg.msg);
 }
 
-void _assert_async_msg_cuda(const Tensor& self_tensor, c10::string_view assert_msg) {
+void _assert_async_msg_cuda(const Tensor& self_tensor, std::string_view assert_msg) {
   const TensorBase &self = get_tensor_base(self_tensor);
   auto n = self.numel();
   TORCH_CHECK(n != 0, "Boolean value of Tensor with no values is ambiguous");

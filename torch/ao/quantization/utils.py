@@ -2,7 +2,6 @@
 """
 Utils shared by different modes of quantization (eager/graph)
 """
-
 import functools
 import warnings
 from collections import OrderedDict
@@ -284,7 +283,7 @@ def activation_is_dynamically_quantized(qconfig):
     dynamically quantized or not, this includes dynamically quantizing to
     quint8, qint8 and float16
     """
-    activation_dtype, _, activation_is_dynamic = get_qconfig_dtypes(qconfig)
+    _activation_dtype, _, activation_is_dynamic = get_qconfig_dtypes(qconfig)
     return activation_is_dynamic
 
 

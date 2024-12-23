@@ -17,6 +17,7 @@ __all__ = [
     "wrap_numpy",
     "is_compiling",
     "is_dynamo_compiling",
+    "is_exporting",
 ]
 
 
@@ -105,14 +106,12 @@ def allow_in_graph(fn):
 
         torch.compiler.allow_in_graph(my_custom_function)
 
-
         @torch.compile(...)
         def fn(x):
             x = torch.add(x, 1)
             x = my_custom_function(x)
             x = torch.add(x, 1)
             return x
-
 
         fn(...)
 
@@ -232,7 +231,9 @@ def disable(fn=None, recursive=True):
     return torch._dynamo.disable(fn, recursive)
 
 
-def set_stance(stance: str, force_backend=None):
+def set_stance(
+    stance: str = "default", *, skip_guard_eval_unsafe=False, force_backend=None
+):
     """
     Set the current stance of the compiler.
     Can be used as a function, context manager, or decorator.
@@ -241,14 +242,13 @@ def set_stance(stance: str, force_backend=None):
     .. code-block:: python
 
         @torch.compile
-        def foo(x): ...
-
+        def foo(x):
+            ...
 
         @torch.compiler.set_stance("force_eager")
         def bar():
             # will not be compiled
             foo(...)
-
 
         bar()
 
@@ -273,12 +273,31 @@ def set_stance(stance: str, force_backend=None):
               If there is cached compiled code valid for the input, it will still be used.
             - "fail_on_recompile": Raise an error when recompiling a function.
 
+        skip_guard_eval_unsafe: A flag to run only differentiating guards.
+            CAUTION - This flag is unsafe and should only be used if your setup
+            meets the following conditions.
+
+            torch.compile uses a guard system to support recompilations and
+            choose which compiled artifact to run at runtime.  These guards,
+            though efficient, add some overhead, which may impact performance in
+            scenarios where you need to optimize for minimal guard processing
+            time.  This API enables you to disable guard evaluation, assuming
+            that you have warmed up the compiled model with a sufficient variety
+            of inputs. This assumption means that, after the warmup phase, no
+            further recompilations will be necessary.  If this assumption fails,
+            there is a risk of silently producing incorrect results (hence the
+            term "unsafe" in the API name).
+
         force_backend: If `stance` is "default", this argument can be used to force `torch.compile`
             to use a specific backend. Otherwise, an error is raised.
     """
     import torch._dynamo
 
-    return torch._dynamo.set_stance(stance, force_backend=force_backend)
+    return torch._dynamo.set_stance(
+        stance,
+        skip_guard_eval_unsafe=skip_guard_eval_unsafe,
+        force_backend=force_backend,
+    )
 
 
 # forbid in graph
@@ -299,7 +318,6 @@ def cudagraph_mark_step_begin():
         @torch.compile(mode="reduce-overhead")
         def rand_foo():
             return torch.rand([4], device="cuda")
-
 
         for _ in range(5):
             torch.compiler.cudagraph_mark_step_begin()
@@ -345,6 +363,7 @@ def wrap_numpy(fn):
 
 
 _is_compiling_flag: bool = False
+_is_exporting_flag: bool = False
 
 
 def is_compiling() -> bool:
@@ -385,3 +404,21 @@ def is_dynamo_compiling() -> bool:
         >>>     # ...rest of the function...
     """
     return False
+
+
+def is_exporting() -> bool:
+    """
+    Indicated whether we're under exporting.
+
+    It's stricter than is_compiling() flag, as it would only be set to True when
+    torch.export is used.
+
+    Example::
+
+        >>> def forward(self, x):
+        >>>     if not torch.compiler.is_exporting():
+        >>>        pass # ...logic that is not needed in export...
+        >>>
+        >>>     # ...rest of the function...
+    """
+    return _is_exporting_flag

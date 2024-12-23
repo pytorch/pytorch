@@ -331,9 +331,6 @@ def _replace_observer_with_quantize_dequantize_node_decomposed(
                 add_dequantize_op_kwargs(dequantize_op, input_node),
             )
 
-            def remap_fn(x):
-                return dequantized_node if x is node else x
-
             node.replace_all_uses_with(dequantized_node)
             # propagate numeric debug handle from observer/fake_quant node to dequantize node
             if NUMERIC_DEBUG_HANDLE_KEY in node.meta:
@@ -342,7 +339,18 @@ def _replace_observer_with_quantize_dequantize_node_decomposed(
                 ]
             graph.erase_node(node)
     elif dtype == torch.float16:
-        raise NotImplementedError("decomposed to float16 op not implemented yet")
+        # Insert to_fp16 -> to_fp32 node
+        dtype_convert_op = torch.ops.quantized_decomposed.convert_element_type.no_fuse
+        with graph.inserting_before(node):
+            input_node = node.args[0]
+            convert_fp16_node = graph.create_node(
+                "call_function", dtype_convert_op, (input_node, torch.float16), {}
+            )
+            convert_fp32_node = graph.create_node(
+                "call_function", dtype_convert_op, (convert_fp16_node, torch.float), {}
+            )
+            node.replace_all_uses_with(convert_fp32_node)
+            graph.erase_node(node)
 
     # should not reach since we have checks in the beginning to make sure the
     # activation_post_process is supported
@@ -921,7 +929,6 @@ def convert_custom_module(
         it later.
     """
     observed_custom_module = modules[str(node.target)]
-    maybe_obs = _maybe_get_observer_for_node(node, modules)
     qconfig = observed_custom_module.qconfig
     if activation_is_statically_quantized(qconfig):
         statically_quantized_custom_module_nodes.add(node)
@@ -1052,16 +1059,14 @@ def convert(
 
     assert _is_observed_module(model), "incoming model must be produced by prepare_fx"
     observed_graph_module_attrs = model.meta["_observed_graph_module_attrs"]
-    node_name_to_scope: Dict[str, Tuple[str, type]] = (
-        observed_graph_module_attrs.node_name_to_scope
-    )
+    node_name_to_scope: Dict[
+        str, Tuple[str, type]
+    ] = observed_graph_module_attrs.node_name_to_scope
     prepare_custom_config: PrepareCustomConfig = (
         observed_graph_module_attrs.prepare_custom_config
     )
     observed_node_names: Set[str] = observed_graph_module_attrs.observed_node_names
-    node_name_to_qconfig: Dict[str, QConfigAny] = (
-        observed_graph_module_attrs.node_name_to_qconfig
-    )  # type: ignore[assignment]
+    node_name_to_qconfig: Dict[str, QConfigAny] = observed_graph_module_attrs.node_name_to_qconfig  # type: ignore[assignment]
 
     # mapping from fully qualified module name to module instance
     # for example,
@@ -1077,18 +1082,14 @@ def convert(
     # TODO refactor this code once we update the prepare logic to have additional information on
     # which graph nodes have been observed and share that with convert to decide which observers to ignore.
     if qconfig_mapping:
-        prepare_qconfig_mapping: QConfigMapping = (
-            observed_graph_module_attrs.qconfig_mapping
-        )  # type: ignore[assignment]
+        prepare_qconfig_mapping: QConfigMapping = observed_graph_module_attrs.qconfig_mapping  # type: ignore[assignment]
         modules_copy = copy.deepcopy(modules)
 
         if observed_graph_module_attrs.is_qat:
             _update_qconfig_for_qat(qconfig_mapping, backend_config)
         _update_qconfig_for_fusion(model, qconfig_mapping)
 
-        _compare_prepare_convert_qconfig_mappings(
-            prepare_qconfig_mapping, qconfig_mapping
-        )  # type: ignore[arg-type]
+        _compare_prepare_convert_qconfig_mappings(prepare_qconfig_mapping, qconfig_mapping)  # type: ignore[arg-type]
         convert_node_name_to_qconfig = _generate_node_name_to_qconfig(
             model, modules_copy, model.graph, qconfig_mapping, node_name_to_scope
         )
@@ -1121,11 +1122,6 @@ def convert(
     # always run weight observers in the top level forward method
     # for dynamic quant ops or weight only quant ops
     _run_weight_observers(model, backend_config)
-
-    graph_inputs: List[str] = []
-    for node in model.graph.nodes:
-        if node.op == "placeholder":
-            graph_inputs.append(node.name)
 
     # additional state to override inputs to be quantized, if specified
     # by the user

@@ -482,7 +482,7 @@ def _profile_to_snapshot(profile):
                 allocation_stacks[key] = python_parents
 
     device_count = torch.cuda.device_count()
-    snapshot = {
+    snapshot: dict[str, list[Any]] = {
         "device_traces": [[] for _ in range(device_count + 1)],
         "segments": [
             {
@@ -524,15 +524,13 @@ def _profile_to_snapshot(profile):
             "frames": stack,
             "category": category,
         }
-        traces = snapshot["device_traces"][device]  # type: ignore[index]
         if during_trace:
-            traces.append(r)
+            snapshot["device_traces"][device].append(r)
         return r
 
     def free(alloc, device):
-        traces = snapshot["device_traces"][device]  # type: ignore[index]
         for e in ("free_requested", "free_completed"):
-            traces.append(
+            snapshot["device_traces"][device].append(
                 {
                     "action": e,
                     "addr": alloc["addr"],

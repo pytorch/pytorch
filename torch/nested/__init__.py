@@ -17,7 +17,11 @@ __all__ = [
     "masked_select",
 ]
 
-# Nested Tensor constructor functions
+# Allowlist these for weights_only load of NJT
+from ._internal.nested_tensor import _rebuild_njt, NestedTensor as _NestedTensor
+
+
+torch.serialization.add_safe_globals([_NestedTensor, _rebuild_njt])
 
 
 def as_nested_tensor(

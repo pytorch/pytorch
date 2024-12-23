@@ -10,6 +10,6 @@ void log_normal_kernel(TensorIteratorBase& iter, double mean, double std, std::o
   at::native::templates::cuda::log_normal_kernel(iter, mean, std, generator);
 }
 
-REGISTER_DISPATCH(log_normal_stub, &log_normal_kernel);
+REGISTER_DISPATCH(log_normal_stub, &log_normal_kernel)
 
 } // namespace at::native

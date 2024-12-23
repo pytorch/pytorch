@@ -45,7 +45,6 @@ def cached():
     .. code-block:: python
 
         import torch.nn.utils.parametrize as P
-
         ...
         with P.cached():
             output = model(inputs)
@@ -161,7 +160,7 @@ class ParametrizationList(ModuleList):
             for module in reversed(self):  # type: ignore[call-overload]
                 if hasattr(module, "right_inverse"):
                     try:
-                        new = module.right_inverse(new)
+                        new = module.right_inverse(new)  # type: ignore[operator]
                     except NotImplementedError:
                         pass
                 # else, or if it throws, we assume that right_inverse is the identity
@@ -248,7 +247,7 @@ class ParametrizationList(ModuleList):
             # See https://github.com/pytorch/pytorch/issues/53103
             for module in reversed(self):  # type: ignore[call-overload]
                 if hasattr(module, "right_inverse"):
-                    value = module.right_inverse(value)
+                    value = module.right_inverse(value)  # type: ignore[operator]
                 else:
                     raise RuntimeError(
                         f"parametrization {type(module).__name__} does not implement "
@@ -510,35 +509,35 @@ def register_parametrization(
         >>> import torch.nn.utils.parametrize as P
         >>>
         >>> class Symmetric(nn.Module):
-        ...     def forward(self, X):
-        ...         return X.triu() + X.triu(1).T  # Return a symmetric matrix
-        ...
-        ...     def right_inverse(self, A):
-        ...         return A.triu()
+        >>>     def forward(self, X):
+        >>>         return X.triu() + X.triu(1).T  # Return a symmetric matrix
+        >>>
+        >>>     def right_inverse(self, A):
+        >>>         return A.triu()
+        >>>
         >>> m = nn.Linear(5, 5)
         >>> P.register_parametrization(m, "weight", Symmetric())
         >>> print(torch.allclose(m.weight, m.weight.T))  # m.weight is now symmetric
         True
         >>> A = torch.rand(5, 5)
-        >>> A = A + A.T  # A is now symmetric
+        >>> A = A + A.T   # A is now symmetric
         >>> m.weight = A  # Initialize the weight to be the symmetric matrix A
         >>> print(torch.allclose(m.weight, A))
         True
 
         >>> class RankOne(nn.Module):
-        ...     def forward(self, x, y):
-        ...         # Form a rank 1 matrix multiplying two vectors
-        ...         return x.unsqueeze(-1) @ y.unsqueeze(-2)
-        ...
-        ...     def right_inverse(self, Z):
-        ...         # Project Z onto the rank 1 matrices
-        ...         U, S, Vh = torch.linalg.svd(Z, full_matrices=False)
-        ...         # Return rescaled singular vectors
-        ...         s0_sqrt = S[0].sqrt().unsqueeze(-1)
-        ...         return U[..., :, 0] * s0_sqrt, Vh[..., 0, :] * s0_sqrt
-        >>> linear_rank_one = P.register_parametrization(
-        ...     nn.Linear(4, 4), "weight", RankOne()
-        ... )
+        >>>     def forward(self, x, y):
+        >>>         # Form a rank 1 matrix multiplying two vectors
+        >>>         return x.unsqueeze(-1) @ y.unsqueeze(-2)
+        >>>
+        >>>     def right_inverse(self, Z):
+        >>>         # Project Z onto the rank 1 matrices
+        >>>         U, S, Vh = torch.linalg.svd(Z, full_matrices=False)
+        >>>         # Return rescaled singular vectors
+        >>>         s0_sqrt = S[0].sqrt().unsqueeze(-1)
+        >>>         return U[..., :, 0] * s0_sqrt, Vh[..., 0, :] * s0_sqrt
+        >>>
+        >>> linear_rank_one = P.register_parametrization(nn.Linear(4, 4), "weight", RankOne())
         >>> print(torch.linalg.matrix_rank(linear_rank_one.weight).item())
         1
 

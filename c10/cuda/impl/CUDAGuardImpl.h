@@ -219,6 +219,19 @@ struct CUDAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
     C10_CUDA_CHECK(cudaEventSynchronize(cuda_event));
   }
 
+  // Note: synchronizeDevice can be safely called from any device
+  void synchronizeDevice(const c10::DeviceIndex device_index) const override {
+    DeviceIndex orig_device{-1};
+    C10_CUDA_CHECK(c10::cuda::GetDevice(&orig_device));
+    C10_CUDA_CHECK(c10::cuda::SetDevice(device_index));
+    const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();
+    if (C10_UNLIKELY(interp)) {
+      (*interp)->trace_gpu_device_synchronization(c10::kCUDA);
+    }
+    C10_CUDA_CHECK(cudaDeviceSynchronize());
+    C10_CUDA_CHECK(c10::cuda::SetDevice(orig_device));
+  }
+
   void recordDataPtrOnStream(const c10::DataPtr& data_ptr, const Stream& stream)
       const override {
     CUDAStream cuda_stream{stream};

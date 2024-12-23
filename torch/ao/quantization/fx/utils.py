@@ -114,7 +114,7 @@ def node_arg_is_bias(node: Node, arg: Any) -> bool:
 
 
 def get_custom_module_class_keys(
-    custom_module_mapping: Dict[QuantType, Dict[Type, Type]],
+    custom_module_mapping: Dict[QuantType, Dict[Type, Type]]
 ) -> List[Any]:
     r"""Get all the unique custom module keys in the custom config dict
     e.g.
@@ -264,7 +264,7 @@ def create_getattr_from_value(
     attr_name = get_new_attr_name(module)
     device = assert_and_get_unique_device(module)
     new_value = (
-        value.clone().detach()
+        value.detach().clone()
         if isinstance(value, torch.Tensor)
         else torch.tensor(value, device=device)
     )
@@ -495,9 +495,7 @@ def _is_custom_module_lstm(
     """
     mod = _get_module(node, named_modules)
     if qconfig is not None and qhandler is not None:
-        assert isinstance(
-            qhandler, torch.ao.quantization.fx.quantize_handler.QuantizeHandler
-        )  # type: ignore[attr-defined]
+        assert isinstance(qhandler, torch.ao.quantization.fx.quantize_handler.QuantizeHandler)  # type: ignore[attr-defined]
         return (
             isinstance(mod, torch.nn.LSTM)
             and activation_is_statically_quantized(qconfig)
@@ -519,9 +517,7 @@ def _is_custom_module_mha(
     """
     mod = _get_module(node, named_modules)
     if qconfig is not None and qhandler is not None:
-        assert isinstance(
-            qhandler, torch.ao.quantization.fx.quantize_handler.QuantizeHandler
-        )  # type: ignore[attr-defined]
+        assert isinstance(qhandler, torch.ao.quantization.fx.quantize_handler.QuantizeHandler)  # type: ignore[attr-defined]
         return (
             isinstance(mod, torch.nn.MultiheadAttention)
             and activation_is_statically_quantized(qconfig)

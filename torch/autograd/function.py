@@ -365,7 +365,6 @@ class _SingleLevelFunction(
             def forward(*args: Any, **kwargs: Any) -> Any:
                 pass
 
-
             @staticmethod
             def setup_context(ctx: Any, inputs: Tuple[Any, ...], output: Any) -> None:
                 pass
@@ -498,7 +497,7 @@ class Function(_SingleLevelFunction):
 
     def __init__(self, *args, **kwargs):
         warnings.warn(
-            f"{self.__class__} should not be instantiated. Methods on autograd functions"
+            f"{self.__class__} should not be instantiated. Methods on autograd functions "
             "are all static, so you should invoke them on the class itself. "
             "Instantiating an autograd function will raise an "
             "error in a future version of PyTorch.",
@@ -766,7 +765,6 @@ class NestedIOFunction(Function):
     This class is here only for backward compatibility reasons.
     Use :class:`Function` instead of this for any new use case.
     """
-
     # The 'type: ignore' statements are needed here because these functions are declared as '@staticmethod' in the
     # superclass (Function) but are instance methods here, which mypy reports as incompatible.
 
@@ -774,7 +772,6 @@ class NestedIOFunction(Function):
         self._nested_input = input
         flat_input = tuple(_iter_tensors(input))
         flat_output = super()._do_forward(*flat_input)  # type: ignore[misc]
-        nested_output = self._nested_output
         nested_tensors = _unflatten(flat_output, self._nested_output)
         return nested_tensors
 

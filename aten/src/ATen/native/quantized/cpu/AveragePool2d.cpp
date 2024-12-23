@@ -24,8 +24,7 @@
 #include <limits>
 #include <vector>
 
-namespace at {
-namespace native {
+namespace at::native {
 
 DEFINE_DISPATCH(qavg_pool2d_nhwc_stub);
 
@@ -390,5 +389,4 @@ Tensor avg_pool2d_quantized_cpu(
   return output;
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native
