@@ -9,7 +9,7 @@ torch.fx.interpreter.Interpreter ['boxed_run', 'call_function', 'call_method', '
 torch.fx.interpreter.Transformer ['call_function', 'call_module', 'get_attr', 'placeholder', 'transform']
 torch.fx.node.Node ['all_input_nodes', 'append', 'args', 'format_node', 'insert_arg', 'is_impure', 'kwargs', 'next', 'normalized_arguments', 'prepend', 'prev', 'replace_all_uses_with', 'replace_input_with', 'stack_trace', 'update_arg', 'update_kwarg']
 torch.fx.passes.shape_prop.ShapeProp ['propagate', 'run_node']
-torch.fx.passes.shape_prop.TensorMetadata ['dtype', 'is_quantized', 'memory_format', 'qparams', 'requires_grad', 'shape', 'stride']
+torch.fx.passes.shape_prop.TensorMetadata ['device', 'dtype', 'is_quantized', 'memory_format', 'qparams', 'requires_grad', 'shape', 'stride']
 torch.fx.passes.split_module.Partition []
 torch.fx.proxy.Attribute ['node']
 torch.fx.proxy.GraphAppendingTracer []
