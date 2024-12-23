@@ -16,6 +16,7 @@ from .. import polyfills, variables
 from ..bytecode_transformation import create_call_function, create_rot_n, is_generator
 from ..exc import (
     handle_observed_exception,
+    InfiniteGeneratorError,
     ObservedException,
     ObservedGeneratorExit,
     ObservedUserStopIteration,
@@ -394,10 +395,10 @@ class GeneratorObjectVariable(VariableTracker):
         except ObservedException as e:
             tx.exn_vt_stack.extend(tracer.exn_vt_stack)
             raise e
+        except InfiniteGeneratorError:
+            # test/dynamo/test_misc.py::test_iterator_limit
+            raise
         except Unsupported as e:
-            # if "graph_break" not in e.msg:
-            #     raise e
-
             torch._C._dynamo.eval_frame.skip_code(self.get_code())
             raise SkipFrame from e
 

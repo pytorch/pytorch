@@ -3443,7 +3443,7 @@ class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
         top = self.pop()
         self.generated_items.append(top)
         if len(self.generated_items) > MAX_ITERATOR_LIMIT:
-            unimplemented(
+            raise exc.InfiniteGeneratorError(
                 "Too many yield values in generator. Maybe you are inlining an infinite generator. "
                 f"If not, please report a bug at {PT2_ISSUE_TRACKER_URL}",
             )
