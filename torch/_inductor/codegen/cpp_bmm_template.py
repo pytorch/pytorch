@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 import contextlib
+import itertools
 from typing import Any, Callable, Dict, List, Optional
 from unittest.mock import patch
 
@@ -14,25 +15,23 @@ from .cpp_template_kernel import CppTemplateKernel
 from .cpp_utils import DTYPE_TO_CPP, GemmBlocking
 
 
-# We use BY as the output in order to cause sizevars in the batch dim to be set in the kernel
-# Otherwise, sizevars can be off by 1 in naming convention, causing compiler errors for epilogue nodes
-# with a dynamic size in the non-bmm inputs
+# We pass all sizevars present in BY to the GEMM templates so variables are not renamed in the BMM definition
 GEMM_SINGLE_THREAD_MM_STUB = r"""
 {{kernel.def_kernel(
     inputs={"X": X, "W": W},
-    outputs={"Y": BY},
+    outputs={"Y": Y},
     aliases=aliases,
     function_name="single_thread_mm",
-    extra_sizevars=[b_index],
+    extra_sizevars=BY_sizevars + [b_index],
     placeholder="<SINGLE_THREAD_MM_DEF_FOR_BMM>")}}"""
 
 GEMM_THREADED_MM_STUB = r"""
 {{kernel.def_kernel(
     inputs={"X": X, "W": W},
-    outputs={"Y": BY},
+    outputs={"Y": Y},
     aliases=aliases,
     function_name="threaded_mm",
-    extra_sizevars=[b_index],
+    extra_sizevars=BY_sizevars + [b_index],
     placeholder="<THREADED_MM_DEF_FOR_BMM>")}}"""
 
 BMM_TEMPLATE = r"""
@@ -190,6 +189,12 @@ class CppBmmTemplate(CppGemmTemplate):
         for kword in ["X", "W", "Y"]:
             options[kword + "_dtype"] = DTYPE_TO_CPP[options[kword].dtype]
         options["b_index"] = self.b_index
+        options["BY_sizevars"] = [
+            s
+            for sym in itertools.chain(BY.get_size(), BY.get_stride())
+            if isinstance(sym, sympy.Expr)
+            for s in sym.free_symbols
+        ]
 
         return options
 
