@@ -92,3 +92,6 @@ RUN rm -rf /opt/python/cp33-cp33m /opt/_internal/cpython-3.3.6
 RUN rm -rf /opt/python/cp34-cp34m /opt/_internal/cpython-3.4.6
 COPY --from=openblas     /opt/OpenBLAS/  /opt/OpenBLAS/
 ENV LD_LIBRARY_PATH=/opt/OpenBLAS/lib:$LD_LIBRARY_PATH
+# Install ci requirements
+ADD ../aarch64_linux/aarch64_ci_setup.sh aarch64_ci_setup.sh
+RUN bash ./aarch64_ci_setup.sh && rm aarch64_ci_setup.sh
