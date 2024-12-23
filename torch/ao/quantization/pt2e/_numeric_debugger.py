@@ -274,10 +274,16 @@ def compare_results(
             )
             continue
         actual_name, actual_stack, actual_stats = actual_results[debug_handle]
+        for a, b in zip(actual_stats, ref_stats):
+            if a.shape != b.shape:
+                log.warning(
+                    f"Cannot compare tensors with different shapes: actual={a.shape} vs ref={b.shape}"
+                )
         try:
             results = [
                 QuantizationComparisonResult(actual=a, ref=b)
                 for a, b in zip(actual_stats, ref_stats)
+                if a.shape == b.shape
             ]
         except Exception as e:
             # Add extra information for an exception from QuantizationComparisonResult
