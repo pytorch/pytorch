@@ -3,6 +3,7 @@ import copy
 import csv
 import functools
 import json
+import os
 import re
 import os
 import timeit
@@ -540,5 +541,3 @@ class BenchmarkRunner:
         if self.args.output_json:
             with open(self.args.output_json, "w") as f:
                 json.dump(perf_list, f)
-
-                
