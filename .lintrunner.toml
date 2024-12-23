@@ -60,6 +60,7 @@ include_patterns = [
     'aten/src/ATen/xpu/**/*.h',
     'aten/src/ATen/xpu/**/*.cpp',
     'aten/src/ATen/core/boxing/**/*.h',
+    'aten/src/ATen/core/dispatch/**/*.h',
     'aten/src/ATen/native/mps/**/*.metal',
     'aten/src/ATen/native/mps/**/*.mm',
     'aten/src/ATen/native/mps/**/*.h',
@@ -1731,5 +1732,19 @@ command = [
 ]
 include_patterns = [
    'torch/**/not-exist.py'
+]
+is_formatter = false
+
+# `import_linter` reports on importing disallowed third party libraries.
+[[linter]]
+code = 'IMPORT_LINTER'
+command = [
+    'python3',
+    'tools/linter/adapters/import_linter.py',
+    '--',
+    '@{{PATHSFILE}}'
+]
+include_patterns = [
+   'torch/_dynamo/**',
 ]
 is_formatter = false
