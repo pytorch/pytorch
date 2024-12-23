@@ -1655,6 +1655,8 @@ class Softmax(Module):
     dim: Optional[int]
 
     def __init__(self, dim: Optional[int] = None) -> None:
+        if dim is not None and type(dim) is not int:
+            raise TypeError(f"dim must be an int or None, got {type(dim).__name__}")
         super().__init__()
         self.dim = dim
 
