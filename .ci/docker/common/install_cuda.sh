@@ -16,24 +16,13 @@ function install_cusparselt_040 {
     rm -rf tmp_cusparselt
 }
 
-function install_cusparselt_052 {
+function install_cusparselt_063 {
     # cuSparseLt license: https://docs.nvidia.com/cuda/cusparselt/license.html
     mkdir tmp_cusparselt && pushd tmp_cusparselt
-    wget -q https://developer.download.nvidia.com/compute/cusparselt/redist/libcusparse_lt/linux-x86_64/libcusparse_lt-linux-x86_64-0.5.2.1-archive.tar.xz
-    tar xf libcusparse_lt-linux-x86_64-0.5.2.1-archive.tar.xz
-    cp -a libcusparse_lt-linux-x86_64-0.5.2.1-archive/include/* /usr/local/cuda/include/
-    cp -a libcusparse_lt-linux-x86_64-0.5.2.1-archive/lib/* /usr/local/cuda/lib64/
-    popd
-    rm -rf tmp_cusparselt
-}
-
-function install_cusparselt_062 {
-    # cuSparseLt license: https://docs.nvidia.com/cuda/cusparselt/license.html
-    mkdir tmp_cusparselt && pushd tmp_cusparselt
-    wget -q https://developer.download.nvidia.com/compute/cusparselt/redist/libcusparse_lt/linux-x86_64/libcusparse_lt-linux-x86_64-0.6.2.3-archive.tar.xz
-    tar xf libcusparse_lt-linux-x86_64-0.6.2.3-archive.tar.xz
-    cp -a libcusparse_lt-linux-x86_64-0.6.2.3-archive/include/* /usr/local/cuda/include/
-    cp -a libcusparse_lt-linux-x86_64-0.6.2.3-archive/lib/* /usr/local/cuda/lib64/
+    wget -q https://developer.download.nvidia.com/compute/cusparselt/redist/libcusparse_lt/linux-x86_64/libcusparse_lt-linux-x86_64-0.6.3.2-archive.tar.xz
+    tar xf libcusparse_lt-linux-x86_64-0.6.3.2-archive.tar.xz
+    cp -a libcusparse_lt-linux-x86_64-0.6.3.2-archive/include/* /usr/local/cuda/include/
+    cp -a libcusparse_lt-linux-x86_64-0.6.3.2-archive/lib/* /usr/local/cuda/lib64/
     popd
     rm -rf tmp_cusparselt
 }
@@ -111,7 +100,7 @@ function install_121 {
     cd ..
     rm -rf nccl
 
-    install_cusparselt_052
+    install_cusparselt_063
 
     ldconfig
 }
@@ -145,7 +134,7 @@ function install_124 {
   cd ..
   rm -rf nccl
 
-  install_cusparselt_062
+  install_cusparselt_063
 
   ldconfig
 }
