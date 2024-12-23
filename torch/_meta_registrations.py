@@ -3344,6 +3344,161 @@ def meta__weight_int4pack_mm_for_cpu(x, w, q_group_size, q_scale_and_zeros):
     return x.new_empty(x.size(0), w.size(0), dtype=x.dtype)
 
 
+def kai_roundup(a: int, b: int) -> int:
+    return ((a + b - 1) // b) * b
+
+
+def get_kai_packed_weight_size(n_bits, N, K, groupsize):
+    if n_bits == 4:
+        if groupsize == K:  # channelwise
+            # dotprod params only [1x8x32_neon_dotprod]
+            kai_nr = 8
+            kai_kr = 16
+            kai_sr = 2
+            kai_num_bytes_sum_rhs = 4  # sizeof(int32_t)
+            kai_num_bytes_multiplier_rhs = 4  # sizeof(float)
+            kai_num_bytes_bias = 4  # sizeof(float)
+
+            def kai_k_roundedup(k, kr, sr):
+                # Since we pack a float and int32 value at the end of the row,
+                # we must make sure that k is a multiple of 4 for alignment
+                kr_sr_roundedup4 = kai_roundup(kr * sr, 4)
+                return kai_roundup(k, kr_sr_roundedup4)
+
+            def kai_get_rhs_packed_stride_rhs_pack_nxk_qsi4cxp_qsu4cxs1s0(
+                k, nr, kr, sr
+            ):
+                k_internal = kai_k_roundedup(k, kr, sr)
+
+                assert (k_internal % 2) == 0, "k_internal must be even"
+
+                return nr * (
+                    (k_internal // 2)
+                    + kai_num_bytes_multiplier_rhs
+                    + kai_num_bytes_sum_rhs
+                    + kai_num_bytes_bias
+                )
+
+            def kai_get_rhs_packed_size_rhs_pack_nxk_qsi4cxp_qsu4cxs1s0(
+                n, k, nr, kr, sr
+            ):
+                num_rows = kai_roundup(n, nr) // nr
+
+                return (
+                    num_rows
+                    * kai_get_rhs_packed_stride_rhs_pack_nxk_qsi4cxp_qsu4cxs1s0(
+                        k, nr, kr, sr
+                    )
+                )
+
+            return kai_get_rhs_packed_size_rhs_pack_nxk_qsi4cxp_qsu4cxs1s0(
+                N, K, kai_nr, kai_kr, kai_sr
+            )
+        elif groupsize % 32 == 0 and K % groupsize == 0:  # groupwise
+            kai_nr = 8
+            kai_kr = 16
+            kai_sr = 2
+            kai_num_bytes_sum_rhs = 4
+            kai_num_bytes_bias = 4
+            kai_nr_multiple_of = 4
+            kai_bl_multiple_of = 32
+
+            def kai_get_rhs_packed_size_rhs_pack_nxk_qsi4c32p_qsu4c32s1s0(
+                n, k, nr, kr, sr, bl
+            ):
+                assert (bl % kr) == 0
+                assert (nr % kai_nr_multiple_of) == 0
+                assert (bl % kai_bl_multiple_of) == 0
+
+                num_rows = kai_roundup(n, nr) // nr
+
+                return (
+                    num_rows
+                    * kai_get_rhs_packed_stride_rhs_pack_nxk_qsi4c32p_qsu4c32s1s0(
+                        k, nr, kr, sr, bl
+                    )
+                )
+
+            def kai_get_rhs_packed_stride_rhs_pack_nxk_qsi4c32p_qsu4c32s1s0(
+                k, nr, kr, sr, bl
+            ):
+                assert (bl % kr) == 0
+                assert (nr % kai_nr_multiple_of) == 0
+                assert (bl % kai_bl_multiple_of) == 0
+
+                # kr and sr are unused in the calculation
+                num_bytes_multiplier_rhs = kai_get_bf16_datatype_size_in_bytes()
+                num_blocks_per_row = kai_num_blocks_per_row(k, bl)
+                num_bytes_per_block = kai_num_bytes_per_block(
+                    bl, num_bytes_multiplier_rhs
+                )
+
+                return nr * (
+                    (num_bytes_per_block * num_blocks_per_row)
+                    + kai_num_bytes_sum_rhs
+                    + kai_num_bytes_bias
+                )
+
+            # This funtion retuns size of these datatypes stored as enum. We modify it to just return bf16 datatype
+            # https://gitlab.arm.com/kleidi/kleidiai/-/blob/main/kai/kai_common.h?ref_type=heads#L55
+            def kai_get_bf16_datatype_size_in_bytes():
+                return 2  # 2 bytes
+
+            def kai_num_blocks_per_row(k, bl):
+                assert (bl % kai_bl_multiple_of) == 0
+                return kai_roundup(k, bl) // bl
+
+            def kai_num_bytes_per_block(bl, num_bytes_multiplier_rhs):
+                assert (bl % kai_bl_multiple_of) == 0
+                return (bl // 2) + num_bytes_multiplier_rhs
+
+            return kai_get_rhs_packed_size_rhs_pack_nxk_qsi4c32p_qsu4c32s1s0(
+                N, K, kai_nr, kai_kr, kai_sr, groupsize
+            )
+
+
+@register_meta([aten._dyn_quant_pack_4bit_weight])
+def meta__dyn_quant_pack_4bit_weight(
+    weights, scales_zeros, bias: Optional[Tensor], block_size, in_features, out_features
+):
+    torch._check(
+        weights.dtype is torch.uint8,
+        lambda: f"expected w to be uint8, got {weights.dtype}",
+    )
+    if torch.backends.kleidiai.is_available() and (
+        (block_size == in_features and scales_zeros.dtype == torch.float)
+        or (
+            block_size < in_features
+            and block_size % 32 == 0
+            and in_features % block_size == 0
+            and scales_zeros.dtype == torch.bfloat16
+        )
+    ):
+        packed_weight_size = get_kai_packed_weight_size(
+            4, out_features, in_features, block_size
+        )
+        return weights.new_empty(int(packed_weight_size), dtype=torch.uint8)
+    packed_weight_size = weights.numel() + scales_zeros.numel()
+    return weights.new_empty(packed_weight_size, dtype=torch.float)
+
+
+@register_meta([aten._dyn_quant_matmul_4bit])
+def meta__dyn_quant_matmul_4bit(
+    inp,
+    packed_weights,
+    block_size,
+    in_features,
+    out_features,
+):
+    torch._check(inp.dim() == 2, lambda: "input must be a 2D tensor")
+    torch._check(
+        inp.dtype in [torch.float32],
+        lambda: f"expected input to be f32, got {inp.dtype}",
+    )
+    M = inp.size(0)
+    return inp.new_empty(M, out_features, dtype=inp.dtype)
+
+
 @register_meta([aten._weight_int8pack_mm])
 def meta__weight_int8pack_mm(x, w, q_scales):
     torch._check(x.dim() == 2, lambda: "x must be a 2D tensor")
