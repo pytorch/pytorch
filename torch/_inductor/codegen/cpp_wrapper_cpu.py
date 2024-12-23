@@ -150,6 +150,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
 
                 cpp_wrapper_src = (
                 '''
+                #include <optional>
                 #include <Python.h>
 
                 class RAIIPyObject {
