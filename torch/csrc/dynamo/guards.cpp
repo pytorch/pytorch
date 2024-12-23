@@ -797,6 +797,8 @@ static PyObject* assert_size_stride(PyObject* dummy, PyObject* args) {
   }
 
   if (num_errors) {
+    msg << "\nThis error most often comes from an incorrect meta function for a custom op.";
+    msg << "\nSee https://pytorch.org/docs/stable/library.html#torch.library.opcheck";
     PyErr_SetString(PyExc_AssertionError, msg.str().c_str());
     return nullptr;
   }
