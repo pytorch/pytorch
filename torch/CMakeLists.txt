@@ -157,7 +157,9 @@ if(USE_ROCM)
       USE_ROCM
       __HIP_PLATFORM_AMD__
       )
-    list(APPEND TORCH_PYTHON_LINK_LIBRARIES ${ROCM_ROCTX_LIB})
+    if(TARGET rocprofiler-sdk-roctx::rocprofiler-sdk-roctx)
+      list(APPEND TORCH_PYTHON_LINK_LIBRARIES rocprofiler-sdk-roctx::rocprofiler-sdk-roctx)
+    endif()
 endif()
 
 if(USE_XPU)
