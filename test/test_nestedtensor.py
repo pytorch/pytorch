@@ -6022,6 +6022,67 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
                 nt.values()[nt.offsets()[i] : (nt.offsets()[i] + nt.lengths()[i])],
             )
 
+    @skipIfTorchDynamo("Test compiles internally")
+    @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
+    @torch._dynamo.utils.disable_cache_limit()
+    @dtypes(torch.float32)
+    @parametrize("env", ["eager", "compile", "compile_dynamic"])
+    def test_narrow_on_batch_dim(self, device, dtype, env):
+        nt = torch.nested.nested_tensor(
+            [
+                torch.randn(2, 5, device=device, dtype=dtype),
+                torch.randn(3, 5, device=device, dtype=dtype),
+                torch.randn(4, 5, device=device, dtype=dtype),
+                torch.randn(6, 5, device=device, dtype=dtype),
+                torch.randn(7, 5, device=device, dtype=dtype),
+            ],
+            layout=torch.jagged,
+            requires_grad=True,
+        )
+
+        def f(nt, start, length):
+            return nt.narrow(0, start, length)
+
+        # tests narrow() of narrow()ed NJT
+        def g(nt, start, length):
+            intermediate = nt.narrow(0, start, length)
+            return intermediate.narrow(0, 1, length - 2)
+
+        if "compile" in env:
+            # required to avoid data-dependent guard errors
+            torch._dynamo.config.capture_scalar_outputs = True
+            f = torch.compile(f, dynamic=(env == "compile_dynamic"), fullgraph=True)
+
+        # first few batch items
+        out1 = f(nt, 0, 2)
+        self.assertEqual(out1.shape[0], 2)
+        for out1_comp, nt_comp in zip(out1.unbind(), nt.unbind()[0:2]):
+            self.assertEqual(out1_comp, nt_comp)
+
+        # some middle batch items
+        out2 = f(nt, 1, 3)
+        self.assertEqual(out2.shape[0], 3)
+        for out2_comp, nt_comp in zip(out2.unbind(), nt.unbind()[1:4]):
+            self.assertEqual(out2_comp, nt_comp)
+
+        # last few batch items
+        out3 = f(nt, 2, 3)
+        self.assertEqual(out3.shape[0], 3)
+        for out3_comp, nt_comp in zip(out3.unbind(), nt.unbind()[2:5]):
+            self.assertEqual(out3_comp, nt_comp)
+
+        # length past the end
+        with self.assertRaisesRegex(RuntimeError, "exceeds dimension size"):
+            out4 = f(nt, 3, 3)
+
+        # narrow() of narrow()ed NJT
+        # first narrow(): 1:5
+        # second narrow() 1+1:4-2 == 2:4
+        out4 = g(nt, 1, 4)
+        self.assertEqual(out4.shape[0], 2)
+        for out4_comp, nt_comp in zip(out4.unbind(), nt.unbind()[2:4]):
+            self.assertEqual(out4_comp, nt_comp)
+
     def test_njt_cat(self, device):
         offsets = torch.tensor([0, 2, 3], device=device, dtype=torch.int64)
         values_1 = torch.randn(
@@ -8035,7 +8096,6 @@ FORWARD_SKIPS_AND_XFAILS = [
             in {
                 "chunk",
                 "masked_select",
-                "narrow",
                 "split",
                 "split_with_sizes",
                 "squeeze",
@@ -8062,6 +8122,17 @@ FORWARD_SKIPS_AND_XFAILS = [
         sample_match_fn=lambda device, sample: "ragged_dim" in sample.name,
         name="ragged_dim_unsupported",
     ),
+    # narrow(): not supported with non-contig on dims other than the batch dim
+    XFailRule(
+        error_type=RuntimeError,
+        error_msg="not yet supported for non-contiguous nested tensors on dim != 0",
+        op_match_fn=lambda device, op: (op.full_name == "narrow"),
+        sample_match_fn=lambda device, sample: (
+            sample.kwargs["dim"] != 0
+            and (sample.input._lengths is not None or sample.input._ragged_idx != 1)
+        ),
+        name="narrow_missing_noncontig_support_on_batch_dim",
+    ),
     XFailRule(
         error_type=RuntimeError,
         # error comes from usage of view() in the decomp
@@ -8077,7 +8148,6 @@ FORWARD_SKIPS_AND_XFAILS = [
         op_match_fn=lambda device, op: (
             op.full_name
             in {
-                "narrow",
                 "split",
                 "split_with_sizes",
                 "unsqueeze",
@@ -8284,13 +8354,6 @@ BACKWARD_SKIPS_AND_XFAILS = [
         sample_match_fn=lambda device, sample: ("with bias" in sample.name),
         name="broken_linear_backward",
     ),
-    # narrow(): unimplemented backward
-    XFailRule(
-        error_type=RuntimeError,
-        error_msg="derivative for aten::narrow is not implemented",
-        op_match_fn=lambda device, op: (op.full_name == "narrow"),
-        name="broken_narrow_backward",
-    ),
     # min / max: need to examine backwards formula for non-full reduction
     XFailRule(
         error_type=RuntimeError,
@@ -8386,6 +8449,14 @@ BACKWARD_SKIPS_AND_XFAILS = [
 
 COMPILE_FORWARD_SKIPS_AND_XFAILS = [
     *FORWARD_SKIPS_AND_XFAILS,
+    # select(): pending unbacked symints not in returned output (needs fix)
+    XFailRule(
+        error_type=torch._dynamo.exc.InternalTorchDynamoError,
+        error_msg="Pending unbacked symbols",
+        op_match_fn=lambda device, op: (op.full_name == "select"),
+        sample_match_fn=lambda device, sample: ("batch_dim" in sample.name),
+        name="broken_select_backward_unbacked",
+    ),
     # Bug: cross-device conversions with to() result in new nested ints within compile only
     XFailRule(
         error_type=AssertionError,
@@ -8397,8 +8468,7 @@ COMPILE_FORWARD_SKIPS_AND_XFAILS = [
     # clone() -> contiguous format on an non-contiguous NJT with holes currently uses
     # unbind(), leading to data-dependent error in torch.compile
     XFailRule(
-        error_type=torch._dynamo.exc.Unsupported,
-        error_msg="data dependent operator: aten._local_scalar_dense.default",
+        error_msg="Could not guard on data-dependent expression",
         op_match_fn=lambda device, op: (op.full_name == "clone"),
         sample_match_fn=lambda device, sample: (
             "noncontig_holes" in sample.name
@@ -8406,13 +8476,15 @@ COMPILE_FORWARD_SKIPS_AND_XFAILS = [
         ),
         name="clone_unbind_data_dependency",
     ),
-    # chunk() on the batch dim reads the values of offsets to determine shape, leading to
-    # data-dependent error in torch.compile
+    # chunk() on the batch dim with chunks=1 causes an unbacked SymInt problem; this
+    # needs to be investigated
     XFailRule(
-        error_type=torch._dynamo.exc.Unsupported,
-        error_msg="data dependent operator: aten._local_scalar_dense.default",
+        error_type=AssertionError,
+        error_msg="s1",
         op_match_fn=lambda device, op: (op.full_name == "chunk"),
-        sample_match_fn=lambda device, sample: ("batch_dim" in sample.name),
+        sample_match_fn=lambda device, sample: (
+            "batch_dim" in sample.name and sample.kwargs["chunks"] == 1
+        ),
         name="chunk_batch_dim_data_dependency",
     ),
     # select on dim=0 currently uses unbind(), leading to data-dependent error in torch.compile
@@ -8495,6 +8567,18 @@ COMPILE_BACKWARD_SKIPS_AND_XFAILS = [
         op_match_fn=lambda device, op: (op.full_name in {"cdouble", "cfloat", "chalf"}),
         name="unimplemented_view_as_real",
     ),
+    # narrow(): unbacked SymInt bug with non-contig transposed inputs
+    XFailRule(
+        error_type=torch.fx.experimental.symbolic_shapes.GuardOnDataDependentSymNode,
+        error_msg=r"data-dependent expression Eq.IsNonOverlappingAndDenseIndicator",
+        op_match_fn=lambda device, op: (op.full_name == "narrow"),
+        sample_match_fn=lambda device, sample: (
+            "noncontig_transposed" in sample.name
+            and "batch_dim" in sample.name
+            and sample.kwargs["length"] < sample.input.size(0)
+        ),
+        name="broken_narrow_backward",
+    ),
     # torch._subclasses.fake_tensor.DataDependentOutputException: aten._local_scalar_dense.default
     # from item call in clone() -> unbind()
     XFailRule(
@@ -8550,21 +8634,15 @@ COMPILE_BACKWARD_SKIPS_AND_XFAILS = [
         ),
         name="clone_unbind_data_dependency_backward",
     ),
-    # select(): pending unbacked symints not in returned output (needs fix)
-    XFailRule(
-        error_type=torch._dynamo.exc.InternalTorchDynamoError,
-        error_msg="Pending unbacked symbols",
-        op_match_fn=lambda device, op: (op.full_name == "select"),
-        sample_match_fn=lambda device, sample: ("batch_dim" in sample.name),
-        name="broken_select_backward_unbacked",
-    ),
     *COMPILE_FORWARD_SKIPS_AND_XFAILS,
     *BACKWARD_SKIPS_AND_XFAILS,
 ]
 
 COMPARE_TENSOR_COMPONENT_EQUALITY = {
-    # masked_select is expected to output a different shape
+    # these ops are expected to output a different shape
+    "chunk",
     "masked_select",
+    "narrow",
 }
 
 
@@ -8649,11 +8727,12 @@ class TestNestedTensorOpInfo(NestedTensorTestCase):
 
                     self.assertEqualNoncontigAware(grads, grads_ref)
 
-    @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
     @ops(
         [op for op in njt_op_db if op.supports_njt],
         allowed_dtypes=(torch.float32,),
     )
+    @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
     @sample_skips_and_xfails(COMPILE_FORWARD_SKIPS_AND_XFAILS)
     def test_compile_forward(self, device, dtype, op):
         for sample, subtest_ctx, skip_xfail_ctx in op.sample_inputs(
@@ -8706,6 +8785,7 @@ class TestNestedTensorOpInfo(NestedTensorTestCase):
         allowed_dtypes=(torch.float32,),
     )
     @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
     @sample_skips_and_xfails(COMPILE_BACKWARD_SKIPS_AND_XFAILS)
     def test_compile_backward(self, device, dtype, op):
         for sample, subtest_ctx, skip_xfail_ctx in op.sample_inputs(
@@ -8713,9 +8793,6 @@ class TestNestedTensorOpInfo(NestedTensorTestCase):
         ):
             with subtest_ctx(self), skip_xfail_ctx(self):
                 torch.compiler.reset()
-                # must be set to avoid:
-                # DataDependentOutputException: aten._local_scalar_dense.default
-                torch._dynamo.config.capture_scalar_outputs = True
 
                 op_fn = op.op
 
