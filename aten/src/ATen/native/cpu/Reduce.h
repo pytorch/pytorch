@@ -33,9 +33,9 @@ inline bool is_outer_reduction(const int64_t* strides) {
          strides[3] == sizeof(typename traits::arg2_t);
 }
 
-template <typename func_t, typename vec_func_t>
+template <typename func_t, typename vec_func_t, bool reduce>
 inline void vectorized_reduction(char** data, int64_t n, int64_t stride,
-                                        func_t op, vec_func_t vop, bool reduce) {
+                                        func_t op [[maybe_unused]], vec_func_t vop) {
   VEC_LOOP_HEADER(func_t, data)
   const char* in1_ptr = data[1];
   Vec acc[4];
@@ -49,7 +49,7 @@ inline void vectorized_reduction(char** data, int64_t n, int64_t stride,
     acc[2] = vop(acc[2], Vec::loadu(ptr + (2 * Vec::size() * sizeof(scalar_t))));
     acc[3] = vop(acc[3], Vec::loadu(ptr + (3 * Vec::size() * sizeof(scalar_t))));
   }
-  if (reduce) {
+  if constexpr (reduce) {
     scalar_t buffer[Vec::size()];
     acc[0] = vop(vop(acc[0], acc[1]), vop(acc[2], acc[3]));
     acc[0].store(buffer);
@@ -83,7 +83,7 @@ inline void vectorized_inner_reduction(char** data, int64_t n, func_t op, vec_fu
   constexpr int64_t vector_stride = 4 * Vec::size() * sizeof(scalar_t);
   int64_t count = n / (4 * Vec::size());
   if (count > 0) {
-    vectorized_reduction(data, count, vector_stride, op, vop, /*reduce=*/true);
+    vectorized_reduction<func_t, vec_func_t, true>(data, count, vector_stride, op, vop);
   }
   char* ptrs[3] = { data[0], data[0], data[1] };
   int64_t strides[] = { 0, 0, sizeof(scalar_t) };
@@ -99,7 +99,7 @@ inline void vectorized_outer_reduction(char** data, int64_t inner_stride, int64_
   constexpr int64_t vector_stride = 4 * Vec::size() * sizeof(scalar_t);
   int64_t outer_stride[2] = { vector_stride, vector_stride };
   UNARY_OUTER_LOOP(data, outer_stride, size1 / (4 * Vec::size()), [&] {
-    vectorized_reduction(data, size0, inner_stride, op, vop, /*reduce=*/false);
+    vectorized_reduction<func_t, vec_func_t, false>(data, size0, inner_stride, op, vop);
   });
 
   // reduce down the remaining columns
