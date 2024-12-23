@@ -1917,54 +1917,19 @@ def forward(self, arg0_1, arg1_1):
     @common_utils.parametrize("backend", ["eager", "aot_eager", "inductor"])
     def test_triton_kernel_num_ctas(self, backend):
         @triton.jit
-        def add_kernel(
-            in_ptr0,
-            in_ptr1,
-            out_ptr,
-            n_elements,
-            BLOCK_SIZE: "tl.constexpr",
-        ):
-            pid = tl.program_id(axis=0)
-            block_start = pid * BLOCK_SIZE
-            offsets = block_start + tl.arange(0, BLOCK_SIZE)
-            mask = offsets < n_elements
-            x = tl.load(in_ptr0 + offsets, mask=mask)
-            y = tl.load(in_ptr1 + offsets, mask=mask)
-            output = x + y
-            tl.store(out_ptr + offsets, output, mask=mask)
+        def kernel(X):
+            return
 
         @torch.compile(fullgraph=True, backend=backend)
-        def f(x, y):
-            output = torch.zeros_like(x)
-            n_elements = output.numel()
-            grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
-            add_kernel[grid](
-                x,
-                y,
-                output,
-                n_elements,
-                BLOCK_SIZE=128,
-                num_warps=8,
-                num_ctas=1,
-            )
-
-            add_kernel.run(
-                x,
-                y,
-                output,
-                n_elements,
-                BLOCK_SIZE=128,
-                num_warps=8,
-                num_ctas=1,
-                grid=(1,),
-            )
-
-            return output
+        def f(x):
+            kernel[(1,)](x, num_ctas=1)
+            kernel.run(x, num_ctas=1, grid=(1,), warmup=False)
+            return x
 
         msg = "Passing num_ctas directly to the Triton kernel is not supported. Please use a Config in @triton.autotune instead."
         with self.assertRaisesRegex(torch._dynamo.exc.Unsupported, msg):
             x = torch.randn(4, device=GPU_TYPE)
-            f(x, x)
+            f(x)
 
     @requires_gpu
     @common_utils.parametrize("backend", ["eager", "aot_eager", "inductor"])
