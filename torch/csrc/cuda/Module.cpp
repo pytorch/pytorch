@@ -405,11 +405,11 @@ PyObject* THCPModule_cudaJiteratorCompileAndLaunchKernel(
       return_by_ref);
 
   if (num_outputs == 1) {
-    return THPVariable_Wrap(outputs[0]);
+    return THPVariable_Wrap(std::move(outputs[0]));
   } else {
     PyObject* output_tuple = PyTuple_New(num_outputs);
     for (int i = 0; i < num_outputs; ++i) {
-      PyTuple_SetItem(output_tuple, i, THPVariable_Wrap(outputs[i]));
+      PyTuple_SetItem(output_tuple, i, THPVariable_Wrap(std::move(outputs[i])));
     }
     return output_tuple;
   }
