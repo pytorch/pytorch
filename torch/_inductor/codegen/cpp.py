@@ -973,11 +973,41 @@ class CppOverrides(OpOverrides):
 
     @staticmethod
     def bitwise_left_shift(a, b):
-        return f"decltype({a})({a} << {b})"
+        code = BracesBuffer()
+        code.writeline("[&]()")
+        with code.indent():
+            scalar_t = DTYPE_TO_CPP[a.dtype]
+            code.writeline(
+                f"constexpr decltype({b}) max_shift = sizeof({scalar_t}) * CHAR_BIT;"
+            )
+            code.writeline(
+                f"if ((static_cast<std::make_signed_t<{scalar_t}>>({b}) < 0) || ({b} >= max_shift))"
+            )
+            with code.indent():
+                code.writeline(f"return decltype({a})(0);")
+            code.writeline(
+                f"return decltype({a})(static_cast<std::make_unsigned_t<{scalar_t}>>({a}) << {b});"
+            )
+        code.writeline("()")
+        return code
 
     @staticmethod
     def bitwise_right_shift(a, b):
-        return f"decltype({a})({a} >> {b})"
+        code = BracesBuffer()
+        code.writeline("[&]()")
+        with code.indent():
+            scalar_t = DTYPE_TO_CPP[a.dtype]
+            code.writeline(
+                f"constexpr decltype({b}) max_shift = sizeof({scalar_t}) * CHAR_BIT - std::is_signed_v<{scalar_t}>;"
+            )
+            code.writeline(
+                f"if ((static_cast<std::make_signed_t<{scalar_t}>>({b}) < 0) || ({b} >= max_shift))"
+            )
+            with code.indent():
+                code.writeline(f"return decltype({a})({a} >> max_shift);")
+            code.writeline(f"return decltype({a})({a} >> {b});")
+        code.writeline("()")
+        return code
 
     @staticmethod
     def rand(seed: sympy.Expr, offset: sympy.Expr):
