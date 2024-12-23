@@ -208,6 +208,7 @@ if [[ "$BUILD_ENVIRONMENT" == *-clang*-asan* ]]; then
   fi
   export USE_ASAN=1
   export REL_WITH_DEB_INFO=1
+  export USE_FBGEMM=0
   export UBSAN_FLAGS="-fno-sanitize-recover=all"
   unset USE_LLVM
 fi
