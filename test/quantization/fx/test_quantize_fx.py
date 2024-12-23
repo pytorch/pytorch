@@ -6640,6 +6640,52 @@ class TestQuantizeFx(QuantizationTestCase):
         }
         self.checkGraphModuleNodes(quantized_model, expected_node_occurrence=node_occurrence)
 
+    @skipIfNoFBGEMM
+    def test_keep_original_weights(self):
+        class SubModule(nn.Module):
+            """
+            A simple submodule containing a linear layer.
+            """
+            def __init__(self, input_dim, output_dim):
+                super(SubModule, self).__init__()
+                self.w = nn.Parameter(torch.randn(input_dim, output_dim))
+                self.b = nn.Parameter(torch.randn(input_dim))
+            def forward(self, x):
+                return F.linear(x, self.w, self.b)
+        class MainModule(nn.Module):
+            """
+            The main module containing the submodule.
+            """
+            def __init__(self, input_dim, hidden_dim, output_dim):
+                super(MainModule, self).__init__()
+                self.submodule = SubModule(hidden_dim, input_dim)
+                self._w = nn.Parameter(torch.randn(output_dim, hidden_dim))
+                self._b = nn.Parameter(torch.randn(output_dim))
+            def forward(self, x):
+                x = self.submodule(x)
+                x = F.linear(x, self._w, self._b)
+                return x
+
+        input_dim = 10
+        hidden_dim = 20
+        output_dim = 5
+        model = MainModule(input_dim, hidden_dim, output_dim)
+        model.eval()
+        example_inputs = torch.randn(1, input_dim)
+        _ = model(*example_inputs)
+        qconfig_mapping = QConfigMapping().set_object_type(nn.functional.linear, float16_dynamic_qconfig)
+        prepared_model = prepare_fx(model, qconfig_mapping, example_inputs)
+        prepared_model(example_inputs)
+        quantized_model = convert_fx(prepared_model, keep_original_weights=True)
+
+        self.assertTrue(len(quantized_model.original_weights_lookup) == 2)
+        self.assertTrue("submodule_packed_weight_0" in quantized_model.original_weights_lookup)
+        torch.testing.assert_close(quantized_model.original_weights_lookup["submodule_packed_weight_0"][0], model.submodule.w)
+        torch.testing.assert_close(quantized_model.original_weights_lookup["submodule_packed_weight_0"][1], model.submodule.b)
+        self.assertTrue("_packed_weight_0" in quantized_model.original_weights_lookup)
+        torch.testing.assert_close(quantized_model.original_weights_lookup["_packed_weight_0"][0], model._w)
+        torch.testing.assert_close(quantized_model.original_weights_lookup["_packed_weight_0"][1], model._b)
+
 @skipIfNoFBGEMM
 class TestQuantizeFxOps(QuantizationTestCase):
     def setUp(self):

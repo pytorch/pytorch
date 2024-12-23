@@ -17,6 +17,7 @@ from torch.ao.quantization.quantization_mappings import get_quantized_operator
 from torch.ao.quantization.utils import _parent_name
 from torch.fx import GraphModule, map_arg, Node
 from torch.fx.graph import Graph
+from torch.fx.passes.split_utils import getattr_recursive
 
 from .utils import (
     collect_producer_nodes,
@@ -443,7 +444,9 @@ def _load_packed_weight(
 
 
 def fold_weight(
-    quantized_model: GraphModule, node_name_to_scope: Dict[str, Tuple[str, type]]
+    quantized_model: GraphModule,
+    node_name_to_scope: Dict[str, Tuple[str, type]],
+    keep_original_weights: bool = False,
 ) -> GraphModule:
     """
     Trace back from the weight node util we hit getattr, reconstruct the
@@ -470,6 +473,7 @@ def fold_weight(
     # remove folded nodes and replace the prepacking node with getattr
     folded_graph = Graph()
     env: Dict[Any, Any] = {}
+    original_weights_lookup: Dict[str, List] = {}
 
     def load_arg(a):
         return map_arg(a, lambda node: env[node.name])
@@ -490,6 +494,36 @@ def fold_weight(
             env[node.name] = folded_graph.create_node(
                 "get_attr", packed_weight_name, (), {}
             )
+            if keep_original_weights:
+                if module_path:
+                    original_weight = getattr_recursive(
+                        quantized_model, module_path + ".w"
+                    )
+                    original_bias = getattr_recursive(
+                        quantized_model, module_path + ".b"
+                    )
+                else:
+                    if node.prev.target.endswith("_w"):
+                        original_weight = quantized_model.state_dict().get(
+                            node.prev.target, None
+                        )
+                        original_bias = quantized_model.state_dict().get(
+                            node.prev.target.replace("_w", "_b"), None
+                        )
+                    else:
+                        original_weight = quantized_model.state_dict().get(
+                            node.prev.target.replace("_b", "_w"), None
+                        )
+                        original_bias = quantized_model.state_dict().get(
+                            node.prev.target, None
+                        )
+                key_name = (
+                    packed_weight_name.replace(":", "_").replace("/", "_").lower()
+                )
+                original_weights_lookup[key_name] = [
+                    original_weight,
+                    original_bias,
+                ]
         elif prepack_node is not None:
             # remove the foled node
             continue
@@ -500,6 +534,10 @@ def fold_weight(
     quantized_model = GraphModule(quantized_model, folded_graph)
     quantized_model._register_state_dict_hook(_save_packed_weight)
     quantized_model.register_load_state_dict_pre_hook(_load_packed_weight)
+
+    if keep_original_weights:
+        setattr(quantized_model, "original_weights_lookup", original_weights_lookup)
+
     return quantized_model
 
 
@@ -1296,6 +1334,7 @@ def _lower_to_native_backend(
     model: GraphModule,
     qconfig_map: Dict[str, QConfigAny],
     node_name_to_scope: Dict[str, Tuple[str, type]],
+    keep_original_weights: bool = False,
 ) -> GraphModule:
     """Lower a quantized reference model (with reference quantized operator patterns)
     to the native backend in PyTorch (fbgemm/qnnpack), both backends shares the same
@@ -1312,7 +1351,7 @@ def _lower_to_native_backend(
     _lower_get_tensor_info_op(model)
     special_pattern_replacement(model)
     model.graph.eliminate_dead_code()
-    model = fold_weight(model, node_name_to_scope)
+    model = fold_weight(model, node_name_to_scope, keep_original_weights)
     model.graph.eliminate_dead_code()
     model.recompile()
     model.graph.lint()
