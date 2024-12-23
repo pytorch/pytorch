@@ -372,6 +372,24 @@ class TestNN(NNTestCase):
         self.assertEqual(names(m.named_buffers(remove_duplicate=False)),
                          ["buffer1", "buffer2"])
 
+        # test persistent
+        class Foo(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer('buffer1', torch.empty(3, 5), persistent=True)
+                self.register_buffer('buffer2', torch.empty(3, 5), persistent=False)
+
+        foo = Foo()
+        # persistent = True
+        self.assertEqual(len(list(foo.buffers(persistent=True))), 1)
+        self.assertEqual(names(foo.named_buffers(persistent=True)), ["buffer1"])
+        # persistent = False
+        self.assertEqual(len(list(foo.buffers(persistent=False))), 1)
+        self.assertEqual(names(foo.named_buffers(persistent=False)), ["buffer2"])
+        # persistent = None
+        self.assertEqual(len(list(foo.buffers(persistent=None))), 2)
+        self.assertEqual(names(foo.named_buffers(persistent=None)), ["buffer1", "buffer2"])
+
     def test_buffer_bad_module_subclass(self):
         class MyBadModule(nn.Linear):
             def __init__(self) -> None:
