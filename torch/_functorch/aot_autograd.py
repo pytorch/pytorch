@@ -1078,6 +1078,7 @@ def aot_module_simplified(
     keep_inference_input_mutations=False,
     inference_compiler: Optional[AOTDispatchCompiler] = None,
     cudagraphs: Optional[BoxedBool] = None,
+    enable_log: bool = True,
 ) -> nn.Module:
     """
     This is the simplified or low overhead version of aot_module. For frontends
@@ -1145,6 +1146,7 @@ def aot_module_simplified(
         is_export=False,
         no_tangents=False,
         cache_info=None,
+        enable_log=enable_log,
     )
     fake_mode, shape_env = construct_fake_mode(full_args, aot_config)
     fake_flat_args = process_inputs(full_args, aot_config, fake_mode, shape_env)
