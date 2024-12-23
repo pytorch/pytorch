@@ -5,6 +5,9 @@ from pathlib import Path
 from typing import Any, Dict, List, Set, Tuple, Union
 
 
+__all__: List[str] = []  # export nothing
+
+
 def materialize_lines(lines: List[str], indentation: int) -> str:
     output = ""
     new_line_with_indent = "\n" + " " * indentation
