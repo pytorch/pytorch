@@ -77,7 +77,7 @@ std::string get_parallel_info() {
   ss << "Environment variables:" << '\n';
   ss << "\tOMP_NUM_THREADS : "
      << get_env_var("OMP_NUM_THREADS", "[not set]") << '\n';
-#if defined(__x86_64__) || defined(_M_X64)    
+#if defined(__x86_64__) || defined(_M_X64)
   ss << "\tMKL_NUM_THREADS : "
      << get_env_var("MKL_NUM_THREADS", "[not set]") << '\n';
 #endif
