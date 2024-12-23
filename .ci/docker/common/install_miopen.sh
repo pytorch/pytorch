@@ -55,16 +55,8 @@ retry () {
 }
 
 # Build custom MIOpen to use comgr for offline compilation.
+ROCM_INSTALL_PATH="/opt/rocm"
 
-## Need a sanitized ROCM_VERSION without patchlevel; patchlevel version 0 must be added to paths.
-ROCM_DOTS=$(echo ${ROCM_VERSION} | tr -d -c '.' | wc -c)
-if [[ ${ROCM_DOTS} == 1 ]]; then
-    ROCM_VERSION_NOPATCH="${ROCM_VERSION}"
-    ROCM_INSTALL_PATH="/opt/rocm-${ROCM_VERSION}.0"
-else
-    ROCM_VERSION_NOPATCH="${ROCM_VERSION%.*}"
-    ROCM_INSTALL_PATH="/opt/rocm-${ROCM_VERSION}"
-fi
 
 # MIOPEN_USE_HIP_KERNELS is a Workaround for COMgr issues
 MIOPEN_CMAKE_COMMON_FLAGS="
