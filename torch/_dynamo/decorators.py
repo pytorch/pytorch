@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from typing import Any, Callable, Dict, Type, TYPE_CHECKING, TypeVar
 
 import torch
+from torch._environment import is_fbcode
 from torch._vendor.packaging.version import Version
 from torch.utils._contextlib import _DecoratorContextManager
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
@@ -615,7 +616,9 @@ def _allow_in_graph_einops():
         return
     else:
         # version > 0.7.0 does allow_in_graph out of tree
-        if Version(mod.__version__) < Version("0.7.0"):
+        # for BC we need to keep this in fbcode
+        # internal xref https://fb.workplace.com/groups/1026248852325474/permalink/1107135774236781/
+        if Version(mod.__version__) < Version("0.7.0") or is_fbcode():
             import einops
 
             try:
