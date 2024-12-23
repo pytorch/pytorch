@@ -330,6 +330,16 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         self.assertIsInstance(cm.exception, RuntimeError)
 
     @requires_nccl()
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 1 GPU")
+    @skip_if_lt_x_gpu(1)
+    def test_nccl_dist_backend_str_error(self):
+        current_device = torch.device("cuda")
+        tensor_ = torch.randn(5, device=current_device)
+        backend = dist.get_backend_from_device(tensor_.device)
+        assert backend == "nccl"
+
+
+    @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
     def test_abort_pg(self):
         # Disable ASYNC_ERROR_HANDLING for this test to ensure we can programmatically
