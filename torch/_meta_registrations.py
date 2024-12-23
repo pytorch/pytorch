@@ -2283,10 +2283,15 @@ def meta_miopen_batch_norm(
         return torch.contiguous_format
 
     out = input_tensor.new_empty(out_shape).to(memory_format=pick_memory_format())
-    save_mean = input_tensor.new_empty(save_mean_shape)
-    save_var = input_tensor.new_empty(save_var_shape)
 
-    return out, save_mean, save_var
+    if training:
+        save_mean = input_tensor.new_empty(save_mean_shape)
+        save_var = input_tensor.new_empty(save_var_shape)
+    else:
+        save_mean = input_tensor.new_empty((0,))
+        save_var = input_tensor.new_empty((0,))
+        
+        return out, save_mean, save_var
 
 @register_meta(aten.convolution.default)
 def meta_conv(
