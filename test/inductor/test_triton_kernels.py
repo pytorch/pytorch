@@ -3659,10 +3659,10 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
             add_compiled(x, y).mean()
 
     @requires_gpu
-    @common_utils.parametrize("tracing", ["non-strict", "dynamo"])
+    @common_utils.parametrize("non_strict", [True, False])
     @common_utils.parametrize("backend", ["eager", "aot_eager", "inductor"])
     @common_utils.parametrize("with_perf_model", [True, False])
-    def test_triton_kernel_prune_configs_by(self, backend, with_perf_model, tracing):
+    def test_triton_kernel_prune_configs_by(self, backend, with_perf_model, non_strict):
         # for non-strict mode
         libname = "my_cool_namespace"
         opname = "my_triton_operator"
@@ -3718,12 +3718,12 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
             N: int,
         ) -> None:
             grid = lambda META: (triton.cdiv(N, META["BLOCK_SIZE"]),)
-            if tracing == "non-strict":
-                capture_triton(prune_by_kernel)[grid](dst, src, add_float, N=N)
+            if non_strict:
+                torch.library.wrap_triton(prune_by_kernel)[grid](dst, src, add_float, N=N)
             else:
                 prune_by_kernel[grid](dst, src, add_float, N=N)
 
-        if tracing == "non-strict":
+        if non_strict:
             decorator = torch.library.triton_op(
                 f"{libname}::{opname}", mutates_args={"dst"}
             )(f)
@@ -3732,7 +3732,6 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
             decorator = f
 
         compiled_f = torch.compile(decorator, backend=backend)
-
         N = 1024
         src = torch.randn(N, device=GPU_TYPE)
         dst = torch.empty(N, device=GPU_TYPE)
