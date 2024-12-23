@@ -4636,6 +4636,27 @@ def forward(self, x, b, y):
         out = graph(x)
         self.assertEqual(ref_out, out)
 
+    def test_track_constants(self):
+        class ConstantClass:
+            def __init__(self, a):
+                self.a = a
+
+        @torch._dynamo.assume_constant_result
+        def get_constant_class():
+            return ConstantClass(10)
+
+        def fn(x):
+            if get_constant_class().a > 5:
+                return x + 1
+            else:
+                return x + 2
+
+        tensor = torch.rand((5, 5))
+        graph, _ = torch._dynamo.export(fn)(tensor)
+        reference = fn(tensor)
+        out = graph(tensor)
+        self.assertEqual(out, reference)
+
 
 common_utils.instantiate_parametrized_tests(ExportTests)
 
