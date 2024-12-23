@@ -8892,6 +8892,32 @@ class TestNNDeviceType(NNTestCase):
 
             self.assertEqual(x.grad, ref_x.grad)
 
+    @onlyCUDA   # Test if CPU and GPU results match with deterministic mode on
+    def test_ReflectionPad2d_large_deterministic(self, device):
+        original_deterministic = torch.are_deterministic_algorithms_enabled()
+        try:
+            torch.use_deterministic_algorithms(True)
+            shape = [2, 65736, 6, 6]
+            pad = (1, 2, 3, 4)
+            x = torch.randn(shape, device=device, requires_grad=True)
+            ref_x = x.detach().cpu().requires_grad_()
+
+            out = F.pad(x, pad, mode='reflect')
+            ref_out = F.pad(ref_x, pad, mode='reflect')
+
+            self.assertEqual(out, ref_out)
+
+            g = torch.randn_like(out)
+            ref_g = g.cpu()
+
+            out.backward(g)
+            ref_out.backward(ref_g)
+
+            self.assertEqual(x.grad, ref_x.grad)
+        finally:
+            # avoid this state leaking outside of this test
+            torch.use_deterministic_algorithms(original_deterministic)
+
     @onlyNativeDeviceTypes
     def test_LocalResponseNorm_empty(self, device):
         mod = torch.nn.LocalResponseNorm(2).to(device)

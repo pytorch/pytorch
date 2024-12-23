@@ -1621,18 +1621,6 @@ else:
             'reflection_pad1d_backward_out_cuda',
             torch.device(device).type == 'cuda')
 
-    @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
-    def test_nondeterministic_alert_ReflectionPad2d(self, device):
-        module = torch.nn.ReflectionPad2d((1, 2, 3, 4))
-        input = torch.randn(2, 3, 8, 8, device=device, requires_grad=True)
-        res = module(input)
-        grad = torch.ones_like(res)
-
-        self.check_nondeterministic_alert(
-            lambda: res.backward(grad, retain_graph=True),
-            'reflection_pad2d_backward_cuda',
-            torch.device(device).type == 'cuda')
-
     @skipIfMPS
     @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
     def test_nondeterministic_alert_ReflectionPad3d(self, device):
