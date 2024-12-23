@@ -220,6 +220,11 @@ class ConstantFolder(torch.fx.Interpreter):
         ):
             return self.unknown_value
 
+        if node.op == "call_function" and isinstance(
+            node.target, torch._higher_order_ops.torchbind.CallTorchBind
+        ):
+            return self.unknown_value
+
         out = self._deduce_value(node)
         if out == self.unknown_value:
             return self.unknown_value
