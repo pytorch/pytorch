@@ -4,6 +4,7 @@
 # flake8: noqa
 
 import dataclasses
+import unittest
 from collections import OrderedDict
 from dataclasses import dataclass, fields, is_dataclass
 from typing import Any, Optional, Tuple
