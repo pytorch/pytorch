@@ -18,4 +18,3 @@ lintrunner ; platform_machine != "s390x"
 ninja
 packaging
 optree>=0.13.0
-cmake
