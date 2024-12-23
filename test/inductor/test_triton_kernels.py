@@ -3659,11 +3659,10 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
             add_compiled(x, y).mean()
 
     @requires_gpu
-    @common_utils.parametrize(
-        "backend", ["non-strict", "eager", "aot_eager", "inductor"]
-    )
+    @common_utils.parametrize("tracing", ["non-strict", "dynamo"])
+    @common_utils.parametrize("backend", ["eager", "aot_eager", "inductor"])
     @common_utils.parametrize("with_perf_model", [True, False])
-    def test_triton_kernel_prune_configs_by(self, backend, with_perf_model):
+    def test_triton_kernel_prune_configs_by(self, backend, with_perf_model, tracing):
         # for non-strict mode
         libname = "my_cool_namespace"
         opname = "my_triton_operator"
@@ -3679,8 +3678,6 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
             if "dst" in named_args and "src" in named_args and len(named_args) == 3:
                 records["capture_named_args"] = True
             return [configs[0]]
-
-        # this will pick the Config with the largest block size  (128)
 
         def perf_model(*args, **kwargs):
             records["run_perf_model"] = True
@@ -3714,12 +3711,6 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
                 x = x + add_float
             tl.store(dst + offsets, x, mask=offsets < N)
 
-        if backend == "non-strict":
-            decorator = torch.library.triton_op(f"{libname}::{opname}", mutates_args={})
-        else:
-            decorator = torch.compile(fullgraph=True, backend=backend)
-
-        @decorator
         def f(
             dst: torch.Tensor,
             src: torch.Tensor,
@@ -3729,10 +3720,18 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
             grid = lambda META: (triton.cdiv(N, META["BLOCK_SIZE"]),)
             prune_by_kernel[grid](dst, src, add_float, N=N)
 
+        if tracing == "non-strict":
+            decorator = torch.library.triton_op(f"{libname}::{opname}", mutates_args={})
+        else:
+            # we can just pass the function 'f' for dynamo
+            decorator = f
+
+        compiled_f = torch.compile(f, fullgraph=True, backend=backend)
+
         N = 1024
         src = torch.randn(N, device=GPU_TYPE)
         dst = torch.empty(N, device=GPU_TYPE)
-        f(dst, src, 1.5, N)
+        compiled_f(dst, src, 1.5, N)
 
         if with_perf_model:
             self.assertEqual(len(records), 1)

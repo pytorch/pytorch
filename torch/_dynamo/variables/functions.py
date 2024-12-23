@@ -1065,6 +1065,15 @@ class DynamoTritonHOPifier(TritonHOPifier):
         )._wrap(user_obj)
         return wrapped_user_obj
 
+    def maybe_unpack_configs(self, configs, tx):
+        # unpack the list of configs
+        configs = configs.unpack_var_sequence(tx)
+
+        # guard_as_python_constant inserts guards for Dynamo to check if the configs object changed.
+        configs = [config.guard_as_python_constant() for config in configs]
+
+        return configs
+
     # We need to override call_getitem here so that we can add the source in the case
     # where we call the triton kernel with a grid
     def call_getitem(

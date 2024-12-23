@@ -1050,6 +1050,11 @@ class TritonHOPifier:
     ) -> Any:
         raise NotImplementedError("abstract method")
 
+    def maybe_unpack_configs(
+        self, configs: List["TritonConfig"], tx: Optional["InstructionTranslator"]
+    ) -> List["TritonConfig"]:
+        raise NotImplementedError("abstract method")
+
     @staticmethod
     def do_prune_configs(  # type: ignore[no-untyped-def]
         autotuner: "TritonAutotunerType",
@@ -1246,7 +1251,6 @@ class TritonHOPifier:
             self.raise_unsupported("Triton kernels should always be called with a grid")
 
         """
-        Currently, if there are multiple autotuning decorators, the subsequent ones will be silently ignored.
         We also don't support the @triton.heuristics wrapper yet.
         We raise an error here to avoid silent incorrectness in these cases
         """
@@ -1261,7 +1265,6 @@ class TritonHOPifier:
                 )
             if autotuner_count > 1:
                 self.raise_unsupported(
-                    "Passing multiple @triton.autotune decorators is not supported. "
                     "Please use a single @triton.autotune decorator instead."
                 )
             iter_kernel = iter_kernel.fn
@@ -1392,13 +1395,7 @@ class TritonHOPifier:
                 variable,
             )
 
-            # unpack the list of configs
-            pruned_configs = pruned_configs.unpack_var_sequence(tx)
-
-            # guard_as_python_constant inserts guards for Dynamo to check if the configs object changed.
-            pruned_configs = [
-                config.guard_as_python_constant() for config in pruned_configs
-            ]
+            pruned_configs = self.maybe_unpack_configs(pruned_configs, tx)
 
             # after pruning the configs, create a new autotuner object with
             # these configs and recurse.
@@ -1521,6 +1518,12 @@ class TracingTritonHOPifier(TritonHOPifier):
         assert isinstance(kwargs, dict)
         assert callable(user_fn)
         return user_fn(*args, **kwargs)
+
+    def maybe_unpack_configs(
+        self, configs: List["TritonConfig"], tx: Optional["InstructionTranslator"]
+    ) -> List["TritonConfig"]:
+        assert isinstance(configs, list)
+        return configs
 
     def check_grid(
         self,
