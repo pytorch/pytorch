@@ -1859,10 +1859,9 @@ def _new_process_group_helper(
             "created, please use a different group name"
         )
 
-    if device_id is not None and (device_id.index is None or device_id.type != "cuda"):
+    if device_id is not None and device_id.index is None:
         raise ValueError(
-            "init_process_group device_id parameter must be a cuda device with an "
-            "id, e.g. cuda:0, not just cuda or cpu"
+            "init_process_group device_id parameter must be a device with an index"
         )
 
     # Note: _new_process_group_helper is only called from init_process_group, which always provides a timeout value
@@ -2656,7 +2655,7 @@ def batch_isend_irecv(p2p_op_list: List[P2POp]) -> List[Work]:
         key = "group_dst" if op.op == isend else "group_src"
         return {key: op.group_peer}
 
-    if device.type == "cuda":
+    if device.type in ["cuda", "xpu"]:
         # NCCL style coalescing
         with _coalescing_manager(group, device, async_ops=True) as cm:
             for p2p_op in p2p_op_list:
