@@ -6498,7 +6498,6 @@ torch.cuda.synchronize()
 
         # Simplest case: 1 sentence, no batching
         x_d1 = sen1.unsqueeze(0)
-        print("TEST SDPA")
         x_nt = torch.nested.as_nested_tensor([sen1], layout=torch.jagged)
 
         # See note below for why we detach here.
@@ -6669,12 +6668,10 @@ torch.cuda.synchronize()
                 tq = q_nt_t.detach()
                 tk = k_nt_t.detach()
                 tv = v_nt_t.detach() 
-                print("NO GRAD")
                 with torch.no_grad():
                     attn_nt = torch.nn.functional.scaled_dot_product_attention(
                         tq, tk, tv 
                     ).transpose(1, 2)
-                print("FIINISH NO GRAD")
 
             attn_nts = attn_nt.unbind()
             self.assertEqual(
@@ -6726,10 +6723,9 @@ torch.cuda.synchronize()
             # "group_gemm_dispatch" not implemented for 'BFloat16'
             if not (str(device).startswith("cuda") and dtype == torch.bfloat16):
                 check_forward_backward()
-
-        check_cudnn = int(os.getenv("TORCH_CUDNN_SDPA_NESTED_TENSOR_ENABLED"))
+        val = os.getenv("TORCH_CUDNN_SDPA_NESTED_TENSOR_ENABLED")
+        check_cudnn = int(val) if val is not None else 0
         if 'cuda' in str(device) and check_cudnn:
-            print("CHECK CUDNN???", check_cudnn)
             with torch.nn.attention.sdpa_kernel(torch.nn.attention.SDPBackend.CUDNN_ATTENTION):
                 check_forward_backward(skip_backward=True)
 
