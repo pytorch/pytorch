@@ -3699,7 +3699,6 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
     )
     @common_utils.parametrize("with_perf_model", [True, False])
     def test_triton_kernel_prune_configs_by(self, backend, with_perf_model):
-
         # for non-strict mode
         libname = "my_cool_namespace"
         opname = "my_triton_operator"
