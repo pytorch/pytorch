@@ -211,7 +211,8 @@ class CppCSEVariable(CSEVariable):
             if any(arg.is_vec for arg in args if isinstance(arg, CppCSEVariable)):
                 self.is_vec = True
         # NOTE [Deduce dtype of CppCSEVariable at runtime]
-        self.dtype = deduce_dtype_for_cpp_cse_variable(name, *args, **kwargs)
+        if self.dtype is None:
+            self.dtype = deduce_dtype_for_cpp_cse_variable(name, *args, **kwargs)
         assert self.dtype is not None
 
     def _set_dependent_itervars(self, index: sympy.Expr):
