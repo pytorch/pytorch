@@ -72,6 +72,7 @@ const Variable& checked_cast_variable(
         name,
         "'");
   }
+  // NOLINTNEXTLINE(bugprone-return-const-ref-from-parameter)
   return t;
 }
 
@@ -86,6 +87,7 @@ Variable& checked_cast_variable(Tensor& t, const char* name, int pos) {
         name,
         "'");
   }
+  // NOLINTNEXTLINE(bugprone-return-const-ref-from-parameter)
   return t;
 }
 } // namespace
@@ -257,6 +259,7 @@ const Tensor& resize_(
     TORCH_CHECK(false, "cannot resize variables that has a forward grad");
   }
 
+  // NOLINTNEXTLINE(bugprone-return-const-ref-from-parameter)
   return self;
 }
 
@@ -284,6 +287,7 @@ const Tensor& resize_as_(
     TORCH_CHECK(false, "cannot resize variables that has a forward grad");
   }
 
+  // NOLINTNEXTLINE(bugprone-return-const-ref-from-parameter)
   return self;
 }
 
@@ -419,6 +423,7 @@ static const Tensor& resize_(
   if (org_size != size) {
     torch::autograd::increment_version(self);
   }
+  // NOLINTNEXTLINE(bugprone-return-const-ref-from-parameter)
   return self;
 }
 
@@ -444,6 +449,7 @@ static const Tensor& resize_as_(
   if (org_size != the_template.sym_sizes()) {
     torch::autograd::increment_version(self);
   }
+  // NOLINTNEXTLINE(bugprone-return-const-ref-from-parameter)
   return self;
 }
 
@@ -456,7 +462,7 @@ static Tensor detach(c10::DispatchKeySet ks, const Tensor& self) {
   // NB: we can't make detach() a normal view operator because the codegen
   // generates allow_tensor_metadata_change = True for them. In the future we
   // should have an option for this in the codegen.
-  auto result = as_view(
+  return as_view(
       /* base */ self,
       /* output */ out,
       /* is_bw_differentiable */ false,
@@ -465,8 +471,6 @@ static Tensor detach(c10::DispatchKeySet ks, const Tensor& self) {
       /* rev_view_func */ nullptr,
       /* creation_meta */ CreationMeta::DEFAULT,
       /*allow_tensor_metadata_change=*/false);
-
-  return result;
 }
 
 static Tensor _fw_primal(
