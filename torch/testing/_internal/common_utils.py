@@ -1421,6 +1421,7 @@ TEST_NUMPY = _check_module_exists('numpy')
 TEST_FAIRSEQ = _check_module_exists('fairseq')
 TEST_SCIPY = _check_module_exists('scipy')
 TEST_MKL = torch.backends.mkl.is_available()
+TEST_ACL = torch.backends.mkldnn.is_available() and torch.ops.mkldnn._is_mkldnn_acl_supported()
 TEST_MPS = torch.backends.mps.is_available()
 MACOS_VERSION = float('.'.join(platform.mac_ver()[0].split('.')[:2]) or -1)
 TEST_XPU = torch.xpu.is_available()
@@ -1573,17 +1574,25 @@ TEST_WITH_TORCHDYNAMO: bool = TestEnvironment.def_flag(
 if TEST_WITH_TORCHDYNAMO:
     import torch._dynamo
     # Do not spend time on helper functions that are called with different inputs
-    torch._dynamo.config.accumulated_cache_size_limit = 64
+    torch._dynamo.config.accumulated_recompile_limit = 64
     # Do not log compilation metrics from unit tests
     torch._dynamo.config.log_compilation_metrics = False
+    # Silence 3.13.0 guard performance warnings
+    torch._dynamo.config.issue_3_13_0_warning = False
     if TEST_WITH_TORCHINDUCTOR:
         import torch._inductor.config
         torch._inductor.config.fallback_random = True
 
 
-def xpassIfTorchDynamo(func):
+# seems like this is only used in test/torch_np
+def xpassIfTorchDynamo_np(func):
+    # numpy 2.0+ is causing issues
+    if TEST_WITH_TORCHDYNAMO and np.__version__[0] == '2':
+        return unittest.skip("skipping numpy 2.0+ dynamo-wrapped test")(func)
     return func if TEST_WITH_TORCHDYNAMO else unittest.expectedFailure(func)
 
+def xfailIfACL(func):
+    return unittest.expectedFailure(func) if TEST_ACL else func
 
 def xfailIfTorchDynamo(func):
     return unittest.expectedFailure(func) if TEST_WITH_TORCHDYNAMO else func
@@ -2561,7 +2570,7 @@ try:
         "pytorch_ci" if IS_CI else os.getenv('PYTORCH_HYPOTHESIS_PROFILE', 'dev')
     )
 except ImportError:
-    print('Fail to import hypothesis in common_utils, tests are not derandomized')
+    warnings.warn('Fail to import hypothesis in common_utils, tests are not derandomized', ImportWarning)
 
 # Used in check_if_enable to see if a test method should be disabled by an issue,
 # sanitizes a test method name from appended suffixes by @dtypes parametrization.
@@ -4999,7 +5008,7 @@ def find_library_location(lib_name: str) -> Path:
     path = torch_root / 'lib' / lib_name
     if os.path.exists(path):
         return path
-    torch_root = Path(__file__).resolve().parent.parent.parent
+    torch_root = Path(__file__).resolve().parents[2]
     return torch_root / 'build' / 'lib' / lib_name
 
 def skip_but_pass_in_sandcastle(reason):

@@ -103,15 +103,25 @@ of the Graph of GraphModule.
 
 Example::
 
-   from torch import nn
+  import torch
+  from torch import nn
 
-   class MyModule(nn.Module):
+  class MyModule(nn.Module):
 
-       def forward(self, x, y):
-         return x + y
+      def forward(self, x, y):
+        return x + y
 
-   mod = torch.export.export(MyModule())
-   print(mod.graph)
+  example_args = (torch.randn(1), torch.randn(1))
+  mod = torch.export.export(MyModule(), example_args)
+  print(mod.graph)
+
+.. code-block:: python
+
+   graph():
+     %x : [num_users=1] = placeholder[target=x]
+     %y : [num_users=1] = placeholder[target=y]
+     %add : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%x, %y), kwargs = {})
+     return (add,)
 
 The above is the textual representation of a Graph, with each line being a node.
 

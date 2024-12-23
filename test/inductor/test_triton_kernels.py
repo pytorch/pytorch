@@ -1,4 +1,5 @@
 # Owner(s): ["module: inductor"]
+# ruff: noqa: F841
 # flake8: noqa: E731
 # Skip do not assign a lambda expression, use a def
 import functools
@@ -2163,7 +2164,7 @@ def forward(self, arg0_1, arg1_1):
             return y
 
         if wrapped:
-            triton_kernel = torch._library.triton_op(
+            triton_kernel = torch.library.triton_op(
                 "constexpr_test::square", triton_kernel_impl, mutates_args={}
             )
         else:
@@ -3098,7 +3099,7 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
         libname = "my_cool_namespace"
         opname = "my_triton_operator"
 
-        @torch._library.triton_op(f"{libname}::{opname}", mutates_args={})
+        @torch.library.triton_op(f"{libname}::{opname}", mutates_args={})
         def add(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
             output = torch.empty_like(x)
             n_elements = output.numel()
@@ -3131,12 +3132,12 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
         self.assertNotIn(opname, code)
 
     @requires_gpu
-    @patch.object(torch._dynamo.config, "cache_size_limit", 1)
+    @patch.object(torch._dynamo.config, "recompile_limit", 1)
     def test_triton_dynamic_grid_no_recompile(self):
         libname = "my_cool_namespace"
         opname = "my_triton_operator"
 
-        @torch._library.triton_op(f"{libname}::{opname}", mutates_args={})
+        @torch.library.triton_op(f"{libname}::{opname}", mutates_args={})
         def add(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
             output = torch.empty_like(x)
             n_elements = output.numel()
@@ -3172,7 +3173,7 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
             output = x + y
             tl.store(out_ptr + offsets, output, mask=mask)
 
-        @torch._library.triton_op("mylib::add", mutates_args=())
+        @torch.library.triton_op("mylib::add", mutates_args=())
         def add(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
             output = torch.empty_like(x)
             n_elements = output.numel()
@@ -3194,7 +3195,7 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
         self.assertEqual(out, expected)
 
     @requires_gpu
-    def test_capture_triton_disabled_in_triton_op(self):
+    def test_wrap_triton_disabled_in_triton_op(self):
         import triton  # @manual
         import triton.language as tl  # @manual
 
@@ -3215,18 +3216,18 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
             output = x + y
             tl.store(out_ptr + offsets, output, mask=mask)
 
-        add_kernel_decorated = torch._library.capture_triton(add_kernel)
+        add_kernel_decorated = torch.library.wrap_triton(add_kernel)
 
         status = []
 
-        @torch._library.triton_op("mylib::add", mutates_args=())
+        @torch.library.triton_op("mylib::add", mutates_args=())
         def add(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
             import torch._higher_order_ops.triton_kernel_wrap
 
-            status.append(torch._library.triton.is_capture_triton_enabled())
+            status.append(torch._library.triton.is_wrap_triton_enabled())
 
             # capture_triton should return the kernel directly if disabled
-            result = torch._library.capture_triton(add_kernel)
+            result = torch.library.wrap_triton(add_kernel)
             self.assertIs(result, add_kernel)
 
             # Smoke test: check that with capture_triton disabled this still does something
@@ -3427,7 +3428,7 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
 
         output = "\n".join(record.getMessage() for record in log.records)
         # correct grid example values updated per block size
-        FileCheck().check("Compile-time auto-tuning code").check(
+        FileCheck().check("Compile-time auto-tuning block:").check(
             "grid_wrapper_for_op_zeros_0"
         ).check_next("return (256").check_next("return (64").run(output)
 
@@ -3549,6 +3550,111 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
             f(x, increment)
 
         self.assertEqual(y + increment, x)
+
+    @requires_gpu
+    @common_utils.parametrize("backend", ["eager", "aot_eager", "inductor"])
+    def test_triton_single_autotune(self, backend):
+        @triton.autotune(
+            configs=[
+                triton.Config(
+                    {"BLOCK_SIZE": 4096},
+                )
+            ],
+            key=["n_elements"],
+        )
+        # Currently, this autotuning decorator will never run!
+        # We only support having a single autotuning decorator on each Triton kernel
+        @triton.autotune(
+            configs=[
+                triton.Config(
+                    {"BLOCK_SIZE": 1024},
+                )
+            ],
+            key=["n_elements"],
+        )
+        @triton.jit
+        def add_kernel(x_ptr, y_ptr, output_ptr, n_elements, BLOCK_SIZE: tl.constexpr):
+            pid = tl.program_id(axis=0)
+
+            block_start = pid * BLOCK_SIZE
+            offsets = block_start + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+
+            x = tl.load(x_ptr + offsets, mask=mask)
+            y = tl.load(y_ptr + offsets, mask=mask)
+            output = x + y
+            tl.store(output_ptr + offsets, output, mask=mask)
+
+        def add(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+            output = torch.ones(x.shape, device=x.device, dtype=x.dtype)
+            n_elements = output.numel()
+            grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
+            add_kernel[grid](x, y, output, n_elements)
+            return output
+
+        x = torch.ones((4096,), device=GPU_TYPE, dtype=torch.float16)
+        y = torch.ones((4096,), device=GPU_TYPE, dtype=torch.float16)
+
+        # this should cause an exception, since pre_hook is not allowed
+        msg = "Passing multiple @triton.autotune decorators is not supported. Please use a single @triton.autotune decorator instead."
+        with self.assertRaisesRegex(torch._dynamo.exc.Unsupported, msg):
+            add_compiled = torch.compile(
+                add, mode="reduce-overhead", fullgraph=True, backend=backend
+            )
+            add_compiled(x, y).mean()
+
+    @requires_gpu
+    @common_utils.parametrize("backend", ["eager", "aot_eager", "inductor"])
+    def test_triton_heuristics_exception(self, backend):
+        @triton.autotune(
+            configs=[
+                triton.Config(
+                    {"BLOCK_SIZE": 4096},
+                )
+            ],
+            key=["n_elements"],
+        )
+        # @triton.heuristics is not yet supported
+        @triton.heuristics(
+            values={"TEST_HEURISTICS": lambda args: args["n_elements"] * 2}
+        )
+        @triton.jit
+        def add_kernel(
+            x_ptr,
+            y_ptr,
+            output_ptr,
+            n_elements,
+            BLOCK_SIZE: tl.constexpr,
+            TEST_HEURISTICS: tl.constexpr,
+        ):
+            pid = tl.program_id(axis=0)
+
+            block_start = pid * BLOCK_SIZE
+            offsets = block_start + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+
+            x = tl.load(x_ptr + offsets, mask=mask)
+            y = tl.load(y_ptr + offsets, mask=mask)
+            output = x + y
+            tl.store(output_ptr + offsets, output, mask=mask)
+
+        def add(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+            output = torch.ones(x.shape, device=x.device, dtype=x.dtype)
+            n_elements = output.numel()
+            grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
+            add_kernel[grid](x, y, output, n_elements)
+            return output
+
+        x = torch.ones((4096,), device=GPU_TYPE, dtype=torch.float16)
+        y = torch.ones((4096,), device=GPU_TYPE, dtype=torch.float16)
+
+        # this should cause an exception, since pre_hook is not allowed
+        msg = "Passing @triton.heuristics decorator after @triton.autotune decorator is not supported. is not supported. "
+        with self.assertRaisesRegex(torch._dynamo.exc.Unsupported, msg):
+            add_compiled = torch.compile(
+                add, mode="reduce-overhead", fullgraph=True, backend=backend
+            )
+            add_compiled(x, y).mean()
 
 
 common_utils.instantiate_parametrized_tests(KernelTests)

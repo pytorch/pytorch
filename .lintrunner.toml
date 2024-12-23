@@ -60,6 +60,7 @@ include_patterns = [
     'aten/src/ATen/xpu/**/*.h',
     'aten/src/ATen/xpu/**/*.cpp',
     'aten/src/ATen/core/boxing/**/*.h',
+    'aten/src/ATen/core/dispatch/**/*.h',
     'aten/src/ATen/native/mps/**/*.metal',
     'aten/src/ATen/native/mps/**/*.mm',
     'aten/src/ATen/native/mps/**/*.h',
@@ -73,6 +74,8 @@ include_patterns = [
     'aten/src/ATen/native/cudnn/*.cpp',
     'aten/src/ATen/native/mkldnn/xpu/**/*.h',
     'aten/src/ATen/native/mkldnn/xpu/**/*.cpp',
+    'aten/src/ATen/native/Tensor*.h',
+    'aten/src/ATen/native/Tensor*.cpp',
     'c10/**/*.h',
     'c10/**/*.cpp',
     'torch/csrc/**/*.h',
@@ -143,7 +146,7 @@ init_command = [
     '--dry-run={{DRYRUN}}',
     'numpy==1.26.4 ; python_version >= "3.9" and python_version <= "3.11"',
     'numpy==2.1.0 ; python_version >= "3.12"',
-    'expecttest==0.2.1',
+    'expecttest==0.3.0',
     'mypy==1.13.0',
     'sympy==1.13.0 ; python_version >= "3.9"',
     'types-requests==2.27.25',
@@ -363,6 +366,16 @@ init_command = [
     'ruamel.yaml==0.17.4',
 ]
 is_formatter = true
+
+[[linter]]
+code = 'GHA'
+include_patterns=['.github/workflows/**/*.yml']
+command = [
+    'python3',
+    'tools/linter/adapters/gha_linter.py',
+    '--',
+    '@{{PATHSFILE}}'
+]
 
 [[linter]]
 code = 'NEWLINE'
@@ -1687,3 +1700,51 @@ command = [
     '@{{PATHSFILE}}'
 ]
 is_formatter = true
+
+# `set_linter` detects occurrences of built-in `set` in areas of Python code like
+# _inductor where the instability of iteration in `set` has proven a problem.
+
+[[linter]]
+code = 'SET_LINTER'
+command = [
+    'python3',
+    'tools/linter/adapters/set_linter.py',
+    '--lintrunner',
+    '--',
+    '@{{PATHSFILE}}'
+]
+include_patterns = [
+    "torch/_inductor/**/*.py",
+]
+is_formatter = true
+
+# `docstring_linter` reports on long Python classes, methods, and functions
+# whose definitions have very small docstrings or none at all.
+#
+[[linter]]
+code = 'DOCSTRING_LINTER'
+command = [
+    'python3',
+    'tools/linter/adapters/docstring_linter.py',
+    '--lintrunner',
+    '--',
+    '@{{PATHSFILE}}'
+]
+include_patterns = [
+   'torch/**/not-exist.py'
+]
+is_formatter = false
+
+# `import_linter` reports on importing disallowed third party libraries.
+[[linter]]
+code = 'IMPORT_LINTER'
+command = [
+    'python3',
+    'tools/linter/adapters/import_linter.py',
+    '--',
+    '@{{PATHSFILE}}'
+]
+include_patterns = [
+   'torch/_dynamo/**',
+]
+is_formatter = false

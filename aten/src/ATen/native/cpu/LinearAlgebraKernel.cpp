@@ -23,7 +23,7 @@ void addr_kernel(TensorIterator &iter,
       cpu_kernel(iter,
         [=](scalar_t /*self_val*/,
             scalar_t vec1_val,
-            scalar_t vec2_val) __ubsan_ignore_undefined__ -> scalar_t {
+            scalar_t vec2_val) -> scalar_t {
           return alpha_val && vec1_val && vec2_val;
         }
       );
@@ -31,7 +31,7 @@ void addr_kernel(TensorIterator &iter,
       cpu_kernel(iter,
         [=](scalar_t self_val,
             scalar_t vec1_val,
-            scalar_t vec2_val) __ubsan_ignore_undefined__ -> scalar_t {
+            scalar_t vec2_val) -> scalar_t {
           return (beta_val && self_val) || (alpha_val && vec1_val && vec2_val);
         }
       );
