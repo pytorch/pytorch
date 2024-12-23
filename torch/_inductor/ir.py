@@ -5356,13 +5356,18 @@ class ExternKernel(InputsKernel):
             args.extend(self.codegen_const_args())
         return args
 
-    def get_kwargs_value(self, arg_name):  # type: ignore[no-untyped-def]
+    def get_kwargs_value(self, arg_name, **kwargs):  # type: ignore[no-untyped-def]
+        """Given an argument name, queries for values in (in order):
+        1. any provided kwargs for this function.
+        2. the class self.kwargs member.
+        3. any available default arguments in self.allarg_properties."""
+        if arg_name in kwargs:
+            return kwargs.get(arg_name)
         if arg_name in self.kwargs:
             return self.kwargs.get(arg_name)
-        if self.allarg_properties and self.allarg_properties.get(arg_name):
+        if self.allarg_properties and arg_name in self.allarg_properties:
             return self.allarg_properties.get(arg_name).get("default_value")  # type: ignore[union-attr]
-        else:
-            raise AssertionError(f"{arg_name} not in self.allarg_properties")
+        raise AssertionError(f"{arg_name} not in self.allarg_properties")
 
     def codegen_kwargs(self, skip_out=False):  # type: ignore[no-untyped-def]
         if V.graph.cpp_wrapper:
@@ -6537,7 +6542,8 @@ class FallbackKernel(ExternKernelAlloc):
         args, kwargs = self.unflatten_args(self.inputs, self.constant_args)
         args = self.fill_non_provided_args(args, kwargs)
         ordered_kwargs = [
-            kwargs.get(key, None) for key in self.ordered_kwargs_for_cpp_kernel
+            self.get_kwargs_value(key, **kwargs)
+            for key in self.ordered_kwargs_for_cpp_kernel
         ]
         if not V.graph.aot_mode:
             # No need to serialize in the cpp wrapper JIT mode
@@ -6602,7 +6608,24 @@ class FallbackKernel(ExternKernelAlloc):
 
     def codegen(self, wrapper) -> None:  # type: ignore[no-untyped-def]
         kernel = self.op_overload
-        if kernel.namespace == "aten":  # type: ignore[union-attr]
+        if V.graph.cpp_wrapper and any(i.dtype.is_complex for i in self.inputs):
+            # If any inputs to this fallback op are complex, they may have the Conjugate
+            # or Negative dispatch keys applied.  The cpp_wrapper fallback ops that
+            # _aren't_ runtime dispatched implicitly bypass the conversions for those
+            # keys internally (since they're applied at dispatch time).  Since there's
+            # no way to tell at compile time whether a tensor will have these keys
+            # applied, pessimize complex fallback ops by always using the runtime
+            # dispatched fallback.
+            #
+            # This is not currently expected to be a performance issue, since few models
+            # utilized complex ops, but this decision may need to be reconsidered if
+            # that changes.
+            log_msg = (
+                f"Using proxy executor as fallback for {kernel} due to complex inputs."
+            )
+            log.warning(log_msg)
+            self.use_runtime_dispatch = True
+        elif kernel.namespace == "aten":  # type: ignore[union-attr]
             # Aten Fallback Ops
             assert isinstance(kernel, torch._ops.OpOverload)
             if V.graph.cpp_wrapper:
@@ -6619,10 +6642,9 @@ class FallbackKernel(ExternKernelAlloc):
         elif kernel.namespace == "_quantized":  # type: ignore[union-attr]
             # Internal Quantized Fallback Ops
             assert isinstance(kernel, torch._ops.OpOverload)
-        else:
+        elif V.graph.cpp_wrapper:
             # For non-aten OpOverload, i.e. custom ops
-            if V.graph.cpp_wrapper:
-                self.use_runtime_dispatch = True
+            self.use_runtime_dispatch = True
 
         if self.use_runtime_dispatch:
             self.codegen_comment(wrapper)

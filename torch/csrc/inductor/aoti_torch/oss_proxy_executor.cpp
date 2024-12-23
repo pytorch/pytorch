@@ -122,6 +122,42 @@ void OSSProxyExecutor::prefill_stack_with_static_arguments(
       stack.emplace_back(serialized_arg_val.get<std::string>());
       break;
     }
+    case c10::TypeKind::ScalarTypeType: {
+      TORCH_CHECK(
+          serialized_arg_type == "as_scalar_type",
+          "Expected extern kernel ",
+          op_kernel.target_,
+          " to have serialized argument type as_scalar_type for argument ",
+          index,
+          " but got ",
+          serialized_arg_type);
+      stack.emplace_back(serialized_arg_val.get<c10::ScalarType>());
+      break;
+    }
+    case c10::TypeKind::MemoryFormatType: {
+      TORCH_CHECK(
+          serialized_arg_type == "as_memory_format",
+          "Expected extern kernel ",
+          op_kernel.target_,
+          " to have serialized argument type as_memory_format for argument ",
+          index,
+          " but got ",
+          serialized_arg_type);
+      stack.emplace_back(serialized_arg_val.get<c10::MemoryFormat>());
+      break;
+    }
+    case c10::TypeKind::LayoutType: {
+      TORCH_CHECK(
+          serialized_arg_type == "as_layout",
+          "Expected extern kernel ",
+          op_kernel.target_,
+          " to have serialized argument type as_layout for argument ",
+          index,
+          " but got ",
+          serialized_arg_type);
+      stack.emplace_back(serialized_arg_val.get<c10::Layout>());
+      break;
+    }
     case c10::TypeKind::DeviceObjType: {
       TORCH_CHECK(
           serialized_arg_type == "as_device",
@@ -457,7 +493,7 @@ OSSProxyExecutor::OSSProxyExecutor(const std::string& json_path, bool is_cpu) {
       overloadName = "";
     } else {
       // There should be no more periods
-      size_t pos2 = target.find('.', pos);
+      size_t pos2 = target.find('.', pos + 1);
       TORCH_CHECK(pos2 == std::string::npos);
 
       opName = target.substr(0, pos);
