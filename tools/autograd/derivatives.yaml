@@ -2842,27 +2842,25 @@
   cpu_nested_shape_example: non_differentiable
 
 - name: to_padded_tensor(Tensor self, float padding, SymInt[]? output_size=None) -> Tensor
-  self: "self.layout() == c10::kJagged ? at::_nested_from_padded_tensor_symint(grad, at::_nested_get_offsets(self), at::_nested_get_jagged_dummy(self), at::_nested_get_ragged_idx(self), at::_nested_get_min_seqlen(self).defined() ? std::optional<Tensor>(at::_nested_get_min_seqlen(self)) : ::std::nullopt, at::_nested_get_max_seqlen(self).defined() ? std::optional<Tensor>(at::_nested_get_max_seqlen(self)) : ::std::nullopt, std::optional<c10::SymInt>(at::_nested_get_values(self).sym_size(0))) : at::_nested_from_padded(grad, self._nested_tensor_size())"
+  self: "self.layout() == c10::kJagged ? at::_nested_from_padded_tensor_symint(grad, at::_nested_get_jagged_metadata(self),  at::_nested_get_ragged_idx(self), std::optional<c10::SymInt>(at::_nested_get_values(self).sym_size(0))) : at::_nested_from_padded(grad, self._nested_tensor_size())"
   padding: non_differentiable
 
-- name: _nested_from_padded_tensor(Tensor padded, Tensor offsets, Tensor dummy, int ragged_idx=1, Tensor? min_seqlen=None, Tensor? max_seqlen=None, SymInt? sum_S=None) -> Tensor
+- name: _nested_from_padded_tensor(Tensor padded, Tensor metadata, int ragged_idx=1, SymInt? sum_S=None) -> Tensor
   padded: grad.to_padded_tensor_symint(0.0, at::OptionalArrayRef<c10::SymInt>(padded.sym_sizes()))
-  offsets: non_differentiable
-  dummy: non_differentiable
+  metadata: non_differentiable
 
 - name:  _nested_view_from_buffer(Tensor(a) self, Tensor nested_size, Tensor nested_strides, Tensor offsets) -> Tensor(a)
   self: grad.values()
   nested_size: non_differentiable
   nested_strides: non_differentiable
 
-- name: _nested_view_from_jagged(Tensor(a) self, Tensor offsets, Tensor dummy, Tensor? lengths=None, int ragged_idx=1, Tensor? min_seqlen=None, Tensor? max_seqlen=None) -> Tensor(a)
+- name: _nested_view_from_jagged(Tensor(a) self, Tensor metadata, Tensor? non_contig_offsets, int ragged_idx=1) -> Tensor(a)
   self: grad.values()
-  offsets: non_differentiable
-  lengths: non_differentiable
-  dummy: non_differentiable
+  metadata: non_differentiable
+  non_contig_offsets: non_differentiable
 
 - name: _nested_get_values(Tensor(a) self) -> Tensor(a)
-  self: "_nested_view_from_jagged(grad, at::_nested_get_offsets(self), at::_nested_get_jagged_dummy(self), at::_nested_get_lengths(self), at::_nested_get_ragged_idx(self), at::_nested_get_min_seqlen(self).defined() ? std::optional<Tensor>(at::_nested_get_min_seqlen(self)) : ::std::nullopt, at::_nested_get_max_seqlen(self).defined() ? std::optional<Tensor>(at::_nested_get_max_seqlen(self)) : ::std::nullopt)"
+  self: "_nested_view_from_jagged(grad, at::_nested_get_jagged_metadata(self), at::_nested_get_non_contig_offsets(self), at::_nested_get_ragged_idx(self))"
 
 # Transformer
 - name:  _safe_softmax(Tensor self, int dim, ScalarType? dtype=None) -> Tensor

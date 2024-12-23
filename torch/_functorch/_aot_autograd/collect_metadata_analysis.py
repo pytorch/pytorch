@@ -655,7 +655,7 @@ from a multi-output view call"
                     t, lambda _, inner_t: view_avoid_dupes_with_primals(inner_t)
                 )
             if isinstance(t, Tensor):
-                return t.view(t.shape)
+                return t.detach()
             return t
 
         # This analysis function returns *only* the outputs that are meant to be tangents to the backwards.

@@ -64,6 +64,7 @@ from torch.utils._python_dispatch import (
 from torch.utils._pytree import KeyPath, keystr, PyTree, tree_map, tree_map_, TreeSpec
 from torch.utils._stats import count
 from torch.utils._traceback import CapturedTraceback
+from torch.utils.weak import WeakTensorKeyDictionary
 
 from ._fake_tensor_utils import _CacheKeyState, _PySymInputStub, _SymIntOutputStub
 
@@ -74,6 +75,8 @@ if TYPE_CHECKING:
     from torch._guards import Source
     from torch._ops import OpOverload
     from torch.fx.experimental.symbolic_shapes import ShapeEnv, SymbolicContext
+    from torch.nested._internal.cached_tensor import CachedTensor
+
 
 log = logging.getLogger(__name__)
 
@@ -629,10 +632,7 @@ class FakeTensor(Tensor):
     item_memo = SymNumberMemoDescriptor()
     unique_memo = SymNumberMemoDescriptor()
 
-    # We expect nested_int_memo to be None when an offsets is a graph
-    # intermediate, or an input that has never been associated with a
-    # nested int.
-    nested_int_memo = SymNumberMemoDescriptor(is_nested_int=True)
+    nested_int_id: Optional[int] = None
 
     # Indicates to our torch_dispatch dispatching infra that
     # this is an "infra" mode with lower dispatching precedence.
@@ -730,7 +730,6 @@ class FakeTensor(Tensor):
         self.nonzero_memo = None
         self.item_memo = None
         self.unique_memo = None
-        self.nested_int_memo = None
 
         if FakeTensorConfig.debug:
             self._debug_trace = CapturedTraceback.extract()  # type: ignore[attr-defined]
@@ -901,17 +900,16 @@ class FakeTensor(Tensor):
 
         return common_device, has_scalar_only_inputs
 
-    def get_nested_int(
-        self,
-        *,
-        coeff: Union[int, torch.SymInt] = 1,
-    ) -> torch.SymInt:
-        if self.nested_int_memo is None:
-            self.nested_int_memo = self.fake_mode.create_symbolic_nested_int(
-                nt_tensor_id=None
-            )
-        assert isinstance(self.nested_int_memo, torch.SymInt)
-        return self.nested_int_memo * coeff
+    # For the purpose of equality comparison
+    def try_get_nested_int_id(self) -> Optional[int]:
+        return self.nested_int_id
+
+    def register_nested_int_id(self, nid: Optional[int] = None) -> int:
+        if nid is None:
+            self.nested_int_id = self.fake_mode.get_next_nested_int_id()
+        else:
+            self.nested_int_id = nid
+        return self.nested_int_id
 
     # Similar to FunctionalTensor.tolist
     def tolist(self) -> Any:
@@ -921,6 +919,12 @@ class FakeTensor(Tensor):
             return [elem.item() for elem in self]
         else:
             return [elem.tolist() for elem in self]
+
+    def detach(self) -> torch.Tensor:  # type: ignore[override]
+        out = torch.ops.aten.detach.default(self)
+        if (t_id := self.try_get_nested_int_id()) is not None:
+            out.register_nested_int_id(t_id)
+        return out
 
 
 _MetadataIntLike = Union[IntLikeType, "_PySymInputStub", "_SymIntOutputStub"]
@@ -1125,6 +1129,9 @@ class FakeTensorMode(TorchDispatchMode):
     nt_tensor_id_counter: int = -1
     nt_tensor_id_initial_count: int = -1
 
+    # See [ Best effort SymInt association ]
+    nt_cache_to_nested_int: WeakTensorKeyDictionary = WeakTensorKeyDictionary()
+
     def __init__(
         self,
         *,
@@ -1213,10 +1220,10 @@ class FakeTensorMode(TorchDispatchMode):
         # this is an "infra" mode with lower dispatching precedence.
         self._mode_key = torch._C._TorchDispatchModeKey.FAKE
 
-        import torch.nested._internal.nested_tensor
+        import torch.nested._internal.tensor_registry
 
         self.nt_tensor_id_initial_count = (
-            torch.nested._internal.nested_tensor._tensor_id_counter
+            torch.nested._internal.tensor_registry._global_tensor_registry._next_id
         )
         self.nt_tensor_id_counter = self.nt_tensor_id_initial_count
 
@@ -2514,21 +2521,63 @@ class FakeTensorMode(TorchDispatchMode):
 
         return tree_map(wrap, r)
 
-    def create_symbolic_nested_int(
-        self, *, nt_tensor_id: Optional[int] = None
+    def get_nested_int(
+        self,
+        *,
+        cache: CachedTensor,
+        coeff: Union[int, torch.SymInt] = 1,
     ) -> torch.SymInt:
+        # Note [ Best effort SymInt association ]
+        #
+        # The question this note tries to answer is why is it okay to be
+        # "best effort/unreliable" when it comes to associating raggedness with
+        # SymInts. What we mean by "unreliable" here is that in an ideal world
+        # symbolic shapes guards should serve as the perfect complement to dynamo
+        # guards, e.g., two SymInts share the same symbol if dynamo can already guard
+        # based on tensor deduping guards that they are the same. Instead of doing that,
+        # we instead associate SymInt on CachedTensor, an object that is somewhat
+        # ephemeral/disposable, e.g. the same CachedTensor gets preserved when
+        # we do something like pointwise, but calling from_jagged(values, offsets)
+        # actually always creates a new CachedTensor, and we would have a fresh
+        # SymInt in that case.
+        #
+        # The answer is that:
+        # - We don't /need/ symbolic shapes guards because we rely on Dynamo guards.
+        #   Hence, we use ephmeral sources when convenient. (There are some known
+        #   downsides: (1) actually trying to produce guards with those SymInts would
+        #   error out. See test_in_graph_construction_mixed_4
+        #   (2) we sometimes secretly update the tensor registry so that
+        #   two j0 compare equal despite not having caches that share the same tensor
+        #   instance. This is not sound, but should be rare - only happens in the .to()
+        #   case).
+        # - We don't /need/ a cache because SymInts in this model are fungible.
+        #   (All have ephemeral sources.)
+        # - All we care about is that the common case (pointwise) doesn't
+        #   create a new symbol/SymInt everytime.
+        # - It's okay to be best effort/not be reliable because the caching is just
+        #   a optimization that doesn't matter foe correctness.
+        #
+        ref = self.nt_cache_to_nested_int.get(cache)
+        if ref is None or (ret := ref()) is None:
+            ret = self.create_symbolic_nested_int(cache=cache)
+            self.nt_cache_to_nested_int[cache] = weakref.ref(ret)
+        assert isinstance(ret, torch.SymInt)
+        if coeff == 1:
+            # Make sure to return the exact instance we just cached
+            return ret
+        else:
+            return ret * coeff
+
+    def create_symbolic_nested_int(self, *, cache: CachedTensor) -> torch.SymInt:
         # See Note: [Creating symbolic nested int]
-        # Returned nested int always has coeff=1; multiply the result by coeff if needed
+        # Returned nested int always has coeff=1; caller should multiply result by coeff if needed
         import torch.nested._internal.nested_tensor
         from torch.nested._internal.nested_int import NestedIntNode
 
-        if nt_tensor_id is None:
-            nt_tensor_id = self.nt_tensor_id_counter
-            assert self.enter_stack, "should only called while FakeTensorMode is active"
-            self.nt_tensor_id_counter += 1
-        hint = torch.SymInt(NestedIntNode(nt_tensor_id, 1))
-
-        src = torch._dynamo.source.EphemeralSource("intermediate_offsets_or_lengths")
+        src = torch._dynamo.source.EphemeralSource(
+            "intermediate_offsets_or_lengths"
+        )
+        hint = torch.SymInt(NestedIntNode(cache, coeff=1))
         assert self.shape_env is not None
         ret = self.shape_env.create_symintnode(
             sym=self.shape_env.create_symbol(
@@ -2538,6 +2587,13 @@ class FakeTensorMode(TorchDispatchMode):
             hint=hint,
             source=src,
         )
+        assert isinstance(ret, torch.SymInt)
+        return ret
+
+    def get_next_nested_int_id(self) -> int:
+        ret = self.nt_tensor_id_counter
+        assert self.enter_stack, "should only called while FakeTensorMode is active"
+        self.nt_tensor_id_counter += 1
         return ret
 
     _cpp_meta_supports_symint = ordered_set(
