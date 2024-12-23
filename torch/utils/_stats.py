@@ -4,16 +4,21 @@
 import collections
 import functools
 from typing import Any, Callable, OrderedDict
+from typing_extensions import ParamSpec
+
 
 simple_call_counter: OrderedDict[str, int] = collections.OrderedDict()
+
+_P = ParamSpec("_P")
+
 
 def count_label(label: str) -> None:
     prev = simple_call_counter.setdefault(label, 0)
     simple_call_counter[label] = prev + 1
 
-def count(fn: Callable[..., Any]) -> Callable[..., Any]:
+def count(fn: Callable[_P, Any]) -> Callable[..., Any]:
     @functools.wraps(fn)
-    def wrapper(*args: Any, **kwargs: Any) -> Any:
+    def wrapper(*args: _P.args, **kwargs: _P.kwargs) -> Any:
         if fn.__qualname__ not in simple_call_counter:
             simple_call_counter[fn.__qualname__] = 0
         simple_call_counter[fn.__qualname__] = simple_call_counter[fn.__qualname__] + 1
