@@ -143,6 +143,7 @@ full_codegen:
   - zero
   - alias_copy
   - as_strided_copy
+  - as_strided
   - diagonal_copy
   - expand_copy
   - permute_copy
