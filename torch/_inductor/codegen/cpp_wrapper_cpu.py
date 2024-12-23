@@ -1075,6 +1075,14 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 output_raii_handles.append(
                     f"RAIIAtenTensorHandle {name}({output_handle_name});"
                 )
+            elif isinstance(output, ir.FallbackKernel):
+                name = f"{output.get_name()}"
+                output_handle_name = f"{name}_handle"
+                self.writeline(f"AtenTensorHandle {output_handle_name};")
+                output_args.append(f"&{output_handle_name}")
+                output_raii_handles.append(
+                    f"RAIIAtenTensorHandle {name}({output_handle_name});"
+                )
             elif isinstance(output, int):
                 output_name = f"{output_name_base}_{idx}"
                 self.writeline(f"int64_t {output_name} = {output};")
@@ -1818,7 +1826,9 @@ class CppWrapperCpu(PythonWrapperCodegen):
         def extract_output_name(out):
             if out is None:
                 return None
-            elif isinstance(out, (ir.MultiOutput, ir._CollectiveKernel)):
+            elif isinstance(
+                out, (ir.MultiOutput, ir._CollectiveKernel, ir.FallbackKernel)
+            ):
                 return out.get_name()
             elif isinstance(out, ir.MutationOutput):
                 mutated_buf_names = out.get_mutation_names()
