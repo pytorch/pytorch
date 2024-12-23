@@ -27,6 +27,8 @@ from torch._dynamo.utils import ifdynstaticdefault
 from torch._dynamo.variables.torch_function import TensorWithTFOverrideVariable
 from torch.nn.modules.lazy import LazyModuleMixin
 from torch.nn.parameter import Parameter, UninitializedParameter
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_utils import skipIfHpu
 
 
 try:
@@ -1818,6 +1820,27 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
             self.assertEqual(cnt.frame_count, ifdynstaticdefault(2, 1))
 
 
+class NNModuleTestsDevice(torch._dynamo.test_case.TestCase):
+    @expectedFailureDynamic
+    @skipIfHpu
+    def test_lazy_module3(self, device):
+        m = LazyMLP()
+        x = torch.rand([10, 10])
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_m = torch._dynamo.optimize(cnt, nopython=True)(m)
+        # first iteration
+        res = opt_m(x)
+        ref = m(x)
+        self.assertTrue(torch.allclose(ref, res))
+        # move to device and second iteration
+        m = m.to(device)
+        x = x.to(device)
+        res = opt_m(x)
+        ref = m(x)
+        self.assertTrue(torch.allclose(ref, res))
+        self.assertEqual(cnt.frame_count, 2)
+
+
 class MockModule(torch.nn.Module):
     def __init__(self) -> None:
         super().__init__()
@@ -3278,6 +3301,9 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         # Check that we have recompiled twice, which leads to 3 frames
         self.assertEqual(cnt.frame_count, 3)
 
+
+devices = ["cuda", "hpu"]
+instantiate_device_type_tests(NNModuleTestsDevice, globals(), only_for=devices)
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
