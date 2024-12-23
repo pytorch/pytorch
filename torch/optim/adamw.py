@@ -119,7 +119,7 @@ AdamW.__doc__ = (
 )
 
 
-# @_disable_dynamo_if_unsupported logic occurs in the decorator that's applied to adam
+# @_disable_dynamo_if_unsupported logic occurs in the decorator that's applied to F.adam
 def adamw(
     params: List[Tensor],
     grads: List[Tensor],
