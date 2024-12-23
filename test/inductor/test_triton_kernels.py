@@ -3721,7 +3721,9 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
             prune_by_kernel[grid](dst, src, add_float, N=N)
 
         if tracing == "non-strict":
-            decorator = torch.library.triton_op(f"{libname}::{opname}", mutates_args={"dst"})
+            decorator = torch.library.triton_op(
+                f"{libname}::{opname}", mutates_args={"dst"}
+            )
         else:
             # we can just pass the function 'f' for dynamo
             decorator = f
