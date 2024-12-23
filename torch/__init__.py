@@ -137,6 +137,7 @@ __all__ = [
     "split",
     "stack",
     "sym_float",
+    "sym_fresh_size",
     "sym_int",
     "sym_ite",
     "sym_max",
@@ -943,6 +944,11 @@ def sym_ite(b, t, f):
     if isinstance(b, SymBool):
         return b.__sym_ite__(t, f)
     return t if b else f
+
+
+# Create a fresh unbacked int, from an (possibly unbacked int) expression.
+def sym_fresh_size(expr):
+    return torch.tensor(expr).item()
 
 
 # Check to see if we can load C extensions, and if not provide some guidance
@@ -2411,7 +2417,7 @@ def compile(
     results are not applicable for subsequent calls (this is called a "guard
     failure), you can use TORCH_LOGS=guards to debug these situations.
     Multiple compiled results can be associated with a frame up to
-    ``torch._dynamo.config.cache_size_limit``, which defaults to 8; at which
+    ``torch._dynamo.config.recompile_limit``, which defaults to 8; at which
     point we will fall back to eager.  Note that compile caches are per
     *code object*, not frame; if you dynamically create multiple copies of a
     function, they will all share the same code cache.
@@ -2486,8 +2492,10 @@ def compile(
 
     """
     _C._log_api_usage_once("torch.compile")
-    if sys.version_info >= (3, 13):
-        raise RuntimeError("Dynamo is not supported on Python 3.13+")
+    if sys.version_info >= (3, 14):
+        raise RuntimeError("Dynamo is not supported on Python 3.14+")
+    elif sys.version_info >= (3, 13) and not sys._is_gil_enabled():
+        raise RuntimeError("Dynamo is not supported on Python with GIL disabled")
 
     # Decorator mode
     if model is None:

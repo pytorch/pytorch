@@ -6,6 +6,7 @@ import contextlib
 import cProfile
 import dis
 import functools
+import gc
 import itertools
 import json
 import logging
@@ -65,7 +66,7 @@ from .bytecode_transformation import (
 from .cache_size import (
     CacheSizeRelevantForFrame,
     compute_cache_size,
-    exceeds_cache_size_limit,
+    exceeds_recompile_limit,
     is_recompilation,
 )
 from .eval_frame import (
@@ -77,10 +78,10 @@ from .eval_frame import (
 from .exc import (
     augment_exc_message,
     BackendCompilerFailed,
-    CacheLimitExceeded,
-    FailOnCacheLimitHit,
+    FailOnRecompileLimitHit,
     format_error_msg,
     InternalTorchDynamoError,
+    RecompileLimitExceeded,
     SkipCodeRecursiveException,
     TorchRuntimeError,
     UncapturedHigherOrderOpError,
@@ -213,7 +214,11 @@ def preserve_global_state(fn: Callable[_P, _T]) -> Callable[_P, _T]:
             prior_inference_mode = torch.is_inference_mode_enabled()
             prior_deterministic = torch.are_deterministic_algorithms_enabled()
             prior_warn_only = torch.is_deterministic_algorithms_warn_only_enabled()
+            prior_mobile_allocator_state = (
+                torch._C._is_default_mobile_cpu_allocator_set()
+            )
             py_rng_state = random.getstate()
+            prior_dtype = torch.get_default_dtype()
             torch_rng_state = torch.random.get_rng_state()
             cuda_rng_state = None
             if torch.cuda.is_available():
@@ -242,6 +247,12 @@ def preserve_global_state(fn: Callable[_P, _T]) -> Callable[_P, _T]:
                 )
                 random.setstate(py_rng_state)
                 torch.random.set_rng_state(torch_rng_state)
+                torch.set_default_dtype(prior_dtype)
+                curr_mobile_allocator_state = (
+                    torch._C._is_default_mobile_cpu_allocator_set()
+                )
+                if prior_mobile_allocator_state != curr_mobile_allocator_state:
+                    torch._C._unset_default_mobile_cpu_allocator()
                 if cuda_rng_state is not None:
                     torch.cuda.set_rng_state(cuda_rng_state)
                 torch._C._set_cublas_allow_tf32(allow_tf32)
@@ -522,7 +533,14 @@ class ConvertFrameAssert:
         frame_compile_id = FRAME_COMPILE_COUNTER[frame_id]
         FRAME_COMPILE_COUNTER[frame_id] += 1
 
-        compile_id = CompileId(frame_id, frame_compile_id)
+        compiled_autograd_id = None
+        if prior := CompileContext.current_compile_id():
+            compiled_autograd_id = prior.compiled_autograd_id
+        compile_id = CompileId(
+            compiled_autograd_id=compiled_autograd_id,
+            frame_id=frame_id,
+            frame_compile_id=frame_compile_id,
+        )
 
         signpost_event(
             "dynamo",
@@ -850,6 +868,7 @@ def _compile(
         CleanupManager.instance[out_code] = output.cleanups
         nonlocal cache_entry
         check_fn = CheckFunctionManager(
+            code,
             output,
             cache_entry,
             hooks.guard_fail_fn if hooks else None,
@@ -875,7 +894,7 @@ def _compile(
     with _use_lazy_graph_module(config.use_lazy_graph_module), compile_context(
         CompileContext(compile_id)
     ), chromium_event_timed(
-        "dynamo", reset_event_log=True, log_pt2_compile_event=True
+        "dynamo", reset_event_log_on_exit=True, log_pt2_compile_event=True
     ), metrics_context:
         restart_reasons: set[str] = set()
         # This is shared across restarts
@@ -892,7 +911,7 @@ def _compile(
                 cache_entry, frame
             )
 
-        exceeded, limit_type = exceeds_cache_size_limit(cache_size, compile_id)
+        exceeded, limit_type = exceeds_recompile_limit(cache_size, compile_id)
         if exceeded:
 
             def format_func_info(code: CodeType) -> str:
@@ -915,14 +934,14 @@ def _compile(
                 format_guard_failures(),
                 troubleshooting_url,
             )
-            if config.fail_on_cache_limit_hit:
-                raise FailOnCacheLimitHit(
-                    f"{limit_type} reached, because fail_on_cache_limit_hit = True this is a HARD failure"
+            if config.fail_on_recompile_limit_hit:
+                raise FailOnRecompileLimitHit(
+                    f"{limit_type} reached, because fail_on_recompile_limit_hit = True this is a HARD failure"
                 )
-            elif config.skip_code_recursive_on_cache_limit_hit and justknobs_check(
-                "pytorch/compiler:skip_code_recursive_on_cache_limit_hit"
+            elif config.skip_code_recursive_on_recompile_limit_hit and justknobs_check(
+                "pytorch/compiler:skip_code_recursive_on_recompile_limit_hit"
             ):
-                raise CacheLimitExceeded(f"{limit_type} reached")
+                raise RecompileLimitExceeded(f"{limit_type} reached")
             else:
                 # do not recursively skip frames
                 unimplemented(f"{limit_type} reached")
@@ -1042,6 +1061,11 @@ def _compile(
             # dynamo_compile table, and we will not have telemetry.
             # Be extra careful when making changes here!
 
+            if torch._dynamo.config.run_gc_after_compile:
+                with dynamo_timed("gc", dynamo_compile_column_us="gc_time_us"):
+                    log.info("run_gc_after_compile: running gc")
+                    gc.collect(1)
+
             if tracer:
                 tracer.output.local_scope = {}
 
@@ -1089,6 +1113,7 @@ def _compile(
                     "inject_BUILD_SET_unimplemented_TESTING_ONLY",
                     "_autograd_backward_strict_mode_banned_ops",
                     "reorderable_logging_functions",
+                    "ignore_logger_methods",
                     "traceable_tensor_subclasses",
                     "_custom_ops_profile",
                 }
@@ -1235,7 +1260,7 @@ class ConvertFrame:
             # to signal to Dynamo eval frame to skip the current frame and any recursive calls.
             if isinstance(e, SkipCodeRecursiveException):
                 return torch._C._dynamo.eval_frame.skip_code_recursive_flag
-            elif isinstance(e, CacheLimitExceeded):
+            elif isinstance(e, RecompileLimitExceeded):
                 # signal to Dynamo to run this frame on run-only mode, skipping recursively if
                 # no valid cache entry is found.
                 return torch._C._dynamo.eval_frame.cache_limit_hit_flag
@@ -1274,7 +1299,7 @@ def replay(filename: str) -> None:
             cache_entry=None,
             frame=None,
             frame_state={},
-            compile_id=CompileId(42, 999),
+            compile_id=CompileId(frame_id=42, frame_compile_id=999),
         )
     finally:
         config.replay_record_enabled = original_replay_val

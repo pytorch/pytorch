@@ -981,7 +981,7 @@ class TestInductorDynamic(TestCase):
                     return op(x, y)
 
                 cnt = CompileCounterWithBackend("inductor")
-                fn_opt = torch._dynamo.optimize(cnt)(fn)
+                fn_opt = torch.compile(fn, backend=cnt)
 
                 x = torch.arange(3)
                 self.assertEqual(fn(x, 2.0), fn_opt(x, 2.0))
@@ -1010,7 +1010,7 @@ class TestInductorDynamic(TestCase):
             )
 
         cnt = CompileCounterWithBackend("inductor")
-        fn_opt = torch._dynamo.optimize(cnt)(fn)
+        fn_opt = torch.compile(fn, backend=cnt)
         x = torch.arange(3)
         z = 1.3
 
@@ -1020,6 +1020,7 @@ class TestInductorDynamic(TestCase):
         # Automatic dynamic float arguments
         self.assertEqual(cnt.frame_count, 2)
 
+    @torch._dynamo.config.patch(specialize_float=False)
     def test_unspecialized_float_softshrink(self):
         # This test is particularly interesting since it exercises
         # both standard operator replacements ie. torch.ops.aten.mul.Tensor
@@ -1028,7 +1029,7 @@ class TestInductorDynamic(TestCase):
             return torch._C._nn.softshrink(x, lambd=y)
 
         cnt = CompileCounterWithBackend("inductor")
-        fn_opt = torch._dynamo.optimize(cnt)(fn)
+        fn_opt = torch.compile(fn, backend=cnt)
         x = torch.randn(5, 5)
 
         print(fn(x, 2.0), fn_opt(x, 2.0))
@@ -1044,7 +1045,7 @@ class TestInductorDynamic(TestCase):
             return math.floor(x**2) * y
 
         cnt = CompileCounterWithBackend("inductor")
-        fn_opt = torch._dynamo.optimize(cnt)(fn)
+        fn_opt = torch.compile(fn, backend=cnt)
         y = torch.arange(3)
 
         self.assertEqual(fn(2.0, y), fn_opt(2.0, y))

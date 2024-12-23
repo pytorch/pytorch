@@ -24,7 +24,6 @@ from typing import (
     Optional,
     overload,
     Sequence,
-    Set,
     Tuple,
     TYPE_CHECKING,
     TypeVar,
@@ -40,7 +39,6 @@ import torch._export.serde.schema as export_schema
 import torch._logging
 import torch.fx
 import torch.utils._pytree as pytree
-from torch._dynamo.device_interface import get_interface_for_device
 from torch._dynamo.utils import identity
 from torch._export.serde.serialize import GraphModuleSerializer
 from torch._higher_order_ops.auto_functionalize import can_auto_functionalize
@@ -79,7 +77,7 @@ from .dependencies import (
 from .loop_body import LoopBody
 from .ops_handler import OpCounterCSE, OpCountResult
 from .runtime.benchmarking import benchmarker
-from .runtime.hints import ReductionHint
+from .runtime.hints import DeviceProperties, ReductionHint
 from .utils import (
     argsort,
     argsort_sym,
@@ -193,7 +191,7 @@ def validate_ir(node_or_nodes: Optional[_NodeOrNodes]) -> None:
             assert isinstance(
                 nodes,
                 (
-                    torch._inductor.ir.ExpandView,
+                    ExpandView,
                     DynamicScalar,
                     AssertScalar,
                     TensorBox,
@@ -354,6 +352,74 @@ def is_triton(x: Union[IRNode, torch.device, None, str]) -> bool:
 
 def is_cpu(x: Union[IRNode, torch.device, None, str]) -> bool:
     return get_device_type(x) == "cpu"
+
+
+def is_aligned_realized_tensor(x: Union[Buffer, TensorBox], alignment: int) -> bool:
+    if not isinstance(x, IRNode) or x.maybe_get_stride() is None:
+        return False
+
+    aligned_strides = all(
+        (V.graph.sizevars.size_hint(x.get_stride()[i]) % alignment) == 0
+        for i in range(len(x.get_stride()) - 1)
+    )
+    # if the last dim size is <= 1, stride doesnt matter
+    aligned_last_dim = (
+        V.graph.sizevars.size_hint(x.get_stride()[-1]) == 1
+        or V.graph.sizevars.size_hint(x.get_size()[-1]) <= 1
+    )
+    return aligned_last_dim and aligned_strides
+
+
+def try_match_insignificant_strides(
+    tensor: Union[TensorBox, BaseView],
+    strides: Sequence[Union[int, torch.SymInt]],
+) -> Union[TensorBox, BaseView]:
+    """
+    Tries to match the strides of the tensor to those in the meta_strides. Strides of insignificant
+    dimensions - size 0 or 1 - will be updated.
+
+    If there are real stride differences (NHWC vs NCHW), or the tensor is not realized, then the input will be returned
+    """
+    if not is_storage_and_layout(tensor):
+        return tensor
+
+    if all(
+        V.graph.sizevars.statically_known_equals(s1, s2)
+        for s1, s2 in zip(strides, tensor.get_stride())
+    ):
+        return tensor  # type: ignore[arg-type]
+
+    def significant_strides_equal(
+        shape: Sequence[Union[Expr, int]],
+        meta_strides: Sequence[Union[Expr, int]],
+        tensor_strides: Sequence[Union[Expr, int]],
+    ) -> bool:
+        for dim, s1, s2 in zip(shape, meta_strides, tensor_strides):
+            if V.graph.sizevars.statically_known_leq(dim, 1):  # type: ignore[arg-type]
+                continue
+
+            if not V.graph.sizevars.statically_known_equals(s1, s2):
+                return False
+
+        return True
+
+    if not significant_strides_equal(tensor.get_size(), strides, tensor.get_stride()):
+        return tensor
+
+    storage, old_layout = as_storage_and_layout(tensor)
+    new_stride = [*old_layout.stride]
+    for i, s in enumerate(tensor.get_size()):
+        if V.graph.sizevars.statically_known_leq(s, 1):  # type: ignore[arg-type]
+            new_stride[i] = strides[i]
+
+    new_layout = FixedLayout(
+        old_layout.device,
+        old_layout.dtype,
+        old_layout.size,
+        new_stride,
+        old_layout.offset,
+    )
+    return TensorBox(ReinterpretView(data=storage, layout=new_layout))
 
 
 class IRNode:
@@ -758,7 +824,7 @@ class Loops(IRNode):
         threshold = max(threshold, config.realize_opcount_threshold)
         return self.inner_fn_opcount().num_ops > threshold
 
-    def inner_fn_free_unbacked_symbols(self) -> Set[Symbol]:
+    def inner_fn_free_unbacked_symbols(self) -> OrderedSet[Symbol]:
         index = self._index(self.ranges)
         return extract_free_unbacked_symbols(self.inner_fn, index)
 
@@ -1004,12 +1070,12 @@ class Reduction(Loops):
 
     def inner_fn_args(self) -> Sequence[Sequence[Expr]]:
         index = self._index(self.ranges)
-        rindex = self._index(self.reduction_ranges, SymT.RINDEX)
+        rindex = self._index(self.reduction_ranges, SymT.R0_INDEX)
         return (index, rindex)
 
-    def inner_fn_free_unbacked_symbols(self) -> Set[Symbol]:
+    def inner_fn_free_unbacked_symbols(self) -> OrderedSet[Symbol]:
         index = self._index(self.ranges)
-        rindex = self._index(self.reduction_ranges, SymT.RINDEX)
+        rindex = self._index(self.reduction_ranges, SymT.R0_INDEX)
         return extract_free_unbacked_symbols(self.inner_fn, index, rindex)
 
     def constant_to_device(self, device: torch.device) -> IRNode:
@@ -1058,96 +1124,25 @@ class Reduction(Loops):
             # We don't support unbacked symints
             return ReductionHint.DEFAULT, 1
 
-        dtype = get_device_type(device)
-        assert dtype is not None
-        device_interface = get_interface_for_device(dtype)
-        device_properties = device_interface.Worker.get_device_properties(device)
-        if get_device_type(device) == "xpu":
-            num_sm = device_properties.gpu_subslice_count
-        else:
-            # default is cuda behavior
-            num_sm = device_properties.multi_processor_count
-
+        props = DeviceProperties.create(device)
+        num_sm = props.multi_processor_count
         min_elements_per_thread = 32
-        max_elements_per_thread = 512
-        threads_per_sm = 2048
-        min_elements_per_device = min_elements_per_thread * num_sm * threads_per_sm
-        max_elements_per_device = max_elements_per_thread * num_sm * threads_per_sm
-
-        def inner_reduction_splits(reduction_numel_hint: int, numel_hint: int) -> int:
-            if not should_split:
-                return 1
-            # do heuristics that's close to eager mode for split inner reduction
-            # we leak reduction autotune configs here, and will need to refactor to avoid this later
-            num_warps = 8
-            num_threads = 32 * num_warps
-            if numel_hint >= 2 * num_sm:  # don't split if there are enough outputs
-                return 1
-            if reduction_numel_hint <= 8192:
-                return 1
-            if reduction_numel_hint * numel_hint <= min_elements_per_device:
-                split_size = min_elements_per_thread
-            elif reduction_numel_hint * numel_hint < max_elements_per_device:
-                target_blocks = num_sm * threads_per_sm // (2 * num_threads)
-                blocks_per_output = (target_blocks + numel_hint - 1) // numel_hint
-                tmp_split_size = (
-                    reduction_numel_hint + num_threads * blocks_per_output - 1
-                ) // (num_threads * blocks_per_output)
-                divisors = sympy.divisors(reduction_numel_hint)
-                closest = min(divisors, key=lambda x: abs(x - tmp_split_size))
-                if abs(closest - tmp_split_size) < 30:
-                    # prefer even splits, but never smalle than min_elements_per_thread
-                    split_size = max(closest, min_elements_per_thread)
-                else:
-                    split_size = tmp_split_size
-            else:
-                divisors = sympy.divisors(reduction_numel_hint)
-                closest = min(divisors, key=lambda x: abs(x - max_elements_per_thread))
-                if abs(closest - max_elements_per_thread) < 50:
-                    # prefer even splits
-                    split_size = closest
-                else:
-                    split_size = max_elements_per_thread
-            return (reduction_numel_hint + split_size * num_threads - 1) // (
-                split_size * num_threads
+        if should_split:
+            inner_reduction_splits: Callable[[int, int], int] = functools.partial(
+                V.choices.reduction_split_factor, device, inner_reduction=True
             )
-
-        def outer_reduction_splits(reduction_numel_hint: int, numel_hint: int) -> int:
-            if not should_split:
-                return 1
-            # TODO the best heuristic currently has XBLOCK (corresponding to numel_hint) 128
-            # extend to even smaller number of outputs
-            num_warps = 8
-            num_threads = num_warps * 32
-            rvals_per_thread = 4  # comes from heuristics, refactor to not leak here
-            xvals_per_block = 128
-            xblocks = (numel_hint + xvals_per_block - 1) // xvals_per_block
-            if reduction_numel_hint * numel_hint < min_elements_per_device:
-                split_size = min_elements_per_thread
-            elif reduction_numel_hint * numel_hint < max_elements_per_device:
-                target_blocks = num_sm * threads_per_sm // (num_threads)
-                target_blocks = (target_blocks + xblocks - 1) // xblocks
-                tmp_split_size = (
-                    reduction_numel_hint + rvals_per_thread * target_blocks - 1
-                ) // (rvals_per_thread * target_blocks)
-                divisors = sympy.divisors(reduction_numel_hint)
-                closest = min(divisors, key=lambda x: abs(x - tmp_split_size))
-                if abs(tmp_split_size - closest) < 20:
-                    split_size = max(closest, min_elements_per_thread)
-                else:
-                    split_size = tmp_split_size
-            else:
-                divisors = sympy.divisors(reduction_numel_hint)
-                closest = min(divisors, key=lambda x: abs(x - max_elements_per_thread))
-                if abs(closest - max_elements_per_thread) < 50:
-                    # prefer even splits
-                    split_size = closest
-                else:
-                    split_size = max_elements_per_thread
-
-            return (reduction_numel_hint + rvals_per_thread * split_size - 1) // (
-                rvals_per_thread * split_size
+            outer_reduction_splits: Callable[[int, int], int] = functools.partial(
+                V.choices.reduction_split_factor, device, inner_reduction=False
             )
+        else:
+
+            def inner_reduction_splits(
+                reduction_numel_hint: int,
+                numel_hint: int,
+            ) -> int:
+                return 1
+
+            outer_reduction_splits = inner_reduction_splits
 
         # easy cases
         if numel_hint == 1:
@@ -1378,7 +1373,7 @@ class Reduction(Loops):
             isinstance(reduction_numel, Integer)
             and V.graph.sizevars.size_hint(reduction_numel)
             < config.unroll_reductions_threshold
-            and (sympy_product(ranges) != 1 or device.type == "cuda")
+            and (sympy_product(ranges) != 1 or is_gpu(device.type))
         ):
             # NB: This works around https://github.com/pytorch/pytorch/issues/140457
             # since turning reductions into pointwise ops can exacerbate this problem
@@ -2045,13 +2040,13 @@ class Scan(Loops):
 
     def inner_fn_args(self) -> Sequence[Sequence[_IntLike]]:
         index = self._index(self.ranges)
-        rindex = self._index(self.scan_ranges, SymT.RINDEX)
+        rindex = self._index(self.scan_ranges, SymT.R0_INDEX)
         idx = self.reindex(index, rindex)
         return (idx,)
 
-    def inner_fn_free_unbacked_symbols(self) -> Set[Symbol]:
+    def inner_fn_free_unbacked_symbols(self) -> OrderedSet[Symbol]:
         index = self._index(self.ranges)
-        rindex = self._index(self.scan_ranges, SymT.RINDEX)
+        rindex = self._index(self.scan_ranges, SymT.R0_INDEX)
         idx = self.reindex(index, rindex)
         return extract_free_unbacked_symbols(self.inner_fn, idx)
 
@@ -2242,13 +2237,13 @@ class Sort(Loops):
 
     def inner_fn_args(self) -> Sequence[Sequence[Expr]]:
         index = self._index(self.ranges)
-        rindex = self._index(self.sort_ranges, SymT.RINDEX)
+        rindex = self._index(self.sort_ranges, SymT.R0_INDEX)
         idx = self.reindex(index, rindex)
         return (idx,)
 
-    def inner_fn_free_unbacked_symbols(self) -> Set[Symbol]:
+    def inner_fn_free_unbacked_symbols(self) -> OrderedSet[Symbol]:
         index = self._index(self.ranges)
-        rindex = self._index(self.sort_ranges, SymT.RINDEX)
+        rindex = self._index(self.sort_ranges, SymT.R0_INDEX)
         idx = self.reindex(index, rindex)
         return extract_free_unbacked_symbols(self.inner_fn, idx)
 
@@ -2342,7 +2337,7 @@ def is_storage_and_layout(x: IRNode) -> bool:
 
 def is_contiguous_storage_and_layout(x: IRNode) -> bool:
     try:
-        buffer, layout = as_storage_and_layout(x, freeze=False)
+        _buffer, layout = as_storage_and_layout(x, freeze=False)
         # pad the stride here so we will NOT claim an tensor as contiguous
         # if a padding is gonna happen.
         if layout.should_pad_strides():
@@ -2411,7 +2406,7 @@ def is_stride_order_storage_and_layout(
     x: IRNode, stride_order: Sequence[Union[int, Integer]]
 ) -> bool:
     try:
-        buffer, layout = as_storage_and_layout(x, freeze=False)
+        _buffer, layout = as_storage_and_layout(x, freeze=False)
         return layout.is_stride_ordered(stride_order)
     except NotImplementedError:
         return False
@@ -3009,14 +3004,22 @@ class SliceView(View):
         dim_size = x.get_size()[dim]
 
         if any(free_unbacked_symbols(x) for x in (start, end, dim_size)):
-
-            def clamp(x, lower, upper):  # type: ignore[no-untyped-def]
-                return sympy.Min(sympy.Max(x, lower), upper)
-
+            min_func = sympy.Min
+            max_func = sympy.Max
         else:
+            min_func = sizevars.evaluate_min
+            max_func = sizevars.evaluate_max
 
-            def clamp(x, lower, upper):  # type: ignore[no-untyped-def]
-                return sizevars.evaluate_min(sizevars.evaluate_max(x, lower), upper)
+        def clamp(x, lower, upper):  # type: ignore[no-untyped-def]
+            clamped_lower = (
+                x if sizevars.statically_known_geq(x, lower) else max_func(x, lower)
+            )
+            clamped_full = (
+                clamped_lower
+                if sizevars.statically_known_leq(clamped_lower, upper)
+                else min_func(clamped_lower, upper)
+            )
+            return clamped_full
 
         def clamp_wrap(val, lower, upper, default):  # type: ignore[no-untyped-def]
             if val is None:
@@ -3038,7 +3041,6 @@ class SliceView(View):
         except TypeError:
             pass
 
-        sizevars = V.graph.sizevars
         new_size = list(x.get_size())
 
         # NB: Ordinarily we default to clamping.
@@ -3176,8 +3178,10 @@ class Layout(OutputSpec):
         offset = ""
         if self.offset != 0:
             offset = f", offset={self.offset}"
+
+        device_index_str = "" if self.device.index is None else f":{self.device.index}"
         return (
-            f"{type(self).__name__}('{self.device.type}', {self.dtype}, "
+            f"{type(self).__name__}('{self.device.type}{device_index_str}', {self.dtype}, "
             f"size={self.size}, stride={self.stride}{offset})"
         )
 
@@ -3863,6 +3867,9 @@ class ConstantBuffer(InputBuffer):
 
 @ir_dataclass
 class NoneAsConstantBuffer(IRNode):
+    def get_reads(self) -> OrderedSet[Dep]:
+        return OrderedSet()
+
     def get_unbacked_symbol_uses(self) -> OrderedSet[sympy.Symbol]:
         return OrderedSet()
 
@@ -3884,7 +3891,7 @@ class ShapeAsConstantBuffer(IRNode):
         return free_unbacked_symbols(self.expr)
 
     def codegen_reference(self, writer: Optional[IndentedBuffer] = None) -> str:
-        return V.graph.wrapper_code.expr_printer(V.graph.sizevars.simplify(self.expr))
+        return V.graph.wrapper_code.codegen_sizevar(self.expr)
 
     def has_tensor_output(self) -> bool:
         return False
@@ -4122,7 +4129,7 @@ class ComputedBuffer(OperationBuffer):
             x_vars = reindex0(x_vars)
 
             if simplify_loops:
-                sizes, reindex2, prune = V.graph.sizevars._simplify_loops(
+                sizes, reindex2, _prune = V.graph.sizevars._simplify_loops(
                     x_vars,
                     sizes,
                     index_prevent_reordering(index_formulas, x_vars, sizes),
@@ -4228,7 +4235,7 @@ class TemplateBuffer(OperationBuffer):
     def __init__(
         self,
         layout: Layout,
-        inputs: List[IRNode],
+        inputs: Sequence[IRNode],
         make_kernel_render: Callable[..., Any],
     ) -> None:
         super().__init__(name=None, layout=layout)
@@ -4251,7 +4258,18 @@ class TemplateBuffer(OperationBuffer):
         deps = dependencies.extract_read_writes(
             dummy, self.get_size(), (), normalize=normalize
         )
-        deps.reads = OrderedSet(dependencies.StarDep(x.get_name()) for x in self.inputs)
+
+        for inp in self.inputs:
+            indexer = inp.layout.make_indexer()
+
+            def dummy(index, rindex):  # type: ignore[no-untyped-def]
+                assert len(rindex) == 0
+                ops.load(inp.get_name(), indexer(index))
+
+            deps.reads |= dependencies.extract_read_writes(
+                dummy, inp.get_size(), (), normalize=True
+            ).reads
+
         return deps
 
     def get_reduction_size(self) -> Sequence[sympy.Expr]:
@@ -4284,6 +4302,7 @@ class TritonTemplateBuffer(TemplateBuffer):
         inputs,
         make_kernel_render,
         mutated_inputs: Optional[Iterable[IRNode]] = None,
+        allowed_prologue_inps: Optional[OrderedSet[str]] = None,
     ) -> None:
         """
         NOTE:[TritonTemplates with multiple outputs]
@@ -4313,8 +4332,15 @@ class TritonTemplateBuffer(TemplateBuffer):
                 for buf in mutated_inputs
             ]
 
+        self.allowed_prologue_inps = (
+            allowed_prologue_inps if allowed_prologue_inps else OrderedSet()
+        )
+
     def get_outputs(self) -> List[Buffer]:
         return self.outputs
+
+    def get_allowed_prologue_inps(self) -> OrderedSet[str]:
+        return self.allowed_prologue_inps
 
     def __str__(self) -> str:
         out = f"TritonTemplateBuffer(layout={self.layout})"
@@ -4392,8 +4418,14 @@ class MultiTemplateBuffer(TritonTemplateBuffer):
         inputs: List[IRNode],
         choice_timings: Callable[[], Dict[ChoiceCaller, float]],
         unfiltered_choices: List[ChoiceCaller],
+        allowed_prologue_inps: OrderedSet[str],
     ) -> None:
-        super().__init__(layout=layout, inputs=inputs, make_kernel_render=None)
+        super().__init__(
+            layout=layout,
+            inputs=inputs,
+            make_kernel_render=None,
+            allowed_prologue_inps=allowed_prologue_inps,
+        )
         self._choice_timings_fn = choice_timings
         self._choice_timings: Optional[Dict[ChoiceCaller, float]] = None
         self.original_inputs = inputs
@@ -4472,7 +4504,7 @@ class InputsKernel(OperationBuffer):
     inputs: List[Buffer]
 
     def get_read_writes(self) -> dependencies.ReadWrites:
-        reads: OrderedSet[dependencies.Dep] = OrderedSet()
+        reads = OrderedSet[dependencies.Dep]()
         StarDep = dependencies.StarDep
         for input in self.inputs:
             if isinstance(input, list):
@@ -4483,7 +4515,7 @@ class InputsKernel(OperationBuffer):
             else:
                 reads.add(StarDep(input.get_name()))
 
-        writes: OrderedSet[dependencies.Dep] = OrderedSet(
+        writes = OrderedSet[dependencies.Dep](
             StarDep(buf.get_name()) for buf in self.get_outputs()
         )
 
@@ -4805,7 +4837,7 @@ class ExternKernel(InputsKernel):
             self.freeze_layout()
 
     def codegen_comment(self, wrapper) -> None:  # type: ignore[no-untyped-def]
-        origin_str, detailed_origin_str = get_kernel_metadata(self, wrapper)
+        origin_str, _detailed_origin_str = get_kernel_metadata(self, wrapper)
         if origin_str:
             wrapper.writeline(origin_str)
 
@@ -5093,8 +5125,6 @@ class ExternKernel(InputsKernel):
 
         # require x to have the layout
         if is_storage_and_layout(x):
-            while isinstance(x.get_layout(), NonOwningLayout):
-                x = x.get_layout().view
             if isinstance(x.get_layout(), FlexibleLayout):
                 if order:
                     # If the the FlexibleLayout already has the size and stride in the required order,
@@ -5132,7 +5162,7 @@ class ExternKernel(InputsKernel):
                         exact_strides=exact_strides,
                     )
                     return x
-            elif isinstance(x.get_layout(), FixedLayout) and (
+            elif isinstance(x.get_layout(), (FixedLayout, NonOwningLayout)) and (
                 (order and x.get_layout().is_stride_ordered(order))
                 or (
                     exact_strides
@@ -5141,7 +5171,11 @@ class ExternKernel(InputsKernel):
                     )
                 )
             ):
-                return x
+                return (
+                    try_match_insignificant_strides(x, exact_strides)
+                    if exact_strides
+                    else x
+                )
             elif isinstance(x.get_layout(), MutationLayoutSHOULDREMOVE):
                 if isinstance(x.get_layout().real_layout(), FlexibleLayout):
                     raise AssertionError(
@@ -5398,7 +5432,7 @@ class ExternKernel(InputsKernel):
         indexer = self.make_indexer()
         index = indexer(index_vars)
 
-        new_sizes, reindex, prune = V.graph.sizevars._simplify_loops(
+        new_sizes, reindex, _prune = V.graph.sizevars._simplify_loops(
             index_vars, sizes, [index]
         )
 
@@ -5413,7 +5447,7 @@ class ExternKernel(InputsKernel):
     def get_unbacked_symbol_uses(self) -> OrderedSet[sympy.Symbol]:
         # NB: It's not necessary to check regular inputs as we automatically
         # have dependencies on them
-        r: OrderedSet[sympy.Symbol] = OrderedSet()
+        r = OrderedSet[sympy.Symbol]()
         for arg in self.constant_args:
             r |= maybe_free_unbacked_symbols(arg)
         for arg in self.kwargs.values():
@@ -5713,7 +5747,7 @@ class UserDefinedTritonKernel(ExternKernel):
         1. The arg is already tl.constexpr, so leave it in
         2. The arg is not tl.constexpr so we have to remove it
         """
-        constexpr_indices_set = set(constexpr_indices)
+        constexpr_indices_set = OrderedSet(constexpr_indices)
         REMOVED = object()
         raw_args = [
             (
@@ -5729,7 +5763,7 @@ class UserDefinedTritonKernel(ExternKernel):
         # We have to compute the constexpr indices for the new, filtered raw_args
         # We also have to adjust equal_to_1.
         if removed_none_args:
-            eq1_indices_set = set(triton_meta["configs"][0].equal_to_1)
+            eq1_indices_set = OrderedSet[int](triton_meta["configs"][0].equal_to_1)
             constexpr_indices = []
             equal_to_1 = []
             index_shift = 0
@@ -6323,7 +6357,6 @@ class FallbackKernel(ExternKernelAlloc):
                 f"NYI: Can't generate FallbackKernel for {kernel}"
             )
 
-        schema_args = schema.arguments
         args, kwargs = self.unflatten_args(self.inputs, self.constant_args)
 
         def handle_aliasing_and_mutation(info, arg) -> None:  # type: ignore[no-untyped-def]
@@ -6494,6 +6527,12 @@ class FallbackKernel(ExternKernelAlloc):
     # Detailed design doc can be found at
     # https://docs.google.com/document/d/1wC4DOZFaYym2t1Esz0X5yxlLI3RDnSiyRbUus3bkJ64/edit?usp=sharing
     def export_extern_kernel_node(self):  # type: ignore[no-untyped-def]
+        log.debug(
+            "Extern kernel node added for node %s with target %s.",
+            self.get_name(),
+            self.op_overload,
+        )
+
         assert isinstance(self, FallbackKernel)
         args, kwargs = self.unflatten_args(self.inputs, self.constant_args)
         args = self.fill_non_provided_args(args, kwargs)
@@ -6534,23 +6573,17 @@ class FallbackKernel(ExternKernelAlloc):
         target = self.op_overload
         returns = target._schema.returns  # type: ignore[union-attr]
         if len(returns) == 1:
-            # FIXME: there is a corner case here, i.e. all_reduce_coalesced_'s return value
-            # is a list of tensors, but self.mutation_outputs is already flatterned. A proper
-            # fix would require changing all the uses of self.mutation_outputs.
+            # NOTE: [special handling of all_reduce_coalesced_'s return value]
+            # all_reduce_coalesced_ return a list of tensors via self.mutation_outputs
+            outputs = self.outputs if self.outputs else self.mutation_outputs
             return_type = returns[0].real_type
-            output_arguments = [
-                handle_single_output(
-                    return_type, [*self.outputs, *self.mutation_outputs]
-                )
-            ]
+            output_arguments = [handle_single_output(return_type, outputs)]
         else:
             # For tuple returns, e.g "-> (Tensor, Tensor)" or "-> (Tesnor, Tensor[])"
             # Not generating output args for self.mutation_outputs
             output_arguments = [
                 handle_single_output(return_schema.real_type, output)
-                for return_schema, output in zip(
-                    returns, [*self.outputs, *self.mutation_outputs]
-                )
+                for return_schema, output in zip(returns, self.outputs)
             ]
 
         node = ExternKernelNode(
@@ -6605,7 +6638,8 @@ class FallbackKernel(ExternKernelAlloc):
                 args,
                 self.op_overload,
                 exported_args,
-                [*self.outputs, *self.mutation_outputs],
+                # NOTE: [special handling of all_reduce_coalesced_'s return value]
+                self.outputs if self.outputs else self.mutation_outputs,
             )
         else:
             self.codegen_comment(wrapper)
@@ -7114,20 +7148,23 @@ class InvokeSubgraph(ExternKernel):
             layout=MultiOutputLayout(device=device),
         )
 
-        outputs = [
-            MultiOutput(
-                FixedLayout(
-                    device=output.get_device(),
-                    dtype=output.get_dtype(),
-                    size=output.get_size(),  # type: ignore[arg-type]
-                    stride=output.get_stride(),
-                    offset=output.get_layout().offset,
-                ),
-                invoke_subgraph,
-                [(list, i)],
-            )
-            for i, output in enumerate(outputs)
-        ]
+        def create_output(output: IRNode, ind: int):
+            if isinstance(output, NoneAsConstantBuffer):
+                return output
+            else:
+                return MultiOutput(
+                    FixedLayout(
+                        device=output.get_device(),
+                        dtype=output.get_dtype(),
+                        size=output.get_size(),  # type: ignore[arg-type]
+                        stride=output.get_stride(),
+                        offset=output.get_layout().offset,
+                    ),
+                    invoke_subgraph,
+                    [(list, ind)],
+                )
+
+        outputs = [create_output(output, i) for i, output in enumerate(outputs)]
 
         invoke_subgraph.outputs = outputs
         return outputs
@@ -7480,7 +7517,7 @@ class _CollectiveKernel(FallbackKernel):
     ) -> None:
         with V.graph.fake_mode:
             (
-                example_output,
+                _example_output,
                 tensor_args,
                 non_tensor_args,
                 unflatten_args,
@@ -7607,7 +7644,7 @@ class _WaitKernel(_CollectiveKernel):
     def create_wait(cls, kernel, inp: TensorBox) -> None:  # type: ignore[no-untyped-def]
         with V.graph.fake_mode:
             (
-                example_output,
+                _example_output,
                 tensor_args,
                 non_tensor_args,
                 unflatten_args,
@@ -7642,7 +7679,7 @@ def maybe_free_unbacked_symbols(s: object) -> OrderedSet[Symbol]:
         # This branch should be impossible in return position
         return free_unbacked_symbols(s)
     elif isinstance(s, (tuple, list)):
-        r: OrderedSet[sympy.Symbol] = OrderedSet()
+        r = OrderedSet[sympy.Symbol]()
         for t in s:
             r |= maybe_free_unbacked_symbols(t)
         return r

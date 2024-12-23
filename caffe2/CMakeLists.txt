@@ -785,11 +785,6 @@ if(HAVE_SOVERSION)
 endif()
 torch_compile_options(torch_cpu)  # see cmake/public/utils.cmake
 
-# Ignore Wdeprecated-XXX errors from third-party libraries
-if(NOT MSVC)
-  set_source_files_properties(${PROJECT_SOURCE_DIR}/torch/csrc/distributed/c10d/socket.cpp PROPERTIES COMPILE_OPTIONS "-Wno-error=deprecated")
-endif()
-
 if("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang" AND NOT USE_IOS AND NOT USE_COREML_DELEGATE)
   target_compile_options_if_supported(torch_cpu "-Wmissing-prototypes")
   target_compile_options_if_supported(torch_cpu "-Werror=missing-prototypes")
@@ -1050,6 +1045,7 @@ endif()
 
 if(USE_XPU)
   list(APPEND Caffe2_XPU_SRCS ${GENERATED_CXX_TORCH_XPU})
+  list(APPEND Caffe2_XPU_SRCS ${TORCH_SRC_DIR}/csrc/inductor/aoti_torch/shim_xpu.cpp)
   add_library(torch_xpu ${Caffe2_XPU_SRCS})
   torch_compile_options(torch_xpu)  # see cmake/public/utils.cmake
   target_compile_definitions(torch_xpu PRIVATE USE_XPU)
@@ -1104,6 +1100,10 @@ if(USE_XPU)
     message(WARNING "Failed to include ATen XPU implementation target")
   else()
     target_link_libraries(torch_xpu PRIVATE torch_xpu_ops)
+    # USE_C10D_XCCL to decide if XCCL backend is enabled in torch-xpu-ops build.
+    if(USE_C10D_XCCL)
+      target_compile_definitions(torch_xpu PUBLIC USE_C10D_XCCL)
+    endif()
     if(MSVC)
       # Windows
       target_link_options(torch_xpu PRIVATE

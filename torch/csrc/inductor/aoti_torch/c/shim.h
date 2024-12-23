@@ -121,7 +121,13 @@ AOTI_TORCH_EXPORT int32_t aoti_torch_dtype_complex64();
 AOTI_TORCH_EXPORT int32_t aoti_torch_dtype_complex128();
 
 AOTI_TORCH_EXPORT int32_t aoti_torch_layout_strided();
+AOTI_TORCH_EXPORT int32_t aoti_torch_layout_sparse_coo();
+AOTI_TORCH_EXPORT int32_t aoti_torch_layout_sparse_csr();
+AOTI_TORCH_EXPORT int32_t aoti_torch_layout_sparse_csc();
+AOTI_TORCH_EXPORT int32_t aoti_torch_layout_sparse_bsr();
+AOTI_TORCH_EXPORT int32_t aoti_torch_layout_sparse_bsc();
 AOTI_TORCH_EXPORT int32_t aoti_torch_layout__mkldnn();
+AOTI_TORCH_EXPORT int32_t aoti_torch_layout_jagged();
 
 AOTI_TORCH_EXPORT int32_t aoti_torch_memory_format_contiguous_format();
 AOTI_TORCH_EXPORT int32_t aoti_torch_memory_format_channels_last();
@@ -463,6 +469,9 @@ aoti_torch_assign_tensors_out(AtenTensorHandle src, AtenTensorHandle* ret_dst);
 AOTI_TORCH_EXPORT AOTITorchError
 aoti_torch_clone(AtenTensorHandle self, AtenTensorHandle* ret);
 
+AOTI_TORCH_EXPORT AOTITorchError
+aoti_torch_clone_preserve_strides(AtenTensorHandle self, AtenTensorHandle* ret);
+
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_addmm_out(
     AtenTensorHandle out,
     AtenTensorHandle self,
@@ -661,6 +670,20 @@ AOTI_TORCH_EXPORT void aoti_torch_check(
         static_cast<uint32_t>(__LINE__),           \
         TORCH_CHECK_MSG(cond, "", ##__VA_ARGS__)); \
   }
+#endif
+
+AOTI_TORCH_EXPORT void aoti_torch_warn(
+    const char* func,
+    const char* file,
+    uint32_t line,
+    const char* msg);
+
+#ifdef DISABLE_WARN
+#define AOTI_TORCH_WARN(...) ((void)0);
+#else
+#define AOTI_TORCH_WARN(...) \
+  aoti_torch_warn(           \
+      __func__, __FILE__, static_cast<uint32_t>(__LINE__), #__VA_ARGS__);
 #endif
 
 #ifdef __cplusplus

@@ -6,18 +6,9 @@ import functools
 import inspect
 import itertools
 import types
-from typing import (
-    Any,
-    Callable,
-    Dict,
-    List,
-    Optional,
-    Tuple,
-    TYPE_CHECKING,
-    TypeVar,
-    Union,
-)
+from typing import Any, Callable, Dict, List, Optional, Tuple, TYPE_CHECKING, TypeVar
 from typing_extensions import Never
+from unittest.mock import patch
 
 import torch
 
@@ -29,6 +20,7 @@ from ..source import AttrSource, ConstantSource, DefaultsSource, GetItemSource
 from ..utils import (
     check_constant_args,
     check_unspec_or_constant_args,
+    counters,
     identity,
     is_function,
     is_wrapper_or_member_descriptor,
@@ -40,14 +32,13 @@ from .constant import ConstantVariable
 
 
 try:
-    from torch.distributed._composable.fsdp import _fsdp_param_group
+    from torch.distributed.fsdp._fully_shard import _fsdp_param_group
 except ModuleNotFoundError:
     _fsdp_param_group = None
 
 
 if TYPE_CHECKING:
     from torch._dynamo.symbolic_convert import InstructionTranslator
-    from torch._guards import Source
     from torch._higher_order_ops.triton_kernel_wrap import (
         TritonGridType,
         TritonKernelType,
@@ -316,7 +307,7 @@ class UserFunctionVariable(BaseUserFunctionVariable):
             and not tx.output.current_tracer.allow_side_effects_under_checkpoint
         ):
             try:
-                from torch.distributed._composable.fsdp._fsdp_state import FSDPState
+                from torch.distributed.fsdp._fully_shard._fsdp_state import FSDPState
             except Exception:
                 FSDPState = None
             if FSDPState is not None and self.fn in [
@@ -326,6 +317,63 @@ class UserFunctionVariable(BaseUserFunctionVariable):
                 with torch._dynamo.side_effects.allow_side_effects_under_checkpoint(tx):
                     return super().call_function(tx, args, kwargs)
         return super().call_function(tx, args, kwargs)
+
+
+class FunctionDecoratedByContextlibContextManagerVariable(BaseUserFunctionVariable):
+    # TODO(guilherme): replace this with a generic GeneratorFunctionVariable
+
+    """functions that behaves like iterators
+
+    .. note::
+
+        This is only used when the function is annotated with @contextlib.contextmanager
+    """
+
+    def __init__(self, vt: VariableTracker, **kwargs):
+        super().__init__(**kwargs)
+        self.vt = vt
+        self.inline_tracer = None
+
+    def __getattr__(self, name):
+        if name in self.__class__.__dict__.keys():
+            return getattr(self, name)
+        return getattr(self.vt, name)
+
+    def call_function(
+        self,
+        tx: "InstructionTranslator",
+        args: "List[VariableTracker]",
+        kwargs: "Dict[str, VariableTracker]",
+    ) -> "VariableTracker":
+        from torch._dynamo.bytecode_transformation import is_generator
+
+        assert is_generator(self.get_code())
+        from torch._dynamo.symbolic_convert import InliningInstructionTranslator
+
+        self.inline_tracer = InliningInstructionTranslator.build_inline_tracer(
+            tx,
+            self,
+            [*self.self_args(), *args],
+            kwargs,
+            stop_generator_on_yield=True,
+        )
+
+        return self
+
+    def next_variable(self, tx):
+        from torch._dynamo import exc
+
+        tracer = self.inline_tracer
+
+        try:
+            # Hierarchically, tx can be seen as the parent of the inline tracer
+            # created on call_function. Any exception needs to be propagated to tx
+            # for Dynamo to behave correctly
+            with patch.dict(counters, {"unimplemented": counters["inline_call"]}):
+                return tracer.inline_call_().next_variable(tx)
+        except exc.ObservedException as e:
+            tx.exn_vt_stack.extend(tracer.exn_vt_stack)
+            raise e
 
 
 class UserMethodVariable(UserFunctionVariable):
@@ -463,7 +511,9 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
         kwdefaults,
         annotations,
         closure,
-        wrapped_reconstructible=None,
+        # This is present when this function is created by
+        # `functools.wrap(wrapped_fn)(this_fn)`.
+        wrapped_fn=None,
         **kwargs,
     ) -> None:
         super().__init__(**kwargs)
@@ -477,10 +527,7 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
         self.kwdefaults = kwdefaults
         self.annotations = annotations
         self.closure = closure
-        # Either a source or a VT with .can_reconstruct() == True
-        self.wrapped_reconstructible: Optional[
-            Union[Source, VariableTracker]
-        ] = wrapped_reconstructible
+        self.wrapped_fn: Optional[VariableTracker] = wrapped_fn
 
     def self_args(self):
         return []
@@ -581,11 +628,11 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
 
         codegen.extend_output(create_call_function(7, False))
 
-        if self.wrapped_reconstructible:
+        if self.wrapped_fn:
             codegen.add_push_null(
                 lambda: codegen.load_import_from("functools", "wraps")
             )
-            codegen(self.wrapped_reconstructible)
+            codegen(self.wrapped_fn)
             codegen.extend_output(create_call_function(1, False))
             codegen.extend_output(create_rot_n(2))
             codegen.extend_output(create_call_function(1, True))
@@ -643,22 +690,11 @@ class SkipFunctionVariable(VariableTracker):
             return self.fold_through_function_to_wrapper().get(self.value)(
                 value, mutation_type=ValueMutationNew()
             )
-        elif (
-            self.value is functools.wraps
-            and not kwargs
-            and len(args) == 1
-            and (
-                args[0].source is not None or args[0].can_reconstruct(tx.output.root_tx)
-            )
-        ):
+        elif self.value is functools.wraps and not kwargs and len(args) == 1:
 
             def wraps(fn):
                 if isinstance(fn, variables.NestedUserFunctionVariable):
-                    if args[0].source:
-                        reconstructible = args[0].source
-                    else:
-                        reconstructible = args[0]
-                    return fn.clone(wrapped_reconstructible=reconstructible)
+                    return fn.clone(wrapped_fn=args[0])
                 unimplemented(f"functools.wraps({fn})")
 
             return variables.LambdaVariable(wraps)

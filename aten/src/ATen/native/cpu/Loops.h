@@ -208,7 +208,7 @@ vectorized_loop(char** C10_RESTRICT data_, int64_t n, int64_t S, func_t&& op, ve
     data[arg] = data_[arg];
   }
 
-  Vec opt_scalar = Vec(S > 0 ? *(scalar_t*)data[S] : scalar_t(0));
+  Vec opt_scalar = Vec(S > 0 ? c10::load((scalar_t*)data[S]) : scalar_t(0));
   int64_t i = 0;
   for (; i <= n - 2 * Vec::size(); i += 2 * Vec::size()) {
     auto args1 = dereference_vec<traits>(&data[1], opt_scalar, S, i);

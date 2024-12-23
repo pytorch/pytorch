@@ -34,28 +34,30 @@ from typing import (
     Optional,
     Protocol,
     Sequence,
-    Set,
     Tuple,
     TYPE_CHECKING,
     TypeVar,
     Union,
     ValuesView,
 )
-from typing_extensions import Concatenate, dataclass_transform, ParamSpec
+from typing_extensions import Concatenate, dataclass_transform, ParamSpec, TypeGuard
 from unittest import mock
 
 import sympy
 
 import torch
+from torch._inductor.runtime.hints import DeviceProperties
 
 
 if TYPE_CHECKING:
     from torch._prims_common import ELEMENTWISE_TYPE_PROMOTION_KIND
+    from .codegen.common import WorkspaceArg
 
+from torch.utils._ordered_set import OrderedSet
 from torch.utils._pytree import tree_map_only
 
 
-GPU_TYPES = ["cuda", "xpu"]
+GPU_TYPES = ["cuda", "mps", "xpu"]
 
 
 # defines here before import torch._dynamo is for avoiding circular import
@@ -101,6 +103,9 @@ GPU_KERNEL_BIN_EXTS = {"cuda": ".cubin", "xpu": ".spv"}
 GPU_ALIGN_BYTES = 16
 ALIGNMENT = 16
 
+TMA_ALIGNMENT = 16
+TMA_DESCRIPTOR_SIZE = 128
+
 ALIGN_BYTES = 64
 assert (ALIGN_BYTES & (ALIGN_BYTES - 1)) == 0 and ALIGN_BYTES >= 8, "must be power of 2"
 
@@ -124,7 +129,7 @@ class align(sympy.Function):
     is_integer = True
 
     @classmethod
-    def eval(cls, value):
+    def eval(cls, value: sympy.Expr) -> Optional[sympy.Expr]:
         if isinstance(value, (int, sympy.Integer)):
             return _align(int(value))
         if _is_aligned(value):
@@ -240,11 +245,11 @@ def decode_device(device: Union[Optional[torch.device], str]) -> torch.device:
     return device
 
 
-def sympy_product(it):
+def sympy_product(it: Iterable[sympy.Expr]) -> sympy.Expr:
     return functools.reduce(operator.mul, it, sympy.S.One)
 
 
-def sympy_dot(seq1, seq2):
+def sympy_dot(seq1: Sequence[sympy.Expr], seq2: Sequence[sympy.Expr]) -> sympy.Expr:
     assert len(seq1) == len(seq2)
     return sympy.expand(sum(a * b for a, b in zip(seq1, seq2)))
 
@@ -336,7 +341,7 @@ def convert_shape_to_symint(
     ]
 
 
-def is_view(op: torch._ops.OpOverload):
+def is_view(op: torch._ops.OpOverload) -> bool:
     """
     Does this op overload have aliasing
     """
@@ -346,7 +351,7 @@ def is_view(op: torch._ops.OpOverload):
 
 def is_pointwise_use(
     use, is_pointwise_fn: Optional[Callable[[torch._ops.OpOverload], bool]] = None
-):
+) -> bool:
     """
     Do all uses of this op have torch.Tag.pointwise or return True for optional `is_pointwise_fn`
 
@@ -391,7 +396,7 @@ def gen_gm_and_inputs(target, args, kwargs):
     return gm, graph_args
 
 
-def synchronize(device: str = "cuda"):
+def synchronize(device: str = "cuda") -> None:
     if device == "cpu":
         return
     device_interface = get_interface_for_device(device)
@@ -447,7 +452,7 @@ def pad_listlike(x, size):
 
 
 # Used to ensure that iterating over a set is deterministic
-def tuple_sorted(x):
+def tuple_sorted(x: Tuple[_T, ...]) -> List[_T]:
     if len(x) == 0:
         return []
 
@@ -515,12 +520,12 @@ def aggregate_origins(node_schedule):
                 for node in node_schedule
                 if hasattr(node, "node") and node.node
             ],
-            set(),
+            OrderedSet(),
         )
     elif isinstance(node_schedule, ir.ExternKernel):
         return node_schedule.origins
     else:
-        return set()
+        return OrderedSet()
 
 
 def get_fused_kernel_name(node_schedule, descriptive_names):
@@ -534,7 +539,7 @@ def get_fused_kernel_name(node_schedule, descriptive_names):
             and "original_aten" in origin.meta
             and origin.meta["original_aten"] is not None
         ]
-        sources = sorted(set(sources))
+        sources = sorted(OrderedSet(sources))
     elif descriptive_names == "torch":
         # Bases the kernel name off of the top-level "torch" operator (i.e. post-dynamo graph)
         sources = []
@@ -545,7 +550,7 @@ def get_fused_kernel_name(node_schedule, descriptive_names):
                     sources.append(source_fn[1])
                 else:
                     sources.append(source_fn[1].__name__)
-        sources = sorted(set(sources))
+        sources = sorted(OrderedSet(sources))
     elif descriptive_names == "inductor_node":
         sources = [
             origin.name for origin in all_origins if origin.op == "call_function"
@@ -568,7 +573,7 @@ def get_kernel_metadata(node_schedule, wrapper):
     # is not supported. An example of this is conditional statements.
     single_graph = None
     if len(inductor_nodes):
-        unique_graphs = {n.graph for n in inductor_nodes}
+        unique_graphs = OrderedSet(n.graph for n in inductor_nodes)
         if len(unique_graphs) == 1:
             single_graph = inductor_nodes[0].graph
             # create a map of idx -> node and cache it
@@ -586,7 +591,7 @@ def get_kernel_metadata(node_schedule, wrapper):
             key = str(node.meta["original_aten"]._overloadpacket)
             original_aten_dict[key].append(node.name)
         if "from_node" in node.meta:
-            key = node.meta["from_node"][0][0]
+            key = node.meta["from_node"][0].name
             from_node_dict[key].append(node.name)
     sort_str = "Topologically Sorted" if single_graph is not None else "Unsorted"
     metadata = (
@@ -614,10 +619,10 @@ def get_kernel_metadata(node_schedule, wrapper):
 
 def dominated_nodes(
     initial_queue: Iterable[torch.fx.Node], skip_filter=None
-) -> Set[torch.fx.Node]:
+) -> OrderedSet[torch.fx.Node]:
     """Returns the set of nodes whose values depend on those within initial_queue"""
     initial_queue = list(initial_queue)
-    dominated_set = set(initial_queue)
+    dominated_set = OrderedSet(initial_queue)
 
     while initial_queue:
         node = initial_queue.pop()
@@ -645,7 +650,7 @@ def gather_origins(args, kwargs):
 
     kwarg_origins = [val.origins for val in kwargs.values() if is_unrealized_node(val)]
     arg_origins = [arg.origins for arg in args if is_unrealized_node(arg)]
-    return set(itertools.chain(*arg_origins, *kwarg_origins))
+    return OrderedSet(itertools.chain(*arg_origins, *kwarg_origins))
 
 
 def sympy_str(expr: sympy.Expr) -> str:
@@ -678,6 +683,10 @@ def get_bounds_index_expr(index):
         return bound_sympy(index)
     else:
         return ValueRanges.unknown()
+
+
+def prefix_is_reduction(prefix: str) -> bool:
+    return prefix[0] == "r"
 
 
 def sympy_index_symbol_with_prefix(prefix: SymT, idx: int) -> sympy.Symbol:
@@ -731,7 +740,7 @@ def sympy_subs(expr: sympy.Expr, replacements: Dict[sympy.Expr, Any]) -> sympy.E
     )
 
 
-def is_symbolic(a: Any) -> bool:
+def is_symbolic(a: Any) -> TypeGuard[Union[torch.SymInt, torch.Tensor]]:
     return isinstance(a, torch.SymInt) or (
         isinstance(a, torch.Tensor)
         and any(is_symbolic(x) for x in itertools.chain(a.size(), a.stride()))
@@ -747,23 +756,25 @@ def get_first_incompatible_cudagraph_node(
 ) -> Optional[torch.fx.Node]:
     from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
 
-    forbidden_set = {
-        "aten._fused_moving_avg_obs_fq_helper.default",
-        "aten._fused_moving_avg_obs_fq_helper_functional.default",
-        "fbgemm.dense_to_jagged.default",
-        "fbgemm.jagged_to_padded_dense.default",
-        "run_and_save_rng_state",
-        "run_with_rng_state",
-        "aten._local_scalar_dense",
-        # Technically, it's not necessary to ban this, because an
-        # assert_scalar with constant arguments can be validly run
-        # with CUDA graphs, but the operator is also pointless with
-        # constant arguments, so might as well ban
-        "aten._assert_scalar",
-    }
+    forbidden_set = OrderedSet(
+        [
+            "aten._fused_moving_avg_obs_fq_helper.default",
+            "aten._fused_moving_avg_obs_fq_helper_functional.default",
+            "fbgemm.dense_to_jagged.default",
+            "fbgemm.jagged_to_padded_dense.default",
+            "run_and_save_rng_state",
+            "run_with_rng_state",
+            "aten._local_scalar_dense",
+            # Technically, it's not necessary to ban this, because an
+            # assert_scalar with constant arguments can be validly run
+            # with CUDA graphs, but the operator is also pointless with
+            # constant arguments, so might as well ban
+            "aten._assert_scalar",
+        ]
+    )
     if torch.are_deterministic_algorithms_enabled():
         forbidden_set.update(
-            {
+            (
                 "aten._unsafe_index_put.default",
                 "aten._unsafe_masked_index_put_accumulate.default",
                 "aten.index_put.default",
@@ -776,8 +787,9 @@ def get_first_incompatible_cudagraph_node(
                 "aten.scatter_reduce.two",
                 "aten.scatter_reduce_.two",
                 "aten.scatter_reduce.two_out",
-            }
+            )
         )
+
     for node in gm.graph.nodes:
         if str(node.target) in forbidden_set:
             return node
@@ -1113,18 +1125,24 @@ class DelayReplaceLine(DeferredLineBase):
 
 
 @functools.lru_cache(None)
-def is_big_gpu(index) -> bool:
-    prop = torch.cuda.get_device_properties(index)
+def is_big_gpu(index_or_device: Union[int, torch.device] = 0) -> bool:
+    if isinstance(index_or_device, torch.device):
+        device = index_or_device
+    else:
+        device = torch.device(get_gpu_type(), index_or_device)
+
+    prop = DeviceProperties.create(device)
 
     # SM logic is not relevant to ROCm gpus
     # Arbitrarily skipping the older models
     if torch.version.hip:
+        assert prop.major is not None
         if prop.major < 9 or prop.major == 10:
             log.warning("GPU arch does not support max_autotune_gemm mode usage")
             return False
         return True
 
-    min_sms = 68  # 3080
+    min_sms = 16 if device.type == "xpu" else 68  # 3080
     avail_sms = prop.multi_processor_count
     if avail_sms < min_sms:
         log.warning(
@@ -1133,6 +1151,28 @@ def is_big_gpu(index) -> bool:
         )
         return False
     return True
+
+
+@functools.lru_cache
+def get_num_sms() -> int:
+    return torch.cuda.get_device_properties("cuda").multi_processor_count
+
+
+def get_tma_workspace_arg(
+    num_tma_descriptors: int,
+    device: torch.device,
+) -> WorkspaceArg:
+    """Builds and returns a WorkspaceArg for the device side TMA workspace buffer."""
+    from .codegen.common import WorkspaceArg, WorkspaceZeroMode
+
+    zero_mode = WorkspaceZeroMode.from_bool(False)
+    size = get_num_sms() * num_tma_descriptors * TMA_DESCRIPTOR_SIZE
+    return WorkspaceArg(
+        count=size,
+        zero_mode=zero_mode,
+        device=device,
+        outer_name=WorkspaceArg.unique_name(),
+    )
 
 
 def use_max_autotune() -> bool:
@@ -1145,7 +1185,7 @@ def _use_template_for_cuda(layout, allowed_layout_dtypes: List[torch.dtype]) -> 
     return (
         layout.device.type == "cuda"
         and layout.dtype in allowed_layout_dtypes
-        and is_big_gpu(layout.device.index or 0)
+        and is_big_gpu(layout.device)
     )
 
 
@@ -1180,6 +1220,37 @@ def use_triton_template(layout, *, enable_int32=False, enable_float8=False):
         and use_max_autotune()
         and _use_autotune_backend("TRITON")
         and has_backend_feature(layout.device, BackendFeature.TRITON_TEMPLATES)
+    )
+
+
+def use_triton_tma_template(*matrices):
+    from torch.utils._triton import has_triton_tma_device
+
+    from .virtualized import V
+
+    def _is_tma_compatible(x):
+        if len(x.get_size()) != 2:
+            return False
+
+        dtype = x.get_dtype()
+        if dtype not in (torch.float16, torch.bfloat16):
+            return False
+
+        layout = x.get_layout()
+        transposed = layout.is_transposed()
+        if not (layout.is_contiguous() or transposed):
+            return False
+
+        inner_dim = layout.size[1]
+        if transposed:
+            inner_dim = layout.size[0]
+        inner_bytes = inner_dim * dtype.itemsize
+        return V.graph.sizevars.statically_known_multiple_of(inner_bytes, TMA_ALIGNMENT)
+
+    return (
+        config.triton.enable_persistent_tma_matmul
+        and has_triton_tma_device()
+        and all(_is_tma_compatible(m) for m in matrices)
     )
 
 
@@ -1310,7 +1381,16 @@ def _use_template_for_cpu(layout):
     return use_max_autotune() and layout.device.type == "cpu"
 
 
-def use_cpp_packed_gemm_template(layout, mat1, mat2, mat2_transposed=False):
+def use_cpp_bmm_template(layout, mat1, mat2):
+    return (
+        use_cpp_gemm_template(layout, mat1, mat2, require_constant_mat2=False)
+        and mat1.layout.is_contiguous()
+    )
+
+
+def use_cpp_gemm_template(
+    layout, mat1, mat2, mat2_transposed=False, require_constant_mat2=True
+):
     from . import ir
     from .codegen.cpp_micro_gemm import create_micro_gemm
     from .codegen.cpp_utils import get_gemm_template_output_and_compute_dtype
@@ -1358,7 +1438,7 @@ def use_cpp_packed_gemm_template(layout, mat1, mat2, mat2_transposed=False):
         and micro_gemm is not None
         and is_last_dim_stride1(mat1)  # TODO(jgong5): support transposed input
         and isinstance(mat2, ir.StorageBox)
-        and mat2.is_module_buffer()
+        and (mat2.is_module_buffer() or not require_constant_mat2)
     )
 
 
@@ -1639,23 +1719,23 @@ def get_device_tflops(dtype):
 
 
 @functools.lru_cache(None)
-def get_gpu_dram_gbps():
+def get_gpu_dram_gbps() -> int:
     from triton.testing import get_dram_gbps
 
     return get_dram_gbps()
 
 
-def get_gpu_shared_memory():
+def get_gpu_shared_memory() -> int:
     from triton.runtime import driver
 
     return driver.active.utils.get_device_properties(0).get("max_shared_mem", 0)
 
 
-def is_welford_reduction(reduction_type):
+def is_welford_reduction(reduction_type: str) -> bool:
     return reduction_type.startswith("welford")
 
 
-def reduction_num_outputs(reduction_type):
+def reduction_num_outputs(reduction_type: str) -> int:
     return 3 if is_welford_reduction(reduction_type) else 1
 
 
@@ -1663,15 +1743,15 @@ def is_linux() -> bool:
     return platform.system() == "Linux"
 
 
-def is_windows():
+def is_windows() -> bool:
     return sys.platform == "win32"
 
 
-def has_free_symbols(itr: Iterable[Any]):
+def has_free_symbols(itr: Iterable[Any]) -> bool:
     return any(isinstance(x, sympy.Expr) and not x.is_number for x in itr)
 
 
-def is_dynamic(*args):
+def is_dynamic(*args) -> bool:
     from . import ir
 
     for t in args:
@@ -1738,7 +1818,31 @@ def pass_execution_and_save(func, gm, inp, msg):
 def is_collective(node, op=None):
     from . import ir
 
-    return type(node) == ir._CollectiveKernel and (op is None or node.op_overload is op)
+    return (
+        type(node) == ir._CollectiveKernel and (op is None or node.op_overload is op)
+    ) or (
+        # TODO: this is a temporary solution to ensure that we can identify torchrec's
+        # communication ops. But in order to allow better communication and computation
+        # overlap, torchrec's communication ops should be not used.
+        type(node) == ir.FallbackKernel
+        and (
+            # NOTE: the `hasattr()` check is to bypass errors such as the following:
+            # AttributeError: '_OpNamespace' 'torchrec' object has no attribute 'all_to_all_single'
+            (
+                hasattr(torch.ops.torchrec, "all_to_all_single")
+                and node.op_overload == torch.ops.torchrec.all_to_all_single.default
+            )
+            or (
+                hasattr(torch.ops.torchrec, "all_gather_into_tensor")
+                and node.op_overload
+                == torch.ops.torchrec.all_gather_into_tensor.default
+            )
+            or (
+                hasattr(torch.ops.torchrec, "reduce_scatter_tensor")
+                and node.op_overload == torch.ops.torchrec.reduce_scatter_tensor.default
+            )
+        )
+    )
 
 
 def is_wait(node):
@@ -1771,7 +1875,7 @@ def is_fallback_op(node, op):
     from . import ir
 
     if isinstance(op, torch._ops.OpOverload):
-        op = {op}
+        op = OrderedSet([op])
     return isinstance(node, ir.FallbackKernel) and node.op_overload in op
 
 
@@ -1913,8 +2017,18 @@ def device_need_guard(device: str):
 
 
 def needs_fallback_due_to_atomic_add_limitations(dtype):
-    # tl.atomic_add does NOT support the following types
-    return dtype in {torch.int64, torch.bool, torch.bfloat16}
+    # tl.atomic add has bfloat16 support in fbcode
+    # but not in OSS https://github.com/pytorch/pytorch/issues/97016
+    # we will fallback until the code is upstreamed to OSS
+    if (
+        config.is_fbcode()
+        and dtype == torch.bfloat16
+        and torch.cuda.is_available()
+        and torch.cuda.get_device_capability() >= (9, 0)
+    ):
+        return False
+    else:
+        return dtype in OrderedSet([torch.int64, torch.bool, torch.bfloat16])
 
 
 def use_scatter_fallback(
@@ -1937,7 +2051,7 @@ def use_scatter_fallback(
     )
 
     return (
-        reduction_type not in {None, reduce_ty}
+        reduction_type not in (None, reduce_ty)
         or (
             src_is_tensor
             and is_gpu(src_device_type)
@@ -1951,7 +2065,7 @@ def use_scatter_fallback(
             and config.cpp.fallback_scatter_reduce_sum
             and (config.cpp.dynamic_threads or parallel_num_threads() != 1)
         )
-        or (reduction_type == reduce_ty and self_dtype in {torch.bool, torch.int64})
+        or (reduction_type == reduce_ty and self_dtype in (torch.bool, torch.int64))
         or torch.are_deterministic_algorithms_enabled()
     )
 
@@ -2051,7 +2165,6 @@ def run_and_get_cpp_code(fn, *args, **kwargs):
 
 
 def shape_env_from_inputs(inputs: Sequence[InputType]):
-    shape_env = None
     fake_mode = detect_fake_mode(inputs)
 
     # TODO(voz): It would be nice to enable this assert, but there are lots of tests that
@@ -2150,16 +2263,18 @@ def set_tracing_context_output_strides(example_inputs, compiled_graph):
             if exprs is None:
                 context.output_strides.append(None)
             else:
-                context.output_strides.append(
-                    tuple(
-                        (
-                            shape_env.evaluate_symexpr(e)
-                            if shape_env is not None
-                            else int(e)
-                        )
-                        for e in exprs
-                    )
-                )
+                fakify_first_call = False
+                if ctx := torch._guards.TracingContext.try_get():
+                    fakify_first_call = ctx.fakify_first_call
+
+                def map_expr(e):
+                    if shape_env is None:
+                        return int(e)
+                    if fakify_first_call:
+                        return shape_env.deserialize_symexpr(e)
+                    return shape_env.evaluate_symexpr(e)
+
+                context.output_strides.append(tuple(map_expr(e) for e in exprs))
 
 
 def should_use_remote_fx_graph_cache():
@@ -2183,6 +2298,34 @@ def should_use_remote_fx_graph_cache():
 
 def normalize_name(name: str) -> str:
     return re.sub(r"[^a-zA-Z0-9_]", "_", name)
+
+
+# correct cases where Triton types names don't match PyTorch
+_triton_type_mapping = {
+    "tl.bool": "tl.int1",
+    "tl.float8_e4m3fn": "tl.float8e4nv",
+    "tl.float8_e5m2": "tl.float8e5",
+    "tl.float8_e4m3fnuz": "tl.float8e4b8",
+    "tl.float8_e5m2fnuz": "tl.float8e5b16",
+}
+_torch_triton_mapping = {v: k for k, v in _triton_type_mapping.items()}
+
+
+_triton_type_re = re.compile(r"^.*[.]")
+
+
+def triton_type(dtype: torch.dtype) -> str:
+    """Convert torch.dtype to triton type"""
+    triton_type_name = _triton_type_re.sub("tl.", str(dtype))
+    return _triton_type_mapping.get(triton_type_name, triton_type_name)
+
+
+def triton_type_to_torch(dtype: str) -> torch.dtype:
+    adjusted_type = _torch_triton_mapping.get(dtype, dtype)
+    type_name = adjusted_type.replace("tl.", "")
+    out_dtype = getattr(torch, type_name)
+    assert isinstance(out_dtype, torch.dtype)
+    return out_dtype
 
 
 def is_same_tensor(data: torch.Tensor, value: torch.Tensor):
@@ -2275,3 +2418,15 @@ def get_donated_idxs() -> Optional[List[int]]:
     if tracing_context is not None and tracing_context.fw_metadata:
         return tracing_context.fw_metadata.bw_donated_idxs
     return None
+
+
+def set_kernel_post_grad_provenance_tracing(node_schedule, kernel_name):
+    from .codegen.simd_kernel_features import DisableReduction, EnableReduction
+    from .virtualized import V
+
+    for node in node_schedule:
+        if node not in (EnableReduction, DisableReduction):
+            if node.node is not None:
+                V.debug._inductor_triton_kernel_to_post_grad_node_info[kernel_name] = [
+                    origin.name for origin in node.node.origins
+                ]
