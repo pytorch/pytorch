@@ -306,12 +306,11 @@ class CppPrinter(ExprPrinter):
         assert len(expr.args) == 1
         return f"static_cast<double>({self._print(expr.args[0])})"
 
-    # TODO: This is wrong if one of the inputs is negative.  This is hard to
-    # tickle though, as the inputs are typically positive (and if we can prove
-    # they are positive, we will have used Mod instead, for which this codegen
-    # is right).
     def _print_PythonMod(self, expr: sympy.Expr) -> str:
-        return self.stringify(expr.args, " % ", PRECEDENCE["Atom"] - 0.5)
+        x, div = expr.args
+        x = self.doprint(x)
+        div = self.doprint(div)
+        return f"c10::div_mod({x}, {div})"
 
     def _print_IntTrueDiv(self, expr: sympy.Expr) -> str:
         lhs, rhs = expr.args
