@@ -14,7 +14,7 @@ filelock
 networkx
 jinja2
 fsspec
-lintrunner ; platform_machine != "s390x"
+lintrunner
 ninja
 packaging
 optree>=0.13.0
