@@ -52,7 +52,6 @@ _grad_t = Union[Tuple[Tensor, ...], Tensor]
 T = TypeVar("T", bound="Module")
 _P = ParamSpec('_P')
 _R = TypeVar('_R')
-_Module_T = TypeVar('_Module_T', bound='Module')
 _Input = TypeVar('_Input')
 _Output = TypeVar('_Output')
 
@@ -1587,10 +1586,10 @@ class Module:
     def register_forward_pre_hook(
         self,
         hook: Union[
-            Callable[[T, Tuple[Input, ...]], Optional[Tuple[Input, ...]]],
+            Callable[[T, Tuple[_Input, ...]], Optional[Tuple[_Input, ...]]],
             Callable[
-                [T, Tuple[Input, ...], Dict[str, Any]],
-                Optional[Tuple[Tuple[Input, ...], Dict[str, Any]]],
+                [T, Tuple[_Input, ...], Dict[str, Any]],
+                Optional[Tuple[Tuple[_Input, ...], Dict[str, Any]]],
             ],
         ],
         *,
@@ -1653,8 +1652,8 @@ class Module:
     def register_forward_hook(
         self,
         hook: Union[
-            Callable[[T, Tuple[Input, ...], Output], Optional[Output]],
-            Callable[[T, Tuple[Input, ...], Dict[str, Any], Output], Optional[Output]],
+            Callable[[T, Tuple[_Input, ...], _Output], Optional[_Output]],
+            Callable[[T, Tuple[_Input, ...], Dict[str, Any], _Output], Optional[_Output]],
         ],
         *,
         prepend: bool = False,
