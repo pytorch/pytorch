@@ -386,5 +386,68 @@ class DistMatrixOpsTest(DTensorTestBase):
             self.assertEqual(dtensor_result.full_tensor(), mm_result)
 
 
+    @with_comms()
+    def test_dtensor_matmul(self):
+        # 1. vector x vector
+        tensor1 = torch.randn(3)
+        tensor2 = torch.randn(3)
+        result = torch.matmul(tensor1, tensor2)
+
+        mesh = init_device_mesh(self.device_type, (self.world_size,))
+        dtensor1 = distribute_tensor(tensor1, mesh, [Shard(0)])
+        dtensor2 = distribute_tensor(tensor2, mesh, [Shard(0)])
+        dtensor_result = torch.matmul(dtensor1, dtensor2)
+        print(f"{result=}, {dtensor_result=}")
+
+        # 2. matrix x vector
+        # tensor1 = torch.randn(3, 4)
+        # tensor2 = torch.randn(4)
+        # result = torch.matmul(tensor1, tensor2)
+
+        # mesh = init_device_mesh(self.device_type, (self.world_size,))
+        # dtensor1 = distribute_tensor(tensor1, mesh, [Shard(0)])
+        # dtensor2 = distribute_tensor(tensor2, mesh, [Shard(0)])
+        # dtensor_result = torch.matmul(dtensor1, dtensor2)
+
+        # print(f"{result=}, {dtensor_result=}")
+
+
+        # 3. batched matrix x broadcasted vector
+        # tensor1 = torch.randn(10, 3, 4)
+        # tensor2 = torch.randn(4)
+        # result = torch.matmul(tensor1, tensor2)
+
+        # mesh = init_device_mesh(self.device_type, (self.world_size,))
+        # dtensor1 = distribute_tensor(tensor1, mesh, [Shard(0)])
+        # dtensor2 = distribute_tensor(tensor2, mesh, [Shard(0)])
+        # dtensor_result = torch.matmul(dtensor1, dtensor2)
+        # print(f"{result=}, {dtensor_result=}")
+
+        # 4. batched matrix x batched matrix
+        # tensor1 = torch.randn(10, 3, 4)
+        # tensor2 = torch.randn(10, 4, 5)
+        # result = torch.matmul(tensor1, tensor2)
+
+        # mesh = init_device_mesh(self.device_type, (self.world_size,))
+        # dtensor1 = distribute_tensor(tensor1, mesh, [Shard(0)])
+        # dtensor2 = distribute_tensor(tensor2, mesh, [Shard(0)])
+        # dtensor_result = torch.matmul(dtensor1, dtensor2)
+        # print(f"{result=}, {dtensor_result=}")
+        # self.assertEqual(dtensor_result.full_tensor(), result)
+
+        # 5. batched matrix x broadcasted matrix
+        # tensor1 = torch.randn(10, 3, 4)
+        # tensor2 = torch.randn(4, 5)
+        # result = torch.matmul(tensor1, tensor2)
+
+        # mesh = init_device_mesh(self.device_type, (self.world_size,))
+        # dtensor1 = distribute_tensor(tensor1, mesh, [Shard(0)])
+        # dtensor2 = distribute_tensor(tensor2, mesh, [Shard(0)])
+        # dtensor_result = torch.matmul(dtensor1, dtensor2)
+        # print(f"{result=}, {dtensor_result=}")
+
+
+
+
 if __name__ == "__main__":
     run_tests()
