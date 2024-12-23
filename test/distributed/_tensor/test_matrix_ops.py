@@ -121,6 +121,25 @@ class DistMatrixOpsTest(DTensorTestBase):
             test_placement_comb([spec[0]], [spec[1]])
 
     @with_comms
+    def test_matmul(self):
+        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        dim = 128
+        x = torch.randn(8, dim)
+        A = torch.randn(dim, dim)
+        y = torch.matmul(x, A)
+
+        # Prepare DTensors
+        dx = distribute_tensor(x, device_mesh, [Replicate()])
+        dA = distribute_tensor(A, device_mesh, [Shard(0)])
+
+        # Use `inference_mode` to test DTensor's capability of decomposing
+        # `matmul` op
+        with torch.inference_mode():
+            dy = torch.matmul(dx, dA)
+
+        self.assertEqual(y, dy.full_tensor())
+
+    @with_comms
     def test_t(self):
         device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
         shard_spec = [Shard(0)]

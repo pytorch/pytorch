@@ -25,6 +25,7 @@ from sympy.core.numbers import equal_valued
 from sympy.core.operations import LatticeOp, ShortCircuit
 from sympy.core.sorting import ordered
 from sympy.core.traversal import walk
+from sympy.printing.precedence import PRECEDENCE
 from sympy.utilities.iterables import sift
 
 from .numbers import int_oo
@@ -262,13 +263,22 @@ class FloorDiv(sympy.Function):
 
         # Expands (x + y) // b into x // b + y // b.
         # This only works if floor is an identity, i.e. x / b is an integer.
-        for term in sympy.Add.make_args(base):
-            quotient = term / divisor
-            if quotient.is_integer and isinstance(divisor, sympy.Integer):
-                # NB: this is correct even if the divisor is not an integer, but it
-                # creates rational expressions that cause problems with dynamic
-                # shapes.
-                return FloorDiv(base - term, divisor) + quotient
+        if isinstance(divisor, sympy.Integer):
+            quotients = 0
+            terms = []
+            for term in sympy.Add.make_args(base):
+                quotient = term / divisor
+
+                if quotient.is_integer:
+                    terms.append(term)
+                    quotients += quotient
+
+            if len(terms) != 0:
+                # Passing evaluate = False since expression will be optimized during the subtraction post its construction.
+                return (
+                    FloorDiv(base - sympy.Add(*terms, evaluate=False), divisor)
+                    + quotients
+                )
 
         try:
             gcd = simple_floordiv_gcd(base, divisor)
@@ -1341,8 +1351,16 @@ OpaqueUnaryFn_log2 = make_opaque_unary_fn("log2")
 
 
 def make_opaque_bitwise_fn(name, real_op_name):
+    if name == "bitwise_and":
+        prec = PRECEDENCE["BitwiseAnd"]
+    elif name == "bitwise_or":
+        prec = PRECEDENCE["BitwiseOr"]
+    else:
+        raise AssertionError(f"unrecognized {name}")
+
     class BitwiseFn(sympy.Function):
         _torch_handler_name = name
+        precedence: int = prec
 
         @classmethod
         def eval(cls, a, b):
