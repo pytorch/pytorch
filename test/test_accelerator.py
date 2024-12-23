@@ -68,6 +68,17 @@ class TestAccelerator(TestCase):
         self.assertTrue(event.query())
         self.assertEqual(c_acc.cpu(), c)
 
+    def test_current_stream_query(self):
+        s = torch.accelerator.current_stream()
+        self.assertEqual(torch.accelerator.current_stream(s.device), s)
+        self.assertEqual(torch.accelerator.current_stream(s.device.index), s)
+        self.assertEqual(torch.accelerator.current_stream(str(s.device)), s)
+        other_device = torch.device("cpu")
+        with self.assertRaisesRegex(
+            ValueError, "doesn't match the current accelerator"
+        ):
+            torch.accelerator.current_stream(other_device)
+
 
 if __name__ == "__main__":
     run_tests()

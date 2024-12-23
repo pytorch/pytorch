@@ -1127,6 +1127,7 @@ exclude_patterns = [
     '**/fb/**',
     'third_party/**/*.py',
     'third_party/**/*.pyi',
+    'torch/_vendor/**',
     'torch/_inductor/fx_passes/serialized_patterns/**',
     'torch/_inductor/autoheuristic/artifacts/**',
     # These files are all grandfathered in, feel free to remove from this list
@@ -1310,21 +1311,6 @@ exclude_patterns = [
     'torch/_export/serde/upgrade.py',
     'torch/_export/trace.py',
     'torch/_export/verifier.py',
-    'torch/_vendor/**',
-    'torch/contrib/__init__.py',
-    'torch/contrib/_tensorboard_vis.py',
-    "torch/cuda/_gpu_trace.py",
-    'torch/cuda/_memory_viz.py',  # mypy: Value of type "object" is not indexable
-    'torch/fft/__init__.py',
-    'torch/func/__init__.py',
-    'torch/futures/__init__.py',
-    'torch/linalg/__init__.py',
-    'torch/monitor/__init__.py',
-    'torch/nested/__init__.py',
-    'torch/signal/__init__.py',
-    'torch/signal/windows/__init__.py',
-    'torch/signal/windows/windows.py',
-    'torch/special/__init__.py',
     'torch/testing/_internal/__init__.py',
     'torch/testing/_internal/autocast_test_lists.py',
     'torch/testing/_internal/autograd_function_db.py',
@@ -1478,7 +1464,6 @@ exclude_patterns = [
     'torch/utils/viz/__init__.py',
     'torch/utils/viz/_cycles.py',
     'torch/utils/weak.py',
-    'torch/xpu/_gpu_trace.py',
 ]
 init_command = [
     'python3',

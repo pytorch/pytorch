@@ -1509,7 +1509,7 @@ def _clone_instructions(instructions):
     return copied
 
 
-@functools.cache
+@functools.lru_cache
 def _cached_cleaned_instructions(code, safe=False) -> Sequence[Instruction]:
     instructions = list(map(convert_instruction, dis.get_instructions(code)))
     check_offsets(instructions)
