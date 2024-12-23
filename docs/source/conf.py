@@ -1922,6 +1922,17 @@ coverage_ignore_functions = [
     # torch.utils.data.datapipes.dataframe.dataframes
     "disable_capture",
     "get_val",
+    # torch.utils.data.datapipes.gen_pyi
+    "extract_class_name",
+    "extract_method_name",
+    "find_file_paths",
+    "gen_from_template",
+    "get_method_definitions",
+    "materialize_lines",
+    "parse_datapipe_file",
+    "parse_datapipe_files",
+    "process_signature",
+    "split_outside_bracket",
     # torch.utils.data.datapipes.map.callable
     "default_fn",
     # torch.utils.data.datapipes.utils.common
