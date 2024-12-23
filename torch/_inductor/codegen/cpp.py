@@ -1687,7 +1687,7 @@ class CppVecOverrides(CppOverrides):
         exponent.update_on_args("frexp", (x,), kwargs={})
         exponent.dtype = torch.int32
         mantissa.update_on_args("frexp", (x,), kwargs={})
-        mantissa.dtype = torch.float32
+        mantissa.dtype = x.dtype
         n_vec = V.kernel._get_num_vectors(x.dtype)
         mantissa_t = (
             f"at::vec::Vectorized<{cdtype}>"
