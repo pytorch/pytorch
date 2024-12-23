@@ -71,7 +71,7 @@ class AdaptiveRoundingOptimizer:
             if isinstance(q_module, torch.nn.ReLU):
                 # Disable all inplace operations
                 q_module.inplace = False
-            if isinstance(module, (torch.nn.Conv1d, torch.nn.Linear)):
+            if isinstance(module, (torch.nn.Conv1d, torch.nn.Linear, torch.nn.Conv2d)):
                 # Knowing activation ahead-of-time would be helpful for asymmetric formulation
                 # But this is challenging in eager mode, but graph module.
                 layer_list.append((name, module, q_module))
@@ -114,11 +114,12 @@ class AdaptiveRoundingOptimizer:
             with torch.no_grad():
                 self.callback(self.model, data_, self.feed_forward_wrapper)
                 self.callback(self.q_model, data_, self.feed_forward_wrapper)
-            fp32_output = fp32_fetcher[1]
-            quant_input = quant_fetcher[0]
+            fp32_output = fp32_fetcher.pop()
+            quant_fetcher.pop()
+            quant_input = quant_fetcher.pop()
             fp_out.append(fp32_output)
             q_input.append(quant_input)
-            fp_input.append(fp32_fetcher[0])
+            fp_input.append(fp32_fetcher.pop())
         handler1.remove()
         handler2.remove()
         return q_input, fp_out, fp_input
@@ -139,6 +140,15 @@ class AdaptiveRoundingOptimizer:
                 x,
                 weight,
                 bias=module.bias,
+            )
+        elif isinstance(module, torch.nn.Conv2d):
+            out = torch.nn.functional.conv2d(
+                x,
+                weight,
+                stride=module.stride,
+                padding=module.padding,
+                dilation=module.dilation,
+                groups=module.groups,
             )
         else:
             raise NotImplementedError
@@ -219,6 +229,16 @@ class AdaptiveRoundingOptimizer:
                         q_inp,
                         q_weight,
                         bias=q_module.bias,
+                    )
+                elif isinstance(module, torch.nn.Conv2d):
+                    q_out = torch.nn.functional.conv2d(
+                        q_inp,
+                        q_weight,
+                        bias=q_module.bias,
+                        stride=q_module.stride,
+                        padding=q_module.padding,
+                        dilation=q_module.dilation,
+                        groups=q_module.groups,
                     )
                 else:
                     raise NotImplementedError
