@@ -23,7 +23,6 @@ from typing import (
 from typing_extensions import (
   Self,
   ParamSpec,
-  TypeVar,
 )
 
 import torch
