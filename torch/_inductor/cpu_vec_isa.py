@@ -192,6 +192,8 @@ class VecAVX512(VecISA):
         if not _IS_WINDOWS
         else "/arch:AVX512"
     )  # TODO: use cflags
+    if not _IS_WINDOWS and torch._C._cpu._is_avx512_fp16_supported():
+        _arch_flags = _arch_flags + " -mavx512fp16"
     _dtype_nelements = {torch.float: 16, torch.bfloat16: 32, torch.float16: 32}
 
     def __str__(self) -> str:
