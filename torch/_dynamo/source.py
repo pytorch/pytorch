@@ -506,7 +506,6 @@ class GetItemSource(ChainedSource):
                 )
             # TODO(anijain2305) - Consider separating out GetItemSource and DictGetItemSource.
             # Prevent any overridden __getitem__ method call.
-            # Ensure that we don't call the user defined getitem method.
             return f"dict.__getitem__({self.base.name()}, {self.index.name()})"
         elif self.index_is_slice:
             return f"{self.base.name()}[{self.unpack_slice()!r}]"
