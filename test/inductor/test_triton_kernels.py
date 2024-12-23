@@ -3719,7 +3719,9 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
         ) -> None:
             grid = lambda META: (triton.cdiv(N, META["BLOCK_SIZE"]),)
             if non_strict:
-                torch.library.wrap_triton(prune_by_kernel)[grid](dst, src, add_float, N=N)
+                torch.library.wrap_triton(prune_by_kernel)[grid](
+                    dst, src, add_float, N=N
+                )
             else:
                 prune_by_kernel[grid](dst, src, add_float, N=N)
 
