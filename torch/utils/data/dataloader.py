@@ -1109,6 +1109,8 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
         self._shutdown = False
         self._workers_done_event = multiprocessing_context.Event()
 
+        # TODO: pickling the dataset once upfront can further speed up start times,
+        # but would need to mimic multiprocessing's context-aware serialization logic
         self._index_queues = []
         self._workers = []
         for i in range(self._num_workers):
@@ -1137,15 +1139,21 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
                 ),
             )
             w.daemon = True
-            # NB: Process.start() actually take some time as it needs to
-            #     start a process and pass the arguments over via a pipe.
-            #     Therefore, we only add a worker to self._workers list after
-            #     it started, so that we do not call .join() if program dies
-            #     before it starts, and __del__ tries to join but will get:
-            #     AssertionError: can only join a started process.
-            w.start()
             self._index_queues.append(index_queue)
             self._workers.append(w)
+
+        # Start all workers in parallel using threads, because `Process.start()`
+        # doesn't block the GIL. Since the dataset object has to be piped from
+        # the main process to the workers, this significantly improves startup
+        # time when the dataset is large.
+        threads = []
+        for w in self._workers:
+            thread = threading.Thread(target=w.start)
+            thread.start()
+            threads.append(thread)
+
+        for thread in threads:
+            thread.join()
 
         if self._pin_memory:
             self._pin_memory_thread_done_event = threading.Event()
