@@ -4,11 +4,10 @@ from typing import List, Optional, Tuple, Union
 
 from torch import Tensor
 
-from .adam import _single_tensor_adam, Adam, adam
+from .adam import Adam, adam
 from .optimizer import (
     _capturable_doc,
     _differentiable_doc,
-    _disable_dynamo_if_unsupported,
     _foreach_doc,
     _fused_doc,
     _maximize_doc,
@@ -120,7 +119,7 @@ AdamW.__doc__ = (
 )
 
 
-@_disable_dynamo_if_unsupported(single_tensor_fn=_single_tensor_adam)
+# @_disable_dynamo_if_unsupported logic occurs in the decorator that's applied to adam
 def adamw(
     params: List[Tensor],
     grads: List[Tensor],
