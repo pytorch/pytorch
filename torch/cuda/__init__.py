@@ -642,14 +642,41 @@ def set_stream(stream: Stream):
     )
 
 
-def _parse_visible_devices() -> Union[List[int], List[str]]:
-    r"""Parse CUDA_VISIBLE_DEVICES environment variable."""
-    var = os.getenv("CUDA_VISIBLE_DEVICES")
 
+def _parse_visible_devices() -> Union[List[int], List[str]]:
+    """Parse CUDA_VISIBLE_DEVICES or HIP_VISIBLE_DEVICES environment variables.
+
+    Returns:
+        List[int] or List[str]: Device IDs based on environment variables:
+            - Returns List[str] for GPU-* or MIG-* device specifications
+            - Returns List[int] for numerical device specifications
+            - Returns list(range(64)) if no environment variables are set
+            - Returns empty list if there are duplicate device IDs
+            - Stops parsing at first negative number or invalid device ID
+
+    Raises:
+        RuntimeError: If both CUDA_VISIBLE_DEVICES and HIP_VISIBLE_DEVICES are set
+
+    Notes:
+        - For numerical IDs, follows strtoul-like parsing where '1gpu2,2ampere' 
+          is treated as '1,2'
+        - For GPU-* and MIG-* prefixes, requires exact prefix matching
+        - HIP devices are checked first if torch.version.hip is True
+    """
+    cuda_devices = os.getenv("CUDA_VISIBLE_DEVICES")
+    hip_devices = os.getenv("HIP_VISIBLE_DEVICES")
+
+    if cuda_devices is not None and hip_devices is not None:
+        raise RuntimeError(
+            "Both CUDA_VISIBLE_DEVICES and HIP_VISIBLE_DEVICES are set. "
+            "Please set only one of these environment variables."
+        )
+
+    var = None
     if torch.version.hip:
-        hip_devices = os.getenv("HIP_VISIBLE_DEVICES")
-        if hip_devices is not None:
-            var = hip_devices
+        var = hip_devices
+    if var is None:
+        var = cuda_devices
 
     if var is None:
         return list(range(64))
