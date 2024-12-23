@@ -1172,7 +1172,7 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
                 )
                 current_device = custom_device_mod.current_device()
             elif self._pin_memory_device is None:
-                current_device = torch.accelerator.current_device_idx()
+                current_device = torch.accelerator.current_device_index()
             pin_memory_thread = threading.Thread(
                 target=_utils.pin_memory._pin_memory_loop,
                 args=(
