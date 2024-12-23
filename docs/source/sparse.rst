@@ -68,7 +68,7 @@ indices of non-zero elements are stored in this case.
 PyTorch currently supports :ref:`COO<sparse-coo-docs>`, :ref:`CSR<sparse-csr-docs>`,
 :ref:`CSC<sparse-csc-docs>`, :ref:`BSR<sparse-bsr-docs>`, and :ref:`BSC<sparse-bsc-docs>`.
 
-We also have a prototype implementation to support :ref: `semi-structured sparsity<sparse-semi-structured-docs>`.
+We also have a prototype implementation to support :ref:`semi-structured sparsity<sparse-semi-structured-docs>`.
 Please see the references for more details.
 
 Note that we provide slight generalizations of these formats.
@@ -99,9 +99,9 @@ better viewed as sparse collections of vectors instead of scalars.
 In this example we create a 3D Hybrid COO Tensor with 2 sparse and 1 dense dimension
 from a 3D strided Tensor. If an entire row in the 3D strided Tensor is zero, it is
 not stored. If however any of the values in the row are non-zero, they are stored
-entirely. This reduces the number of indices since we need one index one per row instead
-of one per element. But it also increases the amount of storage for the values. Since
-only rows that are *entirely* zero can be emitted and the presence of any non-zero
+entirely. This reduces the number of indices since we need one index per row instead
+of one per element. But it also increases the amount of storage for the values since
+only rows that are *entirely* zero can be omitted and the presence of any non-zero
 valued elements cause the entire row to be stored.
 
     >>> t = torch.tensor([[[0., 0], [1., 2.]], [[0., 0], [3., 4.]]])
@@ -116,14 +116,14 @@ valued elements cause the entire row to be stored.
 Operator overview
 +++++++++++++++++
 
-Fundamentally, operations on Tensor with sparse storage formats behave the same as
-operations on Tensor with strided (or other) storage formats. The particularities of
+Fundamentally, operations on tensors with sparse storage formats behave the same as
+operations on tensors with strided (or other) storage formats. The particularities of
 storage, that is the physical layout of the data, influences the performance of
 an operation but should not influence the semantics.
 
 
 We are actively increasing operator coverage for sparse tensors. Users should not
-expect support same level of support as for dense Tensors yet.
+expect support same level of support as for dense tensors yet.
 See our :ref:`operator<sparse-ops-docs>` documentation for a list.
 
     >>> b = torch.tensor([[0, 0, 1, 2, 3, 0], [4, 5, 0, 6, 0, 0]])
@@ -151,7 +151,7 @@ then run the operation.
 
 We are aware that some users want to ignore compressed zeros for operations such
 as `cos` instead of preserving the exact semantics of the operation. For this we
-can point to torch.masked and its MaskedTensor, which is in turn also backed and
+can point to :mod:`torch.masked` and its :class:`MaskedTensor`, which is in turn also backed and
 powered by sparse storage formats and kernels.
 
 Also note that, for now, the user doesn't have a choice of the output layout. For example,
