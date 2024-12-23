@@ -2,7 +2,7 @@
 import functools
 import itertools
 import logging
-from typing import Any, cast, Dict, Sequence, Tuple
+from typing import Any, Callable, cast, Dict, Sequence, Tuple
 
 import sympy
 
@@ -32,16 +32,18 @@ def triton_config(num_stages, num_warps, **kwargs):
     return Config(kwargs, num_stages=num_stages, num_warps=num_warps)
 
 
-def build_rocm_gemm_configs(configs):
+def build_rocm_gemm_configs(
+    configs,
+) -> Callable[[], Sequence[Tuple[int, int, int, int, int]]]:
     rocm_num_stages = get_backend_num_stages()
-    return tuple((c[0], c[1], c[2], rocm_num_stages, c[4]) for c in configs)
+    return lambda: tuple({(c[0], c[1], c[2], rocm_num_stages, c[4]) for c in configs})
 
 
 def filtered_configs(
     m: int,
     n: int,
     k: int,
-    configs: Sequence[Tuple[int, int, int, int, int]],
+    configs: Callable[[], Sequence[Tuple[int, int, int, int, int]]],
     has_int8_tensor=False,
     scale=1,
     exclude=lambda m, n, k: False,
@@ -49,6 +51,7 @@ def filtered_configs(
     """
     Heuristic to shrink configs when they are bigger than the input size
 
+    :param configs: a function that returns a list/sequence of configs
     :param scale: scale factor applied to the config values
     :param exclude: whether a given config should be excluded
     """
@@ -85,7 +88,7 @@ def filtered_configs(
         min_block_size_k,
     )
     used = OrderedSet[tuple[int, int, int, int, int, int]]()
-    for block_m, block_n, block_k, num_stages, num_warps in configs:
+    for block_m, block_n, block_k, num_stages, num_warps in configs():
         # shrink configs for small sizes
         block_m = max(min(int(block_m * scale), m), min_block_size)
         block_n = max(min(int(block_n * scale), n), min_block_size)
@@ -149,38 +152,43 @@ def filtered_configs(
 # List of dictionaries to store the kernel configs. Configs that evaluate to true
 # will be utilised on the target platform. The configs are as follows:
 # (BLOCK_M, BLOCK_N, BLOCK_K, num_stages, num_warps)
-mm_kernel_configs = (
-    [
-        {"config": (32, 32, 16, 1, 2), "cond": True},
-        {"config": (32, 32, 128, 2, 4), "cond": True},
-        {"config": (32, 64, 32, 5, 8), "cond": True},
-        {"config": (64, 32, 32, 5, 8), "cond": True},
-        {"config": (64, 32, 128, 5, 4), "cond": True},
-        {"config": (64, 64, 16, 2, 4), "cond": True},
-        {"config": (64, 64, 32, 2, 4), "cond": True},
-        {"config": (64, 64, 64, 3, 8), "cond": True},
-        {"config": (64, 64, 128, 5, 4), "cond": True},
-        {"config": (64, 128, 32, 3, 4), "cond": True},
-        {"config": (64, 128, 32, 4, 8), "cond": True},
-        {"config": (64, 128, 64, 3, 4), "cond": True},
-        {"config": (64, 128, 128, 4, 4), "cond": True},
-        {"config": (128, 64, 32, 3, 4), "cond": True},
-        {"config": (128, 64, 32, 4, 8), "cond": True},
-        {"config": (128, 128, 32, 2, 8), "cond": True},
-        {"config": (128, 128, 32, 3, 4), "cond": True},
-        {"config": (128, 128, 64, 3, 4), "cond": True},
-        {"config": (128, 128, 64, 5, 8), "cond": True},
-    ]
-    if inductor_config.max_autotune_gemm_search_space != "EXHAUSTIVE"
-    else [
-        {"config": (BLOCK_M, BLOCK_N, BLOCK_K, num_stages, num_warps), "cond": True}
-        for BLOCK_M, BLOCK_N, BLOCK_K in itertools.product(
-            [16, 32, 64, 128, 256], repeat=3
-        )
-        for num_stages in [1, 2, 3, 4, 5]
-        for num_warps in [2, 4, 8]
-    ]
-)
+_mm_kernel_configs = [
+    {"config": (32, 32, 16, 1, 2), "cond": True},
+    {"config": (32, 32, 128, 2, 4), "cond": True},
+    {"config": (32, 64, 32, 5, 8), "cond": True},
+    {"config": (64, 32, 32, 5, 8), "cond": True},
+    {"config": (64, 32, 128, 5, 4), "cond": True},
+    {"config": (64, 64, 16, 2, 4), "cond": True},
+    {"config": (64, 64, 32, 2, 4), "cond": True},
+    {"config": (64, 64, 64, 3, 8), "cond": True},
+    {"config": (64, 64, 128, 5, 4), "cond": True},
+    {"config": (64, 128, 32, 3, 4), "cond": True},
+    {"config": (64, 128, 32, 4, 8), "cond": True},
+    {"config": (64, 128, 64, 3, 4), "cond": True},
+    {"config": (64, 128, 128, 4, 4), "cond": True},
+    {"config": (128, 64, 32, 3, 4), "cond": True},
+    {"config": (128, 64, 32, 4, 8), "cond": True},
+    {"config": (128, 128, 32, 2, 8), "cond": True},
+    {"config": (128, 128, 32, 3, 4), "cond": True},
+    {"config": (128, 128, 64, 3, 4), "cond": True},
+    {"config": (128, 128, 64, 5, 8), "cond": True},
+]
+
+
+_mm_kernel_configs_exhaustive = [
+    {"config": (BLOCK_M, BLOCK_N, BLOCK_K, num_stages, num_warps), "cond": True}
+    for BLOCK_M, BLOCK_N, BLOCK_K in itertools.product([16, 32, 64, 128, 256], repeat=3)
+    for num_stages in [1, 2, 3, 4, 5]
+    for num_warps in [2, 4, 8]
+]
+
+
+def mm_kernel_configs():
+    # wrapped in a function to enable runtime edits to inductor_config.max_autotune_gemm_search_space
+    if inductor_config.max_autotune_gemm_search_space == "EXHAUSTIVE":
+        return _mm_kernel_configs_exhaustive
+    return _mm_kernel_configs
+
 
 # these are only used in tuned_mm when AutoHeuristic is enabled
 # the idea is that when AutoHeuristic collects data to learn a heuristic, more configs are autotuned
@@ -223,11 +231,12 @@ mixed_mm_kernel_configs_small_m = [
     {"config": (16, 128, 256, 5, 8), "cond": True},
 ]
 
-mixed_mm_kernel_configs = (
-    mm_kernel_configs + mixed_mm_kernel_configs_small_m
-    if inductor_config.max_autotune_gemm_search_space != "EXHAUSTIVE"
-    else mm_kernel_configs
-)
+def mixed_mm_kernel_configs():
+    # wrapped in a function to enable runtime edits to inductor_config.max_autotune_gemm_search_space
+    if inductor_config.max_autotune_gemm_search_space != "EXHAUSTIVE":
+        return mm_kernel_configs() + mixed_mm_kernel_configs_small_m
+    return mm_kernel_configs
+
 
 persistent_mm_kernel_configs = [
     {"config": (128, 256, 64, 3, 8), "cond": True},
@@ -351,41 +360,61 @@ scaled_persistent_mm_kernel_configs = [
 
 
 # Create filtered list of configs based on cond evaluation
-mm_platform_configs = tuple(
-    cast(Tuple[int, int, int, int, int], config["config"])
-    for config in mm_kernel_configs
-    if config["cond"]
-)
-extra_mm_platform_configs = tuple(
-    cast(Tuple[int, int, int, int, int], config["config"])
-    for config in extra_mm_kernel_configs
-    if config["cond"]
-)
-int8_platform_configs = tuple(
-    cast(Tuple[int, int, int, int, int], config["config"])
-    for config in int8_mm_kernel_configs
-    if config["cond"]
-)
-mixed_mm_platform_configs = tuple(
-    cast(Tuple[int, int, int, int, int], config["config"])
-    for config in mixed_mm_kernel_configs
-    if config["cond"]
-)
-persistent_mm_platform_configs = tuple(
-    cast(Tuple[int, int, int, int, int], config["config"])
-    for config in persistent_mm_kernel_configs
-    if config["cond"]
-)
-scaled_mm_platform_configs = tuple(
-    cast(Tuple[int, int, int, int, int], config["config"])
-    for config in scaled_mm_kernel_configs
-    if config["cond"]
-)
-scaled_persistent_mm_platform_configs = tuple(
-    cast(Tuple[int, int, int, int, int], config["config"])
-    for config in scaled_persistent_mm_kernel_configs
-    if config["cond"]
-)
+def mm_platform_configs() -> Sequence[Tuple[int, int, int, int, int]]:
+    return tuple(
+        cast(Tuple[int, int, int, int, int], config["config"])
+        for config in mm_kernel_configs()
+        if config["cond"]
+    )
+
+
+def extra_mm_platform_configs() -> Sequence[Tuple[int, int, int, int, int]]:
+    return tuple(
+        cast(Tuple[int, int, int, int, int], config["config"])
+        for config in extra_mm_kernel_configs
+        if config["cond"]
+    )
+
+
+def int8_platform_configs() -> Sequence[Tuple[int, int, int, int, int]]:
+    return tuple(
+        cast(Tuple[int, int, int, int, int], config["config"])
+        for config in int8_mm_kernel_configs
+        if config["cond"]
+    )
+
+
+def mixed_mm_platform_configs() -> Sequence[Tuple[int, int, int, int, int]]:
+    return tuple(
+        cast(Tuple[int, int, int, int, int], config["config"])
+        for config in mixed_mm_kernel_configs()
+        if config["cond"]
+    )
+
+
+def persistent_mm_platform_configs() -> Sequence[Tuple[int, int, int, int, int]]:
+    return tuple(
+        cast(Tuple[int, int, int, int, int], config["config"])
+        for config in persistent_mm_kernel_configs
+        if config["cond"]
+    )
+
+
+def scaled_mm_platform_configs() -> Sequence[Tuple[int, int, int, int, int]]:
+    return tuple(
+        cast(Tuple[int, int, int, int, int], config["config"])
+        for config in scaled_mm_kernel_configs
+        if config["cond"]
+    )
+
+
+def scaled_persistent_mm_platform_configs() -> Sequence[Tuple[int, int, int, int, int]]:
+    return tuple(
+        cast(Tuple[int, int, int, int, int], config["config"])
+        for config in scaled_persistent_mm_kernel_configs
+        if config["cond"]
+    )
+
 
 # On ROCm convert num_stages to improve performance
 if torch.version.hip and torch.cuda.is_available():
