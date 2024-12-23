@@ -200,20 +200,6 @@ inline std::string getKeyFromDevice(at::Device& device) {
   return std::to_string(device.index());
 }
 
-inline at::DeviceIndex getIndexFromDeviceKey(const std::string& deviceKey) {
-  // initialize the device index to -1, which is an invalid value.
-  int index = -1;
-  try {
-    index = std::stoi(deviceKey);
-  } catch (const std::invalid_argument& e) {
-    LOG(ERROR) << c10::str(
-        "Invalid deviceKey: ", deviceKey, ",", e.what(), ".");
-  } catch (const std::out_of_range& e) {
-    LOG(ERROR) << "Out of range: " << e.what();
-  }
-  return static_cast<at::DeviceIndex>(index);
-}
-
 std::string getKeySendRecv(int myRank, int peer) {
   int lowRank = myRank < peer ? myRank : peer;
   int highRank = myRank < peer ? peer : myRank;
@@ -778,7 +764,7 @@ bool ProcessGroupNCCL::WorkNCCL::wait(std::chrono::milliseconds timeout) {
   // upgrade. Once a NCCL version is qualified, this code should not be needed
   // at runtime.
 #ifdef PGNCCL_ENABLE_HASH
-  if (distDebugLevel_ >= DebugLevel::Detail) {
+  if (enableCollectiveHashDebug_.load()) {
     auto numel = getTensorsNumel(*outputs_);
     auto hashValue = hashTensors(*outputs_);
     PRINT_COLLECTIVE_HASH_SIGNATURE(
@@ -911,7 +897,7 @@ ProcessGroupNCCL::ProcessGroupNCCL(
       getCvarInt(TORCH_NCCL_WAIT_TIMEOUT_DUMP_MILSEC, 60 * 1000 /*60 Sec*/);
   coordCheckIntervalMilSec_ = getCvarInt(TORCH_NCCL_COORD_CHECK_MILSEC, 1000);
   traceBufferSize_ = getCvarInt(TORCH_NCCL_TRACE_BUFFER_SIZE, 2000);
-  enableCollecticeHashDebug_ = (dist_debug_level_ >= DebugLevel::Detail);
+  enableCollectiveHashDebug_ = (dist_debug_level_ >= DebugLevel::Detail);
   // store_ usually is wrapped with PrefixStore and the prefix is different
   // across different ProcessGroupNCCL(PG) instances. We need to get the
   // underlying non-PrefixStore for sharing global information shared across
@@ -3298,7 +3284,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collectiveCoalesced(
 // upgrade. Once a NCCL version is qualified, this code should not be needed at
 // runtime.
 #ifdef PGNCCL_ENABLE_HASH
-  if (enableCollecticeHashDebug_.load()) {
+  if (enableCollectiveHashDebug_.load()) {
     auto numel = getTensorsNumel(inputs);
     auto hashValue = hashTensors(inputs);
     PRINT_COLLECTIVE_HASH_SIGNATURE(
