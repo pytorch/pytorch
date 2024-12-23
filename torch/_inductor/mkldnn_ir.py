@@ -21,10 +21,38 @@ from .ir import (
     MutationOutput,
     NoneLayout,
     TensorBox,
+    get_stride_order
 )
 from .utils import convert_shape_to_inductor, pad_listlike
 from .virtualized import V
+from .._meta_registrations import pooling_output_shape_pad_lr
 
+def _prepare_max_pool_create(
+    x: "TensorBox",
+    kernel_size: List[int],
+    stride: List[int],
+    padding: List[int],
+    dilation: List[int],
+    ceil_mode: bool
+):
+    stride_order = get_stride_order(x.get_stride())
+    inputSize = x.get_layout().size
+    if len(stride) == 0:
+        dH, dW = kernel_size[0], kernel_size[1]
+    else:
+        dH, dW = stride[0], stride[1]
+    outputHeight = pooling_output_shape_pad_lr(inputSize[-2], kernel_size[0], padding[0], padding[0], dH, dilation[0], ceil_mode)
+    outputWidth = pooling_output_shape_pad_lr(inputSize[-1], kernel_size[1], padding[1], padding[1], dW, dilation[1], ceil_mode)
+    output_size = inputSize
+    output_size[-2] = outputHeight
+    output_size[-1] = outputWidth
+    kernel_layout = FixedLayout(
+        x.get_device_or_error(),
+        x.get_dtype(),
+        convert_shape_to_inductor(output_size),
+        convert_shape_to_inductor(stride_order),
+    )
+    return kernel_layout
 
 def _prepare_convolution_fusion_create(
     cls,
@@ -271,6 +299,47 @@ def _create_output_node(packed):
     packed.outputs = [output_ir]
     return output_ir
 
+class MaxPooldia(ExternKernelAlloc):
+    def __init__(
+        self,
+        layout,
+        inputs,
+        constant_args=(),
+    ) -> None:
+        super().__init__(
+            layout,
+            inputs,
+            constant_args,
+            None,
+            op_overload=torch.ops.aten.mkldnn_max_pool2d.default,
+            cpp_kernel_name="aoti_torch_cpu_mkldnn_max_pool2d",
+        )
+
+    def codegen(self, wrapper):
+        wrapper.include_extra_header("torch/csrc/inductor/aoti_torch/c/shim_mkldnn.h")
+        super().codegen(wrapper)
+
+    @classmethod
+    def create(
+        cls,
+        x: "TensorBox",
+        kernel_size: List[int],
+        stride: List[int],
+        padding: List[int],
+        dilation: List[int],
+        ceil_mode: bool
+    ):
+        kernel_layout = _prepare_max_pool_create(
+            x, kernel_size, stride, padding, dilation, ceil_mode
+        )
+        inputs = [x]
+        constant_args = [kernel_size, stride, padding, dilation, ceil_mode]
+        maxpool = MaxPooldia(
+            layout=kernel_layout,
+            inputs=inputs,
+            constant_args=constant_args,
+        )
+        return _create_output_node(maxpool)
 
 class ConvolutionUnary(ExternKernelAlloc):
     def __init__(

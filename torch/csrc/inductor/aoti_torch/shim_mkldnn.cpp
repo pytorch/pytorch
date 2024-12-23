@@ -9,6 +9,7 @@
 #endif
 #include <ATen/native/mkldnn/Conv.h>
 #include <ATen/native/mkldnn/Linear.h>
+#include <ATen/native/mkldnn/Pooling.h>
 #include <ATen/native/quantized/cpu/qconv.h>
 #include <ATen/native/quantized/cpu/qlinear.h>
 
@@ -24,6 +25,30 @@ c10::List<T> convert_to_c10_List(const T* scalars, const int64_t len) {
     scalars_list.emplace_back(scalars[i]);
   }
   return scalars_list;
+}
+
+AOTITorchError aoti_torch_cpu_mkldnn_max_pool2d(
+    AtenTensorHandle input,
+    const int64_t* kernel_size,
+    int64_t kernel_len_,
+    const int64_t* stride,
+    int64_t stride_len_,
+    const int64_t* padding,
+    int64_t padding_len_,
+    const int64_t* dilation,
+    int64_t dilation_len_,
+    bool ceil_mode,
+    AtenTensorHandle* ret0) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    auto tmp_result = at::native::mkldnn_max_pool2d(
+        *tensor_handle_to_tensor_pointer(input),
+        pointer_to_list<int64_t>(kernel_size, kernel_len_),
+        pointer_to_list<int64_t>(stride, stride_len_),
+        pointer_to_list<int64_t>(padding, padding_len_),
+        pointer_to_list<int64_t>(dilation, dilation_len_),
+        ceil_mode);
+    *ret0 = new_tensor_handle(std::move(tmp_result));
+  });
 }
 
 AOTITorchError aoti_torch_cpu_mkldnn__convolution_pointwise_binary(

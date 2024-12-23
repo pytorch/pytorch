@@ -20,6 +20,7 @@
 #include <ATen/ops/mkldnn_max_pool2d_native.h>
 #include <ATen/ops/mkldnn_max_pool3d_backward_native.h>
 #include <ATen/ops/mkldnn_max_pool3d_native.h>
+#include <ATen/ops/_to_dense_native.h>
 #endif
 
 
@@ -211,7 +212,13 @@ static Tensor _mkldnn_pooling(
   const auto padding_vec = expand_param_if_needed(padding, "padding", dims);
   auto dilation_vec = expand_param_if_needed(dilation, "dilation", dims);
 
-  const ideep::tensor& x = itensor_from_mkldnn(input);
+  bool is_mkldnn = input.is_mkldnn();
+  auto input_ = is_mkldnn
+      ? input
+      : input.contiguous(input.suggest_memory_format());
+  bool is_channels_last = is_mkldnn ? false :
+      input_.suggest_memory_format() == at::MemoryFormat::ChannelsLast;
+  const ideep::tensor x = itensor_from_tensor(input_, /*from_const_data_ptr*/true);
   std::vector<int64_t> output_sizes;
 
   auto padding_vec_r = padding_vec;
@@ -267,8 +274,14 @@ static Tensor _mkldnn_pooling(
       && !((input.requires_grad() && at::GradMode::is_enabled()) || input._fw_grad(/*level */ 0).defined())) {
     aprop_kind = ideep::prop_kind::forward_inference;
   }
+  auto output = at::empty(
+      output_sizes,
+      input_.options().memory_format(input_.suggest_memory_format()));
 
   ideep::tensor y;
+  if (is_channels_last) {
+    y = itensor_view_from_dense(output, /*from_const_data_ptr*/true);
+  }
   ideep::pooling_forward::compute(
       x,
       {output_sizes.cbegin(), output_sizes.cend()},
@@ -280,7 +293,13 @@ static Tensor _mkldnn_pooling(
       algo,
       aprop_kind);
 
-  return new_with_itensor_mkldnn(std::move(y), optTypeMetaToScalarType(input.options().dtype_opt()), input.options().device_opt());
+  if (is_channels_last) {
+    return output;
+  } else if (is_mkldnn) {
+    return new_with_itensor_mkldnn(std::move(y), optTypeMetaToScalarType(input.options().dtype_opt()), input.options().device_opt());
+  } else {
+    return mkldnn_to_dense(new_with_itensor_mkldnn(std::move(y), optTypeMetaToScalarType(input.options().dtype_opt()), input.options().device_opt()));
+  }
 }
 
 static Tensor _mkldnn_pooling_backward(
