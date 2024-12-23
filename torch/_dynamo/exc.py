@@ -131,6 +131,11 @@ class AttributeMutationError(Unsupported):
         super().__init__(msg)
 
 
+class InfiniteGeneratorError(Unsupported):
+    def __init__(self, msg) -> None:
+        super().__init__(msg)
+
+
 class CondOpArgsMismatchError(ArgsMismatchError):
     """
     Internal error from cond() due to arguments mismatch.
