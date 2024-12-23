@@ -3721,7 +3721,7 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
             prune_by_kernel[grid](dst, src, add_float, N=N)
 
         if tracing == "non-strict":
-            decorator = torch.library.triton_op(f"{libname}::{opname}", mutates_args={})
+            decorator = torch.library.triton_op(f"{libname}::{opname}", mutates_args={"dst"})
         else:
             # we can just pass the function 'f' for dynamo
             decorator = f
@@ -3734,10 +3734,11 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
         compiled_f(dst, src, 1.5, N)
 
         if with_perf_model:
+            # when applying the perf_model: kwargs["BLOCK_SIZE"] * -1, the largest config (BLOCK_SIZE==128) is selected
             self.assertEqual(len(records), 1)
             self.assertEqual(src + 1.5, dst)
         else:
-            # We require the largest config to be picked for the correct result (BLOCK_SIZE==128)
+            # without the perf_model, the BLOCK_SIZE==32, and as a result dst is not modified and remains equal to src
             self.assertEqual(src, dst)
             self.assertEqual(len(records), 3)
             self.assertTrue(records["run_early_config_prune"])
