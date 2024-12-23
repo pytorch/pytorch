@@ -3693,12 +3693,13 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
             )
             add_compiled(x, y).mean()
 
-    @unittest.skipIf(not has_triton_package(), "requires triton")
+    @requires_gpu
     @common_utils.parametrize(
         "backend", ["non-strict", "eager", "aot_eager", "inductor"]
     )
     @common_utils.parametrize("with_perf_model", [True, False])
     def test_triton_kernel_prune_configs_by(self, backend, with_perf_model):
+
         # for non-strict mode
         libname = "my_cool_namespace"
         opname = "my_triton_operator"
@@ -3781,7 +3782,6 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
             self.assertTrue(records["capture_named_args"])
 
     @requires_gpu
-    @unittest.skipIf(not has_triton_package(), "requires triton")
     @common_utils.parametrize("backend", ["eager", "aot_eager", "inductor"])
     @common_utils.parametrize("with_perf_model", [True, False])
     def test_triton_kernel_prune_configs_by_recompile(self, backend, with_perf_model):
