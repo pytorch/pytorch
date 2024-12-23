@@ -101,6 +101,8 @@ fi
 pushd "$PYTORCH_ROOT"
 python setup.py clean
 retry pip install -qr requirements.txt
+retry pip install mkl-include mkl-static
+export USE_STATIC_MKL=1
 case ${DESIRED_PYTHON} in
   cp31*)
     retry pip install -q --pre numpy==2.1.0
