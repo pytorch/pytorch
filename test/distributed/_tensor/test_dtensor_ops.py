@@ -98,8 +98,6 @@ dtensor_fails = {
     xfail("all"),
     xfail("allclose"),
     xfail("alias_copy"),
-    xfail("amax"),
-    xfail("amin"),
     xfail("aminmax"),
     xfail("any"),
     xfail("arange"),
