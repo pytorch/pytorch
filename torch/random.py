@@ -6,7 +6,6 @@ from typing import Generator
 import torch
 from torch._C import default_generator
 
-
 def set_rng_state(new_state: torch.Tensor) -> None:
     r"""Sets the random number generator state.
 
