@@ -3032,7 +3032,7 @@ class DictGuardManager : public GuardManager {
     return _key_value_managers[index];
   }
 
- protected: // also used by DictSubclassGuardManager
+ protected:
   Py_ssize_t _size;
   // DictGuardManager supports both exact dict type and non-exact dict type.
   // Therefore, we have to compare the type to early exit.
@@ -3040,189 +3040,6 @@ class DictGuardManager : public GuardManager {
   bool _is_exact_dict_type; // Useful to check getattr_manager validity.
   std::vector<Py_ssize_t> _indices;
   std::unordered_map<Py_ssize_t, KeyValueManager> _key_value_managers;
-};
-
-/**
- * The DictSubclassGuardManager is designed to work with dict subclasses,
- * specifically focusing on OrderedDicts. Standard dictionaries leverage the
- * PyDict_Next function to iterate over keys, values, and items. OrderedDicts,
- * on the other hand, rely on an additional linked list structure to maintain
- * keys order. Although PyDict_Next and OrderedDict generally yield the same
- * order, discrepancies arise when using OrderedDict's move_to_end method (used
- * in Pytorch hooks). `move_to_end` method only updates the linked list, leaving
- * PyDict_Next unaffected. Therefore, to accurately capture key ordering in such
- * cases, DictSubclassGuardManager directly invoke the .keys() method.
- */
-
-class DictSubclassGuardManager : public DictGuardManager {
- public:
-  DictSubclassGuardManager(
-      RootGuardManager* root,
-      std::string source,
-      py::handle example_value)
-      : DictGuardManager(root, std::move(source), example_value) {}
-
- public:
-  bool check_nopybind(PyObject* obj) override { // borrowed ref
-    // TODO(janimesh) - Implement a fast-path using dict versions.
-
-    if (Py_TYPE(obj) != _expected_type) {
-      _fail_count += 1;
-      return false;
-    }
-
-    if (PyDict_Size(obj) != _size) {
-      _fail_count += 1;
-      return false;
-    }
-
-    // Early return
-    if (_size == 0) {
-      return true;
-    }
-
-    if (!GuardManager::check_nopybind(obj)) { // NOLINT
-      _fail_count += 1;
-      // No need to shuffle the child guards, just return.
-      return false;
-    }
-
-    // Points to an element in the _indices vector.
-    size_t index_pointer = 0;
-    // Points to the key index in the dict
-    Py_ssize_t dict_pointer = 0;
-
-    // Use iter(dict.keys()) to iterate over the keys
-    py::object keys =
-        py::handle(obj).attr("keys")(); // py::object handles the references
-    PyObject* iterator = PyObject_GetIter(keys.ptr()); // new reference
-    PyObject* key = nullptr;
-
-    while (index_pointer < _indices.size() &&
-           (key = PyIter_Next(iterator))) { // new reference
-      if (dict_pointer == _indices[index_pointer]) {
-        KeyValueManager& key_value_manager = _key_value_managers[dict_pointer];
-        std::unique_ptr<GuardManager>& key_manager = key_value_manager.first;
-        if (key_manager && !key_manager->check_nopybind(key)) {
-          Py_DECREF(key);
-          Py_DECREF(iterator);
-          return false;
-        }
-
-        PyObject* value = PyDict_GetItem(obj, key); // borrowed ref
-        std::unique_ptr<GuardManager>& value_manager = key_value_manager.second;
-        if (value_manager && !value_manager->check_nopybind(value)) {
-          Py_DECREF(key);
-          Py_DECREF(iterator);
-          return false;
-        }
-
-        index_pointer++;
-      }
-      dict_pointer++;
-      Py_DECREF(key);
-    }
-
-    Py_DECREF(iterator);
-    return true;
-  }
-
-  GuardDebugInfo check_verbose_nopybind(
-      PyObject* obj) override { // borrowed ref
-    if (Py_TYPE(obj) != _expected_type) {
-      return GuardDebugInfo(false, "TYPE_MISMATCH(" + get_source() + ")", 0);
-    }
-
-    if (PyDict_Size(obj) != _size) {
-      return GuardDebugInfo(
-          false, "len(" + get_source() + ") != " + std::to_string(_size), 0);
-    }
-
-    // Early return
-    if (_size == 0) {
-      return GuardDebugInfo(true, 0);
-    }
-
-    GuardDebugInfo debug_info =
-        GuardManager::check_verbose_nopybind(obj); // NOLINT
-    if (!debug_info.result) {
-      return debug_info;
-    }
-
-    // Points to an element in the _indices vector.
-    size_t index_pointer = 0;
-    // Points to the key index in the dict
-    Py_ssize_t dict_pointer = 0;
-
-    int num_guards_executed = 0;
-
-    // Use iter(dict.keys()) to iterate over the keys
-    py::object keys =
-        py::handle(obj).attr("keys")(); // py::object handles the references
-    PyObject* iterator = PyObject_GetIter(keys.ptr()); // new reference
-    PyObject* key = nullptr;
-
-    while (index_pointer < _indices.size() &&
-           (key = PyIter_Next(iterator))) { // new reference
-      if (dict_pointer == _indices[index_pointer]) {
-        KeyValueManager& key_value_manager = _key_value_managers[dict_pointer];
-        std::unique_ptr<GuardManager>& key_manager = key_value_manager.first;
-        if (key_manager) {
-          GuardDebugInfo debug_info = key_manager->check_verbose_nopybind(key);
-          num_guards_executed += debug_info.num_guards_executed;
-          if (!debug_info.result) {
-            Py_DECREF(key);
-            Py_DECREF(iterator);
-            return GuardDebugInfo(
-                false, debug_info.verbose_code_parts, num_guards_executed);
-          }
-        }
-
-        PyObject* value = PyDict_GetItem(obj, key); // borrowed ref
-        std::unique_ptr<GuardManager>& value_manager = key_value_manager.second;
-        if (value_manager) {
-          GuardDebugInfo debug_info =
-              value_manager->check_verbose_nopybind(value);
-          num_guards_executed += debug_info.num_guards_executed;
-          if (!debug_info.result) {
-            Py_DECREF(key);
-            Py_DECREF(iterator);
-            return GuardDebugInfo(
-                false, debug_info.verbose_code_parts, num_guards_executed);
-          }
-        }
-        index_pointer++;
-      }
-      Py_DECREF(key);
-      dict_pointer++;
-    }
-
-    Py_DECREF(iterator);
-    return GuardDebugInfo(true, num_guards_executed);
-  }
-
- public: // cloning functions
-  DictSubclassGuardManager(
-      RootGuardManager* cloned_root,
-      std::string source,
-      Py_ssize_t size,
-      PyTypeObject* _expected_type,
-      bool is_exact_dict_type,
-      std::vector<Py_ssize_t> indices)
-      : DictGuardManager(
-            cloned_root,
-            std::move(source),
-            size,
-            _expected_type,
-            is_exact_dict_type,
-            std::move(indices)) {}
-
-  GuardManager* clone(
-      RootGuardManager* cloned_root,
-      const py::function& clone_filter_fn) override {
-    return clone_dict_guard_manager<DictSubclassGuardManager>(
-        cloned_root, clone_filter_fn);
-  }
 };
 
 GuardManager* clone_guard_manager(
@@ -3244,22 +3061,20 @@ std::unique_ptr<GuardManager> make_guard_manager(
     py::handle example_value,
     py::handle guard_manager_enum) {
 #if IS_PYBIND_2_13_PLUS
-  using fourobjects =
-      std::tuple<py::object, py::object, py::object, py::object>;
-  PYBIND11_CONSTINIT static py::gil_safe_call_once_and_store<fourobjects>
+  using threeobjects = std::tuple<py::object, py::object, py::object>;
+  PYBIND11_CONSTINIT static py::gil_safe_call_once_and_store<threeobjects>
       storage;
 
-  auto& [guard_manager_enum_class, base_guard_manager_enum, dict_guard_manager_enum, dict_subclass_guard_manager_enum] =
+  auto& [guard_manager_enum_class, base_guard_manager_enum, dict_guard_manager_enum] =
       storage
-          .call_once_and_store_result([]() -> fourobjects {
+          .call_once_and_store_result([]() -> threeobjects {
             py::object guard_manager_enum_class =
                 py::module_::import("torch._dynamo.guards")
                     .attr("GuardManagerType");
             return {
                 guard_manager_enum_class,
                 guard_manager_enum_class.attr("GUARD_MANAGER"),
-                guard_manager_enum_class.attr("DICT_GUARD_MANAGER"),
-                guard_manager_enum_class.attr("DICT_SUBCLASS_GUARD_MANAGER")};
+                guard_manager_enum_class.attr("DICT_GUARD_MANAGER")};
           })
           .get_stored();
 #else
@@ -3269,33 +3084,8 @@ std::unique_ptr<GuardManager> make_guard_manager(
       guard_manager_enum_class.attr("GUARD_MANAGER");
   static py::object dict_guard_manager_enum =
       guard_manager_enum_class.attr("DICT_GUARD_MANAGER");
-  static py::object dict_subclass_guard_manager_enum =
-      guard_manager_enum_class.attr("DICT_SUBCLASS_GUARD_MANAGER");
 #endif
   if (py::isinstance<py::dict>(example_value)) {
-    // The purpose of having both DictGuardManager and DictSubclassGuardManager
-    // is to handle the variability in how dictionaries and their subclasses
-    // manage key ordering.
-
-    // While inserting dictionary guards (check guards.py), we rely on the
-    // list(d.keys()) ordering. Therefore, the cpp guard equivalent must have
-    // the same keys ordering. For standard dictionaries, .keys() API internally
-    // uses PyDict_Next. So, DictGuardManager directly uses PyDict_Next to
-    // speedup the key fetches.
-
-    // But PyDict_Next might not give correct ordering for subclasses of dict.
-    // For example, OrderedDict override the .keys() API without changing the
-    // underlying datastructure. This leads to different keys ordering than the
-    // one given by PyDict_Next. We use DictSubclassGuardManager to account for
-    // this discrepancy. DictSubclassGuardManager directly calls the .keys() API
-    // to accurately capture key ordering. This approach is less efficient than
-    // using PyDict_Next (handled by DictGuardManager), but it ensures
-    // correctness.
-
-    // Since regular dicts are more common than subclasses of dicts with
-    // overridden keys method, we still optimize for the common case with
-    // DictGuardManager by relying on PyDict_Next.
-
     if (guard_manager_enum.is(base_guard_manager_enum)) {
       // For dicts that don't need to guard on keys, we can just rely on the
       // base GuardManager.
@@ -3304,10 +3094,7 @@ std::unique_ptr<GuardManager> make_guard_manager(
     } else if (guard_manager_enum.is(dict_guard_manager_enum)) {
       return std::make_unique<DictGuardManager>(
           root, std::move(source), example_value);
-    } else if (guard_manager_enum.is(dict_subclass_guard_manager_enum))
-      return std::make_unique<DictSubclassGuardManager>(
-          root, std::move(source), example_value);
-    else {
+    } else {
       throw py::type_error("Invalid guard manager enum");
     }
   }
@@ -5747,6 +5534,14 @@ PyObject* torch_c_dynamo_guards_init() {
             self.add_permitted_leaf_guard(std::make_shared<DICT_VERSION>(
                 std::move(value), std::move(verbose_code_parts)));
           })
+      .def(
+          "add_no_hasattr_guard",
+          [](DictGuardManager& self,
+             py::object attr_name,
+             py::object verbose_code_parts) -> void {
+            self.add_permitted_leaf_guard(std::make_shared<NO_HASATTR>(
+                std::move(attr_name), std::move(verbose_code_parts)));
+          })
       // Not permitted accesssors
       .def("lambda_manager", &DictGuardManager::fail_on_get_child_manager)
       .def("getitem_manager", &DictGuardManager::fail_on_get_child_manager)
@@ -5784,21 +5579,6 @@ PyObject* torch_c_dynamo_guards_init() {
           py::arg("example_value"),
           py::arg("guard_manager_enum"),
           py::return_value_policy::reference);
-
-  // Dict Guard Manager
-  py::class_< // NOLINT
-      DictSubclassGuardManager,
-      DictGuardManager,
-      std::unique_ptr<DictSubclassGuardManager>>(
-      py_m, "DictSubclassGuardManager") // NOLINT
-      .def(
-          "add_no_hasattr_guard",
-          [](DictSubclassGuardManager& self,
-             py::object attr_name,
-             py::object verbose_code_parts) -> void {
-            self.add_permitted_leaf_guard(std::make_shared<NO_HASATTR>(
-                std::move(attr_name), std::move(verbose_code_parts)));
-          });
 
   py_m.def("install_object_aliasing_guard", install_object_aliasing_guard);
   py_m.def(
