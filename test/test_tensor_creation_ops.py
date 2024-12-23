@@ -3226,8 +3226,9 @@ class TestTensorCreation(TestCase):
         t = torch.randn(2, 5, device=device)
         self.assertIsNone(t.untyped_storage().filename)
 
-    def test_refs_tensor(self, device):
-        self.assertEqual(torch._refs.tensor([], device=device), torch.tensor([], device=device))
+    @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
+    def test_refs_tensor(self, device, dtype):
+        self.assertEqual(torch._refs.tensor([], device=device, dtype=dtype), torch.tensor([], device=device, dtype=dtype))
 
 
 # Class for testing random tensor creation ops, like torch.randint
