@@ -195,8 +195,8 @@ class RandomSampler(Sampler[int]):
             ).tolist()
         else:
             for _ in range(self.num_samples // n):
-                yield from torch.randperm(n, generator=generator).tolist()
-            yield from torch.randperm(n, generator=generator).tolist()[
+                yield from torch.randperm(n, generator=generator, device="cpu").tolist()
+            yield from torch.randperm(n, generator=generator, device="cpu").tolist()[
                 : self.num_samples % n
             ]
 
