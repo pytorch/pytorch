@@ -2086,7 +2086,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
 
     def test_no_recompile_on_nn_guarded_modules(self):
         size = (10, 10)
-        cache_size_limit = 1
+        recompile_limit = 1
         num_submodules = 4
         cnts = torch._dynamo.testing.CompileCounterWithBackend("eager")
 
@@ -2116,8 +2116,8 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         with unittest.mock.patch(
             "torch._dynamo.config.error_on_recompile", True
         ), unittest.mock.patch(
-            "torch._dynamo.config.cache_size_limit",
-            cache_size_limit,
+            "torch._dynamo.config.recompile_limit",
+            recompile_limit,
         ):
             x = torch.randn(*size, requires_grad=True)
             mod(x)
@@ -2126,7 +2126,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
             else:
                 self.assertEqual(cnts.frame_count, num_submodules)
 
-    @patch.object(torch._dynamo.config, "accumulated_cache_size_limit", 2)
+    @patch.object(torch._dynamo.config, "accumulated_recompile_limit", 2)
     @patch.object(torch._dynamo.config, "inline_inbuilt_nn_modules", False)
     def test_recompile_limit_on_freed_module(self):
         class Mod(torch.nn.Module):
@@ -2152,7 +2152,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
     @patch.object(torch._dynamo.config, "inline_inbuilt_nn_modules", True)
     def test_inline_inbuilt_nn_modules(self):
         size = (10, 10)
-        cache_size_limit = 1
+        recompile_limit = 1
         num_submodules = 4
         cnts = torch._dynamo.testing.CompileCounterWithBackend("eager")
 
@@ -2182,15 +2182,15 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         with unittest.mock.patch(
             "torch._dynamo.config.error_on_recompile", True
         ), unittest.mock.patch(
-            "torch._dynamo.config.cache_size_limit",
-            cache_size_limit,
+            "torch._dynamo.config.recompile_limit",
+            recompile_limit,
         ):
             x = torch.randn(*size, requires_grad=True)
             mod(x)
             self.assertEqual(cnts.frame_count, 1)
 
-    def test_cache_size_limit_on_guarded_nn_modules(self):
-        cache_size_limit = 2
+    def test_recompile_limit_on_guarded_nn_modules(self):
+        recompile_limit = 2
         num_submodules = 4
         cnts = torch._dynamo.testing.CompileCounterWithBackend("eager")
 
@@ -2219,8 +2219,8 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         # therefore the total number of expected frame count is 2 *
         # num_submodules.
         with unittest.mock.patch(
-            "torch._dynamo.config.cache_size_limit",
-            cache_size_limit,
+            "torch._dynamo.config.recompile_limit",
+            recompile_limit,
         ):
             for size in [
                 (4,),
