@@ -193,7 +193,9 @@ class TestSplitOutputType(TestCase):
                     relu
         """
         tag_node = defaultdict(list)
-        gm: torch.fx.GraphModule = torch.export.export(module, (inputs,)).module()
+        gm: torch.fx.GraphModule = torch.export.export(
+            module, (inputs,), strict=True
+        ).module()
         # Add tag to all nodes and build dictionary record tag to call_module nodes
         for node in gm.graph.nodes:
             if "conv" in node.name:
