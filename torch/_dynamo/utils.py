@@ -983,13 +983,15 @@ class CompilationMetrics:
 
         all_metrics = {**legacy_metrics, **metrics}
 
-        # Pre-processing:
+        # Processing before logging:
         all_metrics["inductor_fx_remote_cache_hit_keys"] = collection_to_str(
             all_metrics.get("inductor_fx_remote_cache_hit_keys")
         )
         all_metrics["inductor_fx_remote_cache_miss_keys"] = collection_to_str(
             all_metrics.get("inductor_fx_remote_cache_miss_keys")
         )
+        compile_id = all_metrics.get("compile_id")
+        all_metrics["compile_id"] = str(compile_id) if compile_id else None
 
         return cls(**all_metrics)
 
@@ -1112,7 +1114,7 @@ def record_compilation_metrics(
         compile_id = torch._guards.CompileContext.current_compile_id()
 
     common_metrics = {
-        "compile_id": str(compile_id) if compile_id else None,
+        "compile_id": compile_id,
         "start_time_us": start_time_ns // 1000,
         "end_time_us": end_time_ns // 1000,
         "duration_us": (end_time_ns - start_time_ns) // 1000,
@@ -1128,7 +1130,7 @@ def record_compilation_metrics(
         "inductor_fx_remote_cache_backend_type": inductor_fx_remote_cache_backend_type,
     }
 
-    compilation_metrics = CompilationMetrics.create({**metrics, **common_metrics})
+    compilation_metrics = CompilationMetrics.create({**common_metrics, **metrics})
     _compilation_metrics.append(compilation_metrics)
 
     name = "compilation_metrics"
