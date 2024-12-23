@@ -29,8 +29,6 @@
 #include <string>
 #include <type_traits>
 
-int register_linear_params();
-
 #ifdef USE_FBGEMM
 template <bool ReluFused>
 at::Tensor PackedLinearWeight::apply_dynamic_impl(

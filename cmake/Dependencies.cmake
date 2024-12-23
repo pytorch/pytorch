@@ -152,6 +152,7 @@ endif()
 set(AT_MKLDNN_ACL_ENABLED 0)
 set(AT_MKLDNN_ENABLED 0)
 set(AT_MKL_ENABLED 0)
+set(AT_KLEIDIAI_ENABLED 0)
 # setting default preferred BLAS options if not already present.
 if(NOT INTERN_BUILD_MOBILE)
   set(BLAS "MKL" CACHE STRING "Selected BLAS library")
@@ -500,7 +501,7 @@ if(USE_XNNPACK AND NOT USE_SYSTEM_XNNPACK)
     set(XNNPACK_INCLUDE_DIR "${XNNPACK_SOURCE_DIR}/include" CACHE STRING "XNNPACK include directory")
   endif()
 
-  if(NOT TARGET XNNPACK)
+  if(NOT TARGET XNNPACK OR NOT TARGET microkernels-prod)
     set(XNNPACK_LIBRARY_TYPE "static" CACHE STRING "")
     set(XNNPACK_BUILD_BENCHMARKS OFF CACHE BOOL "")
     set(XNNPACK_BUILD_TESTS OFF CACHE BOOL "")
@@ -548,16 +549,19 @@ if(USE_XNNPACK AND NOT USE_SYSTEM_XNNPACK)
   endif()
 
   include_directories(SYSTEM ${XNNPACK_INCLUDE_DIR})
-  list(APPEND Caffe2_DEPENDENCY_LIBS XNNPACK)
+  list(APPEND Caffe2_DEPENDENCY_LIBS XNNPACK microkernels-prod)
 elseif(NOT TARGET XNNPACK AND USE_SYSTEM_XNNPACK)
   add_library(XNNPACK SHARED IMPORTED)
+  add_library(microkernels-prod SHARED IMPORTED)
   find_library(XNNPACK_LIBRARY XNNPACK)
+  find_library(microkernels-prod_LIBRARY microkernels-prod)
   set_property(TARGET XNNPACK PROPERTY IMPORTED_LOCATION "${XNNPACK_LIBRARY}")
-  if(NOT XNNPACK_LIBRARY)
+  set_property(TARGET microkernels-prod PROPERTY IMPORTED_LOCATION "${microkernels-prod_LIBRARY}")
+  if(NOT XNNPACK_LIBRARY or NOT microkernels-prod_LIBRARY)
     message(FATAL_ERROR "Cannot find XNNPACK")
   endif()
   message("-- Found XNNPACK: ${XNNPACK_LIBRARY}")
-  list(APPEND Caffe2_DEPENDENCY_LIBS XNNPACK)
+  list(APPEND Caffe2_DEPENDENCY_LIBS XNNPACK microkernels-prod)
 endif()
 
 # ---[ Vulkan deps
@@ -1475,6 +1479,35 @@ if(NOT INTERN_BUILD_MOBILE)
     endif()
   else()
     message("disabling MKLDNN because USE_MKLDNN is not set")
+  endif()
+
+  if(USE_KLEIDIAI)
+    if(CMAKE_C_COMPILER_ID STREQUAL "Clang" AND CMAKE_C_COMPILER_VERSION VERSION_LESS "11" )
+        message(WARNING "KleidiAI: Using non-supported Clang version. Expected 11 or newer, received ${CMAKE_C_COMPILER_VERSION}.")
+    endif()
+    if(CMAKE_C_COMPILER_ID STREQUAL "GNU" AND CMAKE_C_COMPILER_VERSION VERSION_LESS "11" )
+        message(WARNING "KleidiAI: Using non-supported GCC version. Expected 11 or newer, received ${CMAKE_C_COMPILER_VERSION}.")
+    endif()
+    set(TEMP_BUILD_SHARED_LIBS ${BUILD_SHARED_LIBS})
+    set(BUILD_SHARED_LIBS OFF CACHE BOOL "Build shared libs" FORCE)
+    set(AT_KLEIDIAI_ENABLED 1)
+    set(KLEIDIAI_BUILD_TESTS OFF) # Disable building KLEIDIAI tests
+    set(KLEIDIAI_SRC "${PROJECT_SOURCE_DIR}/third_party/kleidiai")
+    add_subdirectory(${KLEIDIAI_SRC})
+    set(KLEIDIAI_INCLUDE_DIRS
+    ${KLEIDIAI_SRC}/
+    ${KLEIDIAI_SRC}/kai/
+    ${KLEIDIAI_SRC}/kai/ukernels/
+    ${KLEIDIAI_SRC}/kai/ukernels/matmul/
+    ${KLEIDIAI_SRC}/kai/ukernels/matmul/matmul_clamp_f32_qai8dxp_qsi4cxp/
+    ${KLEIDIAI_SRC}/kai/ukernels/matmul/matmul_clamp_f32_qsi8d32p_qsi4c32p/
+    ${KLEIDIAI_SRC}/kai/ukernels/matmul/matmul_clamp_f32_qai8dxp_qsi4c32p/
+    ${KLEIDIAI_SRC}/kai/ukernels/matmul/pack/
+    )
+    include_directories(SYSTEM INTERFACE ${KLEIDIAI_INCLUDE_DIRS})
+    list(APPEND Caffe2_DEPENDENCY_LIBS kleidiai)
+    # Recover build options.
+    set(BUILD_SHARED_LIBS ${TEMP_BUILD_SHARED_LIBS} CACHE BOOL "Build shared libs" FORCE)
   endif()
 
   if(UNIX AND NOT APPLE)
