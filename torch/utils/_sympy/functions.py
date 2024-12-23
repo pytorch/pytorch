@@ -4,7 +4,6 @@ import math
 import operator
 import sys
 from typing import (
-    Any,
     Callable,
     Iterable,
     List,
@@ -12,6 +11,7 @@ from typing import (
     SupportsFloat,
     Tuple,
     TypeVar,
+    TypeVarTuple,
     Union,
 )
 
@@ -32,6 +32,7 @@ from .numbers import int_oo
 
 
 _T = TypeVar("_T", bound=SupportsFloat)
+_Ts = TypeVarTuple("_Ts")
 
 # Portions of this file are adapted from the Sympy codebase, which was
 # licensed as follows:
@@ -101,9 +102,9 @@ def _is_symbols_binary_summation(expr: sympy.Expr) -> bool:
     )
 
 
-def _keep_float(f: Callable[..., _T]) -> Callable[..., Union[_T, sympy.Float]]:
+def _keep_float(f: Callable[[*_Ts], _T]) -> Callable[[*_Ts], Union[_T, sympy.Float]]:
     @functools.wraps(f)
-    def inner(*args: Any) -> Union[_T, sympy.Float]:
+    def inner(*args: *_Ts) -> Union[_T, sympy.Float]:
         r: Union[_T, sympy.Float] = f(*args)
         if any(isinstance(a, sympy.Float) for a in args) and not isinstance(
             r, sympy.Float
