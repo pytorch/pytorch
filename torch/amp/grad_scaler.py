@@ -346,15 +346,22 @@ class GradScaler:
         optimizer_state: Dict[str, Any],
         *args: Any,
         **kwargs: Any,
-    ) -> Optional[float]:
+    ) -> tuple[Optional[float], bool]:
         retval: Optional[float] = None
-        if not sum(v.item() for v in optimizer_state["found_inf_per_device"].values()):
+        found_inf: bool = any(
+            v.item() for v in optimizer_state["found_inf_per_device"].values()
+        )
+        if not found_inf:
             retval = optimizer.step(*args, **kwargs)
-        return retval
+        return retval, found_inf
 
     def step(
-        self, optimizer: torch.optim.Optimizer, *args: Any, **kwargs: Any
-    ) -> Optional[float]:
+        self,
+        optimizer: torch.optim.Optimizer,
+        *args: Any,
+        return_found_inf: bool = False,
+        **kwargs: Any,
+    ) -> Union[Optional[float], tuple[Optional[float], Union[bool, torch.Tensor]]]:
         """Invoke ``unscale_(optimizer)`` followed by parameter update, if gradients are not infs/NaN.
 
         :meth:`step` carries out the following two operations:
@@ -366,18 +373,23 @@ class GradScaler:
 
         ``*args`` and ``**kwargs`` are forwarded to ``optimizer.step()``.
 
-        Returns the return value of ``optimizer.step(*args, **kwargs)``.
+        Returns the return value of ``optimizer.step(*args, **kwargs)`` and optionally an indication of infs/NaNs.
 
         Args:
             optimizer (torch.optim.Optimizer):  Optimizer that applies the gradients.
             args:  Any arguments.
+            return_found_inf: Whether to return an indication of inf
             kwargs:  Any keyword arguments.
 
         .. warning::
             Closure use is not currently supported.
         """
+        retval: Optional[float] = None
         if not self._enabled:
-            return optimizer.step(*args, **kwargs)
+            retval = optimizer.step(*args, **kwargs)
+            if not return_found_inf:
+                return retval
+            return retval, False
 
         if "closure" in kwargs:
             raise RuntimeError(
@@ -393,7 +405,7 @@ class GradScaler:
                 "step() has already been called since the last update()."
             )
 
-        retval: Optional[float] = None
+        found_inf: Optional[Union[torch.Tensor, bool]] = None
 
         if getattr(optimizer, "_step_supports_amp_scaling", False):
             # This optimizer has customized scale-handling logic, so we can call optimizer.step() directly.
@@ -427,10 +439,8 @@ class GradScaler:
                 found_inf = cast(
                     torch.Tensor,
                     sum(
-                        [  # noqa: C419
-                            t.to(scaler.device, non_blocking=True)
-                            for t in optimizer_state["found_inf_per_device"].values()
-                        ]
+                        t.to(scaler.device, non_blocking=True)
+                        for t in optimizer_state["found_inf_per_device"].values()
                     ),
                 )
                 # Take the product of the scales, if the user has already set `optimizer.grad_scale`.
@@ -445,6 +455,10 @@ class GradScaler:
             if not has_grad_scaler_kwarg:
                 del optimizer.grad_scale  # type: ignore[attr-defined]
                 del optimizer.found_inf  # type: ignore[attr-defined]
+            if return_found_inf:
+                if found_inf is None:
+                    found_inf = False
+                return retval, found_inf
             return retval
 
         if optimizer_state["stage"] is OptState.READY:
@@ -454,10 +468,13 @@ class GradScaler:
             len(optimizer_state["found_inf_per_device"]) > 0
         ), "No inf checks were recorded for this optimizer."
 
-        retval = self._maybe_opt_step(optimizer, optimizer_state, *args, **kwargs)
+        retval, found_inf = self._maybe_opt_step(
+            optimizer, optimizer_state, *args, **kwargs
+        )
 
         optimizer_state["stage"] = OptState.STEPPED
-
+        if return_found_inf:
+            return retval, found_inf
         return retval
 
     def update(self, new_scale: Optional[Union[float, torch.Tensor]] = None) -> None:
@@ -493,7 +510,7 @@ class GradScaler:
         if new_scale is not None:
             assert self._scale is not None
             # Accept a new user-defined scale.
-            if isinstance(new_scale, float):
+            if not isinstance(new_scale, torch.Tensor):
                 self._scale.fill_(new_scale)
             else:
                 reason = "new_scale should be a float or a 1-element torch.cuda.FloatTensor or \
