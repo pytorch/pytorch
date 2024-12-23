@@ -1,5 +1,6 @@
 #pragma once
 
+#include <c10/macros/Macros.h>
 #include <c10/util/ConstexprCrc.h>
 #include <c10/util/IdWrapper.h>
 #include <c10/util/string_view.h>
@@ -92,18 +93,15 @@ inline constexpr uint64_t type_index_impl() {
 } // namespace detail
 
 template <typename T>
-inline constexpr type_index get_type_index() {
-#if !defined(__CUDA_ARCH__)
+C10_HOST inline constexpr type_index get_type_index() {
+#if defined(__CUDA_ARCH__)
+  static_assert(false && sizeof(T), " Don't call me from device code");
+#endif
   // To enforce that this is really computed at compile time, we pass the
   // type index through std::integral_constant.
   return type_index{std::integral_constant<
       uint64_t,
       detail::type_index_impl<std::decay_t<T>>()>::value};
-#else
-  // There's nothing in theory preventing us from running this on device code
-  // except for nvcc throwing a compiler error if we enable it.
-  return (abort(), type_index(0));
-#endif
 }
 
 #if !defined(TORCH_PEDANTIC)
