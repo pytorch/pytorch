@@ -10,6 +10,8 @@ from __future__ import annotations
 import contextlib
 import copy
 import inspect
+import io
+import os
 import re
 import typing
 import warnings
@@ -168,7 +170,7 @@ def _get_torch_export_args(
 def export(
     model: torch.nn.Module | torch.jit.ScriptModule | torch.jit.ScriptFunction,
     args: tuple[Any, ...] | torch.Tensor,
-    f: str,
+    f: str | os.PathLike | io.BytesIO,
     *,
     kwargs: dict[str, Any] | None = None,
     export_params: bool = True,
@@ -249,7 +251,8 @@ def export(
 
                     torch.onnx.export(model, (x, {y: z}, {}), "test.onnx.pb")
 
-        f: Path to the output ONNX model file. E.g. "model.onnx".
+        f: A file-like object (such that ``f.fileno()`` returns a file descriptor)
+            or a path to the output ONNX model file. E.g. "model.onnx".
         kwargs: Named arguments to the model.
         export_params: If True, all parameters will
             be exported. Set this to False if you want to export an untrained model.

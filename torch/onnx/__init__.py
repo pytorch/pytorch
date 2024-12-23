@@ -48,6 +48,7 @@ __all__ = [
     "is_onnxrt_backend_supported",
 ]
 
+import io
 from typing import Any, Callable, Collection, Mapping, Sequence, TYPE_CHECKING
 
 import torch
@@ -132,7 +133,7 @@ def export(
     | torch.jit.ScriptModule
     | torch.jit.ScriptFunction,
     args: tuple[Any, ...] = (),
-    f: str | os.PathLike | None = None,
+    f: str | os.PathLike | io.BytesIO | None = None,
     *,
     kwargs: dict[str, Any] | None = None,
     export_params: bool = True,
