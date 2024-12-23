@@ -1,0 +1,59 @@
+Metadata-Version: 2.3
+Name: filelock
+Version: 3.16.1
+Summary: A platform independent file lock.
+Project-URL: Documentation, https://py-filelock.readthedocs.io
+Project-URL: Homepage, https://github.com/tox-dev/py-filelock
+Project-URL: Source, https://github.com/tox-dev/py-filelock
+Project-URL: Tracker, https://github.com/tox-dev/py-filelock/issues
+Maintainer-email: Bernát Gábor <gaborjbernat@gmail.com>
+License-Expression: Unlicense
+License-File: LICENSE
+Keywords: application,cache,directory,log,user
+Classifier: Development Status :: 5 - Production/Stable
+Classifier: Intended Audience :: Developers
+Classifier: License :: OSI Approved :: The Unlicense (Unlicense)
+Classifier: Operating System :: OS Independent
+Classifier: Programming Language :: Python
+Classifier: Programming Language :: Python :: 3 :: Only
+Classifier: Programming Language :: Python :: 3.8
+Classifier: Programming Language :: Python :: 3.9
+Classifier: Programming Language :: Python :: 3.10
+Classifier: Programming Language :: Python :: 3.11
+Classifier: Programming Language :: Python :: 3.12
+Classifier: Programming Language :: Python :: 3.13
+Classifier: Topic :: Internet
+Classifier: Topic :: Software Development :: Libraries
+Classifier: Topic :: System
+Requires-Python: >=3.8
+Provides-Extra: docs
+Requires-Dist: furo>=2024.8.6; extra == 'docs'
+Requires-Dist: sphinx-autodoc-typehints>=2.4.1; extra == 'docs'
+Requires-Dist: sphinx>=8.0.2; extra == 'docs'
+Provides-Extra: testing
+Requires-Dist: covdefaults>=2.3; extra == 'testing'
+Requires-Dist: coverage>=7.6.1; extra == 'testing'
+Requires-Dist: diff-cover>=9.2; extra == 'testing'
+Requires-Dist: pytest-asyncio>=0.24; extra == 'testing'
+Requires-Dist: pytest-cov>=5; extra == 'testing'
+Requires-Dist: pytest-mock>=3.14; extra == 'testing'
+Requires-Dist: pytest-timeout>=2.3.1; extra == 'testing'
+Requires-Dist: pytest>=8.3.3; extra == 'testing'
+Requires-Dist: virtualenv>=20.26.4; extra == 'testing'
+Provides-Extra: typing
+Requires-Dist: typing-extensions>=4.12.2; (python_version < '3.11') and extra == 'typing'
+Description-Content-Type: text/markdown
+
+# filelock
+
+[![PyPI](https://img.shields.io/pypi/v/filelock)](https://pypi.org/project/filelock/)
+[![Supported Python
+versions](https://img.shields.io/pypi/pyversions/filelock.svg)](https://pypi.org/project/filelock/)
+[![Documentation
+status](https://readthedocs.org/projects/py-filelock/badge/?version=latest)](https://py-filelock.readthedocs.io/en/latest/?badge=latest)
+[![Code style:
+black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
+[![Downloads](https://static.pepy.tech/badge/filelock/month)](https://pepy.tech/project/filelock)
+[![check](https://github.com/tox-dev/py-filelock/actions/workflows/check.yml/badge.svg)](https://github.com/tox-dev/py-filelock/actions/workflows/check.yml)
+
+For more information checkout the [official documentation](https://py-filelock.readthedocs.io/en/latest/index.html).

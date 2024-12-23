@@ -1,0 +1,28 @@
+// Greek symbols
+// TODO: Shouold we include the uppercase variants for the symbols where the uppercase variant doesn't have a separate meaning?
+ALPHA: "\\alpha"
+BETA: "\\beta"
+GAMMA: "\\gamma"
+DELTA: "\\delta" // TODO: Should this be included? Delta usually denotes other things.
+EPSILON: "\\epsilon" |  "\\varepsilon"
+ZETA: "\\zeta"
+ETA: "\\eta"
+THETA: "\\theta" | "\\vartheta"
+// TODO: Should I add iota to the list?
+KAPPA: "\\kappa"
+LAMBDA: "\\lambda" // TODO: What about the uppercase variant?
+MU: "\\mu"
+NU: "\\nu"
+XI: "\\xi"
+// TODO: Should there be a separate note for transforming \pi into sympy.pi?
+RHO: "\\rho" | "\\varrho"
+// TODO: What should we do about sigma?
+TAU: "\\tau"
+UPSILON: "\\upsilon"
+PHI: "\\phi" | "\\varphi"
+CHI: "\\chi"
+PSI: "\\psi"
+OMEGA: "\\omega"
+
+GREEK_SYMBOL: ALPHA | BETA | GAMMA | DELTA | EPSILON | ZETA | ETA | THETA | KAPPA
+    | LAMBDA | MU | NU | XI | RHO | TAU | UPSILON | PHI | CHI | PSI | OMEGA

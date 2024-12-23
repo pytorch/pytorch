@@ -1,0 +1,3 @@
+[console_scripts]
+py.test = pytest:console_main
+pytest = pytest:console_main
