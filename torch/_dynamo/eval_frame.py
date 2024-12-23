@@ -809,6 +809,8 @@ class _NullDecorator(contextlib.nullcontext):  # type: ignore[type-arg]
 def check_if_dynamo_supported():
     if sys.version_info >= (3, 14):
         raise RuntimeError("Python 3.14+ not yet supported for torch.compile")
+    elif sys.version_info >= (3, 13) and not sys._is_gil_enabled():
+        raise RuntimeError("Dynamo is not supported on Python with GIL disabled")
 
 
 def is_dynamo_supported():
@@ -1118,10 +1120,14 @@ class ExportResult(NamedTuple):
     # destructuring so it is BC-breaking
 
 
+# NOTE: this function only supports graphs created by Dynamo's OutputGraph module
 def check_signature_rewritable(graph):
     input_errors = []
     for node in graph.graph.find_nodes(op="placeholder"):
+        # set in OutputGraph._call_user_compiler
         assert hasattr(node, "_dynamo_source")
+        assert hasattr(graph, "_source_to_user_stacks")
+
         source = node._dynamo_source
         user_stacks = graph._source_to_user_stacks.get(source)
         if user_stacks is None:
@@ -1653,7 +1659,6 @@ def export(
                 graph.print_readable(print_output=False, colored=True),
             )
         else:
-            assert hasattr(graph, "_source_to_user_stacks")
             assert out_guards is not None, "Failed to produce guards during tracing"
             assert fake_mode is not None
 
