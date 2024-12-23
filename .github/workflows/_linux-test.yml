@@ -54,7 +54,7 @@ on:
           since we are investigating the behaviour of the monitor script with different tests.
         required: false
         type: boolean
-        default: true
+        default: false
     secrets:
       HUGGING_FACE_HUB_TOKEN:
         required: false
@@ -253,6 +253,12 @@ jobs:
             TEST_COMMAND=.ci/pytorch/test.sh
           fi
 
+          # Leaving 1GB for the runner and other things
+          TOTAL_AVAILABLE_MEMORY_IN_GB=$(awk '/MemTotal/ { printf "%.3f \n", $2/1024/1024 - 1 }' /proc/meminfo)
+          # https://docs.docker.com/engine/containers/resource_constraints/#--memory-swap-details, the 3GB swap
+          # comes from https://github.com/pytorch/test-infra/pull/6058
+          TOTAL_MEMORY_WITH_SWAP=$(("${TOTAL_AVAILABLE_MEMORY_IN_GB%.*}" + 3))
+
           # detached container should get cleaned up by teardown_ec2_linux
           # TODO: Stop building test binaries as part of the build phase
           # Used for GPU_FLAG since that doesn't play nice
@@ -301,6 +307,8 @@ jobs:
             -e DASHBOARD_TAG \
             -e IS_A100_RUNNER \
             -e ARTIFACTS_FILE_SUFFIX \
+            --memory="${TOTAL_AVAILABLE_MEMORY_IN_GB%.*}g" \
+            --memory-swap="${TOTAL_MEMORY_WITH_SWAP}g" \
             --env-file="/tmp/github_env_${GITHUB_RUN_ID}" \
             --security-opt seccomp=unconfined \
             --cap-add=SYS_PTRACE \
