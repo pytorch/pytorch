@@ -11203,6 +11203,10 @@ given dimension `dim`.
 The boolean option :attr:`sorted` if ``True``, will make sure that the returned
 `k` elements are themselves sorted
 
+.. note::
+    When using `torch.topk`, the indices of tied elements are not guaranteed to be stable
+    and may vary across different invocations.
+
 Args:
     {input}
     k (int): the k in "top-k"
