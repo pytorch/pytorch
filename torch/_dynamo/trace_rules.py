@@ -4,7 +4,6 @@ import _weakrefset
 import abc
 import builtins
 import collections
-import contextlib
 import copy
 import copyreg
 import dataclasses
@@ -46,6 +45,7 @@ from .utils import getfile, hashable, NP_SUPPORTED_MODULES, unwrap_if_wrapper
 from .variables import (
     BuiltinVariable,
     FunctionalCallVariable,
+    FunctionDecoratedByContextlibContextManagerVariable,
     FunctorchHigherOrderVariable,
     NestedUserFunctionVariable,
     PolyfilledFunctionVariable,
@@ -154,6 +154,7 @@ manual_torch_name_rule_map = {
     "torch._dynamo.external_utils.is_compiling": TorchInGraphFunctionVariable,
     "torch.compiler.is_compiling": TorchInGraphFunctionVariable,
     "torch.compiler.is_dynamo_compiling": TorchInGraphFunctionVariable,
+    "torch.compiler.is_exporting": TorchInGraphFunctionVariable,
     "torch.autograd._profiler_enabled": SkipFunctionVariable,
     "torch._C._to_dlpack": SkipFunctionVariable,
     "torch.to_dlpack": SkipFunctionVariable,
@@ -190,6 +191,7 @@ manual_torch_name_rule_map = {
     "torch.sym_sqrt": TorchInGraphFunctionVariable,
     "torch.sym_ite": TorchInGraphFunctionVariable,
     "torch.sym_sum": TorchInGraphFunctionVariable,
+    "torch.sym_fresh_size": UserFunctionVariable,
     "torch.Tensor#_make_wrapper_subclass": SkipFunctionVariable,
     "torch.Tensor#__init__": SkipFunctionVariable,
     "torch.Tensor#split": TorchInGraphFunctionVariable,
@@ -292,6 +294,7 @@ manual_torch_name_rule_map = {
     "torch._functorch.deprecated.grad_and_value": UserFunctionVariable,
     "torch._functorch.deprecated.vjp": UserFunctionVariable,
     # everything else
+    "torch._higher_order_ops.foreach_map.foreach_map": UserFunctionVariable,
     "torch._constrain_as_size": UserFunctionVariable,
     "torch._tensor._convert": UserFunctionVariable,
     "torch.jit._unwrap_optional": UserFunctionVariable,
@@ -1369,6 +1372,8 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._dim_arange",
         "torch._dirichlet_grad",
         "torch._disable_functionalization",
+        "torch._dyn_quant_matmul_4bit",
+        "torch._dyn_quant_pack_4bit_weight",
         "torch._efficientzerotensor",
         "torch._embedding_bag_forward_only",
         "torch._embedding_bag",
@@ -2269,10 +2274,7 @@ torch_non_c_binding_in_graph_functions = dict.fromkeys(
         "torch._functorch.deprecated.warn_deprecated",
         "torch._functorch.eager_transforms._any_differentiable",
         "torch._functorch.eager_transforms._autograd_grad",
-        "torch._functorch.eager_transforms._vjp_treespec_compare",
         "torch._functorch.eager_transforms._set_tensor_requires_grad",
-        "torch._functorch.eager_transforms._jvp_treespec_compare",
-        "torch._functorch.eager_transforms._linearize_treespec_compare",
         "torch._functorch.eager_transforms._is_differentiable",
         "torch._functorch.eager_transforms._maybe_unwrap_functional_tensor",
         "torch._functorch.eager_transforms._maybe_wrap_functional_tensor",
@@ -2919,16 +2921,26 @@ Get all torch.Tensor methods which are allowed to be in graph functions.
 
 @functools.lru_cache(None)
 def get_tensor_method():
+    disallowed_tensor_methods = {"__new__", "_make_wrapper_subclass", "_make_subclass"}
     s = set()
     for name in dir(torch.Tensor):
         method = getattr(torch.Tensor, name)
-        if isinstance(
-            method, (types.MethodDescriptorType, types.WrapperDescriptorType)
+        if (
+            isinstance(
+                method,
+                (
+                    types.MethodDescriptorType,
+                    types.WrapperDescriptorType,
+                    types.BuiltinFunctionType,
+                ),
+            )
+            and name not in disallowed_tensor_methods
         ):
             s.add(method)
 
-    # mlazos: this is a function which we handle specially in TensorVariable
+    # mlazos: these are functions which we handle specially in TensorVariable
     s.add(torch.Tensor.__contains__)  # type: ignore[arg-type]
+    s.add(torch.Tensor.register_hook)  # type: ignore[arg-type]
     return frozenset(s)
 
 
@@ -3153,7 +3165,6 @@ def is_numpy_type_info(obj) -> bool:
 BUILTIN_SKIPLIST = (
     abc,
     collections,
-    contextlib,
     copy,
     copyreg,
     enum,
@@ -3514,7 +3525,13 @@ we don't want to inline the lower level function call (e.g, f3) by default.
 
 def check_verbose(obj, is_inlined_call=False):
     if isinstance(
-        obj, (UserFunctionVariable, UserMethodVariable, NestedUserFunctionVariable)
+        obj,
+        (
+            UserFunctionVariable,
+            UserMethodVariable,
+            NestedUserFunctionVariable,
+            FunctionDecoratedByContextlibContextManagerVariable,
+        ),
     ):
         try:
             py_obj = obj.get_function()
