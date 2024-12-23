@@ -118,6 +118,7 @@ class TORCH_API Context {
 
   static bool hasOpenMP();
   static bool hasMKL();
+  static bool hasKleidiAI();
   static bool hasLAPACK();
   static bool hasMKLDNN();
   static bool hasMAGMA() {
@@ -349,6 +350,7 @@ class TORCH_API Context {
   void setDisplayVmapFallbackWarnings(bool enabled);
   bool areVmapFallbackWarningsEnabled() const;
 
+  bool isDefaultMobileCPUAllocatorSet();
   void setDefaultMobileCPUAllocator();
   void unsetDefaultMobileCPUAllocator();
   bool allowFP16ReductionCPU() const;
@@ -539,6 +541,10 @@ inline bool hasOpenMP() {
 
 inline bool hasMKL() {
   return globalContext().hasMKL();
+}
+
+inline bool hasKleidiAI() {
+  return globalContext().hasKleidiAI();
 }
 
 inline bool hasLAPACK() {
