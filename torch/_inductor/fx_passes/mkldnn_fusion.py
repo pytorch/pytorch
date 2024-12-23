@@ -520,13 +520,10 @@ if torch._C._has_mkldnn:
         return fn
 
     def _can_be_inplace(_other):
-        if isinstance(_other.data, ir.View):
-            return _can_be_inplace(_other.data)
-        else:
-            return not (
-                isinstance(_other.data, ir.ReinterpretView)
-                or len(_other.get_inputs_that_alias_output()) > 0
-            )
+        return not (
+            isinstance(_other.data, ir.BaseView)
+            or len(_other.get_inputs_that_alias_output()) > 0
+        )
 
     def _register_binary_unary_maybe_inplace_fusion_lowering(
         pattern,
