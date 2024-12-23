@@ -205,20 +205,6 @@ class SuperVariable(VariableTracker):
             value = collections.OrderedDict.__getitem__(self.objvar.value, key)
             source = ODictGetItemSource(self.objvar.source, key)
             return VariableTracker.build(tx, value, source)
-        elif inner_fn in (
-            collections.OrderedDict.__setitem__,
-            object.__setattr__,
-        ) and isinstance(self.objvar, variables.CustomizedDictVariable):
-            assert not kwargs and len(args) == 2
-            return super(variables.CustomizedDictVariable, self.objvar).call_method(
-                tx, "__setitem__", args, kwargs
-            )
-        elif inner_fn is collections.OrderedDict.__getitem__ and isinstance(
-            self.objvar, variables.CustomizedDictVariable
-        ):
-            return super(variables.CustomizedDictVariable, self.objvar).call_method(
-                tx, "__getitem__", args, kwargs
-            )
         elif is_standard_setattr(inner_fn) and isinstance(
             self.objvar, UserDefinedObjectVariable
         ):
@@ -236,6 +222,11 @@ class SuperVariable(VariableTracker):
                 self.objvar, attr, variables.DeletedVariable()
             )
             return variables.ConstantVariable(None)
+        elif (
+            isinstance(self.objvar, variables.UserDefinedDictVariable)
+            and inner_fn in self.objvar._dict_methods
+        ):
+            return self.objvar._dict_vt.call_method(tx, name, args, kwargs)
 
         unimplemented(f"non-function or method super: {inner_fn}")
 

@@ -3,6 +3,7 @@
 #include <ATen/Context.h>
 
 #include <c10/core/CPUAllocator.h>
+#include <c10/util/Logging.h>
 
 #include <algorithm>
 #include <array>
@@ -241,7 +242,7 @@ void Context::setBenchmarkLimitCuDNN(int b) {
 
 bool Context::allowTF32CuBLAS() const {
 #ifdef USE_ROCM
-    const static auto allow_tf32 = c10::utils::check_env(hipblaslt_allow_tf32);
+    const auto allow_tf32 = c10::utils::check_env(hipblaslt_allow_tf32);
     if (allow_tf32 != true) {
       return false;
     }
@@ -251,12 +252,10 @@ bool Context::allowTF32CuBLAS() const {
 
 void Context::setAllowTF32CuBLAS(bool b) {
 #ifdef USE_ROCM
-  const static auto allow_tf32 = c10::utils::check_env(hipblaslt_allow_tf32);
+  const auto allow_tf32 = c10::utils::check_env(hipblaslt_allow_tf32);
   if (allow_tf32 != true) {
-    TORCH_WARN(
-        "torch.backends.cuda.matmul.allow_tf32 is not supported on ROCm by default. "
-        "Please set environment variable HIPBLASLT_ALLOW_TF32=1 to enable it."
-    );
+    LOG(INFO) << "torch.backends.cuda.matmul.allow_tf32 is not supported on ROCm by default. "
+              << "Please set environment variable HIPBLASLT_ALLOW_TF32=1 to enable it.";
     return;
   }
 #endif
@@ -393,6 +392,10 @@ bool Context::hasMKLDNN() {
 #else
   return false;
 #endif
+}
+
+bool Context::hasKleidiAI() {
+  return AT_KLEIDIAI_ENABLED();
 }
 
 bool Context::hasOpenMP() {
@@ -560,6 +563,10 @@ bool Context::areVmapFallbackWarningsEnabled() const {
 
 void Context::setDisplayVmapFallbackWarnings(bool enabled) {
   display_vmap_fallback_warnings_ = enabled;
+}
+
+bool Context::isDefaultMobileCPUAllocatorSet() {
+  return prev_allocator_ptr_ != nullptr;
 }
 
 void Context::setDefaultMobileCPUAllocator() {
