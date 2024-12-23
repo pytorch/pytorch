@@ -457,10 +457,19 @@ class CachingAutotuner(KernelInterface):
             triton_helpers.set_driver_to_gpu()
 
         if ASTSource:
+            def fixup_signature(signature, constants):
+                signature = signature.copy()
+                for constant in constants:
+                    # If it's not in the signature already, it's a constexpr
+                    # argument that we need to add in
+                    if constant not in signature:
+                        signature[constant] = "constexpr"
+                return signature
+
             compile_args = (
                 ASTSource(
                     self.fn,
-                    compile_meta["signature"],
+                    fixup_signature(compile_meta["signature"], compile_meta["constants"]),
                     compile_meta["constants"],
                     compile_meta["configs"][0],
                 ),
