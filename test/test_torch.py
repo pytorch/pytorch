@@ -1782,7 +1782,7 @@ else:
     @largeTensorTest('24GB', device='cuda')
     @largeTensorTest('24GB', device='cpu')
     def test_cumsum_64bit_indexing(self, device):
-        b = torch.ones((2*4096*8, 100000), dtype=torch.float, device='cuda')
+        b = torch.ones(2 * 4096 * 8, 100000, dtype=torch.float, device='cuda')
         b /= 100000
         d = b.cumsum(dim=-1)
         chunk = 2**30 // b.shape[-1]

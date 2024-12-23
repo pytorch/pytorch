@@ -346,7 +346,7 @@ __device__ void tensor_kernel_scan_innermost_dim_impl(T* row_buf, T *tgt_, const
       for (index_t m = 0; m <= log_num_threads_x; ++m) {
         if (row_exists) {
           index_t s = 1 << m; // s = 2 ^ m
-          index_t a = (index_t) ((threadIdx.x >> m) << (m + 1)) | s; // a = (threadIdx.x / s) * (2 * s) + s
+          auto a = static_cast<index_t>((threadIdx.x >> m) << (m + 1)) | s; // a = (threadIdx.x / s) * (2 * s) + s
           index_t ti = a + (threadIdx.x % s);
           index_t si = a - 1;
           row_buf[ti] = binary_op(row_buf[ti], row_buf[si]);
