@@ -3706,7 +3706,7 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
         ):
             offsets = tl.program_id(0) * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
             x = tl.load(src + offsets, mask=offsets < N)
-            # Let's make sure we always select a block size of 128 based on our perf_model
+            # we only modify dst if our perf_model is applied (and a BLOCK_SIZE of 128 is selected)
             if BLOCK_SIZE == 128:
                 x = x + add_float
             tl.store(dst + offsets, x, mask=offsets < N)
