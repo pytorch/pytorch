@@ -2,6 +2,7 @@
 # Owner(s): ["oncall: distributed"]
 
 import itertools
+import unittest
 from typing import cast, List, Optional
 
 import torch
@@ -22,6 +23,16 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
     skip_unless_torch_gpu,
     with_comms,
 )
+from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FP8
+
+
+def tiled_mul(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
+    if b.numel() == 1:
+        return a / b.squeeze()
+    a = a.unflatten(0, (b.shape[0], -1)).unflatten(-1, (b.shape[-1], -1))
+    a = a * b[:,None,:,None]
+    a = a.flatten(end_dim=1).flatten(start_dim=-2)
+    return a
 
 
 class DistMatrixOpsTest(DTensorTestBase):
@@ -119,6 +130,72 @@ class DistMatrixOpsTest(DTensorTestBase):
         shard_specs_comb = list(itertools.product(placement_specs, placement_specs))
         for spec in shard_specs_comb:
             test_placement_comb([spec[0]], [spec[1]])
+
+    @with_comms
+    @skip_unless_torch_gpu
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, "torch._scaled_mm requires H100+")
+    def test_scaled_mm(self):
+        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+
+        ws = self.world_size
+        m, n, k = 64 * ws, 48 * ws, 128 * ws
+
+        t1 = torch.randn(m, k, device=self.device_type)
+        t2 = torch.randn(n, k, device=self.device_type)
+
+        for output_spec, t1_spec, t2_spec, scale1_shape, scale2_shape, scale1_spec, scale2_spec in [
+            # Tensor-wise scaling
+            # Replicated, zero-dim scale
+            (Replicate(), Replicate(), Replicate(), (), (), Replicate(), Replicate()),
+            # Column-parallel, two-dim scale
+            (Shard(1), Replicate(), Shard(0), (1, 1), (1, 1), Replicate(), Replicate()),
+            # Row-parallel, one-dim scale
+            (Partial(), Shard(1), Shard(1), (1,), (1,), Replicate(), Replicate()),
+            # Row-wise scaling
+            # Replicated
+            (Replicate(), Replicate(), Replicate(), (m, 1), (n, 1), Replicate(), Replicate()),
+            # Column-parallel
+            (Shard(1), Replicate(), Shard(0), (m, 1), (n, 1), Replicate(), Shard(0)),
+            # Row-parallel (which actually ends up doing sub-row-wise scaling)
+            (Partial(), Shard(1), Shard(1), (m, ws), (n, ws), Shard(1), Shard(1)),
+        ]:
+            scale1 = torch.randn(scale1_shape, device=self.device_type)
+            scale2 = torch.randn(scale2_shape, device=self.device_type)
+            t1_fp8 = tiled_mul(t1, scale1).to(torch.float8_e4m3fn)
+            t2_fp8 = tiled_mul(t2, scale2).to(torch.float8_e4m3fn)
+
+            # _scaled_mm can't do sub-row-wise scaling, hence we simulate it
+            if scale1.squeeze().ndim == 2 or scale2.squeeze().ndim == 2:
+                full_ref_res = torch.stack([
+                    torch._scaled_mm(st1, st2.t(), scale_a=sscale1.contiguous(), scale_b=sscale2.contiguous().t(), out_dtype=torch.bfloat16)
+                    for st1, st2, sscale1, sscale2 in zip(
+                        t1_fp8.tensor_split(ws, dim=-1),
+                        t2_fp8.tensor_split(ws, dim=-1),
+                        scale1.tensor_split(ws, dim=-1),
+                        scale2.tensor_split(ws, dim=-1),
+                    )
+                ], dim=0).sum(dim=0)
+            else:
+                full_ref_res = torch._scaled_mm(t1_fp8, t2_fp8.t(), scale_a=scale1, scale_b=scale2.t(), out_dtype=torch.bfloat16)
+
+            dist_t1_fp8 = distribute_tensor(t1_fp8, device_mesh, [t1_spec])
+            dist_t2_fp8 = distribute_tensor(t2_fp8, device_mesh, [t2_spec])
+            dist_scale1 = distribute_tensor(scale1, device_mesh, [scale1_spec])
+            dist_scale2 = distribute_tensor(scale2, device_mesh, [scale2_spec])
+
+            with CommDebugMode() as comm_mode:
+                dist_res = cast(DTensor, torch._scaled_mm(dist_t1_fp8, dist_t2_fp8.t(), scale_a=dist_scale1, scale_b=dist_scale2.t(), out_dtype=torch.bfloat16))
+
+            self.assertEqual(dist_res.placements[0], output_spec)
+
+            full_dist_ref = dist_res.full_tensor()
+            # row-parallel does a split-k reduce-scatter, which has high error
+            if output_spec == Partial():
+                self.assertEqual(full_dist_ref, full_ref_res, atol=3e-1, rtol=4e-2)
+            else:
+                self.assertEqual(full_dist_ref, full_ref_res, atol=0, rtol=0)
+
+            self.assertEqual(comm_mode.get_total_counts(), 0)
 
     @with_comms
     def test_matmul(self):
