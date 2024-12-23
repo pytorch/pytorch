@@ -50,11 +50,11 @@ _grad_t = Union[Tuple[Tensor, ...], Tensor]
 # of `T` to annotate `self`. Many methods of `Module` return `self` and we want those return values to be
 # the type of the subclass, not the looser type of `Module`.
 T = TypeVar("T", bound="Module")
-P = ParamSpec('P')
-R = TypeVar('R')
-Module_T = TypeVar('Module_T', bound='Module')
-Input = TypeVar('Input')
-Output = TypeVar('Output')
+_P = ParamSpec('_P')
+_R = TypeVar('_R')
+_Module_T = TypeVar('_Module_T', bound='Module')
+_Input = TypeVar('_Input')
+_Output = TypeVar('_Output')
 
 class _IncompatibleKeys(
     namedtuple("IncompatibleKeys", ["missing_keys", "unexpected_keys"]),
