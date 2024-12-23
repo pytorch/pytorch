@@ -32,9 +32,8 @@ STEPCURRENT_CACHE_DIR = "cache/stepcurrent"
 
 def pytest_addoption(parser: Parser) -> None:
     group = parser.getgroup("general")
-    group.addoption("--scs", action="store", default=None, dest="stepcurrent_skip")
-    group.addoption("--sc", action="store", default=None, dest="stepcurrent")
-    group.addoption("--rs", action="store", default=None, dest="run_single")
+
+    parser.addoption("--sc", action="store", default=None, dest="stepcurrent")
 
     parser.addoption("--use-main-module", action="store_true")
     group = parser.getgroup("terminal reporting")
@@ -97,10 +96,6 @@ def pytest_configure(config: Config) -> None:
             config.getini("junit_log_passing_tests_reruns"),
         )
         config.pluginmanager.register(config.stash[xml_key])
-    if config.getoption("stepcurrent_skip"):
-        config.option.stepcurrent = config.getoption("stepcurrent_skip")
-    if config.getoption("run_single"):
-        config.option.stepcurrent = config.getoption("run_single")
     if config.getoption("stepcurrent"):
         config.pluginmanager.register(StepcurrentPlugin(config), "stepcurrentplugin")
     if config.getoption("num_shards"):
@@ -291,46 +286,155 @@ def pytest_collection_modifyitems(items: List[Any]) -> None:
 
 
 class StepcurrentPlugin:
-    # Modified fromo _pytest/stepwise.py in order to save the currently running
-    # test instead of the last failed test
+    """
+    This is meant to work in with test/run_test.py to ensure that every test is
+    run, gets retries in new subprocesses, and creates xml.  To do this, it
+    keeps track of each test's status in the cache.  Normal tests are run
+    together in the same process, but when a test fails, it needs to be run
+    singly.  This class and run_test.py have logic to ensure that this happens,
+    especially for unusual cases like segfaults where the process exits
+    immediately and doesn't produce xml for any of the tests, and tests that
+    cause the process to fail at exit which creates xml that believes the test
+    is successful.
+
+    If a test fails normally, it gets run singly in a new subprocess.  If a test
+    segfaults, all tests prior to the segfault get rerun to generate xml, and
+    the segfaulting test gets run singly in a new subprocess.  If a process
+    exist with non 0 exit code but no tests seem to fail, then all the test will
+    be rerun singly to narrow down which test caused the failure.
+
+    Cache file contents:
+    pytest_previous_status: None on the first run, and then is either an exit
+    code or "no xml"
+    to_run: all tests that have still not created xml
+    prev_run: tests that are expected to run during this run.  Poorly named in
+    this context, but makes sense from test/run_test.py's POV.  If a test fails,
+    then it is possibly that not all tests in this actually ran. This should be
+    a prefix of to_run
+    already_ran: tests that have created xml
+
+    Test that are still to be run have 4 possible statuses, which are in
+    test/run_test.py and are: cont, s, r2, and r1, abbreviated c, s, 2, and 1 in
+    the table
+
+    cont: Test can be run in same process as other tests, this is the default status
+    s: Test should be run singly
+    r2: Test should be run singly, and has 2 retries left
+    r1: Test should be run singly, and has 1 retry left
+
+    At the start of the run, all tests get the status c. This plugin will either
+    run all tests with status c, or run a single test with the status s, 2, or
+    1. If a test is known to fail, then the status of the test is changed to 2
+    or 1 depending on how many retires it still has left.
+
+    Examples failure causes with 3 tests:
+    +-------------+--------+----------+
+    | already_ran | to_run | prev_run |
+    +-------------+--------+----------+
+    2 fails normally, generates correct xml, so all we need to do is rerun it
+    more in a new subprocess to see if it consistently fails (which it does in
+    this example)
+    |     | ccc | ccc |
+    | c   |  2c |  2  |
+    | c   |  1c |  1  |
+    | cf  |   c |   c |
+    +-----+-----+-----+
+    2 segfaults, so no xml gets created.  Rerun the previous tests to generate
+    xml, and then rerun 2 on its own in a new subprocess
+    |     | ccc | ccc | 2 segfaults
+    |     | c2c | c   | Rerun previous tests to generate xml
+    | c   |  2c |  2  |
+    | c   |  1c |  1  |
+    | cf  |   c |   c |
+    +-----+-----+-----+
+    A test (2 in this example) caused the process to fail but doesn't fail
+    during the run.  An example of this might be incorrectly freeing memory on
+    process exit.  Rerun all the tests singly to figure out which one caused
+    this
+    |     | ccc | ccc | 2 causes process to fail
+    |     | sss | s   | rerun all tests singly
+    | s   |  ss |  s  | 2 is the one causing the failure
+    | s   |  2s |  2  |
+    | s   |  1s |  1  |
+    | cf  |   s |   s |
+    +-----+-----+-----+
+    """
+
     def __init__(self, config: Config) -> None:
         self.config = config
         self.report_status = ""
         assert config.cache is not None
         self.cache: pytest.Cache = config.cache
-        self.directory = f"{STEPCURRENT_CACHE_DIR}/{config.getoption('stepcurrent')}"
-        self.lastrun: Optional[str] = self.cache.get(self.directory, None)
-        self.initial_val = self.lastrun
-        self.skip: bool = config.getoption("stepcurrent_skip")
-        self.run_single: bool = config.getoption("run_single")
+        directory = f"{STEPCURRENT_CACHE_DIR}/{config.getoption('stepcurrent')}"
+        self.cache_info_init_path = f"{directory}/init"
+        self.cache_info_active_path = f"{directory}/active"
 
-    def pytest_collection_modifyitems(self, config: Config, items: List[Any]) -> None:
-        if not self.lastrun:
-            self.report_status = "Cannot find last run test, not skipping"
-            return
+        init_cache = self.cache.get(self.cache_info_init_path, None)
+        active_cache = self.cache.get(self.cache_info_active_path, None)
+        self.prev_run = init_cache["prev_run"] if init_cache else []
+        self.to_run = init_cache["to_run"] if init_cache else []
+        self.already_ran = init_cache["already_ran"] if init_cache else []
+        self.ended_at = active_cache["ended_at"] if active_cache else None
+        self.pytest_previous_status = (
+            active_cache["pytest_previous_status"] if active_cache else None
+        )
 
-        # check all item nodes until we find a match on last run
-        failed_index = None
+    def get_index(self, nodeid: str, items) -> int:
         for index, item in enumerate(items):
-            if item.nodeid == self.lastrun:
-                failed_index = index
-                if self.skip:
-                    failed_index += 1
-                break
+            if item.nodeid == nodeid:
+                return index
+        raise ValueError(f"Could not find {nodeid} in items")
 
-        # If the previously failed test was not found among the test items,
-        # do not skip any tests.
-        if failed_index is None:
-            self.report_status = "previously run test not found, not skipping."
+    @pytest.hookimpl(trylast=True)
+    def pytest_collection_modifyitems(self, config: Config, items: List[Any]) -> None:
+        if self.pytest_previous_status is None:
+            # This is the first run, so we don't need to do anything
+            self.report_status += "First run, starting from the beginning"
+            # Special case of the status == "cont" below where everything is cont
+            for item in items:
+                self.prev_run.append([item.nodeid, "cont"])
+                self.to_run.append([item.nodeid, "cont"])
+            self.pytest_previous_status = "no xml"
+            self.save_cache()
+            return
+        # validate that the cache is correct
+        for item, test in zip(
+            items,
+            self.already_ran + self.to_run,
+        ):
+            assert (
+                item.nodeid == test[0]
+            ), f"Cache and discovered tests do not match, {item.nodeid} != {test[0]}"
+
+        first_test, status = self.to_run[0]
+        first_index = self.get_index(first_test, items)
+        self.prev_run = []
+        deselected = []
+
+        if status == "cont":
+            # We're in the middle of a test run
+            deselected = items[:first_index]
+            items[:] = items[first_index:]
+            self.report_status += f"Continuing from {first_test}"
+            i, test = next(
+                ((i, t) for i, t in enumerate(self.to_run) if t[1] != "cont"),
+                (len(self.to_run), None),
+            )
+            deselected += items[i:]
+            items[:] = items[:i]
+            if test is not None:
+                self.report_status += f", stopping at {test[0]} (exclusive)"
+            self.prev_run = self.to_run[:i]
         else:
-            self.report_status = f"skipping {failed_index} already run items."
-            deselected = items[:failed_index]
-            del items[:failed_index]
-            if self.run_single:
-                self.report_status += f" Running only {items[0].nodeid}"
-                deselected += items[1:]
-                del items[1:]
-            config.hook.pytest_deselected(items=deselected)
+            # Run single test
+            deselected = items[:first_index] + items[first_index + 1 :]
+            items[:] = items[first_index : first_index + 1]
+            self.prev_run = [[first_test, status]]
+            self.report_status += f"Running single test {first_test}"
+
+        self.pytest_previous_status = "no xml"
+        self.save_cache()
+        config.hook.pytest_deselected(items=deselected)
 
     def pytest_report_collectionfinish(self) -> Optional[str]:
         if self.config.getoption("verbose") >= 0 and self.report_status:
@@ -338,9 +442,30 @@ class StepcurrentPlugin:
         return None
 
     def pytest_runtest_protocol(self, item, nextitem) -> None:
-        self.lastrun = item.nodeid
-        self.cache.set(self.directory, self.lastrun)
+        self.ended_at = item.nodeid
+        self.save_cache_active()
 
+    def save_cache(self) -> None:
+        self.cache.set(
+            self.cache_info_init_path,
+            {
+                "prev_run": self.prev_run,
+                "to_run": self.to_run,
+                "already_ran": self.already_ran,
+            },
+        )
+        self.save_cache_active()
+
+    def save_cache_active(self) -> None:
+        self.cache.set(
+            self.cache_info_active_path,
+            {
+                "ended_at": self.ended_at,
+                "pytest_previous_status": self.pytest_previous_status,
+            },
+        )
+
+    @pytest.hookimpl(trylast=True)
     def pytest_sessionfinish(self, session, exitstatus):
-        if exitstatus == 0 and not self.run_single:
-            self.cache.set(self.directory, self.initial_val)
+        self.pytest_previous_status = 0 if exitstatus == 5 else exitstatus
+        self.save_cache_active()

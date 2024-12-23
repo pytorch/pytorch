@@ -914,13 +914,30 @@ def prof_meth_call(*args, **kwargs):
 torch._C.ScriptFunction.__call__ = prof_func_call  # type: ignore[method-assign]
 torch._C.ScriptMethod.__call__ = prof_meth_call  # type: ignore[method-assign]
 
-def _get_test_report_path():
-    # allow users to override the test file location. We need this
-    # because the distributed tests run the same test file multiple
-    # times with different configurations.
-    override = os.environ.get('TEST_REPORT_SOURCE_OVERRIDE')
-    test_source = override if override is not None else 'python-unittest'
-    return os.path.join('test-reports', test_source)
+
+CI_TEST_PREFIX = str(Path(os.getcwd()))
+
+
+# sanitize filename e.g., distributed/pipeline/sync/skip/test_api.py -> distributed.pipeline.sync.skip.test_api
+def sanitize_test_filename(filename):
+    # inspect.getfile returns absolute path in some CI jobs, converting it to relative path if needed
+    if filename.startswith(CI_TEST_PREFIX):
+        filename = filename[len(CI_TEST_PREFIX) + 1:]
+    strip_py = re.sub(r'.py$', '', filename)
+    return re.sub('/', r'.', strip_py)
+
+
+def get_report_path(pytest=False):
+    pytest = "--use-pytest" in sys.argv or pytest
+    test_filename = sanitize_test_filename(sys.argv[0])
+
+    source = os.environ.get('TEST_REPORT_SOURCE_OVERRIDE', 'python-unittest' if not pytest else 'python-pytest')
+    test_report_path = os.path.join('test-reports', source, test_filename)
+    os.makedirs(test_report_path, exist_ok=True)
+    if pytest:
+        test_report_path = os.path.join(test_report_path, f"{test_filename}-{os.urandom(8).hex()}.xml")
+    return test_report_path
+
 
 is_running_via_run_test = "run_test.py" in getattr(__main__, "__file__", "")
 parser = argparse.ArgumentParser(add_help=not is_running_via_run_test, allow_abbrev=False)
@@ -933,10 +950,9 @@ parser.add_argument('--repeat', type=int, default=1)
 parser.add_argument('--test-bailouts', '--test_bailouts', action='store_true')
 parser.add_argument('--use-pytest', action='store_true')
 parser.add_argument('--save-xml', nargs='?', type=str,
-                    const=_get_test_report_path(),
-                    default=_get_test_report_path() if IS_CI else None)
+                    const=get_report_path(),
+                    default=get_report_path() if IS_CI else None)
 parser.add_argument('--discover-tests', action='store_true')
-parser.add_argument('--log-suffix', type=str, default="")
 parser.add_argument('--run-parallel', type=int, default=1)
 parser.add_argument('--import-slow-tests', type=str, nargs='?', const=DEFAULT_SLOW_TESTS_FILE)
 parser.add_argument('--import-disabled-tests', type=str, nargs='?', const=DEFAULT_DISABLED_TESTS_FILE)
@@ -972,7 +988,6 @@ RERUN_DISABLED_TESTS = args.rerun_disabled_tests
 
 SLOW_TESTS_FILE = args.import_slow_tests
 DISABLED_TESTS_FILE = args.import_disabled_tests
-LOG_SUFFIX = args.log_suffix
 RUN_PARALLEL = args.run_parallel
 TEST_BAILOUTS = args.test_bailouts
 USE_PYTEST = args.use_pytest
@@ -989,7 +1004,6 @@ UNITTEST_ARGS = [sys.argv[0]] + remaining
 torch.manual_seed(SEED)
 
 # CI Prefix path used only on CI environment
-CI_TEST_PREFIX = str(Path(os.getcwd()))
 CI_PT_ROOT = str(Path(os.getcwd()).parent)
 CI_FUNCTORCH_ROOT = str(os.path.join(Path(os.getcwd()).parent, "functorch"))
 
@@ -1113,13 +1127,6 @@ def _print_test_names():
 def chunk_list(lst, nchunks):
     return [lst[i::nchunks] for i in range(nchunks)]
 
-# sanitize filename e.g., distributed/pipeline/sync/skip/test_api.py -> distributed.pipeline.sync.skip.test_api
-def sanitize_test_filename(filename):
-    # inspect.getfile returns absolute path in some CI jobs, converting it to relative path if needed
-    if filename.startswith(CI_TEST_PREFIX):
-        filename = filename[len(CI_TEST_PREFIX) + 1:]
-    strip_py = re.sub(r'.py$', '', filename)
-    return re.sub('/', r'.', strip_py)
 
 def lint_test_case_extension(suite):
     succeed = True
@@ -1138,19 +1145,6 @@ def lint_test_case_extension(suite):
                 print(f"{test_class} - failed. {err}")
                 succeed = False
     return succeed
-
-
-def get_report_path(argv=UNITTEST_ARGS, pytest=False):
-    test_filename = sanitize_test_filename(argv[0])
-    test_report_path = TEST_SAVE_XML + LOG_SUFFIX
-    test_report_path = os.path.join(test_report_path, test_filename)
-    if pytest:
-        test_report_path = test_report_path.replace('python-unittest', 'python-pytest')
-        os.makedirs(test_report_path, exist_ok=True)
-        test_report_path = os.path.join(test_report_path, f"{test_filename}-{os.urandom(8).hex()}.xml")
-        return test_report_path
-    os.makedirs(test_report_path, exist_ok=True)
-    return test_report_path
 
 
 def sanitize_pytest_xml(xml_file: str):
@@ -1237,8 +1231,6 @@ def run_tests(argv=UNITTEST_ARGS):
             other_args.append("--use-pytest")
         if RERUN_DISABLED_TESTS:
             other_args.append("--rerun-disabled-tests")
-        if TEST_SAVE_XML:
-            other_args += ['--save-xml', args.save_xml]
 
         test_cases = (
             get_pytest_test_cases(argv) if USE_PYTEST else
@@ -1248,10 +1240,11 @@ def run_tests(argv=UNITTEST_ARGS):
         failed_tests = []
 
         for test_case_full_name in test_cases:
+            new_xml = ".".join(TEST_SAVE_XML.split(".")[:-1] + [f"{os.urandom(8).hex()}.xml"])
 
             cmd = (
-                [sys.executable] + [argv[0]] + other_args + argv[1:] +
-                (["--pytest-single-test"] if USE_PYTEST else []) +
+                [sys.executable] + [argv[0]] + other_args + [f"--save-xml={new_xml}"] +
+                argv[1:] + (["--pytest-single-test"] if USE_PYTEST else []) +
                 [test_case_full_name]
             )
             string_cmd = " ".join(cmd)
@@ -1279,7 +1272,8 @@ def run_tests(argv=UNITTEST_ARGS):
         test_batches = chunk_list(get_test_names(test_cases), RUN_PARALLEL)
         processes = []
         for i in range(RUN_PARALLEL):
-            command = [sys.executable] + argv + [f'--log-suffix=-shard-{i + 1}'] + test_batches[i]
+            # Bad behavior with save xml paths.  TODO: remove this in favor of using run_test.py
+            command = [sys.executable] + argv + test_batches[i]
             processes.append(subprocess.Popen(command, universal_newlines=True))
         failed = False
         for p in processes:
@@ -1288,9 +1282,8 @@ def run_tests(argv=UNITTEST_ARGS):
     elif USE_PYTEST:
         pytest_args = argv + ["--use-main-module"]
         if TEST_SAVE_XML:
-            test_report_path = get_report_path(pytest=True)
-            print(f'Test results will be stored in {test_report_path}')
-            pytest_args.append(f'--junit-xml-reruns={test_report_path}')
+            print(f'Test results will be stored in {TEST_SAVE_XML}')
+            pytest_args.append(f'--junit-xml-reruns={TEST_SAVE_XML}')
         if PYTEST_SINGLE_TEST:
             pytest_args = PYTEST_SINGLE_TEST + pytest_args[1:]
 
@@ -1298,7 +1291,7 @@ def run_tests(argv=UNITTEST_ARGS):
         os.environ["NO_COLOR"] = "1"
         exit_code = pytest.main(args=pytest_args)
         if TEST_SAVE_XML:
-            sanitize_pytest_xml(test_report_path)
+            sanitize_pytest_xml(TEST_SAVE_XML)
 
         if not RERUN_DISABLED_TESTS:
             # exitcode of 5 means no tests were found, which happens since some test configs don't
@@ -1337,12 +1330,11 @@ def run_tests(argv=UNITTEST_ARGS):
             def printErrors(self) -> None:
                 super().printErrors()
                 self.printErrorList("XPASS", self.unexpectedSuccesses)
-        test_report_path = get_report_path()
         verbose = '--verbose' in argv or '-v' in argv
         if verbose:
-            print(f'Test results will be stored in {test_report_path}')
+            print(f'Test results will be stored in {TEST_SAVE_XML}')
         unittest.main(argv=argv, testRunner=xmlrunner.XMLTestRunner(
-            output=test_report_path,
+            output=TEST_SAVE_XML,
             verbosity=2 if verbose else 1,
             resultclass=XMLTestResultVerbose))
     elif REPEAT_COUNT > 1:
