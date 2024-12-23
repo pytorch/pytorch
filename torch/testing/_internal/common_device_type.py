@@ -59,6 +59,8 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_UBSAN,
     TEST_XPU,
     TestCase,
+    GPU_TYPE,
+    GPU_TYPES,
 )
 
 
@@ -823,7 +825,7 @@ def get_desired_device_type_test_bases(
     test_bases = device_type_test_bases.copy()
     if allow_mps and TEST_MPS and MPSTestBase not in test_bases:
         test_bases.append(MPSTestBase)
-    if allow_xpu and TEST_XPU and XPUTestBase not in test_bases:
+    if (allow_xpu or only_for == "xpu") and TEST_XPU and XPUTestBase not in test_bases:
         test_bases.append(XPUTestBase)
     if TEST_HPU and HPUTestBase not in test_bases:
         test_bases.append(HPUTestBase)
@@ -989,10 +991,10 @@ class OpDTypes(Enum):
     unsupported_backward = 3  # Test only unsupported backward dtypes
     any_one = 4  # Test precisely one supported dtype
     none = 5  # Instantiate no dtype variants (no dtype kwarg needed)
-    any_common_cpu_cuda_one = (
+    any_common_cpu_gpu_one = (
         6  # Test precisely one supported dtype that is common to both cuda and cpu
     )
-
+    
 
 # Arbitrary order
 ANY_DTYPE_ORDER = (
@@ -1113,16 +1115,15 @@ class ops(_TestParametrizer):
                         break
                 else:
                     dtypes = {}
-            elif self.opinfo_dtypes == OpDTypes.any_common_cpu_cuda_one:
-                # Tries to pick a dtype that supports both CPU and CUDA
-                supported = set(op.dtypes).intersection(op.dtypesIfCUDA)
+            elif self.opinfo_dtypes == OpDTypes.any_common_cpu_gpu_one:
+                # Tries to pick a dtype that supports both CPU and GPU
+                supported = set(op.dtypes).intersection(op.supported_dtypes(device_cls.device_type))
                 if supported:
                     dtypes = {
                         next(dtype for dtype in ANY_DTYPE_ORDER if dtype in supported)
                     }
                 else:
                     dtypes = {}
-
             elif self.opinfo_dtypes == OpDTypes.none:
                 dtypes = {None}
             else:
@@ -1397,16 +1398,21 @@ class expectedFailure:
 
         return efail_fn
 
-
+# Only on a list of devices or device
 class onlyOn:
-    def __init__(self, device_type):
-        self.device_type = device_type
+    def __init__(self, device_type: Union[str, List[str]]):
+        self.device_types = []
+        if isinstance(device_type, str):
+            self.device_types.append(device_type)
+        else:
+            assert isinstance(device_type, list)
+            self.device_types = device_type
 
     def __call__(self, fn):
         @wraps(fn)
         def only_fn(slf, *args, **kwargs):
-            if self.device_type != slf.device_type:
-                reason = f"Only runs on {self.device_type}"
+            if slf.device_type not in self.device_types:
+                reason = f"Only runs on {self.device_types}"
                 raise unittest.SkipTest(reason)
 
             return fn(slf, *args, **kwargs)
@@ -1626,6 +1632,10 @@ def onlyXPU(fn):
 
 def onlyHPU(fn):
     return onlyOn("hpu")(fn)
+
+
+def onlyGPU(fn):
+    return onlyOn(GPU_TYPES)(fn)
 
 
 def onlyPRIVATEUSE1(fn):
@@ -1946,6 +1956,10 @@ def skipMeta(fn):
     return skipMetaIf(True, "test doesn't work with meta tensors")(fn)
 
 
+def skipXPU(fn):
+    return skipXPUIf(True, "test doesn't work with XPU tensors")(fn)
+
+
 def skipXLA(fn):
     return skipXLAIf(True, "Marked as skipped for XLA")(fn)
 
@@ -1974,3 +1988,6 @@ flex_attention_supported_platform = unittest.skipUnless(
     and torch.cuda.get_device_capability() >= (8, 0),
     "Requires CUDA and Triton",
 )
+
+def is_gpu_device(devices: List[str]):
+    return "cuda" in devices or "xpu" in devices
