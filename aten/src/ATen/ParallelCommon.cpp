@@ -62,7 +62,7 @@ std::string get_parallel_info() {
   ss << "\tomp_get_max_threads() : " << omp_get_max_threads() << '\n';
 #endif
 
-#if defined(__x86_64__) || defined(_M_X64)    
+#if defined(__x86_64__) || defined(_M_X64)
   ss << at::get_mkl_version() << '\n';
 #endif
 #if AT_MKL_ENABLED()
