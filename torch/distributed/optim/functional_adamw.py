@@ -108,7 +108,7 @@ class _FunctionalAdamW:
 
         state_steps.append(state["step"])
         with torch.no_grad():
-            F.adam(
+            F.adamw(
                 params_with_grad,
                 grads,
                 exp_avgs,
@@ -127,7 +127,6 @@ class _FunctionalAdamW:
                 grad_scale=None,
                 found_inf=None,
                 has_complex=has_complex,
-                decoupled_weight_decay=True,  # AdamW is just adam w/ this parameter set to True
             )
 
     def step(self, gradients: List[Optional[Tensor]]):
@@ -182,7 +181,7 @@ class _FunctionalAdamW:
                 state_steps.append(state["step"])
 
         with torch.no_grad():
-            F.adam(
+            F.adamw(
                 params_with_grad,
                 grads,
                 exp_avgs,
@@ -201,5 +200,4 @@ class _FunctionalAdamW:
                 grad_scale=None,
                 found_inf=None,
                 has_complex=has_complex,
-                decoupled_weight_decay=True,  # AdamW is just adam w/ this parameter set to True
             )
