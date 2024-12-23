@@ -81,6 +81,7 @@ from torch._prims_common import is_integer_dtype
 from torch._subclasses.fake_tensor import unset_fake_temporarily
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
+from torch.fx.graph_module import _get_attr
 from torch.fx.immutable_collections import immutable_dict, immutable_list
 from torch.fx.passes.graph_transform_observer import GraphTransformObserver
 from torch.utils._ordered_set import OrderedSet
@@ -2066,5 +2067,5 @@ def extract_target(node: torch.fx.Node) -> torch.fx.node.Target:
      as a function.
     """
     if node.op == "call_module":
-        return getattr(node.graph.owning_module, node.target).__class__  # type: ignore[arg-type]
+        return _get_attr(node.graph.owning_module, node.target).__class__  # type: ignore[arg-type]
     return node.target
