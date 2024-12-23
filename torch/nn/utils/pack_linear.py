@@ -26,6 +26,7 @@ def pack_linear_weights(model, inplace=False):
     """
 
     torch._C._log_api_usage_once("utils_api.pack_linear.pack_linear_weights")
+    model_ = model
     if not inplace:
         model_ = copy.deepcopy(model)
     model_.eval()
@@ -74,7 +75,7 @@ def pack_module(
     device = next(iter(devices)) if len(devices) > 0 else None
 
     if torch._C._has_mkldnn:
-        packed_weight = torch._C._nn.mkldnn_reorder_linear_weight(torch.Tensor(mod.weight))
+        packed_weight = torch._C._nn.pack_linear(torch.Tensor(mod.weight))
     else:
         raise Exception()
 
