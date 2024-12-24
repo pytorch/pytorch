@@ -430,6 +430,19 @@ int register_linear_params() {
               [](SerializationType state)
                   -> c10::intrusive_ptr<
                       LinearPackedParamsBase> { // __setstate__
+#if defined(__aarch64__)
+    if (at::globalContext().qEngine() == at::QEngine::Arm) {
+      #if AT_MKLDNN_ENABLED()
+                    TORCH_CHECK(
+                        weight.scalar_type() == at::kQInt8,
+                        "ONEDNN only supports INT8 bit width currently. Got ",
+                        c10::toString(weight.scalar_type()));
+                    return PackedLinearWeightsOnednn::prepack(
+                        std::move(weight), std::move(bias));
+      #endif // #if AT_MKLDNN_ENABLED()
+      TORCH_CHECK( false,"Unsupported data type", c10::toString(weight.scalar_type())," in serialized LinearPackedParams object!");
+    }
+#endif//__aarch64__
 #ifdef USE_FBGEMM
                 if (at::globalContext().qEngine() == at::QEngine::FBGEMM ||
                     at::globalContext().qEngine() == at::QEngine::X86) {

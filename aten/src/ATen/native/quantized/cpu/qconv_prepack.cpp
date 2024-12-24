@@ -662,7 +662,17 @@ class QConvPackWeightInt8 final {
       torch::List<int64_t> dilation,
       int64_t groups,
       bool transpose) {
-    auto& ctx = at::globalContext();
+      auto& ctx = at::globalContext();
+#if defined(__aarch64__)
+  if(ctx.qEngine() == at::QEngine::Arm){
+    #if AT_MKLDNN_ENABLED()
+      return PackedConvWeightsOnednn<kSpatialDim>::prepack(
+        weight, bias, stride, padding, output_padding, dilation, groups,
+            transpose);
+    #endif
+    TORCH_CHECK(false,"conv2d_prepack :: is not supported without ONEDNN in qengine ",toString(ctx.qEngine()));
+  }
+#endif//__aarch64__
 #ifdef USE_FBGEMM
   if (ctx.qEngine() == at::QEngine::X86) {
 #if AT_MKLDNN_ENABLED()
@@ -755,7 +765,17 @@ class QConv1dPackWeightInt8 final {
     padding = quant_utils::MakeArgForConv1d(padding, 0);
     output_padding = quant_utils::MakeArgForConv1d(output_padding, 0);
     dilation = quant_utils::MakeArgForConv1d(dilation, 1);
+#if defined(__aarch64__)
+  if (ctx.qEngine() == at::QEngine::Arm) {
+    #if AT_MKLDNN_ENABLED()
+      return PackedConvWeightsOnednn<2>::prepack(
+          weight, bias, stride, padding, output_padding, dilation, groups,
+          transpose);
 
+    #endif
+    TORCH_CHECK(false,"conv1d_prepack :: is not supported without ONEDNN in qengine ",toString(ctx.qEngine()));
+  }
+#endif//__aarch64__
 #ifdef USE_FBGEMM
   if (ctx.qEngine() == at::QEngine::X86) {
 #if AT_MKLDNN_ENABLED()

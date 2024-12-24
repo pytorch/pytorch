@@ -1971,9 +1971,21 @@ class QConvAddInt8 final {
       const c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>>& packed_weight,
       double output_scale,
       int64_t output_zero_point) {
-#if AT_MKLDNN_ENABLED() || !defined(STRIP_ERROR_MESSAGES)
     auto& ctx = at::globalContext();
-#endif
+#if defined(__aarch64__)
+  if (ctx.qEngine() == at::QEngine::Arm) {
+    #if AT_MKLDNN_ENABLED()
+      if (kReluFused) {
+        return dynamic_cast<PackedConvWeightsOnednn<kSpatialDim>*>(packed_weight.get())->apply_add_relu(
+          act, accum, output_scale, output_zero_point);
+      } else {
+        return dynamic_cast<PackedConvWeightsOnednn<kSpatialDim>*>(packed_weight.get())->apply_add(
+          act, accum, output_scale, output_zero_point);
+      }
+    #endif
+    TORCH_CHECK(false,"conv2d_add. is not not supported without ONEDNN in qengine :: ",toString(ctx.qEngine()));
+  }
+#endif//__aarch64__
 #if AT_MKLDNN_ENABLED()
     if (ctx.qEngine() == at::QEngine::ONEDNN) {
       if (kReluFused) {

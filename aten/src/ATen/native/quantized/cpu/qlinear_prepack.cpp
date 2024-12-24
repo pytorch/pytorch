@@ -583,7 +583,14 @@ class QLinearPackWeightInt8 final {
       at::Tensor weight,
       std::optional<Tensor> bias) {
     auto& ctx = at::globalContext();
-
+#if defined(__aarch64__)
+  if (ctx.qEngine() == at::QEngine::Arm) {
+    #if AT_MKLDNN_ENABLED()
+      return PackedLinearWeightsOnednn::prepack(std::move(weight), std::move(bias));
+    #endif // #if AT_MKLDNN_ENABLED()
+        TORCH_CHECK(false,"linear_prepack :: is not supported without ONEDNN in qengine ",toString(ctx.qEngine()));
+  }
+#endif//__aarch64__
 #ifdef USE_FBGEMM
     if (ctx.qEngine() == at::QEngine::FBGEMM ||
         ctx.qEngine() == at::QEngine::X86) {
@@ -614,6 +621,14 @@ class QLinearPackWeightFp16 final {
       at::Tensor weight,
       std::optional<Tensor> bias) {
     auto& ctx = at::globalContext();
+#if defined(__aarch64__)
+    if (ctx.qEngine() == at::QEngine::Arm) {
+      TORCH_CHECK(
+          false,
+          "quantized::linear_prepack_fp16 is currently "
+          "not supported by Arm");
+    }
+#endif // __aarch64__
 #ifdef USE_FBGEMM
     // temporarily convert weight back to fp32, needs to be fixed
     // after fbgemm fixes the interface for their prepacking op (take fp16 input0
