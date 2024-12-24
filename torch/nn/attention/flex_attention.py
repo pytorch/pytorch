@@ -198,13 +198,23 @@ def _adjust_num_blocks_and_indices(
     Take special care to recalculate the num_blocks by invalidating the indices that are out of bounds.
 
     """
-    max_good_blocks = indices[:, :, :, :num_blocks]
-    new_valid_blocks = torch.where(max_good_blocks < new_num_cols, max_good_blocks, -1)
+    # Create a mask for valid blocks using arange
+    block_arange = torch.arange(indices.size(-1), device=indices.device)[None, None, None, :]
+    num_blocks_expanded = num_blocks[..., None]  # [b, h, q//block_size, 1]
+    valid_blocks_mask = block_arange < num_blocks_expanded
+    
+    # Get the blocks within the valid range
+    max_good_blocks = torch.where(valid_blocks_mask, indices, torch.tensor(-1, device=indices.device))
+    new_valid_blocks = torch.where(max_good_blocks < new_num_cols, max_good_blocks, torch.tensor(-1, device=indices.device))
+    
+    # Count valid blocks per row
     new_num_blocks = (new_valid_blocks != -1).sum(dim=-1, keepdim=False).to(torch.int32)
+    
+    # Truncate indices to new dimensions
     indices = indices[:, :, :new_num_rows, :new_num_cols]
     num_blocks = new_num_blocks[:, :, :new_num_rows]
+    
     return num_blocks, indices
-
 
 class BlockMask:
     r"""
