@@ -2256,6 +2256,7 @@ def calc_conv_nd_return_shape(
 def is_channels_last(ten):
     return torch._prims_common.suggest_memory_format(ten) == torch.channels_last
 
+
 @register_meta(aten.miopen_batch_norm.default)
 def meta_miopen_batch_norm(
     input_tensor: torch.Tensor,
@@ -2290,8 +2291,9 @@ def meta_miopen_batch_norm(
     else:
         save_mean = input_tensor.new_empty((0,))
         save_var = input_tensor.new_empty((0,))
-        
+
     return out, save_mean, save_var
+
 
 @register_meta(aten.convolution.default)
 def meta_conv(
