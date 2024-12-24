@@ -64,7 +64,9 @@ C10_DEVICE inline void adam_math(
     }
     // todo(crcrpar): use lerp
     // ref: https://developer.nvidia.com/blog/lerp-faster-cuda/
-    exp_avg = beta1 * exp_avg + (1 - beta1) * grad;
+    if (exp_avg){
+      exp_avg = beta1 * exp_avg + (1 - beta1) * grad;
+    }
     exp_avg_sq = beta2 * exp_avg_sq + (1 - beta2) * grad * grad;
     const opmath_t step_size = lr / bias_correction1;
     opmath_t denom;
@@ -81,7 +83,10 @@ C10_DEVICE inline void adam_math(
     if (grad_scale_ptr) {
       r_args[kGradIdx][ii] = grad_to_store;
     }
-    r_args[kExpAvgIdx][ii] = exp_avg;
+    //don't write into gradients if beta1 is 0
+    if (beta1>0){
+      r_args[kExpAvgIdx][ii] = exp_avg;  
+    }
     r_args[kExpAvgSqIdx][ii] = exp_avg_sq;
     if (amsgrad) {
       r_args[kMaxExpAvgSqIdx][ii] = max_exp_avg_sq;
