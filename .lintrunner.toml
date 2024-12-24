@@ -61,6 +61,7 @@ include_patterns = [
     'aten/src/ATen/xpu/**/*.cpp',
     'aten/src/ATen/core/boxing/**/*.h',
     'aten/src/ATen/core/dispatch/**/*.h',
+    'aten/src/ATen/core/op_registration/**/*.h',
     'aten/src/ATen/native/mps/**/*.metal',
     'aten/src/ATen/native/mps/**/*.mm',
     'aten/src/ATen/native/mps/**/*.h',
