@@ -17,7 +17,7 @@ from torch import device as _device
 from torch._utils import _dummy_type, _LazySeedTracker
 
 from ._utils import _get_device_index
-from .streams import Event, ExternalStream, Stream
+from .streams import Event, Stream
 
 
 _initialized = False
