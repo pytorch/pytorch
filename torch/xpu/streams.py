@@ -96,28 +96,6 @@ class Stream(torch._C._XpuStreamBase):
         return f"torch.xpu.Stream(device={self.device} sycl_queue={self.sycl_queue:#x})"
 
 
-class ExternalStream(Stream):
-    r"""Wrapper around an externally created SYCL queue.
-
-    This class is used to wrap SYCL queue created in other libraries in order
-    to facilitate data exchange and multi-library interactions.
-
-    .. note:: This class doesn't manage the queue life-cycle, it is the user
-       responsibility to keep the referenced queue alive while this class is
-       being used. The different SYCL queue pointers will result in distinct
-       ExternalStream objects, even if the SYCL queues they dereference are equivalent.
-
-    Args:
-        queue_ptr(int): Integer representation of the `sycl::queue*` value passed externally.
-        device(torch.device or int, optional): the device where the queue was originally created.
-            It is the user responsibility to ensure the device is specified correctly.
-    """
-
-    def __new__(cls, queue_ptr, device=None, **kwargs):
-        with torch.xpu.device(device):
-            return super().__new__(cls, queue_ptr=queue_ptr, **kwargs)
-
-
 class Event(torch._C._XpuEventBase):
     r"""Wrapper around a XPU event.
 

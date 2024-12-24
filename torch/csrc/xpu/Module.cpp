@@ -390,6 +390,13 @@ static void initXpuMethodBindings(PyObject* module) {
       "torch.xpu.mem_get_info requires PyTorch to be built with SYCL compiler version 2025.0.0 or newer.");
 #endif
   });
+  m.def(
+      "_xpu_getStreamFromExternal",
+      [](void* data_ptr, c10::DeviceIndex device_index) {
+        at::xpu::XPUStream stream = c10::xpu::getStreamFromExternal(
+            (reinterpret_cast<sycl::queue*>(data_ptr)), device_index);
+        return XPUStream;
+      });
 }
 
 // Callback for python part. Used for additional initialization of python

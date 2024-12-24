@@ -380,6 +380,27 @@ def current_stream(device: Optional[_device_t] = None) -> Stream:
     )
 
 
+def get_stream_from_external(data_ptr: int, device: Optional[_device_t] = None) -> Stream:
+    r"""Wrapper around an externally created SYCL queue.
+
+    This class is used to wrap SYCL queue created in other libraries in order
+    to facilitate data exchange and multi-library interactions.
+
+    .. note:: This class doesn't manage the queue life-cycle, it is the user
+       responsibility to keep the referenced queue alive while this class is
+       being used. The different SYCL queue pointers will result in distinct
+       :class:`Stream` objects, even if the SYCL queues they dereference are equivalent.
+
+    Args:
+        data_ptr(int): Integer representation of the `sycl::queue*` value passed externally.
+        device(torch.device or int, optional): the device where the queue was originally created.
+            It is the user responsibility to ensure the device is specified correctly.
+    """
+    _lazy_init()
+    device = _get_device_index(device, optional=True)
+    return torch._C._xpu_getStreamFromExternal(data_ptr, device)
+
+
 def synchronize(device: _device_t = None) -> None:
     r"""Wait for all kernels in all streams on a XPU device to complete.
 

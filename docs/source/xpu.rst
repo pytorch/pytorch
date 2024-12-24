@@ -18,6 +18,7 @@ torch.xpu
     get_device_name
     get_device_properties
     get_gencode_flags
+    get_stream_from_external
     init
     is_available
     is_initialized
@@ -49,7 +50,6 @@ Streams and events
     :nosignatures:
 
     Event
-    ExternalStream
     Stream
 
 
