@@ -172,7 +172,7 @@ class PadMMTest(TestCase):
         ):
             res1 = fn(a, b)
             compiled_fn = torch.compile(fn)
-            res2, (code,) = run_and_get_code(compiled_fn, a, b)
+            res2, (_,) = run_and_get_code(compiled_fn, a, b)
         self.assertEqual(res1, res2)
 
     @inductor_config.patch(force_shape_pad=True)
