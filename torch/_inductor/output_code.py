@@ -378,7 +378,7 @@ class CompiledFxGraph(OutputCode):
                 if k.startswith("_frozen_param"):
                     self.frozen_param_names[k] = graph.allocated_constant_name[k]
                 else:
-                    self.constants[k] = [v]
+                    self.constants[k] = v
 
         self.torchbind_constants = graph.torchbind_constants
         self.output_strides = output_strides
