@@ -1684,27 +1684,20 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
 
     @inductor_config.patch({"freezing": True})
-    @inductor_config.patch({"cpp.enable_linear_silu_linear_mul": True})
+    @inductor_config.patch({"cpp.enable_group_gemm_template": True})
     @patches
     @torch.no_grad
     @unittest.skipIf(not TEST_MKL, "Test requires MKL")
     @parametrize("batch_size", (16, 52))
     @parametrize("in_features", (52,))
     @parametrize("out_features", (32, 52))
-    @parametrize("bias_gate", (True, False))
-    @parametrize("bias_up", (True, False))
-    @parametrize("input_3d", (True, False))
-    @parametrize(
-        "epilogue",
-        (
-            "none",
-            "relu",
-        ),
-    )
+    @parametrize("bias_gate", (False,))
+    @parametrize("bias_up", (False,))
+    @parametrize("input_3d", (False,))
     @dtypes(
         torch.bfloat16,
     )
-    def test_linear_silu_linear_mul(
+    def test_group_linear(
         self,
         batch_size,
         in_features,
@@ -1712,7 +1705,6 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         bias_gate,
         bias_up,
         input_3d,
-        epilogue,
         dtype,
     ):
         class Linear_Gate_Up(torch.nn.Module):
@@ -1722,11 +1714,9 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
                     in_feature, out_feature, bias=bias_gate
                 )
                 self.up_proj = torch.nn.Linear(in_feature, out_feature, bias=bias_up)
-                self.epilogue = _get_epilogue(epilogue)
 
             def forward(self, x):
-                tmp = torch.nn.functional.silu(self.gate_proj(x)) * self.up_proj(x)
-                return self.epilogue(tmp)
+                return self.gate_proj(x), self.up_proj(x)
 
         if input_3d and bias_gate and bias_up:
             # Reduce the redundant test combination
@@ -2092,9 +2082,7 @@ class TestSelectAlgorithmDynamicShapes(_DynamicShapesTestBase):
     test_quantized_linear_amx_dynamic_shapes = (
         TestSelectAlgorithm.test_quantized_linear_amx
     )
-    test_linear_silu_linear_mul_dynamic_shapes = (
-        TestSelectAlgorithm.test_linear_silu_linear_mul
-    )
+    test_group_linear_dynamic_shapes = TestSelectAlgorithm.test_group_linear
     test_linear_k_slicing_dynamic_shapes = TestSelectAlgorithm.test_linear_k_slicing
     test_linear_cache_blocking_dynamic_shapes = (
         TestSelectAlgorithm.test_linear_cache_blocking

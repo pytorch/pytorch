@@ -17,6 +17,7 @@ from typing import (
     Any,
     Callable,
     Dict,
+    Iterable,
     Iterator,
     List,
     Optional,
@@ -481,16 +482,18 @@ class AllocateLine(MemoryPlanningLine):
 
     def codegen(self, code: IndentedBuffer) -> None:
         assert self.node.get_name() not in V.graph.removed_buffers
-        if (
-            isinstance(self.node, ir.CppTemplateBuffer)
-            and isinstance(self.node.layout, ir.MultiOutputLayout)
+        if isinstance(self.node, ir.CppTemplateBuffer) and isinstance(
+            self.node.layout, ir.MultiOutputLayout
         ):
             # TODO<leslie> support for more than 2 outputs
+            assert isinstance(self.node.outputs, Iterable)
             line0 = self.wrapper.make_buffer_allocation(self.node.outputs[0])
             line1 = self.wrapper.make_buffer_allocation(self.node.outputs[1])
             code.writeline(line0)
             code.writeline(line1)
-            code.writeline(f"{self.node.get_name()} = [{self.node.outputs[0].get_name()}, {self.node.outputs[1].get_name()}]")
+            code.writeline(
+                f"{self.node.get_name()} = [{self.node.outputs[0].get_name()}, {self.node.outputs[1].get_name()}]"
+            )
         else:
             line = self.wrapper.make_buffer_allocation(self.node)
             code.writeline(line)

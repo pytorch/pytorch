@@ -858,13 +858,6 @@ class MultiOutputPattern(PatternExpr):
                 return child_match
             m.extend(child_match)
 
-        # if node in m.nodes:
-        #     # Move the matched node to the end of the list, require by 
-        #     # https://github.com/pytorch/pytorch/blob/
-        #     # 49fdc52fd2b626df5304e3563c205f3e42b9a732/torch/_inductor/pattern_matcher.py#L1032
-        #     m.nodes.remove(node)
-        #     m.nodes.append(node)
-
         return m
 
     def _match_from_anchors(
@@ -1034,7 +1027,9 @@ class LoweringPatternEntry(PatternEntry):
         handler = functools.wraps(self.handler)(functools.partial(self.handler, match))
         if isinstance(self.pattern, MultiOutputPattern):
             with graph.inserting_before(node):
-                replacement = graph.call_function(handler, tuple(match.args), match.kwargs)
+                replacement = graph.call_function(
+                    handler, tuple(match.args), match.kwargs
+                )
                 assert len(match.nodes) == len(self.pattern.outputs)
                 with graph.inserting_after(replacement):
                     for output_idx in range(len(match.nodes)):
@@ -1045,7 +1040,7 @@ class LoweringPatternEntry(PatternEntry):
                             (
                                 replacement,
                                 output_idx,
-                            )
+                            ),
                         )
                         get_item.meta.update(output_node.meta)
                         output_node.replace_all_uses_with(get_item)
@@ -1053,7 +1048,9 @@ class LoweringPatternEntry(PatternEntry):
                         match.graph.erase_node(output_node)
         else:
             with graph.inserting_before(node):
-                replacement = graph.call_function(handler, tuple(match.args), match.kwargs)
+                replacement = graph.call_function(
+                    handler, tuple(match.args), match.kwargs
+                )
                 replacement.meta.update(node.meta)
                 node.replace_all_uses_with(replacement)
             assert match.nodes[-1] is node
@@ -1790,7 +1787,6 @@ class PatternMatcherPass:
                 for entry in self.patterns[(node.op, target)]:
                     if node._erased:
                         break
-                    print("entry.pattern is: {}".format(entry.pattern), flush=True)
                     m = entry.pattern.match(node)
                     # pattern match crosses mutation barrier - discard
                     if (

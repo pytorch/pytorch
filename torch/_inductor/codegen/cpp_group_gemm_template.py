@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import contextlib
 import logging
-from typing import Any, Callable, cast, List, Optional, Union
+from typing import Any, Callable, List, Optional, Union
 from unittest.mock import patch
 
 import torch
@@ -15,13 +15,7 @@ from ..select_algorithm import DataProcessorTemplateWrapper
 from ..utils import parallel_num_threads
 from ..virtualized import V
 from .cpp import get_export_declaration
-from .cpp_gemm_template import (
-    CppGemmTemplate,
-    expand_bias,
-    gen_2d_view_of_epilogue_buf,
-    prune_tensors,
-    transpose_w,
-)
+from .cpp_gemm_template import CppGemmTemplate, expand_bias, prune_tensors, transpose_w
 from .cpp_micro_gemm import CppMicroGemmAMX, create_micro_gemm
 from .cpp_template_kernel import CppTemplateKernel
 from .cpp_utils import (
@@ -152,7 +146,7 @@ class CppGroupGemmTemplate(CppGemmTemplate):
         beta=1,
         alpha=1,
         has_bias=False,
-        epilogue_creator: Optional[Callable[..., ir.Pointwise]] = None,
+        epilogue_creator: Optional[Callable[[ir.Buffer], ir.Pointwise]] = None,
         act_mapping: Optional[dict[int, ir.TensorBox]] = None,
         gemm_group_num: int = 1,
     ) -> None:
@@ -176,7 +170,6 @@ class CppGroupGemmTemplate(CppGemmTemplate):
         )
         self.act_mapping = act_mapping
         self.gemm_group_num = gemm_group_num
-        print("----- layout is: {}".format(layout), flush=True)
         # TODO<leslie> support more than 2 GEMM
         self.output_node: List[ir.Buffer] = [
             ir.Buffer(name="buf_out", layout=layout),
@@ -364,6 +357,7 @@ class CppGroupGemmTemplate(CppGemmTemplate):
             W_list = template_buffer_node.inputs[
                 wgt_start_idx : wgt_start_idx + self.gemm_group_num
             ]
+            assert isinstance(template_buffer_node.outputs, List)
             Y = template_buffer_node.outputs[0]
             Y2 = template_buffer_node.outputs[1]
             counters["inductor"]["cpp_group_gemm_template"] += 1
@@ -411,19 +405,9 @@ class CppGroupGemmTemplate(CppGemmTemplate):
                 ir.Buffer(name=gemm_output_name, layout=template_buffer.layout)
             )
 
-        buffer_name = template_buffer.get_name()
-        if self.epilogue_creator:
-            epilogues.append(
-                ir.ComputedBuffer(
-                    name=buffer_name,
-                    layout=template_buffer.layout,
-                    data=self.epilogue_creator(gemm_output_buffers, inp_list),
-                )
-            )
-            reindexers.append(None)
-
-        if epilogue_nodes:
-            assert False, "support epilogue_nodes is not implemented yet in Group GEMM Template"
+        assert (
+            not self.epilogue_creator and not epilogue_nodes
+        ), "Epilogue fusion is not implemented yet in Group GEMM Template"
 
         kernel_args = {}
         for x_idx in range(wgt_start_idx):

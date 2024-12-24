@@ -4,7 +4,7 @@ import functools
 import itertools
 import logging
 import sys
-from typing import Callable, List, Optional, Iterable
+from typing import Callable, Iterable, List, Optional, Union
 from unittest.mock import patch
 
 import sympy
@@ -29,11 +29,13 @@ class CppTemplate(KernelTemplate):
         input_nodes,
         layout: ir.Layout,
         num_threads: int,
-        epilogue_creator: Optional[Callable[..., ir.Pointwise]] = None,
+        epilogue_creator: Optional[Callable[[ir.Buffer], ir.Pointwise]] = None,
     ) -> None:
         super().__init__(name)
         self.input_nodes = input_nodes
-        self.output_node: ir.Buffer = ir.Buffer(name="buf_out", layout=layout)
+        self.output_node: Union[ir.Buffer, List[ir.Buffer]] = ir.Buffer(
+            name="buf_out", layout=layout
+        )
         self.layout = layout
         self.num_threads = num_threads
         self.epilogue_creator = epilogue_creator
@@ -60,7 +62,9 @@ class CppTemplate(KernelTemplate):
         if isinstance(self.output_node, Iterable):
             # Group GEMM Template
             # TODO<leslie>: support more than 2 GEMM
-            expected_args.extend([self.output_node[0].get_name(), self.output_node[1].get_name()])
+            expected_args.extend(
+                [self.output_node[0].get_name(), self.output_node[1].get_name()]
+            )
         else:
             expected_args.extend([self.output_node.get_name()])
         assert list(call_args)[: len(expected_args)] == expected_args, (
@@ -107,7 +111,9 @@ class CppTemplate(KernelTemplate):
             kernel_hash_name,
             self.name,
             self.input_nodes,
-            self.output_node[0].get_layout() if isinstance(self.output_node, Iterable) else self.output_node.get_layout(),
+            self.output_node[0].get_layout()
+            if isinstance(self.output_node, Iterable)
+            else self.output_node.get_layout(),
             make_kernel_render,
             bmreq,
             self,

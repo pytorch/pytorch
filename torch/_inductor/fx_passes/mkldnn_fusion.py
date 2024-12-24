@@ -846,6 +846,7 @@ if torch._C._has_mkldnn:
         )
 
         from torch._inductor.pattern_matcher import MultiOutputPattern
+
         group_gemm_pattern = MultiOutputPattern([linear0, linear1])
         _register_group_gemm_lowering(
             group_gemm_pattern,

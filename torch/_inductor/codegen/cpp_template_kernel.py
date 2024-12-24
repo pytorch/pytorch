@@ -231,10 +231,10 @@ class CppTemplateKernel(CppKernel):
         reindexers: Optional[List[Optional[Callable[[List[Any]], List[Any]]]]] = None,
     ) -> str:
         if isinstance(dst, Iterable):
-            check_dst = dst[0]
+            ref_dst = dst[0]
         else:
-            check_dst = dst
-        var_sizes = (tuple(check_dst.get_size()), ())
+            ref_dst = dst
+        var_sizes = (tuple(ref_dst.get_size()), ())
         var_ranges = {
             sympy_index_symbol_with_prefix(SymT.INDEX, i): sz
             for i, sz in enumerate(var_sizes[0])
@@ -244,7 +244,7 @@ class CppTemplateKernel(CppKernel):
         if not reindexers:
             reindexers = [None] * len(nodes)
         assert len(offsets) == len(var_sizes[0])
-        output_index = check_dst.get_layout().make_indexer()([*var_ranges.keys()])
+        output_index = ref_dst.get_layout().make_indexer()([*var_ranges.keys()])
         kernel_group = KernelGroup()
         kernel_group.args = self.args
         cpp_kernel_proxy = CppKernelProxy(kernel_group)
@@ -252,15 +252,27 @@ class CppTemplateKernel(CppKernel):
         var_sizes_list = []
         if isinstance(nodes[0], Iterable):
             # TODO: support for different length of epilogue
-            check_len = len(nodes[0])
-            assert all(len(_nodes) == check_len for _nodes in nodes)
-            for i, node in enumerate(nodes[0]):
-                output_name = node.get_name() if i < len(nodes[0]) - 1 else check_dst.get_name()
-                node1 = nodes[1][i]
-                output_name1 = node1.get_name() if i < len(nodes[0]) - 1 else dst[1].get_name()
-                node = node.data if isinstance(node, ir.ComputedBuffer) else node
-                node1 = node1.data if isinstance(node1, ir.ComputedBuffer) else node1
-                assert isinstance(node, ir.Pointwise), node
+            group_gemm_number = len(nodes)
+            for i, _ in enumerate(nodes[0]):
+                output_names = []
+                gemm_nodes = []
+                for gemm_idx in range(group_gemm_number):
+                    single_gemm_nodes = nodes[gemm_idx]
+                    assert isinstance(dst, Iterable)
+                    single_gemm_dst = dst[gemm_idx]
+                    assert isinstance(single_gemm_nodes, Iterable)
+                    assert isinstance(single_gemm_dst, ir.IRNode)
+                    gemm_nodes.append(single_gemm_nodes[i])
+                    output_names.append(
+                        single_gemm_nodes[i].get_name()
+                        if i < len(single_gemm_nodes) - 1
+                        else single_gemm_dst.get_name()
+                    )
+                    _node = gemm_nodes[gemm_idx]
+                    gemm_nodes[gemm_idx] = (
+                        _node.data if isinstance(_node, ir.ComputedBuffer) else _node
+                    )
+
                 def fn(*args):
                     assert len(args) == 2
                     assert len(args[0]) == len(var_sizes[0])
@@ -268,16 +280,13 @@ class CppTemplateKernel(CppKernel):
                     new_args = [arg + offset for arg, offset in zip(args[0], offsets)]  # type: ignore[arg-type]
                     if reindexers[i] is not None:
                         new_args = reindexers[i](new_args)  # type: ignore[misc]
-                    V.ops.store(
-                        output_name,
-                        output_index,
-                        node.make_loader()(new_args).value,
-                    )
-                    V.ops.store(
-                        output_name1,
-                        output_index,
-                        node1.make_loader()(new_args).value,
-                    )
+                    for gemm_idx in range(group_gemm_number):
+                        V.ops.store(
+                            output_names[gemm_idx],
+                            output_index,
+                            gemm_nodes[gemm_idx].make_loader()(new_args).value,
+                        )
+
                 body = LoopBody(
                     fn,
                     (list(var_ranges.keys()), ()),
@@ -289,6 +298,8 @@ class CppTemplateKernel(CppKernel):
                 var_sizes_list.append(var_sizes)
         else:
             for i, node in enumerate(nodes):
+                assert isinstance(node, ir.IRNode)
+                assert isinstance(dst, ir.IRNode)
                 output_name = node.get_name() if i < len(nodes) - 1 else dst.get_name()
                 node = node.data if isinstance(node, ir.ComputedBuffer) else node
                 assert isinstance(node, ir.Pointwise), node
@@ -322,7 +333,7 @@ class CppTemplateKernel(CppKernel):
 
     def store_output(
         self,
-        dst: ir.Buffer,
+        dst: Union[ir.Buffer, Tuple[ir.Buffer]],
         src: Union[ir.IRNode, Tuple[ir.IRNode]],
         orig_src: Optional[Union[ir.IRNode, Tuple[ir.IRNode]]] = None,
         epilogue_nodes: Optional[List[ir.IRNode]] = None,
@@ -352,11 +363,11 @@ class CppTemplateKernel(CppKernel):
         if isinstance(src, Iterable):
             # Group GEMM may have multi outputs to be localized
             assert isinstance(dst, Iterable)
-            for _src, _dst in zip(src, dst):
-                assert _dst.get_size() == _src.get_size(), f"{_dst=}, {_src=}"
-            # TODO <leslie>: support for epilogue fusion
-            assert not epilogue_nodes
+            assert all(
+                _dst.get_size() == _src.get_size() for _src, _dst in zip(src, dst)
+            )
         else:
+            assert isinstance(dst, ir.Buffer)
             assert dst.get_size() == src.get_size(), f"{dst=}, {src=}"
         if offsets:
             offsets = parse_expr_with_index_symbols(offsets)
@@ -368,7 +379,6 @@ class CppTemplateKernel(CppKernel):
                     and isinstance(orig_src, Iterable)
                     and orig_src[0].get_name() != src[0].get_name()
                 ):
-                    # For Group GEMM
                     assert all(
                         _orig_src.get_name() != _src.get_name()
                         for _orig_src, _src in zip(orig_src, src)
@@ -407,8 +417,14 @@ class CppTemplateKernel(CppKernel):
                             scope.add_local_buffer(_src)
                         return self.store_pointwise_nodes(dst, copy_list)
                 else:
-                    assert all(_src.get_name() == _dst.get_name() for _src, _dst in zip(src, dst))
-                    assert all(_src.get_layout() == _dst.get_layout() for _src, _dst in zip(src, dst))
+                    assert all(
+                        _src.get_name() == _dst.get_name()
+                        for _src, _dst in zip(src, dst)
+                    )
+                    assert all(
+                        _src.get_layout() == _dst.get_layout()
+                        for _src, _dst in zip(src, dst)
+                    )
                     return ""
             else:
                 assert isinstance(src, ir.IRNode)

@@ -93,7 +93,7 @@ def group_gemm_lowering(
         return_buf1 = view(return_buf1, (*x_size[:-1], return_buf1.get_size()[-1]))
     template_buf.layout = ir.MultiOutputLayout(device=input_nodes[0].get_device())
     template_buf.outputs = [return_buf0, return_buf1]
-    return ir.TensorBox.create(return_buf0), ir.TensorBox.create(return_buf1) 
+    return ir.TensorBox.create(return_buf0), ir.TensorBox.create(return_buf1)
 
 
 def register_onednn_fusion_ops():

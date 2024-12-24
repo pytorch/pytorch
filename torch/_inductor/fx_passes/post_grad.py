@@ -104,16 +104,10 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
             functools.partial(group_batch_fusion_passes, pre_grad=False)
         )
         GraphTransformObserver(gm, "remove_noop_ops").apply_graph_pass(remove_noop_ops)
-        print("gm.graph before post grad pass is: {}".format(gm.graph), flush=True)
-        for n in gm.graph.nodes:
-            print("node is: {}".format(n), flush=True)
-            print("------------", flush=True)
-        
         for i, patterns in enumerate(pass_patterns):
             GraphTransformObserver(gm, f"pass_pattern_{i}").apply_graph_pass(
                 patterns.apply
             )
-
         for pass_name in config.post_grad_fusion_options:
             # skip all patterns for group batch fusions
             if pass_name in POST_GRAD_FUSIONS:
@@ -131,8 +125,6 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
                 ] = upload_graph(gm.graph)
         if config.b2b_gemm_pass:
             B2B_GEMM_PASS.apply(gm.graph)  # type: ignore[arg-type]
-    
-    print("gm.graph after post grad pass is: {}".format(gm.graph), flush=True)
 
     if config._micro_pipeline_tp:
         micro_pipeline_tp_pass(gm.graph)
