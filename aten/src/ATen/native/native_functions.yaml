@@ -3367,6 +3367,9 @@
     MkldnnCPU: mkldnn_linear_backward
   autogen: mkldnn_linear_backward.out
 
+- func: pack_linear(Tensor weight) -> Tensor
+  python_module: nn
+
 - func: _cslt_compress(Tensor input) -> Tensor
   dispatch:
     CUDA: _cslt_compress
