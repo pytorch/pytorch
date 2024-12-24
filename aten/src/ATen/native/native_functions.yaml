@@ -4167,6 +4167,10 @@
     MPS: _weight_int4pack_mm_mps
     CUDA: _weight_int4pack_mm_cuda
 
+- func: _weight_int4_pack_mm(Tensor self, Tensor mat2, int qGroupSize, Tensor qScale, Tensor qZeros) -> Tensor
+  dispatch:
+    XPU: _weight_int4pack_mm_xpu
+
 # Split int4 pack weight between cpu and other devices due to
 # https://github.com/pytorch/ao/issues/1117#issuecomment-2451252756.
 - func: _convert_weight_to_int4pack_for_cpu(Tensor self, int innerKTiles) -> Tensor
