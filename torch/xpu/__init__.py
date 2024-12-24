@@ -380,7 +380,9 @@ def current_stream(device: Optional[_device_t] = None) -> Stream:
     )
 
 
-def get_stream_from_external(data_ptr: int, device: Optional[_device_t] = None) -> Stream:
+def get_stream_from_external(
+    data_ptr: int, device: Optional[_device_t] = None
+) -> Stream:
     r"""Wrapper around an externally created SYCL queue.
 
     This class is used to wrap SYCL queue created in other libraries in order
@@ -397,8 +399,12 @@ def get_stream_from_external(data_ptr: int, device: Optional[_device_t] = None) 
             It is the user responsibility to ensure the device is specified correctly.
     """
     _lazy_init()
-    device = _get_device_index(device, optional=True)
-    return torch._C._xpu_getStreamFromExternal(data_ptr, device)
+    streamdata = torch._C._xpu_getStreamFromExternal(
+        data_ptr, _get_device_index(device, optional=True)
+    )
+    return Stream(
+        stream_id=streamdata[0], device_index=streamdata[1], device_type=streamdata[2]
+    )
 
 
 def synchronize(device: _device_t = None) -> None:
