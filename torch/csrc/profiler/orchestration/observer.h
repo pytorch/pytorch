@@ -59,6 +59,7 @@ struct TORCH_API ExperimentalConfig {
       bool enable_cuda_sync_events = false,
       bool adjust_profiler_step = false,
       bool disable_external_correlation = false,
+      bool profile_all_threads = false,
       bool adjust_timestamps = false);
   explicit operator bool() const;
 
@@ -89,6 +90,11 @@ struct TORCH_API ExperimentalConfig {
    */
   bool disable_external_correlation;
 
+  /* controls whether profiler records cpu events on threads
+   * that are not spawned from the main thread on which the
+   * profiler was enabled, similar to on_demand mode */
+  bool profile_all_threads;
+
   /*
    * Controls whether or not timestamp adjustment occurs after profiling.
    * The purpose of this is to adjust Vulkan event timelines to align with those
@@ -115,6 +121,7 @@ struct TORCH_API ProfilerConfig {
 
   bool disabled() const;
   bool global() const;
+  bool pushGlobalCallbacks() const;
 
   ProfilerState state;
   ExperimentalConfig experimental_config;
