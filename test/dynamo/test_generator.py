@@ -329,7 +329,9 @@ class GraphModule(torch.nn.Module):
             return i
 
         t = torch.randn(2)
-        with self.assertRaisesRegex(RuntimeError, "generator ignored GeneratorExit"):
+        # This should actually be RuntimeError("generator ignored GeneratorExit")
+        # but Dynamo swallow the exception and raises Unsupported instead
+        with self.assertRaisesRegex(Unsupported, "Observed exception"):
             fn(t)
 
     def test_close_capture_and_reraise_GeneratorExit(self):
