@@ -142,26 +142,37 @@ def check_rocm():
     return rocm_ver if torch.version.hip else "None"
 
 
-def check_dynamo(backend, device, err_msg) -> None:
+def check_dynamo(backend: str, device_type: str, err_msg: str) -> None:
     import torch
 
-    if device == "cuda" and not torch.cuda.is_available():
+    if device_type == "cuda" and not torch.cuda.is_available():
         print(f"CUDA not available -- skipping CUDA check on {backend} backend\n")
         return
 
     try:
         import torch._dynamo as dynamo
+        from torch._inductor.codegen.common import (
+            get_scheduling_for_device,
+            init_backend_registration,
+        )
 
-        if device == "cuda":
-            from torch.utils._triton import has_triton
+        # This is decorated with lru_cache so safe to use multiple times
+        init_backend_registration()
 
-            if not has_triton():
-                print(
-                    f"WARNING: CUDA available but triton cannot be used. "
-                    f"Your GPU may not be supported. "
-                    f"Skipping CUDA check on {backend} backend\n"
-                )
-                return
+        scheduling = get_scheduling_for_device(device_type)
+        if scheduling is None:
+            print(
+                f"WARNING: No Inductor scheduling factory registered for {device_type}. Skipping check."
+            )
+            return
+
+        try:
+            scheduling(None).check_if_available(device_type)
+        except RuntimeError as e:
+            print(
+                f"WARNING: Inductor not available for {device_type}: {e}. Skipping check."
+            )
+            return
 
         dynamo.reset()
 
@@ -177,7 +188,7 @@ def check_dynamo(backend, device, err_msg) -> None:
         opt_mod = dynamo.optimize(backend, nopython=True)(mod)
 
         for f in (fn, opt_mod):
-            x = torch.randn(10, 10).to(device)
+            x = torch.randn(10, 10).to(device_type)
             x.requires_grad = True
             y = f(x)
             torch.testing.assert_close(y, x + x)
@@ -205,6 +216,8 @@ _SANITY_CHECK_ARGS = (
 
 
 def main() -> None:
+    from torch._dynamo.eval_frame import is_dynamo_supported
+
     python_ver = check_python()
     torch_ver = check_torch()
     cuda_ver = check_cuda()
@@ -215,10 +228,10 @@ def main() -> None:
         f"CUDA version: {cuda_ver}\n"
         f"ROCM version: {rocm_ver}\n"
     )
+    if not is_dynamo_supported():
+        warnings.warn("Dynamo is not supported on this platform. Skipping check.")
+        return
     for args in _SANITY_CHECK_ARGS:
-        if sys.version_info >= (3, 13):
-            warnings.warn("Dynamo not yet supported in Python 3.13. Skipping check.")
-            continue
         check_dynamo(*args)
     print("All required checks passed")
 

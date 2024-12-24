@@ -12,6 +12,7 @@ from torch.testing._internal.common_dtype import all_types_and, custom_types
 from torch.testing._internal.opinfo.core import DecorateInfo, OpInfo, SampleInput
 from torch._higher_order_ops.invoke_subgraph import mark_compile_region
 
+
 def sample_inputs_map(opinfo, device, dtype, requires_grad, **kwargs):
     make_arg = functools.partial(
         make_tensor, device=device, dtype=dtype, requires_grad=requires_grad
@@ -75,6 +76,13 @@ hop_that_doesnt_have_opinfo_test_allowlist = [
     "triton_kernel_wrapper_functional",
     "hints_wrapper",
     "foreach_map",
+    "auto_functionalized",
+    "auto_functionalized_v2",
+    "wrap",
+    "wrap_with_set_grad_enabled",
+    "wrap_with_autocast",
+    "wrap_activation_checkpoint",
+    "tag_activation_checkpoint",
 ]
 
 torch.library.define(
@@ -124,6 +132,7 @@ def sample_inputs_invoke_subgraph(opinfo, device, dtype, requires_grad, **kwargs
 @mark_compile_region
 def fn_for_invoke_subgraph(x):
     return torch.sin(x)
+
 
 def simple_invoke_subgraph(x):
     return fn_for_invoke_subgraph(x)
@@ -186,7 +195,6 @@ def sample_inputs_scan(opinfo, device, dtype, requires_grad, **kwargs):
 
 
 def simple_scan(init, xs):
-
     def combine_fn(carry, x):
         result = carry @ x + x
         return result, carry.clone()

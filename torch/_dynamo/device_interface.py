@@ -125,6 +125,26 @@ class DeviceInterface:
     def memory_allocated(device: _device_t = None) -> int:
         raise NotImplementedError
 
+    @staticmethod
+    def is_triton_capable(device: _device_t = None) -> bool:
+        """
+        Returns True if the device has Triton support, False otherwise, even if
+        the appropriate Triton backend is not available.
+        """
+        raise NotImplementedError
+
+    @staticmethod
+    def check_if_triton_available(device: _device_t = None) -> None:
+        """
+        Raises a `RuntimeError` with the appropriate human-readable instructions
+        to resolve the issue if Triton is not available for the given device, or
+        the default device if `device` is `None`.
+
+        The caller should ensure the presence of the 'triton' package before
+        calling this method.
+        """
+        raise NotImplementedError
+
 
 class DeviceGuard:
     """
@@ -220,6 +240,32 @@ class CudaInterface(DeviceInterface):
         else:
             return torch.cuda.get_device_properties(device).gcnArchName.split(":", 1)[0]
 
+    @staticmethod
+    def is_triton_capable(device: _device_t = None) -> bool:
+        return (
+            torch.version.hip is not None
+            or torch.cuda.get_device_properties(device).major >= 7
+        )
+
+    @staticmethod
+    def check_if_triton_available(device: _device_t = None) -> None:
+        if not CudaInterface.is_triton_capable(device):
+            device_props = torch.cuda.get_device_properties(device)
+            raise RuntimeError(
+                f"Found {device_props.name} which is too old to be supported by the triton GPU "
+                "compiler, which is used as the backend. Triton only supports devices of CUDA "
+                "Capability >= 7.0, but your device is of CUDA capability "
+                f"{device_props.major}.{device_props.minor}"
+            )
+
+        import triton.backends
+
+        if torch.version.hip is not None:
+            if "amd" not in triton.backends.backends:
+                raise RuntimeError("triton not built with the 'amd' backend")
+        elif "nvidia" not in triton.backends.backends:
+            raise RuntimeError("triton not built with the 'nvidia' backend")
+
 
 get_xpu_stream: Optional[Callable[[int], int]]
 if torch.xpu._is_compiled():
@@ -292,6 +338,17 @@ class XpuInterface(DeviceInterface):
     def is_bf16_supported(including_emulation: bool = False) -> bool:
         return torch.xpu.is_bf16_supported()
 
+    @staticmethod
+    def is_triton_capable(device: _device_t = None) -> bool:
+        return True
+
+    @staticmethod
+    def check_if_triton_available(device: _device_t = None) -> None:
+        import triton.backends
+
+        if "intel" not in triton.backends.backends:
+            raise RuntimeError("triton not built with the 'intel' backend")
+
 
 @dataclass
 class CpuDeviceProperties:
@@ -308,6 +365,14 @@ class CpuInterface(DeviceInterface):
 
         def record(self, stream=None):
             self.time = time.perf_counter()
+
+    class Worker:
+        @staticmethod
+        def get_device_properties(device: _device_t = None):
+            import multiprocessing
+
+            cpu_count = multiprocessing.cpu_count()
+            return CpuDeviceProperties(cpu_count)
 
     @staticmethod
     def is_available() -> bool:
@@ -329,13 +394,16 @@ class CpuInterface(DeviceInterface):
     def synchronize(device: _device_t = None):
         pass
 
-    class Worker:
-        @staticmethod
-        def get_device_properties(device: _device_t = None):
-            import multiprocessing
+    @staticmethod
+    def is_triton_capable(device: _device_t = None) -> bool:
+        return True
 
-            cpu_count = multiprocessing.cpu_count()
-            return CpuDeviceProperties(cpu_count)
+    @staticmethod
+    def check_if_triton_available(device: _device_t = None) -> None:
+        import triton.backends
+
+        if "cpu" not in triton.backends.backends:
+            raise RuntimeError("triton not built with the 'cpu' backend")
 
 
 device_interfaces: Dict[str, Type[DeviceInterface]] = {}

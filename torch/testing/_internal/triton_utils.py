@@ -2,14 +2,13 @@
 
 import unittest
 
-from torch.testing._internal.inductor_utils import HAS_CUDA, HAS_GPU
-from torch.utils._triton import has_triton
+from torch.testing._internal.inductor_utils import HAS_CUDA, HAS_GPU, HAS_TRITON
 
 
 requires_cuda = unittest.skipUnless(HAS_CUDA, "requires cuda")
 requires_gpu = unittest.skipUnless(HAS_GPU, "requires gpu")
 
-if has_triton():
+if HAS_TRITON:
     import triton
     from triton import language as tl
 

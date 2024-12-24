@@ -10,7 +10,7 @@ from typing import Dict, List, Optional, Tuple, TYPE_CHECKING
 from typing_extensions import override
 
 import torch
-from torch.utils._triton import has_triton, has_triton_package
+from torch.utils._triton import has_triton_package
 
 from ..remote_cache import (
     create_cache,
@@ -37,7 +37,7 @@ def inductor_meta_from_config() -> _InductorMetaTy:
     from torch._inductor import config
 
     backend_hash = None
-    if has_triton():
+    if has_triton_package():
         try:
             backend_hash = torch.utils._triton.triton_hash_with_backend()
         except RuntimeError:

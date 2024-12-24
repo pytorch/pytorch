@@ -38,7 +38,6 @@ from torch._inductor.metrics import get_metric_table, is_metric_table_enabled
 from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.symbol import free_symbol_is_type, SymT
-from torch.utils._triton import has_triton
 
 from . import comms, config, dependencies, ir, metrics
 from .codegen.common import BackendFeature, get_scheduling_for_device, Kernel
@@ -3607,24 +3606,14 @@ class Scheduler:
         ), f"{device} should have been normalized in lowering"
         V.graph.add_device_info(device)
 
-        device_scheduling = get_scheduling_for_device(device.type)
-        if device_scheduling is None:
+        device_scheduling_type = get_scheduling_for_device(device.type)
+        if device_scheduling_type is None:
             raise RuntimeError(f"Unsupported device type: {device.type}")
 
-        if not has_triton():
-            if (
-                device.type == "cuda"
-                and (device_props := torch.cuda.get_device_properties(device)).major < 7
-            ):
-                raise RuntimeError(
-                    f"Found {device_props.name} which is too old to be supported by the triton GPU compiler, which is used as the backend. Triton only supports devices of CUDA Capability >= 7.0, but your device is of CUDA capability {device_props.major}.{device_props.minor}"  # noqa: B950
-                )
-            elif is_gpu(device.type) and not device.type == "mps":
-                raise RuntimeError(
-                    "Cannot find a working triton installation. Either the package is not installed or it is too old. More information on installing Triton can be found at https://github.com/triton-lang/triton"  # noqa: B950
-                )
+        scheduling = device_scheduling_type(self)
+        scheduling.check_if_available(device)
 
-        return device_scheduling(self)
+        return scheduling
 
     def get_backend(self, device: Optional[torch.device]) -> BaseScheduling:
         assert device is not None
@@ -3882,6 +3871,15 @@ class BaseScheduling:
     def get_backend_features(cls, device: torch.device) -> Sequence[BackendFeature]:
         """Return a set of .codegen.common.BackendFeature()"""
         return ()
+
+    @classmethod
+    def check_if_available(cls, device: Union[str, torch.device, None] = None) -> None:
+        """
+        Raises a RuntimeError if the given device does not support this codegen or required
+        prerequisites are not available with a useful description for the user. If None is given,
+        the default device is checked.
+        """
+        return None
 
     def can_fuse_vertical(
         self, node1: BaseSchedulerNode, node2: BaseSchedulerNode

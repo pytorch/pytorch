@@ -821,11 +821,28 @@ def is_dynamo_supported():
         return False
 
 
-def check_if_inductor_supported():
+def check_if_inductor_supported(device: torch.device | str | None = None):
+    from torch._inductor.codegen.common import (
+        get_scheduling_for_device,
+        init_backend_registration,
+    )
+
     check_if_dynamo_supported()
 
+    init_backend_registration()
 
-def is_inductor_supported():
+    if device is None:
+        device = torch.get_default_device()
+    elif isinstance(device, str):
+        device = torch.device(device)
+
+    scheduling_factory = get_scheduling_for_device(device.type)
+    if scheduling_factory is None:
+        return False
+    scheduling_factory(None).check_if_available(device)
+
+
+def is_inductor_supported(device: torch.device | str | None = None):
     try:
         check_if_inductor_supported()
         return True

@@ -14,8 +14,7 @@ from torch._inductor.runtime.hints import HalideInputSpec, HalideMeta
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import parallel_num_threads
 from torch.testing._internal.common_utils import IS_CI, IS_MACOS, IS_WINDOWS
-from torch.testing._internal.inductor_utils import HAS_CPU
-from torch.utils._triton import has_triton
+from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA_TRITON
 
 
 if IS_WINDOWS and IS_CI:
@@ -196,7 +195,9 @@ class HalideTests(TestCase):
         fn(a, b, c)
         self.assertEqual(c, a + b)
 
-    @unittest.skipUnless(has_triton(), "requires triton")
+    @unittest.skipUnless(
+        HAS_CUDA_TRITON, "Requires triton and a compatible CUDA device"
+    )
     def test_random_consistency(self):
         seed = 1234
         shape = (3, 3)

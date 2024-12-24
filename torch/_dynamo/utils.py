@@ -85,7 +85,7 @@ from torch._utils_internal import (
 from torch.fx._utils import _format_graph_code, lazy_format_graph_code
 from torch.monitor import _WaitCounter
 from torch.nn.modules.lazy import LazyModuleMixin
-from torch.utils._triton import has_triton, has_triton_package
+from torch.utils._triton import has_triton_package
 from torch.utils.hooks import RemovableHandle
 
 
@@ -1125,7 +1125,7 @@ def record_compilation_metrics(
         ),
         "inductor_config": _scrubbed_inductor_config_for_logging(),
         "cuda_version": torch.version.cuda,
-        "triton_version": triton.__version__ if has_triton() else "",
+        "triton_version": triton.__version__ if has_triton_package() else "",
         "remote_cache_version": remote_cache_version,
         "inductor_fx_remote_cache_backend_type": inductor_fx_remote_cache_backend_type,
     }
@@ -3120,17 +3120,18 @@ def build_checkpoint_variable(**options):
     )
 
 
-def is_compile_supported(device_type):
+def is_compile_supported(device_type: str) -> bool:
+    from torch._inductor.codegen.common import (
+        get_scheduling_for_device,
+        init_backend_registration,
+    )
+
     from .eval_frame import is_dynamo_supported
 
-    compile_supported = is_dynamo_supported()
-    if device_type == "cpu":
-        pass
-    elif device_type == "cuda" and compile_supported:
-        compile_supported = has_triton()
-    else:
-        compile_supported = False
-    return compile_supported
+    # Ensure the scheduling backends are registered first.
+    init_backend_registration()
+
+    return is_dynamo_supported() and get_scheduling_for_device(device_type) is not None
 
 
 # The following 3.11 source code functions are adapted from
