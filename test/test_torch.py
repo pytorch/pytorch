@@ -1788,7 +1788,7 @@ else:
         chunk = 2**30 // b.shape[-1]
         for i in range(0, b.shape[0], chunk):
             end = min(i + chunk, b.shape[0])
-            b[i:end, :].cumsum_(dim = -1)
+            b[i:end, :].cumsum_(dim=-1)
         # cheat a bit to avoid OOM
         self.assertEqual(b[0, :], d[0, :], atol=3e-5, rtol=3e-5)
         self.assertEqual(b[-1, :], d[-1, :], atol=3e-5, rtol=3e-5)

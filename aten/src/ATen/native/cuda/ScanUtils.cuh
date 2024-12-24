@@ -343,7 +343,7 @@ __device__ void tensor_kernel_scan_innermost_dim_impl(T* row_buf, T *tgt_, const
 
       // Parallel reduction with Sklansky method. The diagram can be seen on this paper:
       // https://research.nvidia.com/publication/single-pass-parallel-prefix-scan-decoupled-look-back
-      for (index_t m = 0; m <= log_num_threads_x; ++m) {
+      for (int m = 0; m <= log_num_threads_x; ++m) {
         if (row_exists) {
           index_t s = 1 << m; // s = 2 ^ m
           auto a = static_cast<index_t>((threadIdx.x >> m) << (m + 1)) | s; // a = (threadIdx.x / s) * (2 * s) + s
