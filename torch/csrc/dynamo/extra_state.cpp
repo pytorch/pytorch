@@ -94,7 +94,8 @@ void set_extra_state_cache_limit_hit(ExtraState* extra_state, bool value) {
 
 ExtraState* get_extra_state(PyCodeObject* code) {
   ExtraState* extra = nullptr;
-  _PyCode_GetExtra((PyObject*)code, extra_index, (void**)&extra);
+  auto res = _PyCode_GetExtra((PyObject*)code, extra_index, (void**)&extra);
+  CHECK(res != -1);
   return extra;
 }
 
@@ -107,8 +108,13 @@ void destroy_extra_state(void* obj) {
 
 void set_extra_state(PyCodeObject* code, ExtraState* extra_state) {
   ExtraState* old_extra_state = get_extra_state(code);
+  CHECK(extra_index >= 0);
   CHECK(is_extra_state_unset(extra_state) || old_extra_state != extra_state);
-  _PyCode_SetExtra((PyObject*)code, extra_index, extra_state);
+  auto res = _PyCode_SetExtra((PyObject*)code, extra_index, extra_state);
+  if (res == -1) {
+    destroy_extra_state(extra_state);
+    CHECK(res != -1);
+  }
 }
 
 ExtraState* init_and_set_extra_state(PyCodeObject* code) {
