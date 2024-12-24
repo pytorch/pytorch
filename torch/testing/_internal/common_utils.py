@@ -5565,5 +5565,30 @@ def scoped_load_inline(func):
                 return cpp_extension.load_inline(*args, **kwargs)
 
         return func(*args, load_inline=load_inline, **kwargs)
+    return wrapper
+
+def recover_orig_fp32_precision(fn):
+    @contextlib.contextmanager
+    def recover():
+        old_mkldnn_conv_p = torch.backends.mkldnn.conv.fp32_precision
+        old_mkldnn_rnn_p = torch.backends.mkldnn.rnn.fp32_precision
+        old_mkldnn_matmul_p = torch.backends.mkldnn.matmul.fp32_precision
+        old_cudnn_conv_p = torch.backends.cudnn.conv.fp32_precision
+        old_cudnn_rnn_p = torch.backends.cudnn.rnn.fp32_precision
+        old_cuda_matmul_p = torch.backends.cuda.matmul.fp32_precision
+        try:
+            yield
+        finally:
+            torch.backends.mkldnn.conv.fp32_precision = old_mkldnn_conv_p
+            torch.backends.mkldnn.rnn.fp32_precision = old_mkldnn_rnn_p
+            torch.backends.mkldnn.matmul.fp32_precision = old_mkldnn_matmul_p
+            torch.backends.cudnn.conv.fp32_precision = old_cudnn_conv_p
+            torch.backends.cudnn.rnn.fp32_precision = old_cudnn_rnn_p
+            torch.backends.cuda.matmul.fp32_precision = old_cuda_matmul_p
+
+    @wraps(fn)
+    def wrapper(*args, **kwargs):
+        with recover():
+            fn(*args, **kwargs)
 
     return wrapper

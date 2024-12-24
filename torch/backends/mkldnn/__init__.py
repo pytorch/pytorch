@@ -4,7 +4,14 @@ from contextlib import contextmanager
 from typing import TYPE_CHECKING
 
 import torch
-from torch.backends import __allow_nonbracketed_mutation, ContextProp, PropModule
+from torch.backends import (
+    __allow_nonbracketed_mutation,
+    _FP32Precision,
+    _get_fp32_precision,
+    _set_fp32_precision,
+    ContextProp,
+    PropModule,
+)
 
 
 def is_available():
@@ -64,18 +71,25 @@ class verbose:
         return False
 
 
-def set_flags(_enabled, _deterministic=None):
-    orig_flags = (torch._C._get_mkldnn_enabled(), torch._C._get_mkldnn_deterministic())
-    torch._C._set_mkldnn_enabled(_enabled)
+def set_flags(_enabled=None, _deterministic=None, _fp32_precision="none"):
+    orig_flags = (
+        torch._C._get_mkldnn_enabled(),
+        torch._C._get_mkldnn_deterministic(),
+        torch._C._get_fp32_precision("mkldnn", "all"),
+    )
+    if _enabled is not None:
+        torch._C._set_mkldnn_enabled(_enabled)
     if _deterministic is not None:
         torch._C._set_mkldnn_deterministic(_deterministic)
+    if _fp32_precision is not None:
+        torch._C._set_fp32_precision("mkldnn", "all", _fp32_precision)
     return orig_flags
 
 
 @contextmanager
-def flags(enabled=False, deterministic=False):
+def flags(enabled=False, deterministic=False, fp32_precision="none"):
     with __allow_nonbracketed_mutation():
-        orig_flags = set_flags(enabled, deterministic)
+        orig_flags = set_flags(enabled, deterministic, fp32_precision)
     try:
         yield
     finally:
@@ -90,6 +104,12 @@ class MkldnnModule(PropModule):
     enabled = ContextProp(torch._C._get_mkldnn_enabled, torch._C._set_mkldnn_enabled)
     deterministic = ContextProp(
         torch._C._get_mkldnn_deterministic, torch._C._set_mkldnn_deterministic
+    )
+    matmul = _FP32Precision("mkldnn", "matmul")
+    conv = _FP32Precision("mkldnn", "conv")
+    rnn = _FP32Precision("mkldnn", "rnn")
+    fp32_precision = ContextProp(
+        _get_fp32_precision("mkldnn", "all"), _set_fp32_precision("generic", "all")
     )
 
 
