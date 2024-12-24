@@ -9095,9 +9095,9 @@ the gap between two values in the tensor.
     Python's range builtin. Instead, use :func:`torch.arange`, which produces values in [start, end).
 
 Args:
-    start (float): the starting value for the set of points. Default: ``0``.
+    start (float, optional): the starting value for the set of points. Default: ``0``.
     end (float): the ending value for the set of points
-    step (float): the gap between each pair of adjacent points. Default: ``1``.
+    step (float, optional): the gap between each pair of adjacent points. Default: ``1``.
 
 Keyword args:
     {out}
@@ -9143,9 +9143,9 @@ in such cases.
 """
     + r"""
 Args:
-    start (Number): the starting value for the set of points. Default: ``0``.
+    start (Number, optional): the starting value for the set of points. Default: ``0``.
     end (Number): the ending value for the set of points
-    step (Number): the gap between each pair of adjacent points. Default: ``1``.
+    step (Number, optional): the gap between each pair of adjacent points. Default: ``1``.
 
 Keyword args:
     {out}
