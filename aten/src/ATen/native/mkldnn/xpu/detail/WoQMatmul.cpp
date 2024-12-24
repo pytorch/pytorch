@@ -24,45 +24,41 @@ sycl::event woq_matmul_int4(
 
   at::Device cur_device = at::Device(at::kXPU, at::xpu::current_device());
   auto engine = GpuEngineManager::Instance().get_engine(cur_device);
-  auto engine_index = cur_device.index();
   auto stream = GpuStreamManager::Instance().get_stream();
 
   // make them all contiguous
-  Tensor m1 = is_onednn_matmul_strides(mat1_) ? mat1_ : mat1_.contiguous();
-  Tensor m2 = is_onednn_matmul_strides(mat2_) ? mat2_ : mat2_.contiguous();
-  Tensor scale_ = is_onednn_matmul_strides(scale) ? scale : scale.contiguous();
-  Tensor zp_ = is_onednn_matmul_strides(zp) ? zp : zp.contiguous();
-  Tensor dst =
-      is_onednn_matmul_strides(result, true) ? result : result.contiguous();
+  Tensor m1 = mat1_;
+  Tensor m2 = mat2_;
+  Tensor scale_ = scale;
+  Tensor zp_ = zp;
+  Tensor dst = result;
+
   int m = m1.size(-2); // M
-  int n = dst.size(-1); // m2.size(0) * kNTileSize;
-  int k = m1.size(-1); // K1
+  int n = dst.size(-1); // N
+  int k = m1.size(-1); // K
 
   // Construct usr md from input
   // xxx_usr_md would describe the real layout of inputs
   auto m1_usr_dt = get_onednn_dtype(m1); // e.g., half <==> f16
   auto m2_usr_dt = get_onednn_dtype(m2); // int32 tensor, pack 8 int4
   auto scale_usr_dt = get_onednn_dtype(scale_); // bf16
-  //   auto zp_usr_dt = dnnl::memory::data_type::s4; // int32, representing
-  //   8xint4
-  auto zp_usr_dt = get_onednn_dtype(zp_); // bf16
+  auto zp_usr_dt = get_onednn_dtype(zp_); // s8 expected currently
   auto dst_usr_dt = get_onednn_dtype(dst); // bf16
 
   dnnl::memory::dims m1_usr_dims, m2_usr_dims, scale_usr_dims, zp_usr_dims,
       dst_usr_dims;
   dnnl::memory::dims m1_usr_strides, m2_usr_strides, scale_usr_strides,
       zp_usr_strides, dst_usr_strides;
-  const uint64_t compressed_k = (uint64_t)(k / 8);
-  const uint64_t compressed_n = (uint64_t)(n / 8);
-  const uint64_t num_groups = (uint64_t)(k / group_size);
+  int64_t compressed_k = (uint64_t)(k / 8);
+  int64_t num_groups = (uint64_t)(k / group_size);
   // wei: {compressed_k, n}:
   m1_usr_dims = {m, k};
   m1_usr_strides = {m1.stride(0), m1.stride(1)};
-  // m2_usr_dims = {compressed_k, n};
   m2_usr_dims = {compressed_k, n};
   m2_usr_strides = {1, compressed_k}; // k dim contiguous, 4bit pack into s32
+
   scale_usr_dims = {num_groups, n};
-  scale_usr_strides = {scale_.stride(1), scale_.stride(0)};
+  scale_usr_strides = {scale_.stride(0), scale_.stride(1)};
   zp_usr_dims = {num_groups, n};
   zp_usr_strides = {zp.stride(0), zp.stride(1)};
   dst_usr_dims = {m, n};
@@ -92,7 +88,7 @@ sycl::event woq_matmul_int4(
   auto scale_dt = scale_usr_dt; // bf16
   // Tell oneDNN the zp dtype we want manipulate is s8
   // library needs infer how to unpack s8 data based on the m2_usr_md.
-  auto zp_dt = dnnl::memory::data_type::s8;
+  auto zp_dt = zp_usr_dt; // should be s8, currently
   auto dst_dt = dst_usr_dt;
 
   dnnl::memory::desc m1_md, m2_md, scale_md, zp_md, dst_md;
@@ -106,9 +102,7 @@ sycl::event woq_matmul_int4(
   m2_strides = {n, 1};
   scale_dims = scale_usr_dims; // {k//group_size, n}
   scale_strides = scale_usr_strides;
-  // zp_dims = {1};
   zp_dims = {num_groups, n};
-  // zp_strides = {1};
   zp_strides = {zp.stride(0), zp.stride(1)};
   dst_dims = dst_usr_dims;
   dst_strides = dst_usr_strides;

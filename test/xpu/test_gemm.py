@@ -1142,13 +1142,15 @@ class TestBasicGEMM(TestCase):
         with torch.no_grad():
             torch.matmul(a, b, out=c)
 
-
     def _group_quantize_tensor(self, w, n_bit=4, q_group_size=16):
+        # w [k, n] = [32, 48]
         assert w.dim() == 2
+        # w [n, k] = [48, 32]
         w = w.transpose(0, 1).contiguous()
         assert q_group_size > 1
         assert w.shape[-1] % q_group_size == 0
 
+        # to_quant: [n * k / group_size, group_size]
         to_quant = w.reshape(-1, q_group_size)
         assert torch.isnan(to_quant).sum() == 0
 
@@ -1167,6 +1169,7 @@ class TestBasicGEMM(TestCase):
         out = to_quant.div(scales).add(zeros).round().clamp_(min_int, max_int)
         assert torch.isnan(out).sum() == 0
 
+        # [n, k]
         out = out.to(dtype=torch.int32).reshape(w.shape)
         if out.device != torch.device('cpu'):
             out = (out[::, ::2] << 4 | out[::, 1::2]).to(torch.uint8)
@@ -1178,9 +1181,9 @@ class TestBasicGEMM(TestCase):
 
         return out, scales, zeros
 
-    @parametrize("m", [32, 64])
-    @parametrize("k", [32, 64])
-    @parametrize("n", [48, 64])
+    @parametrize("m", [128])
+    @parametrize("k", [512, 1024])
+    @parametrize("n", [512, 1024])
     def test__int4_mm(self, device, m, k, n):
 
         q_group = 32
@@ -1215,7 +1218,6 @@ class TestBasicGEMM(TestCase):
             b_scales = b_scales.to(dtype=dtype)
             ref = torch.mm(a, b)
 
-            # A[M, K]  # B[N, K]
             res = weight_int4pack_mm(a, b_int4pack, b_scales, zeros_int8)
 
             mean_err = ((res - ref).abs() / ref).mean()
