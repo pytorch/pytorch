@@ -383,13 +383,13 @@ def current_stream(device: Optional[_device_t] = None) -> Stream:
 def get_stream_from_external(
     data_ptr: int, device: Optional[_device_t] = None
 ) -> Stream:
-    r"""Wrapper around an externally created SYCL queue.
+    r"""Return a :class:`Stream` from an external SYCL queue.
 
-    This class is used to wrap SYCL queue created in other libraries in order
+    This function is used to wrap SYCL queue created in other libraries in order
     to facilitate data exchange and multi-library interactions.
 
-    .. note:: This class doesn't manage the queue life-cycle, it is the user
-       responsibility to keep the referenced queue alive while this class is
+    .. note:: This function doesn't manage the queue life-cycle, it is the user
+       responsibility to keep the referenced queue alive while this returned stream is
        being used. The different SYCL queue pointers will result in distinct
        :class:`Stream` objects, even if the SYCL queues they dereference are equivalent.
 
