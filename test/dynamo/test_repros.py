@@ -6460,6 +6460,28 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
         inp = torch.randn(3, 3)
         self.assertEqual(fn(inp), opt_fn(inp))
 
+    def test_dataclass_in_module(self):
+        @dataclasses.dataclass
+        class MyData:
+            value: float
+
+        class MyModel(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.my_data = MyData(value=3.14)
+
+            def forward(self, x):
+                # Make sure to use the scalar 'value' correctly in tensor operations
+                value_tensor = torch.tensor(self.my_data.value)
+                return x + value_tensor
+
+        model = MyModel()
+        inputs = torch.randn(2, 2)
+        expected = model(inputs)
+        compiled_model = torch.compile(model)
+        actual = compiled_model(inputs)
+        self.assertEqual(actual, expected)
+
     def test_no_tracing_into_eval_frame(self):
         # test that dynamo doesn't trace into nested calls from eval_frame
         @torch.compile(backend="eager", fullgraph=True)
