@@ -13,8 +13,17 @@ from unittest.mock import patch
 import torch
 
 from .. import polyfills, variables
-from ..bytecode_transformation import create_call_function, create_rot_n
-from ..exc import unimplemented, Unsupported
+from ..bytecode_transformation import create_call_function, create_rot_n, is_generator
+from ..exc import (
+    handle_observed_exception,
+    InfiniteGeneratorError,
+    ObservedException,
+    ObservedGeneratorExit,
+    ObservedUserStopIteration,
+    SkipFrame,
+    unimplemented,
+    Unsupported,
+)
 from ..guards import GuardBuilder, install_guard
 from ..source import AttrSource, ConstantSource, DefaultsSource, GetItemSource
 from ..utils import (
@@ -319,25 +328,178 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         return super().call_function(tx, args, kwargs)
 
 
-class FunctionDecoratedByContextlibContextManagerVariable(BaseUserFunctionVariable):
-    # TODO(guilherme): replace this with a generic GeneratorFunctionVariable
+class GeneratorObjectVariable(VariableTracker):
+    def __init__(
+        self,
+        code: types.CodeType,
+        f_globals,
+        inline_tracer: Optional["InstructionTranslator"],
+        **kwargs,
+    ):
+        super().__init__(**kwargs)
+        self.code = code
+        self.f_globals = f_globals
+        self.inline_tracer = inline_tracer
 
-    """functions that behaves like iterators
+    def get_code(self):
+        return self.code
 
+    def get_filename(self):
+        return self.get_code().co_filename
+
+    def get_name(self):
+        return self.get_code().co_name
+
+    def get_function(self):
+        raise NotImplementedError
+
+    def has_self(self):
+        return False
+
+    def __name__(self):
+        return self.get_name()
+
+    def __str__(self):
+        return f"{self.__class__.__name__}({self.get_name()})"
+
+    __repr__ = __str__
+
+    def bind_args(self, tx, args, kwargs):
+        return {}
+
+    def get_globals(self):
+        return self.f_globals
+
+    def python_type(self):
+        return types.GeneratorType
+
+    def _get_inline_tracer(self, tx):
+        from torch._dynamo.symbolic_convert import InliningInstructionTranslator
+
+        if self.inline_tracer is None:
+            self.inline_tracer = InliningInstructionTranslator.build_inline_tracer(
+                tx, self, [], {}
+            )
+        return self.inline_tracer
+
+    def next_variable(self, tx):
+        tracer = self._get_inline_tracer(tx)
+
+        try:
+            # Hierarchically, tx can be seen as the parent of the inline tracer
+            # created on call_function. Any exception needs to be propagated to tx
+            # for Dynamo to behave correctly
+            with patch.dict(counters, {"unimplemented": counters["inline_call"]}):
+                return tracer.inline_call_()
+        except ObservedException as e:
+            tx.exn_vt_stack.extend(tracer.exn_vt_stack)
+            raise e
+        except InfiniteGeneratorError:
+            # test/dynamo/test_misc.py::test_iterator_limit
+            raise
+        except Unsupported as e:
+            torch._C._dynamo.eval_frame.skip_code(self.get_code())
+            raise SkipFrame from e
+
+    def has_unpack_var_sequence(self, tx):
+        return False
+
+    def has_force_unpack_var_sequence(self, tx) -> builtins.bool:
+        return True
+
+    def force_unpack_var_sequence(self, tx) -> List[VariableTracker]:
+        result = []
+        while True:
+            try:
+                result.append(self.next_variable(tx))
+            except ObservedUserStopIteration:
+                handle_observed_exception(tx)
+                break
+        return result
+
+    def call_method(
+        self,
+        tx: "InstructionTranslator",
+        name: str,
+        args: "List[VariableTracker]",
+        kwargs: "Dict[str, VariableTracker]",
+    ) -> "VariableTracker":
+        # iter(gen) -> gen
+        if name == "__iter__":
+            return self
+        elif name == "__next__":
+            return self.next_variable(tx)
+        elif name == "close":
+            # * Upon receiving close, the generator must raise GeneratorExit at
+            # the point the generator was paused (last yield)
+            # * If the generator has a finally block, it will execute before
+            # the generator closes
+            # * If the generator handles (catches) the GeneratorExit exception,
+            # Python raises a RuntimeError because we are not suppose to capture it
+
+            # Setup the exception table and jump target in case of try...finally
+            tracer = self._get_inline_tracer(tx)
+            if len(tracer.block_stack):
+                e = variables.ExceptionVariable(GeneratorExit, ())
+                tracer.push(e)
+                try:
+                    tracer._raise_exception_variable(None)
+                except ObservedGeneratorExit as e:
+                    tracer.exception_handler(e)
+
+                # Run finally block if exist
+                retval = self.next_variable(tx)
+                if retval:
+                    e = variables.ExceptionVariable(
+                        RuntimeError, ("generator ignored GeneratorExit",)
+                    )
+                    tracer.push(e)
+                    tracer._raise_exception_variable(None)
+            return
+        elif name == "send":
+            tracer = self._get_inline_tracer(tx)
+            tracer.push_many(args)
+            return self.next_variable(tx)
+        super().call_method(tx, name, args, kwargs)
+
+
+class ContextlibContextManagerGeneratorObjectVariable(GeneratorObjectVariable):
+    """
     .. note::
 
         This is only used when the function is annotated with @contextlib.contextmanager
     """
 
-    def __init__(self, vt: VariableTracker, **kwargs):
+
+class GeneratorFunctionVariable(BaseUserFunctionVariable):
+    """functions that behaves like iterators
+
+    .. note::
+
+        This is a wrapper around (Nested)UserFunctionVariable
+    """
+
+    def __init__(
+        self, vt: VariableTracker, *, generator_cls=GeneratorObjectVariable, **kwargs
+    ):
         super().__init__(**kwargs)
         self.vt = vt
-        self.inline_tracer = None
+        self.generator_cls = generator_cls
 
     def __getattr__(self, name):
         if name in self.__class__.__dict__.keys():
             return getattr(self, name)
         return getattr(self.vt, name)
+
+    def _build_inline_tracer(self, tx, args, kwargs):
+        from torch._dynamo.symbolic_convert import InliningInstructionTranslator
+
+        return InliningInstructionTranslator.build_inline_tracer(
+            tx,
+            self,
+            args,
+            kwargs,
+        )
 
     def call_function(
         self,
@@ -345,35 +507,51 @@ class FunctionDecoratedByContextlibContextManagerVariable(BaseUserFunctionVariab
         args: "List[VariableTracker]",
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
-        from torch._dynamo.bytecode_transformation import is_generator
+        assert is_generator(self.vt.get_code())
 
-        assert is_generator(self.get_code())
-        from torch._dynamo.symbolic_convert import InliningInstructionTranslator
+        inline_tracer = self._build_inline_tracer(tx, args, kwargs)
+        code = self.vt.get_code()
+        f_globals = self.vt.get_globals()
 
-        self.inline_tracer = InliningInstructionTranslator.build_inline_tracer(
-            tx,
-            self,
-            [*self.self_args(), *args],
-            kwargs,
-            stop_generator_on_yield=True,
+        # This seems super odd but it is to prevent Dynamo on Python 3.11+ to
+        # trace a generator frame without going from this path (GeneratorFunctionVariable -> GeneratorObjectVariable)
+        # A good reproducer for this is to comment this code and run the
+        # test_generator.py::test_generator_with_side_effects test case.
+        # Dynamo will trace both "fn" and "whoo" frames.
+        torch._C._dynamo.eval_frame.skip_code(code)
+
+        # calling a generator returns a generator object
+        return self.generator_cls(
+            code,
+            f_globals,
+            inline_tracer,
+            source=self.source,
         )
 
-        return self
 
-    def next_variable(self, tx):
-        from torch._dynamo import exc
+class FunctionDecoratedByContextlibContextManagerVariable(GeneratorFunctionVariable):
+    """
+    .. note::
 
-        tracer = self.inline_tracer
+        This is only used when the function is annotated with @contextlib.contextmanager
+    """
 
-        try:
-            # Hierarchically, tx can be seen as the parent of the inline tracer
-            # created on call_function. Any exception needs to be propagated to tx
-            # for Dynamo to behave correctly
-            with patch.dict(counters, {"unimplemented": counters["inline_call"]}):
-                return tracer.inline_call_().next_variable(tx)
-        except exc.ObservedException as e:
-            tx.exn_vt_stack.extend(tracer.exn_vt_stack)
-            raise e
+    def __init__(self, vt, **kwargs):
+        super().__init__(
+            vt, generator_cls=ContextlibContextManagerGeneratorObjectVariable, **kwargs
+        )
+
+    def _build_inline_tracer(self, tx, args, kwargs):
+        # NOTE: This only exists to not break support for context manager when
+        # config.enable_yield_on_generator is False. We can safely remove this
+        # once generators are fully supported
+        tracer = super()._build_inline_tracer(tx, args, kwargs)
+        assert isinstance(
+            tracer,
+            torch._dynamo.symbolic_convert.InliningGeneratorInstructionTranslator,
+        )
+        tracer.is_generator_from_ctx_manager = True
+        return tracer
 
 
 class UserMethodVariable(UserFunctionVariable):
