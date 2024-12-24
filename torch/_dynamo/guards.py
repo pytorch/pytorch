@@ -98,6 +98,7 @@ from .source import (
     LocalSource,
     NNModuleSource,
     NumpyTensorSource,
+    ODictGetItemSource,
     OptimizerSource,
     ScriptObjectQualifiedNameSource,
     ShapeEnvSource,
@@ -119,7 +120,6 @@ from .types import (  # noqa: F401
     GuardFn,
 )
 from .utils import (
-    builtin_dict_keys,
     common_constant_types,
     dict_keys,
     dict_keys_repr,
@@ -495,15 +495,11 @@ def get_tensor_guard_code_part(value, name, sizes, strides):
 
 
 def get_key_index(dct, key):
-    # Ensure that we call dict.keys and not value.keys (which can call
-    # overridden keys method). In the C++ guards, we relied on PyDict_Next
-    # to traverse the dictionary, which uses the internal data structure and
-    # does not call the overridden keys method.
-    return list(builtin_dict_keys(dct)).index(key)
+    return list(dct.keys()).index(key)
 
 
 def get_key_index_source(source, index):
-    return f"list(dict.keys({source}))[{index}]"
+    return f"list({source}.keys())[{index}]"
 
 
 @dataclasses.dataclass(frozen=True)
@@ -532,12 +528,7 @@ def getitem_on_dict_manager(
         index = get_key_index(base_example_value, source.index)
 
     key_source = get_key_index_source(base_source_name, index)
-
-    # Ensure that we call dict.keys and not value.keys (which can call
-    # overridden keys method). In the C++ guards, we relied on PyDict_Next
-    # to traverse the dictionary, which uses the internal data structure and
-    # does not call the overridden keys method.
-    key_example_value = list(builtin_dict_keys(base_example_value))[index]
+    key_example_value = list(base_example_value.keys())[index]
     if isinstance(key_example_value, (int, str)):
         value_source = f"{base_source_name}[{key_example_value!r}]"
     else:
@@ -578,6 +569,7 @@ class GuardCodeList:
 class GuardManagerType(enum.Enum):
     GUARD_MANAGER = 1
     DICT_GUARD_MANAGER = 2
+    DICT_SUBCLASS_GUARD_MANAGER = 3
 
 
 @functools.lru_cache(None)
@@ -659,12 +651,7 @@ class GuardBuilder(GuardBuilderBase):
 
         # Iterate over the dicts and install a dict_getitem_manager.
         dict_source = guard.originating_source.name()
-
-        # Ensure that we call dict.keys and not value.keys (which can call
-        # overridden keys method). In the C++ guards, we relied on PyDict_Next
-        # to traverse the dictionary, which uses the internal data structure and
-        # does not call the overridden keys method.
-        for key in builtin_dict_keys(example_value):
+        for key in example_value.keys():
             value = example_value[key]
             value_source = GetItemSource(guard.originating_source, index=key)
             guard_manager_enum = self.get_guard_manager_type(
@@ -688,11 +675,7 @@ class GuardBuilder(GuardBuilderBase):
             )
         assert isinstance(dict_mgr, DictGuardManager)
 
-        # Ensure that we call dict.keys and not value.keys (which can call
-        # overridden keys method). In the C++ guards, we relied on PyDict_Next
-        # to traverse the dictionary, which uses the internal data structure and
-        # does not call the overridden keys method.
-        for idx, key in enumerate(builtin_dict_keys(value)):
+        for idx, key in enumerate(value.keys()):
             key_source = get_key_index_source(guard.name, idx)
             key_manager = dict_mgr.get_key_manager(
                 index=idx,
@@ -769,7 +752,7 @@ class GuardBuilder(GuardBuilderBase):
                 index = get_key_index(base_example_value, key)
 
                 # Install the key manager and add equals match guard
-                key_source = f"list(dict.keys({source_name}))[{index!r}]"
+                key_source = f"list({source_name}.keys())[{index!r}]"
                 mgr.get_key_manager(
                     index=index,
                     source=key_source,
@@ -892,16 +875,23 @@ class GuardBuilder(GuardBuilderBase):
     def get_guard_manager_type(self, source, example_value):
         guard_manager_enum = GuardManagerType.GUARD_MANAGER
         if self.requires_key_order_guarding(source):
-            # Fix this if condition
             if isinstance(example_value, dict_keys):
                 guard_manager_enum = GuardManagerType.DICT_GUARD_MANAGER
             else:
                 assert isinstance(example_value, dict)
-                guard_manager_enum = GuardManagerType.DICT_GUARD_MANAGER
+                # If keys method is not overriden, we can use PyDict_Next to get key
+                # orderings. Read more in guards.cpp
+                if type(example_value).keys is type({}).keys:
+                    guard_manager_enum = GuardManagerType.DICT_GUARD_MANAGER
+                else:
+                    guard_manager_enum = GuardManagerType.DICT_SUBCLASS_GUARD_MANAGER
         return guard_manager_enum
 
     def manager_guards_on_keys(self, mgr_enum):
-        return mgr_enum == GuardManagerType.DICT_GUARD_MANAGER
+        return (
+            mgr_enum == GuardManagerType.DICT_GUARD_MANAGER
+            or mgr_enum == GuardManagerType.DICT_SUBCLASS_GUARD_MANAGER
+        )
 
     def get_global_guard_manager(self):
         return self.guard_manager.root.globals_dict_manager(
@@ -1054,7 +1044,8 @@ class GuardBuilder(GuardBuilderBase):
             assert base_guard_manager  # to make mypy happy
             if isinstance(base_example_value, (dict, collections.OrderedDict)):
                 # TODO(anijain2305) - Consider isolating GetItemSource and
-                # DictGetItemSource for dicts) so that GetItemSource is only for non dict objects.
+                # DictGetItemSource (or maybe use ODictGetItemSource for
+                # dicts) so that GetItemSource is only for non dict objects.
                 if isinstance(base_guard_manager, DictGuardManager):
                     assert self.manager_guards_on_keys(base_guard_manager_enum)
                     out = getitem_on_dict_manager(
@@ -1096,6 +1087,24 @@ class GuardBuilder(GuardBuilderBase):
                     index = source.unpack_slice()
                 out = base_guard_manager.getitem_manager(
                     key=index,
+                    source=source_name,
+                    example_value=example_value,
+                    guard_manager_enum=guard_manager_enum,
+                )
+        elif istype(source, ODictGetItemSource):
+            if isinstance(base_guard_manager, DictGuardManager):
+                assert self.manager_guards_on_keys(base_guard_manager_enum)
+                out = getitem_on_dict_manager(
+                    source,
+                    base_guard_manager,
+                    base_example_value,
+                    example_value,
+                    guard_manager_enum,
+                )
+            else:
+                assert base_guard_manager  # to make mypy happy
+                out = base_guard_manager.dict_getitem_manager(
+                    key=source.index,
                     source=source_name,
                     example_value=example_value,
                     guard_manager_enum=guard_manager_enum,
@@ -1735,7 +1744,7 @@ class GuardBuilder(GuardBuilderBase):
 
         self.TYPE_MATCH(guard)
         code = []
-        any_key_is_id = any(key_is_id(k) for k in builtin_dict_keys(value))
+        any_key_is_id = any(key_is_id(k) for k in value.keys())
         const_keys_repr = dict_keys_repr(
             key_to_id(value),
             local=is_from_local_source(guard.originating_source),
@@ -1765,11 +1774,7 @@ class GuardBuilder(GuardBuilderBase):
         value = self.get(guard.name)
 
         code = []
-        # Ensure that we call dict.keys and not value.keys (which can call
-        # overridden keys method). In the C++ guards, we relied on PyDict_Next
-        # to traverse the dictionary, which uses the internal data structure and
-        # does not call the overridden keys method.
-        code.append(f"list(dict.keys({ref})) == {list(builtin_dict_keys(value))!r}")
+        code.append(f"list({ref}.keys()) == {list(value.keys())!r}")
         self._set_guard_export_info(guard, code)
 
         if self.requires_key_order_guarding(guard.originating_source):
