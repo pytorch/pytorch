@@ -6,10 +6,10 @@ if not "%CUDA_VERSION%" == "cpu" if not "%CUDA_VERSION%" == "xpu" call internal\
 if errorlevel 1 exit /b 1
 
 if "%CUDA_VERSION%" == "xpu" (
-    call internal\xpu_install.bat
-    if errorlevel 1 exit /b 1
-    call "%ProgramFiles(x86)%\Intel\oneAPI\setvars.bat"
-    if errorlevel 1 exit /b 1
+    :: call internal\xpu_install.bat
+    :: if errorlevel 1 exit /b 1
+    :: call "%ProgramFiles(x86)%\Intel\oneAPI\setvars.bat"
+    :: if errorlevel 1 exit /b 1
 )
 
 set "ORIG_PATH=%PATH%"
