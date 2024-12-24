@@ -112,8 +112,6 @@ class TestSelectAlgorithm(TestCase):
         )
         self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
 
-    # FIXME: Investigate why _int_mm_out_cuda is not compiled on ROCm
-    @skipIfRocm
     @patches
     def test__int_mm(self):
         @torch.compile
@@ -286,7 +284,6 @@ class TestSelectAlgorithm(TestCase):
         )
         self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
 
-    @skipIfRocm
     @patches
     @torch._inductor.config.patch(conv_1x1_as_mm=False)
     def test_convolution2(self):
