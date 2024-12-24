@@ -47,6 +47,7 @@ from torch.testing._internal.common_utils import (
     skipIfXpu,
     TEST_WITH_ROCM,
 )
+from torch.testing._internal.custom_tensor import CustomTensorPlainOut
 from torch.testing._internal.inductor_utils import GPU_TYPE
 from torch.testing._internal.logging_utils import LoggingTestCase, make_logging_test
 from torch.testing._internal.triton_utils import HAS_GPU, requires_gpu
@@ -111,7 +112,7 @@ try:
             requires_multigpu,
             TestFailure,
         )
-except (unittest.SkipTest, ImportError) as e:
+except (unittest.SkipTest, ImportError):
     if __name__ == "__main__":
         sys.exit(0)
     raise
@@ -260,6 +261,36 @@ class AOTInductorTestsTemplate:
         model = Model()
         model = model.to(self.device)
         AOTIRunnerUtil.compile(model, example_inputs)
+
+    def test_subclasses(self):
+        device_to_init = self.device
+
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.p1 = torch.nn.Parameter(torch.ones(3, 4, device=device_to_init))
+                self.p2 = torch.nn.Parameter(
+                    CustomTensorPlainOut(
+                        torch.ones(3, 4, device=device_to_init),
+                        torch.ones(3, 4, device=device_to_init),
+                    )
+                )
+
+            def forward(self, x):
+                a = (2 * self.p1 + self.p2).sum()
+                return x + a
+
+        m = Foo()
+        ref_x = torch.randn(3, 4, device=device_to_init)
+
+        with torch.no_grad():
+            result = AOTIRunnerUtil.run(
+                self.device,
+                m,
+                (ref_x,),
+            )
+        actual = m(ref_x)
+        self.assertTrue(same(result, actual))
 
     def test_large_mmaped_weights(self):
         class Model(torch.nn.Module):
@@ -2432,7 +2463,7 @@ class AOTInductorTestsTemplate:
                 output_wo_y = torch.empty_like(x)
                 output_with_y = torch.empty_like(x)
 
-                wo_kernel = add_kernel_with_optional_param[(1,)](
+                add_kernel_with_optional_param[(1,)](
                     x,
                     None,
                     output_wo_y,
@@ -2440,7 +2471,7 @@ class AOTInductorTestsTemplate:
                     ARGS_PASSED="one",
                     BLOCK_SIZE=BLOCK_SIZE,
                 )
-                with_kernel = add_kernel_with_optional_param[(1,)](
+                add_kernel_with_optional_param[(1,)](
                     x,
                     y,
                     output_with_y,
@@ -2870,8 +2901,6 @@ class AOTInductorTestsTemplate:
                 x = self.bar(x)
                 return x
 
-        orig_eager = MyModule()
-
         self.check_model(MyModule(), (torch.randn(2, 3, device=self.device),))
 
     def test_model_modified_weights(self):
@@ -2887,7 +2916,6 @@ class AOTInductorTestsTemplate:
         M = 16
         N = 10
         K = 128
-        batch = 8
         example_inputs = (torch.randn(2, M, K, device=self.device),)
         model = Model(N, K, self.device)
         self.check_model(model, example_inputs)
