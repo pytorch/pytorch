@@ -1,12 +1,12 @@
 #include <ATen/MapAllocator.h>
 #include <c10/cuda/CUDAGuard.h>
-#include <torch/csrc/CudaIPCTypes.h>
+#include <ATen/cuda/CudaIPCTypes.h>
 #include <atomic>
 #include <map>
 #include <mutex>
 #include <string>
 
-namespace torch {
+namespace at::cuda::ipc {
 
 namespace {
 
@@ -262,7 +262,7 @@ bool CudaIPCCollect() {
   return freed_memory;
 }
 
-} // namespace torch
+} // namespace at::cuda::ipc
 
 namespace c10 {
 namespace {
