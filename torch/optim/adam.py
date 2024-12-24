@@ -402,7 +402,15 @@ def _single_tensor_adam(
                 # Perform stepweight decay
                 param.mul_(1 - lr * weight_decay)
             else:
-                grad = grad.add(param, alpha=weight_decay)
+                # Nested if is necessary to bypass jitscript rules
+                if isinstance(weight_decay, Tensor):
+                    if weight_decay.requires_grad:
+                        # usually this is the differentiable path, which is why the param.clone() is needed
+                        grad = grad.addcmul_(param.clone(), weight_decay)
+                    else:
+                        grad = grad.add(param, alpha=weight_decay)
+                else:
+                    grad = grad.add(param, alpha=weight_decay)
 
         if torch.is_complex(param):
             grad = torch.view_as_real(grad)
@@ -429,13 +437,35 @@ def _single_tensor_adam(
         # Decay the first and second moment running average coefficient
         exp_avg.lerp_(grad, 1 - device_beta1)
 
-        exp_avg_sq.mul_(beta2).addcmul_(grad, grad.conj(), value=1 - beta2)
+        # Nested if is necessary to bypass jitscript rules
+        if differentiable and isinstance(beta2, Tensor):
+            if beta2.requires_grad:
+                exp_avg_sq.mul_(beta2).addcmul_(grad, grad.conj().mul(1 - beta2))
+            else:
+                exp_avg_sq.mul_(beta2).addcmul_(grad, grad.conj(), value=1 - beta2)
+        else:
+            exp_avg_sq.mul_(beta2).addcmul_(grad, grad.conj(), value=1 - beta2)
 
         if capturable or differentiable:
             step = step_t
 
-            bias_correction1 = 1 - beta1**step
-            bias_correction2 = 1 - beta2**step
+            # Nested if is necessary to bypass jitscript rules
+            if differentiable and isinstance(beta1, Tensor):
+                if beta1.requires_grad:
+                    bias_correction1 = 1 - beta1 ** step.clone()
+                else:
+                    bias_correction1 = 1 - beta1**step
+            else:
+                bias_correction1 = 1 - beta1**step
+
+            # Nested if is necessary to bypass jitscript rules
+            if differentiable and isinstance(beta2, Tensor):
+                if beta2.requires_grad:
+                    bias_correction2 = 1 - beta2 ** step.clone()
+                else:
+                    bias_correction2 = 1 - beta2**step
+            else:
+                bias_correction2 = 1 - beta2**step
 
             step_size = lr / bias_correction1
             step_size_neg = step_size.neg()
@@ -462,7 +492,10 @@ def _single_tensor_adam(
                     exp_avg_sq.sqrt() / (bias_correction2_sqrt * step_size_neg)
                 ).add_(eps / step_size_neg)
 
-            param.addcdiv_(exp_avg, denom)
+            if differentiable:
+                param.addcdiv_(exp_avg.clone(), denom)
+            else:
+                param.addcdiv_(exp_avg, denom)
         else:
             step = _get_value(step_t)
 
