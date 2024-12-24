@@ -437,11 +437,18 @@ class GeneratorObjectVariable(VariableTracker):
             # the generator closes
             # * If the generator handles (catches) the GeneratorExit exception,
             # Python raises a RuntimeError because we are not suppose to capture it
-            # XXX: Result is correct but the order of the instructions seems wrong
-            try:
-                raise_observed_exception(GeneratorExit, tx)
-            except ObservedGeneratorExit:
-                handle_observed_exception(tx)
+
+            # Setup the exception table and jump target in case of try...finally
+            tracer = self._get_inline_tracer(tx)
+            if len(tracer.block_stack):
+                e = variables.ExceptionVariable(GeneratorExit, ())
+                tracer.push(e)
+                try:
+                    tracer._raise_exception_variable(None)
+                except ObservedGeneratorExit as e:
+                    tracer.exception_handler(e)
+                # Run finally block if exist
+                return self.next_variable(tx)
             return
         elif name == "send":
             tracer = self._get_inline_tracer(tx)

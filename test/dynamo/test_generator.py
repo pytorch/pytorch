@@ -259,54 +259,69 @@ class GraphModule(torch.nn.Module):
         ):
             fn(t, ctx)
 
+    def test_close(self):
+        def whoo(t):
+            yield t.sin()
+            yield t.cos()
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(t):
+            gen = whoo(t)
+            i = next(gen)
+            gen.close()
+            return i
+
+        t = torch.randn(2)
+        y = fn(t)
+        self.assertEqual(y, t.sin())
+
     def test_close_with_side_effects(self):
         L = []
         z = 0
 
-        def double():
+        def whoo(t):
             nonlocal z
             try:
                 L.append(1)
-                yield 1
+                yield t.sin()
                 L.append(2)
-                yield 2
+                yield t.cos()
             finally:
-                # This part seems to be executed in eager
                 L.append(z)
 
         @torch.compile(backend="eager", fullgraph=True)
         def fn(t):
             nonlocal z
-            gen = double()
+            gen = whoo(t)
             i = next(gen)
             z = -123
             gen.close()
-            L.append(456)
+            L.append(len(L))
             return i
 
         t = torch.randn(2)
         y = fn(t)
-        self.assertEqual(y, 1)
-        self.assertEqual(L, [1, -123, 456])
+        self.assertEqual(y, t.sin())
+        self.assertEqual(L, [1, -123, 2])
 
     def test_close_capture_GeneratorExit(self):
         L = []
         z = 0
 
-        def double():
+        def whoo(t):
             nonlocal z
             try:
-                yield 1
-                yield 2
+                yield t.sin()
+                yield t.cos()
             except GeneratorExit:
-                yield 3
+                yield t.tan()
             finally:
                 L.append(z)
 
         @torch.compile(backend="eager", fullgraph=True)
         def fn(t):
             nonlocal z
-            gen = double()
+            gen = whoo(t)
             i = next(gen)
             z = -123
             gen.close()
@@ -321,12 +336,12 @@ class GraphModule(torch.nn.Module):
         L = []
         z = 0
 
-        def double():
+        def whoo(t):
             nonlocal z
             try:
                 L.append(1)
-                yield 1
-                yield 2
+                yield t.sin()
+                yield t.cos()
             except GeneratorExit:
                 L.append(z)
                 z = -1
@@ -337,7 +352,7 @@ class GraphModule(torch.nn.Module):
         @torch.compile(backend="eager", fullgraph=True)
         def fn(t):
             nonlocal z
-            gen = double()
+            gen = whoo(t)
             i = next(gen)
             z = -123
             gen.close()
@@ -346,33 +361,33 @@ class GraphModule(torch.nn.Module):
 
         t = torch.randn(2)
         y = fn(t)
-        self.assertEqual(y, 1)
+        self.assertEqual(y, t.sin())
         self.assertEqual(L, [1, -123, -1, 456])
 
     def test_close_with_subgen(self):
         L = []
         z = 0
 
-        def subgen():
-            yield 1
-            yield 2
+        def subgen(t):
+            yield t.sin()
+            yield t.cos()
 
-        def double():
+        def whoo(t):
             nonlocal z
             L.append(10)
-            yield from subgen()
+            yield from subgen(t)
             L.append(20)
             try:
                 L.append(1)
                 z = 4
-                yield 3
+                yield t.tan()
             finally:
                 L.append(z)
 
         @torch.compile(backend="eager", fullgraph=True)
         def fn(t):
             nonlocal z
-            gen = double()
+            gen = whoo(t)
             i = next(gen)
             z = -123
             gen.close()
@@ -381,7 +396,7 @@ class GraphModule(torch.nn.Module):
 
         t = torch.randn(2)
         y = fn(t)
-        self.assertEqual(y, 1)
+        self.assertEqual(y, t.sin())
         self.assertEqual(L, [10, 456])
         self.assertEqual(z, -123)
 
