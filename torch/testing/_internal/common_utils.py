@@ -4465,7 +4465,7 @@ def retry(ExceptionToCheck, tries=3, delay=3, skip_after_retries=False):
                 try:
                     return f(*args, **kwargs)
                 except ExceptionToCheck as e:
-                    msg = "%s, Retrying in %d seconds..." % (str(e), mdelay)
+                    msg = f"{e}, Retrying in {mdelay:d} seconds..."
                     print(msg)
                     time.sleep(mdelay)
                     mtries -= 1

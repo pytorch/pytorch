@@ -113,8 +113,8 @@ class PackagePickler(_PyTorchLegacyPickler):
                 )
             except UnicodeEncodeError as exc:
                 raise PicklingError(
-                    "can't pickle global identifier '%s.%s' using "
-                    "pickle protocol %i" % (module, name, self.proto)  # type: ignore[attr-defined]
+                    f"can't pickle global identifier '{module}.{name}' using "
+                    f"pickle protocol {self.proto:d}"  # type: ignore[attr-defined]
                 ) from exc
 
         self.memoize(obj)  # type: ignore[attr-defined]
