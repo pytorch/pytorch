@@ -7475,9 +7475,11 @@ class TestMPS(TestCaseMPS):
             self.assertEqual(b_CPU.grad, b_MPS.grad)
             self.assertEqual(a_CPU.grad, a_MPS.grad)
 
-        helper(3, 5, 7, [0, 1, 2])
-        helper(3, 6, 7, [0, 1, 2])  # verify if changes in shape would cause cached graph lookup problems
-        helper(3, 5, 7, 2)  # test scalar index
+        # See https://github.com/pytorch/pytorch/pull/142477#issuecomment-2536508053
+        with self.assertRaisesRegex(RuntimeError, "Expected all tensors to be on the same device"):
+            helper(3, 5, 7, [0, 1, 2])
+            helper(3, 6, 7, [0, 1, 2])  # verify if changes in shape would cause cached graph lookup problems
+            helper(3, 5, 7, 2)  # test scalar index
 
     # Test pytorch gather
     def test_gather(self):
@@ -8638,7 +8640,7 @@ class TestLogical(TestCaseMPS):
 
         C = torch.randn(size=[1, 4], device='mps', dtype=torch.float32)
         D = torch.randn(size=[1, 4], device='cpu', dtype=torch.float32)
-        with self.assertRaisesRegex(RuntimeError, 'Expected elements.is_mps()*'):
+        with self.assertRaisesRegex(RuntimeError, 'Expected all tensors to be on the same device'):
             out = torch.isin(C, D)
 
 class TestSmoothL1Loss(TestCaseMPS):
@@ -9568,6 +9570,18 @@ class TestLinalgMPS(TestCaseMPS):
 
             mean_err = ((res - ref).abs() / ref).mean()
             self.assertLess(mean_err, 0.05)
+
+    def test_solve_triangular_device_check(self, device="mps", dtype=torch.float32):
+        a = torch.tensor([[4, 0, 0],
+                          [1, 3, 0],
+                          [2, 1, 2]], device=device, dtype=dtype)
+        b = torch.tensor([[2, 3],
+                          [4, 5],
+                          [6, 7]], device="cpu", dtype=dtype)
+
+        if device != "cpu":
+            with self.assertRaisesRegex(RuntimeError, "Expected all tensors to be on the same device"):
+                torch.linalg.solve_triangular(a, b, upper=False)
 
 
 class TestSDPA(TestCaseMPS):

@@ -1791,6 +1791,7 @@
 # We need this to be able to properly copy from a CPU to an XLA tensor with different sizes.
 # See https://github.com/pytorch/xla/issues/2881
 - func: _copy_from_and_resize(Tensor self, Tensor dst) -> Tensor
+  device_check: NoCheck   # TensorIterator
   dispatch:
     MPS: _copy_from_and_resize_mps
   autogen: _copy_from_and_resize.out

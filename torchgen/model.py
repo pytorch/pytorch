@@ -340,6 +340,18 @@ def is_xpu_dispatch_key(dk: DispatchKey) -> bool:
     }
 
 
+# MPS specific dispatcy keys
+def is_mps_dispatch_key(dk: DispatchKey) -> bool:
+    return dk in {
+        DispatchKey.MPS,
+        DispatchKey.QuantizedMPS,
+        DispatchKey.SparseMPS,
+        DispatchKey.SparseCsrMPS,
+        DispatchKey.NestedTensorMPS,
+        DispatchKey.AutogradMPS,
+    }
+
+
 # Structured kernel generation is only supported for certain key types;
 # otherwise use old-style
 def is_structured_dispatch_key(dk: DispatchKey) -> bool:
@@ -1279,8 +1291,7 @@ class BackendIndex:
     # All in-tree ops use out kernels, while XLA uses functional kernels.
     use_out_as_primary: bool
     # Whether the backend requires a device guard, and device checks.
-    # For in-tree backends, this is currently just CUDA/HIP
-    # For out-of-tree backends, this is currently just Intel XPU
+    # For in-tree backends, this is currently just CUDA/HIP, Intel XPU and MPS
     device_guard: bool
     # Whether the backend is in-tree (CPU/CUDA) or out-of-tree (XLA)
     external: bool
