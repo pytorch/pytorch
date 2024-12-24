@@ -5,6 +5,7 @@ import math
 import warnings
 from copy import deepcopy
 from typing import Any, Callable, Iterable, List, Literal, Optional, Tuple, Union
+from typing_extensions import ParamSpec
 
 import torch
 from torch import Tensor
@@ -110,6 +111,9 @@ def get_swa_avg_fn():
         return averaged_param + (current_param - averaged_param) / (num_averaged + 1)
 
     return swa_update
+
+
+_P = ParamSpec("_P")
 
 
 class AveragedModel(Module):
@@ -237,7 +241,7 @@ class AveragedModel(Module):
         self.multi_avg_fn = multi_avg_fn
         self.use_buffers = use_buffers
 
-    def forward(self, *args, **kwargs):
+    def forward(self, *args: _P.args, **kwargs: _P.kwargs):
         """Forward pass."""
         return self.module(*args, **kwargs)
 
