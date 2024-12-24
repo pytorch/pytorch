@@ -4,7 +4,6 @@ import math
 import operator
 import sys
 from typing import (
-    Any,
     Callable,
     Iterable,
     List,
@@ -14,6 +13,7 @@ from typing import (
     TypeVar,
     Union,
 )
+from typing_extensions import ParamSpec
 
 import sympy
 from sympy import S
@@ -31,6 +31,7 @@ from sympy.utilities.iterables import sift
 from .numbers import int_oo
 
 
+_P = ParamSpec("_P")
 _T = TypeVar("_T", bound=SupportsFloat)
 
 # Portions of this file are adapted from the Sympy codebase, which was
@@ -101,10 +102,10 @@ def _is_symbols_binary_summation(expr: sympy.Expr) -> bool:
     )
 
 
-def _keep_float(f: Callable[..., _T]) -> Callable[..., Union[_T, sympy.Float]]:
+def _keep_float(f: Callable[_P, _T]) -> Callable[_P, Union[_T, sympy.Float]]:
     @functools.wraps(f)
-    def inner(*args: Any) -> Union[_T, sympy.Float]:
-        r: Union[_T, sympy.Float] = f(*args)
+    def inner(*args: _P.args, **kwargs: _P.kwargs) -> Union[_T, sympy.Float]:
+        r: Union[_T, sympy.Float] = f(*args, **kwargs)
         if any(isinstance(a, sympy.Float) for a in args) and not isinstance(
             r, sympy.Float
         ):

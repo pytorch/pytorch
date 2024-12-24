@@ -7,7 +7,8 @@ import re
 import subprocess
 import time
 from threading import Lock
-from typing import Any, List, Optional, Sequence
+from typing import Any, Callable, List, Optional, Sequence
+from typing_extensions import ParamSpec
 
 
 logger = logging.getLogger("strobelight_function_profiler")
@@ -21,6 +22,8 @@ console_handler.setFormatter(formatter)
 logger.addHandler(console_handler)
 logger.setLevel(logging.INFO)
 logger.propagate = False
+
+_P = ParamSpec("_P")
 
 
 class StrobelightCLIProfilerError(Exception):
@@ -292,9 +295,9 @@ def strobelight(
     if not profiler:
         profiler = StrobelightCLIFunctionProfiler(**kwargs)
 
-    def strobelight_inner(work_function: Any) -> Any:
+    def strobelight_inner(work_function: Callable[_P, Any]) -> Callable[_P, Any]:
         @functools.wraps(work_function)
-        def wrapper_function(*args: Any, **kwargs: Any) -> Any:
+        def wrapper_function(*args: _P.args, **kwargs: _P.kwargs) -> Any:
             return profiler.profile(work_function, *args, **kwargs)
 
         return wrapper_function
