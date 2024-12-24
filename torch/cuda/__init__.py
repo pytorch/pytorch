@@ -666,7 +666,7 @@ def _parse_visible_devices() -> Union[List[int], List[str]]:
                 var = hip_devices
             else:
                 return list(range(rocr_count))
-        else:
+        elif hip_devices is not None:
             var = hip_devices
 
     if var is None:
