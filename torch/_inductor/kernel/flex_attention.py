@@ -688,7 +688,7 @@ class Mode(Enum):
     bwd = auto()
 
 def _get_xpu_config(query, mode: Mode) -> Tuple[int, int, int, int]:
-    return (64, 64, 4, 3)
+    return (128, 64, 4, 3)
 
 def _get_rocm_config(query, mode: Mode) -> Tuple[int, int, int, int]:
     dtype = query.get_dtype()
@@ -772,7 +772,7 @@ def _get_nv_config(query, mode: Mode) -> Tuple[int, int, int, int]:
 
 
 def _get_default_config_fwd(query) -> Tuple[int, int, int, int]:
-    device_type = query.device.type
+    device_type = query.get_device().type
     if device_type == "cuda": 
         if torch.version.hip is None:
             return _get_nv_config(query, mode=Mode.fwd)
@@ -785,7 +785,7 @@ def _get_default_config_fwd(query) -> Tuple[int, int, int, int]:
 
 
 def _get_default_config_bwd(query) -> Tuple[int, int, int, int]:
-    device_type = query.device.type
+    device_type = query.get_device().type
     if device_type == "cuda": 
         if torch.version.hip is None:
             return _get_nv_config(query, mode=Mode.bwd)
