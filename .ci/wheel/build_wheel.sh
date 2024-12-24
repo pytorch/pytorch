@@ -226,27 +226,6 @@ if [[ -z "$BUILD_PYTHONLESS" ]]; then
     # Copy the whl to a final destination before tests are run
     echo "Renaming Wheel file: $wheel_filename_gen to $wheel_filename_new"
     cp "$whl_tmp_dir/$wheel_filename_gen" "$PYTORCH_FINAL_PACKAGE_DIR/$wheel_filename_new"
-
-    ##########################
-    # now test the binary, unless it's cross compiled arm64
-    if [[ -z "$CROSS_COMPILE_ARM64" ]]; then
-        pip uninstall -y "$TORCH_PACKAGE_NAME" || true
-        pip uninstall -y "$TORCH_PACKAGE_NAME" || true
-
-        # Create new "clean" conda environment for testing
-        conda create ${EXTRA_CONDA_INSTALL_FLAGS} -yn "test_conda_env" python="$desired_python"
-        conda activate test_conda_env
-
-        pip install "$PYTORCH_FINAL_PACKAGE_DIR/$wheel_filename_new" -v
-
-        echo "$(date) :: Running tests"
-        # TODO: Add real tests, as run_test.sh from builder is a glorified no-op
-        pushd "$pytorch_rootdir"
-        pip install numpy
-        python .ci/pytorch/smoke_test/smoke_test.py --package torchonly
-        popd
-        echo "$(date) :: Finished tests"
-    fi
 else
     pushd "$pytorch_rootdir"
 

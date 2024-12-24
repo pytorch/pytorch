@@ -1153,13 +1153,11 @@ class TestTensorCreation(TestCase):
         self.assertIs(layout, t.layout)
         self.assertEqual(torch.device(device), t.device)
 
-    # TODO: update to work on CUDA, too
-    @onlyCPU
     def test_stack(self, device):
         for dtype in (torch.half, torch.double, torch.int):
-            x = torch.randint(low=-100, high=100, size=(2, 3, 4)).to(dtype)
-            y = torch.randint(low=-100, high=100, size=(2, 3, 4)).to(dtype)
-            z = torch.randint(low=-100, high=100, size=(2, 3, 4)).to(dtype)
+            x = torch.randint(low=-100, high=100, size=(2, 3, 4), device=device, dtype=dtype)
+            y = torch.randint(low=-100, high=100, size=(2, 3, 4), device=device, dtype=dtype)
+            z = torch.randint(low=-100, high=100, size=(2, 3, 4), device=device, dtype=dtype)
             for dim in range(4):
                 res = torch.stack((x, y, z), dim)
                 res_neg = torch.stack((x, y, z), dim - 4)
@@ -1170,13 +1168,11 @@ class TestTensorCreation(TestCase):
                 self.assertEqual(res.select(dim, 1), y, atol=0, rtol=0)
                 self.assertEqual(res.select(dim, 2), z, atol=0, rtol=0)
 
-    # TODO: update to work on CUDA, too
-    @onlyCPU
     def test_stack_out(self, device):
         for dtype in (torch.half, torch.double, torch.int):
-            x = torch.randint(low=-100, high=100, size=(2, 3, 4)).to(dtype)
-            y = torch.randint(low=-100, high=100, size=(2, 3, 4)).to(dtype)
-            z = torch.randint(low=-100, high=100, size=(2, 3, 4)).to(dtype)
+            x = torch.randint(low=-100, high=100, size=(2, 3, 4), device=device, dtype=dtype)
+            y = torch.randint(low=-100, high=100, size=(2, 3, 4), device=device, dtype=dtype)
+            z = torch.randint(low=-100, high=100, size=(2, 3, 4), device=device, dtype=dtype)
             for dim in range(4):
                 expected_size = x.size()[:dim] + (3,) + x.size()[dim:]
                 res_out = x.new(expected_size)
@@ -1243,8 +1239,6 @@ class TestTensorCreation(TestCase):
         y = torch.repeat_interleave(x, x)
         self.assertEqual(y, x)
 
-    # TODO: udpate to work on CUDA, too
-    @onlyCPU
     def test_new_methods_requires_grad(self, device):
         size = (10,)
         test_cases = [
@@ -1255,18 +1249,16 @@ class TestTensorCreation(TestCase):
             ('new_ones', [size]),
         ]
         for method_name, args in test_cases:
-            x = torch.randn(size)
+            x = torch.randn(size, device=device)
             for requires_grad in [True, False]:
                 x_new = x.__getattribute__(method_name)(*args, requires_grad=requires_grad)
                 self.assertEqual(x_new.requires_grad, requires_grad)
-            x = torch.randint(10, size)
+            x = torch.randint(10, size, device=device)
             with self.assertRaisesRegex(
                     RuntimeError,
                     r'Only Tensors of floating point and complex dtype can require gradients'):
                 x_new = x.__getattribute__(method_name)(*args, requires_grad=True)
 
-    # TODO: update to work on CUDA, too?
-    @onlyCPU
     def test_tensor_from_sequence(self, device):
         class MockSequence:
             def __init__(self, lst):
@@ -1285,14 +1277,12 @@ class TestTensorCreation(TestCase):
         bad_mock_seq = MockSequence([1.0, 2.0, 3.0])
         good_mock_seq = GoodMockSequence([1.0, 2.0, 3.0])
         with self.assertRaisesRegex(ValueError, 'could not determine the shape'):
-            torch.tensor(bad_mock_seq)
-        self.assertEqual(torch.tensor([1.0, 2.0, 3.0]), torch.tensor(good_mock_seq))
+            torch.tensor(bad_mock_seq, device=device)
+        self.assertEqual(torch.tensor([1.0, 2.0, 3.0], device=device), torch.tensor(good_mock_seq, device=device))
 
-    # TODO: update to work on CUDA, too?
-    @onlyCPU
     @skipIfTorchDynamo("Not a TorchDynamo suitable test")
     def test_simple_scalar_cast(self, device):
-        ok = [torch.tensor([1.5]), torch.zeros(1, 1, 1, 1)]
+        ok = [torch.tensor([1.5], device=device), torch.zeros(1, 1, 1, 1, device=device)]
         ok_values = [1.5, 0]
 
         not_ok = map(torch.Tensor, [[], [1, 2], [[1, 2], [3, 4]]])
@@ -1312,10 +1302,8 @@ class TestTensorCreation(TestCase):
         self.assertRaises(RuntimeError, lambda: float(torch.tensor(1.5j)))
         self.assertRaises(RuntimeError, lambda: int(torch.tensor(1.5j)))
 
-    # TODO: update to work on CUDA, too?
-    @onlyCPU
     def test_offset_scalar_cast(self, device):
-        x = torch.tensor([1., 2., 3.])
+        x = torch.tensor([1., 2., 3.], device=device)
         y = x[2:]
         self.assertEqual(int(y), 3)
 
