@@ -367,7 +367,7 @@ class CppTemplateKernel(CppKernel):
                 _dst.get_size() == _src.get_size() for _src, _dst in zip(src, dst)
             )
         else:
-            assert isinstance(dst, ir.Buffer)
+            assert isinstance(dst, (ir.Buffer, ir.ReinterpretView))
             assert dst.get_size() == src.get_size(), f"{dst=}, {src=}"
         if offsets:
             offsets = parse_expr_with_index_symbols(offsets)
