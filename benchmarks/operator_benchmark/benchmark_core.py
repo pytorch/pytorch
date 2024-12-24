@@ -4,6 +4,7 @@ import csv
 import functools
 import json
 import os
+import re
 import timeit
 from collections import namedtuple
 
@@ -534,7 +535,7 @@ class BenchmarkRunner:
                     for _ in range(self.num_runs)
                 ]
                 self._print_perf_result(reported_time, test_case)
-                
+
                 # output results to csv
                 self._output_csv(
                     output_filename,
