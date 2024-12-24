@@ -20,7 +20,10 @@ from typing import (
     TypeVar,
     Union,
 )
-from typing_extensions import Self
+from typing_extensions import (
+  Self,
+  ParamSpec,
+)
 
 import torch
 from torch import device, dtype, Tensor
@@ -47,7 +50,10 @@ _grad_t = Union[Tuple[Tensor, ...], Tensor]
 # of `T` to annotate `self`. Many methods of `Module` return `self` and we want those return values to be
 # the type of the subclass, not the looser type of `Module`.
 T = TypeVar("T", bound="Module")
-
+_P = ParamSpec('_P')
+_R = TypeVar('_R')
+_Input = TypeVar('_Input')
+_Output = TypeVar('_Output')
 
 class _IncompatibleKeys(
     namedtuple("IncompatibleKeys", ["missing_keys", "unexpected_keys"]),
@@ -1580,10 +1586,10 @@ class Module:
     def register_forward_pre_hook(
         self,
         hook: Union[
-            Callable[[T, Tuple[Any, ...]], Optional[Any]],
+            Callable[[T, Tuple[_Input, ...]], Optional[Tuple[_Input, ...]]],
             Callable[
-                [T, Tuple[Any, ...], Dict[str, Any]],
-                Optional[Tuple[Any, Dict[str, Any]]],
+                [T, Tuple[_Input, ...], Dict[str, Any]],
+                Optional[Tuple[Tuple[_Input, ...], Dict[str, Any]]],
             ],
         ],
         *,
@@ -1646,8 +1652,8 @@ class Module:
     def register_forward_hook(
         self,
         hook: Union[
-            Callable[[T, Tuple[Any, ...], Any], Optional[Any]],
-            Callable[[T, Tuple[Any, ...], Dict[str, Any], Any], Optional[Any]],
+            Callable[[T, Tuple[_Input, ...], _Output], Optional[_Output]],
+            Callable[[T, Tuple[_Input, ...], Dict[str, Any], _Output], Optional[_Output]],
         ],
         *,
         prepend: bool = False,
