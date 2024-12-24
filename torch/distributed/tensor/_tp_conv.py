@@ -192,7 +192,6 @@ def tp_convolution_backward(
         )
 
         # step2 reconstruct local gradient output tensor
-        N, C_out, H_out, _ = grad_out_tensor.shape
         padding_w = padding[1]
         if rank == 0:
             grad_out_tensor = torch.nn.functional.pad(

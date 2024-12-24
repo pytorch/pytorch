@@ -663,6 +663,63 @@ struct TernaryOpScalarFunctor {
   }
 };
 
+template <typename T, int depth, int r_args_depth, int res_arg_index>
+struct TernaryOpScalarListFunctor {
+  using opmath_t = at::opmath_type<T>;
+  template <typename Op>
+  __device__ __forceinline__ void operator()(
+      int chunk_size,
+      TensorListScalarListMetadata<opmath_t, depth>& tl,
+      Op op) {
+    static_assert(depth == 2 || depth == 3, "");
+    static_assert(depth >= r_args_depth, "");
+    static_assert(res_arg_index == depth - 1 || res_arg_index == 0, "");
+    const auto tensor_loc = tl.block_to_tensor[blockIdx.x];
+    const auto chunk_idx = tl.block_to_chunk[blockIdx.x];
+    auto n = tl.numel_for_tensor[tensor_loc];
+
+    T* args[depth];
+    const bool all_aligned =
+        init_args<depth>(args, tl, chunk_idx, chunk_size, tensor_loc);
+    n -= chunk_idx * chunk_size;
+    T r_args[r_args_depth][kILP];
+    const opmath_t scalar = tl.scalar_vals[tensor_loc];
+
+    // to make things simple, we put aligned case in a different code path
+    if (n % kILP == 0 && chunk_size % kILP == 0 && all_aligned) {
+      for (int64_t i_start = threadIdx.x;
+           i_start * kILP < n && i_start * kILP < chunk_size;
+           i_start += blockDim.x) {
+        // load
+        load_store(r_args[0], args[0], 0, i_start);
+        load_store(r_args[1], args[1], 0, i_start);
+#pragma unroll
+        for (int ii = 0; ii < kILP; ii++) {
+          r_args[0][ii] =
+              op(static_cast<opmath_t>(r_args[0][ii]),
+                 static_cast<opmath_t>(r_args[1][ii]),
+                 scalar);
+        }
+        // store
+        load_store(args[res_arg_index], r_args[0], i_start, 0);
+      }
+    } else {
+      for (int64_t i_start = 0; i_start < n && i_start < chunk_size;
+           i_start += blockDim.x * kILP) {
+        load_args<r_args_depth>(r_args, args, i_start, chunk_size, n);
+#pragma unroll
+        for (int ii = 0; ii < kILP; ii++) {
+          r_args[0][ii] =
+              op(static_cast<opmath_t>(r_args[0][ii]),
+                 static_cast<opmath_t>(r_args[1][ii]),
+                 scalar);
+        }
+        store_args(args[res_arg_index], r_args[0], i_start, chunk_size, n);
+      }
+    }
+  }
+};
+
 template <typename T>
 struct power_functor {
   C10_DEVICE T operator()(const T& a, const T& b) const {

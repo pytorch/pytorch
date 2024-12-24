@@ -15,6 +15,7 @@ from .optimizer import (
     _get_capturable_supported_devices,
     _get_scalar_dtype,
     _maximize_doc,
+    _params_doc,
     _use_grad_for_differentiable,
     _view_as_real,
     Optimizer,
@@ -202,16 +203,15 @@ Rprop.__doc__ = (
     """
     + rf"""
     Args:
-        params (iterable): iterable of parameters to optimize or dicts defining
-            parameter groups
+        {_params_doc}
         lr (float, optional): learning rate (default: 1e-2)
         etas (Tuple[float, float], optional): pair of (etaminus, etaplus), that
             are multiplicative increase and decrease factors
             (default: (0.5, 1.2))
         step_sizes (Tuple[float, float], optional): a pair of minimal and
             maximal allowed step sizes (default: (1e-6, 50))
-        {_foreach_doc}
         {_capturable_doc}
+        {_foreach_doc}
         {_maximize_doc}
         {_differentiable_doc}
 
@@ -243,7 +243,7 @@ def _single_tensor_rprop(
         step = state_steps[i]
 
         # If compiling, the compiler will handle cudagraph checks, see note [torch.compile x capturable]
-        if not torch._utils.is_compiling() and capturable:
+        if not torch.compiler.is_compiling() and capturable:
             capturable_supported_devices = _get_capturable_supported_devices()
             assert (
                 param.device.type == step.device.type
@@ -309,7 +309,7 @@ def _multi_tensor_rprop(
     assert not differentiable, "_foreach ops don't support autograd"
 
     # If compiling, the compiler will handle cudagraph checks, see note [torch.compile x capturable]
-    if not torch._utils.is_compiling() and capturable:
+    if not torch.compiler.is_compiling() and capturable:
         capturable_supported_devices = _get_capturable_supported_devices()
         assert all(
             p.device.type == step.device.type
@@ -337,7 +337,7 @@ def _multi_tensor_rprop(
         # If steps are on CPU, foreach will fall back to the slow path, which is a for-loop calling t.add(1) over
         # and over. 1 will then be wrapped into a Tensor over and over again, which is slower than if we just
         # wrapped it once now. The alpha is required to assure we go to the right overload.
-        if not torch._utils.is_compiling() and grouped_state_steps[0].is_cpu:
+        if not torch.compiler.is_compiling() and grouped_state_steps[0].is_cpu:
             torch._foreach_add_(
                 grouped_state_steps, torch.tensor(1.0, device="cpu"), alpha=1.0
             )
@@ -427,7 +427,7 @@ def rprop(
     """
     # this check is slow during compilation, so we skip it
     # if it's strictly needed we can add this check back in dynamo
-    if not torch._utils.is_compiling() and not all(
+    if not torch.compiler.is_compiling() and not all(
         isinstance(t, torch.Tensor) for t in state_steps
     ):
         raise RuntimeError(

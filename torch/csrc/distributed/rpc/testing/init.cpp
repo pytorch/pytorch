@@ -68,7 +68,7 @@ PyObject* faulty_agent_init(PyObject* _unused, PyObject* noargs) {
       module, "FaultyTensorPipeAgent", rpc_module.attr("TensorPipeAgent"))
       .def(
           py::init(
-              [](const c10::intrusive_ptr<::c10d::Store> store,
+              [](const c10::intrusive_ptr<::c10d::Store>& store,
                  std::string name,
                  worker_id_t rank,
                  int world_size,

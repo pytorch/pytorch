@@ -51,7 +51,7 @@ DistAutogradContainer& DistAutogradContainer::init(int64_t worker_id) {
     return container;
   }
 
-  container.worker_id_ = worker_id;
+  container.worker_id_ = static_cast<int16_t>(worker_id);
   container.next_context_id_ = static_cast<int64_t>(worker_id)
       << kAutoIncrementBits;
   container.next_autograd_message_id_ = static_cast<int64_t>(worker_id)

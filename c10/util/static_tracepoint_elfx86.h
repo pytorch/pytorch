@@ -79,6 +79,16 @@
 #define TORCH_SDT_ARG_TEMPLATE_8    TORCH_SDT_ARG_TEMPLATE_7 TORCH_SDT_ARGFMT(8)
 #define TORCH_SDT_ARG_TEMPLATE_9    TORCH_SDT_ARG_TEMPLATE_8 TORCH_SDT_ARGFMT(9)
 
+// Resolvable by name macros
+// An attribute that marks a function or variable as needing to be resolvable
+// by name. This generally is needed if inline assembly refers to the variable
+// by string name.
+#ifdef __roar__
+#define TORCH_NAME_RESOLVABLE __attribute__((roar_resolvable_by_name))
+#else
+#define TORCH_NAME_RESOLVABLE
+#endif
+
 // Semaphore define, declare and probe note format
 
 #define TORCH_SDT_SEMAPHORE(provider, name)                                    \
@@ -86,12 +96,14 @@
 
 #define TORCH_SDT_DEFINE_SEMAPHORE(name)                                       \
   extern "C" {                                                                 \
+    TORCH_NAME_RESOLVABLE                                                      \
     volatile unsigned short TORCH_SDT_SEMAPHORE(pytorch, name)                 \
     __attribute__((section(TORCH_SDT_SEMAPHORE_SECTION), used)) = 0;           \
   }
 
 #define TORCH_SDT_DECLARE_SEMAPHORE(name)                                      \
-  extern "C" volatile unsigned short TORCH_SDT_SEMAPHORE(pytorch, name)
+  extern "C" TORCH_NAME_RESOLVABLE volatile unsigned short                     \
+    TORCH_SDT_SEMAPHORE(pytorch, name)
 
 #define TORCH_SDT_SEMAPHORE_NOTE_0(provider, name)                             \
   TORCH_SDT_ASM_1(     TORCH_SDT_ASM_ADDR 0) /*No Semaphore*/                  \

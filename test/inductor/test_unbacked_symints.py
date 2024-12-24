@@ -11,14 +11,19 @@ from torch._inductor.utils import is_big_gpu
 from torch.testing import make_tensor
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
-    skipCUDAIf,
+    skipGPUIf,
 )
 from torch.testing._internal.common_utils import IS_LINUX, parametrize
-from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CUDA
+from torch.testing._internal.inductor_utils import (
+    GPU_TYPE,
+    HAS_CUDA,
+    HAS_GPU,
+    requires_gpu,
+)
 
 
 class TestUnbackedSymints(InductorTestCase):
-    @skipCUDAIf(not HAS_CUDA, "requires cuda")
+    @skipGPUIf(not HAS_GPU, "requires gpu and triton")
     @dynamo_config.patch({"capture_dynamic_output_shape_ops": True})
     def test_expand(self, device):
         def fn(x, y):
@@ -39,7 +44,7 @@ class TestUnbackedSymints(InductorTestCase):
 
         torch.testing.assert_close(actual, expected)
 
-    @skipCUDAIf(not HAS_CUDA, "requires cuda")
+    @skipGPUIf(not HAS_GPU, "requires gpu and triton")
     @dynamo_config.patch({"capture_dynamic_output_shape_ops": True})
     def test_expand_ok_with_runtime_assert(self, device):
         def fn(x):
@@ -48,9 +53,9 @@ class TestUnbackedSymints(InductorTestCase):
             return nz.expand([128, -1, 2])
 
         x = make_tensor(32, 4, device=device, dtype=torch.float32, exclude_zero=True)
-        actual = torch.compile(fn, fullgraph=True)(x)
+        torch.compile(fn, fullgraph=True)(x)
 
-    @skipCUDAIf(not HAS_CUDA, "requires cuda")
+    @skipGPUIf(not HAS_GPU, "requires gpu and triton")
     @dynamo_config.patch({"capture_dynamic_output_shape_ops": True})
     def test_broadcast_tensors(self, device):
         def fn(x):
@@ -64,7 +69,7 @@ class TestUnbackedSymints(InductorTestCase):
         expected = fn(x)
         torch.testing.assert_close(actual, expected)
 
-    @skipCUDAIf(not HAS_CUDA, "requires cuda")
+    @skipGPUIf(not HAS_GPU, "requires gpu and triton")
     @dynamo_config.patch({"capture_dynamic_output_shape_ops": True})
     def test_autotuning(self, device):
         def fn(x, y):
@@ -88,7 +93,7 @@ class TestUnbackedSymints(InductorTestCase):
 
         torch.testing.assert_close(actual, expected)
 
-    @skipCUDAIf(not HAS_CUDA, "requires cuda")
+    @skipGPUIf(not HAS_GPU, "requires gpu and triton")
     @dynamo_config.patch({"capture_scalar_outputs": True})
     def test_split_with_sizes(self, device):
         def fn(x, y):
@@ -104,7 +109,7 @@ class TestUnbackedSymints(InductorTestCase):
 
         torch.testing.assert_close(actual, expected)
 
-    @skipCUDAIf(not HAS_CUDA, "requires cuda")
+    @skipGPUIf(not HAS_GPU, "requires gpu and triton")
     @dynamo_config.patch({"capture_dynamic_output_shape_ops": True})
     def test_view_of_slice(self, device):
         # Tests View.create(slice, size_with_unbacked_symint)
@@ -122,9 +127,8 @@ class TestUnbackedSymints(InductorTestCase):
         expected = fn(*example_inputs)
         torch.testing.assert_close(actual, expected)
 
-    @skipCUDAIf(not HAS_CUDA, "requires cuda")
+    @requires_gpu()
     @dynamo_config.patch({"capture_scalar_outputs": True})
-    @inductor_config.patch({"abi_compatible": True})
     def test_triton_kernel_grid(self, device):
         if device == "cpu":
             raise unittest.SkipTest("Triton kernel requires GPU")
@@ -145,7 +149,7 @@ class TestUnbackedSymints(InductorTestCase):
         expected = fn(*example_inputs)
         torch.testing.assert_close(actual, expected)
 
-    @skipCUDAIf(not HAS_CUDA, "requires cuda")
+    @skipGPUIf(not HAS_GPU, "requires gpu and triton")
     @dynamo_config.patch({"capture_dynamic_output_shape_ops": True})
     def test_nonzero_in_inference_mode(self, device):
         def fn(x):
@@ -191,14 +195,11 @@ class TestUnbackedSymints(InductorTestCase):
         expected = fn(*example_inputs)
         torch.testing.assert_close(actual, expected)
 
-    @skipCUDAIf(not HAS_CUDA, "requires cuda")
+    @requires_gpu()
     @dynamo_config.patch({"capture_scalar_outputs": True})
     def test_vertical_pointwise_reduction_fusion(self, device):
         # reset in case we run both cpu and cuda tests
         torch._inductor.metrics.reset()
-
-        if device == "cpu":
-            raise unittest.SkipTest("This test requires cuda")
 
         # Tests fusing a pointwise & reduction op with unbacked numel/rnumel.
         def fn(x, y, repeats):
@@ -213,9 +214,9 @@ class TestUnbackedSymints(InductorTestCase):
             return pointwise, reduction
 
         example_inputs = (
-            torch.randn(32, 16).cuda(),
-            torch.randn(1, 16).cuda(),
-            torch.tensor(32).cuda(),
+            torch.randn(32, 16).to(GPU_TYPE),
+            torch.randn(1, 16).to(GPU_TYPE),
+            torch.tensor(32).to(GPU_TYPE),
         )
 
         actual = torch.compile(fn, fullgraph=True)(*example_inputs)
@@ -278,13 +279,114 @@ class TestUnbackedSymints(InductorTestCase):
         expected = fn(*example_inputs)
         torch.testing.assert_close(actual, expected)
 
+    @dynamo_config.patch({"capture_scalar_outputs": True})
+    def test_unbacked_masked_scatter(self, device):
+        def fn(value, mask):
+            u0 = mask.count_nonzero()
+            source = torch.ones(u0, dtype=torch.float32, device=device)
+            return torch.masked_scatter(value, mask, source)
 
-instantiate_device_type_tests(
-    TestUnbackedSymints, globals(), only_for=(GPU_TYPE, "cpu")
-)
+        value = make_tensor(10, 10, dtype=torch.float32, device=device)
+        mask = make_tensor(10, 10, dtype=torch.bool, device=device)
+        example_inputs = (value, mask)
+
+        actual = torch.compile(fn, fullgraph=True)(*example_inputs)
+        expected = fn(*example_inputs)
+        torch.testing.assert_close(actual, expected)
+
+    @dynamo_config.patch({"capture_scalar_outputs": True})
+    @parametrize("dynamic", [False, True, None])
+    def test_unbacked_slice_on_subclass(self, device, dynamic):
+        from torch.testing._internal.common_subclass import WrapperTensor
+        from torch.utils._pytree import tree_map
+
+        # NB: the error we're testing for only triggers when unbacked SymInts
+        # are created within a subclass's torch_dispatch, because they're not seen
+        # by Dynamo and thus are considered freshly-created when the subclass instance
+        # return value of the torch_dispatch is handled.
+        # Subclass forwards everything along to the single underlying dense tensor
+        # component, except for slice(), which it handles via data-dependent bounds access
+        class CustomSliceSubclass(WrapperTensor):
+            @classmethod
+            def get_wrapper_properties(cls, t, slice_bounds=None):
+                return t, {}
+
+            def __init__(self, t, slice_bounds=None):
+                self.t = t
+                self.slice_bounds = slice_bounds
+
+            def __repr__(self):
+                t_repr = repr(self.t)
+                slice_bounds_repr = repr(self.slice_bounds)
+                return f"CustomSliceSubclass({t_repr}, {slice_bounds_repr})"
+
+            def __tensor_flatten__(self):
+                return ["t", "slice_bounds"], None
+
+            @classmethod
+            def __tensor_unflatten__(
+                cls, inner_tensors, meta, outer_size, outer_stride
+            ):
+                t = inner_tensors["t"]
+                slice_bounds = inner_tensors["slice_bounds"]
+                return cls(t, slice_bounds)
+
+            @classmethod
+            def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+                if func is torch.ops.aten.slice.Tensor:
+                    inp = args[0]
+
+                    start = inp.slice_bounds[0].item()
+                    torch._check_is_size(start)
+                    torch._check(start <= inp.size(0))
+
+                    length = (args[0].slice_bounds[1] - args[0].slice_bounds[0]).item()
+                    torch._check_is_size(length)
+                    torch._check(start + length <= inp.size(0))
+
+                    return CustomSliceSubclass(
+                        func(args[0].t, dim=0, start=start, end=(start + length)),
+                        slice_bounds=args[0].slice_bounds,
+                    )
+
+                if not all(issubclass(cls, t) for t in types):
+                    return NotImplemented
+
+                if kwargs is None:
+                    kwargs = {}
+
+                def unwrap(e):
+                    return e.t if isinstance(e, CustomSliceSubclass) else e
+
+                def wrap(e):
+                    return CustomSliceSubclass(e) if isinstance(e, torch.Tensor) else e
+
+                rs = tree_map(
+                    wrap,
+                    func(*tree_map(unwrap, args), **tree_map(unwrap, kwargs or {})),
+                )
+                return rs
+
+        def fn(t, start, length):
+            return torch.ops.aten.slice.Tensor(
+                t, dim=0, start=start, end=start + length
+            )
+
+        t = make_tensor(22, 5, dtype=torch.float32, device=device)
+        sub = CustomSliceSubclass(t, slice_bounds=torch.tensor([2, 5], device=t.device))
+        start = 2
+        length = 3
+        example_inputs = (sub, start, length)
+
+        actual = torch.compile(fn, dynamic=dynamic, fullgraph=True)(*example_inputs)
+        expected = fn(*example_inputs)
+        torch.testing.assert_close(actual.t, expected.t)
+
+
+instantiate_device_type_tests(TestUnbackedSymints, globals(), allow_xpu=True)
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
 
-    if IS_LINUX and HAS_CUDA and is_big_gpu(0):
+    if IS_LINUX and HAS_GPU and (not HAS_CUDA or is_big_gpu()):
         run_tests()

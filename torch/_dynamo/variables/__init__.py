@@ -23,17 +23,20 @@ from .ctx_manager import (
 )
 from .dicts import (
     ConstDictVariable,
-    CustomizedDictVariable,
     DefaultDictVariable,
+    DictKeySetVariable,
     FrozensetVariable,
     SetVariable,
 )
 from .distributed import BackwardHookVariable, DistributedVariable, PlacementVariable
 from .functions import (
+    CreateTMADescriptorVariable,
+    FunctionDecoratedByContextlibContextManagerVariable,
     FunctoolsPartialVariable,
     NestedUserFunctionVariable,
     PolyfilledFunctionVariable,
     SkipFunctionVariable,
+    TMADescriptorVariable,
     UserFunctionVariable,
     UserMethodVariable,
 )
@@ -45,6 +48,7 @@ from .higher_order_ops import (
 from .iter import (
     CountIteratorVariable,
     CycleIteratorVariable,
+    FilterVariable,
     IteratorVariable,
     ItertoolsVariable,
     MapVariable,
@@ -66,14 +70,13 @@ from .lists import (
 from .misc import (
     AutogradFunctionContextVariable,
     AutogradFunctionVariable,
-    ClosureVariable,
+    CellVariable,
     DeletedVariable,
     ExceptionVariable,
     GetAttrVariable,
     InspectSignatureVariable,
     LambdaVariable,
     MethodWrapperVariable,
-    NewCellVariable,
     NewGlobalVariable,
     NumpyVariable,
     PythonModuleVariable,
@@ -85,6 +88,7 @@ from .misc import (
     TorchVersionVariable,
     TypingVariable,
     UnknownVariable,
+    WeakRefVariable,
 )
 from .nn_module import (
     FSDPManagedNNModuleVariable,
@@ -95,6 +99,7 @@ from .nn_module import (
 from .optimizer import OptimizerVariable
 from .sdpa import SDPAParamsVariable
 from .tensor import (
+    DataPtrVariable,
     FakeItemVariable,
     NumpyNdarrayVariable,
     SymNodeVariable,
@@ -107,8 +112,8 @@ from .user_defined import (
     MutableMappingVariable,
     RemovableHandleVariable,
     UserDefinedClassVariable,
+    UserDefinedDictVariable,
     UserDefinedObjectVariable,
-    WeakRefVariable,
 )
 
 
@@ -119,17 +124,18 @@ __all__ = [
     "BaseListVariable",
     "BuiltinVariable",
     "CatchWarningsCtxManagerVariable",
-    "ClosureVariable",
     "ConstantVariable",
     "ConstDictVariable",
     "ContextWrappingVariable",
     "CountIteratorVariable",
+    "CreateTMADescriptorVariable",
     "CUDADeviceVariable",
-    "CustomizedDictVariable",
     "CycleIteratorVariable",
+    "DataPtrVariable",
     "DefaultDictVariable",
     "DeletedVariable",
     "DeterministicAlgorithmsVariable",
+    "DictKeySetVariable",
     "EnumVariable",
     "FakeItemVariable",
     "GetAttrVariable",
@@ -143,7 +149,7 @@ __all__ = [
     "ListVariable",
     "NamedTupleVariable",
     "NestedUserFunctionVariable",
-    "NewCellVariable",
+    "CellVariable",
     "NewGlobalVariable",
     "NNModuleVariable",
     "NumpyNdarrayVariable",
@@ -163,6 +169,7 @@ __all__ = [
     "StringFormatVariable",
     "SuperVariable",
     "TensorVariable",
+    "TMADescriptorVariable",
     "TorchCtxManagerClassVariable",
     "TorchInGraphFunctionVariable",
     "TorchVersionVariable",

@@ -9,11 +9,11 @@ namespace ONNXScopeName {
 std::string createFullScopeName(
     const std::string& class_name,
     const std::string& variable_name);
-std::string variableName(torch::jit::ScopePtr scope);
+std::string variableName(const torch::jit::ScopePtr& scope);
 std::string variableNameFromRoot(
     const torch::jit::ScopePtr& scope,
     const std::string& layer_separator);
-std::string className(torch::jit::ScopePtr scope);
+std::string className(const torch::jit::ScopePtr& scope);
 std::string classNameFromRoot(
     const torch::jit::ScopePtr& scope,
     const std::string& layer_separator);

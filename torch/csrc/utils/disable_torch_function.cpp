@@ -322,7 +322,6 @@ auto check_has_torch_function(PyObject* obj, bool ignore_mode) -> bool {
 } // namespace torch
 
 inline bool sequence_has_torch_function(PyObject* args) {
-  // NOLINTNEXTLINE(bugprone-branch-clone)
   Py_ssize_t nargs = PySequence_Fast_GET_SIZE(args);
   for (Py_ssize_t i = 0; i < nargs; i++) {
     PyObject* obj = PySequence_Fast_GET_ITEM(args, i);
@@ -343,7 +342,7 @@ inline bool array_has_torch_function(PyObject* const* args, Py_ssize_t nargs) {
 }
 
 PyObject* THPModule_has_torch_function(PyObject*, PyObject* arg) {
-  bool result; // NOLINT(cppcoreguidelines-init-variables)
+  bool result = false;
   if (PyTuple_CheckExact(arg) || PyList_CheckExact(arg)) {
     // Fast path:
     //   If we know that we have a tuple or list, we can skip an INCREF and

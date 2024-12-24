@@ -339,8 +339,7 @@ void BytecodeDeserializer::parseMethods(
     auto element = std::move(vals[i]);
     auto m_tuple = std::move(element.toTupleRef()).elements();
     const std::string& function_name = m_tuple[0].toStringRef();
-    auto codeTableElements =
-        std::move(std::move(m_tuple[1]).toTupleRef()).elements();
+    auto codeTableElements = std::move(m_tuple[1].toTupleRef()).elements();
     IValue* schemaTable = // older files do not store function schema
         (bytecode_version_ > 0x4L ||
          (bytecode_version_ == 0x4L && m_tuple.size() >= 3))

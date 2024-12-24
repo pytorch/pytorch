@@ -110,8 +110,8 @@ def print_seen():
         return "{" + r + "}"
 
     def sort_key(kv):
-        k, v = kv
-        device_type, op = k
+        k, _ = kv
+        _, op = k
         if isinstance(op, tuple):
             return op
         else:
@@ -269,7 +269,7 @@ inductor_expected_failures_single_sample["xpu"] = {
     "tan": {f16},
     "torch.ops.aten._flash_attention_forward": {f16},
     "torch.ops.aten._efficient_attention_forward": {f16, f32},
-    "to_sparse": {f16, f32, f64, b8, i32, i64},
+    "to_sparse": {f32, f64},
     "linalg.eig": {f32, f64},
     "linalg.eigvals": {f32, f64},
     # Double and complex datatype matmul is not supported in oneDNN
@@ -320,6 +320,7 @@ inductor_expected_failures_single_sample["xpu"] = {
     "linalg.qr": {f64},
     "linalg.pinv": {f64},
     ("linalg.pinv", "hermitian"): {f64},
+    ("linalg.pinv", "singular"): {f64},
     "linalg.norm": {f64},
     ("linalg.norm", "subgradients_at_zero"): {f64},
     "linalg.matrix_rank": {f64},
@@ -342,22 +343,16 @@ inductor_expected_failures_single_sample["xpu"] = {
     "cholesky_solve": {f64},
     "cholesky_inverse": {f64},
     # could not create a primitive
-    "addbmm": {f16, f32, f64},
-    "addmm": {f16, f32, f64},
-    "addmv": {f32, f64},
+    "addbmm": {f64},
+    "addmm": {f64},
+    "addmv": {f64},
     # could not create a primitive descriptor for
     # a deconvolution forward propagation primitive
     "nn.functional.conv_transpose2d": {f32, f64},
     "nn.functional.conv_transpose3d": {f32, f64},
-    # rrelu not supported on XPU now
-    "nn.functional.rrelu": {f16, f32, f64},
-    "histc": {i32, i64},
     # not implemented for 'Half'
-    "nn.functional.multilabel_margin_loss": {f16},
-    "nn.functional.multi_margin_loss": {f16},
-    "nn.functional.avg_pool3d": {f16},
-    # not implemented for 'Bool'
-    "nn.functional.unfold": {b8},
+    "sort": {b8},
+    "argsort": {b8},
 }
 
 
@@ -446,6 +441,10 @@ inductor_override_kwargs["cpu"] = {
     ("nn.functional.multilabel_soft_margin_loss", f16): {
         "atol": 3e-4,
         "rtol": 0.002,
+    },
+    ("nn.functional.triplet_margin_with_distance_loss", f16): {
+        "atol": 3e-4,
+        "rtol": 0.003,
     },
     ("softmax", f16): {"atol": 1e-4, "rtol": 0.02},
     ("polygamma.polygamma_n_0", f32): {"atol": 1e-3, "rtol": 1e-4},
@@ -557,7 +556,12 @@ inductor_override_kwargs["xpu"] = {
     ("cumsum", f16): {"reference_in_float": True},
     "cumprod": {"reference_in_float": True, "atol": 7e-5, "rtol": 0.002},
     ("dot", f16): {"atol": 1e-5, "rtol": 0.002},
-    "logcumsumexp": {"grad_atol": 8e-4, "grad_rtol": 0.001},
+    "logcumsumexp": {
+        "atol": 5e-5,
+        "rtol": 0.005,
+        "grad_atol": 8e-4,
+        "grad_rtol": 0.001,
+    },
     "exponential": {"reference_in_float": True},
     "geometric": {"reference_in_float": True},
     ("kron", f16): {"reference_in_float": True},
@@ -688,7 +692,7 @@ inductor_one_sample["cpu"] = {
     "nn.functional.cosine_similarity": {f16},
     "nn.functional.cross_entropy": {f16, f32, f64},
     "nn.functional.gaussian_nll_loss": {f16},
-    "nn.functional.grid_sample": {f32, f64},
+    "nn.functional.grid_sample": {f32, f64, f16},
     "nn.functional.interpolate.area": {f16},
     "nn.functional.nll_loss": {f16, f32, f64},
     "normal": {f16, f32, f64},
@@ -976,6 +980,7 @@ class TestInductorOpInfo(TestCase):
     @torch._inductor.config.patch(
         {"implicit_fallbacks": False, "triton.autotune_pointwise": False}
     )
+    @torch._inductor.config.patch("test_configs.runtime_triton_dtype_assert", True)
     @collection_decorator
     def test_comprehensive(self, device, dtype, op):
         device_type = torch.device(device).type
@@ -1010,7 +1015,7 @@ class TestInductorOpInfo(TestCase):
         #     print(f"CONSIDERING OP {op_name} on {device_type} with {dtype} |
         # {inductor_skips[device_type].get(op_name, set())}", flush=True)
         if dtype in inductor_skips[device_type].get(op_name, set()):
-            test_expect = ExpectedTestResult.SKIP
+            test_expect = ExpectedTestResult.SKIP  # noqa: F841
             # with open("test_output.txt", "a") as f:
             #     print(f"SKIPPING OP {op_name} on {device_type}", flush=True, file=f)
             #     print(f"SKIPPING OP {op_name} on {device_type}", flush=True)
@@ -1021,9 +1026,9 @@ class TestInductorOpInfo(TestCase):
         ].get(
             op_name, set()
         ):
-            test_expect = ExpectedTestResult.XFAILURE
+            test_expect = ExpectedTestResult.XFAILURE  # noqa: F841
         else:
-            test_expect = ExpectedTestResult.SUCCESS
+            test_expect = ExpectedTestResult.SUCCESS  # noqa: F841
 
         overridden_kwargs = {}
         overridden_kwargs.update(

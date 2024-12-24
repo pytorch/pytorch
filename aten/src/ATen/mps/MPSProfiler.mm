@@ -189,7 +189,7 @@ void MPSProfiler::initialize() {
       currentSigint.sa_flags = SA_RESTART;
       sigfillset(&currentSigint.sa_mask);
       if (sigaction(SIGINT, &currentSigint, &previousSigint) == -1) {
-        AT_ERROR("Cannot install SIGINT handler for MPSProfiler.");
+        TORCH_CHECK(false, "Cannot install SIGINT handler for MPSProfiler.");
       }
     }
   }
@@ -207,7 +207,7 @@ void MPSProfiler::StartTrace(const std::string& mode, bool waitUntilCompleted) {
       } else if (token == "event") {
         m_profile_options |= ProfileOptions::ALL_SIGNPOST_EVENTS;
       } else {
-        AT_ERROR("Invalid Signpost trace mode: ", token);
+        TORCH_CHECK(false, "Invalid Signpost trace mode: ", token);
       }
     }
   }
@@ -654,7 +654,7 @@ bool MPSProfiler::isProfileInfoLoggingEnabled(BaseInfo::Type infoType, bool isEx
       isInfoLoggingEnabled = (m_log_options & LogOptions::CPU_FALLBACK_INFO);
       break;
     default:
-      AT_ERROR("invalid profiling info type");
+      TORCH_CHECK(false, "invalid profiling info type");
   }
   if (!isInfoLoggingEnabled) {
     return false;
@@ -685,7 +685,7 @@ void MPSProfiler::emitSignpostEvent(SignpostTypes signpost_type,
       os_signpost_event_emit(m_os_log_events, signpost_id, kEvtSignpostCPUFallbacksStr, "%s", msg);
       break;
     default:
-      AT_ERROR("unknown SignpostType in MPS profiler");
+      TORCH_CHECK(false, "unknown SignpostType in MPS profiler");
   }
 }
 
@@ -709,7 +709,7 @@ void MPSProfiler::beginSignpostInterval(SignpostTypes signpost_type,
       os_signpost_interval_begin(m_os_log_intervals, signpost_id, kIntSignpostCPUFallbacksStr, "%s", msg);
       break;
     default:
-      AT_ERROR("unknown SignpostType in MPS profiler");
+      TORCH_CHECK(false, "unknown SignpostType in MPS profiler");
   }
 }
 
@@ -728,7 +728,7 @@ void MPSProfiler::endSignpostInterval(SignpostTypes signpost_type, os_signpost_i
       os_signpost_interval_end(m_os_log_intervals, signpost_id, kIntSignpostCPUFallbacksStr);
       break;
     default:
-      AT_ERROR("unknown SignpostType in MPS profiler");
+      TORCH_CHECK(false, "unknown SignpostType in MPS profiler");
   }
 }
 
@@ -750,7 +750,7 @@ MPSProfiler::SignpostTypes MPSProfiler::getSignpostType(BaseInfo::Type infoType)
     case BaseInfo::Type::CPU_FALLBACK:
       return SignpostTypes::CPU_FALLBACK;
     default:
-      AT_ERROR("invalid profiling info type");
+      TORCH_CHECK(false, "invalid profiling info type");
   }
 }
 

@@ -11,8 +11,7 @@
 #include <pthread.h>
 #endif
 
-namespace torch {
-namespace mtia {
+namespace torch::mtia {
 
 static bool in_bad_fork = false; // True for children forked after mtia init
 
@@ -40,7 +39,7 @@ void initModule(PyObject* module) {
   m.def("_mtia_init", []() {
     TORCH_INTERNAL_ASSERT(!in_bad_fork); // Handled at python level
     poison_fork();
-    at::globalContext().lazyInitMTIA();
+    at::globalContext().lazyInitDevice(c10::DeviceType::MTIA);
   });
 
   m.def("_mtia_isBuilt", []() {
@@ -86,7 +85,22 @@ void initModule(PyObject* module) {
         at::detail::getMTIAHooks().getDeviceCapability(device_index);
     return py::reinterpret_steal<py::object>(raw_pyobject);
   });
+
+  m.def("_mtia_emptyCache", []() { at::detail::getMTIAHooks().emptyCache(); });
+
+  m.def(
+      "_mtia_recordMemoryHistory",
+      [](std::optional<std::string> enabled,
+         const std::string& stacks,
+         size_t max_entries) {
+        at::detail::getMTIAHooks().recordMemoryHistory(
+            enabled, stacks, max_entries);
+      });
+
+  m.def("_mtia_memorySnapshot", []() {
+    PyObject* raw_pyobject = at::detail::getMTIAHooks().memorySnapshot();
+    return py::reinterpret_steal<py::object>(raw_pyobject);
+  });
 }
 
-} // namespace mtia
-} // namespace torch
+} // namespace torch::mtia
