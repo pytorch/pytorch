@@ -7999,95 +7999,23 @@ static inline std::tuple<Tensor, Tensor, Tensor> _betainc_partials(
       std::move(grad_a), std::move(grad_b), std::move(grad_x));
 }
 
-std::tuple<Tensor, Tensor, Tensor> special_betainc_backward_full(
-    const Tensor& grad,
+std::tuple<Tensor, Tensor, Tensor> betainc_partials(
     const Tensor& a,
     const Tensor& b,
     const Tensor& x) {
-  std::tuple<Tensor, Tensor, Tensor> _ret_full = _betainc_partials(a, b, x);
-  Tensor g_a = std::get<0>(_ret_full) * grad;
-  Tensor g_b = std::get<1>(_ret_full) * grad;
-  Tensor g_x = std::get<2>(_ret_full) * grad;
-  return std::make_tuple(std::move(g_a), std::move(g_b), std::move(g_x));
+  return _betainc_partials(a, b, x);
 }
 
-std::tuple<Tensor, Tensor> special_betainc_backward_ab(
+std::tuple<Tensor, Tensor, Tensor> special_betainc_backward(
     const Tensor& grad,
     const Tensor& a,
     const Tensor& b,
     const Tensor& x) {
-  std::tuple<Tensor, Tensor, Tensor> _ret_full = _betainc_partials(a, b, x);
-  Tensor g_a = std::get<0>(_ret_full) * grad;
-  Tensor g_b = std::get<1>(_ret_full) * grad;
-  return std::make_tuple(std::move(g_a), std::move(g_b));
-}
-
-std::tuple<Tensor, Tensor> special_betainc_backward_ax(
-    const Tensor& grad,
-    const Tensor& a,
-    const Tensor& b,
-    const Tensor& x) {
-  std::tuple<Tensor, Tensor, Tensor> _ret_full = _betainc_partials(a, b, x);
-  Tensor g_a = std::get<0>(_ret_full) * grad;
-  Tensor g_x = std::get<2>(_ret_full) * grad;
-  return std::make_tuple(std::move(g_a), std::move(g_x));
-}
-
-std::tuple<Tensor, Tensor> special_betainc_backward_bx(
-    const Tensor& grad,
-    const Tensor& a,
-    const Tensor& b,
-    const Tensor& x) {
-  std::tuple<Tensor, Tensor, Tensor> _ret_full = _betainc_partials(a, b, x);
-  Tensor g_b = std::get<1>(_ret_full) * grad;
-  Tensor g_x = std::get<2>(_ret_full) * grad;
-  return std::make_tuple(std::move(g_b), std::move(g_x));
-}
-
-Tensor special_betainc_backward_x(
-    const Tensor& grad,
-    const Tensor& a,
-    const Tensor& b,
-    const Tensor& x) {
-  at::ScalarType dtype_origin = at::promoteTypes(
-      at::promoteTypes(a.scalar_type(), b.scalar_type()), x.scalar_type());
-  bool should_promote_dtype = ((dtype_origin == at::ScalarType::BFloat16) |
-                               (dtype_origin == at::ScalarType::Half))
-      ? true
-      : false;
-  at::ScalarType dtype =
-      should_promote_dtype ? at::ScalarType::Float : dtype_origin;
-
-  auto options = at::TensorOptions().dtype(x.dtype()).device(x.device());
-  const Tensor zero = at::scalar_tensor(0.0, options);
-  const Tensor one = at::scalar_tensor(1.0, options);
-
-  const Tensor& _a = a.to(dtype);
-  const Tensor& _b = b.to(dtype);
-  const Tensor& _x = x.to(dtype);
-
-  Tensor grad_x = at::exp(
-      at::xlogy(_a - one, _x) + at::special_xlog1py(_b - one, -_x) -
-      at::special_betaln(_a, _b));
-
-  Tensor result_is_nan = (a <= zero) | (b <= zero) | (x < zero) | (x > one);
-  const Tensor nan = AT_DISPATCH_FLOATING_TYPES_AND2(
-      at::ScalarType::Half,
-      at::ScalarType::BFloat16,
-      x.scalar_type(),
-      "__betainc_der_power_series_eps",
-      [&]() -> Tensor {
-        return at::scalar_to_tensor(
-            std::numeric_limits<
-                at::scalar_value_type<scalar_t>::type>::quiet_NaN(),
-            grad_x.device());
-      });
-  grad_x = at::where(result_is_nan, nan, grad_x);
-
-  if (should_promote_dtype)
-    grad_x = grad_x.to(dtype_origin);
-
-  return grad_x * grad;
+  if (!grad.defined()) {
+    return std::make_tuple(Tensor(), Tensor(), Tensor());
+  }
+  const auto&& [g_a, g_b, g_x] = _betainc_partials(a, b, x);
+  return std::make_tuple(grad * g_a, grad * g_b, grad * g_x);
 }
 
 static inline std::tuple<Tensor, Tensor, Tensor> _betaincinv_partials(
@@ -8113,10 +8041,7 @@ static inline std::tuple<Tensor, Tensor, Tensor> _betaincinv_partials(
   }
 
   Tensor _x = at::special_betaincinv(_y, _a, _b);
-  std::tuple<Tensor, Tensor, Tensor> _ret_full = _betainc_partials(_a, _b, _x);
-  Tensor g_a = std::get<0>(_ret_full);
-  Tensor g_b = std::get<1>(_ret_full);
-  Tensor g_x = std::get<2>(_ret_full);
+  auto [g_a, g_b, g_x] = _betainc_partials(_a, _b, _x);
   g_a = -g_a / g_x;
   g_b = -g_b / g_x;
   Tensor g_y = at::reciprocal(g_x);
@@ -8130,59 +8055,23 @@ static inline std::tuple<Tensor, Tensor, Tensor> _betaincinv_partials(
   return std::make_tuple(std::move(g_a), std::move(g_b), std::move(g_y));
 }
 
-std::tuple<Tensor, Tensor, Tensor> special_betaincinv_backward_full(
-    const Tensor& grad,
+std::tuple<Tensor, Tensor, Tensor> betaincinv_partials(
     const Tensor& a,
     const Tensor& b,
     const Tensor& y) {
-  std::tuple<Tensor, Tensor, Tensor> _ret_full = _betaincinv_partials(a, b, y);
-  Tensor g_a = std::get<0>(_ret_full) * grad;
-  Tensor g_b = std::get<1>(_ret_full) * grad;
-  Tensor g_y = std::get<2>(_ret_full) * grad;
-  return std::make_tuple(std::move(g_a), std::move(g_b), std::move(g_y));
+  return _betaincinv_partials(a, b, y);
 }
 
-std::tuple<Tensor, Tensor> special_betaincinv_backward_ab(
+std::tuple<Tensor, Tensor, Tensor> special_betaincinv_backward(
     const Tensor& grad,
     const Tensor& a,
     const Tensor& b,
     const Tensor& y) {
-  std::tuple<Tensor, Tensor, Tensor> _ret_full = _betaincinv_partials(a, b, y);
-  Tensor g_a = std::get<0>(_ret_full) * grad;
-  Tensor g_b = std::get<1>(_ret_full) * grad;
-  return std::make_tuple(std::move(g_a), std::move(g_b));
-}
-
-std::tuple<Tensor, Tensor> special_betaincinv_backward_ay(
-    const Tensor& grad,
-    const Tensor& a,
-    const Tensor& b,
-    const Tensor& y) {
-  std::tuple<Tensor, Tensor, Tensor> _ret_full = _betaincinv_partials(a, b, y);
-  Tensor g_a = std::get<0>(_ret_full) * grad;
-  Tensor g_y = std::get<2>(_ret_full) * grad;
-  return std::make_tuple(std::move(g_a), std::move(g_y));
-}
-
-std::tuple<Tensor, Tensor> special_betaincinv_backward_by(
-    const Tensor& grad,
-    const Tensor& a,
-    const Tensor& b,
-    const Tensor& y) {
-  std::tuple<Tensor, Tensor, Tensor> _ret_full = _betaincinv_partials(a, b, y);
-  Tensor g_b = std::get<1>(_ret_full) * grad;
-  Tensor g_y = std::get<2>(_ret_full) * grad;
-  return std::make_tuple(std::move(g_b), std::move(g_y));
-}
-
-Tensor special_betaincinv_backward_y(
-    const Tensor& grad,
-    const Tensor& a,
-    const Tensor& b,
-    const Tensor& y) {
-  std::tuple<Tensor, Tensor, Tensor> _ret_full = _betaincinv_partials(a, b, y);
-  Tensor g_y = std::get<2>(_ret_full) * grad;
-  return g_y;
+  if (!grad.defined()) {
+    return std::make_tuple(Tensor(), Tensor(), Tensor());
+  }
+  const auto&& [g_a, g_b, g_y] = _betaincinv_partials(a, b, y);
+  return std::make_tuple(grad * g_a, grad * g_b, grad * g_y);
 }
 
 } // namespace torch::autograd::generated::details
