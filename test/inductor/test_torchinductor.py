@@ -3456,6 +3456,16 @@ class CommonTemplate:
             ),
         )
 
+    def test_addmv(self):
+        def fn(a, b, c):
+            return torch.addmv(a, b, c)
+        cfn = torch.compile(backend='inductor')(fn)
+        input = torch.tensor([2], dtype=torch.int32)
+        mat = torch.tensor(np.random.randn(0, 0), dtype=torch.int32)
+        vec = torch.tensor([])
+        with torch.no_grad():
+            self.assertEqual(cfn(input, mat, vec), fn(input, mat, vec))
+
     # https://github.com/pytorch/pytorch/issues/98979
     @skipCUDAIf(True, "cuda failed for float64 linear")
     @skipIfXpu(msg="Double and complex datatype matmul is not supported in oneDNN")
