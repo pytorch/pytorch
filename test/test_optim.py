@@ -1334,6 +1334,7 @@ class TestOptimRenewed(TestCase):
     @optims(optim_db, dtypes=[torch.float32])
     def test_grads_are_never_inplaced_into(self, device, dtype, optim_info):
         optim_cls = optim_info.optim_cls
+
         all_optim_inputs = _get_optim_inputs_including_global_cliquey_kwargs(
             device, dtype, optim_info
         )
@@ -2205,69 +2206,66 @@ class TestOptimRenewed(TestCase):
         dtypes=[torch.float32],
     )
     def test_less_mem_beta1_zero_adam(self, device, dtype, optim_info):
-        # test that beta1=0.0 uses less memory than the default
-        model = torch.nn.Linear(5, 5)
-        model.to(dtype=dtype, device=device)
-        inpt = torch.rand(2, 5, dtype=dtype, device=device)
-
-        optim_inputs = optim_info.optim_inputs_func(device=device)
-        
-        mem_used_exp_avg = 0 
-        case_to_mem_usage = {}
-        
         def get_obj_size(d):
             if isinstance(d, dict):
                 return sum(get_obj_size(v) for v in d.values())
-            elif isinstance(d, (list,tuple)):
+            elif isinstance(d, (list, tuple)):
                 return sum(get_obj_size(v) for v in d)
             elif isinstance(d, torch.Tensor):
                 return d.element_size() * d.numel()
             return d.__sizeof__()
-            
-        for optim_input in optim_inputs:
-            beta1_zero = (
-                "betas" in optim_input.kwargs and optim_input.kwargs["betas"][0] == 0.0
-            )
-            if beta1_zero or optim_input.desc == "default":
-                optim = optim_info.optim_cls(model.parameters(), **optim_input.kwargs)
-                optim.zero_grad() 
-                output = model(inpt)
-                loss = output.sum()
-                loss.backward()
-                optim.step()
 
-                if not beta1_zero : 
-                    mem_used_exp_avg += sum(
-                        optim.state[p]["exp_avg"].element_size()
-                        * optim.state[p]["exp_avg"].numel()
-                        for p in model.parameters()
-                    ) 
-                    
-                case_to_mem_usage[
-                    "beta1_zero" if beta1_zero else "default"
-                ] = get_obj_size(optim.state_dict()) 
-            
-                
-        self.assertGreaterEqual(
-            case_to_mem_usage["default"]-case_to_mem_usage["beta1_zero"], mem_used_exp_avg 
-        )
-        
+        # test that beta1=0.0 uses less memory than the default
+        beta_1_optim_inputs = [
+            o
+            for o in optim_info.optim_inputs_func(device=device)
+            if "betas" in o.kwargs and o.kwargs["betas"][0] > 0.0
+        ]
+
+        num_params = 4
+        print(f"num_params: {num_params}")
+        print(f"sizeof: {32 * 16 * dtype.__sizeof__()}")
+        size_of_param_in_bytes = (
+            32 * 16 * dtype.__sizeof__()
+        )  # hardcoded, also idk if sizeof is the right api)
+        for optim_input in beta_1_optim_inputs:
+            beta1_values = (optim_input.kwargs["betas"][0], 0.0)
+            total_sizes = []  # will end up as [big_state_dict_size, no_exp_avg_sd_size]
+            for beta1 in beta1_values:
+                optim_input.kwargs["betas"] = (beta1, optim_input.kwargs["betas"][1])
+                params = [
+                    torch.rand(32, 16, device=device, dtype=dtype)
+                    for _ in range(num_params)
+                ]
+                for p in params:
+                    p.grad = torch.rand_like(p)
+
+                optim = optim_info.optim_cls(params, **optim_input.kwargs)
+                for _ in range(3):
+                    optim.step()
+                    optim.zero_grad()
+                    for p in params:
+                        p.grad = torch.rand_like(p)
+
+                total_sizes.append(get_obj_size(optim.state_dict()))
+
+            # size of exp_avg should match the size of params, as all the params here requires grad
+            size_of_exp_avgs = num_params * size_of_param_in_bytes
+            self.assertEqual(total_sizes[0], total_sizes[1] + size_of_exp_avgs)
 
     @optims(
         [optim for optim in optim_db if optim.optim_cls.__name__ == "Adam"],
         dtypes=[torch.float32],
     )
-    def test_loadstate_with_diff_beta1_adam(
-        self, device, dtype, optim_info
-    ):
-        # the test takes form of two tests. 
-        # 1st test. 
+    def test_loadstate_with_diff_beta1_adam(self, device, dtype, optim_info):
+        # the test takes form of two tests.
+        # 1st test.
         # model_beta1_zero: 1.train for n_iters, 2.load state, 3.train for n_iters
         # model_default: 4.train for n_iters
         # 2nd test.
         # model_default: 1.train for n_iters, 2.load state (beta1=0.0), 3.train for n_iters
         # model_beta1_zero: 4.train for n_iters
-        
+
         inpt = torch.ones((5,), dtype=dtype, device=device)
         optim_inputs = optim_info.optim_inputs_func(device=device)
 
@@ -2276,7 +2274,7 @@ class TestOptimRenewed(TestCase):
             model.to(dtype=dtype, device=device)
             optim = optim_info.optim_cls(model.parameters(), **optim_input.kwargs)
             return model, optim
-        
+
         def iteration(model, optim, inpt, n_iters):
             output = None
             for i in range(n_iters):
@@ -2286,8 +2284,8 @@ class TestOptimRenewed(TestCase):
                 loss.backward(retain_graph=True)
                 optim.step()
             return output
-        
-        for i in range(2): 
+
+        for i in range(2):
             # model and optimizer corresponding to beta1 = 0.0
             model_beta1_zero, optim_beta1_zero = init_model_and_optim(
                 [
@@ -2310,32 +2308,28 @@ class TestOptimRenewed(TestCase):
             model2 = model_default if i == 0 else model_beta1_zero
             optim1 = optim_beta1_zero if i == 0 else optim_default
             optim2 = optim_default if i == 0 else optim_beta1_zero
-            
+
             # model1: 1.train for n_iters, 2.load state of model2, 3.train for n_iters
             # model2: 4.train for n_iters
             n_iters = 10
-            
+
             # 1. train for n_iters
             iteration(model1, optim1, inpt, n_iters)
-            
+
             # 2. load state
             optim1.load_state_dict(optim2.state_dict())
             model1.load_state_dict(model2.state_dict())
-            
+
             self.assertEqual(model1.state_dict(), model2.state_dict())
             self.assertEqual(optim1.state_dict(), optim2.state_dict())
-            
+
             # 3. train for n_iters
             output1_after_load = iteration(model1, optim1, inpt, n_iters)
-            
+
             # 4. train for n_iters
             output2 = iteration(model2, optim2, inpt, n_iters)
-            
-            self.assertTrue(
-                torch.allclose(output1_after_load, output2, atol=0.001)
-            )
-            
-    
+
+            self.assertTrue(torch.allclose(output1_after_load, output2, atol=0.001))
 
     @optims(
         [optim for optim in optim_db if optim.optim_cls.__name__ == "Adam"],
@@ -2345,14 +2339,6 @@ class TestOptimRenewed(TestCase):
         # we test correctness of the optimizer with beta1 = 0.0 by comparing it with the optimizer model
         # with beta1 = 1e-6
 
-        def init_model_and_optim(optim_input):
-            model = torch.nn.Linear(5, 5)
-            torch.nn.init.ones_(model.weight)
-            torch.nn.init.ones_(model.bias)
-            model.to(dtype=dtype, device=device)
-            optim = optim_info.optim_cls(model.parameters(), **optim_input.kwargs)
-            return model, optim
-
         def step(model, optim):
             optim.zero_grad()
             output = model(inpt)
@@ -2361,38 +2347,38 @@ class TestOptimRenewed(TestCase):
             optim.step()
 
         inpt = torch.ones((5,), dtype=dtype, device=device)
-        optim_inputs = [
-            optim_input
-            for optim_input in optim_info.optim_inputs_func(device=device)
-            if ("betas" in optim_input.kwargs and optim_input.kwargs["betas"][0] == 0.0)
-            or optim_input.desc == "default"
-        ]
 
-        n_iters = 10
-        self.assertEqual(len(optim_inputs), 2) # we need two optimizers to compare
-        def run_two_models(beta1_of_default):
+        def run_two_models(non_zero_beta1):
             outputs = []
+            # lr of .1 needed to see difference.
+            optim_inputs = [
+                {"lr": 0.1, "betas": (non_zero_beta1, 0.999)},
+                {"lr": 0.1, "betas": (0.0, 0.999)},
+            ]
             for optim_input in optim_inputs:
                 one_model_output = []
-                optim_input.kwargs["lr"] = 0.1   # need lr high enough to see the difference
-                
-                if optim_input.desc == "default":
-                    optim_input.kwargs["betas"] = (beta1_of_default, 0.999)
-                model, optim = init_model_and_optim(optim_input)
+
+                # create model
+                model = torch.nn.Linear(5, 5)
+                torch.nn.init.ones_(model.weight)
+                torch.nn.init.ones_(model.bias)
+                model.to(dtype=dtype, device=device)
+
+                # create optimizer
+                optim = optim_info.optim_cls(model.parameters(), **optim_input)
 
                 # train the model
-                for i in range(n_iters):
+                for i in range(10):
                     step(model, optim)
                     one_model_output.append(model(inpt))
                 outputs.append(torch.cat(one_model_output))
+
             return outputs
 
-        # our beta1=0 optimizer should have same performance as the default optimizer
-        # with beta1=1e-6
+        # beta1=0 optimizer should have same performance as beta1=1e-6 optimizer
         outputs = run_two_models(1e-6)
         self.assertTrue(torch.allclose(outputs[0], outputs[1]))
-        # our beta1=0 optimizer should have different performance as the default optimizer
-        # with beta1=0.9
+        # beta1=0 optimizer should have different performance as beta1=0.9 optimizer
         outputs = run_two_models(0.9)
         self.assertFalse(torch.allclose(outputs[0], outputs[1]))
 
