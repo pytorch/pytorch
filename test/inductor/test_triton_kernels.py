@@ -3598,7 +3598,7 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
         y = torch.ones((4096,), device=GPU_TYPE, dtype=torch.float16)
 
         # this should cause an exception, since pre_hook is not allowed
-        msg = "Passing multiple @triton.autotune decorators is not supported. Please use a single @triton.autotune decorator instead."
+        msg = "Please use a single @triton.autotune decorator instead."
         with self.assertRaisesRegex(torch._dynamo.exc.Unsupported, msg):
             add_compiled = torch.compile(
                 add, mode="reduce-overhead", fullgraph=True, backend=backend
