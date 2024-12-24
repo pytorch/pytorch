@@ -19,7 +19,7 @@ from .cpp_utils import DTYPE_TO_CPP, GemmBlocking
 GEMM_SINGLE_THREAD_MM_STUB = r"""
 {{kernel.def_kernel(
     inputs={"X": X, "W": W},
-    outputs={"Y": Y},
+    outputs={"Y": Y_2d},
     aliases=aliases,
     function_name="single_thread_mm",
     extra_sizevars=BY_sizevars + [b_index],
@@ -28,7 +28,7 @@ GEMM_SINGLE_THREAD_MM_STUB = r"""
 GEMM_THREADED_MM_STUB = r"""
 {{kernel.def_kernel(
     inputs={"X": X, "W": W},
-    outputs={"Y": Y},
+    outputs={"Y": Y_2d},
     aliases=aliases,
     function_name="threaded_mm",
     extra_sizevars=BY_sizevars + [b_index],
@@ -184,9 +184,9 @@ class CppBmmTemplate(CppGemmTemplate):
         BX, BW, BY = options["X"], options["W"], options["Y"]
         options["BX"], options["BW"], options["BY"] = BX, BW, BY
         options["BY_2d"] = options["Y_2d"]
-        for kword in ["X", "W", "Y", "GemmOut", "Y_2d"]:
+        for kword in ["X", "W", "GemmOut", "Y_2d"]:
             options[kword] = kernel.select(options[kword], 0, self.b_index)
-        for kword in ["X", "W", "Y"]:
+        for kword in ["X", "W", "Y_2d"]:
             options[kword + "_dtype"] = DTYPE_TO_CPP[options[kword].dtype]
         options["b_index"] = self.b_index
         options["BY_sizevars"] = [
