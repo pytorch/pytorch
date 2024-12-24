@@ -30,7 +30,6 @@ from sympy.printing.precedence import PRECEDENCE
 
 import torch
 import torch._logging
-from torch._dynamo.device_interface import get_interface_for_device
 from torch._dynamo.utils import identity, preserve_rng_state
 from torch._prims_common import is_integer_dtype
 from torch.utils._ordered_set import OrderedSet
@@ -3758,10 +3757,9 @@ class TritonScheduling(SIMDScheduling):
         return kernel_name
 
     def benchmark_fused_nodes(self, nodes, n_spills_threshold=8):
-        device_interface = get_interface_for_device(V.graph.device_type)
-        with preserve_rng_state(), device_interface.device(
+        with preserve_rng_state(), torch.cuda.device(
             V.graph.get_current_device_or_throw()
-        ):  # type: ignore[attr-defined]
+        ):
             src_code = self.generate_kernel_code_from_nodes(
                 nodes, benchmark_kernel=True
             )
@@ -3781,7 +3779,7 @@ class TritonScheduling(SIMDScheduling):
             def store_cache():
                 path = cache_file_path()
                 with open(path, "w") as fd:
-                    fd.write(str(ms))  # type: ignore[has-type]
+                    fd.write(str(ms))
 
             log.debug(
                 "kernel src code for %s written to: %s",
