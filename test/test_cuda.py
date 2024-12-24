@@ -733,6 +733,10 @@ class TestCuda(TestCase):
         self.assertEqual(torch.accelerator.current_stream().stream_id, s1.stream_id)
         torch.accelerator.set_stream(s2)
         self.assertEqual(torch.accelerator.current_stream().stream_id, s2.stream_id)
+        with self.assertRaisesRegex(
+            RuntimeError, "device_index >= 0 && device_index < num_gpus"
+        ):
+            torch.accelerator.current_stream(torch.accelerator.device_count())
 
     def test_record_stream(self):
         cycles_per_ms = get_cycles_per_ms()
