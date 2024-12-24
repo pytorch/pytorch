@@ -1,6 +1,5 @@
 # mypy: allow-untyped-defs
 import functools
-import inspect
 import logging
 import math
 
@@ -14,6 +13,7 @@ from ..pattern_matcher import (
     gen_register_replacement,
     joint_fwd_bwd,
 )
+from ..utils import partialize_and_update_signature
 
 
 log = logging.getLogger(__name__)
@@ -607,29 +607,6 @@ def _sfdp_extra_check(scale_factor_op=None, disable_cuda=False):
         return _sfdp_params_check(match)
 
     return fn
-
-
-def partialize_and_update_signature(func, **kwargs):
-    """
-    Equivalent to functools.partial but also updates the signature on returned function
-    """
-    original_sig = inspect.signature(func)
-    parameters = original_sig.parameters
-
-    new_parameters = {
-        key: value for key, value in parameters.items() if key not in kwargs
-    }
-    new_sig = inspect.Signature(parameters=list(new_parameters.values()))
-
-    partial_func = functools.partial(func, **kwargs)
-
-    def wrapper(*args, **kwargs):
-        return partial_func(*args, **kwargs)
-
-    wrapper.__signature__ = new_sig  # type: ignore[attr-defined]
-    wrapper.__name__ = func.__name__
-
-    return wrapper
 
 
 def _get_sfdp_patterns():
