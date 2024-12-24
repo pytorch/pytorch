@@ -259,6 +259,69 @@ if torch._C._has_mkldnn:
 
         return fn
 
+    def _is_valid_group_gemm_fusion():
+        def fn(match):
+            computation_nodes = filter_nodes(
+                match.nodes, mkldnn._linear_pointwise.default
+            )
+            if len(computation_nodes) != 2:
+                return False
+            act = computation_nodes[0].args[0]
+            wgt = computation_nodes[0].args[1]
+            if (
+                computation_nodes[1].args[0] != act
+                or computation_nodes[1].args[1] == wgt
+                or wgt.meta.get("val").dtype != torch.bfloat16  # type: ignore[union-attr]
+                or computation_nodes[0].args[1].meta.get("val").dtype != torch.bfloat16  # type: ignore[union-attr]
+            ):
+                # check for same activations and different wgt
+                # <TODO> Extend to support dtype other than bfloat16
+                return False
+            wgt_size = computation_nodes[0].args[1].meta.get("val").size()  # type: ignore[union-attr]
+            if computation_nodes[1].args[1].meta.get("val").size() != wgt_size:  # type: ignore[union-attr]
+                # check for same weight size
+                return False
+            # Ensure max autotune used with CPP backend
+            if not (
+                torch._inductor.config.max_autotune
+                and "CPP" in torch._inductor.config.max_autotune_gemm_backends
+                and torch._inductor.config.cpp.enable_group_gemm_template
+            ):
+                return False
+
+            return True
+
+        return fn
+
+    def _register_group_gemm_lowering(pattern):
+        @register_lowering_pattern(
+            pattern,
+            extra_check=_is_valid_group_gemm_fusion(),
+            pass_number=0,
+        )
+        def fn(match, *args, **kwargs):
+            r"""
+            Supported Group GEMM patterns
+                          X
+                        /   \
+                linear(X)   linear(X)
+            """
+            # TODO<leslie> Extend to GEMM more than 2
+            computation_args = [
+                kwargs["act"],
+                [kwargs["w0"], kwargs["w1"]],
+                [kwargs["b0"], kwargs["b1"]],
+                "group_gemm_template",
+                None,
+                None,
+            ]
+
+            from ..mkldnn_lowerings import group_gemm_lowering
+
+            return group_gemm_lowering(*computation_args)
+
+        return fn
+
     def _register_leaky_relu_fusion_lowering(pattern, computation_op, lowp_dtype=None):
         @register_lowering_pattern(
             pattern, extra_check=_is_single_computation_op(computation_op, lowp_dtype)
@@ -756,6 +819,37 @@ if torch._C._has_mkldnn:
                     fusion_op,
                     unary_attr=UnaryAttr("relu"),
                 )
+
+    def _register_group_gemm_fusion():
+        # TODO<Leslie> Extend to a list of GEMM
+        act = KeywordArg("act")
+        linear0 = CallFunction(
+            mkldnn._linear_pointwise.default,
+            act,
+            KeywordArg("w0"),
+            KeywordArg("b0"),
+            KeywordArg("attr0"),
+            KeywordArg("scalars0"),
+            KeywordArg("algorithm0"),
+            _users=1,
+        )
+
+        linear1 = CallFunction(
+            mkldnn._linear_pointwise.default,
+            act,
+            KeywordArg("w1"),
+            KeywordArg("b1"),
+            KeywordArg("attr1"),
+            KeywordArg("scalars1"),
+            KeywordArg("algorithm1"),
+            _users=1,
+        )
+
+        from torch._inductor.pattern_matcher import MultiOutputPattern
+        group_gemm_pattern = MultiOutputPattern([linear0, linear1])
+        _register_group_gemm_lowering(
+            group_gemm_pattern,
+        )
 
     def _recover_linear():
         # convert reshape+linear+reshape to a single linear for applying fusion path.
@@ -1315,6 +1409,7 @@ if torch._C._has_mkldnn:
             _register_binary_fusion()
             _register_quantization_lowerings()
             _register_woq_lowerings()
+            _register_group_gemm_fusion()
 
     @functools.lru_cache(None)
     def _mkldnn_weight_pack_init():

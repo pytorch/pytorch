@@ -495,9 +495,10 @@ class BenchmarkRequest:
             input_tensor_meta = [input_tensor_meta]
         self.input_tensor_meta = input_tensor_meta
 
-        if isinstance(output_tensor_meta, (tuple, list)):
-            assert len(output_tensor_meta) == 1
-            output_tensor_meta = output_tensor_meta[0]
+        if not isinstance(self, CppBenchmarkRequest):
+            if isinstance(output_tensor_meta, (tuple, list)):
+                assert len(output_tensor_meta) == 1
+                output_tensor_meta = output_tensor_meta[0]
         self.output_tensor_meta = output_tensor_meta
 
         self.extra_args = extra_args

@@ -9,6 +9,7 @@ from torch._inductor.kernel.mm_common import mm_args
 
 from . import ir
 from .codegen.cpp_gemm_template import CppGemmTemplate
+from .codegen.cpp_group_gemm_template import CppGroupGemmTemplate
 from .codegen.cpp_utils import create_epilogue_with_attr
 from .ir import TensorBox
 from .lowering import (
@@ -27,6 +28,72 @@ from .select_algorithm import (
 )
 from .utils import use_aten_gemm_kernels, use_cpp_gemm_template, use_max_autotune
 from .virtualized import ops, V
+
+
+def group_gemm_lowering(
+    x: TensorBox,
+    w: List[TensorBox],
+    b: List[TensorBox],
+    attr,
+    scalars,
+    algorithm,
+    layout=None,
+):
+    x_size = x.get_size()
+    if len(x_size) > 2:
+        # GEMM template needs 2D input, normalize input shape here
+        x = view(x, [-1, x_size[-1]])
+
+    assert use_max_autotune()
+    b = [bias if bias is None else ir.ExternKernel.realize_input(bias) for bias in b]
+
+    choices: List[ChoiceCaller] = []
+    *_, layout, x, _ = mm_args(x, permute(w[0], [1, 0]), layout=layout)
+
+    kwargs = dict(
+        has_bias=[bias is not None for bias in b],
+        trans_w=True,
+        epilogue_creator=None,
+        act_mapping={0: x, 1: x},
+    )
+
+    # TODO<leslie>: support more than 2 gemm
+    input_nodes = [x, w[0], w[1]]
+    input_nodes.extend([bias for bias in b if bias is not None])
+
+    CppGroupGemmTemplate.add_choices(
+        choices,
+        layout,
+        input_nodes,
+        **kwargs,  # type: ignore[arg-type]
+    )
+
+    assert len(choices) != 0
+    result = autotune_select_algorithm(
+        "group_gemm",
+        choices,
+        input_nodes,
+        layout,
+    )
+    # TODO<leslie>: support for more than 2 outputs
+    template_buf = result.data.data
+    return_buf0 = ir.MultiOutput(
+        layout,
+        template_buf,
+        [(list, 0)],
+    )
+    return_buf1 = ir.MultiOutput(
+        layout,
+        template_buf,
+        [(list, 1)],
+    )
+    if len(x_size) > 2:
+        # TODO<leslie>: test 3D input
+        return_buf0 = view(return_buf0, (*x_size[:-1], return_buf0.get_size()[-1]))
+        return_buf1 = view(return_buf1, (*x_size[:-1], return_buf1.get_size()[-1]))
+    template_buf.layout = ir.MultiOutputLayout(device=input_nodes[0].get_device())
+    template_buf.outputs = [return_buf0, return_buf1]
+    return ir.TensorBox.create(return_buf0), ir.TensorBox.create(return_buf1) 
 
 
 def register_onednn_fusion_ops():

@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 import itertools
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple, Union
 
 import sympy
 from sympy.parsing.sympy_parser import parse_expr
@@ -225,12 +225,16 @@ class CppTemplateKernel(CppKernel):
 
     def store_pointwise_nodes(
         self,
-        dst: ir.Buffer,
-        nodes: List[ir.IRNode],
+        dst: Union[ir.Buffer, Tuple[ir.Buffer]],
+        nodes: Union[List[ir.IRNode], List[List[ir.IRNode]]],
         offsets: Optional[List[sympy.Expr]] = None,
         reindexers: Optional[List[Optional[Callable[[List[Any]], List[Any]]]]] = None,
     ) -> str:
-        var_sizes = (tuple(dst.get_size()), ())
+        if isinstance(dst, Iterable):
+            check_dst = dst[0]
+        else:
+            check_dst = dst
+        var_sizes = (tuple(check_dst.get_size()), ())
         var_ranges = {
             sympy_index_symbol_with_prefix(SymT.INDEX, i): sz
             for i, sz in enumerate(var_sizes[0])
@@ -240,39 +244,77 @@ class CppTemplateKernel(CppKernel):
         if not reindexers:
             reindexers = [None] * len(nodes)
         assert len(offsets) == len(var_sizes[0])
-        output_index = dst.get_layout().make_indexer()([*var_ranges.keys()])
+        output_index = check_dst.get_layout().make_indexer()([*var_ranges.keys()])
         kernel_group = KernelGroup()
         kernel_group.args = self.args
         cpp_kernel_proxy = CppKernelProxy(kernel_group)
         bodies = []
         var_sizes_list = []
-        for i, node in enumerate(nodes):
-            output_name = node.get_name() if i < len(nodes) - 1 else dst.get_name()
-            node = node.data if isinstance(node, ir.ComputedBuffer) else node
-            assert isinstance(node, ir.Pointwise), node
-
-            def fn(*args):
-                assert len(args) == 2
-                assert len(args[0]) == len(var_sizes[0])
-                assert len(args[1]) == 0
-                new_args = [arg + offset for arg, offset in zip(args[0], offsets)]  # type: ignore[arg-type]
-                if reindexers[i] is not None:
-                    new_args = reindexers[i](new_args)  # type: ignore[misc]
-                V.ops.store(
-                    output_name,
-                    output_index,
-                    node.make_loader()(new_args).value,
+        if isinstance(nodes[0], Iterable):
+            # TODO: support for different length of epilogue
+            check_len = len(nodes[0])
+            assert all(len(_nodes) == check_len for _nodes in nodes)
+            for i, node in enumerate(nodes[0]):
+                output_name = node.get_name() if i < len(nodes[0]) - 1 else check_dst.get_name()
+                node1 = nodes[1][i]
+                output_name1 = node1.get_name() if i < len(nodes[0]) - 1 else dst[1].get_name()
+                node = node.data if isinstance(node, ir.ComputedBuffer) else node
+                node1 = node1.data if isinstance(node1, ir.ComputedBuffer) else node1
+                assert isinstance(node, ir.Pointwise), node
+                def fn(*args):
+                    assert len(args) == 2
+                    assert len(args[0]) == len(var_sizes[0])
+                    assert len(args[1]) == 0
+                    new_args = [arg + offset for arg, offset in zip(args[0], offsets)]  # type: ignore[arg-type]
+                    if reindexers[i] is not None:
+                        new_args = reindexers[i](new_args)  # type: ignore[misc]
+                    V.ops.store(
+                        output_name,
+                        output_index,
+                        node.make_loader()(new_args).value,
+                    )
+                    V.ops.store(
+                        output_name1,
+                        output_index,
+                        node1.make_loader()(new_args).value,
+                    )
+                body = LoopBody(
+                    fn,
+                    (list(var_ranges.keys()), ()),
+                    var_ranges,
+                    list(var_ranges.keys()),
+                    tuple(),
                 )
+                bodies.append(body)
+                var_sizes_list.append(var_sizes)
+        else:
+            for i, node in enumerate(nodes):
+                output_name = node.get_name() if i < len(nodes) - 1 else dst.get_name()
+                node = node.data if isinstance(node, ir.ComputedBuffer) else node
+                assert isinstance(node, ir.Pointwise), node
 
-            body = LoopBody(
-                fn,
-                (list(var_ranges.keys()), ()),
-                var_ranges,
-                list(var_ranges.keys()),
-                tuple(),
-            )
-            bodies.append(body)
-            var_sizes_list.append(var_sizes)
+                def fn(*args):
+                    assert len(args) == 2
+                    assert len(args[0]) == len(var_sizes[0])
+                    assert len(args[1]) == 0
+                    new_args = [arg + offset for arg, offset in zip(args[0], offsets)]  # type: ignore[arg-type]
+                    if reindexers[i] is not None:
+                        new_args = reindexers[i](new_args)  # type: ignore[misc]
+                    V.ops.store(
+                        output_name,
+                        output_index,
+                        node.make_loader()(new_args).value,
+                    )
+
+                body = LoopBody(
+                    fn,
+                    (list(var_ranges.keys()), ()),
+                    var_ranges,
+                    list(var_ranges.keys()),
+                    tuple(),
+                )
+                bodies.append(body)
+                var_sizes_list.append(var_sizes)
 
         cpp_kernel_proxy.codegen_loop_bodies(bodies, var_sizes_list)
         kernel_group.finalize_kernel(cpp_kernel_proxy, [])
@@ -281,8 +323,8 @@ class CppTemplateKernel(CppKernel):
     def store_output(
         self,
         dst: ir.Buffer,
-        src: ir.Buffer,
-        orig_src: Optional[ir.Buffer] = None,
+        src: Union[ir.IRNode, Tuple[ir.IRNode]],
+        orig_src: Optional[Union[ir.IRNode, Tuple[ir.IRNode]]] = None,
         epilogue_nodes: Optional[List[ir.IRNode]] = None,
         offsets: Optional[List[Any]] = None,
         reindexers: Optional[List[Optional[Callable[[List[Any]], List[Any]]]]] = None,
@@ -307,13 +349,43 @@ class CppTemplateKernel(CppKernel):
            c) If `src` is local, we need to add a local buffer for it and localize the `orig_src` buffer
               in `epilogue_nodes` with `src`.
         """
-        assert dst.get_size() == src.get_size(), f"{dst=}, {src=}"
+        if isinstance(src, Iterable):
+            # Group GEMM may have multi outputs to be localized
+            assert isinstance(dst, Iterable)
+            for _src, _dst in zip(src, dst):
+                assert _dst.get_size() == _src.get_size(), f"{_dst=}, {_src=}"
+            # TODO <leslie>: support for epilogue fusion
+            assert not epilogue_nodes
+        else:
+            assert dst.get_size() == src.get_size(), f"{dst=}, {src=}"
         if offsets:
             offsets = parse_expr_with_index_symbols(offsets)
         if epilogue_nodes:
             with LocalBufferContext(self.args) as scope:
                 assert orig_src is not None
-                if orig_src.get_name() != src.get_name():
+                if (
+                    isinstance(src, Iterable)
+                    and isinstance(orig_src, Iterable)
+                    and orig_src[0].get_name() != src[0].get_name()
+                ):
+                    # For Group GEMM
+                    assert all(
+                        _orig_src.get_name() != _src.get_name()
+                        for _orig_src, _src in zip(orig_src, src)
+                    )
+                    for _orig_src, _src in zip(orig_src, src):
+                        scope.add_local_buffer(
+                            _src,
+                            [
+                                _orig_src,
+                            ],
+                        )
+                    epilogue_nodes = scope.localize_nodes(epilogue_nodes)
+                elif (
+                    isinstance(src, ir.IRNode)
+                    and isinstance(orig_src, ir.IRNode)
+                    and orig_src.get_name() != src.get_name()
+                ):
                     scope.add_local_buffer(
                         src,
                         [
@@ -325,15 +397,31 @@ class CppTemplateKernel(CppKernel):
                     dst, epilogue_nodes, offsets, reindexers  # type: ignore[arg-type]
                 )
         else:
-            if dst.get_name() != src.get_name():
-                # src is local
-                copy = L.copy(dst, src).data.data
-                with LocalBufferContext(self.args) as scope:
-                    scope.add_local_buffer(src)
-                    return self.store_pointwise_nodes(dst, [copy])
+            if isinstance(src, Iterable):
+                assert isinstance(dst, Iterable)
+                if dst[0].get_name() != src[0].get_name():
+                    copy_list = []
+                    with LocalBufferContext(self.args) as scope:
+                        for _src, _dst in zip(src, dst):
+                            copy_list.append([L.copy(_dst, _src).data.data])
+                            scope.add_local_buffer(_src)
+                        return self.store_pointwise_nodes(dst, copy_list)
+                else:
+                    assert all(_src.get_name() == _dst.get_name() for _src, _dst in zip(src, dst))
+                    assert all(_src.get_layout() == _dst.get_layout() for _src, _dst in zip(src, dst))
+                    return ""
             else:
-                assert dst.layout == src.layout, f"{dst=}, {src=}"
-                return ""
+                assert isinstance(src, ir.IRNode)
+                assert isinstance(dst, ir.IRNode)
+                if dst.get_name() != src.get_name():
+                    # src is local
+                    copy = L.copy(dst, src).data.data
+                    with LocalBufferContext(self.args) as scope:
+                        scope.add_local_buffer(src)
+                        return self.store_pointwise_nodes(dst, [copy])
+                else:
+                    assert dst.get_layout() == src.get_layout(), f"{dst=}, {src=}"
+                    return ""
 
 
 class CppTemplateCaller(ir.ChoiceCaller):
