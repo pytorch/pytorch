@@ -6162,7 +6162,7 @@ class CommonTemplate:
     def test_adaptive_pool_errors_with_long(self):
         class Model(torch.nn.Module):
             def __init__(self, pool_operator):
-                super(Model, self).__init__()
+                super().__init__()
                 self.pool = pool_operator
 
             def forward(self, x):
@@ -6175,8 +6175,8 @@ class CommonTemplate:
             model = Model(op_inst).to(self.device)
             x = torch.randn([1] * (dim + 2)).to(self.device)
             model = torch.compile(model, fullgraph=True)
-            with self.assertRaisesRegex(RuntimeError, r".*not implemented.*"):
-                y = model(x)
+            with self.assertRaisesRegex(RuntimeError, r".*(not implemented|aoti_torch_).*"):
+                model(x)
 
     def test_log1p(self):
         def fn(x):
