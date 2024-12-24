@@ -335,7 +335,11 @@ class ContinueExecutionCache:
             code_options["co_varnames"] = tuple(
                 args
                 + [v for v in argnames_null if v not in args]
-                + [v for v in code_options["co_varnames"] if v not in args]
+                + [
+                    v
+                    for v in code_options["co_varnames"]
+                    if v not in args and v not in freevars
+                ]
             )
             code_options["co_flags"] = code_options["co_flags"] & ~(
                 CO_VARARGS | CO_VARKEYWORDS

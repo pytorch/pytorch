@@ -1221,6 +1221,7 @@ def main():
         "include/ATen/native/cuda/*.cuh",
         "include/ATen/native/hip/*.h",
         "include/ATen/native/hip/*.cuh",
+        "include/ATen/native/kleidiai/*.h",
         "include/ATen/native/mps/*.h",
         "include/ATen/native/mkldnn/xpu/*.h",
         "include/ATen/native/mkldnn/xpu/detail/*.h",

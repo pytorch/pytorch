@@ -172,21 +172,6 @@ _IS_WINDOWS = sys.platform == "win32"
 log = logging.getLogger(__name__)
 
 
-def cpp_wrapper_cache_dir(name: str) -> str:
-    cu_str = (
-        "cpu"
-        if torch.version.cuda is None
-        else f'cu{torch.version.cuda.replace(".", "")}'
-    )
-    python_version = f"py{sys.version_info.major}{sys.version_info.minor}"
-    build_folder = f"{python_version}_{cu_str}"
-
-    cpp_wrapper_dir = os.path.join(cache_dir(), build_folder)
-    cpp_wrapper_build_directory = os.path.join(cpp_wrapper_dir, name)
-    os.makedirs(cpp_wrapper_build_directory, exist_ok=True)
-    return cpp_wrapper_build_directory
-
-
 def get_cpp_wrapper_cubin_path_name() -> str:
     return "cubin_path" if torch.version.hip is None else "hsaco_path"
 
@@ -825,7 +810,15 @@ class FxGraphHashDetails:
                     from triton.runtime.autotuner import Autotuner
 
                     kernel = kernel_side_table.get_kernel(node.kwargs["kernel_idx"])
+                    configs = None
                     if isinstance(kernel, Autotuner):
+                        if kernel.configs:
+                            configs = str(
+                                sorted(
+                                    sorted(str(kv) for kv in c.all_kwargs().items())
+                                    for c in kernel.configs
+                                )
+                            )
                         kernel = kernel.fn
 
                     kernel_source = (
@@ -837,7 +830,7 @@ class FxGraphHashDetails:
                         node.kwargs["constant_args_idx"]
                     )
                     self.user_defined_triton_source.append(
-                        (kernel_source, constant_args)
+                        (kernel_source, constant_args, configs)
                     )
 
         # Alignment checks
@@ -1456,9 +1449,9 @@ class AotCodeCompiler:
 
         (
             specified_output_path,
-            specified_so_name,
+            specified_artifact_name,
         ) = split_aot_inductor_output_path(config.aot_inductor.output_path)
-        key, input_path = write(
+        key, cpp_path = write(
             source_code,
             "cpp",
             extra=cpp_command,
@@ -1466,15 +1459,15 @@ class AotCodeCompiler:
         )
 
         if config.aot_inductor.package:
-            generated_files.append(input_path)
+            generated_files.append(cpp_path)
 
-        output_code_log.info("Output code written to: %s", input_path)
+        output_code_log.info("Output code written to: %s", cpp_path)
         trace_structured(
             "graph_dump",
             lambda: {
                 "name": "inductor_aot_code",
                 "type": "cpp",
-                "filename": input_path,
+                "filename": cpp_path,
             },
             payload_fn=lambda: source_code,
         )
@@ -1482,7 +1475,11 @@ class AotCodeCompiler:
         # We use a file lock below to protect FS operations. The lock file
         # is scoped to the 'key', so make sure the consts_s is protected
         # by the same lock:
-        consts_specified_dir = os.path.join(os.path.split(input_path)[0], key)
+        cpp_path_operator = Path(cpp_path)
+        specified_sub_dir = cpp_path_operator.parent / key
+        if not specified_sub_dir.exists():
+            specified_sub_dir.mkdir(exist_ok=True)
+        cmake_path = str(Path(specified_sub_dir) / "CMakeLists.txt")
 
         def _compile_consts(consts: bytes, platform: str) -> str:
             if platform == "linux":
@@ -1524,12 +1521,9 @@ class AotCodeCompiler:
             _, consts_s = write(
                 consts_asm,
                 "S",
-                specified_dir=consts_specified_dir,
+                specified_dir=str(specified_sub_dir),
             )
-            (
-                object_output_name,
-                object_output_dir,
-            ) = get_name_and_dir_from_output_file_path(consts_s)
+            consts_s = Path(consts_s)
             object_build_options = CppTorchDeviceOptions(
                 # Intel compiler failed to compile this manully constructed assembly file.
                 # it is ok to use gcc to compile the .S to a .o and linked with Intel comiler .
@@ -1539,17 +1533,17 @@ class AotCodeCompiler:
                 use_absolute_path=use_absolute_path,
             )
             object_builder = CppBuilder(
-                name=object_output_name,
-                sources=consts_s,
-                output_dir=object_output_dir,
+                name=str(consts_s.stem),
+                sources=str(consts_s),
+                output_dir=str(consts_s.parent),
                 BuildOption=object_build_options,
             )
             compile_cmd = object_builder.get_command_line()
             consts_o = object_builder.get_target_file_path()
             if fbcode_aot_cpu_re:
                 # TODO: refactor fbcode_aot_cpu_re logic into CppBuilder
-                consts_o = os.path.splitext(consts_s)[0] + ".o"
-                compile_file(consts_s, consts_o, compile_cmd.split())
+                consts_o = str(consts_s.with_suffix(".o"))
+                compile_file(str(consts_s), consts_o, compile_cmd.split())
                 os.chmod(consts_o, 0o644)
             else:
                 run_command_and_check(compile_cmd)
@@ -1566,6 +1560,10 @@ class AotCodeCompiler:
                     while pos < len(consts):
                         rc = f.write(consts[pos:])
                         pos += rc
+
+            # Remove the .S file to save space
+            os.remove(consts_s)
+
             return consts_o
 
         from torch.utils._filelock import FileLock
@@ -1574,7 +1572,7 @@ class AotCodeCompiler:
         lock = FileLock(os.path.join(lock_dir, key + ".lock"), timeout=LOCK_TIMEOUT)
         with lock:
             if serialized_extern_kernel_nodes:
-                extern_kernel_nodes_json = os.path.splitext(input_path)[0] + ".json"
+                extern_kernel_nodes_json = str(cpp_path_operator.with_suffix(".json"))
                 with open(extern_kernel_nodes_json, "w") as f:
                     f.write(serialized_extern_kernel_nodes)
 
@@ -1585,7 +1583,9 @@ class AotCodeCompiler:
             metadata["AOTI_DEVICE_KEY"] = device_type
 
             # Save user provided metadata
-            meta_json = os.path.splitext(input_path)[0] + "_metadata.json"
+            meta_json = str(
+                cpp_path_operator.with_name(f"{cpp_path_operator.stem}_metadata.json")
+            )
             for k, v in config.aot_inductor.metadata.items():
                 assert isinstance(k, str) and isinstance(
                     v, (str)
@@ -1599,12 +1599,9 @@ class AotCodeCompiler:
 
             output_so = (
                 config.aot_inductor.output_path
-                if specified_so_name
-                else os.path.splitext(input_path)[0] + ".so"
+                if specified_artifact_name
+                else str(cpp_path_operator.with_suffix(".so"))
             )
-
-            output_o = os.path.splitext(input_path)[0] + ".o"
-
             all_cuda = all(
                 graph.get_original_value_of_constant(name).is_cuda
                 for name in graph.constants.keys()
@@ -1657,10 +1654,6 @@ class AotCodeCompiler:
             if config.aot_inductor.force_mmap_weights:
                 use_mmap_weights = True
 
-            (
-                object_output_name,
-                object_output_dir,
-            ) = get_name_and_dir_from_output_file_path(input_path)
             object_build_options = CppTorchDeviceOptions(
                 vec_isa=picked_vec_isa,
                 device_type=device_type,
@@ -1670,27 +1663,34 @@ class AotCodeCompiler:
                 use_mmap_weights=use_mmap_weights,
             )
             object_builder = CppBuilder(
-                name=object_output_name,
-                sources=input_path,
-                output_dir=object_output_dir,
+                name=str(cpp_path_operator.stem),
+                sources=cpp_path,
+                output_dir=str(cpp_path_operator.parent),
                 BuildOption=object_build_options,
             )
             compile_cmd = object_builder.get_command_line()
             output_o = object_builder.get_target_file_path()
 
             log.debug("aot compilation command: %s", compile_cmd)
-            if not config.aot_inductor.package_cpp_only:
+            if config.aot_inductor.package_cpp_only:
+                # Not doing the actual compilation here
+                compile_flags = str(
+                    cpp_path_operator.with_name(
+                        f"{cpp_path_operator.stem}_compile_flags.json"
+                    )
+                )
+                object_build_options.save_flags_to_json(compile_flags)
+                generated_files.append(compile_flags)
+                object_builder.save_compile_cmd_to_cmake(cmake_path)
+                object_builder.save_src_to_cmake(cmake_path, cpp_path)
+                generated_files.append(cmake_path)
+            else:
                 if fbcode_aot_cpu_re:
-                    output_o = os.path.splitext(input_path)[0] + ".o"
-                    compile_file(input_path, output_o, compile_cmd.split())
+                    output_o = str(cpp_path_operator.with_suffix(".o"))
+                    compile_file(cpp_path, output_o, compile_cmd.split())
                     os.chmod(output_o, 0o644)
                 else:
                     run_command_and_check(compile_cmd)
-
-            if config.aot_inductor.package_cpp_only:
-                compile_flags = os.path.splitext(input_path)[0] + "_compile_flags.json"
-                object_build_options.save_flags_to_file(compile_flags)
-                generated_files.append(compile_flags)
 
             if not use_mmap_weights:
                 aot_constants = serialized_weights
@@ -1732,22 +1732,28 @@ class AotCodeCompiler:
             log.debug("aot linkage command: %s", link_cmd)
 
             # Append cmds to the end of codegen-ed wrapper file
-            with open(input_path, "a") as f:
+            with open(cpp_path, "a") as f:
                 f.write("\n")
                 f.write(f"// Compile cmd\n// {compile_cmd}\n")
                 f.write(f"// Link cmd\n// {link_cmd}\n")
 
             if config.aot_inductor.package_cpp_only:
-                linker_flags = os.path.splitext(input_path)[0] + "_linker_flags.json"
-                so_build_options.save_flags_to_file(linker_flags)
+                linker_flags = str(
+                    cpp_path_operator.with_name(
+                        f"{cpp_path_operator.stem}_linker_flags.json"
+                    )
+                )
+                so_build_options.save_flags_to_json(linker_flags)
                 generated_files.append(linker_flags)
 
                 # If we only want to package the cpp, then we need to save the
                 # weights separately into a bin, and we also need to prevent compiling the so
 
                 if use_mmap_weights:
-                    weight_file = (
-                        os.path.splitext(input_path)[0] + "_serialized_weights.bin"
+                    weight_file = str(
+                        cpp_path_operator.with_name(
+                            f"{cpp_path_operator.stem}_serialized_weights.bin"
+                        )
                     )
                     with open(weight_file, "wb") as f_weights:
                         f_weights.write(serialized_weights)
@@ -1758,12 +1764,16 @@ class AotCodeCompiler:
                 generated_files.append(consts_o)
                 generated_files.append(kernels_o)
 
+                so_builder.save_src_to_cmake(cmake_path, consts_o)
+                for kernel_o in kernels_o.split():
+                    so_builder.save_src_to_cmake(cmake_path, kernel_o)
+                so_builder.save_link_cmd_to_cmake(cmake_path)
             else:
                 if fbcode_aot_cpu_re:
                     output_so = (
                         config.aot_inductor.output_path
-                        if specified_so_name
-                        else os.path.splitext(input_path)[0] + ".so"
+                        if specified_artifact_name
+                        else str(cpp_path_operator.with_suffix(".so"))
                     )
                     compile_file([output_o, consts_o], output_so, link_cmd.split())
                     os.chmod(output_so, 0o755)
@@ -1773,7 +1783,6 @@ class AotCodeCompiler:
                 for o_file in [
                     output_o,
                     consts_o,
-                    os.path.splitext(consts_o)[0] + ".S",
                 ]:
                     # Remove these as they are not needed anymore
                     os.remove(o_file)
