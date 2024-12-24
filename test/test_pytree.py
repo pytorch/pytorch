@@ -448,7 +448,9 @@ class TestGenericPytree(TestCase):
         def run_test(tup):
             if pytree_impl is py_pytree:
                 expected_spec = py_pytree.TreeSpec(
-                    namedtuple, Point, [py_pytree.LeafSpec() for _ in tup]
+                    namedtuple,
+                    {"type": Point, "fields": ["x", "y"]},
+                    [py_pytree.LeafSpec() for _ in tup],
                 )
             else:
                 expected_spec = cxx_pytree.tree_structure(Point(0, 1))
