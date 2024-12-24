@@ -548,7 +548,7 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
           py::init(
               [](std::vector<at::Tensor> params,
                  std::vector<std::vector<size_t>> bucket_indices,
-                 std::vector<size_t> per_bucket_size_limits,
+                 const std::vector<size_t>& per_bucket_size_limits,
                  c10::intrusive_ptr<::c10d::ProcessGroup> process_group,
                  std::vector<bool> expect_sparse_gradients,
                  int64_t bucket_bytes_cap,
@@ -563,7 +563,6 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
                 return std::make_unique<::c10d::Reducer>(
                     std::move(params),
                     std::move(bucket_indices),
-                    std::move(per_bucket_size_limits),
                     std::move(process_group),
                     std::move(expect_sparse_gradients),
                     bucket_bytes_cap,
@@ -2939,7 +2938,7 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
                 py::gil_scoped_release nogil{};
 
                 return c10::make_intrusive<::c10d::ProcessGroupNCCL>(
-                    store, rank, size, options);
+                    store, rank, size, std::move(options));
               }),
               py::arg("store"),
               py::arg("rank"),
