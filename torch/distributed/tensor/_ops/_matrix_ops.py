@@ -156,7 +156,9 @@ def _scaled_mm_like_strategy(
     assert isinstance(scale_mat2_strategy, OpStrategy)
     # TODO: add support for these later
     assert bias_strategy is None, "_scaled_mm on DTensors doesn't support bias"
-    assert scale_result_strategy is None, "_scaled_mm on DTensors doesn't support scale_result"
+    assert (
+        scale_result_strategy is None
+    ), "_scaled_mm on DTensors doesn't support scale_result"
     # generate all possible strategies for mm
     mm_strategy = gen_einsum_strategies(mm_equation, mesh)
     # filter out invalid strategies and associate costs
@@ -179,7 +181,7 @@ def _scaled_mm_like_strategy(
             if prod(scale_mat2_strategy.shape) == 1
             else mat2_spec
         )
-        strtg.input_specs.extend([scale_self_spec, scale_mat2_spec])
+        strtg.input_specs = list(strtg.input_specs) + [scale_self_spec, scale_mat2_spec]
         if (
             is_tensor_shardable(self_strategy.shape, self_spec)
             and is_tensor_shardable(mat2_strategy.shape, mat2_spec)
