@@ -20,7 +20,6 @@ from ..exc import (
     ObservedException,
     ObservedGeneratorExit,
     ObservedUserStopIteration,
-    raise_observed_exception,
     SkipFrame,
     unimplemented,
     Unsupported,
@@ -447,8 +446,15 @@ class GeneratorObjectVariable(VariableTracker):
                     tracer._raise_exception_variable(None)
                 except ObservedGeneratorExit as e:
                     tracer.exception_handler(e)
+
                 # Run finally block if exist
-                return self.next_variable(tx)
+                retval = self.next_variable(tx)
+                if retval:
+                    e = variables.ExceptionVariable(
+                        RuntimeError, ("generator ignored GeneratorExit",)
+                    )
+                    tracer.push(e)
+                    tracer._raise_exception_variable(None)
             return
         elif name == "send":
             tracer = self._get_inline_tracer(tx)
