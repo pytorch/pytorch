@@ -28,7 +28,7 @@ if "%USE_XPU%"=="1" (
   :: Install xpu support packages
   set CUDA_VERSION=xpu
   :: call %SCRIPT_HELPERS_DIR%\..\windows\internal\xpu_install.bat
-  if errorlevel 1 exit /b 1
+  :: if errorlevel 1 exit /b 1
 )
 
 :: Miniconda has been installed as part of the Windows AMI with all the dependencies.
