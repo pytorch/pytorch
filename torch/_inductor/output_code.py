@@ -289,14 +289,11 @@ class CompiledFxGraphConstantsWithGm(CompiledFxGraphConstants):
         self.gm = gm
 
     def unwrap(self, g: CompiledFxGraph) -> Dict[str, torch.Tensor]:
-        if g.allocated_constant_name is not None:
-            return {
-                name: getattr(self.gm, name)
-                for name in g.allocated_constant_name.values()
-            }
-        else:
-            assert g.constants is not None
-            return g.constants
+        frozen_params = {
+            name: getattr(self.gm, orig_name)
+            for name, orig_name in g.frozen_param_names.items()
+        }
+        return {**g.constants, **frozen_params}
 
 
 @dataclasses.dataclass
@@ -314,15 +311,8 @@ class CompiledFxGraph(OutputCode):
     device_idxs: OrderedSet[int]
     mutated_inputs: OrderedSet[str]
     mutated_input_idxs: OrderedSet[int]
-    # We populate exactly one of the next two fields. In the common case, we store the
-    # constant attirbutes in the cache entry and re-attach them to the module created in
-    # PyCodeCache.load_by_key_path. In the case that the graph has frozen parameters,
-    # however, we save the mapping from attribute names in the GraphLowering to the
-    # original name of the attribute in the GraphModule. When we create the module from
-    # the cache entry, we then look up the constants from the current GraphModule. This
-    # scheme allows us to support caching with freezing.
-    allocated_constant_name: Optional[Dict[str, str]]
-    constants: Optional[Dict[str, torch.Tensor]]
+    constants: Dict[str, torch.Tensor]
+    frozen_param_names: Dict[str, str]
     torchbind_constants: Dict[str, torch._C.ScriptObject]
     output_strides: Optional[List[Optional[Tuple[_StrideExprStr, ...]]]]
     disabled_cudagraphs_reason: Optional[str]
@@ -370,12 +360,26 @@ class CompiledFxGraph(OutputCode):
         self.device_idxs = OrderedSet(graph.device_idxs)
         self.mutated_inputs = OrderedSet(graph.mutated_inputs)
         self.mutated_input_idxs = OrderedSet(graph.mutated_input_idxs)
-        if has_frozen_params(gm):
-            self.allocated_constant_name = graph.allocated_constant_name
-            self.constants = None
-        else:
-            self.allocated_constant_name = None
+
+        # We store the constant attributes in the cache entry and re-attach them
+        # to the module created in PyCodeCache.load_by_key_path. In the case that
+        # the graph has frozen parameters, we save the mapping from the attribute
+        # names in the GraphLowering to the original name of the attribute in the
+        # GraphModule. When we create the module from the cache entry, we then
+        # look up the constants from the current GraphModule. This scheme allows
+        # us to support caching with freezing.
+        if not has_frozen_params(gm):
             self.constants = graph.constants
+            self.frozen_param_names = {}
+        else:
+            self.constants = {}
+            self.frozen_param_names = {}
+            for k, v in graph.constants.items():
+                if k.startswith("_frozen_param"):
+                    self.frozen_param_names[k] = graph.allocated_constant_name[k]
+                else:
+                    self.constants[k] = v
+
         self.torchbind_constants = graph.torchbind_constants
         self.output_strides = output_strides
         self.disabled_cudagraphs_reason = disabled_cudagraphs_reason
