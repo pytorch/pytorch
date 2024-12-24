@@ -155,7 +155,7 @@ class DistMatrixOpsTest(DTensorTestBase):
             scale2_shape,
             scale1_spec,
             scale2_spec,
-         ) in [
+        ) in [
             # Tensor-wise scaling
             # Replicated, zero-dim scale
             (repl, repl, repl, (), (), repl, repl),
