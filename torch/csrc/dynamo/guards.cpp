@@ -797,6 +797,9 @@ static PyObject* assert_size_stride(PyObject* dummy, PyObject* args) {
   }
 
   if (num_errors) {
+    msg << "\nThis error most often comes from a incorrect fake (aka meta) kernel for a custom op.";
+    msg << "\nUse torch.library.opcheck to test your custom op.";
+    msg << "\nSee https://pytorch.org/docs/stable/library.html#torch.library.opcheck";
     PyErr_SetString(PyExc_AssertionError, msg.str().c_str());
     return nullptr;
   }
