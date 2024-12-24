@@ -15,8 +15,12 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     precisionOverride,
 )
-from torch.testing._internal.common_quantization import _group_quantize_tensor
-from torch.testing._internal.common_utils import iter_indices, run_tests, TestCase, parametrize
+from torch.testing._internal.common_utils import (
+    iter_indices,
+    parametrize,
+    run_tests,
+    TestCase,
+)
 
 
 class TestBasicGEMM(TestCase):
@@ -1156,7 +1160,7 @@ class TestBasicGEMM(TestCase):
 
         max_val = to_quant.amax(dim=1, keepdim=True)
         min_val = to_quant.amin(dim=1, keepdim=True)
-        max_int = 2 ** n_bit - 1
+        max_int = 2**n_bit - 1
         min_int = 0
         scales = (max_val - min_val).clamp(min=1e-6) / max_int
         assert torch.isnan(scales).sum() == 0
@@ -1171,7 +1175,7 @@ class TestBasicGEMM(TestCase):
 
         # [n, k]
         out = out.to(dtype=torch.int32).reshape(w.shape)
-        if out.device != torch.device('cpu'):
+        if out.device != torch.device("cpu"):
             out = (out[::, ::2] << 4 | out[::, 1::2]).to(torch.uint8)
 
         # Scales and zeros for the same q-group should be contiguous, so we can
@@ -1185,7 +1189,6 @@ class TestBasicGEMM(TestCase):
     @parametrize("k", [512, 1024])
     @parametrize("n", [512, 1024])
     def test__int4_mm(self, device, m, k, n):
-
         q_group = 32
         inner_k_tiles = 2
 
@@ -1199,16 +1202,12 @@ class TestBasicGEMM(TestCase):
                 b, n_bit=4, q_group_size=q_group
             )
             # b_int4pack [k//8, n]
-            b_int4pack = torch._convert_weight_to_int4pack(
-                b_uint8, inner_k_tiles
-            )
+            b_int4pack = torch._convert_weight_to_int4pack(b_uint8, inner_k_tiles)
 
             return b_int4pack, scales, zeros
 
         def weight_int4pack_mm(a, b_int4pack, qscale, qzeros):
-            return torch._weight_int4_pack_mm(
-                a, b_int4pack, q_group, qscale, qzeros
-            )
+            return torch._weight_int4_pack_mm(a, b_int4pack, q_group, qscale, qzeros)
 
         b_int4pack, b_scales, zeros_int8 = convert_weight_to_int4pack(b_bf16)
 
