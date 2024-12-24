@@ -507,7 +507,6 @@ from .random import (
 
 __all__ = [
     "Event",
-    "ExternalStream",
     "Stream",
     "StreamContext",
     "current_device",
@@ -524,7 +523,7 @@ __all__ = [
     "get_gencode_flags",
     "get_rng_state",
     "get_rng_state_all",
-    "get_stream",
+    "get_stream_from_external",
     "init",
     "initial_seed",
     "is_available",
