@@ -1395,8 +1395,8 @@ std::string generate_reduction_code(
 // Acquires (possibly creating) the kernel cache directory
 std::optional<std::string> get_cache_dir() {
   // If the environment variable USE_TORCH_KERNEL_CACHE is set to "0" then no persistent cache is used
-  const char* uptkc = std::getenv("USE_PYTORCH_KERNEL_CACHE");
-  const bool use_kernel_cache = (uptkc == nullptr) ? true : std::strcmp(uptkc, "0");
+  const auto uptkc = c10::utils::get_env("USE_PYTORCH_KERNEL_CACHE");
+  const bool use_kernel_cache = (uptkc != "0");
 
   if (!use_kernel_cache) {
     return {};
@@ -1404,31 +1404,31 @@ std::optional<std::string> get_cache_dir() {
 
   // Cache path comes from PYTORCH_KERNEL_CACHE_PATH, then TEMP (Windows) or XDG_CACHE_HOME (Linux), then HOME environment variables
   std::string cache_dir;
-  char* ptkcp = std::getenv("PYTORCH_KERNEL_CACHE_PATH");
+  auto ptkcp = c10::utils::get_env("PYTORCH_KERNEL_CACHE_PATH");
   // Create kernel_cache_dir if needed as we do not want to create the base directory passed by the user
   std::string kernels_cache_dir = "";
-  if (ptkcp != nullptr) {
-    cache_dir = std::string(ptkcp);
+  if (ptkcp.has_value()) {
+    cache_dir = ptkcp.value();
   } else {
 #ifdef _WIN32
-    ptkcp = std::getenv("TEMP");
+    ptkcp = c10::utils::get_env("TEMP");
 #else
     // USES XDG_CACHE_HOME if it's set
-    ptkcp = std::getenv("XDG_CACHE_HOME");
+    ptkcp = c10::utils::get_env("XDG_CACHE_HOME");
 #endif
-    if (ptkcp != nullptr) {
+    if (ptkcp.has_value()) {
       kernels_cache_dir = "/torch/kernels";
-      cache_dir = std::string(ptkcp) + kernels_cache_dir;
+      cache_dir = ptkcp.value() + kernels_cache_dir;
     } else {
       // Falls back to HOME/.cache
-      ptkcp = std::getenv("HOME");
-      if (ptkcp == nullptr) {
+      ptkcp = c10::utils::get_env("HOME");
+      if (!ptkcp.has_value()) {
         TORCH_WARN_ONCE("No PYTORCH_KERNEL_CACHE_PATH or HOME environment variable set!",
                         " This disables kernel caching.");
         return {};
       } else {
         kernels_cache_dir = "/.cache/torch/kernels";
-        cache_dir = std::string(ptkcp) + kernels_cache_dir;
+        cache_dir = ptkcp.value() + kernels_cache_dir;
       }
     }
   }
@@ -1437,7 +1437,7 @@ std::optional<std::string> get_cache_dir() {
   const char* p_cache_dir = cache_dir.c_str();
   const bool cache_dir_exists = (access(p_cache_dir, F_OK) == 0);
   if (!cache_dir_exists) {
-    std::string s_ptkcp = std::string(ptkcp);
+    std::string s_ptkcp = ptkcp.value();
     if (!r_mkdir_with_base(s_ptkcp, kernels_cache_dir)) {
       TORCH_WARN_ONCE("Specified kernel cache directory could not be created! This disables kernel caching.",
                       " Specified directory is ", cache_dir, ".",

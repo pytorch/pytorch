@@ -864,7 +864,7 @@ bool GraphExecutor::isOptimized() const {
 
 TORCH_API bool IsNewExecutorEnabled() {
   static const auto disable_new_executor =
-      std::getenv("TORCH_JIT_DISABLE_NEW_EXECUTOR");
+      c10::utils::has_env("TORCH_JIT_DISABLE_NEW_EXECUTOR");
   return getExecutorMode() && FLAGS_torch_jit_enable_new_executor &&
       !disable_new_executor;
 }
