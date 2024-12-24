@@ -2291,7 +2291,7 @@ def meta_miopen_batch_norm(
         save_mean = input_tensor.new_empty((0,))
         save_var = input_tensor.new_empty((0,))
         
-        return out, save_mean, save_var
+    return out, save_mean, save_var
 
 @register_meta(aten.convolution.default)
 def meta_conv(
