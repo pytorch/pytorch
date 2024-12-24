@@ -1265,6 +1265,7 @@ class TritonHOPifier:
                 )
             if autotuner_count > 1:
                 self.raise_unsupported(
+                    "Passing multiple @triton.autotune decorators is not supported. "
                     "Please use a single @triton.autotune decorator instead."
                 )
             iter_kernel = iter_kernel.fn
