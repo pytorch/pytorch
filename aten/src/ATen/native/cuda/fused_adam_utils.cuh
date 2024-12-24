@@ -83,7 +83,10 @@ C10_DEVICE inline void adam_math(
     if (grad_scale_ptr) {
       r_args[kGradIdx][ii] = grad_to_store;
     }
-    r_args[kExpAvgIdx][ii] = exp_avg;
+    //don't write into gradients if beta1 is 0
+    if (beta1>0){
+      r_args[kExpAvgIdx][ii] = exp_avg;  
+    }
     r_args[kExpAvgSqIdx][ii] = exp_avg_sq;
     if (amsgrad) {
       r_args[kMaxExpAvgSqIdx][ii] = max_exp_avg_sq;
