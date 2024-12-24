@@ -2126,6 +2126,10 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         block_mask = create_block_mask(causal, B=4, H=None, Q_LEN=S, KV_LEN=S)
         torch.compile(flex_attention)(q, k, v, score_mod, block_mask=block_mask)
 
+    @common_utils.parametrize("head_dim", [13, 24, 94, 121])
+    def test_non_pow_2_headdim(self, head_dim):
+        self.run_test(_rel_bias, torch.float16, B, H, S, head_dim, B, H, S, head_dim)
+
     @supported_platform
     def test_GQA_causal_mask(self):
         def mask_mod(b, h, q, kv):
