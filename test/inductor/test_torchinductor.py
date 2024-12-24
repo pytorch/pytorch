@@ -6175,7 +6175,9 @@ class CommonTemplate:
             model = Model(op_inst).to(self.device)
             x = torch.randn([1] * (dim + 2)).to(self.device)
             model = torch.compile(model, fullgraph=True)
-            with self.assertRaisesRegex(RuntimeError, r".*(not implemented|aoti_torch_).*"):
+            with self.assertRaisesRegex(
+                RuntimeError, r".*(not implemented|aoti_torch_).*"
+            ):
                 model(x)
 
     def test_log1p(self):
