@@ -274,7 +274,7 @@ def _named_parameters_with_duplicates(
     kwargs["remove_duplicate"] = False
     try:
         ret = list(module.named_parameters(**kwargs))
-    except AssertionError as e:
+    except AssertionError:
         kwargs.pop("remove_duplicate")
         ret = list(module.named_parameters(**kwargs))
     return ret
@@ -535,10 +535,11 @@ def _override_module_mixed_precision(
 
 
 def _no_dispatch_record_stream(tensor: torch.Tensor, stream: torch.Stream) -> None:
-    # FIXME record_stream doesn't work with non-cuda/mtia tensors
+    # FIXME record_stream doesn't work with non-cuda/mtia/xpu tensors
     if tensor.device.type not in [
         "cuda",
         "mtia",
+        "xpu",
         torch._C._get_privateuse1_backend_name(),
     ]:
         return

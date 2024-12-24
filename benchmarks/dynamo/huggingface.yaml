@@ -89,6 +89,7 @@ tolerance:
 
   higher_inference_cpu:
     - LayoutLMForSequenceClassification
+    - GPT2ForSequenceClassification
 
   cosine: []
 

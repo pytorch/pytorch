@@ -4,30 +4,28 @@
 #include <torch/types.h>
 #include <torch/utils.h>
 
-#include <cstddef>
 #include <ostream>
 #include <utility>
-#include <vector>
 
 namespace F = torch::nn::functional;
 
 namespace torch::nn {
 EmbeddingImpl::EmbeddingImpl(EmbeddingOptions options_)
     : options(std::move(options_)) {
-  // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.VirtualCall)
-  reset();
+  EmbeddingImpl::reset();
 }
 
 void EmbeddingImpl::reset() {
-  if (options.padding_idx() != std::nullopt) {
-    if (*options.padding_idx() > 0) {
+  if (options.padding_idx().has_value()) {
+    if (options.padding_idx() > 0) {
       TORCH_CHECK(
-          *options.padding_idx() < options.num_embeddings(),
+          options.padding_idx() < options.num_embeddings(),
           "Padding_idx must be within num_embeddings");
-    } else if (*options.padding_idx() < 0) {
+    } else if (options.padding_idx() < 0) {
       TORCH_CHECK(
-          *options.padding_idx() >= -options.num_embeddings(),
+          options.padding_idx() >= -options.num_embeddings(),
           "Padding_idx must be within num_embedding");
+      // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
       options.padding_idx(options.num_embeddings() + *options.padding_idx());
     }
   }
@@ -49,7 +47,7 @@ void EmbeddingImpl::reset() {
 
 void EmbeddingImpl::reset_parameters() {
   torch::nn::init::normal_(weight);
-  if (options.padding_idx() != std::nullopt) {
+  if (options.padding_idx().has_value()) {
     torch::NoGradGuard no_grad;
     weight[*options.padding_idx()].fill_(0);
   }
@@ -58,10 +56,10 @@ void EmbeddingImpl::reset_parameters() {
 void EmbeddingImpl::pretty_print(std::ostream& stream) const {
   stream << "torch::nn::Embedding(num_embeddings=" << options.num_embeddings()
          << ", embedding_dim=" << options.embedding_dim();
-  if (options.padding_idx() != std::nullopt) {
+  if (options.padding_idx().has_value()) {
     stream << ", padding_idx=" << *options.padding_idx();
   }
-  if (options.max_norm() != std::nullopt) {
+  if (options.max_norm().has_value()) {
     stream << ", max_norm=" << *options.max_norm();
   }
   if (options.norm_type() != 2) {
@@ -153,7 +151,7 @@ void EmbeddingBagImpl::pretty_print(std::ostream& stream) const {
   stream << "torch::nn::EmbeddingBag(num_embeddings="
          << options.num_embeddings()
          << ", embedding_dim=" << options.embedding_dim();
-  if (options.max_norm() != std::nullopt) {
+  if (options.max_norm().has_value()) {
     stream << ", max_norm=" << *options.max_norm();
   }
   if (options.norm_type() != 2) {

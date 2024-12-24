@@ -593,7 +593,7 @@ struct TORCH_API ModulePolicy {
   }
   // are we going to return everything? If so, we can optimize the calculate
   // of the size of the list.
-  static CONSTEXPR_EXCEPT_WIN_CUDA bool all_slots = false;
+  static constexpr bool all_slots = false;
 };
 
 struct TORCH_API ParameterPolicy {
@@ -606,7 +606,7 @@ struct TORCH_API ParameterPolicy {
   static bool valid(const ClassTypePtr& typ, size_t i, const IValue& v) {
     return typ->is_parameter(i) && v.isTensor();
   }
-  static CONSTEXPR_EXCEPT_WIN_CUDA bool all_slots = false;
+  static constexpr bool all_slots = false;
 };
 
 struct TORCH_API BufferPolicy {
@@ -620,7 +620,7 @@ struct TORCH_API BufferPolicy {
     return typ->getAttribute(i)->isSubtypeOf(*TensorType::get()) &&
         typ->is_buffer(i);
   }
-  static CONSTEXPR_EXCEPT_WIN_CUDA bool all_slots = false;
+  static constexpr bool all_slots = false;
 };
 
 struct TORCH_API AttributePolicy {
@@ -633,7 +633,7 @@ struct TORCH_API AttributePolicy {
   static bool valid(const ClassTypePtr& typ, size_t i, const IValue& v) {
     return true;
   }
-  static CONSTEXPR_EXCEPT_WIN_CUDA bool all_slots = true;
+  static constexpr bool all_slots = true;
 };
 
 // take a Policy object, and make a version of it that returns the slot.

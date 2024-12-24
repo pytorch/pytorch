@@ -8,7 +8,6 @@
 #include <c10/util/Exception.h>
 #include <c10/util/Registry.h>
 
-#include <array>
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
@@ -30,7 +29,7 @@ class C10_CUDA_API FreeMemoryCallback {
 
 C10_DECLARE_REGISTRY(FreeCudaMemoryCallbacksRegistry, FreeMemoryCallback);
 #define REGISTER_FREE_MEMORY_CALLBACK(name, ...) \
-  C10_REGISTER_CLASS(FreeCudaMemoryCallbacksRegistry, name, __VA_ARGS__);
+  C10_REGISTER_CLASS(FreeCudaMemoryCallbacksRegistry, name, __VA_ARGS__)
 } // namespace c10
   //
 // TODO: Turn this into an honest to goodness class. I briefly attempted to do
@@ -204,6 +203,7 @@ class CUDAAllocator : public Allocator {
   virtual void raw_delete(void* ptr) = 0;
   virtual void init(int device_count) = 0;
   virtual bool initialized() = 0;
+  virtual double getMemoryFraction(c10::DeviceIndex device) = 0;
   virtual void setMemoryFraction(double fraction, c10::DeviceIndex device) = 0;
   virtual void emptyCache() = 0;
   virtual void enable(bool value) = 0;
@@ -224,6 +224,22 @@ class CUDAAllocator : public Allocator {
       c10::DeviceIndex device,
       MempoolId_t mempool_id) = 0;
   virtual void releasePool(c10::DeviceIndex device, MempoolId_t mempool_id) = 0;
+  virtual int getPoolUseCount(c10::DeviceIndex device, MempoolId_t mempool_id) {
+    TORCH_CHECK(
+        false,
+        name(),
+        " does not yet support getPoolUseCount. "
+        "If you need it, please file an issue describing your use case.");
+  }
+  virtual void ensureExistsAndIncrefPool(
+      c10::DeviceIndex device,
+      MempoolId_t mempool_id) {
+    TORCH_CHECK(
+        false,
+        name(),
+        " does not yet support ensureExistsAndIncrefPool. "
+        "If you need it, please file an issue describing your use case.");
+  }
   // returns true if the allocated blocks are equal to expected live allocations
   virtual bool checkPoolLiveAllocations(
       c10::DeviceIndex device,
@@ -250,7 +266,7 @@ class CUDAAllocator : public Allocator {
       size_t alloc_trace_max_entries,
       RecordContext when) = 0;
   virtual void recordAnnotation(
-      const std::vector<std::pair<std::string, std::string>>& md){};
+      const std::vector<std::pair<std::string, std::string>>& md) {}
   virtual void attachOutOfMemoryObserver(OutOfMemoryObserver observer) = 0;
 
   // Attached AllocatorTraceTracker callbacks will be called while the
@@ -319,6 +335,10 @@ inline void raw_delete(void* ptr) {
 
 inline void init(int device_count) {
   return get()->init(device_count);
+}
+
+inline double getMemoryFraction(c10::DeviceIndex device) {
+  return get()->getMemoryFraction(device);
 }
 
 inline void setMemoryFraction(double fraction, c10::DeviceIndex device) {
@@ -427,6 +447,16 @@ inline void attachAllocatorTraceTracker(AllocatorTraceTracker tracker) {
 inline void releasePool(c10::DeviceIndex device, MempoolId_t mempool_id) {
   return get()->releasePool(device, mempool_id);
 }
+inline void ensureExistsAndIncrefPool(
+    c10::DeviceIndex device,
+    MempoolId_t mempool_id) {
+  get()->ensureExistsAndIncrefPool(device, mempool_id);
+}
+
+inline int getPoolUseCount(c10::DeviceIndex device, MempoolId_t mempool_id) {
+  return get()->getPoolUseCount(device, mempool_id);
+}
+
 // Not part of CUDA_ALLOCATOR_BACKEND_INTERFACE
 inline std::shared_ptr<void> getIpcDevPtr(std::string handle) {
   return get()->getIpcDevPtr(std::move(handle));
@@ -472,9 +502,17 @@ struct C10_CUDA_API MemPool {
   MemPool(
       CUDACachingAllocator::CUDAAllocator* allocator = nullptr,
       bool is_user_created = true);
+  MemPool(const MemPool&) = delete;
+  MemPool(MemPool&&) = default;
+  MemPool& operator=(const MemPool&) = delete;
+  MemPool& operator=(MemPool&&) = default;
+  ~MemPool();
 
   MempoolId_t id();
   CUDACachingAllocator::CUDAAllocator* allocator();
+  int use_count();
+  c10::DeviceIndex device();
+  static MempoolId_t graph_pool_handle(bool is_user_created = true);
 
  private:
   static std::atomic<CaptureId_t> uid_;
@@ -482,6 +520,7 @@ struct C10_CUDA_API MemPool {
   CUDACachingAllocator::CUDAAllocator* allocator_;
   bool is_user_created_;
   MempoolId_t id_;
+  c10::DeviceIndex device_;
 };
 
 // MemPoolContext holds the currently active pool and stashes the previous

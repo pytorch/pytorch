@@ -10,7 +10,7 @@
 
 namespace at::native {
 namespace {
-CONSTEXPR_EXCEPT_WIN_CUDA char shifted_chebyshev_polynomial_v_name[] = "shifted_chebyshev_polynomial_v_forward";
+constexpr char shifted_chebyshev_polynomial_v_name[] = "shifted_chebyshev_polynomial_v_forward";
 
 void shifted_chebyshev_polynomial_v_kernel_cuda(TensorIteratorBase& iterator) {
 #if AT_USE_JITERATOR()
@@ -28,5 +28,5 @@ void shifted_chebyshev_polynomial_v_kernel_cuda(TensorIteratorBase& iterator) {
 
 } // namespace (anonymous)
 
-REGISTER_DISPATCH(shifted_chebyshev_polynomial_v_stub, &shifted_chebyshev_polynomial_v_kernel_cuda);
+REGISTER_DISPATCH(shifted_chebyshev_polynomial_v_stub, &shifted_chebyshev_polynomial_v_kernel_cuda)
 } // namespace at::native

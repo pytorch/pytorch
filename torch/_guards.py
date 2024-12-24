@@ -6,12 +6,14 @@ import dataclasses
 import enum
 import functools
 import logging
+import re
 import threading
 import traceback
 import unittest.mock
 import weakref
 from abc import abstractmethod
 from contextlib import contextmanager
+from dataclasses import dataclass
 from typing import (
     Any,
     Callable,
@@ -27,7 +29,9 @@ from typing import (
     Union,
 )
 
+import torch
 from torch.utils import _pytree as pytree
+from torch.utils._backport_slots import dataclass_slots
 from torch.utils._traceback import CapturedTraceback, format_frame
 from torch.utils.weak import WeakTensorKeyDictionary
 
@@ -38,11 +42,6 @@ log = logging.getLogger(__name__)
 if TYPE_CHECKING:
     import sympy
 
-    # Import the following modules during type checking to enable code intelligence features,
-    # such as auto-completion in tools like pylance, even when these modules are not explicitly
-    # imported in user code.
-    import torch
-
 
 """
 torch._guards is the definitional source of truth for general purpose guard structures.
@@ -51,18 +50,74 @@ An important thing to keep in mind here is the preservation of layering. There s
 and no guard installation notions here.
 """
 
+COMPILE_ID_PATTERN = re.compile(r"^(?P<frame_id>\d+)/(?P<frame_compile_id>\d+)$")
+CA_COMPILE_ID_PATTERN = re.compile(
+    r"^!(?P<compiled_autograd_id>\d+)(?:/(?P<frame_id>\d+)/(?P<frame_compile_id>\d+))?$"
+)
 
-class CompileId(NamedTuple):
-    frame_id: int
+# [Note: Updating CompiledId]
+#
+# CompiledId represents a unique program-level identifier, and we want to keep that
+# property as the codebase evolves. This property is relied on even outside of the pytorch
+# repo, e.g. tlparse or other internal tooling. The in-memory format can be freely changed,
+# as those dependencies only consume the string serialization.
+#
+# The string form should be:
+# 1. Program-level uid: CompileId can uniquely identify a compiled graph.
+# 2. Storage efficient: This object is logged in nearly every entry. We should elide symbols when possible.
+# 3. Compact: The string form is directly displayed by some tools. Special symbols are okay.
+
+
+# TODO: mark as kw_only=True once we drop support for <Python 3.10
+@dataclass(frozen=True)
+class CompileId:
+    frame_id: Optional[int]
     # This id is per-frame, and counts how many times we've compiled this
     # frame.  This could have been a global id but having this be per-frame
     # gives you a better intuitive sense for how many recompiles have occurred
     # so far.
-    frame_compile_id: int
+    frame_compile_id: Optional[int]
+
+    # torch.compiling a compiled autograd graph
+    compiled_autograd_id: Optional[int] = None
+
     # TODO: consider also tracking the recompilation count
+    # See Note: Updating CompileId
 
     def __str__(self):
-        return f"{self.frame_id}/{self.frame_compile_id}"
+        # NOTE: Keep this in sync with both from_string and the tlparse repo
+        if self.compiled_autograd_id is not None:
+            assert (self.frame_id is None) == (self.frame_compile_id is None)
+            frame_str = ""
+            if self.frame_id is not None:
+                frame_str = f"/{self.frame_id}/{self.frame_compile_id}"
+
+            return f"!{self.compiled_autograd_id}{frame_str}"
+        else:
+            assert self.frame_id is not None and self.frame_compile_id is not None
+            return f"{self.frame_id}/{self.frame_compile_id}"
+
+    @classmethod
+    def from_string(cls, compile_id: Optional[str]):
+        """
+        Factory method that creates a CompileId from its string representation.
+        Keep this in sync with the __str__ method.
+        """
+        if compile_id is None:
+            return None
+        try:
+            for pattern in (COMPILE_ID_PATTERN, CA_COMPILE_ID_PATTERN):
+                if match := pattern.match(compile_id):
+                    groups = match.groupdict()
+                    for k, v in groups.items():
+                        if v is not None:
+                            groups[k] = int(v)
+                    return cls(**groups)  # type: ignore[arg-type]
+            else:
+                raise ValueError
+
+        except Exception as e:
+            raise ValueError(f"Invalid compile_id '{compile_id}'") from e
 
 
 class TraceId(NamedTuple):
@@ -72,6 +127,7 @@ class TraceId(NamedTuple):
     attempt: int
 
     def __str__(self):
+        # Keep this in sync with tlparse repo
         if self.attempt == 0:
             return str(self.compile_id)
         else:
@@ -100,14 +156,20 @@ class GuardSource(enum.Enum):
         return self in (GuardSource.GLOBAL_FSDP_MODULE, GuardSource.LOCAL_FSDP_MODULE)
 
     def is_specialized_nn_module(self) -> bool:
-        return (
-            self
-            in (
-                GuardSource.GLOBAL_SPECIALIZED_NN_MODULE,
-                GuardSource.LOCAL_SPECIALIZED_NN_MODULE,
+        import torch._dynamo.config as config
+
+        if config._unsafe_skip_fsdp_module_guards:
+            return (
+                self
+                in (
+                    GuardSource.GLOBAL_SPECIALIZED_NN_MODULE,
+                    GuardSource.LOCAL_SPECIALIZED_NN_MODULE,
+                )
+                or self.is_fsdp_module()
             )
-            # TODO (anijain2305) - Investigate why is_fsdp_module required.
-            or self.is_fsdp_module()
+        return self in (
+            GuardSource.GLOBAL_SPECIALIZED_NN_MODULE,
+            GuardSource.LOCAL_SPECIALIZED_NN_MODULE,
         )
 
     def is_unspecialized_nn_module(self) -> bool:
@@ -174,6 +236,7 @@ class ShapeGuard(NamedTuple):
     sloc: SLoc
 
 
+@dataclass_slots
 @dataclasses.dataclass
 class Guard:
     # originating_source is the source that called the make_guard method to
@@ -214,11 +277,10 @@ class Guard:
     def sort_key(self):
         # Put the duplicate input guards at the end. The duplicate guards have
         # two sources while guard.name only considers one source.
-        from torch._dynamo.guards import GuardBuilder
 
         is_duplicate_input = (
             isinstance(self.create_fn, functools.partial)
-            and self.create_fn.func is GuardBuilder.DUPLICATE_INPUT
+            and self.create_fn.func is torch._dynamo.guards.GuardBuilder.DUPLICATE_INPUT
         )
         return (
             is_duplicate_input,
@@ -368,6 +430,26 @@ class DuplicateInputs(GuardEnvExpr):
 
     def __post_init__(self):
         assert self.input_source_a != self.input_source_b
+
+
+"""
+A class representing storage overlap relations among inputs that aliases the same storage.
+
+Given that a set of tensors alias the same storage, this guard checks whether they actually
+have overlapping storages.
+
+While non_overlapping_sources represent input tensors that definitely don't have any storage
+overlapping with any other input, overlapping_sources represent tensors that either:
+
+1. Do overlap some other input tensor
+2. Might not overlap some other input tensor, but we are not sure
+"""
+
+
+@dataclasses.dataclass
+class StorageOverlap(GuardEnvExpr):
+    overlapping_sources: List[Source]
+    non_overlapping_sources: List[Source]
 
 
 """
@@ -570,6 +652,66 @@ class GuardsContext(Checkpointable[GuardsCheckpointState]):
         self.dynamo_guards = GuardsSet(state.dynamo_guards)
 
 
+class HopSubgraphCache:
+    @abstractmethod
+    def add_dynamo_identifier(self, cache_key: str, identifier: str): ...
+
+    @abstractmethod
+    def get_dynamo_identifier(self, cache_key: str) -> Optional[str]: ...
+
+    @abstractmethod
+    def add_autograd_key_entry(self, identifier: str, key: Callable): ...
+
+    @abstractmethod
+    def get_autograd_key_entry(self, identifier: str): ...
+
+    @abstractmethod
+    def add_proxy_dispatch_entry(self, identifier: str, key: Callable): ...
+
+    @abstractmethod
+    def get_proxy_dispatch_entry(self, identifier: str): ...
+
+
+class InvokeSubgraphCache(HopSubgraphCache):
+    def __init__(self) -> None:
+        self.autograd_cache: Dict[str, Callable] = {}
+        self.proxy_dispatch_cache: Dict[str, Callable] = {}
+        self.dynamo_identifiers: Dict[str, str] = {}
+
+    def add_dynamo_identifier(self, cache_key: str, identifier: str):
+        self.dynamo_identifiers[cache_key] = identifier
+
+    def get_dynamo_identifier(self, cache_key: str) -> Optional[str]:
+        return self.dynamo_identifiers.get(cache_key, None)
+
+    def add_autograd_key_entry(self, identifier: str, key: Callable):
+        self.autograd_cache[identifier] = key
+
+    def get_autograd_key_entry(self, identifier: str):
+        return self.autograd_cache.get(identifier, None)
+
+    def add_proxy_dispatch_entry(self, identifier: str, key: Callable):
+        self.proxy_dispatch_cache[identifier] = key
+
+    def get_proxy_dispatch_entry(self, identifier: str):
+        return self.proxy_dispatch_cache.get(identifier, None)
+
+
+class HopDispatchSetCache:
+    def __init__(self) -> None:
+        # Delayed import to avoid circular dependency
+        from torch._higher_order_ops.invoke_subgraph import invoke_subgraph
+
+        self.hop_cache_map = {invoke_subgraph: InvokeSubgraphCache()}
+
+    def get_cache(
+        self, op: torch._ops.HigherOrderOperator
+    ) -> Optional[HopSubgraphCache]:
+        if op not in self.hop_cache_map:
+            return None
+        return self.hop_cache_map[op]  # type: ignore[index]
+
+
 _TLS = threading.local()
 
 """
@@ -605,6 +747,8 @@ class CompileContext:
         assert compile_id is None or isinstance(compile_id, CompileId)
         self.compile_id: Optional[CompileId] = compile_id
         self.attempt = 0
+        # Verbose ShapeEnv guards produced.
+        self.shape_env_guards: List[str] = []
 
     @staticmethod
     def current_compile_id():
@@ -686,6 +830,7 @@ class TracingContext:
         # meta on the first invocation
         # see note: [Returning Fake Tensors on First AOT Autograd Call]
         self.fakify_first_call = False
+        self.hop_dispatch_set_cache = HopDispatchSetCache()
 
     def clear(self):
         # Look at the note in output_graph.py in function `save_global_state`

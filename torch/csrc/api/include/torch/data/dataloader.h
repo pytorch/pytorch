@@ -12,8 +12,7 @@
 #include <type_traits>
 #include <utility>
 
-namespace torch {
-namespace data {
+namespace torch::data {
 
 /// Creates a `DataLoader` instance for a stateless `dataset`, a `sampler` and
 /// some `options`.
@@ -23,7 +22,7 @@ std::enable_if_t<
     std::unique_ptr<StatelessDataLoader<Dataset, Sampler>>>
 make_data_loader(Dataset dataset, Sampler sampler, DataLoaderOptions options) {
   return std::make_unique<StatelessDataLoader<Dataset, Sampler>>(
-      std::move(dataset), std::move(sampler), std::move(options));
+      std::move(dataset), std::move(sampler), options);
 }
 
 /// Creates a `DataLoader` instance for a stateless `dataset` and some
@@ -41,8 +40,7 @@ make_data_loader(
       size.has_value(),
       "Expected the dataset to be sized in "
       "order to construct the Sampler");
-  return make_data_loader(
-      std::move(dataset), Sampler(*size), std::move(options));
+  return make_data_loader(std::move(dataset), Sampler(*size), options);
 }
 
 /// Creates a `DataLoader` for a stateful `dataset` and some `options`.
@@ -51,7 +49,6 @@ std::unique_ptr<StatefulDataLoader<Dataset>> make_data_loader(
     Dataset dataset,
     DataLoaderOptions options = DataLoaderOptions()) {
   return std::make_unique<StatefulDataLoader<Dataset>>(
-      std::move(dataset), std::move(options));
+      std::move(dataset), options);
 }
-} // namespace data
-} // namespace torch
+} // namespace torch::data

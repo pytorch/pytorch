@@ -198,7 +198,7 @@ ScalarType infer_scalar_type(PyObject* obj) {
     // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
     return *scalarType;
   }
-  AT_ERROR("Could not infer dtype of ", Py_TYPE(obj)->tp_name);
+  TORCH_CHECK(false, "Could not infer dtype of ", Py_TYPE(obj)->tp_name);
 }
 
 void recursive_store(
@@ -344,6 +344,23 @@ Tensor internal_new_from_data(
         /*copy=*/copy_numpy);
   }
 #endif
+
+  if (PyObject_HasAttrString(data, "__dlpack__")) {
+    py::object tensor_o =
+        py::module::import("torch").attr("utils").attr("dlpack").attr(
+            "from_dlpack")(py::handle(data));
+    Tensor tensor = py::cast<Tensor>(tensor_o);
+    const auto& inferred_scalar_type =
+        type_inference ? tensor.scalar_type() : scalar_type;
+    auto device = device_opt.has_value() ? *device_opt : tensor.device();
+    pybind11::gil_scoped_release no_gil;
+    maybe_initialize_device(device);
+    return tensor.to(
+        device,
+        inferred_scalar_type,
+        /*non_blocking=*/false,
+        /*copy=*/copy_variables);
+  }
 
   auto device = device_opt.has_value() ? *device_opt : options.device();
 
@@ -853,6 +870,14 @@ class CheckSparseTensorInvariantsContext {
   ~CheckSparseTensorInvariantsContext() {
     at::globalContext().setCheckSparseTensorInvariants(state);
   }
+  CheckSparseTensorInvariantsContext(
+      const CheckSparseTensorInvariantsContext&) = delete;
+  CheckSparseTensorInvariantsContext(CheckSparseTensorInvariantsContext&&) =
+      delete;
+  CheckSparseTensorInvariantsContext& operator=(
+      const CheckSparseTensorInvariantsContext&) = delete;
+  CheckSparseTensorInvariantsContext& operator=(
+      CheckSparseTensorInvariantsContext&&) = delete;
 
  private:
   bool state;
@@ -961,14 +986,14 @@ static Tensor sparse_compressed_tensor_ctor_worker(
         (required_layout
              ? r.layoutWithDefault(ARG_LAYOUT, required_layout.value())
              : r.layoutOptional(ARG_LAYOUT));
-    if (required_layout) {
+    if (required_layout.has_value()) {
       TORCH_CHECK(
-          layout.value() == required_layout.value(),
+          layout.has_value() && layout == required_layout,
           name,
           ": layout must be ",
           required_layout.value(),
           " but got ",
-          layout.value());
+          layout);
     }
     return at::sparse_compressed_tensor(
                compressed_indices,
@@ -1017,14 +1042,14 @@ static Tensor sparse_compressed_tensor_ctor_worker(
         (required_layout
              ? r.layoutWithDefault(ARG_LAYOUT1, required_layout.value())
              : r.layoutOptional(ARG_LAYOUT1));
-    if (required_layout) {
+    if (required_layout.has_value()) {
       TORCH_CHECK(
-          layout.value() == required_layout.value(),
+          layout == required_layout,
           name,
           ": layout must be ",
           required_layout.value(),
           " but got ",
-          layout.value());
+          layout);
     }
     return at::sparse_compressed_tensor(
                compressed_indices,

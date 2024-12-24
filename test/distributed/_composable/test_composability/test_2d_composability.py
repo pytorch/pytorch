@@ -4,7 +4,7 @@ import copy
 import functools
 import io
 from copy import deepcopy
-from typing import List, Type
+from typing import List, Optional, Type
 
 import torch
 import torch.distributed as dist
@@ -12,7 +12,6 @@ import torch.distributed.checkpoint as dcp
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.distributed._composable import replicate
-from torch.distributed._composable.fsdp import CPUOffloadPolicy, fully_shard
 from torch.distributed._tensor import DTensor, init_device_mesh, Replicate, Shard
 from torch.distributed.checkpoint.state_dict import (
     get_model_state_dict,
@@ -22,7 +21,11 @@ from torch.distributed.checkpoint.state_dict import (
     StateDictOptions,
 )
 from torch.distributed.device_mesh import DeviceMesh
-from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
+from torch.distributed.fsdp import (
+    CPUOffloadPolicy,
+    fully_shard,
+    FullyShardedDataParallel as FSDP,
+)
 from torch.distributed.fsdp._common_utils import (
     _get_module_fsdp_state,
     clean_tensor_name,
@@ -174,6 +177,12 @@ class TestFullyShard2DTraining(FSDPTest):
     @skip_if_lt_x_gpu(2)
     @skipIfRocm
     def test_train_parity_2d_transformer(self):
+        self.run_subtests(
+            {"use_shard_placement_fn": [False, True]},
+            self._test_train_parity_2d_transformer,
+        )
+
+    def _test_train_parity_2d_transformer(self, use_shard_placement_fn: bool):
         torch.manual_seed(42)
         model_args = ModelArgs(n_layers=3, dropout_p=0.0)
         model = Transformer(model_args)
@@ -186,9 +195,23 @@ class TestFullyShard2DTraining(FSDPTest):
         )
         model = Transformer.parallelize(model, global_mesh["tp"], use_seq_parallel=True)
 
+        def _shard_placement_fn(param: nn.Parameter) -> Optional[Shard]:
+            if isinstance(param, DTensor):
+                for placement in param.placements:
+                    if isinstance(placement, Shard):
+                        shard_dim = param.ndim - 1 - placement.dim
+                        assert shard_dim >= 0, f"{param.shape}"
+                        return Shard(shard_dim)
+            return Shard(0)
+
+        shard_placement_fn = _shard_placement_fn if use_shard_placement_fn else None
         for layer in model.layers:
-            fully_shard(layer, mesh=global_mesh["dp"])
-        fully_shard(model, mesh=global_mesh["dp"])
+            fully_shard(
+                layer, mesh=global_mesh["dp"], shard_placement_fn=shard_placement_fn
+            )
+        fully_shard(
+            model, mesh=global_mesh["dp"], shard_placement_fn=shard_placement_fn
+        )
         optim = torch.optim.AdamW(model.parameters(), lr=1e-2)
 
         for param, ref_param in zip(model.parameters(), ref_model.parameters()):
@@ -221,7 +244,6 @@ class TestFullyShard2DTraining(FSDPTest):
                 ref_model.parameters(), model.named_parameters()
             ):
                 full_grad = param.grad.full_tensor()
-                ref_grad = ref_param.grad
                 self.assertEqual(ref_param.grad, full_grad)
 
             ref_optim.step()
@@ -262,7 +284,7 @@ class TestFullyShard2DTraining(FSDPTest):
         # called, but they will just be no-ops without issuing any kernels.
         # We prefer to keep the no-op check at the c10d level, not in FSDP.
         inp = torch.randn((4, mlp_dim), device="cuda")  # same on all ranks
-        for iter_idx in range(10):
+        for _ in range(10):
             ref_optim.zero_grad()
             optim.zero_grad()
 
@@ -560,9 +582,7 @@ class TestNew2dParallelTraining(DTensorTestBase):
                 "net1": ColwiseParallel(),
                 "net2": RowwiseParallel(),
             }
-            model_2d = parallelize_module(
-                SimpleModel().cuda(), mesh_2d["tp"], parallelize_plan
-            )
+            parallelize_module(SimpleModel().cuda(), mesh_2d["tp"], parallelize_plan)
 
     @with_comms
     @skip_if_lt_x_gpu(4)
@@ -810,7 +830,6 @@ class TestNew2dParallelStateDict(DTensorTestBase):
         # Create a model without wrapper
         torch.manual_seed(0)
         no_wrap_model = simple_model().cuda(self.rank)
-        no_wrap_state_dict = no_wrap_model.state_dict()
         no_wrap_optim = torch.optim.Adam(no_wrap_model.parameters(), lr=0.01)
         no_wrap_model(no_wrap_model.get_input().cuda(self.rank)).sum().backward()
         no_wrap_optim.step()
@@ -867,8 +886,6 @@ class TestNew2dParallelStateDict(DTensorTestBase):
         set_optimizer_state_dict(
             model_2d, optimizers=optim_2d, optim_state_dict=ref_optim_2d_osd
         )
-        new_optim_2d_osd = get_optimizer_state_dict(model_2d, optimizers=optim_2d)
-
         ref_optim_2d_osd_states = ref_optim_2d_osd["state"]
         new_optim_2d_osd_states = optim_2d_osd["state"]
 

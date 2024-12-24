@@ -70,9 +70,9 @@ def gen_autograd(
         ),
         key=lambda f: cpp.name(f.func),
     )
-    fns_with_diff_infos: list[
-        NativeFunctionWithDifferentiabilityInfo
-    ] = match_differentiability_info(fns, differentiability_infos)
+    fns_with_diff_infos: list[NativeFunctionWithDifferentiabilityInfo] = (
+        match_differentiability_info(fns, differentiability_infos)
+    )
 
     # Generate VariableType.h/cpp
     if not disable_autograd:

@@ -1,4 +1,5 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
+import string
 from typing import cast, Dict, List, Optional, Tuple
 
 import torch
@@ -234,7 +235,7 @@ def pointwise_rule(op_schema: OpSchema, linearity: bool = False) -> OutputShardi
         ij,ij->ij - addition/mul
         ij,j->ij - broadcasted addition
     """
-    alphabet = "abcdefghijklmnopqrstuvwxyz"
+    alphabet = string.ascii_lowercase
     # find the max_dim first in case we need to broadcasting
     input_specs = op_schema.args_spec
     max_dim = max(input.ndim for input in input_specs)

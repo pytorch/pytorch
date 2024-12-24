@@ -1,13 +1,12 @@
 # mypy: allow-untyped-defs
-import torch
-
-from torch.fx.node import Node
-from torch.fx._symbolic_trace import symbolic_trace
-from torch.fx.passes.tools_common import legalize_graph
 import itertools
 import operator
-
 from typing import Dict, List, Tuple
+
+import torch
+from torch.fx._symbolic_trace import symbolic_trace
+from torch.fx.node import Node
+from torch.fx.passes.tools_common import legalize_graph
 
 
 def split_result_tensors(
@@ -146,7 +145,14 @@ def merge_matmul(in_mod: torch.nn.Module):
         # Multiply the concatenated LHS operands with the one RHS. This will produce
         # the same results as all the individual matmuls involving rhs in the original graph,
         # but they will all be concatenated together.
-        merge_mm = gm.graph.call_function(torch.matmul, (merge_mm_cat, rhs,), {})
+        merge_mm = gm.graph.call_function(
+            torch.matmul,
+            (
+                merge_mm_cat,
+                rhs,
+            ),
+            {},
+        )
 
         # Split the result of the merged matmul using the shapes of the LHS operands
         # to ascertain how large each chunk should be.

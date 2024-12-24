@@ -7,8 +7,8 @@
 
 // ROCm 6.3 is planned to have these functions, but until then here they are.
 #if defined(USE_ROCM) && ROCM_VERSION >= 60201
-#include <hip/hip_bf16.h>
 #include <hip/hip_fp16.h>
+#include <hip/hip_bf16.h>
 
 __device__ inline __hip_bfloat162 preview_unsafeAtomicAdd(__hip_bfloat162* address, __hip_bfloat162 value) {
 #if (defined(__gfx940__) || defined(__gfx941__) || defined(__gfx942__)) && \

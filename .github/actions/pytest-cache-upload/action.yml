@@ -33,7 +33,7 @@ runs:
         retry_wait_seconds: 30
         command: |
           set -eu
-          python3 -m pip install boto3==1.19.12
+          python3 -m pip install boto3==1.35.42
 
     - name: Upload the cache
       shell: bash
