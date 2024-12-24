@@ -37,7 +37,12 @@ struct InputBuffer {
   // Returns the inputs as a list of variables. Destroys given InputBuffer.
   static std::vector<Variable> variables(InputBuffer&& g);
 
+  c10::Stream getStreamForDeviceIdx(c10::Device device);
+
   std::vector<Variable> buffer;
+
+  inline static std::unordered_map<c10::DeviceIndex, c10::Stream>
+      device_streams;
 };
 
 } // namespace torch::autograd
