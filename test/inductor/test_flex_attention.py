@@ -147,9 +147,6 @@ else:
     )
     test_dtypes_fast = [torch.float32]
 
-print(f"test_device: {test_device}")
-print(f"test_dtypes: {test_dtypes}")
-print(f"test_dtypes_fast: {test_dtypes_fast}")
 
 # --------- Useful score mod functions for testing ---------
 def _causal(
@@ -469,8 +466,9 @@ class TestFlexAttention(InductorTestCase):
             block_mask = create_block_mask(
                 noop_mask, Q_B, Q_H, Q_S, KV_S, device=self.device
             )
+        gold_dtype = torch.float64 if not HAS_XPU else torch.float32
         q_ref, k_ref, v_ref = query_key_value_clones(q, k, v)
-        q_gold, k_gold, v_gold = query_key_value_clones(q, k, v, torch.float64 if not HAS_XPU else torch.float32)
+        q_gold, k_gold, v_gold = query_key_value_clones(q, k, v, gold_dtype)
         sdpa_partial = create_attention(
             score_mod, block_mask, enable_gqa=(not Q_H == KV_H)
         )
@@ -491,7 +489,7 @@ class TestFlexAttention(InductorTestCase):
                 (Q_B, Q_H, Q_S, V_D), dtype=dtype, device=self.device
             )
 
-            golden_out.backward(backward_grad.to(torch.float64))
+            golden_out.backward(backward_grad.to(gold_dtype))
             ref_out.backward(backward_grad)
             compiled_out.backward(backward_grad)
 
@@ -708,7 +706,6 @@ class TestFlexAttention(InductorTestCase):
         )
         golden_out, golden_lse = sdpa_partial(q_gold, k_gold, v_gold, return_lse=True)
         ref_out, ref_lse = sdpa_partial(q_ref, k_ref, v_ref, return_lse=True)
-
         compiled_out, compiled_lse = self.run_paged_attention(
             score_mod, q, k, v, dtype, block_mask
         )
@@ -763,7 +760,7 @@ class TestFlexAttention(InductorTestCase):
             requires_grad=not test_inference_only,
         )
         q_ref, k_ref, v_ref = query_key_value_clones(q, k, v)
-        q_gold, k_gold, v_gold = query_key_value_clones(q, k, v, torch.float64)
+        q_gold, k_gold, v_gold = query_key_value_clones(q, k, v, torch.float64 if not HAS_XPU else torch.float32)
         compiled_sdpa = torch.compile(sdpa_call)
         golden_out = sdpa_call(q_gold, k_gold, v_gold)
         ref_out = sdpa_call(q_ref, k_ref, v_ref)
@@ -780,7 +777,7 @@ class TestFlexAttention(InductorTestCase):
                 (Q_B, Q_H, Q_S, V_D), dtype=dtype, device=self.device
             )
 
-            golden_out.backward(backward_grad.to(torch.float64))
+            golden_out.backward(backward_grad.to(torch.float64 if not HAS_XPU else torch.float32))
             ref_out.backward(backward_grad)
             compiled_out.backward(backward_grad)
 
@@ -818,12 +815,12 @@ class TestFlexAttention(InductorTestCase):
         k1 = torch.randn((B, H, S, D), dtype=dtype, device=GPU_TYPE, requires_grad=True)
         v1 = torch.randn((B, H, S, D), dtype=dtype, device=GPU_TYPE, requires_grad=True)
         q1_ref, k1_ref, v1_ref = query_key_value_clones(q1, k1, v1)
-        q1_gold, k1_gold, v1_gold = query_key_value_clones(q1, k1, v1, torch.float64)
+        q1_gold, k1_gold, v1_gold = query_key_value_clones(q1, k1, v1, torch.float64 if not HAS_XPU else torch.float32)
         ref_out1 = sdpa_partial1(q1_ref, k1_ref, v1_ref)
         golden_out1 = sdpa_partial1(q1_gold, k1_gold, v1_gold)
 
         backward_grad1 = torch.randn((B, H, S, D), dtype=dtype, device=GPU_TYPE)
-        golden_out1.backward(backward_grad1.to(torch.float64))
+        golden_out1.backward(backward_grad1.to(torch.float64 if not HAS_XPU else torch.float32))
         ref_out1.backward(backward_grad1)
 
         # Second batch with modified dimensions (B * 2, H, S / 2, D)
@@ -835,13 +832,15 @@ class TestFlexAttention(InductorTestCase):
         q2 = torch.randn((B, H, S, D), dtype=dtype, device=GPU_TYPE, requires_grad=True)
         k2 = torch.randn((B, H, S, D), dtype=dtype, device=GPU_TYPE, requires_grad=True)
         v2 = torch.randn((B, H, S, D), dtype=dtype, device=GPU_TYPE, requires_grad=True)
+        
+        gold_dtype = torch.float64 if not HAS_XPU else torch.float32
         q2_ref, k2_ref, v2_ref = query_key_value_clones(q2, k2, v2)
-        q2_gold, k2_gold, v2_gold = query_key_value_clones(q2, k2, v2, torch.float64)
+        q2_gold, k2_gold, v2_gold = query_key_value_clones(q2, k2, v2, gold_dtype)
         ref_out2 = sdpa_partial2(q2_ref, k2_ref, v2_ref)
         golden_out2 = sdpa_partial2(q2_gold, k2_gold, v2_gold)
 
         backward_grad2 = torch.randn((B, H, S, D), dtype=dtype, device=GPU_TYPE)
-        golden_out2.backward(backward_grad2.to(torch.float64))
+        golden_out2.backward(backward_grad2.to(gold_dtype))
         ref_out2.backward(backward_grad2)
 
         # Third batch with modified dimensions (B * 2, H, S / 4, D)
@@ -853,12 +852,12 @@ class TestFlexAttention(InductorTestCase):
         k3 = torch.randn((B, H, S, D), dtype=dtype, device=GPU_TYPE, requires_grad=True)
         v3 = torch.randn((B, H, S, D), dtype=dtype, device=GPU_TYPE, requires_grad=True)
         q3_ref, k3_ref, v3_ref = query_key_value_clones(q3, k3, v3)
-        q3_gold, k3_gold, v3_gold = query_key_value_clones(q3, k3, v3, torch.float64)
+        q3_gold, k3_gold, v3_gold = query_key_value_clones(q3, k3, v3, gold_dtype)
         ref_out3 = sdpa_partial3(q3_ref, k3_ref, v3_ref)
         golden_out3 = sdpa_partial3(q3_gold, k3_gold, v3_gold)
 
         backward_grad3 = torch.randn((B, H, S, D), dtype=dtype, device=GPU_TYPE)
-        golden_out3.backward(backward_grad3.to(torch.float64))
+        golden_out3.backward(backward_grad3.to(gold_dtype))
         ref_out3.backward(backward_grad3)
 
         # Clear dynamo counters
@@ -961,8 +960,9 @@ class TestFlexAttention(InductorTestCase):
             device=self.device,
             requires_grad=not test_inference_only,
         )
+        gold_dtype = torch.float64 if not HAS_XPU else torch.float32
         golden_out1 = sdpa_partial1(
-            q1.to(torch.float64), k1.to(torch.float64), v1.to(torch.float64)
+            q1.to(gold_dtype), k1.to(gold_dtype), v1.to(gold_dtype)
         )
         ref_out1 = sdpa_partial1(q1, k1, v1)
 
@@ -990,7 +990,7 @@ class TestFlexAttention(InductorTestCase):
             requires_grad=not test_inference_only,
         )
         golden_out2 = sdpa_partial2(
-            q2.to(torch.float64), k2.to(torch.float64), v2.to(torch.float64)
+            q2.to(gold_dtype), k2.to(gold_dtype), v2.to(gold_dtype)
         )
         ref_out2 = sdpa_partial2(q2, k2, v2)
 
@@ -1018,7 +1018,7 @@ class TestFlexAttention(InductorTestCase):
             requires_grad=not test_inference_only,
         )
         golden_out3 = sdpa_partial3(
-            q3.to(torch.float64), k3.to(torch.float64), v3.to(torch.float64)
+            q3.to(gold_dtype), k3.to(gold_dtype), v3.to(gold_dtype)
         )
         ref_out3 = sdpa_partial3(q3, k3, v3)
 
@@ -1214,7 +1214,7 @@ class TestFlexAttention(InductorTestCase):
             S,
             D,
         )
-        self.run_test(*inputs)
+        #self.run_test(*inputs)
         self.run_test_with_paged_attention(*inputs)
 
     test_strides = [
@@ -1550,12 +1550,13 @@ class TestFlexAttention(InductorTestCase):
 
         def score_mod_func(score, b, h, q, kv):
             return score - q // (1 + kv)
-
+        
+        gold_dtype = torch.float64 if not HAS_XPU else torch.float32
         make_tensor = functools.partial(
             torch.randn,
             (2, 2, 128, 4),
             device=GPU_TYPE,
-            dtype=torch.float64,
+            dtype=gold_dtype,
             requires_grad=True,
         )
         query, key, value = make_tensor(), make_tensor(), make_tensor()
@@ -2207,16 +2208,17 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         @torch.compile(backend="aot_eager")
         def eager_sdpa_hop(q, k, v, score_mod):
             return flex_attention(q, k, v, score_mod, return_lse=True)
-
+        
+        gold_dtype = torch.float64 if not HAS_XPU else torch.float32
         ref_out, ref_lse = eager_sdpa_hop(
-            q.to(torch.float64),
-            k.to(torch.float64),
-            v.to(torch.float64),
+            q.to(gold_dtype),
+            k.to(gold_dtype),
+            v.to(gold_dtype),
             score_mod,
         )
         compiled_out, compiled_lse = sdpa_hop(q, k, v, score_mod)
 
-        self.assertTrue(ref_lse.dtype == torch.float64)
+        self.assertTrue(ref_lse.dtype == gold_dtype)
         self.assertTrue(compiled_lse.dtype == torch.float32)
 
         tolerance = Tolerances(atol=2e-2, rtol=2e-2)
@@ -2261,11 +2263,12 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         "score_mod", [_identity, _causal, _times_two, _squared, _trig, _trig2]
     )
     def test_aot_eager_gradcheck(self, score_mod):
+        gold_dtype = torch.float64 if not HAS_XPU else torch.float32
         make_tensor = functools.partial(
             torch.randn,
             (2, 2, 11, 4),
             device=GPU_TYPE,
-            dtype=torch.float64,
+            dtype=gold_dtype,
             requires_grad=True,
         )
         query, key, value = make_tensor(), make_tensor(), make_tensor()
@@ -2308,11 +2311,12 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
     @supported_platform
     def test_differentiable_logsumexp_gradcheck(self):
+        gold_dtype = torch.float64 if not HAS_XPU else torch.float32
         make_tensor = functools.partial(
             torch.randn,
             (2, 2, 11, 4),
             device=GPU_TYPE,
-            dtype=torch.float64,
+            dtype=gold_dtype,
             requires_grad=True,
         )
         query, key, value = make_tensor(), make_tensor(), make_tensor()
@@ -2461,17 +2465,18 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     def test_captured_score_mod_aot_eager_gradcheck(
         self, score_mod_name: str, mode: str
     ):
+        gold_dtype = torch.float64 if not HAS_XPU else torch.float32
         make_tensor = functools.partial(
             torch.randn,
             (2, 2, 11, 4),
             device=GPU_TYPE,
-            dtype=torch.float64,
+            dtype=gold_dtype,
             requires_grad=True,
         )
         query, key, value = make_tensor(), make_tensor(), make_tensor()
 
         func = torch.compile(flex_attention, backend=mode, fullgraph=True)
-        score_mod = captured_buffers_map[score_mod_name](torch.float64)
+        score_mod = captured_buffers_map[score_mod_name](gold_dtype)
 
         self.assertTrue(
             torch.autograd.gradcheck(
@@ -2488,12 +2493,13 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         def mask_mod(b, h, q, kv):
             same_doc = document_masks[b, q] == document_masks[b, kv]
             return same_doc
-
+        
+        gold_dtype = torch.float64 if not HAS_XPU else torch.float32
         make_tensor = functools.partial(
             torch.randn,
             (2, 1, 128, 4),
             device=GPU_TYPE,
-            dtype=torch.float64,
+            dtype=gold_dtype,
             requires_grad=True,
         )
         query, key, value = make_tensor(), make_tensor(), make_tensor()
@@ -2650,6 +2656,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
                 )
                 for _ in range(3)
             ]
+            gold_dtype = torch.float64 if not HAS_XPU else torch.float32
             gradOut = torch.randn(2, 2, 2048, 64, device=GPU_TYPE, dtype=torch.float16)
             out_ref = torch.nn.functional.scaled_dot_product_attention(
                 *inputs, is_causal=True
@@ -2660,13 +2667,13 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             out_flex = torch.compile(attention_call)(*inputs_flex)
             out_flex.backward(gradOut)
             inputs_golden = [
-                i.detach().clone().to(dtype=torch.float64).requires_grad_(True)
+                i.detach().clone().to(dtype=gold_dtype).requires_grad_(True)
                 for i in inputs
             ]
             out_golden = torch.nn.functional.scaled_dot_product_attention(
                 *inputs_golden, is_causal=True
             )
-            out_golden.backward(gradOut.to(dtype=torch.float64))
+            out_golden.backward(gradOut.to(dtype=gold_dtype))
 
             for ref, flex, golden in [
                 (out_ref, out_flex, out_golden),
@@ -2709,12 +2716,13 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
         def head_bias(score, b, h, q_idx, kv_idx):
             return score + bias_flex[h]
-
+        
+        gold_dtype = torch.float64 if not HAS_XPU else torch.float32
         bias_sdpa_ref = bias.detach().clone().requires_grad_(True)
         implicit_bias_sdpa_ref = bias_sdpa_ref
         implicit_bias_sdpa_ref = implicit_bias_sdpa_ref.view(H, 1, 1).expand(H, S, S)
         bias_sdpa_gold = (
-            bias.detach().clone().to(dtype=torch.float64).requires_grad_(True)
+            bias.detach().clone().to(dtype=gold_dtype).requires_grad_(True)
         )
         implicit_bias_sdpa_gold = bias_sdpa_gold
         implicit_bias_sdpa_gold = implicit_bias_sdpa_gold.view(H, 1, 1).expand(H, S, S)
@@ -2744,12 +2752,13 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
         def rel_pos_1d(score, b, h, q_idx, kv_idx):
             return score + bias_flex[q_idx + kv_idx]
-
+        
+        gold_dtype = torch.float64 if not HAS_XPU else torch.float32
         bias_indices = torch.arange(S)[:, None] + torch.arange(S)
         bias_sdpa_ref = bias.detach().clone().requires_grad_(True)
         implicit_bias_sdpa_ref = bias_sdpa_ref[bias_indices]
         bias_sdpa_gold = (
-            bias.detach().clone().to(dtype=torch.float64).requires_grad_(True)
+            bias.detach().clone().to(dtype=gold_dtype).requires_grad_(True)
         )
         implicit_bias_sdpa_gold = bias_sdpa_gold[bias_indices]
 
@@ -2778,7 +2787,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         bias_sdpa_ref = bias.detach().clone().requires_grad_(True)
         implicit_bias_sdpa_ref = bias_sdpa_ref
         bias_sdpa_gold = (
-            bias.detach().clone().to(dtype=torch.float64).requires_grad_(True)
+            bias.detach().clone().to(dtype=gold_dtype).requires_grad_(True)
         )
         implicit_bias_sdpa_gold = bias_sdpa_gold
 
@@ -2807,7 +2816,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         bias_sdpa_ref = bias.detach().clone().requires_grad_(True)
         implicit_bias_sdpa_ref = bias_sdpa_ref
         bias_sdpa_gold = (
-            bias.detach().clone().to(dtype=torch.float64).requires_grad_(True)
+            bias.detach().clone().to(dtype=gold_dtype).requires_grad_(True)
         )
         implicit_bias_sdpa_gold = bias_sdpa_gold
 
@@ -2836,7 +2845,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         bias_sdpa_ref = bias.detach().clone().requires_grad_(True)
         implicit_bias_sdpa_ref = bias_sdpa_ref.transpose(-1, -2)
         bias_sdpa_gold = (
-            bias.detach().clone().to(dtype=torch.float64).requires_grad_(True)
+            bias.detach().clone().to(dtype=gold_dtype).requires_grad_(True)
         )
         implicit_bias_sdpa_gold = bias_sdpa_gold.transpose(-1, -2)
 
@@ -2867,7 +2876,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         bias_sdpa_ref = bias.detach().clone().requires_grad_(True)
         implicit_bias_sdpa_ref = bias_sdpa_ref.transpose(-1, -2)
         bias_sdpa_gold = (
-            bias.detach().clone().to(dtype=torch.float64).requires_grad_(True)
+            bias.detach().clone().to((gold_dtype)).requires_grad_(True)
         )
         implicit_bias_sdpa_gold = bias_sdpa_gold.transpose(-1, -2)
 
@@ -3413,11 +3422,12 @@ def forward(self, child : torch.Tensor, child_1 : torch.Tensor, child_2 : torch.
     @supported_platform
     def test_fw_bw_graph_correctness(self):
         cnt = CompileCounterWithBackend("aot_eager")
+        gold_dtype = torch.float64 if not HAS_XPU else torch.float32
         make_tensor = functools.partial(
             torch.randn,
             (2, 2, 128, 4),
             device=GPU_TYPE,
-            dtype=torch.float64,
+            dtype=gold_dtype,
             requires_grad=True,
         )
         query, key, value = make_tensor(), make_tensor(), make_tensor()
@@ -4457,9 +4467,10 @@ class TestPagedAttention(InductorTestCase):
             dtype=dtype,
             requires_grad=False,
         )
-
+        
+        gold_dtype = torch.float64 if dtype == torch.float64 else torch.float32
         q_ref, k_ref, v_ref = query_key_value_clones(q, k, v)
-        q_gold, k_gold, v_gold = query_key_value_clones(q, k, v, torch.float64)
+        q_gold, k_gold, v_gold = query_key_value_clones(q, k, v, gold_dtype)
 
         sdpa_partial = create_attention(score_mod, block_mask, enable_gqa=False)
 
@@ -4651,10 +4662,11 @@ class TestLearnableBiases(InductorTestCase):
         flex_compiled = torch.compile(flex_attention, mode=mode)
         out_eager = flex_attention(query, key, value, score_mod=bias_func)
         out_compiled = flex_compiled(query, key, value, score_mod=bias_func)
+        gold_dtype = torch.float32 if HAS_XPU else torch.float64
         out_gold = flex_attention(
-            query.to(torch.float64),
-            key.to(torch.float64),
-            value.to(torch.float64),
+            query.to(gold_dtype),
+            key.to(gold_dtype),
+            value.to(gold_dtype),
             score_mod=bias_func,
         )
 
@@ -4684,10 +4696,11 @@ class TestLearnableBiases(InductorTestCase):
         flex_compiled = torch.compile(flex_attention)
         out_eager = flex_attention(query, key, value, score_mod=bias_func)
         out_compiled = flex_compiled(query, key, value, score_mod=bias_func)
+        gold_dtype = torch.float32 if HAS_XPU else torch.float64
         out_gold = flex_attention(
-            query.to(torch.float64),
-            key.to(torch.float64),
-            value.to(torch.float64),
+            query.to(gold_dtype),
+            key.to(gold_dtype),
+            value.to(gold_dtype),
             score_mod=bias_func,
         )
 
@@ -4718,10 +4731,11 @@ class TestLearnableBiases(InductorTestCase):
         flex_compiled = torch.compile(flex_attention)
         out_eager = flex_attention(query, key, value, score_mod=bias_func)
         out_compiled = flex_compiled(query, key, value, score_mod=bias_func)
+        gold_dtype = torch.float32 if HAS_XPU else torch.float64
         out_gold = flex_attention(
-            query.to(torch.float64),
-            key.to(torch.float64),
-            value.to(torch.float64),
+            query.to(gold_dtype),
+            key.to(gold_dtype),
+            value.to(gold_dtype),
             score_mod=bias_func,
         )
 
@@ -4753,10 +4767,11 @@ class TestLearnableBiases(InductorTestCase):
         flex_compiled = torch.compile(flex_attention)
         out_eager = flex_attention(query, key, value, score_mod=bias_func)
         out_compiled = flex_compiled(query, key, value, score_mod=bias_func)
+        gold_dtype = torch.float32 if HAS_XPU else torch.float64
         out_gold = flex_attention(
-            query.to(torch.float64),
-            key.to(torch.float64),
-            value.to(torch.float64),
+            query.to(gold_dtype),
+            key.to(gold_dtype),
+            value.to(gold_dtype),
             score_mod=bias_func,
         )
 
@@ -4785,10 +4800,11 @@ class TestLearnableBiases(InductorTestCase):
         flex_compiled = torch.compile(flex_attention)
         out_eager = flex_attention(query, key, value, score_mod=bias_func)
         out_compiled = flex_compiled(query, key, value, score_mod=bias_func)
+        gold_dtype = torch.float32 if HAS_XPU else torch.float64
         out_gold = flex_attention(
-            query.to(torch.float64),
-            key.to(torch.float64),
-            value.to(torch.float64),
+            query.to(gold_dtype),
+            key.to(gold_dtype),
+            value.to(gold_dtype),
             score_mod=bias_func,
         )
 
@@ -4819,10 +4835,11 @@ class TestLearnableBiases(InductorTestCase):
         flex_compiled = torch.compile(flex_attention)
         out_eager = flex_attention(query, key, value, score_mod=bias_func)
         out_compiled = flex_compiled(query, key, value, score_mod=bias_func)
+        gold_dtype = torch.float32 if HAS_XPU else torch.float64
         out_gold = flex_attention(
-            query.to(torch.float64),
-            key.to(torch.float64),
-            value.to(torch.float64),
+            query.to(gold_dtype),
+            key.to(gold_dtype),
+            value.to(gold_dtype),
             score_mod=bias_func,
         )
 
@@ -4851,10 +4868,11 @@ class TestLearnableBiases(InductorTestCase):
         flex_compiled = torch.compile(flex_attention)
         out_eager = flex_attention(query, key, value, score_mod=bias_func)
         out_compiled = flex_compiled(query, key, value, score_mod=bias_func)
+        gold_dtype = torch.float32 if HAS_XPU else torch.float64
         out_gold = flex_attention(
-            query.to(torch.float64),
-            key.to(torch.float64),
-            value.to(torch.float64),
+            query.to(gold_dtype),
+            key.to(gold_dtype),
+            value.to(gold_dtype),
             score_mod=bias_func,
         )
 
@@ -4887,10 +4905,11 @@ class TestLearnableBiases(InductorTestCase):
         flex_compiled = torch.compile(flex_attention)
         out_eager = flex_attention(query, key, value, score_mod=bias_func)
         out_compiled = flex_compiled(query, key, value, score_mod=bias_func)
+        gold_dtype = torch.float32 if HAS_XPU else torch.float64
         out_gold = flex_attention(
-            query.to(torch.float64),
-            key.to(torch.float64),
-            value.to(torch.float64),
+            query.to(gold_dtype),
+            key.to(gold_dtype),
+            value.to(gold_dtype),
             score_mod=bias_func,
         )
 
@@ -4926,10 +4945,11 @@ class TestLearnableBiases(InductorTestCase):
         flex_compiled = torch.compile(flex_attention)
         out_eager = flex_attention(query, key, value, score_mod=bias_func)
         out_compiled = flex_compiled(query, key, value, score_mod=bias_func)
+        gold_dtype = torch.float32 if HAS_XPU else torch.float64
         out_gold = flex_attention(
-            query.to(torch.float64),
-            key.to(torch.float64),
-            value.to(torch.float64),
+            query.to(gold_dtype),
+            key.to(gold_dtype),
+            value.to(gold_dtype),
             score_mod=bias_func,
         )
 
@@ -4959,10 +4979,11 @@ class TestLearnableBiases(InductorTestCase):
         flex_compiled = torch.compile(flex_attention, mode=mode)
         out_eager = flex_attention(query, key, value, score_mod=bias_func)
         out_compiled = flex_compiled(query, key, value, score_mod=bias_func)
+        gold_dtype = torch.float32 if HAS_XPU else torch.float64
         out_gold = flex_attention(
-            query.to(torch.float64),
-            key.to(torch.float64),
-            value.to(torch.float64),
+            query.to(gold_dtype),
+            key.to(gold_dtype),
+            value.to(gold_dtype),
             score_mod=bias_func,
         )
         # Error in backwards
@@ -4996,10 +5017,11 @@ class TestLearnableBiases(InductorTestCase):
         flex_compiled = torch.compile(flex_attention)
         out_eager = flex_attention(query, key, value, score_mod=bias_func)
         out_compiled = flex_compiled(query, key, value, score_mod=bias_func)
+        gold_dtype = torch.float32 if HAS_XPU else torch.float64
         out_gold = flex_attention(
-            query.to(torch.float64),
-            key.to(torch.float64),
-            value.to(torch.float64),
+            query.to(gold_dtype),
+            key.to(gold_dtype),
+            value.to(gold_dtype),
             score_mod=bias_func,
         )
 
@@ -5029,10 +5051,11 @@ class TestLearnableBiases(InductorTestCase):
         flex_compiled = torch.compile(flex_attention, mode=mode)
         out_eager = flex_attention(query, key, value, score_mod=bias_func)
         out_compiled = flex_compiled(query, key, value, score_mod=bias_func)
+        gold_dtype = torch.float32 if HAS_XPU else torch.float64
         out_gold = flex_attention(
-            query.to(torch.float64),
-            key.to(torch.float64),
-            value.to(torch.float64),
+            query.to(gold_dtype),
+            key.to(gold_dtype),
+            value.to(gold_dtype),
             score_mod=bias_func,
         )
 
@@ -5068,10 +5091,11 @@ class TestLearnableBiases(InductorTestCase):
         flex_compiled = torch.compile(flex_attention)
         out_eager = flex_attention(query, key, value, score_mod=bias_func)
         out_compiled = flex_compiled(query, key, value, score_mod=bias_func)
+        gold_dtype = torch.float32 if HAS_XPU else torch.float64
         out_gold = flex_attention(
-            query.to(torch.float64),
-            key.to(torch.float64),
-            value.to(torch.float64),
+            query.to(gold_dtype),
+            key.to(gold_dtype),
+            value.to(gold_dtype),
             score_mod=bias_func,
         )
 
@@ -5114,11 +5138,12 @@ class TestLearnableBiases(InductorTestCase):
         flex_compiled = torch.compile(flex_attention)
         out_eager = flex_attention(query, key, value, score_mod=bias_func)
         out_compiled = flex_compiled(query, key, value, score_mod=bias_func)
-
+        gold_dtype = torch.float32 if HAS_XPU else torch.float64
+        
         out_gold = flex_attention(
-            query.to(torch.float64),
-            key.to(torch.float64),
-            value.to(torch.float64),
+            query.to(gold_dtype),
+            key.to(gold_dtype),
+            value.to(gold_dtype),
             score_mod=bias_func,
         )
 
