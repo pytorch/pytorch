@@ -64,7 +64,6 @@ ignore = [
     "E741",
     "EXE001",
     "F405",
-    "F841",
     # these ignores are from flake8-logging-format; please fix!
     "G101",
     # these ignores are from ruff NPY; please fix!
