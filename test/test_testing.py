@@ -12,7 +12,8 @@ import re
 import subprocess
 import sys
 import unittest.mock
-from typing import Any, Callable, Iterator, List, Tuple
+from typing import Any, Callable
+from collections.abc import Iterator
 
 import torch
 
@@ -496,7 +497,7 @@ if __name__ == '__main__':
         self.assertNotIn('OK', stderr.decode('ascii'))
 
 
-def make_assert_close_inputs(actual: Any, expected: Any) -> List[Tuple[Any, Any]]:
+def make_assert_close_inputs(actual: Any, expected: Any) -> list[tuple[Any, Any]]:
     """Makes inputs for :func:`torch.testing.assert_close` functions based on two examples.
 
     Args:

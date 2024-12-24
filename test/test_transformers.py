@@ -18,7 +18,7 @@ import math
 import itertools
 import torch.optim as optim
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, onlyCUDA, onlyCPU
-from typing import List, Tuple, Optional, Dict
+from typing import Optional
 import torch.utils.cpp_extension
 from torch.testing._internal.common_nn import NNTestCase
 from torch.testing._internal.common_utils import (
@@ -149,12 +149,12 @@ def _check_equal(
 
 
 def check_out_and_grad(
-    out_tuple: Tuple[torch.Tensor, torch.Tensor, torch.Tensor],
-    grad_query_tuple: Tuple[torch.Tensor, torch.Tensor, torch.Tensor],
-    grad_key_tuple: Tuple[torch.Tensor, torch.Tensor, torch.Tensor],
-    grad_value_tuple: Tuple[torch.Tensor, torch.Tensor, torch.Tensor],
-    grad_attn_mask_tuple: Optional[Tuple[torch.Tensor, torch.Tensor, torch.Tensor]] = None,
-    fudge_factors: Optional[Dict[str, float]] = None
+    out_tuple: tuple[torch.Tensor, torch.Tensor, torch.Tensor],
+    grad_query_tuple: tuple[torch.Tensor, torch.Tensor, torch.Tensor],
+    grad_key_tuple: tuple[torch.Tensor, torch.Tensor, torch.Tensor],
+    grad_value_tuple: tuple[torch.Tensor, torch.Tensor, torch.Tensor],
+    grad_attn_mask_tuple: Optional[tuple[torch.Tensor, torch.Tensor, torch.Tensor]] = None,
+    fudge_factors: Optional[dict[str, float]] = None
 ) -> None:
     """
     Check output and gradients of attention mechanism tensors.
@@ -2574,7 +2574,7 @@ class TestSDPACudaOnly(NNTestCase):
     @unittest.skipIf(not PLATFORM_SUPPORTS_CUDNN_ATTENTION, "cudnn Attention is not supported on this system")
     def test_cudnn_attention_preserves_query_layout(self, device):
 
-        def test_attention(backend: SDPBackend, permute_order: List[List[int]]):
+        def test_attention(backend: SDPBackend, permute_order: list[list[int]]):
             BHSqD = [4, 16, 256, 64]
             BHSkvD = [4, 16, 512, 64]
 
@@ -2602,7 +2602,7 @@ class TestSDPACudaOnly(NNTestCase):
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Fused SDPA was not built for this system")
     @parametrize("mask_dim", [1, 2, 3, 4])
-    def test_mem_efficient_attention_mask_variants(self, device, mask_dim: List[int]):
+    def test_mem_efficient_attention_mask_variants(self, device, mask_dim: list[int]):
         dtype = torch.float16
         make_tensor = partial(torch.rand, device=device, dtype=dtype, requires_grad=True)
         batch, num_heads, head_dim = 8, 8, 64
@@ -3307,7 +3307,7 @@ class TestSDPACudaOnly(NNTestCase):
     @tf32_enabled()
     def test_flash_attention_vs_math_ref_grads(self, device, batch_size: int, seq_len_q: int, seq_len_k: int,
                                                head_dim: int, is_causal: bool, dropout_p: float, dtype: torch.dtype,
-                                               scale: str, enable_gqa: bool, n_heads: List[int]):
+                                               scale: str, enable_gqa: bool, n_heads: list[int]):
         if isSM8XDevice and head_dim in range(193, 256 + 1):
             self.skipTest("Flash attention on sm86, sm87, and sm89 for headdim > 192 currently disabled")
         if is_causal and seq_len_q != seq_len_k:
@@ -3901,7 +3901,7 @@ class TestAttnBias(NNTestCase):
         "shape",
         [(16, 16, 128, 128, 16), (16, 16, 128, 256, 32), (16, 16, 256, 128, 32), (1, 1, 23, 56, 15)],
     )
-    def test_causal_variants(self, device, causal_variant: CausalVariant, shape: List[Tuple[int]]):
+    def test_causal_variants(self, device, causal_variant: CausalVariant, shape: list[tuple[int]]):
         make_tensor = partial(
             torch.rand, device=device, dtype=torch.float16, requires_grad=True
         )
@@ -3938,7 +3938,7 @@ class TestAttnBias(NNTestCase):
     )
     @unittest.skipIf(IS_WINDOWS, "torch.compile is not supported on windows")
     @skipIfTorchDynamo("This function already calls torch.compile.")
-    def test_causal_variants_compile(self, device, causal_variant: CausalVariant, shape: List[Tuple[int]]):
+    def test_causal_variants_compile(self, device, causal_variant: CausalVariant, shape: list[tuple[int]]):
         if TEST_WITH_ROCM and causal_variant == CausalVariant.LOWER_RIGHT:
             self.skipTest("No support for LOWER_RIGHT variant for now")
             return
@@ -3971,7 +3971,7 @@ class TestAttnBias(NNTestCase):
         self.assertEqual(cnts.frame_count, 1, "Compiled graph should have 1 frame!")
 
     @parametrize("shape", [(16, 16, 128, 128, 16), (16, 16, 128, 256, 32), (16, 16, 256, 128, 32), (1, 1, 23, 56, 15)])
-    def test_is_causal_equals_upper_left(self, device, shape: List[Tuple[int]]):
+    def test_is_causal_equals_upper_left(self, device, shape: list[tuple[int]]):
         make_tensor = partial(
             torch.rand, device=device, dtype=torch.float16, requires_grad=True
         )
