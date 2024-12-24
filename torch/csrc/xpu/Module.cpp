@@ -392,9 +392,12 @@ static void initXpuMethodBindings(PyObject* module) {
   });
   m.def(
       "_xpu_getStreamFromExternal",
-      [](void* data_ptr, c10::DeviceIndex device_index) {
-        at::xpu::XPUStream stream = c10::xpu::getStreamFromExternal(
-            (reinterpret_cast<sycl::queue*>(data_ptr)), device_index);
+      [](uintptr_t data_ptr, c10::DeviceIndex device_index) {
+        sycl::queue* ext_queue =
+            // NOLINTNEXTLINE(performance-no-int-to-ptr)
+            reinterpret_cast<sycl::queue*>(reinterpret_cast<void*>(data_ptr));
+        at::xpu::XPUStream stream =
+            c10::xpu::getStreamFromExternal(ext_queue, device_index);
         return std::make_tuple(
             stream.id(), stream.device_index(), stream.device_type());
       });
