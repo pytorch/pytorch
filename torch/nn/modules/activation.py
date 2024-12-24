@@ -1131,6 +1131,14 @@ class MultiheadAttention(Module):
 
         super().__setstate__(state)
 
+    def extra_repr(self) -> str:
+        return (f'embed_dim={self.embed_dim}, num_heads={self.num_heads}'
+                f'{", dropout=" + str(self.dropout) if self.dropout > 0.0 else ""}'
+                f'{", bias=False" if not self._qkv_same_embed_dim or self.in_proj_bias is None else ""}'
+                f'{", add_bias_kv=True" if self.bias_k is not None else ""}'
+                f'{", add_zero_attn=True" if self.add_zero_attn else ""}'
+                f'{", batch_first=True" if self.batch_first else ""}')
+
     def forward(
         self,
         query: Tensor,

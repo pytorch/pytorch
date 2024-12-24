@@ -455,6 +455,25 @@ class TestMultiheadAttentionNN(NNTestCase):
             test_multihead_attn_all_arguments2()  # Test MultiheadAttention with all the argument.
         test_multihead_attn_all_arguments3()  # Test MultiheadAttention with all the argument.
 
+    def test_multihead_attention_repr(self):
+        mha = nn.MultiheadAttention(embed_dim=16, num_heads=2)
+        self.assertEqual(mha.extra_repr(), "embed_dim=16, num_heads=2")
+
+        # test with non-default arguments
+        mha = nn.MultiheadAttention(
+            embed_dim=32,
+            num_heads=4,
+            dropout=0.1,
+            bias=False,
+            add_bias_kv=True,
+            batch_first=True
+        )
+        expected_repr = (
+            "embed_dim=32, num_heads=4, dropout=0.1, bias=False, "
+            "add_bias_kv=True, batch_first=True"
+        )
+        self.assertEqual(mha.extra_repr(), expected_repr)
+
     def test_multihead_attn_3d_attn_mask(self):
         embed_dim = 8
         num_heads = 4
