@@ -288,6 +288,7 @@ class _PipelineSchedule(ABC):
 
             # Clean external container first
             losses.clear()
+
             # Copy internal losses to external container
             losses.extend(self._internal_losses)
 
