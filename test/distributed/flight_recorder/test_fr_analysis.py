@@ -1,10 +1,10 @@
 # Owner(s): ["oncall: distributed"]
 
-import pathlib
 import sys
+from pathlib import Path
 
 
-REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent.parent.parent
+REPO_ROOT = Path(__file__).absolute().parents[3]
 
 sys.path.insert(0, str(REPO_ROOT))
 from tools.flight_recorder.components.types import COLLECTIVES, MatchState
@@ -112,7 +112,7 @@ class FlightRecorderEventTest(TestCase):
         )
 
     def test_all_events(self):
-        for collective in COLLECTIVES:
+        for collective in sorted(COLLECTIVES):
             event = create_one_event(
                 collective, ("0", "default"), [[4, 4]], [[4, 4]], "scheduled", 1
             )
