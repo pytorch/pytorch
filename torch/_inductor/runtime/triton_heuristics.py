@@ -23,6 +23,7 @@ from torch.utils._ordered_set import OrderedSet
 
 from ..triton_bundler import TritonBundler
 from ..utils import prefix_is_reduction
+from . import triton_helpers
 from .autotune_cache import AutotuneCache
 from .benchmarking import benchmarker
 from .coordinate_descent_tuner import CoordescTuner
@@ -50,58 +51,18 @@ from .runtime_utils import (
     triton_hash_to_path_key,
     validate_triton_config,
 )
-
-
-try:
-    import triton
-except ImportError:
-    triton = None
-
-if triton is not None:
-    from triton import Config
-    from triton.compiler import CompiledKernel
-    from triton.runtime.autotuner import OutOfResources
-    from triton.runtime.jit import KernelInterface
-
-    from . import triton_helpers
-
-    try:
-        from triton.runtime.autotuner import PTXASError
-    except ImportError:
-
-        class PTXASError(Exception):  # type: ignore[no-redef]
-            pass
-
-    try:
-        from triton.compiler.compiler import ASTSource
-    except ImportError:
-        ASTSource = None
-
-    try:
-        from triton.backends.compiler import GPUTarget
-    except ImportError:
-        GPUTarget = None
-else:
-    from types import ModuleType
-
-    class OutOfResources(Exception):  # type: ignore[no-redef]
-        pass
-
-    class PTXASError(Exception):  # type: ignore[no-redef]
-        pass
-
-    Config = object
-    KernelInterface = object
-    ASTSource = None
-    GPUTarget = None
-    triton_helpers = ModuleType("triton_helpers")
-
-try:
-    autograd_profiler = torch.autograd.profiler
-except AttributeError:  # Compile workers only have a mock version of torch
-
-    class autograd_profiler:  # type: ignore[no-redef]
-        _is_profiler_enabled = False
+from .triton_compat import (
+    ASTSource,
+    autograd_profiler,
+    cc_warp_size,
+    CompiledKernel,
+    Config,
+    GPUTarget,
+    KernelInterface,
+    OutOfResources,
+    PTXASError,
+    triton,
+)
 
 
 log = logging.getLogger(__name__)
@@ -429,18 +390,13 @@ class CachingAutotuner(KernelInterface):
     def _precompile_config(self, cfg: Config, warm_cache_only: bool):
         """Ahead of time compile a given autotuner config."""
         compile_meta = copy.deepcopy(self.triton_meta)
-        for k, v in cfg.kwargs.items():
-            if self.device_props.type == "hip":
-                if k == "matrix_instr_nonkdim":
-                    compile_meta["matrix_instr_nonkdim"] = v
-                    continue
-                if k == "waves_per_eu":
-                    compile_meta["waves_per_eu"] = v
-                    continue
-                if k == "kpack":
-                    compile_meta["kpack"] = v
-                    continue
-            compile_meta["constants"][k] = v
+        cfg_kwargs = cfg.kwargs
+        if self.device_props.type == "hip":
+            cfg_kwargs = {**cfg_kwargs}
+            for k in ("matrix_instr_nonkdim", "waves_per_eu", "kpack"):
+                if k in cfg_kwargs:
+                    compile_meta[k] = cfg_kwargs.pop(k)
+        compile_meta["constants"].update(cfg_kwargs)
         compile_meta["num_warps"] = cfg.num_warps
         compile_meta["num_stages"] = cfg.num_stages
         compile_meta["debug"] = self.inductor_meta.get(
@@ -456,59 +412,39 @@ class CachingAutotuner(KernelInterface):
         else:
             triton_helpers.set_driver_to_gpu()
 
-        if ASTSource:
-            compile_args = (
-                ASTSource(
-                    self.fn,
-                    compile_meta["signature"],
-                    compile_meta["constants"],
-                    compile_meta["configs"][0],
-                ),
-            )
+        if not ASTSource:
+            raise RuntimeError("Installed triton version too old, please upgrade")
 
-            cc_str = str(compile_meta["cc"])
-            if "gfx10" in cc_str or "gfx11" in cc_str:
-                rocm_warp_size = 32
-            else:
-                rocm_warp_size = 64
+        compile_args = (
+            ASTSource(
+                self.fn,
+                compile_meta["signature"],
+                compile_meta["constants"],
+                compile_meta["configs"][0],
+            ),
+        )
 
-            if GPUTarget:
-                target = GPUTarget(
-                    compile_meta["device_type"],
-                    compile_meta["cc"],
-                    rocm_warp_size if torch.version.hip else 32,
-                )
-            else:
-                target = (
-                    (compile_meta["device_type"], compile_meta["cc"])
-                    if not torch.version.hip
-                    else [
-                        compile_meta["device_type"],
-                        compile_meta["cc"],
-                        rocm_warp_size,
-                    ]
-                )
+        target = GPUTarget(
+            compile_meta["device_type"],
+            compile_meta["cc"],
+            cc_warp_size(compile_meta["cc"]),
+        )
 
-            options = {
-                "num_warps": compile_meta["num_warps"],
-                "num_stages": compile_meta["num_stages"],
-                "debug": compile_meta["debug"],
-                "sanitize_overflow": False,  # turn off additional asserts added for overflow checks
-            }
-            if self.device_props.type == "hip":
-                if "waves_per_eu" in compile_meta:
-                    options["waves_per_eu"] = compile_meta["waves_per_eu"]
-                if "matrix_instr_nonkdim" in compile_meta:
-                    options["matrix_instr_nonkdim"] = compile_meta[
-                        "matrix_instr_nonkdim"
-                    ]
-            compile_kwargs = {
-                "target": target,
-                "options": options,
-            }
-        else:
-            compile_args = (self.fn,)
-            compile_kwargs = compile_meta
+        options = {
+            "num_warps": compile_meta["num_warps"],
+            "num_stages": compile_meta["num_stages"],
+            "debug": compile_meta["debug"],
+            "sanitize_overflow": False,  # turn off additional asserts added for overflow checks
+        }
+        if self.device_props.type == "hip":
+            if "waves_per_eu" in compile_meta:
+                options["waves_per_eu"] = compile_meta["waves_per_eu"]
+            if "matrix_instr_nonkdim" in compile_meta:
+                options["matrix_instr_nonkdim"] = compile_meta["matrix_instr_nonkdim"]
+        compile_kwargs = {
+            "target": target,
+            "options": options,
+        }
 
         if warm_cache_only:
             binary = triton.compile(*compile_args, **compile_kwargs)
