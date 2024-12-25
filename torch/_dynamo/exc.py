@@ -297,7 +297,7 @@ def raise_observed_exception(
 
     # CPython here raises an exception. Since there is no python code, we have to manually setup the exception
     # stack and raise the exception.
-    exception_vt = BuiltinVariable(exc_type).call_function(tx, args or [], kwargs or {})
+    exception_vt = BuiltinVariable(exc_type).call_function(tx, args or [], kwargs or {})  # type: ignore[arg-type]
     tx.exn_vt_stack.append(exception_vt)
     raise observed_exception_map[exc_type]
 
