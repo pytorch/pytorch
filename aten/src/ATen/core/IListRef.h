@@ -598,7 +598,7 @@ class IListRef {
   bool is##TAG() const {          \
     return tag_ == IListRefTag::TAG; \
   }
-  TORCH_ILISTREF_FORALL_TAGS(DEFINE_CHECK);
+  TORCH_ILISTREF_FORALL_TAGS(DEFINE_CHECK)
 #undef DEFINE_CHECK
 
   bool isNone() const {
@@ -611,7 +611,7 @@ class IListRef {
     TORCH_INTERNAL_ASSERT(is##TAG());                                     \
     return detail::IListRefTagImpl<IListRefTag::TAG, T>::unwrap(*this);   \
   }
-  TORCH_ILISTREF_FORALL_TAGS(DEFINE_CASTING);
+  TORCH_ILISTREF_FORALL_TAGS(DEFINE_CASTING)
 #undef DEFINE_CASTING
 
  private:

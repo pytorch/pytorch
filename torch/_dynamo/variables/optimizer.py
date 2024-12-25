@@ -162,7 +162,7 @@ class OptimizerVariable(UserDefinedObjectVariable):
         # track indices to not set so we don't need to
         # in the variable tracker realize the whole state
         # we handle guarding the state specially
-        for ind, group in enumerate(self.value.param_groups):
+        for group in self.value.param_groups:
             if safe_to_set_capturable(group):
                 group["capturable"] = True
 
@@ -170,7 +170,7 @@ class OptimizerVariable(UserDefinedObjectVariable):
         param_groups_vt = LazyVariableTracker.realize_all(
             VariableTracker.build(tx, self.value.param_groups, source)
         )
-        for ind, param_group_vt in enumerate(param_groups_vt.items):
+        for param_group_vt in param_groups_vt.items:
             key = ConstDictVariable._HashableTracker(
                 ConstantVariable.create("capturable")
             )
@@ -237,17 +237,17 @@ class OptimizerVariable(UserDefinedObjectVariable):
         )
 
         state_source = self.source and AttrSource(self.source, "state")
+
         state_vt = VariableTracker.build(tx, self.value.state, state_source)
 
         # We need to realize the top level state dict to populate
         # the guard locals
         state_vt.realize()
+        tx.output.guard_on_key_order.add(state_source.name())
 
         # Populate self.grad_to_source and self.tensor_to_source so that we can
         # manually update_list_args
-        for g_ind, (group, group_vt) in enumerate(
-            zip(self.value.param_groups, param_groups_vt.items)
-        ):
+        for group, group_vt in zip(self.value.param_groups, param_groups_vt.items):
             # we assume here that all params within a param group
             # are initialized similarly
             if len(group["params"]) > 0:
@@ -271,7 +271,6 @@ class OptimizerVariable(UserDefinedObjectVariable):
                             )
                             break
 
-            group_source = group_vt.source
             params_vt = group_vt.getitem_const(tx, ConstantVariable.create("params"))
             all_static = True
             non_static_grads = []
@@ -310,13 +309,16 @@ class OptimizerVariable(UserDefinedObjectVariable):
             p_state_source = GetItemSource(
                 state_source, ConstDictKeySource(state_source, idx)
             )
-            for k, v in value.items():
+            tx.output.guard_on_key_order.add(p_state_source.name())
+            for inner_idx, (k, v) in enumerate(value.items()):
                 if (
                     isinstance(v, torch.Tensor)
                     and v not in self.grad_to_source
                     and v not in self.tensor_to_source
                 ):
-                    self.tensor_to_source[v] = GetItemSource(p_state_source, k)
+                    self.tensor_to_source[v] = GetItemSource(
+                        p_state_source, ConstDictKeySource(p_state_source, inner_idx)
+                    )
 
     def wrap_tensor(self, tx: "InstructionTranslator", tensor_value):
         """Wrap state tensor in a TensorVariable"""
