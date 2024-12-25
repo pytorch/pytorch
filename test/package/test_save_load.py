@@ -2,6 +2,7 @@
 
 import pickle
 from io import BytesIO
+from pathlib import Path
 from textwrap import dedent
 
 from torch.package import PackageExporter, PackageImporter, sys_importer
@@ -14,10 +15,8 @@ except ImportError:
     # Support the case where we run this file directly.
     from common import PackageTestCase
 
-from pathlib import Path
 
-
-packaging_directory = Path(__file__).parent
+packaging_directory = Path(__file__).absolute().parent
 
 
 class TestSaveLoad(PackageTestCase):
@@ -82,7 +81,7 @@ class TestSaveLoad(PackageTestCase):
 
         buffer.seek(0)
         hi = PackageImporter(buffer)
-        loaded_obj = hi.load_pickle("res", "obj.pkl")
+        hi.load_pickle("res", "obj.pkl")
 
         package_b = hi.import_module("package_b")
         self.assertEqual(package_b.result, "package_b")
