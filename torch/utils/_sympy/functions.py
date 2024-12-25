@@ -11,9 +11,9 @@ from typing import (
     SupportsFloat,
     Tuple,
     TypeVar,
-    TypeVarTuple,
     Union,
 )
+from typing_extensions import TypeVarTuple, Unpack
 
 import sympy
 from sympy import S
@@ -102,9 +102,11 @@ def _is_symbols_binary_summation(expr: sympy.Expr) -> bool:
     )
 
 
-def _keep_float(f: Callable[[*_Ts], _T]) -> Callable[[*_Ts], Union[_T, sympy.Float]]:
+def _keep_float(
+    f: Callable[[Unpack[_Ts]], _T]
+) -> Callable[[Unpack[_Ts]], Union[_T, sympy.Float]]:
     @functools.wraps(f)
-    def inner(*args: *_Ts) -> Union[_T, sympy.Float]:
+    def inner(*args: Unpack[_Ts]) -> Union[_T, sympy.Float]:
         r: Union[_T, sympy.Float] = f(*args)
         if any(isinstance(a, sympy.Float) for a in args) and not isinstance(
             r, sympy.Float

@@ -256,7 +256,7 @@ class StrobelightCLIFunctionProfiler:
 
     def profile(
         self, work_function: Callable[_P, _R], *args: _P.args, **kwargs: _P.kwargs
-    ) -> _R | None:
+    ) -> Optional[_R]:
         self.current_run_id = None
         self.profile_result = None
 
@@ -304,13 +304,15 @@ class StrobelightCLIFunctionProfiler:
 # @strobelight(stop_at_error=True,...)
 def strobelight(
     profiler: Optional[StrobelightCLIFunctionProfiler] = None, **kwargs: Any
-) -> Callable[[Callable[_P, _R]], Callable[_P, _R | None]]:
+) -> Callable[[Callable[_P, _R]], Callable[_P, Optional[_R]]]:
     if not profiler:
         profiler = StrobelightCLIFunctionProfiler(**kwargs)
 
-    def strobelight_inner(work_function: Callable[_P, _R]) -> Callable[_P, _R | None]:
+    def strobelight_inner(
+        work_function: Callable[_P, _R]
+    ) -> Callable[_P, Optional[_R]]:
         @functools.wraps(work_function)
-        def wrapper_function(*args: _P.args, **kwargs: _P.kwargs) -> _R | None:
+        def wrapper_function(*args: _P.args, **kwargs: _P.kwargs) -> Optional[_R]:
             return profiler.profile(work_function, *args, **kwargs)
 
         return wrapper_function
