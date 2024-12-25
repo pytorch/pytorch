@@ -1876,7 +1876,7 @@ static void initCudaMethodBindings(PyObject* module) {
             // NOLINTNEXTLINE(performance-no-int-to-ptr)
             reinterpret_cast<cudaStream_t>(reinterpret_cast<void*>(data_ptr));
         at::cuda::CUDAStream stream =
-            c10::cuda::getStreamFromExternal(ext_queue, device_index);
+            c10::cuda::getStreamFromExternal(ext_stream, device_index);
         return std::make_tuple(
             stream.id(), stream.device_index(), stream.device_type());
       });
