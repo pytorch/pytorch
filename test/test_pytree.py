@@ -1239,7 +1239,7 @@ if not torch.utils.pytree.PYTORCH_USE_CXX_PYTREE:
         with self.assertRaisesRegex(
             NotImplementedError, "No registered serialization name"
         ):
-            roundtrip_spec = py_pytree.treespec_dumps(spec)
+            py_pytree.treespec_dumps(spec)
 
     def test_pytree_custom_type_serialize(self):
         class DummyType:
@@ -1320,7 +1320,7 @@ if not torch.utils.pytree.PYTORCH_USE_CXX_PYTREE:
             py_pytree.treespec_dumps(spec, -1)
 
         serialized_spec = py_pytree.treespec_dumps(spec)
-        protocol, data = json.loads(serialized_spec)
+        _, data = json.loads(serialized_spec)
         bad_protocol_serialized_spec = json.dumps((-1, data))
 
         with self.assertRaisesRegex(ValueError, "Unknown protocol"):

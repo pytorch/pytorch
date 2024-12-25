@@ -226,7 +226,7 @@ class Vectorized<c10::BFloat16> : public Vectorized16<at_bfloat16x8_t, c10::BFlo
 
   Vectorized() = default;
 
-  Vectorized(c10::BFloat16 val) : Vectorized16(at_vdupq_n_bf16(val.x)) {}
+  Vectorized(c10::BFloat16 val) : Vectorized16(at_vdupq_n_bf16(c10::bit_cast<at_bfloat16_t>(val.x))) {}
   Vectorized(float val) : Vectorized(c10::BFloat16(val)) {}
   Vectorized(
       value_type val0,
@@ -285,9 +285,7 @@ class Vectorized<c10::BFloat16> : public Vectorized16<at_bfloat16x8_t, c10::BFlo
       return at_vld1q_bf16(reinterpret_cast<const at_bfloat16_t*>(ptr));
     }
     __at_align__ at_bfloat16_t tmp_values[size()];
-    for (const auto i : c10::irange(size())) {
-      tmp_values[i] = 0;
-    }
+    std::memset(tmp_values, 0, sizeof(tmp_values));
     std::memcpy(
         tmp_values,
         reinterpret_cast<const at_bfloat16_t*>(ptr),
