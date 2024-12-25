@@ -7,7 +7,6 @@ from typing import Callable, List, Optional
 import torch
 from torch import multiprocessing as mp, nn
 from torch._dynamo import reset
-from torch._dynamo.device_interface import get_interface_for_device
 from torch._dynamo.exc import BackendCompilerFailed
 from torch._dynamo.testing import rand_strided, reset_rng_state
 from torch._inductor import config
@@ -691,7 +690,7 @@ class TestMaxAutotune(TestCase):
         max_autotune_gemm=True,
     )
     @unittest.skipIf(
-        get_interface_for_device(GPU_TYPE).device_count() < 2,
+        getattr(torch, GPU_TYPE).device_count() < 2,
         "Need at least 2 devices for this test",
     )
     def test_autotune_device_guard(self):
