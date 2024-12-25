@@ -19,7 +19,7 @@ if TYPE_CHECKING:
 
     from torch._guards import CompileId
 
-    from .symbolic_convert import InstructionTranslator
+    from .symbolic_convert import InstructionTranslatorBase
     from .types import DynamoFrameType
 
 
@@ -288,7 +288,7 @@ observed_exception_map = {
 
 def raise_observed_exception(
     exc_type: Type[Exception],
-    tx: InstructionTranslator,
+    tx: InstructionTranslatorBase,
     *,
     args: Optional[List[Any]] = None,
     kwargs: Optional[Dict[str, Any]] = None,
