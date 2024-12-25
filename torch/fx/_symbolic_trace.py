@@ -687,7 +687,7 @@ class Tracer(TracerBase):
             root_fn = _patch_function(root_fn, len(args))
 
         flat_args, in_spec = pytree.tree_flatten(tuple(args))
-        if not all(child.is_leaf() for child in in_spec.children_specs):
+        if not all(child.is_leaf() for child in in_spec.children()):
             # In the case that we have pytree-flattened inputs in
             # `concrete_args`, generate a flattening wrapper around the
             # original root function and return that.

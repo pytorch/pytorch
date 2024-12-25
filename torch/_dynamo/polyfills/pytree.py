@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from collections import deque
 from dataclasses import dataclass, field
-from typing import Any, Callable, Iterable, Literal, TYPE_CHECKING
+from typing import Any, Callable, Iterable, Literal, Mapping, TYPE_CHECKING
 from typing_extensions import TypeIs
 
 import torch.utils._pytree as python_pytree
@@ -318,6 +318,61 @@ if python_pytree._cxx_pytree_dynamo_traceable:
 
     def _is_pytreespec_instance(obj: Any, /) -> TypeIs[PyTreeSpec]:
         return isinstance(obj, PyTreeSpec)
+
+    @substitute_in_graph(  # type: ignore[arg-type]
+        cxx_pytree.treespec_leaf,
+        # We need to disable constant folding here because we want the function to reference the
+        # PyTreeSpec class defined above, not the one in the C++ module.
+        can_constant_fold_through=False,
+    )
+    def treespec_leaf() -> PyTreeSpec:
+        return _LEAF_SPEC
+
+    @substitute_in_graph(  # type: ignore[arg-type]
+        cxx_pytree.treespec_tuple,
+        # We need to disable constant folding here because we want the function to reference the
+        # PyTreeSpec class defined above, not the one in the C++ module.
+        can_constant_fold_through=False,
+    )
+    def treespec_tuple(iterable: Iterable[PyTreeSpec] = (), /) -> PyTreeSpec:
+        children = tuple(iterable)
+        if any(not _is_pytreespec_instance(child) for child in children):
+            raise ValueError(f"Expected a tuple of PyTreeSpecs, got: {children!r}.")
+        handler = optree.register_pytree_node.get(tuple, namespace="torch")  # type: ignore[attr-defined]
+        return PyTreeSpec(
+            tuple(children),
+            tuple,
+            None,
+            tuple(range(len(children))),
+            handler.unflatten_func,
+        )
+
+    @substitute_in_graph(  # type: ignore[arg-type]
+        cxx_pytree.treespec_dict,
+        # We need to disable constant folding here because we want the function to reference the
+        # PyTreeSpec class defined above, not the one in the C++ module.
+        can_constant_fold_through=False,
+    )
+    def treespec_dict(
+        mapping: Mapping[Any, PyTreeSpec] | Iterable[tuple[Any, PyTreeSpec]] = (),
+        /,
+        **kwargs: PyTreeSpec,
+    ) -> PyTreeSpec:
+        dct = dict(mapping, **kwargs)
+        if any(not _is_pytreespec_instance(child) for child in dct.values()):
+            raise ValueError(f"Expected a dictionary of TreeSpecs, got: {dct!r}.")
+
+        (
+            children,
+            metadata,
+            entries,
+            unflatten_func,
+        ) = optree.tree_flatten_one_level(  # type: ignore[assignment,var-annotated]
+            dct,  # type: ignore[arg-type]
+            none_is_leaf=True,
+            namespace="torch",
+        )
+        return PyTreeSpec(tuple(children), dict, metadata, entries, unflatten_func)  # type: ignore[arg-type]
 
     @substitute_in_graph(  # type: ignore[arg-type]
         cxx_pytree.tree_flatten,

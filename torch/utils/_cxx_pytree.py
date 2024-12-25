@@ -20,6 +20,7 @@ from typing import (
     Callable,
     Iterable,
     List,
+    Mapping,
     Optional,
     overload,
     Tuple,
@@ -27,10 +28,13 @@ from typing import (
     TypeVar,
     Union,
 )
-from typing_extensions import deprecated, TypeIs
+from typing_extensions import deprecated, Self, TypeIs
 
 import optree
-from optree import PyTreeSpec as TreeSpec  # direct import for type annotations
+from optree import (  # noqa: F401  # direct import for type annotations
+    PyTreeSpec as PyTreeSpec,
+    PyTreeSpec as TreeSpec,
+)
 
 import torch.utils._pytree as python_pytree
 from torch.utils._pytree import KeyEntry as KeyEntry
@@ -242,6 +246,30 @@ def _private_register_pytree_node(
 
 def _is_pytreespec_instance(obj: Any, /) -> TypeIs[TreeSpec]:
     return isinstance(obj, TreeSpec)
+
+
+def treespec_leaf() -> TreeSpec:
+    """Make a treespec representing a leaf node."""
+    return optree.treespec_leaf(none_is_leaf=True, namespace="torch")
+
+
+def treespec_tuple(iterable: Iterable[TreeSpec] = (), /) -> TreeSpec:
+    """Make a tuple treespec from an iterable of child treespecs."""
+    return optree.treespec_tuple(iterable, none_is_leaf=True, namespace="torch")
+
+
+def treespec_dict(
+    mapping: Union[Mapping[Any, TreeSpec], Iterable[Tuple[Any, TreeSpec]]] = (),
+    /,
+    **kwargs: TreeSpec,
+) -> TreeSpec:
+    """Make a dict treespec from a dict of child treespecs."""
+    return optree.treespec_dict(
+        mapping,
+        **kwargs,
+        none_is_leaf=True,
+        namespace="torch",
+    )
 
 
 def tree_is_leaf(
@@ -969,9 +997,14 @@ class LeafSpecMeta(type(TreeSpec)):  # type: ignore[misc]
         return _is_pytreespec_instance(instance) and instance.is_leaf()
 
 
+@deprecated(
+    "`isinstance(treespec, LeafSpec)` is deprecated, "
+    "use `isinstance(treespec, TreeSpec)` and `treespec.is_leaf()` instead.",
+    category=FutureWarning,
+)
 class LeafSpec(TreeSpec, metaclass=LeafSpecMeta):
-    def __new__(cls) -> "LeafSpec":
-        return optree.treespec_leaf(none_is_leaf=True)  # type: ignore[return-value]
+    def __new__(cls) -> Self:
+        return treespec_leaf()  # type: ignore[return-value]
 
 
 def tree_flatten_with_path(
