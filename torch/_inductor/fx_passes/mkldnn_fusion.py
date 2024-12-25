@@ -38,6 +38,81 @@ if torch._C._has_mkldnn:
     _linear_args = [Arg() for _ in range(6)]
     _conv_transpose_args = [Arg() for _ in range(11)]
 
+    def _is_valid_group_gemm_fusion(computation_nodes):
+        computation_op = mkldnn._linear_pointwise.default
+        assert all(node.target == computation_op for node in computation_nodes)
+        act = computation_nodes[0].args[0]
+        wgt = computation_nodes[0].args[1]
+        if any(
+            (
+                node.args[0] != act
+                or (node.args[1] == wgt and gemm_idx != 0)
+                or node.args[2]  # <TODO> support bias through epilogue fusion
+                or node.args[1].meta.get("val").dtype != torch.bfloat16  # type: ignore[union-attr]
+            )
+            for gemm_idx, node in enumerate(computation_nodes)
+        ):
+            return False
+        wgt_size = computation_nodes[0].args[1].meta.get("val").size()  # type: ignore[union-attr]
+        if any(
+            node.args[1].meta.get("val").size() != wgt_size
+            for node in computation_nodes
+        ):  # type: ignore[union-attr]
+            # check for same weight size
+            return False
+        # Ensure max autotune used with CPP backend
+        return (
+            torch._inductor.config.max_autotune
+            and "CPP" in torch._inductor.config.max_autotune_gemm_backends
+            and torch._inductor.config.cpp.enable_group_gemm_template
+        )
+
+    def group_gemm_pass(graph: torch.fx.Graph):
+        """
+        Group GEMM has multi output nodes which is compilicated to define a Pattern.
+        Use below way to connect the pattern to the lowering.
+        TODO: Use MultiOutputPattern, current limitation is the pattern requires
+        fixed number of output nodes. Extend to support Group GEMM for pattern matcher.
+        """
+        computation_op = mkldnn._linear_pointwise.default
+        from ..mkldnn_lowerings import group_gemm_lowering
+
+        group_gemm_lowering._inductor_lowering_function = True  # type: ignore[attr-defined]
+        for node in graph.nodes:
+            if node.target == computation_op:
+                with graph.inserting_before(node):
+                    act = node.all_input_nodes[0]
+                    users = list(act.users)
+                    if all(user.target == computation_op for user in users):
+                        if not _is_valid_group_gemm_fusion(users):
+                            continue
+                        group_gemm_node = graph.create_node(
+                            "call_function",
+                            group_gemm_lowering,
+                            (
+                                act,
+                                [user.all_input_nodes[1] for user in users],
+                                [None for _ in users],
+                            ),
+                        )
+                        group_gemm_node.meta["val"] = [
+                            user.meta["val"] for user in users
+                        ]
+                        with graph.inserting_after(group_gemm_node):
+                            for gemm_idx, user in enumerate(users):
+                                assert user.target == computation_op
+                                get_item = graph.create_node(
+                                    "call_function",
+                                    operator.getitem,
+                                    (
+                                        group_gemm_node,
+                                        gemm_idx,
+                                    ),
+                                )
+                                user.replace_all_uses_with(get_item)
+                                graph.erase_node(user)
+        return
+
     def _conv_call(users=1):
         return CallFunction(
             mkldnn._convolution_pointwise.default, *_conv_args, _users=users
