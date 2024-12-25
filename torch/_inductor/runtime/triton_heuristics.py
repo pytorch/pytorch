@@ -389,18 +389,13 @@ class CachingAutotuner(KernelInterface):
     def _precompile_config(self, cfg: Config, warm_cache_only: bool):
         """Ahead of time compile a given autotuner config."""
         compile_meta = copy.deepcopy(self.triton_meta)
-        for k, v in cfg.kwargs.items():
-            if self.device_props.type == "hip":
-                if k == "matrix_instr_nonkdim":
-                    compile_meta["matrix_instr_nonkdim"] = v
-                    continue
-                if k == "waves_per_eu":
-                    compile_meta["waves_per_eu"] = v
-                    continue
-                if k == "kpack":
-                    compile_meta["kpack"] = v
-                    continue
-            compile_meta["constants"][k] = v
+        cfg_kwargs = cfg.kwargs
+        if self.device_props.type == "hip":
+            cfg_kwargs = {**cfg_kwargs}
+            for k in ("matrix_instr_nonkdim", "waves_per_eu", "kpack"):
+                if k in cfg_kwargs:
+                    compile_meta[k] = cfg_kwargs.pop(k)
+        compile_meta["constants"].update(cfg_kwargs)
         compile_meta["num_warps"] = cfg.num_warps
         compile_meta["num_stages"] = cfg.num_stages
         compile_meta["debug"] = self.inductor_meta.get(
