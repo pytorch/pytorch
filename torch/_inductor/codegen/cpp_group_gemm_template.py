@@ -406,7 +406,7 @@ class CppGroupGemmTemplate(CppGemmTemplate):
             )
 
         assert (
-            not self.epilogue_creator
+            not self.epilogue_creator and not epilogue_nodes
         ), "Epilogue fusion is not implemented yet in Group GEMM Template"
 
         kernel_args = {}

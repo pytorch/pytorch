@@ -285,7 +285,7 @@ class CppTemplateKernel(CppKernel):
         self,
         dst: Tuple[ir.Buffer],
         nodes: List[List[ir.IRNode]],
-        offsets: Optional[List[sympy.Expr]] = None,
+        offsets: Optional[List[List[sympy.Expr]]] = None,
         reindexers: Optional[
             List[List[Optional[Callable[[List[Any]], List[Any]]]]]
         ] = None,
@@ -297,15 +297,21 @@ class CppTemplateKernel(CppKernel):
             sympy_index_symbol_with_prefix(SymT.INDEX, i): sz
             for i, sz in enumerate(var_sizes[0])
         }
-        if not offsets:
-            offsets = [sympy.S.Zero] * len(var_sizes[0])
         group_gemm_number = len(nodes)
+        if offsets is None:
+            offsets = []
+            for gemm_idx in range(group_gemm_number):
+                offsets.append([sympy.S.Zero] * len(var_sizes[0]))
+        else:
+            for gemm_idx in range(group_gemm_number):
+                if not offsets[gemm_idx]:
+                    offsets[gemm_idx] = [sympy.S.Zero] * len(var_sizes[0])
         if reindexers is None:
             reindexers = [[] for _ in range(group_gemm_number)]
         for gemm_idx in range(group_gemm_number):
             if not reindexers[gemm_idx]:
                 reindexers[gemm_idx] = [None] * len(nodes[gemm_idx])
-        assert len(offsets) == len(var_sizes[0])
+        assert all(len(offset) == len(var_sizes[0]) for offset in offsets)
         output_index = ref_dst.get_layout().make_indexer()([*var_ranges.keys()])
         kernel_group = KernelGroup()
         kernel_group.args = self.args
@@ -313,8 +319,11 @@ class CppTemplateKernel(CppKernel):
         bodies = []
         var_sizes_list = []
         assert isinstance(nodes[0], Iterable)
-        # TODO: support for different length of epilogue
         group_gemm_number = len(nodes)
+        # TODO: support for different length of epilogue
+        epilogue_len = len(nodes[0])
+        assert all(len(node) == epilogue_len for node in nodes)
+
         for i, _ in enumerate(nodes[0]):
             output_names = []
             gemm_nodes = []
@@ -339,8 +348,8 @@ class CppTemplateKernel(CppKernel):
                 assert len(args) == 2
                 assert len(args[0]) == len(var_sizes[0])
                 assert len(args[1]) == 0
-                new_args = [arg + offset for arg, offset in zip(args[0], offsets)]  # type: ignore[arg-type]
                 for gemm_idx in range(group_gemm_number):
+                    new_args = [arg + offset for arg, offset in zip(args[0], offsets[gemm_idx])]  # type: ignore[arg-type]
                     if reindexers[gemm_idx][i] is not None:
                         new_args = reindexers[gemm_idx][i](new_args)  # type: ignore[misc]
                     V.ops.store(
@@ -436,31 +445,35 @@ class CppTemplateKernel(CppKernel):
         assert all(_dst.get_size() == _src.get_size() for _src, _dst in zip(src, dst))
         if offsets:
             offsets = parse_expr_with_index_symbols(offsets)
-        if epilogue_nodes:
+        gemm_num = len(src)
+        group_gemm_offsets: List[Optional[List[ir.IRNode]]] = [
+            None for _ in range(gemm_num)
+        ]
+        if epilogue_nodes and any(epilogue_node for epilogue_node in epilogue_nodes):
             with LocalBufferContext(self.args) as scope:
                 assert orig_src is not None
-                if (
-                    isinstance(src, Iterable)
-                    and isinstance(orig_src, Iterable)
-                    and orig_src[0].get_name() != src[0].get_name()
-                ):
-                    assert all(
-                        _orig_src.get_name() != _src.get_name()
-                        for _orig_src, _src in zip(orig_src, src)
-                    )
-                    for _orig_src, _src in zip(orig_src, src):
-                        scope.add_local_buffer(
-                            _src,
-                            [
-                                _orig_src,
-                            ],
-                        )
-                    epilogue_nodes = [
-                        scope.localize_nodes(epilogue_node) if epilogue_node else None
-                        for epilogue_node in epilogue_nodes
-                    ]
+                localize_epilogue_nodes = []
+                for gemm_idx in range(gemm_num):
+                    if orig_src[gemm_idx].get_name() != src[gemm_idx].get_name():
+                        if epilogue_nodes[gemm_idx]:
+                            scope.add_local_buffer(
+                                src[gemm_idx],
+                                [
+                                    orig_src[gemm_idx],
+                                ],
+                            )
+                            localize_epilogue_nodes.append(
+                                scope.localize_nodes(epilogue_nodes[gemm_idx])
+                            )
+                            group_gemm_offsets[gemm_idx] = offsets
+                        else:
+                            scope.add_local_buffer(src[gemm_idx])
+                            localize_epilogue_nodes.append(
+                                [L.copy(dst[gemm_idx], src[gemm_idx]).data.data]
+                            )
+
                 return self.store_group_gemm_pointwise_nodes(
-                    dst, epilogue_nodes, offsets, reindexers  # type: ignore[arg-type]
+                    dst, localize_epilogue_nodes, group_gemm_offsets, reindexers  # type: ignore[arg-type]
                 )
         else:
             assert isinstance(src, Iterable)

@@ -1738,7 +1738,15 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
     @parametrize("batch_size", (16,))
     @parametrize("in_features", (52,))
     @parametrize("out_features", (32,))
-    @parametrize("bias", ([True, True],))
+    @parametrize(
+        "bias",
+        (
+            [True, True],
+            [True, False],
+            [False, True],
+            [False, False],
+        ),
+    )
     @dtypes(
         torch.bfloat16,
     )
