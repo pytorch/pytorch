@@ -1,11 +1,12 @@
 #include <c10/core/impl/DeviceGuardImplInterface.h>
+#include <array>
 
 namespace c10::impl {
 
-// NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
-std::atomic<const DeviceGuardImplInterface*>
-    device_guard_impl_registry[static_cast<size_t>(
-        DeviceType::COMPILE_TIME_MAX_DEVICE_TYPES)];
+std::array<
+    std::atomic<const DeviceGuardImplInterface*>,
+    static_cast<size_t>(DeviceType::COMPILE_TIME_MAX_DEVICE_TYPES)>
+    device_guard_impl_registry;
 
 DeviceGuardImplRegistrar::DeviceGuardImplRegistrar(
     DeviceType type,

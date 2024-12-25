@@ -325,14 +325,14 @@ def _get_binary_ops_configs() -> List[BackendPatternConfig]:
             (op, torch.relu),
             op,
         ]
-        for bop_pattern in bop_patterns:
-            binary_op_configs.append(
-                BackendPatternConfig(bop_pattern)
-                .set_dtype_configs(dtype_configs)  # noqa: E131
-                ._set_num_tensor_args_to_observation_type(
-                    num_tensor_args_to_observation_type_mapping
-                )
+        binary_op_configs.extend(
+            BackendPatternConfig(bop_pattern)
+            .set_dtype_configs(dtype_configs)  # noqa: E131
+            ._set_num_tensor_args_to_observation_type(
+                num_tensor_args_to_observation_type_mapping
             )
+            for bop_pattern in bop_patterns
+        )
     return binary_op_configs
 
 
@@ -385,13 +385,12 @@ def _get_share_qparams_ops_configs() -> List[BackendPatternConfig]:
         "squeeze_",
         "leaky_relu",
     ]
-    share_qparams_op_configs: List[BackendPatternConfig] = []
-    for op in share_qparams_ops:
-        share_qparams_op_configs.append(
-            BackendPatternConfig(op)
-            .set_observation_type(observation_type)  # noqa: E131
-            .set_dtype_configs(dtype_configs)
-        )
+    share_qparams_op_configs: List[BackendPatternConfig] = [
+        BackendPatternConfig(op)
+        .set_observation_type(observation_type)  # noqa: E131
+        .set_dtype_configs(dtype_configs)
+        for op in share_qparams_ops
+    ]
     return share_qparams_op_configs
 
 

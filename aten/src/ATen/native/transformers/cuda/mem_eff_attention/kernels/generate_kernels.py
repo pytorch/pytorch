@@ -308,7 +308,7 @@ def write_decl_impl(
     family_name: str,
     impl_file: str,
     autogen_dir: Path,
-    disable_def: str = None,
+    disable_def: Optional[str] = None,
 ) -> None:
     cpp_file_header = """/*
  * Copyright (c) Meta Platforms, Inc. and affiliates.
@@ -352,7 +352,7 @@ def write_decl_impl(
             declarations += f"    {_call}"
         declarations += "}\n\n"
         dispatch_all += f"""
-    if (std::is_same<DT, {DTYPES[cat_dt]}>::value && {cat_sm} <= cc && cc < {cat_sm_max}) {{
+    if (std::is_same_v<DT, {DTYPES[cat_dt]}> && {cat_sm} <= cc && cc < {cat_sm_max}) {{
         {dispatch_category_fn}(cb, cc);
     }}"""
 
@@ -380,7 +380,7 @@ void dispatch_{family_name}(T cb, int cc = 0) {{
 
 def main(output_dir: Optional[str]) -> None:
     if output_dir is None:
-        output_dir = Path(__file__).parent
+        output_dir = Path(__file__).absolute().parent
     else:
         output_dir = Path(output_dir)
     write_decl_impl(

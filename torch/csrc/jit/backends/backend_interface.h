@@ -2,8 +2,7 @@
 
 #include <torch/custom_class.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 // Interface for a JIT backend.
 class TORCH_API PyTorchBackendInterface : public torch::CustomClassHolder {
@@ -30,5 +29,4 @@ class TORCH_API PyTorchBackendInterface : public torch::CustomClassHolder {
       c10::IValue handle,
       c10::impl::GenericList inputs) = 0;
 };
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

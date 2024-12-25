@@ -48,6 +48,39 @@ void destroyCublasLtHandle(cublasLtHandle_t handle) {
 }
 
 using CuBlasLtPoolType = DeviceThreadHandlePool<cublasLtHandle_t, createCublasLtHandle, destroyCublasLtHandle>;
+
+// ugly hack until hipblasSetWorkspace exists
+#include <rocblas/rocblas.h>
+
+static hipblasStatus_t rocBLASStatusToHIPStatus(rocblas_status error) {
+    switch(error) {
+    case rocblas_status_size_unchanged:
+    case rocblas_status_size_increased:
+    case rocblas_status_success:
+        return HIPBLAS_STATUS_SUCCESS;
+    case rocblas_status_invalid_handle:
+        return HIPBLAS_STATUS_NOT_INITIALIZED;
+    case rocblas_status_not_implemented:
+        return HIPBLAS_STATUS_NOT_SUPPORTED;
+    case rocblas_status_invalid_pointer:
+    case rocblas_status_invalid_size:
+    case rocblas_status_invalid_value:
+        return HIPBLAS_STATUS_INVALID_VALUE;
+    case rocblas_status_memory_error:
+        return HIPBLAS_STATUS_ALLOC_FAILED;
+    case rocblas_status_internal_error:
+        return HIPBLAS_STATUS_INTERNAL_ERROR;
+    }
+    TORCH_CHECK(false, "HIPBLAS_STATUS_INVALID_ENUM");
+}
+
+static hipblasStatus_t hipblasSetWorkspace_replacement(hipblasHandle_t handle, void* addr, size_t size) {
+    return rocBLASStatusToHIPStatus(rocblas_set_workspace((rocblas_handle)handle, addr, size));
+}
+
+// hipify mappings file correctly maps this but the function doesn't exist yet
+#define hipblasSetWorkspace hipblasSetWorkspace_replacement
+
 #endif
 
 std::map<std::tuple<void *, void *>, at::DataPtr>& cublas_handle_stream_to_workspace() {
@@ -77,17 +110,29 @@ using CuBlasPoolType = DeviceThreadHandlePool<cublasHandle_t, createCublasHandle
 } // namespace
 
 void clearCublasWorkspaces() {
-  #if !defined(USE_ROCM)
-      cublas_handle_stream_to_workspace().clear();
-  #endif
+  cublas_handle_stream_to_workspace().clear();
 }
 
 size_t parseChosenWorkspaceSize() {
   const char * val = getenv("CUBLAS_WORKSPACE_CONFIG");
+#ifdef USE_ROCM
+  if (!val) {
+    val = getenv("HIPBLAS_WORKSPACE_CONFIG");
+  }
+  if (!val) {
+    // for extra convenience
+    val = getenv("ROCBLAS_WORKSPACE_CONFIG");
+  }
+  /* 32MiB default, 128MiB for MI300 */
+  cudaDeviceProp* properties = at::cuda::getCurrentDeviceProperties();
+  const bool gfx94 = properties != nullptr && properties->major == 9 && properties->minor == 4;
+  const size_t default_size = gfx94 ? 1024 * 128 * 1024 : 1024 * 32 * 1024;
+#else
   /* :4096:2:16:8 default, 32MiB for Hopper */
   cudaDeviceProp* properties = at::cuda::getCurrentDeviceProperties();
   const bool sm90 = properties != nullptr && properties->major == 9 && properties->minor == 0;
   const size_t default_size = sm90 ? 4096 * 8 * 1024 : 4096 * 1024 * 2 + 16 * 1024 * 8;
+#endif
 
   if (val) {
     size_t total_size = 0;
@@ -156,7 +201,6 @@ cublasHandle_t getCurrentCUDABlasHandle() {
   auto handle = myPoolWindow->reserve(device);
   auto stream = c10::cuda::getCurrentCUDAStream();
   TORCH_CUDABLAS_CHECK(cublasSetStream(handle, stream));
-#if !defined(USE_ROCM)
   // We explicitly set the cublas workspace even though CUDA 12.2+ fixed the
   // issue where memory usage increased during graph capture.
   // original issue: https://github.com/pytorch/pytorch/pull/83461
@@ -171,6 +215,7 @@ cublasHandle_t getCurrentCUDABlasHandle() {
     workspace_it = cublas_handle_stream_to_workspace().insert(workspace_it, {key, getNewWorkspace()});
   }
   TORCH_CUDABLAS_CHECK(cublasSetWorkspace(handle, workspace_it->second.get(), getChosenWorkspaceSize()));
+#if !defined(USE_ROCM)
   // On CUDA >= 11, and architecture >= Ampere, cuBLAS can use TF32 to speedup
   // FP32 data type calculations based on the value of the allow_tf32 flag.
   // To enable TF32, set the math mode of the handle to CUBLAS_TF32_TENSOR_OP_MATH.

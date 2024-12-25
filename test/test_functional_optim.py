@@ -92,7 +92,6 @@ class TestFunctionalOptimParity(TestCase):
         module_optim = MyModule()
         module_functional = MyModule()
         optim_params = module_optim.parameters()
-        functional_params = module_functional.parameters()
         optim = optim_cls(optim_params, *args, **kwargs)
         functional_optim_cls = functional_optim_map.get(optim_cls, None)
         if not functional_optim_cls:
@@ -111,10 +110,10 @@ class TestFunctionalOptimParity(TestCase):
         )
         # Save old parameters to verify optimizer modifies them.
         old_module_optim_params = [
-            param.clone().detach() for param in module_optim.parameters()
+            param.detach().clone() for param in module_optim.parameters()
         ]
         old_module_functional_params = [
-            param.clone().detach() for param in module_functional.parameters()
+            param.detach().clone() for param in module_functional.parameters()
         ]
 
         t1 = torch.randn(3, 3)

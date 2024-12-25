@@ -25,7 +25,7 @@ namespace torch::jit::fuser {
 // descriptions to create PartitionDesc objects.
 struct TORCH_API PartitionInfo {
   PartitionInfo(const int64_t _nSubTensors, const int64_t _dim)
-      : nSubTensors_{_nSubTensors}, dim_{_dim} {};
+      : nSubTensors_{_nSubTensors}, dim_{_dim} {}
 
   int64_t nSubTensors() const {
     return nSubTensors_;

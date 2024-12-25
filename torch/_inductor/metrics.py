@@ -8,10 +8,11 @@ import os
 import re
 from dataclasses import dataclass
 from functools import lru_cache
-from typing import Dict, List, Set, Tuple, TYPE_CHECKING
+from typing import Dict, List, Tuple, TYPE_CHECKING
 
 from torch._inductor import config
 from torch._inductor.utils import get_benchmark_name
+from torch.utils._ordered_set import OrderedSet
 
 
 # Prevent circular import
@@ -139,7 +140,7 @@ class MetricTable:
         assert len(self.column_names) == len(
             row_dict
         ), f"{len(self.column_names)} v.s. {len(row_dict)}"
-        assert set(self.column_names) == set(
+        assert OrderedSet(self.column_names) == OrderedSet(
             row_dict.keys()
         ), f"{set(self.column_names)} v.s. {set(row_dict.keys())}"
 
@@ -212,13 +213,16 @@ MetricTable.register_table(
 MetricTable.register_table(
     "persistent_red_perf",
     [
-        "kernel1_name",
-        "kernel2_name",
+        "kernel0_path",
+        "kernel1_path",
+        "kernel2_path",
+        "kernel3_path",
+        "kernel0_latency",
         "kernel1_latency",
         "kernel2_latency",
+        "kernel3_latency",
         "size_hints",
         "reduction_hint",
-        "speedup",
     ],
 )
 
@@ -411,11 +415,13 @@ def purge_old_log_files():
             table.write_header()
 
 
-@lru_cache
-def enabled_metric_tables() -> Set[str]:
-    config_str = config.enabled_metric_tables
+def enabled_metric_tables() -> OrderedSet[str]:
+    return enabled_metric_tables_impl(config.enabled_metric_tables)
 
-    enabled = set()
+
+@lru_cache
+def enabled_metric_tables_impl(config_str: str) -> OrderedSet[str]:
+    enabled = OrderedSet[str]()
     for name in config_str.split(","):
         name = name.strip()
         if not name:

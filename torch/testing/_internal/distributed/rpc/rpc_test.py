@@ -852,7 +852,7 @@ class RpcTestCommon:
     def _wait_all_workers(self, f, x):
         initialize_pg(self.file_init_method, self.rank, self.world_size)
         rpc.init_rpc(
-            name="worker%d" % self.rank,
+            name=f"worker{self.rank:d}",
             backend=self.rpc_backend,
             rank=self.rank,
             world_size=self.world_size,
@@ -874,7 +874,7 @@ class RpcTestCommon:
     def _wait_all_workers_twice(self, f, x):
         initialize_pg(self.file_init_method, self.rank, self.world_size)
         rpc.init_rpc(
-            name="worker%d" % self.rank,
+            name=f"worker{self.rank:d}",
             backend=self.rpc_backend,
             rank=self.rank,
             world_size=self.world_size,
@@ -1038,15 +1038,13 @@ class RpcTestCommon:
         n = self.rank + 1
         dst_rank1 = n % self.world_size
         dst_rank2 = (n + 1) % self.world_size
-        all_rrefs = []
-        for _ in range(20):
-            all_rrefs.append(
-                rpc.remote(
-                    worker_name(dst_rank1),
-                    f,
-                    args=(worker_name(dst_rank2),),
-                )
-            )
+        all_rrefs = [
+            rpc.remote(
+                worker_name(dst_rank1),
+                f,
+                args=(worker_name(dst_rank2),),
+            ) for _ in range(20)
+        ]
 
         for i in range(20):
             rref_of_rrefs = all_rrefs[i]
@@ -1073,18 +1071,15 @@ class RpcTestCommon:
 
     def _my_parameter_server(self, sparse):
         ps_rref = RRef(MyParameterServer(self.world_size - 1))
-        futures = []
-        for index in range(1, self.world_size):
-            futures.append(
-                rpc.rpc_async(
-                    worker_name((self.rank + index) % self.world_size),
-                    self._trainer_func,
-                    args=(
-                        ps_rref,
-                        sparse
-                    ),
-                )
-            )
+        futures = [
+            rpc.rpc_async(
+                worker_name((self.rank + index) % self.world_size),
+                self._trainer_func,
+                args=(
+                    ps_rref,
+                    sparse
+                ),
+            ) for index in range(1, self.world_size)]
         torch.futures.wait_all(futures)
 
     def _test_cuda_future_extraction(self, wrapper, unwrapper, sparse_tensor):
@@ -1457,9 +1452,7 @@ class RpcTest(RpcAgentTestFixture, RpcTestCommon):
         model = torch.nn.parallel.DistributedDataParallel(model)
 
         with self.assertRaisesRegex(RuntimeError, 'Current RPC agent is not set! Did you initialize the RPC framework'):
-            params = []
-            for param in model.parameters():
-                params.append(RRef(param))
+            [RRef(param) for param in model.parameters()]
 
     def test_world_size_one(self):
         self._world_size_one(
@@ -1693,7 +1686,7 @@ class RpcTest(RpcAgentTestFixture, RpcTestCommon):
     def test_shutdown_followed_by_rpc(self):
         # Initialize RPC.
         rpc.init_rpc(
-            name="worker%d" % self.rank,
+            name=f"worker{self.rank:d}",
             backend=self.rpc_backend,
             rank=self.rank,
             world_size=self.world_size,
@@ -3286,7 +3279,7 @@ class RpcTest(RpcAgentTestFixture, RpcTestCommon):
         # test that we can start RPC and then immediately locally shutdown
         # without sending any messages.
         rpc.init_rpc(
-            name="worker%d" % self.rank,
+            name=f"worker{self.rank:d}",
             backend=self.rpc_backend,
             rank=self.rank,
             world_size=self.world_size,
@@ -3328,7 +3321,7 @@ class RpcTest(RpcAgentTestFixture, RpcTestCommon):
         # test that if a callee node has gone down, we raise an appropriate
         # exception instead of just crashing.
         rpc.init_rpc(
-            name="worker%d" % self.rank,
+            name=f"worker{self.rank:d}",
             backend=self.rpc_backend,
             rank=self.rank,
             world_size=self.world_size,
@@ -3375,7 +3368,7 @@ class RpcTest(RpcAgentTestFixture, RpcTestCommon):
     def test_local_shutdown_with_rpc(self):
         # test that we can start RPC, send RPCs, and then run local shutdown.
         rpc.init_rpc(
-            name="worker%d" % self.rank,
+            name=f"worker{self.rank:d}",
             backend=self.rpc_backend,
             rank=self.rank,
             world_size=self.world_size,
@@ -3715,7 +3708,7 @@ class RpcTest(RpcAgentTestFixture, RpcTestCommon):
     @dist_init(setup_rpc=False)
     def test_use_rref_after_shutdown(self):
         rpc.init_rpc(
-            name="worker%d" % self.rank,
+            name=f"worker{self.rank:d}",
             backend=self.rpc_backend,
             rank=self.rank,
             world_size=self.world_size,
@@ -3889,9 +3882,7 @@ class RpcTest(RpcAgentTestFixture, RpcTestCommon):
             args=(torch.ones(n, n), torch.ones(n, n))
         )
 
-        cb_futs = []
-        for idx in range(num_cbs):
-            cb_futs.append(fut.then(partial(callback, idx)))
+        cb_futs = [fut.then(partial(callback, idx)) for idx in range(num_cbs)]
 
         self.assertEqual(fut.wait(), torch.ones(n, n) * 2)
 
@@ -4368,20 +4359,16 @@ class RpcTest(RpcAgentTestFixture, RpcTestCommon):
 
     @dist_init
     def test_wait_all_with_exception(self):
-        futs = []
         dst = worker_name((self.rank + 1) % self.world_size)
-        for _ in range(10):
-            futs.append(rpc.rpc_async(dst, raise_func))
+        futs = [rpc.rpc_async(dst, raise_func) for _ in range(10)]
 
         with self.assertRaisesRegex(ValueError, "Expected error"):
             torch.futures.wait_all(futs)
 
     @dist_init
     def test_wait_all_with_partial_exception(self):
-        futs = []
         dst = worker_name((self.rank + 1) % self.world_size)
-        for _ in range(10):
-            futs.append(rpc.rpc_async(dst, torch.add, args=(torch.ones(2), 1)))
+        futs = [rpc.rpc_async(dst, torch.add, args=(torch.ones(2), 1)) for _ in range(10)]
 
         futs.append(rpc.rpc_async(dst, raise_func))
 
@@ -6214,13 +6201,13 @@ class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture, RpcTestCommon):
             rpc_backend_options=options,
         )
 
-        futs = []
-        for i in range(5):
-            futs.append(rpc.rpc_async(
+        futs = [
+            rpc.rpc_async(
                 dst,
                 TensorPipeAgentCudaRpcTest._return_tensor_view,
                 args=(i,)
-            ))
+            ) for i in range(5)
+        ]
 
         for i in range(5):
             self.assertEqual(torch.ones(100, 200) * i, futs[i].wait())

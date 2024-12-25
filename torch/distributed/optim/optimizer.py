@@ -245,13 +245,12 @@ class DistributedOptimizer:
             else _local_optimizer_step
         )
 
-        rpc_futs = []
-        for optimizer in self.remote_optimizers:
-            rpc_futs.append(
-                rpc.rpc_async(
-                    optimizer.owner(),
-                    optimizer_step_func,
-                    args=(optimizer, context_id),
-                )
+        rpc_futs = [
+            rpc.rpc_async(
+                optimizer.owner(),
+                optimizer_step_func,
+                args=(optimizer, context_id),
             )
+            for optimizer in self.remote_optimizers
+        ]
         _wait_for_all(rpc_futs)
