@@ -131,11 +131,7 @@ class TokenLine:
         return True
 
     def is_braced_set(self, begin: int, end: int) -> bool:
-        if (
-            begin + 1 == end
-            or self.tokens[begin].string != "{"
-            or self.tokens[begin - 1].type in _linter.FSTRING_TOKENS
-        ):
+        if begin + 1 == end or self.tokens[begin].string != "{":
             return False
         i = begin + 1
         empty = True

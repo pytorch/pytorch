@@ -1394,9 +1394,9 @@ def _get_notallclose_msg(
     )
     mode = "computed with forward mode " if is_forward_ad else ""
     return (
-        prefix + "Jacobian %smismatch for output %d with respect to input %d,\n"
-        "numerical:%s\nanalytical:%s\n"
-        % (mode, output_idx, input_idx, numerical, analytical)
+        prefix
+        + f"Jacobian {mode}mismatch for output {output_idx:d} with respect to input {input_idx:d},\n"
+        f"numerical:{numerical}\nanalytical:{analytical}\n"
     )
 
 
