@@ -8,9 +8,6 @@ from torch._environment import is_fbcode
 from torch.utils._config_module import get_tristate_env, install_config_module
 
 
-inplace_padding = os.environ.get("TORCHINDUCTOR_INPLACE_PADDING", "1") == "1"
-
-
 def fx_graph_remote_cache_default() -> Optional[bool]:
     return get_tristate_env("TORCHINDUCTOR_FX_GRAPH_REMOTE_CACHE")
 
@@ -849,9 +846,10 @@ class cpp:
     )
 
     # Use ffp-contract when compiling
-    enable_floating_point_contract_flag = (
-        os.environ.get("TORCHINDUCTOR_CPP_ENABLE_FLOATING_POINT_CONTRACT_FLAG", "0")
-        == "1"
+    # Options: "off" (default), "on", "fast"
+    # Per https://godbolt.org/z/bf4bvfc9r , clang/gcc has different behavior for "fast"
+    enable_floating_point_contract_flag = os.environ.get(
+        "TORCHINDUCTOR_CPP_ENABLE_FLOATING_POINT_CONTRACT_FLAG", "off"
     )
 
     # Disable the tiling select heuristic
@@ -991,7 +989,7 @@ class triton:
 
     # For small output size reductions uses cross thread-block synchronization to gain more parallelism
     cooperative_reductions = (
-        os.environ.get("TORCHINDUCTOR_COOPERATIVE_REDUCTIONS", "0") == "1"
+        os.environ.get("TORCHINDUCTOR_COOPERATIVE_REDUCTIONS", "1") == "1"
     )
 
     # used for debugging cooperative reduction codegen, always generate cooperative_reductions
