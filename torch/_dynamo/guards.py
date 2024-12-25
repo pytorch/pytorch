@@ -13,7 +13,6 @@ import inspect
 import itertools
 import logging
 import math
-import re
 import sys
 import textwrap
 import types
@@ -21,7 +20,7 @@ import warnings
 import weakref
 from contextlib import contextmanager
 from copy import deepcopy
-from inspect import currentframe, getframeinfo
+from inspect import currentframe
 from typing import (
     Any,
     Callable,
@@ -39,6 +38,7 @@ from weakref import ReferenceType
 import torch
 import torch.overrides
 import torch.utils._device
+from torch._C._dynamo.eval_frame import code_framelocals_names
 from torch._C._dynamo.guards import (
     check_obj_id,
     check_type_id,
@@ -98,7 +98,6 @@ from .source import (
     LocalSource,
     NNModuleSource,
     NumpyTensorSource,
-    ODictGetItemSource,
     OptimizerSource,
     ScriptObjectQualifiedNameSource,
     ShapeEnvSource,
@@ -120,7 +119,9 @@ from .types import (  # noqa: F401
     GuardFn,
 )
 from .utils import (
+    builtin_dict_keys,
     common_constant_types,
+    dict_keys,
     dict_keys_repr,
     get_custom_getattr,
     get_torch_function_mode_stack,
@@ -443,35 +444,7 @@ def _ast_unparse(node: ast.AST) -> str:
     return ast.unparse(node).replace("\n", "")
 
 
-def strip_function_call(name):
-    """
-    "___odict_getitem(a, 1)" => "a"
-    "a.layers[slice(2)][0]._xyz" ==> "a"
-    "getattr(a.layers[slice(2)][0]._abc, '0')" ==> "a"
-    "getattr(getattr(a.x[3], '0'), '3')" ==> "a"
-    "a.layers[slice(None, -1, None)][0]._xyz" ==> "a"
-    """
-    # recursively find valid object name in function
-    valid_name = re.compile("[A-Za-z_].*")
-    curr = ""
-    for char in name:
-        if char in " (":
-            curr = ""
-        elif char in "),[]":
-            if curr and curr != "None" and valid_name.match(curr):
-                return strip_function_call(curr)
-        else:
-            curr += char
-
-    return strip_getattr_getitem(name)
-
-
-def strip_getattr_getitem(name):
-    """
-    "a[1]" => "a"
-    "a.foo" => "a"
-    """
-    return re.split(r"[.\[]", name)[0]
+strip_function_call = torch._C._dynamo.strip_function_call
 
 
 def get_verbose_code_part(code_part: str, guard: Guard) -> str:
@@ -522,11 +495,15 @@ def get_tensor_guard_code_part(value, name, sizes, strides):
 
 
 def get_key_index(dct, key):
-    return list(dct.keys()).index(key)
+    # Ensure that we call dict.keys and not value.keys (which can call
+    # overridden keys method). In the C++ guards, we relied on PyDict_Next
+    # to traverse the dictionary, which uses the internal data structure and
+    # does not call the overridden keys method.
+    return list(builtin_dict_keys(dct)).index(key)
 
 
 def get_key_index_source(source, index):
-    return f"list({source}.keys())[{index}]"
+    return f"list(dict.keys({source}))[{index}]"
 
 
 @dataclasses.dataclass(frozen=True)
@@ -555,7 +532,12 @@ def getitem_on_dict_manager(
         index = get_key_index(base_example_value, source.index)
 
     key_source = get_key_index_source(base_source_name, index)
-    key_example_value = list(base_example_value.keys())[index]
+
+    # Ensure that we call dict.keys and not value.keys (which can call
+    # overridden keys method). In the C++ guards, we relied on PyDict_Next
+    # to traverse the dictionary, which uses the internal data structure and
+    # does not call the overridden keys method.
+    key_example_value = list(builtin_dict_keys(base_example_value))[index]
     if isinstance(key_example_value, (int, str)):
         value_source = f"{base_source_name}[{key_example_value!r}]"
     else:
@@ -596,12 +578,17 @@ class GuardCodeList:
 class GuardManagerType(enum.Enum):
     GUARD_MANAGER = 1
     DICT_GUARD_MANAGER = 2
-    DICT_SUBCLASS_GUARD_MANAGER = 3
+
+
+@functools.lru_cache(None)
+def code_framelocals_names_reversed_cached(code: types.CodeType):
+    return list(reversed(code_framelocals_names(code)))
 
 
 class GuardBuilder(GuardBuilderBase):
     def __init__(
         self,
+        f_code: types.CodeType,
         id_ref: Callable[[Any, str], str],
         source_ref: Callable[[Source], str],
         lookup_weakrefs: Callable[[object], ReferenceType[object]],
@@ -610,6 +597,7 @@ class GuardBuilder(GuardBuilderBase):
         guard_manager: GuardManagerWrapper,
         check_fn_manager: CheckFunctionManager,
     ):
+        self.f_code = f_code
         self.id_ref = id_ref
         self.source_ref = source_ref
         self.lookup_weakrefs = lookup_weakrefs
@@ -671,7 +659,12 @@ class GuardBuilder(GuardBuilderBase):
 
         # Iterate over the dicts and install a dict_getitem_manager.
         dict_source = guard.originating_source.name()
-        for key in example_value.keys():
+
+        # Ensure that we call dict.keys and not value.keys (which can call
+        # overridden keys method). In the C++ guards, we relied on PyDict_Next
+        # to traverse the dictionary, which uses the internal data structure and
+        # does not call the overridden keys method.
+        for key in builtin_dict_keys(example_value):
             value = example_value[key]
             value_source = GetItemSource(guard.originating_source, index=key)
             guard_manager_enum = self.get_guard_manager_type(
@@ -695,7 +688,11 @@ class GuardBuilder(GuardBuilderBase):
             )
         assert isinstance(dict_mgr, DictGuardManager)
 
-        for idx, key in enumerate(value.keys()):
+        # Ensure that we call dict.keys and not value.keys (which can call
+        # overridden keys method). In the C++ guards, we relied on PyDict_Next
+        # to traverse the dictionary, which uses the internal data structure and
+        # does not call the overridden keys method.
+        for idx, key in enumerate(builtin_dict_keys(value)):
             key_source = get_key_index_source(guard.name, idx)
             key_manager = dict_mgr.get_key_manager(
                 index=idx,
@@ -772,7 +769,7 @@ class GuardBuilder(GuardBuilderBase):
                 index = get_key_index(base_example_value, key)
 
                 # Install the key manager and add equals match guard
-                key_source = f"list({source_name}.keys())[{index!r}]"
+                key_source = f"list(dict.keys({source_name}))[{index!r}]"
                 mgr.get_key_manager(
                     index=index,
                     source=key_source,
@@ -895,20 +892,16 @@ class GuardBuilder(GuardBuilderBase):
     def get_guard_manager_type(self, source, example_value):
         guard_manager_enum = GuardManagerType.GUARD_MANAGER
         if self.requires_key_order_guarding(source):
-            assert isinstance(example_value, dict)
-            # If keys method is not overriden, we can use PyDict_Next to get key
-            # orderings. Read more in guards.cpp
-            if type(example_value).keys is type({}).keys:
+            # Fix this if condition
+            if isinstance(example_value, dict_keys):
                 guard_manager_enum = GuardManagerType.DICT_GUARD_MANAGER
             else:
-                guard_manager_enum = GuardManagerType.DICT_SUBCLASS_GUARD_MANAGER
+                assert isinstance(example_value, dict)
+                guard_manager_enum = GuardManagerType.DICT_GUARD_MANAGER
         return guard_manager_enum
 
     def manager_guards_on_keys(self, mgr_enum):
-        return (
-            mgr_enum == GuardManagerType.DICT_GUARD_MANAGER
-            or mgr_enum == GuardManagerType.DICT_SUBCLASS_GUARD_MANAGER
-        )
+        return mgr_enum == GuardManagerType.DICT_GUARD_MANAGER
 
     def get_global_guard_manager(self):
         return self.guard_manager.root.globals_dict_manager(
@@ -947,15 +940,34 @@ class GuardBuilder(GuardBuilderBase):
 
         # Use istype instead of isinstance to check for exact type of source.
         if istype(source, LocalSource):
-            # RootGuardManager accepts a dict but still its not a
-            # DictGuardManager because we will eventually move to
-            # fastlocals.
-            out = root_guard_manager.dict_getitem_manager(
-                key=source.local_name,
-                source=source_name,
-                example_value=example_value,
-                guard_manager_enum=guard_manager_enum,
-            )
+            # Refer to index in the frame's localsplus directly.
+            # NOTE: name order for a code object doesn't change.
+            # NOTE: we need to find the LAST matching index because <= 3.10 contains
+            # duplicate names in the case of cells: a name can be both local and cell
+            # and will take up 2 slots of the frame's localsplus. The correct behavior
+            # is to refer to the cell, which has a higher index.
+            if config.enable_cpp_framelocals_guard_eval:
+                framelocals_names_reversed = code_framelocals_names_reversed_cached(
+                    self.f_code
+                )
+                framelocals_idx = (
+                    len(framelocals_names_reversed)
+                    - framelocals_names_reversed.index(source.local_name)
+                    - 1
+                )
+                out = root_guard_manager.framelocals_manager(
+                    key=(source.local_name, framelocals_idx),
+                    source=source_name,
+                    example_value=example_value,
+                    guard_manager_enum=guard_manager_enum,
+                )
+            else:
+                out = root_guard_manager.dict_getitem_manager(
+                    key=source.local_name,
+                    source=source_name,
+                    example_value=example_value,
+                    guard_manager_enum=guard_manager_enum,
+                )
         elif istype(source, GlobalSource):
             # Global manager accepts a dict but it is not a DictGuardManager
             # because globals dict is big and we typically guard on a very
@@ -1042,8 +1054,7 @@ class GuardBuilder(GuardBuilderBase):
             assert base_guard_manager  # to make mypy happy
             if isinstance(base_example_value, (dict, collections.OrderedDict)):
                 # TODO(anijain2305) - Consider isolating GetItemSource and
-                # DictGetItemSource (or maybe use ODictGetItemSource for
-                # dicts) so that GetItemSource is only for non dict objects.
+                # DictGetItemSource for dicts) so that GetItemSource is only for non dict objects.
                 if isinstance(base_guard_manager, DictGuardManager):
                     assert self.manager_guards_on_keys(base_guard_manager_enum)
                     out = getitem_on_dict_manager(
@@ -1085,24 +1096,6 @@ class GuardBuilder(GuardBuilderBase):
                     index = source.unpack_slice()
                 out = base_guard_manager.getitem_manager(
                     key=index,
-                    source=source_name,
-                    example_value=example_value,
-                    guard_manager_enum=guard_manager_enum,
-                )
-        elif istype(source, ODictGetItemSource):
-            if isinstance(base_guard_manager, DictGuardManager):
-                assert self.manager_guards_on_keys(base_guard_manager_enum)
-                out = getitem_on_dict_manager(
-                    source,
-                    base_guard_manager,
-                    base_example_value,
-                    example_value,
-                    guard_manager_enum,
-                )
-            else:
-                assert base_guard_manager  # to make mypy happy
-                out = base_guard_manager.dict_getitem_manager(
-                    key=source.index,
                     source=source_name,
                     example_value=example_value,
                     guard_manager_enum=guard_manager_enum,
@@ -1273,10 +1266,11 @@ class GuardBuilder(GuardBuilderBase):
             name = guard
         else:
             name = guard.name
-        base = strip_getattr_getitem(strip_function_call(name))
+        base = strip_function_call(name)
         if base not in self.argnames:
-            if re.match(r"[a-zA-Z0-9_]+", base):
-                if re.match(r"^\d+$", base):
+            is_valid = torch._C._dynamo.is_valid_var_name(base)
+            if is_valid:
+                if is_valid == 2:
                     log.warning("invalid var name: %s", guard)
                 self.argnames.append(base)
 
@@ -1540,6 +1534,7 @@ class GuardBuilder(GuardBuilderBase):
                 frozenset,
                 slice,
                 range,
+                dict_keys,
                 torch.Size,
                 *np_types,
                 *ok_mutable_types,
@@ -1716,15 +1711,16 @@ class GuardBuilder(GuardBuilderBase):
         ) or is_from_optimizer_source(source_b):
             return
 
-        code = [f"{ref_b} is {ref_a}"]
-        self._set_guard_export_info(guard, code)
-
         # Check that the guard has not been inserted already
         key = (ref_a, ref_b)
         if key in self._cached_duplicate_input_guards:
             return
+
         self._cached_duplicate_input_guards.add((ref_a, ref_b))
         self._cached_duplicate_input_guards.add((ref_b, ref_a))
+
+        code = [f"{ref_b} is {ref_a}"]
+        self._set_guard_export_info(guard, code)
 
         install_object_aliasing_guard(
             self.get_guard_manager(guard),
@@ -1739,7 +1735,7 @@ class GuardBuilder(GuardBuilderBase):
 
         self.TYPE_MATCH(guard)
         code = []
-        any_key_is_id = any(key_is_id(k) for k in value.keys())
+        any_key_is_id = any(key_is_id(k) for k in builtin_dict_keys(value))
         const_keys_repr = dict_keys_repr(
             key_to_id(value),
             local=is_from_local_source(guard.originating_source),
@@ -1769,7 +1765,11 @@ class GuardBuilder(GuardBuilderBase):
         value = self.get(guard.name)
 
         code = []
-        code.append(f"list({ref}.keys()) == {list(value.keys())!r}")
+        # Ensure that we call dict.keys and not value.keys (which can call
+        # overridden keys method). In the C++ guards, we relied on PyDict_Next
+        # to traverse the dictionary, which uses the internal data structure and
+        # does not call the overridden keys method.
+        code.append(f"list(dict.keys({ref})) == {list(builtin_dict_keys(value))!r}")
         self._set_guard_export_info(guard, code)
 
         if self.requires_key_order_guarding(guard.originating_source):
@@ -1884,13 +1884,16 @@ class GuardBuilder(GuardBuilderBase):
         # Install all the symbolic guards in one lambda guard. These are run
         # at the very end of the RootGuardManager via epilogue guards.
         # TODO(anijain2305,williamwen42) - Consider moving this to C++.
-        self.add_python_lambda_leaf_guard_to_root(
-            code_parts,
-            verbose_code_parts,
-            closure_vars={**SYMPY_INTERP, **_get_closure_vars()},
-        )
+        if code_parts:
+            self.add_python_lambda_leaf_guard_to_root(
+                code_parts,
+                verbose_code_parts,
+                closure_vars={**SYMPY_INTERP, **_get_closure_vars()},
+            )
 
     def TENSOR_MATCH(self, guard: Guard, value=None):
+        if config._unsafe_skip_fsdp_module_guards and guard.is_fsdp_module():
+            return
         # For tensors that are part of the Dynamo extracted Fx graph module, an
         # ID_MATCH suffices. Once we turn on inline_inbuilt_nn_modules, these
         # will be lifted as inputs and have a TENSOR_MATCH guard.
@@ -2057,18 +2060,17 @@ class GuardBuilder(GuardBuilderBase):
         caller = cur_frame.f_back
         del cur_frame
         assert caller is not None
-        func_name = getframeinfo(caller)[2]
+        func_name = caller.f_code.co_name
         del caller
         # We use func_name for export, so might as well get a nice defensive check out of it
-        assert func_name in dir(
-            self.__class__
+        assert (
+            func_name in self.__class__.__dict__
         ), f"_produce_guard_code must be called from inside GuardedCode. Called from {func_name}"
 
         # Not all guards have names, some can be installed globally (see asserts on HAS_GRAD)
         if provided_guarded_object is None:
-            name_valid = guard.name is not None and guard.name != ""
-
-            guarded_object = self.get(guard.name) if name_valid else None
+            name = guard.name
+            guarded_object = None if not name else self.get(name)
         else:
             guarded_object = provided_guarded_object
 
@@ -2226,6 +2228,7 @@ class DeletedGuardManagerWrapper(GuardManagerWrapper):
 class CheckFunctionManager:
     def __init__(
         self,
+        f_code,
         output_graph=None,
         cache_entry=None,
         guard_fail_fn: Optional[Callable[[GuardFail], None]] = None,
@@ -2258,6 +2261,7 @@ class CheckFunctionManager:
             return r_builder.arg_ref(source.name())
 
         builder = GuardBuilder(
+            f_code,
             self.id_ref,
             source_ref,
             self.lookup_weakrefs,
@@ -2283,7 +2287,7 @@ class CheckFunctionManager:
         if not justknobs_check("pytorch/compiler:guard_nn_modules"):
             log.warning("guard_nn_modules is turned off using justknobs killswitch")
 
-        for guard in sorted(guards or [], key=Guard.sort_key):
+        for guard in sorted(guards or (), key=Guard.sort_key):
             if (
                 not guard_on_nn_modules
                 and guard.is_specialized_nn_module()

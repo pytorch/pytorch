@@ -447,7 +447,6 @@ def reduction_reference(op, sample):
     assert op._extra_op_data.dim_args is not None
     single_dim_argname, dimlist_argname = op._extra_op_data.get_dim_argnames()
     assert single_dim_argname is not None
-    supports_dimlist = dimlist_argname is not None
 
     dim = sample.kwargs.get(
         dimlist_argname, sample.kwargs.get(single_dim_argname, None)
@@ -814,7 +813,6 @@ def sample_inputs_unary_dimwise(
 
 def batchwise_reference_chunk(op, sample):
     # reference for chunk() over dim=0
-    kwargs = sample.kwargs
     B = sample.input.size(0)
     num_chunks = sample.kwargs["chunks"]
     chunk_size = math.ceil(B / num_chunks)

@@ -52,7 +52,7 @@
 namespace at::native {
 
 template<typename scalar_t>
-scalar_t dot_impl(int64_t n, scalar_t *x, int64_t incx, scalar_t *y, int64_t incy);
+scalar_t dot_impl(int64_t n, const scalar_t *x, int64_t incx, const scalar_t *y, int64_t incy);
 
 static void make_offset2bag(const Tensor &offsets, Tensor& offset2bag) {
   offset2bag.index_add_(
@@ -1718,9 +1718,8 @@ Tensor _embedding_bag_per_sample_weights_backward_cpu_template(
 
         if (embedding_idx != static_cast<index_t>(padding_idx)) {
           output_data[sample_idx] = dot_impl<scalar_t>(
-              embedding_features,
-              const_cast<scalar_t*>(grad_data + grad_stride0 * bag_idx), grad_stride1,
-              const_cast<scalar_t*>(weight_data + weight_stride0 * embedding_idx), weight_stride1);
+              embedding_features, grad_data + grad_stride0 * bag_idx, grad_stride1,
+                 weight_data + weight_stride0 * embedding_idx, weight_stride1);
         }
       }
     });
