@@ -210,10 +210,6 @@ bool is_broadcast(const at::Tensor& t) {
 void undo_broadcast_on_batch(at::Tensor& m1, at::Tensor& m2) {
   // onednn support one of src and wei broadcasted on batch dim
   auto tensor_dim = m1.dim();
-  TORCH_CHECK(
-      tensor_dim == 2 || tensor_dim == 3,
-      "undo_broadcast_on_batch only works with 2D or 3D, got ",
-      tensor_dim);
   if (tensor_dim ==2)
     return;
   auto undo_broadcast = [](at::Tensor& tensor) {
@@ -253,18 +249,13 @@ bool is_onednn_matmul_strides(const at::Tensor& tensor, bool is_dst) {
     return true;
 
   // the overlaped cases are not supported
-  dnnl::memory::dims strides = get_onednn_strides(tensor);
-  int64_t storage_size = 1;
-  for (size_t dim = 0; dim < tensor_dim; ++dim)
-    storage_size += (sizes[dim] - 1) * strides[dim];
-  if (storage_size < tensor.numel())
-    return false;
+  if (at::has_internal_overlap(tensor) == at::MemOverlap::Yes) return false;
 
   // the broadcast cases are not supported
   if (is_broadcast(tensor)) {
     return false;
   }
-
+  dnnl::memory::dims strides = get_onednn_strides(tensor);
   if (is_dst) {
     // The memory format of the destination tensor should always
     // be plain with n axis contiguous
