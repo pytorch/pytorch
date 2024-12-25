@@ -565,11 +565,14 @@ struct ReduceOp {
     using load_t = at::native::memory::aligned_vector<scalar_t, output_vec_size>;
 
     // Multiple accumulators to remove dependency between unrolled loops.
-    arg_vec_t value_list;
+    arg_vec_t value_list[vt0];
 
     #pragma unroll
-    for (int j = 0; j < output_vec_size; j++) {
-      value_list[j] = ident;
+    for (int i = 0; i < vt0; i++) {
+      #pragma unroll
+      for (int j = 0; j < output_vec_size; j++) {
+        value_list[i][j] = ident;
+      }
     }
 
     load_t values[vt0];
@@ -584,7 +587,7 @@ struct ReduceOp {
       for (index_t i = 0; i < vt0; i++) {
         #pragma unroll
         for (index_t j = 0; j < output_vec_size; j++) {
-          value_list[j] = ops.reduce(value_list[j], values[i].val[j], idx + i * stride);
+          value_list[i][j] = ops.reduce(value_list[i][j], values[i].val[j], idx + i * stride);
         }
       }
       idx += stride * vt0;
@@ -609,12 +612,20 @@ struct ReduceOp {
       }
       #pragma unroll
       for (index_t j = 0; j < output_vec_size; j++) {
-        value_list[j] = ops.reduce(value_list[j], values[i].val[j], idx);
+        value_list[i][j] = ops.reduce(value_list[i][j], values[i].val[j], idx);
       }
       idx += stride;
     }
 
-    return value_list;
+    // combine accumulators
+    #pragma unroll
+    for (int i = 1; i < vt0; i++) {
+      #pragma unroll
+      for (index_t j = 0; j < output_vec_size; j++) {
+        value_list[0][j] = ops.combine(value_list[0][j], value_list[i][j]);
+      }
+    }
+    return value_list[0];
   }
 
   template <int output_vec_size>
