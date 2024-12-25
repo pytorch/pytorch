@@ -66,7 +66,7 @@ from .bytecode_transformation import (
 from .cache_size import (
     CacheSizeRelevantForFrame,
     compute_cache_size,
-    exceeds_cache_size_limit,
+    exceeds_recompile_limit,
     is_recompilation,
 )
 from .eval_frame import (
@@ -82,6 +82,7 @@ from .exc import (
     format_error_msg,
     InternalTorchDynamoError,
     RecompileLimitExceeded,
+    ShortenTraceback,
     SkipCodeRecursiveException,
     TorchRuntimeError,
     UncapturedHigherOrderOpError,
@@ -911,7 +912,7 @@ def _compile(
                 cache_entry, frame
             )
 
-        exceeded, limit_type = exceeds_cache_size_limit(cache_size, compile_id)
+        exceeded, limit_type = exceeds_recompile_limit(cache_size, compile_id)
         if exceeded:
 
             def format_func_info(code: CodeType) -> str:
@@ -934,12 +935,12 @@ def _compile(
                 format_guard_failures(),
                 troubleshooting_url,
             )
-            if config.fail_on_cache_limit_hit:
+            if config.fail_on_recompile_limit_hit:
                 raise FailOnRecompileLimitHit(
-                    f"{limit_type} reached, because fail_on_cache_limit_hit = True this is a HARD failure"
+                    f"{limit_type} reached, because fail_on_recompile_limit_hit = True this is a HARD failure"
                 )
-            elif config.skip_code_recursive_on_cache_limit_hit and justknobs_check(
-                "pytorch/compiler:skip_code_recursive_on_cache_limit_hit"
+            elif config.skip_code_recursive_on_recompile_limit_hit and justknobs_check(
+                "pytorch/compiler:skip_code_recursive_on_recompile_limit_hit"
             ):
                 raise RecompileLimitExceeded(f"{limit_type} reached")
             else:
@@ -1047,6 +1048,7 @@ def _compile(
                     ValidationException,
                     UncapturedHigherOrderOpError,
                     BisectValidationException,
+                    ShortenTraceback,
                 ),
             ):
                 raise
