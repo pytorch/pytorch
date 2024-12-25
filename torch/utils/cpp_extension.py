@@ -126,11 +126,11 @@ def _find_rocm_home() -> Optional[str]:
         # Guess #2
         hipcc_path = shutil.which('hipcc')
         if hipcc_path is not None:
-            rocm_home = os.path.dirname(os.path.dirname(
-                os.path.realpath(hipcc_path)))
+            rocm_home_path = Path(hipcc_path).resolve().parent.parent
             # can be either <ROCM_HOME>/hip/bin/hipcc or <ROCM_HOME>/bin/hipcc
-            if os.path.basename(rocm_home) == 'hip':
-                rocm_home = os.path.dirname(rocm_home)
+            if rocm_home_path.name == 'hip':
+                rocm_home_path = rocm_home_path.parent
+            rocm_home = str(rocm_home_path)
         else:
             # Guess #3
             fallback_path = '/opt/rocm'
@@ -147,8 +147,7 @@ def _find_sycl_home() -> Optional[str]:
     # Guess 1: for source code build developer/user, we'll have icpx in PATH,
     # which will tell us the SYCL_HOME location.
     if icpx_path is not None:
-        sycl_home = os.path.dirname(os.path.dirname(
-            os.path.realpath(icpx_path)))
+        sycl_home = str(Path(icpx_path).resolve().parent.parent)
 
     # Guess 2: for users install Pytorch with XPU support, the sycl runtime is
     # inside intel-sycl-rt, which is automatically installed via pip dependency.
@@ -157,7 +156,7 @@ def _find_sycl_home() -> Optional[str]:
             files = importlib.metadata.files('intel-sycl-rt') or []
             for f in files:
                 if f.name == "libsycl.so":
-                    sycl_home = os.path.dirname(Path(f.locate()).parent.resolve())
+                    sycl_home = str(Path(f.locate()).resolve().parent.parent)
                     break
         except importlib.metadata.PackageNotFoundError:
             print("Trying to find SYCL_HOME from intel-sycl-rt package, but it is not installed.",
