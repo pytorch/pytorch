@@ -441,7 +441,7 @@ def vmapify_autograd_function(autograd_function, in_dims, batch_size, randomness
         )(ctx.saved_tensors, tangents)
 
         result = reductify(out_tangents, out_tangents_dims, ctx.out_dims, batch_size)
-        return result
+        return *result, None
 
     def backward(ctx, grad_outputs, grad_out_dims):
         def backward_no_context(inputs):
