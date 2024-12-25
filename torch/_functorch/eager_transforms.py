@@ -32,12 +32,15 @@ from torch._functorch.utils import argnums_t, exposed_in
 from torch._subclasses.functional_tensor import FunctionalTensor
 from torch.fx.experimental import const_fold
 from torch.fx.experimental.proxy_tensor import make_fx
-from torch.utils import _pytree as pytree
-from torch.utils._pytree import (
+from torch.utils.pytree import (
+    tree_any,
     tree_flatten,
+    tree_iter,
+    tree_leaves,
     tree_map,
     tree_map_,
     tree_map_only,
+    tree_structure,
     tree_unflatten,
     treespec_pprint,
 )
@@ -100,8 +103,7 @@ def _is_differentiable(maybe_tensor):
 
 
 def _any_differentiable(tensor_or_tuple_of_tensors):
-    flat_args, _ = tree_unflatten(tensor_or_tuple_of_tensors)
-    return any(tuple(map(_is_differentiable, flat_args)))
+    return tree_any(_is_differentiable, tensor_or_tuple_of_tensors)
 
 
 def _wrap_tensor_for_grad(maybe_tensor, level):
@@ -414,8 +416,7 @@ def _safe_zero_index(x):
 # jacrev and jacfwd don't support complex functions
 # Helper function to throw appropriate error.
 def error_if_complex(func_name, args, is_input):
-    flat_args = pytree.tree_leaves(args)
-    for idx, arg in enumerate(flat_args):
+    for idx, arg in enumerate(tree_iter(args)):
         if isinstance(arg, torch.Tensor) and arg.dtype.is_complex:
             input_or_output = "inputs" if is_input else "outputs"
             err_msg = (
@@ -610,7 +611,7 @@ def jacrev(
                 else:  # chunk_size is None or chunk_size != 1
                     chunked_result = vmap(vjp_fn)(basis)
 
-                flat_results = pytree.tree_leaves(chunked_result)
+                flat_results = tree_leaves(chunked_result)
 
                 if chunk_size == 1:
                     flat_results = tree_map(
@@ -667,7 +668,7 @@ def jacrev(
                 else:  # chunk_size is None or chunk_size != 1
                     chunked_result = vmap(vjp_fn)(basis)
 
-                flat_results = pytree.tree_leaves(chunked_result)
+                flat_results = tree_leaves(chunked_result)
 
                 # Short-circuit if we have a single chunk.
                 if chunk_size is None or chunk_size >= out_vec_size:
@@ -1275,9 +1276,7 @@ def jacfwd(
             results, aux = results
             # aux is in the standard basis format, e.g. NxN matrix
             # We need to fetch the first element as original `func` output
-            flat_aux, aux_spec = tree_flatten(aux)
-            flat_aux = [value[0] for value in flat_aux]
-            aux = tree_unflatten(flat_aux, aux_spec)
+            aux = tree_map(lambda value: value[0], aux)
 
         jac_outs, spec = tree_flatten(results)
         # Most probably below output check can never raise an error
@@ -1637,10 +1636,10 @@ def functionalize(func: Callable, *, remove: str = "mutations") -> Callable:
             func_args = _wrap_all_tensors_to_functional(args, func_level)
             func_kwargs = _wrap_all_tensors_to_functional(kwargs, func_level)
 
-            flattened_unwrapped_args = pytree.arg_tree_leaves(*args)
-            flattened_wrapped_args = pytree.arg_tree_leaves(*func_args)
-            flattened_unwrapped_kwargs = pytree.arg_tree_leaves(**kwargs)
-            flattened_wrapped_kwargs = pytree.arg_tree_leaves(**func_kwargs)
+            flattened_unwrapped_args = tree_leaves(args)
+            flattened_wrapped_args = tree_leaves(func_args)
+            flattened_unwrapped_kwargs = tree_leaves(kwargs)
+            flattened_wrapped_kwargs = tree_leaves(func_kwargs)
 
             func_outputs = func(*func_args, **func_kwargs)
             outputs = _unwrap_all_tensors_from_functional(
@@ -1721,7 +1720,7 @@ def linearize(func: Callable, *primals) -> Tuple[Any, Callable]:
     # make_fx such that it also returns the output.
 
     output = func(*primals)
-    _, output_spec = tree_flatten(output)
+    output_spec = tree_structure(output)
 
     flat_primals, primals_argspec = tree_flatten(primals)
 

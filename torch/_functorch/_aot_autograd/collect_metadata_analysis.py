@@ -15,7 +15,7 @@ from functools import wraps
 from typing import Callable, DefaultDict, Dict, List, Optional, Set
 
 import torch
-import torch.utils._pytree as pytree
+import torch.utils.pytree as pytree
 from torch import Tensor
 from torch._guards import detect_fake_mode
 from torch._logging import getArtifactLogger

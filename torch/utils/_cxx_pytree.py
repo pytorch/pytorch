@@ -30,7 +30,10 @@ from typing import (
 from typing_extensions import deprecated, Self, TypeIs
 
 import optree
-from optree import PyTreeSpec as TreeSpec  # direct import for type annotations
+from optree import (  # noqa: F401  # direct import for type annotations
+    PyTreeSpec as PyTreeSpec,
+    PyTreeSpec as TreeSpec,
+)
 
 import torch.utils._pytree as python_pytree
 from torch.utils._pytree import KeyEntry as KeyEntry

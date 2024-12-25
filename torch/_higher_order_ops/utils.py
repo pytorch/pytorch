@@ -6,7 +6,7 @@ from typing import Any, Callable, List, Tuple, Union
 
 import torch
 import torch.fx.traceback as fx_traceback
-import torch.utils._pytree as pytree
+import torch.utils.pytree as pytree
 from torch._ops import OperatorBase
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.passes.shape_prop import TensorMetadata
@@ -36,7 +36,7 @@ def autograd_not_implemented_inner(
     """
     with torch._C._AutoDispatchBelowAutograd():
         result = operator(*args, **kwargs)
-        flat_operands = pytree.arg_tree_leaves(*args)
+        flat_operands = pytree.tree_leaves(args)
         if torch.is_grad_enabled() and any(
             f.requires_grad for f in flat_operands if isinstance(f, torch.Tensor)
         ):

@@ -9,7 +9,7 @@ import typing
 from typing import Any, Iterable, List, Optional, Tuple, Union
 
 import torch
-import torch.utils._pytree as pytree
+import torch.utils.pytree as pytree
 from torch import SymInt, Tensor
 from torch._subclasses.fake_tensor import get_plain_tensors
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
@@ -27,7 +27,7 @@ zip = strict_zip
 
 
 def requires_subclass_dispatch(args, fw_metadata: ViewAndMutationMeta) -> bool:
-    args_flattened = pytree.arg_tree_leaves(*args)
+    args_flattened = pytree.tree_leaves(args)
     any_subclass_args = any(
         is_traceable_wrapper_subclass(x)
         for x in args_flattened
