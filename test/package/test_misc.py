@@ -198,7 +198,7 @@ class TestMisc(PackageTestCase):
     def test_load_python_version_from_package(self):
         """Tests loading a package with a python version embdded"""
         importer1 = PackageImporter(
-            f"{Path(__file__).parent}/package_e/test_nn_module.pt"
+            str(Path(__file__).absolute().parent / "package_e" / "test_nn_module.pt")
         )
         self.assertEqual(importer1.python_version(), "3.9.7")
 
