@@ -1691,9 +1691,8 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
     @parametrize("batch_size", (16, 52))
     @parametrize("in_features", (52,))
     @parametrize("out_features", (32, 52))
-    @parametrize("bias_gate", (False,))
-    @parametrize("bias_up", (False,))
     @parametrize("input_3d", (False, True))
+    @parametrize("gemm_num", (2, 3))
     @dtypes(
         torch.bfloat16,
     )
@@ -1702,30 +1701,27 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         batch_size,
         in_features,
         out_features,
-        bias_gate,
-        bias_up,
         input_3d,
+        gemm_num,
         dtype,
     ):
         class Linear_Gate_Up(torch.nn.Module):
-            def __init__(self, in_feature, out_feature, bias_gate=False, bias_up=False):
+            def __init__(self, in_feature, out_feature, gemm_num):
                 super().__init__()
-                self.gate_proj = torch.nn.Linear(
-                    in_feature, out_feature, bias=bias_gate
-                )
-                self.up_proj = torch.nn.Linear(in_feature, out_feature, bias=bias_up)
+                self.gemm_num = gemm_num
+                self.linears = [
+                    torch.nn.Linear(in_feature, out_feature, bias=False)
+                    for _ in range(gemm_num)
+                ]
 
             def forward(self, x):
-                return self.gate_proj(x), self.up_proj(x)
+                return [self.linears[i](x) for i in range(self.gemm_num)]
 
-        if input_3d and bias_gate and bias_up:
-            # Reduce the redundant test combination
-            return
         torch._dynamo.reset()
         torch._inductor.metrics.reset()
         counters.clear()
         assert dtype == torch.bfloat16
-        mod = Linear_Gate_Up(in_features, out_features, bias_gate, bias_up).eval()
+        mod = Linear_Gate_Up(in_features, out_features, gemm_num).eval()
         B = (2, batch_size) if input_3d else (batch_size,)
         v = torch.randn(*B, in_features).to(torch.bfloat16)
         with verify(dtype) as (atol, rtol), torch.autocast(

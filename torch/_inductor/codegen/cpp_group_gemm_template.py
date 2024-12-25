@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import contextlib
 import logging
-from typing import Any, Callable, List, Optional, Union
+from typing import Any, Callable, List, Optional
 from unittest.mock import patch
 
 import torch
@@ -32,7 +32,7 @@ GEMM_TEMPLATE = r"""
 {{micro_gemm.codegen_define(kernel)}}
 
 extern "C" {{export_declaration}}
-{{kernel.def_kernel(inputs=kernel_args, outputs={"Y": Y, "Y2": Y2}, aliases=aliases)}}
+{{kernel.def_kernel(inputs=kernel_args, outputs=Y_list, aliases=aliases)}}
 {
     {{kernel.maybe_codegen_profile()}}
     {{ template.codegen_blocks(
@@ -103,13 +103,14 @@ extern "C" {{export_declaration}}
                     }
                 }
                 {
-{%- set tile_Y = kernel.slice_nd(Y_2d, [("m_start", "m_end"), ("n_start", "n_end")]) %}
-{%- set tile_Y2 = kernel.slice_nd(Y2_2d, [("m_start", "m_end"), ("n_start", "n_end")]) %}
-{%- set tile_Y_list = [tile_Y, tile_Y2] %}
 {%- set tile_acc_list = [] %}
+{%- set tile_Y_list = [] %}
 {%- for gemm_idx in range(0, gemm_group_num, 1) %}
     {%- set tile_acc_list = tile_acc_list.append(
         kernel.slice_nd(acc_list[gemm_idx], [("0", "m_end - m_start"), ("0", "n_end - n_start")])
+    ) %}
+    {%- set tile_Y_list = tile_Y_list.append(
+        kernel.slice_nd(Y_2d_list[gemm_idx], [("m_start", "m_end"), ("n_start", "n_end")])
     ) %}
 {%- endfor %}
                     {{ kernel.store_output(
@@ -349,23 +350,19 @@ class CppGroupGemmTemplate(CppGemmTemplate):
                 inp = self.input_nodes[cur_idx]
                 cur_idx += 1
             inp_list.append(inp)
-        Y = self.output_node[0]
-        Y2 = self.output_node[1]
 
+        Y_list = self.output_node
         if template_buffer_node is not None:
             W_list = template_buffer_node.inputs[
                 wgt_start_idx : wgt_start_idx + self.gemm_group_num
             ]
             assert isinstance(template_buffer_node.outputs, List)
-            Y = template_buffer_node.outputs[0]
-            Y2 = template_buffer_node.outputs[1]
+            Y_list = template_buffer_node.outputs
             counters["inductor"]["cpp_group_gemm_template"] += 1
 
-        template_buffer = Y
+        template_buffer = Y_list[0]
         fake_buffers: List[ir.Buffer] = []
-        Y_aliases = OrderedSet[str]()
-        Y_2d: Union[ir.Buffer, ir.ReinterpretView] = Y
-        Y2_2d: Union[ir.Buffer, ir.ReinterpretView] = Y2
+        Y_2d_list = Y_list
         output_dtype, compute_dtype = get_gemm_template_output_and_compute_dtype(
             X_list[0].get_dtype()
         )
@@ -417,12 +414,10 @@ class CppGroupGemmTemplate(CppGemmTemplate):
             kernel_args["inp" + str(inp_idx)] = inp_list[inp_idx]
 
         options = dict(
-            Y=Y,
-            Y2=Y2,
             N=self.n,
             K=self.k,
             PADDED_N=self.padded_n,
-            aliases={alias: Y.get_name() for alias in Y_aliases},
+            aliases={},
             beta=self.beta,
             alpha=self.alpha,
             num_threads=self.num_threads,
@@ -431,8 +426,6 @@ class CppGroupGemmTemplate(CppGemmTemplate):
             template=self,
             kernel=kernel,
             export_declaration=get_export_declaration(),
-            Y_2d=Y_2d,
-            Y2_2d=Y2_2d,
             acc_buf_dtype=torch.float,
             DTYPE_TO_CPP=DTYPE_TO_CPP,
             L1_cache_size=L1_cache_size,
@@ -445,6 +438,8 @@ class CppGroupGemmTemplate(CppGemmTemplate):
             X_list=X_list,
             W_list=W_list,
             gemm_group_num=self.gemm_group_num,
+            Y_list={"Y" + str(idx): Y for idx, Y in enumerate(Y_list)},
+            Y_2d_list=Y_2d_list,
         )
         with contextlib.ExitStack() as stack:
             for buf in fake_buffers:

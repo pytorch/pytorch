@@ -34,9 +34,9 @@ def group_gemm_lowering(
     x: TensorBox,
     w: List[TensorBox],
     b: List[TensorBox],
-    attr,
-    scalars,
-    algorithm,
+    attr=None,
+    scalars=None,
+    algorithm=None,
     layout=None,
 ):
     x_size = x.get_size()
