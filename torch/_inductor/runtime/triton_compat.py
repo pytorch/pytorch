@@ -82,12 +82,12 @@ else:
 
     class triton:  # type: ignore[no-redef]
         @staticmethod
-        def jit(*args, **kwargs):
+        def jit(*args: Any, **kwargs: Any) -> Any:
             return _raise_error
 
     class tl:  # type: ignore[no-redef]
         @staticmethod
-        def constexpr(val):
+        def constexpr(val: Any) -> Any:
             return val
 
         tensor = Any
