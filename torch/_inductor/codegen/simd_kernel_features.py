@@ -198,8 +198,8 @@ class SIMDKernelFeatures:
         """Analysis to generate features that can be used in heuristics"""
         if groups_dict is None:
             groups = (self.numel, self.reduction_numel)
-        elif groups_dict.keys() == {"x", "r"}:
-            groups = (groups_dict["x"], groups_dict["r"])
+        elif groups_dict.keys() == OrderedSet(["x", "r0_"]):
+            groups = (groups_dict["x"], groups_dict["r0_"])
         else:
             raise NotImplementedError(f"groups_dict={groups_dict!r}")
         result = self._stats_cache.get(groups)
