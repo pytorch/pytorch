@@ -3004,14 +3004,22 @@ class SliceView(View):
         dim_size = x.get_size()[dim]
 
         if any(free_unbacked_symbols(x) for x in (start, end, dim_size)):
-
-            def clamp(x, lower, upper):  # type: ignore[no-untyped-def]
-                return sympy.Min(sympy.Max(x, lower), upper)
-
+            min_func = sympy.Min
+            max_func = sympy.Max
         else:
+            min_func = sizevars.evaluate_min
+            max_func = sizevars.evaluate_max
 
-            def clamp(x, lower, upper):  # type: ignore[no-untyped-def]
-                return sizevars.evaluate_min(sizevars.evaluate_max(x, lower), upper)
+        def clamp(x, lower, upper):  # type: ignore[no-untyped-def]
+            clamped_lower = (
+                x if sizevars.statically_known_geq(x, lower) else max_func(x, lower)
+            )
+            clamped_full = (
+                clamped_lower
+                if sizevars.statically_known_leq(clamped_lower, upper)
+                else min_func(clamped_lower, upper)
+            )
+            return clamped_full
 
         def clamp_wrap(val, lower, upper, default):  # type: ignore[no-untyped-def]
             if val is None:
@@ -3859,6 +3867,9 @@ class ConstantBuffer(InputBuffer):
 
 @ir_dataclass
 class NoneAsConstantBuffer(IRNode):
+    def get_reads(self) -> OrderedSet[Dep]:
+        return OrderedSet()
+
     def get_unbacked_symbol_uses(self) -> OrderedSet[sympy.Symbol]:
         return OrderedSet()
 
@@ -7137,20 +7148,23 @@ class InvokeSubgraph(ExternKernel):
             layout=MultiOutputLayout(device=device),
         )
 
-        outputs = [
-            MultiOutput(
-                FixedLayout(
-                    device=output.get_device(),
-                    dtype=output.get_dtype(),
-                    size=output.get_size(),  # type: ignore[arg-type]
-                    stride=output.get_stride(),
-                    offset=output.get_layout().offset,
-                ),
-                invoke_subgraph,
-                [(list, i)],
-            )
-            for i, output in enumerate(outputs)
-        ]
+        def create_output(output: IRNode, ind: int):
+            if isinstance(output, NoneAsConstantBuffer):
+                return output
+            else:
+                return MultiOutput(
+                    FixedLayout(
+                        device=output.get_device(),
+                        dtype=output.get_dtype(),
+                        size=output.get_size(),  # type: ignore[arg-type]
+                        stride=output.get_stride(),
+                        offset=output.get_layout().offset,
+                    ),
+                    invoke_subgraph,
+                    [(list, ind)],
+                )
+
+        outputs = [create_output(output, i) for i, output in enumerate(outputs)]
 
         invoke_subgraph.outputs = outputs
         return outputs
