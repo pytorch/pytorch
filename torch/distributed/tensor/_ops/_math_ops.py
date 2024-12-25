@@ -1,4 +1,3 @@
-# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import math
@@ -323,6 +322,10 @@ LINEAR_REDUCTION_OP_MAP = {
     aten.any.default: "sum",
     aten.any.dim: "sum",
     aten.any.out: "sum",
+    aten.amax.default: "max",
+    aten.amax.out: "max",
+    aten.amin.default: "min",
+    aten.amin.out: "min",
 }
 
 
