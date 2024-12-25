@@ -74,6 +74,27 @@ __all__ = [
 ]
 
 
+if _TYPE_CHECKING:
+    # To annotate a module using `torch.utils.pytree`, users can use:
+    #
+    # ```python
+    # from typing import TYPE_CHECKING
+    #
+    # if TYPE_CHECKING:
+    #     from torch.utils.pytree import FlattenFunc, ...
+    #
+    # ...
+    # ```
+
+    __all__ += [
+        "FlattenFunc",
+        "UnflattenFunc",
+        "FlattenWithKeysFunc",
+        "FromDumpableContextFunc",
+        "ToDumpableContextFunc",
+    ]
+
+
 PYTORCH_USE_CXX_PYTREE: bool = _os.getenv("PYTORCH_USE_CXX_PYTREE", "0") not in {
     "0",
     "",
