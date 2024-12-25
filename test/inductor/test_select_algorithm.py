@@ -53,7 +53,7 @@ class TestSelectAlgorithm(TestCase):
             return self.skipTest("Need a big GPU to run max_autotune=True")
 
     @patches
-    def test_linear_relu_gpu(self):
+    def test_linear_relu(self):
         @torch.compile
         def foo(input, weight, bias):
             return F.relu(F.linear(input, weight, bias))
@@ -69,7 +69,7 @@ class TestSelectAlgorithm(TestCase):
         # only happens if we select a triton template (and not aten).
 
     @patches
-    def test_addmm_gpu(self):
+    def test_addmm(self):
         @torch.compile
         def foo(input, weight, bias):
             return torch.addmm(bias, input, weight)
@@ -198,7 +198,7 @@ class TestSelectAlgorithm(TestCase):
     # and enable this test case.
     @skipIfXpu
     @patches
-    def test_mm_plus_mm2_gpu(self):
+    def test_mm_plus_mm2(self):
         @torch.compile
         def foo(a, b, c, d):
             return (a @ b) + (c @ d)
@@ -214,7 +214,7 @@ class TestSelectAlgorithm(TestCase):
 
     @expectedFailureDynamicWrapper
     @patches
-    def test_mm_plus_mm3_gpu(self):
+    def test_mm_plus_mm3(self):
         @torch.compile
         def foo(a, b, c, d):
             return (a @ b) + (c @ d)
