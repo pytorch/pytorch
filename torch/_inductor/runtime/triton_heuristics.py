@@ -54,6 +54,7 @@ from .runtime_utils import (
 from .triton_compat import (
     ASTSource,
     autograd_profiler,
+    cc_warp_size,
     CompiledKernel,
     Config,
     GPUTarget,
@@ -423,28 +424,11 @@ class CachingAutotuner(KernelInterface):
             ),
         )
 
-        cc_str = str(compile_meta["cc"])
-        if "gfx10" in cc_str or "gfx11" in cc_str:
-            rocm_warp_size = 32
-        else:
-            rocm_warp_size = 64
-
-        if GPUTarget:
-            target = GPUTarget(
-                compile_meta["device_type"],
-                compile_meta["cc"],
-                rocm_warp_size if torch.version.hip else 32,
-            )
-        else:
-            target = (
-                (compile_meta["device_type"], compile_meta["cc"])
-                if not torch.version.hip
-                else [
-                    compile_meta["device_type"],
-                    compile_meta["cc"],
-                    rocm_warp_size,
-                ]
-            )
+        target = GPUTarget(
+            compile_meta["device_type"],
+            compile_meta["cc"],
+            cc_warp_size(compile_meta["cc"]),
+        )
 
         options = {
             "num_warps": compile_meta["num_warps"],
