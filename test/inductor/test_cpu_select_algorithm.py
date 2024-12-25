@@ -1730,6 +1730,47 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
             self.common(mod, (v,), atol=atol, rtol=rtol)
         self.assertEqual(counters["inductor"]["cpp_group_gemm_template"], 1)
 
+    @inductor_config.patch({"freezing": True})
+    @inductor_config.patch({"cpp.enable_group_gemm_template": True})
+    @patches
+    @torch.no_grad
+    @unittest.skipIf(not TEST_MKL, "Test requires MKL")
+    @parametrize("batch_size", (16,))
+    @parametrize("in_features", (52,))
+    @parametrize("out_features", (32,))
+    @parametrize("bias", ([True, True],))
+    @dtypes(
+        torch.bfloat16,
+    )
+    def test_group_linear_epilogue(
+        self,
+        batch_size,
+        in_features,
+        out_features,
+        bias,
+        dtype,
+    ):
+        class Linear_Gate_Up(torch.nn.Module):
+            def __init__(self, in_feature, out_feature, bias):
+                super().__init__()
+                self.linear0 = torch.nn.Linear(in_feature, out_feature, bias=bias[0])
+                self.linear1 = torch.nn.Linear(in_feature, out_feature, bias=bias[1])
+
+            def forward(self, x):
+                return self.linear0(x), self.linear1(x)
+
+        torch._dynamo.reset()
+        torch._inductor.metrics.reset()
+        counters.clear()
+        assert dtype == torch.bfloat16
+        mod = Linear_Gate_Up(in_features, out_features, bias).eval()
+        v = torch.randn(batch_size, in_features).to(torch.bfloat16)
+        with verify(dtype) as (atol, rtol), torch.autocast(
+            device_type="cpu"
+        ), torch.no_grad():
+            self.common(mod, (v,), atol=atol, rtol=rtol)
+        self.assertEqual(counters["inductor"]["cpp_group_gemm_template"], 1)
+
     @inductor_config.patch({"freezing": False})
     @patches
     @torch.no_grad

@@ -228,7 +228,12 @@ class CppTemplateKernel(CppKernel):
         dst: Union[ir.Buffer, Tuple[ir.Buffer]],
         nodes: Union[List[ir.IRNode], List[List[ir.IRNode]]],
         offsets: Optional[List[sympy.Expr]] = None,
-        reindexers: Optional[List[Optional[Callable[[List[Any]], List[Any]]]]] = None,
+        reindexers: Optional[
+            Union[
+                List[Optional[Callable[[List[Any]], List[Any]]]],
+                List[List[Optional[Callable[[List[Any]], List[Any]]]]]
+            ]
+        ] = None,
     ) -> str:
         if isinstance(dst, Iterable):
             ref_dst = dst[0]
@@ -242,7 +247,12 @@ class CppTemplateKernel(CppKernel):
         if not offsets:
             offsets = [sympy.S.Zero] * len(var_sizes[0])
         if not reindexers:
-            reindexers = [None] * len(nodes)
+            if isinstance(dst, Iterable):
+                group_gemm_number = len(nodes)
+                for gemm_idx in range(group_gemm_number):
+                    reindexers[gemm_idx] = [None] * len(nodes[gemm_idx])
+            else:
+                reindexers = [None] * len(nodes)
         assert len(offsets) == len(var_sizes[0])
         output_index = ref_dst.get_layout().make_indexer()([*var_ranges.keys()])
         kernel_group = KernelGroup()
@@ -278,9 +288,9 @@ class CppTemplateKernel(CppKernel):
                     assert len(args[0]) == len(var_sizes[0])
                     assert len(args[1]) == 0
                     new_args = [arg + offset for arg, offset in zip(args[0], offsets)]  # type: ignore[arg-type]
-                    if reindexers[i] is not None:
-                        new_args = reindexers[i](new_args)  # type: ignore[misc]
                     for gemm_idx in range(group_gemm_number):
+                        if reindexers[gemm_idx][i] is not None:
+                            new_args = reindexers[gemm_idx][i](new_args)  # type: ignore[misc]
                         V.ops.store(
                             output_names[gemm_idx],
                             output_index,
@@ -336,7 +346,7 @@ class CppTemplateKernel(CppKernel):
         dst: Union[ir.Buffer, Tuple[ir.Buffer]],
         src: Union[ir.IRNode, Tuple[ir.IRNode]],
         orig_src: Optional[Union[ir.IRNode, Tuple[ir.IRNode]]] = None,
-        epilogue_nodes: Optional[List[ir.IRNode]] = None,
+        epilogue_nodes: Optional[Union[List[ir.IRNode], List[List[ir.IRNode]]]] = None,
         offsets: Optional[List[Any]] = None,
         reindexers: Optional[List[Optional[Callable[[List[Any]], List[Any]]]]] = None,
     ):
@@ -368,7 +378,6 @@ class CppTemplateKernel(CppKernel):
             assert all(
                 _dst.get_size() == _src.get_size() for _src, _dst in zip(src, dst)
             )
-            assert not epilogue_nodes, "epilogue_nodes not supported for Group GEMM yet"
         else:
             assert isinstance(dst, (ir.Buffer, ir.ReinterpretView))
             assert dst.get_size() == src.get_size(), f"{dst=}, {src=}"
@@ -378,6 +387,26 @@ class CppTemplateKernel(CppKernel):
             with LocalBufferContext(self.args) as scope:
                 assert orig_src is not None
                 if (
+                    isinstance(src, Iterable)
+                    and isinstance(orig_src, Iterable)
+                    and orig_src[0].get_name() != src[0].get_name()
+                ):
+                    assert all(
+                        _orig_src.get_name() != _src.get_name()
+                        for _orig_src, _src in zip(orig_src, src)
+                    )
+                    for _orig_src, _src in zip(orig_src, src):
+                        scope.add_local_buffer(
+                            _src,
+                            [
+                                _orig_src,
+                            ],
+                        )
+                    epilogue_nodes = [
+                        scope.localize_nodes(epilogue_node) if epilogue_node else None
+                        for epilogue_node in epilogue_nodes
+                    ]
+                elif (
                     isinstance(src, ir.IRNode)
                     and isinstance(orig_src, ir.IRNode)
                     and orig_src.get_name() != src.get_name()

@@ -19,6 +19,7 @@ from .cpp_gemm_template import CppGemmTemplate, expand_bias, prune_tensors, tran
 from .cpp_micro_gemm import CppMicroGemmAMX, create_micro_gemm
 from .cpp_template_kernel import CppTemplateKernel
 from .cpp_utils import (
+    create_epilogue_with_attr,
     DTYPE_TO_CPP,
     GemmBlocking,
     get_gemm_template_output_and_compute_dtype,
@@ -390,8 +391,8 @@ class CppGroupGemmTemplate(CppGemmTemplate):
         L2_cache_size = torch._C._cpu._L2_cache_size()  # per core cache size in Bytes
         assert L2_cache_size > 0, f"Expect L2_cache_size > 0 but got {L2_cache_size}"
 
-        epilogues: List[ir.IRNode] = []
-        reindexers: List[Optional[Callable[[List[Any]], List[Any]]]] = []
+        epilogues: List[List[ir.IRNode]] = [ [] for _ in range(self.gemm_group_num) ]
+        reindexers: List[List[Optional[Callable[[List[Any]], List[Any]]]]] = [ [] for _ in range(self.gemm_group_num) ]
         gemm_output_buffers: list[ir.Buffer] = []
         for out_buf_idx in range(self.gemm_group_num):
             gemm_output_name = f"{template_buffer.get_name()}_GemmOut" + str(
@@ -402,7 +403,7 @@ class CppGroupGemmTemplate(CppGemmTemplate):
             )
 
         assert (
-            not self.epilogue_creator and not epilogue_nodes
+            not self.epilogue_creator
         ), "Epilogue fusion is not implemented yet in Group GEMM Template"
 
         kernel_args = {}
@@ -412,6 +413,24 @@ class CppGroupGemmTemplate(CppGemmTemplate):
             kernel_args["W" + str(w_idx)] = W_list[w_idx]
         for inp_idx in range(self.gemm_group_num):
             kernel_args["inp" + str(inp_idx)] = inp_list[inp_idx]
+
+        from functools import partial
+
+        def _bias_add_epilogue(buf, inp):
+            return create_epilogue_with_attr(
+                buf, "bias_add", other=inp, beta=self.beta, dtype=self.layout.dtype
+            )
+        for gemm_idx, inp in enumerate(inp_list):
+            if inp:
+                buffer_name = Y_list[gemm_idx].get_name()
+                epilogues[gemm_idx].append(
+                    ir.ComputedBuffer(
+                        name=buffer_name,
+                        layout=template_buffer.layout,
+                        data=_bias_add_epilogue(gemm_output_buffers[gemm_idx], inp),
+                    )
+                )
+                reindexers[gemm_idx].append(None)
 
         options = dict(
             N=self.n,
