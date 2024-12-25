@@ -22,7 +22,6 @@ import logging
 import math
 import operator
 import os
-import pathlib
 import platform
 import random
 import re
@@ -989,9 +988,9 @@ UNITTEST_ARGS = [sys.argv[0]] + remaining
 torch.manual_seed(SEED)
 
 # CI Prefix path used only on CI environment
-CI_TEST_PREFIX = str(Path(os.getcwd()))
-CI_PT_ROOT = str(Path(os.getcwd()).parent)
-CI_FUNCTORCH_ROOT = str(os.path.join(Path(os.getcwd()).parent, "functorch"))
+CI_TEST_PREFIX = str(Path.cwd())
+CI_PT_ROOT = str(Path(CI_TEST_PREFIX).parent)
+CI_FUNCTORCH_ROOT = str(Path(CI_PT_ROOT) / "functorch")
 
 def wait_for_process(p, timeout=None):
     try:
@@ -1574,7 +1573,7 @@ TEST_WITH_TORCHDYNAMO: bool = TestEnvironment.def_flag(
 if TEST_WITH_TORCHDYNAMO:
     import torch._dynamo
     # Do not spend time on helper functions that are called with different inputs
-    torch._dynamo.config.accumulated_cache_size_limit = 64
+    torch._dynamo.config.accumulated_recompile_limit = 64
     # Do not log compilation metrics from unit tests
     torch._dynamo.config.log_compilation_metrics = False
     # Silence 3.13.0 guard performance warnings
@@ -2570,7 +2569,7 @@ try:
         "pytorch_ci" if IS_CI else os.getenv('PYTORCH_HYPOTHESIS_PROFILE', 'dev')
     )
 except ImportError:
-    print('Fail to import hypothesis in common_utils, tests are not derandomized')
+    warnings.warn('Fail to import hypothesis in common_utils, tests are not derandomized', ImportWarning)
 
 # Used in check_if_enable to see if a test method should be disabled by an issue,
 # sanitizes a test method name from appended suffixes by @dtypes parametrization.
@@ -4352,7 +4351,7 @@ class TestCase(expecttest.TestCase):
 
     def _attempt_load_from_subprocess(
         self,
-        file: pathlib.Path,
+        file: Path,
         import_string: str,
         expected_failure_message: Optional[str] = None
     ) -> None:
@@ -4361,7 +4360,7 @@ class TestCase(expecttest.TestCase):
         weights_only `torch.load` works as expected without global imports.
 
         Args:
-            file (pathlib.Path): The path to the checkpoint to load.
+            file (Path): The path to the checkpoint to load.
             import_string (str): import string to add to the script
             exected_failure_message (str, optional): The expected failure message if the
                 checkpoint fails to load. If None, the test will pass
@@ -4466,7 +4465,7 @@ def retry(ExceptionToCheck, tries=3, delay=3, skip_after_retries=False):
                 try:
                     return f(*args, **kwargs)
                 except ExceptionToCheck as e:
-                    msg = "%s, Retrying in %d seconds..." % (str(e), mdelay)
+                    msg = f"{e}, Retrying in {mdelay:d} seconds..."
                     print(msg)
                     time.sleep(mdelay)
                     mtries -= 1
@@ -5004,11 +5003,11 @@ def disable_gc():
 def find_library_location(lib_name: str) -> Path:
     # return the shared library file in the installed folder if exist,
     # else the file in the build folder
-    torch_root = Path(torch.__file__).resolve().parent
+    torch_root = Path(torch.__file__).absolute().parent
     path = torch_root / 'lib' / lib_name
     if os.path.exists(path):
         return path
-    torch_root = Path(__file__).resolve().parent.parent.parent
+    torch_root = Path(__file__).absolute().parents[2]
     return torch_root / 'build' / 'lib' / lib_name
 
 def skip_but_pass_in_sandcastle(reason):

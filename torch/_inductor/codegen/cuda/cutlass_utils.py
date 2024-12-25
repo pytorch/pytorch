@@ -30,24 +30,6 @@ def _rename_cutlass_import(content: str, cutlass_modules: List[str]) -> str:
     return content
 
 
-def _gen_cutlass_file(
-    file_name: str, cutlass_modules: List[str], src_dir: str, dst_dir: str
-) -> None:
-    orig_full_path = os.path.abspath(os.path.join(src_dir, file_name))
-    text = ""
-    with open(orig_full_path) as f:
-        text = f.read()
-    text = _rename_cutlass_import(text, cutlass_modules)
-    dst_full_path = os.path.abspath(
-        os.path.join(
-            dst_dir,
-            file_name,
-        )
-    )
-    with open(dst_full_path, "w") as f:
-        f.write(text)
-
-
 @functools.lru_cache(None)
 def try_import_cutlass() -> bool:
     if config.is_fbcode():
@@ -261,7 +243,7 @@ def get_accumulator_dtype(
             return torch_dtype
         else:
             return torch.float
-    if torch_dtype in {torch.bfloat16, torch.float}:
+    if torch_dtype in (torch.bfloat16, torch.float):
         return torch.float
     if torch_dtype == torch.int8:
         return torch.int32
