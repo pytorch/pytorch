@@ -903,8 +903,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
 
         # Define Kernel call signature
         # Important: This step also populates Kernel name to node mapping data structures,
-        # which are required further below ( for example by CutlassEVTEpilogueArgumentFormatter and
-        # the template renderer )
+        # which are required further below ( for example by the template renderer )
         inputs = [X, W, Bias, *extra_inputs]
         names = ["X", "W", "Bias", *extra_names] + ["Y"]
         names_str = ",".join(names)
