@@ -665,6 +665,17 @@ class TestOptimRenewed(TestCase):
             self.assertTrue(a1_grad_imags.all_popped())
             self.assertTrue(losses.all_popped())
 
+    def test_adamw_serialization(self, device):
+        model = torch.nn.Linear(5, 5).to(device)
+        optim = torch.optim.AdamW(model.parameters())
+
+        loaded_dict = optim.state_dict()
+
+        new_optim = torch.optim.Adam(model.parameters())
+        new_optim.load_state_dict(loaded_dict)
+
+        self.assertTrue(new_optim.param_groups[0]["decoupled_weight_decay"])
+
     def _compare_between(
         self, inputs, models, optimizers, assert_eq_kwargs=None, assert_step_dtype=None
     ):
@@ -1275,7 +1286,6 @@ class TestOptimRenewed(TestCase):
             torch.randn(2, 3, requires_grad=False, device=device, dtype=dtype)
             for _ in range(2)
         ]
-        old_params = [p.detach().clone() for p in params]
 
         def closure():
             return torch.tensor([1], device=device, dtype=dtype)
@@ -1331,6 +1341,44 @@ class TestOptimRenewed(TestCase):
                 params[0].grad = torch.zeros_like(params[0])
             optimizer.step(closure)
             self.assertEqual(old_param, params[0])
+
+    @optims(optim_db, dtypes=[torch.float32])
+    def test_grads_are_never_inplaced_into(self, device, dtype, optim_info):
+        optim_cls = optim_info.optim_cls
+        all_optim_inputs = _get_optim_inputs_including_global_cliquey_kwargs(
+            device, dtype, optim_info
+        )
+        param = torch.randn((5, 1), device=device, dtype=dtype, requires_grad=True)
+
+        def closure():
+            return torch.tensor([1], device=device, dtype=dtype)
+
+        for optim_input in all_optim_inputs:
+            kwargs = optim_input.kwargs
+
+            if kwargs.get("differentiable", False):
+                params = [param.clone()]
+            else:
+                params = [param]
+
+            optimizer = optim_cls(params, **kwargs)
+            if optim_info.only_supports_sparse_grads:
+                # Intentionally construct a multidimensional empty v for the sparse grad
+                # Single dim v passes the test while multidim correctly repros the issue
+                # https://github.com/pytorch/pytorch/issues/82486
+                i = torch.empty((1, 0), device=device, dtype=dtype)
+                v = torch.empty((0, 1), device=device, dtype=dtype)
+                params[0].grad = torch.sparse_coo_tensor(
+                    i, v, (5, 1), device=device, dtype=dtype
+                )
+            else:
+                params[0].grad = torch.rand_like(params[0])
+
+            old_version = params[0].grad._version
+
+            for _ in range(5):
+                optimizer.step(closure)
+                self.assertEqual(params[0].grad._version, old_version)
 
     @optims(optim_db, dtypes=[torch.float32])
     def test_optimizer_can_be_printed(self, device, dtype, optim_info):
@@ -1632,7 +1680,6 @@ class TestOptimRenewed(TestCase):
             return closure_loss if optim_info.step_requires_closure else None
 
         for optim_input in all_optim_inputs:
-            kwargs = optim_input.kwargs
             optimizer = optim_cls(params, **optim_input.kwargs)
             for _ in range(3):
                 optimizer.step(closure)
@@ -2114,6 +2161,8 @@ class TestOptimRenewed(TestCase):
     def test_defaults_changed_to_foreach(self, device, dtype, optim_info):
         # Test that the default implementations for optimizers are changed to foreach
         # except Adafactor, which defaults to the single tensor impl for memory efficiency.
+        from torch.optim import Adam, AdamW
+
         optim_cls = optim_info.optim_cls
         model = torch.nn.Linear(5, 5)
         model.to(dtype=dtype, device=device)
@@ -2121,7 +2170,13 @@ class TestOptimRenewed(TestCase):
 
         import inspect
 
-        module = inspect.getmodule(optim_cls)
+        # AdamW dispatches to superclass' adam
+        if optim_cls is AdamW:
+            module = inspect.getmodule(Adam)
+            module_name = "_multi_tensor_adam"
+        else:
+            module = inspect.getmodule(optim_cls)
+            module_name = f"_multi_tensor_{optim_cls.__name__.lower()}"
 
         for optim_input in optim_info.optim_inputs_func(device=device):
             optim = optim_cls(model.parameters(), **optim_input.kwargs)
@@ -2129,9 +2184,7 @@ class TestOptimRenewed(TestCase):
             output = model(inpt)
             loss = output.sum()
             loss.backward()
-            with patch.object(
-                module, f"_multi_tensor_{optim_cls.__name__.lower()}"
-            ) as mocked_foreach_impl:
+            with patch.object(module, module_name) as mocked_foreach_impl:
                 optim.step()
                 self.assertTrue(mocked_foreach_impl.called)
 
