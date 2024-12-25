@@ -254,6 +254,14 @@ class GroupNorm(Module):
             has learnable per-channel affine parameters initialized to ones (for weights)
             and zeros (for biases). Default: ``True``.
 
+    Attributes:
+        weight: the learnable weights of the module of shape
+            :math:`\text{num\_channels}` when :attr:`affine` is set to ``True``.
+            The values are initialized to 1.
+        bias:   the learnable bias of the module of shape
+                :math:`\text{num\_channels}` when :attr:`affine` is set to ``True``.
+                The values are initialized to 0.
+
     Shape:
         - Input: :math:`(N, C, *)` where :math:`C=\text{num\_channels}`
         - Output: :math:`(N, C, *)` (same shape as input)
@@ -346,6 +354,11 @@ class RMSNorm(Module):
         eps: a value added to the denominator for numerical stability. Default: :func:`torch.finfo(x.dtype).eps`
         elementwise_affine: a boolean value that when set to ``True``, this module
             has learnable per-element affine parameters initialized to ones (for weights). Default: ``True``.
+
+    Attributes:
+        weight: the learnable weights of the module of shape
+            :math:`\text{normalized\_shape}` when :attr:`elementwise_affine` is set to ``True``.
+            The values are initialized to 1.
 
     Shape:
         - Input: :math:`(N, *)`
