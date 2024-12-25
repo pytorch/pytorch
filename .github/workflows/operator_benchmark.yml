@@ -34,6 +34,7 @@ jobs:
         { include: [
           { config: "cpu_operator_benchmark_short", shard: 1, num_shards: 1, runner: "linux.12xlarge" },
         ]}
+    secrets: inherit
 
   linux-jammy-cpu-py3_9-gcc11-opbenchmark-on-demand-build:
     if: ${{ github.event_name == 'workflow_dispatch' && github.repository_owner == 'pytorch' }}
@@ -46,6 +47,7 @@ jobs:
         { include: [
           { config: "cpu_operator_benchmark_${{ inputs.test_mode }}", shard: 1, num_shards: 1, runner: "linux.12xlarge" },
         ]}
+    secrets: inherit
 
   linux-jammy-cpu-py3_9-gcc11-opbenchmark-test:
     name: linux-jammy-cpu-py3.9-gcc11-opbenchmark
@@ -55,3 +57,4 @@ jobs:
       build-environment: linux-jammy-py3.9-gcc11-build
       docker-image: ${{ needs.linux-jammy-cpu-py3_9-gcc11-opbenchmark-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-jammy-cpu-py3_9-gcc11-opbenchmark-build.outputs.test-matrix }}
+    secrets: inherit

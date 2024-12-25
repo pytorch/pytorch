@@ -1,5 +1,4 @@
 import argparse
-import os
 import sys
 import textwrap
 
@@ -9,7 +8,7 @@ import pandas as pd
 def get_field(csv, case: str, field: str):
     try:
         return csv.loc[csv["Case Name"] == case][field].item()
-    except Exception as e:
+    except Exception:
         return None
 
 
@@ -61,7 +60,6 @@ def check_perf(actual_csv, expected_csv, expected_filename, threshold):
 
             """
             )
-        sha = os.getenv("SHA1", "{your CI commit sha}")
         msg += textwrap.dedent(
             f"""
         If this change is expected, you can update `{expected_filename}` to reflect the new baseline.

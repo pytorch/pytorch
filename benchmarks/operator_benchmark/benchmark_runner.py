@@ -153,7 +153,7 @@ def parse_args():
     parser.add_argument(
         "--output-dir",
         help="Choose the output directory to save the logs",
-        default="DEFAULT_OUTPUT_DIR",
+        default="benchmark_logs",
     )
     parser.add_argument(
         "--disable-output",
