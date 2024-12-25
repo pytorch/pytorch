@@ -32,7 +32,7 @@ if _TYPE_CHECKING:
     from types import ModuleType
 
     import torch.utils._cxx_pytree as cxx
-    from torch.utils._cxx_pytree import (  # noqa: TCH004
+    from torch.utils._cxx_pytree import (  # noqa: TC004
         _broadcast_to_and_flatten as _broadcast_to_and_flatten,
         FlattenFunc as FlattenFunc,
         FlattenWithKeysFunc as FlattenWithKeysFunc,
