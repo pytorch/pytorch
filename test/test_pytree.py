@@ -757,12 +757,13 @@ class TestPythonPytree(TestCase):
         script = """
 import sys
 import torch
-import torch.utils._pytree
+assert "torch.utils.pytree" in sys.modules
 assert "torch.utils._pytree" in sys.modules
-if "torch.utils._cxx_pytree" in sys.modules:
-    raise RuntimeError("importing torch.utils._pytree should not import torch.utils._cxx_pytree")
-if "optree" in sys.modules:
-    raise RuntimeError("importing torch.utils._pytree should not import optree")
+if not torch.utils.pytree.PYTORCH_USE_CXX_PYTREE:
+    if "torch.utils._cxx_pytree" in sys.modules:
+        raise RuntimeError("importing torch.utils._pytree should not import torch.utils._cxx_pytree")
+    if "optree" in sys.modules:
+        raise RuntimeError("importing torch.utils._pytree should not import optree")
 """
         try:
             subprocess.check_output(
