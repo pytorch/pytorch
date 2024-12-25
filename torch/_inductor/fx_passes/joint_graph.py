@@ -4,7 +4,7 @@ import itertools
 import logging
 import typing
 from collections import Counter
-from typing import Any, Dict, List, Set, Union
+from typing import Any, Dict, List, Union
 
 import torch
 import torch._guards
@@ -16,8 +16,8 @@ from torch.fx.experimental.symbolic_shapes import (
     statically_known_true,
 )
 from torch.multiprocessing.reductions import StorageWeakRef
+from torch.utils._ordered_set import OrderedSet
 
-from ...utils._ordered_set import OrderedSet
 from .. import config
 from ..pattern_matcher import (
     CallFunction,
@@ -55,7 +55,9 @@ def lazy_init():
 
 
 def remove_no_ops(
-    gm: torch.fx.GraphModule, zeros: Set[torch.fx.Node], ones: Set[torch.fx.Node]
+    gm: torch.fx.GraphModule,
+    zeros: OrderedSet[torch.fx.Node],
+    ones: OrderedSet[torch.fx.Node],
 ):
     with torch.utils._python_dispatch._disable_current_modes():
         "Removes no-ops: (+ 0, - 0, * 1, / 1)"
@@ -230,9 +232,11 @@ class UniformValueConstantFolder(ConstantFolder):
             aten.permute,
         ]
 
-        self.indexing_op_packets = {
-            aten.slice,
-        }
+        self.indexing_op_packets = OrderedSet(
+            [
+                aten.slice,
+            ]
+        )
 
     def _support_dynamic_shape(self):
         return True
@@ -348,8 +352,8 @@ def constant_fold_uniform_value(gm: torch.fx.GraphModule):
 
         graph = gm.graph
 
-        zeros = set()
-        ones = set()
+        zeros = OrderedSet[Any]()
+        ones = OrderedSet[Any]()
 
         # Got failures in `test_is_set_to_cuda` if we change aliasing on constants,
         # so just constant-ify if a Tensor is unaliased
@@ -446,11 +450,6 @@ def joint_graph_passes(graph: torch.fx.GraphModule):
 
     lazy_init()
     count = 0
-    if config.joint_custom_pre_pass is not None:
-        GraphTransformObserver(graph, "joint_custom_pre_pass").apply_graph_pass(
-            config.joint_custom_pre_pass
-        )
-        count += 1
 
     from .post_grad import remove_noop_ops
 
@@ -460,6 +459,12 @@ def joint_graph_passes(graph: torch.fx.GraphModule):
         GraphTransformObserver(graph, "constant_fold_uniform_value").apply_gm_pass(
             constant_fold_uniform_value
         )
+
+    if config.joint_custom_pre_pass is not None:
+        GraphTransformObserver(graph, "joint_custom_pre_pass").apply_graph_pass(
+            config.joint_custom_pre_pass
+        )
+        count += 1
 
     if config.pattern_matcher:
         for i, patterns in enumerate(pass_patterns):
@@ -508,7 +513,7 @@ def fix_iota_device(match: Match, length, start, step, dtype, device, requires_g
     Rewrite the arange to use CUDA.
     """
     (node,) = match.nodes
-    user_devices: OrderedSet[torch.device] = OrderedSet()
+    user_devices = OrderedSet[torch.device]()
     for user in node.users:
         if (
             user.op == "call_function"
@@ -555,7 +560,7 @@ def pointless_convert(match: Match, arg, dtype1: torch.dtype, dtype2: torch.dtyp
     """Remove chain of dtype conversions often created by AMP"""
     graph = match.graph
     node = match.output_node()
-    allowed = {torch.float16, torch.bfloat16, torch.float32, torch.float64}
+    allowed = torch.float16, torch.bfloat16, torch.float32, torch.float64
     if dtype1 in allowed and dtype2 in allowed:
         repl = graph.call_function(
             torch.ops.prims.convert_element_type.default, (arg, dtype2)

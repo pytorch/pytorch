@@ -289,6 +289,7 @@ def lru_cache(
 # which are unlikely to identify a particular interesting guard statement
 @lru_cache(None)
 def uninteresting_files() -> Set[str]:
+    import torch._compile
     import torch._dynamo.eval_frame
     import torch._inductor.sizevars
     import torch._library.custom_ops
@@ -302,6 +303,7 @@ def uninteresting_files() -> Set[str]:
         torch.fx.experimental.sym_node,
         torch.fx.interpreter,
         torch,
+        torch._compile,
         torch._dynamo.eval_frame,
         torch._inductor.sizevars,
         torch._library.custom_ops,
@@ -931,7 +933,7 @@ class InnerTensorKey:
 
 @dataclass(frozen=True)
 class DivideByKey:
-    divisor: int
+    divisor: Union[int, SymInt]
 
     def __str__(self) -> str:
         return f".__floordiv__({self.divisor})"
@@ -1018,9 +1020,11 @@ def compute_unbacked_bindings(
                 free_unbacked_symbols_with_path(
                     a.storage_offset(),
                     path + (CallMethodKey("storage_offset"),),
-                    real=a.real_tensor.storage_offset()
-                    if a.real_tensor is not None
-                    else None,
+                    real=(
+                        a.real_tensor.storage_offset()
+                        if a.real_tensor is not None
+                        else None
+                    ),
                 )
             )
 
@@ -1045,16 +1049,39 @@ def compute_unbacked_bindings(
             isinstance(a, torch.SymInt)
             and isinstance(s := a.node._expr, sympy.Mul)
             and len(s.args) == 2
-            and isinstance(lhs := s.args[0], sympy.Integer)
+            and isinstance(lhs := s.args[0], (sympy.Integer, sympy.Symbol))
             and isinstance(rhs := s.args[1], sympy.Symbol)
-            and rhs in pending
+            # support exactly one unbacked for now
+            and ((rhs in pending) ^ (lhs in pending))
+            # support constant coefficient or backed symbolic coefficient
+            and (
+                isinstance(coeff := lhs if lhs not in pending else rhs, sympy.Integer)
+                or coeff in a.node.shape_env.var_to_val
+            )
         ):
+
+            def _symint_wrap(s: sympy.Symbol) -> SymInt:
+                return a.node.shape_env.create_symintnode(
+                    s,
+                    hint=int(a.node.shape_env.var_to_val[s]),
+                    source=a.node.shape_env.var_to_sources.get(s, [None])[0],
+                )
+
+            unbacked = lhs if lhs in pending else rhs
+            divisor: Union[int, SymInt] = (
+                int(coeff) if isinstance(coeff, sympy.Integer) else _symint_wrap(coeff)
+            )
             # TODO: DivideByKey needs to test divisibility at runtime!
-            r[rhs] = path + (DivideByKey(int(lhs)),)
+            r[unbacked] = path + (DivideByKey(divisor),)
             if real is not None:
                 assert isinstance(real, int)
-                shape_env.set_unbacked_var_to_val(rhs, real // int(lhs))
-            pending.remove(rhs)
+                val = (
+                    real // int(coeff)
+                    if isinstance(coeff, sympy.Integer)
+                    else CleanDiv(real, coeff)
+                )
+                shape_env.set_unbacked_var_to_val(unbacked, val)
+            pending.remove(unbacked)
         # The annoyance here arises from the fact that SymBool is
         # allocated by allocating a SymInt and then testing if it's equal
         # to one.  So you have a complicated binding site logic for this.
@@ -2873,7 +2900,7 @@ class DimConstraints:
                 assert op == "==", t
                 try:
                     results[left]["eq"] = sympy.sympify(right)
-                except TypeError as e:  # rhs source is not linked to Dim name
+                except TypeError:  # rhs source is not linked to Dim name
                     pass
 
         # order forced specializations based on name
@@ -3901,56 +3928,16 @@ class ShapeEnv:
         size: List[sympy.Expr] = self._produce_dyn_sizes_from_int_tuple(
             ex_size, source, symbolic_context
         )
-        stride: List[Optional[sympy.Expr]] = [None] * len(size)
-        for i, val in enumerate(ex_stride):
-            if val in (0, 1):
-                stride[i] = sympy.Integer(val)
-        while any(x is None for x in stride):
-            candidates = {
-                ex_size[i] * ex_stride[i]: size[i] * stride[i]
-                for i in range(len(size))
-                if stride[i] is not None
-            }
-
-            # iterate over unbound strides in sorted order
-            val_list = sorted(
-                [(ex_stride[i], i) for i in range(len(stride)) if stride[i] is None],
-                key=_nested_int_aware_sort,
-            )
-            for _, i in val_list:
-                # Set stride to a candidate only for DimDynamic.INFER_STRIDE
-                if (
-                    stride[i] is None
-                    and dynamic_strides[i] == DimDynamic.INFER_STRIDE
-                    and ex_stride[i] in candidates
-                ):
-                    stride[i] = candidates[ex_stride[i]]
-                    candidates[ex_size[i] * ex_stride[i]] = size[i] * stride[i]  # type: ignore[operator]
-
-            if any(x is None for x in stride):
-                # bind the smallest unbound stride to a new variable
-                val, i = min(
-                    [
-                        (ex_stride[i], i)
-                        for i in range(len(stride))
-                        if stride[i] is None
-                    ],
-                    key=_nested_int_aware_sort,
-                )
-                # Set INFER_STRIDE to STATIC or DUCK depending on sizes
-                dyn_stride = dynamic_strides[i]
-                if dynamic_strides[i] == DimDynamic.INFER_STRIDE:
-                    dyn_stride = (
-                        DimDynamic.STATIC if are_sizes_static else DimDynamic.DUCK
-                    )
-                stride[i] = self.create_symbol(
-                    val,
-                    TensorPropertySource(source, TensorProperty.STRIDE, i),
-                    dynamic_dim=dyn_stride,
-                    constraint_dim=constraint_strides[i],
-                    symbolic_context=symbolic_context,
-                )
-        assert all(x is not None for x in stride)
+        stride = self._compute_symbolic_stride(
+            source,
+            size,
+            ex_size,
+            ex_stride,
+            dynamic_strides,
+            constraint_strides,
+            are_sizes_static,
+            symbolic_context,
+        )
 
         sym_sizes = [
             self.create_symintnode(
@@ -3984,6 +3971,64 @@ class ShapeEnv:
             source=TensorPropertySource(source, TensorProperty.STORAGE_OFFSET),
         )
         return tuple(sym_sizes), tuple(sym_stride), sym_storage_offset
+
+    def _compute_symbolic_stride(
+        self,
+        source: Source,
+        size: Sequence[sympy.Expr],
+        ex_size: Sequence[Union[int, SymInt]],
+        ex_stride: Sequence[Union[int, SymInt]],
+        dynamic_strides: Sequence[DimDynamic],
+        constraint_strides: Sequence[
+            Optional[Union[StrictMinMaxConstraint, RelaxedUnspecConstraint]]
+        ],
+        are_sizes_static: bool,
+        symbolic_context: SymbolicContext,
+    ) -> List[sympy.Expr]:
+        from torch._dynamo.source import TensorProperty, TensorPropertySource
+
+        stride: List[Optional[sympy.Expr]] = [None] * len(size)
+        candidates: Dict[Union[int, SymInt], sympy.Expr] = {}
+
+        # iterate over unbound strides in val ascending order with
+        # index descending as a tie breaker since for cases like
+        # [(1, 1), (1, 0)], we want to fill in the right most
+        # stride first.
+        val_list = [(val, -i) for i, val in enumerate(ex_stride)]
+        val_list.sort(key=_nested_int_aware_sort)
+
+        for val, neg_i in val_list:
+            i = -neg_i
+            contiguous_stride = (
+                i != len(ex_stride) - 1
+                and ex_stride[i] == ex_size[i + 1] * ex_stride[i + 1]
+            )
+            if val in (0, 1) and not contiguous_stride:
+                out_stride = sympy.Integer(val)
+            else:
+                dynamic_stride = dynamic_strides[i]
+                if dynamic_stride == DimDynamic.INFER_STRIDE and val in candidates:
+                    # Set stride to a candidate only for DimDynamic.INFER_STRIDE
+                    out_stride = candidates[val]
+                else:
+                    # Set INFER_STRIDE to STATIC or DUCK depending on sizes
+                    dyn_stride = dynamic_stride
+                    if dynamic_stride == DimDynamic.INFER_STRIDE:
+                        dyn_stride = (
+                            DimDynamic.STATIC if are_sizes_static else DimDynamic.DUCK
+                        )
+                    out_stride = self.create_symbol(
+                        val,
+                        TensorPropertySource(source, TensorProperty.STRIDE, i),
+                        dynamic_dim=dyn_stride,
+                        constraint_dim=constraint_strides[i],
+                        symbolic_context=symbolic_context,
+                    )
+            stride[i] = out_stride
+            candidates[ex_size[i] * val] = size[i] * out_stride
+
+        assert all(x is not None for x in stride)
+        return stride
 
     @record_shapeenv_event()
     def create_symintnode(
@@ -5951,9 +5996,9 @@ class ShapeEnv:
                     "stack": structured.from_traceback(
                         CapturedTraceback.extract(skip=1).summary()
                     ),
-                    "user_stack": structured.from_traceback(user_tb)
-                    if user_tb
-                    else None,
+                    "user_stack": (
+                        structured.from_traceback(user_tb) if user_tb else None
+                    ),
                 },
             )
 

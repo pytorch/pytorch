@@ -106,7 +106,7 @@ class AbstractTimeoutTest:
         else:
             yield f"file://{f.name}"
             f.close()
-            yield "tcp://127.0.0.1:%d" % common.find_free_port()
+            yield f"tcp://127.0.0.1:{common.find_free_port():d}"
 
     def _test_default_store_timeout(self, backend):
         for init_method in self._init_methods():
@@ -182,7 +182,7 @@ class TimeoutTest(TestCase):
                 threads.append(t)
                 t.start()
 
-            for i, thread in enumerate(threads):
+            for _, thread in enumerate(threads):
                 thread.join()
 
             # we expect the world_size-1 threads to have failed
@@ -339,7 +339,7 @@ class CommonDistributedDataParallelTest:
         gradient_as_bucket_view=False,
     ):
         model = Net()
-        device = devices[0] if devices else torch.device("cuda:%d" % self.rank)
+        device = devices[0] if devices else torch.device(f"cuda:{self.rank:d}")
         ddp_model = DistributedDataParallel(
             copy.deepcopy(model).to(device),
             device_ids=device_ids,
@@ -583,14 +583,14 @@ class CommonDistributedDataParallelTest:
                 )
             )
             with err_ctx:
-                model = self._test_ddp_checkpointing(
+                self._test_ddp_checkpointing(
                     self.CheckpointOnceModule(use_reentrant=use_reentrant),
                     process_group=process_group,
                     use_bucket_view=use_bucket_view,
                     find_unused_parameters=True,
                 )
             # test passes when static_graph is true
-            model = self._test_ddp_checkpointing(
+            self._test_ddp_checkpointing(
                 self.CheckpointOnceModule(use_reentrant=use_reentrant),
                 process_group=process_group,
                 use_bucket_view=use_bucket_view,
@@ -615,7 +615,7 @@ class CommonDistributedDataParallelTest:
                 )
             )
             with err_ctx:
-                model = self._test_ddp_checkpointing(
+                self._test_ddp_checkpointing(
                     self.CheckpointTwiceModule(use_reentrant=use_reentrant),
                     process_group=process_group,
                     use_bucket_view=use_bucket_view,
@@ -623,7 +623,7 @@ class CommonDistributedDataParallelTest:
                 )
 
             with err_ctx:
-                model = self._test_ddp_checkpointing(
+                self._test_ddp_checkpointing(
                     self.CheckpointTwiceModule(use_reentrant=use_reentrant),
                     process_group=process_group,
                     use_bucket_view=use_bucket_view,
@@ -641,7 +641,7 @@ class CommonDistributedDataParallelTest:
         process_group = self._get_process_group()
         for use_bucket_view in (True, False):
             # Test passes when static_graph=True.
-            model = self._test_ddp_checkpointing(
+            self._test_ddp_checkpointing(
                 self.CheckpointTwiceModule(use_reentrant=use_reentrant),
                 process_group=process_group,
                 use_bucket_view=use_bucket_view,
@@ -656,7 +656,7 @@ class CommonDistributedDataParallelTest:
         """
         process_group = self._get_process_group()
         for use_bucket_view in (True, False):
-            model = self._test_ddp_checkpointing(
+            self._test_ddp_checkpointing(
                 self.DynamicCheckpointTwiceModule(use_reentrant=False),
                 process_group=process_group,
                 use_bucket_view=use_bucket_view,
@@ -675,7 +675,7 @@ class CommonDistributedDataParallelTest:
         """
         process_group = self._get_process_group()
         for use_bucket_view in (True, False):
-            model = self._test_ddp_checkpointing(
+            self._test_ddp_checkpointing(
                 self.DynamicCheckpointTwiceModuleWeightSharing(use_reentrant=False),
                 process_group=process_group,
                 use_bucket_view=use_bucket_view,
@@ -719,7 +719,7 @@ class CommonDistributedDataParallelTest:
         process_group = self._get_process_group()
         torch.cuda.set_device(self.rank)
         for use_bucket_view in (True, False):
-            model = self._test_ddp_checkpointing(
+            self._test_ddp_checkpointing(
                 self.CheckpointTwiceModuleWeightSharing(),
                 process_group=process_group,
                 use_bucket_view=use_bucket_view,
@@ -737,7 +737,7 @@ class CommonDistributedDataParallelTest:
                 "Expect `start_powerSGD_iter` > 1 if `use_error_feedback` or `warm_start` is enabled, "
                 "because PowerSGD can only be applied after the first two iterations in DDP.",
             ):
-                state = powerSGD.PowerSGDState(
+                powerSGD.PowerSGDState(
                     process_group=None,
                     matrix_approximation_rank=1,
                     start_powerSGD_iter=start_powerSGD_iter,
