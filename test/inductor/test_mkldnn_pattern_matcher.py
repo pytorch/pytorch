@@ -881,7 +881,13 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 matcher_check_fn,
                 check_autocast=dtype,
             )
-            self.assertEqual(metrics.generated_kernel_count, 1 if not acl_bf16 else 2)
+            expected_kernel_count = 1
+            if acl_bf16:
+                expected_kernel_count = 2
+            elif dtype == torch.float32:
+                expected_kernel_count = 0
+            # only generated 1 kernel for "to_dtype"
+            self.assertEqual(metrics.generated_kernel_count, expected_kernel_count)
 
     def test_linear_binary_broadcast_shapes_cpu(self):
         class M(torch.nn.Module):
