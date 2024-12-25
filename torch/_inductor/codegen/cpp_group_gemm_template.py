@@ -170,10 +170,9 @@ class CppGroupGemmTemplate(CppGemmTemplate):
         )
         self.act_mapping = act_mapping
         self.gemm_group_num = gemm_group_num
-        # TODO<leslie> support more than 2 GEMM
         self.output_node: List[ir.Buffer] = [
-            ir.Buffer(name="buf_out", layout=layout),
-            ir.Buffer(name="buf_out1", layout=layout),
+            ir.Buffer(name="buf_out" + str(idx), layout=layout)
+            for idx in range(gemm_group_num)
         ]
 
     @staticmethod

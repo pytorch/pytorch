@@ -60,10 +60,8 @@ class CppTemplate(KernelTemplate):
             unique(input_node.get_name() for input_node in self.input_nodes)
         )
         if isinstance(self.output_node, Iterable):
-            # Group GEMM Template
-            # TODO<leslie>: support more than 2 GEMM
             expected_args.extend(
-                [self.output_node[0].get_name(), self.output_node[1].get_name()]
+                [node.get_name() for node in self.output_node]  # Group GEMM Template
             )
         else:
             expected_args.extend([self.output_node.get_name()])

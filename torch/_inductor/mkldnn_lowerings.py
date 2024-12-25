@@ -43,6 +43,7 @@ def group_gemm_lowering(
     if len(x_size) > 2:
         # GEMM template needs 2D input, normalize input shape here
         x = view(x, [-1, x_size[-1]])
+    num_gemm = len(w)
 
     assert use_max_autotune()
     b = [bias if bias is None else ir.ExternKernel.realize_input(bias) for bias in b]
@@ -54,11 +55,10 @@ def group_gemm_lowering(
         has_bias=[bias is not None for bias in b],
         trans_w=True,
         epilogue_creator=None,
-        act_mapping={0: x, 1: x},
+        act_mapping={num: x for num in range(num_gemm)},
     )
 
-    # TODO<leslie>: support more than 2 gemm
-    input_nodes = [x, w[0], w[1]]
+    input_nodes = [x, *w]
     input_nodes.extend([bias for bias in b if bias is not None])
 
     CppGroupGemmTemplate.add_choices(
@@ -75,26 +75,23 @@ def group_gemm_lowering(
         input_nodes,
         layout,
     )
-    # TODO<leslie>: support for more than 2 outputs
     template_buf = result.data.data
-    return_buf0 = ir.MultiOutput(
-        layout,
-        template_buf,
-        [(list, 0)],
-    )
-    return_buf1 = ir.MultiOutput(
-        layout,
-        template_buf,
-        [(list, 1)],
-    )
+    return_bufs = [
+        ir.MultiOutput(layout, template_buf, [(list, gemm_idx)])
+        for gemm_idx in range(num_gemm)
+    ]
     template_buf.layout = ir.MultiOutputLayout(device=input_nodes[0].get_device())
-    template_buf.outputs = [return_buf0, return_buf1]
-    return_buf0 = ir.TensorBox.create(return_buf0)
-    return_buf1 = ir.TensorBox.create(return_buf1)
+    template_buf.outputs = return_bufs
+    return_tensors = [
+        ir.TensorBox.create(return_bufs[gemm_idx]) for gemm_idx in range(num_gemm)
+    ]
     if len(x_size) > 2:
-        return_buf0 = view(return_buf0, (*x_size[:-1], return_buf0.get_size()[-1]))
-        return_buf1 = view(return_buf1, (*x_size[:-1], return_buf1.get_size()[-1]))
-    return return_buf0, return_buf1
+        for gemm_idx in range(num_gemm):
+            return_tensors[gemm_idx] = view(
+                return_tensors[gemm_idx],
+                (*x_size[:-1], return_tensors[gemm_idx].get_size()[-1]),
+            )
+    return return_tensors
 
 
 def register_onednn_fusion_ops():
