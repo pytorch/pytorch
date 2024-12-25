@@ -189,7 +189,7 @@ class SubprocPool:
             data = b""
             try:
                 job_id, data = _recv_msg(self.read_pipe)
-            except Exception as e:
+            except Exception:
                 # Something went wrong during the read. There's no way we have a
                 # valid job_id.
                 log.exception("failure in subproc_pool._recv_msg")

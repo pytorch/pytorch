@@ -6159,6 +6159,27 @@ class CommonTemplate:
                 (torch.arange(-1e-5, 1e-5, 1e-7).to(dtype=dtype),),
             )
 
+    def test_adaptive_pool_errors_with_long(self):
+        class Model(torch.nn.Module):
+            def __init__(self, pool_operator):
+                super().__init__()
+                self.pool = pool_operator
+
+            def forward(self, x):
+                x = torch.argmax(x, dim=1)
+                x = self.pool(x)
+                return x
+
+        for dim in (1, 2, 3):
+            op_inst = eval(f"torch.nn.AdaptiveMaxPool{dim}d(5)")
+            model = Model(op_inst).to(self.device)
+            x = torch.randn([1] * (dim + 2)).to(self.device)
+            model = torch.compile(model, fullgraph=True)
+            with self.assertRaisesRegex(
+                RuntimeError, r".*(not implemented|aoti_torch_).*"
+            ):
+                model(x)
+
     def test_log1p(self):
         def fn(x):
             return torch.log1p(x), torch.log1p(x) * 2
@@ -7120,7 +7141,7 @@ class CommonTemplate:
         for ref, test in zip(refs, tests):
             torch.testing.assert_close(ref, test)
 
-    @torch._dynamo.config.patch(cache_size_limit=10)
+    @torch._dynamo.config.patch(recompile_limit=10)
     def test_tensor_index_put_slice(self):
         def fn(a, version):
             x = torch.tensor([1, 2], device=self.device, dtype=torch.int32)

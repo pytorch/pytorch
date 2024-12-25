@@ -85,7 +85,7 @@ def write_kernel(kernel: Kernel, autogen_dir: Path) -> None:
 
 def main(output_dir: Optional[str]) -> None:
     if output_dir is None:
-        output_dir = Path(__file__).parent
+        output_dir = Path(__file__).absolute().parent
     else:
         output_dir = Path(output_dir)
 
