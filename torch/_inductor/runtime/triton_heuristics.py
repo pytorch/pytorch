@@ -411,59 +411,56 @@ class CachingAutotuner(KernelInterface):
         else:
             triton_helpers.set_driver_to_gpu()
 
-        if ASTSource:
-            compile_args = (
-                ASTSource(
-                    self.fn,
-                    compile_meta["signature"],
-                    compile_meta["constants"],
-                    compile_meta["configs"][0],
-                ),
+        if not ASTSource:
+            raise RuntimeError("Installed triton version too old, please upgrade")
+
+        compile_args = (
+            ASTSource(
+                self.fn,
+                compile_meta["signature"],
+                compile_meta["constants"],
+                compile_meta["configs"][0],
+            ),
+        )
+
+        cc_str = str(compile_meta["cc"])
+        if "gfx10" in cc_str or "gfx11" in cc_str:
+            rocm_warp_size = 32
+        else:
+            rocm_warp_size = 64
+
+        if GPUTarget:
+            target = GPUTarget(
+                compile_meta["device_type"],
+                compile_meta["cc"],
+                rocm_warp_size if torch.version.hip else 32,
             )
-
-            cc_str = str(compile_meta["cc"])
-            if "gfx10" in cc_str or "gfx11" in cc_str:
-                rocm_warp_size = 32
-            else:
-                rocm_warp_size = 64
-
-            if GPUTarget:
-                target = GPUTarget(
+        else:
+            target = (
+                (compile_meta["device_type"], compile_meta["cc"])
+                if not torch.version.hip
+                else [
                     compile_meta["device_type"],
                     compile_meta["cc"],
-                    rocm_warp_size if torch.version.hip else 32,
-                )
-            else:
-                target = (
-                    (compile_meta["device_type"], compile_meta["cc"])
-                    if not torch.version.hip
-                    else [
-                        compile_meta["device_type"],
-                        compile_meta["cc"],
-                        rocm_warp_size,
-                    ]
-                )
+                    rocm_warp_size,
+                ]
+            )
 
-            options = {
-                "num_warps": compile_meta["num_warps"],
-                "num_stages": compile_meta["num_stages"],
-                "debug": compile_meta["debug"],
-                "sanitize_overflow": False,  # turn off additional asserts added for overflow checks
-            }
-            if self.device_props.type == "hip":
-                if "waves_per_eu" in compile_meta:
-                    options["waves_per_eu"] = compile_meta["waves_per_eu"]
-                if "matrix_instr_nonkdim" in compile_meta:
-                    options["matrix_instr_nonkdim"] = compile_meta[
-                        "matrix_instr_nonkdim"
-                    ]
-            compile_kwargs = {
-                "target": target,
-                "options": options,
-            }
-        else:
-            compile_args = (self.fn,)
-            compile_kwargs = compile_meta
+        options = {
+            "num_warps": compile_meta["num_warps"],
+            "num_stages": compile_meta["num_stages"],
+            "debug": compile_meta["debug"],
+            "sanitize_overflow": False,  # turn off additional asserts added for overflow checks
+        }
+        if self.device_props.type == "hip":
+            if "waves_per_eu" in compile_meta:
+                options["waves_per_eu"] = compile_meta["waves_per_eu"]
+            if "matrix_instr_nonkdim" in compile_meta:
+                options["matrix_instr_nonkdim"] = compile_meta["matrix_instr_nonkdim"]
+        compile_kwargs = {
+            "target": target,
+            "options": options,
+        }
 
         if warm_cache_only:
             binary = triton.compile(*compile_args, **compile_kwargs)
