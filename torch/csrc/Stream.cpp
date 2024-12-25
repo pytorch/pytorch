@@ -268,7 +268,6 @@ static PyObject* THPStream_enter(PyObject* _self, PyObject* unused) {
       static_cast<c10::DeviceType>(self->device_type);
   // No operation is performed if the stream does not belong to an accelerator.
   if (C10_UNLIKELY(!at::accelerator::isAccelerator(stream_device_type))) {
-    // Support with torch.Stream() as stream: works
     Py_INCREF(_self);
     return _self;
   }
@@ -290,7 +289,6 @@ static PyObject* THPStream_enter(PyObject* _self, PyObject* unused) {
       py::reinterpret_steal<py::object>(THPStream_Wrap(cur_stream));
   PyObject_SetAttrString(_self, "_ctx_device_index", ctx_device_index.ptr());
   PyObject_SetAttrString(_self, "_ctx_stream", ctx_stream.ptr());
-  // Support with torch.Stream() as stream: works
   Py_INCREF(_self);
   return _self;
   END_HANDLE_TH_ERRORS
