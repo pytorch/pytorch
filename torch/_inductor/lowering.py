@@ -4560,7 +4560,7 @@ fallback_adaptive_avg_pool2d = fallback_handler(
 def _adaptive_avg_pool2d(x, output_size):
     if x.get_dtype() == torch.int64:
         # not supported in eager
-        raise RuntimeError("'adaptive_max_pool2d' not implemented for 'Long'")
+        raise RuntimeError("'adaptive_avg_pool2d' not implemented for 'Long'")
     assert isinstance(x, TensorBox)
     assert len(output_size) == 2
     x.realize_hint()
