@@ -208,11 +208,12 @@ bool is_broadcast(const at::Tensor& t) {
 }
 
 void undo_broadcast_on_batch(at::Tensor& m1, at::Tensor& m2) {
-  // onednn support one of src and wei broadcasted on batch dim
+  // oneDNN support one of src and wei broadcasted on batch dim
   auto tensor_dim = m1.dim();
   if (tensor_dim ==2)
     return;
   auto undo_broadcast = [](at::Tensor& tensor) {
+    // oneDNN does not support broadcasted tensor on m, n, k dim
     if (tensor.stride(1) == 0 || tensor.stride(2) == 0) {
       tensor = tensor.contiguous();
     }
@@ -222,7 +223,7 @@ void undo_broadcast_on_batch(at::Tensor& m1, at::Tensor& m2) {
   };
 
   if (m1.stride(0) == 0 && m2.stride(0) == 0) {
-    // onednn does not support both src and wei broadcasted on batch dim. We copy the smaller one.
+    // oneDNN does not support both src and wei broadcasted on batch dim. We copy the smaller one.
     if (m1.size(1)<m2.size(2)) {
       m1 = m1.contiguous();
     }
