@@ -1,5 +1,4 @@
 # Owner(s): ["module: fx"]
-
 import copy
 import unittest
 from typing import Optional, Set, Type
@@ -92,7 +91,7 @@ class TestDCE(TestCase):
                 self.attr_1 = torch.nn.Parameter(torch.tensor([-0.9]))
 
             def forward(self, x):
-                a = x + 1
+                a = x + 1  # noqa: F841
                 return x + self.attr_1
 
         self._run_dce_and_test(TestModule(), expect_dce_changes=True)
@@ -109,7 +108,7 @@ class TestDCE(TestCase):
 
             def forward(self, x):
                 a = x + 1
-                b = a * 7
+                b = a * 7  # noqa: F841
                 return x + self.attr_1
 
         self._run_dce_and_test(TestModule(), expect_dce_changes=True)
@@ -126,7 +125,7 @@ class TestDCE(TestCase):
 
             def forward(self, x):
                 a = x + 1
-                b = a * self.attr_1
+                b = a * self.attr_1  # noqa: F841
                 return x + 11
 
         self._run_dce_and_test(TestModule(), expect_dce_changes=True)
@@ -153,7 +152,7 @@ class TestDCE(TestCase):
 
         class TestModule(torch.nn.Module):
             def forward(self, x, y):
-                a = y + 2
+                a = y + 2  # noqa: F841
                 return x + 7
 
         self._run_dce_and_test(TestModule(), expect_dce_changes=True)
@@ -172,7 +171,7 @@ class TestDCE(TestCase):
                 self.relu = ReLUImpure()
 
             def forward(self, a: torch.Tensor) -> torch.Tensor:
-                r = self.relu(a)
+                r = self.relu(a)  # noqa: F841
                 return a * 2
 
         self._run_dce_and_test(
@@ -228,7 +227,7 @@ class TestDCE(TestCase):
         class TestModule(torch.nn.Module):
             def forward(self, a: torch.Tensor) -> torch.Tensor:
                 b = a + 1
-                c = torch._ops.ops.aten.add(b, b)
+                c = torch._ops.ops.aten.add(b, b)  # noqa: F841
                 return a
 
         # %add_out node should not be removed because it has side effects.
@@ -249,9 +248,7 @@ class TestDCE(TestCase):
                 d = torch.ops.aten.mul.Tensor(a, b)
                 e = torch.ops.aten.mul.Tensor(a, c)
                 future = torch.ops._c10d_functional.all_reduce.default(e, "sum", "0")
-                synced_e = torch.ops._c10d_functional.wait_tensor.default(
-                    future
-                )  # synced_e is not used
+                torch.ops._c10d_functional.wait_tensor.default(future)
                 return d
 
         torch.distributed.init_process_group(
@@ -279,9 +276,7 @@ class TestDCE(TestCase):
                 d = torch.ops.aten.mul(a, b)
                 e = torch.ops.aten.mul(a, c)
                 future = torch.ops._c10d_functional.all_reduce(e, "sum", "0")
-                synced_e = torch.ops._c10d_functional.wait_tensor(
-                    future
-                )  # synced_e is not used
+                torch.ops._c10d_functional.wait_tensor(future)
                 return d
 
         torch.distributed.init_process_group(

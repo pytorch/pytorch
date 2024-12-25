@@ -245,20 +245,21 @@ def is_initialized():
 
 
 def _lazy_call(callable, **kwargs):
-    if is_initialized():
-        callable()
-    else:
-        # TODO(torch_deploy): this accesses linecache, which attempts to read the
-        # file system to get traceback info. Patch linecache or do something
-        # else here if this ends up being important.
-        global _lazy_seed_tracker
-        if kwargs.get("seed_all", False):
-            _lazy_seed_tracker.queue_seed_all(callable, traceback.format_stack())
-        elif kwargs.get("seed", False):
-            _lazy_seed_tracker.queue_seed(callable, traceback.format_stack())
+    with _initialization_lock:
+        if is_initialized():
+            callable()
         else:
-            # Don't store the actual traceback to avoid memory cycle
-            _queued_calls.append((callable, traceback.format_stack()))
+            # TODO(torch_deploy): this accesses linecache, which attempts to read the
+            # file system to get traceback info. Patch linecache or do something
+            # else here if this ends up being important.
+            global _lazy_seed_tracker
+            if kwargs.get("seed_all", False):
+                _lazy_seed_tracker.queue_seed_all(callable, traceback.format_stack())
+            elif kwargs.get("seed", False):
+                _lazy_seed_tracker.queue_seed(callable, traceback.format_stack())
+            else:
+                # Don't store the actual traceback to avoid memory cycle
+                _queued_calls.append((callable, traceback.format_stack()))
 
 
 _lazy_call(_check_capability)
@@ -647,7 +648,25 @@ def _parse_visible_devices() -> Union[List[int], List[str]]:
 
     if torch.version.hip:
         hip_devices = os.getenv("HIP_VISIBLE_DEVICES")
-        if hip_devices is not None:
+        rocr_devices = os.getenv("ROCR_VISIBLE_DEVICES")
+
+        # You must take care if both HIP and ROCR env vars are set as they have
+        # different meanings. Both env vars accept either a list of ints or a
+        # list of UUIDs. The ROCR env var is processed first which then reduces
+        # the number of GPUs that HIP can select from.
+        if rocr_devices is not None:
+            rocr_count = len(rocr_devices.split(","))
+            if hip_devices is not None:
+                # sanity check if both env vars are set
+                if len(hip_devices.split(",")) > rocr_count:
+                    raise RuntimeError(
+                        "HIP_VISIBLE_DEVICES contains more devices than ROCR_VISIBLE_DEVICES"
+                    )
+                # HIP_VISIBLE_DEVICES is preferred over ROCR_VISIBLE_DEVICES
+                var = hip_devices
+            else:
+                return list(range(rocr_count))
+        elif hip_devices is not None:
             var = hip_devices
 
     if var is None:
