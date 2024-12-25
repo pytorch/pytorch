@@ -375,7 +375,8 @@ def custom_function_call_vmap_generate_rule(interpreter, autograd_function, *ope
         output = custom_function_call(vmapped_function, *unwrapped_operands)
 
     assert isinstance(output, tuple)
-    output_, out_dims = output
+    output_ = output[:-1] if len(output) > 2 else output[0]
+    out_dims = output[-1]
     return wrap_batched(output_, out_dims, interpreter.level())
 
 
@@ -391,10 +392,14 @@ def vmapify_autograd_function(autograd_function, in_dims, batch_size, randomness
         outputs, out_dims = restore_vmap(
             autograd_function.forward, in_dims, batch_size, randomness
         )(*operands)
-        return outputs, out_dims
+        if isinstance(outputs, torch.Tensor):
+            return outputs, out_dims
+        else:
+            return *outputs, out_dims
 
     def setup_context(ctx, inputs, outputs):
-        outputs_, out_dims = outputs
+        outputs_ = outputs[:-1]
+        out_dims = outputs[-1]
         ctx.out_dims = out_dims
 
         def inner(inputs, outputs_):
@@ -441,9 +446,14 @@ def vmapify_autograd_function(autograd_function, in_dims, batch_size, randomness
         )(ctx.saved_tensors, tangents)
 
         result = reductify(out_tangents, out_tangents_dims, ctx.out_dims, batch_size)
-        return *result, None
+        if isinstance(result, torch.Tensor):
+            return result, None
+        else:
+            return *result, None
 
-    def backward(ctx, grad_outputs, grad_out_dims):
+    def backward(ctx, *grad_outputs):
+        grad_outputs_ = grad_outputs[:-1] if len(grad_outputs) > 2 else grad_outputs[0]
+
         def backward_no_context(inputs):
             saved_tensors, grad_outputs = inputs
             wrapped_ctx = CtxWithSavedTensors(ctx, saved_tensors)
@@ -454,7 +464,7 @@ def vmapify_autograd_function(autograd_function, in_dims, batch_size, randomness
             ((ctx.saved_tensors_bdims, ctx.out_dims),),
             batch_size,
             randomness,
-        )((ctx.saved_tensors, grad_outputs))
+        )((ctx.saved_tensors, grad_outputs_))
         result = reductify(
             grad_ins, grad_ins_dims, in_dims, batch_size, ctx.input_shapes
         )
