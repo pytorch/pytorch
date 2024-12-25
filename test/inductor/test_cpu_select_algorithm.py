@@ -1693,7 +1693,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
     @parametrize("out_features", (32, 52))
     @parametrize("bias_gate", (False,))
     @parametrize("bias_up", (False,))
-    @parametrize("input_3d", (False,))
+    @parametrize("input_3d", (False, True))
     @dtypes(
         torch.bfloat16,
     )

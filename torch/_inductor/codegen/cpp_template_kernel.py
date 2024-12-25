@@ -360,12 +360,15 @@ class CppTemplateKernel(CppKernel):
            c) If `src` is local, we need to add a local buffer for it and localize the `orig_src` buffer
               in `epilogue_nodes` with `src`.
         """
+        # <TODO> Leslie: maybe split this function for Group GEMM is clearer since
+        # not much code sharing between this 2 path
         if isinstance(src, Iterable):
             # Group GEMM may have multi outputs to be localized
             assert isinstance(dst, Iterable)
             assert all(
                 _dst.get_size() == _src.get_size() for _src, _dst in zip(src, dst)
             )
+            assert not epilogue_nodes, "epilogue_nodes not supported for Group GEMM yet"
         else:
             assert isinstance(dst, (ir.Buffer, ir.ReinterpretView))
             assert dst.get_size() == src.get_size(), f"{dst=}, {src=}"
@@ -375,23 +378,6 @@ class CppTemplateKernel(CppKernel):
             with LocalBufferContext(self.args) as scope:
                 assert orig_src is not None
                 if (
-                    isinstance(src, Iterable)
-                    and isinstance(orig_src, Iterable)
-                    and orig_src[0].get_name() != src[0].get_name()
-                ):
-                    assert all(
-                        _orig_src.get_name() != _src.get_name()
-                        for _orig_src, _src in zip(orig_src, src)
-                    )
-                    for _orig_src, _src in zip(orig_src, src):
-                        scope.add_local_buffer(
-                            _src,
-                            [
-                                _orig_src,
-                            ],
-                        )
-                    epilogue_nodes = scope.localize_nodes(epilogue_nodes)
-                elif (
                     isinstance(src, ir.IRNode)
                     and isinstance(orig_src, ir.IRNode)
                     and orig_src.get_name() != src.get_name()

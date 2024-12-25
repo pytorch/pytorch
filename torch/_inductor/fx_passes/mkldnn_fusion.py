@@ -268,6 +268,9 @@ if torch._C._has_mkldnn:
                 return False
             act = computation_nodes[0].args[0]
             wgt = computation_nodes[0].args[1]
+            if computation_nodes[0].args[2] or computation_nodes[1].args[2]:
+                # <TODO> Leslie: Bias through epilogue fusion is not supported yet
+                return False
             if (
                 computation_nodes[1].args[0] != act
                 or computation_nodes[1].args[1] == wgt
