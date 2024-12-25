@@ -60,7 +60,7 @@ class DynamicShapesGpuWrapperGpuTests(InductorTestCase):
 
 
 test_failures_gpu_wrapper = {
-    "test_mm_plus_mm2_cuda_dynamic_shapes": test_torchinductor.TestFailure(
+    "test_mm_plus_mm2_gpu_dynamic_shapes": test_torchinductor.TestFailure(
         ("gpu_wrapper",), is_skip=True
     ),
     "test_randint_xpu": test_torchinductor.TestFailure(("gpu_wrapper",), is_skip=False),
