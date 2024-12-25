@@ -458,7 +458,6 @@ class LocalBufferContext:
 
         def wrap_inner_fn_for_node(node: ir.IRNode):
             loops = node.data if isinstance(node, ir.ComputedBuffer) else node
-            print("loops is: {}".format(loops), flush=True)
             assert isinstance(loops, ir.Loops)
             new_inner_fn = self.localize_function(
                 loops.inner_fn,

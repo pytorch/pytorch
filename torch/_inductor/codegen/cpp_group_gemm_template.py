@@ -114,7 +114,7 @@ extern "C" {{export_declaration}}
         kernel.slice_nd(Y_2d_list[gemm_idx], [("m_start", "m_end"), ("n_start", "n_end")])
     ) %}
 {%- endfor %}
-                    {{ kernel.store_output(
+                    {{ kernel.store_outputs(
                         tile_Y_list, tile_acc_list, GemmOuts, epilogue_nodes, offsets=("m_start", "n_start"), reindexers=reindexers
                     )|indent(20, false)
                     }}
@@ -391,8 +391,11 @@ class CppGroupGemmTemplate(CppGemmTemplate):
         L2_cache_size = torch._C._cpu._L2_cache_size()  # per core cache size in Bytes
         assert L2_cache_size > 0, f"Expect L2_cache_size > 0 but got {L2_cache_size}"
 
-        epilogues: List[List[ir.IRNode]] = [ [] for _ in range(self.gemm_group_num) ]
-        reindexers: List[List[Optional[Callable[[List[Any]], List[Any]]]]] = [ [] for _ in range(self.gemm_group_num) ]
+        epilogues: List[List[ir.IRNode]] = [[] for _ in range(self.gemm_group_num)]
+        reindexers: List[List[Optional[Callable[[List[Any]], List[Any]]]]] = [
+            [] for _ in range(self.gemm_group_num)
+        ]
+
         gemm_output_buffers: list[ir.Buffer] = []
         for out_buf_idx in range(self.gemm_group_num):
             gemm_output_name = f"{template_buffer.get_name()}_GemmOut" + str(
@@ -414,12 +417,11 @@ class CppGroupGemmTemplate(CppGemmTemplate):
         for inp_idx in range(self.gemm_group_num):
             kernel_args["inp" + str(inp_idx)] = inp_list[inp_idx]
 
-        from functools import partial
-
         def _bias_add_epilogue(buf, inp):
             return create_epilogue_with_attr(
                 buf, "bias_add", other=inp, beta=self.beta, dtype=self.layout.dtype
             )
+
         for gemm_idx, inp in enumerate(inp_list):
             if inp:
                 buffer_name = Y_list[gemm_idx].get_name()
