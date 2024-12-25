@@ -1025,36 +1025,12 @@ class LoweringPatternEntry(PatternEntry):
 
     def apply(self, match: Match, graph: torch.fx.Graph, node: torch.fx.Node) -> None:
         handler = functools.wraps(self.handler)(functools.partial(self.handler, match))
-        if isinstance(self.pattern, MultiOutputPattern):
-            with graph.inserting_before(node):
-                replacement = graph.call_function(
-                    handler, tuple(match.args), match.kwargs
-                )
-                assert len(match.nodes) == len(self.pattern.outputs)
-                with graph.inserting_after(replacement):
-                    for output_idx in range(len(match.nodes)):
-                        output_node = match.nodes[output_idx]
-                        get_item = graph.create_node(
-                            "call_function",
-                            operator.getitem,
-                            (
-                                replacement,
-                                output_idx,
-                            ),
-                        )
-                        get_item.meta.update(output_node.meta)
-                        output_node.replace_all_uses_with(get_item)
-                        assert len(output_node.users) == 0
-                        match.graph.erase_node(output_node)
-        else:
-            with graph.inserting_before(node):
-                replacement = graph.call_function(
-                    handler, tuple(match.args), match.kwargs
-                )
-                replacement.meta.update(node.meta)
-                node.replace_all_uses_with(replacement)
-            assert match.nodes[-1] is node
-            match.erase_nodes()
+        with graph.inserting_before(node):
+            replacement = graph.call_function(handler, tuple(match.args), match.kwargs)
+            replacement.meta.update(node.meta)
+            node.replace_all_uses_with(replacement)
+        assert match.nodes[-1] is node
+        match.erase_nodes()
 
 
 @dataclasses.dataclass
