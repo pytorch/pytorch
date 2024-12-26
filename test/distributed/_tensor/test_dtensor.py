@@ -2,9 +2,9 @@
 # Owner(s): ["oncall: distributed"]
 
 import os
+import pathlib
 import tempfile
 import unittest
-from pathlib import Path
 
 from numpy.testing import assert_array_equal
 
@@ -559,7 +559,7 @@ class DTensorTest(DTensorTestBase):
                 import_string = (
                     "import torch.distributed.tensor;" if should_import else ""
                 )
-                filename = Path(f.name)
+                filename = pathlib.Path(f.name)
                 err_msg = (
                     (
                         "_pickle.UnpicklingError: Weights only load failed. "
