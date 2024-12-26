@@ -23,6 +23,7 @@ from torch.utils._ordered_set import OrderedSet
 
 from ..triton_bundler import TritonBundler
 from ..utils import prefix_is_reduction
+from . import triton_helpers
 from .autotune_cache import AutotuneCache
 from .benchmarking import benchmarker
 from .coordinate_descent_tuner import CoordescTuner
@@ -50,58 +51,17 @@ from .runtime_utils import (
     triton_hash_to_path_key,
     validate_triton_config,
 )
-
-
-try:
-    import triton
-except ImportError:
-    triton = None
-
-if triton is not None:
-    from triton import Config
-    from triton.compiler import CompiledKernel
-    from triton.runtime.autotuner import OutOfResources
-    from triton.runtime.jit import KernelInterface
-
-    from . import triton_helpers
-
-    try:
-        from triton.runtime.autotuner import PTXASError
-    except ImportError:
-
-        class PTXASError(Exception):  # type: ignore[no-redef]
-            pass
-
-    try:
-        from triton.compiler.compiler import ASTSource
-    except ImportError:
-        ASTSource = None
-
-    try:
-        from triton.backends.compiler import GPUTarget
-    except ImportError:
-        GPUTarget = None
-else:
-    from types import ModuleType
-
-    class OutOfResources(Exception):  # type: ignore[no-redef]
-        pass
-
-    class PTXASError(Exception):  # type: ignore[no-redef]
-        pass
-
-    Config = object
-    KernelInterface = object
-    ASTSource = None
-    GPUTarget = None
-    triton_helpers = ModuleType("triton_helpers")
-
-try:
-    autograd_profiler = torch.autograd.profiler
-except AttributeError:  # Compile workers only have a mock version of torch
-
-    class autograd_profiler:  # type: ignore[no-redef]
-        _is_profiler_enabled = False
+from .triton_compat import (
+    ASTSource,
+    autograd_profiler,
+    CompiledKernel,
+    Config,
+    GPUTarget,
+    KernelInterface,
+    OutOfResources,
+    PTXASError,
+    triton,
+)
 
 
 log = logging.getLogger(__name__)
