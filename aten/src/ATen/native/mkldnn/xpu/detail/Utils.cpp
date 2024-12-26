@@ -221,7 +221,8 @@ void undo_broadcast_on_batch(at::Tensor& m1, at::Tensor& m2) {
           return false;
         bool broadcast_on_mn =
             tensor.stride(dim_m) == 0 || tensor.stride(dim_n) == 0;
-        bool has_broadcast_on_batch = tensor.stride(dim_b) == 0;
+        bool has_broadcast_on_batch =
+            tensor.stride(dim_b) == 0 && tensor.size(dim_b) > 1;
         // We do not support broadcast on dim m,n,k.
         // We can further optimize the case that both dim b and m are
         // broadcasted.
@@ -255,6 +256,10 @@ void undo_broadcast_on_batch(at::Tensor& m1, at::Tensor& m2) {
 }
 
 bool is_onednn_matmul_strides(const at::Tensor& tensor, bool is_dst) {
+  // TODO: We always call contiguous on dst.
+  // delete it after fix the case that dst is transposed on batch and m dim.
+  if (is_dst)
+    return false;
   // https://oneapi-src.github.io/oneDNN/dev_guide_matmul.html
   // oneDNN matmul only support 2-dim and 3-dim
   // 2D src(Mxk), wei(KxN), dst(MxN)
@@ -268,17 +273,20 @@ bool is_onednn_matmul_strides(const at::Tensor& tensor, bool is_dst) {
     return true;
 
   // the overlaped cases are not supported
-  if (at::has_internal_overlap(tensor) == at::MemOverlap::Yes)
+  dnnl::memory::dims strides = get_onednn_strides(tensor);
+  int64_t storage_size = 1;
+  for (size_t dim = 0; dim < tensor_dim; ++dim)
+    storage_size += (sizes[dim] - 1) * strides[dim];
+  if (storage_size < tensor.numel())
     return false;
 
   // the broadcast cases are not supported
   if (is_broadcast(tensor)) {
     return false;
   }
-  dnnl::memory::dims strides = get_onednn_strides(tensor);
   if (is_dst) {
-    // The memory format of the destination tensor should always
-    // be plain with n axis contiguous
+    // The memory format of the destination tensor should always be plain
+    // with n axis contiguous
     if (strides[tensor_dim - 1] != 1)
       return false;
   } else {
