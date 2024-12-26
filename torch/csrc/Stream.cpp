@@ -119,9 +119,6 @@ PyObject* THPStream_Wrap(const c10::Stream& stream) {
 }
 
 static void THPStream_dealloc(THPStream* self) {
-  if (self->context) {
-    Py_DECREF(self->context);
-  }
   Py_TYPE(self)->tp_free((PyObject*)self);
 }
 
@@ -283,12 +280,21 @@ static PyObject* THPStream_enter(PyObject* _self, PyObject* unused) {
   at::accelerator::setCurrentStream(c10::Stream::unpack3(
       self->stream_id, stream_device_idx, stream_device_type));
   // Save the current device index and previous stream to the context.
-  auto ctx_device_index = py::reinterpret_steal<py::object>(
-      THPUtils_packDeviceIndex(cur_device_idx));
-  auto ctx_stream =
-      py::reinterpret_steal<py::object>(THPStream_Wrap(cur_stream));
-  PyObject_SetAttrString(_self, "_ctx_device_index", ctx_device_index.ptr());
-  PyObject_SetAttrString(_self, "_ctx_stream", ctx_stream.ptr());
+  auto ctx_device_index = THPUtils_packDeviceIndex(cur_device_idx);
+  auto ctx_stream = THPStream_Wrap(cur_stream);
+  TORCH_CHECK(!(self->context), "Stream's context should not be initialized.");
+  auto dict = THPObjectPtr(PyDict_New());
+  if (!dict) {
+    throw python_error();
+  }
+  self->context = dict.release();
+  if (PyDict_SetItemString(
+          self->context, "_ctx_device_index", ctx_device_index) < 0) {
+    throw python_error();
+  }
+  if (PyDict_SetItemString(self->context, "_ctx_stream", ctx_stream) < 0) {
+    throw python_error();
+  }
   Py_INCREF(_self);
   return _self;
   END_HANDLE_TH_ERRORS
@@ -302,17 +308,15 @@ static PyObject* THPStream_exit(PyObject* _self, PyObject* unused) {
           static_cast<c10::DeviceType>(self->device_type)))) {
     Py_RETURN_NONE;
   }
-  auto ctx_stream = THPObjectPtr(PyObject_GetAttrString(_self, "_ctx_stream"));
+  auto ctx_stream =
+      THPObjectPtr(PyDict_GetItemString(self->context, "_ctx_stream"));
   auto ctx_device_index =
-      THPObjectPtr(PyObject_GetAttrString(_self, "_ctx_device_index"));
+      THPObjectPtr(PyDict_GetItemString(self->context, "_ctx_device_index"));
   if ((!ctx_stream) || (!ctx_device_index)) {
     throw python_error();
   }
-  Py_DECREF(ctx_stream.get());
-  Py_DECREF(ctx_device_index.get());
-  THPStream* prev_stream = (THPStream*)ctx_stream.release();
-  auto prev_device_index =
-      THPUtils_unpackDeviceIndex(ctx_device_index.release());
+  auto prev_stream = (THPStream*)ctx_stream.get();
+  auto prev_device_index = THPUtils_unpackDeviceIndex(ctx_device_index.get());
   at::accelerator::setCurrentStream(c10::Stream::unpack3(
       prev_stream->stream_id,
       static_cast<c10::DeviceIndex>(prev_stream->device_index),
@@ -321,48 +325,10 @@ static PyObject* THPStream_exit(PyObject* _self, PyObject* unused) {
   if (static_cast<c10::DeviceIndex>(self->device_index) != prev_device_index) {
     at::accelerator::setDeviceIndex(prev_device_index);
   }
+  Py_DECREF(self->context);
+  self->context = nullptr;
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
-}
-
-static void THPStream_maybe_init_context(THPStream* self) {
-  if (!(self->context)) {
-    auto dict = THPObjectPtr(PyDict_New());
-    if (!dict) {
-      throw python_error();
-    }
-    self->context = dict.release();
-  }
-}
-
-static PyObject* THPStream_getattro(PyObject* _self, PyObject* attr_name) {
-  HANDLE_TH_ERRORS
-  auto self = (THPStream*)_self;
-  auto attr_name_str = THPUtils_unpackString(attr_name);
-  if (attr_name_str == "_ctx_device_index" || attr_name_str == "_ctx_stream") {
-    THPStream_maybe_init_context(self);
-    // borrowed reference
-    auto value = THPObjectPtr(PyDict_GetItem(self->context, attr_name));
-    Py_INCREF(value.get());
-    return value.release();
-  }
-  return PyObject_GenericGetAttr(_self, attr_name);
-  END_HANDLE_TH_ERRORS
-}
-
-static int THPStream_setattro(
-    PyObject* _self,
-    PyObject* attr_name,
-    PyObject* value) {
-  HANDLE_TH_ERRORS
-  auto self = (THPStream*)_self;
-  auto attr_name_str = THPUtils_unpackString(attr_name);
-  if (attr_name_str == "_ctx_device_index" || attr_name_str == "_ctx_stream") {
-    THPStream_maybe_init_context(self);
-    return PyDict_SetItem(self->context, attr_name, value);
-  }
-  return PyObject_GenericSetAttr(_self, attr_name, value);
-  END_HANDLE_TH_ERRORS_RET(-1)
 }
 
 static PyObject* THPStream_ne(THPStream* self, THPStream* other) {
@@ -451,8 +417,8 @@ static PyTypeObject THPStreamType = {
     (hashfunc)THPStream_hash, /* tp_hash  */
     nullptr, /* tp_call */
     nullptr, /* tp_str */
-    THPStream_getattro, /* tp_getattro */
-    THPStream_setattro, /* tp_setattro */
+    nullptr, /* tp_getattro */
+    nullptr, /* tp_setattro */
     nullptr, /* tp_as_buffer */
     // NOLINTNEXTLINE(misc-redundant-expression)
     Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE, /* tp_flags */
