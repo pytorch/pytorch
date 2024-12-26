@@ -1,7 +1,7 @@
 import copy
 import logging
 from dataclasses import dataclass
-from typing import Callable, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 import torch
 from torch.ao.ns.fx.utils import compute_sqnr
@@ -71,7 +71,8 @@ def generate_numeric_debug_handle(ep: ExportedProgram) -> None:
     bfs_trace_with_node_process(ep, _assign_debug_handle)
 
 
-def _detach(x):
+def _detach(x: Any) -> Any:
+    detached: Any = None
     if isinstance(x, torch.Tensor):
         detached = x.detach()
     elif isinstance(x, (list, tuple)):
@@ -82,15 +83,12 @@ def _detach(x):
         detached = x
     return detached
 
-def _tensor_shape_equals(x, y):
+
+def _tensor_shape_equals(x: Any, y: Any) -> bool:
     if isinstance(x, torch.Tensor) and isinstance(y, torch.Tensor):
-        print("x:", x.shape, " y:", y.shape)
-        print("equals:", x.shape == y.shape)
         return x.shape == y.shape
     elif isinstance(x, (list, tuple)):
-        res = all([_tensor_shape_equals(e1, e2) for e1, e2 in zip(x, y)])
-        print("list res:", res)
-        return res
+        return all(_tensor_shape_equals(e1, e2) for e1, e2 in zip(x, y))
     elif isinstance(x, dict) and isinstance(y, dict):
         all_equal = True
         for k in x:
@@ -100,7 +98,16 @@ def _tensor_shape_equals(x, y):
         print(f"Comparing non Tensors: {x} and {y}, they must be equal")
         return type(x) == type(y) and x == y
 
-def _loss_fn(loss, x, y):
+
+def _loss_fn(
+    loss: Callable[[torch.Tensor, torch.Tensor], torch.Tensor], x: Any, y: Any
+) -> Any:
+    """The returned loss will have the same structure as `x` and `y`, e.g.
+    if both are Tensor, we'll return a Tensor
+    if both are list, we'll return a list of Tensors
+    if both are dict, we'll return a dict with the same key, and value being the loss between the
+    two Tensors
+    """
     if isinstance(x, torch.Tensor) and isinstance(y, torch.Tensor):
         return loss(x, y)
     elif isinstance(x, (list, tuple)):
@@ -109,6 +116,7 @@ def _loss_fn(loss, x, y):
         return {k: _loss_fn(loss, e, y[k]) for k, e in x.items()}
     else:
         return None
+
 
 class OutputLogger(torch.nn.Module):
     """
@@ -226,7 +234,9 @@ class QuantizationComparisonResult:
             )
 
         if not isinstance(self.ref, (torch.Tensor, list, tuple, dict)):
-            raise ValueError(f"`self.ref` value must be a Tensor, list, tuple or dict, got: {self.ref}")
+            raise ValueError(
+                f"`self.ref` value must be a Tensor, list, tuple or dict, got: {self.ref}"
+            )
 
         if not _tensor_shape_equals(self.ref, self.actual):
             raise ValueError(
