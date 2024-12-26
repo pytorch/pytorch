@@ -4,6 +4,7 @@
 # flake8: noqa
 
 import dataclasses
+import unittest
 from collections import OrderedDict
 from dataclasses import dataclass, fields, is_dataclass
 from typing import Any, Optional, Tuple
@@ -173,6 +174,103 @@ class DictTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(type(ref), type(res))
         self.assertEqual(ref["x"], res["x"])
         self.assertEqual(ref["y"], res["y"])
+
+    def test_custom_iter_dict(self):
+        class ReversedDict(dict):
+            def __iter__(self):
+                return reversed(list(self.keys()))
+
+        d = {
+            "foo": 1,
+            "bar": 2,
+        }
+
+        d = ReversedDict(d)
+
+        @torch.compile(backend="eager")
+        def fn(x, d):
+            return x * d["foo"] * d["bar"]
+
+        fn(torch.randn(4), d)
+        with unittest.mock.patch("torch._dynamo.config.error_on_recompile", True):
+            fn(torch.randn(4), d)
+
+    def test_custom_keys_iter_dict(self):
+        class ReversedDict(dict):
+            def keys(self):
+                return ["bar", "foo"]
+
+        d = {
+            "foo": 1,
+            "bar": 2,
+        }
+
+        d = ReversedDict(d)
+
+        @torch.compile(backend="eager")
+        def fn(x, d):
+            return x * d["foo"] * d["bar"]
+
+        fn(torch.randn(4), d)
+        with unittest.mock.patch("torch._dynamo.config.error_on_recompile", True):
+            fn(torch.randn(4), d)
+
+    def test_dict_guard_on_keys_order(self):
+        d = {
+            2: 4,
+            3: 5,
+        }
+
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        def fn(x, d):
+            for key, value in d.items():
+                x = x * key + value
+            return x
+
+        opt_fn = torch.compile(fn, backend=cnts)
+        opt_fn(torch.randn(4), d)
+        opt_fn(torch.randn(4), d)
+        # No recompilation
+        self.assertEqual(cnts.frame_count, 1)
+
+        # move 2 to the end
+        d[2] = d.pop(2)
+
+        x = torch.randn(4)
+        res = opt_fn(x, d)
+        # Check recompilation
+        self.assertEqual(cnts.frame_count, 2)
+        self.assertEqual(res, fn(x, d))
+
+    def test_dict_guard_on_keys_order2(self):
+        d = {
+            2: 4,
+            3: 5,
+        }
+
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        def fn(x, d):
+            for key in d:
+                value = d[key]
+                x = x * key + value
+            return x
+
+        opt_fn = torch.compile(fn, backend=cnts)
+        opt_fn(torch.randn(4), d)
+        opt_fn(torch.randn(4), d)
+        # No recompilation
+        self.assertEqual(cnts.frame_count, 1)
+
+        # move 2 to the end
+        d[2] = d.pop(2)
+
+        x = torch.randn(4)
+        res = opt_fn(x, d)
+        # Check recompilation
+        self.assertEqual(cnts.frame_count, 2)
+        self.assertEqual(res, fn(x, d))
 
 
 def is_tensor(x):
