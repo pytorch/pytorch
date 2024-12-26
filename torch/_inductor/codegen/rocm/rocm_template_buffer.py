@@ -1,6 +1,11 @@
-from typing import Any, Callable, Sequence
+from typing import Callable, Sequence, TypeVar
+from typing_extensions import ParamSpec
 
 from ...ir import Buffer, Layout, TemplateBuffer
+
+
+_T = TypeVar("_T")
+_P = ParamSpec("_P")
 
 
 class ROCmTemplateBuffer(TemplateBuffer):
@@ -8,7 +13,7 @@ class ROCmTemplateBuffer(TemplateBuffer):
         self,
         layout: Layout,
         inputs: Sequence[Buffer],
-        make_kernel_render: Callable[..., Any],
+        make_kernel_render: Callable[_P, _T],
         workspace_size: int,
         template: "ROCmTemplate",  # type: ignore[name-defined]  # noqa: F821
     ) -> None:
