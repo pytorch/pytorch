@@ -599,8 +599,9 @@ def fuse_all_gather_matmul(all_gather: _AllGatherMatch) -> None:
         if len(new_ag_node.users) == 0:
             graph.erase_node(new_ag_node)
             kwargs = dict(fused_node.kwargs)
-            kwargs["return_A"] = False
-            fused_node.kwargs = kwargs
+            if "return_A" in kwargs:
+                kwargs["return_A"] = False
+                fused_node.kwargs = kwargs
 
     # Raise ancestors of non-A args that are topologically ordered between
     # ag_res_node and the matmul above fused_node.
