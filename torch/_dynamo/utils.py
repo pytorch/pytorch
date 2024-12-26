@@ -1928,6 +1928,12 @@ dict_methods = {
 }
 
 
+def builtin_dict_keys(d):
+    # Avoids overridden keys method of the dictionary
+    assert isinstance(d, dict)
+    return dict.keys(d)
+
+
 def nn_module_new(cls):
     obj = object_new(cls)
     torch.nn.Module.__init__(obj)

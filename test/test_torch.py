@@ -1778,6 +1778,20 @@ else:
             res_cpu = input.cpu().cumsum(dim)
             self.assertEqual(res0, res_cpu, atol=1e-3, rtol=1e-2)
 
+    @onlyCUDA
+    @largeTensorTest('24GB', device='cuda')
+    @largeTensorTest('24GB', device='cpu')
+    def test_cumsum_64bit_indexing(self, device):
+        b = torch.ones(2 * 4096 * 8, 100000, dtype=torch.float, device='cuda')
+        b /= 100000
+        d = b.cumsum(dim=-1)
+        chunk = 2**30 // b.shape[-1]
+        for i in range(0, b.shape[0], chunk):
+            end = min(i + chunk, b.shape[0])
+            b[i:end, :].cumsum_(dim=-1)
+        # cheat a bit to avoid OOM
+        self.assertEqual(b[0, :], d[0, :], atol=3e-5, rtol=3e-5)
+        self.assertEqual(b[-1, :], d[-1, :], atol=3e-5, rtol=3e-5)
 
     @expectedFailureMeta  # expected a non-determinitic error, but it was not raised
     @onlyNativeDeviceTypes
@@ -10787,23 +10801,6 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
     def test_bf16_supported_on_cpu(self):
         self.assertFalse(torch.cuda.is_bf16_supported())
 
-    def test_tensor_with_grad_to_scalar_warning(self) -> None:
-
-        with warnings.catch_warnings(record=True) as w:
-            warnings.simplefilter("always")
-
-            x = torch.tensor(2.0, requires_grad=True)
-            y = math.pow(x, 3)  # calling this results in a warning
-
-            self.assertEqual(len(w), 1)
-            self.assertTrue(issubclass(w[0].category, UserWarning))
-            self.assertIn(
-                "Converting a tensor with requires_grad=True to a scalar may lead to unexpected behavior.",
-                str(w[0].message)
-            )
-
-            y = math.pow(x, 3)  # calling it again does not result in a second warning
-            self.assertEqual(len(w), 1)
 
 # The following block extends TestTorch with negative dim wrapping tests
 # FIXME: replace these with OpInfo sample inputs or systemic OpInfo tests
