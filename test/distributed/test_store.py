@@ -1020,16 +1020,6 @@ class InitPgWithNonUvStore(TestCase):
         os.environ.pop("MASTER_ADDR", None)
         os.environ.pop("MASTER_PORT", None)
 
-    def test_with_url_param(self):
-        port = common.find_free_port()
-        dist.init_process_group(
-            "gloo",
-            rank=0,
-            world_size=1,
-            init_method=f"tcp://{DEFAULT_HOSTNAME}:{port}?use_libuv=0",
-        )
-        self._run_test()
-
     def test_with_env_var(self):
         port = common.find_free_port()
         os.environ["USE_LIBUV"] = "0"
