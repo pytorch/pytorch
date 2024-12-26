@@ -8,7 +8,7 @@ import contextlib
 import dataclasses
 import datetime
 import logging
-from pathlib import Path
+import pathlib
 from typing import Any, Callable, TYPE_CHECKING
 
 import torch
@@ -91,7 +91,7 @@ class CaptureStrategy(abc.ABC):
         """
         self._verbose_print = _verbose_printer(verbose)
         self._dump = dump
-        self._artifacts_dir = Path(artifacts_dir)
+        self._artifacts_dir = pathlib.Path(artifacts_dir)
         self._timestamp = timestamp or datetime.datetime.now().strftime(
             "%Y-%m-%d_%H-%M-%S-%f"
         )

@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import difflib
+import pathlib
 import platform
 import sys
 import time
 import traceback
-from pathlib import Path
 
 import numpy as np
 
@@ -169,7 +169,7 @@ torch=={torch.__version__}"""
 
 
 def save_error_report(file_name: str, text: str):
-    reports_dir = Path("error_reports")
+    reports_dir = pathlib.Path("error_reports")
     reports_dir.mkdir(parents=True, exist_ok=True)
     file_path = reports_dir / file_name
     with open(file_path, "w", encoding="utf-8") as f:
