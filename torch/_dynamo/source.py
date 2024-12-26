@@ -1,4 +1,5 @@
 # mypy: allow-untyped-defs
+import collections
 import dataclasses
 import enum
 from typing import Any, Optional, Union
@@ -85,7 +86,9 @@ def is_constant_source(source):
     return False
 
 
-def reconstruct_getitem(source: "GetItemSource", codegen, index_is_slice):
+def reconstruct_getitem(
+    source: Union["GetItemSource", "ODictGetItemSource"], codegen, index_is_slice
+):
     source.base.reconstruct(codegen)
     if isinstance(source.index, Source):
         source.index.reconstruct(codegen)
@@ -562,6 +565,35 @@ class TypeSource(ChainedSource):
 
     def name(self):
         return f"type({self.base.name()})"
+
+
+@dataclasses.dataclass(frozen=True)
+class ODictGetItemSource(ChainedSource):
+    index: Any
+
+    def __post_init__(self):
+        assert self.base is not None
+
+    def reconstruct(self, codegen):
+        codegen.add_push_null(
+            lambda: codegen.append_output(
+                codegen.create_load_const_unchecked(collections.OrderedDict.__getitem__)
+            )
+        )
+        reconstruct_getitem(self, codegen, index_is_slice=False)
+        codegen.extend_output(create_call_function(2, False))
+
+    def guard_source(self):
+        return self.base.guard_source()
+
+    def name(self):
+        if isinstance(self.index, type):
+            rep = f'__load_module("{self.index.__module__}").{self.index.__qualname__}'
+            return f"___odict_getitem({self.base.name()}, {rep})"
+        elif isinstance(self.index, Source):
+            return f"___odict_getitem({self.base.name()}, {self.index.name()})"
+        else:
+            return f"___odict_getitem({self.base.name()}, {self.index!r})"
 
 
 @dataclasses.dataclass(frozen=True)
