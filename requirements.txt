@@ -2,7 +2,8 @@
 astunparse==1.6.3
 expecttest>=0.2.1
 hypothesis==5.35.1
-numpy==1.21.2 ; python_version <= "3.11"
+numpy==1.21.2 ; python_version <= "3.10"
+numpy==1.26.2 ; python_version == "3.11"
 numpy==1.26.2 ; python_version == "3.12"
 numpy==2.1.2 ; python_version >= "3.13"
 psutil==6.0.0
