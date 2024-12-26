@@ -1252,15 +1252,14 @@ def check_and_add_duplicate_pattern(
 
         new_graph_str = str(graph)
         for graph_str in equiv_pattern_reprs:
-            dupe = new_graph_str == graph_str
+            if not new_graph_str == graph_str:
+                continue
             if skip_duplicates:
-                if dupe:
-                    return True
-            else:
-                torch._check(
-                    not dupe,
-                    lambda: f"Duplicate pattern: {pattern_repr} with duplicated match graph {graph_str} ",
-                )
+                return True
+            torch._check(
+                False,
+                lambda: f"Duplicate pattern: {pattern_repr} with duplicated match graph {graph_str} ",
+            )
         equiv_pattern_reprs.append(new_graph_str)
     else:
         seen_patterns[pattern_repr].append(str(graph) if graph else None)
