@@ -7240,14 +7240,46 @@ torch.cuda.synchronize()
 
         flex_attention(query, key, value, score_mod=my_score_mod)
 
+        # Test with batch-specific score_mod
+        batch_size = query.size(0)
+        batch_table = torch.randn(batch_size, device=device, dtype=dtype)
+        # Keep score the same for batch index == 0
+        batch_table[0].zero_()
+
+        def batch_specific_score_mod(score, b, h, q_idx, kv_idx):
+            return score + batch_table[b]
+
+        def identity_score_mod(score, b, h, q_idx, kv_idx):
+            return score
+
+        output = flex_attention(query, key, value, score_mod=batch_specific_score_mod)
+        output_identity = flex_attention(
+            query, key, value, score_mod=identity_score_mod
+        )
+
+        # Guard against a bug where the batch index passed to score_mod is always b == 0.
+        # Output would be equivalent to applying an identity score_mod.
+        # See https://github.com/pytorch/pytorch/issues/143788
+        self.assertFalse(torch.allclose(output._values, output_identity._values))
+
         # Test with mask_mod
         mask_mod_table = score_mod_table > 0.0
 
         def my_mask_mod(b, h, q_idx, kv_idx):
             return mask_mod_table[q_idx]
 
+        def my_mask_mod2(b, h, q_idx, kv_idx):
+            return mask_mod_table[q_idx] & (b == 0)
+
         block_mask = create_nested_block_mask(my_mask_mod, 1, 1, query, _compile=True)
-        flex_attention(query, key, value, block_mask=block_mask)
+        output = flex_attention(query, key, value, block_mask=block_mask)
+
+        block_mask2 = create_nested_block_mask(my_mask_mod2, 1, 1, query, _compile=True)
+        output2 = flex_attention(query, key, value, block_mask=block_mask2)
+
+        # Guard against a bug where the batch index passed to mask_mod is always b == 0.
+        # See https://github.com/pytorch/pytorch/issues/143788
+        self.assertFalse(torch.allclose(output._values, output2._values))
 
     @dtypes(torch.float32)
     def test_apply_(self, device, dtype):
