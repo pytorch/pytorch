@@ -2001,6 +2001,7 @@
     "RelaxedUnspecConstraint",
     "RuntimeAssert",
     "ShapeGuardPrinter",
+    "ShapeGuardPythonPrinter",
     "StrictMinMaxConstraint",
     "bind_symbols",
     "cast_symbool_to_symint_guardless",
@@ -2390,7 +2391,8 @@
     "Set",
     "Tuple",
     "Union",
-    "defaultdict"
+    "defaultdict",
+    "Path"
   ],
   "torch.utils.data.datapipes.utils.snapshot": [
     "IterDataPipe",

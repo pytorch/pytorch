@@ -60,7 +60,7 @@ std::vector<int64_t> NestedTensor_get_max_size(const NestedTensorImpl& nt) {
 int64_t get_consistent_last_dim_of_nested_tensor(const NestedTensorImpl& nt) {
   std::optional<int64_t> last_dim = nt.opt_size(-1);
   TORCH_CHECK(
-      last_dim != std::nullopt,
+      last_dim.has_value(),
       "Expected all tensors in nested tensor to have the same trailing dimension, instead last dimension equals: ",
       nt.get_nested_sizes().select(1, -1));
   return *last_dim;

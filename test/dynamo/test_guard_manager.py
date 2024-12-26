@@ -8,12 +8,12 @@ import torch._dynamo
 import torch._dynamo.test_case
 from torch._C._dynamo import guards
 from torch._dynamo.convert_frame import GlobalStateGuard
+from torch._dynamo.eval_frame import _debug_get_cache_entry_list
 from torch.testing._internal.common_utils import set_default_dtype
 
 
 RootGuardManager = guards.RootGuardManager
 DictGuardManager = guards.DictGuardManager
-DictSubclassGuardManager = guards.DictSubclassGuardManager
 GetAttrGuardAccessor = guards.GetAttrGuardAccessor
 GetItemGuardAccessor = guards.GetItemGuardAccessor
 TypeGuardAccessor = guards.TypeGuardAccessor
@@ -493,6 +493,70 @@ num_guards_executed=0)
         self.assertFalse(guard_manager.check([3, 4]))
         self.assertFalse(guard_manager.check("foo"))
 
+    def test_framelocals_accessor(self):
+        foo = {
+            "a": 1,
+            "b": 2,
+        }
+
+        guards_manager = RootGuardManager()
+        guards_manager.add_type_match_guard(id_type(foo), ["type(x) == Foo"])
+        guards_manager.framelocals_manager(
+            ("a", 0), "", 1, default_mgr_enum
+        ).add_equals_match_guard(1, ["a == 1"])
+        guards_manager.framelocals_manager(
+            ("b", 1), "", 2, default_mgr_enum
+        ).add_equals_match_guard(2, ["b == 2"])
+
+        self.assertTrue(guards_manager.check(foo))
+        self.assertFalse(guards_manager.check({"a": 1, "b": 3}))
+
+    def test_framelocals_guard_e2e(self):
+        def fn(x, y, z):
+            return x + y + z[0]
+
+        opt_fn = torch.compile(fn, backend="eager")
+
+        ref = opt_fn(torch.ones(3), 2, {0: 1, 2: 3})
+        with torch._dynamo.set_stance("fail_on_recompile"):
+            res = opt_fn(torch.ones(3), 2, {0: 1, 2: 3})
+        self.assertEqual(ref, res)
+
+        c1 = _debug_get_cache_entry_list(fn.__code__)
+        self.assertEqual(len(c1), 1)
+        guard_str = str(c1[0].guard_manager)
+        self.assertIn(
+            "source=L['x'], accessed_by=FrameLocalsGuardAccessor(key='x', framelocals_idx=0)",
+            guard_str,
+        )
+        self.assertIn(
+            "source=L['y'], accessed_by=FrameLocalsGuardAccessor(key='y', framelocals_idx=1)",
+            guard_str,
+        )
+        self.assertIn(
+            "source=L['z'], accessed_by=FrameLocalsGuardAccessor(key='z', framelocals_idx=2)",
+            guard_str,
+        )
+
+    @torch._dynamo.config.patch(enable_cpp_framelocals_guard_eval=False)
+    def test_framelocals_guard_config_flag(self):
+        def fn(x):
+            return x + 1
+
+        opt_fn = torch.compile(fn, backend="eager")
+        ref = opt_fn(torch.ones(3))
+        with torch._dynamo.set_stance("fail_on_recompile"):
+            res = opt_fn(torch.ones(3))
+        self.assertEqual(ref, res)
+
+        c1 = _debug_get_cache_entry_list(fn.__code__)
+        self.assertEqual(len(c1), 1)
+        guard_str = str(c1[0].guard_manager)
+        self.assertIn(
+            "source=L['x'], accessed_by=DictGetItemGuardAccessor('x')",
+            guard_str,
+        )
+
     def test_dict_getitem_accessor(self):
         foo = {
             "a": 1,
@@ -742,6 +806,98 @@ num_guards_executed=0)
         f_locals["d"].pop(100)
         # fails because of len check
         self.assertFalse(root.check(f_locals))
+
+    def test_clone(self):
+        try:
+            from .utils import install_guard_manager_testing_hook
+        except ImportError:
+            from utils import install_guard_manager_testing_hook
+
+        def hook(guard_wrapper, f_locals):
+            root = guard_wrapper.root
+
+            # Check full cloning works as expected
+            cloned_root = root.clone_manager(lambda x: True)
+            self.assertTrue(cloned_root.check(f_locals))
+            f_locals["foo"] = [3, 4]
+            self.assertFalse(cloned_root.check(f_locals))
+            f_locals["foo"] = [2, 3]
+
+            # Skip guarding on foo
+            cloned_root = root.clone_manager(lambda x: "foo" not in x.get_source())
+            f_locals["foo"] = [3, 4]
+            # Original root should fail, but new root should pass because of
+            # absence of guards on foo.
+            self.assertFalse(root.check(f_locals))
+            self.assertTrue(cloned_root.check(f_locals))
+
+        class Bar:
+            x = 4
+            y = torch.randn(4)
+
+        foo = [2, 3]
+        bar = Bar()
+
+        def fn(x, foo, bar):
+            return x + foo[0] + bar.x * bar.y
+
+        x = torch.randn(4)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with install_guard_manager_testing_hook(hook):
+            opt_fn(x, foo, bar)
+
+    def test_diff_guard_manager(self):
+        try:
+            from .utils import install_guard_manager_testing_hook
+        except ImportError:
+            from utils import install_guard_manager_testing_hook
+        counter = 0
+
+        def hook(guard_wrapper, f_locals):
+            nonlocal counter
+            root = guard_wrapper.root
+            diff_guard_root = guard_wrapper.diff_guard_root
+
+            # Check full cloning works as expected
+            self.assertTrue(root.check(f_locals))
+            self.assertTrue(diff_guard_root.check(f_locals))
+
+            # Check that tensor guards run well
+            old_tensor = f_locals["bar"].y
+            f_locals["bar"].y = torch.randn(5)
+            self.assertFalse(root.check(f_locals))
+            self.assertFalse(diff_guard_root.check(f_locals))
+            f_locals["bar"].y = old_tensor
+
+            # Original root should fail on foo changes, but diff_guard_root
+            # should pass because it does not have foo guards on counter = 0. On
+            # counter = 1, it should pass because we have caused a recompile
+            # because of foo, causing it to recompile on foo.
+            f_locals["foo"] = [3, 3]
+            self.assertFalse(root.check(f_locals))
+            if counter == 0:
+                self.assertTrue(diff_guard_root.check(f_locals))
+            else:
+                self.assertFalse(diff_guard_root.check(f_locals))
+            counter += 1
+
+        class Bar:
+            x = 4
+            y = torch.randn(4)
+
+        bar = Bar()
+
+        def fn(x, foo, bar):
+            return x + foo[0] + bar.x * bar.y
+
+        x = torch.randn(4)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with install_guard_manager_testing_hook(hook):
+            foo = (12.0, 13)
+            opt_fn(x, foo, bar)
+
+            foo = (10.0, 11)
+            opt_fn(x, foo, bar)
 
 
 if __name__ == "__main__":

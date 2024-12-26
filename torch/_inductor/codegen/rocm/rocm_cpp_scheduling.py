@@ -77,6 +77,7 @@ class ROCmCPPScheduling(BaseScheduling):
         self,
         template_node: BaseSchedulerNode,
         epilogue_nodes: Sequence[BaseSchedulerNode],
+        prologue_nodes: Sequence[BaseSchedulerNode],
     ):
         """
         Codegen a ROCm template, possibly with fused epilogues
@@ -85,7 +86,7 @@ class ROCmCPPScheduling(BaseScheduling):
             template_node
         ), "Template node passed to ROCmScheduler.codegen_template must be a SchedulerNode that wraps a ROCmTemplateBuffer"
         template_node = cast(SchedulerNode, template_node)
-        _, (numel, rnumel) = template_node.group
+        _, (_numel, rnumel) = template_node.group
         assert rnumel == 1
         ctb: ROCmTemplateBuffer = cast(ROCmTemplateBuffer, template_node.node)
         kernel, render = ctb.make_kernel_render(ctb)

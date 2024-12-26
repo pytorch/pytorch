@@ -64,7 +64,6 @@ ignore = [
     "E741",
     "EXE001",
     "F405",
-    "F841",
     # these ignores are from flake8-logging-format; please fix!
     "G101",
     # these ignores are from ruff NPY; please fix!
@@ -141,6 +140,7 @@ select = [
     "Q004",  # unnecessary escaped quote
     "RSE",
     "RUF008", # mutable dataclass default
+    "RUF013", # ban implicit optional
     "RUF015", # access first ele in constant time
     "RUF016", # type error non-integer index
     "RUF017",
