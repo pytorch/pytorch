@@ -71,7 +71,7 @@ def dist_init(
                 rpc.constants.DEFAULT_SHUTDOWN_TIMEOUT = 60
 
             rpc.init_rpc(
-                name="worker%d" % self.rank,
+                name=f"worker{self.rank:d}",
                 backend=self.rpc_backend,
                 rank=self.rank,
                 world_size=self.world_size,
