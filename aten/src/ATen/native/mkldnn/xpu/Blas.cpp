@@ -180,6 +180,7 @@ Tensor mv(const Tensor& self, const Tensor& vec) {
 }
 
 // result = beta * input + alpha * (batch1 @ batch2)
+//                  binary  eltwise
 Tensor& baddbmm_out(
     const Tensor& input,
     const Tensor& batch1,
@@ -518,11 +519,9 @@ Tensor _weight_int4pack_mm_xpu(
     int64_t qGroupSize,
     const Tensor& qScale,
     const Tensor& qZeros) {
-  constexpr int64_t kNTileSize = 8;
 
   auto M = A.size(0); // M
-  auto N = B.size(0) * kNTileSize; // N1=LCM(N, K)
-  auto K = A.size(1); // K1=LCM(K, 1024)
+  auto N = B.size(0); // N1=LCM(N, K)
   TORCH_CHECK(
       A.dtype() == kBFloat16 || A.dtype() == kHalf || A.dtype() == kFloat,
       __func__,
@@ -531,7 +530,7 @@ Tensor _weight_int4pack_mm_xpu(
   TORCH_CHECK(A.dim() == 2, __func__, " : expect A to be 2D tensor.");
 
   TORCH_CHECK(B.dtype() == kInt, __func__, " : expect B to be int32 tensor.");
-  TORCH_CHECK(B.dim() == 4, __func__, " : expect B to 4d tensor.");
+  TORCH_CHECK(B.dim() == 2, __func__, " : expect B to 2d tensor.");
 
   TORCH_CHECK(
       qGroupSize == 32 || qGroupSize == 64 || qGroupSize == 128 ||

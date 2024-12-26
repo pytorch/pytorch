@@ -1207,7 +1207,7 @@ class TestBasicGEMM(TestCase):
             return b_int4pack, scales, zeros
 
         def weight_int4pack_mm(a, b_int4pack, qscale, qzeros):
-            return torch._weight_int4_pack_mm(a, b_int4pack, q_group, qscale, qzeros)
+            return torch._weight_int4pack_mm_for_xpu(a, b_int4pack, q_group, qscale, qzeros)
 
         b_int4pack, b_scales, zeros_int8 = convert_weight_to_int4pack(b_bf16)
 
