@@ -154,7 +154,7 @@ elif [[ "$BUILD_ENVIRONMENT" == *xpu* ]]; then
   # setting PYTHON_TEST_EXTRA_OPTION
   export PYTHON_TEST_EXTRA_OPTION="--xpu"
   # Disable sccache for xpu test due to flaky issue https://github.com/pytorch/pytorch/issues/143585
-  rm -rf /opt/cache
+  sudo rm -rf /opt/cache
 fi
 
 if [[ "$TEST_CONFIG" == *crossref* ]]; then
