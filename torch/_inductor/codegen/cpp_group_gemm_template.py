@@ -397,10 +397,6 @@ class CppGroupGemmTemplate(CppGemmTemplate):
         L2_cache_size = torch._C._cpu._L2_cache_size()  # per core cache size in Bytes
         assert L2_cache_size > 0, f"Expect L2_cache_size > 0 but got {L2_cache_size}"
 
-        # epilogues: List[List[ir.IRNode]] = [[] for _ in range(self.gemm_group_num)]
-        # reindexers: List[List[Optional[Callable[[List[Any]], List[Any]]]]] = [
-        #     [] for _ in range(self.gemm_group_num)
-        # ]
         epilogues: List[ir.IRNode] = []
         reindexers: List[Optional[Callable[[List[Any]], List[Any]]]] = []
 
@@ -442,33 +438,12 @@ class CppGroupGemmTemplate(CppGemmTemplate):
                 )
                 reindexers.append(None)
 
-        # if epilogue_nodes:
-        #     # _epilogue_nodes = [[] for _ in range(self.gemm_group_num)]
-        #     # for epilogue_node in epilogue_nodes:
-        #     #     # Split epilogue_node by gemm_idx
-        #     #     assert hasattr(epilogue_node, "gemm_idx")
-        #     #     _epilogue_nodes[epilogue_node.gemm_idx].append(epilogue_node)
-            
-        #     # for gemm_idx, _epilogue_node in enumerate(_epilogue_nodes):
-        #     #     if _epilogue_node:
-        #     #         epilogues[gemm_idx].extend(_epilogue_node)
-        #     #         assert Y_list[gemm_idx].get_numel() == epilogues[gemm_idx][-1].get_numel()
-        #     #         Y_list[gemm_idx] = cast(ir.Buffer, epilogues[gemm_idx][-1])
-        #     #         Y_2d_list[gemm_idx], reindexers[gemm_idx] = gen_2d_view_of_epilogue_buf(
-        #     #             Y_list[gemm_idx],
-        #     #             template_buffer,
-        #     #             _epilogue_node,
-        #     #             reindexers[gemm_idx],
-        #     #             default_reindexers=self.get_default_reindexers(_epilogue_node),
-        #     #         )
-
         # <TODO> leslie: Add the fusion check in the Scheduler for Now
         # <TODO> support the case when dimension and the indexing could be different between the GEMM output
         # and epilogues, considering that output buf number might be different from GEMM number.
-        # if epilogue_nodes:
-        #     epilogues.extend(epilogue_nodes)
-
-
+        if epilogue_nodes:
+            epilogues.extend(epilogue_nodes)
+            reindexers.extend([None]*len(epilogue_nodes)) 
 
         options = dict(
             N=self.n,
