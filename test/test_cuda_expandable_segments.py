@@ -1,8 +1,8 @@
 # Owner(s): ["module: cuda"]
 # run time cuda tests, but with the allocator using expandable segments
 
+import pathlib
 import sys
-from pathlib import Path
 
 from test_cuda import (  # noqa: F401
     TestBlockStateAbsorption,
@@ -15,7 +15,7 @@ from torch.testing._internal.common_cuda import IS_JETSON, IS_WINDOWS
 from torch.testing._internal.common_utils import run_tests, TEST_WITH_ROCM
 
 
-REPO_ROOT = Path(__file__).absolute().parents[1]
+REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 
 from tools.stats.import_test_stats import get_disabled_tests

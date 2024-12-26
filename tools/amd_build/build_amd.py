@@ -8,7 +8,7 @@ from pathlib import Path
 
 
 REPO_ROOT = Path(__file__).absolute().parents[2]
-sys.path.append(str(REPO_ROOT / "torch" / "utils"))
+sys.path.append(str((REPO_ROOT / "torch" / "utils").resolve()))
 
 from hipify import hipify_python  # type: ignore[import]
 
