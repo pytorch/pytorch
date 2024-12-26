@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import torch
 from torch.ao.quantization.experimental.quantizer import APoTQuantizer
 
@@ -11,5 +12,5 @@ class TensorAPoT:
         self.quantizer = quantizer
         self.data = apot_data
 
-    def int_repr(self) -> torch.Tensor:
+    def int_repr(self):
         return self.data
