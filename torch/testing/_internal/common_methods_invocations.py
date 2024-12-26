@@ -21,7 +21,7 @@ from torch.testing import make_tensor
 from torch.testing._internal.common_dtype import (
     _dispatch_dtypes, floating_types, floating_types_and, complex_types, floating_and_complex_types,
     floating_and_complex_types_and, all_types_and_complex_and, all_types_and, all_types_and_complex, integral_types_and,
-    empty_types, complex_types_and, integral_types, custom_types,
+    empty_types, complex_types_and, integral_types, custom_types, all_types_complex_float8_and,
 )
 from torch.testing._internal.common_device_type import \
     (onlyCPU, onlyCUDA, onlyNativeDeviceTypes, disablecuDNN, skipCUDAIfNoMagma, skipCUDAIfNoMagmaAndNoCusolver,
@@ -8752,7 +8752,6 @@ def sample_inputs_scaled_mm(op_info, device, dtype, requires_grad, **kwargs):
 def sample_inputs_scaled_dot_product_attention(op_info, device, dtype, requires_grad, **kwargs):
     make = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
     batch, seq_q, seq_kv, num_heads, head_dim = 4, 3, 6, 4, 8
-    num_heads_q_gqa, num_heads_kv_gqa = 32, 8
 
     dim_3_q_shape = (batch, seq_q, head_dim)
     dim_3_kv_shape = (batch, seq_kv, head_dim)
@@ -19155,7 +19154,7 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.skip('output is non-deterministic'), 'TestCommon', 'test_compare_cpu'),
            )),
     OpInfo('eye',
-           dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
+           dtypes=all_types_complex_float8_and(torch.bool, torch.half, torch.bfloat16),
            sample_inputs_func=sample_inputs_eye,
            error_inputs_func=error_inputs_eye,
            supports_out=True,
@@ -19177,6 +19176,9 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.skip("Skipped!"), 'TestMathBits', 'test_neg_view'),
                # UserWarning not triggered : Resized a non-empty tensor but did not warn about it.
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning'),
+               # "mul_cpu_reduced_float" not implemented for 'Float8_e4m3fn'
+               DecorateInfo(unittest.expectedFailure, 'TestNNCOpInfo', 'test_nnc_correctness',
+                            dtypes=(torch.float8_e4m3fn, torch.float8_e4m3fnuz, torch.float8_e5m2, torch.float8_e5m2fnuz)),
            )),
     OpInfo('empty_permuted',
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16, torch.chalf),
