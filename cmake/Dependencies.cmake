@@ -163,6 +163,7 @@ else()
 endif()
 set_property(CACHE BLAS PROPERTY STRINGS "ATLAS;BLIS;Eigen;FLAME;Generic;MKL;OpenBLAS;vecLib;APL")
 message(STATUS "Trying to find preferred BLAS backend of choice: " ${BLAS})
+set(BLAS_CHECK_F2C 0)
 
 if(BLAS STREQUAL "Eigen")
   # Eigen is header-only and we do not have any dependent libraries
@@ -175,6 +176,7 @@ elseif(BLAS STREQUAL "ATLAS")
   set(BLAS_INFO "atlas")
   set(BLAS_FOUND 1)
   set(BLAS_LIBRARIES ${ATLAS_LIBRARIES} cblas)
+  set(BLAS_CHECK_F2C 1)
 elseif(BLAS STREQUAL "OpenBLAS")
   find_package(OpenBLAS REQUIRED)
   include_directories(SYSTEM ${OpenBLAS_INCLUDE_DIR})
@@ -182,10 +184,12 @@ elseif(BLAS STREQUAL "OpenBLAS")
   set(BLAS_INFO "open")
   set(BLAS_FOUND 1)
   set(BLAS_LIBRARIES ${OpenBLAS_LIB})
+  set(BLAS_CHECK_F2C 1)
 elseif(BLAS STREQUAL "BLIS")
   find_package(BLIS REQUIRED)
   include_directories(SYSTEM ${BLIS_INCLUDE_DIR})
   list(APPEND Caffe2_DEPENDENCY_LIBS ${BLIS_LIB})
+  set(BLAS_CHECK_F2C 1)
 elseif(BLAS STREQUAL "MKL")
   if(BLAS_SET_BY_USER)
     find_package(MKL REQUIRED)
@@ -215,6 +219,7 @@ elseif(BLAS STREQUAL "NVPL")
   set(BLAS_INFO "nvpl")
   set(BLAS_FOUND 1)
   set(BLAS_USE_CBLAS_DOT TRUE)
+  set(BLAS_CHECK_F2C 1)
 elseif(BLAS STREQUAL "vecLib")
   find_package(vecLib REQUIRED)
   include_directories(SYSTEM ${vecLib_INCLUDE_DIR})
@@ -226,12 +231,14 @@ elseif(BLAS STREQUAL "FlexiBLAS")
   find_package(FlexiBLAS REQUIRED)
   include_directories(SYSTEM ${FlexiBLAS_INCLUDE_DIR})
   list(APPEND Caffe2_DEPENDENCY_LIBS ${FlexiBLAS_LIB})
+  set(BLAS_CHECK_F2C 1)
 elseif(BLAS STREQUAL "APL")
   find_package(APL REQUIRED)
   include_directories(SYSTEM ${APL_INCLUDE_DIR})
   set(BLAS_INFO "apl")
   set(BLAS_FOUND 1)
   set(BLAS_LIBRARIES ${APL_LIBRARIES})
+  set(BLAS_CHECK_F2C 1)
 elseif(BLAS STREQUAL "Generic")
   # On Debian family, the CBLAS ABIs have been merged into libblas.so
   if(ENV{GENERIC_BLAS_LIBRARIES} STREQUAL "")
@@ -245,9 +252,88 @@ elseif(BLAS STREQUAL "Generic")
   set(GENERIC_BLAS_FOUND TRUE)
   set(BLAS_INFO "generic")
   set(BLAS_FOUND 1)
+  set(BLAS_CHECK_F2C 1)
 else()
   message(FATAL_ERROR "Unrecognized BLAS option: " ${BLAS})
 endif()
+
+# Determine if blas was compiled with the f2c conventions
+IF (BLAS_LIBRARIES AND BLAS_CHECK_F2C)
+  # Push host architecture when cross-compiling otherwise check would fail
+  # when cross-compiling for arm64 on x86_64
+  cmake_push_check_state(RESET)
+  if(CMAKE_SYSTEM_NAME STREQUAL "Darwin" AND CMAKE_OSX_ARCHITECTURES MATCHES "^(x86_64|arm64)$")
+    list(APPEND CMAKE_REQUIRED_FLAGS "-arch ${CMAKE_HOST_SYSTEM_PROCESSOR}")
+  endif()
+
+  # Set values through env variables if cross compiling
+  IF (CMAKE_CROSSCOMPILING)
+    IF("$ENV{PYTORCH_BLAS_F2C}" STREQUAL "ON")
+      SET(BLAS_F2C TRUE)
+    ELSE()
+      SET(BLAS_F2C FALSE)
+    ENDIF()
+
+    IF("$ENV{PYTORCH_BLAS_USE_CBLAS_DOT}" STREQUAL "ON")
+      SET(BLAS_USE_CBLAS_DOT TRUE)
+    ELSE()
+      SET(BLAS_USE_CBLAS_DOT FALSE)
+    ENDIF()
+  ELSE ()
+    SET(CMAKE_REQUIRED_LIBRARIES ${BLAS_LIBRARIES})
+    CHECK_C_SOURCE_RUNS("
+  #include <stdlib.h>
+  #include <stdio.h>
+  float x[4] = { 1, 2, 3, 4 };
+  float y[4] = { .1, .01, .001, .0001 };
+  int four = 4;
+  int one = 1;
+  extern double sdot_();
+  int main() {
+    int i;
+    double r = sdot_(&four, x, &one, y, &one);
+    exit((float)r != (float).1234);
+  }" BLAS_F2C_DOUBLE_WORKS )
+    CHECK_C_SOURCE_RUNS("
+  #include <stdlib.h>
+  #include <stdio.h>
+  float x[4] = { 1, 2, 3, 4 };
+  float y[4] = { .1, .01, .001, .0001 };
+  int four = 4;
+  int one = 1;
+  extern float sdot_();
+  int main() {
+    int i;
+    double r = sdot_(&four, x, &one, y, &one);
+    exit((float)r != (float).1234);
+  }" BLAS_F2C_FLOAT_WORKS )
+
+    IF (BLAS_F2C_DOUBLE_WORKS AND NOT BLAS_F2C_FLOAT_WORKS)
+      MESSAGE(STATUS "This BLAS uses the F2C return conventions")
+      SET(BLAS_F2C TRUE)
+    ELSE (BLAS_F2C_DOUBLE_WORKS AND NOT BLAS_F2C_FLOAT_WORKS)
+      SET(BLAS_F2C FALSE)
+    ENDIF(BLAS_F2C_DOUBLE_WORKS AND NOT BLAS_F2C_FLOAT_WORKS)
+    CHECK_C_SOURCE_RUNS("
+  #include <stdlib.h>
+  #include <stdio.h>
+  float x[4] = { 1, 2, 3, 4 };
+  float y[4] = { .1, .01, .001, .0001 };
+  extern float cblas_sdot();
+  int main() {
+    int i;
+    double r = cblas_sdot(4, x, 1, y, 1);
+    exit((float)r != (float).1234);
+  }" BLAS_USE_CBLAS_DOT )
+    IF (BLAS_USE_CBLAS_DOT)
+      SET(BLAS_USE_CBLAS_DOT TRUE)
+    ELSE (BLAS_USE_CBLAS_DOT)
+      SET(BLAS_USE_CBLAS_DOT FALSE)
+    ENDIF(BLAS_USE_CBLAS_DOT)
+    SET(CMAKE_REQUIRED_LIBRARIES)
+  ENDIF(CMAKE_CROSSCOMPILING)
+  cmake_pop_check_state()
+ENDIF(BLAS_LIBRARIES)
 
 if(NOT INTERN_BUILD_MOBILE)
   set(AT_MKL_SEQUENTIAL 0)
