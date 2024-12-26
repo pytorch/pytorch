@@ -515,6 +515,7 @@ def _convert_fx(
     qconfig_mapping: Union[QConfigMapping, Dict[str, Any], None] = None,
     backend_config: Union[BackendConfig, Dict[str, Any], None] = None,
     is_decomposed: bool = False,
+    keep_original_weights: bool = False,
 ) -> GraphModule:
     """`is_standalone_module`: see docs in :func:`~torch.ao.quantization.prepare_standalone_module_fx`"""
     if convert_custom_config is None:
@@ -546,6 +547,7 @@ def _convert_fx(
         qconfig_mapping=qconfig_mapping,
         backend_config=backend_config,
         is_decomposed=is_decomposed,
+        keep_original_weights=keep_original_weights,
     )
 
     attach_preserved_attrs_to_model(quantized, preserved_attrs)
@@ -558,6 +560,7 @@ def convert_fx(
     _remove_qconfig: bool = True,
     qconfig_mapping: Union[QConfigMapping, Dict[str, Any], None] = None,
     backend_config: Union[BackendConfig, Dict[str, Any], None] = None,
+    keep_original_weights: bool = False,
 ) -> GraphModule:
     r"""Convert a calibrated or trained model to a quantized model
 
@@ -616,6 +619,7 @@ def convert_fx(
         _remove_qconfig=_remove_qconfig,
         qconfig_mapping=qconfig_mapping,
         backend_config=backend_config,
+        keep_original_weights=keep_original_weights,
     )
 
 
