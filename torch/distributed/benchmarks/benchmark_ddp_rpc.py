@@ -86,18 +86,18 @@ def _retrieve_embedding_parameters(emb_rref):
 
 def _print_header():
     _print_cont("\n")
-    _print_cont("%10s" % "")
+    _print_cont(" " * 10)
     for _ in [50, 75, 90, 95]:
-        _print_cont("%14s%10s" % ("sec/epoch", "epoch/sec"))
+        _print_cont(f"{'sec/epoch':14s}{'epoch/sec':10s}")
     _print_cont("\n")
 
 
 def _print_benchmark(prefix, nelem, measurements):
     measurements = sorted(measurements)
-    _print_cont("%8s:" % prefix)
+    _print_cont(f"{prefix:8s}:")
     for p in [50, 75, 90, 95]:
         v = np.percentile(measurements, p)
-        _print_cont("  p%02d:  %1.3fs  %6d/s" % (p, v, nelem / v))
+        _print_cont(f"  p{p:02d}:  {v:1.3f}s  {nelem / v:6d}/s")
     _print_cont("\n")
 
 

@@ -501,6 +501,7 @@ std::vector<std::string> AOTIModelPackageLoader::get_constant_fqns() {
   std::unordered_map<std::string, std::string> constant_name_to_fqn =
       runner_->getConstantNamesToOriginalFQNs();
   std::vector<std::string> constant_fqns;
+  constant_fqns.reserve(constant_name_to_fqn.size());
   for (const auto& it : constant_name_to_fqn) {
     constant_fqns.push_back(it.second);
   }

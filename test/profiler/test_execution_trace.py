@@ -14,6 +14,7 @@ except ImportError:
     pass
 
 import json
+import os
 import sys
 import tempfile
 import unittest
@@ -396,7 +397,7 @@ class TestExecutionTrace(TestCase):
         def fn(nt):
             return nt.sin().cos()
 
-        with torch.profiler.profile(execution_trace_observer=observer) as prof:
+        with torch.profiler.profile(execution_trace_observer=observer):
             for i in range(3):
                 values = torch.rand((8 + i, 4 + i))
                 offsets = torch.tensor([0, 2, 4, 6, 8 + i])
@@ -410,6 +411,38 @@ class TestExecutionTrace(TestCase):
             if "cos" in n["name"]:
                 found_cos = True
         assert found_cos
+
+    @unittest.skipIf(
+        not TEST_CUDA,
+        "need CUDA device availability to run",
+    )
+    def test_execution_trace_record_integral_tensor_range(self):
+        fp = tempfile.NamedTemporaryFile("w+t", suffix=".et.json", delete=False)
+        fp.close()
+
+        os.environ["ENABLE_PYTORCH_EXECUTION_TRACE_INTEGRAL_TENSOR_RANGE"] = "1"
+        t1 = torch.tensor([[1, 2], [3, 4]]).cuda()
+        t2 = torch.tensor([[0, 0], [1, 0]]).cuda()
+        with profile(
+            activities=supported_activities(),
+            schedule=torch.profiler.schedule(
+                skip_first=0, wait=0, warmup=0, active=1, repeat=1
+            ),
+            record_shapes=True,
+            execution_trace_observer=(
+                ExecutionTraceObserver().register_callback(fp.name)
+            ),
+        ) as p:
+            torch.gather(t1, 1, t2)
+            p.step()
+
+        nodes = self.get_execution_trace_root(fp.name)
+        for n in nodes:
+            assert "name" in n
+            if "aten::gather" in n["name"]:
+                for attr in n["attrs"]:
+                    if attr["name"] == "tensor_range":
+                        assert attr["value"] == '{"0":[1,4],"1":[0,1]}'
 
 
 devices = ["cpu", "cuda"]

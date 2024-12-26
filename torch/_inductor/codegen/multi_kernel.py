@@ -2,7 +2,7 @@
 import functools
 import logging
 import os
-import pathlib
+from pathlib import Path
 from typing import Any, List
 
 from torch._inductor.metrics import get_metric_table, is_metric_table_enabled
@@ -313,9 +313,16 @@ class MultiKernelCall:
         self._recorded = False
 
     def cache_file_path(self):
-        key = code_hash(",".join([k.fn.cache_key for k in self.kernels]))
+        key = code_hash(
+            ",".join(
+                [
+                    f"{k.fn.cache_key}{k.size_hints!r}{k.triton_meta!r}"
+                    for k in self.kernels
+                ]
+            )
+        )
         _, _, path = get_path(key, "picked_kernel")
-        return pathlib.Path(path)
+        return Path(path)
 
     def load_cache(self):
         assert self.picked_kernel is None
