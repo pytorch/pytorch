@@ -1,11 +1,11 @@
 # mypy: ignore-errors
+import os
 import sys
-from pathlib import Path
 
 import pandas as pd  # type: ignore[import-untyped]
 
 
-sys.path.append(str(Path(__file__).absolute().parents[1]))
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from train_decision import AHTrainDecisionTree
 
