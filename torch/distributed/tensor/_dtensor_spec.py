@@ -68,20 +68,20 @@ class DTensorSpec:
             self._hash = self._hash_impl()
         return self._hash
 
-    def __eq__(self, __o: object) -> bool:
+    def __eq__(self, other: object, /) -> bool:
         if not (
-            isinstance(__o, DTensorSpec)
-            and self.mesh == __o.mesh
-            and self.placements == __o.placements
+            isinstance(other, DTensorSpec)
+            and self.mesh == other.mesh
+            and self.placements == other.placements
         ):
             return False
-        if self.tensor_meta is None or __o.tensor_meta is None:
-            return self.tensor_meta == __o.tensor_meta
+        if self.tensor_meta is None or other.tensor_meta is None:
+            return self.tensor_meta == other.tensor_meta
 
         return (
-            self.tensor_meta.shape == __o.tensor_meta.shape  # type: ignore[union-attr]
-            and self.tensor_meta.stride == __o.tensor_meta.stride  # type: ignore[union-attr]
-            and self.tensor_meta.dtype == __o.tensor_meta.dtype  # type: ignore[union-attr]
+            self.tensor_meta.shape == other.tensor_meta.shape  # type: ignore[union-attr]
+            and self.tensor_meta.stride == other.tensor_meta.stride  # type: ignore[union-attr]
+            and self.tensor_meta.dtype == other.tensor_meta.dtype  # type: ignore[union-attr]
         )
 
     def __str__(self) -> str:

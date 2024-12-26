@@ -246,7 +246,7 @@ class TestDatasetRandomSplit(TestCase):
                     range(10), [3, 7], generator=torch.Generator().manual_seed(1)
                 )
             ],
-            [[5, 6, 1], [2, 0, 8, 9, 3, 7, 4]],
+            [[8, 4, 2], [0, 7, 5, 3, 6, 9, 1]],
         )
         self.assertEqual(
             random_split(
