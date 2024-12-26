@@ -1778,6 +1778,20 @@ else:
             res_cpu = input.cpu().cumsum(dim)
             self.assertEqual(res0, res_cpu, atol=1e-3, rtol=1e-2)
 
+    @onlyCUDA
+    @largeTensorTest('24GB', device='cuda')
+    @largeTensorTest('24GB', device='cpu')
+    def test_cumsum_64bit_indexing(self, device):
+        b = torch.ones(2 * 4096 * 8, 100000, dtype=torch.float, device='cuda')
+        b /= 100000
+        d = b.cumsum(dim=-1)
+        chunk = 2**30 // b.shape[-1]
+        for i in range(0, b.shape[0], chunk):
+            end = min(i + chunk, b.shape[0])
+            b[i:end, :].cumsum_(dim=-1)
+        # cheat a bit to avoid OOM
+        self.assertEqual(b[0, :], d[0, :], atol=3e-5, rtol=3e-5)
+        self.assertEqual(b[-1, :], d[-1, :], atol=3e-5, rtol=3e-5)
 
     @expectedFailureMeta  # expected a non-determinitic error, but it was not raised
     @onlyNativeDeviceTypes
