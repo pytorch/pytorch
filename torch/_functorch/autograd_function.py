@@ -457,7 +457,7 @@ def vmapify_autograd_function(autograd_function, in_dims, batch_size, randomness
         def backward_no_context(inputs):
             saved_tensors, grad_outputs = inputs
             wrapped_ctx = CtxWithSavedTensors(ctx, saved_tensors)
-            return autograd_function.backward(wrapped_ctx, grad_outputs)
+            return autograd_function.backward(wrapped_ctx, *grad_outputs)
 
         grad_ins, grad_ins_dims = restore_vmap(
             backward_no_context,
