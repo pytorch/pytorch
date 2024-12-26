@@ -4810,7 +4810,12 @@ class CppScheduling(BaseScheduling):
         """
         assert not prologue_nodes
 
-        epilogue_nodes = [epilogue_node for epilogue_node in epilogue_nodes if isinstance(epilogue_node, (SchedulerNode, FusedSchedulerNode))]
+        # Remove the MultiOutput Node
+        epilogue_nodes = [
+            epilogue_node
+            for epilogue_node in epilogue_nodes
+            if isinstance(epilogue_node, (SchedulerNode, FusedSchedulerNode))
+        ]
 
         counters["inductor"]["cpp_epilogue_fusion_counter"] += len(epilogue_nodes)
         assert self.is_cpp_template(

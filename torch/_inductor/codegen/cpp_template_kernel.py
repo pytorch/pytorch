@@ -285,25 +285,10 @@ class CppTemplateKernel(CppKernel):
         self,
         dst: Tuple[ir.Buffer],
         nodes: List[ir.IRNode],
-        offsets: Optional[List[List[sympy.Expr]]] = None,
-        reindexers: Optional[
-            List[Optional[Callable[[List[Any]], List[Any]]]]
-        ] = None,
-        extra_nodes: Optional[List[ir.IRNode]] = None,
-        extra_reindexers: Optional[
-            List[Optional[Callable[[List[Any]], List[Any]]]]
-        ] = None,
-        extra_names = None,
+        offsets: List[sympy.Expr],
+        reindexers: List[Optional[Callable[[List[Any]], List[Any]]]],
+        output_names: List[str],
     ) -> str:
-        if not reindexers:
-            reindexers = [None] * len(nodes)
-        if not extra_reindexers:
-            extra_reindexers = [None] * len(extra_nodes)
-        nodes = nodes + extra_nodes
-        if reindexers and extra_reindexers:
-            reindexers = reindexers + extra_reindexers
-        elif extra_reindexers:
-            reindexers = extra_reindexers
         assert isinstance(dst, Iterable)
         ref_dst = dst[0]
         var_sizes = (tuple(ref_dst.get_size()), ())
@@ -319,20 +304,11 @@ class CppTemplateKernel(CppKernel):
         cpp_kernel_proxy = CppKernelProxy(kernel_group)
         bodies = []
         var_sizes_list = []
-        def get_idx_of_node(node):
-            idx = 0
-            for _node in extra_nodes:
-                if node == _node:
-                    return idx
-                idx += 1
-            assert False, "should find node in extra_nodes"
         for i, node in enumerate(nodes):
-            try:
-                output_name = node.get_name()
-            except:
-                output_name = extra_names[get_idx_of_node(node)]
+            output_name = output_names[i]
             node = node.data if isinstance(node, ir.ComputedBuffer) else node
             assert isinstance(node, ir.Pointwise), node
+
             def fn(*args):
                 assert len(args) == 2
                 assert len(args[0]) == len(var_sizes[0])
@@ -345,6 +321,7 @@ class CppTemplateKernel(CppKernel):
                     output_index,
                     node.make_loader()(new_args).value,
                 )
+
             body = LoopBody(
                 fn,
                 (list(var_ranges.keys()), ()),
@@ -424,19 +401,15 @@ class CppTemplateKernel(CppKernel):
         orig_src: Optional[Tuple[ir.IRNode]] = None,
         epilogue_nodes: Optional[List[ir.IRNode]] = None,
         offsets: Optional[List[Any]] = None,
-        reindexers: Optional[
-            List[Optional[Callable[[List[Any]], List[Any]]]]
-        ] = None,
+        reindexers: Optional[List[Optional[Callable[[List[Any]], List[Any]]]]] = None,
     ):
         assert isinstance(dst, Iterable)
         assert all(_dst.get_size() == _src.get_size() for _src, _dst in zip(src, dst))
         if offsets:
             offsets = parse_expr_with_index_symbols(offsets)
         gemm_num = len(src)
-        extra_nodes = []
-        extra_reindexers = []
-        extra_names = []
         final_offsets = []
+        output_names = []
         if epilogue_nodes:
             if not reindexers:
                 reindexers = [None] * len(epilogue_nodes)
@@ -448,9 +421,12 @@ class CppTemplateKernel(CppKernel):
                     all_read_names.extend(list(epilogue.get_read_names()))
                 localize_epilogue_nodes.extend(scope.localize_nodes(epilogue_nodes))
                 final_offsets.extend([offsets] * len(localize_epilogue_nodes))
+                output_names.extend(
+                    [node.get_name() for node in localize_epilogue_nodes]
+                )
                 for gemm_idx in range(gemm_num):
                     if orig_src[gemm_idx].get_name() != src[gemm_idx].get_name():
-                        if orig_src[gemm_idx].name in all_read_names:
+                        if orig_src[gemm_idx].get_name() in all_read_names:
                             scope.add_local_buffer(
                                 src[gemm_idx],
                                 [
@@ -459,14 +435,20 @@ class CppTemplateKernel(CppKernel):
                             )
                         else:
                             scope.add_local_buffer(src[gemm_idx])
-                            extra_nodes.extend(
+                            localize_epilogue_nodes.extend(
                                 [L.copy(dst[gemm_idx], src[gemm_idx]).data.data]
                             )
-                            extra_reindexers.append(None)
-                            extra_names.append(dst[gemm_idx].get_name())
-                            final_offsets.append([sympy.S.Zero] * len(dst[gemm_idx].get_size()))
+                            reindexers.append(None)
+                            output_names.append(dst[gemm_idx].get_name())
+                            final_offsets.append(
+                                [sympy.S.Zero] * len(dst[gemm_idx].get_size())
+                            )
                 return self.store_group_gemm_pointwise_nodes(
-                    dst, localize_epilogue_nodes, final_offsets, reindexers, extra_nodes, extra_reindexers, extra_names # type: ignore[arg-type]
+                    dst,
+                    localize_epilogue_nodes,
+                    final_offsets,
+                    reindexers,
+                    output_names=output_names,
                 )
         else:
             assert isinstance(src, Iterable)
@@ -477,14 +459,15 @@ class CppTemplateKernel(CppKernel):
                     for _src, _dst in zip(src, dst):
                         copy_list.extend([L.copy(_dst, _src).data.data])
                         scope.add_local_buffer(_src)
-                        extra_names.append(_dst.get_name())
+                        output_names.append(_dst.get_name())
                         final_offsets.append([sympy.S.Zero] * len(_dst.get_size()))
+                    reindexers = [None] * len(copy_list)
                     return self.store_group_gemm_pointwise_nodes(
                         dst,
-                        nodes=[],
+                        nodes=copy_list,
                         offsets=final_offsets,
-                        extra_nodes=copy_list,
-                        extra_names=extra_names,
+                        reindexers=reindexers,
+                        output_names=output_names,
                     )
             else:
                 assert all(

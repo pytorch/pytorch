@@ -1227,14 +1227,23 @@ class FusedSchedulerNode(BaseSchedulerNode):
                 # Rewrite the StarDep to MemoryDep
                 assert isinstance(node2.node, MultiOutput)
                 assert len(node2.read_writes.writes) == 1
-                assert isinstance(list(node2.read_writes.writes)[0], StarDep)
-                name = list(node2.read_writes.writes)[0].name
-                template_nodes = [node for node in node1.get_nodes() if node.is_template()]
+                assert isinstance(next(iter(node2.read_writes.writes)), StarDep)
+                name = next(iter(node2.read_writes.writes)).name
+                template_nodes = [
+                    node for node in node1.get_nodes() if node.is_template()
+                ]
                 assert len(template_nodes) == 1
                 template_node = template_nodes[0]
                 assert len(template_node.read_writes.writes) == 1
-                write = list(template_node.read_writes.writes)[0]
-                node2.read_writes.writes = OrderedSet([MemoryDep(name, write.index, write.var_names, write.size, write.mode),])
+                write = next(iter(template_node.read_writes.writes))
+                assert isinstance(write, MemoryDep)
+                node2.read_writes.writes = OrderedSet(
+                    [
+                        MemoryDep(
+                            name, write.index, write.var_names, write.size, write.mode
+                        ),
+                    ]
+                )
         else:
             assert isinstance(node2, (SchedulerNode, FusedSchedulerNode))
         nodes = list(itertools.chain(node1.get_nodes(), node2.get_nodes()))
@@ -1973,7 +1982,6 @@ class Scheduler:
             self.nodes = comms.reorder_compute_and_comm_for_overlap(self.nodes)
         self.process_grouped_nodes()
         self.compute_last_usage()
-        print("---- post fusion nodes is: {}".format(self.nodes), flush=True)
         V.debug.ir_post_fusion(self.nodes)
         V.debug.graph_diagram(self.nodes)
         self.debug_draw_graph()
@@ -2770,15 +2778,11 @@ class Scheduler:
             for node in fused_nodes:
                 fusion_log.debug("  " + node.debug_str_short())  # noqa: G003
         for node1, node2 in self.get_possible_fusions(nodes):
-            print("---- inside check possible fusion ", flush=True)
-            print("node1 is: {}".format(node1), flush=True)
-            print("node2 is: {}".format(node2), flush=True)
             node1 = self.name_to_fused_node[node1.get_first_name()]
             node2 = self.name_to_fused_node[node2.get_first_name()]
             if (
-                self.can_fuse(node1, node2) and not self.will_fusion_create_cycle(
-                    node1, node2
-                )
+                self.can_fuse(node1, node2)
+                and not self.will_fusion_create_cycle(node1, node2)
             ) or (
                 node1.is_template()
                 and isinstance(node2.node, MultiOutput)
@@ -2894,11 +2898,8 @@ class Scheduler:
                 continue
             for buf in node.used_buffer_names():
                 buffer_names_grouping[buf].append(node)
-        print("buffer_names_grouping is: {}".format(buffer_names_grouping), flush=True)
         for node_grouping in buffer_names_grouping.values():
             check_all_pairs(node_grouping)
-
-        print("possible_fusions is: {}".format(possible_fusions), flush=True)
 
         if config.aggressive_fusion:
             group_grouping = collections.defaultdict(list)
@@ -3703,7 +3704,6 @@ class Scheduler:
 
         self.current_device = None
         for node in self.nodes:
-            print("---- inside codegen node is: {}".format(node), flush=True)
             if log.isEnabledFor(logging.DEBUG):
                 try:
                     log.debug(
