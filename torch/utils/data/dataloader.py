@@ -1503,6 +1503,7 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
                     self._workers_status
                 ):
                     # when self._in_order is False, distribute work to a worker if it has capacity
+                    # _workers_status is updated only in this thread, so the sum is guaranteed > 0
                     break
         else:
             # not found (i.e., didn't break)
