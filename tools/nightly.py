@@ -262,7 +262,7 @@ class Venv:
         candidates = [p for p in candidates if p.is_dir() and p.name == "site-packages"]
         if not candidates:
             raise RuntimeError(
-                f"No site-packages directory found for excecutable {python}"
+                f"No site-packages directory found for executable {python}"
             )
         return candidates[0]
 
@@ -271,8 +271,8 @@ class Venv:
         """Get the command to activate the virtual environment."""
         if WINDOWS:
             # Assume PowerShell
-            return f"& {self.prefix / 'Scripts' / 'Activate.ps1'}"
-        return f"source {self.prefix}/bin/activate"
+            return f'''& "{self.prefix / "Scripts" / "Activate.ps1"}"'''
+        return f'source "{self.prefix}/bin/activate"'
 
     @timed("Creating virtual environment")
     def create(self, *, remove_if_exists: bool = False) -> Path:
@@ -334,7 +334,7 @@ class Venv:
             activate_script = self.prefix / "bin" / "activate"
             st_mode = activate_script.stat().st_mode
             activate_script.chmod(st_mode | 0o200)
-            with (self.prefix / "bin" / "activate").open(mode="a") as f:
+            with activate_script.open(mode="a", encoding="utf-8") as f:
                 f.write(
                     "\n"
                     + textwrap.dedent(
