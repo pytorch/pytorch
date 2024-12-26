@@ -59,7 +59,7 @@ class ModelTest(PackageTestCase):
         self.assertEqual(r2(input), ref)
 
         # functions exist also to get at the private modules in each package
-        torchvision = i.import_module("torchvision")
+        torchvision = i.import_module("torchvision")  # noqa: F841
 
         f2 = BytesIO()
         # if we are doing transfer learning we might want to re-save
