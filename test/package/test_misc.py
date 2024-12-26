@@ -198,7 +198,7 @@ class TestMisc(PackageTestCase):
     def test_load_python_version_from_package(self):
         """Tests loading a package with a python version embdded"""
         importer1 = PackageImporter(
-            f"{Path(__file__).parent}/package_e/test_nn_module.pt"
+            str(Path(__file__).absolute().parent / "package_e" / "test_nn_module.pt")
         )
         self.assertEqual(importer1.python_version(), "3.9.7")
 
@@ -241,7 +241,7 @@ class TestMisc(PackageTestCase):
             )
             self.assertEqual(he.get_rdeps("package_b.subpackage_2"), ["package_b"])
 
-        with self.assertRaises(PackagingError) as e:
+        with self.assertRaises(PackagingError):
             with PackageExporter(BytesIO()) as he:
                 import package_b
 
@@ -338,10 +338,13 @@ class TestMisc(PackageTestCase):
         causes modules who do this hackery to fail on import. See
         https://github.com/pytorch/pytorch/issues/57490 for more information.
         """
-        import package_a.std_sys_module_hacks
+        if sys.version_info < (3, 13):
+            import package_a.std_sys_module_hacks as std_sys_module_hacks
+        else:
+            import package_a.std_sys_module_hacks_3_13 as std_sys_module_hacks
 
         buffer = BytesIO()
-        mod = package_a.std_sys_module_hacks.Module()
+        mod = std_sys_module_hacks.Module()
 
         with PackageExporter(buffer) as pe:
             pe.intern("**")

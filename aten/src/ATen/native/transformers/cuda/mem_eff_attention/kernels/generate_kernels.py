@@ -308,7 +308,7 @@ def write_decl_impl(
     family_name: str,
     impl_file: str,
     autogen_dir: Path,
-    disable_def: str = None,
+    disable_def: Optional[str] = None,
 ) -> None:
     cpp_file_header = """/*
  * Copyright (c) Meta Platforms, Inc. and affiliates.
@@ -380,7 +380,7 @@ void dispatch_{family_name}(T cb, int cc = 0) {{
 
 def main(output_dir: Optional[str]) -> None:
     if output_dir is None:
-        output_dir = Path(__file__).parent
+        output_dir = Path(__file__).absolute().parent
     else:
         output_dir = Path(output_dir)
     write_decl_impl(

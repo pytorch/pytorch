@@ -40,8 +40,7 @@
  * through the creation of a TensorOptions value.
  */
 
-namespace c10 {
-namespace impl {
+namespace c10::impl {
 
 TORCH_API void common_device_check_failure(Device common_device, const at::Tensor& tensor, at::CheckedFrom methodName, at::CheckedFrom argName);
 
@@ -79,5 +78,4 @@ inline void check_and_update_common_device(std::optional<Device>& common_device,
     check_and_update_common_device(common_device, tensor, methodName, argName);
   }
 }
-} // namespace impl
-} // namespace c10
+} // namespace c10::impl

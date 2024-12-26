@@ -312,10 +312,11 @@ def _make_prim(
         prim_autograd_impl.impl(name, _autograd_impl)
         prim_meta_impl.impl(name, meta)
     else:
-        mutates_args = []
-        for arg in cpp_schema.arguments:
-            if arg.alias_info is not None and arg.alias_info.is_write:
-                mutates_args.append(arg.name)
+        mutates_args = [
+            arg.name
+            for arg in cpp_schema.arguments
+            if arg.alias_info is not None and arg.alias_info.is_write
+        ]
         prim_def = torch.library.custom_op(
             "prims::" + name,
             _prim_impl,
@@ -1783,7 +1784,7 @@ def _cat_meta(tensors: Sequence[TensorLikeType], dim: int) -> TensorLikeType:
                 torch._check(
                     length == common_length,
                     lambda: f"Sizes of tensors must match except in dimension {dim}. "
-                    f"Expected {common_length} but got {length} for tensor number "
+                    f"Expected {common_length} in dimension {idx} but got {length} for tensor number "
                     f"{tensor_idx} in the list",
                 )
 
@@ -1920,7 +1921,7 @@ def _convert_element_type_aten(a: Tensor, dtype: torch.dtype) -> Tensor:
         # TODO: update meta objects so this can be acquired directly
         try:
             requires_grad = a.requires_grad
-        except Exception as e:
+        except Exception:
             requires_grad = False
 
     result = torch.empty_like(

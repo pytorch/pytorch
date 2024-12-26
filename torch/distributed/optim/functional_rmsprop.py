@@ -4,6 +4,9 @@ from typing import Dict, List, Optional
 import torch
 import torch.optim._functional as F
 from torch import Tensor
+from torch.distributed.optim._deprecation_warning import (
+    _scripted_functional_optimizer_deprecation_warning,
+)
 
 
 __all__: List[str] = []
@@ -33,6 +36,7 @@ class _FunctionalRMSprop:
         maximize: bool = False,
         _allow_empty_param_list: bool = False,
     ):
+        _scripted_functional_optimizer_deprecation_warning(stacklevel=2)
         self.defaults = {
             "lr": lr,
             "alpha": alpha,

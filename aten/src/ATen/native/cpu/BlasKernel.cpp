@@ -3,6 +3,7 @@
 #include <ATen/Parallel.h>
 #include <ATen/native/CPUBlas.h>
 #include <ATen/native/cpu/zmath.h>
+#include <ATen/native/cpu/ReducedPrecisionFloatGemvFastPathKernel.h>
 #include <c10/util/irange.h>
 #include <c10/util/Unroll.h>
 
@@ -366,7 +367,7 @@ void gemm_notrans_(
 
 #if !defined(C10_MOBILE)
 static float compute_dot(const at::Half* a, const at::Half* b, int64_t len) {
-  return at::native::blas_impl::fp16_dot_with_fp32_arith(
+  return at::native::CPU_CAPABILITY::fp16_dot_with_fp32_arith(
       a, b, len);
 }
 
@@ -403,7 +404,7 @@ void gemm_transa_(
 }
 
 static float compute_dot(const at::BFloat16* a, const at::BFloat16* b, int64_t len) {
-  return at::native::blas_impl::bf16_dot_with_fp32_arith(a, b, len);
+  return at::native::CPU_CAPABILITY::bf16_dot_with_fp32_arith(a, b, len);
 }
 
 template <>

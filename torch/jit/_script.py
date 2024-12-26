@@ -1493,11 +1493,10 @@ def _get_overloads(obj):
             _jit_internal.get_overload_no_implementation_error_message("function", obj)
         )
 
-    compiled_fns = []
-    for overload_fn in uncompiled_overloads:
-        compiled_fns.append(
-            _compile_function_with_overload(overload_fn, qual_name, obj)
-        )
+    compiled_fns = [
+        _compile_function_with_overload(overload_fn, qual_name, obj)
+        for overload_fn in uncompiled_overloads
+    ]
 
     if existing_compiled_fns:
         compiled_fns = existing_compiled_fns + compiled_fns

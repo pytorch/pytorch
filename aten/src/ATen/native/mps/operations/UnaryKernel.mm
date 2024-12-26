@@ -48,8 +48,7 @@ static void exec_unary_kernel(const Tensor& self, const Tensor& output_, const s
       getMPSProfiler().beginProfileKernel(cplState, name, {self});
 
       [computeEncoder setComputePipelineState:cplState];
-      mtl_setBuffer(computeEncoder, outputTensor, 0);
-      mtl_setBuffer(computeEncoder, inputTensor, 1);
+      mtl_setArgs(computeEncoder, outputTensor, inputTensor);
       mtl_dispatch1DJob(computeEncoder, cplState, length);
 
       getMPSProfiler().endProfileKernel(cplState);
