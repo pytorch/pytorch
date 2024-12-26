@@ -13,7 +13,7 @@ except ImportError:
     # Support the case where we run this file directly.
     from common import PackageTestCase
 
-packaging_directory = f"{Path(__file__).parent}/package_bc"
+packaging_directory = str(Path(__file__).absolute().parent / "package_bc")
 
 
 class TestLoadBCPackages(PackageTestCase):
