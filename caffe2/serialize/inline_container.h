@@ -291,6 +291,9 @@ size_t getPadding(
     size_t filename_size,
     size_t size,
     std::string& padding_buf);
+
+size_t getOffset(size_t cursor, std::string filename, size_t size);
+
 } // namespace detail
 
 } // namespace serialize
