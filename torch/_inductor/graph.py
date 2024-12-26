@@ -1976,6 +1976,10 @@ class GraphLowering(torch.fx.Interpreter):
                 V.graph.all_codegen_kernel_names,
             )
 
+            print("self.wrapper_code lines is ", flush=True)
+            for line in self.wrapper_code.lines:
+                print(line, flush=True)
+
             result = self.wrapper_code.generate(self.is_inference)
             self.wrapper_code.pop_codegened_graph()
             return result

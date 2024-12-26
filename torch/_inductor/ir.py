@@ -6752,6 +6752,7 @@ class MultiOutput(ExternKernel):
         self.name = V.graph.register_buffer(self)
         V.graph.register_operation(self)
         self.indices = indices
+        self.is_fusable = False
 
     def get_unbacked_symbol_uses(self) -> OrderedSet[sympy.Symbol]:
         return self.inputs[0].get_unbacked_symbol_uses()
@@ -6766,6 +6767,9 @@ class MultiOutput(ExternKernel):
             if isinstance(inp, FallbackKernel)
             and len(inp.get_inputs_that_alias_output()) > 0
         ]
+
+    def can_fuse(self) -> bool:
+        return self.is_fusable
 
 
 # We just use a normal dataclass for MutableBox/TensorBox/StorageBox since

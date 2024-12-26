@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import contextlib
 import logging
-from typing import Any, Callable, List, Optional
+from typing import Any, Callable, cast, List, Optional
 from unittest.mock import patch
 
 import torch
@@ -15,7 +15,13 @@ from ..select_algorithm import DataProcessorTemplateWrapper
 from ..utils import parallel_num_threads
 from ..virtualized import V
 from .cpp import get_export_declaration
-from .cpp_gemm_template import CppGemmTemplate, expand_bias, prune_tensors, transpose_w
+from .cpp_gemm_template import (
+    CppGemmTemplate,
+    expand_bias,
+    gen_2d_view_of_epilogue_buf,
+    prune_tensors,
+    transpose_w,
+)
 from .cpp_micro_gemm import CppMicroGemmAMX, create_micro_gemm
 from .cpp_template_kernel import CppTemplateKernel
 from .cpp_utils import (
@@ -391,10 +397,12 @@ class CppGroupGemmTemplate(CppGemmTemplate):
         L2_cache_size = torch._C._cpu._L2_cache_size()  # per core cache size in Bytes
         assert L2_cache_size > 0, f"Expect L2_cache_size > 0 but got {L2_cache_size}"
 
-        epilogues: List[List[ir.IRNode]] = [[] for _ in range(self.gemm_group_num)]
-        reindexers: List[List[Optional[Callable[[List[Any]], List[Any]]]]] = [
-            [] for _ in range(self.gemm_group_num)
-        ]
+        # epilogues: List[List[ir.IRNode]] = [[] for _ in range(self.gemm_group_num)]
+        # reindexers: List[List[Optional[Callable[[List[Any]], List[Any]]]]] = [
+        #     [] for _ in range(self.gemm_group_num)
+        # ]
+        epilogues: List[ir.IRNode] = []
+        reindexers: List[Optional[Callable[[List[Any]], List[Any]]]] = []
 
         gemm_output_buffers: list[ir.Buffer] = []
         for out_buf_idx in range(self.gemm_group_num):
@@ -406,7 +414,7 @@ class CppGroupGemmTemplate(CppGemmTemplate):
             )
 
         assert (
-            not self.epilogue_creator and not epilogue_nodes
+            not self.epilogue_creator
         ), "Epilogue fusion is not implemented yet in Group GEMM Template"
 
         kernel_args = {}
@@ -425,14 +433,42 @@ class CppGroupGemmTemplate(CppGemmTemplate):
         for gemm_idx, inp in enumerate(inp_list):
             if inp:
                 buffer_name = Y_list[gemm_idx].get_name()
-                epilogues[gemm_idx].append(
+                epilogues.append(
                     ir.ComputedBuffer(
                         name=buffer_name,
                         layout=template_buffer.layout,
                         data=_bias_add_epilogue(gemm_output_buffers[gemm_idx], inp),
                     )
                 )
-                reindexers[gemm_idx].append(None)
+                reindexers.append(None)
+
+        # if epilogue_nodes:
+        #     # _epilogue_nodes = [[] for _ in range(self.gemm_group_num)]
+        #     # for epilogue_node in epilogue_nodes:
+        #     #     # Split epilogue_node by gemm_idx
+        #     #     assert hasattr(epilogue_node, "gemm_idx")
+        #     #     _epilogue_nodes[epilogue_node.gemm_idx].append(epilogue_node)
+            
+        #     # for gemm_idx, _epilogue_node in enumerate(_epilogue_nodes):
+        #     #     if _epilogue_node:
+        #     #         epilogues[gemm_idx].extend(_epilogue_node)
+        #     #         assert Y_list[gemm_idx].get_numel() == epilogues[gemm_idx][-1].get_numel()
+        #     #         Y_list[gemm_idx] = cast(ir.Buffer, epilogues[gemm_idx][-1])
+        #     #         Y_2d_list[gemm_idx], reindexers[gemm_idx] = gen_2d_view_of_epilogue_buf(
+        #     #             Y_list[gemm_idx],
+        #     #             template_buffer,
+        #     #             _epilogue_node,
+        #     #             reindexers[gemm_idx],
+        #     #             default_reindexers=self.get_default_reindexers(_epilogue_node),
+        #     #         )
+
+        # <TODO> leslie: Add the fusion check in the Scheduler for Now
+        # <TODO> support the case when dimension and the indexing could be different between the GEMM output
+        # and epilogues, considering that output buf number might be different from GEMM number.
+        # if epilogue_nodes:
+        #     epilogues.extend(epilogue_nodes)
+
+
 
         options = dict(
             N=self.n,
