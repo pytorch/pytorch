@@ -1357,6 +1357,8 @@ def quantized_decomposed_dequantize_per_channel(
     quant_min: int,
     quant_max: int,
     dtype: torch.dtype,
+    *,
+    out_dtype: Optional[torch.dtype] = None,
 ) -> TensorBox:
     assert len(scales.get_size()) == 1, "expect scales 1 dim"
     assert len(zero_points.get_size()) == 1, "expect zero_points 1 dim"
@@ -1366,6 +1368,9 @@ def quantized_decomposed_dequantize_per_channel(
     assert axis < len(
         input.get_size()
     ), f"Expecting axis to be < {len(input.get_size())}"
+
+    if out_dtype is None:
+        out_dtype = torch.float32
 
     input_loader = input.make_loader()
     scales_loader = scales.make_loader()
@@ -1378,16 +1383,16 @@ def quantized_decomposed_dequantize_per_channel(
         scale = scales_loader(channel_idx)
         zero_point = zero_points_loader(channel_idx)
 
-        if scales.dtype != torch.float32:
-            scale = ops.to_dtype(scale, torch.float32)
-        if zero_points.dtype != torch.float32:
-            zero_point = ops.to_dtype(zero_point, torch.float32)
-        val = ops.sub(ops.to_dtype(input, torch.float32), zero_point) * scale
+        if scales.dtype != out_dtype:
+            scale = ops.to_dtype(scale, out_dtype)
+        if zero_points.dtype != out_dtype:
+            zero_point = ops.to_dtype(zero_point, out_dtype)
+        val = ops.sub(ops.to_dtype(input, out_dtype), zero_point) * scale
         return val
 
     return Pointwise.create(
         device=input.get_device(),
-        dtype=torch.float32,
+        dtype=out_dtype,
         inner_fn=inner_fn,
         ranges=input.get_size(),
     )
@@ -1442,22 +1447,27 @@ def quantized_decomposed_dequantize_per_tensor_default(
     quant_min: int,
     quant_max: int,
     dtype: torch.dtype,
+    *,
+    out_dtype: Optional[torch.dtype] = None,
 ) -> TensorBox:
     assert (
         input.get_dtype() == dtype
     ), f"Expecting input to have dtype {dtype}, but got dtype: {input.get_dtype()}"
 
+    if out_dtype is None:
+        out_dtype = torch.float32
+
     input_loader = input.make_loader()
 
     def inner_fn(idx, scale, zero_point):
         input = input_loader(idx)
-        scale, zero_point = _create_constants(scale, zero_point, dtype=torch.float32)
-        val = ops.sub(ops.to_dtype(input, torch.float32), zero_point) * scale
+        scale, zero_point = _create_constants(scale, zero_point, dtype=out_dtype)
+        val = ops.sub(ops.to_dtype(input, out_dtype), zero_point) * scale
         return val
 
     return Pointwise.create(
         device=input.get_device(),
-        dtype=torch.float32,
+        dtype=out_dtype,
         inner_fn=functools.partial(
             inner_fn, scale=float(scale), zero_point=int(zero_point)
         ),
@@ -1523,6 +1533,8 @@ def quantized_decomposed_dequantize_per_tensor_tensor(
     quant_min: int,
     quant_max: int,
     dtype: torch.dtype,
+    *,
+    out_dtype: Optional[torch.dtype] = None,
 ) -> TensorBox:
     assert len(scale.get_size()) == 0 or (
         len(scale.get_size()) == 1 and scale.get_size()[0] == 1
@@ -1534,6 +1546,9 @@ def quantized_decomposed_dequantize_per_tensor_tensor(
         input.get_dtype() == dtype
     ), f"Expecting input to have dtype {dtype}, but got dtype: {input.get_dtype()}"
 
+    if out_dtype is None:
+        out_dtype = torch.float32
+
     input_loader = input.make_loader()
     scale_loader = scale.make_loader()
     zero_point_loader = zero_point.make_loader()
@@ -1542,16 +1557,16 @@ def quantized_decomposed_dequantize_per_tensor_tensor(
         input = input_loader(idx)
         _scale = scale_loader((0,) if len(scale.get_size()) == 1 else ())
         _zero_point = zero_point_loader((0,) if len(scale.get_size()) == 1 else ())
-        if scale.dtype != torch.float32:
-            _scale = ops.to_dtype(_scale, torch.float32)
-        if zero_point.dtype != torch.float32:
-            _zero_point = ops.to_dtype(_zero_point, torch.float32)
-        val = ops.sub(ops.to_dtype(input, torch.float32), _zero_point) * _scale
+        if scale.dtype != out_dtype:
+            _scale = ops.to_dtype(_scale, out_dtype)
+        if zero_point.dtype != out_dtype:
+            _zero_point = ops.to_dtype(_zero_point, out_dtype)
+        val = ops.sub(ops.to_dtype(input, out_dtype), _zero_point) * _scale
         return val
 
     return Pointwise.create(
         device=input.get_device(),
-        dtype=torch.float32,
+        dtype=out_dtype,
         inner_fn=inner_fn,
         ranges=input.get_size(),
     )
