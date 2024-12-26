@@ -124,7 +124,6 @@ class FlightRecorderEventTest(TestCase):
                 output_sizes = [[math.prod(input_sizes[0]) * 2]]
             if collective == "all_to_all":
                 expectedState = MatchState.UNDECIDED
-
             event = create_one_event(
                 collective, ("0", "default"), input_sizes, output_sizes, "scheduled", 1
             )
