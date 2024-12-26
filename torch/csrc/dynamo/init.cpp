@@ -90,7 +90,6 @@ THPObjectPtr strip_function_call(PyObject* name) {
   if (PyUnicode_READY(name) != 0)
     return THPObjectPtr::none();
 
-  // TODO: what about endianism?
   auto length = PyUnicode_GET_LENGTH(name);
   switch (PyUnicode_KIND(name)) {
     case PyUnicode_1BYTE_KIND:
@@ -117,6 +116,49 @@ bool _checkParamCount(size_t nargs, size_t expected) {
   return true;
 }
 
+template <typename T>
+THPObjectPtr is_valid_var_name_helper(const T* start, size_t length) {
+  if (length < 1)
+    return THPObjectPtr::dup(Py_False);
+
+  // TODO: the original code is a bit odd... check it. It just checked that the
+  // string starts with alnum. Then if it's all digits then it logs a warning.
+
+  if (!Py_UNICODE_ISALNUM(*start))
+    return THPObjectPtr::dup(Py_False);
+  while (length-- > 0) {
+    if (!Py_UNICODE_ISDIGIT(*start++)) {
+      return THPObjectPtr::dup(Py_True);
+    }
+  }
+
+  // 2 == warning
+  return THPObjectPtr(THPUtils_packInt32(2));
+}
+
+THPObjectPtr is_valid_var_name(PyObject* name) {
+  if (!PyUnicode_Check(name)) {
+    PyErr_SetString(PyExc_TypeError, "String expected");
+    return THPObjectPtr::none();
+  }
+
+  if (PyUnicode_READY(name) != 0) {
+    return THPObjectPtr::none();
+  }
+
+  auto length = PyUnicode_GET_LENGTH(name);
+  switch (PyUnicode_KIND(name)) {
+    case PyUnicode_1BYTE_KIND:
+      return is_valid_var_name_helper(PyUnicode_1BYTE_DATA(name), length);
+    case PyUnicode_2BYTE_KIND:
+      return is_valid_var_name_helper(PyUnicode_2BYTE_DATA(name), length);
+    case PyUnicode_4BYTE_KIND:
+      return is_valid_var_name_helper(PyUnicode_4BYTE_DATA(name), length);
+    default:
+      throw std::runtime_error("unimplemented - bad value");
+  }
+}
+
 PyObject* _strip_function_call(
     PyObject* self,
     PyObject* const* args,
@@ -127,13 +169,28 @@ PyObject* _strip_function_call(
   return strip_function_call(args[0]).release();
 }
 
+PyObject* _is_valid_var_name(
+    PyObject* self,
+    PyObject* const* args,
+    Py_ssize_t nargs) {
+  if (!_checkParamCount(nargs, 1)) {
+    return THPObjectPtr::none().release();
+  }
+  return is_valid_var_name(args[0]).release();
+}
+
 #define PYC_FN(x) ((PyCFunction)(void (*)()) & x)
 
 void _register_functions(PyObject* mod) {
-  static std::array<PyMethodDef, 2> fns = {
+  static std::array<PyMethodDef, 3> fns = {
       PyMethodDef{
           "strip_function_call",
           PYC_FN(_strip_function_call),
+          METH_FASTCALL,
+          nullptr},
+      PyMethodDef{
+          "is_valid_var_name",
+          PYC_FN(_is_valid_var_name),
           METH_FASTCALL,
           nullptr},
       PyMethodDef{nullptr, nullptr, 0, nullptr},

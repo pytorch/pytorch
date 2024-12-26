@@ -403,7 +403,7 @@ def assert_almost_equal(actual, desired, decimal=7, err_msg="", verbose=True):
         usecomplex = False
 
     def _build_err_msg():
-        header = "Arrays are not almost equal to %d decimals" % decimal
+        header = f"Arrays are not almost equal to {decimal:d} decimals"
         return build_err_msg([actual, desired], err_msg, verbose=verbose, header=header)
 
     if usecomplex:
@@ -526,7 +526,7 @@ def assert_approx_equal(actual, desired, significant=7, err_msg="", verbose=True
     msg = build_err_msg(
         [actual, desired],
         err_msg,
-        header="Items are not equal to %d significant digits:" % significant,
+        header=f"Items are not equal to {significant:d} significant digits:",
         verbose=verbose,
     )
     try:
@@ -944,7 +944,7 @@ def assert_array_almost_equal(x, y, decimal=6, err_msg="", verbose=True):
         y,
         err_msg=err_msg,
         verbose=verbose,
-        header=("Arrays are not almost equal to %d decimals" % decimal),
+        header=f"Arrays are not almost equal to {decimal:d} decimals",
         precision=decimal,
     )
 
@@ -1359,10 +1359,10 @@ def assert_array_almost_equal_nulp(x, y, nulp=1):
     ref = nulp * np.spacing(np.where(ax > ay, ax, ay))
     if not np.all(np.abs(x - y) <= ref):
         if np.iscomplexobj(x) or np.iscomplexobj(y):
-            msg = "X and Y are not equal to %d ULP" % nulp
+            msg = f"X and Y are not equal to {nulp:d} ULP"
         else:
             max_nulp = np.max(nulp_diff(x, y))
-            msg = "X and Y are not equal to %d ULP (max is %g)" % (nulp, max_nulp)
+            msg = f"X and Y are not equal to {nulp:d} ULP (max is {max_nulp:g})"
         raise AssertionError(msg)
 
 
