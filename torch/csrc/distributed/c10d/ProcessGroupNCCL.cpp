@@ -896,7 +896,7 @@ ProcessGroupNCCL::ProcessGroupNCCL(
   // TODO, we should either deprecate TORCH_NCCL_DUMP_ON_TIMEOUT
   // or change its name to reflect that dump happens on exception including
   // both timeout and other errors.
-  dumpOnTimeoutOrEx_ = getCvarBool(TORCH_NCCL_DUMP_ON_TIMEOUT, false) ||
+  dumpOnTimeoutOrEx_ = getCvarBool(TORCH_NCCL_DUMP_ON_TIMEOUT, true) ||
       (dist_debug_level_ >= DebugLevel::Detail);
   // logging C++ stack isn't safe. Introduce a variable to control it.
   logCppStackOnUncleanShutdown_ =

@@ -46,6 +46,7 @@ class Adam(Optimizer):
         capturable: bool = False,
         differentiable: bool = False,
         fused: Optional[bool] = None,
+        decoupled_weight_decay: bool = False,
     ):
         if isinstance(lr, Tensor):
             if foreach and not capturable:
@@ -95,6 +96,7 @@ class Adam(Optimizer):
             capturable=capturable,
             differentiable=differentiable,
             fused=fused,
+            decoupled_weight_decay=decoupled_weight_decay,
         )
         super().__init__(params, defaults)
 
@@ -117,6 +119,7 @@ class Adam(Optimizer):
             group.setdefault("foreach", None)
             group.setdefault("capturable", False)
             group.setdefault("differentiable", False)
+            group.setdefault("decoupled_weight_decay", False)
             fused = group.setdefault("fused", None)
             for p in group["params"]:
                 p_state = self.state.get(p, [])
@@ -262,6 +265,7 @@ class Adam(Optimizer):
                 fused=group["fused"],
                 grad_scale=getattr(self, "grad_scale", None),
                 found_inf=getattr(self, "found_inf", None),
+                decoupled_weight_decay=group["decoupled_weight_decay"],
             )
 
         return loss
@@ -278,7 +282,7 @@ Adam.__doc__ = (
             &\hspace{13mm}      \lambda \text{ (weight decay)},  \: \textit{amsgrad},
                 \:\textit{maximize},  \: \epsilon \text{ (epsilon)}                              \\
             &\textbf{initialize} :  m_0 \leftarrow 0 \text{ ( first moment)},
-                v_0\leftarrow 0 \text{ (second moment)},\: \widehat{v_0}^{max}\leftarrow 0\\[-1.ex]
+                v_0\leftarrow 0 \text{ (second moment)},\: v_0^{max}\leftarrow 0          \\[-1.ex]
             &\rule{110mm}{0.4pt}                                                                 \\
             &\textbf{for} \: t=1 \: \textbf{to} \: \ldots \: \textbf{do}                         \\
 
@@ -291,14 +295,12 @@ Adam.__doc__ = (
             &\hspace{5mm}m_t           \leftarrow   \beta_1 m_{t-1} + (1 - \beta_1) g_t          \\
             &\hspace{5mm}v_t           \leftarrow   \beta_2 v_{t-1} + (1-\beta_2) g^2_t          \\
             &\hspace{5mm}\widehat{m_t} \leftarrow   m_t/\big(1-\beta_1^t \big)                   \\
-            &\hspace{5mm}\widehat{v_t} \leftarrow   v_t/\big(1-\beta_2^t \big)                   \\
             &\hspace{5mm}\textbf{if} \: amsgrad                                                  \\
-            &\hspace{10mm}\widehat{v_t}^{max} \leftarrow \mathrm{max}(\widehat{v_{t-1}}^{max},
-                \widehat{v_t})                                                                   \\
-            &\hspace{10mm}\theta_t \leftarrow \theta_{t-1} - \gamma \widehat{m_t}/
-                \big(\sqrt{\widehat{v_t}^{max}} + \epsilon \big)                                 \\
+            &\hspace{10mm} v_t^{max} \leftarrow \mathrm{max}(v_{t-1}^{max},v_t)                  \\
+            &\hspace{10mm}\widehat{v_t} \leftarrow v_t^{max}/\big(1-\beta_2^t \big)              \\
             &\hspace{5mm}\textbf{else}                                                           \\
-            &\hspace{10mm}\theta_t \leftarrow \theta_{t-1} - \gamma \widehat{m_t}/
+            &\hspace{10mm}\widehat{v_t} \leftarrow   v_t/\big(1-\beta_2^t \big)                  \\
+            &\hspace{5mm}\theta_t \leftarrow \theta_{t-1} - \gamma \widehat{m_t}/
                 \big(\sqrt{\widehat{v_t}} + \epsilon \big)                                       \\
             &\rule{110mm}{0.4pt}                                                          \\[-1.ex]
             &\bf{return} \:  \theta_t                                                     \\[-1.ex]
@@ -357,6 +359,7 @@ def _single_tensor_adam(
     maximize: bool,
     capturable: bool,
     differentiable: bool,
+    decoupled_weight_decay: bool,
 ):
     assert grad_scale is None and found_inf is None
 
@@ -395,7 +398,11 @@ def _single_tensor_adam(
         step_t += 1
 
         if weight_decay != 0:
-            grad = grad.add(param, alpha=weight_decay)
+            if decoupled_weight_decay:
+                # Perform stepweight decay
+                param.mul_(1 - lr * weight_decay)
+            else:
+                grad = grad.add(param, alpha=weight_decay)
 
         if torch.is_complex(param):
             grad = torch.view_as_real(grad)
@@ -502,6 +509,7 @@ def _multi_tensor_adam(
     maximize: bool,
     capturable: bool,
     differentiable: bool,
+    decoupled_weight_decay: bool,
 ):
     if len(params) == 0:
         return
@@ -605,13 +613,17 @@ def _multi_tensor_adam(
             torch._foreach_add_(device_state_steps, 1)
 
         if weight_decay != 0:
-            # Re-use the intermediate memory (device_grads) already allocated for maximize
-            if maximize:
-                torch._foreach_add_(device_grads, device_params, alpha=weight_decay)
+            if decoupled_weight_decay:
+                # Perform stepweight decay
+                torch._foreach_mul_(device_params, 1 - lr * weight_decay)
             else:
-                device_grads = torch._foreach_add(  # type: ignore[assignment]
-                    device_grads, device_params, alpha=weight_decay
-                )
+                # Re-use the intermediate memory (device_grads) already allocated for maximize
+                if maximize:
+                    torch._foreach_add_(device_grads, device_params, alpha=weight_decay)
+                else:
+                    device_grads = torch._foreach_add(  # type: ignore[assignment]
+                        device_grads, device_params, alpha=weight_decay
+                    )
 
         # Decay the first and second moment running average coefficient
         # Use device beta1 if beta1 is a tensor to ensure all
@@ -729,6 +741,7 @@ def _fused_adam(
     maximize: bool,
     capturable: bool,  # Needed for consistency.
     differentiable: bool,
+    decoupled_weight_decay: bool,
 ) -> None:
     if not params:
         return
@@ -783,7 +796,8 @@ def _fused_adam(
             lr_dict[device] = lr.to(device=device, non_blocking=True)  # type: ignore[union-attr]
             lr = lr_dict[device]
         torch._foreach_add_(device_state_steps, 1)
-        torch._fused_adam_(
+        func = torch._fused_adam_ if not decoupled_weight_decay else torch._fused_adamw_
+        func(
             device_params,
             device_grads,
             device_exp_avgs,
@@ -823,6 +837,7 @@ def adam(
     grad_scale: Optional[Tensor] = None,
     found_inf: Optional[Tensor] = None,
     has_complex: bool = False,
+    decoupled_weight_decay: bool = False,
     *,
     amsgrad: bool,
     beta1: float,
@@ -892,4 +907,5 @@ def adam(
         differentiable=differentiable,
         grad_scale=grad_scale,
         found_inf=found_inf,
+        decoupled_weight_decay=decoupled_weight_decay,
     )

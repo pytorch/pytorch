@@ -42,7 +42,6 @@ env:
   AWS_DEFAULT_REGION: us-east-1
   BINARY_ENV_FILE: /tmp/env
   BUILD_ENVIRONMENT: !{{ build_environment }}
-  BUILDER_ROOT: /builder
   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
   PR_NUMBER: ${{ github.event.pull_request.number }}
   PYTORCH_FINAL_PACKAGE_DIR: /artifacts

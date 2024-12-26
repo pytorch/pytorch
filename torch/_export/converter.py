@@ -13,6 +13,7 @@ from torch import _C
 from torch._export.passes.replace_quantized_ops_with_standard_ops_pass import (
     replace_quantized_ops_with_standard_ops,
 )
+from torch.export.dynamic_shapes import _tree_map_with_path, Dim
 from torch.export.exported_program import ExportedProgram
 from torch.export.graph_signature import (
     ConstantArgument,
@@ -1510,10 +1511,18 @@ DEBUG: (TORCH_LOGS="+export" <cmd>), additionally
         gm: torch.fx.GraphModule,
         name_to_constant: Dict[str, Any],
     ):
+        dynamic_shapes = _tree_map_with_path(
+            lambda path, x: (
+                [Dim.AUTO] * x.dim() if isinstance(x, torch.Tensor) else None  # type: ignore[attr-defined]
+            ),
+            self.sample_args,
+        )
+
         # TODO: adjust input orders to match GraphSignature convention
         ep = torch.export._trace._export(
             gm,
             self.sample_args,
+            dynamic_shapes=dynamic_shapes,
             strict=False,
             pre_dispatch=True,
         )

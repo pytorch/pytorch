@@ -44,12 +44,12 @@ template<typename scalar_t>
 void gemv(char trans, int64_t m, int64_t n, scalar_t alpha, const scalar_t *a, int64_t lda, const scalar_t *x, int64_t incx, scalar_t beta, scalar_t *y, int64_t incy);
 
 template<typename scalar_t>
-scalar_t dot_impl(int64_t n, scalar_t *x, int64_t incx, scalar_t *y, int64_t incy);
+scalar_t dot_impl(int64_t n, const scalar_t *x, int64_t incx, const scalar_t *y, int64_t incy);
 
 template<typename scalar_t>
-scalar_t vdot_impl(int64_t n, scalar_t *x, int64_t incx, scalar_t *y, int64_t incy);
+scalar_t vdot_impl(int64_t n, const scalar_t *x, int64_t incx, const scalar_t *y, int64_t incy);
 
-constexpr inline bool lda_cond(int64_t m, int64_t n, int64_t lda) {
+static constexpr inline bool lda_cond(int64_t m, int64_t n, int64_t lda) {
   return n == 1 || lda >= std::max<int64_t>(1L, m);
 }
 
@@ -127,7 +127,7 @@ Tensor mv(const Tensor &self, const Tensor &vec) {
   return at::addmv_(result, self, vec, 0, 1);
 }
 
-inline void dot_check(const Tensor& self, const Tensor& other) {
+static inline void dot_check(const Tensor& self, const Tensor& other) {
   TORCH_CHECK(
       self.dim() == 1 && other.dim() == 1,
       "1D tensors expected, but got ",
@@ -185,7 +185,7 @@ Tensor dot(const Tensor &self, const Tensor &other){
 
   return AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(at::ScalarType::BFloat16, at::ScalarType::Half, self.scalar_type(), "dot", [&] {
     Tensor result = at::empty({}, self.options());
-    result.fill_(dot_impl<scalar_t>(self.numel(), const_cast<scalar_t*>(self.const_data_ptr<scalar_t>()), self.stride(0), const_cast<scalar_t*>(other.const_data_ptr<scalar_t>()), other.stride(0)));
+    result.fill_(dot_impl<scalar_t>(self.numel(), self.const_data_ptr<scalar_t>(), self.stride(0), other.const_data_ptr<scalar_t>(), other.stride(0)));
     return result;
   });
 }
@@ -216,7 +216,7 @@ Tensor vdot(const Tensor &self, const Tensor &other){
 
   return AT_DISPATCH_COMPLEX_TYPES(self.scalar_type(), "vdot", [&] {
     Tensor result = at::empty({}, self.options());
-    result.fill_(vdot_impl<scalar_t>(self.numel(), const_cast<scalar_t*>(self.const_data_ptr<scalar_t>()), self.stride(0), const_cast<scalar_t *>(other.const_data_ptr<scalar_t>()), other.stride(0)));
+    result.fill_(vdot_impl<scalar_t>(self.numel(), self.const_data_ptr<scalar_t>(), self.stride(0), other.const_data_ptr<scalar_t>(), other.stride(0)));
     return result;
   });
 

@@ -70,7 +70,7 @@ __global__ void searchsorted_cuda_kernel(
   bool right,
   bool is_1d_boundaries) {
 
-  for (int64_t tid = blockIdx.x * blockDim.x + threadIdx.x; tid < numel_in; tid += blockDim.x * gridDim.x) {
+  for (int64_t tid = ((int64_t) blockIdx.x) * blockDim.x + threadIdx.x; tid < numel_in; tid += blockDim.x * gridDim.x) {
     // If boundaries tensor is 1d, we always search the entire boundary tensor
     int64_t start_bd = is_1d_boundaries ? 0 : tid / idim_in * idim_bd;
     int64_t end_bd = start_bd + idim_bd;

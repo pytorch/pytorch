@@ -200,7 +200,7 @@ class TestModelOutput(torch._dynamo.test_case.TestCase):
             x: torch.FloatTensor = None
 
         def fn(x):
-            obj = MyDataClass(x=x)
+            obj = MyDataClass(x=x * 3)
             return obj
 
         inp = torch.randn(3, 3)

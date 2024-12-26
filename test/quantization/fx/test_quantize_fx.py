@@ -1,4 +1,5 @@
 # Owner(s): ["oncall: quantization"]
+# ruff: noqa: F841
 
 from collections import OrderedDict
 import contextlib

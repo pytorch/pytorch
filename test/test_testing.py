@@ -2314,7 +2314,7 @@ class TestImports(TestCase):
             ignored_modules.append("torch.testing._internal.common_distributed")
 
         torch_dir = os.path.dirname(torch.__file__)
-        for base, folders, files in os.walk(torch_dir):
+        for base, _, files in os.walk(torch_dir):
             prefix = os.path.relpath(base, os.path.dirname(torch_dir)).replace(os.path.sep, ".")
             for f in files:
                 if not f.endswith(".py"):

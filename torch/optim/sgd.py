@@ -349,8 +349,14 @@ def _single_tensor_sgd(
                 grad = grad.add(buf, alpha=momentum)
             else:
                 grad = buf
-
-        param.add_(grad, alpha=-lr)
+        # Nested if is necessary to bypass jitscript rules
+        if isinstance(lr, Tensor):
+            if lr.requires_grad:
+                param.addcmul_(grad, lr, value=-1)
+            else:
+                param.add_(grad, alpha=-lr)
+        else:
+            param.add_(grad, alpha=-lr)
 
 
 def _multi_tensor_sgd(

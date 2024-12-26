@@ -394,7 +394,6 @@ def _get_conv_bn_pattern_nodes(r: ReplacedPatterns) -> Dict[str, Tuple[Node, Nod
                 getitem_node = n
         assert conv_node is not None
         assert bn_node is not None
-        # getitem_node might be None in new training IR
         return (conv_node, bn_node, getitem_node)
 
     def _get_q_dq_nodes(n: Node) -> Tuple[Node, Node, Node]:
@@ -414,24 +413,12 @@ def _get_conv_bn_pattern_nodes(r: ReplacedPatterns) -> Dict[str, Tuple[Node, Nod
     r_conv, r_bn, r_getitem = _get_nodes(r.replacements)
 
     # Create the mapping from original node to replacement node
-    if o_getitem is None:
-        # getitem is None is new training IR
-        assert r_getitem is None
-        mapping = {
-            "conv": (o_conv, r_conv),
-            "bn": (o_bn, r_bn),
-        }
-    else:
-        # TODO: This branch is going through a deprecated branch and should be deleted soon,
-        # after capture_pre_autograd_graph fully migrate to training IR
-        # T199018392
-        assert r_getitem is not None
-        assert o_getitem is not None
-        mapping = {
-            "conv": (o_conv, r_conv),
-            "bn": (o_bn, r_bn),
-            "getitem": (o_getitem, r_getitem),
-        }
+    assert o_getitem is None
+    assert r_getitem is None
+    mapping = {
+        "conv": (o_conv, r_conv),
+        "bn": (o_bn, r_bn),
+    }
 
     # Extract conv input and weight
     # Note: here we extract the original nodes indirectly through the pattern nodes
@@ -667,16 +654,11 @@ def _fuse_conv_bn_qat_helper(
     m.graph.eliminate_dead_code()
     m.recompile()
 
-    from torch._export import gm_using_training_ir
-
-    using_training_ir = gm_using_training_ir(m)
-
     conv_bn_pattern = _get_conv_bn_pattern(conv_fn)
     match_pattern = _get_aten_graph_module_for_pattern(
         conv_bn_pattern,
         example_inputs,
         is_cuda,
-        using_training_ir=using_training_ir,
     )
 
     # Step (1): Replace patterns with conv bias
@@ -690,7 +672,6 @@ def _fuse_conv_bn_qat_helper(
         qat_conv_bn_pattern,
         example_inputs,
         is_cuda,
-        using_training_ir=using_training_ir,
     )
     replacements_with_conv_bias = replace_pattern_with_filters(
         m,
@@ -708,7 +689,6 @@ def _fuse_conv_bn_qat_helper(
         qat_conv_bn_pattern_no_conv_bias,
         example_inputs,
         is_cuda,
-        using_training_ir=using_training_ir,
     )
     replacements_no_conv_bias = replace_pattern_with_filters(
         m,
@@ -922,9 +902,6 @@ def _fold_conv_bn_qat_helper(
     """
     Replace the quantized (conv + bn) pattern with conv with bn weights folded into the weights of conv.
     """
-    from torch._export import gm_using_training_ir
-
-    using_training_ir = gm_using_training_ir(m)
 
     m.graph.eliminate_dead_code()
     m.recompile()
@@ -958,7 +935,6 @@ def _fold_conv_bn_qat_helper(
             match_pattern,
             example_inputs,
             is_cuda,
-            using_training_ir=using_training_ir,
             **kwargs,
         )
         replacement_pattern = _get_folded_quantized_qat_conv_bn_pattern(
@@ -968,7 +944,6 @@ def _fold_conv_bn_qat_helper(
             replacement_pattern,
             example_inputs,
             is_cuda,
-            using_training_ir=using_training_ir,
             **kwargs,
         )
         replacements.extend(

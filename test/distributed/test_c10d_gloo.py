@@ -377,7 +377,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
             self.assertEqual(
                 torch.tensor([(i * self.world_size) + (i % self.world_size)]),
                 inputs[i],
-                msg=("Mismatch in iteration %d" % i),
+                msg=(f"Mismatch in iteration {i:d}"),
             )
 
     @requires_gloo()
@@ -482,7 +482,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
                     ]
                 ),
                 future_handle.value()[0],
-                msg=("Mismatch in iteration %d" % i),
+                msg=(f"Mismatch in iteration {i:d}"),
             )
 
     @requires_gloo()
@@ -897,7 +897,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
             self.assertEqual(
                 torch.tensor([iter + root]),
                 result[0],
-                msg=("Mismatch in iteration %d for rank %d" % (iter, root)),
+                msg=(f"Mismatch in iteration {iter:d} for rank {root:d}"),
             )
 
     @requires_gloo()
@@ -1088,7 +1088,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
                 self.assertEqual(
                     expected_outputs[iter],
                     [result],
-                    msg=("Mismatch in iteration %d for root %d" % (iter, root)),
+                    msg=(f"Mismatch in iteration {iter:d} for root {root:d}"),
                 )
 
     @requires_gloo()
@@ -1223,7 +1223,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
             self.assertEqual(
                 expected_outputs[i],
                 [result],
-                msg=("Mismatch in iteration %d" % i),
+                msg=(f"Mismatch in iteration {i:d}"),
             )
 
     @requires_gloo()
@@ -1409,7 +1409,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
                         ]
                     ),
                     result[0],
-                    msg=("Mismatch in iteration %d with root rank %d" % (iter, root)),
+                    msg=(f"Mismatch in iteration {iter:d} with root rank {root:d}"),
                 )
 
     @requires_gloo()
@@ -1916,7 +1916,7 @@ class DistributedDataParallelTest(
             torch.save(ddp_withload.state_dict(), checkpoint_path)
 
         dist.barrier()
-        map_location = {"cuda:%d" % 0: "cuda:%d" % self.rank}
+        map_location = {"cuda:0": f"cuda:{self.rank:d}"}
         ddp_state_dict = torch.load(checkpoint_path, map_location=map_location)
 
         for model in [ddp_withload, model_withload]:
@@ -2360,7 +2360,7 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
             backend="gloo", store=store, rank=self.rank, world_size=self.world_size
         )
         process_group = c10d.distributed_c10d._get_default_group()
-        device = torch.device("cuda:%d" % self.rank)
+        device = torch.device(f"cuda:{self.rank:d}")
         backend = process_group._get_backend(device)
         backend.create_device(interface=LOOPBACK)
         ranks = list(range(self.world_size))

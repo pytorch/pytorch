@@ -314,8 +314,46 @@ class TestPyTreeDynamicAxesShapes(common_utils.TestCase):
         )
         self.assertEqual(unflatten_dynamic_shapes, expected_dynamic_shapes)
 
+    def test__unflatten_dynamic_shapes_with_inputs_tree_succeeds_on_dict_of_mixed_structure(
+        self,
+    ):
+        inputs = {
+            "w": torch.randn(1, 2, 3),
+            "x": ({"x0": torch.randn(1, 2, 3)}, {"x1": torch.randn(1, 2, 3)}),
+            "y": (torch.randn(1, 2, 3), torch.randn(1, 2, 3)),
+            "z": [torch.randn(1, 2, 3), torch.randn(1, 2, 3)],
+        }
+        w_dim_0 = torch.export.Dim("w_dim_0")
+        x0_dim_1 = torch.export.Dim("x0_dim_1")
+        x0_dim_2 = torch.export.Dim("x0_dim_2")
+        x1_dim_1 = torch.export.Dim("x1_dim_1")
+        y0_dim_0 = torch.export.Dim("y0_dim_0")
+        y0_dim_1 = torch.export.Dim("y0_dim_1")
+        y1_dim_2 = torch.export.Dim("y1_dim_2")
+        z0_dim_2 = torch.export.Dim("z0_dim_2")
+        z1_dim_1 = torch.export.Dim("z1_dim_1")
+        dynamic_shapes = {
+            "w": {0: w_dim_0},
+            "x0": {1: x0_dim_1, 2: x0_dim_2},
+            "x1": {1: x1_dim_1},
+            "y0": {0: y0_dim_0, 1: y0_dim_1},
+            "y1": {2: y1_dim_2},
+            "z0": {2: z0_dim_2},
+            "z1": {1: z1_dim_1},
+        }
+        unflatten_dynamic_shapes = _compat._unflatten_dynamic_shapes_with_inputs_tree(
+            inputs, dynamic_shapes
+        )
+        expected_dynamic_shapes = {
+            "w": {0: w_dim_0},
+            "x": ({"x0": {1: x0_dim_1, 2: x0_dim_2}}, {"x1": {1: x1_dim_1}}),
+            "y": ({0: y0_dim_0, 1: y0_dim_1}, {2: y1_dim_2}),
+            "z": [{2: z0_dim_2}, {1: z1_dim_1}],
+        }
+        self.assertEqual(unflatten_dynamic_shapes, expected_dynamic_shapes)
+
     @common_utils.parametrize(
-        "model, args, kwargs,input_names, output_names, dynamic_axes, expected_dynamic_shapes",
+        "model, args, kwargs, input_names, output_names, dynamic_axes, expected_dynamic_shapes",
         [
             # llama-3.2-1B-Instruct (trimmed)
             (
@@ -436,7 +474,7 @@ class TestPyTreeDynamicAxesShapes(common_utils.TestCase):
         dynamic_axes,
         expected_dynamic_shapes,
     ):
-        dynamic_shapes = _compat._from_dynamic_axes_to_dynamic_shapes(
+        dynamic_shapes, _, _ = _compat._from_dynamic_axes_to_dynamic_shapes(
             model,
             args,
             kwargs,

@@ -2417,7 +2417,7 @@ def compile(
     results are not applicable for subsequent calls (this is called a "guard
     failure), you can use TORCH_LOGS=guards to debug these situations.
     Multiple compiled results can be associated with a frame up to
-    ``torch._dynamo.config.cache_size_limit``, which defaults to 8; at which
+    ``torch._dynamo.config.recompile_limit``, which defaults to 8; at which
     point we will fall back to eager.  Note that compile caches are per
     *code object*, not frame; if you dynamically create multiple copies of a
     function, they will all share the same code cache.
@@ -2494,6 +2494,8 @@ def compile(
     _C._log_api_usage_once("torch.compile")
     if sys.version_info >= (3, 14):
         raise RuntimeError("Dynamo is not supported on Python 3.14+")
+    elif sys.version_info >= (3, 13) and not sys._is_gil_enabled():
+        raise RuntimeError("Dynamo is not supported on Python with GIL disabled")
 
     # Decorator mode
     if model is None:

@@ -37,7 +37,7 @@ class VirtualGuardImpl final : public DeviceGuardImplInterface {
   void uncheckedSetDevice(Device d) const noexcept override {
     impl_->uncheckedSetDevice(d);
   }
-  Stream getStream(Device d) const noexcept override {
+  Stream getStream(Device d) const override {
     return impl_->getStream(d);
   }
   Stream getNewStream(Device d, int priority = 0) const override {
@@ -50,7 +50,7 @@ class VirtualGuardImpl final : public DeviceGuardImplInterface {
       const override {
     return impl_->getStreamFromGlobalPool(d, isHighPriority);
   }
-  Stream exchangeStream(Stream s) const noexcept override {
+  Stream exchangeStream(Stream s) const override {
     return impl_->exchangeStream(s);
   }
   DeviceIndex deviceCount() const noexcept override {

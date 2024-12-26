@@ -707,13 +707,15 @@ class FSDPParam:
                     (
                         all_gather_inputs,
                         self._extensions_data.all_gather_metadata,
-                    ) = sharded_local_tensor.fsdp_pre_all_gather(self.shard_mesh)
+                    ) = sharded_local_tensor.fsdp_pre_all_gather(
+                        self.shard_mesh_from_root
+                    )
                 else:
                     (
                         all_gather_inputs,
                         self._extensions_data.all_gather_metadata,
                     ) = sharded_local_tensor.fsdp_pre_all_gather(
-                        self.shard_mesh,
+                        self.shard_mesh_from_root,
                         self._orig_size,
                         self._contiguous_orig_stride,
                         self._module_info.module,
@@ -800,6 +802,19 @@ class FSDPParam:
             assert mesh.mesh_dim_names is not None
             return mesh[mesh.mesh_dim_names[-1]]
         raise ValueError(f"Invalid mesh: {mesh}")
+
+    @property
+    def shard_mesh_from_root(self):
+        mesh = self.mesh_info.mesh
+
+        if mesh.ndim == 1:
+            return mesh
+        else:
+            assert mesh.mesh_dim_names is not None
+            shard_dim_name = mesh.mesh_dim_names[-1]
+
+            root_mesh = _mesh_resources.get_root_mesh(mesh)
+            return root_mesh[shard_dim_name]
 
     def _assert_in_states(self, *states: ShardedState) -> None:
         if self.sharded_state not in states:

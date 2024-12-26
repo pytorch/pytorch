@@ -7,6 +7,7 @@ import sys
 import types
 from typing import Any, Callable, cast, Dict, Iterator, List, Optional, Tuple, Union
 
+from ..utils._backport_slots import dataclass_slots
 from .bytecode_analysis import (
     get_indexof,
     propagate_line_nums,
@@ -16,6 +17,7 @@ from .bytecode_analysis import (
 from .utils import is_safe_constant
 
 
+@dataclass_slots
 @dataclasses.dataclass
 class InstructionExnTabEntry:
     start: "Instruction"
@@ -42,6 +44,7 @@ class InstructionExnTabEntry:
         )
 
 
+@dataclass_slots
 @dataclasses.dataclass
 class Instruction:
     """A mutable version of dis.Instruction"""
@@ -57,6 +60,7 @@ class Instruction:
     # extra fields to make modification easier:
     target: Optional["Instruction"] = None
     exn_tab_entry: Optional[InstructionExnTabEntry] = None
+    argrepr: Optional[str] = None
 
     def __hash__(self) -> int:
         return id(self)
@@ -68,21 +72,47 @@ class Instruction:
         return f"Instruction(opname={self.opname}, offset={self.offset})"
 
 
-def convert_instruction(i: dis.Instruction) -> Instruction:
-    if sys.version_info >= (3, 13):
-        starts_line = i.line_number
-    else:
-        starts_line = i.starts_line
-    return Instruction(
-        i.opcode,
-        i.opname,
-        i.arg,
-        i.argval,
-        i.offset,
-        starts_line,
-        i.is_jump_target,
-        getattr(i, "positions", None),
-    )
+if sys.version_info >= (3, 13):
+
+    def convert_instruction(i: dis.Instruction) -> Instruction:
+        return Instruction(
+            i.opcode,
+            i.opname,
+            i.arg,
+            i.argval,
+            i.offset,
+            i.line_number,
+            i.is_jump_target,
+            i.positions,
+        )
+
+elif sys.version_info >= (3, 11):
+
+    def convert_instruction(i: dis.Instruction) -> Instruction:
+        return Instruction(
+            i.opcode,
+            i.opname,
+            i.arg,
+            i.argval,
+            i.offset,
+            i.starts_line,
+            i.is_jump_target,
+            i.positions,
+        )
+
+else:
+
+    def convert_instruction(i: dis.Instruction) -> Instruction:
+        return Instruction(
+            i.opcode,
+            i.opname,
+            i.arg,
+            i.argval,
+            i.offset,
+            i.starts_line,
+            i.is_jump_target,
+            None,
+        )
 
 
 class _NotProvided:
@@ -90,10 +120,20 @@ class _NotProvided:
         return "_NotProvided"
 
 
-def inst_has_op_bits(name):
-    return (sys.version_info >= (3, 11) and name == "LOAD_GLOBAL") or (
-        sys.version_info >= (3, 12) and name in ("LOAD_ATTR", "LOAD_SUPER_ATTR")
-    )
+if sys.version_info >= (3, 12):
+
+    def inst_has_op_bits(name):
+        return name in ("LOAD_ATTR", "LOAD_GLOBAL", "LOAD_SUPER_ATTR")
+
+elif sys.version_info >= (3, 11):
+
+    def inst_has_op_bits(name):
+        return name == "LOAD_GLOBAL"
+
+else:
+
+    def inst_has_op_bits(name):
+        return False
 
 
 def create_instruction(
@@ -526,6 +566,7 @@ def linetable_311_writer(first_lineno: int):
     return linetable, update
 
 
+@dataclass_slots
 @dataclasses.dataclass
 class ExceptionTableEntry:
     start: int

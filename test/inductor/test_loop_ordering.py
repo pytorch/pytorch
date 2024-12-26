@@ -158,7 +158,7 @@ class ImplDetailTest(TestCase):
 
         def _create_computed_buffer():
             def inner_fn(index):
-                i0, i1, i2, i3 = index
+                i0, _, i2, i3 = index
                 return ops.load(
                     "primal", i3 + 49 * i2 + 2401 * ModularIndexing(i0, 1, 64)
                 )
@@ -435,7 +435,6 @@ class LoopOrderingTest(TestCase):
         scale = torch.Tensor([10.0]).to("cuda")
 
         E4M3_MAX_POS = torch.finfo(torch.float8_e4m3fn).max
-        E5M2_MAX_POS = torch.finfo(torch.float8_e5m2).max
 
         def test_pattern2(tensor_x_inp, scale_x):
             tensor_x = tensor_x_inp * scale_x

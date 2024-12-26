@@ -12,8 +12,9 @@ import requests
 from gitutils import retries_decorator
 
 
-REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+REPO_ROOT = Path(__file__).absolute().parents[2]
 sys.path.insert(0, str(REPO_ROOT))
+
 from tools.testing.clickhouse import query_clickhouse
 
 

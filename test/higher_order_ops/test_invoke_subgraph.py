@@ -73,8 +73,6 @@ class TestInvokeSubgraph(TestCase):
         self.assertEqual(y.grad, y_clone.grad)
 
     def test_multiple(self):
-        n_layers = 2
-
         @mark_compile_region
         def cos(x):
             return torch.cos(x)
@@ -594,6 +592,27 @@ class GraphModule(torch.nn.Module):
             return (sin,)
 """,
             )
+
+    @requires_cuda
+    def test_return_none(self):
+        from torch.nn import functional as F
+
+        weight = torch.ones(
+            1000, device="cuda:0", dtype=torch.float32, requires_grad=True
+        )
+        ones = torch.ones(1000, device="cuda:0", dtype=torch.float32)
+
+        @mark_compile_region
+        def fn(x, train):
+            return F.dropout(x * weight, 0.33, train)
+
+        @torch._dynamo.optimize_assert("inductor")
+        def run(x, train=True):
+            return fn(x, train)
+
+        r1 = run(ones, train=False)
+        r1.sum().backward()
+        weight.grad.clone()
 
     def test_dynamic(self):
         @mark_compile_region

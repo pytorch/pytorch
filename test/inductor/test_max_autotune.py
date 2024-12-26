@@ -1192,7 +1192,7 @@ class TestPrologueFusion(TestCase):
         self.check_code(code[0], num_kernels=1, num_allocs=1, num_deallocs=3)
 
         # should be done in low precision
-        f = (
+        (
             FileCheck()
             .check("for k_idx")
             .check_not("to(tl.float32)")
@@ -1216,7 +1216,7 @@ class TestPrologueFusion(TestCase):
         self.check_code(code[0], num_kernels=1, num_allocs=1, num_deallocs=2)
 
         # should be done in low precision, no arithmetic
-        f = (
+        (
             FileCheck()
             .check("for k_idx")
             .check_not("to(tl.float32)")
@@ -1232,7 +1232,7 @@ class TestPrologueFusion(TestCase):
         self.check_code(code[0], num_kernels=1, num_allocs=1, num_deallocs=2)
 
         # should not be done in low precision
-        f = (
+        (
             FileCheck()
             .check("for k_idx")
             .check("to(tl.float32)")
@@ -1369,7 +1369,7 @@ class TestPrologueFusion(TestCase):
     @config.patch(realize_reads_threshold=1, realize_opcount_threshold=1)
     @parametrize("benchmark_fusion", (True, False))
     def test_prologue_read_into_both_inputs(self, benchmark_fusion):
-        M = K = N = 256
+        M = K = 256
 
         # not supported today. it could be, but typically the pointwise nodes would get
         # inlined into separate nodes.

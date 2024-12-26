@@ -8,7 +8,7 @@ import contextlib
 import dataclasses
 import datetime
 import logging
-import pathlib
+from pathlib import Path
 from typing import Any, Callable, TYPE_CHECKING
 
 import torch
@@ -91,7 +91,7 @@ class CaptureStrategy(abc.ABC):
         """
         self._verbose_print = _verbose_printer(verbose)
         self._dump = dump
-        self._artifacts_dir = pathlib.Path(artifacts_dir)
+        self._artifacts_dir = Path(artifacts_dir)
         self._timestamp = timestamp or datetime.datetime.now().strftime(
             "%Y-%m-%d_%H-%M-%S-%f"
         )
@@ -143,7 +143,11 @@ class TorchExportStrategy(CaptureStrategy):
         with _patch_dynamo_unsupported_functions():
             try:
                 return torch.export.export(
-                    model, args, kwargs=kwargs, dynamic_shapes=dynamic_shapes
+                    model,
+                    args,
+                    kwargs=kwargs,
+                    dynamic_shapes=dynamic_shapes,
+                    strict=True,
                 )
             except torch._dynamo.exc.UserError as exc:
                 # Refine the dynamic shapes based on the suggested fixes.
@@ -155,7 +159,7 @@ class TorchExportStrategy(CaptureStrategy):
                     # If the dynamic shapes cannot be refined, re-raise the exception.
                     raise exc from None
                 return torch.export.export(
-                    model, args, kwargs=kwargs, dynamic_shapes=new_shapes
+                    model, args, kwargs=kwargs, dynamic_shapes=new_shapes, strict=True
                 )
 
     def _enter(self, model) -> None:
@@ -355,7 +359,7 @@ class LegacyDynamoStrategy(CaptureStrategy):
         )
 
         # Use torch.export to recapture the GraphModule into an ExportedProgram.
-        return torch.export.export(graph_module, flattened_args)
+        return torch.export.export(graph_module, flattened_args, strict=True)
 
     def _enter(self, model) -> None:
         model_repr = _take_first_line(repr(model))

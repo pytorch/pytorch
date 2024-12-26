@@ -5,11 +5,6 @@
 
 {%- set timeout_minutes = 240 -%}
 
-# NOTE: If testing pytorch/builder changes you can change this variable to change what pytorch/builder reference
-#       the binary builds will check out
-{%- set builder_repo = "pytorch/builder" -%}
-{%- set builder_branch = "main" -%}
-
 {%- macro concurrency(build_environment) -%}
 concurrency:
   group: !{{ build_environment }}-${{ github.event.pull_request.number || github.ref_name }}-${{ github.ref_type == 'branch' && github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
@@ -84,7 +79,7 @@ concurrency:
 
 {%- macro checkout(submodules="recursive", deep_clone=True, directory="", repository="pytorch/pytorch", branch="", checkout_pr_head=True) -%}
       - name: Checkout !{{ 'PyTorch' if repository == "pytorch/pytorch" else repository }}
-        uses: malfet/checkout@silent-checkout
+        uses: actions/checkout@v4
         with:
       {%- if branch %}
           ref: !{{ branch }}
@@ -102,7 +97,7 @@ concurrency:
       {%- if directory %}
           path: !{{ directory }}
       {%- endif %}
-          quiet-checkout: true
+          show-progress: false
       - name: Clean !{{ 'PyTorch' if repository == "pytorch/pytorch" else repository }} checkout
         run: |
           # Remove any artifacts from the previous checkouts
