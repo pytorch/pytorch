@@ -1332,6 +1332,9 @@ class CppWrapperCpu(PythonWrapperCodegen):
             buffer.get_stride(),
         )
 
+    def make_buffer_list(self, name, outputs):
+        return ""
+
     def make_allocation(self, name, device, dtype, shape, stride):
         orig_stride = stride
         device_str = self.codegen_device(device)
