@@ -258,7 +258,7 @@ else()
 endif()
 
 # Determine if blas was compiled with the f2c conventions
-IF (BLAS_LIBRARIES AND BLAS_CHECK_F2C)
+if(BLAS_LIBRARIES AND BLAS_CHECK_F2C)
   # Push host architecture when cross-compiling otherwise check would fail
   # when cross-compiling for arm64 on x86_64
   cmake_push_check_state(RESET)
@@ -267,19 +267,19 @@ IF (BLAS_LIBRARIES AND BLAS_CHECK_F2C)
   endif()
 
   # Set values through env variables if cross compiling
-  IF (CMAKE_CROSSCOMPILING)
-    IF("$ENV{PYTORCH_BLAS_F2C}" STREQUAL "ON")
+  if(CMAKE_CROSSCOMPILING)
+    if("$ENV{PYTORCH_BLAS_F2C}" STREQUAL "ON")
       SET(BLAS_F2C TRUE)
-    ELSE()
+    else()
       SET(BLAS_F2C FALSE)
-    ENDIF()
+    endif()
 
-    IF("$ENV{PYTORCH_BLAS_USE_CBLAS_DOT}" STREQUAL "ON")
+    if("$ENV{PYTORCH_BLAS_USE_CBLAS_DOT}" STREQUAL "ON")
       SET(BLAS_USE_CBLAS_DOT TRUE)
-    ELSE()
+    else()
       SET(BLAS_USE_CBLAS_DOT FALSE)
-    ENDIF()
-  ELSE ()
+    endif()
+  else()
     SET(CMAKE_REQUIRED_LIBRARIES ${BLAS_LIBRARIES})
     CHECK_C_SOURCE_RUNS("
   #include <stdlib.h>
@@ -308,12 +308,12 @@ IF (BLAS_LIBRARIES AND BLAS_CHECK_F2C)
     exit((float)r != (float).1234);
   }" BLAS_F2C_FLOAT_WORKS )
 
-    IF (BLAS_F2C_DOUBLE_WORKS AND NOT BLAS_F2C_FLOAT_WORKS)
+    if(BLAS_F2C_DOUBLE_WORKS AND NOT BLAS_F2C_FLOAT_WORKS)
       MESSAGE(STATUS "This BLAS uses the F2C return conventions")
       SET(BLAS_F2C TRUE)
-    ELSE (BLAS_F2C_DOUBLE_WORKS AND NOT BLAS_F2C_FLOAT_WORKS)
+    else(BLAS_F2C_DOUBLE_WORKS AND NOT BLAS_F2C_FLOAT_WORKS)
       SET(BLAS_F2C FALSE)
-    ENDIF(BLAS_F2C_DOUBLE_WORKS AND NOT BLAS_F2C_FLOAT_WORKS)
+    endif(BLAS_F2C_DOUBLE_WORKS AND NOT BLAS_F2C_FLOAT_WORKS)
     CHECK_C_SOURCE_RUNS("
   #include <stdlib.h>
   #include <stdio.h>
@@ -325,15 +325,15 @@ IF (BLAS_LIBRARIES AND BLAS_CHECK_F2C)
     double r = cblas_sdot(4, x, 1, y, 1);
     exit((float)r != (float).1234);
   }" BLAS_USE_CBLAS_DOT )
-    IF (BLAS_USE_CBLAS_DOT)
+    if(BLAS_USE_CBLAS_DOT)
       SET(BLAS_USE_CBLAS_DOT TRUE)
-    ELSE (BLAS_USE_CBLAS_DOT)
+    else(BLAS_USE_CBLAS_DOT)
       SET(BLAS_USE_CBLAS_DOT FALSE)
-    ENDIF(BLAS_USE_CBLAS_DOT)
+    endif(BLAS_USE_CBLAS_DOT)
     SET(CMAKE_REQUIRED_LIBRARIES)
-  ENDIF(CMAKE_CROSSCOMPILING)
+  endif(CMAKE_CROSSCOMPILING)
   cmake_pop_check_state()
-ENDIF(BLAS_LIBRARIES)
+endif(BLAS_LIBRARIES)
 
 if(NOT INTERN_BUILD_MOBILE)
   set(AT_MKL_SEQUENTIAL 0)
