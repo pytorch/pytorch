@@ -22,27 +22,20 @@ static PyObject* THXPStream_pynew(
   int64_t stream_id = 0;
   int64_t device_index = 0;
   int64_t device_type = 0;
-  uint64_t queue_ptr = 0;
 
   // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
   constexpr const char* kwlist[] = {
-      "priority",
-      "stream_id",
-      "device_index",
-      "device_type",
-      "queue_ptr",
-      nullptr};
+      "priority", "stream_id", "device_index", "device_type", nullptr};
   if (!PyArg_ParseTupleAndKeywords(
           args,
           kwargs,
-          "|iLLLK",
+          "|iLLL",
           // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
           const_cast<char**>(kwlist),
           &priority,
           &stream_id,
           &device_index,
-          &device_type,
-          &queue_ptr)) {
+          &device_type)) {
     return nullptr;
   }
 
@@ -56,11 +49,7 @@ static PyObject* THXPStream_pynew(
             stream_id,
             static_cast<c10::DeviceIndex>(device_index),
             static_cast<c10::DeviceType>(device_type))
-      : queue_ptr ? at::xpu::getStreamFromExternal(
-                        // NOLINTNEXTLINE(performance-no-int-to-ptr)
-                        (reinterpret_cast<sycl::queue*>(queue_ptr)),
-                        current_device)
-                  : at::xpu::getStreamFromPool(priority, current_device);
+      : at::xpu::getStreamFromPool(priority, current_device);
 
   THXPStream* self = (THXPStream*)ptr.get();
   self->stream_id = static_cast<int64_t>(stream.id());
