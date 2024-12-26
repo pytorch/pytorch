@@ -180,6 +180,15 @@ def _create_c10d_store(
     if not 0 <= port < 2**16:
         raise ValueError(f"port must have value from 0 to 65535 but was {port}.")
 
+    master_addr = os.environ['MASTER_ADDR']
+    master_port = int(os.environ['MASTER_PORT'])
+    if hostname != master_addr or port != master_port:
+        raise ValueError(
+            f"hostname:port {hostname}:{port} is not equal to MASTER_ADDR:MASTER_PORT {master_addr}:{master_port},"
+            "This may be due to setting the parameter init_method of method init_process_group to tcp://ip:port,and incorrect setting of --rdzv-endpoint,"
+            "We strongly recommend not setting the parameter init_method of method init_process_group."
+        )
+
     if _torchelastic_use_agent_store():
         attempt = os.environ["TORCHELASTIC_RESTART_COUNT"]
         tcp_store = TCPStore(hostname, port, world_size, False, timeout)
