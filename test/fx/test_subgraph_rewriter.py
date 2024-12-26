@@ -1,6 +1,5 @@
 # Owner(s): ["module: fx"]
 
-from torch.testing._internal.jit_utils import JitTestCase
 import os
 import sys
 
@@ -14,6 +13,7 @@ from torch.fx.experimental.rewriter import RewritingTracer
 
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
+from torch.testing._internal.jit_utils import JitTestCase
 
 
 if __name__ == "__main__":
@@ -686,7 +686,8 @@ class TestSubgraphRewriter(JitTestCase):
                 p = torch.ops.aten.copy.default(cache, n)
                 q = torch.ops.aten.copy_.default(cache, p)
                 u = torch.relu(cache)
-                return u  # check the result to ensure cache is updated before relu op
+                # check the result to ensure cache is updated before relu op
+                return u  
 
         def pattern(self_tensor, src_tensor):
             p = torch.ops.aten.copy.default(self_tensor, src_tensor)
@@ -705,13 +706,9 @@ class TestSubgraphRewriter(JitTestCase):
             return u
 
         traced = symbolic_trace(M())
-        print(traced)
         comparison_fn = symbolic_trace(comparison)
-        print(comparison_fn)
 
         subgraph_rewriter.replace_pattern(traced, pattern, replacement)
-
-        print(traced)
 
         traced.graph.lint()
 

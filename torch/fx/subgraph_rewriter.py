@@ -379,7 +379,8 @@ def _replace_pattern(
 
         first_next_node = None
         if first_user_node is None:
-            # no users, so we insert the replacement graph before the first next node of returning nodes
+            # no users, so we insert the replacement graph before the first next
+            # node of returning nodes
             next_node = None
             for n in reversed(original_graph.nodes):
                 if n in match.returning_nodes:
