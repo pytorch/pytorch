@@ -90,9 +90,7 @@ class CUDATemplate(KernelTemplate):
             call_args,
             expected_args,
         )
-        extra_args = V.graph.sizevars.size_hints(
-            map(sympy.expand, call_args[len(expected_args) :])
-        )
+        V.graph.sizevars.size_hints(map(sympy.expand, call_args[len(expected_args) :]))
         size_args = V.graph.sizevars.size_hints(kernel.get_layout_args())
 
         kernel_hash_name = f"cuda_{self.name}_{next(self.index_counter)}"
