@@ -76,7 +76,7 @@ TEST(TestStream, StreamPriorityTest) {
       at::cuda::CUDAStream::priority_range();
   EXPECT_EQ(least_priority, 0);
 
-  stream = at::cuda::getStreamFromPool(-1);
+  auto stream = at::cuda::getStreamFromPool(-1);
   EXPECT_EQ(stream.priority(), -1);
   EXPECT_GT(10, at::cuda::max_compile_time_stream_priorities);
   stream = at::cuda::getStreamFromPool(-10);
