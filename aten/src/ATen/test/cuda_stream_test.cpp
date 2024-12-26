@@ -79,11 +79,11 @@ TEST(TestStream, StreamPriorityTest) {
   stream = at::cuda::getStreamFromPool(-1);
   EXPECT_EQ(stream.priority(), -1);
   EXPECT_GT(10, at::cuda::max_compile_time_stream_priorities);
-  stream = c10::xpu::getStreamFromPool(-10);
+  stream = at::cuda::getStreamFromPool(-10);
   EXPECT_EQ(stream.priority(), greatest_priority);
-  stream = c10::xpu::getStreamFromPool(0);
+  stream = at::cuda::getStreamFromPool(0);
   EXPECT_EQ(stream.priority(), 0);
-  stream = c10::xpu::getStreamFromPool(10);
+  stream = at::cuda::getStreamFromPool(10);
   EXPECT_EQ(stream.priority(), 0);
 }
 
