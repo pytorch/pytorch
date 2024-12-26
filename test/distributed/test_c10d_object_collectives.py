@@ -7,7 +7,6 @@ from functools import partial, wraps
 import torch
 import torch.distributed as dist
 
-
 if not dist.is_available():
     print("Distributed not available, skipping tests", file=sys.stderr)
     sys.exit(0)
@@ -74,11 +73,12 @@ class TestObjectCollectives(MultiProcessTestCase):
         dist.destroy_process_group()
 
     def dist_init(self):
+        os.environ["MASTER_ADDR"] = "localhost"
+        os.environ["MASTER_PORT"] = "29600"
         dist.init_process_group(
             backend=BACKEND,
             world_size=self.world_size,
-            rank=self.rank,
-            init_method=f"file://{self.file_name}",
+            rank=self.rank
         )
 
         # set device for nccl pg for collectives
