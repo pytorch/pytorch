@@ -9,7 +9,7 @@ from pathlib import Path
 CPP_TEST_PREFIX = "cpp"
 CPP_TEST_PATH = "build/bin"
 CPP_TESTS_DIR = os.path.abspath(os.getenv("CPP_TESTS_DIR", default=CPP_TEST_PATH))
-REPO_ROOT = Path(__file__).resolve().parents[2]
+REPO_ROOT = Path(__file__).absolute().parents[2]
 
 
 def parse_test_module(test: str) -> str:
@@ -43,7 +43,7 @@ def discover_tests(
     ]
 
     cpp_tests_dir = (
-        f"{base_dir.parent}/{CPP_TEST_PATH}" if cpp_tests_dir is None else cpp_tests_dir
+        str(base_dir.parent / CPP_TEST_PATH) if cpp_tests_dir is None else cpp_tests_dir
     )
     # CPP test files are located under pytorch/build/bin. Unlike Python test, C++ tests
     # are just binaries and could have any name, i.e. basic or atest
