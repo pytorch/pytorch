@@ -232,7 +232,7 @@ def main(argv):
                 )
             )
 
-    out_dir = Path(__file__).parent
+    out_dir = Path(__file__).absolute().parent
 
     (out_dir / "nnapi_wrapper.h").write_text(
         PREFIX
