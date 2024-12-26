@@ -4,7 +4,6 @@ import _weakrefset
 import abc
 import builtins
 import collections
-import contextlib
 import copy
 import copyreg
 import dataclasses
@@ -46,6 +45,7 @@ from .utils import getfile, hashable, NP_SUPPORTED_MODULES, unwrap_if_wrapper
 from .variables import (
     BuiltinVariable,
     FunctionalCallVariable,
+    FunctionDecoratedByContextlibContextManagerVariable,
     FunctorchHigherOrderVariable,
     NestedUserFunctionVariable,
     PolyfilledFunctionVariable,
@@ -154,6 +154,7 @@ manual_torch_name_rule_map = {
     "torch._dynamo.external_utils.is_compiling": TorchInGraphFunctionVariable,
     "torch.compiler.is_compiling": TorchInGraphFunctionVariable,
     "torch.compiler.is_dynamo_compiling": TorchInGraphFunctionVariable,
+    "torch.compiler.is_exporting": TorchInGraphFunctionVariable,
     "torch.autograd._profiler_enabled": SkipFunctionVariable,
     "torch._C._to_dlpack": SkipFunctionVariable,
     "torch.to_dlpack": SkipFunctionVariable,
@@ -615,7 +616,6 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._C._get_function_stack_at",
         "torch._C._get_graph_executor_optimize",
         "torch._C._get_linalg_preferred_backend",
-        "torch._C._get_rocm_fa_preferred_backend",
         "torch._C._get_math_sdp_enabled",
         "torch._C._get_math_sdp_allow_fp16_bf16_reduction",
         "torch._C._get_max_operator_version",
@@ -1144,7 +1144,6 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._C._set_grad_enabled",
         "torch._C._set_graph_executor_optimize",
         "torch._C._set_linalg_preferred_backend",
-        "torch._C._set_rocm_fa_preferred_backend",
         "torch._C._set_meta_in_tls_dispatch_include",
         "torch._C._set_mkldnn_enabled",
         "torch._C._set_multithreading_enabled",
@@ -1373,6 +1372,8 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._dim_arange",
         "torch._dirichlet_grad",
         "torch._disable_functionalization",
+        "torch._dyn_quant_matmul_4bit",
+        "torch._dyn_quant_pack_4bit_weight",
         "torch._efficientzerotensor",
         "torch._embedding_bag_forward_only",
         "torch._embedding_bag",
@@ -2423,7 +2424,6 @@ torch_non_c_binding_in_graph_functions = dict.fromkeys(
         "torch.backends.cuda.enable_cudnn_sdp",
         "torch.backends.cuda.preferred_blas_library",
         "torch.backends.cuda.preferred_linalg_library",
-        "torch.backends.cuda.preferred_rocm_fa_library",
         "torch.backends.cuda.sdp_kernel",
         "torch.backends.cudnn._init",
         "torch.backends.cudnn.flags",
@@ -3165,7 +3165,6 @@ def is_numpy_type_info(obj) -> bool:
 BUILTIN_SKIPLIST = (
     abc,
     collections,
-    contextlib,
     copy,
     copyreg,
     enum,
@@ -3526,7 +3525,13 @@ we don't want to inline the lower level function call (e.g, f3) by default.
 
 def check_verbose(obj, is_inlined_call=False):
     if isinstance(
-        obj, (UserFunctionVariable, UserMethodVariable, NestedUserFunctionVariable)
+        obj,
+        (
+            UserFunctionVariable,
+            UserMethodVariable,
+            NestedUserFunctionVariable,
+            FunctionDecoratedByContextlibContextManagerVariable,
+        ),
     ):
         try:
             py_obj = obj.get_function()
