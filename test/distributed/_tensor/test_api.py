@@ -11,6 +11,7 @@ from torch.distributed._tensor import (
     Replicate,
     Shard,
 )
+from torch.distributed.tensor.debug import CommDebugMode
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
@@ -42,6 +43,8 @@ class DTensorAPITest(DTensorTestBase):
 
     @with_comms
     def test_distribute_tensor(self):
+        comm_mode = CommDebugMode()
+
         device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
         shard_spec = [Shard(0)]
 
@@ -49,7 +52,11 @@ class DTensorAPITest(DTensorTestBase):
             tensor_to_shard = torch.randn(
                 3 * self.world_size, 3, requires_grad=requires_grad
             )
-            dist_tensor = distribute_tensor(tensor_to_shard, device_mesh, shard_spec)
+            with comm_mode:
+                dist_tensor = distribute_tensor(
+                    tensor_to_shard, device_mesh, shard_spec
+                )
+                self.assertEqual(comm_mode.get_total_counts(), 1)
             self.assertEqual(dist_tensor.size(), torch.Size([3 * self.world_size, 3]))
             local_tensor = dist_tensor.to_local()
             self.assertEqual(local_tensor.size(), torch.Size([3, 3]))
@@ -62,6 +69,18 @@ class DTensorAPITest(DTensorTestBase):
         tensor_to_shard = torch.randn(3, 3 * self.world_size)
         dist_tensor = distribute_tensor(tensor_to_shard, device_mesh, shard_minus_spec)
         self.assertEqual(dist_tensor.placements[0].dim, 1)
+
+        # test src_data_rank = None, make sure it does not have communication
+        tensor_to_distribute = torch.randn(3 * self.world_size, 3)
+
+        placement_combs = [[Shard(0)], [Shard(1)], [Replicate()]]
+
+        with comm_mode:
+            for placement in placement_combs:
+                dtensor = distribute_tensor(
+                    tensor_to_distribute, device_mesh, placement, src_data_rank=None
+                )
+        self.assertEqual(comm_mode.get_total_counts(), 0)
 
     @with_comms
     def test_distribute_tensor_errors(self):

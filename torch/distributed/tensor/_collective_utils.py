@@ -13,10 +13,8 @@ from torch.distributed.device_mesh import _mesh_resources, DeviceMesh
 from torch.distributed.distributed_c10d import (
     _get_group_size_by_name,
     broadcast,
-    get_global_rank,
     get_group_rank,
     get_rank,
-    GroupMember,
     ProcessGroup,
     scatter,
     Work,
@@ -79,6 +77,8 @@ def mesh_scatter(
     mesh: DeviceMesh,
     mesh_dim: int = 0,
     async_op: bool = False,
+    *,
+    group_src: int = 0,
 ) -> Optional[Work]:
     """
     scatter a list of tensors to a device mesh dimension. We by default
@@ -105,27 +105,22 @@ def mesh_scatter(
         return None
     dim_group = mesh.get_group(mesh_dim)
     assert isinstance(dim_group, ProcessGroup)
-    # src need to be global rank
-    src_for_dim = 0
 
-    if dim_group is not GroupMember.WORLD:
-        src_for_dim = get_global_rank(dim_group, 0)
-
-    if src_for_dim == get_rank():
+    if group_src == get_rank(dim_group):
         fut = scatter(
             output,
             scatter_list=scatter_list,
-            src=src_for_dim,
             group=dim_group,
             async_op=async_op,
+            group_src=group_src,
         )
     else:
         fut = scatter(
             output,
             scatter_list=None,
-            src=src_for_dim,
             group=dim_group,
             async_op=async_op,
+            group_src=group_src,
         )
 
     return fut
@@ -136,6 +131,8 @@ def mesh_broadcast(
     mesh: DeviceMesh,
     mesh_dim: int = 0,
     async_op: bool = False,
+    *,
+    group_src: int = 0,
 ) -> Optional[Work]:
     """
     broadcast the tensor to a device mesh dimension. We by default
@@ -161,12 +158,8 @@ def mesh_broadcast(
         return None
     dim_group = mesh.get_group(mesh_dim)
     assert isinstance(dim_group, ProcessGroup)
-    # src need to be global rank
-    src_for_dim = 0
-    if dim_group is not GroupMember.WORLD:
-        src_for_dim = get_global_rank(dim_group, 0)
 
-    return broadcast(tensor, src=src_for_dim, group=dim_group, async_op=async_op)
+    return broadcast(tensor, group=dim_group, async_op=async_op, group_src=group_src)
 
 
 def pad_tensor(tensor: torch.Tensor, pad_dim: int, pad_size: int) -> torch.Tensor:
