@@ -686,7 +686,7 @@ class TestUnaryUfuncs(TestCase):
         for dtype in (torch.half, torch.float, torch.double):
             a = torch.zeros(10, dtype=dtype)
             with self.assertRaises(TypeError):
-                b = ~a
+                ~a
 
     @dtypes(torch.complex64, torch.complex128)
     def test_abs_angle_complex_to_float(self, device, dtype):
