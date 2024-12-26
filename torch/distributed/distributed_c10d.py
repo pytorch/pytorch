@@ -231,7 +231,7 @@ def supports_complex(reduceOp: ReduceOp) -> bool:
     return reduceOp not in denyList
 
 
-class Backend(str):
+class Backend(collections.UserString):
     """
     An enum-like class for backends.
 

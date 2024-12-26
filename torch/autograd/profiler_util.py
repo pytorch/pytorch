@@ -2,7 +2,7 @@
 import bisect
 import itertools
 import math
-from collections import defaultdict, namedtuple
+from collections import defaultdict, namedtuple, UserList
 from operator import attrgetter
 from typing import Any, Dict, List, Optional, Tuple
 from typing_extensions import deprecated
@@ -23,7 +23,7 @@ __all__ = [
 ]
 
 
-class EventList(list):
+class EventList(UserList):
     """A list of Events (for pretty printing)."""
 
     def __init__(self, *args, **kwargs):
