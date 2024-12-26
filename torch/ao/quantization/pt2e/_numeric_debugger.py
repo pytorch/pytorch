@@ -71,6 +71,45 @@ def generate_numeric_debug_handle(ep: ExportedProgram) -> None:
     bfs_trace_with_node_process(ep, _assign_debug_handle)
 
 
+def _detach(x):
+    if isinstance(x, torch.Tensor):
+        detached = x.detach()
+    elif isinstance(x, (list, tuple)):
+        detached = type(x)([_detach(e) for e in x])
+    elif isinstance(x, dict):
+        detached = {k: _detach(e) for k, e in x.items()}
+    else:
+        detached = x
+    return detached
+
+def _tensor_shape_equals(x, y):
+    if isinstance(x, torch.Tensor) and isinstance(y, torch.Tensor):
+        print("x:", x.shape, " y:", y.shape)
+        print("equals:", x.shape == y.shape)
+        return x.shape == y.shape
+    elif isinstance(x, (list, tuple)):
+        res = all([_tensor_shape_equals(e1, e2) for e1, e2 in zip(x, y)])
+        print("list res:", res)
+        return res
+    elif isinstance(x, dict) and isinstance(y, dict):
+        all_equal = True
+        for k in x:
+            all_equal = all_equal and k in y and (_tensor_shape_equals(x[k], y[k]))
+        return all_equal
+    else:
+        print(f"Comparing non Tensors: {x} and {y}, they must be equal")
+        return type(x) == type(y) and x == y
+
+def _loss_fn(loss, x, y):
+    if isinstance(x, torch.Tensor) and isinstance(y, torch.Tensor):
+        return loss(x, y)
+    elif isinstance(x, (list, tuple)):
+        return type(x)([_loss_fn(loss, e1, e2) for e1, e2 in zip(x, y)])
+    elif isinstance(x, dict) and isinstance(y, dict):
+        return {k: _loss_fn(loss, e, y[k]) for k, e in x.items()}
+    else:
+        return None
+
 class OutputLogger(torch.nn.Module):
     """
     Base class for capturing output values for nodes in a GraphModule, it only captures
@@ -90,11 +129,10 @@ class OutputLogger(torch.nn.Module):
         self.node_name = node_name
         self.nn_module_stack = nn_module_stack
         self.debug_handle = debug_handle
-        self.stats: List[torch.Tensor] = []
+        self.stats: List[Any] = []
 
     def forward(self, x: object) -> object:
-        if isinstance(x, torch.Tensor):
-            self.stats.append(x.detach())
+        self.stats.append(_detach(x))
         return x
 
     def __extra_repr__(self) -> str:
@@ -163,26 +201,16 @@ class QuantizationComparisonResult:
 
     @property
     def mse_loss(self) -> torch.Tensor:
-        return F.mse_loss(
-            self.actual.to(dtype=torch.float32), self.ref.to(dtype=torch.float32)
-        )
+        return self.loss(F.mse_loss)
 
     @property
     def sqnr(self) -> torch.Tensor:
-        return compute_sqnr(
-            self.actual.to(dtype=torch.float32), self.ref.to(dtype=torch.float32)
-        )
+        return self.loss(compute_sqnr)
 
     def loss(
         self, loss_function: Callable[[torch.Tensor, torch.Tensor], torch.Tensor]
     ) -> torch.Tensor:
-        if self.actual.shape != self.ref.shape:
-            raise ValueError(
-                f"Cannot compare tensors with different shapes: {self.actual.shape} vs {self.ref.shape}"
-            )
-        return loss_function(
-            self.actual.to(dtype=torch.float32), self.ref.to(dtype=torch.float32)
-        )
+        return _loss_fn(loss_function, self.actual, self.ref)
 
     def __repr__(self) -> str:
         # Don't include the tensors themselves as they are quite large to print
@@ -192,16 +220,17 @@ class QuantizationComparisonResult:
         )
 
     def __post_init__(self) -> None:
-        if not isinstance(self.actual, torch.Tensor):
+        if not isinstance(self.actual, (torch.Tensor, list, tuple, dict)):
             raise ValueError(
-                f"`self.actual` value must be a Tensor, got: {self.actual}"
+                f"`self.actual` value must be a Tensor, list, tuple or dict, got: {self.actual}"
             )
 
-        if not isinstance(self.ref, torch.Tensor):
-            raise ValueError(f"`self.ref` value must be a Tensor, got: {self.ref}")
-        if self.actual.shape != self.ref.shape:
+        if not isinstance(self.ref, (torch.Tensor, list, tuple, dict)):
+            raise ValueError(f"`self.ref` value must be a Tensor, list, tuple or dict, got: {self.ref}")
+
+        if not _tensor_shape_equals(self.ref, self.actual):
             raise ValueError(
-                f"Cannot compare tensors with different shapes: ref={self.ref.shape} vs actual={self.actual.shape}"
+                f"Cannot compare tensors with different shapes: ref={self.ref} vs actual={self.actual}"
             )
 
 
