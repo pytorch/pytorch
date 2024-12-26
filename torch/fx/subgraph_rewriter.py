@@ -365,6 +365,7 @@ def _replace_pattern(
         for n in match.returning_nodes:
             user_nodes.update(n.users)
 
+        first_user_node = None
         if len(user_nodes) == 0:
             first_user_node = None
         elif len(user_nodes) == 1:
@@ -388,7 +389,9 @@ def _replace_pattern(
                     break
                 else:
                     next_node = n
-        insert_point = first_user_node if first_user_node is not None else first_next_node
+        insert_point = (
+            first_user_node if first_user_node is not None else first_next_node
+        )
         with original_graph.inserting_before(insert_point):  # type: ignore[possibly-undefined]
             copied_returning_nodes = original_graph.graph_copy(
                 replacement_graph, val_map

@@ -684,10 +684,10 @@ class TestSubgraphRewriter(JitTestCase):
                 m = torch.mul(x, y)
                 n = cache.index_copy(0, torch.tensor([0]), m)
                 p = torch.ops.aten.copy.default(cache, n)
-                q = torch.ops.aten.copy_.default(cache, p)
+                q = torch.ops.aten.copy_.default(cache, p)  # noqa: F841
                 u = torch.relu(cache)
                 # check the result to ensure cache is updated before relu op
-                return u  
+                return u
 
         def pattern(self_tensor, src_tensor):
             p = torch.ops.aten.copy.default(self_tensor, src_tensor)
@@ -701,7 +701,7 @@ class TestSubgraphRewriter(JitTestCase):
         def comparison(x, y, cache):
             m = torch.mul(x, y)
             n = cache.index_copy(0, torch.tensor([0]), m)
-            q = torch.ops.aten.copy_.default(cache, n)
+            q = torch.ops.aten.copy_.default(cache, n)  # noqa: F841
             u = torch.relu(cache)
             return u
 
