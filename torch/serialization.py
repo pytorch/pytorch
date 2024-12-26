@@ -1864,14 +1864,26 @@ def _load(
             UserWarning,
         )
 
+    current_offset = None
+
     def load_tensor(dtype, numel, key, location):
         name = f"data/{key}"
         if torch._guards.detect_fake_mode(None) is not None:
             nbytes = numel * torch._utils._element_size(dtype)
             storage = torch.UntypedStorage(nbytes, device="meta")
         elif overall_storage is not None:
-            storage_offset = zip_file.get_record_offset(name)
+            nonlocal current_offset
+            if current_offset is None:
+                assert key == "0"
+                current_offset = zip_file.get_record_offset(name)
+                storage_offset = current_offset
+            else:
+                storage_offset = zip_file.get_record_offset_no_read(
+                    current_offset, name, numel
+                )
             storage = overall_storage[storage_offset : storage_offset + numel]
+            # offset of next zipfile header (add 16 after numel because zip64 has data descriptor after payload)
+            current_offset = storage_offset + numel + 16
         else:
             storage = (
                 zip_file.get_storage_from_record(name, numel, torch.UntypedStorage)

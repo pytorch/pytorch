@@ -4469,6 +4469,24 @@ class TestSerialization(TestCase, SerializationMixin):
             loaded_sd = torch.load(f, weights_only=weights_only)
             self.assertEqual(sd_save, loaded_sd)
 
+    @parametrize('path_type', (str, Path))
+    def test_mmap_load_offset_calculation(self, path_type):
+        m = torch.nn.Sequential(*[torch.nn.Linear(4, 4) for _ in range(20)])
+
+        with TemporaryFileName() as f:
+            f = path_type(f)
+            state_dict = m.state_dict()
+            torch.save(state_dict, f)
+            result = torch.load(f, mmap=True)
+            result_non_mmap = torch.load(f, mmap=False)
+
+        with torch.device("meta"):
+            model_mmap_state_dict = torch.nn.Sequential(*[torch.nn.Linear(4, 4) for _ in range(20)])
+            model_non_mmap_state_dict = torch.nn.Sequential(*[torch.nn.Linear(4, 4) for _ in range(20)])
+        model_mmap_state_dict.load_state_dict(result, assign=True)
+        model_non_mmap_state_dict.load_state_dict(result_non_mmap, assign=True)
+        inp = torch.randn(4, 4)
+        self.assertEqual(model_mmap_state_dict(inp), model_non_mmap_state_dict(inp.clone()))
 
     def run(self, *args, **kwargs):
         with serialization_method(use_zip=True):

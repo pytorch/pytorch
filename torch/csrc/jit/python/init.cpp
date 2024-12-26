@@ -1619,6 +1619,14 @@ void initJITBindings(PyObject* module) {
           "get_record_offset",
           [](PyTorchStreamReader& self, const std::string& key) {
             return self.getRecordOffset(key);
+          })
+      .def(
+          "get_record_offset_no_read",
+          [](PyTorchStreamReader& self,
+             size_t offset,
+             const std::string filename,
+             size_t size) {
+            return self.getRecordOffsetNoRead(offset, filename, size);
           });
 
   // Used by torch.Package to coordinate deserialization of storages across
@@ -1697,7 +1705,12 @@ void initJITBindings(PyObject* module) {
                                        const py::kwargs& kwargs) {
                     ToIValueAllowNumbersAsTensors g(allow_numbers_as_tensors);
                     return _get_operation_for_overload_or_packet(
-                        {op}, symbol, args, kwargs, /*is_overload*/ true, dk_);
+                        {op},
+                        symbol,
+                        args,
+                        kwargs,
+                        /*is_overload*/ true,
+                        dk_);
                   });
               return py::make_tuple(
                   func, func_dk, py::cast(op->getTags().vec()));
@@ -1717,8 +1730,8 @@ void initJITBindings(PyObject* module) {
       [](const FunctionSchema& schema,
          const py::args& args,
          const py::kwargs& kwargs) {
-        // checkSchemaAllowFakeScriptObject will throw runtime error if there is
-        // a schema mismatch. Otherwise, it returns true.
+        // checkSchemaAllowFakeScriptObject will throw runtime error if
+        // there is a schema mismatch. Otherwise, it returns true.
         return checkSchemaAllowFakeScriptObject(schema, args, kwargs);
       });
 
@@ -1878,9 +1891,9 @@ void initJITBindings(PyObject* module) {
             std::optional<IValue> i_value = toTypeInferredIValueOptional(value);
             if (i_value) {
               // For normalization purposes there is an inconsistency within
-              // torch.fx that turns all arguments named "self" into "input".
-              // Thus this check ensures that those arguments are checked
-              // correctly.
+              // torch.fx that turns all arguments named "self" into
+              // "input". Thus this check ensures that those arguments are
+              // checked correctly.
               if (name == "input" && !self.hasInputArgumentNamed("input")) {
                 self.addArgumentValue("self", *i_value);
               } else {
@@ -1898,10 +1911,10 @@ void initJITBindings(PyObject* module) {
           std::optional<IValue> value =
               toTypeInferredIValueOptional(key_pair.second);
           if (value) {
-            // For normalization purposes there is an inconsistency within
-            // torch.fx that
-            // turns all arguments named "self" into "input". Thus this check
-            // ensures that those arguments are checked correctly.
+            // For normalization purposes there is an inconsistency
+            // within torch.fx that turns all arguments named "self"
+            // into "input". Thus this check ensures that those
+            // arguments are checked correctly.
             if (key.toStringRef() == "input" &&
                 !self.hasInputArgumentNamed("input")) {
               self.addArgumentValue("self", *value);
@@ -2123,8 +2136,8 @@ void initJITBindings(PyObject* module) {
       .def(
           "__getattr__",
           [](PythonAwaitWrapper& self, const std::string& name) -> py::object {
-            // In eager mode allow Await[W] to be used as W, redirecting getattr
-            // to the result of delayed function.
+            // In eager mode allow Await[W] to be used as W, redirecting
+            // getattr to the result of delayed function.
             return py::getattr(self.wait(), name.c_str(), py::none());
           })
       .def(
@@ -2151,7 +2164,8 @@ void initJITBindings(PyObject* module) {
     std::optional<IValue> self_value = toTypeInferredIValueOptional(self);
     std::optional<IValue> other_value = toTypeInferredIValueOptional(other);
 
-    // Only return true if we are certain that self and other are aliasing.
+    // Only return true if we are certain that self and other are
+    // aliasing.
     if (!self_value || !other_value) {
       return false;
     }
@@ -2161,7 +2175,8 @@ void initJITBindings(PyObject* module) {
     std::optional<IValue> self_value = toTypeInferredIValueOptional(self);
     std::optional<IValue> other_value = toTypeInferredIValueOptional(other);
 
-    // Only return true if we are certain that self and other are overlapping.
+    // Only return true if we are certain that self and other are
+    // overlapping.
     if (!self_value || !other_value) {
       return false;
     }
@@ -2210,9 +2225,9 @@ void initJITBindings(PyObject* module) {
         // Run the user-supplied function
         py_func_output = f(*args_tup, **kwargs);
 
-        // Convert the output of the user-supplied function to IValue. The type
-        // information of this IValue is used both to record the correct type in
-        // the trace.
+        // Convert the output of the user-supplied function to IValue. The
+        // type information of this IValue is used both to record the
+        // correct type in the trace.
         output_ivalue = toTypeInferredIValue(py_func_output);
         Value* out_val = jit::tracer::getValueTrace(output_ivalue);
         body_block->registerOutput(out_val);
@@ -2262,14 +2277,15 @@ void initJITBindings(PyObject* module) {
             /* unwrap_func */ [futures](const py::object& /*unused*/) {
               // Throw errors when calling wait() on the returned Future if
               // any of the original futures would throw.
-              // NB: PythonFutureWrapper takes an unwrap_func which serves as a
-              // callback to evalute the value in the Future. RPC uses this
-              // unwrap_func to check whether the returned py::object is a
-              // RemoteException object, and re-throw the exception if it is.
-              // By extracting the c10::ivalue::Future from PythonFutureWrapper
-              // the unwrap_func on the original PythonFutureWrapper objects are
-              // discarded, and hence it will return the RemoteException as an
-              // object instead of re-throwing it.
+              // NB: PythonFutureWrapper takes an unwrap_func which serves
+              // as a callback to evalute the value in the Future. RPC uses
+              // this unwrap_func to check whether the returned py::object
+              // is a RemoteException object, and re-throw the exception if
+              // it is. By extracting the c10::ivalue::Future from
+              // PythonFutureWrapper the unwrap_func on the original
+              // PythonFutureWrapper objects are discarded, and hence it
+              // will return the RemoteException as an object instead of
+              // re-throwing it.
               for (auto& fut : futures) {
                 fut->wait();
               }
