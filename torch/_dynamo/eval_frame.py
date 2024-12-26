@@ -78,7 +78,7 @@ from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
 from . import config, convert_frame, external_utils, trace_rules, utils
 from .backends.registry import CompilerFn, lookup_backend
 from .code_context import code_context
-from .exc import CondOpArgsMismatchError, UserError, UserErrorType
+from .exc import CondOpArgsMismatchError, ShortenTraceback, UserError, UserErrorType
 from .hooks import Hooks
 from .mutation_guard import install_generation_tagging_init
 from .utils import common_constant_types, compile_times
@@ -574,6 +574,10 @@ class _TorchDynamoContext:
 
                 try:
                     return fn(*args, **kwargs)
+                except ShortenTraceback as e:
+                    # Failures in the backend likely don't have useful
+                    # data in the TorchDynamo frames, so we strip them out.
+                    raise e.remove_dynamo_frames() from None  # see TORCHDYNAMO_VERBOSE=1
                 finally:
                     # Restore the dynamic layer stack depth if necessary.
                     set_eval_frame(None)
