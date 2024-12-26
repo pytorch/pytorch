@@ -1,13 +1,14 @@
-# mypy: allow-untyped-defs
-from ...ir import TemplateBuffer
+from typing import Any, Callable, Sequence
+
+from ...ir import Buffer, Layout, TemplateBuffer
 
 
 class ROCmTemplateBuffer(TemplateBuffer):
     def __init__(
         self,
-        layout,
-        inputs,
-        make_kernel_render,
+        layout: Layout,
+        inputs: Sequence[Buffer],
+        make_kernel_render: Callable[..., Any],
         workspace_size: int,
         template: "ROCmTemplate",  # type: ignore[name-defined]  # noqa: F821
     ) -> None:
@@ -16,5 +17,5 @@ class ROCmTemplateBuffer(TemplateBuffer):
         self.workspace_size = workspace_size
         self.template = template
 
-    def get_workspace_size(self):
+    def get_workspace_size(self) -> int:
         return self.workspace_size if self.workspace_size is not None else 0
