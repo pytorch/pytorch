@@ -14,6 +14,7 @@ from torch.testing._internal.common_utils import set_default_dtype
 
 RootGuardManager = guards.RootGuardManager
 DictGuardManager = guards.DictGuardManager
+DictSubclassGuardManager = guards.DictSubclassGuardManager
 GetAttrGuardAccessor = guards.GetAttrGuardAccessor
 GetItemGuardAccessor = guards.GetItemGuardAccessor
 TypeGuardAccessor = guards.TypeGuardAccessor
