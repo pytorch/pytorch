@@ -51,9 +51,10 @@ class TestLayoutOptim(TestCase):
                     backend = "nccl"
                 elif GPU_TYPE == "xpu":
                     backend = "ccl"
+                os.environ["MASTER_PORT"] = str(port)
+                os.environ["MASTER_ADDR"] = "localhost"
                 dist.init_process_group(
                     backend=backend,
-                    init_method=f"tcp://localhost:{port}",
                     world_size=1,
                     rank=0,
                 )

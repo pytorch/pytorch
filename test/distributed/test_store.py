@@ -191,26 +191,6 @@ class FileStoreTest(TestCase, StoreTestBase):
         store.set_timeout(timedelta(seconds=300))
         return store
 
-    def test_init_pg_and_rpc_with_same_file(self):
-        file = tempfile.NamedTemporaryFile(delete=False)
-        # Init RPC using file
-        rpc_backend_options = rpc.TensorPipeRpcBackendOptions()
-        rpc_backend_options.init_method = f"file://{file.name}"
-        rpc_backend_options._transports = tp_transports()
-        rpc.init_rpc(
-            "worker", rank=0, world_size=1, rpc_backend_options=rpc_backend_options
-        )
-
-        # Init PG using file
-        dist.init_process_group(
-            "gloo", rank=0, world_size=1, init_method=f"file://{file.name}"
-        )
-        dist.destroy_process_group()
-        assert os.path.exists(file.name)
-
-        rpc.shutdown()
-        os.remove(file.name)
-
     def test_refcount(self):
         file = tempfile.NamedTemporaryFile(delete=False)
         store = dist.FileStore(file.name, 1)
@@ -358,7 +338,6 @@ class TCPStoreTest(TestCase, StoreTestBase):
         os.environ["USE_LIBUV"] = "1" if self._use_libuv else "0"
         dist.init_process_group(
             backend="gloo",
-            init_method="env://",
             rank=0,
             world_size=1,
         )
@@ -1052,22 +1031,12 @@ class InitPgWithNonUvStore(TestCase):
         os.environ.pop("MASTER_ADDR", None)
         os.environ.pop("MASTER_PORT", None)
 
-    def test_with_url_param(self):
-        port = common.find_free_port()
-        dist.init_process_group(
-            "gloo",
-            rank=0,
-            world_size=1,
-            init_method=f"tcp://{DEFAULT_HOSTNAME}:{port}?use_libuv=0",
-        )
-        self._run_test()
-
     def test_with_env_var(self):
         port = common.find_free_port()
         os.environ["USE_LIBUV"] = "0"
         os.environ["MASTER_ADDR"] = DEFAULT_HOSTNAME
         os.environ["MASTER_PORT"] = str(port)
-        dist.init_process_group("gloo", rank=0, world_size=1, init_method="env://")
+        dist.init_process_group("gloo", rank=0, world_size=1)
         self._run_test()
 
     def _run_test(self):

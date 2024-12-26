@@ -126,7 +126,7 @@ class RendezvousEnvTest(TestCase):
 
         previous_handlers = logging.root.handlers
 
-        c10d.init_process_group(backend="ucc", init_method="env://")
+        c10d.init_process_group(backend="ucc")
 
         current_handlers = logging.root.handlers
         self.assertEqual(len(previous_handlers), len(current_handlers))
@@ -678,9 +678,10 @@ class DistributedDataParallelTest(
     @requires_ucc()
     @skip_if_lt_x_gpu(2)
     def test_save_load_checkpoint(self):
+        os.environ["MASTER_ADDR"] = "localhost"
+        os.environ["MASTER_PORT"] = "29600"
         dist.init_process_group(
             "ucc",
-            init_method=f"file://{self.file_name}",
             world_size=self.world_size,
             rank=self.rank,
         )
