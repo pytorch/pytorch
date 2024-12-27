@@ -2,6 +2,8 @@
 # This is not a feature-complete compiler backend end
 # Just an early prototype that shows that one can compile
 # Easy models to Metal
+from typing import Optional
+
 import sympy
 
 import torch
@@ -31,18 +33,26 @@ class MetalOverrides(OpOverrides):
     def to_dtype(
         x,
         dtype: torch.dtype,
-        src_dtype: torch.dtype | None = None,
+        src_dtype: Optional[torch.dtype] = None,
         use_compute_types=True,
     ):
         return f"static_cast<{DTYPE_TO_METAL[dtype]}>({x})"
+
+    @staticmethod
+    def where(a, b, c):
+        return f"{a} ? {b} : {c}"
 
     @staticmethod
     def logical_or(a, b):
         return f"{a} | {b}"
 
     @staticmethod
-    def atan(x):
-        return f"metal::atan({x})"
+    def logical_and(a, b):
+        return f"{a} & {b}"
+
+    @staticmethod
+    def abs(x):
+        return f"metal::abs({x})"
 
     @staticmethod
     def sin(x):
@@ -53,8 +63,24 @@ class MetalOverrides(OpOverrides):
         return f"metal::cos({x})"
 
     @staticmethod
+    def tan(x):
+        return f"metal::tan({x})"
+
+    @staticmethod
+    def asin(x):
+        return f"metal::asin({x})"
+
+    @staticmethod
     def acos(x):
         return f"metal::acos({x})"
+
+    @staticmethod
+    def atan(x):
+        return f"metal::atan({x})"
+
+    @staticmethod
+    def sqrt(x):
+        return f"metal::sqrt({x})"
 
 
 class MetalKernel(SIMDKernel):

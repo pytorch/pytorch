@@ -48,7 +48,20 @@ class MPSBasicTests(TestCase):
         )
 
     def test_acos(self):
-        self.common(lambda a: a.acos(), (torch.rand(1024),))
+        self.common(lambda x: x.acos(), (torch.rand(1024),))
+
+    def test_sliced_input(self):
+        self.common(
+            lambda x: x[:, ::2].sin() + x[:, 1::2].cos(), (torch.rand(32, 1024),)
+        )
+
+    def test_where(self):
+        def foo(x):
+            rc = x.abs().sqrt()
+            rc[x < 0] = -5
+            return rc
+
+        self.common(foo, (torch.rand(1024),))
 
     @parametrize("dtype", MPS_DTYPES)
     def test_cast(self, dtype):
