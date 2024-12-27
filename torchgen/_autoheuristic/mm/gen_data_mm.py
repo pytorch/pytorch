@@ -1,11 +1,12 @@
 import itertools
+import os
 import random
 import sys
-from pathlib import Path
+
+
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 from typing import Any
-
-
-sys.path.append(str(Path(__file__).absolute().parents[1]))
 
 from benchmark_runner import BenchmarkRunner  # type: ignore[import-not-found]
 from benchmark_utils import (  # type: ignore[import-not-found]
