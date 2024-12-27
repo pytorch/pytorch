@@ -516,9 +516,16 @@ class GetItemSource(ChainedSource):
 
 
 @dataclasses.dataclass(frozen=True)
-class ConstDictKeySource(GetItemSource):
-    def is_dict_key(self):
-        return True
+class ConstDictKeySource(ChainedSource):
+    index: Any
+
+    def __post_init__(self):
+        assert self.base is not None
+        if isinstance(self.index, slice):
+            super().__setattr__("index", self.index.__reduce__())
+
+    def guard_source(self):
+        return self.base.guard_source()
 
     def reconstruct(self, codegen):
         codegen.add_push_null(
@@ -531,6 +538,9 @@ class ConstDictKeySource(GetItemSource):
     def name(self):
         # The list creation will be CSE'd by PyExprCSEPass
         return f"list(dict.keys({self.base.name()}))[{self.index!r}]"
+
+    def is_dict_key(self):
+        return True
 
 
 @dataclasses.dataclass(frozen=True)
