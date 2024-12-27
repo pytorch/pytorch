@@ -23,6 +23,8 @@ from ..source import (
     ConstDictKeySource,
     FSDPNNModuleSource,
     GetItemSource,
+    DictGetItemSource,
+    NO_KEY,
     NNModuleSource,
     UnspecializedBuiltinNNModuleSource,
     UnspecializedNNModuleSource,
@@ -1105,8 +1107,8 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
 
                 # Instead of using dict[key] to access the value, use a dict[dict.keys()[index]] to access the
                 # value. This removes the reliance on the actual key value.
-                source_key = ConstDictKeySource(hooks_dict_source, i)
-                source_value = GetItemSource(hooks_dict_source, source_key)
+                key_source = ConstDictKeySource(hooks_dict_source, i)
+                source_value = DictGetItemSource(hooks_dict_source, NO_KEY, key_source)
                 value = LazyVariableTracker.create(v, source_value)
                 return key, value
 

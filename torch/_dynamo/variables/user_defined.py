@@ -1158,6 +1158,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             return variables.ConstantVariable.create(False)
 
     def odict_getitem(self, tx: "InstructionTranslator", key):
+        assert False
         from .builder import VariableBuilder
         from .dicts import is_hashable
 
