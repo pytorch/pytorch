@@ -280,7 +280,7 @@ class Venv:
         """Get the command to activate the virtual environment."""
         if WINDOWS:
             # Assume PowerShell
-            return f"& {shlex.quote(str(self.activate_script))}"
+            return f'& "{self.activate_script}"'
         # Assume Bash, Zsh, etc.
         # POSIX standard should use dot `. venv/bin/activate` rather than `source`
         return f"source {shlex.quote(str(self.activate_script))}"
