@@ -6,8 +6,6 @@ from functools import partial
 from typing import Optional
 import re
 
-import torch.version
-
 import torch
 
 from torch.quantization._quantized_conversions import (

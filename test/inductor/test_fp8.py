@@ -220,7 +220,6 @@ class TestFP8Types(TestCase):
         self, src_dtype: torch.dtype, dst_dtype: torch.dtype, shape: str
     ):
         dst_dtype = _fix_fp8_dtype_for_hip(dst_dtype, device="cuda")
-
         def fp8_saturated(x, dtype):
             return _to_fp8_saturated(x, dtype)
 
