@@ -98,7 +98,6 @@ from .source import (
     LocalSource,
     NNModuleSource,
     NumpyTensorSource,
-    ODictGetItemSource,
     OptimizerSource,
     ScriptObjectQualifiedNameSource,
     ShapeEnvSource,
@@ -1055,8 +1054,7 @@ class GuardBuilder(GuardBuilderBase):
             assert base_guard_manager  # to make mypy happy
             if isinstance(base_example_value, (dict, collections.OrderedDict)):
                 # TODO(anijain2305) - Consider isolating GetItemSource and
-                # DictGetItemSource (or maybe use ODictGetItemSource for
-                # dicts) so that GetItemSource is only for non dict objects.
+                # DictGetItemSource for dicts) so that GetItemSource is only for non dict objects.
                 if isinstance(base_guard_manager, DictGuardManager):
                     assert self.manager_guards_on_keys(base_guard_manager_enum)
                     out = getitem_on_dict_manager(
@@ -1098,24 +1096,6 @@ class GuardBuilder(GuardBuilderBase):
                     index = source.unpack_slice()
                 out = base_guard_manager.getitem_manager(
                     key=index,
-                    source=source_name,
-                    example_value=example_value,
-                    guard_manager_enum=guard_manager_enum,
-                )
-        elif istype(source, ODictGetItemSource):
-            if isinstance(base_guard_manager, DictGuardManager):
-                assert self.manager_guards_on_keys(base_guard_manager_enum)
-                out = getitem_on_dict_manager(
-                    source,
-                    base_guard_manager,
-                    base_example_value,
-                    example_value,
-                    guard_manager_enum,
-                )
-            else:
-                assert base_guard_manager  # to make mypy happy
-                out = base_guard_manager.dict_getitem_manager(
-                    key=source.index,
                     source=source_name,
                     example_value=example_value,
                     guard_manager_enum=guard_manager_enum,
