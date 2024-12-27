@@ -3544,7 +3544,7 @@ class TestSlowIterableDataset(IterableDataset):
 
 class TestOutOfOrderDataLoader(TestCase):
     def test_in_order_index_ds(self):
-        dataset = TestSlowIndexDataset(end=10, slow_index=2)
+        dataset = TestSlowIndexDataset(end=10, slow_index=0)
 
         dataloader = torch.utils.data.DataLoader(
             dataset,
@@ -3561,7 +3561,7 @@ class TestOutOfOrderDataLoader(TestCase):
         self.assertEqual(expected_data, data)
 
     def test_out_of_order_index_ds(self):
-        dataset = TestSlowIndexDataset(end=10, slow_index=2)
+        dataset = TestSlowIndexDataset(end=10, slow_index=0)
 
         dataloader = torch.utils.data.DataLoader(
             dataset,
@@ -3570,18 +3570,17 @@ class TestOutOfOrderDataLoader(TestCase):
             in_order=False,
         )
 
-        # worker_id = 0 gets 0, then 'stuck' on index = 2, and gets one more
+        # worker_id = 0 gets 'stuck' on 0 and also has 2 in it's queue
         # due to prefetch_factor being 2
-        expected_worker_ids = [0, 1, 1, 1, 1, 1, 1, 1, 0, 0]
-        expected_data = [0, 1, 3, 5, 6, 7, 8, 9, 2, 4]
+        # this makes the test more deterministic as [0, 2] will be the last elements
+        expected_worker_ids = [1, 1, 1, 1, 1, 1, 1, 1, 0, 0]
+        expected_data = [1, 3, 4, 5, 6, 7, 8, 9, 0, 2]
         outputs = list(dataloader)
         worker_ids = [o[0].item() for o in outputs]
         data = [o[1].item() for o in outputs]
-        self.assertEqual(set(expected_worker_ids[:8]), set(worker_ids[:8]))
-        self.assertEqual(set(expected_worker_ids[8:]), set(worker_ids[8:]))
+        self.assertEqual(expected_worker_ids, worker_ids)
         self.assertNotEqual(data, list(range(10)))
-        self.assertEqual(set(expected_data), set(data))
-        self.assertIn(2, data[8:])
+        self.assertEqual(expected_data, data)
 
     def test_in_order_iterable_ds(self):
         dataset = TestSlowIterableDataset(start=0, end=10)
