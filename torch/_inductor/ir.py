@@ -7150,11 +7150,7 @@ class InvokeSubgraph(ExternKernel):
 
         def create_output(output: IRNode, ind: int):
             if isinstance(output, (ShapeAsConstantBuffer, NoneAsConstantBuffer)):
-                # Send a dummy layout
-                return NoneLayout(
-                    device=device,
-                    size=(),
-                )
+                return output
             else:
                 return MultiOutput(
                     FixedLayout(
