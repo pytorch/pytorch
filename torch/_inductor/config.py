@@ -846,9 +846,10 @@ class cpp:
     )
 
     # Use ffp-contract when compiling
-    enable_floating_point_contract_flag = (
-        os.environ.get("TORCHINDUCTOR_CPP_ENABLE_FLOATING_POINT_CONTRACT_FLAG", "0")
-        == "1"
+    # Options: "off" (default), "on", "fast"
+    # Per https://godbolt.org/z/bf4bvfc9r , clang/gcc has different behavior for "fast"
+    enable_floating_point_contract_flag = os.environ.get(
+        "TORCHINDUCTOR_CPP_ENABLE_FLOATING_POINT_CONTRACT_FLAG", "off"
     )
 
     # Disable the tiling select heuristic
@@ -1333,6 +1334,9 @@ class trace:
 
     log_autotuning_results: bool = False
 
+    # Save mapping info from inductor generated triton kernel to post_grad fx nodes
+    log_inductor_triton_kernel_to_post_grad_node_info: bool = True
+
 
 _save_config_ignore = [
     # workaround: "Can't pickle <function ...>"
@@ -1367,6 +1371,11 @@ class test_configs:
     max_mm_configs: Optional[int] = None
 
     runtime_triton_dtype_assert = False
+
+    # regex to control the set of considered autotuning
+    # choices (aka configs) by name and / or description
+    autotune_choice_name_regex: Optional[str] = None
+    autotune_choice_desc_regex: Optional[str] = None
 
 
 if TYPE_CHECKING:

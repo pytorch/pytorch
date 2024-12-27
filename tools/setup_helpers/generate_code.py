@@ -15,6 +15,7 @@ try:
 except ImportError:
     from yaml import SafeLoader as YamlLoader  # type: ignore[assignment, misc]
 
+
 NATIVE_FUNCTIONS_PATH = "aten/src/ATen/native/native_functions.yaml"
 TAGS_PATH = "aten/src/ATen/native/tags.yaml"
 
@@ -43,7 +44,7 @@ def generate_code(
     autograd_gen_dir = os.path.join(install_dir, "autograd", "generated")
     for d in (autograd_gen_dir, python_install_dir):
         os.makedirs(d, exist_ok=True)
-    autograd_dir = os.fspath(Path(__file__).parent.parent / "autograd")
+    autograd_dir = os.fspath(Path(__file__).absolute().parent.parent / "autograd")
 
     if subset == "pybindings" or not subset:
         gen_autograd_python(
@@ -110,8 +111,9 @@ def get_selector(
     operators_yaml_path: str | None,
 ) -> Any:
     # cwrap depends on pyyaml, so we can't import it earlier
-    root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    sys.path.insert(0, root)
+    REPO_ROOT = Path(__file__).absolute().parents[2]
+    sys.path.insert(0, str(REPO_ROOT))
+
     from torchgen.selective_build.selector import SelectiveBuilder
 
     assert not (
