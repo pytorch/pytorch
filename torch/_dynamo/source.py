@@ -7,7 +7,6 @@ from torch._guards import ChainedSource, GuardSource, Source
 
 from . import utils
 from .bytecode_transformation import create_call_function, create_instruction
-from .utils import enum_repr
 
 
 # It shouldn't be supported to construct an NNModuleVariable inside an FSDP module,
@@ -487,15 +486,11 @@ class GetItemSource(ChainedSource):
 
     def name(self):
         # Index can be of following types
-        # 1) enum.Enum
-        # 2) index is a slice - example 1:4
-        # 3) index is a constant - example string, integer
+        # 1) index is a slice - example 1:4
+        # 2) index is a constant - example string, integer
         assert not isinstance(self.index, Source)
         if self.index_is_slice:
             return f"{self.base.name()}[{self.unpack_slice()!r}]"
-        elif isinstance(self.index, enum.Enum):
-            # TODO (anijain2305) - This should probably be moved to DictGetItemSource
-            return f"{self.base.name()}[{enum_repr(self.index, self.guard_source().is_local())}]"
         else:
             return f"{self.base.name()}[{self.index!r}]"
 
