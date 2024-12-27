@@ -57,7 +57,7 @@ from torch.utils._ordered_set import OrderedSet
 from torch.utils._pytree import tree_map_only
 
 
-GPU_TYPES = ["cuda", "xpu"]
+GPU_TYPES = ["cuda", "mps", "xpu"]
 
 
 # defines here before import torch._dynamo is for avoiding circular import
