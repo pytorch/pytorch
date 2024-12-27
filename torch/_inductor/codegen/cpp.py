@@ -4809,6 +4809,14 @@ class CppScheduling(BaseScheduling):
         Codegen a CPP template, possibly with fused epilogues
         """
         assert not prologue_nodes
+
+        # Remove the MultiOutput Node
+        epilogue_nodes = [
+            epilogue_node
+            for epilogue_node in epilogue_nodes
+            if isinstance(epilogue_node, (SchedulerNode, FusedSchedulerNode))
+        ]
+
         counters["inductor"]["cpp_epilogue_fusion_counter"] += len(epilogue_nodes)
         assert self.is_cpp_template(
             template_node

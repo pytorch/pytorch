@@ -4434,6 +4434,17 @@ class CppTemplateBuffer(TemplateBuffer):
         super().__init__(layout, inputs, make_kernel_render)
         self.template = template
         self.choice = choice
+        self.outputs: Optional[List[Buffer]] = None
+
+    def get_layout(self) -> Layout:
+        if isinstance(self.layout, MultiOutputLayout):
+            assert isinstance(self.outputs, Iterable)
+            assert isinstance(self.outputs[0], Buffer)
+            layout = self.outputs[0].layout
+            assert isinstance(layout, Layout)
+            return layout
+        else:
+            return super().get_layout()
 
 
 @ir_dataclass(frozen=False)
@@ -6741,6 +6752,7 @@ class MultiOutput(ExternKernel):
         self.name = V.graph.register_buffer(self)
         V.graph.register_operation(self)
         self.indices = indices
+        self.is_fusable = False
 
     def get_unbacked_symbol_uses(self) -> OrderedSet[sympy.Symbol]:
         return self.inputs[0].get_unbacked_symbol_uses()
@@ -6755,6 +6767,9 @@ class MultiOutput(ExternKernel):
             if isinstance(inp, FallbackKernel)
             and len(inp.get_inputs_that_alias_output()) > 0
         ]
+
+    def can_fuse(self) -> bool:
+        return self.is_fusable
 
 
 # We just use a normal dataclass for MutableBox/TensorBox/StorageBox since

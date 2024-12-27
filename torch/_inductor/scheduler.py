@@ -1219,7 +1219,33 @@ class FusedSchedulerNode(BaseSchedulerNode):
     ) -> FusedSchedulerNode:
         assert node1.scheduler is node2.scheduler
         assert isinstance(node1, (SchedulerNode, FusedSchedulerNode))
-        assert isinstance(node2, (SchedulerNode, FusedSchedulerNode))
+        if node1.is_template():
+            if isinstance(node2, ExternKernelSchedulerNode):
+                # CPP Group GEMM Fuse with MultiOutput node
+                # * Node1 has memorydep of MultiOutput in reads
+                # * Node2 has StarDep of MultiOutput in writes
+                # Rewrite the StarDep to MemoryDep
+                assert isinstance(node2.node, MultiOutput)
+                assert len(node2.read_writes.writes) == 1
+                assert isinstance(next(iter(node2.read_writes.writes)), StarDep)
+                name = next(iter(node2.read_writes.writes)).name
+                template_nodes = [
+                    node for node in node1.get_nodes() if node.is_template()
+                ]
+                assert len(template_nodes) == 1
+                template_node = template_nodes[0]
+                assert len(template_node.read_writes.writes) == 1
+                write = next(iter(template_node.read_writes.writes))
+                assert isinstance(write, MemoryDep)
+                node2.read_writes.writes = OrderedSet(
+                    [
+                        MemoryDep(
+                            name, write.index, write.var_names, write.size, write.mode
+                        ),
+                    ]
+                )
+        else:
+            assert isinstance(node2, (SchedulerNode, FusedSchedulerNode))
         nodes = list(itertools.chain(node1.get_nodes(), node2.get_nodes()))
         return cls(node1.scheduler, nodes)
 
@@ -2754,8 +2780,14 @@ class Scheduler:
         for node1, node2 in self.get_possible_fusions(nodes):
             node1 = self.name_to_fused_node[node1.get_first_name()]
             node2 = self.name_to_fused_node[node2.get_first_name()]
-            if self.can_fuse(node1, node2) and not self.will_fusion_create_cycle(
-                node1, node2
+            if (
+                self.can_fuse(node1, node2)
+                and not self.will_fusion_create_cycle(node1, node2)
+            ) or (
+                node1.is_template()
+                and isinstance(node2.node, MultiOutput)
+                and node2.node.is_fusable
+                and node1.is_cpu()
             ):
                 if not self.speedup_by_fusion(node1, node2):
                     continue
@@ -2853,6 +2885,12 @@ class Scheduler:
                     ):
                         # foreach fusions and epilogue fusions are order dependent
                         possible_fusions.append((node2, node1))
+                    elif (
+                        node1.is_template()
+                        and isinstance(node2.node, MultiOutput)
+                        and node2.node.is_fusable
+                    ):
+                        possible_fusions.append((node1, node2))
 
         buffer_names_grouping = collections.defaultdict(list)
         for node in nodes:
@@ -3147,6 +3185,7 @@ class Scheduler:
         return (
             isinstance(node, (ExternKernelSchedulerNode, NopKernelSchedulerNode))
             and not node.is_template()
+            and not (isinstance(node.node, MultiOutput) and node.node.is_fusable)
         )
 
     def can_fuse(self, node1: BaseSchedulerNode, node2: BaseSchedulerNode) -> bool:
