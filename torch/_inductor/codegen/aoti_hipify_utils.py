@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import re
 
 import torch
@@ -15,7 +16,7 @@ def maybe_hipify_code_wrapper(source_codes: str, force_hipify: bool = False) -> 
     if torch.version.hip is None and not force_hipify:
         return source_codes
 
-    def c2_repl(m: re.Match[str]) -> object:
+    def c2_repl(m):
         return PYTORCH_MAP[m.group(0)]
 
     # We need to redefine RE_PYTORCH_PREPROCESSOR here since in hipify_torch,
@@ -27,5 +28,5 @@ def maybe_hipify_code_wrapper(source_codes: str, force_hipify: bool = False) -> 
     # we need to skip replacing "getStreamFromExternal" in "getStreamFromExternalMasqueradingAsCUDA"
     RE_PYTORCH_PREPROCESSOR = re.compile(rf"({PYTORCH_TRIE.export_to_regex()})(?=\W)")
 
-    source_codes = RE_PYTORCH_PREPROCESSOR.sub(c2_repl, source_codes)  # type: ignore[arg-type]
+    source_codes = RE_PYTORCH_PREPROCESSOR.sub(c2_repl, source_codes)
     return source_codes
