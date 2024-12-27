@@ -1,14 +1,13 @@
-# mypy: allow-untyped-defs
-# This is not a feature-complete compiler backend end
-# Just an early prototype that shows that one can compile
-# Easy models to Metal
-from typing import Optional
+# This is not a feature-complete compiler backend
+# Just an early prototype that shows that one can compile elementwise ops into a Metal shader
+from typing import Any, Optional
 
 import sympy
 
 import torch
 
 from ..ops_handler import StoreMode
+from ..scheduler import SchedulerNode
 from ..utils import get_kernel_metadata
 from ..virtualized import V
 from .common import CSEVariable, DeferredLine, IndentedBuffer, OpOverrides
@@ -31,55 +30,55 @@ DTYPE_TO_METAL = {
 class MetalOverrides(OpOverrides):
     @staticmethod
     def to_dtype(
-        x,
+        x: CSEVariable,
         dtype: torch.dtype,
         src_dtype: Optional[torch.dtype] = None,
-        use_compute_types=True,
-    ):
+        use_compute_types: bool = True,
+    ) -> str:
         return f"static_cast<{DTYPE_TO_METAL[dtype]}>({x})"
 
     @staticmethod
-    def where(a, b, c):
+    def where(a: CSEVariable, b: CSEVariable, c: CSEVariable) -> str:
         return f"{a} ? {b} : {c}"
 
     @staticmethod
-    def logical_or(a, b):
+    def logical_or(a: CSEVariable, b: CSEVariable) -> str:
         return f"{a} | {b}"
 
     @staticmethod
-    def logical_and(a, b):
+    def logical_and(a: CSEVariable, b: CSEVariable) -> str:
         return f"{a} & {b}"
 
     @staticmethod
-    def abs(x):
+    def abs(x: CSEVariable) -> str:
         return f"metal::abs({x})"
 
     @staticmethod
-    def sin(x):
+    def sin(x: CSEVariable) -> str:
         return f"metal::sin({x})"
 
     @staticmethod
-    def cos(x):
+    def cos(x: CSEVariable) -> str:
         return f"metal::cos({x})"
 
     @staticmethod
-    def tan(x):
+    def tan(x: CSEVariable) -> str:
         return f"metal::tan({x})"
 
     @staticmethod
-    def asin(x):
+    def asin(x: CSEVariable) -> str:
         return f"metal::asin({x})"
 
     @staticmethod
-    def acos(x):
+    def acos(x: CSEVariable) -> str:
         return f"metal::acos({x})"
 
     @staticmethod
-    def atan(x):
+    def atan(x: CSEVariable) -> str:
         return f"metal::atan({x})"
 
     @staticmethod
-    def sqrt(x):
+    def sqrt(x: CSEVariable) -> str:
         return f"metal::sqrt({x})"
 
 
@@ -91,7 +90,7 @@ class MetalKernel(SIMDKernel):
     def __init__(
         self,
         tiling: dict[str, sympy.Expr],
-        **kwargs,
+        **kwargs: Any,
     ) -> None:
         super().__init__(tiling, **kwargs)
         self.compute = self.body
@@ -101,7 +100,7 @@ class MetalKernel(SIMDKernel):
     def dtype_to_str(self, dtype: torch.dtype) -> str:
         return DTYPE_TO_METAL[dtype]
 
-    def load(self, name: str, index: sympy.Expr):
+    def load(self, name: str, index: sympy.Expr) -> CSEVariable:
         """Codegen a load from an InputBuffer"""
         var = self.args.input(name)
         index = self.prepare_indexing(index)
@@ -117,7 +116,7 @@ class MetalKernel(SIMDKernel):
         line = f"{var}[{index}] = static_cast<{dtype_str}>({value});"
         self.body.writeline(DeferredLine(name, line))
 
-    def codegen_kernel(self, name=None):
+    def codegen_kernel(self, name: Optional[str] = None) -> str:
         """Called at the end to generate a final kernel string"""
         code = IndentedBuffer()
         code.writeline('torch.mps._compile_shader("""')
@@ -139,16 +138,14 @@ class MetalKernel(SIMDKernel):
 
         return code.getvalue()
 
-    def call_kernel(self, name: str, node=None):
+    def call_kernel(self, name: str, node: Any = None) -> None:
         """Codegen a call to this kernel"""
         wrapper = V.graph.wrapper_code
-        args = list(self.args.output_buffers.keys()) + list(
-            self.args.input_buffers.keys()
-        )
+        args = [*self.args.output_buffers.keys(), *self.args.input_buffers.keys()]
         wrapper.generate_kernel_call(
             name,
             args,
-            gpu=False,  # TODO: Fix me
+            gpu=False,  # TODO: Fix me, MPS does not expose streams now
             triton=False,
         )
 
@@ -156,7 +153,9 @@ class MetalKernel(SIMDKernel):
 class MetalScheduling(SIMDScheduling):
     kernel_type = MetalKernel  # type: ignore[assignment]
 
-    def define_kernel(self, src_code, node_schedule, kernel):
+    def define_kernel(
+        self, src_code: str, node_schedule: list[SchedulerNode], kernel: MetalKernel
+    ) -> str:
         wrapper = V.graph.wrapper_code
         if src_code in wrapper.src_to_kernel:
             kernel_name = wrapper.src_to_kernel[src_code]
