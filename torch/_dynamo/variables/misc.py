@@ -17,7 +17,7 @@ import torch.utils._pytree as pytree
 from .. import config, variables
 from ..bytecode_transformation import create_call_function, create_instruction
 from ..create_parameter_op import do_not_convert_to_tracable_parameter
-from ..exc import unimplemented
+from ..exc import raise_observed_exception, unimplemented
 from ..guards import GuardBuilder, install_guard
 from ..mutation_guard import unpatched_nn_module_init
 from ..source import (
@@ -213,6 +213,27 @@ class SuperVariable(VariableTracker):
             and inner_fn in self.objvar._dict_methods
         ):
             return self.objvar._dict_vt.call_method(tx, name, args, kwargs)
+        elif inner_fn is object.__getattribute__:
+            # object.__getattribute__ has no side-effects. We can directly call
+            # __getattribute__ to access the attribute.
+            attr_name = args[0].value
+            if tx.output.side_effects.has_pending_mutation_of_attr(
+                self.objvar, attr_name
+            ):
+                result = tx.output.side_effects.load_attr(
+                    self.objvar, attr_name, deleted_ok=True
+                )
+                if isinstance(result, variables.DeletedVariable):
+                    raise_observed_exception(AttributeError, tx)
+                return result
+
+            try:
+                attr_value = self.objvar.value.__getattribute__(attr_name)
+            except AttributeError:
+                raise_observed_exception(AttributeError, tx)
+
+            source = self.source and AttrSource(self.source, attr_name)
+            return VariableTracker.build(tx, attr_value, source)
 
         unimplemented(f"non-function or method super: {inner_fn}")
 
