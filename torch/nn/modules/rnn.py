@@ -103,22 +103,26 @@ class RNNBase(Module):
         self.num_layers = num_layers
         self.bias = bias
         self.batch_first = batch_first
-        self.dropout = float(dropout)
+        self.dropout = dropout
         self.bidirectional = bidirectional
         self.proj_size = proj_size
         self._flat_weight_refs: List[Optional[weakref.ReferenceType[Parameter]]] = []
         num_directions = 2 if bidirectional else 1
 
         if (
-            not isinstance(dropout, numbers.Number)
+            not isinstance(dropout, int)
+            or not isinstance(dropout, float)
             or not 0 <= dropout <= 1
             or isinstance(dropout, bool)
         ):
             raise ValueError(
-                "dropout should be a number in range [0, 1] "
+                "dropout must be an int or float in range [0, 1] "
                 "representing the probability of an element being "
                 "zeroed"
             )
+
+        self.dropout = float(dropout)
+
         if dropout > 0 and num_layers == 1:
             warnings.warn(
                 "dropout option adds dropout after all but last "
