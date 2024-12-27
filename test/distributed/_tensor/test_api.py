@@ -34,6 +34,9 @@ class MyModel(nn.Module):
             m.reset_parameters()
 
 
+c10d_ops = torch.ops.c10d
+
+
 class DTensorAPITest(DTensorTestBase):
     @property
     def world_size(self) -> int:
@@ -42,7 +45,7 @@ class DTensorAPITest(DTensorTestBase):
         return 4
 
     @with_comms
-    def test_distribute_tensor(self):
+    def test_distribute_tensor_rank(self):
         comm_mode = CommDebugMode()
 
         device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
@@ -56,7 +59,7 @@ class DTensorAPITest(DTensorTestBase):
                 dist_tensor = distribute_tensor(
                     tensor_to_shard, device_mesh, shard_spec
                 )
-                self.assertEqual(comm_mode.get_total_counts(), 1)
+                self.assertEqual(comm_mode.get_comm_counts()[c10d_ops.scatter_], 1)
             self.assertEqual(dist_tensor.size(), torch.Size([3 * self.world_size, 3]))
             local_tensor = dist_tensor.to_local()
             self.assertEqual(local_tensor.size(), torch.Size([3, 3]))
@@ -71,15 +74,22 @@ class DTensorAPITest(DTensorTestBase):
         self.assertEqual(dist_tensor.placements[0].dim, 1)
 
         # test src_data_rank = None, make sure it does not have communication
-        tensor_to_distribute = torch.randn(3 * self.world_size, 3)
-
         placement_combs = [[Shard(0)], [Shard(1)], [Replicate()]]
 
         with comm_mode:
             for placement in placement_combs:
+                if isinstance(placement[0], Shard):
+                    shard_dim = placement[0].dim
+                    shape = [3, 3]
+                    shape[shard_dim] *= self.world_size
+                    tensor_to_distribute = torch.randn(*shape)
+                else:
+                    tensor_to_distribute = torch.randn(3, 3)
+
                 dtensor = distribute_tensor(
                     tensor_to_distribute, device_mesh, placement, src_data_rank=None
                 )
+                self.assertEqual(dtensor.to_local().shape, (3, 3))
         self.assertEqual(comm_mode.get_total_counts(), 0)
 
     @with_comms
