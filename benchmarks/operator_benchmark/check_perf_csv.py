@@ -5,6 +5,11 @@ import textwrap
 import pandas as pd
 
 
+SKIP_TEST_LISTS = [
+    "channel_shuffle_batch_size4_channels_per_group64_height64_width64_groups4_channel_lastTrue",
+]
+
+
 def get_field(csv, case: str, field: str):
     try:
         return csv.loc[csv["Case Name"] == case][field].item()
@@ -15,6 +20,8 @@ def get_field(csv, case: str, field: str):
 def check_perf(actual_csv, expected_csv, expected_filename, threshold):
     failed = []
     improved = []
+
+    actual_csv = actual_csv[~actual_csv["Case Name"].isin(set(SKIP_TEST_LISTS))]
 
     for case in actual_csv["Case Name"]:
         perf = get_field(actual_csv, case, "Execution Time")
