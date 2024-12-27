@@ -50,6 +50,10 @@ class MPSBasicTests(TestCase):
     def test_acos(self):
         self.common(lambda a: a.acos(), (torch.rand(1024),))
 
+    @parametrize("dtype", MPS_DTYPES)
+    def test_cast(self, dtype):
+        self.common(lambda a: a.to(dtype), (torch.rand(1024),))
+
 
 instantiate_parametrized_tests(MPSBasicTests)
 

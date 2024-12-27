@@ -28,6 +28,15 @@ DTYPE_TO_METAL = {
 
 class MetalOverrides(OpOverrides):
     @staticmethod
+    def to_dtype(
+        x,
+        dtype: torch.dtype,
+        src_dtype: torch.dtype | None = None,
+        use_compute_types=True,
+    ):
+        return f"static_cast<{DTYPE_TO_METAL[dtype]}>({x})"
+
+    @staticmethod
     def logical_or(a, b):
         return f"{a} | {b}"
 
