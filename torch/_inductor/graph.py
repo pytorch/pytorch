@@ -158,6 +158,9 @@ def supported_dtype_of_cpp_wrapper(dtype: torch.dtype, device_type: str) -> bool
         supported_dtype.add(torch.float8_e5m2)
         supported_dtype.add(torch.float8_e4m3fnuz)
         supported_dtype.add(torch.float8_e5m2fnuz)
+    if device_type == "cpu":
+        supported_dtype.add(torch.float8_e4m3fn)
+        supported_dtype.add(torch.float8_e5m2)
 
     return dtype in supported_dtype
 
