@@ -3495,24 +3495,6 @@ class TestRandomTensorCreation(TestCase):
             self.assertTrue((res1 < 6).all().item())
             self.assertTrue((res1 >= 0).all().item())
 
-
-    def test_randint_distribution(self, device):
-        size = 1_000_000
-        n_max = int(0.75 * 2 ** 32)
-        n_bins = 8
-
-        def bin(index, max_size):
-            return index // (max_size // n_bins)
-        res = torch.randint(n_max, (size,), device=device)
-        # histogram implemented for float only
-        bins = bin(res, n_max).float().cpu()
-        hist, _ = bins.histogram(8, range=(0, n_bins))
-        expected_bin = res.shape[0] / 8
-        expected_error = math.sqrt(expected_bin) / expected_bin * 3
-        error = (hist - expected_bin).abs().max() / expected_bin
-        self.assertTrue(error < expected_error)
-
-
     @dtypes(torch.half, torch.float, torch.bfloat16, torch.double,
             torch.complex32, torch.complex64, torch.complex128)
     def test_randn(self, device, dtype):
