@@ -273,7 +273,9 @@ class _TestONNXRuntime(pytorch_test_common.ExportTestCase):
             == pytorch_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM
         ):
             with _dynamo_config.patch(do_not_emit_runtime_asserts=True):
-                ref_model = torch.export.export(ref_model, args=ref_input_args)
+                ref_model = torch.export.export(
+                    ref_model, args=ref_input_args, strict=True
+                )
             if (
                 self.dynamic_shapes
             ):  # TODO: Support dynamic shapes for torch.export.ExportedProgram
