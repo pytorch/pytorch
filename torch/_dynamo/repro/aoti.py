@@ -4,11 +4,12 @@ import functools
 import io
 import logging
 import os
+import re
 import shutil
 import sys
 import textwrap
 from importlib import import_module
-from typing import Any, Dict, Optional, Union
+from typing import Any, Dict, Optional, Tuple, Union
 
 import torch
 from torch._dynamo.debug_utils import (
@@ -19,12 +20,11 @@ from torch._dynamo.debug_utils import (
     helper_for_dump_minify,
     InputReader,
     minifier_dir,
+    NNModuleToString,
     NopInputReader,
 )
 from torch.export import ExportedProgram
 from torch.hub import tqdm
-
-from .after_aot import generate_compiler_repro_string
 
 
 log = logging.getLogger(__name__)
@@ -32,6 +32,14 @@ log = logging.getLogger(__name__)
 
 inductor_config = import_module("torch._inductor.config")
 use_buck = inductor_config.is_fbcode()
+
+
+class AOTIMinifierError(Exception):
+    def __init__(self, original_exception):
+        additional_message = "This error is caused by a bug in the AOTI minifier, please report a bug to PyTorch"
+        full_message = f"{additional_message}: {str(original_exception)}"
+        super().__init__(full_message)
+        self.original_exception = original_exception
 
 
 def dump_to_minify(
@@ -45,32 +53,78 @@ def dump_to_minify(
         os.makedirs(subdir, exist_ok=True)
     save_graph_repro_ep(
         out,
-        exported_program,
         compiler_name,
+        exported_program=exported_program,
         save_dir=subdir,
         command="minify",
-        options=options,
+        config_patches=options,
     )
     return helper_for_dump_minify(out.getvalue())
 
 
+def get_module_string(gm):
+    def _convert_to_comment(s_):
+        s = s_.split("\n")
+        if len(s) == 1:
+            return "# " + s_
+        first = s.pop(0)
+        for i in range(len(s)):
+            line = s[i]
+            if line.strip() != "":
+                s[i] = "# " + line
+            else:
+                s[i] = ""
+        s = "\n".join(s)
+        s = first + "\n" + s
+        return s
+
+    module_string = NNModuleToString.convert(gm)
+    return _convert_to_comment(module_string)
+
+
 def save_graph_repro_ep(
     fd,
-    exported_program: ExportedProgram,
     compiler_name,
     *,
-    options: Optional[Dict[str, str]] = None,
+    exported_program: Optional[ExportedProgram] = None,
+    gm: Optional[torch.nn.Module] = None,
+    args: Optional[Tuple[Any]] = None,
+    config_patches: Optional[Dict[str, str]] = None,
     stable_output=False,
     save_dir=None,
     command="run",
     accuracy=None,
     check_str=None,
+    module_in_comment=False,
+    strict=False,
 ):
+    # Save graph for reproducing the error.
+    # Either exported_program or gm will be saved, depending on which one is defined.
+    # Only one of exported_program and gm should be defined.
+
+    if exported_program is None and gm is None:
+        raise AOTIMinifierError("One of exported_program and gm must be defined")
+    if exported_program is not None and gm is not None:
+        raise AOTIMinifierError("Only one of exported_program and gm can be defined")
+    if gm is not None and args is None:
+        raise AOTIMinifierError("If gm is defined, args should also be defined")
+
+    if exported_program is None:
+        assert gm is not None
+        assert args is not None
+        exported_program = torch.export.export(gm, args, strict=strict)
+    elif gm is None:
+        gm = exported_program.module()
+
+    # save a graph preview using gm
+    module_string = get_module_string(gm)
+    fd.write(module_string)
+
     # save a graph repro using exported_program
     fd.write(
         generate_compiler_repro_exported_program(
             exported_program,
-            options=options,
+            options=config_patches,
             stable_output=stable_output,
             save_dir=save_dir,
         )
@@ -86,53 +140,14 @@ def save_graph_repro_ep(
     )
 
 
-def save_graph_repro_string(
-    fd,
+def dump_compiler_graph_state(
     gm,
     args,
     compiler_name,
     *,
     config_patches=None,
-    stable_output=False,
-    save_dir=None,
-    command="run",
     accuracy=None,
-    tracing_mode=None,
-    check_str=None,
-):
-    # save a graph repro by dumping the `gm` as a string
-    if any(
-        isinstance(arg, torch.fx.experimental._backward_state.BackwardState)
-        for arg in args
-    ):
-        fd.write(
-            "Repro is not generated due to existence of BackwardState in graph input"
-        )
-        return
-    fd.write(
-        generate_compiler_repro_string(
-            gm,
-            args,
-            stable_output=stable_output,
-            save_dir=save_dir,
-        )
-    )
-    if accuracy is None:
-        accuracy = "_accuracy" in compiler_name
-    fd.write("if __name__ == '__main__':\n")
-    fd.write("    from torch._dynamo.repro.aoti import run_repro, repro_load_args\n")
-    fd.write(
-        f"    config_patches={config_patches}\n"
-        f"    with torch.no_grad():\n"
-        f"        args = repro_load_args(load_args, save_dir={save_dir!r})\n"
-        f"        exported_program = torch.export.export(mod, args)\n"
-        f"        run_repro(exported_program, config_patches=config_patches, accuracy={accuracy!r}, command={command!r}, "
-        f"save_dir={save_dir!r}, check_str={check_str!r})\n"
-    )
-
-
-def dump_compiler_graph_state(
-    gm, args, compiler_name, *, config_patches=None, accuracy=None
+    strict=False,
 ):
     subdir = os.path.join(minifier_dir(), "checkpoints")
     if not os.path.exists(subdir):
@@ -141,16 +156,17 @@ def dump_compiler_graph_state(
     log.warning(
         "Writing checkpoint with %s nodes to %s", len(gm.graph.nodes), file_name
     )
-    # exported_program = torch.export.export(gm, tuple(args))
     with open(file_name, "w") as fd:
-        save_graph_repro_string(
+        save_graph_repro_ep(
             fd,
-            gm,
-            args,
             compiler_name,
+            gm=gm,
+            args=tuple(args),
             config_patches=config_patches,
             save_dir=subdir,
             accuracy=accuracy,
+            module_in_comment=True,
+            strict=strict,
         )
     curdir = os.getcwd()
     repro_path = os.path.join(curdir, "repro.py")
@@ -246,12 +262,12 @@ def repro_get_args(options, exported_program, config_patches):
 def repro_run(options, exported_program, config_patches):
     from torch._inductor import _aoti_compile_and_package_inner, aoti_load_package
 
-    mod, args, kwargs = repro_common(options, exported_program)
+    gm, args, kwargs = repro_common(options, exported_program)
 
     from torch.cuda import synchronize
 
     package_path = _aoti_compile_and_package_inner(
-        mod,
+        gm,
         args,
         kwargs,
         load_and_run=False,
@@ -267,18 +283,63 @@ def repro_run(options, exported_program, config_patches):
             need_sync = True
             break
 
-    compiled(*args)
+    compiled(*args, **kwargs)
 
     if need_sync:
         synchronize()  # ensure segfaults are surfaced
 
 
+def export_for_aoti_minifier(
+    gm, tuple_inputs, strict=False, skip_export_error=True
+) -> Optional[torch.nn.Module]:
+    # Some graphs cannot be used for AOTI/export (illegal graphs), these should be
+    # considered as graphs that don't fail in the minifier, so the minifier keeps searching.
+    # In these case, we return None. Otherwise, we return the exported graph module.
+    # This won't affect the minifier result because the minifier is only responsible for catching
+    # errors in AOTI, not export.
+    #
+    # Please add to this list of illegal graphs if you change the implementation here.
+    # - graph output is not allowed by export
+    #
+    # If skip_export_error=True, then the errors in export will not be raised, and the minifier
+    # will keep exploring and ignore this graph.
+    from torch._dynamo.exc import UserError, UserErrorType
+
+    try:
+        ep = torch.export.export(gm, tuple_inputs, strict=strict)
+        gm = ep.module()
+        return gm
+    except Exception as e:
+        if skip_export_error:
+            return None
+        if isinstance(e, UserError) and e.error_type == UserErrorType.INVALID_OUTPUT:
+            # graph output is not allowed by export when strict=True
+            return None
+        if isinstance(e, RuntimeError):
+            # graph output is not allowed by export when strict=False
+            pattern = r"Found .* in output, which is not a known type\."
+            if re.search(pattern, str(e)) is not None:
+                return None
+        raise AOTIMinifierError(e) from e
+    # we should never reach here
+    return None
+
+
 def repro_minify(options, exported_program, config_patches):
     from functorch.compile import minifier
     from torch._inductor import _aoti_compile_and_package_inner
+    from torch._inductor.compile_fx import _aoti_flatten_inputs
 
     mod, args, kwargs = repro_common(options, exported_program)
+
+    # update serialized_in_spec and serialized_out_spec
+    flat_example_inputs, inductor_configs = _aoti_flatten_inputs(
+        mod, args, kwargs, options=config_patches
+    )
     compiler_name = "aot_inductor"
+    assert options.minifier_export_mode in ["dynamo", "python"]
+    strict = options.minifier_export_mode == "dynamo"
+    skip_export_error = options.skip_export_error
 
     from torch.cuda import synchronize
 
@@ -290,17 +351,25 @@ def repro_minify(options, exported_program, config_patches):
             break
 
     def module_fails(gm, flat_example_inputs, check_str=None):
-        # we have to export first so the in_spec and out_spec are populated
+        # Need to export first so the in_spec and out_spec are populated
         tuple_inputs = tuple(flat_example_inputs)
-        ep = torch.export.export(gm, tuple_inputs)
-        gm = ep.module()
+        gm = export_for_aoti_minifier(
+            gm, tuple_inputs, strict=strict, skip_export_error=skip_export_error
+        )
+
+        # Some graphs cannot be used for AOTI/export (illegal graphs), these should be
+        # considered as graphs that don't fail in the minifier, so the minifier keeps searching.
+        if gm is None:
+            return False
+
+        assert isinstance(gm, torch.fx.GraphModule)
+
         try:
             _aoti_compile_and_package_inner(
                 gm,
                 tuple_inputs,
-                kwargs,
                 load_and_run=True,
-                inductor_configs=config_patches,
+                inductor_configs=inductor_configs,
             )
             if need_sync:
                 synchronize()  # ensure segfaults are surfaced
@@ -312,12 +381,13 @@ def repro_minify(options, exported_program, config_patches):
 
     minifier(
         mod,
-        args,
+        flat_example_inputs,
         module_fails=functools.partial(module_fails, check_str=options.check_str),
         dump_state=functools.partial(
             dump_compiler_graph_state,
             compiler_name=compiler_name,
             config_patches=config_patches,
+            strict=strict,
         ),
         save_dir=options.save_dir,
         offload_to_disk=options.offload_to_disk,
@@ -329,8 +399,6 @@ def repro_minify(options, exported_program, config_patches):
 
 def run_repro(
     exported_program,
-    # load_args,
-    # kwargs: Dict[str, Any],
     *,
     config_patches: Optional[Dict[str, str]] = None,
     command="run",
@@ -338,6 +406,8 @@ def run_repro(
     save_dir=None,
     tracing_mode=None,
     check_str=None,
+    minifier_export_mode="python",
+    skip_export_error=True,
     **more_kwargs,
 ):
     for k in more_kwargs:
@@ -426,6 +496,21 @@ default settings on this script:
         type=str,
         default=check_str,
         help="require minified program to fail with error containing this string",
+    )
+    parser_minify.add_argument(
+        "--minifier-export-mode",
+        type=str,
+        default=minifier_export_mode,
+        help=(
+            "The export mode used in minifier, either dynamo or python."
+            "`dynamo` corresponds to strict=True, and `python` corresponds to strict=False."
+        ),
+    )
+    parser_minify.add_argument(
+        "--skip-export-error",
+        type=bool,
+        default=skip_export_error,
+        help="Skip intermediate graphs that cannot be exported.",
     )
 
     # Run the repro in the context of minification, inverting exit code meaning

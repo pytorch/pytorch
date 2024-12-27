@@ -142,7 +142,9 @@ class DistributedPatternTests(TestCase):
         fn(x0, obj1).sum().backward()
         fn(x1, obj2).sum().backward()
 
-        with compiled_autograd.enable(functools.partial(torch.compile, fullgraph=True)):
+        with compiled_autograd._enable(
+            functools.partial(torch.compile, fullgraph=True)
+        ):
             opt(x2, obj1).sum().backward()
             opt(x3, obj2).sum().backward()
 
@@ -175,7 +177,9 @@ class DistributedPatternTests(TestCase):
         fn(x0, obj1).sum().backward()
         fn(x1, obj2).sum().backward()
 
-        with compiled_autograd.enable(functools.partial(torch.compile, fullgraph=True)):
+        with compiled_autograd._enable(
+            functools.partial(torch.compile, fullgraph=True)
+        ):
             opt(x2, obj1).sum().backward()
             opt(x3, obj2).sum().backward()
 
@@ -319,7 +323,7 @@ class DistributedPatternTests(TestCase):
         m2, inp2 = init_module_bw_hooks(False)
         fw_cnt = CompileCounter()
         bw_cnt = CompileCounter()
-        with compiled_autograd.enable(torch.compile(backend=bw_cnt, fullgraph=True)):
+        with compiled_autograd._enable(torch.compile(backend=bw_cnt, fullgraph=True)):
             m2 = torch.compile(m2, backend=fw_cnt, fullgraph=True)
             out2 = steps(m2, inp2)
 
@@ -341,7 +345,7 @@ class DistributedPatternTests(TestCase):
 
         m2, inp2 = init_module_bw_hooks(True)
         m2 = torch.compile(m2, backend="aot_eager", fullgraph=True)
-        with compiled_autograd.enable(lambda gm: gm):
+        with compiled_autograd._enable(lambda gm: gm):
             out2 = steps(m2, inp2)
 
         self.assertEqual(m1.hook_count_pre, m2.hook_count_pre)
@@ -357,7 +361,7 @@ class DistributedPatternTests(TestCase):
 
         m2, inp2 = init_module_bw_hooks(False)
         m2 = torch.compile(m2, fullgraph=True)
-        with compiled_autograd.enable(torch.compile(fullgraph=True)):
+        with compiled_autograd._enable(torch.compile(fullgraph=True)):
             out2 = steps(m2, inp2)
 
         self.assertEqual(m1.hook_count_pre, m2.hook_count_pre)
@@ -374,7 +378,7 @@ class DistributedPatternTests(TestCase):
 
         a2, inp2 = init_module_bw_hooks(False)
         b2, _ = init_module_bw_hooks(False)
-        with compiled_autograd.enable(torch.compile(fullgraph=True)):
+        with compiled_autograd._enable(torch.compile(fullgraph=True)):
             out2 = steps(
                 torch.compile(torch.nn.Sequential(a2, b2), fullgraph=True), inp2
             )
@@ -466,7 +470,7 @@ class DistributedPatternTests(TestCase):
         m2, inp2 = init_fake_distributed()
         m2 = torch.compile(m2, backend="aot_eager", fullgraph=True)
         bw_cnt = CompileCounter()
-        with compiled_autograd.enable(torch.compile(backend=bw_cnt, fullgraph=True)):
+        with compiled_autograd._enable(torch.compile(backend=bw_cnt, fullgraph=True)):
             out2 = steps(m2, inp2)
 
         self._assert_same_grad(m1.weight, m2.weight)
@@ -485,7 +489,7 @@ class DistributedPatternTests(TestCase):
 
         m2, inp2 = init_fake_distributed(GPU_TYPE)
         m2 = torch.compile(m2, fullgraph=True)
-        with compiled_autograd.enable(torch.compile(fullgraph=True)):
+        with compiled_autograd._enable(torch.compile(fullgraph=True)):
             out2 = steps(m2, inp2)
 
         self._assert_same_grad(m1.weight, m2.weight)

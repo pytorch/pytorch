@@ -91,7 +91,7 @@ class Interpreter:
         if graph is not None:
             self.graph = graph
         else:
-            self.graph = self.module.graph
+            self.graph = self.module.graph  # type: ignore[assignment]
         self.env: Dict[Node, Any] = {}
         self.name = "Interpreter"
         self.garbage_collect_values = garbage_collect_values
@@ -204,7 +204,9 @@ class Interpreter:
 
     @contextmanager
     def _set_current_node(self, node):
-        with fx_traceback.set_current_meta(node):
+        with fx_traceback.set_current_meta(
+            node, f"Interpreter_{self.__class__.__name__}"
+        ):
             yield
 
     @compatibility(is_backward_compatible=True)
