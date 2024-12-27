@@ -342,7 +342,7 @@ class TestDraftExport(TestCase):
         inputs = (torch.randn(3, 3),)
         with self.assertRaises(RuntimeError):
             with torch._functorch.config.patch(fake_tensor_propagate_real_tensors=True):
-                export(mod, inputs)
+                export(mod, inputs, strict=True)
 
         ep, report = draft_export(mod, inputs)
         for ep_out, eager_out in zip(ep.module()(*inputs), mod(*inputs)):
@@ -384,7 +384,7 @@ class TestDraftExport(TestCase):
             "Real tensor propagation found an aliasing mismatch",
         ):
             with torch._functorch.config.patch(fake_tensor_propagate_real_tensors=True):
-                export(mod, inputs)
+                export(mod, inputs, strict=True)
 
         ep, report = draft_export(mod, inputs)
         for ep_out, eager_out in zip(

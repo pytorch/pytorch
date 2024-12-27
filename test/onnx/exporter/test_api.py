@@ -149,6 +149,7 @@ class TestExportAPIDynamo(common_utils.TestCase):
                     2: torch.export.Dim("customb_dim_2"),
                 },
             },
+            strict=True,
         )
 
         self.assert_export(exported_program)

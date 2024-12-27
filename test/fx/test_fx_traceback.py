@@ -92,10 +92,7 @@ class TestFXNodeSource(TestCase):
 
         model = Model()
         example_inputs = (torch.randn(8, 10),)
-        ep = torch.export.export(
-            model,
-            example_inputs,
-        )
+        ep = torch.export.export(model, example_inputs, strict=True)
         gm = ep.module()
         provenance = get_graph_provenance_json(gm.graph)
         provenance = json.loads(provenance)

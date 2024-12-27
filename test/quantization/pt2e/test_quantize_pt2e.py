@@ -1460,7 +1460,7 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
 
         with TemporaryFileName() as fname:
             # serialization
-            quantized_ep = torch.export.export(m, example_inputs)
+            quantized_ep = torch.export.export(m, example_inputs, strict=True)
             torch.export.save(quantized_ep, fname)
             # deserialization
             loaded_ep = torch.export.load(fname)
