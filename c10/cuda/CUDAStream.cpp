@@ -325,7 +325,7 @@ CUDAStream getStreamFromPool(const int priority, DeviceIndex device_index) {
   c10::call_once(
       device_flags[device_index], initDeviceStreamState, device_index);
 #endif
-  auto pri_idx = std::max(std::min(-priority, max_stream_priorities - 1), 0);
+  auto pri_idx = std::clamp(-priority, 0, max_stream_priorities - 1);
   const auto idx = get_idx(priority_counters[pri_idx][device_index]);
   StreamIdType id_type = StreamIdType(pri_idx + 1);
   return CUDAStreamForId(device_index, makeStreamId(id_type, idx));
