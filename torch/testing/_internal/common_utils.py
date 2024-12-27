@@ -99,7 +99,6 @@ from torch.testing._internal.common_dtype import get_all_dtypes
 from torch.utils._import_utils import _check_module_exists
 import torch.utils._pytree as pytree
 from torch.utils import cpp_extension
-from torch._utils import GPU_TYPES, get_gpu_type
 try:
     import pytest
     has_pytest = True
@@ -5567,16 +5566,3 @@ def scoped_load_inline(func):
         return func(*args, load_inline=load_inline, **kwargs)
 
     return wrapper
-
-CUDA_AVAIL = torch.cuda.is_available()
-
-XPU_AVAIL = torch.xpu.is_available()
-
-GPU_AVAIL = CUDA_AVAIL or XPU_AVAIL
-
-GPU_TYPE = get_gpu_type()
-
-MULTIGPU_AVAIL = any(
-    getattr(torch, gpu).is_available() and getattr(torch, gpu).device_count() >= 2
-    for gpu in GPU_TYPES
-)

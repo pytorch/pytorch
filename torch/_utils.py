@@ -1054,15 +1054,3 @@ NAME_MAPPING = {
     ("exceptions", "StandardError"): ("builtins", "Exception"),
     ("UserDict", "UserDict"): ("collections", "UserDict"),
 }
-
-GPU_TYPES = ["cuda", "mps", "xpu"]
-
-
-# defines here before import torch._dynamo is for avoiding circular import
-# when get_gpu_type is imported from dynamo
-@functools.lru_cache(None)
-def get_gpu_type():
-    avail_gpus = [x for x in GPU_TYPES if getattr(torch, x).is_available()]
-    assert len(avail_gpus) <= 1
-    gpu_type = "cuda" if len(avail_gpus) == 0 else avail_gpus.pop()
-    return gpu_type
