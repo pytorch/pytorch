@@ -86,6 +86,18 @@ def _quantize_rowwise(x: Tensor, float8_dtype: torch.dtype):
     inverse_scale = scale.reciprocal()
     return x_fp8, inverse_scale
 
+def _fix_fp8_dtype_for_hip(dtype, device):
+    if torch.version.hip and device == "cuda":
+        # HIP uses different float8 dtypes only on GPU
+        if isinstance(dtype, tuple):
+            return tuple(map(lambda x: _fix_fp8_dtype_for_hip(x, device), dtype))
+        if isinstance(dtype, list):
+            return list(map(lambda x: _fix_fp8_dtype_for_hip(x, device), dtype))   
+        if dtype == torch.float8_e4m3fn:
+            return torch.float8_e4m3fnuz
+        elif dtype == torch.float8_e5m2:
+            return torch.float8_e5m2fnuz
+    return dtype
 
 @instantiate_parametrized_tests
 class TestFP8Types(TestCase):
@@ -159,18 +171,15 @@ class TestFP8Types(TestCase):
 
     @parametrize("dtype", (torch.float16, torch.bfloat16, torch.float))
     @parametrize("shape", ("15,3,13", "4,2048,4096"))
-    @parametrize(
-        "dst_types",
-        [(torch.float8_e4m3fn, torch.float8_e5m2)]
-        if torch.version.hip is None
-        else [(torch.float8_e4m3fnuz, torch.float8_e5m2fnuz)],
-    )
+    @parametrize("dst_types", [(torch.float8_e4m3fn, torch.float8_e5m2)])
     @parametrize("device", ("cuda", "cpu"))
     def test_valid_cast(
         self, dtype: torch.dtype, shape: str, dst_types: tuple, device: torch.device
     ):
         if device == "cuda" and not PLATFORM_SUPPORTS_FP8:
             raise unittest.SkipTest(f8_msg)
+        
+        dst_types = _fix_fp8_dtype_for_hip(dst_types, device)
         e4m3, e5m2 = dst_types
 
         def fp8_cast(x):
@@ -211,12 +220,7 @@ class TestFP8Types(TestCase):
             compiled_fp8_cast(x, torch.float8_e4m3fn)
 
     @parametrize("src_dtype", (torch.float16, torch.bfloat16, torch.float))
-    @parametrize(
-        "dst_dtype",
-        (torch.float8_e4m3fn, torch.float8_e5m2)
-        if torch.version.hip is None
-        else (torch.float8_e4m3fnuz, torch.float8_e5m2fnuz),
-    )
+    @parametrize("dst_dtype", (torch.float8_e4m3fn, torch.float8_e5m2))
     @parametrize("shape", ("16,16,16", "4,2048,4096"))
     @parametrize("device", ("cuda", "cpu"))
     def test_to_fp8_saturated(
@@ -228,6 +232,8 @@ class TestFP8Types(TestCase):
     ):
         if device == "cuda" and not PLATFORM_SUPPORTS_FP8:
             raise unittest.SkipTest(f8_msg)
+        
+        dst_dtype = _fix_fp8_dtype_for_hip(device)
 
         def fp8_saturated(x, dtype):
             return _to_fp8_saturated(x, dtype)
@@ -276,12 +282,7 @@ class TestFP8Types(TestCase):
 
         torch.testing.assert_close(y_compiled.half(), y.half(), rtol=1e-2, atol=1e-2)
 
-    @parametrize(
-        "float8_dtype",
-        (torch.float8_e4m3fn, torch.float8_e5m2)
-        if torch.version.hip is None
-        else (torch.float8_e4m3fnuz, torch.float8_e5m2fnuz),
-    )
+    @parametrize("float8_dtype", (torch.float8_e4m3fn, torch.float8_e5m2))
     @parametrize("shape", ("1,1,15", "1,10,15", "1,10,512", "1,10,4096", "4,2048,4096"))
     @parametrize("device", ("cuda", "cpu"))
     def test_amax_along_with_fp8_quant(
@@ -289,6 +290,9 @@ class TestFP8Types(TestCase):
     ):
         if device == "cuda" and not PLATFORM_SUPPORTS_FP8:
             raise unittest.SkipTest(f8_msg)
+        
+        float8_dtype = _fix_fp8_dtype_for_hip(float8_dtype, device)
+
         shape = [int(dim) for dim in shape.split(",")]
         batch_size, sequence_length, hidden_size = shape
 
