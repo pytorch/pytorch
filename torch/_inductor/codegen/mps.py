@@ -55,11 +55,11 @@ class MetalOverrides(OpOverrides):
 
     @staticmethod
     def sin(x: CSEVariable) -> str:
-        return f"metal::sin({x})"
+        return f"metal::precise::sin({x})"
 
     @staticmethod
     def cos(x: CSEVariable) -> str:
-        return f"metal::cos({x})"
+        return f"metal::precise::cos({x})"
 
     @staticmethod
     def tan(x: CSEVariable) -> str:
