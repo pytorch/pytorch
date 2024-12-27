@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 import functools
+from collections import deque
 from typing import Dict, Tuple
 
 import torch
@@ -8,6 +9,7 @@ from torch._ops import OpOverload, OpOverloadPacket
 from torch.utils._ordered_set import OrderedSet
 
 from ..pattern_matcher import fwd_only, register_replacement
+from ..utils import partialize_and_update_signature
 
 
 aten = torch.ops.aten
@@ -68,6 +70,71 @@ def _misc_patterns_init():
         [post_grad_patterns, joint_graph_patterns],
         scalar_workaround={"slice_shape": 42},
     )
+
+    # Float8 training patterns
+    E4M3_MAX_POS = torch.finfo(torch.float8_e4m3fn).max
+    E5M2_MAX_POS = torch.finfo(torch.float8_e5m2).max
+
+    def amax_with_scaling_pattern(tensor_x_inp, scale_x, IS_E5M2):
+        tensor_x = tensor_x_inp.to(torch.float32) * scale_x
+        if IS_E5M2:
+            tensor_x = tensor_x.clamp(min=-1 * E5M2_MAX_POS, max=E5M2_MAX_POS)
+            tensor_x = tensor_x.to(torch.float8_e5m2)
+        else:
+            tensor_x = tensor_x.clamp(min=-1 * E4M3_MAX_POS, max=E4M3_MAX_POS)
+            tensor_x = tensor_x.to(torch.float8_e4m3fn)
+        amax = torch.max(torch.abs(tensor_x_inp))
+        return (tensor_x, amax)
+
+    def amax_with_scaling_tiled_replacement(tensor_x_inp, scale_x, IS_E5M2):
+        tensor_x = tensor_x_inp.to(torch.float32) * scale_x
+        if IS_E5M2:
+            tensor_x = tensor_x.clamp(min=-1 * E5M2_MAX_POS, max=E5M2_MAX_POS)
+            tensor_x = tensor_x.to(torch.float8_e5m2)
+        else:
+            tensor_x = tensor_x.clamp(min=-1 * E4M3_MAX_POS, max=E4M3_MAX_POS)
+            tensor_x = tensor_x.to(torch.float8_e4m3fn)
+        amax_1 = torch.max(torch.abs(tensor_x_inp), dim=-1).values
+        amax = torch.max(amax_1)
+        return (tensor_x, amax)
+
+    # The amax_with_scaling_pattern will also match dynamic scaling cases, we want to avoid that.
+    # `scale_x` of delayed scaling comes from the previous iteration, instead of from `tensor_x_inp`.
+    # We check that `scale_x` is not a dependency of `tensor_x_inp`
+    def fp8_delayed_scaling_extra_check(match):
+        scale_x_inputs = deque([match.kwargs["scale_x"]])
+        max_num_node_to_check = 50  # Don't traverse too many nodes
+        current_num_node = 0
+        while len(scale_x_inputs) > 0 and current_num_node < max_num_node_to_check:
+            current_node = scale_x_inputs.popleft()
+            for n in current_node.all_input_nodes:
+                if n == match.kwargs["tensor_x_inp"]:
+                    return False
+                scale_x_inputs.append(n)
+                current_num_node += 1
+        return True
+
+    if torch.cuda.is_available():
+        for IS_E5M2 in [True, False]:
+            # torch.float16 has the same pattern as torch.bfloat16, because they both needs `tensor_x_inp.to(torch.float32)`
+            # It will cause errors in `assert pattern_repr not in _seen_patterns`
+            for dtype in [torch.float32, torch.bfloat16]:
+                device = "cuda"
+                register_replacement(
+                    partialize_and_update_signature(
+                        amax_with_scaling_pattern, IS_E5M2=IS_E5M2
+                    ),
+                    partialize_and_update_signature(
+                        amax_with_scaling_tiled_replacement, IS_E5M2=IS_E5M2
+                    ),
+                    [
+                        torch.tensor((16, 16), device=device, dtype=dtype),
+                        torch.tensor(2.0, device=device, dtype=torch.float32),
+                    ],
+                    fwd_only,
+                    post_grad_patterns,
+                    extra_check=fp8_delayed_scaling_extra_check,
+                )
 
 
 class NumpyCompatNormalization:
