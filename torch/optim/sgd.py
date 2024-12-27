@@ -30,7 +30,7 @@ class SGD(Optimizer):  # noqa: D101
         lr: Union[float, Tensor] = 1e-3,
         momentum: float = 0,
         dampening: float = 0,
-        weight_decay: float = 0,
+        weight_decay: Union[float, Tensor] = 0,
         nesterov: bool = False,
         *,
         maximize: bool = False,
@@ -334,7 +334,15 @@ def _single_tensor_sgd(
         grad = grads[i] if not maximize else -grads[i]
 
         if weight_decay != 0:
-            grad = grad.add(param, alpha=weight_decay)
+            # Nested if is necessary to bypass jitscript rules
+            if isinstance(weight_decay, Tensor):
+                if weight_decay.requires_grad:
+                    # usually this is the differentiable path, which is why the param.clone() is needed
+                    grad = grad.addcmul_(param.clone(), weight_decay)
+                else:
+                    grad = grad.add(param, alpha=weight_decay)
+            else:
+                grad = grad.add(param, alpha=weight_decay)
 
         if momentum != 0:
             buf = momentum_buffer_list[i]
@@ -349,6 +357,7 @@ def _single_tensor_sgd(
                 grad = grad.add(buf, alpha=momentum)
             else:
                 grad = buf
+
         # Nested if is necessary to bypass jitscript rules
         if isinstance(lr, Tensor):
             if lr.requires_grad:

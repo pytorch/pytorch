@@ -426,6 +426,57 @@ class TestDifferentiableOptimizer(TestCase):
             ),
         )
 
+    def test_differentiable_weight_decay(self):
+        params = torch.rand(10, requires_grad=True, dtype=torch.float64)
+        grad = torch.rand_like(params, requires_grad=True, dtype=torch.float64)
+        weight_decay = torch.tensor(0.9, requires_grad=True, dtype=torch.float64)
+
+        mbuff = torch.rand_like(params, requires_grad=True, dtype=torch.float64)
+        state = {"momentum_buffer": mbuff}
+        kwargs: dict[str, Any] = {"weight_decay": weight_decay, "differentiable": True}
+
+        gradcheck(
+            _multistep_backprop_diff_hyperparams_fn,
+            (
+                params,
+                grad,
+                state,
+                SGD,
+                kwargs,  # includes weight_decay
+                *state.values(),
+                *kwargs.values(),
+            ),
+        )
+
+    def test_differentiable_weight_decay_and_lr(self):
+        params = torch.rand(10, requires_grad=True, dtype=torch.float64)
+        grad = torch.rand_like(params, requires_grad=True, dtype=torch.float64)
+
+        weight_decay = torch.tensor(0.9, requires_grad=True, dtype=torch.float64)
+        lr = torch.tensor(0.001, requires_grad=True, dtype=torch.float64)
+
+        mbuff = torch.rand_like(params, requires_grad=True, dtype=torch.float64)
+        state = {"momentum_buffer": mbuff}
+
+        kwargs: dict[str, Any] = {
+            "weight_decay": weight_decay,
+            "lr": lr,
+            "differentiable": True,
+        }
+
+        gradcheck(
+            _multistep_backprop_diff_hyperparams_fn,
+            (
+                params,
+                grad,
+                state,
+                SGD,
+                kwargs,  # includes lr & weight_decay
+                *state.values(),
+                *kwargs.values(),
+            ),
+        )
+
 
 if __name__ == "__main__":
     print("These tests should be run through test/test_optim.py instead")
