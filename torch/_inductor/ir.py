@@ -191,7 +191,7 @@ def validate_ir(node_or_nodes: Optional[_NodeOrNodes]) -> None:
             assert isinstance(
                 nodes,
                 (
-                    torch._inductor.ir.ExpandView,
+                    ExpandView,
                     DynamicScalar,
                     AssertScalar,
                     TensorBox,
@@ -368,6 +368,58 @@ def is_aligned_realized_tensor(x: Union[Buffer, TensorBox], alignment: int) -> b
         or V.graph.sizevars.size_hint(x.get_size()[-1]) <= 1
     )
     return aligned_last_dim and aligned_strides
+
+
+def try_match_insignificant_strides(
+    tensor: Union[TensorBox, BaseView],
+    strides: Sequence[Union[int, torch.SymInt]],
+) -> Union[TensorBox, BaseView]:
+    """
+    Tries to match the strides of the tensor to those in the meta_strides. Strides of insignificant
+    dimensions - size 0 or 1 - will be updated.
+
+    If there are real stride differences (NHWC vs NCHW), or the tensor is not realized, then the input will be returned
+    """
+    if not is_storage_and_layout(tensor):
+        return tensor
+
+    if all(
+        V.graph.sizevars.statically_known_equals(s1, s2)
+        for s1, s2 in zip(strides, tensor.get_stride())
+    ):
+        return tensor  # type: ignore[arg-type]
+
+    def significant_strides_equal(
+        shape: Sequence[Union[Expr, int]],
+        meta_strides: Sequence[Union[Expr, int]],
+        tensor_strides: Sequence[Union[Expr, int]],
+    ) -> bool:
+        for dim, s1, s2 in zip(shape, meta_strides, tensor_strides):
+            if V.graph.sizevars.statically_known_leq(dim, 1):  # type: ignore[arg-type]
+                continue
+
+            if not V.graph.sizevars.statically_known_equals(s1, s2):
+                return False
+
+        return True
+
+    if not significant_strides_equal(tensor.get_size(), strides, tensor.get_stride()):
+        return tensor
+
+    storage, old_layout = as_storage_and_layout(tensor)
+    new_stride = [*old_layout.stride]
+    for i, s in enumerate(tensor.get_size()):
+        if V.graph.sizevars.statically_known_leq(s, 1):  # type: ignore[arg-type]
+            new_stride[i] = strides[i]
+
+    new_layout = FixedLayout(
+        old_layout.device,
+        old_layout.dtype,
+        old_layout.size,
+        new_stride,
+        old_layout.offset,
+    )
+    return TensorBox(ReinterpretView(data=storage, layout=new_layout))
 
 
 class IRNode:
@@ -2952,14 +3004,22 @@ class SliceView(View):
         dim_size = x.get_size()[dim]
 
         if any(free_unbacked_symbols(x) for x in (start, end, dim_size)):
-
-            def clamp(x, lower, upper):  # type: ignore[no-untyped-def]
-                return sympy.Min(sympy.Max(x, lower), upper)
-
+            min_func = sympy.Min
+            max_func = sympy.Max
         else:
+            min_func = sizevars.evaluate_min
+            max_func = sizevars.evaluate_max
 
-            def clamp(x, lower, upper):  # type: ignore[no-untyped-def]
-                return sizevars.evaluate_min(sizevars.evaluate_max(x, lower), upper)
+        def clamp(x, lower, upper):  # type: ignore[no-untyped-def]
+            clamped_lower = (
+                x if sizevars.statically_known_geq(x, lower) else max_func(x, lower)
+            )
+            clamped_full = (
+                clamped_lower
+                if sizevars.statically_known_leq(clamped_lower, upper)
+                else min_func(clamped_lower, upper)
+            )
+            return clamped_full
 
         def clamp_wrap(val, lower, upper, default):  # type: ignore[no-untyped-def]
             if val is None:
@@ -3807,6 +3867,9 @@ class ConstantBuffer(InputBuffer):
 
 @ir_dataclass
 class NoneAsConstantBuffer(IRNode):
+    def get_reads(self) -> OrderedSet[Dep]:
+        return OrderedSet()
+
     def get_unbacked_symbol_uses(self) -> OrderedSet[sympy.Symbol]:
         return OrderedSet()
 
@@ -4172,7 +4235,7 @@ class TemplateBuffer(OperationBuffer):
     def __init__(
         self,
         layout: Layout,
-        inputs: List[IRNode],
+        inputs: Sequence[IRNode],
         make_kernel_render: Callable[..., Any],
     ) -> None:
         super().__init__(name=None, layout=layout)
@@ -5062,8 +5125,6 @@ class ExternKernel(InputsKernel):
 
         # require x to have the layout
         if is_storage_and_layout(x):
-            while isinstance(x.get_layout(), NonOwningLayout):
-                x = x.get_layout().view
             if isinstance(x.get_layout(), FlexibleLayout):
                 if order:
                     # If the the FlexibleLayout already has the size and stride in the required order,
@@ -5101,7 +5162,7 @@ class ExternKernel(InputsKernel):
                         exact_strides=exact_strides,
                     )
                     return x
-            elif isinstance(x.get_layout(), FixedLayout) and (
+            elif isinstance(x.get_layout(), (FixedLayout, NonOwningLayout)) and (
                 (order and x.get_layout().is_stride_ordered(order))
                 or (
                     exact_strides
@@ -5110,7 +5171,11 @@ class ExternKernel(InputsKernel):
                     )
                 )
             ):
-                return x
+                return (
+                    try_match_insignificant_strides(x, exact_strides)
+                    if exact_strides
+                    else x
+                )
             elif isinstance(x.get_layout(), MutationLayoutSHOULDREMOVE):
                 if isinstance(x.get_layout().real_layout(), FlexibleLayout):
                     raise AssertionError(
@@ -7083,20 +7148,23 @@ class InvokeSubgraph(ExternKernel):
             layout=MultiOutputLayout(device=device),
         )
 
-        outputs = [
-            MultiOutput(
-                FixedLayout(
-                    device=output.get_device(),
-                    dtype=output.get_dtype(),
-                    size=output.get_size(),  # type: ignore[arg-type]
-                    stride=output.get_stride(),
-                    offset=output.get_layout().offset,
-                ),
-                invoke_subgraph,
-                [(list, i)],
-            )
-            for i, output in enumerate(outputs)
-        ]
+        def create_output(output: IRNode, ind: int):
+            if isinstance(output, NoneAsConstantBuffer):
+                return output
+            else:
+                return MultiOutput(
+                    FixedLayout(
+                        device=output.get_device(),
+                        dtype=output.get_dtype(),
+                        size=output.get_size(),  # type: ignore[arg-type]
+                        stride=output.get_stride(),
+                        offset=output.get_layout().offset,
+                    ),
+                    invoke_subgraph,
+                    [(list, ind)],
+                )
+
+        outputs = [create_output(output, i) for i, output in enumerate(outputs)]
 
         invoke_subgraph.outputs = outputs
         return outputs
