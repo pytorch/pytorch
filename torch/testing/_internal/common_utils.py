@@ -5566,3 +5566,27 @@ def scoped_load_inline(func):
         return func(*args, load_inline=load_inline, **kwargs)
 
     return wrapper
+
+GPU_TYPES = ["cuda", "xpu"]
+
+# defines here before import torch._dynamo is for avoiding circular import
+# when get_gpu_type is imported from dynamo
+@functools.lru_cache(None)
+def get_gpu_type():
+    avail_gpus = [x for x in GPU_TYPES if getattr(torch, x).is_available()]
+    assert len(avail_gpus) <= 1
+    gpu_type = "cuda" if len(avail_gpus) == 0 else avail_gpus.pop()
+    return gpu_type
+
+CUDA_AVAIL = torch.cuda.is_available()
+
+XPU_AVAIL = torch.xpu.is_available()
+
+GPU_AVAIL = CUDA_AVAIL or XPU_AVAIL
+
+GPU_TYPE = get_gpu_type()
+
+MULTIGPU_AVAIL = any(
+    getattr(torch, gpu).is_available() and getattr(torch, gpu).device_count() >= 2
+    for gpu in GPU_TYPES
+)
