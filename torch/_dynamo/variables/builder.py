@@ -98,7 +98,6 @@ from ..utils import (
     common_constant_types,
     dict_keys,
     get_fake_value,
-    get_items_from_dict,
     get_locals_to_steal,
     get_static_address_type,
     is_frozen_dataclass,
@@ -652,10 +651,12 @@ class VariableBuilder:
             # Ensure that we call dict.keys and not value.keys (which can call
             # overridden keys method). In the C++ guards, we relied on
             # PyDict_Next to traverse the dictionary, which uses the internal
-            # data structure and does not call the overridden keys method.
+            # data structure and does not call the overridden keys method.  For
+            # OrderedDict, keys method can result in a different order compared
+            # to a dict.keys order
             result = dict(
-                build_key_value(i, k, v)
-                for i, (k, v) in enumerate(get_items_from_dict(value))
+                build_key_value(i, k, dict.__getitem__(value, k))
+                for i, k in enumerate(dict.keys(value))
             )
 
             if istype(value, collections.defaultdict):
@@ -1260,9 +1261,11 @@ class VariableBuilder:
             # overridden keys method). In the C++ guards, we relied on
             # PyDict_Next to traverse the dictionary, which uses the internal
             # data structure and does not call the overridden keys method.
+            # Similarly, we call dict.__getitem__ to avoid any overridden
+            # __getitem__ method.
             result = dict(
-                build_key_value(i, k, v)
-                for i, (k, v) in enumerate(get_items_from_dict(value))
+                build_key_value(i, k, dict.__getitem__(value, k))
+                for i, k in enumerate(dict.keys(value))
             )
 
             # NB: This is deliberately kept ValueMutationNew because dict_vt is
