@@ -648,15 +648,8 @@ class VariableBuilder:
 
                 return key, value
 
-            # Ensure that we call dict.keys and not value.keys (which can call
-            # overridden keys method). In the C++ guards, we relied on
-            # PyDict_Next to traverse the dictionary, which uses the internal
-            # data structure and does not call the overridden keys method.  For
-            # OrderedDict, keys method can result in a different order compared
-            # to a dict.keys order
             result = dict(
-                build_key_value(i, k, dict.__getitem__(value, k))
-                for i, k in enumerate(dict.keys(value))
+                build_key_value(i, k, v) for i, (k, v) in enumerate(value.items())
             )
 
             if istype(value, collections.defaultdict):
@@ -1257,15 +1250,8 @@ class VariableBuilder:
 
                 return key, value
 
-            # Ensure that we call dict.keys and not value.keys (which can call
-            # overridden keys method). In the C++ guards, we relied on
-            # PyDict_Next to traverse the dictionary, which uses the internal
-            # data structure and does not call the overridden keys method.
-            # Similarly, we call dict.__getitem__ to avoid any overridden
-            # __getitem__ method.
             result = dict(
-                build_key_value(i, k, dict.__getitem__(value, k))
-                for i, k in enumerate(dict.keys(value))
+                build_key_value(i, k, v) for i, (k, v) in enumerate(value.items())
             )
 
             # NB: This is deliberately kept ValueMutationNew because dict_vt is

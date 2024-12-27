@@ -33,6 +33,11 @@ from .variables.base import (
 from .variables.user_defined import FrozenDataClassVariable
 
 
+def _manual_update_dict(dict_from, dict_to):
+    for k, v in dict_from.items():
+        dict_to[k] = v
+
+
 def _manual_dict_setitem(dict_from, dict_to, mro_index):
     # Carefully calls the dict or OrderedDict `clear` or `__setitem__`. We have
     # to be careful because we don't want to trigger the user defined object

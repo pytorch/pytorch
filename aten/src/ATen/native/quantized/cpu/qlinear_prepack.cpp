@@ -31,6 +31,8 @@
 #include <utility>
 #include <vector>
 
+int register_linear_params();
+
 #ifdef USE_FBGEMM
 namespace {
 // Calculate the column offsets.
