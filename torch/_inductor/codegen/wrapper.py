@@ -617,7 +617,8 @@ class AllocateLine(MemoryPlanningLine):
         ):
             assert isinstance(self.node.outputs, Iterable)
             for output in self.node.outputs:
-                code.writeline(self.wrapper.make_buffer_allocation(output))
+                if output.get_name() not in self.node.outputs_removed:
+                    code.writeline(self.wrapper.make_buffer_allocation(output))
         else:
             line = self.wrapper.make_buffer_allocation(self.node)
             code.writeline(line)
