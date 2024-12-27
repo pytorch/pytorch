@@ -1,7 +1,7 @@
 import copy
 import logging
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
+from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
 import torch
 from torch.ao.ns.fx.utils import compute_sqnr
@@ -71,23 +71,14 @@ def generate_numeric_debug_handle(ep: ExportedProgram) -> None:
     bfs_trace_with_node_process(ep, _assign_debug_handle)
 
 
-def _detach(x: Any) -> Any:
-    detached: Any = None
-    if isinstance(x, torch.Tensor):
-        detached = x.detach()
-    elif isinstance(x, (list, tuple)):
-        detached = type(x)([_detach(e) for e in x])
-    elif isinstance(x, dict):
-        detached = {k: _detach(e) for k, e in x.items()}
-    else:
-        detached = x
-    return detached
+def _detach(x: object) -> object:
+    return torch.fx.node.map_aggregate(x, lambda x: x.detach())
 
 
-def _tensor_shape_equals(x: Any, y: Any) -> bool:
+def _tensor_shape_equals(x: object, y: object) -> bool:
     if isinstance(x, torch.Tensor) and isinstance(y, torch.Tensor):
         return x.shape == y.shape
-    elif isinstance(x, (list, tuple)):
+    elif isinstance(x, (list, tuple)) and isinstance(y, (list, tuple)):
         return all(_tensor_shape_equals(e1, e2) for e1, e2 in zip(x, y))
     elif isinstance(x, dict) and isinstance(y, dict):
         all_equal = True
@@ -100,8 +91,8 @@ def _tensor_shape_equals(x: Any, y: Any) -> bool:
 
 
 def _loss_fn(
-    loss: Callable[[torch.Tensor, torch.Tensor], torch.Tensor], x: Any, y: Any
-) -> Any:
+    loss: Callable[[torch.Tensor, torch.Tensor], torch.Tensor], x: object, y: object
+) -> object:
     """The returned loss will have the same structure as `x` and `y`, e.g.
     if both are Tensor, we'll return a Tensor
     if both are list, we'll return a list of Tensors
@@ -109,7 +100,7 @@ def _loss_fn(
     two Tensors
     """
     if isinstance(x, torch.Tensor) and isinstance(y, torch.Tensor):
-        return loss(x, y)
+        return loss(x.to(torch.float32), y.to(torch.float32))
     elif isinstance(x, (list, tuple)):
         return type(x)([_loss_fn(loss, e1, e2) for e1, e2 in zip(x, y)])
     elif isinstance(x, dict) and isinstance(y, dict):
@@ -137,7 +128,7 @@ class OutputLogger(torch.nn.Module):
         self.node_name = node_name
         self.nn_module_stack = nn_module_stack
         self.debug_handle = debug_handle
-        self.stats: List[Any] = []
+        self.stats: List[object] = []
 
     def forward(self, x: object) -> object:
         self.stats.append(_detach(x))
