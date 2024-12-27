@@ -1303,7 +1303,6 @@ t2.start()
 
         device_count = torch.cuda.device_count()
         current_alloc = [memory_allocated(idx) for idx in range(device_count)]
-        x = torch.ones(10, device="cuda:0")  # noqa: F841
         self.assertGreater(memory_allocated(0), current_alloc[0])
         self.assertTrue(
             all(
