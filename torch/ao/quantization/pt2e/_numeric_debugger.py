@@ -72,7 +72,16 @@ def generate_numeric_debug_handle(ep: ExportedProgram) -> None:
 
 
 def _detach(x: object) -> object:
-    return torch.fx.node.map_aggregate(x, lambda x: x.detach())
+    detached: object = None
+    if isinstance(x, torch.Tensor):
+        detached = x.detach()
+    elif isinstance(x, (list, tuple)):
+        detached = type(x)([_detach(e) for e in x])
+    elif isinstance(x, dict):
+        detached = {k: _detach(e) for k, e in x.items()}
+    else:
+        detached = x
+    return detached
 
 
 def _tensor_shape_equals(x: object, y: object) -> bool:
@@ -101,7 +110,7 @@ def _loss_fn(
     """
     if isinstance(x, torch.Tensor) and isinstance(y, torch.Tensor):
         return loss(x.to(torch.float32), y.to(torch.float32))
-    elif isinstance(x, (list, tuple)):
+    elif isinstance(x, (list, tuple)) and isinstance(y, (list, tuple)):
         return type(x)([_loss_fn(loss, e1, e2) for e1, e2 in zip(x, y)])
     elif isinstance(x, dict) and isinstance(y, dict):
         return {k: _loss_fn(loss, e, y[k]) for k, e in x.items()}
@@ -199,16 +208,16 @@ class QuantizationComparisonResult:
     ref: torch.Tensor
 
     @property
-    def mse_loss(self) -> torch.Tensor:
+    def mse_loss(self) -> object:
         return self.loss(F.mse_loss)
 
     @property
-    def sqnr(self) -> torch.Tensor:
+    def sqnr(self) -> object:
         return self.loss(compute_sqnr)
 
     def loss(
         self, loss_function: Callable[[torch.Tensor, torch.Tensor], torch.Tensor]
-    ) -> torch.Tensor:
+    ) -> object:
         return _loss_fn(loss_function, self.actual, self.ref)
 
     def __repr__(self) -> str:
@@ -261,14 +270,18 @@ def _module_stack_to_str(module_stack: object) -> str:
 
 def extract_results_from_loggers(
     model: GraphModule,
-) -> Dict[int, Tuple[Optional[str], object, List[torch.Tensor]]]:
+) -> Dict[int, Tuple[Optional[str], object, List[object]]]:
     """For a given model, extract the tensors stats and related information for each debug handle.
+    The reason we have a list of object, instead of Tensor is because the output of node may not be
+    a Tensor, it could be (nested) list, tuple or dict as well.
 
     Returns:
-        A dict is keyed by the debug_handle id and the values are a list of Tensors recorded
-        in loggers"""
+        A dict is keyed by the debug_handle id and the values are a list of object recorded
+        in loggers
+
+    """
     # Results maps debug handle to a tensor list for each model being compared.
-    handles: Dict[int, Tuple[Optional[str], object, List[torch.Tensor]]] = {}
+    handles: Dict[int, Tuple[Optional[str], object, List[object]]] = {}
     for _name, module in model.named_children():
         if isinstance(module, OutputLogger) and len(module.stats) > 0:
             handles[module.debug_handle] = (
