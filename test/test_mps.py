@@ -12622,6 +12622,12 @@ class TestMetalLibrary(TestCaseMPS):
         # Passing no tensors asserts
         self.assertRaises(RuntimeError, lambda: lib.full(12))
 
+class TestPerformance(TestCaseMPS):
+    def test_add_perf(self):
+        n = 32768
+        time_mps = torch.testing._benchmark_func(torch.add, (n, n), device="mps").mean
+        # This mostly measures synchronization time, but it shoudl still be less than 200ms
+        self.assertLess(time_mps, 1e-2)
 
 # TODO: Actually instantiate that test for the "mps" device to better reflect what it is doing.
 # This requires mps to be properly registered in the device generic test framework which is not the
