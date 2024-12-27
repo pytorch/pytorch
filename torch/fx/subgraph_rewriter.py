@@ -392,7 +392,8 @@ def _replace_pattern(
         insert_point = (
             first_user_node if first_user_node is not None else first_next_node
         )
-        with original_graph.inserting_before(insert_point):  # type: ignore[possibly-undefined]
+        assert insert_point is not None, "The insert point can't be None"
+        with original_graph.inserting_before(insert_point):
             copied_returning_nodes = original_graph.graph_copy(
                 replacement_graph, val_map
             )
