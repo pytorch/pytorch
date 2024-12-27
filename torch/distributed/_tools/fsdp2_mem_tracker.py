@@ -13,7 +13,7 @@ from typing import (
     TypeVar,
     Union,
 )
-from typing_extensions import ParamSpec
+from typing_extensions import ParamSpec, TypeVarTuple, Unpack
 
 import torch
 import torch.distributed as dist
@@ -40,6 +40,7 @@ __all__ = ["FSDPMemTracker"]
 
 _P = ParamSpec("_P")
 _R = TypeVar("_R")
+_Ts = TypeVarTuple("_Ts")
 
 
 class _FSDPRefType(_RefType):
@@ -200,8 +201,8 @@ class FSDPMemTracker(MemTracker):
     def _fsdp_state_pre_forward(
         self,
         fsdp_mod: FSDPModule,
-        orig_fsdp_state_pre_fw: Callable[_P, Any],
-    ) -> Callable[_P, Tuple[Tuple[Any, ...], Dict[str, Any]]]:
+        orig_fsdp_state_pre_fw: Callable[_P, Tuple[Tuple[Unpack[_Ts]], Dict[str, Any]]],
+    ) -> Callable[_P, Tuple[Tuple[Unpack[_Ts]], Dict[str, Any]]]:
         # We capture memory snapshots before and after ``FSDPState._pre_forward`` to attribute the `unsharded` params
         # and `all_gather` buffers.  There are three cases:
         # Case 1: If the module is not in the ``memory_tracking`` dictionary, create a new ``_FSDPModMemStats``
@@ -218,7 +219,7 @@ class FSDPMemTracker(MemTracker):
         @wraps(orig_fsdp_state_pre_fw)
         def inner(
             *args: _P.args, **kwargs: _P.kwargs
-        ) -> Tuple[Tuple[Any, ...], Dict[str, Any]]:
+        ) -> Tuple[Tuple[Unpack[_Ts]], Dict[str, Any]]:
             mod_fqn = self._mod_tracker.get_known_fqn(fsdp_mod)
             assert mod_fqn is not None
             if fsdp_mod not in self.memory_tracking:
