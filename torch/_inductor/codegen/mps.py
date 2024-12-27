@@ -1,5 +1,7 @@
 # mypy: allow-untyped-defs
-
+# This is not a feature-complete compiler backend end
+# Just an early prototype that shows that one can compile
+# Easy models to Metal
 import sympy
 
 import torch
@@ -12,6 +14,12 @@ from .simd import SIMDKernel, SIMDScheduling
 
 
 DTYPE_TO_METAL = {
+    torch.bool: "bool",
+    torch.int8: "char",
+    torch.int16: "short",
+    torch.int32: "int",
+    torch.int64: "long",
+    torch.uint8: "uchar",
     torch.float: "float",
     torch.half: "half",
     torch.bfloat16: "bfloat",
@@ -19,6 +27,10 @@ DTYPE_TO_METAL = {
 
 
 class MetalOverrides(OpOverrides):
+    @staticmethod
+    def logical_or(a, b):
+        return f"{a} | {b}"
+
     @staticmethod
     def atan(x):
         return f"metal::atan({x})"

@@ -4,7 +4,19 @@ import os
 import sys
 
 import torch
+from torch.testing import make_tensor
+from torch.testing._internal.common_dtype import get_all_dtypes
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    MACOS_VERSION,
+    parametrize,
+)
 
+
+MPS_UNSUPPORTED_TYPES = [torch.double, torch.cdouble] + (
+    [torch.bfloat16] if MACOS_VERSION < 14.0 else []
+)
+MPS_DTYPES = [t for t in get_all_dtypes() if t not in MPS_UNSUPPORTED_TYPES]
 
 importlib.import_module("filelock")
 
@@ -25,12 +37,21 @@ class MPSBasicTests(TestCase):
     common = check_model_gpu
     device = "mps"
 
-    def test_add(self):
-        self.common(lambda a, b: a + b, (torch.rand(1024), torch.rand(1024)))
+    @parametrize("dtype", MPS_DTYPES)
+    def test_add(self, dtype):
+        self.common(
+            lambda a, b: a + b,
+            (
+                make_tensor(1024, device="mps", dtype=dtype),
+                make_tensor(1024, dtype=dtype, device="mps"),
+            ),
+        )
 
     def test_acos(self):
         self.common(lambda a: a.acos(), (torch.rand(1024),))
 
+
+instantiate_parametrized_tests(MPSBasicTests)
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
