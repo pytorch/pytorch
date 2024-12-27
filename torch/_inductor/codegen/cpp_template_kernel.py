@@ -402,7 +402,7 @@ class CppTemplateKernel(CppKernel):
         epilogue_nodes: Optional[List[ir.IRNode]] = None,
         offsets: Optional[List[Any]] = None,
         reindexers: Optional[List[Optional[Callable[[List[Any]], List[Any]]]]] = None,
-        multi_output_buffers: Optional[Tuple[ir.IRNode]] = None,
+        multi_output_buffers: Optional[Tuple[ir.MultiOutput]] = None,
     ):
         assert isinstance(dst, Iterable)
         assert all(_dst.get_size() == _src.get_size() for _src, _dst in zip(src, dst))
@@ -458,13 +458,42 @@ class CppTemplateKernel(CppKernel):
                             final_offsets.append(
                                 [sympy.S.Zero] * len(dst[gemm_idx].get_size())
                             )
-                return self.store_group_gemm_pointwise_nodes(
+                res = self.store_group_gemm_pointwise_nodes(
                     dst,
                     localize_epilogue_nodes,
                     final_offsets,
                     reindexers,
                     output_names=output_names,
                 )
+
+                for gemm_idx in range(gemm_num):
+                    if (
+                        multi_output_buffers
+                        and multi_output_buffers[gemm_idx].get_name() in all_read_names
+                    ):
+                        # If the MultiOutput is used in the Epilogue, let's remove it from args
+                        multi_output_name = multi_output_buffers[gemm_idx].get_name()
+                        if (
+                            multi_output_name in self.args.output_buffers
+                            and self.args.output_buffers[multi_output_name] != "REMOVED"
+                        ):
+                            self.remove_buffer(multi_output_name)
+                            assert isinstance(
+                                multi_output_buffers[gemm_idx],
+                                ir.MultiOutput,
+                            )
+                            assert len(multi_output_buffers[gemm_idx].inputs) == 1
+                            assert isinstance(
+                                multi_output_buffers[gemm_idx].inputs[0],
+                                ir.CppTemplateBuffer,
+                            )
+                            multi_output_buffers[gemm_idx].inputs[  # type: ignore[attr-defined]
+                                0
+                            ].outputs_removed.append(
+                                multi_output_name
+                            )
+
+                return res
         else:
             assert isinstance(src, Iterable)
             assert isinstance(dst, Iterable)

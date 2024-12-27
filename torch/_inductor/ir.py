@@ -4435,6 +4435,7 @@ class CppTemplateBuffer(TemplateBuffer):
         self.template = template
         self.choice = choice
         self.outputs: Optional[List[Buffer]] = None
+        self.outputs_removed: List[str] = []
 
     def get_layout(self) -> Layout:
         if isinstance(self.layout, MultiOutputLayout):
