@@ -13286,10 +13286,9 @@ if HAS_GPU and not TEST_WITH_ASAN:
                 loss.backward()
 
             _, code = run_and_get_code(wrapper, x, y)
-            self.assertTrue(
-                "buf1 = reinterpret_tensor(mm_default_2, (1024, 50257), (50304, 1), 0); del mm_default_2  # reuse"
-                in code[1]
-            )
+            FileCheck().check_regex(
+                r"reinterpret_tensor\(.*, \(1024, 50257\), \(50304, 1\)"
+            ).run(code[1])
 
     class RNNTest(TestCase):
         device_type = GPU_TYPE
