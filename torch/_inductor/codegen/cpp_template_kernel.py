@@ -478,6 +478,7 @@ class CppTemplateKernel(CppKernel):
                             and self.args.output_buffers[multi_output_name] != "REMOVED"
                         ):
                             self.remove_buffer(multi_output_name)
+                        if self.args.output_buffers[multi_output_name] == "REMOVED":
                             assert isinstance(
                                 multi_output_buffers[gemm_idx],
                                 ir.MultiOutput,
