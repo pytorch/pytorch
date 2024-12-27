@@ -26,6 +26,10 @@ def parse_args():
     args = parser.parse_args()
     if args.bucket.startswith("s3://"):
         args.bucket = args.bucket[5:]
+    if args.key_prefix.startswith("/"):
+        args.key_prefix = args.key_prefix[1:]
+    if args.key_prefix.endswith("/"):
+        args.key_prefix = args.key_prefix[:-1]
     return args
 
 

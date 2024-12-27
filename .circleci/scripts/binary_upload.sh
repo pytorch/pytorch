@@ -68,7 +68,6 @@ s3_upload() {
   local pkg_type
   extension="$1"
   pkg_type="$2"
-  s3_prefix="${pkg_type}/${UPLOAD_CHANNEL}"
   s3_root_dir="${UPLOAD_BUCKET}/${s3_prefix}"
   if [[ -z ${UPLOAD_SUBFOLDER:-} ]]; then
     s3_upload_dir="${s3_root_dir}/"
@@ -88,7 +87,7 @@ s3_upload() {
           python scripts/release/upload_metadata_file.py \
             --package "${pkg}" \
             --bucket "${UPLOAD_BUCKET}" \
-            --key-prefix "${s3_prefix}" \
+            --key-prefix "${s3_root_dir}" \
             ${dry_run_arg}
         fi
       )
