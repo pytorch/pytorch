@@ -19,6 +19,7 @@ from .cpp_gemm_template import CppGemmTemplate, expand_bias, prune_tensors, tran
 from .cpp_micro_gemm import CppMicroGemmAMX, create_micro_gemm
 from .cpp_template_kernel import CppTemplateKernel
 from .cpp_utils import (
+    create_epilogue_with_attr,
     DTYPE_TO_CPP,
     GemmBlocking,
     get_gemm_template_output_and_compute_dtype,
@@ -113,8 +114,14 @@ extern "C" {{export_declaration}}
         kernel.slice_nd(Y_2d_list[gemm_idx], [("m_start", "m_end"), ("n_start", "n_end")])
     ) %}
 {%- endfor %}
-                    {{ kernel.store_output(
-                        tile_Y_list, tile_acc_list, GemmOuts, epilogue_nodes, offsets=("m_start", "n_start"), reindexers=reindexers
+                    {{ kernel.store_outputs(
+                        tile_Y_list,
+                        tile_acc_list,
+                        GemmOuts,
+                        epilogue_nodes,
+                        offsets=("m_start", "n_start"),
+                        reindexers=reindexers,
+                        multi_output_buffers=multi_output_buffers
                     )|indent(20, false)
                     }}
                 }
@@ -352,6 +359,7 @@ class CppGroupGemmTemplate(CppGemmTemplate):
             inp_list.append(inp)
 
         Y_list = self.output_node
+        multi_output_buffers = None
         if template_buffer_node is not None:
             W_list = template_buffer_node.inputs[
                 wgt_start_idx : wgt_start_idx + self.gemm_group_num
@@ -359,6 +367,7 @@ class CppGroupGemmTemplate(CppGemmTemplate):
             assert isinstance(template_buffer_node.outputs, List)
             Y_list = template_buffer_node.outputs
             counters["inductor"]["cpp_group_gemm_template"] += 1
+            multi_output_buffers = template_buffer_node.outputs
 
         template_buffer = Y_list[0]
         fake_buffers: List[ir.Buffer] = []
@@ -392,6 +401,7 @@ class CppGroupGemmTemplate(CppGemmTemplate):
 
         epilogues: List[ir.IRNode] = []
         reindexers: List[Optional[Callable[[List[Any]], List[Any]]]] = []
+
         gemm_output_buffers: list[ir.Buffer] = []
         for out_buf_idx in range(self.gemm_group_num):
             gemm_output_name = f"{template_buffer.get_name()}_GemmOut" + str(
@@ -402,7 +412,7 @@ class CppGroupGemmTemplate(CppGemmTemplate):
             )
 
         assert (
-            not self.epilogue_creator and not epilogue_nodes
+            not self.epilogue_creator
         ), "Epilogue fusion is not implemented yet in Group GEMM Template"
 
         kernel_args = {}
@@ -412,6 +422,30 @@ class CppGroupGemmTemplate(CppGemmTemplate):
             kernel_args["W" + str(w_idx)] = W_list[w_idx]
         for inp_idx in range(self.gemm_group_num):
             kernel_args["inp" + str(inp_idx)] = inp_list[inp_idx]
+
+        def _bias_add_epilogue(buf, inp):
+            return create_epilogue_with_attr(
+                buf, "bias_add", other=inp, beta=self.beta, dtype=self.layout.dtype
+            )
+
+        for gemm_idx, inp in enumerate(inp_list):
+            if inp:
+                buffer_name = Y_list[gemm_idx].get_name()
+                epilogues.append(
+                    ir.ComputedBuffer(
+                        name=buffer_name,
+                        layout=template_buffer.layout,
+                        data=_bias_add_epilogue(gemm_output_buffers[gemm_idx], inp),
+                    )
+                )
+                reindexers.append(None)
+
+        # <TODO> leslie: Add the fusion check in the Scheduler for Now
+        # <TODO> support the case when dimension and the indexing could be different between the GEMM output
+        # and epilogues, considering that output buf number might be different from GEMM number.
+        if epilogue_nodes:
+            epilogues.extend(epilogue_nodes)
+            reindexers.extend([None] * len(epilogue_nodes))
 
         options = dict(
             N=self.n,
@@ -440,6 +474,7 @@ class CppGroupGemmTemplate(CppGemmTemplate):
             gemm_group_num=self.gemm_group_num,
             Y_list={"Y" + str(idx): Y for idx, Y in enumerate(Y_list)},
             Y_2d_list=Y_2d_list,
+            multi_output_buffers=multi_output_buffers,
         )
         with contextlib.ExitStack() as stack:
             for buf in fake_buffers:
