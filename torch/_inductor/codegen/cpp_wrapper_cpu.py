@@ -142,69 +142,35 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 os.path.join(os.path.dirname(__file__), "aoti_runtime", "interface.cpp")
             ) as f:
                 self.header.splice(f.read())
+            self.header.splice(
+                f"""
+                #include <torch/csrc/inductor/aoti_runtime/arrayref_tensor.h>
+                #include <torch/csrc/inductor/aoti_runtime/thread_local.h>
+                #include <torch/csrc/inductor/aoti_runtime/scalar_to_tensor.h>
+                #include <torch/csrc/inductor/aoti_torch/generated/c_shim_{self.device}.h>
+
+                #include <c10/util/generic_math.h>
+                typedef at::Half half;
+                typedef at::BFloat16 bfloat16;
+
+                // Round up to the nearest multiple of {ALIGN_BYTES}
+                [[maybe_unused]] static int64_t align(int64_t nbytes) {{
+                return (nbytes + {ALIGN_BYTES} - 1) & -{ALIGN_BYTES};
+                }}
+                """
+            )
         else:
             self.header.splice(
-                """
+                f"""
                 import torch
                 from torch._inductor.codecache import CppWrapperCodeCache
 
                 cpp_wrapper_src = (
                 '''
-                #include <optional>
-                #include <Python.h>
-
-                #define PYBIND11_SIMPLE_GIL_MANAGEMENT
-                #include <pybind11/gil.h>
-                namespace py = pybind11;
-
-                class RAIIPyObject {
-                public:
-                    RAIIPyObject() : obj_(nullptr) {}
-                    RAIIPyObject(PyObject* obj) : obj_(obj) {}
-                    ~RAIIPyObject() {
-                        Py_XDECREF(obj_);
-                    }
-                    RAIIPyObject& operator=(const RAIIPyObject& other) {
-                        if (this != &other) {
-                            Py_XDECREF(obj_);
-                            obj_ = other.obj_;
-                            Py_XINCREF(obj_);
-                        }
-                        return *this;
-                    }
-                    operator PyObject*() {
-                        return obj_;
-                    }
-                    PyObject* get() {
-                        return obj_;
-                    }
-                private:
-                    PyObject* obj_;
-                };
-
-                #include <torch/csrc/inductor/aoti_runtime/device_utils.h>
-                #include <torch/csrc/inductor/aoti_runtime/utils.h>
-                using namespace torch::aot_inductor;
+                #include <torch/csrc/inductor/cpp_wrapper/{self.device}.h>
                 """
             )
 
-        self.header.splice(
-            f"""
-            #include <torch/csrc/inductor/aoti_runtime/arrayref_tensor.h>
-            #include <torch/csrc/inductor/aoti_runtime/thread_local.h>
-            #include <torch/csrc/inductor/aoti_runtime/scalar_to_tensor.h>
-            #include <torch/csrc/inductor/aoti_torch/generated/c_shim_{self.device}.h>
-
-            #include <c10/util/generic_math.h>
-            typedef at::Half half;
-            typedef at::BFloat16 bfloat16;
-
-            // Round up to the nearest multiple of {ALIGN_BYTES}
-            [[maybe_unused]] static int64_t align(int64_t nbytes) {{
-              return (nbytes + {ALIGN_BYTES} - 1) & -{ALIGN_BYTES};
-            }}
-            """
-        )
         extend_aoti_c_shim_include = (
             f"torch/csrc/inductor/aoti_torch/generated/extend/c_shim_{self.device}.h"
         )
