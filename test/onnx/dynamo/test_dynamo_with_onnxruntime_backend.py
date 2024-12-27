@@ -7,7 +7,6 @@ import dataclasses
 import os
 import sys
 import unittest
-from pathlib import Path
 from typing import Tuple
 
 import onnxruntime
@@ -25,8 +24,7 @@ from torch.testing._internal import common_utils
 from torch.testing._internal.common_utils import skipIfNNModuleInlined
 
 
-sys.path.append(str(Path(__file__).absolute().parents[1]))
-
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import onnx_test_common
 
 
