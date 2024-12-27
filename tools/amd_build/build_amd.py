@@ -6,8 +6,9 @@ import os
 import sys
 from pathlib import Path
 
-
-REPO_ROOT = Path(__file__).absolute().parents[2]
+# NOTE: `tools/amd_build/build_amd.py` could be a symlink.
+# The behavior of `symlink / '..'` is different from `symlink.parent`.
+REPO_ROOT = (Path(__file__) / os.path.pardir / os.path.pardir / os.path.pardir).resolve()
 sys.path.append(str(REPO_ROOT / "torch" / "utils"))
 
 from hipify import hipify_python  # type: ignore[import]
@@ -49,6 +50,7 @@ parser.add_argument(
 
 args = parser.parse_args()
 
+# NOTE: `tools/amd_build/build_amd.py` could be a symlink.
 amd_build_dir = os.path.dirname(os.path.realpath(__file__))
 proj_dir = os.path.dirname(os.path.dirname(amd_build_dir))
 
