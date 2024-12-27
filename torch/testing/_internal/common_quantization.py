@@ -2939,7 +2939,7 @@ class TestHelperModules:
         def forward(self, x):
             x = self.conv1(x)
             # use split so we get a list of Tensors
-            x1, x2 = x.split(2, dim=1)
+            x1, x2 = torch.split(x, 2, dim=1)
             y = torch.cat([x1, x2], dim=1)
             return y
 
