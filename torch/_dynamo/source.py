@@ -519,11 +519,6 @@ class GetItemSource(ChainedSource):
 class ConstDictKeySource(ChainedSource):
     index: Any
 
-    def __post_init__(self):
-        assert self.base is not None
-        if isinstance(self.index, slice):
-            super().__setattr__("index", self.index.__reduce__())
-
     def guard_source(self):
         return self.base.guard_source()
 
