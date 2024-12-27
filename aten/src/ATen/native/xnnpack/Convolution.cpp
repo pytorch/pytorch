@@ -11,8 +11,7 @@
 #include <c10/util/irange.h>
 
 namespace at::native::xnnpack {
-namespace internal {
-namespace convolution2d {
+namespace internal::convolution2d {
 
 namespace {
 
@@ -204,8 +203,7 @@ ContextConv2D create(
   xnn_operator_t convolution_op{};
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   xnn_status create_status;
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
-  std::array<int64_t, 4> weight_sizes;
+  std::array<int64_t, 4> weight_sizes{};
 
   if (transposed) {
     const Tensor weight_reordered = reorder_weights_for_transpose_conv(weight_nhwc, groups);
@@ -464,7 +462,6 @@ Tensor conv2d_transpose_clamp_run(
   return op_context->run(input);
 }
 
-} // namespace convolution2d
 } // namespace internal
 
 bool use_convolution2d(

@@ -3,16 +3,20 @@
 
 import logging
 import math
-from typing import Any, List, Optional, Sequence, Tuple
+from dataclasses import dataclass
+from enum import auto, Enum
+from typing import Any, List, Optional, Sequence, Tuple, Union
 
 import sympy
 
 import torch
 from torch._inductor.virtualized import V
+from torch.utils._ordered_set import OrderedSet
 from torch.utils._pytree import tree_map
 
 from .. import config
 from ..ir import (
+    Buffer,
     ComputedBuffer,
     ExternKernel,
     FixedLayout,
@@ -20,11 +24,23 @@ from ..ir import (
     get_fill_order,
     InputBuffer,
     IRNode,
+    MutationLayoutSHOULDREMOVE,
+    Scatter,
     StorageBox,
     Subgraph,
     TensorBox,
 )
-from ..lowering import empty, empty_strided, lowerings, register_lowering
+from ..lowering import (
+    _full,
+    check_and_broadcast_indices,
+    empty,
+    empty_strided,
+    expand,
+    index_output_size_and_inner_fn,
+    lowerings,
+    register_lowering,
+    to_dtype,
+)
 from ..select_algorithm import autotune_select_algorithm, realize_inputs, TritonTemplate
 
 
@@ -93,10 +109,54 @@ def get_float32_precision():
         return "'tf32'"
 
 
-def build_subgraph_buffer(
-    args: List[TensorBox],
-    subgraph: Subgraph,
-):
+def zeros_and_scatter_lowering(shape: List[int], indices, values):
+    # Always accumulate into fp32 then cast
+    grad = _full(0, values.get_device(), torch.float32, shape)
+    assert isinstance(grad, TensorBox)
+    grad.realize()
+    x_size = grad.get_size()
+    values = to_dtype(values, grad.get_dtype())
+    indices_loaders = [i.make_loader() if i is not None else None for i in indices]
+    indices, tensor_indices = check_and_broadcast_indices(indices, grad.get_device())
+    # We can use the first one since they are all required to be the same size
+    tensor_size = list(indices[tensor_indices[0]].get_size())
+    indexed_size = [x_size[i] for i in range(len(indices))]
+
+    expected_vals_size, inner_fn = index_output_size_and_inner_fn(
+        x_size,
+        indices,
+        tensor_indices,
+        tensor_size,
+        indices_loaders,
+        indexed_size,
+        None,
+        check=True,
+    )
+
+    values = expand(values, expected_vals_size)
+    device = grad.get_device()
+    assert device is not None
+    scatter = Scatter(
+        device=device,
+        dtype=grad.get_dtype(),
+        inner_fn=values.make_loader(),
+        ranges=expected_vals_size,  # iter_ranges,
+        output_indexer=inner_fn,
+        scatter_mode="atomic_add",
+    )
+
+    buffer = ComputedBuffer(
+        name=grad.data.data.name,  # type: ignore[attr-defined]
+        layout=MutationLayoutSHOULDREMOVE(grad),
+        data=scatter,
+    )
+    return buffer
+
+
+SubgraphResults = Union[List[Optional[ComputedBuffer]], Optional[ComputedBuffer]]
+
+
+def build_subgraph_buffer(args: List[TensorBox], subgraph: Subgraph) -> SubgraphResults:
     """This function's goal is to take in the required args and produce the subgraph buffer
     The subgraph buffer is a ComputedBuffer that will be inlined into the triton template
 
@@ -107,17 +167,30 @@ def build_subgraph_buffer(
     from ..subgraph_lowering import PointwiseSubgraphLowering
 
     pw_subgraph = PointwiseSubgraphLowering(
-        subgraph.graph_module, root_graph_lowering=V.graph
+        subgraph.graph_module,
+        root_graph_lowering=V.graph,
+        allowed_mutations=OrderedSet([torch.ops.flex_lib.zeros_and_scatter.default]),
+        additional_lowerings={
+            torch.ops.flex_lib.zeros_and_scatter.default: zeros_and_scatter_lowering
+        },
     )
     with V.set_graph_handler(pw_subgraph):  # type: ignore[arg-type]
         pw_subgraph.run(*args)
 
-    def convert_output_node_to_buffer(output):
-        if output is None:
+    # Since we are allowing mutations/buffer creation, we need to register any fresh buffers
+    # creating during the pointwise subgraph lowering
+    if len(pw_subgraph.buffers) > 0:
+        for buffer in pw_subgraph.buffers:
+            V.graph.register_buffer(buffer)
+
+    def convert_output_node_to_buffer(output_buffer) -> Optional[ComputedBuffer]:
+        if output_buffer is None:
             return None
-        output_buffer = output
+        if isinstance(output_buffer, ComputedBuffer):
+            # These nodes are coming from the output of zeros_and_scatter
+            return output_buffer
         assert isinstance(output_buffer, TensorBox), (
-            "The output node  for flex attention's subgraph must be a TensorBox, but got: ",
+            "The output node for flex attention's subgraph must be a TensorBox, but got: ",
             type(output_buffer),
         )
         assert isinstance(output_buffer.data, StorageBox), (
@@ -135,8 +208,6 @@ def build_subgraph_buffer(
         )
         return subgraph_buffer
 
-    # node.args[0] is either a single element or a list of elements
-    # representing all outputs of the function.
     return tree_map(convert_output_node_to_buffer, pw_subgraph.graph_outputs)
 
 
@@ -157,6 +228,12 @@ def get_offset_for_next_block(
     jump_to_block = (next_block - cur_block ) * SPARSE_BLOCK - (SPARSE_BLOCK_MULTIPLE - 1) * BLOCK
     offset = jump_to_block * needs_jump + (1 - needs_jump) * BLOCK
     return offset
+"""
+
+get_bounded_indices_func = r"""
+@triton.jit
+def get_bounded_indices(indices, max_len=None):
+    return indices % max_len if max_len is not None else indices
 """
 
 compute_flex_attention = r"""
@@ -355,10 +432,9 @@ compute_flex_attention = r"""
     idx_d = tl.arange(0, V_HEAD_DIM)[None, :]
 
     mask = idx_m < Q_LEN
-    # TODO generalize and add proper mask support
+
     {{store_output(("idx_zq", "idx_hq", "idx_m", "idx_d"), "acc", "mask")}}
 
-    # TODO dont want to write this if we dont require grad
     if OUTPUT_LOGSUMEXP:
         off_hz = tl.program_id(1)
         l_ptrs = LSE + off_hz * Q_LEN + offs_m
@@ -555,10 +631,19 @@ flex_attention_template = TritonTemplate(
 
 
 def _use_flex_decoding(query, kernel_options):
-    # Decide which kernel to use, return true if use flex decoding kernel.
-    return (
-        not kernel_options.get("FORCE_USE_FLEX_ATTENTION", False)
-    ) and V.graph.sizevars.evaluate_expr(sympy.Lt(query.get_size()[-2], 128))
+    """Decide which kernel to use, return true if use flex decoding kernel.
+    Note:
+       Since the number of splits is calculated based of the the number of batch and head dims
+       we need to ensure that the batch and head dims are statically known. Otherwise we just
+       use the main flex_attention kernel.
+    """
+    force_flex = kernel_options.get("FORCE_USE_FLEX_DECODING", False)
+    short_query_length = V.graph.sizevars.evaluate_expr(
+        sympy.Lt(query.get_size()[-2], 128)
+    )
+    static_batch = isinstance(query.get_size()[0], (int, sympy.Integer))
+    static_num_heads = isinstance(query.get_size()[1], (int, sympy.Integer))
+    return not force_flex and short_query_length and static_batch and static_num_heads
 
 
 _h100_default_config = {
@@ -598,12 +683,17 @@ _rocm_default_config = {
 }
 
 
-def _get_rocm_config(query, mode: str) -> Tuple[int, int, int, int]:
+class Mode(Enum):
+    fwd = auto()
+    bwd = auto()
+
+
+def _get_rocm_config(query, mode: Mode) -> Tuple[int, int, int, int]:
     dtype = query.get_dtype()
-    head_dim = query.get_size()[-1]
+    head_dim = V.graph.sizevars.evaluate_static_shape(query.get_size()[-1])
     fwd_config = None
 
-    if mode == "fwd":
+    if mode == Mode.fwd:
         if head_dim <= 256:
             if dtype == torch.float32:
                 fwd_config = (64, 64, 4, 1)
@@ -617,6 +707,7 @@ def _get_rocm_config(query, mode: str) -> Tuple[int, int, int, int]:
                 fwd_config = (64, 32, 4, 1)
         return fwd_config
     else:  # bwd
+        assert mode == Mode.bwd
         if dtype == torch.float32:
             return (16, 16, 4, 1)
         elif head_dim <= 256:
@@ -630,14 +721,14 @@ def _get_rocm_config(query, mode: str) -> Tuple[int, int, int, int]:
             return (16, 16, 4, 1)
 
 
-def _get_nv_config(query, mode: str) -> Tuple[int, int, int, int]:
+def _get_nv_config(query, mode: Mode) -> Tuple[int, int, int, int]:
     dtype = query.get_dtype()
-    head_dim = query.get_size()[-1]
+    head_dim = V.graph.sizevars.evaluate_static_shape(query.get_size()[-1])
     fwd_config = None
 
     capability = torch.cuda.get_device_capability()
 
-    if mode == "fwd":
+    if mode == Mode.fwd:
         if head_dim <= 256:
             if dtype == torch.float32:
                 fwd_config = (64, 64, 4, 3)
@@ -655,6 +746,7 @@ def _get_nv_config(query, mode: str) -> Tuple[int, int, int, int]:
         return fwd_config
 
     else:  # bwd
+        assert mode == Mode.bwd
         if dtype == torch.float32:
             return (16, 16, 4, 1)
         elif head_dim <= 256 and capability >= (9, 0):  # H100
@@ -664,11 +756,13 @@ def _get_nv_config(query, mode: str) -> Tuple[int, int, int, int]:
                 return (64, 128, 8, 3)
             else:
                 return (64, 64, 4, 2)
-        elif capability >= (8, 0):  # A100
-            if head_dim == 64:
+        elif capability >= (8, 0):
+            if head_dim >= 64:
                 return (32, 128, 4, 3)
             elif head_dim == 128:
-                return (64, 128, 8, 3)
+                # SM86/89 have smaller shared memory sizes
+                num_stages = 3 if capability[-1] == 0 else 2
+                return (64, 64, 4, num_stages)
             else:
                 return (64, 64, 4, 2)
         else:  # modest hardware or extremely large head_dim
@@ -677,16 +771,16 @@ def _get_nv_config(query, mode: str) -> Tuple[int, int, int, int]:
 
 def _get_default_config_fwd(query) -> Tuple[int, int, int, int]:
     if torch.version.hip is None:
-        return _get_nv_config(query, "fwd")
+        return _get_nv_config(query, mode=Mode.fwd)
     else:
-        return _get_rocm_config(query, "fwd")
+        return _get_rocm_config(query, mode=Mode.fwd)
 
 
 def _get_default_config_bwd(query) -> Tuple[int, int, int, int]:
     if torch.version.hip is None:
-        return _get_nv_config(query, "bwd")
+        return _get_nv_config(query, mode=Mode.bwd)
     else:
-        return _get_rocm_config(query, "bwd")
+        return _get_rocm_config(query, mode=Mode.bwd)
 
 
 def create_num_blocks_fake_generator(sparse_indices):
@@ -722,6 +816,221 @@ def create_indices_fake(x) -> torch.Tensor:
 
 from torch._inductor.kernel.flex_decoding import create_flex_decoding_kernel
 
+from ..codegen.cpp_flex_attention_template import CppFlexAttentionTemplate
+
+
+def check_cpu_supported():
+    import os
+    import sys
+
+    requires_avx2_on_cpu = (
+        torch.cpu._is_avx2_supported() and os.getenv("ATEN_CPU_CAPABILITY") != "default"
+    )
+    supported = (
+        requires_avx2_on_cpu
+        and not torch.xpu.is_available()
+        and not sys.platform == "darwin"
+    )
+    return supported
+
+
+def lower_cpu(
+    query,
+    key,
+    value,
+    subgraph,
+    block_mask,
+    scale,
+    kernel_options,
+    score_mod_other_buffers,
+    mask_mod_other_buffers,
+):
+    (
+        _,  # q_length
+        _,  # kv_length
+        kv_num_blocks,
+        kv_indices,
+        full_kv_num_blocks,
+        full_kv_indices,
+        q_num_blocks,
+        q_indices,
+        full_q_num_blocks,
+        full_q_indices,
+        SPARSE_Q_BLOCK_SIZE,
+        SPARSE_KV_BLOCK_SIZE,
+        mask_graph,
+    ) = block_mask
+
+    if kernel_options["OUTPUT_LOGSUMEXP"]:
+        raise NotImplementedError(
+            "torch.compile on CPU only supports inference and `return_lse` is not supported yet."
+        )
+    if not check_cpu_supported():
+        raise NotImplementedError(
+            "torch.compile on current platform is not supported for CPU."
+        )
+
+    fake_buffers: List[Buffer] = []  # noqa: F821
+    placeholder_inps = [
+        create_placeholder(name, dtype, query.get_device())
+        for name, dtype in [
+            ("score", torch.float),
+            ("b", torch.int64),
+            ("h", torch.int64),
+            ("q_idx", torch.int64),
+            ("kv_idx", torch.int64),
+        ]
+    ]
+    subgraph_buffer = build_subgraph_buffer(
+        placeholder_inps + list(score_mod_other_buffers), subgraph
+    )
+    if subgraph_buffer is not None:
+        if isinstance(subgraph_buffer, list):
+            for _buf in subgraph_buffer:
+                if _buf is not None:
+                    _buf.freeze_layout()
+        else:
+            subgraph_buffer.freeze_layout()
+    mask_graph_placeholder_inps = [
+        create_placeholder(name, dtype, query.get_device())
+        for name, dtype in [
+            ("b", torch.int64),
+            ("h", torch.int64),
+            ("q_idx", torch.int64),
+            ("kv_idx", torch.int64),
+        ]
+    ]
+    mask_graph_buffer = build_subgraph_buffer(
+        mask_graph_placeholder_inps + list(mask_mod_other_buffers), mask_graph
+    )
+
+    buffer_list = (
+        placeholder_inps
+        + list(score_mod_other_buffers)
+        + mask_graph_placeholder_inps
+        + list(mask_mod_other_buffers)
+    )
+    for item in buffer_list:
+        if isinstance(item, TensorBox):
+            fake_buffers.append(item.data.data)  # type: ignore[attr-defined]
+
+    (
+        query,
+        key,
+        value,
+        kv_num_blocks,
+        kv_indices,
+        full_kv_num_blocks,
+        full_kv_indices,
+        q_num_blocks,
+        q_indices,
+        full_q_num_blocks,
+        full_q_indices,
+    ) = maybe_realize(
+        [
+            query,
+            key,
+            value,
+            kv_num_blocks,
+            kv_indices,
+            full_kv_num_blocks,
+            full_kv_indices,
+            q_num_blocks,
+            q_indices,
+            full_q_num_blocks,
+            full_q_indices,
+        ]
+    )
+
+    if len(OrderedSet([query.get_name(), key.get_name(), value.get_name()])) != 3:
+        raise NotImplementedError(
+            "Unsupported for now if query, key, value are the same buffer."
+        )
+    if query.get_dtype() not in [torch.float, torch.bfloat16]:
+        raise NotImplementedError(
+            "`torch.float` and `torch.bfloat16` are supported in FlexAttention for CPU device. "
+            f"Found input tensors are `{query.get_dtype()}`."
+        )
+    score_mod_other_buffers = maybe_realize(score_mod_other_buffers)
+    mask_mod_other_buffers = maybe_realize(mask_mod_other_buffers)
+    Bq, Hq, seq_len_q, qk_head_dim = query.get_size()
+    Bkv, Hkv, seq_len_kv, v_head_dim = value.get_size()
+    B = Bq
+
+    # Construct output layout with strides matching the query.
+    out_size = [B, Hq, seq_len_q, v_head_dim]
+    fill_order = get_fill_order(query.get_stride())
+    out_strides = construct_strides(out_size, fill_order)
+
+    layout = FixedLayout(
+        query.get_device(),
+        query.get_dtype(),
+        [B, Hq, seq_len_q, v_head_dim],
+        stride=[sympy.sympify(s) for s in out_strides],
+    )
+    _choices: List[Any] = []
+    input_nodes = [query, key, value, kv_num_blocks, kv_indices]
+    if not full_kv_num_blocks:
+        no_full_kv_block = True
+    else:
+        no_full_kv_block = False
+        input_nodes += [full_kv_num_blocks]
+    has_other_buffer = False
+    kernel_input_name_to_buffer = {}
+    if score_mod_other_buffers or mask_mod_other_buffers:
+        has_other_buffer = True
+
+        for prefix, buffers in [
+            ("score_others", score_mod_other_buffers),
+            ("mask_others", mask_mod_other_buffers),
+        ]:
+            kernel_input_name_to_buffer.update(
+                {f"{prefix}_{i}": buf for i, buf in enumerate(buffers)}
+            )
+        input_nodes += [
+            value
+            for value in kernel_input_name_to_buffer.values()
+            if not isinstance(value, sympy.Symbol)
+        ]
+
+    skip_mask_score = kernel_options.get("SKIP_MASK_SCORE", False)
+    # Mark SPARSE_KV_BLOCK_SIZE & SPARSE_Q_BLOCK_SIZE as static shapes and add guards.
+    SPARSE_KV_BLOCK_SIZE = V.graph.sizevars.evaluate_static_shape(SPARSE_KV_BLOCK_SIZE)
+    SPARSE_Q_BLOCK_SIZE = V.graph.sizevars.evaluate_static_shape(SPARSE_Q_BLOCK_SIZE)
+    assert V.graph.sizevars.evaluate_expr(
+        sympy.Le(seq_len_q, sympy.Mul(kv_indices.get_size()[-2], SPARSE_Q_BLOCK_SIZE))
+    ), "Q seqlen must be smaller than the block_mask size in the Q dimension, considering pass a larger block_mask."
+    assert V.graph.sizevars.evaluate_expr(
+        sympy.Le(seq_len_kv, sympy.Mul(kv_indices.get_size()[-1], SPARSE_KV_BLOCK_SIZE))
+    ), "KV seqlen must be smaller than the block_mask size in the KV dimension, considering pass a larger block_mask."
+    CppFlexAttentionTemplate.add_choices(
+        choices=_choices,
+        input_nodes=input_nodes,
+        layout=layout,
+        scale=scale,
+        score_mod=None if skip_mask_score else subgraph_buffer,
+        mask_mod=None if skip_mask_score else mask_graph_buffer,
+        kv_block_size=SPARSE_KV_BLOCK_SIZE,
+        has_other_buffer=has_other_buffer,
+        no_full_kv_block=no_full_kv_block,
+        fake_buffers=fake_buffers,
+        len_score_other=len(score_mod_other_buffers),
+        len_mask_other=len(mask_mod_other_buffers),
+        kernel_input_name_to_buffer=kernel_input_name_to_buffer,
+    )
+    inputs_for_autotuning = [
+        query,
+        key,
+        value,
+    ]
+    res = autotune_select_algorithm(
+        "flex_attention",
+        _choices,
+        inputs_for_autotuning,
+        layout,
+    )
+    return (res,)
+
 
 # TODO: We probably also need a layout constraint?
 @register_lowering(torch.ops.higher_order.flex_attention, type_promotion_kind=None)
@@ -736,7 +1045,23 @@ def flex_attention(
     score_mod_other_buffers,
     mask_mod_other_buffers,
 ):
+    if query.get_device().type == "cpu":
+        return lower_cpu(
+            query,
+            key,
+            value,
+            subgraph,
+            block_mask,
+            scale,
+            kernel_options,
+            score_mod_other_buffers,
+            mask_mod_other_buffers,
+        )
+
+    # below is cuda path if device is not cpu
     (
+        _,  # q_length
+        _,  # kv_length
         kv_num_blocks,
         kv_indices,
         full_kv_num_blocks,
@@ -749,6 +1074,7 @@ def flex_attention(
         SPARSE_KV_BLOCK_SIZE,
         mask_graph,
     ) = block_mask
+
     placeholder_inps = [
         create_placeholder(name, dtype, query.get_device())
         for name, dtype in [
@@ -762,6 +1088,7 @@ def flex_attention(
     subgraph_buffer = build_subgraph_buffer(
         placeholder_inps + list(score_mod_other_buffers), subgraph
     )
+
     mask_graph_placeholder_inps = [
         create_placeholder(name, dtype, query.get_device())
         for name, dtype in [
@@ -774,6 +1101,7 @@ def flex_attention(
     mask_graph_buffer = build_subgraph_buffer(
         mask_graph_placeholder_inps + list(mask_mod_other_buffers), mask_graph
     )
+
     kernel_options = dict(kernel_options)
     kernel_options.setdefault("FLOAT32_PRECISION", get_float32_precision())
     if _use_flex_decoding(query, kernel_options):
@@ -840,14 +1168,14 @@ def flex_attention(
 
     # Construct output layout with strides matching the query.
     out_size = [B, Hq, seq_len_q, v_head_dim]
-    fill_order = get_fill_order(query.get_stride())
+    fill_order = get_fill_order(query.get_stride(), V.graph.sizevars.shape_env)
     out_strides = construct_strides(out_size, fill_order)
 
     layout = FixedLayout(
         query.get_device(),
         query.get_dtype(),
         [B, Hq, seq_len_q, v_head_dim],
-        stride=out_strides,
+        stride=[sympy.sympify(s) for s in out_strides],
     )
     # see NOTE:[TritonTemplates with multiple outputs]
     logsumexp_shape = [B, Hq, seq_len_q]
@@ -871,8 +1199,13 @@ def flex_attention(
         full_kv_num_blocks, full_kv_indices = (
             empty(0, device=query.get_device()) for _ in range(2)
         )
-    kernel_options.setdefault("QK_HEAD_DIM", qk_head_dim)
-    kernel_options.setdefault("V_HEAD_DIM", v_head_dim)
+    kernel_options.setdefault(
+        "QK_HEAD_DIM",
+        V.graph.sizevars.evaluate_static_shape(qk_head_dim),
+    )
+    kernel_options.setdefault(
+        "V_HEAD_DIM", V.graph.sizevars.evaluate_static_shape(v_head_dim)
+    )
 
     choices: List[Any] = []
     configs: List[Tuple[int, int, int, int]] = []
@@ -893,12 +1226,6 @@ def flex_attention(
     # Mark SPARSE_KV_BLOCK_SIZE & SPARSE_Q_BLOCK_SIZE as static shapes and add guards.
     SPARSE_KV_BLOCK_SIZE = V.graph.sizevars.evaluate_static_shape(SPARSE_KV_BLOCK_SIZE)
     SPARSE_Q_BLOCK_SIZE = V.graph.sizevars.evaluate_static_shape(SPARSE_Q_BLOCK_SIZE)
-    assert V.graph.sizevars.evaluate_expr(
-        sympy.Le(seq_len_q, sympy.Mul(kv_indices.get_size()[-2], SPARSE_Q_BLOCK_SIZE))
-    ), "Q seqlen must be smaller than the block_mask size in the Q dimension, considering pass a larger block_mask."
-    assert V.graph.sizevars.evaluate_expr(
-        sympy.Le(seq_len_kv, sympy.Mul(kv_indices.get_size()[-1], SPARSE_KV_BLOCK_SIZE))
-    ), "KV seqlen must be smaller than the block_mask size in the KV dimension, considering pass a larger block_mask."
 
     # Note, we don't need to pass in the captured buffers explicitly
     # because they're implicitly added by the score_mod function
@@ -912,12 +1239,19 @@ def flex_attention(
                     f"got Q_BLOCK_SIZE={SPARSE_Q_BLOCK_SIZE} and KV_BLOCK_SIZE={SPARSE_KV_BLOCK_SIZE}."
                 )
             continue
-        # Work around https://github.com/pytorch/pytorch/issues/129625
-        if num_stages == 2:
-            continue
 
         cur_kernel_options = original_kernel_options.copy()
         # Performance tuning
+        # Triton parameters
+        # Remove prefix for forward kernels options and delete backward kernel options.
+        for k in list(cur_kernel_options.keys()):
+            if k.startswith("fwd_"):
+                v = cur_kernel_options.pop(k)
+                cur_kernel_options[k[4:]] = v
+            if k.startswith("bwd_"):
+                cur_kernel_options.pop(k)
+        cur_kernel_options.setdefault("num_stages", num_stages)
+        cur_kernel_options.setdefault("num_warps", num_warps)
         cur_kernel_options.setdefault("BLOCK_M", BLOCK_M)
         cur_kernel_options.setdefault("BLOCK_N", BLOCK_N)
         # Blocksparse options
@@ -944,8 +1278,6 @@ def flex_attention(
             mutated_inputs=[
                 logsumexp,
             ],
-            num_stages=num_stages,
-            num_warps=num_warps,
             call_sizes=query.get_size(),
             **cur_kernel_options,
         )
@@ -1402,12 +1734,11 @@ def bwd_dq_block_mn(
         qk *= SM_SCALE
     # ~~~~~~~~~~~~~~~~~~~ Apply score modification  ~~~~~~~~~~~~~~~~~~~
     pre_mod_scores = qk
-    if CHECK_BLOCK_BOUNDARY:
-        m = offs_m2[:, None] % Q_LEN
-        n = offs_n2[None, :] % KV_LEN
-    else:
-        m = offs_m2[:, None]
-        n = offs_n2[None, :]
+    n = get_bounded_indices(offs_n2[None, :], KV_LEN if CHECK_BLOCK_BOUNDARY else None)
+    # The boundary check is done for the outer loop, but here it's possible since we're iterating across N dim
+    # that the M reads out of bounds prior to the last loop
+    m = get_bounded_indices(offs_m2[:, None], Q_LEN if (not IS_DIVISIBLE or CHECK_BLOCK_BOUNDARY) else None)
+
     {{ modification(
         subgraph_number=0,
         output_name="post_mod_scores",
@@ -1435,7 +1766,7 @@ def bwd_dq_block_mn(
         ) | indent_except_first(2) }}
 
         if CHECK_BLOCK_BOUNDARY:
-            mask_mod_output = tl.where(offs_n2[None, :] < KV_LEN, mask_mod_output, float("-inf"))
+            mask_mod_output = tl.where(offs_n2[None, :] < KV_LEN, mask_mod_output, False)
         # apply mask for partial masked block
         post_mod_scores = tl.where(mask_mod_output, post_mod_scores, float("-inf"))
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -1463,11 +1794,26 @@ def bwd_dq_block_mn(
     if CHECK_BLOCK_BOUNDARY:
         grad_scores = tl.where(offs_n2[None, :] < KV_LEN, grad_scores, 0.0)
 
+    # ~~~~~~~~~~~~~~~~~~~ Apply other buffer grad writes ~~~~~~~~~~~~~
+    if WRITE_DQ:
+        scatter_mask = offs_m2[:, None] < Q_LEN and offs_n2[None, :] < KV_LEN
+        {{ modification(
+            subgraph_number=3,
+            output_name=None,
+            mask="scatter_mask",
+            score="pre_mod_scores",
+            b="off_z",
+            h="off_hq",
+            m="m",
+            n="n",
+            grad_score_mod="ds"
+        ) | indent_except_first(2) }}
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     ds = grad_scores
 
     if not IS_FULL_BLOCKS:
         if CHECK_BLOCK_BOUNDARY:
-            mask_mod_output = tl.where(offs_n2[None, :] < KV_LEN, mask_mod_output, float("-inf"))
+            mask_mod_output = tl.where(offs_n2[None, :] < KV_LEN, mask_mod_output, False)
         # (grads) apply mask for partially unmasked block
         ds = tl.where(mask_mod_output, ds, 0.0)
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -1585,12 +1931,11 @@ def bwd_dkdv_block_mn(
     if not PRESCALE_QK:
         qkT *= SM_SCALE
     # ~~~~~~~~~~~~~~~~~~~ Apply score modification  ~~~~~~~~~~~~~~~~~~~
-    if CHECK_BLOCK_BOUNDARY:
-        m = offs_m1[None, :] % Q_LEN
-        n = offs_n1[:, None] % KV_LEN
-    else:
-        m = offs_m1[None, :]
-        n = offs_n1[:, None]
+    m = get_bounded_indices(offs_m1[None, :], Q_LEN if CHECK_BLOCK_BOUNDARY else None)
+    # The boundary check is done for the outer loop, but here it's possible since we're iterating across M dim
+    # that the n reads out of bounds prior to the last loop
+    n = get_bounded_indices(offs_n1[:, None], KV_LEN if (not IS_DIVISIBLE or CHECK_BLOCK_BOUNDARY) else None)
+
     pre_mod_scores = qkT
     {{ modification(
         subgraph_number=0,
@@ -1618,7 +1963,7 @@ def bwd_dkdv_block_mn(
             n="n",
         ) | indent_except_first(2) }}
         if CHECK_BLOCK_BOUNDARY:
-            mask_mod_output = tl.where(offs_n1[:, None] < KV_LEN, mask_mod_output, float("-inf"))
+            mask_mod_output = tl.where(offs_n1[:, None] < KV_LEN, mask_mod_output, False)
         # (grads) apply mask for fully masked block
         post_mod_scores = tl.where(mask_mod_output, post_mod_scores, float("-inf"))
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -1650,13 +1995,34 @@ def bwd_dkdv_block_mn(
         n="n",
         grad_score_mod="dsT"
     ) | indent_except_first(1) }}
+
+    # ~~~~~~~~~~~~~~~~~~~ Apply other buffer grad writes ~~~~~~~~~~~~~
+    if not WRITE_DQ:
+        idx_b = off_z
+        idx_h = off_hq
+        idx_m = m
+        idx_n = n
+        scatter_mask = offs_m1[None, :] < Q_LEN and offs_n1[:, None] < KV_LEN
+        {{ modification(
+            subgraph_number=3,
+            output_name=None,
+            mask="scatter_mask",
+            score="pre_mod_scores",
+            b="idx_b",
+            h="idx_h",
+            m="idx_m",
+            n="idx_n",
+            grad_score_mod="dsT"
+        ) | indent_except_first(2) }}
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
     if CHECK_BLOCK_BOUNDARY:
         grad_scores = tl.where(offs_n1[:, None] < KV_LEN, grad_scores, 0.0)
 
     dsT = grad_scores
     if not IS_FULL_BLOCKS:
         if CHECK_BLOCK_BOUNDARY:
-            mask_mod_output = tl.where(offs_n1[:, None] < KV_LEN, mask_mod_output, float("-inf"))
+            mask_mod_output = tl.where(offs_n1[:, None] < KV_LEN, mask_mod_output, False)
         # (grads) apply mask for partially unmasked block
         dsT = tl.where(mask_mod_output, dsT, 0.0)
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -1664,8 +2030,85 @@ def bwd_dkdv_block_mn(
 
     return dk, dv
  """
-    + compute_next_offset_func,
+    + compute_next_offset_func
+    + get_bounded_indices_func,
 )
+
+
+def validate_joint_graph(joint_graph: torch.fx.Graph):
+    """We do some pre lowering graph checks in order to raise nicer error messages"""
+    for node in joint_graph.nodes:
+        if (
+            node.op == "call_function"
+            and node.target == torch.ops.flex_lib.zeros_and_scatter.default
+        ):
+            for user in node.users:
+                if user.op != "output":
+                    raise NotImplementedError(
+                        "Using multiple indexing operations on the same tensor that requires gradients "
+                        "in a score_mod function is not currently supported. "
+                        "This typically happens when indexing the same tensor multiple times, like:\n\n"
+                        "    def score_mod(score, b, h, q_idx, kv_idx):\n"
+                        "        return score + bias[q_idx] + bias[kv_idx]  # bias used twice!\n\n"
+                        "A valid workaround is to clone() the tensors that will be indexed multiple times. For example:\n\n"
+                        "    bias1 = bias.clone()\n"
+                        "    def score_mod(score, b, h, q_idx, kv_idx):\n"
+                        "        return score + bias[q_idx] + bias1[kv_idx]\n\n"
+                        "Note that this solution will use additional memory."
+                    )
+    return
+
+
+@dataclass(frozen=True)
+class JointOutputResult:
+    """Results from processing joint outputs."""
+
+    grad_input: ComputedBuffer
+    captured_grads_compute: List[ComputedBuffer]
+    captured_grads: List[Optional[TensorBox]]
+    mutated_grads: List[TensorBox]
+
+
+def process_joint_outputs(
+    all_joint_outputs: SubgraphResults, num_placeholders: int
+) -> JointOutputResult:
+    """Process joint outputs and extract various buffers needed for lowering
+
+    Args:
+        all_joint_outputs: List of all the outputs from build_subgraphs
+        num_placeholders: The number of placeholder inputs, used to skip over unused backward compute buffers
+
+    Returns:
+        JointOutputResult containing processed buffers and gradients
+    """
+    assert isinstance(all_joint_outputs, List)
+    assert (
+        all_joint_outputs[0] is not None
+    ), "joint_subgraph_buffer is None this is a bug!"
+
+    joint_buffer = all_joint_outputs[0]
+    other_grads = all_joint_outputs[num_placeholders - 1 :]
+
+    # outer_grads has the structure: Len(other_buffer_grads) if buffer doesn't require grad than it will be None
+    # We only grab the buffers that require grad for inlining into kernel
+    grads_compute = [buf for buf in other_grads if buf is not None]
+
+    def get_out(buf):
+        if buf is None:
+            return None
+        assert isinstance(buf, ComputedBuffer)
+        assert buf.name is not None
+        return TensorBox.create(V.graph.get_buffer(buf.name))
+
+    grads_out = [get_out(x) for x in other_grads]
+    mutated_grads = [buf for buf in grads_out if buf is not None]
+
+    return JointOutputResult(
+        grad_input=joint_buffer,
+        captured_grads_compute=grads_compute,
+        captured_grads=grads_out,
+        mutated_grads=mutated_grads,
+    )
 
 
 # TODO: We probably also need a layout constraint?
@@ -1690,6 +2133,8 @@ def flex_attention_backward(*args, **kwargs):
         mask_mod_other_buffers,
     ) = args
     (
+        _,  # q_length
+        _,  # kv_length
         kv_num_blocks,
         kv_indices,
         full_kv_num_blocks,
@@ -1741,7 +2186,6 @@ def flex_attention_backward(*args, **kwargs):
     assert V.graph.sizevars.evaluate_expr(
         sympy.Eq(Bq, Bkv) | sympy.Eq(Bkv, 1)
     ), f"Bq and Bkv must broadcastable. Got Bq={Bq} and Bkv={Bkv}"
-    B = Bq
 
     kernel_options = dict(kernel_options)
     kernel_options.setdefault("FLOAT32_PRECISION", get_float32_precision())
@@ -1769,8 +2213,18 @@ def flex_attention_backward(*args, **kwargs):
     ]
     # Sometimes we have weird unused nodes here
     joint_graph.graph_module.graph.eliminate_dead_code()
-    joint_subgraph_buffer, *_ = build_subgraph_buffer(
-        joint_placeholder_inps + list(score_mod_other_buffers), joint_graph
+
+    # It is hard to raise nice errors for some joint graphs during subgraph lowering
+    # This lets us do some checks before attempting to lower
+    validate_joint_graph(joint_graph.graph_module.graph)
+
+    all_joint_outputs = build_subgraph_buffer(
+        joint_placeholder_inps + list(score_mod_other_buffers),
+        joint_graph,
+    )
+
+    joint_outputs = process_joint_outputs(
+        all_joint_outputs, len(joint_placeholder_inps)
     )
 
     mask_graph_placeholder_inps = [
@@ -1785,6 +2239,8 @@ def flex_attention_backward(*args, **kwargs):
     mask_graph_buffer = build_subgraph_buffer(
         mask_graph_placeholder_inps + list(mask_mod_other_buffers), mask_graph
     )
+
+    mask_graph_buffer = mask_graph_buffer
 
     layout_broadcasted_k = FixedLayout(
         key.get_device(),
@@ -1827,8 +2283,15 @@ def flex_attention_backward(*args, **kwargs):
         full_kv_num_blocks, full_kv_indices, full_q_num_blocks, full_q_indices = (
             empty(0, device=query.get_device()) for _ in range(4)
         )
-    kernel_options.setdefault("QK_HEAD_DIM", qk_head_dim)
-    kernel_options.setdefault("V_HEAD_DIM", v_head_dim)
+    kernel_options.setdefault(
+        "QK_HEAD_DIM", V.graph.sizevars.evaluate_static_shape(qk_head_dim)
+    )
+    kernel_options.setdefault(
+        "V_HEAD_DIM", V.graph.sizevars.evaluate_static_shape(v_head_dim)
+    )
+
+    SPARSE_Q_BLOCK_SIZE = V.graph.sizevars.evaluate_static_shape(SPARSE_Q_BLOCK_SIZE)
+    SPARSE_KV_BLOCK_SIZE = V.graph.sizevars.evaluate_static_shape(SPARSE_KV_BLOCK_SIZE)
 
     choices: List[Any] = []
     configs: List[Tuple[int, int, int, int]] = []
@@ -1840,7 +2303,7 @@ def flex_attention_backward(*args, **kwargs):
                 (BLOCK1, BLOCK2, w, s)
                 for BLOCK1 in [32, 64]
                 for BLOCK2 in [32, 64, 128]
-                for w in [4, 8]
+                for w in ([4, 8] if BLOCK1 >= 128 or BLOCK2 >= 128 else [4])
                 for s in num_stages_list
                 if BLOCK2 % BLOCK1 == 0
             ]
@@ -1856,7 +2319,18 @@ def flex_attention_backward(*args, **kwargs):
             continue
 
         # Performance tuning
+        # Triton heuristics
         cur_kernel_options = original_kernel_options.copy()
+        # Remove prefix for backward kernels options and delete forward kernel options.
+        for k in list(cur_kernel_options.keys()):
+            if k.startswith("bwd_"):
+                v = cur_kernel_options.pop(k)
+                cur_kernel_options[k[4:]] = v
+            if k.startswith("fwd_"):
+                cur_kernel_options.pop(k)
+        cur_kernel_options.setdefault("num_warps", num_warps)
+        cur_kernel_options.setdefault("num_stages", num_stages)
+
         cur_kernel_options.setdefault("BLOCK_M1", BLOCK1)
         cur_kernel_options.setdefault("BLOCK_N1", BLOCK2)
         cur_kernel_options.setdefault("BLOCK_M2", BLOCK2)
@@ -1886,11 +2360,18 @@ def flex_attention_backward(*args, **kwargs):
                 full_q_indices,
             ],
             layout=layout_broadcasted_k,  # We use store_output only for grad_key
-            subgraphs=[fw_subgraph_buffer, joint_subgraph_buffer, mask_graph_buffer],
-            mutated_inputs=[grad_query, broadcasted_grad_value],
+            subgraphs=[
+                fw_subgraph_buffer,
+                joint_outputs.grad_input,
+                mask_graph_buffer,
+                joint_outputs.captured_grads_compute,
+            ],
+            mutated_inputs=[
+                grad_query,
+                broadcasted_grad_value,
+                *joint_outputs.mutated_grads,
+            ],
             call_sizes=query.get_size() + key.get_size()[1:3],
-            num_stages=num_stages,
-            num_warps=num_warps,
             **cur_kernel_options,
         )
     inputs_for_autotuning = (
@@ -1914,6 +2395,7 @@ def flex_attention_backward(*args, **kwargs):
         ]
         + list(score_mod_other_buffers)
         + list(mask_mod_other_buffers)
+        + joint_outputs.mutated_grads
     )
     input_gen_fns = {
         8: create_num_blocks_fake_generator(kv_indices),  # kv_num_blocks
@@ -1944,8 +2426,4 @@ def flex_attention_backward(*args, **kwargs):
         grad_key = lowerings[aten.sum](broadcasted_grad_key, axis=0, keepdims=True)
         grad_value = lowerings[aten.sum](broadcasted_grad_value, axis=0, keepdims=True)
 
-    return (
-        grad_query,
-        grad_key,
-        grad_value,
-    )
+    return (grad_query, grad_key, grad_value, tuple(joint_outputs.captured_grads))
