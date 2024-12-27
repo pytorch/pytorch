@@ -1,6 +1,5 @@
 #pragma once
 
-#include <ATen/core/Array.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/DeviceUtils.cuh>
 #include <ATen/cuda/detail/OffsetCalculator.cuh>
@@ -899,7 +898,7 @@ inline void launch_jitted_reduce_kernel(
     std::mutex &jiterator_mutex,
     std::array<at::cuda::jit::NvrtcFunction, 3> &fn_cache,
     const at::cuda::jit::KernelDescriptor &desc,
-    int vt0, const ReduceConfig& config, void *reduction) {
+    int vt0, const ReduceConfig& config, const void *reduction) {
   dim3 block = config.block();
   dim3 grid = config.grid();
 
@@ -924,7 +923,7 @@ inline void launch_jitted_reduce_kernel(
     *fn_ptr = at::cuda::jit::jit_pwise_function(code, "reduction_" + desc.name);
   }
   constexpr int kernel_args = 1;
-  void* args[kernel_args];
+  const void* args[kernel_args];
   args[0] = reduction;
   at::cuda::jit::launch_jitted_pwise_function(*fn_ptr, args, grid, block, shared_memory);
 }
@@ -1122,7 +1121,7 @@ ReduceConfig setReduceConfig(const TensorIterator& iter){
   // Control the number of threadblocks by adjusting the maximum number of
   // threads per multi-processor. These numbers better reflect the maximum
   // theoretical achievable threads per MP for the reduction operation.
-  if (iter.ndim() == 1)
+  if (iter.ndim() == 1 || iter.ndim() == 3)
     max_threads_per_mp = 512;
   if (iter.ndim() == 2)
     max_threads_per_mp = 256;

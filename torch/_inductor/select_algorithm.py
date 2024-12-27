@@ -10,6 +10,7 @@ import logging
 import math
 import operator
 import os
+import re
 import sys
 import textwrap
 import time
@@ -74,6 +75,7 @@ from .utils import (
     sympy_dot,
     sympy_index_symbol,
     sympy_product,
+    triton_type,
     triton_type_to_torch,
     unique,
 )
@@ -88,6 +90,8 @@ PRINT_AUTOTUNE = True
 DEBUG = False
 
 if TYPE_CHECKING:
+    import concurrent
+
     from torch._inductor.codegen.simd import IterationRangesRoot
 
 
@@ -332,6 +336,8 @@ class TritonTemplateKernel(TritonKernel):
 
         # input buffers which we are fusing into
         self.prologue_fused_inputs: OrderedSet[str] = OrderedSet()
+        # input buffers which we are fusing into, which preserve a zero mask
+        self.prologue_fused_inputs_preserve_zero: OrderedSet[str] = OrderedSet()
 
         # The following attributes are all used for triton kernel codegen.
         # They are swapped onto the TritonTemplateKernel object by
@@ -637,7 +643,7 @@ class TritonTemplateKernel(TritonKernel):
                     self.body.writeline(str(scatter))
 
             body_val = self.body.getvalue()
-            self.cse.invalidate(set())
+            self.cse.invalidate(OrderedSet[str]())
             return body_val
 
     def load_input(
@@ -689,8 +695,6 @@ class TritonTemplateKernel(TritonKernel):
             lengths = [V.graph.sizevars.simplify(s) for s in input_node.get_size()]
             assert len(indices) == len(lengths)
 
-            stride = self.named_input_nodes[input_name].get_stride()
-
             index_symbols = [sympy.Symbol(x, integer=True) for x in indices]
             assert len(indices) == len(lengths)
 
@@ -711,9 +715,11 @@ class TritonTemplateKernel(TritonKernel):
             )
             contiguous_index = self.rename_indexing(contiguous_index)
             self.body.writeline("xindex = " + texpr(contiguous_index))
-            self.range_trees[0].lookup(
+
+            xindex_range_root = self.range_trees[0].lookup(
                 sympy.Integer(1), sympy_product(lengths)
-            ).set_name("xindex")
+            )
+            xindex_range_root.set_name("xindex")
 
             # Note - ["None" override_mask]
             # MM Templates work by taking out of bounds index values and wrapping them around to 0
@@ -726,7 +732,7 @@ class TritonTemplateKernel(TritonKernel):
             self.template_out = "xindex"
             self.template_indices = indices
             self.named_input_nodes[input_name].data.freeze_layout()
-            self.cse.invalidate(set())
+            self.cse.invalidate(OrderedSet())
 
             template_mask = self.template_mask
 
@@ -746,14 +752,20 @@ class TritonTemplateKernel(TritonKernel):
                         # We load masked out values with 0, then apply a prologue.
                         # The masked out values may not necessariliy be 0 any more
                         # so we need to reapply the mask.
-                        # TODO: do analysis with value ranges if the prologue is 0 preserving, such as
-                        # type casting or multiplication, and omit reapplication of mask.
-                        if template_mask == "None":
-                            V.kernel.compute.writeline(f"{output_name} = {value}")
-                        else:
-                            V.kernel.compute.writeline(
-                                f"{output_name} = tl.where({template_mask}, {value}, {other})"
+                        value_dtype = value.dtype
+                        value_str = str(value)
+                        if template_mask != "None" and (
+                            name not in V.kernel.prologue_fused_inputs_preserve_zero
+                            or other != 0
+                        ):
+                            value_str = (
+                                f"tl.where({template_mask}, {value_str}, {other})"
                             )
+
+                        if value_dtype != V.graph.get_buffer(name).dtype:
+                            value_str = f"{value_str}.to({triton_type(V.graph.get_buffer(name).dtype)})"
+
+                        V.kernel.compute.writeline(f"{output_name} = {value_str}")
 
             self.ops_handler = StoreOutputSubstitution
 
@@ -799,9 +811,9 @@ class TritonTemplateKernel(TritonKernel):
 
         def hook():
             with self.set_subgraph_body(hook_key):
-                self.cse.invalidate(set())
+                self.cse.invalidate(OrderedSet())
                 self.codegen_body()
-                self.cse.invalidate(set())
+                self.cse.invalidate(OrderedSet())
                 if input_node.get_name() not in self.prologue_fused_inputs:
                     self.body.writeline(load_code)
 
@@ -885,7 +897,7 @@ class TritonTemplateKernel(TritonKernel):
         def hook():
             # more stuff might have been added since the codegen_body above
             self.codegen_body()
-            self.cse.invalidate(set())
+            self.cse.invalidate(OrderedSet())
 
             return textwrap.indent(self.body.getvalue(), " " * indent_width).strip()
 
@@ -979,6 +991,11 @@ class TritonTemplateKernel(TritonKernel):
                 name,
                 call_args,
                 grid=self.grid_fn(*grid),
+                # Calling self.grid_fn(*grid) already computes grid as a tuple,
+                # so we need to explicitly set grid_fn as empty here. Otherwise, the
+                # generated wrapper code will wrap the tuple as grid(tuple), which can
+                # cause incorrect grid computation in some corner cases.
+                grid_fn="",
                 arg_types=arg_types,
                 triton_meta=self.triton_meta,
             )
@@ -1627,6 +1644,25 @@ class AlgorithmSelectorCache(PersistentCache):
         # TODO(nmacchioni): remove once CI tests are fixed
         choices = [choice for choice in choices if choice is not None]
 
+        if config.test_configs.autotune_choice_name_regex is not None:
+            choices = [
+                c
+                for c in choices
+                if re.search(
+                    config.test_configs.autotune_choice_name_regex,
+                    c.name,
+                )
+            ]
+        if config.test_configs.autotune_choice_desc_regex is not None:
+            choices = [
+                c
+                for c in choices
+                if re.search(
+                    config.test_configs.autotune_choice_desc_regex,
+                    c.description,
+                )
+            ]
+
         if mm_file_name := get_mm_log_filename():
             M, K = input_nodes[-2].get_size()[:2]
             N = input_nodes[-1].get_size()[-1]
@@ -1715,16 +1751,35 @@ class AlgorithmSelectorCache(PersistentCache):
 
             def precompile_with_captured_stdout(choice):
                 with restore_stdout_stderr(initial_stdout, initial_stderr):
-                    start_time = time.time()
                     choice.precompile()
-                    return time.time() - start_time
+
+            def on_complete(future):
+                assert future in start_times
+                elapsed_times[future] = time.time() - start_times[future]
 
             executor = ThreadPoolExecutor(max_workers=num_workers)
+            async_compile = torch._inductor.async_compile.AsyncCompile()
 
-            futures = {}
+            futures: Dict[concurrent.futures.Future[Any], ChoiceCaller] = {}
+            start_times: Dict[concurrent.futures.Future[Any], float] = {}
+            elapsed_times: Dict[concurrent.futures.Future[Any], float] = {}
+
             for c in choices:
                 if hasattr(c, "precompile"):
-                    future = executor.submit(precompile_with_captured_stdout, c)
+                    triton_cuda_choice = isinstance(
+                        c, TritonTemplateCaller
+                    ) and isinstance(c.bmreq, TritonGPUBenchmarkRequest)
+                    if triton_cuda_choice and async_compile.use_process_pool():
+                        with open(c.bmreq.module_path) as file:
+                            source_code = file.read()
+                        future = async_compile.triton(
+                            kernel_name=c.bmreq.kernel_name, source_code=source_code
+                        ).future
+                    else:
+                        future = executor.submit(precompile_with_captured_stdout, c)
+
+                    start_times[future] = time.time()
+                    future.add_done_callback(on_complete)
                     futures[future] = c
 
             @functools.lru_cache(None)
@@ -1743,7 +1798,7 @@ class AlgorithmSelectorCache(PersistentCache):
                         log.info(
                             "Precompiling benchmark choice %s took %.02fs",
                             futures[future],
-                            future.result(),
+                            elapsed_times[future],
                         )
 
                 executor.shutdown(wait=True)
@@ -1829,20 +1884,14 @@ class AlgorithmSelectorCache(PersistentCache):
 
                 return timings
 
-            # Assume the same base template, with same prologue support.
-            # We could relax this assumption by taking union of allowed prologue inputs,
-            # and within benchmark fusion not allow prologue fusion for choices which dont support it
-            # No use case of that yet.
-            allowed_prologue_inps: Optional[OrderedSet[str]] = None
+            # We take the union of allowed prologue inputs from all choices,
+            # and, within benchmark fusion, don't allow prologue fusion for
+            # choices which dont support the whole union.
+            allowed_prologue_inps: OrderedSet[str] = OrderedSet()
             for c in choices:
                 if isinstance(c, TritonTemplateCaller):
-                    if allowed_prologue_inps is None:
-                        allowed_prologue_inps = c.allowed_prologue_inps
-                    else:
-                        assert allowed_prologue_inps == c.allowed_prologue_inps
+                    allowed_prologue_inps |= c.allowed_prologue_inps
 
-            if allowed_prologue_inps is None:
-                allowed_prologue_inps = OrderedSet()
             return torch._inductor.ir.TensorBox.create(
                 torch._inductor.ir.MultiTemplateBuffer(
                     layout,

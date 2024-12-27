@@ -109,18 +109,12 @@ fbgemm::conv_param_t<kSpatialDim> MakeFbgemmConvParam(
     const std::vector<int>& dilations,
     const std::vector<int>& output_padding,
     bool transposed) {
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
-  std::array<int, kSpatialDim> image_shape_;
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
-  std::array<int, kSpatialDim> kernels_;
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
-  std::array<int, kSpatialDim> strides_;
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
-  std::array<int, kSpatialDim * 2> pads_;
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
-  std::array<int, kSpatialDim> dilations_;
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
-  std::array<int, kSpatialDim> output_padding_;
+  std::array<int, kSpatialDim> image_shape_{};
+  std::array<int, kSpatialDim> kernels_{};
+  std::array<int, kSpatialDim> strides_{};
+  std::array<int, kSpatialDim * 2> pads_{};
+  std::array<int, kSpatialDim> dilations_{};
+  std::array<int, kSpatialDim> output_padding_{};
   std::move(image_shape.begin(), image_shape.begin() + image_shape.size(), image_shape_.begin());
   std::move(
       kernels.begin(), kernels.begin() + kernels.size(), kernels_.begin());

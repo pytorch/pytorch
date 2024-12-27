@@ -39,6 +39,10 @@ from torch.utils._sympy.symbol import (
 
 from ..._dynamo.utils import counters
 from .. import config, ir, scheduler
+from ..analyze_preserves_zero_mask import (
+    can_codegen_without_upcasts,
+    prologue_preserves_zero_mask,
+)
 from ..codecache import code_hash
 from ..dependencies import MemoryDep, StarDep, WeakDep
 from ..ir import IRNode, TritonTemplateBuffer
@@ -52,6 +56,7 @@ from ..utils import (
     IndentedBuffer,
     Placeholder,
     prefix_is_reduction,
+    set_kernel_post_grad_provenance_tracing,
     sympy_index_symbol,
     sympy_product,
     sympy_subs,
@@ -902,7 +907,7 @@ class SIMDKernel(Kernel):
                 # This arg points to a buf that has been sliced.
                 # We need to count each individual slice to have
                 # a better estimation.
-                indices: OrderedSet[Any] = OrderedSet()
+                indices = OrderedSet[Any]()
                 no_index_dep_count = 0
                 for dep in buf_accesses[arg]:
                     if isinstance(dep, (StarDep, WeakDep)):
@@ -1161,11 +1166,11 @@ class SIMDScheduling(BaseScheduling):
 
     def generate_node_schedule(self, nodes, numel, rnumel):
         node_schedule: List[Any] = []
-        done: OrderedSet[scheduler.BaseSchedulerNode] = OrderedSet()
+        done = OrderedSet[scheduler.BaseSchedulerNode]()
         # Writes with a reduced shape, meaning they are only present once the
         # reduction loop has ended
-        not_ready_yet_nodes: OrderedSet[str] = OrderedSet()
-        current_loop_buffer_usage: OrderedSet[str] = OrderedSet()
+        not_ready_yet_nodes = OrderedSet[str]()
+        current_loop_buffer_usage = OrderedSet[str]()
         maybe_split_index: Optional[int] = None
 
         def fits_in_main_body(n):
@@ -1315,6 +1320,8 @@ class SIMDScheduling(BaseScheduling):
             with V.set_kernel_handler(kernel):
                 src_code = kernel.codegen_kernel()
             kernel_name = self.define_kernel(src_code, node_schedule, kernel)
+            if config.trace.enabled:
+                set_kernel_post_grad_provenance_tracing(node_schedule, kernel_name)
             log.debug("Generating kernel code with kernel_name: %s", kernel_name)
             kernel.kernel_name = kernel_name
             kernel.code_hash = code_hash(src_code)
@@ -1446,24 +1453,39 @@ class SIMDScheduling(BaseScheduling):
             with kernel.set_subgraph_body("<STORE_OUTPUT>"):
                 for node in epilogue_nodes:
                     node.codegen(kernel.split_and_set_ranges(node.get_ranges()))
-                kernel.cse.invalidate(set())
+                kernel.cse.invalidate(OrderedSet())
 
             for input_name, buffer in kernel.named_input_nodes.items():
                 subgraph_name = f"<LOAD_INPUT_{input_name}>"
                 if prologue_group := buf_name_to_prologue_group.get(
                     buffer.get_name(), []
                 ):
+                    can_codegen_without_upcast = all(
+                        can_codegen_without_upcasts(p_n) for p_n in prologue_group
+                    )
+
                     # TODO - this doesnt work with libdevice calls, potentially other bugs
                     # upcasting to fp32 and downcasting gives large slowdown
-                    with config.patch("triton.codegen_upcast_to_fp32", False):
+                    with config.patch(
+                        "triton.codegen_upcast_to_fp32", not can_codegen_without_upcast
+                    ):
                         with kernel.set_subgraph_body(subgraph_name):
                             for prologue_node in prologue_group:
+                                if (
+                                    len(prologue_node.get_buffer_names()) == 1
+                                    and len(prologue_group) == 1
+                                ):
+                                    if prologue_preserves_zero_mask(prologue_node):
+                                        kernel.prologue_fused_inputs_preserve_zero |= (
+                                            prologue_node.get_buffer_names()
+                                        )
+
                                 prologue_node.codegen(
                                     kernel.split_and_set_ranges(
                                         prologue_node.get_ranges()
                                     )
                                 )
-                            kernel.cse.invalidate(set())
+                            kernel.cse.invalidate(OrderedSet())
 
         if not isinstance(partial_code, str):
             partial_code.finalize_hook("<DEF_KERNEL>")
@@ -1500,6 +1522,9 @@ class SIMDScheduling(BaseScheduling):
                 return src_code
 
             kernel_name = self.define_kernel(src_code, node_schedule, kernel)
+
+            if config.trace.enabled:
+                set_kernel_post_grad_provenance_tracing(node_schedule, kernel_name)
 
         self.codegen_comment(node_schedule)
         kernel.call_kernel(kernel_name, template_node.node)
@@ -1617,7 +1642,7 @@ class SIMDScheduling(BaseScheduling):
             for dep in itertools.chain.from_iterable(dep_sources)
             if dep.name not in V.graph.removed_buffers and isinstance(dep, MemoryDep)
         ]
-        write_names = {dep.name for dep in rw.writes}
+        write_names = OrderedSet(dep.name for dep in rw.writes)
 
         tilings: List[CandidateTiling] = []
 
@@ -1698,7 +1723,7 @@ class SIMDScheduling(BaseScheduling):
                         break
             return default_tiling
 
-        seen_names: OrderedSet[str] = OrderedSet()
+        seen_names = OrderedSet[str]()
         candidate_tiles: Counter[Any] = collections.Counter()
         for node in EnableReduction.filter(node_schedule):
             for tiling in cls.candidate_tilings(node):
@@ -1743,7 +1768,7 @@ class SIMDScheduling(BaseScheduling):
                 for node in EnableReduction.filter(node_schedule)
                 if isinstance(node, scheduler.SchedulerNode)
             ]
-            new_tilings: OrderedSet[Tuple[sympy.Expr]] = OrderedSet()
+            new_tilings = OrderedSet[Tuple[sympy.Expr]]()
             for node_range in node_ranges:
                 # Collapse leading dims, to fit in the maximum dimensionality.
                 num_leading_dims = max(0, len(node_range) - config.triton.max_tiles)

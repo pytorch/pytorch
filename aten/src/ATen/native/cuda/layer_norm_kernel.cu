@@ -519,7 +519,7 @@ __global__ void GammaBetaBackwardSimpleCUDAKernel(
     const T_ACC* rstd,
     T* dg,
     T* db) {
-  const int64_t j = blockIdx.x * blockDim.x + threadIdx.x;
+  const int64_t j = ((int64_t) blockIdx.x) * blockDim.x + threadIdx.x;
   if (j < N) {
     T_ACC sum1 = 0;
     T_ACC sum2 = 0;
@@ -562,7 +562,7 @@ __global__ void GammaBetaBackwardCUDAKernel_32x32(
   T_ACC dg_sum = 0;
   T_ACC db_sum = 0;
 
-  const int64_t j = blockIdx.x * blockDim.x + threadIdx.x;
+  const int64_t j = ((int64_t) blockIdx.x) * blockDim.x + threadIdx.x;
 
   if (j < N) {
     constexpr int unroll_factor = 8;
@@ -659,7 +659,7 @@ __global__ void GammaBetaBackwardCUDAKernel(
   T_ACC* s_dg;
   T_ACC* s_db;
 
-  const int64_t j = blockIdx.x * blockDim.x + threadIdx.x;
+  const int64_t j = ((int64_t) blockIdx.x) * blockDim.x + threadIdx.x;
 
   T_ACC dg_sum = 0;
   T_ACC db_sum = 0;

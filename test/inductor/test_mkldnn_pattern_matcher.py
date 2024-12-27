@@ -300,6 +300,13 @@ class TestPatternMatcher(TestPatternMatcherBase):
             generated_kernel_count = cal_conv_generated_kernel_number(
                 mod, v, dtype, dim
             )
+            # TODO: Remove when https://github.com/pytorch/pytorch/issues/143146 is fixed
+            if (
+                TEST_ACL
+                and dtype == torch.bfloat16
+                and memory_format != torch.contiguous_format
+            ):
+                continue
             self.assertEqual(metrics.generated_kernel_count, generated_kernel_count)
 
     @skipIfNoDynamoSupport
@@ -349,6 +356,8 @@ class TestPatternMatcher(TestPatternMatcherBase):
             # only fuse for linear when the dtype is bf16
             mod = mod
             v = torch.randn(2, 10)
+            # TODO: Remove when https://github.com/pytorch/pytorch/issues/143146 is fixed
+            acl_bf16 = TEST_ACL and dtype == torch.bfloat16
 
             def matcher_check_fn():
                 match_nodes = unary_list[unary_fn]
@@ -357,7 +366,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
                     match_nodes += 2
                 self.assertEqual(
                     counters["inductor"]["mkldnn_unary_fusion_matcher_nodes"],
-                    match_nodes,
+                    match_nodes if not acl_bf16 else 0,
                 )
                 self.assertEqual(
                     counters["inductor"]["mkldnn_linear_weight_pack_matcher_count"], 1
@@ -365,7 +374,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
 
             self._test_common(mod, (v,), matcher_check_fn, check_autocast=dtype)
             # only generated 1 kernel for "to"
-            self.assertEqual(metrics.generated_kernel_count, 1)
+            self.assertEqual(metrics.generated_kernel_count, 1 if not acl_bf16 else 2)
 
     @unittest.skipIf(not TEST_MKL, "Test requires MKL")
     def test_linear_fp32(self):
@@ -460,6 +469,8 @@ class TestPatternMatcher(TestPatternMatcherBase):
             metrics.reset()
             fold_mod = M(dtype, unary_fn, cast_bias=True).eval()
             v = torch.randn(2, 10)
+            # TODO: Remove when https://github.com/pytorch/pytorch/issues/143146 is fixed
+            acl_bf16 = TEST_ACL and dtype == torch.bfloat16
 
             def folder_matcher_check_fn():
                 match_nodes = unary_list[unary_fn]
@@ -468,11 +479,12 @@ class TestPatternMatcher(TestPatternMatcherBase):
                     match_nodes += 2
                 # we have 2 linears, so we double the matcher_count/nodes
                 self.assertEqual(
-                    counters["inductor"]["mkldnn_unary_fusion_matcher_count"], 2
+                    counters["inductor"]["mkldnn_unary_fusion_matcher_count"],
+                    2 if not acl_bf16 else 0,
                 )
                 self.assertEqual(
                     counters["inductor"]["mkldnn_unary_fusion_matcher_nodes"],
-                    match_nodes * 2,
+                    match_nodes * 2 if not acl_bf16 else 0,
                 )
                 self.assertEqual(
                     counters["inductor"]["mkldnn_linear_weight_pack_matcher_count"], 2
@@ -484,7 +496,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 folder_matcher_check_fn,
                 check_autocast=dtype,
             )
-            self.assertEqual(metrics.generated_kernel_count, 1)
+            self.assertEqual(metrics.generated_kernel_count, 1 if not acl_bf16 else 3)
             # we won't fold the bias if bias is not same dtype with weight
             # https://github.com/pytorch/pytorch/pull/129138
             metrics.reset()
@@ -557,7 +569,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
                     torch.bfloat16,
                 ) and self._check_unary_is_decomposed(unary_fn):
                     # Has extra dtype conversion nodes for autocast.
-                    match_nodes += 2
+                    match_nodes += 2 if not TEST_ACL else 0
                 self.assertEqual(
                     counters["inductor"]["mkldnn_unary_fusion_matcher_nodes"],
                     match_nodes,
@@ -570,6 +582,13 @@ class TestPatternMatcher(TestPatternMatcherBase):
             generated_kernel_count = cal_conv_generated_kernel_number(
                 mod, v, dtype, dim
             )
+            # TODO: Remove when https://github.com/pytorch/pytorch/issues/143146 is fixed
+            if (
+                TEST_ACL
+                and dtype == torch.bfloat16
+                and memory_format != torch.contiguous_format
+            ):
+                continue
             self.assertEqual(metrics.generated_kernel_count, generated_kernel_count)
 
     @skipIfNoDynamoSupport
@@ -664,6 +683,13 @@ class TestPatternMatcher(TestPatternMatcherBase):
             generated_kernel_count = cal_conv_generated_kernel_number(
                 mod, v, dtype, dim
             )
+            # TODO: Remove when https://github.com/pytorch/pytorch/issues/143146 is fixed
+            if (
+                TEST_ACL
+                and dtype == torch.bfloat16
+                and memory_format != torch.contiguous_format
+            ):
+                continue
             self.assertEqual(metrics.generated_kernel_count, generated_kernel_count)
 
     @skipIfNoDynamoSupport
@@ -712,8 +738,20 @@ class TestPatternMatcher(TestPatternMatcherBase):
             dtypes.append(torch.float16)
         cl_format = torch.channels_last if dim == 4 else torch.channels_last_3d
         test_memory_format = [torch.contiguous_format, cl_format]
+        if dim == 4:
+            input_shapes = [
+                [2, 3, 56, 56],
+            ]
+            other_shapes = [[2, 16, 1, 1], [1, 16, 1, 1], [1, 1, 1, 1]]
+        else:
+            input_shapes = [
+                [2, 3, 20, 56, 56],
+            ]
+            other_shapes = [[2, 16, 1, 1, 1], [1, 16, 1, 1, 1], [1, 1, 1, 1, 1]]
         options = itertools.product(
             binary_list,
+            input_shapes,
+            other_shapes,
             [True, False],
             test_memory_format,
             dtypes,
@@ -721,17 +759,13 @@ class TestPatternMatcher(TestPatternMatcherBase):
 
         for (
             binary_fn,
+            x_shape,
+            other_shape,
             has_relu,
             memory_format,
             dtype,
         ) in options:
             metrics.reset()
-            if dim == 4:
-                x_shape = (1, 3, 56, 56)
-                other_shape = (1, 16, 1, 1)
-            else:
-                x_shape = (1, 3, 20, 56, 56)
-                other_shape = (1, 16, 1, 1, 1)
             mod = M(binary_fn, has_relu).eval()
             x = (
                 torch.randn(x_shape, dtype=torch.float32, requires_grad=True)
@@ -799,13 +833,15 @@ class TestPatternMatcher(TestPatternMatcherBase):
 
         for binary_fn, input_shape, bias, dtype in options:
             metrics.reset()
+            # TODO: Remove when https://github.com/pytorch/pytorch/issues/143146 is fixed
+            acl_bf16 = TEST_ACL and dtype == torch.bfloat16
 
             def matcher_check_fn():
                 self.assertEqual(
                     counters["inductor"][
                         "mkldnn_conv_binary_unary_fusion_matcher_nodes"
                     ],
-                    2,
+                    2 if not acl_bf16 else 0,
                 )
                 reshape_linear_reshape_match_nodes = 3 if len(input_shape) == 3 else 0
                 self.assertEqual(
@@ -828,7 +864,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 matcher_check_fn,
                 check_autocast=dtype,
             )
-            self.assertEqual(metrics.generated_kernel_count, 1)
+            self.assertEqual(metrics.generated_kernel_count, 1 if not acl_bf16 else 2)
 
     def test_linear_binary_broadcast_shapes_cpu(self):
         class M(torch.nn.Module):
@@ -850,22 +886,30 @@ class TestPatternMatcher(TestPatternMatcherBase):
         if torch.ops.mkldnn._is_mkldnn_fp16_supported():
             dtypes.append(torch.float16)
         options = itertools.product(
-            binary_list, [[2, 3, 10], [2, 10]], [True, False], dtypes
+            binary_list,
+            (
+                ([2, 3, 10], [1, 1, 30]),
+                ([2, 10], [1, 30]),
+            ),
+            (True, False),
+            dtypes,
         )
         out_feature = 30
 
-        for binary_fn, input_shape, bias, dtype in options:
+        for binary_fn, (input_shape, other_shape), bias, dtype in options:
             metrics.reset()
             mod = M(binary_fn, input_shape[-1], out_feature, bias).eval()
             v = torch.randn(input_shape)
-            other = torch.randn(input_shape[:-1] + [1]).to(dtype)
+            other = torch.randn(other_shape).to(dtype)
+            # TODO: Remove when https://github.com/pytorch/pytorch/issues/143146 is fixed
+            acl_bf16 = TEST_ACL and dtype == torch.bfloat16
 
             def matcher_check_fn():
                 self.assertEqual(
                     counters["inductor"][
                         "mkldnn_conv_binary_unary_fusion_matcher_nodes"
                     ],
-                    2,
+                    2 if not acl_bf16 else 0,
                 )
                 reshape_linear_reshape_match_nodes = 3 if len(input_shape) == 3 else 0
                 self.assertEqual(
@@ -876,7 +920,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
                     counters["inductor"][
                         "mkldnn_conv_binary_unary_fusion_matcher_nodes"
                     ],
-                    2,
+                    2 if not acl_bf16 else 0,
                 )
                 self.assertEqual(
                     counters["inductor"]["mkldnn_linear_weight_pack_matcher_nodes"], 1
@@ -891,7 +935,38 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 matcher_check_fn,
                 check_autocast=dtype,
             )
-            self.assertEqual(metrics.generated_kernel_count, 1)
+            self.assertEqual(metrics.generated_kernel_count, 1 if not acl_bf16 else 2)
+
+    @skipIfNoDynamoSupport
+    @skipIfNoONEDNN
+    @skipIfRocm
+    @unittest.skipIf(IS_FBCODE, "Failing in fbcode")
+    def test_conv2d_linear_add_broadcast_shapes_cpu(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = torch.nn.Conv2d(3, 16, kernel_size=3, stride=1)
+                self.linear = torch.nn.Linear(3, 16)
+
+            def forward(self, x1, x2):
+                return self.conv(x1) + self.linear(x2)[:, :, None, None]
+
+        metrics.reset()
+        mod = M().eval()
+        x1 = torch.randn(2, 3, 56, 56)
+        x2 = torch.randn(2, 3)
+
+        def matcher_check_fn():
+            match_nodes = 0 if TEST_ACL else 2
+            self.assertEqual(
+                counters["inductor"]["mkldnn_conv_binary_unary_fusion_matcher_nodes"],
+                match_nodes,
+            )
+            self.assertEqual(
+                counters["inductor"]["mkldnn_conv_weight_pack_matcher_nodes"], 1
+            )
+
+        self._test_common(mod, (x1, x2), matcher_check_fn)
 
     def test_multi_linear_share_same_input(self):
         # llama pattern.
@@ -907,7 +982,8 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 return F.silu(self.w1(x)) * F.relu(self.w2(x))
 
         dtypes = []
-        if torch.ops.mkldnn._is_mkldnn_bf16_supported():
+        # TODO: Remove when https://github.com/pytorch/pytorch/issues/143146 is fixed
+        if torch.ops.mkldnn._is_mkldnn_bf16_supported() and not TEST_ACL:
             dtypes.append(torch.bfloat16)
         if torch.ops.mkldnn._is_mkldnn_fp16_supported():
             dtypes.append(torch.float16)
@@ -3496,7 +3572,8 @@ class TestDynamicPatternMatcher(TestPatternMatcherBase):
                 return F.silu(self.w1(x)) * F.relu(self.w2(x))
 
         dtypes = []
-        if torch.ops.mkldnn._is_mkldnn_bf16_supported():
+        # TODO: Remove when https://github.com/pytorch/pytorch/issues/143146 is fixed
+        if torch.ops.mkldnn._is_mkldnn_bf16_supported() and not TEST_ACL:
             dtypes.append(torch.bfloat16)
         if torch.ops.mkldnn._is_mkldnn_fp16_supported():
             dtypes.append(torch.float16)

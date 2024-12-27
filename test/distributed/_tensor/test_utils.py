@@ -133,7 +133,6 @@ class UtilTest(DTensorTestBase):
             global_tensor_shape, global_mesh, placements
         )
         assert global_mesh.get_coordinate is not None
-        dp_replic_rank = global_mesh.get_local_rank("dp_replic")
         dp_shard_rank = global_mesh.get_local_rank("dp_shard")
         tp_rank = global_mesh.get_local_rank("tp")
         shard_idx_on_dim_0 = tp_rank * dp_shard_size + dp_shard_rank
