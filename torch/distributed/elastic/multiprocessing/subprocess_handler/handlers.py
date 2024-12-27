@@ -1,3 +1,6 @@
+#!/usr/bin/env python3
+# mypy: allow-untyped-defs
+
 # Copyright (c) Facebook, Inc. and its affiliates.
 # All rights reserved.
 #
@@ -20,7 +23,7 @@ def get_subprocess_handler(
     stdout: str,
     stderr: str,
     local_rank_id: int,
-) -> SubprocessHandler:
+):
     return SubprocessHandler(
         entrypoint=entrypoint,
         args=args,
