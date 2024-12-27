@@ -28,6 +28,7 @@
 #include <utility>
 #endif
 
+int register_embedding_params();
 
 #ifdef USE_FBGEMM
 
@@ -380,7 +381,9 @@ namespace {
   }
 }
 
-template <int kSpatialDim> int register_conv_params() {
+template <int kSpatialDim = 2>
+TORCH_API int
+register_conv_params() {
   static auto register_conv_params =
     torch::selective_class_<ConvPackedParamsBase<kSpatialDim>>(
         "quantized", TORCH_SELECTIVE_CLASS(_hack_int_to_class_name(kSpatialDim)))
@@ -417,7 +420,9 @@ TORCH_API int register_conv_params<2>();
 template
 TORCH_API int register_conv_params<3>();
 
-int register_linear_params() {
+TORCH_API int register_linear_params();
+
+TORCH_API int register_linear_params() {
   using SerializationType = std::tuple<at::Tensor, std::optional<at::Tensor>>;
   static auto register_linear_params =
       torch::selective_class_<LinearPackedParamsBase>(
