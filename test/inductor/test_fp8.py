@@ -86,18 +86,24 @@ def _quantize_rowwise(x: Tensor, float8_dtype: torch.dtype):
     inverse_scale = scale.reciprocal()
     return x_fp8, inverse_scale
 
+
 def _fix_fp8_dtype_for_hip(dtype, device):
     if torch.version.hip and device == "cuda":
         # HIP uses different float8 dtypes only on GPU
         if isinstance(dtype, tuple):
-            return tuple(map(lambda x: _fix_fp8_dtype_for_hip(x, device), dtype))
+            return tuple(
+                map(lambda x: _fix_fp8_dtype_for_hip(x, device), dtype)
+            )  # noqa: C417
         if isinstance(dtype, list):
-            return list(map(lambda x: _fix_fp8_dtype_for_hip(x, device), dtype))   
+            return list(
+                map(lambda x: _fix_fp8_dtype_for_hip(x, device), dtype)
+            )  # noqa: C417
         if dtype == torch.float8_e4m3fn:
             return torch.float8_e4m3fnuz
         elif dtype == torch.float8_e5m2:
             return torch.float8_e5m2fnuz
     return dtype
+
 
 @instantiate_parametrized_tests
 class TestFP8Types(TestCase):
@@ -178,7 +184,7 @@ class TestFP8Types(TestCase):
     ):
         if device == "cuda" and not PLATFORM_SUPPORTS_FP8:
             raise unittest.SkipTest(f8_msg)
-        
+
         dst_types = _fix_fp8_dtype_for_hip(dst_types, device)
         e4m3, e5m2 = dst_types
 
@@ -232,7 +238,7 @@ class TestFP8Types(TestCase):
     ):
         if device == "cuda" and not PLATFORM_SUPPORTS_FP8:
             raise unittest.SkipTest(f8_msg)
-        
+
         dst_dtype = _fix_fp8_dtype_for_hip(device)
 
         def fp8_saturated(x, dtype):
@@ -251,9 +257,11 @@ class TestFP8Types(TestCase):
     @unittest.skipIf(TEST_WITH_ROCM, "ROCm fails with accuracy issue")
     @parametrize(
         "float8_dtype",
-        (torch.float8_e4m3fn, torch.float8_e5m2)
-        if torch.version.hip is None
-        else (torch.float8_e4m3fnuz, torch.float8_e5m2fnuz),
+        (
+            (torch.float8_e4m3fn, torch.float8_e5m2)
+            if torch.version.hip is None
+            else (torch.float8_e4m3fnuz, torch.float8_e5m2fnuz)
+        ),
     )
     @parametrize("shape", ("1,1,15", "1,10,15", "1,10,512", "1,10,4096", "4,2048,4096"))
     @parametrize("device", ("cuda", "cpu"))
@@ -290,7 +298,7 @@ class TestFP8Types(TestCase):
     ):
         if device == "cuda" and not PLATFORM_SUPPORTS_FP8:
             raise unittest.SkipTest(f8_msg)
-        
+
         float8_dtype = _fix_fp8_dtype_for_hip(float8_dtype, device)
 
         shape = [int(dim) for dim in shape.split(",")]
@@ -321,9 +329,11 @@ class TestFP8Types(TestCase):
     @unittest.skipIf(TEST_WITH_ROCM, "ROCm fails with accuracy issue")
     @parametrize(
         "float8_dtype",
-        (torch.float8_e4m3fn, torch.float8_e5m2)
-        if torch.version.hip is None
-        else (torch.float8_e4m3fnuz, torch.float8_e5m2fnuz),
+        (
+            (torch.float8_e4m3fn, torch.float8_e5m2)
+            if torch.version.hip is None
+            else (torch.float8_e4m3fnuz, torch.float8_e5m2fnuz)
+        ),
     )
     @parametrize("amax_keep_dim", (True, False))
     @parametrize("shape", ("1,1,15", "1,10,15", "1,10,512", "1,10,4096", "4,2048,4096"))
@@ -374,9 +384,11 @@ class TestFP8Types(TestCase):
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     @parametrize(
         "float8_dtype",
-        (torch.float8_e4m3fn, torch.float8_e5m2)
-        if torch.version.hip is None
-        else (torch.float8_e4m3fnuz, torch.float8_e5m2fnuz),
+        (
+            (torch.float8_e4m3fn, torch.float8_e5m2)
+            if torch.version.hip is None
+            else (torch.float8_e4m3fnuz, torch.float8_e5m2fnuz)
+        ),
     )
     @parametrize("shape", ("4,2048,4096",))
     @parametrize("keepdim", (False, True))
