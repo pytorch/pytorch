@@ -3074,15 +3074,22 @@ class CommonTemplate:
         # Reproducer for https://github.com/pytorch/pytorch/issues/143649
         def fn1(a, b):
             return torch.floor_divide(a, b)
+
         def fn2(a, b):
             return torch.remainder(a, b)
+
         def fn3(a, b):
             return torch.fmod(a, b)
+
         def fn4(a, b):
             return torch.divide(a, b, rounding_mode="trunc")
+
         for f in [fn1, fn2, fn3, fn4]:
             with self.assertRaisesRegex(RuntimeError, ".*ZeroDivisionError.*"):
-                f(torch.tensor([1, 2, 3], device="cpu"), torch.tensor([0, 0, 0], device="cpu"))
+                f(
+                    torch.tensor([1, 2, 3], device="cpu"),
+                    torch.tensor([0, 0, 0], device="cpu"),
+                )
 
     def test_div_precision(self):
         # Reproducer for https://github.com/pytorch/pytorch/issues/101039

@@ -687,7 +687,7 @@ class OpDecompositions:
 
     @staticmethod
     def remainder(a, b):
-        if is_integer_dtype(a.dtype) and is_integer_dtype(a.dtype):
+        if is_integer_dtype(a.dtype) and is_integer_dtype(b.dtype):
             r = ops.mod(a, b)
         else:
             r = ops.fmod(a, b)

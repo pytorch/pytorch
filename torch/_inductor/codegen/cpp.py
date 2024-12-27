@@ -596,6 +596,7 @@ class RecordOptimizationContext:
 
 class CppOverrides(OpOverrides):
     """Map element-wise ops to C++"""
+    assert_function = "AOTI_TORCH_CHECK"
 
     @staticmethod
     def add(a, b):
@@ -773,8 +774,10 @@ class CppOverrides(OpOverrides):
         code = BracesBuffer()
         code.writeline("[&]()")
         with code.indent():
-            code.writeline(f'AOTI_TORCH_CHECK({b}!=0, "ZeroDivisionError");')
-            code.writeline(f"return ({a} < 0) != ({b} < 0) ? ({rem} != 0 ? {quot} - 1 : {quot}) : {quot};")
+            code.writeline(f'{CppOverrides.assert_function}({b}!=0, "ZeroDivisionError");')
+            code.writeline(
+                f"return ({a} < 0) != ({b} < 0) ? ({rem} != 0 ? {quot} - 1 : {quot}) : {quot};"
+            )
         code.writeline("()")
         return code
 
@@ -792,7 +795,7 @@ class CppOverrides(OpOverrides):
         code = BracesBuffer()
         code.writeline("[&]()")
         with code.indent():
-            code.writeline(f'AOTI_TORCH_CHECK({b}!=0, "ZeroDivisionError");')
+            code.writeline(f'{CppOverrides.assert_function}({b}!=0, "ZeroDivisionError");')
             code.writeline(f"return {a} / {b};")
         code.writeline("()")
         return code
@@ -920,7 +923,7 @@ class CppOverrides(OpOverrides):
         code = BracesBuffer()
         code.writeline("[&]()")
         with code.indent():
-            code.writeline(f'AOTI_TORCH_CHECK({b}!=0, "ZeroDivisionError");')
+            code.writeline(f'{CppOverrides.assert_function}({b}!=0, "ZeroDivisionError");')
             code.writeline(f"return mod({a}, {b});")
         code.writeline("()")
         return code
