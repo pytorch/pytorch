@@ -478,7 +478,17 @@ static Tensor& _exec_fft(Tensor& out, const Tensor& self, IntArrayRef out_sizes,
 
   const auto value_type = c10::toRealValueType(input.scalar_type());
   out.resize_(batched_out_sizes, MemoryFormat::Contiguous);
-
+  auto astrides = input.strides();
+  bool all_zero = true;
+  for (const auto& stride : astrides) {
+      if (stride != 0) {
+          all_zero = false;
+          break;
+      }
+  }
+  if (all_zero) {
+      input = input.clone(MemoryFormat::Contiguous);
+  }
   auto descriptor = _plan_mkl_fft(
       input.strides(), out.strides(), signal_size, input.is_complex(),
       out.is_complex(), normalization, forward, value_type);
