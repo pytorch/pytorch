@@ -4,8 +4,8 @@ from typing_extensions import ParamSpec
 from ...ir import Buffer, Layout, TemplateBuffer
 
 
-_T = TypeVar("_T")
 _P = ParamSpec("_P")
+_T = TypeVar("_T")
 
 
 class ROCmTemplateBuffer(TemplateBuffer):

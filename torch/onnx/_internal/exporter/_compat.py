@@ -6,7 +6,6 @@ from __future__ import annotations
 
 import inspect
 import logging
-import re
 import warnings
 from typing import Any, Callable, Mapping, Sequence, TYPE_CHECKING
 
@@ -60,7 +59,9 @@ def _rename_dynamic_shapes_with_model_inputs(
 
     renamed_dynamic_shapes = {}
     for idx, param_name in enumerate(sig.parameters):
-        renamed_dynamic_shapes[param_name] = dynamic_shapes[input_names[idx]]
+        input_name = input_names[idx]
+        if input_name in dynamic_shapes:
+            renamed_dynamic_shapes[param_name] = dynamic_shapes[input_name]
 
     return renamed_dynamic_shapes
 
@@ -73,22 +74,24 @@ def _from_dynamic_axes_to_dynamic_shapes(
     dynamic_axes=None,
     output_names: set[str],
     input_names: Sequence[str] | None = None,
-) -> dict[str, Any | None] | None:
+) -> tuple[dict[str, Any | None] | None, tuple[Any, ...], dict[str, Any] | None]:
     """
+    Converts dynamic_axes into dynamic_shapes by wrapping the axis names with torch.export.Dim.AUTO.
 
     dynamic_axes examples:
     (1) dynamic_axes = {"x": {0: "my_custom_axis_name_1"}, "y": {1: "my_custom_axis_name_2"}}
     (2) dynamic_axes = {"x": [0], "y": [1]}
 
     these will be converted to dynamic_shapes respectively:
-    (1) dynamic_shapes = {"x": {0: Dim("my_custom_axis_name_1")}, "y": {1: Dim("my_custom_axis_name_2")}}
-    (2) dynamic_shapes = {"x": {0: Dim("x_dim_0")}, "y": {1: Dim("y_dim_1")}}  # auto-generated dim names
+    (1) dynamic_shapes = {"x": {0: Dim.AUTO}, "y": {1: Dim.AUTO}}
+    (2) dynamic_shapes = {"x": {0: Dim.AUTO}, "y": {1: Dim.AUTO}}
 
+    Detail on Dim.AUTO: https://github.com/pytorch/pytorch/pull/133620
     """
     # https://github.com/pytorch/pytorch/pull/128371
     # 1. The function does not need to provide dynamic_shapes to torch.export.export
     if dynamic_axes is None:
-        return None
+        return None, args, kwargs
 
     if input_names is None:
         input_names = []
@@ -98,25 +101,27 @@ def _from_dynamic_axes_to_dynamic_shapes(
 
     dynamic_shapes: dict[str, Any | None] = {}
     for input_name, axes in dynamic_axes.items():
-        # NOTE: torch.export.Dim requires strict min and max constraints, and it
-        # dpends on the traced model to provide the correct min and max values.
-        # We set max to 99999 to avoid the constraints violation error with the default int64 max.
-        # https://github.com/pytorch/pytorch/blob/32f585d9346e316e554c8d9bf7548af9f62141fc/test/export/test_export.py#L687
+        # TODO(titaiwang): Add ONNX IR pass to rename default dynamic axes: s0, s1, ...
+        # to the dynamic axes defined by users.
+        # NOTE: torch.export.Dim.AUTO does its best to infer the min and max values
+        # from the model, but it's not guaranteed to be dynamic.
         if input_name in output_names:
             # User specified an output name as a dynamic axis, so we skip it
             continue
         if isinstance(axes, dict):
-            # Dim needs to pass str.isidentifier()
-            # If the max is not set, llm is going to fail, as sequence length is usually bounded within config.
-            # But we also don't want to only support llm. This kind of leaves us with this awkward position.
+            if any(not isinstance(k, int) for k in axes.keys()):
+                raise ValueError(
+                    "The axis in dynamic_axes must be in the form of: dict[int, str] or list[int]."
+                )
             dynamic_shapes[input_name] = {
-                k: torch.export.Dim(re.sub(r"[^A-Za-z_]", "", v), max=99999)
-                for k, v in axes.items()
+                k: torch.export.Dim.AUTO for k, _ in axes.items()
             }
         elif isinstance(axes, list):
-            dynamic_shapes[input_name] = {
-                k: torch.export.Dim(f"{input_name}_dim_{k}", max=99999) for k in axes
-            }
+            if any(not isinstance(k, int) for k in axes):
+                raise ValueError(
+                    "The axis in dynamic_axes must be in the form of: dict[int, str] or list[int]."
+                )
+            dynamic_shapes[input_name] = {k: torch.export.Dim.AUTO for k in axes}
         elif axes is None:
             dynamic_shapes[input_name] = None
         else:
@@ -139,7 +144,10 @@ def _from_dynamic_axes_to_dynamic_shapes(
 
     # We need tree structure to represent dynamic_shapes
     dynamic_shapes = _unflatten_dynamic_shapes_with_inputs_tree(inputs, dynamic_shapes)
-    return dynamic_shapes
+
+    # Since the dynamic_shapes are now in the order of the model parameters,
+    # we need to convert args and kwargs to the order of the model parameters.
+    return dynamic_shapes, tuple(inputs), {}
 
 
 def _unflatten_dynamic_shapes_with_inputs_tree(
@@ -266,7 +274,7 @@ def export_compat(
                 UserWarning,
             )
             try:
-                dynamic_shapes = _from_dynamic_axes_to_dynamic_shapes(
+                dynamic_shapes, args, kwargs = _from_dynamic_axes_to_dynamic_shapes(
                     model,
                     args,
                     kwargs,
