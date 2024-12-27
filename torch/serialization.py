@@ -1194,7 +1194,7 @@ def _save(
         zip_file.write_record("byteorder", sys.byteorder, len(sys.byteorder))
 
     # Write each tensor to a file named tensor/the_tensor_key in the zip archive
-    for key in sorted(serialized_storages.keys()):
+    for key in serialized_storages.keys():
         name = f"data/{key}"
         storage = serialized_storages[key]
         num_bytes = storage.nbytes()
