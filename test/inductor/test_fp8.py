@@ -91,13 +91,9 @@ def _fix_fp8_dtype_for_hip(dtype, device):
     if torch.version.hip and device == "cuda":
         # HIP uses different float8 dtypes only on GPU
         if isinstance(dtype, tuple):
-            return tuple(
-                map(lambda x: _fix_fp8_dtype_for_hip(x, device), dtype)
-            )  # noqa: C417
+            return tuple(_fix_fp8_dtype_for_hip(x, device) for x in dtype)
         if isinstance(dtype, list):
-            return list(
-                map(lambda x: _fix_fp8_dtype_for_hip(x, device), dtype)
-            )  # noqa: C417
+            return [_fix_fp8_dtype_for_hip(x, device) for x in dtype]
         if dtype == torch.float8_e4m3fn:
             return torch.float8_e4m3fnuz
         elif dtype == torch.float8_e5m2:
@@ -176,9 +172,7 @@ class TestFP8Types(TestCase):
     @parametrize("shape", ("15,3,13", "4,2048,4096"))
     @parametrize("dst_types", [(torch.float8_e4m3fn, torch.float8_e5m2)])
     def test_valid_cast(self, dtype: torch.dtype, shape: str, dst_types: tuple):
-        
         dst_types = _fix_fp8_dtype_for_hip(dst_types, device="cuda")
-        
         e4m3, e5m2 = dst_types
 
         def fp8_cast(x):
@@ -276,9 +270,7 @@ class TestFP8Types(TestCase):
     @parametrize("float8_dtype", (torch.float8_e4m3fn, torch.float8_e5m2))
     @parametrize("shape", ("1,1,15", "1,10,15", "1,10,512", "1,10,4096", "4,2048,4096"))
     def test_amax_along_with_fp8_quant(self, float8_dtype: torch.dtype, shape: str):
-        
         float8_dtype = _fix_fp8_dtype_for_hip(float8_dtype, device="cuda")
-        
         shape = [int(dim) for dim in shape.split(",")]
         batch_size, sequence_length, hidden_size = shape
 
