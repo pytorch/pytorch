@@ -78,6 +78,7 @@ Result:
             example_case.example_args,
             example_case.example_kwargs,
             dynamic_shapes=example_case.dynamic_shapes,
+            strict=True,
         )
         graph_output = str(exported_program)
         graph_output = re.sub(r"        # File(.|\n)*?\n", "", graph_output)
