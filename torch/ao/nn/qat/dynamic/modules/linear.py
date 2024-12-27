@@ -1,7 +1,10 @@
-from typing import Optional, Union
+from typing import Optional, TYPE_CHECKING, Union
 
 import torch
-from torch.ao.quantization.qconfig import QConfig
+
+
+if TYPE_CHECKING:
+    from torch.ao.quantization.qconfig import QConfig  # noqa: TC004
 
 
 __all__ = ["Linear"]
