@@ -57,7 +57,7 @@ from torch.utils._ordered_set import OrderedSet
 from torch.utils._pytree import tree_map_only
 
 
-GPU_TYPES = ["cuda", "xpu"]
+GPU_TYPES = ["cuda", "mps", "xpu"]
 
 
 # defines here before import torch._dynamo is for avoiding circular import
@@ -1129,7 +1129,7 @@ def is_big_gpu(index_or_device: Union[int, torch.device] = 0) -> bool:
     if isinstance(index_or_device, torch.device):
         device = index_or_device
     else:
-        device = torch.device("cuda", index_or_device)
+        device = torch.device(get_gpu_type(), index_or_device)
 
     prop = DeviceProperties.create(device)
 
@@ -1142,7 +1142,7 @@ def is_big_gpu(index_or_device: Union[int, torch.device] = 0) -> bool:
             return False
         return True
 
-    min_sms = 68  # 3080
+    min_sms = 16 if device.type == "xpu" else 68  # 3080
     avail_sms = prop.multi_processor_count
     if avail_sms < min_sms:
         log.warning(
@@ -2020,10 +2020,15 @@ def needs_fallback_due_to_atomic_add_limitations(dtype):
     # tl.atomic add has bfloat16 support in fbcode
     # but not in OSS https://github.com/pytorch/pytorch/issues/97016
     # we will fallback until the code is upstreamed to OSS
-    if config.is_fbcode() and dtype == torch.bfloat16:
+    if (
+        config.is_fbcode()
+        and dtype == torch.bfloat16
+        and torch.cuda.is_available()
+        and torch.cuda.get_device_capability() >= (9, 0)
+    ):
         return False
     else:
-        return dtype in (torch.int64, torch.bool, torch.bfloat16)
+        return dtype in OrderedSet([torch.int64, torch.bool, torch.bfloat16])
 
 
 def use_scatter_fallback(
@@ -2413,3 +2418,15 @@ def get_donated_idxs() -> Optional[List[int]]:
     if tracing_context is not None and tracing_context.fw_metadata:
         return tracing_context.fw_metadata.bw_donated_idxs
     return None
+
+
+def set_kernel_post_grad_provenance_tracing(node_schedule, kernel_name):
+    from .codegen.simd_kernel_features import DisableReduction, EnableReduction
+    from .virtualized import V
+
+    for node in node_schedule:
+        if node not in (EnableReduction, DisableReduction):
+            if node.node is not None:
+                V.debug._inductor_triton_kernel_to_post_grad_node_info[kernel_name] = [
+                    origin.name for origin in node.node.origins
+                ]

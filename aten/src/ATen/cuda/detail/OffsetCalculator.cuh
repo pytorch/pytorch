@@ -4,7 +4,6 @@
 #include <cstdint>
 #include <type_traits>
 #include <c10/macros/Macros.h>
-#include <ATen/core/Array.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/cuda/detail/IntegerDivider.cuh>
 

@@ -15,7 +15,6 @@
 #include <ATen/ExpandUtils.h>
 #include <ATen/LegacyVmapMode.h>
 #include <ATen/LinalgBackend.h>
-
 #include <ATen/Parallel.h>
 #include <ATen/Utils.h>
 #include <ATen/core/Vitals.h>
@@ -109,7 +108,6 @@
 #include <sstream>
 
 #ifdef USE_CUDA
-#include <ATen/ROCmFABackend.h>
 #include <ATen/cuda/CUDAConfig.h>
 #include <ATen/native/transformers/cuda/sdp_utils.h>
 #ifdef __HIP_PLATFORM_AMD__
@@ -1334,6 +1332,14 @@ static PyObject* THPModule_getCurrentNode(PyObject* _unused, PyObject* noargs) {
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject* THPModule_isDefaultMobileCPUAllocatorSet(
+    PyObject* _unused,
+    PyObject* noargs) {
+  HANDLE_TH_ERRORS
+  return PyBool_FromLong(at::globalContext().isDefaultMobileCPUAllocatorSet());
+  END_HANDLE_TH_ERRORS
+}
+
 static PyObject* THPModule_setDefaultMobileCPUAllocator(
     PyObject* _unused,
     PyObject* noargs) {
@@ -1629,6 +1635,10 @@ static std::initializer_list<PyMethodDef> TorchMethods = {
      METH_NOARGS,
      nullptr},
     {"_current_autograd_node", THPModule_getCurrentNode, METH_NOARGS, nullptr},
+    {"_is_default_mobile_cpu_allocator_set",
+     THPModule_isDefaultMobileCPUAllocatorSet,
+     METH_NOARGS,
+     nullptr},
     {"_set_default_mobile_cpu_allocator",
      THPModule_setDefaultMobileCPUAllocator,
      METH_NOARGS,
@@ -1942,6 +1952,8 @@ Call this whenever a new thread is created in order to propagate values from
       set_module_attr("has_openmp", at::hasOpenMP() ? Py_True : Py_False));
   ASSERT_TRUE(set_module_attr("has_mkl", at::hasMKL() ? Py_True : Py_False));
   ASSERT_TRUE(
+      set_module_attr("_has_kleidiai", at::hasKleidiAI() ? Py_True : Py_False));
+  ASSERT_TRUE(
       set_module_attr("has_lapack", at::hasLAPACK() ? Py_True : Py_False));
 
   py_module.def("_valgrind_supported_platform", []() {
@@ -2178,18 +2190,6 @@ Call this whenever a new thread is created in order to propagate values from
   });
   py_module.def("_get_blas_preferred_backend", []() {
     return at::globalContext().blasPreferredBackend();
-  });
-
-  py::enum_<at::ROCmFABackend>(py_module, "_ROCmFABackend")
-      .value("Default", at::ROCmFABackend::Default)
-      .value("AOTriton", at::ROCmFABackend::AOTriton)
-      .value("Ck", at::ROCmFABackend::Ck);
-
-  py_module.def("_set_rocm_fa_preferred_backend", [](at::ROCmFABackend b) {
-    at::globalContext().setROCmFAPreferredBackend(b);
-  });
-  py_module.def("_get_rocm_fa_preferred_backend", []() {
-    return at::globalContext().getROCmFAPreferredBackend();
   });
 
   py_module.def(

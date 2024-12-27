@@ -1,6 +1,6 @@
-# mypy: allow-untyped-defs
 # Copyright (c) Meta Platforms, Inc. and affiliates
 from contextlib import contextmanager
+from typing import Iterator
 
 from torch.distributed.tensor._api import DTensor
 from torch.distributed.tensor.experimental._attention import context_parallel
@@ -12,7 +12,7 @@ __all__ = ["context_parallel", "implicit_replication", "local_map", "register_sh
 
 
 @contextmanager
-def implicit_replication():
+def implicit_replication() -> Iterator[None]:
     """
     This context manager allows :class:`DTensor` to implicitly treat all non-DTensors (``torch.Tensor``)
     in the program be replicate :class:`DTensor` s during the operator computation.
