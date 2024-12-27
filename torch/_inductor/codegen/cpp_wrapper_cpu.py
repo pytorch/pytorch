@@ -4,7 +4,7 @@ import math
 import os
 import sys
 from itertools import count
-from typing import Callable, Dict, List, Optional, Sequence, Set, Tuple
+from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
 import sympy
 from sympy import Expr
@@ -14,6 +14,7 @@ import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncComp
 import torch._ops
 from torch._inductor.runtime.runtime_utils import dynamo_timed
 from torch.fx.experimental.symbolic_shapes import ConvertIntKey, DivideByKey, SymTypes
+from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.symbol import symbol_is_type, SymT
 
 from .. import config, ir
@@ -46,21 +47,19 @@ class CppWrapperCpu(PythonWrapperCodegen):
         self.comment = "//"
         self.none_str = "nullptr"
         self.supports_intermediate_hooks = False
-        self.outputs_need_copy = set()
         self.kernel_callsite_id = count()
         self.var_array_id = (
             count()
         )  # for different types of local array variable declarations
-        self.declared_var_array_vars = set()
         self.int_array_id = count()  # for int array local variable declarations
-        self.declared_int_array_vars = set()
+        self.declared_int_array_vars = OrderedSet[str]()
         self.tmp_tensor_id = count()  # for tmp tensor local variable declarations
         self.arg_var_id = count()
-        self.used_cached_devices = set()
-        self.used_cached_dtypes = set()
-        self.used_cached_layouts = set()
-        self.used_cached_memory_formats = set()
-        self.used_cond_predicate = set()
+        self.used_cached_devices = OrderedSet[str]()
+        self.used_cached_dtypes = OrderedSet[str]()
+        self.used_cached_layouts = OrderedSet[str]()
+        self.used_cached_memory_formats = OrderedSet[str]()
+        self.used_cond_predicate = OrderedSet[str]()
         self.cached_output_id = count()
         self.scalar_to_tensor_id = count()
         self.custom_op_wrapper_loaded = False
@@ -259,7 +258,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
         self,
         name: str,
         value: ir.TensorBox,
-        bound_vars: Set[sympy.Symbol],
+        bound_vars: OrderedSet[sympy.Symbol],
     ):
         code = self.prefix
 
@@ -560,7 +559,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
             "class AOTInductorModelKernels : public AOTInductorModelKernelsBase {"
         )
         self.prefix.writeline("  public:")
-        declare_kernel = set(self.src_to_kernel.values()) - set(
+        declare_kernel = OrderedSet(self.src_to_kernel.values()) - OrderedSet(
             self.initialized_kernels.keys()
         )
         declare_kernel.update(
@@ -1563,7 +1562,6 @@ class CppWrapperCpu(PythonWrapperCodegen):
         )
 
     def codegen_conditional(self, conditional):
-        name = conditional.get_name()
         outer_inputs = [f"{buf.codegen_reference()}" for buf in conditional.operands]
         outer_outputs = []
         for out in conditional.outputs:

@@ -48,7 +48,7 @@ if __name__ == "__main__":
         name=PACKAGE_NAME,
         version=version,
         author="PyTorch Core Team",
-        description="Example for PyTorch out of tree regitration",
+        description="Example for PyTorch out of tree registration",
         packages=find_packages(exclude=("test",)),
         package_data={PACKAGE_NAME: ["*.dll", "*.dylib", "*.so"]},
         install_requires=[

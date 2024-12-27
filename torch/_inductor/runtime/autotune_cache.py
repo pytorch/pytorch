@@ -10,7 +10,7 @@ from typing import Dict, List, Optional, Tuple, TYPE_CHECKING
 from typing_extensions import override
 
 import torch
-from torch.utils._triton import has_triton, has_triton_package
+from torch.utils._triton import has_triton
 
 from ..remote_cache import (
     create_cache,
@@ -19,13 +19,11 @@ from ..remote_cache import (
     RemoteCacheBackend,
     RemoteCacheJsonSerde,
 )
+from .triton_compat import Config
 
 
 if TYPE_CHECKING:
     from ..remote_cache import Sample
-
-if has_triton_package():
-    from triton import Config
 
 log = logging.getLogger(__name__)
 
@@ -259,8 +257,6 @@ class _AutotuneCacheBundlerImpl:
             # We couldn't load the cache - so mark _entries as non-None so we
             # store local cache values.
             return False
-
-        cache_dir = torch._inductor.runtime.runtime_utils.cache_dir()
 
         # Go through the entries we got from the cache and save them locally.
         time_saved_ns = 0

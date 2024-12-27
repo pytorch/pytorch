@@ -4,7 +4,7 @@ import logging
 import operator
 from collections import defaultdict
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, List, Tuple
+from typing import Any, Callable, Dict, List, Tuple, Union
 
 import torch
 from torch._dispatch.python import enable_python_dispatcher
@@ -22,6 +22,7 @@ from torch._inductor.virtualized import V
 from torch.fx.immutable_collections import immutable_dict
 from torch.fx.passes.reinplace import _is_view_op
 from torch.utils import _pytree as pytree
+from torch.utils._ordered_set import OrderedSet
 
 
 log = logging.getLogger(__name__)
@@ -128,7 +129,6 @@ def _decompose_scatter_functional(
     inp_updated = aten.slice_scatter(inp, view_updated, 0, 0, 10)
     """
     assert node.target is _generalized_scatter
-    inp, src, view_ops = node.args
     return _decompose_scatter_functional_helper(graph, *node.args)  # type: ignore[arg-type]
 
 
@@ -164,10 +164,12 @@ def _decompose_scatter_mutating(
 
 # View ops whose view_scatter op is lowered into mutations anyway,
 # so is never a pessimisation to decompose.
-_ALWAYS_MUTATING_SCATTER_OPS = {
-    aten.as_strided.default,
-    aten.diagonal.default,
-}
+_ALWAYS_MUTATING_SCATTER_OPS = OrderedSet(
+    [
+        aten.as_strided.default,
+        aten.diagonal.default,
+    ]
+)
 
 
 def scatter_always_uses_mutation(node: torch.fx.Node) -> bool:
@@ -183,7 +185,7 @@ def should_reinplace_scatter(node: torch.fx.Node) -> bool:
     input and output would have been realized anyway.
 
     """
-    inp, src, view_ops = node.args
+    inp, _src, _view_ops = node.args
 
     # Mutating scatter ops unconditionally realize input and output
     if scatter_always_uses_mutation(node):
@@ -272,7 +274,7 @@ def canonicalize_view_scatter_ops(graph: torch.fx.Graph) -> None:
         def can_fuse():
             if src.target is not _generalized_scatter:  # type: ignore[union-attr]
                 return False
-            src_inp, src_src, src_scatter_view_op = src.args  # type: ignore[union-attr]
+            src_inp, _src_src, _src_scatter_view_op = src.args  # type: ignore[union-attr]
 
             inp_base = node_to_view_base.get(inp, inp)  # type: ignore[arg-type]
             src_base = node_to_view_base.get(src_inp, src_inp)  # type: ignore[arg-type]
@@ -294,7 +296,7 @@ def canonicalize_view_scatter_ops(graph: torch.fx.Graph) -> None:
             graph.erase_node(node)
             return
 
-        src_inp, src_src, src_scatter_view_op = src.args  # type: ignore[union-attr]
+        _src_inp, src_src, src_scatter_view_op = src.args  # type: ignore[union-attr]
         with graph.inserting_before(src):  # type: ignore[arg-type]
             new_node = graph_call_function(
                 graph,
@@ -358,16 +360,18 @@ for outplace_op, inplace_op in inplaceable_foreach_ops_lowerings.items():
     inplaceable_foreach_ops[outplace_op] = InplaceableOp(inplace_op, 0)
 
 
-inplaceable_triton_ops = {triton_kernel_wrapper_functional}
+inplaceable_triton_ops = OrderedSet([triton_kernel_wrapper_functional])
 
 
 # Operators that don't depend on the tensor data
-META_ONLY_OPS = {
-    aten.sym_size.int,
-    aten.sym_stride.int,
-    aten.sym_numel.default,
-    aten.sym_storage_offset.default,
-}
+META_ONLY_OPS = OrderedSet(
+    [
+        aten.sym_size.int,
+        aten.sym_stride.int,
+        aten.sym_numel.default,
+        aten.sym_storage_offset.default,
+    ]
+)
 
 
 def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
@@ -392,7 +396,7 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
     copy_args_to_copy_nodes = {}
     # maps argument to the first copy_ node that mutates it.
     copy_nodes = {}
-    mutated_inputs = set()
+    mutated_inputs = OrderedSet[Any]()
     storage_to_nodes = defaultdict(list)
     node_order: Dict[Any, int] = {}
     for i, node in enumerate(reversed(graph.nodes)):
@@ -458,7 +462,7 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
 
     def can_inplace(node, mutated_arg):
         if isinstance(mutated_arg, (list, tuple)):
-            unique_storages = {get_node_storage(arg) for arg in mutated_arg}
+            unique_storages = OrderedSet(get_node_storage(arg) for arg in mutated_arg)
             if len(unique_storages) != len(mutated_arg):
                 # at least two Tensors in mutated_arg alias each other, so we can't reinplace it.
                 # We can probably do better (that is, reinplace one of them and clone the other)
@@ -547,7 +551,7 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
         old_tensors_to_clone, kwargs, node_name, trigger
     ):
         tensors_to_clone: List[str] = []
-        storage_of_reinplaced_args = set()
+        storage_of_reinplaced_args = OrderedSet[Union[int, None]]()
 
         # Those used to count possibly_missed_reinplacing_opportunities
         missed_nodes = []

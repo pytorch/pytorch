@@ -19,6 +19,8 @@ from typing import (
 import sympy
 from sympy import Integer, Symbol
 
+from torch.utils._ordered_set import OrderedSet
+
 from .. import config, metrics
 from ..runtime.hints import DeviceProperties
 from ..runtime.runtime_utils import next_power_of_2
@@ -208,7 +210,7 @@ class ComboKernel(Kernel):
         )
 
         for node in subkernel_nodes:
-            node_schedule, tiled_groups, numel, rnumel = node_info_map[node]
+            _node_schedule, tiled_groups, _numel, _rnumel = node_info_map[node]
             node_info = node
 
             read_writes = node.read_writes
@@ -490,7 +492,7 @@ class ComboKernel(Kernel):
         This code stomps on the passed-in values by writing an constant to the top of the kernel.
 
         In a kernel like:
-        def KERNEL_NAME(in_ptr0, in_ptr1, out_ptr2, xnumel, rnumel, XBLOCK : tl.constexpr, RBLOCK : tl.constexpr):
+        def KERNEL_NAME(in_ptr0, in_ptr1, out_ptr2, xnumel, rnumel, XBLOCK : tl.constexpr, R0_BLOCK : tl.constexpr):
 
         We would add
         xnumel = 4096
@@ -525,7 +527,8 @@ class ComboKernel(Kernel):
                     )
                 val = next_power_of_2(val)
                 code.writeline(f"RBLOCK_{num}: tl.constexpr = {val}")
-                uniquify_block_sizes.append("RBLOCK")
+                code.writeline(f"R0_BLOCK_{num}: tl.constexpr = {val}")
+                uniquify_block_sizes.append("R0_BLOCK")
 
             if tree.prefix == "x" and sub_kernel.no_x_dim:
                 code.writeline(f"XBLOCK_{num}: tl.constexpr = 1")
@@ -615,7 +618,7 @@ class ComboKernel(Kernel):
             return heuristics_list[0], size_hints_list[0], self.sub_kernels[0]
 
     def get_mutated_args_sub_kernels(self) -> List[str]:
-        mutated_args = set()
+        mutated_args = OrderedSet[str]()
         for sub_kernel in self.sub_kernels:
             for mutation in sub_kernel.mutations:
                 if mutation in sub_kernel.args.input_buffers:
@@ -723,23 +726,24 @@ class ComboKernel(Kernel):
 
     def codegen_blocks(self, code: IndentedBuffer) -> None:
         for block in self.block_args:
-            assert block in [
+            assert block in (
                 "XBLOCK",
                 "YBLOCK",
-                "RBLOCK",
-            ], f"{block} is not supported without autotuning"
+                "R0_BLOCK",
+            ), f"{block} is not supported without autotuning"
         if "YBLOCK" in self.block_args:
             code.splice(f"XBLOCK: tl.constexpr = {self.block_size_2d}")
             code.splice(f"YBLOCK: tl.constexpr = {self.block_size_2d}")
         else:
             code.splice(f"XBLOCK: tl.constexpr = {self.block_size_1d}")
-        if "RBLOCK" in self.block_args:
+        if "R0_BLOCK" in self.block_args:
+            code.splice(f"R0_BLOCK: tl.constexpr = {self.block_size_reduce}")
             code.splice(f"RBLOCK: tl.constexpr = {self.block_size_reduce}")
 
     def add_blockd_to_args(self, argdefs: List[str]) -> List[str]:
         block_args = {}
         block_names = {}
-        for num, sub_kernel in enumerate(self.sub_kernels):
+        for sub_kernel in self.sub_kernels:
             # TODO: we assume all sub_kernels have the same block size
             for tree in sub_kernel.range_trees:
                 if tree.is_reduction and (
@@ -753,6 +757,7 @@ class ComboKernel(Kernel):
         if self.enable_autotune:
             argdefs.extend(block_args)
         self.block_args = list(block_names.keys())
+
         return argdefs
 
     def add_numel_to_args(self, argdefs: List[str], signature: List[Any]) -> List[str]:
@@ -884,7 +889,7 @@ class ComboKernel(Kernel):
         self, num_gb: float, grid: Optional[List[Any]] = None
     ) -> IndentedBuffer:
         result = IndentedBuffer()
-        argdefs, call_args, signature, _ = self.args.python_argdefs()
+        _argdefs, call_args, signature, _ = self.args.python_argdefs()
 
         result.writelines(["", "", "def get_args():"])
         with result.indent():
