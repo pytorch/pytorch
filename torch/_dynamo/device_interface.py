@@ -338,6 +338,20 @@ class CpuInterface(DeviceInterface):
             return CpuDeviceProperties(cpu_count)
 
 
+class MpsInterface(DeviceInterface):
+    @staticmethod
+    def is_bf16_supported(including_emulation: bool = False):
+        return torch.backends.mps.is_macos_or_newer(14, 0)
+
+    @staticmethod
+    def is_available() -> bool:
+        return torch.backends.mps.is_available()
+
+    @staticmethod
+    def current_device():
+        return 0
+
+
 device_interfaces: Dict[str, Type[DeviceInterface]] = {}
 _device_initialized = False
 
@@ -377,5 +391,6 @@ def init_device_reg():
         register_interface_for_device(f"xpu:{i}", XpuInterface)
 
     register_interface_for_device("cpu", CpuInterface)
+    register_interface_for_device("mps", MpsInterface)
 
     _device_initialized = True

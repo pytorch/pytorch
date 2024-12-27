@@ -434,7 +434,10 @@ def get_device_op_overrides(device: str):
     assert isinstance(device, str)
 
     if not device_op_overrides_dict.keys():
-        from . import cpu_device_op_overrides  # noqa: F401
+        from . import (  # noqa: F401  # noqa: F401
+            cpu_device_op_overrides,
+            mps_device_op_overrides,
+        )
         from .cuda import device_op_overrides  # noqa: F401
         from .xpu import device_op_overrides as xpu_op_overrides  # noqa: F401
 
