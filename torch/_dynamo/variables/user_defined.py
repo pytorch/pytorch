@@ -993,6 +993,8 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 mro_source = AttrSource(self.cls_source, "__mro__")
                 klass_source = GetItemSource(mro_source, idx)
                 dict_source = AttrSource(klass_source, "__dict__")
+                # TODO(anijain2305) - This is a mapping proxy object. Ideally we
+                # should use DictGetItemSource here.
                 return GetItemSource(dict_source, name)
 
         unimplemented(f"Could not find {name} in {type(self.value).__mro__}")

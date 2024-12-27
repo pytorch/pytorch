@@ -346,22 +346,22 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
             actual_graph,
             """\
 class GraphModule(torch.nn.Module):
-    def forward(self, L_d_x_: "f32[]", L_d_y_0_: "f32[]", L_d_y_1_2_: "f32[]"):
-        l_d_x_ = L_d_x_
-        l_d_y_0_ = L_d_y_0_
-        l_d_y_1_2_ = L_d_y_1_2_
+    def forward(self, dict_getitem_L_d_x_: "f32[]", dict_getitem_L_d_y_0_: "f32[]", dict_getitem_L_d_y_1_2_: "f32[]"):
+        dict_getitem_l_d_x_ = dict_getitem_L_d_x_
+        dict_getitem_l_d_y_0_ = dict_getitem_L_d_y_0_
+        dict_getitem_l_d_y_1_2_ = dict_getitem_L_d_y_1_2_
 
         wrap_body_0 = self.wrap_body_0
-        wrap = torch.ops.higher_order.wrap(wrap_body_0, l_d_x_, l_d_y_0_, l_d_y_1_2_);  wrap_body_0 = l_d_x_ = l_d_y_0_ = l_d_y_1_2_ = None
+        wrap = torch.ops.higher_order.wrap(wrap_body_0, dict_getitem_l_d_x_, dict_getitem_l_d_y_0_, dict_getitem_l_d_y_1_2_);  wrap_body_0 = dict_getitem_l_d_x_ = dict_getitem_l_d_y_0_ = dict_getitem_l_d_y_1_2_ = None
         getitem: "f32[]" = wrap[0];  wrap = None
         return (getitem,)
 
     class wrap_body_0(torch.nn.Module):
-        def forward(self, l_d_x_: "f32[]", l_d_y_0_: "f32[]", l_d_y_1_2_: "f32[]"):
-            sin: "f32[]" = l_d_x_.sin();  l_d_x_ = None
-            cos: "f32[]" = l_d_y_0_.cos();  l_d_y_0_ = None
+        def forward(self, dict_getitem_l_d_x_: "f32[]", dict_getitem_l_d_y_0_: "f32[]", dict_getitem_l_d_y_1_2_: "f32[]"):
+            sin: "f32[]" = dict_getitem_l_d_x_.sin();  dict_getitem_l_d_x_ = None
+            cos: "f32[]" = dict_getitem_l_d_y_0_.cos();  dict_getitem_l_d_y_0_ = None
             add: "f32[]" = sin + cos;  sin = cos = None
-            sin_1: "f32[]" = l_d_y_1_2_.sin();  l_d_y_1_2_ = None
+            sin_1: "f32[]" = dict_getitem_l_d_y_1_2_.sin();  dict_getitem_l_d_y_1_2_ = None
             sub: "f32[]" = add - sin_1;  add = sin_1 = None
             return (sub,)
 """,  # NOQA: B950

@@ -85,18 +85,6 @@ def is_constant_source(source):
     return False
 
 
-def reconstruct_getitem(source: "GetItemSource", codegen, index_is_slice):
-    source.base.reconstruct(codegen)
-    if isinstance(source.index, Source):
-        source.index.reconstruct(codegen)
-    else:
-        if index_is_slice:
-            assert isinstance(source, GetItemSource)
-            codegen.append_output(codegen.create_load_const(source.unpack_slice()))
-        else:
-            codegen.append_output(codegen.create_load_const(source.index))
-
-
 @dataclasses.dataclass(frozen=True)
 class LocalSource(Source):
     local_name: str
@@ -482,7 +470,11 @@ class GetItemSource(ChainedSource):
             super().__setattr__("index_is_slice", True)
 
     def reconstruct(self, codegen):
-        reconstruct_getitem(self, codegen, index_is_slice=self.index_is_slice)
+        self.base.reconstruct(codegen)
+        if self.index_is_slice:
+            codegen.append_output(codegen.create_load_const(self.unpack_slice()))
+        else:
+            codegen.append_output(codegen.create_load_const(self.index))
         codegen.append_output(create_instruction("BINARY_SUBSCR"))
 
     def guard_source(self):
@@ -495,21 +487,14 @@ class GetItemSource(ChainedSource):
 
     def name(self):
         # Index can be of following types
-        # 1) ConstDictKeySource
-        # 2) enum.Enum
-        # 3) index is a slice - example 1:4
-        # 4) index is a constant - example string, integer
-        if isinstance(self.index, Source):
-            if not isinstance(self.index, ConstDictKeySource):
-                raise ValueError(
-                    "GetItemSource index must be a constant, enum or ConstDictKeySource"
-                )
-            # TODO(anijain2305) - Consider separating out GetItemSource and DictGetItemSource.
-            # Prevent any overridden __getitem__ method call.
-            return f"dict.__getitem__({self.base.name()}, {self.index.name()})"
-        elif self.index_is_slice:
+        # 1) enum.Enum
+        # 2) index is a slice - example 1:4
+        # 3) index is a constant - example string, integer
+        assert not isinstance(self.index, Source)
+        if self.index_is_slice:
             return f"{self.base.name()}[{self.unpack_slice()!r}]"
         elif isinstance(self.index, enum.Enum):
+            # TODO (anijain2305) - This should probably be moved to DictGetItemSource
             return f"{self.base.name()}[{enum_repr(self.index, self.guard_source().is_local())}]"
         else:
             return f"{self.base.name()}[{self.index!r}]"
@@ -536,6 +521,35 @@ class ConstDictKeySource(ChainedSource):
 
     def is_dict_key(self):
         return True
+
+
+# Used to access an item from the dictionary
+@dataclasses.dataclass(frozen=True)
+class DictGetItemSource(ChainedSource):
+    # Key to access in the dictionary. It can be one of the the following types
+    # 1) ConstDictKeySource
+    # 2) constant - like string, integer
+    index: Any
+
+    def guard_source(self):
+        return self.base.guard_source()
+
+    def reconstruct(self, codegen):
+        self.base.reconstruct(codegen)
+        if isinstance(self.index, Source):
+            self.index.reconstruct(codegen)
+        else:
+            codegen.append_output(codegen.create_load_const(self.index))
+        codegen.append_output(create_instruction("BINARY_SUBSCR"))
+
+    def name(self):
+        if isinstance(self.index, ConstDictKeySource):
+            return f"dict.__getitem__({self.base.name()}, {self.index.name()})"
+        else:
+            from .variables import ConstantVariable
+
+            assert ConstantVariable.is_literal(self.index)
+            return f"dict.__getitem__({self.base.name()}, {self.index!r})"
 
 
 @dataclasses.dataclass(frozen=True)

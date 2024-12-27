@@ -11,7 +11,7 @@ from .. import polyfills, variables
 from ..bytecode_transformation import create_call_function, create_instruction
 from ..exc import raise_observed_exception, unimplemented
 from ..guards import GuardBuilder, install_guard
-from ..source import AttrSource, GetItemSource, is_from_local_source
+from ..source import AttrSource, DictGetItemSource, is_from_local_source
 from ..utils import dict_keys, dict_values, specialize_symnode
 from .base import ValueMutationNew, VariableTracker
 from .constant import ConstantVariable
@@ -843,7 +843,7 @@ class PythonSysModulesVariable(VariableTracker):
         k, has_key = self._contains_helper(tx, key)
 
         if has_key:
-            source = self.source and GetItemSource(self.source, k)
+            source = self.source and DictGetItemSource(self.source, k)
             return VariableTracker.build(tx, sys.modules[k], source)
 
         if default is not None:
@@ -853,5 +853,5 @@ class PythonSysModulesVariable(VariableTracker):
 
     def call_getitem(self, tx: "InstructionTranslator", key: VariableTracker):
         k, _has_key = self._contains_helper(tx, key)
-        source = self.source and GetItemSource(self.source, k)
+        source = self.source and DictGetItemSource(self.source, k)
         return VariableTracker.build(tx, sys.modules[k], source)
