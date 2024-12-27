@@ -13287,8 +13287,13 @@ if HAS_GPU and not TEST_WITH_ASAN:
 
             _, code = run_and_get_code(wrapper, x, y)
 
-            # checks re-inplacing still happens if pad_mm happens
-            if "(1024, 50264)" in code[1]:
+            # checks re-inplacing happens if pad_mm happens. Extra if-branch is added
+            # since pad_mm is profiling-based and may not happen on certain machines
+            # for this specific test case.
+            if (
+                "assert_size_stride(mm_default_2, (1024, 50264), (50304, 1))" in code[1]
+                and "(1024, 50257), (50304, 1)" in code[1]
+            ):
                 FileCheck().check_regex(
                     r"reinterpret_tensor\(.*, \(1024, 50257\).*# reuse"
                 ).run(code[1])
