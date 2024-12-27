@@ -1241,28 +1241,31 @@ def check_and_add_duplicate_pattern(
     """
 
     pattern_repr = PatternPrettyPrinter.run(pattern)
-    if equiv_pattern_reprs := seen_patterns.get(pattern_repr):
-        if graph is None:
-            if skip_duplicates:
-                return True
-            torch._check(
-                False,
-                lambda: f"Duplicate pattern: {pattern_repr} with no graph",
-            )
-
-        new_graph_str = str(graph)
-        for graph_str in equiv_pattern_reprs:
-            if not new_graph_str == graph_str:
-                continue
-            if skip_duplicates:
-                return True
-            torch._check(
-                False,
-                lambda: f"Duplicate pattern: {pattern_repr} with duplicated match graph {graph_str} ",
-            )
-        equiv_pattern_reprs.append(new_graph_str)
-    else:
+    equiv_pattern_reprs = seen_patterns.get(pattern_repr)
+    if not equiv_pattern_reprs:
         seen_patterns[pattern_repr].append(str(graph) if graph else None)
+        return False
+
+    if graph is None:
+        if skip_duplicates:
+            return True
+        torch._check(
+            False,
+            lambda: f"Duplicate pattern: {pattern_repr} with no graph",
+        )
+
+    new_graph_str = str(graph)
+    for graph_str in equiv_pattern_reprs:
+        if not new_graph_str == graph_str:
+            continue
+        if skip_duplicates:
+            return True
+        torch._check(
+            False,
+            lambda: f"Duplicate pattern: {pattern_repr} with duplicated match graph {graph_str} ",
+        )
+    equiv_pattern_reprs.append(new_graph_str)
+    return False
 
 
 def register_replacement(
@@ -1446,7 +1449,7 @@ def register_replacement(
                     pattern_matcher_pass.seen_patterns,
                     skip_duplicates=skip_duplicates,
                 ):
-                    return
+                    return False
 
         pattern = ReplacementPatternEntry(
             pattern=pattern,
