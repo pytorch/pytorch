@@ -11,7 +11,7 @@ from ..scheduler import SchedulerNode
 from ..utils import get_kernel_metadata
 from ..virtualized import V
 from .common import CSEVariable, DeferredLine, IndentedBuffer, OpOverrides
-from .simd import SIMDKernel, SIMDScheduling
+from .simd import IterationRangesEntry, SIMDKernel, SIMDScheduling
 
 
 DTYPE_TO_METAL = {
@@ -116,6 +116,11 @@ class MetalKernel(SIMDKernel):
         line = f"{var}[{index}] = static_cast<{dtype_str}>({value});"
         self.body.writeline(DeferredLine(name, line))
 
+    def codegen_iteration_ranges_entry(self, entry: IterationRangesEntry) -> None:
+        index_expr = self.rename_indexing(entry.expr)
+        index_str = self.sexpr(index_expr)  # type: ignore[misc]
+        self.body.writeline(f"{self.index_dtype} {entry.name} = {index_str};")
+
     def codegen_kernel(self, name: Optional[str] = None) -> str:
         """Called at the end to generate a final kernel string"""
         code = IndentedBuffer()
@@ -129,7 +134,7 @@ class MetalKernel(SIMDKernel):
                 for outer, inner in self.args.input_buffers.items():
                     dtype_str = self.dtype_to_str(V.graph.get_dtype(outer))
                     code.writeline(f"constant {dtype_str}* {inner},")
-                code.writeline("uint x0 [[thread_position_in_grid]]")
+                code.writeline("uint xindex [[thread_position_in_grid]]")
             code.writeline(") {")
             with code.indent():
                 code.splice(self.body)
