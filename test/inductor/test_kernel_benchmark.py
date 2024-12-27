@@ -1,4 +1,5 @@
 # Owner(s): ["module: inductor"]
+# ruff: noqa: F841
 import contextlib
 import os
 import subprocess
@@ -13,6 +14,7 @@ from torch._inductor.codecache import PyCodeCache
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import fresh_inductor_cache
 from torch.testing import FileCheck
+from torch.testing._internal.common_cuda import xfailIfSM89
 from torch.testing._internal.common_device_type import expectedFailureXPU
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 
@@ -384,7 +386,10 @@ class TestKernelBenchmark(TestCase):
         self.check_bandwidth(compiled_module, "0.006")
 
     @expectedFailureXPU
-    @config.patch(max_autotune=True, max_autotune_gemm_backends="TRITON")
+    @xfailIfSM89
+    @config.patch(
+        max_autotune=True, max_autotune_gemm_backends="TRITON", force_shape_pad=True
+    )
     def test_slice_mm_bandwidth_computation(self):
         M, N, K = 1000, 2000, 3000
 
