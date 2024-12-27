@@ -13997,6 +13997,30 @@ are freshly created instead of aliasing the input.
 """,
 )
 
+add_docstr(
+    torch.pi,
+    r"""
+A constant representing the mathematical constant π (Pi), which is the ratio of a circle's circumference to its diameter. 
+
+Example::
+
+    >>> torch.pi
+    3.141592653589793
+""",
+)
+
+add_docstr(
+    torch.e,
+    r"""
+A constant representing Euler's number (e), the base of the natural logarithm.
+
+Example::
+
+    >>> torch.e
+    2.718281828459045
+""",
+)
+
 for unary_base_func_name in (
     "exp",
     "sqrt",
