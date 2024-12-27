@@ -45,6 +45,7 @@ import itertools
 import logging
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -280,10 +281,10 @@ class Venv:
         """Get the command to activate the virtual environment."""
         if WINDOWS:
             # Assume PowerShell
-            return f'& "{self.activate_script}"'
+            return f"& {shlex.quote(self.activate_script)}"
         # Assume Bash, Zsh, etc.
         # POSIX standard should use dot `. venv/bin/activate` rather than `source`
-        return f'source "{self.activate_script}"'
+        return f"source {shlex.quote(self.activate_script)}"
 
     @timed("Creating virtual environment")
     def create(self, *, remove_if_exists: bool = False) -> Path:
