@@ -8,8 +8,11 @@ import torch
 class Benchmark(BenchmarkBase):
     N = 100
 
+    def __init__(self):
+        super().__init__(category="sum_floordiv", backend="export", device="cpu")
+
     def name(self):
-        return "sum_floordiv_regression"
+        return f"{self.category()}_regression"
 
     def description(self):
         return "information at https://github.com/pytorch/pytorch/issues/134133"
@@ -27,7 +30,7 @@ class Benchmark(BenchmarkBase):
         torch._dynamo.reset()
 
     def _work(self):
-        torch.export.export(self.m, (self.input,))
+        torch.export.export(self.m, (self.input,), strict=True)
 
 
 def main():

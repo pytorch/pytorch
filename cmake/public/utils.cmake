@@ -375,7 +375,6 @@ function(torch_compile_options libname)
       -Wdeprecated
       -Wno-unused-parameter
       -Wno-missing-field-initializers
-      -Wno-type-limits
       -Wno-array-bounds
       -Wno-unknown-pragmas
       -Wno-strict-overflow
@@ -386,7 +385,7 @@ function(torch_compile_options libname)
     if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
       list(APPEND private_compile_options -Wunused-but-set-variable)
     endif()
-    if("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang")
+    if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
       list(APPEND private_compile_options -Wunused-private-field -Wextra-semi -Wno-error=extra-semi)
     else()
       list(APPEND private_compile_options
@@ -415,6 +414,9 @@ function(torch_compile_options libname)
       $<$<COMPILE_LANGUAGE:CXX>:${private_compile_options}>)
   if(USE_CUDA)
     foreach(option IN LISTS private_compile_options)
+      if("${option}" STREQUAL "-Wextra-semi")
+        continue()
+      endif()
       target_compile_options(${libname} PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:-Xcompiler ${option}>)
     endforeach()
   endif()

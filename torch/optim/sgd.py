@@ -349,8 +349,14 @@ def _single_tensor_sgd(
                 grad = grad.add(buf, alpha=momentum)
             else:
                 grad = buf
-
-        param.add_(grad, alpha=-lr)
+        # Nested if is necessary to bypass jitscript rules
+        if isinstance(lr, Tensor):
+            if lr.requires_grad:
+                param.addcmul_(grad, lr, value=-1)
+            else:
+                param.add_(grad, alpha=-lr)
+        else:
+            param.add_(grad, alpha=-lr)
 
 
 def _multi_tensor_sgd(
@@ -435,7 +441,7 @@ def _multi_tensor_sgd(
 
         if not device_has_sparse_grad:
             # handle internal item() call if lr is a tensor
-            if isinstance(lr, torch.Tensor) and torch._utils.is_compiling():
+            if isinstance(lr, torch.Tensor) and torch.compiler.is_compiling():
                 grads_x_lr = torch._foreach_mul(device_grads, -lr)
                 torch._foreach_add_(device_params, grads_x_lr)
             else:
