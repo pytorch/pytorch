@@ -8,7 +8,7 @@ from collections import defaultdict
 from pathlib import Path
 
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
+REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 try:
     # using tools/ to optimize test run.
     sys.path.append(str(REPO_ROOT))
