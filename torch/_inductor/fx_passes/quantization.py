@@ -3172,6 +3172,7 @@ def _register_quantization_weight_pack_pass():
     # Step 4: weight prepack for SmoothQuant from Torchao
     _register_smooth_quant_int_mm_pattern()
 
+    # Step 5: QLinear post op Fusion
     _register_qlnear_unary_fusion()
 
 
