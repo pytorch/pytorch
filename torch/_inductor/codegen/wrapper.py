@@ -488,9 +488,6 @@ class AllocateLine(MemoryPlanningLine):
             assert isinstance(self.node.outputs, Iterable)
             for output in self.node.outputs:
                 code.writeline(self.wrapper.make_buffer_allocation(output))
-            code.writeline(
-                self.wrapper.make_buffer_list(self.node.get_name(), self.node.outputs)
-            )
         else:
             line = self.wrapper.make_buffer_allocation(self.node)
             code.writeline(line)
@@ -2106,12 +2103,6 @@ class PythonWrapperCodegen(CodeGen):
         stride = tuple(buffer.get_stride())
         return self.make_allocation(buffer.get_name(), device, dtype, shape, stride)
 
-    def make_buffer_list(self, name, outputs):
-        line = f"{name} = ["
-        for output in outputs:
-            line += f"{output.get_name()}, "
-        return line + "]"
-
     def make_allocation(self, name, device, dtype, shape, stride):
         if device.type in ("cpu", "cuda", "xpu"):
             # optimized path for faster allocations, saving ~2us versus the stuff below
@@ -2225,6 +2216,12 @@ class PythonWrapperCodegen(CodeGen):
         if not self.can_reuse(buffer):
             return
         self.freed.add(name)
+
+        if isinstance(buffer, ir.CppTemplateBuffer) and isinstance(
+            buffer.layout, ir.MultiOutputLayout
+        ):
+            # CppTemplateBuffer of Group GEMM, we actually didn't allocate this buffer
+            return
 
         self.writeline(FreeIfNotReusedLine(self, buffer))
 

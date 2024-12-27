@@ -43,6 +43,8 @@ if torch._C._has_mkldnn:
         assert all(node.target == computation_op for node in computation_nodes)
         act = computation_nodes[0].args[0]
         wgt = computation_nodes[0].args[1]
+        if len(computation_nodes) < 2:
+            return False
         if any(
             (
                 node.args[0] != act
