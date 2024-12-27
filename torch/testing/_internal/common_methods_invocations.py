@@ -16239,6 +16239,8 @@ op_db: List[OpInfo] = [
             # aten::_scaled_mm hit the vmap fallback which is currently disabled
             DecorateInfo(unittest.skip("Skipped!"), "TestVmapOperatorsOpInfo", "test_op_has_batch_rule",
                          device_type='cpu'),
+            DecorateInfo(unittest.expectedFailure, 'TestNNCOpInfo', 'test_nnc_correctness',
+                        dtypes=(torch.float8_e4m3fn, torch.float8_e4m3fnuz, torch.float8_e5m2, torch.float8_e5m2fnuz)),
         )
     ),
     OpInfo(
