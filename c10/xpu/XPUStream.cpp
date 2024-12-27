@@ -264,8 +264,8 @@ XPUStream getStreamFromPool(const int priority, DeviceIndex device) {
   // Initializes the stream pools (once)
   initDeviceStreamOnce(device);
   // See Note [XPU Stream priorities]
-  auto priority_idx = std::max(
-      std::min(-priority + 1, max_compile_time_stream_priorities - 1), 0);
+  auto priority_idx =
+      std::clamp(-priority + 1, 0, max_compile_time_stream_priorities - 1);
   const auto idx = get_idx(priority_counters[device][priority_idx]);
   auto id_type = static_cast<StreamIdType>(priority_idx);
   return XPUStreamForId(device, makeStreamId(id_type, idx));
