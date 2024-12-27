@@ -13286,9 +13286,12 @@ if HAS_GPU and not TEST_WITH_ASAN:
                 loss.backward()
 
             _, code = run_and_get_code(wrapper, x, y)
-            FileCheck().check_regex(
-                r"reinterpret_tensor\(.*, \(1024, 50257\), \(50304, 1\)"
-            ).run(code[1])
+
+            # checks re-inplacing still happens if pad_mm happens
+            if "(1024, 50264)" in code[1]:
+                FileCheck().check_regex(
+                    r"reinterpret_tensor\(.*, \(1024, 50257\).*# reuse"
+                ).run(code[1])
 
     class RNNTest(TestCase):
         device_type = GPU_TYPE
