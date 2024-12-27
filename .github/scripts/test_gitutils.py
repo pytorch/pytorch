@@ -12,7 +12,7 @@ from gitutils import (
 )
 
 
-BASE_DIR = Path(__file__).absolute().parent
+BASE_DIR = Path(__file__).parent
 
 
 class TestPeekableIterator(TestCase):
@@ -68,7 +68,7 @@ class TestRetriesDecorator(TestCase):
 
 class TestGitRepo(TestCase):
     def setUp(self) -> None:
-        repo_dir = BASE_DIR.absolute().parent.parent
+        repo_dir = BASE_DIR.parent.parent.absolute()
         if not (repo_dir / ".git").is_dir():
             raise SkipTest(
                 "Can't find git directory, make sure to run this test on real repo checkout"
