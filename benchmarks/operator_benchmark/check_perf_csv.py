@@ -6,6 +6,7 @@ import pandas as pd
 
 
 SKIP_TEST_LISTS = [
+    # https://github.com/pytorch/pytorch/issues/143852
     "channel_shuffle_batch_size4_channels_per_group64_height64_width64_groups4_channel_lastTrue",
 ]
 
