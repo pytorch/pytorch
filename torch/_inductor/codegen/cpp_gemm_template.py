@@ -591,7 +591,7 @@ class CppGemmTemplate(CppTemplate):
         beta=1,
         alpha=1,
         has_bias=False,
-        epilogue_creator: Optional[Callable[[ir.Buffer], ir.Pointwise]] = None,
+        epilogue_creator: Optional[Callable[..., ir.Pointwise]] = None,
         should_block_weights: bool = True,
         name="packed_gemm",
     ) -> None:

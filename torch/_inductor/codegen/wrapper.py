@@ -612,8 +612,18 @@ class AllocateLine(MemoryPlanningLine):
 
     def codegen(self, code: IndentedBuffer) -> None:
         assert self.node.get_name() not in V.graph.removed_buffers
-        line = self.wrapper.make_buffer_allocation(self.node)
-        code.writeline(line)
+        if isinstance(self.node, ir.CppTemplateBuffer) and isinstance(
+            self.node.layout, ir.MultiOutputLayout
+        ):
+            assert isinstance(self.node.outputs, Iterable)
+            for output in self.node.outputs:
+                code.writeline(self.wrapper.make_buffer_allocation(output))
+            code.writeline(
+                self.wrapper.make_buffer_list(self.node.get_name(), self.node.outputs)
+            )
+        else:
+            line = self.wrapper.make_buffer_allocation(self.node)
+            code.writeline(line)
 
     def codegen_fx(self, converter: FxConverter) -> FxConversionFunc:
         return converter._generate_allocate

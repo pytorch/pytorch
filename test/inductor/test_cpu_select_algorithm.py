@@ -2375,6 +2375,53 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
                     counters["inductor"]["cpp_epilogue_fusion_counter"], 0
                 )
 
+    @inductor_config.patch({"freezing": True})
+    @inductor_config.patch({"cpp.enable_group_gemm_template": True})
+    @patches
+    @torch.no_grad
+    @unittest.skipIf(not TEST_MKL, "Test requires MKL")
+    @parametrize("batch_size", (16, 52))
+    @parametrize("in_features", (52,))
+    @parametrize("out_features", (32, 52))
+    @parametrize("input_3d", (False, True))
+    @parametrize("gemm_num", (2, 3))
+    @dtypes(
+        torch.bfloat16,
+    )
+    def test_group_linear(
+        self,
+        batch_size,
+        in_features,
+        out_features,
+        input_3d,
+        gemm_num,
+        dtype,
+    ):
+        class Linear_Gate_Up(torch.nn.Module):
+            def __init__(self, in_feature, out_feature, gemm_num):
+                super().__init__()
+                self.gemm_num = gemm_num
+                self.linears = [
+                    torch.nn.Linear(in_feature, out_feature, bias=False)
+                    for _ in range(gemm_num)
+                ]
+
+            def forward(self, x):
+                return [self.linears[i](x) for i in range(self.gemm_num)]
+
+        torch._dynamo.reset()
+        torch._inductor.metrics.reset()
+        counters.clear()
+        assert dtype == torch.bfloat16
+        mod = Linear_Gate_Up(in_features, out_features, gemm_num).eval()
+        B = (2, batch_size) if input_3d else (batch_size,)
+        v = torch.randn(*B, in_features).to(torch.bfloat16)
+        with verify(dtype) as (atol, rtol), torch.autocast(
+            device_type="cpu"
+        ), torch.no_grad():
+            self.common(mod, (v,), atol=atol, rtol=rtol)
+        self.assertEqual(counters["inductor"]["cpp_group_gemm_template"], 1)
+
     @inductor_config.patch({"freezing": False})
     @patches
     @torch.no_grad
