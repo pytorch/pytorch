@@ -152,6 +152,7 @@ endif()
 set(AT_MKLDNN_ACL_ENABLED 0)
 set(AT_MKLDNN_ENABLED 0)
 set(AT_MKL_ENABLED 0)
+set(AT_KLEIDIAI_ENABLED 0)
 # setting default preferred BLAS options if not already present.
 if(NOT INTERN_BUILD_MOBILE)
   set(BLAS "MKL" CACHE STRING "Selected BLAS library")
@@ -500,7 +501,7 @@ if(USE_XNNPACK AND NOT USE_SYSTEM_XNNPACK)
     set(XNNPACK_INCLUDE_DIR "${XNNPACK_SOURCE_DIR}/include" CACHE STRING "XNNPACK include directory")
   endif()
 
-  if(NOT TARGET XNNPACK)
+  if(NOT TARGET XNNPACK OR NOT TARGET microkernels-prod)
     set(XNNPACK_LIBRARY_TYPE "static" CACHE STRING "")
     set(XNNPACK_BUILD_BENCHMARKS OFF CACHE BOOL "")
     set(XNNPACK_BUILD_TESTS OFF CACHE BOOL "")
@@ -548,16 +549,19 @@ if(USE_XNNPACK AND NOT USE_SYSTEM_XNNPACK)
   endif()
 
   include_directories(SYSTEM ${XNNPACK_INCLUDE_DIR})
-  list(APPEND Caffe2_DEPENDENCY_LIBS XNNPACK)
+  list(APPEND Caffe2_DEPENDENCY_LIBS XNNPACK microkernels-prod)
 elseif(NOT TARGET XNNPACK AND USE_SYSTEM_XNNPACK)
   add_library(XNNPACK SHARED IMPORTED)
+  add_library(microkernels-prod SHARED IMPORTED)
   find_library(XNNPACK_LIBRARY XNNPACK)
+  find_library(microkernels-prod_LIBRARY microkernels-prod)
   set_property(TARGET XNNPACK PROPERTY IMPORTED_LOCATION "${XNNPACK_LIBRARY}")
-  if(NOT XNNPACK_LIBRARY)
+  set_property(TARGET microkernels-prod PROPERTY IMPORTED_LOCATION "${microkernels-prod_LIBRARY}")
+  if(NOT XNNPACK_LIBRARY or NOT microkernels-prod_LIBRARY)
     message(FATAL_ERROR "Cannot find XNNPACK")
   endif()
   message("-- Found XNNPACK: ${XNNPACK_LIBRARY}")
-  list(APPEND Caffe2_DEPENDENCY_LIBS XNNPACK)
+  list(APPEND Caffe2_DEPENDENCY_LIBS XNNPACK microkernels-prod)
 endif()
 
 # ---[ Vulkan deps
@@ -731,6 +735,10 @@ if(USE_FBGEMM)
       # See https://github.com/pytorch/pytorch/issues/74352
       target_compile_options_if_supported(asmjit -Wno-deprecated-copy)
       target_compile_options_if_supported(asmjit -Wno-unused-but-set-variable)
+    endif()
+    if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+      target_compile_options_if_supported(asmjit -Wno-extra-semi)
+      target_compile_options_if_supported(fbgemm -Wno-extra-semi)
     endif()
   endif()
 
@@ -1069,7 +1077,9 @@ if(USE_ROCM)
 
     set(Caffe2_PUBLIC_HIP_DEPENDENCY_LIBS
       hip::amdhip64 MIOpen hiprtc::hiprtc) # libroctx will be linked in with MIOpen
-    list(APPEND Caffe2_PUBLIC_HIP_DEPENDENCY_LIBS roc::hipblaslt)
+    if(UNIX)
+      list(APPEND Caffe2_PUBLIC_HIP_DEPENDENCY_LIBS roc::hipblaslt)
+    endif(UNIX)
 
     list(APPEND Caffe2_PUBLIC_HIP_DEPENDENCY_LIBS
       roc::hipblas hip::hipfft hip::hiprand roc::hipsparse roc::hipsolver)
@@ -1306,28 +1316,6 @@ if(CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO AND NOT INTERN_DISABLE_ONNX)
   set(BUILD_SHARED_LIBS ${TEMP_BUILD_SHARED_LIBS})
 endif()
 
-# --[ x86-simd-sort integration
-if(USE_X86_SIMD_SORT)
-  if(NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
-    message(WARNING
-      "x64 operating system is required for x86-simd-sort. "
-      "Not compiling with x86-simd-sort. "
-      "Turn this warning off by USE_X86_SIMD_SORT=OFF.")
-    set(USE_X86_SIMD_SORT OFF)
-  endif()
-
-  if(USE_X86_SIMD_SORT)
-    if(USE_OPENMP AND NOT MSVC)
-      set(USE_XSS_OPENMP ON)
-    else()
-      set(USE_XSS_OPENMP OFF)
-    endif()
-
-    set(XSS_SIMD_SORT_INCLUDE_DIR ${CMAKE_CURRENT_LIST_DIR}/../third_party/x86-simd-sort)
-    include_directories(SYSTEM ${XSS_SIMD_SORT_INCLUDE_DIR})
-  endif()
-endif()
-
 # --[ ATen checks
 set(USE_LAPACK 0)
 
@@ -1360,10 +1348,13 @@ if(NOT INTERN_BUILD_MOBILE)
     string(APPEND CMAKE_CUDA_FLAGS " -Xcompiler=/wd4819,/wd4503,/wd4190,/wd4244,/wd4251,/wd4275,/wd4522")
   else()
     if(WERROR)
-      if("${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU" AND ${CMAKE_CXX_COMPILER_VERSION} VERSION_GREATER_EQUAL 13)
+      if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND ${CMAKE_CXX_COMPILER_VERSION} VERSION_GREATER_EQUAL 13)
         string(APPEND CMAKE_CUDA_FLAGS " -Xcompiler -Wno-dangling-reference ")
       endif()
-      if("${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU" OR ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang" AND ${CMAKE_CXX_COMPILER_VERSION} VERSION_GREATER_EQUAL 13))
+      if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+        string(APPEND CMAKE_CUDA_FLAGS " -Xcompiler -Wno-extra-semi ")
+      endif()
+      if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" OR (CMAKE_CXX_COMPILER_ID STREQUAL "Clang" AND ${CMAKE_CXX_COMPILER_VERSION} VERSION_GREATER_EQUAL 13))
         string(APPEND CMAKE_CUDA_FLAGS " -Xcompiler -Werror -Xcompiler -Wno-error=sign-compare ")
       endif()
     endif()
@@ -1488,6 +1479,35 @@ if(NOT INTERN_BUILD_MOBILE)
     endif()
   else()
     message("disabling MKLDNN because USE_MKLDNN is not set")
+  endif()
+
+  if(USE_KLEIDIAI)
+    if(CMAKE_C_COMPILER_ID STREQUAL "Clang" AND CMAKE_C_COMPILER_VERSION VERSION_LESS "11" )
+        message(WARNING "KleidiAI: Using non-supported Clang version. Expected 11 or newer, received ${CMAKE_C_COMPILER_VERSION}.")
+    endif()
+    if(CMAKE_C_COMPILER_ID STREQUAL "GNU" AND CMAKE_C_COMPILER_VERSION VERSION_LESS "11" )
+        message(WARNING "KleidiAI: Using non-supported GCC version. Expected 11 or newer, received ${CMAKE_C_COMPILER_VERSION}.")
+    endif()
+    set(TEMP_BUILD_SHARED_LIBS ${BUILD_SHARED_LIBS})
+    set(BUILD_SHARED_LIBS OFF CACHE BOOL "Build shared libs" FORCE)
+    set(AT_KLEIDIAI_ENABLED 1)
+    set(KLEIDIAI_BUILD_TESTS OFF) # Disable building KLEIDIAI tests
+    set(KLEIDIAI_SRC "${PROJECT_SOURCE_DIR}/third_party/kleidiai")
+    add_subdirectory(${KLEIDIAI_SRC})
+    set(KLEIDIAI_INCLUDE_DIRS
+    ${KLEIDIAI_SRC}/
+    ${KLEIDIAI_SRC}/kai/
+    ${KLEIDIAI_SRC}/kai/ukernels/
+    ${KLEIDIAI_SRC}/kai/ukernels/matmul/
+    ${KLEIDIAI_SRC}/kai/ukernels/matmul/matmul_clamp_f32_qai8dxp_qsi4cxp/
+    ${KLEIDIAI_SRC}/kai/ukernels/matmul/matmul_clamp_f32_qsi8d32p_qsi4c32p/
+    ${KLEIDIAI_SRC}/kai/ukernels/matmul/matmul_clamp_f32_qai8dxp_qsi4c32p/
+    ${KLEIDIAI_SRC}/kai/ukernels/matmul/pack/
+    )
+    include_directories(SYSTEM INTERFACE ${KLEIDIAI_INCLUDE_DIRS})
+    list(APPEND Caffe2_DEPENDENCY_LIBS kleidiai)
+    # Recover build options.
+    set(BUILD_SHARED_LIBS ${TEMP_BUILD_SHARED_LIBS} CACHE BOOL "Build shared libs" FORCE)
   endif()
 
   if(UNIX AND NOT APPLE)
