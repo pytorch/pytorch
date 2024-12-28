@@ -620,7 +620,7 @@ class TestDifferentiableOptimizer(TestCase):
             10, requires_grad=True, dtype=torch.float64
         )
 
-        # Have to pass in beta1 and beta2 seperately
+        # Have to pass in beta1 and beta2 separately
         # so they're passed in as Tensors (not a tuple) and recognized by gradcheck.
         # In the test, this is called: kwargs.update({betas: (beta1, beta2)})
         kwargs: dict[str, Any] = {
@@ -660,7 +660,7 @@ class TestDifferentiableOptimizer(TestCase):
             10, requires_grad=True, dtype=torch.float64
         )
 
-        # Have to pass in beta1 and beta2 seperately
+        # Have to pass in beta1 and beta2 separately
         # so they're passed in as Tensors (not a tuple) and recognized by gradcheck.
         # In the test, this is called: kwargs.update({betas: (beta1, beta2)})
         kwargs: dict[str, Any] = {
