@@ -104,9 +104,11 @@ struct WelfordOps {
     // need nf for use in combine where int32 may overflow.
     index_t new_n = acc.n + 1;
     acc_scalar_t new_nf = static_cast<acc_scalar_t>(new_n);
-    acc_scalar_t delta = data - acc.mean;
-    acc_scalar_t new_mean = acc.mean + delta / new_nf;
-    acc_scalar_t new_delta = data - new_mean;
+    // Avoid mean result is Nan, cause by inf - inf = Nan or -inf + inf = Nan
+    bool is_inf = std::isinf(acc.mean);
+    acc_scalar_t delta = is_inf && data == acc.mean? 0 : data - acc.mean;
+    acc_scalar_t new_mean = is_inf && delta == -acc.mean ? 0 : acc.mean + delta / new_nf;
+    acc_scalar_t new_delta = std::isinf(new_mean) && data == new_mean ? 0 : data - new_mean;
     return {
       new_mean,
       acc.m2 + delta * new_delta,
