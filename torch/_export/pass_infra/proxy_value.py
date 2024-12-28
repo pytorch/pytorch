@@ -3,10 +3,13 @@ from typing import Union
 from typing import Iterator
 import torch
 
+from typing import TypeVar
+
+_T = TypeVar("_T")
 
 class ProxyValue:
     # pyre-ignore
-    def __init__(self, data: Iterator[object], proxy: Union[torch.fx.Proxy, torch.fx.Node]):
+    def __init__(self, data: Union[Iterator[_T], torch.Tensor], proxy: Union[torch.fx.Proxy, torch.fx.Node]):
         # pyre-ignore
         self.data = data
         self.proxy_or_node = proxy
