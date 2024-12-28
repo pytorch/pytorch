@@ -1559,12 +1559,12 @@ def _export_to_aten_ir_make_fx(
                                     original_getattr=original_getattr_method,
                                     attrs_to_proxy=attrs_to_proxy,
                                 )
-                                arg.__class__.__getattribute__ = custom
+                                arg.__class__.__getattribute__ = custom  # type: ignore[assignment]
                                 patched.add(tensor_type)
                     yield
                 finally:
-                    for k, v in tensor_type_to_old_getattribute.items():
-                        k.__getattribute__ = v[0]
+                    for k, (old_getattr, _) in tensor_type_to_old_getattribute.items():
+                        k.__getattribute__ = old_getattr  # type: ignore[method-assign]
 
             with ctx, override_getattribute_for_subclasses(flat_args):
                 gm = make_fx(

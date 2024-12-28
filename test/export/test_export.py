@@ -1734,7 +1734,7 @@ graph():
                 )
 
             def forward(self, x):
-                res = (2 * self.p1 + self.p2)
+                res = 2 * self.p1 + self.p2
                 res2 = res + res.constant_attribute
                 return x + res2.elem.elem
 
