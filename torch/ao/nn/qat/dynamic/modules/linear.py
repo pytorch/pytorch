@@ -28,7 +28,7 @@ class Linear(torch.ao.nn.qat.Linear):
         in_features: int,
         out_features: int,
         bias: bool = True,
-        qconfig: Optional[QConfig] = None,
+        qconfig: Optional["QConfig"] = None,
         device: Optional[Union[int, str, torch.device]] = None,
         dtype: Optional[str] = None,
     ) -> None:
