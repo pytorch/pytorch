@@ -213,7 +213,7 @@ class TestAOTInductorPackage(TestCase):
             options = {
                 "aot_inductor.package_cpp_only": self.package_cpp_only,
             }
-            ep = torch.export.export(model, example_inputs)
+            ep = torch.export.export(model, example_inputs, strict=True)
             package_path = torch._inductor.aoti_compile_and_package(
                 ep, inductor_configs=options
             )
