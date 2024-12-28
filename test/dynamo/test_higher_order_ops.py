@@ -346,22 +346,22 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
             actual_graph,
             """\
 class GraphModule(torch.nn.Module):
-    def forward(self, dict_getitem_L_d_x_: "f32[]", dict_getitem_L_d_y_0_: "f32[]", dict_getitem_L_d_y_1_2_: "f32[]"):
-        dict_getitem_l_d_x_ = dict_getitem_L_d_x_
-        dict_getitem_l_d_y_0_ = dict_getitem_L_d_y_0_
-        dict_getitem_l_d_y_1_2_ = dict_getitem_L_d_y_1_2_
+    def forward(self, L_d_x_: "f32[]", L_d_y_0_: "f32[]", L_d_y_1_2_: "f32[]"):
+        l_d_x_ = L_d_x_
+        l_d_y_0_ = L_d_y_0_
+        l_d_y_1_2_ = L_d_y_1_2_
 
         wrap_body_0 = self.wrap_body_0
-        wrap = torch.ops.higher_order.wrap(wrap_body_0, dict_getitem_l_d_x_, dict_getitem_l_d_y_0_, dict_getitem_l_d_y_1_2_);  wrap_body_0 = dict_getitem_l_d_x_ = dict_getitem_l_d_y_0_ = dict_getitem_l_d_y_1_2_ = None
+        wrap = torch.ops.higher_order.wrap(wrap_body_0, l_d_x_, l_d_y_0_, l_d_y_1_2_);  wrap_body_0 = l_d_x_ = l_d_y_0_ = l_d_y_1_2_ = None
         getitem: "f32[]" = wrap[0];  wrap = None
         return (getitem,)
 
     class wrap_body_0(torch.nn.Module):
-        def forward(self, dict_getitem_l_d_x_: "f32[]", dict_getitem_l_d_y_0_: "f32[]", dict_getitem_l_d_y_1_2_: "f32[]"):
-            sin: "f32[]" = dict_getitem_l_d_x_.sin();  dict_getitem_l_d_x_ = None
-            cos: "f32[]" = dict_getitem_l_d_y_0_.cos();  dict_getitem_l_d_y_0_ = None
+        def forward(self, l_d_x_: "f32[]", l_d_y_0_: "f32[]", l_d_y_1_2_: "f32[]"):
+            sin: "f32[]" = l_d_x_.sin();  l_d_x_ = None
+            cos: "f32[]" = l_d_y_0_.cos();  l_d_y_0_ = None
             add: "f32[]" = sin + cos;  sin = cos = None
-            sin_1: "f32[]" = dict_getitem_l_d_y_1_2_.sin();  dict_getitem_l_d_y_1_2_ = None
+            sin_1: "f32[]" = l_d_y_1_2_.sin();  l_d_y_1_2_ = None
             sub: "f32[]" = add - sin_1;  add = sin_1 = None
             return (sub,)
 """,  # NOQA: B950
@@ -3093,7 +3093,7 @@ def forward(self, L_a_ : torch.SymInt, L_b_ : torch.SymInt, L_c_ : torch.SymInt,
         self.assertExpectedInline(
             graph.code.strip(),
             """\
-def forward(self, L_pred_ : torch.Tensor, L_pytree_in_0_ : torch.Tensor, L_pytree_in_1_0_0_0_ : torch.Tensor, L_pytree_in_2_ : torch.Tensor, L_pytree_in_3_0_ : torch.Tensor, L_pytree_in_3_1_0_ : torch.Tensor, L_pytree_in_3_2_ : torch.Tensor, dict_getitem_L_pytree_in_4_g_ : torch.Tensor):
+def forward(self, L_pred_ : torch.Tensor, L_pytree_in_0_ : torch.Tensor, L_pytree_in_1_0_0_0_ : torch.Tensor, L_pytree_in_2_ : torch.Tensor, L_pytree_in_3_0_ : torch.Tensor, L_pytree_in_3_1_0_ : torch.Tensor, L_pytree_in_3_2_ : torch.Tensor, L_pytree_in_4_g_ : torch.Tensor):
     l_pred_ = L_pred_
     l_pytree_in_0_ = L_pytree_in_0_
     l_pytree_in_1_0_0_0_ = L_pytree_in_1_0_0_0_
@@ -3101,10 +3101,10 @@ def forward(self, L_pred_ : torch.Tensor, L_pytree_in_0_ : torch.Tensor, L_pytre
     l_pytree_in_3_0_ = L_pytree_in_3_0_
     l_pytree_in_3_1_0_ = L_pytree_in_3_1_0_
     l_pytree_in_3_2_ = L_pytree_in_3_2_
-    dict_getitem_l_pytree_in_4_g_ = dict_getitem_L_pytree_in_4_g_
+    l_pytree_in_4_g_ = L_pytree_in_4_g_
     cond_true_0 = self.cond_true_0
     cond_false_0 = self.cond_false_0
-    cond = torch.ops.higher_order.cond(l_pred_, cond_true_0, cond_false_0, [dict_getitem_l_pytree_in_4_g_, l_pytree_in_0_, l_pytree_in_1_0_0_0_, l_pytree_in_2_, l_pytree_in_3_0_, l_pytree_in_3_1_0_, l_pytree_in_3_2_]);  l_pred_ = cond_true_0 = cond_false_0 = dict_getitem_l_pytree_in_4_g_ = l_pytree_in_0_ = l_pytree_in_1_0_0_0_ = l_pytree_in_2_ = l_pytree_in_3_0_ = l_pytree_in_3_1_0_ = l_pytree_in_3_2_ = None
+    cond = torch.ops.higher_order.cond(l_pred_, cond_true_0, cond_false_0, [l_pytree_in_0_, l_pytree_in_1_0_0_0_, l_pytree_in_2_, l_pytree_in_3_0_, l_pytree_in_3_1_0_, l_pytree_in_3_2_, l_pytree_in_4_g_]);  l_pred_ = cond_true_0 = cond_false_0 = l_pytree_in_0_ = l_pytree_in_1_0_0_0_ = l_pytree_in_2_ = l_pytree_in_3_0_ = l_pytree_in_3_1_0_ = l_pytree_in_3_2_ = l_pytree_in_4_g_ = None
     getitem = cond[0];  cond = None
     return (getitem,)""",  # noqa: B950
         )
@@ -4293,13 +4293,13 @@ class GraphModule(torch.nn.Module):
                 actual,
                 """\
 class GraphModule(torch.nn.Module):
-    def forward(self, dict_getitem_L_model_parameters_weight_: "f32[3, 3]", dict_getitem_L_model_parameters_bias_: "f32[3]", L_inputs_: "f32[64, 3]", L_targets_: "f32[64, 3]"):
-        dict_getitem_l_model_parameters_weight_ = dict_getitem_L_model_parameters_weight_
-        dict_getitem_l_model_parameters_bias_ = dict_getitem_L_model_parameters_bias_
+    def forward(self, L_model_parameters_weight_: "f32[3, 3]", L_model_parameters_bias_: "f32[3]", L_inputs_: "f32[64, 3]", L_targets_: "f32[64, 3]"):
+        l_model_parameters_weight_ = L_model_parameters_weight_
+        l_model_parameters_bias_ = L_model_parameters_bias_
         l_inputs_ = L_inputs_
         l_targets_ = L_targets_
 
-        prediction: "f32[64, 3]" = torch._C._nn.linear(l_inputs_, dict_getitem_l_model_parameters_weight_, dict_getitem_l_model_parameters_bias_);  l_inputs_ = dict_getitem_l_model_parameters_weight_ = dict_getitem_l_model_parameters_bias_ = None
+        prediction: "f32[64, 3]" = torch._C._nn.linear(l_inputs_, l_model_parameters_weight_, l_model_parameters_bias_);  l_inputs_ = l_model_parameters_weight_ = l_model_parameters_bias_ = None
 
         mse_loss: "f32[]" = torch.nn.functional.mse_loss(prediction, l_targets_);  prediction = l_targets_ = None
         return (mse_loss,)
@@ -5830,10 +5830,10 @@ class GraphModule(torch.nn.Module):
             actual,
             """\
 class GraphModule(torch.nn.Module):
-    def forward(self, dict_getitem_L_self_buffers_tensor_constant0_: "f32[3, 3, 3]"):
-        dict_getitem_l_self_buffers_tensor_constant0_ = dict_getitem_L_self_buffers_tensor_constant0_
+    def forward(self, L_self_buffers_tensor_constant0_: "f32[3, 3, 3]"):
+        l_self_buffers_tensor_constant0_ = L_self_buffers_tensor_constant0_
 
-        alias_default: "f32[3, 3, 3]" = torch.ops.aten.alias.default(dict_getitem_l_self_buffers_tensor_constant0_);  dict_getitem_l_self_buffers_tensor_constant0_ = None
+        alias_default: "f32[3, 3, 3]" = torch.ops.aten.alias.default(l_self_buffers_tensor_constant0_);  l_self_buffers_tensor_constant0_ = None
 
         sin_default: "f32[3, 3, 3]" = torch.ops.aten.sin.default(alias_default)
 
@@ -5852,16 +5852,16 @@ class GraphModule(torch.nn.Module):
             actual,
             """\
 class GraphModule(torch.nn.Module):
-    def forward(self, dict_getitem_dict_getitem_L_self_modules_FX_CONST_FOLDED_ATTRS_parameters_0_: "f32[3, 3, 3]", dict_getitem_dict_getitem_L_self_modules_FX_CONST_FOLDED_ATTRS_parameters_1_: "f32[3, 3, 3]", L_flat_tangents_1_: "f32[3, 3, 3]"):
-        dict_getitem_dict_getitem_l_self_modules_fx_const_folded_attrs_parameters_0_ = dict_getitem_dict_getitem_L_self_modules_FX_CONST_FOLDED_ATTRS_parameters_0_
-        dict_getitem_dict_getitem_l_self_modules_fx_const_folded_attrs_parameters_1_ = dict_getitem_dict_getitem_L_self_modules_FX_CONST_FOLDED_ATTRS_parameters_1_
+    def forward(self, L_self_modules_FX_CONST_FOLDED_ATTRS_parameters_0_: "f32[3, 3, 3]", L_self_modules_FX_CONST_FOLDED_ATTRS_parameters_1_: "f32[3, 3, 3]", L_flat_tangents_1_: "f32[3, 3, 3]"):
+        l_self_modules_fx_const_folded_attrs_parameters_0_ = L_self_modules_FX_CONST_FOLDED_ATTRS_parameters_0_
+        l_self_modules_fx_const_folded_attrs_parameters_1_ = L_self_modules_FX_CONST_FOLDED_ATTRS_parameters_1_
         l_flat_tangents_1_ = L_flat_tangents_1_
 
-        _new_zeros_with_same_feature_meta_default: "f32[3, 3, 3]" = torch.ops.aten._new_zeros_with_same_feature_meta.default(l_flat_tangents_1_, dict_getitem_dict_getitem_l_self_modules_fx_const_folded_attrs_parameters_0_);  dict_getitem_dict_getitem_l_self_modules_fx_const_folded_attrs_parameters_0_ = None
+        _new_zeros_with_same_feature_meta_default: "f32[3, 3, 3]" = torch.ops.aten._new_zeros_with_same_feature_meta.default(l_flat_tangents_1_, l_self_modules_fx_const_folded_attrs_parameters_0_);  l_self_modules_fx_const_folded_attrs_parameters_0_ = None
 
         copy__default: "f32[3, 3, 3]" = torch.ops.aten.copy_.default(_new_zeros_with_same_feature_meta_default, l_flat_tangents_1_);  _new_zeros_with_same_feature_meta_default = l_flat_tangents_1_ = None
 
-        mul_tensor: "f32[3, 3, 3]" = torch.ops.aten.mul.Tensor(copy__default, dict_getitem_dict_getitem_l_self_modules_fx_const_folded_attrs_parameters_1_);  copy__default = dict_getitem_dict_getitem_l_self_modules_fx_const_folded_attrs_parameters_1_ = None
+        mul_tensor: "f32[3, 3, 3]" = torch.ops.aten.mul.Tensor(copy__default, l_self_modules_fx_const_folded_attrs_parameters_1_);  copy__default = l_self_modules_fx_const_folded_attrs_parameters_1_ = None
         return (mul_tensor,)
 """,
         )

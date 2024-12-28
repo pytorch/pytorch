@@ -544,7 +544,7 @@ class DictGetItemSource(ChainedSource):
             from .variables import ConstantVariable
 
             assert ConstantVariable.is_literal(self.index)
-            return f"dict.__getitem__({self.base.name()}, {self.index!r})"
+            return f"{self.base.name()}[{self.index!r}]"
 
 
 @dataclasses.dataclass(frozen=True)
