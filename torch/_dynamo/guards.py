@@ -667,7 +667,7 @@ class GuardBuilder(GuardBuilderBase):
         # does not call the overridden keys method.
         for key in builtin_dict_keys(example_value):
             value = example_value[key]
-            value_source = GetItemSource(guard.originating_source, index=key)
+            value_source = DictGetItemSource(guard.originating_source, index=key)
             guard_manager_enum = self.get_guard_manager_type(
                 value_source, example_value
             )
