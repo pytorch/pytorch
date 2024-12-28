@@ -129,6 +129,8 @@ class MetalKernel(SIMDKernel):
             code.writeline("kernel void kernel_0(")
             with code.indent():
                 for outer, inner in self.args.output_buffers.items():
+                    if outer in self.removed_buffers:
+                        continue
                     dtype_str = self.dtype_to_str(V.graph.get_dtype(outer))
                     code.writeline(f"device {dtype_str}* {inner},")
                 for outer, inner in self.args.input_buffers.items():
@@ -147,6 +149,7 @@ class MetalKernel(SIMDKernel):
         """Codegen a call to this kernel"""
         wrapper = V.graph.wrapper_code
         args = [*self.args.output_buffers.keys(), *self.args.input_buffers.keys()]
+        args = [arg for arg in args if arg not in self.removed_buffers]
         wrapper.generate_kernel_call(
             name,
             args,

@@ -70,6 +70,13 @@ class MPSBasicTests(TestCase):
     def test_broadcast(self):
         self.common(torch.add, (torch.rand(32, 1024), torch.rand(1024)))
 
+    def test_inplace(self):
+        def inc_(x):
+            x += 1
+            return x
+
+        self.common(inc_, (torch.rand(1024),))
+
 
 instantiate_parametrized_tests(MPSBasicTests)
 
