@@ -1626,7 +1626,7 @@ graph():
         ref_x = torch.randn(2, 2)
         ref_out = m(ref_x)
 
-        ep_training = torch.export.export_for_training(m, (ref_x,))
+        ep_training = torch.export.export_for_training(m, (ref_x,), strict=False)
         self.assertExpectedInline(
             str(ep_training.graph).strip(),
             """\
@@ -1671,6 +1671,94 @@ graph():
         )
         res = ep.module()(ref_x)
         self.assertEqual(res, ref_out)
+
+    @testing.expectedFailureLegacyExportNonStrict  # Old export doesn't work with subclasses
+    @testing.expectedFailureLegacyExportStrict  # Old export doesn't work with subclasses
+    @testing.expectedFailureSerDerNonStrict  # builtins.getattr is not supported  T211130564
+    @testing.expectedFailureSerDer  # builtins.getattr is not supported  T211130564
+    def test_subclass_nested_attr_access(self):
+        from torch.testing._internal.two_tensor import TwoTensor
+
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.p1 = torch.nn.Parameter(torch.ones(3, 4))
+                self.p2 = torch.nn.Parameter(
+                    TwoTensor(
+                        TwoTensor(torch.ones(3, 4), torch.ones(3, 4)),
+                        TwoTensor(torch.ones(3, 4), torch.ones(3, 4)),
+                    )
+                )
+
+            def forward(self, x):
+                res = (2 * self.p1 + self.p2).sum()
+                return x + res.get_elem_a().b
+
+        m = Foo()
+        ref_x = torch.randn(3, 4)
+        ref_out = m(ref_x)
+        ep_training = torch.export.export_for_training(m, (ref_x,), strict=False)
+        self.assertExpectedInline(
+            str(ep_training.graph).strip(),
+            """\
+graph():
+    %p_p1 : [num_users=1] = placeholder[target=p_p1]
+    %p_p2 : [num_users=1] = placeholder[target=p_p2]
+    %x : [num_users=1] = placeholder[target=x]
+    %mul : [num_users=1] = call_function[target=torch.ops.aten.mul.Tensor](args = (%p_p1, 2), kwargs = {})
+    %add : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%mul, %p_p2), kwargs = {})
+    %sum_1 : [num_users=1] = call_function[target=torch.ops.aten.sum.default](args = (%add,), kwargs = {})
+    %getattr_33 : [num_users=1] = call_function[target=builtins.getattr](args = (%sum_1, a), kwargs = {})
+    %getattr_38 : [num_users=1] = call_function[target=builtins.getattr](args = (%getattr_33, b), kwargs = {})
+    %add_1 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%x, %getattr_38), kwargs = {})
+    return (add_1,)""",
+        )
+        ep = export(m, (ref_x,))
+        self.assertTrue(torch.allclose(ep.module()(ref_x), ref_out))
+
+    @testing.expectedFailureLegacyExportNonStrict  # Old export doesn't work with subclasses
+    @testing.expectedFailureLegacyExportStrict  # Old export doesn't work with subclasses
+    @testing.expectedFailureSerDerNonStrict  # builtins.getattr is not supported  T211130564
+    @testing.expectedFailureSerDer  # builtins.getattr is not supported  T211130564
+    def test_subclass_nested_attr_access_const_metadata(self):
+        from torch.testing._internal.custom_tensor import ConstantExtraMetadataTensor
+
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.p1 = torch.nn.Parameter(torch.ones(3, 4))
+                self.p2 = torch.nn.Parameter(
+                    ConstantExtraMetadataTensor(
+                        ConstantExtraMetadataTensor(torch.ones(3, 4)),
+                    )
+                )
+
+            def forward(self, x):
+                res = (2 * self.p1 + self.p2)
+                res2 = res + res.constant_attribute
+                return x + res2.elem.elem
+
+        m = Foo()
+        ref_x = torch.randn(3, 4)
+        ref_out = m(ref_x)
+        ep_training = torch.export.export_for_training(m, (ref_x,), strict=False)
+        self.assertExpectedInline(
+            str(ep_training.graph).strip(),
+            """\
+graph():
+    %p_p1 : [num_users=1] = placeholder[target=p_p1]
+    %p_p2 : [num_users=1] = placeholder[target=p_p2]
+    %x : [num_users=1] = placeholder[target=x]
+    %mul : [num_users=1] = call_function[target=torch.ops.aten.mul.Tensor](args = (%p_p1, 2), kwargs = {})
+    %add : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%mul, %p_p2), kwargs = {})
+    %add_1 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%add, 4), kwargs = {})
+    %getattr_22 : [num_users=1] = call_function[target=builtins.getattr](args = (%add_1, elem), kwargs = {})
+    %getattr_27 : [num_users=1] = call_function[target=builtins.getattr](args = (%getattr_22, elem), kwargs = {})
+    %add_2 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%x, %getattr_27), kwargs = {})
+    return (add_2,)""",
+        )
+        ep = export(m, (ref_x,))
+        self.assertTrue(torch.allclose(ep.module()(ref_x), ref_out))
 
     def test_real_tensor_errors_on_aliasing_custom_op(self):
         @torch.library.custom_op("export::foo_alias", mutates_args={})

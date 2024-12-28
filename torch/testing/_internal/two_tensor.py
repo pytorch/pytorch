@@ -84,6 +84,9 @@ class TwoTensor(torch.Tensor):
             return out
         else:
             return return_and_correct_aliasing(func, args, kwargs, out)
+    
+    def get_elem_a(self):
+        return self.a
 
 
 class TwoTensorMode(torch.utils._python_dispatch.TorchDispatchMode):

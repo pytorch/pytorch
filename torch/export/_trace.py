@@ -1,11 +1,13 @@
 # mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
+import builtins
 import dataclasses
 import functools
 import inspect
 import logging
 import re
 import time
+import types
 import warnings
 from contextlib import contextmanager, nullcontext
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
@@ -67,7 +69,12 @@ from torch._utils_internal import log_export_usage
 from torch.export._unlift import _check_input_constraints_pre_hook
 from torch.export.dynamic_shapes import _check_dynamic_shapes, _combine_args
 from torch.export.exported_program import OutputKind
-from torch.fx.experimental.proxy_tensor import make_fx
+from torch.fx.experimental.proxy_tensor import (
+    get_proxy_slot,
+    make_fx,
+    PreDispatchTorchFunctionMode,
+    track_tensor_tree,
+)
 from torch.fx.experimental.symbolic_shapes import (
     ConstraintViolationError,
     free_unbacked_symbols,
@@ -76,6 +83,7 @@ from torch.fx.experimental.symbolic_shapes import (
 )
 from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
 from torch.fx.graph_module import _get_attr
+from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 from torch.utils._pytree import TreeSpec
 from torch.utils._sympy.value_ranges import ValueRangeError
 
@@ -1472,7 +1480,93 @@ def _export_to_aten_ir_make_fx(
                     non_strict_root, assigned_buffers
                 )
 
-            with ctx:
+            def custom_getattribute(self, attr, *, original_getattr, attrs_to_proxy):
+                """
+                The idea here is that we override subclass getattr methods to proxy
+                inner tensors and metadata. Because of infinite loop shenanigans, we have
+                to manually construct the getattr proxy nodes without relying on torch function
+                system.
+                """
+                out = original_getattr(self, attr)
+                if attr in attrs_to_proxy:
+                    if torch._C._is_torch_function_mode_enabled():
+                        # When we get here there is no guarantee that we will hit the
+                        # PreDispatchTorchFunctionMode, so we manually peak into the torch
+                        # function mode list and tweak the PreDispatchTorchFunctionMode.
+                        # This has side effect of proxying stuff like
+                        # proxy.node.meta["val"] = extract_val(val) because at that time, torch function
+                        # mode is still active. It seems bad to turn it off inside proxy_tensor.py, so
+                        # I guess we will just rely on DCE for now to remove extra stuff like detach
+                        torch_function_mode_stack = (
+                            torch.overrides._get_current_function_mode_stack()
+                        )
+                        for mode in torch_function_mode_stack:
+                            if isinstance(mode, PreDispatchTorchFunctionMode):
+                                tracer = mode.tracer
+                                proxy = get_proxy_slot(self, tracer).proxy
+                                inner_proxy = tracer.create_proxy(
+                                    "call_function", builtins.getattr, (proxy, attr), {}
+                                )
+                                # Even though the name says tensor tracking, the impl
+                                # suggests it tracks everything?
+                                track_tensor_tree(
+                                    out, inner_proxy, constant=None, tracer=tracer
+                                )
+                return out
+
+            @contextmanager
+            def override_getattribute_for_subclasses(args):
+                """
+                Context manager that temporarily monkey patches
+                tensor.__getattribute__ so that we can intercept it at
+                torch_function layer.
+                """
+
+                # Dictionary that tracks subclass type to original getattr function
+                # and the attributes we can proxy.
+                tensor_type_to_old_getattribute = {}
+                for arg in args:
+                    if is_traceable_wrapper_subclass(arg):
+                        # Query subclass specific attrs
+                        subclass_attrs = set(dir(arg)) - set(dir(torch.Tensor))
+                        attrs_to_proxy = []
+                        for attr in subclass_attrs:
+                            val = getattr(arg, attr)
+                            # If it is a static function or method, we should always inline
+                            if not isinstance(
+                                val, (types.FunctionType, types.MethodType)
+                            ):
+                                attrs_to_proxy.append(attr)
+                        inner_tensors, _ = arg.__tensor_flatten__()
+                        attrs_to_proxy.extend(inner_tensors)
+                        tensor_type_to_old_getattribute[arg.__class__] = (
+                            arg.__class__.__getattribute__,
+                            attrs_to_proxy,
+                        )
+
+                try:
+                    for arg in args:
+                        patched = set()
+                        if is_traceable_wrapper_subclass(arg):
+                            tensor_type = arg.__class__
+                            if tensor_type not in patched:
+                                (
+                                    original_getattr_method,
+                                    attrs_to_proxy,
+                                ) = tensor_type_to_old_getattribute[tensor_type]
+                                custom = functools.partialmethod(
+                                    custom_getattribute,
+                                    original_getattr=original_getattr_method,
+                                    attrs_to_proxy=attrs_to_proxy,
+                                )
+                                arg.__class__.__getattribute__ = custom
+                                patched.add(tensor_type)
+                    yield
+                finally:
+                    for k, v in tensor_type_to_old_getattribute.items():
+                        k.__getattribute__ = v[0]
+
+            with ctx, override_getattribute_for_subclasses(flat_args):
                 gm = make_fx(
                     wrapped_fn,
                     record_module_stack=True,
@@ -1510,6 +1604,8 @@ def _export_to_aten_ir_make_fx(
                     torch.ops.profiler._record_function_enter.default,
                     torch.ops.profiler._record_function_enter_new.default,
                     torch.ops.profiler._record_function_exit._RecordFunction,
+                    torch.ops.aten.detach.default,
+                    builtins.getattr,
                 ):
                     return False
                 return True

@@ -86,6 +86,9 @@ class CustomTensorPlainOut(torch.Tensor):
         self.elem1 = elem1
         self.elem2 = elem2
 
+    def get_elem(self):
+        return self.elem1
+
     def __repr__(self):
         inner_repr_1 = repr(self.elem1)
         inner_repr_2 = repr(self.elem2)
