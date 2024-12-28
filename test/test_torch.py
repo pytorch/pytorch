@@ -5956,8 +5956,10 @@ else:
     )
     def test_grad_scaling_autocast(self, device, dtype, optim_info, foreach, fused):
         try_pickle = False
+        return_found_inf = False
 
         def run(device, data, model, optimizer, scaler, loss_fn, skip_iter, try_scaling_api):
+            nonlocal try_pickle, return_found_inf
             for i, (input, target) in enumerate(data):
                 optimizer.zero_grad()
                 with torch.autocast(device_type=device, dtype=torch.half, enabled=try_scaling_api):
@@ -5968,7 +5970,7 @@ else:
                     if i == skip_iter and scaler.is_enabled():
                         with torch.no_grad():
                             model[1].weight.grad.fill_(float('inf'))
-                    scaler.step(optimizer)
+                    scaler.step(optimizer, return_found_inf=return_found_inf)
                     scaler.update()
                     if try_pickle:
                         scaler = pickle.loads(pickle.dumps(scaler))
@@ -5995,6 +5997,13 @@ else:
             )
             # this will be picked up by try_pickle within run():
             try_pickle = True
+            self._run_scaling_case(
+                device, run, unskipped=3, skipped=1, atol=1e-3,
+                optimizer_ctor=optimizer_ctor, optimizer_kwargs={"foreach": foreach, "fused": fused},
+            )
+
+            # tests returning found_inf
+            return_found_inf = True
             self._run_scaling_case(
                 device, run, unskipped=3, skipped=1, atol=1e-3,
                 optimizer_ctor=optimizer_ctor, optimizer_kwargs={"foreach": foreach, "fused": fused},
