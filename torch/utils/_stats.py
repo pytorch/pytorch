@@ -17,7 +17,7 @@ def count_label(label: str) -> None:
     prev = simple_call_counter.setdefault(label, 0)
     simple_call_counter[label] = prev + 1
 
-def count(fn: Callable[_P, _R]) -> Callable[..., _R]:
+def count(fn: Callable[_P, _R]) -> Callable[_P, _R]:
     @functools.wraps(fn)
     def wrapper(*args: _P.args, **kwargs: _P.kwargs) -> _R:
         if fn.__qualname__ not in simple_call_counter:
