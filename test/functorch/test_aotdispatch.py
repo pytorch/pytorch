@@ -6338,11 +6338,11 @@ metadata incorrectly.
                         TwoTensor(
                             torch.ones(3, 4),
                             TwoTensor(torch.randn(3, 4), torch.randn(3, 4)),
-                        ), 
+                        ),
                         TwoTensor(
                             TwoTensor(torch.randn(3, 4), torch.randn(3, 4)),
                             TwoTensor(torch.ones(3, 4), torch.randn(3, 4)),
-                        )
+                        ),
                     )
                 )
 
