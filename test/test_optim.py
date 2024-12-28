@@ -8,7 +8,10 @@ from typing import Any, Dict, Tuple
 from unittest.mock import patch
 
 from optim.test_lrscheduler import TestLRScheduler  # noqa: F401
-from optim.test_optim import TestDifferentiableOptimizer  # noqa: F401
+from optim.test_optim import (  # noqa: F401
+    TestDifferentiableOptimizer,
+    TestDifferentiableOptimizerOptimizerInfo,
+)
 from optim.test_swa_utils import TestSWAUtils  # noqa: F401
 
 import torch
@@ -2218,7 +2221,9 @@ class TestOptimRenewed(TestCase):
 
 
 instantiate_device_type_tests(TestOptimRenewed, globals(), allow_mps=True)
-
+instantiate_device_type_tests(
+    TestDifferentiableOptimizerOptimizerInfo, globals(), allow_mps=True
+)
 
 if __name__ == "__main__":
     run_tests()
