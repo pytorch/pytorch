@@ -1,0 +1,2 @@
+interceptor_via_fun:fbgemm::EmbeddingSpMDMKernelSignature
+interceptor_via_fun:fbgemm::GenerateEmbeddingSpMDMWithStrides
