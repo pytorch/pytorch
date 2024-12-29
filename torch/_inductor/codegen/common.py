@@ -361,6 +361,7 @@ def init_backend_registration():
     from .cpp_wrapper_gpu import CppWrapperGpu
     from .cuda_combined_scheduling import CUDACombinedScheduling
     from .halide import HalideScheduling
+    from .mps import MetalScheduling
     from .triton import TritonScheduling
     from .wrapper import PythonWrapperCodegen
 
@@ -393,6 +394,14 @@ def init_backend_registration():
         register_backend_for_device(
             "xpu",
             TritonScheduling,
+            PythonWrapperCodegen,
+            CppWrapperGpu,
+        )
+
+    if get_scheduling_for_device("mps") is None:
+        register_backend_for_device(
+            "mps",
+            MetalScheduling,
             PythonWrapperCodegen,
             CppWrapperGpu,
         )
