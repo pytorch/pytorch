@@ -1,0 +1,16 @@
+astunparse-1.6.3.dist-info/AUTHORS.rst,sha256=_VxW6Jgbo7Qu1u8z3O3uS0_AoCwuagAPoHwsc5TwxVw,257
+astunparse-1.6.3.dist-info/INSTALLER,sha256=zuuue4knoyJ-UwPPXg8fezS7VCrXJQrAP7zeNuwvFQg,4
+astunparse-1.6.3.dist-info/LICENSE,sha256=kvwOT0-pRgVY7t80ErmI1DOi3Ls6nEVAKhRaT6uKasY,3936
+astunparse-1.6.3.dist-info/METADATA,sha256=vQ5__mA9vvjnREIJ61SolBrPCW52OugdLCScjVsL_Ec,4391
+astunparse-1.6.3.dist-info/RECORD,,
+astunparse-1.6.3.dist-info/REQUESTED,sha256=47DEQpj8HBSa-_TImW-5JCeuQeRkm5NMpJWZG3hSuFU,0
+astunparse-1.6.3.dist-info/WHEEL,sha256=8zNYZbwQSXoB9IfXOjPfeNwvAsALAjffgk27FqvCWbo,110
+astunparse-1.6.3.dist-info/top_level.txt,sha256=D97cApMaOtwZJ6KEsu7GakV5Kt7YpcRkL0dD010ftIo,11
+astunparse/__init__.py,sha256=Vi1Ni9JeZyX7kUX7YEgvaj1S6ky6RyUy8qL_CON1Ugw,357
+astunparse/__main__.py,sha256=OeZij_FXCdGilJ1G5H7H0ChEOuDJUqY_hFCLe8GZpc8,1222
+astunparse/__pycache__/__init__.cpython-312.pyc,,
+astunparse/__pycache__/__main__.cpython-312.pyc,,
+astunparse/__pycache__/printer.cpython-312.pyc,,
+astunparse/__pycache__/unparser.cpython-312.pyc,,
+astunparse/printer.py,sha256=8K09sbxtItuH9qE7jphZfN4vudsn3KpIWssudeBAXGo,1408
+astunparse/unparser.py,sha256=RnI-3goUb3N72KIDHDRiFApOJZfIcAtQ5vEIUY7jB5M,27426
