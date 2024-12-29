@@ -231,7 +231,7 @@ static PyObject* THPStorage_fromBuffer(
   TORCH_CHECK(
       THPDtype_Check(dtype_obj),
       "argument 'dtype' must be of type torch.dtype");
-  auto dtype = reinterpret_cast<THPDtype*>(dtype_obj);
+  auto* dtype = reinterpret_cast<THPDtype*>(dtype_obj);
   scalar_type = dtype->scalar_type;
 
   const bool is_endian_independent = (scalar_type == at::kByte) ||
@@ -504,7 +504,7 @@ static PyObject* THPStorage_setFromFile(PyObject* self, PyObject* args) {
   // advanced position
   const auto fd_current_pos = LSEEK(fd, 0, SEEK_CUR);
   LSEEK(fd, fd_original_pos, SEEK_SET);
-  const auto seek_return =
+  auto* const seek_return =
       PyObject_CallMethod(file, "seek", "Li", (long long)fd_current_pos, 0);
   if (seek_return == nullptr) {
     return nullptr;
@@ -517,7 +517,7 @@ static PyObject* THPStorage_setFromFile(PyObject* self, PyObject* args) {
 
 static PyObject* THPStorage__setCdata(PyObject* _self, PyObject* new_cdata) {
   HANDLE_TH_ERRORS
-  auto self = (THPStorage*)_self;
+  auto* self = (THPStorage*)_self;
   TORCH_CHECK(
       THPUtils_checkLong(new_cdata),
       "given an invalid argument to "
@@ -556,17 +556,17 @@ static PyObject* THPStorage_byteswap(PyObject* self, PyObject* args) {
       elem_size);
 
   if (elem_size == 2) {
-    auto buffer = static_cast<uint16_t*>(storage.mutable_data());
+    auto* buffer = static_cast<uint16_t*>(storage.mutable_data());
     for (uint64_t i = 0; i < count; i++, buffer++) {
       *buffer = thp_bswap16(*buffer);
     }
   } else if (elem_size == 4) {
-    auto buffer = static_cast<uint32_t*>(storage.mutable_data());
+    auto* buffer = static_cast<uint32_t*>(storage.mutable_data());
     for (uint64_t i = 0; i < count; i++, buffer++) {
       *buffer = thp_bswap32(*buffer);
     }
   } else if (elem_size == 8) {
-    auto buffer = static_cast<uint64_t*>(storage.mutable_data());
+    auto* buffer = static_cast<uint64_t*>(storage.mutable_data());
     for (uint64_t i = 0; i < count; i++, buffer++) {
       *buffer = thp_bswap64(*buffer);
     }

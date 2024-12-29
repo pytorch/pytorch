@@ -59,7 +59,7 @@ class C10_API WaitCounterHandle {
     }
 
     void stop() {
-      if (auto handle = std::exchange(handle_, nullptr)) {
+      if (auto* handle = std::exchange(handle_, nullptr)) {
         handle->stop(ctxs_);
       }
     }

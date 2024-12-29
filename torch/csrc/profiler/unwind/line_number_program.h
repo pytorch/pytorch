@@ -115,7 +115,7 @@ struct LineNumberProgram {
     } else {
       include_directories_.emplace_back(""); // implicit cwd
       while (true) {
-        auto str = L.readCString();
+        const auto* str = L.readCString();
         if (*str == '\0') {
           break;
         }
@@ -124,7 +124,7 @@ struct LineNumberProgram {
       file_names_.emplace_back("");
       file_directory_index_.emplace_back(0);
       while (true) {
-        auto str = L.readCString();
+        const auto* str = L.readCString();
         if (*str == '\0') {
           break;
         }

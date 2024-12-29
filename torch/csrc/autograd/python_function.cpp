@@ -122,7 +122,7 @@ PyObject* to_py_size(const std::vector<c10::SymInt>& size) {
     if (auto maybe_int = symint.maybe_as_int(); maybe_int.has_value()) {
       PyTuple_SET_ITEM(ret.get(), i, THPUtils_packInt64(*maybe_int));
     } else {
-      auto py_symint = py::cast(symint).release().ptr();
+      auto* py_symint = py::cast(symint).release().ptr();
       PyTuple_SET_ITEM(ret.get(), i, py_symint);
     }
   }
@@ -274,7 +274,7 @@ auto PyNode::release_variables() -> void {
   // we just leak the saved objects.
   if (Py_IsInitialized()) {
     pybind11::gil_scoped_acquire gil;
-    auto f = (THPFunction*)obj;
+    auto* f = (THPFunction*)obj;
     f->saved_variables.clear();
     f->has_freed_buffers = 1;
   }
@@ -282,7 +282,7 @@ auto PyNode::release_variables() -> void {
 
 auto PyNode::name() const -> std::string {
   pybind11::gil_scoped_acquire gil;
-  auto f = (THPFunction*)obj;
+  auto* f = (THPFunction*)obj;
   auto name = std::string(Py_TYPE(f)->tp_name);
   return name;
 }
@@ -315,7 +315,7 @@ void PyNode::compiled_args(CompiledNodeArgs& args) {
   args.collect_size(static_cast<size_t>(key));
   args.collect_size(static_cast<size_t>(size));
 
-  auto f = (THPFunction*)obj;
+  auto* f = (THPFunction*)obj;
   f->compiled_autograd_symints.clear();
   f->compiled_autograd_symints.reserve(size - 1);
   for (const auto i : c10::irange(1, size)) {
@@ -356,7 +356,7 @@ void PyNode::compiled_args(CompiledNodeArgs& args) {
 variable_list PyNode::apply_with_saved(
     const variable_list& inputs,
     SwapSavedVariables& saved) {
-  auto f = (THPFunction*)obj;
+  auto* f = (THPFunction*)obj;
   TORCH_INTERNAL_ASSERT(!f->compiled_autograd_tracing);
   saved.before(f->compiled_autograd_symints);
   saved.before(f->saved_variables);
@@ -952,13 +952,13 @@ static void _append_subgraph(
   std::unordered_map<Value*, Value*> value_map;
   auto value_map_func = [&](Value* v) { return value_map.at(v); };
   for (size_t i = 0; i < node->inputs().size(); ++i) {
-    auto subgraph_input = subgraph->addInput();
+    auto* subgraph_input = subgraph->addInput();
     subgraph_input->copyMetadata(node->inputs().at(i));
     value_map[node->inputs().at(i)] = subgraph_input;
   }
   // Find node position in owning block, all subsequent nodes after are added to
   // subgraph
-  auto owning_block = node->owningBlock();
+  auto* owning_block = node->owningBlock();
   auto it = std::find(
       owning_block->nodes().begin(), owning_block->nodes().end(), node);
   // Skip TupleUnpack node if created
@@ -1025,23 +1025,24 @@ static void _trace_post_record(
   node->i_(jit::attr::inplace, is_inplace);
   if (PyObject* module_name = PyDict_GetItemString(
           ((PyTypeObject*)op_obj)->tp_dict, "__module__")) {
-    if (auto ptr = PyUnicode_AsUTF8(module_name)) {
+    if (const auto* ptr = PyUnicode_AsUTF8(module_name)) {
       node->s_(jit::attr::module, std::string(ptr));
     }
   }
 
   // Isolate C variable ptrs in a vector
   int num_outputs = PyTuple_GET_SIZE(output_objects);
-  auto graph = node->owningGraph();
+  auto* graph = node->owningGraph();
   node->addOutput();
-  auto old_node = node;
+  auto* old_node = node;
   if (!unpack_output) {
     std::vector<at::TypePtr> tuple_values(num_outputs, at::TensorType::get());
     auto tuple_type = at::TupleType::create(std::move(tuple_values));
     // Original type is tuple of tensors "without" element type and shape.
     // The missed parts will be added below.
     node->output()->setType(std::move(tuple_type));
-    auto unpacked = graph->createTupleUnpack(node->output())->insertAfter(node);
+    auto* unpacked =
+        graph->createTupleUnpack(node->output())->insertAfter(node);
     node = unpacked;
   }
 
@@ -1049,7 +1050,7 @@ static void _trace_post_record(
   for (const auto i : c10::irange(num_outputs)) {
     PyObject* obj = PyTuple_GET_ITEM(output_objects, i);
     if (THPVariable_Check(obj)) {
-      auto value = node->outputs()[i];
+      auto* value = node->outputs()[i];
       const auto& tensor = THPVariable_Unpack(obj);
       if (tensor.defined()) {
         value->inferTypeFrom(tensor);
@@ -1108,7 +1109,7 @@ PyObject* process_outputs(
   if (is_executable) {
     grad_fn->input_info.clear();
     grad_fn->input_info.reserve(unpacked.input_vars.size());
-    for (auto& var : unpacked.input_vars) {
+    for (const auto& var : unpacked.input_vars) {
       grad_fn->input_info.emplace_back(var);
     }
   }
@@ -1273,7 +1274,7 @@ static PyObject* get_base_setup_context() {
 
   // setup_context gets "leaked" - we return a new reference and hold onto it
   // forever.
-  auto setup_context = PyObject_GetAttrString(function, "setup_context");
+  auto* setup_context = PyObject_GetAttrString(function, "setup_context");
   if (!setup_context)
     return nullptr;
   THPFunction_setup_context = setup_context;
@@ -1336,7 +1337,7 @@ PyObject* THPFunction_apply(PyObject* cls, PyObject* inputs) {
   if (!cls_setup_context) {
     return nullptr;
   }
-  auto orig_setup_context = get_base_setup_context();
+  auto* orig_setup_context = get_base_setup_context();
   if (!orig_setup_context) {
     return nullptr;
   }
@@ -1366,7 +1367,7 @@ PyObject* THPFunction_apply(PyObject* cls, PyObject* inputs) {
       }
       THPObjectPtr setup_context_fn(
           PyObject_GetAttrString(cls, "setup_context"));
-      auto result =
+      auto* result =
           PyObject_CallObject(setup_context_fn, ctx_input_output_tuple);
       if (!result) {
         return nullptr;
@@ -1408,7 +1409,7 @@ PyObject* THPFunction__register_hook_dict(PyObject* _self, PyObject* _var) {
   const auto& tensor = THPVariable_Unpack(var);
   std::unique_ptr<FunctionPreHook> hook(
       new PyFunctionTensorPreHook(var->backward_hooks, tensor.output_nr()));
-  auto self = (THPFunction*)_self;
+  auto* self = (THPFunction*)_self;
   auto cdata = self->cdata.lock();
   TORCH_CHECK(
       cdata,
@@ -1424,7 +1425,7 @@ PyObject* THPFunction__register_hook_dict(PyObject* _self, PyObject* _var) {
 
 PyObject* THPFunction_register_hook(PyObject* _self, PyObject* hook) {
   HANDLE_TH_ERRORS
-  auto self = (THPFunction*)_self;
+  auto* self = (THPFunction*)_self;
   auto cdata = self->cdata.lock();
   TORCH_CHECK(
       cdata,
@@ -1439,7 +1440,7 @@ PyObject* THPFunction_register_hook(PyObject* _self, PyObject* hook) {
 
 PyObject* THPFunction_register_prehook(PyObject* _self, PyObject* hook) {
   HANDLE_TH_ERRORS
-  auto self = (THPFunction*)_self;
+  auto* self = (THPFunction*)_self;
   auto cdata = self->cdata.lock();
   TORCH_CHECK(
       cdata,
@@ -1535,7 +1536,7 @@ PyObject* THPFunction_get_compiled_autograd_symints(
     PyObject* _self,
     PyObject* _unused) {
   HANDLE_TH_ERRORS
-  auto self = (THPFunction*)_self;
+  auto* self = (THPFunction*)_self;
   auto size = self->compiled_autograd_symints.size();
   PyObject* result = PyTuple_New(static_cast<Py_ssize_t>(size));
   if (!result) {
@@ -1555,7 +1556,7 @@ PyObject* THPFunction_get_compiled_autograd_backward_state(
     PyObject* _self,
     void* _unused) {
   HANDLE_TH_ERRORS
-  auto self = (THPFunction*)_self;
+  auto* self = (THPFunction*)_self;
   PyObject* bw_state = self->compiled_autograd_backward_state;
   if (bw_state == nullptr) {
     bw_state = Py_None;
@@ -1570,7 +1571,7 @@ int THPFunction_set_compiled_autograd_backward_state(
     PyObject* bw_state,
     void* _unused) {
   HANDLE_TH_ERRORS
-  auto self = (THPFunction*)_self;
+  auto* self = (THPFunction*)_self;
   TORCH_INTERNAL_ASSERT(self->compiled_autograd_backward_state == nullptr);
   Py_INCREF(bw_state);
   self->compiled_autograd_backward_state = bw_state;
@@ -1646,7 +1647,7 @@ PyObject* THPFunction_metadata(THPFunction* self, void* _unused) {
       "and then let the original variable get deallocated.  Don't do that!  If "
       "you really have no way of restructuring your code so this is the case, "
       "please file an issue reporting that you are affected by this.");
-  auto metadata = static_cast<PyAnomalyMetadata*>(cdata->metadata())->dict();
+  auto* metadata = static_cast<PyAnomalyMetadata*>(cdata->metadata())->dict();
 
   Py_INCREF(metadata);
   return metadata;
@@ -1660,7 +1661,7 @@ namespace {
 
 template <PyObject* THPFunction::*ptr>
 PyObject* getObject(PyObject* obj, void* _unused) {
-  auto self = (THPFunction*)obj;
+  auto* self = (THPFunction*)obj;
   PyObject* value = self->*ptr;
   if (!value) {
     Py_RETURN_NONE;
@@ -1671,7 +1672,7 @@ PyObject* getObject(PyObject* obj, void* _unused) {
 
 template <PyObject* THPFunction::*ptr>
 int setObject(PyObject* obj, PyObject* value, void* _unused) {
-  auto self = (THPFunction*)obj;
+  auto* self = (THPFunction*)obj;
   if (value == Py_None) {
     value = nullptr;
   }
@@ -1683,13 +1684,13 @@ int setObject(PyObject* obj, PyObject* value, void* _unused) {
 
 template <typename M, M THPFunction::*ptr, PyObject* (*Convert)(long)>
 PyObject* getMember(PyObject* obj, void* _unused) {
-  auto self = (THPFunction*)obj;
+  auto* self = (THPFunction*)obj;
   return Convert(self->*ptr);
 }
 
 template <typename M, M autograd::Node::*ptr, PyObject* (*Convert)(long)>
 PyObject* getImplMember(PyObject* obj, void* _unused) {
-  auto self = (THPFunction*)obj;
+  auto* self = (THPFunction*)obj;
   return Convert(self->cdata.*ptr);
 }
 

@@ -11,11 +11,11 @@
 #include <string>
 
 PyObject* THPQScheme_New(at::QScheme qscheme, const std::string& name) {
-  auto type = (PyTypeObject*)&THPQSchemeType;
+  auto* type = (PyTypeObject*)&THPQSchemeType;
   auto self = THPObjectPtr{type->tp_alloc(type, 0)};
   if (!self)
     throw python_error();
-  auto self_ = reinterpret_cast<THPQScheme*>(self.get());
+  auto* self_ = reinterpret_cast<THPQScheme*>(self.get());
   self_->qscheme = qscheme;
   std::strncpy(self_->name, name.c_str(), QSCHEME_NAME_LEN);
   self_->name[QSCHEME_NAME_LEN] = '\0';
@@ -23,7 +23,7 @@ PyObject* THPQScheme_New(at::QScheme qscheme, const std::string& name) {
 }
 
 PyObject* THPQScheme_reduce(PyObject* _self, PyObject* noargs) {
-  auto self = (THPQScheme*)_self;
+  auto* self = (THPQScheme*)_self;
   return THPUtils_packString(self->name);
 }
 

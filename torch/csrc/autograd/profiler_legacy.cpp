@@ -126,7 +126,7 @@ struct ProfilerLegacyThreadLocalState : public ProfilerStateBase {
   ~ProfilerLegacyThreadLocalState() override = default;
 
   static ProfilerLegacyThreadLocalState* getTLS() {
-    auto tls = ProfilerStateBase::get(/*global=*/false);
+    auto* tls = ProfilerStateBase::get(/*global=*/false);
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
         tls == nullptr || tls->profilerType() == ActiveProfilerType::LEGACY);
     return static_cast<ProfilerLegacyThreadLocalState*>(tls);
@@ -361,13 +361,13 @@ const std::unordered_set<std::string> disable_cuda_profiling = {
     "aten::size"};
 
 void pushProfilingCallbacksLegacy() {
-  auto registration_state_ptr = ProfilerLegacyThreadLocalState::getTLS();
+  auto* registration_state_ptr = ProfilerLegacyThreadLocalState::getTLS();
   TORCH_INTERNAL_ASSERT(registration_state_ptr, "Expected profiler state set");
   auto handle = at::addThreadLocalCallback(
       at::RecordFunctionCallback(
           [](const at::RecordFunction& fn)
               -> std::unique_ptr<at::ObserverContext> {
-            auto state_ptr = ProfilerLegacyThreadLocalState::getTLS();
+            auto* state_ptr = ProfilerLegacyThreadLocalState::getTLS();
             if (!state_ptr || state_ptr->config().disabled()) {
               return nullptr;
             }
@@ -389,7 +389,7 @@ void pushProfilingCallbacksLegacy() {
             return nullptr;
           },
           [](const at::RecordFunction& fn, at::ObserverContext*) {
-            auto state_ptr = ProfilerLegacyThreadLocalState::getTLS();
+            auto* state_ptr = ProfilerLegacyThreadLocalState::getTLS();
             if (!state_ptr || state_ptr->config().disabled()) {
               return;
             }
@@ -418,7 +418,7 @@ void enableProfilerLegacy(
 
   TORCH_CHECK(new_config.state != torch::profiler::impl::ProfilerState::KINETO);
 
-  auto state_ptr = ProfilerLegacyThreadLocalState::getTLS();
+  auto* state_ptr = ProfilerLegacyThreadLocalState::getTLS();
   TORCH_CHECK(!state_ptr, "Profiler is already enabled on this thread");
   auto state = std::make_shared<ProfilerLegacyThreadLocalState>(new_config);
   c10::ThreadLocalDebugInfo::_push(c10::DebugInfoKind::PROFILER_STATE, state);
@@ -444,7 +444,7 @@ thread_event_lists disableProfilerLegacy(
         c10::ThreadLocalDebugInfo::_peek(c10::DebugInfoKind::PROFILER_STATE);
   }
 
-  auto state_ptr = static_cast<ProfilerLegacyThreadLocalState*>(state.get());
+  auto* state_ptr = static_cast<ProfilerLegacyThreadLocalState*>(state.get());
   TORCH_CHECK(
       state_ptr && !state_ptr->config().disabled(),
       "Can't disable profiler when it's not running");
@@ -461,7 +461,7 @@ thread_event_lists disableProfilerLegacy(
 }
 
 void addEventList(std::vector<LegacyEvent>&& profiledEvents) {
-  auto state_ptr = ProfilerLegacyThreadLocalState::getTLS();
+  auto* state_ptr = ProfilerLegacyThreadLocalState::getTLS();
   TORCH_CHECK(state_ptr, "Profiler must be enabled.");
   state_ptr->setOrAddRemoteProfiledEvents(std::move(profiledEvents));
 }

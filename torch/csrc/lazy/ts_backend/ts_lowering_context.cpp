@@ -28,13 +28,13 @@ TSLoweringContext::TSLoweringContext(
       graph_(std::make_shared<torch::jit::Graph>()),
       function_(
           std::make_shared<torch::jit::GraphFunction>(name, graph_, nullptr)) {
-  for (auto node : post_order) {
+  for (const auto* node : post_order) {
     Lower(node);
   }
 }
 
 void TSLoweringContext::Lower(const Node* node) {
-  if (auto* tsnode = dynamic_cast<const torch::lazy::TsNode*>(node)) {
+  if (const auto* tsnode = dynamic_cast<const torch::lazy::TsNode*>(node)) {
     // First, we call the node lowering function, which exists for newly
     // codegenned or refactored nodes
     TSOpVector ops = tsnode->Lower(function_, this);

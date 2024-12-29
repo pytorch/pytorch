@@ -120,7 +120,7 @@ struct TORCH_API TensorPipeRpcBackendOptions : public RpcBackendOptions {
     if (iter == deviceMaps.end()) {
       deviceMaps[workerName] = deviceMap;
     } else {
-      for (auto& entry : deviceMap) {
+      for (const auto& entry : deviceMap) {
         // c10::Device has no default constructor, hence map[device] dosn't work
         // In C++-17 we can use insert_or_assign.
         auto entryIter = iter->second.find(entry.first);

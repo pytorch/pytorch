@@ -15,7 +15,7 @@ std::string str_error(int errnum) {
   auto res [[maybe_unused]] = strerror_s(buf.data(), buf.size(), errnum);
   buf.resize(strlen(buf.c_str()));
 #else
-  auto res [[maybe_unused]] = strerror_r(errnum, buf.data(), buf.size());
+  auto* res [[maybe_unused]] = strerror_r(errnum, buf.data(), buf.size());
   if constexpr (std::is_same_v<decltype(res), int>) {
     buf.resize(strlen(buf.c_str()));
   } else {

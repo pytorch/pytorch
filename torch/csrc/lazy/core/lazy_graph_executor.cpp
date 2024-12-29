@@ -171,7 +171,7 @@ void LazyGraphExecutor::DeviceContextArena::ForAllDeviceContexts(
     const std::function<void(DeviceContext*)>& fn,
     const BackendDevice* device) {
   if (device == nullptr) {
-    for (auto devctx : GetAllDeviceContexts()) {
+    for (auto* devctx : GetAllDeviceContexts()) {
       fn(devctx);
     }
   } else {
@@ -252,7 +252,7 @@ std::vector<ExceptionCleanup> LazyGraphExecutor::DeviceLockerArena::LockDevices(
     const std::set<BackendDevice>& devices) {
   std::vector<ExceptionCleanup> unlocker;
   unlocker.reserve(devices.size());
-  for (auto& device : devices) {
+  for (const auto& device : devices) {
     unlocker.emplace_back(LockDevice(device));
   }
   return unlocker;
@@ -435,7 +435,7 @@ void LazyGraphExecutor::MarkStep(const BackendDevice& device) {
 void LazyGraphExecutor::WaitDeviceOps(c10::ArrayRef<BackendDevice> devices) {
   std::set<BackendDevice> wait_devices;
   if (!devices.empty()) {
-    for (auto& device : devices) {
+    for (const auto& device : devices) {
       wait_devices.insert(device);
     }
   } else {
@@ -467,7 +467,7 @@ size_t LazyGraphExecutor::IncTrimCounter() const {
 std::string LazyGraphExecutor::DumpBackendComputation(
     const std::vector<LazyTensorPtr>& tensors) {
   std::vector<Value> ir_values;
-  for (auto& tensor : tensors) {
+  for (const auto& tensor : tensors) {
     Value ir_value = tensor->CurrentIrValue();
     if (ir_value) {
       ir_values.push_back(std::move(ir_value));
@@ -711,7 +711,7 @@ LazyGraphExecutor::PostOrderData LazyGraphExecutor::RunPostOrder(
   PostOrderData po_data;
   po_data.post_order = Util::ComputePostOrder(roots, &po_data.emission_map);
   std::unordered_map<BackendData::Handle, size_t> data_handles;
-  for (auto node : po_data.post_order) {
+  for (const auto* node : po_data.post_order) {
     const auto backend_data = getBackend()->GetComputationDataFromNode(node);
     if (backend_data) {
       /* Acceptable race condition: HasValue may return false. This is OK

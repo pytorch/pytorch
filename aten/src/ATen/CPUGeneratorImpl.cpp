@@ -174,7 +174,7 @@ void CPUGeneratorImpl::set_state(const c10::TensorImpl& new_state) {
       double_normal_sample = std::optional<double>(r * ::sin(theta));
     }
   } else if (new_state_size == size_current) {
-    auto rng_state = (CPUGeneratorImplState*)new_state.data();
+    auto *rng_state = (CPUGeneratorImplState*)new_state.data();
     legacy_pod = &rng_state->legacy_pod;
     // update next_float_normal_sample
     if (rng_state->is_next_float_normal_sample_valid) {
@@ -222,7 +222,7 @@ c10::intrusive_ptr<c10::TensorImpl> CPUGeneratorImpl::get_state() const {
   static_assert(std::is_standard_layout_v<CPUGeneratorImplState>, "CPUGeneratorImplState is not a PODType");
 
   auto state_tensor = at::detail::empty_cpu({(int64_t)size}, ScalarType::Byte, std::nullopt, std::nullopt, std::nullopt, std::nullopt);
-  auto rng_state = state_tensor.data_ptr();
+  auto *rng_state = state_tensor.data_ptr();
 
   // accumulate generator data to be copied into byte tensor
   auto accum_state = std::make_unique<CPUGeneratorImplState>();
@@ -342,7 +342,7 @@ std::shared_ptr<CPUGeneratorImpl> CPUGeneratorImpl::clone() const {
  * See Note [Acquire lock when using random generators]
  */
 CPUGeneratorImpl* CPUGeneratorImpl::clone_impl() const {
-  auto gen = new CPUGeneratorImpl();
+  auto *gen = new CPUGeneratorImpl();
   gen->set_engine(engine_);
   gen->set_next_float_normal_sample(next_float_normal_sample_);
   gen->set_next_double_normal_sample(next_double_normal_sample_);

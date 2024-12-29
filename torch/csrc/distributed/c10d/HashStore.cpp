@@ -84,7 +84,7 @@ int64_t HashStore::add(const std::string& key, int64_t i) {
   const auto& value = map_[key];
   int64_t ti = i;
   if (!value.empty()) {
-    auto buf = reinterpret_cast<const char*>(value.data());
+    const auto* buf = reinterpret_cast<const char*>(value.data());
     auto len = value.size();
     ti += std::stoll(std::string(buf, len));
   }
@@ -136,7 +136,7 @@ std::vector<std::vector<uint8_t>> HashStore::multiGet(
   std::vector<std::vector<uint8_t>> res;
   res.reserve(keys.size());
 
-  for (auto& key : keys) {
+  for (const auto& key : keys) {
     auto it = map_.find(key);
     if (it != map_.end()) {
       res.emplace_back(it->second);

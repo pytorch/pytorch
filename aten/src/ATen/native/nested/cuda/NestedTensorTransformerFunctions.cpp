@@ -62,9 +62,9 @@ Tensor nested_from_padded_cuda(
         at::cat({target_size_sizes, padded_sizes_tensor, target_offsets});
     metadata = metadata.to(at::Device(kCUDA), kInt, true, true);
 
-    auto output_size_ptr = metadata.data_ptr<int>();
-    auto input_size_ptr = output_size_ptr + target_size_sizes.numel();
-    auto offsets_ptr = input_size_ptr + padded_sizes_tensor.numel();
+    auto *output_size_ptr = metadata.data_ptr<int>();
+    auto *input_size_ptr = output_size_ptr + target_size_sizes.numel();
+    auto *offsets_ptr = input_size_ptr + padded_sizes_tensor.numel();
 
     Tensor padded_contiguous = padded.contiguous();
     if (padded.dtype() == kFloat) {

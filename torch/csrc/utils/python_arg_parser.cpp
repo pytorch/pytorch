@@ -292,7 +292,7 @@ static py::object dispatch_on_subclass(
     std::optional<c10::impl::TorchDispatchModeKey> maybe_mode_key =
         std::nullopt) {
   py::object ret;
-  for (auto& arg : overloaded_args) {
+  for (const auto& arg : overloaded_args) {
     py::object torch_function =
         PyObject_FastGetAttrString(arg, torch_function_name_str);
     if (!torch_function) {
@@ -471,7 +471,7 @@ auto handle_torch_function_no_python_arg_parser(
   // necessarily types
   std::vector<py::object> overloaded_types;
   overloaded_types.reserve(overloaded_args.size());
-  for (auto& arg : overloaded_args) {
+  for (const auto& arg : overloaded_args) {
     overloaded_types.push_back(
         py::reinterpret_borrow<py::object>(get_type_of_overloaded_arg(arg)));
   }
@@ -581,7 +581,7 @@ auto handle_torch_function_no_python_arg_parser(
     if (mode_obj) {
       ss << "  - mode object " << py::repr(mode_obj) << "\n";
     }
-    for (auto& arg : overloaded_args) {
+    for (const auto& arg : overloaded_args) {
       ss << "  - tensor subclass " << py::repr(get_type_of_overloaded_arg(arg))
          << "\n";
     }
@@ -866,7 +866,7 @@ static bool is_int_or_symint(PyObject* obj) {
   // that we still allow for fake tensors in this case, but
   // for regular tensors it's redundant with the test below.
   if (THPVariable_Check(obj)) {
-    auto& var = THPVariable_Unpack(obj);
+    const auto& var = THPVariable_Unpack(obj);
     if (TORCH_GUARD_SIZE_OBLIVIOUS(var.sym_numel().sym_eq(1)) &&
         at::isIntegralType(var.dtype().toScalarType(), /*include_bool*/ true)) {
       return true;
@@ -1362,7 +1362,7 @@ std::string FunctionSignature::toString() const {
   bool keyword_already = false;
   ss << "(";
   int i = 0;
-  for (auto& param : params) {
+  for (const auto& param : params) {
     if (i != 0) {
       ss << ", ";
     }
@@ -1409,7 +1409,7 @@ std::string FunctionSignature::toString() const {
   int num_missing = 0;
   std::stringstream ss;
 
-  auto& params = signature.params;
+  const auto& params = signature.params;
   for (auto it = params.begin() + idx; it != params.end(); ++it) {
     if (!it->optional) {
       if (num_missing > 0) {
@@ -1621,7 +1621,7 @@ PythonArgParser::PythonArgParser(
     bool traceable)
     : max_args(0), traceable(traceable) {
   int index = 0;
-  for (auto& fmt : fmts) {
+  for (const auto& fmt : fmts) {
     signatures_.emplace_back(fmt, index);
     ++index;
   }
@@ -1720,7 +1720,7 @@ void PythonArgParser::print_error(
 
 std::vector<std::string> PythonArgParser::get_signatures() const {
   std::vector<std::string> options;
-  for (auto& signature : signatures_) {
+  for (const auto& signature : signatures_) {
     if (!signature.hidden) {
       options.push_back(signature.toString());
     }
@@ -1803,7 +1803,7 @@ at::Tensor PythonArgs::tensor_slow(int i) {
 
 at::Scalar PythonArgs::scalar_slow(int i) {
   if (traceable && jit::tracer::isTracing() && THPVariable_Check(args[i])) {
-    auto& var = THPVariable_Unpack(args[i]);
+    const auto& var = THPVariable_Unpack(args[i]);
     jit::tracer::ArgumentStash::stashValue(
         signature.params[i].name, idx, var, c10::NumberType::get());
   }

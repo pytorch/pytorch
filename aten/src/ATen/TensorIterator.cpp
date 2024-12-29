@@ -699,7 +699,7 @@ int64_t TensorIteratorBase::numel() const {
 StrideVector TensorIteratorBase::get_dim_strides(int dim) const {
   auto dims = ndim();
   auto inner_strides = StrideVector();
-  for (auto& op : operands_) {
+  for (const auto& op : operands_) {
     inner_strides.push_back(dims == 0 ? 0 : op.stride_bytes[dim]);
   }
   return inner_strides;
@@ -712,7 +712,7 @@ SmallVector<char*, 4> TensorIteratorBase::get_base_ptrs() const {
 }
 
 bool TensorIteratorBase::is_dim_reduced(int dim) const {
-  for (auto& op : operands_) {
+  for (const auto& op : operands_) {
     if (op.is_output && op.stride_bytes[dim] == 0 && shape_[dim] > 1) {
       return true;
     }
@@ -1301,7 +1301,7 @@ bool TensorIteratorBase::can_use_32bit_indexing() const {
   if (numel() > max_value) {
     return false;
   }
-  for (auto& op : operands_) {
+  for (const auto& op : operands_) {
     int64_t max_offset = 1;
     for (const auto dim : c10::irange(ndim())) {
       max_offset += (shape_[dim] - 1) * op.stride_bytes[dim];
@@ -1338,7 +1338,7 @@ int TensorIteratorBase::get_dim_to_split() const {
     if (size == 0) {
       continue;
     }
-    for (auto& op : operands_) {
+    for (const auto& op : operands_) {
       // std::abs is necessary to handle some special cases where we support negative strides
       // see the CUDA backend of at::flip
       const int64_t extent = (size - 1) * std::abs(op.stride_bytes[dim]);

@@ -84,7 +84,7 @@ struct TORCH_API ClassType : public NamedType {
     if (this == &rhs) {
       return true;
     }
-    if (auto user_rhs = rhs.castRaw<ClassType>()) {
+    if (const auto *user_rhs = rhs.castRaw<ClassType>()) {
       const auto& lhs_name = name();
       const auto& rhs_name = user_rhs->name();
       return lhs_name.has_value() && lhs_name == rhs_name &&

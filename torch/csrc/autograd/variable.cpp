@@ -114,7 +114,7 @@ ViewInfo ViewInfo::chain(
         // This case should be relatively rare: parent view doesn't have a
         // view_func() AND as_strided() isn't supported; there's no obvious way
         // to chain the two views.
-        auto error_msg =
+        const auto* error_msg =
             ("Attempted to chain views when the parent view has no view_func() and "
              "does not support as_strided(). This is not supported.");
         view_func = std::make_unique<ErroringViewFunc>(error_msg);
@@ -171,7 +171,7 @@ AutogradMeta* materialize_autograd_meta(const at::TensorBase& self) {
   TORCH_CHECK(
       self.defined(),
       "cannot call materialize_autograd_meta() on undefined tensor");
-  auto p = self.unsafeGetTensorImpl();
+  auto* p = self.unsafeGetTensorImpl();
   if (!p->autograd_meta()) {
     p->set_autograd_meta(std::make_unique<AutogradMeta>());
   }
@@ -215,7 +215,7 @@ void rebase_history(const Variable& self, Edge gradient_edge) {
   TORCH_INTERNAL_ASSERT(gradient_edge.function != nullptr);
   const auto& meta = impl::get_autograd_meta(self);
   auto old_fn = meta != nullptr ? meta->grad_fn_ : nullptr;
-  auto diff_view_meta = get_view_autograd_meta(self);
+  auto* diff_view_meta = get_view_autograd_meta(self);
   if (diff_view_meta && diff_view_meta->has_bw_view()) {
     // See NOTE [ View + Inplace detection ]
     auto creation_meta = diff_view_meta->get_creation_meta();
@@ -283,7 +283,7 @@ std::shared_ptr<Node> try_get_grad_accumulator(const Variable& self) {
 }
 
 std::shared_ptr<Node> grad_accumulator(const Variable& self) {
-  auto autograd_meta = get_autograd_meta(self);
+  auto* autograd_meta = get_autograd_meta(self);
   if (!autograd_meta) {
     return nullptr;
   }
@@ -333,7 +333,7 @@ void set_gradient_edge(const Variable& self, Edge edge) {
   // for custom autograd Functions for which multiple operations can happen on a
   // given Tensor before its gradient edge is set when exiting the custom
   // Function.
-  auto diff_view_meta = get_view_autograd_meta(self);
+  auto* diff_view_meta = get_view_autograd_meta(self);
   if (diff_view_meta && diff_view_meta->has_bw_view()) {
     diff_view_meta->set_attr_version(self._version());
   }
@@ -608,7 +608,7 @@ void VariableHooks::requires_grad_(
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 bool VariableHooks::is_view(const at::TensorBase& self) const {
-  auto diff_view_meta = torch::autograd::impl::get_view_autograd_meta(self);
+  auto* diff_view_meta = torch::autograd::impl::get_view_autograd_meta(self);
   if (diff_view_meta) {
     return diff_view_meta->has_bw_view();
   } else {
@@ -617,7 +617,7 @@ bool VariableHooks::is_view(const at::TensorBase& self) const {
 }
 
 const at::TensorBase& VariableHooks::base(const at::TensorBase& self) const {
-  auto diff_view_meta = torch::autograd::impl::get_view_autograd_meta(self);
+  auto* diff_view_meta = torch::autograd::impl::get_view_autograd_meta(self);
   if (diff_view_meta) {
     TORCH_CHECK(
         diff_view_meta->has_bw_view(),
@@ -648,11 +648,11 @@ std::shared_ptr<torch::autograd::Node> singleton_shared_ptr;
 
 const std::shared_ptr<torch::autograd::Node>& VariableHooks::grad_fn(
     const at::TensorBase& self) const {
-  auto diff_view_meta = torch::autograd::impl::get_view_autograd_meta(self);
+  auto* diff_view_meta = torch::autograd::impl::get_view_autograd_meta(self);
   if (diff_view_meta && diff_view_meta->has_bw_view()) {
     // See NOTE [ View + Inplace detection ]
     std::lock_guard<std::mutex> lock(diff_view_meta->mutex_);
-    auto& view_info = diff_view_meta->get_backward_view();
+    const auto& view_info = diff_view_meta->get_backward_view();
     if (!diff_view_meta->grad_fn_ && !view_info.base_.requires_grad()) {
       return diff_view_meta->grad_fn_;
     }
@@ -692,7 +692,7 @@ const std::shared_ptr<torch::autograd::Node>& VariableHooks::grad_fn(
       // in VariableType_x.cpp
       //       that would provide a way to recreate the grad_fn chain.
       if (view_info.has_view_fn()) {
-        auto& view_fn = view_info.view_fn();
+        const auto& view_fn = view_info.view_fn();
         Tensor diff_view;
         {
           // We can reach this path with grad_mode disabled, e.g. engine
@@ -766,7 +766,7 @@ void handle_view_on_rebase(
   /// See NOTE [ View + Inplace detection ] for justification of the logic below
   auto creation_meta = diff_view_meta->get_creation_meta();
   if (creation_meta != CreationMeta::DEFAULT) {
-    auto grad_fn = diff_view_meta->grad_fn_.get();
+    auto* grad_fn = diff_view_meta->grad_fn_.get();
     std::string msg;
     std::string modified_obj;
     // Create the header for the error message.

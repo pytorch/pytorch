@@ -198,7 +198,7 @@ cublasHandle_t getCurrentCUDABlasHandle() {
   thread_local std::unique_ptr<CuBlasPoolType::PoolWindow> myPoolWindow(
       pool->newPoolWindow());
 
-  auto handle = myPoolWindow->reserve(device);
+  auto *handle = myPoolWindow->reserve(device);
   auto stream = c10::cuda::getCurrentCUDAStream();
   TORCH_CUDABLAS_CHECK(cublasSetStream(handle, stream));
   // We explicitly set the cublas workspace even though CUDA 12.2+ fixed the

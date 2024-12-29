@@ -22,7 +22,7 @@ inline bool tryTHPCopy(
     PyObject* src,
     bool non_blocking,
     bool broadcast) {
-  for (auto& i : v) {
+  for (const auto& i : v) {
     if (i.non_blocking == non_blocking &&
         PyType_IsSubtype(Py_TYPE(src), i.srcType)) {
       (i.copy)(dst, src, broadcast);

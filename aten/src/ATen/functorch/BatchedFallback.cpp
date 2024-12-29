@@ -184,8 +184,8 @@ static void batchedTensorInplaceForLoopFallback(const c10::OperatorHandle& op, t
   // of the arguments onto `stack`, and call `op`.
   for (int64_t linear_idx = 0; linear_idx < num_batches; ++linear_idx) {
     auto index = computeIndex(linear_idx, batch_sizes);
-    auto batched_tensor_inputs_pos_iter = batched_tensor_inputs_position.begin();
-    auto input_physical_views_iter = input_physical_views.begin();
+    auto *batched_tensor_inputs_pos_iter = batched_tensor_inputs_position.begin();
+    const auto *input_physical_views_iter = input_physical_views.begin();
     for (const auto arg_idx : c10::irange(0, num_arguments)) {
       // We assume that torch::jit::Stack is backed by vector<IValue> for
       // simplicity. When that is not the case, this code should be updated.
@@ -338,8 +338,8 @@ void batchedTensorForLoopFallback(const c10::OperatorHandle& op, torch::jit::Sta
 
   for (int64_t linear_idx = 0; linear_idx < num_batches; ++linear_idx) {
     auto index = computeIndex(linear_idx, batch_sizes);
-    auto batched_tensor_inputs_pos_iter = batched_tensor_inputs_position.begin();
-    auto input_physical_views_iter = input_physical_views.begin();
+    auto *batched_tensor_inputs_pos_iter = batched_tensor_inputs_position.begin();
+    const auto *input_physical_views_iter = input_physical_views.begin();
     for (const auto arg_idx : c10::irange(0, num_arguments)) {
       // We assume that torch::jit::Stack is backed by vector<IValue> for
       // simplicity. When that is not the case, this code should be updated.
@@ -467,7 +467,7 @@ void batchedNestedTensorForLoopFallback(const c10::OperatorHandle& op, torch::ji
   std::vector<Tensor> output_shards(num_components * num_returns);
   for (const auto component_idx : c10::irange(0, num_components)) {
     auto batched_idx = 0;
-    auto batched_tensor_inputs_pos_iter = batched_tensor_inputs_position.begin();
+    auto *batched_tensor_inputs_pos_iter = batched_tensor_inputs_position.begin();
     for (const auto arg_idx : c10::irange(0, num_arguments)) {
       // We assume that torch::jit::Stack is backed by vector<IValue> for
       // simplicity. When that is not the case, this code should be updated.

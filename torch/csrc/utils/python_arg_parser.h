@@ -506,7 +506,7 @@ inline std::vector<int64_t> PythonArgs::intlist(int i) {
 
 inline PyObject* toPyObject(const c10::SymInt& symint) {
   if (symint.is_symbolic()) {
-    auto r = py::cast(symint).release().ptr();
+    auto* r = py::cast(symint).release().ptr();
     TORCH_INTERNAL_ASSERT(r);
     return r;
   } else {
@@ -565,7 +565,7 @@ inline std::vector<c10::SymInt> PythonArgs::symintlist(int i) {
     // Elements of torch.Size are tensors during tracing, and we need to
     // record extra information before they are turned into an IntArrayRef
     if (traceable && jit::tracer::isTracing() && THPVariable_Check(obj)) {
-      auto& var = THPVariable_Unpack(obj);
+      const auto& var = THPVariable_Unpack(obj);
       jit::tracer::ArgumentStash::stashIntArrayRefElem(
           signature.params[i].name, size2, idx, var);
       try {
@@ -586,7 +586,7 @@ inline std::vector<c10::SymInt> PythonArgs::symintlist(int i) {
           throw_intlist_exception(this, i, obj, idx, e);
         }
       } else if (THPVariable_Check(obj)) {
-        auto& var = THPVariable_Unpack(obj);
+        const auto& var = THPVariable_Unpack(obj);
         if (var.numel() != 1 ||
             !at::isIntegralType(
                 var.dtype().toScalarType(), /*include_bool*/ true)) {
@@ -637,7 +637,7 @@ inline std::vector<int64_t> PythonArgs::intlistWithDefault(
     // Elements of torch.Size are tensors during tracing, and we need to
     // record extra information before they are turned into an IntArrayRef
     if (traceable && jit::tracer::isTracing() && THPVariable_Check(obj)) {
-      auto& var = THPVariable_Unpack(obj);
+      const auto& var = THPVariable_Unpack(obj);
       jit::tracer::ArgumentStash::stashIntArrayRefElem(
           signature.params[i].name, size2, idx, var);
       try {
@@ -660,7 +660,7 @@ inline std::vector<int64_t> PythonArgs::intlistWithDefault(
         res[idx] = py::cast<c10::SymInt>(py::handle(obj))
                        .guard_int(__FILE__, __LINE__);
       } else if (THPVariable_Check(obj)) {
-        auto& var = THPVariable_Unpack(obj);
+        const auto& var = THPVariable_Unpack(obj);
         if (var.numel() != 1 ||
             !at::isIntegralType(
                 var.dtype().toScalarType(), /*include_bool*/ true)) {
@@ -786,7 +786,7 @@ inline std::optional<at::ScalarType> PythonArgs::scalartypeOptional(int i) {
 }
 
 inline at::Layout toLayout(PyObject* obj) {
-  const auto layout = reinterpret_cast<THPLayout*>(obj);
+  auto* const layout = reinterpret_cast<THPLayout*>(obj);
   return layout->layout;
 }
 
@@ -820,7 +820,7 @@ inline at::Device deviceFromLong(int64_t device_index) {
 
 inline at::Device toDevice(PyObject* obj) {
   if (THPDevice_Check(obj)) {
-    const auto device = reinterpret_cast<THPDevice*>(obj);
+    auto* const device = reinterpret_cast<THPDevice*>(obj);
     return device->device;
   }
   if (THPUtils_checkLong(obj)) {
@@ -899,7 +899,7 @@ inline at::MemoryFormat PythonArgs::memoryformat(int i) {
   TORCH_CHECK(
       THPMemoryFormat_Check(args[i]),
       "memory_format arg must be an instance of the torch.memory_format");
-  const auto memory_format = reinterpret_cast<THPMemoryFormat*>(args[i]);
+  auto* const memory_format = reinterpret_cast<THPMemoryFormat*>(args[i]);
   return memory_format->memory_format;
 }
 
@@ -915,7 +915,7 @@ inline at::QScheme PythonArgs::toQScheme(int i) {
   TORCH_CHECK(
       THPQScheme_Check(args[i]),
       "qscheme arg must be an instance of the torch.qscheme");
-  const auto qscheme = reinterpret_cast<THPQScheme*>(args[i]);
+  auto* const qscheme = reinterpret_cast<THPQScheme*>(args[i]);
   return qscheme->qscheme;
 }
 
@@ -959,7 +959,7 @@ inline int64_t PythonArgs::toInt64(int i) {
   if (!args[i])
     return signature.params[i].default_int;
   if (traceable && jit::tracer::isTracing() && THPVariable_Check(args[i])) {
-    auto& var = THPVariable_Unpack(args[i]);
+    const auto& var = THPVariable_Unpack(args[i]);
     jit::tracer::ArgumentStash::stashValue(
         signature.params[i].name, idx, var, c10::IntType::get());
   }
@@ -976,7 +976,7 @@ inline c10::SymInt PythonArgs::toSymInt(int i) {
   }
 
   if (traceable && jit::tracer::isTracing() && THPVariable_Check(args[i])) {
-    auto& var = THPVariable_Unpack(args[i]);
+    const auto& var = THPVariable_Unpack(args[i]);
     jit::tracer::ArgumentStash::stashValue(
         signature.params[i].name, idx, var, c10::IntType::get());
   }
@@ -989,7 +989,7 @@ inline c10::SymBool PythonArgs::toSymBool(int i) {
     return c10::SymBool(signature.params[i].default_bool);
   }
   if (traceable && jit::tracer::isTracing() && THPVariable_Check(args[i])) {
-    auto& var = THPVariable_Unpack(args[i]);
+    const auto& var = THPVariable_Unpack(args[i]);
     jit::tracer::ArgumentStash::stashValue(
         signature.params[i].name, idx, var, c10::BoolType::get());
   }

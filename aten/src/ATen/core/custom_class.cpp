@@ -154,7 +154,7 @@ c10::FunctionSchema class_base::withNewArguments(
   // Skip self.
   size_t argIdx = 1;
   for (const auto& default_arg : default_args) {
-    auto& old_arg = old_args[argIdx++];
+    const auto& old_arg = old_args[argIdx++];
     new_args.emplace_back(
         default_arg.name_,
         old_arg.type(),

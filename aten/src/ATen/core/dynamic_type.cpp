@@ -79,7 +79,7 @@ DynamicType::~DynamicType() {
 }
 
 std::shared_ptr<const DynamicType> DynamicType::create(const Type& other) {
-  if (auto dynRaw = other.castRaw<DynamicType>()) {
+  if (const auto *dynRaw = other.castRaw<DynamicType>()) {
     TORCH_INTERNAL_ASSERT(
         !dynRaw->weak_from_this().expired(),
         "Error creating dynamic type instance not managed by shared_ptr: ",
@@ -92,7 +92,7 @@ std::shared_ptr<const DynamicType> DynamicType::create(const Type& other) {
 }
 
 DynamicTypePtr DynamicType::create(Type& other) {
-  if (auto dynRaw = other.castRaw<DynamicType>()) {
+  if (auto *dynRaw = other.castRaw<DynamicType>()) {
     TORCH_INTERNAL_ASSERT(
         !dynRaw->weak_from_this().expired(),
         "Error creating dynamic type instance not managed by shared_ptr: ",
@@ -116,11 +116,11 @@ DynamicType::DynamicType(Tag tag, std::string_view name, Arguments arguments)
 DynamicType::DynamicType(const Type& other) : SharedType(DynamicType::Kind) {
   auto kind = other.kind();
   TORCH_INTERNAL_ASSERT(kind != Kind);
-  if (auto n = other.castRaw<NamedType>()) {
+  if (const auto *n = other.castRaw<NamedType>()) {
     if (const auto& qn = n->name()) {
       name_ = qn->qualifiedName();
     }
-  } else if (auto v = other.castRaw<VarType>()) {
+  } else if (const auto *v = other.castRaw<VarType>()) {
     name_ = v->name();
   }
 
@@ -147,7 +147,7 @@ DynamicType::DynamicType(const Type& other) : SharedType(DynamicType::Kind) {
     return;
   }
 
-  if (auto tup = other.castRaw<TupleType>()) {
+  if (const auto *tup = other.castRaw<TupleType>()) {
     if (auto names = tup->names()) {
       new (&arguments_) Arguments(*names, args);
       return;

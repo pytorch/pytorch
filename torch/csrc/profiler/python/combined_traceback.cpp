@@ -40,7 +40,7 @@ struct PythonTraceback : public CapturedTraceback::Python {
     while (f) {
       frames.emplace_back(
           CapturedTraceback::PyFrame{PyFrame_GetCode(f), PyFrame_GetLasti(f)});
-      auto f_back = PyFrame_GetBack(f);
+      auto* f_back = PyFrame_GetBack(f);
       Py_XDECREF(f);
       f = f_back;
     }
@@ -85,7 +85,7 @@ struct PythonTraceback : public CapturedTraceback::Python {
       }
     }
     for (const auto& f : to_symbolize) {
-      auto f_code = (PyCodeObject*)f.code;
+      auto* f_code = (PyCodeObject*)f.code;
       py::handle filename = f_code->co_filename;
       py::handle funcname = f_code->co_name;
       auto lineno = PyCode_Addr2Line(f_code, f.lasti);

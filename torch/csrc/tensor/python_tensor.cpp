@@ -93,7 +93,7 @@ static PyObject* Tensor_new(
 // we add...
 static PyObject* Tensor_instancecheck(PyObject* _self, PyObject* arg) {
   HANDLE_TH_ERRORS
-  auto self = (PyTensorType*)_self;
+  auto* self = (PyTensorType*)_self;
   if (THPVariable_Check(arg)) {
     const auto& var = THPVariable_Unpack(arg);
     // NB: This is a little unfortunate, in that if I do an isinstance check
@@ -224,7 +224,7 @@ static std::string get_name(Backend backend, ScalarType scalarType) {
 }
 
 static THPObjectPtr get_storage_obj(Backend backend, ScalarType dtype) {
-  auto module_name = torch::utils::backend_to_string(backend);
+  const auto* module_name = torch::utils::backend_to_string(backend);
   auto module_obj = THPObjectPtr(PyImport_ImportModule(module_name));
   if (!module_obj)
     throw python_error();
@@ -268,7 +268,7 @@ static THPObjectPtr get_tensor_dict() {
   if (!tensor_class)
     throw python_error();
 
-  auto tensor_type = (PyTypeObject*)tensor_class.get();
+  auto* tensor_type = (PyTypeObject*)tensor_class.get();
   TORCH_CHECK(tensor_type->tp_base, "missing base type for Tensor");
 
   auto res = THPObjectPtr(PyDict_New());
@@ -401,7 +401,7 @@ static void py_bind_tensor_types(
   if (!tensor_classes)
     throw python_error();
 
-  for (auto& tensor_type : tensor_types) {
+  for (const auto& tensor_type : tensor_types) {
     auto name = std::string(tensor_type->name);
     auto idx = name.rfind('.');
     auto type_name = name.substr(idx + 1);

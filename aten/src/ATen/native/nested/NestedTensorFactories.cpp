@@ -43,7 +43,7 @@ Tensor empty_like_nested(
     std::optional<c10::MemoryFormat> optional_memory_format) {
   auto options = verify_empty_parameters(
       self, dtype, layout, device, pin_memory, optional_memory_format);
-  auto self_nt = get_nested_tensor_impl(self);
+  auto *self_nt = get_nested_tensor_impl(self);
   auto memory_format = options.memory_format_opt().value_or(MemoryFormat::Preserve);
   if (memory_format == MemoryFormat::Contiguous) {
     auto nested_size = self_nt->get_nested_sizes().clone();
@@ -133,7 +133,7 @@ Tensor clone_nested(
     const Tensor& self,
     std::optional<c10::MemoryFormat> optional_memory_format) {
   auto memory_format = optional_memory_format.value_or(c10::MemoryFormat::Preserve);
-  auto self_ptr = get_nested_tensor_impl(self);
+  auto *self_ptr = get_nested_tensor_impl(self);
   if (memory_format == c10::MemoryFormat::Preserve ||
   (memory_format == c10::MemoryFormat::Contiguous && self.is_contiguous())) {
     const Tensor& buffer = self_ptr->get_unsafe_storage_as_tensor(),
@@ -175,7 +175,7 @@ std::vector<at::Tensor> NestedTensor_unbind(
       "got dimension ",
       dim,
       " instead.");
-  auto self_ptr = get_nested_tensor_impl(self);
+  auto *self_ptr = get_nested_tensor_impl(self);
   int64_t ntensors = self_ptr->size(0);
   std::vector<at::Tensor> result_tensors(ntensors);
   if (ntensors == 0) {
@@ -212,7 +212,7 @@ Tensor narrow_nested_symint(const at::Tensor& self, int64_t dim, SymInt start, S
   auto nested_sizes = nt_impl->get_nested_sizes();
   auto nested_strides = nt_impl->get_nested_strides();
   auto storage_offsets = nt_impl->get_storage_offsets();
-  auto storage_offsets_ptr = storage_offsets.data_ptr<int64_t>();
+  auto *storage_offsets_ptr = storage_offsets.data_ptr<int64_t>();
 
   auto start_int = start.guard_int(__FILE__, __LINE__);
   auto length_int = length.guard_int(__FILE__, __LINE__);

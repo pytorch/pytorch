@@ -44,7 +44,7 @@ TSOpVector LowerTSBuiltin(
     const auto tuple_call_result = sv.asTuple({}, *function);
     TSOpVector tuple_result;
     for (const auto& tuple_component : tuple_call_result) {
-      auto tuple_component_sv =
+      auto* tuple_component_sv =
           dynamic_cast<torch::jit::SimpleValue*>(tuple_component.get());
       tuple_result.push_back(tuple_component_sv->getValue());
     }
@@ -90,8 +90,8 @@ torch::lazy::TSOpVector Cast::Lower(
 torch::lazy::TSOpVector DeviceData::Lower(
     std::shared_ptr<torch::jit::GraphFunction> function,
     torch::lazy::TSLoweringContext* loctx) const {
-  auto infoptr = data_->info();
-  auto deviceDataInfoPtr =
+  auto* infoptr = data_->info();
+  auto* deviceDataInfoPtr =
       (torch::lazy::LazyGraphExecutor::DeviceDataInfo*)infoptr;
   if (GRAPH_DUMP_ENABLED) {
     LOG(ERROR) << "Lowering device data node, tensor id "

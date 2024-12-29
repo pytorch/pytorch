@@ -77,7 +77,7 @@ class UvHandle : public c10::intrusive_ptr_target {
 
  private:
   static c10::intrusive_ptr<UvHandle> reclaim(uv_handle_t* handle) {
-    auto h = (UvHandle*)uv_handle_get_data(handle);
+    auto* h = (UvHandle*)uv_handle_get_data(handle);
     return c10::intrusive_ptr<UvHandle>::reclaim(h);
   }
 
@@ -96,7 +96,7 @@ class UvTcpSocket : public UvHandle {
   }
 
   static c10::intrusive_ptr<UvTcpSocket> borrow(uv_stream_t* handle) {
-    auto h = (UvTcpSocket*)uv_handle_get_data((uv_handle_t*)handle);
+    auto* h = (UvTcpSocket*)uv_handle_get_data((uv_handle_t*)handle);
     return h->iptr();
   }
 
@@ -333,7 +333,7 @@ class UvTcpServer : public UvTcpSocket {
   }
 
   static c10::intrusive_ptr<UvTcpServer> borrow(uv_stream_t* handle) {
-    auto h = (UvTcpServer*)uv_handle_get_data((uv_handle_t*)handle);
+    auto* h = (UvTcpServer*)uv_handle_get_data((uv_handle_t*)handle);
     return h->iptr();
   }
 
@@ -370,7 +370,7 @@ class WriterPayload : public c10::intrusive_ptr_target {
   static c10::intrusive_ptr<WriterPayload> reclaim(uv_write_t* request) {
     /* This method returns a intrusive_ptr that does not increase the refcount.
      */
-    auto h = (WriterPayload*)uv_req_get_data((uv_req_t*)request);
+    auto* h = (WriterPayload*)uv_req_get_data((uv_req_t*)request);
     return c10::intrusive_ptr<WriterPayload>::reclaim(h);
   }
 
@@ -1290,7 +1290,7 @@ int64_t LibUVStoreDaemon::add(const std::string& key, int64_t addVal) {
   auto it = tcpStore_.find(key);
   if (it != tcpStore_.end()) {
     oldData = it->second;
-    auto buf = reinterpret_cast<const char*>(it->second.data());
+    const auto* buf = reinterpret_cast<const char*>(it->second.data());
     auto len = it->second.size();
     addVal += std::stoll(std::string(buf, len));
   }
@@ -1318,7 +1318,7 @@ bool LibUVStoreDaemon::waitKeys(
     return true;
   }
   int numKeysToAwait = 0;
-  for (auto& key : keys) {
+  for (const auto& key : keys) {
     // Only count keys that have not already been set
     if (tcpStore_.find(key) == tcpStore_.end()) {
       waitingSockets_[key].push_back(client);

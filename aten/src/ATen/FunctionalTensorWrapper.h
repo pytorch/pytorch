@@ -290,7 +290,7 @@ namespace impl {
 
 TORCH_API inline FunctionalTensorWrapper* unsafeGetFunctionalWrapper(
     const Tensor& tensor) {
-  auto functional_impl =
+  auto* functional_impl =
       static_cast<FunctionalTensorWrapper*>(tensor.unsafeGetTensorImpl());
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(functional_impl != nullptr);
   return functional_impl;

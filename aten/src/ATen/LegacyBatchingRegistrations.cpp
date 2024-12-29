@@ -281,7 +281,7 @@ Tensor squeeze_batching_rule(const Tensor& self) {
       squeezed_sizes.end(),
       physical_sizes.begin(),
       physical_sizes.begin() + num_batch_dims);
-  for (auto it = physical_sizes.begin() + num_batch_dims; it != physical_sizes.end(); ++it) {
+  for (const auto *it = physical_sizes.begin() + num_batch_dims; it != physical_sizes.end(); ++it) {
     if (*it != 1) {
       squeezed_sizes.push_back(*it);
     }
@@ -489,9 +489,9 @@ Tensor view_as_complex_batching_rule(const Tensor& self) {
 // stride. This is something we can support but we choose not to because it's
 // potentially error prone.
 static void checkBatchDimsAtFrontInLayout(IntArrayRef physical_strides, int64_t num_batch_dims) {
-  auto smallest_batch_stride = std::min_element(
+  const auto *smallest_batch_stride = std::min_element(
       physical_strides.begin(), physical_strides.begin() + num_batch_dims);
-  auto largest_example_stride = std::max_element(
+  const auto *largest_example_stride = std::max_element(
       physical_strides.begin() + num_batch_dims, physical_strides.end());
   if (largest_example_stride == physical_strides.end()) {
     // No example dimensions

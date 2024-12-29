@@ -171,7 +171,7 @@ std::vector<uint8_t> toVec8(const std::string& data) {
 std::vector<std::vector<uint8_t>> toVec8(const std::vector<std::string>& data) {
   std::vector<std::vector<uint8_t>> out;
   out.reserve(data.size());
-  for (auto& data_ : data) {
+  for (const auto& data_ : data) {
     out.emplace_back(toVec8(data_));
   }
   return out;
@@ -1097,7 +1097,7 @@ This class does not support ``__members__`` property.)");
           "buffer_ptrs",
           [](const c10::intrusive_ptr<SymmetricMemory>& symm_mem) {
             std::vector<uintptr_t> ret;
-            for (auto ptr : symm_mem->get_buffer_ptrs()) {
+            for (auto* ptr : symm_mem->get_buffer_ptrs()) {
               ret.push_back(reinterpret_cast<uintptr_t>(ptr));
             }
             return ret;
@@ -1111,7 +1111,7 @@ This class does not support ``__members__`` property.)");
           "signal_pad_ptrs",
           [](const c10::intrusive_ptr<SymmetricMemory>& symm_mem) {
             std::vector<uintptr_t> ret;
-            for (auto ptr : symm_mem->get_signal_pad_ptrs()) {
+            for (auto* ptr : symm_mem->get_signal_pad_ptrs()) {
               ret.push_back(reinterpret_cast<uintptr_t>(ptr));
             }
             return ret;

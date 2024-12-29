@@ -25,7 +25,7 @@ GeneratorImpl::GeneratorImpl(Device device_in, DispatchKeySet key_set)
  * method for copying for Generators in ATen.
  */
 c10::intrusive_ptr<GeneratorImpl> GeneratorImpl::clone() const {
-  auto res = this->clone_impl();
+  auto* res = this->clone_impl();
   c10::raw::intrusive_ptr::incref(res);
   c10::raw::weak_intrusive_ptr::incref(res);
   return c10::intrusive_ptr<GeneratorImpl>::reclaim(res);

@@ -76,7 +76,7 @@ static std::tuple<double, int> __printFormat(std::ostream& stream, const Tensor&
     return std::make_tuple(1., 0);
   }
   bool intMode = true;
-  auto self_p = self.const_data_ptr<double>();
+  const auto *self_p = self.const_data_ptr<double>();
   for (const auto i : c10::irange(size)) {
     auto z = self_p[i];
     if(std::isfinite(z)) {
@@ -331,7 +331,7 @@ std::ostream& print(std::ostream& stream, const Tensor & tensor_, int64_t linesi
 
     // Proxy check for if autograd was built
     if (tensor.getIntrusivePtr()->autograd_meta()) {
-      auto& fw_grad = tensor._fw_grad(/* level */ 0);
+      const auto& fw_grad = tensor._fw_grad(/* level */ 0);
       if (fw_grad.defined()) {
         stream << ", tangent:" << '\n' << fw_grad;
       }

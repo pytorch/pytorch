@@ -79,7 +79,7 @@ class C10_CUDA_API CUDAAllocatorConfig {
 
   static CUDAAllocatorConfig& instance() {
     static CUDAAllocatorConfig* s_instance = ([]() {
-      auto inst = new CUDAAllocatorConfig();
+      auto* inst = new CUDAAllocatorConfig();
       const char* env = getenv("PYTORCH_CUDA_ALLOC_CONF");
       inst->parseArgs(env);
       return inst;

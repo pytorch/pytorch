@@ -924,7 +924,7 @@ struct TORCH_API DictType : public SharedType {
 
   static DictTypePtr create(TypePtr key, TypePtr value) {
     auto kind = key->kind();
-    if (auto dyn = key->castRaw<DynamicType>()) {
+    if (auto *dyn = key->castRaw<DynamicType>()) {
       kind = dyn->dynamicKind();
     }
     switch (kind) {
@@ -978,7 +978,7 @@ struct TORCH_API DictType : public SharedType {
   }
 
   bool equals(const Type& rhs) const override {
-    if (auto* dict_rhs = rhs.castRaw<DictType>()) {
+    if (const auto* dict_rhs = rhs.castRaw<DictType>()) {
       return *getKeyType() == *(dict_rhs->getKeyType()) &&
           *getValueType() == *(dict_rhs->getValueType());
     }
@@ -1035,7 +1035,7 @@ struct TORCH_API FutureType
     if (Type::isSubtypeOfExt(rhs, why_not)) {
       return true;
     }
-    if (auto rhs_ = rhs.castRaw<FutureType>()) {
+    if (const auto *rhs_ = rhs.castRaw<FutureType>()) {
       return getElementType()->isSubtypeOfExt(*rhs_->getElementType(), why_not);
     }
     return false;
@@ -1077,7 +1077,7 @@ struct TORCH_API AwaitType
     if (Type::isSubtypeOfExt(rhs, why_not)) {
       return true;
     }
-    if (auto rhs_ = rhs.castRaw<AwaitType>()) {
+    if (const auto *rhs_ = rhs.castRaw<AwaitType>()) {
       return getElementType()->isSubtypeOfExt(*rhs_->getElementType(), why_not);
     }
     return false;
@@ -2173,7 +2173,7 @@ struct TORCH_API InterfaceType : public NamedType {
       QualifiedName qualifiedName, bool is_module=false);
 
   bool equals(const Type& rhs) const override {
-    if (auto user_rhs = rhs.castRaw<InterfaceType>()) {
+    if (const auto *user_rhs = rhs.castRaw<InterfaceType>()) {
       return isSubTypeImpl(*this, *user_rhs, nullptr) &&
           isSubTypeImpl(*user_rhs, *this, nullptr);
     }

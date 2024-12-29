@@ -193,7 +193,7 @@ static void autogradBasedTransformSendToNext(
     if (!ivalue.isTensor()) {
       continue;
     }
-    auto maybe_tensor_wrapper = maybeGetTensorWrapper(ivalue.toTensor());
+    auto *maybe_tensor_wrapper = maybeGetTensorWrapper(ivalue.toTensor());
     if (!maybe_tensor_wrapper) {
       continue;
     }

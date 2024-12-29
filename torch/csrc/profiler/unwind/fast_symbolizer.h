@@ -26,7 +26,7 @@ struct FastSymbolizer {
     frame.funcname = "??";
     frame.filename = library;
     frame.lineno = offset;
-    auto s = getOrCreateSections(library);
+    auto* s = getOrCreateSections(library);
     if (auto e = s->findSubprogramName(offset)) {
       frame.funcname = *e;
     } else {
@@ -84,7 +84,7 @@ struct FastSymbolizer {
       Sections* s,
       uint64_t offset) {
     if (auto idx = s->findDebugInfoOffset(offset)) {
-      auto r = line_number_programs_.at(*idx).get();
+      auto* r = line_number_programs_.at(*idx).get();
       try {
         r->parse();
       } catch (UnwindError& err) {

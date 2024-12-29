@@ -107,7 +107,7 @@ struct CUDAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
       const noexcept override {
     if (!event)
       return;
-    auto cuda_event = static_cast<cudaEvent_t>(event);
+    auto* cuda_event = static_cast<cudaEvent_t>(event);
     DeviceIndex orig_device{-1};
     C10_CUDA_CHECK_WARN(c10::cuda::GetDevice(&orig_device));
     C10_CUDA_CHECK_WARN(c10::cuda::SetDevice(device_index));

@@ -69,7 +69,7 @@ static c10::SymbolicShape get_symbolic_shape(at::Tensor& tensor) {
     return c10::SymbolicShape(tensor.sizes());
   }
   const Shape& input_shape = ltc_tensor->GetIrValue()->shape();
-  auto& is_symbolic = input_shape.is_symbolic();
+  const auto& is_symbolic = input_shape.is_symbolic();
   if (!is_symbolic.has_value()) {
     return c10::SymbolicShape();
   }

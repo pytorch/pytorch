@@ -334,7 +334,7 @@ void mallocAsync(
   if (!capture_underway &&
       !ungraphed_ptrs_defer_free_until_no_capture.empty()) {
     // See Note [Avoid freeing uncaptured ptrs during CUDA graph capture]
-    for (const auto ptr : ungraphed_ptrs_defer_free_until_no_capture) {
+    for (auto* const ptr : ungraphed_ptrs_defer_free_until_no_capture) {
       auto it = ptr_info.find(ptr);
       TORCH_INTERNAL_ASSERT(it != ptr_info.end(), "ptr not found in ptr_info");
       free_impl(it);
@@ -608,7 +608,7 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
 
   void recordStream(const DataPtr& ptr, cuda::CUDAStream stream) override {
     std::lock_guard<std::mutex> lk(general_mutex);
-    auto ptr_val = ptr.get();
+    auto* ptr_val = ptr.get();
     // Empty tensor's storage().data() might be a null ptr. As there is no
     // blocks associated with those tensors, it is fine to do nothing here.
     if (!ptr_val) {

@@ -18,11 +18,11 @@
 static PyObject* THPUpperModuleOfDevice = nullptr;
 
 PyObject* THPDevice_New(const at::Device& device) {
-  auto type = (PyTypeObject*)&THPDeviceType;
+  auto* type = (PyTypeObject*)&THPDeviceType;
   auto self = THPObjectPtr{type->tp_alloc(type, 0)};
   if (!self)
     throw python_error();
-  auto self_ = reinterpret_cast<THPDevice*>(self.get());
+  auto* self_ = reinterpret_cast<THPDevice*>(self.get());
   self_->device = device;
   return self.release();
 }
@@ -150,7 +150,7 @@ static PyObject* THPDevice_rc(PyObject* a, PyObject* b, int op) {
 
 static PyObject* THPDevice_reduce(PyObject* _self, PyObject* noargs) {
   HANDLE_TH_ERRORS
-  auto self = (THPDevice*)_self;
+  auto* self = (THPDevice*)_self;
   auto ret = THPObjectPtr{PyTuple_New(2)};
   if (!ret)
     throw python_error();

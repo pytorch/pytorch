@@ -24,7 +24,7 @@ struct ITTThreadLocalState : ProfilerStateBase {
   }
 
   static ITTThreadLocalState* getTLS() {
-    auto tls = ProfilerStateBase::get(/*global=*/false);
+    auto* tls = ProfilerStateBase::get(/*global=*/false);
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
         tls == nullptr || tls->profilerType() == ActiveProfilerType::ITT);
     return static_cast<ITTThreadLocalState*>(tls);
@@ -50,7 +50,7 @@ void pushITTCallbacks(
       c10::DebugInfoKind::PROFILER_STATE,
       std::make_shared<ITTThreadLocalState>(config));
 
-  auto state_ptr = ITTThreadLocalState::getTLS();
+  auto* state_ptr = ITTThreadLocalState::getTLS();
   TORCH_INTERNAL_ASSERT(state_ptr, "Expected profiler state set");
 
   auto handle = at::addThreadLocalCallback(

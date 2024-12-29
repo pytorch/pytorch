@@ -71,7 +71,7 @@ void reorder_tensors_like(std::vector<Tensor>& tensors, TensorList order) {
   std::unordered_map<size_t, size_t> type_id_to_type_used;
   std::vector<Tensor> ordered_tensors;
   ordered_tensors.reserve(tensors.size());
-  for (auto& tmpl_tensor : order) {
+  for (const auto& tmpl_tensor : order) {
     size_t tmpl_type_id = type_id(tmpl_tensor);
     auto& indices = type_id_to_indices[tmpl_type_id];
     auto& used = type_id_to_type_used[tmpl_type_id];
@@ -114,7 +114,7 @@ std::vector<at::Tensor> unflatten_sparse_tensors(
   std::vector<at::Tensor> outputs;
   outputs.reserve(tensors.size());
   for (size_t i = 0, num_tensors = tensors.size(); i < num_tensors; ++i) {
-    auto& ref_t = tensors[i];
+    const auto& ref_t = tensors[i];
     auto t =
         at::_sparse_coo_tensor_unsafe(indices[i], values[i], ref_t.sizes());
     outputs.emplace_back(t._coalesced_(ref_t.is_coalesced()));

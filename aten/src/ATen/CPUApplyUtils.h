@@ -147,7 +147,7 @@ inline bool _apply_preamble(ArrayRef<Tensor> tensors) {
   if (!_all_equal_numel(tensors))
     TORCH_CHECK(false, _all_equal_numel_error(tensors));
   // An empty tensor has no elements
-  for (auto& t : tensors)
+  for (const auto& t : tensors)
     if (t.numel() == 0)
       return false;
   return true;
@@ -155,7 +155,7 @@ inline bool _apply_preamble(ArrayRef<Tensor> tensors) {
 
 inline int64_t _max_dim_tensors(ArrayRef<Tensor> tensors) {
   int64_t dim = 0;
-  for (auto& t : tensors)
+  for (const auto& t : tensors)
     dim = std::max(dim, t.ndimension());
   return dim;
 }

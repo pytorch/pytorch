@@ -1,15 +1,23 @@
+#include "ATen/core/Dimname.h"
+#include "c10/util/Exception.h"
+#include "c10/util/ArrayRef.h"
 #include <ATen/TensorNames.h>
 #include <ATen/WrapDimUtils.h>
+#include <algorithm>
 #include <c10/util/irange.h>
+#include <cstdint>
+#include <ostream>
+#include <vector>
 
 namespace at::namedinference {
-
 
 Dimname TensorName::toDimname() const {
   return name_;
 }
 
-const TensorName& TensorName::unify(const TensorName& other, const char* op_name) const {
+const TensorName& TensorName::unify(
+    const TensorName& other,
+    const char* op_name) const {
   // unify(None, None)
   if (name_.isWildcard() && other.name_.isWildcard()) {
     return *this;
@@ -22,11 +30,19 @@ const TensorName& TensorName::unify(const TensorName& other, const char* op_name
 
   // unify(A, None)
   if (other.name_.isWildcard()) {
-    const auto it = std::find(other.origin_.begin(), other.origin_.end(), name_);
-    TORCH_CHECK(it == other.origin_.end(),
-        op_name, ":",
-        " Cannot match ", *this, " with ", other,
-        " because the latter names already have ", name_, ".",
+    const auto* it =
+        std::find(other.origin_.begin(), other.origin_.end(), name_);
+    TORCH_CHECK(
+        it == other.origin_.end(),
+        op_name,
+        ":",
+        " Cannot match ",
+        *this,
+        " with ",
+        other,
+        " because the latter names already have ",
+        name_,
+        ".",
         " Are your tensors misaligned?");
     return *this;
   }
@@ -37,10 +53,14 @@ const TensorName& TensorName::unify(const TensorName& other, const char* op_name
   }
 
   // unify(A, B)
-  TORCH_CHECK(name_ == other.name_,
-      op_name, ":",
-      " Expected ", *this,
-      " to match ", other,
+  TORCH_CHECK(
+      name_ == other.name_,
+      op_name,
+      ":",
+      " Expected ",
+      *this,
+      " to match ",
+      other,
       " but they do not match.");
   return *this;
 }
@@ -53,7 +73,7 @@ TensorNames::TensorNames(ArrayRef<Dimname> names) {
 }
 
 TensorNames::TensorNames(ArrayRef<Dimname> names, int64_t start, int64_t end) {
-  int64_t names_size = static_cast<int64_t>(names.size());
+  auto const names_size = static_cast<int64_t>(names.size());
   start = maybe_wrap_dim(start, names_size);
   end = maybe_wrap_dim(end, names_size);
   names_.reserve(end - start);
@@ -62,8 +82,9 @@ TensorNames::TensorNames(ArrayRef<Dimname> names, int64_t start, int64_t end) {
   }
 }
 
-TensorNames& TensorNames::unifyFromRightInplace(const TensorNames& other, const char* op_name) {
-
+TensorNames& TensorNames::unifyFromRightInplace(
+    const TensorNames& other,
+    const char* op_name) {
   if (names_.size() > other.names_.size()) {
     const auto size_diff = names_.size() - other.names_.size();
     for (const auto idx : c10::irange(size_diff, names_.size())) {
@@ -73,9 +94,7 @@ TensorNames& TensorNames::unifyFromRightInplace(const TensorNames& other, const 
     const auto size_diff = other.names_.size() - names_.size();
     // pad names_ to the same length as other.names_ before unification
     names_.insert(
-        names_.begin(),
-        other.names_.begin(),
-        other.names_.begin() + size_diff);
+        names_.begin(), other.names_.begin(), other.names_.begin() + size_diff);
     for (const auto idx : c10::irange(size_diff, names_.size())) {
       names_[idx] = names_[idx].unify(other.names_[idx], op_name);
     }
@@ -93,16 +112,27 @@ void TensorNames::checkUnique(const char* op_name) const {
   // doesn't matter unless benchmarking tells us it does. The alternative is
   // to create some sort of set data structure but the overhead of that
   // might dominate for small sizes.
-  for (auto it = names_.begin(); it != names_.end(); ++it) {
+  for (const auto* it = names_.begin(); it != names_.end(); ++it) {
     const auto name = it->toDimname();
-    if (name.isWildcard()) continue;
+    if (name.isWildcard()) {
+      continue;
+}
 
-    auto dup = std::find_if(it + 1, names_.end(),
-        [&](const TensorName& other) { return other.toDimname() == name; });
-    TORCH_CHECK(dup == names_.end(),
-        op_name, ": ",
-        "Attempted to propagate dims ", *it, " and ", *dup, " to the output, ",
-        "but that would create a tensor with duplicate names [", toDimnameVec(),
+    const auto* dup =
+        std::find_if(it + 1, names_.end(), [&](const TensorName& other) {
+          return other.toDimname() == name;
+        });
+    TORCH_CHECK(
+        dup == names_.end(),
+        op_name,
+        ": ",
+        "Attempted to propagate dims ",
+        *it,
+        " and ",
+        *dup,
+        " to the output, ",
+        "but that would create a tensor with duplicate names [",
+        toDimnameVec(),
         "]. Please rename your inputs with Tensor.rename to prevent this.");
   }
 }
@@ -125,6 +155,5 @@ std::vector<Dimname> TensorNames::toDimnameVec() const {
   }
   return result;
 }
-
 
 } // namespace at::namedinference

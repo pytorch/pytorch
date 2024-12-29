@@ -16,7 +16,7 @@ using GaugeBackendFactories =
     std::vector<std::shared_ptr<GaugeBackendFactoryIf>>;
 
 Synchronized<GaugeBackendFactories>& gaugeBackendFactories() {
-  static auto instance = new Synchronized<GaugeBackendFactories>();
+  static auto* instance = new Synchronized<GaugeBackendFactories>();
   return *instance;
 }
 } // namespace

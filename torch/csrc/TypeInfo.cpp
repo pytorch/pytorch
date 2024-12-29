@@ -18,21 +18,21 @@
 #include <sstream>
 
 static PyObject* THPFInfo_New(const at::ScalarType& type) {
-  auto finfo = (PyTypeObject*)&THPFInfoType;
+  auto* finfo = (PyTypeObject*)&THPFInfoType;
   auto self = THPObjectPtr{finfo->tp_alloc(finfo, 0)};
   if (!self)
     throw python_error();
-  auto self_ = reinterpret_cast<THPDTypeInfo*>(self.get());
+  auto* self_ = reinterpret_cast<THPDTypeInfo*>(self.get());
   self_->type = c10::toRealValueType(type);
   return self.release();
 }
 
 static PyObject* THPIInfo_New(const at::ScalarType& type) {
-  auto iinfo = (PyTypeObject*)&THPIInfoType;
+  auto* iinfo = (PyTypeObject*)&THPIInfoType;
   auto self = THPObjectPtr{iinfo->tp_alloc(iinfo, 0)};
   if (!self)
     throw python_error();
-  auto self_ = reinterpret_cast<THPDTypeInfo*>(self.get());
+  auto* self_ = reinterpret_cast<THPDTypeInfo*>(self.get());
   self_->type = type;
   return self.release();
 }
@@ -245,7 +245,7 @@ static PyObject* THPFInfo_dtype(THPFInfo* self, void*) {
 
 static PyObject* THPFInfo_str(THPFInfo* self) {
   std::ostringstream oss;
-  const auto dtypeStr = THPFInfo_dtype(self, nullptr);
+  auto* const dtypeStr = THPFInfo_dtype(self, nullptr);
   oss << "finfo(resolution="
       << PyFloat_AsDouble(THPFInfo_resolution(self, nullptr));
   oss << ", min=" << PyFloat_AsDouble(THPFInfo_min(self, nullptr));
@@ -263,7 +263,7 @@ static PyObject* THPFInfo_str(THPFInfo* self) {
 static PyObject* THPIInfo_str(THPIInfo* self) {
   std::ostringstream oss;
 
-  const auto dtypeStr = THPIInfo_dtype(self, nullptr);
+  auto* const dtypeStr = THPIInfo_dtype(self, nullptr);
   oss << "iinfo(min=" << PyLong_AsDouble(THPIInfo_min(self, nullptr));
   oss << ", max=" << PyLong_AsDouble(THPIInfo_max(self, nullptr));
   if (dtypeStr) {

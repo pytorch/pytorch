@@ -52,9 +52,9 @@ void _assert_wrapped_functional(
       at::functionalization::impl::isFunctionalTensor(wrapped));
   TORCH_INTERNAL_ASSERT(
       !at::functionalization::impl::isFunctionalTensor(unwrapped));
-  auto wrapped_impl =
+  auto* wrapped_impl =
       at::functionalization::impl::unsafeGetFunctionalWrapper(wrapped);
-  auto& wrapped_inner = wrapped_impl->value();
+  const auto& wrapped_inner = wrapped_impl->value();
   TORCH_INTERNAL_ASSERT(
       unwrapped.unsafeGetTensorImpl() == wrapped_inner.unsafeGetTensorImpl())
 }
@@ -66,12 +66,12 @@ void _propagate_functional_input_mutation(
       at::functionalization::impl::isFunctionalTensor(wrapped));
   TORCH_INTERNAL_ASSERT(
       !at::functionalization::impl::isFunctionalTensor(unwrapped));
-  auto wrapped_impl =
+  auto* wrapped_impl =
       at::functionalization::impl::unsafeGetFunctionalWrapper(wrapped);
   // Ensure that the input is up to date by committing any pending updates to
   // the alias.
   wrapped_impl->sync_();
-  auto& wrapped_inner = wrapped_impl->value();
+  const auto& wrapped_inner = wrapped_impl->value();
   // It would probably be more reasonable to check that the two tensors are
   // aliased, but we can't do that unless we give BatchedTensorImpl a notion of
   // storage.
@@ -171,7 +171,7 @@ Tensor _unwrap_functional_tensor(const Tensor& self, bool add_back_views) {
   // which case the current tensors should always be wrapped in a
   // FunctionalTensorWrapper.
   TORCH_INTERNAL_ASSERT(at::functionalization::impl::isFunctionalTensor(self));
-  auto functional =
+  auto* functional =
       at::functionalization::impl::unsafeGetFunctionalWrapper(self);
 
   // when regenerating the (potentially mutated) input tensors, the

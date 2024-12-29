@@ -158,7 +158,7 @@ functionalization::FunctionalStorageImpl* FunctionalTensorWrapper::functional_st
 }
 
 void FunctionalTensorWrapper::commit_update() {
-  auto storage_impl = functional_storage_impl();
+  auto *storage_impl = functional_storage_impl();
   storage_impl->add_update(value_, view_metas_);
   // As an optimization, we used to mark the tensor here as "up-to-date",
   // That way, code like:
@@ -381,7 +381,7 @@ Tensor FunctionalTensorWrapper::apply_view_metas(const Tensor& base) {
 
 void FunctionalTensorWrapper::regenerate_from_base() {
   at::AutoDispatchSkipFunctionalize guard;
-  auto storage_impl = functional_storage_impl();
+  auto *storage_impl = functional_storage_impl();
   auto t = storage_impl->base();
 
   TORCH_INTERNAL_ASSERT(!at::functionalization::impl::isFunctionalTensor(t));
@@ -394,7 +394,7 @@ void FunctionalTensorWrapper::regenerate_from_base() {
 
 bool FunctionalTensorWrapper::apply_updates() {
   // Apply all updates on alias_
-  auto storage_impl = functional_storage_impl();
+  auto *storage_impl = functional_storage_impl();
   return storage_impl->apply_updates();
 }
 
@@ -474,7 +474,7 @@ c10::intrusive_ptr<TensorImpl> FunctionalTensorWrapper::shallow_copy_and_detach(
 
 void FunctionalTensorWrapper::shallow_copy_from(const c10::intrusive_ptr<TensorImpl>& impl) {
     AT_ASSERT(has_compatible_shallow_copy_type(impl->key_set()));
-    auto functional_impl =
+    auto *functional_impl =
         static_cast<FunctionalTensorWrapper*>(impl.get());
     copy_tensor_metadata_and_refresh(
         /*src_impl=*/functional_impl,
@@ -558,7 +558,7 @@ Tensor from_functional_tensor(const Tensor& tensor, bool assert_functional) {
       return tensor;
   }
   if (isFunctionalTensor(tensor)) {
-    auto impl = unsafeGetFunctionalWrapper(tensor);
+    auto *impl = unsafeGetFunctionalWrapper(tensor);
     return impl->value();
   } else {
     // If the current tensor is not functional, then raise an error
@@ -610,7 +610,7 @@ void sync(const Tensor& t) {
   if (!at::functionalization::impl::isFunctionalTensor(t)) {
     return;
   }
-  auto functional_impl = at::functionalization::impl::unsafeGetFunctionalWrapper(t);
+  auto *functional_impl = at::functionalization::impl::unsafeGetFunctionalWrapper(t);
   functional_impl->sync_();
 }
 void sync(const std::optional<Tensor>& t) {
@@ -755,14 +755,14 @@ bool isFunctionalTensor(ITensorListRef list) {
 
 void freeze_functional_tensor(const Tensor& tensor) {
   TORCH_INTERNAL_ASSERT(at::functionalization::impl::isFunctionalTensor(tensor));
-  auto functional_base_impl = at::functionalization::impl::unsafeGetFunctionalWrapper(tensor);
+  auto *functional_base_impl = at::functionalization::impl::unsafeGetFunctionalWrapper(tensor);
   functional_base_impl->freeze_storage();
 }
 
 Tensor create_functional_tensor_with_view_meta(const at::Tensor& view_to_wrap, const at::Tensor& base, functionalization::ViewMeta meta, int64_t out_idx) {
   TORCH_INTERNAL_ASSERT(!at::functionalization::impl::isFunctionalTensor(view_to_wrap));
   TORCH_INTERNAL_ASSERT(at::functionalization::impl::isFunctionalTensor(base));
-  auto functional_base_impl = at::functionalization::impl::unsafeGetFunctionalWrapper(base);
+  auto *functional_base_impl = at::functionalization::impl::unsafeGetFunctionalWrapper(base);
   if (out_idx != 0) {
     // Note [out_idx in ViewMeta]
     // When a view op outputs multiple tensors, each output needs its own separate ViewMeta.
@@ -784,7 +784,7 @@ std::vector<Tensor> create_functional_tensor_with_view_meta(ITensorListRef view_
 
 void mutate_view_meta(const at::Tensor& self, const functionalization::ViewMeta& meta) {
   TORCH_INTERNAL_ASSERT(at::functionalization::impl::isFunctionalTensor(self));
-  auto self_impl = at::functionalization::impl::unsafeGetFunctionalWrapper(self);
+  auto *self_impl = at::functionalization::impl::unsafeGetFunctionalWrapper(self);
   self_impl->mutate_view_meta(meta);
 }
 

@@ -152,9 +152,9 @@ struct UnwindCache {
         [](struct dl_phdr_info* info,
            size_t size [[maybe_unused]],
            void* data) {
-          auto self = (UnwindCache*)data;
+          auto* self = (UnwindCache*)data;
           uint64_t last_addr = 0;
-          auto segments = (Elf64_Phdr*)info->dlpi_phdr;
+          auto* segments = (Elf64_Phdr*)info->dlpi_phdr;
           for (auto i : c10::irange(info->dlpi_phnum)) {
             if (segments[i].p_type == PT_LOAD) {
               auto begin = ((uint64_t)info->dlpi_addr + segments[i].p_vaddr);
@@ -166,7 +166,7 @@ struct UnwindCache {
               if (library_name.empty()) {
                 library_name = process_name();
               }
-              auto eh_frame_hdr =
+              auto* eh_frame_hdr =
                   // NOLINTNEXTLINE(performance-no-int-to-ptr)
                   (void*)(segments[i].p_vaddr + info->dlpi_addr);
               self->all_libraries_.emplace_back(
@@ -227,7 +227,7 @@ struct UnwindCache {
       refreshLibraries();
       last_version_ = current_version;
     }
-    auto* r = searchFor(addr);
+    const auto* r = searchFor(addr);
     if (!r) {
       if (current_version.adds_ != last_version_.adds_) {
         refreshLibraries();
@@ -239,7 +239,7 @@ struct UnwindCache {
   }
 
   const LibraryInfo& libraryFor(uint64_t addr) {
-    auto* r = findLibraryFor(addr);
+    const auto* r = findLibraryFor(addr);
     if (!r) {
       for ([[maybe_unused]] const auto& l : libraries_with_no_unwind_) {
         TORCH_WARN("Did not find a PT_GNU_EH_FRAME segment for ", l);
@@ -321,7 +321,7 @@ static std::string dladdr_lookup(void* addr) {
 
 struct Symbolizer {
   Symbolizer() {
-    auto envar = std::getenv("TORCH_ADDR2LINE_BINARY");
+    auto* envar = std::getenv("TORCH_ADDR2LINE_BINARY");
     if (envar != nullptr) {
       // currently we take user's input as is without checking
       addr2line_binary_ = envar;
@@ -474,12 +474,12 @@ static std::vector<Frame> symbolize_addr2line(
     const std::vector<void*>& frames) {
   auto guard = Symbolizer::guard();
   Symbolizer& s = Symbolizer::get();
-  for (auto f : frames) {
+  for (auto* f : frames) {
     s.request(f);
   }
   std::vector<Frame> results;
   results.reserve(frames.size());
-  for (auto f : frames) {
+  for (auto* f : frames) {
     results.emplace_back(s.lookup(f));
   }
   return results;

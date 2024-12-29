@@ -60,7 +60,7 @@ static PyObject* THCPEvent_from_ipc_handle(
     PyObject* args,
     PyObject* kwargs) {
   HANDLE_TH_ERRORS
-  auto type = (PyTypeObject*)_type;
+  auto* type = (PyTypeObject*)_type;
 
   static torch::PythonArgParser parser({
       "from_ipc_handle(Device device, std::string ipc_handle)",
@@ -124,8 +124,8 @@ static PyObject* THCPEvent_get_device(THCPEvent* self, void* unused) {
 
 static PyObject* THCPEvent_record(PyObject* _self, PyObject* _stream) {
   HANDLE_TH_ERRORS {
-    auto self = (THCPEvent*)_self;
-    auto stream = (THCPStream*)_stream;
+    auto* self = (THCPEvent*)_self;
+    auto* stream = (THCPStream*)_stream;
     pybind11::gil_scoped_release no_gil{};
     self->cuda_event.record(stream->cuda_stream);
   }
@@ -135,8 +135,8 @@ static PyObject* THCPEvent_record(PyObject* _self, PyObject* _stream) {
 
 static PyObject* THCPEvent_wait(PyObject* _self, PyObject* _stream) {
   HANDLE_TH_ERRORS {
-    auto self = (THCPEvent*)_self;
-    auto stream = (THCPStream*)_stream;
+    auto* self = (THCPEvent*)_self;
+    auto* stream = (THCPStream*)_stream;
     pybind11::gil_scoped_release no_gil{};
     self->cuda_event.block(stream->cuda_stream);
   }
@@ -146,22 +146,22 @@ static PyObject* THCPEvent_wait(PyObject* _self, PyObject* _stream) {
 
 static PyObject* THCPEvent_query(PyObject* _self, PyObject* noargs) {
   HANDLE_TH_ERRORS
-  auto self = (THCPEvent*)_self;
+  auto* self = (THCPEvent*)_self;
   return PyBool_FromLong(self->cuda_event.query());
   END_HANDLE_TH_ERRORS
 }
 
 static PyObject* THCPEvent_elapsed_time(PyObject* _self, PyObject* _other) {
   HANDLE_TH_ERRORS
-  auto self = (THCPEvent*)_self;
-  auto other = (THCPEvent*)_other;
+  auto* self = (THCPEvent*)_self;
+  auto* other = (THCPEvent*)_other;
   return PyFloat_FromDouble(self->cuda_event.elapsed_time(other->cuda_event));
   END_HANDLE_TH_ERRORS
 }
 
 static PyObject* THCPEvent_synchronize(PyObject* _self, PyObject* noargs) {
   HANDLE_TH_ERRORS {
-    auto self = (THCPEvent*)_self;
+    auto* self = (THCPEvent*)_self;
     pybind11::gil_scoped_release no_gil{};
     self->cuda_event.synchronize();
   }
@@ -171,7 +171,7 @@ static PyObject* THCPEvent_synchronize(PyObject* _self, PyObject* noargs) {
 
 static PyObject* THCPEvent_ipc_handle(PyObject* _self, PyObject* noargs) {
   HANDLE_TH_ERRORS
-  auto self = (THCPEvent*)_self;
+  auto* self = (THCPEvent*)_self;
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   cudaIpcEventHandle_t handle;
   self->cuda_event.ipc_handle(&handle);

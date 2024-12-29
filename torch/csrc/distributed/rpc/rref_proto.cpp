@@ -15,7 +15,7 @@ c10::ivalue::TupleElements toIValues(const Message& message, MessageType type) {
       type,
       ", but got ",
       message.type());
-  auto payload = static_cast<const char*>(message.payload().data());
+  const auto* payload = static_cast<const char*>(message.payload().data());
   auto payload_size = message.payload().size();
 
   auto value = jit::unpickle(

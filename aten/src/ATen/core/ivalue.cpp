@@ -168,7 +168,7 @@ void IValue::visit(const std::function<bool (const IValue &)>& visitor) const {
       } else {
         elems = this->toListRef();
       }
-      for (auto& elem : elems) {
+      for (const auto& elem : elems) {
         elem.visit(visitor);
       }
       break;
@@ -217,7 +217,7 @@ void IValue::getSubValues(HashAliasedIValues& subValues) const {
       } else {
         elems = this->toListRef();
       }
-      for (auto& elem : elems) {
+      for (const auto& elem : elems) {
         elem.getSubValues(subValues);
       }
       break;
@@ -268,7 +268,7 @@ bool IValue::overlaps(const IValue& rhs) const {
   HashAliasedIValues rhsSubValues, thisSubValues;
   rhs.getSubValues(rhsSubValues);
   getSubValues(thisSubValues);
-  for (auto& sub : thisSubValues) {
+  for (const auto& sub : thisSubValues) {
     if (rhsSubValues.count(sub)) {
       return true;
     }
@@ -665,7 +665,7 @@ static bool simpleClassTypeArg(const Argument& arg, const ClassTypePtr& type) {
 }
 
 torch::jit::Function* checkObjectSortSchema(const c10::ClassTypePtr& t, std::stringstream& why_not) {
-  if (auto method = t->findMethod("__lt__")) {
+  if (auto *method = t->findMethod("__lt__")) {
       const auto& lt_schema = method->getSchema();
       const auto& schema_args = lt_schema.arguments();
       bool error =
@@ -842,7 +842,7 @@ std::ostream& operator<<(std::ostream & out, const IValue & v) {
     case IValue::Tag::GenericDict:
       return printDict(out, v.toGenericDict(), formatter);
     case IValue::Tag::PyObject: {
-      auto py_obj = v.toPyObject();
+      auto *py_obj = v.toPyObject();
       return out << "<PyObject at" << py_obj << ">";
     }
     case IValue::Tag::Generator:

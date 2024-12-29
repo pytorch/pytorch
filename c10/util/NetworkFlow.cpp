@@ -200,7 +200,7 @@ struct DinicFlowGraph {
     while (!q.empty()) {
       auto x = q.front();
       q.pop();
-      for (auto& edge_idx : adj[x]) {
+      for (const auto& edge_idx : adj[x]) {
         // the edge that goes u -> v where v == x
         const auto& e = reverse_edge(edges[edge_idx]);
         if (!e.residual_capacity()) {

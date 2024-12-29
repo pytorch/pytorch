@@ -83,7 +83,7 @@ int THPCppFunction_traverse(PyObject* self, visitproc visit, void* arg) {
     // See: https://github.com/pytorch/pytorch/issues/102174
     auto& fn = *((THPCppFunction*)self)->cdata;
     for (const auto& hook : fn.tensor_pre_hooks()) {
-      if (auto pyhook = dynamic_cast<PyFunctionTensorPreHook*>(hook.get())) {
+      if (auto* pyhook = dynamic_cast<PyFunctionTensorPreHook*>(hook.get())) {
         Py_VISIT(pyhook->dict);
       }
     }
@@ -92,18 +92,18 @@ int THPCppFunction_traverse(PyObject* self, visitproc visit, void* arg) {
     // not contain any PyFunctionTensorPreHooks. The alternative is to have a
     // check that actually guarantees this.
     for (const auto& pair : fn.retains_grad_hooks()) {
-      if (auto pyhook =
+      if (auto* pyhook =
               dynamic_cast<PyFunctionTensorPreHook*>(pair.second.get())) {
         Py_VISIT(pyhook->dict);
       }
     }
     for (const auto& hook : fn.pre_hooks()) {
-      if (auto pyhook = dynamic_cast<PyFunctionPreHook*>(hook.get())) {
+      if (auto* pyhook = dynamic_cast<PyFunctionPreHook*>(hook.get())) {
         Py_VISIT(pyhook->dict);
       }
     }
     for (const auto& hook : fn.post_hooks()) {
-      if (auto pyhook = dynamic_cast<PyFunctionPostHook*>(hook.get())) {
+      if (auto* pyhook = dynamic_cast<PyFunctionPostHook*>(hook.get())) {
         Py_VISIT(pyhook->dict);
       }
     }
@@ -112,7 +112,7 @@ int THPCppFunction_traverse(PyObject* self, visitproc visit, void* arg) {
 }
 
 int THPCppFunction_clear(PyObject* self) {
-  auto f = (THPCppFunction*)self;
+  auto* f = (THPCppFunction*)self;
   // Remove the weak ref of the c++ object if it exist
   if (f->cdata) {
     f->cdata->set_pyobj(nullptr);
@@ -137,7 +137,7 @@ PyObject* THPCppFunction_next_functions(PyObject* self, void* _unused) {
   if (!py_functions)
     return nullptr;
   for (const auto i : c10::irange(num_next)) {
-    auto& c_tuple = cdata->next_edge(i);
+    const auto& c_tuple = cdata->next_edge(i);
     THPObjectPtr tuple(PyTuple_New(2));
     if (!tuple)
       return nullptr;
@@ -173,7 +173,7 @@ PyObject* THPCppFunction_register_hook_dict(PyObject* self, PyObject* _var) {
     return PyErr_Format(
         PyExc_TypeError, "_register_hook_dict expected a variable");
   }
-  auto var = (THPVariable*)_var;
+  auto* var = (THPVariable*)_var;
   auto& fn = *((THPCppFunction*)self)->cdata;
   fn.add_tensor_pre_hook(std::make_unique<PyFunctionTensorPreHook>(
       var->backward_hooks, THPVariable_Unpack(var).output_nr()));
@@ -288,7 +288,7 @@ PyObject* functionToPyObject(const std::shared_ptr<Node>& cdata) {
     Py_RETURN_NONE;
   }
 
-  if (auto pfw = dynamic_cast<PyNode*>(cdata.get())) {
+  if (auto* pfw = dynamic_cast<PyNode*>(cdata.get())) {
     PyObject* obj = pfw->obj;
     Py_INCREF(obj);
     return obj;
@@ -356,7 +356,7 @@ PyObject* callRegisterFn(PyObject* dict, PyObject* hook) {
 PyObject* registerFunctionHook(Node& fn, PyObject* hook) {
   PyObject* dict = Py_None;
   for (const auto& hook : fn.post_hooks()) {
-    if (auto pyhook = dynamic_cast<PyFunctionPostHook*>(hook.get())) {
+    if (auto* pyhook = dynamic_cast<PyFunctionPostHook*>(hook.get())) {
       dict = pyhook->dict;
       break;
     }
@@ -379,7 +379,7 @@ PyObject* registerFunctionHook(Node& fn, PyObject* hook) {
 PyObject* registerFunctionPreHook(Node& fn, PyObject* hook) {
   PyObject* dict = Py_None;
   for (const auto& hook : fn.pre_hooks()) {
-    if (auto pyhook = dynamic_cast<PyFunctionPreHook*>(hook.get())) {
+    if (auto* pyhook = dynamic_cast<PyFunctionPreHook*>(hook.get())) {
       dict = pyhook->dict;
       break;
     }

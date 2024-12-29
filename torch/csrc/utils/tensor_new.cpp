@@ -183,7 +183,7 @@ ScalarType infer_scalar_type(PyObject* obj) {
       THPObjectPtr handle(PySequence_GetItem(obj, i));
       if (!handle)
         throw python_error();
-      auto cur_item = handle.get();
+      auto* cur_item = handle.get();
       TORCH_CHECK_TYPE(
           cur_item != obj, "new(): self-referential lists are incompatible");
       ScalarType item_scalarType = infer_scalar_type(cur_item);
@@ -625,7 +625,7 @@ Tensor legacy_sparse_tensor_generic_ctor_new(
           "  Please use torch.sparse_coo_tensor(x._indices(), x._values(), x.shape).");
     }
     // NOLINTNEXTLINE(performance-no-int-to-ptr)
-    auto cdata = reinterpret_cast<void*>(r.toInt64(0));
+    auto* cdata = reinterpret_cast<void*>(r.toInt64(0));
     return at::unsafeTensorFromTH(cdata, true);
   } else if (r.idx == 2) {
     if (ctor_or_new == CtorOrNew::CTOR) {
@@ -748,7 +748,7 @@ Tensor legacy_tensor_generic_ctor_new(
     return new_with_storage(options, scalar_type, storage);
   } else if (r.idx == 2) {
     // NOLINTNEXTLINE(performance-no-int-to-ptr)
-    auto cdata = reinterpret_cast<void*>(r.toInt64(0));
+    auto* cdata = reinterpret_cast<void*>(r.toInt64(0));
     return at::unsafeTensorFromTH(cdata, true);
   } else if (r.idx == 3) {
     const auto& other = r.tensor(0);
@@ -920,7 +920,7 @@ static Tensor sparse_compressed_tensor_ctor_worker(
     // Clear error indicator if attribute does not exists.
     // Otherwise subsequent Python C API calls might return bogus values.
     // See https://github.com/pytorch/pytorch/issues/58520 for more details
-    auto rc = PyObject_GetAttrString(o, attr_name);
+    auto* rc = PyObject_GetAttrString(o, attr_name);
     if (!rc) {
       if (!PyErr_ExceptionMatches(PyExc_AttributeError)) {
         throw python_error();
@@ -1572,7 +1572,7 @@ Tensor tensor_frombuffer(
   THPObjectPtr obj(view.obj);
 
   auto len = view.len;
-  auto buf = view.buf;
+  auto* buf = view.buf;
   PyBuffer_Release(&view);
 
   TORCH_CHECK_VALUE(
@@ -1622,7 +1622,7 @@ Tensor tensor_frombuffer(
       len,
       " bytes)");
 
-  auto offset_buf = static_cast<char*>(buf) + offset;
+  auto* offset_buf = static_cast<char*>(buf) + offset;
   auto options = TensorOptions().dtype(dtype).device(c10::kCPU);
 
   auto tensor = at::for_blob(offset_buf, static_cast<int64_t>(actual_count))
@@ -1706,7 +1706,7 @@ Tensor asarray(
 
     if (is_numpy_array || is_numpy_scalar) {
       THPObjectPtr ptr;
-      auto arr = obj;
+      auto* arr = obj;
 
       // PyArray_CheckScalar is true for both scalars and 0-dim arrays, per
       // https://numpy.org/devdocs/reference/c-api/array.html#c.PyArray_CheckScalar

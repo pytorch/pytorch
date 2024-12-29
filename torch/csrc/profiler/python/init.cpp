@@ -161,7 +161,7 @@ int RecordFunctionFast_init(
     PyObject* selfGeneric,
     PyObject* args,
     PyObject* kwargs) {
-  auto self = (RecordFunctionFast*)selfGeneric;
+  auto* self = (RecordFunctionFast*)selfGeneric;
   // NOLINTNEXTLINE(*-c-arrays*)
   constexpr const char* kwlist[] = {
       "name", "input_values", "keyword_values", nullptr};
@@ -203,7 +203,7 @@ int RecordFunctionFast_init(
 }
 
 void RecordFunctionFast_dealloc(PyObject* selfGeneric) {
-  auto self = (RecordFunctionFast*)selfGeneric;
+  auto* self = (RecordFunctionFast*)selfGeneric;
   Py_CLEAR(self->name);
   Py_CLEAR(self->input_values);
   Py_CLEAR(self->keyword_values);
@@ -216,7 +216,7 @@ void RecordFunctionFast_dealloc(PyObject* selfGeneric) {
 PyObject* RecordFunctionFast_enter(PyObject* selfGeneric, PyObject* unused) {
   HANDLE_TH_ERRORS
   if (torch::profiler::impl::ProfilerStateBase::get() != nullptr) {
-    auto self = (RecordFunctionFast*)selfGeneric;
+    auto* self = (RecordFunctionFast*)selfGeneric;
     TORCH_INTERNAL_ASSERT(
         !self->guard,
         "Trying to enter a new record_function_fast context but the guard is unexpectedly already set");
@@ -271,7 +271,7 @@ PyObject* RecordFunctionFast_enter(PyObject* selfGeneric, PyObject* unused) {
 PyObject* RecordFunctionFast_exit(PyObject* selfGeneric, PyObject* unused) {
   HANDLE_TH_ERRORS
   if (torch::profiler::impl::ProfilerStateBase::get() != nullptr) {
-    auto self = (RecordFunctionFast*)selfGeneric;
+    auto* self = (RecordFunctionFast*)selfGeneric;
     TORCH_INTERNAL_ASSERT(
         self->guard,
         "Trying to exit an active record_function_fast context but no guard is set");

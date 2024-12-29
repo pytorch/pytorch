@@ -25,7 +25,7 @@ std::ostream& operator<<(
     std::ostream& stream,
     const std::vector<SourceLocation>& frames) {
   stream << "Frames:\n";
-  for (auto& location : frames) {
+  for (const auto& location : frames) {
     stream << "  " << location.function << " (" << location.file << ":"
            << location.line << ")\n";
   }

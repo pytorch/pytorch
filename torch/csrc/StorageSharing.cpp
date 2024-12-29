@@ -325,7 +325,7 @@ static PyObject* THPStorage_shareCuda(PyObject* self, PyObject* noargs) {
     at::DataPtr sent_data_ptr = torch::GetNewRefCountedSentData(
         storage.mutable_data(), storage.device());
     auto old_data_ptr = storage.set_data_ptr(std::move(sent_data_ptr));
-    auto sent_data =
+    auto* sent_data =
         static_cast<torch::CudaIPCSentData*>(storage.data_ptr().get_context());
     sent_data->set_original_ptr(std::move(old_data_ptr));
     _ref_counter = PyBytes_FromString((sent_data->handle()).c_str());
@@ -468,8 +468,9 @@ static PyObject* THPStorage_newSharedCuda(PyObject* _unused, PyObject* args) {
     if (s_ipc_event_handle.empty()) {
       return nullptr;
     }
-    auto ipc_event_handle = reinterpret_cast<const cudaIpcEventHandle_t*>(
-        s_ipc_event_handle.c_str());
+    const auto* ipc_event_handle =
+        reinterpret_cast<const cudaIpcEventHandle_t*>(
+            s_ipc_event_handle.c_str());
     cudaEvent_t event = nullptr;
     cudaIpcOpenEventHandle(&event, *ipc_event_handle);
     C10_CUDA_CHECK(

@@ -192,7 +192,7 @@ void serialize(serialize::InputArchive& archive, Optimizer& optimizer) {
         "loaded state dict contains a parameter group that has a different size than the optimizer's parameter group");
 
     for (const auto idx : c10::irange(params.size())) {
-      auto param_group_old_key =
+      auto* param_group_old_key =
           // NOLINTNEXTLINE(performance-no-int-to-ptr)
           reinterpret_cast<void*>(std::stoull(param_group_old_keys[idx]));
       if (saved_state.find(param_group_old_key) != saved_state.end()) {

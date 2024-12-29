@@ -38,8 +38,8 @@ static get_elementwise_nested_tensor_impl(
         "Expected both self and other to be nested, but got a non-nested self and non-nested other");
   }
 
-  auto self_ptr = get_nested_tensor_impl(self);
-  auto other_ptr = get_nested_tensor_impl(other);
+  auto *self_ptr = get_nested_tensor_impl(self);
+  auto *other_ptr = get_nested_tensor_impl(other);
 
   TORCH_CHECK(
       self.dim() == other.dim(),
@@ -82,7 +82,7 @@ Tensor NestedTensor_elementwise_Tensor(
   Tensor other_contiguous = other;
   // self is a scalar
   if (!self.is_nested() && self.dim() == 0 && self.numel() == 1) {
-    auto other_impl = get_nested_tensor_impl(other);
+    auto *other_impl = get_nested_tensor_impl(other);
     return wrap_buffer(
       f(self, other_impl->get_unsafe_storage_as_tensor()),
       other_impl->get_nested_sizes().clone(),
@@ -92,7 +92,7 @@ Tensor NestedTensor_elementwise_Tensor(
   }
   // other is a scalar
   if (!other.is_nested() && other.dim() == 0 && other.numel() == 1) {
-    auto self_impl = get_nested_tensor_impl(self);
+    auto *self_impl = get_nested_tensor_impl(self);
     return wrap_buffer(
       f(self_impl->get_unsafe_storage_as_tensor(), other),
       self_impl->get_nested_sizes().clone(),
@@ -102,7 +102,7 @@ Tensor NestedTensor_elementwise_Tensor(
   }
   // special case when other is dense (CUDA only for now)
   if (self.is_nested() && !other.is_nested() && self.is_cuda() && other.is_cuda()) {
-    auto self_ptr = get_nested_tensor_impl(self);
+    auto *self_ptr = get_nested_tensor_impl(self);
     auto other_ = other;
     // check for the [B, *, D], [B, 1, D] case -> use custom kernel
     // TODO: this if statement is ugly and hopefully we will remove this in the near future
@@ -241,13 +241,13 @@ Tensor& NestedTensor_elementwise__Tensor(
     Func f) {
   // self is a scalar
   if (!self.is_nested() && self.dim() == 0 && self.numel() == 1) {
-    auto other_impl = get_nested_tensor_impl(other);
+    auto *other_impl = get_nested_tensor_impl(other);
     f(self, other_impl->get_buffer());
     return self;
   }
   // other is a scalar
   if (!other.is_nested() && other.dim() == 0 && other.numel() == 1) {
-    auto self_impl = get_nested_tensor_impl(self);
+    auto *self_impl = get_nested_tensor_impl(self);
     f(self_impl->get_buffer(), other);
     return self;
   }

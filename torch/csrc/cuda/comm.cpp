@@ -371,7 +371,7 @@ static at::Tensor& _gather_out_impl(
     int64_t dim) {
   std::vector<int64_t> chunk_sizes;
   chunk_sizes.reserve(tensors.size());
-  for (auto& tensor : tensors) {
+  for (const auto& tensor : tensors) {
     chunk_sizes.emplace_back(tensor.size(dim));
   }
   auto chunks =
@@ -388,7 +388,7 @@ at::Tensor& gather_out(
     int64_t dim) {
   TORCH_CHECK(!tensors.empty(), "Expected at least one tensor to gather from");
   int64_t total_size = 0;
-  auto& first = tensors.front();
+  const auto& first = tensors.front();
   const auto first_size = first.sizes();
   dim = at::maybe_wrap_dim(dim, first);
   std::vector<int64_t> expected_size(first_size.begin(), first_size.end());
@@ -442,7 +442,7 @@ at::Tensor gather(
     std::optional<int32_t> destination_index) {
   TORCH_CHECK(!tensors.empty(), "Expected at least one tensor to gather from");
   int64_t total_size = 0;
-  auto& first = tensors.front();
+  const auto& first = tensors.front();
   const auto first_size = first.sizes();
   dim = at::maybe_wrap_dim(dim, first);
   std::vector<int64_t> expected_size(first_size.begin(), first_size.end());

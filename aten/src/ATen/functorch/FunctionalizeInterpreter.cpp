@@ -31,7 +31,7 @@ void FunctionalizeInterpreterPtr::processImpl(
   foreachTensorInplace(*stack, static_cast<std::ptrdiff_t>(stack->size() - ret_size), static_cast<std::ptrdiff_t>(stack->size()),
     [&](const Tensor& tensor) {
       if (at::functionalization::impl::isFunctionalTensor(tensor)) {
-        auto wrapper = at::functionalization::impl::unsafeGetFunctionalWrapper(tensor);
+        auto *wrapper = at::functionalization::impl::unsafeGetFunctionalWrapper(tensor);
         // Functorch is responsible for setting the level on the wrapper, since we don't
         // have that info available in core (for now).
         // We could just "propagate" the level from the input tensors inside of the functionalize kernels,

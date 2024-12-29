@@ -14,7 +14,7 @@ bool hasBackend() {
 }
 
 const BackendImplInterface* getBackend() {
-  auto* interface = backend_impl_registry.load();
+  const auto* interface = backend_impl_registry.load();
   TORCH_CHECK(interface, "Lazy tensor backend not registered.");
   return interface;
 }

@@ -82,7 +82,7 @@ inline void set_history(
 inline void set_history(
     const std::vector<Variable>& variables,
     const std::shared_ptr<Node>& grad_fn) {
-  for (auto& variable : variables) {
+  for (const auto& variable : variables) {
     set_history(variable, grad_fn);
   }
 }
@@ -93,7 +93,7 @@ inline bool isFwGradDefined(const std::optional<at::Tensor>& t) {
 
 inline bool isFwGradDefinedTensorList(const at::ITensorListRef& variables) {
   bool ret = false;
-  for (auto& variable : variables) {
+  for (const auto& variable : variables) {
     ret |= isFwGradDefined(variable);
   }
   return ret;

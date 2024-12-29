@@ -50,7 +50,7 @@ struct C10_EXPORT NVLinkDetector : public c10d::DMAConnectivityDetector {
     static const char* warning_msg =
         "PyTorch features that use NVLinkDetector may assume no NVLink presence.";
 
-    auto driver_api = c10::cuda::DriverAPI::get();
+    auto* driver_api = c10::cuda::DriverAPI::get();
     if (driver_api->nvmlInit_v2_() != NVML_SUCCESS) {
       LOG(WARNING)
           << "NVLinkDetector: Failed to initialize NVML via nvmlInit_v2. "

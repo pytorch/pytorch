@@ -22,7 +22,7 @@ using WaitCounterBackendFactories =
     std::vector<std::shared_ptr<WaitCounterBackendFactoryIf>>;
 
 Synchronized<WaitCounterBackendFactories>& waitCounterBackendFactories() {
-  static auto instance = new Synchronized<WaitCounterBackendFactories>();
+  static auto* instance = new Synchronized<WaitCounterBackendFactories>();
   return *instance;
 }
 

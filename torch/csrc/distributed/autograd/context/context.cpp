@@ -234,8 +234,8 @@ const c10::Dict<torch::Tensor, torch::Tensor> DistAutogradContext::
   std::lock_guard<std::mutex> guard(lock_);
   // block current streams before accessing gradients to make sure that
   // gradient computations are finished before use.
-  for (auto& entry : gradReadyEvents_) {
-    auto& event = entry.second;
+  for (const auto& entry : gradReadyEvents_) {
+    const auto& event = entry.second;
     event.block(impl_.getStream(event.device()));
   }
   return accumulatedGrads_;

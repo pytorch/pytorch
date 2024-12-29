@@ -17,7 +17,7 @@ std::vector<const Node*> Util::ComputePostOrder(
     auto it = emap->find(node);
     if (it == emap->end()) {
       (*emap)[node] = kEmitting;
-      for (auto& output : node->operands()) {
+      for (const auto& output : node->operands()) {
         auto oit = emap->find(output.node);
         if (oit == emap->end()) {
           node_stack.push(output.node);
@@ -29,7 +29,7 @@ std::vector<const Node*> Util::ComputePostOrder(
         }
       }
     } else if (it->second == kEmitting) {
-      for (auto& output : node->operands()) {
+      for (const auto& output : node->operands()) {
         auto oit = emap->find(output.node);
         TORCH_CHECK(
             oit != emap->end() && oit->second == kEmitted,
@@ -51,7 +51,7 @@ std::vector<const Node*> Util::ComputePostOrder(
     c10::ArrayRef<const Node*> nodes,
     EmissionMap* emap) {
   std::vector<const Node*> post_order;
-  for (auto node : nodes) {
+  for (const auto* node : nodes) {
     auto node_post_order = ComputePostOrder(node, emap);
     post_order.insert(
         post_order.end(), node_post_order.begin(), node_post_order.end());

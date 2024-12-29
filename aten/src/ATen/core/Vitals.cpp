@@ -41,7 +41,7 @@ bool torchVitalEnabled() {
   // If this is a performance hit, make `enabled` variable static
   // and return `const bool&` instead
   bool enabled = []() {
-    auto e = getenv("TORCH_VITAL");
+    auto *e = getenv("TORCH_VITAL");
     if (e != nullptr) {
       return e[0] != '\0';
     }

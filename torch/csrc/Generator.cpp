@@ -21,17 +21,17 @@ using namespace torch;
 PyObject* THPGeneratorClass = nullptr;
 
 PyObject* THPGenerator_initDefaultGenerator(const at::Generator& cdata) {
-  auto type = (PyTypeObject*)THPGeneratorClass;
+  auto* type = (PyTypeObject*)THPGeneratorClass;
   auto self = THPObjectPtr{type->tp_alloc(type, 0)};
   if (!self)
     throw python_error();
-  auto self_ = reinterpret_cast<THPGenerator*>(self.get());
+  auto* self_ = reinterpret_cast<THPGenerator*>(self.get());
   self_->cdata = std::move(cdata);
   return self.release();
 }
 
 static void THPGenerator_dealloc(PyObject* _self) {
-  auto self = reinterpret_cast<THPGenerator*>(_self);
+  auto* self = reinterpret_cast<THPGenerator*>(_self);
   if (self->cdata.defined()) {
     self->cdata.set_pyobj(nullptr);
     self->cdata.~Generator();
@@ -86,7 +86,7 @@ static PyObject* THPGenerator_setState(PyObject* _self, PyObject* _new_state) {
         "expected a torch.ByteTensor, but got %s",
         Py_TYPE(_new_state)->tp_name);
   }
-  auto self = (THPGenerator*)_self;
+  auto* self = (THPGenerator*)_self;
   auto& gen = self->cdata;
   const auto& new_state_tensor = THPVariable_Unpack(_new_state);
 
@@ -136,7 +136,7 @@ static PyObject* THPGenerator_graphSafeSetState(
     PyObject* _self,
     PyObject* _state) {
   HANDLE_TH_ERRORS
-  auto self = (THPGenerator*)_self;
+  auto* self = (THPGenerator*)_self;
   auto& gen = self->cdata;
 
   // See Note [Acquire lock when using random generators]
@@ -161,7 +161,7 @@ static PyObject* THPGenerator_cloneState(PyObject* _self, PyObject* noargs) {
 
 static PyObject* THPGenerator_manualSeed(PyObject* _self, PyObject* seed) {
   HANDLE_TH_ERRORS
-  auto self = (THPGenerator*)_self;
+  auto* self = (THPGenerator*)_self;
   auto generator = self->cdata;
   TORCH_CHECK(
       THPUtils_checkLong(seed),
@@ -179,7 +179,7 @@ static PyObject* THPGenerator_manualSeed(PyObject* _self, PyObject* seed) {
 
 static PyObject* THPGenerator_setOffset(PyObject* _self, PyObject* offset) {
   HANDLE_TH_ERRORS
-  auto self = (THPGenerator*)_self;
+  auto* self = (THPGenerator*)_self;
   auto generator = self->cdata;
   TORCH_CHECK(
       THPUtils_checkLong(offset),
@@ -198,7 +198,7 @@ static PyObject* THPGenerator_setOffset(PyObject* _self, PyObject* offset) {
 static PyObject* THPGenerator_seed(PyObject* _self, PyObject* noargs) {
   HANDLE_TH_ERRORS
   // See Note [Acquire lock when using random generators]
-  auto self = (THPGenerator*)_self;
+  auto* self = (THPGenerator*)_self;
   std::scoped_lock<std::mutex> lock(self->cdata.mutex());
   uint64_t seed_val = self->cdata.seed();
   return THPUtils_packUInt64(seed_val);
@@ -207,14 +207,14 @@ static PyObject* THPGenerator_seed(PyObject* _self, PyObject* noargs) {
 
 static PyObject* THPGenerator_initialSeed(PyObject* _self, PyObject* noargs) {
   HANDLE_TH_ERRORS
-  auto self = (THPGenerator*)_self;
+  auto* self = (THPGenerator*)_self;
   return THPUtils_packUInt64(self->cdata.current_seed());
   END_HANDLE_TH_ERRORS
 }
 
 static PyObject* THPGenerator_getOffset(PyObject* _self, PyObject* noargs) {
   HANDLE_TH_ERRORS
-  auto self = (THPGenerator*)_self;
+  auto* self = (THPGenerator*)_self;
   return THPUtils_packUInt64(self->cdata.get_offset());
   END_HANDLE_TH_ERRORS
 }
@@ -227,7 +227,7 @@ static PyObject* THPGenerator_get_device(THPGenerator* self, void* unused) {
 
 PyObject* THPGenerator_reduce(PyObject* _self, PyObject* noargs) {
   HANDLE_TH_ERRORS
-  auto self = (THPGenerator*)_self;
+  auto* self = (THPGenerator*)_self;
   auto& gen = self->cdata;
 
   auto ret = THPObjectPtr{PyTuple_New(3)};
@@ -370,7 +370,7 @@ PyObject* THPGenerator_Wrap(const Generator& gen) {
     Py_RETURN_NONE;
   }
 
-  if (auto obj = pyobj(gen)) {
+  if (auto* obj = pyobj(gen)) {
     Py_INCREF(obj);
     return obj;
   }
@@ -391,7 +391,7 @@ at::Generator THPGenerator_Unwrap(PyObject* state) {
 PyObject* THPGenerator_NewWithVar(PyTypeObject* type, Generator gen) {
   PyObject* obj = type->tp_alloc(type, 0);
   if (obj) {
-    auto g = (THPGenerator*)obj;
+    auto* g = (THPGenerator*)obj;
     new (&g->cdata) Generator(std::move(gen));
     set_pyobj(g->cdata, obj);
   }

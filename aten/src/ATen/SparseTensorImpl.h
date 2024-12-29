@@ -373,7 +373,7 @@ struct TORCH_API SparseTensorImpl : public TensorImpl {
    */
   void shallow_copy_from(const c10::intrusive_ptr<TensorImpl>& impl) override {
     AT_ASSERT(has_compatible_shallow_copy_type(impl->key_set()));
-    auto sparse_impl = static_cast<const SparseTensorImpl*>(impl.get());
+    const auto* sparse_impl = static_cast<const SparseTensorImpl*>(impl.get());
     copy_tensor_metadata(
         /*src_sparse_impl=*/sparse_impl,
         /*dest_sparse_impl=*/this,

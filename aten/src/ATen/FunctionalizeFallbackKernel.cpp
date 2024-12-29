@@ -156,7 +156,7 @@ static const at::Tensor & resize__functionalization(c10::DispatchKeySet dispatch
   if (needs_resize_storage) {
     // If resize_() actually increases the size of the storage, then we need to tell FunctionalTensorWrapper about it.
     // See Note[resize_() in functionalization pass]
-    auto func_impl = at::functionalization::impl::unsafeGetFunctionalWrapper(self);
+    auto *func_impl = at::functionalization::impl::unsafeGetFunctionalWrapper(self);
     func_impl->maybe_replace_storage(tmp_output);
     // See the note - we're guaranteed at this point that "self" is *not* a view (and has no outstanding views)
     // So we don't need to treat the output of resize as view tensor.
@@ -337,8 +337,8 @@ static at::Tensor& set__functionalize(at::Tensor& self, const at::Tensor& src) {
 
   TORCH_INTERNAL_ASSERT(at::functionalization::impl::isFunctionalTensor(self));
   TORCH_INTERNAL_ASSERT(at::functionalization::impl::isFunctionalTensor(src));
-  auto self_impl = at::functionalization::impl::unsafeGetFunctionalWrapper(self);
-  auto src_impl = at::functionalization::impl::unsafeGetFunctionalWrapper(src);
+  auto *self_impl = at::functionalization::impl::unsafeGetFunctionalWrapper(self);
+  auto *src_impl = at::functionalization::impl::unsafeGetFunctionalWrapper(src);
   // See Note [Ordering of resize_() and set_()]
   TORCH_CHECK(!self_impl->was_inductor_storage_resized(),
     "storage_resize_() followed by set_() in torch.compile is not supported today");

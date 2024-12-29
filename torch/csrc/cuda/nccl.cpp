@@ -475,7 +475,7 @@ AutoNcclGroup::~AutoNcclGroup() noexcept(false) {
 bool is_available(TensorList tensors) {
 #ifdef USE_NCCL
   device_set devices;
-  for (auto& tensor : tensors) {
+  for (const auto& tensor : tensors) {
     if (!tensor.is_cuda() || tensor.is_sparse())
       return false;
     if (!tensor.is_contiguous())
@@ -611,7 +611,7 @@ void broadcast(
     auto device = tensors[i].get_device();
     device_guard.set_index(device);
     // Default to the current stream
-    const auto stream = (streams.empty() || !streams[i])
+    auto* const stream = (streams.empty() || !streams[i])
         ? at::cuda::getCurrentCUDAStream(device).stream()
         : streams[i]->stream();
     TORCH_CHECK(
@@ -663,7 +663,7 @@ void reduce(
     auto device = inputs[i].device().index();
     device_guard.set_index(device);
     // Default to the current stream
-    const auto stream = (streams.empty() || !streams[i])
+    auto* const stream = (streams.empty() || !streams[i])
         ? at::cuda::getCurrentCUDAStream(device).stream()
         : streams[i]->stream();
 
@@ -717,7 +717,7 @@ void all_reduce(
     auto device = inputs[i].device().index();
     device_guard.set_index(device);
     // Default to the current stream
-    const auto stream = (streams.empty() || !streams[i])
+    auto* const stream = (streams.empty() || !streams[i])
         ? at::cuda::getCurrentCUDAStream(device).stream()
         : streams[i]->stream();
 
@@ -759,7 +759,7 @@ void reduce_scatter(
     auto device = inputs[i].device().index();
     device_guard.set_index(device);
     // Default to the current stream
-    const auto stream = (streams.empty() || !streams[i])
+    auto* const stream = (streams.empty() || !streams[i])
         ? at::cuda::getCurrentCUDAStream(device).stream()
         : streams[i]->stream();
 
@@ -800,7 +800,7 @@ void all_gather(
     auto device = inputs[i].device().index();
     device_guard.set_index(device);
     // Default to the current stream
-    const auto stream = (streams.empty() || !streams[i])
+    auto* const stream = (streams.empty() || !streams[i])
         ? at::cuda::getCurrentCUDAStream(device).stream()
         : streams[i]->stream();
 
@@ -844,7 +844,7 @@ void all2all_single_equal_split(
   [[maybe_unused]] size_t rankdiff = input.nbytes() / size;
   const auto* sendbuff = reinterpret_cast<const char*>(input.const_data_ptr());
   auto* recvbuff = reinterpret_cast<char*>(output.data_ptr());
-  auto comm = to_nccl_comm(_comm);
+  auto* comm = to_nccl_comm(_comm);
 #if defined(USE_ROCM) || defined(NCCL_ALLTOALL_SUPPORTED)
   // NCCL_ALLTOALL_SUPPORTED is used so NCCL can differentiate send/recv
   // operations issued as a part of the collective (e.g. alltoall) vs those
@@ -893,7 +893,7 @@ void all2all_single_unequal_split(
   using namespace torch::cuda::nccl::detail;
 
   auto type = to_nccl_data_type(_type);
-  auto comm = to_nccl_comm(_comm);
+  auto* comm = to_nccl_comm(_comm);
 #if defined(USE_ROCM) || defined(NCCL_ALLTOALLV_SUPPORTED)
   // NCCL_ALLTOALLV_SUPPORTED is used so NCCL can differentiate send/recv
   // operations issued as a part of the collective (e.g. alltoallv) vs those
@@ -955,7 +955,7 @@ void all2all(
 #if defined(NCCL_MAJOR) && \
     ((NCCL_MAJOR > 2) || ((NCCL_MAJOR == 2) && (NCCL_MINOR >= 7)))
   using namespace torch::cuda::nccl::detail;
-  auto comm = to_nccl_comm(_comm);
+  auto* comm = to_nccl_comm(_comm);
 
 #ifdef NCCL_ALLTOALLV_SUPPORTED
   // NCCL_ALLTOALLV_SUPPORTED is used so NCCL can differentiate send/recv
@@ -1120,7 +1120,7 @@ void gather(
     ((NCCL_MAJOR > 2) || ((NCCL_MAJOR == 2) && (NCCL_MINOR >= 7)))
   using namespace torch::cuda::nccl::detail;
 
-  auto comm = to_nccl_comm(_comm);
+  auto* comm = to_nccl_comm(_comm);
   int numranks = 0, cur_rank = 0;
   NCCL_CHECK(ncclCommCount(comm, &numranks));
   NCCL_CHECK(ncclCommUserRank(comm, &cur_rank));
@@ -1169,7 +1169,7 @@ void scatter(
     ((NCCL_MAJOR > 2) || ((NCCL_MAJOR == 2) && (NCCL_MINOR >= 7)))
   using namespace torch::cuda::nccl::detail;
 
-  auto comm = to_nccl_comm(_comm);
+  auto* comm = to_nccl_comm(_comm);
   int numranks = 0, cur_rank = 0;
 #ifndef NCCL_HAS_COMM_NONBLOCKING
   NCCL_CHECK(ncclCommCount(comm, &numranks));

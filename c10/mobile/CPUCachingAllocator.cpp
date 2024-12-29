@@ -77,7 +77,7 @@ void CPUCachingAllocator::record_free(void* ptr) {
 
 void CPUCachingAllocator::free_cached() {
   for (const auto& it : available_map_) {
-    for (const auto ptr : it.second) {
+    for (auto* const ptr : it.second) {
       c10::free_cpu(ptr);
       // When cached memory is return to OS, it must be removed
       // from allocation_map.

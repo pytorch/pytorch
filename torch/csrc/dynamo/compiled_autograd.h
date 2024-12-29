@@ -140,7 +140,7 @@ struct TensorArgs {
     if (!tensor.defined()) {
       return _undefined;
     }
-    auto impl = tensor.unsafeGetTensorImpl();
+    auto* impl = tensor.unsafeGetTensorImpl();
     auto it = _args.find(impl);
     if (it == _args.end()) {
       TORCH_INTERNAL_ASSERT(create && inputs.size() == _next_id - 1);

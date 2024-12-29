@@ -64,7 +64,7 @@ struct C10_API SafePyObject {
 
   // stop tracking the current object, and return it
   PyObject* release() {
-    auto rv = data_;
+    auto* rv = data_;
     data_ = nullptr;
     return rv;
   }

@@ -17,7 +17,7 @@ Tensor& copy_(Tensor& self, const Tensor& src, bool non_blocking) {
   jit::Value* output = nullptr;
   if (torch::jit::tracer::isTracing()) {
     const jit::tracer::TracingState& state = *jit::tracer::getTracingState();
-    auto& graph = state.graph;
+    const auto& graph = state.graph;
     if (state.force_outplace && self.storage().use_count() <= 1) {
       // if you have no views of self, then an in place copy is equivalent to
       // making sure we expand src to the same size as self

@@ -103,7 +103,7 @@ void Logger::set_env_variables() {
         getCvarString({"GLOO_DEVICE_TRANSPORT"}, "N/A");
 
 #ifdef USE_C10D_GLOO
-    auto gloo_pg = static_cast<c10d::ProcessGroupGloo*>(
+    auto* gloo_pg = static_cast<c10d::ProcessGroupGloo*>(
         reducer_->process_group_
             ->getBackend(c10d::ProcessGroup::BackendType::GLOO)
             .get());

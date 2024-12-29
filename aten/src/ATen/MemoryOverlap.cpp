@@ -63,10 +63,10 @@ MemOverlapStatus get_overlap_status(const TensorImpl* a, const TensorImpl* b) {
   // which we will miss.
   const auto& a_storage = a->unsafe_storage();
   if (a_storage && a_storage.is_alias_of(b->unsafe_storage())) {
-    const auto a_begin = static_cast<const char*>(a->data());
-    const auto a_end = a_begin + a->numel() * a->itemsize();
-    const auto b_begin = static_cast<const char*>(b->data());
-    const auto b_end = b_begin + b->numel() * b->itemsize();
+    const auto *a_begin = static_cast<const char*>(a->data());
+    const auto *a_end = a_begin + a->numel() * a->itemsize();
+    const auto *b_begin = static_cast<const char*>(b->data());
+    const auto *b_end = b_begin + b->numel() * b->itemsize();
 
     if (a_begin == b_begin && a_end == b_end) {
       return (a->strides() == b->strides()) ?

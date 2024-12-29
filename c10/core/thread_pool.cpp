@@ -78,7 +78,7 @@ size_t ThreadPool::numAvailable() const {
 }
 
 bool ThreadPool::inThreadPool() const {
-  for (auto& thread : threads_) {
+  for (const auto& thread : threads_) {
     if (thread.get_id() == std::this_thread::get_id()) {
       return true;
     }

@@ -794,7 +794,7 @@ ProcessGroupGloo::ProcessGroupGloo(
     try {
       context->connectFullMesh(store, options_->devices[i]);
     } catch (const std::runtime_error& e) {
-      auto err = e.what();
+      const auto* err = e.what();
       // TORCH_CHECK to print the cpp stacktrace.
       auto msg = c10::str("Gloo connectFullMesh failed with ", err);
       logAndThrow(msg, msg);
@@ -2823,7 +2823,7 @@ c10::intrusive_ptr<Work> ProcessGroupGloo::send(
     int tag) {
   auto& tensor = checkSingleTensor(tensors);
   auto utag = checkTag(tag);
-  auto ptr = tensor.const_data_ptr();
+  const auto* ptr = tensor.const_data_ptr();
   auto size = tensor.numel() * tensor.element_size();
 
   // Construct unbound buffer.
@@ -2844,7 +2844,7 @@ c10::intrusive_ptr<Work> ProcessGroupGloo::recv(
     int tag) {
   auto& tensor = checkSingleTensor(tensors);
   auto utag = checkTag(tag);
-  auto ptr = tensor.mutable_data_ptr();
+  auto* ptr = tensor.mutable_data_ptr();
   auto size = tensor.numel() * tensor.element_size();
 
   // Construct unbound buffer.
@@ -2864,7 +2864,7 @@ c10::intrusive_ptr<Work> ProcessGroupGloo::recvAnysource(
     int tag) {
   auto& tensor = checkSingleTensor(tensors);
   auto utag = checkTag(tag);
-  auto ptr = tensor.mutable_data_ptr();
+  auto* ptr = tensor.mutable_data_ptr();
   auto size = tensor.numel() * tensor.element_size();
 
   // Construct unbound buffer.
@@ -3000,7 +3000,7 @@ void ProcessGroupGloo::monitoredBarrier(
 
   auto waitLoop = [&](const std::map<int, c10::intrusive_ptr<Work>>& works) {
     std::vector<int> processedRanks;
-    for (auto& work : works) {
+    for (const auto& work : works) {
       bool rankResponded = false;
       try {
         // Note: if waitAllRanks=false, we recompute the time remaining in

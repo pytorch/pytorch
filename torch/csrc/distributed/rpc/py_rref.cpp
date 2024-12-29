@@ -250,8 +250,8 @@ py::object PyRRef::createRRefProxy(
     float timeoutSeconds) const {
   auto& pythonRpcHandler = PythonRpcHandler::getInstance();
   pybind11::gil_scoped_acquire ag;
-  auto& functions = pythonRpcHandler.getRRefProxyFunctions();
-  auto& ctor = functions.rrefProxyCtor_;
+  const auto& functions = pythonRpcHandler.getRRefProxyFunctions();
+  const auto& ctor = functions.rrefProxyCtor_;
   switch (type) {
     case RRefProxyType::RPC_SYNC: {
       return ctor(*this, functions.rpcSync_, timeoutSeconds);
@@ -273,7 +273,7 @@ py::object PyRRef::getRRefType(float timeout, bool blocking) {
   if (!type_.has_value()) {
     pybind11::gil_scoped_release release;
     auto& pythonRpcHandler = PythonRpcHandler::getInstance();
-    auto& typeFuncs = pythonRpcHandler.getRRefTypeFunctions();
+    const auto& typeFuncs = pythonRpcHandler.getRRefTypeFunctions();
     pybind11::gil_scoped_acquire acquire;
     type_ = isOwner() ? typeFuncs.onOwner_(*this, blocking)
                       : typeFuncs.onUser_(*this, timeout, blocking);

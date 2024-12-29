@@ -459,7 +459,7 @@ c10::intrusive_ptr<Work> ProcessGroupMPI::reduce(
   std::function<void(std::unique_ptr<WorkEntry>&)> runFunc =
       [opts, this](std::unique_ptr<WorkEntry>& entry) {
         auto data = (entry->src)[0];
-        auto dataPtr = (entry->src)[0].data_ptr();
+        auto* dataPtr = (entry->src)[0].data_ptr();
         void* sendbuf = (rank_ == opts.rootRank) ? MPI_IN_PLACE : dataPtr;
         void* recvbuf = (rank_ == opts.rootRank) ? dataPtr : nullptr;
 

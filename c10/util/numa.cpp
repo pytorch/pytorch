@@ -34,7 +34,7 @@ void NUMABind(int numa_node_id) {
       numa_node_id,
       " is unavailable");
 
-  auto bm = numa_allocate_nodemask();
+  auto* bm = numa_allocate_nodemask();
   numa_bitmask_setbit(bm, numa_node_id);
   numa_bind(bm);
   numa_bitmask_free(bm);

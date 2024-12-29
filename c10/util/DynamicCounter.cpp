@@ -14,12 +14,12 @@ using DynamicCounterBackends =
     std::vector<std::shared_ptr<detail::DynamicCounterBackendIf>>;
 
 Synchronized<DynamicCounterBackends>& dynamicCounterBackends() {
-  static auto instance = new Synchronized<DynamicCounterBackends>();
+  static auto* instance = new Synchronized<DynamicCounterBackends>();
   return *instance;
 }
 
 Synchronized<std::unordered_set<std::string>>& registeredCounters() {
-  static auto instance = new Synchronized<std::unordered_set<std::string>>();
+  static auto* instance = new Synchronized<std::unordered_set<std::string>>();
   return *instance;
 }
 } // namespace

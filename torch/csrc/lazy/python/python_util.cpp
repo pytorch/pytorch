@@ -42,7 +42,7 @@ std::vector<SourceLocation> GetPythonFrames() {
       loc.file = THPUtils_unpackString(code->co_filename);
       loc.function = THPUtils_unpackString(code->co_name);
       frames.push_back(std::move(loc));
-      auto new_frame = PyFrame_GetBack(frame);
+      auto* new_frame = PyFrame_GetBack(frame);
       Py_DECREF(frame);
       frame = new_frame;
     }

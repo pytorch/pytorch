@@ -237,7 +237,7 @@ TEST(materialize_test, copy_on_write) {
   auto new_storage = cow::lazy_clone_storage(original_storage);
   ASSERT_THAT(new_storage, testing::NotNull());
 
-  auto context = new_storage->data_ptr().cast_context<cow::COWDeleterContext>(
+  auto* context = new_storage->data_ptr().cast_context<cow::COWDeleterContext>(
       cow::cow_deleter);
   ASSERT_THAT(context, testing::NotNull());
 

@@ -103,7 +103,7 @@ std::string DebugUtil::GetTensorsGraphInfo(
       }
     }
   } else {
-    for (auto& tensor : tensors) {
+    for (const auto& tensor : tensors) {
       torch::lazy::Value ir_value = tensor->CurrentIrValue();
       if (ir_value) {
         root_nodes.push_back(ir_value.node.get());

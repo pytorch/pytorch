@@ -36,7 +36,7 @@ std::vector<int64_t> NestedTensor_get_max_size_from_size_tensor(
   if (sizes.dim() == 0) {
     return {};
   }
-  const auto sizes_ptr = sizes.data_ptr<int64_t>();
+  auto *const sizes_ptr = sizes.data_ptr<int64_t>();
   const auto sizes_size_0 = sizes.sizes()[0];
   const auto sizes_size_1 = sizes.sizes()[1];
   TORCH_INTERNAL_ASSERT(sizes_size_1 > 0);
@@ -76,7 +76,7 @@ std::vector<Tensor> chunk_nested_tensor(const Tensor& self, int64_t chunks, int6
            "Chunk for nested tensors is currently only supported for the last dimension.");
   TORCH_CHECK(chunks > 0,"chunk expects `chunks` to be greater than 0, got: ", chunks);
   TORCH_CHECK(self.is_contiguous(), "chunk expects `self` to be contiguous.");
-  auto self_impl = get_nested_tensor_impl(self);
+  auto *self_impl = get_nested_tensor_impl(self);
   const int64_t last_dim_size = get_consistent_last_dim_of_nested_tensor(*self_impl);
     TORCH_CHECK(last_dim_size % chunks == 0,
            "Chunk for nested tensors is only supported for nested tensors with trailing dimension divisible by chunks, got: ",
@@ -131,7 +131,7 @@ std::vector<Tensor> split_with_sizes_nested(
   for (const auto split_size : split_sizes) {
       total_size += split_size;
   }
-  auto self_impl = get_nested_tensor_impl(self);
+  auto *self_impl = get_nested_tensor_impl(self);
   auto self_size = get_consistent_last_dim_of_nested_tensor(*self_impl);
   TORCH_CHECK(total_size == self_size,
           "split_with_sizes expects split_sizes to sum exactly to ", self_size,

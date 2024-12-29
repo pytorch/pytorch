@@ -41,7 +41,7 @@ bool _compute_channels_last_contiguous_2d(
   switch (sizes.size()) {
     case 4: {
       T expected = 1;
-      for (auto& d : {1, 3, 2, 0}) {
+      for (const auto& d : {1, 3, 2, 0}) {
         const auto& size_d = sizes[d];
         if (TORCH_GUARD_SIZE_OBLIVIOUS(sym_ne(size_d, 1))) {
           if (TORCH_GUARD_SIZE_OBLIVIOUS(sym_ne(strides[d], expected))) {
@@ -70,7 +70,7 @@ bool _compute_channels_last_contiguous_3d(
   switch (sizes.size()) {
     case 5: {
       T expected = 1;
-      for (auto& d : {1, 4, 3, 2, 0}) {
+      for (const auto& d : {1, 4, 3, 2, 0}) {
         const auto& size_d = sizes[d];
         if (TORCH_GUARD_SIZE_OBLIVIOUS(sym_ne(size_d, 1))) {
           if (TORCH_GUARD_SIZE_OBLIVIOUS(sym_ne(strides[d], expected))) {

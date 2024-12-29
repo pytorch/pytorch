@@ -66,13 +66,13 @@ PyCodeObject* getCode();
 
 template <>
 PyCodeObject* getCode<CallType::PyModuleCall>() {
-  static auto module_call_code = []() {
+  static auto* module_call_code = []() {
     pybind11::gil_scoped_acquire gil;
-    auto res = py::module::import("torch.nn")
-                   .attr("Module")
-                   .attr("__call__")
-                   .attr("__code__")
-                   .ptr();
+    auto* res = py::module::import("torch.nn")
+                    .attr("Module")
+                    .attr("__call__")
+                    .attr("__code__")
+                    .ptr();
     TORCH_INTERNAL_ASSERT(PyCode_Check(res));
     return (PyCodeObject*)res;
   }();
@@ -81,13 +81,13 @@ PyCodeObject* getCode<CallType::PyModuleCall>() {
 
 template <>
 PyCodeObject* getCode<CallType::PyOptimizerCall>() {
-  static auto optimizer_step_code = []() {
+  static auto* optimizer_step_code = []() {
     pybind11::gil_scoped_acquire gil;
-    auto res = py::module::import("torch.optim")
-                   .attr("Optimizer")
-                   .attr("_optimizer_step_code")
-                   .attr("__code__")
-                   .ptr();
+    auto* res = py::module::import("torch.optim")
+                    .attr("Optimizer")
+                    .attr("_optimizer_step_code")
+                    .attr("__code__")
+                    .ptr();
     TORCH_INTERNAL_ASSERT(PyCode_Check(res));
     return (PyCodeObject*)res;
   }();
@@ -353,7 +353,7 @@ std::optional<TensorMetadata> ValueCache::recordIfTensor(py::handle p) {
 std::vector<std::pair<std::string, TensorMetadata>> ValueCache::unpackTensorMap(
     const py::dict& tensor_map) {
   std::vector<std::pair<std::string, TensorMetadata>> out;
-  for (auto& it : tensor_map) {
+  for (const auto& it : tensor_map) {
     auto* value = it.second.ptr();
     if (py::isinstance<py::str>(it.first) && THPVariable_CheckExact(value)) {
       out.emplace_back(
@@ -392,7 +392,7 @@ void ValueCache::store<CallType::PyModuleCall>(
 
     py::dict params = py::handle((PyObject*)key).attr("_parameters");
     std::vector<NNModuleInfo::ParameterInfo> params_;
-    for (auto& it : params) {
+    for (const auto& it : params) {
       auto* p = it.second.ptr();
       if (py::isinstance<py::str>(it.first) && THPVariable_CheckExact(p)) {
         params_.push_back(
@@ -408,7 +408,7 @@ void ValueCache::store<CallType::PyModuleCall>(
 template <>
 ExtraFields<EventType::PyCall>::args_t ValueCache::load<CallType::PyModuleCall>(
     const PyModuleCallKey& key) const {
-  auto& cache = std::get<CallType::PyModuleCall>(state_);
+  const auto& cache = std::get<CallType::PyModuleCall>(state_);
   TORCH_INTERNAL_ASSERT(cache.location_.has_value());
   const auto& cls_and_parameters = cache.cls_and_parameters_.at(key);
   const auto& cls = cls_and_parameters.cls_;
@@ -433,7 +433,7 @@ void ValueCache::store<CallType::PyOptimizerCall>(
     std::vector<OptimizerInfo::ParameterInfo> params;
 
     for (const auto& i : (py::list)self.attr("param_groups")) {
-      for (auto& param : py::cast<py::dict>(i).attr("get")("params")) {
+      for (const auto& param : py::cast<py::dict>(i).attr("get")("params")) {
         if (THPVariable_CheckExact(param.ptr())) {
           // While `self.state` is permitted to store data in an arbitrary way,
           // all generic optimizers (SGD, Adam, etc) use param as the key since
@@ -455,7 +455,7 @@ void ValueCache::store<CallType::PyOptimizerCall>(
 template <>
 ExtraFields<EventType::PyCall>::args_t ValueCache::load<
     CallType::PyOptimizerCall>(const PyOptimizerCallKey& key) const {
-  auto& cache = std::get<CallType::PyOptimizerCall>(state_);
+  const auto& cache = std::get<CallType::PyOptimizerCall>(state_);
   const auto& cls_and_parameters = cache.cls_and_parameters_.at(key);
   auto cls = cls_and_parameters.cls_;
   OptimizerInfo info{
@@ -761,7 +761,7 @@ PythonTracer::PythonTracer(torch::profiler::impl::RecordQueue* queue)
   }
 
   // Register the tracer in each thread.
-  for (const auto thread_state : interpreterThreads()) {
+  for (auto* const thread_state : interpreterThreads()) {
     PyThreadState_Swap(thread_state);
 
     thread_local_results_.emplace_back(thread_state, &value_cache_, this);
@@ -772,7 +772,7 @@ PythonTracer::PythonTracer(torch::profiler::impl::RecordQueue* queue)
     // to all the prior frames onto our event stack. (We stop at depth=128)
 
     std::vector<THPFrameObjectPtr> current_stack;
-    auto frame = PyEval_GetFrame();
+    auto* frame = PyEval_GetFrame();
     Py_XINCREF(frame);
 
     size_t depth = 0; // Make sure we can't infinite loop.
@@ -805,7 +805,7 @@ PythonTracer::PythonTracer(torch::profiler::impl::RecordQueue* queue)
 void PythonTracer::stop() {
   gil_and_restore_thread gil;
   if (active_) {
-    for (const auto thread_state : interpreterThreads()) {
+    for (auto* const thread_state : interpreterThreads()) {
       if (thread_state->c_profilefunc == &PythonTracer::pyProfileFn) {
         PyThreadState_Swap(thread_state);
         PyEval_SetProfile(nullptr, nullptr);
@@ -828,7 +828,7 @@ void PythonTracer::restart() {
     return;
   }
   int cur_thread = 0;
-  for (const auto thread_state : interpreterThreads()) {
+  for (auto* const thread_state : interpreterThreads()) {
     if (thread_state->c_profilefunc == nullptr) {
       auto* ctx = thread_local_results_[cur_thread].ctx_;
       PyThreadState_Swap(thread_state);
@@ -879,7 +879,7 @@ void PythonTracer::recordPyCall(
           frame, self.get(), back.get());
     } else {
       auto back = THPFrameObjectPtr(PyFrame_GetBack(frame));
-      auto f_back = (back.get() != nullptr) ? back.get() : frame;
+      auto* f_back = (back.get() != nullptr) ? back.get() : frame;
       return tls.intern<CallType::PyCall, E>(no_ephemeral_t(), frame, f_back);
     }
   }();
@@ -893,7 +893,7 @@ void PythonTracer::recordCCall(
     PyFrameObject* frame,
     PyObject* arg) {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(PyCFunction_Check(arg));
-  auto fn = reinterpret_cast<PyCFunctionObject*>(arg);
+  auto* fn = reinterpret_cast<PyCFunctionObject*>(arg);
 
   // NB: For C calls a new frame is not created, so we use `frame` rather than
   //     `frame->f_back`.

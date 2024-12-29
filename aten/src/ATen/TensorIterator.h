@@ -392,7 +392,7 @@ struct TORCH_API TensorIteratorBase : public impl::MetaBase {
   /// value from tensor_base.
   template <typename T>
   T original_scalar_value(int64_t arg) {
-    auto& original_tensor_base = operands_[arg].original_tensor_base();
+    const auto& original_tensor_base = operands_[arg].original_tensor_base();
     if (original_tensor_base.defined()) {
       TORCH_INTERNAL_ASSERT(
           original_tensor_base.scalar_type() != common_dtype());

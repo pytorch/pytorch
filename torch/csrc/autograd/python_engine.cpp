@@ -93,7 +93,7 @@ void PythonEngine::thread_init(
     // TODO: call disarm once PyThreadState_Clear can safely be called from
     // finalize NOTE: deploy.cpp calls `PyInterpreterState_Delete` to destruct
     // PyThreadState, so avoid use-after-free here.
-    auto ptr = gil.release();
+    auto* ptr = gil.release();
     operator delete(ptr);
   }
 #endif
@@ -104,7 +104,7 @@ void PythonEngine::thread_on_exception(
     const std::shared_ptr<Node>& fn,
     std::exception& e) {
   // See Note [ Persisting PyErr state across autograd engine threads ]
-  auto python_err = dynamic_cast<python_error*>(&e);
+  auto* python_err = dynamic_cast<python_error*>(&e);
   if (python_err) {
     python_err->persist();
   }

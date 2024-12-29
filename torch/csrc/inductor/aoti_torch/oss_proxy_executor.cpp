@@ -22,7 +22,7 @@ void OSSProxyExecutor::prefill_stack_with_static_arguments(
 
   TORCH_CHECK(serialized_arg.size() == 1);
   std::string serialized_arg_type = serialized_arg.begin().key();
-  auto& serialized_arg_val = serialized_arg.begin().value();
+  const auto& serialized_arg_val = serialized_arg.begin().value();
 
   switch (schema_arg_type->kind()) {
     case c10::TypeKind::TensorType: {
@@ -348,7 +348,7 @@ void OSSProxyExecutor::get_input_info_from_serialized(
   int index = 0;
   for (const auto& named_argument : serialized_node["inputs"]) {
     const auto& arg = named_argument["arg"];
-    auto& schema_arg = schema_args[index];
+    const auto& schema_arg = schema_args[index];
 
     prefill_stack_with_static_arguments(
         index++, schema_arg.real_type(), arg, op_kernel);
@@ -374,9 +374,9 @@ void OSSProxyExecutor::get_output_info_from_serialized(
   for (const auto& serialized_output : serialized_node["outputs"]) {
     TORCH_CHECK(serialized_output.size() == 1);
     std::string serialized_output_type = serialized_output.begin().key();
-    auto& serialized_output_val = serialized_output.begin().value();
+    const auto& serialized_output_val = serialized_output.begin().value();
 
-    auto& schema_return = schema_returns[output_index];
+    const auto& schema_return = schema_returns[output_index];
     const at::TypePtr& schema_return_type = schema_return.real_type();
 
     switch (schema_return_type->kind()) {

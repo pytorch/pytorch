@@ -81,8 +81,8 @@ class DefaultMobileCPUAllocator final : public at::Allocator {
     }
     // TODO: enable with better TLS support on mobile
     // profiledCPUMemoryReporter().Delete(pointer);
-    auto allocator_ptr = GetThreadLocalCachingAllocator();
-    auto profiling_allocator_ptr = GetThreadLocalProfilingAllocator();
+    auto* allocator_ptr = GetThreadLocalCachingAllocator();
+    auto* profiling_allocator_ptr = GetThreadLocalProfilingAllocator();
     if (allocator_ptr != nullptr) {
       allocator_ptr->free(pointer);
     } else if (profiling_allocator_ptr != nullptr) {
@@ -93,7 +93,7 @@ class DefaultMobileCPUAllocator final : public at::Allocator {
       // caching allocator is not enabled.
       // NOLINTNEXTLINE(clang-analyzer-unix.Malloc)
       CPUCachingAllocator::record_free(pointer);
-      auto allocation_planner = GetThreadLocalAllocationPlanner();
+      auto* allocation_planner = GetThreadLocalAllocationPlanner();
       if (allocation_planner != nullptr) {
         allocation_planner->record_free(pointer);
       }
@@ -112,8 +112,8 @@ class DefaultMobileCPUAllocator final : public at::Allocator {
 
     auto alloc_size = PreGuardBytes + nbytes + PostGuardBytes;
     void* data = nullptr;
-    auto allocator_ptr = GetThreadLocalCachingAllocator();
-    auto profiling_allocator_ptr = GetThreadLocalProfilingAllocator();
+    auto* allocator_ptr = GetThreadLocalCachingAllocator();
+    auto* profiling_allocator_ptr = GetThreadLocalProfilingAllocator();
     if (allocator_ptr != nullptr) {
       data = allocator_ptr->allocate(alloc_size);
     } else if (profiling_allocator_ptr != nullptr) {
@@ -125,7 +125,7 @@ class DefaultMobileCPUAllocator final : public at::Allocator {
         profiledCPUMemoryReporter().OutOfMemory(alloc_size);
         throw e;
       }
-      auto allocation_planner = GetThreadLocalAllocationPlanner();
+      auto* allocation_planner = GetThreadLocalAllocationPlanner();
       if (allocation_planner != nullptr) {
         allocation_planner->record_allocation(alloc_size, data);
       }

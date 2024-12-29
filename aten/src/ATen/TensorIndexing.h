@@ -346,9 +346,9 @@ inline int64_t count_specified_dimensions(
     const ArrayRef<TensorIndex>& indices) {
   // Count the number of indexed dimensions (everything but ellipsis and None)
   int64_t count = 0;
-  for (auto& obj : indices) {
+  for (const auto& obj : indices) {
     if (obj.is_tensor()) {
-      auto& tensor = obj.tensor();
+      const auto& tensor = obj.tensor();
       if (tensor.scalar_type() == kByte || tensor.scalar_type() == kBool) {
         count += tensor.dim();
       } else {
@@ -536,7 +536,7 @@ inline Tensor applySlicing(
 
   Tensor result = self;
   for (const auto i : c10::irange(indices.size())) {
-    auto& obj = indices[i];
+    const auto& obj = indices[i];
     // See NOTE [nested tensor size for indexing]
     std::optional<SymIntArrayRef> result_sizes = result.is_nested()
         ? std::optional<SymIntArrayRef>(std::nullopt)

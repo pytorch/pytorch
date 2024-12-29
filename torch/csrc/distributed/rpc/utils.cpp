@@ -506,7 +506,7 @@ std::vector<at::IValue> readWrappedPayload(
       payload.size(),
       " but additional payload size is ",
       additionalPayloadSize);
-  auto wrappedPayloadBegin =
+  const auto* wrappedPayloadBegin =
       static_cast<const char*>(message.payload().data()) + payload.size() -
       additionalPayloadSize;
   std::vector<torch::Tensor> tensorTable;
@@ -525,8 +525,8 @@ void populateRemoteProfiledEvents(
     const ProfilerConfig& profilingConfig,
     const std::vector<std::vector<LegacyEvent>>& eventLists) {
   // Gather all events into a vector
-  for (auto& l : eventLists) {
-    for (auto& e : l) {
+  for (const auto& l : eventLists) {
+    for (const auto& e : l) {
       profiledEvents.push_back(e);
     }
   }

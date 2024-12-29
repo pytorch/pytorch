@@ -456,7 +456,7 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
   _C_m.def(
       "_register_py_class_for_device",
       [](const std::string& device, py::object python_type_class) {
-        auto cls = python_type_class.ptr();
+        auto* cls = python_type_class.ptr();
         registerPythonTensorClass(device, cls);
       });
   _C_m.def("_set_autograd_fallback_mode", [](const std::string& mode) {

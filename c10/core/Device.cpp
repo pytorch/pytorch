@@ -41,7 +41,7 @@ DeviceType parse_type(const std::string& device_string) {
         "'mkldnn' is no longer used as device type. So torch.device('mkldnn') will be "
         "deprecated and removed in the future. Please use other valid device types instead.");
   }
-  auto device = std::find_if(
+  const auto* device = std::find_if(
       types.begin(),
       types.end(),
       [&device_string](const std::pair<const char*, DeviceType>& p) {

@@ -346,14 +346,14 @@ int64_t get_numel_from_nested_size_tensor(const at::Tensor& tensor) {
       static_cast<uint64_t>(std::numeric_limits<int64_t>::max()),
       static_cast<uint64_t>(std::numeric_limits<size_t>::max()));
 
-  const int64_t* sizes_ptr = tensor.const_data_ptr<int64_t>();
+  const auto *sizes_ptr = tensor.const_data_ptr<int64_t>();
   const auto nt_dim = tensor.size(1);
   uint64_t num_elements{0};
 
   for (const auto i : c10::irange(tensor.size(0))) {
     uint64_t n = 1;
-    const auto start{sizes_ptr + i * nt_dim};
-    const auto end{start + nt_dim};
+    const auto *start{sizes_ptr + i * nt_dim};
+    const auto *end{start + nt_dim};
     bool overflows = c10::safe_multiplies_u64(start, end, &n);
     num_elements += n;
     overflows |= (num_elements > numel_max);

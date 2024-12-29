@@ -121,7 +121,7 @@ namespace {
 
 // Taken from codegened version
 Tensor _fw_primal(c10::DispatchKeySet ks, const Tensor& self, int64_t level) {
-  auto& self_ = unpack(self, "self", 0);
+  const auto& self_ = unpack(self, "self", 0);
   std::shared_ptr<Identity> grad_fn;
   if (compute_requires_grad(self)) {
     grad_fn = std::make_shared<Identity>();
@@ -164,8 +164,8 @@ Tensor _make_dual(
       "already has a forward gradient at the same level ",
       level,
       " is not supported.");
-  auto& primal_ = unpack(primal, "primal", 0);
-  auto& tangent_ = unpack(tangent, "tangent", 0);
+  const auto& primal_ = unpack(primal, "primal", 0);
+  const auto& tangent_ = unpack(tangent, "tangent", 0);
   std::shared_ptr<ViewBackward0> grad_fn;
   if (compute_requires_grad(primal_)) {
     grad_fn = std::make_shared<ViewBackward0>();
@@ -197,7 +197,7 @@ Tensor& copy_(
   // TODO: once copy is exposed in Declarations.yaml we may be able to bind
   // it automatically
   auto& self_ = unpack(self, "self", 0);
-  auto& src_ = unpack(src, "src", 1);
+  const auto& src_ = unpack(src, "src", 1);
   std::shared_ptr<CopyBackwards> grad_fn;
   auto requires_grad = compute_requires_grad(self, src);
   requires_grad &= isDifferentiableType(self.scalar_type());
@@ -243,7 +243,7 @@ const Tensor& resize_(
     const Tensor& self,
     SymIntArrayRef size,
     std::optional<MemoryFormat> optional_memory_format) {
-  auto& self_ = unpack(self, "self", 0);
+  const auto& self_ = unpack(self, "self", 0);
   if (self.requires_grad()) {
     TORCH_CHECK(false, "cannot resize variables that require grad");
   }
@@ -265,8 +265,8 @@ const Tensor& resize_as_(
     const Tensor& self,
     const Tensor& the_template,
     std::optional<MemoryFormat> optional_memory_format) {
-  auto& self_ = unpack(self, "self", 0);
-  auto& the_template_ = unpack(the_template, "the_template", 1);
+  const auto& self_ = unpack(self, "self", 0);
+  const auto& the_template_ = unpack(the_template, "the_template", 1);
   if (self.requires_grad()) {
     TORCH_CHECK(false, "cannot resize variables that require grad");
   }
@@ -288,7 +288,7 @@ const Tensor& resize_as_(
 }
 
 Tensor detach(c10::DispatchKeySet ks, const Tensor& self) {
-  auto& self_ = unpack(self, "self", 0);
+  const auto& self_ = unpack(self, "self", 0);
   RECORD_FUNCTION("detach", std::vector<c10::IValue>({self}));
   auto result = ([&]() {
     at::AutoDispatchBelowAutograd guard;
@@ -321,7 +321,7 @@ Tensor& detach_(c10::DispatchKeySet ks, Tensor& self) {
   // grad_fn and output_nr; there's other metadata like debug name
   // and hooks which aren't cleared.  Is this function supposed to
   // clear those too? I'm not too sure, so I'm leaving it be for now.
-  auto autograd_meta = impl::materialize_autograd_meta(self);
+  auto* autograd_meta = impl::materialize_autograd_meta(self);
   autograd_meta->set_requires_grad(false, self.unsafeGetTensorImpl());
   autograd_meta->grad_fn_.reset();
   autograd_meta->output_nr_ = 0;

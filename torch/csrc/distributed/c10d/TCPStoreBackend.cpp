@@ -372,7 +372,7 @@ void TCPStoreMasterDaemon::addHandler(int socket) {
 
   auto it = tcpStore_.find(key);
   if (it != tcpStore_.end()) {
-    auto buf = reinterpret_cast<const char*>(it->second.data());
+    const auto* buf = reinterpret_cast<const char*>(it->second.data());
     auto len = it->second.size();
     addVal += std::stoll(std::string(buf, len));
   }

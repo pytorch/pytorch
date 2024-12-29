@@ -815,7 +815,7 @@ using result_activity_t = std::pair<Result*, libkineto::GenericTraceActivity*>;
 std::vector<result_activity_t> torch_events;
 
 for (const auto idx : c10::irange(cpu_trace->activities.size())) {
-  auto& profiler_result = results[idx];
+  const auto& profiler_result = results[idx];
   auto& activity = cpu_trace->activities[idx];
 
   // add information about an associated forward op, if a sequence number
@@ -936,7 +936,7 @@ class TransferEvents {
       std::vector<std::shared_ptr<Result>>& results,
       trace_ptr_t& trace)
       : results_{results} {
-    auto* trace_activities_ptr = trace->get()->activities();
+    const auto* trace_activities_ptr = trace->get()->activities();
     TORCH_INTERNAL_ASSERT(trace_activities_ptr != nullptr);
     trace_activities_ = *trace_activities_ptr;
     reassociate();

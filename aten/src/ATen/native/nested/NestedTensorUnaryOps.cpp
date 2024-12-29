@@ -39,7 +39,7 @@ DEFINE_TORCH_NESTED_TENSOR_UNARY_OP(tanh)
 #undef DEFINE_TORCH_NESTED_TENSOR_UNARY_OP
 
 Tensor& NestedTensor_abs_(Tensor& self) {
-  auto self_ptr = get_nested_tensor_impl(self);
+  auto *self_ptr = get_nested_tensor_impl(self);
   check_numel_equals_buffer_size(self_ptr);
   auto buffer = self_ptr->get_buffer();
   at::abs_(buffer);
@@ -51,8 +51,8 @@ Tensor NestedTensor_where(const Tensor& condition, const Tensor& self, const Ten
   TORCH_CHECK(other.is_nested(), "other must be nested");
   TORCH_CHECK(!self.is_nested(), "self must not be nested");
 
-  auto condition_ptr = get_nested_tensor_impl(condition);
-  auto other_ptr = get_nested_tensor_impl(other);
+  auto *condition_ptr = get_nested_tensor_impl(condition);
+  auto *other_ptr = get_nested_tensor_impl(other);
 
   int64_t ntensors = condition_ptr->size(0);
   TORCH_CHECK(other_ptr->size(0) == ntensors, "condition and other must have the same number of tensors");
@@ -90,9 +90,9 @@ Tensor& NestedTensor_where_out(const Tensor& condition, const Tensor& self, cons
   TORCH_CHECK(!self.is_nested(), "self must not be nested");
   TORCH_CHECK(out.is_nested(), "out must be nested");
 
-  auto condition_ptr = get_nested_tensor_impl(condition);
-  auto other_ptr = get_nested_tensor_impl(other);
-  auto out_ptr = get_nested_tensor_impl(out);
+  auto *condition_ptr = get_nested_tensor_impl(condition);
+  auto *other_ptr = get_nested_tensor_impl(other);
+  auto *out_ptr = get_nested_tensor_impl(out);
 
   int64_t ntensors = condition_ptr->size(0);
   TORCH_CHECK(other_ptr->size(0) == ntensors, "condition and other must have the same number of tensors");
@@ -116,7 +116,7 @@ Tensor& NestedTensor_where_out(const Tensor& condition, const Tensor& self, cons
 }
 
 Tensor& NestedTensor_sgn_(Tensor& self) {
-  auto self_ptr = get_nested_tensor_impl(self);
+  auto *self_ptr = get_nested_tensor_impl(self);
   check_numel_equals_buffer_size(self_ptr);
   auto buffer = self_ptr->get_buffer();
   buffer.sgn_();
@@ -124,7 +124,7 @@ Tensor& NestedTensor_sgn_(Tensor& self) {
 }
 
 Tensor& NestedTensor_logical_not_(Tensor& self){
-  auto self_ptr = get_nested_tensor_impl(self);
+  auto *self_ptr = get_nested_tensor_impl(self);
   check_numel_equals_buffer_size(self_ptr);
   auto buffer = self_ptr->get_buffer();
   buffer.logical_not_();
@@ -133,7 +133,7 @@ Tensor& NestedTensor_logical_not_(Tensor& self){
 
 
 Tensor& NestedTensor_relu_(Tensor& self) {
-  auto self_ptr = get_nested_tensor_impl(self);
+  auto *self_ptr = get_nested_tensor_impl(self);
   check_numel_equals_buffer_size(self_ptr);
   auto buffer = self_ptr->get_buffer();
   at::relu_(buffer);
@@ -141,7 +141,7 @@ Tensor& NestedTensor_relu_(Tensor& self) {
 }
 
 Tensor& NestedTensor_gelu_(Tensor& self, std::string_view approximate) {
-  auto self_ptr = get_nested_tensor_impl(self);
+  auto *self_ptr = get_nested_tensor_impl(self);
   check_numel_equals_buffer_size(self_ptr);
   auto buffer = self_ptr->get_buffer();
   at::gelu_(buffer, approximate);
@@ -157,7 +157,7 @@ Tensor NestedTensor_gelu(const Tensor& self, std::string_view approximate) {
 }
 
 Tensor& NestedTensor_tanh_(Tensor& self) {
-  auto self_ptr = get_nested_tensor_impl(self);
+  auto *self_ptr = get_nested_tensor_impl(self);
   check_numel_equals_buffer_size(self_ptr);
   auto buffer = self_ptr->get_buffer();
   at::tanh_(buffer);
@@ -165,7 +165,7 @@ Tensor& NestedTensor_tanh_(Tensor& self) {
 }
 
 Tensor& NestedTensor_neg_(Tensor& self) {
-  auto self_ptr = get_nested_tensor_impl(self);
+  auto *self_ptr = get_nested_tensor_impl(self);
   check_numel_equals_buffer_size(self_ptr);
   auto buffer = self_ptr->get_buffer();
   at::neg_(buffer);
@@ -179,7 +179,7 @@ Tensor& zero_nested_(Tensor& self) {
 }
 
 Tensor& NestedTensor_silu_(Tensor& self){
-  auto self_ptr = get_nested_tensor_impl(self);
+  auto *self_ptr = get_nested_tensor_impl(self);
   check_numel_equals_buffer_size(self_ptr);
   auto buffer = self_ptr->get_buffer();
   at::silu_(buffer);

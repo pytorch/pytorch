@@ -17,10 +17,10 @@ bool type_caster<c10::SymInt>::load(py::handle src, bool) {
     return true;
   }
 
-  auto raw_obj = src.ptr();
+  auto* raw_obj = src.ptr();
 
   if (THPVariable_Check(raw_obj)) {
-    auto& var = THPVariable_Unpack(raw_obj);
+    const auto& var = THPVariable_Unpack(raw_obj);
     if (var.numel() == 1 &&
         at::isIntegralType(var.dtype().toScalarType(), /*include_bool*/ true)) {
       auto scalar = var.item();
@@ -69,7 +69,7 @@ bool type_caster<c10::SymFloat>::load(py::handle src, bool) {
     return true;
   }
 
-  auto raw_obj = src.ptr();
+  auto* raw_obj = src.ptr();
   if (THPUtils_checkDouble(raw_obj)) {
     value = c10::SymFloat{THPUtils_unpackDouble(raw_obj)};
     return true;
@@ -99,7 +99,7 @@ bool type_caster<c10::SymBool>::load(py::handle src, bool) {
     return true;
   }
 
-  auto raw_obj = src.ptr();
+  auto* raw_obj = src.ptr();
   if (THPUtils_checkBool(raw_obj)) {
     value = c10::SymBool{THPUtils_unpackBool(raw_obj)};
     return true;

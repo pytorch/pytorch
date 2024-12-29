@@ -179,8 +179,8 @@ static void batchedTensorInplaceForLoopFallback(const c10::OperatorHandle& op, t
   // of the arguments onto `stack`, and call `op`.
   for (const auto linear_idx : c10::irange(num_batches)) {
     auto index = computeIndex(linear_idx, batch_sizes);
-    auto batched_tensor_inputs_pos_iter = batched_tensor_inputs_position.begin();
-    auto input_physical_views_iter = input_physical_views.begin();
+    auto *batched_tensor_inputs_pos_iter = batched_tensor_inputs_position.begin();
+    const auto *input_physical_views_iter = input_physical_views.begin();
     for (const auto arg_idx : c10::irange(num_arguments)) {
       // We assume that torch::jit::Stack is backed by vector<IValue> for
       // simplicity. When that is not the case, this code should be updated.
@@ -322,8 +322,8 @@ void batchedTensorForLoopFallback(const c10::OperatorHandle& op, torch::jit::Sta
 
   for (const auto linear_idx : c10::irange(num_batches)) {
     auto index = computeIndex(linear_idx, batch_sizes);
-    auto batched_tensor_inputs_pos_iter = batched_tensor_inputs_position.begin();
-    auto input_physical_views_iter = input_physical_views.begin();
+    auto *batched_tensor_inputs_pos_iter = batched_tensor_inputs_position.begin();
+    const auto *input_physical_views_iter = input_physical_views.begin();
     for (const auto arg_idx : c10::irange(num_arguments)) {
       // We assume that torch::jit::Stack is backed by vector<IValue> for
       // simplicity. When that is not the case, this code should be updated.

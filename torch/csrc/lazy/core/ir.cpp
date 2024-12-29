@@ -77,7 +77,7 @@ Node::Node(
       std::make_move_iterator(shapes.begin()),
       std::make_move_iterator(shapes.end()));
 
-  for (auto& operand : operands) {
+  for (const auto& operand : operands) {
     // Ideally, optional operands should be filtered by the leaf node classes,
     // but it's just much easier to do it here.
     // TODO(alanwaketan): Find a way to move the below logic to the leaf node

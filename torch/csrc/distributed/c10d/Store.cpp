@@ -48,7 +48,7 @@ std::vector<std::vector<uint8_t>> Store::multiGet(
     const std::vector<std::string>& keys) {
   std::vector<std::vector<uint8_t>> result;
   result.reserve(keys.size());
-  for (auto& key : keys) {
+  for (const auto& key : keys) {
     result.emplace_back(get(key));
   }
   return result;

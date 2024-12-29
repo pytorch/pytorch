@@ -497,7 +497,7 @@ PyObject* THCPModule_cudaSleep(PyObject* _unused, PyObject* cycles) {
 static PyGILState_STATE cudaMutexGILState;
 
 PyObject* THCPModule_cudaLockMutex(PyObject* module, PyObject* noargs) {
-  auto mutex = c10::cuda::getFreeMutex();
+  auto* mutex = c10::cuda::getFreeMutex();
   // This has to be a busy loop because we **absolutely need to** hold the GIL
   // or it's a recipe for a deadlock otherwise (if we let other Python threads
   // run while we have the cudaMutex, but not the GIL, they might try to e.g.
@@ -517,7 +517,7 @@ PyObject* THCPModule_cudaLockMutex(PyObject* module, PyObject* noargs) {
 }
 
 PyObject* THCPModule_cudaUnlockMutex(PyObject* module, PyObject* noargs) {
-  auto mutex = c10::cuda::getFreeMutex();
+  auto* mutex = c10::cuda::getFreeMutex();
   PyGILState_Release(cudaMutexGILState);
   mutex->unlock();
   Py_RETURN_NONE;
@@ -714,7 +714,7 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* noargs) {
   auto add_frame_key = [&](const py::dict& d,
                            const std::shared_ptr<c10::GatheredContext>& ctx) {
     if (ctx) {
-      auto sc = getFromContext(ctx);
+      auto* sc = getFromContext(ctx);
       to_gather_frames.emplace_back(sc);
       to_gather_dest.emplace_back(d);
     } else {
@@ -812,7 +812,7 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* noargs) {
       py::dict trace_entry;
       if (te.context_) {
         // without further compression frames can get really large on dump
-        auto sc = getFromContext(te.context_);
+        auto* sc = getFromContext(te.context_);
         to_gather_frames.emplace_back(sc);
         to_gather_dest.emplace_back(trace_entry);
       }
@@ -1097,10 +1097,10 @@ void removeStorageDeleterFns(
     const std::vector<c10::StorageImpl*>& stale_live_storages,
     std::unordered_set<void*> definitely_stale_pointers) {
   for (c10::StorageImpl* stale_storage : stale_live_storages) {
-    auto ptr = stale_storage->data_ptr().get();
+    auto* ptr = stale_storage->data_ptr().get();
     auto allocated_pointer = definitely_stale_pointers.find(ptr);
     TORCH_CHECK(allocated_pointer != definitely_stale_pointers.end());
-    auto t = c10::cuda::CUDACachingAllocator::get();
+    auto* t = c10::cuda::CUDACachingAllocator::get();
     bool succeeded = stale_storage->mutable_data_ptr().compare_exchange_deleter(
         t->raw_deleter(), &c10::detail::deleteNothing);
 
@@ -1121,7 +1121,7 @@ void addStorageDeleterFns(
   for (auto& data_ptr : delta.dataptrs_allocd) {
     auto storage_pair = storages.find(data_ptr.get());
     if (storage_pair != storages.end()) {
-      auto ctx = storage_pair->second->data_ptr().get_context();
+      auto* ctx = storage_pair->second->data_ptr().get_context();
       TORCH_CHECK(ctx == nullptr, " Not expecting deleter function");
       storage_pair->second->set_data_ptr_noswap(std::move(data_ptr));
     } else {
@@ -1261,8 +1261,8 @@ static void registerCudaPluggableAllocator(PyObject* module) {
   m.def("_free_And_Remove_DeleterFn", [](size_t storage_impl_ptr) {
     // NOLINTNEXTLINE(performance-no-int-to-ptr)
     c10::StorageImpl* storage_impl = (c10::StorageImpl*)storage_impl_ptr;
-    auto alloc = c10::cuda::CUDACachingAllocator::get();
-    auto data_ptr = storage_impl->data_ptr().get();
+    auto* alloc = c10::cuda::CUDACachingAllocator::get();
+    auto* data_ptr = storage_impl->data_ptr().get();
     bool succeeded = storage_impl->mutable_data_ptr().compare_exchange_deleter(
         alloc->raw_deleter(), c10::detail::deleteNothing);
     TORCH_CHECK(succeeded, "Expected standard deleter");
@@ -1286,7 +1286,7 @@ static void registerCudaPluggableAllocator(PyObject* module) {
   m.def("_has_Standard_Deleter", [](size_t storage_impl_ptr) {
     // NOLINTNEXTLINE(performance-no-int-to-ptr)
     c10::StorageImpl* storage_impl = (c10::StorageImpl*)storage_impl_ptr;
-    auto alloc = c10::cuda::CUDACachingAllocator::get();
+    auto* alloc = c10::cuda::CUDACachingAllocator::get();
     return (storage_impl->data_ptr().get_deleter() == alloc->raw_deleter());
   });
 
@@ -1312,7 +1312,7 @@ static void registerCudaPluggableAllocator(PyObject* module) {
   m.def(
       "_construct_CUDA_Tensor_From_Storage_And_Metadata",
       [](py::dict& metadata, c10::Storage s) {
-        auto dtype_arg = metadata["dtype"].ptr();
+        auto* dtype_arg = metadata["dtype"].ptr();
         auto meta = scalarTypeToTypeMeta(toScalarType(dtype_arg));
 
         constexpr c10::DispatchKeySet cuda_dks(c10::DispatchKey::CUDA);
@@ -1364,7 +1364,7 @@ static void registerCudaPluggableAllocator(PyObject* module) {
          const py::set& expected_live_allocations) {
         std::unordered_set<void*> allocations;
         allocations.reserve(expected_live_allocations.size());
-        for (auto& elem : expected_live_allocations) {
+        for (const auto& elem : expected_live_allocations) {
           // NOLINTNEXTLINE(performance-no-int-to-ptr)
           allocations.insert(reinterpret_cast<void*>(py::cast<size_t>(elem)));
         }
@@ -1465,9 +1465,10 @@ static PyObject* THCPModule_initExtension(PyObject* self, PyObject* noargs) {
   };
 
   auto num_gpus = c10::cuda::device_count();
-  auto default_cuda_generators = PyTuple_New(static_cast<Py_ssize_t>(num_gpus));
+  auto* default_cuda_generators =
+      PyTuple_New(static_cast<Py_ssize_t>(num_gpus));
   for (const auto i : c10::irange(num_gpus)) {
-    auto cast_gen = (THPGenerator*)THPGenerator_initDefaultGenerator(
+    auto* cast_gen = (THPGenerator*)THPGenerator_initDefaultGenerator(
         at::cuda::detail::getDefaultCUDAGenerator(i));
     // This reference is meant to be given away, so no need to incref here.
     PyTuple_SetItem(default_cuda_generators, i, (PyObject*)cast_gen);

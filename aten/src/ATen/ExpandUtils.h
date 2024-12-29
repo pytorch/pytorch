@@ -76,7 +76,7 @@ inline bool are_expandable(IntArrayRef shape1, IntArrayRef shape2) {
 inline void check_defined(
     std::initializer_list<std::reference_wrapper<const Tensor>> tensors,
     const char* api_name) {
-  for (auto& t : tensors) {
+  for (const auto& t : tensors) {
     if (!t.get().defined()) {
       TORCH_CHECK(false, api_name, "(...) called with an undefined Tensor");
     }

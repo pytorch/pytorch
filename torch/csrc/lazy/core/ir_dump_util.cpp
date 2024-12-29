@@ -86,7 +86,7 @@ std::optional<AttrTag> ParseAttrTag(
 
 NodeIdMap GenerateIdMap(c10::ArrayRef<const Node*> post_order) {
   NodeIdMap id_map;
-  for (auto node : post_order) {
+  for (const auto* node : post_order) {
     TORCH_CHECK(id_map.emplace(node, id_map.size()).second, node->ToString());
   }
   return id_map;
@@ -163,7 +163,7 @@ std::string GenerateTextNodeSpec(const Node* node, const NodeIdMap& id_map) {
   std::stringstream ss;
   ss << node->shapes() << " " << node->op() << "(";
   size_t count = 0;
-  for (auto& output : node->operands()) {
+  for (const auto& output : node->operands()) {
     if (count > 0) {
       ss << ", ";
     }
@@ -194,7 +194,7 @@ std::string DumpUtil::PostOrderToDot(
   NodeIdMap id_map = GenerateIdMap(post_order);
   std::stringstream ss;
   ss << "digraph G {\n";
-  for (auto node : post_order) {
+  for (const auto* node : post_order) {
     ss << "  node" << id_map.at(node) << " ["
        << GenerateDotNodeSpec(node, roots_ids) << "]\n";
   }
@@ -234,7 +234,7 @@ std::string DumpUtil::PostOrderToText(
   NodeIdMap id_map = GenerateIdMap(post_order);
   std::stringstream ss;
   ss << "IR {\n";
-  for (auto node : post_order) {
+  for (const auto* node : post_order) {
     auto opt_root_id = GetRootNodeId(node, roots_ids);
     ss << "  %" << id_map.at(node) << " = "
        << GenerateTextNodeSpec(node, id_map);
@@ -252,7 +252,7 @@ std::string DumpUtil::ToBackend(
     c10::ArrayRef<Value> values,
     const BackendDevice& device) {
   auto lowering_ctx = LoweringContext::Create("IrToBackend", device);
-  for (auto& ir_value : values) {
+  for (const auto& ir_value : values) {
     lowering_ctx->AddResult(ir_value);
   }
   auto computation = lowering_ctx->Build();

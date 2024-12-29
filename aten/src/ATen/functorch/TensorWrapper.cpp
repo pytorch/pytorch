@@ -70,7 +70,7 @@ static Tensor unsafeMakeTensorWrapper(
     int64_t level,
     bool is_immutable,
     const std::shared_ptr<bool>& life_handle) {
-  auto wrapped = maybeGetTensorWrapper(tensor);
+  auto *wrapped = maybeGetTensorWrapper(tensor);
   if (wrapped) {
     TORCH_INTERNAL_ASSERT(wrapped->level() < level);
   }

@@ -127,7 +127,7 @@ FatalSignalHandler::signal_handler FatalSignalHandler::kSignalHandlers[] = {
     {nullptr, 0, {}}};
 
 struct sigaction* FatalSignalHandler::getPreviousSigaction(int signum) {
-  for (auto handler = kSignalHandlers; handler->name != nullptr; handler++) {
+  for (auto* handler = kSignalHandlers; handler->name != nullptr; handler++) {
     if (handler->signum == signum) {
       return &handler->previous;
     }
@@ -136,7 +136,7 @@ struct sigaction* FatalSignalHandler::getPreviousSigaction(int signum) {
 }
 
 const char* FatalSignalHandler::getSignalName(int signum) {
-  for (auto handler = kSignalHandlers; handler->name != nullptr; handler++) {
+  for (auto* handler = kSignalHandlers; handler->name != nullptr; handler++) {
     if (handler->signum == signum) {
       return handler->name;
     }

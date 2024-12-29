@@ -72,7 +72,7 @@ Generator createCUDAGenerator(DeviceIndex device_index) {
   }
   TORCH_CHECK(idx >= 0 && idx < num_gpus, "The device_index is invalid.");
   auto gen = make_generator<CUDAGeneratorImpl>(idx);
-  auto cuda_gen = check_generator<CUDAGeneratorImpl>(gen);
+  auto *cuda_gen = check_generator<CUDAGeneratorImpl>(gen);
   cuda_gen->set_current_seed(default_rng_seed_val);
   cuda_gen->set_philox_offset_per_thread(0);
   return gen;
@@ -329,7 +329,7 @@ c10::intrusive_ptr<c10::TensorImpl> CUDAGeneratorImpl::get_state() const {
   static const size_t total_size = seed_size + offset_size;
 
   auto state_tensor = at::detail::empty_cpu({(int64_t)total_size}, ScalarType::Byte, std::nullopt, std::nullopt, std::nullopt, std::nullopt);
-  auto rng_state = state_tensor.data_ptr<uint8_t>();
+  auto *rng_state = state_tensor.data_ptr<uint8_t>();
   auto current_seed = this->current_seed();
   auto offset = static_cast<int64_t>(this->philox_offset_per_thread()); // Note that old THCGeneratorState had offset as std::atomic<int64_t>
   memcpy(rng_state, &current_seed, seed_size);
@@ -362,7 +362,7 @@ void CUDAGeneratorImpl::set_state(const c10::TensorImpl& new_state) {
   }
 
   uint64_t input_seed = 0;
-  auto new_rng_state = new_state.data_dtype_initialized<uint8_t>();
+  const auto *new_rng_state = new_state.data_dtype_initialized<uint8_t>();
   memcpy(&input_seed, new_rng_state, seed_size);
   this->set_current_seed(input_seed);
   int64_t philox_offset = 0;
@@ -500,7 +500,7 @@ std::shared_ptr<CUDAGeneratorImpl> CUDAGeneratorImpl::clone() const {
  */
 CUDAGeneratorImpl* CUDAGeneratorImpl::clone_impl() const {
   at::cuda::assertNotCapturing("Cannot call CUDAGeneratorImpl::clone_impl");
-  auto gen = new CUDAGeneratorImpl(this->device().index(), state_->clone());
+  auto *gen = new CUDAGeneratorImpl(this->device().index(), state_->clone());
   return gen;
 }
 

@@ -329,7 +329,7 @@ void ClassType::checkForwardHookSchema(
 }
 
 torch::jit::Function* ClassType::findMethod(const std::string& name) const {
-  for (auto method : methods_) {
+  for (auto *method : methods_) {
     if (name == method->name()) {
       return method;
     }
@@ -337,7 +337,7 @@ torch::jit::Function* ClassType::findMethod(const std::string& name) const {
   return nullptr;
 }
 torch::jit::Function& ClassType::getMethod(const std::string& name) const {
-  auto method = findMethod(name);
+  auto *method = findMethod(name);
   TORCH_CHECK(
       method != nullptr,
       "Couldn't find method: '",
@@ -349,7 +349,7 @@ torch::jit::Function& ClassType::getMethod(const std::string& name) const {
 }
 
 torch::jit::Function* ClassType::findHook(const std::string& name) const {
-  auto hook = findForwardHook(name);
+  auto *hook = findForwardHook(name);
   if (hook == nullptr) {
     hook = findForwardPreHook(name);
   }
@@ -383,7 +383,7 @@ void ClassType::addStaticMethod(torch::jit::Function* method) {
 }
 
 torch::jit::Function* ClassType::findStaticMethod(const std::string& name) const {
-  for (auto method : staticmethods_) {
+  for (auto *method : staticmethods_) {
     if (name == method->name()) {
       return method;
     }
@@ -393,7 +393,7 @@ torch::jit::Function* ClassType::findStaticMethod(const std::string& name) const
 
 void ClassType::unsafeRemoveMethod(const std::string& name) {
   size_t slot = 0;
-  for (auto method : methods_) {
+  for (auto *method : methods_) {
     if (method->name() == name) {
       methods_.erase(methods_.begin() + static_cast<std::ptrdiff_t>(slot));
       return;
@@ -441,7 +441,7 @@ bool ClassType::isSubtypeOfExt(const Type& rhs, std::ostream* why_not) const {
       return false;
     }
     for (const FunctionSchema& schema : iface->methods()) {
-      auto self_method = findMethod(schema.name());
+      auto *self_method = findMethod(schema.name());
       if (!self_method) {
         if (why_not) {
           *why_not << "Class '" << repr_str() << "' does not have method '"

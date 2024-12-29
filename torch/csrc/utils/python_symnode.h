@@ -164,8 +164,8 @@ class PythonSymNodeImpl : public c10::SymNodeImpl {
       const char* fname,
       const c10::SymNode& other,
       const c10::SymNode& third) {
-    auto pother = dynamic_cast<PythonSymNodeImpl*>(other.get());
-    auto pthird = dynamic_cast<PythonSymNodeImpl*>(third.get());
+    auto* pother = dynamic_cast<PythonSymNodeImpl*>(other.get());
+    auto* pthird = dynamic_cast<PythonSymNodeImpl*>(third.get());
     TORCH_CHECK(pother);
     TORCH_CHECK(pthird);
     py::gil_scoped_acquire acquire;
@@ -174,7 +174,7 @@ class PythonSymNodeImpl : public c10::SymNodeImpl {
   }
 
   c10::SymNode dispatch_common_(const char* fname, const c10::SymNode& other) {
-    auto pother = dynamic_cast<PythonSymNodeImpl*>(other.get());
+    auto* pother = dynamic_cast<PythonSymNodeImpl*>(other.get());
     TORCH_CHECK(pother);
     py::gil_scoped_acquire acquire;
     auto r = getPyObj().attr(fname)(pother->getPyObj());

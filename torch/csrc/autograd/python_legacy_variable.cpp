@@ -154,7 +154,7 @@ void init_legacy_variable(PyObject* module) {
   if (PyType_Ready(&THPLegacyVariableType) < 0) {
     throw python_error();
   }
-  auto obj = (PyObject*)&THPLegacyVariableType;
+  auto* obj = (PyObject*)&THPLegacyVariableType;
   Py_INCREF(obj);
   if (PyModule_AddObject(module, "_LegacyVariableBase", obj) < 0) {
     throw python_error();

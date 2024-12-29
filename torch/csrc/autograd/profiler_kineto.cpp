@@ -284,7 +284,7 @@ struct AddGenericMetadata : public MetadataBase {
     }
 
     if (config_ && !config_->experimental_config.performance_events.empty()) {
-      auto& event_names = config_->experimental_config.performance_events;
+      const auto& event_names = config_->experimental_config.performance_events;
       for (const auto i : c10::irange(op_event.perf_event_counters_->size())) {
         addMetadata(
             event_names[i],
@@ -475,7 +475,7 @@ struct KinetoThreadLocalState : public ProfilerStateBase {
 template <bool use_global_state_ptr = false>
 std::unique_ptr<at::ObserverContext> onFunctionEnter(
     const at::RecordFunction& fn) {
-  auto state_ptr = KinetoThreadLocalState::get(use_global_state_ptr);
+  auto* state_ptr = KinetoThreadLocalState::get(use_global_state_ptr);
   if (!state_ptr) {
     return nullptr;
   }
@@ -487,7 +487,7 @@ template <bool use_global_state_ptr = false>
 void onFunctionExit(
     const at::RecordFunction& fn,
     at::ObserverContext* ctx_ptr) {
-  auto state_ptr = KinetoThreadLocalState::get(use_global_state_ptr);
+  auto* state_ptr = KinetoThreadLocalState::get(use_global_state_ptr);
   if (!state_ptr) {
     return;
   }
@@ -513,7 +513,7 @@ void onFunctionExit(
   }
   if (config.state == ProfilerState::KINETO_GPU_FALLBACK) {
     try {
-      auto fallback = kineto_ctx_ptr->fallback_;
+      auto* fallback = kineto_ctx_ptr->fallback_;
       TORCH_INTERNAL_ASSERT(fallback != nullptr);
       torch::profiler::impl::cudaStubs()->record(
           nullptr, &fallback->device_event_end_, nullptr);
@@ -521,7 +521,7 @@ void onFunctionExit(
       LOG(WARNING) << "Failed to record CUDA event. " << e.what();
     }
   } else if (config.state == ProfilerState::KINETO_PRIVATEUSE1_FALLBACK) {
-    auto fallback = kineto_ctx_ptr->fallback_;
+    auto* fallback = kineto_ctx_ptr->fallback_;
     TORCH_INTERNAL_ASSERT(fallback != nullptr);
     torch::profiler::impl::privateuse1Stubs()->record(
         nullptr, &fallback->device_event_end_, nullptr);
@@ -538,7 +538,7 @@ void onFunctionExit(
 
 template <bool use_global_callback = false>
 void pushProfilingCallbacks(const std::unordered_set<at::RecordScope>& scopes) {
-  auto registration_state_ptr =
+  auto* registration_state_ptr =
       KinetoThreadLocalState::get(use_global_callback);
   TORCH_INTERNAL_ASSERT(registration_state_ptr, "Expected profiler state set");
   auto recordFunctionCallback =
@@ -576,7 +576,7 @@ void reportBackendEventToActiveKinetoProfiler(
       KinetoThreadLocalState::get(/*global=*/true) == nullptr,
       "On-demand profiling does not support post processing callback");
 
-  auto state_ptr = KinetoThreadLocalState::get(/*global=*/false);
+  auto* state_ptr = KinetoThreadLocalState::get(/*global=*/false);
   if (!state_ptr) {
     return;
   }
@@ -629,7 +629,7 @@ void prepareProfiler(
      * valid?
      */
     auto is_standard_event = [](const std::string& event) -> bool {
-      for (auto e : torch::profiler::ProfilerPerfEvents) {
+      for (const auto* e : torch::profiler::ProfilerPerfEvents) {
         if (!std::strcmp(event.c_str(), e)) {
           return true;
         }
@@ -646,7 +646,7 @@ void prepareProfiler(
 }
 
 static void toggleTorchOpCollectionDynamic(bool enable) {
-  auto state_ptr = ProfilerStateBase::get();
+  auto* state_ptr = ProfilerStateBase::get();
   if (state_ptr) {
     const auto& config = state_ptr->config();
     if (enable) {
@@ -667,7 +667,7 @@ static void toggleTorchOpCollectionDynamic(bool enable) {
 #define UNUSED __attribute__((unused))
 #endif
 static UNUSED void togglePythonCollectionDynamic(bool enable) {
-  auto state_ptr = ProfilerStateBase::get();
+  auto* state_ptr = ProfilerStateBase::get();
   if (state_ptr) {
     auto global = state_ptr->config().global();
     KinetoThreadLocalState* kineto_thread_local_state_ptr =
@@ -732,7 +732,7 @@ void enableProfilerWithEventPostProcess(
       "On-demand profiling does not support post processing callback");
 
   enableProfiler(config, activities, scopes);
-  auto state_ptr = KinetoThreadLocalState::get(config.global());
+  auto* state_ptr = KinetoThreadLocalState::get(config.global());
   state_ptr->setEventPostProcessingCallback(std::move(cb));
 }
 
@@ -931,10 +931,12 @@ const c10::ArrayRef<std::string> KinetoEvent::stack() const {
   };
 
   auto const& extra_fields = result_->extra_fields_;
-  if (auto p = std::get_if<ExtraFields<EventType::TorchOp>>(&extra_fields)) {
+  if (const auto* p =
+          std::get_if<ExtraFields<EventType::TorchOp>>(&extra_fields)) {
     return get(*p);
   }
-  if (auto p = std::get_if<ExtraFields<EventType::Backend>>(&extra_fields)) {
+  if (const auto* p =
+          std::get_if<ExtraFields<EventType::Backend>>(&extra_fields)) {
     return get(*p);
   }
   return python_stack_;
@@ -942,10 +944,12 @@ const c10::ArrayRef<std::string> KinetoEvent::stack() const {
 
 const c10::ArrayRef<std::string> KinetoEvent::moduleHierarchy() const {
   auto const& extra_fields = result_->extra_fields_;
-  if (auto p = std::get_if<ExtraFields<EventType::TorchOp>>(&extra_fields)) {
+  if (const auto* p =
+          std::get_if<ExtraFields<EventType::TorchOp>>(&extra_fields)) {
     return p->jit_modules_;
   }
-  if (auto p = std::get_if<ExtraFields<EventType::Backend>>(&extra_fields)) {
+  if (const auto* p =
+          std::get_if<ExtraFields<EventType::Backend>>(&extra_fields)) {
     return p->jit_modules_;
   }
   return {};
@@ -1104,7 +1108,7 @@ void ProfilerResult::save(const std::string& path) {
 
 namespace profiler::impl {
 void _reportVulkanEventToProfiler(vulkan_id_t id) {
-  auto state_ptr = ::torch::autograd::profiler::KinetoThreadLocalState::get(
+  auto* state_ptr = ::torch::autograd::profiler::KinetoThreadLocalState::get(
       /*global=*/false);
   if (state_ptr) {
     state_ptr->reportVulkanEventToProfiler(id);

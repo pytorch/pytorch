@@ -77,8 +77,8 @@ Tensor nested_softmax_backward(
   TORCH_INTERNAL_ASSERT(grad.is_nested(), "Should be nested grad")
   TORCH_INTERNAL_ASSERT(output.is_nested(), "Should be nested output")
 
-  auto output_ptr = get_nested_tensor_impl(output);
-  auto grad_ptr = get_nested_tensor_impl(grad);
+  auto *output_ptr = get_nested_tensor_impl(output);
+  auto *grad_ptr = get_nested_tensor_impl(grad);
   int64_t ntensors = output_ptr->size(0);
   if (ntensors == 0) {
     return grad.clone();
@@ -118,8 +118,8 @@ Tensor _nested_sum_backward_cpu(
   const Tensor& nested_self,
   OptionalIntArrayRef opt_dims,
   bool keepdim) {
-  auto nt_self = get_nested_tensor_impl(nested_self);
-  auto nt_grad = get_nested_tensor_impl(grad);
+  auto *nt_self = get_nested_tensor_impl(nested_self);
+  auto *nt_grad = get_nested_tensor_impl(grad);
   const Tensor& grad_buffer = nt_grad->get_buffer();
   const Tensor& self_buffer = nt_self->get_buffer();
   auto grad_sizes = nt_grad->get_nested_sizes();
@@ -163,7 +163,7 @@ Tensor _nested_select_backward_symint(
   int64_t dim,
   // NOLINTNEXTLINE(performance-unnecessary-value-param)
   c10::SymInt index) {
-  auto nt_self = get_nested_tensor_impl(nested_self);
+  auto *nt_self = get_nested_tensor_impl(nested_self);
   const Tensor& self_buffer = nt_self->get_buffer();
   const auto self_sizes = nt_self->get_nested_sizes();
   const Tensor& self_grad_buffer = self_buffer.new_zeros(self_buffer.sizes());

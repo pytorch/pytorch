@@ -97,7 +97,7 @@ inline std::string ranksToString(const std::vector<int>& ranks) {
 inline std::string ranksFromTrace(
     const std::vector<std::pair<int, std::string>>& items) {
   std::string ranks;
-  for (auto& p : items) {
+  for (const auto& p : items) {
     if (ranks.empty()) {
       ranks = std::to_string(p.first);
     } else {
@@ -119,7 +119,7 @@ inline std::string analyzeLaggingRanks(const TraceMap& traceMap) {
   uint64_t lagSeq = traceMap.begin()->first;
   std::vector<int> startRanks;
   std::vector<int> endRanks;
-  for (auto& p : traceMap.begin()->second) {
+  for (const auto& p : traceMap.begin()->second) {
     if (p.second.second == kEventStart) {
       startRanks.push_back(p.first);
     } else {

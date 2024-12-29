@@ -68,9 +68,9 @@ bool is_numpy_available() {
     std::string message = "Failed to initialize NumPy";
     PyObject *type = nullptr, *value = nullptr, *traceback = nullptr;
     PyErr_Fetch(&type, &value, &traceback);
-    if (auto str = value ? PyObject_Str(value) : nullptr) {
-      if (auto enc_str = PyUnicode_AsEncodedString(str, "utf-8", "strict")) {
-        if (auto byte_str = PyBytes_AS_STRING(enc_str)) {
+    if (auto* str = value ? PyObject_Str(value) : nullptr) {
+      if (auto* enc_str = PyUnicode_AsEncodedString(str, "utf-8", "strict")) {
+        if (auto* byte_str = PyBytes_AS_STRING(enc_str)) {
           message += ": " + std::string(byte_str);
         }
         Py_XDECREF(enc_str);
@@ -220,7 +220,7 @@ at::Tensor tensor_from_numpy(
       "expected np.ndarray (got ",
       Py_TYPE(obj)->tp_name,
       ")");
-  auto array = (PyArrayObject*)obj;
+  auto* array = (PyArrayObject*)obj;
 
   // warn_if_not_writable is true when a copy of numpy variable is created.
   // the warning is suppressed when a copy is being created.

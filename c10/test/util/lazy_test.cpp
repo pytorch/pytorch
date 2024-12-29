@@ -26,7 +26,7 @@ TEST(LazyTest, OptimisticLazy) {
   for (size_t i = 0; i < kNumThreads; ++i) {
     threads.emplace_back([&] {
       auto* p = &s.ensure(factory);
-      auto old = address.exchange(p);
+      auto* old = address.exchange(p);
       if (old != nullptr) {
         // Even racing ensure()s should return a stable reference.
         EXPECT_EQ(old, p);

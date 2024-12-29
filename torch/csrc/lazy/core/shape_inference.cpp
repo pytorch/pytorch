@@ -507,7 +507,7 @@ std::vector<Shape> compute_shape_cat(at::TensorList tensors, int64_t dim) {
 
   dim = at::maybe_wrap_dim(dim, tensors);
   size_t extended_dim_shape = 0;
-  for (auto& tensor : tensors) {
+  for (const auto& tensor : tensors) {
     extended_dim_shape += tensor.sizes()[dim];
   }
   TORCH_CHECK(!out_shape.empty(), "Scalar tensors are not supported in cat.");

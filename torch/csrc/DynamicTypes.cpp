@@ -36,7 +36,7 @@ void registerLayoutObject(THPLayout* thp_layout, at::Layout layout) {
 }
 
 THPDtype* getTHPDtype(at::ScalarType scalarType) {
-  auto dtype = dtype_registry[static_cast<int>(scalarType)];
+  auto* dtype = dtype_registry[static_cast<int>(scalarType)];
   if (!dtype) {
     throw std::invalid_argument("unsupported scalarType");
   }
@@ -44,7 +44,7 @@ THPDtype* getTHPDtype(at::ScalarType scalarType) {
 }
 
 THPLayout* getTHPLayout(at::Layout layout) {
-  auto thp_layout = layout_registry[static_cast<int>(layout)];
+  auto* thp_layout = layout_registry[static_cast<int>(layout)];
   if (!thp_layout) {
     throw std::invalid_argument("unsupported at::Layout");
   }

@@ -108,7 +108,7 @@ at::TensorOptions options_from_string(const std::string& str) {
           .first == cuda_prefix.end()) {
     // torch.cuda. is prefix of str
     c10::call_once(cuda_once, []() {
-      for (auto type : autograd::VariableType::allCUDATypes()) {
+      for (auto* type : autograd::VariableType::allCUDATypes()) {
         cuda_map.emplace(type_to_string(*type), type);
       }
     });
@@ -118,7 +118,7 @@ at::TensorOptions options_from_string(const std::string& str) {
       xpu_prefix.end()) {
     // torch.xpu. is prefix of str
     c10::call_once(xpu_once, []() {
-      for (auto type : autograd::VariableType::allXPUTypes()) {
+      for (auto* type : autograd::VariableType::allXPUTypes()) {
         xpu_map.emplace(type_to_string(*type), type);
       }
     });
@@ -129,14 +129,14 @@ at::TensorOptions options_from_string(const std::string& str) {
           .first == privateUser_prefix.end()) {
     // torch.foo. foo is privateUser1 name
     c10::call_once(privateUser1_once, []() {
-      for (auto type : autograd::VariableType::allPrivateUser1Types()) {
+      for (auto* type : autograd::VariableType::allPrivateUser1Types()) {
         privateUser1_map.emplace(type_to_string(*type), type);
       }
     });
     map = &privateUser1_map;
   } else {
     c10::call_once(cpu_once, []() {
-      for (auto type : autograd::VariableType::allCPUTypes()) {
+      for (auto* type : autograd::VariableType::allCPUTypes()) {
         cpu_map.emplace(type_to_string(*type), type);
       }
     });
@@ -168,8 +168,8 @@ std::vector<std::pair<Backend, ScalarType>> all_declared_types() {
       ScalarType::Bool,
       ScalarType::BFloat16};
 
-  for (auto& backend : backends) {
-    for (auto& scalar_type : scalar_types) {
+  for (const auto& backend : backends) {
+    for (const auto& scalar_type : scalar_types) {
       // there is no sparse bool type.
       if (scalar_type == ScalarType::Bool &&
           (backend == Backend::SparseCUDA || backend == Backend::SparseCPU)) {

@@ -101,7 +101,7 @@ class TORCH_API TSLoweringContext : public LoweringContext {
     auto it = emitted_outputs_.find(output);
     if (it == emitted_outputs_.end()) {
       auto post_order = Util::ComputePostOrder(output.node, &emit_status_);
-      for (auto node : post_order) {
+      for (const auto* node : post_order) {
         Lower(node);
       }
       // At this point the output better be present, otherwise there is an issue

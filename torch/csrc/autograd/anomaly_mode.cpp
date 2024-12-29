@@ -56,7 +56,7 @@ void AnomalyMetadata::print_stack(const std::string& current_node_name) {
   // if there is no "parent_" in metadata, then it means this metadata's node
   // is the root and stop printing the traceback
   while (cur_parent) {
-    auto parent_metadata = cur_parent->metadata();
+    auto* parent_metadata = cur_parent->metadata();
     TORCH_WARN(
         "\n\n",
         "Previous calculation was induced by ",

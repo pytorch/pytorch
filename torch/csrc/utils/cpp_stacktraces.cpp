@@ -8,7 +8,7 @@
 namespace torch {
 namespace {
 bool compute_cpp_stack_traces_enabled() {
-  auto envar = std::getenv("TORCH_SHOW_CPP_STACKTRACES");
+  auto* envar = std::getenv("TORCH_SHOW_CPP_STACKTRACES");
   if (envar) {
     if (strcmp(envar, "0") == 0) {
       return false;
@@ -25,7 +25,7 @@ bool compute_cpp_stack_traces_enabled() {
 }
 
 bool compute_disable_addr2line() {
-  auto envar = std::getenv("TORCH_DISABLE_ADDR2LINE");
+  auto* envar = std::getenv("TORCH_DISABLE_ADDR2LINE");
   if (envar) {
     if (strcmp(envar, "0") == 0) {
       return false;
@@ -48,7 +48,7 @@ bool get_cpp_stacktraces_enabled() {
 }
 
 static torch::unwind::Mode compute_symbolize_mode() {
-  auto envar_c = std::getenv("TORCH_SYMBOLIZE_MODE");
+  auto* envar_c = std::getenv("TORCH_SYMBOLIZE_MODE");
   if (envar_c) {
     std::string envar = envar_c;
     if (envar == "dladdr") {

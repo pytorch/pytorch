@@ -405,7 +405,7 @@ int64_t FileStore::addHelper(const std::string& key, int64_t i) {
   const auto& value = cache_[key];
   int64_t ti = i;
   if (!value.empty()) {
-    auto buf = reinterpret_cast<const char*>(value.data());
+    const auto* buf = reinterpret_cast<const char*>(value.data());
     auto len = value.size();
     ti += std::stoll(std::string(buf, len));
   }

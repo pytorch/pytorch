@@ -107,7 +107,7 @@ inline void maybe_wrap_dims(
 inline int64_t legacy_cat_wrap_dim(
     int64_t dim,
     const std::vector<std::vector<int64_t>>& tensor_sizes) {
-  for (auto& sizes : tensor_sizes) {
+  for (const auto& sizes : tensor_sizes) {
     if (sizes.size() == 1 && sizes[0] == 0) {
       continue;
     }
@@ -119,7 +119,7 @@ inline int64_t legacy_cat_wrap_dim(
 inline int64_t legacy_cat_wrap_dim_symint(
     int64_t dim,
     const std::vector<std::vector<c10::SymInt>>& tensor_sizes) {
-  for (auto& sizes : tensor_sizes) {
+  for (const auto& sizes : tensor_sizes) {
     if (sizes.size() == 1) {
       if (TORCH_GUARD_SIZE_OBLIVIOUS(sizes[0].sym_eq(0))) {
         continue;

@@ -101,7 +101,7 @@ static PyObject* THPStream_pynew(
 
 PyObject* THPStream_Wrap(const c10::Stream& stream) {
   HANDLE_TH_ERRORS
-  auto type = (PyTypeObject*)THPStreamClass;
+  auto* type = (PyTypeObject*)THPStreamClass;
   THPObjectPtr ptr(type->tp_alloc(type, 0));
   if (!ptr) {
     throw python_error();
@@ -130,7 +130,7 @@ static PyObject* THPStream_get_device(THPStream* self, void* unused) {
 
 static PyObject* THPStream_query(PyObject* _self, PyObject* noargs) {
   HANDLE_TH_ERRORS
-  auto self = (THPStream*)_self;
+  auto* self = (THPStream*)_self;
 
   return PyBool_FromLong(c10::Stream::unpack3(
                              self->stream_id,
@@ -144,7 +144,7 @@ static PyObject* THPStream_query(PyObject* _self, PyObject* noargs) {
 static PyObject* THPStream_synchronize(PyObject* _self, PyObject* noargs) {
   HANDLE_TH_ERRORS {
     pybind11::gil_scoped_release no_gil;
-    auto self = (THPStream*)_self;
+    auto* self = (THPStream*)_self;
 
     c10::Stream::unpack3(
         self->stream_id,
@@ -158,8 +158,8 @@ static PyObject* THPStream_synchronize(PyObject* _self, PyObject* noargs) {
 
 static PyObject* THPStream_wait_event(PyObject* _self, PyObject* _event) {
   HANDLE_TH_ERRORS {
-    auto self = (THPStream*)_self;
-    auto event = (THPEvent*)_event;
+    auto* self = (THPStream*)_self;
+    auto* event = (THPEvent*)_event;
     c10::Stream::unpack3(
         self->stream_id,
         static_cast<c10::DeviceIndex>(self->device_index),
@@ -172,8 +172,8 @@ static PyObject* THPStream_wait_event(PyObject* _self, PyObject* _event) {
 
 static PyObject* THPStream_wait_stream(PyObject* _self, PyObject* _other) {
   HANDLE_TH_ERRORS {
-    auto self = (THPStream*)_self;
-    auto other_stream = (THPStream*)_other;
+    auto* self = (THPStream*)_self;
+    auto* other_stream = (THPStream*)_other;
     c10::Event new_event(
         static_cast<c10::DeviceType>(other_stream->device_type),
         c10::EventFlag::PYTORCH_DEFAULT);
@@ -196,7 +196,7 @@ static PyObject* THPStream_record_event(
     PyObject* args,
     PyObject* kwargs) {
   HANDLE_TH_ERRORS
-  auto self = (THPStream*)_self;
+  auto* self = (THPStream*)_self;
   PyObject* _new_event = nullptr;
   PyObject* _event = Py_None;
 
@@ -220,7 +220,7 @@ static PyObject* THPStream_record_event(
         static_cast<c10::DeviceType>(self->device_type),
         c10::EventFlag::PYTORCH_DEFAULT);
   }
-  auto new_event = (THPEvent*)_new_event;
+  auto* new_event = (THPEvent*)_new_event;
   TORCH_CHECK(new_event, "event must not be null");
   new_event->event.record(c10::Stream::unpack3(
       self->stream_id,

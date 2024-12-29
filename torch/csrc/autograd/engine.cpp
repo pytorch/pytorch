@@ -290,7 +290,7 @@ void Engine::stop() {
   stopped_ = true;
   // Under some conditions, autograd threads can hang on shutdown
   // Do not wait for them to shutdown indefinitely but rely on timeout
-  auto wait_duration_str = getenv("TORCH_AUTOGRAD_SHUTDOWN_WAIT_LIMIT");
+  auto* wait_duration_str = getenv("TORCH_AUTOGRAD_SHUTDOWN_WAIT_LIMIT");
   auto wait_duration = wait_duration_str ? std::atof(wait_duration_str) : 10.0;
   bool noBackward = true;
   for (auto& queue : device_ready_queues_) {
@@ -843,7 +843,7 @@ void set_device(int device) {
   if (device != CPU_DEVICE) {
     for (const auto i : c10::irange(static_cast<size_t>(
              c10::DeviceType::COMPILE_TIME_MAX_DEVICE_TYPES))) {
-      auto* impl = c10::impl::device_guard_impl_registry[i].load();
+      const auto* impl = c10::impl::device_guard_impl_registry[i].load();
       if (impl && device < impl->deviceCount()) {
         impl->setDevice(at::Device(
             static_cast<c10::DeviceType>(i),
@@ -1200,7 +1200,7 @@ static uint64_t compute_min_topological_nr(const edge_list& outputs) {
     return 0;
   }
   auto min_topo_nr = std::numeric_limits<uint64_t>::max();
-  for (auto& output_edge : outputs) {
+  for (const auto& output_edge : outputs) {
     auto topo_nr = output_edge.function->topological_nr();
     min_topo_nr = (min_topo_nr < topo_nr) ? min_topo_nr : topo_nr;
   }
@@ -1219,7 +1219,7 @@ auto Engine::compute_dependencies(
   // We no longer have to expand functions that don't require grad.
   auto& dependencies = task.dependencies_;
   while (!queue.empty()) {
-    auto fn = queue.back();
+    auto* fn = queue.back();
     queue.pop_back();
     if (fn->topological_nr() < min_topo_nr) {
       continue;
@@ -1228,7 +1228,7 @@ auto Engine::compute_dependencies(
       will_use_accelerator = fn->stream().has_value();
     }
     for (const auto& edge : fn->next_edges()) {
-      if (auto next_ptr = edge.function.get()) {
+      if (auto* next_ptr = edge.function.get()) {
         dependencies[next_ptr] += 1;
         const bool was_inserted = task.nodes_in_graph_.insert(next_ptr).second;
         if (was_inserted)
@@ -1540,7 +1540,7 @@ auto Engine::start_device_threads() -> void {
   // See Note [Allocating GPUs to autograd threads]
   c10::DeviceIndex num_devices = 0;
   for (const auto& impl_atomic : c10::impl::device_guard_impl_registry) {
-    auto* impl = impl_atomic.load();
+    const auto* impl = impl_atomic.load();
     // Only record the number of devices for device that don't run on the
     // cpu ready queue.
     if (impl && !should_run_in_cpu_ready_queue(impl->type())) {
@@ -1654,7 +1654,7 @@ void GraphTask::init_to_execute(
   // need to explore past the first output or we would miss the nodes that are
   // required to compute the second output.
   int output_idx = 0;
-  for (auto& output_edge : outputs) {
+  for (const auto& output_edge : outputs) {
     // (0) `is_needed` above corresponds to `exec_info_[fn].needed_`
     Node* output = output_edge.function.get();
     auto& info = exec_info_[output];
@@ -1683,7 +1683,7 @@ void GraphTask::init_to_execute(
       const auto& next = fn_->next_edges();
       auto num_next = next.size();
       while (next_next_fn_ < num_next) {
-        auto fn = next[next_next_fn_++].function.get();
+        auto* fn = next[next_next_fn_++].function.get();
         if (fn)
           return fn;
       }
@@ -1703,7 +1703,7 @@ void GraphTask::init_to_execute(
 
   while (!stack.empty()) {
     auto& frame = stack.back();
-    const auto fn = frame.fn_;
+    auto* const fn = frame.fn_;
 
     Node* child_fn = nullptr;
     while ((child_fn = frame.get_next_fn()) && !seen.emplace(child_fn).second) {

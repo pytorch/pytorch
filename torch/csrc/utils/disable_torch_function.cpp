@@ -275,7 +275,7 @@ PyObject* THPModule_disable_torch_dispatch(PyObject* self, PyObject* a) {
       // included in AFTER, so it is included in the negation (and that's
       // correct: we want to exclude Python key and everything BEFORE it.)
   );
-  auto r = PyObject_Call(func, py_args.ptr(), kwargs);
+  auto* r = PyObject_Call(func, py_args.ptr(), kwargs);
   if (r == nullptr)
     throw python_error();
   return r;

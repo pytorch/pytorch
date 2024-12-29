@@ -21,7 +21,7 @@ static struct PyModuleDef _module = {
     _methods.data()};
 
 PyObject* torch_c_dynamo_utils_init() {
-  auto m = PyModule_Create(&_module);
+  auto* m = PyModule_Create(&_module);
   if (m == nullptr)
     return nullptr;
 

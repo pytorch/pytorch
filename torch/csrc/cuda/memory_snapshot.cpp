@@ -337,7 +337,7 @@ std::string _memory_snapshot_pickled() {
       trace_entry.insert(size_s, (int64_t)te.size_);
       trace_entry.insert(stream_s, int64_t(te.stream_));
       if (te.context_) {
-        auto sc = getFromContext(te.context_);
+        auto* sc = getFromContext(te.context_);
         frame_tracebacks.push_back(sc);
         frame_dict.push_back(trace_entry);
       }

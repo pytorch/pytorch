@@ -443,9 +443,9 @@ bool OptionalType::equals(const Type& rhs) const {
 }
 
 bool OptionalType::isSubtypeOfExt(const Type& rhs, std::ostream* why_not) const {
-  if (auto optional_rhs = rhs.castRaw<OptionalType>()) {
+  if (const auto *optional_rhs = rhs.castRaw<OptionalType>()) {
     return getElementType()->isSubtypeOfExt(*optional_rhs->getElementType(), why_not);
-  } else if (auto union_rhs = rhs.castRaw<UnionType>()) {
+  } else if (const auto *union_rhs = rhs.castRaw<UnionType>()) {
     if (!union_rhs->canHoldType(*NoneType::get())) {
       if (why_not) {
         *why_not << rhs.repr_str() << " cannot hold None";

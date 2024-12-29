@@ -163,7 +163,7 @@ std::shared_ptr<NCCLComm> NCCLComm::split(
   at::cuda::OptionalCUDAGuard gpuGuard(source->deviceIndex_);
   auto comm = std::make_shared<NCCLComm>();
   // This call will block until the source communicator is initialized
-  auto sourceComm = source->getNcclComm();
+  auto* sourceComm = source->getNcclComm();
 #ifndef NCCL_HAS_COMM_NONBLOCKING
   C10D_NCCL_CHECK(
       ncclCommSplit(sourceComm, color_id, rank, &(comm->ncclComm_), &config),
@@ -215,7 +215,7 @@ void NCCLComm::finalize() {
     return;
   }
   at::cuda::OptionalCUDAGuard gpuGuard(deviceIndex_);
-  auto comm = getNcclComm();
+  auto* comm = getNcclComm();
   C10D_NCCL_CHECK_NONBLOCKING(ncclCommFinalize(comm), std::nullopt);
 }
 
@@ -227,7 +227,7 @@ void NCCLComm::destroy() {
     return;
   }
   at::cuda::OptionalCUDAGuard gpuGuard(deviceIndex_);
-  auto comm = getNcclComm();
+  auto* comm = getNcclComm();
   C10D_NCCL_CHECK(ncclCommDestroy(comm), std::nullopt);
   // Poison future getNcclComm
   aborted_ = true;
@@ -327,7 +327,7 @@ ncclResult_t NCCLComm::registerSegment(void* ptr, size_t size) {
 
   void* handle = nullptr;
   // Use getNcclComm to make sure comm is ready before calling nccl APIs
-  auto comm = getNcclComm();
+  auto* comm = getNcclComm();
   C10D_NCCL_CHECK(
       ncclCommRegister(comm, ptr, size, &handle),
       c10::str(
@@ -356,7 +356,7 @@ ncclResult_t NCCLComm::deregisterSegment(void* ptr) {
 
   void* handle = registeredSegmentHandles_[ptr];
   // Use getNcclComm to make sure comm is ready before calling nccl APIs
-  auto comm = getNcclComm();
+  auto* comm = getNcclComm();
   C10D_NCCL_CHECK(
       ncclCommDeregister(comm, handle),
       c10::str(
@@ -425,11 +425,12 @@ std::string getNcclVersion() {
 #ifdef USE_C10D_NCCL
 size_t hashTensors(const std::vector<at::Tensor>& tensors) {
   size_t hash = 0;
-  for (auto& tensor : tensors) {
+  for (const auto& tensor : tensors) {
     if (tensor.numel() > 0 && tensor.storage()) {
       size_t data_size = tensor.storage().nbytes();
       if (data_size > 0 && tensor.storage().data_ptr()) {
-        auto src = static_cast<const char*>(tensor.storage().data_ptr().get());
+        const auto* src =
+            static_cast<const char*>(tensor.storage().data_ptr().get());
         std::vector<char> dst(data_size);
         // This is needed so that we trigger a device synchronization so we can
         // get the collective finished if launched on GPU and hash its output.
@@ -479,7 +480,7 @@ std::string getNcclErrorDetailStr(
   std::string interpret;
   std::string err;
 #ifdef ENABLE_NCCL_GET_LAST_ERROR
-  auto ret = ncclGetLastError(nullptr);
+  const auto* ret = ncclGetLastError(nullptr);
   if (ret) {
     err = "\nLast error:\n" + std::string(ret);
   } else {

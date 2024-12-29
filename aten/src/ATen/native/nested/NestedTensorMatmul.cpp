@@ -75,8 +75,8 @@ static Tensor matmul_with_bmm_nested(const Tensor& self, const Tensor& mat2) {
   // Tensor mat2 = mat2_.contiguous();
   // self [N, n_heads, *, head_dim]
   // mat2 [N, n_heads, head_dim, *]
-  const auto self_ptr = get_nested_tensor_impl(self);
-  const auto mat2_ptr = get_nested_tensor_impl(mat2);
+  auto *const self_ptr = get_nested_tensor_impl(self);
+  auto *const mat2_ptr = get_nested_tensor_impl(mat2);
   // metadata for self
   std::vector<IntArrayRef> self_sizes = NestedTensor_get_sizes(self_ptr);
   std::vector<IntArrayRef> self_strides = NestedTensor_get_strides(self_ptr);
@@ -196,7 +196,7 @@ static Tensor matmul_nested_with_broadcasted_dense(
   const auto E = other.size(-1);
   const auto component_dim = nt.dim() - 1;
   auto new_sizes = nt_impl->get_nested_sizes().clone();
-  auto new_sizes_ptr = new_sizes.data_ptr<int64_t>();
+  auto *new_sizes_ptr = new_sizes.data_ptr<int64_t>();
   for (const auto i : c10::irange(nt.size(0))) {
     new_sizes_ptr[i * component_dim + 2] = E;
   }
@@ -233,8 +233,8 @@ Tensor matmul_nested(const Tensor& self, const Tensor& mat2) {
   auto self_contig = self.contiguous();
   auto mat2_contig = mat2.contiguous();
   // dispatcher should have guaranteed that at least one is nested
-  const auto self_ptr = get_nested_tensor_impl(self_contig);
-  const auto mat2_ptr = get_nested_tensor_impl(mat2_contig);
+  auto *const self_ptr = get_nested_tensor_impl(self_contig);
+  auto *const mat2_ptr = get_nested_tensor_impl(mat2_contig);
   int64_t self_dim = self_ptr->dim(), mat2_dim = mat2_ptr->dim();
   TORCH_CHECK(
       self_dim >= 3,
@@ -311,7 +311,7 @@ Tensor& matmul_out_nested(
   // TODO: this is a very quick and dirty implementation
   //       should improve it to avoid the intermediate memory usage
   Tensor function_result = at::matmul(tensor1, tensor2);
-  auto function_result_ptr = get_nested_tensor_impl(function_result);
+  auto *function_result_ptr = get_nested_tensor_impl(function_result);
   // TODO: this is to reproduce function_result_ptr->opt_sizes_
   //       if an accessor is provided in the future, can replace this
   std::vector<int64_t> sizes;

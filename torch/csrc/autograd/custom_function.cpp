@@ -114,7 +114,7 @@ static void _process_forward_mode_AD(
     }
     const auto& out =
         outputs[i].has_value() ? outputs[i].value() : at::Tensor();
-    auto out_tensor_impl = raw_outputs[i].value().unsafeGetTensorImpl();
+    auto* out_tensor_impl = raw_outputs[i].value().unsafeGetTensorImpl();
     bool is_differentiable =
         (non_differentiable.count(out_tensor_impl) == 0 &&
          isDifferentiableType(raw_outputs[i].value().scalar_type()));
@@ -365,7 +365,7 @@ static optional_variable_list _process_backward_mode_ad(
     // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
     Variable var = raw_outputs[i].value();
 
-    auto out_tensor_impl = var.unsafeGetTensorImpl();
+    auto* out_tensor_impl = var.unsafeGetTensorImpl();
     bool is_input = inputs_mapping.count(out_tensor_impl) > 0;
     bool is_modified = dirty_inputs.count(out_tensor_impl) > 0;
     bool is_differentiable = cdata &&
@@ -398,7 +398,7 @@ static optional_variable_list _process_backward_mode_ad(
     // warning.
     if (!(is_input && is_modified) && var.is_view()) {
       // is_view() => diff_view_meta
-      auto diff_view_meta = impl::get_view_autograd_meta(var);
+      auto* diff_view_meta = impl::get_view_autograd_meta(var);
       diff_view_meta->set_creation_meta(CreationMeta::IN_CUSTOM_FUNCTION);
     }
 
@@ -415,7 +415,7 @@ static optional_variable_list _process_backward_mode_ad(
   if (num_diff_outputs > 1) {
     for (auto& var : outputs) {
       if (var.has_value()) {
-        auto diff_view_meta = impl::get_view_autograd_meta(var.value());
+        auto* diff_view_meta = impl::get_view_autograd_meta(var.value());
         if (diff_view_meta && diff_view_meta->has_bw_view()) {
           diff_view_meta->set_creation_meta(CreationMeta::MULTI_OUTPUT_NODE);
         }
@@ -425,7 +425,7 @@ static optional_variable_list _process_backward_mode_ad(
 
   // All the modified Tensors must be returned as is for the rewrite to be
   // valid.
-  for (auto& dirty_input : dirty_inputs) {
+  for (const auto& dirty_input : dirty_inputs) {
     TORCH_CHECK(
         outputs_impl.count(dirty_input) > 0,
         "Some elements marked as dirty during the forward method were not returned as output. The"
@@ -531,7 +531,7 @@ variable_list AutogradContext::get_saved_variables() const {
   saved.reserve(saved_variables_.size());
   auto ptr = grad_fn_.lock();
   TORCH_INTERNAL_ASSERT(ptr);
-  for (auto& var : saved_variables_) {
+  for (const auto& var : saved_variables_) {
     saved.push_back(var.unpack(ptr));
   }
   return saved;
@@ -553,7 +553,7 @@ bool AutogradContext::needs_input_grad(
 void AutogradContext::mark_dirty(const variable_list& inputs) {
   dirty_inputs_.clear();
   dirty_inputs_.reserve(inputs.size());
-  for (auto& var : inputs) {
+  for (const auto& var : inputs) {
     dirty_inputs_.insert(var.unsafeGetTensorImpl());
   }
 }
@@ -561,7 +561,7 @@ void AutogradContext::mark_dirty(const variable_list& inputs) {
 void AutogradContext::mark_non_differentiable(const variable_list& outputs) {
   non_differentiable_.clear();
   non_differentiable_.reserve(outputs.size());
-  for (auto& var : outputs) {
+  for (const auto& var : outputs) {
     non_differentiable_.insert(var.unsafeGetTensorImpl());
   }
 }
@@ -572,7 +572,7 @@ void AutogradContext::set_materialize_grads(bool value) {
 
 const std::unordered_set<at::TensorImpl*>& AutogradContext::get_and_bump_dirty()
     const {
-  for (auto& var : dirty_inputs_) {
+  for (const auto& var : dirty_inputs_) {
     var->bump_version();
   }
   return dirty_inputs_;

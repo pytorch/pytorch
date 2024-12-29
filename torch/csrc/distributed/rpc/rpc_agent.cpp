@@ -150,7 +150,7 @@ void RpcAgent::retryExpiredRpcs() {
     // the outcome of the current send. Then, we clean up the rpcRetryMap_.
     for (auto it = earliestRpcList.begin(); it != earliestRpcList.end();
          /* no increment */) {
-      auto& earliestRpc = *it;
+      const auto& earliestRpc = *it;
       c10::intrusive_ptr<JitFuture> jitFuture;
 
       // send() will throw an exception if an RPC is retried while the agent is

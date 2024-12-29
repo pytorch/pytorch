@@ -273,7 +273,7 @@ static PyObject* THPModule_crashIfvptrUBSAN(PyObject* module, PyObject* noarg) {
     virtual ~Baz() = default;
   };
   Baz x{};
-  auto y = static_cast<Foo*>(static_cast<void*>(&x));
+  auto* y = static_cast<Foo*>(static_cast<void*>(&x));
   auto rc = y->bar();
   return THPUtils_packInt32(rc);
 }
@@ -1261,7 +1261,8 @@ static PyObject* THPModule_willEngineExecuteNode(
       "_will_engine_execute_node expects an grad_fn, "
       "but got ",
       THPUtils_typename(arg));
-  const auto exec_info = torch::autograd::get_current_graph_task_exec_info();
+  const auto* const exec_info =
+      torch::autograd::get_current_graph_task_exec_info();
   TORCH_CHECK(
       exec_info,
       "_get_should_execute_nodes should only be called during the backward pass");
@@ -1273,7 +1274,7 @@ static PyObject* THPModule_willEngineExecuteNode(
   } else {
     node = ((torch::autograd::THPCppFunction*)arg)->cdata.get();
   }
-  const auto nodes_in_graph =
+  const auto* const nodes_in_graph =
       torch::autograd::get_current_graph_task_nodes_in_graph();
   bool ret = nodes_in_graph->find(node) != nodes_in_graph->end();
   if (ret && !exec_info->empty()) {
@@ -2212,7 +2213,7 @@ Call this whenever a new thread is created in order to propagate values from
   py_module.def("_get_obj_in_tls", [](const std::string& key) -> py::handle {
     auto safe_pyobject =
         at::impl::ThreadLocalPythonObjects::get_state().get(key);
-    auto obj = safe_pyobject->ptr(getPyInterpreter());
+    auto* obj = safe_pyobject->ptr(getPyInterpreter());
     return py::handle(obj);
   });
 

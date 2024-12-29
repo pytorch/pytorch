@@ -135,7 +135,7 @@ inline bool is_channels_last_strides_2d_s4(
     return false;
   }
   // loop strides indices
-  for (auto& d : {1, 3, 2, 0}) {
+  for (const auto& d : {1, 3, 2, 0}) {
     if (sizes[d] == 0) {
       return false;
     }
@@ -175,7 +175,7 @@ inline bool is_channels_last_strides_3d_s5(
   if (strides[1] == 0) {
     return false;
   }
-  for (auto& d : {1, 4, 3, 2, 0}) {
+  for (const auto& d : {1, 4, 3, 2, 0}) {
     if (sizes[d] == 0) {
       return false;
     }

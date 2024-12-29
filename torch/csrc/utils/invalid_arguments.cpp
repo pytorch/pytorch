@@ -321,9 +321,9 @@ std::string _argDesc(
     const std::vector<PyObject*>& arguments,
     const std::unordered_map<std::string, PyObject*>& kwargs) {
   std::string result = "(";
-  for (auto& arg : arguments)
+  for (const auto& arg : arguments)
     result += std::string(py_typename(arg)) + ", ";
-  for (auto& kwarg : kwargs)
+  for (const auto& kwarg : kwargs)
     result += kwarg.first + "=" + py_typename(kwarg.second) + ", ";
   if (!arguments.empty())
     result.erase(result.length() - 2);
@@ -341,7 +341,7 @@ std::vector<std::string> _tryMatchKwargs(
     start_idx--;
   if (start_idx < 0)
     start_idx = 0;
-  for (auto& entry : kwargs) {
+  for (const auto& entry : kwargs) {
     bool found = false;
     for (unsigned int i = start_idx; i < option.arguments.size(); i++) {
       if (option.arguments[i].name == entry.first) {
@@ -413,7 +413,7 @@ std::string format_invalid_args(
     error_msg += "got ";
     error_msg += _argDesc(args, kwargs);
     error_msg += ", but expected one of:\n";
-    for (auto& option_str : options) {
+    for (const auto& option_str : options) {
       auto pair = _parseOption(option_str, kwargs);
       auto& option = pair.first;
       auto& printable_option_str = pair.second;

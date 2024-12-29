@@ -391,7 +391,7 @@ convertIValue(
     std::string tensor_shape, tensor_stride, tensor_type, tensor_value;
 
     const auto& tensor = val.toTensor();
-    const auto tensor_impl = tensor.unsafeGetTensorImpl();
+    auto* const tensor_impl = tensor.unsafeGetTensorImpl();
     if (tensor.defined() && !tensor_impl->has_symbolic_sizes_strides()) {
       // tensor shape
       tensor_shape = vectorToString(tensor.sizes().vec());
@@ -414,7 +414,7 @@ convertIValue(
     // symbolic sizes/strides implies t->storage_offset() will fail
     if (tensor_impl->has_storage() &&
         !tensor_impl->has_symbolic_sizes_strides()) {
-      auto& t_storage = tensor_impl->storage();
+      const auto& t_storage = tensor_impl->storage();
       storage_id = getObjectID(ob, t_storage.data());
       offset = tensor_impl->storage_offset();
       numel = tensor_impl->numel();
@@ -577,7 +577,7 @@ inline std::string getCommsNodeAttrs(const RecordFunction& fn) { // NOLINT
 
 #ifdef USE_DISTRIBUTED
   // We rely on paramcommsdebug object that is available in thread local info
-  auto debugInfo = dynamic_cast<ParamCommsDebugInfo*>(
+  auto* debugInfo = dynamic_cast<ParamCommsDebugInfo*>(
       c10::ThreadLocalDebugInfo::get(c10::DebugInfoKind::PARAM_COMMS_INFO));
   if (debugInfo == nullptr) {
     LOG(WARNING) << "ParamCommsDebugInfo not available for function: "
@@ -706,7 +706,7 @@ static void recordOperatorStart(
 static std::unique_ptr<ObserverContext> onFunctionEnter(
     const RecordFunction& fn) {
   using RunState = ExecutionTraceObserver::RunState;
-  auto ob = ObserverManager::get();
+  auto* ob = ObserverManager::get();
   if (ob != nullptr && ob->getState() == RunState::enabled) {
     // record op
     auto fc_ptr = std::make_unique<FunctionCallContext>();
@@ -745,12 +745,12 @@ static std::string json_str_escape(const std::string& str) {
 
 static void onFunctionExit(const RecordFunction& fn, ObserverContext* ctx_ptr) {
   using RunState = ExecutionTraceObserver::RunState;
-  auto ob = ObserverManager::get();
+  auto* ob = ObserverManager::get();
   if (ob == nullptr || ctx_ptr == nullptr) {
     return;
   }
   if (ob->getState() == RunState::enabled) {
-    auto fc_ptr = dynamic_cast<FunctionCallContext*>(ctx_ptr);
+    auto* fc_ptr = dynamic_cast<FunctionCallContext*>(ctx_ptr);
     // TORCH_INTERNAL_ASSERT(fc_ptr != nullptr);
     if (fc_ptr == nullptr) {
       LOG(WARNING) << "FunctionCallContext is nullptr.";
@@ -847,7 +847,7 @@ bool addExecutionTraceObserver(const std::string& output_file_path) {
 
     // check if the environment variable is set to force recording integer
     // tensors
-    auto env_variable =
+    auto* env_variable =
         getenv("ENABLE_PYTORCH_EXECUTION_TRACE_INTEGRAL_TENSOR_RANGE");
     if (env_variable != nullptr) {
       ob.record_integral_tensor_range = true;
@@ -869,7 +869,7 @@ bool addExecutionTraceObserver(const std::string& output_file_path) {
 }
 
 void removeExecutionTraceObserver() {
-  auto ob = ObserverManager::get();
+  auto* ob = ObserverManager::get();
   if (ob != nullptr) {
     if (ob->getState() != ExecutionTraceObserver::RunState::disabled) {
       disableExecutionTraceObserver();

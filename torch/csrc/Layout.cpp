@@ -11,11 +11,11 @@
 #include <string>
 
 PyObject* THPLayout_New(at::Layout layout, const std::string& name) {
-  auto type = (PyTypeObject*)&THPLayoutType;
+  auto* type = (PyTypeObject*)&THPLayoutType;
   auto self = THPObjectPtr{type->tp_alloc(type, 0)};
   if (!self)
     throw python_error();
-  auto self_ = reinterpret_cast<THPLayout*>(self.get());
+  auto* self_ = reinterpret_cast<THPLayout*>(self.get());
   self_->layout = layout;
   std::strncpy(self_->name, name.c_str(), LAYOUT_NAME_LEN);
   self_->name[LAYOUT_NAME_LEN] = '\0';

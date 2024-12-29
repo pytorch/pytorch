@@ -16,7 +16,7 @@ RegisterHandler tracebackHandler{
     [](const Request&, Response& res) {
       auto tmpfile = c10::make_tempfile("torch-dump_traceback");
 
-      auto cfile = ::fopen(tmpfile.name.c_str(), "w");
+      auto* cfile = ::fopen(tmpfile.name.c_str(), "w");
       if (!cfile) {
         throw std::runtime_error("failed to open file for writing");
       }

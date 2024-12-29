@@ -13,11 +13,11 @@
 PyObject* THPMemoryFormat_New(
     at::MemoryFormat memory_format,
     const std::string& name) {
-  auto type = (PyTypeObject*)&THPMemoryFormatType;
+  auto* type = (PyTypeObject*)&THPMemoryFormatType;
   auto self = THPObjectPtr{type->tp_alloc(type, 0)};
   if (!self)
     throw python_error();
-  auto self_ = reinterpret_cast<THPMemoryFormat*>(self.get());
+  auto* self_ = reinterpret_cast<THPMemoryFormat*>(self.get());
   self_->memory_format = memory_format;
   std::strncpy(self_->name, name.c_str(), MEMORY_FORMAT_NAME_LEN);
   self_->name[MEMORY_FORMAT_NAME_LEN] = '\0';

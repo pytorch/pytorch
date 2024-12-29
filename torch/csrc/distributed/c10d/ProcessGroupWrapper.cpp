@@ -317,7 +317,7 @@ struct CollectiveFingerPrint {
     int64_t data_size = static_cast<int64_t>(data->size());
     // Need to release here and get the ptr due to C++ parameter evaluation
     // order.
-    auto d = data.release();
+    auto* d = data.release();
     at::Tensor serialized_tensor =
         at::for_blob(d->data(), {data_size})
             .context(

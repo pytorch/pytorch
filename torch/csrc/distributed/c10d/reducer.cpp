@@ -172,7 +172,7 @@ Reducer::Reducer(
     const auto variable_count = params_.size();
     grad_accumulators_.resize(variable_count);
     for (const auto variable_index : c10::irange(variable_count)) {
-      auto& variable = params_[variable_index];
+      const auto& variable = params_[variable_index];
 
       // The gradient accumulator function is lazily initialized once.
       // Therefore we can use its presence in the autograd graph as
@@ -488,7 +488,7 @@ std::vector<c10d::GradBucket> Reducer::get_grad_buckets(
   std::vector<c10d::GradBucket> gradBuckets;
   gradBuckets.reserve(buckets_.size());
   for (const auto i : c10::irange(buckets_.size())) {
-    auto& bucket = buckets_[i];
+    const auto& bucket = buckets_[i];
     auto variables_for_bucket = get_variables_for_bucket(i, bucket);
     gradBuckets.emplace_back(
         i,
@@ -1000,9 +1000,9 @@ std::vector<at::Tensor> Reducer::get_variables_for_bucket(
   variables_for_bucket.reserve(bucket.variable_indices.size());
   for (const auto& variable_index : bucket.variable_indices) {
     // Grab bucket index where gradient is located using variable_locators_.
-    auto& bucket_index_for_variable = variable_locators_[variable_index];
+    const auto& bucket_index_for_variable = variable_locators_[variable_index];
     // Grab the actual model parameter.
-    auto& variable =
+    const auto& variable =
         bucket.variables[bucket_index_for_variable.intra_bucket_index];
     variables_for_bucket.emplace_back(variable);
   }
@@ -1361,10 +1361,10 @@ void Reducer::search_unused_parameters(
 
   // Traverse the autograd graph starting at the specified output.
   while (!queue.empty()) {
-    auto fn = queue.back();
+    auto* fn = queue.back();
     queue.pop_back();
     for (const auto& edge : fn->next_edges()) {
-      if (auto next_ptr = edge.function.get()) {
+      if (auto* next_ptr = edge.function.get()) {
         const bool was_inserted = seen.insert(next_ptr).second;
         if (was_inserted) {
           queue.push_back(next_ptr);
@@ -1694,7 +1694,7 @@ void Reducer::runGradCallbackForVariable(
 #ifdef _WIN32
   cb(variable.mutable_grad());
 #else
-  auto context_ptr = rpc_context_.context_ptr.load();
+  auto* context_ptr = rpc_context_.context_ptr.load();
   if (context_ptr == nullptr) {
     cb(variable.mutable_grad());
   } else {
@@ -1708,7 +1708,7 @@ void Reducer::runGradCallbackForVariable(
 void Reducer::RpcContext::set(ContextPtr&& new_context_ptr) {
   // We should set 'new_context_ptr' even if it's nullptr. That means the
   // reducer is under a local backward run.
-  const auto new_context_raw_ptr = new_context_ptr.get();
+  auto* const new_context_raw_ptr = new_context_ptr.get();
   if (context_ptr.exchange(new_context_raw_ptr) != new_context_raw_ptr) {
     // Set the shared ptr to the context only if it's set first time.
     // All call sites should use the same context ptr.

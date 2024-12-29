@@ -237,7 +237,7 @@ at::DataPtr GetNewRefCountedSentData(void* data, at::Device device) {
     }
   }
   cuda_ipc_global_entities.next_available_ref_counters_file_->set_counter(1);
-  auto sent_data = new CudaIPCSentData(
+  auto* sent_data = new CudaIPCSentData(
       cuda_ipc_global_entities.next_available_ref_counters_file_->handle(),
       cuda_ipc_global_entities.next_available_ref_counters_file_->get_offset(),
       cuda_ipc_global_entities.next_available_ref_counters_file_->counter_ptr(),

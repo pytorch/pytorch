@@ -225,7 +225,7 @@ void DistEngine::computeDependencies(
   // Traverse the graph.
   auto& dependencies = graphTask->dependencies_;
   while (!queue.empty()) {
-    auto fn = queue.front();
+    auto* fn = queue.front();
     queue.pop();
 
     if (!will_use_accelerator) {
@@ -233,7 +233,7 @@ void DistEngine::computeDependencies(
     }
 
     for (const auto& edge : fn->next_edges()) {
-      if (auto nextFn = edge.function.get()) {
+      if (auto* nextFn = edge.function.get()) {
         dependencies[nextFn] += 1;
         const bool wasInserted = seen.insert(nextFn).second;
         if (wasInserted) {
@@ -310,10 +310,10 @@ void DistEngine::computeDependencies(
       if (!execInfo.captures_) {
         continue;
       }
-      auto fn = mapEntry.first;
+      auto* fn = mapEntry.first;
       // There may be nodes other than 'AccumulateGrad', e.g. RecvRPCBackward,
       // to be captured.
-      if (auto accumulateGradFn = dynamic_cast<AccumulateGrad*>(fn)) {
+      if (auto* accumulateGradFn = dynamic_cast<AccumulateGrad*>(fn)) {
         for (auto& capture : *execInfo.captures_) {
           // Capture hooks are technically deprecated, but as an exception below
           // is the single and only instance of capture hooks usage that we

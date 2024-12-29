@@ -15,11 +15,11 @@
 PyObject* THPDtype_New(at::ScalarType scalar_type, const std::string& name) {
   HANDLE_TH_ERRORS
   AT_ASSERT(name.length() < DTYPE_NAME_LEN);
-  auto type = (PyTypeObject*)&THPDtypeType;
+  auto* type = (PyTypeObject*)&THPDtypeType;
   auto self = THPObjectPtr{type->tp_alloc(type, 0)};
   if (!self)
     throw python_error();
-  auto self_ = reinterpret_cast<THPDtype*>(self.get());
+  auto* self_ = reinterpret_cast<THPDtype*>(self.get());
   self_->scalar_type = scalar_type;
   std::strncpy(self_->name, name.c_str(), DTYPE_NAME_LEN);
   return self.release();
@@ -69,7 +69,7 @@ static PyObject* THPDtype_reduce(PyObject* _self, PyObject* noargs) {
    * For singletons, a string is returned. The string should be interpreted
    * as the name of a global variable.
    */
-  auto self = (THPDtype*)_self;
+  auto* self = (THPDtype*)_self;
   return THPUtils_packString(self->name);
   END_HANDLE_TH_ERRORS
 }
@@ -178,7 +178,7 @@ void THPDtype_init(PyObject* module) {
   auto dict = THPObjectPtr(PyDict_New());
   if (!dict)
     throw python_error();
-  auto torch = THPUtils_packString("torch");
+  auto* torch = THPUtils_packString("torch");
   if (!torch)
     throw python_error();
   if (PyDict_SetItemString(dict, "__module__", torch) < 0) {

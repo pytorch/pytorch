@@ -109,7 +109,7 @@ static PyObject* THCPStream_priority_range(
 
 static PyObject* THCPStream_query(PyObject* _self, PyObject* noargs) {
   HANDLE_TH_ERRORS
-  auto self = (THCPStream*)_self;
+  auto* self = (THCPStream*)_self;
   return PyBool_FromLong(self->cuda_stream.query());
   END_HANDLE_TH_ERRORS
 }
@@ -117,7 +117,7 @@ static PyObject* THCPStream_query(PyObject* _self, PyObject* noargs) {
 static PyObject* THCPStream_synchronize(PyObject* _self, PyObject* noargs) {
   HANDLE_TH_ERRORS {
     pybind11::gil_scoped_release no_gil;
-    auto self = (THCPStream*)_self;
+    auto* self = (THCPStream*)_self;
     self->cuda_stream.synchronize();
   }
   Py_RETURN_NONE;
@@ -126,8 +126,8 @@ static PyObject* THCPStream_synchronize(PyObject* _self, PyObject* noargs) {
 
 static PyObject* THCPStream_eq(PyObject* _self, PyObject* _other) {
   HANDLE_TH_ERRORS
-  auto self = (THCPStream*)_self;
-  auto other = (THCPStream*)_other;
+  auto* self = (THCPStream*)_self;
+  auto* other = (THCPStream*)_other;
   return PyBool_FromLong(self->cuda_stream == other->cuda_stream);
   END_HANDLE_TH_ERRORS
 }

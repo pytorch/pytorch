@@ -18,7 +18,7 @@ struct LexerImpl {
   template <typename T>
   T read() {
     T result;
-    auto end = next_ + sizeof(T);
+    const auto* end = next_ + sizeof(T);
     UNWIND_CHECK(
         !checked || end <= end_,
         "read out of bounds {} >= {}",
@@ -67,7 +67,7 @@ struct LexerImpl {
     return Value;
   }
   const char* readCString() {
-    auto result = next_;
+    const auto* result = next_;
     if (!checked) {
       next_ += strlen(next_) + 1;
       return result;

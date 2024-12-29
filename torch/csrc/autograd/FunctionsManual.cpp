@@ -1074,7 +1074,7 @@ std::vector<Tensor> cat_tensors_backward(
     } else {
       grad_val = grad;
     }
-    auto& shape = sizes[i];
+    const auto& shape = sizes[i];
     // If input was empty tensor, gradInput should be empty tensor.
     if (shape.size() == 1) {
       if (TORCH_GUARD_SIZE_OBLIVIOUS(shape[0].sym_eq(0))) {
@@ -1131,7 +1131,7 @@ std::vector<Tensor> block_diag_backward(
         ? real_view_of_grad
         : grad;
 
-    auto& shape = sizes[i];
+    const auto& shape = sizes[i];
     // If input was empty tensor, gradInput should be empty tensor.
     if (shape.size() == 1 && shape[0] == 0) {
       grad_inputs[i] = at::zeros({0}, grad_val.options());
@@ -1669,7 +1669,7 @@ Tensor repeat_backward(
     Tensor grad,
     c10::SymIntArrayRef repeats,
     c10::SymIntArrayRef input_shape) {
-  auto find_iter = std::find(repeats.cbegin(), repeats.cend(), 0);
+  const auto* find_iter = std::find(repeats.cbegin(), repeats.cend(), 0);
   if (find_iter != repeats.cend()) {
     return at::zeros_symint(input_shape, grad.options());
   }
@@ -2131,7 +2131,7 @@ Tensor _nested_split_with_sizes_backward(
     } else {
       const auto& length = split_sizes[i].guard_int(__FILE__, __LINE__);
       auto nt_split_size = nt_sizes.clone();
-      auto nt_split_size_ptr = nt_split_size.data_ptr<int64_t>();
+      auto* nt_split_size_ptr = nt_split_size.data_ptr<int64_t>();
       for (int64_t j : c10::irange(static_cast<int64_t>(nt_sizes.size(0)))) {
         // subtract 1 to account for batch dim
         nt_split_size_ptr
@@ -2200,7 +2200,7 @@ Tensor glu_double_backward(
     const Tensor& grad_output,
     const Tensor& input,
     int64_t dim) {
-  auto& gO = grad_output;
+  const auto& gO = grad_output;
   auto input_size = input.size(dim) / 2;
   auto first_half = input.narrow(dim, 0, input_size);
   auto second_half = input.narrow(dim, input_size, input_size);
@@ -6036,7 +6036,7 @@ Tensor stack_jvp(at::TensorList tensors, int64_t dim) {
   if (any_defined) {
     std::vector<Tensor> fw_grads;
 
-    for (auto& t : tensors) {
+    for (const auto& t : tensors) {
       fw_grads.push_back(
           isFwGradDefined(t)
               ? t._fw_grad(/*level*/ 0)

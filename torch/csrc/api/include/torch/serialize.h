@@ -66,7 +66,7 @@ template <typename... SaveToArgs>
 void save(const std::vector<torch::Tensor>& tensor_vec, SaveToArgs&&... args) {
   serialize::OutputArchive archive(std::make_shared<jit::CompilationUnit>());
   for (const auto i : c10::irange(tensor_vec.size())) {
-    auto& value = tensor_vec[i];
+    const auto& value = tensor_vec[i];
     archive.write(std::to_string(i), value);
   }
   archive.save_to(std::forward<SaveToArgs>(args)...);

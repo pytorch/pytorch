@@ -220,7 +220,7 @@ class ModuleDictImpl : public Cloneable<ModuleDictImpl> {
   void update(
       const std::vector<std::pair<std::string, std::shared_ptr<Module>>>&
           modules) {
-    for (auto& item : modules) {
+    for (const auto& item : modules) {
       insert(item.first, item.second);
     }
   }

@@ -3,7 +3,7 @@
 
 namespace {
 std::string GetFirstUserFrameInPythonIfEnabled() {
-  static const auto LTC_ENABLE_SOURCE_INFO =
+  static auto* const LTC_ENABLE_SOURCE_INFO =
       std::getenv("LTC_ENABLE_SOURCE_INFO");
   if (!LTC_ENABLE_SOURCE_INFO) {
     return {};
@@ -21,7 +21,7 @@ static hash_t OperandHashes(
     const hash_t& seed,
     bool bakeInSizes) {
   hash_t hash = seed;
-  for (auto& operand : operands) {
+  for (const auto& operand : operands) {
     if (!operand) {
       hash = HashCombine(hash, static_cast<uint64_t>(kNullOpt));
       continue;
@@ -29,7 +29,7 @@ static hash_t OperandHashes(
     auto operand_hash = bakeInSizes ? operand.shapeHash() : operand.hash();
     hash = HashCombine(hash, operand_hash);
   }
-  for (auto& shape : shapes) {
+  for (const auto& shape : shapes) {
     hash = HashCombine(hash, shape.hash(bakeInSizes));
   }
   return hash;
@@ -95,7 +95,7 @@ TSOpVector TensorList::Lower(
     tensor_list.emplace_back(loctx->GetOutputOp(operand));
   }
   auto graph = function->graph();
-  auto listnode =
+  auto* listnode =
       graph->insertNode(graph->createList(tensor_list[0]->type(), tensor_list));
   return {listnode->output()};
 }

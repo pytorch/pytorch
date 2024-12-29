@@ -882,7 +882,7 @@ struct MempoolIdHash {
 };
 
 cudaError_t allocPrimitive(void** ptr, size_t size, AllocParams& p) {
-  auto active_pool = MemPoolContext::getActiveMemPool();
+  auto* active_pool = MemPoolContext::getActiveMemPool();
   if (active_pool && active_pool->allocator() && p.pool->owner_PrivatePool) {
     *ptr = active_pool->allocator()->raw_alloc(size);
     return *ptr ? cudaSuccess : cudaErrorMemoryAllocation;
@@ -1375,8 +1375,8 @@ class DeviceCachingAllocator {
       bool split_remainder) {
     auto size = params.size();
     auto device = params.device();
-    auto pool = params.pool;
-    auto stream = params.stream();
+    auto* pool = params.pool;
+    auto* stream = params.stream();
 
     TORCH_INTERNAL_ASSERT(
         params.err == cudaSuccess && params.block != nullptr &&
@@ -1475,7 +1475,7 @@ class DeviceCachingAllocator {
 
     // following logic might modifying underlaying Block, causing the size
     // changed. We store ahead for reporting
-    auto orig_block_ptr = block->ptr;
+    auto* orig_block_ptr = block->ptr;
     auto orig_block_size = block->size;
 
     StatTypes stat_types = get_stat_types_for_pool(*block->pool);
@@ -1913,9 +1913,9 @@ class DeviceCachingAllocator {
     }
 
     for (auto& segment : pps.segments) {
-      auto ptr = segment.blocks.at(0).ptr;
+      auto* ptr = segment.blocks.at(0).ptr;
       TORCH_CHECK(ptrs_to_blocks.count(ptr), " could not find ", ptr)
-      auto block = ptrs_to_blocks[ptr];
+      auto* block = ptrs_to_blocks[ptr];
 
       setSegmentStateToCheckpoint(block, segment, context, rr);
     }
@@ -1932,7 +1932,7 @@ class DeviceCachingAllocator {
     std::vector<Block*> all_blocks;
     MempoolId_t mempool_id = {0, 0};
 
-    auto active_mempool = MemPoolContext::getActiveMemPool();
+    auto* active_mempool = MemPoolContext::getActiveMemPool();
     if (active_mempool) {
       mempool_id = active_mempool->id();
     }
@@ -2123,7 +2123,7 @@ class DeviceCachingAllocator {
     // mempool. When the count reaches 0, we tell free_cached_blocks it may now
     // cudaFree blocks from this graph's pool when it discovers they're unused
     // (unsplit).
-    auto pp = get_private_pool(mempool_id);
+    auto* pp = get_private_pool(mempool_id);
     auto uc = --(pp->use_count);
     TORCH_INTERNAL_ASSERT(uc >= 0);
     if (uc == 0) {
@@ -2137,7 +2137,7 @@ class DeviceCachingAllocator {
 
   int getPoolUseCount(MempoolId_t mempool_id) {
     std::lock_guard<std::recursive_mutex> lock(mutex);
-    auto pp = get_private_pool(mempool_id);
+    auto* pp = get_private_pool(mempool_id);
     return pp->use_count;
   }
 
@@ -2382,7 +2382,7 @@ class DeviceCachingAllocator {
       // invariant: free -> unmapped -> *
       // map_block will map some of unmapped and merge with free
       auto remaining = size - candidate->size;
-      auto new_candidate = candidate->next;
+      auto* new_candidate = candidate->next;
       if (!map_block(
               new_candidate, std::min(remaining, candidate->next->size), ctx)) {
         return nullptr;
@@ -2646,7 +2646,7 @@ class DeviceCachingAllocator {
     // get "avg age" threshold.
     size_t total_age = 0.0;
     int freeable_block_count = 0;
-    for (auto& b : large_blocks.blocks) {
+    for (const auto& b : large_blocks.blocks) {
       if (!b->is_split()) {
         total_age += b->gc_count();
         ++freeable_block_count;
@@ -2731,11 +2731,11 @@ class DeviceCachingAllocator {
       }
       return bool(p.block);
     } else {
-      auto active_pool = MemPoolContext::getActiveMemPool();
+      auto* active_pool = MemPoolContext::getActiveMemPool();
       if (active_pool && active_pool->allocator() &&
           p.pool->owner_PrivatePool) {
         // Ensure that active_pool and p.pool are the same
-        auto pp = get_private_pool(active_pool->id());
+        auto* pp = get_private_pool(active_pool->id());
         TORCH_INTERNAL_ASSERT(pp == p.pool->owner_PrivatePool);
       }
       if (CUDAAllocatorConfig::release_lock_on_cudamalloc()) {
@@ -2858,7 +2858,7 @@ class DeviceCachingAllocator {
 
   bool release_cached_blocks(const std::shared_ptr<GatheredContext>& context) {
     MempoolId_t mempool_id = {0, 0};
-    auto active_mempool = MemPoolContext::getActiveMemPool();
+    auto* active_mempool = MemPoolContext::getActiveMemPool();
     if (active_mempool) {
       mempool_id = active_mempool->id();
     }
@@ -2934,10 +2934,10 @@ class DeviceCachingAllocator {
         context ? context : block->context_when_segment_allocated);
 
     auto* pool = block->pool;
-    auto active_pool = MemPoolContext::getActiveMemPool();
+    auto* active_pool = MemPoolContext::getActiveMemPool();
     if (active_pool && active_pool->allocator() && pool->owner_PrivatePool) {
       // Ensure that active_pool and pool are the same
-      auto pp = get_private_pool(active_pool->id());
+      auto* pp = get_private_pool(active_pool->id());
       TORCH_INTERNAL_ASSERT(pp == pool->owner_PrivatePool);
 
       // If there is an active mempool with a given allocator,
@@ -3966,7 +3966,7 @@ struct BackendStaticInitializer {
   }
 
   BackendStaticInitializer() {
-    auto r = parseEnvForBackend();
+    auto* r = parseEnvForBackend();
     allocator.store(r);
   }
 };

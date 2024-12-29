@@ -129,7 +129,7 @@ namespace {
 std::shared_ptr<::gloo::transport::Device> makeGlooDevice(
     const std::string& interfaceName,
     const std::string& hostName) {
-  static auto transportName = getenv("GLOO_DEVICE_TRANSPORT");
+  static auto* transportName = getenv("GLOO_DEVICE_TRANSPORT");
   if (transportName) {
     return GlooDeviceRegistry()->Create(transportName, interfaceName, hostName);
   }

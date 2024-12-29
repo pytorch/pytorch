@@ -114,7 +114,7 @@ class TSBackendImpl : public torch::lazy::BackendImplInterface {
 
   torch::lazy::BackendDataPtr GetComputationDataFromNode(
       const Node* node) const override {
-    auto* device_data_node = DeviceData::Cast(node);
+    const auto* device_data_node = DeviceData::Cast(node);
     if (!device_data_node) {
       return nullptr;
     }
@@ -123,7 +123,7 @@ class TSBackendImpl : public torch::lazy::BackendImplInterface {
 
   std::string GetComputationBackendText(
       const torch::lazy::ComputationPtr computation) const override {
-    auto ts_computation =
+    auto* ts_computation =
         static_cast<torch::lazy::TSComputation*>(computation.get());
     return ts_computation->graph()->toString();
   }
@@ -194,7 +194,7 @@ torch::lazy::BackendDataPtr TSBackendImpl::CreateDataPlaceholder(
 std::vector<torch::lazy::ComputationPtr> TSBackendImpl::Compile(
     std::vector<torch::lazy::ComputationPtr> instances) const {
   for (const auto& instance : instances) {
-    auto ts_computation =
+    auto* ts_computation =
         static_cast<torch::lazy::TSComputation*>(instance.get());
     if (!ts_computation->in_mark_step) {
       LOG(WARNING) << "Compile outside of mark step";

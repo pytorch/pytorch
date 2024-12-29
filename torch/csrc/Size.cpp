@@ -62,7 +62,7 @@ PyObject* THPSize_NewFromSymSizes(const at::Tensor& self_) {
       TORCH_CHECK(
           !torch::jit::tracer::isTracing(),
           "JIT Tracing of SymInts isn't supported");
-      auto py_symint = py::cast(si).release().ptr();
+      auto* py_symint = py::cast(si).release().ptr();
       if (!py_symint)
         throw python_error();
       PyTuple_SET_ITEM(ret.get(), i, py_symint);
@@ -87,7 +87,7 @@ PyObject* THPSize_NewFromSymSizes(const at::Tensor& self_) {
 static bool isTracedZeroDimVar(PyObject* item) {
   if (!THPVariable_Check(item))
     return false;
-  auto& var = THPVariable_Unpack(item);
+  const auto& var = THPVariable_Unpack(item);
   return var.dim() == 0 && torch::jit::tracer::getValueTrace(var);
 }
 
@@ -137,7 +137,7 @@ static PyObject* THPSize_repr(THPSize* self) {
     if (i != 0) {
       repr += ", ";
     }
-    auto item = PyTuple_GET_ITEM(self, i);
+    auto* item = PyTuple_GET_ITEM(self, i);
     auto ih = py::handle(item);
 
     repr += torch::is_symint(ih)
@@ -189,7 +189,7 @@ static PyMappingMethods THPSize_as_mapping = {
 
 static PyObject* THPSize_numel(PyObject* _self, PyObject* noargs) {
   HANDLE_TH_ERRORS
-  auto self = (THPSize*)_self;
+  auto* self = (THPSize*)_self;
   int64_t numel = 1;
   for (Py_ssize_t i = 0; i < PyTuple_Size((PyObject*)self); ++i) {
     numel *= THPUtils_unpackLong(PyTuple_GET_ITEM(self, i));
@@ -200,12 +200,12 @@ static PyObject* THPSize_numel(PyObject* _self, PyObject* noargs) {
 
 static PyObject* THPSize_reduce(PyObject* _self, PyObject* noargs) {
   HANDLE_TH_ERRORS
-  auto self = (THPSize*)_self;
+  auto* self = (THPSize*)_self;
   auto ret = THPObjectPtr{PyTuple_New(2)};
   if (!ret)
     throw python_error();
 
-  auto obj = (PyObject*)(&THPSizeType);
+  auto* obj = (PyObject*)(&THPSizeType);
   Py_INCREF(&THPSizeType);
   PyTuple_SET_ITEM(ret.get(), 0, obj);
 
@@ -213,7 +213,7 @@ static PyObject* THPSize_reduce(PyObject* _self, PyObject* noargs) {
   if (!t)
     throw python_error();
   for (Py_ssize_t i = 0; i < PyTuple_Size((PyObject*)self); ++i) {
-    auto d = PyTuple_GET_ITEM(self, i);
+    auto* d = PyTuple_GET_ITEM(self, i);
     Py_INCREF(d);
     PyTuple_SET_ITEM(t.get(), i, d);
   }

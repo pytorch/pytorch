@@ -259,7 +259,7 @@ TensorBase empty_strided_symint_generic(
 
 TensorBase empty_cpu(IntArrayRef size, ScalarType dtype, bool pin_memory,
                      std::optional<c10::MemoryFormat> memory_format_opt) {
-  auto allocator = GetCPUAllocatorMaybePinned(pin_memory);
+  auto *allocator = GetCPUAllocatorMaybePinned(pin_memory);
   constexpr c10::DispatchKeySet cpu_ks(c10::DispatchKey::CPU);
   return empty_generic(size, allocator, cpu_ks, dtype, memory_format_opt);
 }
@@ -292,7 +292,7 @@ TensorBase empty_cpu(
 
 TensorBase empty_strided_cpu(IntArrayRef size, IntArrayRef stride,
                              ScalarType dtype, bool pin_memory) {
-  auto allocator = at::detail::GetCPUAllocatorMaybePinned(pin_memory);
+  auto *allocator = at::detail::GetCPUAllocatorMaybePinned(pin_memory);
   constexpr c10::DispatchKeySet cpu_ks(c10::DispatchKey::CPU);
   return at::detail::empty_strided_generic(
       size, stride, allocator, cpu_ks, dtype);

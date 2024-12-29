@@ -24,7 +24,7 @@ int64_t dimname_to_position(const Tensor& tensor, Dimname dim) {
       "Name ", dim, " not found in ", toDimnameRepr(tensor), ".");
   const auto names = tensor.names();
 
-  const auto it = std::find(names.begin(), names.end(), dim);
+  const auto *it = std::find(names.begin(), names.end(), dim);
   TORCH_CHECK(it != names.end(),
       "Name ", dim, " not found in ", toDimnameRepr(tensor), ".");
 
@@ -61,7 +61,7 @@ static void check_for_misalignment(
   if (name.isWildcard()) {
     return;
   }
-  auto it = std::find(other_names.begin(), other_names.end(), name);
+  const auto *it = std::find(other_names.begin(), other_names.end(), name);
   // TODO(zou3519): Can improve message by checking if names are alignable and suggesting workarounds
   TORCH_CHECK(it == other_names.end(),
       "Misaligned dims when attempting to ", action, " dims ", names, " and dims ",

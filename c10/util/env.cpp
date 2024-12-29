@@ -52,7 +52,7 @@ std::optional<std::string> get_env(const char* name) noexcept {
 #pragma warning(disable : 4996)
 #endif
   // NOLINTNEXTLINE(concurrency-mt-unsafe)
-  auto envar = std::getenv(name);
+  auto* envar = std::getenv(name);
 #ifdef _MSC_VER
 #pragma warning(pop)
 #endif

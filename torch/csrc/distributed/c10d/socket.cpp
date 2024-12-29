@@ -262,7 +262,7 @@ struct formatter<c10d::detail::SocketImpl> {
       FormatContext& ctx) const {
     ::sockaddr_storage addr_s{};
 
-    auto addr_ptr = reinterpret_cast<::sockaddr*>(&addr_s);
+    auto* addr_ptr = reinterpret_cast<::sockaddr*>(&addr_s);
 
     ::socklen_t addr_len = sizeof(addr_s);
 
@@ -306,7 +306,7 @@ SocketImpl::~SocketImpl() {
 std::unique_ptr<SocketImpl> SocketImpl::accept() const {
   ::sockaddr_storage addr_s{};
 
-  auto addr_ptr = reinterpret_cast<::sockaddr*>(&addr_s);
+  auto* addr_ptr = reinterpret_cast<::sockaddr*>(&addr_s);
 
   ::socklen_t addr_len = sizeof(addr_s);
 

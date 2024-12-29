@@ -40,7 +40,7 @@ void PyObjectSlot::unchecked_clear_pyobj(PyInterpreter* interpreter) {
 }
 
 PyInterpreter& PyObjectSlot::load_pyobj_interpreter() const {
-  auto interpreter = pyobj_interpreter_.load(std::memory_order_acquire);
+  auto* interpreter = pyobj_interpreter_.load(std::memory_order_acquire);
   if (interpreter) {
     return *interpreter;
   }

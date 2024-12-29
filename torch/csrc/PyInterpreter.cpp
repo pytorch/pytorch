@@ -589,7 +589,7 @@ static void set_tensor_attr_with_capsule(
       getPyInterpreter(), /*ignore_hermetic_tls=*/false);
   TORCH_CHECK(
       mb_obj.has_value(), "Tensor subclass's PyInterpreter has no value");
-  auto obj = mb_obj.value();
+  auto* obj = mb_obj.value();
   py::handle(obj).attr(attr_name) = capsule;
 }
 
@@ -617,7 +617,7 @@ static c10::ArrayRef<T> get_set_cached_attr(
       tensor->pyobj_slot()->check_pyobj(getPyInterpreter());
   TORCH_CHECK(
       mb_obj.has_value(), "Tensor subclass's PyInterpreter has no value");
-  auto tensor_obj = mb_obj.value();
+  auto* tensor_obj = mb_obj.value();
   auto buffer_len_attr_name = std::string(base_attr_name) + std::string("_len");
 
   bool is_buffer_allocated = false;

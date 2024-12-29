@@ -49,7 +49,7 @@ std::vector<at::IValue>& ScriptCall::stackRef() {
 }
 
 void ScriptCall::toIValues(std::vector<at::IValue>& ivalues) const {
-  for (auto& value : stack_) {
+  for (const auto& value : stack_) {
     ivalues.push_back(value);
   }
 
@@ -127,7 +127,7 @@ c10::intrusive_ptr<Message> ScriptCall::toMessageImpl() && {
 }
 
 std::unique_ptr<ScriptCall> ScriptCall::fromMessage(const Message& message) {
-  auto payload = static_cast<const char*>(message.payload().data());
+  const auto* payload = static_cast<const char*>(message.payload().data());
   auto payload_size = message.payload().size();
   auto value = jit::unpickle(
       payload,

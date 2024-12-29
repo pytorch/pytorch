@@ -126,9 +126,9 @@ std::vector<FileLineFunc> prepareCallstack(
   std::vector<FileLineFunc> entries;
   entries.reserve(cs.size());
   for (const auto& entry : cs) {
-    auto& range = entry.range;
+    const auto& range = entry.range;
     if (range.source()) {
-      auto& src = range.source();
+      const auto& src = range.source();
       if (src && src->filename()) {
         auto line =
             src->starting_line_no() + src->lineno_for_offset(range.start());
@@ -454,7 +454,7 @@ std::unordered_map<std::string, std::string> saveNcclMeta(
     const SaveNcclMetaConfig& config) {
   std::unordered_map<std::string, std::string> map;
 #ifdef USE_DISTRIBUTED
-  auto debugInfo = dynamic_cast<ParamCommsDebugInfo*>(
+  auto* debugInfo = dynamic_cast<ParamCommsDebugInfo*>(
       c10::ThreadLocalDebugInfo::get(c10::DebugInfoKind::PARAM_COMMS_INFO));
 
   if (config.introspectMetadata) {
@@ -463,7 +463,7 @@ std::unordered_map<std::string, std::string> saveNcclMeta(
                    << fn.name();
       return map;
     }
-    auto& collective_name = debugInfo->getCollectiveName();
+    const auto& collective_name = debugInfo->getCollectiveName();
     map.emplace(kCommsName, fmt::format("\"{}\"", collective_name));
     map.emplace(
         kDtype, fmt::format("\"{}\"", c10::toString(debugInfo->getDType())));
@@ -471,10 +471,10 @@ std::unordered_map<std::string, std::string> saveNcclMeta(
     map.emplace(
         kOutMsgNelems, std::to_string(debugInfo->getOutMessageNelems()));
 
-    auto& inSplitSizes = debugInfo->getInputSplitSizes();
+    const auto& inSplitSizes = debugInfo->getInputSplitSizes();
     map.emplace(kInSplit, format_list(inSplitSizes, config.truncate));
 
-    auto& outSplitSizes = debugInfo->getOutputSplitSizes();
+    const auto& outSplitSizes = debugInfo->getOutputSplitSizes();
     map.emplace(kOutSplit, format_list(outSplitSizes, config.truncate));
 
     auto globalRankStart = debugInfo->getGlobalRankStart();
@@ -486,15 +486,15 @@ std::unordered_map<std::string, std::string> saveNcclMeta(
       map.emplace(kGlobalRankStride, std::to_string(globalRankStride));
     }
     map.emplace(kGroupSize, std::to_string(debugInfo->getWorldSize()));
-    auto& group_name = debugInfo->getProcessGroupName();
+    const auto& group_name = debugInfo->getProcessGroupName();
     if (!group_name.empty()) {
       map.emplace(kProcessGroupName, fmt::format("\"{}\"", group_name));
     }
-    auto& group_desc = debugInfo->getProcessGroupDesc();
+    const auto& group_desc = debugInfo->getProcessGroupDesc();
     if (!group_desc.empty()) {
       map.emplace(kProcessGroupDesc, fmt::format("\"{}\"", group_desc));
     }
-    auto& groupRanks = debugInfo->getGroupRanks();
+    const auto& groupRanks = debugInfo->getGroupRanks();
     map.emplace(kGroupRanks, format_list(groupRanks, config.truncate));
 
     auto rank = debugInfo->getRank();
@@ -923,7 +923,7 @@ uint64_t computeFlops(
 // Currently it returns int representation of the last 20 bits of the address
 // value
 int getTensorStartHint(const at::Tensor& t) {
-  const auto tensor_impl = t.unsafeGetTensorImpl();
+  auto* const tensor_impl = t.unsafeGetTensorImpl();
   uintptr_t storage_addr = 0;
   storage_addr = reinterpret_cast<uintptr_t>(tensor_impl->storage().data());
   int last_bits = static_cast<int>(storage_addr & 0xFFFFF);

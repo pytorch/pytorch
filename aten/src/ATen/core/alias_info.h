@@ -129,19 +129,19 @@ template <>
       // because hash_combine is order dependent. Instead, we choose to
       // use XOR as the combining function as XOR is commutative.
       size_t before_set_hash_seed = 0;
-      for (auto &e: aliasInfo.beforeSets()) {
+      for (const auto &e: aliasInfo.beforeSets()) {
         auto symbol_hash = std::hash<c10::Symbol>()(e);
         before_set_hash_seed = before_set_hash_seed ^ symbol_hash;
       }
       size_t after_set_hash_seed = 0;
-      for (auto &e: aliasInfo.afterSets()) {
+      for (const auto &e: aliasInfo.afterSets()) {
         auto symbol_hash = std::hash<c10::Symbol>()(e);
         after_set_hash_seed = after_set_hash_seed ^ symbol_hash;
       }
 
       hash = c10::hash_combine(hash, before_set_hash_seed);
       hash = c10::hash_combine(hash, after_set_hash_seed);
-      for (auto &e: aliasInfo.containedTypes()) {
+      for (const auto &e: aliasInfo.containedTypes()) {
         auto contained_type_hash = std::hash<c10::AliasInfo>()(e);
         hash = c10::hash_combine(hash, contained_type_hash);
       }

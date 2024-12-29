@@ -1208,7 +1208,7 @@ class StorageOverlapChecker {
 
   void reset(bool overlapping) {
     auto& vec = _get(overlapping);
-    for (auto item : vec) {
+    for (auto* item : vec) {
       Py_DECREF(item);
     }
     vec.clear();
@@ -3113,7 +3113,7 @@ class TORCH_FUNCTION_MODE_STACK : public LeafGuard {
     Py_ssize_t len = PyList_Size(initial_stack.ptr());
     for (Py_ssize_t idx = 0; idx < len; idx++) {
       PyObject* mode = PyList_GetItem(initial_stack.ptr(), idx); // borrowed ref
-      auto type = Py_TYPE(mode);
+      auto* type = Py_TYPE(mode);
       this->_ref_stack.push_back(type);
     }
   }
@@ -4768,7 +4768,7 @@ PyObject* torch_c_dynamo_guards_init() {
   if (PyType_Ready(&GlobalStateGuardType) < 0)
     return nullptr;
 
-  auto m = PyModule_Create(&_module);
+  auto* m = PyModule_Create(&_module);
   if (m == nullptr)
     return nullptr;
 

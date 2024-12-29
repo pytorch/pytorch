@@ -8,7 +8,7 @@ std::vector<AtenTensorHandle> unsafe_alloc_new_handles_from_tensors(
   std::vector<AtenTensorHandle> result;
   result.reserve(tensors.size());
   for (auto tensor : tensors) {
-    auto allocated = new at::Tensor(std::move(tensor));
+    auto* allocated = new at::Tensor(std::move(tensor));
     result.push_back(tensor_pointer_to_tensor_handle(allocated));
   }
   return result;

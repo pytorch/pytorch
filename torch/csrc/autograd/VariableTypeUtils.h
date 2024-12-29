@@ -49,7 +49,7 @@ inline can_mutate_inplace_result can_mutate_inplace(
   if (!requires_grad || !GradMode::is_enabled()) {
     return can_mutate_inplace_result::success;
   }
-  auto diff_view_meta = impl::get_view_autograd_meta(tensor);
+  auto* diff_view_meta = impl::get_view_autograd_meta(tensor);
   if (diff_view_meta && diff_view_meta->has_bw_view()) {
     if (diff_view_meta->get_creation_meta() != CreationMeta::DEFAULT) {
       return can_mutate_inplace_result::non_default_backward_view;
@@ -144,7 +144,7 @@ inline void rebase_history(
     const std::vector<Variable>& vars,
     const std::shared_ptr<Node>& grad_fn) {
   if (grad_fn) {
-    for (auto& var : vars) {
+    for (const auto& var : vars) {
       if (var.defined()) {
         auto output_nr = grad_fn->add_input_metadata(var);
         impl::rebase_history(var, {grad_fn, output_nr});
@@ -202,7 +202,7 @@ inline at::Tensor as_view(
   if (base.is_inference())
     return tensor;
 
-  auto diff_view_meta = torch::autograd::impl::get_view_autograd_meta(base);
+  auto* diff_view_meta = torch::autograd::impl::get_view_autograd_meta(base);
 
   // To speed up the most common case, we specially handle when both the forward
   // and backward view infos are the same, and so a single shared ViewInfo can
@@ -314,7 +314,7 @@ inline void check_no_requires_grad(
   if (!GradMode::is_enabled()) {
     return;
   }
-  for (auto& tensor : tensors) {
+  for (const auto& tensor : tensors) {
     check_no_requires_grad(tensor, name, fn_name, /*check_grad_mode*/ false);
   }
 }

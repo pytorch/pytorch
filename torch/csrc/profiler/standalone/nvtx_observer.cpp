@@ -24,7 +24,7 @@ struct NVTXThreadLocalState : ProfilerStateBase {
   }
 
   static NVTXThreadLocalState* getTLS() {
-    auto tls = ProfilerStateBase::get(/*global=*/false);
+    auto* tls = ProfilerStateBase::get(/*global=*/false);
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
         tls == nullptr || tls->profilerType() == ActiveProfilerType::NVTX);
     return static_cast<NVTXThreadLocalState*>(tls);
@@ -66,7 +66,7 @@ std::pair<at::RecordFunctionHandle, int> NVTXThreadLocalState::getOpIdFromInput(
 static std::list<std::pair<at::RecordFunctionHandle, int>> flattenOpIdList(
     const c10::List<c10::IValue>& list) {
   std::list<std::pair<at::RecordFunctionHandle, int>> input_op_id_list;
-  auto state_ptr = NVTXThreadLocalState::getTLS();
+  auto* state_ptr = NVTXThreadLocalState::getTLS();
   TORCH_INTERNAL_ASSERT(state_ptr, "Expected profiler state set");
   for (const c10::IValue& input : list) {
     if (input.isTensor()) {
@@ -82,7 +82,7 @@ static std::list<std::pair<at::RecordFunctionHandle, int>> getInputTensorOpIds(
     const at::RecordFunction& fn) {
   std::pair<at::RecordFunctionHandle, int> undefined_op_pair(0, -1);
   std::list<std::pair<at::RecordFunctionHandle, int>> input_producer_ops_;
-  auto state_ptr = NVTXThreadLocalState::getTLS();
+  auto* state_ptr = NVTXThreadLocalState::getTLS();
   TORCH_INTERNAL_ASSERT(state_ptr, "Expected profiler state set");
   for (const c10::IValue& input_item : fn.inputs()) {
     if (input_item.isTensor()) {
@@ -109,13 +109,13 @@ static std::list<std::pair<at::RecordFunctionHandle, int>> getInputTensorOpIds(
 
 static void updateOutputTensorTracker(const at::RecordFunction& fn) {
   int output_nr = 0;
-  auto state_ptr = NVTXThreadLocalState::getTLS();
+  auto* state_ptr = NVTXThreadLocalState::getTLS();
   TORCH_INTERNAL_ASSERT(state_ptr, "Expected profiler state set");
   for (const c10::IValue& s_tensor : fn.outputs()) {
     if (s_tensor.isTensor()) {
       const at::Tensor& tensor = s_tensor.toTensor();
       if (tensor.defined()) {
-        auto ten_addr = tensor.unsafeGetTensorImpl();
+        auto* ten_addr = tensor.unsafeGetTensorImpl();
         state_ptr->setProducerTensorMap(ten_addr, fn.handle(), output_nr);
       }
     }
@@ -153,7 +153,7 @@ void pushNVTXCallbacks(
       c10::DebugInfoKind::PROFILER_STATE,
       std::make_shared<NVTXThreadLocalState>(config));
 
-  auto state_ptr = NVTXThreadLocalState::getTLS();
+  auto* state_ptr = NVTXThreadLocalState::getTLS();
   TORCH_INTERNAL_ASSERT(state_ptr, "Expected profiler state set");
 
   auto handle = at::addThreadLocalCallback(

@@ -69,10 +69,10 @@ static PyObject* THPEvent_pynew(
 }
 
 PyObject* THPEvent_new(c10::DeviceType device_type, c10::EventFlag flag) {
-  auto type = (PyTypeObject*)&THPEventType;
+  auto* type = (PyTypeObject*)&THPEventType;
   auto self = THPObjectPtr{type->tp_alloc(type, 0)};
   TORCH_CHECK(self, "Failed to allocate memory for Event");
-  auto self_ = reinterpret_cast<THPEvent*>(self.get());
+  auto* self_ = reinterpret_cast<THPEvent*>(self.get());
   new (&self_->event) c10::Event(device_type, flag);
   return self.release();
 }
@@ -96,7 +96,7 @@ static PyObject* THPEvent_record(
     PyObject* args,
     PyObject* kwargs) {
   HANDLE_TH_ERRORS
-  auto self = (THPEvent*)_self;
+  auto* self = (THPEvent*)_self;
   PyObject* _stream = Py_None;
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
   constexpr const char* accepted_args[] = {"stream", nullptr};
@@ -111,7 +111,7 @@ static PyObject* THPEvent_record(
     return nullptr;
   }
   if (_stream != Py_None) {
-    auto stream = (THPStream*)_stream;
+    auto* stream = (THPStream*)_stream;
     self->event.record(c10::Stream::unpack3(
         stream->stream_id,
         static_cast<c10::DeviceIndex>(stream->device_index),
@@ -130,7 +130,7 @@ static PyObject* THPEvent_from_ipc_handle(
     PyObject* args,
     PyObject* kwargs) {
   HANDLE_TH_ERRORS
-  auto type = (PyTypeObject*)_type;
+  auto* type = (PyTypeObject*)_type;
 
   static torch::PythonArgParser parser({
       "from_ipc_handle(Device device, std::string ipc_handle)",
@@ -174,7 +174,7 @@ static PyObject* THPEvent_wait(
     PyObject* args,
     PyObject* kwargs) {
   HANDLE_TH_ERRORS {
-    auto self = (THPEvent*)_self;
+    auto* self = (THPEvent*)_self;
     PyObject* _stream = Py_None;
     // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
     constexpr const char* accepted_args[] = {"stream", nullptr};
@@ -189,7 +189,7 @@ static PyObject* THPEvent_wait(
       return nullptr;
     }
     if (_stream != Py_None) {
-      auto stream = (THPStream*)_stream;
+      auto* stream = (THPStream*)_stream;
       self->event.block(c10::Stream::unpack3(
           stream->stream_id,
           static_cast<c10::DeviceIndex>(stream->device_index),
@@ -206,15 +206,15 @@ static PyObject* THPEvent_wait(
 
 static PyObject* THPEvent_query(PyObject* _self, PyObject* noargs) {
   HANDLE_TH_ERRORS
-  auto self = (THPEvent*)_self;
+  auto* self = (THPEvent*)_self;
   return PyBool_FromLong(self->event.query());
   END_HANDLE_TH_ERRORS
 }
 
 static PyObject* THPEvent_elapsed_time(PyObject* _self, PyObject* _other) {
   HANDLE_TH_ERRORS
-  auto self = (THPEvent*)_self;
-  auto other = (THPEvent*)_other;
+  auto* self = (THPEvent*)_self;
+  auto* other = (THPEvent*)_other;
   return PyFloat_FromDouble(self->event.elapsedTime(other->event));
   END_HANDLE_TH_ERRORS
 }
@@ -222,7 +222,7 @@ static PyObject* THPEvent_elapsed_time(PyObject* _self, PyObject* _other) {
 static PyObject* THPEvent_synchronize(PyObject* _self, PyObject* noargs) {
   HANDLE_TH_ERRORS {
     pybind11::gil_scoped_release no_gil{};
-    auto self = (THPEvent*)_self;
+    auto* self = (THPEvent*)_self;
     self->event.synchronize();
   }
   Py_RETURN_NONE;
@@ -231,7 +231,7 @@ static PyObject* THPEvent_synchronize(PyObject* _self, PyObject* noargs) {
 
 static PyObject* THPEvent_evend_id(PyObject* _self, PyObject* noargs) {
   HANDLE_TH_ERRORS
-  auto self = (THPEvent*)_self;
+  auto* self = (THPEvent*)_self;
   return PyLong_FromVoidPtr(self->event.eventId());
   END_HANDLE_TH_ERRORS
 }

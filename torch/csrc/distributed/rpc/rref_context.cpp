@@ -304,9 +304,9 @@ void RRefContext::delAllUsersAndUnforkedOwners(
 c10::intrusive_ptr<RRef> RRefContext::getOrCreateRRef(
     const RRefForkData& rrefForkData,
     const TypePtr& type) {
-  auto& ownerId = rrefForkData.ownerId_;
-  auto& rrefId = rrefForkData.rrefId_;
-  auto& forkId = rrefForkData.forkId_;
+  const auto& ownerId = rrefForkData.ownerId_;
+  const auto& rrefId = rrefForkData.rrefId_;
+  const auto& forkId = rrefForkData.forkId_;
   if (ownerId == getWorkerId()) {
     return getOrCreateOwnerRRef(rrefId, type);
   } else {

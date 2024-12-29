@@ -68,7 +68,7 @@ struct FDE {
     if (augmentation_string_ && *augmentation_string_ == 'z') {
       augmentation_length_ = static_cast<int64_t>(LC.readULEB128());
       Lexer A(LC.loc());
-      for (auto ap = augmentation_string_ + 1; *ap; ap++) {
+      for (const auto* ap = augmentation_string_ + 1; *ap; ap++) {
         switch (*ap) {
           case 'L':
             lsda_enc = A.read<uint8_t>();
@@ -317,7 +317,7 @@ struct FDE {
             auto reg = L.readULEB128();
             auto len = L.readULEB128();
             // NOLINTNEXTLINE(performance-no-int-to-ptr)
-            auto end = (void*)((uint64_t)L.loc() + len);
+            auto* end = (void*)((uint64_t)L.loc() + len);
             auto op = L.read<uint8_t>();
             if ((op & 0xF0) == 0x70) { // DW_bregX
               auto rhs_reg = (op & 0xF);
@@ -333,7 +333,7 @@ struct FDE {
           case DW_CFA_def_cfa_expression: {
             auto len = L.readULEB128();
             // NOLINTNEXTLINE(performance-no-int-to-ptr)
-            auto end = (void*)((uint64_t)L.loc() + len);
+            auto* end = (void*)((uint64_t)L.loc() + len);
             auto op = L.read<uint8_t>();
             if ((op & 0xF0) == 0x70) { // DW_bregX
               auto rhs_reg = (op & 0xF);

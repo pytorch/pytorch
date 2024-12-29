@@ -727,7 +727,7 @@ inline void bgemm_tunable(CUDABLAS_BGEMM_ARGTYPES(DType)) {
 
 template <>
 void bgemm<double>(CUDABLAS_BGEMM_ARGTYPES(double)) {
-  auto tuning_ctx = at::cuda::tunable::getTuningContext();
+  auto *tuning_ctx = at::cuda::tunable::getTuningContext();
   if (tuning_ctx->IsTunableOpEnabled()) {
     bgemm_tunable<double>(CUDABLAS_BGEMM_ARGS(double));
   }
@@ -738,7 +738,7 @@ void bgemm<double>(CUDABLAS_BGEMM_ARGTYPES(double)) {
 
 template <>
 void bgemm<float>(CUDABLAS_BGEMM_ARGTYPES(float)) {
-  auto tuning_ctx = at::cuda::tunable::getTuningContext();
+  auto *tuning_ctx = at::cuda::tunable::getTuningContext();
   if (tuning_ctx->IsTunableOpEnabled()) {
     bgemm_tunable<float>(CUDABLAS_BGEMM_ARGS(float));
   }
@@ -749,7 +749,7 @@ void bgemm<float>(CUDABLAS_BGEMM_ARGTYPES(float)) {
 
 template <>
 void bgemm<c10::complex<double>>(CUDABLAS_BGEMM_ARGTYPES(c10::complex<double>)) {
-  auto tuning_ctx = at::cuda::tunable::getTuningContext();
+  auto *tuning_ctx = at::cuda::tunable::getTuningContext();
   if (tuning_ctx->IsTunableOpEnabled()) {
     bgemm_tunable<c10::complex<double>>(CUDABLAS_BGEMM_ARGS(c10::complex<double>));
   }
@@ -760,7 +760,7 @@ void bgemm<c10::complex<double>>(CUDABLAS_BGEMM_ARGTYPES(c10::complex<double>)) 
 
 template <>
 void bgemm<c10::complex<float>>(CUDABLAS_BGEMM_ARGTYPES(c10::complex<float>)) {
-  auto tuning_ctx = at::cuda::tunable::getTuningContext();
+  auto *tuning_ctx = at::cuda::tunable::getTuningContext();
   if (tuning_ctx->IsTunableOpEnabled()) {
     bgemm_tunable<c10::complex<float>>(CUDABLAS_BGEMM_ARGS(c10::complex<float>));
   }
@@ -771,7 +771,7 @@ void bgemm<c10::complex<float>>(CUDABLAS_BGEMM_ARGTYPES(c10::complex<float>)) {
 
 template <>
 void bgemm<at::Half>(CUDABLAS_BGEMM_ARGTYPES(at::Half)) {
-  auto tuning_ctx = at::cuda::tunable::getTuningContext();
+  auto *tuning_ctx = at::cuda::tunable::getTuningContext();
   if (tuning_ctx->IsTunableOpEnabled()) {
     bgemm_tunable<at::Half>(CUDABLAS_BGEMM_ARGS(at::Half));
   }
@@ -782,7 +782,7 @@ void bgemm<at::Half>(CUDABLAS_BGEMM_ARGTYPES(at::Half)) {
 
 template <>
 void bgemm<at::BFloat16>(CUDABLAS_BGEMM_ARGTYPES(at::BFloat16)) {
-  auto tuning_ctx = at::cuda::tunable::getTuningContext();
+  auto *tuning_ctx = at::cuda::tunable::getTuningContext();
   if (tuning_ctx->IsTunableOpEnabled()) {
     bgemm_tunable<at::BFloat16>(CUDABLAS_BGEMM_ARGS(at::BFloat16));
   }
@@ -1144,7 +1144,7 @@ inline void gemm_tunable(CUDABLAS_GEMM_ARGTYPES(DType)) {
 
 template <>
 void gemm<double>(CUDABLAS_GEMM_ARGTYPES(double)) {
-  auto tuning_ctx = at::cuda::tunable::getTuningContext();
+  auto *tuning_ctx = at::cuda::tunable::getTuningContext();
   if (tuning_ctx->IsTunableOpEnabled()) {
     gemm_tunable<double>(CUDABLAS_GEMM_ARGS(double));
   }
@@ -1155,7 +1155,7 @@ void gemm<double>(CUDABLAS_GEMM_ARGTYPES(double)) {
 
 template <>
 void gemm<float>(CUDABLAS_GEMM_ARGTYPES(float)) {
-  auto tuning_ctx = at::cuda::tunable::getTuningContext();
+  auto *tuning_ctx = at::cuda::tunable::getTuningContext();
   if (tuning_ctx->IsTunableOpEnabled()) {
     gemm_tunable<float>(CUDABLAS_GEMM_ARGS(float));
   }
@@ -1166,7 +1166,7 @@ void gemm<float>(CUDABLAS_GEMM_ARGTYPES(float)) {
 
 template <>
 void gemm<c10::complex<double>>(CUDABLAS_GEMM_ARGTYPES(c10::complex<double>)) {
-  auto tuning_ctx = at::cuda::tunable::getTuningContext();
+  auto *tuning_ctx = at::cuda::tunable::getTuningContext();
   if (tuning_ctx->IsTunableOpEnabled()) {
     gemm_tunable<c10::complex<double>>(CUDABLAS_GEMM_ARGS(c10::complex<double>));
   }
@@ -1177,7 +1177,7 @@ void gemm<c10::complex<double>>(CUDABLAS_GEMM_ARGTYPES(c10::complex<double>)) {
 
 template <>
 void gemm<c10::complex<float>>(CUDABLAS_GEMM_ARGTYPES(c10::complex<float>)) {
-  auto tuning_ctx = at::cuda::tunable::getTuningContext();
+  auto *tuning_ctx = at::cuda::tunable::getTuningContext();
   if (tuning_ctx->IsTunableOpEnabled()) {
     gemm_tunable<c10::complex<float>>(CUDABLAS_GEMM_ARGS(c10::complex<float>));
   }
@@ -1188,7 +1188,7 @@ void gemm<c10::complex<float>>(CUDABLAS_GEMM_ARGTYPES(c10::complex<float>)) {
 
 template <>
 void gemm<at::Half>(CUDABLAS_GEMM_ARGTYPES(at::Half)) {
-  auto tuning_ctx = at::cuda::tunable::getTuningContext();
+  auto *tuning_ctx = at::cuda::tunable::getTuningContext();
   if (tuning_ctx->IsTunableOpEnabled()) {
     gemm_tunable<at::Half>(CUDABLAS_GEMM_ARGS(at::Half));
   }
@@ -1199,7 +1199,7 @@ void gemm<at::Half>(CUDABLAS_GEMM_ARGTYPES(at::Half)) {
 
 template <>
 void gemm<at::BFloat16>(CUDABLAS_GEMM_ARGTYPES(at::BFloat16)) {
-  auto tuning_ctx = at::cuda::tunable::getTuningContext();
+  auto *tuning_ctx = at::cuda::tunable::getTuningContext();
   if (tuning_ctx->IsTunableOpEnabled()) {
     gemm_tunable<at::BFloat16>(CUDABLAS_GEMM_ARGS(at::BFloat16));
   }
@@ -2120,7 +2120,7 @@ void geqrfBatched<c10::complex<double>>(
 template <>
 void getrfBatched<double>(
     int n, double** dA_array, int ldda, int* ipiv_array, int* info_array, int batchsize) {
-  auto handle = at::cuda::getCurrentCUDABlasHandle();
+  auto *handle = at::cuda::getCurrentCUDABlasHandle();
   TORCH_CUDABLAS_CHECK(cublasDgetrfBatched(
       handle, n, dA_array, ldda, ipiv_array, info_array, batchsize));
 }
@@ -2128,7 +2128,7 @@ void getrfBatched<double>(
 template <>
 void getrfBatched<float>(
     int n, float** dA_array, int ldda, int* ipiv_array, int* info_array, int batchsize) {
-  auto handle = at::cuda::getCurrentCUDABlasHandle();
+  auto *handle = at::cuda::getCurrentCUDABlasHandle();
   TORCH_CUDABLAS_CHECK(cublasSgetrfBatched(
       handle, n, dA_array, ldda, ipiv_array, info_array, batchsize));
 }
@@ -2141,7 +2141,7 @@ void getrfBatched<c10::complex<double>>(
     int* ipiv_array,
     int* info_array,
     int batchsize) {
-  auto handle = at::cuda::getCurrentCUDABlasHandle();
+  auto *handle = at::cuda::getCurrentCUDABlasHandle();
   TORCH_CUDABLAS_CHECK(cublasZgetrfBatched(
       handle,
       n,
@@ -2160,7 +2160,7 @@ void getrfBatched<c10::complex<float>>(
     int* ipiv_array,
     int* info_array,
     int batchsize) {
-  auto handle = at::cuda::getCurrentCUDABlasHandle();
+  auto *handle = at::cuda::getCurrentCUDABlasHandle();
   TORCH_CUDABLAS_CHECK(cublasCgetrfBatched(
       handle,
       n,

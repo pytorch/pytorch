@@ -123,12 +123,12 @@ std::optional<c10::Device> compute_target_device(
   } else {
     // We need to loop through all of the (potentially multiple) TensorList
     // arguments In case, e.g. the first one is empty but the second is not.
-    for (auto& tens_list : tlist_args) {
+    for (const auto& tens_list : tlist_args) {
       for (const auto i : c10::irange(tens_list.size())) {
         return tens_list.get(i).device();
       }
     }
-    for (auto& tens_list : opt_tlist_args) {
+    for (const auto& tens_list : opt_tlist_args) {
       for (const auto i : c10::irange(tens_list.size())) {
         auto const& e = tens_list.get(i);
         if (e.has_value()) {
@@ -179,7 +179,7 @@ void ltc_eager_fallback(
   }
   _eager_fallback_counters[name]->AddValue(1);
 
-  auto& args = op.schema().arguments();
+  const auto& args = op.schema().arguments();
   auto arguments = torch::jit::last(stack, args.size());
 
   // Log each tensor argument.
@@ -208,7 +208,7 @@ void ts_eager_fallback(
     const c10::OperatorHandle& op,
     torch::jit::Stack* stack,
     c10::DeviceType device_type) {
-  auto& schema_args = op.schema().arguments();
+  const auto& schema_args = op.schema().arguments();
   const auto num_arguments = schema_args.size();
   auto arguments = torch::jit::last(stack, num_arguments);
   const auto arguments_begin = stack->size() - num_arguments;
@@ -259,7 +259,7 @@ void ts_eager_fallback(
   // updated data on the eager tensors back to the original inputs.
   for (const auto i : c10::irange(tensor_args_indices.size())) {
     auto tensor_idx = tensor_args_indices[i];
-    const auto alias_info = schema_args[tensor_idx].alias_info();
+    const auto* const alias_info = schema_args[tensor_idx].alias_info();
     if (alias_info != nullptr && alias_info->isWrite()) {
       at::_copy_from_and_resize(eager_tensors[i], tensor_args[i]);
     }
@@ -292,7 +292,7 @@ void ts_eager_fallback(
     if (returns[idx].isTensor()) {
       const auto& return_tens = returns[idx].toTensor();
       if (return_tens.defined()) {
-        const auto alias_info = schema_returns[idx].alias_info();
+        const auto* const alias_info = schema_returns[idx].alias_info();
         if (alias_info != nullptr && alias_info->isWrite()) {
           // Case (1): mutable alias case. Move the input ivalue directly onto
           // the stack in place of the existing eager output tensor.
@@ -302,7 +302,7 @@ void ts_eager_fallback(
           for (const auto i : c10::irange(tensor_args_indices.size())) {
             auto input_tensor_idx = tensor_args_indices[i];
             const auto& input_tensor = eager_tensors[i];
-            const auto input_alias_info =
+            const auto* const input_alias_info =
                 schema_args[input_tensor_idx].alias_info();
             if (input_tensor.defined() && input_alias_info != nullptr &&
                 *alias_info == *input_alias_info) {

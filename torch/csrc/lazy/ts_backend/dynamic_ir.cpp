@@ -14,7 +14,8 @@ TSOpVector SizeNode::Lower(
   std::vector<torch::jit::NamedValue> arguments;
   std::vector<torch::jit::NamedValue> kwarguments;
   arguments.reserve(2);
-  auto index = loctx->graph()->insertConstant(static_cast<int64_t>(this->dim_));
+  auto* index =
+      loctx->graph()->insertConstant(static_cast<int64_t>(this->dim_));
   arguments.emplace_back(loctx->GetOutputOp(operand(0)));
   arguments.emplace_back(index);
   torch::lazy::TSOpVector size_out =

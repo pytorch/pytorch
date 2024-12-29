@@ -465,7 +465,7 @@ const c10::List<c10::IValue> FlightRecorder::getCollectiveTrace(
       dict.insert(duration_key, *e.duration_);
     }
 
-    auto it = e.sizes_.begin();
+    auto* it = e.sizes_.begin();
     auto read_sizes = [&](const c10::SmallVector<int64_t, 4>& dims) {
       auto sizes = new_list();
       for (auto dim : dims) {
@@ -603,7 +603,7 @@ std::string FlightRecorder::dump_json(
       if (e.duration_) {
         j[duration_key_str] = *e.duration_;
       }
-      auto it = e.sizes_.begin();
+      auto* it = e.sizes_.begin();
       auto read_sizes = [&](const c10::SmallVector<int64_t, 4>& dims) {
         auto sizes = std::list<std::list<int64_t>>();
         for (auto dim : dims) {

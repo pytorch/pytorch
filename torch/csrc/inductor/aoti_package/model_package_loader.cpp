@@ -100,37 +100,37 @@ std::tuple<std::string, std::string> get_cpp_compile_command(
   std::string target_file = output_dir + filename + file_ext;
 
   std::string cflags_args = "";
-  for (auto& arg : compile_options["cflags"]) {
+  for (const auto& arg : compile_options["cflags"]) {
     cflags_args += "-" + arg.get<std::string>() + " ";
   }
 
   std::string definitions_args = "";
-  for (auto& arg : compile_options["definitions"]) {
+  for (const auto& arg : compile_options["definitions"]) {
     definitions_args += "-D " + arg.get<std::string>() + " ";
   }
 
   std::string include_dirs_args = "";
-  for (auto& arg : compile_options["include_dirs"]) {
+  for (const auto& arg : compile_options["include_dirs"]) {
     include_dirs_args += "-I" + arg.get<std::string>() + " ";
   }
 
   std::string ldflags_args = "";
-  for (auto& arg : compile_options["ldflags"]) {
+  for (const auto& arg : compile_options["ldflags"]) {
     ldflags_args += "-" + arg.get<std::string>() + " ";
   }
 
   std::string libraries_dirs_args = "";
-  for (auto& arg : compile_options["libraries_dirs"]) {
+  for (const auto& arg : compile_options["libraries_dirs"]) {
     libraries_dirs_args += "-L" + arg.get<std::string>() + " ";
   }
 
   std::string libraries_args = "";
-  for (auto& arg : compile_options["libraries"]) {
+  for (const auto& arg : compile_options["libraries"]) {
     libraries_args += "-l" + arg.get<std::string>() + " ";
   }
 
   std::string passthrough_parameters_args = "";
-  for (auto& arg : compile_options["passthrough_args"]) {
+  for (const auto& arg : compile_options["passthrough_args"]) {
     passthrough_parameters_args += arg.get<std::string>() + " ";
   }
 
@@ -320,7 +320,7 @@ void AOTIModelPackageLoader::load_metadata(const std::string& cpp_filename) {
 
   const nlohmann::json metadata_json_obj = load_json_file(metadata_json_path);
 
-  for (auto& item : metadata_json_obj.items()) {
+  for (const auto& item : metadata_json_obj.items()) {
     metadata_[item.key()] = item.value().get<std::string>();
   }
 }

@@ -54,9 +54,9 @@ detail::TypeMetaData* TypeMeta::typeMetaDatas() {
 
 uint16_t TypeMeta::existingMetaDataIndexForType(TypeIdentifier identifier) {
   auto* metaDatas = typeMetaDatas();
-  const auto end = metaDatas + nextTypeIndex;
+  auto* const end = metaDatas + nextTypeIndex;
   // MaxTypeIndex is not very large; linear search should be fine.
-  auto it = std::find_if(metaDatas, end, [identifier](const auto& metaData) {
+  auto* it = std::find_if(metaDatas, end, [identifier](const auto& metaData) {
     return metaData.id_ == identifier;
   });
   if (it == end) {

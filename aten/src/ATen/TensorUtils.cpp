@@ -61,7 +61,7 @@ void checkContiguous(CheckedFrom c, const TensorGeometryArg& t) {
 }
 
 void checkAllContiguous(CheckedFrom c, at::ArrayRef<TensorArg> ts) {
-  for (auto& t : ts) {
+  for (const auto& t : ts) {
     if (!t->defined()) continue;
     checkContiguous(c, t);
   }
@@ -101,7 +101,7 @@ void checkSize_symint(CheckedFrom c, const TensorGeometryArg& t, int64_t dim, co
 
 static void checkAllSame(CheckedFrom c, ArrayRef<TensorArg> tensors, void(*fn)(CheckedFrom, const TensorArg&, const TensorArg&)) {
   const TensorArg* t0 = nullptr;
-  for (auto& t : tensors) {
+  for (const auto& t : tensors) {
     if (!t->defined()) continue;
     if (t0 != nullptr) {
       fn(c, *t0, t);
@@ -239,7 +239,7 @@ static void checkBackend(CheckedFrom c, const Tensor& t, Backend backend) {
 }
 
 void checkBackend(CheckedFrom c, at::ArrayRef<Tensor> tensors, at::Backend backend) {
-  for (auto &t : tensors) {
+  for (const auto &t : tensors) {
     checkBackend(c, t, backend);
   }
 }
@@ -253,7 +253,7 @@ static void checkDeviceType(CheckedFrom c, const Tensor& t, DeviceType device_ty
 }
 
 void checkDeviceType(CheckedFrom c, at::ArrayRef<Tensor> tensors, at::DeviceType device_type) {
-  for (auto &t : tensors) {
+  for (const auto &t : tensors) {
     checkDeviceType(c, t, device_type);
   }
 }
@@ -267,7 +267,7 @@ void checkLayout(CheckedFrom c, const Tensor& t, Layout layout) {
 }
 
 void checkLayout(CheckedFrom c, at::ArrayRef<Tensor> tensors, at::Layout layout) {
-  for (auto &t : tensors) {
+  for (const auto &t : tensors) {
     checkLayout(c, t, layout);
   }
 }

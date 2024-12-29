@@ -38,7 +38,7 @@ cusparseHandle_t getCurrentCUDASparseHandle() {
   thread_local std::unique_ptr<CuSparsePoolType::PoolWindow> myPoolWindow(
       pool->newPoolWindow());
 
-  auto handle = myPoolWindow->reserve(device);
+  auto *handle = myPoolWindow->reserve(device);
   TORCH_CUDASPARSE_CHECK(cusparseSetStream(handle, c10::cuda::getCurrentCUDAStream()));
   return handle;
 }

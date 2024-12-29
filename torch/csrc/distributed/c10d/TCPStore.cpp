@@ -363,7 +363,7 @@ void TCPStore::waitForWorkers() {
     while (true) {
       // TODO: Any chance to make this cleaner?
       std::vector<uint8_t> value = doGet(initKey_);
-      auto buf = reinterpret_cast<const char*>(value.data());
+      const auto* buf = reinterpret_cast<const char*>(value.data());
       auto len = value.size();
       int numWorkersCompleted = std::stoi(std::string(buf, len));
       if (numWorkersCompleted >= static_cast<int>(*numWorkers_)) {

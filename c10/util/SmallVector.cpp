@@ -113,7 +113,7 @@ void* SmallVectorBase<Size_T>::mallocForGrow(
     size_t& NewCapacity) {
   NewCapacity = getNewCapacity<Size_T>(MinSize, TSize, this->capacity());
   // NOLINTNEXTLINE(cppcoreguidelines-no-malloc)
-  auto Result = std::malloc(NewCapacity * TSize);
+  auto* Result = std::malloc(NewCapacity * TSize);
   if (Result == nullptr) {
     throw std::bad_alloc();
   }

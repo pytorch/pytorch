@@ -49,7 +49,7 @@ cudnnHandle_t getCudnnHandle() {
   thread_local std::unique_ptr<CudnnPoolType::PoolWindow> myPoolWindow(
       pool->newPoolWindow());
 
-  auto handle = myPoolWindow->reserve(device);
+  auto *handle = myPoolWindow->reserve(device);
   AT_CUDNN_CHECK(cudnnSetStream(handle, c10::cuda::getCurrentCUDAStream()));
   return handle;
 }

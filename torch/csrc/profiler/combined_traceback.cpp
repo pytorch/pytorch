@@ -11,7 +11,7 @@ std::shared_ptr<CapturedTraceback> CapturedTraceback::gather(
     bool cpp) {
   auto r = std::make_shared<CapturedTraceback>();
   if (python) {
-    auto p = python_support_.load();
+    auto* p = python_support_.load();
     while (p && r->frames_.empty()) {
       r->frames_ = p->gather();
       r->python_ = p;
