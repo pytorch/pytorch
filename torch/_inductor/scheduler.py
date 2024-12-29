@@ -3617,6 +3617,7 @@ class Scheduler:
             if (
                 device.type == "cuda"
                 and (device_props := torch.cuda.get_device_properties(device)).major < 7
+                and os.getenv("TORCH_TRITON_SKIP_CC_CHECKS") != "1"
             ):
                 raise GPUTooOldForTriton(device_props, inspect.currentframe())
             elif is_gpu(device.type) and not device.type == "mps":
