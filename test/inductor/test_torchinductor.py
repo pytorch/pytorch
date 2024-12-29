@@ -6220,7 +6220,10 @@ class CommonTemplate:
 
     @patch.object(cpp_prefix_path, "cache_clear", lambda: None)
     @config.patch(force_disable_caches=True)
-    def test_determinstic_codegen(self):
+    def test_deterministic_codegen(self):
+        if "cpu" in str(self.device) and config.is_fbcode():
+            raise unittest.SkipTest("cpp packaging is wacky in fbcode")
+
         @torch.compile(fullgraph=True)
         def a(x):
             return x.cos().sin().softmax(-1)
@@ -6265,7 +6268,10 @@ class CommonTemplate:
 
     @patch.object(cpp_prefix_path, "cache_clear", lambda: None)
     @config.patch(force_disable_caches=True)
-    def test_determinstic_codegen_on_graphbreak(self):
+    def test_deterministic_codegen_on_graph_break(self):
+        if "cpu" in str(self.device) and config.is_fbcode():
+            raise unittest.SkipTest("cpp packaging is wacky in fbcode")
+
         def a(x):
             return x.cos().sin().softmax(-1)
 
@@ -6282,7 +6288,10 @@ class CommonTemplate:
 
     @patch.object(cpp_prefix_path, "cache_clear", lambda: None)
     @config.patch(force_disable_caches=True)
-    def test_determinstic_codegen_with_suffix(self):
+    def test_deterministic_codegen_with_suffix(self):
+        if "cpu" in str(self.device) and config.is_fbcode():
+            raise unittest.SkipTest("cpp packaging is wacky in fbcode")
+
         @torch.compile(fullgraph=True)
         def a(x):
             return x.cos().sin().softmax(-1)
