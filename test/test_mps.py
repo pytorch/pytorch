@@ -6541,6 +6541,7 @@ class TestMPS(TestCaseMPS):
     def test_angle(self):
         def helper(shape, dtype):
             cpu_x = torch.randn(shape, device='cpu', dtype=dtype, requires_grad=False)
+            cpu_x.flatten()[0] = np.nan # Test that NaN is propagated correctly
             x = cpu_x.detach().clone().to('mps')
 
             angle_result = torch.angle(x)
