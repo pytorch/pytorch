@@ -35,7 +35,7 @@ sycl::event matmul(
 
   at::Tensor m1 = mat1;
   at::Tensor m2 = mat2;
-  
+
   undo_broadcast_on_batch(m1, m2);
 
   m1 = is_onednn_matmul_strides(m1) ? m1 : m1.contiguous();
