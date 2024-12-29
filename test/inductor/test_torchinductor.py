@@ -6220,6 +6220,7 @@ class CommonTemplate:
 
     @patch.object(cpp_prefix_path, "cache_clear", lambda: None)
     @config.patch(force_disable_caches=True)
+    @skip_if_cpp_wrapper("run_and_get_kernels issue")
     def test_deterministic_codegen(self):
         if "cpu" in str(self.device) and config.is_fbcode():
             raise unittest.SkipTest("cpp packaging is wacky in fbcode")
@@ -6268,6 +6269,7 @@ class CommonTemplate:
 
     @patch.object(cpp_prefix_path, "cache_clear", lambda: None)
     @config.patch(force_disable_caches=True)
+    @skip_if_cpp_wrapper("run_and_get_kernels issue")
     def test_deterministic_codegen_on_graph_break(self):
         if "cpu" in str(self.device) and config.is_fbcode():
             raise unittest.SkipTest("cpp packaging is wacky in fbcode")
@@ -6288,6 +6290,7 @@ class CommonTemplate:
 
     @patch.object(cpp_prefix_path, "cache_clear", lambda: None)
     @config.patch(force_disable_caches=True)
+    @skip_if_cpp_wrapper("run_and_get_kernels issue")
     def test_deterministic_codegen_with_suffix(self):
         if "cpu" in str(self.device) and config.is_fbcode():
             raise unittest.SkipTest("cpp packaging is wacky in fbcode")
