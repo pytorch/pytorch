@@ -64,7 +64,7 @@ def call_hook(
     return result
 
 
-def wrap_numpy(f: Callable[_P, pytree.PyTree]) -> Callable[_P, pytree.PyTree]:
+def wrap_numpy(f: Callable[_P, _R]) -> Callable[_P, _R]:
     r"""Decorator that turns a function from ``np.ndarray``s to ``np.ndarray``s into a function
     from ``torch.Tensor``s to ``torch.Tensor``s.
     """
