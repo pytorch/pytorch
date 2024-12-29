@@ -1270,7 +1270,8 @@ class PythonWrapperCodegen(CodeGen):
 
         # conservatively use the sum of all allocated buffer sizes
         # in potentially nested scopes as the total allocated size
-        total_allocated_buffer_size = sum(
+        # FIXME(rec): not used
+        _total_allocated_buffer_size = sum(
             s.total_allocated_buffer_size for s in past_planning_states
         )
 
@@ -2337,6 +2338,7 @@ class PythonWrapperCodegen(CodeGen):
             return
 
         self.push_codegened_graph(subgraph.graph)
+        self.writeline("")
         self.writeline(f"{self.comment} subgraph: {subgraph.name}")
         self.codegen_subgraph_prefix(subgraph, outer_inputs, outer_outputs)
 

@@ -15,10 +15,6 @@ on:
         required: false
         type: string
         description: Root directory for the pytorch/pytorch repository. Not actually needed, but currently passing it in since we pass in the same inputs to the reusable workflows of all binary builds
-      BUILDER_ROOT:
-        required: false
-        type: string
-        description: Root directory for the pytorch/builder repository. Not actually needed, but currently passing it in since we pass in the same inputs to the reusable workflows of all binary builds
       PACKAGE_TYPE:
         required: true
         type: string
@@ -81,7 +77,6 @@ jobs:
       image: continuumio/miniconda3:4.12.0
     env:
       PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
       PACKAGE_TYPE: ${{ inputs.PACKAGE_TYPE }}
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION

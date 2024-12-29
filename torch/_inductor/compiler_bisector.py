@@ -1,9 +1,11 @@
+import atexit
 import collections
 import dataclasses
 import functools
 import os
 import shutil
 import sys
+import tempfile
 from dataclasses import dataclass, field
 from typing import Callable, Dict, List, Optional, Tuple
 
@@ -114,9 +116,11 @@ class CompilerBisector:
 
     bisection_enabled: bool = False
 
+    in_process_cache: Optional[str] = None
+
     @classmethod
     def get_dir(cls) -> str:
-        return f"{cache_dir()}/{SUBDIR_NAME}"
+        return f"{cache_dir() if not cls.in_process_cache else cls.in_process_cache}/{SUBDIR_NAME}"
 
     @classmethod
     def write_lines_to_file(cls, file_path: str, lines: List[str]) -> None:
@@ -285,8 +289,10 @@ class CompilerBisector:
 
     @classmethod
     def delete_bisect_status(cls) -> None:
-        if os.path.exists(cls.get_dir()):
-            shutil.rmtree(cls.get_dir())
+        # in process_cache we have created if it exists, just the subdirectory of non created dir
+        dir_name = cls.in_process_cache if cls.in_process_cache else cls.get_dir()
+        if os.path.exists(dir_name):
+            shutil.rmtree(dir_name)
             print("Bisection status deleted.")
         else:
             print("No bisection status found.")
@@ -485,12 +491,19 @@ class CompilerBisector:
             bisection_enabled_orig = cls.bisection_enabled
             cls.delete_bisect_status()
             cls.bisection_enabled = True
+            cls.in_process_cache = tempfile.mkdtemp()
 
-            # TODO - cli interface, and in-process different directories
+            def cleanup() -> None:
+                cls.bisection_enabled = bisection_enabled_orig
+                cls.delete_bisect_status()
+                cls.in_process_cache = None
+
+            cleanup_handler = atexit.register(cleanup)
+
             class DisableBisect:
                 def __del__(self) -> None:
-                    cls.bisection_enabled = bisection_enabled_orig
-                    cls.delete_bisect_status()
+                    cleanup()
+                    atexit.unregister(cleanup_handler)
 
             _cleanup = DisableBisect()
 

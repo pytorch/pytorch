@@ -148,7 +148,7 @@ if try_import_cutlass():
                 "layout_d": LayoutTag[instance_layout_D],  # type: ignore[name-defined]
                 "element_accumulator": DataTypeTag[operation.accumulator_type()],  # type: ignore[name-defined]
                 "opcode_class": OpcodeClassTag[operation.tile_description.math_instruction.opcode_class],  # type: ignore[name-defined] # noqa: B950
-                "arch": "cutlass::arch::Sm%d" % operation.arch,
+                "arch": f"cutlass::arch::Sm{operation.arch:d}",
                 "tile_shape_m": str(operation.tile_description.tile_shape[0]),
                 "tile_shape_n": str(operation.tile_description.tile_shape[1]),
                 "tile_shape_k": str(operation.tile_description.tile_shape[2]),

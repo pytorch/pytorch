@@ -35,8 +35,12 @@ setup-env: ensure-branch-clean
 setup-env-cuda:
 	$(MAKE) setup-env PYTHON="$(PYTHON)" NIGHTLY_TOOL_OPTS="$(NIGHTLY_TOOL_OPTS) --cuda"
 
+setup-env-rocm:
+	$(MAKE) setup-env PYTHON="$(PYTHON)" NIGHTLY_TOOL_OPTS="$(NIGHTLY_TOOL_OPTS) --rocm"
+
 setup_env: setup-env
 setup_env_cuda: setup-env-cuda
+setup_env_rocm: setup-env-rocm
 
 setup-lint:
 	$(PIP) install lintrunner

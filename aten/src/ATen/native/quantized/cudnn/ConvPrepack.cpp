@@ -7,6 +7,7 @@
 #include <torch/library.h>
 #include <ATen/native/quantized/cpu/QuantUtils.h>
 #include <ATen/native/quantized/cudnn/utils.h>
+#include <ATen/native/quantized/library.h>
 #include <ATen/native/quantized/PackedParams.h>
 #include <ATen/quantized/Quantizer.h>
 #include <c10/core/QScheme.h>
@@ -14,12 +15,6 @@
 #include <torch/library.h>
 
 #include <utility>
-
-template <int kSpatialDim = 2>
-int register_conv_params();
-
-extern template int register_conv_params<2>();
-extern template int register_conv_params<3>();
 
 template <int kSpatialDim>
 c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> PackedConvWeightCudnn<

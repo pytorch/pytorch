@@ -83,7 +83,7 @@ class DistMathOpsTest(DTensorTestBase):
 
     @with_comms
     def test_linear_op_reductions(self):
-        for op_str in ("all", "sum", "prod", "max", "min", "any"):
+        for op_str in ("all", "sum", "prod", "max", "min", "any", "amax", "amin"):
             self.linear_op_reductions(op_str)
 
     @with_comms

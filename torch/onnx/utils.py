@@ -1532,8 +1532,8 @@ def _set_input_and_output_names(graph, input_names, output_names):
             return
         if len(name_list) > len(node_list):
             raise RuntimeError(
-                "number of %s names provided (%d) exceeded number of %ss (%d)"
-                % (descriptor, len(name_list), descriptor, len(node_list))
+                f"number of {descriptor} names provided ({len(name_list)}) "
+                f"exceeded number of {descriptor}s ({len(node_list)})"
             )
 
         # Mark if the output node DebugName is set before.

@@ -1172,7 +1172,13 @@ def trace_structured(
     payload is an arbitrary string, which can be arbitrarily long (but expected to have
     newlines so no lines are too long)
     """
-    assert "name" not in ["rank", "frame_id", "frame_compile_id", "attempt"]
+    assert "name" not in [
+        "rank",
+        "compiled_autograd_id",
+        "frame_id",
+        "frame_compile_id",
+        "attempt",
+    ]
     assert callable(
         metadata_fn
     ), f"metadata_fn should be callable, but got {type(metadata_fn)}"
@@ -1191,22 +1197,26 @@ def trace_structured(
             # never changes and we assume no interleaving
             if dist.is_available() and dist.is_initialized():
                 record["rank"] = dist.get_rank()
-            if (
-                trace_id := torch._guards.CompileContext.current_trace_id()
-            ) is not None:
-                record["frame_id"] = trace_id.compile_id.frame_id
-                record["frame_compile_id"] = trace_id.compile_id.frame_compile_id
-                record["attempt"] = trace_id.attempt
-            elif compile_id is not None:
-                record["frame_id"] = compile_id.frame_id
-                record["frame_compile_id"] = compile_id.frame_compile_id
+
+            trace_id = torch._guards.CompileContext.current_trace_id()
+            if expect_trace_id and trace_id is None and compile_id is None:
+                # Record the stack of the log call to better diagnose why we
+                # don't have a frame id for it
+                record["stack"] = torch._logging.structured.from_traceback(
+                    CapturedTraceback.extract(skip=1).summary()
+                )
             else:
-                if expect_trace_id:
-                    # Record the stack of the log call to better diagnose why we
-                    # don't have a frame id for it
-                    record["stack"] = torch._logging.structured.from_traceback(
-                        CapturedTraceback.extract(skip=1).summary()
-                    )
+                cid = trace_id.compile_id if trace_id else compile_id
+                if cid is not None:
+                    if cid.compiled_autograd_id is not None:
+                        record["compiled_autograd_id"] = cid.compiled_autograd_id
+                    if cid.frame_id is not None:
+                        record["frame_id"] = cid.frame_id
+                    if cid.frame_compile_id is not None:
+                        record["frame_compile_id"] = cid.frame_compile_id
+                if trace_id:
+                    record["attempt"] = trace_id.attempt
+
         payload = payload_fn()
         if payload is not None:
             if not isinstance(payload, str):

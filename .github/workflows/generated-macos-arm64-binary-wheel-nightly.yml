@@ -38,7 +38,6 @@ jobs:
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
-      BUILDER_ROOT: ${{ github.workspace }}/builder
       PACKAGE_TYPE: wheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -106,6 +105,22 @@ jobs:
           export USE_COREML_DELEGATE
           export TORCH_PACKAGE_NAME
           "${PYTORCH_ROOT}/.ci/wheel/build_wheel.sh"
+      - name: Test PyTorch wheel
+        run: |
+          # shellcheck disable=SC1091
+          source "${RUNNER_TEMP}/anaconda/bin/activate"
+          set -eux -o pipefail
+          # shellcheck disable=SC1090
+          source "${BINARY_ENV_FILE:-/Users/distiller/project/env}"
+          pip uninstall -y "$TORCH_PACKAGE_NAME" || true
+          pip uninstall -y "$TORCH_PACKAGE_NAME" || true
+
+          # Create new "clean" conda environment for testing
+          conda create -yn "test_conda_env" python="$DESIRED_PYTHON"
+          conda activate test_conda_env
+
+          pip install "$PYTORCH_FINAL_PACKAGE_DIR"/*.whl numpy -v
+          python "${PYTORCH_ROOT}/.ci/pytorch/smoke_test/smoke_test.py" --package torchonly
       - uses: actions/upload-artifact@v4.4.0
         if: always()
         with:
@@ -121,7 +136,6 @@ jobs:
     needs: wheel-py3_9-cpu-build
     with:
       PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
       PACKAGE_TYPE: wheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -142,7 +156,6 @@ jobs:
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
-      BUILDER_ROOT: ${{ github.workspace }}/builder
       PACKAGE_TYPE: wheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -210,6 +223,22 @@ jobs:
           export USE_COREML_DELEGATE
           export TORCH_PACKAGE_NAME
           "${PYTORCH_ROOT}/.ci/wheel/build_wheel.sh"
+      - name: Test PyTorch wheel
+        run: |
+          # shellcheck disable=SC1091
+          source "${RUNNER_TEMP}/anaconda/bin/activate"
+          set -eux -o pipefail
+          # shellcheck disable=SC1090
+          source "${BINARY_ENV_FILE:-/Users/distiller/project/env}"
+          pip uninstall -y "$TORCH_PACKAGE_NAME" || true
+          pip uninstall -y "$TORCH_PACKAGE_NAME" || true
+
+          # Create new "clean" conda environment for testing
+          conda create -yn "test_conda_env" python="$DESIRED_PYTHON"
+          conda activate test_conda_env
+
+          pip install "$PYTORCH_FINAL_PACKAGE_DIR"/*.whl numpy -v
+          python "${PYTORCH_ROOT}/.ci/pytorch/smoke_test/smoke_test.py" --package torchonly
       - uses: actions/upload-artifact@v4.4.0
         if: always()
         with:
@@ -225,7 +254,6 @@ jobs:
     needs: wheel-py3_10-cpu-build
     with:
       PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
       PACKAGE_TYPE: wheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -246,7 +274,6 @@ jobs:
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
-      BUILDER_ROOT: ${{ github.workspace }}/builder
       PACKAGE_TYPE: wheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -314,6 +341,22 @@ jobs:
           export USE_COREML_DELEGATE
           export TORCH_PACKAGE_NAME
           "${PYTORCH_ROOT}/.ci/wheel/build_wheel.sh"
+      - name: Test PyTorch wheel
+        run: |
+          # shellcheck disable=SC1091
+          source "${RUNNER_TEMP}/anaconda/bin/activate"
+          set -eux -o pipefail
+          # shellcheck disable=SC1090
+          source "${BINARY_ENV_FILE:-/Users/distiller/project/env}"
+          pip uninstall -y "$TORCH_PACKAGE_NAME" || true
+          pip uninstall -y "$TORCH_PACKAGE_NAME" || true
+
+          # Create new "clean" conda environment for testing
+          conda create -yn "test_conda_env" python="$DESIRED_PYTHON"
+          conda activate test_conda_env
+
+          pip install "$PYTORCH_FINAL_PACKAGE_DIR"/*.whl numpy -v
+          python "${PYTORCH_ROOT}/.ci/pytorch/smoke_test/smoke_test.py" --package torchonly
       - uses: actions/upload-artifact@v4.4.0
         if: always()
         with:
@@ -329,7 +372,6 @@ jobs:
     needs: wheel-py3_11-cpu-build
     with:
       PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
       PACKAGE_TYPE: wheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -350,7 +392,6 @@ jobs:
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
-      BUILDER_ROOT: ${{ github.workspace }}/builder
       PACKAGE_TYPE: wheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -418,6 +459,22 @@ jobs:
           export USE_COREML_DELEGATE
           export TORCH_PACKAGE_NAME
           "${PYTORCH_ROOT}/.ci/wheel/build_wheel.sh"
+      - name: Test PyTorch wheel
+        run: |
+          # shellcheck disable=SC1091
+          source "${RUNNER_TEMP}/anaconda/bin/activate"
+          set -eux -o pipefail
+          # shellcheck disable=SC1090
+          source "${BINARY_ENV_FILE:-/Users/distiller/project/env}"
+          pip uninstall -y "$TORCH_PACKAGE_NAME" || true
+          pip uninstall -y "$TORCH_PACKAGE_NAME" || true
+
+          # Create new "clean" conda environment for testing
+          conda create -yn "test_conda_env" python="$DESIRED_PYTHON"
+          conda activate test_conda_env
+
+          pip install "$PYTORCH_FINAL_PACKAGE_DIR"/*.whl numpy -v
+          python "${PYTORCH_ROOT}/.ci/pytorch/smoke_test/smoke_test.py" --package torchonly
       - uses: actions/upload-artifact@v4.4.0
         if: always()
         with:
@@ -433,7 +490,6 @@ jobs:
     needs: wheel-py3_12-cpu-build
     with:
       PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
       PACKAGE_TYPE: wheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -454,7 +510,6 @@ jobs:
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
-      BUILDER_ROOT: ${{ github.workspace }}/builder
       PACKAGE_TYPE: wheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -522,6 +577,22 @@ jobs:
           export USE_COREML_DELEGATE
           export TORCH_PACKAGE_NAME
           "${PYTORCH_ROOT}/.ci/wheel/build_wheel.sh"
+      - name: Test PyTorch wheel
+        run: |
+          # shellcheck disable=SC1091
+          source "${RUNNER_TEMP}/anaconda/bin/activate"
+          set -eux -o pipefail
+          # shellcheck disable=SC1090
+          source "${BINARY_ENV_FILE:-/Users/distiller/project/env}"
+          pip uninstall -y "$TORCH_PACKAGE_NAME" || true
+          pip uninstall -y "$TORCH_PACKAGE_NAME" || true
+
+          # Create new "clean" conda environment for testing
+          conda create -yn "test_conda_env" python="$DESIRED_PYTHON"
+          conda activate test_conda_env
+
+          pip install "$PYTORCH_FINAL_PACKAGE_DIR"/*.whl numpy -v
+          python "${PYTORCH_ROOT}/.ci/pytorch/smoke_test/smoke_test.py" --package torchonly
       - uses: actions/upload-artifact@v4.4.0
         if: always()
         with:
@@ -537,7 +608,6 @@ jobs:
     needs: wheel-py3_13-cpu-build
     with:
       PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
       PACKAGE_TYPE: wheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION

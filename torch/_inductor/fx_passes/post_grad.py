@@ -5,7 +5,7 @@ import itertools
 import logging
 import operator
 from collections import Counter, defaultdict
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import torch
 import torch._inductor as inductor
@@ -38,6 +38,7 @@ from ..pattern_matcher import (
     KeywordArg,
     ListOf,
     Match,
+    MultiOutputPattern,
     MULTIPLE,
     PatternMatcherPass,
     register_graph_pattern,
@@ -1004,6 +1005,46 @@ def addmm(match, mat1, mat2, *, inp):
         return aten.addmm(inp, mat1, mat2)
 
     match.replace_by_example(repl, [inp, mat1, mat2])
+
+
+def register_partial_reduction_pattern():
+    "Reuse partial reductions in complete reductions"
+
+    # post grad equivalents
+    equiv_red = {
+        aten.amax.default: aten.max.default,
+        aten.amin.default: aten.min.default,
+    }
+
+    # TODO: to support other reductions like sum, would need to skip
+    # lower precision reductions since partial output would need to be kept at fp32.
+    for red_op in (aten.amax.default, aten.amin.default):
+        inp = KeywordArg("input")
+        partial_reduc = CallFunction(
+            red_op, inp, KeywordArg("reduced_dims"), KeywordArg("keepdim")
+        )
+        full_reduc = CallFunction([red_op, equiv_red[red_op]], inp)
+
+        @register_graph_pattern(
+            MultiOutputPattern([partial_reduc, full_reduc]), pass_dict=pass_patterns[2]
+        )
+        def reuse_partial(match, input, reduced_dims, keepdim):
+            partial_red, full_red = match.output_nodes()
+
+            # if theyre small, reuse not worth it
+            if not statically_known_true(input.meta["val"].numel() >= 4096):
+                return True
+
+            def replacement(inp: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+                partial = partial_red.target(inp, reduced_dims, keepdim)
+                complete = full_red.target(partial)
+                return (partial, complete)
+
+            counters["inductor"]["partial_reduction_reuse"] += 1
+            match.replace_by_example(replacement, [input])
+
+
+register_partial_reduction_pattern()
 
 
 def check_shape_cuda_and_fused_int_mm_mul_enabled(match):

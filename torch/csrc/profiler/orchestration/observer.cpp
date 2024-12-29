@@ -19,6 +19,7 @@ ExperimentalConfig::ExperimentalConfig(
     bool enable_cuda_sync_events,
     bool adjust_profiler_step,
     bool disable_external_correlation,
+    bool profile_all_threads,
     bool adjust_timestamps)
     : profiler_metrics{std::move(profiler_metrics)},
       profiler_measure_per_kernel{profiler_measure_per_kernel},
@@ -27,6 +28,7 @@ ExperimentalConfig::ExperimentalConfig(
       enable_cuda_sync_events{enable_cuda_sync_events},
       adjust_profiler_step{adjust_profiler_step},
       disable_external_correlation{disable_external_correlation},
+      profile_all_threads{profile_all_threads},
       adjust_timestamps{adjust_timestamps} {}
 
 /*explicit*/ ExperimentalConfig::operator bool() const {
@@ -57,6 +59,10 @@ bool ProfilerConfig::disabled() const {
 
 bool ProfilerConfig::global() const {
   return state == torch::profiler::impl::ProfilerState::KINETO_ONDEMAND;
+}
+
+bool ProfilerConfig::pushGlobalCallbacks() const {
+  return global() || experimental_config.profile_all_threads;
 }
 
 namespace {
@@ -114,14 +120,15 @@ ProfilerStateBase::~ProfilerStateBase() {
       ? GlobalManager::get()
       : static_cast<ProfilerStateBase*>(
             c10::ThreadLocalDebugInfo::get(c10::DebugInfoKind::PROFILER_STATE));
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!out || out->config().global() == global);
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      !out || out->config().pushGlobalCallbacks() == global);
   return out;
 }
 
 /*static*/ void ProfilerStateBase::push(
     std::shared_ptr<ProfilerStateBase>&& state) {
   TORCH_INTERNAL_ASSERT(state != nullptr);
-  if (state->config().global()) {
+  if (state->config().pushGlobalCallbacks()) {
     GlobalManager::push(std::move(state));
   } else {
     c10::ThreadLocalDebugInfo::_push(c10::DebugInfoKind::PROFILER_STATE, state);

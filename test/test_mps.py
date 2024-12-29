@@ -5736,6 +5736,13 @@ class TestMPS(TestCaseMPS):
 
         helper(2, 8, 4, 5)
 
+    def test_fmin(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/143933
+        scalar = torch.tensor(.5)
+        x_mps = torch.rand(32, device="mps")
+        x_cpu = x_mps.detach().cpu()
+        self.assertEqual(torch.fmin(x_mps, scalar), torch.fmin(x_cpu, scalar))
+
     # Test forward sum
     def test_sum(self):
         def helper(n, c, h, w, dtype=torch.float32):

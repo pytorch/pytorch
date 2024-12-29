@@ -322,6 +322,10 @@ LINEAR_REDUCTION_OP_MAP = {
     aten.any.default: "sum",
     aten.any.dim: "sum",
     aten.any.out: "sum",
+    aten.amax.default: "max",
+    aten.amax.out: "max",
+    aten.amin.default: "min",
+    aten.amin.out: "min",
 }
 
 

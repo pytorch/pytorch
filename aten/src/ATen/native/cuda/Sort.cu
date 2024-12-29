@@ -1,7 +1,6 @@
 #define TORCH_ASSERT_NO_OPERATORS
 #include <ATen/native/cuda/Sort.h>
 #include <ATen/core/TensorBase.h>
-#include <ATen/core/Array.h>
 #include <ATen/Dispatch.h>
 #include <ATen/cuda/cub.cuh>
 #include <ATen/cuda/CUDAContext.h>
@@ -12,7 +11,6 @@
 #include <ATen/native/cuda/SortingCommon.cuh>
 
 #include <limits>
-#include <c10/core/DeviceArray.h>
 
 namespace at::native {
 

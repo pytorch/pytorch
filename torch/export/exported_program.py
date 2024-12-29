@@ -378,6 +378,24 @@ def _decompose_and_get_gm_with_new_signature_constants(
 
     if not _is_joint_ir_decomp(ep, joint_loss_index):
         mod = ep.module()
+
+        wrapped_params = dict(mod.named_parameters(remove_duplicate=False))
+
+        from torch._functorch._aot_autograd.subclass_parametrization import (
+            unwrap_tensor_subclass_parameters,
+        )
+
+        # [NOTE] Unwrapping subclasses AOT
+        # In torch.compile, the subclass unwrapping/wrapping happen at runtime
+        # but at export, this is impossible as it is intented to be run on
+        # C++ environment. As a result, we unwrap subclass parameters AOT. After this,
+        # ExportedProgram state_dict won't be same as eager model because eager model
+        # could have subclass weights while ExportedProgram will have desugared versions.
+        # This is fine because run_decompositions is supposed to specialize to post-autograd
+        # graph where the subclass desugaring is supposed to happen.
+        unwrap_tensor_subclass_parameters(mod)
+        unwrapped_params = dict(mod.named_parameters(remove_duplicate=False))
+
         # TODO T204030333
         fake_mode = _detect_fake_mode_from_gm(ep.graph_module)
         if fake_mode is None:
@@ -485,7 +503,27 @@ def _decompose_and_get_gm_with_new_signature_constants(
         _verify_stack_trace(gm)
         _verify_placeholder_names(gm, new_graph_signature)
 
-        return _remove_unneccessary_copy_op_pass(gm, new_graph_signature)
+        gm, new_graph_signature = _remove_unneccessary_copy_op_pass(
+            gm, new_graph_signature
+        )
+
+        # When we apply parameterixzation rule to unwrap
+        # subclasses, the state dict will now have different
+        # desugared parameters. We need to manually filter those
+        # and update the ep.state_dict. Ideally, we should just return
+        # the state dict of ep.module but ep.module only stores params
+        # buffers that participate in forward. If we undo this behaviour,
+        # it would break some downstream users.
+        for name, p in unwrapped_params.items():
+            if name not in wrapped_params:
+                ep.state_dict[name] = p
+
+        for name, p in wrapped_params.items():
+            assert name in ep.state_dict
+            if name not in unwrapped_params:
+                ep.state_dict.pop(name)
+
+        return gm, new_graph_signature, ep.state_dict
 
     old_placeholders = [
         node for node in ep.graph_module.graph.nodes if node.op == "placeholder"
@@ -651,7 +689,7 @@ def _decompose_and_get_gm_with_new_signature_constants(
         ):
             for k, v in old_node.meta.items():
                 new_node.meta[k] = v
-    return gm, new_graph_signature
+    return gm, new_graph_signature, ep.state_dict
 
 
 def _remove_unneccessary_copy_op_pass(
@@ -739,7 +777,11 @@ def _decompose_exported_program(
     python_decomp_table: Dict[torch._ops.OperatorBase, Callable],
     joint_loss_index: Optional[int],
 ):
-    gm, new_graph_signature = _decompose_and_get_gm_with_new_signature_constants(
+    (
+        gm,
+        new_graph_signature,
+        state_dict,
+    ) = _decompose_and_get_gm_with_new_signature_constants(
         ep,
         cia_to_decomp=cia_to_decomp,
         python_decomp_table=python_decomp_table,
@@ -769,7 +811,7 @@ def _decompose_exported_program(
         root=gm,
         graph=gm.graph,
         graph_signature=new_graph_signature,
-        state_dict=ep.state_dict,
+        state_dict=state_dict,
         range_constraints=new_range_constraints,
         module_call_graph=new_module_call_graph,
         example_inputs=ep.example_inputs,
