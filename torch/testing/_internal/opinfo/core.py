@@ -762,7 +762,6 @@ class OpInfo:
     # backward dtypes this function is expected to work with on XPU
     backward_dtypesIfXPU: _dispatch_dtypes = None
 
-
     # the following metadata describes the operators out= support
 
     # whether the op supports the out kwarg
@@ -958,7 +957,9 @@ class OpInfo:
             set(self.dtypesIfGPU) if self.dtypesIfGPU is not None else self.dtypes
         )
         self.dtypesIfCUDA = (
-            set(self.dtypesIfCUDA) if self.dtypesIfCUDA is not None else self.dtypesIfGPU
+            set(self.dtypesIfCUDA)
+            if self.dtypesIfCUDA is not None
+            else self.dtypesIfGPU
         )
         self.dtypesIfROCM = (
             set(self.dtypesIfROCM)
@@ -1042,7 +1043,7 @@ class OpInfo:
             set(self.backward_dtypes)
             if self.backward_dtypes is not None
             else self.dtypes
-        )        
+        )
 
         # NOTE: if the op is unspecified it is assumed to be under the torch namespace
         if not self.op:
