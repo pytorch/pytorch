@@ -6,7 +6,6 @@
 
 #include <ATen/OpMathType.h>
 #include <ATen/TensorIterator.h>
-#include <ATen/core/Array.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/detail/OffsetCalculator.cuh>
 #include <ATen/native/cuda/jit_utils.h>
