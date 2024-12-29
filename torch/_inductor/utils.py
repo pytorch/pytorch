@@ -1477,6 +1477,14 @@ def run_and_get_code(fn, *args, **kwargs) -> Tuple[Any, List[str]]:
     return result, source_codes
 
 
+def run_and_get_kernels(fn, *args, **kwargs) -> Tuple[Any, List[str]]:
+    result, source_codes = run_and_get_code(fn, *args, **kwargs)
+    kernels = []
+    for code in source_codes:
+        kernels.extend(re.findall(r"'''.*?'''", code, re.DOTALL))
+    return result, kernels
+
+
 def run_fw_bw_and_get_code(fn):
     def run_with_backward():
         result = fn()
