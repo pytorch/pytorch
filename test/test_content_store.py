@@ -23,7 +23,7 @@ from torch.utils._content_store import (
 
 @unittest.skipIf(IS_WINDOWS, "Test case not supported on Windows")
 class TestContentStore(TestCase):
-    def setUpClass(self):
+    def setUp(self):
         if not torch._dynamo.is_inductor_supported(self.device_type):
             raise unittest.SkipTest("Requires Inductor support")
 
