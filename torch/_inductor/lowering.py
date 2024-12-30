@@ -592,12 +592,13 @@ def make_pointwise(
         # in tracing, we will annotate pointwise nodes that correspond to the output of
         # a pointwise node that would have been run in eager. intermediary pointwise nodes
         # during decompositions are not annotated.
+        low_pr_fp = (torch.bfloat16, torch.float16)
         emulate_precision_casts = (
             V.graph is not None
             and getattr(V.graph, "current_node", None) is not None
             and V.graph.current_node.meta is not None
             and V.graph.current_node.meta.get("low_precision_pointwise_barrier", False)
-            and dtype in (torch.bfloat16, torch.float16)
+            and dtype in low_pr_fp
         )
 
         def inner_fn(index):
@@ -612,11 +613,12 @@ def make_pointwise(
                 return override_fn_when_gpu_float64(*[load(index) for load in loaders])
             else:
                 inputs_loaded = []
-                for load in loaders:
+                for inp_index, load in enumerate(loaders):
                     out = load(index)
-                    if emulate_precision_casts:
-                        downcast = ops.to_dtype(out, dtype, use_compute_types=False)
-                        out = ops.to_dtype(downcast, dtype)
+                    inp_dtype = inputs[inp_index].get_dtype()
+                    if emulate_precision_casts and inp_dtype in low_pr_fp:
+                        downcast = ops.to_dtype(out, inp_dtype, use_compute_types=False)
+                        out = ops.to_dtype(downcast, inp_dtype)
                     inputs_loaded.append(out)
 
                 out = fn(*inputs_loaded)
@@ -728,10 +730,6 @@ def _foreach_map(subgraph, *args, **kwargs):
     The graph outputs represent the vertically fused sequence of ops, and then register_operation_list
     below registers the buffers as horizontally fuseable in the scheduler.
     """
-    realize_outputs = (
-        len(V.graph.current_node.users) == 0 or cur_node_has_non_foreach_users()
-    )
-
     from .subgraph_lowering import PointwiseSubgraphLowering
 
     inputs = args[0]  # nested tuple
@@ -755,11 +753,7 @@ def _foreach_map(subgraph, *args, **kwargs):
         ) in group:
             outputs[output_ind] = output
 
-            if (
-                V.graph.has_feature(device, BackendFeature.FOREACH)
-                and use_foreach
-                and realize_outputs
-            ):
+            if V.graph.has_feature(device, BackendFeature.FOREACH) and use_foreach:
                 output.realize()
                 operation_list.append(output.get_operation_name())
 
@@ -2416,9 +2410,11 @@ def sdpa_constraint(fx_node, *args, **kwargs):
             return arg
 
         meta_val = fx_arg.meta["val"]
-        meta_stride = meta_val.stride()
+        meta_stride_expr = [
+            s.node.expr if isinstance(s, torch.SymInt) else s for s in meta_val.stride()
+        ]
 
-        stride_order = ir.get_stride_order(meta_stride)
+        stride_order = ir.get_stride_order(meta_val.stride())
 
         if stride_order and stride_order[-1] != 0:
             # contiguous stride order
@@ -2443,14 +2439,64 @@ def sdpa_constraint(fx_node, *args, **kwargs):
         # This value can be found in pytorch/aten/src/ATen/native/transformers/attention.cpp preprocess_mask
         ALIGNMENT = 8
 
+        # effn_attn_fwd does requires dense last dim, not just alignment
+        effn_attn_fwd_bias = (
+            fx_node.target
+            == torch.ops.aten._scaled_dot_product_efficient_attention.default
+            and idx == 3
+        )
+
         assert isinstance(arg, TensorBox)
         if len(arg.get_size()) not in (3, 4):
             return arg
 
         if ir.is_aligned_realized_tensor(arg, ALIGNMENT):
-            return V.graph.try_match_insignificant_strides(
-                ir.ExternKernel.realize_input(arg), meta_stride
+            return ir.try_match_insignificant_strides(
+                ir.ExternKernel.realize_input(arg), meta_stride_expr
             )
+
+        if (
+            isinstance(arg, IRNode)
+            and arg.maybe_get_stride() is not None
+            and ir.is_aligned_realized_tensor(arg, ALIGNMENT)
+        ):
+            return ir.try_match_insignificant_strides(
+                ir.ExternKernel.realize_input(arg), meta_stride_expr
+            )
+
+        if effn_attn_fwd_bias:
+            out_size = list(arg.get_size())
+
+            expanded_dims = []
+            if arg.maybe_get_stride() is not None:
+                # We require a dense last dimension, but the other strides
+                # can be expanded, which results in a smaller tensor
+                for i, s in enumerate(arg.get_stride()[0:-1]):
+                    if V.graph.sizevars.statically_known_equals(s, 0):
+                        expanded_dims.append(i)
+
+            # Now, pad strides to alignment
+            out_strides = [-1] * len(out_size)
+            out_strides[-1] = 1
+            stride = 1
+            for i in range(len(out_size) - 2, -1, -1):
+                if out_strides[i + 1] != 0:
+                    stride = stride * out_size[i + 1]
+
+                # the expanded dims still need to be aligned, if they are,
+                # we can make them expanded by setting the stride equal to 0
+                if i in expanded_dims:
+                    if V.graph.sizevars.statically_known_equals(
+                        out_strides[i + 1] % ALIGNMENT, 0
+                    ):
+                        out_strides[i] = 0
+                        continue
+
+                if not V.graph.sizevars.statically_known_equals(stride % ALIGNMENT, 0):
+                    stride = ceildiv(stride, ALIGNMENT) * ALIGNMENT
+
+                out_strides[i] = stride
+            return ir.ExternKernel.require_exact_strides(arg, out_strides)
 
         def is_aligned(x):
             return (V.graph.sizevars.size_hint(x.get_size()[-1]) % ALIGNMENT) == 0
@@ -2458,8 +2504,8 @@ def sdpa_constraint(fx_node, *args, **kwargs):
         if isinstance(arg.data, ir.BaseView):
             if not is_aligned(arg):
                 if is_aligned(arg.unwrap_view()):
-                    return V.graph.try_match_insignificant_strides(
-                        ir.ExternKernel.realize_input(arg), meta_stride
+                    return ir.try_match_insignificant_strides(
+                        ir.ExternKernel.realize_input(arg), meta_stride_expr
                     )
 
         return ir.ExternKernel.require_stride_order(arg, stride_order)
@@ -4514,6 +4560,9 @@ fallback_adaptive_avg_pool2d = fallback_handler(
 
 @register_lowering(aten._adaptive_avg_pool2d)
 def _adaptive_avg_pool2d(x, output_size):
+    if x.get_dtype() == torch.int64:
+        # not supported in eager
+        raise RuntimeError("'adaptive_avg_pool2d' not implemented for 'Long'")
     assert isinstance(x, TensorBox)
     assert len(output_size) == 2
     x.realize_hint()
@@ -4586,6 +4635,9 @@ fallback_adaptive_max_pool2d = fallback_handler(
 
 @register_lowering(aten.adaptive_max_pool2d)
 def adaptive_max_pool2d(x, output_size):
+    if x.get_dtype() == torch.int64:
+        # not supported in eager
+        raise RuntimeError("adaptive_max_pool2d not implemented for Long")
     assert isinstance(x, TensorBox)
     assert len(output_size) == 2
     x.realize_hint()
