@@ -715,7 +715,7 @@ class TestCutlassBackend(TestCase):
 
     @unittest.mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
     @unittest.skipIf(not SM90OrLater, "need sm_90")
-    def test_colin(self):
+    def test_aoti_workspace_ptr(self):
         torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = False
 
         class MyModel(torch.nn.Module):
@@ -728,7 +728,7 @@ class TestCutlassBackend(TestCase):
                 "autotune_in_subproc": False,
                 "max_autotune_gemm_backends": "CUTLASS",
                 "autotune_fallback_to_aten": False,
-                "cuda.cutlass_op_allowlist_regex": "256x128x64.*stream_k_warpspecialized_cooperative_epi_nosmem",
+                "cuda.cutlass_op_allowlist_regex": "128x256x64.*stream_k_warpspecialized_cooperative_epi_nosmem",
                 "cuda.cutlass_max_profiling_configs": 1,
                 "cuda.cutlass_dir": _CUTLASS_DIR,
             }
