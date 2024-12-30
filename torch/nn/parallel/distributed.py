@@ -541,6 +541,12 @@ class DistributedDataParallel(Module, Joinable):
         broadcast_buffers (bool): Flag that enables syncing (broadcasting)
                           buffers of the module at beginning of the ``forward``
                           function. (default: ``True``)
+        init_sync (bool): Whether to sync during initialization to verify param
+                          shapes and broadcast parameters and buffers.
+                          WARNING: if this is set to False the user is required
+                          to ensure themselves that the weights are the same on
+                          all ranks.
+                          (default: ``True``)
         process_group: The process group to be used for distributed data
                        all-reduction. If ``None``, the default process group, which
                        is created by :func:`torch.distributed.init_process_group`,
@@ -632,6 +638,7 @@ class DistributedDataParallel(Module, Joinable):
         output_device=None,
         dim=0,
         broadcast_buffers=True,
+        init_sync=True,
         process_group=None,
         bucket_cap_mb=None,
         find_unused_parameters=False,
@@ -821,17 +828,21 @@ class DistributedDataParallel(Module, Joinable):
 
         # Build parameters for reducer.
         parameters, expect_sparse_gradient = self._build_params_for_reducer()
-        # Verify model equivalence.
-        _verify_param_shape_across_processes(self.process_group, parameters)
-        # Sync params and buffers. Ensures all DDP models start off at the same value.
-        _sync_module_states(
-            module=self.module,
-            process_group=self.process_group,
-            broadcast_bucket_size=self.broadcast_bucket_size,
-            src=0,
-            params_and_buffers_to_ignore=self.parameters_to_ignore,
-            broadcast_buffers=self.broadcast_buffers,
-        )
+
+        # All collectives during initialization are gated by this flag.
+        if init_sync:
+            # Verify model equivalence.
+            _verify_param_shape_across_processes(self.process_group, parameters)
+            # Sync params and buffers. Ensures all DDP models start off at the same value.
+            _sync_module_states(
+                module=self.module,
+                process_group=self.process_group,
+                broadcast_bucket_size=self.broadcast_bucket_size,
+                src=0,
+                params_and_buffers_to_ignore=self.parameters_to_ignore,
+                broadcast_buffers=self.broadcast_buffers,
+            )
+
         # In debug mode, build a mapping of parameter index -> parameter.
         param_to_name_mapping = self._build_debug_param_to_name_mapping(parameters)
 
@@ -1487,7 +1498,7 @@ class DistributedDataParallel(Module, Joinable):
 
     def _should_disable_cpp_reducer(self) -> bool:
         return self._use_python_reducer and (
-            torch._utils.is_compiling() or self._force_to_disable_cpp_reducer
+            torch.compiler.is_compiling() or self._force_to_disable_cpp_reducer
         )
 
     def _pre_forward(self, *inputs, **kwargs):
@@ -1500,7 +1511,7 @@ class DistributedDataParallel(Module, Joinable):
                 h.remove()
             self._accum_grad_hooks.clear()
 
-        if not self._lazy_init_ran and not torch._utils.is_compiling():
+        if not self._lazy_init_ran and not torch.compiler.is_compiling():
             self._lazy_init()
 
         if self._delay_all_reduce_all_params:

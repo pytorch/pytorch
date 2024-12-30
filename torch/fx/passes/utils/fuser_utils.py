@@ -224,7 +224,8 @@ def insert_subgm(
     # Create a call_module node in main graph.
     module_node = gm.graph.call_module(submodule_name, args=orig_inputs, kwargs=None)
 
-    if len(orig_outputs) == 1:
+    output_node = sub_gm.graph.output_node()
+    if len(orig_outputs) == 1 and not isinstance(output_node.args[0], tuple):
         # main_remapping[comp.orig_outputs[0]] = module_node
         orig_outputs[0].replace_all_uses_with(module_node, propagate_meta=True)
     else:
@@ -248,14 +249,21 @@ def erase_nodes(gm: GraphModule, nodes: NodeList):
 
 @compatibility(is_backward_compatible=False)
 def fuse_by_partitions(
-    gm: GraphModule, partitions: List[Dict[Node, None]], prefix: str = "fused_"
+    gm: GraphModule,
+    partitions: List[Dict[Node, None]],
+    prefix: str = "fused_",
+    always_return_tuple: bool = False,
 ) -> GraphModule:
     for partition_id, partition in enumerate(partitions):
         sorted_nodes = topo_sort(list(partition))
 
         submodule_name = prefix + str(partition_id)
         sub_gm, orig_inputs, orig_outputs = fuse_as_graphmodule(
-            gm, sorted_nodes, submodule_name, partition
+            gm,
+            sorted_nodes,
+            submodule_name,
+            partition,
+            always_return_tuple=always_return_tuple,
         )
 
         insert_subgm(gm, sub_gm, orig_inputs, orig_outputs)

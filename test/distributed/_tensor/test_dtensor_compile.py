@@ -234,8 +234,8 @@ class TestDTensorCompile(torch._dynamo.test_case.TestCase):
                 requires_grad=x.requires_grad,
             )
 
-        out = fn(x)
-        out2 = torch.compile(fn, backend="eager")(x)
+        fn(x)
+        torch.compile(fn, backend="eager")(x)
 
     def test_dtensor_constructor_w_dynamo_disable(self):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
@@ -573,12 +573,33 @@ class TestDTensorCompile(torch._dynamo.test_case.TestCase):
         res = opt_kwargs_fn(x)
         self.assertEqual(res, ref)
 
+    def test_dynamo_dtensor_from_local_redistribute_async(self):
+        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+        from torch.distributed._functional_collectives import AsyncCollectiveTensor
+
+        # pass in tensor as inputs/outputs, create DTensor and run redistribute
+        # (allgather collective) inside the fn
+        def fn(x):
+            dt = DTensor.from_local(x, mesh, [Shard(0)], run_check=False)
+            out = dt.redistribute(mesh, [Replicate()], async_op=True).to_local()
+            if isinstance(out, AsyncCollectiveTensor):
+                return out.wait()
+            else:
+                return out
+
+        x = torch.ones(1)
+        ref = fn(x)
+        cnt = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
+        opt_fn = torch.compile(fn, backend=cnt, fullgraph=True)
+        res = opt_fn(x)
+        self.assertEqual(res, ref)
+
     def test_dtensor_dont_recompile_on_same_placement_devicemesh(self):
         cnt = torch._dynamo.testing.CompileCounterWithBackend("inductor")
 
         @torch.compile(backend=cnt)
         def fn(x):
-            dt = DTensor.from_local(x, mesh, [placement], run_check=False)
+            DTensor.from_local(x, mesh, [placement], run_check=False)
 
         x = torch.ones(4, 4, requires_grad=True)
 
@@ -638,7 +659,7 @@ class TestDTensorCompile(torch._dynamo.test_case.TestCase):
         x2 = x_dt.redistribute(mesh, [Replicate()], async_op=True)
         x2 = x2.to_local()
         self.assertTrue(isinstance(x2, AsyncCollectiveTensor))
-        out = opt_fn(x2)
+        opt_fn(x2)
         # The important part: we get a wait_tensor() in the graph.
         # At runtime, the input to the graph is an AsyncCollectiveTensor,
         # and inside the graph we need to issue a wait() to synchronize.
@@ -858,8 +879,6 @@ class TestDTensorCompileE2E(DTensorTestBase):
             (data_parallel_size, self.world_size // data_parallel_size),
             mesh_dim_names=["dp", "tp"],
         )
-
-        fsdp_pg = twod_mesh.get_group(mesh_dim=0)
 
         inp = torch.rand(20, 10, device=self.device_type)
         parallelize_plan = {
