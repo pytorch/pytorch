@@ -908,7 +908,7 @@ class TestStateDictHooks(TestCase):
         def fn(m, s, p, l):
             return OrderedDict()
 
-        handle = hook_registration_fn(fn)
+        hook_registration_fn(fn)
         if private:
             self.assertFalse(hasattr(fn, "_from_public_api"))
             self.assertTrue(len(m.state_dict()) == 0)
@@ -917,7 +917,7 @@ class TestStateDictHooks(TestCase):
             with self.assertRaisesRegex(
                 RuntimeError, "state_dict post-hook must return None"
             ):
-                sd = m.state_dict()
+                m.state_dict()
             with self.assertRaisesRegex(
                 RuntimeError, "previously registered via register_state_dict_post_hook"
             ):
@@ -991,9 +991,9 @@ class TestModuleGlobalHooks(TestCase):
             lambda *args: fw_hook(2, *args)
         )
 
-        output = module_1(input)
-        output = module_2(input)
-        output = module_3(input)
+        module_1(input)
+        module_2(input)
+        module_3(input)
         self.assertEqual(counter["forwards"], 15)
         self.assertEqual(counter["backwards"], 4)
 
