@@ -118,6 +118,14 @@ def boxed_nop(fx_g, example_inputs):
     return run
 
 
+def boxed_nop_with_mode(fx_g, example_inputs, *, mode):
+    def run(args):
+        with mode:
+            return torch.fx.Interpreter(fx_g).boxed_run(args)
+    run._boxed_call = True
+    return run
+
+
 def fake_crossref_boxed_nop(fx_g, example_inputs, ignore_op_fn=None):
     def run(args):
         with torch._subclasses.CrossRefFakeMode(ignore_op_fn):
@@ -203,6 +211,31 @@ def aot_eager_decomp_partition(gm, fake_tensor_inputs, **kwargs):
 
 register_backend(
     name="aot_eager_decomp_partition", compiler_fn=aot_eager_decomp_partition
+)
+
+
+# aot_eager_decomp_partition_with_mode is similar as aot_eager_decomp_partition,
+# except that 
+# 1) it takes a TorchDispatchMode mode and run the fw/bw in the mode
+# 2) it takes a enable_log flag to turn on/off compilation logging
+def aot_eager_decomp_partition_with_mode(gm, fake_tensor_inputs, mode, enable_log, **kwarg):
+    return aot_autograd(
+        # these are taken from memory_efficient_fusion()
+        fw_compiler=functools.partial(boxed_nop_with_mode, mode=mode),
+        bw_compiler=functools.partial(boxed_nop_with_mode, mode=mode),
+        # NB: lambda here is to delay import of inductor
+        decompositions=lambda: import_module(
+            "torch._inductor.compile_fx"
+        ).select_decomp_table(),
+        partition_fn=functools.partial(
+            min_cut_rematerialization_partition, compiler="inductor"
+        ),
+        enable_log=enable_log,
+    )(gm, fake_tensor_inputs)
+
+
+register_backend(
+    name="aot_eager_decomp_partition_with_mode", compiler_fn=aot_eager_decomp_partition_with_mode
 )
 
 
