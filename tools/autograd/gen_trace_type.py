@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import itertools
-from typing import Sequence
+from typing import TYPE_CHECKING
 
 from torchgen.api import cpp
 from torchgen.api.types import DispatcherSignature
@@ -9,6 +9,10 @@ from torchgen.code_template import CodeTemplate
 from torchgen.context import with_native_function
 from torchgen.model import Argument, NativeFunction, SchemaKind, TensorOptionsArguments
 from torchgen.utils import FileManager
+
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 
 # Note [Manual Backend kernels]
@@ -75,8 +79,7 @@ DONT_RECORD_TRACE = {
 def should_trace(f: NativeFunction) -> bool:
     # Operations involving Storage or Type are not traceable at the moment
     if any(
-        str(arg.type) in {"Storage", "Type", "ConstQuantizerPtr"}
-        for arg in f.func.schema_order_arguments()
+        str(arg.type) in {"Storage", "Type"} for arg in f.func.schema_order_arguments()
     ):
         return False
     # We can't trace functions which don't have any Tensor or TensorList returns

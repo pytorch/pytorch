@@ -4,7 +4,7 @@ import argparse
 import os
 from collections import namedtuple
 from pathlib import Path
-from typing import Any, Callable, Iterable, Iterator, Sequence
+from typing import Any, Callable, TYPE_CHECKING
 
 import yaml
 
@@ -23,6 +23,10 @@ from torchgen.model import NativeFunction, NativeFunctionsGroup, OperatorName
 from torchgen.selective_build.selector import SelectiveBuilder
 from torchgen.utils import FileManager, NamespaceHelper
 from torchgen.yaml_utils import YamlLoader
+
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable, Iterator, Sequence
 
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
@@ -252,7 +256,7 @@ def main() -> None:
     options = parser.parse_args()
 
     # Assumes that this file lives at PYTORCH_ROOT/torchgen/gen_backend_stubs.py
-    torch_root = Path(__file__).parent.parent.parent.absolute()
+    torch_root = Path(__file__).absolute().parents[2]
     aten_path = str(torch_root / "aten" / "src" / "ATen")
     lazy_ir_generator: type[GenLazyIR] = default_args.lazy_ir_generator
     if options.gen_ts_lowerings:

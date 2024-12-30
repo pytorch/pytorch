@@ -354,14 +354,20 @@ class FakeTensorConverter:
         maybe_memo = self._get_memo(t)
         if maybe_memo is not None:
             return maybe_memo
-        existing_device = t.device
         # not yet supported in metatensors
         if t.is_quantized:
             raise UnsupportedFakeTensorException("quantized nyi in meta tensors")
         if type(t) is torch.nn.Parameter:
             assert not make_constant
 
-        def mk_fake_tensor(make_meta_t: Callable[[], object]) -> FakeTensor:
+        constant = t if make_constant else None
+
+        # This callback is used by both subclass and inner tensors. Require the
+        # caller to explicitly specify the device in case outer and inner tensors
+        # have different devices.
+        def mk_fake_tensor(
+            make_meta_t: Callable[[], object], device: Union[torch.device, str]
+        ) -> FakeTensor:
             # NB: don't use in_kernel_invocation_manager. to
             # ensure FakeTensor can internally do constant computation
             # as necessary.  Invocation manager is "more correct" as
@@ -373,16 +379,16 @@ class FakeTensorConverter:
                 return FakeTensor(
                     fake_mode,
                     make_meta_t(),
-                    existing_device,
+                    device,
                     # TODO: callback might be used in recursive contexts, in
                     # which case using t is wrong!  BUG!
-                    constant=t if make_constant else None,
+                    constant=constant,
                 )
 
         out = self.meta_converter(
             t,
             shape_env=shape_env,
-            callback=mk_fake_tensor,
+            callback=mk_fake_tensor,  # type: ignore[arg-type]
             source=source,
             symbolic_context=symbolic_context,
             trace=trace,
@@ -536,7 +542,7 @@ class FakeTensorConfig:
 #
 # Making this a descriptor may seem overly fancy, but actually it's the most
 # convenient way to ensure access to FakeTensor during access, which is
-# required for testing version counter and epoch validity.​
+# required for testing version counter and epoch validity.
 class SymNumberMemoDescriptor:
     _name: str
 
@@ -757,7 +763,7 @@ class FakeTensor(Tensor):
 
     @classmethod
     @count
-    def __torch_dispatch__(
+    def __torch_dispatch__(  # type: ignore[override] # TODO
         cls,
         func: OpOverload,
         types: Sequence[Type],
@@ -1305,7 +1311,8 @@ class FakeTensorMode(TorchDispatchMode):
             maybe_prev_only_lift_cpu_tensors,
         ) = self.enter_stack.pop()
         if live:
-            out = super().__exit__(a, b, c)
+            super().__exit__(a, b, c)
+
             # Re-enable the previous fake mode, if there was one.
             if maybe_prev_fake_mode is not None:
                 torch._C._set_dispatch_mode(maybe_prev_fake_mode)
@@ -1797,7 +1804,7 @@ class FakeTensorMode(TorchDispatchMode):
                 "%sFakeTensorMode.__torch_dispatch__: %s", " " * RECURSION_COUNT, func
             )
             # NOTE: incr is intentionally unused for a RAII pattern
-            incr = IncrementRecursionCount()
+            incr = IncrementRecursionCount()  # noqa: F841
 
         # Some attribute queries that can be serviced directly
         # See Note [is_coalesced is dispatched]
@@ -2513,12 +2520,13 @@ class FakeTensorMode(TorchDispatchMode):
         # See Note: [Creating symbolic nested int]
         # Returned nested int always has coeff=1; multiply the result by coeff if needed
         import torch.nested._internal.nested_tensor
+        from torch.nested._internal.nested_int import NestedIntNode
 
         if nt_tensor_id is None:
             nt_tensor_id = self.nt_tensor_id_counter
             assert self.enter_stack, "should only called while FakeTensorMode is active"
             self.nt_tensor_id_counter += 1
-        hint = torch._C._get_nested_int(nt_tensor_id, 1)
+        hint = torch.SymInt(NestedIntNode(nt_tensor_id, 1))
 
         src = torch._dynamo.source.EphemeralSource("intermediate_offsets_or_lengths")
         assert self.shape_env is not None
