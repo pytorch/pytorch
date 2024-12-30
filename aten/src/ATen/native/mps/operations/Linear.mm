@@ -15,6 +15,11 @@ Tensor _mps_linear(const Tensor& input, const Tensor& weight_arg, const std::opt
 
   auto weight = (weight_arg.dim() == 1) ? weight_arg.view({1, weight_arg.size(0)}) : weight_arg;
 
+  TORCH_CHECK(input.dtype() == weight_arg.dtype(),
+              "expected input and weight to have the same dtype, but got: ",
+              input.dtype(),
+              " != ",
+              weight_arg.dtype())
   TORCH_CHECK(supportedFloatingOrComplexType(input), "MPS device does not support linear for non-float inputs");
   TORCH_CHECK(input.is_mps(), "Tensor for argument input is on ", input.device(), " but expected on mps");
   TORCH_CHECK(supportedFloatingOrComplexType(weight_arg), "MPS device does not support linear for non-float weights");
