@@ -385,19 +385,15 @@ Tensor quantized_batch_norm(
     double eps,
     double output_scale,
     int64_t output_zero_point) {
-  // See [Note: hacky wrapper removal for optional tensor]
-  c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
-  const Tensor& weight = *weight_maybe_owned;
-  const Tensor& bias = bias_opt.value_or(Tensor());
-
-  Tensor qy;
-  // TODO: this should arguably support 3d as well
-  qy = q_batch_norm2d_impl<false>(
+  return q_batch_norm_impl<false>(
       qx,
-      weight.defined() ? std::make_optional(weight) : std::nullopt,
-      bias.defined() ? std::make_optional(bias) : std::nullopt,
-      mean, var, eps, output_scale, output_zero_point);
-  return qy;
+      weight_opt,
+      bias_opt,
+      mean,
+      var,
+      eps,
+      output_scale,
+      output_zero_point);
 }
 
 TORCH_LIBRARY_IMPL(quantized, QuantizedCPU, m) {
