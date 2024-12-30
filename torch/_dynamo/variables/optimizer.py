@@ -187,7 +187,7 @@ class OptimizerVariable(UserDefinedObjectVariable):
                 return []
             elif (
                 isinstance(arg, ConstDictVariable)
-                and isinstance(arg.source, DictGetItemSource)
+                and isinstance(arg.source, GetItemSource)
                 and isinstance(arg.source.base, AttrSource)
                 and arg.source.base.member == "param_groups"
             ):
