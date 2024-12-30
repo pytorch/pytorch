@@ -618,6 +618,7 @@ def make_pointwise(
                         downcast = ops.to_dtype(out, dtype, use_compute_types=False)
                         out = ops.to_dtype(downcast, dtype)
                     inputs_loaded.append(out)
+
                 out = fn(*inputs_loaded)
                 if emulate_precision_casts:
                     # fp16/bf16 kernels are computed in fp32. Casting down to fp16/bf16 here,
