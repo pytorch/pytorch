@@ -152,7 +152,7 @@ class CPUReproTests(TestCase):
                     return func(*args, **kwargs)
 
             with RecordFunctions():
-                out = fn_compiled(inps)
+                fn_compiled(inps)
 
             self.assertTrue(conv_seen)
 
@@ -2281,6 +2281,23 @@ class CPUReproTests(TestCase):
         res = cfn(x, bit_num)
         self.assertEqual(res_aten_eager, res)
 
+    def test_bitwise_shift_corner_inputs(self):
+        # Fix https://github.com/pytorch/pytorch/issues/143555
+        # and https://github.com/pytorch/pytorch/issues/143566
+        bitwise_fns = (
+            torch.bitwise_left_shift,
+            torch.bitwise_right_shift,
+        )
+        for bitwise_fn in bitwise_fns:
+            torch._dynamo.reset()
+            metrics.reset()
+            x = torch.tensor(1000, dtype=torch.int64)
+            bit_num = torch.tensor(64, dtype=torch.int64)
+            res_aten_eager = bitwise_fn(x, bit_num)
+            cfn = torch.compile(bitwise_fn)
+            res = cfn(x, bit_num)
+            self.assertEqual(res_aten_eager, res)
+
     def test_view_dtype(self):
         def f(x):
             return x.view(torch.int32) >> 2
@@ -2384,8 +2401,6 @@ class CPUReproTests(TestCase):
             x = torch.randn((2, 9), dtype=dtype)
             x[0, 0] = torch.nan
             x[1, -1] = torch.nan
-
-            tol = 1e-2 if dtype == torch.bfloat16 else 1e-4
 
             with config.patch({"cpp.simdlen": None}):
                 for cpp_wrapper_flag in [True, False]:
@@ -3121,7 +3136,6 @@ class CPUReproTests(TestCase):
             x1 = torch.randn((5, 20), dtype=dtype)
             x2 = torch.randn((5, 20), dtype=dtype)
 
-            tol = 1e-2 if dtype == torch.bfloat16 else 1e-4
             with config.patch({"cpp.simdlen": 1}):
                 torch._dynamo.reset()
                 metrics.reset()
@@ -3365,7 +3379,7 @@ class CPUReproTests(TestCase):
                 permute_2, [16, 32], -1
             )
             getitem = split_with_sizes[0]
-            getitem_1 = split_with_sizes[1]
+            _getitem_1 = split_with_sizes[1]
             permute_3 = torch.ops.aten.permute.default(getitem, [0, 1, 3, 2])
             expand_1 = torch.ops.aten.expand.default(permute_3, [8, 4, 16, 144])
             clone_3 = torch.ops.aten.clone.default(
@@ -4615,7 +4629,7 @@ class CPUReproTests(TestCase):
                     )
                 )
                 permute_default_8 = None
-                permute_default_10 = torch.ops.aten.permute.default(
+                _permute_default_10 = torch.ops.aten.permute.default(
                     convert_element_type_default_19, [0, 2, 1, 3]
                 )
                 convert_element_type_default_19 = None
@@ -4945,6 +4959,27 @@ class CPUReproTests(TestCase):
             metrics.reset()
             torch.compile(converted_model)(*example_batch)
             check_metrics_vec_kernel_count(3)
+
+    def test_dropout(self):
+        class Model(nn.Module):
+            def __init__(self, dim):
+                super().__init__()
+                self.dropout = eval(f"nn.Dropout{dim}d(p=0.5)")
+
+            def forward(self, x):
+                torch.manual_seed(0)
+                x = self.dropout(x)
+                return x
+
+        for dim in [1, 2, 3]:
+            model = Model(dim)
+            torch.manual_seed(0)
+            shape = [1, 3] + [256] * dim
+            x = torch.randn(*shape)
+            output = model(x)
+            c_model = torch.compile(model)
+            c_output = c_model(x)
+            self.assertTrue(torch.allclose(output, c_output))
 
 
 if __name__ == "__main__":

@@ -2086,7 +2086,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
 
     def test_no_recompile_on_nn_guarded_modules(self):
         size = (10, 10)
-        cache_size_limit = 1
+        recompile_limit = 1
         num_submodules = 4
         cnts = torch._dynamo.testing.CompileCounterWithBackend("eager")
 
@@ -2116,8 +2116,8 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         with unittest.mock.patch(
             "torch._dynamo.config.error_on_recompile", True
         ), unittest.mock.patch(
-            "torch._dynamo.config.cache_size_limit",
-            cache_size_limit,
+            "torch._dynamo.config.recompile_limit",
+            recompile_limit,
         ):
             x = torch.randn(*size, requires_grad=True)
             mod(x)
@@ -2126,7 +2126,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
             else:
                 self.assertEqual(cnts.frame_count, num_submodules)
 
-    @patch.object(torch._dynamo.config, "accumulated_cache_size_limit", 2)
+    @patch.object(torch._dynamo.config, "accumulated_recompile_limit", 2)
     @patch.object(torch._dynamo.config, "inline_inbuilt_nn_modules", False)
     def test_recompile_limit_on_freed_module(self):
         class Mod(torch.nn.Module):
@@ -2152,7 +2152,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
     @patch.object(torch._dynamo.config, "inline_inbuilt_nn_modules", True)
     def test_inline_inbuilt_nn_modules(self):
         size = (10, 10)
-        cache_size_limit = 1
+        recompile_limit = 1
         num_submodules = 4
         cnts = torch._dynamo.testing.CompileCounterWithBackend("eager")
 
@@ -2182,15 +2182,15 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         with unittest.mock.patch(
             "torch._dynamo.config.error_on_recompile", True
         ), unittest.mock.patch(
-            "torch._dynamo.config.cache_size_limit",
-            cache_size_limit,
+            "torch._dynamo.config.recompile_limit",
+            recompile_limit,
         ):
             x = torch.randn(*size, requires_grad=True)
             mod(x)
             self.assertEqual(cnts.frame_count, 1)
 
-    def test_cache_size_limit_on_guarded_nn_modules(self):
-        cache_size_limit = 2
+    def test_recompile_limit_on_guarded_nn_modules(self):
+        recompile_limit = 2
         num_submodules = 4
         cnts = torch._dynamo.testing.CompileCounterWithBackend("eager")
 
@@ -2219,8 +2219,8 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         # therefore the total number of expected frame count is 2 *
         # num_submodules.
         with unittest.mock.patch(
-            "torch._dynamo.config.cache_size_limit",
-            cache_size_limit,
+            "torch._dynamo.config.recompile_limit",
+            recompile_limit,
         ):
             for size in [
                 (4,),
@@ -3070,7 +3070,9 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
     def test_globals_change_in_other_file(self):
         @torch.compile(backend="eager", fullgraph=True)
         def fn(x):
-            update_global()
+            # Let `update_global` get invoked in a nested frame, to make sure
+            # Dynamo is properly modelling globals across frames and files.
+            test_functions.call(update_global)
             a = test_functions.update_global(x)
             # Ensure that the updated global values are read
             return x * a * (_variable + _variable1 + test_functions._variable)
@@ -3228,6 +3230,53 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         res = opt_fn(x)
         self.assertEqual(ref, res)
+
+    @torch._dynamo.config.patch("skip_tensor_guards_with_matching_dict_tags", False)
+    @torch._dynamo.config.patch("inline_inbuilt_nn_modules", True)
+    def test_param_requires_grad(self):
+        def adjust_model(model):
+            to_freeze = model.num_iter % 2 == 0
+            if to_freeze:
+                for param in model.layer2.parameters():
+                    param.requires_grad = False
+            else:
+                for param in model.layer2.parameters():
+                    param.requires_grad = True
+
+        class MyModule(torch.nn.Module):
+            def __init__(self, input_size, hidden_size, output_size):
+                super().__init__()
+
+                self.layer1 = torch.nn.Linear(hidden_size, hidden_size)
+                self.layer2 = torch.nn.Linear(hidden_size, hidden_size)
+
+                self.num_iter = 0
+
+            def forward(self, x):
+                x = self.layer2(x + self.layer1.bias)
+
+                self.num_iter += 1
+                return x
+
+        input_size = 1024
+        hidden_size = 1024
+        output_size = 1
+        num_samples = 2048
+        features = torch.randn(num_samples, input_size)
+
+        model = MyModule(input_size, hidden_size, output_size)
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_model = torch.compile(model, backend=cnt, fullgraph=True)
+
+        for _ in range(3):
+            model.zero_grad(True)
+            adjust_model(model)
+            res = opt_model(features)
+            res.sum().backward()
+
+        # Check that we have recompiled twice, which leads to 3 frames
+        self.assertEqual(cnt.frame_count, 3)
 
 
 if __name__ == "__main__":
