@@ -2366,11 +2366,11 @@ class TestOptimRenewed(TestCase):
         def run_two_models(non_zero_beta1):
             outputs = []
             # lr of .1 needed to see difference.
-            optim_inputs = [
+            optim_kwargs = [
                 {"lr": 0.1, "betas": (non_zero_beta1, 0.999)},
                 {"lr": 0.1, "betas": (0.0, 0.999)},
             ]
-            for optim_input in optim_inputs:
+            for optim_input in optim_kwargs:
                 one_model_output = []
 
                 # create model
