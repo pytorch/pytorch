@@ -193,7 +193,9 @@ class TestSplitOutputType(TestCase):
                     relu
         """
         tag_node = defaultdict(list)
-        gm: torch.fx.GraphModule = torch.export.export(module, (inputs,)).module()
+        gm: torch.fx.GraphModule = torch.export.export(
+            module, (inputs,), strict=True
+        ).module()
         # Add tag to all nodes and build dictionary record tag to call_module nodes
         for node in gm.graph.nodes:
             if "conv" in node.name:
@@ -214,10 +216,8 @@ class TestSplitOutputType(TestCase):
 
         inputs = torch.randn((1, 3, 224, 224))
 
-        gm, tag_node = TestSplitOutputType.trace_and_tag(module, inputs, tags)
-        split_gm, orig_to_split_fqn_mapping = split_by_tags(
-            gm, tags, return_fqn_mapping=True
-        )
+        gm, _ = TestSplitOutputType.trace_and_tag(module, inputs, tags)
+        split_gm, _ = split_by_tags(gm, tags, return_fqn_mapping=True)
 
         gm_output = module(inputs)
         split_gm_output = split_gm(inputs)

@@ -8,6 +8,7 @@ from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Union
 import torch
 from torch._dynamo.utils import counters
 from torch._inductor.utils import InputType
+from torch.utils._ordered_set import OrderedSet
 
 
 perf_hint_log = torch._logging.getArtifactLogger(__name__, "perf_hints")
@@ -205,7 +206,7 @@ def check_for_mutation_ignore_cuda_graph_managed_tensor(
 
     # doesnt work for non-trees because the warmup run would apply mutation twice
     if torch._inductor.config.triton.cudagraph_trees:
-        unique_idxs = set(static_input_idxs)
+        unique_idxs = OrderedSet(static_input_idxs)
         # checking if mutation is only on parameters/static inputs
         mutation_indices = [
             idx for idx in compiled_graph.mutated_input_idxs if idx not in unique_idxs

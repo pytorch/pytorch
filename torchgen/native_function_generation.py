@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import string
 from collections import defaultdict
-from typing import Sequence
+from typing import TYPE_CHECKING
 
 import torchgen.api.dispatcher as dispatcher
 from torchgen.api.translate import translate
@@ -28,6 +28,10 @@ from torchgen.model import (
     Variant,
 )
 from torchgen.utils import concatMap
+
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 
 # See Note: [Out ops with functional variants that don't get grouped properly]
@@ -389,6 +393,7 @@ def add_generated_native_functions(
         has_inplace = SchemaKind.inplace in d
         has_mutable = SchemaKind.mutable in d
         has_out = SchemaKind.out in d
+        is_core = any("core" in variant.tags for variant in d.values())
 
         # We automatically generate a few native functions that don't exist in the yaml, for a few reasons:
         # (1) If an operator has an inplace/out= variant but no functional variant, we can generate
@@ -405,14 +410,14 @@ def add_generated_native_functions(
             has_view_ops = any(
                 f.is_view_op and str(f.func.name.name) != "set_" for f in d.values()
             )
-            # Don't generate the other variants for CompositeImplicitAutograd operators.
+            # Don't generate the other variants for non-core CompositeImplicitAutograd operators.
             # We could probably do this, but the main benefit of generating the function triplets
             # is for transforms that need them, and transforms don't need to act directly
             # on CompositeImplicitAutograd operators (since we let them decompose).
             are_composite_implicit = all(
                 f.has_composite_implicit_autograd_kernel for f in d.values()
             )
-            if are_manual or has_view_ops or are_composite_implicit:
+            if are_manual or has_view_ops or are_composite_implicit and not is_core:
                 continue
             if has_out and len(d.values()) == 1:
                 # Note: [Out ops with functional variants that don't get grouped properly]
@@ -443,10 +448,10 @@ def add_generated_native_functions(
                 continue
 
             base_fn = (
-                d[SchemaKind.inplace]
-                if has_inplace
-                else d[SchemaKind.mutable]
+                d[SchemaKind.mutable]
                 if has_mutable
+                else d[SchemaKind.inplace]
+                if has_inplace
                 else d[SchemaKind.out]
                 if has_out
                 else d[SchemaKind.functional]
