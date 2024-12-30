@@ -763,6 +763,33 @@ class CommonTemplate:
         # Check for 2 reduction dimensions.
         self._assert_reduction_ndims(code, 2)
 
+    def test_fused_2d_reduction(
+        self,
+    ):
+        """
+        Tests fusing multiple reductions on the same input, with 2D tiling.
+        """
+
+        def foo(x):
+            return torch.sum(x) + torch.argmax(x)
+
+        view_size = (5, 7)
+        view = self._discontiguous_tensor(view_size)
+
+        # Expect at least 1 block pointer for the input.
+        # Add 2 more if we generate 2 kernels.
+        result, (code,) = run_and_compare(
+            self,
+            foo,
+            view,
+            expected_num_block_pointers=1,
+            expected_num_triton_kernels=1,
+            config_patches=tiled_reduction_config,
+        )
+
+        # Check the code for multiple Rn_BLOCK's
+        self._assert_reduction_ndims(code, 2)
+
     @parametrize(
         "tile_reductions",
         [False, True],
