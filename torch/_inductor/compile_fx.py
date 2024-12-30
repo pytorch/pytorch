@@ -44,7 +44,6 @@ from torch._dynamo.device_interface import get_interface_for_device
 from torch._dynamo.repro.after_aot import wrap_compiler_debug
 from torch._dynamo.utils import (
     CompileEventLogger,
-    CompileEventLogLevel,
     counters,
     detect_fake_mode,
     dynamo_timed,
@@ -53,6 +52,9 @@ from torch._dynamo.utils import (
     set_feature_use,
 )
 from torch._functorch import config as functorch_config
+from torch._functorch._aot_autograd.subclass_parametrization import (
+    unwrap_tensor_subclass_parameters,
+)
 from torch._functorch.aot_autograd import (
     aot_export_module,
     make_boxed_func,
@@ -564,7 +566,7 @@ def compile_fx_inner(
         stack.enter_context(_WaitCounter("pytorch.wait_counter.dynamo_compile").guard())
         stack.enter_context(with_fresh_cache_if_config())
         stack.enter_context(DebugContext())
-        CompileEventLogger.add(
+        CompileEventLogger.pt2_compile(
             "inductor_compile",
             is_backward=kwargs["is_backward"],
         )
@@ -731,9 +733,8 @@ def _compile_fx_inner(
         # fx_graph_cache_miss
         # fx_graph_cache_bypass
         # fx_graph_cache_disabled
-        CompileEventLogger.log_instant_event(
+        CompileEventLogger.instant(
             f"fx_graph_cache_{cache_state}",
-            CompileEventLogLevel.CHROMIUM,
             metadata=cache_info,
             time_ns=start_time,
         )
@@ -1327,6 +1328,9 @@ def compile_fx_aot(
     config_patches: Optional[Dict[str, str]] = None,
 ) -> Union[List[str], str]:
     assert isinstance(model_, GraphModule), model_
+
+    # [See NOTE] Unwrapping subclasses AOT
+    unwrap_tensor_subclass_parameters(model_)
 
     config_patches: Dict[str, Any] = (
         {"cpp_wrapper": True}

@@ -16,14 +16,23 @@ from typing import Any, Iterator, Sequence
 from typing_extensions import Never
 
 
-EMPTY_TOKENS = {
-    token.COMMENT,
-    token.DEDENT,
-    token.ENCODING,
-    token.INDENT,
-    token.NEWLINE,
-    token.NL,
-}
+FSTRING_TOKENS = dict.fromkeys(
+    [
+        getattr(token, "FSTRING_START", -1),
+        getattr(token, "FSTRING_MIDDLE", -1),
+        getattr(token, "FSTRING_END", -1),
+    ]
+)
+EMPTY_TOKENS = dict.fromkeys(
+    [
+        token.COMMENT,
+        token.DEDENT,
+        token.ENCODING,
+        token.INDENT,
+        token.NEWLINE,
+        token.NL,
+    ]
+)
 BRACKETS = {"{": "}", "(": ")", "[": "]"}
 BRACKETS_INV = {j: i for i, j in BRACKETS.items()}
 

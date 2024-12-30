@@ -316,21 +316,34 @@ class CompileEventLogLevel(enum.Enum):
 class CompileEventLogger:
     """
     Helper class for representing adding metadata(i.e. columns) to various compile events.
-    Use CompileEventLogger.add_data() to add metadata to:
+    Use CompileEventLogger to add event data to:
     - Chromium events
     - PT2 Compile Events
     - CompilationMetrics
 
-    This should be used in conjunction with dynamo_timed(), which creates the various
-    events and contexts to add data to.
+    This should be used in conjunction with dynamo_timed() and metrics contexts, which create
+    timed spans and events. CompileEventLogger uses three log levels (described in CompileEventLogLevel),
+    where each log level logs to all sources below it in the hierarchy.
+
+    Example usages:
+    - I want to log to an existing chromium event within dynamo timed:
+    with dynamo_timed("my_event"):
+        CompileEventLogger.chromium("my_event", foo=bar)
+
+    - I want to log my event to both chromium + pt2_compile_events:
+    with dynamo_timed("my_event", log_pt2_compile_event=True):
+        CompileEventLogger.pt2_compile("my_event", foo=bar)
+
+    - I want to add information to dynamo events and dynamo_compile
+        CompileEventLogger.compilation_metric(foo=bar)
     """
 
     @staticmethod
     def log_instant_event(
         event_name: str,
-        log_level: CompileEventLogLevel,
-        metadata: Dict[str, object],
+        metadata: Dict[str, Any],
         time_ns: Optional[int] = None,
+        log_level: CompileEventLogLevel = CompileEventLogLevel.CHROMIUM,
     ):
         if time_ns is None:
             time_ns = time.time_ns()
@@ -348,7 +361,7 @@ class CompileEventLogger:
         )
 
     @staticmethod
-    def add_data_(event_name: str, log_level: CompileEventLogLevel, **metadata: object):
+    def add_data(event_name: str, log_level: CompileEventLogLevel, **metadata: object):
         """
         Centralized API for adding data to various events
         Log an event to a toplevel "dynamo" event or metrics context
@@ -381,7 +394,7 @@ class CompileEventLogger:
             metrics_context = get_metrics_context()
             if not metrics_context.in_progress():
                 raise RuntimeError(
-                    "No metrics context is in progress. Please only call this function within a metrics context/dynamo_timed."
+                    "No metrics context is in progress. Please only call this function within a metrics context."
                 )
 
             # TODO: should we assert that the keys of metadata are in CompilationMetrics?
@@ -396,10 +409,13 @@ class CompileEventLogger:
         top_event = get_chromium_event_logger().get_top()
         if top_event is None:
             raise RuntimeError(
-                "No toplevel event active. Please only call this function within a metrics context/dynamo_timed."
+                "No toplevel event active. Please only call this function within a dynamo_timed context."
             )
-        CompileEventLogger.add_data_(top_event, log_level, **metadata)
+        CompileEventLogger.add_data(top_event, log_level, **metadata)
 
+    # MAIN API: These functions are syntactic sugar for the basic operations above without
+    # needing to use a specific log level. These are easier to use because you don't need
+    # to import CompileEventLogLevel to use them.
     @staticmethod
     def add(event_name: str, **metadata: object):
         """
@@ -515,13 +531,13 @@ class CompileEventLogger:
 
     @staticmethod
     def chromium(event_name: str, **metadata: object):
-        CompileEventLogger.add_data_(
+        CompileEventLogger.add_data(
             event_name, CompileEventLogLevel.CHROMIUM, **metadata
         )
 
     @staticmethod
     def pt2_compile(event_name: str, **metadata: object):
-        CompileEventLogger.add_data_(
+        CompileEventLogger.add_data(
             event_name, CompileEventLogLevel.PT2_COMPILE, **metadata
         )
 
@@ -532,10 +548,18 @@ class CompileEventLogger:
         )
 
     @staticmethod
-    def try_add(event_name: str, **metadata: object):
-        """Same as log, but instead of logging an instant event, just silently returns.
+    def instant(
+        event_name: str, metadata: Dict[str, Any], time_ns: Optional[int] = None
+    ):
+        CompileEventLogger.log_instant_event(
+            event_name, metadata, time_ns, CompileEventLogLevel.CHROMIUM
+        )
 
-        This function is syntactic sugar for chromium_event_logger().try_add_event_data
+    @staticmethod
+    def try_add_pt2_compile(event_name: str, **metadata: object):
+        """
+        Adds to an existing pt2_compile event, but silently returns if the event doesn't exist.
+        This function is syntactic sugar for chromium_event_logger().try_add_event_data.
         """
         chromium_log = get_chromium_event_logger()
         chromium_log.try_add_event_data(event_name, **metadata)
@@ -1159,6 +1183,10 @@ class CompilationMetrics:
     feature_usage: Optional[dict[str, bool]] = None
     compile_time_autotune_time_us: Optional[int] = None
     is_runtime: Optional[bool] = False
+    gc_time_us: Optional[int] = None
+    tensorify_float_attempt: Optional[bool] = None
+    tensorify_float_success: Optional[bool] = None
+    tensorify_float_failure: Optional[Set[str]] = None
 
 
 DEFAULT_COMPILATION_METRICS_LIMIT = 64
@@ -1178,6 +1206,7 @@ def add_compilation_metrics_to_chromium(c: CompilationMetrics) -> None:
 
     If you're tempted to add to this list, consider using CompileEventLogger.compilation_metric()
     instead, which will automatically also add it to tlparse and PT2 Compile Events.
+    TODO: Get rid of this function and replace it with CompileEventLogger directly instead.
     """
     event_logger = get_chromium_event_logger()
     event_name = event_logger.get_top()
@@ -1542,7 +1571,7 @@ class ChromiumEventLogger:
         :param str event_name Name of event to appear in trace
         :param time_ns Timestamp in nanoseconds
         :param metadata: Any extra metadata associated with this event
-        :param log_pt_compile_event: If True, log to pt2_compile_events
+        :param log_pt2_compile_event: If True, log to pt2_compile_events
         :param compile_id: Explicit compile_id (rather than using the current context)
         """
         compile_id = compile_id or torch._guards.CompileContext.current_compile_id()
@@ -1727,7 +1756,7 @@ def get_chromium_event_logger() -> ChromiumEventLogger:
 @contextmanager
 def chromium_event_timed(
     event_name: str,
-    reset_event_log: bool = False,
+    reset_event_log_on_exit: bool = False,
     log_pt2_compile_event: bool = False,
 ) -> Generator[Any, None, None]:
     """
@@ -1736,8 +1765,6 @@ def chromium_event_timed(
     instead. Use this context manager only if you want to avoid dynamo_timed.
     """
     chromium_event_log = get_chromium_event_logger()
-    if reset_event_log:
-        chromium_event_log.reset()
     chromium_start_time = time.time_ns()
     chromium_event_log.log_event_start(
         event_name,
@@ -1755,6 +1782,8 @@ def chromium_event_timed(
             chromium_start_time,
             log_pt2_compile_event,
         )
+        if reset_event_log_on_exit:
+            chromium_event_log.reset()
 
 
 @dataclasses.dataclass
@@ -2183,6 +2212,14 @@ tuple_iterator: Type[Iterator[Any]] = type(iter(()))
 range_iterator: Type[Iterator[Any]] = type(iter(range(0)))
 tuple_iterator_len = tuple_iterator.__length_hint__  # type: ignore[attr-defined]
 object_new = object.__new__
+dict_new = dict.__new__
+dict_methods = {
+    method
+    for method in itertools.chain(
+        dict.__dict__.values(), collections.OrderedDict.__dict__.values()
+    )
+    if callable(method)
+}
 
 
 def nn_module_new(cls):
@@ -2680,16 +2717,16 @@ def format_func_info(code):
 
 @contextlib.contextmanager
 def disable_cache_limit():
-    prior = config.cache_size_limit
-    config.cache_size_limit = sys.maxsize
-    prior_acc_limit = config.accumulated_cache_size_limit
-    config.accumulated_cache_size_limit = sys.maxsize
+    prior = config.recompile_limit
+    config.recompile_limit = sys.maxsize
+    prior_acc_limit = config.accumulated_recompile_limit
+    config.accumulated_recompile_limit = sys.maxsize
 
     try:
         yield
     finally:
-        config.cache_size_limit = prior
-        config.accumulated_cache_size_limit = prior_acc_limit
+        config.recompile_limit = prior
+        config.accumulated_recompile_limit = prior_acc_limit
 
 
 # map from transformed code back to original user code

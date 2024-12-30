@@ -4,15 +4,11 @@
 import argparse
 import os
 import sys
+from pathlib import Path
 
 
-sys.path.append(
-    os.path.realpath(
-        os.path.join(
-            __file__, os.path.pardir, os.path.pardir, os.path.pardir, "torch", "utils"
-        )
-    )
-)
+REPO_ROOT = Path(__file__).absolute().parents[2]
+sys.path.append(str((REPO_ROOT / "torch" / "utils").resolve()))
 
 from hipify import hipify_python  # type: ignore[import]
 
@@ -54,7 +50,7 @@ parser.add_argument(
 args = parser.parse_args()
 
 amd_build_dir = os.path.dirname(os.path.realpath(__file__))
-proj_dir = os.path.join(os.path.dirname(os.path.dirname(amd_build_dir)))
+proj_dir = os.path.dirname(os.path.dirname(amd_build_dir))
 
 if args.project_directory:
     proj_dir = args.project_directory
