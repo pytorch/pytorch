@@ -427,6 +427,29 @@ class MpsInterface(DeviceInterface):
             return {}
 
 
+class MpsInterface(DeviceInterface):
+    @staticmethod
+    def is_bf16_supported(including_emulation: bool = False):
+        return torch.backends.mps.is_macos_or_newer(14, 0)
+
+    @staticmethod
+    def is_available() -> bool:
+        return torch.backends.mps.is_available()
+
+    @staticmethod
+    def current_device():
+        return 0
+
+    @staticmethod
+    def synchronize(device: _device_t = None):
+        torch.mps.synchronize()
+
+    class Worker:
+        @staticmethod
+        def get_device_properties(device: _device_t = None):
+            return {}
+
+
 device_interfaces: Dict[str, Type[DeviceInterface]] = {}
 _device_initialized = False
 

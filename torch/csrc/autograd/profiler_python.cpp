@@ -603,8 +603,7 @@ static PyTypeObject TraceContextType = {
 
 class gil_and_restore_thread {
  public:
-  gil_and_restore_thread()
-      : gil_(), initial_thread_state_{PyThreadState_Get()} {}
+  gil_and_restore_thread() : initial_thread_state_{PyThreadState_Get()} {}
   ~gil_and_restore_thread() {
     PyThreadState_Swap(initial_thread_state_);
 
