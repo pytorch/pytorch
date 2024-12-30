@@ -13,9 +13,6 @@ and /cudnn/linear_unpack_impl.cpp, for cudnn.
 #include <torch/custom_class.h>
 #include <torch/library.h>
 
-int register_linear_params();
-
-
 namespace at::native {
 namespace {
 

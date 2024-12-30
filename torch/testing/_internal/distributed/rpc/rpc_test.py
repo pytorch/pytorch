@@ -1452,7 +1452,7 @@ class RpcTest(RpcAgentTestFixture, RpcTestCommon):
         model = torch.nn.parallel.DistributedDataParallel(model)
 
         with self.assertRaisesRegex(RuntimeError, 'Current RPC agent is not set! Did you initialize the RPC framework'):
-            params = [RRef(param) for param in model.parameters()]
+            [RRef(param) for param in model.parameters()]
 
     def test_world_size_one(self):
         self._world_size_one(

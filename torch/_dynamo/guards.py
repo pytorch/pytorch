@@ -122,6 +122,7 @@ from .types import (  # noqa: F401
 )
 from .utils import (
     common_constant_types,
+    dict_keys,
     dict_keys_repr,
     get_custom_getattr,
     get_torch_function_mode_stack,
@@ -444,35 +445,7 @@ def _ast_unparse(node: ast.AST) -> str:
     return ast.unparse(node).replace("\n", "")
 
 
-def strip_function_call(name):
-    """
-    "___odict_getitem(a, 1)" => "a"
-    "a.layers[slice(2)][0]._xyz" ==> "a"
-    "getattr(a.layers[slice(2)][0]._abc, '0')" ==> "a"
-    "getattr(getattr(a.x[3], '0'), '3')" ==> "a"
-    "a.layers[slice(None, -1, None)][0]._xyz" ==> "a"
-    """
-    # recursively find valid object name in function
-    valid_name = re.compile("[A-Za-z_].*")
-    curr = ""
-    for char in name:
-        if char in " (":
-            curr = ""
-        elif char in "),[]":
-            if curr and curr != "None" and valid_name.match(curr):
-                return strip_function_call(curr)
-        else:
-            curr += char
-
-    return strip_getattr_getitem(name)
-
-
-def strip_getattr_getitem(name):
-    """
-    "a[1]" => "a"
-    "a.foo" => "a"
-    """
-    return re.split(r"[.\[]", name)[0]
+strip_function_call = torch._C._dynamo.strip_function_call
 
 
 def get_verbose_code_part(code_part: str, guard: Guard) -> str:
@@ -903,13 +876,16 @@ class GuardBuilder(GuardBuilderBase):
     def get_guard_manager_type(self, source, example_value):
         guard_manager_enum = GuardManagerType.GUARD_MANAGER
         if self.requires_key_order_guarding(source):
-            assert isinstance(example_value, dict)
-            # If keys method is not overriden, we can use PyDict_Next to get key
-            # orderings. Read more in guards.cpp
-            if type(example_value).keys is type({}).keys:
+            if isinstance(example_value, dict_keys):
                 guard_manager_enum = GuardManagerType.DICT_GUARD_MANAGER
             else:
-                guard_manager_enum = GuardManagerType.DICT_SUBCLASS_GUARD_MANAGER
+                assert isinstance(example_value, dict)
+                # If keys method is not overriden, we can use PyDict_Next to get key
+                # orderings. Read more in guards.cpp
+                if type(example_value).keys is type({}).keys:
+                    guard_manager_enum = GuardManagerType.DICT_GUARD_MANAGER
+                else:
+                    guard_manager_enum = GuardManagerType.DICT_SUBCLASS_GUARD_MANAGER
         return guard_manager_enum
 
     def manager_guards_on_keys(self, mgr_enum):
@@ -1300,7 +1276,7 @@ class GuardBuilder(GuardBuilderBase):
             name = guard
         else:
             name = guard.name
-        base = strip_getattr_getitem(strip_function_call(name))
+        base = strip_function_call(name)
         if base not in self.argnames:
             if re.match(r"[a-zA-Z0-9_]+", base):
                 if re.match(r"^\d+$", base):
@@ -1567,6 +1543,7 @@ class GuardBuilder(GuardBuilderBase):
                 frozenset,
                 slice,
                 range,
+                dict_keys,
                 torch.Size,
                 *np_types,
                 *ok_mutable_types,
@@ -1743,15 +1720,16 @@ class GuardBuilder(GuardBuilderBase):
         ) or is_from_optimizer_source(source_b):
             return
 
-        code = [f"{ref_b} is {ref_a}"]
-        self._set_guard_export_info(guard, code)
-
         # Check that the guard has not been inserted already
         key = (ref_a, ref_b)
         if key in self._cached_duplicate_input_guards:
             return
+
         self._cached_duplicate_input_guards.add((ref_a, ref_b))
         self._cached_duplicate_input_guards.add((ref_b, ref_a))
+
+        code = [f"{ref_b} is {ref_a}"]
+        self._set_guard_export_info(guard, code)
 
         install_object_aliasing_guard(
             self.get_guard_manager(guard),
@@ -2314,7 +2292,7 @@ class CheckFunctionManager:
         if not justknobs_check("pytorch/compiler:guard_nn_modules"):
             log.warning("guard_nn_modules is turned off using justknobs killswitch")
 
-        for guard in sorted(guards or [], key=Guard.sort_key):
+        for guard in sorted(guards or (), key=Guard.sort_key):
             if (
                 not guard_on_nn_modules
                 and guard.is_specialized_nn_module()

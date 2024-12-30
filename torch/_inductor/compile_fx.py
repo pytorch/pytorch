@@ -52,6 +52,9 @@ from torch._dynamo.utils import (
     set_feature_use,
 )
 from torch._functorch import config as functorch_config
+from torch._functorch._aot_autograd.subclass_parametrization import (
+    unwrap_tensor_subclass_parameters,
+)
 from torch._functorch.aot_autograd import (
     aot_export_module,
     make_boxed_func,
@@ -1325,6 +1328,9 @@ def compile_fx_aot(
     config_patches: Optional[Dict[str, str]] = None,
 ) -> Union[List[str], str]:
     assert isinstance(model_, GraphModule), model_
+
+    # [See NOTE] Unwrapping subclasses AOT
+    unwrap_tensor_subclass_parameters(model_)
 
     config_patches: Dict[str, Any] = (
         {"cpp_wrapper": True}

@@ -1,6 +1,11 @@
 # Owner(s): ["module: optimizer"]
 
+from __future__ import annotations
+
+from typing import Any
+
 import torch
+from torch import nn, Tensor
 from torch.optim import (
     Adadelta,
     Adagrad,
@@ -9,6 +14,7 @@ from torch.optim import (
     AdamW,
     ASGD,
     NAdam,
+    Optimizer,
     RAdam,
     RMSprop,
     Rprop,
@@ -45,6 +51,71 @@ def _diff_fn(p, grad, opt_differentiable_state, opt_class, kwargs, *ignored):
         v
         for v in opt.state[p].values()
         if isinstance(v, torch.Tensor) and v.requires_grad
+    )
+
+
+def _multistep_backprop_diff_hyperparams_fn(
+    params: Tensor,
+    grad: Tensor,
+    opt_differentiable_state: dict[str, Any],
+    opt_class: type[Optimizer],
+    kwargs: dict[str, Any],
+    *ignored: Any,
+) -> tuple[Tensor, ...]:
+    assert (
+        kwargs["differentiable"] is True
+    ), "Only call this test function when differentiable=True"
+
+    params = params.clone()
+    params.grad = grad
+
+    opt_differentiable_state = {
+        k: v.clone() if isinstance(v, torch.Tensor) else v
+        for k, v in opt_differentiable_state.items()
+    }
+
+    # This copy is necessary so the update on line 78 doesn't overwrite the original kwargs values
+    kwargs = kwargs.copy()
+    kwargs.update(
+        {k: v.clone() if isinstance(v, torch.Tensor) else v for k, v in kwargs.items()}
+    )
+    differentiable_kwargs = [
+        v for v in kwargs.values() if isinstance(v, torch.Tensor) and v.requires_grad
+    ]
+
+    criterion = nn.MSELoss()
+
+    optimizer = opt_class([params], **kwargs)
+    optimizer.state[params].update(opt_differentiable_state)
+
+    # Simple x, y pair
+    x = torch.tensor([1.0], dtype=torch.float64)
+    y = torch.tensor([2.0], dtype=torch.float64)
+
+    for _ in range(2):
+        loss = criterion(x * torch.sum(params), y)
+        loss.backward(
+            inputs=(params,),
+            create_graph=True,
+        )
+        optimizer.step()
+        optimizer.zero_grad()
+
+    meta_loss = loss
+    meta_loss.backward(inputs=(*differentiable_kwargs,), create_graph=True)
+
+    return (
+        (meta_loss,)
+        + tuple(
+            v
+            for v in optimizer.state[params].values()
+            if isinstance(v, torch.Tensor) and v.requires_grad
+        )
+        + tuple(
+            v
+            for v in kwargs.values()
+            if isinstance(v, torch.Tensor) and v.requires_grad
+        )
     )
 
 
@@ -330,6 +401,28 @@ class TestDifferentiableOptimizer(TestCase):
                     "differentiable": True,
                 },
                 *state.values(),
+            ),
+        )
+
+    def test_differentiable_lr(self):
+        params = torch.rand(10, requires_grad=True, dtype=torch.float64)
+        grad = torch.rand_like(params, requires_grad=True, dtype=torch.float64)
+        lr = torch.tensor(0.001, requires_grad=True, dtype=torch.float64)
+
+        mbuff = torch.rand_like(params, requires_grad=True, dtype=torch.float64)
+        state = {"momentum_buffer": mbuff}
+        kwargs: dict[str, Any] = {"lr": lr, "differentiable": True}
+
+        gradcheck(
+            _multistep_backprop_diff_hyperparams_fn,
+            (
+                params,
+                grad,
+                state,
+                SGD,
+                kwargs,  # includes lr
+                *state.values(),
+                *kwargs.values(),
             ),
         )
 

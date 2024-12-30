@@ -62,8 +62,6 @@
 #include <utility>
 #endif
 
-int register_linear_params();
-
 namespace at::native {
 
 namespace {
