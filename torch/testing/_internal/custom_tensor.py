@@ -1,5 +1,6 @@
 # mypy: ignore-errors
 
+
 import torch
 import torch.utils._pytree as pytree
 from torch.utils._python_dispatch import return_and_correct_aliasing
@@ -85,6 +86,7 @@ class CustomTensorPlainOut(torch.Tensor):
     def __init__(self, elem1, elem2):
         self.elem1 = elem1
         self.elem2 = elem2
+        self.custom_attribute = (5, 6)
 
     def get_elem(self):
         return self.elem1
@@ -95,7 +97,7 @@ class CustomTensorPlainOut(torch.Tensor):
         return f"CustomTensorPlainOut({inner_repr_1}, {inner_repr_2})"
 
     def __tensor_flatten__(self):
-        return ["elem1", "elem2"], None
+        return ["elem1", "elem2"], self.custom_attribute
 
     @staticmethod
     def __tensor_unflatten__(inner_tensors, meta, outer_size, outer_stride):
