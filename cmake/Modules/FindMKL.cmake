@@ -192,7 +192,7 @@ MACRO(GET_MKL_LIB_NAMES LIBRARIES INTERFACE MKL64)
   SET(${LIBRARIES} mkl_${INTERFACE}${MKL64} mkl_core)
   IF(_THREAD)
     LIST(INSERT ${LIBRARIES} 1 ${_THREAD})
-    IF(UNIX AND ${USE_STATIC_MKL})
+    IF(UNIX AND "${USE_STATIC_MKL}")
       # The thread library defines symbols required by the other MKL libraries so also add it last
       LIST(APPEND ${LIBRARIES} ${_THREAD})
     ENDIF()
