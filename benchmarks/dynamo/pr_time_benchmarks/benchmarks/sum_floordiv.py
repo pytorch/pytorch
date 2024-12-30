@@ -30,7 +30,7 @@ class Benchmark(BenchmarkBase):
         torch._dynamo.reset()
 
     def _work(self):
-        torch.export.export(self.m, (self.input,))
+        torch.export.export(self.m, (self.input,), strict=True)
 
 
 def main():

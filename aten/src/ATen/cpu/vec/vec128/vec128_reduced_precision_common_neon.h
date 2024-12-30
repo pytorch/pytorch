@@ -145,6 +145,9 @@ struct Vectorized16 {
   Derived asin() const {
     return static_cast<const Derived*>(this)->map_with_vec_float_method(&Vectorized<float>::asin);
   }
+  Derived asinh() const {
+    return static_cast<const Derived*>(this)->map_with_vec_float_method(&Vectorized<float>::asinh);
+  }
   Derived atan() const {
     return static_cast<const Derived*>(this)->map_with_vec_float_method(&Vectorized<float>::atan);
   }

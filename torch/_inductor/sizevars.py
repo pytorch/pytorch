@@ -11,7 +11,6 @@ from typing import (
     List,
     Optional,
     Sequence,
-    Set,
     Tuple,
     Union,
 )
@@ -20,6 +19,7 @@ import sympy
 from sympy import Expr
 
 from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols, ShapeEnv
+from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.functions import FloorDiv, ModularIndexing
 from torch.utils._sympy.symbol import symbol_is_type, SymT
 from torch.utils._sympy.value_ranges import bound_sympy, IntInfinity, ValueRanges
@@ -702,8 +702,8 @@ class SizeVarAllocator:
             self.inv_precomputed_replacements[sym] = expr
         return self.precomputed_replacements[expr]
 
-    def free_symbols(self) -> Set[sympy.Symbol]:
-        return set(self.var_to_val.keys()) - set(self.replacements.keys())
+    def free_symbols(self) -> OrderedSet[sympy.Symbol]:
+        return OrderedSet(self.var_to_val.keys()) - OrderedSet(self.replacements.keys())
 
     def combine_modular_indexing_pairs(self, index: sympy.Expr) -> sympy.Expr:
         """

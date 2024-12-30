@@ -376,6 +376,22 @@ static void bindGetDeviceProperties(PyObject* module) {
       py::return_value_policy::reference);
 }
 
+static void initXpuMethodBindings(PyObject* module) {
+  auto m = py::handle(module).cast<py::module>();
+  m.def("_xpu_getMemoryInfo", [](c10::DeviceIndex device_index) {
+#if SYCL_COMPILER_VERSION >= 20250000
+    auto total = at::xpu::getDeviceProperties(device_index)->global_mem_size;
+    auto free = c10::xpu::get_raw_device(device_index)
+                    .get_info<sycl::ext::intel::info::device::free_memory>();
+    return std::make_tuple(free, total);
+#else
+  TORCH_CHECK_NOT_IMPLEMENTED(
+      false,
+      "torch.xpu.mem_get_info requires PyTorch to be built with SYCL compiler version 2025.0.0 or newer.");
+#endif
+  });
+}
+
 // Callback for python part. Used for additional initialization of python
 // classes
 static PyObject* THXPModule_initExtension(PyObject* self, PyObject* noargs) {
@@ -458,6 +474,7 @@ namespace torch::xpu {
 
 void initModule(PyObject* module) {
   registerXpuDeviceProperties(module);
+  initXpuMethodBindings(module);
 }
 
 } // namespace torch::xpu
