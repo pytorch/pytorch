@@ -8,7 +8,7 @@ import torch.utils._pytree as pytree
 from torch._inductor.kernel.mm_common import mm_args
 
 from . import ir
-from .codegen.cpp_gemm_template import CppPackedGemmTemplate
+from .codegen.cpp_gemm_template import CppGemmTemplate
 from .codegen.cpp_utils import create_epilogue_with_attr
 from .ir import TensorBox
 from .lowering import (
@@ -25,7 +25,7 @@ from .select_algorithm import (
     ChoiceCaller,
     ExternKernelChoice,
 )
-from .utils import use_aten_gemm_kernels, use_cpp_packed_gemm_template, use_max_autotune
+from .utils import use_aten_gemm_kernels, use_cpp_gemm_template, use_max_autotune
 from .virtualized import ops, V
 
 
@@ -182,7 +182,7 @@ def register_onednn_fusion_ops():
             if use_max_autotune():
                 transposed_w = permute(w, [1, 0])
                 *_, layout, x, transposed_w = mm_args(x, transposed_w, layout=layout)
-                if use_cpp_packed_gemm_template(layout, x, transposed_w):
+                if use_cpp_gemm_template(layout, x, transposed_w):
 
                     def epilogue_creator(buf):
                         return create_epilogue_with_attr(
@@ -196,7 +196,7 @@ def register_onednn_fusion_ops():
                     )
                     if b is not None:
                         kwargs["input_indices"] = [2, 0, 1]  # type: ignore[assignment]
-                    CppPackedGemmTemplate.add_choices(
+                    CppGemmTemplate.add_choices(
                         choices,
                         layout,
                         [x, w] if b is None else [x, w, b],
@@ -247,7 +247,7 @@ def register_onednn_fusion_ops():
                 *_, layout, x, transposed_w, y = mm_args(
                     x, transposed_w, y, layout=layout
                 )
-                if use_cpp_packed_gemm_template(layout, x, transposed_w):
+                if use_cpp_gemm_template(layout, x, transposed_w):
 
                     def epilogue_creator(buf):
                         return create_epilogue_with_attr(buf, attr, other=y)
@@ -258,7 +258,7 @@ def register_onednn_fusion_ops():
                         epilogue_creator=epilogue_creator,
                     )
                     kwargs["input_indices"] = [0, 2, 1] if b is None else [3, 0, 2, 1]
-                    CppPackedGemmTemplate.add_choices(
+                    CppGemmTemplate.add_choices(
                         choices,
                         layout,
                         [x, y, w] if b is None else [x, y, w, b],
@@ -563,7 +563,7 @@ def register_onednn_fusion_ops():
                         torch.zeros_like(V.graph.constants[w_zp.get_name()]),
                         V.graph.constants[w_zp.get_name()],
                     )  # We only compensate MatrixB and assume B_zp is 0 to avoid the compensation of MatrixA
-                    and use_cpp_packed_gemm_template(layout, x, packed_weight)
+                    and use_cpp_gemm_template(layout, x, packed_weight)
                 ):
                     W_tensor = V.graph.constants[packed_weight.get_name()].to_dense()
                     weight_compens_tensor = torch.sum(W_tensor.to(torch.float), dim=0)
@@ -690,7 +690,7 @@ def register_onednn_fusion_ops():
                         return output_buf
 
                     assert x.get_dtype() == torch.uint8
-                    CppPackedGemmTemplate.add_choices(
+                    CppGemmTemplate.add_choices(
                         choices,
                         layout,
                         [x, x_scale, x_zp, packed_weight, w_scale, w_zp]
@@ -842,7 +842,7 @@ def register_onednn_fusion_ops():
                         torch.zeros_like(V.graph.constants[w_zp.get_name()]),
                         V.graph.constants[w_zp.get_name()],
                     )  # We only compensate MatrixB and assume B_zp is 0 to avoid the compensation of MatrixA
-                    and use_cpp_packed_gemm_template(layout, x, packed_weight)
+                    and use_cpp_gemm_template(layout, x, packed_weight)
                 ):
                     W_tensor = V.graph.constants[packed_weight.get_name()]
                     W_tensor = W_tensor.to_dense()
@@ -986,7 +986,7 @@ def register_onednn_fusion_ops():
 
                         return output_buf
 
-                    CppPackedGemmTemplate.add_choices(
+                    CppGemmTemplate.add_choices(
                         choices,
                         layout,
                         [x, x_scale, x_zp, packed_weight, w_scale, w_zp, x2]
@@ -1070,8 +1070,8 @@ def register_onednn_fusion_ops():
                     *_, layout, x, transposed_w = mm_args(
                         x, transposed_w, layout=layout
                     )
-                    if use_cpp_packed_gemm_template(layout, x, transposed_w):
-                        CppPackedGemmTemplate.add_choices(
+                    if use_cpp_gemm_template(layout, x, transposed_w):
+                        CppGemmTemplate.add_choices(
                             choices,
                             layout,
                             [x, packed_w, orig_w],
