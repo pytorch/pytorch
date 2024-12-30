@@ -367,7 +367,6 @@ class TestDifferentiableOptimizer(TestCase):
             ),
         )
 
-
     def test_differentiable_lr(self):
         params = torch.rand(10, requires_grad=True, dtype=torch.float64)
         grad = torch.rand_like(params, requires_grad=True, dtype=torch.float64)
