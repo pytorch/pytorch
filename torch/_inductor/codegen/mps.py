@@ -159,7 +159,7 @@ class MetalKernel(SIMDKernel):
         code = IndentedBuffer()
         code.writeline('torch.mps._compile_shader("""')
         with code.indent():
-            code.writeline("kernel void kernel_0(")
+            code.writeline("kernel void generated_kernel(")
             with code.indent():
                 for outer, inner in self.args.output_buffers.items():
                     if outer in self.removed_buffers:
@@ -201,10 +201,13 @@ class MetalScheduling(SIMDScheduling):
         if src_code in wrapper.src_to_kernel:
             kernel_name = wrapper.src_to_kernel[src_code]
         else:
-            kernel_name = f"mps_lib.kernel_{wrapper.next_kernel_suffix()}"
+            # TODO: Merge multiple kernels into a single library
+            # Either using MultiKernel concept or overriding SIMDScheduling.codegen_node_scheduling
+            mps_lib_name = f"mps_lib_{wrapper.next_kernel_suffix()}"
+            kernel_name = f"{mps_lib_name}.generated_kernel"
             wrapper.src_to_kernel[src_code] = kernel_name
             origins, detailed_origins = get_kernel_metadata(node_schedule, wrapper)
             metadata_comment = f"{origins}\n{detailed_origins}"
-            wrapper.define_kernel("mps_lib", src_code, metadata_comment)
+            wrapper.define_kernel(mps_lib_name, src_code, metadata_comment)
 
         return kernel_name
