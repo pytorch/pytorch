@@ -1738,6 +1738,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
     @parametrize("batch_size", (16,))
     @parametrize("in_features", (52,))
     @parametrize("out_features", (32,))
+    @parametrize("input_3d", (True, False))
     @parametrize(
         "bias",
         (
@@ -1765,6 +1766,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         batch_size,
         in_features,
         out_features,
+        input_3d,
         bias,
         dtype,
         epilogue,
@@ -1794,7 +1796,8 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         counters.clear()
         assert dtype == torch.bfloat16
         mod = Linear_Gate_Up(in_features, out_features, bias, epilogue).eval()
-        v = torch.randn(batch_size, in_features).to(torch.bfloat16)
+        B = (2, batch_size) if input_3d else (batch_size,)
+        v = torch.randn(*B, in_features).to(torch.bfloat16)
         with verify(dtype) as (atol, rtol), torch.autocast(
             device_type="cpu"
         ), torch.no_grad():
@@ -2152,6 +2155,9 @@ class TestSelectAlgorithmDynamicShapes(_DynamicShapesTestBase):
         TestSelectAlgorithm.test_quantized_linear_amx
     )
     test_group_linear_dynamic_shapes = TestSelectAlgorithm.test_group_linear
+    test_group_linear_epilogue_dynamic_shapes = (
+        TestSelectAlgorithm.test_group_linear_epilogue
+    )
     test_linear_k_slicing_dynamic_shapes = TestSelectAlgorithm.test_linear_k_slicing
     test_linear_cache_blocking_dynamic_shapes = (
         TestSelectAlgorithm.test_linear_cache_blocking

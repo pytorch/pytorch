@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import contextlib
 import logging
-from typing import Any, Callable, List, Optional
+from typing import Any, Callable, cast, List, Optional
 from unittest.mock import patch
 
 import torch
@@ -15,7 +15,13 @@ from ..select_algorithm import DataProcessorTemplateWrapper
 from ..utils import parallel_num_threads
 from ..virtualized import V
 from .cpp import get_export_declaration
-from .cpp_gemm_template import CppGemmTemplate, expand_bias, prune_tensors, transpose_w
+from .cpp_gemm_template import (
+    CppGemmTemplate,
+    expand_bias,
+    gen_2d_view_of_epilogue_buf,
+    prune_tensors,
+    transpose_w,
+)
 from .cpp_micro_gemm import CppMicroGemmAMX, create_micro_gemm
 from .cpp_template_kernel import CppTemplateKernel
 from .cpp_utils import (
@@ -440,12 +446,21 @@ class CppGroupGemmTemplate(CppGemmTemplate):
                 )
                 reindexers.append(None)
 
-        # <TODO> leslie: Add the fusion check in the Scheduler for Now
-        # <TODO> support the case when dimension and the indexing could be different between the GEMM output
-        # and epilogues, considering that output buf number might be different from GEMM number.
         if epilogue_nodes:
             epilogues.extend(epilogue_nodes)
-            reindexers.extend([None] * len(epilogue_nodes))
+            for epilogue_node in epilogue_nodes:
+                Y = cast(ir.Buffer, epilogue_node)
+                _, reindexers = gen_2d_view_of_epilogue_buf(
+                    Y,
+                    template_buffer,
+                    [
+                        epilogue_node,
+                    ],
+                    reindexers,
+                    default_reindexers=[
+                        None,
+                    ],
+                )
 
         options = dict(
             N=self.n,
