@@ -14,7 +14,7 @@ static void sanityCheckNotFunctional(const c10::OperatorHandle& op, torch::jit::
 
 void FunctionalizeInterpreterPtr::processImpl(
     const c10::OperatorHandle& op,
-    torch::jit::Stack* stack) {
+    torch::jit::Stack* stack) const {
   // We always want to call the functionalization kernels if functionalize() is on the layer stack.
   // It's the responsibility of the functionalization kernel to no-op and redispatch
   // if none of the input tensors are functional.

@@ -97,7 +97,7 @@ class C10_API SymInt {
         reinterpret_cast<void*>(static_cast<uintptr_t>(extended_bits)));
   }
 
-  void release_() {
+  void release_() const {
     if (is_heap_allocated()) {
       SymNode::reclaim(toSymNodeImplUnowned()); // steal
     }

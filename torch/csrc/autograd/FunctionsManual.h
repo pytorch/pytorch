@@ -23,7 +23,7 @@ struct TORCH_API IndexRangeGenerator {
     i += range_size;
     return {i - range_size, i};
   }
-  size_t size() {
+  size_t size() const {
     return i;
   }
 

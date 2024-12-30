@@ -547,7 +547,7 @@ struct C10_CUDA_API MemPool {
   bool is_symmetric();
   CUDACachingAllocator::CUDAAllocator* allocator();
   int use_count();
-  c10::DeviceIndex device();
+  c10::DeviceIndex device() const;
   static MempoolId_t graph_pool_handle(bool is_user_created = true);
 
  private:

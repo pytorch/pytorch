@@ -11,7 +11,7 @@ Backend::Backend(int rank, int size)
 
 Backend::~Backend() = default;
 
-void Backend::init() {
+void Backend::init() const {
   C10_LOG_API_USAGE_ONCE(fmt::format("c10d.backend_{}", getBackendName()));
 }
 

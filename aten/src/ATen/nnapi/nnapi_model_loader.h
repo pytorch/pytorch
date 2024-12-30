@@ -15,7 +15,7 @@ int load_nnapi_model(
     int64_t model_length,
     size_t num_buffers,
     const void** buffer_ptrs,
-    int32_t* buffer_sizes,
+    const int32_t* buffer_sizes,
     size_t num_memories,
     ANeuralNetworksMemory** memories,
     int32_t* memory_sizes,

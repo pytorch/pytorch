@@ -741,7 +741,7 @@ struct TORCH_API TensorType : public SharedType {
 
   TensorTypePtr merge(const TensorType& other, bool merge_sizes = true) const;
 
-  bool matchTensor(const at::Tensor& t);
+  bool matchTensor(const at::Tensor& t) const;
 
   // is all information about the type specified except for autograd?
   // This replaces the notion of a 'CompleteTensorType' that used to exist

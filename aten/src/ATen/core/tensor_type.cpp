@@ -372,7 +372,7 @@ static bool is_null_or_equal(std::optional<T> a, c10::IntArrayRef b) {
   return !a.has_value() || a.value() == b;
 }
 
-bool TensorType::matchTensor(const at::Tensor& t) {
+bool TensorType::matchTensor(const at::Tensor& t) const {
   bool undef = undefined().value_or(!t.defined());
   if (undef != !t.defined()) {
     // When the followings are true, we consider it's not a match:

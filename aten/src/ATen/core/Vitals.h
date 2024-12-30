@@ -45,7 +45,7 @@ struct TORCH_API TorchVital {
 
   TorchVitalAttr& create(const std::string& attr);
   TorchVitalAttr& create(const std::string& attr, bool force);
-  friend std::ostream& operator<<(std::ostream& os, const TorchVital& dt);
+  friend std::ostream& operator<<(std::ostream& os, const TorchVital& tv);
 
   ~TorchVital();
 };

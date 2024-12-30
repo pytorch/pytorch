@@ -50,7 +50,7 @@ TEST(JitLoggingTest, CheckOutputStreamSetting) {
       __FILE__,
       __LINE__,
       ::c10::str("Message"));
-  ASSERT_TRUE(test_stream.str().size() > 0);
+  ASSERT_TRUE(!test_stream.str().empty());
 }
 
 } // namespace jit

@@ -155,11 +155,11 @@ class SocketImpl {
 
   std::unique_ptr<SocketImpl> accept() const;
 
-  void closeOnExec() noexcept;
+  void closeOnExec() const noexcept;
 
-  void enableNonBlocking();
+  void enableNonBlocking() const;
 
-  void disableNonBlocking();
+  void disableNonBlocking() const;
 
   bool enableNoDelay() noexcept;
 
@@ -186,7 +186,7 @@ class SocketImpl {
   bool waitForInput(std::chrono::milliseconds timeout);
 
  private:
-  bool setSocketFlag(int level, int optname, bool value) noexcept;
+  bool setSocketFlag(int level, int optname, bool value) const noexcept;
 
   Handle hnd_;
   const std::optional<std::string> remote_;
@@ -354,13 +354,13 @@ std::unique_ptr<SocketImpl> SocketImpl::accept() const {
   return impl;
 }
 
-void SocketImpl::closeOnExec() noexcept {
+void SocketImpl::closeOnExec() const noexcept {
 #ifndef _WIN32
   ::fcntl(hnd_, F_SETFD, FD_CLOEXEC);
 #endif
 }
 
-void SocketImpl::enableNonBlocking() {
+void SocketImpl::enableNonBlocking() const {
 #ifdef _WIN32
   unsigned long value = 1;
   if (::ioctlsocket(hnd_, FIONBIO, &value) == 0) {
@@ -379,7 +379,7 @@ void SocketImpl::enableNonBlocking() {
 }
 
 // TODO: Remove once we migrate everything to non-blocking mode.
-void SocketImpl::disableNonBlocking() {
+void SocketImpl::disableNonBlocking() const {
 #ifdef _WIN32
   unsigned long value = 0;
   if (::ioctlsocket(hnd_, FIONBIO, &value) == 0) {
@@ -435,7 +435,8 @@ std::uint16_t SocketImpl::getPort() const {
   }
 }
 
-bool SocketImpl::setSocketFlag(int level, int optname, bool value) noexcept {
+bool SocketImpl::setSocketFlag(int level, int optname, bool value)
+    const noexcept {
 #ifdef _WIN32
   auto buf = value ? TRUE : FALSE;
 #else

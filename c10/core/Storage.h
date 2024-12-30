@@ -83,7 +83,7 @@ struct C10_API Storage {
   }
 
   // Mimic create_legacy, but without requiring a newly-created StorageImpl.
-  void reset_legacy() {
+  void reset_legacy() const {
     TORCH_CHECK(resizable() && allocator());
     set_nbytes(0);
     set_data_ptr_noswap(allocator()->allocate(0));

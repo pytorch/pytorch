@@ -196,7 +196,7 @@ struct C10_API Allocator {
     AT_ASSERT(dptr.get() == dptr.get_context());
     return dptr.release_context();
   }
-  void raw_deallocate(void* ptr) {
+  void raw_deallocate(void* ptr) const {
     auto d = raw_deleter();
     AT_ASSERT(d);
     d(ptr);

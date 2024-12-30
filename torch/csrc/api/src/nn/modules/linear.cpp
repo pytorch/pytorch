@@ -58,6 +58,7 @@ void LinearImpl::pretty_print(std::ostream& stream) const {
          << ", bias=" << options.bias() << ")";
 }
 
+// NOLINTNEXTLINE(readability-make-member-function-const)
 Tensor LinearImpl::forward(const Tensor& input) {
   return F::linear(input, weight, bias);
 }
@@ -164,7 +165,7 @@ void BilinearImpl::pretty_print(std::ostream& stream) const {
          << ", bias=" << options.bias() << ")";
 }
 
-Tensor BilinearImpl::forward(const Tensor& input1, const Tensor& input2) {
+Tensor BilinearImpl::forward(const Tensor& input1, const Tensor& input2) const {
   return F::bilinear(input1, input2, weight, bias);
 }
 

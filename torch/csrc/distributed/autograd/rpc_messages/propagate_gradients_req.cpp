@@ -87,7 +87,7 @@ const std::vector<torch::autograd::Variable>& PropagateGradientsReq::
   return grads_;
 }
 
-bool PropagateGradientsReq::retainGraph() {
+bool PropagateGradientsReq::retainGraph() const {
   return retainGraph_;
 }
 

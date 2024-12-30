@@ -12,7 +12,7 @@ struct Range {
 
   int64_t size() const { return end - begin; }
 
-  Range operator/(int64_t divisor) {
+  Range operator/(int64_t divisor) const {
     return Range(begin / divisor, end / divisor);
   }
 

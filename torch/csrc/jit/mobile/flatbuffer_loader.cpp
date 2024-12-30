@@ -84,7 +84,9 @@ class FlatbufferLoader final {
   void registerIValueParser(
       mobile::serialization::IValueUnion ivalue_type,
       IValueParser parser);
-  mobile::Module parseModule(mobile::serialization::Module* module, char* end);
+  mobile::Module parseModule(
+      mobile::serialization::Module* module,
+      const char* end);
 
   void extractJitSourceAndConstants(
       ExtraFilesMap* jit_sources,
@@ -282,7 +284,7 @@ void FlatbufferLoader::parseAndPopulate(
 
 mobile::Module FlatbufferLoader::parseModule(
     mobile::serialization::Module* module,
-    char* end) {
+    const char* end) {
   module_ = module;
   all_ivalues_.clear();
   all_types_.clear();

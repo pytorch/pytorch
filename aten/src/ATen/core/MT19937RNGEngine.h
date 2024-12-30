@@ -127,7 +127,7 @@ public:
     return data_.seed_;
   }
 
-  inline bool is_valid() {
+  inline bool is_valid() const {
     if ((data_.seeded_ == true)
       && (data_.left_ > 0 && data_.left_ <= MERSENNE_STATE_N)
       && (data_.next_ <= MERSENNE_STATE_N)) {

@@ -358,7 +358,7 @@ graph(%x, %y):
   %z2 = aten::mul(%y, %z1)
   return (%z2))IR",
       &pattern1);
-  AT_ASSERT(findPatternMatches(pattern1, graph).size() == 0);
+  AT_ASSERT(findPatternMatches(pattern1, graph).empty());
 }
 
 TEST(SubgraphMatcherTest, MatchInBasicBlocks2) {
@@ -393,7 +393,7 @@ graph(%x, %y):
   %v = my::mul(%y, %u)
   return (%v))IR",
       &pattern1);
-  AT_ASSERT(findPatternMatches(pattern1, graph).size() == 0);
+  AT_ASSERT(findPatternMatches(pattern1, graph).empty());
 }
 
 TEST(SubgraphMatcherTest, MatchesAttributes) {

@@ -134,11 +134,11 @@ BackendDataPtr LazyTensor::CurrentDataHandle() const {
   return data()->handle;
 }
 
-void LazyTensor::SetDataHandle(BackendDataPtr handle) {
+void LazyTensor::SetDataHandle(BackendDataPtr handle) const {
   SetDataHandle(std::move(handle), /*sync=*/true);
 }
 
-void LazyTensor::SetDataHandle(BackendDataPtr handle, bool sync) {
+void LazyTensor::SetDataHandle(BackendDataPtr handle, bool sync) const {
   data()->handle = std::move(handle);
   // Assigning a device data should always clear the IR node, to allow graph
   // trimming.
@@ -208,7 +208,7 @@ Value LazyTensor::CurrentIrValue() const {
   return data()->ir_value;
 }
 
-void LazyTensor::SetTensorData(at::Tensor tensor_data) {
+void LazyTensor::SetTensorData(at::Tensor tensor_data) const {
   data()->tensor_data = std::move(tensor_data);
 }
 

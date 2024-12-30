@@ -191,7 +191,7 @@ class TORCH_API BilinearImpl : public Cloneable<BilinearImpl> {
   /// Applies a bilinear transform on the `input1` and `input2` tensor by
   /// multiplying with the `weight` and optionally adding the `bias`, if
   /// `with_bias` is true in the options.
-  Tensor forward(const Tensor& input1, const Tensor& input2);
+  Tensor forward(const Tensor& input1, const Tensor& input2) const;
 
   /// The options used to configure this module.
   BilinearOptions options;

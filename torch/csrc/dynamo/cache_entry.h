@@ -69,7 +69,7 @@ typedef struct VISIBILITY_HIDDEN CacheEntry {
   ~CacheEntry();
 
   // Warning: returns a reference whose lifetime is controlled by C++
-  py::object next();
+  py::object next() const;
 
   void invalidate(py::object deleted_guard_manager);
   // Called from the python side to update the diff guard root manager

@@ -33,7 +33,7 @@ struct PyNode : public Node {
       at::OptionalDeviceGuard* device_guard);
   variable_list to_variable_list(
       const PyObject* r,
-      const std::vector<bool>& is_variable_input);
+      const std::vector<bool>& is_variable_input) const;
 
   variable_list apply(variable_list&& inputs) override;
   variable_list apply_with_saved_impl(

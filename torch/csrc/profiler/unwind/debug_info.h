@@ -41,7 +41,7 @@ struct DebugInfo {
     return {{lowpc_, lowpc_ + *highpc_}};
   }
 
-  bool is64bit() {
+  bool is64bit() const {
     return is_64bit_;
   }
 
@@ -166,7 +166,8 @@ struct DebugInfo {
     }
   }
 
-  std::vector<std::pair<uint64_t, uint64_t>> readRanges4(uint64_t offset) {
+  std::vector<std::pair<uint64_t, uint64_t>> readRanges4(
+      uint64_t offset) const {
     CheckedLexer L = s_.debug_ranges.lexer(offset);
     std::vector<std::pair<uint64_t, uint64_t>> ranges;
     uint64_t base = lowpc_;
@@ -228,7 +229,7 @@ struct DebugInfo {
     }
   }
 
-  CheckedLexer findAbbrev(uint64_t offset, uint64_t entry) {
+  CheckedLexer findAbbrev(uint64_t offset, uint64_t entry) const {
     CheckedLexer L = s_.debug_abbrev.lexer(offset);
     while (true) {
       auto abbrev_code = L.readULEB128();

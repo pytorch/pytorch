@@ -767,7 +767,7 @@ struct TraceState {
   TraceState(std::vector<std::optional<c10::SymInt>>&& ss, size_t num_outputs)
       : sym_sizes(std::move(ss)), outputs(num_outputs) {}
 
-  void debug_asserts() {
+  void debug_asserts() const {
     TORCH_INTERNAL_ASSERT(sym_sizes_index == sym_sizes.size());
   }
   std::optional<c10::SymInt> next_sym_size() {

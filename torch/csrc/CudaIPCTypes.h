@@ -34,11 +34,11 @@ struct CudaIPCSentData final {
       at::Device device);
   ~CudaIPCSentData();
 
-  uint64_t counter_value();
-  std::string handle() {
+  uint64_t counter_value() const;
+  std::string handle() const {
     return handle_;
   }
-  uint64_t offset() {
+  uint64_t offset() const {
     return offset_;
   }
   void set_original_ptr(at::DataPtr data_ptr) {
@@ -92,15 +92,15 @@ struct CudaIPCRefCountersFile final {
     *counter_ptr() = value;
   }
 
-  bool have_offsets() {
+  bool have_offsets() const {
     return next_offset_ < size_;
   }
 
-  bool offsets_in_use() {
+  bool offsets_in_use() const {
     return used_slots_;
   }
 
-  uint64_t get_offset() {
+  uint64_t get_offset() const {
     return next_offset_;
   }
 

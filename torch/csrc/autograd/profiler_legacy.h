@@ -232,11 +232,11 @@ struct TORCH_API LegacyEvent {
     extra_args_ = std::move(save_args);
   }
 
-  uint64_t flops() {
+  uint64_t flops() const {
     return flops_;
   }
 
-  bool isAsync() {
+  bool isAsync() const {
     return is_async_;
   }
 
