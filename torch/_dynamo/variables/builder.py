@@ -98,6 +98,7 @@ from ..utils import (
     common_constant_types,
     dict_keys,
     get_fake_value,
+    get_items_from_dict,
     get_locals_to_steal,
     get_static_address_type,
     is_frozen_dataclass,
@@ -137,7 +138,6 @@ from .dicts import (
     DefaultDictVariable,
     DictKeySetVariable,
     FrozensetVariable,
-    HFPretrainedConfigVariable,
     PythonSysModulesVariable,
     SetVariable,
 )
@@ -648,8 +648,13 @@ class VariableBuilder:
 
                 return key, value
 
+            # Ensure that we call dict.keys and not value.keys (which can call
+            # overridden keys method). In the C++ guards, we relied on
+            # PyDict_Next to traverse the dictionary, which uses the internal
+            # data structure and does not call the overridden keys method.
             result = dict(
-                build_key_value(i, k, v) for i, (k, v) in enumerate(value.items())
+                build_key_value(i, k, v)
+                for i, (k, v) in enumerate(get_items_from_dict(value))
             )
 
             if istype(value, collections.defaultdict):
@@ -848,9 +853,6 @@ class VariableBuilder:
             )
         elif np and isinstance(value, np.number):
             return self.wrap_unspecialized_primitive(value)
-        elif HFPretrainedConfigVariable.is_matching_object(value):
-            self.install_guards(GuardBuilder.TYPE_MATCH)
-            return HFPretrainedConfigVariable(value)
         elif isinstance(value, HigherOrderOperator):
             if value is torch._higher_order_ops.invoke_subgraph:
                 unimplemented(
@@ -1250,8 +1252,13 @@ class VariableBuilder:
 
                 return key, value
 
+            # Ensure that we call dict.keys and not value.keys (which can call
+            # overridden keys method). In the C++ guards, we relied on
+            # PyDict_Next to traverse the dictionary, which uses the internal
+            # data structure and does not call the overridden keys method.
             result = dict(
-                build_key_value(i, k, v) for i, (k, v) in enumerate(value.items())
+                build_key_value(i, k, v)
+                for i, (k, v) in enumerate(get_items_from_dict(value))
             )
 
             # NB: This is deliberately kept ValueMutationNew because dict_vt is
