@@ -289,8 +289,6 @@ class TestFP8Types(TestCase):
     ):
         if device == "cuda" and not PLATFORM_SUPPORTS_FP8:
             raise unittest.SkipTest(f8_msg)
-        if device == "cpu" and TEST_WITH_ROCM:
-            raise unittest.SkipTest("Skip fp8 CPU tests in ROCm")
         shape = [int(dim) for dim in shape.split(",")]
         batch_size, sequence_length, hidden_size = shape
 
