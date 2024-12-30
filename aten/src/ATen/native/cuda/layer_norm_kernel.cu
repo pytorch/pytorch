@@ -746,6 +746,20 @@ void launch_vectorized_layer_norm_kernel(
     const int warp_size = at::cuda::warp_size();
     const dim3 threads(warp_size, num_threads() / warp_size, 1);
     const dim3 blocks(M);
+
+#ifdef USE_ROCM
+  uint64_t workgroupSize = static_cast<uint64_t>(blocks.x) * static_cast<uint64_t>(threads.x);
+  // this caused invalid configuration problem 
+  if (workgroupSize > std::numeric_limits<uint32_t>::max()) {
+    // Fix invalid configuration https://github.com/pytorch/pytorch/issues/136291
+    uint64_t totalThreads = static_cast<uint64_t>(blocks.x) * static_cast<uint64_t>(threads.x) * static_cast<uint64_t>(threads.y);
+    blocks.x = 65535;
+    //blocks.x = std::numeric_limits<uint32_t>::max() / threads.x;
+    uint64_t newTotal = static_cast<uint64_t>(blocks.x) * static_cast<uint64_t>(threads.x) * static_cast<uint64_t>(threads.y);
+    blocks.y = (totalThreads-1) / newTotal  + 1;
+  }
+#endif
+
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(threads.y % 2 == 0 || threads.y == 1);
     int nshared = threads.y > 1 ? threads.y * 3/2 *sizeof(T_ACC) : 0;
     vectorized_layer_norm_kernel<<<blocks, threads, nshared, stream>>>(N, eps, X_data,
@@ -757,7 +771,7 @@ template <typename T, typename T_ACC>
 void LayerNormKernelImplInternal(
     const Tensor& X,
     const Tensor& gamma,
-    const Tensor& beta,
+    const Tensor& beta,t
     int64_t M,
     int64_t N,
     T_ACC eps,
