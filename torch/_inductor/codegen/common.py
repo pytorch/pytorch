@@ -36,7 +36,7 @@ import sympy
 import torch
 import torch.fx
 from torch._inductor.dtype_propagation import DtypePropagationOpsHandler
-from torch._prims_common import ELEMENTWISE_TYPE_PROMOTION_KIND, is_integer_dtype
+from torch._prims_common import ELEMENTWISE_TYPE_PROMOTION_KIND
 from torch.utils import _pytree as pytree
 from torch.utils._sympy.numbers import int_oo
 from torch.utils._sympy.printers import PythonPrinter as _PythonPrinter
@@ -687,10 +687,7 @@ class OpDecompositions:
 
     @staticmethod
     def remainder(a, b):
-        if is_integer_dtype(a.dtype) and is_integer_dtype(b.dtype):
-            r = ops.mod(a, b)
-        else:
-            r = ops.fmod(a, b)
+        r = ops.mod(a, b)
         cond = ops.and_(
             ops.ne(r, ops.constant(0, torch.int32)),
             ops.ne(ops.signbit(r), ops.signbit(b)),
