@@ -109,8 +109,8 @@ def can_match_buffer_size(input_buf: BufferLike, output_buf: BufferLike):
         sympy_str(input_size)
         == sympy_str(output_size)
     ) or (
-        # statically known that 0.99 * input_size <= output_size <= input_size
-        V.graph.sizevars.statically_known_geq(output_size, 0.99 * input_size)
+        # statically known that 0.95 * input_size <= output_size <= input_size
+        V.graph.sizevars.statically_known_geq(output_size, 0.95 * input_size)
         and V.graph.sizevars.statically_known_leq(output_size, input_size)
     ):
         return True

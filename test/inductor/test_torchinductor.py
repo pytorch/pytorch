@@ -13113,6 +13113,7 @@ if HAS_GPU and not TEST_WITH_ASAN:
             self.assertTrue("in_out_ptr" in code[1])
 
         @torch._functorch.config.patch("donated_buffer", True)
+        @torch._inductor.config.patch("force_shape_pad", True)
         def test_donated_buffer_inplace_gpt(self):
             # model implementation from llm.c:
             # https://github.com/karpathy/llm.c/blob/master/train_gpt2.py
@@ -13208,7 +13209,7 @@ if HAS_GPU and not TEST_WITH_ASAN:
             class GPTConfig:
                 block_size: int = 1024
                 vocab_size: int = 50257
-                n_layer: int = 12
+                n_layer: int = 1
                 n_head: int = 12
                 n_embd: int = 768
 
@@ -13287,16 +13288,9 @@ if HAS_GPU and not TEST_WITH_ASAN:
 
             _, code = run_and_get_code(wrapper, x, y)
 
-            # checks re-inplacing happens if pad_mm happens. Extra if-branch is added
-            # since pad_mm is profiling-based and may not happen on certain machines
-            # for this specific test case.
-            if (
-                "assert_size_stride(mm_default_2, (1024, 50264), (50304, 1))" in code[1]
-                and "(1024, 50257), (50304, 1)" in code[1]
-            ):
-                FileCheck().check_regex(
-                    r"reinterpret_tensor\(.*, \(1024, 50257\).*# reuse"
-                ).run(code[1])
+            FileCheck().check_regex(
+                r"reinterpret_tensor\(.*, \(1024, 50257\).*# reuse"
+            ).run(code[1])
 
     class RNNTest(TestCase):
         device_type = GPU_TYPE
