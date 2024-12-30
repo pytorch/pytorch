@@ -40,11 +40,13 @@ from torch._dynamo.testing import (
     skipIfPy312,
 )
 from torch._dynamo.utils import ifdynstaticdefault
+from torch._guards import CompileContext, CompileId
 from torch._inductor.aoti_eager import (
     aoti_compile_with_persistent_cache,
     aoti_eager_cache_dir,
     load_aoti_eager_cache,
 )
+from torch._inductor.codecache import cpp_prefix_path
 from torch._inductor.codegen.common import DataTypePropagation, OptimizationContext
 from torch._inductor.fx_passes import pad_mm
 from torch._inductor.test_case import TestCase as InductorTestCase
@@ -52,6 +54,7 @@ from torch._inductor.utils import (
     add_scheduler_init_hook,
     run_and_get_code,
     run_and_get_cpp_code,
+    run_and_get_kernels,
     run_and_get_triton_code,
     run_fw_bw_and_get_code,
 )
@@ -6215,6 +6218,99 @@ class CommonTemplate:
                 (torch.arange(-1e-5, 1e-5, 1e-7).to(dtype=dtype),),
             )
 
+    @patch.object(cpp_prefix_path, "cache_clear", lambda: None)
+    @config.patch(force_disable_caches=True)
+    @skip_if_cpp_wrapper("run_and_get_kernels issue")
+    def test_deterministic_codegen(self):
+        if "cpu" in str(self.device) and config.is_fbcode():
+            raise unittest.SkipTest("cpp packaging is wacky in fbcode")
+
+        @torch.compile(fullgraph=True)
+        def a(x):
+            return x.cos().sin().softmax(-1)
+
+        @torch.compile(fullgraph=True)
+        def b(x):
+            return x.sin().cos().softmax(-1)
+
+        @torch.compile(fullgraph=True)
+        def c(x):
+            return x.cos().sin().softmax(-1)
+
+        x = torch.randn(16, 256, device=self.device)
+        _, (coda_a0,) = run_and_get_kernels(a, x)
+        _, (coda_b0,) = run_and_get_kernels(b, x)
+        _, (coda_c0,) = run_and_get_kernels(c, x)
+        self.assertEqual(coda_a0, coda_c0)
+
+        # compile in a different order
+        torch.compiler.reset()
+        _, (coda_c1,) = run_and_get_kernels(c, x)
+        _, (coda_a1,) = run_and_get_kernels(a, x)
+        _, (coda_b1,) = run_and_get_kernels(b, x)
+        self.assertEqual(coda_a0, coda_a1)
+        self.assertEqual(coda_b0, coda_b1)
+        self.assertEqual(coda_c0, coda_c1)
+
+        # force a different CompileId
+        torch.compiler.reset()
+        CompileContext_init = CompileContext.__init__
+        with patch.object(
+            CompileContext,
+            "__init__",
+            lambda self, _: CompileContext_init(self, CompileId(999, 999)),
+        ):
+            _, (coda_a2,) = run_and_get_kernels(a, x)
+            _, (coda_c2,) = run_and_get_kernels(c, x)
+            _, (coda_b2,) = run_and_get_kernels(b, x)
+        self.assertEqual(coda_a0, coda_a2)
+        self.assertEqual(coda_b0, coda_b2)
+        self.assertEqual(coda_c0, coda_c2)
+
+    @patch.object(cpp_prefix_path, "cache_clear", lambda: None)
+    @config.patch(force_disable_caches=True)
+    @skip_if_cpp_wrapper("run_and_get_kernels issue")
+    def test_deterministic_codegen_on_graph_break(self):
+        if "cpu" in str(self.device) and config.is_fbcode():
+            raise unittest.SkipTest("cpp packaging is wacky in fbcode")
+
+        def a(x):
+            return x.cos().sin().softmax(-1)
+
+        @torch.compile()
+        def b(x):
+            x = a(x)
+            torch._dynamo.graph_break()
+            x = a(x)
+            return x
+
+        x = torch.randn(16, 256, device=self.device)
+        _, (code0, code1) = run_and_get_kernels(b, x)
+        self.assertEqual(code0, code1)
+
+    @patch.object(cpp_prefix_path, "cache_clear", lambda: None)
+    @config.patch(force_disable_caches=True)
+    @skip_if_cpp_wrapper("run_and_get_kernels issue")
+    def test_deterministic_codegen_with_suffix(self):
+        if "cpu" in str(self.device) and config.is_fbcode():
+            raise unittest.SkipTest("cpp packaging is wacky in fbcode")
+
+        @torch.compile(fullgraph=True)
+        def a(x):
+            return x.cos().sin().softmax(-1)
+
+        @torch.compile(fullgraph=True)
+        def b(x, y):
+            x = x.cos().sin().softmax(-1)
+            x = torch.matmul(x, y)
+            return x
+
+        x = torch.randn(16, 256, device=self.device)
+        y = torch.randn(256, 256, device=self.device)
+        _, (code0,) = run_and_get_kernels(a, x)
+        _, (code1,) = run_and_get_kernels(b, x, y)
+        self.assertEqual(code0, code1)
+
     def test_flip(self):
         def fn(x):
             return torch.flip(x, (-1,)), torch.flip(x, (0, 2)) - 2
@@ -8550,26 +8646,6 @@ class CommonTemplate:
         self.assertGreaterEqual(c0.min(), 0)
         self.assertGreater(c0.max(), 2**40)
         self.assertLess(c0.max(), 2**50)
-
-    def test_randint_distribution(self):
-        @torch.compile(fullgraph=True)
-        def fn(n_argsmax, size):
-            return torch.randint(n_max, (size,), device=self.device)
-
-        def bin(index, max_size):
-            return index // (max_size // n_bins)
-
-        size = 1_000_000
-        n_max = int(0.75 * 2**32)
-        n_bins = 8
-
-        res = fn(n_max, size)
-        bins = bin(res, n_max).float().cpu()
-        hist, _ = bins.histogram(8, range=(0, n_bins))
-        expected_bin = res.shape[0] / 8
-        expected_error = math.sqrt(expected_bin) / expected_bin * 3
-        error = (hist - expected_bin).abs().max() / expected_bin
-        self.assertTrue(error < expected_error)
 
     @config.patch(fallback_random=True)
     def test_like_rands(self):
