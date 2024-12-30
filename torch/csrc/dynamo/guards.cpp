@@ -3109,7 +3109,7 @@ class TORCH_FUNCTION_MODE_STACK : public LeafGuard {
   TORCH_FUNCTION_MODE_STACK(
       const py::list& initial_stack,
       py::object verbose_code_parts)
-      : LeafGuard(std::move(verbose_code_parts)), _ref_stack() {
+      : LeafGuard(std::move(verbose_code_parts)) {
     Py_ssize_t len = PyList_Size(initial_stack.ptr());
     for (Py_ssize_t idx = 0; idx < len; idx++) {
       PyObject* mode = PyList_GetItem(initial_stack.ptr(), idx); // borrowed ref
