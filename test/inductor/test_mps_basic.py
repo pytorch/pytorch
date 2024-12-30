@@ -25,6 +25,7 @@ sys.path.append(pytorch_test_dir)
 
 from inductor.test_torchinductor import (  # @manual=fbcode//caffe2/test/inductor:test_inductor-library
     check_model_gpu,
+    CommonTemplate,
     TestCase,
 )
 
@@ -36,6 +37,8 @@ from inductor.test_torchinductor import (  # @manual=fbcode//caffe2/test/inducto
 class MPSBasicTests(TestCase):
     common = check_model_gpu
     device = "mps"
+
+    test_add_const_int = CommonTemplate.test_add_const_int
 
     @parametrize("dtype", MPS_DTYPES)
     def test_add(self, dtype):
