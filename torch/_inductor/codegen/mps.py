@@ -50,9 +50,6 @@ class MetalExprPrinter(ExprPrinter_):
         return f"({x}) % ({mod})"
 
 
-mexpr = MetalExprPrinter().doprint
-
-
 class MetalOverrides(OpOverrides):
     @staticmethod
     def to_dtype(
@@ -121,6 +118,7 @@ class MetalKernel(SIMDKernel):
     overrides = MetalOverrides  # type: ignore[assignment]
     suffix = ";"
     newvar_prefix = "auto "
+    sexpr = MetalExprPrinter().doprint
 
     def __init__(
         self,
@@ -153,7 +151,7 @@ class MetalKernel(SIMDKernel):
 
     def codegen_iteration_ranges_entry(self, entry: IterationRangesEntry) -> None:
         index_expr = self.rename_indexing(entry.expr)
-        index_str = mexpr(index_expr)  # type: ignore[misc]
+        index_str = self.sexpr(index_expr)  # type: ignore[misc]
         self.body.writeline(f"{self.index_dtype} {entry.name} = {index_str};")
 
     def codegen_kernel(self, name: Optional[str] = None) -> str:
