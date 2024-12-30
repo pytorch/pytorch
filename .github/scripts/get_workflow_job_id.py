@@ -64,7 +64,7 @@ def fetch_url(
             )
         exception_message = (
             "Is github alright?",
-            f"Recieved status code '{err.code}' when attempting to retrieve {url}:\n",
+            f"Received status code '{err.code}' when attempting to retrieve {url}:\n",
             f"{err.reason}\n\nheaders={err.headers}",
         )
         raise RuntimeError(exception_message) from err
