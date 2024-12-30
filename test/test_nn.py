@@ -13027,6 +13027,20 @@ if __name__ == '__main__':
         y = y.contiguous(memory_format=torch.contiguous_format)
         self.assertEqual(y, y_ref)
 
+    @onlyCUDA
+    def test_log_softmax_acc(self):
+        # log_softmax will use high precision as accumulate type for CPU,
+        # which is same as CUDA behavior. Fix https://github.com/pytorch/pytorch/issues/140222
+        input = torch.randn(2, 2, 2, 2, 2, dtype=torch.bfloat16)
+        input_fp32 = input.clone().to(torch.float32)
+        res = F.log_softmax(input, dim=1)
+        res_fp32 = F.log_softmax(input_fp32, dim=1)
+        self.assertEqual(res, res_fp32.to(torch.bfloat16))
+
+        input_cuda = input.clone().cuda()
+        res_cuda = F.log_softmax(input_cuda, dim=1)
+        self.assertEqual(res, res_cuda)
+
 
 class TestFunctionalPickle(TestCase):
 
