@@ -25,7 +25,7 @@ void dispatch_half_gemm(CUDABLAS_GEMM_ARGTYPES(at::Half)) {
       if(transa_ && transb_) {
           gemm_impl<
             at::Half,
-            256,
+           256,
             256,
             128,
             32,
@@ -45,8 +45,8 @@ void dispatch_half_gemm(CUDABLAS_GEMM_ARGTYPES(at::Half)) {
       }
       else if(transa_ && !transb_) {
           gemm_impl<
-            at::Half,
-            256,
+           at::Half,
+           256,
             256,
             128,
             32,
@@ -66,8 +66,8 @@ void dispatch_half_gemm(CUDABLAS_GEMM_ARGTYPES(at::Half)) {
       }
       else if(!transa_ && transb_) {
           gemm_impl<
-            at::Half,
-            256,
+           at::Half,
+           256,
             256,
             128,
             32,
@@ -87,8 +87,8 @@ void dispatch_half_gemm(CUDABLAS_GEMM_ARGTYPES(at::Half)) {
       }
       else if(!transa_ && !transb_) {
           gemm_impl<
-            at::Half,
-            256,
+           at::Half,
+           256,
             256,
             128,
             32,
@@ -117,7 +117,7 @@ void dispatch_half_gemm(CUDABLAS_GEMM_ARGTYPES(at::Half)) {
       if(transa_ && transb_) {
           gemm_impl<
             at::Half,
-            256,
+              256,
             256,
             128,
             32,
@@ -137,8 +137,8 @@ void dispatch_half_gemm(CUDABLAS_GEMM_ARGTYPES(at::Half)) {
       }
       else if(transa_ && !transb_) {
           gemm_impl<
-            at::Half,
-            256,
+          at::Half,
+              256,
             256,
             128,
             32,
@@ -158,8 +158,8 @@ void dispatch_half_gemm(CUDABLAS_GEMM_ARGTYPES(at::Half)) {
       }
       else if(!transa_ && transb_) {
           gemm_impl<
-            at::Half,
-            256,
+          at::Half,
+              256,
             256,
             128,
             32,
@@ -178,8 +178,8 @@ void dispatch_half_gemm(CUDABLAS_GEMM_ARGTYPES(at::Half)) {
       }
       else if(!transa_ && !transb_) {
           gemm_impl<
-            at::Half,
-            256,
+                    at::Half,
+              256,
             256,
             128,
             32,
@@ -205,8 +205,8 @@ void dispatch_half_gemm(CUDABLAS_GEMM_ARGTYPES(at::Half)) {
     {
       if(transa_ && transb_) {
           gemm_impl<
-            at::Half,
-            256,
+                  at::Half,
+              256,
             256,
             128,
             32,
@@ -226,8 +226,8 @@ void dispatch_half_gemm(CUDABLAS_GEMM_ARGTYPES(at::Half)) {
       }
       else if(transa_ && !transb_) {
           gemm_impl<
-            at::Half,
-            256,
+                  at::Half,
+              256,
             256,
             128,
             32,
@@ -248,8 +248,8 @@ void dispatch_half_gemm(CUDABLAS_GEMM_ARGTYPES(at::Half)) {
       }
       else if(!transa_ && transb_) {
           gemm_impl<
-            at::Half,
-            256,
+                   at::Half,
+              256,
             256,
             128,
             32,
@@ -270,8 +270,8 @@ void dispatch_half_gemm(CUDABLAS_GEMM_ARGTYPES(at::Half)) {
       }
       else if(!transa_ && !transb_) {
           gemm_impl<
-            at::Half,
-            256,
+                    at::Half,
+              256,
             256,
             128,
             32,
@@ -297,10 +297,153 @@ void dispatch_half_gemm(CUDABLAS_GEMM_ARGTYPES(at::Half)) {
   }
 #endif
 }
+void dispatch_half_gemm_wmma(CUDABLAS_GEMM_ARGTYPES(at::Half)) {
+#if 1
+  // If any of the shapes cant be tiled, we must use padding.
+  bool use_padding = ((m % 256 != 0) || (n % 128 != 0) || (k % 64 != 0));
+  // Dispatch to best implementation.
+  // TODO add more configurations. Optimize.
+
+  bool transa_ = std::tolower(transa) != 'n';
+  bool transb_ = std::tolower(transb) != 'n';
+
+  if (use_padding) {
+      if(transa_ && transb_) { // col , col      
+          gemm_impl_wmma<
+            at::Half,
+            256,   128,   256,    64,  8,   16,   16,      4,       4,
+            S<4, 64, 1>,     S<0, 2, 1>,     S<0, 2, 1>,            1,
+            1,              8,      true,     S<4, 64, 1>,     
+            S<1, 0, 2>,     S<1, 0, 2>,             2,              8,
+            8, true,    1,        1,       S<1, 32, 1,  8>,         8,
+           
+            true,
+            true,
+            true>
+            (CUDABLAS_GEMM_ARGS(at::Half));
+      }
+      else if(transa_ && !transb_) { // row, col
+          gemm_impl_wmma<
+           at::Half,
+            256,   128,   256,    64,  8,   16,   16,      4,       4,
+            S<4, 64, 1>,     S<1, 0, 2>,     S<1, 0, 2>,              
+            2,              8,              8,      true,     
+            S<4, 64, 1>,     S<1, 0, 2>,     S<1, 0, 2>,            2,
+            8,              8,      true,        1,        1,       
+            S<1, 32, 1,  8>,                      8,
+            true,
+            true,
+            false>
+            (CUDABLAS_GEMM_ARGS(at::Half));
+      }
+      else if(!transa_ && transb_) { //col, row
+          gemm_impl_wmma<
+           at::Half,
+            256,   128,   256,    64,  8,   16,   16,      4,  
+            4,     S<4, 64, 1>,     S<0, 2, 1>,     S<0, 2, 1>,
+            1,              1,              8,      true,     
+            S<4, 64, 1>,     S<0, 2, 1>,     S<0, 2, 1>,
+            1,              1,              8,      true,        1,
+            1,       S<1, 32, 1,  8>,                      8,
+            true,
+            false,
+            true>
+            (CUDABLAS_GEMM_ARGS(at::Half));
+      }
+      else if(!transa_ && !transb_) { //row, row
+        // DeviceGemmWmma_CShuffle<      Row,     Row,     Row,   F16,   F16,   F16,     F32,      F16, PassThrough, PassThrough, PassThrough, GemmMNKPadding,           1,   >,
+          gemm_impl_wmma<
+           at::Half,
+           256,   128,   256,    64,  8,   16,   16,      4,       4,     
+           S<4, 64, 1>,     S<1, 0, 2>,     S<1, 0, 2>,              
+           2,              8,              8,      true,     
+           S<4, 64, 1>,     S<0, 2, 1>,     S<0, 2, 1>,             1,
+                         1,              8,      true,        1,        1, 
+          S<1, 32, 1,  8>, 8,
+            true,
+            false,
+            false>
+            (CUDABLAS_GEMM_ARGS(at::Half));
+      }
+      else {
+        TORCH_CHECK(false, "unreachable");
+      }
+  } else {
+         if(transa_ && transb_) { // col , col      
+          gemm_impl_wmma<
+            at::Half,
+            256,   128,   256,    64,  8,   16,   16,      4,       4,
+            S<4, 64, 1>,     S<0, 2, 1>,     S<0, 2, 1>,            1,
+            1,              8,      true,     S<4, 64, 1>,     
+            S<1, 0, 2>,     S<1, 0, 2>,             2,              8,
+            8, true,    1,        1,       S<1, 32, 1,  8>,         8,
+           
+            false,
+            true,
+            true>
+            (CUDABLAS_GEMM_ARGS(at::Half));
+      }
+      else if(transa_ && !transb_) { // row, col
+          gemm_impl_wmma<
+           at::Half,
+            256,   128,   256,    64,  8,   16,   16,      4,       4,
+            S<4, 64, 1>,     S<1, 0, 2>,     S<1, 0, 2>,              
+            2,              8,              8,      true,     
+            S<4, 64, 1>,     S<1, 0, 2>,     S<1, 0, 2>,            2,
+            8,              8,      true,        1,        1,       
+            S<1, 32, 1,  8>,                      8,
+            false,
+            true,
+            false>
+            (CUDABLAS_GEMM_ARGS(at::Half));
+      }
+      else if(!transa_ && transb_) { //col, row
+          gemm_impl_wmma<
+           at::Half,
+            256,   128,   256,    64,  8,   16,   16,      4,  
+            4,     S<4, 64, 1>,     S<0, 2, 1>,     S<0, 2, 1>,
+            1,              1,              8,      true,     
+            S<4, 64, 1>,     S<0, 2, 1>,     S<0, 2, 1>,
+            1,              1,              8,      true,        1,
+            1,       S<1, 32, 1,  8>,                      8,
+            false,
+            false,
+            true>
+            (CUDABLAS_GEMM_ARGS(at::Half));
+      }
+      else if(!transa_ && !transb_) { //row, row
+        // DeviceGemmWmma_CShuffle<      Row,     Row,     Row,   F16,   F16,   F16,     F32,      F16, PassThrough, PassThrough, PassThrough, GemmMNKPadding,           1,   >,
+          gemm_impl_wmma<
+           at::Half,
+           256,   128,   256,    64,  8,   16,   16,      4,       4,     
+           S<4, 64, 1>,     S<1, 0, 2>,     S<1, 0, 2>,              
+           2,              8,              8,      true,     
+           S<4, 64, 1>,     S<0, 2, 1>,     S<0, 2, 1>,             1,
+                         1,              8,      true,        1,        1, 
+          S<1, 32, 1,  8>, 8,
+            false,
+            false,
+            false>
+            (CUDABLAS_GEMM_ARGS(at::Half));
+      }
+      else {
+        TORCH_CHECK(false, "unreachable");
+      }
+  }
+#endif
+}
 
 template <>
 void gemm_internal_ck<at::Half>(CUDABLAS_GEMM_ARGTYPES(at::Half)) {
-  dispatch_half_gemm(CUDABLAS_GEMM_ARGS(at::Half));
+  auto dprops = at::cuda::getCurrentDeviceProperties();
+  c10::string_view arch(dprops->gcnArchName);
+  if (arch == "gfx1100") {
+    dispatch_half_gemm_wmma(CUDABLAS_GEMM_ARGS(at::Half));
+  } else{
+    dispatch_half_gemm(CUDABLAS_GEMM_ARGS(at::Half));
+  }
+
+  //TORCH_WARN("########### using CK");
 }
 
 } // namespace at::native
