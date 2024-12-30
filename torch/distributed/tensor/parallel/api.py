@@ -91,6 +91,8 @@ def parallelize_module(  # type: ignore[return]
                     lambda t: fnmatch(t[0], atom),
                     module.named_children(),
                 )
+                matched_children = list(matched_children)
+                print(f"{list(matched_children)=} {path_splits=}")
                 # apply the plan to all matched submodules
                 for _, submodule in matched_children:
                     if path_splits:
@@ -98,10 +100,12 @@ def parallelize_module(  # type: ignore[return]
                         leaf_path = ".".join(
                             path_splits
                         )  # rest of the path after `atom`
+                        print(f"{leaf_path=}")
                         parallelize_module(
                             submodule, device_mesh, {leaf_path: parallelize_style}
                         )
                     else:
+                        print("apply directly onto submodule")
                         # otherwise, directly apply style to this submodule
                         parallelize_module(submodule, device_mesh, parallelize_style)
         return module
