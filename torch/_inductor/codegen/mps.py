@@ -5,6 +5,7 @@ from typing import Any, Optional
 import sympy
 
 import torch
+from torch.utils._sympy.printers import ExprPrinter as ExprPrinter_
 
 from ..ops_handler import StoreMode
 from ..scheduler import SchedulerNode
@@ -25,6 +26,31 @@ DTYPE_TO_METAL = {
     torch.half: "half",
     torch.bfloat16: "bfloat",
 }
+
+
+class MetalExprPrinter(ExprPrinter_):
+    def _print_FloorDiv(self, expr: sympy.Expr) -> str:
+        x, div = expr.args
+        x = self.doprint(x)
+        div = self.doprint(div)
+        if expr.is_integer:
+            return f"({x}) / ({div})"
+        return f"metal::floor({x}) / ({div})"
+
+    def _print_ModularIndexing(self, expr: sympy.Expr) -> str:
+        x, div, mod = expr.args
+        x = self.doprint(x)
+        if div != 1:
+            div = self.doprint(div)
+            if expr.is_integer:
+                x = f"({x}) / ({div})"
+            else:
+                x = f"metal::floor({x}) / ({div})"
+        mod = self.doprint(mod)
+        return f"({x}) % ({mod})"
+
+
+mexpr = MetalExprPrinter().doprint
 
 
 class MetalOverrides(OpOverrides):
@@ -118,7 +144,7 @@ class MetalKernel(SIMDKernel):
 
     def codegen_iteration_ranges_entry(self, entry: IterationRangesEntry) -> None:
         index_expr = self.rename_indexing(entry.expr)
-        index_str = self.sexpr(index_expr)  # type: ignore[misc]
+        index_str = mexpr(index_expr)  # type: ignore[misc]
         self.body.writeline(f"{self.index_dtype} {entry.name} = {index_str};")
 
     def codegen_kernel(self, name: Optional[str] = None) -> str:
