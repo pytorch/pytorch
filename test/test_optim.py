@@ -2219,7 +2219,7 @@ class TestOptimRenewed(TestCase):
                 self.assertGreater(len(state), 0)
 
     @optims(
-        [optim for optim in optim_db if optim.optim_cls.__name__ == "Adam"],
+        [optim for optim in optim_db if optim.optim_cls.__name__ in ["Adam", "AdamW"]],
         dtypes=[torch.float32],
     )
     def test_less_mem_beta1_zero_adam(self, device, dtype, optim_info):
@@ -2240,8 +2240,6 @@ class TestOptimRenewed(TestCase):
         ]
 
         num_params = 4
-        print(f"num_params: {num_params}")
-        print(f"sizeof: {32 * 16 * dtype.__sizeof__()}")
         size_of_param_in_bytes = (
             32 * 16 * dtype.__sizeof__()
         )  # hardcoded, also idk if sizeof is the right api)
@@ -2271,7 +2269,7 @@ class TestOptimRenewed(TestCase):
             self.assertEqual(total_sizes[0], total_sizes[1] + size_of_exp_avgs)
 
     @optims(
-        [optim for optim in optim_db if optim.optim_cls.__name__ == "Adam"],
+        [optim for optim in optim_db if optim.optim_cls.__name__ in ["Adam", "AdamW"]],
         dtypes=[torch.float32],
     )
     def test_loadstate_with_diff_beta1_adam(self, device, dtype, optim_info):
@@ -2349,7 +2347,7 @@ class TestOptimRenewed(TestCase):
             self.assertTrue(torch.allclose(output1_after_load, output2, atol=0.001))
 
     @optims(
-        [optim for optim in optim_db if optim.optim_cls.__name__ == "Adam"],
+        [optim for optim in optim_db if optim.optim_cls.__name__ in ["Adam", "AdamW"]],
         dtypes=[torch.float32],
     )
     def test_correct_beta1(self, device, dtype, optim_info):
