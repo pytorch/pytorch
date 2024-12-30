@@ -185,7 +185,7 @@ class _TestMultiProcessing:
         context = mp.get_context(self.start_method)
         pids_queue = context.Queue()
         nested_child_sleep = 20.0
-        mp_context = mp.start_processes(
+        mp_context = mp.start_processes(  # noqa: F841
             fn=_test_nested,
             args=(pids_queue, nested_child_sleep, self.start_method),
             nprocs=1,

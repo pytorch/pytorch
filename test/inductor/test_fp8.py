@@ -147,11 +147,11 @@ class TestFP8Types(TestCase):
 
         x_shape = (16, 16)
         x = torch.rand(*x_shape, device="cuda", dtype=dtype).to(e4m3_type)
-        y_fp8 = compiled_fp8_matmul(x)
+        y_fp8 = compiled_fp8_matmul(x)  # noqa: F841
 
         x_shape = (15, 16)
         x = torch.rand(*x_shape, device="cuda", dtype=dtype).to(e4m3_type)
-        y_fp8 = compiled_fp8_matmul(x)
+        y_fp8 = compiled_fp8_matmul(x)  # noqa: F841
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     @parametrize("dtype", (torch.float16, torch.bfloat16, torch.float))
@@ -193,14 +193,14 @@ class TestFP8Types(TestCase):
             "Conversions between float8_e5m2 and float8_e4m3fn is not supported!",
         ):
             x = torch.rand(*x_shape, device="cuda").to(dtype=torch.float8_e4m3fn)
-            y = compiled_fp8_cast(x, torch.float8_e5m2)
+            compiled_fp8_cast(x, torch.float8_e5m2)
 
         with self.assertRaisesRegex(
             torch._dynamo.exc.BackendCompilerFailed,
             "Conversions between float8_e5m2 and float8_e4m3fn is not supported!",
         ):
             x = torch.rand(*x_shape, device="cuda").to(dtype=torch.float8_e5m2)
-            y = compiled_fp8_cast(x, torch.float8_e4m3fn)
+            compiled_fp8_cast(x, torch.float8_e4m3fn)
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     @parametrize("src_dtype", (torch.float16, torch.bfloat16, torch.float))
@@ -699,7 +699,7 @@ class TestFP8Lowering(TestCase):
 
         linear_compiled = torch.compile(linear, backend="inductor", mode="max-autotune")
         with self.assertRaises(torch._dynamo.exc.TorchRuntimeError) as cm:
-            y_compiled = linear_compiled(
+            linear_compiled(
                 x,
                 w_t_fp8,
                 w_inverse_scale,
@@ -738,7 +738,7 @@ class TestFP8Lowering(TestCase):
 
         linear_compiled = torch.compile(linear, backend="inductor", mode="max-autotune")
         with self.assertRaises(torch._dynamo.exc.TorchRuntimeError) as cm:
-            y_compiled = linear_compiled(
+            linear_compiled(
                 x,
                 w_t_fp8,
                 w_inverse_scale,
