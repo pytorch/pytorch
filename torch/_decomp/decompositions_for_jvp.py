@@ -107,7 +107,7 @@ def trace(self: Tensor) -> Tensor:
 def log_sigmoid_forward(self: Tensor) -> Tuple[Tensor, Tensor]:
     min = torch.minimum(self.new_zeros(()), self)
     z = torch.exp(-torch.abs(self))
-    if self.is_cuda:
+    if self.is_cuda or self.is_xpu:
         buffer = self.new_zeros((0,))
     else:
         buffer = z

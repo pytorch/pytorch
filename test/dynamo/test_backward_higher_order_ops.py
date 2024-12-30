@@ -247,8 +247,6 @@ class GraphModule(torch.nn.Module):
                 with compiled_autograd._enable(compiler_fn):
                     out.backward(grad_out)
 
-            graph = None
-
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

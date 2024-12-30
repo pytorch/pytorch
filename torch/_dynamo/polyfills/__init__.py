@@ -8,7 +8,8 @@ Python polyfills for common builtins.
 
 # mypy: allow-untyped-defs
 
-from typing import Any, Callable, Sequence, TYPE_CHECKING
+from itertools import repeat as _repeat
+from typing import Any, Callable, List, Sequence, TYPE_CHECKING
 
 import torch
 
@@ -59,7 +60,7 @@ def index(iterator, item, start=0, end=None):
 
 
 def repeat(item, count):
-    for i in range(count):
+    for _ in range(count):
         yield item
 
 
@@ -177,6 +178,28 @@ def instantiate_user_defined_class_object(cls, /, *args, **kwargs):
     return obj
 
 
+def foreach_map_fn(*args):
+    op = args[0]
+    new_args: List[Any] = []
+    at_least_one_list = False
+    for arg in args[1:]:
+        if not isinstance(arg, (list, tuple)):
+            new_args.append(_repeat(arg))
+        else:
+            at_least_one_list = True
+            new_args.append(arg)
+
+    # Just apply op once to args if there are no lists
+    if not at_least_one_list:
+        return op(*args[1:])
+
+    out = []
+    for unpacked in zip(*new_args):
+        out.append(op(*unpacked))
+
+    return out
+
+
 def foreach_lerp_inplace(self, end, weight):
     # decompose foreach lerp into constituent ops, prevents a graph break due to
     # converting a value to a scalar when arg[2] is a single tensor
@@ -199,3 +222,16 @@ def predicate(obj: Any) -> bool:
     if obj:
         return True
     return False
+
+
+def object_eq(self, other):
+    # Mirrors CPython implementation:
+    # https://github.com/python/cpython/blob/a1c52d1265c65bcf0d9edf87e143843ad54f9b8f/Objects/typeobject.c#L6228-L6233
+    return self is other
+
+
+def object_ne(self, other):
+    # Mirrors CPython implementation:
+    # https://github.com/python/cpython/blob/a1c52d1265c65bcf0d9edf87e143843ad54f9b8f/Objects/typeobject.c#L6235-L6255
+    # Using `==` is important because `self` might have a user-defined `__eq__`.
+    return not (self == other)

@@ -600,7 +600,7 @@ def identify_mutated_tensors(
         return [
             ordered_tensor_names[i] for i, mutated in enumerate(mutations) if mutated
         ]
-    except Exception as e:
+    except Exception:
         log.warning(
             "Encountered an exception in identify_mutated_tensors, assuming every input is mutated",
             exc_info=True,
@@ -1002,7 +1002,7 @@ class TritonHOPifier:
 
     2. In order to capture a user-defined triton kernel while performing
     tracing (via make_fx or non-strict export), a user must annotate their
-    triton kernel with the `capture_triton` decorator. The decorator uses
+    triton kernel with the `wrap_triton` decorator. The decorator uses
     TritonHOPifier to convert calls to the triton kernel into a call
     to the HOP (which can then be traced).
 
@@ -1169,7 +1169,7 @@ class TritonHOPifier:
         tx: Optional["InstructionTranslator"],
     ) -> Optional["ConstantVariable"]:
         from triton import JITFunction
-        from triton.runtime.autotuner import autotune, Autotuner, Config
+        from triton.runtime.autotuner import autotune, Autotuner, Config, Heuristics
 
         SPECIAL_CONFIG_NAMES = {"num_warps", "num_stages", "num_ctas"}
 
@@ -1178,6 +1178,25 @@ class TritonHOPifier:
                 "Passing num_ctas directly to the Triton kernel is not supported. "
                 "Please use a Config in @triton.autotune instead."
             )
+
+        # Currently, if there are multiple autotuning decorators, the subsequent ones will be silently ignored.
+        # We also don't support the @triton.heuristics wrapper yet.
+        # We raise an error here to avoid silent incorrectness in these cases
+        iter_kernel = variable.kernel
+        autotuner_count = 0
+        while not isinstance(iter_kernel, JITFunction):
+            if isinstance(iter_kernel, Autotuner):
+                autotuner_count += 1
+            if isinstance(iter_kernel, Heuristics):
+                self.raise_unsupported(
+                    "Passing @triton.heuristics decorator after @triton.autotune decorator is not supported. is not supported. "
+                )
+            if autotuner_count > 1:
+                self.raise_unsupported(
+                    "Passing multiple @triton.autotune decorators is not supported. "
+                    "Please use a single @triton.autotune decorator instead."
+                )
+            iter_kernel = iter_kernel.fn
 
         special_kwargs = {}
         for name in SPECIAL_CONFIG_NAMES:
@@ -1299,7 +1318,7 @@ class TritonHOPifier:
 
 
 ###############################################################################
-# Helpers for capture_triton API that makes a user-defined triton kernel traceable into
+# Helpers for wrap_triton API that makes a user-defined triton kernel traceable into
 # a graph via make_fx or non-strict export (coming soon)
 
 
@@ -1330,7 +1349,7 @@ class TracingTritonHOPifier(TritonHOPifier):
     ) -> Tuple[Union[int, sympy.Expr, SymInt], ...]:
         if not isinstance(grid, collections.abc.Sequence):
             raise RuntimeError(
-                "capture_triton can only handle grids that resolve to Sequence[int]."
+                "wrap_triton can only handle grids that resolve to Sequence[int]."
             )
         # normalize to tuple
         return tuple(grid)
@@ -1389,18 +1408,18 @@ class TraceableTritonKernelWrapper:
         return tracing_triton_hopifier_singleton.call_getitem(self, args)  # type: ignore[return-value]
 
     def run(self, *args: Sequence[Any], **kwargs: Dict[str, Any]) -> Any:
-        from torch._library.triton import is_capture_triton_enabled
+        from torch._library.triton import is_wrap_triton_enabled
 
-        if is_capture_triton_enabled():
+        if is_wrap_triton_enabled():
             return tracing_triton_hopifier_singleton.call_run(self, args, kwargs, None)
         else:
             assert self.kernel is not None
             return self.kernel.run(*args, **kwargs)
 
     def __call__(self, *args: Sequence[Any], **kwargs: Dict[str, Any]) -> Any:
-        from torch._library.triton import is_capture_triton_enabled
+        from torch._library.triton import is_wrap_triton_enabled
 
-        if is_capture_triton_enabled():
+        if is_wrap_triton_enabled():
             return tracing_triton_hopifier_singleton.call_triton_kernel(
                 self, args, kwargs, None
             )
