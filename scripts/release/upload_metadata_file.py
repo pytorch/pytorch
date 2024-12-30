@@ -5,9 +5,10 @@ import subprocess
 import zipfile
 from functools import cache
 from pathlib import Path
+from typing import Any
 
 
-def parse_args():
+def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Upload metadata file to S3")
     parser.add_argument(
         "--package", type=str, required=True, help="Path to the package"
@@ -23,8 +24,12 @@ def parse_args():
     )
     parser.add_argument("--dry-run", action="store_true", help="Dry run")
     args = parser.parse_args()
+    # Sanitize the input a bit by removing s3:// prefix + trailing/leading
+    # slashes
     if args.bucket.startswith("s3://"):
         args.bucket = args.bucket[5:]
+    if args.bucket.endswith("/"):
+        args.bucket = args.bucket[:-1]
     if args.key_prefix.startswith("/"):
         args.key_prefix = args.key_prefix[1:]
     if args.key_prefix.endswith("/"):
@@ -33,7 +38,7 @@ def parse_args():
 
 
 @cache
-def get_s3_client():
+def get_s3_client() -> Any:
     try:
         import boto3
     except ImportError:
@@ -43,7 +48,7 @@ def get_s3_client():
     return boto3.client("s3")
 
 
-def s3_upload(s3_bucket, s3_key, file, dry_run):
+def s3_upload(s3_bucket: str, s3_key: str, file: str, dry_run: bool) -> None:
     s3 = get_s3_client()
     if dry_run:
         print(f"Dry run uploading {file} to s3://{s3_bucket}/{s3_key}")
@@ -51,7 +56,7 @@ def s3_upload(s3_bucket, s3_key, file, dry_run):
     s3.upload_file(file, s3_bucket, s3_key, ExtraArgs={"ChecksumAlgorithm": "sha256"})
 
 
-def extract_metadata(file):
+def extract_metadata(file: str) -> str:
     # Copy the file to a temp location to extract the METADATA file
     file_name = Path(file).name
     tmp = "/tmp"
