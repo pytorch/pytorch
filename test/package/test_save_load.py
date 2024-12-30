@@ -2,9 +2,11 @@
 
 import pickle
 from io import BytesIO
-from pathlib import Path
+from sys import version_info
 from textwrap import dedent
+from unittest import skipIf
 
+import torch
 from torch.package import PackageExporter, PackageImporter, sys_importer
 from torch.testing._internal.common_utils import run_tests
 
@@ -15,8 +17,10 @@ except ImportError:
     # Support the case where we run this file directly.
     from common import PackageTestCase
 
+from pathlib import Path
 
-packaging_directory = Path(__file__).absolute().parent
+
+packaging_directory = Path(__file__).parent
 
 
 class TestSaveLoad(PackageTestCase):
@@ -263,6 +267,20 @@ class TestSaveLoad(PackageTestCase):
         with PackageExporter(buffer2, importer=(importer, sys_importer)) as exporter:
             exporter.intern("**")
             exporter.save_module("package_a.use_torch_package_importer")
+
+    @skipIf(version_info >= (3, 13), "https://github.com/pytorch/pytorch/issues/142170")
+    def test_save_load_fp8(self):
+        tensor = torch.rand(20, 20).to(torch.float8_e4m3fn)
+
+        buffer = BytesIO()
+        with PackageExporter(buffer) as exporter:
+            exporter.save_pickle("fp8_model", "model.pkl", tensor)
+
+        buffer.seek(0)
+
+        importer = PackageImporter(buffer)
+        loaded_tensor = importer.load_pickle("fp8_model", "model.pkl")
+        self.assertTrue(torch.equal(tensor, loaded_tensor))
 
 
 if __name__ == "__main__":
