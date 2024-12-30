@@ -1,6 +1,7 @@
 import contextlib
 import copy
 import hashlib
+import importlib
 import inspect
 import io
 import os
@@ -11,15 +12,39 @@ import unittest
 import warnings
 from dataclasses import dataclass
 from types import FunctionType, ModuleType
-from typing import Any, Callable, Dict, List, NoReturn, Optional, Set, Union
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    Generic,
+    List,
+    NoReturn,
+    Optional,
+    Set,
+    Tuple,
+    TYPE_CHECKING,
+    TypeVar,
+    Union,
+)
 from typing_extensions import deprecated
 from unittest import mock
 
 from torch._utils_internal import justknobs_check
 
 
+# Types saved/loaded in configs
+CONFIG_TYPES = (int, float, bool, type(None), str, list, set, tuple, dict)
+
+
+# Duplicated, because mypy needs these types statically
+T = TypeVar("T", bound=Union[int, float, bool, None, str, list, set, tuple, dict])
+
+
+_UNSET_SENTINEL = object()
+
+
 @dataclass
-class Config:
+class _Config(Generic[T]):
     """Represents a config with richer behaviour than just a default value.
     ::
         i.e.
@@ -29,7 +54,9 @@ class Config:
     This configs must be installed with install_config_module to be used
 
     Precedence Order:
-        env_name_force: If set, this environment variable overrides everything
+        alias: If set, the directly use the value of the alias.
+        env_name_force: If set, this environment variable has precedence over
+            everything after this.
         user_override: If a user sets a value (i.e. foo.bar=True), that
             has precedence over everything after this.
         env_name_default: If set, this environment variable will override everything
@@ -45,25 +72,28 @@ class Config:
     Arguments:
         justknob: the name of the feature / JK. In OSS this is unused.
         default: is the value to default this knob to in OSS.
+        alias: The alias config to read instead.
         env_name_force: The environment variable to read that is a FORCE
-            environment variable. I.e. it overrides everything
+            environment variable. I.e. it overrides everything except for alias.
         env_name_default: The environment variable to read that changes the
             default behaviour. I.e. user overrides take preference.
     """
 
-    default: Any = True
+    default: Union[T, object]
     justknob: Optional[str] = None
     env_name_default: Optional[str] = None
     env_name_force: Optional[str] = None
     value_type: Optional[type] = None
+    alias: Optional[str] = None
 
     def __init__(
         self,
-        default: Any = True,
+        default: Union[T, object] = _UNSET_SENTINEL,
         justknob: Optional[str] = None,
         env_name_default: Optional[str] = None,
         env_name_force: Optional[str] = None,
         value_type: Optional[type] = None,
+        alias: Optional[str] = None,
     ):
         # python 3.9 does not support kw_only on the dataclass :(.
         self.default = default
@@ -71,14 +101,49 @@ class Config:
         self.env_name_default = env_name_default
         self.env_name_force = env_name_force
         self.value_type = value_type
+        self.alias = alias
         if self.justknob is not None:
             assert isinstance(
                 self.default, bool
             ), f"justknobs only support booleans, {self.default} is not a boolean"
+        if self.alias is not None:
+            assert (
+                default is _UNSET_SENTINEL
+                and justknob is None
+                and env_name_default is None
+                and env_name_force is None
+            ), "if alias is set, default, justknob or env var cannot be set"
 
 
-# Types saved/loaded in configs
-CONFIG_TYPES = (int, float, bool, type(None), str, list, set, tuple, dict)
+# In runtime, we unbox the Config[T] to a T, but typechecker cannot see this,
+# so in order to allow for this dynamic behavior to work correctly with
+# typechecking we are going to lie to the typechecker that Config[T] returns
+# a T.
+if TYPE_CHECKING:
+
+    def Config(
+        default: Union[T, object] = _UNSET_SENTINEL,
+        justknob: Optional[str] = None,
+        env_name_default: Optional[str] = None,
+        env_name_force: Optional[str] = None,
+        value_type: Optional[type] = None,
+        alias: Optional[str] = None,
+    ) -> T:
+        ...
+
+else:
+
+    def Config(
+        default: Union[T, object] = _UNSET_SENTINEL,
+        justknob: Optional[str] = None,
+        env_name_default: Optional[str] = None,
+        env_name_force: Optional[str] = None,
+        value_type: Optional[type] = None,
+        alias: Optional[str] = None,
+    ) -> _Config[T]:
+        return _Config(
+            default, justknob, env_name_default, env_name_force, value_type, alias
+        )
 
 
 def _read_env_variable(name: str) -> Optional[bool]:
@@ -117,7 +182,7 @@ def install_config_module(module: ModuleType) -> None:
                 or isinstance(value, (ModuleType, FunctionType))
                 or (hasattr(value, "__module__") and value.__module__ == "typing")
                 # Handle from torch.utils._config_module import Config
-                or (isinstance(value, type) and issubclass(value, Config))
+                or (isinstance(value, type) and issubclass(value, _Config))
             ):
                 continue
 
@@ -125,11 +190,11 @@ def install_config_module(module: ModuleType) -> None:
             if isinstance(value, CONFIG_TYPES):
                 annotated_type = type_hints.get(key, None)
                 config[name] = _ConfigEntry(
-                    Config(default=value, value_type=annotated_type)
+                    _Config(default=value, value_type=annotated_type)
                 )
                 if dest is module:
                     delattr(module, key)
-            elif isinstance(value, Config):
+            elif isinstance(value, _Config):
                 config[name] = _ConfigEntry(value)
 
                 if dest is module:
@@ -200,9 +265,6 @@ def get_assignments_with_compile_ignored_comments(module: ModuleType) -> Set[str
     return assignments
 
 
-_UNSET_SENTINEL = object()
-
-
 @dataclass
 class _ConfigEntry:
     # The default value specified in the configuration
@@ -229,13 +291,15 @@ class _ConfigEntry:
     # call so the final state is correct. It's just very unintuitive.
     # upstream bug - python/cpython#126886
     hide: bool = False
+    alias: Optional[str] = None
 
-    def __init__(self, config: Config):
+    def __init__(self, config: _Config):
         self.default = config.default
         self.value_type = (
             config.value_type if config.value_type is not None else type(self.default)
         )
         self.justknob = config.justknob
+        self.alias = config.alias
         if config.env_name_default is not None:
             if (env_value := _read_env_variable(config.env_name_default)) is not None:
                 self.env_value_default = env_value
@@ -266,6 +330,8 @@ class ConfigModule(ModuleType):
             super().__setattr__(name, value)
         elif name not in self._config:
             raise AttributeError(f"{self.__name__}.{name} does not exist")
+        elif self._config[name].alias is not None:
+            self._set_alias_val(self._config[name], value)
         else:
             self._config[name].user_override = value
             self._is_dirty = True
@@ -277,6 +343,10 @@ class ConfigModule(ModuleType):
 
             if config.hide:
                 raise AttributeError(f"{self.__name__}.{name} does not exist")
+
+            alias_val = self._get_alias_val(config)
+            if alias_val is not _UNSET_SENTINEL:
+                return alias_val
 
             if config.env_value_force is not _UNSET_SENTINEL:
                 return config.env_value_force
@@ -310,6 +380,33 @@ class ConfigModule(ModuleType):
         self._config[name].user_override = _UNSET_SENTINEL
         self._config[name].hide = True
 
+    def _get_alias_module_and_name(
+        self, entry: _ConfigEntry
+    ) -> Optional[Tuple[ModuleType, str]]:
+        alias = entry.alias
+        if alias is None:
+            return None
+        module_name, constant_name = alias.rsplit(".", 1)
+        try:
+            module = importlib.import_module(module_name)
+        except ImportError as e:
+            raise AttributeError("config alias {alias} does not exist") from e
+        return module, constant_name
+
+    def _get_alias_val(self, entry: _ConfigEntry) -> Any:
+        data = self._get_alias_module_and_name(entry)
+        if data is None:
+            return _UNSET_SENTINEL
+        module, constant_name = data
+        constant_value = getattr(module, constant_name)
+        return constant_value
+
+    def _set_alias_val(self, entry: _ConfigEntry, val: Any) -> None:
+        data = self._get_alias_module_and_name(entry)
+        assert data is not None
+        module, constant_name = data
+        setattr(module, constant_name, val)
+
     def _is_default(self, name: str) -> bool:
         return self._config[name].user_override is _UNSET_SENTINEL
 
@@ -326,6 +423,7 @@ class ConfigModule(ModuleType):
         This is used by a number of different user facing export methods
         which all have slightly different semantics re: how and what to
         skip.
+        If a config is aliased, it skips this config.
 
         Arguments:
             ignored_keys are keys that should not be exported.
@@ -348,7 +446,10 @@ class ConfigModule(ModuleType):
                     continue
             if skip_default and self._is_default(key):
                 continue
+            if self._config[key].alias is not None:
+                continue
             config[key] = copy.deepcopy(getattr(self, key))
+
         return config
 
     def get_type(self, config_name: str) -> type:

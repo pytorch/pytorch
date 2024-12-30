@@ -87,7 +87,7 @@ jobs:
     runs-on: "${{ needs.get-label-type.outputs.label-type }}linux.9xlarge.ephemeral"
     strategy:
       matrix:
-        rocm_version: ["6.1", "6.2.4"]
+        rocm_version: ["6.2.4", "6.3"]
     env:
       GPU_ARCH_TYPE: rocm
       GPU_ARCH_VERSION: ${{ matrix.rocm_version }}

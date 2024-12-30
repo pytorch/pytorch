@@ -156,7 +156,7 @@ template<typename ElementInputA, typename ElementInputB>
 Tensor
 mixed_dtypes_linear_dispatch_bias_activation(
     const Tensor& input, const Tensor& weight, const Tensor& scale,
-    const Tensor& bias, const c10::string_view& activation) {
+    const Tensor& bias, const std::string_view& activation) {
     if (bias.numel() == 0) {
       if (activation == "none") {
         return mixed_dtypes_linear_cutlass<
@@ -196,7 +196,7 @@ Tensor
 _mixed_dtypes_linear(const Tensor& input, const Tensor& weight,
                      const Tensor& scale,
                      const std::optional<Tensor>& bias_opt,
-                     const std::optional<c10::string_view> activation_opt) {
+                     const std::optional<std::string_view> activation_opt) {
 #if defined(USE_ROCM) || defined(_MSC_VER) || (defined(CUDA_VERSION) && CUDA_VERSION < 11080)
   TORCH_CHECK(false, "_mixed_dtypes_linear: not compiled for this platform");
   return Tensor{};
