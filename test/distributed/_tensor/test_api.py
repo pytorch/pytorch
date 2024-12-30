@@ -73,9 +73,20 @@ class DTensorAPITest(DTensorTestBase):
         dist_tensor = distribute_tensor(tensor_to_shard, device_mesh, shard_minus_spec)
         self.assertEqual(dist_tensor.placements[0].dim, 1)
 
-        # test src_data_rank = None, make sure it does not have communication
         placement_combs = [[Shard(0)], [Shard(1)], [Replicate()]]
+        # test src_data_rank == 1
+        # set seed differently for each rank
+        torch.manual_seed(self.rank)
+        for placement in placement_combs:
+            tensor_to_distribute = torch.randn(3 * self.world_size, 3 * self.world_size)
+            dtensor = distribute_tensor(
+                tensor_to_distribute, device_mesh, placement, src_data_rank=1
+            )
+            full_dtensor = dtensor.full_tensor()
+            if self.rank == 1:
+                self.assertEqual(full_dtensor, tensor_to_distribute)
 
+        # test src_data_rank = None, make sure it does not have communication
         with comm_mode:
             for placement in placement_combs:
                 if isinstance(placement[0], Shard):

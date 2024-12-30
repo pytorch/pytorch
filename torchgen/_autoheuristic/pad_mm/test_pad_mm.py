@@ -1,11 +1,11 @@
+import os
 import sys
 import unittest
-from pathlib import Path
+
+
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from expecttest import TestCase
-
-
-sys.path.append(str(Path(__file__).absolute().parents[1]))
 
 from test_utils import read_file_to_string, run_bash  # type: ignore[import-not-found]
 

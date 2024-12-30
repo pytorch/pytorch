@@ -112,7 +112,7 @@ class FlightRecorderEventTest(TestCase):
         )
 
     def test_all_events(self):
-        for collective in COLLECTIVES:
+        for collective in sorted(COLLECTIVES):
             event = create_one_event(
                 collective, ("0", "default"), [[4, 4]], [[4, 4]], "scheduled", 1
             )

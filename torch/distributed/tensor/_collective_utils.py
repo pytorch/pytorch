@@ -94,6 +94,13 @@ def mesh_scatter(
             to scatter on, we by default choose the first rank on the
             mesh dimension as source of truth.
 
+    Keyword args:
+        group_src (int, optional): the group rank of the source data for the
+        logical/global tensor, on the specific mesh dimension. By default, we
+        use ``group_rank=0`` on each DeviceMesh dimension as the source data
+        to preserve the single-device semantic. If passing ``None`` explicitly,
+        this method simply uses its local data with no communication.
+
     Returns:
         A :class:`Work` object
     """
@@ -146,6 +153,13 @@ def mesh_broadcast(
         mesh_dim (int, optional): indicate which mesh dimension we want
             to scatter on, we by default choose the first rank on the
             mesh dimension as source of truth.
+
+    Keyword args:
+        group_src (int, optional): the group rank of the source data for the
+        logical/global tensor, on the specific mesh dimension. By default, we
+        use ``group_rank=0`` on each DeviceMesh dimension as the source data
+        to preserve the single-device semantic. If passing ``None`` explicitly,
+        this method simply uses its local data with no communication.
 
     Returns:
         A :class:`Work` object

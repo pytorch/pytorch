@@ -499,7 +499,7 @@ PyObject* TensorGuards_check_verbose(
     }
     std::string fail_reason = checks[i].check_verbose(
         state, THPVariable_Unpack(item), tensor_check_names[i]);
-    if (fail_reason.length() > 0) {
+    if (!fail_reason.empty()) {
       return Py_BuildValue("s", fail_reason.c_str());
     }
   }
@@ -797,6 +797,9 @@ static PyObject* assert_size_stride(PyObject* dummy, PyObject* args) {
   }
 
   if (num_errors) {
+    msg << "\nThis error most often comes from a incorrect fake (aka meta) kernel for a custom op.";
+    msg << "\nUse torch.library.opcheck to test your custom op.";
+    msg << "\nSee https://pytorch.org/docs/stable/library.html#torch.library.opcheck";
     PyErr_SetString(PyExc_AssertionError, msg.str().c_str());
     return nullptr;
   }
@@ -1127,7 +1130,7 @@ std::unordered_set<int64_t> compute_overlapping_tensors(
     const std::vector<Tensor>& tensors) {
   std::unordered_set<int64_t> aliased_tensor_indices;
   for (int64_t i = 0; i < static_cast<int64_t>(tensors.size()); i++) {
-    auto tensor_i = tensors[i];
+    const auto& tensor_i = tensors[i];
     for (int64_t j = 0; j < i; j++) {
       if (!tensors_definitely_do_not_overlap<Meta>(tensor_i, tensors[j])) {
         aliased_tensor_indices.insert(i);
@@ -1890,7 +1893,7 @@ class STORAGE_OVERLAPPING : public RelationalGuard {
       py::object verbose_code_parts)
       : RelationalGuard(std::move(verbose_code_parts)),
         _overlapping(overlapping),
-        _checker(checker) {}
+        _checker(std::move(checker)) {}
 
   bool check_nopybind(PyObject* value) override {
     _checker->add(value, _overlapping);
@@ -2210,8 +2213,8 @@ class GuardManager {
    */
   template <typename GuardAccessorT>
   GuardManager* get_child_manager(
-      py::object accessor_key,
-      std::string source,
+      const py::object& accessor_key,
+      const std::string& source,
       py::handle example_value,
       py::handle guard_manager_enum) {
     // accessor_key type depends on the GuardAccessorT
@@ -4837,11 +4840,11 @@ void install_no_tensor_aliasing_guard(
 }
 
 void install_storage_overlapping_guard_with_checker(
-    std::shared_ptr<StorageOverlapChecker> checker,
+    const std::shared_ptr<StorageOverlapChecker>& checker,
     const py::list& guard_managers,
-    py::object verbose_code_parts,
+    const py::object& verbose_code_parts,
     bool overlapping) {
-  if (guard_managers.size() == 0) {
+  if (guard_managers.empty()) {
     // If there are no GuardManagers, there's no need to create a
     // STORAGE_OVERLAPPING guard.
     return;
@@ -4861,7 +4864,7 @@ void install_storage_overlapping_guard_with_checker(
 void install_storage_overlapping_guard(
     const py::list& overlapping_guard_managers,
     const py::list& non_overlapping_guard_managers,
-    py::object verbose_code_parts) {
+    const py::object& verbose_code_parts) {
   // Create a single StorageOverlapChecker that will be shared amongst
   // the 2 STORAGE_OVERLAPPING guards below.
   std::shared_ptr<StorageOverlapChecker> checker =
