@@ -422,7 +422,6 @@ std::string getNcclVersion() {
   return versionString;
 }
 
-#ifdef USE_C10D_NCCL
 size_t hashTensors(const std::vector<at::Tensor>& tensors) {
   size_t hash = 0;
   for (auto& tensor : tensors) {
@@ -443,7 +442,6 @@ size_t hashTensors(const std::vector<at::Tensor>& tensors) {
   }
   return hash;
 }
-#endif
 
 // Default value: 30 minutes
 int nccl_nonblocking_timeout() {

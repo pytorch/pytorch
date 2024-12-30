@@ -206,7 +206,7 @@ static void autogradBasedTransformSendToNext(
 
 void GradInterpreterPtr::processImpl(
     const c10::OperatorHandle& op,
-    torch::jit::Stack* stack) {
+    torch::jit::Stack* stack) const {
   autogradBasedTransformProcess(op, stack, level(), TransformType::Grad);
 }
 
@@ -224,7 +224,7 @@ void GradInterpreterPtr::sendToNextInterpreterImpl(
 
 void JvpInterpreterPtr::processImpl(
     const c10::OperatorHandle& op,
-    torch::jit::Stack* stack) {
+    torch::jit::Stack* stack) const {
   autogradBasedTransformProcess(op, stack, level(), TransformType::Jvp);
 }
 

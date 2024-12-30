@@ -655,10 +655,10 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     return _generic_sizes(identity<T>());
   }
 
-  ArrayRef<int64_t> _generic_sizes(identity<int64_t>) {
+  ArrayRef<int64_t> _generic_sizes(identity<int64_t>) const {
     return sizes();
   }
-  ArrayRef<c10::SymInt> _generic_sizes(identity<c10::SymInt>) {
+  ArrayRef<c10::SymInt> _generic_sizes(identity<c10::SymInt>) const {
     return sym_sizes();
   }
 
@@ -667,10 +667,10 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     return _generic_strides(identity<T>());
   }
 
-  ArrayRef<int64_t> _generic_strides(identity<int64_t>) {
+  ArrayRef<int64_t> _generic_strides(identity<int64_t>) const {
     return strides();
   }
-  ArrayRef<c10::SymInt> _generic_strides(identity<c10::SymInt>) {
+  ArrayRef<c10::SymInt> _generic_strides(identity<c10::SymInt>) const {
     return sym_strides();
   }
 
@@ -679,10 +679,10 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     return _generic_storage_offset(identity<T>());
   }
 
-  int64_t _generic_storage_offset(identity<int64_t>) {
+  int64_t _generic_storage_offset(identity<int64_t>) const {
     return storage_offset();
   }
-  c10::SymInt _generic_storage_offset(identity<c10::SymInt>) {
+  c10::SymInt _generic_storage_offset(identity<c10::SymInt>) const {
     return sym_storage_offset();
   }
 

@@ -188,6 +188,7 @@ PReLUImpl::PReLUImpl(const PReLUOptions& options_) : options(options_) {
   reset();
 }
 
+// NOLINTNEXTLINE(readability-make-member-function-const)
 Tensor PReLUImpl::forward(const Tensor& input) {
   return F::prelu(input, weight);
 }

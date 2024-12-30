@@ -211,7 +211,7 @@ CudaIPCSentData::~CudaIPCSentData() {
 #endif
 }
 
-uint64_t CudaIPCSentData::counter_value() {
+uint64_t CudaIPCSentData::counter_value() const {
   return *counter_ptr_;
 }
 

@@ -218,7 +218,7 @@ struct DinicFlowGraph {
 
   std::pair<std::vector<size_t>, std::vector<size_t>> partition(
       size_t s,
-      size_t t) {
+      size_t t) const {
     // Note: the partitioning returns "reachable" / "unreachable",
     //   but specifically, for "unreachable", it returns "all vertices
     //   that are reachable from t in the reverse residual graph"
