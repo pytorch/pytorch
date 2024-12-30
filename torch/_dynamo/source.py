@@ -526,6 +526,13 @@ class DictGetItemSource(ChainedSource):
     # 2) constant - like string, integer
     index: Any
 
+    def __post_init__(self):
+        from .variables import ConstantVariable
+
+        assert isinstance(
+            self.index, ConstDictKeySource
+        ) or ConstantVariable.is_literal(self.index)
+
     def guard_source(self):
         return self.base.guard_source()
 
@@ -541,9 +548,6 @@ class DictGetItemSource(ChainedSource):
         if isinstance(self.index, ConstDictKeySource):
             return f"dict.__getitem__({self.base.name()}, {self.index.name()})"
         else:
-            from .variables import ConstantVariable
-
-            assert ConstantVariable.is_literal(self.index)
             return f"{self.base.name()}[{self.index!r}]"
 
 
