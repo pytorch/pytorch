@@ -1057,6 +1057,7 @@ if(USE_ROCM)
        list(APPEND HIP_CXX_FLAGS -g2)
        list(APPEND HIP_CXX_FLAGS -O0)
        list(APPEND HIP_HIPCC_FLAGS -fdebug-info-for-profiling)
+       list(APPEND HIP_HIPCC_FLAGS --offload-compress)
     endif(CMAKE_BUILD_TYPE MATCHES Debug)
 
     # needed for compat with newer versions of hip-clang that introduced C++20 mangling rules
