@@ -292,7 +292,7 @@ def make_signal_windows_opinfo(
         name=name,
         ref=ref if TEST_SCIPY else None,
         dtypes=floating_types(),
-        dtypesIfCUDA=floating_types(),
+        dtypesIfGPU=floating_types(),
         sample_inputs_func=sample_inputs_func,
         reference_inputs_func=reference_inputs_func,
         error_inputs_func=error_inputs_func,

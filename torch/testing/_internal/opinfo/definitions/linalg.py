@@ -1674,7 +1674,7 @@ op_db: List[OpInfo] = [
         # Need this lambda because gradcheck does not work with TensorList inputs
         aten_name="linalg_multi_dot",
         dtypes=all_types_and_complex_and(torch.half, torch.bfloat16),
-        dtypesIfCUDA=floating_and_complex_types_and(torch.half, torch.bfloat16),
+        dtypesIfGPU=floating_and_complex_types_and(torch.half, torch.bfloat16),
         supports_inplace_autograd=False,
         # Batched grad checks fail for empty input tensors (see https://github.com/pytorch/pytorch/issues/53407)
         check_batched_grad=False,

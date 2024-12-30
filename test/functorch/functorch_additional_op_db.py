@@ -69,7 +69,7 @@ additional_op_db.extend(
             supports_forward_ad=True,
             sample_inputs_func=partial(sample_inputs_conv2d, False),
             dtypes=floating_types(),
-            dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
+            dtypesIfGPU=floating_types_and(torch.half, torch.bfloat16),
             supports_out=False,
         ),
         OpInfo(
@@ -79,7 +79,7 @@ additional_op_db.extend(
             supports_autograd=True,
             supports_forward_ad=True,
             sample_inputs_func=partial(sample_inputs_conv2d, True),
-            dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
+            dtypesIfGPU=floating_types_and(torch.half, torch.bfloat16),
             dtypes=floating_types(),
             supports_out=False,
         ),
@@ -90,7 +90,7 @@ additional_op_db.extend(
             supports_autograd=True,
             supports_forward_ad=True,
             sample_inputs_func=partial(sample_inputs_conv2d, True, extra_args=((2, 2))),
-            dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
+            dtypesIfGPU=floating_types_and(torch.half, torch.bfloat16),
             dtypes=floating_types(),
             supports_out=False,
         ),
@@ -103,7 +103,7 @@ additional_op_db.extend(
             sample_inputs_func=partial(
                 sample_inputs_conv2d, False, extra_args=((2, 2))
             ),
-            dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
+            dtypesIfGPU=floating_types_and(torch.half, torch.bfloat16),
             dtypes=floating_types(),
             supports_out=False,
         ),
@@ -116,7 +116,7 @@ additional_op_db.extend(
             sample_inputs_func=partial(
                 sample_inputs_conv2d, True, extra_args=((2, 2), (1, 1))
             ),
-            dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
+            dtypesIfGPU=floating_types_and(torch.half, torch.bfloat16),
             dtypes=floating_types(),
             supports_out=False,
         ),
@@ -129,7 +129,7 @@ additional_op_db.extend(
             sample_inputs_func=partial(
                 sample_inputs_conv2d, False, extra_args=((2, 2), (1, 1))
             ),
-            dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
+            dtypesIfGPU=floating_types_and(torch.half, torch.bfloat16),
             dtypes=floating_types(),
             supports_out=False,
         ),
@@ -142,7 +142,7 @@ additional_op_db.extend(
             sample_inputs_func=partial(
                 sample_inputs_conv2d, True, extra_args=((2, 2), (1, 1), (2, 2))
             ),
-            dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
+            dtypesIfGPU=floating_types_and(torch.half, torch.bfloat16),
             dtypes=floating_types(),
             supports_out=False,
         ),
@@ -155,7 +155,7 @@ additional_op_db.extend(
             sample_inputs_func=partial(
                 sample_inputs_conv2d, True, extra_args=((2, 2), (1, 1), (2, 2))
             ),
-            dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
+            dtypesIfGPU=floating_types_and(torch.half, torch.bfloat16),
             dtypes=floating_types(),
             supports_out=False,
         ),
@@ -168,7 +168,7 @@ additional_op_db.extend(
             sample_inputs_func=partial(
                 sample_inputs_conv2d, True, extra_args=((2, 3), 0, 1, 2), groups=2
             ),
-            dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
+            dtypesIfGPU=floating_types_and(torch.half, torch.bfloat16),
             dtypes=floating_types(),
             supports_out=False,
         ),
@@ -181,7 +181,7 @@ additional_op_db.extend(
             sample_inputs_func=partial(
                 sample_inputs_conv2d, True, extra_args=((2, 3), 0, 1, 6), groups=6
             ),
-            dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
+            dtypesIfGPU=floating_types_and(torch.half, torch.bfloat16),
             dtypes=floating_types(),
             supports_out=False,
         ),
@@ -306,8 +306,8 @@ additional_op_db.append(
         supports_fwgrad_bwgrad=True,
         dtypes=floating_types_and(torch.float16),
         backward_dtypes=floating_types(),
-        dtypesIfCUDA=floating_types_and(torch.bfloat16, torch.float16),
-        backward_dtypesIfCUDA=floating_types_and(torch.bfloat16, torch.float16),
+        dtypesIfGPU=floating_types_and(torch.bfloat16, torch.float16),
+        backward_dtypesIfGPU=floating_types_and(torch.bfloat16, torch.float16),
     )
 )
 
