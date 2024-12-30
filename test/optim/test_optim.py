@@ -6,7 +6,7 @@ from typing import Any
 
 import torch
 from torch import nn, Tensor
-from torch.optim import Optimizer, SGD
+from torch.optim import Adam, AdamW, Optimizer, SGD
 from torch.testing._internal.common_utils import (
     gradcheck,
     load_tests,
@@ -97,6 +97,277 @@ def _multistep_backprop_diff_hyperparams_fn(
 
 @skipIfTorchDynamo("Differentiable optimizers not supported")
 class TestDifferentiableOptimizer(TestCase):
+    def test_adam_differentiable_lr(self):
+        params = torch.rand(10, requires_grad=True, dtype=torch.float64)
+        grad = torch.rand_like(params, requires_grad=True, dtype=torch.float64)
+        lr = torch.tensor(0.001, requires_grad=True, dtype=torch.float64)
+
+        state = {}
+        state["step"] = torch.tensor(10.0, requires_grad=False, dtype=torch.float64)
+        state["exp_avg"] = torch.rand(10, requires_grad=True, dtype=torch.float64)
+        state["exp_avg_sq"] = torch.rand(10, requires_grad=True, dtype=torch.float64)
+        state["max_exp_avg_sq"] = torch.rand(
+            10, requires_grad=True, dtype=torch.float64
+        )
+        kwargs: dict[str, Any] = {"lr": lr, "differentiable": True}
+
+        gradcheck(
+            _multistep_backprop_diff_hyperparams_fn,
+            (
+                params,
+                grad,
+                state,
+                Adam,
+                kwargs,  # includes lr
+                *state.values(),
+                *kwargs.values(),
+            ),
+        )
+
+    def test_adam_differentiable_weight_decay(self):
+        params = torch.rand(10, requires_grad=True, dtype=torch.float64)
+        grad = torch.rand_like(params, requires_grad=True, dtype=torch.float64)
+        weight_decay = torch.tensor(0.999, requires_grad=True, dtype=torch.float64)
+
+        state = {}
+        state["step"] = torch.tensor(10.0, requires_grad=False, dtype=torch.float64)
+        state["exp_avg"] = torch.rand(10, requires_grad=True, dtype=torch.float64)
+        state["exp_avg_sq"] = torch.rand(10, requires_grad=True, dtype=torch.float64)
+        state["max_exp_avg_sq"] = torch.rand(
+            10, requires_grad=True, dtype=torch.float64
+        )
+        kwargs: dict[str, Any] = {"weight_decay": weight_decay, "differentiable": True}
+
+        gradcheck(
+            _multistep_backprop_diff_hyperparams_fn,
+            (
+                params,
+                grad,
+                state,
+                Adam,
+                kwargs,  # includes weight_decay
+                *state.values(),
+                *kwargs.values(),
+            ),
+        )
+
+    def test_adam_differentiable_betas(self):
+        params = torch.rand(10, requires_grad=True, dtype=torch.float64)
+        grad = torch.rand_like(params, requires_grad=True, dtype=torch.float64)
+
+        lr = torch.tensor([0.001], requires_grad=True, dtype=torch.float64)
+        betas = (
+            torch.tensor(0.9, requires_grad=True, dtype=torch.float64),
+            torch.tensor(0.999, requires_grad=True, dtype=torch.float64),
+        )
+        state = {}
+        state["step"] = torch.tensor(10.0, requires_grad=False, dtype=torch.float64)
+        state["exp_avg"] = torch.rand(10, requires_grad=True, dtype=torch.float64)
+        state["exp_avg_sq"] = torch.rand(10, requires_grad=True, dtype=torch.float64)
+        state["max_exp_avg_sq"] = torch.rand(
+            10, requires_grad=True, dtype=torch.float64
+        )
+
+        # Have to pass in beta1 and beta2 separately
+        # so they're passed in as Tensors (not a tuple) and recognized by gradcheck.
+        # In the test, this is called: kwargs.update({betas: (beta1, beta2)})
+        kwargs: dict[str, Any] = {
+            "beta1": betas[0],
+            "beta2": betas[1],
+            "lr": lr,
+            "differentiable": True,
+        }
+
+        gradcheck(
+            _multistep_backprop_diff_hyperparams_fn,
+            (
+                params,
+                grad,
+                state,
+                Adam,
+                kwargs,  # includes betas
+                *state.values(),
+                *kwargs.values(),
+            ),
+        )
+
+    def test_adam_differentiable_all_hyperparams(self):
+        params = torch.rand(10, requires_grad=True, dtype=torch.float64)
+        grad = torch.rand_like(params, requires_grad=True, dtype=torch.float64)
+
+        lr = torch.tensor(0.001, requires_grad=True, dtype=torch.float64)
+        weight_decay = torch.tensor(0.999, requires_grad=True, dtype=torch.float64)
+        betas = (
+            torch.tensor(0.9, requires_grad=True, dtype=torch.float64),
+            torch.tensor(0.999, requires_grad=True, dtype=torch.float64),
+        )
+        state = {}
+        state["step"] = torch.tensor(10.0, requires_grad=False, dtype=torch.float64)
+        state["exp_avg"] = torch.rand(10, requires_grad=True, dtype=torch.float64)
+        state["exp_avg_sq"] = torch.rand(10, requires_grad=True, dtype=torch.float64)
+        state["max_exp_avg_sq"] = torch.rand(
+            10, requires_grad=True, dtype=torch.float64
+        )
+
+        # Have to pass in beta1 and beta2 separately
+        # so they're passed in as Tensors (not a tuple) and recognized by gradcheck.
+        # In the test, this is called: kwargs.update({betas: (beta1, beta2)})
+        kwargs: dict[str, Any] = {
+            "lr": lr,
+            "weight_decay": weight_decay,
+            "beta1": betas[0],
+            "beta2": betas[1],
+            "differentiable": True,
+        }
+
+        gradcheck(
+            _multistep_backprop_diff_hyperparams_fn,
+            (
+                params,
+                grad,
+                state,
+                Adam,
+                kwargs,  # includes betas
+                *state.values(),
+                *kwargs.values(),
+            ),
+        )
+
+    def test_adamw_differentiable_lr(self):
+        params = torch.rand(10, requires_grad=True, dtype=torch.float64)
+        grad = torch.rand_like(params, requires_grad=True, dtype=torch.float64)
+        lr = torch.tensor(0.001, requires_grad=True, dtype=torch.float64)
+
+        state = {}
+        state["step"] = torch.tensor(10.0, requires_grad=False, dtype=torch.float64)
+        state["exp_avg"] = torch.rand(10, requires_grad=True, dtype=torch.float64)
+        state["exp_avg_sq"] = torch.rand(10, requires_grad=True, dtype=torch.float64)
+        state["max_exp_avg_sq"] = torch.rand(
+            10, requires_grad=True, dtype=torch.float64
+        )
+        kwargs: dict[str, Any] = {"lr": lr, "differentiable": True}
+
+        gradcheck(
+            _multistep_backprop_diff_hyperparams_fn,
+            (
+                params,
+                grad,
+                state,
+                AdamW,
+                kwargs,  # includes lr
+                *state.values(),
+                *kwargs.values(),
+            ),
+        )
+
+    def test_adamw_differentiable_weight_decay(self):
+        params = torch.rand(10, requires_grad=True, dtype=torch.float64)
+        grad = torch.rand_like(params, requires_grad=True, dtype=torch.float64)
+        weight_decay = torch.tensor(0.999, requires_grad=True, dtype=torch.float64)
+
+        state = {}
+        state["step"] = torch.tensor(10.0, requires_grad=False, dtype=torch.float64)
+        state["exp_avg"] = torch.rand(10, requires_grad=True, dtype=torch.float64)
+        state["exp_avg_sq"] = torch.rand(10, requires_grad=True, dtype=torch.float64)
+        state["max_exp_avg_sq"] = torch.rand(
+            10, requires_grad=True, dtype=torch.float64
+        )
+        kwargs: dict[str, Any] = {"weight_decay": weight_decay, "differentiable": True}
+
+        gradcheck(
+            _multistep_backprop_diff_hyperparams_fn,
+            (
+                params,
+                grad,
+                state,
+                AdamW,
+                kwargs,  # includes weight_decay
+                *state.values(),
+                *kwargs.values(),
+            ),
+        )
+
+    def test_adamw_differentiable_betas(self):
+        params = torch.rand(10, requires_grad=True, dtype=torch.float64)
+        grad = torch.rand_like(params, requires_grad=True, dtype=torch.float64)
+
+        betas = (
+            torch.tensor(0.9, requires_grad=True, dtype=torch.float64),
+            torch.tensor(0.999, requires_grad=True, dtype=torch.float64),
+        )
+        state = {}
+        state["step"] = torch.tensor(10.0, requires_grad=False, dtype=torch.float64)
+        state["exp_avg"] = torch.rand(10, requires_grad=True, dtype=torch.float64)
+        state["exp_avg_sq"] = torch.rand(10, requires_grad=True, dtype=torch.float64)
+        state["max_exp_avg_sq"] = torch.rand(
+            10, requires_grad=True, dtype=torch.float64
+        )
+
+        # Have to pass in beta1 and beta2 separately
+        # so they're passed in as Tensors (not a tuple) and recognized by gradcheck.
+        # In the test, this is called: kwargs.update({betas: (beta1, beta2)})
+        kwargs: dict[str, Any] = {
+            "beta1": betas[0],
+            "beta2": betas[1],
+            "differentiable": True,
+        }
+
+        gradcheck(
+            _multistep_backprop_diff_hyperparams_fn,
+            (
+                params,
+                grad,
+                state,
+                AdamW,
+                kwargs,  # includes betas
+                *state.values(),
+                *kwargs.values(),
+            ),
+        )
+
+    def test_adamw_differentiable_all_hyperparams(self):
+        params = torch.rand(10, requires_grad=True, dtype=torch.float64)
+        grad = torch.rand_like(params, requires_grad=True, dtype=torch.float64)
+
+        lr = torch.tensor(0.001, requires_grad=True, dtype=torch.float64)
+        weight_decay = torch.tensor(0.999, requires_grad=True, dtype=torch.float64)
+        betas = (
+            torch.tensor(0.9, requires_grad=True, dtype=torch.float64),
+            torch.tensor(0.999, requires_grad=True, dtype=torch.float64),
+        )
+        state = {}
+        state["step"] = torch.tensor(10.0, requires_grad=False, dtype=torch.float64)
+        state["exp_avg"] = torch.rand(10, requires_grad=True, dtype=torch.float64)
+        state["exp_avg_sq"] = torch.rand(10, requires_grad=True, dtype=torch.float64)
+        state["max_exp_avg_sq"] = torch.rand(
+            10, requires_grad=True, dtype=torch.float64
+        )
+
+        # Have to pass in beta1 and beta2 separately
+        # so they're passed in as Tensors (not a tuple) and recognized by gradcheck.
+        # In the test, this is called: kwargs.update({betas: (beta1, beta2)})
+        kwargs: dict[str, Any] = {
+            "lr": lr,
+            "weight_decay": weight_decay,
+            "beta1": betas[0],
+            "beta2": betas[1],
+            "differentiable": True,
+        }
+
+        gradcheck(
+            _multistep_backprop_diff_hyperparams_fn,
+            (
+                params,
+                grad,
+                state,
+                AdamW,
+                kwargs,  # includes betas
+                *state.values(),
+                *kwargs.values(),
+            ),
+        )
+
+
     def test_differentiable_lr(self):
         params = torch.rand(10, requires_grad=True, dtype=torch.float64)
         grad = torch.rand_like(params, requires_grad=True, dtype=torch.float64)
