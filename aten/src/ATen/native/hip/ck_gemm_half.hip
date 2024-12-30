@@ -25,7 +25,7 @@ void dispatch_half_gemm(CUDABLAS_GEMM_ARGTYPES(at::Half)) {
       if(transa_ && transb_) {
           gemm_impl<
             at::Half,
-           256,
+            256,
             256,
             128,
             32,
@@ -45,8 +45,8 @@ void dispatch_half_gemm(CUDABLAS_GEMM_ARGTYPES(at::Half)) {
       }
       else if(transa_ && !transb_) {
           gemm_impl<
-           at::Half,
-           256,
+            at::Half,
+            256,
             256,
             128,
             32,
@@ -66,8 +66,8 @@ void dispatch_half_gemm(CUDABLAS_GEMM_ARGTYPES(at::Half)) {
       }
       else if(!transa_ && transb_) {
           gemm_impl<
-           at::Half,
-           256,
+            at::Half,
+            256,
             256,
             128,
             32,
@@ -87,8 +87,8 @@ void dispatch_half_gemm(CUDABLAS_GEMM_ARGTYPES(at::Half)) {
       }
       else if(!transa_ && !transb_) {
           gemm_impl<
-           at::Half,
-           256,
+            at::Half,
+            256,
             256,
             128,
             32,
@@ -117,7 +117,7 @@ void dispatch_half_gemm(CUDABLAS_GEMM_ARGTYPES(at::Half)) {
       if(transa_ && transb_) {
           gemm_impl<
             at::Half,
-              256,
+            256,
             256,
             128,
             32,
@@ -137,8 +137,8 @@ void dispatch_half_gemm(CUDABLAS_GEMM_ARGTYPES(at::Half)) {
       }
       else if(transa_ && !transb_) {
           gemm_impl<
-          at::Half,
-              256,
+            at::Half,
+            256,
             256,
             128,
             32,
@@ -158,8 +158,8 @@ void dispatch_half_gemm(CUDABLAS_GEMM_ARGTYPES(at::Half)) {
       }
       else if(!transa_ && transb_) {
           gemm_impl<
-          at::Half,
-              256,
+            at::Half,
+            256,
             256,
             128,
             32,
@@ -178,8 +178,8 @@ void dispatch_half_gemm(CUDABLAS_GEMM_ARGTYPES(at::Half)) {
       }
       else if(!transa_ && !transb_) {
           gemm_impl<
-                    at::Half,
-              256,
+            at::Half,
+            256,
             256,
             128,
             32,
@@ -205,8 +205,8 @@ void dispatch_half_gemm(CUDABLAS_GEMM_ARGTYPES(at::Half)) {
     {
       if(transa_ && transb_) {
           gemm_impl<
-                  at::Half,
-              256,
+            at::Half,
+            256,
             256,
             128,
             32,
@@ -226,8 +226,8 @@ void dispatch_half_gemm(CUDABLAS_GEMM_ARGTYPES(at::Half)) {
       }
       else if(transa_ && !transb_) {
           gemm_impl<
-                  at::Half,
-              256,
+            at::Half,
+            256,
             256,
             128,
             32,
@@ -248,8 +248,8 @@ void dispatch_half_gemm(CUDABLAS_GEMM_ARGTYPES(at::Half)) {
       }
       else if(!transa_ && transb_) {
           gemm_impl<
-                   at::Half,
-              256,
+            at::Half,
+            256,
             256,
             128,
             32,
@@ -270,8 +270,8 @@ void dispatch_half_gemm(CUDABLAS_GEMM_ARGTYPES(at::Half)) {
       }
       else if(!transa_ && !transb_) {
           gemm_impl<
-                    at::Half,
-              256,
+            at::Half,
+            256,
             256,
             128,
             32,
