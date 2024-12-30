@@ -1,0 +1,25 @@
+name: riscv64
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - ciflow/riscv64/*
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref_name }}-${{ github.ref_type == 'branch' && github.sha }}-${{ github.event_name == 'workflow_dispatch' }}-${{ github.event_name == 'schedule' }}
+  cancel-in-progress: true
+
+permissions: read-all
+
+jobs:
+  linux-manylinux-2_39-py3_12-cpu-riscv64-cross-build:
+    if: github.repository_owner == 'pytorch'
+    name: linux-manylinux-2_39-py3_12-cpu-riscv64-cross-build
+    uses: ./.github/workflows/_linux-build.yml
+    with:
+      build-environment: linux-riscv64-binary-manywheel
+      docker-image-name: pytorch/manylinuxriscv64-builder:cpu-riscv64
+      runner: ubuntu-24.04
