@@ -50,6 +50,8 @@ typedef at::BFloat16 bfloat16;
 
 typedef at::Float8_e4m3fn float8_e4m3fn;
 typedef at::Float8_e5m2 float8_e5m2;
+typedef at::Float8_e4m3fnuz float8_e4m3fnuz;
+typedef at::Float8_e5m2fnuz float8_e5m2fnuz;
 
 template <typename T>
 struct Welford {
