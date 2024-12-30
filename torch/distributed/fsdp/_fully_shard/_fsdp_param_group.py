@@ -451,7 +451,7 @@ class FSDPParamGroup:
             # If there was a mistargeted unshard without a corresponding wait,
             # then we wait here and clear the unshard
             if (event := self._all_gather_result.all_gather_event) is not None:
-                torch.cuda.current_stream().wait_event(event)
+                torch.accelerator.current_stream().wait_event(event)
             work = self._all_gather_result.all_gather_work
             if isinstance(work, dist.distributed_c10d.Work):
                 work.wait()
