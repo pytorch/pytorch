@@ -28,7 +28,6 @@ from typing import (
     Type,
     Union,
 )
-from typing_extensions import TypeAlias, TypeIs
 
 import torch
 import torch._weights_only_unpickler as _weights_only_unpickler
@@ -36,6 +35,7 @@ from torch._sources import get_source_lines_and_file
 from torch._utils import _import_dotted_name
 from torch.storage import _get_dtype_from_pickle_storage_type
 from torch.types import Storage
+from typing_extensions import TypeAlias, TypeIs
 
 
 __all__ = [
@@ -1889,6 +1889,8 @@ def _load(
         )
 
     current_offset = None
+    data_descriptor_size64 = 24
+    data_descriptor_size32 = 16
 
     def load_tensor(dtype, numel, key, location):
         name = f"data/{key}"
@@ -1905,9 +1907,15 @@ def _load(
                 storage_offset = zip_file.get_record_offset_no_read(
                     current_offset, name, numel
                 )
+            local_header_offset = current_offset
             storage = overall_storage[storage_offset : storage_offset + numel]
-            # offset of next zipfile header (add 16 after numel because zip64 has data descriptor after payload)
-            current_offset = storage_offset + numel + 16
+            # offset of next zipfile header
+            current_offset = storage_offset + numel
+            # add size of data descriptor after payload
+            if current_offset >= 0xFFFFFFFF or numel >= 0xFFFFFFFF:
+                current_offset += data_descriptor_size64
+            else:
+                current_offset += data_descriptor_size32
         else:
             storage = (
                 zip_file.get_storage_from_record(name, numel, torch.UntypedStorage)
