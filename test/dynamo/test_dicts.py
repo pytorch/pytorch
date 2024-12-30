@@ -62,6 +62,31 @@ class DictTests(torch._dynamo.test_case.TestCase):
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         self.assertEqual(fn(x), opt_fn(x))
 
+    def test_dict_contains(self):
+        sd = dict()
+        sd[2] = 5
+        sd[4] = 10
+
+        def fn(x):
+            if 1 in sd:
+                x = x * 2
+            else:
+                x = x * 3
+            return x
+
+        x = torch.randn(4)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(x), opt_fn(x))
+
+        # Ensure a recompilation
+        sd[1] = 15
+        self.assertEqual(fn(x), opt_fn(x))
+
+        # Ensure not recompilation because the traced program remains same here.
+        sd[2] = 10
+        with unittest.mock.patch("torch._dynamo.config.error_on_recompile", True):
+            self.assertEqual(fn(x), opt_fn(x))
+
     def test_dict_subclass_methods_fallback_readonly(self):
         sd = SimpleDict()
         sd[2] = 5

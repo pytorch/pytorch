@@ -151,6 +151,12 @@ class ConstDictVariable(VariableTracker):
         def make_hashable(key):
             return key if isinstance(key, Hashable) else Hashable(key)
 
+        # TODO(anijain2305) - next line, accidentally, calls .realize() on all
+        # keys of the ConstDictVariableTracker, inserting guards on all keys. To
+        # prevent this, we have to be improve `isinstance` checks on LazyVTs.
+        # Today, `isinstance` on LazyVT realizes the VT. Remove the special
+        # handling on SUPPORTED_NODES in builder.py after fixing this. This only
+        # affects key VTs that have ConstDictKeySource.
         self.items = {make_hashable(x): v for x, v in items.items()}
         # need to reconstruct everything if the dictionary is an intermediate value
         # or if a pop/delitem was executed
@@ -327,7 +333,7 @@ class ConstDictVariable(VariableTracker):
             # guard.
             if self.source:
                 tx.output.guard_on_key_order.add(self.source.name())
-                self.source.make_guard(GuardBuilder.DICT_KEYS_MATCH)
+                install_guard(self.make_guard(GuardBuilder.DICT_KEYS_MATCH))
             assert not (args or kwargs)
             return DictKeysVariable(self)
         elif name == "values":
@@ -398,15 +404,32 @@ class ConstDictVariable(VariableTracker):
             # Key guarding - Nothing to do. SEQUENCE_LENGTH guard already inserted.
             return self.getitem_const(tx, args[0])
         elif name == "__contains__" and len(args) == 1:
-            # Key guarding - Only keys are accessed. Install DICT_KEYS_MATCH
-            # guard for now. Ideally, we only need to insert a "key in dict" or
-            # a "key not in dict" guard here, but it requires more work, so we
-            # can be conservative here.
-            # TODO - This needs a DICT_CONTAINS guard. If we do this, we can get
-            # rid of PythonSysModulesVariable.
+            # Key guarding - Install DICT_CONTAINS guard.
+            contains = args[0] in self
             if self.source:
-                self.source.make_guard(GuardBuilder.DICT_KEYS_MATCH)
-            return ConstantVariable.create(args[0] in self)
+                if (
+                    not args[0].source
+                    and isinstance(args[0], ConstantVariable)
+                    and not tx.output.side_effects.is_modified(self)
+                ):
+                    install_guard(
+                        self.make_guard(
+                            functools.partial(
+                                GuardBuilder.DICT_CONTAINS,
+                                key=args[0].value,
+                                invert=not contains,
+                            )
+                        )
+                    )
+                elif not args[0].source:
+                    # 1) If args[0].source is not None, we have already inserted
+                    # a guard due to LazyVT realization.
+
+                    # 2) Conservatively guard on all the keys because there is
+                    # no easy way to insert a DICT_CONTAINS guard for non
+                    # consts or mutated dicts.
+                    install_guard(self.make_guard(GuardBuilder.DICT_KEYS_MATCH))
+            return ConstantVariable.create(contains)
         elif name == "setdefault" and arg_hashable and self.is_mutable():
             assert not kwargs
             assert len(args) <= 2
@@ -592,6 +615,9 @@ class SetVariable(ConstDictVariable):
                 return super().call_method(tx, "pop", args, kwargs)
             else:
                 return ConstantVariable.create(value=None)
+        elif name == "__contains__" and len(args) == 1:
+            # Already EQUALS_MATCH guarded.
+            return ConstantVariable.create(args[0] in self)
         return super().call_method(tx, name, args, kwargs)
 
     def getitem_const(self, tx: "InstructionTranslator", arg: VariableTracker):
@@ -642,6 +668,9 @@ class FrozensetVariable(SetVariable):
     ) -> "VariableTracker":
         if name in ["add", "pop", "update", "remove", "discard", "clear"]:
             raise RuntimeError(f"Illegal call_method {name} on a frozenset")
+        elif name == "__contains__" and len(args) == 1:
+            # Already EQUALS_MATCH guarded.
+            return ConstantVariable.create(args[0] in self)
         return super().call_method(tx, name, args, kwargs)
 
 
@@ -682,6 +711,9 @@ class DictKeySetVariable(SetVariable):
     ) -> "VariableTracker":
         if name in ["add", "pop", "update", "remove", "discard", "clear"]:
             raise RuntimeError(f"Illegal call_method {name} on a dict_keys")
+        elif name == "__contains__" and len(args) == 1:
+            # Already EQUALS_MATCH guarded.
+            return ConstantVariable.create(args[0] in self)
         return super().call_method(tx, name, args, kwargs)
 
 

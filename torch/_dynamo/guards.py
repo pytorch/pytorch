@@ -422,7 +422,7 @@ def _get_closure_vars():
             "___odict_getitem": collections.OrderedDict.__getitem__,
             "___key_to_id": key_to_id,
             "___dict_version": dict_version,
-            "___dict_contains": lambda a, b: a in b,
+            "___dict_contains": lambda a, b: dict.__contains__(b, a),
             "___tuple_iterator_len": tuple_iterator_len,
             "___normalize_range_iter": normalize_range_iter,
             "___tuple_iterator_getitem": tuple_iterator_getitem,

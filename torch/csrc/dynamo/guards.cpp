@@ -1758,7 +1758,7 @@ class DICT_CONTAINS : public LeafGuard {
         _key(std::move(key)) {}
 
   bool check_nopybind(PyObject* value) override { // borrowed ref
-    int result = PyDict_Contains(value, _key.ptr());
+    int result = PyDict_Check(value) && PyDict_Contains(value, _key.ptr());
     if (result == -1) {
       PyErr_Clear();
       return false;
