@@ -609,13 +609,13 @@ class VariableBuilder:
         elif istype(value, (dict, collections.defaultdict, collections.OrderedDict)):
             self.install_guards(GuardBuilder.SEQUENCE_LENGTH)
 
-            # Optimisation for the common case strings, ints, etc
             all_const = all(ConstantVariable.is_literal(k) for k in value.keys())
-            if all_const:
-                # TODO(anijain2305) - Do we have to guard on all the keys? Can
-                # keys be guarded lazily, similar to values?
-                self.install_guards(GuardBuilder.DICT_CONST_KEYS)
-            else:
+
+            # For all_const, we dont have to guard on anything yet. We guard on
+            # keys lazily by adding a dict_getitem entry for each accessed key.
+            # For cases where we need to guard on all keys, we lazily put guards
+            # during the dict call_method (check dicts.py)
+            if not all_const:
                 # Guard on the key order
                 # This is not ideal, i.e., there is no need to guard on the key
                 # order. But we guard on the key order because of the complexity

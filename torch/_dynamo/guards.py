@@ -1763,8 +1763,8 @@ class GuardBuilder(GuardBuilderBase):
             get_verbose_code_parts(code, guard)
         )
 
-    def DICT_CONST_KEYS(self, guard):
-        """Constant keys match"""
+    def DICT_KEYS_MATCH(self, guard):
+        """Insert guard to check that the keys of a dict are same"""
         ref = self.arg_ref(guard)
         value = self.get(guard.name)
 

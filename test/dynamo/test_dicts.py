@@ -318,6 +318,28 @@ class DictTests(torch._dynamo.test_case.TestCase):
         x = torch.randn(4)
         self.assertEqual(opt_fn(x, d), fn(x, d))
 
+    def test_lazy_key_guarding(self):
+        d = {"a": 2, "b": 3, "c": 5}
+
+        def fn(x):
+            return x * d["a"]
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+
+        x = torch.randn(4)
+        ref = fn(x)
+        res = opt_fn(x)
+        self.assertEqual(ref, res)
+
+        # Since key c was not used, it should not lead to a recompilation
+        d.pop("c")
+        d["d"] = 10
+
+        with unittest.mock.patch("torch._dynamo.config.error_on_recompile", True):
+            ref = fn(x)
+            res = opt_fn(x)
+            self.assertEqual(ref, res)
+
 
 def is_tensor(x):
     import torch

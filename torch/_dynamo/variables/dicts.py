@@ -274,6 +274,29 @@ class ConstDictVariable(VariableTracker):
         args: "List[VariableTracker]",
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
+        # Note that guarding for dicts is little more complicated than for other
+        # types. We guard lazily on both keys and values.
+        #
+        # For values, the guarding is easy. In builder.py, we create a
+        # LazyVariableTracker for values, which takes care of inserting the
+        # guards only when the particular value is accessed.
+        #
+        # But for keys, the situation is more complicated. There are 2 ways to
+        # access keys:
+        # 1) Using the key content directly (like int, string etc)
+        # 2) Using the keys list and indexing into it. This is done via
+        # ConstDictKeySource. This is fine, because we can make the key VT a
+        # LazyVariableTracker here, which will guard only if the key is
+        # accessed.
+        #
+        # The problem occurs for the first case. These are just constant
+        # objects, and might not have a source. To solve this, while accessing
+        # the value, we directly put the key content (e.g. int, string etc) into
+        # the C++ guard. Since the value VT is lazy, whenever the value is
+        # accessed, we indirectly guard on the key as well.
+        #
+        # For cases, we only access keys (like calling method keys), we call
+        # DICT_KEYS_MATCH guard to guard on all the keys.
         from . import BuiltinVariable, ConstantVariable, TupleVariable
 
         Hashable = ConstDictVariable._HashableTracker
@@ -288,9 +311,11 @@ class ConstDictVariable(VariableTracker):
             self.items.update(temp_dict_vt.items)
             return ConstantVariable.create(None)
         elif name == "__getitem__":
+            # Key guarding - Nothing to do. LazyVT for value will take care.
             assert len(args) == 1
             return self.getitem_const_raise_exception_if_absent(tx, args[0])
         elif name == "items":
+            # Key guarding - Nothing to do. LazyVT for value will take care.
             assert not (args or kwargs)
             if self.source:
                 tx.output.guard_on_key_order.add(self.source.name())
@@ -298,21 +323,27 @@ class ConstDictVariable(VariableTracker):
                 [TupleVariable([k.vt, v]) for k, v in self.items.items()]
             )
         elif name == "keys":
+            # Key guarding - Only keys are accessed. Install DICT_KEYS_MATCH
+            # guard.
             if self.source:
                 tx.output.guard_on_key_order.add(self.source.name())
+                self.source.make_guard(GuardBuilder.DICT_KEYS_MATCH)
             assert not (args or kwargs)
             return DictKeysVariable(self)
         elif name == "values":
+            # Key guarding - Nothing to do. LazyVT for value will take care.
             if self.source:
                 tx.output.guard_on_key_order.add(self.source.name())
             assert not (args or kwargs)
             return DictValuesVariable(self)
         elif name == "copy":
+            # Key guarding - Nothing to do. LazyVT for value will take care.
             assert not (args or kwargs)
             return self.clone(
                 items=self.items.copy(), mutation_type=ValueMutationNew(), source=None
             )
         elif name == "__len__":
+            # Key guarding - Nothing to do. SEQUENCE_LENGTH guard already inserted.
             assert not (args or kwargs)
             return ConstantVariable.create(len(self.items))
         elif name == "__setitem__" and arg_hashable and self.is_mutable():
@@ -364,8 +395,17 @@ class ConstDictVariable(VariableTracker):
             else:
                 return super().call_method(tx, name, args, kwargs)
         elif name in ("get", "__getattr__") and args[0] in self:
+            # Key guarding - Nothing to do. SEQUENCE_LENGTH guard already inserted.
             return self.getitem_const(tx, args[0])
         elif name == "__contains__" and len(args) == 1:
+            # Key guarding - Only keys are accessed. Install DICT_KEYS_MATCH
+            # guard for now. Ideally, we only need to insert a "key in dict" or
+            # a "key not in dict" guard here, but it requires more work, so we
+            # can be conservative here.
+            # TODO - This needs a DICT_CONTAINS guard. If we do this, we can get
+            # rid of PythonSysModulesVariable.
+            if self.source:
+                self.source.make_guard(GuardBuilder.DICT_KEYS_MATCH)
             return ConstantVariable.create(args[0] in self)
         elif name == "setdefault" and arg_hashable and self.is_mutable():
             assert not kwargs
