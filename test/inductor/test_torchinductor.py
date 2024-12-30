@@ -13288,9 +13288,12 @@ if HAS_GPU and not TEST_WITH_ASAN:
 
             _, code = run_and_get_code(wrapper, x, y)
 
-            FileCheck().check_regex(
-                r"reinterpret_tensor\(.*, \(1024, 50257\).*# reuse"
-            ).run(code[1])
+            # The cpp_wrapper code is significantly more complex, so skip checking for exact
+            # code lines.
+            if not config.cpp_wrapper:
+                FileCheck().check_regex(
+                    r"reinterpret_tensor\(.*, \(1024, 50257\).*# reuse"
+                ).run(code[1])
 
     class RNNTest(TestCase):
         device_type = GPU_TYPE
