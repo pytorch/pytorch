@@ -6,7 +6,7 @@ import sys
 import unittest
 from copy import deepcopy
 from enum import Enum
-from typing import Any, Dict, List, Optional, Protocol, Tuple, Type, Union
+from typing import Any, Dict, List, Optional, Tuple, Type, Union
 
 import torch
 from torch import Tensor
@@ -100,7 +100,7 @@ class ErrorOptimizerInput:
 
 
 # Typing for every optim_inputs_func
-class OptimInputsFunc(Protocol):
+class OptimInputsFunc:
     def __call__(
         self, device: str, dtype: Optional[torch.dtype] = None
     ) -> List[OptimizerInput]: ...
