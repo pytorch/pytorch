@@ -359,6 +359,9 @@ public:
   Vectorized<T> asin() const {
     return map(Sleef_asinf8_u10);
   }
+  Vectorized<T> asinh() const {
+    return map(Sleef_asinhf8_u10);
+  }
   Vectorized<T> atan() const {
     return map(Sleef_atanf8_u10);
   }
