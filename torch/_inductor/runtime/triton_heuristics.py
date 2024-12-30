@@ -15,8 +15,7 @@ import re
 import sys
 import threading
 import time
-from collections.abc import Hashable
-from typing import Any, Container, Dict, List, Optional, Tuple
+from typing import Any, Container, Dict, Hashable, List, Optional, Tuple
 
 import torch
 from torch._guards import CompileId
@@ -1218,7 +1217,7 @@ def cached_autotune(
 
 def unique_configs(configs: List[Config]):
     """Remove duplicate configurations"""
-    seen = OrderedSet[Hashable]()
+    seen: OrderedSet[Hashable] = OrderedSet()
     pruned_configs = []
 
     for cfg in configs:
