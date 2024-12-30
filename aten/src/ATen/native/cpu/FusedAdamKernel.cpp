@@ -238,7 +238,7 @@ std::enable_if_t<
         param_ptr[d] = param_ptr[d] * scalar_t(1 - lr * weight_decay);
       }
     }
-    // exp_avg.lerp_(grad, 1 - beta1) if beta1 > 0 else grad  
+    // exp_avg.lerp_(grad, 1 - beta1) if beta1 > 0 else grad is passed as exp_avg
     if (exp_avg_grad_coefficient < 1){
       auto is_lerp_weight_small = std::abs(scalar_t(exp_avg_grad_coefficient)) < scalar_t(0.5);
       if (is_lerp_weight_small) {
@@ -246,9 +246,6 @@ std::enable_if_t<
       } else {
         exp_avg_ptr[d] = grad_val - (grad_val - exp_avg_ptr[d]) * (scalar_t(1) - scalar_t(exp_avg_grad_coefficient));
       }
-    }
-    else{
-      exp_avg_ptr[d] = grad_ptr[d];
     }
 
     exp_avg_sq_ptr[d] = exp_avg_sq_ptr[d] * scalar_t(beta2);
