@@ -777,13 +777,41 @@ class CommonTemplate:
         view = self._discontiguous_tensor(view_size)
 
         # Expect at least 1 block pointer for the input.
-        # Add 2 more if we generate 2 kernels.
         result, (code,) = run_and_compare(
             self,
             foo,
             view,
             expected_num_block_pointers=1,
             expected_num_triton_kernels=1,
+            config_patches=tiled_reduction_config,
+        )
+
+        # Check the code for multiple Rn_BLOCK's
+        self._assert_reduction_ndims(code, 2)
+
+    @parametrize("reduction_op", [torch.sum, torch.argmax])
+    def test_2d_reductions_mixed_indexing(
+        self,
+        reduction_op: Callable,
+    ):
+        """
+        Tests a program with multiple reductions using different strides.
+        These might not be fused.
+        """
+
+        def foo(*args):
+            return sum(reduction_op(arg) for arg in args)
+
+        view_size = (5, 7)
+        arg0 = self._discontiguous_tensor(view_size)
+        arg1 = torch.empty(view_size)
+
+        # No guarantees on the number of kernels or pointers.
+        result, (code,) = run_and_compare(
+            self,
+            foo,
+            arg0,
+            arg1,
             config_patches=tiled_reduction_config,
         )
 
