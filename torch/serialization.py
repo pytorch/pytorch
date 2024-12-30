@@ -1912,7 +1912,7 @@ def _load(
             # offset of next zipfile header
             current_offset = storage_offset + numel
             # add size of data descriptor after payload
-            if current_offset >= 0xFFFFFFFF or numel >= 0xFFFFFFFF:
+            if local_header_offset >= 0xFFFFFFFF or numel >= 0xFFFFFFFF:
                 current_offset += data_descriptor_size64
             else:
                 current_offset += data_descriptor_size32
