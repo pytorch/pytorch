@@ -28,7 +28,6 @@ from typing import (
     Type,
     Union,
 )
-from typing_extensions import TypeAlias, TypeIs
 
 import torch
 import torch._weights_only_unpickler as _weights_only_unpickler
@@ -36,6 +35,7 @@ from torch._sources import get_source_lines_and_file
 from torch._utils import _import_dotted_name
 from torch.storage import _get_dtype_from_pickle_storage_type
 from torch.types import Storage
+from typing_extensions import TypeAlias, TypeIs
 
 
 __all__ = [
@@ -1888,14 +1888,34 @@ def _load(
             UserWarning,
         )
 
+    current_offset = None
+    data_descriptor_size64 = 24
+    data_descriptor_size32 = 16
+
     def load_tensor(dtype, numel, key, location):
         name = f"data/{key}"
         if torch._guards.detect_fake_mode(None) is not None:
             nbytes = numel * torch._utils._element_size(dtype)
             storage = torch.UntypedStorage(nbytes, device="meta")
         elif overall_storage is not None:
-            storage_offset = zip_file.get_record_offset(name)
+            nonlocal current_offset
+            if current_offset is None:
+                assert key == "0"
+                current_offset = zip_file.get_record_offset(name)
+                storage_offset = current_offset
+            else:
+                storage_offset = zip_file.get_record_offset_no_read(
+                    current_offset, name, numel
+                )
+            local_header_offset = current_offset
             storage = overall_storage[storage_offset : storage_offset + numel]
+            # offset of next zipfile header
+            current_offset = storage_offset + numel
+            # add size of data descriptor after payload
+            if local_header_offset >= 0xFFFFFFFF or numel >= 0xFFFFFFFF:
+                current_offset += data_descriptor_size64
+            else:
+                current_offset += data_descriptor_size32
         else:
             storage = (
                 zip_file.get_storage_from_record(name, numel, torch.UntypedStorage)

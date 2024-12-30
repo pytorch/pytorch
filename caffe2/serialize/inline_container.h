@@ -174,6 +174,8 @@ class TORCH_API PyTorchStreamReader final {
   size_t getRecordSize(const std::string& name);
 
   size_t getRecordOffset(const std::string& name);
+  size_t
+  getRecordOffsetNoRead(size_t cursor, std::string filename, size_t size);
   bool hasRecord(const std::string& name);
   std::vector<std::string> getAllRecords();
 
@@ -289,6 +291,9 @@ size_t getPadding(
     size_t filename_size,
     size_t size,
     std::string& padding_buf);
+
+size_t getOffset(size_t cursor, std::string filename, size_t size);
+
 } // namespace detail
 
 } // namespace serialize

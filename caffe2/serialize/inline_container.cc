@@ -280,6 +280,24 @@ size_t getPadding(
   padding_buf[3] = (uint8_t)(padding_size >> 8);
   return padding_size_plus_fbxx;
 }
+
+size_t getOffset(size_t cursor, std::string filename, size_t size) {
+  size_t filename_size = filename.size();
+  size_t start = cursor + MZ_ZIP_LOCAL_DIR_HEADER_SIZE + filename_size +
+      sizeof(mz_uint16) * 2;
+  if (size >= MZ_UINT32_MAX || cursor >= MZ_UINT32_MAX) {
+    start += sizeof(mz_uint16) * 2;
+    if (size >= MZ_UINT32_MAX) {
+      start += 2 * sizeof(mz_uint64);
+    }
+    if (cursor >= MZ_UINT32_MAX) {
+      start += sizeof(mz_uint64);
+    }
+  }
+  size_t mod = start % kFieldAlignment;
+  size_t next_offset = (mod == 0) ? start : (start + kFieldAlignment - mod);
+  return next_offset;
+}
 } // namespace detail
 
 bool PyTorchStreamReader::hasRecord(const std::string& name) {
@@ -402,8 +420,7 @@ size_t PyTorchStreamReader::getRecordMultiReaders(
         }
         readSizes[i] = size;
         LOG(INFO) << "Thread " << i << " read [" << startPos << "-" << endPos
-                  << "] "
-                  << "from " << name << " of size " << n;
+                  << "] " << "from " << name << " of size " << n;
         TORCH_CHECK(
             threadReadSize == size,
             "record size ",
@@ -608,6 +625,14 @@ size_t PyTorchStreamReader::getRecordSize(const std::string& name) {
   mz_zip_archive_file_stat stat;
   mz_zip_reader_file_stat(ar_.get(), getRecordID(name), &stat);
   return stat.m_uncomp_size;
+}
+
+size_t PyTorchStreamReader::getRecordOffsetNoRead(
+    size_t cursor,
+    std::string filename,
+    size_t size) {
+  std::string full_name = archive_name_plus_slash_ + filename;
+  return detail::getOffset(cursor, full_name, size);
 }
 
 PyTorchStreamReader::~PyTorchStreamReader() {
