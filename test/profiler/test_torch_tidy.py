@@ -100,7 +100,7 @@ class TestTorchTidyProfiler(TestCase):
             return self._get_tensor_fields(find_node_with_name(nodes, op_name), index)
 
         a_impl, a_storage_data, a_id = get_fields("aten::add", 0)
-        b_impl, b_storage_data, b_id = get_fields("aten::mul", 0)
+        b_impl, b_storage_data, _ = get_fields("aten::mul", 0)
 
         # Profiler matches ground truth from Python API.
         self.assertEqual(a_storage_data, a_initial_storage_data)
@@ -467,7 +467,7 @@ class TestTorchTidyProfiler(TestCase):
             -1
         ].extra_fields
         _, uniform_node = find_chain(["aten::rand", "aten::uniform_"])
-        x_impl, x_storage_data, x_id = self._get_tensor_fields(uniform_node, 0)
+        _, x_storage_data, x_id = self._get_tensor_fields(uniform_node, 0)
 
         # Make sure IDs are consistent between allocations and op inputs
         self.assertEqual(allocation.ptr, x_storage_data)

@@ -10,7 +10,7 @@ import os
 import warnings
 from collections import defaultdict
 from collections.abc import Iterable
-from typing import Any, Callable, Dict, List, Optional, Sequence, Set, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Union
 from unittest.mock import patch
 
 import sympy
@@ -35,6 +35,7 @@ from torch._prims_common import (
     Number,
 )
 from torch.fx.experimental.sym_node import magic_methods, method_to_operator
+from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.functions import (
     CeilDiv,
     FloorDiv,
@@ -78,10 +79,12 @@ from .virtualized import ops, V
 
 # TODO(jansel): we should implement decomps or lowerings for these
 # https://github.com/pytorch/torchdynamo/issues/327
-FALLBACK_ALLOW_LIST = {
-    "torchvision::roi_align",
-    "aten::index_add",
-}
+FALLBACK_ALLOW_LIST = OrderedSet(
+    [
+        "torchvision::roi_align",
+        "aten::index_add",
+    ]
+)
 
 log = logging.getLogger(__name__)
 lowerings: Dict[Union[Callable[..., Any], str], Callable[..., Any]] = {}
@@ -89,13 +92,17 @@ lowerings: Dict[Union[Callable[..., Any], str], Callable[..., Any]] = {}
 _maybe_layout_constraints: Dict[
     torch._ops.OpOverload, Optional[Callable[..., Any]]
 ] = {}
-fallbacks: Set[torch._ops.OpOverload] = set()
+fallbacks = OrderedSet[torch._ops.OpOverload]()
 aten = torch.ops.aten
 tr_c10d = torch.ops.tr_c10d
 prims = torch.ops.prims
-needs_realized_inputs: Set[torch._ops.OpOverload] = set()
-foreach_ops: Set[torch._ops.OpOverload] = {torch._higher_order_ops._foreach_map}  # type: ignore[arg-type]
-inplace_foreach_ops: Set[torch._ops.OpOverload] = set()
+needs_realized_inputs = OrderedSet[torch._ops.OpOverload]()
+foreach_ops = OrderedSet[torch._ops.OpOverload](
+    [torch._higher_order_ops._foreach_map]  # type: ignore[list-item]
+)
+# TODO(rec): torch._higher_order_ops._foreach_map is not an OpOverload
+# so why is it in foreach_ops?
+inplace_foreach_ops = OrderedSet[torch._ops.OpOverload]()
 inplaceable_foreach_ops: Dict[torch._ops.OpOverload, torch._ops.OpOverload] = {}
 quantized_decomposed = torch.ops.quantized_decomposed
 
@@ -180,7 +187,7 @@ def assert_nyi(cond, msg):
 
 
 def add_needs_realized_inputs(fn):
-    if isinstance(fn, (list, tuple, set)):
+    if isinstance(fn, (list, set, tuple, OrderedSet)):  # noqa: set_linter
         return [add_needs_realized_inputs(x) for x in fn]
     needs_realized_inputs.add(fn)
     if isinstance(fn, torch._ops.OpOverloadPacket):
@@ -585,12 +592,13 @@ def make_pointwise(
         # in tracing, we will annotate pointwise nodes that correspond to the output of
         # a pointwise node that would have been run in eager. intermediary pointwise nodes
         # during decompositions are not annotated.
+        low_pr_fp = (torch.bfloat16, torch.float16)
         emulate_precision_casts = (
             V.graph is not None
             and getattr(V.graph, "current_node", None) is not None
             and V.graph.current_node.meta is not None
             and V.graph.current_node.meta.get("low_precision_pointwise_barrier", False)
-            and dtype in (torch.bfloat16, torch.float16)
+            and dtype in low_pr_fp
         )
 
         def inner_fn(index):
@@ -605,11 +613,12 @@ def make_pointwise(
                 return override_fn_when_gpu_float64(*[load(index) for load in loaders])
             else:
                 inputs_loaded = []
-                for load in loaders:
+                for inp_index, load in enumerate(loaders):
                     out = load(index)
-                    if emulate_precision_casts:
-                        downcast = ops.to_dtype(out, dtype, use_compute_types=False)
-                        out = ops.to_dtype(downcast, dtype)
+                    inp_dtype = inputs[inp_index].get_dtype()
+                    if emulate_precision_casts and inp_dtype in low_pr_fp:
+                        downcast = ops.to_dtype(out, inp_dtype, use_compute_types=False)
+                        out = ops.to_dtype(downcast, inp_dtype)
                     inputs_loaded.append(out)
 
                 out = fn(*inputs_loaded)
@@ -721,10 +730,6 @@ def _foreach_map(subgraph, *args, **kwargs):
     The graph outputs represent the vertically fused sequence of ops, and then register_operation_list
     below registers the buffers as horizontally fuseable in the scheduler.
     """
-    realize_outputs = (
-        len(V.graph.current_node.users) == 0 or cur_node_has_non_foreach_users()
-    )
-
     from .subgraph_lowering import PointwiseSubgraphLowering
 
     inputs = args[0]  # nested tuple
@@ -748,11 +753,7 @@ def _foreach_map(subgraph, *args, **kwargs):
         ) in group:
             outputs[output_ind] = output
 
-            if (
-                V.graph.has_feature(device, BackendFeature.FOREACH)
-                and use_foreach
-                and realize_outputs
-            ):
+            if V.graph.has_feature(device, BackendFeature.FOREACH) and use_foreach:
                 output.realize()
                 operation_list.append(output.get_operation_name())
 
@@ -998,7 +999,7 @@ def squeeze(x, dim=None):
         else tuple(V.graph.sizevars.evaluate_static_shape(d) for d in dim)
     )
     dim = canonicalize_dims(len(x.get_size()), dim)  # type: ignore[call-overload]
-    dims = set((dim,) if not isinstance(dim, tuple) else dim)
+    dims = OrderedSet((dim,) if not isinstance(dim, tuple) else dim)
 
     new_shape = []
     for d, s in enumerate(x.get_size()):
@@ -2409,9 +2410,11 @@ def sdpa_constraint(fx_node, *args, **kwargs):
             return arg
 
         meta_val = fx_arg.meta["val"]
-        meta_stride = meta_val.stride()
+        meta_stride_expr = [
+            s.node.expr if isinstance(s, torch.SymInt) else s for s in meta_val.stride()
+        ]
 
-        stride_order = ir.get_stride_order(meta_stride)
+        stride_order = ir.get_stride_order(meta_val.stride())
 
         if stride_order and stride_order[-1] != 0:
             # contiguous stride order
@@ -2436,30 +2439,64 @@ def sdpa_constraint(fx_node, *args, **kwargs):
         # This value can be found in pytorch/aten/src/ATen/native/transformers/attention.cpp preprocess_mask
         ALIGNMENT = 8
 
+        # effn_attn_fwd does requires dense last dim, not just alignment
+        effn_attn_fwd_bias = (
+            fx_node.target
+            == torch.ops.aten._scaled_dot_product_efficient_attention.default
+            and idx == 3
+        )
+
         assert isinstance(arg, TensorBox)
         if len(arg.get_size()) not in (3, 4):
             return arg
 
-        def is_aligned_realized_tensor(x):
-            aligned_strides = all(
-                (V.graph.sizevars.size_hint(x.get_stride()[i]) % ALIGNMENT) == 0
-                for i in range(len(x.get_stride()) - 1)
+        if ir.is_aligned_realized_tensor(arg, ALIGNMENT):
+            return ir.try_match_insignificant_strides(
+                ir.ExternKernel.realize_input(arg), meta_stride_expr
             )
-            # if the last dim size is <= 1, stride doesnt matter
-            aligned_last_dim = (
-                V.graph.sizevars.size_hint(x.get_stride()[-1]) == 1
-                or V.graph.sizevars.size_hint(x.get_size()[-1]) <= 1
-            )
-            return aligned_last_dim and aligned_strides
 
         if (
             isinstance(arg, IRNode)
             and arg.maybe_get_stride() is not None
-            and is_aligned_realized_tensor(arg)
+            and ir.is_aligned_realized_tensor(arg, ALIGNMENT)
         ):
-            return V.graph.try_match_insignificant_strides(
-                ir.ExternKernel.realize_input(arg), meta_stride
+            return ir.try_match_insignificant_strides(
+                ir.ExternKernel.realize_input(arg), meta_stride_expr
             )
+
+        if effn_attn_fwd_bias:
+            out_size = list(arg.get_size())
+
+            expanded_dims = []
+            if arg.maybe_get_stride() is not None:
+                # We require a dense last dimension, but the other strides
+                # can be expanded, which results in a smaller tensor
+                for i, s in enumerate(arg.get_stride()[0:-1]):
+                    if V.graph.sizevars.statically_known_equals(s, 0):
+                        expanded_dims.append(i)
+
+            # Now, pad strides to alignment
+            out_strides = [-1] * len(out_size)
+            out_strides[-1] = 1
+            stride = 1
+            for i in range(len(out_size) - 2, -1, -1):
+                if out_strides[i + 1] != 0:
+                    stride = stride * out_size[i + 1]
+
+                # the expanded dims still need to be aligned, if they are,
+                # we can make them expanded by setting the stride equal to 0
+                if i in expanded_dims:
+                    if V.graph.sizevars.statically_known_equals(
+                        out_strides[i + 1] % ALIGNMENT, 0
+                    ):
+                        out_strides[i] = 0
+                        continue
+
+                if not V.graph.sizevars.statically_known_equals(stride % ALIGNMENT, 0):
+                    stride = ceildiv(stride, ALIGNMENT) * ALIGNMENT
+
+                out_strides[i] = stride
+            return ir.ExternKernel.require_exact_strides(arg, out_strides)
 
         def is_aligned(x):
             return (V.graph.sizevars.size_hint(x.get_size()[-1]) % ALIGNMENT) == 0
@@ -2467,8 +2504,8 @@ def sdpa_constraint(fx_node, *args, **kwargs):
         if isinstance(arg.data, ir.BaseView):
             if not is_aligned(arg):
                 if is_aligned(arg.unwrap_view()):
-                    return V.graph.try_match_insignificant_strides(
-                        ir.ExternKernel.realize_input(arg), meta_stride
+                    return ir.try_match_insignificant_strides(
+                        ir.ExternKernel.realize_input(arg), meta_stride_expr
                     )
 
         return ir.ExternKernel.require_stride_order(arg, stride_order)
@@ -3425,12 +3462,16 @@ def _unsafe_index(x, indices):
 # https://github.com/pytorch/torchdynamo/issues/1863
 @register_lowering(aten.index_put)
 def index_put(x, indices, values, accumulate=False):
-    return index_put_(clone(x), indices, values, accumulate)
+    return index_put_impl_(
+        clone(x), indices, values, accumulate, check=True, may_realize=False
+    )
 
 
 @register_lowering(aten._unsafe_index_put)
 def _unsafe_index_put(x, indices, values, accumulate=False):
-    return index_put_impl_(clone(x), indices, values, accumulate, check=False)
+    return index_put_impl_(
+        clone(x), indices, values, accumulate, check=False, may_realize=False
+    )
 
 
 def index_put_as_masked_fill(self, indices, value, accumulate):
@@ -3459,20 +3500,59 @@ def index_put_fallback(self, indices, values, accumulate):
 
 @register_lowering(aten.index_put_, type_promotion_kind=None)
 def index_put_(self, indices, values, accumulate=False):
-    return index_put_impl_(self, indices, values, accumulate, check=True)
+    return index_put_impl_(
+        self, indices, values, accumulate, check=True, may_realize=True
+    )
 
 
 @register_lowering(inductor_prims._unsafe_index_put_, type_promotion_kind=None)
 def _unsafe_index_put_(self, indices, values, accumulate=False):
-    return index_put_impl_(self, indices, values, accumulate, check=False)
+    return index_put_impl_(
+        self, indices, values, accumulate, check=False, may_realize=True
+    )
 
 
-def index_put_impl_(self, indices, values, accumulate, check):
+def index_put_impl_(self, indices, values, accumulate, check, may_realize=False):
+    if may_realize:
+
+        def try_get_name(x):
+            if isinstance(x, ir.TensorBox):
+                x = x.data
+            if isinstance(x, ir.BaseView):
+                x = x.unwrap_view()
+            if isinstance(x, ir.StorageBox):
+                x = x.data
+            return x.get_name() if isinstance(x, ir.Buffer) else None
+
+        def indice_slice_from_randperm(indice):
+            # Refer to: https://github.com/pytorch/pytorch/pull/139366#discussion_r1825424660
+            # For this specific pattern, indices is unique as coming from torch.randperm.
+            # However, as the content of the indices is unknown, we have to check this specific pattern.
+            if isinstance(indice, TensorBox) and isinstance(indice.data, ir.BaseView):
+                indice = indice.data.unwrap_view()
+                return (
+                    isinstance(indice, ir.StorageBox)
+                    and isinstance(indice.data, ir.ExternKernel)
+                    and getattr(indice.data, "fx_node", None)
+                    and indice.data.fx_node.target == torch.ops.aten.randperm.default
+                )
+            return False
+
+        if try_get_name(self) in values.get_read_names() and not all(
+            indice_slice_from_randperm(indice) for indice in indices
+        ):
+            # Fix issue: https://github.com/pytorch/pytorch/issues/138908
+            # When self and values have memory overlapping, indices may
+            # contain duplicate values, potentially causing incorrect results since
+            # the load of `values` might contain modified value from the store of `self`.
+            # To address this, store values in a temporary buffer in such cases.
+            values.realize()
+
     # Dispatch to masked fill for single boolean index with single value
     if (
         values.get_numel() == 1
         and len(indices) == 1
-        and indices[0].get_dtype() in {torch.bool, torch.uint8}
+        and indices[0].get_dtype() in (torch.bool, torch.uint8)
     ):
         mask = indices[0]
         for _ in range(len(mask.get_size()), len(self.get_size())):
@@ -3485,7 +3565,7 @@ def index_put_impl_(self, indices, values, accumulate, check):
 
     # Fallback if there is a boolean index
     for index in indices:
-        if index is not None and index.get_dtype() in {torch.bool, torch.uint8}:
+        if index is not None and index.get_dtype() in (torch.bool, torch.uint8):
             return index_put_fallback(self, indices, values, accumulate)
 
     x_size = self.get_size()
@@ -3656,7 +3736,7 @@ def scatter_fallback(
 
 @register_lowering(aten.scatter_, type_promotion_kind=None)
 def scatter_(self, dim: int, index, src, *, reduce: Optional[str] = None):
-    assert reduce in {None, "add", "multiply"}
+    assert reduce in (None, "add", "multiply")
     if reduce is None:
         op_overload = getattr(aten.scatter_, V.graph.current_node.target._overloadname)  # type: ignore[union-attr]
         fallback_result = scatter_fallback(
@@ -3689,7 +3769,7 @@ def scatter_reduce(x, dim: int, index, src, reduction_type, **kwargs):
 
 @register_lowering(aten.scatter_reduce_, type_promotion_kind=None)
 def scatter_reduce_(self, dim: int, index, src, reduce, *, include_self: bool = True):
-    assert reduce in {None, "sum", "prod", "mean", "amax", "amin"}
+    assert reduce in (None, "sum", "prod", "mean", "amax", "amin")
     assert (
         len(aten.scatter_reduce_.overloads()) == 1
         and "two" in aten.scatter_reduce_.overloads()
@@ -4480,6 +4560,9 @@ fallback_adaptive_avg_pool2d = fallback_handler(
 
 @register_lowering(aten._adaptive_avg_pool2d)
 def _adaptive_avg_pool2d(x, output_size):
+    if x.get_dtype() == torch.int64:
+        # not supported in eager
+        raise RuntimeError("'adaptive_avg_pool2d' not implemented for 'Long'")
     assert isinstance(x, TensorBox)
     assert len(output_size) == 2
     x.realize_hint()
@@ -4552,6 +4635,9 @@ fallback_adaptive_max_pool2d = fallback_handler(
 
 @register_lowering(aten.adaptive_max_pool2d)
 def adaptive_max_pool2d(x, output_size):
+    if x.get_dtype() == torch.int64:
+        # not supported in eager
+        raise RuntimeError("adaptive_max_pool2d not implemented for Long")
     assert isinstance(x, TensorBox)
     assert len(output_size) == 2
     x.realize_hint()
@@ -5331,7 +5417,7 @@ def _validate_reduction_axis(x, axis):
         if axis[i] < 0:
             axis[i] += len(size) if len(size) else 1
         assert 0 <= axis[i] < len(size) or (len(size) == 0 and axis[i] == 0)
-    assert len(set(axis)) == len(axis), "reduction axis not unique"
+    assert len(OrderedSet(axis)) == len(axis), "reduction axis not unique"
     return axis
 
 
@@ -5339,7 +5425,7 @@ def _make_reduction_inner(x, *, axis, keepdims, dtype, override_return_dtype):
     if dtype is not None:
         x = to_dtype(x, dtype)
     size = x.get_size()
-    axis = set(_validate_reduction_axis(x, axis))
+    axis = OrderedSet[int](_validate_reduction_axis(x, axis))
 
     kept_sizes = []
     kept_idx = []

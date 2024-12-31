@@ -277,6 +277,10 @@ class ValueCache {
  public:
   ValueCache() = default;
   ValueCache(const ValueCache&) = delete;
+  ValueCache& operator==(const ValueCache&) = delete;
+  ValueCache(ValueCache&&) = default;
+  ValueCache& operator==(ValueCache&&) = delete;
+  ~ValueCache() = default;
 
   template <CallType C>
   void store(const typename Config<C>::key_t&, typename Config<C>::ephemeral_t);
@@ -599,8 +603,7 @@ static PyTypeObject TraceContextType = {
 
 class gil_and_restore_thread {
  public:
-  gil_and_restore_thread()
-      : gil_(), initial_thread_state_{PyThreadState_Get()} {}
+  gil_and_restore_thread() : initial_thread_state_{PyThreadState_Get()} {}
   ~gil_and_restore_thread() {
     PyThreadState_Swap(initial_thread_state_);
 

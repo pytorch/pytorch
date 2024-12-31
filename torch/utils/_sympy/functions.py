@@ -4,7 +4,6 @@ import math
 import operator
 import sys
 from typing import (
-    Any,
     Callable,
     Iterable,
     List,
@@ -14,6 +13,7 @@ from typing import (
     TypeVar,
     Union,
 )
+from typing_extensions import TypeVarTuple, Unpack
 
 import sympy
 from sympy import S
@@ -25,12 +25,14 @@ from sympy.core.numbers import equal_valued
 from sympy.core.operations import LatticeOp, ShortCircuit
 from sympy.core.sorting import ordered
 from sympy.core.traversal import walk
+from sympy.printing.precedence import PRECEDENCE
 from sympy.utilities.iterables import sift
 
 from .numbers import int_oo
 
 
 _T = TypeVar("_T", bound=SupportsFloat)
+_Ts = TypeVarTuple("_Ts")
 
 # Portions of this file are adapted from the Sympy codebase, which was
 # licensed as follows:
@@ -100,9 +102,11 @@ def _is_symbols_binary_summation(expr: sympy.Expr) -> bool:
     )
 
 
-def _keep_float(f: Callable[..., _T]) -> Callable[..., Union[_T, sympy.Float]]:
+def _keep_float(
+    f: Callable[[Unpack[_Ts]], _T]
+) -> Callable[[Unpack[_Ts]], Union[_T, sympy.Float]]:
     @functools.wraps(f)
-    def inner(*args: Any) -> Union[_T, sympy.Float]:
+    def inner(*args: Unpack[_Ts]) -> Union[_T, sympy.Float]:
         r: Union[_T, sympy.Float] = f(*args)
         if any(isinstance(a, sympy.Float) for a in args) and not isinstance(
             r, sympy.Float
@@ -1350,8 +1354,16 @@ OpaqueUnaryFn_log2 = make_opaque_unary_fn("log2")
 
 
 def make_opaque_bitwise_fn(name, real_op_name):
+    if name == "bitwise_and":
+        prec = PRECEDENCE["BitwiseAnd"]
+    elif name == "bitwise_or":
+        prec = PRECEDENCE["BitwiseOr"]
+    else:
+        raise AssertionError(f"unrecognized {name}")
+
     class BitwiseFn(sympy.Function):
         _torch_handler_name = name
+        precedence: int = prec
 
         @classmethod
         def eval(cls, a, b):

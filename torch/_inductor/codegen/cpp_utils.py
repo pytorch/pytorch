@@ -5,7 +5,7 @@ import functools
 import math
 import sys
 from collections import namedtuple
-from typing import Any, Callable, Dict, List, Optional, Sequence, Set, Tuple
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 from unittest.mock import patch
 
 import sympy
@@ -185,7 +185,7 @@ class CppCSEVariable(CSEVariable):
     ) -> None:
         super().__init__(name, bounds, dtype)
         self.is_vec = False
-        self.dependent_itervars: Set[sympy.Symbol] = set()
+        self.dependent_itervars = OrderedSet[sympy.Symbol]()
 
     def __repr__(self) -> str:
         return (
@@ -211,7 +211,11 @@ class CppCSEVariable(CSEVariable):
             if any(arg.is_vec for arg in args if isinstance(arg, CppCSEVariable)):
                 self.is_vec = True
         # NOTE [Deduce dtype of CppCSEVariable at runtime]
-        self.dtype = deduce_dtype_for_cpp_cse_variable(name, *args, **kwargs)
+        if self.dtype is None:
+            # Take frexp for example: 2 output with different data type.
+            # The output dtype can't be deduced, since we don't know the idx
+            # of return tensor everywhere invoking update_on_args
+            self.dtype = deduce_dtype_for_cpp_cse_variable(name, *args, **kwargs)
         assert self.dtype is not None
 
     def _set_dependent_itervars(self, index: sympy.Expr):
@@ -293,7 +297,9 @@ def rewrite_index_for_nodes(
     index: sympy.Expr,
     global_buf_name: str,
 ):
-    used_vars = {s for s in index.free_symbols if symbol_is_type(s, SymT.INDEX)}
+    used_vars = OrderedSet(
+        s for s in index.free_symbols if symbol_is_type(s, SymT.INDEX)
+    )
     index_vars = []
     local_buf = localize_buffer_handler.global_to_local[global_buf_name]
     for i in range(len(local_buf.get_size())):
@@ -725,7 +731,7 @@ def _get_loop_body(fn_list):
 
 
 def _get_dtype_from_loopbodies(loop_bodies):
-    dtypes = set()
+    dtypes = OrderedSet[torch.dtype]()
     for loop_body in loop_bodies:
         graphs = [loop_body.root_block.graph] + [
             body.graph for body in list(loop_body.subblocks.values())
@@ -754,7 +760,7 @@ def template_fusion_with_epilogues_supported(
         index_of_template_buf_read: Sequence[sympy.Expr],
         epilogue_writes: OrderedSet[Dep],
     ) -> Tuple[bool, bool]:
-        num_indexes = len(set(index_of_template_buf_read))
+        num_indexes = len(OrderedSet(index_of_template_buf_read))
 
         if num_indexes > 1:
             same_index = False
