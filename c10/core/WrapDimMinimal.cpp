@@ -34,8 +34,10 @@ T maybe_wrap_dim_slow(T dim, const T& dim_post_expr, bool wrap_scalar) {
 }
 
 // Explicitly instantiate the template at the two types it will be used
-template C10_API int64_t
-maybe_wrap_dim_slow(int64_t dim, const int64_t& dim_post_expr, bool wrap_scalar);
+template C10_API int64_t maybe_wrap_dim_slow(
+    int64_t dim,
+    const int64_t& dim_post_expr,
+    bool wrap_scalar);
 template C10_API SymInt
 maybe_wrap_dim_slow(SymInt dim, const SymInt& dim_post_expr, bool wrap_scalar);
 
