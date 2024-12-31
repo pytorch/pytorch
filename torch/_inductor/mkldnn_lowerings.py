@@ -9,7 +9,7 @@ from torch._inductor.kernel.mm_common import mm_args
 
 from . import ir
 from .codegen.cpp_gemm_template import CppGemmTemplate
-from .codegen.cpp_group_gemm_template import CppGroupGemmTemplate
+from .codegen.cpp_grouped_gemm_template import CppGroupedGemmTemplate
 from .codegen.cpp_utils import create_epilogue_with_attr
 from .ir import TensorBox
 from .lowering import (
@@ -30,7 +30,7 @@ from .utils import use_aten_gemm_kernels, use_cpp_gemm_template, use_max_autotun
 from .virtualized import ops, V
 
 
-def group_gemm_lowering(
+def grouped_gemm_lowering(
     x: TensorBox,
     w: List[TensorBox],
     b: List[TensorBox],
@@ -61,7 +61,7 @@ def group_gemm_lowering(
     input_nodes = [x, *w]
     input_nodes.extend([bias for bias in b if bias is not None])
 
-    CppGroupGemmTemplate.add_choices(
+    CppGroupedGemmTemplate.add_choices(
         choices,
         layout,
         input_nodes,
@@ -70,7 +70,7 @@ def group_gemm_lowering(
 
     assert len(choices) != 0
     result = autotune_select_algorithm(
-        "group_gemm",
+        "grouped_gemm",
         choices,
         input_nodes,
         layout,

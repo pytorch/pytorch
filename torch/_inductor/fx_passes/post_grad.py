@@ -98,9 +98,9 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
         )
 
     if torch._C._has_mkldnn:
-        from .mkldnn_fusion import group_gemm_pass
+        from .mkldnn_fusion import grouped_gemm_pass
 
-        group_gemm_pass(gm.graph)
+        grouped_gemm_pass(gm.graph)
 
     if config.pattern_matcher:
         lazy_init()
