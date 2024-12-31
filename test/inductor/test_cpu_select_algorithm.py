@@ -1684,7 +1684,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
 
     @inductor_config.patch({"freezing": True})
-    @inductor_config.patch({"cpp.enable_group_gemm_template": True})
+    @inductor_config.patch({"cpp.enable_grouped_gemm_template": True})
     @patches
     @torch.no_grad
     @unittest.skipIf(not TEST_MKL, "Test requires MKL")
@@ -1696,7 +1696,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
     @dtypes(
         torch.bfloat16,
     )
-    def test_group_linear(
+    def test_grouped_linear(
         self,
         batch_size,
         in_features,
@@ -1728,7 +1728,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
             device_type="cpu"
         ), torch.no_grad():
             self.common(mod, (v,), atol=atol, rtol=rtol)
-        self.assertEqual(counters["inductor"]["cpp_group_gemm_template"], 1)
+        self.assertEqual(counters["inductor"]["cpp_grouped_gemm_template"], 1)
 
     @inductor_config.patch({"freezing": False})
     @patches
@@ -2078,7 +2078,7 @@ class TestSelectAlgorithmDynamicShapes(_DynamicShapesTestBase):
     test_quantized_linear_amx_dynamic_shapes = (
         TestSelectAlgorithm.test_quantized_linear_amx
     )
-    test_group_linear_dynamic_shapes = TestSelectAlgorithm.test_group_linear
+    test_grouped_linear_dynamic_shapes = TestSelectAlgorithm.test_grouped_linear
     test_linear_k_slicing_dynamic_shapes = TestSelectAlgorithm.test_linear_k_slicing
     test_linear_cache_blocking_dynamic_shapes = (
         TestSelectAlgorithm.test_linear_cache_blocking

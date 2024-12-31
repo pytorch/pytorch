@@ -856,8 +856,8 @@ class cpp:
         os.environ.get("TORCHINDUCTOR_CPP_ENABLE_TILING_HEURISTIC", "1") == "1"
     )
 
-    # Enable the GEMM Template of Linear SiLU and Linear Mul
-    enable_group_gemm_template = False
+    # Enable the Grouped GEMM Fusion
+    enable_grouped_gemm_template = False
 
     # Maximal allowed number of slices on K-dim for a GEMM kernel. This controls
     # the maximal parallelism of K-slicing. Since K-slicing requires extra thread

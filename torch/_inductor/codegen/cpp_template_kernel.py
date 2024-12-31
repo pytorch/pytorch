@@ -248,13 +248,13 @@ class CppTemplateKernel(CppKernel):
         bodies = []
         var_sizes_list = []
         if isinstance(next(iter(nodes)), Iterable):
-            group_gemm_number = len(nodes)
+            grouped_gemm_number = len(nodes)
             epilogue_nodes = next(iter(nodes))
             assert isinstance(epilogue_nodes, Iterable)
             for i, _ in enumerate(epilogue_nodes):
                 output_names = []
                 gemm_nodes = []
-                for gemm_idx in range(group_gemm_number):
+                for gemm_idx in range(grouped_gemm_number):
                     single_gemm_nodes = nodes[gemm_idx]
                     assert isinstance(dst, Iterable)
                     single_gemm_dst = dst[gemm_idx]
@@ -278,7 +278,7 @@ class CppTemplateKernel(CppKernel):
                     new_args = [arg + offset for arg, offset in zip(next(iter(args)), offsets)]  # type: ignore[arg-type]
                     if reindexers[i] is not None:
                         new_args = reindexers[i](new_args)  # type: ignore[misc]
-                    for gemm_idx in range(group_gemm_number):
+                    for gemm_idx in range(grouped_gemm_number):
                         V.ops.store(
                             output_names[gemm_idx],
                             output_index,
