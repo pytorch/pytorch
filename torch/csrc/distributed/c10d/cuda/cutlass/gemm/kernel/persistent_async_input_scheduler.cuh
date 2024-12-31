@@ -263,33 +263,17 @@ public:
       cta_m, cta_n
     );
   }
-  // Kernel helper function to get next work ID
-  template <class WorkIdPipeline, class WorkIdPipelineState>
+
+  // Kernel helper function to get next work tile
   CUTLASS_DEVICE
   auto
-  fetch_next_work(
-    WorkTileInfo work_tile_info,
-    WorkIdPipeline& work_id_pipeline,
-    WorkIdPipelineState work_id_pipe_consumer_state) {
-      WorkTileInfo new_work_tile_info;
-      advance_to_next_work();
-      new_work_tile_info = get_current_work();
+  fetch_next_work(WorkTileInfo work_tile_info) {
+    if (continue_current_work(work_tile_info)) {
+      return work_tile_info;
+    }
 
-    // Return true to indicate that the WorkID pipeline state should be advanced
-    return cute::make_tuple(new_work_tile_info, true);
-  }
-
-  CUTLASS_DEVICE
-  static auto
-  work_tile_to_cta_coord(WorkTileInfo work_tile_info) {
-    // Get every cta coord in three dimensions of the cluster
-    auto [cta_m_in_cluster, cta_n_in_cluster, cta_l_in_cluster] = cute::block_id_in_cluster();
-    return make_coord(
-      work_tile_info.M_idx + static_cast<int32_t>(cta_m_in_cluster),
-      work_tile_info.N_idx + static_cast<int32_t>(cta_n_in_cluster),
-      _,
-      work_tile_info.L_idx + static_cast<int32_t>(cta_l_in_cluster)
-    );
+    advance_to_next_work();
+    return get_current_work();
   }
 
   // Given the inputs, computes the physical grid we should launch.
@@ -345,20 +329,6 @@ public:
       args.raster_order,
       /* truncate_by_problem_size = */true
     );
-  }
-
-  // Convert CTA-level work tile info to cluster-level tile coord
-  CUTLASS_DEVICE
-  cute::Coord<int,int,int,int>
-  tile_info_to_coord_mnkl(WorkTileInfo work_tile_info) const {
-    // TileScheduler works at CTA-level, kernel works at cluster-level
-    int m_coord = idx2crd(work_tile_info.M_idx / params.cluster_shape_m_,
-                          params.problem_tiles_m_);
-    int n_coord = idx2crd(work_tile_info.N_idx / params.cluster_shape_n_,
-                          params.problem_tiles_n_);
-    int l_coord = idx2crd(work_tile_info.L_idx,
-                          params.problem_tiles_l_);
-    return make_coord(m_coord, n_coord, _, l_coord);
   }
 
   // Returns whether the block assigned this work should compute the epilogue for the corresponding
@@ -471,7 +441,7 @@ public:
   template <class ProblemShape, class ElementAccumulator>
   static cutlass::Status
   initialize_workspace(Arguments const&, void*, cudaStream_t, ProblemShape, KernelHardwareInfo const&,
-    uint32_t, const uint32_t = 1) {
+    uint32_t, const uint32_t = 1, CudaHostAdapter* cuda_adapter = nullptr) {
     return Status::kSuccess;
   }
 public:
