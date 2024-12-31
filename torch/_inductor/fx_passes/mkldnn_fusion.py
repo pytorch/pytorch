@@ -41,13 +41,14 @@ if torch._C._has_mkldnn:
     def _is_valid_group_gemm_fusion(computation_nodes):
         computation_op = mkldnn._linear_pointwise.default
         assert all(node.target == computation_op for node in computation_nodes)
-        act = computation_nodes[0].args[0]
-        wgt = computation_nodes[0].args[1]
+        first_computation_node = next(iter(computation_nodes))
+        act = next(iter(first_computation_node.args))
+        wgt = first_computation_node.args[1]
         if len(computation_nodes) < 2:
             return False
         if any(
             (
-                node.args[0] != act
+                next(iter(node.args)) != act
                 or (node.args[1] == wgt and gemm_idx != 0)
                 or node.args[2]  # <TODO> support bias through epilogue fusion
                 or node.args[1].meta.get("val").dtype != torch.bfloat16  # type: ignore[union-attr]
@@ -55,7 +56,7 @@ if torch._C._has_mkldnn:
             for gemm_idx, node in enumerate(computation_nodes)
         ):
             return False
-        wgt_size = computation_nodes[0].args[1].meta.get("val").size()  # type: ignore[union-attr]
+        wgt_size = wgt.meta.get("val").size()  # type: ignore[union-attr]
         if any(
             node.args[1].meta.get("val").size() != wgt_size
             for node in computation_nodes
@@ -83,7 +84,7 @@ if torch._C._has_mkldnn:
         for node in graph.nodes:
             if node.target == computation_op:
                 with graph.inserting_before(node):
-                    act = node.all_input_nodes[0]
+                    act = next(iter(node.all_input_nodes))
                     users = list(act.users)
                     if all(user.target == computation_op for user in users):
                         if not _is_valid_group_gemm_fusion(users):
