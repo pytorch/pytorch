@@ -19,11 +19,11 @@ to a GitHub repository by adding a simple ``hubconf.py`` file;
 
 How to implement an entrypoint?
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-Here is a code snippet specifies an entrypoint for ``resnet18`` model if we expand
+Here is a code snippet that specifies an entrypoint for the ``resnet18`` model if we expand
 the implementation in ``pytorch/vision/hubconf.py``.
-In most case importing the right function in ``hubconf.py`` is sufficient. Here we
+In most case importing the right function in ``hubconf.py`` is sufficient. Here, we
 just want to use the expanded version as an example to show how it works.
-You can see the full script in
+You can find the full script in
 `pytorch/vision repo <https://github.com/pytorch/vision/blob/master/hubconf.py>`_
 
 ::
