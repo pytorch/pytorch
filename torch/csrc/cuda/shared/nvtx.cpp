@@ -71,48 +71,48 @@ static void printUnavailableWarning() {
 }
 
 static int rangePushA(const std::string&) {
-    printUnavailableWarning();
-    return 0;
+  printUnavailableWarning();
+  return 0;
 }
 
 static int rangePop() {
-    printUnavailableWarning();
-    return 0;
+  printUnavailableWarning();
+  return 0;
 }
 
 static int rangeStartA(const std::string&) {
-    printUnavailableWarning();
-    return 0;
+  printUnavailableWarning();
+  return 0;
 }
 
 static void rangeEnd(int) {
-    printUnavailableWarning();
+  printUnavailableWarning();
 }
 
 static void markA(const std::string&) {
-    printUnavailableWarning();
+  printUnavailableWarning();
 }
 
 static py::object deviceRangeStart(const std::string&, std::intptr_t) {
-    printUnavailableWarning();
-    return py::none(); // Return an appropriate default object
+  printUnavailableWarning();
+  return py::none(); // Return an appropriate default object
 }
 
 static void deviceRangeEnd(py::object, std::intptr_t) {
-    printUnavailableWarning();
+  printUnavailableWarning();
 }
 
 void initNvtxBindings(PyObject* module) {
-    auto m = py::handle(module).cast<py::module>();
-    auto nvtx = m.def_submodule("_nvtx", "unavailable");
+  auto m = py::handle(module).cast<py::module>();
+  auto nvtx = m.def_submodule("_nvtx", "unavailable");
 
-    nvtx.def("rangePushA", rangePushA);
-    nvtx.def("rangePop", rangePop);
-    nvtx.def("rangeStartA", rangeStartA);
-    nvtx.def("rangeEnd", rangeEnd);
-    nvtx.def("markA", markA);
-    nvtx.def("deviceRangeStart", deviceRangeStart);
-    nvtx.def("deviceRangeEnd", deviceRangeEnd);
+  nvtx.def("rangePushA", rangePushA);
+  nvtx.def("rangePop", rangePop);
+  nvtx.def("rangeStartA", rangeStartA);
+  nvtx.def("rangeEnd", rangeEnd);
+  nvtx.def("markA", markA);
+  nvtx.def("deviceRangeStart", deviceRangeStart);
+  nvtx.def("deviceRangeEnd", deviceRangeEnd);
 }
 #endif // ROCM_ON_WINDOWS
 

@@ -90,9 +90,15 @@ struct CUDAMethods : public ProfilerStubs {
   static void printUnavailableWarning() {
     TORCH_WARN_ONCE("Warning: roctracer isn't available on Windows");
   }
-  void mark(const char* name) const override { printUnavailableWarning(); }
-  void rangePush(const char* name) const override { printUnavailableWarning(); }
-  void rangePop() const override { printUnavailableWarning(); }
+  void mark(const char* name) const override {
+    printUnavailableWarning();
+  }
+  void rangePush(const char* name) const override {
+    printUnavailableWarning();
+  }
+  void rangePop() const override {
+    printUnavailableWarning();
+  }
 #endif
 
   void onEachDevice(std::function<void(int)> op) const override {
