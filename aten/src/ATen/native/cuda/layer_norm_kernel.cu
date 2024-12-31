@@ -745,16 +745,17 @@ void launch_vectorized_layer_norm_kernel(
     auto stream = at::cuda::getCurrentCUDAStream().stream();
     const int warp_size = at::cuda::warp_size();
     const dim3 threads(warp_size, num_threads() / warp_size, 1);
-    const dim3 blocks(M);
+    dim3 blocks(M);
 
 #ifdef USE_ROCM
   uint64_t workgroupSize = static_cast<uint64_t>(blocks.x) * static_cast<uint64_t>(threads.x);
-  // this caused invalid configuration problem 
+  // this caused invalid configuration problem
   if (workgroupSize > std::numeric_limits<uint32_t>::max()) {
     // Fix invalid configuration https://github.com/pytorch/pytorch/issues/136291
     uint64_t totalThreads = static_cast<uint64_t>(blocks.x) * static_cast<uint64_t>(threads.x) * static_cast<uint64_t>(threads.y);
+    // TODO: check which way is better
+    // blocks.x = std::numeric_limits<uint32_t>::max() / threads.x;
     blocks.x = 65535;
-    //blocks.x = std::numeric_limits<uint32_t>::max() / threads.x;
     uint64_t newTotal = static_cast<uint64_t>(blocks.x) * static_cast<uint64_t>(threads.x) * static_cast<uint64_t>(threads.y);
     blocks.y = (totalThreads-1) / newTotal  + 1;
   }
