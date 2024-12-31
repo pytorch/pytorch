@@ -29,6 +29,7 @@ from torch._prims_common import is_float_dtype
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.nn import functional as F
 from torch.testing._internal.common_utils import (
+    TEST_WITH_ROCM,
     instantiate_parametrized_tests,
     IS_FBCODE,
     IS_MACOS,
@@ -583,6 +584,8 @@ class CPUReproTests(TestCase):
         batch_size,
         seq_len,
     ):
+        if TEST_WITH_ROCM and not unbatched:
+            self.skipTest("Flaky on ROCm with unbatched=False")
         self._test_lstm_packed(
             unbatched,
             input_size,
