@@ -60,9 +60,7 @@ class CppTemplate(KernelTemplate):
             unique(input_node.get_name() for input_node in self.input_nodes)
         )
         if isinstance(self.output_node, Iterable):
-            expected_args.extend(
-                [node.get_name() for node in self.output_node]  # Group GEMM Template
-            )
+            expected_args.extend([node.get_name() for node in self.output_node])
         else:
             expected_args.extend([self.output_node.get_name()])
         assert list(call_args)[: len(expected_args)] == expected_args, (
