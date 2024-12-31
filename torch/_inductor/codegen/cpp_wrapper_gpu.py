@@ -230,10 +230,13 @@ class CppWrapperGpu(CppWrapperCpu):
         # See Note: [Input Alignment handling in Inductor]
         #
         # JIT Inductor does not guard on input alignment. It relies on copy_misaligned_inputs to
-        # copy misaligned inputs to aligned buffers. For AOTInductor, we expect users to use it
-        # as non-Python deployment for its best performance, so implicitly copying misaligned inputs
-        # to aligned buffers is going to bring a surprising performance hit. Instead, we check input
-        # alignment and throw an error if any input is misaligned.
+        # copy misaligned inputs to aligned buffers. For AOTInductor, we need to do the same in cpp.
+
+        if config.is_fbcode():
+            # TODO: This is added because FC. Remove this once the newly added shim symbols,
+            # e.g. aoti_torch_clone_preserve_strides, have landed
+            return super().codegen_inputs()
+
         if V.graph.aot_mode and V.graph.inputs_to_check:
             for idx in V.graph.inputs_to_check:
                 input_name = V.graph.graph_input_names[idx]
@@ -244,10 +247,18 @@ class CppWrapperGpu(CppWrapperCpu):
                 assert isinstance(
                     value, TensorBox
                 ), f"{input_name} is expected to be tensor but found as {type(value)}"
+                warn_msg = (
+                    f"Input {idx} was compiled as {GPU_ALIGN_BYTES}-bytes aligned, "
+                    "but it is not aligned at run time. Copying to an aligned tensor "
+                    "to guarantee correctness, but expect a performance hit."
+                )
                 self.prefix.splice(
                     f"""
                     if ((long({input_name}.data_ptr()) & ({GPU_ALIGN_BYTES} -1)) != 0) {{
-                        throw std::runtime_error("{input_name} is not aligned to {GPU_ALIGN_BYTES} bytes");
+                        AOTI_TORCH_WARN("{warn_msg}");
+                        AtenTensorHandle {input_name}_aligned;
+                        aoti_torch_clone_preserve_strides({input_name}, &{input_name}_aligned);
+                        {input_name} = std::move(RAIIAtenTensorHandle({input_name}_aligned));
                     }}
                     """
                 )
