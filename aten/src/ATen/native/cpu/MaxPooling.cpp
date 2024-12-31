@@ -20,6 +20,7 @@ inline void max_pool1d_kernel(
     int64_t oe = p.valid_output_end(kj);
     int64_t ij = p.index(kj, oj);
     for (; oj < oe; ++oj, ij += p.SJ) {
+      TORCH_CHECK(ij < p.IW, "max_pool1d() Invalid stride: ", p.SJ);
       scalar_t val = ip[ij];
       bool update_max = std::isnan(val) || op[oj] < val;
       op[oj] = update_max ? val : op[oj];
