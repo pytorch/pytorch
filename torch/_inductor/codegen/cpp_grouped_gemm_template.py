@@ -419,7 +419,7 @@ class CppGroupedGemmTemplate(CppGemmTemplate):
 
         assert (
             not self.epilogue_creator
-        ), "Epilogue fusion is not implemented yet in Group GEMM Template"
+        ), "epilogue_creator is not supported yet in Grouped GEMM Template"
 
         kernel_args = {}
         for x_idx in range(wgt_start_idx):

@@ -39,28 +39,31 @@ if torch._C._has_mkldnn:
     _conv_transpose_args = [Arg() for _ in range(11)]
 
     def _is_valid_grouped_gemm_fusion(computation_nodes):
+        """
+        Here we check:
+        1. More than 1 GEMM nodes has been found.
+        2. All the GEMM nodes share the same activation.
+        3. All the GEMM nodes have same weight size but different wgt node.
+        4. Inductor Group GEMM config has been turned on.
+        5. <TODO> Only BF16 has been supported and tested, extend to other data types.
+        """
         computation_op = mkldnn._linear_pointwise.default
         assert all(node.target == computation_op for node in computation_nodes)
         first_computation_node = next(iter(computation_nodes))
         act = next(iter(first_computation_node.args))
         wgt = first_computation_node.args[1]
+        wgt_size = wgt.meta.get("val").size()  # type: ignore[union-attr]
         if len(computation_nodes) < 2:
             return False
         if any(
             (
                 next(iter(node.args)) != act
+                or (node.args[1].meta.get("val").size() != wgt_size)
                 or (node.args[1] == wgt and gemm_idx != 0)
                 or node.args[1].meta.get("val").dtype != torch.bfloat16  # type: ignore[union-attr]
             )
             for gemm_idx, node in enumerate(computation_nodes)
         ):
-            return False
-        wgt_size = wgt.meta.get("val").size()  # type: ignore[union-attr]
-        if any(
-            node.args[1].meta.get("val").size() != wgt_size
-            for node in computation_nodes
-        ):  # type: ignore[union-attr]
-            # check for same weight size
             return False
         # Ensure max autotune used with CPP backend
         return (
