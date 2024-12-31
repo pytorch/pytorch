@@ -2220,7 +2220,7 @@ class PythonWrapperCodegen(CodeGen):
         if isinstance(buffer, ir.CppTemplateBuffer) and isinstance(
             buffer.layout, ir.MultiOutputLayout
         ):
-            # CppTemplateBuffer of Group GEMM, we actually didn't allocate this buffer
+            # CppTemplateBuffer of Grouped GEMM, we actually didn't allocate this buffer
             return
 
         self.writeline(FreeIfNotReusedLine(self, buffer))

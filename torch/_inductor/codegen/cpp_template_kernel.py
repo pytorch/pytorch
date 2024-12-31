@@ -255,9 +255,9 @@ class CppTemplateKernel(CppKernel):
 
             def fn(*args):
                 assert len(args) == 2
-                assert len(args[0]) == len(var_sizes[0])
+                assert len(next(iter(args))) == len(next(iter(var_sizes)))
                 assert len(args[1]) == 0
-                new_args = [arg + offset for arg, offset in zip(args[0], offsets)]  # type: ignore[arg-type]
+                new_args = [arg + offset for arg, offset in zip(next(iter(args)), offsets)]  # type: ignore[arg-type]
                 if reindexers[i] is not None:
                     new_args = reindexers[i](new_args)  # type: ignore[misc]
                 V.ops.store(
@@ -280,7 +280,7 @@ class CppTemplateKernel(CppKernel):
         kernel_group.finalize_kernel(cpp_kernel_proxy, [])
         return kernel_group.loops_code.getvalue()
 
-    def store_group_gemm_pointwise_nodes(
+    def store_grouped_gemm_pointwise_nodes(
         self,
         dst: Tuple[ir.Buffer],
         nodes: List[ir.IRNode],
@@ -293,10 +293,10 @@ class CppTemplateKernel(CppKernel):
         var_sizes = (tuple(ref_dst.get_size()), ())
         var_ranges = {
             sympy_index_symbol_with_prefix(SymT.INDEX, i): sz
-            for i, sz in enumerate(var_sizes[0])
+            for i, sz in enumerate(next(iter(var_sizes)))
         }
         assert offsets, "offsets should be set outside"
-        assert all(len(offset) == len(var_sizes[0]) for offset in offsets)
+        assert all(len(offset) == len(next(iter(var_sizes))) for offset in offsets)
         output_index = ref_dst.get_layout().make_indexer()([*var_ranges.keys()])
         kernel_group = KernelGroup()
         kernel_group.args = self.args
@@ -310,9 +310,9 @@ class CppTemplateKernel(CppKernel):
 
             def fn(*args):
                 assert len(args) == 2
-                assert len(args[0]) == len(var_sizes[0])
+                assert len(next(iter(args))) == len(next(iter(var_sizes)))
                 assert len(args[1]) == 0
-                new_args = [arg + offset for arg, offset in zip(args[0], offsets[i])]  # type: ignore[arg-type]
+                new_args = [arg + offset for arg, offset in zip(next(iter(args)), offsets[i])]  # type: ignore[arg-type]
                 if reindexers[i] is not None:
                     new_args = reindexers[i](new_args)  # type: ignore[misc]
                 V.ops.store(
@@ -457,7 +457,7 @@ class CppTemplateKernel(CppKernel):
                             final_offsets.append(
                                 [sympy.S.Zero] * len(dst[gemm_idx].get_size())
                             )
-                return self.store_group_gemm_pointwise_nodes(
+                return self.store_grouped_gemm_pointwise_nodes(
                     dst,
                     localize_epilogue_nodes,
                     final_offsets,
@@ -467,7 +467,7 @@ class CppTemplateKernel(CppKernel):
         else:
             assert isinstance(src, Iterable)
             assert isinstance(dst, Iterable)
-            if dst[0].get_name() != src[0].get_name():
+            if next(iter(dst)).get_name() != next(iter(src)).get_name():
                 copy_list = []
                 with LocalBufferContext(self.args) as scope:
                     for _src, _dst in zip(src, dst):
@@ -476,7 +476,7 @@ class CppTemplateKernel(CppKernel):
                         output_names.append(_dst.get_name())
                         final_offsets.append([sympy.S.Zero] * len(_dst.get_size()))
                     reindexers = [None] * len(copy_list)
-                    return self.store_group_gemm_pointwise_nodes(
+                    return self.store_grouped_gemm_pointwise_nodes(
                         dst,
                         nodes=copy_list,
                         offsets=final_offsets,
