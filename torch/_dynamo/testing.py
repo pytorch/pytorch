@@ -20,6 +20,7 @@ from typing import (
     TypeVar,
     Union,
 )
+from typing_extensions import ParamSpec
 from unittest.mock import patch
 
 import torch
@@ -50,6 +51,8 @@ unsupported = eval_frame.unsupported
 three = 3
 
 log = logging.getLogger(__name__)
+
+_P = ParamSpec("_P")
 
 
 def clone_me(x: Optional[torch.Tensor]) -> Optional[torch.Tensor]:
@@ -207,7 +210,11 @@ def debug_insert_nops(
         torch_function_mode_stack=[],
     )
 
-    return GuardedCode(code, CheckFunctionManager(graph).guard_manager, CompileId(0, 0))  # type: ignore[arg-type]
+    return GuardedCode(
+        code,
+        CheckFunctionManager(frame.f_code, graph).guard_manager,  # type: ignore[arg-type]
+        CompileId(frame_id=0, frame_compile_id=0),
+    )
 
 
 class CompileCounter:
@@ -403,9 +410,9 @@ def check_dynamic_shape_capture() -> bool:
     return not config.assume_static_by_default
 
 
-def _make_fn_with_patches(fn: Callable[..., _T], *patches: Any) -> Callable[..., _T]:
+def _make_fn_with_patches(fn: Callable[_P, _T], *patches: Any) -> Callable[_P, _T]:
     @functools.wraps(fn)
-    def _fn(*args: Any, **kwargs: Any) -> _T:
+    def _fn(*args: _P.args, **kwargs: _P.kwargs) -> _T:
         with contextlib.ExitStack() as stack:
             for module, attr, val in patches:
                 stack.enter_context(patch.object(module, attr, val))

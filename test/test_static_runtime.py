@@ -1,4 +1,5 @@
 # Owner(s): ["module: unknown"]
+# ruff: noqa: F841
 
 import unittest
 from typing import Dict, Optional
