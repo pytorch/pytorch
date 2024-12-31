@@ -415,7 +415,7 @@ class BaseSchedulerNode:
         Decide if there should be inplace updates for the node
         and record the decision in the active kernel.
         """
-        from .codegen.wrapper import buffer_reuse_key
+        from .codegen.wrapper import can_match_buffer_size
 
         if not (
             isinstance(self, SchedulerNode)
@@ -487,8 +487,7 @@ class BaseSchedulerNode:
                             )
                             and len(input_buf.node.get_inputs_that_alias_output()) > 0
                         )
-                        and buffer_reuse_key(input_buf.node)
-                        == buffer_reuse_key(buf.node)
+                        and can_match_buffer_size(input_buf.node, buf.node)
                     ):
                         # if there isn't a triton kernel, then we don't need to call triton-specific things.
                         # but TODO this might be a convenient place to signal to the Collective kernels to inplace
