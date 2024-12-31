@@ -39,7 +39,11 @@ struct TORCH_API MPSHooksInterface : AcceleratorHooksInterface {
       [[maybe_unused]] DeviceIndex device_index) const override {
     FAIL_MPSHOOKS_FUNC(__func__);
   }
+  // deprecated use device-agnostic API getDeviceAllocator()
   virtual Allocator* getMPSDeviceAllocator() const {
+    FAIL_MPSHOOKS_FUNC(__func__);
+  }
+  Allocator* getDeviceAllocator() const override {
     FAIL_MPSHOOKS_FUNC(__func__);
   }
   virtual void deviceSynchronize() const {

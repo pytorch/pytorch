@@ -60,6 +60,10 @@ struct TORCH_API PrivateUse1HooksInterface : AcceleratorHooksInterface {
     FAIL_PRIVATEUSE1HOOKS_FUNC(__func__);
   }
 
+  Allocator* getDeviceAllocator() const override {
+    return GetAllocator(kPrivateUse1);
+  }
+
 #undef FAIL_PRIVATEUSE1HOOKS_FUNC
 };
 
