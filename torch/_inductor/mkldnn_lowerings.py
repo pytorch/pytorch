@@ -49,7 +49,7 @@ def group_gemm_lowering(
     b = [bias if bias is None else ir.ExternKernel.realize_input(bias) for bias in b]
 
     choices: List[ChoiceCaller] = []
-    *_, layout, x, _ = mm_args(x, permute(w[0], [1, 0]), layout=layout)
+    *_, layout, x, _ = mm_args(x, permute(next(iter(w)), [1, 0]), layout=layout)
 
     kwargs = dict(
         has_bias=[bias is not None for bias in b],
@@ -80,7 +80,9 @@ def group_gemm_lowering(
         ir.MultiOutput(layout, template_buf, [(list, gemm_idx)])
         for gemm_idx in range(num_gemm)
     ]
-    template_buf.layout = ir.MultiOutputLayout(device=input_nodes[0].get_device())
+    template_buf.layout = ir.MultiOutputLayout(
+        device=next(iter(input_nodes)).get_device()
+    )
     template_buf.outputs = return_bufs
     return_tensors = [
         ir.TensorBox.create(return_bufs[gemm_idx]) for gemm_idx in range(num_gemm)
