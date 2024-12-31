@@ -34,7 +34,7 @@ bool check_head_dim_size_xpu(sdp::sdp_params const& params, bool debug) {
       (query_size_last != value_size_last)) {
     if (debug) {
       TORCH_WARN(
-          "OneDNN Graph's attention requires q,k,v to have the same last dimension.",
+          "OneDNN attention requires q,k,v to have the same last dimension.",
           " Got Query.size(-1): ",
           query_size_last,
           ", Key.size(-1): ",
@@ -48,7 +48,7 @@ bool check_head_dim_size_xpu(sdp::sdp_params const& params, bool debug) {
   if (query_size_last > 256) {
     if (debug) {
       TORCH_WARN(
-          "OneDNN Graph's attention requires q,k,v to have head dimension less than 256.",
+          "OneDNN attention requires q,k,v to have head dimension less than 256.",
           " Got ",
           query_size_last,
           " instead.");
@@ -97,7 +97,7 @@ sdp::SDPBackend select_sdp_backend_xpu(sdp::sdp_params const& kernel_params) {
   // 1. Flash Attention
   // 2. Math fallback
   auto& ctx = at::globalContext();
-  // use overrideable linked to onednn graph as mem efficient implementation
+  // use overrideable linked to onednn as overrideable implementation
   if (!ctx.userEnabledMathSDP() && !ctx.userEnabledOverrideableSDP()) {
     return sdp::SDPBackend::error;
   }
@@ -135,7 +135,7 @@ sdp::SDPBackend select_sdp_backend_xpu(sdp::sdp_params const& kernel_params) {
   // reason why the kernel was not selected
 
   print_debug = true;
-  TORCH_WARN("OneDNN Graph kernel not used because:");
+  TORCH_WARN("OneDNN kernel not used because:");
   use_overrideable_xpu(kernel_params, print_debug);
   TORCH_CHECK(!print_debug, "No available kernel. Aborting execution.")
   return sdp::SDPBackend::error;
@@ -184,17 +184,17 @@ _scaled_dot_product_fused_attention_overrideable_xpu(
     bool is_causal,
     bool return_debug_mask,
     std::optional<double> scale) {
-  TORCH_CHECK(
+  TORCH_INTERNAL_ASSERT(
       query.dim() == 4 && key.dim() == 4 && value.dim() == 4,
       "scaled_dot_product_fused_attention_overrideable_xpu: Accept only 4 dims inputs shape of {(B), H, T, K}");
-  TORCH_CHECK(
+  TORCH_INTERNAL_ASSERT(
       (key.size(0) == value.size(0)) && (key.size(1) == value.size(1)) &&
           (key.size(2) == value.size(2)),
       "scaled_dot_product_fused_attention_overrideable_xpu: K/V should have the same batch / seq / num_head");
-  TORCH_CHECK(
+  TORCH_INTERNAL_ASSERT(
       dropout_p == 0.0,
       "scaled_dot_product_fused_attention_overrideable_xpu: Currently do not support dropout > 0");
-  TORCH_CHECK(
+  TORCH_INTERNAL_ASSERT(
       !(attn_bias.has_value() && is_causal),
       "scaled_dot_product_fused_attention_overrideable_xpu: attn_bias cannot present with is_causal");
 
@@ -225,7 +225,7 @@ _scaled_dot_product_fused_attention_overrideable_xpu(
       attn_mask_fallback = std::nullopt;
     }
   }
-  at::native::onednn::graph::gpu_float_sdpa(
+  at::native::onednn::gpu_float_sdpa(
       batch_size,
       seq_len_q,
       seq_len_kv,
