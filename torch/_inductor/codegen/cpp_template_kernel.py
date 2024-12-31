@@ -358,15 +358,17 @@ class CppTemplateKernel(CppKernel):
            c) If `src` is local, we need to add a local buffer for it and localize the `orig_src` buffer
               in `epilogue_nodes` with `src`.
         """
-        # <TODO> Leslie: maybe split this function for Group GEMM is clearer since
+        # <TODO> Leslie: maybe split this function for Grouped GEMM is clearer since
         # not much code sharing between this 2 path
         if isinstance(src, Iterable):
-            # Group GEMM may have multi outputs to be localized
+            # Grouped GEMM may have multi outputs to be localized
             assert isinstance(dst, Iterable)
             assert all(
                 _dst.get_size() == _src.get_size() for _src, _dst in zip(src, dst)
             )
-            assert not epilogue_nodes, "epilogue_nodes not supported for Group GEMM yet"
+            assert (
+                not epilogue_nodes
+            ), "epilogue_nodes not supported for Grouped GEMM yet"
         else:
             assert isinstance(dst, (ir.Buffer, ir.ReinterpretView))
             assert dst.get_size() == src.get_size(), f"{dst=}, {src=}"
