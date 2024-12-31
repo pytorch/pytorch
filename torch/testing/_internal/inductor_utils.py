@@ -9,8 +9,7 @@ import os
 from subprocess import CalledProcessError
 import sys
 import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncCompile pools
-from typing import Callable, TypeVar
-from typing_extensions import ParamSpec
+from typing import Callable
 from torch._inductor.codecache import CppCodeCache
 from torch._inductor.utils import get_gpu_shared_memory, is_big_gpu
 from torch._inductor.utils import GPU_TYPES, get_gpu_type
@@ -163,22 +162,30 @@ def skip_windows_ci(name: str, file: str) -> None:
         raise unittest.SkipTest("requires sympy/functorch/filelock")
 
 
-_T = TypeVar("_T")
-_P = ParamSpec("_P")
+def _skip_lazily_if_decorator(cb: Callable[[], bool], msg: str):
 
-def _skip_lazily_if(cb: Callable[[], bool], msg: str, fn: Callable[_P, _T]) -> Callable[_P, _T]:
-    @functools.wraps(fn)
-    def wrapper(*args: _P.args, **kwargs: _P.kwargs) -> _T:
-        if cb():
-            raise unittest.SkipTest(msg)
+    def decorator(fn):
 
-        return fn(*args, **kwargs)
+        @functools.wraps(fn)
+        def wrapper(*args, **kwargs):
+            if cb():
+                raise unittest.SkipTest(msg)
 
-    return wrapper
+            return fn(*args, **kwargs)
+
+        return wrapper
+
+    def decorator_wrapper(fn=None):
+        if callable(fn):
+            return decorator(fn)
+
+        return decorator
+
+    return decorator_wrapper
 
 
-requires_gpu = functools.partial(_skip_lazily_if, lambda: not HAS_GPU, "requires gpu")
-requires_triton = functools.partial(_skip_lazily_if, lambda: not HAS_TRITON, "requires triton")
+requires_gpu = _skip_lazily_if_decorator(lambda: not HAS_GPU, "requires gpu")
+requires_triton = _skip_lazily_if_decorator(lambda: not HAS_TRITON, "requires triton")
 
 skipCUDAIf = functools.partial(skipDeviceIf, device="cuda")
 skipXPUIf = functools.partial(skipDeviceIf, device="xpu")
