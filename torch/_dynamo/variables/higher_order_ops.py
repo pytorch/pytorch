@@ -222,7 +222,9 @@ def _check_supported_callable_arg(
         BuiltinVariable(callable).call_function(tx, [func_var], {}).as_python_constant()
     )
     if not is_callable:
-        unimplemented(f"{arg_name} is of unsupported callable type {str(func_var)}.")
+        unimplemented(
+            f"{arg_name} should be a Callable but is of type {str(func_var)}."
+        )
 
 
 def validate_args_and_maybe_create_graph_inputs(
