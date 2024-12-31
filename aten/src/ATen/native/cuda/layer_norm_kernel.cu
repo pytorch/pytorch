@@ -771,7 +771,7 @@ template <typename T, typename T_ACC>
 void LayerNormKernelImplInternal(
     const Tensor& X,
     const Tensor& gamma,
-    const Tensor& beta,t
+    const Tensor& beta,
     int64_t M,
     int64_t N,
     T_ACC eps,
