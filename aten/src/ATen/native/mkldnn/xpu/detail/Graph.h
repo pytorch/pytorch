@@ -7,7 +7,7 @@
 #include <bitset>
 #include <list>
 
-namespace at::native::onednn::graph {
+namespace at::native::onednn {
 
 using namespace dnnl::graph;
 using data_type = logical_tensor::data_type;
@@ -93,4 +93,4 @@ struct GraphCache {
     return std::nullopt;
   }
 };
-} // namespace at::native::onednn::graph
+} // namespace at::native::onednn
