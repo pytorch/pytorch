@@ -9,6 +9,8 @@ import os
 from subprocess import CalledProcessError
 import sys
 import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncCompile pools
+from typing import Callable, TypeVar
+from typing_extensions import ParamSpec
 from torch._inductor.codecache import CppCodeCache
 from torch._inductor.utils import get_gpu_shared_memory, is_big_gpu
 from torch._inductor.utils import GPU_TYPES, get_gpu_type
@@ -46,11 +48,11 @@ def test_cpu():
 HAS_CPU = LazyVal(test_cpu)
 
 
-# Ensure the scheduling backends are registered first.
-init_backend_registration()
-
-
 def has_inductor_available(device_type: str) -> bool:
+    # Ensure the scheduling backends are registered first. Note that this is
+    # decorated with `lru_cache`, so safe to call multiple times.
+    init_backend_registration()
+
     try:
         scheduling_factory = get_scheduling_for_device(device_type)
         if scheduling_factory is None:
@@ -82,20 +84,20 @@ def _has_triton() -> bool:
 HAS_TRITON = _has_triton()
 
 # Triton for CPU is available.
-HAS_CPU_TRITON = HAS_TRITON and has_triton_backend_available("cpu")
+HAS_CPU_TRITON = LazyVal(lambda: HAS_TRITON and has_triton_backend_available("cpu"))
 
 # We have a CUDA device and a compatible Inductor backend.
-HAS_CUDA = torch.cuda.is_available() and has_inductor_available("cuda")
+HAS_CUDA = LazyVal(lambda: torch.cuda.is_available() and has_inductor_available("cuda"))
 # We have a CUDA device and the CUDA Triton backend for Inductor is available.
-HAS_CUDA_TRITON = HAS_CUDA and has_triton_backend_available("cuda")
+HAS_CUDA_TRITON = LazyVal(lambda: HAS_CUDA and has_triton_backend_available("cuda"))
 
 # We have an XPU device and a compatible Inductor backend.
-HAS_XPU = torch.xpu.is_available() and has_inductor_available("xpu")
+HAS_XPU = LazyVal(lambda: torch.xpu.is_available() and has_inductor_available("xpu"))
 # We have an XPU device and the XPU Triton backend for Inductor is available.
-HAS_XPU_TRITON = HAS_XPU and has_triton_backend_available("xpu")
+HAS_XPU_TRITON = LazyVal(lambda: HAS_XPU and has_triton_backend_available("xpu"))
 
-HAS_GPU = HAS_CUDA or HAS_XPU
-HAS_GPU_TRITON = HAS_CUDA_TRITON or HAS_XPU_TRITON
+HAS_GPU = LazyVal(lambda: HAS_CUDA or HAS_XPU)
+HAS_GPU_TRITON = LazyVal(lambda: HAS_CUDA_TRITON or HAS_XPU_TRITON)
 
 GPU_TYPE = get_gpu_type()
 
@@ -161,8 +163,22 @@ def skip_windows_ci(name: str, file: str) -> None:
         raise unittest.SkipTest("requires sympy/functorch/filelock")
 
 
-requires_gpu = functools.partial(unittest.skipIf, not HAS_GPU, "requires gpu")
-requires_triton = functools.partial(unittest.skipIf, not HAS_TRITON, "requires triton")
+_T = TypeVar("_T")
+_P = ParamSpec("_P")
+
+def _skip_lazily_if(cb: Callable[[], bool], msg: str, fn: Callable[_P, _T]) -> Callable[_P, _T]:
+    @functools.wraps(fn)
+    def wrapper(*args: _P.args, **kwargs: _P.kwargs) -> _T:
+        if cb():
+            raise unittest.SkipTest(msg)
+
+        return fn(*args, **kwargs)
+
+    return wrapper
+
+
+requires_gpu = functools.partial(_skip_lazily_if, lambda: not HAS_GPU, "requires gpu")
+requires_triton = functools.partial(_skip_lazily_if, lambda: not HAS_TRITON, "requires triton")
 
 skipCUDAIf = functools.partial(skipDeviceIf, device="cuda")
 skipXPUIf = functools.partial(skipDeviceIf, device="xpu")
