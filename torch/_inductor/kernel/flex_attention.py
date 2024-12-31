@@ -756,11 +756,13 @@ def _get_nv_config(query, mode: Mode) -> Tuple[int, int, int, int]:
                 return (64, 128, 8, 3)
             else:
                 return (64, 64, 4, 2)
-        elif capability >= (8, 0):  # A100
-            if head_dim == 64:
+        elif capability >= (8, 0):
+            if head_dim >= 64:
                 return (32, 128, 4, 3)
             elif head_dim == 128:
-                return (64, 128, 8, 3)
+                # SM86/89 have smaller shared memory sizes
+                num_stages = 3 if capability[-1] == 0 else 2
+                return (64, 64, 4, num_stages)
             else:
                 return (64, 64, 4, 2)
         else:  # modest hardware or extremely large head_dim
@@ -1237,12 +1239,19 @@ def flex_attention(
                     f"got Q_BLOCK_SIZE={SPARSE_Q_BLOCK_SIZE} and KV_BLOCK_SIZE={SPARSE_KV_BLOCK_SIZE}."
                 )
             continue
-        # Work around https://github.com/pytorch/pytorch/issues/129625
-        if num_stages == 2:
-            continue
 
         cur_kernel_options = original_kernel_options.copy()
         # Performance tuning
+        # Triton parameters
+        # Remove prefix for forward kernels options and delete backward kernel options.
+        for k in list(cur_kernel_options.keys()):
+            if k.startswith("fwd_"):
+                v = cur_kernel_options.pop(k)
+                cur_kernel_options[k[4:]] = v
+            if k.startswith("bwd_"):
+                cur_kernel_options.pop(k)
+        cur_kernel_options.setdefault("num_stages", num_stages)
+        cur_kernel_options.setdefault("num_warps", num_warps)
         cur_kernel_options.setdefault("BLOCK_M", BLOCK_M)
         cur_kernel_options.setdefault("BLOCK_N", BLOCK_N)
         # Blocksparse options
@@ -1269,8 +1278,6 @@ def flex_attention(
             mutated_inputs=[
                 logsumexp,
             ],
-            num_stages=num_stages,
-            num_warps=num_warps,
             call_sizes=query.get_size(),
             **cur_kernel_options,
         )
@@ -2310,12 +2317,20 @@ def flex_attention_backward(*args, **kwargs):
             or SPARSE_Q_BLOCK_SIZE % BLOCK2 != 0
         ):
             continue
-        if num_warps == 8:
-            # Working around https://github.com/pytorch/pytorch/issues/141603
-            continue
 
         # Performance tuning
+        # Triton heuristics
         cur_kernel_options = original_kernel_options.copy()
+        # Remove prefix for backward kernels options and delete forward kernel options.
+        for k in list(cur_kernel_options.keys()):
+            if k.startswith("bwd_"):
+                v = cur_kernel_options.pop(k)
+                cur_kernel_options[k[4:]] = v
+            if k.startswith("fwd_"):
+                cur_kernel_options.pop(k)
+        cur_kernel_options.setdefault("num_warps", num_warps)
+        cur_kernel_options.setdefault("num_stages", num_stages)
+
         cur_kernel_options.setdefault("BLOCK_M1", BLOCK1)
         cur_kernel_options.setdefault("BLOCK_N1", BLOCK2)
         cur_kernel_options.setdefault("BLOCK_M2", BLOCK2)
@@ -2357,8 +2372,6 @@ def flex_attention_backward(*args, **kwargs):
                 *joint_outputs.mutated_grads,
             ],
             call_sizes=query.get_size() + key.get_size()[1:3],
-            num_stages=num_stages,
-            num_warps=num_warps,
             **cur_kernel_options,
         )
     inputs_for_autotuning = (
