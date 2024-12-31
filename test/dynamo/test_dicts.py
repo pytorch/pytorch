@@ -272,6 +272,52 @@ class DictTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnts.frame_count, 2)
         self.assertEqual(res, fn(x, d))
 
+    def test_ordered_dict_reordered_keys(self):
+        d = OrderedDict()
+        d[2] = 4
+        d[3] = 5
+        d.move_to_end(2)
+
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        def fn(x, d):
+            y = 0
+            for idx, (key, value) in enumerate(d.items()):
+                if idx == 0:
+                    y += torch.sin(x * value)
+                else:
+                    y += torch.cos(x * value)
+            return y
+
+        opt_fn = torch.compile(fn, backend=cnts)
+        x = torch.randn(4)
+        self.assertEqual(opt_fn(x, d), fn(x, d))
+
+    def test_ordered_dict_subclass_reordered_keys(self):
+        class ODSubclass(OrderedDict):
+            def keys():
+                return super().keys()
+
+        d = ODSubclass()
+        d[2] = 4
+        d[3] = 5
+        d.move_to_end(2)
+
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        def fn(x, d):
+            y = 0
+            for idx, (key, value) in enumerate(d.items()):
+                if idx == 0:
+                    y += torch.sin(x * value)
+                else:
+                    y += torch.cos(x * value)
+            return y
+
+        opt_fn = torch.compile(fn, backend=cnts)
+        x = torch.randn(4)
+        self.assertEqual(opt_fn(x, d), fn(x, d))
+
 
 def is_tensor(x):
     import torch
