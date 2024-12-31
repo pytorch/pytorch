@@ -158,14 +158,21 @@ C10_XPU_API XPUStream
 getStreamFromPool(const int priority, DeviceIndex device = -1);
 
 /**
- * Get a XPUStream from a externally allocated one.
+ * Get an XPUStream from an external SYCL queue.
  *
- * This is mainly for interoperability with different libraries where we
- * want to operate on a non-torch allocated stream for data exchange or similar
- * purposes
+ * This function allows interoperability with other libraries by enabling
+ * the use of an external SYCL queue that was not created by PyTorch. This
+ * can be useful for data exchange or other operations where integration
+ * with non-PyTorch queues is required.
+ *
+ * NOTE: It is the user's responsibility to ensure that the referenced SYCL
+ * queue remains alive while the corresponding XPUStream, or any c10::Stream
+ * derived from it, is in use. The different SYCL queue pointers will result in
+ * distinct XPUStream instances, even if the SYCL queues they dereference are
+ * equivalent.
  */
-C10_API XPUStream
-getStreamFromExternal(sycl::queue* ext_stream, DeviceIndex device_index);
+C10_XPU_API XPUStream
+getStreamFromExternal(sycl::queue* ext_queue, DeviceIndex device_index);
 
 /**
  * Get the current XPU stream, for the passed XPU device, or for the current
