@@ -1,3 +1,5 @@
+#pragma once
+
 #include <c10/util/Logging.h>
 #include <torch/csrc/distributed/c10d/reducer.hpp>
 
