@@ -155,7 +155,6 @@ void quantized_matmul(
     c10::string_view unary_post_op_algorithm,
     bool m2_trnas);
 
-namespace graph {
 void gpu_float_sdpa(
     int batch_size,
     int seq_len_q,
@@ -171,5 +170,4 @@ void gpu_float_sdpa(
     bool is_causal,
     float softmax_scale,
     const Tensor& output);
-} // namespace graph
 } // namespace at::native::onednn
