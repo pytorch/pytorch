@@ -738,8 +738,20 @@ class TestPatternMatcher(TestPatternMatcherBase):
             dtypes.append(torch.float16)
         cl_format = torch.channels_last if dim == 4 else torch.channels_last_3d
         test_memory_format = [torch.contiguous_format, cl_format]
+        if dim == 4:
+            input_shapes = [
+                [2, 3, 56, 56],
+            ]
+            other_shapes = [[2, 16, 1, 1], [1, 16, 1, 1], [1, 1, 1, 1]]
+        else:
+            input_shapes = [
+                [2, 3, 20, 56, 56],
+            ]
+            other_shapes = [[2, 16, 1, 1, 1], [1, 16, 1, 1, 1], [1, 1, 1, 1, 1]]
         options = itertools.product(
             binary_list,
+            input_shapes,
+            other_shapes,
             [True, False],
             test_memory_format,
             dtypes,
@@ -747,17 +759,13 @@ class TestPatternMatcher(TestPatternMatcherBase):
 
         for (
             binary_fn,
+            x_shape,
+            other_shape,
             has_relu,
             memory_format,
             dtype,
         ) in options:
             metrics.reset()
-            if dim == 4:
-                x_shape = (1, 3, 56, 56)
-                other_shape = (1, 16, 1, 1)
-            else:
-                x_shape = (1, 3, 20, 56, 56)
-                other_shape = (1, 16, 1, 1, 1)
             mod = M(binary_fn, has_relu).eval()
             x = (
                 torch.randn(x_shape, dtype=torch.float32, requires_grad=True)
@@ -878,15 +886,21 @@ class TestPatternMatcher(TestPatternMatcherBase):
         if torch.ops.mkldnn._is_mkldnn_fp16_supported():
             dtypes.append(torch.float16)
         options = itertools.product(
-            binary_list, [[2, 3, 10], [2, 10]], [True, False], dtypes
+            binary_list,
+            (
+                ([2, 3, 10], [1, 1, 30]),
+                ([2, 10], [1, 30]),
+            ),
+            (True, False),
+            dtypes,
         )
         out_feature = 30
 
-        for binary_fn, input_shape, bias, dtype in options:
+        for binary_fn, (input_shape, other_shape), bias, dtype in options:
             metrics.reset()
             mod = M(binary_fn, input_shape[-1], out_feature, bias).eval()
             v = torch.randn(input_shape)
-            other = torch.randn(input_shape[:-1] + [1]).to(dtype)
+            other = torch.randn(other_shape).to(dtype)
             # TODO: Remove when https://github.com/pytorch/pytorch/issues/143146 is fixed
             acl_bf16 = TEST_ACL and dtype == torch.bfloat16
 
@@ -922,6 +936,37 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 check_autocast=dtype,
             )
             self.assertEqual(metrics.generated_kernel_count, 1 if not acl_bf16 else 2)
+
+    @skipIfNoDynamoSupport
+    @skipIfNoONEDNN
+    @skipIfRocm
+    @unittest.skipIf(IS_FBCODE, "Failing in fbcode")
+    def test_conv2d_linear_add_broadcast_shapes_cpu(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = torch.nn.Conv2d(3, 16, kernel_size=3, stride=1)
+                self.linear = torch.nn.Linear(3, 16)
+
+            def forward(self, x1, x2):
+                return self.conv(x1) + self.linear(x2)[:, :, None, None]
+
+        metrics.reset()
+        mod = M().eval()
+        x1 = torch.randn(2, 3, 56, 56)
+        x2 = torch.randn(2, 3)
+
+        def matcher_check_fn():
+            match_nodes = 0 if TEST_ACL else 2
+            self.assertEqual(
+                counters["inductor"]["mkldnn_conv_binary_unary_fusion_matcher_nodes"],
+                match_nodes,
+            )
+            self.assertEqual(
+                counters["inductor"]["mkldnn_conv_weight_pack_matcher_nodes"], 1
+            )
+
+        self._test_common(mod, (x1, x2), matcher_check_fn)
 
     def test_multi_linear_share_same_input(self):
         # llama pattern.

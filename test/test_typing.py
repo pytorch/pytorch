@@ -30,7 +30,7 @@ DATA_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "typing"))
 REVEAL_DIR = os.path.join(DATA_DIR, "reveal")
 PASS_DIR = os.path.join(DATA_DIR, "pass")
 FAIL_DIR = os.path.join(DATA_DIR, "fail")
-MYPY_INI = os.path.join(DATA_DIR, os.pardir, os.pardir, "mypy.ini")
+MYPY_INI = os.path.join(os.path.dirname(os.path.dirname(DATA_DIR)), "mypy.ini")
 CACHE_DIR = os.path.join(DATA_DIR, ".mypy_cache")
 
 
@@ -187,7 +187,7 @@ class TestTyping(TestCase):
         name_fn=lambda b: os.path.relpath(b, start=FAIL_DIR),
     )
     def test_fail(self, path):
-        __tracebackhide__ = True
+        __tracebackhide__ = True  # noqa: F841
 
         with open(path) as fin:
             lines = fin.readlines()
@@ -226,7 +226,7 @@ class TestTyping(TestCase):
         name_fn=lambda b: os.path.relpath(b, start=REVEAL_DIR),
     )
     def test_reveal(self, path):
-        __tracebackhide__ = True
+        __tracebackhide__ = True  # noqa: F841
 
         with open(path) as fin:
             lines = _parse_reveals(fin)
