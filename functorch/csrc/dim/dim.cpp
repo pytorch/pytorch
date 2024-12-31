@@ -7,7 +7,7 @@
 #include <torch/csrc/utils/python_compat.h>
 
 
-// Many APIs have changed/don't exist anymore/untested on 3.13
+// Untested on 3.13
 #if IS_PYTHON_3_13_PLUS
 
 #include "dim.h"
