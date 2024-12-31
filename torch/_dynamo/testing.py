@@ -20,10 +20,12 @@ from typing import (
     TypeVar,
     Union,
 )
+from typing_extensions import ParamSpec
 from unittest.mock import patch
 
 import torch
 from torch import fx
+from torch._dynamo.backends.debugging import aot_eager
 from torch._dynamo.output_graph import OutputGraph
 
 from . import config, eval_frame, optimize_assert, reset
@@ -34,6 +36,7 @@ from .bytecode_transformation import (
     transform_code_object,
 )
 from .guards import CheckFunctionManager, CompileId, GuardedCode
+from .types import DynamoFrameType
 from .utils import same
 
 
@@ -49,6 +52,8 @@ three = 3
 
 log = logging.getLogger(__name__)
 
+_P = ParamSpec("_P")
+
 
 def clone_me(x: Optional[torch.Tensor]) -> Optional[torch.Tensor]:
     if x is None:
@@ -58,6 +63,23 @@ def clone_me(x: Optional[torch.Tensor]) -> Optional[torch.Tensor]:
 
 def remove_optimized_module_prefix(name: str) -> str:
     return re.sub(r"^_orig_mod[.]", "", name)
+
+
+def extract_graph_and_tracker(fn, *args, **kwargs):  # type: ignore[no-untyped-def]
+    from torch._dynamo.symbolic_convert import InstructionTranslator
+
+    gm = None
+    region_tracker = None
+
+    def extract_graph_backend(_gm, *args, **kwargs):  # type: ignore[no-untyped-def]
+        nonlocal gm
+        nonlocal region_tracker
+        gm = _gm
+        region_tracker = InstructionTranslator.current_tx().output.region_tracker
+        return _gm
+
+    torch.compile(backend=extract_graph_backend, fullgraph=True)(fn)(*args, **kwargs)
+    return gm.graph, region_tracker  # type: ignore[union-attr]
 
 
 def collect_results(
@@ -93,9 +115,7 @@ def collect_results(
     results.append(buffers)
     for example in example_inputs:
         if isinstance(example, (tuple, list)):
-            for inp in example:
-                if isinstance(inp, torch.Tensor):
-                    results.append(inp.grad)
+            results.extend(inp.grad for inp in example if isinstance(inp, torch.Tensor))
         else:
             if isinstance(example, torch.Tensor):
                 results.append(example.grad)
@@ -163,7 +183,7 @@ def debug_dump(name: str, code: types.CodeType, extra: str = "") -> None:
 
 
 def debug_insert_nops(
-    frame: types.FrameType, cache_size: int, hooks: Any, _: Any, *, skip: int = 0
+    frame: DynamoFrameType, cache_size: int, hooks: Any, _: Any, *, skip: int = 0
 ) -> Optional[GuardedCode]:
     """used to debug jump updates"""
 
@@ -187,9 +207,14 @@ def debug_insert_nops(
         local_scope=locals(),
         global_scope=globals(),
         f_code=frame.f_code,
+        torch_function_mode_stack=[],
     )
 
-    return GuardedCode(code, CheckFunctionManager(graph).check_fn, CompileId(0, 0))
+    return GuardedCode(
+        code,
+        CheckFunctionManager(frame.f_code, graph).guard_manager,  # type: ignore[arg-type]
+        CompileId(frame_id=0, frame_compile_id=0),
+    )
 
 
 class CompileCounter:
@@ -242,6 +267,37 @@ class EagerAndRecordGraphs:
     ) -> Callable[..., Any]:
         self.graphs.append(gm)
         return gm.forward
+
+
+class AotEagerAndRecordGraphs:
+    def __init__(self) -> None:
+        self.graphs: List[torch.fx.GraphModule] = []
+        self.fw_graphs: List[torch.fx.GraphModule] = []
+        self.bw_graphs: List[torch.fx.GraphModule] = []
+
+    def __call__(
+        self, gm: torch.fx.GraphModule, example_inputs: List[torch.Tensor]
+    ) -> Callable[..., Any]:
+        self.graphs.append(gm)
+
+        def fw_compiler(
+            gm: torch.fx.GraphModule, example_inputs: List[torch.Tensor]
+        ) -> Callable[..., Any]:
+            self.fw_graphs.append(gm)
+            return gm.forward
+
+        def bw_compiler(
+            gm: torch.fx.GraphModule, example_inputs: List[torch.Tensor]
+        ) -> Callable[..., Any]:
+            self.bw_graphs.append(gm)
+            return gm.forward
+
+        return aot_eager(
+            gm,
+            example_inputs,
+            fw_compiler=fw_compiler,
+            bw_compiler=bw_compiler,
+        )
 
 
 def strip_comment(code: str) -> str:
@@ -349,9 +405,14 @@ def rand_strided(
 _T = TypeVar("_T")
 
 
-def _make_fn_with_patches(fn: Callable[..., _T], *patches: Any) -> Callable[..., _T]:
+def check_dynamic_shape_capture() -> bool:
+    # This also mirrors config from `test/dynamo/test_dynamic_shapes.py:make_dynamic_cls`
+    return not config.assume_static_by_default
+
+
+def _make_fn_with_patches(fn: Callable[_P, _T], *patches: Any) -> Callable[_P, _T]:
     @functools.wraps(fn)
-    def _fn(*args: Any, **kwargs: Any) -> _T:
+    def _fn(*args: _P.args, **kwargs: _P.kwargs) -> _T:
         with contextlib.ExitStack() as stack:
             for module, attr, val in patches:
                 stack.enter_context(patch.object(module, attr, val))

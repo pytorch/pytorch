@@ -52,7 +52,7 @@ inline void gather_shape_check(const Tensor& self, int64_t dim,
         ensure_nonempty_size(index, i) <= ensure_nonempty_size(self, i),
         "Size does not match at dimension ", i,
         " expected index ", index.sizes(),
-        " to be smaller than self ", self.sizes(),
+        " to be no larger than self ", self.sizes(),
         " apart from dimension ", dim
       );
     }
@@ -109,15 +109,15 @@ inline void scatter_shape_check(
 
     TORCH_CHECK(!is_wrong_shape,
       "Expected index ", index.sizes(),
-      " to be smaller than self ", self.sizes(),
+      " to be no larger than self ", self.sizes(),
       " apart from dimension ", dim,
-      " and to be smaller size than src ", src.sizes()
+      " and to be no larger size than src ", src.sizes()
     );
   }
   else {
     TORCH_CHECK(!is_wrong_shape,
       "Expected index ", index.sizes(),
-      " to be smaller than self ", self.sizes(),
+      " to be no larger than self ", self.sizes(),
       " apart from dimension ", dim
     );
   }

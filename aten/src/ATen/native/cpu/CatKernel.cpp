@@ -2,9 +2,10 @@
 #include <ATen/core/Tensor.h>
 
 #include <ATen/Dispatch.h>
-#include <ATen/native/cpu/CatKernel.h>
+#include <ATen/Dispatch_v2.h>
 #include <ATen/cpu/vec/functional.h>
 #include <ATen/cpu/vec/vec.h>
+#include <ATen/native/cpu/CatKernel.h>
 #include <c10/util/irange.h>
 
 namespace at::native {
@@ -16,15 +17,19 @@ struct InputMeta {
   int64_t inner_size;
 
   InputMeta(const Tensor& t, int64_t dim, int64_t inner)
-    : data_ptr(t.const_data_ptr())
-    , inner_size(t.sizes()[dim] * inner) {}
+      : data_ptr(t.const_data_ptr()), inner_size(t.sizes()[dim] * inner) {}
 };
 
 template <typename scalar_t>
-void cat_serial_kernel_impl(const Tensor& result, const MaterializedITensorListRef& tensors, int64_t dim) {
+void cat_serial_kernel_impl(
+    const Tensor& result,
+    const MaterializedITensorListRef& tensors,
+    int64_t dim) {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-      dim >= 0 && dim < result.dim(), "dim out of range in cat_serial_kernel_impl");
-  int64_t outer = result.numel() / (result.sizes()[dim] * result.strides()[dim]);
+      dim >= 0 && dim < result.dim(),
+      "dim out of range in cat_serial_kernel_impl");
+  int64_t outer =
+      result.numel() / (result.sizes()[dim] * result.strides()[dim]);
   scalar_t* result_data = result.data_ptr<scalar_t>();
   int64_t ninputs = static_cast<int64_t>(tensors.size());
   std::vector<InputMeta> inputs;
@@ -38,15 +43,16 @@ void cat_serial_kernel_impl(const Tensor& result, const MaterializedITensorListR
   for (const auto i : c10::irange(outer)) {
     for (const auto j : c10::irange(ninputs)) {
       int64_t local_inner = inputs[j].inner_size;
-      const scalar_t* input_ptr = (const scalar_t*)(inputs[j].data_ptr) + i * local_inner;
+      const scalar_t* input_ptr =
+          (const scalar_t*)(inputs[j].data_ptr) + i * local_inner;
       int64_t d = 0;
       for (; d < local_inner - (local_inner % Vec::size()); d += Vec::size()) {
         Vec in_vec = Vec::loadu(input_ptr + d);
         in_vec.store(result_ptr + d);
       }
-      #if !defined(_MSC_VER) && !defined(COMPILING_FOR_MIN_SIZE)
-      # pragma unroll
-      #endif
+#if !defined(_MSC_VER) && !defined(COMPILING_FOR_MIN_SIZE)
+#pragma unroll
+#endif
       for (; d < local_inner; d++) {
         result_ptr[d] = input_ptr[d];
       }
@@ -55,14 +61,23 @@ void cat_serial_kernel_impl(const Tensor& result, const MaterializedITensorListR
   }
 }
 
-void cat_serial_kernel(const Tensor& result, const MaterializedITensorListRef& tensors, int64_t dim) {
-  AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, result.scalar_type(), "cat_serial_kernel", [&]() {
-    cat_serial_kernel_impl<scalar_t>(result, tensors, dim);
-  });
+void cat_serial_kernel(
+    const Tensor& result,
+    const MaterializedITensorListRef& tensors,
+    int64_t dim) {
+  AT_DISPATCH_V2(
+      result.scalar_type(),
+      "cat_serial_kernel",
+      AT_WRAP(
+          [&]() { cat_serial_kernel_impl<scalar_t>(result, tensors, dim); }),
+      AT_EXPAND(AT_FLOATING_TYPES),
+      kBFloat16,
+      kHalf,
+      AT_EXPAND(AT_FLOAT8_TYPES));
 }
 
 } // anonymous namespace
 
-REGISTER_DISPATCH(cat_serial_stub, &cat_serial_kernel);
+REGISTER_DISPATCH(cat_serial_stub, &cat_serial_kernel)
 
-} // at::native
+} // namespace at::native

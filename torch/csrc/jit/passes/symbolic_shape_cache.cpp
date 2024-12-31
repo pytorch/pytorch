@@ -205,5 +205,5 @@ bool operator==(
     const CanonicalizedSymbolicShape& a,
     const CanonicalizedSymbolicShape& b) {
   return a.values_ == b.values_;
-};
+}
 } // namespace torch::jit

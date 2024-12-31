@@ -37,7 +37,7 @@ std::ostream& operator<<(std::ostream & out, const Scalar& s) {
 std::string toString(const Scalar& s) {
   std::stringstream out;
   out << s;
-  return out.str();
+  return std::move(out).str();
 }
 }
 namespace at {
@@ -50,16 +50,20 @@ inline std::ios_base& defaultfloat(std::ios_base& __base) {
 //saves/restores number formatting inside scope
 struct FormatGuard {
   FormatGuard(std::ostream & out)
-  : out(out), saved(nullptr) {
+  : out(out) {
     saved.copyfmt(out);
   }
   ~FormatGuard() {
     out.copyfmt(saved);
   }
+  FormatGuard(const FormatGuard&) = delete;
+  FormatGuard(FormatGuard&&) = delete;
+  FormatGuard& operator=(const FormatGuard&) = delete;
+  FormatGuard& operator=(FormatGuard&&) = delete;
 private:
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   std::ostream & out;
-  std::ios saved;
+  std::ios saved{nullptr};
 };
 
 std::ostream& operator<<(std::ostream & out, const DeprecatedTypeProperties& t) {
@@ -153,7 +157,7 @@ static std::tuple<double, int> __printFormat(std::ostream& stream, const Tensor&
 
 static void __printIndent(std::ostream &stream, int64_t indent)
 {
-  for (C10_UNUSED const auto i : c10::irange(indent)) {
+  for ([[maybe_unused]] const auto i : c10::irange(indent)) {
     stream << " ";
   }
 }

@@ -10,8 +10,9 @@ from functools import partial
 import torch._inductor.decomposition
 import torch.autograd
 from torch import Tensor
-from torch._decomp import _is_cia_op, core_aten_decompositions, decomposition_table
+from torch._decomp import core_aten_decompositions, decomposition_table
 from torch._dispatch.python import enable_python_dispatcher
+from torch._export.utils import _is_cia_op
 from torch._ops import DispatchKey
 from torch.testing import make_tensor
 from torch.testing._internal.common_cuda import tf32_off
@@ -412,12 +413,22 @@ CROSS_REF_EXCLUDE_SET = {
     (None, None, "native_batch_norm"),
     (None, None, "_upsample_bilinear2d_aa"),
     (None, None, "empty_strided"),  # aten.empty_strided was not decomposed
+    (
+        None,
+        None,
+        "bernoulli",
+    ),  # bernoulli is a function of randomness, so couldn't do cross-reference.
 }
 
 CROSS_REF_BACKWARD_EXCLUDE_SET = {
     # Decomposed backward formula is not as precise
     ("cpu", torch.bfloat16, "nn.functional.hardswish"),
     ("cuda", torch.float16, "nn.functional.cross_entropy"),
+    (
+        None,
+        None,
+        "bernoulli",
+    ),  # bernoulli is a function of randomness, so couldn't do cross-reference.
 }
 
 all_decomposed = set()
@@ -544,7 +555,6 @@ class TestDecomp(TestCase):
     # NB: This actually overlaps with test_comprehensive, but it only
     # runs on things that are definitely decomposed so it's a lot faster
     # to run
-    @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @onlyNativeDeviceTypes
     @skipIfCrossRef
     @suppress_warnings
@@ -552,13 +562,19 @@ class TestDecomp(TestCase):
     def test_quick(self, device, dtype, op):
         self.do_cross_ref(device, dtype, op, run_all=False)
 
-    @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @skipOps("TestDecomp", "test_quick_core_backward", core_backward_failures)
     @onlyNativeDeviceTypes
     @skipIfCrossRef
     @suppress_warnings
     @ops(_decomp_test_ops_core_autograd, allowed_dtypes=(torch.float64,))
     def test_quick_core_backward(self, device, dtype, op):
+        test_keys = [
+            (torch.device(device).type, dtype, op.name),
+            (None, dtype, op.name),
+            (None, None, op.name),
+        ]
+        if any(key in CROSS_REF_BACKWARD_EXCLUDE_SET for key in test_keys):
+            self.skipTest(f"{op.name} in {dtype} not supported")
         for sample_input in op.sample_inputs(device, dtype, requires_grad=True):
             aten_name = op.decomp_aten_name or op.aten_name
             args = [sample_input.input] + list(sample_input.args)
@@ -592,6 +608,17 @@ class TestDecomp(TestCase):
         res = torch._decomp.decompositions.uniform(x, low=low, high=high)
         self.assertEqual(ref, res)
 
+    def test_bernoulli_default(self, device):
+        p = 0.3
+        p_t = p * torch.ones(5, 5)
+        torch.manual_seed(123)
+        ref = torch.ops.aten.bernoulli.default(p_t)
+        torch.manual_seed(123)
+        res = torch._decomp.decompositions.bernoulli(p_t)
+        ref_p = ref.sum() / torch.prod(torch.tensor(ref.size()))
+        res_p = res.sum() / torch.prod(torch.tensor(res.size()))
+        self.assertEqual(ref_p, res_p, atol=0.06 * p, rtol=0.06)
+
     def test_broadcasting_index_copy(self, device):
         x = torch.zeros([1, 10], device=device)
         xs = torch.ones([2, 10], device=device)
@@ -618,51 +645,6 @@ class TestDecomp(TestCase):
         for dim in (-1, 0, 1):
             self.assertEqual(torch.cat(inps, dim), cat_inductor(inps, dim))
 
-    def test_rrelu_with_noise(self, device):
-        # rrelu_with_noise behavior depends on a) whether elements in the input
-        # are <= 0, and b) whether we're in training mode. Cover all cases:
-        dtype = torch.float64
-        x = torch.tensor([-3.0, -2.0, -1.0, 0.0, 1.0, 2.0], dtype=dtype, device=device)
-        lower = 1.0
-        upper = 4.0
-        training = False
-
-        torch.manual_seed(123)
-        noise_ref = torch.zeros(x.shape, dtype=dtype, device=device)
-        ref = torch.ops.aten.rrelu_with_noise(x, noise_ref, lower, upper, training)
-
-        torch.manual_seed(123)
-        noise_res = torch.zeros(x.shape, dtype=dtype, device=device)
-        res = torch._decomp.decompositions.rrelu_with_noise(
-            x,
-            noise_res,
-            lower,
-            upper,
-            training,
-        )
-        self.assertEqual(ref, res)
-        self.assertEqual(noise_ref, noise_res)
-
-        # Now with training=True:
-        training = True
-
-        torch.manual_seed(123)
-        noise_ref = torch.zeros(x.shape, dtype=dtype, device=device)
-        ref = torch.ops.aten.rrelu_with_noise(x, noise_ref, lower, upper, training)
-
-        torch.manual_seed(123)
-        noise_res = torch.zeros(x.shape, dtype=dtype, device=device)
-        res = torch._decomp.decompositions.rrelu_with_noise(
-            x,
-            noise_res,
-            lower,
-            upper,
-            training,
-        )
-        self.assertEqual(ref, res)
-        self.assertEqual(noise_ref, noise_res)
-
-    @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @suppress_warnings
     @tf32_off()
     # only tests RNNs since we have py dispsatcher decomps for them
@@ -1037,7 +1019,6 @@ instantiate_device_type_tests(TestDecomp, globals())
 
 
 class DecompOneOffTests(TestCase):
-    @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @onlyNativeDeviceTypes
     @skipIfCrossRef
     def test_contiguous_softmax(self, device):
@@ -1052,7 +1033,6 @@ class DecompOneOffTests(TestCase):
         res = torch._decomp.decompositions._softmax(x, -1, False)
         self.assertEqual(ref.stride(), res.stride())
 
-    @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @onlyNativeDeviceTypes
     @skipIfCrossRef
     def test_contiguous_log_softmax(self, device):
@@ -1118,7 +1098,6 @@ class DecompOneOffTests(TestCase):
             self.assertEqual(a.stride(), b.stride())
             self.assertEqual(a.dtype, b.dtype)
 
-    @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @onlyNativeDeviceTypes
     @skipIfCrossRef
     def test_elu_backward(self, device):
@@ -1131,7 +1110,6 @@ class DecompOneOffTests(TestCase):
         res = torch._decomp.decompositions.elu_backward(grad_out, 1.0, 1, 1, True, out)
         self.assertEqual(ref, res)
 
-    @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @onlyNativeDeviceTypes
     @skipIfCrossRef
     def test_threshold_backward_dtype(self, device):
@@ -1142,7 +1120,6 @@ class DecompOneOffTests(TestCase):
         res = torch._decomp.decompositions.threshold_backward(grad, input_tensor, 1)
         self.assertEqual(ref.dtype, res.dtype)
 
-    @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @onlyNativeDeviceTypes
     @skipIfCrossRef
     def test_weight_norm_interface(self, device):
@@ -1162,7 +1139,6 @@ class DecompOneOffTests(TestCase):
             torch._decomp.decompositions._weight_norm_interface(inp, inp2),
         )
 
-    @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @onlyCPU
     @skipIfCrossRef
     @skipOps(
@@ -1210,6 +1186,31 @@ class DecompOneOffTests(TestCase):
 
             self.assertTrue(torch.allclose(actual_res, eager_res, atol=atol, rtol=rtol))
 
+    @onlyCPU
+    def test_native_layer_norm_cpu_decomp(self, device):
+        def f(x, w, b):
+            return torch.ops.aten.native_layer_norm.default(x, [1, 2, 3], w, b, eps=0.5)
+
+        x = torch.randn(1, 2, 3, dtype=torch.bfloat16, device="cpu")
+        w = torch.randn(1, 2, 3, dtype=torch.bfloat16, requires_grad=True, device="cpu")
+        b = torch.randn(1, 2, 3, dtype=torch.bfloat16, requires_grad=True, device="cpu")
+        out_ref = f(x, w, b)
+
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        with enable_python_dispatcher(), FakeTensorMode():
+            x = torch.randn(1, 2, 3, dtype=torch.bfloat16, device="cpu")
+            w = torch.randn(
+                1, 2, 3, dtype=torch.bfloat16, requires_grad=True, device="cpu"
+            )
+            b = torch.randn(
+                1, 2, 3, dtype=torch.bfloat16, requires_grad=True, device="cpu"
+            )
+            out = f(x, w, b)
+
+        for o_ref, o in zip(out_ref, out):
+            self.assertEqual(o_ref.dtype, o.dtype)
+
 
 instantiate_device_type_tests(DecompOneOffTests, globals())
 
@@ -1230,9 +1231,7 @@ class HasDecompTest(TestCase):
 
         try:
             # CompositeImplicitAutograd ops are transparent to the tracer, so don't need decompositions
-            return not op.has_kernel_for_dispatch_key(
-                DispatchKey.CompositeImplicitAutograd
-            )
+            return not _is_cia_op(op)
         except RuntimeError as e:
             # has_key fails for some jit-registered ops, which shouldn't be
             # relevant here anyway

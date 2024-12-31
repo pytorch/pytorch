@@ -516,6 +516,11 @@ class TCPStoreTest(TestCase, StoreTestBase):
             use_libuv=self._use_libuv,
         )
 
+    @skip_if_win32()
+    def test_world_size_0_raises(self):
+        with self.assertRaisesRegex(ValueError, "TCPStore world size cannot be 0"):
+            dist.TCPStore("localhost", 0, world_size=0, is_master=False)
+
 
 class LibUvTCPStoreTest(TCPStoreTest):
     _use_libuv = True
@@ -548,7 +553,7 @@ class LibUvTCPStoreTest(TCPStoreTest):
         )
 
         with self.assertRaisesRegex(NotImplementedError, err_msg_reg):
-            store = dist.TCPStore(
+            dist.TCPStore(
                 addr,
                 port,
                 1,
@@ -699,7 +704,7 @@ class RendezvousTCPTest(TestCase):
     def create_tcp_url(self):
         addr = DEFAULT_HOSTNAME
         port = common.find_free_port()
-        url = "tcp://%s:%d?world_size=%d" % (addr, port, 1)
+        url = f"tcp://{addr}:{port:d}?world_size=1"
         return url
 
     def test_common_errors(self):
@@ -743,7 +748,7 @@ class RendezvousTCPTest(TestCase):
         url = self.create_tcp_url()
         test_store_timeout = timedelta(seconds=0.1)
         gen0 = dist.rendezvous(url + "&rank=0", timeout=timedelta(seconds=10))
-        store0, rank0, size0 = next(gen0)
+        store0, _, _ = next(gen0)
         store0.set_timeout(test_store_timeout)
         # this should time out in 0.1s. If the timeout passed into rendezvous was
         # not respected, it will take much longer to timeout.
@@ -761,7 +766,7 @@ class RendezvousTCPTest(TestCase):
         url = self.create_tcp_url()
         test_store_timeout = timedelta(seconds=0.1)
         gen0 = dist.rendezvous(url + "&rank=0", timeout=timedelta(seconds=10))
-        store0, rank0, size0 = next(gen0)
+        store0, _, _ = next(gen0)
         store0.set_timeout(test_store_timeout)
         # this should time out in 10s. If the timeout passed into rendezvous was
         # not respected, it will take much longer to timeout.
@@ -782,7 +787,7 @@ class RendezvousTCPTest(TestCase):
     def test_tcp_store_url_with_libuv(self):
         url = self.create_tcp_url()
         gen0 = dist.rendezvous(url + "&rank=0&use_libuv=1")
-        store0, rank0, size0 = next(gen0)
+        store0, _, _ = next(gen0)
         self.assertTrue(store0.libuvBackend)
 
 
@@ -1073,7 +1078,7 @@ class TestClientProtocol(TestCase):
         thread = threading.Thread(target=listen)
         thread.start()
 
-        store = dist.TCPStore(
+        dist.TCPStore(
             host_name="localhost",
             port=port,
             world_size=2,

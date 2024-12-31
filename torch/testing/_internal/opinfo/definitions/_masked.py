@@ -358,7 +358,6 @@ def sample_inputs_masked_softmax(
 
 def sample_inputs_masked_cumops(op_info, device, dtype, requires_grad, **kwargs):
     """Sample inputs for masked cumsum and cumprod."""
-    inputs: List[SampleInput] = []
     for sample_input in sample_inputs_softmax_variant(
         op_info, device, dtype, requires_grad, **kwargs
     ):
@@ -857,21 +856,9 @@ op_db: List[OpInfo] = [
             DecorateInfo(
                 unittest.skip("Skipped!"), "TestJit", "test_variant_consistency_jit"
             ),
-            DecorateInfo(
-                unittest.skip("Non-deterministic when non-unique values present"),
-                "TestDecomp",
-                "test_comprehensive",
-            ),
-            DecorateInfo(
-                unittest.skip("Non-deterministic when non-unique values present"),
-                "TestDecomp",
-                "test_quick",
-            ),
         ),
         sample_inputs_func=partial(
-            sample_inputs_masked_softmax,
-            use_zero_dimensions=False,
-            unique_values=True,
+            sample_inputs_masked_softmax, use_zero_dimensions=False
         ),
         gradcheck_wrapper=gradcheck_wrapper_masked_operation,
     ),

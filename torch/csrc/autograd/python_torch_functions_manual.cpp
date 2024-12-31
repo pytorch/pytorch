@@ -736,13 +736,6 @@ void initTorchFunctions(PyObject* module) {
             dst.sym_sizes(),
             dst.sym_strides());
       });
-  py_module.def(
-      "_functionalize_mark_mutation_hidden_from_autograd",
-      [](const at::Tensor& t) {
-        TORCH_INTERNAL_ASSERT(
-            at::functionalization::impl::isFunctionalTensor(t));
-        at::functionalization::impl::mark_mutation_hidden_from_autograd(t);
-      });
   py_module.def("_is_functional_tensor", [](const at::Tensor& t) {
     return at::functionalization::impl::isFunctionalTensor(t);
   });

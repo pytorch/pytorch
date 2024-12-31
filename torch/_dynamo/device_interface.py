@@ -109,9 +109,9 @@ class DeviceInterface:
     def synchronize(device: _device_t = None):
         raise NotImplementedError
 
-    @staticmethod
-    def get_device_properties(device: _device_t = None):
-        raise NotImplementedError
+    @classmethod
+    def get_device_properties(cls, device: _device_t = None):
+        return cls.Worker.get_device_properties(device)
 
     @staticmethod
     def get_compute_capability(device: _device_t = None):
@@ -338,6 +338,29 @@ class CpuInterface(DeviceInterface):
             return CpuDeviceProperties(cpu_count)
 
 
+class MpsInterface(DeviceInterface):
+    @staticmethod
+    def is_bf16_supported(including_emulation: bool = False):
+        return torch.backends.mps.is_macos_or_newer(14, 0)
+
+    @staticmethod
+    def is_available() -> bool:
+        return torch.backends.mps.is_available()
+
+    @staticmethod
+    def current_device():
+        return 0
+
+    @staticmethod
+    def synchronize(device: _device_t = None):
+        torch.mps.synchronize()
+
+    class Worker:
+        @staticmethod
+        def get_device_properties(device: _device_t = None):
+            return {}
+
+
 device_interfaces: Dict[str, Type[DeviceInterface]] = {}
 _device_initialized = False
 
@@ -346,13 +369,13 @@ def register_interface_for_device(
     device: Union[str, torch.device], device_interface: Type[DeviceInterface]
 ):
     if isinstance(device, torch.device):
-        device = str(device)
+        device = device.type
     device_interfaces[device] = device_interface
 
 
 def get_interface_for_device(device: Union[str, torch.device]) -> Type[DeviceInterface]:
     if isinstance(device, torch.device):
-        device = str(device)
+        device = device.type
     if not _device_initialized:
         init_device_reg()
     if device in device_interfaces:
@@ -377,5 +400,6 @@ def init_device_reg():
         register_interface_for_device(f"xpu:{i}", XpuInterface)
 
     register_interface_for_device("cpu", CpuInterface)
+    register_interface_for_device("mps", MpsInterface)
 
     _device_initialized = True

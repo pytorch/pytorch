@@ -5,6 +5,7 @@
 
 #include <chrono>
 #include <memory>
+#include <string>
 #include <string_view>
 #include <unordered_map>
 #include <vector>
@@ -29,6 +30,11 @@ class DynamicBackendWrapper : public WaitCounterBackendIf {
  public:
   explicit DynamicBackendWrapper(WaitCounterDynamicBackend impl)
       : impl_{impl} {}
+
+  DynamicBackendWrapper(const DynamicBackendWrapper&) = delete;
+  DynamicBackendWrapper(DynamicBackendWrapper&&) = delete;
+  DynamicBackendWrapper& operator=(const DynamicBackendWrapper&) = delete;
+  DynamicBackendWrapper& operator=(DynamicBackendWrapper&&) = delete;
   ~DynamicBackendWrapper() override {
     impl_.destroy(impl_.self);
   }
@@ -110,7 +116,7 @@ class WaitCounterImpl {
     return ctxs;
   }
 
-  void stop(SmallVector<intptr_t>&& ctxs) noexcept {
+  void stop(const SmallVector<intptr_t>& ctxs) noexcept {
     auto now = std::chrono::steady_clock::now();
     assert(ctxs.size() == backends_.size());
     for (size_t i = 0; i < ctxs.size(); ++i) {
@@ -155,7 +161,7 @@ WaitCounterHandle::WaitGuard WaitCounterHandle::start() {
   return WaitCounterHandle::WaitGuard(*this, impl_.start());
 }
 
-void WaitCounterHandle::stop(SmallVector<intptr_t>&& ctxs) {
-  return impl_.stop(std::move(ctxs));
+void WaitCounterHandle::stop(const SmallVector<intptr_t>& ctxs) {
+  return impl_.stop(ctxs);
 }
 } // namespace c10::monitor

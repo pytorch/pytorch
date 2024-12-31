@@ -29,5 +29,5 @@ jobs:
           aws-region: us-east-1
       - name: Update PyTorch labels list in S3
         run: |
-          python3 -m pip install boto3==1.19.12
+          python3 -m pip install boto3==1.35.42
           .github/scripts/export_pytorch_labels.py pytorch pytorch

@@ -8,7 +8,7 @@ import torch.utils._pytree as pytree
 from torch._inductor.kernel.mm_common import mm_args
 
 from . import ir
-from .codegen.cpp_gemm_template import CppPackedGemmTemplate
+from .codegen.cpp_gemm_template import CppGemmTemplate
 from .codegen.cpp_utils import create_epilogue_with_attr
 from .ir import TensorBox
 from .lowering import (
@@ -25,7 +25,7 @@ from .select_algorithm import (
     ChoiceCaller,
     ExternKernelChoice,
 )
-from .utils import use_aten_gemm_kernels, use_cpp_packed_gemm_template, use_max_autotune
+from .utils import use_aten_gemm_kernels, use_cpp_gemm_template, use_max_autotune
 from .virtualized import ops, V
 
 
@@ -182,7 +182,7 @@ def register_onednn_fusion_ops():
             if use_max_autotune():
                 transposed_w = permute(w, [1, 0])
                 *_, layout, x, transposed_w = mm_args(x, transposed_w, layout=layout)
-                if use_cpp_packed_gemm_template(layout, x, transposed_w):
+                if use_cpp_gemm_template(layout, x, transposed_w):
 
                     def epilogue_creator(buf):
                         return create_epilogue_with_attr(
@@ -196,7 +196,7 @@ def register_onednn_fusion_ops():
                     )
                     if b is not None:
                         kwargs["input_indices"] = [2, 0, 1]  # type: ignore[assignment]
-                    CppPackedGemmTemplate.add_choices(
+                    CppGemmTemplate.add_choices(
                         choices,
                         layout,
                         [x, w] if b is None else [x, w, b],
@@ -247,7 +247,7 @@ def register_onednn_fusion_ops():
                 *_, layout, x, transposed_w, y = mm_args(
                     x, transposed_w, y, layout=layout
                 )
-                if use_cpp_packed_gemm_template(layout, x, transposed_w):
+                if use_cpp_gemm_template(layout, x, transposed_w):
 
                     def epilogue_creator(buf):
                         return create_epilogue_with_attr(buf, attr, other=y)
@@ -258,7 +258,7 @@ def register_onednn_fusion_ops():
                         epilogue_creator=epilogue_creator,
                     )
                     kwargs["input_indices"] = [0, 2, 1] if b is None else [3, 0, 2, 1]
-                    CppPackedGemmTemplate.add_choices(
+                    CppGemmTemplate.add_choices(
                         choices,
                         layout,
                         [x, y, w] if b is None else [x, y, w, b],
@@ -381,6 +381,16 @@ def register_onednn_fusion_ops():
             scalars,
             algorithm,
         ):
+            # To align with qlinear where x_scale and x_zp are converted to Tensor
+            assert type(x_scale) == float
+            x_scale = V.graph.add_tensor_constant(
+                torch.tensor(x_scale, dtype=torch.float32), name="x_scale"
+            )
+            assert type(x_zp) == int
+            x_zp = V.graph.add_tensor_constant(
+                torch.tensor(x_zp, dtype=torch.int32), name="x_zp"
+            )
+
             return TensorBox.create(
                 mkldnn_ir.QConvPointWisePT2E.create(
                     x,
@@ -406,16 +416,17 @@ def register_onednn_fusion_ops():
         @register_lowering(
             torch.ops.onednn.qconv2d_pointwise.binary, type_promotion_kind=None
         )
+        @register_lowering(
+            torch.ops.onednn.qconv2d_pointwise.binary_tensor, type_promotion_kind=None
+        )
         def qconvolution_binary(
             x: TensorBox,
             x_scale,
             x_zp,
-            accum: TensorBox,
-            accum_scale,
-            accum_zp,
             packed_weight: TensorBox,
             w_scale: TensorBox,
             w_zp: TensorBox,
+            accum: TensorBox,
             bias: TensorBox,
             stride,
             padding,
@@ -424,12 +435,24 @@ def register_onednn_fusion_ops():
             o_inv_scale,
             o_zero_point,
             output_dtype,
+            accum_scale,
+            accum_zp,
             binary_attr,
             alpha,
             unary_attr,
             unary_scalars,
             unary_algorithmm,
         ):
+            # To align with qlinear where x_scale and x_zp are converted to Tensor
+            assert type(x_scale) == float
+            x_scale = V.graph.add_tensor_constant(
+                torch.tensor(x_scale, dtype=torch.float32), name="x_scale"
+            )
+            assert type(x_zp) == int
+            x_zp = V.graph.add_tensor_constant(
+                torch.tensor(x_zp, dtype=torch.int32), name="x_zp"
+            )
+
             if (
                 binary_attr == "sum"
                 and output_dtype in [torch.float32, torch.bfloat16]
@@ -446,12 +469,10 @@ def register_onednn_fusion_ops():
                     x,
                     x_scale,
                     x_zp,
-                    accum,
-                    accum_scale,
-                    accum_zp,
                     packed_weight,
                     w_scale,
                     w_zp,
+                    accum,
                     bias,
                     stride,
                     padding,
@@ -460,6 +481,8 @@ def register_onednn_fusion_ops():
                     o_inv_scale,
                     o_zero_point,
                     output_dtype,
+                    accum_scale,
+                    accum_zp,
                     binary_attr,
                     alpha,
                     unary_attr,
@@ -540,7 +563,7 @@ def register_onednn_fusion_ops():
                         torch.zeros_like(V.graph.constants[w_zp.get_name()]),
                         V.graph.constants[w_zp.get_name()],
                     )  # We only compensate MatrixB and assume B_zp is 0 to avoid the compensation of MatrixA
-                    and use_cpp_packed_gemm_template(layout, x, packed_weight)
+                    and use_cpp_gemm_template(layout, x, packed_weight)
                 ):
                     W_tensor = V.graph.constants[packed_weight.get_name()].to_dense()
                     weight_compens_tensor = torch.sum(W_tensor.to(torch.float), dim=0)
@@ -631,7 +654,7 @@ def register_onednn_fusion_ops():
                                 return ops.to_dtype(input, output_dtype)
 
                             output_buf = ir.Pointwise(
-                                device=output_buf.get_device(),
+                                device=output_buf.get_device_or_error(),
                                 dtype=output_dtype,
                                 inner_fn=inner_fn_cast_output_to_bf16,
                                 ranges=output_buf.get_size(),
@@ -654,7 +677,7 @@ def register_onednn_fusion_ops():
                                 return ops.to_dtype(clamped, torch.uint8)
 
                             output_buf = ir.Pointwise(
-                                device=output_buf.get_device(),
+                                device=output_buf.get_device_or_error(),
                                 dtype=output_dtype,
                                 inner_fn=functools.partial(
                                     inner_fn_requant,
@@ -667,7 +690,7 @@ def register_onednn_fusion_ops():
                         return output_buf
 
                     assert x.get_dtype() == torch.uint8
-                    CppPackedGemmTemplate.add_choices(
+                    CppGemmTemplate.add_choices(
                         choices,
                         layout,
                         [x, x_scale, x_zp, packed_weight, w_scale, w_zp]
@@ -819,7 +842,7 @@ def register_onednn_fusion_ops():
                         torch.zeros_like(V.graph.constants[w_zp.get_name()]),
                         V.graph.constants[w_zp.get_name()],
                     )  # We only compensate MatrixB and assume B_zp is 0 to avoid the compensation of MatrixA
-                    and use_cpp_packed_gemm_template(layout, x, packed_weight)
+                    and use_cpp_gemm_template(layout, x, packed_weight)
                 ):
                     W_tensor = V.graph.constants[packed_weight.get_name()]
                     W_tensor = W_tensor.to_dense()
@@ -928,7 +951,7 @@ def register_onednn_fusion_ops():
                                 return ops.to_dtype(input, output_dtype)
 
                             output_buf = ir.Pointwise(
-                                device=output_buf.get_device(),
+                                device=output_buf.get_device_or_error(),
                                 dtype=output_dtype,
                                 inner_fn=inner_fn_cast_output_to_bf16,
                                 ranges=output_buf.get_size(),
@@ -951,7 +974,7 @@ def register_onednn_fusion_ops():
                                 return ops.to_dtype(clamped, torch.uint8)
 
                             output_buf = ir.Pointwise(
-                                device=output_buf.get_device(),
+                                device=output_buf.get_device_or_error(),
                                 dtype=torch.uint8,
                                 inner_fn=functools.partial(
                                     inner_fn_requant,
@@ -963,7 +986,7 @@ def register_onednn_fusion_ops():
 
                         return output_buf
 
-                    CppPackedGemmTemplate.add_choices(
+                    CppGemmTemplate.add_choices(
                         choices,
                         layout,
                         [x, x_scale, x_zp, packed_weight, w_scale, w_zp, x2]
@@ -1047,8 +1070,8 @@ def register_onednn_fusion_ops():
                     *_, layout, x, transposed_w = mm_args(
                         x, transposed_w, layout=layout
                     )
-                    if use_cpp_packed_gemm_template(layout, x, transposed_w):
-                        CppPackedGemmTemplate.add_choices(
+                    if use_cpp_gemm_template(layout, x, transposed_w):
+                        CppGemmTemplate.add_choices(
                             choices,
                             layout,
                             [x, packed_w, orig_w],

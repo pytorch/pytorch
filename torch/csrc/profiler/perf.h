@@ -37,6 +37,8 @@ class PerfEvent {
  public:
   explicit PerfEvent(std::string& name) : name_(name) {}
 
+  PerfEvent(const PerfEvent& other) = delete;
+  PerfEvent& operator=(const PerfEvent&) = delete;
   PerfEvent& operator=(PerfEvent&& other) noexcept {
     if (this != &other) {
       fd_ = other.fd_;

@@ -17,6 +17,7 @@ permissions: read-all
 jobs:
   # There must be at least one job here to satisfy GitHub action workflow syntax
   introduction:
+    if: github.repository_owner == 'pytorch'
     runs-on: ubuntu-latest
     continue-on-error: true
     steps:

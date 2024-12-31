@@ -93,7 +93,7 @@ struct Layout final {
       }
 
       return batch;
-    };
+    }
 
     static int64_t channel(const IntArrayRef tensor) {
       if (C10_UNLIKELY(tensor.empty())) {
@@ -101,7 +101,7 @@ struct Layout final {
       }
 
       return tensor.back();
-    };
+    }
   };
 
   // Convolution Filters

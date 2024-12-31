@@ -19,8 +19,7 @@ struct Module;
 } // namespace jit
 } // namespace torch
 
-namespace torch {
-namespace serialize {
+namespace torch::serialize {
 class TORCH_API OutputArchive final {
  public:
   explicit OutputArchive(std::shared_ptr<jit::CompilationUnit> cu);
@@ -78,5 +77,4 @@ class TORCH_API OutputArchive final {
   std::shared_ptr<jit::CompilationUnit> cu_;
   jit::Module module_;
 };
-} // namespace serialize
-} // namespace torch
+} // namespace torch::serialize

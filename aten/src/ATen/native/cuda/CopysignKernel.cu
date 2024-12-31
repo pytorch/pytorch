@@ -28,6 +28,6 @@ void copysign_kernel_cuda(TensorIteratorBase& iter) {
   });
 }
 
-REGISTER_DISPATCH(copysign_stub, &copysign_kernel_cuda);
+REGISTER_DISPATCH(copysign_stub, &copysign_kernel_cuda)
 
 } // namespace at::native

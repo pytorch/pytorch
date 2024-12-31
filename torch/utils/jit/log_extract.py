@@ -10,7 +10,6 @@ def extract_ir(filename: str) -> List[str]:
     BEGIN = "<GRAPH_EXPORT>"
     END = "</GRAPH_EXPORT>"
     pfx = None
-    current = ""
     graphs = []
     with open(filename) as f:
         split_strs = f.read().split(BEGIN)

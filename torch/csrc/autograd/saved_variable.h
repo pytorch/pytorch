@@ -29,7 +29,9 @@ class TORCH_API SavedVariable {
       const std::optional<Variable>& variable,
       bool is_output,
       bool is_inplace_on_view = false);
+  SavedVariable(const SavedVariable&) = delete;
   SavedVariable(SavedVariable&&) = default;
+  SavedVariable& operator=(const SavedVariable&) = delete;
   SavedVariable& operator=(SavedVariable&&) = default;
   ~SavedVariable() {
     if (fw_grad_) {

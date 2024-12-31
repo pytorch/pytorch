@@ -7,6 +7,7 @@
 #include <ATen/cuda/tunable/TunableOp.h>
 #include <ATen/cuda/tunable/GemmCommon.h>
 #include <c10/util/StringUtil.h>
+#include <fmt/printf.h>
 
 #define ROCBLAS_BETA_FEATURES_API
 #include <rocblas/rocblas.h>
@@ -129,7 +130,7 @@ static rocblas_operation _rocblasOpFromChar(char op) {
     case 'C':
       return rocblas_operation_conjugate_transpose;
   }
-  AT_ERROR(
+  TORCH_CHECK(false,
       "_rocblasOpFromChar input should be 't', 'n' or 'c' but got `", op, "`");
 }
 
@@ -197,7 +198,7 @@ auto GetRocBlasGemmTypeStringAndOps() {
   std::vector<std::pair<std::string, std::unique_ptr<Callable<GemmParams<T>>>>> ret;
   for (size_t i = 0; i < solutions.size(); ++i) {
     auto callable = std::make_unique<RocblasGemmOp<T>>(solutions[i]);
-    ret.emplace_back(std::make_pair(c10::str("Gemm_Rocblas_", solutions[i]), std::move(callable)));
+    ret.emplace_back(std::make_pair(fmt::sprintf("Gemm_Rocblas_%d", solutions[i]), std::move(callable)));
   }
   return ret;
 }

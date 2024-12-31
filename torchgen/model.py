@@ -5,9 +5,13 @@ import itertools
 import re
 from dataclasses import dataclass
 from enum import auto, Enum
-from typing import Callable, Iterator, Sequence
+from typing import Callable, TYPE_CHECKING
 
 from torchgen.utils import assert_never, NamespaceHelper, OrderedSet
+
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator, Sequence
 
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
@@ -245,10 +249,9 @@ class _TorchDispatchModeKey(Enum):
 
 
 def codegen_per_backend_entries() -> str:
-    r = []
+    r: list[str] = []
     for fk in FUNCTIONALITY_KEYS:
-        for bc in BACKEND_COMPONENTS:
-            r.append(f"    {fk}{bc} = auto()")
+        r.extend(f"    {fk}{bc} = auto()" for bc in BACKEND_COMPONENTS)
     return "\n".join(r)
 
 
@@ -279,6 +282,7 @@ dispatch_keys = [
     DispatchKey.CUDA,
     DispatchKey.MPS,
     DispatchKey.XPU,
+    DispatchKey.SparseXPU,
     DispatchKey.SparseCUDA,
     DispatchKey.SparseCsrCUDA,
     DispatchKey.QuantizedCPU,
@@ -289,6 +293,7 @@ dispatch_keys = [
     DispatchKey.CompositeExplicitAutogradNonFunctional,
     DispatchKey.NestedTensorCPU,
     DispatchKey.NestedTensorCUDA,
+    DispatchKey.NestedTensorXPU,
     # Meta is a magic key: it is automatically generated for structured
     # kernels
     DispatchKey.Meta,
@@ -344,6 +349,9 @@ def is_structured_dispatch_key(dk: DispatchKey) -> bool:
 def is_ufunc_dispatch_key(dk: DispatchKey) -> bool:
     # For now, ufunc dispatch keys coincide with structured keys
     return dk in UFUNC_DISPATCH_KEYS
+
+
+dispatch_device_map = {is_cuda_dispatch_key: "cuda", is_xpu_dispatch_key: "xpu"}
 
 
 # This is oddly named ScalarType and not DType for symmetry with C++
@@ -1484,14 +1492,15 @@ class FunctionSchema:
             else:
                 # mutable keyword arguments whose name has _scratch_ prefix are
                 # scratch tensors for memory planning and should not be returned
-                assert len(
-                    [
-                        arg
-                        for arg in self.arguments.out
-                        if not arg.name.startswith("_scratch_")
-                    ]
-                ) == len(
-                    self.returns
+                assert (
+                    len(
+                        [
+                            arg
+                            for arg in self.arguments.out
+                            if not arg.name.startswith("_scratch_")
+                        ]
+                    )
+                    == len(self.returns)
                 ), "Must return as many arguments as there are out arguments, or no return at all"
 
         if self.name.name.inplace:
@@ -1509,7 +1518,7 @@ class FunctionSchema:
                     and self.returns[0].annotation == self_a.argument.annotation
                 )
             else:
-                # You can't method chain on non-tensor self arguments though (like a List[Tensor])
+                # You can't method chain on non-tensor self arguments though (like a list[Tensor])
                 # so in all other cases we expect the return type to be none.
                 assert len(self.returns) == 0
 
@@ -1590,9 +1599,7 @@ class FunctionSchema:
             ), "invariant: all scratch operators are expected to be out= operators too"
             return SchemaKind.scratch
         elif is_out:
-            assert (
-                not is_scratch
-            ), "We should not categorize a scratch op as an out variant. Check if the order of if statements are expected!"
+            assert not is_scratch, "We should not categorize a scratch op as an out variant. Check if the order of if statements are expected!"  # noqa: B950
             return SchemaKind.out
         elif is_mutable:
             return SchemaKind.mutable
@@ -1893,7 +1900,6 @@ class BaseTy(Enum):
     Stream = auto()
     SymInt = auto()
     SymBool = auto()
-    ConstQuantizerPtr = auto()  # TODO: rename
     GraphModule = auto()
 
 
@@ -2701,9 +2707,7 @@ class NativeFunctionsViewGroup:
                 )
         if self.view.has_composite_implicit_autograd_nested_tensor_kernel:
             if self.view_inplace is not None:
-                assert (
-                    self.view_inplace.has_composite_implicit_autograd_nested_tensor_kernel
-                ), (
+                assert self.view_inplace.has_composite_implicit_autograd_nested_tensor_kernel, (
                     f"{str(self.view.func.name)} and {str(self.view_inplace.func.name)} must either"
                     " both have CompositeImplicitAutogradNestedTensor kernels, or both not have composite kernels."
                 )

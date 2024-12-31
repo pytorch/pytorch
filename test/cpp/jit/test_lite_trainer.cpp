@@ -317,7 +317,7 @@ struct DummyDataset : torch::data::datasets::Dataset<DummyDataset, int> {
     // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
     return 1 + index;
   }
-  torch::optional<size_t> size() const override {
+  std::optional<size_t> size() const override {
     return size_;
   }
 

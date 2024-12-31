@@ -22,6 +22,7 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 """
+
 from __future__ import annotations
 
 import keyword
@@ -283,16 +284,16 @@ def comma_separate(collection: Collection[Union[str, Collection[str]]]) -> str:
         str: the comma-separated string
 
     Examples:
-        >>> comma_separate(('d0',))
+        >>> comma_separate(("d0",))
         'd0'
 
-        >>> comma_separate(('d0', 'd1', 'd2', 'd3'))
+        >>> comma_separate(("d0", "d1", "d2", "d3"))
         'd0, d1, d2, d3'
 
-        >>> comma_separate([('d1', 'd4')])
+        >>> comma_separate([("d1", "d4")])
         '(d1, d4)'
 
-        >>> comma_separate([('d0',), (), ('d1',), ('d2',), ('d3', 'd4')])
+        >>> comma_separate([("d0",), (), ("d1",), ("d2",), ("d3", "d4")])
         '(d0,), (), (d1,), (d2,), (d3, d4)'
     """
     return ", ".join(

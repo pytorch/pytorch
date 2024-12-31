@@ -1,13 +1,7 @@
 #include <torch/csrc/jit/mobile/nnc/registry.h>
 
-namespace torch {
-namespace jit {
-namespace mobile {
-namespace nnc {
+namespace torch::jit::mobile::nnc {
 
-C10_DEFINE_REGISTRY(NNCKernelRegistry, NNCKernel);
+C10_DEFINE_REGISTRY(NNCKernelRegistry, NNCKernel)
 
-} // namespace nnc
-} // namespace mobile
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::mobile::nnc

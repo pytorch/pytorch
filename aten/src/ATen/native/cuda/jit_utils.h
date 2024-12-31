@@ -1,15 +1,12 @@
 #pragma once
 
 #include <string>
-#include <sstream>
-#include <unordered_map>
-#include <vector>
 
 #include <c10/util/irange.h>
 #include <ATen/jit_macros.h>
 #include <ATen/cuda/detail/LazyNVRTC.h>
 
-namespace at { namespace cuda { namespace jit {
+namespace at::cuda::jit {
 
 enum class BinaryFuncVariant {NoScalar, RhsScalar, LhsScalar};
 
@@ -71,7 +68,7 @@ inline int can_vectorize_up_to(const KernelDescriptor &desc, c10::ArrayRef<char*
 
   // Deals with output
   auto result_size = c10::scalarTypeToTypeMeta(desc.result_type).itemsize();
-  int result = can_vectorize_up_to(result_size, pointers[0]);
+  auto result = can_vectorize_up_to(result_size, pointers[0]);
 
   // Incorporates input(s)
   auto input_size = c10::scalarTypeToTypeMeta(desc.f_inputs_type).itemsize();
@@ -134,7 +131,7 @@ NvrtcFunction jit_pwise_function(
 
 void launch_jitted_pwise_function(
     NvrtcFunction function,
-    void* args[],
+    const void* args[],
     const dim3 nBlocks,
     const dim3 kBlockSize,
     const int smem=0);
@@ -212,4 +209,4 @@ inline std::string typeName(ScalarType t) {
 
 TORCH_CUDA_CPP_API void initializeCudaContext();
 
-}}}  // namespace at::cuda::jit
+} // namespace at::cuda::jit

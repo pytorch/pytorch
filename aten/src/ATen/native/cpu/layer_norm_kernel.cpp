@@ -296,7 +296,7 @@ void layer_norm_backward_frame(
 }
 
 template <typename T, typename T2, typename opmath_t,
-          typename std::enable_if_t<is_reduced_floating_point_v<T> && std::is_same<T2, float>::value, int> = 0>
+          typename std::enable_if_t<is_reduced_floating_point_v<T> && std::is_same_v<T2, float>, int> = 0>
 void layer_norm_backward_frame(
     const T* dY_data,
     const T* X_data,
@@ -609,7 +609,7 @@ void LayerNormBackwardKernelImpl(
 
 } // namespace
 
-REGISTER_DISPATCH(LayerNormKernel, &LayerNormKernelImpl);
-REGISTER_DISPATCH(LayerNormBackwardKernel, &LayerNormBackwardKernelImpl);
+REGISTER_DISPATCH(LayerNormKernel, &LayerNormKernelImpl)
+REGISTER_DISPATCH(LayerNormBackwardKernel, &LayerNormBackwardKernelImpl)
 
 } // namespace at::native
