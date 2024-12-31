@@ -39,6 +39,7 @@ class MPSBasicTests(TestCase):
     device = "mps"
 
     test_add_const_int = CommonTemplate.test_add_const_int
+    test_add_inplace_permuted_mps = CommonTemplate.test_add_inplace_permuted
 
     @parametrize("dtype", MPS_DTYPES)
     def test_add(self, dtype):
