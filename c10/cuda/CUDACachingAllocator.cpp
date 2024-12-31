@@ -211,7 +211,6 @@ struct Block {
       void* ptr)
       : device(device),
         stream(stream),
-        stream_uses(),
         size(size),
         requested_size(0),
         pool(pool),
@@ -219,11 +218,7 @@ struct Block {
 
   // constructor for search key
   Block(c10::DeviceIndex device, cudaStream_t stream, size_t size)
-      : device(device),
-        stream(stream),
-        stream_uses(),
-        size(size),
-        requested_size(0) {}
+      : device(device), stream(stream), size(size), requested_size(0) {}
 
   size_t gc_count() {
     TORCH_INTERNAL_ASSERT(pool);
