@@ -1221,7 +1221,7 @@ class FusedSchedulerNode(BaseSchedulerNode):
         assert isinstance(node1, (SchedulerNode, FusedSchedulerNode))
         if node1.is_template():
             if isinstance(node2, ExternKernelSchedulerNode):
-                # CPP Group GEMM Fuse with MultiOutput node
+                # CPP Grouped GEMM Fuse with MultiOutput node
                 # * Node1 has memorydep of MultiOutput in reads
                 # * Node2 has StarDep of MultiOutput in writes
                 # Rewrite the StarDep to MemoryDep
@@ -1233,7 +1233,7 @@ class FusedSchedulerNode(BaseSchedulerNode):
                     node for node in node1.get_nodes() if node.is_template()
                 ]
                 assert len(template_nodes) == 1
-                template_node = template_nodes[0]
+                template_node = next(iter(template_nodes))
                 assert len(template_node.read_writes.writes) == 1
                 write = next(iter(template_node.read_writes.writes))
                 assert isinstance(write, MemoryDep)
