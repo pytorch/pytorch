@@ -42,10 +42,6 @@ on:
         required: true
         type: string
         description: Root directory for the pytorch/pytorch repository
-      BUILDER_ROOT:
-        required: true
-        type: string
-        description: Root directory for the pytorch/builder repository
       PACKAGE_TYPE:
         required: true
         type: string
@@ -98,7 +94,6 @@ jobs:
     timeout-minutes: ${{ inputs.timeout-minutes }}
     env:
       PYTORCH_ROOT: ${{ inputs.PYTORCH_ROOT }}
-      BUILDER_ROOT: ${{ inputs.BUILDER_ROOT }}
       PACKAGE_TYPE: ${{ inputs.PACKAGE_TYPE }}
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -129,7 +124,6 @@ jobs:
         run: |
           {
             echo "PYTORCH_ROOT=${{ env.PYTORCH_ROOT }}"
-            echo "BUILDER_ROOT=${{ env.BUILDER_ROOT }}"
             echo "PACKAGE_TYPE=${{ env.PACKAGE_TYPE }}"
             echo "DESIRED_CUDA=${{ env.DESIRED_CUDA }}"
             echo "GPU_ARCH_VERSION=${{ env.GPU_ARCH_VERSION }}"
@@ -193,12 +187,12 @@ jobs:
           fi
 
       - name: Checkout PyTorch to pytorch dir
-        uses: malfet/checkout@silent-checkout
+        uses: actions/checkout@v4
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
           path: pytorch
-          quiet-checkout: true
+          show-progress: false
 
       - name: Clean PyTorch checkout
         run: |

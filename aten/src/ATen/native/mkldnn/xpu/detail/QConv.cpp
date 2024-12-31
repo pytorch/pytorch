@@ -194,7 +194,7 @@ at::Tensor quantized_convolution(
   Tensor scratchpad_tensor = at::empty(
       {static_cast<int64_t>(scratchpad_size)},
       act.options().dtype(at::kByte),
-      c10::nullopt);
+      std::nullopt);
   auto scratchpad_m = make_onednn_memory(
       conv_fwd_pd.scratchpad_desc(), engine, scratchpad_tensor.data_ptr());
   args.insert({DNNL_ARG_SCRATCHPAD, scratchpad_m});

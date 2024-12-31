@@ -44,7 +44,7 @@ class DynamoProfilerTests(torch._inductor.test_case.TestCase):
 
         kernel_name = "hipModuleLaunchKernel" if torch.version.hip else "cuLaunchKernel"
 
-        def nameMatchesLaunchKernel(event_name):
+        def nameMatchesLaunchKernel(event_name):  # noqa: F841
             return kernel_name in event_name
 
         self.assertTrue(
