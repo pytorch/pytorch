@@ -199,7 +199,7 @@ class CppGroupGemmTemplate(CppGemmTemplate):
         has_bias: tuple[bool, ...] = (False, False),
         trans_w=False,
         input_indices=None,
-        epilogue_creator: Optional[Callable[..., ir.Pointwise]] = None,
+        epilogue_creator: Optional[Callable[[ir.Buffer], ir.Pointwise]] = None,
         act_mapping: Optional[
             dict[int, ir.TensorBox]
         ] = None,  # gemm idx to its act buf
