@@ -230,8 +230,7 @@ class CppTemplateKernel(CppKernel):
         offsets: Optional[List[sympy.Expr]] = None,
         reindexers: Optional[List[Optional[Callable[[List[Any]], List[Any]]]]] = None,
     ) -> str:
-        ref_dst = dst
-        var_sizes = (tuple(ref_dst.get_size()), ())
+        var_sizes = (tuple(dst.get_size()), ())
         var_ranges = {
             sympy_index_symbol_with_prefix(SymT.INDEX, i): sz
             for i, sz in enumerate(var_sizes[0])
@@ -241,7 +240,7 @@ class CppTemplateKernel(CppKernel):
         if not reindexers:
             reindexers = [None] * len(nodes)
         assert len(offsets) == len(var_sizes[0])
-        output_index = ref_dst.get_layout().make_indexer()([*var_ranges.keys()])
+        output_index = dst.get_layout().make_indexer()([*var_ranges.keys()])
         kernel_group = KernelGroup()
         kernel_group.args = self.args
         cpp_kernel_proxy = CppKernelProxy(kernel_group)
@@ -290,7 +289,7 @@ class CppTemplateKernel(CppKernel):
         output_names: List[str],
     ) -> str:
         assert isinstance(dst, Iterable)
-        ref_dst = dst[0]
+        ref_dst = next(iter(dst))
         var_sizes = (tuple(ref_dst.get_size()), ())
         var_ranges = {
             sympy_index_symbol_with_prefix(SymT.INDEX, i): sz
