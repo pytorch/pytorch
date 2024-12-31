@@ -15,8 +15,7 @@ using MTLCommandBuffer_t = void*;
 using DispatchQueue_t = void*;
 #endif
 
-namespace torch {
-namespace mps {
+namespace torch::mps {
 
 /// Returns true if MPS device is available.
 bool TORCH_API is_available();
@@ -40,5 +39,4 @@ MTLCommandBuffer_t TORCH_API get_command_buffer();
 /// with the PyTorch MPS backend.
 DispatchQueue_t TORCH_API get_dispatch_queue();
 
-} // namespace mps
-} // namespace torch
+} // namespace torch::mps

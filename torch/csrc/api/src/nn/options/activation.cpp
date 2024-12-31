@@ -1,7 +1,6 @@
 #include <torch/nn/options/activation.h>
 
-namespace torch {
-namespace nn {
+namespace torch::nn {
 
 SELUOptions::SELUOptions(bool inplace) : inplace_(inplace) {}
 
@@ -60,5 +59,4 @@ MultiheadAttentionForwardFuncOptions::MultiheadAttentionForwardFuncOptions(
       out_proj_bias_(std::move(out_proj_bias)) {}
 
 } // namespace functional
-} // namespace nn
-} // namespace torch
+} // namespace torch::nn

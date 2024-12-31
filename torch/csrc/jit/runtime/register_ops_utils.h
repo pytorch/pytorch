@@ -71,7 +71,7 @@ inline double round_to_even(double a) {
 // and if the dest is an int the source must be integral type
 void checkImplicitTensorToNum(const at::Tensor& t, bool toInt);
 
-static C10_UNUSED int64_t floordiv(int64_t a, int64_t b) {
+[[maybe_unused]] static int64_t floordiv(int64_t a, int64_t b) {
   if (b == 0) {
     throw std::runtime_error("division by 0");
   }
@@ -85,16 +85,16 @@ static C10_UNUSED int64_t floordiv(int64_t a, int64_t b) {
   }
 }
 TORCH_API void checkDoubleInRange(double a);
-static C10_UNUSED int64_t floor(double a) {
+[[maybe_unused]] static int64_t floor(double a) {
   checkDoubleInRange(a);
   return std::floor(a);
 }
-static C10_UNUSED int64_t ceil(double a) {
+[[maybe_unused]] static int64_t ceil(double a) {
   checkDoubleInRange(a);
   return std::ceil(a);
 }
 
-static C10_UNUSED int64_t gcd(int64_t a, int64_t b) {
+[[maybe_unused]] static int64_t gcd(int64_t a, int64_t b) {
   while (b != 0) {
     int64_t r = a % b;
     a = b;
@@ -200,7 +200,7 @@ void listRemove(Stack& stack) {
   if (pos != list.end()) {
     list.erase(pos);
   } else {
-    AT_ERROR("list.remove(x): x not in list");
+    TORCH_CHECK(false, "list.remove(x): x not in list");
   }
 }
 
@@ -251,7 +251,7 @@ void listIndex(Stack& stack) {
   if (pos != list.end()) {
     push(stack, static_cast<int64_t>(std::distance(list.begin(), pos)));
   } else {
-    AT_ERROR("'", elem, "' is not in list");
+    TORCH_CHECK(false, "'", elem, "' is not in list");
   }
 }
 

@@ -3,7 +3,7 @@ import contextlib
 import inspect
 import logging
 from collections import defaultdict
-from typing import Any, Callable, Dict, List, Tuple, TYPE_CHECKING, Union
+from typing import Any, Callable, Dict, List, Set, Tuple, TYPE_CHECKING, Union
 
 import torch
 import torch.utils._pytree as pytree
@@ -26,6 +26,7 @@ from torch.export.dynamic_shapes import (
     _combine_args,
     _DimHint,
     _process_dynamic_shapes,
+    _RelaxedConstraint,
     _tree_map_with_path,
 )
 from torch.export.graph_signature import CustomObjArgument
@@ -115,9 +116,11 @@ def fakify(
     assert mode.shape_env is not None
     if t_id in t_constraints:
         for i, constraint in t_constraints[t_id].items():
-            symbolic_context.constraint_sizes[i] = constraint.constraint_range
             src = TensorPropertySource(base=source, prop=TensorProperty.SIZE, idx=i)
             sources[(t_id, i)].append(src)
+            if isinstance(constraint, _RelaxedConstraint):
+                continue
+            symbolic_context.constraint_sizes[i] = constraint.constraint_range
             mode.shape_env.source_name_to_debug_name[src.name()] = constraint.name  # type: ignore[assignment]
     fake = mode.from_tensor(t, source=source, symbolic_context=symbolic_context)
     mode.shape_env.tracked_fakes.append(TrackedFake(fake, source, symbolic_context))  # type: ignore[union-attr]
@@ -209,6 +212,7 @@ def make_fake_inputs(
         source_pairs: List[Tuple[Source, Source]] = []
         derived_equalities: List[Tuple[Source, Union[Source, Symbol], Callable]] = []
         phantom_symbols: Dict[str, Symbol] = {}
+        relaxed_sources: Set[Source] = set()
         for constraint in constraints:
             torch.export.dynamic_shapes._process_equalities(
                 constraint,
@@ -218,12 +222,14 @@ def make_fake_inputs(
                 source_pairs,
                 derived_equalities,
                 phantom_symbols,
+                relaxed_sources,
             )
 
         equalities_inputs = EqualityConstraint(
             source_pairs=source_pairs,
             derived_equalities=derived_equalities,
             phantom_symbols=list(phantom_symbols.values()),
+            relaxed_sources=relaxed_sources,
             warn_only=False,
         )
         return (
@@ -248,6 +254,18 @@ def _flatten_dynamic_shapes(
 
     _tree_map_with_path(_tree_map_helper, combined_args, dynamic_shapes)
     return flat_shapes
+
+
+def _clean_dynamic_markers(tensor: torch.Tensor) -> None:
+    for attr in [
+        "_dynamo_weak_dynamic_indices",
+        "_dynamo_dynamic_indices",
+        "_dynamo_dynamic_range",
+        "_dynamo_static_indices",
+        "_dynamo_unbacked_indices",
+    ]:
+        if hasattr(tensor, attr):
+            delattr(tensor, attr)
 
 
 def produce_guards_and_solve_constraints(
@@ -339,6 +357,11 @@ def make_constraints(
     }
     if not dynamic_shapes:
         return range_constraints
+
+    # clean up dynamic markers from tensors
+    for arg in pytree.tree_flatten(combined_args)[0]:
+        if isinstance(arg, torch.Tensor):
+            _clean_dynamic_markers(arg)
 
     # get individual dynamic shapes spec for each input
     if not isinstance(dynamic_shapes, dict):
@@ -509,18 +532,40 @@ class _NonStrictTorchFunctionHandler(torch.overrides.TorchFunctionMode):
     In particular, conditions on unbacked symints can appear outside such
     calls, and as such are not handled here.
 
-    2. Handles line-of-code logging for each torch function call in non-strict.
+    2. Overrides torch functions that are known to cause problems in non-strict.
+
+    Certain Python features, such as indexing/slicing, cannot be intercepted
+    in non-strict. When these features need special handling in the compiler,
+    tracing can fail in non-strict (yet surprisingly succeed in strict).
+    Fortunately, redirecting to other torch functions can often fix such issues.
+
+    3. Handles line-of-code logging for each torch function call in non-strict.
 
     Usage: TORCHEXPORT_EXTENDED_DEBUG_CURRENT_LOC=1 TORCH_LOGS="+export" ...
     """
 
+    def _override(self, func, args, kwargs):
+        if func is torch.tensor:
+            # Redirect to Python implementation of torch.tensor for data with symints.
+            # NOTE(avik): We don't unconditionally redirect to this implementation
+            # because it has some known incompletenesses, e.g., it doesn't support
+            # empty data. See https://github.com/pytorch/pytorch/issues/143216
+            if any(
+                isinstance(a, torch.SymInt) for a in pytree.tree_flatten(args[0])[0]
+            ):
+                return torch._refs.tensor, args, kwargs
+        if func.__name__ == "__getitem__" and isinstance(args[0], torch.Tensor):
+            # Redirect to torch.select for indexing with symint.
+            if isinstance(args[1], torch.SymInt):
+                return torch.select, [args[0], 0, args[1]], {}
+        return func, args, kwargs
+
     def __torch_function__(self, func, types, args=(), kwargs=None):
         kwargs = kwargs or {}
-        if (
-            not torch.compiler.is_dynamo_compiling()
-            and log.isEnabledFor(logging.DEBUG)
-            and config.extended_debug_current_loc
-        ):
+        if torch.compiler.is_dynamo_compiling():
+            return func(*args, **kwargs)
+
+        if log.isEnabledFor(logging.DEBUG) and config.extended_debug_current_loc:
             frame = _find_user_code_frame()
             if frame is not None:
                 log.debug(
@@ -530,6 +575,8 @@ class _NonStrictTorchFunctionHandler(torch.overrides.TorchFunctionMode):
                     frame.f_lineno,
                     frame.f_code.co_name,
                 )
+
+        func, args, kwargs = self._override(func, args, kwargs)
         try:
             return func(*args, **kwargs)
         except GuardOnDataDependentSymNode as e:

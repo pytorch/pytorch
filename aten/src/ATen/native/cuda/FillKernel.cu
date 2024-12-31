@@ -25,6 +25,6 @@ void fill_kernel_cuda(TensorIterator& iter, const Scalar& value) {
   }), AT_EXPAND(AT_ALL_TYPES_AND_COMPLEX), kComplexHalf, kBool, kHalf, kBFloat16, AT_EXPAND(AT_FLOAT8_TYPES), AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES));
 }
 
-REGISTER_DISPATCH(fill_stub, &fill_kernel_cuda);
+REGISTER_DISPATCH(fill_stub, &fill_kernel_cuda)
 
 } // namespace at::native

@@ -203,7 +203,6 @@ class StageTest(MultiProcContinousTest):
             self.rank,
             self.world_size,
             self.device,
-            input_args=x.chunk(chunks)[0],
         )
 
         # Attach to a schedule
@@ -273,7 +272,6 @@ class StageTest(MultiProcContinousTest):
             self.rank,
             self.world_size,
             self.device,
-            input_args=x.chunk(chunks)[0],
             dw_builder=cs.dw_builder,
         )
 
@@ -312,15 +310,11 @@ class StageTest(MultiProcContinousTest):
         full_mod.to(self.device)
         stage_mod = full_mod.get_submodule(f"layers.{self.rank}")
 
-        x = torch.randn(batch_size, d_hid, device=self.device)
-        target = torch.randn(batch_size, d_hid, device=self.device)
-
         stage_with_dw_builder = PipelineStage(
             stage_mod,
             self.rank,
             self.world_size,
             self.device,
-            input_args=x.chunk(chunks)[0],
             dw_builder=lambda: None,
         )
         with self.assertRaisesRegex(AssertionError, "backward_one_chunk"):

@@ -1,0 +1,59 @@
+name: Build manywheel docker images for s390x
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+      - release/*
+    tags:
+      # NOTE: Binary build pipelines should only get triggered on release candidate or nightly builds
+      # Release candidate tags look like: v1.11.0-rc1
+      - v[0-9]+.[0-9]+.[0-9]+-rc[0-9]+
+    paths:
+      - '.ci/docker/manywheel/*'
+      - '.ci/docker/manywheel/build_scripts/*'
+      - '.ci/docker/common/*'
+      - .github/workflows/build-manywheel-images-s390x.yml
+  pull_request:
+    paths:
+      - '.ci/docker/manywheel/*'
+      - '.ci/docker/manywheel/build_scripts/*'
+      - '.ci/docker/common/*'
+      - .github/workflows/build-manywheel-images-s390x.yml
+
+
+env:
+  DOCKER_REGISTRY: "docker.io"
+  DOCKER_BUILDKIT: 1
+  WITH_PUSH: ${{ github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release')) }}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  cancel-in-progress: true
+
+jobs:
+  build-docker-cpu-s390x:
+    if: github.repository_owner == 'pytorch'
+    environment: ${{ (github.ref == 'refs/heads/main' || startsWith(github.event.ref, 'refs/tags/v')) && 'docker-build' || '' }}
+    runs-on: linux.s390x
+    env:
+      GPU_ARCH_TYPE: cpu-s390x
+    steps:
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
+        with:
+          submodules: false
+          no-sudo: true
+      - name: Authenticate if WITH_PUSH
+        if: env.WITH_PUSH == 'true'
+        env:
+          DOCKER_TOKEN: ${{ secrets.DOCKER_TOKEN }}
+          DOCKER_ID: ${{ secrets.DOCKER_ID }}
+        run: |
+          if [[ "${WITH_PUSH}" == true ]]; then
+            echo "${DOCKER_TOKEN}" | docker login -u "${DOCKER_ID}" --password-stdin
+          fi
+      - name: Build Docker Image
+        run: |
+          .ci/docker/manywheel/build.sh manylinuxs390x-builder:cpu-s390x

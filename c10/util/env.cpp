@@ -2,6 +2,7 @@
 #include <c10/util/env.h>
 #include <fmt/format.h>
 #include <cstdlib>
+#include <mutex>
 #include <shared_mutex>
 
 namespace c10::utils {

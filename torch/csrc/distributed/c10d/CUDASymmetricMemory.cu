@@ -1,9 +1,12 @@
 #include <torch/csrc/distributed/c10d/CUDASymmetricMemory.hpp>
 
+#include <torch/csrc/distributed/c10d/CUDASymmetricMemory-inl.h>
+
 #include <ATen/ceil_div.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/cuda/CUDAGuard.h>
+#include <c10/util/error.h>
 
 #if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
 #include <c10/cuda/driver_api.h>
@@ -44,13 +47,18 @@ bool device_has_multicast_support(int device_idx) {
 #endif
 }
 
+bool allow_overlapping_devices() {
+  return c10::utils::check_env("TORCH_SYMM_MEM_ALLOW_OVERLAPPING_DEVICES") ==
+      true;
+}
+
 class IpcChannel {
  public:
   IpcChannel() : socket_name_(get_socket_name(getpid())) {
     TORCH_CHECK(
         (socket_ = socket(AF_UNIX, SOCK_DGRAM, 0)) != 0,
         "Failed to create socket: ",
-        strerror(errno));
+        c10::utils::str_error(errno));
 
     struct sockaddr_un addr = {.sun_family = AF_UNIX};
     std::copy(socket_name_.begin(), socket_name_.end(), addr.sun_path);
@@ -58,7 +66,7 @@ class IpcChannel {
     TORCH_CHECK(
         bind(socket_, (struct sockaddr*)&addr, SUN_LEN(&addr)) == 0,
         "Failed to bind socket: ",
-        strerror(errno));
+        c10::utils::str_error(errno));
   }
 
   ~IpcChannel() {
@@ -88,7 +96,6 @@ class IpcChannel {
     cmsg->cmsg_type = SCM_RIGHTS;
 
     if (fd != -1) {
-      // memcpy(CMSG_DATA(cmsg), &fd, sizeof(fd));
       std::copy(
           reinterpret_cast<const char*>(&fd),
           reinterpret_cast<const char*>(&fd) + sizeof(fd),
@@ -98,7 +105,7 @@ class IpcChannel {
     }
 
     TORCH_CHECK(
-        sendmsg(socket_, &msg, 0) > 0, "Failed to send fd: ", strerror(errno));
+        sendmsg(socket_, &msg, 0) > 0, "Failed to send fd: ", c10::utils::str_error(errno));
   }
 
   int recv_fd() {
@@ -117,7 +124,7 @@ class IpcChannel {
     TORCH_CHECK(
         recvmsg(socket_, &msg, 0) > 0,
         "Failed to receive fd: ",
-        strerror(errno));
+        c10::utils::str_error(errno));
 
     if (msg.msg_controllen == 0) {
       return -1;
@@ -266,9 +273,29 @@ void map_block(
 namespace c10d {
 namespace symmetric_memory {
 
+AllocationRef::AllocationRef(void* ptr, HandleType handle, size_t block_size, int device_idx)
+    : ptr(ptr), handle(handle), block_size(block_size), device_idx(device_idx) {}
+
+AllocationRef::~AllocationRef() {
+#if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
+  // Leak the cuda allocations during static deinitialization
+  if (is_finalizing()) {
+    return;
+  }
+  auto driver_api = c10::cuda::DriverAPI::get();
+  c10::cuda::CUDAGuard guard(device_idx);
+  C10_CUDA_CHECK(cudaDeviceSynchronize());
+  C10_CUDA_DRIVER_CHECK(
+      driver_api->cuMemUnmap_(reinterpret_cast<CUdeviceptr>(ptr), block_size));
+  C10_CUDA_DRIVER_CHECK(driver_api->cuMemRelease_(handle));
+#else
+  TORCH_CHECK(
+      false, "CUDASymmetricMemory requires PYTORCH_C10_DRIVER_API_SUPPORTED");
+#endif
+}
+
 CUDASymmetricMemory::CUDASymmetricMemory(
-    std::vector<HandleType> handles,
-    size_t block_size,
+    std::vector<c10::intrusive_ptr<AllocationRef>> alloc_refs,
     std::vector<void*> buffers,
     std::vector<void*> signal_pads,
     HandleType mc_handle,
@@ -277,8 +304,7 @@ CUDASymmetricMemory::CUDASymmetricMemory(
     int local_device_idx,
     int rank,
     int world_size)
-    : handles_(std::move(handles)),
-      block_size_(block_size),
+    : alloc_refs_(std::move(alloc_refs)),
       buffers_(std::move(buffers)),
       signal_pads_(std::move(signal_pads)),
       mc_handle_(mc_handle),
@@ -298,29 +324,6 @@ CUDASymmetricMemory::CUDASymmetricMemory(
       buffers_dev_, buffers_.data(), arr_size, cudaMemcpyHostToDevice));
   AT_CUDA_CHECK(cudaMemcpy(
       signal_pads_dev_, signal_pads_.data(), arr_size, cudaMemcpyHostToDevice));
-}
-
-CUDASymmetricMemory::~CUDASymmetricMemory() {
-#if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
-  // Leak the cuda allocations during static deinitialization
-  if (is_finalizing()) {
-    return;
-  }
-  c10::cuda::CUDAGuard guard(local_device_idx_);
-  C10_CUDA_CHECK(cudaDeviceSynchronize());
-
-  auto driver_api = c10::cuda::DriverAPI::get();
-  for (int r = 0; r < world_size_; ++r) {
-    C10_CUDA_DRIVER_CHECK(driver_api->cuMemUnmap_(
-        reinterpret_cast<CUdeviceptr>(buffers_[r]), block_size_));
-    C10_CUDA_DRIVER_CHECK(driver_api->cuMemRelease_(handles_[r]));
-  }
-  c10::cuda::CUDACachingAllocator::raw_delete(buffers_dev_);
-  c10::cuda::CUDACachingAllocator::raw_delete(signal_pads_dev_);
-#else
-  TORCH_CHECK(
-      false, "CUDASymmetricMemory requires PYTORCH_C10_DRIVER_API_SUPPORTED");
-#endif
 }
 
 std::vector<void*> CUDASymmetricMemory::get_buffer_ptrs() {
@@ -360,8 +363,11 @@ at::Tensor CUDASymmetricMemory::get_buffer(
     c10::IntArrayRef sizes,
     c10::ScalarType dtype,
     int64_t storage_offset) {
-  const auto numel =
-      std::accumulate(sizes.begin(), sizes.end(), 1, std::multiplies<int>());
+  const size_t numel = std::accumulate(
+      sizes.begin(),
+      sizes.end(),
+      static_cast<size_t>(1),
+      std::multiplies<size_t>());
   const auto element_size = c10::elementSize(dtype);
   const auto req_size = (numel + storage_offset) * element_size;
   TORCH_CHECK(
@@ -371,10 +377,54 @@ at::Tensor CUDASymmetricMemory::get_buffer(
       " bytes) exceeds the allocated size (",
       buffer_size_,
       " bytes)");
+  auto data_ptr = reinterpret_cast<uint8_t*>(buffers_[rank]) +
+      storage_offset * element_size;
   auto device = c10::Device(c10::DeviceType::CUDA, local_device_idx_);
   auto options = at::TensorOptions().dtype(dtype).device(device);
-  return at::for_blob(buffers_[rank], sizes)
-      .storage_offset(storage_offset)
+  return at::for_blob(data_ptr, sizes)
+      .options(options)
+      .target_device(device)
+      .make_tensor();
+}
+
+at::Tensor CUDASymmetricMemory::get_signal_pad(
+    int rank,
+    c10::IntArrayRef sizes,
+    std::optional<c10::ScalarType> dtype,
+    int64_t storage_offset) {
+  // If the dtype is unspecified, default it to UInt32, as it
+  // is the most common type for signaling purposes.
+  if (!dtype.has_value()) {
+    dtype = c10::ScalarType::UInt32;
+  }
+
+  // If the shape is unspecified, treat the signal pad as a 1d tensor.
+  const auto element_size = c10::elementSize(*dtype);
+  std::vector<int64_t> shape;
+  if (sizes.size() != 0) {
+    shape = sizes.vec();
+  } else {
+    shape.push_back(signal_pad_size / element_size);
+  }
+
+  const size_t numel = std::accumulate(
+      shape.begin(),
+      shape.end(),
+      static_cast<size_t>(1),
+      std::multiplies<size_t>());
+  const auto req_size = (numel + storage_offset) * element_size;
+  TORCH_CHECK(
+      req_size <= signal_pad_size,
+      "CUDASymmetricMemory::get_signal_pad: the requested size (",
+      req_size,
+      " bytes) exceeds the allocated size (",
+      signal_pad_size,
+      " bytes)");
+  auto data_ptr = reinterpret_cast<uint8_t*>(signal_pads_[rank]) +
+      storage_offset * element_size;
+  auto device = c10::Device(c10::DeviceType::CUDA, local_device_idx_);
+  auto options = at::TensorOptions().dtype(*dtype).device(device);
+  return at::for_blob(data_ptr, shape)
       .options(options)
       .target_device(device)
       .make_tensor();
@@ -397,50 +447,53 @@ void check_channel(int channel, int world_size) {
       ")");
 }
 
-__device__ __forceinline__ void release_signal(uint32_t* addr) {
-#if defined(USE_ROCM) || (defined(__CUDA_ARCH__) && (__CUDA_ARCH__ < 800))
-  CUDA_KERNEL_ASSERT(false);
-#else
-  volatile uint32_t* signal = addr;
-  uint32_t val;
-  do {
-    val = *signal;
-  } while (val != 0 || atomicCAS_system(addr, 0, 1) != 0);
-#endif
-}
-
-__device__ __forceinline__ void acquire_signal(uint32_t* addr) {
-#if defined(USE_ROCM) || (defined(__CUDA_ARCH__) && (__CUDA_ARCH__ < 800))
-  CUDA_KERNEL_ASSERT(false);
-#else
-  volatile uint32_t* signal = addr;
-  uint32_t val;
-  do {
-    val = *signal;
-  } while (val != 1 || atomicCAS_system(addr, 1, 0) != 1);
-#endif
-}
-
 static __global__ void barrier_kernel(
     uint32_t** signal_pads,
     int channel,
     int rank,
-    int world_size) {
+    int world_size,
+    size_t timeout_ms) {
   if (threadIdx.x < world_size) {
     auto target_rank = threadIdx.x;
-    release_signal(signal_pads[target_rank] + world_size * channel + rank);
-    acquire_signal(signal_pads[rank] + world_size * channel + target_rank);
+    if (target_rank == rank) {
+      return;
+    }
+    auto put_success = try_put_signal<MemOpSem::Release>(
+        signal_pads[target_rank] + world_size * channel + rank, timeout_ms);
+    if (!put_success) {
+      printf(
+          "[FATAL] CUDASymmetricMemory::barrier: rank %d failed to send signal "
+          "to rank %d on channel %d after %lu microseconds\n",
+          rank,
+          target_rank,
+          channel,
+          timeout_ms);
+      trap();
+    }
+    auto wait_success = try_wait_signal<MemOpSem::Acquire>(
+        signal_pads[rank] + world_size * channel + target_rank, timeout_ms);
+    if (!wait_success) {
+      printf(
+          "[FATAL] CUDASymmetricMemory::barrier: rank %d failed to receive signal "
+          "from rank %d on channel %d after %lu microseconds\n",
+          rank,
+          target_rank,
+          channel,
+          timeout_ms);
+      trap();
+    }
   }
 }
 
-void CUDASymmetricMemory::barrier(int channel) {
+void CUDASymmetricMemory::barrier(int channel, size_t timeout_ms) {
   check_channel(channel, world_size_);
   c10::cuda::CUDAGuard guard(local_device_idx_);
   barrier_kernel<<<1, C10_WARP_SIZE, 0, at::cuda::getCurrentCUDAStream()>>>(
       reinterpret_cast<uint32_t**>(signal_pads_dev_),
       channel,
       rank_,
-      world_size_);
+      world_size_,
+      timeout_ms);
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
@@ -449,13 +502,28 @@ static __global__ void put_signal_kernel(
     int dst_rank,
     int channel,
     int rank,
-    int world_size) {
+    int world_size,
+    size_t timeout_ms) {
   if (threadIdx.x == 0) {
-    release_signal(signal_pads[dst_rank] + world_size * channel + rank);
+    bool success = try_put_signal<MemOpSem::Release>(
+        signal_pads[dst_rank] + world_size * channel + rank, timeout_ms);
+    if (!success) {
+      printf(
+          "[FATAL] CUDASymmetricMemory::put_signal: rank %d failed to send signal "
+          "to rank %d on channel %d after %lu microseconds\n",
+          rank,
+          dst_rank,
+          channel,
+          timeout_ms);
+      trap();
+    }
   }
 }
 
-void CUDASymmetricMemory::put_signal(int dst_rank, int channel) {
+void CUDASymmetricMemory::put_signal(
+    int dst_rank,
+    int channel,
+    size_t timeout_ms) {
   check_channel(channel, world_size_);
   c10::cuda::CUDAGuard guard(local_device_idx_);
   put_signal_kernel<<<1, C10_WARP_SIZE, 0, at::cuda::getCurrentCUDAStream()>>>(
@@ -463,7 +531,8 @@ void CUDASymmetricMemory::put_signal(int dst_rank, int channel) {
       dst_rank,
       channel,
       rank_,
-      world_size_);
+      world_size_,
+      timeout_ms);
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
@@ -472,14 +541,33 @@ static __global__ void wait_signal_kernel(
     int src_rank,
     int channel,
     int rank,
-    int world_size) {
+    int world_size,
+    size_t timeout_ms) {
   if (threadIdx.x == 0) {
-    acquire_signal(signal_pads[rank] + world_size * channel + src_rank);
+    bool success = try_wait_signal<MemOpSem::Acquire>(
+        signal_pads[rank] + world_size * channel + src_rank, timeout_ms);
+    if (!success) {
+      printf(
+          "[FATAL] CUDASymmetricMemory::wait_signal rank %d failed to receive signal "
+          "from rank %d on channel %d after %lu microseconds\n",
+          rank,
+          src_rank,
+          channel,
+          timeout_ms);
+#if !defined(USE_ROCM)
+      __trap();
+#else
+      assert(0);
+#endif
+    }
   }
   __threadfence_system();
 }
 
-void CUDASymmetricMemory::wait_signal(int src_rank, int channel) {
+void CUDASymmetricMemory::wait_signal(
+    int src_rank,
+    int channel,
+    size_t timeout_ms) {
   check_channel(channel, world_size_);
   c10::cuda::CUDAGuard guard(local_device_idx_);
   wait_signal_kernel<<<1, C10_WARP_SIZE, 0, at::cuda::getCurrentCUDAStream()>>>(
@@ -487,7 +575,8 @@ void CUDASymmetricMemory::wait_signal(int src_rank, int channel) {
       src_rank,
       channel,
       rank_,
-      world_size_);
+      world_size_,
+      timeout_ms);
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
@@ -499,30 +588,27 @@ int CUDASymmetricMemory::get_world_size() {
   return world_size_;
 }
 
-void CUDASymmetricMemory::stream_write_value32(uintptr_t addr, uint32_t val) {
-#if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
-  auto driver_api = c10::cuda::DriverAPI::get();
-  // According to the documentation of CUstreamWriteValue_flags,
-  // cuStreamWriteValue32 will provide a memory fence before the write, which
-  // has similar semantics to __threadfence_system() but is scoped to the
-  // stream rather than a CUDA thread.
-  driver_api->cuStreamWriteValue32_(
-      at::cuda::getCurrentCUDAStream(),
-      reinterpret_cast<CUdeviceptr>((void*)addr),
-      val,
-      0);
-#else
-  TORCH_CHECK(
-      false, "CUDASymmetricMemory requires PYTORCH_C10_DRIVER_API_SUPPORTED");
-#endif
-}
+Block::Block(
+  c10::intrusive_ptr<AllocationRef> alloc_ref,
+  int device_idx,
+  size_t block_size,
+  size_t buffer_size,
+  size_t signal_pad_offset,
+  const std::optional<std::string>& group_name)
+    : alloc_ref(std::move(alloc_ref)),
+      device_idx(device_idx),
+      block_size(block_size),
+      buffer_size(buffer_size),
+      signal_pad_offset(signal_pad_offset),
+      default_group_name(std::move(group_name)) {}
 
 void* CUDASymmetricMemoryAllocator::alloc(
     size_t size,
     int device_idx,
-    const std::string& group_name) {
+    const std::optional<std::string>& group_name) {
 #if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
-  auto driver_api = c10::cuda::DriverAPI::get();
+  c10::cuda::CUDAGuard guard(device_idx);
+  device_idx = static_cast<int>(guard.current_device().index());
 
   CUmemAllocationProp prop = {};
   prop.type = CU_MEM_ALLOCATION_TYPE_PINNED;
@@ -535,6 +621,7 @@ void* CUDASymmetricMemoryAllocator::alloc(
   size_t block_size = signal_pad_offset + signal_pad_size;
 
   size_t granularity;
+  auto driver_api = c10::cuda::DriverAPI::get();
   C10_CUDA_DRIVER_CHECK(driver_api->cuMemGetAllocationGranularity_(
       &granularity, &prop, CU_MEM_ALLOC_GRANULARITY_RECOMMENDED));
   block_size = at::round_up(block_size, granularity);
@@ -546,11 +633,16 @@ void* CUDASymmetricMemoryAllocator::alloc(
   void* ptr = nullptr;
   map_block(&ptr, handle, block_size, device_idx);
 
-  c10::cuda::CUDAGuard guard(device_idx);
   AT_CUDA_CHECK(cudaMemset(ptr, 0, block_size));
 
+  auto alloc_ref = c10::make_intrusive<AllocationRef>(ptr, handle, block_size, device_idx);
   auto block = c10::make_intrusive<Block>(
-      handle, device_idx, block_size, size, signal_pad_offset, group_name);
+      std::move(alloc_ref),
+      device_idx,
+      block_size,
+      size,
+      signal_pad_offset,
+      group_name);
   {
     std::unique_lock lock(mutex_);
     ptr_to_block_.emplace(ptr, std::move(block));
@@ -563,28 +655,8 @@ void* CUDASymmetricMemoryAllocator::alloc(
 }
 
 void CUDASymmetricMemoryAllocator::free(void* ptr) {
-#if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
-  auto block = find_block(ptr);
-  // Leak the cuda allocations during static deinitialization
-  if (block == nullptr || is_finalizing()) {
-    return;
-  }
-  // Initializing CUDASymmetricMemory with an allocation transfers its
-  // ownership to the CUDASymmetricMemory object.
-  if (block->symm_mem == nullptr) {
-    auto driver_api = c10::cuda::DriverAPI::get();
-    C10_CUDA_DRIVER_CHECK(driver_api->cuMemUnmap_(
-        reinterpret_cast<CUdeviceptr>(ptr), block->block_size));
-    C10_CUDA_DRIVER_CHECK(driver_api->cuMemRelease_(block->handle));
-  }
-  {
-    std::unique_lock lock(mutex_);
-    ptr_to_block_.erase(ptr);
-  }
-#else
-  TORCH_CHECK(
-      false, "CUDASymmetricMemory requires PYTORCH_C10_DRIVER_API_SUPPORTED");
-#endif
+  std::unique_lock lock(mutex_);
+  ptr_to_block_.erase(ptr);
 }
 
 size_t CUDASymmetricMemoryAllocator::get_alloc_size(void* ptr) {
@@ -615,7 +687,8 @@ void validate_rendezvous_requests(
   for (auto req : reqs) {
     device_indices.insert(req.device_idx);
   }
-  if (device_indices.size() < (size_t)world_size) {
+  if (!allow_overlapping_devices() &&
+      device_indices.size() < (size_t)world_size) {
     TORCH_CHECK(
         false,
         "CUDASymmetricMemoryAllocator::rendezvous: ",
@@ -709,7 +782,7 @@ static void init_multicast_for_block(
   C10_CUDA_DRIVER_CHECK(
       driver_api->cuMulticastAddDevice_(mc_handle, block->device_idx));
   C10_CUDA_DRIVER_CHECK(driver_api->cuMulticastBindMem_(
-      mc_handle, 0, block->handle, 0, block->block_size, 0));
+      mc_handle, 0, block->alloc_ref->handle, 0, block->block_size, 0));
 
   map_block(&mc_addr, mc_handle, block->block_size, block->device_idx);
   store_barrier(store, rank, world_size);
@@ -717,19 +790,36 @@ static void init_multicast_for_block(
 }
 
 c10::intrusive_ptr<SymmetricMemory> CUDASymmetricMemoryAllocator::rendezvous(
-    void* ptr) {
+    void* ptr,
+    const std::optional<std::string>& group_name) {
 #if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
   auto block = find_block(ptr);
   if (block == nullptr) {
     return nullptr;
   }
 
-  if (block->symm_mem != nullptr) {
-    return block->symm_mem;
+  // The group_name passed to rendezvous() takes precedence over
+  // the default group_name specified during allocation.
+  std::string group_name_;
+  if (group_name.has_value()) {
+    group_name_ = *group_name;
+  } else {
+    if (!block->default_group_name.has_value()) {
+      TORCH_CHECK(
+          false,
+          "CUDASymmetricMemory::rendezvous: `group_name` is neither "
+          "specified during allocation nor passed to rendezvous().");
+    }
+    group_name_ = *block->default_group_name;
+  }
+
+  auto it = block->symm_mems.find(group_name_);
+  if (it != block->symm_mems.end()) {
+    return it->second;
   }
 
   IpcChannel ipc_channel;
-  auto group_info = get_group_info(block->group_name);
+  auto group_info = get_group_info(group_name_);
   auto store = group_info.store;
   int rank = group_info.rank;
   int world_size = group_info.world_size;
@@ -737,7 +827,10 @@ c10::intrusive_ptr<SymmetricMemory> CUDASymmetricMemoryAllocator::rendezvous(
   auto driver_api = c10::cuda::DriverAPI::get();
   int block_fd;
   C10_CUDA_DRIVER_CHECK(driver_api->cuMemExportToShareableHandle_(
-      &block_fd, block->handle, CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR, 0));
+      &block_fd,
+      block->alloc_ref->handle,
+      CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR,
+      0));
 
   auto local_req = RendezvousRequest{
       .device_idx = block->device_idx,
@@ -761,7 +854,7 @@ c10::intrusive_ptr<SymmetricMemory> CUDASymmetricMemoryAllocator::rendezvous(
 
   for (int r = 0; r < world_size; ++r) {
     if (r == rank) {
-      handles[r] = block->handle;
+      handles[r] = block->alloc_ref->handle;
       buffers[r] = ptr;
       signal_pads[r] = (void*)((uintptr_t)ptr + block->signal_pad_offset);
       continue;
@@ -780,18 +873,23 @@ c10::intrusive_ptr<SymmetricMemory> CUDASymmetricMemoryAllocator::rendezvous(
   HandleType mc_handle{};
   void* mc_addr = nullptr;
   bool group_has_multicast_support = check_group_multicast_support(reqs);
-  if (group_has_multicast_support) {
+  if (!allow_overlapping_devices() && group_has_multicast_support) {
     init_multicast_for_block(
         mc_handle, mc_addr, block, ipc_channel, pids, store, rank, world_size);
   }
 
-  // Initializing CUDASymmetricMemory with an allocation transfers its
-  // ownership to the CUDASymmetricMemory object. So that outstanding
-  // references to the CUDASymmetricMemory object can keep the allocation
-  // alive.
-  block->symm_mem = c10::make_intrusive<CUDASymmetricMemory>(
-      std::move(handles),
-      block->block_size,
+  std::vector<c10::intrusive_ptr<AllocationRef>> alloc_refs;
+  for (int r = 0; r < world_size; ++r) {
+    if (r == rank) {
+      alloc_refs.emplace_back(block->alloc_ref);
+      continue;
+    }
+    alloc_refs.push_back(c10::make_intrusive<AllocationRef>(
+        buffers[r], handles[r], block->block_size, block->device_idx));
+  }
+
+  auto symm_mem = c10::make_intrusive<CUDASymmetricMemory>(
+      std::move(alloc_refs),
       std::move(buffers),
       std::move(signal_pads),
       mc_handle,
@@ -800,20 +898,12 @@ c10::intrusive_ptr<SymmetricMemory> CUDASymmetricMemoryAllocator::rendezvous(
       block->device_idx,
       group_info.rank,
       group_info.world_size);
-  return block->symm_mem;
+  block->symm_mems[group_name_] = symm_mem;
+  return symm_mem;
 #else
   TORCH_CHECK(
       false, "CUDASymmetricMemory requires PYTORCH_C10_DRIVER_API_SUPPORTED");
 #endif
-}
-
-bool CUDASymmetricMemoryAllocator::is_rendezvous_completed(void* ptr) {
-  auto block = find_block(ptr);
-  TORCH_CHECK(
-      block != nullptr,
-      "CUDASymmetricMemoryAllocator::is_rendezvous_completed: input must be allocated ",
-      "via CUDASymmetricMemoryAllocator::alloc");
-  return block->symm_mem != nullptr;
 }
 
 bool CUDASymmetricMemoryAllocator::has_multicast_support(int device_idx) {

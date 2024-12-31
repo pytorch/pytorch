@@ -14,11 +14,7 @@ from torch.testing._internal.common_device_type import (
     ops,
 )
 from torch.testing._internal.common_methods_invocations import DecorateInfo, op_db
-from torch.testing._internal.common_utils import (
-    run_tests,
-    suppress_warnings,
-    TEST_WITH_ASAN,
-)
+from torch.testing._internal.common_utils import run_tests, suppress_warnings
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorConverter,
     DTensorOpTestBase,
@@ -102,8 +98,6 @@ dtensor_fails = {
     xfail("all"),
     xfail("allclose"),
     xfail("alias_copy"),
-    xfail("amax"),
-    xfail("amin"),
     xfail("aminmax"),
     xfail("any"),
     xfail("arange"),
@@ -211,13 +205,10 @@ dtensor_fails = {
     xfail("linalg.lu_factor"),
     xfail("linalg.lu_factor_ex"),
     xfail("linalg.lu_solve"),
-    xfail("linalg.matrix_norm"),
     xfail("linalg.matrix_power"),
     xfail("linalg.matrix_rank"),
     xfail("linalg.matrix_rank", "hermitian"),
     xfail("linalg.multi_dot"),
-    xfail("linalg.norm"),
-    xfail("linalg.norm", "subgradients_at_zero"),
     xfail("linalg.pinv"),
     xfail("linalg.pinv", "hermitian"),
     xfail("linalg.slogdet"),
@@ -242,8 +233,6 @@ dtensor_fails = {
     xfail("masked_fill"),
     xfail("masked_scatter"),
     xfail("masked_select"),
-    xfail("masked.amax"),
-    xfail("masked.amin"),
     xfail("masked.argmax"),
     xfail("masked.argmin"),
     xfail("masked.cumprod"),
@@ -365,6 +354,7 @@ dtensor_fails = {
     xfail("ormqr"),
     xfail("ones"),
     xfail("pca_lowrank"),
+    xfail("permute_copy"),
     xfail("pinverse"),
     xfail("polar"),
     xfail("put"),
@@ -528,7 +518,6 @@ class TestDTensorOps(DTensorOpTestBase):
 
     # only allow float dytpe for now, we can relax this constraint
     # when feel necessary later (i.e when adding quantization support).
-    @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @suppress_warnings
     @ops(op_db, allowed_dtypes=(torch.float,))
     @skipOps("TestDTensorOps", "test_dtensor_op_db", dtensor_fails)

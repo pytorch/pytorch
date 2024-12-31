@@ -179,30 +179,36 @@ auto PyFunctionPostHook::operator()(
 void PyFunctionTensorPreHook::compiled_args(CompiledNodeArgs& args) {
   PyObject *key = nullptr, *value = nullptr;
   Py_ssize_t pos = 0;
+  Py_BEGIN_CRITICAL_SECTION(dict);
   while (PyDict_Next(dict, &pos, &key, &value)) {
     Py_INCREF(value);
     args.add_tensor_pre_hook(
         c10::SafePyObject(value, getPyInterpreter()),
         static_cast<int>(value_idx));
   }
+  Py_END_CRITICAL_SECTION();
 }
 
 void PyFunctionPreHook::compiled_args(CompiledNodeArgs& args) {
   PyObject *key = nullptr, *value = nullptr;
   Py_ssize_t pos = 0;
+  Py_BEGIN_CRITICAL_SECTION(dict);
   while (PyDict_Next(dict, &pos, &key, &value)) {
     Py_INCREF(value);
     args.add_pre_hook(c10::SafePyObject(value, getPyInterpreter()));
   }
+  Py_END_CRITICAL_SECTION();
 }
 
 void PyFunctionPostHook::compiled_args(CompiledNodeArgs& args) {
   PyObject *key = nullptr, *value = nullptr;
   Py_ssize_t pos = 0;
+  Py_BEGIN_CRITICAL_SECTION(dict);
   while (PyDict_Next(dict, &pos, &key, &value)) {
     Py_INCREF(value);
     args.add_post_hook(c10::SafePyObject(value, getPyInterpreter()));
   }
+  Py_END_CRITICAL_SECTION();
 }
 
 PyFunctionTensorPostAccGradHooks::PyFunctionTensorPostAccGradHooks(
@@ -234,11 +240,13 @@ void PyFunctionTensorPostAccGradHooks::compiled_args(
     torch::dynamo::autograd::CompiledNodeArgs& args) {
   PyObject *key = nullptr, *value = nullptr;
   Py_ssize_t pos = 0;
+  Py_BEGIN_CRITICAL_SECTION(dict);
   while (PyDict_Next(dict, &pos, &key, &value)) {
     Py_INCREF(value);
     c10::SafePyObject hook_obj(value, getPyInterpreter());
     args.add_post_acc_grad_hook(std::move(hook_obj));
   }
+  Py_END_CRITICAL_SECTION();
 }
 
 void PyFunctionTensorPostAccGradHooks::apply_with_saved(

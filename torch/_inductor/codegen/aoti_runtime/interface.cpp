@@ -1,8 +1,7 @@
-#include <torch/csrc/inductor/aoti_runtime/arrayref_tensor.h>
+// Definition of AOTI runtime interface functions
+
 #include <torch/csrc/inductor/aoti_runtime/interface.h>
 #include <torch/csrc/inductor/aoti_runtime/model_container.h>
-#include <torch/csrc/inductor/aoti_runtime/scalar_to_tensor.h>
-#include <torch/csrc/inductor/aoti_runtime/thread_local.h>
 
 #include <iostream>
 #include <sstream>

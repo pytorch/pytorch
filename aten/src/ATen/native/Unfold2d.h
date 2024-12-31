@@ -42,7 +42,7 @@ using unfold2d_acc_fn = void (*)(
     bool is_channels_last
 );
 
-DECLARE_DISPATCH(unfold2d_copy_fn, unfolded2d_copy_stub);
-DECLARE_DISPATCH(unfold2d_acc_fn, unfolded2d_acc_stub);
+DECLARE_DISPATCH(unfold2d_copy_fn, unfolded2d_copy_stub)
+DECLARE_DISPATCH(unfold2d_acc_fn, unfolded2d_acc_stub)
 
 } // namespace at::native

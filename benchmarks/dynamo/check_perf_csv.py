@@ -5,7 +5,7 @@ import textwrap
 import pandas as pd
 
 
-def check_perf_csv(filename, threshold):
+def check_perf_csv(filename, threshold, threshold_scale):
     """
     Basic performance checking.
     """
@@ -16,7 +16,7 @@ def check_perf_csv(filename, threshold):
     for _, row in df.iterrows():
         model_name = row["name"]
         speedup = row["speedup"]
-        if speedup < threshold:
+        if speedup < threshold * threshold_scale:
             failed.append(model_name)
 
         print(f"{model_name:34} {speedup}")
@@ -39,5 +39,12 @@ if __name__ == "__main__":
     parser.add_argument(
         "--threshold", "-t", type=float, help="threshold speedup value to check against"
     )
+    parser.add_argument(
+        "--threshold-scale",
+        "-s",
+        type=float,
+        default=1.0,
+        help="multiple threshold by this value to relax the check",
+    )
     args = parser.parse_args()
-    check_perf_csv(args.file, args.threshold)
+    check_perf_csv(args.file, args.threshold, args.threshold_scale)

@@ -5,23 +5,21 @@
 
 #include <cstdlib>
 #include <iostream>
-#include <sstream>
 #include <string>
-#include <thread>
 
 #define STR_HELPER(x) #x
 #define STR(x) STR_HELPER(x)
 
 // Wait for work to complete
 std::vector<std::vector<at::Tensor>> waitWork(
-    c10::intrusive_ptr<::c10d::ProcessGroupMPI> pg,
-    std::vector<c10::intrusive_ptr<c10d::Work>> works) {
+    const c10::intrusive_ptr<::c10d::ProcessGroupMPI>& pg,
+    const std::vector<c10::intrusive_ptr<c10d::Work>>& works) {
   std::vector<std::vector<at::Tensor>> outputTensors;
   for (auto& work : works) {
     try {
       work->wait();
     } catch (const std::exception& ex) {
-      std::cerr << "Exception received: " << ex.what() << std::endl;
+      std::cerr << "Exception received: " << ex.what() << '\n';
       pg->abort();
     }
     outputTensors.emplace_back(work->result());
@@ -31,15 +29,15 @@ std::vector<std::vector<at::Tensor>> waitWork(
 
 // Wait using Futures
 std::vector<std::vector<at::Tensor>> waitFuture(
-    c10::intrusive_ptr<::c10d::ProcessGroupMPI> pg,
-    std::vector<c10::intrusive_ptr<c10d::Work>> works) {
+    const c10::intrusive_ptr<::c10d::ProcessGroupMPI>& pg,
+    const std::vector<c10::intrusive_ptr<c10d::Work>>& works) {
   std::vector<std::vector<at::Tensor>> outputTensors;
   for (auto& work : works) {
     auto fut = work->getFuture();
     try {
       fut->wait();
     } catch (const std::exception& ex) {
-      std::cerr << "Exception received: " << ex.what() << std::endl;
+      std::cerr << "Exception received: " << ex.what() << '\n';
       pg->abort();
     }
     auto result = fut->value();
@@ -78,7 +76,7 @@ void testAllreduce(int iter = 1000) {
     const auto expected = worldSize * i;
     auto data = outputTensors[i][0].data_ptr<float>();
     for (auto j = 0; j < outputTensors[i][0].numel(); ++j) {
-      if (data[j] != expected) {
+      if (data[j] != static_cast<float>(expected)) {
         TORCH_CHECK(false, "BOOM!");
       }
     }
@@ -110,7 +108,7 @@ void testBroadcast(int iter = 10000) {
     const auto expected = i;
     auto data = outputTensors[i][0].data_ptr<float>();
     for (auto j = 0; j < outputTensors[i][0].numel(); ++j) {
-      if (data[j] != expected) {
+      if (data[j] != static_cast<float>(expected)) {
         TORCH_CHECK(false, "BOOM!");
       }
     }
@@ -140,7 +138,7 @@ void testReduce(int iter = 10000) {
       const auto expected = worldSize * i;
       auto data = outputTensors[i][0].data_ptr<float>();
       for (auto j = 0; j < outputTensors[i][0].numel(); ++j) {
-        if (data[j] != expected) {
+        if (data[j] != static_cast<float>(expected)) {
           TORCH_CHECK(false, "BOOM!");
         }
       }
@@ -179,7 +177,7 @@ void testAllgather(int iter = 10000) {
       const auto expected = i * j;
       auto data = outputTensors[i][j].data_ptr<float>();
       for (auto k = 0; k < outputTensors[i][j].numel(); ++k) {
-        if (data[k] != expected) {
+        if (data[k] != static_cast<float>(expected)) {
           TORCH_CHECK(false, "BOOM!");
         }
       }
@@ -222,7 +220,7 @@ void testGather(int iter = 10000) {
         const auto expected = i * j;
         auto data = outputTensors[i][j].data_ptr<float>();
         for (auto k = 0; k < outputTensors[i][j].numel(); ++k) {
-          if (data[k] != expected) {
+          if (data[k] != static_cast<float>(expected)) {
             TORCH_CHECK(false, "BOOM!");
           }
         }
@@ -230,7 +228,7 @@ void testGather(int iter = 10000) {
     }
   } else {
     for (const auto i : c10::irange(iter)) {
-      if (outputTensors[i].size() != 0) {
+      if (!outputTensors[i].empty()) {
         TORCH_CHECK(false, "BOOM!");
       }
     }
@@ -271,7 +269,7 @@ void testScatter(int iter = 1) {
       const auto expected = i * j;
       auto data = outputTensors[i][0].data_ptr<float>();
       for (auto k = 0; k < outputTensors[i][0].numel(); ++k) {
-        if (data[k] != expected) {
+        if (data[k] != static_cast<float>(expected)) {
           TORCH_CHECK(false, "BOOM!");
         }
       }
@@ -331,7 +329,7 @@ void testSendRecv(bool recvAnysource, int iter = 10000) {
     const auto expected = i;
     auto data = outputTensors[i][0].data_ptr<float>();
     for (auto j = 0; j < outputTensors[i][0].numel(); ++j) {
-      if (data[j] != expected) {
+      if (data[j] != static_cast<float>(expected)) {
         TORCH_CHECK(false, "BOOM!");
       }
     }
@@ -349,7 +347,7 @@ int main(int argc, char** argv) {
 #ifdef MPIEXEC
   // If we are within an openmpi mpirun, then skip the exec
   if (!std::getenv("OMPI_COMM_WORLD_SIZE")) {
-    std::cout << "Execute mpiexec from: " << STR(MPIEXEC) << std::endl;
+    std::cout << "Execute mpiexec from: " << STR(MPIEXEC) << '\n';
     execl(STR(MPIEXEC), "-np 2", argv[0], (char*)nullptr);
   }
 
@@ -363,7 +361,7 @@ int main(int argc, char** argv) {
   testSendRecv(true);
   testBackendName();
 
-  std::cout << "Test successful" << std::endl;
+  std::cout << "Test successful" << '\n';
 #else
   std::cout << "MPI executable not found, skipping test" << std::endl;
 #endif

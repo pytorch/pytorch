@@ -6,7 +6,7 @@ on:
 jobs:
   auto-request-review:
     # Don't run on forked repos
-    if: ${{ !github.event.pull_request.head.repo.fork }}
+    if: ${{ !github.event.pull_request.head.repo.fork && github.repository_owner == 'pytorch' }}
     permissions:
       contents: read
       pull-requests: write

@@ -103,6 +103,8 @@ def semi_sparse_detach(func, types, args, kwargs) -> torch.Tensor:
         packed_t=self.packed_t,
         meta_t=self.meta_t,
         compressed_swizzled_bitmask=self.compressed_swizzled_bitmask,
+        fuse_transpose_cusparselt=self.fuse_transpose_cusparselt,
+        alg_id_cusparselt=self.alg_id_cusparselt,
         requires_grad=False,
     )
 
@@ -145,7 +147,7 @@ def semi_sparse_addmm(func, types, args=(), kwargs=None) -> torch.Tensor:
         )
     B_t = B.t()
     assert isinstance(B_t, torch.sparse.SparseSemiStructuredTensor)
-    row, col = A.shape
+    row, _col = A.shape
     A_padded = B_t._pad_dense_input(A)
     result = B_t._mm(A_padded.t(), bias=bias).t()
     return result[:row, :]

@@ -23,10 +23,10 @@ TORCH_API std::string NewProcessWideShmHandle();
 
 class TORCH_API MapAllocator {
  public:
-  MapAllocator(c10::string_view filename, int flags, size_t size);
+  MapAllocator(std::string_view filename, int flags, size_t size);
   MapAllocator(
       WithFd,
-      c10::string_view filename,
+      std::string_view filename,
       int fd,
       int flags,
       size_t size);
@@ -61,7 +61,7 @@ class TORCH_API MapAllocator {
 
   static MapAllocator* fromDataPtr(const at::DataPtr&);
   static at::DataPtr makeDataPtr(
-      c10::string_view filename,
+      std::string_view filename,
       int flags,
       size_t size,
       size_t* actual_size_out);
@@ -112,6 +112,10 @@ class TORCH_API RefcountedMapAllocator : private RefcountedMapAllocatorArgCheck,
       size_t size);
 
   static RefcountedMapAllocator* fromDataPtr(const at::DataPtr&);
+  RefcountedMapAllocator(const RefcountedMapAllocator&) = delete;
+  RefcountedMapAllocator(RefcountedMapAllocator&&) = delete;
+  RefcountedMapAllocator& operator=(const RefcountedMapAllocator&) = delete;
+  RefcountedMapAllocator& operator=(RefcountedMapAllocator&&) = delete;
   static at::DataPtr makeDataPtr(
       const char* filename,
       int flags,

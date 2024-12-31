@@ -97,10 +97,9 @@ class Pattern:
     def matched_events(self):
         if self.skip:
             return []
-        matched_events = []
-        for event in self.eventTreeTraversal():
-            if self.match(event):
-                matched_events.append(event)
+        matched_events = [
+            event for event in self.eventTreeTraversal() if self.match(event)
+        ]
         return matched_events
 
     def root_of(self, event: _ProfilerEvent):

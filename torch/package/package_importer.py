@@ -6,6 +6,7 @@ import inspect
 import io
 import linecache
 import os
+import sys
 import types
 from contextlib import contextmanager
 from typing import (
@@ -259,7 +260,10 @@ class PackageImporter(Importer):
 
             if typename == "storage":
                 storage_type, key, location, size = data
-                dtype = storage_type.dtype
+                if storage_type is torch.UntypedStorage:
+                    dtype = torch.uint8
+                else:
+                    dtype = storage_type.dtype
 
                 if key not in loaded_storages:
                     load_tensor(
@@ -463,7 +467,6 @@ class PackageImporter(Importer):
 
     # note: copied from cpython's import code, with call to create module replaced with _make_module
     def _do_find_and_load(self, name):
-        path = None
         parent = name.rpartition(".")[0]
         module_name_no_parent = name.rpartition(".")[-1]
         if parent:
@@ -475,7 +478,7 @@ class PackageImporter(Importer):
             parent_module = self.modules[parent]
 
             try:
-                path = parent_module.__path__  # type: ignore[attr-defined]
+                parent_module.__path__  # type: ignore[attr-defined]
 
             except AttributeError:
                 # when we attempt to import a package only containing pybinded files,
@@ -527,8 +530,9 @@ class PackageImporter(Importer):
         if name == "os":
             self.modules["os.path"] = cast(Any, module).path
         elif name == "typing":
-            self.modules["typing.io"] = cast(Any, module).io
-            self.modules["typing.re"] = cast(Any, module).re
+            if sys.version_info < (3, 13):
+                self.modules["typing.io"] = cast(Any, module).io
+                self.modules["typing.re"] = cast(Any, module).re
 
         return module
 

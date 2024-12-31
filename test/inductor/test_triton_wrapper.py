@@ -14,7 +14,7 @@ from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 class TestTritonWrapper(TestCase):
     def get_compiled_module(self):
         compiled_module = None
-        for v in PyCodeCache.cache.values():
+        for v in PyCodeCache.modules:
             if hasattr(v, "benchmark_compiled_module"):
                 self.assertTrue(
                     compiled_module is None, "Found multiple compiled modules"
@@ -38,7 +38,7 @@ class TestTritonWrapper(TestCase):
         N = 10
         x = torch.rand(N).to(device=GPU_TYPE)
         y = torch.rand(N).to(device=GPU_TYPE)
-        out = f(x, y)
+        out = f(x, y)  # noqa: F841
         compiled_module = self.get_compiled_module()
         # to make sure the subprocess runs on the exact same path as the parent process
         # we augment the PYTHONPATH env var

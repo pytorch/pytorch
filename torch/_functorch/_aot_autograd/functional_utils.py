@@ -8,7 +8,8 @@ This file contains utilities related to functionalization in AOTAutograd:
 """
 from __future__ import annotations
 
-from typing import Optional
+from dataclasses import dataclass
+from typing import Optional, Tuple
 
 import torch
 from torch import Tensor
@@ -16,7 +17,11 @@ from torch._logging import getArtifactLogger
 from torch._subclasses.fake_tensor import FakeTensor
 from torch._subclasses.functional_tensor import FunctionalTensor
 from torch._subclasses.meta_utils import is_sparse_any
-from torch.fx.experimental.symbolic_shapes import definitely_true, sym_eq
+from torch.fx.experimental.symbolic_shapes import (
+    definitely_true,
+    sym_eq,
+    SymIntEqByExpr,
+)
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.utils._python_dispatch import (
     is_traceable_wrapper_subclass,
@@ -45,7 +50,7 @@ def to_fun(t):
 
 def sync_functional_tensor(t):
     if is_traceable_wrapper_subclass(t):
-        attrs, ctx = t.__tensor_flatten__()  # type: ignore[attr-defined]
+        attrs, _ctx = t.__tensor_flatten__()  # type: ignore[attr-defined]
         for attr in attrs:
             sync_functional_tensor(getattr(t, attr))
     else:
@@ -326,6 +331,35 @@ def has_same_metadata(t1, t2):
     )
 
 
+@dataclass(frozen=True)
+class MetadataKey:
+    """
+    This should be equal whenever has_same_metadata would return True
+    """
+
+    size: Tuple[SymIntEqByExpr, ...]
+    layout: torch.layout
+    is_sparse: bool
+    # these are empty when is_sparse
+    stride: Optional[Tuple[SymIntEqByExpr, ...]]
+    storage_offset: Optional[SymIntEqByExpr]
+    is_conj: bool
+    is_neg: bool
+
+    @staticmethod
+    def make(t):
+        is_sparse = is_sparse_any(t)
+        return MetadataKey(
+            size=tuple(SymIntEqByExpr(s) for s in t.size()),
+            layout=t.layout,
+            is_sparse=is_sparse,
+            stride=None if is_sparse else tuple(SymIntEqByExpr(s) for s in t.stride()),
+            storage_offset=None if is_sparse else SymIntEqByExpr(t.storage_offset()),
+            is_conj=t.is_conj(),
+            is_neg=t.is_neg(),
+        )
+
+
 # Wrapper around a FunctionalTensorWrapper for comparing only the resulting metadata
 # after applying all the ViewMeta operations.
 class FunctionalTensorMetadataEq:
@@ -418,7 +452,6 @@ def assert_functional_graph(fx_g: torch.fx.Graph) -> int:
             placeholders.add(n)
         if isinstance(n.target, torch._ops.OpOverload):
             if n.target in allowed_mutation_ops:
-                suffix = True
                 # Can only copy_/set_ into an input
                 # this is mostly a hack to avoid failing XLA tests.
                 # See https://github.com/pytorch/pytorch/pull/122434#issuecomment-2101012113

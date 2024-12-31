@@ -12,7 +12,7 @@ int64_t normalizeAndCheckIndex(int64_t idx, int64_t list_size) {
   }
 
   if (idx < 0 || idx >= list_size) {
-    AT_ERROR("Invalid index ", idx, " for list_size", list_size);
+    TORCH_CHECK(false, "Invalid index ", idx, " for list_size", list_size);
   }
   return idx;
 }
@@ -32,7 +32,7 @@ ExprHandle promoteToDtype(ExprHandle e, ScalarType dt) {
   case ScalarType::Name:      \
     e = cast<Type>(e);        \
     break;
-    AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TYPE_CASE);
+    AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TYPE_CASE)
 #undef TYPE_CASE
     case ScalarType::QUInt8:
       e = cast<c10::quint8>(e);

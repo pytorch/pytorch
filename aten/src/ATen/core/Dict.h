@@ -80,9 +80,10 @@ public:
 
   template<class Value_>
   void setValue(Value_&& value) const {
-    static_assert(std::is_constructible<Value, Value_>::value, "Wrong type for the value argument of setValue()");
+    static_assert(std::is_constructible_v<Value, Value_>, "Wrong type for the value argument of setValue()");
     iterator_->second = Value(std::forward<Value_>(value));
   }
+  ~DictEntryRef() = default;
 
 private:
   // allow copying and moving, but only our friends (i.e. the Dict class) can do
@@ -205,6 +206,7 @@ template<class Key, class Value> Dict<IValue, IValue> toGenericDict(Dict<Key, Va
  * for the kernel API.
  */
 template<class Key, class Value>
+// NOLINTNEXTLINE(cppcoreguidelines-special-member-functions)
 class Dict final {
 private:
   static_assert((std::is_same_v<IValue, Key> && std::is_same_v<IValue, Value>) || guts::typelist::contains<impl::valid_dict_key_types, Key>::value, "Invalid Key type for Dict. We only support int64_t, double, bool, and string.");
@@ -314,7 +316,7 @@ public:
    *
    * @return The number of elements removed. This is either '1' if an element with the key existed, or '0' if it didn't.
    */
-  C10_NODISCARD size_t erase(const Key& key) const;
+  [[nodiscard]] size_t erase(const Key& key) const;
 
   /**
    * Returns the mapped value of the element with key equivalent to key.

@@ -72,7 +72,7 @@ def check_codegen(
     def run(*ex, **kwargs):
         return model(*ex, **kwargs)
 
-    run = torch._dynamo.optimize(compile_fx_wrapper, nopython=True)(run)
+    run = torch.compile(run, backend=compile_fx_wrapper, fullgraph=True)
 
     if is_cpp_code:
         _, code = run_and_get_cpp_code(run, *example_inputs, **kwargs)
@@ -120,7 +120,7 @@ test_failures = {
     "test_stack_dynamic_shapes": TestFailure(("cpu",)),
     "test_tensor2_dynamic_shapes": TestFailure(("cpu",)),
     "test_tensor3_dynamic_shapes": TestFailure(("cpu",)),
-    "test_to_device_constant_dynamic_shapes": TestFailure("cpu"),
+    "test_to_device_constant_dynamic_shapes": TestFailure(("cpu",)),
     "test_upsample_nearest2d_backward_dynamic_shapes": TestFailure(("cpu",)),
     "test_views3_dynamic_shapes": TestFailure(("cpu",)),
     "test_views4_dynamic_shapes": TestFailure(("cpu",)),
@@ -160,9 +160,10 @@ test_failures = {
     "test_empty1_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
     "test_empty2_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
     "test_empty_strided_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
-    "test_bucketize_dynamic_shapes": TestFailure("cpu"),
-    "test_bucketize_default_kwargs_dynamic_shapes": TestFailure("cpu"),
-    "test_bucketize_int_dynamic_shapes": TestFailure("cpu"),
+    "test_bucketize_dynamic_shapes": TestFailure(("cpu",)),
+    "test_bucketize_default_kwargs_dynamic_shapes": TestFailure(("cpu",)),
+    "test_bucketize_int_dynamic_shapes": TestFailure(("cpu",)),
+    "test_searchsorted_dynamic_shapes": TestFailure(("cpu",)),
     "test_like_rands_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
     "test_linspace2_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
     "test_linspace3_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
@@ -247,7 +248,7 @@ test_failures = {
     "test_views5_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
     "test_view_detach_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
     "test_view_on_aliased_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
-    "test_linear_float64_dynamic_shapes": TestFailure("cpu"),
+    "test_linear_float64_dynamic_shapes": TestFailure(("cpu",)),
     "test_adaptive_avg_pool_with_output_size_0_dynamic_shapes": TestFailure(
         ("cpu", "cuda", "xpu")
     ),

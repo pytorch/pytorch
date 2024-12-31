@@ -7,8 +7,7 @@
 #include <ruy/ruy.h>
 #endif
 
-namespace at {
-namespace native {
+namespace at::native {
 
 namespace {
 
@@ -184,5 +183,4 @@ TORCH_LIBRARY_IMPL(quantized, QuantizedCPU, m) {
 
 } // namespace
 
-} // namespace native
-} // namespace at
+} // namespace at::native

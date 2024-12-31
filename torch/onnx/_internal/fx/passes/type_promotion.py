@@ -43,7 +43,7 @@ _SCALAR_TYPE_TENSOR_DTYPE_MAP: Mapping[type, torch.dtype] = {
 def _try_getclosurevars(func):
     try:
         return inspect.getclosurevars(func)
-    except TypeError as e:
+    except TypeError:
         return None
 
 
@@ -154,15 +154,15 @@ class ElementwiseTypePromotionRule(TypePromotionRule):
             f"{self.promote_args_positions}, {self.promote_kwargs_names}, {self.promotion_kind})"
         )
 
-    def __eq__(self, __value: object) -> bool:
-        if not isinstance(__value, ElementwiseTypePromotionRule):
+    def __eq__(self, other: object, /) -> bool:
+        if not isinstance(other, ElementwiseTypePromotionRule):
             return False
         return (
-            self.namespace == __value.namespace
-            and self.op_name == __value.op_name
-            and self.promote_args_positions == __value.promote_args_positions
-            and self.promote_kwargs_names == __value.promote_kwargs_names
-            and self.promotion_kind == __value.promotion_kind
+            self.namespace == other.namespace
+            and self.op_name == other.op_name
+            and self.promote_args_positions == other.promote_args_positions
+            and self.promote_kwargs_names == other.promote_kwargs_names
+            and self.promotion_kind == other.promotion_kind
         )
 
     def __hash__(self) -> int:
@@ -270,13 +270,13 @@ class ReductionTypePromotionRule(TypePromotionRule):
     def __repr__(self):
         return f"ReductionTypePromotionRule('{self.namespace}', '{self.op_name}', {self.promotion_kind})"
 
-    def __eq__(self, __value: object) -> bool:
-        if not isinstance(__value, ElementwiseTypePromotionRule):
+    def __eq__(self, other: object, /) -> bool:
+        if not isinstance(other, ElementwiseTypePromotionRule):
             return False
         return (
-            self.namespace == __value.namespace
-            and self.op_name == __value.op_name
-            and self.promotion_kind == __value.promotion_kind
+            self.namespace == other.namespace
+            and self.op_name == other.op_name
+            and self.promotion_kind == other.promotion_kind
         )
 
     def __hash__(self) -> int:
@@ -884,12 +884,6 @@ _GENERATED_ATEN_TYPE_PROMOTION_RULE_SET = {
         [0, 1],
         [],
         ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
-    ),
-    ElementwiseTypePromotionRule(
-        "aten", "pow", [0, 1], [], ELEMENTWISE_TYPE_PROMOTION_KIND.BOOL_TO_LONG
-    ),
-    ElementwiseTypePromotionRule(
-        "aten", "pow_", [0, 1], [], ELEMENTWISE_TYPE_PROMOTION_KIND.BOOL_TO_LONG
     ),
     ElementwiseTypePromotionRule(
         "aten", "prelu", [0, 1], [], ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT

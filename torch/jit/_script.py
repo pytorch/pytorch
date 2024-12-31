@@ -1493,11 +1493,10 @@ def _get_overloads(obj):
             _jit_internal.get_overload_no_implementation_error_message("function", obj)
         )
 
-    compiled_fns = []
-    for overload_fn in uncompiled_overloads:
-        compiled_fns.append(
-            _compile_function_with_overload(overload_fn, qual_name, obj)
-        )
+    compiled_fns = [
+        _compile_function_with_overload(overload_fn, qual_name, obj)
+        for overload_fn in uncompiled_overloads
+    ]
 
     if existing_compiled_fns:
         compiled_fns = existing_compiled_fns + compiled_fns
@@ -1600,7 +1599,7 @@ def _recursive_compile_class(obj, loc):
     _qual_name = _qualified_name(obj)
     # We're starting a new compilation, so update the error call stack in
     # case it fails
-    error_stack = torch._C.CallStack(_qual_name, loc)
+    error_stack = torch._C.CallStack(_qual_name, loc)  # noqa: F841
     rcb = _jit_internal.createResolutionCallbackForClassMethods(obj)
     return _compile_and_register_class(obj, rcb, _qual_name)
 

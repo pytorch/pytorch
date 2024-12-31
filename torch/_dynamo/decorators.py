@@ -2,15 +2,25 @@
 # ruff: noqa: TCH004
 import functools
 import inspect
+import sys
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, Type, TYPE_CHECKING, TypeVar
 
 import torch
+from torch._environment import is_fbcode
+from torch._vendor.packaging.version import Version
+from torch.utils._contextlib import _DecoratorContextManager
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
 from . import trace_rules, variables
 from .comptime import comptime
-from .eval_frame import DisableContext, innermost_fn, RunOnlyContext
+from .eval_frame import (
+    _set_stance,
+    DisableContext,
+    DynamoStance,
+    innermost_fn,
+    RunOnlyContext,
+)
 from .exc import IncorrectUsage
 from .external_utils import is_compiling
 from .utils import is_function
@@ -49,7 +59,7 @@ def run(fn=None):
 
 def disable(fn=None, recursive=True):
     """
-    Decorator and context manager to disable TorchDynamo
+    Decorator to disable TorchDynamo
 
     If recursive=True, Dynamo is completely skipped on the decorated function
     frame as well as the recursively invoked functions.
@@ -79,6 +89,45 @@ def skip(fn=None):
     skip_code(fn.__code__)
     fn._torchdynamo_disable = True
     return fn
+
+
+class set_stance(_DecoratorContextManager):
+    """
+    Decorator, context manager, function to set the current stance of the compiler.
+
+    Stances documented in corresponding function in torch/compiler/__init__.py
+    """
+
+    _dynamo_forbidden = True
+
+    def __init__(
+        self,
+        stance: str = "default",
+        *,
+        skip_guard_eval_unsafe: bool = False,
+        force_backend=None,
+    ) -> None:
+        if force_backend is not None and stance != "default":
+            raise RuntimeError("non-default stance cannot have force_backend set")
+
+        self.stance = DynamoStance(stance, skip_guard_eval_unsafe, force_backend)
+        self.prev = _set_stance(self.stance)
+
+    def __call__(self, fn):
+        _set_stance(self.prev)
+        wrapper = super().__call__(fn)
+        # forbid wrapper in graph
+        wrapper._dynamo_forbidden = True  # type: ignore[attr-defined]
+        return wrapper
+
+    def __enter__(self):
+        _set_stance(self.stance)
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        _set_stance(self.prev)
+
+    def clone(self):
+        return self.__class__(self.stance.stance, force_backend=self.stance.backend)
 
 
 def assume_constant_result(fn):
@@ -364,7 +413,7 @@ def substitute_in_graph(
 def _apply_func_to_inner_tensors_of_same_dim(func, t, *args, **kwargs):
     assert is_traceable_wrapper_subclass(t)
 
-    attrs, ctx = t.__tensor_flatten__()
+    attrs, _ctx = t.__tensor_flatten__()
     assert isinstance(t, torch.Tensor)
     for attr in attrs:
         inner = getattr(t, attr)
@@ -562,27 +611,35 @@ def mark_static_address(t, guard=True):
 # Note: this carefully avoids eagerly import einops.
 # TODO: we should delete this whole _allow_in_graph_einops logic by approximately 2024 Q2
 def _allow_in_graph_einops():
-    import einops
+    mod = sys.modules.get("einops")
+    if mod is None:
+        return
+    else:
+        # version > 0.7.0 does allow_in_graph out of tree
+        # for BC we need to keep this in fbcode
+        # internal xref https://fb.workplace.com/groups/1026248852325474/permalink/1107135774236781/
+        if Version(mod.__version__) < Version("0.7.0") or is_fbcode():
+            import einops
 
-    try:
-        # requires einops > 0.6.1, torch >= 2.0
-        from einops._torch_specific import (  # type: ignore[attr-defined]  # noqa: F401
-            _ops_were_registered_in_torchdynamo,
-        )
+            try:
+                # requires einops > 0.6.1, torch >= 2.0
+                from einops._torch_specific import (  # type: ignore[attr-defined]  # noqa: F401
+                    _ops_were_registered_in_torchdynamo,
+                )
 
-        # einops > 0.6.1 will call the op registration logic as it is imported.
-    except ImportError:
-        # einops <= 0.6.1
-        allow_in_graph(einops.rearrange)
-        allow_in_graph(einops.reduce)
-        if hasattr(einops, "repeat"):
-            allow_in_graph(einops.repeat)  # available since einops 0.2.0
-        if hasattr(einops, "einsum"):
-            allow_in_graph(einops.einsum)  # available since einops 0.5.0
-        if hasattr(einops, "pack"):
-            allow_in_graph(einops.pack)  # available since einops 0.6.0
-        if hasattr(einops, "unpack"):
-            allow_in_graph(einops.unpack)  # available since einops 0.6.0
+                # einops > 0.6.1 will call the op registration logic as it is imported.
+            except ImportError:
+                # einops <= 0.6.1
+                allow_in_graph(einops.rearrange)
+                allow_in_graph(einops.reduce)
+                if hasattr(einops, "repeat"):
+                    allow_in_graph(einops.repeat)  # available since einops 0.2.0
+                if hasattr(einops, "einsum"):
+                    allow_in_graph(einops.einsum)  # available since einops 0.5.0
+                if hasattr(einops, "pack"):
+                    allow_in_graph(einops.pack)  # available since einops 0.6.0
+                if hasattr(einops, "unpack"):
+                    allow_in_graph(einops.unpack)  # available since einops 0.6.0
 
 
 trace_rules.add_module_init_func("einops", _allow_in_graph_einops)
