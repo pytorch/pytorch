@@ -24,7 +24,8 @@ class Stream(torch._C._XpuStreamBase):
         priority(int, optional): priority of the stream, which can be positive, 0, or negative.
             A lower number indicates a higher priority. By default, the priority is set to 0.
             If the value falls outside of the allowed priority range, it will automatically be
-            mapped to the nearest valid priority(either lowest or highest).
+            mapped to the nearest valid priority (lowest for large positive numbers or
+            highest for large negative numbers).
     """
 
     def __new__(cls, device=None, priority=0, **kwargs):
