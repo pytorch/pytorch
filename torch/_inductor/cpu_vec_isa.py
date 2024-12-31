@@ -188,7 +188,7 @@ class VecAVX512(VecISA):
     _bit_width = 512
     _macro = ["CPU_CAPABILITY_AVX512"]
     _arch_flags = (
-        "-mavx512f -mavx512dq -mavx512vl -mavx512bw -mfma"
+        "-mavx512f -mavx512dq -mavx512vl -mavx512bw -mfma -mf16c"
         if not _IS_WINDOWS
         else "/arch:AVX512"
     )  # TODO: use cflags
