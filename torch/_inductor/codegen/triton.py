@@ -30,6 +30,7 @@ from sympy.printing.precedence import PRECEDENCE
 
 import torch
 import torch._logging
+from torch._dynamo.device_interface import get_interface_for_device
 from torch._dynamo.utils import identity, preserve_rng_state
 from torch._prims_common import is_integer_dtype
 from torch.utils._ordered_set import OrderedSet
@@ -3069,7 +3070,6 @@ class TritonKernel(SIMDKernel):
 
     @staticmethod
     def inductor_meta_common():
-        compile_id = torch._guards.CompileContext.current_compile_id()
         inductor_meta = {
             "backend_hash": torch.utils._triton.triton_hash_with_backend(),
             "are_deterministic_algorithms_enabled": torch.are_deterministic_algorithms_enabled(),
@@ -3084,8 +3084,6 @@ class TritonKernel(SIMDKernel):
             "min_split_scan_rblock": config.triton.min_split_scan_rblock,
             "spill_threshold": config.triton.spill_threshold,
             "store_cubin": config.triton.store_cubin,
-            "compile_id": str(compile_id) if compile_id else None,
-            "is_forward": not V.graph.is_backward,
         }
         if torch.version.hip is not None:
             inductor_meta["is_hip"] = True
@@ -3757,9 +3755,10 @@ class TritonScheduling(SIMDScheduling):
         return kernel_name
 
     def benchmark_fused_nodes(self, nodes, n_spills_threshold=8):
-        with preserve_rng_state(), torch.cuda.device(
+        device_interface = get_interface_for_device(V.graph.device_type)
+        with preserve_rng_state(), device_interface.device(
             V.graph.get_current_device_or_throw()
-        ):
+        ):  # type: ignore[attr-defined]
             src_code = self.generate_kernel_code_from_nodes(
                 nodes, benchmark_kernel=True
             )
@@ -3779,7 +3778,7 @@ class TritonScheduling(SIMDScheduling):
             def store_cache():
                 path = cache_file_path()
                 with open(path, "w") as fd:
-                    fd.write(str(ms))
+                    fd.write(str(ms))  # type: ignore[has-type]
 
             log.debug(
                 "kernel src code for %s written to: %s",

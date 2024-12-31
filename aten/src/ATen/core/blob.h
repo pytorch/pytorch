@@ -22,7 +22,7 @@ class TORCH_API Blob final : public c10::intrusive_ptr_target {
   /**
    * Initializes an empty Blob.
    */
-  Blob() noexcept : meta_() {}
+  Blob() noexcept = default;
   ~Blob() override {
     Reset();
   }

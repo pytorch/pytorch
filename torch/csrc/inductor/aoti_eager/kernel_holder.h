@@ -21,7 +21,7 @@ struct AOTIKernelMetadata {
   std::vector<ParameterMetadata> parameter_metadata_list_;
   // AOTI model runner to run the AOTI kernel
   std::shared_ptr<AOTIModelContainerRunner> kernel_runner_;
-  AOTIKernelMetadata() : parameter_metadata_list_(), kernel_runner_(nullptr) {}
+  AOTIKernelMetadata() : kernel_runner_(nullptr) {}
 
   // Check whether the given parameter metadata list is the same as the
   // parameter metadata list of the AOTI kernel.

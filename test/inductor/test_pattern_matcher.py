@@ -201,7 +201,7 @@ class TestPatternMatcher(TestCase):
             return x - 2
 
         patterns = PatternMatcherPass()
-        torch.set_default_device("cuda")
+        torch.set_default_device(GPU_TYPE)
         inputs = [torch.empty(4, 5, dtype=torch.float32)]
         register_replacement(pattern1, replacement1, inputs, fwd_only, patterns)
         register_replacement(pattern2, replacement2, inputs, fwd_only, patterns)
