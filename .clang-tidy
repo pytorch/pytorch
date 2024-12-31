@@ -60,7 +60,6 @@ readability-simplify-subscript-expr,
 readability-string-compare,
 -readability-redundant-access-specifiers,
 -readability-redundant-control-flow,
--readability-redundant-declaration,
 '
 HeaderFilterRegex: '^(aten/|c10/|torch/).*$'
 WarningsAsErrors: '*'

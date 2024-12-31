@@ -19,7 +19,6 @@ import threading
 import time
 import traceback
 import typing
-import warnings
 import weakref
 from pathlib import Path
 from types import CellType, CodeType, FunctionType, ModuleType
@@ -700,14 +699,6 @@ def _compile(
         assert output.output_instructions
         instructions[:] = output.output_instructions
         code_options.update(output.code_options)
-
-        # The config.dead_code_elimination flag is deprecated
-        # See https://github.com/pytorch/pytorch/issues/136862 for more information
-        if not config.dead_code_elimination:
-            warnings.warn(
-                "The config.dead_code_elimination flag is deprecated, it's now always true."
-            )
-
         propagate_inst_exn_table_entries(instructions)
         check_inst_exn_tab_entries_valid(instructions)
         instructions[:] = remove_pointless_jumps(remove_dead_code(instructions))
