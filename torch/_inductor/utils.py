@@ -51,12 +51,13 @@ from torch._inductor.runtime.hints import DeviceProperties
 
 if TYPE_CHECKING:
     from torch._prims_common import ELEMENTWISE_TYPE_PROMOTION_KIND
+    from .codegen.common import WorkspaceArg
 
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._pytree import tree_map_only
 
 
-GPU_TYPES = ["cuda", "xpu"]
+GPU_TYPES = ["cuda", "mps", "xpu"]
 
 
 # defines here before import torch._dynamo is for avoiding circular import
@@ -101,6 +102,9 @@ GPU_KERNEL_BIN_EXTS = {"cuda": ".cubin", "xpu": ".spv"}
 
 GPU_ALIGN_BYTES = 16
 ALIGNMENT = 16
+
+TMA_ALIGNMENT = 16
+TMA_DESCRIPTOR_SIZE = 128
 
 ALIGN_BYTES = 64
 assert (ALIGN_BYTES & (ALIGN_BYTES - 1)) == 0 and ALIGN_BYTES >= 8, "must be power of 2"
@@ -1125,7 +1129,7 @@ def is_big_gpu(index_or_device: Union[int, torch.device] = 0) -> bool:
     if isinstance(index_or_device, torch.device):
         device = index_or_device
     else:
-        device = torch.device("cuda", index_or_device)
+        device = torch.device(get_gpu_type(), index_or_device)
 
     prop = DeviceProperties.create(device)
 
@@ -1138,7 +1142,7 @@ def is_big_gpu(index_or_device: Union[int, torch.device] = 0) -> bool:
             return False
         return True
 
-    min_sms = 68  # 3080
+    min_sms = 16 if device.type == "xpu" else 68  # 3080
     avail_sms = prop.multi_processor_count
     if avail_sms < min_sms:
         log.warning(
@@ -1147,6 +1151,28 @@ def is_big_gpu(index_or_device: Union[int, torch.device] = 0) -> bool:
         )
         return False
     return True
+
+
+@functools.lru_cache
+def get_num_sms() -> int:
+    return torch.cuda.get_device_properties("cuda").multi_processor_count
+
+
+def get_tma_workspace_arg(
+    num_tma_descriptors: int,
+    device: torch.device,
+) -> WorkspaceArg:
+    """Builds and returns a WorkspaceArg for the device side TMA workspace buffer."""
+    from .codegen.common import WorkspaceArg, WorkspaceZeroMode
+
+    zero_mode = WorkspaceZeroMode.from_bool(False)
+    size = get_num_sms() * num_tma_descriptors * TMA_DESCRIPTOR_SIZE
+    return WorkspaceArg(
+        count=size,
+        zero_mode=zero_mode,
+        device=device,
+        outer_name=WorkspaceArg.unique_name(),
+    )
 
 
 def use_max_autotune() -> bool:
@@ -1194,6 +1220,37 @@ def use_triton_template(layout, *, enable_int32=False, enable_float8=False):
         and use_max_autotune()
         and _use_autotune_backend("TRITON")
         and has_backend_feature(layout.device, BackendFeature.TRITON_TEMPLATES)
+    )
+
+
+def use_triton_tma_template(*matrices):
+    from torch.utils._triton import has_triton_tma_device
+
+    from .virtualized import V
+
+    def _is_tma_compatible(x):
+        if len(x.get_size()) != 2:
+            return False
+
+        dtype = x.get_dtype()
+        if dtype not in (torch.float16, torch.bfloat16):
+            return False
+
+        layout = x.get_layout()
+        transposed = layout.is_transposed()
+        if not (layout.is_contiguous() or transposed):
+            return False
+
+        inner_dim = layout.size[1]
+        if transposed:
+            inner_dim = layout.size[0]
+        inner_bytes = inner_dim * dtype.itemsize
+        return V.graph.sizevars.statically_known_multiple_of(inner_bytes, TMA_ALIGNMENT)
+
+    return (
+        config.triton.enable_persistent_tma_matmul
+        and has_triton_tma_device()
+        and all(_is_tma_compatible(m) for m in matrices)
     )
 
 
@@ -1963,10 +2020,15 @@ def needs_fallback_due_to_atomic_add_limitations(dtype):
     # tl.atomic add has bfloat16 support in fbcode
     # but not in OSS https://github.com/pytorch/pytorch/issues/97016
     # we will fallback until the code is upstreamed to OSS
-    if config.is_fbcode() and dtype == torch.bfloat16:
+    if (
+        config.is_fbcode()
+        and dtype == torch.bfloat16
+        and torch.cuda.is_available()
+        and torch.cuda.get_device_capability() >= (9, 0)
+    ):
         return False
     else:
-        return dtype in (torch.int64, torch.bool, torch.bfloat16)
+        return dtype in OrderedSet([torch.int64, torch.bool, torch.bfloat16])
 
 
 def use_scatter_fallback(
@@ -2356,3 +2418,15 @@ def get_donated_idxs() -> Optional[List[int]]:
     if tracing_context is not None and tracing_context.fw_metadata:
         return tracing_context.fw_metadata.bw_donated_idxs
     return None
+
+
+def set_kernel_post_grad_provenance_tracing(node_schedule, kernel_name):
+    from .codegen.simd_kernel_features import DisableReduction, EnableReduction
+    from .virtualized import V
+
+    for node in node_schedule:
+        if node not in (EnableReduction, DisableReduction):
+            if node.node is not None:
+                V.debug._inductor_triton_kernel_to_post_grad_node_info[kernel_name] = [
+                    origin.name for origin in node.node.origins
+                ]

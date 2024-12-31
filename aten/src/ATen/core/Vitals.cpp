@@ -87,7 +87,7 @@ bool APIVitals::setVital(
   return true;
 }
 
-APIVitals::APIVitals() : vitals_enabled(false), name_map_() {
+APIVitals::APIVitals() : vitals_enabled(false) {
   // Set default values, force is necessary because in unit tests the env
   // variable may not be set when global APIVitals are constructed.
   setVital("CUDA", "used", "False", /* force = */ true);
