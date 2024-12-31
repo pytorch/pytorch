@@ -278,21 +278,16 @@ class TestPatternMatcher(TestPatternMatcherBase):
             )
 
             def matcher_check_fn():
-                match_nodes = 0 if TEST_ACL else unary_list[unary_fn]
-                if (
-                    dtype
-                    in (
-                        torch.float16,
-                        torch.bfloat16,
-                    )
-                    and self._check_unary_is_decomposed(unary_fn)
-                    and not TEST_ACL
-                ):
+                match_nodes = unary_list[unary_fn]
+                if dtype in (
+                    torch.float16,
+                    torch.bfloat16,
+                ) and self._check_unary_is_decomposed(unary_fn):
                     # Has extra dtype conversion nodes for autocast.
                     match_nodes += 2
                 self.assertEqual(
                     counters["inductor"]["mkldnn_unary_fusion_matcher_nodes"],
-                    match_nodes,
+                    0 if TEST_ACL else match_nodes,
                 )
                 self.assertEqual(
                     counters["inductor"]["mkldnn_conv_weight_pack_matcher_count"], 1
@@ -353,8 +348,8 @@ class TestPatternMatcher(TestPatternMatcherBase):
             v = torch.randn(2, 10)
 
             def matcher_check_fn():
-                match_nodes = 0 if TEST_ACL else unary_list[unary_fn]
-                if self._check_unary_is_decomposed(unary_fn) and not TEST_ACL:
+                match_nodes = unary_list[unary_fn]
+                if self._check_unary_is_decomposed(unary_fn):
                     # Has extra dtype conversion nodes for autocast.
                     match_nodes += 2
                 self.assertEqual(
@@ -464,8 +459,8 @@ class TestPatternMatcher(TestPatternMatcherBase):
             v = torch.randn(2, 10)
 
             def folder_matcher_check_fn():
-                match_nodes = 0 if TEST_ACL else unary_list[unary_fn]
-                if self._check_unary_is_decomposed(unary_fn) and not TEST_ACL:
+                match_nodes = unary_list[unary_fn]
+                if self._check_unary_is_decomposed(unary_fn):
                     # Has extra dtype conversion nodes for autocast.
                     match_nodes += 2
                 # we have 2 linears, so we double the matcher_count/nodes
@@ -554,16 +549,16 @@ class TestPatternMatcher(TestPatternMatcherBase):
             )
 
             def matcher_check_fn():
-                match_nodes = 0 if TEST_ACL else unary_list[unary_fn]
+                match_nodes = unary_list[unary_fn]
                 if dtype in (
                     torch.float16,
                     torch.bfloat16,
                 ) and self._check_unary_is_decomposed(unary_fn):
                     # Has extra dtype conversion nodes for autocast.
-                    match_nodes += 0 if TEST_ACL else 2
+                    match_nodes += 2
                 self.assertEqual(
                     counters["inductor"]["mkldnn_unary_fusion_matcher_nodes"],
-                    match_nodes,
+                    0 if TEST_ACL else match_nodes,
                 )
                 self.assertEqual(
                     counters["inductor"]["mkldnn_conv_weight_pack_matcher_count"], 1
@@ -650,14 +645,14 @@ class TestPatternMatcher(TestPatternMatcherBase):
             )
 
             def matcher_check_fn():
-                match_nodes = 0 if TEST_ACL else binary_list[binary_fn][1]
-                if has_relu and not TEST_ACL:
+                match_nodes = binary_list[binary_fn][1]
+                if has_relu:
                     match_nodes += 1
                 self.assertEqual(
                     counters["inductor"][
                         "mkldnn_conv_binary_unary_fusion_matcher_nodes"
                     ],
-                    match_nodes,
+                    0 if TEST_ACL else match_nodes,
                 )
                 self.assertEqual(
                     counters["inductor"]["mkldnn_conv_weight_pack_matcher_count"], 2
@@ -757,14 +752,14 @@ class TestPatternMatcher(TestPatternMatcherBase):
             )
 
             def matcher_check_fn():
-                match_nodes = 0 if TEST_ACL else binary_list[binary_fn][1]
-                if has_relu and not TEST_ACL:
+                match_nodes = binary_list[binary_fn][1]
+                if has_relu:
                     match_nodes += 1
                 self.assertEqual(
                     counters["inductor"][
                         "mkldnn_conv_binary_unary_fusion_matcher_nodes"
                     ],
-                    match_nodes,
+                    0 if TEST_ACL else match_nodes,
                 )
                 self.assertEqual(
                     counters["inductor"]["mkldnn_conv_weight_pack_matcher_nodes"], 1
