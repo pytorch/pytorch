@@ -1800,7 +1800,7 @@ class SIMDScheduling(BaseScheduling):
         is_pointwise = "x" in tiling
 
         total_numel = numel * reduction_numel
-        missing_tiling = [sympy_product(splits) / total_numel]
+        missing_tiling = [total_numel / sympy_product(splits)]
 
         tiling_args = (
             (splits, missing_tiling) if is_pointwise else (missing_tiling, splits)
@@ -1811,7 +1811,7 @@ class SIMDScheduling(BaseScheduling):
     def get_nd_tilings(
         cls,
         node_schedule,
-        numel,
+        pointwise_numel,
         reduction_numel,
     ) -> List[Dict[str, Tuple[sympy.Expr]]]:
         """
@@ -1835,7 +1835,6 @@ class SIMDScheduling(BaseScheduling):
             # Use the node ranges as the default tiling candidate.
             ranges_to_tile = node_ranges[0 if is_pointwise else 1]
             node_tilings = [ranges_to_tile]
-            pointwise_numel = sympy_product(node_ranges[0])
 
             # Search the indexing expressions for more candidates.
             # If we see modular indexing, try to subdivide ranges into their implied
@@ -1906,7 +1905,7 @@ class SIMDScheduling(BaseScheduling):
                 tilings.add(
                     cls.complete_partial_tiling(
                         cls.create_partial_tiling(collapsed_splits, is_pointwise),
-                        numel,
+                        pointwise_numel,
                         reduction_numel,
                     )
                 )
