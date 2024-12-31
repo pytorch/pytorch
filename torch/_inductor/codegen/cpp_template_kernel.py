@@ -230,10 +230,7 @@ class CppTemplateKernel(CppKernel):
         offsets: Optional[List[sympy.Expr]] = None,
         reindexers: Optional[List[Optional[Callable[[List[Any]], List[Any]]]]] = None,
     ) -> str:
-        if isinstance(dst, Iterable):
-            ref_dst = dst[0]
-        else:
-            ref_dst = dst
+        ref_dst = next(iter(dst)) if isinstance(dst, Iterable) else dst
         var_sizes = (tuple(ref_dst.get_size()), ())
         var_ranges = {
             sympy_index_symbol_with_prefix(SymT.INDEX, i): sz
