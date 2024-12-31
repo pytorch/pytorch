@@ -66,6 +66,26 @@ def register_onednn_fusion_ops():
             torch.ops.onednn.qconv2d_pointwise,
         ]
 
+        @register_lowering(torch.ops.aten.mkldnn_max_pool2d)
+        def my_mkldnn_max_pool2d(
+            x: TensorBox,
+            kernel_size,
+            stride,
+            padding = [0, 0],
+            dilation = [1, 1],
+            ceil_mode = False
+        ):
+            return TensorBox.create(
+                mkldnn_ir.MaxPooldia.create(
+                    x,
+                    kernel_size,
+                    stride,
+                    padding,
+                    dilation,
+                    ceil_mode
+                )
+            )
+
         @register_lowering(torch.ops.mkldnn._convolution_pointwise)
         def convolution_unary(
             x: TensorBox,
