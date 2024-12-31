@@ -133,7 +133,6 @@ at::Tensor quantized_convolution(
     torch::List<std::optional<at::Scalar>> unary_scalars,
     std::optional<std::string_view> unary_algorithm);
 
-namespace graph {
 void gpu_float_sdpa(
     int batch_size,
     int seq_len_q,
@@ -149,5 +148,4 @@ void gpu_float_sdpa(
     bool is_causal,
     float softmax_scale,
     const Tensor& output);
-} // namespace graph
 } // namespace at::native::onednn

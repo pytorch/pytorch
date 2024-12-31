@@ -6,7 +6,7 @@
 #include <omp.h>
 #include <oneapi/dnnl/dnnl.hpp>
 
-using namespace at::native::onednn::graph;
+using namespace at::native::onednn;
 namespace {
 struct SDPALogicalParams {
   enum class TensorID {
@@ -126,7 +126,7 @@ partition create_sdpa_graph_partition(
         {masked_qk_out.value()},
         "mask_add"};
   } else if (is_causal) {
-    TORCH_CHECK(false, "Causal mask must use fallback mask for now.");
+    TORCH_INTERNAL_ASSERT(false, "Causal mask must use fallback mask for now.");
   }
 
   op softmax{op_id++, op::kind::SoftMax, "softmax"};
@@ -144,7 +144,7 @@ partition create_sdpa_graph_partition(
       "matmul_v"};
 
   engine::kind ekind = engine::kind::gpu;
-  graph g(ekind);
+  dnnl::graph::graph g(ekind);
   g.add_op(matmul_qk);
   g.add_op(scale_div);
   if (mask_add.has_value()) {
@@ -154,14 +154,14 @@ partition create_sdpa_graph_partition(
   g.add_op(matmul_v);
   g.finalize();
   auto partitions = g.get_partitions();
-  TORCH_CHECK(
+  TORCH_INTERNAL_ASSERT(
       (partitions.size() == 1) && partitions[0].is_supported(),
-      "oneDNN Graph doesn't support this fusion pattern. If you'd like its support, please submit a issue.");
+      "oneDNN doesn't support this fusion pattern. If you'd like its support, please submit a issue.");
   return partitions[0];
 }
 } // namespace
 
-namespace at::native::onednn::graph {
+namespace at::native::onednn {
 void gpu_float_sdpa(
     int batch_size,
     int seq_len_q,
@@ -188,7 +188,7 @@ void gpu_float_sdpa(
       : query.scalar_type() == c10::ScalarType::Half     ? data_type::f16
       : query.scalar_type() == c10::ScalarType::BFloat16 ? data_type::bf16
                                                          : data_type::undef;
-  TORCH_CHECK(
+  TORCH_INTERNAL_ASSERT(
       (logical_tensor_dtype != data_type::undef),
       "Only FP16/BF16/FP32 datatypes are currently supported");
 
@@ -282,6 +282,7 @@ void gpu_float_sdpa(
   };
   size_t i = 0;
   std::vector<dnnl::graph::tensor> inputs;
+  inputs.reserve(l_inputs.size());
   inputs.emplace_back(l_inputs[i++], eng, query.data_ptr());
   inputs.emplace_back(l_inputs[i++], eng, key.data_ptr());
   inputs.emplace_back(l_inputs[i++], eng, softmax_scale1.data_ptr());
@@ -291,4 +292,4 @@ void gpu_float_sdpa(
   inputs.emplace_back(l_inputs[i++], eng, value.data_ptr());
   sdp_cp_entry.cp.execute(strm, inputs, outputs);
 }
-} // namespace at::native::onednn::graph
+} // namespace at::native::onednn
