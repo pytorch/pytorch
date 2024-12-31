@@ -953,10 +953,10 @@ class OpInfo:
 
         self.dtypes = set(self.dtypes)
 
-        # For GPU devices defined in common_utils.GPU_TYPES, for example 'CUDA', 
+        # For GPU devices defined in common_utils.GPU_TYPES, for example 'CUDA',
         # the dtypes defined in dtypesIfGPU will be used if dtypesIfCUDA is not specified.
         self.dtypesIfGPU = (
-            set(self.dtypesIfGPU) if self.dtypesIfGPU is not None else self.dtypes
+             set(self.dtypesIfGPU) if self.dtypesIfGPU is not None else self.dtypes
         )
         self.dtypesIfCUDA = (
             set(self.dtypesIfCUDA)
