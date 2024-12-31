@@ -242,7 +242,7 @@ class CppGroupGemmTemplate(CppGemmTemplate):
             new_inputs = list(inputs)
             if not trans_w:
                 return new_inputs, layout_or_out
-            X = new_inputs[0]
+            X = next(iter(new_inputs))
             W_list = new_inputs[wgt_start_idx : wgt_start_idx + gemm_group_num]
             new_W_list = []
             for W in W_list:
@@ -257,16 +257,16 @@ class CppGroupGemmTemplate(CppGemmTemplate):
 
         num_threads = parallel_num_threads()
         new_inputs, _ = normalize_shapes(*maybe_to_dense(new_inputs, new_layout))
-        m, n, k, *_ = mm_args(new_inputs[0], new_inputs[wgt_start_idx])
+        m, n, k, *_ = mm_args(next(iter(new_inputs)), new_inputs[wgt_start_idx])
         output_dtype, compute_dtype = get_gemm_template_output_and_compute_dtype(
-            new_inputs[0].get_dtype()
+            next(iter(new_inputs)).get_dtype()
         )
         micro_gemm = create_micro_gemm(
             "micro_gemm",
             m,
             n,
             k,
-            input_dtype=new_inputs[0].get_dtype(),
+            input_dtype=next(iter(new_inputs)).get_dtype(),
             input2_dtype=new_inputs[wgt_start_idx].get_dtype(),
             output_dtype=output_dtype,
             compute_dtype=compute_dtype,
@@ -375,19 +375,19 @@ class CppGroupGemmTemplate(CppGemmTemplate):
             counters["inductor"]["cpp_group_gemm_template"] += 1
             multi_output_buffers = template_buffer_node.outputs
 
-        template_buffer = Y_list[0]
+        template_buffer = next(iter(Y_list))
         fake_buffers: List[ir.Buffer] = []
         Y_2d_list = Y_list
         output_dtype, compute_dtype = get_gemm_template_output_and_compute_dtype(
-            X_list[0].get_dtype()
+            next(iter(X_list)).get_dtype()
         )
         micro_gemm = create_micro_gemm(
             f"{kernel.kernel_name}_micro_gemm",
             self.m,
             self.n,
             self.k,
-            input_dtype=X_list[0].get_dtype(),
-            input2_dtype=W_list[0].get_dtype(),
+            input_dtype=next(iter(X_list)).get_dtype(),
+            input2_dtype=next(iter(W_list)).get_dtype(),
             output_dtype=output_dtype,
             compute_dtype=compute_dtype,
             alpha=self.alpha,
