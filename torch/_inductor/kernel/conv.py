@@ -79,7 +79,7 @@ platform_configs = tuple(
 )
 
 # On ROCm convert num_stages to 1 as pipelining provides no benefit
-if torch.version.hip:
+if torch.version.hip and torch.cuda.is_available():
     platform_configs = build_rocm_gemm_configs(platform_configs)
 
 
