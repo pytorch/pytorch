@@ -499,7 +499,7 @@ class BenchmarkRequest:
             if len(output_tensor_meta) > 1:
                 # Each output with same meta for Grouped GEMM
                 assert all(
-                    getattr(output_tensor_meta[0], attr) == getattr(x, attr)
+                    getattr(next(iter(output_tensor_meta)), attr) == getattr(x, attr)
                     for x in output_tensor_meta
                     for attr in ["device", "dtype", "sizes", "strides", "offset"]
                 )
