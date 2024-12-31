@@ -343,7 +343,9 @@ class ConstDictVariable(VariableTracker):
             assert not (args or kwargs)
             return DictValuesVariable(self)
         elif name == "copy":
-            # Key guarding - Nothing to do. LazyVT for value will take care.
+            # Key guarding - Install DICT_KEYS_MATCH guard.
+            if self.source:
+                install_guard(self.make_guard(GuardBuilder.DICT_KEYS_MATCH))
             assert not (args or kwargs)
             return self.clone(
                 items=self.items.copy(), mutation_type=ValueMutationNew(), source=None

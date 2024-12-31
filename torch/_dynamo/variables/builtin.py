@@ -1374,6 +1374,10 @@ class BuiltinVariable(VariableTracker):
                     arg, user_cls, mutation_type=ValueMutationNew()
                 )
             elif isinstance(arg, variables.ConstDictVariable):
+                # Install keys match guard to ensure a recompilation if the keys
+                # change and produce a new dict
+                if arg.source:
+                    install_guard(arg.source.make_guard(GuardBuilder.DICT_KEYS_MATCH))
                 return arg.clone(
                     user_cls=user_cls, source=None, mutation_type=ValueMutationNew()
                 )
@@ -1458,6 +1462,8 @@ class BuiltinVariable(VariableTracker):
                 dict.fromkeys(arg, value), user_cls, mutation_type=ValueMutationNew()
             )
         elif arg.has_force_unpack_var_sequence(tx):
+            if isinstance(arg, ConstDictVariable) and arg.source:
+                install_guard(arg.source.make_guard(GuardBuilder.DICT_KEYS_MATCH))
             keys = arg.force_unpack_var_sequence(tx)
             if all(is_hashable(v) for v in keys):
                 return DictVariableType(
