@@ -31,47 +31,41 @@ struct type_index final : IdWrapper<type_index, uint64_t> {
 
 namespace detail {
 
-inline constexpr c10::c10_string_view extract(
-    c10::c10_string_view prefix,
-    c10::c10_string_view suffix,
-    c10::c10_string_view str) {
-#if !defined(__CUDA_ARCH__) // CUDA doesn't like std::logic_error in device code
-  return (!str.starts_with(prefix) || !str.ends_with(suffix))
-      ? (throw std::logic_error("Invalid pattern"), c10::c10_string_view())
-      : str.substr(prefix.size(), str.size() - prefix.size() - suffix.size());
-#else
-  return str.substr(prefix.size(), str.size() - prefix.size() - suffix.size());
-#endif
-}
-
 template <typename T>
 inline constexpr c10::c10_string_view fully_qualified_type_name_impl() {
 #if defined(_MSC_VER) && !defined(__clang__)
-  constexpr std::string_view str = __FUNCSIG__;
+  constexpr c10::string_view fun_sig = __FUNCSIG__;
 #if defined(__NVCC__)
-  constexpr std::string_view prefix =
-      "std::basic_string_view<char> c10::util::detail::fully_qualified_type_name_impl<";
-  constexpr std::string_view suffix = ">()";
+  constexpr c10::string_view prefix =
+      "c10::basic_string_view<char> c10::util::detail::fully_qualified_type_name_impl<";
+  constexpr c10::string_view suffix = ">()";
 #else
-  constexpr std::string_view prefix =
-      "class std::basic_string_view<char,struct std::char_traits<char> > __cdecl c10::util::detail::fully_qualified_type_name_impl<";
-  constexpr std::string_view suffix = ">(void)";
+  constexpr c10::string_view prefix =
+      "class c10::basic_string_view<char> __cdecl c10::util::detail::fully_qualified_type_name_impl<";
+  constexpr c10::string_view suffix = ">(void)";
 #endif
 #elif defined(__clang__)
-  return extract(
-      "c10::c10_string_view c10::util::detail::fully_qualified_type_name_impl() [T = ",
-      "]",
-      __PRETTY_FUNCTION__);
+  constexpr c10::string_view fun_sig = __PRETTY_FUNCTION__;
+  constexpr c10::string_view prefix =
+      "c10::c10_string_view c10::util::detail::fully_qualified_type_name_impl() [T = ";
+  constexpr c10::string_view suffix = "]";
 #elif defined(__GNUC__)
-  return extract(
-      "constexpr c10::c10_string_view c10::util::detail::fully_qualified_type_name_impl() [with T = ",
-      "; c10::c10_string_view = c10::basic_string_view<char>]",
-      __PRETTY_FUNCTION__);
+  constexpr c10::string_view fun_sig = __PRETTY_FUNCTION__;
+  constexpr c10::string_view prefix =
+      "constexpr c10::c10_string_view c10::util::detail::fully_qualified_type_name_impl() [with T = ";
+  constexpr c10::string_view
+      suffix = "; c10::c10_string_view = c10::basic_string_view<char>]";
 #endif
+#if !defined(__CUDA_ARCH__)
+  static_assert(c10::starts_with(
+      static_cast<std::string_view>(fun_sig),
+      static_cast<std::string_view>(prefix)));
+  static_assert(c10::ends_with(
+      static_cast<std::string_view>(fun_sig),
+      static_cast<std::string_view>(suffix)));
 #endif
-  static_assert(c10::string_view_starts_with(str, prefix));
-  static_assert(c10::string_view_ends_with(str, suffix));
-  return str.substr(prefix.size(), str.size() - prefix.size() - suffix.size());
+  return fun_sig.substr(
+      prefix.size(), fun_sig.size() - prefix.size() - suffix.size());
 }
 
 #if !defined(__CUDA_ARCH__)
@@ -124,10 +118,9 @@ inline constexpr type_index get_type_index<std::string>() {
 #endif
 
 template <typename T>
-inline constexpr c10::c10_string_view get_fully_qualified_type_name() noexcept {
-  constexpr c10::c10_string_view name =
-      detail::fully_qualified_type_name_impl<T>();
-  return name;
+inline constexpr std::string_view get_fully_qualified_type_name() noexcept {
+  return static_cast<std::string_view>(
+      detail::fully_qualified_type_name_impl<T>());
 }
 } // namespace c10::util
 

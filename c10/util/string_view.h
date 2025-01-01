@@ -628,22 +628,6 @@ constexpr bool ends_with(const std::string_view s, const char prefix) noexcept {
   return !s.empty() && prefix == s.back();
 }
 
-// NOTE: In C++20, this function should be replaced by str.starts_with
-constexpr bool string_view_starts_with(
-    std::string_view str,
-    std::string_view prefix) noexcept {
-  return (prefix.size() > str.size()) ? false
-                                      : prefix == str.substr(0, prefix.size());
-}
-
-// NOTE: In C++20, this function should be replaced by str.ends_with
-constexpr bool string_view_ends_with(
-    std::string_view str,
-    std::string_view suffix) noexcept {
-  return (suffix.size() > str.size())
-      ? false
-      : suffix == (str.substr(str.size() - suffix.size(), suffix.size()));
-}
 } // namespace c10
 
 namespace std {
