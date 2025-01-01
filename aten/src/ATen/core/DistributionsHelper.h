@@ -1,6 +1,5 @@
 #pragma once
 
-#include <ATen/core/Array.h>
 #include <ATen/core/TransformationHelper.h>
 #include <c10/util/Half.h>
 #include <c10/util/BFloat16.h>

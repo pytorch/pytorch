@@ -5,7 +5,6 @@ import inspect
 import re
 import sys
 import traceback
-import warnings
 import weakref
 from typing import Any, Callable, Dict, List, Optional, Sequence, Set, Tuple, Union
 from typing_extensions import deprecated
@@ -19,6 +18,7 @@ from torch._library.custom_ops import (
     device_types_t,
 )
 from torch._library.infer_schema import infer_schema  # noqa: F401
+from torch._library.triton import triton_op, wrap_triton
 from torch._ops import OpOverload
 
 
@@ -33,6 +33,8 @@ __all__ = [
     "register_vmap",
     "get_ctx",
     "custom_op",
+    "triton_op",
+    "wrap_triton",
     "infer_schema",
 ]
 
@@ -52,15 +54,6 @@ def fallthrough_kernel():
     A dummy function to pass to ``Library.impl`` in order to register a fallthrough.
     """
     raise NotImplementedError("fallthrough_kernel() should never be called.")
-
-
-def _warn_deploy():
-    warnings.warn(
-        "Python torch.library APIs do nothing under torch::deploy (multipy). "
-        "Please instead use C++ custom operator registration APIs.",
-        RuntimeWarning,
-        stacklevel=3,
-    )
 
 
 class Library:
@@ -92,7 +85,7 @@ class Library:
                 " is a reserved namespace. Please try creating a library with another name.",
             )
         if torch._running_with_deploy():
-            _warn_deploy()
+            _library.utils.warn_deploy()
             return
 
         frame = traceback.extract_stack(limit=3)[0]
@@ -143,7 +136,7 @@ class Library:
             >>> my_lib.define("sum(Tensor self) -> Tensor")
         """
         if torch._running_with_deploy():
-            _warn_deploy()
+            _library.utils.warn_deploy()
             return
 
         # This is added because we also want to disallow PURE_FUNCTION alias analysis which is a valid
@@ -178,7 +171,7 @@ class Library:
     def _register_fake(self, op_name, fn, _stacklevel=1):
         r"""Registers the fake impl for an operator defined in the library."""
         if torch._running_with_deploy():
-            _warn_deploy()
+            _library.utils.warn_deploy()
             return
 
         source = torch._library.utils.get_source(_stacklevel + 1)
@@ -222,7 +215,7 @@ class Library:
         (mode, func: OpOverload, types: Tuple[type, ...], args, kwargs) -> Any
         """
         if torch._running_with_deploy():
-            _warn_deploy()
+            _library.utils.warn_deploy()
             return
 
         qualname = f"{self.ns}::{op_name}"
@@ -243,7 +236,7 @@ class Library:
             >>> my_lib._impl_with_aoti_compile("div.Tensor", "CPU")
         """
         if torch._running_with_deploy():
-            _warn_deploy()
+            _library.utils.warn_deploy()
             return
 
         if dispatch_key == "":
@@ -300,7 +293,7 @@ class Library:
             >>> my_lib.impl("div.Tensor", div_cpu, "CPU")
         """
         if torch._running_with_deploy():
-            _warn_deploy()
+            _library.utils.warn_deploy()
             return
 
         if not callable(fn):
@@ -384,7 +377,7 @@ class Library:
             >>> my_lib.fallback(fallback_kernel, "Autocast")
         """
         if torch._running_with_deploy():
-            _warn_deploy()
+            _library.utils.warn_deploy()
             return
 
         if dispatch_key == "":
@@ -545,6 +538,10 @@ def impl(qualname, types, func=None, *, lib=None):
     Please only use this if the implementation truly supports all device types;
     for example, this is true if it is a composition of built-in PyTorch operators.
 
+    This API may be used as a decorator. You can use nested decorators
+    with this API provided they return a function and are placed inside
+    this API (see Example 2).
+
     Some valid types are: "cpu", "cuda", "xla", "mps", "ipu", "xpu".
 
     Args:
@@ -556,7 +553,7 @@ def impl(qualname, types, func=None, *, lib=None):
     Examples:
         >>> import torch
         >>> import numpy as np
-        >>>
+        >>> # Example 1: Register function.
         >>> # Define the operator
         >>> torch.library.define("mylib::mysin", "(Tensor x) -> Tensor")
         >>>
@@ -568,6 +565,28 @@ def impl(qualname, types, func=None, *, lib=None):
         >>> x = torch.randn(3)
         >>> y = torch.ops.mylib.mysin(x)
         >>> assert torch.allclose(y, x.sin())
+        >>>
+        >>> # Example 2: Register function with decorator.
+        >>> def custom_decorator(func):
+        >>>     def wrapper(*args, **kwargs):
+        >>>         return func(*args, **kwargs) + 1
+        >>>     return wrapper
+        >>>
+        >>> # Define the operator
+        >>> torch.library.define("mylib::sin_plus_one", "(Tensor x) -> Tensor")
+        >>>
+        >>> # Add implementations for the operator
+        >>> @torch.library.impl("mylib::sin_plus_one", "cpu")
+        >>> @custom_decorator
+        >>> def f(x):
+        >>>     return torch.from_numpy(np.sin(x.numpy()))
+        >>>
+        >>> # Call the new operator from torch.ops.
+        >>> x = torch.randn(3)
+        >>>
+        >>> y1 = torch.ops.mylib.sin_plus_one(x)
+        >>> y2 = torch.sin(x) + 1
+        >>> assert torch.allclose(y1, y2)
     """
     return _impl(qualname, types, func, lib=lib, disable_dynamo=False)
 
@@ -877,6 +896,10 @@ def register_autograd(
     they may not directly access :meth:`torch.Tensor.data_ptr` and they must
     not depend on or mutate global state. If you need a non-traceable backward,
     you can make it a separate custom_op that you call inside ``backward_fn``.
+
+    If you need different autograd behavior on different devices, then we
+    recommend creating two different custom operators, one for each device
+    that needs different behavior, and switching between them at runtime.
 
     Examples:
         >>> import torch
@@ -1328,12 +1351,12 @@ def opcheck(
 
         >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_CUDA)
         >>> @torch.library.custom_op("mylib::numpy_mul", mutates_args=())
-        >>> def numpy_add(x: Tensor, y: float) -> Tensor:
+        >>> def numpy_mul(x: Tensor, y: float) -> Tensor:
         >>>     x_np = x.numpy(force=True)
-        >>>     z_np = x_np + y
+        >>>     z_np = x_np * y
         >>>     return torch.from_numpy(z_np).to(x.device)
         >>>
-        >>> @numpy_sin.register_fake
+        >>> @numpy_mul.register_fake
         >>> def _(x, y):
         >>>     return torch.empty_like(x)
         >>>
@@ -1344,7 +1367,7 @@ def opcheck(
         >>> def backward(ctx, grad):
         >>>     return grad * ctx.y, None
         >>>
-        >>> numpy_sin.register_autograd(backward, setup_context=setup_context)
+        >>> numpy_mul.register_autograd(backward, setup_context=setup_context)
         >>>
         >>> sample_inputs = [
         >>>     (torch.randn(3), 3.14),
@@ -1354,7 +1377,7 @@ def opcheck(
         >>> ]
         >>>
         >>> for args in sample_inputs:
-        >>>     torch.library.opcheck(foo, args)
+        >>>     torch.library.opcheck(numpy_mul, args)
 
     """
     import torch.testing._internal.optests as optests

@@ -37,5 +37,5 @@ namespace at::native {
             }
         }
 
-        REGISTER_DISPATCH(special_bessel_y0_stub, &bessel_y0_kernel_cuda);
+        REGISTER_DISPATCH(special_bessel_y0_stub, &bessel_y0_kernel_cuda)
 } // namespace at::native

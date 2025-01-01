@@ -26,6 +26,7 @@ import torch
 import torch._logging
 
 from ..._prims_common import is_integer_dtype
+from ...utils._ordered_set import OrderedSet
 from ...utils._sympy.functions import FloorDiv, ModularIndexing
 from ...utils._sympy.symbol import symbol_is_type, SymT
 from ...utils._sympy.value_ranges import ValueRanges
@@ -185,8 +186,8 @@ class HalidePrinter(PythonPrinter):
             return super()._print_FloorDiv(expr)
 
         x, div = expr.args
-        x = self.cast_float(self.paren(self.doprint(x)))
-        div = self.cast_float(self.paren(self.doprint(div)))
+        x = self.cast_float(self.doprint(x))
+        div = self.cast_float(self.doprint(div))
         return self.cast_index(f"hl.floor({x} / {div})")
 
     def _print_Round(self, expr):
@@ -523,7 +524,7 @@ class HalideOverrides(OpOverrides):
             V.kernel.used_dims_from_index(index),
             bounds=get_bounds_index_expr(expr),
         )
-        if dtype not in {torch.int32, torch.int64}:
+        if dtype not in (torch.int32, torch.int64):
             return ops.to_dtype(var, dtype)
         return var
 
@@ -580,7 +581,7 @@ class HalideCSEVariable(CSEVariable):
         self.used_dims: Optional[List[sympy.Symbol]] = None
 
     def update_on_args(self, name, args, kwargs):
-        used = set(self.used_dims or ())
+        used = OrderedSet(self.used_dims or ())
         for arg in itertools.chain(args, kwargs.values()):
             if isinstance(arg, HalideCSEVariable):
                 assert arg.used_dims is not None, (name, arg, args)
@@ -673,10 +674,10 @@ class HalideKernel(SIMDKernel):
 
     def __init__(
         self,
-        *groups,
+        tiling: Dict[str, sympy.Expr],
         **kwargs,
     ) -> None:
-        super().__init__(*groups, **kwargs)
+        super().__init__(tiling, **kwargs)
         # For halide, we just write directly to the body
         self.compute = self.body
         self.loads = self.body
@@ -721,7 +722,7 @@ class HalideKernel(SIMDKernel):
         )
         size_hint = functools.partial(V.graph.sizevars.size_hint, fallback=inf)  # type: ignore[arg-type]
         indices = dict.fromkeys(map(super().prepare_indexing, indices))
-        all_used_symbols = set()
+        all_used_symbols = OrderedSet[Any]()
         sym_to_node = {
             n.symbol(): n
             for n in itertools.chain.from_iterable(
@@ -788,7 +789,7 @@ class HalideKernel(SIMDKernel):
             if not nodes:
                 nodes.append(tree.lookup(1, tree.numel))
             handled_count = 0
-            divisor = sympy.Integer(1)
+            divisor = sympy.S.One
             added_sym_size = []
             # decide on a minimal set of symbols and put them in self.halide_vars
             while handled_count < len(nodes) and not eq(tree.numel, divisor):
@@ -818,7 +819,7 @@ class HalideKernel(SIMDKernel):
                         handled_count = len(nodes)
                         had_fallback = True
                     sym = sympy_index_symbol(f"h{len(self.halide_vars)}")
-                    if tree.prefix == "r":
+                    if tree.is_reduction:
                         self.reduction_renames[sym] = sympy_index_symbol(
                             f"hr{len(self.halide_vars)}"
                         )
@@ -846,7 +847,7 @@ class HalideKernel(SIMDKernel):
                         idx += 1
                         divisor *= size
                     length = 1
-                    expr = sympy.Integer(0)
+                    expr = sympy.S.Zero
                     while not eq(node.length, length):
                         sym, size = added_sym_size[idx]
                         idx += 1
@@ -855,8 +856,8 @@ class HalideKernel(SIMDKernel):
                     self.index_replacements[node.symbol()] = expr
                 except IndexError:
                     assert had_fallback
-                    full_index = sympy.Integer(0)
-                    stride = sympy.Integer(1)
+                    full_index = sympy.S.Zero
+                    stride = sympy.S.One
                     for sym, size in added_sym_size:
                         full_index += stride * sym
                         stride *= size
@@ -937,8 +938,8 @@ class HalideKernel(SIMDKernel):
                 ), sym
 
         # group the expression by variables used
-        offset = sympy.Integer(0)
-        split_expr = {s: sympy.Integer(0) for s in symbols}
+        offset = sympy.S.Zero
+        split_expr = {s: sympy.S.Zero for s in symbols}
         split_failed: List[Tuple[List[sympy.Symbol], sympy.Expr]] = []
         index = sympy.expand(self.rename_indexing(index))
         for part in index.args if isinstance(index, sympy.Add) else [index]:
@@ -952,7 +953,7 @@ class HalideKernel(SIMDKernel):
                 for i in range(len(split_failed)):
                     assert split_failed[i] is not None
                     other_vars, other_part = split_failed[i]
-                    if set(other_vars) & set(part_vars):
+                    if OrderedSet(other_vars) & OrderedSet(part_vars):
                         part_vars.extend([v for v in other_vars if v not in part_vars])
                         part += other_part
                     else:
@@ -972,7 +973,7 @@ class HalideKernel(SIMDKernel):
             length = sympy.simplify(
                 sympy_subs(expr, {sym: self.sym_size(sym) - 1 for sym in syms}) + 1
             )
-            stride = sympy.Integer(1)
+            stride = sympy.S.One
             if isinstance(expr, sympy.Mul):
                 for term in expr.args:
                     if isinstance(term, sympy.Integer):
@@ -994,11 +995,11 @@ class HalideKernel(SIMDKernel):
         if not dims:  # scalar load/store
             if self.has_indirect_indexing:
                 # workaround https://github.com/halide/Halide/issues/8338
-                dims.append(DimensionInfo(sympy.Integer(0), 1, 1))
+                dims.append(DimensionInfo(sympy.S.Zero, 1, 1))
         elif not V.graph.sizevars.statically_known_equals(dims[0].stride, 1):
             # Halide assumes dimension 0 is stride == 1, so add a dummy dimension
             dims.insert(
-                0, DimensionInfo(sympy.Integer(0), 1 if is_store else dims[0].stride, 1)
+                0, DimensionInfo(sympy.S.Zero, 1 if is_store else dims[0].stride, 1)
             )
 
         if dims and not is_store:
@@ -1058,7 +1059,7 @@ class HalideKernel(SIMDKernel):
 
     def used_dims_from_index(self, index: sympy.Expr):
         """Detect which range trees are used to populate HalideCSEVariable.used_dims"""
-        used_dims = set()
+        used_dims = OrderedSet[sympy.Symbol]()
         for sym in index.free_symbols:
             assert isinstance(sym, sympy.Symbol)
             if symbol_is_type(sym, SymT.TMP):
@@ -1116,7 +1117,9 @@ class HalideKernel(SIMDKernel):
                 isinstance(self._load_mask, HalideCSEVariable)
                 and self._load_mask.used_dims is not None
             )
-            used_dims = {*self.used_dims_from_index(index), *self._load_mask.used_dims}
+            used_dims = OrderedSet(
+                (*self.used_dims_from_index(index), *self._load_mask.used_dims)
+            )
             result = self.newfunc(self.sort_used_dims(used_dims))
             if result.used_dims:
                 self.body.writeline(f"{result.name}_mask = hl.RDom([hl.Range(0, 1)])")
@@ -1191,13 +1194,14 @@ class HalideKernel(SIMDKernel):
             return result_tuple
 
         assert isinstance(value, HalideCSEVariable) and value.used_dims is not None
-        reduction_vars = {*self.reduction_renames}
+        reduction_vars = OrderedSet(self.reduction_renames)
         result_var = self.newfunc(
             [v for v in value.used_dims if v not in reduction_vars]
         )
-        if reduction_vars - {*value.used_dims}:
+        if reduction_vars - OrderedSet(value.used_dims):
             value = self.genfunc(
-                f"{value}", self.sort_used_dims({*value.used_dims, *reduction_vars})
+                f"{value}",
+                self.sort_used_dims(OrderedSet((*value.used_dims, *reduction_vars))),
             )
         value_str = value.subs_str(self.reduction_renames)
         default = ir.Reduction.default_accumulator(reduction_type, src_dtype)
@@ -1233,10 +1237,10 @@ class HalideKernel(SIMDKernel):
         assert isinstance(mean, HalideCSEVariable) and mean.used_dims is not None
         assert isinstance(m2, HalideCSEVariable) and m2.used_dims is not None
         assert isinstance(weight, HalideCSEVariable) and weight.used_dims is not None
-        used_dims = {*mean.used_dims, *m2.used_dims, *weight.used_dims} or {
-            *self.halide_vars
-        }
-        used_dims -= {*self.reduction_renames}
+        used_dims = OrderedSet(
+            (*mean.used_dims, *m2.used_dims, *weight.used_dims) or self.halide_vars
+        )
+        used_dims -= OrderedSet(self.reduction_renames)
         result_var = self.newfunc(self.sort_used_dims(used_dims))
         default = [f"hl.cast({x.name}.type(), 0)" for x in (mean, m2, weight)]
         pfx = result_var.name
@@ -1278,10 +1282,11 @@ class HalideKernel(SIMDKernel):
         assert self.inside_reduction
         assert len(dtypes) == len(values_orig)
         values: List[HalideCSEVariable] = []
-        all_used_dims = set()
+        all_used_dims = OrderedSet[sympy.Symbol]()
+
         for value in values_orig:
             assert isinstance(value, HalideCSEVariable) and value.used_dims is not None
-            if set(value.used_dims) & set(self.reduction_renames):
+            if OrderedSet(value.used_dims) & OrderedSet(self.reduction_renames):
                 values.append(value)
             else:
                 values.append(
@@ -1291,7 +1296,7 @@ class HalideKernel(SIMDKernel):
                 )
             all_used_dims.update(value.used_dims)
         result_var = self.newfunc(self.sort_used_dims(all_used_dims))
-        assert result_var.used_dims and set(result_var.used_dims) & set(
+        assert result_var.used_dims and OrderedSet(result_var.used_dims) & OrderedSet(
             self.reduction_renames
         )
         initial = [
@@ -1377,7 +1382,7 @@ class HalideKernel(SIMDKernel):
         """
 
         def arg_order(arg_tuple):
-            call_str, arg = arg_tuple
+            _call_str, arg = arg_tuple
             if isinstance(arg, SizeArg):
                 return 1  # this would normally be at the end, move it to middle
             elif "out_ptr" in arg.name:
@@ -1392,19 +1397,19 @@ class HalideKernel(SIMDKernel):
             result.append((call_str, arg))
             if isinstance(arg, TensorArg):
                 assert arg.offset == 0 and arg.alias_of is None
-                for alias in self.buffer_aliases.get(arg.name, ()):
-                    result.append(
-                        (
-                            None,
-                            TensorArg(
-                                alias,
-                                arg.buffer,
-                                arg.dtype,
-                                arg.offset,
-                                alias_of=arg.name,
-                            ),
-                        )
+                result.extend(
+                    (
+                        None,
+                        TensorArg(
+                            alias,
+                            arg.buffer,
+                            arg.dtype,
+                            arg.offset,
+                            alias_of=arg.name,
+                        ),
                     )
+                    for alias in self.buffer_aliases.get(arg.name, ())
+                )
         return result
 
     def halide_kernel_meta(self) -> HalideMeta:

@@ -10,6 +10,7 @@
 #include <c10/util/ScopeExit.h>
 #include <c10/util/UniqueVoidPtr.h>
 #include <c10/util/env.h>
+#include <c10/util/error.h>
 #include <c10/util/flat_hash_map.h>
 #include <c10/util/hash.h>
 #include <c10/util/llvmMathExtras.h>
@@ -210,7 +211,6 @@ struct Block {
       void* ptr)
       : device(device),
         stream(stream),
-        stream_uses(),
         size(size),
         requested_size(0),
         pool(pool),
@@ -218,11 +218,7 @@ struct Block {
 
   // constructor for search key
   Block(c10::DeviceIndex device, cudaStream_t stream, size_t size)
-      : device(device),
-        stream(stream),
-        stream_uses(),
-        size(size),
-        requested_size(0) {}
+      : device(device), stream(stream), size(size), requested_size(0) {}
 
   size_t gc_count() {
     TORCH_INTERNAL_ASSERT(pool);
@@ -486,7 +482,7 @@ struct ExpandableSegment {
         pidfd != -1 || errno != ENOSYS,
         "The kernel on this machine does not support the pidfd_open syscall needed to use IPC for CUDA tensors when expandable_segments:True is set. "
         "Consider using expandable_segments:False via torch.cuda.memory._set_allocator_settings('expandable_segments:False') for this allocation.");
-    TORCH_CHECK(pidfd != -1, "pidfd_open:", std::strerror(errno));
+    TORCH_CHECK(pidfd != -1, "pidfd_open:", c10::utils::str_error(errno));
     for (auto i : c10::irange(header.num_handles)) {
       (void)i;
       int fd = 0;
@@ -504,7 +500,7 @@ struct ExpandableSegment {
             err != ENOSYS,
             "The kernel on this machine does not support the pidfd_getfd syscall needed to use IPC for CUDA tensors when expandable_segments:True is set. "
             "Consider using expandable_segments:False via torch.cuda.memory._set_allocator_settings('expandable_segments:False') for this allocation.");
-        TORCH_CHECK(false, "pidfd_getfd: ", std::strerror(err));
+        TORCH_CHECK(false, "pidfd_getfd: ", c10::utils::str_error(err));
       }
       CUmemGenericAllocationHandle handle = 0;
       C10_CUDA_DRIVER_CHECK(DriverAPI::get()->cuMemImportFromShareableHandle_(
@@ -880,17 +876,27 @@ struct MempoolIdHash {
   }
 };
 
-cudaError_t cudaMallocMaybeCapturing(void** p, size_t size) {
+cudaError_t allocPrimitive(void** ptr, size_t size, AllocParams& p) {
+  auto active_pool = MemPoolContext::getActiveMemPool();
+  if (active_pool && active_pool->allocator() && p.pool->owner_PrivatePool) {
+    *ptr = active_pool->allocator()->raw_alloc(size);
+    return *ptr ? cudaSuccess : cudaErrorMemoryAllocation;
+  } else {
+    return C10_CUDA_ERROR_HANDLED(cudaMalloc(ptr, size));
+  }
+}
+
+cudaError_t cudaMallocMaybeCapturing(void** ptr, size_t size, AllocParams& p) {
   if (at::cuda::currentStreamCaptureStatusMayInitCtx() ==
       at::cuda::CaptureStatus::None) {
-    return C10_CUDA_ERROR_HANDLED(cudaMalloc(p, size));
+    return allocPrimitive(ptr, size, p);
   } else {
     // It's ok to capture cudaMallocs, as long as we never cudaFree those
     // addresses before replay.
     // Capturing cudaMalloc behaves nicely: it gives the graph new VA,
     // but is ignored (won't leakily allocate new memory) in replays.
     at::cuda::CUDAStreamCaptureModeGuard g{cudaStreamCaptureModeRelaxed};
-    return C10_CUDA_ERROR_HANDLED(cudaMalloc(p, size));
+    return allocPrimitive(ptr, size, p);
   }
 }
 
@@ -1566,6 +1572,19 @@ class DeviceCachingAllocator {
     if (C10_UNLIKELY(!captures_underway.empty())) {
       block_to_cudagraph_stream_uses[block].insert(stream);
     }
+  }
+
+  /** get memory fraction limiting maximum allocated memory **/
+  double getMemoryFraction() {
+    if (!set_fraction) {
+      return 1.0;
+    }
+
+    size_t device_free = 0;
+    size_t device_total = 0;
+    C10_CUDA_CHECK(cudaMemGetInfo(&device_free, &device_total));
+    return static_cast<double>(allowed_memory_maximum) /
+        static_cast<double>(device_total);
   }
 
   /** set memory fraction to limit maximum allocated memory **/
@@ -2707,19 +2726,21 @@ class DeviceCachingAllocator {
       }
       return bool(p.block);
     } else {
+      auto active_pool = MemPoolContext::getActiveMemPool();
+      if (active_pool && active_pool->allocator() &&
+          p.pool->owner_PrivatePool) {
+        // Ensure that active_pool and p.pool are the same
+        auto pp = get_private_pool(active_pool->id());
+        TORCH_INTERNAL_ASSERT(pp == p.pool->owner_PrivatePool);
+      }
       if (CUDAAllocatorConfig::release_lock_on_cudamalloc()) {
         // At scope exit, acquire the lock again. This provides safety against
         // any potential exceptions in the cudaMallocMaybeCapturing function.
         auto sg = c10::make_scope_exit([&]() { lock.lock(); });
         lock.unlock();
-      }
-      auto active_pool = MemPoolContext::getActiveMemPool();
-      if (active_pool && active_pool->allocator() &&
-          p.pool->owner_PrivatePool) {
-        ptr = active_pool->allocator()->raw_alloc(size);
-        p.err = ptr ? cudaSuccess : cudaErrorMemoryAllocation;
+        p.err = cudaMallocMaybeCapturing(&ptr, size, p);
       } else {
-        p.err = cudaMallocMaybeCapturing(&ptr, size);
+        p.err = cudaMallocMaybeCapturing(&ptr, size, p);
       }
       if (CUDAAllocatorConfig::release_lock_on_cudamalloc()) {
         TORCH_CHECK(
@@ -3376,6 +3397,16 @@ class NativeCachingAllocator : public CUDAAllocator {
     device_allocator[block->device]->free(block);
   }
 
+  double getMemoryFraction(c10::DeviceIndex device) override {
+    TORCH_INTERNAL_ASSERT(
+        0 <= device && static_cast<size_t>(device) < device_allocator.size(),
+        "Allocator not initialized for device ",
+        device,
+        ": did you call init?");
+    C10_CUDA_CHECK(c10::cuda::SetDevice(device));
+    return device_allocator[device]->getMemoryFraction();
+  }
+
   void setMemoryFraction(double fraction, c10::DeviceIndex device) override {
     TORCH_INTERNAL_ASSERT(
         0 <= device && static_cast<size_t>(device) < device_allocator.size(),
@@ -3985,6 +4016,10 @@ CUDACachingAllocator::CUDAAllocator* MemPool::allocator() {
 
 int MemPool::use_count() {
   return CUDACachingAllocator::getPoolUseCount(device_, id_);
+}
+
+c10::DeviceIndex MemPool::device() {
+  return device_;
 }
 
 MempoolId_t MemPool::graph_pool_handle(bool is_user_created) {

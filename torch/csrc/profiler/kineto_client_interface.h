@@ -6,6 +6,6 @@
 namespace torch {
 
 // declare global_kineto_init for libtorch_cpu.so to call
-TORCH_API void global_kineto_init(void);
+TORCH_API void global_kineto_init();
 
 } // namespace torch

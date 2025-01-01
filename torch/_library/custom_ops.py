@@ -26,7 +26,7 @@ def custom_op(
     mutates_args: Union[str, Iterable[str]],
     device_types: device_types_t = None,
     schema: Optional[str] = None,
-) -> Callable:
+) -> Any:
     """Wraps a function into custom operator.
 
     Reasons why you may want to create a custom op include:
@@ -494,6 +494,10 @@ class CustomOpDef:
         not depend on or mutate global state. If you need a non-traceable backward,
         you can make it a separate custom_op that you call inside ``backward_fn``.
 
+        If you need different autograd behavior on different devices, then we
+        recommend creating two different custom operators, one for each device
+        that needs different behavior, and switching between them at runtime.
+
         Examples:
             >>> import torch
             >>> import numpy as np
@@ -553,6 +557,10 @@ class CustomOpDef:
         self._setup_context_fn = setup_context
 
     def _register_to_dispatcher(self) -> None:
+        if torch._running_with_deploy():
+            utils.warn_deploy(stacklevel=5)
+            return
+
         lib = self._lib
         schema_str = self._name + self._schema
         cpp_schema = _C.parse_schema(schema_str)
@@ -590,19 +598,13 @@ class CustomOpDef:
 
         schema = self._opoverload._schema
         if schema.is_mutable:
+            mutated_idxs, mutated_keys = utils.mutated_args_kwargs(schema)
 
             def adinplaceorview_impl(keyset, *args, **kwargs):
-                for arg, val in utils.zip_schema(schema, args, kwargs):
-                    if not arg.alias_info:
-                        continue
-                    if not arg.alias_info.is_write:
-                        continue
-                    if isinstance(val, Tensor):
-                        torch.autograd.graph.increment_version(val)
-                    elif isinstance(val, (tuple, list)):
-                        for v in val:
-                            if isinstance(v, Tensor):
-                                torch.autograd.graph.increment_version(v)
+                for idx in mutated_idxs:
+                    increment_version(args[idx])
+                for key in mutated_keys:
+                    increment_version(kwargs[key])
                 with _C._AutoDispatchBelowADInplaceOrView():
                     return self._opoverload.redispatch(
                         keyset & _C._after_ADInplaceOrView_keyset, *args, **kwargs
@@ -734,6 +736,15 @@ class CustomOpDef:
             return register
         else:
             return register(func)
+
+
+def increment_version(val: Any) -> None:
+    if isinstance(val, Tensor):
+        torch.autograd.graph.increment_version(val)
+    elif isinstance(val, (tuple, list)):
+        for v in val:
+            if isinstance(v, Tensor):
+                torch.autograd.graph.increment_version(v)
 
 
 # NOTE: [Supporting decorator and non-decorator usage]

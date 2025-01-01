@@ -108,14 +108,14 @@ class RNNCellBase(nn.RNNCellBase):
             if weight_qscheme is not None:
                 scale = weight_qparams["scale"]
                 scale_tensor = (
-                    scale.clone().detach()
+                    scale.detach().clone()
                     if isinstance(scale, torch.Tensor)
                     else torch.tensor(scale, dtype=torch.float, device=device)
                 )
                 self.register_buffer(key + "_scale", scale_tensor)
                 zp = weight_qparams["zero_point"]
                 zp_tensor = (
-                    zp.clone().detach()
+                    zp.detach().clone()
                     if isinstance(zp, torch.Tensor)
                     else torch.tensor(zp, dtype=torch.int, device=device)
                 )
@@ -123,7 +123,7 @@ class RNNCellBase(nn.RNNCellBase):
                 if weight_qscheme == torch.per_channel_affine:
                     axis = weight_qparams["axis"]
                     axis_tensor = (
-                        axis.clone().detach()
+                        axis.detach().clone()
                         if isinstance(axis, torch.Tensor)
                         else torch.tensor(axis, dtype=torch.int, device=device)
                     )

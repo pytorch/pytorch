@@ -169,8 +169,8 @@ class BenchmarkFusionTestTemplate:
 
         for c in out_code[0], out_code2[0]:
             FileCheck().check("async_compile.wait").check("DeviceGuard").check_count(
-                "empty_strided_cuda", 2, exactly=True
-            ).check("return").run(c)
+                "empty_strided_cuda", 1, exactly=True
+            ).check_regex("buf[0-9]* = buf[0-9]*; del buf[0-9]*").check("return").run(c)
 
     def test_tield_kernel_fusion(self):
         def f(x):
@@ -242,7 +242,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
 
         def setUp(self):
             super().setUp()
-            if not is_big_gpu(0):
+            if not is_big_gpu():
                 return self.skipTest("Need a big GPU to run max_autotune=True")
 
         def _equivalent_output_code_impl(self, size, first_dim=None, activation=True):

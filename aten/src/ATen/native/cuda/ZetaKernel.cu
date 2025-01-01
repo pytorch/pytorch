@@ -34,6 +34,6 @@ void zeta_kernel_cuda(TensorIteratorBase& iter) {
 
 }  // namespace (anonymous)
 
-REGISTER_DISPATCH(zeta_stub, &zeta_kernel_cuda);
+REGISTER_DISPATCH(zeta_stub, &zeta_kernel_cuda)
 
 } // namespace at::native

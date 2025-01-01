@@ -1,4 +1,5 @@
 # Owner(s): ["module: dataloader"]
+# ruff: noqa: F841
 
 import ctypes
 import errno
@@ -48,6 +49,7 @@ from torch.utils.data import (
     ChainDataset,
     ConcatDataset,
     DataLoader,
+    dataloader,
     Dataset,
     IterableDataset,
     IterDataPipe,
@@ -2479,10 +2481,8 @@ except RuntimeError as e:
     @unittest.skipIf(not HAS_PSUTIL, "psutil not found")
     @slowTest
     def test_proper_exit(self):
-        (
-            r"""There might be ConnectionResetError or leaked semaphore warning """
-            r"""(due to dirty process exit), but they are all safe to ignore"""
-        )
+        """There might be ConnectionResetError or leaked semaphore warning
+        (due to dirty process exit), but they are all safe to ignore"""
 
         # TODO: test the case where the pin_memory_thread triggers an
         #       error/fatal signal. I haven't found out how to properly do that.
@@ -2759,51 +2759,51 @@ except RuntimeError as e:
 
     def test_default_convert_mapping_keep_type(self):
         data = CustomDict({"a": 1, "b": 2})
-        converted = _utils.collate.default_convert(data)
+        converted = dataloader.default_convert(data)
 
         self.assertEqual(converted, data)
 
     def test_default_convert_sequence_keep_type(self):
         data = CustomList([1, 2, 3])
-        converted = _utils.collate.default_convert(data)
+        converted = dataloader.default_convert(data)
 
         self.assertEqual(converted, data)
 
     def test_default_convert_sequence_dont_keep_type(self):
         data = range(2)
-        converted = _utils.collate.default_convert(data)
+        converted = dataloader.default_convert(data)
 
         self.assertEqual(converted, [0, 1])
 
     def test_default_collate_dtype(self):
         arr = [1, 2, -1]
-        collated = _utils.collate.default_collate(arr)
+        collated = dataloader.default_collate(arr)
         self.assertEqual(collated, torch.tensor(arr))
         self.assertEqual(collated.dtype, torch.int64)
 
         arr = [1.1, 2.3, -0.9]
-        collated = _utils.collate.default_collate(arr)
+        collated = dataloader.default_collate(arr)
         self.assertEqual(collated, torch.tensor(arr, dtype=torch.float64))
 
         arr = [True, False]
-        collated = _utils.collate.default_collate(arr)
+        collated = dataloader.default_collate(arr)
         self.assertEqual(collated, torch.tensor(arr))
         self.assertEqual(collated.dtype, torch.bool)
 
         # Should be a no-op
         arr = ["a", "b", "c"]
-        self.assertEqual(arr, _utils.collate.default_collate(arr))
+        self.assertEqual(arr, dataloader.default_collate(arr))
 
     def test_default_collate_mapping_keep_type(self):
         batch = [CustomDict({"a": 1, "b": 2}), CustomDict({"a": 3, "b": 4})]
-        collated = _utils.collate.default_collate(batch)
+        collated = dataloader.default_collate(batch)
 
         expected = CustomDict({"a": torch.tensor([1, 3]), "b": torch.tensor([2, 4])})
         self.assertEqual(collated, expected)
 
     def test_default_collate_sequence_keep_type(self):
         batch = [CustomList([1, 2, 3]), CustomList([4, 5, 6])]
-        collated = _utils.collate.default_collate(batch)
+        collated = dataloader.default_collate(batch)
 
         expected = CustomList(
             [
@@ -2816,7 +2816,7 @@ except RuntimeError as e:
 
     def test_default_collate_sequence_dont_keep_type(self):
         batch = [range(2), range(2)]
-        collated = _utils.collate.default_collate(batch)
+        collated = dataloader.default_collate(batch)
 
         self.assertEqual(collated, [torch.tensor([0, 0]), torch.tensor([1, 1])])
 
@@ -2826,16 +2826,16 @@ except RuntimeError as e:
 
         # Should be a no-op
         arr = np.array(["a", "b", "c"])
-        self.assertEqual(arr, _utils.collate.default_collate(arr))
+        self.assertEqual(arr, dataloader.default_collate(arr))
 
         arr = np.array([[["a", "b", "c"]]])
-        self.assertRaises(TypeError, lambda: _utils.collate.default_collate(arr))
+        self.assertRaises(TypeError, lambda: dataloader.default_collate(arr))
 
         arr = np.array([object(), object(), object()])
-        self.assertRaises(TypeError, lambda: _utils.collate.default_collate(arr))
+        self.assertRaises(TypeError, lambda: dataloader.default_collate(arr))
 
         arr = np.array([[[object(), object(), object()]]])
-        self.assertRaises(TypeError, lambda: _utils.collate.default_collate(arr))
+        self.assertRaises(TypeError, lambda: dataloader.default_collate(arr))
 
     @unittest.skipIf(not TEST_NUMPY, "numpy unavailable")
     def test_default_collate_numpy_memmap(self):
@@ -2846,7 +2846,7 @@ except RuntimeError as e:
             arr_memmap = np.memmap(f, dtype=arr.dtype, mode="w+", shape=arr.shape)
             arr_memmap[:] = arr[:]
             arr_new = np.memmap(f, dtype=arr.dtype, mode="r", shape=arr.shape)
-            tensor = _utils.collate.default_collate(list(arr_new))
+            tensor = dataloader.default_collate(list(arr_new))
 
         self.assertTrue(
             (tensor == tensor.new_tensor([[0, 1], [2, 3], [4, 5], [6, 7]])).all().item()
@@ -2854,10 +2854,8 @@ except RuntimeError as e:
 
     def test_default_collate_bad_sequence_type(self):
         batch = [["X"], ["X", "X"]]
-        self.assertRaises(RuntimeError, lambda: _utils.collate.default_collate(batch))
-        self.assertRaises(
-            RuntimeError, lambda: _utils.collate.default_collate(batch[::-1])
-        )
+        self.assertRaises(RuntimeError, lambda: dataloader.default_collate(batch))
+        self.assertRaises(RuntimeError, lambda: dataloader.default_collate(batch[::-1]))
 
     @unittest.skipIf(not TEST_NUMPY, "numpy unavailable")
     def test_default_collate_shared_tensor(self):
@@ -2868,8 +2866,8 @@ except RuntimeError as e:
 
         self.assertEqual(t_in.is_shared(), False)
 
-        self.assertEqual(_utils.collate.default_collate([t_in]).is_shared(), False)
-        self.assertEqual(_utils.collate.default_collate([n_in]).is_shared(), False)
+        self.assertEqual(dataloader.default_collate([t_in]).is_shared(), False)
+        self.assertEqual(dataloader.default_collate([n_in]).is_shared(), False)
 
         # FIXME: fix the following hack that makes `default_collate` believe
         #        that it is in a worker process (since it tests
@@ -2877,8 +2875,8 @@ except RuntimeError as e:
         old = _utils.worker._worker_info
         try:
             _utils.worker._worker_info = "x"
-            self.assertEqual(_utils.collate.default_collate([t_in]).is_shared(), True)
-            self.assertEqual(_utils.collate.default_collate([n_in]).is_shared(), True)
+            self.assertEqual(dataloader.default_collate([t_in]).is_shared(), True)
+            self.assertEqual(dataloader.default_collate([n_in]).is_shared(), True)
         finally:
             _utils.worker._worker_info = old
 
@@ -3501,6 +3499,107 @@ class TestConvAfterFork(TestCase):
         loader = DataLoader(ConvDataset(), num_workers=1)
         for x in loader:
             self.assertEqual(x.shape, (1, 1, 1, 23999))
+
+
+class TestSlowIndexDataset(Dataset):
+    def __init__(self, end: int, slow_index: int):
+        self.end = end
+        self.slow_index = slow_index
+
+    def __getitem__(self, idx):
+        if idx == self.slow_index:
+            time.sleep(0.5)
+        return idx
+
+    def __len__(self):
+        return self.end
+
+
+class TestSlowIterableDataset(IterableDataset):
+    def __init__(self, start: int, end: int):
+        self.start = start
+        self.end = end
+        self.mid = math.ceil((self.end - self.start) / 2)
+
+    def give_data(self, iter_start, iter_end):
+        for i in range(iter_start, iter_end):
+            if i >= self.mid:
+                time.sleep(0.5)
+            yield i
+
+    def __iter__(self):
+        worker_info = torch.utils.data.get_worker_info()
+        per_worker = int(
+            math.ceil((self.end - self.start) / float(worker_info.num_workers))
+        )
+        worker_id = worker_info.id
+        iter_start = self.start + worker_id * per_worker
+        iter_end = min(iter_start + per_worker, self.end)
+        return self.give_data(iter_start, iter_end)
+
+
+class TestOutOfOrderDataLoader(TestCase):
+    def test_in_order_index_ds(self):
+        dataset = TestSlowIndexDataset(end=10, slow_index=2)
+
+        dataloader = torch.utils.data.DataLoader(
+            dataset,
+            num_workers=2,
+            in_order=True,
+        )
+
+        expected_order = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+        output = [sample.item() for sample in dataloader]
+        self.assertEqual(expected_order, output)
+
+    def test_out_of_order_index_ds(self):
+        dataset = TestSlowIndexDataset(end=10, slow_index=2)
+
+        dataloader = torch.utils.data.DataLoader(
+            dataset,
+            num_workers=2,
+            in_order=False,
+        )
+
+        # normally, this should be [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+        expected_order = [0, 1, 3, 5, 7, 2, 4, 6, 8, 9]
+        output = [sample.item() for sample in dataloader]
+        self.assertNotEqual(output, list(range(10)))
+        self.assertEqual(len(output), len(expected_order))
+        self.assertEqual(set(output), set(range(10)))
+        self.assertEqual(set(output[:5]), set(expected_order[:5]))
+        self.assertEqual(set(output[5:]), set(expected_order[5:]))
+
+    def test_in_order_iterable_ds(self):
+        dataset = TestSlowIterableDataset(start=0, end=10)
+
+        dataloader = torch.utils.data.DataLoader(
+            dataset,
+            num_workers=2,
+            in_order=True,
+        )
+
+        expected_order = [0, 5, 1, 6, 2, 7, 3, 8, 4, 9]
+        output = [sample.item() for sample in dataloader]
+        self.assertEqual(expected_order, output)
+
+    def test_out_of_order_iterable_ds(self):
+        dataset = TestSlowIterableDataset(start=0, end=10)
+
+        dataloader = torch.utils.data.DataLoader(
+            dataset,
+            num_workers=2,
+            in_order=False,
+        )
+
+        # normally, this should be [0, 5, 1, 6, 2, 7, 3, 8, 4, 9]
+        expected_order = [0, 1, 2, 3, 5, 4, 6, 7, 8, 9]
+        output = [sample.item() for sample in dataloader]
+        self.assertNotEqual(output, [0, 5, 1, 6, 2, 7, 3, 8, 4, 9])
+        self.assertEqual(len(output), len(expected_order))
+        self.assertEqual(set(output), set(range(10)))
+        self.assertEqual(set(output[:4]), set(expected_order[:4]))
+        self.assertEqual(set(output[4:]), set(expected_order[4:]))
 
 
 instantiate_device_type_tests(TestDataLoaderDeviceType, globals())

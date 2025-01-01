@@ -127,7 +127,7 @@ struct VISIBILITY_HIDDEN ConstantParameterList : public SugaredValue {
 
 struct VISIBILITY_HIDDEN ModuleDictMethod : public SugaredValue {
   explicit ModuleDictMethod(SugaredValuePtr iterable, std::string name)
-      : iterable_(std::move(iterable)), name_(std::move(name)){};
+      : iterable_(std::move(iterable)), name_(std::move(name)) {}
 
   std::string kind() const override {
     return name_;
@@ -286,7 +286,7 @@ struct VISIBILITY_HIDDEN SugaredDict : public SugaredValue {
 
   SugaredValuePtr iter(const SourceRange& loc, GraphFunction& m) override {
     return keys_;
-  };
+  }
 
   std::shared_ptr<ModuleValue> self_;
   std::shared_ptr<SugaredTupleValue> keys_;

@@ -76,9 +76,9 @@ class GraphTransformObserver:
             return False
 
         debug_info = lambda: self.passname  # noqa: E731
-        from torch._inductor.bisect_helper import BisectionManager
+        from torch._inductor.compiler_bisector import CompilerBisector
 
-        return BisectionManager.disable_subsystem(
+        return CompilerBisector.disable_subsystem(
             "inductor", self.subsystem, debug_info
         )
 

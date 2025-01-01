@@ -77,6 +77,37 @@ void check_gpu_arch(hipStream_t stream) {
   }
 }
 
+// We want to checkpoint and save the RNG state for backward if dropout
+// We get the default generator and return the seed and offset which will
+// be used in the backward function
+std::tuple<at::Tensor, at::Tensor, at::PhiloxCudaState, bool>
+prepare_philox_arguments(float p_dropout, int64_t counter_offset) {
+  at::Tensor seed_t, offset_t;
+  at::PhiloxCudaState philox_state;
+  bool use_philox_state = false;
+  if (p_dropout <= 0.0)  {
+    seed_t = at::empty({}, at::dtype(at::kLong).device(at::kCUDA));
+    offset_t = at::empty({}, at::dtype(at::kLong).device(at::kCUDA));
+    return { seed_t, offset_t, philox_state, use_philox_state };
+  }
+  auto gen = at::get_generator_or_default<at::CUDAGeneratorImpl>(std::nullopt, at::cuda::detail::getDefaultCUDAGenerator());
+  std::lock_guard<std::mutex> lock(gen->mutex_);
+  philox_state = gen->philox_cuda_state(counter_offset);
+  if (at::cuda::currentStreamCaptureStatus() == at::cuda::CaptureStatus::None) {
+    auto [seed, offset] = at::cuda::philox::unpack(philox_state);
+    seed_t = at::scalar_tensor(at::Scalar(static_cast<int64_t>(seed)), at::dtype(at::kLong).device(at::kCUDA));
+    offset_t = at::scalar_tensor(at::Scalar(static_cast<int64_t>(offset)), at::dtype(at::kLong).device(at::kCUDA));
+  } else {
+    // See Note [CUDA Graph-safe RNG states] about the design
+    use_philox_state = true;
+    seed_t = at::empty({}, at::dtype(at::kLong).device(at::kCUDA));
+    offset_t = at::empty({}, at::dtype(at::kLong).device(at::kCUDA));
+  }
+
+  return { seed_t, offset_t, philox_state, use_philox_state };
+}
+
+
 }
 
 #define CHECK_DEVICE(x) TORCH_CHECK(x.is_cuda(), #x " must be on CUDA")
@@ -158,44 +189,9 @@ mha_fwd(const at::Tensor &q,         // batch_size x seqlen_q x num_heads x head
   auto round_multiple = [](int x, int m) { return (x + m - 1) / m * m; };
   const int head_size = round_multiple(head_size_og, 8);
   const int head_size_rounded = round_multiple(head_size, 32);
-  const int seqlen_q_rounded = round_multiple(seqlen_q, 128);
-  const int seqlen_k_rounded = round_multiple(seqlen_k, 128);
 
-  // We want to checkpoint and save the RNG state for backward if dropout
-  // We get the default generator and return the seed and offset which will
-  // be used in the backward function
-  auto gen = at::get_generator_or_default<at::CUDAGeneratorImpl>(std::nullopt, at::cuda::detail::getDefaultCUDAGenerator());
-  at::Tensor seed_t, offset_t;
-
-  at::PhiloxCudaState philox_state;
-  bool use_philox_state = false;
-  if (p_dropout > 0.0)  {
-    // number of times random will be generated per thread, to offset philox counter in thc random
-    // state
-    // We use a custom RNG that increases the offset by batch_size * nheads * 32.
-    int64_t counter_offset = batch_size * num_heads * 32;
-    // See Note [Acquire lock when using random generators]
-    std::lock_guard<std::mutex> lock(gen->mutex_);
-    philox_state = gen->philox_cuda_state(counter_offset);
-    if (at::cuda::currentStreamCaptureStatus() == at::cuda::CaptureStatus::None) {
-      auto [seed, offset] = at::cuda::philox::unpack(philox_state);
-      seed_t = at::scalar_tensor(at::Scalar(static_cast<int64_t>(seed)), at::dtype(at::kLong).device(at::kCUDA));
-      offset_t = at::scalar_tensor(at::Scalar(static_cast<int64_t>(offset)), at::dtype(at::kLong).device(at::kCUDA));
-    } else {
-      // See Note [CUDA Graph-safe RNG states] about the design
-      use_philox_state = true;
-      seed_t = at::empty({}, at::dtype(at::kLong).device(at::kCUDA));
-      offset_t = at::empty({}, at::dtype(at::kLong).device(at::kCUDA));
-    }
-  } else {
-    if (at::cuda::currentStreamCaptureStatus() != at::cuda::CaptureStatus::None) {
-      seed_t = at::empty({}, at::dtype(at::kLong).device(at::kCUDA));
-      offset_t = at::empty({}, at::dtype(at::kLong).device(at::kCUDA));
-    } else {
-      seed_t = at::empty({}, at::dtype(at::kLong).device(at::kCUDA));
-      offset_t = at::empty({}, at::dtype(at::kLong).device(at::kCUDA));
-    }
-  }
+  auto [seed_t, offset_t, philox_state, use_philox_state] =
+    prepare_philox_arguments(p_dropout, batch_size * num_heads * 32);
 
   // Transpose tensors to meet AOTriton's Flash API
   at::Tensor q_t = q_padded.permute({0,2,1,3});
@@ -215,7 +211,6 @@ mha_fwd(const at::Tensor &q,         // batch_size x seqlen_q x num_heads x head
 
   hipError_t err; // TODO: Error handling
   using aotriton::v2::flash::attn_fwd;
-  using aotriton::TensorView;
   using sdp::aotriton_adapter::mk_aotensor;
   using sdp::aotriton_adapter::mk_aoscalartensor;
   using sdp::aotriton_adapter::mk_philoxtensor;
@@ -266,16 +261,150 @@ mha_varlen_fwd(const at::Tensor &q,  // total_q x num_heads x head_size, total_q
                int window_size_right,
                const bool return_softmax,
                std::optional<at::Generator> gen_) {
+  TORCH_CHECK(!seqused_k.has_value(), "[ROCm] mha_varlen_fwd: seqused_k must be nullopt");
+  const bool paged_KV = block_table_.has_value();
+  TORCH_CHECK(!paged_KV, "[ROCm] mha_varlen_fwd: block_table_ must be nullopt");
+  TORCH_CHECK(!alibi_slopes_.has_value(), "[ROCm] mha_varlen_fwd: alibi_slopes_ must be nullopt");
 
-  TORCH_CHECK(false, "mha_varlen_fwd not supported on ROCm");
+  at::hip::HIPGuardMasqueradingAsCUDA device_guard{(char)q.get_device()};
+  auto stream = at::hip::getCurrentHIPStreamMasqueradingAsCUDA().stream();
+  check_gpu_arch(stream);
 
-  at::Tensor softmax_lse = at::empty({}, at::dtype(at::kFloat));
-  at::Tensor p = at::empty({}, at::dtype(at::kFloat));
-  at::Tensor offset_t = at::empty({}, at::dtype(at::kLong));
-  at::Tensor seed_t = at::empty({}, at::dtype(at::kLong));
-  at::Tensor out = at::empty({}, at::dtype(at::kFloat));
+  auto q_dtype = q.dtype();
+  TORCH_CHECK(q_dtype == at::kHalf || q_dtype == at::kBFloat16,
+      "FlashAttention only support fp16 and bf16 data type");
+  TORCH_CHECK(k.dtype() == q_dtype, "query and key must have the same dtype");
+  TORCH_CHECK(v.dtype() == q_dtype, "query and value must have the same dtype");
+  TORCH_CHECK(cu_seqlens_q.dtype() == at::kInt, "cu_seqlens_q must have dtype int32");
+  TORCH_CHECK(cu_seqlens_k.dtype() == at::kInt, "cu_seqlens_k must have dtype int32");
 
-  return {out, q, k, v, softmax_lse, seed_t, offset_t, p};
+  CHECK_DEVICE(q); CHECK_DEVICE(k); CHECK_DEVICE(v);
+  CHECK_DEVICE(cu_seqlens_q);
+  CHECK_DEVICE(cu_seqlens_k);
+
+  TORCH_CHECK(q.stride(-1) == 1, "Input tensor must have contiguous last dimension");
+  TORCH_CHECK(k.stride(-1) == 1, "Input tensor must have contiguous last dimension");
+  TORCH_CHECK(v.stride(-1) == 1, "Input tensor must have contiguous last dimension");
+  CHECK_CONTIGUOUS(cu_seqlens_q);
+  CHECK_CONTIGUOUS(cu_seqlens_k);
+
+  const auto sizes = q.sizes();
+
+  const int batch_size = cu_seqlens_q.numel() - 1;
+  int num_heads = sizes[1];
+  const int head_size_og = sizes[2];
+  const int num_heads_k = paged_KV ? k.size(2) : k.size(1);
+
+  if (max_seqlen_q == 1 && !alibi_slopes_.has_value()) {
+    is_causal = false;
+  }  // causal=true is the same as causal=false in this case
+
+  at::Tensor temp_q = q;
+  const int total_q = temp_q.sizes()[0];
+
+  TORCH_CHECK(batch_size > 0, "batch size must be positive");
+  TORCH_CHECK(head_size_og <= 256, "FlashAttention forward only supports head dimension at most 256");
+  TORCH_CHECK(num_heads % num_heads_k == 0, "Number of heads in key/value must divide number of heads in query");
+
+  if (window_size_left >= max_seqlen_k) {
+    window_size_left = -1;
+  }
+  if (window_size_right >= max_seqlen_k) {
+    window_size_right = -1;
+  }
+
+  CHECK_SHAPE(temp_q, total_q, num_heads, head_size_og);
+  const int total_k = k.size(0);
+  CHECK_SHAPE(k, total_k, num_heads_k, head_size_og);
+  CHECK_SHAPE(v, total_k, num_heads_k, head_size_og);
+  CHECK_SHAPE(cu_seqlens_q, batch_size + 1);
+  CHECK_SHAPE(cu_seqlens_k, batch_size + 1);
+
+  // AOTriton's varlen API needs input shapes be
+  // (1, num_heads, total sequence lenght, head dimension)
+  at::Tensor q_padded, k_padded, v_padded;
+  at::Tensor out, out_padded;
+  q_padded = q.unsqueeze(0).transpose(1, 2);
+  k_padded = k.unsqueeze(0).transpose(1, 2);
+  v_padded = v.unsqueeze(0).transpose(1, 2);
+  if (out_.has_value()) {
+    out = out_.value();
+    TORCH_CHECK(out.dtype() == q_dtype, "Output must have the same dtype as inputs");
+    CHECK_DEVICE(out);
+    TORCH_CHECK(out.stride(-1) == 1, "Output tensor must have contiguous last dimension");
+    CHECK_SHAPE(out, total_q, num_heads, head_size_og);
+  } else {
+    out = at::empty_like(q);
+  }
+  out_padded = out.unsqueeze(0).transpose(1, 2);
+
+  auto round_multiple = [](int x, int m) { return (x + m - 1) / m * m; };
+  const int head_size = head_size_og;
+
+  auto opts = q.options();
+
+  auto softmax_lse = at::empty({batch_size, num_heads, max_seqlen_q}, opts.dtype(at::kFloat));
+  at::Tensor M = softmax_lse.view({batch_size * num_heads, max_seqlen_q});
+  at::Tensor softmax_fa_t;
+  // Only return softmax if there's dropout to reduce compilation time
+  if (return_softmax) {
+    TORCH_CHECK(p_dropout > 0.0f, "return_softmax is only supported when p_dropout > 0.0");
+    softmax_fa_t = at::empty({ batch_size, num_heads, max_seqlen_q, max_seqlen_k }, opts);
+  } else {
+    softmax_fa_t = at::empty({ 0, 0, 0, 0 }, opts);
+  }
+
+  if (zero_tensors) {
+    out.zero_();
+    softmax_lse.fill_(-std::numeric_limits<float>::infinity());
+    if (return_softmax) {
+      softmax_fa_t.zero_();
+    }
+  }
+
+  auto [seed_t, offset_t, philox_state, use_philox_state] =
+    prepare_philox_arguments(p_dropout, batch_size * num_heads * 32);
+
+  if (max_seqlen_k > 0) {
+    hipError_t err; // TODO: Error handling
+    using aotriton::v2::flash::attn_fwd_compact_varlen;
+    using sdp::aotriton_adapter::mk_aotensor;
+    using sdp::aotriton_adapter::mk_aoscalartensor;
+    using sdp::aotriton_adapter::mk_philoxtensor;
+    using sdp::aotriton_adapter::cast_dtype;
+    aotriton::TensorView<4> empty_bias(0, {0,0,0,0}, {0,0,0,0}, cast_dtype(q.dtype()));
+    auto seed = use_philox_state ? mk_philoxtensor(philox_state.seed_.ptr) : mk_aoscalartensor(seed_t);
+    auto offset1 = use_philox_state ? mk_philoxtensor(philox_state.offset_.ptr) : mk_aoscalartensor(offset_t);
+    auto offset2 = use_philox_state ? philox_state.offset_intragraph_ : 0;
+    auto seed_output = use_philox_state ? mk_philoxtensor(seed_t.data_ptr<int64_t>()) : mk_philoxtensor(nullptr);
+    auto offset_output = use_philox_state ? mk_philoxtensor(offset_t.data_ptr<int64_t>()) : mk_philoxtensor(nullptr);
+    err = attn_fwd_compact_varlen(mk_aotensor(q_padded, "q"),
+                                  mk_aotensor(k_padded, "k"),
+                                  mk_aotensor(v_padded, "v"),
+                                  mk_aotensor<1>(cu_seqlens_q, "cu_seqlens_q"),
+                                  mk_aotensor<1>(cu_seqlens_k, "cu_seqlens_k"),
+                                  max_seqlen_q,
+                                  max_seqlen_k,
+                                  empty_bias,
+                                  softmax_scale,
+                                  mk_aotensor<2>(M, "M"),
+                                  mk_aotensor(out_padded, "Out"),
+                                  p_dropout,
+                                  seed,
+                                  offset1,
+                                  offset2,
+                                  seed_output,
+                                  offset_output,
+                                  mk_aotensor(softmax_fa_t, "encoded_softmax"),
+                                  is_causal,
+                                  stream);
+  } else {
+    // If seqlen_k == 0, then we have an empty tensor. We need to set the output to 0.
+    out.zero_();
+    softmax_lse.fill_(std::numeric_limits<float>::infinity());
+  }
+
+  return {out, q, k, v, softmax_lse, seed_t, offset_t, softmax_fa_t};
 }
 
 std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor>
@@ -297,6 +426,9 @@ mha_bwd(const at::Tensor &dout,  // batch_size x seqlen_q x num_heads, x head_si
         const bool deterministic,
         const at::Tensor philox_seed,
         const at::Tensor philox_offset) {
+  // Otherwise the kernel will be launched from cuda:0 device
+  // Cast to char to avoid compiler warning about narrowing
+  at::hip::HIPGuardMasqueradingAsCUDA device_guard{(char)q.get_device()};
   auto stream = at::hip::getCurrentHIPStreamMasqueradingAsCUDA().stream();
   check_gpu_arch(stream);
 
@@ -341,8 +473,6 @@ mha_bwd(const at::Tensor &dout,  // batch_size x seqlen_q x num_heads, x head_si
 
   auto round_multiple = [](int x, int m) { return (x + m - 1) / m * m; };
   const int head_size_rounded = round_multiple(head_size, 32);
-  const int seqlen_q_rounded = round_multiple(seqlen_q, 128);
-  const int seqlen_k_rounded = round_multiple(seqlen_k, 128);
 
   TORCH_CHECK(head_size == round_multiple(head_size_og, 8), "head_size must be head_size_og rounded to a multiple of 8");
 
@@ -381,23 +511,8 @@ mha_bwd(const at::Tensor &dout,  // batch_size x seqlen_q x num_heads, x head_si
     dv = at::empty_like(k);
   }
 
-  // const at::Tensor& dout_padded = dout;
-
-  // Otherwise the kernel will be launched from cuda:0 device
-  // Cast to char to avoid compiler warning about narrowing
-  at::hip::HIPGuardMasqueradingAsCUDA device_guard{(char)q.get_device()};
-
   auto opts = q.options();
-  auto softmax_d = at::empty({batch_size, num_heads, seqlen_q_rounded}, opts.dtype(at::kFloat));
-
-  at::Tensor dk_expanded, dv_expanded;
-  if (num_heads_k != num_heads) {  // MQA / GQA
-    dk_expanded = at::empty({batch_size, seqlen_k, num_heads, head_size}, opts);
-    dv_expanded = at::empty({batch_size, seqlen_k, num_heads, head_size}, opts);
-  } else {
-    dk_expanded = dk;
-    dv_expanded = dv;
-  }
+  auto softmax_d = at::empty({batch_size, num_heads, seqlen_q}, opts.dtype(at::kFloat));
 
   at::Tensor q_t = q.permute({0,2,1,3});
   at::Tensor k_t = k.permute({0,2,1,3});
@@ -440,14 +555,7 @@ mha_bwd(const at::Tensor &dout,  // batch_size x seqlen_q x num_heads, x head_si
                    stream);
   }
 
-  // For MQA/GQA we need to sum dK and dV across the groups
-  if (num_heads_k != num_heads) {
-    at::sum_out(dk, at::reshape(dk_expanded, {batch_size, seqlen_k, num_heads_k, num_heads / num_heads_k, head_size}), {3});
-    at::sum_out(dv, at::reshape(dv_expanded, {batch_size, seqlen_k, num_heads_k, num_heads / num_heads_k, head_size}), {3});
-  }
   return { dq, dk, dv, softmax_d };
-#undef CALL_BWD_DROPOUT
-#undef CALL_BWD
 }
 
 std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor>
@@ -473,13 +581,173 @@ mha_varlen_bwd(const at::Tensor &dout,  // total_q x num_heads, x head_size
                int window_size_right,
                const bool deterministic,
                const at::Tensor philox_seed,
-               const at::Tensor philox_offset) {
-  TORCH_CHECK(false, "mha_varlen_bwd not supported on ROCm");
+               const at::Tensor philox_offset)
+{
+  TORCH_CHECK(!alibi_slopes_.has_value(), "[ROCm] mha_varlen_fwd: alibi_slopes_ must be nullopt");
 
-  at::Tensor softmax_d = at::empty({}, at::dtype(at::kFloat));
+  if (is_causal) {
+    window_size_right = 0;
+  }
+  // Otherwise the kernel will be launched from cuda:0 device
+  // Cast to char to avoid compiler warning about narrowing
+  at::hip::HIPGuardMasqueradingAsCUDA device_guard{(char)q.get_device()};
+  auto stream = at::hip::getCurrentHIPStreamMasqueradingAsCUDA().stream();
+  check_gpu_arch(stream);
 
-  return { q, k, v, softmax_d };
+  bool is_dropout = p_dropout > 0.0;
+
+  auto q_dtype = q.dtype();
+  TORCH_CHECK(q_dtype == at::kHalf || q_dtype == at::kBFloat16,
+      "FlashAttention only support fp16 and bf16 data type");
+  TORCH_CHECK(k.dtype() == q_dtype, "query and key must have the same dtype");
+  TORCH_CHECK(v.dtype() == q_dtype, "query and value must have the same dtype");
+  TORCH_CHECK(out.dtype() == q_dtype, "query and out must have the same dtype");
+  TORCH_CHECK(dout.dtype() == q_dtype, "query and dout must have the same dtype");
+  TORCH_CHECK(cu_seqlens_q.dtype() == at::kInt, "cu_seqlens_q must have dtype int32");
+  TORCH_CHECK(cu_seqlens_k.dtype() == at::kInt, "cu_seqlens_k must have dtype int32");
+
+  CHECK_DEVICE(q); CHECK_DEVICE(k); CHECK_DEVICE(v);
+  CHECK_DEVICE(out); CHECK_DEVICE(dout); CHECK_DEVICE(softmax_lse);
+  CHECK_DEVICE(cu_seqlens_q); CHECK_DEVICE(cu_seqlens_k);
+
+  TORCH_CHECK(q.stride(-1) == 1, "Input tensor must have contiguous last dimension");
+  TORCH_CHECK(k.stride(-1) == 1, "Input tensor must have contiguous last dimension");
+  TORCH_CHECK(v.stride(-1) == 1, "Input tensor must have contiguous last dimension");
+  TORCH_CHECK(out.stride(-1) == 1, "out tensor must have contiguous last dimension");
+  TORCH_CHECK(dout.stride(-1) == 1, "dout tensor must have contiguous last dimension");
+  CHECK_CONTIGUOUS(cu_seqlens_q);
+  CHECK_CONTIGUOUS(cu_seqlens_k);
+
+  const auto sizes = q.sizes();
+
+  const int total_q = sizes[0];
+  const int batch_size = cu_seqlens_q.numel() - 1;
+  const int num_heads = sizes[1];
+  const int head_size_og = dout.size(2);
+  const int head_size = sizes[2];
+  const int total_k = k.size(0);
+  const int num_heads_k = k.size(1);
+  TORCH_CHECK(batch_size > 0, "batch size must be positive");
+  TORCH_CHECK(head_size <= 256, "FlashAttention backward only supports head dimension at most 256");
+  TORCH_CHECK(num_heads % num_heads_k == 0, "Number of heads in key/value must divide number of heads in query");
+
+  if (window_size_left >= max_seqlen_k) { window_size_left = -1; }
+  if (window_size_right >= max_seqlen_k) { window_size_right = -1; }
+
+  CHECK_SHAPE(q, total_q, num_heads, head_size);
+  CHECK_SHAPE(k, total_k, num_heads_k, head_size);
+  CHECK_SHAPE(v, total_k, num_heads_k, head_size);
+  CHECK_SHAPE(out, total_q, num_heads, head_size);
+  CHECK_SHAPE(dout, total_q, num_heads, head_size_og);
+  CHECK_SHAPE(cu_seqlens_q, batch_size + 1);
+  CHECK_SHAPE(cu_seqlens_k, batch_size + 1);
+
+  at::Tensor softmax_lse_cont = softmax_lse.view({batch_size * num_heads, max_seqlen_q}).contiguous();
+  at::Tensor delta = at::empty_like(softmax_lse_cont).contiguous();
+
+  at::Tensor q_padded, k_padded, v_padded;
+  q_padded = q.unsqueeze(0).transpose(1, 2);
+  k_padded = k.unsqueeze(0).transpose(1, 2);
+  v_padded = v.unsqueeze(0).transpose(1, 2);
+  at::Tensor out_t, dout_t;
+  out_t = out.unsqueeze(0).transpose(1, 2);
+  dout_t = dout.unsqueeze(0).transpose(1, 2);
+
+  at::Tensor dq, dk, dv;
+  at::Tensor dq_padded, dk_padded, dv_padded;
+  if (dq_.has_value()) {
+    dq = dq_.value();
+    TORCH_CHECK(dq.dtype() == q_dtype, "dq must have the same dtype as q");
+    CHECK_DEVICE(dq);
+    TORCH_CHECK(dq.stride(-1) == 1, "dq must have contiguous last dimension");
+    CHECK_SHAPE(dq, total_q, num_heads, head_size);
+  } else {
+    dq = at::empty_like(q);
+  }
+  if (dk_.has_value()) {
+    dk = dk_.value();
+    TORCH_CHECK(dk.dtype() == q_dtype, "dk must have the same dtype as q");
+    CHECK_DEVICE(dk);
+    TORCH_CHECK(dk.stride(-1) == 1, "dk must have contiguous last dimension");
+    CHECK_SHAPE(dk, total_k, num_heads_k, head_size);
+  } else {
+    dk = at::empty_like(k);
+  }
+  if (dv_.has_value()) {
+    dv = dv_.value();
+    TORCH_CHECK(dv.dtype() == q_dtype, "dv must have the same dtype as q");
+    CHECK_DEVICE(dv);
+    TORCH_CHECK(dv.stride(-1) == 1, "dv must have contiguous last dimension");
+    CHECK_SHAPE(dv, total_k, num_heads_k, head_size);
+  } else {
+    dv = at::empty_like(v);
+  }
+  dq_padded = dq.unsqueeze(0).transpose(1, 2);
+  dk_padded = dk.unsqueeze(0).transpose(1, 2);
+  dv_padded = dv.unsqueeze(0).transpose(1, 2);
+
+  auto opts = q.options();
+  auto softmax_d = at::empty({batch_size, num_heads, max_seqlen_q}, opts.dtype(at::kFloat));
+
+  if( zero_tensors ) {
+    dq.zero_();
+    dk.zero_();
+    dv.zero_();
+    softmax_d.zero_();
+  }
+
+  at::PhiloxCudaState philox_args;
+  if (is_dropout) {
+    if (at::cuda::currentStreamCaptureStatus() ==
+        at::cuda::CaptureStatus::None)
+    {
+      philox_args = at::PhiloxCudaState(*philox_seed.data_ptr<int64_t>(), *philox_offset.data_ptr<int64_t>());
+    } else { // dropout + capture
+      philox_args = at::PhiloxCudaState(
+          philox_seed.data_ptr<int64_t>(), philox_offset.data_ptr<int64_t>(), 0);
+    }
+  }
+  if (max_seqlen_q > 0) {
+    hipError_t err; // TODO: Error handling
+    using aotriton::v2::flash::attn_bwd_compact_varlen;
+    using sdp::aotriton_adapter::mk_aotensor;
+    using sdp::aotriton_adapter::mk_aoscalartensor;
+    using sdp::aotriton_adapter::cast_dtype;
+    aotriton::TensorView<4> empty_bias(0, {0,0,0,0}, {0,0,0,0}, cast_dtype(q.dtype()));
+    err = attn_bwd_compact_varlen(mk_aotensor(q_padded, "q"),
+                                  mk_aotensor(k_padded, "k"),
+                                  mk_aotensor(v_padded, "v"),
+                                  mk_aotensor<1>(cu_seqlens_q, "cu_seqlens_q"),
+                                  mk_aotensor<1>(cu_seqlens_k, "cu_seqlens_k"),
+                                  max_seqlen_q,
+                                  max_seqlen_k,
+                                  empty_bias,
+                                  softmax_scale,
+                                  mk_aotensor(out_t, "out"),
+                                  mk_aotensor(dout_t, "dout"),
+                                  mk_aotensor(dq_padded, "dq"),
+                                  mk_aotensor(dk_padded, "dk"),
+                                  mk_aotensor(dv_padded, "dv"),
+                                  empty_bias,
+                                  mk_aotensor<2>(softmax_lse_cont, "L"),
+                                  mk_aotensor<2>(delta, "delta"),
+                                  p_dropout,
+                                  mk_aoscalartensor(philox_seed),
+                                  mk_aoscalartensor(philox_offset),
+                                  0,
+                                  is_causal,
+                                  stream);
+  } else {
+    // If seqlen_q == 0, then we have an empty tensor. We need to set the output to 0.
+    dq.zero_();
+    dk.zero_();
+    dv.zero_();
+    softmax_d.zero_();
+  }
+
+  return { dq, dk, dv, softmax_d };
 }
+
 } // namespace pytorch_fmha
 
 #endif

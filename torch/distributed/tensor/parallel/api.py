@@ -4,20 +4,13 @@ from fnmatch import fnmatch
 from typing import Dict, Optional, Union
 
 import torch
-import torch.distributed.tensor._random as random
 import torch.nn as nn
 from torch.distributed.device_mesh import _mesh_resources, DeviceMesh
-from torch.distributed.tensor._random import (
-    is_rng_supported_mesh,
-    TensorParallelRNGTracker,
-)
 from torch.distributed.tensor.parallel._utils import _validate_tp_mesh_dim
 from torch.distributed.tensor.parallel.style import ParallelStyle
 
 
-__all__ = [
-    "parallelize_module",
-]
+__all__ = ["parallelize_module"]
 
 
 def parallelize_module(  # type: ignore[return]
@@ -79,17 +72,8 @@ def parallelize_module(  # type: ignore[return]
         )
         return module
 
-    # instantiate a TP RNG state tracker if it's not there
-    if is_rng_supported_mesh(device_mesh) and not isinstance(
-        random._rng_tracker, TensorParallelRNGTracker
-    ):
-        random._rng_tracker = TensorParallelRNGTracker(device_mesh.device_type)
-        # TODO: we should allow user to pass in the default seed from a config
-        random._rng_tracker._manual_seed(device_mesh, base_seed=1234)
-        # By default we execute random ops in non-tensor-parallel region. If users want
-        # to execute in tensor-parallel region, they can manually set this field to True
-        # after parallelizing the model.
-        random._rng_tracker.distribute_region_enabled = False
+    # note: The RNG tracker will be initialized in distribute_tensor() call if it hasn't
+    # been initialized.
 
     if isinstance(parallelize_plan, ParallelStyle):
         return parallelize_plan._apply(module, device_mesh)
