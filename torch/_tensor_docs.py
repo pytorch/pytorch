@@ -1327,7 +1327,7 @@ cpu(memory_format=torch.preserve_format) -> Tensor
 
 Returns a copy of this object in CPU memory.
 
-If this object is already in CPU memory and on the correct device,
+If this object is already in CPU memory,
 then no copy is performed and the original object is returned.
 
 Args:
