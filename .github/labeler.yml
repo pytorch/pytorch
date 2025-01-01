@@ -35,8 +35,11 @@
 - torch/distributed/_tensor/**
 - torch/distributed/fsdp/**
 - torch/csrc/inductor/**
+- torch/csrc/dynamo/**
 - test/cpp/aoti_abi_check/**
 - test/cpp/aoti_inference/**
+- test/inductor/**
+- test/dynamo/**
 
 "module: cpu":
 - aten/src/ATen/cpu/**

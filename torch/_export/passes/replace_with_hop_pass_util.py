@@ -1,23 +1,28 @@
 # mypy: allow-untyped-defs
+from __future__ import annotations
 
 import contextlib
 import copy
 import operator
-from typing import Callable
+from typing import Callable, Optional, Tuple, TYPE_CHECKING
 
 import torch
-from torch._ops import HigherOrderOperator
 
 from ..utils import node_replace_, nodes_map
+
+
+if TYPE_CHECKING:
+    from torch._ops import HigherOrderOperator
+    from torch.export.graph_signature import ExportGraphSignature
 
 
 def _replace_with_hop_helper(
     node: torch.fx.Node,
     enter_block_node: torch.fx.Node,
-    node_filter: Callable,
     wrap_hoo: HigherOrderOperator,
-):
+) -> None:
     graph: torch.fx.Graph = node.graph
+    assert graph.owning_module is not None
     gm: torch.fx.GraphModule = graph.owning_module
     assert isinstance(node.target, str)
     sub_gm = getattr(gm, node.target)
@@ -101,9 +106,9 @@ def _replace_with_hop_helper(
 
 def _sequential_split_and_maybe_inline_subgraphs_helper(
     new_gm: torch.fx.GraphModule,
-    graph_signature,
+    graph_signature: Optional[ExportGraphSignature],
     maybe_inline_or_replace_with_hop: Callable[[torch.fx.Node], None],
-):
+) -> Tuple[torch.fx.GraphModule, Optional[ExportGraphSignature]]:
     """
     Helper function for replacing graph nodse with higher order nodes.
     For each subgraph in `new_gm`, decides whether to construct a HOO subgraph, or inline the calls
@@ -126,7 +131,7 @@ def _sequential_split_and_maybe_inline_subgraphs_helper(
             new_gm_out_node.args[0], new_signature.output_specs
         ):
             if arg_node is None:
-                assert out_spec.arg.value is None
+                assert out_spec.arg.value is None  # type: ignore[union-attr]
             elif (
                 isinstance(arg_node, torch.fx.Node)
                 and out_spec.arg.name != arg_node.name
@@ -145,14 +150,18 @@ def _sequential_split_and_maybe_inline_subgraphs_helper(
             ),
         )
     new_gm.recompile()
+    new_gm.graph.lint()
     return new_gm, new_signature
 
 
 def _replace_with_hop_pass_helper(
     gm: torch.fx.GraphModule,
-    graph_signature,
-    sequential_split_and_maybe_inline_subgraphs: Callable,
-):
+    graph_signature: Optional[ExportGraphSignature],
+    sequential_split_and_maybe_inline_subgraphs: Callable[
+        [torch.fx.GraphModule, Optional[ExportGraphSignature]],
+        Tuple[torch.fx.GraphModule, Optional[ExportGraphSignature]],
+    ],
+) -> Tuple[torch.fx.GraphModule, Optional[ExportGraphSignature]]:
     """
     Split gm into sub-graph-modules using `sequential_split_and_maybe_inline_subgraphs`, and
     then recursively call itself on each of the submodules.

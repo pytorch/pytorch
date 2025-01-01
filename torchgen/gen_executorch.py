@@ -5,7 +5,7 @@ import os
 from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, Sequence, TextIO, TYPE_CHECKING
+from typing import Any, Callable, TextIO, TYPE_CHECKING
 
 import yaml
 
@@ -57,6 +57,8 @@ from torchgen.utils import (
 
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from torchgen.selective_build.selector import SelectiveBuilder
 
 

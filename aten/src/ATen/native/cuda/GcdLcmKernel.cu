@@ -52,7 +52,7 @@ void lcm_kernel_cuda(TensorIteratorBase& iter) {
   #endif // AT_USE_JITERATOR()
 }
 
-REGISTER_DISPATCH(gcd_stub, &gcd_kernel_cuda);
-REGISTER_DISPATCH(lcm_stub, &lcm_kernel_cuda);
+REGISTER_DISPATCH(gcd_stub, &gcd_kernel_cuda)
+REGISTER_DISPATCH(lcm_stub, &lcm_kernel_cuda)
 
 } // namespace at::native

@@ -40,6 +40,7 @@ struct alignas(64) FreeBlockList {
 
 namespace {
   // Max cached block sizes: (1 << MAX_SIZE_INDEX) bytes
+  // NOLINTNEXTLINE(misc-definitions-in-headers)
   constexpr size_t MAX_SIZE_INDEX = 64;
 }
 

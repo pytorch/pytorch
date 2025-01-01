@@ -68,7 +68,7 @@ class C10_API SymBool {
 
   std::optional<bool> maybe_as_bool() const {
     if (!is_heap_allocated()) {
-      return std::make_optional(data_);
+      return data_;
     }
     return toSymNodeImplUnowned()->constant_bool();
   }

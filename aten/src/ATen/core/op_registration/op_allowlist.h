@@ -34,9 +34,7 @@
 #include <ATen/record_function.h>
 #endif
 
-namespace c10 {
-
-namespace impl {
+namespace c10::impl {
 
 constexpr bool allowlist_contains(string_view allowlist, string_view item);  // Forward Declare
 
@@ -195,5 +193,4 @@ constexpr bool dispatch_key_allowlist_check(DispatchKey /*k*/) {
 #endif
 }
 
-} // namespace impl
-} // namespace c10
+} // namespace c10::impl

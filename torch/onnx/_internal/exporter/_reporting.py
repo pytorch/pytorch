@@ -24,6 +24,8 @@ class ExportStatus:
     torch_export_non_strict: bool | None = None
     # Whether torch.jit.trace succeeds
     torch_jit: bool | None = None
+    # Whether decomposition succeeds
+    decomposition: bool | None = None
     # Whether ONNX translation succeeds
     onnx_translation: bool | None = None
     # Whether ONNX model passes onnx.checker.check_model
@@ -43,9 +45,10 @@ def _status_emoji(status: bool | None) -> str:
 def _format_export_status(status: ExportStatus) -> str:
     return (
         f"```\n"
-        f"{_status_emoji(status.torch_export)} Obtain model graph with `torch.export.export`\n"
         f"{_status_emoji(status.torch_export_non_strict)} Obtain model graph with `torch.export.export(..., strict=False)`\n"
+        f"{_status_emoji(status.torch_export)} Obtain model graph with `torch.export.export(..., strict=True)`\n"
         f"{_status_emoji(status.torch_jit)} Obtain model graph with `torch.jit.trace`\n"
+        f"{_status_emoji(status.decomposition)} Decompose operators for ONNX compatibility\n"
         f"{_status_emoji(status.onnx_translation)} Translate the graph into ONNX\n"
         f"{_status_emoji(status.onnx_checker)} Run `onnx.checker` on the ONNX model\n"
         f"{_status_emoji(status.onnx_runtime)} Execute the model with ONNX Runtime\n"
@@ -77,6 +80,8 @@ def construct_report_file_name(timestamp: str, status: ExportStatus) -> str:
     if not (status.torch_export or status.torch_export_non_strict or status.torch_jit):
         # All strategies failed
         postfix = "pt_export"
+    elif status.decomposition is False:
+        postfix = "decomp"
     elif status.onnx_translation is False:
         postfix = "conversion"
     elif status.onnx_checker is False:

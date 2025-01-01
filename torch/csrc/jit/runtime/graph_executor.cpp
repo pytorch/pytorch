@@ -53,13 +53,13 @@
 #include <utility>
 #include <vector>
 
+// clang-format off
 C10_DEFINE_bool(
     torch_jit_execution_plan_reuse_code_graph,
     false,
-    "Directly reuse the preprocessed graph in the CodeImpl to reduce the memory consumption. This is aggressive memory saving, and please be cautious!");
+    "Directly reuse the preprocessed graph in the CodeImpl to reduce the memory consumption. This is aggressive memory saving, and please be cautious!")
 
 namespace torch::jit {
-
 EnableProfilingGuard::EnableProfilingGuard() {
   auto& executor_mode = getExecutorMode();
   old_executor_mode = executor_mode;
@@ -432,8 +432,8 @@ struct DifferentiableGraphOp {
 
     {
       auto inputs = last(stack, num_inputs);
-      // hook up the outputs of df to the gradient functions of the inputs that
-      // require gradients
+      // hook up the outputs of df to the gradient functions of the inputs
+      // that require gradients
       for (auto idx : grad.df_output_vjps) {
         grad_fn->addOutputForIValue(inputs[idx]);
       }
@@ -455,8 +455,8 @@ struct DifferentiableGraphOp {
       // TODO - XXX - if any output is the same tensor multiple times, views
       // have to be setup here. We need to refactor autograd until it is safe
       // for tensors to be constructed without all the viewing infrastructure.
-      // this is currently intentionally not done here so we can get an idea of
-      // our perf before introducing overhead for correctness
+      // this is currently intentionally not done here so we can get an idea
+      // of our perf before introducing overhead for correctness
       for (auto idx : grad.df_input_vjps) {
         grad_fn->addInputIValue(outputs[idx]);
       }
@@ -501,7 +501,8 @@ struct DifferentiableGraphOp {
       detach(stack[i]);
     }
   }
-  // Capture (save) inputs that would be required to subsequently run backwards
+  // Capture (save) inputs that would be required to subsequently run
+  // backwards
   void captureInputs(
       DifferentiableGraphBackward& grad_fn,
       at::ArrayRef<IValue> inputs) const {
@@ -736,8 +737,10 @@ struct GraphExecutorImpl : public GraphExecutorImplBase {
     runOptimization(opt_graph);
 
     // Phase 4. If this graph will be differentiated, we need to slice out the
-    //          symbolically differentiable subgraphs for further optimizations.
-    // Phase 5. Apply non-differentiable optimizations to the graphs we've found
+    //          symbolically differentiable subgraphs for further
+    //          optimizations.
+    // Phase 5. Apply non-differentiable optimizations to the graphs we've
+    // found
     //          (or the whole graph if we know we won't need its derivative).
     if (needsGradient(opt_graph)) {
       auto diff_nodes = CreateAutodiffSubgraphs(
@@ -781,8 +784,8 @@ struct GraphExecutorImpl : public GraphExecutorImplBase {
 
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   ArgumentSpecCreator arg_spec_creator_;
-  // Populated only when optimize is false (and in that case plan_cache will be
-  // unused). The compiled version of graph.
+  // Populated only when optimize is false (and in that case plan_cache will
+  // be unused). The compiled version of graph.
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   ExecutionPlan fallback;
 

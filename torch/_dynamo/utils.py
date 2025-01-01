@@ -14,6 +14,7 @@ import gc
 import importlib
 import inspect
 import itertools
+import json
 import linecache
 import logging
 import math
@@ -30,6 +31,7 @@ import typing
 import uuid
 import warnings
 import weakref
+from collections import OrderedDict
 from contextlib import contextmanager
 from dataclasses import is_dataclass
 from functools import lru_cache
@@ -43,6 +45,8 @@ from typing import (
     DefaultDict,
     Deque,
     Dict,
+    Generator,
+    Generic,
     Iterable,
     Iterator,
     KeysView,
@@ -60,7 +64,6 @@ from typing_extensions import Literal, TypeIs
 
 import torch
 import torch._functorch.config
-import torch._inductor.config as inductor_config
 import torch.fx.experimental.symbolic_shapes
 import torch.utils._pytree as pytree
 from torch import fx
@@ -71,10 +74,17 @@ from torch._C import (
     _push_on_torch_function_stack,
 )
 from torch._dispatch.python import enable_python_dispatcher
-from torch._guards import Source, TracingContext
+from torch._dynamo.metrics_context import MetricsContext, RuntimeMetricsContext
+from torch._guards import CompileId, Source, TracingContext
 from torch._subclasses.meta_utils import is_sparse_compressed
-from torch._utils_internal import log_chromium_event_internal, log_compilation_event
+from torch._utils_internal import (
+    log_chromium_event_internal,
+    log_compilation_event,
+    record_chromium_event_internal,
+    signpost_event,
+)
 from torch.fx._utils import _format_graph_code, lazy_format_graph_code
+from torch.monitor import _WaitCounter
 from torch.nn.modules.lazy import LazyModuleMixin
 from torch.utils._triton import has_triton, has_triton_package
 from torch.utils.hooks import RemovableHandle
@@ -135,12 +145,59 @@ log = logging.getLogger(__name__)
 # profiling compilation time by function
 compilation_time_metrics: Dict[str, List[float]] = {}
 
-# profiling compilation time by frame phase
-frame_phase_timing: Dict[str, Dict[str, float]] = collections.defaultdict(
-    lambda: collections.defaultdict(float)
-)
+# This supports calculate_time_spent(), which reports cumulative times
+# across the process for any "phase" populated by dynamo_timed. Reset if
+# reset_frame_count() is called.
+cumulative_time_spent_ns: Dict[str, float] = collections.defaultdict(float)
 
 timer_counter = itertools.count()
+
+
+# Abstraction on top of counters.
+class ReInplaceTrigger(enum.Enum):
+    AUTO_FUNC_V1 = 1
+    AUTO_FUNC_V2 = 2
+    TRITON_OPS = 3
+
+
+class ReinplaceCounters:
+    _values: DefaultDict[str, int] = collections.defaultdict(int)
+
+    # Track sizes of known not re-inplaced tensors (exclude dynamic shapes).
+    @classmethod
+    def add_missed_bytes(cls, trigger: ReInplaceTrigger, bytes: int):
+        if bytes != 0:
+            cls._values[f"missed_bytes_{trigger.name}"] += bytes
+
+    # Track number of not re-inplaced tensors.
+    @classmethod
+    def add_missed_opportunities(cls, trigger: ReInplaceTrigger, count: int):
+        if count != 0:
+            cls._values[f"missed_tensors_{trigger}"] += count
+
+    @classmethod
+    def clear(cls):
+        cls._values.clear()
+
+    @classmethod
+    def get_total_missed(cls):
+        sum = 0
+        for trigger in ReInplaceTrigger:
+            sum += cls._values.get(f"missed_tensors_{trigger}", 0)
+        return sum
+
+    @classmethod
+    def get_total_missed_bytes(cls):
+        sum = 0
+        for trigger in ReInplaceTrigger:
+            sum += cls._values.get(f"missed_bytes_{trigger.name}", 0)
+        return sum
+
+    @classmethod
+    def log(cls):
+        # if not empty log.
+        if cls._values:
+            signpost_event("inductor", "reinplace_counters", cls._values)
 
 
 def tabulate(
@@ -169,7 +226,7 @@ def increment_frame() -> None:
 # Note: Called for you by dynamo - you almost never ever want to invoke this yourself.
 def reset_frame_count() -> None:
     global curr_frame
-    frame_phase_timing.clear()
+    cumulative_time_spent_ns.clear()
     compilation_time_metrics.clear()
     curr_frame = 0
 
@@ -182,25 +239,16 @@ def increment_op_count(cnt: int) -> None:
     op_count += cnt
 
 
-# Calculate total time spent so far for each phase
+# Get the total time in seconds for each "phase"
 # For example, {'entire_frame_compile':8.574629999999999, 'backend_compile':5.26806}
 def calculate_time_spent() -> Dict[str, float]:
-    total_wall_time = 0.0
     total_by_key = {}
-    for timings in frame_phase_timing.values():
-        total_wall_time += timings.get(
-            "entire_frame_compile", timings.get("inductor_compile", 0)
-        )
+    for phase, timing in cumulative_time_spent_ns.items():
+        total_by_key[phase] = timing / 1e9
 
-        for key, timing in timings.items():
-            if key not in total_by_key:
-                total_by_key[key] = timing
-            else:
-                total_by_key[key] += timing
-
-    if total_by_key:
-        total_by_key["total_wall_time"] = total_wall_time
-
+    total_by_key["total_wall_time"] = total_by_key.get(
+        "entire_frame_compile", 0
+    ) + total_by_key.get("entire_backward_compile", 0)
     return total_by_key
 
 
@@ -219,183 +267,164 @@ def print_time_report() -> None:
     print(out)
 
 
-def _add_time_spent(key: str, phase_name: str, time_spent: float) -> None:
-    frame_phase_timing[key][phase_name] += time_spent
+# Use the following singleton to capture and log CompilationMetrics. Entering the context
+# manager allocates a new record to be logged when it exits. (You should not need to use
+# this directly unless you introduce a new code path where compilation metrics would be
+# gathered). While compiling, use the setters or timer in MetricsContext to update fields
+# in the current context. For example:
+#
+# To set a single field once (use overwrite=True to overwrite):
+#   get_metrics_context().set("metric_name", value)
+#
+# To set multiple fields at once (use overwrite=True to overwrite):
+#   get_metrics_context().update({"name1": val1, "name2": val2})
+#
+# To increment an integer field:
+#   get_metrics_context().increment("metric_name", value)
+#
+# To record execution time, MetricsContext works with dynamo_timed:
+#    def foo(...):
+#        # Updates the "metric_us" field.
+#        with dynamo_timed("metric", dynamo_compile_column_us="metric_us")
+#            ...
+#
+_METRICS_CONTEXT: MetricsContext
+_RUNTIME_METRICS_CONTEXT: RuntimeMetricsContext
 
 
-# Use frame_phase_timing to record remote_cache_time_saved
-# This follows the same principles of key as the other frame phase timings,
-# but is incremented by FxGraphCache (and later AOTAutogradCache) directly
-def add_remote_cache_time_saved(time_saved_ns: int, is_backward: bool = False) -> None:
-    key = None
-    if is_backward:
-        # Use compile id as the frame key for backwards compilation
-        key = str(torch._guards.CompileContext.current_compile_id())
-    else:
-        key = str(curr_frame)
-    # Convert to seconds (as a float)
-    time_saved = time_saved_ns / 1e9
-    _add_time_spent(key, "remote_cache_time_saved", time_saved)
+def get_metrics_context() -> MetricsContext:
+    return _METRICS_CONTEXT
 
 
-# dynamo_timed is a context manager
-# By wrapping a function in dynamo_timed, we can store a record in compilation_time_metrics
-# where the key is the functions name.
-# For example:
-#
-#   def _foo(...):
-#       with dynamo_timed("_foo"):
-#           ...
-#
-# Would show up as an entry in our timing dict:
-# OrderedDict([('_foo', [0.083690, 0.23949, 3.1425e-05])])
-# This is extremely useful for granular debugging.
-#
-# Although it is tempting to use dynamo_timed as a decorator, please do not.
-# In its decorator form it makes cProfile traces less useful as dynamo_timed
-# suddenly becomes a bottleneck for lots of function calls (as only one parent
-# pointer is recorded).
-#
-# For a higher-level mode, pass a phase_name into dynamo_timed
-# phase_names record an extra record into a separate compilation timing structure,
-# one keyed on frame+name rather than function.
-# The frame is incremented outside of this function, in def increment_frame() above.
-# `fwd_only` is used to identify if this phase or function is only called
-# during compiling fwd graphs, e.g, `entire_frame_compile` and `backend_compile`.
-# The other phases (`inductor_compile` and `code_gen`) are called for both fwd and bwd graphs.
+def get_runtime_metrics_context() -> RuntimeMetricsContext:
+    return _RUNTIME_METRICS_CONTEXT
 
 
 @contextmanager
 def dynamo_timed(
     key: str,
+    # TODO(masneral): Deprecate this param.
     phase_name: Optional[str] = None,
-    fwd_only: bool = True,
-):
-    chromium_log: ChromiumEventLogger = get_chromium_event_logger()
+    log_pt2_compile_event: bool = False,
+    metadata: Optional[Dict[str, object]] = None,
+    dynamo_compile_column_us: Optional[str] = None,
+    dynamo_compile_runtime_column_us: Optional[str] = None,
+    compile_id: Optional[CompileId] = None,
+    is_forward: Optional[bool] = None,
+    log_waitcounter: bool = False,
+) -> Generator[Any, None, None]:
+    """
+    dynamo_timed is a context manager
+    By wrapping a function in dynamo_timed, we can get a few things:
+
+    1) Optionally log timings to pt2_compile_events.
+    2) Optionally log timings to CompilationMetrics (dynamo_compile).
+    3) Optionally log chromium events.
+    4) Optionally increment a WaitCounter.
+    5) Store a record in compilation_time_metrics
+       For example:
+
+        def _foo(...):
+            with dynamo_timed("_foo"):
+                ...
+
+        Would show up as an entry in our timing dict:
+        OrderedDict([('_foo', [0.083690, 0.23949, 3.1425e-05])])
+        This is extremely useful for granular debugging.
+
+    Although it is tempting to use dynamo_timed as a decorator, please do not.
+    In its decorator form it makes cProfile traces less useful as dynamo_timed
+    suddenly becomes a bottleneck for lots of function calls (as only one parent
+    pointer is recorded).
+
+    Params:
+    - key: key into compile_time_metrics. If phase_name is not provided, this is
+      also the event name used for pt2_compile_events logs and chromium events.
+    - phase_name: Optional override for the event name.
+    - log_pt2_compile_event: Whether to log a pt2 compile event internally.
+    - metadata: Extra metadata to put in pt2_compile_events.
+    - dynamo_compile_column_us: If provided, updates the specified CompilationMetrics
+      field to be logged to dyname_compile column. We expect all columns to be _us;
+      therefore, the field name must end with "_us".
+    - dynamo_compile_runtime_column_us: Like 'dynamo_compile_column_us', but should
+      be used for those columns captured outside of a compile context, e.g.,
+      runtime autotuning.
+    - compile_id: In the typical case, this parameter should not be needed. Use to
+      supply the compile_id for those cases where we want to log a compile_id where
+      it's not naturally available, e.g., for runtime autotuning.
+    - is_forward: Optionally set an is_forward field for those logging destinations
+      that support it.
+    - log_waitcounter: If set, we'll log a waitcounter of the form "pytorch.dynamo_timed.{key}"
+    """
+    # We're standardizing on microseconds for dynamo_compile timings.
+    if dynamo_compile_column_us is not None:
+        assert dynamo_compile_column_us.endswith("_us")
+
+    # Only one of these should be set.
+    assert dynamo_compile_column_us is None or dynamo_compile_runtime_column_us is None
+
+    if phase_name:
+        event_name = phase_name
+        fn_name = key
+    else:
+        event_name = key
+        fn_name = None
+
     if key not in compilation_time_metrics:
         compilation_time_metrics[key] = []
 
-    fail_type: Optional[str] = None
-    fail_reason: Optional[str] = None
-    time_spent = float("-inf")
+    event_metadata = {}
+    if metadata:
+        event_metadata.update(metadata)
+    if fn_name:
+        event_metadata.update({"fn_name": fn_name})
+    if is_forward is not None:
+        event_metadata.update({"is_backward": not is_forward})
+
+    chromium_log: ChromiumEventLogger = get_chromium_event_logger()
     start_ns = time.time_ns()
+    chromium_log.log_event_start(
+        event_name, start_ns, event_metadata, log_pt2_compile_event, compile_id
+    )
+
     try:
         with torch.profiler.record_function(f"{key} (dynamo_timed)"):
-            t0 = time.time()
-            if phase_name:
-                chromium_log.log_event_start(phase_name, start_ns, {"fn_name": key})
+            if log_waitcounter:
+                with _WaitCounter(f"pytorch.dynamo_timed.{key}").guard():
+                    yield
             else:
-                chromium_log.log_event_start(key, start_ns, {})
-            yield
-            time_spent = time.time() - t0
-        compilation_time_metrics[key].append(time_spent)
-    except Exception as e:
-        fail_type = str(type(e))
-        fail_reason = str(e)
-        raise
+                yield
     finally:
         end_ns = time.time_ns()
-        # Always log the end event even on exception
-        if phase_name:
-            chromium_log.log_event_end(
-                phase_name,
-                end_ns,
-                {},
-                start_ns,
-            )
-        else:
-            chromium_log.log_event_end(key, end_ns, {}, start_ns)
-        # Only record backward compilation metrics if phase_name is not None!
-        if phase_name:
-            frame_key = str(curr_frame)
-            # fwd only compilation stages: entire_frame_compile, backend_compile, aotdispatch.
-            # use frame_key as time aggregation key.
-            if fwd_only and fail_type is None:
-                _add_time_spent(frame_key, phase_name, time_spent)
-            else:
-                # fwd + bwd compilation stages: inductor_compile, code_gen.
-                # use frame_key as time aggregation key for fwd graphs;
-                # use compile_id as time aggregation key for bwd graphs.
-                if torch._guards.TracingContext.try_get() is not None:
-                    aot_graph_name = str(
-                        torch._guards.TracingContext.get().aot_graph_name
-                    )
-                    if (
-                        "forward" in aot_graph_name or "inference" in aot_graph_name
-                    ) and fail_type is None:
-                        _add_time_spent(frame_key, phase_name, time_spent)
-                    elif "backward" in aot_graph_name:
-                        compile_id = str(
-                            torch._guards.CompileContext.current_compile_id()
-                        )
-                        if fail_type is None:
-                            _add_time_spent(compile_id, phase_name, time_spent)
+        time_spent_ns = end_ns - start_ns
+        compilation_time_metrics[key].append(time_spent_ns / 1e9)
+        chromium_log.log_event_end(
+            event_name, end_ns, {}, start_ns, log_pt2_compile_event, compile_id
+        )
+        if dynamo_compile_column_us:
+            metrics_context = get_metrics_context()
+            if metrics_context.in_progress():
+                metrics_context.increment(
+                    dynamo_compile_column_us, time_spent_ns // 1000
+                )
+            # TODO: the events that we capture in calculate_time_spent() seem a little
+            # arbitrary. Currently, it's only those fields that are present in
+            # CompilationMetrics (but note that we accumulate by the associated event
+            # name, not the field name in CompilationMetrics). Do we want to keep it
+            # this way?
+            cumulative_time_spent_ns[event_name] += time_spent_ns
 
-                        # log backward compilation metrics at the end of `inductor_compile` of bwd graph,
-                        # one record for one bwd graph.
-                        if phase_name == "inductor_compile":
-                            if fail_type is None:
-                                inductor_compile_time = frame_phase_timing[
-                                    compile_id
-                                ].get("inductor_compile", None)
-                                code_gen_time = frame_phase_timing[compile_id].get(
-                                    "code_gen", None
-                                )
-                                remote_cache_time_saved = frame_phase_timing[
-                                    compile_id
-                                ].get("remote_cache_time_saved", None)
-                                remote_fx_graph_cache_get_time = frame_phase_timing[
-                                    compile_id
-                                ].get("remote_fx_graph_cache_get", None)
-                                remote_fx_graph_cache_put_time = frame_phase_timing[
-                                    compile_id
-                                ].get("remote_fx_graph_cache_put", None)
-                            else:
-                                inductor_compile_time = None
-                                code_gen_time = None
-                                remote_cache_time_saved = None
-                                remote_fx_graph_cache_get_time = None
-                                remote_fx_graph_cache_put_time = None
-                            structured_logging_overhead_s = (
-                                torch._logging.get_structured_logging_overhead()
-                            )
-                            metrics = CompilationMetrics(
-                                compile_id=compile_id,
-                                inductor_compile_time_s=inductor_compile_time,
-                                code_gen_time_s=code_gen_time,
-                                fail_type=fail_type,
-                                fail_reason=fail_reason,
-                                remote_cache_time_saved_s=remote_cache_time_saved,
-                                structured_logging_overhead_s=structured_logging_overhead_s,
-                                is_forward=False,  # is_forward
-                                remote_fx_graph_cache_get_time_ms=to_int_ms(
-                                    remote_fx_graph_cache_get_time
-                                ),
-                                remote_fx_graph_cache_put_time_ms=to_int_ms(
-                                    remote_fx_graph_cache_put_time
-                                ),
-                                start_time_us=start_ns // 1000,
-                                duration_us=(end_ns - start_ns) // 1000,
-                                inductor_cumulative_compile_time_us=to_int_us(
-                                    inductor_compile_time
-                                ),
-                                inductor_code_gen_cumulative_compile_time_us=to_int_us(
-                                    code_gen_time
-                                ),
-                                distributed_ephemeral_timeout_us=to_int_us(
-                                    remote_cache_time_saved
-                                ),  # TODO: instrument more accurately
-                                structured_logging_overhead_us=to_int_us(
-                                    structured_logging_overhead_s
-                                ),
-                                remote_fx_graph_cache_get_time_us=to_int_us(
-                                    remote_fx_graph_cache_get_time
-                                ),
-                                remote_fx_graph_cache_put_time_us=to_int_us(
-                                    remote_fx_graph_cache_put_time
-                                ),
-                            )
-                            record_compilation_metrics(metrics)
+        if dynamo_compile_runtime_column_us:
+            get_runtime_metrics_context().increment(
+                dynamo_compile_runtime_column_us,
+                time_spent_ns // 1000,
+                extra={
+                    "compile_id": compile_id,
+                    "is_runtime": True,
+                    "is_forward": is_forward,
+                },
+            )
+            cumulative_time_spent_ns[event_name] += time_spent_ns
 
 
 @overload
@@ -472,7 +501,7 @@ class DuplicateWarningChecker:
         self.reset()
 
     def reset(self):
-        self.set = collections.OrderedDict()
+        self.set = OrderedDict()
 
     def add(self, key: Union[str, Tuple[object, object]]) -> bool:
         if key in self.set:
@@ -810,6 +839,11 @@ def to_int_us(v: Optional[float]) -> Optional[int]:
     return None if v is None else int(v * 1_000_000)
 
 
+# Version field added to every log. Increment to make it easier to distinguish new
+# vs. old entries when you make a substantive change to how the logs are populated.
+LOG_FORMAT_VERSION = 3
+
+
 @dataclasses.dataclass
 class CompilationMetrics:
     compile_id: Optional[str] = None
@@ -841,7 +875,6 @@ class CompilationMetrics:
     # to install any guarded code.  True means we actually decided to install
     # a compiled frame
     has_guarded_code: Optional[bool] = None
-    possibly_missed_reinplacing_opportunities: Optional[int] = None
     remote_cache_time_saved_s: Optional[float] = None
     structured_logging_overhead_s: Optional[float] = None
     config_suppress_errors: Optional[bool] = None
@@ -849,6 +882,7 @@ class CompilationMetrics:
     specialize_float: Optional[bool] = None
     dynamo_config: Optional[str] = None
     is_forward: Optional[bool] = None
+    num_triton_bundles: Optional[int] = None
     remote_fx_graph_cache_get_time_ms: Optional[int] = None
     remote_fx_graph_cache_put_time_ms: Optional[int] = None
     start_time_us: Optional[int] = None
@@ -858,14 +892,109 @@ class CompilationMetrics:
     inductor_cumulative_compile_time_us: Optional[int] = None
     inductor_code_gen_cumulative_compile_time_us: Optional[int] = None
     triton_compile_time_us: Optional[int] = None
-    runtime_cudagraphify_time_us: Optional[int] = None
+    runtime_cudagraphify_time_us: Optional[int] = None  # TODO: instrument
     runtime_triton_autotune_time_us: Optional[int] = None
     dynamo_compile_time_before_restart_us: Optional[int] = None
-    cuda_synchronize_time_us: Optional[int] = None
+    cuda_synchronize_time_us: Optional[int] = None  # TODO: instrument
     distributed_ephemeral_timeout_us: Optional[int] = None
     structured_logging_overhead_us: Optional[int] = None
     remote_fx_graph_cache_get_time_us: Optional[int] = None
     remote_fx_graph_cache_put_time_us: Optional[int] = None
+    backward_cumulative_compile_time_us: Optional[int] = None
+    end_time_us: Optional[int] = None
+    pre_grad_pass_time_us: Optional[int] = None
+    post_grad_pass_time_us: Optional[int] = None
+    joint_graph_pass_time_us: Optional[int] = None
+    log_format_version: int = LOG_FORMAT_VERSION
+    inductor_config: Optional[str] = None
+    remote_cache_version: Optional[int] = None
+    inductor_fx_remote_cache_hit_count: Optional[int] = None
+    inductor_fx_remote_cache_miss_count: Optional[int] = None
+    inductor_fx_remote_cache_backend_type: Optional[str] = None
+    inductor_fx_remote_cache_hit_keys: Optional[str] = None
+    inductor_fx_remote_cache_miss_keys: Optional[str] = None
+    cuda_version: Optional[str] = None
+    triton_version: Optional[str] = None
+    feature_usage: Optional[dict[str, bool]] = None
+    compile_time_autotune_time_us: Optional[int] = None
+    is_runtime: Optional[bool] = False
+    gc_time_us: Optional[int] = None
+    tensorify_float_attempt: Optional[bool] = None
+    tensorify_float_success: Optional[bool] = None
+    tensorify_float_failure: Optional[Set[str]] = None
+
+    @classmethod
+    def create(cls, metrics: Dict[str, Any]):
+        """
+        Factory method to create a CompilationMetrics from a dict of fields.
+        Includes the logic to add legacy fields and any pre-processing, e.g.,
+        we transform some fields to comma-separated strings for scuba logging.
+        """
+
+        def us_to_s(metric: Optional[int]) -> Optional[float]:
+            return metric / 1e6 if metric is not None else None
+
+        def us_to_ms(metric: Optional[int]) -> Optional[int]:
+            return metric // 1000 if metric is not None else None
+
+        def collection_to_str(metric: Optional[Any]) -> Optional[str]:
+            def safe_str(item: Any) -> str:
+                try:
+                    return str(item)
+                except Exception:
+                    return "<unknown>"
+
+            if metric is None:
+                return None
+
+            if not isinstance(metric, (set, list)):
+                return "<unknown>"
+
+            return ",".join(safe_str(item) for item in sorted(metric))
+
+        # TODO: The following are legacy fields, populated from the fields that replace
+        # them. Remove these when we decide we can really deprecate them.
+        legacy_metrics = {
+            "start_time": us_to_s(metrics.get("start_time_us")),
+            "entire_frame_compile_time_s": us_to_s(
+                metrics.get("dynamo_cumulative_compile_time_us")
+            ),
+            "backend_compile_time_s": us_to_s(
+                metrics.get("aot_autograd_cumulative_compile_time_us")
+            ),
+            "inductor_compile_time_s": us_to_s(
+                metrics.get("inductor_cumulative_compile_time_us")
+            ),
+            "code_gen_time_s": us_to_s(
+                metrics.get("inductor_code_gen_cumulative_compile_time_us")
+            ),
+            "remote_cache_time_saved_s": us_to_s(
+                metrics.get("distributed_ephemeral_timeout_us")
+            ),
+            "remote_fx_graph_cache_get_time_ms": us_to_ms(
+                metrics.get("remote_fx_graph_cache_get_time_us")
+            ),
+            "remote_fx_graph_cache_put_time_ms": us_to_ms(
+                metrics.get("remote_fx_graph_cache_put_time_us")
+            ),
+            "structured_logging_overhead_s": us_to_s(
+                metrics.get("structured_logging_overhead_us")
+            ),
+        }
+
+        all_metrics = {**legacy_metrics, **metrics}
+
+        # Processing before logging:
+        all_metrics["inductor_fx_remote_cache_hit_keys"] = collection_to_str(
+            all_metrics.get("inductor_fx_remote_cache_hit_keys")
+        )
+        all_metrics["inductor_fx_remote_cache_miss_keys"] = collection_to_str(
+            all_metrics.get("inductor_fx_remote_cache_miss_keys")
+        )
+        compile_id = all_metrics.get("compile_id")
+        all_metrics["compile_id"] = str(compile_id) if compile_id else None
+
+        return cls(**all_metrics)
 
 
 DEFAULT_COMPILATION_METRICS_LIMIT = 64
@@ -876,12 +1005,13 @@ _compilation_metrics: Deque[CompilationMetrics] = collections.deque(
 )
 
 
-def add_compilation_metrics_to_chromium(c: CompilationMetrics):
+def add_compilation_metrics_to_chromium(c: CompilationMetrics) -> None:
     event_logger = get_chromium_event_logger()
-    # The following compilation metrics are related to
-    # dynamo, so go with the "entire frame compile" event
+    event_name = event_logger.get_top()
+    if not event_name:
+        return
     event_logger.add_event_data(
-        event_name="dynamo",
+        event_name=event_name,
         frame_key=c.frame_key,
         co_name=c.co_name,
         co_filename=c.co_filename,
@@ -913,14 +1043,103 @@ def add_compilation_metrics_to_chromium(c: CompilationMetrics):
     )
 
 
-def record_compilation_metrics(compilation_metrics: CompilationMetrics):
-    global _compilation_metrics
-    _compilation_metrics.append(compilation_metrics)
-    if compilation_metrics.is_forward:
-        name = "compilation_metrics"
-        add_compilation_metrics_to_chromium(compilation_metrics)
+def _scrubbed_inductor_config_for_logging() -> Optional[str]:
+    """
+    Method to parse and scrub uninteresting configs from inductor config
+    """
+
+    # TypeSafeSerializer for json.dumps()
+    # Skips complex types as values in config dict
+    class TypeSafeSerializer(json.JSONEncoder):
+        def default(self, o):
+            try:
+                return super().default(o)
+            except Exception:
+                return "Value is not JSON serializable"
+
+    configs_to_scrub_re = r"((^TYPE_CHECKING$)|(.*_progress$)|(.*TESTING.*)|(.*(rocm|halide).*)|(^trace\..*)|(^_))"
+    keys_to_scrub = set()
+    inductor_conf_str = None
+    inductor_config_copy = (
+        torch._inductor.config.get_config_copy() if torch._inductor.config else None
+    )
+    if inductor_config_copy is not None:
+        try:
+            for key, val in inductor_config_copy.items():
+                if not isinstance(key, str) or re.search(configs_to_scrub_re, key):
+                    keys_to_scrub.add(key)
+                # Convert set() to list for json.dumps()
+                if isinstance(val, set):
+                    inductor_config_copy[key] = list(val)
+            # Evict unwanted keys
+            for key in keys_to_scrub:
+                del inductor_config_copy[key]
+            # Stringify Inductor config
+            inductor_conf_str = json.dumps(
+                inductor_config_copy, cls=TypeSafeSerializer, skipkeys=True
+            )
+        except Exception:
+            # Don't crash because of runtime logging errors
+            inductor_conf_str = "Inductor Config is not JSON serializable"
+    return inductor_conf_str
+
+
+def record_compilation_metrics(
+    start_time_ns: int,
+    end_time_ns: int,
+    metrics: Dict[str, Any],
+    exc_type: Optional[Type[BaseException]],
+    exc_value: Optional[BaseException],
+):
+    if torch._inductor.utils.should_use_remote_fx_graph_cache():
+        try:
+            from torch._inductor.fb.remote_cache import (
+                FbRemoteFxGraphCache,
+                REMOTE_CACHE_VERSION,
+            )
+
+            remote_cache_version = REMOTE_CACHE_VERSION
+            backend = FbRemoteFxGraphCache.get_remote_backend()
+            inductor_fx_remote_cache_backend_type = type(backend).__name__
+        except ModuleNotFoundError:
+            remote_cache_version = None
+            inductor_fx_remote_cache_backend_type = None
     else:
-        name = "bwd_compilation_metrics"
+        inductor_fx_remote_cache_backend_type = None
+        remote_cache_version = None
+
+    # Populate the compile_id from the metrics context if it's set. Otherwise,
+    # look for it in the current compile context.
+    compile_id = metrics.get("compile_id")
+    if not compile_id:
+        compile_id = torch._guards.CompileContext.current_compile_id()
+
+    common_metrics = {
+        "compile_id": compile_id,
+        "start_time_us": start_time_ns // 1000,
+        "end_time_us": end_time_ns // 1000,
+        "duration_us": (end_time_ns - start_time_ns) // 1000,
+        "fail_type": exc_type.__qualname__ if exc_type else None,
+        "fail_reason": str(exc_value) if exc_value else None,
+        "structured_logging_overhead_us": to_int_us(
+            torch._logging.get_structured_logging_overhead()
+        ),
+        "inductor_config": _scrubbed_inductor_config_for_logging(),
+        "cuda_version": torch.version.cuda,
+        "triton_version": triton.__version__ if has_triton() else "",
+        "remote_cache_version": remote_cache_version,
+        "inductor_fx_remote_cache_backend_type": inductor_fx_remote_cache_backend_type,
+    }
+
+    compilation_metrics = CompilationMetrics.create({**common_metrics, **metrics})
+    _compilation_metrics.append(compilation_metrics)
+
+    name = "compilation_metrics"
+    if compilation_metrics.is_forward is False:
+        name = "bwd_" + name
+    if compilation_metrics.is_runtime is True:
+        name = name + "_runtime"
+
     torch._logging.trace_structured(
         name,
         lambda: {
@@ -932,9 +1151,23 @@ def record_compilation_metrics(compilation_metrics: CompilationMetrics):
         # without making it inconsistent with compilation metrics itself, so
         # we ignore the (hopefully small) time spent logging compilation metrics
         record_logging_overhead=False,
+        # These may be runtime logs, e.g., runtime autotunning, so we provide
+        # the CompileId from the compilation metrics in case it's not available
+        # in the current trace.
+        compile_id=compile_id,
     )
+
+    # If there's a chromium event in flight, add the CompilationMetrics to it.
+    add_compilation_metrics_to_chromium(compilation_metrics)
+
+    # Finally log the compilation metrics.
     if config.log_compilation_metrics:
         log_compilation_event(compilation_metrics)
+
+
+# record_compilation_metrics is called by the singleton MetricsContext exit handler.
+_METRICS_CONTEXT = MetricsContext(on_exit=record_compilation_metrics)
+_RUNTIME_METRICS_CONTEXT = RuntimeMetricsContext(on_exit=record_compilation_metrics)
 
 
 def set_compilation_metrics_limit(new_size: int) -> None:
@@ -961,12 +1194,34 @@ class ChromiumEventLogger:
     a specification of the Chromium Event JSON format.
     """
 
-    def get_stack(self):
+    def get_stack(self) -> List[str]:
+        """
+        The main event stack, with every chromium event.
+        Logged to tlparse.
+        """
         if hasattr(self.tls, "stack"):
             return self.tls.stack
         else:
-            self.tls.stack = ["__start__"]
+            self.tls.stack = []
             return self.tls.stack
+
+    def get_top(self) -> Optional[str]:
+        """
+        Get the top event name or None if the stack is empty.
+        """
+        stack = self.get_stack()
+        return stack[-1] if stack else None
+
+    def get_pt2_compile_substack(self):
+        """
+        A smaller subset of the main stack that gets used to log
+        PT2 Compile Events internally.
+        """
+        if hasattr(self.tls, "pt2_compile_substack"):
+            return self.tls.pt2_compile_substack
+        else:
+            self.tls.pt2_compile_substack = []
+            return self.tls.pt2_compile_substack
 
     def get_event_data(self) -> Dict[str, Any]:
         if not hasattr(self.tls, "event_data"):
@@ -981,6 +1236,14 @@ class ChromiumEventLogger:
 
         # TODO: log to init/id tlparse after I add support for it
         log.info("ChromiumEventLogger initialized with id %s", self.id_)
+
+    def try_add_event_data(self, event_name: str, **kwargs) -> None:
+        """
+        Same as add_event_data, but will silently not log if the event isn't in the stack.
+        """
+        if event_name not in self.get_stack():
+            return
+        self.add_event_data(event_name, **kwargs)
 
     def add_event_data(
         self,
@@ -1007,15 +1270,19 @@ class ChromiumEventLogger:
         event_name: str,
         time_ns: int,
         metadata: Dict[str, Any],
+        log_pt2_compile_event: bool = False,
+        compile_id: Optional[CompileId] = None,
     ) -> None:
         """
         Logs the start of a single event.
         :param str event_name Name of event to appear in trace
         :param time_ns Timestamp in nanoseconds
         :param metadata: Any extra metadata associated with this event
+        :param log_pt2_compile_event: If True, log to pt2_compile_events
+        :param compile_id: Explicit compile_id (rather than using the current context)
         """
-        compile_id = str(torch._guards.CompileContext.current_compile_id())
-        metadata["compile_id"] = compile_id
+        compile_id = compile_id or torch._guards.CompileContext.current_compile_id()
+        metadata["compile_id"] = str(compile_id)
         self._log_timed_event(
             event_name,
             time_ns,
@@ -1023,13 +1290,18 @@ class ChromiumEventLogger:
             metadata,
         )
         self.get_stack().append(event_name)
+        # Add metadata from start event
+        self.add_event_data(event_name, **metadata)
+        if log_pt2_compile_event:
+            self.get_pt2_compile_substack().append(event_name)
 
     def reset(self) -> None:
         # We this on every compile in case a compile crashes or restarts and we haven't
         # cleared the stack.
         stack = self.get_stack()
+        substack = self.get_pt2_compile_substack()
         stack.clear()
-        stack.append("__start__")
+        substack.clear()
         event_data = self.get_event_data()
         event_data.clear()
 
@@ -1039,6 +1311,8 @@ class ChromiumEventLogger:
         time_ns: int,
         metadata: Dict[str, Any],
         start_time_ns: int,
+        log_pt2_compile_event: bool,
+        compile_id: Optional[CompileId] = None,
     ) -> None:
         """
         Logs the end of a single event. This function should only be
@@ -1046,9 +1320,12 @@ class ChromiumEventLogger:
         :param event_name: Name of event to appear in trace
         :param time_ns: Timestamp in nanoseconds
         :param metadata: Any extra metadata associated with this event
+        :param start_time_ns: The start time timestamp in nanoseconds
+        :param log_pt_compile_event: If True, log to pt2_compile_events
+        :param compile_id: Explicit compile_id (rather than using the current context)
         """
-        compile_id = str(torch._guards.CompileContext.current_compile_id())
-        metadata["compile_id"] = compile_id
+        compile_id = compile_id or torch._guards.CompileContext.current_compile_id()
+        metadata["compile_id"] = str(compile_id)
 
         # Grab metadata collected during event span
         all_event_data = self.get_event_data()
@@ -1067,28 +1344,39 @@ class ChromiumEventLogger:
             event_metadata,
         )
 
+        def pop_stack(stack):
+            while event_name != stack[-1]:
+                # If the event isn't the most recent one to end, pop
+                # off the stack until it is.
+                # Since event_name in self.stack, this pop is always safe
+                log.warning(
+                    "ChromiumEventLogger: Detected overlapping events, fixing stack"
+                )
+                stack.pop()
+
+        event_stack = self.get_stack()
         # These stack health checks currently never happen,
         # but they're written this way to future proof any weird event
         # overlaps in the future.
-        stack = self.get_stack()
-        if event_name not in stack:
+        if event_name not in event_stack:
             # Something went wrong, we never called start on this event,
             # or it was skipped due to overlapping events below
             log.warning("ChromiumEventLogger: Start event not in stack, ignoring")
             return
 
-        while event_name != stack[-1]:
-            # If the event isn't the most recent one to end, pop
-            # off the stack until it is.
-            # Since event_name in self.stack, this pop is always safe
-            log.warning(
-                "ChromiumEventLogger: Detected overlapping events, fixing stack"
-            )
-            stack.pop()
+        pop_stack(event_stack)
 
-        log_chromium_event_internal(event, stack, self.id_, start_time_ns)
+        if log_pt2_compile_event:
+            pt2_compile_substack = self.get_pt2_compile_substack()
+            pop_stack(pt2_compile_substack)
+            log_chromium_event_internal(
+                event, pt2_compile_substack, self.id_, start_time_ns
+            )
+            # Pop actual event off of stack
+            pt2_compile_substack.pop()
+
         # Finally pop the actual event off the stack
-        stack.pop()
+        event_stack.pop()
 
     def _log_timed_event(
         self,
@@ -1116,6 +1404,7 @@ class ChromiumEventLogger:
             suppress_context=False,
             expect_trace_id=False,  # Not every chromium event will have a trace_id
         )
+        record_chromium_event_internal(event)
         return event
 
     def log_instant_event(
@@ -1123,6 +1412,8 @@ class ChromiumEventLogger:
         event_name: str,
         time_ns: int,
         metadata: Optional[Dict[str, Any]] = None,
+        # By default, an instant event isn't logged internally, only to structured logging.
+        log_pt2_compile_event: bool = False,
     ) -> None:
         """
         Log an instant event with no associated duration.
@@ -1152,8 +1443,11 @@ class ChromiumEventLogger:
             suppress_context=False,
             expect_trace_id=True,
         )
-        # Log an instant event with the same start and end time
-        log_chromium_event_internal(event, self.get_stack(), self.id_, time_ns)
+        if log_pt2_compile_event:
+            # Log an instant event with the same start and end time
+            log_chromium_event_internal(
+                event, self.get_pt2_compile_substack(), self.id_, time_ns
+            )
 
 
 CHROMIUM_EVENT_LOG: Optional[ChromiumEventLogger] = None
@@ -1164,6 +1458,39 @@ def get_chromium_event_logger() -> ChromiumEventLogger:
     if CHROMIUM_EVENT_LOG is None:
         CHROMIUM_EVENT_LOG = ChromiumEventLogger()
     return CHROMIUM_EVENT_LOG
+
+
+@contextmanager
+def chromium_event_timed(
+    event_name: str,
+    reset_event_log_on_exit: bool = False,
+    log_pt2_compile_event: bool = False,
+) -> Generator[Any, None, None]:
+    """
+    Context manager that creates a chromium start and end event. Chromium event
+    logging is integrated with dynamo_timed, so you probably want to use that
+    instead. Use this context manager only if you want to avoid dynamo_timed.
+    """
+    chromium_event_log = get_chromium_event_logger()
+    chromium_start_time = time.time_ns()
+    chromium_event_log.log_event_start(
+        event_name,
+        chromium_start_time,
+        {},
+        log_pt2_compile_event,
+    )
+    try:
+        yield
+    finally:
+        chromium_event_log.log_event_end(
+            event_name,
+            time.time_ns(),
+            {},
+            chromium_start_time,
+            log_pt2_compile_event,
+        )
+        if reset_event_log_on_exit:
+            chromium_event_log.reset()
 
 
 @dataclasses.dataclass
@@ -1378,21 +1705,37 @@ def is_namedtuple_cls(cls):
     """Test if an object is a namedtuple or a (torch.return_types|torch.autograd.forward_ad).* quasi-namedtuple"""
     try:
         if issubclass(cls, tuple):
-            bases = getattr(cls, "__bases__", []) or [None]
             module = getattr(cls, "__module__", None)
-            return module in ("torch.return_types", "torch.autograd.forward_ad") or (
-                bases[0] is tuple and hasattr(cls, "_make") and hasattr(cls, "_fields")
-            )
+            if module in ("torch.return_types", "torch.autograd.forward_ad"):
+                return True
+            if isinstance(getattr(cls, "_fields", None), tuple) and callable(
+                getattr(cls, "_make", None)
+            ):
+                # The subclassing style namedtuple can have an extra base `typing.Generic`
+                bases = tuple(t for t in cls.__bases__ if t is not Generic)
+                if bases == (tuple,):
+                    # This is a namedtuple type directly created by `collections.namedtuple(...)`
+                    return True
+                if bases and any(
+                    (
+                        # Subclass of namedtuple
+                        is_namedtuple_cls(t)
+                        # For subclasses of namedtuple, the __new__ method should not be customized
+                        and cls.__new__ is t.__new__
+                    )
+                    for t in bases
+                ):
+                    return True
     except TypeError:
         pass
     return False
 
 
 @functools.lru_cache(1)
-def namedtuple_fields(cls):
+def namedtuple_fields(cls) -> Tuple[str, ...]:
     """Get the fields of a namedtuple or a torch.return_types.* quasi-namedtuple"""
     if cls is slice:
-        return ["start", "stop", "step"]
+        return ("start", "stop", "step")
 
     assert issubclass(cls, tuple)
     if hasattr(cls, "_fields"):
@@ -1406,11 +1749,12 @@ def namedtuple_fields(cls):
     # frustrating ones e.g. torch.return_types.max
     assert cls.__module__ == "torch.return_types"
     obj = cls(map(Marker, range(cls.n_fields)))
-    fields: List[Optional[str]] = [None] * cls.n_fields
+    fields: Dict[str, int] = {}
     for name in dir(obj):
         if name[0] != "_" and isinstance(getattr(obj, name), Marker):
-            fields[getattr(obj, name).index] = name
-    return fields
+            fields[name] = getattr(obj, name).index
+    assert len(fields) == cls.n_fields
+    return tuple(sorted(fields, key=fields.get))  # type: ignore[arg-type]
 
 
 def checkpoint_params(gm):
@@ -1418,9 +1762,10 @@ def checkpoint_params(gm):
         rng_state = torch.clone(torch.random.get_rng_state())
         if torch.cuda.is_available():
             cuda_rng_state = torch.clone(torch.cuda.get_rng_state())
-        saved_state = []
-        for param in itertools.chain(gm.parameters(), gm.buffers()):
-            saved_state.append((param, param._version, torch.clone(param)))
+        saved_state = [
+            (param, param._version, torch.clone(param))
+            for param in itertools.chain(gm.parameters(), gm.buffers())
+        ]
 
     def restore():
         with torch.no_grad():
@@ -1474,11 +1819,17 @@ common_constant_types: Set[type] = {
     bytes,
     type(None),
     Ellipsis.__class__,
+    NotImplemented.__class__,
     types.CodeType,
+    # Commonly used immutable types from torch.
     torch.device,
     torch.dtype,
     torch.memory_format,
     torch.layout,
+    torch.finfo,
+    torch.iinfo,
+    torch.nn.attention.SDPBackend,
+    torch.cuda._CudaDeviceProperties,
 }
 
 if has_triton_package():
@@ -1563,11 +1914,34 @@ def check_numpy_ndarray_args(args, kwargs):
 
 dict_keys: Type[KeysView[Any]] = type({}.keys())
 dict_values: Type[ValuesView[Any]] = type({}.values())
-odict_values: Type[ValuesView[Any]] = type(collections.OrderedDict().values())
+odict_values: Type[ValuesView[Any]] = type(OrderedDict().values())
 tuple_iterator: Type[Iterator[Any]] = type(iter(()))
 range_iterator: Type[Iterator[Any]] = type(iter(range(0)))
 tuple_iterator_len = tuple_iterator.__length_hint__  # type: ignore[attr-defined]
 object_new = object.__new__
+dict_new = dict.__new__
+dict_methods = {
+    method
+    for method in itertools.chain(dict.__dict__.values(), OrderedDict.__dict__.values())
+    if callable(method)
+}
+
+
+def builtin_dict_keys(d):
+    # Avoids overridden keys method of the dictionary
+    assert isinstance(d, dict)
+    return dict.keys(d)
+
+
+def get_items_from_dict(obj):
+    # Get items without calling the user defined __getitem__ or keys method.
+    assert isinstance(obj, dict)
+    if istype(obj, (dict, OrderedDict)):
+        return obj.items()
+    elif isinstance(obj, OrderedDict):
+        return [(k, OrderedDict.__getitem__(obj, k)) for k in OrderedDict.keys(obj)]
+    else:
+        return [(k, dict.__getitem__(obj, k)) for k in dict.keys(obj)]
 
 
 def nn_module_new(cls):
@@ -1586,6 +1960,16 @@ def tuple_iterator_getitem(it, index):
 
 
 iter_next = next
+
+
+def normalize_range_iter(range_iter) -> Tuple[int, int, int]:
+    _, (range_obj,), maybe_idx = range_iter.__reduce__()
+    # In 3.12+, `maybe_idx` could be None, and `range_obj.start` would've been
+    # already incremented by the current index.
+    start = range_obj.start + (maybe_idx or 0)
+    stop = range_obj.stop
+    step = range_obj.step
+    return (start, stop, step)
 
 
 def to_subclass(t, cls):
@@ -1962,7 +2346,7 @@ def same(
                     and math.isnan(res_error)
                     # Some unit test for the accuracy minifier relies on
                     # returning false in this case.
-                    and not inductor_config.cpp.inject_relu_bug_TESTING_ONLY
+                    and not torch._inductor.config.cpp.inject_relu_bug_TESTING_ONLY
                 ):
                     passes_test = True
                 if not passes_test:
@@ -2055,16 +2439,16 @@ def format_func_info(code):
 
 @contextlib.contextmanager
 def disable_cache_limit():
-    prior = config.cache_size_limit
-    config.cache_size_limit = sys.maxsize
-    prior_acc_limit = config.accumulated_cache_size_limit
-    config.accumulated_cache_size_limit = sys.maxsize
+    prior = config.recompile_limit
+    config.recompile_limit = sys.maxsize
+    prior_acc_limit = config.accumulated_recompile_limit
+    config.accumulated_recompile_limit = sys.maxsize
 
     try:
         yield
     finally:
-        config.cache_size_limit = prior
-        config.accumulated_cache_size_limit = prior_acc_limit
+        config.recompile_limit = prior
+        config.accumulated_recompile_limit = prior_acc_limit
 
 
 # map from transformed code back to original user code
@@ -2176,6 +2560,17 @@ def get_fake_value(node, tx, allow_non_graph_fake=False):
 
         # no matter it's lazy module or not, we should copy to fake mode.
         nnmodule = deepcopy_to_fake_tensor(nnmodule, tx.fake_mode)
+
+    if node.name in ["interpolate", "is_integer", "wrapped_gradient"] or any(
+        isinstance(a, complex) for a in args
+    ):
+        # We need to specialize symfloats for now. Eventually we should do a tensorify pass in dynamo.
+        args = tuple(
+            float(arg)
+            if isinstance(arg, torch.SymFloat) and arg.node.hint is not None
+            else arg
+            for arg in args
+        )
 
     try:
         with tx.fake_mode, enable_python_dispatcher():
@@ -2701,6 +3096,21 @@ def is_utils_checkpoint(obj):
     return obj is torch.utils.checkpoint.checkpoint
 
 
+def is_invoke_subgraph(obj):
+    from torch._higher_order_ops.invoke_subgraph import invoke_subgraph_placeholder
+
+    return obj is invoke_subgraph_placeholder
+
+
+def build_invoke_subgraph_variable(**options):
+    from .variables.higher_order_ops import TorchHigherOrderOperatorVariable
+
+    return TorchHigherOrderOperatorVariable.make(
+        torch._higher_order_ops.invoke_subgraph,
+        **options,
+    )
+
+
 def build_checkpoint_variable(**options):
     import torch._higher_order_ops.wrap as higher_order_ops
 
@@ -3125,7 +3535,7 @@ def maybe_enable_compiled_autograd(should_enable, fullgraph=True, dynamic=True):
                 gm, backend=inner_compiler, fullgraph=fullgraph, dynamic=dynamic
             )
 
-        with torch._dynamo.compiled_autograd.enable(compiler_fn) as ctx:
+        with torch._dynamo.compiled_autograd._enable(compiler_fn) as ctx:
             yield ctx
 
 
@@ -3275,7 +3685,7 @@ def get_torch_function_mode_stack_at(ind):
 
 
 def set_torch_function_mode_stack(stack):
-    for i in range(_len_torch_function_stack()):
+    for _ in range(_len_torch_function_stack()):
         _pop_torch_function_stack()
 
     for mode in stack:
@@ -3283,7 +3693,7 @@ def set_torch_function_mode_stack(stack):
 
 
 def clear_torch_function_mode_stack():
-    for i in range(_len_torch_function_stack()):
+    for _ in range(_len_torch_function_stack()):
         _pop_torch_function_stack()
 
 
@@ -3311,10 +3721,10 @@ def verify_guard_fn_signature(value):
 
 def does_not_override_dict_iter_methods(user_cls):
     return (
-        user_cls.items in (dict.items, collections.OrderedDict.items)
-        and user_cls.values in (dict.values, collections.OrderedDict.values)
-        and user_cls.keys in (dict.keys, collections.OrderedDict.keys)
-        and user_cls.__iter__ in (dict.__iter__, collections.OrderedDict.__iter__)
+        user_cls.items in (dict.items, OrderedDict.items)
+        and user_cls.values in (dict.values, OrderedDict.values)
+        and user_cls.keys in (dict.keys, OrderedDict.keys)
+        and user_cls.__iter__ in (dict.__iter__, OrderedDict.__iter__)
     )
 
 
@@ -3414,3 +3824,13 @@ class CompileTimeInstructionCounter:
         finally:
             if config.record_compile_time_instruction_count:
                 cls.end()
+
+
+def set_feature_use(feature: str, usage: bool):
+    """
+    Records whether we are using a feature
+    Generally a feature is a JK.
+    """
+    # Note that sometimes (tests etc...) we're not in a context which we can record into
+    if get_metrics_context().in_progress():
+        get_metrics_context().set_key_value("feature_usage", feature, usage)

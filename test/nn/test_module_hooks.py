@@ -908,7 +908,7 @@ class TestStateDictHooks(TestCase):
         def fn(m, s, p, l):
             return OrderedDict()
 
-        handle = hook_registration_fn(fn)
+        hook_registration_fn(fn)
         if private:
             self.assertFalse(hasattr(fn, "_from_public_api"))
             self.assertTrue(len(m.state_dict()) == 0)
@@ -917,7 +917,7 @@ class TestStateDictHooks(TestCase):
             with self.assertRaisesRegex(
                 RuntimeError, "state_dict post-hook must return None"
             ):
-                sd = m.state_dict()
+                m.state_dict()
             with self.assertRaisesRegex(
                 RuntimeError, "previously registered via register_state_dict_post_hook"
             ):
@@ -991,9 +991,9 @@ class TestModuleGlobalHooks(TestCase):
             lambda *args: fw_hook(2, *args)
         )
 
-        output = module_1(input)
-        output = module_2(input)
-        output = module_3(input)
+        module_1(input)
+        module_2(input)
+        module_3(input)
         self.assertEqual(counter["forwards"], 15)
         self.assertEqual(counter["backwards"], 4)
 
@@ -1212,6 +1212,27 @@ class TestModuleGlobalHooks(TestCase):
 
         output.backward(torch.ones(5, 5), retain_graph=True)
         self.assertTrue(local_backward_called and global_backward_called)
+
+    @skipIfTorchDynamo("TorchDynamo does not work well with hooks")
+    def test_module_global_hooks_with_kwargs(self):
+        def kwarg_global_forward_hook(
+            module: nn.Module,
+            args: Tuple[torch.Tensor],
+            kwargs: Dict[str, Any],
+            out: torch.Tensor,
+        ) -> Any:
+            out = out + kwargs["bias"]
+            return out
+
+        model = KwargModel()
+        nn.modules.module.register_module_forward_hook(
+            kwarg_global_forward_hook,
+            with_kwargs=True,
+        )
+        x: torch.Tensor = torch.randn(10, 20)
+        bias: torch.Tensor = torch.randn(10, 20)
+        out = model(x, bias=bias)
+        self.assertEqual(out, x + 2 * bias, rtol=0, atol=1e-5)
 
 
 class TestModuleHookNN(NNTestCase):

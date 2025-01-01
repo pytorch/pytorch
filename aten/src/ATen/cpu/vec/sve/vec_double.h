@@ -147,6 +147,9 @@ public:
   Vectorized<double> asin() const {
     return USE_SLEEF(Vectorized<double>(Sleef_asindx_u10sve(values)),map(std::asin));
   }
+  Vectorized<double> asinh() const {
+    return USE_SLEEF(Vectorized<double>(Sleef_asinhdx_u10sve(values)),map(std::asinh));
+  }
   Vectorized<double> atan() const {
     return USE_SLEEF(Vectorized<double>(Sleef_atandx_u10sve(values)),map(std::atan));
   }

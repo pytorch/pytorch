@@ -446,7 +446,7 @@ void unfolded2d_copy_kernel(
 
 } // namespace
 
-REGISTER_DISPATCH(unfolded2d_copy_stub, &unfolded2d_copy_kernel);
-REGISTER_DISPATCH(unfolded2d_acc_stub, &unfolded2d_acc_kernel);
+REGISTER_DISPATCH(unfolded2d_copy_stub, &unfolded2d_copy_kernel)
+REGISTER_DISPATCH(unfolded2d_acc_stub, &unfolded2d_acc_kernel)
 
 } // namespace at::native

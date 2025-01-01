@@ -115,7 +115,7 @@ static void min_kernel_impl(
         scalar_t min_number = c10::load(self_data);
         int64_t index = 0;
         for (const auto i : c10::irange(self_dim_size)) {
-          scalar_t value = self_data[i * self_dim_stride];
+          scalar_t value = c10::load(&self_data[i * self_dim_stride]);
           if (!(zabs_(value) >= zabs_(min_number))) {
             min_number = value;
             index = i;
@@ -213,14 +213,15 @@ static void aminmax_kernel(
 }
 
 static void where_kernel_impl(TensorIterator &iter) {
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(kComplexHalf, kHalf, kBFloat16, kBool,
+  AT_DISPATCH_V2(
     iter.dtype(), "where_cpu", [&] {
       cpu_kernel(
         iter,
         [=](bool cond_val, scalar_t self_val, scalar_t other_val) -> scalar_t {
           return cond_val ? self_val : other_val;
         });
-  });
+  },
+  kComplexHalf, kHalf, kBFloat16, kBool, AT_EXPAND(AT_ALL_TYPES_AND_COMPLEX), AT_EXPAND(AT_FLOAT8_TYPES));
 }
 
 static void isposinf_kernel_impl(TensorIteratorBase& iter) {
@@ -400,17 +401,17 @@ static void clamp_min_scalar_kernel_impl(TensorIteratorBase& iter, Scalar min_) 
 
 } // anonymous namespace
 
-REGISTER_DISPATCH(max_stub, &max_kernel_impl);
-REGISTER_DISPATCH(min_stub, &min_kernel_impl);
-REGISTER_DISPATCH(aminmax_stub, &aminmax_kernel);
-REGISTER_DISPATCH(where_kernel, &where_kernel_impl);
-REGISTER_DISPATCH(isposinf_stub, &isposinf_kernel_impl);
-REGISTER_DISPATCH(isneginf_stub, &isneginf_kernel_impl);
-REGISTER_DISPATCH(mode_stub, &mode_kernel_impl);
-REGISTER_DISPATCH(clamp_stub, &clamp_kernel_impl);
-REGISTER_DISPATCH(clamp_scalar_stub, &clamp_scalar_kernel_impl);
-REGISTER_DISPATCH(clamp_min_scalar_stub, &clamp_min_scalar_kernel_impl);
-REGISTER_DISPATCH(clamp_max_scalar_stub, &clamp_max_scalar_kernel_impl);
-REGISTER_DISPATCH(isin_default_stub, &isin_default_kernel_cpu);
+REGISTER_DISPATCH(max_stub, &max_kernel_impl)
+REGISTER_DISPATCH(min_stub, &min_kernel_impl)
+REGISTER_DISPATCH(aminmax_stub, &aminmax_kernel)
+REGISTER_DISPATCH(where_kernel, &where_kernel_impl)
+REGISTER_DISPATCH(isposinf_stub, &isposinf_kernel_impl)
+REGISTER_DISPATCH(isneginf_stub, &isneginf_kernel_impl)
+REGISTER_DISPATCH(mode_stub, &mode_kernel_impl)
+REGISTER_DISPATCH(clamp_stub, &clamp_kernel_impl)
+REGISTER_DISPATCH(clamp_scalar_stub, &clamp_scalar_kernel_impl)
+REGISTER_DISPATCH(clamp_min_scalar_stub, &clamp_min_scalar_kernel_impl)
+REGISTER_DISPATCH(clamp_max_scalar_stub, &clamp_max_scalar_kernel_impl)
+REGISTER_DISPATCH(isin_default_stub, &isin_default_kernel_cpu)
 
 } // namespace at::native

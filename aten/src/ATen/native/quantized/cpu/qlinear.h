@@ -2,8 +2,7 @@
 #include <ATen/Tensor.h>
 #include <ATen/Config.h>
 
-namespace at {
-namespace native {
+namespace at::native {
 
 class QLinearOnednn final {
  public:
@@ -18,9 +17,9 @@ class QLinearOnednn final {
       double output_scale,
       int64_t output_zero_point,
       std::optional<c10::ScalarType> output_dtype,
-      c10::string_view post_op_name,
+      std::string_view post_op_name,
       torch::List<std::optional<at::Scalar>> post_op_args,
-      c10::string_view post_op_algorithm);
+      std::string_view post_op_algorithm);
 
 C10_API static Tensor run_pointwise_binary_tensor(
       Tensor act, // int8 CPU tensor, not QTensor
@@ -36,12 +35,11 @@ C10_API static Tensor run_pointwise_binary_tensor(
       std::optional<c10::ScalarType> output_dtype,
       double other_scale,
       int64_t other_zero_point,
-      c10::string_view binary_post_op, // e.g. "none", "sum", "add"
+      std::string_view binary_post_op, // e.g. "none", "sum", "add"
       double binary_alpha,
-      c10::string_view unary_post_op, // e.g. "none", "relu"
+      std::string_view unary_post_op, // e.g. "none", "relu"
       torch::List<std::optional<at::Scalar>> unary_post_op_args,
-      c10::string_view unary_post_op_algorithm);
+      std::string_view unary_post_op_algorithm);
 };
 
-} // namespace native
-} // namespace at
+} // namespace at::native
