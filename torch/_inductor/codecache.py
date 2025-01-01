@@ -77,7 +77,6 @@ from torch._inductor.cpu_vec_isa import pick_vec_isa
 from torch._inductor.custom_graph_pass import CustomGraphPass, CustomGraphPassType
 from torch._inductor.output_code import has_frozen_params
 from torch._inductor.runtime.compile_tasks import (
-    _module_to_triton_kernel,
     _reload_python_module,
     _reload_python_module_in_subproc,
 )
@@ -134,13 +133,13 @@ if TYPE_CHECKING:
     from collections.abc import KeysView
     from concurrent.futures import Future
 
-    from torch._inductor.graph import GraphLowering
-    from torch._inductor.ir import ChoiceCaller
-    from torch._inductor.runtime.hints import HalideInputSpec, HalideMeta
-
     from .compile_fx import _CompileFxKwargs, CompiledFxGraph
+    from .graph import GraphLowering
+    from .ir import ChoiceCaller
     from .output_code import CompiledFxGraphConstants, OutputCode
     from .remote_cache import JsonDataTy, RemoteCache
+    from .runtime.hints import HalideInputSpec, HalideMeta
+    from .runtime.triton_heuristics import CachingAutotuner
     from .utils import InputType
 
     T = TypeVar("T")
@@ -2811,10 +2810,10 @@ class PyCodeCache:
         return parse_stack_trace(entry)
 
 
-class TritonCodeCache:
-    @classmethod
-    def load(cls, kernel_name: str, source_code: str) -> ModuleType:
-        return _module_to_triton_kernel(PyCodeCache.load(source_code), kernel_name)
+def _load_triton_kernel_from_source(
+    kernel_name: str, source_code: str
+) -> CachingAutotuner:
+    return getattr(PyCodeCache.load(source_code), kernel_name)
 
 
 def _cuda_compiler() -> Optional[str]:
@@ -3214,29 +3213,8 @@ class ROCmCodeCache:
 
 
 class CodeCacheFuture:
-    def result(self) -> None:
+    def result(self) -> Callable[..., Any]:
         raise NotImplementedError
-
-
-class TritonFuture(CodeCacheFuture):
-    kernel: ModuleType
-
-    def __init__(
-        self,
-        kernel: Any,
-        future: Optional[Future[Any]],
-    ) -> None:
-        self.kernel = kernel
-        self.future = future
-
-    def result(self) -> ModuleType:  # type: ignore[override]
-        if self.future is not None:
-            # If the worker failed this will throw an exception.
-            result = self.future.result()
-            assert result is None
-            self.future = None
-            self.kernel.precompile()
-        return self.kernel
 
 
 class LambdaFuture(CodeCacheFuture):
