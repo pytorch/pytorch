@@ -592,7 +592,10 @@ class Tensor(torch._C.TensorBase):
     def backward(
         self, gradient=None, retain_graph=None, create_graph=False, inputs=None
     ):
-        r"""Computes the gradient of current tensor wrt graph leaves.
+        r"""
+        backward(gradient=None, retain_graph=None, create_graph=False, inputs=None) -> None
+        
+        Computes the gradient of current tensor wrt graph leaves.
 
         The graph is differentiated using the chain rule. If the tensor is
         non-scalar (i.e. its data has more than one element) and requires
@@ -650,7 +653,10 @@ class Tensor(torch._C.TensorBase):
         )
 
     def register_hook(self, hook):
-        r"""Registers a backward hook.
+        r"""
+        register_hook(hook) -> torch.utils.hooks.RemovableHandle
+        
+        Registers a backward hook.
 
         The hook will be called every time a gradient with respect to the
         Tensor is computed. The hook should have the following signature::
@@ -700,7 +706,10 @@ class Tensor(torch._C.TensorBase):
         return handle
 
     def register_post_accumulate_grad_hook(self, hook):
-        r"""Registers a backward hook that runs after grad accumulation.
+        r"""
+        register_post_accumulate_grad_hook(hook) -> torch.utils.hooks.RemovableHandle
+        
+        Registers a backward hook that runs after grad accumulation.
 
         The hook will be called after all gradients for a tensor have been accumulated,
         meaning that the .grad field has been updated on that tensor. The post
@@ -819,7 +828,10 @@ class Tensor(torch._C.TensorBase):
     )
 
     def is_shared(self):
-        r"""Checks if tensor is in shared memory.
+        r"""
+        is_shared() -> bool
+        
+        Checks if tensor is in shared memory.
 
         This is always ``True`` for CUDA tensors.
         """
@@ -841,7 +853,10 @@ class Tensor(torch._C.TensorBase):
         return self
 
     def module_load(self, other, assign=False):
-        r"""Defines how to transform ``other`` when loading it into ``self`` in :meth:`~nn.Module.load_state_dict`.
+        r"""
+        module_load(other, assign=False) -> Tensor
+        
+        Defines how to transform ``other`` when loading it into ``self`` in :meth:`~nn.Module.load_state_dict`.
 
         Used when :func:`~torch.__future__.get_swap_module_params_on_conversion` is ``True``.
 
@@ -886,7 +901,10 @@ class Tensor(torch._C.TensorBase):
         keepdim=False,
         dtype=None,
     ):
-        r"""See :func:`torch.norm`"""
+        r"""
+        norm(p='fro', dim=None, keepdim=False, dtype=None) -> Tensor
+        
+        See :func:`torch.norm`"""
         if has_torch_function_unary(self):
             return handle_torch_function(
                 Tensor.norm, (self,), self, p=p, dim=dim, keepdim=keepdim, dtype=dtype
@@ -941,7 +959,10 @@ class Tensor(torch._C.TensorBase):
         onesided: Optional[bool] = None,
         return_complex: Optional[bool] = None,
     ):
-        r"""See :func:`torch.stft`
+        r"""
+        stft(n_fft, hop_length=None, win_length=None, window=None, center=True, pad_mode='reflect', normalized=False, onesided=None, return_complex=None) -> Tensor
+        
+        See :func:`torch.stft`
 
         .. warning::
           This function changed signature at version 0.4.1. Calling with
@@ -987,7 +1008,10 @@ class Tensor(torch._C.TensorBase):
         length: Optional[int] = None,
         return_complex: bool = False,
     ):
-        r"""See :func:`torch.istft`"""
+        r"""
+        istft(n_fft, hop_length=None, win_length=None, window=None, center=True, normalized=False, onesided=None, length=None, return_complex=False) -> Tensor
+        
+        See :func:`torch.istft`"""
         if has_torch_function_unary(self):
             return handle_torch_function(
                 Tensor.istft,
@@ -1496,7 +1520,7 @@ class Tensor(torch._C.TensorBase):
         self, *, ambiguity_check: Union[bool, List[torch.memory_format]] = False
     ):
         """
-        dim_order(ambiguity_check=False) -> tuple
+        dim_order(ambiguity_check=False) -> Tuple[int, ...]
 
         Returns the uniquely determined tuple of int describing the dim order or
         physical layout of :attr:`self`.
