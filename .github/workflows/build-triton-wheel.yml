@@ -57,6 +57,9 @@ jobs:
             rocm_version: "6.3"
           - device: "cuda"
             rocm_version: ""
+          - device: "cuda"
+            docker-image: "pytorch/manylinux2_28-builder:aarch64"
+            cuda_version: "12.6"
     timeout-minutes: 40
     env:
       DOCKER_IMAGE: ${{ matrix.device == 'rocm' && format('pytorch/manylinux2_28-builder:rocm{0}', matrix.rocm_version) || matrix.docker-image }}
