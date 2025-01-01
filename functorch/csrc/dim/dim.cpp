@@ -7,8 +7,8 @@
 #include <torch/csrc/utils/python_compat.h>
 
 
-// Untested on 3.13
-#if IS_PYTHON_3_13_PLUS
+// Untested on 3.14
+#if IS_PYTHON_3_14_PLUS
 
 #include "dim.h"
 
