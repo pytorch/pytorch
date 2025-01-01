@@ -344,7 +344,7 @@ class ConstDictVariable(VariableTracker):
             return DictValuesVariable(self)
         elif name == "copy":
             # Key guarding - Install DICT_KEYS_MATCH guard.
-            if self.source:
+            if self.source and not isinstance(self, SetVariable):
                 install_guard(self.make_guard(GuardBuilder.DICT_KEYS_MATCH))
             assert not (args or kwargs)
             return self.clone(
