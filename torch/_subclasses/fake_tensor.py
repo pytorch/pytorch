@@ -880,6 +880,11 @@ class FakeTensor(Tensor):
                 is_cpu_zero_dim = t_is_cpu_zero_dim
                 return
 
+            # if mismatched device are cpu & meta, set common_device to meta
+            if {str(common_device), str(t.device)} == {"cpu", "meta"}:
+                common_device = torch.device("meta")
+                return
+
             # mismatching devices of non-zero dim tensors, throw
             # This might be valid behavior and need to be explicitly modeled, e.g. reshape_as
             raise RuntimeError(
