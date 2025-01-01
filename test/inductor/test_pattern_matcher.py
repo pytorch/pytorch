@@ -143,7 +143,6 @@ class TestPatternMatcher(TestCase):
                 ref[indices], test[indices]
             )  # also checks that dtype is correct
 
-    @skipIfRocm
     @skipIfXpu
     @skipCUDAIf(not SM80OrLater, "need sm_80")
     @inductor_config.patch(force_fuse_int_mm_with_mul=True)
@@ -178,7 +177,6 @@ class TestPatternMatcher(TestCase):
             self._test_fused_int_mm_mul_impl(fn1, args, True)
             self._test_fused_int_mm_mul_impl(fn2, args, True)
 
-    @skipIfRocm
     @skipIfXpu
     @skipCUDAIf(not SM80OrLater, "need sm_80")
     @inductor_config.patch(force_fuse_int_mm_with_mul=True)
