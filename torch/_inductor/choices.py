@@ -7,8 +7,11 @@ import sympy
 
 from . import config
 from .codecache import write_text
+from .codegen.triton import FixedTritonConfig, TritonKernel
 from .metrics import get_metric_table, is_metric_table_enabled
 from .runtime.hints import DeviceProperties, ReductionHint
+from .runtime.runtime_utils import next_power_of_2
+from .runtime.triton_heuristics import _num_warps
 from .scheduler import BaseSchedulerNode, Scheduler, WhyNoFuse
 from .virtualized import V
 
@@ -16,8 +19,7 @@ from .virtualized import V
 if TYPE_CHECKING:
     import torch
 
-    from .codegen.simd_kernel_features import SIMDKernelFeatures
-    from .codegen.triton import TritonKernel
+    from .codegen.simd_kernel_features import MemoryStats, SIMDKernelFeatures
 
 
 class Sortable(typing.Protocol):
@@ -44,11 +46,123 @@ class InductorChoices:
         self,
         kernel_cls: Type[TritonKernel],
         features: SIMDKernelFeatures,
-        groups: List[sympy.Expr],
+        kernel_args: List[Dict[str, sympy.Expr]],
         kernel_kwargs: Dict[str, Any],
     ) -> Dict[str, Any]:
         """Hook to change the kwargs passed to TritonKernel, used to apply fixed configurations"""
-        return kernel_kwargs
+        (groups,) = kernel_args
+        device = V.graph.get_current_device_or_throw()
+        if not (
+            (
+                config.max_autotune
+                or config.max_autotune_pointwise
+                or config.coordinate_descent_tuning
+                or config.triton.multi_kernel
+            )
+            and kernel_cls is TritonKernel
+            and features.is_reduction()
+            and len(groups) == 2
+            and device.type != "cpu"
+        ):
+            return kernel_kwargs
+
+        mstats = features.memory_stats(groups)
+        if mstats.persistent.reads.dim[1].count_per_thread_non_contiguous > 0:
+            # TODO(jansel): still need to tune heuristics for non-contiguous
+            return kernel_kwargs
+
+        return self._contiguous_reduction_fixed_config(
+            features, kernel_kwargs, mstats, device
+        )
+
+    def _contiguous_reduction_fixed_config(
+        self,
+        features: SIMDKernelFeatures,
+        kernel_kwargs: Dict[str, Any],
+        mstats: MemoryStats,
+        device: torch.device,
+    ) -> Dict[str, Any]:
+        pstats = mstats.persistent
+        lstats = mstats.looped
+        xhint = next_power_of_2(
+            V.graph.sizevars.size_hint(features.numel, fallback=8192)
+        )
+        rhint = next_power_of_2(
+            V.graph.sizevars.size_hint(features.reduction_numel, fallback=8192)
+        )
+
+        # need to respect existing overrides
+        cooperative = config.triton.cooperative_reductions and kernel_kwargs.get(
+            "override_cooperative_reduction"
+        )
+        if cooperative is not False:
+            rsplit = next_power_of_2(
+                self.reduction_split_factor(
+                    device, xhint, rhint, pstats.reads.dim[1].contiguous_score >= 0.5
+                )
+            )
+            cooperative = rsplit > 1
+        else:
+            cooperative = False
+            rsplit = 1
+
+        props = DeviceProperties.create(device)
+        safety_factor = 0.9
+        assert props.regs_per_multiprocessor is not None
+        register_bytes_per_sm_threshold = int(
+            4 * props.regs_per_multiprocessor * safety_factor
+        )
+        xblock = 1
+
+        target = 16384 // next_power_of_2(max(pstats.reads.bytes_per_thread // 2, 1))
+        target = max(512, min(target, 8192))
+
+        persistent = config.triton.persistent_reductions and kernel_kwargs.get(
+            "override_persistent_reduction"
+        )
+        if persistent is None:
+            if (
+                pstats.memory.bytes_per_thread < lstats.memory.bytes_per_thread
+                and pstats.reads.dim[0].count_per_thread_contiguous == 0
+            ):
+                # using a persistent reduction will save memory lets try to make it happen
+                threshold = register_bytes_per_sm_threshold
+            elif pstats.reads.dim[0].count_per_thread_contiguous == 0:
+                threshold = register_bytes_per_sm_threshold // 4
+            else:
+                threshold = 8192
+            threshold = threshold * rsplit // xblock
+
+            persistent = next_power_of_2(
+                rhint
+            ) < threshold and V.graph.sizevars.statically_known_leq(
+                pstats.memory.bytes_per_thread * features.reduction_numel, threshold
+            )
+
+        if persistent:
+            rblock = rhint // rsplit
+        else:
+            rblock = min(rhint, max(target // xblock, 8))
+
+        if xblock * rblock < target // 2:
+            xblock = target // rblock
+
+        cfg = {"XBLOCK": xblock}
+        if not persistent:
+            cfg["R0_BLOCK"] = rblock
+        if cooperative:
+            cfg["RSPLIT"] = rsplit
+        if pstats.reads.bytes_per_thread > 16:
+            cfg["num_warps"] = _num_warps(xblock * rblock // 64, 32)
+        else:
+            cfg["num_warps"] = _num_warps(xblock * rblock // 128, 16)
+        cfg["num_stages"] = 1
+        return {
+            **kernel_kwargs,
+            "override_cooperative_reduction": cooperative,
+            "override_persistent_reduction": persistent,
+            "fixed_config": FixedTritonConfig(cfg),
+        }
 
     def should_use_cooperative_reduction(self, features: SIMDKernelFeatures) -> bool:
         """Heuristic to decide if a cooperative reduction should be used."""
