@@ -6,20 +6,20 @@ import sys
 import warnings
 from pathlib import Path
 from types import ModuleType
-from typing import Any, Callable, Dict, TYPE_CHECKING
+from typing import Callable, Dict, TYPE_CHECKING
 
 
 if TYPE_CHECKING:
-    KernelType = Any
+    from torch._inductor.runtime.triton_heuristics import CachingAutotuner
 
 
 def _reload_triton_kernel_in_subproc(
     reload_module: Callable[[], ModuleType], kernel_name: str
-) -> KernelType:
+) -> CachingAutotuner:
     return _module_to_triton_kernel(reload_module(), kernel_name)
 
 
-def _module_to_triton_kernel(mod: ModuleType, kernel_name: str) -> KernelType:
+def _module_to_triton_kernel(mod: ModuleType, kernel_name: str) -> CachingAutotuner:
     kernel = getattr(mod, kernel_name)
     kernel._reload_in_subproc = functools.partial(
         _reload_triton_kernel_in_subproc,
@@ -67,7 +67,7 @@ def _set_triton_ptxas_path() -> None:
 
 
 def _worker_compile_triton(
-    load_kernel: Callable[[], KernelType], extra_env: Dict[str, str]
+    load_kernel: Callable[[], CachingAutotuner], extra_env: Dict[str, str]
 ) -> None:
     _set_triton_ptxas_path()
     os.environ.update(extra_env)
