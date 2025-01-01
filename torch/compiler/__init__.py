@@ -25,6 +25,7 @@ __all__ = [
 _P = ParamSpec("_P")
 _R = TypeVar("_R")
 
+
 def compile(*args, **kwargs):
     """
     See :func:`torch.compile` for details on the arguments for this function.
