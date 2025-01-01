@@ -4,8 +4,8 @@
 #if AT_MKLDNN_ENABLED()
 #include <ATen/Tensor.h>
 #include <ATen/native/quantized/PackedParams.h>
+#include <ATen/cpu/Utils.h>
 #include <ideep.hpp>
-#include <cpuinfo.h>
 
 #include <c10/util/CallOnce.h>
 
@@ -432,7 +432,7 @@ inline bool should_use_onednn_quant(
 #if !defined(__linux__)
   return false;
 #else
-  bool vnni_available = cpuinfo_has_x86_avx512vnni();
+  bool vnni_available = at::cpu::is_cpu_support_avx512_vnni();
   bool w_sym_quant =
       is_weight_symmetric_quant(weight, is_transposed_conv);
   bool opad_all_zero =
