@@ -138,7 +138,7 @@ class MetalKernel(SIMDKernel):
         var = self.args.input(name)
         index = self.prepare_indexing(index)
         line = f"{var}[{index}]"
-        return self.cse.generate(self.body, line)
+        return self.cse.generate(self.body, line, dtype=V.graph.get_dtype(name))
 
     def store(
         self, name: str, index: sympy.Expr, value: CSEVariable, mode: StoreMode = None
