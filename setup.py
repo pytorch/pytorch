@@ -731,7 +731,7 @@ class build_ext(setuptools.command.build_ext.build_ext):
         self.create_compile_commands()
 
         # Copy functorch extension
-        for i, ext in enumerate(self.extensions):
+        for ext in self.extensions:
             if ext.name != "functorch._C":
                 continue
             fullname = self.get_ext_fullname(ext.name)
