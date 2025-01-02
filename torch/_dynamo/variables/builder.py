@@ -1569,6 +1569,7 @@ class VariableBuilder:
                     )
                     and value in self._common_constants()
                 )
+                or isinstance(self.source, ConstDictKeySource)
             ):
                 self.install_guards(GuardBuilder.CONSTANT_MATCH)
                 return ConstantVariable.create(value=value, source=self.source)
