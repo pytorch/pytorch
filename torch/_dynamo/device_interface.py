@@ -144,8 +144,7 @@ class DeviceInterface:
         The caller should ensure the presence of the 'triton' package before
         calling this method.
         """
-        device_type = cls.device(device).type
-        raise RuntimeError(f"Device type {device_type} does not support Triton")
+        raise RuntimeError(f"This device type does not support Triton")
 
 
 class DeviceGuard:
