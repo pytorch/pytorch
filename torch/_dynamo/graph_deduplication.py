@@ -154,9 +154,9 @@ def _get_external_inputs(
         flattened_args_kwargs = _flatten_args_kwargs((node.args, node.kwargs))
         for arg_ind, in_node in enumerate(flattened_args_kwargs):
             if (
-                in_node not in region_unique
+                isinstance(in_node, Node)
+                and in_node not in region_unique
                 and in_node not in external_node_to_indices
-                and isinstance(in_node, Node)
             ):
                 external_node_to_indices[in_node] = (node_ind, arg_ind)
 
