@@ -1,5 +1,5 @@
-# mypy: allow-untyped-defs
-from typing import Optional, Union
+from typing import Any, Optional, Union
+from typing_extensions import Self
 
 import torch
 import torch.nn.functional as F
@@ -13,6 +13,7 @@ from torch.distributions.utils import (
     logits_to_probs,
     probs_to_logits,
 )
+from torch.types import _size
 
 
 __all__ = ["NegativeBinomial"]
@@ -69,7 +70,7 @@ class NegativeBinomial(Distribution):
         batch_shape = self._param.size()
         super().__init__(batch_shape, validate_args=validate_args)
 
-    def expand(self, batch_shape, _instance=None):
+    def expand(self, batch_shape: _size, _instance: Optional[Self] = None) -> Self:
         new = self._get_checked_instance(NegativeBinomial, _instance)
         batch_shape = torch.Size(batch_shape)
         new.total_count = self.total_count.expand(batch_shape)
@@ -83,7 +84,7 @@ class NegativeBinomial(Distribution):
         new._validate_args = self._validate_args
         return new
 
-    def _new(self, *args, **kwargs):
+    def _new(self, *args: Any, **kwargs: Any) -> Tensor:
         return self._param.new(*args, **kwargs)
 
     @property
@@ -119,12 +120,12 @@ class NegativeBinomial(Distribution):
             validate_args=False,
         )
 
-    def sample(self, sample_shape=torch.Size()):
+    def sample(self, sample_shape: _size = torch.Size()) -> Tensor:
         with torch.no_grad():
             rate = self._gamma.sample(sample_shape=sample_shape)
             return torch.poisson(rate)
 
-    def log_prob(self, value):
+    def log_prob(self, value: Tensor) -> Tensor:
         if self._validate_args:
             self._validate_sample(value)
 

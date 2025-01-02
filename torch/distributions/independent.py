@@ -1,12 +1,14 @@
-# mypy: allow-untyped-defs
 from typing import Generic, Optional, TypeVar
+from typing_extensions import Self
 
 import torch
 from torch import Size, Tensor
 from torch.distributions import constraints
+from torch.distributions.constraints import Constraint
 from torch.distributions.distribution import Distribution
 from torch.distributions.utils import _sum_rightmost
 from torch.types import _size
+from torch import Tensor
 
 
 __all__ = ["Independent"]
@@ -67,7 +69,7 @@ class Independent(Distribution, Generic[D]):
         self.reinterpreted_batch_ndims = reinterpreted_batch_ndims
         super().__init__(batch_shape, event_shape, validate_args=validate_args)
 
-    def expand(self, batch_shape, _instance=None):
+    def expand(self, batch_shape: _size, _instance: Optional[Self] = None) -> Self:
         new = self._get_checked_instance(Independent, _instance)
         batch_shape = torch.Size(batch_shape)
         new.base_dist = self.base_dist.expand(
@@ -91,7 +93,7 @@ class Independent(Distribution, Generic[D]):
         return self.base_dist.has_enumerate_support
 
     @constraints.dependent_property
-    def support(self):
+    def support(self) -> Optional[Constraint]:
         result = self.base_dist.support
         if self.reinterpreted_batch_ndims:
             result = constraints.independent(result, self.reinterpreted_batch_ndims)
@@ -109,28 +111,28 @@ class Independent(Distribution, Generic[D]):
     def variance(self) -> Tensor:
         return self.base_dist.variance
 
-    def sample(self, sample_shape=torch.Size()) -> Tensor:
+    def sample(self, sample_shape: _size = torch.Size()) -> Tensor:
         return self.base_dist.sample(sample_shape)
 
     def rsample(self, sample_shape: _size = torch.Size()) -> Tensor:
         return self.base_dist.rsample(sample_shape)
 
-    def log_prob(self, value):
+    def log_prob(self, value: Tensor) -> Tensor:
         log_prob = self.base_dist.log_prob(value)
         return _sum_rightmost(log_prob, self.reinterpreted_batch_ndims)
 
-    def entropy(self):
+    def entropy(self) -> Tensor:
         entropy = self.base_dist.entropy()
         return _sum_rightmost(entropy, self.reinterpreted_batch_ndims)
 
-    def enumerate_support(self, expand=True):
+    def enumerate_support(self, expand: bool = True) -> Tensor:
         if self.reinterpreted_batch_ndims > 0:
             raise NotImplementedError(
                 "Enumeration over cartesian product is not implemented"
             )
         return self.base_dist.enumerate_support(expand=expand)
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return (
             self.__class__.__name__
             + f"({self.base_dist}, {self.reinterpreted_batch_ndims})"

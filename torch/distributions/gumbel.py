@@ -1,6 +1,6 @@
-# mypy: allow-untyped-defs
 import math
 from typing import Optional, Union
+from typing_extensions import Self
 
 import torch
 from torch import Tensor
@@ -9,7 +9,7 @@ from torch.distributions.transformed_distribution import TransformedDistribution
 from torch.distributions.transforms import AffineTransform, ExpTransform
 from torch.distributions.uniform import Uniform
 from torch.distributions.utils import broadcast_all, euler_constant
-from torch.types import _Number
+from torch.types import _Number, _size
 
 
 __all__ = ["Gumbel"]
@@ -58,14 +58,14 @@ class Gumbel(TransformedDistribution):
         ]
         super().__init__(base_dist, transforms, validate_args=validate_args)
 
-    def expand(self, batch_shape, _instance=None):
+    def expand(self, batch_shape: _size, _instance: Optional[Self] = None) -> Self:
         new = self._get_checked_instance(Gumbel, _instance)
         new.loc = self.loc.expand(batch_shape)
         new.scale = self.scale.expand(batch_shape)
         return super().expand(batch_shape, _instance=new)
 
     # Explicitly defining the log probability function for Gumbel due to precision issues
-    def log_prob(self, value):
+    def log_prob(self, value: Tensor) -> Tensor:
         if self._validate_args:
             self._validate_sample(value)
         y = (self.loc - value) / self.scale
@@ -87,5 +87,5 @@ class Gumbel(TransformedDistribution):
     def variance(self) -> Tensor:
         return self.stddev.pow(2)
 
-    def entropy(self):
+    def entropy(self) -> Tensor:
         return self.scale.log() + (1 + euler_constant)

@@ -1,9 +1,10 @@
-# mypy: allow-untyped-defs
-from typing import Optional, Union
+from typing import Any, Optional, Union
+from typing_extensions import Self
 
 import torch
 from torch import Tensor
 from torch.distributions import constraints
+from torch.distributions.constraints import Constraint
 from torch.distributions.distribution import Distribution
 from torch.distributions.utils import (
     broadcast_all,
@@ -11,12 +12,13 @@ from torch.distributions.utils import (
     logits_to_probs,
     probs_to_logits,
 )
+from torch.types import _size
 
 
 __all__ = ["Binomial"]
 
 
-def _clamp_by_zero(x):
+def _clamp_by_zero(x: Tensor) -> Tensor:
     # works like clamp(x, min=0) but has grad at 0 is 0.5
     return (x.clamp(min=0) + x - x.clamp(max=0)) / 2
 
@@ -81,7 +83,7 @@ class Binomial(Distribution):
         batch_shape = self._param.size()
         super().__init__(batch_shape, validate_args=validate_args)
 
-    def expand(self, batch_shape, _instance=None):
+    def expand(self, batch_shape: _size, _instance: Optional[Self] = None) -> Self:
         new = self._get_checked_instance(Binomial, _instance)
         batch_shape = torch.Size(batch_shape)
         new.total_count = self.total_count.expand(batch_shape)
@@ -95,11 +97,11 @@ class Binomial(Distribution):
         new._validate_args = self._validate_args
         return new
 
-    def _new(self, *args, **kwargs):
+    def _new(self, *args: Any, **kwargs: Any) -> Tensor:
         return self._param.new(*args, **kwargs)
 
     @constraints.dependent_property(is_discrete=True, event_dim=0)
-    def support(self):
+    def support(self) -> Constraint:
         return constraints.integer_interval(0, self.total_count)
 
     @property
@@ -126,14 +128,14 @@ class Binomial(Distribution):
     def param_shape(self) -> torch.Size:
         return self._param.size()
 
-    def sample(self, sample_shape=torch.Size()):
+    def sample(self, sample_shape: _size = torch.Size()) -> Tensor:
         shape = self._extended_shape(sample_shape)
         with torch.no_grad():
             return torch.binomial(
                 self.total_count.expand(shape), self.probs.expand(shape)
             )
 
-    def log_prob(self, value):
+    def log_prob(self, value: Tensor) -> Tensor:
         if self._validate_args:
             self._validate_sample(value)
         log_factorial_n = torch.lgamma(self.total_count + 1)
@@ -153,7 +155,7 @@ class Binomial(Distribution):
             value * self.logits - log_factorial_k - log_factorial_nmk - normalize_term
         )
 
-    def entropy(self):
+    def entropy(self) -> Tensor:
         total_count = int(self.total_count.max())
         if not self.total_count.min() == total_count:
             raise NotImplementedError(
@@ -163,7 +165,7 @@ class Binomial(Distribution):
         log_prob = self.log_prob(self.enumerate_support(False))
         return -(torch.exp(log_prob) * log_prob).sum(0)
 
-    def enumerate_support(self, expand=True):
+    def enumerate_support(self, expand: bool = True) -> Tensor:
         total_count = int(self.total_count.max())
         if not self.total_count.min() == total_count:
             raise NotImplementedError(

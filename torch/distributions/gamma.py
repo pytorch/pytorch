@@ -1,5 +1,5 @@
-# mypy: allow-untyped-defs
 from typing import Optional, Union
+from typing_extensions import Self
 
 import torch
 from torch import Tensor
@@ -12,7 +12,7 @@ from torch.types import _Number, _size
 __all__ = ["Gamma"]
 
 
-def _standard_gamma(concentration):
+def _standard_gamma(concentration: Tensor) -> Tensor:
     return torch._standard_gamma(concentration)
 
 
@@ -67,7 +67,7 @@ class Gamma(ExponentialFamily):
             batch_shape = self.concentration.size()
         super().__init__(batch_shape, validate_args=validate_args)
 
-    def expand(self, batch_shape, _instance=None):
+    def expand(self, batch_shape: _size, _instance: Optional[Self] = None) -> Self:
         new = self._get_checked_instance(Gamma, _instance)
         batch_shape = torch.Size(batch_shape)
         new.concentration = self.concentration.expand(batch_shape)
@@ -86,7 +86,7 @@ class Gamma(ExponentialFamily):
         )  # do not record in autograd graph
         return value
 
-    def log_prob(self, value):
+    def log_prob(self, value: Tensor) -> Tensor:
         value = torch.as_tensor(value, dtype=self.rate.dtype, device=self.rate.device)
         if self._validate_args:
             self._validate_sample(value)
@@ -97,7 +97,7 @@ class Gamma(ExponentialFamily):
             - torch.lgamma(self.concentration)
         )
 
-    def entropy(self):
+    def entropy(self) -> Tensor:
         return (
             self.concentration
             - torch.log(self.rate)
@@ -109,10 +109,10 @@ class Gamma(ExponentialFamily):
     def _natural_params(self) -> tuple[Tensor, Tensor]:
         return (self.concentration - 1, -self.rate)
 
-    def _log_normalizer(self, x, y):
+    def _log_normalizer(self, x: Tensor, y: Tensor) -> Tensor:
         return torch.lgamma(x + 1) + (x + 1) * torch.log(-y.reciprocal())
 
-    def cdf(self, value):
+    def cdf(self, value: Tensor) -> Tensor:
         if self._validate_args:
             self._validate_sample(value)
         return torch.special.gammainc(self.concentration, self.rate * value)

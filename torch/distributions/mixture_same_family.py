@@ -1,11 +1,12 @@
-# mypy: allow-untyped-defs
 from typing import Optional
+from typing_extensions import Self
 
 import torch
 from torch import Tensor
 from torch.distributions import Categorical, constraints
-from torch.distributions.constraints import MixtureSameFamilyConstraint
+from torch.distributions.constraints import Constraint, MixtureSameFamilyConstraint
 from torch.distributions.distribution import Distribution
+from torch.types import _size
 
 
 __all__ = ["MixtureSameFamily"]
@@ -106,7 +107,7 @@ class MixtureSameFamily(Distribution):
             batch_shape=cdbs, event_shape=event_shape, validate_args=validate_args
         )
 
-    def expand(self, batch_shape, _instance=None):
+    def expand(self, batch_shape: _size, _instance: Optional[Self] = None) -> Self:
         batch_shape = torch.Size(batch_shape)
         batch_shape_comp = batch_shape + (self._num_component,)
         new = self._get_checked_instance(MixtureSameFamily, _instance)
@@ -124,7 +125,7 @@ class MixtureSameFamily(Distribution):
         return new
 
     @constraints.dependent_property
-    def support(self):
+    def support(self) -> Constraint:
         return MixtureSameFamilyConstraint(self._component_distribution.support)
 
     @property
@@ -155,14 +156,14 @@ class MixtureSameFamily(Distribution):
         )
         return mean_cond_var + var_cond_mean
 
-    def cdf(self, x):
+    def cdf(self, x: Tensor) -> Tensor:
         x = self._pad(x)
         cdf_x = self.component_distribution.cdf(x)
         mix_prob = self.mixture_distribution.probs
 
         return torch.sum(cdf_x * mix_prob, dim=-1)
 
-    def log_prob(self, x):
+    def log_prob(self, x: Tensor) -> Tensor:
         if self._validate_args:
             self._validate_sample(x)
         x = self._pad(x)
@@ -172,7 +173,7 @@ class MixtureSameFamily(Distribution):
         )  # [B, k]
         return torch.logsumexp(log_prob_x + log_mix_prob, dim=-1)  # [S, B]
 
-    def sample(self, sample_shape=torch.Size()):
+    def sample(self, sample_shape: _size = torch.Size()) -> Tensor:
         with torch.no_grad():
             sample_len = len(sample_shape)
             batch_len = len(self.batch_shape)
@@ -197,10 +198,10 @@ class MixtureSameFamily(Distribution):
             samples = torch.gather(comp_samples, gather_dim, mix_sample_r)
             return samples.squeeze(gather_dim)
 
-    def _pad(self, x):
+    def _pad(self, x: Tensor) -> Tensor:
         return x.unsqueeze(-1 - self._event_ndims)
 
-    def _pad_mixture_dimensions(self, x):
+    def _pad_mixture_dimensions(self, x: Tensor) -> Tensor:
         dist_batch_ndims = len(self.batch_shape)
         cat_batch_ndims = len(self.mixture_distribution.batch_shape)
         pad_ndims = 0 if cat_batch_ndims == 1 else dist_batch_ndims - cat_batch_ndims
@@ -213,7 +214,7 @@ class MixtureSameFamily(Distribution):
         )
         return x
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         args_string = (
             f"\n  {self.mixture_distribution},\n  {self.component_distribution}"
         )

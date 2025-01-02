@@ -1,6 +1,6 @@
-# mypy: allow-untyped-defs
 import math
 from typing import Optional, Union
+from typing_extensions import Self
 
 import torch
 from torch import Tensor
@@ -65,7 +65,7 @@ class Normal(ExponentialFamily):
             batch_shape = self.loc.size()
         super().__init__(batch_shape, validate_args=validate_args)
 
-    def expand(self, batch_shape, _instance=None):
+    def expand(self, batch_shape: _size, _instance: Optional[Self] = None) -> Self:
         new = self._get_checked_instance(Normal, _instance)
         batch_shape = torch.Size(batch_shape)
         new.loc = self.loc.expand(batch_shape)
@@ -74,7 +74,7 @@ class Normal(ExponentialFamily):
         new._validate_args = self._validate_args
         return new
 
-    def sample(self, sample_shape=torch.Size()):
+    def sample(self, sample_shape: _size = torch.Size()) -> Tensor:
         shape = self._extended_shape(sample_shape)
         with torch.no_grad():
             return torch.normal(self.loc.expand(shape), self.scale.expand(shape))
@@ -84,7 +84,7 @@ class Normal(ExponentialFamily):
         eps = _standard_normal(shape, dtype=self.loc.dtype, device=self.loc.device)
         return self.loc + eps * self.scale
 
-    def log_prob(self, value):
+    def log_prob(self, value: Tensor) -> Tensor:
         if self._validate_args:
             self._validate_sample(value)
         # compute the variance
@@ -100,22 +100,22 @@ class Normal(ExponentialFamily):
             - math.log(math.sqrt(2 * math.pi))
         )
 
-    def cdf(self, value):
+    def cdf(self, value: Tensor) -> Tensor:
         if self._validate_args:
             self._validate_sample(value)
         return 0.5 * (
             1 + torch.erf((value - self.loc) * self.scale.reciprocal() / math.sqrt(2))
         )
 
-    def icdf(self, value):
+    def icdf(self, value: Tensor) -> Tensor:
         return self.loc + self.scale * torch.erfinv(2 * value - 1) * math.sqrt(2)
 
-    def entropy(self):
+    def entropy(self) -> Tensor:
         return 0.5 + 0.5 * math.log(2 * math.pi) + torch.log(self.scale)
 
     @property
     def _natural_params(self) -> tuple[Tensor, Tensor]:
         return (self.loc / self.scale.pow(2), -0.5 * self.scale.pow(2).reciprocal())
 
-    def _log_normalizer(self, x, y):
+    def _log_normalizer(self, x: Tensor, y: Tensor) -> Tensor:
         return -0.25 * x.pow(2) / y + 0.5 * torch.log(-math.pi / y)

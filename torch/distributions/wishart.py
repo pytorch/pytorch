@@ -1,7 +1,7 @@
-# mypy: allow-untyped-defs
 import math
 import warnings
 from typing import Optional, Union
+from typing_extensions import Self
 
 import torch
 from torch import nan, Tensor
@@ -134,7 +134,7 @@ class Wishart(ExponentialFamily):
             self._unbroadcasted_scale_tril = scale_tril
         elif covariance_matrix is not None:
             self._unbroadcasted_scale_tril = torch.linalg.cholesky(covariance_matrix)
-        else:  # precision_matrix is not None
+        elif precision_matrix is not None:
             self._unbroadcasted_scale_tril = _precision_to_scale_tril(precision_matrix)
 
         # Chi2 distribution is needed for Bartlett decomposition sampling
@@ -149,7 +149,7 @@ class Wishart(ExponentialFamily):
             )
         )
 
-    def expand(self, batch_shape, _instance=None):
+    def expand(self, batch_shape: _size, _instance: Optional[Self] = None) -> Self:
         new = self._get_checked_instance(Wishart, _instance)
         batch_shape = torch.Size(batch_shape)
         cov_shape = batch_shape + self.event_shape
@@ -223,7 +223,7 @@ class Wishart(ExponentialFamily):
             V.pow(2) + torch.einsum("...i,...j->...ij", diag_V, diag_V)
         )
 
-    def _bartlett_sampling(self, sample_shape=torch.Size()):
+    def _bartlett_sampling(self, sample_shape: _size = torch.Size()) -> Tensor:
         p = self._event_shape[-1]  # has singleton shape
 
         # Implemented Sampling using Bartlett decomposition
@@ -241,7 +241,9 @@ class Wishart(ExponentialFamily):
         return chol @ chol.transpose(-2, -1)
 
     def rsample(
-        self, sample_shape: _size = torch.Size(), max_try_correction=None
+        self,
+        sample_shape: _size = torch.Size(),
+        max_try_correction: Optional[int] = None,
     ) -> Tensor:
         r"""
         .. warning::
@@ -292,7 +294,7 @@ class Wishart(ExponentialFamily):
 
         return sample
 
-    def log_prob(self, value):
+    def log_prob(self, value: Tensor) -> Tensor:
         if self._validate_args:
             self._validate_sample(value)
         nu = self.df  # has shape (batch_shape)
@@ -313,7 +315,7 @@ class Wishart(ExponentialFamily):
             / 2
         )
 
-    def entropy(self):
+    def entropy(self) -> Tensor:
         nu = self.df  # has shape (batch_shape)
         p = self._event_shape[-1]  # has singleton shape
         return (
@@ -335,7 +337,7 @@ class Wishart(ExponentialFamily):
         p = self._event_shape[-1]  # has singleton shape
         return -self.precision_matrix / 2, (nu - p - 1) / 2
 
-    def _log_normalizer(self, x, y):
+    def _log_normalizer(self, x: Tensor, y: Tensor) -> Tensor:
         p = self._event_shape[-1]
         return (y + (p + 1) / 2) * (
             -torch.linalg.slogdet(-2 * x).logabsdet + _log_2 * p

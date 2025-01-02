@@ -1,11 +1,11 @@
-# mypy: allow-untyped-defs
 import warnings
 from typing import Optional
-from typing_extensions import deprecated
+from typing_extensions import deprecated, Self
 
 import torch
 from torch import Tensor
 from torch.distributions import constraints
+from torch.distributions.constraints import Constraint
 from torch.distributions.utils import lazy_property
 from torch.types import _size
 
@@ -83,7 +83,7 @@ class Distribution:
                     )
         super().__init__()
 
-    def expand(self, batch_shape: _size, _instance=None):
+    def expand(self, batch_shape: _size, _instance: Optional[Self] = None) -> Self:
         """
         Returns a new distribution instance (or populates an existing instance
         provided by a derived class) with batch dimensions expanded to
@@ -119,7 +119,7 @@ class Distribution:
         return self._event_shape
 
     @property
-    def arg_constraints(self) -> dict[str, constraints.Constraint]:
+    def arg_constraints(self) -> dict[str, Constraint]:
         """
         Returns a dictionary from argument names to
         :class:`~torch.distributions.constraints.Constraint` objects that
@@ -129,7 +129,7 @@ class Distribution:
         raise NotImplementedError
 
     @property
-    def support(self) -> Optional[constraints.Constraint]:
+    def support(self) -> Optional[Constraint]:
         """
         Returns a :class:`~torch.distributions.constraints.Constraint` object
         representing this distribution's support.
@@ -327,8 +327,10 @@ class Distribution:
                 f"but found invalid values:\n{value}"
             )
 
-    def _get_checked_instance(self, cls, _instance=None):
-        if _instance is None and type(self).__init__ != cls.__init__:
+    def _get_checked_instance(
+        self, cls: type, _instance: Optional[Self] = None
+    ) -> Self:
+        if _instance is None and type(self).__init__ != cls.__init__:  # type: ignore[misc]
             raise NotImplementedError(
                 f"Subclass {self.__class__.__name__} of {cls.__name__} that defines a custom __init__ method "
                 "must also define a custom .expand() method."

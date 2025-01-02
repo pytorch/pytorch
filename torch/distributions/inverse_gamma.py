@@ -1,5 +1,5 @@
-# mypy: allow-untyped-defs
 from typing import Optional, Union
+from typing_extensions import Self
 
 import torch
 from torch import Tensor
@@ -7,6 +7,7 @@ from torch.distributions import constraints
 from torch.distributions.gamma import Gamma
 from torch.distributions.transformed_distribution import TransformedDistribution
 from torch.distributions.transforms import PowerTransform
+from torch.types import _size
 
 
 __all__ = ["InverseGamma"]
@@ -54,7 +55,7 @@ class InverseGamma(TransformedDistribution):
             base_dist, PowerTransform(neg_one), validate_args=validate_args
         )
 
-    def expand(self, batch_shape, _instance=None):
+    def expand(self, batch_shape: _size, _instance: Optional[Self] = None) -> Self:
         new = self._get_checked_instance(InverseGamma, _instance)
         return super().expand(batch_shape, _instance=new)
 
@@ -82,7 +83,7 @@ class InverseGamma(TransformedDistribution):
         )
         return torch.where(self.concentration > 2, result, torch.inf)
 
-    def entropy(self):
+    def entropy(self) -> Tensor:
         return (
             self.concentration
             + self.rate.log()

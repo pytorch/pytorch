@@ -1,5 +1,5 @@
-# mypy: allow-untyped-defs
 from typing import Optional, Union
+from typing_extensions import Self
 
 import torch
 from torch import Tensor
@@ -107,7 +107,7 @@ class TransformedDistribution(Distribution):
         event_shape = forward_shape[cut:]
         super().__init__(batch_shape, event_shape, validate_args=validate_args)
 
-    def expand(self, batch_shape, _instance=None):
+    def expand(self, batch_shape: _size, _instance: Optional[Self] = None) -> Self:
         new = self._get_checked_instance(TransformedDistribution, _instance)
         batch_shape = torch.Size(batch_shape)
         shape = batch_shape + self.event_shape
@@ -137,7 +137,7 @@ class TransformedDistribution(Distribution):
     def has_rsample(self) -> bool:  # type: ignore[override]
         return self.base_dist.has_rsample
 
-    def sample(self, sample_shape=torch.Size()):
+    def sample(self, sample_shape: _size = torch.Size()) -> Tensor:
         """
         Generates a sample_shape shaped sample or sample_shape shaped batch of
         samples if the distribution parameters are batched. Samples first from
@@ -162,7 +162,7 @@ class TransformedDistribution(Distribution):
             x = transform(x)
         return x
 
-    def log_prob(self, value):
+    def log_prob(self, value: Tensor) -> Tensor:
         """
         Scores the sample by inverting the transform(s) and computing the score
         using the score of the base distribution and the log abs det jacobian.
@@ -186,7 +186,7 @@ class TransformedDistribution(Distribution):
         )
         return log_prob
 
-    def _monotonize_cdf(self, value):
+    def _monotonize_cdf(self, value: Tensor) -> Tensor:
         """
         This conditionally flips ``value -> 1-value`` to ensure :meth:`cdf` is
         monotone increasing.
@@ -198,7 +198,7 @@ class TransformedDistribution(Distribution):
             return value
         return sign * (value - 0.5) + 0.5
 
-    def cdf(self, value):
+    def cdf(self, value: Tensor) -> Tensor:
         """
         Computes the cumulative distribution function by inverting the
         transform(s) and computing the score of the base distribution.
@@ -211,7 +211,7 @@ class TransformedDistribution(Distribution):
         value = self._monotonize_cdf(value)
         return value
 
-    def icdf(self, value):
+    def icdf(self, value: Tensor) -> Tensor:
         """
         Computes the inverse cumulative distribution function using
         transform(s) and computing the score of the base distribution.

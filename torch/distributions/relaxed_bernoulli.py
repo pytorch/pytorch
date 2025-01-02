@@ -1,5 +1,5 @@
-# mypy: allow-untyped-defs
-from typing import Optional, Union
+from typing import Any, Optional, Union
+from typing_extensions import Self
 
 import torch
 from torch import Tensor
@@ -69,7 +69,7 @@ class LogitRelaxedBernoulli(Distribution):
             batch_shape = self._param.size()
         super().__init__(batch_shape, validate_args=validate_args)
 
-    def expand(self, batch_shape, _instance=None):
+    def expand(self, batch_shape: _size, _instance: Optional[Self] = None) -> Self:
         new = self._get_checked_instance(LogitRelaxedBernoulli, _instance)
         batch_shape = torch.Size(batch_shape)
         new.temperature = self.temperature
@@ -83,7 +83,7 @@ class LogitRelaxedBernoulli(Distribution):
         new._validate_args = self._validate_args
         return new
 
-    def _new(self, *args, **kwargs):
+    def _new(self, *args: Any, **kwargs: Any) -> Tensor:
         return self._param.new(*args, **kwargs)
 
     @lazy_property
@@ -108,7 +108,7 @@ class LogitRelaxedBernoulli(Distribution):
             uniforms.log() - (-uniforms).log1p() + probs.log() - (-probs).log1p()
         ) / self.temperature
 
-    def log_prob(self, value):
+    def log_prob(self, value: Tensor) -> Tensor:
         if self._validate_args:
             self._validate_sample(value)
         logits, value = broadcast_all(self.logits, value)
@@ -152,7 +152,7 @@ class RelaxedBernoulli(TransformedDistribution):
         base_dist = LogitRelaxedBernoulli(temperature, probs, logits)
         super().__init__(base_dist, SigmoidTransform(), validate_args=validate_args)
 
-    def expand(self, batch_shape, _instance=None):
+    def expand(self, batch_shape: _size, _instance: Optional[Self] = None) -> Self:
         new = self._get_checked_instance(RelaxedBernoulli, _instance)
         return super().expand(batch_shape, _instance=new)
 

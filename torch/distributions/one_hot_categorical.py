@@ -1,5 +1,5 @@
-# mypy: allow-untyped-defs
-from typing import Optional
+from typing import Any, Optional
+from typing_extensions import Self
 
 import torch
 from torch import Tensor
@@ -57,7 +57,7 @@ class OneHotCategorical(Distribution):
         event_shape = self._categorical.param_shape[-1:]
         super().__init__(batch_shape, event_shape, validate_args=validate_args)
 
-    def expand(self, batch_shape, _instance=None):
+    def expand(self, batch_shape: _size, _instance: Optional[Self] = None) -> Self:
         new = self._get_checked_instance(OneHotCategorical, _instance)
         batch_shape = torch.Size(batch_shape)
         new._categorical = self._categorical.expand(batch_shape)
@@ -67,7 +67,7 @@ class OneHotCategorical(Distribution):
         new._validate_args = self._validate_args
         return new
 
-    def _new(self, *args, **kwargs):
+    def _new(self, *args: Any, **kwargs: Any) -> Tensor:
         return self._categorical._new(*args, **kwargs)
 
     @property
@@ -100,23 +100,23 @@ class OneHotCategorical(Distribution):
     def param_shape(self) -> torch.Size:
         return self._categorical.param_shape
 
-    def sample(self, sample_shape=torch.Size()):
+    def sample(self, sample_shape: _size = torch.Size()) -> Tensor:
         sample_shape = torch.Size(sample_shape)
         probs = self._categorical.probs
         num_events = self._categorical._num_events
         indices = self._categorical.sample(sample_shape)
         return torch.nn.functional.one_hot(indices, num_events).to(probs)
 
-    def log_prob(self, value):
+    def log_prob(self, value: Tensor) -> Tensor:
         if self._validate_args:
             self._validate_sample(value)
         indices = value.max(-1)[1]
         return self._categorical.log_prob(indices)
 
-    def entropy(self):
+    def entropy(self) -> Tensor:
         return self._categorical.entropy()
 
-    def enumerate_support(self, expand=True):
+    def enumerate_support(self, expand: bool = True) -> Tensor:
         n = self.event_shape[0]
         values = torch.eye(n, dtype=self._param.dtype, device=self._param.device)
         values = values.view((n,) + (1,) * len(self.batch_shape) + (n,))
