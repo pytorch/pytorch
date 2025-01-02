@@ -14,7 +14,6 @@ import math
 import operator
 import random
 import re
-import sys
 import types
 import warnings
 import weakref
@@ -139,7 +138,6 @@ from .dicts import (
     DefaultDictVariable,
     DictKeySetVariable,
     FrozensetVariable,
-    PythonSysModulesVariable,
     SetVariable,
 )
 from .distributed import (
@@ -1243,9 +1241,6 @@ class VariableBuilder:
                 for i, (k, v) in enumerate(value.items())
             }
             return ConstDictVariable(result, type(value))
-        elif value is sys.modules:
-            self.install_guards(GuardBuilder.FUNCTION_MATCH)
-            return PythonSysModulesVariable(source=self.source)
         else:
             assert istype(
                 value, (dict, collections.defaultdict, collections.OrderedDict)

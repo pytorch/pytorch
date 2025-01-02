@@ -1745,11 +1745,7 @@ class NO_HASATTR : public LeafGuard {
   py::object _attr_name;
 };
 
-// Checks that dict contains or does not contain a key. This happens for
-// PythonSysModulesVariable tracker.
-// TODO(janimesh) - Check if we can use DictGuardManager. The downside could be
-// large number of keys for sys module, so DICT_CONTAINS might still end up
-// being faster.
+// Checks that dict contains or does not contain a key.
 class DICT_CONTAINS : public LeafGuard {
  public:
   DICT_CONTAINS(bool contains, py::object key, py::object verbose_code_parts)
