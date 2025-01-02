@@ -9,6 +9,11 @@ source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
 echo "Testing pytorch"
 if [[ "${SHARD_NUMBER:-1}" == "1" ]]; then
+      # FSDP tests
+    for f in test/distributed/fsdp/*.py ; do time python test/run_test.py --verbose -i "${f#*/}" ; done
+fi
+
+if [[ "${SHARD_NUMBER:-2}" == "2" ]]; then
     time python test/run_test.py --include test_cuda_multigpu test_cuda_primary_ctx --verbose
 
     # Disabling tests to see if they solve timeout issues; see https://github.com/pytorch/pytorch/issues/70015
@@ -24,8 +29,7 @@ if [[ "${SHARD_NUMBER:-1}" == "1" ]]; then
     time python test/run_test.py --verbose -i distributed/test_symmetric_memory
     time python test/run_test.py --verbose -i distributed/test_pg_wrapper
     time python test/run_test.py --verbose -i distributed/rpc/cuda/test_tensorpipe_agent
-    # FSDP tests
-    for f in test/distributed/fsdp/*.py ; do time python test/run_test.py --verbose -i "${f#*/}" ; done
+
     # ShardedTensor tests
     time python test/run_test.py --verbose -i distributed/checkpoint/test_checkpoint
     time python test/run_test.py --verbose -i distributed/checkpoint/test_file_system_checkpoint
@@ -33,9 +37,7 @@ if [[ "${SHARD_NUMBER:-1}" == "1" ]]; then
     time python test/run_test.py --verbose -i distributed/_shard/sharding_plan/test_sharding_plan
     time python test/run_test.py --verbose -i distributed/_shard/sharded_tensor/test_sharded_tensor
     time python test/run_test.py --verbose -i distributed/_shard/sharded_tensor/test_sharded_tensor_reshard
-fi
 
-if [[ "${SHARD_NUMBER:-2}" == "2" ]]; then
     # functional collective tests
     time python test/run_test.py --verbose -i distributed/test_functional_api
 
