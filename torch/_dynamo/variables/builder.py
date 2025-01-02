@@ -450,6 +450,10 @@ class VariableBuilder:
                 (tuple, list, odict_values, collections.deque, torch.Size),
                 cls.wrap_listlike,
             ),
+            (
+                (dict, collections.defaultdict, collections.OrderedDict),
+                cls.wrap_dict_like,
+            ),
             (tuple_iterator, cls.wrap_tuple_iterator),
             (range_iterator, cls.wrap_range_iterator),
             ((slice, range), cls.wrap_slice_range),
@@ -585,95 +589,6 @@ class VariableBuilder:
                 output, tuple_cls=type(value), source=self.source
             )
             return result
-        elif value is torch.utils._pytree.SUPPORTED_NODES:
-            # For SUPPORTED_NODES, we guard on the dictionary version (PEP509)
-            # under the assumption that the values themselves don't change.
-            self.install_guards(GuardBuilder.DICT_VERSION)
-
-            # The keys on the SUPPORTED_NODES can be arbitrary, so save on the
-            # key order.
-            self.tx.output.guard_on_key_order.add(self.source.name())
-            result = {
-                TypingVariable(k): UserDefinedObjectVariable(
-                    v,
-                    source=DictGetItemSource(
-                        self.get_source(), ConstDictKeySource(self.get_source(), i)
-                    ),
-                )
-                for i, (k, v) in enumerate(value.items())
-            }
-            return ConstDictVariable(result, type(value))
-        elif value is sys.modules:
-            self.install_guards(GuardBuilder.FUNCTION_MATCH)
-            return PythonSysModulesVariable(source=self.source)
-        elif istype(value, (dict, collections.defaultdict, collections.OrderedDict)):
-            self.install_guards(GuardBuilder.SEQUENCE_LENGTH)
-
-            all_const = all(ConstantVariable.is_literal(k) for k in value.keys())
-
-            # For all_const, we dont have to guard on anything yet. We guard on
-            # keys lazily by adding a dict_getitem entry for each accessed key.
-            # For cases where we need to guard on all keys, we lazily put guards
-            # during the dict call_method (check dicts.py)
-            if not all_const:
-                # Guard on the key order
-                # This is not ideal, i.e., there is no need to guard on the key
-                # order. But we guard on the key order because of the complexity
-                #
-                # 1) For non-constant objects, we can't save the key in the
-                # guard context because it can be memory heavy. We can add
-                # weakrefs but this complicates the accesses.
-                #
-                # 2) For non-constant objects, we also have to guard on the keys
-                # (like TENSOR_MATCH on tensor). We might also have guards on
-                # the attributes of the keys (like tensor.grad). To make this
-                # work in tree strucutre is complicated.
-                #
-                # So, instead we guard on the key order. While guarding on key
-                # order, we just save the indices and use it to access keys and
-                # values. Indices are cheap to save.
-                self.tx.output.guard_on_key_order.add(self.source.name())
-
-            # We need all the keys to be hashable. We do this within the
-            # _HashableTracker class in dicts.py
-            def build_key_value(i, k, v):
-                if all_const:
-                    key = ConstantVariable.create(k)
-                    source_key = k
-                else:
-                    source_key = ConstDictKeySource(self.get_source(), i)
-                    key = LazyVariableTracker.create(k, source_key)
-
-                source_value = DictGetItemSource(self.get_source(), source_key)
-                value = LazyVariableTracker.create(v, source_value)
-
-                return key, value
-
-            # Ensure that we call dict.keys and not value.keys (which can call
-            # overridden keys method). In the C++ guards, we relied on
-            # PyDict_Next to traverse the dictionary, which uses the internal
-            # data structure and does not call the overridden keys method.
-            result = dict(
-                build_key_value(i, k, v)
-                for i, (k, v) in enumerate(get_items_from_dict(value))
-            )
-
-            if istype(value, collections.defaultdict):
-                factory_source = AttrSource(self.source, "default_factory")
-                result = DefaultDictVariable(
-                    result,
-                    type(value),
-                    default_factory=VariableBuilder(self.tx, factory_source)(
-                        value.default_factory
-                    ),
-                    source=self.source,
-                )
-            else:
-                result = ConstDictVariable(
-                    result, user_cls=type(value), source=self.source
-                )
-
-            return self.tx.output.side_effects.track_mutable(value, result)
         elif isinstance(value, torch.nn.Module):
             return self.wrap_module(value)
         elif ConstantVariable.is_literal(value):  # non-atomic literals
@@ -1308,6 +1223,100 @@ class VariableBuilder:
             # don't allow STORE_ATTR mutation with custom __setattr__
             return result
         return self.tx.output.side_effects.track_object_existing(value, result)
+
+    def wrap_dict_like(self, value: Union[dict, collections.OrderedDict]):
+        if value is torch.utils._pytree.SUPPORTED_NODES:
+            # For SUPPORTED_NODES, we guard on the dictionary version (PEP509)
+            # under the assumption that the values themselves don't change.
+            self.install_guards(GuardBuilder.DICT_VERSION)
+
+            # The keys on the SUPPORTED_NODES can be arbitrary, so save on the
+            # key order.
+            self.tx.output.guard_on_key_order.add(self.source.name())
+            result = {
+                TypingVariable(k): UserDefinedObjectVariable(
+                    v,
+                    source=DictGetItemSource(
+                        self.get_source(), ConstDictKeySource(self.get_source(), i)
+                    ),
+                )
+                for i, (k, v) in enumerate(value.items())
+            }
+            return ConstDictVariable(result, type(value))
+        elif value is sys.modules:
+            self.install_guards(GuardBuilder.FUNCTION_MATCH)
+            return PythonSysModulesVariable(source=self.source)
+        else:
+            assert istype(
+                value, (dict, collections.defaultdict, collections.OrderedDict)
+            )
+            self.install_guards(GuardBuilder.SEQUENCE_LENGTH)
+
+            all_const = all(ConstantVariable.is_literal(k) for k in value.keys())
+
+            # For all_const, we dont have to guard on anything yet. We guard on
+            # keys lazily by adding a dict_getitem entry for each accessed key.
+            # For cases where we need to guard on all keys, we lazily put guards
+            # during the dict call_method (check dicts.py)
+            if not all_const:
+                # Guard on the key order
+                # This is not ideal, i.e., there is no need to guard on the key
+                # order. But we guard on the key order because of the complexity
+                #
+                # 1) For non-constant objects, we can't save the key in the
+                # guard context because it can be memory heavy. We can add
+                # weakrefs but this complicates the accesses.
+                #
+                # 2) For non-constant objects, we also have to guard on the keys
+                # (like TENSOR_MATCH on tensor). We might also have guards on
+                # the attributes of the keys (like tensor.grad). To make this
+                # work in tree strucutre is complicated.
+                #
+                # So, instead we guard on the key order. While guarding on key
+                # order, we just save the indices and use it to access keys and
+                # values. Indices are cheap to save.
+                self.tx.output.guard_on_key_order.add(self.source.name())
+
+            # We need all the keys to be hashable. We do this within the
+            # _HashableTracker class in dicts.py
+            def build_key_value(i, k, v):
+                if all_const:
+                    key = ConstantVariable.create(k)
+                    source_key = k
+                else:
+                    source_key = ConstDictKeySource(self.get_source(), i)
+                    key = LazyVariableTracker.create(k, source_key)
+
+                source_value = DictGetItemSource(self.get_source(), source_key)
+                value = LazyVariableTracker.create(v, source_value)
+
+                return key, value
+
+            # Ensure that we call dict.keys and not value.keys (which can call
+            # overridden keys method). In the C++ guards, we relied on
+            # PyDict_Next to traverse the dictionary, which uses the internal
+            # data structure and does not call the overridden keys method.
+            result = dict(
+                build_key_value(i, k, v)
+                for i, (k, v) in enumerate(get_items_from_dict(value))
+            )
+
+            if istype(value, collections.defaultdict):
+                factory_source = AttrSource(self.source, "default_factory")
+                result = DefaultDictVariable(
+                    result,
+                    type(value),
+                    default_factory=VariableBuilder(self.tx, factory_source)(
+                        value.default_factory
+                    ),
+                    source=self.source,
+                )
+            else:
+                result = ConstDictVariable(
+                    result, user_cls=type(value), source=self.source
+                )
+
+            return self.tx.output.side_effects.track_mutable(value, result)
 
     def wrap_listlike(self, value: Union[tuple, list, odict_values, NamedTuple]):
         if config.specialize_int and type(value) is torch.Size:
