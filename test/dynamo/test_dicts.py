@@ -5,7 +5,7 @@
 
 import dataclasses
 import unittest
-from collections import OrderedDict
+from collections import defaultdict, namedtuple, OrderedDict
 from dataclasses import dataclass, fields, is_dataclass
 from typing import Any, Optional, Tuple
 
@@ -359,6 +359,33 @@ class DictTests(torch._dynamo.test_case.TestCase):
         # Since key c was not used, it should not lead to a recompilation
         d.pop("c")
         d["d"] = 10
+
+        with unittest.mock.patch("torch._dynamo.config.error_on_recompile", True):
+            ref = fn(x)
+            res = opt_fn(x)
+            self.assertEqual(ref, res)
+
+    def test_lazy_key_non_const_guarding(self):
+        d = {
+            list: 2,
+            dict: 3,
+            OrderedDict: 5,
+            namedtuple: 7,
+        }
+
+        def fn(x):
+            return x * d[list]
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+
+        x = torch.randn(4)
+        ref = fn(x)
+        res = opt_fn(x)
+        self.assertEqual(ref, res)
+
+        # Since key c was not used, it should not lead to a recompilation
+        d.pop(dict)
+        d[defaultdict] = 10
 
         with unittest.mock.patch("torch._dynamo.config.error_on_recompile", True):
             ref = fn(x)

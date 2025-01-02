@@ -1,8 +1,10 @@
+import builtins
 import collections
 import functools
 from typing import Any, Callable, Dict, final, Optional, Tuple, Union
 from typing_extensions import Self
 
+from ..utils import is_function_or_wrapper
 from .base import VariableTracker
 from .tensor import SymNodeVariable
 
@@ -141,6 +143,21 @@ class LazyVariableTracker(VariableTracker):
         # save `value` to keep it alive and ensure id() isn't reused
         cache[idx] = (result, value)
         return result
+
+    def is_hashable(self) -> bool:
+        # Checks that the underlying value is hashable without realizing the VT.
+        assert not self.is_realized()
+        value = self._cache.value
+        return (
+            value in vars(builtins).values()
+            or issubclass(type(value), type)
+            or is_function_or_wrapper(value)
+        )
+
+    def original_value(self) -> Any:
+        # Returns the value without realizing the VT.
+        assert not self.is_realized()
+        return self._cache.value
 
 
 class LazySymNodeFormatString:
