@@ -2,7 +2,7 @@
 import math
 import warnings
 from functools import total_ordering
-from typing import Callable, Tuple, Type
+from typing import Callable, Type
 
 import torch
 from torch import inf
@@ -40,10 +40,10 @@ from torch import Tensor
 
 
 _KL_REGISTRY: dict[
-    Tuple[Type, Type], Callable
+    tuple[Type, Type], Callable
 ] = {}  # Source of truth mapping a few general (type, type) pairs to functions.
 _KL_MEMOIZE: dict[
-    Tuple[Type, Type], Callable
+    tuple[Type, Type], Callable
 ] = {}  # Memoized version mapping many specific (type, type) pairs to functions.
 
 __all__ = ["register_kl", "kl_divergence"]
