@@ -56,7 +56,7 @@ def has_inductor_available(device_type: str) -> bool:
         scheduling_factory = get_scheduling_for_device(device_type)
         if scheduling_factory is None:
             return False
-        scheduling_factory(None).check_if_available(device_type)
+        scheduling_factory(None).raise_if_unavailable(device_type)
         return True
     except RuntimeError:
         return False

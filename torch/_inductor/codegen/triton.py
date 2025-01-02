@@ -3784,7 +3784,9 @@ class TritonScheduling(SIMDScheduling):
         return cls.backend_features
 
     @classmethod
-    def check_if_available(cls, device: Union[str, torch.device, None] = None) -> None:
+    def raise_if_unavailable(
+        cls, device: Union[str, torch.device, None] = None
+    ) -> None:
         if not has_triton_package():
             raise TritonMissing(inspect.currentframe())
 

@@ -167,7 +167,7 @@ def check_dynamo(backend: str, device_type: str, err_msg: str) -> None:
             return
 
         try:
-            scheduling(None).check_if_available(device_type)
+            scheduling(None).raise_if_unavailable(device_type)
         except RuntimeError as e:
             print(
                 f"WARNING: Inductor not available for {device_type}: {e}. Skipping check."

@@ -39,10 +39,10 @@ class CUDACombinedScheduling(BaseScheduling):
         return TritonScheduling.get_backend_features(device)
 
     @classmethod
-    def check_if_available(
+    def raise_if_unavailable(
         cls, device: "Union[str, torch.device, None]" = None
     ) -> None:
-        TritonScheduling.check_if_available(device)
+        TritonScheduling.raise_if_unavailable(device)
 
     def choose_node_backend(self, node: BaseSchedulerNode) -> BaseScheduling:
         if self._cuda_cpp_scheduling.is_cuda_cpp_template(node):

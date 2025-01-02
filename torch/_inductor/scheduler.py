@@ -3625,7 +3625,7 @@ class Scheduler:
             raise RuntimeError(f"Unsupported device type: {device.type}")
 
         scheduling = device_scheduling_type(self)
-        scheduling.check_if_available(device)
+        scheduling.raise_if_unavailable(device)
 
         return scheduling
 
@@ -3887,7 +3887,9 @@ class BaseScheduling:
         return ()
 
     @classmethod
-    def check_if_available(cls, device: Union[str, torch.device, None] = None) -> None:
+    def raise_if_unavailable(
+        cls, device: Union[str, torch.device, None] = None
+    ) -> None:
         """
         Raises a RuntimeError if the given device does not support this codegen or required
         prerequisites are not available with a useful description for the user. If None is given,

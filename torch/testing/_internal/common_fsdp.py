@@ -6,6 +6,7 @@ import os
 import re
 import sys
 import time
+import warnings
 from abc import ABC, abstractmethod
 from contextlib import nullcontext
 from copy import deepcopy
@@ -71,7 +72,6 @@ from torch.testing._internal.common_utils import (
     TEST_HPU,
 )
 from torch.testing._internal.inductor_utils import has_inductor_available
-import warnings
 
 
 DEVICE_COUNT = 4  # default
