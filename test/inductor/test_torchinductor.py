@@ -13219,6 +13219,8 @@ if HAS_GPU and not TEST_WITH_ASAN:
             _, code = run_and_get_code(wrapper, inp, weight)
             self.assertTrue("in_out_ptr" in code[1])
 
+        # TODO: Enable this case after pad_mm is enabled on XPU.
+        @expectedFailureXPU
         @torch._functorch.config.patch("donated_buffer", True)
         @torch._inductor.config.patch("force_shape_pad", True)
         def test_donated_buffer_inplace_gpt(self):
@@ -13378,15 +13380,15 @@ if HAS_GPU and not TEST_WITH_ASAN:
                     return loss
 
             B, T = 1, 1024
-            ctx = torch.amp.autocast(device_type="cuda", dtype=torch.bfloat16)
+            ctx = torch.amp.autocast(device_type=GPU_TYPE, dtype=torch.bfloat16)
 
             model = GPT(GPTConfig())
             model.train()
-            model.to("cuda")
+            model.to(GPU_TYPE)
             model = torch.compile(model)
 
-            x = torch.randint(0, 50257, (B, T), dtype=torch.int64, device="cuda")
-            y = torch.randint(0, 50257, (B, T), dtype=torch.int64, device="cuda")
+            x = torch.randint(0, 50257, (B, T), dtype=torch.int64, device=GPU_TYPE)
+            y = torch.randint(0, 50257, (B, T), dtype=torch.int64, device=GPU_TYPE)
 
             def wrapper(x, y):
                 with ctx:
