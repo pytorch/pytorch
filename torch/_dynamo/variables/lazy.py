@@ -149,9 +149,11 @@ class LazyVariableTracker(VariableTracker):
     def is_hashable(self) -> bool:
         # Checks that the underlying value is hashable without realizing the VT.
         def _helper(value: Any) -> bool:
+            # TODO: Add support for more types
+            if isinstance(value, torch.Tensor):
+                return False
             return (
-                isinstance(value, torch.Tensor)
-                or value in vars(builtins).values()
+                value in vars(builtins).values()
                 or issubclass(type(value), type)
                 or is_function_or_wrapper(value)
             )
