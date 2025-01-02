@@ -142,10 +142,10 @@ def check_rocm():
     return rocm_ver if torch.version.hip else "None"
 
 
-def check_dynamo(backend: str, device_type: str, err_msg: str) -> None:
+def check_dynamo(backend: str, device: str, err_msg: str) -> None:
     import torch
 
-    if device_type == "cuda" and not torch.cuda.is_available():
+    if device == "cuda" and not torch.cuda.is_available():
         print(f"CUDA not available -- skipping CUDA check on {backend} backend\n")
         return
 
@@ -159,19 +159,17 @@ def check_dynamo(backend: str, device_type: str, err_msg: str) -> None:
         # This is decorated with lru_cache so safe to use multiple times
         init_backend_registration()
 
-        scheduling = get_scheduling_for_device(device_type)
+        scheduling = get_scheduling_for_device(device)
         if scheduling is None:
             print(
-                f"WARNING: No Inductor scheduling factory registered for {device_type}. Skipping check."
+                f"WARNING: No Inductor scheduling factory registered for {device}. Skipping check."
             )
             return
 
         try:
-            scheduling(None).raise_if_unavailable(device_type)
+            scheduling(None).raise_if_unavailable(device)
         except RuntimeError as e:
-            print(
-                f"WARNING: Inductor not available for {device_type}: {e}. Skipping check."
-            )
+            print(f"WARNING: Inductor not available for {device}: {e}. Skipping check.")
             return
 
         dynamo.reset()
@@ -188,7 +186,7 @@ def check_dynamo(backend: str, device_type: str, err_msg: str) -> None:
         opt_mod = dynamo.optimize(backend, nopython=True)(mod)
 
         for f in (fn, opt_mod):
-            x = torch.randn(10, 10).to(device_type)
+            x = torch.randn(10, 10).to(device)
             x.requires_grad = True
             y = f(x)
             torch.testing.assert_close(y, x + x)
