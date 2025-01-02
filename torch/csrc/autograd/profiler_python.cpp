@@ -990,13 +990,17 @@ class PostProcess {
 
     ska::flat_hash_map<size_t, stack_t> stacks;
     auto& state = get_state<E>();
+    // We already own the GIL at this point
     for (const auto& enter : enters) {
       auto fields_it = state.fields_.find(enter.key_);
       if (fields_it != state.fields_.end()) {
         while (!state.exits_.empty() &&
                state.exits_.top().t_ < enter.enter_t_) {
           auto& exit = state.exits_.top();
-          pop(stacks[exit.python_tid_], exit.t_);
+          auto& tstack = stacks[exit.python_tid_];
+          if (!tstack.empty()) {
+            pop(tstack, exit.t_);
+          }
           state.exits_.pop();
         }
         out.push_back(Result::create(
