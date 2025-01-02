@@ -850,7 +850,7 @@ def raise_if_inductor_unavailable(device: torch.device | str | None = None) -> N
 
 def is_inductor_supported(device: torch.device | str | None = None) -> bool:
     try:
-        raise_if_inductor_unavailable()
+        raise_if_inductor_unavailable(device)
         return True
     except Exception:
         return False
