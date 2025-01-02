@@ -260,8 +260,9 @@ NAdam.__doc__ = (
             numerical stability (default: 1e-8)
         weight_decay (float, optional): weight decay (L2 penalty) (default: 0)
         momentum_decay (float, optional): momentum momentum_decay (default: 4e-3)
-        decoupled_weight_decay (bool, optional): whether to use decoupled weight
-            decay as in AdamW to obtain NAdamW (default: False)
+        decoupled_weight_decay (bool, optional): whether to decouple the weight
+            decay from the gradient-based update as in AdamW to obtain NAdamW.
+            (default: False)
         {_foreach_doc}
         {_maximize_doc}
         {_capturable_doc}
