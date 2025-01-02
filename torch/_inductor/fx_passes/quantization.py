@@ -2986,7 +2986,7 @@ def _register_smooth_quant_int_mm_pattern():
                 )
 
 
-def _register_qlnear_post_op_fusion_pass(
+def _register_qlinear_post_op_fusion_pass(
     pattern,
     pass_number,
     computation_op,
@@ -3110,7 +3110,7 @@ def _register_qlinear_unary_fusion():
             }
 
             for unary_attr, patterns in linear_unary_replace_patterns.items():
-                _register_qlnear_post_op_fusion_pass(
+                _register_qlinear_post_op_fusion_pass(
                     patterns,
                     3,  # pass_number
                     computation_op,
@@ -3149,7 +3149,7 @@ def _register_qlinear_unary_fusion():
             }
 
             for unary_attr, patterns in linear_unary_replace_float_out_patterns.items():
-                _register_qlnear_post_op_fusion_pass(
+                _register_qlinear_post_op_fusion_pass(
                     patterns,
                     4,  # pass_number
                     computation_op,
