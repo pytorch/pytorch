@@ -39,11 +39,8 @@ class RAIIPyObject {
 #include <torch/csrc/inductor/aoti_runtime/utils.h>
 using namespace torch::aot_inductor;
 
-#include <torch/csrc/inductor/aoti_runtime/arrayref_tensor.h>
-#include <torch/csrc/inductor/aoti_runtime/scalar_to_tensor.h>
-#include <torch/csrc/inductor/aoti_runtime/thread_local.h>
-
 #include <c10/util/generic_math.h>
+#include <torch/csrc/inductor/aoti_runtime/scalar_to_tensor.h>
 using half = at::Half;
 using bfloat16 = at::BFloat16;
 
