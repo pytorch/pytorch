@@ -9,8 +9,8 @@ from torch.utils._sympy.printers import ExprPrinter as ExprPrinter_
 
 from ..ops_handler import StoreMode
 from ..scheduler import SchedulerNode
-from ..utils import get_kernel_metadata
-from ..virtualized import V
+from ..utils import get_bounds_index_expr, get_kernel_metadata
+from ..virtualized import ops, V
 from .common import CSEVariable, DeferredLine, IndentedBuffer, OpOverrides
 from .simd import IterationRangesEntry, SIMDKernel, SIMDScheduling
 
@@ -50,6 +50,9 @@ class MetalExprPrinter(ExprPrinter_):
         return f"({x}) % ({mod})"
 
 
+mexpr = MetalExprPrinter().doprint
+
+
 class MetalOverrides(OpOverrides):
     @staticmethod
     def to_dtype(
@@ -59,6 +62,19 @@ class MetalOverrides(OpOverrides):
         use_compute_types: bool = True,
     ) -> str:
         return f"static_cast<{DTYPE_TO_METAL[dtype]}>({x})"
+
+    @staticmethod
+    def index_expr(expr: sympy.Expr, dtype: torch.dtype) -> str:
+        idx_str = mexpr(V.kernel.rename_indexing(expr))
+        var = V.kernel.cse.generate(
+            V.kernel.compute, idx_str, bounds=get_bounds_index_expr(expr)
+        )
+        return ops.to_dtype(var, dtype)
+
+    @staticmethod
+    def masked(mask: CSEVariable, body: sympy.Expr, other: CSEVariable) -> str:
+        # TODO: Add a proper implementation considering there are no lambdas in Metal
+        return f"{mask} ? {body()} : {other}"
 
     @staticmethod
     def where(a: CSEVariable, b: CSEVariable, c: CSEVariable) -> str:
@@ -112,6 +128,13 @@ class MetalOverrides(OpOverrides):
     @staticmethod
     def sqrt(x: CSEVariable) -> str:
         return f"metal::sqrt({x})"
+
+    @staticmethod
+    def floordiv(a: CSEVariable, b: CSEVariable) -> str:
+        # a and b are integer type
+        quot = f"{a} / {b}"
+        rem = f"{a} % {b}"
+        return f"(({a} < 0) != ({b} < 0) ? ({rem} != 0 ? {quot} - 1 : {quot}) : {quot})"
 
 
 class MetalKernel(SIMDKernel):
