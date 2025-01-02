@@ -68,11 +68,11 @@ class Kumaraswamy(TransformedDistribution):
         return super().expand(batch_shape, _instance=new)
 
     @property
-    def mean(self):
+    def mean(self) -> Tensor:
         return _moments(self.concentration1, self.concentration0, 1)
 
     @property
-    def mode(self):
+    def mode(self) -> Tensor:
         # Evaluate in log-space for numerical stability.
         log_mode = (
             self.concentration0.reciprocal() * (-self.concentration0).log1p()
@@ -82,7 +82,7 @@ class Kumaraswamy(TransformedDistribution):
         return log_mode.exp()
 
     @property
-    def variance(self):
+    def variance(self) -> Tensor:
         return _moments(self.concentration1, self.concentration0, 2) - torch.pow(
             self.mean, 2
         )

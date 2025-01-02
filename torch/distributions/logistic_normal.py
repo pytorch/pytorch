@@ -49,9 +49,9 @@ class LogisticNormal(TransformedDistribution):
         return super().expand(batch_shape, _instance=new)
 
     @property
-    def loc(self):
+    def loc(self) -> Tensor:
         return self.base_dist.base_dist.loc
 
     @property
-    def scale(self):
+    def scale(self) -> Tensor:
         return self.base_dist.base_dist.scale

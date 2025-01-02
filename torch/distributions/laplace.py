@@ -32,19 +32,19 @@ class Laplace(Distribution):
     has_rsample = True
 
     @property
-    def mean(self):
+    def mean(self) -> Tensor:
         return self.loc
 
     @property
-    def mode(self):
+    def mode(self) -> Tensor:
         return self.loc
 
     @property
-    def variance(self):
+    def variance(self) -> Tensor:
         return 2 * self.scale.pow(2)
 
     @property
-    def stddev(self):
+    def stddev(self) -> Tensor:
         return (2**0.5) * self.scale
 
     def __init__(self, loc, scale, validate_args=None):

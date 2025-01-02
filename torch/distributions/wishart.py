@@ -203,17 +203,17 @@ class Wishart(ExponentialFamily):
         )
 
     @property
-    def mean(self):
+    def mean(self) -> Tensor:
         return self.df.view(self._batch_shape + (1, 1)) * self.covariance_matrix
 
     @property
-    def mode(self):
+    def mode(self) -> Tensor:
         factor = self.df - self.covariance_matrix.shape[-1] - 1
         factor[factor <= 0] = nan
         return factor.view(self._batch_shape + (1, 1)) * self.covariance_matrix
 
     @property
-    def variance(self):
+    def variance(self) -> Tensor:
         V = self.covariance_matrix  # has shape (batch_shape x event_shape)
         diag_V = V.diagonal(dim1=-2, dim2=-1)
         return self.df.view(self._batch_shape + (1, 1)) * (
@@ -327,7 +327,7 @@ class Wishart(ExponentialFamily):
         )
 
     @property
-    def _natural_params(self):
+    def _natural_params(self) -> tuple[Tensor, Tensor]:
         nu = self.df  # has shape (batch_shape)
         p = self._event_shape[-1]  # has singleton shape
         return -self.precision_matrix / 2, (nu - p - 1) / 2

@@ -37,19 +37,19 @@ class Uniform(Distribution):
     has_rsample = True
 
     @property
-    def mean(self):
+    def mean(self) -> Tensor:
         return (self.high + self.low) / 2
 
     @property
-    def mode(self):
+    def mode(self) -> Tensor:
         return nan * self.high
 
     @property
-    def stddev(self):
+    def stddev(self) -> Tensor:
         return (self.high - self.low) / 12**0.5
 
     @property
-    def variance(self):
+    def variance(self) -> Tensor:
         return (self.high - self.low).pow(2) / 12
 
     def __init__(self, low, high, validate_args=None):

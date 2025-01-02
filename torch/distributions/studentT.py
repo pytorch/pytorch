@@ -39,17 +39,17 @@ class StudentT(Distribution):
     has_rsample = True
 
     @property
-    def mean(self):
+    def mean(self) -> Tensor:
         m = self.loc.clone(memory_format=torch.contiguous_format)
         m[self.df <= 1] = nan
         return m
 
     @property
-    def mode(self):
+    def mode(self) -> Tensor:
         return self.loc
 
     @property
-    def variance(self):
+    def variance(self) -> Tensor:
         m = self.df.clone(memory_format=torch.contiguous_format)
         m[self.df > 2] = (
             self.scale[self.df > 2].pow(2)

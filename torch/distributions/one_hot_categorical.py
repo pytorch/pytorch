@@ -63,33 +63,33 @@ class OneHotCategorical(Distribution):
         return self._categorical._new(*args, **kwargs)
 
     @property
-    def _param(self):
+    def _param(self) -> Tensor:
         return self._categorical._param
 
     @property
-    def probs(self):
+    def probs(self) -> Tensor:
         return self._categorical.probs
 
     @property
-    def logits(self):
+    def logits(self) -> Tensor:
         return self._categorical.logits
 
     @property
-    def mean(self):
+    def mean(self) -> Tensor:
         return self._categorical.probs
 
     @property
-    def mode(self):
+    def mode(self) -> Tensor:
         probs = self._categorical.probs
         mode = probs.argmax(dim=-1)
         return torch.nn.functional.one_hot(mode, num_classes=probs.shape[-1]).to(probs)
 
     @property
-    def variance(self):
+    def variance(self) -> Tensor:
         return self._categorical.probs * (1 - self._categorical.probs)
 
     @property
-    def param_shape(self):
+    def param_shape(self) -> torch.Size:
         return self._categorical.param_shape
 
     def sample(self, sample_shape=torch.Size()):

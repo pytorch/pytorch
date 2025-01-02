@@ -225,15 +225,15 @@ class MultivariateNormal(Distribution):
         )
 
     @property
-    def mean(self):
+    def mean(self) -> Tensor:
         return self.loc
 
     @property
-    def mode(self):
+    def mode(self) -> Tensor:
         return self.loc
 
     @property
-    def variance(self):
+    def variance(self) -> Tensor:
         return (
             self._unbroadcasted_scale_tril.pow(2)
             .sum(-1)

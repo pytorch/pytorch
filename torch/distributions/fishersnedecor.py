@@ -56,19 +56,19 @@ class FisherSnedecor(Distribution):
         return new
 
     @property
-    def mean(self):
+    def mean(self) -> Tensor:
         df2 = self.df2.clone(memory_format=torch.contiguous_format)
         df2[df2 <= 2] = nan
         return df2 / (df2 - 2)
 
     @property
-    def mode(self):
+    def mode(self) -> Tensor:
         mode = (self.df1 - 2) / self.df1 * self.df2 / (self.df2 + 2)
         mode[self.df1 <= 2] = nan
         return mode
 
     @property
-    def variance(self):
+    def variance(self) -> Tensor:
         df2 = self.df2.clone(memory_format=torch.contiguous_format)
         df2[df2 <= 4] = nan
         return (

@@ -52,11 +52,11 @@ class Multinomial(Distribution):
     total_count: int
 
     @property
-    def mean(self):
+    def mean(self) -> Tensor:
         return self.probs * self.total_count
 
     @property
-    def variance(self):
+    def variance(self) -> Tensor:
         return self.total_count * self.probs * (1 - self.probs)
 
     def __init__(self, total_count=1, probs=None, logits=None, validate_args=None):
@@ -88,15 +88,15 @@ class Multinomial(Distribution):
         return constraints.multinomial(self.total_count)
 
     @property
-    def logits(self):
+    def logits(self) -> Tensor:
         return self._categorical.logits
 
     @property
-    def probs(self):
+    def probs(self) -> Tensor:
         return self._categorical.probs
 
     @property
-    def param_shape(self):
+    def param_shape(self) -> torch.Size:
         return self._categorical.param_shape
 
     def sample(self, sample_shape=torch.Size()):

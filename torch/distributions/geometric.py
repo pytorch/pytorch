@@ -85,15 +85,15 @@ class Geometric(Distribution):
         return new
 
     @property
-    def mean(self):
+    def mean(self) -> Tensor:
         return 1.0 / self.probs - 1.0
 
     @property
-    def mode(self):
+    def mode(self) -> Tensor:
         return torch.zeros_like(self.probs)
 
     @property
-    def variance(self):
+    def variance(self) -> Tensor:
         return (1.0 / self.probs - 1.0) / self.probs
 
     @lazy_property

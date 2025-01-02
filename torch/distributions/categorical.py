@@ -103,11 +103,11 @@ class Categorical(Distribution):
         return logits_to_probs(self.logits)
 
     @property
-    def param_shape(self):
+    def param_shape(self) -> torch.Size:
         return self._param.size()
 
     @property
-    def mean(self):
+    def mean(self) -> Tensor:
         return torch.full(
             self._extended_shape(),
             nan,
@@ -116,11 +116,11 @@ class Categorical(Distribution):
         )
 
     @property
-    def mode(self):
+    def mode(self) -> Tensor:
         return self.probs.argmax(dim=-1)
 
     @property
-    def variance(self):
+    def variance(self) -> Tensor:
         return torch.full(
             self._extended_shape(),
             nan,

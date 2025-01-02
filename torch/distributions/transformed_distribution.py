@@ -128,7 +128,7 @@ class TransformedDistribution(Distribution):
         return support
 
     @property
-    def has_rsample(self):
+    def has_rsample(self) -> bool:  # type: ignore[override]
         return self.base_dist.has_rsample
 
     def sample(self, sample_shape=torch.Size()):

@@ -76,17 +76,17 @@ class Bernoulli(ExponentialFamily):
         return self._param.new(*args, **kwargs)
 
     @property
-    def mean(self):
+    def mean(self) -> Tensor:
         return self.probs
 
     @property
-    def mode(self):
+    def mode(self) -> Tensor:
         mode = (self.probs >= 0.5).to(self.probs)
         mode[self.probs == 0.5] = nan
         return mode
 
     @property
-    def variance(self):
+    def variance(self) -> Tensor:
         return self.probs * (1 - self.probs)
 
     @lazy_property
@@ -98,7 +98,7 @@ class Bernoulli(ExponentialFamily):
         return logits_to_probs(self.logits, is_binary=True)
 
     @property
-    def param_shape(self):
+    def param_shape(self) -> torch.Size:
         return self._param.size()
 
     def sample(self, sample_shape=torch.Size()):
@@ -125,7 +125,7 @@ class Bernoulli(ExponentialFamily):
         return values
 
     @property
-    def _natural_params(self):
+    def _natural_params(self) -> tuple[Tensor]:
         return (torch.logit(self.probs),)
 
     def _log_normalizer(self, x):

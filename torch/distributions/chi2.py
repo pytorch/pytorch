@@ -32,5 +32,5 @@ class Chi2(Gamma):
         return super().expand(batch_shape, new)
 
     @property
-    def df(self):
+    def df(self) -> Tensor:
         return self.concentration * 2

@@ -4,7 +4,7 @@ import math
 import numbers
 import operator
 import weakref
-from typing import List
+from typing import Optional
 
 import torch
 import torch.nn.functional as F
@@ -95,7 +95,7 @@ class Transform:
 
     def __init__(self, cache_size=0):
         self._cache_size = cache_size
-        self._inv = None
+        self._inv: Optional[Transform] = None
         if cache_size == 0:
             pass  # default behavior
         elif cache_size == 1:
@@ -110,13 +110,13 @@ class Transform:
         return state
 
     @property
-    def event_dim(self):
+    def event_dim(self) -> int:
         if self.domain.event_dim == self.codomain.event_dim:
             return self.domain.event_dim
         raise ValueError("Please use either .domain.event_dim or .codomain.event_dim")
 
     @property
-    def inv(self):
+    def inv(self) -> "Transform":
         """
         Returns the inverse :class:`Transform` of this transform.
         This should satisfy ``t.inv.inv is t``.
@@ -130,7 +130,7 @@ class Transform:
         return inv
 
     @property
-    def sign(self):
+    def sign(self) -> int:
         """
         Returns the sign of the determinant of the Jacobian, if applicable.
         In general this only makes sense for bijective transforms.
@@ -234,17 +234,17 @@ class _InverseTransform(Transform):
         return self._inv.domain
 
     @property
-    def bijective(self):
+    def bijective(self) -> bool:  # type: ignore[override]
         assert self._inv is not None
         return self._inv.bijective
 
     @property
-    def sign(self):
+    def sign(self) -> int:
         assert self._inv is not None
         return self._inv.sign
 
     @property
-    def inv(self):
+    def inv(self) -> Transform:
         return self._inv
 
     def with_cache(self, cache_size=1):
@@ -286,7 +286,7 @@ class ComposeTransform(Transform):
             the latest single value is cached. Only 0 and 1 are supported.
     """
 
-    def __init__(self, parts: List[Transform], cache_size=0):
+    def __init__(self, parts: list[Transform], cache_size=0):
         if cache_size:
             parts = [part.with_cache(cache_size) for part in parts]
         super().__init__(cache_size=cache_size)
@@ -332,14 +332,14 @@ class ComposeTransform(Transform):
         return all(p.bijective for p in self.parts)
 
     @lazy_property
-    def sign(self) -> int:
+    def sign(self) -> int:  # type: ignore[override]
         sign = 1
         for p in self.parts:
             sign = sign * p.sign
         return sign
 
     @property
-    def inv(self):
+    def inv(self) -> Transform:
         inv = None
         if self._inv is not None:
             inv = self._inv()
@@ -439,11 +439,11 @@ class IndependentTransform(Transform):
         )
 
     @property
-    def bijective(self):
+    def bijective(self) -> bool:  # type: ignore[override]
         return self.base_transform.bijective
 
     @property
-    def sign(self):
+    def sign(self) -> int:  # type: ignore[override]
         return self.base_transform.sign
 
     def _call(self, x):
@@ -578,7 +578,7 @@ class PowerTransform(Transform):
         return PowerTransform(self.exponent, cache_size=cache_size)
 
     @lazy_property
-    def sign(self) -> Tensor:
+    def sign(self) -> int:  # type: ignore[override]
         return self.exponent.sign()
 
     def __eq__(self, other):
@@ -727,7 +727,7 @@ class AffineTransform(Transform):
         self._event_dim = event_dim
 
     @property
-    def event_dim(self):
+    def event_dim(self) -> int:
         return self._event_dim
 
     @constraints.dependent_property(is_discrete=False)
@@ -774,7 +774,7 @@ class AffineTransform(Transform):
         return True
 
     @property
-    def sign(self):
+    def sign(self) -> int:
         if isinstance(self.scale, numbers.Real):
             return 1 if float(self.scale) > 0 else -1 if float(self.scale) < 0 else 0
         return self.scale.sign()
@@ -1039,7 +1039,7 @@ class CatTransform(Transform):
        y = t(x)
     """
 
-    transforms: List[Transform]
+    transforms: list[Transform]
 
     def __init__(self, tseq, dim=0, lengths=None, cache_size=0):
         assert all(isinstance(t, Transform) for t in tseq)
@@ -1054,11 +1054,11 @@ class CatTransform(Transform):
         self.dim = dim
 
     @lazy_property
-    def event_dim(self) -> Tensor:
+    def event_dim(self) -> int:  # type: ignore[override]
         return max(t.event_dim for t in self.transforms)
 
     @lazy_property
-    def length(self) -> Tensor:
+    def length(self) -> int:
         return sum(self.lengths)
 
     def with_cache(self, cache_size=1):
@@ -1114,7 +1114,7 @@ class CatTransform(Transform):
             return sum(logdetjacs)
 
     @property
-    def bijective(self):
+    def bijective(self) -> bool:  # type: ignore[override]
         return all(t.bijective for t in self.transforms)
 
     @constraints.dependent_property
@@ -1143,7 +1143,7 @@ class StackTransform(Transform):
        y = t(x)
     """
 
-    transforms: List[Transform]
+    transforms: list[Transform]
 
     def __init__(self, tseq, dim=0, cache_size=0):
         assert all(isinstance(t, Transform) for t in tseq)
@@ -1190,7 +1190,7 @@ class StackTransform(Transform):
         return torch.stack(logdetjacs, dim=self.dim)
 
     @property
-    def bijective(self):
+    def bijective(self) -> bool:  # type: ignore[override]
         return all(t.bijective for t in self.transforms)
 
     @constraints.dependent_property
@@ -1230,7 +1230,7 @@ class CumulativeDistributionTransform(Transform):
         self.distribution = distribution
 
     @property
-    def domain(self):
+    def domain(self) -> constraints.Constraint:  # type: ignore[override]
         return self.distribution.support
 
     def _call(self, x):

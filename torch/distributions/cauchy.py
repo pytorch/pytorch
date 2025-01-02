@@ -53,17 +53,17 @@ class Cauchy(Distribution):
         return new
 
     @property
-    def mean(self):
+    def mean(self) -> Tensor:
         return torch.full(
             self._extended_shape(), nan, dtype=self.loc.dtype, device=self.loc.device
         )
 
     @property
-    def mode(self):
+    def mode(self) -> Tensor:
         return self.loc
 
     @property
-    def variance(self):
+    def variance(self) -> Tensor:
         return torch.full(
             self._extended_shape(), inf, dtype=self.loc.dtype, device=self.loc.device
         )

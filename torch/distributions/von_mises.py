@@ -188,14 +188,14 @@ class VonMises(Distribution):
             return type(self)(loc, concentration, validate_args=validate_args)
 
     @property
-    def mean(self):
+    def mean(self) -> Tensor:
         """
         The provided mean is the circular one.
         """
         return self.loc
 
     @property
-    def mode(self):
+    def mode(self) -> Tensor:
         return self.loc
 
     @lazy_property

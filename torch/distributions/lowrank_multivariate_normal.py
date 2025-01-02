@@ -144,11 +144,11 @@ class LowRankMultivariateNormal(Distribution):
         return new
 
     @property
-    def mean(self):
+    def mean(self) -> Tensor:
         return self.loc
 
     @property
-    def mode(self):
+    def mode(self) -> Tensor:
         return self.loc
 
     @lazy_property

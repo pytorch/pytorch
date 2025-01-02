@@ -87,11 +87,11 @@ class Dirichlet(ExponentialFamily):
         )
 
     @property
-    def mean(self):
+    def mean(self) -> Tensor:
         return self.concentration / self.concentration.sum(-1, True)
 
     @property
-    def mode(self):
+    def mode(self) -> Tensor:
         concentrationm1 = (self.concentration - 1).clamp(min=0.0)
         mode = concentrationm1 / concentrationm1.sum(-1, True)
         mask = (self.concentration < 1).all(axis=-1)
@@ -101,7 +101,7 @@ class Dirichlet(ExponentialFamily):
         return mode
 
     @property
-    def variance(self):
+    def variance(self) -> Tensor:
         con0 = self.concentration.sum(-1, True)
         return (
             self.concentration
@@ -120,7 +120,7 @@ class Dirichlet(ExponentialFamily):
         )
 
     @property
-    def _natural_params(self):
+    def _natural_params(self) -> tuple[Tensor]:
         return (self.concentration,)
 
     def _log_normalizer(self, x):
