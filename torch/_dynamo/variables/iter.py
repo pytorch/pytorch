@@ -191,10 +191,6 @@ class ItertoolsVariable(VariableTracker):
             return variables.CycleIteratorVariable(
                 *args, mutation_type=ValueMutationNew()
             )
-        elif self.value is itertools.dropwhile:
-            return variables.UserFunctionVariable(polyfills.dropwhile).call_function(
-                tx, args, kwargs
-            )
         elif self.value is itertools.zip_longest:
             return variables.UserFunctionVariable(polyfills.zip_longest).call_function(
                 tx, args, kwargs
