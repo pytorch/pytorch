@@ -1753,7 +1753,7 @@ class AlgorithmSelectorCache(PersistentCache):
             initial_stderr = sys.stderr
 
             def precompile_with_captured_stdout(choice):
-                with restore_stdout_stderr(initial_stdout, initial_stderr):
+                with restore_stdout_stderr():
                     choice.precompile()
 
             def on_complete(future):
@@ -1786,7 +1786,7 @@ class AlgorithmSelectorCache(PersistentCache):
                     futures[future] = c
 
             @functools.lru_cache(None)
-            @restore_stdout_stderr(initial_stdout, initial_stderr)
+            @restore_stdout_stderr()
             def wait_on_futures():
                 counters["inductor"]["select_algorithm_precompile"] += 1
                 for future in as_completed(
