@@ -1597,9 +1597,9 @@ def _export_to_aten_ir_make_fx(
                     torch.ops.profiler._record_function_enter.default,
                     torch.ops.profiler._record_function_enter_new.default,
                     torch.ops.profiler._record_function_exit._RecordFunction,
-                    # In theory, we could fix this dead detach and getattr nodes 
+                    # In theory, we could fix this dead detach and getattr nodes
                     # from subclass tensors if we carefully rewrite track_tensor_tree
-                    # in a way that it doesn't do any tensor methods. 
+                    # in a way that it doesn't do any tensor methods.
                     torch.ops.aten.detach.default,
                     builtins.getattr,
                 ):

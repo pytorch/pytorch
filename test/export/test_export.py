@@ -1862,7 +1862,7 @@ graph():
 
             def forward(self, x):
                 res = x + 2 * self.p1 + self.p2
-                return res.elem.elem + self.p2.get_complicated_metadata()[1]
+                return res.elem.elem + self.p2.get_complicated_metadata().foo
 
         m = Foo()
         ref_x = torch.randn(3, 4)
