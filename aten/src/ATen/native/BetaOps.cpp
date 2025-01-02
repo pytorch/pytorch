@@ -195,54 +195,6 @@ TORCH_IMPL_FUNC(special_betaln_out) (const Tensor& a, const Tensor& b, const Ten
   result.copy_(result_tmp);
 }
 
-Tensor special_betaln(const Tensor& a, const Scalar& b) {
-  return at::special_betaln(a, wrapped_scalar_tensor(b, a.device()));
-}
-
-Tensor special_betaln(const Scalar& a, const Tensor& b) {
-  return at::special_betaln(wrapped_scalar_tensor(a, b.device()), b);
-}
-
-Tensor& special_betaln_out(const Tensor& a, const Scalar& b, Tensor& result) {
-  return at::special_betaln_out(result, a, wrapped_scalar_tensor(b, a.device()));
-}
-
-Tensor& special_betaln_out(const Scalar& a, const Tensor& b, Tensor& result) {
-  return at::special_betaln_out(result, wrapped_scalar_tensor(a, b.device()), b);
-}
-
-Tensor special_betainc(const Tensor& self, const Scalar& a, const Scalar& b) {
-  return at::special_betainc(self, wrapped_scalar_tensor(a), wrapped_scalar_tensor(b));
-}
-
-Tensor special_betainc(const Tensor& self, const Scalar& a, const Tensor& b) {
-  return at::special_betainc(self, wrapped_scalar_tensor(a), b);
-}
-
-Tensor special_betainc(const Tensor& self, const Tensor& a, const Scalar& b) {
-  return at::special_betainc(self, a, wrapped_scalar_tensor(b));
-}
-
-Tensor special_betainc(const Scalar& self, const Tensor& a, const Tensor& b) {
-  return at::special_betainc(wrapped_scalar_tensor(self), a, b);
-}
-
-Tensor& special_betainc_out(const Tensor& self, const Scalar& a, const Scalar& b, Tensor& result) {
-  return at::special_betainc_out(result, self, wrapped_scalar_tensor(a), wrapped_scalar_tensor(b));
-}
-
-Tensor& special_betainc_out(const Tensor& self, const Scalar& a, const Tensor& b, Tensor& result) {
-  return at::special_betainc_out(result, self, wrapped_scalar_tensor(a), b);
-}
-
-Tensor& special_betainc_out(const Tensor& self, const Tensor& a, const Scalar& b, Tensor& result) {
-  return at::special_betainc_out(result, self, a, wrapped_scalar_tensor(b));
-}
-
-Tensor& special_betainc_out(const Scalar& self, const Tensor& a, const Tensor& b, Tensor& result) {
-  return at::special_betainc_out(result, wrapped_scalar_tensor(self), a, b);
-}
-
 static Tensor _betaincinv_initial_approx(const Tensor& y, const Tensor& a, const Tensor& b, at::ScalarType& dtype) {
     /* Computes an initial approximation for `betaincinv(y, a, b)`. */
   const auto&& [eps, tiny, maxexp] = AT_DISPATCH_FLOATING_TYPES_AND2(
@@ -483,38 +435,6 @@ TORCH_IMPL_FUNC(special_betaincinv_out) (const Tensor& self, const Tensor& a, co
   const Tensor&& result_tmp = _betaincinv_computation(self, a, b);
   at::native::resize_output(result, result_tmp.sizes());
   result.copy_(result_tmp);
-}
-
-Tensor special_betaincinv(const Tensor& self, const Scalar& a, const Scalar& b) {
-  return at::special_betaincinv(self, wrapped_scalar_tensor(a, self.device()), wrapped_scalar_tensor(b, self.device()));
-}
-
-Tensor special_betaincinv(const Tensor& self, const Scalar& a, const Tensor& b) {
-  return at::special_betaincinv(self, wrapped_scalar_tensor(a, self.device()), b);
-}
-
-Tensor special_betaincinv(const Tensor& self, const Tensor& a, const Scalar& b) {
-  return at::special_betaincinv(self, a, wrapped_scalar_tensor(b, self.device()));
-}
-
-Tensor special_betaincinv(const Scalar& self, const Tensor& a, const Tensor& b) {
-  return at::special_betaincinv(wrapped_scalar_tensor(self, a.device()), a, b);
-}
-
-Tensor& special_betaincinv_out(const Tensor& self, const Scalar& a, const Scalar& b, Tensor& result) {
-  return at::special_betaincinv_out(result, self, wrapped_scalar_tensor(a, self.device()), wrapped_scalar_tensor(b, self.device()));
-}
-
-Tensor& special_betaincinv_out(const Tensor& self, const Scalar& a, const Tensor& b, Tensor& result) {
-  return at::special_betaincinv_out(result, self, wrapped_scalar_tensor(a, self.device()), b);
-}
-
-Tensor& special_betaincinv_out(const Tensor& self, const Tensor& a, const Scalar& b, Tensor& result) {
-  return at::special_betaincinv_out(result, self, a, wrapped_scalar_tensor(b, self.device()));
-}
-
-Tensor& special_betaincinv_out(const Scalar& self, const Tensor& a, const Tensor& b, Tensor& result) {
-  return at::special_betaincinv_out(result, wrapped_scalar_tensor(self, a.device()), a, b);
 }
 
 } // namespace at::native
