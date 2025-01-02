@@ -1,11 +1,18 @@
+# /// script
+# requires-python = ">=3.9"
+# dependencies = [
+#     "boto3",
+# ]
+# ///
 import argparse
 import os
 import shutil
-import subprocess
 import zipfile
 from functools import cache
 from pathlib import Path
 from typing import Any
+
+import boto3
 
 
 def parse_args() -> argparse.Namespace:
@@ -39,12 +46,6 @@ def parse_args() -> argparse.Namespace:
 
 @cache
 def get_s3_client() -> Any:
-    try:
-        import boto3
-    except ImportError:
-        subprocess.run(["pip", "install", "boto3"])
-        import boto3
-
     return boto3.client("s3")
 
 

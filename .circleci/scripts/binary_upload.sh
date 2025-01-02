@@ -85,7 +85,7 @@ s3_upload() {
           if [[ "${DRY_RUN}" = "disabled" ]]; then
             dry_run_arg=""
           fi
-          python scripts/release/upload_metadata_file.py \
+          uv run scripts/release/upload_metadata_file.py \
             --package "${pkg}" \
             --bucket "${UPLOAD_BUCKET}" \
             --key-prefix "${s3_key_prefix}" \
@@ -98,7 +98,7 @@ s3_upload() {
 
 # Install dependencies (should be a no-op if previously installed)
 conda install -yq anaconda-client
-pip install -q awscli
+pip install -q awscli uv
 
 case "${PACKAGE_TYPE}" in
   conda)
