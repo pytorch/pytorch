@@ -1,5 +1,5 @@
 # Owner(s): ["module: nestedtensor"]
-
+# ruff: noqa: F841
 import ast
 import io
 import itertools
@@ -68,6 +68,7 @@ from torch.testing._internal.opinfo.core import (
     BinaryUfuncInfo,
     ReductionOpInfo,
     sample_skips_and_xfails,
+    SkipRule,
     XFailRule,
 )
 from torch.testing._internal.opinfo.definitions.nested import njt_op_db
@@ -8149,7 +8150,186 @@ FORWARD_SKIPS_AND_XFAILS = [
 ]
 
 BACKWARD_SKIPS_AND_XFAILS = [
+    # segfaults, so skip. It's trying to use the NST logic for NJT
+    SkipRule(
+        op_match_fn=lambda device, op: op.full_name == "split_with_sizes",
+        name="split_with_sizes_backward_segfault",
+    ),
     *FORWARD_SKIPS_AND_XFAILS,
+    # Backwards is generally broken for non-contiguous NJTs with holes. Rather than
+    # determine the exceptions in detail, just skip for now. Fix is to ensure
+    # that summing over gradients during backwards after broadcasting takes into
+    # account holes / lengths.
+    SkipRule(
+        op_match_fn=lambda device, op: (
+            isinstance(op, BinaryUfuncInfo)
+            or op.full_name in {"mean", "where", "unsqueeze"}
+        ),
+        sample_match_fn=lambda device, sample: ("noncontig_holes" in sample.name),
+        name="broken_noncontig_holes_backward",
+    ),
+    # mean(): need to examine backwards formula
+    XFailRule(
+        error_type=RuntimeError,
+        error_msg="SymIntArrayRef expected to contain only concrete integers",
+        op_match_fn=lambda device, op: (op.full_name in {"mean"}),
+        sample_match_fn=lambda device, sample: (
+            "full reduction" not in sample.name
+            and "normal dim reduction" not in sample.name
+        ),
+        name="broken_mean_backward",
+    ),
+    # RuntimeError: expand(): cannot expand shape (3, 3, 1, j44) -> [3, 3, 7, j44]
+    # with noncontig transposed inputs to mean()
+    XFailRule(
+        error_type=RuntimeError,
+        error_msg="cannot expand shape",
+        op_match_fn=lambda device, op: (op.full_name == "mean"),
+        sample_match_fn=lambda device, sample: (
+            "normal dim reduction" in sample.name
+            and "noncontig_transposed" in sample.name
+        ),
+        name="broken_mean_backward2",
+    ),
+    # unsqueeze() backward tries to call squeeze with noncontig transposed,
+    # but that's not supported
+    XFailRule(
+        error_type=ValueError,
+        error_msg="expected self to be a contiguous jagged layout NestedTensor",
+        op_match_fn=lambda device, op: (op.full_name == "unsqueeze"),
+        sample_match_fn=lambda device, sample: (
+            "noncontig_transposed" in sample.name or "ragged_dim" in sample.name
+        ),
+        name="broken_unsqueeze_backward",
+    ),
+    # RuntimeError: view(): cannot view shape (3, j62, 1, 7, 3) as [3, j58, 7, 3]
+    # with unflatten()
+    XFailRule(
+        error_type=RuntimeError,
+        error_msg="cannot view shape",
+        op_match_fn=lambda device, op: (op.full_name in {"unflatten"}),
+        sample_match_fn=lambda device, sample: ("noncontig_holes" in sample.name),
+        name="broken_unflatten_backward",
+    ),
+    # -> CPU device conversion backwards is broken
+    XFailRule(
+        error_type=RuntimeError,
+        error_msg="Unknown layout in record_stream_any_impl",
+        op_match_fn=lambda device, op: (op.full_name == "to"),
+        sample_match_fn=lambda device, sample: (
+            sample.kwargs.get("device", None) == "cpu"
+        ),
+        name="broken_to_backward",
+    ),
+    # sum() backward is not implemented for non-full reductions
+    XFailRule(
+        error_type=NotImplementedError,
+        error_msg="aten._nested_sum_backward.default",
+        op_match_fn=lambda device, op: (op.full_name == "sum"),
+        sample_match_fn=lambda device, sample: ("full reduction" not in sample.name),
+        name="broken_sum_backward",
+    ),
+    # squeeze(): invalid gradient shape; need to check formula
+    XFailRule(
+        error_type=RuntimeError,
+        error_msg="returned an invalid gradient at index 0",
+        op_match_fn=lambda device, op: (op.full_name == "squeeze"),
+        sample_match_fn=lambda device, sample: (
+            sample.name == "5D_contig_with_seqlen_cache: normal_dim"
+            and sample.kwargs["dim"] == 3
+        ),
+        name="broken_squeeze_backward",
+    ),
+    # sgn() / masked_select(): backwards formulas don't work at all
+    XFailRule(
+        error_type=RuntimeError,
+        error_msg="NestedTensor does not support directly calling torch.ops.aten.size",
+        op_match_fn=lambda device, op: (op.full_name in {"sgn", "masked_select"}),
+        name="broken_sgn_masked_select_backward",
+    ),
+    # select(): grad_output is an NJT for non-batch-dim operation
+    XFailRule(
+        error_type=ValueError,
+        error_msg="expected grad_output to be a tensor",
+        op_match_fn=lambda device, op: (op.full_name == "select"),
+        sample_match_fn=lambda device, sample: ("batch_dim" not in sample.name),
+        name="broken_select_backward",
+    ),
+    # prod(): completely broken in every way
+    XFailRule(
+        op_match_fn=lambda device, op: (op.full_name == "prod"),
+        name="broken_prod_backward",
+    ),
+    # pow() / float_power(): use where() underneath; broken for (NT, T) broadcasting cases
+    XFailRule(
+        error_type=ValueError,
+        error_msg="expected condition to be a jagged layout NestedTensor",
+        op_match_fn=lambda device, op: (op.full_name in {"pow", "float_power"}),
+        sample_match_fn=lambda device, sample: ("(NT, T)" in sample.name),
+        name="broken_pow_backward",
+    ),
+    # __rpow__() backward is also broken, but for the reverse (T, NT) broadcasting cases
+    XFailRule(
+        error_type=ValueError,
+        error_msg="expected condition to be a jagged layout NestedTensor",
+        op_match_fn=lambda device, op: (op.full_name == "__rpow__"),
+        sample_match_fn=lambda device, sample: ("(T, NT)" in sample.name),
+        name="broken_rpow_backward",
+    ),
+    # linear(): some formula problem when bias is used; seems to be platform-specific
+    # (fails locally but not in CI)
+    SkipRule(
+        # result2.use_count() <= 1 INTERNAL ASSERT FAILED
+        op_match_fn=lambda device, op: (op.full_name == "nn.functional.linear"),
+        sample_match_fn=lambda device, sample: ("with bias" in sample.name),
+        name="broken_linear_backward",
+    ),
+    # narrow(): unimplemented backward
+    XFailRule(
+        error_type=RuntimeError,
+        error_msg="derivative for aten::narrow is not implemented",
+        op_match_fn=lambda device, op: (op.full_name == "narrow"),
+        name="broken_narrow_backward",
+    ),
+    # min / max: need to examine backwards formula for non-full reduction
+    XFailRule(
+        error_type=RuntimeError,
+        error_msg="SymIntArrayRef expected to contain only concrete integers",
+        op_match_fn=lambda device, op: (
+            op.full_name in {"max.reduction_with_dim", "min.reduction_with_dim"}
+        ),
+        sample_match_fn=lambda device, sample: ("full reduction" not in sample.name),
+        name="broken_min_max_reduction_with_dim_backward",
+    ),
+    # matmul(): unimplemented backward
+    XFailRule(
+        error_type=NotImplementedError,
+        error_msg="aten.matmul_backward.default",
+        op_match_fn=lambda device, op: (op.full_name == "matmul"),
+        name="broken_matmul_backward",
+    ),
+    # copysign(): formula is broken for (T, NT) broadcasting
+    XFailRule(
+        error_type=RuntimeError,
+        error_msg="SymIntArrayRef expected to contain only concrete integers",
+        op_match_fn=lambda device, op: (op.full_name == "copysign"),
+        sample_match_fn=lambda device, sample: ("(T, NT)" in sample.name),
+        name="broken_copysign_backward",
+    ),
+    # chunk(): backward doesn't work for the batch dim yet
+    XFailRule(
+        error_type=RuntimeError,
+        error_msg="Nested Tensor doesn't support chunk backward on dim=0 yet",
+        op_match_fn=lambda device, op: (op.full_name == "chunk"),
+        sample_match_fn=lambda device, sample: ("batch_dim" in sample.name),
+        name="broken_chunk_backward",
+    ),
+    # amin() / amax(): broken in a host of ways I don't think it's a good use of time
+    # to try to sift through
+    SkipRule(
+        op_match_fn=lambda device, op: (op.full_name in {"amin", "amax"}),
+        name="broken_amin_amax_backward",
+    ),
     XFailRule(
         error_type=RuntimeError,
         error_msg="reducing across the ragged dimension is not supported for non-contiguous",
@@ -8180,16 +8360,7 @@ BACKWARD_SKIPS_AND_XFAILS = [
             "for outputs with complex dtype"
         ),
         op_match_fn=lambda device, op: (op.full_name in {"cdouble", "cfloat", "chalf"}),
-        sample_match_fn=lambda device, sample: ("with_seqlen_cache" in sample.name),
         name="no_complex_autodiff",
-    ),
-    # bad derivative formula or something
-    XFailRule(
-        error_type=RuntimeError,
-        error_msg="NestedTensor does not support directly calling torch.ops.aten.size",
-        op_match_fn=lambda device, op: (op.full_name in {"sgn", "masked_select"}),
-        sample_match_fn=lambda device, sample: ("with_seqlen_cache" in sample.name),
-        name="direct_size_call_with_seqlen_cache",
     ),
     # Bug: need to use the correct nested int in the return shape
     XFailRule(
@@ -8206,12 +8377,8 @@ BACKWARD_SKIPS_AND_XFAILS = [
         error_type=NotImplementedError,
         error_msg="aten.masked_fill_.Scalar",
         op_match_fn=lambda device, op: (
-            op.full_name in {"max.binary", "min.binary", "minimum", "maximum"}
-        ),
-        sample_match_fn=lambda device, sample: (
-            "(NT, T) broadcasting all 1s" in sample.name
-            or "(NT, T) broadcasting 1 over ragged" in sample.name
-            or "(NT, T) mixed broadcasting" in sample.name
+            op.full_name
+            in {"max.binary", "min.binary", "minimum", "maximum", "copysign"}
         ),
         name="unimplemented_masked_fill",
     ),
@@ -8271,12 +8438,61 @@ COMPILE_FORWARD_SKIPS_AND_XFAILS = [
 ]
 
 COMPILE_BACKWARD_SKIPS_AND_XFAILS = [
+    # non-contiguous with holes inputs + torch.compile doesn't work great today; need
+    # torch._check() statements. Skip these and handle them later.
+    SkipRule(
+        op_match_fn=lambda device, op: True,
+        sample_match_fn=lambda device, sample: ("noncontig_holes" in sample.name),
+        name="noncontig_holes_data_dependency",
+    ),
+    # chunk(): broken in several ways on the batch dim; revisit after similar
+    # data-dependency issues are handled for narrow()
+    SkipRule(
+        op_match_fn=lambda device, op: (op.full_name == "chunk"),
+        sample_match_fn=lambda device, sample: ("batch_dim" in sample.name),
+        name="broken_chunk_compile_backward_on_batch_dim",
+    ),
+    # mean(): weird bug
+    XFailRule(
+        error_type=torch._dynamo.exc.BackendCompilerFailed,
+        error_msg="'NestedIntNode' object has no attribute 'sub'",
+        op_match_fn=lambda device, op: (op.full_name == "mean"),
+        sample_match_fn=lambda device, sample: (
+            "full reduction" not in sample.name
+            and "normal dim reduction" not in sample.name
+        ),
+        name="broken_mean_compile_backward",
+    ),
+    # min() / max(): weird bug
+    XFailRule(
+        error_type=AttributeError,
+        error_msg="'ConstantIntNode' object has no attribute 'add'",
+        op_match_fn=lambda device, op: (
+            op.full_name in {"max.reduction_with_dim", "min.reduction_with_dim"}
+        ),
+        sample_match_fn=lambda device, sample: ("full reduction" not in sample.name),
+        name="broken_min_max_compile_backward",
+    ),
+    # to() fails with data-dependent guards OR Unknown layout in record_stream_any_impl;
+    # need to fix with torch._check(), etc.
+    XFailRule(
+        op_match_fn=lambda device, op: (op.full_name == "to"),
+        sample_match_fn=lambda device, sample: ("-> cpu" in sample.name),
+        name="to_data_dependency",
+    ),
+    # copysign(): formula is broken for (T, NT) broadcasting
+    XFailRule(
+        error_type=AttributeError,
+        error_msg="'ConstantIntNode' object has no attribute 'add'",
+        op_match_fn=lambda device, op: (op.full_name == "copysign"),
+        sample_match_fn=lambda device, sample: ("(T, NT)" in sample.name),
+        name="broken_copysign_compile_backward",
+    ),
     # in compile, these complex ops use view_as_real(), which isn't implemented
     XFailRule(
         error_type=NotImplementedError,
         error_msg="aten.view_as_real.default",
         op_match_fn=lambda device, op: (op.full_name in {"cdouble", "cfloat", "chalf"}),
-        sample_match_fn=lambda device, sample: ("with_seqlen_cache" in sample.name),
         name="unimplemented_view_as_real",
     ),
     # torch._subclasses.fake_tensor.DataDependentOutputException: aten._local_scalar_dense.default
@@ -8334,6 +8550,14 @@ COMPILE_BACKWARD_SKIPS_AND_XFAILS = [
         ),
         name="clone_unbind_data_dependency_backward",
     ),
+    # select(): pending unbacked symints not in returned output (needs fix)
+    XFailRule(
+        error_type=torch._dynamo.exc.InternalTorchDynamoError,
+        error_msg="Pending unbacked symbols",
+        op_match_fn=lambda device, op: (op.full_name == "select"),
+        sample_match_fn=lambda device, sample: ("batch_dim" in sample.name),
+        name="broken_select_backward_unbacked",
+    ),
     *COMPILE_FORWARD_SKIPS_AND_XFAILS,
     *BACKWARD_SKIPS_AND_XFAILS,
 ]
@@ -8351,9 +8575,13 @@ class TestNestedTensorOpInfo(NestedTensorTestCase):
     # TODO: move this
     def _gen_grad_outputs(self, out_val):
         if isinstance(out_val, (list, tuple)):
-            return tuple(torch.ones_like(c) for c in out_val)
+            need_grad_outs = tuple(o for o in out_val if o.grad_fn is not None)
+            grad_outputs = tuple(
+                torch.ones_like(o) for o in out_val if o.grad_fn is not None
+            )
+            return need_grad_outs, grad_outputs
         else:
-            return (torch.ones_like(out_val),)
+            return out_val, (torch.ones_like(out_val),)
 
     @ops(
         [op for op in njt_op_db if op.supports_njt],
@@ -8361,13 +8589,13 @@ class TestNestedTensorOpInfo(NestedTensorTestCase):
     )
     @sample_skips_and_xfails(FORWARD_SKIPS_AND_XFAILS)
     def test_forward(self, device, dtype, op):
-        for sample, subtest_ctx in op.sample_inputs(
+        for sample, subtest_ctx, skip_xfail_ctx in op.sample_inputs(
             device=device,
             dtype=dtype,
             requires_grad=False,
             use_subtests=True,
         ):
-            with subtest_ctx(self):
+            with subtest_ctx(self), skip_xfail_ctx(self):
                 # compare to reference, but expect different nested int
                 out = op.op(sample.input, *sample.args, **sample.kwargs)
                 out_ref = op.ref(op, sample)
@@ -8389,10 +8617,10 @@ class TestNestedTensorOpInfo(NestedTensorTestCase):
     )
     @sample_skips_and_xfails(BACKWARD_SKIPS_AND_XFAILS)
     def test_backward(self, device, dtype, op):
-        for sample, subtest_ctx in op.sample_inputs(
+        for sample, subtest_ctx, skip_xfail_ctx in op.sample_inputs(
             device=device, dtype=dtype, requires_grad=True, use_subtests=True
         ):
-            with subtest_ctx(self):
+            with subtest_ctx(self), skip_xfail_ctx(self):
                 # compare to reference, but expect different nested int
                 out = op.op(sample.input, *sample.args, **sample.kwargs)
                 out_ref = op.ref(op, sample)
@@ -8409,14 +8637,14 @@ class TestNestedTensorOpInfo(NestedTensorTestCase):
                     if isinstance(inp, torch.Tensor) and inp.requires_grad
                 ]
                 if len(g_inps) > 0:
+                    need_grad_outs, grad_outputs = self._gen_grad_outputs(out)
                     grads = torch.autograd.grad(
-                        out, inputs=g_inps, grad_outputs=self._gen_grad_outputs(out)
+                        need_grad_outs, inputs=g_inps, grad_outputs=grad_outputs
                     )
 
+                    need_grad_outs, grad_outputs = self._gen_grad_outputs(out_ref)
                     grads_ref = torch.autograd.grad(
-                        out_ref,
-                        inputs=g_inps,
-                        grad_outputs=self._gen_grad_outputs(out_ref),
+                        need_grad_outs, inputs=g_inps, grad_outputs=grad_outputs
                     )
 
                     self.assertEqualNoncontigAware(grads, grads_ref)
@@ -8428,10 +8656,10 @@ class TestNestedTensorOpInfo(NestedTensorTestCase):
     )
     @sample_skips_and_xfails(COMPILE_FORWARD_SKIPS_AND_XFAILS)
     def test_compile_forward(self, device, dtype, op):
-        for sample, subtest_ctx in op.sample_inputs(
+        for sample, subtest_ctx, skip_xfail_ctx in op.sample_inputs(
             device=device, dtype=dtype, requires_grad=False, use_subtests=True
         ):
-            with subtest_ctx(self):
+            with subtest_ctx(self), skip_xfail_ctx(self):
                 torch.compiler.reset()
 
                 op_fn = op.op
@@ -8480,11 +8708,14 @@ class TestNestedTensorOpInfo(NestedTensorTestCase):
     @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
     @sample_skips_and_xfails(COMPILE_BACKWARD_SKIPS_AND_XFAILS)
     def test_compile_backward(self, device, dtype, op):
-        for sample, subtest_ctx in op.sample_inputs(
+        for sample, subtest_ctx, skip_xfail_ctx in op.sample_inputs(
             device=device, dtype=dtype, requires_grad=True, use_subtests=True
         ):
-            with subtest_ctx(self):
+            with subtest_ctx(self), skip_xfail_ctx(self):
                 torch.compiler.reset()
+                # must be set to avoid:
+                # DataDependentOutputException: aten._local_scalar_dense.default
+                torch._dynamo.config.capture_scalar_outputs = True
 
                 op_fn = op.op
 
@@ -8514,16 +8745,18 @@ class TestNestedTensorOpInfo(NestedTensorTestCase):
                     if isinstance(inp, torch.Tensor) and inp.requires_grad
                 ]
                 if len(g_inps) > 0:
+                    need_grad_outs, grad_outputs = self._gen_grad_outputs(out_compile)
                     grads_compile = torch.autograd.grad(
-                        out_compile,
+                        need_grad_outs,
                         inputs=g_inps,
-                        grad_outputs=self._gen_grad_outputs(out_compile),
+                        grad_outputs=grad_outputs,
                     )
 
+                    need_grad_outs, grad_outputs = self._gen_grad_outputs(out_ref)
                     grads_ref = torch.autograd.grad(
-                        out_ref,
+                        need_grad_outs,
                         inputs=g_inps,
-                        grad_outputs=self._gen_grad_outputs(out_ref),
+                        grad_outputs=grad_outputs,
                     )
 
                     self.assertEqualNoncontigAware(grads_compile, grads_ref)

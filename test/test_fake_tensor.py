@@ -1,4 +1,5 @@
 # Owner(s): ["module: meta tensors"]
+# ruff: noqa: F841
 
 
 import contextlib

@@ -25,7 +25,7 @@ class TestConverter(TestCase):
         init_torchbind_implementations()
 
         @torch._library.register_fake_class("_TorchScriptTesting::_TensorQueue")
-        class FakeTensorQueue:
+        class _FakeTensorQueue:
             def __init__(self, queue):
                 self.queue = queue
 
@@ -1017,7 +1017,7 @@ class TestConverter(TestCase):
             torch.randn([2, 3, 4]).to(torch.float32),
             torch.randn([2, 3, 4]).to(torch.float64),
         )
-        ep_list = self._check_equal_ts_ep_converter(func6, inp)
+        self._check_equal_ts_ep_converter(func6, inp)
 
         # TODO: Additional check once dynamic shape is supported.
         # for ep in ep_list:
@@ -1353,7 +1353,7 @@ class TestConverter(TestCase):
     def test_ts2ep_with_loop(self):
         def func1(x, x_list: List[torch.Tensor]):
             a, b, c = x, x, x
-            for i in range(1, 5, 2):
+            for _ in range(1, 5, 2):
                 for k in range(5):
                     a = a + a + k
                     b = b + b - k
@@ -1364,12 +1364,12 @@ class TestConverter(TestCase):
                     x_list.append(x_list[k] + x_list[k + 1] - x_list[k + 2])
             return x, x_list
 
-        def func2(x):
+        def func2(x):  # noqa: F841
             for i in range(x.size(0)):
                 x = x * x * i
             return x
 
-        def func3(x):
+        def func3(x):  # noqa: F841
             while x.sum() < 10:
                 x += x.sin()
             return x

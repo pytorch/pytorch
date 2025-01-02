@@ -2494,6 +2494,8 @@ def compile(
     _C._log_api_usage_once("torch.compile")
     if sys.version_info >= (3, 14):
         raise RuntimeError("Dynamo is not supported on Python 3.14+")
+    elif sys.version_info >= (3, 13) and not sys._is_gil_enabled():
+        raise RuntimeError("Dynamo is not supported on Python with GIL disabled")
 
     # Decorator mode
     if model is None:
