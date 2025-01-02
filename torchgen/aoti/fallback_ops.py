@@ -45,6 +45,8 @@ inductor_fallback_ops = {
     "aten.cummin.default",
     "aten.cumprod.default",
     "aten.cumsum.default",
+    "aten._dyn_quant_matmul_4bit.default",
+    "aten._dyn_quant_pack_4bit_weight.default",
     "aten._efficient_attention_backward.default",
     "aten._efficient_attention_forward.default",
     "aten._efficientzerotensor.default",

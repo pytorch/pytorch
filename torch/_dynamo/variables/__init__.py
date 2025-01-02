@@ -23,7 +23,6 @@ from .ctx_manager import (
 )
 from .dicts import (
     ConstDictVariable,
-    CustomizedDictVariable,
     DefaultDictVariable,
     DictKeySetVariable,
     FrozensetVariable,
@@ -115,6 +114,7 @@ from .user_defined import (
     MutableMappingVariable,
     RemovableHandleVariable,
     UserDefinedClassVariable,
+    UserDefinedDictVariable,
     UserDefinedObjectVariable,
 )
 
@@ -132,7 +132,6 @@ __all__ = [
     "CountIteratorVariable",
     "CreateTMADescriptorVariable",
     "CUDADeviceVariable",
-    "CustomizedDictVariable",
     "CycleIteratorVariable",
     "DataPtrVariable",
     "DefaultDictVariable",
