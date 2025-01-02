@@ -6,7 +6,8 @@ from __future__ import annotations
 
 import itertools
 import sys
-from typing import Generator, Iterable, Iterator, TypeVar
+from typing import Callable, Iterable, Iterator, TypeVar
+from typing_extensions import TypeAlias
 
 from ..decorators import substitute_in_graph
 
@@ -14,14 +15,16 @@ from ..decorators import substitute_in_graph
 __all__ = [
     "chain",
     "chain_from_iterable",
+    "compress",
+    "dropwhile",
     "islice",
     "tee",
-    "compress",
 ]
 
 
 _T = TypeVar("_T")
 _U = TypeVar("_U")
+_Predicate: TypeAlias = Callable[[_T], object]
 
 
 # Reference: https://docs.python.org/3/library/itertools.html#itertools.chain
@@ -37,6 +40,26 @@ def chain_from_iterable(iterable: Iterable[Iterable[_T]], /) -> Iterator[_T]:
 
 
 chain.from_iterable = chain_from_iterable  # type: ignore[method-assign]
+
+
+# Reference: https://docs.python.org/3/library/itertools.html#itertools.compress
+@substitute_in_graph(itertools.compress, is_embedded_type=True)  # type: ignore[arg-type]
+def compress(data: Iterable[_T], selectors: Iterable[_U], /) -> Iterator[_T]:
+    return (datum for datum, selector in zip(data, selectors) if selector)
+
+
+# Reference: https://docs.python.org/3/library/itertools.html#itertools.dropwhile
+@substitute_in_graph(itertools.dropwhile, is_embedded_type=True)  # type: ignore[arg-type]
+def dropwhile(predicate: _Predicate[_T], iterable: Iterable[_T], /) -> Iterator[_T]:
+    # dropwhile(lambda x: x < 5, [1, 4, 6, 3, 8]) -> 6 3 8
+
+    iterator = iter(iterable)
+    for x in iterator:
+        if not predicate(x):
+            yield x
+            break
+
+    yield from iterator
 
 
 # Reference: https://docs.python.org/3/library/itertools.html#itertools.islice
@@ -103,11 +126,3 @@ def tee(iterable: Iterable[_T], n: int = 2, /) -> tuple[Iterator[_T], ...]:
             return
 
     return tuple(_tee(shared_link) for _ in range(n))
-
-
-# Reference: https://docs.python.org/3/library/itertools.html#itertools.compress
-@substitute_in_graph(itertools.compress, is_embedded_type=True)  # type: ignore[arg-type]
-def compress(
-    data: Iterable[_T], selectors: Iterable[_U], /
-) -> Generator[_T, None, None]:
-    return (datum for datum, selector in zip(data, selectors) if selector)
