@@ -35,7 +35,9 @@
 #include <arm_neon.h>
 #endif
 
-
+#if defined(CPU_CAPABILITY_SVE)
+#include <limits.h>
+#endif
 // NOLINTBEGIN(*-c-arrays)
 namespace at::native {
 namespace {
@@ -223,6 +225,25 @@ int64_t hsum(const uint8_t* A, int len) {
   int64_t row_sum = 0;
   int i = 0;
 
+#if defined(CPU_CAPABILITY_SVE)
+  svuint32_t sum_v_u32 = svdup_u32(0);
+  int overflow_threshold = ULONG_MAX/(4*UCHAR_MAX) * svcntb();
+  int loop = len / overflow_threshold + 1;  
+  int size = svcntb();  
+  svbool_t pred = svptrue_b8(); 
+    for(int j=0; j<=loop; j++){
+      for (; ((i < overflow_threshold * j) && (i < len)); i += size) {
+        if(len-size < i){
+          pred = svwhilelt_b8(i,len);
+        }
+        svuint8_t src_u8 = svld1_u8(pred, A + i);         
+        sum_v_u32 = svdot_u32(sum_v_u32, src_u8, svdup_u8(1)); 
+      }
+      row_sum+=svaddv_u32(svptrue_b32(),sum_v_u32);
+      sum_v_u32 = svdup_u32(0);
+    }
+#endif
+
 #ifdef CPU_CAPABILITY_AVX2
   __m256i sum_v = _mm256_setzero_si256();
   __m256i one_epi16_v = _mm256_set1_epi16(1);
@@ -279,6 +300,25 @@ int64_t hsum(const uint8_t* A, int len) {
 int64_t hsum(const int8_t* A, int len) {
   int64_t row_sum = 0;
   int i = 0;
+
+#if defined(CPU_CAPABILITY_SVE)
+  svint32_t sum_v_s32 = svdup_s32(0);
+  int overflow_threshold = LONG_MAX/(4*CHAR_MAX) * svcntb();
+  int loop = len / overflow_threshold + 1;
+  int size = svcntb();  
+  svbool_t pred = svptrue_b8(); 
+  for (int j = 0; j <= loop; j++) {
+    for (; (i < overflow_threshold * j) && (i < len); i += size) {
+        if(len-size < i){
+          pred = svwhilelt_b8(i,len);
+        }
+      svint8_t src_s8 = svld1_s8(pred, A + i);
+      sum_v_s32 = svdot_s32(sum_v_s32, src_s8, svdup_s8(1));
+    }
+    row_sum += svaddv_s32(svptrue_b32(), sum_v_s32);
+    sum_v_s32 = svdup_s32(0);  
+  }
+#endif
 
 #ifdef CPU_CAPABILITY_AVX2
   __m256i sum_v = _mm256_setzero_si256();
@@ -337,6 +377,18 @@ int64_t hsum(const int32_t* A, int len) {
   int64_t row_sum = 0;
   int i = 0;
 
+#if defined(CPU_CAPABILITY_SVE)
+  int size = svcntw();              
+  svbool_t pred = svptrue_b32(); 
+  for (; i <len; i+=size) {
+      if (len - i < size) {
+        pred = svwhilelt_b32(i, len);
+      }
+      svint32_t src_s32 = svld1_s32(pred, A + i);
+      row_sum += svaddv_s32(pred, src_s32);
+    }
+#endif
+
 #ifdef CPU_CAPABILITY_AVX2
   __m256i sum_epi64 = _mm256_setzero_si256();
   // vectorized
@@ -391,6 +443,25 @@ int64_t hsum(const int32_t* A, int len) {
 int64_t hsum_sq(const uint8_t* A, int len) {
   int64_t row_sum = 0;
   int i = 0;
+
+#if defined(CPU_CAPABILITY_SVE)
+  svuint32_t sum_v_u32 = svdup_u32(0);// creating a vector with 0's
+  int overflow_threshold = ULONG_MAX/(4*UCHAR_MAX * UCHAR_MAX) * svcntb();
+  int loop = len / overflow_threshold + 1;  
+  int size = svcntb();  
+  svbool_t pred = svptrue_b8(); 
+    for(int j=0; j<=loop; j++){
+      for (; ((i < overflow_threshold * j) && (i < len)); i += size) {
+        if(len-size < i){
+          pred = svwhilelt_b8(i,len);
+        }
+        svuint8_t src_u8 = svld1_u8(pred, A + i);         
+        sum_v_u32 = svdot_u32(sum_v_u32, src_u8, src_u8); 
+      }
+      row_sum+=svaddv_u32(svptrue_b32(),sum_v_u32);
+      sum_v_u32 = svdup_u32(0);
+    }
+#endif
 
 #ifdef CPU_CAPABILITY_AVX2
   // vectorized
@@ -465,6 +536,25 @@ int64_t hsum_sq(const uint8_t* A, int len) {
 int64_t hsum_sq(const int8_t* A, int len) {
   int64_t row_sum = 0;
   int i = 0;
+
+#if defined(CPU_CAPABILITY_SVE)
+  svint32_t sum_v_s32 = svdup_s32(0);
+  int overflow_threshold = LONG_MAX/(4*CHAR_MAX * CHAR_MAX) * svcntb();
+  int loop = len / overflow_threshold + 1;
+  int size = svcntb();  
+  svbool_t pred = svptrue_b8(); 
+  for (int j = 0; j <= loop; j++) {
+    for (; (i < overflow_threshold * j) && (i < len); i += size) {
+        if(len-size < i){
+          pred = svwhilelt_b8(i,len);
+        }
+      svint8_t src_s8 = svld1_s8(pred, A + i);
+      sum_v_s32 = svdot_s32(sum_v_s32, src_s8, src_s8);
+    }
+    row_sum += svaddv_s32(svptrue_b32(), sum_v_s32);
+    sum_v_s32 = svdup_s32(0);  
+  }
+#endif
 
 #ifdef CPU_CAPABILITY_AVX2
   // vectorized
@@ -547,6 +637,21 @@ int64_t hsum_sq(const int8_t* A, int len) {
 float hsum_sq(const int32_t* A, int len) {
   float row_sum = 0;
   int i = 0;
+
+#if defined(CPU_CAPABILITY_SVE)
+    svfloat32_t sum_v_f32 = svdup_f32(0);
+    int size = svcntw();
+    svbool_t pred = svptrue_b32();
+    for (; i < len; i += size) {
+        if(len-size < i){
+          pred = svwhilelt_b32(i,len);
+        }
+        svint32_t src_s32 = svld1_s32(pred, A + i);
+        svfloat32_t src_f32 = svcvt_f32_s32_x(pred, src_s32);
+        sum_v_f32  = svmla_f32_m(pred , sum_v_f32, src_f32, src_f32);
+    }
+    row_sum+= svaddv_f32(svptrue_b32(), sum_v_f32);
+#endif
 
 #ifdef CPU_CAPABILITY_AVX2
   __m256 sum_ps = _mm256_setzero_ps();
