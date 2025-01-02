@@ -8,6 +8,7 @@ from torch.distributions.utils import (
     logits_to_probs,
     probs_to_logits,
 )
+from torch import Tensor
 
 
 __all__ = ["Binomial"]
@@ -104,11 +105,11 @@ class Binomial(Distribution):
         return self.total_count * self.probs * (1 - self.probs)
 
     @lazy_property
-    def logits(self):
+    def logits(self) -> Tensor:
         return probs_to_logits(self.probs, is_binary=True)
 
     @lazy_property
-    def probs(self):
+    def probs(self) -> Tensor:
         return logits_to_probs(self.logits, is_binary=True)
 
     @property

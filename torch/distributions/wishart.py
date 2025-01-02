@@ -11,6 +11,7 @@ from torch.distributions.exp_family import ExponentialFamily
 from torch.distributions.multivariate_normal import _precision_to_scale_tril
 from torch.distributions.utils import lazy_property
 from torch.types import _size
+from torch import Tensor
 
 
 __all__ = ["Wishart"]
@@ -18,7 +19,7 @@ __all__ = ["Wishart"]
 _log_2 = math.log(2)
 
 
-def _mvdigamma(x: torch.Tensor, p: int) -> torch.Tensor:
+def _mvdigamma(x: Tensor, p: int) -> Tensor:
     assert x.gt((p - 1) / 2).all(), "Wrong domain for multivariate digamma function."
     return torch.digamma(
         x.unsqueeze(-1)
@@ -26,7 +27,7 @@ def _mvdigamma(x: torch.Tensor, p: int) -> torch.Tensor:
     ).sum(-1)
 
 
-def _clamp_above_eps(x: torch.Tensor) -> torch.Tensor:
+def _clamp_above_eps(x: Tensor) -> Tensor:
     # We assume positive input for this function
     return x.clamp(min=torch.finfo(x.dtype).eps)
 
@@ -178,20 +179,20 @@ class Wishart(ExponentialFamily):
         return new
 
     @lazy_property
-    def scale_tril(self):
+    def scale_tril(self) -> Tensor:
         return self._unbroadcasted_scale_tril.expand(
             self._batch_shape + self._event_shape
         )
 
     @lazy_property
-    def covariance_matrix(self):
+    def covariance_matrix(self) -> Tensor:
         return (
             self._unbroadcasted_scale_tril
             @ self._unbroadcasted_scale_tril.transpose(-2, -1)
         ).expand(self._batch_shape + self._event_shape)
 
     @lazy_property
-    def precision_matrix(self):
+    def precision_matrix(self) -> Tensor:
         identity = torch.eye(
             self._event_shape[-1],
             device=self._unbroadcasted_scale_tril.device,
@@ -238,7 +239,7 @@ class Wishart(ExponentialFamily):
 
     def rsample(
         self, sample_shape: _size = torch.Size(), max_try_correction=None
-    ) -> torch.Tensor:
+    ) -> Tensor:
         r"""
         .. warning::
             In some cases, sampling algorithm based on Bartlett decomposition may return singular matrix samples.

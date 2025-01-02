@@ -17,6 +17,7 @@ from torch.distributions.utils import (
     vec_to_tril_matrix,
 )
 from torch.nn.functional import pad, softplus
+from torch import Tensor
 
 
 __all__ = [
@@ -327,11 +328,11 @@ class ComposeTransform(Transform):
         return codomain
 
     @lazy_property
-    def bijective(self):
+    def bijective(self) -> bool:  # type: ignore[override]
         return all(p.bijective for p in self.parts)
 
     @lazy_property
-    def sign(self):
+    def sign(self) -> int:
         sign = 1
         for p in self.parts:
             sign = sign * p.sign
@@ -577,7 +578,7 @@ class PowerTransform(Transform):
         return PowerTransform(self.exponent, cache_size=cache_size)
 
     @lazy_property
-    def sign(self):
+    def sign(self) -> Tensor:
         return self.exponent.sign()
 
     def __eq__(self, other):
@@ -1053,11 +1054,11 @@ class CatTransform(Transform):
         self.dim = dim
 
     @lazy_property
-    def event_dim(self):
+    def event_dim(self) -> Tensor:
         return max(t.event_dim for t in self.transforms)
 
     @lazy_property
-    def length(self):
+    def length(self) -> Tensor:
         return sum(self.lengths)
 
     def with_cache(self, cache_size=1):

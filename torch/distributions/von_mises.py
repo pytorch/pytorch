@@ -6,6 +6,7 @@ import torch.jit
 from torch.distributions import constraints
 from torch.distributions.distribution import Distribution
 from torch.distributions.utils import broadcast_all, lazy_property
+from torch import Tensor
 
 
 __all__ = ["VonMises"]
@@ -143,15 +144,15 @@ class VonMises(Distribution):
         return log_prob
 
     @lazy_property
-    def _loc(self):
+    def _loc(self) -> Tensor:
         return self.loc.to(torch.double)
 
     @lazy_property
-    def _concentration(self):
+    def _concentration(self) -> Tensor:
         return self.concentration.to(torch.double)
 
     @lazy_property
-    def _proposal_r(self):
+    def _proposal_r(self) -> Tensor:
         kappa = self._concentration
         tau = 1 + (1 + 4 * kappa**2).sqrt()
         rho = (tau - (2 * tau).sqrt()) / (2 * kappa)
@@ -198,7 +199,7 @@ class VonMises(Distribution):
         return self.loc
 
     @lazy_property
-    def variance(self):
+    def variance(self) -> Tensor:  # type: ignore[override]
         """
         The provided variance is the circular one.
         """

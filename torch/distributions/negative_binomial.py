@@ -9,6 +9,7 @@ from torch.distributions.utils import (
     logits_to_probs,
     probs_to_logits,
 )
+from torch import Tensor
 
 
 __all__ = ["NegativeBinomial"]
@@ -87,11 +88,11 @@ class NegativeBinomial(Distribution):
         return self.mean / torch.sigmoid(-self.logits)
 
     @lazy_property
-    def logits(self):
+    def logits(self) -> Tensor:
         return probs_to_logits(self.probs, is_binary=True)
 
     @lazy_property
-    def probs(self):
+    def probs(self) -> Tensor:
         return logits_to_probs(self.logits, is_binary=True)
 
     @property
@@ -99,7 +100,7 @@ class NegativeBinomial(Distribution):
         return self._param.size()
 
     @lazy_property
-    def _gamma(self):
+    def _gamma(self) -> torch.distributions.Gamma:
         # Note we avoid validating because self.total_count can be zero.
         return torch.distributions.Gamma(
             concentration=self.total_count,

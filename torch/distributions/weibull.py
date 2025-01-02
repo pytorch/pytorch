@@ -6,6 +6,7 @@ from torch.distributions.gumbel import euler_constant
 from torch.distributions.transformed_distribution import TransformedDistribution
 from torch.distributions.transforms import AffineTransform, PowerTransform
 from torch.distributions.utils import broadcast_all
+from torch import Tensor
 
 
 __all__ = ["Weibull"]

@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 from numbers import Number, Real
+from torch import Tensor
 
 import torch
 from torch.distributions import constraints
@@ -74,7 +75,7 @@ class Beta(ExponentialFamily):
         total = self.concentration1 + self.concentration0
         return self.concentration1 * self.concentration0 / (total.pow(2) * (total + 1))
 
-    def rsample(self, sample_shape: _size = ()) -> torch.Tensor:
+    def rsample(self, sample_shape: _size = ()) -> Tensor:
         return self._dirichlet.rsample(sample_shape).select(-1, 0)
 
     def log_prob(self, value):

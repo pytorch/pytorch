@@ -12,7 +12,7 @@ from torch.distributions.utils import (
     probs_to_logits,
 )
 from torch.nn.functional import binary_cross_entropy_with_logits
-
+from torch import Tensor
 
 __all__ = ["Bernoulli"]
 
@@ -90,11 +90,11 @@ class Bernoulli(ExponentialFamily):
         return self.probs * (1 - self.probs)
 
     @lazy_property
-    def logits(self):
+    def logits(self) -> Tensor:
         return probs_to_logits(self.probs, is_binary=True)
 
     @lazy_property
-    def probs(self):
+    def probs(self) -> Tensor:
         return logits_to_probs(self.logits, is_binary=True)
 
     @property

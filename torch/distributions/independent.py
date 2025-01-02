@@ -6,6 +6,7 @@ from torch.distributions import constraints
 from torch.distributions.distribution import Distribution
 from torch.distributions.utils import _sum_rightmost
 from torch.types import _size
+from torch import Tensor
 
 
 __all__ = ["Independent"]
@@ -103,7 +104,7 @@ class Independent(Distribution):
     def sample(self, sample_shape=torch.Size()):
         return self.base_dist.sample(sample_shape)
 
-    def rsample(self, sample_shape: _size = torch.Size()) -> torch.Tensor:
+    def rsample(self, sample_shape: _size = torch.Size()) -> Tensor:
         return self.base_dist.rsample(sample_shape)
 
     def log_prob(self, value):

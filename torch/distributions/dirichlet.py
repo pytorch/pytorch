@@ -5,6 +5,7 @@ from torch.autograd.function import once_differentiable
 from torch.distributions import constraints
 from torch.distributions.exp_family import ExponentialFamily
 from torch.types import _size
+from torch import Tensor
 
 
 __all__ = ["Dirichlet"]
@@ -71,7 +72,7 @@ class Dirichlet(ExponentialFamily):
         new._validate_args = self._validate_args
         return new
 
-    def rsample(self, sample_shape: _size = ()) -> torch.Tensor:
+    def rsample(self, sample_shape: _size = ()) -> Tensor:
         shape = self._extended_shape(sample_shape)
         concentration = self.concentration.expand(shape)
         return _Dirichlet.apply(concentration)

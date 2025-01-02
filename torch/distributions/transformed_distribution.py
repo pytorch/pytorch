@@ -8,6 +8,7 @@ from torch.distributions.independent import Independent
 from torch.distributions.transforms import ComposeTransform, Transform
 from torch.distributions.utils import _sum_rightmost
 from torch.types import _size
+from torch import Tensor
 
 
 __all__ = ["TransformedDistribution"]
@@ -143,7 +144,7 @@ class TransformedDistribution(Distribution):
                 x = transform(x)
             return x
 
-    def rsample(self, sample_shape: _size = torch.Size()) -> torch.Tensor:
+    def rsample(self, sample_shape: _size = torch.Size()) -> Tensor:
         """
         Generates a sample_shape shaped reparameterized sample or sample_shape
         shaped batch of reparameterized samples if the distribution parameters

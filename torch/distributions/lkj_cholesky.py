@@ -14,6 +14,7 @@ import torch
 from torch.distributions import Beta, constraints
 from torch.distributions.distribution import Distribution
 from torch.distributions.utils import broadcast_all
+from torch import Tensor
 
 
 __all__ = ["LKJCholesky"]

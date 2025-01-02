@@ -14,6 +14,7 @@ from torch.distributions.utils import (
 )
 from torch.nn.functional import binary_cross_entropy_with_logits
 from torch.types import _size
+from torch import Tensor
 
 
 __all__ = ["ContinuousBernoulli"]
@@ -151,11 +152,11 @@ class ContinuousBernoulli(ExponentialFamily):
         return torch.where(self._outside_unstable_region(), vars, taylor)
 
     @lazy_property
-    def logits(self):
+    def logits(self) -> Tensor:
         return probs_to_logits(self.probs, is_binary=True)
 
     @lazy_property
-    def probs(self):
+    def probs(self) -> Tensor:
         return clamp_probs(logits_to_probs(self.logits, is_binary=True))
 
     @property
@@ -168,7 +169,7 @@ class ContinuousBernoulli(ExponentialFamily):
         with torch.no_grad():
             return self.icdf(u)
 
-    def rsample(self, sample_shape: _size = torch.Size()) -> torch.Tensor:
+    def rsample(self, sample_shape: _size = torch.Size()) -> Tensor:
         shape = self._extended_shape(sample_shape)
         u = torch.rand(shape, dtype=self.probs.dtype, device=self.probs.device)
         return self.icdf(u)

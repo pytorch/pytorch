@@ -4,6 +4,7 @@ from typing import Dict
 import torch
 from torch.distributions import Categorical, constraints
 from torch.distributions.distribution import Distribution
+from torch import Tensor
 
 
 __all__ = ["MixtureSameFamily"]

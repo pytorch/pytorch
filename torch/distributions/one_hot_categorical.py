@@ -4,6 +4,7 @@ from torch.distributions import constraints
 from torch.distributions.categorical import Categorical
 from torch.distributions.distribution import Distribution
 from torch.types import _size
+from torch import Tensor
 
 
 __all__ = ["OneHotCategorical", "OneHotCategoricalStraightThrough"]
@@ -80,7 +81,7 @@ class OneHotCategorical(Distribution):
     @property
     def mode(self):
         probs = self._categorical.probs
-        mode = probs.argmax(axis=-1)
+        mode = probs.argmax(dim=-1)
         return torch.nn.functional.one_hot(mode, num_classes=probs.shape[-1]).to(probs)
 
     @property
@@ -126,7 +127,7 @@ class OneHotCategoricalStraightThrough(OneHotCategorical):
     """
     has_rsample = True
 
-    def rsample(self, sample_shape: _size = torch.Size()) -> torch.Tensor:
+    def rsample(self, sample_shape: _size = torch.Size()) -> Tensor:
         samples = self.sample(sample_shape)
         probs = self._categorical.probs  # cached via @lazy_property
         return samples + (probs - probs.detach())

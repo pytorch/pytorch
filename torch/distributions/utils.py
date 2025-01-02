@@ -6,6 +6,7 @@ from typing import Any, Callable, Dict, Generic, overload, TypeVar
 import torch
 import torch.nn.functional as F
 from torch.overrides import is_tensor_like
+from torch import Tensor
 
 
 euler_constant = 0.57721566490153286060  # Euler Mascheroni Constant
@@ -177,7 +178,7 @@ class _lazy_property_and_property(lazy_property[T], property):
         property.__init__(self, wrapped)
 
 
-def tril_matrix_to_vec(mat: torch.Tensor, diag: int = 0) -> torch.Tensor:
+def tril_matrix_to_vec(mat: Tensor, diag: int = 0) -> Tensor:
     r"""
     Convert a `D x D` matrix or a batch of matrices into a (batched) vector
     which comprises of lower triangular elements from the matrix in row order.
@@ -191,7 +192,7 @@ def tril_matrix_to_vec(mat: torch.Tensor, diag: int = 0) -> torch.Tensor:
     return vec
 
 
-def vec_to_tril_matrix(vec: torch.Tensor, diag: int = 0) -> torch.Tensor:
+def vec_to_tril_matrix(vec: Tensor, diag: int = 0) -> Tensor:
     r"""
     Convert a vector or a batch of vectors into a batched `D x D`
     lower triangular matrix containing elements from the vector in row order.

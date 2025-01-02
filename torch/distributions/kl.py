@@ -36,6 +36,7 @@ from .poisson import Poisson
 from .transformed_distribution import TransformedDistribution
 from .uniform import Uniform
 from .utils import _sum_rightmost, euler_constant as _euler_gamma
+from torch import Tensor
 
 
 _KL_REGISTRY: Dict[
@@ -161,7 +162,7 @@ def _batch_trace_XXT(bmat):
     return flat_trace.reshape(bmat.shape[:-2])
 
 
-def kl_divergence(p: Distribution, q: Distribution) -> torch.Tensor:
+def kl_divergence(p: Distribution, q: Distribution) -> Tensor:
     r"""
     Compute Kullback-Leibler divergence :math:`KL(p \| q)` between two distributions.
 

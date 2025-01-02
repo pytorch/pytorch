@@ -6,6 +6,7 @@ from torch.distributions.transformed_distribution import TransformedDistribution
 from torch.distributions.transforms import AffineTransform, PowerTransform
 from torch.distributions.uniform import Uniform
 from torch.distributions.utils import broadcast_all, euler_constant
+from torch import Tensor
 
 
 __all__ = ["Kumaraswamy"]

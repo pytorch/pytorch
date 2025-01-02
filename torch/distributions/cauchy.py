@@ -8,6 +8,7 @@ from torch.distributions import constraints
 from torch.distributions.distribution import Distribution
 from torch.distributions.utils import broadcast_all
 from torch.types import _size
+from torch import Tensor
 
 
 __all__ = ["Cauchy"]
@@ -67,7 +68,7 @@ class Cauchy(Distribution):
             self._extended_shape(), inf, dtype=self.loc.dtype, device=self.loc.device
         )
 
-    def rsample(self, sample_shape: _size = torch.Size()) -> torch.Tensor:
+    def rsample(self, sample_shape: _size = torch.Size()) -> Tensor:
         shape = self._extended_shape(sample_shape)
         eps = self.loc.new(shape).cauchy_()
         return self.loc + eps * self.scale

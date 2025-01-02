@@ -4,6 +4,7 @@ from torch import nan
 from torch.distributions import constraints
 from torch.distributions.distribution import Distribution
 from torch.distributions.utils import lazy_property, logits_to_probs, probs_to_logits
+from torch import Tensor
 
 
 __all__ = ["Categorical"]
@@ -94,11 +95,11 @@ class Categorical(Distribution):
         return constraints.integer_interval(0, self._num_events - 1)
 
     @lazy_property
-    def logits(self):
+    def logits(self) -> Tensor:
         return probs_to_logits(self.probs)
 
     @lazy_property
-    def probs(self):
+    def probs(self) -> Tensor:
         return logits_to_probs(self.logits)
 
     @property
@@ -116,7 +117,7 @@ class Categorical(Distribution):
 
     @property
     def mode(self):
-        return self.probs.argmax(axis=-1)
+        return self.probs.argmax(dim=-1)
 
     @property
     def variance(self):
