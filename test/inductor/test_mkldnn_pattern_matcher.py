@@ -2126,7 +2126,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
     def test_qconv2d_dequant_promotion_xpu(self):
         self._test_qconv2d_dequant_promotion_helper(device="xpu")
 
-    def _qlinear_cpu_test_helper(
+    def _qlinear_test_helper(
         self,
         inputs,
         device="cpu",
@@ -2177,7 +2177,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
         This testcase will quantize a single Linear Moduel.
         """
         for bias in [True, False]:
-            self._qlinear_cpu_test_helper((torch.randn((2, 4)),), bias=bias)
+            self._qlinear_test_helper((torch.randn((2, 4)),), bias=bias)
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
@@ -2187,7 +2187,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
         This testcase will quantize a single Linear Moduel.
         """
         for bias in [True, False]:
-            self._qlinear_cpu_test_helper(
+            self._qlinear_test_helper(
                 (torch.randn((2, 4)).to(device="xpu"),), device="xpu", bias=bias
             )
 
@@ -2198,7 +2198,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
         This testcase will quantize a single Linear Moduel.
         """
         for bias in [True, False]:
-            self._qlinear_cpu_test_helper(
+            self._qlinear_test_helper(
                 (torch.randn((2, 4)),), bias=bias, is_dynamic=True
             )
 
@@ -2209,7 +2209,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
         This testcase will quantize a single Linear Moduel.
         """
         for bias in [True, False]:
-            self._qlinear_cpu_test_helper(
+            self._qlinear_test_helper(
                 (torch.randn((2, 4)),), bias=bias, is_dynamic=True, is_qat=True
             )
 
@@ -2220,7 +2220,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
         This testcase will quantize a single Linear Moduel.
         """
         for bias in [True, False]:
-            self._qlinear_cpu_test_helper(
+            self._qlinear_test_helper(
                 (torch.randn((2, 3, 4)),), bias=bias, is_dynamic=True
             )
 
@@ -2232,7 +2232,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
         This testcase will quantize a single Linear Moduel with int8_mixed_bf16 quantization.
         """
         for bias in [True, False]:
-            self._qlinear_cpu_test_helper(
+            self._qlinear_test_helper(
                 (torch.randn((2, 4)),), int8_mixed_bf16=True, bias=bias
             )
 
@@ -2258,7 +2258,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
         This testcase will quantize a single Linear Moduel.
         """
         for bias in [True, False]:
-            self._qlinear_cpu_test_helper((torch.randn((2, 3, 4)),), bias=bias)
+            self._qlinear_test_helper((torch.randn((2, 3, 4)),), bias=bias)
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
@@ -2280,7 +2280,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
         This testcase will quantize a single Linear Moduel with int8_mixed_bf16 quantization.
         """
         for bias in [True, False]:
-            self._qlinear_cpu_test_helper(
+            self._qlinear_test_helper(
                 (torch.randn((2, 3, 4)),), int8_mixed_bf16=True, bias=bias
             )
 
@@ -2319,7 +2319,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
                     13 if bias else 12,
                 )
 
-            self._qlinear_cpu_test_helper(
+            self._qlinear_test_helper(
                 (torch.randn((2, 4, 3, 4)),),
                 do_permute=True,
                 matcher_check_fn=matcher_check_fn,
@@ -2346,7 +2346,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
                     17 if bias else 16,
                 )
 
-            self._qlinear_cpu_test_helper(
+            self._qlinear_test_helper(
                 (torch.randn((2, 4, 3, 4)),),
                 int8_mixed_bf16=True,
                 do_permute=True,

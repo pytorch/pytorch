@@ -8,7 +8,7 @@
 
 namespace at::native::onednn {
 
-void quantized_matmul_pt2(
+void quantized_matmul(
   at::Tensor  mat1, // act
   double input_scale,
   int64_t input_zero_point,
@@ -46,7 +46,7 @@ void quantized_matmul_pt2(
   size_t dims = result.dim();
   at::Device curDevice = at::Device(at::kXPU, c10::xpu::current_device());
   auto engine = GpuEngineManager::Instance().get_engine(curDevice);
-  auto strm = GpuStreamManager::Instance().get_stream();
+  auto stream = GpuStreamManager::Instance().get_stream();
 
   at::Tensor m1 = is_onednn_matmul_strides(mat1)
       ? mat1
@@ -264,7 +264,7 @@ void quantized_matmul_pt2(
     args.insert({DNNL_ARG_ATTR_ZERO_POINTS | DNNL_ARG_SRC, m1_zp_m});
   }
 
-  auto qmatmul_event = dnnl::sycl_interop::execute(matmul_p, strm, args);
+  auto qmatmul_event = dnnl::sycl_interop::execute(matmul_p, stream, args);
 
   if (!dst.is_same(result))
     result.copy_(dst);
