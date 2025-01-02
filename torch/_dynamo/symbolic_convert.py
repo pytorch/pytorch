@@ -26,6 +26,7 @@ import torch
 import torch._logging
 from torch._dynamo.exc import TensorifyScalarRestartAnalysis
 from torch._guards import tracing, TracingContext
+from torch.utils._functools import cache_method
 
 from . import config, exc, logging as torchdynamo_logging, trace_rules, variables
 from .bytecode_analysis import (
@@ -262,6 +263,10 @@ class TensorifyState:
     @classmethod
     def clear(cls) -> None:
         cls.force_specializations.clear()
+
+    @classmethod
+    def empty(cls) -> bool:
+        return len(cls.force_specializations) == 0
 
 
 @functools.lru_cache(None)
@@ -1198,6 +1203,9 @@ class InstructionTranslatorBase(
             unimplemented("Storing handles in globals - NYI")
         self.output.side_effects.store_global(variable, name, value)
 
+    # Cache note: This cache only exists for the duration of this
+    # InstructionTranslator - so it should be safe to do.
+    @cache_method
     def import_source(self, module_name):
         """Create an alias to a module for use in guards"""
         if "torch_package" in module_name:
@@ -3311,6 +3319,8 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
 
     def _load_global(self, inst):
         if self.output.global_scope is self.f_globals:
+            # If the global scope matches that of the root frame, use handler in
+            # root frame instruction translator, to enforce consistency.
             super()._load_global(inst)
         else:
             name = inst.argval
@@ -3327,7 +3337,9 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                 self.push(VariableTracker.build(self, value, global_source))
 
     def STORE_GLOBAL(self, inst):
-        if self.f_globals is self.parent.f_globals:
+        if self.output.global_scope is self.f_globals:
+            # If the global scope matches that of the root frame, use handler in
+            # root frame instruction translator, to enforce consistency.
             super().STORE_GLOBAL(inst)
         else:
             value = self.pop()

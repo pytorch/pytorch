@@ -1,4 +1,5 @@
 # Owner(s): ["module: inductor"]
+# ruff: noqa: F841
 import contextlib
 import dataclasses
 import functools
@@ -24,6 +25,7 @@ from torch._dynamo.device_interface import get_interface_for_device
 from torch._dynamo.utils import counters
 from torch._inductor import config as inductor_config
 from torch._inductor.test_case import run_tests, TestCase
+from torch.nn.attention.flex_attention import flex_attention
 from torch.testing._internal.common_utils import (
     scoped_load_inline,
     skipIfWindows,
@@ -799,7 +801,6 @@ main()
 
             return torch.compile(gm, backend=inner_compiler)
 
-        fwd_compiler_fn = functools.partial(eager_with_check, is_bwd=False)
         bwd_compiler_fn = functools.partial(eager_with_check, is_bwd=True)
 
         def fn(inputs):
@@ -940,7 +941,7 @@ main()
         torch._dynamo.reset()
         handle = torch._dynamo.convert_frame.register_bytecode_hook(bytecode_hook)
         try:
-            out = compiled_fn(inputs)
+            compiled_fn(inputs)
             self.assertTrue(len(inputs) == 0)
         finally:
             handle.remove()
@@ -2424,7 +2425,9 @@ TORCH_LIBRARY(test_autograd_cpp_node_saved_float, m) {
                 yield x.grad
 
         # compiled autograd and dynamo both support symfloat, but not backend
-        self.check_output_and_recompiles(fn, [1, 3])
+        self.check_output_and_recompiles(fn, [1, 4])
+        # 1 restart analysis due to specialize_float=False
+        self.assertEqual(counters["stats"]["unique_graphs"], 3)
 
     @scoped_load_inline
     def test_autograd_cpp_node_data_dependent(self, load_inline):
@@ -3216,6 +3219,31 @@ TORCH_LIBRARY(test_cudagraphs_cpu_scalar_used_in_cpp_custom_op, m) {
         self.assertTrue(isinstance(view_nodes[0].args[1][0], torch.fx.Node))
         self.assertTrue(isinstance(view_nodes[1].args[1][0], torch.fx.Node))
 
+    @unittest.skipIf(not HAS_CUDA, "requires cuda")
+    def test_flex_attention(self):
+        def fn():
+            @torch.compile(backend="aot_eager")
+            def fwd_bwd(x: torch.Tensor):
+                flex_attention(x, x, x).sum().backward()
+
+            for a, b in zip([12, 24, 48], [64, 128, 256]):
+                v = torch.zeros(
+                    1,
+                    1,
+                    a * b,
+                    b,
+                    dtype=torch.bfloat16,
+                    device="cuda",
+                    requires_grad=True,
+                )
+                fwd_bwd(v)
+                yield v.grad
+
+        # TODO: Dynamo graph breaks on torch.ops.higher_order.flex_attention_backward
+        self.check_output_and_recompiles(
+            fn, count=3, compiler_fn=make_compiler_fn(fullgraph=False)
+        )
+
     @unittest.expectedFailure
     def test_saved_tensor_unpack_hook_ordering(self):
         # not the correct behaviour, I'm just preventing this from changing silently
@@ -3319,6 +3347,57 @@ TORCH_LIBRARY(test_cudagraphs_cpu_scalar_used_in_cpp_custom_op, m) {
 
             loss.backward()
             yield tuple(order)
+
+        self.check_output_and_recompiles(fn)
+
+    def test_sac(self):
+        # circular import
+        from torch.utils.checkpoint import (
+            checkpoint,
+            CheckpointPolicy,
+            create_selective_checkpoint_contexts,
+        )
+
+        def fn():
+            class mlp(nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.layer1 = nn.Linear(10, 10)
+                    self.layer2 = nn.Linear(10, 10)
+                    self.layer3 = nn.Linear(10, 10)
+                    self.layer4 = nn.Linear(10, 10)
+
+                def forward(self, x):
+                    x = self.layer1(x)
+                    x = self.layer2(x)
+                    x = self.layer3(x)
+                    x = self.layer4(x)
+                    return x
+
+            recompute_list = [torch.ops.aten.addmm.default]
+
+            def recompute_policy(ctx, op, *args, **kwargs):
+                if op in recompute_list:
+                    return CheckpointPolicy.MUST_RECOMPUTE
+                else:
+                    return CheckpointPolicy.PREFER_SAVE
+
+            def context_fn():
+                return create_selective_checkpoint_contexts(recompute_policy)
+
+            model = mlp()
+            input = torch.randn(1, 10)
+
+            out = checkpoint(model, input, use_reentrant=False, context_fn=context_fn)
+            out.sum().backward()
+            yield model.layer1.weight.grad
+            yield model.layer1.bias.grad
+            yield model.layer2.weight.grad
+            yield model.layer2.bias.grad
+            yield model.layer3.weight.grad
+            yield model.layer3.bias.grad
+            yield model.layer4.weight.grad
+            yield model.layer4.bias.grad
 
         self.check_output_and_recompiles(fn)
 

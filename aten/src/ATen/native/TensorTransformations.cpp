@@ -1,6 +1,6 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/native/IndexKernel.h> // for flip_stub
 #include <ATen/native/TensorTransformations.h>
-#include <ATen/native/IndexKernel.h>  // for flip_stub
 
 #include <ATen/Parallel.h>
 #include <ATen/TensorIterator.h>
@@ -44,28 +44,30 @@ Tensor flip(const Tensor& self, IntArrayRef dims) {
   int n = 0;
   auto strides = DimVector(self.strides());
   for (const auto i : c10::irange(total_dims)) {
-    if(flip_dims_b[i] && self.size(i) > 1 && self.stride(i) != 0) {
+    if (flip_dims_b[i] && self.size(i) > 1 && self.stride(i) != 0) {
       n++;
       strides[i] = 0;
     }
   }
 
   // Nothing to do, we return fast
-  if (n == 0 || self.numel() <=1) {
+  if (n == 0 || self.numel() <= 1) {
     out_tensor.copy_(self);
     return out_tensor;
   }
 
-  //create dummy output with 0 strides at flipped dimension, to prevent tensorIterator from coalescing flipped dims
+  // create dummy output with 0 strides at flipped dimension, to prevent
+  // tensorIterator from coalescing flipped dims
   const auto restrided_self = self.as_strided(self.sizes(), strides);
-  auto iter = TensorIteratorConfig()
-    .set_check_mem_overlap(false)
-    .check_all_same_dtype(false)
-    .declare_static_dtype_and_device(self.scalar_type(), self.device())
-    .add_output(out_tensor)
-    .add_const_input(self)
-    .add_const_input(restrided_self)
-    .build();
+  auto iter =
+      TensorIteratorConfig()
+          .set_check_mem_overlap(false)
+          .check_all_same_dtype(false)
+          .declare_static_dtype_and_device(self.scalar_type(), self.device())
+          .add_output(out_tensor)
+          .add_const_input(self)
+          .add_const_input(restrided_self)
+          .build();
 
   auto* data = reinterpret_cast<char*>(iter.data_ptr(0));
   const auto sizes = iter.shape();
@@ -83,11 +85,12 @@ Tensor flip(const Tensor& self, IntArrayRef dims) {
   //   - We iterate in the opposite direction (invert the strides)
 
   for (const auto i : c10::irange(iter.ndim())) {
-    // We know that an dimension has a zero stride and self[i] does not, as we defined above
-    // Note that it may be the case that strides_dummy[i] = 0 not because we set it, but because
-    // strides_self[i] == 0. We do not want to do anything there
+    // We know that an dimension has a zero stride and self[i] does not, as we
+    // defined above Note that it may be the case that strides_dummy[i] = 0 not
+    // because we set it, but because strides_self[i] == 0. We do not want to do
+    // anything there
     if (strides_dummy[i] == 0 && strides_self[i] != 0) {
-      data += strides_bytes[i] * (sizes[i]-1);
+      data += strides_bytes[i] * (sizes[i] - 1);
       strides_bytes[i] *= -1;
     }
   }
@@ -99,7 +102,10 @@ Tensor flip(const Tensor& self, IntArrayRef dims) {
   return out_tensor;
 }
 
-Tensor roll(const Tensor& self, IntArrayRef shifts, IntArrayRef dims) { // Used by CPU and MPS dispatch.
+Tensor roll(
+    const Tensor& self,
+    IntArrayRef shifts,
+    IntArrayRef dims) { // Used by CPU and MPS dispatch.
   if (dims.size() != 1 || shifts.size() != 1) {
     return roll_common(self, shifts, dims);
   }
@@ -115,7 +121,7 @@ Tensor roll(const Tensor& self, IntArrayRef shifts, IntArrayRef dims) { // Used 
   if (start < 0) {
     start = start + size;
   }
-  auto t0 = self.narrow(dim, start, size-start);
+  auto t0 = self.narrow(dim, start, size - start);
   auto t1 = self.narrow(dim, 0, start);
   return at::cat({std::move(t0), std::move(t1)}, dim);
 }
@@ -123,27 +129,38 @@ Tensor roll(const Tensor& self, IntArrayRef shifts, IntArrayRef dims) { // Used 
 Tensor rot90(const Tensor& self, int64_t k, IntArrayRef dims) {
   const int64_t total_dims = self.dim(), total_rot_dims = dims.size();
 
-  TORCH_CHECK(total_rot_dims == 2,
-    "expected total rotation dims == 2, but got dims = ", total_rot_dims);
+  TORCH_CHECK(
+      total_rot_dims == 2,
+      "expected total rotation dims == 2, but got dims = ",
+      total_rot_dims);
 
-  TORCH_CHECK(total_dims >= 2,
-    "expected total dims >= 2, but got total dims = ", total_dims);
+  TORCH_CHECK(
+      total_dims >= 2,
+      "expected total dims >= 2, but got total dims = ",
+      total_dims);
 
-  TORCH_CHECK(dims[0] != dims[1] && std::abs(dims[0] - dims[1]) != total_dims,
-    "expected rotation dims to be different, but got dim0 = ", dims[0],
-    " and dim1 = ", dims[1]);
+  TORCH_CHECK(
+      dims[0] != dims[1] && std::abs(dims[0] - dims[1]) != total_dims,
+      "expected rotation dims to be different, but got dim0 = ",
+      dims[0],
+      " and dim1 = ",
+      dims[1]);
 
   // check range of dims
-  TORCH_CHECK(dims[0] < total_dims && dims[0] >= -total_dims,
-    "Rotation dim0 out of range, dim0 = ", dims[0]);
+  TORCH_CHECK(
+      dims[0] < total_dims && dims[0] >= -total_dims,
+      "Rotation dim0 out of range, dim0 = ",
+      dims[0]);
 
-  TORCH_CHECK(dims[1] < total_dims && dims[1] >= -total_dims,
-    "Rotation dim1 out of range, dim1 = ", dims[1]);
+  TORCH_CHECK(
+      dims[1] < total_dims && dims[1] >= -total_dims,
+      "Rotation dim1 out of range, dim1 = ",
+      dims[1]);
 
   // handle modulo with negative k
   k = (4 + (k % 4)) % 4;
 
-  switch(k) {
+  switch (k) {
     case 1:
       return self.flip({dims[1]}).transpose_(dims[0], dims[1]);
     case 2:
@@ -181,7 +198,8 @@ std::vector<Tensor> atleast_1d(TensorList tensors) {
   auto transform_lambda = [](const Tensor& input) -> Tensor {
     return at::native::atleast_1d(input);
   };
-  std::transform(tensors.cbegin(), tensors.cend(), result.begin(), transform_lambda);
+  std::transform(
+      tensors.cbegin(), tensors.cend(), result.begin(), transform_lambda);
   return result;
 }
 
@@ -202,7 +220,8 @@ std::vector<Tensor> atleast_2d(TensorList tensors) {
   auto transform_lambda = [](const Tensor& input) -> Tensor {
     return at::native::atleast_2d(input);
   };
-  std::transform(tensors.cbegin(), tensors.cend(), result.begin(), transform_lambda);
+  std::transform(
+      tensors.cbegin(), tensors.cend(), result.begin(), transform_lambda);
   return result;
 }
 
@@ -226,7 +245,8 @@ std::vector<Tensor> atleast_3d(TensorList tensors) {
   auto transform_lambda = [](const Tensor& input) -> Tensor {
     return at::native::atleast_3d(input);
   };
-  std::transform(tensors.cbegin(), tensors.cend(), result.begin(), transform_lambda);
+  std::transform(
+      tensors.cbegin(), tensors.cend(), result.begin(), transform_lambda);
   return result;
 }
 

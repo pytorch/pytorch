@@ -10,7 +10,7 @@ from typing import Any, Callable, Dict, Optional, Set, Type, TYPE_CHECKING, Unio
 
 import torch
 from torch._environment import is_fbcode
-from torch.utils._config_module import get_tristate_env, install_config_module
+from torch.utils._config_module import Config, get_tristate_env, install_config_module
 
 
 # to configure logging for dynamo, aot, and inductor
@@ -256,6 +256,14 @@ allow_complex_guards_as_runtime_asserts = False
 # compile this code; however, this can be useful for export.
 force_unspec_int_unbacked_size_like_on_torchrec_kjt = False
 
+# Currently, Dynamo will always specialize on int members of NN module.
+# However, there could be cases where this is undesirable, e.g., when tracking
+# step count leading to constant recompilation and eventually eager fallback.
+# Setting this flag to True will allow int members to be potentially unspecialized
+# through dynamic shape mechanism.
+# Defaults to False for BC.
+allow_unspec_int_on_nn_module = False
+
 # Specify how to optimize a compiled DDP module. The flag accepts a boolean
 # value or a string. There are 4 modes.
 # 1. "ddp_optimizer" (or True): with "ddp_ptimizer", Dynamo will automatically
@@ -334,6 +342,10 @@ skip_nnmodule_hook_guards = True
 # notice and lead to incorrect result.
 skip_no_tensor_aliasing_guards_on_parameters = True
 
+# Considers a tensor immutable if it is one of the values of a dictionary, and
+# the dictionary tag is same across invocation calls.
+skip_tensor_guards_with_matching_dict_tags = True
+
 # If True, raises exception if TorchDynamo is called with a context manager
 raise_on_ctx_manager_usage = True
 
@@ -384,6 +396,9 @@ enable_cpp_guard_manager = True
 
 # Inline inbuilt nn modules
 inline_inbuilt_nn_modules = not is_fbcode()
+
+# Use C++ FrameLocalsMapping (raw array view of Python frame fastlocals)
+enable_cpp_framelocals_guard_eval = True
 
 # Whether to automatically find and replace identical graph
 # regions with a call to invoke_subgraph
@@ -536,6 +551,18 @@ automatic_dynamic_local_pgo: bool = (
 # Like above, but using remote cache
 automatic_dynamic_remote_pgo: Optional[bool] = get_tristate_env(
     "TORCH_DYNAMO_AUTOMATIC_DYNAMIC_REMOTE_PGO"
+)
+
+# temporary config to kill later
+_unsafe_skip_fsdp_module_guards = (
+    os.environ.get("UNSAFE_SKIP_FSDP_MODULE_GUARDS", "0") == "1"
+)
+
+# Run GC at the end of compilation
+run_gc_after_compile = Config(  # type: ignore[var-annotated]
+    default=True,
+    justknob="pytorch/compiler:enable_run_gc_after_compile",
+    env_name_default="TORCH_DYNAMO_RUN_GC_AFTER_COMPILE",
 )
 
 # HACK: this is for testing custom ops profiling only
