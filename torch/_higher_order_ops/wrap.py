@@ -2,10 +2,33 @@
 import inspect
 import itertools
 import logging
-from typing import Optional
+from typing import Any, Optional
+
+import torch
+import torch.utils._pytree as pytree
+from torch._C import _AutoDispatchBelowAutograd, DispatchKey
+from torch._dispatch.python import suspend_functionalization
+from torch._higher_order_ops.utils import (
+    _from_fun,
+    _set_compilation_env,
+    create_fw_bw_graph,
+    reenter_make_fx,
+    saved_tensors_and_symints,
+    save_tensors_and_symints_for_backward,
+    unique_graph_id,
+)
 
 from torch._logging import warning_once
 from torch._ops import HigherOrderOperator
+from torch._subclasses.fake_tensor import FakeTensorMode
+from torch._subclasses.functional_tensor import disable_functional_mode
+from torch.fx.experimental.proxy_tensor import (
+    disable_proxy_modes_tracing,
+    ProxyTorchDispatchMode,
+    track_tensor_tree,
+    _temp_remove_metadata_torch_function_mode,
+    _temp_remove_pre_dispatch_torch_function_mode,
+)
 from torch.types import _dtype
 from torch.utils.checkpoint import checkpoint, CheckpointPolicy
 
@@ -21,20 +44,71 @@ class Wrap(HigherOrderOperator):
         super().__init__("wrap")
 
     def __call__(self, func, *args, **kwargs):
-        # Dynamo already traces the body of HigherOrderOp beforehand when it
-        # so no need to trace into it.
-        import torch._dynamo  # noqa: F401
-        from torch._dynamo import disable
-
-        @disable
-        def wrapper():
-            result = func(*args, **kwargs)
-            return result
-
-        return wrapper()
+        return super().__call__(func, *args, **kwargs)
 
 
 wrap = Wrap()
+
+
+class WrapAutogradOp(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, fw_graph, joint_graph, *flat_args):
+        ctx._joint_graph = joint_graph
+        save_tensors_and_symints_for_backward(ctx, flat_args)
+        with _AutoDispatchBelowAutograd():
+            return wrap(fw_graph, *flat_args)
+
+    @staticmethod
+    def backward(ctx, *flat_grads):
+        operands = saved_tensors_and_symints(ctx)
+        grads = wrap(ctx._joint_graph, *(flat_grads + operands))
+        return None, None, *grads
+
+
+@wrap.py_impl(DispatchKey.Autograd)
+def wrap_autograd(func, *args, **kwargs):
+    if pytree.tree_all_only(
+        torch.Tensor,
+        lambda t: not t.requires_grad,  # type: ignore[union-attr]
+        (args, kwargs),
+    ):
+        with _AutoDispatchBelowAutograd():
+            return wrap(func, *args, **kwargs)
+
+    with suspend_functionalization(), disable_functional_mode():
+        with disable_proxy_modes_tracing():
+            fw_inputs = pytree.tree_map(_from_fun, (*args, *kwargs.values()))
+            fw_outputs = pytree.tree_map(_from_fun, func(*fw_inputs))
+            fw_graph, joint_graph = create_fw_bw_graph(
+                func, False, fw_inputs, fw_outputs
+            )
+
+    flat_out = WrapAutogradOp.apply(fw_graph, joint_graph, *args, **kwargs)
+    return flat_out
+
+@wrap.py_impl(ProxyTorchDispatchMode)
+def wrap_dispatch_mode(mode, func, *args, **kwargs):
+    inputs = args + tuple(kwargs.values())
+    subgraph = reenter_make_fx(func)(*inputs)
+    i, graph_name = unique_graph_id(mode, prefix="wrap_body")
+    mode.tracer.root.register_module(graph_name, subgraph)
+
+    # proxify
+    proxy_inputs = pytree.tree_map(mode.tracer.unwrap_proxy, (subgraph,) + inputs)
+    out_proxy = mode.tracer.create_proxy(
+        "call_function", wrap, proxy_inputs, {}
+    )
+    out = subgraph(*inputs)
+    return track_tensor_tree(out, out_proxy, constant=None, tracer=mode.tracer)
+
+@wrap.py_impl(FakeTensorMode)
+def wrap_fake_mode(mode, func, *args, **kwargs):
+    with mode:
+        return func(*args, **kwargs)
+
+@wrap.py_impl(DispatchKey.CompositeExplicitAutograd)
+def wrap_dense(func, *args, **kwargs):
+    return func(*args, **kwargs)
 
 
 class WrapWithSetGradEnabled(HigherOrderOperator):
