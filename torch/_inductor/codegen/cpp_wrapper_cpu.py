@@ -126,6 +126,9 @@ class CppWrapperCpu(PythonWrapperCodegen):
         # include a hash so our code cache gives different constants different files
         self.header.writeline(f"// {name} {hashed}")
 
+    def get_device_include(self):
+        return f"#include <torch/csrc/inductor/cpp_wrapper/{self.device}.h>"
+
     def write_header(self):
         if V.graph.is_const_graph:
             # We do not write header for constant graph, it will be written by main module.
@@ -167,7 +170,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
 
                 cpp_wrapper_src = (
                 '''
-                #include <torch/csrc/inductor/cpp_wrapper/{self.device}.h>
+                {self.get_device_include()}
                 """
             )
 
