@@ -48,7 +48,6 @@ The code below could be run to generate a snapshot file which records the state 
             data,
             "torchscript_exporter_highresnet.onnx",
             dynamo=False,
-            external_data=True,
             report=False,
         )
 
