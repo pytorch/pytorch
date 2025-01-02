@@ -151,25 +151,14 @@ def check_dynamo(backend: str, device: str, err_msg: str) -> None:
 
     try:
         import torch._dynamo as dynamo
-        from torch._inductor.codegen.common import (
-            get_scheduling_for_device,
-            init_backend_registration,
-        )
-
-        # This is decorated with lru_cache so safe to use multiple times
-        init_backend_registration()
-
-        scheduling = get_scheduling_for_device(device)
-        if scheduling is None:
-            print(
-                f"WARNING: No Inductor scheduling factory registered for {device}. Skipping check."
-            )
-            return
+        from torch._dynamo.eval_frame import raise_if_inductor_unavailable
 
         try:
-            scheduling(None).raise_if_unavailable(device)
+            raise_if_inductor_unavailable(device)
         except RuntimeError as e:
-            print(f"WARNING: Inductor not available for {device}: {e}. Skipping check.")
+            print(
+                f"WARNING: Inductor not available for {device} ({e}). Skipping check."
+            )
             return
 
         dynamo.reset()
