@@ -1,5 +1,5 @@
-# mypy: allow-untyped-defs
 from typing import Optional, Union
+from typing_extensions import Self
 
 import torch
 from torch import Tensor
@@ -9,6 +9,7 @@ from torch.distributions.gumbel import euler_constant
 from torch.distributions.transformed_distribution import TransformedDistribution
 from torch.distributions.transforms import AffineTransform, PowerTransform
 from torch.distributions.utils import broadcast_all
+from torch.types import _size
 
 
 __all__ = ["Weibull"]
@@ -54,7 +55,7 @@ class Weibull(TransformedDistribution):
         ]
         super().__init__(base_dist, transforms, validate_args=validate_args)
 
-    def expand(self, batch_shape, _instance=None):
+    def expand(self, batch_shape: _size, _instance: Optional[Self] = None) -> Self:
         new = self._get_checked_instance(Weibull, _instance)
         new.scale = self.scale.expand(batch_shape)
         new.concentration = self.concentration.expand(batch_shape)
@@ -87,7 +88,7 @@ class Weibull(TransformedDistribution):
             - torch.exp(2 * torch.lgamma(1 + self.concentration_reciprocal))
         )
 
-    def entropy(self):
+    def entropy(self) -> Tensor:
         return (
             euler_constant * (1 - self.concentration_reciprocal)
             + torch.log(self.scale * self.concentration_reciprocal)

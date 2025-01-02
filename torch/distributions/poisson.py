@@ -1,12 +1,12 @@
-# mypy: allow-untyped-defs
 from typing import Optional, Union
+from typing_extensions import Self
 
 import torch
 from torch import Tensor
 from torch.distributions import constraints
 from torch.distributions.exp_family import ExponentialFamily
 from torch.distributions.utils import broadcast_all
-from torch.types import _Number, Number
+from torch.types import _Number, Number, _size
 
 
 __all__ = ["Poisson"]
@@ -59,7 +59,7 @@ class Poisson(ExponentialFamily):
             batch_shape = self.rate.size()
         super().__init__(batch_shape, validate_args=validate_args)
 
-    def expand(self, batch_shape, _instance=None):
+    def expand(self, batch_shape: _size, _instance: Optional[Self] = None) -> Self:
         new = self._get_checked_instance(Poisson, _instance)
         batch_shape = torch.Size(batch_shape)
         new.rate = self.rate.expand(batch_shape)
@@ -67,12 +67,12 @@ class Poisson(ExponentialFamily):
         new._validate_args = self._validate_args
         return new
 
-    def sample(self, sample_shape=torch.Size()):
+    def sample(self, sample_shape: _size = torch.Size()) -> Tensor:
         shape = self._extended_shape(sample_shape)
         with torch.no_grad():
             return torch.poisson(self.rate.expand(shape))
 
-    def log_prob(self, value):
+    def log_prob(self, value: Tensor) -> Tensor:
         if self._validate_args:
             self._validate_sample(value)
         rate, value = broadcast_all(self.rate, value)
@@ -82,5 +82,5 @@ class Poisson(ExponentialFamily):
     def _natural_params(self) -> tuple[Tensor]:
         return (torch.log(self.rate),)
 
-    def _log_normalizer(self, x):
+    def _log_normalizer(self, x: Tensor) -> Tensor:
         return torch.exp(x)

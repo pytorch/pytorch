@@ -197,7 +197,7 @@ class Transform:
         """
         raise NotImplementedError
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return self.__class__.__name__ + "()"
 
     def forward_shape(self, shape):
@@ -259,7 +259,7 @@ class _InverseTransform(Transform):
         assert self._inv is not None
         return self._inv == other._inv
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return f"{self.__class__.__name__}({repr(self._inv)})"
 
     def __call__(self, x):
@@ -392,7 +392,7 @@ class ComposeTransform(Transform):
             shape = part.inverse_shape(shape)
         return shape
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         fmt_string = self.__class__.__name__ + "(\n    "
         fmt_string += ",\n    ".join([p.__repr__() for p in self.parts])
         fmt_string += "\n)"
@@ -468,7 +468,7 @@ class IndependentTransform(Transform):
         result = _sum_rightmost(result, self.reinterpreted_batch_ndims)
         return result
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return f"{self.__class__.__name__}({repr(self.base_transform)}, {self.reinterpreted_batch_ndims})"
 
     def forward_shape(self, shape):
@@ -594,8 +594,8 @@ class PowerTransform(Transform):
         return PowerTransform(self.exponent, cache_size=cache_size)
 
     @lazy_property
-    def sign(self) -> int:  # type: ignore[override]
-        return self.exponent.sign()  # type: ignore[return-value]
+    def sign(self) -> Tensor:
+        return self.exponent.sign()
 
     def __eq__(self, other):
         if not isinstance(other, PowerTransform):

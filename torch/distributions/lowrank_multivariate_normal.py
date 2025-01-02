@@ -1,6 +1,6 @@
-# mypy: allow-untyped-defs
 import math
 from typing import Optional
+from typing_extensions import Self
 
 import torch
 from torch import Tensor
@@ -14,7 +14,7 @@ from torch.types import _size
 __all__ = ["LowRankMultivariateNormal"]
 
 
-def _batch_capacitance_tril(W, D):
+def _batch_capacitance_tril(W: Tensor, D: Tensor) -> Tensor:
     r"""
     Computes Cholesky of :math:`I + W.T @ inv(D) @ W` for a batch of matrices :math:`W`
     and a batch of vectors :math:`D`.
@@ -26,7 +26,7 @@ def _batch_capacitance_tril(W, D):
     return torch.linalg.cholesky(K)
 
 
-def _batch_lowrank_logdet(W, D, capacitance_tril):
+def _batch_lowrank_logdet(W: Tensor, D: Tensor, capacitance_tril: Tensor) -> Tensor:
     r"""
     Uses "matrix determinant lemma"::
         log|W @ W.T + D| = log|C| + log|D|,
@@ -38,7 +38,9 @@ def _batch_lowrank_logdet(W, D, capacitance_tril):
     )
 
 
-def _batch_lowrank_mahalanobis(W, D, x, capacitance_tril):
+def _batch_lowrank_mahalanobis(
+    W: Tensor, D: Tensor, x: Tensor, capacitance_tril: Tensor
+) -> Tensor:
     r"""
     Uses "Woodbury matrix identity"::
         inv(W @ W.T + D) = inv(D) - inv(D) @ W @ inv(C) @ W.T @ inv(D),
@@ -137,7 +139,7 @@ class LowRankMultivariateNormal(Distribution):
         self._capacitance_tril = _batch_capacitance_tril(cov_factor, cov_diag)
         super().__init__(batch_shape, event_shape, validate_args=validate_args)
 
-    def expand(self, batch_shape, _instance=None):
+    def expand(self, batch_shape: _size, _instance: Optional[Self] = None) -> Self:
         new = self._get_checked_instance(LowRankMultivariateNormal, _instance)
         batch_shape = torch.Size(batch_shape)
         loc_shape = batch_shape + self.event_shape
@@ -221,7 +223,7 @@ class LowRankMultivariateNormal(Distribution):
             + self._unbroadcasted_cov_diag.sqrt() * eps_D
         )
 
-    def log_prob(self, value):
+    def log_prob(self, value: Tensor) -> Tensor:
         if self._validate_args:
             self._validate_sample(value)
         diff = value - self.loc
@@ -238,7 +240,7 @@ class LowRankMultivariateNormal(Distribution):
         )
         return -0.5 * (self._event_shape[0] * math.log(2 * math.pi) + log_det + M)
 
-    def entropy(self):
+    def entropy(self) -> Tensor:
         log_det = _batch_lowrank_logdet(
             self._unbroadcasted_cov_factor,
             self._unbroadcasted_cov_diag,

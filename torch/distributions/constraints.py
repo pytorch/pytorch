@@ -101,7 +101,7 @@ class Constraint:
         """
         raise NotImplementedError
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return self.__class__.__name__[1:] + "()"
 
 
@@ -136,7 +136,9 @@ class _Dependent(Constraint):
             raise NotImplementedError(".event_dim cannot be determined statically")
         return self._event_dim
 
-    def __call__(self, *, is_discrete=NotImplemented, event_dim=NotImplemented):
+    def __call__(
+        self, *, is_discrete: bool = NotImplemented, event_dim: int = NotImplemented
+    ) -> "_Dependent":
         """
         Support for syntax to customize static attributes::
 
@@ -263,7 +265,7 @@ class _IndependentConstraint(Constraint):
         result = result.all(-1)
         return result
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return f"{self.__class__.__name__[1:]}({repr(self.base_constraint)}, {self.reinterpreted_batch_ndims})"
 
 
@@ -355,7 +357,7 @@ class _IntegerInterval(Constraint):
             (value % 1 == 0) & (self.lower_bound <= value) & (value <= self.upper_bound)
         )
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         fmt_string = self.__class__.__name__[1:]
         fmt_string += (
             f"(lower_bound={self.lower_bound}, upper_bound={self.upper_bound})"
@@ -377,7 +379,7 @@ class _IntegerLessThan(Constraint):
     def check(self, value):
         return (value % 1 == 0) & (value <= self.upper_bound)
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         fmt_string = self.__class__.__name__[1:]
         fmt_string += f"(upper_bound={self.upper_bound})"
         return fmt_string
@@ -397,7 +399,7 @@ class _IntegerGreaterThan(Constraint):
     def check(self, value):
         return (value % 1 == 0) & (value >= self.lower_bound)
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         fmt_string = self.__class__.__name__[1:]
         fmt_string += f"(lower_bound={self.lower_bound})"
         return fmt_string
@@ -424,7 +426,7 @@ class _GreaterThan(Constraint):
     def check(self, value):
         return self.lower_bound < value
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         fmt_string = self.__class__.__name__[1:]
         fmt_string += f"(lower_bound={self.lower_bound})"
         return fmt_string
@@ -442,7 +444,7 @@ class _GreaterThanEq(Constraint):
     def check(self, value):
         return self.lower_bound <= value
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         fmt_string = self.__class__.__name__[1:]
         fmt_string += f"(lower_bound={self.lower_bound})"
         return fmt_string
@@ -460,7 +462,7 @@ class _LessThan(Constraint):
     def check(self, value):
         return value < self.upper_bound
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         fmt_string = self.__class__.__name__[1:]
         fmt_string += f"(upper_bound={self.upper_bound})"
         return fmt_string
@@ -479,7 +481,7 @@ class _Interval(Constraint):
     def check(self, value):
         return (self.lower_bound <= value) & (value <= self.upper_bound)
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         fmt_string = self.__class__.__name__[1:]
         fmt_string += (
             f"(lower_bound={self.lower_bound}, upper_bound={self.upper_bound})"
@@ -500,7 +502,7 @@ class _HalfOpenInterval(Constraint):
     def check(self, value):
         return (self.lower_bound <= value) & (value < self.upper_bound)
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         fmt_string = self.__class__.__name__[1:]
         fmt_string += (
             f"(lower_bound={self.lower_bound}, upper_bound={self.upper_bound})"
