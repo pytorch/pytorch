@@ -873,6 +873,16 @@ class CommonTemplate:
             ),
         )
 
+    @patch("torch._inductor.compile_fx._debug_serde_compile", True)
+    def test_serde_compile(self):
+        # Make sure that compiling works when we pass the input + output from
+        # fx_codegen_and_compile() through serde.
+
+        def fn(a, b):
+            return a + b
+
+        self.common(fn, (torch.tensor([False, True]), torch.tensor([True, True])))
+
     @skipCUDAIf(not SM80OrLater, "Requires sm80")
     @skip_if_halide  # aoti
     @skip_if_triton_cpu  # aoti
@@ -4790,9 +4800,11 @@ class CommonTemplate:
 
         eager_version_counters_after = [
             # TODO: remove the + 1 after https://github.com/pytorch/pytorch/issues/120622 is fixed
-            buffer._version + 1
-            if k in ["m.running_mean", "m.running_var"]
-            else buffer._version
+            (
+                buffer._version + 1
+                if k in ["m.running_mean", "m.running_var"]
+                else buffer._version
+            )
             for k, buffer in model_for_eager.named_buffers()
         ]
 
@@ -12897,9 +12909,11 @@ if HAS_GPU and not TEST_WITH_ASAN:
                 ),
                 (
                     fn3,
-                    "triton_poi_fused_layer_norm_relu"
-                    if torch._dynamo.config.inline_inbuilt_nn_modules
-                    else "triton_poi_fused_LayerNorm_ReLU",
+                    (
+                        "triton_poi_fused_layer_norm_relu"
+                        if torch._dynamo.config.inline_inbuilt_nn_modules
+                        else "triton_poi_fused_LayerNorm_ReLU"
+                    ),
                     (torch.randn(4, 4, device=GPU_TYPE),),
                 ),
             ]
