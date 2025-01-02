@@ -40,11 +40,13 @@ from torch._dynamo.testing import (
     skipIfPy312,
 )
 from torch._dynamo.utils import ifdynstaticdefault
+from torch._guards import CompileContext, CompileId
 from torch._inductor.aoti_eager import (
     aoti_compile_with_persistent_cache,
     aoti_eager_cache_dir,
     load_aoti_eager_cache,
 )
+from torch._inductor.codecache import cpp_prefix_path
 from torch._inductor.codegen.common import DataTypePropagation, OptimizationContext
 from torch._inductor.fx_passes import pad_mm
 from torch._inductor.test_case import TestCase as InductorTestCase
@@ -52,6 +54,7 @@ from torch._inductor.utils import (
     add_scheduler_init_hook,
     run_and_get_code,
     run_and_get_cpp_code,
+    run_and_get_kernels,
     run_and_get_triton_code,
     run_fw_bw_and_get_code,
 )
@@ -6218,6 +6221,99 @@ class CommonTemplate:
                 fn,
                 (torch.arange(-1e-5, 1e-5, 1e-7).to(dtype=dtype),),
             )
+
+    @patch.object(cpp_prefix_path, "cache_clear", lambda: None)
+    @config.patch(force_disable_caches=True)
+    @skip_if_cpp_wrapper("run_and_get_kernels issue")
+    def test_deterministic_codegen(self):
+        if "cpu" in str(self.device) and config.is_fbcode():
+            raise unittest.SkipTest("cpp packaging is wacky in fbcode")
+
+        @torch.compile(fullgraph=True)
+        def a(x):
+            return x.cos().sin().softmax(-1)
+
+        @torch.compile(fullgraph=True)
+        def b(x):
+            return x.sin().cos().softmax(-1)
+
+        @torch.compile(fullgraph=True)
+        def c(x):
+            return x.cos().sin().softmax(-1)
+
+        x = torch.randn(16, 256, device=self.device)
+        _, (coda_a0,) = run_and_get_kernels(a, x)
+        _, (coda_b0,) = run_and_get_kernels(b, x)
+        _, (coda_c0,) = run_and_get_kernels(c, x)
+        self.assertEqual(coda_a0, coda_c0)
+
+        # compile in a different order
+        torch.compiler.reset()
+        _, (coda_c1,) = run_and_get_kernels(c, x)
+        _, (coda_a1,) = run_and_get_kernels(a, x)
+        _, (coda_b1,) = run_and_get_kernels(b, x)
+        self.assertEqual(coda_a0, coda_a1)
+        self.assertEqual(coda_b0, coda_b1)
+        self.assertEqual(coda_c0, coda_c1)
+
+        # force a different CompileId
+        torch.compiler.reset()
+        CompileContext_init = CompileContext.__init__
+        with patch.object(
+            CompileContext,
+            "__init__",
+            lambda self, _: CompileContext_init(self, CompileId(999, 999)),
+        ):
+            _, (coda_a2,) = run_and_get_kernels(a, x)
+            _, (coda_c2,) = run_and_get_kernels(c, x)
+            _, (coda_b2,) = run_and_get_kernels(b, x)
+        self.assertEqual(coda_a0, coda_a2)
+        self.assertEqual(coda_b0, coda_b2)
+        self.assertEqual(coda_c0, coda_c2)
+
+    @patch.object(cpp_prefix_path, "cache_clear", lambda: None)
+    @config.patch(force_disable_caches=True)
+    @skip_if_cpp_wrapper("run_and_get_kernels issue")
+    def test_deterministic_codegen_on_graph_break(self):
+        if "cpu" in str(self.device) and config.is_fbcode():
+            raise unittest.SkipTest("cpp packaging is wacky in fbcode")
+
+        def a(x):
+            return x.cos().sin().softmax(-1)
+
+        @torch.compile()
+        def b(x):
+            x = a(x)
+            torch._dynamo.graph_break()
+            x = a(x)
+            return x
+
+        x = torch.randn(16, 256, device=self.device)
+        _, (code0, code1) = run_and_get_kernels(b, x)
+        self.assertEqual(code0, code1)
+
+    @patch.object(cpp_prefix_path, "cache_clear", lambda: None)
+    @config.patch(force_disable_caches=True)
+    @skip_if_cpp_wrapper("run_and_get_kernels issue")
+    def test_deterministic_codegen_with_suffix(self):
+        if "cpu" in str(self.device) and config.is_fbcode():
+            raise unittest.SkipTest("cpp packaging is wacky in fbcode")
+
+        @torch.compile(fullgraph=True)
+        def a(x):
+            return x.cos().sin().softmax(-1)
+
+        @torch.compile(fullgraph=True)
+        def b(x, y):
+            x = x.cos().sin().softmax(-1)
+            x = torch.matmul(x, y)
+            return x
+
+        x = torch.randn(16, 256, device=self.device)
+        y = torch.randn(256, 256, device=self.device)
+        _, (code0,) = run_and_get_kernels(a, x)
+        _, (code1,) = run_and_get_kernels(b, x, y)
+        self.assertEqual(code0, code1)
 
     def test_flip(self):
         def fn(x):
@@ -13115,6 +13211,189 @@ if HAS_GPU and not TEST_WITH_ASAN:
 
             _, code = run_and_get_code(wrapper, inp, weight)
             self.assertTrue("in_out_ptr" in code[1])
+
+        @torch._functorch.config.patch("donated_buffer", True)
+        @torch._inductor.config.patch("force_shape_pad", True)
+        def test_donated_buffer_inplace_gpt(self):
+            # model implementation from llm.c:
+            # https://github.com/karpathy/llm.c/blob/master/train_gpt2.py
+            class NewGELU(nn.Module):
+                def forward(self, input):
+                    return (
+                        0.5
+                        * input
+                        * (
+                            1.0
+                            + torch.tanh(
+                                math.sqrt(2.0 / math.pi)
+                                * (input + 0.044715 * torch.pow(input, 3.0))
+                            )
+                        )
+                    )
+
+            class CausalSelfAttention(nn.Module):
+                def __init__(self, config):
+                    super().__init__()
+                    assert config.n_embd % config.n_head == 0
+                    # key, query, value projections for all heads, but in a batch
+                    self.c_attn = nn.Linear(config.n_embd, 3 * config.n_embd)
+                    # output projection
+                    self.c_proj = nn.Linear(config.n_embd, config.n_embd)
+                    self.c_proj.LLMC_RESIDUAL_SCALE_FLAG = 1
+                    # regularization
+                    self.n_head = config.n_head
+                    self.n_embd = config.n_embd
+                    # not really a 'bias', more of a mask, but following the OpenAI/HF naming though
+                    self.register_buffer(
+                        "bias",
+                        torch.tril(
+                            torch.ones(config.block_size, config.block_size)
+                        ).view(1, 1, config.block_size, config.block_size),
+                    )
+
+                def forward(self, x):
+                    (
+                        B,
+                        T,
+                        C,
+                    ) = (
+                        x.size()
+                    )  # batch size, sequence length, embedding dimensionality (n_embd)
+                    # calculate query, key, values for all heads in batch and move head forward to be the batch dim
+                    qkv = self.c_attn(x)
+                    q, k, v = qkv.split(self.n_embd, dim=2)
+                    k = k.view(B, T, self.n_head, C // self.n_head).transpose(
+                        1, 2
+                    )  # (B, nh, T, hs)
+                    q = q.view(B, T, self.n_head, C // self.n_head).transpose(
+                        1, 2
+                    )  # (B, nh, T, hs)
+                    v = v.view(B, T, self.n_head, C // self.n_head).transpose(
+                        1, 2
+                    )  # (B, nh, T, hs)
+                    y = F.scaled_dot_product_attention(q, k, v, is_causal=True)
+                    y = (
+                        y.transpose(1, 2).contiguous().view(B, T, C)
+                    )  # re-assemble all head outputs side by side
+                    # output projection
+                    y = self.c_proj(y)
+                    return y
+
+            class MLP(nn.Module):
+                def __init__(self, config):
+                    super().__init__()
+                    self.c_fc = nn.Linear(config.n_embd, 4 * config.n_embd)
+                    self.gelu = NewGELU()
+                    self.c_proj = nn.Linear(4 * config.n_embd, config.n_embd)
+                    self.c_proj.LLMC_RESIDUAL_SCALE_FLAG = 1
+
+                def forward(self, x):
+                    x = self.c_fc(x)
+                    x = self.gelu(x)
+                    x = self.c_proj(x)
+                    return x
+
+            class Block(nn.Module):
+                def __init__(self, config):
+                    super().__init__()
+                    self.ln_1 = nn.LayerNorm(config.n_embd)
+                    self.attn = CausalSelfAttention(config)
+                    self.ln_2 = nn.LayerNorm(config.n_embd)
+                    self.mlp = MLP(config)
+
+                def forward(self, x):
+                    x = x + self.attn(self.ln_1(x))
+                    x = x + self.mlp(self.ln_2(x))
+                    return x
+
+            class GPTConfig:
+                block_size: int = 1024
+                vocab_size: int = 50257
+                n_layer: int = 1
+                n_head: int = 12
+                n_embd: int = 768
+
+            class GPT(nn.Module):
+                def __init__(self, config):
+                    super().__init__()
+                    self.config = config
+
+                    self.transformer = nn.ModuleDict(
+                        dict(
+                            wte=nn.Embedding(config.vocab_size, config.n_embd),
+                            wpe=nn.Embedding(config.block_size, config.n_embd),
+                            h=nn.ModuleList(
+                                [Block(config) for _ in range(config.n_layer)]
+                            ),
+                            ln_f=nn.LayerNorm(config.n_embd),
+                        )
+                    )
+                    self.lm_head = nn.Linear(
+                        config.n_embd, config.vocab_size, bias=False
+                    )
+                    self.lm_head.LLMC_SKIP_INIT = (
+                        1  # don't init this one, we will tie weights
+                    )
+                    self.transformer.wte.weight = (
+                        self.lm_head.weight
+                    )  # https://paperswithcode.com/method/weight-tying
+
+                def forward(self, idx, targets):
+                    device = idx.device
+                    b, t = idx.size()
+                    assert (
+                        t <= self.config.block_size
+                    ), f"Cannot forward sequence of length {t}, block size is only {self.config.block_size}"
+                    pos = torch.arange(
+                        0, t, dtype=torch.long, device=device
+                    )  # shape (t)
+
+                    # forward the GPT model itself
+                    tok_emb = self.transformer.wte(
+                        idx
+                    )  # token embeddings of shape (b, t, n_embd)
+                    pos_emb = self.transformer.wpe(
+                        pos
+                    )  # position embeddings of shape (t, n_embd)
+                    x = tok_emb + pos_emb
+
+                    for block in self.transformer.h:
+                        x = block(x)
+                    x = self.transformer.ln_f(x)
+
+                    logits = self.lm_head(x)
+                    loss = F.cross_entropy(
+                        logits.view(-1, logits.size(-1)),
+                        targets.view(-1),
+                        ignore_index=-1,
+                    )
+
+                    return loss
+
+            B, T = 1, 1024
+            ctx = torch.amp.autocast(device_type="cuda", dtype=torch.bfloat16)
+
+            model = GPT(GPTConfig())
+            model.train()
+            model.to("cuda")
+            model = torch.compile(model)
+
+            x = torch.randint(0, 50257, (B, T), dtype=torch.int64, device="cuda")
+            y = torch.randint(0, 50257, (B, T), dtype=torch.int64, device="cuda")
+
+            def wrapper(x, y):
+                with ctx:
+                    loss = model(x, y)
+                loss.backward()
+
+            _, code = run_and_get_code(wrapper, x, y)
+
+            # The cpp_wrapper code is significantly more complex, so skip checking for exact
+            # code lines.
+            if not config.cpp_wrapper:
+                FileCheck().check_regex(
+                    r"reinterpret_tensor\(.*, \(1024, 50257\).*# reuse"
+                ).run(code[1])
 
     class RNNTest(TestCase):
         device_type = GPU_TYPE
