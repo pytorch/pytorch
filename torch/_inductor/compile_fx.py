@@ -10,8 +10,8 @@ import sys
 import time
 import warnings
 from abc import ABC, abstractmethod
-from inspect import currentframe
 from dataclasses import dataclass
+from inspect import currentframe
 from itertools import count
 from typing import (
     Any,
@@ -1244,7 +1244,7 @@ class _FxCompileSerialized(FxCompile):
         inputs_to_check: Sequence[int],
         graph_kwargs: _CompileFxKwargs,
     ) -> OutputCode:
-        context = torch._guards.TracingContext.try_get()
+        # _context = torch._guards.TracingContext.try_get()
         constants = CompiledFxGraphConstantsWithGm(gm)
 
         try:
@@ -1270,7 +1270,8 @@ class _FxCompileSerialized(FxCompile):
 
         self._postprocess(output)
 
-        # TODO: Do we need to figure out what changed in TracingContext in the child and plumb that back up to the parent?
+        # TODO: Do we need to figure out what changed in TracingContext in the
+        # child and plumb that back up to the parent?
 
         return output.graph
 
