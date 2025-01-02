@@ -399,6 +399,7 @@ test_inductor_cpp_wrapper_shard() {
       --include inductor/test_torchinductor_opinfo \
       -k '(linalg and not linalg_eigvals) or to_sparse' \
       --verbose
+    exit
   fi
 
   # Run certain inductor unit tests with cpp wrapper. In the end state, we
