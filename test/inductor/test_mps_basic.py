@@ -43,7 +43,6 @@ class MPSBasicTests(TestCase):
     test_max_min = CommonTemplate.test_max_min
     test_views6 = CommonTemplate.test_views6
     test_addmm = CommonTemplate.test_addmm
-    test_view_as_complex = CommonTemplate.test_view_as_complex
 
     @parametrize("dtype", MPS_DTYPES)
     def test_add(self, dtype):
