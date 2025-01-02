@@ -767,6 +767,7 @@ class SubgroupTest(MultiProcessTestCase):
             self.assertTrue(buf.eq(peer_rank + world.size() // 2).all())
 
 
+@skipIfRocm
 @instantiate_parametrized_tests
 @requires_cuda_p2p_access()
 class SymmMemCollectiveTest(MultiProcessTestCase):
@@ -854,6 +855,7 @@ class SymmMemCollectiveTest(MultiProcessTestCase):
 
         dist.destroy_process_group()
 
+    @skipIfRocm
     @skip_if_lt_x_gpu(4)
     @parametrize("dtype", [torch.float, torch.bfloat16])
     @parametrize("align_bytes", [4, 8, 16])
@@ -874,6 +876,7 @@ class SymmMemCollectiveTest(MultiProcessTestCase):
 
         dist.destroy_process_group()
 
+    @skipIfRocm
     @skip_if_lt_x_gpu(4)
     @parametrize("dtype", [torch.float, torch.bfloat16])
     @parametrize("align_bytes", [4, 8, 16])
