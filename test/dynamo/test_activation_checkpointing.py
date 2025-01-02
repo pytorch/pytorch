@@ -1260,7 +1260,7 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
                 super().__init__()
 
             def forward(self, x, ys):
-                a = torch.sin(x)
+                a = torch.sin(x)  # noqa: F841
                 b = torch.cos(ys[0])
                 c = torch.cos(ys[1])
                 return (x, [b, c])

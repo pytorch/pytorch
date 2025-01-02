@@ -12,9 +12,10 @@ contain configuration options that affect only a specific part of the compiler:
 * :mod:`torch.fx.experimental.config`
 """
 
-import os
 import sys
 from typing import Optional
+
+from torch.utils._config_module import Config, install_config_module
 
 
 __all__ = [
@@ -28,7 +29,7 @@ __all__ = [
 # FB-internal note: you do NOT have to specify this explicitly specify this if
 # you run on MAST, we will automatically default this to
 # mast:MAST_JOB_NAME:MAST_JOB_VERSION.
-job_id: Optional[str] = os.environ.get("TORCH_COMPILE_JOB_ID", None)
+job_id: Optional[str] = Config(env_name_default="TORCH_COMPILE_JOB_ID", default=None)
 """
 Semantically, this should be an identifier that uniquely identifies, e.g., a
 training job.  You might have multiple attempts of the same job, e.g., if it was
@@ -55,13 +56,12 @@ different profiles.  If you know your workload is truly SPMD, you can run with
 consistent profiles across all ranks.
 """
 
-cache_key_tag: str = os.environ.get("TORCH_COMPILE_CACHE_KEY_TAG", "")
+
+cache_key_tag: str = Config(env_name_default="TORCH_COMPILE_CACHE_KEY_TAG", default="")
 """
 Tag to be included in the cache key generation for all torch compile caching.
 A common use case for such a tag is to break caches.
 """
-
-from torch.utils._config_module import install_config_module
 
 
 install_config_module(sys.modules[__name__])

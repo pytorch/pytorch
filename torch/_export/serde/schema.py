@@ -8,10 +8,12 @@ from typing import Annotated, Dict, List, Optional
 from torch._export.serde.union import _Union
 
 # NOTE: Please update this value if any modifications are made to the schema
-SCHEMA_VERSION = (8, 2)
+SCHEMA_VERSION = (8, 3)
 TREESPEC_VERSION = 1
 
 
+# NOTE: If you updated the schema, please run `scripts/export/update_schema.py`
+# to update the auto generated files.
 class ScalarType(IntEnum):
     UNKNOWN = 0
     BYTE = 1
@@ -28,6 +30,8 @@ class ScalarType(IntEnum):
     BOOL = 12
     BFLOAT16 = 13
     UINT16 = 28
+    FLOAT8E4M3FN = 29
+    FLOAT8E5M2 = 30
 
 
 class Layout(IntEnum):

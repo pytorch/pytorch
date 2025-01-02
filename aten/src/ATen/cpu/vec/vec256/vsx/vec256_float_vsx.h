@@ -273,6 +273,9 @@ class Vectorized<float> {
   Vectorized<float> C10_ALWAYS_INLINE asin() const {
     return {Sleef_asinf4_u10(_vec0), Sleef_asinf4_u10(_vec1)};
   }
+  Vectorized<float> C10_ALWAYS_INLINE asinh() const {
+    return {Sleef_asinhf4_u10(_vec0), Sleef_asinhf4_u10(_vec1)};
+  }
   Vectorized<float> atan() const {
     return {Sleef_atanf4_u10(_vec0), Sleef_atanf4_u10(_vec1)};
   }
