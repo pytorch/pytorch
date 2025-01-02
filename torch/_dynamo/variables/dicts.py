@@ -27,6 +27,17 @@ if TYPE_CHECKING:
 
 
 def is_hashable(x):
+    # NB - performing isinstance check on a LazVT realizes the VT, accidentally
+    # inserting the guard. To avoid this, lazyVT `is_hashable` methods looks at
+    # the underlying value without realizing the VT. Consider updating the
+    # lazyVT `is_hashable` method if you see unnecessary guarding for a key VT.
+    if (
+        isinstance(x, variables.LazyVariableTracker)
+        and not x.is_realized()
+        and x.is_hashable()
+    ):
+        return True
+
     if isinstance(x, variables.TensorVariable):
         # Tensors are hashable if they have an example_value (a fake tensor)
         # Most VT's should have one.
@@ -80,6 +91,12 @@ class ConstDictVariable(VariableTracker):
 
         @property
         def underlying_value(self):
+            if (
+                isinstance(self.vt, variables.LazyVariableTracker)
+                and not self.vt.is_realized()
+                and self.vt.is_hashable()
+            ):
+                return self.vt.original_value()
             if isinstance(self.vt, variables.TensorVariable):
                 x = self.vt.as_proxy().node.meta["example_value"]
             elif isinstance(self.vt, variables.TupleVariable):
@@ -273,6 +290,10 @@ class ConstDictVariable(VariableTracker):
             return None
         return self.items[key]
 
+    def install_dict_keys_match_guard(self):
+        if self.source:
+            install_guard(self.make_guard(GuardBuilder.DICT_KEYS_MATCH))
+
     def call_method(
         self,
         tx,
@@ -321,45 +342,43 @@ class ConstDictVariable(VariableTracker):
             assert len(args) == 1
             return self.getitem_const_raise_exception_if_absent(tx, args[0])
         elif name == "items":
-            # Key guarding - Nothing to do. LazyVT for value will take care.
             assert not (args or kwargs)
+            self.install_dict_keys_match_guard()
             if self.source:
                 tx.output.guard_on_key_order.add(self.source.name())
             return TupleVariable(
                 [TupleVariable([k.vt, v]) for k, v in self.items.items()]
             )
         elif name == "keys":
-            # Key guarding - Only keys are accessed. Install DICT_KEYS_MATCH
-            # guard.
+            self.install_dict_keys_match_guard()
             if self.source:
                 tx.output.guard_on_key_order.add(self.source.name())
-                install_guard(self.make_guard(GuardBuilder.DICT_KEYS_MATCH))
             assert not (args or kwargs)
             return DictKeysVariable(self)
         elif name == "values":
-            # Key guarding - Nothing to do. LazyVT for value will take care.
+            self.install_dict_keys_match_guard()
             if self.source:
                 tx.output.guard_on_key_order.add(self.source.name())
             assert not (args or kwargs)
             return DictValuesVariable(self)
         elif name == "copy":
-            # Key guarding - Install DICT_KEYS_MATCH guard.
-            if self.source and not isinstance(self, SetVariable):
-                install_guard(self.make_guard(GuardBuilder.DICT_KEYS_MATCH))
+            self.install_dict_keys_match_guard()
             assert not (args or kwargs)
             return self.clone(
                 items=self.items.copy(), mutation_type=ValueMutationNew(), source=None
             )
         elif name == "__len__":
-            # Key guarding - Nothing to do. SEQUENCE_LENGTH guard already inserted.
             assert not (args or kwargs)
+            self.install_dict_keys_match_guard()
             return ConstantVariable.create(len(self.items))
         elif name == "__setitem__" and arg_hashable and self.is_mutable():
+            self.install_dict_keys_match_guard()
             assert not kwargs and len(args) == 2
             tx.output.side_effects.mutation(self)
             self.items[Hashable(args[0])] = args[1]
             return ConstantVariable.create(None)
         elif name == "__delitem__" and arg_hashable and self.is_mutable():
+            self.install_dict_keys_match_guard()
             self.should_reconstruct_all = True
             tx.output.side_effects.mutation(self)
             self.items.__delitem__(Hashable(args[0]))
@@ -382,6 +401,7 @@ class ConstDictVariable(VariableTracker):
         elif name == "update" and self.is_mutable():
             # In general, this call looks like `a.update(b, x=1, y=2, ...)`.
             # Either `b` or the kwargs is omittable, but not both.
+            self.install_dict_keys_match_guard()
             has_arg = len(args) == 1
             has_kwargs = len(kwargs) > 0
             if has_arg or has_kwargs:
@@ -403,12 +423,12 @@ class ConstDictVariable(VariableTracker):
             else:
                 return super().call_method(tx, name, args, kwargs)
         elif name in ("get", "__getattr__") and args[0] in self:
-            # Key guarding - Nothing to do. SEQUENCE_LENGTH guard already inserted.
+            # Key guarding - Nothing to do.
             return self.getitem_const(tx, args[0])
         elif name == "__contains__" and len(args) == 1:
             # Key guarding - Install DICT_CONTAINS guard.
             contains = args[0] in self
-            if self.source:
+            if self.source and not isinstance(self, SetVariable):
                 if (
                     not args[0].source
                     and isinstance(args[0], ConstantVariable)
@@ -433,6 +453,7 @@ class ConstDictVariable(VariableTracker):
                     install_guard(self.make_guard(GuardBuilder.DICT_KEYS_MATCH))
             return ConstantVariable.create(contains)
         elif name == "setdefault" and arg_hashable and self.is_mutable():
+            self.install_dict_keys_match_guard()
             assert not kwargs
             assert len(args) <= 2
             value = self.maybe_getitem_const(args[0])
@@ -625,6 +646,10 @@ class SetVariable(ConstDictVariable):
     def getitem_const(self, tx: "InstructionTranslator", arg: VariableTracker):
         raise RuntimeError("Illegal to getitem on a set")
 
+    def install_dict_keys_match_guard(self):
+        # Already EQUALS_MATCH guarded
+        pass
+
 
 class FrozensetVariable(SetVariable):
     def __init__(
@@ -670,9 +695,6 @@ class FrozensetVariable(SetVariable):
     ) -> "VariableTracker":
         if name in ["add", "pop", "update", "remove", "discard", "clear"]:
             raise RuntimeError(f"Illegal call_method {name} on a frozenset")
-        elif name == "__contains__" and len(args) == 1:
-            # Already EQUALS_MATCH guarded.
-            return ConstantVariable.create(args[0] in self)
         return super().call_method(tx, name, args, kwargs)
 
 
@@ -713,9 +735,6 @@ class DictKeySetVariable(SetVariable):
     ) -> "VariableTracker":
         if name in ["add", "pop", "update", "remove", "discard", "clear"]:
             raise RuntimeError(f"Illegal call_method {name} on a dict_keys")
-        elif name == "__contains__" and len(args) == 1:
-            # Already EQUALS_MATCH guarded.
-            return ConstantVariable.create(args[0] in self)
         return super().call_method(tx, name, args, kwargs)
 
 
