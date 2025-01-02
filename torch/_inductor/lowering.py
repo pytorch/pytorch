@@ -19,7 +19,6 @@ import torch
 import torch.ao.quantization.fx._decomposed
 import torch.fx
 import torch.utils._pytree as pytree
-from torch._dynamo.utils import counters
 from torch._higher_order_ops.associative_scan import associative_scan_op
 from torch._higher_order_ops.triton_kernel_wrap import triton_kernel_wrapper_mutation
 from torch._prims_common import (
@@ -83,6 +82,7 @@ from .virtualized import ops, V
 FALLBACK_ALLOW_LIST = OrderedSet(
     [
         "torchvision::roi_align",
+        "aten::index_add",
     ]
 )
 
@@ -592,12 +592,13 @@ def make_pointwise(
         # in tracing, we will annotate pointwise nodes that correspond to the output of
         # a pointwise node that would have been run in eager. intermediary pointwise nodes
         # during decompositions are not annotated.
+        low_pr_fp = (torch.bfloat16, torch.float16)
         emulate_precision_casts = (
             V.graph is not None
             and getattr(V.graph, "current_node", None) is not None
             and V.graph.current_node.meta is not None
             and V.graph.current_node.meta.get("low_precision_pointwise_barrier", False)
-            and dtype in (torch.bfloat16, torch.float16)
+            and dtype in low_pr_fp
         )
 
         def inner_fn(index):
@@ -612,11 +613,12 @@ def make_pointwise(
                 return override_fn_when_gpu_float64(*[load(index) for load in loaders])
             else:
                 inputs_loaded = []
-                for load in loaders:
+                for inp_index, load in enumerate(loaders):
                     out = load(index)
-                    if emulate_precision_casts:
-                        downcast = ops.to_dtype(out, dtype, use_compute_types=False)
-                        out = ops.to_dtype(downcast, dtype)
+                    inp_dtype = inputs[inp_index].get_dtype()
+                    if emulate_precision_casts and inp_dtype in low_pr_fp:
+                        downcast = ops.to_dtype(out, inp_dtype, use_compute_types=False)
+                        out = ops.to_dtype(downcast, inp_dtype)
                     inputs_loaded.append(out)
 
                 out = fn(*inputs_loaded)
@@ -1941,8 +1943,10 @@ def fallback_node_due_to_unsupported_type(node: torch.fx.Node, allow_cpu_inputs=
     return check_skip_condition(node, node, is_output=True)
 
 
-def make_fallback(op, layout_constraint=None, warn=True):
-    assert op not in decompositions, f"both a fallback and a decomp for same op: {op}"
+def make_fallback(op, layout_constraint=None, warn=True, override_decomp=False):
+    assert (
+        op not in decompositions or override_decomp
+    ), f"both a fallback and a decomp for same op: {op}"
     if (
         warn
         and bool(os.getenv("CI"))
@@ -1952,6 +1956,7 @@ def make_fallback(op, layout_constraint=None, warn=True):
             config.fallback_random
             and op in torch._decomp.decompositions_for_rng.extra_random_decomps
         )
+        and not override_decomp
     ):
         # Note: 'warn' is holdover from when this was a warning, but for ops that previously
         # set warn=False we do not want a CI error.
@@ -3996,98 +4001,11 @@ def rev(x, dims):
     )
 
 
-def inplace_constant_pad_nd(
-    x: TensorBox, padding: Sequence[int], fill_value: float
-) -> Optional[TensorBox]:
-    """
-    This optimization changes the semantics of padding from 'clone'
-    style to 'view' style.
-
-    Thanks to functionalization, this change can still maintain numerical
-    correctness.
-    """
-
-    def _padding_can_be_fused():
-        """
-        Conservatively check if padding can be fused with downstream op.
-        1. if the downstream op is a sum, then there is little benefit to
-           do inplace padding
-        2. if the downstream op is a matmul, doing inplace padding can
-           save membw.
-        """
-        current_node = V.graph.current_node
-        if current_node is None:
-            return True  # be conservative
-        users = tuple(current_node.users)
-        if len(users) == 1 and users[0].target in (
-            aten.mm.default,
-            aten.addmm.default,
-        ):
-            return False
-
-        return True  # be conservative
-
-    if _padding_can_be_fused():
-        return None
-
-    # Only handle 2D case for now
-    if len(padding) != 4 or len(x.get_size()) != 2:
-        return None
-
-    # No harm to realize since we already know that
-    # the op can not be fused into the single user.
-    # It need to be realized later anyways.
-    x.realize()
-
-    # If x is a view (e.g. a SliceView), realizing it just realizing the
-    # underlying storage. x itself is still a view.
-    if not ir.is_storage_and_layout(x):
-        return None
-    x.freeze_layout()
-
-    _, layout = ir.as_storage_and_layout(x)
-    strides = layout.stride
-    if strides[1] != 1:
-        return None
-
-    if padding[0] != 0 or padding[2] != 0 or padding[3] != 0:
-        return None
-
-    npad = padding[1]
-    if npad == 0:
-        return None
-
-    stride0 = strides[0]
-    rowsize = layout.size[1]
-
-    if stride0 < rowsize + npad:
-        return None
-
-    resized_x = as_strided(
-        x,
-        [layout.size[0], layout.size[1] + npad],
-        layout.stride,
-        layout.offset,
-    )
-
-    sliced_x = slice_(resized_x, dim=1, start=rowsize, end=rowsize + npad)
-    fill_(sliced_x, fill_value)
-
-    counters["inductor"]["inplace_padding"] += 1
-    return resized_x
-
-
 @register_lowering(aten.constant_pad_nd, type_promotion_kind=None)
 def constant_pad_nd(x, padding, fill_value=0):
     assert (len(padding) % 2) == 0
     if all(p == 0 for p in padding):
         return clone(x)
-
-    if config.inplace_padding:
-        out = inplace_constant_pad_nd(x, padding, fill_value)
-        if out:
-            return out
-            # fall through if can not inplace the padding
 
     sizes = x.get_size()
 
@@ -4642,6 +4560,9 @@ fallback_adaptive_avg_pool2d = fallback_handler(
 
 @register_lowering(aten._adaptive_avg_pool2d)
 def _adaptive_avg_pool2d(x, output_size):
+    if x.get_dtype() == torch.int64:
+        # not supported in eager
+        raise RuntimeError("'adaptive_avg_pool2d' not implemented for 'Long'")
     assert isinstance(x, TensorBox)
     assert len(output_size) == 2
     x.realize_hint()
@@ -4714,6 +4635,9 @@ fallback_adaptive_max_pool2d = fallback_handler(
 
 @register_lowering(aten.adaptive_max_pool2d)
 def adaptive_max_pool2d(x, output_size):
+    if x.get_dtype() == torch.int64:
+        # not supported in eager
+        raise RuntimeError("adaptive_max_pool2d not implemented for Long")
     assert isinstance(x, TensorBox)
     assert len(output_size) == 2
     x.realize_hint()

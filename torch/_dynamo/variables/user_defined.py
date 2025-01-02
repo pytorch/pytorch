@@ -34,7 +34,6 @@ from ..guards import GuardBuilder, install_guard
 from ..source import (
     AttrSource,
     GetItemSource,
-    ODictGetItemSource,
     RandomValueSource,
     UnspecializedParamBufferSource,
 )
@@ -42,6 +41,7 @@ from ..utils import (
     build_checkpoint_variable,
     build_invoke_subgraph_variable,
     check_constant_args,
+    dict_methods,
     get_custom_getattr,
     has_torch_function,
     is_frozen_dataclass,
@@ -557,11 +557,6 @@ class UserDefinedClassVariable(UserDefinedVariable):
             with do_not_convert_to_tracable_parameter():
                 var.call_method(tx, "__init__", args, kwargs)
                 return var
-        elif variables.CustomizedDictVariable.is_matching_cls(self.value):
-            options = {"mutation_type": ValueMutationNew()}
-            return variables.CustomizedDictVariable.create(
-                self.value, args, kwargs, options
-            )
         elif (
             variables.RestrictedListSubclassVariable.is_matching_cls(self.value)
             and self.source
@@ -637,7 +632,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
         new_fn = inspect.getattr_static(self.value, "__new__", None)
         if isinstance(new_fn, staticmethod):
             new_fn = new_fn.__func__
-        return new_fn in (object.__new__, Generic.__new__)
+        return new_fn in (object.__new__, Generic.__new__, dict.__new__)
 
     def call_hasattr(self, tx: "InstructionTranslator", name: str) -> "VariableTracker":
         if self.source:
@@ -761,12 +756,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         args: "List[VariableTracker]",
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
-        from . import (
-            BuiltinVariable,
-            ConstantVariable,
-            TupleVariable,
-            UserMethodVariable,
-        )
+        from . import ConstantVariable, UserMethodVariable
 
         method = self._maybe_get_baseclass_method(name)
         if method is not None:
@@ -775,54 +765,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
             if is_standard_setattr(method) or isinstance(self.value, threading.local):
                 return self.method_setattr_standard(tx, *args, **kwargs)
-
-            # [NOTE] OrderedDict, dict subtypes must always have source
-            # We cannot instantiate such subtypes in-graph due to builtin __new__
-            if method is collections.OrderedDict.keys:
-                # subclass of OrderedDict
-                assert not (args or kwargs)
-                assert self.source  # OrderedDict, dict subtypes must always have source
-                keys = list(self.value.keys())
-                assert all(map(ConstantVariable.is_literal, keys))
-                install_guard(self.source.make_guard(GuardBuilder.DICT_CONST_KEYS))
-                tx.output.guard_on_key_order.add(self.source.name())
-                return TupleVariable([ConstantVariable.create(k) for k in keys])
-
-            if (
-                method in (collections.OrderedDict.__contains__, dict.__contains__)
-                and len(args) == 1
-                and isinstance(args[0], (ConstantVariable, BuiltinVariable))
-                and inspect.getattr_static(type(self.value), "keys")
-                in (collections.OrderedDict.keys, dict.keys)
-            ):
-                assert not kwargs
-                assert self.source  # OrderedDict, dict subtypes must always have source
-
-                # TODO(anijain2305) - Why do we need to guard on all keys?
-                install_guard(self.source.make_guard(GuardBuilder.DICT_CONST_KEYS))
-                return ConstantVariable.create(
-                    args[0].as_python_constant() in self.value
-                )
-
-            if method is collections.OrderedDict.items and isinstance(
-                self.value, collections.OrderedDict
-            ):
-                assert self.source  # OrderedDict, dict subtypes must always have source
-                assert not (args or kwargs)
-                keys = self.call_method(tx, "keys", [], {})
-                items = [
-                    TupleVariable(
-                        [key, self.odict_getitem(tx, key)],
-                    )
-                    for key in keys.force_unpack_var_sequence(tx)
-                ]
-                tx.output.guard_on_key_order.add(self.source.name())
-                return TupleVariable(items)
-
-            if method is collections.OrderedDict.__getitem__ and len(args) == 1:
-                assert not kwargs
-                assert self.source  # OrderedDict, dict subtypes must always have source
-                return self.odict_getitem(tx, args[0])
 
             if len(args) == 1 and not kwargs:
                 if method is object.__eq__:
@@ -1056,6 +998,8 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 mro_source = AttrSource(self.cls_source, "__mro__")
                 klass_source = GetItemSource(mro_source, idx)
                 dict_source = AttrSource(klass_source, "__dict__")
+                # TODO(anijain2305) - This is a mapping proxy object. Ideally we
+                # should use DictGetItemSource here.
                 return GetItemSource(dict_source, name)
 
         unimplemented(f"Could not find {name} in {type(self.value).__mro__}")
@@ -1065,7 +1009,20 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         from . import ConstantVariable
 
         source = AttrSource(self.source, name) if self.source else None
-        self._check_for_getattribute()
+
+        if object_has_getattribute(self.value):
+            getattribute_fn = inspect.getattr_static(
+                type(self.value), "__getattribute__"
+            )
+            if self.source:
+                new_source = AttrSource(self.source, "__getattribute__")
+            try:
+                return variables.UserMethodVariable(
+                    getattribute_fn, self, source=new_source
+                ).call_function(tx, [ConstantVariable.create(name)], {})
+            except ObservedAttributeError:
+                # Pass through to __getattr__ if __getattribute__ fails
+                handle_observed_exception(tx)
 
         if tx.output.side_effects.has_pending_mutation_of_attr(self, name):
             result = tx.output.side_effects.load_attr(self, name, deleted_ok=True)
@@ -1271,9 +1228,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         raise_observed_exception(AttributeError, tx)
 
     def call_hasattr(self, tx: "InstructionTranslator", name: str) -> "VariableTracker":
-        if self._check_for_getattribute():
-            unimplemented("hasattr with custom __getattribute__")
-
         if self.source:
             install_guard(
                 AttrSource(self.source, name).make_guard(GuardBuilder.HASATTR)
@@ -1287,23 +1241,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         except ObservedAttributeError:
             handle_observed_exception(tx)
             return variables.ConstantVariable.create(False)
-
-    def odict_getitem(self, tx: "InstructionTranslator", key):
-        from .dicts import is_hashable
-
-        # TODO this should probably be merged with the dict handling
-
-        index = (
-            key.source
-            if is_hashable(key) and key.source is not None
-            else key.as_python_constant()
-        )
-
-        return VariableTracker.build(
-            tx,
-            collections.OrderedDict.__getitem__(self.value, key.as_python_constant()),
-            self.source and ODictGetItemSource(self.source, index),
-        )
 
 
 class FrozenDataClassVariable(UserDefinedObjectVariable):
@@ -1444,6 +1381,42 @@ class RemovableHandleVariable(VariableTracker):
 
     def python_type(self):
         return RemovableHandleClass
+
+
+class UserDefinedDictVariable(UserDefinedObjectVariable):
+    """
+    Represents user defined objects that are subclasses of dict/OrderedDict.
+
+    Internally, it uses a ConstDictVariable to represent the dict part of the
+    variable tracker. For everything else, it falls back to
+    UserDefinedObjectVariable.
+    """
+
+    _nonvar_fields = UserDefinedObjectVariable._nonvar_fields
+
+    def __init__(self, value, dict_vt=None, **kwargs):
+        super().__init__(value, **kwargs)
+        self._dict_vt = dict_vt
+        if self._dict_vt is None:
+            assert (
+                self.source is None
+            ), "dict_vt must be constructed by builder.py when source is present"
+            self._dict_vt = variables.ConstDictVariable(
+                {}, mutation_type=ValueMutationNew()
+            )
+        self._dict_methods = dict_methods
+
+    def call_method(
+        self,
+        tx,
+        name,
+        args: "List[VariableTracker]",
+        kwargs: "Dict[str, VariableTracker]",
+    ) -> "VariableTracker":
+        method = self._maybe_get_baseclass_method(name)
+        if method in self._dict_methods:
+            return self._dict_vt.call_method(tx, name, args, kwargs)
+        return super().call_method(tx, name, args, kwargs)
 
 
 class MutableMappingVariable(UserDefinedObjectVariable):
