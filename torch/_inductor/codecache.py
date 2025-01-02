@@ -1942,7 +1942,7 @@ class CppCodeCache:
     # If we precompile headers with a given set of flags, the precompiled output will
     # persist for the life of the program, rather than just for the life of the inductor
     # cache.
-    __header_dir: tempfile.TemporaryDirectory | None = None
+    __header_dir: tempfile.TemporaryDirectory | None = None  # type: ignore[type-arg]
     __header_cache: Dict[str, str] = {}
 
     @staticmethod
