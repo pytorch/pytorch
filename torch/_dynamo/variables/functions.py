@@ -5,6 +5,7 @@ import collections
 import functools
 import inspect
 import itertools
+import sys
 import types
 from typing import Any, Callable, Dict, List, Optional, Tuple, TYPE_CHECKING, TypeVar
 from typing_extensions import Never
@@ -437,9 +438,15 @@ class GeneratorObjectVariable(VariableTracker):
             # * If the generator handles (catches) the GeneratorExit exception,
             # Python raises a RuntimeError because we are not suppose to capture it
 
+            def is_inside_try_finally(tracer):
+                exn_tab_entry = tracer.current_instruction.exn_tab_entry
+                return (sys.version_info >= (3, 11) and exn_tab_entry) or (
+                    sys.version_info < (3, 11) and tracer.block_stack
+                )
+
             # Setup the exception table and jump target in case of try...finally
             tracer = self._get_inline_tracer(tx)
-            if len(tracer.block_stack):
+            if is_inside_try_finally(tracer):
                 e = variables.ExceptionVariable(GeneratorExit, ())
                 tracer.push(e)
                 try:
