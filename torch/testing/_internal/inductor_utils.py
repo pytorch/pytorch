@@ -30,7 +30,6 @@ from torch._dynamo.device_interface import get_interface_for_device
 
 log: logging.Logger = logging.getLogger(__name__)
 
-
 def test_cpu():
     try:
         CppCodeCache.load("")
@@ -42,7 +41,6 @@ def test_cpu():
         torch._inductor.exc.CppCompileError,
     ):
         return False
-
 
 HAS_CPU = LazyVal(test_cpu)
 
@@ -105,7 +103,6 @@ HAS_MULTIGPU = any(
     for gpu in GPU_TYPES
 )
 
-
 def _check_has_dynamic_shape(
     self: TestCase,
     code,
@@ -127,7 +124,6 @@ def _check_has_dynamic_shape(
 
 def skipDeviceIf(cond, msg, *, device):
     if cond:
-
         def decorate_fn(fn):
             @functools.wraps(fn)
             def inner(self, *args, **kwargs):
@@ -144,12 +140,10 @@ def skipDeviceIf(cond, msg, *, device):
 
             return inner
     else:
-
         def decorate_fn(fn):
             return fn
 
     return decorate_fn
-
 
 def skip_windows_ci(name: str, file: str) -> None:
     if IS_WINDOWS and IS_CI:
@@ -161,11 +155,8 @@ def skip_windows_ci(name: str, file: str) -> None:
             sys.exit(0)
         raise unittest.SkipTest("requires sympy/functorch/filelock")
 
-
 def _skip_lazily_if_decorator(cb: Callable[[], bool], msg: str):
-
     def decorator(fn):
-
         @functools.wraps(fn)
         def wrapper(*args, **kwargs):
             if cb():
