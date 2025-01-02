@@ -1920,7 +1920,7 @@ class DistributedDataParallelTest(
         ddp_state_dict = torch.load(checkpoint_path, map_location=map_location)
 
         for model in [ddp_withload, model_withload]:
-            for p in ddp_withload.parameters():
+            for p in model.parameters():
                 with torch.no_grad():
                     p.zero_()
         ddp_withload.load_state_dict(ddp_state_dict)
@@ -1973,7 +1973,8 @@ class DistributedDataParallelTest(
         This unit test verifies whether the Future object is passed properly.
         The callback function creates a Future object and sets a value to it.
         """
-        store = c10d.FileStore(self.file_name, self.world_size)
+        store = c10d.FileStore(self.file_name, self.world_size)  # noqa: F841
+
         process_group = self._get_process_group()
 
         # Test on CPU
