@@ -1069,12 +1069,12 @@ class FakeIndentedBuffer(IndentedBuffer):
 
 
 @contextlib.contextmanager
-def restore_stdout_stderr(initial_stdout, initial_stderr):
+def restore_stdout_stderr():
+    initial_stdout, initial_stderr = sys.stdout, sys.stderr
     try:
         yield
     finally:
-        sys.stdout = initial_stdout
-        sys.stderr = initial_stderr
+        sys.stdout, sys.stderr = initial_stdout, initial_stderr
 
 
 class DeferredLineBase:
