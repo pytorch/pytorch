@@ -221,7 +221,7 @@ class TestSourceMatcher(JitTestCase):
                 torch._check(b + 1 < y.size(0))
                 return y[: b + 1]
 
-        ep = torch.export.export(M(), (torch.tensor(4), torch.randn(10)))
+        ep = torch.export.export(M(), (torch.tensor(4), torch.randn(10)), strict=True)
         fake_inputs = [
             node.meta["val"] for node in ep.graph.nodes if node.op == "placeholder"
         ]

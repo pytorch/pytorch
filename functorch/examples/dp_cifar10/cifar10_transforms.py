@@ -12,8 +12,7 @@ import sys
 from datetime import datetime, timedelta
 
 import numpy as np
-import torchvision.transforms as transforms
-from torchvision import models
+from torchvision import models, transforms
 from torchvision.datasets import CIFAR10
 from tqdm import tqdm
 
@@ -214,10 +213,6 @@ def main():
     else:
         generator = None
 
-    augmentations = [
-        transforms.RandomCrop(32, padding=4),
-        transforms.RandomHorizontalFlip(),
-    ]
     normalize = [
         transforms.ToTensor(),
         transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),

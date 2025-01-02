@@ -507,7 +507,7 @@ template <
     bool EnableActivationSiLU>
 Tensor two_four_sgemm_dispatch_layouts_bias_activation(
     const Tensor& tensor_a, const Tensor& tensor_b, const Tensor& tensor_c,
-    const Tensor& meta, const c10::string_view& activation) {
+    const Tensor& meta, const std::string_view& activation) {
     // Perform dispatching.
     if constexpr (EnableActivationNone) {
         if (activation == "none") {
@@ -601,7 +601,7 @@ Tensor two_four_sgemm_dispatch_layouts_bias_activation(
 Tensor _sparse_semi_structured_linear(
       const Tensor& input, const Tensor& weight,
       const Tensor& meta, const std::optional<Tensor>& bias_opt,
-      const std::optional<c10::string_view> activation_opt,
+      const std::optional<std::string_view> activation_opt,
       const std::optional<c10::ScalarType> out_dtype_opt) {
     TORCH_WARN_ONCE("_sparse_semi_structured_linear is deprecated and will be "
                     "removed in a future PyTorch release.  Please use "
