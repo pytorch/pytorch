@@ -65,7 +65,8 @@ embedding_dense_backward_batch_rule(
     result = reshape_dim_outof_symint(1, bdim_size, result);
     return std::make_tuple(std::move(result), 1);
   }
-  const auto bdim_size = indices.size(*indices_bdim);
+  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+  const auto bdim_size = indices.size(indices_bdim.value());
   indices = moveBatchDimToFront(indices, indices_bdim);
   grad = moveBatchDimToFront(grad, grad_bdim);
   grad = ensure_has_bdim(grad, grad_bdim.has_value(), bdim_size);
@@ -250,7 +251,8 @@ struct UpsampleBackwardBatchRuleHelper<F, Func, typelist<A, B, C, T...>> {
       const Tensor& grad_output, std::optional<int64_t> grad_output_bdim,
       c10::SymIntArrayRef output_size, c10::SymIntArrayRef input_size,
       T... extra_args) {
-    auto grad_output_ = reshape_dim_into(*grad_output_bdim, 0, grad_output);
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+    auto grad_output_ = reshape_dim_into(grad_output_bdim.value(), 0, grad_output);
     TORCH_INTERNAL_ASSERT(!input_size.empty());
 
     // input_size is wrong so we correct it
@@ -258,11 +260,12 @@ struct UpsampleBackwardBatchRuleHelper<F, Func, typelist<A, B, C, T...>> {
     physical_input_size[0] = grad_output_.sym_sizes()[0];
 
     auto out = Func(
-        grad_output_,
-        output_size,
-        physical_input_size,
+        std::move(grad_output_),
+        std::move(output_size),
+        std::move(physical_input_size),
         std::forward<T>(extra_args)...);
-    return std::make_tuple(reshape_dim_outof_symint(0, grad_output.sym_sizes()[*grad_output_bdim], out), 0);
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+    return std::make_tuple(reshape_dim_outof_symint(0, grad_output.sym_sizes()[grad_output_bdim.value()], out), 0);
   }
 
 };

@@ -8,6 +8,9 @@ from torch._environment import is_fbcode
 from torch.utils._config_module import get_tristate_env, install_config_module
 
 
+inplace_padding = os.environ.get("TORCHINDUCTOR_INPLACE_PADDING", "1") == "1"
+
+
 def fx_graph_remote_cache_default() -> Optional[bool]:
     return get_tristate_env("TORCHINDUCTOR_FX_GRAPH_REMOTE_CACHE")
 
@@ -141,8 +144,11 @@ memory_pool = os.environ.get("TORCHINDUCTOR_MEMORY_POOL", "intermediates")
 # codegen benchmark harness
 benchmark_harness = True
 
-# fuse pointwise into templates
+# fuse pointwise into templates epilogues
 epilogue_fusion = True
+
+# fuse pointwise into template prologues
+prologue_fusion = False
 
 # do epilogue fusions before other fusions
 epilogue_fusion_first = False
@@ -1330,6 +1336,9 @@ class trace:
 
     log_autotuning_results: bool = False
 
+    # Save mapping info from inductor generated triton kernel to post_grad fx nodes
+    log_inductor_triton_kernel_to_post_grad_node_info: bool = True
+
 
 _save_config_ignore = [
     # workaround: "Can't pickle <function ...>"
@@ -1359,9 +1368,16 @@ external_matmul: List[Callable[[torch.Tensor, torch.Tensor, torch.Tensor], None]
 
 
 class test_configs:
-    force_extern_kernel_in_multi_template = False
+    force_extern_kernel_in_multi_template: bool = False
+
+    max_mm_configs: Optional[int] = None
 
     runtime_triton_dtype_assert = False
+
+    # regex to control the set of considered autotuning
+    # choices (aka configs) by name and / or description
+    autotune_choice_name_regex: Optional[str] = None
+    autotune_choice_desc_regex: Optional[str] = None
 
 
 if TYPE_CHECKING:

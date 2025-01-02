@@ -36,6 +36,7 @@ from torch._export.passes.lift_constants_pass import (
 )
 from torch._export.utils import (
     _collect_param_buffer_metadata,
+    _compiling_state_context,
     _populate_param_buffer_metadata_to_new_gm,
     _update_gm_meta_if_possible,
     apply_runtime_assertion_pass,
@@ -718,15 +719,6 @@ def _export_to_aten_ir(
     if _check_autograd_state:
         if not pre_dispatch and is_grad_enabled:
             grad_safe_guard = AutogradStateOpsFailSafeguard()  # type: ignore[assignment]
-
-    @contextmanager
-    def _compiling_state_context():
-        old_value = torch.compiler._is_compiling_flag
-        try:
-            torch.compiler._is_compiling_flag = True
-            yield
-        finally:
-            torch.compiler._is_compiling_flag = old_value
 
     # This _reparametrize_module makes sure inputs and module.params/buffers have the same fake_mode,
     # otherwise aot_export_module will error out because it sees a mix of fake_modes.
@@ -1427,15 +1419,6 @@ def _export_to_aten_ir_make_fx(
     produce_guards_callback=None,
     transform=lambda x: x,
 ) -> ATenExportArtifact:
-    @contextmanager
-    def _compiling_state_context():
-        old_value = torch.compiler._is_compiling_flag
-        try:
-            torch.compiler._is_compiling_flag = True
-            yield
-        finally:
-            torch.compiler._is_compiling_flag = old_value
-
     def _make_fx_helper(mod, args, kwargs, **flags):
         from torch._functorch._aot_autograd.schemas import GraphSignature
 

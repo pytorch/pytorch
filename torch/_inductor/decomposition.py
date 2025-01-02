@@ -17,12 +17,10 @@ from torch._decomp import (
 )
 from torch._decomp.decompositions import (
     _grid_sampler_2d as decomp_grid_sampler_2d,
-    _index_add,
     pw_cast_for_opmath,
 )
 from torch._decomp.decompositions_for_rng import extra_random_decomps
 from torch._dynamo.utils import counters
-from torch._environment import is_fbcode
 from torch._higher_order_ops.out_dtype import out_dtype
 from torch._inductor.utils import pad_listlike
 from torch._prims_common import (
@@ -50,7 +48,6 @@ quantized_decomposed = torch.ops.quantized_decomposed
 inductor_decompositions = get_decompositions(
     [
         aten._adaptive_avg_pool2d_backward,
-        aten.index_select,
         aten.addmv,
         aten.arange,
         aten.bitwise_and_,
@@ -61,6 +58,7 @@ inductor_decompositions = get_decompositions(
         aten.flip,
         aten.gelu,
         aten.hardtanh,
+        aten.index_select,
         aten.lcm,
         aten.leaky_relu,
         aten.linalg_vector_norm,
@@ -103,7 +101,6 @@ decomps_to_exclude = [
     aten._softmax_backward_data,
     aten.clamp_max,
     aten.clamp_min,
-    aten.index_add,  # we conditionally call this decomp
     aten.glu,  # inductor lowers this directly
     aten.select_scatter,  # need to be in the ATen graph in order for it to work with the re-inplacing pass
     aten.slice_scatter,  # need to be in the ATen graph in order for it to work with the re-inplacing pass
@@ -174,24 +171,6 @@ def full(
         kwargs["dtype"] = type_to_dtype(type(fill_value))
         return torch.full(size, fill_value, **kwargs)
     return NotImplemented
-
-
-@register_decomposition([aten.index_add])
-def index_add(
-    x: torch.Tensor,
-    dim: int,
-    index: torch.Tensor,
-    tensor: torch.Tensor,
-    *,
-    alpha: torch.types.Number = 1,
-) -> torch.Tensor:
-    # If we are not in fbcode and dtype is bfloat16
-    # fallback to index_add kernel
-    # see https://github.com/pytorch/pytorch/issues/137425 for details
-    if not is_fbcode() and x.dtype == torch.bfloat16:
-        return NotImplemented
-    else:
-        return _index_add(x, dim, index, tensor, inplace=False, alpha=alpha)
 
 
 # Not really sure how to put this into the main library.  PrimTorch wants

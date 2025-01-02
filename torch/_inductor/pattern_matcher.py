@@ -64,7 +64,6 @@ from typing import (
     Optional,
     Protocol,
     Sequence,
-    Set,
     Tuple,
     Type,
     TypeVar,
@@ -84,6 +83,7 @@ from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
 from torch.fx.immutable_collections import immutable_dict, immutable_list
 from torch.fx.passes.graph_transform_observer import GraphTransformObserver
+from torch.utils._ordered_set import OrderedSet
 
 from .._functorch import config as functorch_config
 from .._functorch.aot_autograd import aot_function, make_boxed_func
@@ -192,7 +192,7 @@ class Match:
 
     def extend(self, other: Match) -> None:
         if self.kwargs:
-            for key in set(self.kwargs.keys()) & set(other.kwargs.keys()):
+            for key in OrderedSet(self.kwargs.keys()) & OrderedSet(other.kwargs.keys()):
                 if self.kwargs[key] != other.kwargs[key]:
                     raise FailedMatch("kwarg mismatch: {}", key)
         self.args.extend(other.args)
@@ -376,7 +376,7 @@ class PatternExpr(ABC):
         return self.__class__.__name__ + "()"
 
     def find_anchor_nodes(
-        self, ctx: MatchContext, searched: Set[torch.fx.Node]
+        self, ctx: MatchContext, searched: OrderedSet[torch.fx.Node]
     ) -> Generator[Optional[torch.fx.Node], None, None]:
         if self in ctx.pattern_to_node:
             yield ctx.pattern_to_node[self]
@@ -467,7 +467,7 @@ class _TargetExpr(PatternExpr):
     """
 
     fns: List[FnsType]
-    fns_set: Set[FnsType]
+    fns_set: OrderedSet[FnsType]
 
     def __init__(
         self, fns: Union[FnsType, Sequence[FnsType]], users: Union[Multiple, int] = 1
@@ -479,7 +479,7 @@ class _TargetExpr(PatternExpr):
                 fns.extend(getattr(fn, overload) for overload in fn.overloads())
 
         self.fns = fns
-        self.fns_set = set(fns)
+        self.fns_set = OrderedSet(fns)
         self.users = users
 
     @property
@@ -514,7 +514,7 @@ class _TargetExpr(PatternExpr):
         return isinstance(self.users, Multiple) or self.users > 1
 
     def find_anchor_nodes(
-        self, ctx: MatchContext, searched: Set[torch.fx.Node]
+        self, ctx: MatchContext, searched: OrderedSet[torch.fx.Node]
     ) -> Generator[Optional[torch.fx.Node], None, None]:
         raise NotImplementedError
 
@@ -679,7 +679,7 @@ class _TargetArgsExpr(_TargetExpr):
         return m
 
     def find_anchor_nodes(
-        self, ctx: MatchContext, searched: Set[torch.fx.Node]
+        self, ctx: MatchContext, searched: OrderedSet[torch.fx.Node]
     ) -> Generator[Optional[torch.fx.Node], None, None]:
         """
         This is used when we are matching a pattern with multiple outputs.
@@ -865,7 +865,7 @@ class MultiOutputPattern(PatternExpr):
     ) -> MatchResult:
         prior = dict(ctx.pattern_to_node)
         m: MatchResult = FailedMatch("no anchor found")
-        for node in pattern.find_anchor_nodes(ctx, set()):
+        for node in pattern.find_anchor_nodes(ctx, OrderedSet()):
             m = ctx.match(pattern, node)
             if is_match(m):
                 return m
@@ -913,7 +913,7 @@ class RepeatedExpr(PatternExpr):
             self.inner_pattern,
         )
         # Check all anchor nodes match the pattern
-        for anchor_node in self.inner_pattern.find_anchor_nodes(ctx, set()):
+        for anchor_node in self.inner_pattern.find_anchor_nodes(ctx, OrderedSet()):
             anchor_m = MatchContext([self], graph=node.graph).match(
                 self.inner_pattern, anchor_node
             )
@@ -1096,10 +1096,10 @@ class ReplacementPatternEntry(PatternEntry):
             node: torch.fx.Node,
             tag_name: str,
             tag_value: str,
-            input_stops: Set[torch.fx.Node],
+            input_stops: OrderedSet[torch.fx.Node],
         ) -> None:
             queue = [node]
-            visited = set()
+            visited = OrderedSet[torch.fx.Node]()
 
             while queue:
                 arg = queue.pop()
@@ -1151,7 +1151,9 @@ class ReplacementPatternEntry(PatternEntry):
                     # incorrectly tag some nodes as recomputables.
                     for tag_name in ["recompute", "ac_graph_id"]:
                         if tag_name in old.meta:
-                            percolate_tags(new, tag_name, old.meta[tag_name], set(args))
+                            percolate_tags(
+                                new, tag_name, old.meta[tag_name], OrderedSet(args)
+                            )
 
                     old.replace_all_uses_with(new)
                     graph.erase_node(old)
@@ -1404,7 +1406,7 @@ def register_replacement(
         return pattern.pattern
 
 
-_serialized_patterns: Set[str] = set()
+_serialized_patterns = OrderedSet[str]()
 
 
 def _serialize_pattern(
@@ -1765,7 +1767,7 @@ class PatternMatcherPass:
                     # pattern match crosses mutation barrier - discard
                     if (
                         is_match(m)
-                        and len(set(map(get_mutation_region_id_partial, m.nodes))) != 1  # type: ignore[possibly-undefined]
+                        and len(OrderedSet(map(get_mutation_region_id_partial, m.nodes))) != 1  # type: ignore[possibly-undefined]
                     ):
                         continue
                     if os.environ.get("TORCHINDUCTOR_PATTERN_MATCH_DEBUG") == node.name:
@@ -1967,7 +1969,7 @@ def stable_topological_sort(graph: torch.fx.Graph) -> None:
 
     # - Nodes in `ready` have been processed and are already in the correct
     #   order.
-    ready = set()
+    ready = OrderedSet[torch.fx.Node]()
 
     # - `waiting` is a mapping from a dependency to nodes which depend on that
     #   dependency.
@@ -2037,7 +2039,7 @@ def clone_graph(input_graph: torch.fx.GraphModule) -> torch.fx.GraphModule:
     return CopyGraph(input_graph).transform()
 
 
-_seen_patterns: Set[str] = set()
+_seen_patterns = OrderedSet[str]()
 
 
 def get_arg_value(
