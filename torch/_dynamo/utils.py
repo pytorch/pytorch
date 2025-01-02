@@ -31,6 +31,7 @@ import typing
 import uuid
 import warnings
 import weakref
+from collections import OrderedDict
 from contextlib import contextmanager
 from dataclasses import is_dataclass
 from functools import lru_cache
@@ -500,7 +501,7 @@ class DuplicateWarningChecker:
         self.reset()
 
     def reset(self):
-        self.set = collections.OrderedDict()
+        self.set = OrderedDict()
 
     def add(self, key: Union[str, Tuple[object, object]]) -> bool:
         if key in self.set:
@@ -1913,7 +1914,7 @@ def check_numpy_ndarray_args(args, kwargs):
 
 dict_keys: Type[KeysView[Any]] = type({}.keys())
 dict_values: Type[ValuesView[Any]] = type({}.values())
-odict_values: Type[ValuesView[Any]] = type(collections.OrderedDict().values())
+odict_values: Type[ValuesView[Any]] = type(OrderedDict().values())
 tuple_iterator: Type[Iterator[Any]] = type(iter(()))
 range_iterator: Type[Iterator[Any]] = type(iter(range(0)))
 tuple_iterator_len = tuple_iterator.__length_hint__  # type: ignore[attr-defined]
@@ -1921,11 +1922,26 @@ object_new = object.__new__
 dict_new = dict.__new__
 dict_methods = {
     method
-    for method in itertools.chain(
-        dict.__dict__.values(), collections.OrderedDict.__dict__.values()
-    )
+    for method in itertools.chain(dict.__dict__.values(), OrderedDict.__dict__.values())
     if callable(method)
 }
+
+
+def builtin_dict_keys(d):
+    # Avoids overridden keys method of the dictionary
+    assert isinstance(d, dict)
+    return dict.keys(d)
+
+
+def get_items_from_dict(obj):
+    # Get items without calling the user defined __getitem__ or keys method.
+    assert isinstance(obj, dict)
+    if istype(obj, (dict, OrderedDict)):
+        return obj.items()
+    elif isinstance(obj, OrderedDict):
+        return [(k, OrderedDict.__getitem__(obj, k)) for k in OrderedDict.keys(obj)]
+    else:
+        return [(k, dict.__getitem__(obj, k)) for k in dict.keys(obj)]
 
 
 def nn_module_new(cls):
@@ -3705,10 +3721,10 @@ def verify_guard_fn_signature(value):
 
 def does_not_override_dict_iter_methods(user_cls):
     return (
-        user_cls.items in (dict.items, collections.OrderedDict.items)
-        and user_cls.values in (dict.values, collections.OrderedDict.values)
-        and user_cls.keys in (dict.keys, collections.OrderedDict.keys)
-        and user_cls.__iter__ in (dict.__iter__, collections.OrderedDict.__iter__)
+        user_cls.items in (dict.items, OrderedDict.items)
+        and user_cls.values in (dict.values, OrderedDict.values)
+        and user_cls.keys in (dict.keys, OrderedDict.keys)
+        and user_cls.__iter__ in (dict.__iter__, OrderedDict.__iter__)
     )
 
 
