@@ -1,8 +1,12 @@
 import functools
 import importlib.util
-from typing import Optional
+from typing import Optional, TYPE_CHECKING
 
 import torch
+
+
+if TYPE_CHECKING:
+    import dill
 
 
 def _check_module_exists(name: str) -> bool:
@@ -29,7 +33,7 @@ def dill_available() -> bool:
 
 
 @functools.lru_cache
-def import_dill() -> Optional[object]:
+def import_dill() -> Optional["dill"]:
     if not dill_available():
         return None
 
