@@ -32,9 +32,10 @@ Tensor q_linear_pointwise(
 
   std::vector<int64_t> src_dims = {M, K};
   std::vector<int64_t> dst_dims = {M, N};
-  Tensor qout = at::empty(dst_dims, device(c10::kXPU).dtype(c10::kByte));
+  auto out_dtype = output_dtype.has_value() ? output_dtype.value() : act.scalar_type();
+  Tensor qout = at::empty(dst_dims, device(c10::kXPU).dtype(out_dtype));
 
-  quantized_matmul_pt2(
+  quantized_matmul(
     act.contiguous(),
     act_scale,
     act_zero_point,
@@ -84,9 +85,10 @@ Tensor q_linear_pointwise_tensor(
 
   std::vector<int64_t> src_dims = {M, K};
   std::vector<int64_t> dst_dims = {M, N};
-  Tensor qout = at::empty(dst_dims, device(c10::kXPU).dtype(c10::kByte));
+  auto out_dtype = output_dtype.has_value() ? output_dtype.value() : act.scalar_type();
+  Tensor qout = at::empty(dst_dims, device(c10::kXPU).dtype(out_dtype));
 
-  quantized_matmul_pt2(
+  quantized_matmul(
     act.contiguous(),
     act_scale.item().toDouble(),
     act_zero_point.item().toLong(),

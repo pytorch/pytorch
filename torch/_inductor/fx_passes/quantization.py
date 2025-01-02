@@ -427,8 +427,8 @@ def _register_quantized_linear_lowering(
         b = kwargs["b"] if "b" in kwargs else None
 
         # Output QParams
-        o_inv_scale = kwargs["o_inv_scale"] if output_dtype == torch.uint8 else 1.0
-        o_zero_point = kwargs["o_zp"] if output_dtype == torch.uint8 else 0
+        o_inv_scale = kwargs["o_inv_scale"] if (output_dtype == torch.uint8 or output_dtype == torch.int8) else 1.0
+        o_zero_point = kwargs["o_zp"] if (output_dtype == torch.uint8 or output_dtype == torch.int8) else 0
         assert (
             kwargs["postop_name"] == "none"
         )  # Expected no post op fused in weight prepack phase
