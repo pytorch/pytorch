@@ -1,7 +1,5 @@
 #!/usr/bin/env python3
-
-from typing import Callable, Iterator
-
+# mypy: allow-untyped-defs
 
 # Copyright (c) Facebook, Inc. and its affiliates.
 # All rights reserved.
@@ -25,21 +23,16 @@ class CyclingIterator:
     ``[1,2,3,1,2,3]``
     """
 
-    def __init__(
-        self,
-        n: int,
-        generator_fn: Callable[[int], Iterator[object]],
-        start_epoch: int = 0,
-    ):
+    def __init__(self, n: int, generator_fn, start_epoch=0):
         self._n = n
         self._epoch = start_epoch
         self._generator_fn = generator_fn
         self._iter = generator_fn(self._epoch)
 
-    def __iter__(self) -> "CyclingIterator":
+    def __iter__(self):
         return self
 
-    def __next__(self) -> object:
+    def __next__(self):
         try:
             return next(self._iter)
         except StopIteration as eod:  # eod == end of data
