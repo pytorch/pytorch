@@ -13,7 +13,7 @@ set -eux -o pipefail
 
 # This script expects to be in the pytorch root folder
 if [[ ! -d 'test' || ! -f 'test/run_test.py' ]]; then
-    echo "builder/test.sh expects to be run from the Pytorch root directory " \
+    echo "run_tests.sh expects to be run from the Pytorch root directory " \
          "but I'm actually in $(pwd)"
     exit 2
 fi
