@@ -2279,7 +2279,9 @@ class CppKernel(Kernel):
 
     def decide_parallel_depth(self, max_parallel_depth, threads):
         assert self.call_ranges is not None
-        ranges = self.call_ranges[max_parallel_depth[1]:(max_parallel_depth[0] + max_parallel_depth[1])]
+        ranges = self.call_ranges[
+            max_parallel_depth[1] : (max_parallel_depth[0] + max_parallel_depth[1])
+        ]
         seq = self.size_hint()
         par = 1
         depth = 0
@@ -4193,12 +4195,18 @@ class OuterLoopFusedKernel(CppKernel):
             call_ranges = kernel.call_ranges
             assert call_ranges is not None
             kernels_parallel_depth.append(
-                kernel.decide_parallel_depth((len(call_ranges) - max_parallel_depth[1], max_parallel_depth[1]), threads)
+                kernel.decide_parallel_depth(
+                    (len(call_ranges) - max_parallel_depth[1], max_parallel_depth[1]),
+                    threads,
+                )[0]
             )
-        return min(
-            max_parallel_depth[0],
-            max(kernels_parallel_depth),
-        ), max_parallel_depth[1]
+        return (
+            min(
+                max_parallel_depth[0],
+                max(kernels_parallel_depth),
+            ),
+            max_parallel_depth[1],
+        )
 
 
 class ReasonFusedNodes(Enum):
@@ -5193,8 +5201,16 @@ class LoopNest:
             if loop.is_reduction != is_reduction:
                 break
             max_depth += 1
-        if len(self.loops) > 2 and not self.loops[0].is_reduction and self.loops[1].is_reduction:
-            if self.loops[0].size * 100 < self.loops[1].size:
+        if (
+            len(self.loops) > 2
+            and not self.loops[0].is_reduction
+            and self.loops[1].is_reduction
+        ):
+            if (
+                isinstance(self.loops[0].size, sympy.Integer)
+                and isinstance(self.loops[1].size, sympy.Integer)
+                and self.loops[0].size * 100 < self.loops[1].size
+            ):
                 start_depth = 1
         return max_depth, start_depth
 
