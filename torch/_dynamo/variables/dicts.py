@@ -473,6 +473,7 @@ class ConstDictVariable(VariableTracker):
             return super().call_method(tx, name, args, kwargs)
 
     def unpack_var_sequence(self, tx):
+        self.install_dict_keys_match_guard()
         return [x.vt for x in self.items.keys()]
 
     def call_hasattr(self, tx, name):
@@ -483,6 +484,10 @@ class ConstDictVariable(VariableTracker):
                 return ConstantVariable.create(True)
             return ConstantVariable.create(False)
         unimplemented(f"hasattr on {self.user_cls} is not supported")
+
+    def clone(self, **kwargs):
+        self.install_dict_keys_match_guard()
+        return super().clone(**kwargs)
 
 
 class DefaultDictVariable(ConstDictVariable):
