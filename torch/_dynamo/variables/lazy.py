@@ -4,6 +4,8 @@ import functools
 from typing import Any, Callable, Dict, final, Optional, Tuple, Union
 from typing_extensions import Self
 
+import torch
+
 from ..utils import is_function_or_wrapper
 from .base import VariableTracker
 from .tensor import SymNodeVariable
@@ -146,13 +148,19 @@ class LazyVariableTracker(VariableTracker):
 
     def is_hashable(self) -> bool:
         # Checks that the underlying value is hashable without realizing the VT.
+        def _helper(value: Any) -> bool:
+            return (
+                isinstance(value, torch.Tensor)
+                or value in vars(builtins).values()
+                or issubclass(type(value), type)
+                or is_function_or_wrapper(value)
+            )
+
         assert not self.is_realized()
         value = self._cache.value
-        return (
-            value in vars(builtins).values()
-            or issubclass(type(value), type)
-            or is_function_or_wrapper(value)
-        )
+        if isinstance(value, tuple):
+            return all(_helper(v) for v in value)
+        return _helper(value)
 
     def original_value(self) -> Any:
         # Returns the value without realizing the VT.
