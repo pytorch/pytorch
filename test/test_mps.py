@@ -1981,6 +1981,18 @@ class TestMPS(TestCaseMPS):
         self.assertEqual(output_cpu, output_mps, atol=tol, rtol=tol)
         self.assertEqual(output_cpu.size(), output_mps.size())
 
+    @parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16])
+    def test_take_along_dim(self, dtype):
+        if dtype == torch.bfloat16 and MACOS_VERSION < 14.0:
+            raise unittest.SkipTest("bfloat16 needs MacOS14+")
+
+        x = torch.tensor([[-5.], [0.], [5.]], dtype=dtype)
+        inds = torch.tensor([[0], [1], [2]])
+        ref = torch.take_along_dim(x, inds, 0)
+        x_mps = x.detach().clone().to('mps')
+        inds_mps = inds.detach().clone().to('mps')
+        res = torch.take_along_dim(x_mps, inds_mps, 0)
+        self.assertEqual(res, ref)
 
     def test_addr(self):
         A = torch.ones(5, 10).to("mps")
@@ -5724,6 +5736,13 @@ class TestMPS(TestCaseMPS):
 
         helper(2, 8, 4, 5)
 
+    def test_fmin(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/143933
+        scalar = torch.tensor(.5)
+        x_mps = torch.rand(32, device="mps")
+        x_cpu = x_mps.detach().cpu()
+        self.assertEqual(torch.fmin(x_mps, scalar), torch.fmin(x_cpu, scalar))
+
     # Test forward sum
     def test_sum(self):
         def helper(n, c, h, w, dtype=torch.float32):
@@ -8270,6 +8289,13 @@ class TestMPS(TestCaseMPS):
             helper((2, 8, 4, 5), 1.0, op_name, inplace)
             helper((2, 8, 3, 5), 0.1, op_name, inplace)
             helper((2, 8, 3, 5), 0.2, op_name, inplace)
+
+        # Test float32  int alpha
+        # See https://github.com/pytorch/pytorch/issues/143932
+        x = torch.rand(32, device='mps', dtype=torch.float32)
+        y = torch.arange(32, device='mps', dtype=torch.int32)
+        self.assertEqual(torch.add(x, y, alpha=2).cpu(), torch.add(x.cpu(), y.cpu(), alpha=2))
+        self.assertEqual(torch.add(x, 3, alpha=2).cpu(), torch.add(x.cpu(), 3, alpha=2))
 
     # Test add
     def test_add_scalars(self):

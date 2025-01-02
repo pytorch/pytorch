@@ -2,8 +2,8 @@
 
 import functools
 import warnings
-from typing import Any, Callable, List, Optional, TYPE_CHECKING, Union
-from typing_extensions import deprecated
+from typing import Any, Callable, List, Optional, TYPE_CHECKING, TypeVar, Union
+from typing_extensions import deprecated, ParamSpec
 
 import torch
 import torch.utils._pytree as pytree
@@ -13,6 +13,9 @@ try:
     import numpy as np
 except ModuleNotFoundError:
     np = None  # type: ignore[assignment]
+
+_P = ParamSpec("_P")
+_R = TypeVar("_R")
 
 if TYPE_CHECKING:
     # TorchScript does not support `@deprecated`
@@ -35,13 +38,13 @@ else:
         return torch.compiler.is_compiling()
 
 
-def wrap_inline(fn: Callable[..., Any]) -> Callable[..., Any]:
+def wrap_inline(fn: Callable[_P, _R]) -> Callable[_P, _R]:
     """
     Create an extra frame around fn that is not in skipfiles.
     """
 
     @functools.wraps(fn)
-    def inner(*args: Any, **kwargs: Any) -> Any:
+    def inner(*args: _P.args, **kwargs: _P.kwargs) -> _R:
         return fn(*args, **kwargs)
 
     return inner
@@ -61,7 +64,7 @@ def call_hook(
     return result
 
 
-def wrap_numpy(f: Callable[..., Any]) -> Callable[..., Any]:
+def wrap_numpy(f: Callable[_P, _R]) -> Callable[_P, _R]:
     r"""Decorator that turns a function from ``np.ndarray``s to ``np.ndarray``s into a function
     from ``torch.Tensor``s to ``torch.Tensor``s.
     """
@@ -69,7 +72,7 @@ def wrap_numpy(f: Callable[..., Any]) -> Callable[..., Any]:
         return f
 
     @functools.wraps(f)
-    def wrap(*args: Any, **kwargs: Any) -> Any:
+    def wrap(*args: _P.args, **kwargs: _P.kwargs) -> pytree.PyTree:
         args, kwargs = pytree.tree_map_only(
             torch.Tensor, lambda x: x.numpy(), (args, kwargs)
         )
@@ -119,22 +122,6 @@ def normalize_as_list(x: Any) -> List[Any]:
     elif isinstance(x, list):
         return x
     return [x]
-
-
-def call_aot_bwd_impl(
-    ctx: torch.autograd.function.BackwardCFunction,
-    saved_tensors: List[torch.Tensor],
-    all_args: List[
-        Union[torch.Tensor, torch.fx.experimental._backward_state.BackwardState]
-    ],
-    backward_state: Optional[torch.fx.experimental._backward_state.BackwardState],
-) -> List[torch.Tensor]:
-    fakectx = FakeBackwardCFunction(ctx, saved_tensors)
-    bw_module = fakectx._bw_module
-    if backward_state is not None:
-        all_args = [*all_args, backward_state]
-    out = bw_module(*all_args)
-    return normalize_as_list(out)
 
 
 def untyped_storage_size(x: torch.Tensor) -> int:
