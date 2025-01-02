@@ -369,6 +369,7 @@ def mps_ops_modifier(ops):
         'acosh',
         'all',
         'allclose',
+        'angle',
         'any',
         'addcdiv',
         'addcmul',
