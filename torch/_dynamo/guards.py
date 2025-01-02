@@ -88,6 +88,7 @@ from .source import (
     ChainedSource,
     ConstDictKeySource,
     DefaultsSource,
+    DictGetItemSource,
     FlattenScriptObjectSource,
     FSDPNNModuleSource,
     GetItemSource,
@@ -666,7 +667,7 @@ class GuardBuilder(GuardBuilderBase):
         # does not call the overridden keys method.
         for key in builtin_dict_keys(example_value):
             value = example_value[key]
-            value_source = GetItemSource(guard.originating_source, index=key)
+            value_source = DictGetItemSource(guard.originating_source, index=key)
             guard_manager_enum = self.get_guard_manager_type(
                 value_source, example_value
             )
@@ -1050,33 +1051,36 @@ class GuardBuilder(GuardBuilderBase):
                     example_value=example_value,
                     guard_manager_enum=guard_manager_enum,
                 )
+        elif istype(source, DictGetItemSource):
+            assert base_guard_manager  # to make mypy happy
+            assert isinstance(base_example_value, (dict, collections.OrderedDict))
+            if isinstance(base_guard_manager, DictGuardManager):
+                assert self.manager_guards_on_keys(base_guard_manager_enum)
+                out = getitem_on_dict_manager(
+                    source,
+                    base_guard_manager,
+                    base_example_value,
+                    example_value,
+                    guard_manager_enum,
+                )
+            else:
+                if isinstance(source.index, ConstDictKeySource):
+                    raise RuntimeError(
+                        "Expecting clean index here. Likely Dynamo forgot to mark"
+                        " a dict as guard_on_key_order"
+                    )
+                out = base_guard_manager.dict_getitem_manager(
+                    key=source.index,
+                    source=source_name,
+                    example_value=example_value,
+                    guard_manager_enum=guard_manager_enum,
+                )
         elif istype(source, GetItemSource):
             assert base_guard_manager  # to make mypy happy
-            if isinstance(base_example_value, (dict, collections.OrderedDict)):
-                # TODO(anijain2305) - Consider isolating GetItemSource and
-                # DictGetItemSource for dicts) so that GetItemSource is only for non dict objects.
-                if isinstance(base_guard_manager, DictGuardManager):
-                    assert self.manager_guards_on_keys(base_guard_manager_enum)
-                    out = getitem_on_dict_manager(
-                        source,
-                        base_guard_manager,
-                        base_example_value,
-                        example_value,
-                        guard_manager_enum,
-                    )
-                else:
-                    if isinstance(source.index, ConstDictKeySource):
-                        raise RuntimeError(
-                            "Expecting clean index here. Likely Dynamo forgot to mark"
-                            " a dict as guard_on_key_order"
-                        )
-                    out = base_guard_manager.dict_getitem_manager(
-                        key=source.index,
-                        source=source_name,
-                        example_value=example_value,
-                        guard_manager_enum=guard_manager_enum,
-                    )
-            elif isinstance(base_example_value, list) and not source.index_is_slice:
+            assert not isinstance(
+                base_example_value, (dict, collections.OrderedDict)
+            ), "Use DictGetItemSource"
+            if isinstance(base_example_value, list) and not source.index_is_slice:
                 out = base_guard_manager.list_getitem_manager(
                     key=source.index,
                     source=source_name,

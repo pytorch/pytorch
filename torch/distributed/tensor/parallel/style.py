@@ -35,6 +35,8 @@ class ParallelStyle(ABC):
     flexibility for different kind of style implementations.
     """
 
+    src_data_rank: Optional[int] = 0
+
     @abstractmethod
     def _apply(self, module: nn.Module, device_mesh: DeviceMesh) -> nn.Module:
         ...
@@ -118,13 +120,21 @@ class ColwiseParallel(ParallelStyle):
         # means Colwise as Linear is input * weight^T + bias, where
         # weight would become Shard(1)
         for name, param in module.named_parameters():
-            dist_param = nn.Parameter(distribute_tensor(param, device_mesh, [Shard(0)]))
+            dist_param = nn.Parameter(
+                distribute_tensor(
+                    param, device_mesh, [Shard(0)], src_data_rank=self.src_data_rank
+                )
+            )
             module.register_parameter(name, dist_param)
 
     def _partition_embedding_fn(self, name, module, device_mesh):
         # colwise shard embedding.weight is straight forward as Shard(1)
         for name, param in module.named_parameters():
-            dist_param = nn.Parameter(distribute_tensor(param, device_mesh, [Shard(1)]))
+            dist_param = nn.Parameter(
+                distribute_tensor(
+                    param, device_mesh, [Shard(1)], src_data_rank=self.src_data_rank
+                )
+            )
             module.register_parameter(name, dist_param)
 
     @staticmethod
@@ -225,21 +235,37 @@ class RowwiseParallel(ParallelStyle):
         # weight would become Shard(0)
         module.register_parameter(
             "weight",
-            nn.Parameter(distribute_tensor(module.weight, device_mesh, [Shard(1)])),
+            nn.Parameter(
+                distribute_tensor(
+                    module.weight,
+                    device_mesh,
+                    [Shard(1)],
+                    src_data_rank=self.src_data_rank,
+                )
+            ),
         )
         if getattr(module, "bias", None) is not None:
             # The Linear module has bias
             module.register_parameter(
                 "bias",
                 nn.Parameter(
-                    distribute_tensor(module.bias, device_mesh, [Replicate()])
+                    distribute_tensor(
+                        module.bias,
+                        device_mesh,
+                        [Replicate()],
+                        src_data_rank=self.src_data_rank,
+                    )
                 ),
             )
 
     def _partition_embedding_fn(self, name, module, device_mesh):
         # rowwise shard embedding.weight is Shard(0)
         for name, param in module.named_parameters():
-            dist_param = nn.Parameter(distribute_tensor(param, device_mesh, [Shard(0)]))
+            dist_param = nn.Parameter(
+                distribute_tensor(
+                    param, device_mesh, [Shard(0)], src_data_rank=self.src_data_rank
+                )
+            )
             module.register_parameter(name, dist_param)
 
     @staticmethod

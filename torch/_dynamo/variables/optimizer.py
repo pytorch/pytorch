@@ -12,6 +12,7 @@ from ..guards import GuardBuilder, install_guard
 from ..source import (
     AttrSource,
     ConstDictKeySource,
+    DictGetItemSource,
     GetItemSource,
     GlobalWeakRefSource,
     GradSource,
@@ -263,7 +264,7 @@ class OptimizerVariable(UserDefinedObjectVariable):
                                 VariableTracker.build(
                                     tx,
                                     self.value.state[param],
-                                    GetItemSource(
+                                    DictGetItemSource(
                                         state_source,
                                         ConstDictKeySource(state_source, key_index),
                                     ),
@@ -306,7 +307,7 @@ class OptimizerVariable(UserDefinedObjectVariable):
         # We have to again iterate over the state dict to collect the
         # tensor_to_source dict. This is used for the finalizer.
         for idx, (p, value) in enumerate(self.value.state.items()):
-            p_state_source = GetItemSource(
+            p_state_source = DictGetItemSource(
                 state_source, ConstDictKeySource(state_source, idx)
             )
             tx.output.guard_on_key_order.add(p_state_source.name())
@@ -316,7 +317,7 @@ class OptimizerVariable(UserDefinedObjectVariable):
                     and v not in self.grad_to_source
                     and v not in self.tensor_to_source
                 ):
-                    self.tensor_to_source[v] = GetItemSource(
+                    self.tensor_to_source[v] = DictGetItemSource(
                         p_state_source, ConstDictKeySource(p_state_source, inner_idx)
                     )
 

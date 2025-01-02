@@ -2558,8 +2558,6 @@ fake_backward_skips = {
 }
 
 fake_backward_xfails = {skip(s) for s in fake_backward_skips} | {
-    xfail("fft.ihfftn"),  # Mismatch in aten._conj_physical.default
-    xfail("fft.ihfft2"),  # Mismatch in aten._conj_physical.default
     skip("nn.functional.ctc_loss"),
 }
 
