@@ -1,8 +1,10 @@
 # mypy: allow-untyped-defs
 import ast
+import copy
 import dataclasses
 import functools
 import inspect
+import json
 import math
 import operator
 import re
@@ -37,6 +39,7 @@ if TYPE_CHECKING:
     from torch.export.graph_signature import ExportGraphSignature
 
 from torch.export.graph_signature import CustomObjArgument, InputKind, OutputKind
+from torch.fx._pytree import register_pytree_flatten_spec
 from torch.utils._pytree import (
     _register_pytree_node,
     Context,
@@ -1150,3 +1153,146 @@ def _compiling_state_context():
     finally:
         torch.compiler._is_compiling_flag = old_compiling_flag
         torch.compiler._is_exporting_flag = old_exporting_flag
+
+
+def register_module_as_pytree_input_node(
+    cls: Type[torch.nn.Module],
+    flatten_fn: Optional[FlattenFunc] = None,
+    unflatten_fn: Optional[UnflattenFunc] = None,
+    *,
+    serialized_type_name: Optional[str] = None,
+    to_dumpable_context: Optional[ToDumpableContextFn] = None,
+    from_dumpable_context: Optional[FromDumpableContextFn] = None,
+) -> None:
+    """
+    Registers a module as a valid input type for :func:`torch.export.export`.
+
+    Args:
+        mod: the module instance
+        serialized_type_name: The serialized name for the module. This is
+        required if you want to serialize the pytree TreeSpec containing this
+        module.
+
+    Example::
+
+        import torch
+
+        class Module(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(3, 3)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        torch._export.utils.register_module_as_pytree_node(InputDataClass)
+
+        class Mod(torch.nn.Module):
+            def forward(self, x, m):
+                return m(x) + x
+
+        ep = torch.export.export(Mod(), (torch.randn(3), Module()))
+        print(ep)
+
+    """
+    assert issubclass(cls, torch.nn.Module)
+
+    import weakref
+
+    class PrototypeModule(weakref.ref):
+        def __init__(self, m, *args, **kwargs):
+            super().__init__(m, *args, **kwargs)
+            assert isinstance(m, torch.nn.Module)
+            assert not hasattr(self, "cls")
+            self.cls = cls
+
+        def __eq__(self, other):
+            return type(other) == PrototypeModule and self.cls == other.cls
+
+        def __deepcopy__(self, memo):
+            return PrototypeModule(self())
+
+    def default_flatten_fn(obj: Any) -> Tuple[List[Any], Context]:
+        named_parameters = dict(obj.named_parameters())
+        named_buffers = dict(obj.named_buffers())
+        params_buffers = {**named_parameters, **named_buffers}
+        return list(params_buffers.values()), [
+            list(params_buffers.keys()),
+            PrototypeModule(obj),
+        ]
+
+    def default_unflatten_fn(values: Iterable[Any], context: Context) -> Any:
+        flat_names, ref = context
+        if ref is None or ref() is None:
+            raise RuntimeError("Module has been garbage collected")
+        obj = ref()
+        assert flatten_fn is not None
+        flattened, _ = flatten_fn(obj)
+
+        def copy_module(mod: torch.nn.Module):
+            ret = copy.copy(mod)
+            ret.__dict__ = {copy.copy(k): copy.copy(v) for k, v in mod.__dict__.items()}
+            for name, child in ret.named_children():
+                setattr(ret, name, copy_module(child))
+            return ret
+
+        if any(v is not o for v, o in zip(values, flattened)):
+            with torch.nn.utils.stateless._reparametrize_module(
+                obj, dict(zip(flat_names, values)), tie_weights=True, strict=True
+            ):
+                ret = copy_module(obj)
+        else:
+            ret = obj
+        return ret
+
+    def default_flatten_fn_with_keys(obj: Any) -> Tuple[List[Any], Context]:
+        flattened, [flat_names, *args] = flatten_fn(obj)  # type: ignore[misc]
+        return [(MappingKey(k), v) for k, v in zip(flat_names, flattened)], [
+            flat_names,
+            *args,
+        ]
+
+    flatten_fn = flatten_fn if flatten_fn is not None else default_flatten_fn
+    unflatten_fn = unflatten_fn if unflatten_fn is not None else default_unflatten_fn
+
+    if (to_dumpable_context is None) ^ (from_dumpable_context is None):
+        raise ValueError(
+            f"Both to_dumpable_context and from_dumpable_context for {cls} must "
+            "be None or registered."
+        )
+
+    serialized_type_name = serialized_type_name or (
+        cls.__module__ + "." + cls.__qualname__
+    )
+    if to_dumpable_context is None:
+
+        def to_dumpable_context(context):
+            keys, *_ = context
+            return json.dumps([keys, *([None] * len(_))])
+
+    if from_dumpable_context is None:
+
+        def from_dumpable_context(dumpable):
+            s = json.loads(dumpable)
+            s[1] = PrototypeModule(torch.nn.Module())
+            return s
+
+    _register_pytree_node(
+        cls,
+        flatten_fn,
+        unflatten_fn,
+        serialized_type_name=serialized_type_name,
+        flatten_with_keys_fn=default_flatten_fn_with_keys,
+        to_dumpable_context=to_dumpable_context,
+        from_dumpable_context=from_dumpable_context,
+    )
+
+    def default_flatten_fn_spec(obj, spec) -> List[Any]:
+        flats, context = flatten_fn(obj)
+        assert context == spec.context
+        return flats
+
+    register_pytree_flatten_spec(
+        cls,
+        default_flatten_fn_spec,
+    )

@@ -72,6 +72,7 @@ from torch.testing._internal.common_utils import (
     TEST_TRANSFORMERS,
     TestCase as TorchTestCase,
 )
+from torch.testing._internal.custom_tensor import CustomTensorPlainOut
 from torch.utils._pytree import (
     LeafSpec,
     tree_flatten,
@@ -338,6 +339,37 @@ class TestDynamismExpression(TestCase):
         # It works if we transform the whole unbacked int expression into
         # an unbacked int.
         export(Module(torch.sym_fresh_size), inputs, strict=True)
+
+
+class InputModule(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.linear = torch.nn.Linear(3, 3)
+
+    def forward(self, x, y):
+        return self.linear(x) * y
+
+
+class InputModuleWithNestedSubclass(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.p1 = torch.nn.Parameter(torch.ones(2, 2))
+        self.p2 = torch.nn.Parameter(
+            CustomTensorPlainOut(
+                CustomTensorPlainOut(
+                    torch.Tensor([[0, 0], [0, 1]]),
+                    torch.Tensor([[0, 0], [1, 0]]),
+                ),
+                CustomTensorPlainOut(
+                    torch.Tensor([[1, 0], [0, 0]]),
+                    torch.Tensor([[0, 1], [0, 0]]),
+                ),
+            )
+        )
+
+    def forward(self, x):
+        a = (x + 2 * self.p1 + self.p2).sum().sum()
+        return x + a
 
 
 @unittest.skipIf(IS_WINDOWS, "Windows isn't supported for this case")
@@ -1542,8 +1574,6 @@ def forward(self, x, y):
     @testing.expectedFailureLegacyExportNonStrict  # Old export doesn't work with subclasses
     @testing.expectedFailureLegacyExportStrict  # Old export doesn't work with subclasses
     def test_subclasses_parameterization(self):
-        from torch.testing._internal.custom_tensor import CustomTensorPlainOut
-
         class Foo(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -1599,8 +1629,6 @@ graph():
     @testing.expectedFailureLegacyExportNonStrict  # Old export doesn't work with subclasses
     @testing.expectedFailureLegacyExportStrict  # Old export doesn't work with subclasses
     def test_subclasses_parameterization_nested(self):
-        from torch.testing._internal.custom_tensor import CustomTensorPlainOut
-
         class Foo(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -5534,6 +5562,32 @@ def forward(self, x):
                 self.assertTrue(
                     torch.allclose(torch.tensor(7, dtype=torch.float), buffer)
                 )
+
+    def test_module_input(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x, y, m):
+                return m(x, y) + x + y
+
+        i = InputModule()
+        f = Foo()
+        ep = export(f, (torch.randn(3), torch.randn(3), i), strict=False)
+
+        m = InputModule()
+        inputs = (torch.randn(3), torch.randn(3), m)
+        self.assertEqual(f(*inputs), ep.module()(*inputs))
+
+    def test_module_input_subclasses_parameterization_nested(self):
+        class Module(torch.nn.Module):
+            def forward(self, x, m):
+                return m(x) * 2
+
+        mod = InputModuleWithNestedSubclass()
+        f = Module()
+        ref_x = torch.randn(2, 2)
+        ref_out = f(ref_x, mod)
+
+        ep = torch.export.export_for_training(f, (torch.randn(2, 2), mod), strict=False)
+        self.assertEqual(ref_out, ep.module()(ref_x, mod))
 
     def test_runtime_assert_for_prim(self):
         class Foo(torch.nn.Module):
