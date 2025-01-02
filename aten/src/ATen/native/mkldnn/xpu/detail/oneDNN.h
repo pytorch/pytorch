@@ -133,7 +133,7 @@ at::Tensor quantized_convolution(
     torch::List<std::optional<at::Scalar>> unary_scalars,
     std::optional<std::string_view> unary_algorithm);
 
-void quantized_matmul_pt2(
+void quantized_matmul(
   at::Tensor  mat1, // act
   double input_scale,
   int64_t input_zero_point,
