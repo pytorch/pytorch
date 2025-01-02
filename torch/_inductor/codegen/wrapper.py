@@ -464,6 +464,13 @@ class AllocateLine(MemoryPlanningLine):
         if self.node.get_name() in V.graph.removed_buffers:
             return NullLine(self.wrapper)
 
+        if isinstance(self.node, ir.CppTemplateBuffer) and isinstance(
+            self.node.layout, ir.MultiOutputLayout
+        ):
+            # Keep the Grouped GEMM Template as AllocateLine, as we
+            # decide to allocate its MultiOutput in the AllocateLine.codegen
+            return self
+
         # try to reuse a recently freed buffer
         key = buffer_reuse_key(self.node)
         if config.allow_buffer_reuse and key in state:
