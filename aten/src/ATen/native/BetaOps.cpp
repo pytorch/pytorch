@@ -130,14 +130,8 @@ static Tensor _log_gamma_correction(const Tensor& x) {
 }
 
 static Tensor _log_gamma_difference_big_y(const Tensor& x, const Tensor& y) {
-  at::ScalarType dtype = at::promoteTypes(x.scalar_type(), y.scalar_type());
-  auto options = at::TensorOptions().dtype(dtype).device(x.device());
-  const Tensor half = at::scalar_tensor(0.5, options);
-  const Tensor one = at::scalar_tensor(1.0, options);
-
-  Tensor cancelled_stirling = (-one * (x + y - half) * at::log1p(x / y)
+  Tensor cancelled_stirling = (-1.0 * (x + y - 0.5) * at::log1p(x / y)
                                - x * at::log(y) + x);
-
   Tensor correction = _log_gamma_correction(y) - _log_gamma_correction(x + y);
   return correction + cancelled_stirling;
 }
@@ -153,19 +147,15 @@ static Tensor _special_betaln(const Tensor& x, const Tensor& y) {
 
   Tensor _x = at::minimum(__x, __y);
   Tensor _y = at::maximum(__x, __y);
-  const Tensor half = at::scalar_tensor(0.5, options);
-  const Tensor two = at::scalar_tensor(2.0, options);
-  const Tensor eight = at::scalar_tensor(8.0, options);
-
-  Tensor log2pi = at::log(two * at::scalar_tensor(c10::pi<double>, options));
+  Tensor log2pi = at::log(2.0 * at::scalar_tensor(c10::pi<double>, options));
 
   // Two large arguments case: _y >= _x >= 8
-  Tensor log_beta_two_large = (half * log2pi
-                               - half * at::log(_y)
+  Tensor log_beta_two_large = (0.5 * log2pi
+                               - 0.5 * at::log(_y)
                                + _log_gamma_correction(_x)
                                + _log_gamma_correction(_y)
                                - _log_gamma_correction(_x + _y)
-                               + (_x - half) * at::log(_x / (_x + _y))
+                               + (_x - 0.5) * at::log(_x / (_x + _y))
                                - _y * at::log1p(_x / _y));
   // Small arguments case: _x < 8, _y >= 8.
   Tensor log_beta_one_large = at::lgamma(_x) + _log_gamma_difference_big_y(_x, _y);
@@ -173,9 +163,9 @@ static Tensor _special_betaln(const Tensor& x, const Tensor& y) {
   // Small arguments case: _x <= _y < 8.
   Tensor log_beta_small = at::lgamma(_x) + at::lgamma(_y) - at::lgamma(_x + _y);
 
-  Tensor result = at::where(_x >= eight,
+  Tensor result = at::where(_x >= 8.0,
                    log_beta_two_large,
-                   at::where(_y >= eight,
+                   at::where(_y >= 8.0,
                              log_beta_one_large,
                              log_beta_small));
   if (should_promote_dtype)
@@ -209,25 +199,22 @@ static Tensor _betaincinv_initial_approx(const Tensor& y, const Tensor& a, const
     return std::make_tuple(std::move(eps), std::move(tiny), std::move(maxexp));
   });
   auto options = at::TensorOptions().dtype(dtype).device(y.device());
-  const Tensor one = at::scalar_tensor(1.0, options);
   const Tensor two = at::scalar_tensor(2.0, options);
-  const Tensor three = at::scalar_tensor(3.0, options);
-  const Tensor five = at::scalar_tensor(5.0, options);
   const Tensor six = at::scalar_tensor(6.0, options);
-  const Tensor max_log = (maxexp - one) * at::log(two);
+  const Tensor max_log = (maxexp - 1.0) * at::log(two);
 
   // When min(a, b) >= 1, we use the approximation proposed by [1].
 
   // Equation 26.5.22 [1, page 945].
   Tensor yp = - at::special_ndtri(y);
-  Tensor inv_2a_minus_one = at::reciprocal(two * a - one);
-  Tensor inv_2b_minus_one = at::reciprocal(two * b - one);
-  Tensor lmb = (at::square(yp) - three) / six;
-  Tensor h = two * at::reciprocal(inv_2a_minus_one + inv_2b_minus_one);
+  Tensor inv_2a_minus_one = at::reciprocal(2.0 * a - 1.0);
+  Tensor inv_2b_minus_one = at::reciprocal(2.0 * b - 1.0);
+  Tensor lmb = (at::square(yp) - 3.0) / 6.0;
+  Tensor h = 2.0 * at::reciprocal(inv_2a_minus_one + inv_2b_minus_one);
   Tensor w = (yp * at::sqrt(h + lmb) / h -
           (inv_2b_minus_one - inv_2a_minus_one) *
-          (lmb + five / six - two / (three * h)));
-  Tensor result_for_large_a_and_b = a / (a + b * at::exp(two * w));
+          (lmb + 5.0 / six - 2.0 / (3.0 * h)));
+  Tensor result_for_large_a_and_b = a / (a + b * at::exp(2.0 * w));
 
   /* When min(a, b) < 1 and max(a, b) >= 1, we use the approximation proposed by
    * [2]. This approximation depends on the following approximation for betainc:
@@ -267,16 +254,16 @@ static Tensor _betaincinv_initial_approx(const Tensor& y, const Tensor& a, const
   Tensor log_xg = at::xlogy(inv_a, a) + at::xlogy(inv_a, y) + (
       inv_a * at::special_betaln(a, b));
   Tensor xg = at::exp(at::minimum(log_xg, max_log));
-  Tensor result_for_small_a_and_b = xg / (one + xg);
+  Tensor result_for_small_a_and_b = xg / (1.0 + xg);
 
   Tensor result = at::where(
-      at::minimum(a, b) >= one,
+      at::minimum(a, b) >= 1.0,
           result_for_large_a_and_b,
-          at::where(at::maximum(a, b) < one,
+          at::where(at::maximum(a, b) < 1.0,
               result_for_small_a_and_b,
               result_for_small_a_or_b));
 
-  return at::clamp(result, tiny, one - eps);
+  return at::clamp(result, tiny, 1.0 - eps);
 }
 
 static Tensor _betaincinv_computation(const Tensor& y, const Tensor& a, const Tensor& b) {
@@ -305,10 +292,8 @@ static Tensor _betaincinv_computation(const Tensor& y, const Tensor& a, const Te
     return std::make_tuple(std::move(eps), std::move(tiny), std::move(nan));
   });
   auto options = at::TensorOptions().dtype(dtype).device(_y.device());
-  const Tensor zero = at::scalar_tensor(0.0, options);
   const Tensor half = at::scalar_tensor(0.5, options);
   const Tensor one = at::scalar_tensor(1.0, options);
-  const Tensor two = at::scalar_tensor(2.0, options);
   const Tensor halley_correction_min = at::scalar_tensor(0.5, options);
   const Tensor halley_correction_max = at::scalar_tensor(1.5, options);
   const Tensor _true = at::scalar_tensor(true, _y.device());
@@ -324,23 +309,23 @@ static Tensor _betaincinv_computation(const Tensor& y, const Tensor& a, const Te
   Tensor error_at_half = at::special_betainc(half, _a, _b) - _y;
   Tensor use_symmetry_relation;
   if (dtype == at::ScalarType::Float) {
-      a_and_b_are_small = (_a < one) & (_b < one);
+      a_and_b_are_small = (_a < 1.0) & (_b < 1.0);
       error_at_mean = at::special_betainc(_a / (_a + _b), _a, _b) - _y;
-      use_symmetry_relation = (error_at_half < zero) & a_and_b_are_small & (
-          error_at_mean < zero);
+      use_symmetry_relation = (error_at_half < 0.0) & a_and_b_are_small & (
+          error_at_mean < 0.0);
   } else { // T is double
-      use_symmetry_relation = (error_at_half < zero);
+      use_symmetry_relation = (error_at_half < 0.0);
   }
 
   Tensor a_orig = _a, y_orig = _y;
   _a = at::where(use_symmetry_relation, _b, _a);
   _b = at::where(use_symmetry_relation, a_orig, _b);
-  _y = at::where(use_symmetry_relation, one - _y, _y);
+  _y = at::where(use_symmetry_relation, 1.0 - _y, _y);
 
-  Tensor a_minus_1 = _a - one;
-  Tensor b_minus_1 = _b - one;
+  Tensor a_minus_1 = _a - 1.0;
+  Tensor b_minus_1 = _b - 1.0;
   Tensor lbeta_a_and_b = at::special_betaln(_a, _b);
-  Tensor two_tiny = two * tiny;
+  Tensor two_tiny = 2.0 * tiny;
 
   // max_iterations was taken from [4] and tolerance was set by experimentation.
   int max_iterations = 0;
@@ -359,9 +344,9 @@ static Tensor _betaincinv_computation(const Tensor& y, const Tensor& a, const Te
   Tensor initial_high;
   if (dtype == at::ScalarType::Float) {
       initial_high = at::ones_like(_y) * at::where(
-          a_and_b_are_small & (error_at_mean < zero), half, one);
+          a_and_b_are_small & (error_at_mean < 0.0), 0.5, 1.0);
   } else {
-      initial_high = at::ones_like(_y) * half;
+      initial_high = at::ones_like(_y) * 0.5;
   }
 
   Tensor should_stop = (_y == initial_low) | (_y == initial_high);
@@ -378,13 +363,13 @@ static Tensor _betaincinv_computation(const Tensor& y, const Tensor& a, const Te
           at::xlogy(a_minus_1, candidate) +
           at::special_xlog1py(b_minus_1, -candidate) -
           lbeta_a_and_b);
-      Tensor second_der_over_der = a_minus_1 / candidate - b_minus_1 / (one - candidate);
+      Tensor second_der_over_der = a_minus_1 / candidate - b_minus_1 / (1.0 - candidate);
 
       /* Following [2, section 9.4.2, page 463], we limit the influence of the
          Halley's correction to the Newton's method, since this correction can
          reduce the Newton's region of convergence. We set minimum and maximum
          values for this correction by experimentation. */
-      Tensor halley_correction = at::clamp(one - half * error_over_der * second_der_over_der,
+      Tensor halley_correction = at::clamp(1.0 - 0.5 * error_over_der * second_der_over_der,
                                            halley_correction_min, halley_correction_max);
       Tensor halley_delta = error_over_der / halley_correction;
       Tensor halley_candidate = at::where(should_stop, candidate, candidate - halley_delta);
@@ -393,13 +378,13 @@ static Tensor _betaincinv_computation(const Tensor& y, const Tensor& a, const Te
        * out of bounds. */
       Tensor new_candidate = at::where(
           halley_candidate <= low,
-              half * (candidate + low),
+              0.5 * (candidate + low),
               at::where(halley_candidate >= high,
-                  half * (candidate + high),
+                  0.5 * (candidate + high),
                   halley_candidate));
 
       Tensor new_delta = candidate - new_candidate;
-      Tensor new_delta_is_negative = (new_delta < zero);
+      Tensor new_delta_is_negative = (new_delta < 0.0);
       Tensor new_low = at::where(new_delta_is_negative, candidate, low);
       Tensor new_high = at::where(new_delta_is_negative, high, candidate);
 
@@ -416,13 +401,13 @@ static Tensor _betaincinv_computation(const Tensor& y, const Tensor& a, const Te
   // If we are taking advantage of the symmetry relation, we have to adjust the
   // input y and the solution.
   _y = y_orig;
-  result = at::where(use_symmetry_relation, one - at::maximum(result, eps), result);
+  result = at::where(use_symmetry_relation, 1.0 - at::maximum(result, eps), result);
 
   // Handle trivial cases.
-  result = at::where((at::eq(_y, zero) | at::eq(_y, one)), _y, result);
+  result = at::where((at::eq(_y, 0.0) | at::eq(_y, one)), _y, result);
 
   // Determine if the inputs are out of range (should return NaN output).
-  Tensor result_is_nan = (_a <= zero) | (_b <= zero) | (_y < zero) | (_y > one);
+  Tensor result_is_nan = (_a <= 0.0) | (_b <= 0.0) | (_y < 0.0) | (_y > 1.0);
   result = at::where(result_is_nan, nan, result);
 
   if (should_promote_dtype)
