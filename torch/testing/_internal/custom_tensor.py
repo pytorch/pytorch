@@ -28,6 +28,9 @@ class ConstantExtraMetadataTensor(torch.Tensor):
         inner_repr = repr(self.elem)
         return f"CustomTensor({inner_repr})"
 
+    def get_complicated_metadata(self):
+        return (self.constant_attribute, self.constant_attribute)
+
     def __tensor_flatten__(self):
         return ["elem"], self.constant_attribute
 
@@ -86,7 +89,6 @@ class CustomTensorPlainOut(torch.Tensor):
     def __init__(self, elem1, elem2):
         self.elem1 = elem1
         self.elem2 = elem2
-        self.custom_attribute = (5, 6)
 
     def get_elem(self):
         return self.elem1
@@ -97,7 +99,7 @@ class CustomTensorPlainOut(torch.Tensor):
         return f"CustomTensorPlainOut({inner_repr_1}, {inner_repr_2})"
 
     def __tensor_flatten__(self):
-        return ["elem1", "elem2"], self.custom_attribute
+        return ["elem1", "elem2"], None
 
     @staticmethod
     def __tensor_unflatten__(inner_tensors, meta, outer_size, outer_stride):

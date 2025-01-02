@@ -1855,16 +1855,14 @@ graph():
                 super().__init__()
                 self.p1 = torch.nn.Parameter(torch.ones(3, 4))
                 self.p2 = torch.nn.Parameter(
-                    CustomTensorPlainOut(
-                        ConstantExtraMetadataTensor(torch.ones(3, 4)),
+                    ConstantExtraMetadataTensor(
                         ConstantExtraMetadataTensor(torch.ones(3, 4)),
                     )
                 )
 
             def forward(self, x):
                 res = x + 2 * self.p1 + self.p2
-                hahaha = self.p2.custom_attribute
-                return res.elem + hahaha[1]
+                return res.elem.elem + self.p2.get_complicated_metadata()[1]
 
         m = Foo()
         ref_x = torch.randn(3, 4)
@@ -1875,22 +1873,14 @@ graph():
             """\
 graph():
     %p_p1 : [num_users=1] = placeholder[target=p_p1]
-    %p_p2 : [num_users=4] = placeholder[target=p_p2]
+    %p_p2 : [num_users=1] = placeholder[target=p_p2]
     %x : [num_users=1] = placeholder[target=x]
-    %getattr_1 : [num_users=2] = call_function[target=builtins.getattr](args = (%p_p2, custom_attribute), kwargs = {})
-    %getitem : [num_users=0] = call_function[target=operator.getitem](args = (%getattr_1, 0), kwargs = {})
-    %getitem_1 : [num_users=0] = call_function[target=operator.getitem](args = (%getattr_1, 1), kwargs = {})
-    %getattr_18 : [num_users=2] = call_function[target=builtins.getattr](args = (%p_p2, custom_attribute), kwargs = {})
-    %getitem_2 : [num_users=0] = call_function[target=operator.getitem](args = (%getattr_18, 0), kwargs = {})
-    %getitem_3 : [num_users=0] = call_function[target=operator.getitem](args = (%getattr_18, 1), kwargs = {})
     %mul : [num_users=1] = call_function[target=torch.ops.aten.mul.Tensor](args = (%p_p1, 2), kwargs = {})
     %add : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%x, %mul), kwargs = {})
     %add_1 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%add, %p_p2), kwargs = {})
-    %getattr_35 : [num_users=2] = call_function[target=builtins.getattr](args = (%p_p2, custom_attribute), kwargs = {})
-    %getitem_4 : [num_users=0] = call_function[target=operator.getitem](args = (%getattr_35, 0), kwargs = {})
-    %getitem_5 : [num_users=0] = call_function[target=operator.getitem](args = (%getattr_35, 1), kwargs = {})
-    %getattr_36 : [num_users=1] = call_function[target=builtins.getattr](args = (%add_1, elem), kwargs = {})
-    %add_2 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%getattr_36, 6), kwargs = {})
+    %getattr_21 : [num_users=1] = call_function[target=builtins.getattr](args = (%add_1, elem), kwargs = {})
+    %getattr_26 : [num_users=1] = call_function[target=builtins.getattr](args = (%getattr_21, elem), kwargs = {})
+    %add_2 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%getattr_26, 4), kwargs = {})
     return (add_2,)""",
         )
         ep = export(m, (ref_x,))
