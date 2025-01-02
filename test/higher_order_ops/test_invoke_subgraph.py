@@ -73,8 +73,6 @@ class TestInvokeSubgraph(TestCase):
         self.assertEqual(y.grad, y_clone.grad)
 
     def test_multiple(self):
-        n_layers = 2
-
         @mark_compile_region
         def cos(x):
             return torch.cos(x)
