@@ -2,35 +2,7 @@
 # mypy: allow-untyped-defs
 import warnings
 
-import triton
-import triton.language as tl
-
-
-# In the latest triton, math functions were shuffled around into different modules:
-# https://github.com/openai/triton/pull/3172
-try:
-    from triton.language.extra import libdevice
-
-    libdevice = tl.extra.libdevice  # noqa: F811
-    math = tl.math
-except ImportError:
-    if hasattr(tl.extra, "cuda") and hasattr(tl.extra.cuda, "libdevice"):
-        libdevice = tl.extra.cuda.libdevice
-        math = tl.math
-    elif hasattr(tl.extra, "intel") and hasattr(tl.extra.intel, "libdevice"):
-        libdevice = tl.extra.intel.libdevice
-        math = tl.math
-    else:
-        libdevice = tl.math
-        math = tl
-
-
-try:
-    from triton.language.standard import _log2
-except ImportError:
-
-    def _log2(x):
-        raise NotImplementedError
+from .triton_compat import _log2, libdevice, math, tl, triton  # noqa: F401
 
 
 def set_driver_to_cpu():
