@@ -2960,20 +2960,17 @@ TORCH_LIBRARY(test_cudagraphs_cpu_scalar_used_in_cpp_custom_op, m) {
 
         expected_logs = [
             "CompiledFunctionBackward1",
-            "aot1_tangents_1",
             "aot1_sin_1",
-            "aot1_primals_2",
             "aot1_neg",
-            "aot0_tangents_2",
+            "aot1_mul",
             "aot1_cos_1",
-            "aot1_primals_1",
-            "aot0_tangents_1",
+            "aot1_mul_1",
             "CompiledFunctionBackward0",
+            "aot0_sin_1",
             "aot0_neg",
-            "aot0_sin",
             "aot0_mul",
+            "aot0_cos_1",
             "aot0_mul_1",
-            "aot0_cos",
             "aot0_add",
         ]
 

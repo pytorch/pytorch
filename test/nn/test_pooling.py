@@ -1783,6 +1783,19 @@ torch.cuda.synchronize()
                         x, (2, 2), output_size=output_size, _random_samples=samples
                     )
 
+    @onlyNativeDeviceTypes
+    def test_fractional_max_pool2d_backward_fails(self, device):
+        grad_output = torch.randn(1, 1, 2, 3, 3, device=device)
+        input = torch.randn(1, 2, 7, 7, device=device)
+        kernel_size = (2, 2)
+        output_size = (3, 3)
+        indices = torch.ones(1, 2, 3, 3, dtype=torch.long, device=device)
+
+        with self.assertRaisesRegex(RuntimeError, "gradOutput sizes unexpected"):
+            torch.ops.aten.fractional_max_pool2d_backward(
+                grad_output, input, kernel_size, output_size, indices
+            )
+
     @expectedFailureMeta  # RuntimeError: Unrecognized tensor type ID: Meta
     @onlyNativeDeviceTypes
     def test_fractional_max_pool3d(self, device):
