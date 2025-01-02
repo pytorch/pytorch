@@ -207,8 +207,8 @@ class FloorDiv(sympy.Function):
         return self.args[1]
 
     def _sympystr(self, printer: sympy.printing.StrPrinter) -> str:
-        base = printer.parenthesize(self.base, self.precedence)
-        divisor = printer.parenthesize(self.divisor, self.precedence)
+        base = printer.parenthesize(self.base, PRECEDENCE["Atom"] - 0.5)
+        divisor = printer.parenthesize(self.divisor, PRECEDENCE["Atom"] - 0.5)
         return f"({base}//{divisor})"
 
     # Automatic evaluation.
