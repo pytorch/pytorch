@@ -4071,6 +4071,18 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
             f"Expected output shape {expected_shape}, but got {result.shape}",
         )
 
+    @supported_platform
+    def test_create_is_cuda_graphable(self):
+        def mask_mod(b, h, q, kv):
+            return q >= kv
+
+        g = torch.cuda.CUDAGraph()
+
+        with torch.cuda.graph(g):
+            create_block_mask(mask_mod, None, None, 256, 256)
+
+        g.replay()
+
     @common_utils.parametrize("compile", [False, True])
     @supported_platform
     def test_block_mask_vs_sequence_lengths(self, compile):
