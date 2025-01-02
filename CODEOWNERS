@@ -148,6 +148,7 @@ caffe2/utils/hip @jeffdaily @jithunnair-amd
 
 # XPU-specific files
 /aten/src/ATen/xpu/ @EikanWang @gujinghui
+/aten/src/ATen/native/mkldnn/xpu/ @EikanWang @gujinghui
 /c10/xpu/ @EikanWang @gujinghui
 /torch/csrc/xpu/ @EikanWang @gujinghui
 /torch/xpu/ @EikanWang @gujinghui
