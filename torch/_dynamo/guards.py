@@ -1374,20 +1374,6 @@ class GuardBuilder(GuardBuilderBase):
             obj_id, get_verbose_code_parts(code, guard)
         )
 
-    def DICT_VERSION(self, guard: Guard):
-        # ___check_dict_version is same as `dict_version(x) == y`
-        ref = self.arg_ref(guard)
-        val = self.get(guard.name)
-        version = dict_version(self.get(guard.name))
-        code = f"___dict_version({ref}) == {version}"
-        self._set_guard_export_info(guard, [code])
-
-        # TODO(anijain2305) - Delete this when DictGuardManager uses tags
-        # for dicts.
-        self.get_guard_manager(guard).add_dict_version_guard(
-            val, get_verbose_code_parts(code, guard)
-        )
-
     def DICT_CONTAINS(self, guard: Guard, key: str, invert: bool):
         dict_ref = self.arg_ref(guard)
 

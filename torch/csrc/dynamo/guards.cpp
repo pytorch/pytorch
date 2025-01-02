@@ -1946,23 +1946,6 @@ class DYNAMIC_INDICES : public LeafGuard {
   py::set _dynamic_indices;
 };
 
-class DICT_VERSION : public LeafGuard {
- public:
-  DICT_VERSION(py::object value, py::object verbose_code_parts)
-      : LeafGuard(std::move(verbose_code_parts)) {
-    if (!PyDict_Check(value.ptr())) {
-      throw py::type_error("DICT_VERSION expects a dict");
-    }
-    _tag = get_dict_version_unchecked(value.ptr());
-  }
-  bool check_nopybind(PyObject* value) override { // borrowed ref
-    return PyDict_Check(value) && get_dict_version_unchecked(value) == _tag;
-  }
-
-  // Saved dict version.
-  uint64_t _tag;
-};
-
 // GuardManager can be a pointer to DictGuardManager, but at this point the
 // compiler does not know that DictGuardManager is a derived class of
 // GuardManager (no way to define inheritance relationships in forward
@@ -2802,8 +2785,8 @@ class DictGuardManager : public GuardManager {
     // DictGuardManager can be challenging. For instance, `type(dict_object)` as
     // an accessor is permissible, which otherwise would be hard to integrate
     // directly into DictGuardManager.  Similarly, incorporating guards such as
-    // DICT_CONTAINS and DICT_VERSION as leaf guards offers a simpler solution
-    // than embedding these functionalities within the DictGuardManager itself.
+    // DICT_CONTAINS as leaf guards offers a simpler solution than embedding
+    // these functionalities within the DictGuardManager itself.
     if (!GuardManager::check_nopybind(obj)) {
       _fail_count += 1;
       // No need to shuffle the child guards, just return.
@@ -2860,8 +2843,8 @@ class DictGuardManager : public GuardManager {
     // DictGuardManager can be challenging. For instance, `type(dict_object)` as
     // an accessor is permissible, which otherwise would be hard to integrate
     // directly into DictGuardManager.  Similarly, incorporating guards such as
-    // DICT_CONTAINS and DICT_VERSION as leaf guards offers a simpler solution
-    // than embedding these functionalities within the DictGuardManager itself.
+    // DICT_CONTAINS as leaf guards offers a simpler solution than embedding
+    // these functionalities within the DictGuardManager itself.
     GuardDebugInfo debug_info = GuardManager::check_verbose_nopybind(obj);
     if (!debug_info.result) {
       return debug_info;
@@ -4882,10 +4865,6 @@ PyObject* torch_c_dynamo_guards_init() {
       py_m, "DYNAMIC_INDICES")
       .def(py::init<py::set, py::list>())
       .def("__call__", &DYNAMIC_INDICES::check);
-  py::class_<DICT_VERSION, LeafGuard, std::shared_ptr<DICT_VERSION>>(
-      py_m, "DICT_VERSION")
-      .def(py::init<py::object, py::list>())
-      .def("__call__", &DICT_VERSION::check);
   py::class_<TENSOR_MATCH, LeafGuard, std::shared_ptr<TENSOR_MATCH>>(
       py_m, "TENSOR_MATCH")
       .def(py::init<
@@ -5165,14 +5144,6 @@ PyObject* torch_c_dynamo_guards_init() {
              py::set value,
              py::object verbose_code_parts) -> void {
             self.add_leaf_guard(std::make_shared<DYNAMIC_INDICES>(
-                std::move(value), std::move(verbose_code_parts)));
-          })
-      .def(
-          "add_dict_version_guard",
-          [](GuardManager& self,
-             py::object value,
-             py::object verbose_code_parts) -> void {
-            self.add_leaf_guard(std::make_shared<DICT_VERSION>(
                 std::move(value), std::move(verbose_code_parts)));
           })
       .def(
@@ -5521,17 +5492,6 @@ PyObject* torch_c_dynamo_guards_init() {
              py::object verbose_code_parts) -> void {
             self.add_permitted_leaf_guard(std::make_shared<DICT_CONTAINS>(
                 contains, std::move(key), std::move(verbose_code_parts)));
-          })
-      .def(
-          "add_dict_version_guard",
-          [](DictGuardManager& self,
-             py::object value,
-             py::object verbose_code_parts) -> void {
-            // DICT_VERSION is used in a very narrow context today to guard on
-            // pytree SUPPPORTED_NODES. We can remove this once we have tags in
-            // DictGuardManager.
-            self.add_permitted_leaf_guard(std::make_shared<DICT_VERSION>(
-                std::move(value), std::move(verbose_code_parts)));
           })
       .def(
           "add_no_hasattr_guard",
