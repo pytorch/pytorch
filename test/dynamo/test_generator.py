@@ -275,6 +275,32 @@ class GraphModule(torch.nn.Module):
         y = fn(t)
         self.assertEqual(y, t.sin())
 
+    def test_close_subgen(self):
+        z = 0
+
+        def subgen(t):
+            nonlocal z
+            z = 1
+            yield t.sin()
+            z = 3
+            yield t.cos()
+
+        def whoo(t):
+            yield from subgen(t)
+            yield t.tan()
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(t):
+            gen = whoo(t)
+            i = next(gen)
+            gen.close()
+            return i
+
+        t = torch.randn(2)
+        y = fn(t)
+        self.assertEqual(y, t.sin())
+        self.assertEqual(z, 1)
+
     def test_close_with_side_effects(self):
         L = []
         z = 0
@@ -365,6 +391,27 @@ class GraphModule(torch.nn.Module):
         y = fn(t)
         self.assertEqual(y, t.sin())
         self.assertEqual(L, [1, -123, -1, 456])
+
+    def test_close_capture_and_reraise_RuntimeError(self):
+        def whoo(t):
+            try:
+                yield t.sin()
+                yield t.cos()
+            except GeneratorExit as e:
+                raise RuntimeError from e
+            finally:
+                pass
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(t):
+            gen = whoo(t)
+            i = next(gen)
+            gen.close()
+            return i
+
+        t = torch.randn(2)
+        with self.assertRaises(RuntimeError):
+            fn(t)
 
     def test_close_with_subgen(self):
         L = []
