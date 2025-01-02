@@ -996,24 +996,6 @@ endif()
 
 # ---[ HIP
 if(USE_ROCM)
-  # This prevents linking in the libtinfo from /opt/conda/lib which conflicts with ROCm libtinfo.
-  # Currently only active for Ubuntu 20.04 and greater versions.
-  if(UNIX AND EXISTS "/etc/os-release")
-    file(STRINGS /etc/os-release OS_RELEASE)
-    set(DISTRO_NAME "")
-    set(DISTRO_VERSION "")
-    foreach(line ${OS_RELEASE})
-      string(REGEX MATCH "^NAME=" DISTRO_NAME_MATCH ${line})
-      if(NOT DISTRO_NAME_MATCH STREQUAL "")
-        string(REGEX REPLACE "^NAME=\"(.*)\"" "\\1" DISTRO_NAME ${line})
-      endif()
-      string(REGEX MATCH "^VERSION_ID=" DISTRO_VERSION_MATCH ${line})
-      if(NOT DISTRO_VERSION_MATCH STREQUAL "")
-        string(REGEX REPLACE "^VERSION_ID=\"(.*)\"" "\\1" DISTRO_VERSION ${line})
-      endif()
-    endforeach()
-  endif()
-
   include(${CMAKE_CURRENT_LIST_DIR}/public/LoadHIP.cmake)
   if(PYTORCH_FOUND_HIP)
     message(INFO "Compiling with HIP for AMD.")
