@@ -522,8 +522,6 @@ def wrap_batched(args, bdims, level):
 
 def unwrap_batched(args, level):
     flat_args, spec = tree_flatten(args)
-    if all(not isinstance(arg, torch.Tensor) for arg in flat_args):
-        return args
     if len(flat_args) == 0:
         return args, ()
     result = [
