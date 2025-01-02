@@ -5192,7 +5192,7 @@ class LoopNest:
         When the loop is split at the top level, the max depth is 1.
         """
         if self.loops is None:
-            return 0
+            return 0, 0
 
         max_depth = 0
         start_depth = 0
