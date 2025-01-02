@@ -4541,7 +4541,7 @@ class TestExamplesCorrectness(TestCase):
     @unittest.skipIf(not USE_TORCHVISION, "test requires torchvision")
     @parametrize("mechanism", ["make_functional", "functional_call"])
     def test_resnet18_per_sample_grads(self, device, mechanism):
-        import torchvision.models as models
+        from torchvision import models
 
         model = models.__dict__["resnet18"](
             pretrained=False, norm_layer=(lambda c: nn.GroupNorm(min(32, c), c))

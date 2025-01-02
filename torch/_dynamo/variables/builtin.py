@@ -54,7 +54,7 @@ from .ctx_manager import EventVariable, StreamVariable
 from .dicts import (
     ConstDictVariable,
     DefaultDictVariable,
-    DictView,
+    DictViewVariable,
     FrozensetVariable,
     is_hashable,
     SetVariable,
@@ -79,7 +79,6 @@ from .user_defined import UserDefinedObjectVariable, UserDefinedVariable
 
 if TYPE_CHECKING:
     from torch._dynamo.symbolic_convert import InstructionTranslator
-
 
 log = logging.getLogger(__name__)
 
@@ -273,7 +272,7 @@ class BuiltinVariable(VariableTracker):
         # combinations. Handlers are attempted in order, and will be used if the type checks
         # match. They are expected to have the signature:
         # fn(tx, arg0: VariableTracker, arg1: VariableTracker) -> VariableTracker
-        from .dicts import DictKeys, SetVariable
+        from .dicts import DictKeysVariable, SetVariable
         from .functions import BaseUserFunctionVariable, UserFunctionVariable
         from .nn_module import NNModuleVariable
         from .tensor import supported_const_comparison_ops
@@ -460,7 +459,7 @@ class BuiltinVariable(VariableTracker):
         op_handlers[operator.mul].extend(list_like_expansion_handlers)
 
         size_or_tuple = (SizeVariable, TupleVariable)
-        has_set_items = (SetVariable, DictKeys)
+        has_set_items = (SetVariable, DictKeysVariable)
 
         def create_cmp_op_handlers(op):
             def compare_by_value(tx: "InstructionTranslator", a, b):
@@ -1636,14 +1635,6 @@ class BuiltinVariable(VariableTracker):
         name_var: VariableTracker,
         default=None,
     ):
-        from .. import trace_rules
-        from . import (
-            ConstantVariable,
-            GetAttrVariable,
-            TorchInGraphFunctionVariable,
-            UserFunctionVariable,
-        )
-
         name = name_var.as_python_constant()
 
         if not name_var.is_python_constant():
@@ -1713,14 +1704,14 @@ class BuiltinVariable(VariableTracker):
             try:
                 return obj.var_getattr(tx, name)
             except NotImplementedError:
-                return GetAttrVariable(obj, name, source=source)
-        elif isinstance(obj, TorchInGraphFunctionVariable):
+                return variables.GetAttrVariable(obj, name, source=source)
+        elif isinstance(obj, variables.TorchInGraphFunctionVariable):
             # Get OpOverload from an OpOverloadPacket, e.g., torch.ops.aten.add.default.
             member = getattr(obj.value, name)
             if isinstance(
                 member, (torch._ops.OpOverloadPacket, torch._ops.OpOverload)
-            ) and trace_rules.is_aten_op_or_tensor_method(member):
-                return TorchInGraphFunctionVariable(member, source=source)
+            ) and torch._dynamo.trace_rules.is_aten_op_or_tensor_method(member):
+                return variables.TorchInGraphFunctionVariable(member, source=source)
         elif isinstance(obj, DummyModule):
             # TODO(mlazos) - Do we need this?
             if obj.is_torch or name not in obj.value.__dict__:
@@ -1732,13 +1723,16 @@ class BuiltinVariable(VariableTracker):
                 tx.exec_recorder.record_module_access(obj.value, name, member)
             return VariableTracker.build(tx, member, source)
 
-        elif istype(obj, UserFunctionVariable) and name in ("__name__", "__module__"):
+        elif istype(obj, variables.UserFunctionVariable) and name in (
+            "__name__",
+            "__module__",
+        ):
             return ConstantVariable.create(getattr(obj.fn, name))
         else:
             try:
                 return obj.var_getattr(tx, name)
             except NotImplementedError:
-                return GetAttrVariable(obj, name, source=source)
+                return variables.GetAttrVariable(obj, name, source=source)
 
     def call_setattr(
         self,
@@ -1750,7 +1744,6 @@ class BuiltinVariable(VariableTracker):
         if isinstance(
             obj,
             (
-                variables.CustomizedDictVariable,
                 variables.PlacementVariable,
                 variables.NamedTupleVariable,
                 variables.UserDefinedObjectVariable,
@@ -1854,19 +1847,6 @@ class BuiltinVariable(VariableTracker):
                         return getattr_var
 
             obj.convert_to_unspecialized(tx)
-        # FIXME (tmanlaibaatar) this is utter hack to unblock HuggingFace export
-        # Export generally doesn't want to allow mutations on objects directly,
-        # but we don't have good way to do this rn. For now, we make it an undefined
-        # behaviour and just set attributes directly on the PretrainedConfig object
-        # for now.
-        elif isinstance(obj, variables.dicts.HFPretrainedConfigVariable) and tx.export:
-            if name_var.is_python_constant() and isinstance(
-                val, variables.ConstantVariable
-            ):
-                setattr(
-                    obj.obj, name_var.as_python_constant(), val.as_python_constant()
-                )
-                return ConstantVariable(None)
 
     def call_delattr(
         self,
@@ -2060,7 +2040,7 @@ class BuiltinVariable(VariableTracker):
             )
 
         # Unwrap the underlying ConstDictVariable
-        if isinstance(a, DictView):
+        if isinstance(a, DictViewVariable):
             a = a.dv_dict
         if isinstance(a, (ListVariable, ConstDictVariable)):
             return ConstantVariable.create(len(a.items) == 0)
