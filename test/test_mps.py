@@ -845,6 +845,7 @@ def mps_ops_modifier(ops):
         'log1p': [torch.int64],
         'sigmoid': [torch.int64],
         'atan2': [torch.int64],
+        'angle': [torch.int64],
 
         # GEMM on MPS is not supported for integral types
         'nn.functional.linear': [torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
@@ -6548,6 +6549,8 @@ class TestMPS(TestCaseMPS):
             angle_result_cpu = torch.angle(cpu_x)
 
             self.assertEqual(angle_result, angle_result_cpu)
+
+        helper((2, 8, 4, 5), torch.float16)
         helper((2, 8, 4, 5), torch.float32)
         helper((2, 8, 4, 5), torch.complex64)
 
