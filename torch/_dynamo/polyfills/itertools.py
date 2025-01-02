@@ -28,7 +28,6 @@ _U = TypeVar("_U")
 _Predicate: TypeAlias = Callable[[_T], object]
 _T1 = TypeVar("_T1")
 _T2 = TypeVar("_T2")
-_T3 = TypeVar("_T3")
 
 
 # Reference: https://docs.python.org/3/library/itertools.html#itertools.chain
@@ -164,32 +163,9 @@ def zip_longest(
 
 @overload
 def zip_longest(
-    iter1: Iterable[_T1],
-    iter2: Iterable[_T2],
-    iter3: Iterable[_T3],
-    /,
-) -> Iterator[tuple[_T1 | None, _T2 | None, _T3 | None]]:
-    ...
-
-
-@overload
-def zip_longest(
-    iter1: Iterable[_T1],
-    iter2: Iterable[_T2],
-    iter3: Iterable[_T3],
-    /,
-    *,
-    fillvalue: _U = ...,
-) -> Iterator[tuple[_T1 | _U, _T2 | _U, _T3 | _U]]:
-    ...
-
-
-@overload
-def zip_longest(
     iter1: Iterable[_T],
     iter2: Iterable[_T],
     iter3: Iterable[_T],
-    iter4: Iterable[_T],
     /,
     *iterables: Iterable[_T],
 ) -> Iterator[tuple[_T | None, ...]]:
@@ -201,7 +177,6 @@ def zip_longest(
     iter1: Iterable[_T],
     iter2: Iterable[_T],
     iter3: Iterable[_T],
-    iter4: Iterable[_T],
     /,
     *iterables: Iterable[_T],
     fillvalue: _U = ...,
