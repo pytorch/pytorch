@@ -5,7 +5,7 @@ from functools import total_ordering
 from typing import Callable
 
 import torch
-from torch import inf
+from torch import inf, Tensor
 
 from .bernoulli import Bernoulli
 from .beta import Beta
@@ -36,7 +36,6 @@ from .poisson import Poisson
 from .transformed_distribution import TransformedDistribution
 from .uniform import Uniform
 from .utils import _sum_rightmost, euler_constant as _euler_gamma
-from torch import Tensor
 
 
 _KL_REGISTRY: dict[

@@ -17,7 +17,6 @@ from torch.distributions.utils import (
     vec_to_tril_matrix,
 )
 from torch.nn.functional import pad, softplus
-from torch import Tensor
 
 
 __all__ = [
@@ -95,7 +94,7 @@ class Transform:
 
     def __init__(self, cache_size=0):
         self._cache_size = cache_size
-        self._inv: Optional[Transform] = None
+        self._inv: Optional[weakref.ReferenceType[Transform]] = None
         if cache_size == 0:
             pass  # default behavior
         elif cache_size == 1:
@@ -221,7 +220,7 @@ class _InverseTransform(Transform):
 
     def __init__(self, transform: Transform):
         super().__init__(cache_size=transform._cache_size)
-        self._inv: Transform = transform
+        self._inv: Transform = transform  # type: ignore[assignment]
 
     @constraints.dependent_property(is_discrete=False)
     def domain(self):
