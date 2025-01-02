@@ -247,11 +247,9 @@ def generate_ttir(
         name: arg for name, arg in ordered_args.items() if not isinstance(arg, Tensor)
     }
 
-    # Build kernel signature -- doesn't include constexpr arguments.
     signature = {
         name: kernel._type_of(kernel._key_of(arg))
         for i, (name, arg) in enumerate(ordered_args.items())
-        if i not in kernel.constexprs
     }
 
     triton._C.libtriton.ir.load_dialects(context)
