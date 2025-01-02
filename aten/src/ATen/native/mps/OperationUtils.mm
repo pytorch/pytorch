@@ -2,6 +2,7 @@
 #include <ATen/core/TensorBase.h>
 #include <ATen/native/mps/MetalShaderLibrary.h>
 #include <functional>
+#include <sstream>
 #include <stdexcept>
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/TensorIterator.h>
@@ -178,7 +179,9 @@ MPSDataType getMPSScalarType(ScalarType scalar_type) {
 }
 
 // use short_name to avoid getting extra long cached graph keys with ops such as cat_out(), etc.
-std::string getMPSTypeString(ScalarType scalar_type, bool short_name) {
+namespace {
+// Would be nice to roll this out to replace getMPSTypeString.
+std::string_view getMPSTypeStringConstant(ScalarType scalar_type, bool short_name) {
   switch (scalar_type) {
     case ScalarType::Double:
     case ScalarType::Float:
@@ -206,6 +209,12 @@ std::string getMPSTypeString(ScalarType scalar_type, bool short_name) {
     default:
       return "Undefined";
   }
+}
+} // namespace
+
+std::string getMPSTypeString(ScalarType scalar_type, bool short_name) {
+  const auto sv = getMPSTypeStringConstant(scalar_type, short_name);
+  return std::string(sv.data(), sv.size());
 }
 
 std::string scalarToMetalTypeString(const c10::ScalarType& scalar_type) {
@@ -285,29 +294,35 @@ std::string getArrayRefString(const IntArrayRef s) {
 }
 
 std::string getTensorsStringKey(const TensorList& tensors, bool short_dtype, bool exclude_shape) {
-  std::string str;
+  std::ostringstream str;
   // The key format per tensor would look like ":Float32[1,1,1,10]:"
   for (const Tensor& tensor : tensors) {
-    str += ":";
+    str << ':';
     if (tensor.defined()) {
-      str += getMPSTypeString(tensor.scalar_type(), short_dtype) + "[";
+      str << getMPSTypeStringConstant(tensor.scalar_type(), short_dtype) << '[';
       // if tensor is a scalar
       if (tensor.dim() == 0) {
-        str += "Scalar";
+        str << "Scalar";
       } else {
         if (exclude_shape) {
-          str += "[-1]";
+          str << "[-1]";
         } else {
-          str +=
-              std::string([[getMPSShape(tensor) valueForKey:@"description"] componentsJoinedByString:@","].UTF8String);
+          bool first = true;
+          for (const auto size : tensor.sizes()) {
+            if (!first) {
+              str << ',';
+            }
+            first = false;
+            str << size;
+          }
         }
       }
-      str += "]";
+      str << ']';
     } else {
-      str += "Undefined";
+      str << "Undefined";
     }
   }
-  return str;
+  return str.str();
 }
 
 Tensor getTensorView(const Tensor& t, MPSShape* shape) {
