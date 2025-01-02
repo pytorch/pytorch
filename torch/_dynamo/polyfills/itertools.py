@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import itertools
 import sys
-from typing import Callable, Iterable, Iterator, TypeVar
+from typing import Callable, Iterable, Iterator, overload, TypeVar
 from typing_extensions import TypeAlias
 
 from ..decorators import substitute_in_graph
@@ -19,12 +19,15 @@ __all__ = [
     "dropwhile",
     "islice",
     "tee",
+    "zip_longest",
 ]
 
 
 _T = TypeVar("_T")
 _U = TypeVar("_U")
 _Predicate: TypeAlias = Callable[[_T], object]
+_T1 = TypeVar("_T1")
+_T2 = TypeVar("_T2")
 
 
 # Reference: https://docs.python.org/3/library/itertools.html#itertools.chain
@@ -126,3 +129,84 @@ def tee(iterable: Iterable[_T], n: int = 2, /) -> tuple[Iterator[_T], ...]:
             return
 
     return tuple(_tee(shared_link) for _ in range(n))
+
+
+@overload
+def zip_longest(
+    iter1: Iterable[_T1],
+    /,
+    *,
+    fillvalue: _U = ...,
+) -> Iterator[tuple[_T1]]:
+    ...
+
+
+@overload
+def zip_longest(
+    iter1: Iterable[_T1],
+    iter2: Iterable[_T2],
+    /,
+) -> Iterator[tuple[_T1 | None, _T2 | None]]:
+    ...
+
+
+@overload
+def zip_longest(
+    iter1: Iterable[_T1],
+    iter2: Iterable[_T2],
+    /,
+    *,
+    fillvalue: _U = ...,
+) -> Iterator[tuple[_T1 | _U, _T2 | _U]]:
+    ...
+
+
+@overload
+def zip_longest(
+    iter1: Iterable[_T],
+    iter2: Iterable[_T],
+    iter3: Iterable[_T],
+    /,
+    *iterables: Iterable[_T],
+) -> Iterator[tuple[_T | None, ...]]:
+    ...
+
+
+@overload
+def zip_longest(
+    iter1: Iterable[_T],
+    iter2: Iterable[_T],
+    iter3: Iterable[_T],
+    /,
+    *iterables: Iterable[_T],
+    fillvalue: _U = ...,
+) -> Iterator[tuple[_T | _U, ...]]:
+    ...
+
+
+# Reference: https://docs.python.org/3/library/itertools.html#itertools.zip_longest
+@substitute_in_graph(itertools.zip_longest, is_embedded_type=True)  # type: ignore[arg-type,misc]
+def zip_longest(
+    *iterables: Iterable[_T],
+    fillvalue: _U = None,  # type: ignore[assignment]
+) -> Iterator[tuple[_T | _U, ...]]:
+    # zip_longest('ABCD', 'xy', fillvalue='-') -> Ax By C- D-
+
+    iterators = list(map(iter, iterables))
+    num_active = len(iterators)
+    if not num_active:
+        return
+
+    while True:
+        values = []
+        for i, iterator in enumerate(iterators):
+            try:
+                value = next(iterator)
+            except StopIteration:
+                num_active -= 1
+                if not num_active:
+                    return
+                iterators[i] = itertools.repeat(fillvalue)  # type: ignore[arg-type]
+                value = fillvalue  # type: ignore[assignment]
+            values.append(value)
+        yield tuple(values)
