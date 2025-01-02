@@ -685,10 +685,15 @@ class SIMDKernel(Kernel):
             return False
 
     def split_and_set_ranges(self, lengths: Sequence[Sequence[sympy.Expr]]):
-        groups = [rt.numel for rt in self.range_trees]
+        tiling = {rt.prefix: rt.numel for rt in self.range_trees}
         if not self.inside_reduction:
-            groups[-1] = sympy.S.One
+            reduction_prefixes = [
+                prefix for prefix in tiling if prefix_is_reduction(prefix)
+            ]
+            for prefix in reduction_prefixes:
+                tiling[prefix] = sympy.S.One
 
+        groups = [*tiling.values()]
         return self.map_kernel_groups_to_node_sizes(groups, lengths, self.set_ranges)
 
     @classmethod
