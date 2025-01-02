@@ -54,7 +54,7 @@ at::Tensor quantized_convolution(
     at::Tensor weight,
     at::Tensor weight_scales,
     at::Tensor weight_zero_points,
-    std::optional<at::Tensor> bias,
+    c10::optional<at::Tensor> bias,
     torch::List<int64_t> stride,
     torch::List<int64_t> padding,
     torch::List<int64_t> dilation,
@@ -63,15 +63,15 @@ at::Tensor quantized_convolution(
     at::Tensor output,
     double inv_output_scale,
     int64_t output_zero_point,
-    std::optional<at::Tensor> accum,
+    c10::optional<at::Tensor> accum,
     double accum_scale,
     int64_t accum_zero_point,
-    std::optional<c10::ScalarType> output_dtype,
-    std::optional<std::string_view> binary_attr,
-    std::optional<at::Scalar> binary_alpha,
-    std::optional<std::string_view> unary_attr,
-    torch::List<std::optional<at::Scalar>> unary_scalars,
-    std::optional<std::string_view> unary_algorithm) {
+    c10::optional<c10::ScalarType> output_dtype,
+    c10::optional<c10::string_view> binary_attr,
+    c10::optional<at::Scalar> binary_alpha,
+    c10::optional<c10::string_view> unary_attr,
+    torch::List<c10::optional<at::Scalar>> unary_scalars,
+    c10::optional<c10::string_view> unary_algorithm) {
   Attr attr =
       Attr(/*q_scale=*/1.0 / inv_output_scale, /*zp=*/output_zero_point);
 
@@ -80,14 +80,16 @@ at::Tensor quantized_convolution(
     attr = attr.append_bias(bias.value(), ndim - 2);
   }
   construct_attr_by_post_op(
-      binary_attr.has_value() ? binary_attr.value() : "none",
-      binary_alpha.has_value() ? binary_alpha.value().to<double>() : 1.0,
-      accum_scale,
-      accum_zero_point,
-      unary_attr.has_value() ? unary_attr.value() : "none",
-      unary_scalars,
-      unary_algorithm.has_value() ? unary_algorithm.value() : "",
-      attr);
+    binary_attr.has_value() ? binary_attr.value() : "none",
+    binary_alpha.has_value() ? binary_alpha.value().to<double>() : 1.0,
+    accum_scale,
+    accum_zero_point,
+    accum,
+    unary_attr.has_value() ? unary_attr.value() : "none",
+    unary_scalars,
+    unary_algorithm.has_value() ? unary_algorithm.value() : "",
+    attr
+  );
 
   TORCH_CHECK(
       3 == ndim || 4 == ndim || 5 == ndim,
@@ -194,7 +196,7 @@ at::Tensor quantized_convolution(
   Tensor scratchpad_tensor = at::empty(
       {static_cast<int64_t>(scratchpad_size)},
       act.options().dtype(at::kByte),
-      std::nullopt);
+      c10::nullopt);
   auto scratchpad_m = make_onednn_memory(
       conv_fwd_pd.scratchpad_desc(), engine, scratchpad_tensor.data_ptr());
   args.insert({DNNL_ARG_SCRATCHPAD, scratchpad_m});
