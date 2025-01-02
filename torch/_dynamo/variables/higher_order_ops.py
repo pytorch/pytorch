@@ -581,12 +581,7 @@ def speculate_subgraph(
                 # Nothing left to do here
                 return (output, treespec), tx.output.graph, subtracer.lifted_freevars
             else:
-                from . import TensorVariable
-
-                if not only_consist_of(output, TensorVariable, allow_none=True):
-                    unimplemented(
-                        "HigherOrderOperator body's output must consist of tensors only"
-                    )
+                validate_subgraph_output_types(output)
 
                 # The output proxies might not belong to this SubgraphTracer
                 # (if they are free variables that were never lifted)
@@ -988,6 +983,27 @@ class CallTorchbindHigherOrderVariable(TorchHigherOrderOperatorVariable):
         )
 
 
+def validate_subgraph_output_types(output: VariableTracker):
+    """Verify that that the output of the subgraph is a tensor,
+    int, bool, SymBool, or SymInt.
+    """
+    from . import TensorVariable
+
+    if non_tensor_output := find_mismatched_vars(
+        output, TensorVariable, allow_none=True
+    ):
+        for out in non_tensor_output:
+            if (
+                isinstance(out, SymNodeVariable) and out.python_type() in (int, bool)
+            ) or (
+                isinstance(out, ConstantVariable) and out.python_type() in (int, bool)
+            ):
+                continue
+            unimplemented(
+                f"HigherOrderOperator body's output must consist of tensors or ints only but got {out.python_type()}"
+            )
+
+
 class WhileLoopHigherOrderVariable(TorchHigherOrderOperatorVariable):
     @raise_hard_error_if_graph_break(
         reason="while_loop doesn't work unless it is captured completely with torch.compile."
@@ -998,6 +1014,8 @@ class WhileLoopHigherOrderVariable(TorchHigherOrderOperatorVariable):
         args: List[VariableTracker],
         kwargs: Dict[str, VariableTracker],
     ) -> VariableTracker:
+        from torch._higher_order_ops.while_loop import _create_unbacked_symint
+
         from . import TensorVariable
 
         args, kwargs = LazyVariableTracker.realize_all((args, kwargs))
@@ -1038,6 +1056,24 @@ class WhileLoopHigherOrderVariable(TorchHigherOrderOperatorVariable):
             )
         additional_inputs_seq = additional_inputs.unpack_var_sequence(tx)
 
+        with discard_graph_changes(tx):
+            # See NOTE [unspecialize int carry with unbacked symints]
+            # Note: this must be run under discard graph changes.
+            def create_unbacked_sym_node_var(tx) -> SymNodeVariable:
+                example_value = _create_unbacked_symint(tx.output.fake_mode)
+                proxy = tx.output.current_tracer.create_graph_input(
+                    "unbacked_symint", type(example_value), example_value
+                )
+                return SymNodeVariable.create(tx, proxy, example_value)
+
+            new_operands_seq = [
+                create_unbacked_sym_node_var(tx)
+                if (isinstance(carry, ConstantVariable) and carry.python_type() is int)
+                or (isinstance(carry, SymNodeVariable))
+                else carry
+                for carry in operands_seq
+            ]
+
         # create cond subgrpahs
         (
             (cond_r, _cond_treespec),
@@ -1046,7 +1082,7 @@ class WhileLoopHigherOrderVariable(TorchHigherOrderOperatorVariable):
         ) = speculate_subgraph(
             tx,
             cond_fn,
-            operands_seq + additional_inputs_seq,
+            new_operands_seq + additional_inputs_seq,
             {},
             "while_loop",
             source_target=self.value,
@@ -1079,21 +1115,18 @@ class WhileLoopHigherOrderVariable(TorchHigherOrderOperatorVariable):
             set_subgraph_inputs="flatten_manual",
         )
         cond_nn_modules = dict(tx.output.nn_modules)
-        if not isinstance(cond_r, TensorVariable):
-            unimplemented(
-                f"Expected cond_fn to return a tensor but got {cond_r.python_type()}",
+        validate_subgraph_output_types(cond_r)
+        if isinstance(cond_r, TensorVariable):
+            cond_r_meta = _extract_tensor_metadata(
+                cond_r.proxy.node.meta["example_value"], include_contiguity=False
             )
-
-        # cond output checks
-        cond_r_meta = _extract_tensor_metadata(
-            cond_r.proxy.node.meta["example_value"], include_contiguity=False
-        )
-        if not cond_r_meta.dtype == torch.bool or not cond_r_meta.shape == torch.Size(
-            []
-        ):
-            unimplemented(
-                f"Expected cond_fn to return a tensor with shape (,) but got {cond_r_meta.shape}"
-            )
+            if (
+                not cond_r_meta.dtype == torch.bool
+                or not cond_r_meta.shape == torch.Size([])
+            ):
+                unimplemented(
+                    f"Expected cond_fn to return a scalar tensor or a bool but got {cond_r_meta.shape}"
+                )
         # create body subgraph
         (
             (body_r, body_treespec),
@@ -1102,13 +1135,14 @@ class WhileLoopHigherOrderVariable(TorchHigherOrderOperatorVariable):
         ) = speculate_subgraph(
             tx,
             body_fn,
-            operands_seq + additional_inputs_seq,
+            new_operands_seq + additional_inputs_seq,
             {},
             "while_loop",
             source_target=self.value,
             set_subgraph_inputs="flatten_manual",
             should_flatten_outputs=True,
         )
+        validate_subgraph_output_types(body_r)
 
         check_meta_consistency_vt(
             body_r.unpack_var_sequence(tx),
@@ -1166,13 +1200,17 @@ class WhileLoopHigherOrderVariable(TorchHigherOrderOperatorVariable):
             lambda a: a.node.meta["example_value"],
             body_r.as_proxy(),
         )
-
+        unspecialized_flat_example_value = pytree.tree_map_only(
+            (int, torch.SymInt),
+            lambda _: _create_unbacked_symint(tx.output.fake_mode),
+            flat_example_value,
+        )
         return _call_function_and_unflatten_output(
             tx,
             torch.ops.higher_order.while_loop,
             p_args,
             {},
-            flat_example_value,
+            unspecialized_flat_example_value,
             body_treespec,
         )
 

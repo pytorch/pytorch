@@ -154,10 +154,12 @@ def while_loop(cond_fn, body_fn, carried_inputs):
 
         validate_subgraph_args_types(flat_inputs)
 
-        if not pytree.tree_all(lambda t: isinstance(t, torch.Tensor), carried_inputs):
+        if not pytree.tree_all(
+            lambda t: isinstance(t, (torch.Tensor, torch.SymInt, int)), carried_inputs
+        ):
             raise RuntimeError(
                 "Expect carried_inputs to be a tuple of possibly nested dict/list/tuple that only"
-                f"consists of tensor leaves, but got {carried_inputs}."
+                f"consists of tensor or int leaves, but got {carried_inputs}."
             )
 
     _validate_input(cond_fn, body_fn, carried_inputs)
