@@ -12,6 +12,8 @@ from typing_extensions import Self
 
 _T = TypeVar("_T")
 
+__all__ = ["CyclingIterator"]
+
 
 class CyclingIterator(Iterator[_T]):
     """
