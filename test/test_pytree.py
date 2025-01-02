@@ -43,6 +43,14 @@ class GlobalDummyType:
         self.y = y
 
 
+cxx_pytree.register_pytree_node(
+    GlobalDummyType,
+    lambda dummy: ([dummy.x, dummy.y], None),
+    lambda xs, _: GlobalDummyType(*xs),
+    serialized_type_name="GlobalDummyType",
+)
+
+
 class TestGenericPytree(TestCase):
     def test_aligned_public_apis(self):
         public_apis = py_pytree.__all__
@@ -1016,7 +1024,7 @@ TreeSpec(tuple, None, [*,
         with self.assertRaisesRegex(
             NotImplementedError, "No registered serialization name"
         ):
-            roundtrip_spec = py_pytree.treespec_dumps(spec)
+            py_pytree.treespec_dumps(spec)
 
     def test_pytree_custom_type_serialize(self):
         class DummyType:
@@ -1097,7 +1105,7 @@ TreeSpec(tuple, None, [*,
             py_pytree.treespec_dumps(spec, -1)
 
         serialized_spec = py_pytree.treespec_dumps(spec)
-        protocol, data = json.loads(serialized_spec)
+        _, data = json.loads(serialized_spec)
         bad_protocol_serialized_spec = json.dumps((-1, data))
 
         with self.assertRaisesRegex(ValueError, "Unknown protocol"):
@@ -1182,7 +1190,7 @@ TreeSpec(tuple, None, [*,
     def test_tree_flatten_with_path_is_leaf(self):
         leaf_dict = {"foo": [(3)]}
         pytree = (["hello", [1, 2], leaf_dict],)
-        key_leaves, spec = py_pytree.tree_flatten_with_path(
+        key_leaves, _ = py_pytree.tree_flatten_with_path(
             pytree, is_leaf=lambda x: isinstance(x, dict)
         )
         self.assertTrue(key_leaves[-1][1] is leaf_dict)
@@ -1328,7 +1336,7 @@ class TestCxxPytree(TestCase):
         _, spec = cxx_pytree.tree_flatten(pytree)
         self.assertExpectedInline(
             repr(spec),
-            "PyTreeSpec((*, [*, *, [*]]), NoneIsLeaf)",
+            "PyTreeSpec((*, [*, *, [*]]), NoneIsLeaf, namespace='torch')",
         )
 
     @parametrize(
@@ -1383,12 +1391,6 @@ class TestCxxPytree(TestCase):
         self.assertEqual(roundtrip_spec.type._fields, spec.type._fields)
 
     def test_pytree_custom_type_serialize(self):
-        cxx_pytree.register_pytree_node(
-            GlobalDummyType,
-            lambda dummy: ([dummy.x, dummy.y], None),
-            lambda xs, _: GlobalDummyType(*xs),
-            serialized_type_name="GlobalDummyType",
-        )
         spec = cxx_pytree.tree_structure(GlobalDummyType(0, 1))
         serialized_spec = cxx_pytree.treespec_dumps(spec)
         roundtrip_spec = cxx_pytree.treespec_loads(serialized_spec)

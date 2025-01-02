@@ -22,10 +22,10 @@ template <typename F, F Func, typename... ExtraArgs>
 Tensor random_batching_rule(SymIntArrayRef shape, ExtraArgs... extra_args) {
   c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchVmapMode);
   auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
   c10::SmallVector<SymInt> shapeVec(1, maybe_layer->batchSize());
   shapeVec.reserve(shape.size() + 1);
   shapeVec.insert(shapeVec.end(), shape.begin(), shape.end());
-  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
   RandomnessType randomness = maybe_layer->randomness();
   check_randomness(randomness);
   if (randomness == RandomnessType::Different) {
@@ -39,11 +39,10 @@ template <typename F, F Func, typename... ExtraArgs>
 Tensor& random_inplace_batching_rule(Tensor& self, ExtraArgs... extra_args) {
   c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchVmapMode);
   auto maybe_layer = maybeCurrentDynamicLayer();
-  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
   const auto cur_level = maybe_layer->layerId();
   auto [self_value, self_bdim] = unwrapTensorAtLevel(self, cur_level);
   self_value = moveBatchDimToFront(std::move(self_value), self_bdim);
-  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
   RandomnessType randomness = maybe_layer->randomness();
   check_randomness(randomness);
   TORCH_CHECK(
@@ -64,6 +63,7 @@ Tensor& random_inplace_batching_rule(Tensor& self, ExtraArgs... extra_args) {
 static Tensor& bernoulli_inplace_Tensor_batching_rule(Tensor& self, const Tensor& p_, std::optional<Generator> gen) {
   c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchVmapMode);
   auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
   auto cur_level = maybe_layer->layerId();
   RandomnessType randomness = maybe_layer->randomness();
 

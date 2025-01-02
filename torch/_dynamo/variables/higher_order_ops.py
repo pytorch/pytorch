@@ -15,8 +15,8 @@ import torch.fx
 import torch.nn
 from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.utils import get_fake_value
-from torch._dynamo.variables import ConstantVariable
 from torch._dynamo.variables.builtin import BuiltinVariable
+from torch._dynamo.variables.constant import ConstantVariable
 from torch._dynamo.variables.functions import UserFunctionVariable
 from torch._dynamo.variables.tensor import SymNodeVariable
 from torch._guards import Source
@@ -2293,6 +2293,8 @@ class FlexAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
         args: "List[VariableTracker]",
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
+        from torch._higher_order_ops.flex_attention import flex_attention_fake_impl
+
         from .builder import wrap_fx_proxy
 
         (
@@ -2330,12 +2332,9 @@ class FlexAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
         inp_args, _ = proxy_args_kwargs(proxied_args, {})
 
         query_meta = query.as_proxy().node.meta["example_value"]
+        value_meta = value.as_proxy().node.meta["example_value"]
         with torch._guards.TracingContext.try_get().fake_mode:
-            out_meta = torch.empty_like(
-                query_meta, memory_format=torch.contiguous_format
-            )
-            # TODO: Figure out a better way to handle this for NJT than using sum()
-            lse_meta = torch.empty_like(query_meta, dtype=torch.float32).sum(dim=-1)
+            out_meta, lse_meta = flex_attention_fake_impl(query_meta, value_meta)
         example_value = (out_meta, lse_meta)
 
         # Compose the ordered HOO args:
