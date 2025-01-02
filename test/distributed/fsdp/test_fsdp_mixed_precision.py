@@ -993,6 +993,52 @@ class TestFSDPMixedPrecisionSharded(TestFSDPMixedPrecision):
         # propagated via `ToCopyBackward0`
         self.assertEqual(x_float.grad.dtype, torch.float32)
 
+    @skip_if_lt_x_gpu(2)
+    def test_buffer_dtype_no_root_handle(self):
+        class NonLearnableConv(nn.Module):
+            def __init__(self, kernel, in_channels: int):
+                super().__init__()
+                self.padding = (len(kernel) - 1) // 2
+                kernel = torch.tensor(kernel, dtype=torch.float32)
+                kernel = kernel / kernel.sum()
+                kernel = kernel.outer(kernel)[None, None].repeat(in_channels, 1, 1, 1)
+                self.register_buffer("kernel", kernel)
+
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                return nn.functional.conv2d(
+                    x,
+                    self.kernel,
+                    groups=self.kernel.shape[0],
+                    stride=2,
+                    padding=self.padding,
+                )
+
+        model = nn.Sequential(
+            nn.Sequential(nn.Conv2d(3, 64, 3, padding=1)),
+            nn.Sequential(NonLearnableConv((1, 2, 2, 1), 64)),
+            nn.Sequential(nn.Conv2d(64, 3, 3, padding=1)),
+            nn.Sequential(NonLearnableConv((1, 2, 2, 1), 3)),
+        ).cuda()
+
+        dtype = torch.float16
+        model = FSDP(
+            module=model,
+            device_id=self.rank,
+            use_orig_params=True,
+            limit_all_gathers=True,
+            auto_wrap_policy=ModuleWrapPolicy({nn.Sequential}),
+            mixed_precision=MixedPrecision(
+                param_dtype=dtype,
+                buffer_dtype=dtype,
+                reduce_dtype=dtype,
+            ),
+        )
+
+        # Check that we can run forward/backward without dtype errors
+        x = torch.randn(2, 3, 128, 128, device="cuda")
+        out = model(x)
+        out.mean().backward()
+
 
 class TestFSDPMixedPrecisionUnsharded(TestFSDPMixedPrecision):
     """
