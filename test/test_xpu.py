@@ -306,6 +306,8 @@ print(torch.xpu.device_count())
         self.assertEqual(torch.accelerator.current_stream().stream_id, s1.stream_id)
         torch.accelerator.set_stream(s2)
         self.assertEqual(torch.accelerator.current_stream().stream_id, s2.stream_id)
+        with self.assertRaisesRegex(RuntimeError, "The device index is out of range"):
+            torch.accelerator.current_stream(torch.accelerator.device_count())
 
     def test_generator(self):
         torch.manual_seed(2024)

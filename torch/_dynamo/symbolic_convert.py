@@ -56,7 +56,7 @@ from .replay_record import DummyModule, ExecutionRecorder
 from .resume_execution import ContinueExecutionCache, ReenterWith
 from .source import (
     AttrSource,
-    GetItemSource,
+    DictGetItemSource,
     GlobalSource,
     GlobalWeakRefSource,
     LocalCellSource,
@@ -142,6 +142,16 @@ compare_op_handlers["not in"] = lambda tx, args, _: handle_not(
 
 
 PT2_ISSUE_TRACKER_URL = "https://github.com/pytorch/pytorch/issues/new?&labels=oncall%3A+pt2&projects=&template=pt2-bug-report.yml"
+
+
+@functools.cache
+def _import_module(name: str) -> types.ModuleType:
+    """
+    Import the named module and cache the result. importlib.import_module()
+    seems to do some filesystem checking to validate the name so not caching
+    this can be slow.
+    """
+    return importlib.import_module(name)
 
 
 @dataclasses.dataclass
@@ -251,21 +261,26 @@ class DistributedState:
 
 
 class TensorifyState:
-    # These are the set of source that we collect from the tensorify_python_scalars.py joint
-    # fx pass to inform us about which float inputs we should specialize when we restart analysis.
-    force_specializations: Set[Source] = set()
+    # These are the set of string symfloats names (eg. "zf0") that we collect
+    # from the tensorify_python_scalars.py joint fx pass to inform us about
+    # which float inputs we should specialize when we restart analysis.
+    force_specializations: Set[str] = set()
 
     @classmethod
-    def specialize(cls, index: Source) -> None:
+    def specialize(cls, index: str) -> None:
         cls.force_specializations.add(index)
 
     @classmethod
-    def should_specialize(cls, index: Source) -> bool:
+    def should_specialize(cls, index: str) -> bool:
         return index in cls.force_specializations
 
     @classmethod
     def clear(cls) -> None:
         cls.force_specializations.clear()
+
+    @classmethod
+    def empty(cls) -> bool:
+        return len(cls.force_specializations) == 0
 
 
 @functools.lru_cache(None)
@@ -647,11 +662,10 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
                         self.push(value)
                     self.jump(inst)
             else:
-                # TODO link the torch.cond doc later
                 raise exc.UserError(
                     exc.UserErrorType.DYNAMIC_CONTROL_FLOW,
                     "Dynamic control flow is not supported at the moment. Please use "
-                    "functorch.experimental.control_flow.cond to explicitly capture the control flow.",
+                    "torch.cond to explicitly capture the control flow.",
                     case_name="cond_operands",
                 )
 
@@ -1197,7 +1211,7 @@ class InstructionTranslatorBase(
     def nn_modules_globals_vt(self):
         module_name = "torch.nn.modules.module"
         module_source = self.import_source(module_name)
-        fglobals_value = importlib.import_module(module_name)  # type: ignore[assignment]
+        fglobals_value = _import_module(module_name)
         return VariableTracker.build(self, fglobals_value, module_source)
 
     def LOAD_GLOBAL(self, inst):
@@ -1233,7 +1247,7 @@ class InstructionTranslatorBase(
                 module_name.replace(">", "_").replace("<", "_").replace(".", "_dot_")
             )
         else:
-            value = importlib.import_module(module_name)
+            value = _import_module(module_name)
             alias = f"__import_{module_name.replace('.', '_dot_')}"
         f_globals = self.output.global_scope
         assert alias not in f_globals or f_globals[alias] is value
@@ -1342,7 +1356,7 @@ class InstructionTranslatorBase(
             builtins_source = GlobalSource(
                 self.output.name_of_builtins_dict_key_in_fglobals
             )
-            var_source = GetItemSource(builtins_source, argval)
+            var_source = DictGetItemSource(builtins_source, argval)
             self.push(VariableTracker.build(self, val, var_source))
         else:
             assert is_builtin_constant(val)
@@ -3193,11 +3207,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
 
         code: types.CodeType = func.get_code()
         if code.co_name in ("__setitem__", "__setattr__") and not (
-            args
-            and isinstance(
-                args[0],
-                (variables.CustomizedDictVariable, variables.UserDefinedObjectVariable),
-            )
+            args and isinstance(args[0], variables.UserDefinedObjectVariable)
         ):
             unimplemented(f"inline {code.co_name}")
 
@@ -3255,7 +3265,6 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
     def inline_call_(self):
         parent = self.parent
         code = self.f_code
-        func = self.funcvar
 
         strict_ctx: Any = contextlib.nullcontext()
         if parent.strict_checks_fn:
@@ -3383,7 +3392,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             if "torch_package" in module_name:
                 fglobals_value = torch.package.package_importer._package_imported_modules[module_name]  # type: ignore[assignment]
             else:
-                fglobals_value = importlib.import_module(module_name)  # type: ignore[assignment]
+                fglobals_value = _import_module(module_name)
             fglobals_vt = VariableTracker.build(self, fglobals_value, module_source)
             global_source = AttrSource(module_source, name)
         else:
@@ -3393,7 +3402,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             globals_source = GlobalSource(globals_name)
             fglobals_value = self.f_globals  # type: ignore[assignment]
             fglobals_vt = VariableTracker.build(self, fglobals_value, globals_source)
-            global_source = GetItemSource(globals_source, name)  # type: ignore[assignment]
+            global_source = DictGetItemSource(globals_source, name)  # type: ignore[assignment]
         return fglobals_value, fglobals_vt, global_source
 
     def _load_global(self, inst):
