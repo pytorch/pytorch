@@ -284,6 +284,15 @@ class ConstDictVariable(VariableTracker):
             return None
         return self.items[key]
 
+    def realize_key_vt(self, arg: VariableTracker):
+        # Realize the LazyVT on a particular index
+        assert arg in self
+        key = ConstDictVariable._HashableTracker(arg)
+        index = tuple(self.items.keys()).index(key)
+        original_key_vt = tuple(self.original_items.keys())[index]
+        if isinstance(original_key_vt, variables.LazyVariableTracker):
+            original_key_vt.realize()
+
     def install_dict_keys_match_guard(self):
         if self.source:
             install_guard(self.make_guard(GuardBuilder.DICT_KEYS_MATCH))
@@ -292,20 +301,26 @@ class ConstDictVariable(VariableTracker):
         # Key guarding - These are the cases to consider
         # 1) The dict has been mutated. In this case, we would have already
         # inserted a DICT_KEYS_MATCH guard, so we can skip.
-        # 2) args[0].source is not None. In this case, args[0] VT would have
-        # been realized, and we would have already inserted the necessary
-        # guard. So, we can skip.
-        # 3) args[0].source is None. This happens for const keys. Here, we
+        #
+        # 2) args[0].source is None. This happens for const keys. Here, we
         # have to insert the DICT_CONTAINS guard.
+        #
+        # 3) args[0].source is not None. This can happen for non-const VTs.
+        #   3a) contains=True. In this case, we can access the lazyVT from
+        #   original_items and selectively realize it.
+        #   3b) contains=False. There is no easy way to selectively apply this
+        #   DICT_NOT_CONTAINS guard because our guard are represented via trees.
+        #   Be conservative and add DICT_KEYS_MATCH guard.
         from . import ConstantVariable
 
+        if not self.source:
+            return
+
+        if tx.output.side_effects.is_modified(self):
+            return
+
         contains = args[0] in self
-        if (
-            self.source
-            and not tx.output.side_effects.is_modified(self)
-            and args[0].source is None
-            and isinstance(args[0], ConstantVariable)
-        ):
+        if args[0].source is None and isinstance(args[0], ConstantVariable):
             install_guard(
                 self.make_guard(
                     functools.partial(
@@ -315,6 +330,11 @@ class ConstDictVariable(VariableTracker):
                     )
                 )
             )
+        elif args[0].source:
+            if contains:
+                self.realize_key_vt(args[0])
+            else:
+                self.install_dict_keys_match_guard()
 
     def call_method(
         self,
