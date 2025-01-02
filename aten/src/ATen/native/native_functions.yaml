@@ -3371,9 +3371,10 @@
   dispatch:
     CUDA: _cslt_compress
 
-- func: _cslt_sparse_mm(Tensor compressed_A, Tensor dense_B, Tensor? bias=None, Tensor? alpha=None, ScalarType? out_dtype=None, bool transpose_result=False, int alg_id=0) -> Tensor
+- func: _cslt_sparse_mm(Tensor compressed_A, Tensor dense_B, Tensor? bias=None, Tensor? alpha=None, ScalarType? out_dtype=None, bool transpose_result=False, int alg_id=0, int split_k=1, bool split_k_one_kernel=True) -> Tensor
   dispatch:
     CUDA: _cslt_sparse_mm
+  tags: needs_fixed_stride_order
 
 - func: _cslt_sparse_mm_search(Tensor compressed_A, Tensor dense_B, Tensor? bias=None, Tensor? alpha=None, ScalarType? out_dtype=None, bool transpose_result=False) -> int
   dispatch:
@@ -4175,6 +4176,14 @@
 - func: _weight_int4pack_mm_for_cpu(Tensor self, Tensor mat2, int qGroupSize, Tensor qScaleAndZeros) -> Tensor
   dispatch:
     CPU: _weight_int4pack_mm_cpu
+
+- func: _dyn_quant_pack_4bit_weight(Tensor weights, Tensor scales_zeros, Tensor? bias, int block_size, int in_features, int out_features) -> Tensor
+  dispatch:
+    CPU: _dyn_quant_pack_4bit_weight_cpu
+
+- func: _dyn_quant_matmul_4bit(Tensor inp, Tensor packed_weights, int block_size, int in_features, int out_features) -> Tensor
+  dispatch:
+    CPU: _dyn_quant_matmul_4bit_cpu
 
 - func: _weight_int8pack_mm(Tensor self, Tensor mat2, Tensor scales) -> Tensor
   dispatch:
@@ -5018,7 +5027,7 @@
 
 - func: rrelu(Tensor self, Scalar lower=0.125, Scalar upper=0.3333333333333333, bool training=False, Generator? generator=None) -> Tensor
   device_check: NoCheck   # TensorIterator
-  tags: nondeterministic_seeded
+  tags: [pointwise, nondeterministic_seeded]
 
 - func: rrelu_(Tensor(a!) self, Scalar lower=0.125, Scalar upper=0.3333333333333333, bool training=False, Generator? generator=None) -> Tensor(a!)
   tags: nondeterministic_seeded
@@ -5055,6 +5064,7 @@
 
 - func: relu6(Tensor self) -> Tensor
   python_module: nn
+  tags: pointwise
 
 - func: relu6_(Tensor(a!) self) -> Tensor(a!)
   python_module: nn
@@ -5139,6 +5149,7 @@
   structured_delegate: hardshrink.out
   device_check: NoCheck   # TensorIterator
   variants: function, method
+  tags: pointwise
 
 - func: hardshrink_backward.grad_input(Tensor grad_out, Tensor self, Scalar lambd, *, Tensor(a!) grad_input) -> Tensor(a!)
   structured: True
@@ -5203,6 +5214,7 @@
 
 - func: selu(Tensor self) -> Tensor
   device_check: NoCheck   # TensorIterator
+  tags: pointwise
 
 - func: selu_(Tensor(a!) self) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
@@ -5211,6 +5223,7 @@
   device_check: NoCheck   # TensorIterator
   dispatch:
     CompositeExplicitAutograd: celu
+  tags: pointwise
 
 - func: celu_(Tensor(a!) self, Scalar alpha=1.0) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
@@ -5261,6 +5274,7 @@
 - func: mish(Tensor self) -> Tensor
   structured_delegate: mish.out
   python_module: nn
+  tags: pointwise
 
 - func: mish_(Tensor(a!) self) -> Tensor(a!)
   structured_delegate: mish.out
@@ -6061,6 +6075,7 @@
   structured_delegate: threshold.out
   dispatch:
     QuantizedCPU: threshold_quantized_cpu
+  tags: pointwise
 
 - func: threshold_(Tensor(a!) self, Scalar threshold, Scalar value) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
@@ -8281,7 +8296,7 @@
   structured: True
   variants: function
   dispatch:
-    CPU, CUDA: scatter_reduce_two
+    CPU, CUDA, MPS: scatter_reduce_two
 
 - func: eq_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
   structured_delegate: eq.Scalar_out
@@ -9270,11 +9285,13 @@
 - func: nonzero_static.out(Tensor self, *, int size, int fill_value=-1, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU: nonzero_static_out_cpu
+    CUDA: nonzero_static_out_cuda
 
 - func: nonzero_static(Tensor self, *, int size, int fill_value=-1) -> Tensor
   variants: method, function
   dispatch:
     CPU: nonzero_static_cpu
+    CUDA: nonzero_static_cuda
 
 - func: nonzero_numpy(Tensor self) -> Tensor[]
   variants: method, function
@@ -11781,6 +11798,7 @@
   structured_delegate: elu.out
   device_check: NoCheck   # TensorIterator
   python_module: nn
+  tags: pointwise
 
 - func: elu_backward.grad_input(Tensor grad_output, Scalar alpha, Scalar scale, Scalar input_scale, bool is_result, Tensor self_or_result, *, Tensor(a!) grad_input) -> Tensor(a!)
   structured: True
@@ -11854,6 +11872,7 @@
   python_module: nn
   dispatch:
     QuantizedCPU: hardsigmoid_quantized_cpu
+  tags: pointwise
 
 - func: hardsigmoid_(Tensor(a!) self) -> Tensor(a!)
   structured_delegate: hardsigmoid.out
@@ -11885,7 +11904,7 @@
   dispatch:
     CPU, CUDA, MPS: hardtanh
     QuantizedCPU: hardtanh_quantized_cpu
-  tags: core
+  tags: [pointwise, core]
 
 - func: hardtanh_backward.grad_input(Tensor grad_output, Tensor self, Scalar min_val, Scalar max_val, *, Tensor(a!) grad_input) -> Tensor(a!)
   python_module: nn
@@ -12009,19 +12028,20 @@
     CUDA: log_sigmoid_backward_cuda
     MPS: log_sigmoid_backward_mps
 
-- func: rrelu_with_noise.out(Tensor self, Tensor noise, Scalar lower=0.125, Scalar upper=0.3333333333333333, bool training=False, Generator? generator=None, *, Tensor(a!) out) -> Tensor(a!)
+- func: rrelu_with_noise.out(Tensor self, Tensor(b!) noise, Scalar lower=0.125, Scalar upper=0.3333333333333333, bool training=False, Generator? generator=None, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
   tags: nondeterministic_seeded
   dispatch:
     CPU: rrelu_with_noise_out_cpu
     CUDA: rrelu_with_noise_out_cuda
 
-- func: rrelu_with_noise(Tensor self, Tensor noise, Scalar lower=0.125, Scalar upper=0.3333333333333333, bool training=False, Generator? generator=None) -> Tensor
+- func: rrelu_with_noise(Tensor self, Tensor(b!) noise, Scalar lower=0.125, Scalar upper=0.3333333333333333, bool training=False, Generator? generator=None) -> Tensor
   python_module: nn
   dispatch:
     CPU: rrelu_with_noise_cpu
     CUDA: rrelu_with_noise_cuda
   tags: nondeterministic_seeded
+  autogen: rrelu_with_noise_functional
 
 - func: rrelu_with_noise_backward(Tensor grad_output, Tensor self, Tensor noise, Scalar lower, Scalar upper, bool training, bool self_is_result) -> Tensor
   python_module: nn
@@ -12029,7 +12049,7 @@
     CompositeExplicitAutograd: rrelu_with_noise_backward
   autogen: rrelu_with_noise_backward.out
 
-- func: rrelu_with_noise_(Tensor(a!) self, Tensor noise, Scalar lower=0.125, Scalar upper=0.3333333333333333, bool training=False, Generator? generator=None) -> Tensor(a!)
+- func: rrelu_with_noise_(Tensor(a!) self, Tensor(b!) noise, Scalar lower=0.125, Scalar upper=0.3333333333333333, bool training=False, Generator? generator=None) -> Tensor(a!)
   python_module: nn
   tags: nondeterministic_seeded
   dispatch:
@@ -12049,6 +12069,7 @@
   structured_delegate: softplus.out
   device_check: NoCheck   # TensorIterator
   python_module: nn
+  tags: pointwise
 
 - func: softplus_backward.grad_input(Tensor grad_output, Tensor self, Scalar beta, Scalar threshold, *, Tensor(a!) grad_input) -> Tensor(a!)
   structured: True
@@ -12075,6 +12096,7 @@
   structured_delegate: softshrink.out
   device_check: NoCheck   # TensorIterator
   python_module: nn
+  tags: pointwise
 
 - func: softshrink_backward.grad_input(Tensor grad_output, Tensor self, Scalar lambd, *, Tensor(a!) grad_input) -> Tensor(a!)
   structured: True
