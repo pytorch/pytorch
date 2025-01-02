@@ -317,7 +317,6 @@ class ReplicateTest(MultiProcessInductorTestCase):
     )
     # todo: This pass mucks things up since Inductor thinks its inference
     # and can apply this. Should turn off these passes in compiled autograd
-    @unittest.expectedFailure  # TODO(rzou): needs to be fixed
     @torch._inductor.config.patch(
         reorder_for_locality=False,
         reorder_for_peak_memory=False,
@@ -373,7 +372,7 @@ class ReplicateTest(MultiProcessInductorTestCase):
         self.assertEqual(counters["inductor"]["ddp_buckets"], 3)
         fc = FileCheck()
         for _ in range(3):
-            fc.check("cpp_fused_").check(
+            fc.check("aten.flatten.using_ints(").check("cpp_fused_").check(
                 "torch.ops._c10d_functional.all_reduce_.default("
             )
         for _ in range(3):
@@ -385,7 +384,7 @@ class ReplicateTest(MultiProcessInductorTestCase):
         self.assertEqual(counters["inductor"]["ddp_buckets"], 3)
         fc = FileCheck()
         for _ in range(3):
-            fc.check("cpp_fused_").check(
+            fc.check("aten.flatten.using_ints(").check("cpp_fused_").check(
                 "torch.ops._c10d_functional.all_reduce_.default("
             )
         for _ in range(3):
