@@ -127,7 +127,7 @@ std::vector<at::Tensor> AOTIModelContainerRunner::boxed_run(
     void* stream_handle) {
   std::vector<AtenTensorHandle> input_handles =
       torch::aot_inductor::unsafe_alloc_new_handles_from_tensors(inputs);
-  inputs.clear();
+  std::move(inputs).clear();
   return run_impl(input_handles, stream_handle);
 }
 
