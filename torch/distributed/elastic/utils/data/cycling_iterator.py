@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 from typing import Callable, Iterator, TypeVar
+from typing_extensions import Self
 
 
 # Copyright (c) Facebook, Inc. and its affiliates.
@@ -38,7 +39,7 @@ class CyclingIterator(Iterator[_T]):
         self._generator_fn = generator_fn
         self._iter = generator_fn(self._epoch)
 
-    def __iter__(self) -> "CyclingIterator":
+    def __iter__(self) -> Self:
         return self
 
     def __next__(self) -> _T:
