@@ -3054,7 +3054,7 @@ def _register_qlnear_post_op_fusion_pass(
         counters["inductor"]["qlinear_unary_matcher_nodes"] += len(match.nodes)
 
 
-def _register_qlnear_unary_fusion():
+def _register_qlinear_unary_fusion():
     from .mkldnn_fusion import (
         _gelu_fusion_1 as _gelu_fusion_erf,
         _gelu_fusion_2 as _gelu_fusion_tanh,
@@ -3173,7 +3173,7 @@ def _register_quantization_weight_pack_pass():
     _register_smooth_quant_int_mm_pattern()
 
     # Step 5: QLinear post op Fusion
-    _register_qlnear_unary_fusion()
+    _register_qlinear_unary_fusion()
 
 
 def quant_lift_up(graph_module: torch.fx.GraphModule):
