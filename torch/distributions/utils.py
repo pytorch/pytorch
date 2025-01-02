@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 from functools import update_wrapper
 from numbers import Number
-from typing import Any, Callable, Dict, Generic, overload, TypeVar
+from typing import Any, Callable, Generic, overload, TypeVar
 
 import torch
 import torch.nn.functional as F
@@ -44,7 +44,7 @@ def broadcast_all(*values):
             "torch.Tensor or objects implementing __torch_function__."
         )
     if not all(is_tensor_like(v) for v in values):
-        options: Dict[str, Any] = dict(dtype=torch.get_default_dtype())
+        options: dict[str, Any] = dict(dtype=torch.get_default_dtype())
         for value in values:
             if isinstance(value, torch.Tensor):
                 options = dict(dtype=value.dtype, device=value.device)

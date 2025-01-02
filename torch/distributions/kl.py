@@ -2,7 +2,7 @@
 import math
 import warnings
 from functools import total_ordering
-from typing import Callable, Dict, Tuple, Type
+from typing import Callable, Tuple, Type
 
 import torch
 from torch import inf
@@ -39,10 +39,10 @@ from .utils import _sum_rightmost, euler_constant as _euler_gamma
 from torch import Tensor
 
 
-_KL_REGISTRY: Dict[
+_KL_REGISTRY: dict[
     Tuple[Type, Type], Callable
 ] = {}  # Source of truth mapping a few general (type, type) pairs to functions.
-_KL_MEMOIZE: Dict[
+_KL_MEMOIZE: dict[
     Tuple[Type, Type], Callable
 ] = {}  # Memoized version mapping many specific (type, type) pairs to functions.
 
