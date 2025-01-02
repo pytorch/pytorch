@@ -72,6 +72,11 @@ class MetalOverrides(OpOverrides):
         return ops.to_dtype(var, dtype)
 
     @staticmethod
+    def masked(mask: CSEVariable, body: sympy.Expr, other: CSEVariable) -> str:
+        # TODO: Add a proper implementation considering there are no lambdas in Metal
+        return f"{mask} ? {body()} : {other}"
+
+    @staticmethod
     def where(a: CSEVariable, b: CSEVariable, c: CSEVariable) -> str:
         return f"{a} ? {b} : {c}"
 
