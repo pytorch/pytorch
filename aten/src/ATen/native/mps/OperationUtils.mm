@@ -974,7 +974,6 @@ void MetalKernelFunction::dispatch(c10::ArrayRef<uint64_t> length, c10::Optional
 }
 
 void MetalKernelFunction::setArg(unsigned idx, const at::TensorBase& t) {
-  TORCH_CHECK(t.device().type() == kMPS, "Tensor must be on GPU");
   mtl_setBuffer(encoder, t, idx);
 }
 
