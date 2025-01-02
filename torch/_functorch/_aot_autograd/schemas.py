@@ -310,13 +310,6 @@ class SubclassCreationMeta:
         # sanity assert to make sure we don't leak memory
         assert is_fake(self.original_subclass)
 
-        # This saves the type of subclass nested structure to compare
-        # against runtime tangent inputs. We do wanna compute this at AOT
-        # time as it is invoked in hot-path
-        from .subclass_utils import get_types_for_subclass
-
-        self.subclass_type = get_types_for_subclass(self.original_subclass)
-
 
 # This class encapsulates all aliasing + mutation info we need about the forward graph
 # See a more detailed overview of the edge case handling at
