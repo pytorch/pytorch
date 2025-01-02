@@ -14,7 +14,7 @@ struct THPGenerator {
 // is borrowed. The caller should ensure that the at::Generator object lifetime
 // last at least as long as the Python wrapper.
 TORCH_PYTHON_API PyObject* THPGenerator_initDefaultGenerator(
-    const at::Generator& cdata);
+    at::Generator cdata);
 
 #define THPGenerator_Check(obj) PyObject_IsInstance(obj, THPGeneratorClass)
 
