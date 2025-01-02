@@ -2722,7 +2722,7 @@ class CppVecKernel(CppKernel):
 
     def reduction(self, dtype, src_dtype, reduction_type, value):
         # Note: For argmax and argmin on bool type, we always convert bool to float.
-        # Fix issue: https://github.com/pytorch/pytorch/pull/143848
+        # Fix issue: https://github.com/pytorch/pytorch/issues/143568
         assert reduction_type in VECTORIZABLE_RTYPES
         argmax_or_argmin = reduction_type in ("argmax", "argmin")
         horizontal_reduction = self.tiling_idx >= self.reduction_depth
