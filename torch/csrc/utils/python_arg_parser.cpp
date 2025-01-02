@@ -121,6 +121,12 @@ bool should_allow_numbers_as_tensors(const std::string& name) {
       "floor_divide",
       "floor_divide_",
       "floor_divide_out",
+      "special_betainc",
+      "special_betainc_out",
+      "special_betaincinv",
+      "special_betaincinv_out",
+      "special_betaln",
+      "special_betaln_out",
       "_conj"}; // _conj needed because mul.Tensor backward calls it
   return allowed.find(name) != allowed.end();
 }
