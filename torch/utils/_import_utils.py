@@ -1,12 +1,9 @@
 import functools
 import importlib.util
-from typing import Optional, TYPE_CHECKING
+from types import ModuleType
+from typing import Optional
 
 import torch
-
-
-if TYPE_CHECKING:
-    import dill
 
 
 def _check_module_exists(name: str) -> bool:
@@ -33,7 +30,7 @@ def dill_available() -> bool:
 
 
 @functools.lru_cache
-def import_dill() -> Optional["dill"]:
+def import_dill() -> Optional[ModuleType]:
     if not dill_available():
         return None
 
