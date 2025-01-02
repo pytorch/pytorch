@@ -90,6 +90,34 @@ def buffer_reuse_key(node: BufferLike) -> ReuseKey:
     )
 
 
+def can_match_buffer_size(input_buf: BufferLike, output_buf: BufferLike):
+    # Return True if input_buf can be re-inplaced for output_buf.
+    # This differs from `buffer_reuse_key` for general buffer reuse.
+    if input_buf.get_device_or_error() != output_buf.get_device_or_error():
+        return False
+
+    if input_buf.get_dtype() != output_buf.get_dtype():
+        return False
+
+    input_size = V.graph.sizevars.simplify(input_buf.get_layout().storage_size())
+    output_size = V.graph.sizevars.simplify(output_buf.get_layout().storage_size())
+
+    if (
+        # NB: this is symbolic so that we don't try to reuse a buffer
+        # for s0 for s1, just because they happen to share the same
+        # size hint
+        sympy_str(input_size)
+        == sympy_str(output_size)
+    ) or (
+        # statically known that 0.95 * input_size <= output_size <= input_size
+        V.graph.sizevars.statically_known_geq(output_size, 0.95 * input_size)
+        and V.graph.sizevars.statically_known_leq(output_size, input_size)
+    ):
+        return True
+
+    return False
+
+
 def convert_arg_type(arg: torch.Argument) -> str:
     from .cpp import CONTAINER_PYTHON_TO_CPP, PYTHON_TO_CPP
 
@@ -1270,7 +1298,8 @@ class PythonWrapperCodegen(CodeGen):
 
         # conservatively use the sum of all allocated buffer sizes
         # in potentially nested scopes as the total allocated size
-        total_allocated_buffer_size = sum(
+        # FIXME(rec): not used
+        _total_allocated_buffer_size = sum(
             s.total_allocated_buffer_size for s in past_planning_states
         )
 
@@ -2236,7 +2265,7 @@ class PythonWrapperCodegen(CodeGen):
         )
 
     def codegen_inplace_reuse(self, input_buffer: ir.Buffer, output_buffer: ir.Buffer):
-        assert buffer_reuse_key(input_buffer) == buffer_reuse_key(output_buffer)
+        assert can_match_buffer_size(input_buffer, output_buffer)
         self.codegen_allocation(input_buffer)
         self.freed.add(input_buffer.get_name())
         self.allocated.add(output_buffer.get_name())
@@ -2337,6 +2366,7 @@ class PythonWrapperCodegen(CodeGen):
             return
 
         self.push_codegened_graph(subgraph.graph)
+        self.writeline("")
         self.writeline(f"{self.comment} subgraph: {subgraph.name}")
         self.codegen_subgraph_prefix(subgraph, outer_inputs, outer_outputs)
 

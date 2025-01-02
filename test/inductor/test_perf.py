@@ -1148,7 +1148,7 @@ class InplacingTests(TestCase):
                     x = x + torch.ops.mylib.foo(q, k_cache, v_cache)
                 return x
 
-            compiled_out, (code,) = run_and_get_code(
+            _, (code,) = run_and_get_code(
                 torch.compile(f, fullgraph=True),
             )
 
