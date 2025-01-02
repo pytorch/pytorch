@@ -489,3 +489,21 @@ Note: This project is unrelated to [hughperkins/pytorch](https://github.com/hugh
 ## License
 
 PyTorch has a BSD-style license, as found in the [LICENSE](LICENSE) file.
+
+## How to Run the Script(這裡是我新加入的使用範例)
+
+Here is an example of using PyTorch to build a simple neural network:
+```python
+import torch
+import torch.nn as nn
+
+class SimpleNN(nn.Module):
+    def __init__(self):
+        super(SimpleNN, self).__init__()
+        self.fc = nn.Linear(10, 1)
+
+    def forward(self, x):
+        return self.fc(x)
+
+model = SimpleNN()
+print(model)
