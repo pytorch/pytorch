@@ -264,7 +264,9 @@ def _print_snapshot(snapshot: Dict[torch.device, Dict[str, int]], units: str) ->
         print(
             f"Device: {dev}",
             *(
-                f"\t{k}: {_rounding_fn(v, divisor, 2)} {units}"
+                f"\t{k.value}: {_rounding_fn(v, divisor, 2)} {units}"
+                if isinstance(k, _RefType)
+                else f"\t{k}: {_rounding_fn(v, divisor, 2)} {units}"
                 for k, v in dev_snap.items()
             ),
             sep="\n",
@@ -286,7 +288,9 @@ def _print_snapshot_tabular(
     divisor = _get_mem_divisor(units)
     table_data = []
     key_list = list(next(iter(snapshot.values())).keys())
-    headers = ["Device"] + [f"{key}" for key in key_list]
+    headers = ["Device"] + [
+        f"{key.value}" if isinstance(key, _RefType) else f"{key}" for key in key_list
+    ]
 
     for dev, dev_snap in snapshot.items():
         if _rounding_fn(dev_snap[_TOTAL_KEY], divisor, 2) <= 0:
@@ -301,7 +305,7 @@ def _print_state_snapshots(
     snapshots: Dict[_State, List[Dict[torch.device, Dict[str, int]]]], units: str
 ) -> None:
     for state, snapshot_list in snapshots.items():
-        print(f"{state}")
+        print(f"{state.value}")
         for i, snapshot in enumerate(snapshot_list):
             print(f"# {i + 1}:")
             _print_snapshot(snapshot, units)
@@ -323,7 +327,7 @@ def _print_state_snapshots_tabular(
     divisor = _get_mem_divisor(units)
     for state, snapshot_list in snapshots.items():
         for i, snapshot in enumerate(snapshot_list):
-            state_call = f"{state} # {i + 1}"
+            state_call = f"{state.value} # {i + 1}"
             for dev, dev_snap in snapshot.items():
                 if _rounding_fn(dev_snap[_TOTAL_KEY], divisor, 2) <= 0:
                     continue
@@ -335,7 +339,9 @@ def _print_state_snapshots_tabular(
                 }
                 last_state_call = state_call
                 for k, v in dev_snap.items():
-                    row[f"{k}"] = f"{_rounding_fn(v, divisor, 2)} {units}"
+                    row[
+                        f"{k.value}" if isinstance(k, _RefType) else f"{k}"
+                    ] = f"{_rounding_fn(v, divisor, 2)} {units}"
                 table_data.append(row)
     print(tabulate(table_data, headers="keys", tablefmt="rst"))
 
@@ -705,6 +711,7 @@ class MemTracker(TorchDispatchMode):
             mod_stats = self.memory_tracking[module]
             state = _ModState.PRE_FW
             input_mem = self._track_inputs_or_outputs(inputs)
+            mod_stats.mod_fqn = mod_name
             mod_stats.input_mem = input_mem
 
         mem_snapshot = self.get_tracker_snapshot()
@@ -837,6 +844,8 @@ class MemTracker(TorchDispatchMode):
                 self._track_module_params_and_buffers(obj, install_grad_hooks=False)
             elif isinstance(obj, optim.Optimizer):
                 self._track_optimizer_states(_MemRefType.OPT, obj)
+            elif obj is None:
+                continue
             else:
                 raise TypeError(
                     f"Object of type {type(obj)} is not supported for tracking. "
