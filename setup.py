@@ -1292,7 +1292,7 @@ def main():
         "include/torch/csrc/inductor/aoti_torch/generated/*.h",
         "include/torch/csrc/inductor/aoti_torch/generated/extend/*.h",
         "include/torch/csrc/inductor/cpp_wrapper/*.h",
-        "include/torch/csrc/inductor/cpp_wrapper/device_internal/*.h"
+        "include/torch/csrc/inductor/cpp_wrapper/device_internal/*.h",
         "include/torch/csrc/inductor/cpp_wrapper_array_ref/*.h",
         "include/torch/csrc/jit/*.h",
         "include/torch/csrc/jit/backends/*.h",
