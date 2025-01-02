@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-from typing import Callable, Iterator
+from typing import Callable, Iterator, TypeVar
 
 
 # Copyright (c) Facebook, Inc. and its affiliates.
@@ -9,8 +9,10 @@ from typing import Callable, Iterator
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 
+_T = TypeVar("_T")
 
-class CyclingIterator:
+
+class CyclingIterator(Iterator[_T]):
     """
     An iterator decorator that cycles through the
     underlying iterator "n" times. Useful to "unroll"
@@ -28,7 +30,7 @@ class CyclingIterator:
     def __init__(
         self,
         n: int,
-        generator_fn: Callable[[int], Iterator[object]],
+        generator_fn: Callable[[int], Iterator[_T]],
         start_epoch: int = 0,
     ):
         self._n = n
@@ -39,7 +41,7 @@ class CyclingIterator:
     def __iter__(self) -> "CyclingIterator":
         return self
 
-    def __next__(self) -> object:
+    def __next__(self) -> _T:
         try:
             return next(self._iter)
         except StopIteration as eod:  # eod == end of data
