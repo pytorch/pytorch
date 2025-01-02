@@ -1587,16 +1587,19 @@ def _export_to_aten_ir_make_fx(
 
                 hook.remove()  # type: ignore[possibly-undefined]
 
-            # In export, we ignore any op that is related to
-            # eager mode profiling call. The expectation is
-            # that either runtimes provide their own profiling
-            # OR user wrap the compiled region on a profiling in
-            # later stage.
             def _is_impure(node):
                 if node.op == "call_function" and node.target in (
+                    # In export, we ignore any op that is related to
+                    # eager mode profiling call. The expectation is
+                    # that either runtimes provide their own profiling
+                    # OR user wrap the compiled region on a profiling in
+                    # later stage.
                     torch.ops.profiler._record_function_enter.default,
                     torch.ops.profiler._record_function_enter_new.default,
                     torch.ops.profiler._record_function_exit._RecordFunction,
+                    # In theory, we could fix this dead detach and getattr nodes 
+                    # from subclass tensors if we carefully rewrite track_tensor_tree
+                    # in a way that it doesn't do any tensor methods. 
                     torch.ops.aten.detach.default,
                     builtins.getattr,
                 ):
