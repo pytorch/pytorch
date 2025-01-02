@@ -9581,21 +9581,6 @@ def ___make_guard_fn():
         ):
             compiled_fn(x)
 
-        # FIXME(XuehaiPan): do not inline infinite generator if it does not raise errors in eager mode
-        def fn(x):
-            def gen():
-                while True:
-                    yield x
-
-            return list(zip(range(10), gen()))
-
-        x = torch.randn([0, 1, 2, 3, 4, 5])
-        compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
-        with self.assertRaisesRegex(
-            torch._dynamo.exc.Unsupported, "infinite generator"
-        ):
-            compiled_fn(x)
-
     def test_itertools_islice(self):
         counters.clear()
 
