@@ -1854,10 +1854,21 @@ def is_safe_constant(v):
     )
 
 
+def is_torch_sym(value):
+    return isinstance(value, (torch.SymBool, torch.SymInt)) and not isinstance(
+        value.node, torch.nested._internal.nested_int.NestedIntNode
+    )
+
+
 def specialize_symnode(arg):
-    from .variables import ConstantVariable, SymNodeVariable
+    from .variables import ConstantVariable, LazyVariableTracker, SymNodeVariable
 
     # Guard and specialize
+    if isinstance(arg, LazyVariableTracker) and not arg.is_realized():
+        # If lazVT and not a sym value, return arg without realizing
+        if not is_torch_sym(arg.original_value()):
+            return arg
+
     if isinstance(arg, SymNodeVariable):
         return ConstantVariable.create(arg.evaluate_expr())
 

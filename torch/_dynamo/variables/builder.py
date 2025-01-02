@@ -36,7 +36,7 @@ import sympy
 
 import torch
 from torch import SymInt
-from torch._dynamo.utils import get_metrics_context
+from torch._dynamo.utils import get_metrics_context, is_torch_sym
 from torch._guards import TracingContext
 from torch._higher_order_ops.torchbind import call_torchbind
 from torch._ops import HigherOrderOperator
@@ -864,9 +864,7 @@ class VariableBuilder:
         ):
             self.install_guards(GuardBuilder.FUNCTION_MATCH)
             return ItertoolsVariable(value, source=self.source)
-        elif isinstance(value, (torch.SymBool, torch.SymInt)) and not isinstance(
-            value.node, torch.nested._internal.nested_int.NestedIntNode
-        ):
+        elif is_torch_sym(value):
             # Note: this doesn't handle nested symints.
             # For SymBool input, we re-use the infra for SymInt by simulating SymBool with a SymInt in dynamo.
 
