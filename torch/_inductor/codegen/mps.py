@@ -86,6 +86,10 @@ class MetalOverrides(OpOverrides):
         return f"metal::abs({x})"
 
     @staticmethod
+    def signbit(x: CSEVariable) -> str:
+        return f"metal::signbit({x})"
+
+    @staticmethod
     def sin(x: CSEVariable) -> str:
         return f"metal::precise::sin({x})"
 
@@ -138,7 +142,7 @@ class MetalKernel(SIMDKernel):
         var = self.args.input(name)
         index = self.prepare_indexing(index)
         line = f"{var}[{index}]"
-        return self.cse.generate(self.body, line)
+        return self.cse.generate(self.body, line, dtype=V.graph.get_dtype(name))
 
     def store(
         self, name: str, index: sympy.Expr, value: CSEVariable, mode: StoreMode = None
