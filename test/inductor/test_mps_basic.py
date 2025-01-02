@@ -43,6 +43,7 @@ class MPSBasicTests(TestCase):
     test_max_min = CommonTemplate.test_max_min
     test_views6 = CommonTemplate.test_views6
     test_addmm = CommonTemplate.test_addmm
+    test_signbit = CommonTemplate.test_signbit
     test_view_as_complex = CommonTemplate.test_view_as_complex
     test_max_pool2d2 = CommonTemplate.test_max_pool2d2
 
