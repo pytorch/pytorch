@@ -287,6 +287,34 @@ class ConstDictVariable(VariableTracker):
         if self.source:
             install_guard(self.make_guard(GuardBuilder.DICT_KEYS_MATCH))
 
+    def install_dict_contains_guard(self, tx, args):
+        # Key guarding - These are the cases to consider
+        # 1) The dict has been mutated. In this case, we would have already
+        # inserted a DICT_KEYS_MATCH guard, so we can skip.
+        # 2) args[0].source is not None. In this case, args[0] VT would have
+        # been realized, and we would have already inserted the necessary
+        # guard. So, we can skip.
+        # 3) args[0].source is None. This happens for const keys. Here, we
+        # have to insert the DICT_CONTAINS guard.
+        from . import ConstantVariable
+
+        contains = args[0] in self
+        if (
+            self.source
+            and not tx.output.side_effects.is_modified(self)
+            and args[0].source is None
+            and isinstance(args[0], ConstantVariable)
+        ):
+            install_guard(
+                self.make_guard(
+                    functools.partial(
+                        GuardBuilder.DICT_CONTAINS,
+                        key=args[0].value,
+                        invert=not contains,
+                    )
+                )
+            )
+
     def call_method(
         self,
         tx,
@@ -294,29 +322,13 @@ class ConstDictVariable(VariableTracker):
         args: "List[VariableTracker]",
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
-        # Note that guarding for dicts is little more complicated than for other
-        # types. We guard lazily on both keys and values.
-        #
-        # For values, the guarding is easy. In builder.py, we create a
-        # LazyVariableTracker for values, which takes care of inserting the
-        # guards only when the particular value is accessed.
-        #
-        # But for keys, the situation is more complicated. There are 2 ways to
-        # access keys:
-        # 1) Using the key content directly (like int, string etc)
-        # 2) Using the keys list and indexing into it. This is done via
-        # ConstDictKeySource. This is fine, because we can make the key VT a
-        # LazyVariableTracker here, which will guard only if the key is
-        # accessed.
-        #
-        # The problem occurs for the first case. These are just constant
-        # objects, and might not have a source. To solve this, while accessing
-        # the value, we directly put the key content (e.g. int, string etc) into
-        # the C++ guard. Since the value VT is lazy, whenever the value is
-        # accessed, we indirectly guard on the key as well.
-        #
-        # For cases, we only access keys (like calling method keys), we call
-        # DICT_KEYS_MATCH guard to guard on all the keys.
+        # NB - Both key and value are LazyVariableTrackers in the beginning. So,
+        # we have to insert guards when a dict method is accessed. For this to
+        # be simple, we are conservative and overguard. We skip guard only for
+        # get/__getitem__ because the key guard will be inserted by the
+        # corresponding value VT. For __contains__, we add a DICT_CONTAINS
+        # guard. But for all the other methods, we insert the DICT_KEYS_MATCH
+        # guard to be conservative.
         from . import BuiltinVariable, ConstantVariable, TupleVariable
 
         Hashable = ConstDictVariable._HashableTracker
@@ -419,31 +431,8 @@ class ConstDictVariable(VariableTracker):
             # Key guarding - Nothing to do.
             return self.getitem_const(tx, args[0])
         elif name == "__contains__" and len(args) == 1:
-            # Key guarding - Install DICT_CONTAINS guard.
+            self.install_dict_contains_guard(tx, args)
             contains = args[0] in self
-            if self.source and not isinstance(self, SetVariable):
-                if (
-                    not args[0].source
-                    and isinstance(args[0], ConstantVariable)
-                    and not tx.output.side_effects.is_modified(self)
-                ):
-                    install_guard(
-                        self.make_guard(
-                            functools.partial(
-                                GuardBuilder.DICT_CONTAINS,
-                                key=args[0].value,
-                                invert=not contains,
-                            )
-                        )
-                    )
-                elif not args[0].source:
-                    # 1) If args[0].source is not None, we have already inserted
-                    # a guard due to LazyVT realization.
-
-                    # 2) Conservatively guard on all the keys because there is
-                    # no easy way to insert a DICT_CONTAINS guard for non
-                    # consts or mutated dicts.
-                    install_guard(self.make_guard(GuardBuilder.DICT_KEYS_MATCH))
             return ConstantVariable.create(contains)
         elif name == "setdefault" and arg_hashable and self.is_mutable():
             self.install_dict_keys_match_guard()
@@ -640,6 +629,10 @@ class SetVariable(ConstDictVariable):
         raise RuntimeError("Illegal to getitem on a set")
 
     def install_dict_keys_match_guard(self):
+        # Already EQUALS_MATCH guarded
+        pass
+
+    def install_dict_contains_guard(self, tx, args):
         # Already EQUALS_MATCH guarded
         pass
 
