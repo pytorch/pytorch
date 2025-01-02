@@ -86,6 +86,10 @@ class MetalOverrides(OpOverrides):
         return f"metal::abs({x})"
 
     @staticmethod
+    def signbit(x: CSEVariable) -> str:
+        return f"metal::signbit({x})"
+
+    @staticmethod
     def sin(x: CSEVariable) -> str:
         return f"metal::precise::sin({x})"
 
