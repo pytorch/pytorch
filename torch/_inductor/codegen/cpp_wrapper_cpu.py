@@ -1486,8 +1486,10 @@ class CppWrapperCpu(PythonWrapperCodegen):
         return final_tmp_name
 
     def codegen_device_copy(self, src, dst, non_blocking: bool):
+        """This function is overridden by cpp_wrapper_cpu_array_ref, so we don't need to
+        handle cases where dst is not an AtenTensorHandle."""
         self.writeline(
-            f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_copy_(expensive_copy_to_tensor_if_needed({dst}), {src}, {non_blocking}));"
+            f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_copy_({dst}, {src}, {non_blocking}));"
         )
 
     def codegen_multi_output(self, name, value):
