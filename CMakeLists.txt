@@ -1188,7 +1188,6 @@ if(APPLE)
     append_cxx_flag_if_supported("-Wno-unguarded-availability-new"
                                  CMAKE_OBJCXX_FLAGS)
   endif()
-  append_cxx_flag_if_supported("-Wno-unused-private-field" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Wno-missing-braces" CMAKE_CXX_FLAGS)
 endif()
 

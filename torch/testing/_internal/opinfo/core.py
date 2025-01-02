@@ -1207,14 +1207,16 @@ class OpInfo:
         Returns None if the operator has no inplace operator variant"""
         return self.inplace_operator_variant
 
-    # Returns a callable from TestCase -> subtest context manager xfailing / skipping only
-    # for expected errors.
+    # Returns a tuple of callables:
+    # (TestCase -> subtest context, TestCase -> skip / xfail context)
+    # I'd love to combine these into one but I haven't figured out how to do it
+    # in a way that works like it should, and I tried a LOT of things.
     def _maybe_skip_or_xfail(self, rules, device, sample, idx):
-        def _subtest_fn(test_case, sample=sample, idx=idx):
+        def _subtest_fn(test_case, sample=sample.name, idx=idx):
             return test_case.subTest(sample=sample, idx=idx)
 
         if rules is None or len(rules) == 0:
-            return _subtest_fn
+            return (_subtest_fn, lambda _: contextlib.nullcontext())
 
         # NB: match first rule only (order matters!)
         for rule in rules:
@@ -1230,15 +1232,13 @@ class OpInfo:
 
                 # Provide a context for the test case to run the sample input
                 # through as a subtest AND handle skip / xfail for it as needed.
-                return lambda test_case: SubtestRuleCtx(
-                    sample=sample,
-                    idx=idx,
-                    rule=rule,
-                    test_case=test_case,
+                return (
+                    _subtest_fn,
+                    lambda test_case, rule=rule: rule.get_context(test_case),
                 )
 
         log.debug("matched no rules: %s %s %s", self.full_name, device, sample)
-        return _subtest_fn
+        return (_subtest_fn, lambda _: contextlib.nullcontext())
 
     def _sample_callback_fn(self, use_subtests, device):
         # Get sample-specific skips / xfails.
@@ -1250,12 +1250,12 @@ class OpInfo:
             raise RuntimeError(
                 """Sample-specific skips / xfails require use_subtests=True.
 Please pass this to the sample generation function and run the test logic within the
-returned subtest context. For example:
+returned contexts (NB: order matters!). For example:
 
 def test_foo(self, device, dtype, op):
-    for sample, subtest_ctx in op.sample_inputs(..., use_subtests=True):
-        # the subtest context handles skips / xfails
-        with subtest_ctx(self):
+    for sample, subtest_ctx, skip_xfail_ctx in op.sample_inputs(..., use_subtests=True):
+        # these contexts handle running within subtests and skips / xfails
+        with subtest_ctx(self), skip_xfail_ctx(self):
             # test logic here
             ..."""
             )
@@ -1286,7 +1286,9 @@ def test_foo(self, device, dtype, op):
             # for xfails / skips to work properly.
             return (
                 sample,
-                self._maybe_skip_or_xfail(sample_skips_and_xfails, device, sample, idx),
+                *self._maybe_skip_or_xfail(
+                    sample_skips_and_xfails, device, sample, idx
+                ),
             )
 
         return _f
@@ -1652,59 +1654,6 @@ class sample_skips_and_xfails:
 
         fn.sample_skips_and_xfails = self.rules
         return fn
-
-
-# A combined subTest() + rule-specific context manager. In practice, this is used to treat each
-# sample input as a subtest AND properly skip / xfail it as necessary. I found it difficult to
-# combine these in a less verbose way, mainly due to the skip context not behaving as a proper
-# context manager. If there's a better way to do this, please fix it!
-class SubtestRuleCtx:
-    def __init__(self, sample, idx, rule, test_case):
-        self.sample = sample
-        self.idx = idx
-        self.rule = rule
-        self.test_case = test_case
-
-    def __enter__(self):
-        # Enter subTest() context to ensure sample is run through as a subtest
-        self.subtest_ctx = self.test_case.subTest(sample=self.sample, idx=self.idx)
-        self.subtest_ctx.__enter__()
-
-        # Enter rule-specific context (either skip / xfail)
-        self.rule_ctx = None
-        try:
-            self.rule_ctx = self.rule.get_context(self.test_case)
-            self.rule_ctx.__enter__()
-        except unittest.SkipTest as e:
-            # exit the subtest context, indicating skipped
-            self.rule_ctx = None
-            self.subtest_ctx.__exit__(type(e), e, e.__traceback__)
-            self.subtest_ctx = None
-
-        return self
-
-    def __exit__(self, exc_type, exc, exc_tb):
-        # NB: exit should be performed in opposite order as enter - rule then subtest
-        if self.rule_ctx is not None:
-            try:
-                if self.rule_ctx.__exit__(exc_type, exc, exc_tb):
-                    # indicate subtest success (i.e. the expected error was seen for an xfail)
-                    self.subtest_ctx.__exit__(None, None, None)
-                    return True
-            except AssertionError as e:
-                # This is thrown if an expected error is not raised.
-                # Hack in the rule name to help out with debugging.
-                if len(e.args) >= 1:
-                    e.args = (
-                        f"{e.args[0]}\nAssociated {self.rule.type} rule: {self.rule.name}",
-                        *e.args[1:],
-                    )
-                # indicate subtest failure (i.e. the expected error was -not- seen for an xfail)
-                return self.subtest_ctx.__exit__(type(e), e, None)
-
-        if self.subtest_ctx is not None:
-            return self.subtest_ctx.__exit__(exc_type, exc, exc_tb)
-        return True
 
 
 def _generate_reduction_inputs(device, dtype, requires_grad, **kwargs):
