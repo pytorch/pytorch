@@ -63,7 +63,7 @@ def has_inductor_available(device_type: str) -> bool:
 def has_triton_backend_available(device_type: str) -> bool:
     try:
         di = get_interface_for_device(device_type)
-        di.check_if_triton_available(None)
+        di.raise_if_triton_unavailable(None)
         return True
     except RuntimeError:
         return False

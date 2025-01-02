@@ -135,7 +135,7 @@ class DeviceInterface:
         raise NotImplementedError
 
     @staticmethod
-    def check_if_triton_available(device: _device_t = None) -> None:
+    def raise_if_triton_unavailable(device: _device_t = None) -> None:
         """
         Raises a `RuntimeError` with the appropriate human-readable instructions
         to resolve the issue if Triton is not available for the given device, or
@@ -144,7 +144,8 @@ class DeviceInterface:
         The caller should ensure the presence of the 'triton' package before
         calling this method.
         """
-        raise NotImplementedError
+        device_type = cls.device(device).type
+        raise RuntimeError(f"Device type {device_type} does not support Triton")
 
 
 class DeviceGuard:
@@ -249,7 +250,7 @@ class CudaInterface(DeviceInterface):
         )
 
     @staticmethod
-    def check_if_triton_available(device: _device_t = None) -> None:
+    def raise_if_triton_unavailable(device: _device_t = None) -> None:
         from torch._inductor.exc import GPUTooOldForTriton
 
         if not CudaInterface.is_triton_capable(device):
@@ -341,7 +342,7 @@ class XpuInterface(DeviceInterface):
         return True
 
     @staticmethod
-    def check_if_triton_available(device: _device_t = None) -> None:
+    def raise_if_triton_unavailable(evice: _device_t = None) -> None:
         import triton.backends
 
         if "intel" not in triton.backends.backends:
@@ -397,7 +398,7 @@ class CpuInterface(DeviceInterface):
         return True
 
     @staticmethod
-    def check_if_triton_available(device: _device_t = None) -> None:
+    def raise_if_triton_unavailable(device: _device_t = None) -> None:
         import triton.backends
 
         if "cpu" not in triton.backends.backends:

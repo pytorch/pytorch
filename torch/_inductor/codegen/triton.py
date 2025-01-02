@@ -3795,7 +3795,7 @@ class TritonScheduling(SIMDScheduling):
         if device is None:
             device = torch.get_default_device()
 
-        get_interface_for_device(device).check_if_triton_available(device)
+        get_interface_for_device(device).raise_if_triton_unavailable(device)
 
     def codegen_comment(self, node_schedule):
         wrapper = V.graph.wrapper_code
