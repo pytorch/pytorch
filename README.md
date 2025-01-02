@@ -44,7 +44,19 @@ Our trunk health (Continuous Integration signals) can be found at [hud.pytorch.o
 - [License](#license)
 
 <!-- tocstop -->
-
+## Use tensor in PyTorch
+### step1.
+* install PyTorch package in your python:
+```bash
+$ pip install torch
+```
+### step2.
+* Example Usage:
+```bash
+$ import torch
+$ x = torch.tensor([1.0, 2.0, 3.0])
+$ print(x)
+```
 ## More About PyTorch
 
 [Learn the basics of PyTorch](https://pytorch.org/tutorials/beginner/basics/intro.html)
