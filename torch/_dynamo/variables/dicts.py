@@ -168,12 +168,6 @@ class ConstDictVariable(VariableTracker):
         def make_hashable(key):
             return key if isinstance(key, Hashable) else Hashable(key)
 
-        # TODO(anijain2305) - next line, accidentally, calls .realize() on all
-        # keys of the ConstDictVariableTracker, inserting guards on all keys. To
-        # prevent this, we have to be improve `isinstance` checks on LazyVTs.
-        # Today, `isinstance` on LazyVT realizes the VT. Remove the special
-        # handling on SUPPORTED_NODES in builder.py after fixing this. This only
-        # affects key VTs that have ConstDictKeySource.
         self.items = {make_hashable(x): v for x, v in items.items()}
         # need to reconstruct everything if the dictionary is an intermediate value
         # or if a pop/delitem was executed
