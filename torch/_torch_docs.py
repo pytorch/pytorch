@@ -5053,7 +5053,7 @@ For each N-dimensional point in input:
 If :attr:`bins` is a sequence of N 1D tensors, it explicitly specifies the N sequences
 of bin edges. Each 1D tensor should contain a strictly increasing sequence with at
 least one element. A sequence of K bin edges defines K-1 bins, explicitly specifying
-the left and right edges of all bins. Every bin is exclusive of its left edge. Only
+the left and right edges of all bins. Every bin is inclusive of its left edge. Only
 the rightmost bin is inclusive of its right edge.
 
 If :attr:`bins` is a sequence of N ints, it specifies the number of equal-width bins
