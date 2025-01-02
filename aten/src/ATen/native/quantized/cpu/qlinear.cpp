@@ -931,8 +931,8 @@ static at::Tensor linear_int8_with_onednn_weight(
     std::string_view& unary_post_op_algorithm) {
   using ideep::tensor;
   const int64_t dim = input.dim();
-  TORCH_CHECK(input.scalar_type() == c10::ScalarType::Byte,
-      "qlinear with mkldnn tensor: data type of input should be uint8 (unsigned char).");
+  TORCH_CHECK(input.scalar_type() == c10::ScalarType::Byte || input.scalar_type() == c10::ScalarType::Char,
+      "qlinear with mkldnn tensor: data type of input should be uint8 or int8 (unsigned char or char).");
   TORCH_CHECK(onednn_weight.scalar_type() == c10::ScalarType::Char,
       "qlinear with mkldnn tensor: data type of weight should be int8 (char).");
   TORCH_CHECK(
@@ -1021,7 +1021,8 @@ static at::Tensor linear_int8_with_onednn_weight(
       empty_tensor;
 
   // Create onednn primitive
-  auto src_desc = tensor::desc(src_dims, ideep::data_type::u8, ideep::format_tag::any);
+  auto src_dtype = input.scalar_type() == c10::kByte ? ideep::data_type::u8 : ideep::data_type::s8;
+  auto src_desc = tensor::desc(src_dims, src_dtype, ideep::format_tag::any);
   auto weights_desc = packed_weight.get_desc();
   auto dst_dtype = dst.get_data_type();
   auto dst_desc = tensor::desc(dst_dims, dst_dtype, ideep::format_tag::any);
@@ -1118,12 +1119,14 @@ namespace at::native {
       torch::List<std::optional<at::Scalar>> post_op_args,
       std::string_view post_op_algorithm) {
 #if AT_MKLDNN_ENABLED()
-    TORCH_CHECK(act_scale.numel() == 1 && act_zero_point.numel() == 1,
-        "onednn int8 linear: act scale/zp size should be 1");
+    // act_zero_point.numel() == 0 for symmetric quantization
+    TORCH_CHECK(act_scale.numel() == 1 && act_zero_point.numel() <= 1,
+        "onednn int8 linear: act scale/zp size should be 1/<=1");
     static std::optional<at::Tensor> other = std::nullopt;
     static const std::string_view binary_post_op = "none";
+    int64_t act_zp = act_zero_point.numel() == 1 ? act_zero_point.item().toLong() : 0;
     return linear_int8_with_onednn_weight(
-        act, act_scale.item().toDouble(), act_zero_point.item().toLong(),
+        act, act_scale.item().toDouble(), act_zp,
         onednn_weight, weight_scales, weight_zero_points,
         bias, output_scale, output_zero_point, output_dtype,
         other, /*other scale*/1.0, /*other zp*/0,
@@ -1154,10 +1157,12 @@ namespace at::native {
       torch::List<std::optional<at::Scalar>> unary_post_op_args,
       std::string_view unary_post_op_algorithm) {
 #if AT_MKLDNN_ENABLED()
-    TORCH_CHECK(act_scale.numel() == 1 && act_zero_point.numel() == 1,
-        "onednn int8 linear: act scale/zp size should be 1");
+    // act_zero_point.numel() == 0 for symmetric quantization
+    TORCH_CHECK(act_scale.numel() == 1 && act_zero_point.numel() <= 1,
+        "onednn int8 linear: act scale/zp size should be 1/<=1");
+    int64_t act_zp = act_zero_point.numel() == 1 ? act_zero_point.item().toLong() : 0;
     return linear_int8_with_onednn_weight(
-        act, act_scale.item().toDouble(), act_zero_point.item().toLong(),
+        act, act_scale.item().toDouble(), act_zp,
         onednn_weight, weight_scales, weight_zero_points,
         bias, output_scale, output_zero_point, output_dtype,
         other, other_scale, other_zero_point,

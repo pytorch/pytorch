@@ -568,84 +568,6 @@ class TestQuantizePT2EQAT_ConvBn_Base(PT2EQATTestCase):
         m = M(self.conv_class)
         self._verify_symmetric_xnnpack_qat_numerics(m, example_inputs)
 
-    def test_prepare_qat_conv_bn_fusion_getitem_placeholder(self):
-        """
-        Test the case where the placeholder node for the [conv - bn - getitem] pattern
-        is also a getitem node:
-
-          some_op -> unrelated_getitem -> conv -> bn -> conv_bn_getitem
-
-        We want the metadata to be copied from the `conv_bn_getitem` node, not from
-        the `unrelated_getitem` node, which is not part of the conv-bn pattern but
-        is returned as part of the match anyway (as a placeholder).
-        """
-        from torch._utils_internal import capture_pre_autograd_graph_using_training_ir
-
-        # T199018392
-        # remove this test after we kill capture_pre_autograd_graph()
-        if capture_pre_autograd_graph_using_training_ir():
-            self.skipTest("Not applicable to training IR")
-
-        class M(torch.nn.Module):
-            def __init__(self, conv_class, bn_class):
-                super().__init__()
-                self.bn1 = bn_class(3)
-                self.conv = conv_class(3, 3, 3)
-                self.bn2 = bn_class(3)
-
-            def forward(self, x):
-                x = self.bn1(x)
-                x = self.conv(x)
-                x = self.bn2(x)
-                return x
-
-        def _get_getitem_nodes(m: torch.fx.GraphModule):
-            """
-            Return a 2-tuple of (unrelated_getitem_node, conv_bn_getitem_node) from the graph.
-            """
-            unrelated_getitem_node, conv_bn_getitem_node = None, None
-            for node in m.graph.nodes:
-                if (
-                    node.target != operator.getitem
-                    or node.args[0].target
-                    != torch.ops.aten._native_batch_norm_legit.default
-                ):
-                    continue
-                if node.args[0].args[0].op == "placeholder":
-                    unrelated_getitem_node = node
-                else:
-                    conv_bn_getitem_node = node
-            assert (
-                unrelated_getitem_node is not None
-            ), "did not find unrelated getitem node, bad test setup"
-            assert (
-                conv_bn_getitem_node is not None
-            ), "did not find conv bn getitem node, bad test setup"
-            return (unrelated_getitem_node, conv_bn_getitem_node)
-
-        # Program capture
-        m = M(self.conv_class, self.bn_class)
-        m = torch._export.capture_pre_autograd_graph(m, self.example_inputs)
-        m.graph.eliminate_dead_code()
-        m.recompile()
-        (_, original_conv_bn_getitem_node) = _get_getitem_nodes(m)
-
-        # Prepare QAT
-        quantizer = XNNPACKQuantizer()
-        quantizer.set_global(
-            get_symmetric_quantization_config(is_per_channel=False, is_qat=True)
-        )
-        m = prepare_qat_pt2e(m, quantizer)
-        (unrelated_getitem_node, conv_bn_getitem_node) = _get_getitem_nodes(m)
-
-        # Verify that the metadata was copied from `conv_bn_getitem`, not `unrelated_getitem`
-        original_conv_bn_getitem_meta = original_conv_bn_getitem_node.meta[
-            "quantization_annotation"
-        ]
-        conv_bn_getitem_meta = conv_bn_getitem_node.meta["quantization_annotation"]
-        self.assertEqual(conv_bn_getitem_meta, original_conv_bn_getitem_meta)
-        self.assertTrue("quantization_annotation" not in unrelated_getitem_node.meta)
-
     def test_qat_update_shared_qspec(self):
         """
         Test the case where nodes used in SharedQuantizationSpec were replaced
@@ -726,8 +648,8 @@ class TestQuantizePT2EQAT_ConvBn_Base(PT2EQATTestCase):
             assert isinstance(bias_node, torch.fx.Node)
             return (qweight_node, bias_node)
 
-        first_conv_qweight, first_conv_bias = get_conv_weight_and_bias(first_conv)
-        second_conv_qweight, second_conv_bias = get_conv_weight_and_bias(second_conv)
+        _, first_conv_bias = get_conv_weight_and_bias(first_conv)
+        _, second_conv_bias = get_conv_weight_and_bias(second_conv)
 
         # Assert that each set of conv, conv weight, and conv bias are in the same partition
         def get_source_fn(node: torch.fx.Node):
@@ -925,39 +847,6 @@ class TestQuantizePT2EQAT_ConvBn_Base(PT2EQATTestCase):
         (conv_node, bn_node, _) = _get_conv_bn_getitem_nodes(m)
         self.assertTrue(conv_node is not None)
         self.assertTrue(bn_node is None)
-
-    def test_preserve_capture_pre_autograd_graph_tag(self):
-        """
-        Ensure the capture_pre_autograd_graph_tag node meta is preserved.
-        TODO: Remove this test after training IR migration.
-        T199018392
-        """
-        from torch._export import capture_pre_autograd_graph
-        from torch._utils_internal import capture_pre_autograd_graph_using_training_ir
-
-        if capture_pre_autograd_graph_using_training_ir():
-            self.skipTest(
-                "test doesn't apply when capture_pre_autograd_graph is using training IR"
-            )
-
-        m = self._get_conv_bn_model(has_conv_bias=False, has_bn=True, has_relu=False)
-        m = capture_pre_autograd_graph(m, self.example_inputs)
-
-        for node in m.graph.nodes:
-            self.assertTrue(node.meta.get("capture_pre_autograd_graph_tag", False))
-        quantizer = XNNPACKQuantizer()
-        quantizer.set_global(
-            get_symmetric_quantization_config(is_per_channel=False, is_qat=True),
-        )
-        m = prepare_qat_pt2e(m, quantizer)
-        m = convert_pt2e(m)
-        has_tag = False
-        for node in m.graph.nodes:
-            if not node.meta.get("capture_pre_autograd_graph_tag", False):
-                has_tag = True
-                break
-        self.assertTrue(has_tag)
-        torch.export.export(m, self.example_inputs)
 
 
 @skipIfNoQNNPACK
@@ -1222,10 +1111,10 @@ class TestQuantizeMixQATAndPTQ(QuantizationTestCase):
 
         self._prepare_qat_linears(model)
 
-        after_prepare_result_pt2e = model(*example_inputs)
+        model(*example_inputs)
         # must be fixed model.eval()
         self._convert_qat_linears(model)
-        quant_result_pt2e = model(*example_inputs)
+        model(*example_inputs)
 
         model_pt2e = export_for_training(
             model,
@@ -1237,9 +1126,9 @@ class TestQuantizeMixQATAndPTQ(QuantizationTestCase):
         quantization_config = get_symmetric_quantization_config()
         quantizer.set_global(quantization_config)
         model_pt2e = prepare_pt2e(model_pt2e, quantizer)
-        after_prepare_result_pt2e = model_pt2e(*example_inputs)
+        after_prepare_result_pt2e = model_pt2e(*example_inputs)  # noqa: F841
         model_pt2e = convert_pt2e(model_pt2e)
-        quant_result_pt2e = model_pt2e(*example_inputs)
+        quant_result_pt2e = model_pt2e(*example_inputs)  # noqa: F841
 
         exported_model = torch.export.export(model_pt2e, example_inputs)
 

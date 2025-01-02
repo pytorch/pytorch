@@ -251,7 +251,6 @@ class ExprPrinterTests(InductorTestCase):
     def test_print_pow(self):
         s1 = sympy.Symbol("foo", integer=True)
         s2 = sympy.Symbol("bar", integer=True)
-        s3 = sympy.Symbol("baz", integer=True)
 
         common_cases = [
             # expr, result

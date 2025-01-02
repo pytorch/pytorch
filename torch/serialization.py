@@ -1436,6 +1436,11 @@ def load(
                         " silence this warning)",
                         UserWarning,
                     )
+                    if weights_only:
+                        raise RuntimeError(
+                            "Cannot use ``weights_only=True`` with TorchScript archives passed to "
+                            "``torch.load``. " + UNSAFE_MESSAGE
+                        )
                     opened_file.seek(orig_position)
                     return torch.jit.load(opened_file, map_location=map_location)
                 if mmap:
