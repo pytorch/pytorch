@@ -692,7 +692,6 @@ def torch_key() -> bytes:
                 # a hash representing the state of the source code.
                 extra_files = (
                     "codegen/aoti_runtime/interface.cpp",
-                    "codegen/aoti_runtime/implementation.cpp",
                     "codegen/cpp_prefix.h",
                     "script.ld",
                 )
@@ -2385,13 +2384,14 @@ class CppWrapperCodeCache(CppPythonBindingsCodeCache):
         Currently, this is only utilized by the cpp_wrapper classes.
         """
         base_device = device.split(":")[0]
+        is_array_ref = config.aot_inductor.allow_stack_allocation
         return str(
             Path(torch.__file__).resolve().parent
             / "include"
             / "torch"
             / "csrc"
             / "inductor"
-            / "cpp_wrapper"
+            / ("cpp_wrapper_array_ref" if is_array_ref else "cpp_wrapper")
             / f"{base_device}.h"
         )
 
