@@ -327,9 +327,11 @@ def while_loop_tracing(mode, cond_fn, body_fn, carried_inputs, additional_inputs
     )
 
 
-def check_outputs_carry_consistency(
-    outs: List[Union[torch.Tensor, torch.SymInt, int]],
-    carries: List[Union[torch.Tensor, torch.SymInt, int]],
+def check_meta_consistency(
+    lhs_list: List[Union[torch.Tensor, torch.SymInt, int]],
+    rhs_list: List[Union[torch.Tensor, torch.SymInt, int]],
+    lhs_name: str,
+    rhs_name: str,
 ) -> None:
     def diff_meta_pairs(
         lhs_list: List[Union[torch.Tensor, torch.SymInt, int]],
@@ -369,6 +371,10 @@ def check_outputs_carry_consistency(
 
             return ""
 
+        if len(lhs_list) != len(rhs_list):
+            raise torch._dynamo.exc.UncapturedHigherOrderOpError(
+                f"Expected {lhs_name} and {rhs_name} to have same number of outputs but got lhs:{lhs_list} and rhs:{rhs_list}"
+            )
         all_diffs = []
         for i, (lhs, rhs) in enumerate(zip(lhs_list, rhs_list)):
             if diff := diff_meta(lhs, rhs):
@@ -377,10 +383,10 @@ def check_outputs_carry_consistency(
                 )
         return all_diffs
 
-    if all_diffs := diff_meta_pairs(outs, carries):
+    if all_diffs := diff_meta_pairs(lhs_list, rhs_list):
         diff_str = "\n".join(all_diffs)
-        raise RuntimeError(
-            f"Expected carried_inputs and body outputs return tensors with same metadata but found:\n{diff_str}"
+        raise torch._dynamo.exc.UncapturedHigherOrderOpError(
+            f"Expected {lhs_name} and {rhs_name} to have same metadata but found:\n{diff_str}"
         )
 
 
@@ -424,7 +430,9 @@ def while_loop_fake_tensor_mode(
             # body_fn return output with the same pytree and tensor meta data as carried_inputs
             # so we could just return the output after one iteration.
             body_outs = body_fn(*carried_inputs, *additional_inputs)
-            check_outputs_carry_consistency(body_outs, carried_inputs)
+            check_meta_consistency(
+                carried_inputs, body_outs, "carried_inputs", "body_output"
+            )
         # See NOTE [unspecialize int carry with unbacked symints]
         return pytree.tree_map_only(
             (int, torch.SymInt), lambda _: _create_unbacked_symint(mode), body_outs
