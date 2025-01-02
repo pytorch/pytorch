@@ -7,6 +7,7 @@ import inspect
 import sys
 import types
 from typing import Any, Callable, Dict, List, Set, Type, TypeVar, Union
+from typing_extensions import ParamSpec
 
 import torch
 import torch.utils._pytree as pytree
