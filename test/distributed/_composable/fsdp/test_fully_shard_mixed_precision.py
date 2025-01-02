@@ -548,6 +548,39 @@ class TestFullyShardMixedPrecisionCasts(FSDPTestMultiThread):
             fully_shard(module, mp_policy=mp_policy)
         inner(model, torch.randn((3, 1, 9, 9)))
 
+    @skip_if_lt_x_gpu(1)
+    def test_clamp_reduce_dtype(self):
+        # Initialize the model directly in bf16
+        init_dtype = torch.bfloat16
+        model = nn.Sequential(
+            nn.Linear(32, 32, dtype=init_dtype),
+            nn.Linear(32, 32, dtype=init_dtype),
+        )
+        mp_policy = MixedPrecisionPolicy(
+            param_dtype=torch.bfloat16, reduce_dtype=torch.bfloat16
+        )
+        # Check that we did not clamp the reduce dtype
+        self.assertEqual(mp_policy.reduce_dtype, torch.bfloat16)
+        for module in model:
+            fully_shard((module), mp_policy=mp_policy)
+        fully_shard(model, mp_policy=mp_policy)
+
+        # Check that the reduce-scatter runs in bf16 even after we change the
+        # model from bf16 to fp32
+        model.to(torch.float32)
+        orig_reduce_scatter = dist.reduce_scatter_tensor
+
+        def assert_fn(output: torch.Tensor):
+            self.assertEqual(output.dtype, torch.bfloat16)
+
+        reduce_scatter = functools.partial(
+            reduce_scatter_with_assert, self, orig_reduce_scatter, assert_fn
+        )
+        with patch_reduce_scatter(reduce_scatter):
+            inp = torch.randn((4, 32), device="cuda")
+            loss = model(inp).sum()
+            loss.backward()
+
 
 if __name__ == "__main__":
     run_tests()

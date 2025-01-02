@@ -193,33 +193,18 @@ jobs:
           fi
 
       - name: Checkout PyTorch to pytorch dir
-        uses: malfet/checkout@silent-checkout
+        uses: actions/checkout@v4
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
           path: pytorch
-          quiet-checkout: true
+          show-progress: false
 
       - name: Clean PyTorch checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-
-      - name: Checkout pytorch/builder to builder dir
-        uses: malfet/checkout@silent-checkout
-        with:
-          ref: main
-          submodules: recursive
-          repository: pytorch/builder
-          path: builder
-          quiet-checkout: true
-
-      - name: Clean pytorch/builder checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: builder
 
       - name: Check if the job is disabled
         id: filter
@@ -246,7 +231,6 @@ jobs:
           mkdir -p artifacts/
           container_name=$(docker run \
             -e BINARY_ENV_FILE \
-            -e BUILDER_ROOT \
             -e BUILD_ENVIRONMENT \
             -e DESIRED_CUDA \
             -e DESIRED_DEVTOOLSET \
@@ -264,7 +248,6 @@ jobs:
             --tty \
             --detach \
             -v "${GITHUB_WORKSPACE}/pytorch:/pytorch" \
-            -v "${GITHUB_WORKSPACE}/builder:/builder" \
             -v "${RUNNER_TEMP}/artifacts:/artifacts" \
             -w / \
             "${DOCKER_IMAGE}"
@@ -272,10 +255,8 @@ jobs:
           docker exec -t -w "${PYTORCH_ROOT}" "${container_name}" bash -c "bash .circleci/scripts/binary_populate_env.sh"
           if [[ ${BUILD_ENVIRONMENT} == *"aarch64"* ]]; then
             docker exec -t "${container_name}" bash -c "source ${BINARY_ENV_FILE} && bash /pytorch/.ci/aarch64_linux/aarch64_ci_build.sh"
-          elif [[ ${{ inputs.PACKAGE_TYPE }} == "manywheel" || ${{ inputs.PACKAGE_TYPE }} == "libtorch" ]]; then
-            docker exec -t "${container_name}" bash -c "source ${BINARY_ENV_FILE} && bash /pytorch/.ci/${{ inputs.PACKAGE_TYPE }}/build.sh"
           else
-            docker exec -t "${container_name}" bash -c "source ${BINARY_ENV_FILE} && bash /builder/${{ inputs.PACKAGE_TYPE }}/build.sh"
+            docker exec -t "${container_name}" bash -c "source ${BINARY_ENV_FILE} && bash /pytorch/.ci/${{ inputs.PACKAGE_TYPE }}/build.sh"
           fi
 
       - name: Chown artifacts

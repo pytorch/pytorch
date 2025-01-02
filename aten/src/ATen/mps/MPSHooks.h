@@ -21,6 +21,7 @@ struct MPSHooks : public at::MPSHooksInterface {
   // MPSGeneratorImpl interface
   const Generator& getDefaultGenerator(
       DeviceIndex device_index = -1) const override;
+  Generator getNewGenerator(DeviceIndex device_index = -1) const override;
 
   // MPSStream interface
   void deviceSynchronize() const override;

@@ -306,8 +306,18 @@ class InductorChoices:
             abs(node1.min_order - node2.max_order),
             abs(node2.min_order - node1.max_order),
         )
+
+        # prologue fusion always last
+        if node2.is_template():
+            template_score = 0
+        else:
+            template_score = 1 + (
+                (node1.is_template() == config.epilogue_fusion_first)
+                and memory_score > 0
+            )
+
         return (
-            node1.is_template() == config.epilogue_fusion_first and memory_score > 0,
+            template_score,
             node1.is_reduction() == node2.is_reduction() and memory_score > 0,
             memory_score,
             proximity_score,
