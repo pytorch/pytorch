@@ -203,9 +203,6 @@ class CppWrapperGpu(CppWrapperCpu):
             return
 
         super().write_header()
-
-        self.header.splice("#include <filesystem>")
-        self.header.splice(self.device_codegen.abi_compatible_header())
         self.header.splice(
             maybe_hipify_code_wrapper(self.device_codegen.kernel_driver())
         )
