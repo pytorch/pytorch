@@ -126,7 +126,7 @@ op_db: List[OpInfo] = [
         ndimensional=SpectralFuncType.OneD,
         dtypes=all_types_and_complex_and(torch.bool),
         # CUDA supports Half/ComplexHalf Precision FFT only on SM53 or later archs
-        dtypesIfCUDA=all_types_and_complex_and(
+        dtypesIfGPU=all_types_and_complex_and(
             torch.bool,
             *(() if (not SM53OrLater) else (torch.half, torch.complex32)),
         ),
@@ -147,7 +147,7 @@ op_db: List[OpInfo] = [
         ndimensional=SpectralFuncType.TwoD,
         dtypes=all_types_and_complex_and(torch.bool),
         # CUDA supports Half/ComplexHalf Precision FFT only on SM53 or later archs
-        dtypesIfCUDA=all_types_and_complex_and(
+        dtypesIfGPU=all_types_and_complex_and(
             torch.bool,
             *(() if (not SM53OrLater) else (torch.half, torch.complex32)),
         ),
@@ -179,7 +179,7 @@ op_db: List[OpInfo] = [
         ndimensional=SpectralFuncType.ND,
         dtypes=all_types_and_complex_and(torch.bool),
         # CUDA supports Half/ComplexHalf Precision FFT only on SM53 or later archs
-        dtypesIfCUDA=all_types_and_complex_and(
+        dtypesIfGPU=all_types_and_complex_and(
             torch.bool,
             *(() if (not SM53OrLater) else (torch.half, torch.complex32)),
         ),
@@ -201,7 +201,7 @@ op_db: List[OpInfo] = [
         ndimensional=SpectralFuncType.OneD,
         dtypes=all_types_and_complex_and(torch.bool),
         # CUDA supports Half/ComplexHalf Precision FFT only on SM53 or later archs
-        dtypesIfCUDA=all_types_and_complex_and(
+        dtypesIfGPU=all_types_and_complex_and(
             torch.bool,
             *(() if (not SM53OrLater) else (torch.half, torch.complex32)),
         ),
@@ -232,7 +232,7 @@ op_db: List[OpInfo] = [
         ndimensional=SpectralFuncType.TwoD,
         dtypes=all_types_and_complex_and(torch.bool),
         # CUDA supports Half/ComplexHalf Precision FFT only on SM53 or later archs
-        dtypesIfCUDA=all_types_and_complex_and(
+        dtypesIfGPU=all_types_and_complex_and(
             torch.bool,
             *(() if (not SM53OrLater) else (torch.half, torch.complex32)),
         ),
@@ -276,7 +276,7 @@ op_db: List[OpInfo] = [
         ndimensional=SpectralFuncType.ND,
         dtypes=all_types_and_complex_and(torch.bool),
         # CUDA supports Half/ComplexHalf Precision FFT only on SM53 or later archs
-        dtypesIfCUDA=all_types_and_complex_and(
+        dtypesIfGPU=all_types_and_complex_and(
             torch.bool,
             *(() if (not SM53OrLater) else (torch.half, torch.complex32)),
         ),
@@ -313,7 +313,7 @@ op_db: List[OpInfo] = [
         ndimensional=SpectralFuncType.OneD,
         dtypes=all_types_and(torch.bool),
         # CUDA supports Half/ComplexHalf Precision FFT only on SM53 or later archs
-        dtypesIfCUDA=all_types_and(
+        dtypesIfGPU=all_types_and(
             torch.bool, *(() if (not SM53OrLater) else (torch.half,))
         ),
         sample_inputs_func=partial(sample_inputs_fft_with_min, min_size=1),
@@ -334,7 +334,7 @@ op_db: List[OpInfo] = [
         ndimensional=SpectralFuncType.TwoD,
         dtypes=all_types_and(torch.bool),
         # CUDA supports Half/ComplexHalf Precision FFT only on SM53 or later archs
-        dtypesIfCUDA=all_types_and(
+        dtypesIfGPU=all_types_and(
             torch.bool, *(() if (not SM53OrLater) else (torch.half,))
         ),
         sample_inputs_func=partial(sample_inputs_fft_with_min, min_size=(1, 1)),
@@ -357,7 +357,7 @@ op_db: List[OpInfo] = [
         ndimensional=SpectralFuncType.ND,
         dtypes=all_types_and(torch.bool),
         # CUDA supports Half/ComplexHalf Precision FFT only on SM53 or later archs
-        dtypesIfCUDA=all_types_and(
+        dtypesIfGPU=all_types_and(
             torch.bool, *(() if (not SM53OrLater) else (torch.half,))
         ),
         sample_inputs_func=partial(sample_inputs_fft_with_min, min_size=(1, 1)),
@@ -388,7 +388,7 @@ op_db: List[OpInfo] = [
         check_batched_forward_grad=False,
         dtypes=all_types_and_complex_and(torch.bool),
         # CUDA supports Half/ComplexHalf Precision FFT only on SM53 or later archs
-        dtypesIfCUDA=all_types_and_complex_and(
+        dtypesIfGPU=all_types_and_complex_and(
             torch.bool,
             *(() if (not SM53OrLater) else (torch.half, torch.complex32)),
         ),
@@ -409,7 +409,7 @@ op_db: List[OpInfo] = [
         check_batched_forward_grad=False,
         dtypes=all_types_and_complex_and(torch.bool),
         # CUDA supports Half/ComplexHalf Precision FFT only on SM53 or later archs
-        dtypesIfCUDA=all_types_and_complex_and(
+        dtypesIfGPU=all_types_and_complex_and(
             torch.bool,
             *(() if (not SM53OrLater) else (torch.half, torch.complex32)),
         ),
@@ -437,7 +437,7 @@ op_db: List[OpInfo] = [
         check_batched_forward_grad=False,
         dtypes=all_types_and_complex_and(torch.bool),
         # CUDA supports Half/ComplexHalf Precision FFT only on SM53 or later archs
-        dtypesIfCUDA=all_types_and_complex_and(
+        dtypesIfGPU=all_types_and_complex_and(
             torch.bool,
             *(() if (not SM53OrLater) else (torch.half, torch.complex32)),
         ),
@@ -463,7 +463,7 @@ op_db: List[OpInfo] = [
         check_batched_forward_grad=False,
         dtypes=all_types_and(torch.bool),
         # CUDA supports Half/ComplexHalf Precision FFT only on SM53 or later archs
-        dtypesIfCUDA=all_types_and(
+        dtypesIfGPU=all_types_and(
             torch.bool, *(() if (not SM53OrLater) else (torch.half,))
         ),
         skips=(),
@@ -485,7 +485,7 @@ op_db: List[OpInfo] = [
         check_batched_forward_grad=False,
         dtypes=all_types_and(torch.bool),
         # CUDA supports Half/ComplexHalf Precision FFT only on SM53 or later archs
-        dtypesIfCUDA=all_types_and(
+        dtypesIfGPU=all_types_and(
             torch.bool, *(() if (not SM53OrLater) else (torch.half,))
         ),
         check_batched_grad=False,
@@ -517,7 +517,7 @@ op_db: List[OpInfo] = [
         check_batched_forward_grad=False,
         dtypes=all_types_and(torch.bool),
         # CUDA supports Half/ComplexHalf Precision FFT only on SM53 or later archss
-        dtypesIfCUDA=all_types_and(
+        dtypesIfGPU=all_types_and(
             torch.bool, *(() if (not SM53OrLater) else (torch.half,))
         ),
         check_batched_grad=False,
@@ -548,7 +548,7 @@ op_db: List[OpInfo] = [
         check_batched_forward_grad=False,
         dtypes=all_types_and_complex_and(torch.bool),
         # CUDA supports Half/ComplexHalf Precision FFT only on SM53 or later archs
-        dtypesIfCUDA=all_types_and_complex_and(
+        dtypesIfGPU=all_types_and_complex_and(
             torch.bool,
             *(() if (not SM53OrLater) else (torch.half, torch.complex32)),
         ),
@@ -570,7 +570,7 @@ op_db: List[OpInfo] = [
         check_batched_forward_grad=False,
         dtypes=all_types_and_complex_and(torch.bool),
         # CUDA supports Half/ComplexHalf Precision FFT only on SM53 or later archs
-        dtypesIfCUDA=all_types_and_complex_and(
+        dtypesIfGPU=all_types_and_complex_and(
             torch.bool,
             *(() if (not SM53OrLater) else (torch.half, torch.complex32)),
         ),
@@ -599,7 +599,7 @@ op_db: List[OpInfo] = [
         check_batched_forward_grad=False,
         dtypes=all_types_and_complex_and(torch.bool),
         # CUDA supports Half/ComplexHalf Precision FFT only on SM53 or later archs
-        dtypesIfCUDA=all_types_and_complex_and(
+        dtypesIfGPU=all_types_and_complex_and(
             torch.bool,
             *(() if (not SM53OrLater) else (torch.half, torch.complex32)),
         ),
