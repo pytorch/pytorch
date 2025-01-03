@@ -11,6 +11,7 @@
 #include <ATen/ops/aminmax.h>
 #include <ATen/ops/sum.h>
 #endif
+#include <c10/util/irange.h>
 
 namespace at::native {
 namespace mps {

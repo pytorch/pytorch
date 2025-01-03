@@ -152,7 +152,7 @@ class TestBasics(TestCase):
         mask = _create_random_mask((3, 4), device=device)
         msg = "It is not recommended to create a MaskedTensor with a tensor that requires_grad."
         with self.assertWarnsRegex(UserWarning, msg):
-            mt = masked_tensor(data, mask)
+            masked_tensor(data, mask)
 
     def test_add(self, device):
         data = torch.arange(5.0, device=device)

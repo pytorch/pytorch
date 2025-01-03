@@ -1,5 +1,4 @@
 # Owner(s): ["module: inductor"]
-
 from typing import List
 
 import torch
@@ -198,7 +197,7 @@ class TestReinplacingPassCorrectness(InductorTestCase):
 
     def test_view_inplaced_functionalize_v2(self):
         def f(arg0_1):
-            select = torch.ops.aten.select.int(arg0_1, 0, 0)
+            torch.ops.aten.select.int(arg0_1, 0, 0)
             auto_functionalized = auto_functionalized_v2(
                 torch.ops.test_view.boo.default,
                 _x_base_index=0,
@@ -208,7 +207,7 @@ class TestReinplacingPassCorrectness(InductorTestCase):
                 _all_bases=[arg0_1],
             )
             getitem_1 = auto_functionalized[1]
-            copy_ = torch.ops.aten.copy_.default(arg0_1, getitem_1)
+            torch.ops.aten.copy_.default(arg0_1, getitem_1)
             return ()
 
         x1 = torch.randn(3, device=device)
@@ -220,7 +219,7 @@ class TestReinplacingPassCorrectness(InductorTestCase):
     # introduce a view another_view that is used `after` the copy
     def test_view_inplaced2_functionalize_v2(self):
         def f(arg0_1):
-            select = torch.ops.aten.select.int(arg0_1, 0, 0)
+            _select = torch.ops.aten.select.int(arg0_1, 0, 0)
             another_view = arg0_1[2]
             auto_functionalized = auto_functionalized_v2(
                 torch.ops.test_view.boo.default,
@@ -231,7 +230,7 @@ class TestReinplacingPassCorrectness(InductorTestCase):
                 _all_bases=[arg0_1],
             )
             getitem_1 = auto_functionalized[1]
-            copy_ = torch.ops.aten.copy_.default(arg0_1, getitem_1)
+            _copy = torch.ops.aten.copy_.default(arg0_1, getitem_1)
             return another_view
 
         x1 = torch.randn(3, device=device)
@@ -243,7 +242,7 @@ class TestReinplacingPassCorrectness(InductorTestCase):
     # introduce a view another_view that is used `before` the copy
     def test_views_not_inplaced_functionalize_v2(self):
         def f(arg0_1):
-            select = torch.ops.aten.select.int(arg0_1, 0, 0)
+            _select = torch.ops.aten.select.int(arg0_1, 0, 0)
             another_view = arg0_1[2]
             auto_functionalized = auto_functionalized_v2(
                 torch.ops.test_view.boo.default,
@@ -255,7 +254,7 @@ class TestReinplacingPassCorrectness(InductorTestCase):
             )
             getitem_1 = auto_functionalized[1]
             use_another_view = another_view * 10
-            copy_ = torch.ops.aten.copy_.default(arg0_1, getitem_1)
+            _copy = torch.ops.aten.copy_.default(arg0_1, getitem_1)
             return use_another_view
 
         x1 = torch.randn(3, device=device)
@@ -267,8 +266,8 @@ class TestReinplacingPassCorrectness(InductorTestCase):
     # a view over input without copy node, inplace not allowed
     def test_views_not_inplaced2_functionalize_v2(self):
         def f(arg0_1):
-            select = torch.ops.aten.select.int(arg0_1, 0, 0)
-            another_view = arg0_1[2]
+            _select = torch.ops.aten.select.int(arg0_1, 0, 0)
+            _another_view = arg0_1[2]
             auto_functionalized = auto_functionalized_v2(
                 torch.ops.test_view.boo.default,
                 _x_base_index=0,
@@ -277,7 +276,7 @@ class TestReinplacingPassCorrectness(InductorTestCase):
                 _x_storage_offset=0,
                 _all_bases=[arg0_1],
             )
-            getitem_1 = auto_functionalized[1]
+            _getitem_1 = auto_functionalized[1]
             return
 
         x1 = torch.randn(3, device=device)
@@ -299,7 +298,7 @@ class TestReinplacingPassCorrectness(InductorTestCase):
                 _x_storage_offset=0,
                 _all_bases=[a],
             )
-            getitem_1 = auto_functionalized[1]
+            _getitem_1 = auto_functionalized[1]
             return another_view
 
         x1 = torch.randn(3, device=device)
@@ -450,7 +449,7 @@ class TestReinplacingPassCorrectness(InductorTestCase):
             return MySin.apply(x)
 
         x = torch.randn(3, requires_grad=True, device=device)
-        y = f(x)
+        f(x)
         self.assertEqual(num_reinplacing_failures(), 0)
 
 
