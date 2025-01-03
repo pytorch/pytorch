@@ -276,7 +276,8 @@ public:
     // 32-bit shuffle
     v1 = _mm256_shuffle_epi32(v, 0xB1);
     v = _mm256_max_epi32(v, v1);
-    return _mm256_cvtsi256_si32(v);
+    __m128i lo = _mm256_castsi256_si128(v);
+    return _mm_cvtsi128_si32(lo);
   }
   Vectorized<int32_t> operator==(const Vectorized<int32_t>& other) const {
     return _mm256_cmpeq_epi32(values, other.values);
