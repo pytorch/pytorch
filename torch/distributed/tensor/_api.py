@@ -96,14 +96,21 @@ class _ToTorchTensor(torch.autograd.Function):
         )
         tensor_stride = tuple(tensor_stride)
         grad_placements = grad_placements or dtensor_spec.placements
-        return (
-            DTensor.from_local(
-                grad_output,
-                mesh,
-                grad_placements,
-                run_check=False,
+        grad_spec = DTensorSpec(
+            mesh,
+            grad_placements,
+            tensor_meta=TensorMeta(
                 shape=dtensor_meta.shape,
-                stride=dtensor_meta.stride,
+                stride=tensor_stride,
+                dtype=dtensor_meta.dtype,
+            ),
+        )
+
+        return (
+            DTensor(
+                grad_output,
+                grad_spec,
+                requires_grad=grad_output.requires_grad,
             ),
             None,
         )
