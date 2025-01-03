@@ -94,6 +94,7 @@ static PyObject* THPStream_pynew(
   // NOLINTNEXTLINE(bugprone-signed-char-misuse)
   self->device_index = static_cast<int64_t>(stream_opt->device_index());
   self->device_type = static_cast<int64_t>(stream_opt->device_type());
+  self->context = nullptr;
 
   return (PyObject*)ptr.release();
   END_HANDLE_TH_ERRORS
@@ -112,6 +113,7 @@ PyObject* THPStream_Wrap(const c10::Stream& stream) {
   // NOLINTNEXTLINE(bugprone-signed-char-misuse)
   self->device_index = static_cast<int64_t>(stream.device_index());
   self->device_type = static_cast<int64_t>(stream.device_type());
+  self->context = nullptr;
   return ptr.release();
   END_HANDLE_TH_ERRORS
 }
@@ -256,6 +258,79 @@ static PyObject* THPStream_eq(THPStream* self, THPStream* other) {
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject* THPStream_enter(PyObject* _self, PyObject* unused) {
+  HANDLE_TH_ERRORS
+  auto self = (THPStream*)_self;
+  c10::DeviceType stream_device_type =
+      static_cast<c10::DeviceType>(self->device_type);
+  // No operation is performed if the stream does not belong to an accelerator.
+  if (C10_UNLIKELY(!at::accelerator::isAccelerator(stream_device_type))) {
+    Py_INCREF(_self);
+    return _self;
+  }
+  c10::DeviceIndex cur_device_idx = at::accelerator::getDeviceIndex();
+  c10::DeviceIndex stream_device_idx =
+      static_cast<c10::DeviceIndex>(self->device_index);
+  // If the stream is not on the current device, switch the current device to
+  // the device of the stream.
+  if (stream_device_idx != cur_device_idx) {
+    at::accelerator::setDeviceIndex(stream_device_idx);
+  }
+  c10::Stream cur_stream = at::accelerator::getCurrentStream(stream_device_idx);
+  at::accelerator::setCurrentStream(c10::Stream::unpack3(
+      self->stream_id, stream_device_idx, stream_device_type));
+  // Save the current device index and previous stream to the context.
+  auto ctx_device_index = THPUtils_packDeviceIndex(cur_device_idx);
+  auto ctx_stream = THPStream_Wrap(cur_stream);
+  TORCH_CHECK(!(self->context), "Stream's context should not be initialized.");
+  auto dict = THPObjectPtr(PyDict_New());
+  if (!dict) {
+    throw python_error();
+  }
+  self->context = dict.release();
+  if (PyDict_SetItemString(
+          self->context, "_ctx_device_index", ctx_device_index) < 0) {
+    throw python_error();
+  }
+  if (PyDict_SetItemString(self->context, "_ctx_stream", ctx_stream) < 0) {
+    throw python_error();
+  }
+  Py_INCREF(_self);
+  return _self;
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* THPStream_exit(PyObject* _self, PyObject* unused) {
+  HANDLE_TH_ERRORS
+  auto self = (THPStream*)_self;
+  // No operation is performed if the stream does not belong to an accelerator.
+  if (C10_UNLIKELY(!at::accelerator::isAccelerator(
+          static_cast<c10::DeviceType>(self->device_type)))) {
+    Py_RETURN_NONE;
+  }
+  auto ctx_stream =
+      THPObjectPtr(PyDict_GetItemString(self->context, "_ctx_stream"));
+  auto ctx_device_index =
+      THPObjectPtr(PyDict_GetItemString(self->context, "_ctx_device_index"));
+  if ((!ctx_stream) || (!ctx_device_index)) {
+    throw python_error();
+  }
+  auto prev_stream = (THPStream*)ctx_stream.get();
+  auto prev_device_index = THPUtils_unpackDeviceIndex(ctx_device_index.get());
+  at::accelerator::setCurrentStream(c10::Stream::unpack3(
+      prev_stream->stream_id,
+      static_cast<c10::DeviceIndex>(prev_stream->device_index),
+      static_cast<c10::DeviceType>(prev_stream->device_type)));
+  // Reset the current device to the previous device if they differ.
+  if (static_cast<c10::DeviceIndex>(self->device_index) != prev_device_index) {
+    at::accelerator::setDeviceIndex(prev_device_index);
+  }
+  Py_DECREF(self->context);
+  self->context = nullptr;
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
 static PyObject* THPStream_ne(THPStream* self, THPStream* other) {
   HANDLE_TH_ERRORS
   return PyBool_FromLong(
@@ -321,6 +396,8 @@ static const std::initializer_list<PyMethodDef> THPStream_methods = {
      METH_VARARGS | METH_KEYWORDS,
      nullptr},
     {"__eq__", (PyCFunction)THPStream_eq, METH_O, nullptr},
+    {"__enter__", THPStream_enter, METH_NOARGS, nullptr},
+    {"__exit__", THPStream_exit, METH_VARARGS, nullptr},
     {nullptr}};
 
 static PyTypeObject THPStreamType = {
