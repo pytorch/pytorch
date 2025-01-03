@@ -246,10 +246,7 @@ class CppTemplateKernel(CppKernel):
         cpp_kernel_proxy = CppKernelProxy(kernel_group)
         bodies = []
         var_sizes_list = []
-
         for i, node in enumerate(nodes):
-            assert isinstance(node, ir.IRNode)
-            assert isinstance(dst, ir.IRNode)
             output_name = node.get_name() if i < len(nodes) - 1 else dst.get_name()
             node = node.data if isinstance(node, ir.ComputedBuffer) else node
             assert isinstance(node, ir.Pointwise), node
@@ -360,8 +357,8 @@ class CppTemplateKernel(CppKernel):
     def store_output(
         self,
         dst: ir.Buffer,
-        src: ir.IRNode,
-        orig_src: Optional[ir.IRNode] = None,
+        src: ir.Buffer,
+        orig_src: Optional[ir.Buffer] = None,
         epilogue_nodes: Optional[List[ir.IRNode]] = None,
         offsets: Optional[List[Any]] = None,
         reindexers: Optional[List[Optional[Callable[[List[Any]], List[Any]]]]] = None,
@@ -411,7 +408,7 @@ class CppTemplateKernel(CppKernel):
                     scope.add_local_buffer(src)
                     return self.store_pointwise_nodes(dst, [copy])
             else:
-                assert dst.get_layout() == src.get_layout(), f"{dst=}, {src=}"
+                assert dst.layout == src.layout, f"{dst=}, {src=}"
                 return ""
 
     def store_outputs(
