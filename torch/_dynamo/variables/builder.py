@@ -38,8 +38,8 @@ import torch
 from torch import SymInt
 from torch._dynamo.utils import (
     get_metrics_context,
+    is_int_specialization_case,
     is_torch_sym,
-    is_wrap_int_into_constant_vt,
 )
 from torch._guards import TracingContext
 from torch._higher_order_ops.torchbind import call_torchbind
@@ -1535,7 +1535,7 @@ class VariableBuilder:
         if not config.specialize_int and type(value) is int:
             # unspecializing int by default, but still
             # specialize for the following conditions
-            if is_wrap_int_into_constant_vt(value, self.source):
+            if is_int_specialization_case(value, self.source):
                 self.install_guards(GuardBuilder.CONSTANT_MATCH)
                 return ConstantVariable.create(value=value, source=self.source)
             else:
