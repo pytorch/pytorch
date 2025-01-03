@@ -384,13 +384,13 @@ public:
     auto v = values;
     // 128-bit shuffle
     auto v1 = _mm256_permute2f128_ps(v, v, 0x1);
-    v = v + v1;
+    v = _mm256_add_ps(v, v1);
     // 64-bit shuffle
     v1 = _mm256_shuffle_ps(v, v, 0x4E);
-    v = v + v1;
+    v = _mm256_add_ps(v, v1);
     // 32-bit shuffle
     v1 = _mm256_shuffle_ps(v, v, 0xB1);
-    v = v + v1;
+    v = _mm256_add_ps(v, v1);
     return _mm256_cvtss_f32(v);
   }
   float reduce_max() const {
