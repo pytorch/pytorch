@@ -42,7 +42,7 @@ class MPSBasicTests(TestCase):
     test_add_inplace_permuted_mps = CommonTemplate.test_add_inplace_permuted
     test_max_min = CommonTemplate.test_max_min
     test_inf = CommonTemplate.test_inf
-    test_nan_to_num_ = CommonTemplate.test_nan_to_num_
+    test_nan_to_num = CommonTemplate.test_nan_to_num
     test_views6 = CommonTemplate.test_views6
     test_addmm = CommonTemplate.test_addmm
     test_signbit = CommonTemplate.test_signbit
