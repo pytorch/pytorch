@@ -82,7 +82,7 @@ def skipOps(test_case_name, base_test_name, to_skip):
 
 # Re-generate this failed list, turn on dry_run of the below func
 # check_dtensor_func(self, test, op, dry_run=True), then run sth
-# like python test/distributed/_tensor/test_dtensor_ops.py > failed.expect
+# like python test/distributed/tensor/test_dtensor_ops.py > failed.expect
 dtensor_fails = {
     # these sometimes pass and sometimes fail
     # we need to remove many of them from list once op
