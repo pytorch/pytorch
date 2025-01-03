@@ -296,7 +296,7 @@ class AutogradCompilerInstance:
 
     def bind_function(self, fn_name, fn):
         """Binds ops.fn_name = fn"""
-        op = ops.add(fn_name, fn)
+        ops.add(fn_name, fn)
 
     def apply_functional(self, fn_name, grads, args, output_metadata):
         """Proxies a call to ops.fn_name(grads, *args) into the graph"""
