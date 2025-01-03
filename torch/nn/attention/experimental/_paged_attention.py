@@ -212,7 +212,7 @@ class PagedAttention:
             batch_idx (Tensor): batch index corresponding to the block_mask
                 batch dimension. This provides flexibility to convert a
                 block mask with smaller batch size than the page table;
-                shape :math:`(1)`.
+                shape :math:`(B)`.
         """
         B, H, ROWS, MAX_BLOCKS_IN_COL = block_mask.kv_indices.shape
 
