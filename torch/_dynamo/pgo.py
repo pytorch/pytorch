@@ -364,7 +364,6 @@ def update_automatic_dynamic(
             entry_tup,
             old_entry_tup,
         )
-        # Logs an
         CompileEventLogger.instant(
             "automatic_dynamic",
             {
