@@ -72,6 +72,15 @@ fusion_log = torch._logging.getArtifactLogger(__name__, "fusion")
 loop_ordering_log = torch._logging.getArtifactLogger(__name__, "loop_ordering")
 
 
+def is_grouped_gemm_fusion(node1: BaseSchedulerNode, node2: BaseSchedulerNode) -> bool:
+    return (
+        node1.is_template()
+        and isinstance(node2.node, MultiOutput)
+        and len(node2.node.inputs) == 1
+        and next(iter(node2.node.inputs)).get_name() in node1.get_buffer_names()
+    )
+
+
 @dataclasses.dataclass
 class SchedulerBuffer:
     scheduler: Scheduler
@@ -2821,12 +2830,7 @@ class Scheduler:
             if (
                 self.can_fuse(node1, node2)
                 and not self.will_fusion_create_cycle(node1, node2)
-            ) or (
-                node1.is_template()
-                and isinstance(node2.node, MultiOutput)
-                and node2.node.is_fusable
-                and node1.is_cpu()
-            ):
+            ) or is_grouped_gemm_fusion(node1, node2):
                 if not self.speedup_by_fusion(node1, node2):
                     continue
                 fusion_log.debug(
@@ -2923,11 +2927,7 @@ class Scheduler:
                     ):
                         # foreach fusions and epilogue fusions are order dependent
                         possible_fusions.append((node2, node1))
-                    elif (
-                        node1.is_template()
-                        and isinstance(node2.node, MultiOutput)
-                        and node2.node.is_fusable
-                    ):
+                    elif is_grouped_gemm_fusion(node1, node2):
                         possible_fusions.append((node1, node2))
 
         buffer_names_grouping = collections.defaultdict(list)
@@ -3223,7 +3223,11 @@ class Scheduler:
         return (
             isinstance(node, (ExternKernelSchedulerNode, NopKernelSchedulerNode))
             and not node.is_template()
-            and not (isinstance(node.node, MultiOutput) and node.node.is_fusable)
+            and not (
+                isinstance(node.node, MultiOutput)
+                and len(node.node.inputs) == 1
+                and isinstance(next(iter(node.node.inputs)), ir.CppTemplateBuffer)
+            )
         )
 
     def can_fuse(self, node1: BaseSchedulerNode, node2: BaseSchedulerNode) -> bool:

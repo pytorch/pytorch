@@ -83,8 +83,6 @@ def grouped_gemm_lowering(
     template_buf.layout = ir.MultiOutputLayout(
         device=next(iter(input_nodes)).get_device()
     )
-    for return_buf in return_bufs:
-        return_buf.is_fusable = True
     template_buf.outputs = return_bufs
     return_tensors = [
         ir.TensorBox.create(return_bufs[gemm_idx]) for gemm_idx in range(num_gemm)
