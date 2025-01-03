@@ -1250,6 +1250,7 @@ exclude_patterns = [
     'test/test_testing.py',
     'test/test_torch.py',
     'test/test_transformers.py',
+    'test/xpu/test_transformers.py',
     'test/test_type_promotion.py',
     'test/test_unary_ufuncs.py',
     'test/test_vulkan.py',
