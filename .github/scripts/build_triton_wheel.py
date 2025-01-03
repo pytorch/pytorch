@@ -9,7 +9,7 @@ from tempfile import TemporaryDirectory
 from typing import Optional
 
 
-SCRIPT_DIR = Path(__file__).absolute().parent
+SCRIPT_DIR = Path(__file__).parent
 REPO_DIR = SCRIPT_DIR.parent.parent
 
 

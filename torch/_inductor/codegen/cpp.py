@@ -848,8 +848,8 @@ class CppOverrides(OpOverrides):
             return tuple(V.kernel.cse.try_get(cache_key) for cache_key in cache_keys)
 
         code = BracesBuffer()
-        exponent = V.kernel.cse.newvar()
-        mantissa = V.kernel.cse.newvar()
+        exponent = V.kernel.cse.newvar(dtype=torch.int32)
+        mantissa = V.kernel.cse.newvar(dtype=x.dtype)
         code.writeline(f"int32_t {exponent};")
         code.writeline(f"auto {mantissa} = std::frexp({x}, &{exponent});")
         V.kernel.compute.splice(code)
@@ -1682,8 +1682,8 @@ class CppVecOverrides(CppOverrides):
         cdtype = DTYPE_TO_CPP[x.dtype]
         size = V.kernel.tail_size if V.kernel.tail_size else V.kernel.tiling_factor
         code = BracesBuffer()
-        exponent = V.kernel.cse.newvar()
-        mantissa = V.kernel.cse.newvar()
+        exponent = V.kernel.cse.newvar(dtype=torch.int32)
+        mantissa = V.kernel.cse.newvar(dtype=x.dtype)
         exponent.update_on_args("frexp", (x,), kwargs={})
         mantissa.update_on_args("frexp", (x,), kwargs={})
         n_vec = V.kernel._get_num_vectors(x.dtype)
@@ -2275,7 +2275,10 @@ class CppKernel(Kernel):
 
     @property
     def assert_function(self) -> str:
-        return "AOTI_TORCH_CHECK"
+        if V.graph.aot_mode:
+            return "AOTI_TORCH_CHECK"
+        else:
+            return "TORCH_CHECK"
 
     def decide_parallel_depth(self, max_parallel_depth, threads):
         assert self.call_ranges is not None
