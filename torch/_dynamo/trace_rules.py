@@ -2850,7 +2850,6 @@ torch_non_c_binding_in_graph_functions = dict.fromkeys(
         "torch.sym_min",
         "torch.sym_not",
         "torch.tensordot",
-        "torch.typename",
         "torch.unique_consecutive",
         "torch.use_deterministic_algorithms",
     ],
