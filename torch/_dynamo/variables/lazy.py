@@ -146,6 +146,8 @@ class LazyVariableTracker(VariableTracker):
 
     def is_hashable(self) -> bool:
         # Checks that the underlying value is hashable without realizing the VT.
+        # This is used by ConstDictVariable tracker to find if the key LazyVT
+        # can be hashed.
         def _helper(value: Any) -> bool:
             # TODO: Add support for more types
             return (
@@ -164,6 +166,11 @@ class LazyVariableTracker(VariableTracker):
         # Returns the value without realizing the VT.
         assert not self.is_realized()
         return self._cache.value
+
+    def original_source(self) -> Any:
+        # Returns the source without realizing the VT.
+        assert not self.is_realized()
+        return self._cache.source
 
 
 class LazySymNodeFormatString:
