@@ -607,9 +607,9 @@ class DTensor(torch.Tensor):
 
     def __create_chunk_list__(self):
         """
-        Return a list of ChunkStorageMetadata, which is a data class describes the size/offset of the local shard/replica
-        on the current rank. For DTensor, each rank will have a single local shard/replica, so the returned list usually
-        only have one element.
+        Return a list of ChunkStorageMetadata, which is a dataclass that describes the size/offset of the local shard/replica
+        on current rank. For DTensor, each rank will have a single local shard/replica, so the returned list usually only
+        has one element.
 
         This dunder method is primariy used for distributed checkpoint purpose.
 
