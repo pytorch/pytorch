@@ -2391,7 +2391,8 @@
     "Set",
     "Tuple",
     "Union",
-    "defaultdict"
+    "defaultdict",
+    "Path"
   ],
   "torch.utils.data.datapipes.utils.snapshot": [
     "IterDataPipe",
