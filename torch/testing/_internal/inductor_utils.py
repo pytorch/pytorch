@@ -156,27 +156,35 @@ def skip_windows_ci(name: str, file: str) -> None:
         raise unittest.SkipTest("requires sympy/functorch/filelock")
 
 def _skip_lazily_if_decorator(cb: Callable[[], bool], msg: str):
-    def decorator(fn):
-        @functools.wraps(fn)
+    def decorator(fn_or_cls):
+        if isinstance(fn_or_cls, type):
+            if cb():
+                fn_or_cls.__unittest_skip__ = True
+                fn_or_cls.__unittest_skip_why__ = msg
+
+            return fn_or_cls
+
+        @functools.wraps(fn_or_cls)
         def wrapper(*args, **kwargs):
             if cb():
                 raise unittest.SkipTest(msg)
 
-            return fn(*args, **kwargs)
+            return fn_or_cls(*args, **kwargs)
 
         return wrapper
 
-    def decorator_wrapper(fn=None):
-        if callable(fn):
-            return decorator(fn)
+    def decorator_wrapper(fn_or_cls=None):
+        if callable(fn_or_cls):
+            return decorator(fn_or_cls)
 
         return decorator
 
     return decorator_wrapper
 
 
-requires_gpu = _skip_lazily_if_decorator(lambda: not HAS_GPU, "requires gpu")
-requires_triton = _skip_lazily_if_decorator(lambda: not HAS_TRITON, "requires triton")
+requires_gpu = _skip_lazily_if_decorator(lambda: not HAS_GPU, "requires GPU with Inductor support")
+requires_triton = _skip_lazily_if_decorator(lambda: not HAS_TRITON, "requires Triton")
+requires_gpu_and_triton = _skip_lazily_if_decorator(lambda: not HAS_GPU_TRITON, "requires GPU and Triton")
 
 skipCUDAIf = functools.partial(skipDeviceIf, device="cuda")
 skipXPUIf = functools.partial(skipDeviceIf, device="xpu")
