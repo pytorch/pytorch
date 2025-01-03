@@ -322,6 +322,87 @@ void mkldnn_matmul(
 
 }
 
+// Call ideep::matmul_forward with prepacked weights,
+// avoiding any unecessary reorders before calling
+// ideep::matmul_forward::compute().
+void mkldnn_matmul_prepacked(
+    const Tensor &mat1,
+    const Tensor &mat2,
+    const Tensor &result,
+    float beta,
+    float alpha) {
+#if !defined(__aarch64__)  || !AT_MKLDNN_ACL_ENABLED()
+  throw std::runtime_error("MKLDNN backend weight matmuls are only supported for aarch64\n");
+#endif
+  TORCH_CHECK((mat1.dim() == 2 && mat2.dim() == 2) || // aten::addmm
+              (mat1.dim() == 3 && mat2.dim() == 3) || // aten::bmm, aten::baddbmm
+              (mat1.dim() == 2 && mat2.dim() == 1) || // aten::mv
+              (mat1.dim() == 1 && mat2.dim() == 1),  // aten::dot
+              "mkldnn_matmul:  unsupported dims for mat and mat2");
+
+  // oneDNN fast-maths mode (enabled by setting the environment variable ONEDNN_DEFAULT_FPMATH_MODE=BF16) will dispatch
+  // fp32 inputs to bf16 kernels where HW permits. So, both fp32 and bf16 inputs are permitted.
+  TORCH_CHECK((mat1.scalar_type() == mat2.scalar_type()) && (mat1.scalar_type() == result.scalar_type()) &&
+              ((mat1.scalar_type() == at::kFloat) || (mat1.scalar_type() == at::kBFloat16)),
+              "mkldnn_matmul:  only enabled for fp32 and bf16 path");
+  // device needs to support bf16 if the inputs are of bf16 type
+  if (mat1.scalar_type() == at::kBFloat16) {
+    TORCH_CHECK(mkldnn_bf16_device_check_arm(),
+                "mkldnn_matmul: mkldnn_matmul bf16 path needs a cpu with bf16 support");
+  }
+
+  auto mat1_unsqueezed = mat1.dim() == 1 ? mat1.unsqueeze(0) : mat1;
+  auto result_unsqueezed = result.dim() == 1 ? result.unsqueeze(1) : result;
+  bool bf32_usable = mat1.scalar_type() == at::kFloat && use_mkldnn_bf32_matmul();
+
+  ideep::attr_t op_attr;
+  // "addmm", "addbmm" "baddbmm" in pytorch allow bias to be 2-D or 3-D tensor
+  // but mkldnn matmul primitive only support bias be 1-D tensors
+  // to address their differences, we use mkldnn post ops to perform a fused "add" after matrix multiplication is over
+  if (beta != 0.0f) op_attr = ideep::attr_t::fuse_sum();
+  if (bf32_usable) op_attr.set_fpmath_mode(dnnl_fpmath_mode_bf16); // bf32 path
+  // If alpha = 0, dose not need actually do gemm computation
+  if (alpha == 0)
+    return;
+
+  auto is_mkldnn_optimized_format = [&](const Tensor& t) {
+    if (t.is_contiguous()) return true;
+    const auto sizes = t.sizes();
+    const auto strides = t.strides();
+    if (t.dim() == 2){
+      return strides[0] == 1 && strides[1] == sizes[0];
+    } else {
+      // dim = 3
+      return strides[0] == sizes[1] * sizes[2] && strides[1] == 1 && strides[2] == sizes[1];
+    }
+  };
+
+  // Mkldnn only optimized for contiguous or transposed (transpose last 2 dim if 3-D tensor) format now
+  // Will remove this "contiguous" after mkldnn have fully supported
+  Tensor mat1_ = is_mkldnn_optimized_format(mat1_unsqueezed) ? mat1_unsqueezed : mat1_unsqueezed.contiguous();
+  // Make sure mat1 and mat2 have default contiguous strides if they are contiguous tensors for better performance.
+  mat1_ = may_convert_to_default_contiguous_strides(mat1_);
+
+  // mkldnn_matmul only proceed CPU tensor
+  const ideep::tensor x = itensor_view_from_dense(mat1_);
+  const ideep::tensor w = itensor_from_mkldnn(mat2);
+  ideep::tensor y = itensor_view_from_dense(result_unsqueezed);
+  ideep::matmul_forward::compute(x, w, y, alpha, beta,
+      ideep::scale_t(), ideep::scale_t(), ideep::scale_t(), op_attr);
+  if (y.get_data_handle() != result.data_ptr()){
+    // ideep will query onednn expect format of output
+    // if given output format is not expected, ideep will re-init an output buffer
+    // under this case, we need copy the re-inited buffer back to given buffer
+    ideep::tensor public_y = itensor_view_from_dense(result);
+    y.reorder_to(public_y);
+  }
+
+  if (mat1.dim() == 1 && mat2.dim() == 1){
+    // aten::dot
+    result.squeeze_();
+  }
+}
+
 inline bool checksize(const Tensor& mat1, const Tensor& mat2){
   // if dim = 2, mat1's size = (m * n), mat2's size = (n * k)
   // else if dim = 3, mat1's size = (b * m * n), mat2's size = (b * n * k)
