@@ -22,6 +22,7 @@
 #include <cutlass/numeric_types.h>
 #include <cutlass/trace.h>
 #include <cutlass/util/host_tensor.h>
+#include <cutlass/version.h>
 
 // Rename the global function symbol
 #if CUTLASS_VERSION == 351
