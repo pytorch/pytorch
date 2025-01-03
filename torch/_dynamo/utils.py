@@ -1734,6 +1734,7 @@ common_constant_types: Set[type] = {
     type(None),
     Ellipsis.__class__,
     NotImplemented.__class__,
+    types.BuiltinFunctionType,
     types.CodeType,
     # Commonly used immutable types from torch.
     torch.device,
