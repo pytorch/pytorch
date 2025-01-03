@@ -153,7 +153,10 @@ class SchedulerBuffer:
     def can_free(self) -> bool:
         # There's no real allocated buffer, no need to free it
         assert self.node is not None
-        if isinstance(self.node.layout, ir.NoneLayout):
+        if isinstance(self.node.layout, ir.NoneLayout) or (
+            isinstance(self.node, ir.CppTemplateBuffer)
+            and isinstance(self.node.layout, ir.MultiOutputLayout)
+        ):
             return False
         for use in self.users:
             if isinstance(use.node, OutputNode):
