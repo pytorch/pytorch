@@ -29,6 +29,8 @@ For more information on CUDA runtime environment variables, see `CUDA Environmen
     - If set to ``0``, enables fallback to record streams-based synchronization behavior in NCCL.
   * - ``TORCH_CUDNN_V8_API_DEBUG``
     - If set to ``1``, sanity check whether cuDNN V8 is being used.
+  * - ``TORCH_TRITON_SKIP_CC_CHECKS``
+    - If set to ``1``, PyTorch will skip CUDA compute capability checks, allowing custom Triton builds for older hardware to be used.
 
 **CUDA Runtime and Libraries Environment Variables**
 

@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 import functools
 import hashlib
+import os
 
 
 @functools.lru_cache(None)
@@ -69,7 +70,10 @@ def has_triton() -> bool:
     from torch._dynamo.device_interface import get_interface_for_device
 
     def cuda_extra_check(device_interface):
-        return device_interface.Worker.get_device_properties().major >= 7
+        return (
+            device_interface.Worker.get_device_properties().major >= 7
+            or os.getenv("TORCH_TRITON_SKIP_CC_CHECKS") == "1"
+        )
 
     def cpu_extra_check(device_interface):
         import triton.backends
