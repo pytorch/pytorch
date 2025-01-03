@@ -2,12 +2,11 @@
 import math
 
 import torch
-from torch import inf, nan
+from torch import inf, nan, Tensor
 from torch.distributions import Chi2, constraints
 from torch.distributions.distribution import Distribution
 from torch.distributions.utils import _standard_normal, broadcast_all
 from torch.types import _size
-from torch import Tensor
 
 
 __all__ = ["StudentT"]

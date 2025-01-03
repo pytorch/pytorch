@@ -1,11 +1,11 @@
 # mypy: allow-untyped-defs
 import torch
+from torch import Tensor
 from torch.autograd import Function
 from torch.autograd.function import once_differentiable
 from torch.distributions import constraints
 from torch.distributions.exp_family import ExponentialFamily
 from torch.types import _size
-from torch import Tensor
 
 
 __all__ = ["Dirichlet"]

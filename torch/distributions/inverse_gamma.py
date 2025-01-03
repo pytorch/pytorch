@@ -1,10 +1,10 @@
 # mypy: allow-untyped-defs
 import torch
+from torch import Tensor
 from torch.distributions import constraints
 from torch.distributions.gamma import Gamma
 from torch.distributions.transformed_distribution import TransformedDistribution
 from torch.distributions.transforms import PowerTransform
-from torch import Tensor
 
 
 __all__ = ["InverseGamma"]

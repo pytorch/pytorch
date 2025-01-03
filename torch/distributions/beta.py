@@ -1,8 +1,8 @@
 # mypy: allow-untyped-defs
 from numbers import Number, Real
-from torch import Tensor
 
 import torch
+from torch import Tensor
 from torch.distributions import constraints
 from torch.distributions.dirichlet import Dirichlet
 from torch.distributions.exp_family import ExponentialFamily

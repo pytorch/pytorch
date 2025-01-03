@@ -2,6 +2,7 @@
 from numbers import Number
 
 import torch
+from torch import Tensor
 from torch.distributions import constraints
 from torch.distributions.distribution import Distribution
 from torch.distributions.transformed_distribution import TransformedDistribution
@@ -14,7 +15,6 @@ from torch.distributions.utils import (
     probs_to_logits,
 )
 from torch.types import _size
-from torch import Tensor
 
 
 __all__ = ["LogitRelaxedBernoulli", "RelaxedBernoulli"]

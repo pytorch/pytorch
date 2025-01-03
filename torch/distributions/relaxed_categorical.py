@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 import torch
+from torch import Tensor
 from torch.distributions import constraints
 from torch.distributions.categorical import Categorical
 from torch.distributions.distribution import Distribution
@@ -7,7 +8,6 @@ from torch.distributions.transformed_distribution import TransformedDistribution
 from torch.distributions.transforms import ExpTransform
 from torch.distributions.utils import broadcast_all, clamp_probs
 from torch.types import _size
-from torch import Tensor
 
 
 __all__ = ["ExpRelaxedCategorical", "RelaxedOneHotCategorical"]

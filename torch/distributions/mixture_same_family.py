@@ -1,9 +1,9 @@
 # mypy: allow-untyped-defs
 
 import torch
+from torch import Tensor
 from torch.distributions import Categorical, constraints
 from torch.distributions.distribution import Distribution
-from torch import Tensor
 
 
 __all__ = ["MixtureSameFamily"]
@@ -55,7 +55,10 @@ class MixtureSameFamily(Distribution):
     has_rsample = False
 
     def __init__(
-        self, mixture_distribution: Categorical, component_distribution: Distribution, validate_args=None
+        self,
+        mixture_distribution: Categorical,
+        component_distribution: Distribution,
+        validate_args=None,
     ) -> None:
         self._mixture_distribution = mixture_distribution
         self._component_distribution = component_distribution

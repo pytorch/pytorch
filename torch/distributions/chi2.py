@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
+from torch import Tensor
 from torch.distributions import constraints
 from torch.distributions.gamma import Gamma
-from torch import Tensor
 
 
 __all__ = ["Chi2"]

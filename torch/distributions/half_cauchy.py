@@ -2,12 +2,11 @@
 import math
 
 import torch
-from torch import inf
+from torch import inf, Tensor
 from torch.distributions import constraints
 from torch.distributions.cauchy import Cauchy
 from torch.distributions.transformed_distribution import TransformedDistribution
 from torch.distributions.transforms import AbsTransform
-from torch import Tensor
 
 
 __all__ = ["HalfCauchy"]

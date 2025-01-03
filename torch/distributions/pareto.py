@@ -1,10 +1,10 @@
 # mypy: allow-untyped-defs
+from torch import Tensor
 from torch.distributions import constraints
 from torch.distributions.exponential import Exponential
 from torch.distributions.transformed_distribution import TransformedDistribution
 from torch.distributions.transforms import AffineTransform, ExpTransform
 from torch.distributions.utils import broadcast_all
-from torch import Tensor
 
 
 __all__ = ["Pareto"]

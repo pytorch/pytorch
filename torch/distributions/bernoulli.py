@@ -2,7 +2,7 @@
 from numbers import Number
 
 import torch
-from torch import nan
+from torch import nan, Tensor
 from torch.distributions import constraints
 from torch.distributions.exp_family import ExponentialFamily
 from torch.distributions.utils import (
@@ -12,7 +12,7 @@ from torch.distributions.utils import (
     probs_to_logits,
 )
 from torch.nn.functional import binary_cross_entropy_with_logits
-from torch import Tensor
+
 
 __all__ = ["Bernoulli"]
 

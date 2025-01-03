@@ -5,13 +5,12 @@ from numbers import Number
 from typing import Optional, Union
 
 import torch
-from torch import nan
+from torch import nan, Tensor
 from torch.distributions import constraints
 from torch.distributions.exp_family import ExponentialFamily
 from torch.distributions.multivariate_normal import _precision_to_scale_tril
 from torch.distributions.utils import lazy_property
 from torch.types import _size
-from torch import Tensor
 
 
 __all__ = ["Wishart"]

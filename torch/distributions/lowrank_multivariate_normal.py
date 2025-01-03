@@ -2,12 +2,12 @@
 import math
 
 import torch
+from torch import Tensor
 from torch.distributions import constraints
 from torch.distributions.distribution import Distribution
 from torch.distributions.multivariate_normal import _batch_mahalanobis, _batch_mv
 from torch.distributions.utils import _standard_normal, lazy_property
 from torch.types import _size
-from torch import Tensor
 
 
 __all__ = ["LowRankMultivariateNormal"]

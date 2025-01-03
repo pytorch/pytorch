@@ -1,11 +1,11 @@
 # mypy: allow-untyped-defs
 
 import torch
+from torch import Tensor
 from torch.distributions import constraints
 from torch.distributions.distribution import Distribution
 from torch.distributions.utils import _sum_rightmost
 from torch.types import _size
-from torch import Tensor
 
 
 __all__ = ["Independent"]

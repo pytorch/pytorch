@@ -3,10 +3,10 @@ import math
 
 import torch
 import torch.jit
+from torch import Tensor
 from torch.distributions import constraints
 from torch.distributions.distribution import Distribution
 from torch.distributions.utils import broadcast_all, lazy_property
-from torch import Tensor
 
 
 __all__ = ["VonMises"]

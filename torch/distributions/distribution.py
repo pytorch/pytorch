@@ -4,10 +4,10 @@ from typing import Any, Optional
 from typing_extensions import deprecated
 
 import torch
+from torch import Tensor
 from torch.distributions import constraints
 from torch.distributions.utils import lazy_property
 from torch.types import _size
-from torch import Tensor
 
 
 __all__ = ["Distribution"]

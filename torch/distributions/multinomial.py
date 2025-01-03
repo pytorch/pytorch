@@ -1,11 +1,10 @@
 # mypy: allow-untyped-defs
 import torch
-from torch import inf
+from torch import inf, Tensor
 from torch.distributions import Categorical, constraints
 from torch.distributions.binomial import Binomial
 from torch.distributions.distribution import Distribution
 from torch.distributions.utils import broadcast_all
-from torch import Tensor
 
 
 __all__ = ["Multinomial"]

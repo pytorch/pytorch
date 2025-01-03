@@ -2,11 +2,11 @@
 from numbers import Number
 
 import torch
+from torch import Tensor
 from torch.distributions import constraints
 from torch.distributions.exp_family import ExponentialFamily
 from torch.distributions.utils import broadcast_all
 from torch.types import _size
-from torch import Tensor
 
 
 __all__ = ["Exponential"]

@@ -3,6 +3,7 @@ import math
 from numbers import Number
 
 import torch
+from torch import Tensor
 from torch.distributions import constraints
 from torch.distributions.exp_family import ExponentialFamily
 from torch.distributions.utils import (
@@ -14,7 +15,6 @@ from torch.distributions.utils import (
 )
 from torch.nn.functional import binary_cross_entropy_with_logits
 from torch.types import _size
-from torch import Tensor
 
 
 __all__ = ["ContinuousBernoulli"]
