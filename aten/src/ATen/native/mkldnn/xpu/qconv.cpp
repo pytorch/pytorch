@@ -3,6 +3,7 @@
 #include <c10/core/MemoryFormat.h>
 #include <torch/library.h>
 
+#include <c10/core/ScalarType.h>
 #include <iostream>
 
 using namespace at::native::onednn;
@@ -124,8 +125,8 @@ class QConvoneDNNXPU final {
       double accum_scale,
       int64_t accum_zero_point,
       c10::string_view binary_attr,
-      std::optional<at::Scalar> alpha,
-      std::optional<c10::string_view> unary_attr,
+      c10::optional<at::Scalar> alpha,
+      c10::optional<c10::string_view> unary_attr,
       torch::List<c10::optional<at::Scalar>> unary_scalars,
       c10::optional<c10::string_view> unary_algorithm) {
     TORCH_CHECK(
@@ -155,8 +156,15 @@ class QConvoneDNNXPU final {
         stride.vec(),
         dilation.vec());
 
+    bool fp32_output =
+        output_dtype.has_value() && (output_dtype == c10::kFloat);
+    bool bfloat16_output =
+        output_dtype.has_value() && (output_dtype == c10::kBFloat16);
+    auto dst_dtype = fp32_output
+        ? c10::kFloat
+        : (bfloat16_output ? c10::kBFloat16 : act.scalar_type());
     Tensor output = at::empty(
-        dst_tz, device(c10::kXPU).dtype(output_dtype).memory_format(mfmt));
+        dst_tz, device(c10::kXPU).dtype(dst_dtype).memory_format(mfmt));
 
     return quantized_convolution(
         act,
@@ -186,6 +194,7 @@ class QConvoneDNNXPU final {
   }
 
 };
+
 
 TORCH_LIBRARY_IMPL(onednn, XPU, m) {
   m.impl(
