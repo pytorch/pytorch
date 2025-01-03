@@ -985,12 +985,22 @@ struct IValuePacker {
 };
 
 template <>
-struct IValuePacker<uint64_t> {
-  static at::IValue pack(const uint64_t& t) {
+struct IValuePacker<size_t> {
+  static at::IValue pack(const size_t& t) {
+    // We generally use size_t as the size of a list of Tensors or number of
+    // dimensions. The number of dimensions generally do not exceed 64
+    // (TensorIterator has that limitation), and lists of Tensors generally do
+    // not exceed the int64_t max (you'd probably run out of RAM or run into
+    // significant Tensor overhead). If you run into this limitation the fix is
+    // to figure out how to pack size_t into int64_t. Note that size_t has some
+    // weird behavior on Mac OS.
+    size_t maximum_value = std::numeric_limits<int64_t>::max();
+    TORCH_INTERNAL_ASSERT(
+        t <= maximum_value, "size_t too large to pack into IValue");
     return static_cast<int64_t>(t); // pack as int64_t
   }
-  static uint64_t unpack(const at::IValue& t) {
-    return static_cast<uint64_t>(t.toInt());
+  static size_t unpack(const at::IValue& t) {
+    return static_cast<size_t>(t.toInt());
   }
   static at::TypePtr packed_type() {
     return IValuePacker<int64_t>::packed_type();
