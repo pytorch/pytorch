@@ -3434,7 +3434,7 @@ def wrap_test_class(orig_cls):
         elif name.startswith("test_"):
             fullgraph = name not in known_graph_breaks_tests
             ctxs = [
-                compiled_autograd._enable(make_compiler_fn(fullgraph=fullgraph)),
+                compiled_autograd._enable(make_compiler_fn(fullgraph=fullgraph, backend="aot_eager")),
                 test_contexts.get(name, contextlib.nullcontext()),
             ]
             dct[name] = make_wrapped(fn, ctxs)
@@ -3593,6 +3593,14 @@ known_failing_tests = {
     "test_invalid_gradients",  # can't give autograd error due to inaccurate output metadata of lifted backward
     "test_autograd_node_isinstance",  # backward ctx is a fake cls and not directly a Node instance
     "test_backward_hook_relative_ordering",  # compiled autograd collects breadth first, and module backward hook not supported
+    # Category: Subclasses
+    "test_dtensor_basic",
+    "test_dtensor_contiguous_dtensor_noncontiguous_local_as_tangent",
+    "test_dtensor_different_gradient_placement",
+    "test_dtensor_noncontiguous_output",
+    "test_dtensor_partial_placement_graph_output",
+    "test_tp_compile_comm_reordering",
+    "test_unwrap_async_collective_tensor_tangent",
     # Uncategorized
     "test_not_implemented_grad",  # Dynamo changes the types of exceptions
 }
@@ -3603,9 +3611,13 @@ if not HAS_CUDA:
 
 test_autograd = load_test_module("test_autograd")
 test_custom_ops = load_test_module("test_custom_ops")
+test_dtensor = load_test_module("distributed/_tensor/test_dtensor_compile")
 
 TestAutogradWithCompiledAutograd = wrap_test_class(test_autograd.TestAutograd)
 TestCustomOpWithCompiledAutograd = wrap_test_class(test_custom_ops.TestCustomOp)
+TestDTensorCompileWithCompiledAutograd = wrap_test_class(
+    test_dtensor.TestDTensorCompile
+)
 
 if __name__ == "__main__":
     if HAS_CPU:
