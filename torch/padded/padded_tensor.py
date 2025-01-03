@@ -28,18 +28,69 @@ def slice_nd(input, start_idxs, end_idxs):
     return input
 
 
-class PaddedOp:
+def padded_to_tensor(args, kwargs):
+    if kwargs is None:
+        kwargs = {}
+    tensor_args, tensor_kwargs = pytree.tree_map_only(
+        PaddedTensor, lambda x: x.tensor, (args, kwargs)
+    )
+    tensor_args = list(tensor_args)
+
+    return tensor_args, tensor_kwargs
+
+
+class SlicingOp:
     def __init__(self) -> None:
         pass
 
     def infer_shape(self, args, kwargs):
         raise NotImplementedError
 
-    def modify_args(self, padded_args, padded_kwargs, args, kwargs):
-        return padded_args, padded_kwargs
+    def modify_args(self, args, kwargs):
+        def fn(padded_tensor):
+            print(
+                "Slicing tensor with shape %s to %s"
+                % (padded_tensor.tensor.shape, padded_tensor.original_shape)
+            )
+
+            tensor = slice_nd(
+                padded_tensor.tensor,
+                [0] * len(padded_tensor.original_shape),
+                padded_tensor.original_shape,
+            )
+
+            return tensor
+
+        if kwargs is None:
+            kwargs = {}
+        tensor_args, tensor_kwargs = pytree.tree_map_only(
+            PaddedTensor, fn, (args, kwargs)
+        )
+        tensor_args = list(tensor_args)
+
+        return tensor_args, tensor_kwargs
+
+    def modify_results(self, results):
+        return results
 
 
-class OnesLikeOp(PaddedOp):
+class NonSlicingOp(SlicingOp):
+    def __init__(self) -> None:
+        super().__init__()
+
+    def infer_shape(self, args, kwargs):
+        raise NotImplementedError
+
+    def modify_args(self, args, kwargs):
+        tensor_args, tensor_kwargs = padded_to_tensor(args, kwargs)
+
+        return tensor_args, tensor_kwargs
+
+    def modify_results(self, results):
+        return results
+
+
+class OnesLikeOp(SlicingOp):
     def __init__(self) -> None:
         super().__init__()
 
@@ -48,7 +99,7 @@ class OnesLikeOp(PaddedOp):
         return [input_shape]
 
 
-class ViewOp(PaddedOp):
+class ViewOp(SlicingOp):
     def __init__(self) -> None:
         super().__init__()
 
@@ -90,6 +141,10 @@ class ViewOp(PaddedOp):
         input_shape = args[0].shape
         output_shape = list(args[1])
 
+        # If the shapes are compatible, we can just return the original output shape.
+        if math.prod(input_shape) == math.prod(output_shape):
+            return [torch.Size(output_shape)]
+
         # Does the output shape contain -1? If so, we need to infer the value of -1
         if -1 in output_shape:
             input_shape_prod = math.prod(input_shape)
@@ -109,8 +164,10 @@ class ViewOp(PaddedOp):
 
         return [torch.Size(original_output_shape)]
 
-    def modify_args(self, padded_args, padded_kwargs, args, kwargs):
-        inp, shape = padded_args
+    def modify_args(self, args, kwargs):
+        tensor_args, tensor_kwargs = padded_to_tensor(args, kwargs)
+
+        inp, shape = tensor_args
 
         # If the shapes are not compatible, we need to slice the input tensor to the original shape
         if -1 not in shape:
@@ -119,10 +176,10 @@ class ViewOp(PaddedOp):
                     inp, [0] * len(args[0].original_shape), args[0].original_shape
                 )
 
-        return (inp, shape), padded_kwargs
+        return (inp, shape), tensor_kwargs
 
 
-class ViewAsRealOp(PaddedOp):
+class ViewAsRealOp(SlicingOp):
     def __init__(self) -> None:
         super().__init__()
 
@@ -131,7 +188,7 @@ class ViewAsRealOp(PaddedOp):
         return [input_shape + (2,)]
 
 
-class UnsqueezeOp(PaddedOp):
+class UnsqueezeOp(SlicingOp):
     def __init__(self) -> None:
         super().__init__()
 
@@ -145,7 +202,7 @@ class UnsqueezeOp(PaddedOp):
         return [input_shape[:dim] + (1,) + input_shape[dim:]]
 
 
-class PolarOp(PaddedOp):
+class PolarOp(SlicingOp):
     def __init__(self) -> None:
         super().__init__()
 
@@ -154,7 +211,7 @@ class PolarOp(PaddedOp):
         return [input_shape]
 
 
-class TransposeOp(PaddedOp):
+class TransposeOp(SlicingOp):
     def __init__(self) -> None:
         super().__init__()
 
@@ -175,7 +232,7 @@ class TransposeOp(PaddedOp):
         return [torch.Size(input_shape)]
 
 
-class ExpandOp(PaddedOp):
+class ExpandOp(SlicingOp):
     def __init__(self) -> None:
         super().__init__()
 
@@ -185,15 +242,18 @@ class ExpandOp(PaddedOp):
 
         return [torch.Size(shape)]
 
-    def modify_args(self, padded_args, padded_kwargs, args, kwargs):
+    def modify_args(self, args, kwargs):
+        padded_args, padded_kwargs = padded_to_tensor(args, kwargs)
+
         inp, shape = padded_args
+        print("shape", shape)
 
         pa = slice_nd(inp, [0] * len(shape), shape)
 
         return (pa, shape), padded_kwargs
 
 
-class ElementwiseUnaryOp(PaddedOp):
+class ElementwiseUnaryOp(SlicingOp):
     def __init__(self) -> None:
         super().__init__()
 
@@ -202,7 +262,7 @@ class ElementwiseUnaryOp(PaddedOp):
         return [input_shape]
 
 
-class ElementwiseBinaryOp(PaddedOp):
+class ElementwiseBinaryOp(SlicingOp):
     def __init__(self) -> None:
         super().__init__()
 
@@ -219,7 +279,9 @@ class ElementwiseBinaryOp(PaddedOp):
 
         return [torch.Size(reversed(new_shape))]
 
-    def modify_args(self, padded_args, padded_kwargs, args, kwargs):
+    def modify_args(self, args, kwargs):
+        tensor_args, tensor_kwargs = padded_to_tensor(args, kwargs)
+
         def is_broadcastable(shape1, shape2):
             # Broadcastable means that at each dimension, either the shapes are equal or one of them is 1
             num_unequal_and_1 = 0
@@ -251,14 +313,14 @@ class ElementwiseBinaryOp(PaddedOp):
                 # For each broadcast dim, slice the padded tensor to the correct shape.
                 for broadcast_dim, arg_idx in broadcast_dims:
                     other_arg_idx = abs(arg_idx - 1)
-                    padded_args[arg_idx] = torch.ops.aten.slice(
-                        padded_args[arg_idx], broadcast_dim, 0, 1
+                    tensor_args[arg_idx] = torch.ops.aten.slice(
+                        tensor_args[arg_idx], broadcast_dim, 0, 1
                     )
 
-        return padded_args, padded_kwargs
+        return tensor_args, tensor_kwargs
 
 
-class MatmulOp(PaddedOp):
+class MatmulOp(NonSlicingOp):
     def __init__(self) -> None:
         super().__init__()
 
@@ -266,7 +328,21 @@ class MatmulOp(PaddedOp):
         return [torch.Size([args[0].original_shape[0], args[1].original_shape[1]])]
 
 
-class MeanOp(PaddedOp):
+class BmmOp(NonSlicingOp):
+    def __init__(self) -> None:
+        super().__init__()
+
+    def infer_shape(self, args, kwargs):
+        b1, n1, m1 = args[0].original_shape
+        b2, m2, p2 = args[1].original_shape
+
+        assert b1 == b2
+        assert m1 == m2
+
+        return [torch.Size([b1, n1, p2])]
+
+
+class MeanOp(SlicingOp):
     def __init__(self) -> None:
         super().__init__()
 
@@ -283,7 +359,7 @@ class MeanOp(PaddedOp):
         return [torch.Size(list(input_shape[:dim]) + [1])]
 
 
-class ScaledDotProductAttentionOp(PaddedOp):
+class ScaledDotProductAttentionOp(SlicingOp):
     def __init__(self) -> None:
         super().__init__()
 
@@ -293,12 +369,12 @@ class ScaledDotProductAttentionOp(PaddedOp):
         attn_shape = input_shape[:-1]
         return [input_shape, attn_shape]
 
-    def modify_args(self, padded_args, padded_kwargs, args, kwargs):
+    # def modify_args(self, padded_args, padded_kwargs, args, kwargs):
 
-        return padded_args, padded_kwargs
+    #    return padded_args, padded_kwargs
 
 
-class IndexOp(PaddedOp):
+class IndexOp(SlicingOp):
     def __init__(self) -> None:
         super().__init__()
 
@@ -318,7 +394,7 @@ class IndexOp(PaddedOp):
         return [torch.Size(input_shape_mod)]
 
 
-class SelectOp(PaddedOp):
+class SelectOp(SlicingOp):
     def __init__(self) -> None:
         super().__init__()
 
@@ -335,7 +411,7 @@ class SelectOp(PaddedOp):
         return [input_shape[:dim] + input_shape[dim + 1 :]]
 
 
-class IndexPutOp(PaddedOp):
+class IndexPutOp(SlicingOp):
     def __init__(self) -> None:
         super().__init__()
 
@@ -343,22 +419,22 @@ class IndexPutOp(PaddedOp):
         input_shape = args[0].original_shape
         return [torch.Size(input_shape)]
 
-    def modify_args(self, padded_args, padded_kwargs, args, kwargs):
-        # Slice out the padded indices and values, so they fit the input tensor
-        inp, indices, values = args
-        padded_inp, padded_indices, padded_values = padded_args
+    # def modify_args(self, padded_args, padded_kwargs, args, kwargs):
+    #    # Slice out the padded indices and values, so they fit the input tensor
+    #    inp, indices, values = args
+    #    padded_inp, padded_indices, padded_values = padded_args
 
-        depadded_indices = [
-            x if x is None else torch.arange(x.original_shape[0]).int() for x in indices
-        ]
-        depadded_values = slice_nd(
-            padded_values, [0] * len(values.original_shape), values.original_shape
-        )
+    #    depadded_indices = [
+    #        x if x is None else torch.arange(x.original_shape[0]).int() for x in indices
+    #    ]
+    #    depadded_values = slice_nd(
+    #        padded_values, [0] * len(values.original_shape), values.original_shape
+    #    )
 
-        return [padded_inp, depadded_indices, depadded_values], padded_kwargs
+    #    return [padded_inp, depadded_indices, depadded_values], padded_kwargs
 
 
-class SplitWithSizesOp(PaddedOp):
+class SplitWithSizesOp(SlicingOp):
     def __init__(self) -> None:
         super().__init__()
 
@@ -377,23 +453,24 @@ class SplitWithSizesOp(PaddedOp):
             for i in range(len(indices_or_sections))
         ]
 
-    def modify_args(self, padded_args, padded_kwargs, args, kwargs):
-        # Slice the input tensor to the correct shape
-        indices_or_sections = args[1]
-        dim = args[2]
+    def modify_args(self, args, kwargs):
+        _, _, dim = args
 
         if dim < 0:
             dim += len(args[0].original_shape)
 
-        padded_args[0] = torch.ops.aten.slice(
-            padded_args[0], dim, 0, sum(padded_args[1])
+        tensor_args, tensor_kwargs = padded_to_tensor(args, kwargs)
+
+        # Slice the input tensor to the correct shape
+        tensor_args[0] = torch.ops.aten.slice(
+            tensor_args[0], dim, 0, sum(tensor_args[1])
         )
-        print(padded_args[0].shape)
+        print(tensor_args[0].shape)
 
-        return padded_args, padded_kwargs
+        return tensor_args, tensor_kwargs
 
 
-class CatOp(PaddedOp):
+class CatOp(SlicingOp):
     def __init__(self) -> None:
         super().__init__()
 
@@ -402,7 +479,7 @@ class CatOp(PaddedOp):
         return [input_shape]
 
 
-class StackOp(PaddedOp):
+class StackOp(SlicingOp):
     def __init__(self) -> None:
         super().__init__()
 
@@ -420,7 +497,7 @@ class StackOp(PaddedOp):
         ]
 
 
-class DetachOp(PaddedOp):
+class DetachOp(SlicingOp):
     def __init__(self) -> None:
         super().__init__()
 
@@ -429,7 +506,7 @@ class DetachOp(PaddedOp):
         return [input_shape]
 
 
-class EmbeddingOp(PaddedOp):
+class EmbeddingOp(SlicingOp):
     def __init__(self) -> None:
         super().__init__()
 
@@ -443,7 +520,7 @@ class EmbeddingOp(PaddedOp):
         return [torch.Size(out_shape)]
 
 
-class NoOp(PaddedOp):
+class NoOp(SlicingOp):
     def __init__(self) -> None:
         super().__init__()
 
@@ -477,6 +554,7 @@ class OpDatabase:
             "mul": ElementwiseBinaryOp(),
             # Contraction / Reduction operations
             "mm": MatmulOp(),
+            "bmm": BmmOp(),
             "mean": MeanOp(),
             "_scaled_dot_product_flash_attention_for_cpu": ScaledDotProductAttentionOp(),
             # Indexing operations
@@ -529,6 +607,8 @@ def log_function_with_shapes(func, args, out=None, orig_shape_out=None):
     def to_original_shape_str(arg):
         if isinstance(arg, PaddedTensor):
             return [i for i in arg.original_shape]
+        elif isinstance(arg, torch.Tensor):
+            return []
         else:
             return arg
 
@@ -648,35 +728,30 @@ class PaddedTensor(torch.Tensor):
         op = OP_DATABASE.get_op(func._opname)
 
         # Convert args and kwargs to padded tensors
+        global MULTIPLIERS
         args = tuple(
             (
-                PaddedTensor(arg, {n: 1 for n in range(8)})
+                PaddedTensor(arg, MULTIPLIERS)
                 if type(arg) is torch.Tensor or type(arg) is torch.nn.Parameter
                 else arg
             )
             for arg in args
         )
 
-        # Get tensor args
-        if kwargs is None:
-            kwargs = {}
-        tensor_args, tensor_kwargs = pytree.tree_map_only(
-            PaddedTensor, lambda x: x.tensor, (args, kwargs)
-        )
-        tensor_args = list(tensor_args)
-
-        tensor_args, tensor_kwargs = op.modify_args(
-            tensor_args, tensor_kwargs, args, kwargs
-        )
-
         # Infer shape
         orig_shape_out = op.infer_shape(args, kwargs)
 
-        # TODO: need to check that the original shape is valid for all args and kwargs
-        # TODO: padded value should change according to func.
+        # Modify args
+        tensor_args, tensor_kwargs = op.modify_args(args, kwargs)
+
+        log_function_with_shapes(func, tensor_args)
+        # Run function
         out = func(*tensor_args, **tensor_kwargs)
 
-        log_function_with_shapes(func, args, out, orig_shape_out)
+        # Modify results
+        out = op.modify_results(out)
+
+        log_function_with_shapes(func, tensor_args, out, orig_shape_out)
 
         out_flat, spec = pytree.tree_flatten(out)
         global MULTIPLIERS
