@@ -75,11 +75,11 @@ class MetalOverrides(OpOverrides):
 
     @staticmethod
     def logical_or(a: CSEVariable, b: CSEVariable) -> str:
-        return f"{a} | {b}"
+        return f"{a} || {b}"
 
     @staticmethod
     def logical_and(a: CSEVariable, b: CSEVariable) -> str:
-        return f"{a} & {b}"
+        return f"{a} && {b}"
 
     @staticmethod
     def abs(x: CSEVariable) -> str:
