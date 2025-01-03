@@ -45,7 +45,6 @@ static CUresult CUDAAPI nvrtc_cuTensorMapEncodeTiled(
 
 
 #include <cutlass/version.h>
-#include <cute/tensor.hpp>
 #include <cutlass/core_io.h>
 #include <cutlass/cutlass.h>
 #include <cutlass/gemm/device/gemm.h>
