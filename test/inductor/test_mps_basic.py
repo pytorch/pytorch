@@ -48,6 +48,7 @@ class MPSBasicTests(TestCase):
     test_signbit = CommonTemplate.test_signbit
     test_view_as_complex = CommonTemplate.test_view_as_complex
     test_max_pool2d2 = CommonTemplate.test_max_pool2d2
+    test_remainder = CommonTemplate.test_remainder
 
     @parametrize("dtype", MPS_DTYPES)
     def test_add(self, dtype):
