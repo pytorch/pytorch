@@ -61,6 +61,14 @@ class MetalOverrides(OpOverrides):
         return f"static_cast<{DTYPE_TO_METAL[dtype]}>({x})"
 
     @staticmethod
+    def constant(val: CSEVariable, dtype: torch.dtype) -> str:
+        if val == torch.inf:
+            return "HUGE_VALF"
+        elif val == -torch.inf:
+            return "-HUGE_VALF"
+        return str(val)
+
+    @staticmethod
     def where(a: CSEVariable, b: CSEVariable, c: CSEVariable) -> str:
         return f"{a} ? {b} : {c}"
 
@@ -80,6 +88,14 @@ class MetalOverrides(OpOverrides):
     @staticmethod
     def logical_and(a: CSEVariable, b: CSEVariable) -> str:
         return f"{a} && {b}"
+
+    @staticmethod
+    def isnan(x: CSEVariable) -> str:
+        return f"metal::isnan({x})"
+
+    @staticmethod
+    def isinf(x: CSEVariable) -> str:
+        return f"metal::isinf({x})"
 
     @staticmethod
     def abs(x: CSEVariable) -> str:
