@@ -2,6 +2,7 @@
 
 import os
 import zipfile
+from pathlib import Path
 from sys import version_info
 from tempfile import TemporaryDirectory
 from textwrap import dedent
@@ -32,10 +33,8 @@ except ImportError:
     # Support the case where we run this file directly.
     from common import PackageTestCase
 
-from pathlib import Path
 
-
-packaging_directory = Path(__file__).parent
+packaging_directory = Path(__file__).absolute().parent
 
 
 @skipIf(
