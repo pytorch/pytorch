@@ -2,7 +2,7 @@
 import functools
 import logging
 import os
-from pathlib import Path
+import pathlib
 from typing import Any, List
 
 from torch._inductor.metrics import get_metric_table, is_metric_table_enabled
@@ -322,7 +322,7 @@ class MultiKernelCall:
             )
         )
         _, _, path = get_path(key, "picked_kernel")
-        return Path(path)
+        return pathlib.Path(path)
 
     def load_cache(self):
         assert self.picked_kernel is None
