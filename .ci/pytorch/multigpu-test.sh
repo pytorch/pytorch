@@ -43,8 +43,8 @@ if [[ "${SHARD_NUMBER:-2}" == "2" ]]; then
     time python test/run_test.py --verbose -i distributed/test_functional_api
 
     # DTensor tests
-    time python test/run_test.py --verbose -i distributed/_tensor/test_random_ops
-    time python test/run_test.py --verbose -i distributed/_tensor/test_dtensor_compile
+    time python test/run_test.py --verbose -i distributed/tensor/test_random_ops
+    time python test/run_test.py --verbose -i distributed/tensor/test_dtensor_compile
 
     # DeviceMesh test
     time python test/run_test.py --verbose -i distributed/test_device_mesh
