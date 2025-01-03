@@ -1,5 +1,6 @@
 from typing import Any, Optional, Union
 
+from torch.export.graph_signature import CustomObjArgument
 from torchgen.model import (
     Annotation,
     Argument,
@@ -42,6 +43,14 @@ class TypeGen:
             return BaseType(BaseTy.SymBool)
         elif isinstance(obj, torch.ScriptObject):
             return CustomClassType(obj._type().name())  # type: ignore[attr-defined]
+        elif isinstance(obj, CustomObjArgument):
+            return CustomClassType(obj.name)
+        elif isinstance(obj, torch.dtype):
+            return BaseType(BaseTy.ScalarType)
+        elif isinstance(obj, torch._ops.OpOverload):
+            return BaseType(BaseTy.Operator)
+        elif obj is None:
+            return BaseType(BaseTy.NoneType)
         elif isinstance(obj, (list, tuple)):
             assert len(obj) > 0
             all_base_tys = [TypeGen.from_example(x) for x in obj]
