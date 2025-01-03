@@ -38,9 +38,11 @@ PyObject* Dim_init() {
 #include "python_variable_simple.h"
 
 #if IS_PYTHON_3_11_PLUS
-
+#define Py_BUILD_CORE_MODULE
 #define Py_BUILD_CORE
 #if IS_PYTHON_3_13_PLUS
+// see https://github.com/python/cpython/issues/112136
+#include <internal/pycore_modsupport.h>
 #define NEED_OPCODE_METADATA
 #include "internal/pycore_opcode_metadata.h"
 #undef NEED_OPCODE_METADATA
@@ -48,6 +50,7 @@ PyObject* Dim_init() {
 #include "internal/pycore_opcode.h"
 #endif
 #undef Py_BUILD_CORE
+#undef Py_BUILD_CORE_MODULE
 #endif
 
 // C++ API functions for objects to
@@ -1567,7 +1570,7 @@ struct PyInstDecoder {
     }
 private:
     PyCodeObject* code_object_;
-    _Py_CODEUNIT* code_;
+    [[maybe_unused]] _Py_CODEUNIT* code_;
     int offset_;
 };
 
