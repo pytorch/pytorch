@@ -4,6 +4,7 @@ from __future__ import annotations
 import collections
 import dataclasses
 import functools
+import inspect
 import itertools
 import logging
 import math
@@ -44,6 +45,7 @@ from . import comms, config, dependencies, ir, metrics
 from .codegen.common import BackendFeature, get_scheduling_for_device, Kernel
 from .comm_analysis import estimate_nccl_collective_runtime
 from .dependencies import Dep, MemoryDep, StarDep, WeakDep
+from .exc import GPUTooOldForTriton, TritonMissing
 from .ir import ComputedBuffer, get_device_type, MultiOutput, MultiOutputLayout
 from .loop_body import LoopBody
 from .memory import MemoryPlanningInfoForBuffer, MemoryPlanningInfoForNode
@@ -413,7 +415,7 @@ class BaseSchedulerNode:
         Decide if there should be inplace updates for the node
         and record the decision in the active kernel.
         """
-        from .codegen.wrapper import buffer_reuse_key
+        from .codegen.wrapper import can_match_buffer_size
 
         if not (
             isinstance(self, SchedulerNode)
@@ -485,8 +487,7 @@ class BaseSchedulerNode:
                             )
                             and len(input_buf.node.get_inputs_that_alias_output()) > 0
                         )
-                        and buffer_reuse_key(input_buf.node)
-                        == buffer_reuse_key(buf.node)
+                        and can_match_buffer_size(input_buf.node, buf.node)
                     ):
                         # if there isn't a triton kernel, then we don't need to call triton-specific things.
                         # but TODO this might be a convenient place to signal to the Collective kernels to inplace
@@ -997,7 +998,9 @@ class SchedulerNode(BaseSchedulerNode):
             recompute_sizes_body_func=recompute_sizes_body_func,
         )
 
-    def refresh_dependencies(self, normalize: bool) -> None:
+    def refresh_dependencies(
+        self, normalize: bool, need_clear_tiling_cache: bool
+    ) -> None:
         # Fake dependencies are added manually. They can not be analyzed from
         # extract_read_writes. Find them out and apply manually.
         fake_deps = OrderedSet(
@@ -1012,22 +1015,36 @@ class SchedulerNode(BaseSchedulerNode):
             ).with_read(fake_deps)
         )
 
+        self.pointwise_read_writes.clear_cache(self)
+
+        if need_clear_tiling_cache:
+            from .codegen.simd import SIMDScheduling
+
+            # TODO(shunting) if this cause compilation time increase when
+            # enabling LOAF by default, try just clearing the specific cache
+            # entry by using a customized cache implemetation rather than
+            # lru_cache.
+            SIMDScheduling.candidate_tilings.cache_clear()
+
     def apply_new_loop_order(self, new_order: Sequence[int]) -> None:
         self._body = self._body.reorder_iter_loops(
             new_order,
         )
         self._sizes = self._body.sizes
 
-        self.refresh_dependencies(normalize=False)
+        self.refresh_dependencies(normalize=False, need_clear_tiling_cache=True)
 
-        from .codegen.simd import SIMDScheduling
+    def merge_loops(self) -> None:
+        self._body = self._body.merge_loops()
+        self._sizes = self._body.sizes
 
-        # TODO(shunting) if this cause compilation time increase when
-        # enabling LOAF by default, try just clearing the specific cache
-        # entry by using a customized cache implemetation rather than
-        # lru_cache.
-        SIMDScheduling.candidate_tilings.cache_clear()
-        self.pointwise_read_writes.clear_cache(self)
+        # merge_loops is called after loop reordering.
+        # We still need retain fake dependencies since codegen the
+        # estimated amount of memory access rely on them.
+        #
+        # Merge loops does not affect the tiling decision. So we
+        # don't need clear the tiling cache.
+        self.refresh_dependencies(normalize=True, need_clear_tiling_cache=False)
 
     def reorder_loops_by_dep_pair(
         self, self_dep: MemoryDep, other_dep: MemoryDep
@@ -1122,15 +1139,30 @@ class SchedulerNode(BaseSchedulerNode):
             log.fatal("Error in codegen for %s", self.node)
             raise
 
+    def pointwise_or_reduction_read_writes(
+        self, pointwise: bool = True
+    ) -> dependencies.ReadWrites:
+        """
+        Get the memory dependencies in either the pointwise or the reduction axes.
+        """
+        keep_sizes, ignore_sizes = self._sizes if pointwise else reversed(self._sizes)
+        return dependencies.extract_read_writes(
+            self._body, keep_sizes, hidden_args=[[sympy.S.Zero] * len(ignore_sizes)]
+        )
+
     @cache_on_self
     def pointwise_read_writes(self) -> dependencies.ReadWrites:
         """
-        Get the memory dependencies in the non-reduction axis.
+        Get the memory dependencies in the non-reduction axes.
         """
-        sizes, reduction_sizes = self._sizes
-        return dependencies.extract_read_writes(
-            self._body, sizes, hidden_args=[[sympy.S.Zero] * len(reduction_sizes)]
-        )
+        return self.pointwise_or_reduction_read_writes(pointwise=True)
+
+    @cache_on_self
+    def reduction_read_writes(self) -> dependencies.ReadWrites:
+        """
+        Get the memory dependencies in the reduction axes.
+        """
+        return self.pointwise_or_reduction_read_writes(pointwise=False)
 
     def can_inplace(self, read_dep: dependencies.Dep) -> bool:
         if self.is_template():
@@ -2443,13 +2475,7 @@ class Scheduler:
                 if not isinstance(snode, SchedulerNode) or snode.is_template():
                     continue
 
-                snode._body = snode._body.merge_loops()
-                snode._sizes = snode._body.sizes
-
-                # merge_loops is called after loop reordering.
-                # We still need retain fake dependencies since codegen the
-                # estimated amount of memory access rely on them.
-                snode.refresh_dependencies(normalize=True)
+                snode.merge_loops()
 
                 # Note that for CPU backend, merging loops will change
                 # snode.group. It's fine for Triton backend.
@@ -2694,6 +2720,18 @@ class Scheduler:
                 choice_timings.items(), key=lambda x: x[1]
             ):
                 if not isinstance(choice, torch._inductor.ir.TritonTemplateCallerBase):
+                    continue
+
+                # For prologue fusion we check if the underlying template of the choice
+                # supports all allowed prologue inputs. If not, we skip this choice in
+                # the fusion benchmark.
+                # TODO: Remove this check after all Triton templates support prologue fusion.
+                # Currently, persistent+TMA Triton template does not due to the TMA-based loads.
+                if (
+                    not epilogue_fusion
+                    and hasattr(choice, "allowed_prologue_inps")
+                    and choice.allowed_prologue_inps != multi_node.allowed_prologue_inps
+                ):
                     continue
 
                 if unfused_time >= ms1 + ms2:
@@ -3330,7 +3368,10 @@ class Scheduler:
         del device2
 
         shared_data_score = self.score_fusion_memory(node1, node2)
-        if shared_data_score == 0:
+        if (
+            shared_data_score < config.score_fusion_memory_threshold
+            and config.loop_ordering_after_fusion
+        ):
             shared_data_score = self.shared_data_after_reordering_loop(node1, node2)
 
         if loop_ordering_log.isEnabledFor(logging.DEBUG):
@@ -3507,7 +3548,7 @@ class Scheduler:
         node2_dep_len = len(node1.read_writes.reads) + len(node2.read_writes.writes)
 
         # optimization: iter over smaller set
-        if max(node1_dep_len, node2_dep_len) * 4 > min(node1_dep_len, node2_dep_len):
+        if min(node1_dep_len, node2_dep_len) * 4 < max(node1_dep_len, node2_dep_len):
             if node1_dep_len > node2_dep_len:
                 tmp = node1
                 node1 = node2
@@ -3630,13 +3671,9 @@ class Scheduler:
                 device.type == "cuda"
                 and (device_props := torch.cuda.get_device_properties(device)).major < 7
             ):
-                raise RuntimeError(
-                    f"Found {device_props.name} which is too old to be supported by the triton GPU compiler, which is used as the backend. Triton only supports devices of CUDA Capability >= 7.0, but your device is of CUDA capability {device_props.major}.{device_props.minor}"  # noqa: B950
-                )
-            elif is_gpu(device.type):
-                raise RuntimeError(
-                    "Cannot find a working triton installation. Either the package is not installed or it is too old. More information on installing Triton can be found at https://github.com/openai/triton"  # noqa: B950
-                )
+                raise GPUTooOldForTriton(device_props, inspect.currentframe())
+            elif is_gpu(device.type) and not device.type == "mps":
+                raise TritonMissing(inspect.currentframe())
 
         return device_scheduling(self)
 
