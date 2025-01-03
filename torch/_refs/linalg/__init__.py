@@ -154,15 +154,15 @@ def vector_norm(
         if not (is_ord_even and utils.is_float_dtype(x.dtype)):
             x = torch.abs(x)
         if (dim is None and guard_size_oblivious(x.numel() == 1)) or (
-            dim is not None and all(guard_size_oblivious(x.shape[d] == 1) for d in dim)
+            dim is not None
+            and (x.ndim > 0 and all(guard_size_oblivious(x.shape[d] == 1) for d in dim))
         ):
-            if keepdim:
+            if keepdim or x.ndim == 0:
                 return to_result_dtype(x.clone())
             elif dim is None:
                 return x.flatten()[0]
             else:
                 new_shape = [s for d, s in enumerate(x.shape) if d not in dim]
-                print(x.shape, dim, new_shape)
                 return to_result_dtype(x.clone().view(new_shape))
 
         return to_result_dtype(torch.pow(reduce_sum(torch.pow(x, ord)), 1.0 / ord))  # type: ignore[return-value]
