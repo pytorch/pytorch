@@ -1666,7 +1666,9 @@ def _backward_prologue_functional(
 
 
 # NOTE: this function must be torch._dynamo.allow_in_graph-able. Non tensor/symnode inputs must be constants.
-def _backward_epilogue_functional(metadata, maybe_subclass_metadata, out):
+def _backward_epilogue_functional(
+    metadata, maybe_subclass_metadata, out, *, make_subclass_override=None
+):
     # Toss out the backward output tokens
     num_bw_tokens = metadata.num_backward_tokens
     if num_bw_tokens > 0:
@@ -1686,6 +1688,7 @@ def _backward_epilogue_functional(metadata, maybe_subclass_metadata, out):
             subclass_metas=maybe_subclass_metadata.grad_input_metas,
             included_subclass_symints=True,
             is_runtime=True,
+            make_subclass_override=make_subclass_override,
         )
         return outs_wrapped
     return out
