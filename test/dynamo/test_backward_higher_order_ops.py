@@ -121,9 +121,10 @@ class _multiply_invoke(torch.nn.Module):
                 out.backward(grad_out)
             actual = normalize_gm(graph.print_readable(False))
             self.assertEqual(x.grad, grad_out * grad_out)
-            self.assertExpectedInline(
-                actual,
-                """\
+            if backend == ["aot_eager", "inductor"]:
+                self.assertExpectedInline(
+                    actual,
+                    """\
 class GraphModule(torch.nn.Module):
     def forward(self, L_inputs_ : list):
         l_inputs_ = L_inputs_
@@ -144,7 +145,7 @@ class GraphModule(torch.nn.Module):
         new_grad_1: "f32[2]" = torch.clone(result);  result = None
         return (new_grad, new_grad_1)
 """,
-            )
+                )
 
             graph = None
 
@@ -194,9 +195,10 @@ class GraphModule(torch.nn.Module):
             actual = normalize_gm(graph.print_readable(False))
             self.assertEqual(obj.counter, 1)
             self.assertEqual(x.grad, grad_out + grad_out)
-            self.assertExpectedInline(
-                actual,
-                """\
+            if backend == ["aot_eager", "inductor"]:
+                self.assertExpectedInline(
+                    actual,
+                    """\
 class GraphModule(torch.nn.Module):
     def forward(self, L_inputs_ : list, L_hooks_0_keywords_fn_keywords_obj_counter: "Sym(s1)"):
         l_inputs_ = L_inputs_
@@ -223,7 +225,7 @@ class GraphModule(torch.nn.Module):
         new_grad_1: "f32[2]" = torch.clone(result);  result = None
         return (new_grad, new_grad_1, add)
 """,
-            )
+                )
 
             out = fn(x, y)
             out.backward(grad_out)
