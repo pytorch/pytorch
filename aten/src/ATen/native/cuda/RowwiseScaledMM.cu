@@ -3,6 +3,11 @@
 #include <ATen/core/Tensor.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/nvrtc_stub/ATenNVRTC.h>
+#include <c10/macros/Macros.h>
+
+// Two warninngs in Cutlass included header files
+C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wset-but-not-used")
+C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wunused-but-set-parameter")
 
 // Determine if the architecture supports rowwise scaled mm
 // Currently failing on windows with:

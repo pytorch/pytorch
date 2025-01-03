@@ -87,7 +87,7 @@ if(INTERN_BUILD_ATEN_OPS)
     if(CMAKE_CUDA_COMPILER_VERSION VERSION_GREATER_EQUAL 12.0 AND
       EXISTING_ARCH_FLAGS MATCHES ".*compute_90.*")
       set_source_files_properties(${ROWWISE_SCALED_MM_FILE}
-        PROPERTIES COMPILE_FLAGS "-gencode arch=compute_90a,code=sm_90a -Xcudafe --diag_suppress=set_but_not_used")
+        PROPERTIES COMPILE_FLAGS "-gencode arch=compute_90a,code=sm_90a")
     endif()
   endif()
 
