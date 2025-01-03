@@ -4998,7 +4998,9 @@ def _avg_poolnd(
 
             def fn(idx):
                 return ops.mul(fn_sum(idx, x_loader), ops.constant(scale, dtype))
+
         else:
+
             def fn(idx):
                 return ops.truediv(fn_sum(idx, x_loader), ops.constant(divisor, dtype))
 
