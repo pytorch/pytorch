@@ -2,7 +2,6 @@
 
 import collections
 import functools
-import sys
 from typing import Dict, List, Optional, TYPE_CHECKING
 
 from torch._subclasses.fake_tensor import is_fake
@@ -11,7 +10,7 @@ from .. import polyfills, variables
 from ..bytecode_transformation import create_call_function, create_instruction
 from ..exc import raise_observed_exception, unimplemented
 from ..guards import GuardBuilder, install_guard
-from ..source import DictGetItemSource, is_from_local_source
+from ..source import is_from_local_source
 from ..utils import dict_keys, dict_values, specialize_symnode
 from .base import ValueMutationNew, VariableTracker
 from .constant import ConstantVariable
@@ -845,75 +844,3 @@ class DictValuesVariable(DictViewVariable):
 
     def python_type(self):
         return dict_values
-
-
-class PythonSysModulesVariable(VariableTracker):
-    """Special case for sys.modules.
-
-    Without this we will guard on the exact set of modules imported in the
-    lifetime of the python program.
-    """
-
-    def python_type(self):
-        return dict
-
-    def reconstruct(self, codegen):
-        codegen.add_push_null(
-            lambda: codegen.extend_output(
-                [
-                    codegen.create_load_python_module(sys),
-                    codegen.create_load_attr("modules"),
-                ]
-            )
-        )
-
-    def call_method(
-        self,
-        tx: "InstructionTranslator",
-        name,
-        args: List[VariableTracker],
-        kwargs: Dict[str, VariableTracker],
-    ):
-        if name == "__getitem__":
-            return self.call_getitem(tx, *args, **kwargs)
-        elif name == "get":
-            return self.call_get(tx, *args, **kwargs)
-        elif name == "__contains__":
-            return self.call_contains(tx, *args, **kwargs)
-        unimplemented(f"sys.modules.{name}(*{args}, **{kwargs})")
-
-    def _contains_helper(self, tx: "InstructionTranslator", key: VariableTracker):
-        k = key.as_python_constant()
-        has_key = k in sys.modules
-        install_guard(
-            self.make_guard(
-                functools.partial(GuardBuilder.DICT_CONTAINS, key=k, invert=not has_key)
-            )
-        )
-        return k, has_key
-
-    def call_contains(self, tx: "InstructionTranslator", key: VariableTracker):
-        _k, has_key = self._contains_helper(tx, key)
-        return ConstantVariable.create(value=has_key)
-
-    def call_get(
-        self,
-        tx: "InstructionTranslator",
-        key: VariableTracker,
-        default: Optional[VariableTracker] = None,
-    ):
-        k, has_key = self._contains_helper(tx, key)
-
-        if has_key:
-            source = self.source and DictGetItemSource(self.source, k)
-            return VariableTracker.build(tx, sys.modules[k], source)
-
-        if default is not None:
-            return default
-
-        return ConstantVariable.create(value=None)
-
-    def call_getitem(self, tx: "InstructionTranslator", key: VariableTracker):
-        k, _has_key = self._contains_helper(tx, key)
-        source = self.source and DictGetItemSource(self.source, k)
-        return VariableTracker.build(tx, sys.modules[k], source)

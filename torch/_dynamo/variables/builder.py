@@ -14,7 +14,6 @@ import math
 import operator
 import random
 import re
-import sys
 import types
 import warnings
 import weakref
@@ -142,7 +141,6 @@ from .dicts import (
     DefaultDictVariable,
     DictKeySetVariable,
     FrozensetVariable,
-    PythonSysModulesVariable,
     SetVariable,
 )
 from .distributed import (
@@ -574,27 +572,6 @@ class VariableBuilder:
                 output, tuple_cls=type(value), source=self.source
             )
             return result
-        elif value is torch.utils._pytree.SUPPORTED_NODES:
-            # For SUPPORTED_NODES, we guard on the dictionary version (PEP509)
-            # under the assumption that the values themselves don't change.
-            self.install_guards(GuardBuilder.DICT_VERSION)
-
-            # The keys on the SUPPORTED_NODES can be arbitrary, so save on the
-            # key order.
-            self.tx.output.guard_on_key_order.add(self.source.name())
-            result = {
-                TypingVariable(k): UserDefinedObjectVariable(
-                    v,
-                    source=DictGetItemSource(
-                        self.get_source(), ConstDictKeySource(self.get_source(), i)
-                    ),
-                )
-                for i, (k, v) in enumerate(value.items())
-            }
-            return ConstDictVariable(result, type(value))
-        elif value is sys.modules:
-            self.install_guards(GuardBuilder.FUNCTION_MATCH)
-            return PythonSysModulesVariable(source=self.source)
         elif istype(value, (dict, collections.defaultdict, collections.OrderedDict)):
             self.install_guards(GuardBuilder.SEQUENCE_LENGTH)
 
