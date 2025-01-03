@@ -35,12 +35,8 @@ def parse_args() -> argparse.Namespace:
     # slashes
     if args.bucket.startswith("s3://"):
         args.bucket = args.bucket[5:]
-    if args.bucket.endswith("/"):
-        args.bucket = args.bucket[:-1]
-    if args.key_prefix.startswith("/"):
-        args.key_prefix = args.key_prefix[1:]
-    if args.key_prefix.endswith("/"):
-        args.key_prefix = args.key_prefix[:-1]
+    args.bucket = args.bucket.strip("/")
+    args.key_prefix = args.key_prefix.strip("/")
     return args
 
 
