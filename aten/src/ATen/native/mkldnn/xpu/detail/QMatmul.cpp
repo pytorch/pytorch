@@ -174,7 +174,7 @@ void quantized_matmul(
   std::unordered_map<int, dnnl::memory> args;
 
   dnnl::post_ops po;
-  attr.extract_post_ops(dst, true);
+  po = attr.extract_post_ops(dst, true);
   bool m1_need_zp = (input_zero_point != 0);
   bool wgh_is_per_channel = weight_scales.numel() > 1;
 
