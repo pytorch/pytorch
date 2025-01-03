@@ -384,7 +384,7 @@ def substitute_in_graph(
         # Need to wrap the function because we may cannot assign __torch_dynamo_polyfill__ to a
         # C++ function.
         @functools.wraps(traceable_fn)
-        def wrapped(*args, **kwargs):
+        def wrapped(*args: _P.args, **kwargs: _P.kwargs) -> _R:
             return original_fn(*args, **kwargs)
 
         def dispatch_fn(self, value: Callable[_P, _R]) -> PolyfilledFunctionVariable:
