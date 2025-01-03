@@ -85,13 +85,13 @@ def extract_include_arg(include_dirs: list[Path], i: int, args: list[str]) -> No
     for name in PRE_INCLUDE_ARGS:
         path = extract_one(name, i, args)
         if path is not None:
-            include_dirs.insert(0, Path(path).resolve())
+            include_dirs.insert(0, Path(path).absolute())
             return
 
     for name in POST_INCLUDE_ARGS:
         path = extract_one(name, i, args)
         if path is not None:
-            include_dirs.append(Path(path).resolve())
+            include_dirs.append(Path(path).absolute())
             return
 
 
@@ -110,7 +110,7 @@ if __name__ == "__main__":
             depfile_path = Path(args[i + 1])
         elif arg == "-c":
             # Include the base path of the cuda file
-            include_dirs.append(Path(args[i + 1]).resolve().parent)
+            include_dirs.append(Path(args[i + 1]).absolute().parent)
         else:
             extract_include_arg(include_dirs, i, args)
 
