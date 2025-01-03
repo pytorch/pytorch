@@ -3384,11 +3384,10 @@ class TestRandomTensorCreation(TestCase):
 
     def test_normal_default_device(self, device):
         try:
-            old_device = torch.get_default_device()
             torch.set_default_device(device)
             t = torch.normal(0, 1, (10, 10))
         finally:
-            torch.set_default_device(old_device)
+            torch.set_default_device(None)
         self.assertEqual(str(t.device), device)
 
     # https://github.com/pytorch/pytorch/issues/126834
