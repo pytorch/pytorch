@@ -19,6 +19,7 @@
 #include <ATen/ops/baddbmm_native.h>
 #include <ATen/ops/bmm_native.h>
 #include <ATen/ops/cholesky_native.h>
+#include <ATen/ops/linalg_cholesky_native.h>
 #include <ATen/ops/linalg_lu_factor_native.h>
 #include <ATen/ops/linalg_solve_triangular_native.h>
 #include <ATen/ops/mm_native.h>
@@ -832,6 +833,7 @@ static Tensor& linalg_cholesky_mps_impl(const Tensor& input, bool upper, Tensor&
         status,
         ". See https://developer.apple.com/documentation/metalperformanceshaders/mpsmatrixdecompositionstatus for details.");
   }
+  upper ? out.triu_() : out.tril_();
   return out;
 }
 } // namespace mps
@@ -997,8 +999,20 @@ Tensor& addbmm_out_mps(const Tensor& self,
 Tensor cholesky_mps(const Tensor& self, bool upper) {
   Tensor out = at::zeros_like(self);
   mps::linalg_cholesky_mps_impl(self, upper, out);
-  upper ? out.triu_() : out.tril_();
   return out;
+}
+
+Tensor& cholesky_mps_out(const Tensor& self, bool upper, Tensor& out) {
+  return mps::linalg_cholesky_mps_impl(self, upper, out);;
+}
+
+Tensor& linalg_cholesky_out_mps(const Tensor& self, bool upper, Tensor& out) {
+  return mps::linalg_cholesky_mps_impl(self, upper, out);;
+}
+
+Tensor linalg_cholesky_mps(const Tensor& self, bool upper) {
+  Tensor out = at::zeros_like(self);
+  return mps::linalg_cholesky_mps_impl(self, upper, out);;
 }
 
 Tensor addbmm_mps(const Tensor& self,
