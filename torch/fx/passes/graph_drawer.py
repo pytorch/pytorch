@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 
 import hashlib
+import html
 from itertools import chain
 from typing import Any, Dict, Optional, TYPE_CHECKING
 
@@ -76,13 +77,11 @@ if HAS_PYDOT:
             ignore_parameters_and_buffers: bool = False,
             skip_node_names_in_args: bool = True,
             parse_stack_trace: bool = False,
-            dot_graph_shape: Optional[str] = None,
             normalize_args: bool = False,
         ):
             self._name = name
-            self.dot_graph_shape = (
-                dot_graph_shape if dot_graph_shape is not None else "record"
-            )
+            # HTML-Like labels
+            self.dot_graph_shape = "none"
             self.normalize_args = normalize_args
             _WEIGHT_TEMPLATE["shape"] = self.dot_graph_shape
 
@@ -143,6 +142,16 @@ if HAS_PYDOT:
                 return self.get_main_dot_graph()
             else:
                 return self.get_submod_dot_graph(submod_name)
+
+        def _extra_info(
+            self,
+            module: torch.fx.GraphModule,
+            node: torch.fx.Node,
+            skip_node_names_in_args: bool,
+            parse_stack_trace: bool
+            ) -> Dict[str, str]:
+            """Return additional information to be rendered in the node label."""
+            return {}
 
         def get_main_dot_graph(self) -> pydot.Dot:
             return self._dot_graphs[self._name]
@@ -218,12 +227,21 @@ if HAS_PYDOT:
             skip_node_names_in_args: bool,
             parse_stack_trace: bool,
         ) -> str:
+            header = f"""<
+            <table border="0" cellborder="0" cellspacing="0">
+            <tr><td colspan="2"><b>%{node.name}</b></td></tr>
+            """
+
+            rows: Dict[str, str] = {
+                'op_code': f'{node.op}',
+            }
+
             def _get_str_for_args_kwargs(arg):
                 if isinstance(arg, tuple):
-                    prefix, suffix = r"|args=(\l", r",\n)\l"
+                    prefix, suffix = "(", ")"
                     arg_strs_list = [_format_arg(a, max_list_len=8) for a in arg]
                 elif isinstance(arg, dict):
-                    prefix, suffix = r"|kwargs={\l", r",\n}\l"
+                    prefix, suffix = r"{", r"}"
                     arg_strs_list = [
                         f"{k}: {_format_arg(v, max_list_len=8)}" for k, v in arg.items()
                     ]
@@ -235,27 +253,18 @@ if HAS_PYDOT:
                     arg_strs_list = [a for a in arg_strs_list if "%" not in a]
                 if len(arg_strs_list) == 0:
                     return ""
-                arg_strs = prefix + r",\n".join(arg_strs_list) + suffix
-                if len(arg_strs_list) == 1:
-                    arg_strs = arg_strs.replace(r"\l", "").replace(r"\n", "")
-                return arg_strs.replace("{", r"\{").replace("}", r"\}")
-
-            label = "{" + f"name=%{node.name}|op_code={node.op}\n"
-
+                arg_strs = prefix + r", ".join(arg_strs_list) + suffix
+                return html.escape(arg_strs)
+            
             if node.op == "call_module":
                 leaf_module = self._get_leaf_node(module, node)
-                label += r"\n" + self._typename(leaf_module) + r"\n|"
-                extra = ""
+                rows['leaf_module'] = self._typename(leaf_module)
+
                 if hasattr(leaf_module, "__constants__"):
-                    extra = r"\n".join(
-                        [
-                            f"{c}: {getattr(leaf_module, c)}"
-                            for c in leaf_module.__constants__  # type: ignore[union-attr]
-                        ]  # type: ignore[union-attr]
-                    )
-                label += extra + r"\n"
+                    for c in leaf_module.__constants__:
+                        rows[str(c)] = getattr(leaf_module, c)
             else:
-                label += f"|target={self._typename(node.target)}" + r"\n"
+                rows["target"] = self._typename(node.target)
                 if self.normalize_args:
                     try:
                         args, kwargs = normalize_function(  # type: ignore[misc]
@@ -270,114 +279,85 @@ if HAS_PYDOT:
                         args, kwargs = node.args, node.kwargs
                 else:
                     args, kwargs = node.args, node.kwargs
+
                 if len(args) > 0:
-                    label += _get_str_for_args_kwargs(args)
+                    args_str = _get_str_for_args_kwargs(args)
+                    if args_str:
+                        rows["args"] = args_str
                 if len(kwargs) > 0:
-                    label += _get_str_for_args_kwargs(kwargs)
-                label += f"|num_users={len(node.users)}" + r"\n"
+                    kwargs_str = _get_str_for_args_kwargs(kwargs)
+                    if kwargs_str:
+                        rows["kwargs"] = kwargs_str
+                rows["num_users"] = len(node.users)
 
             tensor_meta = node.meta.get("tensor_meta")
-            label += self._tensor_meta_to_label(tensor_meta)
+            rows.update(self._tensor_meta_to_label(tensor_meta))
 
             # for original fx graph
             # print buf=buf0, n_origin=6
             buf_meta = node.meta.get("buf_meta", None)
             if buf_meta is not None:
-                label += f"|buf={buf_meta.name}" + r"\n"
-                label += f"|n_origin={buf_meta.n_origin}" + r"\n"
+                rows["buf"] = buf_meta.name
+                rows["n_origin"] = buf_meta.n_origin
 
             # for original fx graph
             # print file:lineno code
             if parse_stack_trace and node.stack_trace is not None:
                 parsed_stack_trace = _parse_stack_trace(node.stack_trace)
                 fname = self._shorten_file_name(parsed_stack_trace.file)
-                label += (
-                    f"|file={fname}:{parsed_stack_trace.lineno} {parsed_stack_trace.code}"
-                    + r"\n"
-                )
+                rows["file"] = f"{fname}:{parsed_stack_trace.lineno} {parsed_stack_trace.code}"
 
-            return label + "}"
+            # Add extra info to the label
+            extra_info = self._extra_info()
+            rows.update(extra_info)
+            body = "\n".join(f"<tr><td>{k}</td><td>{v}</td></tr>" for k, v in rows.items())
+            return header + body + "</table>>"
 
         def _tensor_meta_to_label(self, tm) -> str:
             if tm is None:
                 return ""
             elif isinstance(tm, TensorMetadata):
-                return self._stringify_tensor_meta(tm)
-            elif isinstance(tm, list):
-                result = ""
-                for item in tm:
-                    result += self._tensor_meta_to_label(item)
-                return result
+                return self._htmlize_tensor_meta(tm)
+            elif isinstance(tm, (list, tuple)):
+                return "".join(self._tensor_meta_to_label(item) for item in tm)
             elif isinstance(tm, dict):
-                result = ""
-                for v in tm.values():
-                    result += self._tensor_meta_to_label(v)
-                return result
-            elif isinstance(tm, tuple):
-                result = ""
-                for item in tm:
-                    result += self._tensor_meta_to_label(item)
-                return result
+                return "".join(self._tensor_meta_to_label(v) for v in tm.values())
             else:
                 raise RuntimeError(f"Unsupported tensor meta type {type(tm)}")
 
-        def _stringify_tensor_meta(self, tm: TensorMetadata) -> str:
-            result = ""
-            if not hasattr(tm, "dtype"):
-                print("tm", tm)
-            result += "|" + "dtype" + "=" + str(tm.dtype) + r"\n"
-            result += "|" + "shape" + "=" + str(tuple(tm.shape)) + r"\n"
-            result += "|" + "requires_grad" + "=" + str(tm.requires_grad) + r"\n"
-            result += "|" + "stride" + "=" + str(tm.stride) + r"\n"
+        def _htmlize_tensor_meta(self, tm: TensorMetadata) -> str:
+            result = f"""
+            <tr><td>dtype</td><td>{tm.dtype}</td></tr>
+            <tr><td>shape</td><td>{tuple(tm.shape)}</td></tr>
+            <tr><td>requires_grad</td><td>{tm.requires_grad}</td></tr>
+            <tr><td>stride</td><td>{tm.stride}</td></tr>
+            """
             if tm.is_quantized:
                 assert tm.qparams is not None
                 assert "qscheme" in tm.qparams
                 qscheme = tm.qparams["qscheme"]
-                if qscheme in {
-                    torch.per_tensor_affine,
-                    torch.per_tensor_symmetric,
-                }:
-                    result += "|" + "q_scale" + "=" + str(tm.qparams["scale"]) + r"\n"
-                    result += (
-                        "|"
-                        + "q_zero_point"
-                        + "="
-                        + str(tm.qparams["zero_point"])
-                        + r"\n"
-                    )
+                if qscheme in {torch.per_tensor_affine, torch.per_tensor_symmetric}:
+                    result += f"""
+                    <tr><td>q_scale</td><td>{tm.qparams["scale"]}</td></tr>
+                    <tr><td>q_zero_point</td><td>{tm.qparams["zero_point"]}</td></tr>
+                    """
                 elif qscheme in {
                     torch.per_channel_affine,
                     torch.per_channel_symmetric,
                     torch.per_channel_affine_float_qparams,
                 }:
-                    result += (
-                        "|"
-                        + "q_per_channel_scale"
-                        + "="
-                        + str(tm.qparams["scale"])
-                        + r"\n"
-                    )
-                    result += (
-                        "|"
-                        + "q_per_channel_zero_point"
-                        + "="
-                        + str(tm.qparams["zero_point"])
-                        + r"\n"
-                    )
-                    result += (
-                        "|"
-                        + "q_per_channel_axis"
-                        + "="
-                        + str(tm.qparams["axis"])
-                        + r"\n"
-                    )
+                    result += f"""
+                    <tr><td>q_per_channel_scale</td><td>{tm.qparams["scale"]}</td></tr>
+                    <tr><td>q_per_channel_zero_point</td><td>{tm.qparams["zero_point"]}</td></tr>
+                    <tr><td>q_per_channel_axis</td><td>{tm.qparams["axis"]}</td></tr>
+                    """
                 else:
                     raise RuntimeError(f"Unsupported qscheme: {qscheme}")
-                result += "|" + "qscheme" + "=" + str(tm.qparams["qscheme"]) + r"\n"
+                result += f'<tr><td>qscheme</td><td>{tm.qparams["qscheme"]}</td></tr>'
             return result
 
-        def _get_tensor_label(self, t: torch.Tensor) -> str:
-            return str(t.dtype) + str(list(t.shape)) + r"\n"
+        def _get_html_tensor_label(self, t: torch.Tensor) -> str:
+            return f"<tr><td>tensor</td><td>{t.dtype}{list(t.shape)}</td></tr>"
 
         # when parse_stack_trace=True
         # print file:lineno code
@@ -398,7 +378,6 @@ if HAS_PYDOT:
 
             # "TB" means top-to-bottom rank direction in layout
             dot_graph = pydot.Dot(name, rankdir="TB")
-
             buf_name_to_subgraph = {}
 
             for node in graph_module.graph.nodes:
@@ -431,19 +410,26 @@ if HAS_PYDOT:
                     for pname, ptensor in chain(
                         leaf_module.named_parameters(), leaf_module.named_buffers()
                     ):
-                        pname1 = node.name + "." + pname
-                        label1 = (
-                            pname1 + "|op_code=get_" + "parameter"
+                        pname1 = f"{node.name}.{pname}"
+                        node_name = f'"{pname}"'
+                        param_type = (
+                            "parameter"
                             if isinstance(ptensor, torch.nn.Parameter)
-                            else "buffer" + r"\l"
+                            else "buffer"
                         )
+                        label = f"""<
+                        <table border="0" cellborder="0" cellspacing="0">
+                          <tr><td colspan="2"><b>{pname1}</b></td></tr>
+                          <tr><td>op_code</td><td>get_{param_type}</td></tr>
+                          {self._get_html_tensor_label(ptensor)}
+                        </table>>"""
                         dot_w_node = pydot.Node(
-                            pname1,
-                            label="{" + label1 + self._get_tensor_label(ptensor) + "}",
+                            node_name,
+                            label=label,
                             **_WEIGHT_TEMPLATE,
                         )
                         dot_graph.add_node(dot_w_node)
-                        dot_graph.add_edge(pydot.Edge(pname1, node.name))
+                        dot_graph.add_edge(pydot.Edge(node_name, node.name))
 
                 if node.op == "call_module":
                     leaf_module = self._get_leaf_node(graph_module, node)
