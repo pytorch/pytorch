@@ -17,6 +17,7 @@ from ..pattern_matcher import Arg, CallFunction, filter_nodes, KeywordArg, ListO
 from ..utils import pad_listlike
 from .freezing_patterns import register_freezing_graph_pattern
 from .post_grad import register_lowering_pattern
+import sys
 
 
 aten = torch.ops.aten
@@ -613,7 +614,7 @@ def _is_valid_quantized_op_binary_optimization_pattern(
             if "other" in match.kwargs
             else (
                 match.kwargs["accum"]
-                if output_dtype == torch.uint8 or (not extra_input_from_dequant)
+                if (output_dtype in {torch.uint8, torch.int8}) or (not extra_input_from_dequant)
                 else match.kwargs["accum_after_dequant"]
             )
         )
@@ -644,11 +645,11 @@ def _register_quantized_conv_binary_lowering(
         x, x_scale, x_zp = kwargs["x"], kwargs["x_scale"], kwargs["x_zp"]
         accum = (
             kwargs["accum"]
-            if output_dtype == torch.uint8
+            if (output_dtype in {torch.uint8, torch.int8})
             else kwargs["accum_after_dequant"]
         )
-        accum_scale = kwargs["accum_scale"] if output_dtype == torch.uint8 else 1.0
-        accum_zp = kwargs["accum_zp"] if output_dtype == torch.uint8 else 0
+        accum_scale = kwargs["accum_scale"] if (output_dtype in {torch.uint8, torch.int8}) else 1.0
+        accum_zp = kwargs["accum_zp"] if (output_dtype in {torch.uint8, torch.int8}) else 0
         packed_weight, w_scale, w_zp = (
             kwargs["packed_weight"],
             kwargs["w_scale"],
@@ -662,8 +663,8 @@ def _register_quantized_conv_binary_lowering(
             kwargs["groups"],
         )
         # Output QParams
-        o_inv_scale = kwargs["o_inv_scale"] if output_dtype == torch.uint8 else 1.0
-        o_zero_point = kwargs["o_zp"] if output_dtype == torch.uint8 else 0
+        o_inv_scale = kwargs["o_inv_scale"] if (output_dtype in {torch.uint8, torch.int8}) else 1.0
+        o_zero_point = kwargs["o_zp"] if (output_dtype in {torch.uint8, torch.int8}) else 0
 
         accum.realize()
         from .mkldnn_fusion import _can_be_inplace
