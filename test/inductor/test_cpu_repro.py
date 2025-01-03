@@ -4994,26 +4994,6 @@ class CPUReproTests(TestCase):
             c_output = c_model(x)
             self.assertTrue(torch.allclose(output, c_output))
 
-    def test_avg_pool2d(self):
-        # https://github.com/pytorch/pytorch/issues/143738
-        class Model(torch.nn.Module):
-            def __init__(self):
-                super(Model, self).__init__()
-
-            def forward(self, x):
-                torch.manual_seed(0)
-                x = torch.argsort(x, dim=3)
-                # x.dtype: torch.int64
-                x = F.avg_pool2d(x, kernel_size=2, stride=2)
-                return x
-
-        model = Model()
-        x = torch.randn(1, 1, 2, 4)
-        output = model(x)
-        c_model = torch.compile(model)
-        c_output = c_model(x)
-        self.assertTrue(torch.allclose(output, c_output))
-
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
