@@ -150,7 +150,11 @@ class CppWrapperCpu(PythonWrapperCodegen):
 
                 cpp_wrapper_src = (
                 '''
-                #include <pybind11/pybind11.h>
+                #include <optional>
+                #include <Python.h>
+
+                #define PYBIND11_SIMPLE_GIL_MANAGEMENT
+                #include <pybind11/gil.h>
                 namespace py = pybind11;
 
                 class RAIIPyObject {
@@ -1331,9 +1335,6 @@ class CppWrapperCpu(PythonWrapperCodegen):
             buffer.get_size(),
             buffer.get_stride(),
         )
-
-    def make_buffer_list(self, name, outputs):
-        return ""
 
     def make_allocation(self, name, device, dtype, shape, stride):
         orig_stride = stride

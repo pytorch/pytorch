@@ -1,5 +1,4 @@
 # Owner(s): ["module: unknown"]
-
 import contextlib
 import copy
 import inspect
@@ -1944,7 +1943,7 @@ class TestCompositeCompliance(TestCase):
                         output_grads_copy.append(output_grad.detach().clone())
                         output_grads.append(torch._lazy_clone(output_grad))
 
-                    input_grads = torch.autograd.grad(
+                    torch.autograd.grad(
                         results,
                         leaf_tensors,
                         output_grads,
@@ -2559,8 +2558,6 @@ fake_backward_skips = {
 }
 
 fake_backward_xfails = {skip(s) for s in fake_backward_skips} | {
-    xfail("fft.ihfftn"),  # Mismatch in aten._conj_physical.default
-    xfail("fft.ihfft2"),  # Mismatch in aten._conj_physical.default
     skip("nn.functional.ctc_loss"),
 }
 
