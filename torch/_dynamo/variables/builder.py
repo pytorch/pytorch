@@ -36,7 +36,11 @@ import sympy
 
 import torch
 from torch import SymInt
-from torch._dynamo.utils import get_metrics_context, is_torch_sym
+from torch._dynamo.utils import (
+    get_metrics_context,
+    is_torch_sym,
+    is_wrap_int_into_constant_vt,
+)
 from torch._guards import TracingContext
 from torch._higher_order_ops.torchbind import call_torchbind
 from torch._ops import HigherOrderOperator
@@ -81,7 +85,6 @@ from ..source import (
     GetItemSource,
     GradSource,
     is_constant_source,
-    is_from_defaults,
     is_from_optimizer_source,
     LocalSource,
     NumpyTensorSource,
@@ -400,20 +403,6 @@ class VariableBuilder:
             TensorWithTFOverrideVariable,
             UserDefinedObjectVariable,
             NumpyNdarrayVariable,
-        }
-
-    @staticmethod
-    @functools.lru_cache(None)
-    def _common_constants():
-        return {
-            # We zero-one specialize shapes, so specialize these constants
-            # too
-            0,
-            1,
-            # NB: There used to be more constants here, but honestly it was
-            # pretty confusing.  Note we specialize floats by default, and
-            # DON'T specialize ints by default.  This all only matters with
-            # dynamic_shapes
         }
 
     def get_source(self):
@@ -1546,31 +1535,7 @@ class VariableBuilder:
         if not config.specialize_int and type(value) is int:
             # unspecializing int by default, but still
             # specialize for the following conditions
-            if not TracingContext.get().force_unspec_int_unbacked_size_like and (
-                # Assume integers from global variables want to be specialized
-                not self.source.guard_source().is_local()
-                # Assume that integers that came from NN modules want to be
-                # specialized (as we don't expect users to be changing the
-                # NN modules on the fly), unless explicitly disabled
-                or (
-                    self.source.guard_source().is_specialized_nn_module()
-                    and not config.allow_unspec_int_on_nn_module
-                )
-                or (
-                    self.source.guard_source().is_unspecialized_builtin_nn_module()
-                    and not config.allow_unspec_int_on_nn_module
-                )
-                or is_from_defaults(self.source)
-                # TODO: Delete this condition when rollout is done.  NB: this
-                # condition never evaluates True in open source
-                or (
-                    not justknobs_check(
-                        "pytorch/dynamo:enable_unspecialize_zero_one_plain_int"
-                    )
-                    and value in self._common_constants()
-                )
-                or isinstance(self.source, ConstDictKeySource)
-            ):
+            if is_wrap_int_into_constant_vt(value, self.source):
                 self.install_guards(GuardBuilder.CONSTANT_MATCH)
                 return ConstantVariable.create(value=value, source=self.source)
             else:
