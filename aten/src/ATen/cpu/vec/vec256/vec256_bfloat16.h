@@ -628,7 +628,16 @@ private:
     auto o2 = op(a_hi, b_hi);
     return cvt_from_fp32<T, /*is_compare_op*/true>(o1, o2);
   }
-
+  template<typename Op>
+  Vectorized<T> inline binary_compare(const Vectorized16<T>& b, Op op) const {
+    __m256 a_lo, a_hi;
+    __m256 b_lo, b_hi;
+    cvt_to_fp32<T>(values, a_lo, a_hi);
+    cvt_to_fp32<T>(b.values, b_lo, b_hi);
+    auto o1 = op(a_lo, b_lo);
+    auto o2 = op(a_hi, b_hi);
+    return cvt_from_fp32<T, /*is_compare_op*/true>(o1, o2);
+  }
 public:
   Vectorized<T> inline operator>(const Vectorized<T>& other) const {
     return binary_compare(other, [](__m256 x, __m256 y) { return _mm256_cmp_ps(x, y, _CMP_GT_OQ); });
@@ -642,10 +651,10 @@ public:
   Vectorized<T> inline operator<=(const Vectorized<T>& other) const {
     return binary_compare(other, [](__m256 x, __m256 y) { return _mm256_cmp_ps(x, y, _CMP_LE_OQ); });
   }
-  Vectorized<T> inline operator==(const Vectorized<T>& other) const {
+  Vectorized<T> inline operator==(const Vectorized16<T>& other) const {
     return binary_compare(other, [](__m256 x, __m256 y) { return _mm256_cmp_ps(x, y, _CMP_EQ_OQ); });
   }
-  Vectorized<T> inline operator!=(const Vectorized<T>& other) const {
+  Vectorized<T> inline operator!=(const Vectorized16<T>& other) const {
     return binary_compare(other, [](__m256 x, __m256 y) { return _mm256_cmp_ps(x, y, _CMP_NEQ_UQ); });
   }
 };

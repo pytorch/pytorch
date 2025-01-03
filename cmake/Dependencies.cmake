@@ -1193,7 +1193,10 @@ if(USE_GLOO)
         set(NCCL_EXTERNAL ON)
       endif()
       set(GLOO_USE_CUDA_TOOLKIT ON CACHE BOOL "" FORCE)
+      set(__CMAKE_CXX_STANDARD ${CMAKE_CXX_STANDARD})
+      set(CMAKE_CXX_STANDARD 17)
       add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../third_party/gloo)
+      set(CMAKE_CXX_STANDARD ${__CMAKE_CXX_STANDARD})
       # Here is a little bit hacky. We have to put PROJECT_BINARY_DIR in front
       # of PROJECT_SOURCE_DIR with/without conda system. The reason is that
       # gloo generates a new config.h in the binary diretory.
