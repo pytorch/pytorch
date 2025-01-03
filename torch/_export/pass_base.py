@@ -173,7 +173,7 @@ class _ExportPassBaseDeprecatedDoNotUse(PassBase):
             args: Tuple[Argument, ...],
             kwargs: Dict[str, Argument],
         ) -> ProxyValue:
-            return self.callback.output(args[0], NodeMetadata(self.node.meta)).data
+            return self.callback.output(args[0], NodeMetadata(self.node.meta)).data  # type: ignore[return-value]
 
         def call_function(
             self,
