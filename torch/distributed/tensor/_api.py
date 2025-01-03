@@ -812,17 +812,10 @@ def _shard_tensor(
         >>> full_tensor = torch.arange(world_size, device=f"cuda:{rank}")
         >>> dtensor = _shard_tensor(full_tensor, [Shard(1)], device_mesh)
     """
-    device_mesh = device_mesh or _mesh_resources.get_current_mesh()
-
-    shape, offset = compute_local_shape_and_global_offset(
-        full_tensor.shape, device_mesh, placements
+    warnings.warn(
+        "This API is deprecated, please use `distribute_tensor` with `src_data_rank=None` instead."
     )
-    slices = [
-        slice(cur_offset, cur_offset + cur_shape)
-        for cur_shape, cur_offset in zip(shape, offset)
-    ]
-    local_tensor = full_tensor[slices]
-    return DTensor.from_local(local_tensor, device_mesh, placements)
+    return distribute_tensor(full_tensor, device_mesh, placements, src_data_rank=None)
 
 
 def distribute_module(
