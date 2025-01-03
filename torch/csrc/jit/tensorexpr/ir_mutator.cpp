@@ -108,7 +108,6 @@ ExprPtr IRMutator::mutate(const CompareSelectPtr& v) {
   return v;
 }
 
-// NOLINTNEXTLINE
 #define IMM_MUTATE_DEFINE(_1, Name)                  \
   ExprPtr IRMutator::mutate(const Name##ImmPtr& v) { \
     return v;                                        \

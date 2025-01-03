@@ -17,7 +17,7 @@ from tools.testing.target_determination.heuristics.utils import (
 from tools.testing.test_run import TestRun
 
 
-REPO_ROOT = Path(__file__).parent.parent.parent.parent
+REPO_ROOT = Path(__file__).parents[3]
 
 keyword_synonyms: dict[str, list[str]] = {
     "amp": ["mixed_precision"],

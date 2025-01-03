@@ -20,6 +20,7 @@ from typing import (
     TypeVar,
     Union,
 )
+from typing_extensions import ParamSpec
 from unittest.mock import patch
 
 import torch
@@ -51,6 +52,8 @@ three = 3
 
 log = logging.getLogger(__name__)
 
+_P = ParamSpec("_P")
+
 
 def clone_me(x: Optional[torch.Tensor]) -> Optional[torch.Tensor]:
     if x is None:
@@ -60,6 +63,23 @@ def clone_me(x: Optional[torch.Tensor]) -> Optional[torch.Tensor]:
 
 def remove_optimized_module_prefix(name: str) -> str:
     return re.sub(r"^_orig_mod[.]", "", name)
+
+
+def extract_graph_and_tracker(fn, *args, **kwargs):  # type: ignore[no-untyped-def]
+    from torch._dynamo.symbolic_convert import InstructionTranslator
+
+    gm = None
+    region_tracker = None
+
+    def extract_graph_backend(_gm, *args, **kwargs):  # type: ignore[no-untyped-def]
+        nonlocal gm
+        nonlocal region_tracker
+        gm = _gm
+        region_tracker = InstructionTranslator.current_tx().output.region_tracker
+        return _gm
+
+    torch.compile(backend=extract_graph_backend, fullgraph=True)(fn)(*args, **kwargs)
+    return gm.graph, region_tracker  # type: ignore[union-attr]
 
 
 def collect_results(
@@ -95,9 +115,7 @@ def collect_results(
     results.append(buffers)
     for example in example_inputs:
         if isinstance(example, (tuple, list)):
-            for inp in example:
-                if isinstance(inp, torch.Tensor):
-                    results.append(inp.grad)
+            results.extend(inp.grad for inp in example if isinstance(inp, torch.Tensor))
         else:
             if isinstance(example, torch.Tensor):
                 results.append(example.grad)
@@ -192,7 +210,11 @@ def debug_insert_nops(
         torch_function_mode_stack=[],
     )
 
-    return GuardedCode(code, CheckFunctionManager(graph).guard_manager, CompileId(0, 0))  # type: ignore[arg-type]
+    return GuardedCode(
+        code,
+        CheckFunctionManager(frame.f_code, graph).guard_manager,  # type: ignore[arg-type]
+        CompileId(frame_id=0, frame_compile_id=0),
+    )
 
 
 class CompileCounter:
@@ -388,9 +410,9 @@ def check_dynamic_shape_capture() -> bool:
     return not config.assume_static_by_default
 
 
-def _make_fn_with_patches(fn: Callable[..., _T], *patches: Any) -> Callable[..., _T]:
+def _make_fn_with_patches(fn: Callable[_P, _T], *patches: Any) -> Callable[_P, _T]:
     @functools.wraps(fn)
-    def _fn(*args: Any, **kwargs: Any) -> _T:
+    def _fn(*args: _P.args, **kwargs: _P.kwargs) -> _T:
         with contextlib.ExitStack() as stack:
             for module, attr, val in patches:
                 stack.enter_context(patch.object(module, attr, val))

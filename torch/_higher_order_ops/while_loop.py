@@ -1,5 +1,5 @@
 # mypy: allow-untyped-defs
-from typing import Callable, Tuple, Union
+from typing import Callable, List, Tuple, Union
 
 import torch
 import torch.utils._pytree as pytree
@@ -10,6 +10,7 @@ from torch._higher_order_ops.utils import (
     _maybe_run_with_interpreter,
     _set_compilation_env,
     autograd_not_implemented,
+    diff_tensor_meta,
     reenter_make_fx,
     UnsupportedAliasMutationException,
     validate_subgraph_args_types,
@@ -21,6 +22,7 @@ from torch.fx.experimental.proxy_tensor import (
     ProxyTorchDispatchMode,
     track_tensor_tree,
 )
+from torch.fx.passes.shape_prop import _extract_tensor_metadata
 
 
 class WhileLoopOp(HigherOrderOperator):
@@ -32,7 +34,7 @@ class WhileLoopOp(HigherOrderOperator):
         cond_fn: Callable,
         body_fn: Callable,
         carried_inputs: Tuple[Union[torch.Tensor, int, float, bool]],
-        additional_inputs: Tuple[Union[torch.Tensor, int, float, bool]],
+        additional_inputs: Tuple[Union[torch.Tensor, torch.SymInt, int], ...],
         /,
     ):
         if not isinstance(carried_inputs, tuple):
@@ -44,14 +46,7 @@ class WhileLoopOp(HigherOrderOperator):
                 f"additional_inputs must be a tuple, got {type(additional_inputs)}"
             )
 
-        if not all(
-            isinstance(t, (torch.Tensor, int, float, bool)) for t in carried_inputs
-        ):
-            raise RuntimeError(
-                "carried_inputs must be a tuple of tensors, ints, floats, or bools, got "
-                f"{carried_inputs}"
-            )
-
+        validate_subgraph_args_types(carried_inputs)
         validate_subgraph_args_types(additional_inputs)
         return super().__call__(cond_fn, body_fn, carried_inputs, additional_inputs)
 
@@ -120,16 +115,34 @@ def while_loop(cond_fn, body_fn, carried_inputs):
     # Currently, additional_inputs is not a user-facing input. It will be automatically set in dynamo.
     # parameters and buffers accessed in cond_fn or body_fn or tensor closures will become additional_inputs.
     additional_inputs: Tuple = ()
+
+    # The reason we flatten the output before calling into dynamo is that
+    # we want to create a consistent input ordering for cond_fn and body_fn.
+    # and we also want to the input ordering matches the output ordering.
+    # Also see NOTE: [why we cannot use "automatic" for while_loop]
+    # Construct flat cond_fn and flat_body_fn, which takes flattened inputs
+    flat_inputs, in_spec = pytree.tree_flatten((carried_inputs, additional_inputs))
+
+    def flat_cond_fn(*flat_args):
+        carried, additional = pytree.tree_unflatten(flat_args, in_spec)
+        return cond_fn(*carried, *additional)
+
+    def flat_body_fn(*flat_args):
+        carried, additional = pytree.tree_unflatten(flat_args, in_spec)
+        return body_fn(*carried, *additional)
+
     if torch.compiler.is_dynamo_compiling():
-        return while_loop_op(cond_fn, body_fn, carried_inputs, additional_inputs)
+        return while_loop_op(flat_cond_fn, flat_body_fn, tuple(flat_inputs), tuple())
 
     def _validate_input(cond_fn, body_fn, carried_inputs):
+        from torch._higher_order_ops.utils import validate_subgraph_args_types
+
         if not callable(cond_fn) or not callable(body_fn):
             raise RuntimeError("Expect cond_fn and body_fn to be callable.")
 
-        if not isinstance(carried_inputs, (tuple, list)) or pytree.tree_any(
-            lambda t: not isinstance(t, torch.Tensor), carried_inputs
-        ):
+        validate_subgraph_args_types(flat_inputs)
+
+        if not pytree.tree_all(lambda t: isinstance(t, torch.Tensor), carried_inputs):
             raise RuntimeError(
                 "Expect carried_inputs to be a tuple of possibly nested dict/list/tuple that only"
                 f"consists of tensor leaves, but got {carried_inputs}."
@@ -151,7 +164,7 @@ def while_loop(cond_fn, body_fn, carried_inputs):
                     backend = "eager"
                 return torch.compile(
                     _while_loop_op_wrapper, backend=backend, fullgraph=True
-                )(cond_fn, body_fn, carried_inputs, additional_inputs)
+                )(flat_cond_fn, flat_body_fn, tuple(flat_inputs), tuple())
 
 
 @while_loop_op.py_impl(DispatchKey.CompositeExplicitAutograd)
@@ -222,9 +235,7 @@ def while_loop_tracing(mode, cond_fn, body_fn, carried_inputs, additional_inputs
             "call_function", while_loop_op, proxy_args, {}, name="while_loop"
         )
 
-        # body_fn return output with the same pytree and tensor meta data as carried_inputs
-        # so we could just return the output after one iteration.
-        out = body_fn(*carried_inputs, *additional_inputs)
+        out = while_loop_op(cond_graph, body_graph, carried_inputs, additional_inputs)
         return track_tensor_tree(
             out, out_proxy, constant=None, tracer=proxy_mode.tracer
         )
@@ -234,12 +245,64 @@ def while_loop_tracing(mode, cond_fn, body_fn, carried_inputs, additional_inputs
     )
 
 
+def check_outputs_carry_consistency(
+    outs: List[torch.Tensor], carries: List[torch.Tensor]
+) -> None:
+    all_diffs_in_meta = []
+    for out, cry in zip(outs, carries):
+        if diff := diff_tensor_meta(
+            _extract_tensor_metadata(cry), _extract_tensor_metadata(out)
+        ):
+            all_diffs_in_meta.append(",".join(diff))
+    if all_diffs_in_meta:
+        diff_str = "\n".join(all_diffs_in_meta)
+        raise RuntimeError(
+            f"Expected carried_inputs and body outputs return tensors with same metadata but found:\n{diff_str}"
+        )
+
+
 @while_loop_op.py_impl(FakeTensorMode)
 def while_loop_fake_tensor_mode(
     mode, cond_fn, body_fn, carried_inputs, additional_inputs
 ):
     with mode:
-        return body_fn(*carried_inputs, *additional_inputs)
+        # NOTE: [Handling unback symints created in subgraph of while_loop]
+        # The idea is that the scope of unbacked symints are limited to the subgraph.
+        #
+        # We're implementing the fake tensor mode of while_loop operator.
+        # and we run body_fn once to get an fake output.
+        # Let's only consider tensor output for now:
+        #
+        # Case 1:
+        # if the unbacked symints is local to the subgraph e.g.
+        #   def body_fn(it, x):
+        #     nz = x.nonzero()
+        #     return it+1. nz.sum()
+        # we can just ignore the newly created unbacked symints because it has
+        # no effect on the output of while_loop and it's tracked when we tracing.
+        # the subgraph.
+        #
+        # Case 2.1:
+        # if the unbacked symints are part of output of while_loop e.g.
+        #   def body_fn(it, x):
+        #     nz = x.nonzero()
+        #     return it+1, nz
+        # This will fail the shape check because in each iteration, the carried_input's shape
+        # must match the output shape as nz.shape contains newly allocated unbacked symint, this
+        # won't match the carried_input's shape.
+        #
+        # Case 2.2:
+        # if the unbacked symints are part of carried_inputs e.g.
+        #   nz = a.nonzero()
+        #   body_fn(it, nz):
+        #     return it+1. nz.sin() + 1,
+        # There's no new unbacked symints allocated in subgraph, so we're safe.
+        with mode.shape_env.ignore_fresh_unbacked_symbols():
+            # body_fn return output with the same pytree and tensor meta data as carried_inputs
+            # so we could just return the output after one iteration.
+            body_outs = body_fn(*carried_inputs, *additional_inputs)
+            check_outputs_carry_consistency(body_outs, carried_inputs)
+            return body_outs
 
 
 @while_loop_op.py_functionalize_impl
@@ -247,7 +310,7 @@ def while_loop_func(ctx, cond_fn, body_fn, carried_inputs, additional_inputs):
     unwrapped_carried_inputs = ctx.unwrap_tensors(carried_inputs)
     unwrapped_additional_inputs = ctx.unwrap_tensors(additional_inputs)
     unwrapped_inputs = unwrapped_carried_inputs + unwrapped_additional_inputs
-    with ctx.redispatch_to_next() as m:
+    with ctx.redispatch_to_next():
         functional_cond_fn = ctx.functionalize(_maybe_run_with_interpreter(cond_fn))
         functional_body_fn = ctx.functionalize(_maybe_run_with_interpreter(body_fn))
         pre_dispatch = hasattr(ctx, "mode") and ctx.mode.pre_dispatch

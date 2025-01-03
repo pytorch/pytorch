@@ -367,13 +367,30 @@ def clear_tracked_input():
 # Wraps an iterator and tracks the most recent value the iterator produces
 # for debugging purposes. Tracked values are stored on the test function.
 class TrackedInputIter:
-    def __init__(self, child_iter, input_type_desc,
-                 callback=lambda x: x, set_seed=True, restrict_to_index=None):
+    def __init__(
+        self,
+        child_iter,
+        input_type_desc,
+        item_callback=None,
+        track_callback=None,
+        set_seed=True,
+        restrict_to_index=None
+    ):
         self.child_iter = enumerate(child_iter)
         # Input type describes the things we're tracking (e.g. "sample input", "error input").
         self.input_type_desc = input_type_desc
-        # Callback is run on each iterated thing to get the thing to track.
-        self.callback = callback
+        # NB: The two types of callbacks below exist because the thing we want to track isn't
+        # always the same as the thing we want returned from the iterator. An example of this
+        # is ErrorInput, which we want returned from the iterator, but which contains a
+        # SampleInput that we want to track.
+        # Item callback is run on each (iterated thing, index) to get the thing to return.
+        self.item_callback = item_callback
+        if self.item_callback is None:
+            self.item_callback = lambda x, i: x
+        # Track callback is run on each iterated thing to get the thing to track.
+        self.track_callback = track_callback
+        if self.track_callback is None:
+            self.track_callback = lambda x: x
         self.test_fn = extract_test_fn()
         # Indicates whether the random seed should be set before each call to the iterator
         self.set_seed = set_seed
@@ -402,10 +419,10 @@ class TrackedInputIter:
 
         self._set_tracked_input(
             TrackedInput(
-                index=input_idx, val=self.callback(input_val), type_desc=self.input_type_desc
+                index=input_idx, val=self.track_callback(input_val), type_desc=self.input_type_desc
             )
         )
-        return input_val
+        return self.item_callback(input_val, input_idx)
 
     def _set_tracked_input(self, tracked_input: TrackedInput):
         if self.test_fn is None:
@@ -1341,6 +1358,7 @@ IS_MACOS = sys.platform == "darwin"
 IS_PPC = platform.machine() == "ppc64le"
 IS_X86 = platform.machine() in ('x86_64', 'i386')
 IS_ARM64 = platform.machine() in ('arm64', 'aarch64')
+IS_S390X = platform.machine() == "s390x"
 
 def is_avx512_vnni_supported():
     if sys.platform != 'linux':
@@ -1403,6 +1421,7 @@ TEST_NUMPY = _check_module_exists('numpy')
 TEST_FAIRSEQ = _check_module_exists('fairseq')
 TEST_SCIPY = _check_module_exists('scipy')
 TEST_MKL = torch.backends.mkl.is_available()
+TEST_ACL = torch.backends.mkldnn.is_available() and torch.ops.mkldnn._is_mkldnn_acl_supported()
 TEST_MPS = torch.backends.mps.is_available()
 MACOS_VERSION = float('.'.join(platform.mac_ver()[0].split('.')[:2]) or -1)
 TEST_XPU = torch.xpu.is_available()
@@ -1555,17 +1574,25 @@ TEST_WITH_TORCHDYNAMO: bool = TestEnvironment.def_flag(
 if TEST_WITH_TORCHDYNAMO:
     import torch._dynamo
     # Do not spend time on helper functions that are called with different inputs
-    torch._dynamo.config.accumulated_cache_size_limit = 64
+    torch._dynamo.config.accumulated_recompile_limit = 64
     # Do not log compilation metrics from unit tests
     torch._dynamo.config.log_compilation_metrics = False
+    # Silence 3.13.0 guard performance warnings
+    torch._dynamo.config.issue_3_13_0_warning = False
     if TEST_WITH_TORCHINDUCTOR:
         import torch._inductor.config
         torch._inductor.config.fallback_random = True
 
 
-def xpassIfTorchDynamo(func):
+# seems like this is only used in test/torch_np
+def xpassIfTorchDynamo_np(func):
+    # numpy 2.0+ is causing issues
+    if TEST_WITH_TORCHDYNAMO and np.__version__[0] == '2':
+        return unittest.skip("skipping numpy 2.0+ dynamo-wrapped test")(func)
     return func if TEST_WITH_TORCHDYNAMO else unittest.expectedFailure(func)
 
+def xfailIfACL(func):
+    return unittest.expectedFailure(func) if TEST_ACL else func
 
 def xfailIfTorchDynamo(func):
     return unittest.expectedFailure(func) if TEST_WITH_TORCHDYNAMO else func
@@ -1843,6 +1870,9 @@ def runOnRocmArch(arch: Tuple[str, ...]):
             return fn(self, *args, **kwargs)
         return wrap_fn
     return dec_fn
+
+def xfailIfS390X(func):
+    return unittest.expectedFailure(func) if IS_S390X else func
 
 def skipIfXpu(func=None, *, msg="test doesn't currently work on the XPU stack"):
     def dec_fn(fn):
@@ -2174,6 +2204,14 @@ def skip_if_pytest(fn):
 
     return wrapped
 
+def skipIfNoXPU(fn):
+    @wraps(fn)
+    def wrapper(*args, **kwargs):
+        if not TEST_XPU:
+            raise unittest.SkipTest("test required PyTorched compiled with XPU")
+        else:
+            fn(*args, **kwargs)
+    return wrapper
 
 def slowTest(fn):
     @wraps(fn)
@@ -2532,7 +2570,7 @@ try:
         "pytorch_ci" if IS_CI else os.getenv('PYTORCH_HYPOTHESIS_PROFILE', 'dev')
     )
 except ImportError:
-    print('Fail to import hypothesis in common_utils, tests are not derandomized')
+    warnings.warn('Fail to import hypothesis in common_utils, tests are not derandomized', ImportWarning)
 
 # Used in check_if_enable to see if a test method should be disabled by an issue,
 # sanitizes a test method name from appended suffixes by @dtypes parametrization.
@@ -4428,7 +4466,7 @@ def retry(ExceptionToCheck, tries=3, delay=3, skip_after_retries=False):
                 try:
                     return f(*args, **kwargs)
                 except ExceptionToCheck as e:
-                    msg = "%s, Retrying in %d seconds..." % (str(e), mdelay)
+                    msg = f"{e}, Retrying in {mdelay:d} seconds..."
                     print(msg)
                     time.sleep(mdelay)
                     mtries -= 1
@@ -4652,8 +4690,7 @@ def _generate_indices_prefer_all_rows(rows: int, cols: int, num_indices: int) ->
 
     for r in range(rows):
         # Note that this can yield overlapping indices
-        for c in random.choices(col_indices, k=n_per_row):
-            indices.append((r, c))
+        indices.extend((r, c) for c in random.choices(col_indices, k=n_per_row))
 
     return torch.tensor(indices[:num_indices])
 
@@ -4971,7 +5008,7 @@ def find_library_location(lib_name: str) -> Path:
     path = torch_root / 'lib' / lib_name
     if os.path.exists(path):
         return path
-    torch_root = Path(__file__).resolve().parent.parent.parent
+    torch_root = Path(__file__).resolve().parents[2]
     return torch_root / 'build' / 'lib' / lib_name
 
 def skip_but_pass_in_sandcastle(reason):
@@ -5148,9 +5185,7 @@ def get_cycles_per_ms() -> float:
     # and seems to return stable values. Therefore, we enable caching
     # using lru_cache decorator above.
     num = 10
-    vals = []
-    for _ in range(num):
-        vals.append(measure())
+    vals = [measure() for _ in range(num)]
     vals = sorted(vals)
     return mean(vals[2 : num - 2])
 

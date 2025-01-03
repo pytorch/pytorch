@@ -1,0 +1,41 @@
+# Basic tests
+
+ignored = set()  # noqa: set_linter
+a = set()
+b = "set()"
+c = set
+d = c.set
+f = (
+   set(
+   )
+)
+ignored = (
+   set(  # noqa: set_linter
+   )
+)
+
+# Non-sets
+
+d = {}
+long_string = """ set()
+set() set x.set set()
+\""""
+
+class A:
+    def set(self, x):
+        self.x = x
+
+set = A().set
+
+# Braced sets
+
+set1 = {1}
+set2 = {1, 2}
+
+iterator_set = {i for i in range(10)}
+
+# A dict with two sets.
+dict_set = {"a": {2, 3}, "b": {i for i in range(3)}}
+
+# A set containing an object constructed with a dict and a set
+sos_set = {Something({i: i + 1 for i in range(3)}, {i + 1 for i in range(3)})}

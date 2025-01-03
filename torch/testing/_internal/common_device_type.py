@@ -1135,6 +1135,16 @@ class ops(_TestParametrizer):
             # See [Note: device and dtype suffix placement]
             test_name = op.formatted_name
 
+            # Filter sample skips / xfails to only those that apply to the OpInfo.
+            # These are defined on the test function via decorators.
+            sample_skips_and_xfails = getattr(test, "sample_skips_and_xfails", None)
+            if sample_skips_and_xfails is not None:
+                sample_skips_and_xfails = [
+                    rule
+                    for rule in sample_skips_and_xfails
+                    if rule.op_match_fn(device_cls.device_type, op)
+                ]
+
             for dtype in dtypes:
                 # Construct parameter kwargs to pass to the test.
                 param_kwargs = {"op": op}
@@ -1183,6 +1193,9 @@ class ops(_TestParametrizer):
                         device_cls.device_type,
                         dtype,
                     )
+
+                    if sample_skips_and_xfails is not None:
+                        test_wrapper.sample_skips_and_xfails = sample_skips_and_xfails
 
                     yield (test_wrapper, test_name, param_kwargs, decorator_fn)
                 except Exception as ex:
@@ -1299,7 +1312,10 @@ def _has_sufficient_memory(device, size):
         # torch.cuda.mem_get_info, aka cudaMemGetInfo, returns a tuple of (free memory, total memory) of a GPU
         if device == "cuda":
             device = "cuda:0"
-        return torch.cuda.memory.mem_get_info(device)[0] >= size
+        return (
+            torch.cuda.memory.mem_get_info(device)[0]
+            * torch.cuda.memory.get_per_process_memory_fraction(device)
+        ) >= size
 
     if device == "xla":
         raise unittest.SkipTest("TODO: Memory availability checks for XLA?")
@@ -1833,7 +1849,7 @@ def skipCUDAIfNotMiopenSuggestNHWC(fn):
 
 
 # Skips a test for specified CUDA versions, given in the form of a list of [major, minor]s.
-def skipCUDAVersionIn(versions: List[Tuple[int, int]] = None):
+def skipCUDAVersionIn(versions: Optional[List[Tuple[int, int]]] = None):
     def dec_fn(fn):
         @wraps(fn)
         def wrap_fn(self, *args, **kwargs):
@@ -1851,7 +1867,7 @@ def skipCUDAVersionIn(versions: List[Tuple[int, int]] = None):
 
 
 # Skips a test for CUDA versions less than specified, given in the form of [major, minor].
-def skipCUDAIfVersionLessThan(versions: Tuple[int, int] = None):
+def skipCUDAIfVersionLessThan(versions: Optional[Tuple[int, int]] = None):
     def dec_fn(fn):
         @wraps(fn)
         def wrap_fn(self, *args, **kwargs):

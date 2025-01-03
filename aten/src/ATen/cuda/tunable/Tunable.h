@@ -11,6 +11,7 @@
 
 #include <c10/util/CallOnce.h>
 #include <c10/util/StringUtil.h>
+#include <c10/util/env.h>
 
 #include <fstream>
 #include <functional>
@@ -22,45 +23,12 @@
 #include <unordered_set>
 #include <utility>
 
-namespace at::cuda::tunable {
-
-namespace detail {
-
-struct MaybeDelete {
-  bool owns_pointer;
-  void operator()(std::ostream* os) const { if (owns_pointer) delete os; }
-};
-
-using OstreamPtr = std::unique_ptr<std::ostream, MaybeDelete>;
-
-inline OstreamPtr get_stream(const std::string& filename) {
-  if (filename == "out") {
-    return OstreamPtr { &std::cout, MaybeDelete {false} };
-  }
-  else if (filename == "err") {
-    return OstreamPtr { &std::cerr, MaybeDelete {false} };
-  }
-  else {
-    return OstreamPtr { new std::ofstream {filename.c_str()}, MaybeDelete {true} };
-  }
-}
-
-}
-
-template<class... Types>
-static void TunableLog(int level, Types... args) {
-  static const char *env_file = getenv("PYTORCH_TUNABLEOP_VERBOSE_FILENAME");
-  static const char *env_verbose = getenv("PYTORCH_TUNABLEOP_VERBOSE");
-  static int level_user = env_verbose ? atoi(env_verbose) : 0;
-  static auto streamptr = detail::get_stream(env_file ? env_file : "err");
-  if (level_user >= level) {
-    (*streamptr) << c10::str(args...) << std::endl;
-  }
-}
-#define TUNABLE_LOGV(LEVEL, ...) TunableLog(LEVEL, __VA_ARGS__)
+#define TUNABLE_LOGV(LEVEL, ...) getTuningContext()->Log(LEVEL, __VA_ARGS__)
 #define TUNABLE_LOG1(...) TUNABLE_LOGV(1, __VA_ARGS__)
 #define TUNABLE_LOG2(...) TUNABLE_LOGV(2, __VA_ARGS__)
 #define TUNABLE_LOG3(...) TUNABLE_LOGV(3, __VA_ARGS__)
+
+namespace at::cuda::tunable {
 
 enum TORCH_CUDA_CPP_API TuningStatus {
   OK = 0,
@@ -219,7 +187,19 @@ class TORCH_CUDA_CPP_API TuningContext {
     bool ReadFile(const std::string& filename={});
     bool WriteFile(const std::string& filename={});
 
+    template<class... Types>
+    void Log(int level, Types... args) {
+      if (GetLogOkay() && GetLogLevel() >= level) {
+        GetLog() << c10::str(args...) << std::endl;
+      }
+    }
+
   private:
+    std::string GetLogFilename() const;
+    int GetLogLevel() const;
+    bool GetLogOkay() const;
+    std::ostream& GetLog() const;
+
     bool enable_;
     bool tuning_enable_;
     bool record_untuned_enable_;
@@ -238,6 +218,7 @@ class TORCH_CUDA_CPP_API TuningContext {
     std::string filename_;
     std::ofstream untuned_file_;
     size_t results_count_from_input_file_;
+    bool is_shutting_down_;
 };
 
 TORCH_CUDA_CPP_API TuningContext* getTuningContext();
