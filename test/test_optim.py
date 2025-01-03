@@ -1323,7 +1323,7 @@ class TestOptimRenewed(TestCase):
                 )
 
             if kwargs.get("differentiable", False):
-                params = [param.clone()]
+                params = [param.detach()]
             else:
                 params = [param]
 
@@ -1350,14 +1350,11 @@ class TestOptimRenewed(TestCase):
         )
         param = torch.randn((5, 1), device=device, dtype=dtype, requires_grad=True)
 
-        def closure():
-            return torch.tensor([1], device=device, dtype=dtype)
-
         for optim_input in all_optim_inputs:
             kwargs = optim_input.kwargs
 
             if kwargs.get("differentiable", False):
-                params = [param.clone()]
+                params = [param.detach()]
             else:
                 params = [param]
 
@@ -1377,7 +1374,7 @@ class TestOptimRenewed(TestCase):
             old_version = params[0].grad._version
 
             for _ in range(5):
-                optimizer.step(closure)
+                optimizer.step()
                 self.assertEqual(params[0].grad._version, old_version)
 
     @optims(optim_db, dtypes=[torch.float32])
