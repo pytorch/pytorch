@@ -389,7 +389,7 @@ def _pre_forward(
         if handle and handle._offload_params and handle.flat_param._cpu_grad is None:
             handle.flat_param._cpu_grad = torch.zeros_like(
                 handle.flat_param._local_shard, device=torch.device("cpu")
-            ).pin_memory(device=state.compute_device)
+            ).pin_memory()
 
         should_cast_forward_inputs = (
             state._handle and not state._handle._force_full_precision
