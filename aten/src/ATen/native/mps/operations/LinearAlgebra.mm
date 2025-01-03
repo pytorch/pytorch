@@ -767,6 +767,12 @@ static Tensor& linalg_cholesky_mps_impl(const Tensor& input, bool upper, Tensor&
   if (!input.is_contiguous()) {
     input_ = input.clone(at::MemoryFormat::Contiguous);
   }
+  uint64_t batchSize = input_.sizes().size() > 2 ? input_.size(0) : 1;
+  std::vector<Tensor> status_tensors;
+  status_tensors.reserve(batchSize);
+  for ([[maybe_unused]] const auto i : c10::irange(batchSize)) {
+    status_tensors.push_back(at::zeros(1, kInt, std::nullopt, kMPS, std::nullopt));
+  }
   id<MTLBuffer> bufferIn = getMTLBufferStorage(input_);
   id<MTLBuffer> bufferOut = getMTLBufferStorage(out);
   MPSStream* mpsStream = getCurrentMPSStream();
@@ -774,13 +780,10 @@ static Tensor& linalg_cholesky_mps_impl(const Tensor& input, bool upper, Tensor&
 
   dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
     @autoreleasepool {
-      // TODO Irakli add caching of the key here, example:
-      // string key = (opType == ADDBMM_OP_TYPE) ? ("addbmm_out_mps_impl") : ("baddbmm_out_mps_impl");
       mpsStream->endKernelCoalescing();
       id<MTLCommandBuffer> commandBuffer = mpsStream->commandBuffer();
 
       const int64_t n = out.size(-1);
-      const int64_t lda = n; // leading dimension in row-major
       const uint64_t elemSize = out.element_size();
 
       MPSMatrixDecompositionCholesky* choleskyFilter =
@@ -788,38 +791,47 @@ static Tensor& linalg_cholesky_mps_impl(const Tensor& input, bool upper, Tensor&
 
       MPSMatrixDescriptor* desc_in = [MPSMatrixDescriptor matrixDescriptorWithRows:n
                                                                            columns:n
-                                                                          matrices:1
-                                                                          rowBytes:lda * elemSize
-                                                                       matrixBytes:n * lda * elemSize
+                                                                          matrices:batchSize
+                                                                          rowBytes:n * elemSize
+                                                                       matrixBytes:n * n * elemSize
                                                                           dataType:getMPSDataType(input_)];
 
       MPSMatrixDescriptor* desc_out = [MPSMatrixDescriptor matrixDescriptorWithRows:n
                                                                             columns:n
-                                                                           matrices:1
-                                                                           rowBytes:lda * elemSize
-                                                                        matrixBytes:n * lda * elemSize
+                                                                           matrices:batchSize
+                                                                           rowBytes:n * elemSize
+                                                                        matrixBytes:n * n * elemSize
                                                                            dataType:getMPSDataType(out)];
 
-      MPSMatrix* matrixIn = [[[MPSMatrix alloc] initWithBuffer:bufferIn
-                                                        offset:input_.storage_offset() * elemSize
-                                                    descriptor:desc_in] autorelease];
-      MPSMatrix* matrixOut = [[[MPSMatrix alloc] initWithBuffer:bufferOut
-                                                         offset:out.storage_offset() * elemSize
-                                                     descriptor:desc_out] autorelease];
+      for (const auto i : c10::irange(batchSize)) {
+        const uint64_t batchOffset = i * n * n;
+        MPSMatrix* matrixIn = [[[MPSMatrix alloc] initWithBuffer:bufferIn
+                                                          offset:(input_.storage_offset() + batchOffset) * elemSize
+                                                      descriptor:desc_in] autorelease];
+        MPSMatrix* matrixOut = [[[MPSMatrix alloc] initWithBuffer:bufferOut
+                                                          offset:(out.storage_offset() + batchOffset) * elemSize
+                                                      descriptor:desc_out] autorelease];
 
-      // Create a status buffer to check for positive definiteness
-      id<MTLBuffer> statusBuffer = [device newBufferWithLength:sizeof(int) options:MTLResourceStorageModeShared];
+        // status buffer to check for positive definiteness
+        id<MTLBuffer> statusBuffer = getMTLBufferStorage(status_tensors[i]);
 
-      [choleskyFilter encodeToCommandBuffer:commandBuffer
-                               sourceMatrix:matrixIn
-                               resultMatrix:matrixOut
-                                     status:statusBuffer];
-      // Check status
-      int status = *((int*)statusBuffer.contents);
-      TORCH_CHECK(status == 0, "linalg.cholesky: Input matrix is not positive definite");
+        [choleskyFilter encodeToCommandBuffer:commandBuffer
+                                sourceMatrix:matrixIn
+                                resultMatrix:matrixOut
+                                      status:statusBuffer];
+    }
     }
   });
-
+  for (const auto i : c10::irange(status_tensors.size())) {
+    int status = status_tensors[i].item<int>();
+    TORCH_CHECK(
+        status == 0,
+        "cholesky factorization failure at the ",
+        i + 1,
+        " sample with status: ",
+        status,
+        ". See https://developer.apple.com/documentation/metalperformanceshaders/mpsmatrixdecompositionstatus for details.");
+  }
   return out;
 }
 } // namespace mps
