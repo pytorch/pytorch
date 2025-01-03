@@ -1466,7 +1466,7 @@ class CppBuilder:
                 # Visual C++ and ICC both require a dummy source file to compile, in
                 # addition to the header.
                 self._precompiling_dummy_file = tempfile.NamedTemporaryFile(
-                    "w+b", suffix=".cpp", buffering=0
+                    suffix=".cpp", buffering=0
                 )
                 self._precompiling_dummy_file.write(f'#include "{header}"\n'.encode())
                 self._sources_args = f"/Yc{header} {self._precompiling_dummy_file.name}"

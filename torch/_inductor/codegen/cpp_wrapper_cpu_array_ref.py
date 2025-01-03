@@ -83,7 +83,7 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
 
     def get_device_include(self):
         if V.graph.aot_mode:
-            return super().get_device_include()
+            return f"#include <torch/csrc/inductor/cpp_wrapper_array_ref/aoti_{self.device}.h>"
         return f"#include <torch/csrc/inductor/cpp_wrapper_array_ref/{self.device}.h>"
 
     def codegen_input_numel_asserts(self):
