@@ -76,6 +76,7 @@ from ..source import (
     CallMethodItemSource,
     ConstDictKeySource,
     ConvertIntSource,
+    DictGetItemSource,
     FloatTensorSource,
     GetItemSource,
     GradSource,
@@ -98,6 +99,7 @@ from ..utils import (
     common_constant_types,
     dict_keys,
     get_fake_value,
+    get_items_from_dict,
     get_locals_to_steal,
     get_static_address_type,
     is_frozen_dataclass,
@@ -137,7 +139,6 @@ from .dicts import (
     DefaultDictVariable,
     DictKeySetVariable,
     FrozensetVariable,
-    HFPretrainedConfigVariable,
     PythonSysModulesVariable,
     SetVariable,
 )
@@ -595,7 +596,7 @@ class VariableBuilder:
             result = {
                 TypingVariable(k): UserDefinedObjectVariable(
                     v,
-                    source=GetItemSource(
+                    source=DictGetItemSource(
                         self.get_source(), ConstDictKeySource(self.get_source(), i)
                     ),
                 )
@@ -643,13 +644,18 @@ class VariableBuilder:
                     source_key = ConstDictKeySource(self.get_source(), i)
                     key = LazyVariableTracker.create(k, source_key)
 
-                source_value = GetItemSource(self.get_source(), source_key)
+                source_value = DictGetItemSource(self.get_source(), source_key)
                 value = LazyVariableTracker.create(v, source_value)
 
                 return key, value
 
+            # Ensure that we call dict.keys and not value.keys (which can call
+            # overridden keys method). In the C++ guards, we relied on
+            # PyDict_Next to traverse the dictionary, which uses the internal
+            # data structure and does not call the overridden keys method.
             result = dict(
-                build_key_value(i, k, v) for i, (k, v) in enumerate(value.items())
+                build_key_value(i, k, v)
+                for i, (k, v) in enumerate(get_items_from_dict(value))
             )
 
             if istype(value, collections.defaultdict):
@@ -725,7 +731,7 @@ class VariableBuilder:
                 if not ConstantVariable.is_literal(k):
                     unimplemented("functools.partial with non-literal keyword")
                 keywords[k] = VariableBuilder(
-                    self.tx, GetItemSource(keywords_source, k)
+                    self.tx, DictGetItemSource(keywords_source, k)
                 )(v)
 
             install_guard(
@@ -848,9 +854,6 @@ class VariableBuilder:
             )
         elif np and isinstance(value, np.number):
             return self.wrap_unspecialized_primitive(value)
-        elif HFPretrainedConfigVariable.is_matching_object(value):
-            self.install_guards(GuardBuilder.TYPE_MATCH)
-            return HFPretrainedConfigVariable(value)
         elif isinstance(value, HigherOrderOperator):
             if value is torch._higher_order_ops.invoke_subgraph:
                 unimplemented(
@@ -1245,13 +1248,18 @@ class VariableBuilder:
                 source_key = ConstDictKeySource(self.get_source(), i)
                 key = LazyVariableTracker.create(k, source_key)
 
-                source_value = GetItemSource(self.get_source(), source_key)
+                source_value = DictGetItemSource(self.get_source(), source_key)
                 value = LazyVariableTracker.create(v, source_value)
 
                 return key, value
 
+            # Ensure that we call dict.keys and not value.keys (which can call
+            # overridden keys method). In the C++ guards, we relied on
+            # PyDict_Next to traverse the dictionary, which uses the internal
+            # data structure and does not call the overridden keys method.
             result = dict(
-                build_key_value(i, k, v) for i, (k, v) in enumerate(value.items())
+                build_key_value(i, k, v)
+                for i, (k, v) in enumerate(get_items_from_dict(value))
             )
 
             # NB: This is deliberately kept ValueMutationNew because dict_vt is
@@ -2173,7 +2181,7 @@ def _dataclasses_fields_lambda(obj):
     for field in dataclasses.fields(value):
         source = None
         if obj.source:
-            source = GetItemSource(
+            source = DictGetItemSource(
                 AttrSource(obj.source, "__dataclass_fields__"), field.name
             )
         items.append(UserDefinedObjectVariable(field, source=source))
