@@ -2238,12 +2238,6 @@ class PythonWrapperCodegen(CodeGen):
             return
         self.freed.add(name)
 
-        if isinstance(buffer, ir.CppTemplateBuffer) and isinstance(
-            buffer.layout, ir.MultiOutputLayout
-        ):
-            # CppTemplateBuffer of Grouped GEMM, we actually didn't allocate this buffer
-            return
-
         self.writeline(FreeIfNotReusedLine(self, buffer))
 
     def can_reuse(self, input_buffer, output_buffer=None):
