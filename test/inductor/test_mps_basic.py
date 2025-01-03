@@ -58,6 +58,9 @@ class MPSBasicTests(TestCase):
     def test_acos(self):
         self.common(lambda x: x.acos(), (torch.rand(1024),))
 
+    def test_atanh(self):
+        self.common(lambda x: x.atanh(), (torch.rand(1024),))
+
     def test_sliced_input(self):
         self.common(
             lambda x: x[:, ::2].sin() + x[:, 1::2].cos(), (torch.rand(32, 1024),)

@@ -117,6 +117,10 @@ class MetalOverrides(OpOverrides):
     def sqrt(x: CSEVariable) -> str:
         return f"metal::sqrt({x})"
 
+    @staticmethod
+    def atanh(x: CSEVariable) -> str:
+        return f"metal::atanh({x})"
+
 
 class MetalKernel(SIMDKernel):
     overrides = MetalOverrides  # type: ignore[assignment]
