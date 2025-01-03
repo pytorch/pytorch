@@ -95,7 +95,9 @@ its type to `common_constant_types`.
 
     @staticmethod
     def is_base_literal(obj):
-        return type(obj) in common_constant_types
+        return type(obj) in common_constant_types or obj in [
+            torch.nested.nested_tensor,
+        ]
 
     @staticmethod
     def is_literal(obj):
