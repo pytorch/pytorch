@@ -1903,22 +1903,23 @@ def specialize_symnode(arg):
 
     # Guard and specialize
     if isinstance(arg, LazyVariableTracker) and not arg.is_realized():
-        # If lazVT and not a sym value, return arg without realizing
+        # Find if the arg would be realized as SymNodeVariable later on. If yes,
+        # realize it and specialize. Else return the arg.
 
-        source = arg._cache.source
+        source = arg.original_source()
         value = arg.original_value()
-        if (
+
+        is_symnode_vt = is_torch_sym(value) or (
             not config.specialize_int
             and type(value) is int
-            and is_wrap_int_into_constant_vt(value, source)
-        ):
-            return arg
-        elif type(value) is not int and not is_torch_sym(arg.original_value()):
+            and not is_int_specialization_case(value, source)
+        )
+
+        if not is_symnode_vt:
             return arg
 
     if isinstance(arg, SymNodeVariable):
         return ConstantVariable.create(arg.evaluate_expr())
-
     return arg
 
 
