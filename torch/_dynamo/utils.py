@@ -301,6 +301,160 @@ def get_runtime_metrics_context() -> RuntimeMetricsContext:
     return _RUNTIME_METRICS_CONTEXT
 
 
+class CompileEventLogLevel(enum.Enum):
+    """
+    Enum that loosely corresponds with a "log level" of a given event.
+
+    CHROMIUM_EVENT: Logs only to tlparse.
+    COMPILE_EVENT: Logs to tlparse + PT2 Compile Events
+    COMPILATION_METRIC: Logs to tlparse, PT2 Compile Events, and dynamo_compile
+    """
+
+    CHROMIUM = 1
+    PT2_COMPILE = 2
+    COMPILATION_METRIC = 3
+
+
+class CompileEventLogger:
+    """
+    Helper class for representing adding metadata(i.e. columns) to various compile events.
+    Use CompileEventLogger to add event data to:
+    - Chromium events
+    - PT2 Compile Events
+    - CompilationMetrics
+
+    This should be used in conjunction with dynamo_timed() and metrics contexts, which create
+    timed spans and events. CompileEventLogger uses three log levels (described in CompileEventLogLevel),
+    where each log level logs to all sources below it in the hierarchy.
+
+    Example usages:
+    - I want to log to an existing chromium event within dynamo timed:
+    with dynamo_timed("my_event"):
+        CompileEventLogger.chromium("my_event", foo=bar)
+
+    - I want to log my event to both chromium + pt2_compile_events:
+    with dynamo_timed("my_event", log_pt2_compile_event=True):
+        CompileEventLogger.pt2_compile("my_event", foo=bar)
+
+    - I want to add information to dynamo events and dynamo_compile
+        CompileEventLogger.compilation_metric(foo=bar)
+    """
+
+    @staticmethod
+    def log_instant_event(
+        event_name: str,
+        metadata: Dict[str, Any],
+        time_ns: Optional[int] = None,
+        log_level: CompileEventLogLevel = CompileEventLogLevel.CHROMIUM,
+    ):
+        if time_ns is None:
+            time_ns = time.time_ns()
+        chromium_log = get_chromium_event_logger()
+        if log_level == CompileEventLogLevel.CHROMIUM:
+            log_pt2_compile_event = False
+        elif log_level == CompileEventLogLevel.PT2_COMPILE:
+            log_pt2_compile_event = True
+        else:
+            raise RuntimeError(
+                "Cannot log instant event at COMPILATION_METRIC level. Please choose one of CHROMIUM_EVENT or COMPILE_EVENT"
+            )
+        chromium_log.log_instant_event(
+            event_name, time_ns, metadata, log_pt2_compile_event
+        )
+
+    @staticmethod
+    def add_data(event_name: str, log_level: CompileEventLogLevel, **metadata: object):
+        """
+        Centralized API for adding data to various events
+        Log an event to a toplevel "dynamo" event or metrics context
+        depending on log level.
+        """
+        chromium_log = get_chromium_event_logger()
+        pt2_compile_substack = chromium_log.get_pt2_compile_substack()
+
+        if log_level == CompileEventLogLevel.CHROMIUM:
+            chromium_log.add_event_data(event_name, **metadata)
+        elif log_level == CompileEventLogLevel.PT2_COMPILE:
+            pt2_compile_substack = chromium_log.get_pt2_compile_substack()
+            if event_name not in pt2_compile_substack:
+                raise RuntimeError(
+                    "Error: specified log level PT2_COMPILE, but the event %s"
+                    " is not logged to pt2_compile_events. Make sure the event is active and you passed "
+                    "log_pt2_compile_event=True to dynamo_timed",
+                    event_name,
+                )
+            chromium_log.add_event_data(event_name, **metadata)
+        else:
+            assert log_level == CompileEventLogLevel.COMPILATION_METRIC
+            top_event = chromium_log.get_top()
+
+            if event_name != top_event:
+                raise RuntimeError(
+                    "Log level is COMPILATION_METRIC, but event_name isn't the toplevel event. "
+                    "CompilationMetrics must be logged to the toplevel event. Consider using `log_toplevel_event_data` directly."
+                )
+            metrics_context = get_metrics_context()
+            if not metrics_context.in_progress():
+                raise RuntimeError(
+                    "No metrics context is in progress. Please only call this function within a metrics context."
+                )
+
+            # TODO: should we assert that the keys of metadata are in CompilationMetrics?
+            metrics_context.update(metadata)
+            chromium_log.add_event_data(event_name, **metadata)
+
+    @staticmethod
+    def add_toplevel(log_level: CompileEventLogLevel, **metadata: object):
+        """
+        Syntactic sugar for logging to the toplevel event
+        """
+        top_event = get_chromium_event_logger().get_top()
+        if top_event is None:
+            raise RuntimeError(
+                "No toplevel event active. Please only call this function within a dynamo_timed context."
+            )
+        CompileEventLogger.add_data(top_event, log_level, **metadata)
+
+    # MAIN API: These functions are syntactic sugar for the basic operations above without
+    # needing to use a specific log level. These are easier to use because you don't need
+    # to import CompileEventLogLevel to use them.
+
+    @staticmethod
+    def chromium(event_name: str, **metadata: object):
+        CompileEventLogger.add_data(
+            event_name, CompileEventLogLevel.CHROMIUM, **metadata
+        )
+
+    @staticmethod
+    def pt2_compile(event_name: str, **metadata: object):
+        CompileEventLogger.add_data(
+            event_name, CompileEventLogLevel.PT2_COMPILE, **metadata
+        )
+
+    @staticmethod
+    def compilation_metric(**metadata: object):
+        CompileEventLogger.add_toplevel(
+            CompileEventLogLevel.COMPILATION_METRIC, **metadata
+        )
+
+    @staticmethod
+    def instant(
+        event_name: str, metadata: Dict[str, Any], time_ns: Optional[int] = None
+    ):
+        CompileEventLogger.log_instant_event(
+            event_name, metadata, time_ns, CompileEventLogLevel.CHROMIUM
+        )
+
+    @staticmethod
+    def try_add_pt2_compile(event_name: str, **metadata: object):
+        """
+        Adds to an existing pt2_compile event, but silently returns if the event doesn't exist.
+        This function is syntactic sugar for chromium_event_logger().try_add_event_data.
+        """
+        chromium_log = get_chromium_event_logger()
+        chromium_log.try_add_event_data(event_name, **metadata)
+
+
 @contextmanager
 def dynamo_timed(
     key: str,
@@ -1007,6 +1161,16 @@ _compilation_metrics: Deque[CompilationMetrics] = collections.deque(
 
 
 def add_compilation_metrics_to_chromium(c: CompilationMetrics) -> None:
+    """
+    These are the common fields in CompilationMetrics that existed before
+    metrics_context, and aren't set by MetricsContext.set(). We add the subset
+    of them that make sense in `dynamo`/toplevel events in PT2 Compile Events
+    directly.
+
+    If you're tempted to add to this list, consider using CompileEventLogger.compilation_metric()
+    instead, which will automatically also add it to tlparse and PT2 Compile Events.
+    TODO: Get rid of this function and replace it with CompileEventLogger directly instead.
+    """
     event_logger = get_chromium_event_logger()
     event_name = event_logger.get_top()
     if not event_name:
