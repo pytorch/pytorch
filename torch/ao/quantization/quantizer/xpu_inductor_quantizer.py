@@ -96,22 +96,6 @@ class XPUInductorQuantizer(X86InductorQuantizer):
     ):
         pass
 
-    def _annotate_conv2d_binary(
-        self,
-        gm: torch.fx.GraphModule,
-        quantization_config: Optional[QuantizationConfig],
-        filter_fn: Optional[FilterFn] = None,
-    ) -> None:
-        pass
-
-    def _annotate_conv2d_binary_unary(
-        self,
-        gm: torch.fx.GraphModule,
-        quantization_config: Optional[QuantizationConfig],
-        filter_fn: Optional[FilterFn] = None,
-    ) -> None:
-        pass
-
     def _annotate_linear_fusion_pattern(
         self,
         model: torch.fx.GraphModule,
