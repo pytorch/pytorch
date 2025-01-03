@@ -50,3 +50,9 @@ Functions
 .. autofunction:: xlog1py
 .. autofunction:: xlogy
 .. autofunction:: zeta
+.. autofunction:: beta
+.. autofunction:: betaln
+.. autofunction:: betainc
+.. autofunction:: betaincc
+.. autofunction:: betaincinv
+.. autofunction:: betainccinv
