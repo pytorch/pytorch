@@ -182,6 +182,7 @@ class MetalKernel(SIMDKernel):
         """Called at the end to generate a final kernel string"""
         code = IndentedBuffer()
         code.writeline('torch.mps._compile_shader("""')
+        idx_var_names = [v.name for v in self.active_range_trees()]
         with code.indent():
             code.writeline("kernel void generated_kernel(")
             with code.indent():
@@ -193,9 +194,23 @@ class MetalKernel(SIMDKernel):
                 for outer, inner in self.args.input_buffers.items():
                     dtype_str = self.dtype_to_str(V.graph.get_dtype(outer))
                     code.writeline(f"constant {dtype_str}* {inner},")
-                code.writeline("uint xindex [[thread_position_in_grid]]")
+                if len(idx_var_names) == 1:
+                    code.writeline(
+                        f"uint {idx_var_names[0]} [[thread_position_in_grid]]"
+                    )
+                else:
+                    assert (
+                        len(idx_var_names) < 4
+                    ), "Up to 3 index variables are supported"
+                    code.writeline(
+                        f"uint{len(idx_var_names)} thread_pos [[thread_position_in_grid]]"
+                    )
+
             code.writeline(") {")
             with code.indent():
+                if len(idx_var_names) > 1:
+                    for idx, name in enumerate(idx_var_names):
+                        code.writeline(f"auto {name} = thread_pos.{chr(120+idx)};")
                 code.splice(self.body)
             code.writeline("}")
         code.writeline('""")')
@@ -207,6 +222,11 @@ class MetalKernel(SIMDKernel):
         wrapper = V.graph.wrapper_code
         args = [*self.args.output_buffers.keys(), *self.args.input_buffers.keys()]
         args = [arg for arg in args if arg not in self.removed_buffers]
+        if len(self.active_range_trees()) > 0:
+            args += [
+                f"threads=[{', '.join(str(v.numel) for v in self.active_range_trees())}]"
+            ]
+
         wrapper.generate_kernel_call(
             name,
             args,
