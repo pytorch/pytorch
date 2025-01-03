@@ -39,6 +39,14 @@ class MPSBasicTests(TestCase):
     device = "mps"
 
     test_add_const_int = CommonTemplate.test_add_const_int
+    test_add_inplace_permuted_mps = CommonTemplate.test_add_inplace_permuted
+    test_max_min = CommonTemplate.test_max_min
+    test_inf = CommonTemplate.test_inf
+    test_nan_to_num = CommonTemplate.test_nan_to_num
+    test_views6 = CommonTemplate.test_views6
+    test_addmm = CommonTemplate.test_addmm
+    test_signbit = CommonTemplate.test_signbit
+    test_view_as_complex = CommonTemplate.test_view_as_complex
 
     @parametrize("dtype", MPS_DTYPES)
     def test_add(self, dtype):
@@ -52,6 +60,9 @@ class MPSBasicTests(TestCase):
 
     def test_acos(self):
         self.common(lambda x: x.acos(), (torch.rand(1024),))
+
+    def test_atanh(self):
+        self.common(lambda x: x.atanh(), (torch.rand(1024),))
 
     def test_sliced_input(self):
         self.common(

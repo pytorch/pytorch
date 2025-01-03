@@ -52,7 +52,7 @@ class AdamW(Adam):
 
 
 AdamW.__doc__ = (
-    r"""Implements AdamW algorithm.
+    r"""Implements AdamW algorithm, where weight decay does not accumulate in the momentum nor variance.
 
     .. math::
        \begin{aligned}
