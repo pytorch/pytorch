@@ -329,7 +329,7 @@ test_inductor_distributed() {
   python test/run_test.py -i inductor/test_aot_inductor.py -k test_non_default_cuda_device --verbose
   python test/run_test.py -i inductor/test_aot_inductor.py -k test_replicate_on_devices --verbose
   python test/run_test.py -i distributed/test_c10d_functional_native.py --verbose
-  python test/run_test.py -i distributed/_tensor/test_dtensor_compile.py --verbose
+  python test/run_test.py -i distributed/tensor/test_dtensor_compile.py --verbose
   python test/run_test.py -i distributed/tensor/parallel/test_micro_pipeline_tp.py --verbose
   python test/run_test.py -i distributed/_composable/test_replicate_with_compiler.py --verbose
   python test/run_test.py -i distributed/_composable/fsdp/test_fully_shard_comm.py --verbose

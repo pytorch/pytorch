@@ -13,7 +13,6 @@ import logging
 import operator
 import traceback
 import typing
-import typing_extensions
 import warnings
 import weakref
 from collections import defaultdict
@@ -36,7 +35,6 @@ from typing import (
     TypeVar,
     Union,
 )
-from typing_extensions import Concatenate, ParamSpec, Self
 from weakref import WeakKeyDictionary
 
 import torch
@@ -44,6 +42,7 @@ import torch._ops
 import torch.fx as fx
 import torch.fx.traceback as fx_traceback
 import torch.utils._pytree as pytree
+import typing_extensions
 from torch import SymBool, SymInt, Tensor
 from torch._dispatch.python import enable_python_dispatcher
 from torch._library.fake_class_registry import FakeScriptObject
@@ -72,6 +71,7 @@ from torch.utils._stats import count
 from torch.utils._thunk import Thunk
 from torch.utils._traceback import CapturedTraceback
 from torch.utils.weak import _WeakHashRef, WeakIdKeyDictionary, WeakTensorKeyDictionary
+from typing_extensions import Concatenate, ParamSpec, Self
 
 from ._backward_state import BackwardState
 from .sym_node import SymNode
@@ -177,22 +177,19 @@ def is_sym_node(node: _HasMeta) -> bool:
 
 
 @overload
-def set_proxy_slot(obj: Tensor, tracer: _ProxyTracer, proxy: _ProxyTensor) -> None:
-    ...
+def set_proxy_slot(obj: Tensor, tracer: _ProxyTracer, proxy: _ProxyTensor) -> None: ...
 
 
 @overload
 def set_proxy_slot(
     obj: _AnyScriptObjectType, tracer: _ProxyTracer, proxy: Proxy
-) -> None:
-    ...
+) -> None: ...
 
 
 @overload
 def set_proxy_slot(
     obj: PySymType, tracer: _ProxyTracer, proxy: _PySymProxyType
-) -> None:
-    ...
+) -> None: ...
 
 
 def set_proxy_slot(
@@ -251,8 +248,7 @@ _PySymProxyType = Thunk[Proxy]
 def get_proxy_slot(
     obj: Tensor,
     tracer: _ProxyTracer,
-) -> _ProxyTensor:
-    ...
+) -> _ProxyTensor: ...
 
 
 @overload
@@ -260,8 +256,7 @@ def get_proxy_slot(
     obj: Tensor,
     tracer: _ProxyTracer,
     default: U,
-) -> Union[_ProxyTensor, U]:
-    ...
+) -> Union[_ProxyTensor, U]: ...
 
 
 @overload
@@ -270,16 +265,14 @@ def get_proxy_slot(
     tracer: _ProxyTracer,
     default: U,
     transform: Callable[[_ProxyTensor], R],
-) -> Union[R, U]:
-    ...
+) -> Union[R, U]: ...
 
 
 @overload
 def get_proxy_slot(
     obj: _AnyScriptObjectType,
     tracer: _ProxyTracer,
-) -> Proxy:
-    ...
+) -> Proxy: ...
 
 
 @overload
@@ -287,8 +280,7 @@ def get_proxy_slot(
     obj: _AnyScriptObjectType,
     tracer: _ProxyTracer,
     default: U,
-) -> Union[Proxy, U]:
-    ...
+) -> Union[Proxy, U]: ...
 
 
 @overload
@@ -297,16 +289,14 @@ def get_proxy_slot(
     tracer: _ProxyTracer,
     default: U,
     transform: Callable[[Proxy], R],
-) -> Union[R, U]:
-    ...
+) -> Union[R, U]: ...
 
 
 @overload
 def get_proxy_slot(
     obj: PySymType,
     tracer: _ProxyTracer,
-) -> _PySymProxyType:
-    ...
+) -> _PySymProxyType: ...
 
 
 @overload
@@ -314,8 +304,7 @@ def get_proxy_slot(
     obj: PySymType,
     tracer: _ProxyTracer,
     default: T,
-) -> Union[T, _PySymProxyType]:
-    ...
+) -> Union[T, _PySymProxyType]: ...
 
 
 @overload
@@ -324,8 +313,7 @@ def get_proxy_slot(
     tracer: _ProxyTracer,
     default: U,
     transform: Callable[[_PySymProxyType], R],
-) -> Union[R, U]:
-    ...
+) -> Union[R, U]: ...
 
 
 # the default argument is what to return if the slot is not set.
@@ -706,22 +694,21 @@ def fetch_sym_proxy(
 
 
 @overload
-def fetch_object_proxy(tracer: _ProxyTracer, t: Tensor) -> Union[_ProxyTensor, Tensor]:
-    ...
+def fetch_object_proxy(
+    tracer: _ProxyTracer, t: Tensor
+) -> Union[_ProxyTensor, Tensor]: ...
 
 
 @overload
 def fetch_object_proxy(
     tracer: _ProxyTracer, t: _AnyScriptObjectType
-) -> Union[Proxy, _AnyScriptObjectType]:
-    ...
+) -> Union[Proxy, _AnyScriptObjectType]: ...
 
 
 @overload
 def fetch_object_proxy(
     tracer: _ProxyTracer, t: PySymType
-) -> Union[_PySymProxyType, PySymType]:
-    ...
+) -> Union[_PySymProxyType, PySymType]: ...
 
 
 def fetch_object_proxy(
@@ -1066,18 +1053,15 @@ class PythonKeyTracer(Tracer):
         return super().create_arg(a)  # type: ignore[return-value]
 
     @overload
-    def unwrap_proxy(self, e: Tensor) -> Union[Proxy, Tensor]:
-        ...
+    def unwrap_proxy(self, e: Tensor) -> Union[Proxy, Tensor]: ...
 
     @overload
-    def unwrap_proxy(self, e: PySymType) -> Union[Proxy, PySymType]:
-        ...
+    def unwrap_proxy(self, e: PySymType) -> Union[Proxy, PySymType]: ...
 
     @overload
     def unwrap_proxy(
         self, e: _AnyScriptObjectType
-    ) -> Union[Proxy, _AnyScriptObjectType]:
-        ...
+    ) -> Union[Proxy, _AnyScriptObjectType]: ...
 
     def unwrap_proxy(self, e: T) -> object:
         if isinstance(e, Tensor):
@@ -1375,17 +1359,21 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
         if len(args) == 1 and isinstance(args[0], (list, tuple)):
             n_args = (
                 tuple(
-                    get_proxy_slot(a, self.tracer).force().node
-                    if isinstance(a, py_sym_types)
-                    else a
+                    (
+                        get_proxy_slot(a, self.tracer).force().node
+                        if isinstance(a, py_sym_types)
+                        else a
+                    )
                     for a in args[0]
                 ),
             )
         else:
             n_args = tuple(
-                get_proxy_slot(a, self.tracer).force().node
-                if isinstance(a, py_sym_types)
-                else a
+                (
+                    get_proxy_slot(a, self.tracer).force().node
+                    if isinstance(a, py_sym_types)
+                    else a
+                )
                 for a in args
             )
 
@@ -1872,14 +1860,14 @@ class _MakefxTracer:
         # adding new modes in _MakefxTracer.
         self.fake_tensor_mode: Optional[FakeTensorMode] = None
         self.proxy_mode: Union[nullcontext, ProxyTorchDispatchMode] = nullcontext()
-        self.proxy_function_mode: Union[
-            nullcontext, PreDispatchTorchFunctionMode
-        ] = nullcontext()
+        self.proxy_function_mode: Union[nullcontext, PreDispatchTorchFunctionMode] = (
+            nullcontext()
+        )
         self.fx_tracer: Optional[PythonKeyTracer] = None
         self.python_dispatcher_mode: Union[nullcontext, Any] = nullcontext()
-        self.torch_fn_metadata_mode: Union[
-            nullcontext, TorchFunctionMetadataMode
-        ] = nullcontext()
+        self.torch_fn_metadata_mode: Union[nullcontext, TorchFunctionMetadataMode] = (
+            nullcontext()
+        )
 
     def _checkpoint_modes(self) -> List[Any]:
         return [
@@ -2296,7 +2284,7 @@ def _set_unbacked_bindings(out: object, out_proxy: _NestedProxys) -> None:
 
     # Can't use detect_fake_mode here,
     #
-    # python test/distributed/_tensor/test_dtensor_compile.py -k
+    # python test/distributed/tensor/test_dtensor_compile.py -k
     # test_tp_compile_fullgraph_is_seq_parallel_False
     #
     # will fail.  Very strange, it probably isn't right for them to be using
