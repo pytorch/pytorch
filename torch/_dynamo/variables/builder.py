@@ -405,20 +405,6 @@ class VariableBuilder:
             NumpyNdarrayVariable,
         }
 
-    @staticmethod
-    @functools.lru_cache(None)
-    def _common_constants():
-        return {
-            # We zero-one specialize shapes, so specialize these constants
-            # too
-            0,
-            1,
-            # NB: There used to be more constants here, but honestly it was
-            # pretty confusing.  Note we specialize floats by default, and
-            # DON'T specialize ints by default.  This all only matters with
-            # dynamic_shapes
-        }
-
     def get_source(self):
         return self.source
 
