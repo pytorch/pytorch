@@ -14,6 +14,7 @@ import shutil
 import subprocess
 import sys
 import sysconfig
+import tempfile
 import textwrap
 import warnings
 from ctypes import cdll
@@ -369,9 +370,11 @@ class BuildOptionsBase:
         libraries_dirs: Optional[List[str]] = None,
         libraries: Optional[List[str]] = None,
         passthrough_args: Optional[List[str]] = None,
+        precompiled_header: Optional[str] = None,
         aot_mode: bool = False,
         use_absolute_path: bool = False,
         compile_only: bool = False,
+        precompiling: bool = False,
     ) -> None:
         self._compiler = compiler
         self._definations: List[str] = definitions or []
@@ -382,10 +385,12 @@ class BuildOptionsBase:
         self._libraries: List[str] = libraries or []
         # Some args is hard to abstract to OS compatable, passthrough it directly.
         self._passthrough_args: List[str] = passthrough_args or []
+        self._precompiled_header: Optional[str] = precompiled_header
 
         self._aot_mode: bool = aot_mode
         self._use_absolute_path: bool = use_absolute_path
         self._compile_only: bool = compile_only
+        self._precompiling: bool = precompiling
 
     def _process_compile_only_options(self) -> None:
         if self._compile_only:
@@ -429,6 +434,9 @@ class BuildOptionsBase:
     def get_passthrough_args(self) -> List[str]:
         return self._passthrough_args
 
+    def get_precompiled_header(self) -> Optional[str]:
+        return self._precompiled_header
+
     def get_aot_mode(self) -> bool:
         return self._aot_mode
 
@@ -437,6 +445,9 @@ class BuildOptionsBase:
 
     def get_compile_only(self) -> bool:
         return self._compile_only
+
+    def get_precompiling(self) -> bool:
+        return self._precompiling
 
     def save_flags_to_json(self, file: str) -> None:
         attrs = {
@@ -455,6 +466,9 @@ class BuildOptionsBase:
 
         with open(file, "w") as f:
             json.dump(attrs, f)
+
+    def set_precompiled_header(self, path: str) -> None:
+        self._precompiled_header = path
 
 
 def _get_warning_all_cflag(warning_all: bool = True) -> List[str]:
@@ -626,11 +640,14 @@ class CppOptions(BuildOptionsBase):
         extra_flags: Sequence[str] = (),
         use_absolute_path: bool = False,
         compiler: str = "",
+        precompiling: bool = False,
     ) -> None:
-        super().__init__()
+        super().__init__(
+            compile_only=compile_only,
+            use_absolute_path=use_absolute_path,
+            precompiling=precompiling,
+        )
         self._compiler = compiler if compiler else get_cpp_compiler()
-        self._use_absolute_path = use_absolute_path
-        self._compile_only = compile_only
 
         (
             definations,
@@ -1114,6 +1131,7 @@ class CppTorchOptions(CppOptions):
         shared: bool = True,
         extra_flags: Sequence[str] = (),
         compiler: str = "",
+        precompiling: bool = False,
     ) -> None:
         super().__init__(
             compile_only=compile_only,
@@ -1121,6 +1139,7 @@ class CppTorchOptions(CppOptions):
             extra_flags=extra_flags,
             use_absolute_path=use_absolute_path,
             compiler=compiler,
+            precompiling=precompiling,
         )
 
         self._aot_mode = aot_mode
@@ -1276,6 +1295,7 @@ class CppTorchDeviceOptions(CppTorchOptions):
         use_mmap_weights: bool = False,
         shared: bool = True,
         extra_flags: Sequence[str] = (),
+        precompiling: bool = False,
     ) -> None:
         super().__init__(
             vec_isa=vec_isa,
@@ -1285,6 +1305,7 @@ class CppTorchDeviceOptions(CppTorchOptions):
             use_absolute_path=use_absolute_path,
             use_mmap_weights=use_mmap_weights,
             extra_flags=extra_flags,
+            precompiling=precompiling,
         )
 
         device_definations: List[str] = []
@@ -1376,6 +1397,9 @@ class CppBuilder:
         EXT = ".obj" if _IS_WINDOWS else ".o"
         return EXT
 
+    def __get_precompiled_header_ext(self) -> str:
+        return ".pch" if _IS_WINDOWS or _is_clang(self._compiler) else ".gch"
+
     def __init__(
         self,
         name: str,
@@ -1401,6 +1425,12 @@ class CppBuilder:
         self._name = name
 
         # Code start here, initial self internal veriables firstly.
+        if precompiled_header := BuildOption.get_precompiled_header():
+            if _IS_WINDOWS:
+                self._include_dirs_args = f"/Yu{precompiled_header} "
+            else:
+                self._include_dirs_args = f"-include {precompiled_header} "
+
         self._build_option = BuildOption
         self._compiler = BuildOption.get_compiler()
         self._use_absolute_path = BuildOption.get_use_absolute_path()
@@ -1409,26 +1439,39 @@ class CppBuilder:
         self._output_dir = output_dir
 
         self._compile_only = BuildOption.get_compile_only()
-        file_ext = (
-            self.__get_object_ext()
-            if self._compile_only
-            else self.__get_python_module_ext()
-        )
+        self._precompiling = BuildOption.get_precompiling()
+        assert not (self._compile_only and self._precompiling)
+
+        if self._compile_only:
+            file_ext = self.__get_object_ext()
+        elif self._precompiling:
+            file_ext = self.__get_precompiled_header_ext()
+        else:
+            file_ext = self.__get_python_module_ext()
         self._target_file = os.path.join(self._output_dir, f"{self._name}{file_ext}")
 
         if isinstance(sources, str):
             sources = [sources]
 
-        if config.is_fbcode():
-            if self._aot_mode and not self._use_absolute_path:
-                inp_name = sources
-                # output process @ get_name_and_dir_from_output_file_path
-            else:
-                # We need to copy any absolute-path torch includes
-                inp_name = [os.path.basename(i) for i in sources]
-                self._target_file = os.path.basename(self._target_file)
+        if config.is_fbcode() and (not self._aot_mode or self._use_absolute_path):
+            # We need to copy any absolute-path torch includes
+            sources = [os.path.basename(i) for i in sources]
+            self._target_file = os.path.basename(self._target_file)
 
-            self._sources_args = " ".join(inp_name)
+        if self._precompiling:
+            assert len(sources) == 1
+            header = sources[0]
+
+            if _IS_WINDOWS:
+                # Visual C++ and ICC both require a dummy source file to compile, in
+                # addition to the header.
+                self._precompiling_dummy_file = tempfile.NamedTemporaryFile(
+                    "w+b", suffix=".cpp", buffering=0
+                )
+                self._precompiling_dummy_file.write(f'#include "{header}"\n'.encode())
+                self._sources_args = f"/Yc{header} {self._precompiling_dummy_file.name}"
+            else:
+                self._sources_args = f"-x c++-header {header}"
         else:
             self._sources_args = " ".join(sources)
 
@@ -1488,20 +1531,24 @@ class CppBuilder:
                 # https://learn.microsoft.com/en-us/cpp/build/walkthrough-compile-a-c-program-on-the-command-line?view=msvc-1704
                 # https://stackoverflow.com/a/31566153
                 cmd = (
-                    f"{compiler} {include_dirs_args} {definations_args} {cflags_args} {sources} "
-                    f"{passthrough_args} /LD /Fe{target_file} /link {libraries_dirs_args} {libraries_args} {ldflags_args} "
+                    f"{compiler} {include_dirs_args} {definations_args} {cflags_args} "
+                    f"{sources} {passthrough_args} "
+                    f"/{'Fe' if not self._precompiling else 'Fp'}{target_file}"
                 )
+                if not self._precompiling:
+                    cmd += f" /LD /link {libraries_dirs_args} {libraries_args} {ldflags_args}"
                 cmd = normalize_path_separator(cmd)
             else:
                 compile_only_arg = "-c" if self._compile_only else ""
-                cmd = re.sub(
-                    r"[ \n]+",
-                    " ",
-                    f"""
-                    {compiler} {sources} {definations_args} {cflags_args} {include_dirs_args}
-                    {passthrough_args} {ldflags_args} {libraries_args} {libraries_dirs_args} {compile_only_arg} -o {target_file}
-                    """,
-                ).strip()
+                cmd = (
+                    f"{compiler} {sources} {definations_args} {cflags_args} "
+                    f"{include_dirs_args} {passthrough_args} "
+                )
+                if not self._precompiling:
+                    cmd += f" {ldflags_args} {libraries_args} {libraries_dirs_args}"
+                cmd += f"{compile_only_arg} -o {target_file}"
+
+                cmd = re.sub(r"[ \n]+", " ", cmd).strip()
             return cmd
 
         command_line = format_build_command(
