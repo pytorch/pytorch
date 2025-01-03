@@ -537,8 +537,10 @@ mha_fwd(const at::Tensor &q,         // batch_size x seqlen_q x num_heads x head
         } else {
           seed_t = at::empty({}, at::dtype(at::kLong).device(at::kCUDA));
           offset_t = at::empty({}, at::dtype(at::kLong).device(at::kCUDA));
-          params.seed = seed_t.data_ptr<int64_t>();
-          params.extragraph_offset = offset_t.data_ptr<int64_t>();
+        //   TODO patch in order to build
+        params.rng_state = reinterpret_cast<uint64_t*>(seed_t.data_ptr());
+        //   params.seed = seed_t.data_ptr<int64_t>();
+        //   params.extragraph_offset = offset_t.data_ptr<int64_t>();
         }
         params.philox_args = philox_state;
     } else {
@@ -795,8 +797,10 @@ mha_varlen_fwd(const at::Tensor &q,  // total_q x num_heads x head_size, total_q
         } else {
           seed_t = at::empty({}, at::dtype(at::kLong).device(at::kCUDA));
           offset_t = at::empty({}, at::dtype(at::kLong).device(at::kCUDA));
-          params.seed = seed_t.data_ptr<int64_t>();
-          params.extragraph_offset = offset_t.data_ptr<int64_t>();
+          //   TODO patch in order to build
+          params.rng_state = reinterpret_cast<uint64_t*>(seed_t.data_ptr());
+        //   params.seed = seed_t.data_ptr<int64_t>();
+        //   params.extragraph_offset = offset_t.data_ptr<int64_t>();
         }
         params.philox_args = philox_state;
     } else {
@@ -835,7 +839,9 @@ mha_varlen_fwd(const at::Tensor &q,  // total_q x num_heads x head_size, total_q
 void run_mha_bwd(Flash_bwd_params &params, cudaStream_t stream) {
     FP16_SWITCH(!params.is_bf16, [&] {
         HEADDIM_SWITCH(params.d, [&] {
-            run_mha_bwd_<elem_type, kHeadDim>(params, stream);
+            BOOL_SWITCH(params.is_causal, Is_causal, [&] {
+                run_mha_bwd_<elem_type, kHeadDim, Is_causal>(params, stream);
+            });
         });
     });
 }
