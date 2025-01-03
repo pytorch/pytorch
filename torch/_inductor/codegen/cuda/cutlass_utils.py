@@ -14,6 +14,7 @@ import torch
 from ... import config
 from ...ir import Layout
 from ...runtime.runtime_utils import cache_dir
+from ...virtualized import V
 from .cuda_env import get_cuda_arch, get_cuda_version
 
 
@@ -27,24 +28,6 @@ def _rename_cutlass_import(content: str, cutlass_modules: List[str]) -> str:
             f"from cutlass_library.{cutlass_module} import ",
         )
     return content
-
-
-def _gen_cutlass_file(
-    file_name: str, cutlass_modules: List[str], src_dir: str, dst_dir: str
-) -> None:
-    orig_full_path = os.path.abspath(os.path.join(src_dir, file_name))
-    text = ""
-    with open(orig_full_path) as f:
-        text = f.read()
-    text = _rename_cutlass_import(text, cutlass_modules)
-    dst_full_path = os.path.abspath(
-        os.path.join(
-            dst_dir,
-            file_name,
-        )
-    )
-    with open(dst_full_path, "w") as f:
-        f.write(text)
 
 
 @functools.lru_cache(None)
@@ -260,7 +243,7 @@ def get_accumulator_dtype(
             return torch_dtype
         else:
             return torch.float
-    if torch_dtype in {torch.bfloat16, torch.float}:
+    if torch_dtype in (torch.bfloat16, torch.float):
         return torch.float
     if torch_dtype == torch.int8:
         return torch.int32
@@ -297,29 +280,29 @@ def get_max_alignment(inductor_layout: Layout) -> int:
     def is_static_int(number):
         return isinstance(number, (int, sympy.Integer))
 
+    def a_factor_of(x, alignment):
+        if is_static_int(x) and is_static_int(alignment):
+            return x % alignment == 0
+        rem = sympy.Mod(x, alignment)
+        return V.graph.sizevars.evaluate_expr(sympy.Eq(rem, 0))
+
     try:
         contiguous_dim = inductor_layout.stride.index(1)
     except ValueError:
         # No dim with stride 1 found, return 1
         return 1
-    if (
-        is_static_int(size[contiguous_dim])
-        and is_static_int(offset)
-        and all(is_static_int(s) for s in inductor_layout.stride)
-    ):
-        alignments = get_alignments(dtype)
-        for alignment in alignments:
-            if (
-                int(size[contiguous_dim]) % alignment != 0
-                or int(offset) % alignment != 0
-            ):
-                continue
-            if all(
-                (dim == contiguous_dim)
-                or (inductor_layout.stride[dim] % alignment == 0)
-                for dim in range(len(size))
-            ):
-                return alignment
+    alignments = get_alignments(dtype)
+    for alignment in alignments:
+        if not a_factor_of(size[contiguous_dim], alignment) or not a_factor_of(
+            offset, alignment
+        ):
+            continue
+        if all(
+            (dim == contiguous_dim)
+            or a_factor_of(inductor_layout.stride[dim], alignment)
+            for dim in range(len(size))
+        ):
+            return alignment
     return 1
 
 

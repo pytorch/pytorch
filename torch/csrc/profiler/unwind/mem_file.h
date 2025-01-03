@@ -46,8 +46,7 @@ struct MemFile {
         "failed to open {}: {}",
         filename_,
         c10::utils::str_error(errno));
-    // NOLINTNEXTLINE
-    struct stat s;
+    struct stat s {};
     if (-1 == fstat(fd_, &s)) {
       close(fd_); // destructors don't run during exceptions
       UNWIND_CHECK(

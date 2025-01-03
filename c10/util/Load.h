@@ -26,12 +26,12 @@ struct LoadImpl<bool> {
 } // namespace detail
 
 template <typename T>
-C10_HOST_DEVICE T load(const void* src) {
+C10_HOST_DEVICE constexpr T load(const void* src) {
   return c10::detail::LoadImpl<T>::apply(src);
 }
 
 template <typename scalar_t>
-C10_HOST_DEVICE scalar_t load(const scalar_t* src) {
+C10_HOST_DEVICE constexpr scalar_t load(const scalar_t* src) {
   return c10::detail::LoadImpl<scalar_t>::apply(src);
 }
 

@@ -79,7 +79,7 @@ platform_configs = tuple(
 )
 
 # On ROCm convert num_stages to 1 as pipelining provides no benefit
-if torch.version.hip:
+if torch.version.hip and torch.cuda.is_available():
     platform_configs = build_rocm_gemm_configs(platform_configs)
 
 
@@ -420,7 +420,7 @@ def conv_layout(
         stride = ir.convert_shape_to_inductor(output.stride())  # type: ignore[assignment]
 
     return ir.FixedLayout(
-        x.get_device(),
+        x.get_device_or_error(),
         x.get_dtype(),
         sizes,
         stride,

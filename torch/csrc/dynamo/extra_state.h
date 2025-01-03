@@ -2,6 +2,8 @@
 
 #include <Python.h>
 
+#include <torch/csrc/dynamo/framelocals_mapping.h>
+
 #ifdef __cplusplus
 
 #include <torch/csrc/dynamo/utils.h>
@@ -40,15 +42,20 @@ typedef struct CacheEntry CacheEntry;
 #ifdef __cplusplus
 
 typedef struct VISIBILITY_HIDDEN ExtraState {
+  // A pointer to the orig_code object to prevent race conditions in invalidate
+  // function.
+  PyCodeObject* orig_code;
   // List of cache entries for compiled code objects
   std::list<CacheEntry> cache_entry_list;
   // Frame state to detect dynamic shape dims
   py::dict frame_state;
   bool cache_limit_hit{false};
 
+  ExtraState(PyCodeObject* orig_code_arg);
   CacheEntry* get_first_entry();
   void move_to_front(CacheEntry* cache_entry);
-  void invalidate(CacheEntry* cache_entry);
+  void move_to_back(CacheEntry* cache_entry);
+  void invalidate(CacheEntry* cache_entry, py::object deleted_guard_manager);
 } ExtraState;
 
 #else
@@ -140,16 +147,16 @@ ExtraState* init_and_set_extra_state(PyCodeObject* code);
 // Ownership contract
 // args
 //  - extra_state: Borrowed
-//  - f_locals: Borrowed
 // return:
 //   - Py_None or PyCodeObject: Borrowed reference.
 //   - Py_None or PyObject: Trace id of the compiled code.
 void lookup(
     ExtraState* extra_state,
-    PyObject* f_locals,
+    FrameLocalsMapping* f_locals,
     PyObject* backend,
     PyObject** maybe_cached_code,
-    const char** trace_annotation);
+    const char** trace_annotation,
+    bool is_skip_guard_eval_unsafe);
 
 // Create a new cache entry at extra_state holding on to guarded_code.
 // Ownership contract

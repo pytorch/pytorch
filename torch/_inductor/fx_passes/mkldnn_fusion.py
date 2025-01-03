@@ -5,7 +5,9 @@ from functools import reduce
 from typing import Any, Tuple
 
 import torch
+from torch._dynamo.utils import counters
 from torch.fx.experimental.symbolic_shapes import has_free_symbols
+from torch.utils._ordered_set import OrderedSet
 
 from .. import ir
 from ..lowering import lowerings as L
@@ -249,6 +251,10 @@ if torch._C._has_mkldnn:
                 unary_attr.scalars_attr,
                 unary_attr.algorithm_attr,
             ]
+            counters["inductor"]["mkldnn_unary_fusion_matcher_count"] += 1
+            counters["inductor"]["mkldnn_unary_fusion_matcher_nodes"] += len(
+                match.nodes
+            )
             return L[computation_op](*computation_args)
 
         return fn
@@ -272,6 +278,10 @@ if torch._C._has_mkldnn:
                 )
                 matched = matched and dtype1 == torch.float and dtype2 == lowp_dtype
             computation_args = list(args)
+            counters["inductor"]["mkldnn_unary_fusion_matcher_count"] += 1
+            counters["inductor"]["mkldnn_unary_fusion_matcher_nodes"] += len(
+                match.nodes
+            )
             if matched:
                 computation_args = computation_args[:-3] + [
                     "leaky_relu",
@@ -318,6 +328,10 @@ if torch._C._has_mkldnn:
                 )
                 matched = matched and dtype1 == torch.float and dtype2 == lowp_dtype
             computation_args = list(args)
+            counters["inductor"]["mkldnn_unary_fusion_matcher_count"] += 1
+            counters["inductor"]["mkldnn_unary_fusion_matcher_nodes"] += len(
+                match.nodes
+            )
             if matched:
                 computation_args = computation_args[:-3] + [
                     "hardtanh",
@@ -343,8 +357,8 @@ if torch._C._has_mkldnn:
         ops.sub: "sub",
     }
 
-    def _is_valid_binary(match, fn):
-        binary_nodes = filter_nodes(match.nodes, fn)
+    def _is_valid_binary(match, computation_op, binary_op):
+        binary_nodes = filter_nodes(match.nodes, binary_op)
         if len(binary_nodes) < 1:
             return False
 
@@ -367,8 +381,47 @@ if torch._C._has_mkldnn:
             for n in binary_nodes
         ):
             return False
+
+        def _check_input_sizes(n, computation_op):
+            # Check if the tensor shape of the 'other' node is the same as or
+            # can be broadcasted to the tensor shape of the computation node.
+            computation_node = (
+                n.args[0] if n.args[1] is match.kwargs["other"] else n.args[1]
+            )
+            assert computation_node.target == computation_op
+            computation_node_size = get_meta_value(computation_node).size()
+            if computation_op is mkldnn._linear_pointwise.default:
+                broadcast_sizes = []
+                if len(computation_node_size) >= 2:
+                    broadcast_sizes = [
+                        torch.Size(
+                            [1 for _ in range(len(computation_node_size) - 1)]
+                            + [computation_node_size[-1]]
+                        ),
+                    ]
+            else:
+                assert len(computation_node_size) > 2
+                broadcast_sizes = [
+                    torch.Size(
+                        [computation_node_size[0], computation_node_size[1]]
+                        + [1 for _ in range(len(computation_node_size) - 2)]
+                    ),
+                    torch.Size(
+                        [1, computation_node_size[1]]
+                        + [1 for _ in range(len(computation_node_size) - 2)]
+                    ),
+                    torch.Size([1 for _ in range(len(computation_node_size))]),
+                ]
+            return (
+                get_meta_value(match.kwargs["other"]).size()
+                in [
+                    computation_node_size,
+                ]
+                + broadcast_sizes
+            )
+
         if any(
-            get_meta_value(n.args[0]).size() != get_meta_value(n.args[1]).size()
+            not _check_input_sizes(n, computation_op)
             or get_meta_value(n.args[0]).device != get_meta_value(n.args[1]).device
             or get_meta_value(n.args[0]).dtype != get_meta_value(n.args[1]).dtype
             for n in binary_nodes
@@ -383,7 +436,7 @@ if torch._C._has_mkldnn:
         def fn(match):
             if not _is_single_computation_op(computation_op)(match):
                 return False
-            if not _is_valid_binary(match, binary_op):
+            if not _is_valid_binary(match, computation_op, binary_op):
                 return False
             return True
 
@@ -410,7 +463,7 @@ if torch._C._has_mkldnn:
         def _is_ancestor_node(_current_node, _ancestor_node):
             # Check whether _ancestor_node is the ancestor node of _current_node
             _node_list = [_current_node]
-            _visited_nodes = set()
+            _visited_nodes = OrderedSet[torch.fx.Node]()
             while len(_node_list) != 0:
                 _current_node = _node_list.pop(0)
                 if _current_node not in _visited_nodes:
@@ -492,18 +545,19 @@ if torch._C._has_mkldnn:
                     ]
                 else:
                     computation_args += [1.0, None, [], None]
+            counters["inductor"]["mkldnn_conv_binary_unary_fusion_matcher_count"] += 1
+            counters["inductor"][
+                "mkldnn_conv_binary_unary_fusion_matcher_nodes"
+            ] += len(match.nodes)
             return L[fusion_op](*computation_args)
 
         return fn
 
     def _can_be_inplace(_other):
-        if isinstance(_other.data, ir.View):
-            return _can_be_inplace(_other.data)
-        else:
-            return not (
-                isinstance(_other.data, ir.ReinterpretView)
-                or len(_other.get_inputs_that_alias_output()) > 0
-            )
+        return not (
+            isinstance(_other.data, ir.BaseView)
+            or len(_other.get_inputs_that_alias_output()) > 0
+        )
 
     def _register_binary_unary_maybe_inplace_fusion_lowering(
         pattern,
@@ -536,9 +590,15 @@ if torch._C._has_mkldnn:
                     ]
                 else:
                     computation_args += [1.0, None, [], None]
+            counters["inductor"]["mkldnn_conv_binary_unary_fusion_matcher_count"] += 1
+            counters["inductor"][
+                "mkldnn_conv_binary_unary_fusion_matcher_nodes"
+            ] += len(match.nodes)
             # Make sure the other is not an alias or mutation(fx side doesn't has such info).
             other.realize()
-            if not _can_be_inplace(other):
+            if not _can_be_inplace(other) or other.data.shape != list(
+                match.nodes[0].meta["val"].size()
+            ):
                 return L[outplace_fusion_op](*computation_args)
             return L[inplace_fusion_op](*computation_args)
 
@@ -787,6 +847,10 @@ if torch._C._has_mkldnn:
                 graph.erase_node(old_linear_node)
                 if len(reshape_1_node.users) == 0:
                     graph.erase_node(reshape_1_node)
+            counters["inductor"]["mkldnn_reshape_linear_reshape_matcher_count"] += 1
+            counters["inductor"]["mkldnn_reshape_linear_reshape_matcher_nodes"] += len(
+                match.nodes
+            )
 
         def is_linear_add_bias(match):
             add_node = match.output_node()
@@ -837,6 +901,8 @@ if torch._C._has_mkldnn:
             repl.meta.update(add_node.meta)
             add_node.replace_all_uses_with(repl)
             match.erase_nodes()
+            counters["inductor"]["mkldnn_linear_bias_matcher_count"] += 1
+            counters["inductor"]["mkldnn_linear_bias_matcher_nodes"] += len(match.nodes)
 
     def _is_packable_mkldnn_rnn_layer(match):
         lstm_node = match.output_node()
@@ -1075,6 +1141,10 @@ if torch._C._has_mkldnn:
                 conv_node.replace_all_uses_with(packed_conv_node)
                 packed_conv_node.meta.update(conv_node.meta)
                 graph.erase_node(conv_node)
+            counters["inductor"]["mkldnn_conv_weight_pack_matcher_count"] += 1
+            counters["inductor"]["mkldnn_conv_weight_pack_matcher_nodes"] += len(
+                match.nodes
+            )
 
         @register_freezing_graph_pattern(
             CallFunction(aten.mkldnn_rnn_layer.default, *_aten_mkldnn_rnn_layer_args),
@@ -1086,7 +1156,6 @@ if torch._C._has_mkldnn:
 
             graph = match.graph
             lstm_node = match.output_node()
-            input = args[0]
             weight0, weight1 = args[1:3]
             reverse = kwargs.get("reverse")
             packed_lstm_op = aten.mkldnn_rnn_layer.default
@@ -1126,6 +1195,10 @@ if torch._C._has_mkldnn:
                 lstm_node.replace_all_uses_with(packed_lstm_node)
                 packed_lstm_node.meta.update(lstm_node.meta)
                 graph.erase_node(lstm_node)
+            counters["inductor"]["mkldnn_rnn_weight_pack_matcher_count"] += 1
+            counters["inductor"]["mkldnn_rnn_weight_pack_matcher_nodes"] += len(
+                match.nodes
+            )
 
         @register_freezing_graph_pattern(
             CallFunction(
@@ -1214,6 +1287,10 @@ if torch._C._has_mkldnn:
                 linear_node.replace_all_uses_with(packed_linear_node)
                 packed_linear_node.meta.update(linear_node.meta)
                 graph.erase_node(linear_node)
+            counters["inductor"]["mkldnn_linear_weight_pack_matcher_count"] += 1
+            counters["inductor"]["mkldnn_linear_weight_pack_matcher_nodes"] += len(
+                match.nodes
+            )
 
     def _eliminate_duplicate_packed_nodes(gm):
         """
