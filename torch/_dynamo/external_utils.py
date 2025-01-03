@@ -116,6 +116,14 @@ def call_backward(
     return grads
 
 
+def normalize_as_list(x: Any) -> List[Any]:
+    if isinstance(x, tuple):
+        return list(x)
+    elif isinstance(x, list):
+        return x
+    return [x]
+
+
 def untyped_storage_size(x: torch.Tensor) -> int:
     return x.untyped_storage().size()
 
