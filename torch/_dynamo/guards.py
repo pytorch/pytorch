@@ -1768,6 +1768,11 @@ class GuardBuilder(GuardBuilderBase):
         ref = self.arg_ref(guard)
         value = self.get(guard.name)
 
+        if value is torch.utils._pytree.SUPPORTED_NODES:
+            # For SUPPORTED_NODES, we can guard on the dictionary version (PEP509).
+            self.DICT_VERSION(guard)
+            return
+
         code = []
         # Ensure that we call dict.keys and not value.keys (which can call
         # overridden keys method). In the C++ guards, we relied on PyDict_Next
