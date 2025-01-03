@@ -6816,10 +6816,6 @@ def lerp(start, end, weight):
     )
     args = [start, end]
     if isinstance(weight, TensorLike):
-        torch._check(
-            start.dtype == weight.dtype,
-            lambda: f"expected dtype {start.dtype} for `weight`, but got dtype {weight.dtype}",
-        )
         args.append(weight)
     return elementwise_meta(
         *args, type_promotion=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
