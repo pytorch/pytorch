@@ -485,6 +485,22 @@ def convolution(
     stride = tuple(V.graph.sizevars.evaluate_static_shapes(stride))
     padding = tuple(V.graph.sizevars.evaluate_static_shapes(padding))
 
+    kwargs: ConvLayoutParams = {
+        "stride": stride,
+        "padding": padding,
+        "dilation": dilation,
+        "transposed": transposed,
+        "output_padding": output_padding,
+        "groups": groups,
+    }
+
+    if len(x.get_size()) == len(weight.get_size()) - 1:
+        # add batch dimension to simplify rest of function
+        return L[aten.squeeze](
+            convolution(L[aten.expand](x, [1, *x.get_size()]), weight, bias, **kwargs),
+            dim=0,
+        )
+
     # Always convert conv1D to 2D for Intel GPU.
     # Only conv2D can be converted to channel last layout,
     # which have much better performance.
@@ -503,22 +519,6 @@ def convolution(
         return L[aten.squeeze](
             convolution(x, weight, bias, **kwargs),
             dim=2,
-        )
-
-    kwargs: ConvLayoutParams = {
-        "stride": stride,
-        "padding": padding,
-        "dilation": dilation,
-        "transposed": transposed,
-        "output_padding": output_padding,
-        "groups": groups,
-    }
-
-    if len(x.get_size()) == len(weight.get_size()) - 1:
-        # add batch dimension to simplify rest of function
-        return L[aten.squeeze](
-            convolution(L[aten.expand](x, [1, *x.get_size()]), weight, bias, **kwargs),
-            dim=0,
         )
 
     out_chan, in_chan, *kernel_shape = V.graph.sizevars.evaluate_static_shapes(
