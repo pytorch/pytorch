@@ -14,6 +14,37 @@
 
 #if defined(BUILD_ROWWISE_FP8_KERNEL)
 
+// We are going to override the cuTensorMapEncodeTiled driver api with our lazy loader
+static CUresult CUDAAPI nvrtc_cuTensorMapEncodeTiled(
+    CUtensorMap* tensorMap,
+    CUtensorMapDataType tensorDataType,
+    cuuint32_t tensorRank,
+    void* globalAddress,
+    const cuuint64_t* globalDim,
+    const cuuint64_t* globalStrides,
+    const cuuint32_t* boxDim,
+    const cuuint32_t* elementStrides,
+    CUtensorMapInterleave interleave,
+    CUtensorMapSwizzle swizzle,
+    CUtensorMapL2promotion l2Promotion,
+    CUtensorMapFloatOOBfill oobFill) {
+  return at::globalContext().getNVRTC().cuTensorMapEncodeTiled(
+      tensorMap,
+      tensorDataType,
+      tensorRank,
+      globalAddress,
+      globalDim,
+      globalStrides,
+      boxDim,
+      elementStrides,
+      interleave,
+      swizzle,
+      l2Promotion,
+      oobFill);
+}
+
+
+#include <cutlass/version.h>
 #include <cute/tensor.hpp>
 #include <cutlass/core_io.h>
 #include <cutlass/cutlass.h>
@@ -22,7 +53,6 @@
 #include <cutlass/numeric_types.h>
 #include <cutlass/trace.h>
 #include <cutlass/util/host_tensor.h>
-#include <cutlass/version.h>
 
 // Rename the global function symbol
 #if CUTLASS_VERSION == 351
