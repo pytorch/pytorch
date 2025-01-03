@@ -1570,7 +1570,7 @@ struct PyInstDecoder {
     }
 private:
     PyCodeObject* code_object_;
-    [[maybe_unused]] _Py_CODEUNIT* code_;
+    _Py_CODEUNIT* code_;
     int offset_;
 };
 
