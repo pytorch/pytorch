@@ -26,7 +26,7 @@ class TestAttention(TestCase):
         self.wqkv = nn.Linear(self.dim, total_head_dim, bias=False)
         self.wo = nn.Linear(self.dim, self.dim, bias=False)
 
-        # Cache
+    def create_kv_cache(self):
         max_batch_size = 4
         max_seq_length = 16
         cache_shape = (
@@ -35,7 +35,9 @@ class TestAttention(TestCase):
             max_seq_length,
             self.head_dim,
         )
-        self.k_cache, self.v_cache = torch.randn(cache_shape), torch.randn(cache_shape)
+        k_cache, v_cache = torch.zeros(cache_shape), torch.zeros(cache_shape)
+
+        return k_cache, v_cache
 
     def run_unpadded_padded(self, fn, inputs, inputs_p, outputs_p_shapes):
         # Run the function on unpadded and padded inputs
@@ -126,20 +128,19 @@ class TestAttention(TestCase):
 
         self.run_unpadded_padded(self.f_3, inputs, inputs_p, output_shapes_p)
 
-    def kv_update(self, input_pos, k_val, v_val):
+    def kv_update(self, input_pos, k_val, v_val, k_cache, v_cache):
         # input_pos: [S], k_val: [B, H, S, D]
         assert input_pos.shape[0] == k_val.shape[2]
-        print("-----------------------------")
 
-        k_out = self.k_cache
-        v_out = self.v_cache
+        k_out = k_cache
+        v_out = v_cache
         k_out[:, :, input_pos] = k_val
         v_out[:, :, input_pos] = v_val
 
         return k_out, v_out
 
-    def f_4(self, k, v, input_pos):
-        k, v = self.kv_update(input_pos, k, v)
+    def f_4(self, k, v, input_pos, k_cache, v_cache):
+        k, v = self.kv_update(input_pos, k, v, k_cache, v_cache)
 
         k = k.repeat_interleave(self.n_head // self.n_local_heads, dim=1)
         v = v.repeat_interleave(self.n_head // self.n_local_heads, dim=1)
@@ -147,8 +148,17 @@ class TestAttention(TestCase):
         return k, v
 
     def test_attention_4(self):
-        inputs = [torch.randn(4, 5, 2, 2), torch.randn(4, 5, 2, 2)]
-        MULTIPLIERS = {0: 8, 1: 1, 2: 8, 3: 1}
+        k_cache, v_cache = self.create_kv_cache()
+
+        inputs = [
+            torch.randn(4, 5, 2, 2),
+            torch.randn(4, 5, 2, 2),
+            torch.ones(2, dtype=torch.int32),
+            k_cache,
+            v_cache,
+        ]
+        # MULTIPLIERS = {0: 8, 1: 1, 2: 8, 3: 1}
+        MULTIPLIERS = {0: 1, 1: 1, 2: 1, 3: 1}
         inputs_p = pytree.tree_map(lambda x: PaddedTensor(x, MULTIPLIERS, None), inputs)
         output_shapes_p = [torch.Size([8, 40, 8, 2]) for _ in range(2)]
 
@@ -196,13 +206,13 @@ class TestAttention(TestCase):
         self.run_unpadded_padded(self.f_7, inputs, inputs_p, output_shapes_p)
 
     def test_all(self):
-        def f(x, freqs_cis, mask, input_pos):
+        def f(x, freqs_cis, mask, input_pos, k_cache, v_cache):
             bsz, seqlen = x.shape
 
             q, k, v = self.f_1(x)
             q, k, v = self.f_2(q, k, v, bsz, seqlen)
             q, k, v = self.f_3(q, k, v, freqs_cis)
-            k, v = self.f_4(k, v, input_pos)
+            k, v = self.f_4(k, v, input_pos, k_cache, v_cache)
             (y,) = self.f_5(q, k, v, mask)
             (y,) = self.f_6(y, bsz, seqlen)
             (y,) = self.f_7(y)
@@ -214,7 +224,9 @@ class TestAttention(TestCase):
         mask = torch.ones([1, 1, 2, 16])
         input_pos = torch.ones([2], dtype=torch.int32)
 
-        inputs = [x, freqs_cis, mask, input_pos]
+        k_cache, v_cache = self.create_kv_cache()
+
+        inputs = [x, freqs_cis, mask, input_pos, k_cache, v_cache]
 
         # inputs_p = [
         #    PaddedTensor(x, {0: 8, 1: 8, 2: 1}, None),
@@ -228,6 +240,8 @@ class TestAttention(TestCase):
             PaddedTensor(freqs_cis, {0: 1, 1: 1, 2: 1}, None),
             mask,
             PaddedTensor(input_pos, {0: 1, 1: 1, 2: 1}, None),
+            PaddedTensor(k_cache, {0: 1, 1: 1, 2: 1}, None),
+            PaddedTensor(v_cache, {0: 1, 1: 1, 2: 1}, None),
         ]
 
         self.run_unpadded_padded(f, inputs, inputs_p, None)
@@ -238,4 +252,4 @@ if __name__ == "__main__":
 
 # cls = TestAttention()
 # cls.setUp()
-# cls.test_attention_1()
+# cls.test_attention_4()

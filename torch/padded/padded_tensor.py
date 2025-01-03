@@ -415,21 +415,21 @@ class IndexPutOp(SlicingOp):
         input_shape = args[0].original_shape
         return [torch.Size(input_shape)]
 
-    def modify_args(self, args, kwargs):
-        tensor_args, tensor_kwargs = padded_to_tensor(args, kwargs)
+    # def modify_args(self, args, kwargs):
+    #    tensor_args, tensor_kwargs = padded_to_tensor(args, kwargs)
 
-        # Slice out the padded indices and values, so they fit the input tensor
-        inp, indices, values = args
-        padded_inp, padded_indices, padded_values = tensor_args
+    #    # Slice out the padded indices and values, so they fit the input tensor
+    #    inp, indices, values = args
+    #    padded_inp, padded_indices, padded_values = tensor_args
 
-        depadded_indices = [
-            x if x is None else torch.arange(x.original_shape[0]).int() for x in indices
-        ]
-        depadded_values = slice_nd(
-            padded_values, [0] * len(values.original_shape), values.original_shape
-        )
+    #    depadded_indices = [
+    #        x if x is None else torch.arange(x.original_shape[0]).int() for x in indices
+    #    ]
+    #    depadded_values = slice_nd(
+    #        padded_values, [0] * len(values.original_shape), values.original_shape
+    #    )
 
-        return [padded_inp, depadded_indices, depadded_values], tensor_kwargs
+    #    return [padded_inp, depadded_indices, depadded_values], tensor_kwargs
 
 
 class SplitWithSizesOp(SlicingOp):
@@ -575,6 +575,9 @@ class OpDatabase:
             return self.ops[opname]
         else:
             raise NotImplementedError(f"Op '{opname}' not supported")
+
+            # print("WARNING: Op", opname, "not supported. Using NoOp")
+            # return NoOp()
 
 
 OP_DATABASE = OpDatabase()
