@@ -15,6 +15,7 @@ import inspect
 import itertools
 import os
 import random
+import typing
 import unittest
 import warnings
 import weakref
@@ -6496,6 +6497,13 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
 
         with mock.patch("torch._dynamo.eval_frame._maybe_set_eval_frame", bad):
             fn(torch.ones(3))
+
+    def test_torchname(self):
+        def fn(obj):
+            return torch.typename(obj)
+
+        opt_fn = torch.compile(fn, backend="eager")
+        self.assertEqual(fn(typing.Any), opt_fn(typing.Any))
 
 
 instantiate_parametrized_tests(ReproTests)
