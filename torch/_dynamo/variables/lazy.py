@@ -1,10 +1,8 @@
-import builtins
 import collections
 import functools
+import inspect
 from typing import Any, Callable, Dict, final, Optional, Tuple, Union
 from typing_extensions import Self
-
-import torch
 
 from ..utils import is_function_or_wrapper
 from .base import VariableTracker
@@ -150,10 +148,8 @@ class LazyVariableTracker(VariableTracker):
         # Checks that the underlying value is hashable without realizing the VT.
         def _helper(value: Any) -> bool:
             # TODO: Add support for more types
-            if isinstance(value, torch.Tensor):
-                return False
             return (
-                value in vars(builtins).values()
+                inspect.isbuiltin(value)
                 or issubclass(type(value), type)
                 or is_function_or_wrapper(value)
             )
