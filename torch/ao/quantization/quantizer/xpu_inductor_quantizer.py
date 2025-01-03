@@ -118,7 +118,7 @@ class XPUInductorQuantizer(X86InductorQuantizer):
         quantization_config: Optional[QuantizationConfig],
         filter_fn: Optional[FilterFn] = None,
     ):
-        pass
+        self._annotate_linear(model, quantization_config, filter_fn)
 
     def _annotate_matmul(
         self,
