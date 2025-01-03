@@ -294,6 +294,7 @@ manual_torch_name_rule_map = {
     "torch._functorch.deprecated.grad_and_value": UserFunctionVariable,
     "torch._functorch.deprecated.vjp": UserFunctionVariable,
     # everything else
+    "torch._higher_order_ops.triton_kernel_wrap.do_prune_configs": UserFunctionVariable,
     "torch._higher_order_ops.foreach_map.foreach_map": UserFunctionVariable,
     "torch._constrain_as_size": UserFunctionVariable,
     "torch._tensor._convert": UserFunctionVariable,
@@ -3298,6 +3299,7 @@ MOD_INLINELIST = [
     "torch._higher_order_ops.invoke_subgraph",
     "torch._higher_order_ops.scan",
     "torch._higher_order_ops.strict_mode",
+    "torch._higher_order_ops.triton_kernel_wrap",
     "torch._higher_order_ops.while_loop",
     "torch._inductor.test_operators",
     "torch._library.autograd",
