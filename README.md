@@ -305,7 +305,7 @@ If you want to build legacy python code, please refer to [Building on legacy cod
 
 **CPU-only builds**
 
-In this mode PyTorch computations will run on your CPU, not your GPU
+In this mode PyTorch computations will run on your CPU, not your GPU.
 
 ```cmd
 python setup.py develop
@@ -351,6 +351,24 @@ set CUDAHOSTCXX=C:\Program Files (x86)\Microsoft Visual Studio\2019\Community\VC
 
 python setup.py develop
 
+```
+
+**Intel GPU builds**
+
+In this mode PyTorch with Intel GPU support will be built. The building process has been validated with Visual Studio 2022.
+
+Please make sure [the common prerequisites](#prerequisites) as well as [the prerequisites for Intel GPU](#intel-gpu-support) are properly installed in prior. Specifically, the environmental variables needs to be configured by the following commands:
+
+```cmd
+$ call "C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build\vcvarsall.bat" x64
+$ call "C:\Program Files (x86)\Intel\oneAPI\compiler\2025.0\env\vars.bat"
+$ call "C:\Program Files (x86)\Intel\oneAPI\ocloc\2024.2\env\vars.bat"
+```
+
+Then PyTorch can be built with the command:
+
+```cmd
+python setup.py develop
 ```
 
 ##### Adjust Build Options (Optional)
