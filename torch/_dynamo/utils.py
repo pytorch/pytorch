@@ -78,6 +78,7 @@ from torch._dynamo.metrics_context import MetricsContext, RuntimeMetricsContext
 from torch._guards import CompileId, Source, TracingContext
 from torch._subclasses.meta_utils import is_sparse_compressed
 from torch._utils_internal import (
+    justknobs_check,
     log_chromium_event_internal,
     log_compilation_event,
     record_chromium_event_internal,
@@ -1854,10 +1855,55 @@ def is_safe_constant(v):
     )
 
 
+def _common_constants():
+    return {
+        # We zero-one specialize shapes, so specialize these constants
+        # too
+        0,
+        1,
+        # NB: There used to be more constants here, but honestly it was
+        # pretty confusing.  Note we specialize floats by default, and
+        # DON'T specialize ints by default.  This all only matters with
+        # dynamic_shapes
+    }
+
+
 def is_torch_sym(value):
     return isinstance(value, (torch.SymBool, torch.SymInt)) and not isinstance(
         value.node, torch.nested._internal.nested_int.NestedIntNode
     )
+
+
+def is_wrap_int_into_constant_vt(value, source):
+    from .source import ConstDictKeySource, is_from_defaults
+
+    # unspecializing int by default, but still
+    # specialize for the following conditions
+    if not TracingContext.get().force_unspec_int_unbacked_size_like and (
+        # Assume integers from global variables want to be specialized
+        not source.guard_source().is_local()
+        # Assume that integers that came from NN modules want to be
+        # specialized (as we don't expect users to be changing the
+        # NN modules on the fly), unless explicitly disabled
+        or (
+            source.guard_source().is_specialized_nn_module()
+            and not config.allow_unspec_int_on_nn_module
+        )
+        or (
+            source.guard_source().is_unspecialized_builtin_nn_module()
+            and not config.allow_unspec_int_on_nn_module
+        )
+        or is_from_defaults(source)
+        # TODO: Delete this condition when rollout is done.  NB: this
+        # condition never evaluates True in open source
+        or (
+            not justknobs_check("pytorch/dynamo:enable_unspecialize_zero_one_plain_int")
+            and value in _common_constants()
+        )
+        or isinstance(source, ConstDictKeySource)
+    ):
+        return True
+    return False
 
 
 def specialize_symnode(arg):
@@ -1866,7 +1912,16 @@ def specialize_symnode(arg):
     # Guard and specialize
     if isinstance(arg, LazyVariableTracker) and not arg.is_realized():
         # If lazVT and not a sym value, return arg without realizing
-        if not is_torch_sym(arg.original_value()):
+
+        source = arg._cache.source
+        value = arg.original_value()
+        if (
+            not config.specialize_int
+            and type(value) is int
+            and is_wrap_int_into_constant_vt(value, source)
+        ):
+            return arg
+        elif type(value) is not int and not is_torch_sym(arg.original_value()):
             return arg
 
     if isinstance(arg, SymNodeVariable):
