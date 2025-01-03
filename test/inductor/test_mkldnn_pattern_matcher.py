@@ -2169,6 +2169,10 @@ class TestPatternMatcher(TestPatternMatcherBase):
                     counters["inductor"]["qlinear_unary_matcher_count"],
                     0 if TEST_ACL else 2,
                 )
+                self.assertEqual(
+                    counters["inductor"]["qlinear_unary_lower_count"],
+                    0 if TEST_ACL else 2,
+                )
 
             self._test_common(
                 mod,
