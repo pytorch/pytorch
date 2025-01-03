@@ -5202,17 +5202,24 @@ class CommonTemplate:
             (torch.randn([1, 2, 4, 8]),),
         )
 
-    def test_var_mean(self):
+    @parametrize("tile_reduction", (False, True))
+    def test_var_mean(self, tile_reduction: bool):
         def fn(x):
             return (
                 *torch.var_mean(x, -1),
                 *torch.var_mean(x, [1, 3]),
             )
 
-        self.common(
-            fn,
-            (torch.randn([1, 2, 4, 8]),),
-        )
+        with config.patch(
+            {
+                "triton.prefer_nd_tiling": tile_reduction,
+                "triton.tile_reductions": tile_reduction,
+            }
+        ):
+            self.common(
+                fn,
+                (torch.randn([1, 2, 4, 8]),),
+            )
 
     def test_var_correction(self):
         def fn(x):
