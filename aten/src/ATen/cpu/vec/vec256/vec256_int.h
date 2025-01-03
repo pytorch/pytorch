@@ -263,7 +263,7 @@ public:
     v1 = _mm256_shuffle_epi32(v, 0xB1);
     v = _mm256_add_epi32(v, v1);
     __m128i lo = _mm256_castsi256_si128(v);
-    return _mm256_cvtsi128_si32(lo);
+    return _mm_cvtsi128_si32(lo);
   }
   int32_t reduce_max() const {
     auto v = values;
