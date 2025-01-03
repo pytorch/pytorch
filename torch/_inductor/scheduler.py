@@ -72,6 +72,15 @@ fusion_log = torch._logging.getArtifactLogger(__name__, "fusion")
 loop_ordering_log = torch._logging.getArtifactLogger(__name__, "loop_ordering")
 
 
+def is_grouped_gemm_fusion(node1: BaseSchedulerNode, node2: BaseSchedulerNode) -> bool:
+    return (
+        node1.is_template()
+        and isinstance(node2.node, MultiOutput)
+        and len(node2.node.inputs) == 1
+        and next(iter(node2.node.inputs)).get_name() in node1.get_buffer_names()
+    )
+
+
 @dataclasses.dataclass
 class SchedulerBuffer:
     scheduler: Scheduler
@@ -144,7 +153,10 @@ class SchedulerBuffer:
     def can_free(self) -> bool:
         # There's no real allocated buffer, no need to free it
         assert self.node is not None
-        if isinstance(self.node.layout, ir.NoneLayout):
+        if isinstance(self.node.layout, ir.NoneLayout) or (
+            isinstance(self.node, ir.CppTemplateBuffer)
+            and isinstance(self.node.layout, ir.MultiOutputLayout)
+        ):
             return False
         for use in self.users:
             if isinstance(use.node, OutputNode):
@@ -1251,7 +1263,33 @@ class FusedSchedulerNode(BaseSchedulerNode):
     ) -> FusedSchedulerNode:
         assert node1.scheduler is node2.scheduler
         assert isinstance(node1, (SchedulerNode, FusedSchedulerNode))
-        assert isinstance(node2, (SchedulerNode, FusedSchedulerNode))
+        if node1.is_template():
+            if isinstance(node2, ExternKernelSchedulerNode):
+                # CPP Grouped GEMM Fuse with MultiOutput node
+                # * Node1 has memorydep of MultiOutput in reads
+                # * Node2 has StarDep of MultiOutput in writes
+                # Rewrite the StarDep to MemoryDep
+                assert isinstance(node2.node, MultiOutput)
+                assert len(node2.read_writes.writes) == 1
+                assert isinstance(next(iter(node2.read_writes.writes)), StarDep)
+                name = next(iter(node2.read_writes.writes)).name
+                template_nodes = [
+                    node for node in node1.get_nodes() if node.is_template()
+                ]
+                assert len(template_nodes) == 1
+                template_node = next(iter(template_nodes))
+                assert len(template_node.read_writes.writes) == 1
+                write = next(iter(template_node.read_writes.writes))
+                assert isinstance(write, MemoryDep)
+                node2.read_writes.writes = OrderedSet(
+                    [
+                        MemoryDep(
+                            name, write.index, write.var_names, write.size, write.mode
+                        ),
+                    ]
+                )
+        else:
+            assert isinstance(node2, (SchedulerNode, FusedSchedulerNode))
         nodes = list(itertools.chain(node1.get_nodes(), node2.get_nodes()))
         return cls(node1.scheduler, nodes)
 
@@ -2792,9 +2830,10 @@ class Scheduler:
         for node1, node2 in self.get_possible_fusions(nodes):
             node1 = self.name_to_fused_node[node1.get_first_name()]
             node2 = self.name_to_fused_node[node2.get_first_name()]
-            if self.can_fuse(node1, node2) and not self.will_fusion_create_cycle(
-                node1, node2
-            ):
+            if (
+                self.can_fuse(node1, node2)
+                and not self.will_fusion_create_cycle(node1, node2)
+            ) or is_grouped_gemm_fusion(node1, node2):
                 if not self.speedup_by_fusion(node1, node2):
                     continue
                 fusion_log.debug(
@@ -2891,6 +2930,8 @@ class Scheduler:
                     ):
                         # foreach fusions and epilogue fusions are order dependent
                         possible_fusions.append((node2, node1))
+                    elif is_grouped_gemm_fusion(node1, node2):
+                        possible_fusions.append((node1, node2))
 
         buffer_names_grouping = collections.defaultdict(list)
         for node in nodes:
@@ -3185,6 +3226,11 @@ class Scheduler:
         return (
             isinstance(node, (ExternKernelSchedulerNode, NopKernelSchedulerNode))
             and not node.is_template()
+            and not (
+                isinstance(node.node, MultiOutput)
+                and len(node.node.inputs) == 1
+                and isinstance(next(iter(node.node.inputs)), ir.CppTemplateBuffer)
+            )
         )
 
     def can_fuse(self, node1: BaseSchedulerNode, node2: BaseSchedulerNode) -> bool:
@@ -3608,15 +3654,6 @@ class Scheduler:
         # the current kernel from where 'allocate' retrieve those decisions.
         # We have to make sure there is a non-NULL kernel handler to store
         # those inplace update decisions.
-
-        if (
-            isinstance(scheduler_node.node, ir.MultiOutput)
-            and len(scheduler_node.node.inputs) == 1
-            and isinstance(next(iter(scheduler_node.node.inputs)), ir.CppTemplateBuffer)
-        ):
-            # <TODO> We can remove this code after Fuse MultiOutput and CppTemplateBuffer
-            return
-
         counters["inductor"]["extern_calls"] += 1
         with V.set_kernel_handler(Kernel(increase_kernel_count=False)):
             scheduler_node.decide_inplace_update()
