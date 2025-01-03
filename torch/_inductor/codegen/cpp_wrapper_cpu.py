@@ -18,7 +18,7 @@ from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.symbol import symbol_is_type, SymT
 
 from .. import config, ir
-from ..utils import _align, ALIGN_BYTES, cache_on_self, normalize_name
+from ..utils import _align, cache_on_self, normalize_name
 from ..virtualized import V
 from .aoti_hipify_utils import maybe_hipify_code_wrapper
 from .common import get_device_op_overrides, IndentedBuffer, Kernel
@@ -127,6 +127,8 @@ class CppWrapperCpu(PythonWrapperCodegen):
         self.header.writeline(f"// {name} {hashed}")
 
     def get_device_include(self):
+        if V.graph.aot_mode:
+            return f"#include <torch/csrc/inductor/cpp_wrapper/aoti_{self.device}.h>"
         return f"#include <torch/csrc/inductor/cpp_wrapper/{self.device}.h>"
 
     def write_header(self):
@@ -134,45 +136,24 @@ class CppWrapperCpu(PythonWrapperCodegen):
             # We do not write header for constant graph, it will be written by main module.
             return
 
-        if V.graph.aot_mode:
+        if not V.graph.aot_mode:
             self.header.splice(
                 """
-                #include <torch/csrc/inductor/aoti_runtime/interface.h>
-                #include <torch/csrc/inductor/aoti_runtime/model.h>
-                """
-            )
-            with open(
-                os.path.join(os.path.dirname(__file__), "aoti_runtime", "interface.cpp")
-            ) as f:
-                self.header.splice(f.read())
-            self.header.splice(
-                f"""
-                #include <torch/csrc/inductor/aoti_runtime/arrayref_tensor.h>
-                #include <torch/csrc/inductor/aoti_runtime/thread_local.h>
-                #include <torch/csrc/inductor/aoti_runtime/scalar_to_tensor.h>
-                #include <torch/csrc/inductor/aoti_torch/generated/c_shim_{self.device}.h>
-
-                #include <c10/util/generic_math.h>
-                typedef at::Half half;
-                typedef at::BFloat16 bfloat16;
-
-                // Round up to the nearest multiple of {ALIGN_BYTES}
-                [[maybe_unused]] static int64_t align(int64_t nbytes) {{
-                return (nbytes + {ALIGN_BYTES} - 1) & -{ALIGN_BYTES};
-                }}
-                """
-            )
-        else:
-            self.header.splice(
-                f"""
                 import torch
                 from torch._inductor.codecache import CppWrapperCodeCache
 
                 cpp_wrapper_src = (
                 '''
-                {self.get_device_include()}
                 """
             )
+
+        self.header.splice(self.get_device_include())
+
+        if V.graph.aot_mode:
+            with open(
+                os.path.join(os.path.dirname(__file__), "aoti_runtime", "interface.cpp")
+            ) as f:
+                self.header.splice(f.read())
 
         extend_aoti_c_shim_include = (
             f"torch/csrc/inductor/aoti_torch/generated/extend/c_shim_{self.device}.h"
