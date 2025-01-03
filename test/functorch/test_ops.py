@@ -2673,7 +2673,6 @@ class TestOperators(TestCase):
                     expected = mapvjpmap_fn(*batched_args)
                     self.assertEqual(result, expected)
 
-    @unittest.skip("Testing")
     # See NOTE: [three-transform testing]
     @ops(autograd_function_db, allowed_dtypes=(torch.float32,))
     @skipOps(
@@ -2788,7 +2787,6 @@ class TestOperators(TestCase):
                 result = jvpvmap_op(*primals)
                 self.assertEqual(result, expected)
 
-    @unittest.skip("Testing")
     # See NOTE: [three-transform testing]
     @ops(autograd_function_db, allowed_dtypes=(torch.float32,))
     @skipOps(
