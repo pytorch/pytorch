@@ -1,4 +1,3 @@
-# mypy: allow-untyped-decorators
 # Copyright (c) Meta Platforms, Inc. and affiliates
 # implement matrix related ops for distributed tensor
 from typing import List
