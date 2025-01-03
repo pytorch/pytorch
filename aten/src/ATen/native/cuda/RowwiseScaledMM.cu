@@ -3,9 +3,15 @@
 #include <ATen/core/Tensor.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/nvrtc_stub/ATenNVRTC.h>
+#include <c10/macros/Macros.h>
+
+// Two warninngs in Cutlass included header files
+C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wset-but-not-used")
+C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wunused-but-set-parameter")
 
 // Determine if the architecture supports rowwise scaled mm
-// Currenlty failing on windows with: https://github.com/NVIDIA/cutlass/issues/1571
+// Currently failing on windows with:
+// https://github.com/NVIDIA/cutlass/issues/1571
 #if !defined(USE_ROCM) && !defined(_WIN32) && defined(CUDA_VERSION) && CUDA_VERSION >= 12000
 
 #define BUILD_ROWWISE_FP8_KERNEL
