@@ -50,9 +50,6 @@ class MetalExprPrinter(ExprPrinter_):
         return f"({x}) % ({mod})"
 
 
-mexpr = MetalExprPrinter().doprint
-
-
 class MetalOverrides(OpOverrides):
     @staticmethod
     def to_dtype(
@@ -69,11 +66,13 @@ class MetalOverrides(OpOverrides):
             return "HUGE_VALF"
         elif val == -torch.inf:
             return "-HUGE_VALF"
+        elif isinstance(val, bool):
+            return "true" if val else "false"
         return str(val)
 
     @staticmethod
     def index_expr(expr: sympy.Expr, dtype: torch.dtype) -> str:
-        idx_str = mexpr(V.kernel.rename_indexing(expr))
+        idx_str = V.kernel.index_to_str(V.kernel.rename_indexing(expr))
         var = V.kernel.cse.generate(
             V.kernel.compute, idx_str, bounds=get_bounds_index_expr(expr)
         )
@@ -157,6 +156,7 @@ class MetalKernel(SIMDKernel):
     suffix = ";"
     newvar_prefix = "auto "
     sexpr = MetalExprPrinter().doprint
+    kexpr = sexpr
 
     def __init__(
         self,
