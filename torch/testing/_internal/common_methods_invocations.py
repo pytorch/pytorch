@@ -4961,6 +4961,14 @@ def sample_inputs_reduction_count_nonzero(*args, **kwargs):
         sample.kwargs.pop('keepdim', None)
         yield sample
 
+
+def sample_inputs_reduction_with_dim(*args, **kwargs):
+    with_dim = kwargs.pop('with_dim', False)
+    for sample in sample_inputs_reduction(*args, **kwargs):
+        if with_dim == ('dim' in sample.kwargs):
+            yield sample
+
+
 def sample_inputs_leaky_relu(op_info, device, dtype, requires_grad, **kwargs):
     N = 10
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
@@ -14185,6 +14193,23 @@ op_db: List[OpInfo] = [
            skips=(
            )),
     OpInfo('median',
+           op=torch.ops.aten.median.default,
+           aten_name="median.default",
+           variant_test_name='default',
+           dtypes=all_types_and(torch.bfloat16, torch.float16),
+           dtypesIfCUDA=all_types_and(torch.bfloat16, torch.float16, torch.bool),
+           dtypesIfHpu=custom_types(torch.float32, torch.bfloat16, torch.int32),
+           # TODO: some signatures of median do support out
+           supports_out=False,
+           supports_forward_ad=True,
+           supports_fwgrad_bwgrad=True,
+           error_inputs_func=error_inputs_median,
+           sample_inputs_func=partial(sample_inputs_reduction_with_dim, supports_multiple_dims=False, with_dim=False),
+           ),
+    OpInfo('median',
+           op=torch.ops.aten.median.dim,
+           aten_name="median.dim",
+           variant_test_name='dim',
            dtypes=all_types_and(torch.bfloat16, torch.float16),
            dtypesIfHpu=custom_types(torch.float32, torch.bfloat16, torch.int32),
            # TODO: some signatures of median do support out
@@ -14192,14 +14217,31 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            error_inputs_func=error_inputs_median,
-           sample_inputs_func=partial(sample_inputs_reduction, supports_multiple_dims=False)),
+           sample_inputs_func=partial(sample_inputs_reduction_with_dim, supports_multiple_dims=False, with_dim=True),
+           ),
     OpInfo('nanmedian',
+           op=torch.ops.aten.nanmedian.default,
+           aten_name="nanmedian.default",
+           variant_test_name='default',
+           dtypes=all_types_and(torch.bfloat16, torch.float16),
+           dtypesIfCUDA=all_types_and(torch.bfloat16, torch.float16, torch.bool),
+           # TODO: some signatures of nanmedian do support out
+           supports_out=False,
+           supports_forward_ad=True,
+           supports_fwgrad_bwgrad=True,
+           sample_inputs_func=partial(sample_inputs_reduction_with_dim, supports_multiple_dims=False, with_dim=False),
+           ),
+    OpInfo('nanmedian',
+           op=torch.ops.aten.nanmedian.dim,
+           aten_name="nanmedian.dim",
+           variant_test_name='dim',
            dtypes=all_types_and(torch.bfloat16, torch.float16),
            # TODO: some signatures of nanmedian do support out
            supports_out=False,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
-           sample_inputs_func=partial(sample_inputs_reduction, supports_multiple_dims=False)),
+           sample_inputs_func=partial(sample_inputs_reduction_with_dim, supports_multiple_dims=False, with_dim=True),
+           ),
     OpInfo('var_mean',
            dtypes=floating_and_complex_types_and(torch.half, torch.bfloat16),
            dtypesIfHpu=custom_types(torch.float32, torch.bfloat16),

@@ -334,7 +334,8 @@ def sample_inputs_masked_std_var(op_info, device, dtype, requires_grad, **kwargs
 def sample_inputs_masked_softmax(
     op_info, device, dtype, requires_grad, with_dtype=False, **kwargs
 ):
-    """Sample inputs for masked softmax, log_softmax, and softmin.
+    """Sample inputs for masked softmax, log_softmax, softmin, median,
+    and nanmedian.
 
     Masked normalization operator is a reduction operator with
     trailing mask optional argument. A mask is a bool tensor with the
