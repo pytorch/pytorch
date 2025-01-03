@@ -993,6 +993,8 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 mro_source = AttrSource(self.cls_source, "__mro__")
                 klass_source = GetItemSource(mro_source, idx)
                 dict_source = AttrSource(klass_source, "__dict__")
+                # TODO(anijain2305) - This is a mapping proxy object. Ideally we
+                # should use DictGetItemSource here.
                 return GetItemSource(dict_source, name)
 
         unimplemented(f"Could not find {name} in {type(self.value).__mro__}")
@@ -1002,7 +1004,20 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         from . import ConstantVariable
 
         source = AttrSource(self.source, name) if self.source else None
-        self._check_for_getattribute()
+
+        if object_has_getattribute(self.value):
+            getattribute_fn = inspect.getattr_static(
+                type(self.value), "__getattribute__"
+            )
+            if self.source:
+                new_source = AttrSource(self.source, "__getattribute__")
+            try:
+                return variables.UserMethodVariable(
+                    getattribute_fn, self, source=new_source
+                ).call_function(tx, [ConstantVariable.create(name)], {})
+            except ObservedAttributeError:
+                # Pass through to __getattr__ if __getattribute__ fails
+                handle_observed_exception(tx)
 
         if tx.output.side_effects.has_pending_mutation_of_attr(self, name):
             result = tx.output.side_effects.load_attr(self, name, deleted_ok=True)
@@ -1208,9 +1223,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         raise_observed_exception(AttributeError, tx)
 
     def call_hasattr(self, tx: "InstructionTranslator", name: str) -> "VariableTracker":
-        if self._check_for_getattribute():
-            unimplemented("hasattr with custom __getattribute__")
-
         if self.source:
             install_guard(
                 AttrSource(self.source, name).make_guard(GuardBuilder.HASATTR)
