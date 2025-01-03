@@ -64,6 +64,14 @@ class MetalOverrides(OpOverrides):
         return f"static_cast<{DTYPE_TO_METAL[dtype]}>({x})"
 
     @staticmethod
+    def constant(val: CSEVariable, dtype: torch.dtype) -> str:
+        if val == torch.inf:
+            return "HUGE_VALF"
+        elif val == -torch.inf:
+            return "-HUGE_VALF"
+        return str(val)
+
+    @staticmethod
     def index_expr(expr: sympy.Expr, dtype: torch.dtype) -> str:
         idx_str = mexpr(V.kernel.rename_indexing(expr))
         var = V.kernel.cse.generate(
@@ -91,6 +99,14 @@ class MetalOverrides(OpOverrides):
     @staticmethod
     def logical_and(a: CSEVariable, b: CSEVariable) -> str:
         return f"{a} && {b}"
+
+    @staticmethod
+    def isnan(x: CSEVariable) -> str:
+        return f"metal::isnan({x})"
+
+    @staticmethod
+    def isinf(x: CSEVariable) -> str:
+        return f"metal::isinf({x})"
 
     @staticmethod
     def abs(x: CSEVariable) -> str:
