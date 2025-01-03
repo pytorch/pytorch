@@ -66,12 +66,17 @@ class MetalOverrides(OpOverrides):
 
     @staticmethod
     def maximum(a: CSEVariable, b: CSEVariable) -> str:
-        # TODO: Fix nan propagation, see https://github.com/pytorch/pytorch/issues/143976
-        return f"metal::max(static_cast<decltype({a}+{b})>({a}), static_cast<decltype({a}+{b})>({b}))"
+        nan_check = f"metal::any(metal::isnan({a})) | metal::any(metal::isnan({b}))"
+        nan_value = f"static_cast<decltype({a}+{b})>(NAN)"
+        max_res = f"metal::max(static_cast<decltype({a}+{b})>({a}), static_cast<decltype({a}+{b})>({b}))"
+        return f"{nan_check} ? {nan_value} : {max_res}"
 
     @staticmethod
     def minimum(a: CSEVariable, b: CSEVariable) -> str:
-        return f"metal::min(static_cast<decltype({a}+{b})>({a}), static_cast<decltype({a}+{b})>({b}))"
+        nan_check = f"metal::any(metal::isnan({a})) | metal::any(metal::isnan({b}))"
+        nan_value = f"static_cast<decltype({a}+{b})>(NAN)"
+        min_res = f"metal::min(static_cast<decltype({a}+{b})>({a}), static_cast<decltype({a}+{b})>({b}))"
+        return f"{nan_check} ? {nan_value} : {min_res}"
 
     @staticmethod
     def logical_or(a: CSEVariable, b: CSEVariable) -> str:
