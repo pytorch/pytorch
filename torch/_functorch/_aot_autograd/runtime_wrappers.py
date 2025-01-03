@@ -62,7 +62,6 @@ from .traced_function_transforms import aot_dispatch_subclass
 from .utils import (
     call_func_at_runtime_with_args,
     make_boxed_func,
-    normalize_as_list,
     partial_flatten_asdict,
     strict_zip,
 )
@@ -1712,6 +1711,13 @@ class AOTDispatchAutograd:
             expected_meta = meta.meta
 
         runtime_type = type(x)
+        if torch._dynamo.compiled_autograd.in_compiled_autograd_region:
+            # When we're inside compiled autograd's AOTDispatcher step,
+            # regular Tensors look like FunctionalTensors.
+            # Tensor subclasses still look like Tensor subclasses though.
+            if isinstance(x, torch._subclasses.functional_tensor.FunctionalTensor):
+                runtime_type = torch.Tensor
+
         runtime_meta = None
         runtime_subclass_keys: Sequence[str] = []
 
@@ -1985,23 +1991,9 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
 
             @staticmethod
             def _backward_impl(ctx, all_args):
-                if ctx._is_compiled_autograd_tracing():
-                    if lazy_backward_info is None:
-                        raise RuntimeError(
-                            """This compiled backward function was saved by AOTAutogradCache, which does not support
-                        compiled autograd. Please turn off AOTAutogradCache using `TORCHINDUCTOR_AUTOGRAD_CACHE=0`."""
-                        )
-                    bw_module = lazy_backward_info.bw_module
-                    # For compiled autograd, run raw FX graph so that it can be inlined into the larger graph
-                    symints = ctx._get_compiled_autograd_symints()
-                    assert len(symints) == len(ctx.symints)
-                    all_args[: len(symints)] = symints
-                    if backward_state_indices:
-                        assert ctx._compiled_autograd_backward_state.proxy is not None
-                        all_args.append(ctx._compiled_autograd_backward_state)
-                    context = torch._C._DisableAutocast if disable_amp else nullcontext
-                    with context():
-                        return normalize_as_list(bw_module(*all_args))
+                assert (
+                    not ctx._is_compiled_autograd_tracing()
+                ), "compiled autograd reimplements this function at proxy_call_aot_backward"
 
                 assert (
                     not backward_state_indices
