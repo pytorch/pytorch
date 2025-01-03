@@ -53,10 +53,7 @@ RRefForkData::RRefForkData(
 //////////////////////////////  RRef  /////////////////////////////////////
 
 RRef::RRef(worker_id_t ownerId, const RRefId& rrefId, TypePtr type)
-    : RRefInterface(),
-      ownerId_(ownerId),
-      rrefId_(rrefId),
-      type_(std::move(type)) {}
+    : ownerId_(ownerId), rrefId_(rrefId), type_(std::move(type)) {}
 
 RRefForkData RRef::fork() const {
   auto& ctx = RRefContext::getInstance();
