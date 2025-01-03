@@ -1287,6 +1287,14 @@ class _BlasBackend:
     Cublaslt: _BlasBackend
     Ck: _BlasBackend
 
+def _get_rocm_fa_preferred_backend() -> torch._C._ROCmFABackend: ...
+def _set_rocm_fa_preferred_backend(arg: torch._C._ROCmFABackend): ...
+
+class _ROCmFABackend:
+    Default: _ROCmFABackend
+    AOTriton: _ROCmFABackend
+    Ck: _ROCmFABackend
+
 class ConvBackend(Enum): ...
 
 class Tag(Enum):
