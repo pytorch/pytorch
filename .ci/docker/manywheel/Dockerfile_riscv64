@@ -1,0 +1,71 @@
+FROM --platform=linux/amd64 ubuntu:24.04 as base
+
+ENV PYTHON_VERSION=3.12.3
+ENV RISCV_GCC_VERSION=14
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV CC=riscv64-linux-gnu-gcc-${RISCV_GCC_VERSION}
+ENV CXX=riscv64-linux-gnu-g++-${RISCV_GCC_VERSION}
+ENV QEMU_LD_PREFIX=/usr/riscv64-linux-gnu/
+
+# Install basic dependencies
+RUN apt-get update && apt-get install -y \
+    ninja-build \
+    autoconf \
+    automake \
+    libtool \
+    patchelf \
+    ccache \
+    git \
+    wget \
+    python3-pip \
+    python3-venv \
+    python-is-python3 \
+    cmake \
+    gcc-${RISCV_GCC_VERSION}-riscv64-linux-gnu \
+    g++-${RISCV_GCC_VERSION}-riscv64-linux-gnu \
+    && rm -rf /var/lib/apt/lists/*
+
+# git236+ would refuse to run git commands in repos owned by other users
+# Which causes version check to fail, as pytorch repo is bind-mounted into the image
+# Override this behaviour by treating every folder as safe
+# For more details see https://github.com/pytorch/pytorch/issues/78659#issuecomment-1144107327
+RUN git config --global --add safe.directory "*"
+
+FROM base as python
+# Build and install RISC-V Python
+WORKDIR /opt
+RUN wget https://www.python.org/ftp/python/${PYTHON_VERSION}/Python-${PYTHON_VERSION}.tgz \
+    && tar -xf Python-${PYTHON_VERSION}.tgz --no-same-permissions --no-same-owner \
+    && cd Python-${PYTHON_VERSION} \
+    && mkdir build && cd build \
+    && ../configure \
+        --host=riscv64-linux-gnu \
+        --build=x86_64-linux-gnu \
+        --prefix=/opt/python-riscv \
+        --enable-shared \
+        --disable-ipv6 \
+        --enable-optimizations \
+        ac_cv_file__dev_ptmx=no \
+        ac_cv_file__dev_ptc=no \
+        --with-build-python=/usr/bin/python3 \
+    && make -j$(nproc) \
+    && make install
+
+FROM base as final
+COPY --from=python             /opt/python-riscv                           /opt/python-riscv
+
+# Install crossenv
+RUN pip install crossenv --break-system-packages \
+    && /usr/bin/python3 -m crossenv /opt/python-riscv/bin/python3 /opt/riscv-cross-env
+
+# Set up cross Python environment
+SHELL ["/bin/bash", "-c"]
+RUN source /opt/riscv-cross-env/bin/activate \
+    && pip install setuptools pyyaml typing_extensions wheel \
+    && python -mpip install --pre numpy==2.0.2
+
+# Set default environment variables for PyTorch build
+ENV Python_ROOT_DIR=/opt/python-riscv/
+
+CMD ["/bin/bash"]
