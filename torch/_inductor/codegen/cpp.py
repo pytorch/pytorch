@@ -4843,6 +4843,14 @@ class CppScheduling(BaseScheduling):
         Codegen a CPP template, possibly with fused epilogues
         """
         assert not prologue_nodes
+
+        # Remove the MultiOutput Node
+        epilogue_nodes = [
+            epilogue_node
+            for epilogue_node in epilogue_nodes
+            if isinstance(epilogue_node, (SchedulerNode, FusedSchedulerNode))
+        ]
+
         counters["inductor"]["cpp_epilogue_fusion_counter"] += len(epilogue_nodes)
         assert self.is_cpp_template(
             template_node
@@ -4881,6 +4889,7 @@ class CppScheduling(BaseScheduling):
             epilogue_nodes=epilogue_ir_nodes,
         )
         with kernel:
+            grouped_gemm_allocate_lines: List[AllocateLine] = []
             if isinstance(template_node.node, ir.CppTemplateBuffer) and isinstance(
                 template_node.node.layout, ir.MultiOutputLayout
             ):
@@ -4889,7 +4898,7 @@ class CppScheduling(BaseScheduling):
                     template_node.node.outputs
                 ), "Grouped GEMM Template should with output buffers"
                 for buffer in template_node.node.outputs:
-                    V.graph.wrapper_code.writeline(
+                    grouped_gemm_allocate_lines.append(
                         AllocateLine(V.graph.wrapper_code, buffer)
                     )
             else:
@@ -4901,6 +4910,10 @@ class CppScheduling(BaseScheduling):
         with V.set_kernel_handler(kernel):
             node_schedule = [template_node, *epilogue_nodes]
             kernel_name = self.define_kernel(src_code, node_schedule, kernel.args)
+        for line in grouped_gemm_allocate_lines:
+            if kernel.args.output_buffers[line.node.get_name()] != "REMOVED":
+                # only allocate the buffer when it's not removed in kernel args
+                V.graph.wrapper_code.writeline(line)
         kernel.call_kernel(kernel_name, ctb)
         V.graph.removed_buffers |= kernel.removed_buffers
         self.scheduler.free_buffers()
