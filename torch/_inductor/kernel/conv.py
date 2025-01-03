@@ -485,6 +485,26 @@ def convolution(
     stride = tuple(V.graph.sizevars.evaluate_static_shapes(stride))
     padding = tuple(V.graph.sizevars.evaluate_static_shapes(padding))
 
+    # Always convert conv1D to 2D for Intel GPU.
+    # Only conv2D can be converted to channel last layout,
+    # which have much better performance.
+    if len(x.get_size()) == 3 and ir.get_device_type(x) == "xpu":
+        kwargs.update(
+            {
+                "stride": (1,) + stride,
+                "padding": (0,) + padding,
+                "dilation": (1,) + dilation,
+                "output_padding": (0,) + output_padding,
+            }
+        )
+        x = L[aten.unsqueeze](x, dim=2)
+        weight = L[aten.unsqueeze](weight, dim=2)
+
+        return L[aten.squeeze](
+            convolution(x, weight, bias, **kwargs),
+            dim=2,
+        )
+
     kwargs: ConvLayoutParams = {
         "stride": stride,
         "padding": padding,
@@ -535,7 +555,11 @@ def convolution(
     ):
         return convert_1x1_conv_to_mm(x, weight, bias)
 
-    if bias is not None and ir.get_device_type(x) != "cpu":
+    if (
+        bias is not None
+        and ir.get_device_type(x) != "cpu"
+        and ir.get_device_type(x) != "xpu"
+    ):
         # peel off the bias, cudnn is slower with it
         result = convolution(x, weight, None, **kwargs)
         return L[aten.add](
