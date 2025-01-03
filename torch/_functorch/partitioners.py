@@ -1575,6 +1575,8 @@ def choose_saved_values_set(
                 # Only allow recomputing nodes that are actually required for BW
                 i.dist_from_bw < int(1e9)  # type: ignore[attr-defined]
                 and get_node_storage(i) not in input_storages
+                and i.meta.get("recompute", CheckpointPolicy.PREFER_SAVE)
+                                != CheckpointPolicy.MUST_SAVE
             )
         ]
 
