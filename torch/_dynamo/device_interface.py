@@ -144,7 +144,7 @@ class DeviceInterface:
         The caller should ensure the presence of the 'triton' package before
         calling this method.
         """
-        raise RuntimeError(f"This device type does not support Triton")
+        raise RuntimeError("This device type does not support Triton")
 
 
 class DeviceGuard:
