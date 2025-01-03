@@ -8290,6 +8290,13 @@ class TestMPS(TestCaseMPS):
             helper((2, 8, 3, 5), 0.1, op_name, inplace)
             helper((2, 8, 3, 5), 0.2, op_name, inplace)
 
+        # Test float32  int alpha
+        # See https://github.com/pytorch/pytorch/issues/143932
+        x = torch.rand(32, device='mps', dtype=torch.float32)
+        y = torch.arange(32, device='mps', dtype=torch.int32)
+        self.assertEqual(torch.add(x, y, alpha=2).cpu(), torch.add(x.cpu(), y.cpu(), alpha=2))
+        self.assertEqual(torch.add(x, 3, alpha=2).cpu(), torch.add(x.cpu(), 3, alpha=2))
+
     # Test add
     def test_add_scalars(self):
         def helper(alpha):
@@ -12586,7 +12593,7 @@ class TestMetalLibrary(TestCaseMPS):
         self.assertEqual(x, y)
         self.assertEqual(x, z)
 
-    def test_metal_arange_with_arg(self):
+    def test_metal_arange_with_arg(self, start=3.14, step=.5):
         x = torch.zeros(12, device="mps")
         lib = torch.mps._compile_shader("""
             kernel void arange(device float* x, constant float& start, constant float& step,
@@ -12594,8 +12601,11 @@ class TestMetalLibrary(TestCaseMPS):
               x[idx] = start + idx * step;
             }
         """)
-        lib.arange(x, 3.14, .5)
-        self.assertEqual(x, torch.arange(3.14, 8.66, .5, device='mps'))
+        lib.arange(x, start, step)
+        self.assertEqual(x, torch.arange(start, 8.66, .5, device='mps'))
+
+    def test_metal_arange_with_arg_and_scalar_tensor(self):
+        self.test_metal_arange_with_arg(step=torch.tensor(.5))
 
     def test_metal_arange_with_arg_and_cast(self):
         x = torch.zeros(12, device="mps", dtype=torch.half)
