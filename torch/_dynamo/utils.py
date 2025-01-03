@@ -1855,16 +1855,12 @@ def is_safe_constant(v):
     )
 
 
-def _common_constants():
+def common_constants():
     return {
         # We zero-one specialize shapes, so specialize these constants
         # too
         0,
         1,
-        # NB: There used to be more constants here, but honestly it was
-        # pretty confusing.  Note we specialize floats by default, and
-        # DON'T specialize ints by default.  This all only matters with
-        # dynamic_shapes
     }
 
 
@@ -1874,12 +1870,10 @@ def is_torch_sym(value):
     )
 
 
-def is_wrap_int_into_constant_vt(value, source):
-    from .source import ConstDictKeySource, is_from_defaults
+def is_int_specialization_case(value, source):
+    from .source import is_from_defaults
 
-    # unspecializing int by default, but still
-    # specialize for the following conditions
-    if not TracingContext.get().force_unspec_int_unbacked_size_like and (
+    return not TracingContext.get().force_unspec_int_unbacked_size_like and (
         # Assume integers from global variables want to be specialized
         not source.guard_source().is_local()
         # Assume that integers that came from NN modules want to be
@@ -1898,12 +1892,9 @@ def is_wrap_int_into_constant_vt(value, source):
         # condition never evaluates True in open source
         or (
             not justknobs_check("pytorch/dynamo:enable_unspecialize_zero_one_plain_int")
-            and value in _common_constants()
+            and value in common_constants()
         )
-        or isinstance(source, ConstDictKeySource)
-    ):
-        return True
-    return False
+    )
 
 
 def specialize_symnode(arg):
