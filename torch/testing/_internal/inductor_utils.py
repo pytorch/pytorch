@@ -182,9 +182,10 @@ def _skip_lazily_if_decorator(cb: Callable[[], bool], msg: str):
     return decorator_wrapper
 
 
+requires_cuda = _skip_lazily_if_decorator(lambda: not HAS_CUDA, "requires CUDA device with Inductor support")
 requires_gpu = _skip_lazily_if_decorator(lambda: not HAS_GPU, "requires GPU with Inductor support")
 requires_triton = _skip_lazily_if_decorator(lambda: not HAS_TRITON, "requires Triton")
-requires_gpu_and_triton = _skip_lazily_if_decorator(lambda: not HAS_GPU_TRITON, "requires GPU and Triton")
+requires_gpu_triton = _skip_lazily_if_decorator(lambda: not HAS_GPU_TRITON, "requires GPU and Triton")
 
 skipCUDAIf = functools.partial(skipDeviceIf, device="cuda")
 skipXPUIf = functools.partial(skipDeviceIf, device="xpu")

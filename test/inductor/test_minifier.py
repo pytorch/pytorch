@@ -13,8 +13,11 @@ from torch.testing._internal.common_utils import (
     skipIfXpu,
     TEST_WITH_ASAN,
 )
-from torch.testing._internal.inductor_utils import GPU_TYPE
-from torch.testing._internal.triton_utils import requires_gpu, requires_gpu_triton
+from torch.testing._internal.inductor_utils import (
+    GPU_TYPE,
+    requires_gpu,
+    requires_gpu_triton,
+)
 
 
 class MinifierTests(MinifierTestBase):
