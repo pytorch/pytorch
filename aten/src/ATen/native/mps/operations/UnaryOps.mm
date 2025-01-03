@@ -296,16 +296,27 @@ Tensor& logical_not_out_mps(const Tensor& self, Tensor& output) {
 
 Tensor& angle_out_mps(const Tensor& self, Tensor& output) {
   TORCH_CHECK(self.scalar_type() != ScalarType::Long, "MPS does not support angle op with int64 input");
-  mps::unary_op(self, output, "angle_out_mps", ^MPSGraphTensor*(MPSGraph* mpsGraph, MPSGraphTensor* inputTensor) {
-    auto realPart = [mpsGraph realPartOfTensor:inputTensor name:nil];
-    auto imagPart = [mpsGraph imaginaryPartOfTensor:inputTensor name:nil];
-    return [mpsGraph atan2WithPrimaryTensor:imagPart secondaryTensor:realPart name:nil];
-  });
-  return output;
+  if (mps::supportsComplex()) {
+    mps::unary_op(self, output, "angle_out_mps", ^MPSGraphTensor*(MPSGraph* mpsGraph, MPSGraphTensor* inputTensor) {
+      auto realPart = [mpsGraph realPartOfTensor:inputTensor name:nil];
+      auto imagPart = [mpsGraph imaginaryPartOfTensor:inputTensor name:nil];
+      return [mpsGraph atan2WithPrimaryTensor:imagPart secondaryTensor:realPart name:nil];
+    });
+    return output;
+  } else {
+    TORCH_CHECK(!self.is_complex(), "MPS does not support angle with complex imput on macOS13")
+    mps::unary_op(self, output, "angle_out_mps", ^MPSGraphTensor*(MPSGraph* mpsGraph, MPSGraphTensor* inputTensor) {
+      auto imagPart = [mpsGraph constantWithScalar:0.0 shape:inputTensor.shape dataType:inputTensor.dataType];
+      return [mpsGraph atan2WithPrimaryTensor:imagPart secondaryTensor:inputTensor name:nil];
+    });
+    return output;
+  }
 }
 
 Tensor angle_mps(const Tensor& self) {
-  const auto float_type = c10::isIntegralType(self.scalar_type(), /*includeBool=*/true) ? c10::typeMetaToScalarType(c10::get_default_dtype()) : c10::toRealValueType(self.scalar_type());
+  const auto float_type = c10::isIntegralType(self.scalar_type(), /*includeBool=*/true)
+      ? c10::typeMetaToScalarType(c10::get_default_dtype())
+      : c10::toRealValueType(self.scalar_type());
   Tensor result = at::empty({0}, self.options().dtype(float_type));
   return angle_out_mps(self, result);
 }
