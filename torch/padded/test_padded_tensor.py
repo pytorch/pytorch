@@ -63,7 +63,9 @@ class TestAttention(TestCase):
     def test_attention_1(self):
         inputs = [torch.ones(4, 2, dtype=torch.int32)]
         MULTIPLIERS = {0: 8, 1: 8, 2: 1}
-        inputs_p = pytree.tree_map(lambda x: PaddedTensor(x, MULTIPLIERS, None), inputs)
+        inputs_p = pytree.tree_map(
+            lambda x: PaddedTensor(x, {0: 8, 1: 8, 2: 1}, None), inputs
+        )
         output_shapes_p = [torch.Size([8, 8, 10]) for _ in range(3)]
 
         self.run_unpadded_padded(self.f_1, inputs, inputs_p, output_shapes_p)
@@ -127,6 +129,7 @@ class TestAttention(TestCase):
     def kv_update(self, input_pos, k_val, v_val):
         # input_pos: [S], k_val: [B, H, S, D]
         assert input_pos.shape[0] == k_val.shape[2]
+        print("-----------------------------")
 
         k_out = self.k_cache
         v_out = self.v_cache
@@ -204,7 +207,7 @@ class TestAttention(TestCase):
             (y,) = self.f_6(y, bsz, seqlen)
             (y,) = self.f_7(y)
 
-            return y
+            return (y,)
 
         x = torch.ones(4, 2, dtype=torch.int32)
         freqs_cis = torch.randn(2, 1, 2)
@@ -213,11 +216,18 @@ class TestAttention(TestCase):
 
         inputs = [x, freqs_cis, mask, input_pos]
 
+        # inputs_p = [
+        #    PaddedTensor(x, {0: 8, 1: 8, 2: 1}, None),
+        #    PaddedTensor(freqs_cis, {0: 8, 1: 1, 2: 1}, None),
+        #    mask,
+        #    PaddedTensor(input_pos, {0: 8, 1: 1, 2: 1}, None),
+        # ]
+
         inputs_p = [
-            PaddedTensor(x, {0: 8, 1: 8, 2: 1}, None),
-            PaddedTensor(freqs_cis, {0: 8, 1: 1, 2: 1}, None),
-            PaddedTensor(mask, {0: 8, 1: 8, 2: 1, 3: 1}, None),
-            PaddedTensor(input_pos, {0: 8, 1: 1}, None),
+            PaddedTensor(x, {0: 1, 1: 1, 2: 1}, None),
+            PaddedTensor(freqs_cis, {0: 1, 1: 1, 2: 1}, None),
+            mask,
+            PaddedTensor(input_pos, {0: 1, 1: 1, 2: 1}, None),
         ]
 
         self.run_unpadded_padded(f, inputs, inputs_p, None)

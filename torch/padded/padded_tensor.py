@@ -7,10 +7,6 @@ import torch.utils._pytree as pytree
 from torch.utils._python_dispatch import return_and_correct_aliasing
 
 
-global MULTIPLIERS
-MULTIPLIERS = None
-
-
 def slice_nd(input, start_idxs, end_idxs):
     # Slice a tensor along multiple dimensions
     # This is a generalization of torch.slice, which only supports slicing along one dimension
@@ -419,19 +415,21 @@ class IndexPutOp(SlicingOp):
         input_shape = args[0].original_shape
         return [torch.Size(input_shape)]
 
-    # def modify_args(self, padded_args, padded_kwargs, args, kwargs):
-    #    # Slice out the padded indices and values, so they fit the input tensor
-    #    inp, indices, values = args
-    #    padded_inp, padded_indices, padded_values = padded_args
+    def modify_args(self, args, kwargs):
+        tensor_args, tensor_kwargs = padded_to_tensor(args, kwargs)
 
-    #    depadded_indices = [
-    #        x if x is None else torch.arange(x.original_shape[0]).int() for x in indices
-    #    ]
-    #    depadded_values = slice_nd(
-    #        padded_values, [0] * len(values.original_shape), values.original_shape
-    #    )
+        # Slice out the padded indices and values, so they fit the input tensor
+        inp, indices, values = args
+        padded_inp, padded_indices, padded_values = tensor_args
 
-    #    return [padded_inp, depadded_indices, depadded_values], padded_kwargs
+        depadded_indices = [
+            x if x is None else torch.arange(x.original_shape[0]).int() for x in indices
+        ]
+        depadded_values = slice_nd(
+            padded_values, [0] * len(values.original_shape), values.original_shape
+        )
+
+        return [padded_inp, depadded_indices, depadded_values], tensor_kwargs
 
 
 class SplitWithSizesOp(SlicingOp):
@@ -661,6 +659,13 @@ def get_pad(shape: torch.Size, multipliers: Dict[int, int]) -> Tuple[int, ...]:
     return tuple(pad[::-1])
 
 
+def get_multipliers(args):
+    for arg in args:
+        if type(arg) is PaddedTensor:
+            return arg.multipliers
+    return {n: 1 for n in range(10)}
+
+
 class PaddedTensor(torch.Tensor):
     @staticmethod
     def __new__(
@@ -671,12 +676,10 @@ class PaddedTensor(torch.Tensor):
     ):
         assert type(multipliers) is dict
 
-        global MULTIPLIERS
-        MULTIPLIERS = multipliers
-
         # TODO: change ori_shape as torch.Tensor
         if multipliers is None:
             multipliers = {}
+
         padded_shape = get_padded_shape(tensor.shape, multipliers)
         kwargs = {}
         # TODO: Improve kwargs. Support different strides, storage_offset, etc.
@@ -726,17 +729,21 @@ class PaddedTensor(torch.Tensor):
         print("Dispatching", func._opname)
 
         op = OP_DATABASE.get_op(func._opname)
+        multipliers = get_multipliers(args)
 
         # Convert args and kwargs to padded tensors
-        global MULTIPLIERS
-        args = tuple(
-            (
-                PaddedTensor(arg, MULTIPLIERS)
-                if type(arg) is torch.Tensor or type(arg) is torch.nn.Parameter
-                else arg
-            )
-            for arg in args
-        )
+        args_new = []
+        for arg in args:
+            if type(arg) is torch.Tensor or type(arg) is torch.nn.Parameter:
+                print(
+                    "Encountered tensor with shape",
+                    arg.shape,
+                    "and converted to padded tensor",
+                )
+                args_new.append(PaddedTensor(arg, multipliers))
+            else:
+                args_new.append(arg)
+        args = tuple(args_new)
 
         # Infer shape
         orig_shape_out = op.infer_shape(args, kwargs)
@@ -754,9 +761,8 @@ class PaddedTensor(torch.Tensor):
         log_function_with_shapes(func, tensor_args, out, orig_shape_out)
 
         out_flat, spec = pytree.tree_flatten(out)
-        global MULTIPLIERS
         out_flat = [
-            PaddedTensor(t, MULTIPLIERS, s) for t, s in zip(out_flat, orig_shape_out)
+            PaddedTensor(t, multipliers, s) for t, s in zip(out_flat, orig_shape_out)
         ]
         out = pytree.tree_unflatten(out_flat, spec)
         return return_and_correct_aliasing(func, args, kwargs, out)
