@@ -4,6 +4,7 @@
 # flake8: noqa
 
 import dataclasses
+import itertools
 import unittest
 from collections import defaultdict, namedtuple, OrderedDict
 from dataclasses import dataclass, fields, is_dataclass
@@ -582,7 +583,7 @@ class DictTests(torch._dynamo.test_case.TestCase):
 
     def test_dict_reconstruct_keeps_original_order(self):
         def fn():
-            modules = collections.OrderedDict([("act", torch.nn.ReLU())])
+            modules = OrderedDict([("act", torch.nn.ReLU())])
             module_dict = torch.nn.ModuleDict(modules)
 
             next_modules = {"fc4": torch.nn.Linear(5, 6), "act3": torch.nn.Sigmoid()}
@@ -600,7 +601,7 @@ class DictTests(torch._dynamo.test_case.TestCase):
 
     def test_dict_subclass_initialization_in_graph(self):
         for super_class in (
-            collections.OrderedDict,
+            OrderedDict,
             dict,
         ):
 
@@ -649,7 +650,7 @@ class DictTests(torch._dynamo.test_case.TestCase):
 
     def test_dict_subclass_contains(self):
         # pattern from huggingface
-        class ClassInstantier(collections.OrderedDict):
+        class ClassInstantier(OrderedDict):
             pass
 
         @torch.compile(fullgraph=True, backend="eager")
