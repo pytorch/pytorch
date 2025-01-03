@@ -981,6 +981,9 @@ elseif(USE_CUDA)
   endif()
   if(USE_FLASH_ATTENTION)
     target_compile_definitions(torch_cuda PRIVATE USE_FLASH_ATTENTION)
+    target_include_directories(torch_cuda PRIVATE
+        ${PROJECT_SOURCE_DIR}/third_party/flash-attention/csrc/flash_attn/src/
+    )
   endif()
   if(USE_MEM_EFF_ATTENTION)
     target_compile_definitions(torch_cuda PRIVATE USE_MEM_EFF_ATTENTION)

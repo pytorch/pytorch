@@ -167,8 +167,11 @@ file(GLOB native_utils_cpp "native/utils/*.cpp")
 # list(APPEND flash_attention_cuda_cu ${PROJECT_SOURCE_DIR}/third_party/flash-attention/csrc/flash_attn/src/*.cu)
 file(GLOB flash_attention_cuda_kernels_cu ${PROJECT_SOURCE_DIR}/third_party/flash-attention/csrc/flash_attn/src/*.cu)
 # list(APPEND flash_attention_cuda_cpp ${PROJECT_SOURCE_DIR}/third_party/flash-attention/csrc/flash_attn/src/*.cpp)
-file(GLOB flash_attention_cuda_cpp ${PROJECT_SOURCE_DIR}/third_party/flash-attention/csrc/flash_attn/src/*.h)
-
+# Flash attention C++ sources
+file(GLOB flash_attention_cuda_cpp
+    "${PROJECT_SOURCE_DIR}/third_party/flash-attention/csrc/flash_attn/src/*.cpp"
+    "native/transformers/cuda/flash_attn/flash_api.cpp"
+)
 
 # file(GLOB flash_attention_cuda_cu "native/transformers/cuda/flash_attn/*.cu")
 # file(GLOB flash_attention_cuda_kernels_cu "native/transformers/cuda/flash_attn/kernels/*.cu")
