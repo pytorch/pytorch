@@ -76,6 +76,7 @@ from ..source import (
     CallMethodItemSource,
     ConstDictKeySource,
     ConvertIntSource,
+    DictGetItemSource,
     FloatTensorSource,
     GetItemSource,
     GradSource,
@@ -98,6 +99,7 @@ from ..utils import (
     common_constant_types,
     dict_keys,
     get_fake_value,
+    get_items_from_dict,
     get_locals_to_steal,
     get_static_address_type,
     is_frozen_dataclass,
@@ -134,11 +136,9 @@ from .ctx_manager import (
 )
 from .dicts import (
     ConstDictVariable,
-    CustomizedDictVariable,
     DefaultDictVariable,
     DictKeySetVariable,
     FrozensetVariable,
-    HFPretrainedConfigVariable,
     PythonSysModulesVariable,
     SetVariable,
 )
@@ -227,6 +227,7 @@ from .user_defined import (
     MutableMappingVariable,
     SourcelessGraphModuleVariable,
     UserDefinedClassVariable,
+    UserDefinedDictVariable,
     UserDefinedObjectVariable,
 )
 
@@ -595,7 +596,7 @@ class VariableBuilder:
             result = {
                 TypingVariable(k): UserDefinedObjectVariable(
                     v,
-                    source=GetItemSource(
+                    source=DictGetItemSource(
                         self.get_source(), ConstDictKeySource(self.get_source(), i)
                     ),
                 )
@@ -605,10 +606,6 @@ class VariableBuilder:
         elif value is sys.modules:
             self.install_guards(GuardBuilder.FUNCTION_MATCH)
             return PythonSysModulesVariable(source=self.source)
-        elif CustomizedDictVariable.is_matching_cls_hf(type(value)):
-            self.install_guards(GuardBuilder.TYPE_MATCH)
-            result = CustomizedDictVariable.wrap(self, value)
-            return self.tx.output.side_effects.track_object_existing(value, result)
         elif istype(value, (dict, collections.defaultdict, collections.OrderedDict)):
             self.install_guards(GuardBuilder.SEQUENCE_LENGTH)
 
@@ -647,13 +644,18 @@ class VariableBuilder:
                     source_key = ConstDictKeySource(self.get_source(), i)
                     key = LazyVariableTracker.create(k, source_key)
 
-                source_value = GetItemSource(self.get_source(), source_key)
+                source_value = DictGetItemSource(self.get_source(), source_key)
                 value = LazyVariableTracker.create(v, source_value)
 
                 return key, value
 
+            # Ensure that we call dict.keys and not value.keys (which can call
+            # overridden keys method). In the C++ guards, we relied on
+            # PyDict_Next to traverse the dictionary, which uses the internal
+            # data structure and does not call the overridden keys method.
             result = dict(
-                build_key_value(i, k, v) for i, (k, v) in enumerate(value.items())
+                build_key_value(i, k, v)
+                for i, (k, v) in enumerate(get_items_from_dict(value))
             )
 
             if istype(value, collections.defaultdict):
@@ -729,7 +731,7 @@ class VariableBuilder:
                 if not ConstantVariable.is_literal(k):
                     unimplemented("functools.partial with non-literal keyword")
                 keywords[k] = VariableBuilder(
-                    self.tx, GetItemSource(keywords_source, k)
+                    self.tx, DictGetItemSource(keywords_source, k)
                 )(v)
 
             install_guard(
@@ -852,9 +854,6 @@ class VariableBuilder:
             )
         elif np and isinstance(value, np.number):
             return self.wrap_unspecialized_primitive(value)
-        elif HFPretrainedConfigVariable.is_matching_object(value):
-            self.install_guards(GuardBuilder.TYPE_MATCH)
-            return HFPretrainedConfigVariable(value)
         elif isinstance(value, HigherOrderOperator):
             if value is torch._higher_order_ops.invoke_subgraph:
                 unimplemented(
@@ -1232,6 +1231,51 @@ class VariableBuilder:
                 fake_script_obj,
                 source=self.source,
             )
+        elif (
+            isinstance(value, (dict, collections.OrderedDict))
+            and type(value).__new__ is dict.__new__
+        ):
+            # Construct a dict_vt that will reside inside the UserDefinedDictVariable
+            self.install_guards(GuardBuilder.TYPE_MATCH)
+            self.install_guards(GuardBuilder.SEQUENCE_LENGTH)
+
+            # Guard on the key order
+            self.tx.output.guard_on_key_order.add(self.source.name())
+
+            # We need all the keys to be hashable. We do this within the
+            # _HashableTracker class in dicts.py
+            def build_key_value(i, k, v):
+                source_key = ConstDictKeySource(self.get_source(), i)
+                key = LazyVariableTracker.create(k, source_key)
+
+                source_value = DictGetItemSource(self.get_source(), source_key)
+                value = LazyVariableTracker.create(v, source_value)
+
+                return key, value
+
+            # Ensure that we call dict.keys and not value.keys (which can call
+            # overridden keys method). In the C++ guards, we relied on
+            # PyDict_Next to traverse the dictionary, which uses the internal
+            # data structure and does not call the overridden keys method.
+            result = dict(
+                build_key_value(i, k, v)
+                for i, (k, v) in enumerate(get_items_from_dict(value))
+            )
+
+            # NB: This is deliberately kept ValueMutationNew because dict_vt is
+            # an internal representation. dict_vt tracks the mutation on the
+            # dict side. side_effects infra uses the UserDefinedDictVariable to
+            # apply side-effects of this dict_vt.
+            dict_vt = ConstDictVariable(
+                result,
+                user_cls=collections.OrderedDict
+                if isinstance(value, collections.OrderedDict)
+                else dict,
+                mutation_type=ValueMutationNew(),
+            )
+
+            result = UserDefinedDictVariable(value, dict_vt=dict_vt, source=self.source)
+            return self.tx.output.side_effects.track_object_existing(value, result)
         elif issubclass(type(value), MutableMapping):
             self.install_guards(GuardBuilder.TYPE_MATCH)
             return MutableMappingVariable(value, source=self.source)
@@ -2131,15 +2175,13 @@ class VariableBuilder:
 def _dataclasses_fields_lambda(obj):
     if isinstance(obj, UserDefinedObjectVariable):
         value = obj.value
-    elif isinstance(obj, CustomizedDictVariable):
-        value = obj.user_cls
     else:
         unimplemented(f"Dataclass fields handling fails for type {obj}")
     items = []
     for field in dataclasses.fields(value):
         source = None
         if obj.source:
-            source = GetItemSource(
+            source = DictGetItemSource(
                 AttrSource(obj.source, "__dataclass_fields__"), field.name
             )
         items.append(UserDefinedObjectVariable(field, source=source))

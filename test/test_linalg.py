@@ -2506,7 +2506,7 @@ class TestLinalg(TestCase):
             # check if svd_lowrank produces same singular values as linalg.svdvals
             U, S, Vh = torch.linalg.svd(a, full_matrices=False)
             V = Vh.mH
-            self.assertEqual(s, S)
+            self.assertEqual(s, S, rtol=5e-7, atol=1e-7)
 
             if density == 1:
                 # actual_rank is known only for dense inputs

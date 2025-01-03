@@ -57,7 +57,7 @@ from torch.utils._ordered_set import OrderedSet
 from torch.utils._pytree import tree_map_only
 
 
-GPU_TYPES = ["cuda", "xpu"]
+GPU_TYPES = ["cuda", "mps", "xpu"]
 
 
 # defines here before import torch._dynamo is for avoiding circular import
@@ -1129,7 +1129,7 @@ def is_big_gpu(index_or_device: Union[int, torch.device] = 0) -> bool:
     if isinstance(index_or_device, torch.device):
         device = index_or_device
     else:
-        device = torch.device("cuda", index_or_device)
+        device = torch.device(get_gpu_type(), index_or_device)
 
     prop = DeviceProperties.create(device)
 
@@ -1142,7 +1142,7 @@ def is_big_gpu(index_or_device: Union[int, torch.device] = 0) -> bool:
             return False
         return True
 
-    min_sms = 68  # 3080
+    min_sms = 16 if device.type == "xpu" else 68  # 3080
     avail_sms = prop.multi_processor_count
     if avail_sms < min_sms:
         log.warning(
@@ -1181,9 +1181,9 @@ def use_max_autotune() -> bool:
     )
 
 
-def _use_template_for_cuda(layout, allowed_layout_dtypes: List[torch.dtype]) -> bool:
+def _use_template_for_gpu(layout, allowed_layout_dtypes: List[torch.dtype]) -> bool:
     return (
-        layout.device.type == "cuda"
+        is_gpu(layout.device.type)
         and layout.dtype in allowed_layout_dtypes
         and is_big_gpu(layout.device)
     )
@@ -1212,8 +1212,8 @@ def use_triton_template(layout, *, enable_int32=False, enable_float8=False):
     return (
         (
             (
-                layout.device.type == "cuda"
-                and _use_template_for_cuda(layout, layout_dtypes)
+                is_gpu(layout.device.type)
+                and _use_template_for_gpu(layout, layout_dtypes)
             )
             or (layout.device.type == "cpu" and layout.dtype in layout_dtypes)
         )
@@ -1268,7 +1268,7 @@ def use_cutlass_template(layout, m, n, k):
 
     layout_dtypes = [torch.float16, torch.bfloat16, torch.float32, torch.int32]
     res = (
-        _use_template_for_cuda(layout, layout_dtypes)
+        _use_template_for_gpu(layout, layout_dtypes)
         and use_max_autotune()
         and _use_autotune_backend("CUTLASS")
     )
@@ -1475,6 +1475,14 @@ def run_and_get_code(fn, *args, **kwargs) -> Tuple[Any, List[str]]:
         torch._dynamo.reset()
         result = fn(*args, **kwargs)
     return result, source_codes
+
+
+def run_and_get_kernels(fn, *args, **kwargs) -> Tuple[Any, List[str]]:
+    result, source_codes = run_and_get_code(fn, *args, **kwargs)
+    kernels = []
+    for code in source_codes:
+        kernels.extend(re.findall(r"'''.*?'''", code, re.DOTALL))
+    return result, kernels
 
 
 def run_fw_bw_and_get_code(fn):
