@@ -760,8 +760,6 @@ template <class Return, class... Args>
 C10_ALWAYS_INLINE_UNLESS_MOBILE Return Dispatcher::call(
     const TypedOperatorHandle<Return(Args...)>& op,
     Args... args) const {
-  detail::unused_arg_(args...); // workaround for a false-positive warning about
-                                // unused parameters in gcc 5
   auto dispatchKeySet =
       op.operatorDef_->op.dispatchKeyExtractor()
           .template getDispatchKeySetUnboxed<Args...>(args...);
@@ -817,8 +815,6 @@ inline Return Dispatcher::redispatch(
     const TypedOperatorHandle<Return(Args...)>& op,
     DispatchKeySet currentDispatchKeySet,
     Args... args) const {
-  detail::unused_arg_(args...); // workaround for a false-positive warning about
-                                // unused parameters in gcc 5
   // do not use RecordFunction on redispatch
 #ifndef NDEBUG
   DispatchTraceNestingGuard debug_guard;

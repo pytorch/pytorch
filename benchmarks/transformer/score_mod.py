@@ -26,7 +26,7 @@ from torch.nn.attention.flex_attention import (
 
 torch._dynamo.config.automatic_dynamic_shapes = False
 # Needed since changing args to function causes recompiles
-torch._dynamo.config.cache_size_limit = 1000
+torch._dynamo.config.recompile_limit = 1000
 
 
 from torch._inductor.runtime.benchmarking import benchmarker
@@ -221,7 +221,7 @@ def run_single_backend_sdpa(
 ) -> ExperimentResults:
     backend_context = get_backend_context(backend)
     with backend_context:
-        device = torch.device("cuda")
+        _device = torch.device("cuda")
         eager_sdpa = generate_eager_sdpa(
             config.attn_type, config.shape, config.dtype, block_mask, score_mod
         )
@@ -372,8 +372,6 @@ def run_single_experiment(
         requires_grad=config.calculate_bwd_time,
         nested_tensors=config.attn_type == "document_mask",
     )
-    is_decoding = q_seq_len == 1
-
     score_mod = generate_score_mod(config.attn_type, config.shape)
     block_mask, mask_kwargs = generate_block_mask(config.attn_type, config.shape)
     kernel_options = get_kernel_options(config.attn_type, config.shape)
