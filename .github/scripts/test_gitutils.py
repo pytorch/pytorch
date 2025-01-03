@@ -12,7 +12,7 @@ from gitutils import (
 )
 
 
-BASE_DIR = Path(__file__).parent
+BASE_DIR = Path(__file__).absolute().parent
 
 
 class TestPeekableIterator(TestCase):
