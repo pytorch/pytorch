@@ -1,4 +1,5 @@
 #include <c10/core/Device.h>
+#include <c10/cuda/CUDAMacros.h>
 #include <c10/util/Exception.h>
 
 #include <algorithm>
@@ -132,7 +133,13 @@ Device::Device(const std::string& device_string) : Device(Type::CPU) {
 
   try {
     if (!device_index_str.empty()) {
-      index_ = static_cast<c10::DeviceIndex>(std::stoi(device_index_str));
+      auto index = std::stoi(device_index_str);
+      TORCH_CHECK(
+          index < std::numeric_limits<c10::DeviceIndex>::max(),
+          "Device index '",
+          device_index_str,
+          "' is out of range");
+      index_ = static_cast<c10::DeviceIndex>(index);
     }
   } catch (const std::exception&) {
     TORCH_CHECK(
