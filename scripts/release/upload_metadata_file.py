@@ -50,7 +50,12 @@ def s3_upload(s3_bucket: str, s3_key: str, file: str, dry_run: bool) -> None:
     if dry_run:
         print(f"Dry run uploading {file} to s3://{s3_bucket}/{s3_key}")
         return
-    s3.upload_file(file, s3_bucket, s3_key, ExtraArgs={"ChecksumAlgorithm": "sha256"})
+    s3.upload_file(
+        file,
+        s3_bucket,
+        s3_key,
+        ExtraArgs={"ChecksumAlgorithm": "sha256", "ACL": "public-read"},
+    )
 
 
 def extract_metadata(file: str) -> str:
