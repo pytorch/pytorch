@@ -5,6 +5,7 @@ from typing import Any, Optional
 import sympy
 
 import torch
+from torch.utils._sympy.printers import ExprPrinter as ExprPrinter_
 
 from ..ops_handler import StoreMode
 from ..scheduler import SchedulerNode
@@ -27,6 +28,28 @@ DTYPE_TO_METAL = {
 }
 
 
+class MetalExprPrinter(ExprPrinter_):
+    def _print_FloorDiv(self, expr: sympy.Expr) -> str:
+        x, div = expr.args
+        x = self.doprint(x)
+        div = self.doprint(div)
+        if expr.is_integer:
+            return f"({x}) / ({div})"
+        return f"metal::floor({x}) / ({div})"
+
+    def _print_ModularIndexing(self, expr: sympy.Expr) -> str:
+        x, div, mod = expr.args
+        x = self.doprint(x)
+        if div != 1:
+            div = self.doprint(div)
+            if expr.is_integer:
+                x = f"({x}) / ({div})"
+            else:
+                x = f"metal::floor({x}) / ({div})"
+        mod = self.doprint(mod)
+        return f"({x}) % ({mod})"
+
+
 class MetalOverrides(OpOverrides):
     @staticmethod
     def to_dtype(
@@ -40,6 +63,15 @@ class MetalOverrides(OpOverrides):
     @staticmethod
     def where(a: CSEVariable, b: CSEVariable, c: CSEVariable) -> str:
         return f"{a} ? {b} : {c}"
+
+    @staticmethod
+    def maximum(a: CSEVariable, b: CSEVariable) -> str:
+        # TODO: Fix nan propagation, see https://github.com/pytorch/pytorch/issues/143976
+        return f"metal::max(static_cast<decltype({a}+{b})>({a}), static_cast<decltype({a}+{b})>({b}))"
+
+    @staticmethod
+    def minimum(a: CSEVariable, b: CSEVariable) -> str:
+        return f"metal::min(static_cast<decltype({a}+{b})>({a}), static_cast<decltype({a}+{b})>({b}))"
 
     @staticmethod
     def logical_or(a: CSEVariable, b: CSEVariable) -> str:
@@ -86,6 +118,7 @@ class MetalKernel(SIMDKernel):
     overrides = MetalOverrides  # type: ignore[assignment]
     suffix = ";"
     newvar_prefix = "auto "
+    sexpr = MetalExprPrinter().doprint
 
     def __init__(
         self,
@@ -126,7 +159,7 @@ class MetalKernel(SIMDKernel):
         code = IndentedBuffer()
         code.writeline('torch.mps._compile_shader("""')
         with code.indent():
-            code.writeline("kernel void kernel_0(")
+            code.writeline("kernel void generated_kernel(")
             with code.indent():
                 for outer, inner in self.args.output_buffers.items():
                     if outer in self.removed_buffers:
@@ -168,10 +201,13 @@ class MetalScheduling(SIMDScheduling):
         if src_code in wrapper.src_to_kernel:
             kernel_name = wrapper.src_to_kernel[src_code]
         else:
-            kernel_name = f"mps_lib.kernel_{wrapper.next_kernel_suffix()}"
+            # TODO: Merge multiple kernels into a single library
+            # Either using MultiKernel concept or overriding SIMDScheduling.codegen_node_scheduling
+            mps_lib_name = f"mps_lib_{wrapper.next_kernel_suffix()}"
+            kernel_name = f"{mps_lib_name}.generated_kernel"
             wrapper.src_to_kernel[src_code] = kernel_name
             origins, detailed_origins = get_kernel_metadata(node_schedule, wrapper)
             metadata_comment = f"{origins}\n{detailed_origins}"
-            wrapper.define_kernel("mps_lib", src_code, metadata_comment)
+            wrapper.define_kernel(mps_lib_name, src_code, metadata_comment)
 
         return kernel_name
