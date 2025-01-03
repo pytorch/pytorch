@@ -655,9 +655,6 @@ class SetVariable(ConstDictVariable):
                 return super().call_method(tx, "pop", args, kwargs)
             else:
                 return ConstantVariable.create(value=None)
-        elif name == "__contains__" and len(args) == 1:
-            # Already EQUALS_MATCH guarded.
-            return ConstantVariable.create(args[0] in self)
         return super().call_method(tx, name, args, kwargs)
 
     def getitem_const(self, tx: "InstructionTranslator", arg: VariableTracker):
