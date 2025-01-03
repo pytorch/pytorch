@@ -33,8 +33,13 @@ sycl::event matmul(
   auto engine = GpuEngineManager::Instance().get_engine(cur_device);
   auto stream = GpuStreamManager::Instance().get_stream();
 
-  at::Tensor m1 = is_onednn_matmul_strides(mat1) ? mat1 : mat1.contiguous();
-  at::Tensor m2 = is_onednn_matmul_strides(mat2) ? mat2 : mat2.contiguous();
+  at::Tensor m1 = mat1;
+  at::Tensor m2 = mat2;
+
+  undo_broadcast_on_batch(m1, m2);
+
+  m1 = is_onednn_matmul_strides(m1) ? m1 : m1.contiguous();
+  m2 = is_onednn_matmul_strides(m2) ? m2 : m2.contiguous();
   at::Tensor dst =
       is_onednn_matmul_strides(result, true) ? result : result.contiguous();
 
@@ -46,13 +51,13 @@ sycl::event matmul(
   if (dims == 3) {
     mb = dst.size(0);
     TORCH_CHECK(
-        mb == m1.size(0) && mb == m2.size(0),
+        mb == mat1.size(0) && mb == mat2.size(0),
         "batch size mismatch, dst mb: ",
         mb,
         "m1 mb",
-        m1.size(0),
+        mat1.size(0),
         " m2 mb: ",
-        m2.size(0));
+        mat2.size(0));
   }
 
   // validate bias and make it compatible with oneDNN implementation
@@ -145,8 +150,8 @@ sycl::event matmul(
     }
     dst_strides = {dst.stride(0), dst.stride(1)};
   } else {
-    m1_dims = {mb, m, k};
-    m2_dims = {mb, k, n};
+    m1_dims = {m1.size(0), m, k};
+    m2_dims = {m2.size(0), k, n};
     dst_dims = {mb, m, n};
 
     m1_strides = {m1.stride(0), m1.stride(1), m1.stride(2)};
