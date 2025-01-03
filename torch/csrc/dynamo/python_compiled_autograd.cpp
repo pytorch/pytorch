@@ -76,11 +76,12 @@ static std::vector<at::Tensor> toTensorList(
 //
 // The vector<Tensor> are the list of gradient Tensors, each of which may be
 // undefined (in C++) which corresponds to None (in Python).
-static void bind_function(
+static std::string bind_function(
     PyObject* py_compiler,
     const std::string& fn_name,
     functional_apply_t fn,
-    std::vector<at::TypePtr> packed_args_schema) {
+    std::vector<at::TypePtr> packed_args_schema,
+    bool is_custom_function) {
   // This is the function that can be called from Python.
   auto py_func = py::cpp_function(
       [packed_args_schema = std::move(packed_args_schema), fn = std::move(fn)](
@@ -104,7 +105,9 @@ static void bind_function(
         return jit::toPyObject(at::IValue(outputs));
       });
   py::handle handle(py_compiler);
-  handle.attr("bind_function")(fn_name, py_func);
+  auto result =
+      handle.attr("bind_function")(fn_name, py_func, is_custom_function);
+  return result.cast<std::string>();
 }
 
 // Invokes py_compiler.method_name(fn_name, inputs, packed_args,
@@ -139,13 +142,18 @@ static variable_list call_function(
 }
 
 struct PyCompilerInterfaceImpl : PyCompilerInterface {
-  void bind_function(
+  std::string bind_function(
       PyObject* py_compiler,
       const std::string& fn_name,
       functional_apply_t fn,
-      std::vector<at::TypePtr> packed_args_schema) override {
+      std::vector<at::TypePtr> packed_args_schema,
+      bool is_custom_function = false) override {
     return torch::dynamo::autograd::bind_function(
-        py_compiler, fn_name, std::move(fn), std::move(packed_args_schema));
+        py_compiler,
+        fn_name,
+        std::move(fn),
+        std::move(packed_args_schema),
+        is_custom_function);
   }
   variable_list call_function(
       PyObject* py_compiler,
@@ -865,7 +873,11 @@ CacheNode* _compiled_autograd_impl(
         auto schema = std::vector<at::TypePtr>{IValuePacker<
             std::vector<c10::optional<InputMetadata>>>::packed_type()};
         bind_function(
-            py_compiler.get(), "validate_outputs", validate_outputs, schema);
+            py_compiler.get(),
+            "validate_outputs",
+            validate_outputs,
+            schema,
+            false);
       });
 
       PackedArgs args;
