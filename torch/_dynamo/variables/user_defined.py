@@ -966,6 +966,9 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 inspect.ismemberdescriptor(subobj) and name in self.value.__slots__
             )  # handle memberdecriptor and slots
             or self._is_c_defined_property(subobj)
+            or inspect.isgetsetdescriptor(
+                subobj
+            )  # handle getsetdescriptor like __dict__
         ):
             # Call __getattribute__, we have already checked that this is not overridden and side-effect free. We don't
             # want to call getattr because it can be user-overridden.
