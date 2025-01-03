@@ -72,11 +72,16 @@ class MetalOverrides(OpOverrides):
 
     @staticmethod
     def index_expr(expr: sympy.Expr, dtype: torch.dtype) -> str:
-        idx_str = V.kernel.index_to_str(V.kernel.rename_indexing(expr))
+        idx_str = V.kernel.index_to_str(V.kernel.prepare_indexing(expr))
         var = V.kernel.cse.generate(
             V.kernel.compute, idx_str, bounds=get_bounds_index_expr(expr)
         )
         return ops.to_dtype(var, dtype)
+
+    @staticmethod
+    def masked(mask: CSEVariable, body: sympy.Expr, other: CSEVariable) -> str:
+        # TODO: Add a proper implementation considering there are no lambdas in Metal
+        return f"{mask} ? {body()} : {other}"
 
     @staticmethod
     def where(a: CSEVariable, b: CSEVariable, c: CSEVariable) -> str:
