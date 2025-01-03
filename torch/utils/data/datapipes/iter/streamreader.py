@@ -1,5 +1,5 @@
-# mypy: allow-untyped-defs
-from typing import Tuple
+from io import IOBase
+from typing import Iterator, Optional, Tuple
 
 from torch.utils.data.datapipes._decorator import functional_datapipe
 from torch.utils.data.datapipes.datapipe import IterDataPipe
@@ -29,11 +29,13 @@ class StreamReaderIterDataPipe(IterDataPipe[Tuple[str, bytes]]):
         [('alphabet', 'a'), ('alphabet', 'b'), ('alphabet', 'c'), ('alphabet', 'd'), ('alphabet', 'e')]
     """
 
-    def __init__(self, datapipe, chunk=None):
+    def __init__(
+        self, datapipe: IterDataPipe[Tuple[str, IOBase]], chunk: Optional[int] = None
+    ):
         self.datapipe = datapipe
         self.chunk = chunk
 
-    def __iter__(self):
+    def __iter__(self) -> Iterator[Tuple[str, bytes]]:
         for furl, stream in self.datapipe:
             while True:
                 d = stream.read(self.chunk)

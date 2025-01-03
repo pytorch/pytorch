@@ -4994,6 +4994,16 @@ class CPUReproTests(TestCase):
             c_output = c_model(x)
             self.assertTrue(torch.allclose(output, c_output))
 
+    @requires_vectorization
+    def test_bool_max(self):
+        torch.manual_seed(777)
+        x = torch.randn(size=[128, 2501]).ge(0)
+
+        def fn(x):
+            return torch.max(x, 1, False)
+
+        self.common(fn, (x,))
+
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
