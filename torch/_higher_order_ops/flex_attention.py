@@ -186,7 +186,7 @@ def _math_attention_inner(
         post_mod_scores = torch.where(
             mask_mod(b, h, m, n, *mask_mod_other_buffers),
             score_mod(scores, b, h, m, n, *score_mod_other_buffers),
-            torch.tensor(-float("inf"), dtype=working_precision, device=scores.device),
+            torch.full((), -float("inf"), dtype=working_precision, device=scores.device),
         )
 
     return scores, post_mod_scores
