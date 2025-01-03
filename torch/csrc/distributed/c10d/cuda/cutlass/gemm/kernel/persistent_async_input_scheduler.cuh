@@ -264,7 +264,23 @@ public:
     );
   }
 
-  // Kernel helper function to get next work tile
+// TODO(yifu): remove this once cutlass 3.5.1 upgrade is completed
+#if CUTLASS_VERSION != 351
+  template <class WorkIdPipeline, class WorkIdPipelineState>
+  CUTLASS_DEVICE
+  auto
+  fetch_next_work(
+    WorkTileInfo work_tile_info,
+    WorkIdPipeline& work_id_pipeline,
+    WorkIdPipelineState work_id_pipe_consumer_state) {
+      WorkTileInfo new_work_tile_info;
+      advance_to_next_work();
+      new_work_tile_info = get_current_work();
+
+    // Return true to indicate that the WorkID pipeline state should be advanced
+    return cute::make_tuple(new_work_tile_info, true);
+  }
+#else
   CUTLASS_DEVICE
   auto
   fetch_next_work(WorkTileInfo work_tile_info) {
@@ -275,6 +291,7 @@ public:
     advance_to_next_work();
     return get_current_work();
   }
+#endif
 
   // Given the inputs, computes the physical grid we should launch.
   template<class ProblemShapeMNKL, class BlockShape, class ClusterShape>
