@@ -1653,7 +1653,7 @@ class AotCodeCompiler:
 
             object_build_options = CppTorchDeviceOptions(
                 compile_only=True,
-                **compile_command,
+                **compile_command,  # type: ignore[arg-type]
             )
             object_build_options.set_precompiled_header(precompiled_header)
             object_builder = CppBuilder(
