@@ -492,6 +492,15 @@ class ConstDictVariable(VariableTracker):
         return super().clone(**kwargs)
 
 
+class NNModuleHooksDictVariable(ConstDictVariable):
+    # Special class to avoid adding any guards on the nn module hook ids.
+    def install_dict_keys_match_guard(self):
+        pass
+
+    def install_dict_contains_guard(self, tx, args):
+        pass
+
+
 class DefaultDictVariable(ConstDictVariable):
     def __init__(self, items, user_cls, default_factory=None, **kwargs) -> None:
         super().__init__(items, user_cls, **kwargs)
