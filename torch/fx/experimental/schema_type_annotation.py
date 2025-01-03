@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 import inspect
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Optional
 
 import torch
 import torch.fx
@@ -42,7 +42,7 @@ class AnnotateTypesWithSchema(Transformer):
         self.annotate_get_attrs = annotate_get_attrs
 
     def call_function(
-        self, target: Target, args: Tuple[Argument, ...], kwargs: Dict[str, Any]
+        self, target: Target, args: tuple[Argument, ...], kwargs: dict[str, Any]
     ):
         python_ret_type = None
         if self.annotate_functionals and target.__module__ == "torch.nn.functional":
@@ -73,7 +73,7 @@ class AnnotateTypesWithSchema(Transformer):
         return return_proxy
 
     def call_module(
-        self, target: Target, args: Tuple[Argument, ...], kwargs: Dict[str, Any]
+        self, target: Target, args: tuple[Argument, ...], kwargs: dict[str, Any]
     ):
         python_ret_type = None
         assert isinstance(target, str)
@@ -91,8 +91,8 @@ class AnnotateTypesWithSchema(Transformer):
     def get_attr(
         self,
         target: torch.fx.node.Target,
-        args: Tuple[Argument, ...],
-        kwargs: Dict[str, Any],
+        args: tuple[Argument, ...],
+        kwargs: dict[str, Any],
     ):
         attr_proxy = super().get_attr(target, args, kwargs)
 

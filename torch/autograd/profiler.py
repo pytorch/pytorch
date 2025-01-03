@@ -1,9 +1,10 @@
 # mypy: allow-untyped-defs
 import uuid
 from collections import defaultdict
+from collections.abc import Iterable
 from dataclasses import dataclass
 from time import perf_counter_ns
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any, Optional
 from warnings import warn
 
 import torch
@@ -557,7 +558,7 @@ class profile:
         # frontend_function_events contains the events in aten or torch frontend level,
         # whose correlation id is 0
         frontend_function_events = []
-        device_corr_map: Dict[int, List[FunctionEvent]] = {}
+        device_corr_map: dict[int, list[FunctionEvent]] = {}
         max_evt_id = 0
         for kineto_event in result.events():
             if _filter_name(kineto_event.name()):
@@ -1141,7 +1142,7 @@ class KinetoStepTracker:
     """
 
     _current_step = 0
-    _step_dict: Dict[str, int] = defaultdict(int)
+    _step_dict: dict[str, int] = defaultdict(int)
 
     @classmethod
     def init_step_count(cls, requester: str):

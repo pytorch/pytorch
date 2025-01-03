@@ -20,7 +20,7 @@ import math
 import operator
 import sys
 from functools import lru_cache, update_wrapper
-from typing import Optional, Type, TYPE_CHECKING, Union
+from typing import TYPE_CHECKING
 
 import torch
 
@@ -83,7 +83,7 @@ class SymNode:
         expr,
         shape_env,
         pytype,
-        hint: Optional[Union[int, float, bool]],
+        hint: int | float | bool | None,
         constant=None,
         fx_node=None,
         optimized_summation=False,
@@ -150,7 +150,7 @@ class SymNode:
         else:
             hint = compute_hint()
         self._hint = hint
-        self.constant: Optional[Union[int, float, bool]] = constant
+        self.constant: int | float | bool | None = constant
 
         # Record the FX node of the current node if we are doing translation
         # validation. They will be used for building the input assertions for
@@ -1272,7 +1272,7 @@ def _make_node_magic(method, func):
             log.warning("failed to eval %s(%s, %s)", method, self.expr, other.expr)
             raise
         sym_node_log.debug("%s %s %s -> %s", method, self.expr, other.expr, out)
-        pytype: Type
+        pytype: type
         # This is not strictly correct. In Python, a**b may return complex when
         # a < 0 and b is a float: (-1)**2.1. Same for sympy.sqrt(-3.14). This
         # returns a float while both arguments are ints: 2**(-1). Also, max and
@@ -1335,7 +1335,7 @@ def _make_node_magic(method, func):
         out_hint = None
         if self.hint is not None:
             out_hint = op(self.hint)
-        pytype: Type
+        pytype: type
         if method in always_int_magic_methods:
             pytype = int
         elif method in always_bool_magic_methods:
@@ -1485,7 +1485,7 @@ def _make_node_sizes_strides(method, func):
                 out_hint = op(size_hints, stride_hints)
 
         # NB: This is the indicator function, not the actual bool!
-        pytype: Type
+        pytype: type
         if method.endswith("_indicator"):
             pytype = int
         else:
@@ -1544,7 +1544,7 @@ def _make_user_magic(method, user_type):
     else:
         method_attr = method
 
-    def get_constant(x: Union[SymInt, int, SymFloat, float, SymBool, bool]):
+    def get_constant(x: SymInt | int | SymFloat | float | SymBool | bool):
         if isinstance(x, (int, float, bool)):
             return x
         if isinstance(x, SymBool):

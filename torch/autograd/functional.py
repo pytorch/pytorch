@@ -1,5 +1,4 @@
 # mypy: allow-untyped-defs
-from typing import List, Tuple
 
 import torch
 from torch._vmap_internals import _vmap
@@ -181,8 +180,8 @@ def _autograd_grad(
     assert isinstance(grad_outputs, tuple)
     assert len(outputs) == len(grad_outputs)
 
-    new_outputs: Tuple[torch.Tensor, ...] = ()
-    new_grad_outputs: Tuple[torch.Tensor, ...] = ()
+    new_outputs: tuple[torch.Tensor, ...] = ()
+    new_grad_outputs: tuple[torch.Tensor, ...] = ()
     for out, grad_out in zip(outputs, grad_outputs):
         if out is not None and out.requires_grad:
             new_outputs += (out,)
@@ -211,7 +210,7 @@ def _fill_in_zeros(grads, refs, strict, create_graph, stage):
     if stage not in ["back", "back_trick", "double_back", "double_back_trick"]:
         raise RuntimeError(f"Invalid stage argument '{stage}' to _fill_in_zeros")
 
-    res: Tuple[torch.Tensor, ...] = ()
+    res: tuple[torch.Tensor, ...] = ()
     for i, grads_i in enumerate(grads):
         if grads_i is None:
             if strict:
@@ -470,8 +469,8 @@ def jvp(func, inputs, v=None, create_graph=False, strict=False):
 
 
 def _construct_standard_basis_for(
-    tensors: Tuple[torch.Tensor, ...], tensor_numels: Tuple[int, ...]
-) -> Tuple[torch.Tensor, ...]:
+    tensors: tuple[torch.Tensor, ...], tensor_numels: tuple[int, ...]
+) -> tuple[torch.Tensor, ...]:
     # This function:
     # - constructs a N=sum(tensor_numels) standard basis. i.e. an NxN identity matrix.
     # - Splits the identity matrix into chunks with each chunk size determined by `tensor_numels`.
@@ -780,11 +779,11 @@ def jacobian(
                 jacobian_output_input, (is_outputs_tuple, is_inputs_tuple)
             )
 
-        jacobian: Tuple[torch.Tensor, ...] = ()
+        jacobian: tuple[torch.Tensor, ...] = ()
 
         for i, out in enumerate(outputs):
             # mypy complains that expression and variable have different types due to the empty list
-            jac_i: Tuple[List[torch.Tensor]] = tuple([] for _ in range(len(inputs)))  # type: ignore[assignment]
+            jac_i: tuple[list[torch.Tensor]] = tuple([] for _ in range(len(inputs)))  # type: ignore[assignment]
             for j in range(out.nelement()):
                 vj = _autograd_grad(
                     (out.reshape(-1)[j],),
