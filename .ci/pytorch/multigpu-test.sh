@@ -8,8 +8,9 @@
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
 echo "Testing pytorch"
+# When adding more tests, please use HUD to see which shard is shorter
 if [[ "${SHARD_NUMBER:-1}" == "1" ]]; then
-      # FSDP tests
+    # FSDP tests
     for f in test/distributed/fsdp/*.py ; do time python test/run_test.py --verbose -i "${f#*/}" ; done
 fi
 
