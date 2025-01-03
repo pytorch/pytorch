@@ -9,8 +9,8 @@ from torch.utils._sympy.printers import ExprPrinter as ExprPrinter_
 
 from ..ops_handler import StoreMode
 from ..scheduler import SchedulerNode
-from ..utils import get_bounds_index_expr, get_kernel_metadata
-from ..virtualized import ops, V
+from ..utils import get_kernel_metadata
+from ..virtualized import V
 from .common import CSEVariable, DeferredLine, IndentedBuffer, OpOverrides
 from .simd import IterationRangesEntry, SIMDKernel, SIMDScheduling
 
@@ -50,9 +50,6 @@ class MetalExprPrinter(ExprPrinter_):
         return f"({x}) % ({mod})"
 
 
-mexpr = MetalExprPrinter().doprint
-
-
 class MetalOverrides(OpOverrides):
     @staticmethod
     def to_dtype(
@@ -62,19 +59,6 @@ class MetalOverrides(OpOverrides):
         use_compute_types: bool = True,
     ) -> str:
         return f"static_cast<{DTYPE_TO_METAL[dtype]}>({x})"
-
-    @staticmethod
-    def index_expr(expr: sympy.Expr, dtype: torch.dtype) -> str:
-        idx_str = mexpr(V.kernel.rename_indexing(expr))
-        var = V.kernel.cse.generate(
-            V.kernel.compute, idx_str, bounds=get_bounds_index_expr(expr)
-        )
-        return ops.to_dtype(var, dtype)
-
-    @staticmethod
-    def masked(mask: CSEVariable, body: sympy.Expr, other: CSEVariable) -> str:
-        # TODO: Add a proper implementation considering there are no lambdas in Metal
-        return f"{mask} ? {body()} : {other}"
 
     @staticmethod
     def where(a: CSEVariable, b: CSEVariable, c: CSEVariable) -> str:
@@ -100,10 +84,6 @@ class MetalOverrides(OpOverrides):
     @staticmethod
     def abs(x: CSEVariable) -> str:
         return f"metal::abs({x})"
-
-    @staticmethod
-    def signbit(x: CSEVariable) -> str:
-        return f"metal::signbit({x})"
 
     @staticmethod
     def sin(x: CSEVariable) -> str:
@@ -132,13 +112,6 @@ class MetalOverrides(OpOverrides):
     @staticmethod
     def sqrt(x: CSEVariable) -> str:
         return f"metal::sqrt({x})"
-
-    @staticmethod
-    def floordiv(a: CSEVariable, b: CSEVariable) -> str:
-        # a and b are integer type
-        quot = f"{a} / {b}"
-        rem = f"{a} % {b}"
-        return f"(({a} < 0) != ({b} < 0) ? ({rem} != 0 ? {quot} - 1 : {quot}) : {quot})"
 
 
 class MetalKernel(SIMDKernel):
@@ -185,7 +158,6 @@ class MetalKernel(SIMDKernel):
         """Called at the end to generate a final kernel string"""
         code = IndentedBuffer()
         code.writeline('torch.mps._compile_shader("""')
-        idx_var_names = [v.name for v in self.active_range_trees()]
         with code.indent():
             code.writeline("kernel void generated_kernel(")
             with code.indent():
@@ -197,23 +169,9 @@ class MetalKernel(SIMDKernel):
                 for outer, inner in self.args.input_buffers.items():
                     dtype_str = self.dtype_to_str(V.graph.get_dtype(outer))
                     code.writeline(f"constant {dtype_str}* {inner},")
-                if len(idx_var_names) == 1:
-                    code.writeline(
-                        f"uint {idx_var_names[0]} [[thread_position_in_grid]]"
-                    )
-                else:
-                    assert (
-                        len(idx_var_names) < 4
-                    ), "Up to 3 index variables are supported"
-                    code.writeline(
-                        f"uint{len(idx_var_names)} thread_pos [[thread_position_in_grid]]"
-                    )
-
+                code.writeline("uint xindex [[thread_position_in_grid]]")
             code.writeline(") {")
             with code.indent():
-                if len(idx_var_names) > 1:
-                    for idx, name in enumerate(idx_var_names):
-                        code.writeline(f"auto {name} = thread_pos.{chr(120+idx)};")
                 code.splice(self.body)
             code.writeline("}")
         code.writeline('""")')
@@ -225,11 +183,6 @@ class MetalKernel(SIMDKernel):
         wrapper = V.graph.wrapper_code
         args = [*self.args.output_buffers.keys(), *self.args.input_buffers.keys()]
         args = [arg for arg in args if arg not in self.removed_buffers]
-        if len(self.active_range_trees()) > 0:
-            args += [
-                f"threads=[{', '.join(str(v.numel) for v in self.active_range_trees())}]"
-            ]
-
         wrapper.generate_kernel_call(
             name,
             args,
