@@ -4497,6 +4497,18 @@ class CppTemplateBuffer(TemplateBuffer):
         super().__init__(layout, inputs, make_kernel_render)
         self.template = template
         self.choice = choice
+        self.outputs: Optional[List[Buffer]] = None
+
+    def get_layout(self) -> Layout:
+        if isinstance(self.layout, MultiOutputLayout):
+            assert isinstance(self.outputs, Iterable)
+            first_output = next(iter(self.outputs))
+            assert isinstance(first_output, Buffer)
+            layout = first_output.layout
+            assert isinstance(layout, Layout)
+            return layout
+        else:
+            return super().get_layout()
 
 
 @ir_dataclass(frozen=False)

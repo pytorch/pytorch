@@ -76,6 +76,7 @@ from .cpp_utils import (
     unify_mask_base_type,
     value_to_cpp,
 )
+from .wrapper import AllocateLine
 
 
 _IS_WINDOWS = sys.platform == "win32"
@@ -4880,7 +4881,20 @@ class CppScheduling(BaseScheduling):
             epilogue_nodes=epilogue_ir_nodes,
         )
         with kernel:
-            for node in [template_node, *epilogue_nodes]:
+            if isinstance(template_node.node, ir.CppTemplateBuffer) and isinstance(
+                template_node.node.layout, ir.MultiOutputLayout
+            ):
+                # For Grouped GEMM, allocate buffers for each GEMM
+                assert (
+                    template_node.node.outputs
+                ), "Grouped GEMM Template should with output buffers"
+                for buffer in template_node.node.outputs:
+                    V.graph.wrapper_code.writeline(
+                        AllocateLine(V.graph.wrapper_code, buffer)
+                    )
+            else:
+                template_node.mark_run()  # type: ignore[attr-defined]
+            for node in epilogue_nodes:
                 node.mark_run()  # type: ignore[attr-defined]
             src_code = render()
 
