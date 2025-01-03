@@ -9424,6 +9424,7 @@
   variants: method, function
   dispatch:
     CPU, CUDA: cholesky
+    MPS: cholesky_mps
 
 - func: cholesky_solve.out(Tensor self, Tensor input2, bool upper=False, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:

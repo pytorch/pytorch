@@ -18,6 +18,7 @@
 #include <ATen/ops/addr_native.h>
 #include <ATen/ops/baddbmm_native.h>
 #include <ATen/ops/bmm_native.h>
+#include <ATen/ops/cholesky_native.h>
 #include <ATen/ops/linalg_lu_factor_native.h>
 #include <ATen/ops/linalg_solve_triangular_native.h>
 #include <ATen/ops/mm_native.h>
@@ -750,6 +751,77 @@ static Tensor& linalg_solve_triangular_mps_impl(const Tensor& A,
   return out;
 }
 
+static Tensor& linalg_cholesky_mps_impl(const Tensor& input, bool upper, Tensor& out) {
+  using namespace mps;
+
+  TORCH_CHECK(!input.is_complex(), "linalg.cholesky: Complex dtype not supported on MPS yet!");
+  TORCH_CHECK(input.dim() >= 2, "linalg.cholesky: Input tensor must be at least 2D");
+  TORCH_CHECK(input.size(-2) == input.size(-1), "linalg.cholesky: Input tensor must be square");
+
+  if (input.numel() == 0 || out.numel() == 0) {
+    out.zero_();
+    return out;
+  }
+
+  Tensor input_ = input;
+  if (!input.is_contiguous()) {
+    input_ = input.clone(at::MemoryFormat::Contiguous);
+  }
+  id<MTLBuffer> bufferIn = getMTLBufferStorage(input_);
+  id<MTLBuffer> bufferOut = getMTLBufferStorage(out);
+  MPSStream* mpsStream = getCurrentMPSStream();
+  id<MTLDevice> device = MPSDevice::getInstance()->device();
+
+  dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
+    @autoreleasepool {
+      // TODO Irakli add caching of the key here, example:
+      // string key = (opType == ADDBMM_OP_TYPE) ? ("addbmm_out_mps_impl") : ("baddbmm_out_mps_impl");
+      mpsStream->endKernelCoalescing();
+      id<MTLCommandBuffer> commandBuffer = mpsStream->commandBuffer();
+
+      const int64_t n = out.size(-1);
+      const int64_t lda = n; // leading dimension in row-major
+      const uint64_t elemSize = out.element_size();
+
+      MPSMatrixDecompositionCholesky* choleskyFilter =
+          [[[MPSMatrixDecompositionCholesky alloc] initWithDevice:device lower:!upper order:n] autorelease];
+
+      MPSMatrixDescriptor* desc_in = [MPSMatrixDescriptor matrixDescriptorWithRows:n
+                                                                           columns:n
+                                                                          matrices:1
+                                                                          rowBytes:lda * elemSize
+                                                                       matrixBytes:n * lda * elemSize
+                                                                          dataType:getMPSDataType(input_)];
+
+      MPSMatrixDescriptor* desc_out = [MPSMatrixDescriptor matrixDescriptorWithRows:n
+                                                                            columns:n
+                                                                           matrices:1
+                                                                           rowBytes:lda * elemSize
+                                                                        matrixBytes:n * lda * elemSize
+                                                                           dataType:getMPSDataType(out)];
+
+      MPSMatrix* matrixIn = [[[MPSMatrix alloc] initWithBuffer:bufferIn
+                                                        offset:input_.storage_offset() * elemSize
+                                                    descriptor:desc_in] autorelease];
+      MPSMatrix* matrixOut = [[[MPSMatrix alloc] initWithBuffer:bufferOut
+                                                         offset:out.storage_offset() * elemSize
+                                                     descriptor:desc_out] autorelease];
+
+      // Create a status buffer to check for positive definiteness
+      id<MTLBuffer> statusBuffer = [device newBufferWithLength:sizeof(int) options:MTLResourceStorageModeShared];
+
+      [choleskyFilter encodeToCommandBuffer:commandBuffer
+                               sourceMatrix:matrixIn
+                               resultMatrix:matrixOut
+                                     status:statusBuffer];
+      // Check status
+      int status = *((int*)statusBuffer.contents);
+      TORCH_CHECK(status == 0, "linalg.cholesky: Input matrix is not positive definite");
+    }
+  });
+
+  return out;
+}
 } // namespace mps
 
 Tensor addr_mps(const Tensor& self, const Tensor& vec1, const Tensor& vec2, const Scalar& beta, const Scalar& alpha) {
@@ -908,6 +980,13 @@ Tensor& addbmm_out_mps(const Tensor& self,
 
   mps::addbmm_or_baddbmm_out_mps_impl(*b_self, batch1, batch2, beta, alpha, result, mps::ADDBMM_OP_TYPE);
   return result;
+}
+
+Tensor cholesky_mps(const Tensor& self, bool upper) {
+  Tensor out = at::zeros_like(self);
+  mps::linalg_cholesky_mps_impl(self, upper, out);
+  upper ? out.triu_() : out.tril_();
+  return out;
 }
 
 Tensor addbmm_mps(const Tensor& self,
