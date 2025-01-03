@@ -4,12 +4,13 @@
 #include <ATen/Parallel.h>
 #include <ATen/TensorOperators.h>
 #include <ATen/native/quantized/cpu/fbgemm_utils.h>
-#include <ATen/native/quantized/PackedParams.h>
 #include <ATen/native/quantized/cpu/QnnpackUtils.h>
 #include <ATen/native/quantized/cpu/XnnpackUtils.h>
 #include <ATen/native/quantized/cpu/OnednnUtils.h>
 #include <ATen/native/quantized/cpu/QuantUtils.h>
 #include <ATen/native/quantized/cpu/qlinear.h>
+#include <ATen/native/quantized/library.h>
+#include <ATen/native/quantized/PackedParams.h>
 #include <ATen/native/mkldnn/MKLDNNCommon.h>
 #include <caffe2/utils/threadpool/pthreadpool-cpp.h>
 #include <torch/library.h>
