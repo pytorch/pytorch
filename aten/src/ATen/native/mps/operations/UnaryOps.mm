@@ -306,8 +306,13 @@ Tensor& angle_out_mps(const Tensor& self, Tensor& output) {
   } else {
     TORCH_CHECK(!self.is_complex(), "MPS does not support angle with complex imput on macOS13")
     mps::unary_op(self, output, "angle_out_mps", ^MPSGraphTensor*(MPSGraph* mpsGraph, MPSGraphTensor* inputTensor) {
+      // On macOS 13 with non-complex input, realPartOfTensor and imaginaryPartOfTensor are 
+      // not available, and NaN is not propagated correctly:
       auto imagPart = [mpsGraph constantWithScalar:0.0 shape:inputTensor.shape dataType:inputTensor.dataType];
-      return [mpsGraph atan2WithPrimaryTensor:imagPart secondaryTensor:inputTensor name:nil];
+      auto result = [mpsGraph atan2WithPrimaryTensor:imagPart secondaryTensor:inputTensor name:nil];
+      auto nanMask = [mpsGraph isNaNWithTensor:result name:nil];
+      auto nanTensor = [mpsGraph constantWithScalar:NAN dataType:inputTensor.dataType];
+      return [mpsGraph selectWithPredicateTensor:nanMask truePredicateTensor:nanTensor falsePredicateTensor:result name:nil];
     });
     return output;
   }
