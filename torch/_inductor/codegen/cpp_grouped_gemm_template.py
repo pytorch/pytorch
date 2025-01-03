@@ -113,7 +113,7 @@ extern "C" {{export_declaration}}
         kernel.slice_nd(Y_2d_list[gemm_idx], [("m_start", "m_end"), ("n_start", "n_end")])
     ) %}
 {%- endfor %}
-                    {{ kernel.store_output(
+                    {{ kernel.store_outputs(
                         tile_Y_list, tile_acc_list, GemmOuts, epilogue_nodes, offsets=("m_start", "n_start"), reindexers=reindexers
                     )|indent(20, false)
                     }}
