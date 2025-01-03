@@ -324,6 +324,64 @@ Tensor _fft_c2c_mkl(const Tensor& self, IntArrayRef dim, int64_t normalization, 
                    tensor_cdata<double>(out), compute_fct<double>(self, dim, normalization));
   }
 
+  const auto ndim = self.dim();
+  const int64_t signal_ndim = dim.size();
+  const auto batch_dims = ndim - signal_ndim;
+
+  DimVector dim_permute(ndim);
+  std::iota(dim_permute.begin(), dim_permute.end(), int64_t{0});
+
+  c10::SmallVector<bool, kDimVectorStaticSize> is_transformed_dim(ndim);
+  for (const auto& d : dim) {
+    is_transformed_dim[d] = true;
+  }
+  auto batch_end = std::partition(dim_permute.begin(), dim_permute.end(),
+                                  [&](int64_t d) {return !is_transformed_dim[d]; });
+  auto self_strides = self.strides();
+  std::sort(dim_permute.begin(), batch_end,
+            [&](int64_t a, int64_t b) { return self_strides[a] > self_strides[b]; });
+  std::copy(dim.cbegin(), dim.cend(), batch_end);
+  auto input = self.permute(dim_permute);
+
+  // Collapse batch dimensions into a single dimension
+  DimVector batched_sizes(signal_ndim + 1);
+  batched_sizes[0] = -1;
+  std::copy(input.sizes().cbegin() + batch_dims, input.sizes().cend(), batched_sizes.begin() + 1);
+  input = input.reshape(batched_sizes);
+
+  const auto batch_size = input.sizes()[0];
+  DimVector signal_size(signal_ndim + 1);
+  signal_size[0] = batch_size;
+  for (const auto i : c10::irange(signal_ndim)) {
+    auto in_size = input.sizes()[i + 1];
+    auto out_size = self.sizes()[dim[i]];
+    signal_size[i + 1] = std::max(in_size, out_size);
+    TORCH_INTERNAL_ASSERT(in_size == signal_size[i + 1] ||
+                          in_size == (signal_size[i + 1] / 2) + 1);
+    TORCH_INTERNAL_ASSERT(out_size == signal_size[i + 1] ||
+                          out_size == (signal_size[i + 1] / 2) + 1);
+  }
+
+  batched_sizes[0] = batch_size;
+  DimVector batched_out_sizes(batched_sizes.begin(), batched_sizes.end());
+  for (const auto i : c10::irange(dim.size())) {
+    batched_out_sizes[i + 1] = self.sizes()[dim[i]];
+  }
+
+  out.resize_(batched_out_sizes, MemoryFormat::Contiguous);
+
+  DimVector out_strides(ndim);
+  int64_t batch_numel = 1;
+  for (int64_t i = batch_dims - 1; i >= 0; --i) {
+    out_strides[dim_permute[i]] = batch_numel * out.strides()[0];
+    batch_numel *= self.sizes()[dim_permute[i]];
+  }
+  for (const auto i : c10::irange(batch_dims, ndim)) {
+    out_strides[dim_permute[i]] = out.strides()[1 + (i - batch_dims)];
+  }
+
+  out.as_strided_(self.sizes(), out_strides, out.storage_offset());
+
   return out;
 }
 
