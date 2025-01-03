@@ -291,12 +291,6 @@ public:
   Vectorized<double> pow(const Vectorized<double> &b) const {
     return Vectorized<double>(Sleef_powd8_u10(values, b));
   }
-  double reduce_add() const {
-    return _mm512_reduce_add_pd(values);
-  }
-  double reduce_max() const {
-    return _mm512_reduce_max_pd(values);
-  }
   // Comparison using the _CMP_**_OQ predicate.
   //   `O`: get false if an operand is NaN
   //   `Q`: do not raise if an operand is NaN

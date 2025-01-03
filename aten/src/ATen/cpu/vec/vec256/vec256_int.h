@@ -251,6 +251,32 @@ public:
     return *this;
   }
   Vectorized<int32_t> neg() const;
+  int32_t reduce_add() const {
+    auto v = values;
+    // 128-bit shuffle
+    auto v1 = _mm256_permute2f128_si256(v, v, 0x1);
+    v = v + v1;
+    // 64-bit shuffle
+    v1 = _mm256_shuffle_epi32(v, 0x4E);
+    v = v + v1;
+    // 32-bit shuffle
+    v1 = _mm256_shuffle_epi32(v, 0xB1);
+    v = v + v1;
+    return _mm256_cvtsi256_si32(v);
+  }
+  int32_t reduce_max() const {
+    auto v = values;
+    // 128-bit shuffle
+    auto v1 = _mm256_permute2f128_si256(v, v, 0x1);
+    v = _mm256_max_epi32(v, v1);
+    // 64-bit shuffle
+    v1 = _mm256_shuffle_epi32(v, 0x4E);
+    v = _mm256_max_epi32(v, v1);
+    // 32-bit shuffle
+    v1 = _mm256_shuffle_epi32(v, 0xB1);
+    v = _mm256_max_epi32(v, v1);
+    return _mm256_cvtsi256_si32(v);
+  }
   Vectorized<int32_t> operator==(const Vectorized<int32_t>& other) const {
     return _mm256_cmpeq_epi32(values, other.values);
   }
