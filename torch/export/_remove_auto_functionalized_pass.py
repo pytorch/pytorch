@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # All rights reserved.
 #
@@ -15,7 +14,7 @@ from torch._inductor.fx_passes.post_grad import decompose_auto_functionalized
 from torch.export import ExportedProgram
 
 
-def remove_self_clone(graph: torch.fx.Graph):
+def remove_self_clone(graph: torch.fx.Graph) -> None:
     for node in graph.nodes:
         if node.target == torch.ops.aten.copy_.default and node.args[0] == node.args[1]:
             node.replace_all_uses_with(node.args[0])
