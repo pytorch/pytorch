@@ -898,6 +898,19 @@ bool has_input_metadata<Edge>(const Edge& thing) {
   return thing.is_valid();
 }
 
+std::vector<c10::optional<InputMetadata>> collect_input_metadata(
+    const edge_list& edges) {
+  std::vector<c10::optional<InputMetadata>> input_metadata;
+  for (const auto& edge : edges) {
+    if (!edge.is_valid()) {
+      input_metadata.emplace_back(c10::nullopt);
+      continue;
+    }
+    input_metadata.emplace_back(edge.function->input_metadata(edge.input_nr));
+  }
+  return input_metadata;
+}
+
 // Given an vector<Edge> or vector<optional<InputMetdata>>, validate the
 // outputs. This involves using the InputMetadata to check the outputs and also
 // potentially calling .sum_to on the outputs.
