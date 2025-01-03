@@ -53,7 +53,7 @@ from torch.testing._internal.common_utils import (
     retry_on_connect_failures,
     run_tests,
     skip_but_pass_in_sandcastle,
-    skipIfROCmArch,
+    skipIfRocmArch,
     TestCase,
 )
 
