@@ -66,6 +66,8 @@ class MetalOverrides(OpOverrides):
             return "HUGE_VALF"
         elif val == -torch.inf:
             return "-HUGE_VALF"
+        elif isinstance(val, bool):
+            return "true" if val else "false"
         return str(val)
 
     @staticmethod
