@@ -3651,7 +3651,7 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
         y = torch.ones((4096,), device=GPU_TYPE, dtype=torch.float16)
 
         # this should cause an exception, since pre_hook is not allowed
-        msg = "Passing @triton.heuristics decorator after @triton.autotune decorator is not supported. is not supported. "
+        msg = "Passing @triton.heuristics decorator after @triton.autotune decorator is not supported. is not supported."
         with self.assertRaisesRegex(torch._dynamo.exc.Unsupported, msg):
             add_compiled = torch.compile(
                 add, mode="reduce-overhead", fullgraph=True, backend=backend

@@ -1051,9 +1051,9 @@ class DynamoTritonHOPifier(TritonHOPifier):
 
     # We use this function to wrap call_prune_configs
     def call_user_defined_fn(self, user_fn, args, kwargs, tx, variable):
-        from .builder import VariableBuilder
+        from .builder import SourcelessBuilder
 
-        wrapped_user_function = VariableBuilder(tx, variable.source)._wrap(user_fn)
+        wrapped_user_function = SourcelessBuilder.create(tx, user_fn)
         result = wrapped_user_function.call_function(tx, args, kwargs)
         return result
 
@@ -1061,7 +1061,7 @@ class DynamoTritonHOPifier(TritonHOPifier):
         from .builder import VariableBuilder
 
         wrapped_user_obj = VariableBuilder(
-            tx, AttrSource(variable.source, f"{name}")
+            tx, AttrSource(variable.kernel_source, f"{name}")
         )._wrap(user_obj)
         return wrapped_user_obj
 
@@ -1092,7 +1092,7 @@ class DynamoTritonHOPifier(TritonHOPifier):
             kernel=variable.kernel,
             kernel_idx=variable.kernel_idx,
             grid=args[0],
-            source=variable.source,
+            kernel_source=variable.source,
         )
 
     def call_HOP(self, variable, grids, combined_args_raw, tx) -> ConstantVariable:
@@ -1169,8 +1169,10 @@ class TritonKernelVariable(VariableTracker):
     grid: "TritonGridType"
     kernel: "TritonKernelType"
     kernel_idx: Optional[int]
+    kernel_source: "AttrSource"
 
     def __init__(self, kernel, kernel_idx, grid, **kwargs) -> None:
+        self.kernel_source = kwargs.pop("kernel_source", None)
         super().__init__(**kwargs)
         dynamo_triton_hopifier_singleton.init_variable(self, kernel, kernel_idx, grid)
 
