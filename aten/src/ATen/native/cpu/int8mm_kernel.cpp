@@ -5,16 +5,39 @@
 #include <ATen/Parallel.h>
 #include <ATen/cpu/vec/functional.h>
 #include <ATen/cpu/vec/vec.h>
+#include <ATen/native/CPUBlas.h>
 #include <ATen/native/cpu/int_mm_kernel.h>
 #include <ATen/native/cpu/utils.h>
-#include <c10/util/irange.h>
 #include <c10/util/Unroll.h>
+#include <c10/util/irange.h>
 
 #if (defined(_WIN32) || defined(_WIN64))
 #define RESTRICT __restrict
 #else
 #define RESTRICT __restrict__
 #endif
+
+#if AT_MKLDNN_ENABLED()
+#include <ideep.hpp>
+// Add uKernel API versioning to be compatible with different oneDNN versions
+// oneDNN 3.6.x updates the ukernel APIs of brgemm and brgemm_pack_B
+// brgemm_pack_B is changed to transform and the setting of brgemm beta is
+// changed to set_add_C
+#if (IDEEP_VERSION_MAJOR == 3 && IDEEP_VERSION_MINOR == 5)
+#define ONEDNN_UKERNEL_1
+#elif (IDEEP_VERSION_MAJOR >= 3 && IDEEP_VERSION_MINOR >= 6)
+#define ONEDNN_UKERNEL_2
+#endif
+#if (                                                           \
+    (defined(ONEDNN_UKERNEL_1) || defined(ONEDNN_UKERNEL_2)) && \
+    (defined(__x86_64__) || (defined(_M_X64) && !defined(_M_ARM64EC))))
+#define ONEDNN_UKERNEL_ENABLED
+#endif
+#endif // AT_MKLDNN_ENABLED()
+#if defined(ONEDNN_UKERNEL_ENABLED)
+#include <oneapi/dnnl/dnnl.hpp>
+#include <oneapi/dnnl/dnnl_ukernel.hpp>
+#endif // oneDNN BRGEMM
 
 namespace at::native {
 
@@ -415,6 +438,134 @@ void int8pack_mm_kernel_(
       data_index_step(mb, MB, nb, NB);
     }
   });
+}
+
+static inline void transpose_16x16_fp32(__m512 a[16]) {
+  __m512 t[16];
+  c10::ForcedUnroll<8>{}([&](auto i) {
+    t[i] = _mm512_unpacklo_ps(a[2 * i], a[2 * i + 1]);
+    t[i + 8] = _mm512_unpackhi_ps(a[2 * i], a[2 * i + 1]);
+  });
+  c10::ForcedUnroll<8>{}([&](auto i) {
+    a[i] = (__m512)_mm512_unpacklo_pd((__m512d)t[i * 2], (__m512d)t[i * 2 + 1]);
+    a[i + 8] =
+        (__m512)_mm512_unpackhi_pd((__m512d)t[i * 2], (__m512d)t[i * 2 + 1]);
+  });
+  c10::ForcedUnroll<8>{}([&](auto i) {
+    t[2 * i] = _mm512_shuffle_f32x4(a[2 * i], a[2 * i + 1], 0x44);
+    t[2 * i + 1] = _mm512_shuffle_f32x4(a[2 * i], a[2 * i + 1], 0xee);
+  });
+  a[0] = _mm512_shuffle_f32x4(t[0], t[2], 0x88);
+  a[4] = _mm512_shuffle_f32x4(t[0], t[2], 0xdd);
+  a[8] = _mm512_shuffle_f32x4(t[1], t[3], 0x88);
+  a[12] = _mm512_shuffle_f32x4(t[1], t[3], 0xdd);
+  a[2] = _mm512_shuffle_f32x4(t[4], t[6], 0x88);
+  a[6] = _mm512_shuffle_f32x4(t[4], t[6], 0xdd);
+  a[10] = _mm512_shuffle_f32x4(t[5], t[7], 0x88);
+  a[14] = _mm512_shuffle_f32x4(t[5], t[7], 0xdd);
+  a[1] = _mm512_shuffle_f32x4(t[8], t[10], 0x88);
+  a[5] = _mm512_shuffle_f32x4(t[8], t[10], 0xdd);
+  a[9] = _mm512_shuffle_f32x4(t[9], t[11], 0x88);
+  a[13] = _mm512_shuffle_f32x4(t[11], t[11], 0xdd);
+  a[3] = _mm512_shuffle_f32x4(t[12], t[14], 0x88);
+  a[7] = _mm512_shuffle_f32x4(t[12], t[14], 0xdd);
+  a[11] = _mm512_shuffle_f32x4(t[13], t[15], 0x88);
+  a[15] = _mm512_shuffle_f32x4(t[13], t[15], 0xdd);
+}
+
+template <int NUM>
+void dequant_and_unpack(
+    const int8_t* B,
+    BFloat16* B_unpack,
+    BFloat16* scales,
+    const int K,
+    const int ldb_unpack);
+
+template <>
+void dequant_and_unpack<1>(
+    const int8_t* B,
+    BFloat16* B_unpack,
+    BFloat16* scales,
+    const int K,
+    const int ldb_unpack) {
+  for (int k = 0; k < K; k++) {
+    int8_t b8 = B[k];
+    B_unpack[k * ldb_unpack] = static_cast<BFloat16>(b8) * scales[0];
+  }
+}
+
+template <>
+void dequant_and_unpack<16>(
+    const int8_t* B,
+    BFloat16* B_unpack,
+    BFloat16* scales,
+    const int K,
+    const int ldb_unpack) {
+  const int ldb = K;
+  __m512 scale[16];
+  c10::ForcedUnroll<16>{}([&](auto i) {
+    float ss = static_cast<float>(scales[i]);
+    scale[i] = _mm512_set1_ps(ss);
+  });
+  for (int k = 0; k < K; k += 16) {
+    int kk = std::min(k, K - 16);
+    __m512 vb[16];
+    c10::ForcedUnroll<16>{}([&](auto i) {
+      __m128i b8 = _mm_load_si128((__m128i*)(B + kk + i * ldb));
+      __m512i b32 = _mm512_cvtepi8_epi32(b8);
+      vb[i] = _mm512_cvtepi32_ps(b32);
+      vb[i] = _mm512_mul_ps(vb[i], scale[i]);
+    });
+    transpose_16x16_fp32(vb);
+    c10::ForcedUnroll<16>{}([&](auto i) {
+      _mm256_storeu_ps(
+          (float*)(B_unpack + (kk + i) * ldb_unpack),
+          (__m256)_mm512_cvtneps_pbh(vb[i]));
+    });
+  }
+}
+
+template <typename kBFloat16>
+void int8pack_mm_kernel(
+    const Tensor& C,
+    const Tensor& A,
+    const Tensor& B,
+    const Tensor& scales) {
+  const BFloat16* A_data = A.const_data_ptr<BFloat16>();
+  const int8_t* B_data = B.const_data_ptr<int8_t>();
+  BFloat16* C_data = C.data_ptr<BFloat16>();
+  const BFloat16* S_data = scales.const_data_ptr<BFloat16>();
+
+  int M = A.size(0);
+  int N = B.size(0);
+  int K = A.size(1);
+  int lda = K;
+  int ldb = K;
+  int ldc = N;
+  float* B_unpack = (float*)malloc(N * K * sizeof(float));
+  int thread_num = get_num_threads();
+  int n = std::max(16, N / thread_num + N % thread_num);
+  at::parallel_for(0, N / n + N % n, 0, [&](int begin, int end) {
+    int local_begin = begin * n;
+    int local_n = std::min(n, N - local_begin);
+    int8_t* B_local = B_data + local_begin * ldb;
+    BFloat16* B_unpack_local = B_unpack + local_begin;
+    BFloat16* scales_local = S_data + local_begin;
+    if (local_n >= 16 && K >= 16) {
+      for (int i = 0; i < local_n; i += 16) {
+        int ii = std::min(i, local_n - 16);
+        dequant_and_unpack<16>(
+            B_local + ii * ldb, B_unpack_local + ii, scales_local + ii, K, N);
+      }
+    } else {
+      for (int i = 0; i < local_n; i++)
+        dequant_and_unpack<1>(
+            B_local + i * ldb, B_unpack_local + i, scales_local + i, K, N);
+    }
+    cpublas::brgemm(
+        M, local_n, K, lda, N, ldc, false, A_data, B_unpack_local, C_data);
+  });
+  free(B_unpack);
 }
 
 void int8pack_mm_kernel(
