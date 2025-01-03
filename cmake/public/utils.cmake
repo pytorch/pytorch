@@ -1,3 +1,6 @@
+# Enables CMake to set LTO on compilers other than Intel.
+cmake_policy(SET CMP0069 NEW)
+include(CheckIPOSupported)
 ################################################################################################
 # Exclude and prepend functionalities
 function(exclude OUTPUT INPUT)
@@ -436,6 +439,14 @@ function(torch_compile_options libname)
   # Use -O2 for release builds (-O3 doesn't improve perf, and -Os results in perf regression)
   target_compile_options(${libname} PRIVATE
       $<$<AND:$<COMPILE_LANGUAGE:CXX>,$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>>:-O2>)
+
+  # Optional IPO. Do not use IPO if it's not supported by compiler.
+  check_ipo_supported(RESULT result OUTPUT output LANGUAGES C CXX)
+  if(result)
+    set_property(TARGET ${libname} PROPERTY INTERPROCEDURAL_OPTIMIZATION $<IF:$<CONFIG:Release>,TRUE,FALSE>)
+  else()
+    message(WARNING "IPO is not supported: ${output}")
+  endif()
 
 endfunction()
 
