@@ -50,6 +50,7 @@ class MPSBasicTests(TestCase):
     test_view_as_complex = CommonTemplate.test_view_as_complex
     test_remainder = CommonTemplate.test_remainder
     test_max_pool2d2 = CommonTemplate.test_max_pool2d2
+    test_cat_empty = CommonTemplate.test_cat_empty
 
     @parametrize("dtype", MPS_DTYPES)
     def test_add(self, dtype):
