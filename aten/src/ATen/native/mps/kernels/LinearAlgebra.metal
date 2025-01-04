@@ -36,9 +36,9 @@ kernel void naive_matmul(
 // Helper structs to pack N, NB and similar vars
 // ------------------------------------
 struct BlockParams {
-  uint N;      // Full matrix size
-  uint NB;     // block size
-  uint k;      // block index
+  uint N; // Full matrix size
+  uint NB; // block size
+  uint k; // block index
   uint activeNB; // block size for partial blocks
   uint batch_idx; // current batch index
   uint batch_stride; // stride between matrices in batch
@@ -87,7 +87,7 @@ kernel void factorDiagonalBlock(
     tile[i] = 0.0f;
   }
   threadgroup_barrier(mem_flags::mem_threadgroup);
-  
+
   uint tileSize = actSize * actSize;
   for (uint i = tid; i < tileSize; i += tpg) {
     uint r = i / actSize;
