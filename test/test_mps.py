@@ -8860,6 +8860,21 @@ class TestNLLLoss(TestCaseMPS):
             self.assertEqual(result_long['mps'].to('cpu'), result_long['cpu'])
             self.assertEqual(grad_long['mps'].to('cpu'), grad_long['cpu'])
 
+    def test_nll_loss_backward(self):
+        # Copy-n-pasted from similar test_torchinductor.py test
+        # Used to crash with `error: 'mps.divide' op requires the same element type for all operands and results`
+
+        labels = (
+            torch.zeros([5], dtype=torch.int64, device="mps"),
+            torch.tensor([-100, -100, 3, -100, -100], dtype=torch.int64, device="mps"),
+        )
+        for label in labels:
+            inp = torch.rand(5, 5, device="mps", dtype=torch.half)
+            grad_out = torch.empty((), device=inp.device, dtype=inp.dtype)
+            total_weight = torch.tensor(1.0, device=inp.device)
+            torch.ops.aten.nll_loss_backward(grad_out, inp, label, None, 1, -100, total_weight)
+
+
 class TestTopK(TestCase):
     def _test_topk(self, shape, largest):
         cpu_x = torch.randn(shape, device='cpu', dtype=torch.float, requires_grad=False)
