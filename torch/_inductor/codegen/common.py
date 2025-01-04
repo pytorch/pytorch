@@ -1839,6 +1839,8 @@ class Kernel(CodeGen):
                                 config.cpu_backend == "triton"
                                 if device_str == "cpu"
                                 else config.cuda_backend == "triton"
+                                if device_str != "mps"
+                                else False
                             )
                         else:
                             triton_backend = False
