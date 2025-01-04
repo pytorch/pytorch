@@ -745,12 +745,49 @@ void launch_vectorized_layer_norm_kernel(
     auto stream = at::cuda::getCurrentCUDAStream().stream();
     const int warp_size = at::cuda::warp_size();
     const dim3 threads(warp_size, num_threads() / warp_size, 1);
-    const dim3 blocks(M);
+    dim3 blocks(M);
+
+#ifdef USE_ROCM
+    uint64_t workgroupSize = static_cast<uint64_t>(blocks.x) * static_cast<uint64_t>(threads.x);
+    // this caused invalid configuration problem
+    if (workgroupSize > std::numeric_limits<uint32_t>::max()) {
+      // Fix invalid configuration https://github.com/pytorch/pytorch/issues/136291
+      blocks.x = std::numeric_limits<uint32_t>::max() / threads.x;
+    }
+#endif
+
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(threads.y % 2 == 0 || threads.y == 1);
     int nshared = threads.y > 1 ? threads.y * 3/2 *sizeof(T_ACC) : 0;
     vectorized_layer_norm_kernel<<<blocks, threads, nshared, stream>>>(N, eps, X_data,
     gamma_data, beta_data, mean_data, rstd_data, Y_data);
     C10_CUDA_KERNEL_LAUNCH_CHECK();
+
+#ifdef USE_ROCM
+    // the blocks.x contains the max grid x dimention without invalid configuration error
+    // Fix invalid configuration https://github.com/pytorch/pytorch/issues/136291
+    // Ensure all elements are processed. Prepare for next round
+    int64_t remaining = M - blocks.x;
+    const T* X_data2 = X_data;
+    T_ACC* mean_data2 = mean_data;
+    T_ACC* rstd_data2 = rstd_data;
+    T* Y_data2 = Y_data;
+
+    while (remaining > 0) {
+      X_data2 += N * blocks.x;
+      mean_data2 += blocks.x;
+      rstd_data2 += blocks.x;
+      Y_data2 += N * blocks.x;
+
+      blocks.x = (remaining > blocks.x) ? blocks.x : remaining;
+
+      vectorized_layer_norm_kernel<<<blocks, threads, nshared, stream>>>(N, eps, X_data2,
+        gamma_data, beta_data, mean_data2, rstd_data2, Y_data2);
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
+
+      remaining -= blocks.x;
+    }
+#endif
+
 }
 
 template <typename T, typename T_ACC>
