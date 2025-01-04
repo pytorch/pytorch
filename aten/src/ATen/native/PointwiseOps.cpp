@@ -48,7 +48,15 @@ TORCH_META_FUNC(addcdiv)
         "The future addcdiv behavior is just the latter implementation: ",
         "(input + value * tensor1 / tensor2), for all dtypes.");
   }
-  build_ternary_op(maybe_get_output(), self, tensor1, tensor2);
+  build(TensorIteratorConfig()
+      .allow_cpu_scalars(true)
+      .promote_inputs_to_common_dtype(true)
+      .cast_common_dtype_to_outputs(true)
+      .enforce_safe_casting_to_output(true)
+      .add_owned_output(maybe_get_output())
+      .add_owned_const_input(self)
+      .add_owned_const_input(tensor1)
+      .add_owned_const_input(tensor2));
 }
 
 } // namespace at::meta

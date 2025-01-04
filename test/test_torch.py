@@ -4348,9 +4348,10 @@ else:
 
     # FIXME: move to elementwise ternary test suite
     @onlyNativeDeviceTypes
+    @parametrize("use_cpu_scalar", [True, False])
     @dtypesIfCUDA(*set(get_all_math_dtypes('cuda')))
     @dtypes(*set(get_all_math_dtypes('cpu')))
-    def test_addcdiv(self, device, dtype):
+    def test_addcdiv(self, device, dtype, use_cpu_scalar):
         # Returns floating or integral scalar corresponding to dtype
         def _number(floating, integer, dtype):
             if dtype in [torch.half, torch.float, torch.double, torch.bfloat16]:
@@ -4372,7 +4373,10 @@ else:
         def _test_addcdiv():
             a = non_zero_rand((2, 2), dtype=dtype, device=device)
             b = non_zero_rand((2, 2), dtype=dtype, device=device)
-            c = non_zero_rand((2, 2), dtype=dtype, device=device)
+            if use_cpu_scalar:
+                c = non_zero_rand([], device="cpu", dtype=dtype)
+            else:
+                c = non_zero_rand((2, 2), dtype=dtype, device=device)
             alpha = _number(0.5, 3, dtype)
 
             expected = a + (alpha * b) / c
@@ -4396,6 +4400,20 @@ else:
             c = torch.tensor([1.0], device=device, dtype=dtype)
             out = torch.addcmul(a, b, c, value=-2)
             self.assertTrue(not (out.isnan() or out.isinf()))
+
+    @onlyCUDA
+    def test_addcdiv_cuda_errors_with_cpu_scalars(self, device):
+        alpha = 0.5
+
+        a = torch.rand((2, 2), device=device)
+        b = torch.rand((2, 2), device=device)
+        c = torch.rand((2, 2), device=device)
+        scalar = torch.rand([], device="cpu")
+
+        with self.assertRaisesRegex(RuntimeError, r'CPU Scalar support for tensor1 argument'):
+            torch.addcdiv(a, scalar, c, value=alpha)
+        with self.assertRaisesRegex(RuntimeError, r'CPU Scalar support for self argument'):
+            torch.addcdiv(scalar, b, c, value=alpha)
 
     def test_nullary_op_mem_overlap(self, device):
         ops = (
