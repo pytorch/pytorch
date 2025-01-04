@@ -8455,6 +8455,15 @@ class TestMPS(TestCaseMPS):
         helper(np.array([1, 1, 1, 1, 1]), (0 + 1 + 2 + 3 + 4) / 5, (6 - 2 * 2), 10000)
         helper(np.array([[1, 1, 1, 1, 1, 1, 1]]), 0, 0, 7, False)
 
+    def test_non_contiguous_sampling_variation(self):
+        torch.manual_seed(42)
+        # transpose so it's made non-contiguous
+        probs = torch.tensor([[.25, .1], [.25, .1], [.25, .1], [.25, .7]]).T.to("mps")
+        samples = {torch.multinomial(probs, 1).flatten()[0].item() for _ in range(200)}
+        # we should get different samples rather than the same value repeated,
+        # indicating the sampling is working properly on non-contiguous tensors
+        self.assertNotEqual(len(samples), 1)
+
     def test_cumsum_dim_check(self):
         x = torch.rand((3, 3), device="mps")
         self.assertEqual(x.cumsum(1), x.cumsum(-1))
