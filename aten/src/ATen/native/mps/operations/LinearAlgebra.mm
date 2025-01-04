@@ -764,77 +764,93 @@ static Tensor& linalg_cholesky_mps_impl(const Tensor& input, bool upper, Tensor&
     return out;
   }
 
-  Tensor input_ = input;
-  if (!input.is_contiguous()) {
-    input_ = input.clone(at::MemoryFormat::Contiguous);
+  Tensor input_ = input.is_contiguous() ? input : input.clone(at::MemoryFormat::Contiguous);
+  if (!out.is_contiguous()) {
+    out = out.contiguous();
   }
-  uint64_t batchSize = input_.sizes().size() > 2 ? input_.size(0) : 1;
-  std::vector<Tensor> status_tensors;
-  status_tensors.reserve(batchSize);
-  for ([[maybe_unused]] const auto i : c10::irange(batchSize)) {
-    status_tensors.push_back(at::zeros(1, kInt, std::nullopt, kMPS, std::nullopt));
+  out.copy_(input_);
+
+  int64_t ndim = out.dim();
+  int64_t N = out.size(-1);
+  int64_t B = 1; // default
+  for (int64_t i = 0; i < ndim - 2; i++) {
+    B *= out.size(i);
   }
-  id<MTLBuffer> bufferIn = getMTLBufferStorage(input_);
-  id<MTLBuffer> bufferOut = getMTLBufferStorage(out);
-  MPSStream* mpsStream = getCurrentMPSStream();
-  id<MTLDevice> device = MPSDevice::getInstance()->device();
 
-  dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
-    @autoreleasepool {
-      mpsStream->endKernelCoalescing();
-      id<MTLCommandBuffer> commandBuffer = mpsStream->commandBuffer();
+  auto stream = getCurrentMPSStream();
+  auto device = MPSDevice::getInstance()->device();
 
-      const int64_t n = out.size(-1);
-      const uint64_t elemSize = out.element_size();
+  auto factorDiagonalPSO = lib.getPipelineStateForFunc("factorDiagonalBlock");
+  auto applyTRSMPSO = lib.getPipelineStateForFunc("applyTRSM");
+  auto applySYRKPSO = lib.getPipelineStateForFunc("applySYRK");
 
-      MPSMatrixDecompositionCholesky* choleskyFilter =
-          [[[MPSMatrixDecompositionCholesky alloc] initWithDevice:device lower:!upper order:n] autorelease];
+  int64_t NB = std::min<int64_t>(32, N);
 
-      MPSMatrixDescriptor* desc_in = [MPSMatrixDescriptor matrixDescriptorWithRows:n
-                                                                           columns:n
-                                                                          matrices:batchSize
-                                                                          rowBytes:n * elemSize
-                                                                       matrixBytes:n * n * elemSize
-                                                                          dataType:getMPSDataType(input_)];
+  int64_t numBlocks = (N + NB - 1) / NB;
 
-      MPSMatrixDescriptor* desc_out = [MPSMatrixDescriptor matrixDescriptorWithRows:n
-                                                                            columns:n
-                                                                           matrices:batchSize
-                                                                           rowBytes:n * elemSize
-                                                                        matrixBytes:n * n * elemSize
-                                                                           dataType:getMPSDataType(out)];
+  for (int64_t b = 0; b < B; b++) {
+    // for each block column
+    for (int64_t k = 0; k < numBlocks; k++) {
+      // factor diagonal block
+      uint32_t activeNB_k = (uint32_t)std::min(N - k * NB, (int64_t)NB);
+      dispatch_sync_with_rethrow(stream->queue(), ^() {
+        @autoreleasepool {
+          auto computeEncoder = stream->commandEncoder();
+          [computeEncoder setComputePipelineState:factorDiagonalPSO];
+          std::array<uint32_t, 4> sizes = {static_cast<uint32_t>(N),
+                                           static_cast<uint32_t>(NB),
+                                           static_cast<uint32_t>(k),
+                                           static_cast<uint32_t>(activeNB_k)};
+          mtl_setArgs(computeEncoder, out, sizes);
+          mtl_dispatch1DJob(computeEncoder, factorDiagonalPSO, activeNB_k * activeNB_k);
+        }
+      });
 
-      for (const auto i : c10::irange(batchSize)) {
-        const uint64_t batchOffset = i * n * n;
-        MPSMatrix* matrixIn = [[[MPSMatrix alloc] initWithBuffer:bufferIn
-                                                          offset:(input_.storage_offset() + batchOffset) * elemSize
-                                                      descriptor:desc_in] autorelease];
-        MPSMatrix* matrixOut = [[[MPSMatrix alloc] initWithBuffer:bufferOut
-                                                          offset:(out.storage_offset() + batchOffset) * elemSize
-                                                      descriptor:desc_out] autorelease];
+      // TRSM updates
+      for (int64_t j = k + 1; j < numBlocks; j++) {
+        uint32_t activeNB_j = (uint32_t)std::min(N - j * NB, (int64_t)NB);
+        dispatch_sync_with_rethrow(stream->queue(), ^() {
+          @autoreleasepool {
+            auto computeEncoder = stream->commandEncoder();
+            [computeEncoder setComputePipelineState:applyTRSMPSO];
+            std::array<uint32_t, 6> sizes = {static_cast<uint32_t>(N),
+                                             static_cast<uint32_t>(NB),
+                                             static_cast<uint32_t>(k),
+                                             static_cast<uint32_t>(j),
+                                             static_cast<uint32_t>(activeNB_k),
+                                             static_cast<uint32_t>(activeNB_j)};
+            mtl_setArgs(computeEncoder, out, sizes);
+            mtl_dispatch1DJob(computeEncoder, applyTRSMPSO, activeNB_j * activeNB_k);
+          }
+        });
+      }
 
-        // status buffer to check for positive definiteness
-        id<MTLBuffer> statusBuffer = getMTLBufferStorage(status_tensors[i]);
-
-        [choleskyFilter encodeToCommandBuffer:commandBuffer
-                                sourceMatrix:matrixIn
-                                resultMatrix:matrixOut
-                                      status:statusBuffer];
+      // SYRK updates
+      for (int64_t j = k + 1; j < numBlocks; j++) {
+        uint32_t activeNB_j = (uint32_t)std::min(N - j * NB, (int64_t)NB);
+        for (int64_t h = j; h < numBlocks; h++) {
+          uint32_t activeNB_h = (uint32_t)std::min(N - h * NB, (int64_t)NB);
+          dispatch_sync_with_rethrow(stream->queue(), ^() {
+            @autoreleasepool {
+              auto computeEncoder = stream->commandEncoder();
+              [computeEncoder setComputePipelineState:applySYRKPSO];
+              std::array<uint32_t, 8> sizes = {static_cast<uint32_t>(N),
+                                               static_cast<uint32_t>(NB),
+                                               static_cast<uint32_t>(k),
+                                               static_cast<uint32_t>(j),
+                                               static_cast<uint32_t>(h),
+                                               static_cast<uint32_t>(activeNB_k),
+                                               static_cast<uint32_t>(activeNB_j),
+                                               static_cast<uint32_t>(activeNB_h)};
+              mtl_setArgs(computeEncoder, out, sizes);
+              mtl_dispatch1DJob(computeEncoder, applySYRKPSO, activeNB_j * activeNB_h);
+            }
+          });
+        }
+      }
     }
-    }
-  });
-  for (const auto i : c10::irange(status_tensors.size())) {
-    int status = status_tensors[i].item<int>();
-    TORCH_CHECK(
-        status == 0,
-        "cholesky factorization failure at the ",
-        i + 1,
-        " sample with status: ",
-        status,
-        ". See https://developer.apple.com/documentation/metalperformanceshaders/mpsmatrixdecompositionstatus for details.");
   }
-  upper ? out.triu_() : out.tril_();
-  return out;
+  return upper ? out.triu_() : out.tril_();
 }
 } // namespace mps
 
@@ -1003,16 +1019,19 @@ Tensor cholesky_mps(const Tensor& self, bool upper) {
 }
 
 Tensor& cholesky_mps_out(const Tensor& self, bool upper, Tensor& out) {
-  return mps::linalg_cholesky_mps_impl(self, upper, out);;
+  return mps::linalg_cholesky_mps_impl(self, upper, out);
+  ;
 }
 
 Tensor& linalg_cholesky_out_mps(const Tensor& self, bool upper, Tensor& out) {
-  return mps::linalg_cholesky_mps_impl(self, upper, out);;
+  return mps::linalg_cholesky_mps_impl(self, upper, out);
+  ;
 }
 
 Tensor linalg_cholesky_mps(const Tensor& self, bool upper) {
   Tensor out = at::zeros_like(self);
-  return mps::linalg_cholesky_mps_impl(self, upper, out);;
+  return mps::linalg_cholesky_mps_impl(self, upper, out);
+  ;
 }
 
 Tensor addbmm_mps(const Tensor& self,
