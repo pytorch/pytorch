@@ -72,7 +72,7 @@ class MetalOverrides(OpOverrides):
 
     @staticmethod
     def index_expr(expr: sympy.Expr, dtype: torch.dtype) -> str:
-        idx_str = V.kernel.index_to_str(V.kernel.rename_indexing(expr))
+        idx_str = V.kernel.index_to_str(V.kernel.prepare_indexing(expr))
         var = V.kernel.cse.generate(
             V.kernel.compute, idx_str, bounds=get_bounds_index_expr(expr)
         )
@@ -156,6 +156,10 @@ class MetalOverrides(OpOverrides):
     @staticmethod
     def sqrt(x: CSEVariable) -> str:
         return f"metal::sqrt({x})"
+
+    @staticmethod
+    def atanh(x: CSEVariable) -> str:
+        return f"metal::atanh({x})"
 
     @staticmethod
     def floordiv(a: CSEVariable, b: CSEVariable) -> str:

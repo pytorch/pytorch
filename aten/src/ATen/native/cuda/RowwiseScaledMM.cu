@@ -53,9 +53,13 @@ static CUresult CUDAAPI nvrtc_cuTensorMapEncodeTiled(
 #include <cutlass/util/host_tensor.h>
 
 // Rename the global function symbol
+#if CUTLASS_VERSION == 351
+#include <cute/tensor.hpp>
+#else
 #define cuTensorMapEncodeTiled nvrtc_cuTensorMapEncodeTiled
 #include <cute/tensor.hpp>
 #undef cuTensorMapEncodeTiled
+#endif
 // Set everything back to normal
 
 #include <cutlass/gemm/collective/collective_builder.hpp>
@@ -197,6 +201,7 @@ void f8f8bf16_rowwise_impl(
   using Accum = cutlass::epilogue::fusion::Sm90AccFetch;
 
   #if CUTLASS_VERSION == 351
+  #define FLIPPED_SCALES ;
   using AccumScale = cutlass::epilogue::fusion::Sm90EVT<
               Multiply,
               WScale,
@@ -269,6 +274,23 @@ void f8f8bf16_rowwise_impl(
   StrideOutput stride_output = cutlass::make_cute_packed_stride(
       StrideOutput{}, cute::make_shape(M, static_cast<int>(out.stride(0)), 1));
 
+#ifdef FLIPPED_SCALES
+  typename Gemm::Arguments arguments{
+      cutlass::gemm::GemmUniversalMode::kGemm,
+      {M, N, K},
+      {reinterpret_cast<DtypeA*>(XQ.data_ptr()),
+       stride_a,
+       reinterpret_cast<DtypeB*>(WQ.data_ptr()),
+       stride_b},
+      {{{{bias.has_value() ? reinterpret_cast<DtypeBias*>(bias->data_ptr())
+                           : nullptr},
+         {{reinterpret_cast<DtypeScale*>(w_scale.data_ptr())},
+          {{reinterpret_cast<DtypeScale*>(x_scale.data_ptr())}}}}},
+       reinterpret_cast<DtypeOutput*>(out.data_ptr()),
+       stride_output,
+       reinterpret_cast<DtypeOutput*>(out.data_ptr()),
+       stride_output}};
+#else
   typename Gemm::Arguments arguments{
       cutlass::gemm::GemmUniversalMode::kGemm,
       {M, N, K},
@@ -284,6 +306,7 @@ void f8f8bf16_rowwise_impl(
        stride_output,
        reinterpret_cast<DtypeOutput*>(out.data_ptr()),
        stride_output}};
+#endif
 
   Gemm gemm;
 
