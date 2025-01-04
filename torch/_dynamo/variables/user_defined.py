@@ -957,7 +957,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
         # In some cases, we have to do dynamic lookup because getattr_static is not enough. For example, threading.local
         # has side-effect free __getattribute__ and the attribute is not visible without a dynamic lookup.
-        if not object_has_getattribute(self.value) and (
+        if (
             subobj is NO_SUCH_SUBOBJ  # e.g., threading.local
             or isinstance(
                 subobj, _collections._tuplegetter
