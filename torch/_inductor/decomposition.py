@@ -4,7 +4,8 @@ import logging
 import math
 import sys
 import typing
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Tuple, TypeVar, Union
+from typing_extensions import ParamSpec
 
 import torch
 import torch._decomp as decomp
@@ -39,6 +40,9 @@ from .utils import (
     use_scatter_fallback,
 )
 
+
+_T = TypeVar("_T")
+_P = ParamSpec("_P")
 
 log = logging.getLogger(__name__)
 aten = torch.ops.aten
@@ -119,7 +123,7 @@ remove_decompositions(decompositions, decomps_to_exclude)
 
 def register_decomposition(
     ops: List[Union[torch._ops.OperatorBase, torch._ops.OpOverloadPacket]]
-) -> Callable[..., Any]:
+) -> Callable[[Callable[_P, _T]], Callable[_P, _T]]:
     for op in [ops] if callable(ops) else ops:  # type: ignore[attr-defined]
         if op in decompositions:
             log.warning("duplicate decomp: %s", ops)
