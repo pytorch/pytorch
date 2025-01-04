@@ -27,6 +27,10 @@
 - (MPSGraphTensor*)minimumWithNaNPropagationAndIntFallbackWithPrimaryTensor:(MPSGraphTensor*)primaryTensor
                                                             secondaryTensor:(MPSGraphTensor*)secondaryTensor
                                                                        name:(NSString*)name {
+  // As of MacOS-15.1 m..imumWithNanPropagation is only defined for floating types and calling it with integral
+  // agruments results in
+  //  /AppleInternal/Library/BuildRoots/c7c74b64-74b4-11ef-aeda-9635a580fe0d/Library/Caches/com.apple.xbs/Sources/MetalPerformanceShaders/MPSCore/Utility/MPSKernelDAG.mm:805:
+  //  failed assertion `Error getting visible function: (null) Function isNaN_u8_i8 was not found in the library'
   if (([primaryTensor dataType] & MPSDataTypeFloatBit) == 0) {
     return [self minimumWithPrimaryTensor:primaryTensor secondaryTensor:secondaryTensor name:name];
   }
@@ -36,6 +40,10 @@
 - (MPSGraphTensor*)maximumWithNaNPropagationAndIntFallbackWithPrimaryTensor:(MPSGraphTensor*)primaryTensor
                                                             secondaryTensor:(MPSGraphTensor*)secondaryTensor
                                                                        name:(NSString*)name {
+  // As of MacOS-15.1 m..imumWithNanPropagation is only defined for floating types and calling it with integral
+  // agruments results in
+  //  /AppleInternal/Library/BuildRoots/c7c74b64-74b4-11ef-aeda-9635a580fe0d/Library/Caches/com.apple.xbs/Sources/MetalPerformanceShaders/MPSCore/Utility/MPSKernelDAG.mm:805:
+  //  failed assertion `Error getting visible function: (null) Function isNaN_u8_i8 was not found in the library'
   if (([primaryTensor dataType] & MPSDataTypeFloatBit) == 0) {
     return [self maximumWithPrimaryTensor:primaryTensor secondaryTensor:secondaryTensor name:name];
   }
