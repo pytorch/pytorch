@@ -43,7 +43,7 @@ PyObject* Dim_init() {
 #if IS_PYTHON_3_13_PLUS
 // see https://github.com/python/cpython/issues/112136
 #include <internal/pycore_modsupport.h>
-#include <cpython/code.h> // To get _Py_OPARG
+#include <internal/pycore_code.h> // To get _Py_OPARG
 #define NEED_OPCODE_METADATA
 #include "internal/pycore_opcode_metadata.h"
 #undef NEED_OPCODE_METADATA
