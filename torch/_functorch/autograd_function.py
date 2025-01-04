@@ -401,16 +401,19 @@ def vmapify_autograd_function(autograd_function, in_dims, batch_size, randomness
             return *outputs, out_dims
 
     def setup_context(ctx, inputs, outputs):
-        outputs_ = outputs[:-1]
         out_dims = outputs[-1]
+        if isinstance(out_dims, tuple):
+            outputs_ = outputs[:-1]
+        else:
+            outputs_ = outputs[0]
 
-        def inner(inputs, outputs_):
+        def inner(inputs, outputs):
             # wrapped_ctx.save_for_backward will:
             # - unwrap batchedtensors into (tensor, bdim)
             # - save_for_backward(*unwrapped_tensors)
             # - assign the bdims to wrapped_ctx._pt_saved_tensors_bdims
             wrapped_ctx = CtxCustomSave(ctx, current_level())
-            autograd_function.setup_context(wrapped_ctx, inputs, outputs_)
+            autograd_function.setup_context(wrapped_ctx, inputs, outputs)
 
             # input_shapes are used for reductify later to reduce expanded gradients
             # to the correct shape.
@@ -457,6 +460,15 @@ def vmapify_autograd_function(autograd_function, in_dims, batch_size, randomness
 
     def backward(ctx, *grad_outputs):
         grad_outputs_ = grad_outputs[:-1]
+        grad_outputs_in_dims = Generated._pt_out_dims  # type: ignore[attr-defined]
+
+        if not isinstance(grad_outputs_in_dims, tuple):
+            grad_outputs_in_dims = (grad_outputs_in_dims,)
+
+        grad_outputs_in_dims = tuple(
+            in_dim if grad_output is not None else None
+            for grad_output, in_dim in zip(grad_outputs_, grad_outputs_in_dims)
+        )
 
         def backward_no_context(inputs):
             saved_tensors, grad_outputs = inputs
@@ -465,7 +477,7 @@ def vmapify_autograd_function(autograd_function, in_dims, batch_size, randomness
 
         grad_ins, grad_ins_dims = restore_vmap(
             backward_no_context,
-            ((Generated._pt_nested_saved_tensors_bdims, Generated._pt_out_dims),),  # type: ignore[attr-defined]
+            ((Generated._pt_nested_saved_tensors_bdims, grad_outputs_in_dims),),  # type: ignore[attr-defined]
             batch_size,
             randomness,
         )((ctx.saved_tensors, grad_outputs_))
