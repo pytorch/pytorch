@@ -535,7 +535,27 @@ class FunctionalTensorMode(TorchDispatchMode):
                             torch.ops.aten.dropout.default,
                             torch.ops.aten._to_copy.default,
                         ):
-                            torch._freeze_functional_tensor(outs_unwrapped)  # type: ignore[attr-defined]
+
+                            def must_copy():
+                                """
+                                Return True if the output of the op must be copied, not an alias
+                                """
+                                # output dtype is different from input
+                                return (
+                                    func == torch.ops.aten._to_copy.default
+                                    and "dtype" in kwargs
+                                    and kwargs["dtype"] != args_unwrapped[0].dtype
+                                )
+
+                            if must_copy():
+                                # We can further relax to args_unwrapped[0] != kwargs["dtype"], but I don't think
+                                # we have an aten op for that.
+                                torch.ops.aten._assert_tensor_metadata.default(
+                                    torch._from_functional_tensor(args_unwrapped[0]),
+                                    dtype=args_unwrapped[0].dtype,
+                                )
+                            else:
+                                torch._freeze_functional_tensor(outs_unwrapped)  # type: ignore[attr-defined]
                     outs_wrapped = pytree.tree_map_only(
                         torch.Tensor, wrap, outs_unwrapped
                     )
