@@ -16,7 +16,7 @@ build-backend = "setuptools.build_meta:__legacy__"
 
 [tool.black]
 line-length = 88
-target-version = ["py38"]
+target-version = ["py39"]
 
 
 [tool.isort]
@@ -40,7 +40,7 @@ standard_library = ["typing_extensions"]
 
 
 [tool.ruff]
-target-version = "py38"
+target-version = "py39"
 line-length = 88
 src = ["caffe2", "torch", "torchgen", "functorch", "test"]
 
