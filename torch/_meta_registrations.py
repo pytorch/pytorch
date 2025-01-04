@@ -218,7 +218,8 @@ def logcumsumexp(self, dim):
     return torch.empty_like(self).contiguous()
 
 
-# Stride-related code from _exec_fft in aten/src/ATen/native/cuda/SpectralOps.cpp
+# Stride-related code from _exec_fft in aten/src/ATen/native/cuda/SpectralOps.cpp for cuda,
+# and aten/src/ATen/native/mkl/SpectralOps.cpp for cpu
 def _exec_fft(out, self, out_sizes, dim, forward):
     ndim = self.ndim
     signal_ndim = len(dim)
