@@ -2,6 +2,7 @@
 
 import pickle
 from io import BytesIO
+from pathlib import Path
 from sys import version_info
 from textwrap import dedent
 from unittest import skipIf
@@ -17,10 +18,8 @@ except ImportError:
     # Support the case where we run this file directly.
     from common import PackageTestCase
 
-from pathlib import Path
 
-
-packaging_directory = Path(__file__).parent
+packaging_directory = Path(__file__).absolute().parent
 
 
 class TestSaveLoad(PackageTestCase):
