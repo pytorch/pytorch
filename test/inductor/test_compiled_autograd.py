@@ -3611,13 +3611,14 @@ if not HAS_CUDA:
 
 test_autograd = load_test_module("test_autograd")
 test_custom_ops = load_test_module("test_custom_ops")
-test_dtensor = load_test_module("distributed/_tensor/test_dtensor_compile")
 
 TestAutogradWithCompiledAutograd = wrap_test_class(test_autograd.TestAutograd)
 TestCustomOpWithCompiledAutograd = wrap_test_class(test_custom_ops.TestCustomOp)
-TestDTensorCompileWithCompiledAutograd = wrap_test_class(
-    test_dtensor.TestDTensorCompile
-)
+if torch.distributed.is_available():
+    test_dtensor = load_test_module("distributed/_tensor/test_dtensor_compile")
+    TestDTensorCompileWithCompiledAutograd = wrap_test_class(
+        test_dtensor.TestDTensorCompile
+    )
 
 if __name__ == "__main__":
     if HAS_CPU:
