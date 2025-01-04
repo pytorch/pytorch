@@ -3359,6 +3359,18 @@ def module_error_inputs_torch_nn_Pad3d(module_info, device, dtype, requires_grad
         ),
     ]
 
+def module_error_inputs_torch_nn_HuberLoss(module_info, device, dtype, requires_grad, training, **kwargs):
+
+    return [
+        ErrorModuleInput(
+            ModuleInput(constructor_input=FunctionInput(delta=1.+0.j),
+            ),
+            error_on=ModuleErrorEnum.CONSTRUCTION_ERROR,
+            error_type=TypeError,
+            error_regex=r"delta should be of type float, got: complex",
+
+            ),
+    ]
 
 _macos15_or_newer = torch.backends.mps.is_available() and torch.backends.mps.is_macos_or_newer(15, 0)
 
@@ -3967,6 +3979,7 @@ module_db: list[ModuleInfo] = [
                ),
     ModuleInfo(torch.nn.HuberLoss,
                module_inputs_func=module_inputs_torch_nn_HuberLoss,
+               module_error_inputs_func=module_error_inputs_torch_nn_HuberLoss,
                skips=(
                    # No channels_last support for loss functions.
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),
