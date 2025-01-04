@@ -1636,7 +1636,7 @@ class InstructionTranslatorBase(
         if sys.version_info >= (3, 11):
             if not isinstance(exc_instance, variables.ExceptionVariable):
                 unimplemented(
-                    f"except expects to recieve an object of exception type but received {exc_instance}"
+                    f"except expects to receive an object of exception type but received {exc_instance}"
                 )
 
         if isinstance(expected_exc_types, TupleVariable):
