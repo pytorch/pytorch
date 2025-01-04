@@ -770,7 +770,9 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
         def extract_output_name(out):
             if out is None:
                 return None
-            elif isinstance(out, (ir.MultiOutput, ir._CollectiveKernel)):
+            elif isinstance(
+                out, (ir.MultiOutput, ir._CollectiveKernel, ir.FallbackKernel)
+            ):
                 return out.get_name()
             elif isinstance(out, (list, tuple)):
                 return type(out)(extract_output_name(o) for o in out)

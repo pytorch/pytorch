@@ -1513,8 +1513,9 @@ class GraphLowering(torch.fx.Interpreter):
                         # To avoid converting possible view ops to a copy kernel, we use the previous
                         # require_exact_strides to handle views. But ultimately it's better to require
                         # the right strides at the tensor definition.
-                        if n.meta["val"]._is_view() or isinstance(
-                            result.data, ir.BaseView
+                        if n.meta["val"]._is_view() or (
+                            isinstance(result, TensorBox)
+                            and isinstance(result.data, ir.BaseView)
                         ):
                             result = ir.ExternKernel.require_stride_order(
                                 result,
