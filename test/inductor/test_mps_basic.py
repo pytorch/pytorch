@@ -57,8 +57,8 @@ class MPSBasicTests(TestCase):
         self.common(
             lambda a, b: a + b,
             (
-                make_tensor(1024, dtype=dtype),
-                make_tensor(1024, dtype=dtype),
+                make_tensor(1024, dtype=dtype, device=self.device),
+                make_tensor(1024, dtype=dtype, device=self.device),
             ),
             check_lowp=False,
         )
