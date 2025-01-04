@@ -40,7 +40,7 @@ struct BlockParams {
   uint NB; // block size
   uint k; // block index
   uint activeNB; // block size for partial blocks
-  uint batch_idx; // current batch index
+  uint batch_size; // total number of batches
   uint batch_stride; // stride between matrices in batch
 };
 
@@ -51,7 +51,7 @@ struct TRSMParams {
   uint j;
   uint activeNB_k;
   uint activeNB_j;
-  uint batch_idx;
+  uint batch_size;
   uint batch_stride;
 };
 
@@ -64,7 +64,7 @@ struct UpdateParams {
   uint activeNB_k;
   uint activeNB_j;
   uint activeNB_h;
-  uint batch_idx;
+  uint batch_size;
   uint batch_stride;
 };
 
@@ -72,12 +72,16 @@ kernel void factorDiagonalBlock(
     device float* A [[buffer(0)]],
     constant BlockParams& sizes [[buffer(1)]],
     uint tid [[thread_position_in_threadgroup]],
+    uint bid [[threadgroup_position_in_grid]],
     uint tpg [[threads_per_threadgroup]]) {
+  if (bid >= sizes.batch_size)
+    return;
+
   const uint N = sizes.N;
   const uint NB = sizes.NB;
   const uint k = sizes.k;
   const uint actSize = sizes.activeNB;
-  const uint batch_offset = sizes.batch_idx * sizes.batch_stride;
+  const uint batch_offset = bid * sizes.batch_stride;
 
   uint row0 = k * NB;
   uint col0 = k * NB;
@@ -129,14 +133,18 @@ kernel void applyTRSM(
     device float* A [[buffer(0)]],
     constant TRSMParams& sizes [[buffer(1)]],
     uint tid [[thread_position_in_threadgroup]],
+    uint bid [[threadgroup_position_in_grid]],
     uint tpg [[threads_per_threadgroup]]) {
+  if (bid >= sizes.batch_size)
+    return;
+
   const uint N = sizes.N;
   const uint NB = sizes.NB;
   const uint k = sizes.k;
   const uint j = sizes.j;
   const uint actSize_k = sizes.activeNB_k;
   const uint actSize_j = sizes.activeNB_j;
-  const uint batch_offset = sizes.batch_idx * sizes.batch_stride;
+  const uint batch_offset = bid * sizes.batch_stride;
 
   if (j == k || actSize_k == 0 || actSize_j == 0) {
     return;
@@ -188,7 +196,11 @@ kernel void applySYRK(
     device float* A [[buffer(0)]],
     constant UpdateParams& sizes [[buffer(1)]],
     uint tid [[thread_position_in_threadgroup]],
+    uint bid [[threadgroup_position_in_grid]],
     uint tpg [[threads_per_threadgroup]]) {
+  if (bid >= sizes.batch_size)
+    return;
+
   const uint N = sizes.N;
   const uint NB = sizes.NB;
   const uint k = sizes.k;
@@ -197,7 +209,7 @@ kernel void applySYRK(
   const uint actSize_k = sizes.activeNB_k;
   const uint actSize_j = sizes.activeNB_j;
   const uint actSize_h = sizes.activeNB_h;
-  const uint batch_offset = sizes.batch_idx * sizes.batch_stride;
+  const uint batch_offset = bid * sizes.batch_stride;
 
   if (actSize_j == 0 || actSize_h == 0 || actSize_k == 0) {
     return;
