@@ -1,7 +1,8 @@
 # mypy: allow-untyped-defs
 from functools import update_wrapper
 from numbers import Number
-from typing import Any, Callable, Generic, overload, TypeVar
+from typing import Any, Callable, Generic, overload
+from typing_extensions import TypeVar
 
 import torch
 import torch.nn.functional as F
@@ -131,10 +132,11 @@ def probs_to_logits(probs, is_binary=False):
     return torch.log(ps_clamped)
 
 
-T = TypeVar("T", covariant=True)
+T = TypeVar("T", contravariant=True)
+R = TypeVar("R", covariant=True)
 
 
-class lazy_property(Generic[T]):
+class lazy_property(Generic[T, R]):
     r"""
     Used as a decorator for lazy loading of class attributes. This uses a
     non-data descriptor that calls the wrapped method to compute the property on
@@ -142,23 +144,23 @@ class lazy_property(Generic[T]):
     attribute.
     """
 
-    def __init__(self, wrapped: Callable[..., T]) -> None:
-        self.wrapped: Callable[..., T] = wrapped
+    def __init__(self, wrapped: Callable[[T], R]) -> None:
+        self.wrapped: Callable[[T], R] = wrapped
         update_wrapper(self, wrapped)  # type:ignore[arg-type]
 
     @overload
     def __get__(
         self, instance: None, obj_type: Any = None
-    ) -> "_lazy_property_and_property[T]":
+    ) -> "_lazy_property_and_property[T, R]":
         ...
 
     @overload
-    def __get__(self, instance: object, obj_type: Any = None) -> T:
+    def __get__(self, instance: T, obj_type: Any = None) -> R:
         ...
 
     def __get__(
-        self, instance: object, obj_type: Any = None
-    ) -> "T | _lazy_property_and_property[T]":
+        self, instance: T | None, obj_type: Any = None
+    ) -> "R | _lazy_property_and_property[T, R]":
         if instance is None:
             return _lazy_property_and_property(self.wrapped)
         with torch.enable_grad():
@@ -167,14 +169,14 @@ class lazy_property(Generic[T]):
         return value
 
 
-class _lazy_property_and_property(lazy_property[T], property):
+class _lazy_property_and_property(lazy_property[T, R], property):
     """We want lazy properties to look like multiple things.
 
     * property when Sphinx autodoc looks
     * lazy_property when Distribution validate_args looks
     """
 
-    def __init__(self, wrapped: Callable[..., T]) -> None:
+    def __init__(self, wrapped: Callable[[T], R]) -> None:
         property.__init__(self, wrapped)
 
 
