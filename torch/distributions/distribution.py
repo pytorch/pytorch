@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 import warnings
-from typing import Any, Optional
+from typing import Optional
 from typing_extensions import deprecated
 
 import torch
@@ -124,7 +124,7 @@ class Distribution:
         raise NotImplementedError
 
     @property
-    def support(self) -> Optional[Any]:
+    def support(self) -> Optional[constraints.Constraint]:
         """
         Returns a :class:`~torch.distributions.constraints.Constraint` object
         representing this distribution's support.
