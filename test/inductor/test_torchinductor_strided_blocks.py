@@ -591,6 +591,7 @@ class CommonTemplate:
             ((129, 129), 3, 2, torch.sum),  # Large size, with loops.
             ((3, 3), 1, 1, torch.argmax),
             ((129, 129), 1, 1, torch.argmax),
+            ((5, 5), 1, 1, torch.var_mean),  # Reduction + pointwise fusion.
         ],
     )
     def test_2d_reduction_odd_shapes(

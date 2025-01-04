@@ -48,7 +48,6 @@ class MPSBasicTests(TestCase):
     test_addmm = CommonTemplate.test_addmm
     test_signbit = CommonTemplate.test_signbit
     test_view_as_complex = CommonTemplate.test_view_as_complex
-    test_max_pool2d2 = CommonTemplate.test_max_pool2d2
     test_remainder = CommonTemplate.test_remainder
 
     @parametrize("dtype", MPS_DTYPES)
@@ -63,6 +62,9 @@ class MPSBasicTests(TestCase):
 
     def test_acos(self):
         self.common(lambda x: x.acos(), (torch.rand(1024),))
+
+    def test_atanh(self):
+        self.common(lambda x: x.atanh(), (torch.rand(1024),))
 
     def test_sliced_input(self):
         self.common(
