@@ -13,8 +13,11 @@ from torch.testing._internal.common_utils import (
     skipIfXpu,
     TEST_WITH_ASAN,
 )
-from torch.testing._internal.inductor_utils import GPU_TYPE
-from torch.testing._internal.triton_utils import requires_gpu
+from torch.testing._internal.inductor_utils import (
+    GPU_TYPE,
+    requires_gpu,
+    requires_gpu_triton,
+)
 
 
 class MinifierTests(MinifierTestBase):
@@ -44,12 +47,12 @@ inner(torch.randn(20, 20).to("{device}"))
     def test_after_aot_cpu_accuracy_error(self):
         self._test_after_aot("cpu", "AccuracyError")
 
-    @requires_gpu
+    @requires_gpu_triton
     @inductor_config.patch("triton.inject_relu_bug_TESTING_ONLY", "compile_error")
     def test_after_aot_gpu_compile_error(self):
         self._test_after_aot(GPU_TYPE, "SyntaxError")
 
-    @requires_gpu
+    @requires_gpu_triton
     @inductor_config.patch("triton.inject_relu_bug_TESTING_ONLY", "accuracy")
     def test_after_aot_gpu_accuracy_error(self):
         self._test_after_aot(GPU_TYPE, "AccuracyError")
@@ -285,7 +288,7 @@ def forward(self, linear):
     return pytree.tree_unflatten((relu,), self._out_spec)""",
         )
 
-    @requires_gpu
+    @requires_gpu_triton
     @skipIfXpu(msg="AOTI for XPU not enabled yet")
     @inductor_config.patch(
         {
@@ -306,7 +309,7 @@ def forward(self, linear):
     return pytree.tree_unflatten((relu,), self._out_spec)""",
         )
 
-    @requires_gpu
+    @requires_gpu_triton
     @skipIfXpu(msg="AOTI for XPU not enabled yet")
     @inductor_config.patch(
         {

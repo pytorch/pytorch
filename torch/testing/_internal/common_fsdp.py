@@ -71,7 +71,7 @@ from torch.testing._internal.common_utils import (
     TEST_CUDA,
     TEST_HPU,
 )
-from torch.utils._triton import has_triton
+from torch.testing._internal.inductor_utils import has_inductor_available
 
 
 DEVICE_COUNT = 4  # default
@@ -1502,9 +1502,10 @@ def test_compiled_fsdp(compile_compute_on_module: Optional[type] = None):
         def wrapper(*args, **kwargs):
             original_fully_shard = torch.distributed.fsdp.fully_shard
             for mode in FullyShardMode:
-                if mode != FullyShardMode.EAGER and not has_triton():
-                    warnings.warn("Inductor on GPU needs Triton and recent GPU arch")
+                if mode != FullyShardMode.EAGER and not has_inductor_available("cuda"):
+                    warnings.warn(f"{mode} requires Inductor, which is not available")
                     continue
+
                 # barrier to ensure thread reading the same value
                 original_skip_fsdp_hooks = torch._dynamo.config.skip_fsdp_hooks
                 original_compile_threads = torch._inductor.config.compile_threads

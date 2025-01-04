@@ -1,7 +1,7 @@
 # Owner(s): ["module: inductor"]
 from torch._inductor import config
 from torch._inductor.test_case import run_tests
-from torch.testing._internal.inductor_utils import HAS_CPU, TRITON_HAS_CPU
+from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CPU_TRITON
 
 
 try:
@@ -10,7 +10,7 @@ except ImportError:
     import test_torchinductor
 
 
-if HAS_CPU and TRITON_HAS_CPU:
+if HAS_CPU and HAS_CPU_TRITON:
 
     @config.patch(cpu_backend="triton")
     class SweepInputsCpuTritonTest(test_torchinductor.SweepInputsCpuTest):
@@ -30,5 +30,5 @@ if HAS_CPU and TRITON_HAS_CPU:
 
 
 if __name__ == "__main__":
-    if HAS_CPU and TRITON_HAS_CPU:
+    if HAS_CPU and HAS_CPU_TRITON:
         run_tests(needs="filelock")

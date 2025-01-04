@@ -46,14 +46,14 @@ if TYPE_CHECKING:
     from torch._dynamo.variables.functions import TritonKernelVariable
     from torch._subclasses.functional_tensor import BaseFunctionalizeAPI
     from torch.fx.proxy import Proxy
-    from torch.utils._triton import has_triton
+    from torch.utils._triton import has_triton_package
 
     TritonMetaParamsType = Dict[str, int]
     TritonGridTupleType = Tuple[Union[int, sympy.Expr, SymInt], ...]
     TritonGridCallableType = Callable[[TritonMetaParamsType], Tuple[int, ...]]
     TritonGridType = Union[TritonGridTupleType, TritonGridCallableType]
 
-    if has_triton():
+    if has_triton_package():
         from triton.runtime.autotuner import Autotuner
         from triton.runtime.jit import JITFunction
     else:

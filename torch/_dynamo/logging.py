@@ -33,7 +33,6 @@ _step_counter = itertools.count(1)
 
 # Update num_steps if more phases are added: Dynamo, AOT, Backend
 # This is very inductor centric
-# _inductor.utils.has_triton() gives a circular import error here
 
 if not disable_progress:
     try:

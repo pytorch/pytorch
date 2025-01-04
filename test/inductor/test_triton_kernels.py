@@ -4,6 +4,7 @@
 # Skip do not assign a lambda expression, use a def
 import functools
 import logging
+import unittest
 from unittest.mock import patch
 
 import torch
