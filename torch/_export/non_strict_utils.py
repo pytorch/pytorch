@@ -89,7 +89,7 @@ def fakify(
     sources: Dict[Tuple[int, int], List[Source]],
 ):
     source = key_path_to_source(kp)
-    if _is_constant_argument(t) or isinstance(t, torch.ScriptObject):
+    if _is_constant_argument(t) or isinstance(t, (torch.ScriptObject, torch.nn.Module)):
         return t
 
     if not isinstance(t, torch.Tensor):
@@ -444,6 +444,42 @@ def _gather_constant_attrs(m: torch.nn.Module) -> ConstantAttrMap:
 
     inner(m, [], constants)
     return constants
+
+
+@contextlib.contextmanager
+def _fakify_module_inputs(
+    args: Tuple[Any],
+    kwargs: Dict[Any, Any],
+    fake_mode: torch._subclasses.fake_tensor.FakeTensorMode,
+):
+    # This context manager is used to fakify module inputs.
+    # Inputs:
+    #   args, kwargs: the args and kwargs containing module inputs that haven't been fakified.
+    #   fake_mode: the fake mode to be used for fakifying script objects. It's the same mode that fakify input tensors.
+
+    ctxs = []
+    for arg in pytree.tree_leaves((args, kwargs)):
+        if isinstance(arg, torch.nn.Module):
+            from torch.export._trace import _fakify_params_buffers
+
+            fake_params_buffers = _fakify_params_buffers(fake_mode, arg)
+            ctxs.append(
+                torch.nn.utils.stateless._reparametrize_module(
+                    arg,
+                    fake_params_buffers,
+                    tie_weights=True,
+                    strict=True,
+                    stack_weights=True,
+                )
+            )
+            torch._export.utils.register_module_as_pytree_input_node(type(arg))
+    try:
+        with contextlib.ExitStack() as stack:
+            for ctx in ctxs:
+                stack.enter_context(ctx)
+            yield
+    finally:
+        pass
 
 
 @contextlib.contextmanager
