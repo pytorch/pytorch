@@ -174,11 +174,11 @@ class File {
     ::close(fd_);
   }
 
-  Lock lockShared() {
+  Lock lockShared() const {
     return Lock(fd_, LOCK_SH);
   }
 
-  Lock lockExclusive() {
+  Lock lockExclusive() const {
     return Lock(fd_, LOCK_EX);
   }
 

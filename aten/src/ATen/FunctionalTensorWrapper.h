@@ -157,7 +157,7 @@ struct TORCH_API FunctionalTensorWrapper : public c10::TensorImpl {
   //
   // Returns whether the current FunctionalTensorWrapper
   // experienced a set_() call.
-  bool was_storage_changed() {
+  bool was_storage_changed() const {
     return was_storage_changed_;
   }
 
@@ -195,7 +195,7 @@ struct TORCH_API FunctionalTensorWrapper : public c10::TensorImpl {
   // replace_() swaps out the wrapped tensor, value_, with tmp.
   void replace_(const Tensor& other, bool from_lazy_regenerate = false);
 
-  bool is_multi_output_view() {
+  bool is_multi_output_view() const {
     return is_multi_output_view_;
   }
 

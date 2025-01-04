@@ -116,7 +116,7 @@ void Node::addComputedShape(const std::function<Shape()>& shape_fn) {
 using ShapeCache = Cache<hash_t, Shape, HashReducer>;
 
 // Compute the shape using the provided shape_fn.
-Shape Node::computeShape(const std::function<Shape()>& shape_fn) {
+Shape Node::computeShape(const std::function<Shape()>& shape_fn) const {
   static ShapeCache* cache = new ShapeCache(FLAGS_torch_lazy_shape_cache_size);
 
   auto hash = shapeHash();

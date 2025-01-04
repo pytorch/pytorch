@@ -34,7 +34,7 @@ CacheEntry::~CacheEntry() {
 C10_DIAGNOSTIC_POP()
 C10_DIAGNOSTIC_POP()
 
-py::object CacheEntry::next() {
+py::object CacheEntry::next() const {
   NULL_CHECK(this->_owner);
   auto it = this->_owner_loc;
   ++it;

@@ -96,7 +96,7 @@ struct TORCH_API FunctionalStorageImpl : public c10::StorageImpl {
     const std::vector<ViewMeta> view_metas;
   };
 
-  explicit FunctionalStorageImpl(const Tensor& value);
+  explicit FunctionalStorageImpl(const Tensor& base);
 
   void add_update(
       const Tensor& updated_val,
@@ -152,7 +152,7 @@ struct TORCH_API FunctionalStorageImpl : public c10::StorageImpl {
     curr_storage_size_ = std::move(new_size);
   }
 
-  bool was_inductor_storage_resized() {
+  bool was_inductor_storage_resized() const {
     return inductor_storage_resized_;
   }
 

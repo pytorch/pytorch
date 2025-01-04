@@ -50,7 +50,7 @@ struct ComputeRequiresGrad : IterArgs<ComputeRequiresGrad> {
       (*this)(*tensor);
     }
   }
-  bool short_circuit() {
+  bool short_circuit() const {
     return out;
   }
 };

@@ -120,7 +120,7 @@ class TORCH_API Node {
   void addComputedShape(const std::function<Shape()>& shape_fn);
 
   // Compute the shape using the provided shape_fn if not previously cached
-  Shape computeShape(const std::function<Shape()>& shape_fn);
+  Shape computeShape(const std::function<Shape()>& shape_fn) const;
 
   virtual const std::vector<Output>& operands() const;
 
