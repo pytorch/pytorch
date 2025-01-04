@@ -123,7 +123,6 @@ from .utils import (
     builtin_dict_keys,
     common_constant_types,
     dict_keys,
-    dict_keys_repr,
     get_custom_getattr,
     get_torch_function_mode_stack,
     get_torch_function_mode_stack_at,
@@ -1731,29 +1730,6 @@ class GuardBuilder(GuardBuilderBase):
             self.get_guard_manager_from_source(source_b),
             get_verbose_code_parts(code, guard),
         )
-
-    def DICT_KEYS(self, guard):
-        # Guard on the keys and their order
-        ref = self.arg_ref(guard)
-        value = self.get(guard.name)
-
-        self.TYPE_MATCH(guard)
-        code = []
-        any_key_is_id = any(key_is_id(k) for k in builtin_dict_keys(value))
-        const_keys_repr = dict_keys_repr(
-            key_to_id(value),
-            local=is_from_local_source(guard.originating_source),
-        )
-        if any_key_is_id:
-            code.append(f"___key_to_id({ref}) == {const_keys_repr}")
-        else:
-            code.append(f"list({ref}.keys()) == {const_keys_repr}")
-
-        self._set_guard_export_info(guard, code)
-        if self.requires_key_order_guarding(guard.originating_source):
-            self.guard_on_dict_keys_and_order(value, guard)
-        else:
-            self.guard_on_dict_keys_and_ignore_order(value, guard)
 
     def WEAKREF_ALIVE(self, guard):
         code = [f"{self.arg_ref(guard)} is not None"]
