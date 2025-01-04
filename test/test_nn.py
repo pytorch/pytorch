@@ -7142,14 +7142,17 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
     @largeTensorTest("40GB", device="cuda")
     def test_layer_norm_large_tensor(self):
         # test for https://github.com/pytorch/pytorch/issues/136291
-        device = torch.device("cuda")
+        device=torch.device("cuda")
         b, n, dp = 16, 3000, 16
-        pairwise_repr = torch.randn(b, n, n, dp)
+        pairwise_repr = torch.ones(b, n, n, dp)
 
         attn_bias_norm = nn.LayerNorm(dp).to(device=device)
         pairwise_repr = pairwise_repr.to(dtype=torch.float32, device=device)
         norm = attn_bias_norm(pairwise_repr)
-        self.assertEqual(norm, torch.Size([16, 3000, 3000, 16]))
+        self.assertEqual(norm.shape, torch.Size([16, 3000, 3000, 16]))
+        # check last value to make sure it is correct. 
+        # check all values will take too long
+        self.assertEqual(norm[-1][-1][-1][-1], 0.0)
 
     def test_padding_list(self):
         # Padding can be a list, or tuple (regression test for gh-54452)
