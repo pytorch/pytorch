@@ -214,11 +214,7 @@ def preserve_global_state(fn: Callable[_P, _T]) -> Callable[_P, _T]:
             prior_inference_mode = torch.is_inference_mode_enabled()
             prior_deterministic = torch.are_deterministic_algorithms_enabled()
             prior_warn_only = torch.is_deterministic_algorithms_warn_only_enabled()
-            prior_mobile_allocator_state = (
-                torch._C._is_default_mobile_cpu_allocator_set()
-            )
             py_rng_state = random.getstate()
-            prior_dtype = torch.get_default_dtype()
             torch_rng_state = torch.random.get_rng_state()
             cuda_rng_state = None
             if torch.cuda.is_available():
@@ -247,12 +243,6 @@ def preserve_global_state(fn: Callable[_P, _T]) -> Callable[_P, _T]:
                 )
                 random.setstate(py_rng_state)
                 torch.random.set_rng_state(torch_rng_state)
-                torch.set_default_dtype(prior_dtype)
-                curr_mobile_allocator_state = (
-                    torch._C._is_default_mobile_cpu_allocator_set()
-                )
-                if prior_mobile_allocator_state != curr_mobile_allocator_state:
-                    torch._C._unset_default_mobile_cpu_allocator()
                 if cuda_rng_state is not None:
                     torch.cuda.set_rng_state(cuda_rng_state)
                 torch._C._set_cublas_allow_tf32(allow_tf32)
