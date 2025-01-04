@@ -3367,7 +3367,7 @@ def module_error_inputs_torch_nn_HuberLoss(module_info, device, dtype, requires_
             ),
             error_on=ModuleErrorEnum.CONSTRUCTION_ERROR,
             error_type=TypeError,
-            error_regex=r"delta should be of type float, got: complex",
+            error_regex=r"delta should be of type float, got: <class 'complex'>",
 
             ),
     ]
