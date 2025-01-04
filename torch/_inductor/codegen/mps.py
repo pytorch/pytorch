@@ -61,6 +61,14 @@ class MetalOverrides(OpOverrides):
         return f"static_cast<{DTYPE_TO_METAL[dtype]}>({x})"
 
     @staticmethod
+    def constant(val: CSEVariable, dtype: torch.dtype) -> str:
+        if val == torch.inf:
+            return "HUGE_VALF"
+        elif val == -torch.inf:
+            return "-HUGE_VALF"
+        return str(val)
+
+    @staticmethod
     def where(a: CSEVariable, b: CSEVariable, c: CSEVariable) -> str:
         return f"{a} ? {b} : {c}"
 
@@ -75,15 +83,27 @@ class MetalOverrides(OpOverrides):
 
     @staticmethod
     def logical_or(a: CSEVariable, b: CSEVariable) -> str:
-        return f"{a} | {b}"
+        return f"{a} || {b}"
 
     @staticmethod
     def logical_and(a: CSEVariable, b: CSEVariable) -> str:
-        return f"{a} & {b}"
+        return f"{a} && {b}"
+
+    @staticmethod
+    def isnan(x: CSEVariable) -> str:
+        return f"metal::isnan({x})"
+
+    @staticmethod
+    def isinf(x: CSEVariable) -> str:
+        return f"metal::isinf({x})"
 
     @staticmethod
     def abs(x: CSEVariable) -> str:
         return f"metal::abs({x})"
+
+    @staticmethod
+    def signbit(x: CSEVariable) -> str:
+        return f"metal::signbit({x})"
 
     @staticmethod
     def sin(x: CSEVariable) -> str:
@@ -113,6 +133,10 @@ class MetalOverrides(OpOverrides):
     def sqrt(x: CSEVariable) -> str:
         return f"metal::sqrt({x})"
 
+    @staticmethod
+    def atanh(x: CSEVariable) -> str:
+        return f"metal::atanh({x})"
+
 
 class MetalKernel(SIMDKernel):
     overrides = MetalOverrides  # type: ignore[assignment]
@@ -138,7 +162,7 @@ class MetalKernel(SIMDKernel):
         var = self.args.input(name)
         index = self.prepare_indexing(index)
         line = f"{var}[{index}]"
-        return self.cse.generate(self.body, line)
+        return self.cse.generate(self.body, line, dtype=V.graph.get_dtype(name))
 
     def store(
         self, name: str, index: sympy.Expr, value: CSEVariable, mode: StoreMode = None
@@ -158,6 +182,7 @@ class MetalKernel(SIMDKernel):
         """Called at the end to generate a final kernel string"""
         code = IndentedBuffer()
         code.writeline('torch.mps._compile_shader("""')
+        idx_var_names = [v.name for v in self.active_range_trees()]
         with code.indent():
             code.writeline("kernel void generated_kernel(")
             with code.indent():
@@ -169,9 +194,23 @@ class MetalKernel(SIMDKernel):
                 for outer, inner in self.args.input_buffers.items():
                     dtype_str = self.dtype_to_str(V.graph.get_dtype(outer))
                     code.writeline(f"constant {dtype_str}* {inner},")
-                code.writeline("uint xindex [[thread_position_in_grid]]")
+                if len(idx_var_names) == 1:
+                    code.writeline(
+                        f"uint {idx_var_names[0]} [[thread_position_in_grid]]"
+                    )
+                else:
+                    assert (
+                        len(idx_var_names) < 4
+                    ), "Up to 3 index variables are supported"
+                    code.writeline(
+                        f"uint{len(idx_var_names)} thread_pos [[thread_position_in_grid]]"
+                    )
+
             code.writeline(") {")
             with code.indent():
+                if len(idx_var_names) > 1:
+                    for idx, name in enumerate(idx_var_names):
+                        code.writeline(f"auto {name} = thread_pos.{chr(120+idx)};")
                 code.splice(self.body)
             code.writeline("}")
         code.writeline('""")')
@@ -183,6 +222,11 @@ class MetalKernel(SIMDKernel):
         wrapper = V.graph.wrapper_code
         args = [*self.args.output_buffers.keys(), *self.args.input_buffers.keys()]
         args = [arg for arg in args if arg not in self.removed_buffers]
+        if len(self.active_range_trees()) > 0:
+            args += [
+                f"threads=[{', '.join(str(v.numel) for v in self.active_range_trees())}]"
+            ]
+
         wrapper.generate_kernel_call(
             name,
             args,

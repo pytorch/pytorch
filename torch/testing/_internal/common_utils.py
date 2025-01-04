@@ -22,7 +22,6 @@ import logging
 import math
 import operator
 import os
-import pathlib
 import platform
 import random
 import re
@@ -989,9 +988,9 @@ UNITTEST_ARGS = [sys.argv[0]] + remaining
 torch.manual_seed(SEED)
 
 # CI Prefix path used only on CI environment
-CI_TEST_PREFIX = str(Path(os.getcwd()))
-CI_PT_ROOT = str(Path(os.getcwd()).parent)
-CI_FUNCTORCH_ROOT = str(os.path.join(Path(os.getcwd()).parent, "functorch"))
+CI_TEST_PREFIX = str(Path.cwd())
+CI_PT_ROOT = str(Path(CI_TEST_PREFIX).parent)
+CI_FUNCTORCH_ROOT = str(Path(CI_PT_ROOT) / "functorch")
 
 def wait_for_process(p, timeout=None):
     try:
@@ -4358,7 +4357,7 @@ class TestCase(expecttest.TestCase):
 
     def _attempt_load_from_subprocess(
         self,
-        file: pathlib.Path,
+        file: Path,
         import_string: str,
         expected_failure_message: Optional[str] = None
     ) -> None:
@@ -4367,7 +4366,7 @@ class TestCase(expecttest.TestCase):
         weights_only `torch.load` works as expected without global imports.
 
         Args:
-            file (pathlib.Path): The path to the checkpoint to load.
+            file (Path): The path to the checkpoint to load.
             import_string (str): import string to add to the script
             exected_failure_message (str, optional): The expected failure message if the
                 checkpoint fails to load. If None, the test will pass
@@ -5010,11 +5009,11 @@ def disable_gc():
 def find_library_location(lib_name: str) -> Path:
     # return the shared library file in the installed folder if exist,
     # else the file in the build folder
-    torch_root = Path(torch.__file__).resolve().parent
+    torch_root = Path(torch.__file__).absolute().parent
     path = torch_root / 'lib' / lib_name
     if os.path.exists(path):
         return path
-    torch_root = Path(__file__).resolve().parents[2]
+    torch_root = Path(__file__).absolute().parents[2]
     return torch_root / 'build' / 'lib' / lib_name
 
 def skip_but_pass_in_sandcastle(reason):

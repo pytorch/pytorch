@@ -11,7 +11,7 @@ from typing import Any, Callable, cast, Dict
 from urllib.request import urlopen
 
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
+REPO_ROOT = Path(__file__).absolute().parents[2]
 
 
 def get_disabled_issues() -> list[str]:
