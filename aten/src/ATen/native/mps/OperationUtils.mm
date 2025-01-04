@@ -23,6 +23,26 @@
 #include <mach-o/dyld.h>
 #include <mach-o/getsect.h>
 
+@implementation MPSGraph (PyTorchFixups)
+- (MPSGraphTensor*)minimumWithNaNPropagationAndIntFallbackWithPrimaryTensor:(MPSGraphTensor*)primaryTensor
+                                                            secondaryTensor:(MPSGraphTensor*)secondaryTensor
+                                                                       name:(NSString*)name {
+  if (([primaryTensor dataType] & MPSDataTypeFloatBit) == 0) {
+    return [self minimumWithPrimaryTensor:primaryTensor secondaryTensor:secondaryTensor name:name];
+  }
+  return [self minimumWithNaNPropagationWithPrimaryTensor:primaryTensor secondaryTensor:secondaryTensor name:name];
+}
+
+- (MPSGraphTensor*)maximumWithNaNPropagationAndIntFallbackWithPrimaryTensor:(MPSGraphTensor*)primaryTensor
+                                                            secondaryTensor:(MPSGraphTensor*)secondaryTensor
+                                                                       name:(NSString*)name {
+  if (([primaryTensor dataType] & MPSDataTypeFloatBit) == 0) {
+    return [self maximumWithPrimaryTensor:primaryTensor secondaryTensor:secondaryTensor name:name];
+  }
+  return [self maximumWithNaNPropagationWithPrimaryTensor:primaryTensor secondaryTensor:secondaryTensor name:name];
+}
+@end
+
 namespace at::native::mps {
 
 void dispatch_sync_with_rethrow(dispatch_queue_t queue, void (^block)()) {
