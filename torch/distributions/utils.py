@@ -1,10 +1,11 @@
 # mypy: allow-untyped-defs
 from functools import update_wrapper
 from numbers import Number
-from typing import Any, Dict
+from typing import Any, Callable, Generic, overload, TypeVar
 
 import torch
 import torch.nn.functional as F
+from torch import Tensor
 from torch.overrides import is_tensor_like
 
 
@@ -43,7 +44,7 @@ def broadcast_all(*values):
             "torch.Tensor or objects implementing __torch_function__."
         )
     if not all(is_tensor_like(v) for v in values):
-        options: Dict[str, Any] = dict(dtype=torch.get_default_dtype())
+        options: dict[str, Any] = dict(dtype=torch.get_default_dtype())
         for value in values:
             if isinstance(value, torch.Tensor):
                 options = dict(dtype=value.dtype, device=value.device)
@@ -130,7 +131,10 @@ def probs_to_logits(probs, is_binary=False):
     return torch.log(ps_clamped)
 
 
-class lazy_property:
+T = TypeVar("T", covariant=True)
+
+
+class lazy_property(Generic[T]):
     r"""
     Used as a decorator for lazy loading of class attributes. This uses a
     non-data descriptor that calls the wrapped method to compute the property on
@@ -138,11 +142,23 @@ class lazy_property:
     attribute.
     """
 
-    def __init__(self, wrapped):
-        self.wrapped = wrapped
+    def __init__(self, wrapped: Callable[..., T]) -> None:
+        self.wrapped: Callable[..., T] = wrapped
         update_wrapper(self, wrapped)  # type:ignore[arg-type]
 
-    def __get__(self, instance, obj_type=None):
+    @overload
+    def __get__(
+        self, instance: None, obj_type: Any = None
+    ) -> "_lazy_property_and_property[T]":
+        ...
+
+    @overload
+    def __get__(self, instance: object, obj_type: Any = None) -> T:
+        ...
+
+    def __get__(
+        self, instance: object, obj_type: Any = None
+    ) -> "T | _lazy_property_and_property[T]":
         if instance is None:
             return _lazy_property_and_property(self.wrapped)
         with torch.enable_grad():
@@ -151,18 +167,18 @@ class lazy_property:
         return value
 
 
-class _lazy_property_and_property(lazy_property, property):
+class _lazy_property_and_property(lazy_property[T], property):
     """We want lazy properties to look like multiple things.
 
     * property when Sphinx autodoc looks
     * lazy_property when Distribution validate_args looks
     """
 
-    def __init__(self, wrapped):
+    def __init__(self, wrapped: Callable[..., T]) -> None:
         property.__init__(self, wrapped)
 
 
-def tril_matrix_to_vec(mat: torch.Tensor, diag: int = 0) -> torch.Tensor:
+def tril_matrix_to_vec(mat: Tensor, diag: int = 0) -> Tensor:
     r"""
     Convert a `D x D` matrix or a batch of matrices into a (batched) vector
     which comprises of lower triangular elements from the matrix in row order.
@@ -176,7 +192,7 @@ def tril_matrix_to_vec(mat: torch.Tensor, diag: int = 0) -> torch.Tensor:
     return vec
 
 
-def vec_to_tril_matrix(vec: torch.Tensor, diag: int = 0) -> torch.Tensor:
+def vec_to_tril_matrix(vec: Tensor, diag: int = 0) -> Tensor:
     r"""
     Convert a vector or a batch of vectors into a batched `D x D`
     lower triangular matrix containing elements from the vector in row order.
