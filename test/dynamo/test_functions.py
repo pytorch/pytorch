@@ -2488,7 +2488,7 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         input2 = torch.arange(2, dtype=torch.bfloat16).requires_grad_(True)
         inputs = [input1, input2]
 
-        opt_fn = torch.compile(fullgraph=True)(fn)
+        opt_fn = torch.compile(backend="eager", fullgraph=True)(fn)
         self.assertEqual(opt_fn(inputs), fn(inputs))
 
     def test_filter_fallback(self):
@@ -2502,13 +2502,13 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         input2 = torch.arange(2, dtype=torch.bfloat16)
         inputs = [input1, input2]
 
-        opt_fn = torch.compile()(fn)
+        opt_fn = torch.compile(backend="eager")(fn)
         self.assertEqual(opt_fn(inputs), fn(inputs))
 
         torch._dynamo.reset()
 
         with self.assertRaises(torch._dynamo.exc.Unsupported):
-            opt_fn = torch.compile(fullgraph=True)(fn)
+            opt_fn = torch.compile(backend="eager", fullgraph=True)(fn)
             opt_fn(inputs)
 
     def test_filter_infinite_iterator(self):
@@ -3043,7 +3043,7 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(cnts.frame_count, 1)
 
     def test_complex_closure(self):
-        @torch.compile
+        @torch.compile(backend="eager")
         def forward(y):
             def a():
                 def x(z):
@@ -3059,7 +3059,7 @@ class GraphModule(torch.nn.Module):
         self.assertTrue(same(res, input1 + input2))
 
     def test_non_inlined_closure(self):
-        @torch.compile()
+        @torch.compile(backend="eager")
         def program(x, y):
             one = lambda x, y: x + y
 
@@ -3092,7 +3092,7 @@ class GraphModule(torch.nn.Module):
         def func(a, b, info_or_dt):
             return a + info_func(info_or_dt).max
 
-        opt_fn = torch.compile(func)
+        opt_fn = torch.compile(func, backend="eager")
 
         a = torch.randn(2)
         b = torch.randn(2)
@@ -3172,7 +3172,7 @@ class GraphModule(torch.nn.Module):
                 def fn(x):
                     return op(-10, x)
 
-                opt_fn = torch.compile(fullgraph=True)(fn)
+                opt_fn = torch.compile(backend="eager", fullgraph=True)(fn)
 
                 x = torch.randn(10)
                 self.assertEqual(opt_fn(x), fn(x))
@@ -3181,7 +3181,7 @@ class GraphModule(torch.nn.Module):
         def fn(x, y):
             return operator.pos(x) * +y
 
-        opt_fn = torch.compile(fullgraph=True, dynamic=True)(fn)
+        opt_fn = torch.compile(backend="eager", fullgraph=True, dynamic=True)(fn)
 
         def test(x, y):
             self.assertEqual(opt_fn(x, y), fn(x, y))
@@ -3203,7 +3203,7 @@ class GraphModule(torch.nn.Module):
 
         for dynamic in [True, False]:
             torch._dynamo.reset()
-            opt_fn = torch.compile(fn, dynamic=dynamic)
+            opt_fn = torch.compile(fn, backend="eager", dynamic=dynamic)
             t = torch.ones(1)
             test(10, t)
             test(-100, t)
@@ -3215,7 +3215,7 @@ class GraphModule(torch.nn.Module):
         def fn(x, y):
             return operator.truth(x) and bool(y)
 
-        opt_fn = torch.compile(fullgraph=True, dynamic=False)(fn)
+        opt_fn = torch.compile(backend="eager", fullgraph=True, dynamic=False)(fn)
 
         def test(x, y):
             self.assertEqual(opt_fn(x, y), fn(x, y))
@@ -3236,7 +3236,7 @@ class GraphModule(torch.nn.Module):
                     a = range(-10, 10)
                     return list(map(op, a))
 
-                opt_fn = torch.compile(fn, fullgraph=True)
+                opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
                 self.assertEqual(opt_fn(), fn())
 
     def test_unary_fold_op_seq(self):
@@ -3247,7 +3247,7 @@ class GraphModule(torch.nn.Module):
                     a = [tuple(range(-10, i)) for i in range(10)]
                     return tuple(map(op, a))
 
-                opt_fn = torch.compile(fn, fullgraph=True)
+                opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
                 self.assertEqual(opt_fn(), fn())
 
     def test_attrgetter(self):
@@ -3263,7 +3263,7 @@ class GraphModule(torch.nn.Module):
                     getter = operator.attrgetter(*attrs)
                     return getter(x), getter(y)
 
-                opt_fn = torch.compile(fullgraph=True)(fn)
+                opt_fn = torch.compile(backend="eager", fullgraph=True)(fn)
 
                 x = torch.randn(3, 4)
                 y = torch.randn(3, 4)
@@ -3282,7 +3282,7 @@ class GraphModule(torch.nn.Module):
                     getter = operator.itemgetter(*items)
                     return getter(x), getter(y)
 
-                opt_fn = torch.compile(fullgraph=True)(fn)
+                opt_fn = torch.compile(backend="eager", fullgraph=True)(fn)
 
                 x = torch.randn(3, 4)
                 y = torch.randn(3, 4)
@@ -3301,7 +3301,7 @@ class GraphModule(torch.nn.Module):
                     caller = operator.methodcaller(name, *args, **kwargs)
                     return caller(x), caller(y)
 
-                opt_fn = torch.compile(fullgraph=True)(fn)
+                opt_fn = torch.compile(backend="eager", fullgraph=True)(fn)
 
                 x = torch.randn(3, 4)
                 y = torch.randn(3, 4)
@@ -3444,7 +3444,7 @@ class GraphModule(torch.nn.Module):
                 acc *= acc * k
             return x * acc
 
-        opt_fn = torch.compile(fullgraph=True)(fn)
+        opt_fn = torch.compile(backend="eager", fullgraph=True)(fn)
         x = torch.ones(1)
         self.assertEqual(opt_fn(x), fn(x))
 
@@ -3454,7 +3454,7 @@ class GraphModule(torch.nn.Module):
             acc *= acc * range(10, 20, 2)[2]
             return x * acc
 
-        opt_fn = torch.compile(fullgraph=True)(fn)
+        opt_fn = torch.compile(backend="eager", fullgraph=True)(fn)
         x = torch.ones(1)
         self.assertEqual(opt_fn(x), fn(x))
 
@@ -4355,7 +4355,7 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
             return x, str(a)
 
         eager_custom_str = foo_custom_str(torch.ones(4))
-        dynamo_custom_str = torch.compile(foo_custom_str, fullgraph=True)(torch.ones(4))
+        dynamo_custom_str = torch.compile(foo_custom_str, backend="eager", fullgraph=True)(torch.ones(4))
 
         self.assertEqual(eager_custom_str[1], dynamo_custom_str[1])
         self.assertEqual(eager_custom_str[1], "ok")
@@ -4368,7 +4368,7 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
             return x, str(a)
 
         eager_default_str = foo_default_str(torch.ones(4))
-        dynamo_default_str = torch.compile(foo_default_str, fullgraph=True)(
+        dynamo_default_str = torch.compile(foo_default_str, backend="eager", fullgraph=True)(
             torch.ones(4)
         )
 
@@ -4410,7 +4410,7 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
 
         a = torch.randn(4, 2, 5)
         b = torch.randn(4, 2, 5, 5)
-        compiled_fn = torch.compile(fn, fullgraph=True)
+        compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
         compiled_res = compiled_fn(a, b, torch.tensor([2]))
         reference_res = fn(a, b, torch.tensor([2]))
         self.assertTrue(same(compiled_res, reference_res))

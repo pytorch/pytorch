@@ -97,6 +97,43 @@ def is_forbidden_context_manager(ctx):
     return ctx in f_ctxs
 
 
+def is_c_defined_property(subobj):
+    if not isinstance(subobj, property):
+        return False
+
+    # pybind def_readwrite is implemented via PyCFunction. At the python level, it is visible as a property whose
+    # fget is an instancemethod wrapper - https://docs.python.org/3/c-api/method.html#c.PyInstanceMethod_Check
+
+    # If we have a PyCFunction, we make an assumption that there is no side effect.
+    return isinstance(
+        subobj.fget, types.BuiltinFunctionType
+    ) or torch._C._dynamo.utils.is_instancemethod(subobj.fget)
+
+
+def getattr_static_helper(value, name):
+    subobj = inspect.getattr_static(value, name, NO_SUCH_SUBOBJ)
+    import _collections
+
+    # In some cases, we have to do dynamic lookup because getattr_static is not enough. For example, threading.local
+    # has side-effect free __getattribute__ and the attribute is not visible without a dynamic lookup.
+    if (
+        subobj is NO_SUCH_SUBOBJ  # e.g., threading.local
+        or isinstance(
+            subobj, _collections._tuplegetter
+        )  # namedtuple fields are represented by _tuplegetter
+        or (
+            inspect.ismemberdescriptor(subobj) and name in value.__slots__
+        )  # handle memberdecriptor and slots
+        or is_c_defined_property(subobj)
+        or inspect.isgetsetdescriptor(subobj)  # handle getsetdescriptor like __dict__
+    ):
+        # Call __getattribute__, we have already checked that this is not overridden and side-effect free. We don't
+        # want to call getattr because it can be user-overridden.
+        subobj = value.__getattribute__(name)
+
+    return subobj
+
+
 class UserDefinedVariable(VariableTracker):
     pass
 
@@ -178,7 +215,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
             return super().var_getattr(tx, name)
 
         try:
-            obj = inspect.getattr_static(self.value, name)
+            obj = getattr_static_helper(self.value, name)
         except AttributeError:
             obj = None
 
@@ -215,6 +252,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
 
         if (
             source
+            and obj is NO_SUCH_SUBOBJ
             and not inspect.ismethoddescriptor(obj)
             and not is_wrapper_or_member_descriptor(obj)
         ):
@@ -939,43 +977,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
     def _check_for_getattr(self):
         return get_custom_getattr(self.value)
 
-    def _is_c_defined_property(self, subobj):
-        if not isinstance(subobj, property):
-            return False
-
-        # pybind def_readwrite is implemented via PyCFunction. At the python level, it is visible as a property whose
-        # fget is an instancemethod wrapper - https://docs.python.org/3/c-api/method.html#c.PyInstanceMethod_Check
-
-        # If we have a PyCFunction, we make an assumption that there is no side effect.
-        return isinstance(
-            subobj.fget, types.BuiltinFunctionType
-        ) or torch._C._dynamo.utils.is_instancemethod(subobj.fget)
-
-    def _getattr_static(self, name):
-        subobj = inspect.getattr_static(self.value, name, NO_SUCH_SUBOBJ)
-        import _collections
-
-        # In some cases, we have to do dynamic lookup because getattr_static is not enough. For example, threading.local
-        # has side-effect free __getattribute__ and the attribute is not visible without a dynamic lookup.
-        if (
-            subobj is NO_SUCH_SUBOBJ  # e.g., threading.local
-            or isinstance(
-                subobj, _collections._tuplegetter
-            )  # namedtuple fields are represented by _tuplegetter
-            or (
-                inspect.ismemberdescriptor(subobj) and name in self.value.__slots__
-            )  # handle memberdecriptor and slots
-            or self._is_c_defined_property(subobj)
-            or inspect.isgetsetdescriptor(
-                subobj
-            )  # handle getsetdescriptor like __dict__
-        ):
-            # Call __getattribute__, we have already checked that this is not overridden and side-effect free. We don't
-            # want to call getattr because it can be user-overridden.
-            subobj = self.value.__getattribute__(name)
-
-        return subobj
-
     def has_key_in_generic_dict(self, tx: "InstructionTranslator", key):
         if tx.output.side_effects.has_pending_mutation_of_attr(self, key):
             mutated_attr = tx.output.side_effects.load_attr(self, key, deleted_ok=True)
@@ -1038,7 +1039,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             return UserDefinedClassVariable(type(self.value), **options)
 
         try:
-            subobj = self._getattr_static(name)
+            subobj = getattr_static_helper(self.value, name)
         except AttributeError:
             subobj = NO_SUCH_SUBOBJ
             getattr_fn = self._check_for_getattr()
@@ -1134,7 +1135,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             isinstance(subobj, types.MethodType)
             and isinstance(self.value, torch.nn.Module)
         ):
-            # Since we get subobj via self._getattr_static, which may not trigger dynamic lookup.
+            # Since we get subobj via getattr_static_helper, which may not trigger dynamic lookup.
             # Static lookup can't tell us it's a method or function correctly,
             # so we trigger dynamic lookup here to get the correct type.
             dynamic_subobj = getattr(self.value, name)
