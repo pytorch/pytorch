@@ -156,7 +156,7 @@ void addcdiv_cuda_scalar_tensor2_kernel(
 constexpr char addcdiv_name[] = "addcdiv";
 #endif
 void addcdiv_cuda_kernel(TensorIteratorBase& iter, const Scalar& value) {
-  TORCH_CHECK(
+  TORCH_CHECK_VALUE(
     !iter.is_cpu_scalar(1),
     "CPU Scalar support for self argument is not supported when "
     "calling addcdiv on CUDA tensors."
