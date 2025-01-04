@@ -4410,9 +4410,10 @@ else:
         c = torch.rand((2, 2), device=device)
         scalar = torch.rand([], device="cpu")
 
-        with self.assertRaisesRegex(RuntimeError, r'CPU Scalar support for tensor1 argument'):
+
+        with self.assertRaisesRegex(ValueError, r'CPU Scalar support for tensor1 argument'):
             torch.addcdiv(a, scalar, c, value=alpha)
-        with self.assertRaisesRegex(RuntimeError, r'CPU Scalar support for self argument'):
+        with self.assertRaisesRegex(ValueError, r'CPU Scalar support for self argument'):
             torch.addcdiv(scalar, b, c, value=alpha)
 
     def test_nullary_op_mem_overlap(self, device):
