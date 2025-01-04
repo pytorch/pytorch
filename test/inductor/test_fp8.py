@@ -87,6 +87,20 @@ def _quantize_rowwise(x: Tensor, float8_dtype: torch.dtype):
     return x_fp8, inverse_scale
 
 
+def _fix_fp8_dtype_for_hip(dtype, device):
+    if torch.version.hip and device != "cpu":
+        # HIP uses different float8 dtypes on GPU
+        if isinstance(dtype, tuple):
+            return tuple(_fix_fp8_dtype_for_hip(x, device) for x in dtype)
+        if isinstance(dtype, list):
+            return [_fix_fp8_dtype_for_hip(x, device) for x in dtype]
+        if dtype == torch.float8_e4m3fn:
+            return torch.float8_e4m3fnuz
+        elif dtype == torch.float8_e5m2:
+            return torch.float8_e5m2fnuz
+    return dtype
+
+
 @instantiate_parametrized_tests
 class TestFP8Types(TestCase):
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
@@ -116,9 +130,8 @@ class TestFP8Types(TestCase):
     def test_eager_fallback(self, dtype: torch.dtype):
         weight_shape = (32, 16)
 
-        e4m3_type = (
-            torch.float8_e4m3fn if torch.version.hip is None else torch.float8_e4m3fnuz
-        )
+        e4m3_type = torch.float8_e4m3fn
+        e4m3_type = _fix_fp8_dtype_for_hip(e4m3_type, device="cuda")
 
         def fp8_matmul_unwrapped(x):
             a_scale = torch.Tensor([1.0]).to(device="cuda")
@@ -156,13 +169,9 @@ class TestFP8Types(TestCase):
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     @parametrize("dtype", (torch.float16, torch.bfloat16, torch.float))
     @parametrize("shape", ("15,3,13", "4,2048,4096"))
-    @parametrize(
-        "dst_types",
-        [(torch.float8_e4m3fn, torch.float8_e5m2)]
-        if torch.version.hip is None
-        else [(torch.float8_e4m3fnuz, torch.float8_e5m2fnuz)],
-    )
+    @parametrize("dst_types", [(torch.float8_e4m3fn, torch.float8_e5m2)])
     def test_valid_cast(self, dtype: torch.dtype, shape: str, dst_types: tuple):
+        dst_types = _fix_fp8_dtype_for_hip(dst_types, device="cuda")
         e4m3, e5m2 = dst_types
 
         def fp8_cast(x):
@@ -204,16 +213,13 @@ class TestFP8Types(TestCase):
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     @parametrize("src_dtype", (torch.float16, torch.bfloat16, torch.float))
-    @parametrize(
-        "dst_dtype",
-        (torch.float8_e4m3fn, torch.float8_e5m2)
-        if torch.version.hip is None
-        else (torch.float8_e4m3fnuz, torch.float8_e5m2fnuz),
-    )
+    @parametrize("dst_dtype", (torch.float8_e4m3fn, torch.float8_e5m2))
     @parametrize("shape", ("16,16,16", "4,2048,4096"))
     def test_to_fp8_saturated(
         self, src_dtype: torch.dtype, dst_dtype: torch.dtype, shape: str
     ):
+        dst_dtype = _fix_fp8_dtype_for_hip(dst_dtype, device="cuda")
+
         def fp8_saturated(x, dtype):
             return _to_fp8_saturated(x, dtype)
 
@@ -229,14 +235,10 @@ class TestFP8Types(TestCase):
 
     @unittest.skipIf(TEST_WITH_ROCM, "ROCm fails with accuracy issue")
     @unittest.skipIf(not SM90OrLater, "FP8 is only supported on H100+")
-    @parametrize(
-        "float8_dtype",
-        (torch.float8_e4m3fn, torch.float8_e5m2)
-        if torch.version.hip is None
-        else (torch.float8_e4m3fnuz, torch.float8_e5m2fnuz),
-    )
+    @parametrize("float8_dtype", (torch.float8_e4m3fn, torch.float8_e5m2))
     @parametrize("shape", ("1,1,15", "1,10,15", "1,10,512", "1,10,4096", "4,2048,4096"))
     def test_amax_fp8_quant(self, float8_dtype: torch.dtype, shape: str):
+        float8_dtype = _fix_fp8_dtype_for_hip(float8_dtype, device="cuda")
         shape = [int(dim) for dim in shape.split(",")]
         batch_size, sequence_length, hidden_size = shape
 
@@ -258,14 +260,10 @@ class TestFP8Types(TestCase):
         torch.testing.assert_close(y_compiled.half(), y.half(), rtol=1e-2, atol=1e-2)
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
-    @parametrize(
-        "float8_dtype",
-        (torch.float8_e4m3fn, torch.float8_e5m2)
-        if torch.version.hip is None
-        else (torch.float8_e4m3fnuz, torch.float8_e5m2fnuz),
-    )
+    @parametrize("float8_dtype", (torch.float8_e4m3fn, torch.float8_e5m2))
     @parametrize("shape", ("1,1,15", "1,10,15", "1,10,512", "1,10,4096", "4,2048,4096"))
     def test_amax_along_with_fp8_quant(self, float8_dtype: torch.dtype, shape: str):
+        float8_dtype = _fix_fp8_dtype_for_hip(float8_dtype, device="cuda")
         shape = [int(dim) for dim in shape.split(",")]
         batch_size, sequence_length, hidden_size = shape
 
@@ -293,17 +291,13 @@ class TestFP8Types(TestCase):
 
     @unittest.skipIf(TEST_WITH_ROCM, "ROCm fails with accuracy issue")
     @unittest.skipIf(not SM90OrLater, "FP8 is only supported on H100+")
-    @parametrize(
-        "float8_dtype",
-        (torch.float8_e4m3fn, torch.float8_e5m2)
-        if torch.version.hip is None
-        else (torch.float8_e4m3fnuz, torch.float8_e5m2fnuz),
-    )
+    @parametrize("float8_dtype", (torch.float8_e4m3fn, torch.float8_e5m2))
     @parametrize("amax_keep_dim", (True, False))
     @parametrize("shape", ("1,1,15", "1,10,15", "1,10,512", "1,10,4096", "4,2048,4096"))
     def test_layernorm_fp8_quant(
         self, float8_dtype: torch.dtype, amax_keep_dim: bool, shape: str
     ):
+        float8_dtype = _fix_fp8_dtype_for_hip(float8_dtype, device="cuda")
         shape = [int(dim) for dim in shape.split(",")]
         batch_size, sequence_length, hidden_size = shape
 
@@ -339,12 +333,7 @@ class TestFP8Types(TestCase):
         )
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
-    @parametrize(
-        "float8_dtype",
-        (torch.float8_e4m3fn, torch.float8_e5m2)
-        if torch.version.hip is None
-        else (torch.float8_e4m3fnuz, torch.float8_e5m2fnuz),
-    )
+    @parametrize("float8_dtype", (torch.float8_e4m3fn, torch.float8_e5m2))
     @parametrize("shape", ("4,2048,4096",))
     @parametrize("keepdim", (False, True))
     def test_layernorm_fp8_quant_benchmark(
@@ -353,6 +342,7 @@ class TestFP8Types(TestCase):
         shape: str,
         keepdim: bool,
     ):
+        float8_dtype = _fix_fp8_dtype_for_hip(float8_dtype, device="cuda")
         shape = [int(dim) for dim in shape.split(",")]
         batch_size, sequence_length, hidden_size = shape
 

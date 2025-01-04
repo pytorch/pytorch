@@ -36,6 +36,7 @@ from torch.testing._internal.common_utils import (
     skipIfRocm,
     slowTest,
     TEST_MKL,
+    TEST_WITH_ROCM,
     xfailIfS390X,
 )
 from torch.utils._python_dispatch import TorchDispatchMode
@@ -583,6 +584,8 @@ class CPUReproTests(TestCase):
         batch_size,
         seq_len,
     ):
+        if TEST_WITH_ROCM and not unbatched:
+            self.skipTest("Flaky on ROCm with unbatched=False")
         self._test_lstm_packed(
             unbatched,
             input_size,
