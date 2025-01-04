@@ -772,10 +772,12 @@ static Tensor& linalg_cholesky_mps_impl(const Tensor& input, bool upper, Tensor&
 
   int64_t ndim = out.dim();
   int64_t N = out.size(-1);
-  int64_t B = 1; // default
+  int64_t B = 1;
   for (int64_t i = 0; i < ndim - 2; i++) {
     B *= out.size(i);
   }
+
+  uint32_t batch_stride = N * N;
 
   auto stream = getCurrentMPSStream();
   auto device = MPSDevice::getInstance()->device();
@@ -785,47 +787,50 @@ static Tensor& linalg_cholesky_mps_impl(const Tensor& input, bool upper, Tensor&
   auto applySYRKPSO = lib.getPipelineStateForFunc("applySYRK");
 
   int64_t NB = std::min<int64_t>(32, N);
-
   int64_t numBlocks = (N + NB - 1) / NB;
 
   for (int64_t b = 0; b < B; b++) {
-    // for each block column
     for (int64_t k = 0; k < numBlocks; k++) {
-      // factor diagonal block
       uint32_t activeNB_k = (uint32_t)std::min(N - k * NB, (int64_t)NB);
       dispatch_sync_with_rethrow(stream->queue(), ^() {
         @autoreleasepool {
           auto computeEncoder = stream->commandEncoder();
           [computeEncoder setComputePipelineState:factorDiagonalPSO];
-          std::array<uint32_t, 4> sizes = {static_cast<uint32_t>(N),
-                                           static_cast<uint32_t>(NB),
-                                           static_cast<uint32_t>(k),
-                                           static_cast<uint32_t>(activeNB_k)};
+          std::array<uint32_t, 6> sizes = {
+              static_cast<uint32_t>(N),
+              static_cast<uint32_t>(NB),
+              static_cast<uint32_t>(k),
+              static_cast<uint32_t>(activeNB_k),
+              static_cast<uint32_t>(b),
+              static_cast<uint32_t>(batch_stride)
+          };
           mtl_setArgs(computeEncoder, out, sizes);
           mtl_dispatch1DJob(computeEncoder, factorDiagonalPSO, activeNB_k * activeNB_k);
         }
       });
 
-      // TRSM updates
       for (int64_t j = k + 1; j < numBlocks; j++) {
         uint32_t activeNB_j = (uint32_t)std::min(N - j * NB, (int64_t)NB);
         dispatch_sync_with_rethrow(stream->queue(), ^() {
           @autoreleasepool {
             auto computeEncoder = stream->commandEncoder();
             [computeEncoder setComputePipelineState:applyTRSMPSO];
-            std::array<uint32_t, 6> sizes = {static_cast<uint32_t>(N),
-                                             static_cast<uint32_t>(NB),
-                                             static_cast<uint32_t>(k),
-                                             static_cast<uint32_t>(j),
-                                             static_cast<uint32_t>(activeNB_k),
-                                             static_cast<uint32_t>(activeNB_j)};
+            std::array<uint32_t, 8> sizes = {
+                static_cast<uint32_t>(N),
+                static_cast<uint32_t>(NB),
+                static_cast<uint32_t>(k),
+                static_cast<uint32_t>(j),
+                static_cast<uint32_t>(activeNB_k),
+                static_cast<uint32_t>(activeNB_j),
+                static_cast<uint32_t>(b),
+                static_cast<uint32_t>(batch_stride)
+            };
             mtl_setArgs(computeEncoder, out, sizes);
             mtl_dispatch1DJob(computeEncoder, applyTRSMPSO, activeNB_j * activeNB_k);
           }
         });
       }
 
-      // SYRK updates
       for (int64_t j = k + 1; j < numBlocks; j++) {
         uint32_t activeNB_j = (uint32_t)std::min(N - j * NB, (int64_t)NB);
         for (int64_t h = j; h < numBlocks; h++) {
@@ -834,14 +839,18 @@ static Tensor& linalg_cholesky_mps_impl(const Tensor& input, bool upper, Tensor&
             @autoreleasepool {
               auto computeEncoder = stream->commandEncoder();
               [computeEncoder setComputePipelineState:applySYRKPSO];
-              std::array<uint32_t, 8> sizes = {static_cast<uint32_t>(N),
-                                               static_cast<uint32_t>(NB),
-                                               static_cast<uint32_t>(k),
-                                               static_cast<uint32_t>(j),
-                                               static_cast<uint32_t>(h),
-                                               static_cast<uint32_t>(activeNB_k),
-                                               static_cast<uint32_t>(activeNB_j),
-                                               static_cast<uint32_t>(activeNB_h)};
+              std::array<uint32_t, 10> sizes = {
+                  static_cast<uint32_t>(N),
+                  static_cast<uint32_t>(NB),
+                  static_cast<uint32_t>(k),
+                  static_cast<uint32_t>(j),
+                  static_cast<uint32_t>(h),
+                  static_cast<uint32_t>(activeNB_k),
+                  static_cast<uint32_t>(activeNB_j),
+                  static_cast<uint32_t>(activeNB_h),
+                  static_cast<uint32_t>(b),
+                  static_cast<uint32_t>(batch_stride)
+              };
               mtl_setArgs(computeEncoder, out, sizes);
               mtl_dispatch1DJob(computeEncoder, applySYRKPSO, activeNB_j * activeNB_h);
             }
