@@ -174,12 +174,14 @@ static void initGlobalStreamState() {
   num_gpus = device_count();
   // Check if the number of GPUs matches the expected compile-time max number
   // of GPUs.
+#ifdef FBCODE_CAFFE2
   TORCH_CHECK(
       num_gpus <= C10_COMPILE_TIME_MAX_GPUS,
       "Number of CUDA devices on the machine is larger than the compiled "
       "max number of gpus expected (",
       C10_COMPILE_TIME_MAX_GPUS,
       "). Increase that and recompile.");
+#endif
   int leastPriority = -1, greatestPriority = -1;
   C10_CUDA_CHECK(
       cudaDeviceGetStreamPriorityRange(&leastPriority, &greatestPriority));
