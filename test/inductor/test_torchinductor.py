@@ -12163,6 +12163,25 @@ class CommonTemplate:
         run(9)
         self.assertEqual(cnts.frame_count, 4)
 
+    @dynamo_config.patch(error_on_recompile=True)
+    def test_no_specization_over_symbolic_value(self):
+        def fn(x):
+            s0 = x.shape[0]
+            y = torch.full((1,), s0)
+            return x + y
+
+        arg1 = torch.ones(10)
+        arg2 = torch.ones(11)
+        ref1 = fn(arg1)
+        ref2 = fn(arg2)
+
+        opt_fn = torch.compile(fn, fullgraph=True, dynamic=True, backend="inductor")
+        res1 = opt_fn(arg1)
+        res2 = opt_fn(arg2)
+
+        self.assertEqual(res1, ref1)
+        self.assertEqual(res2, ref2)
+
 
 @dataclasses.dataclass
 class TestFailure:
