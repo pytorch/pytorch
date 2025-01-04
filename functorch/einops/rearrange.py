@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import functools
-from typing import Callable, Dict, List, Sequence, Tuple, Union
+from typing import Callable, Dict, List, Tuple, TYPE_CHECKING, Union
 
 import torch
 from functorch._C import dim as _C
@@ -13,6 +13,10 @@ from ._parsing import (
     parse_pattern,
     validate_rearrange_expressions,
 )
+
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 
 __all__ = ["rearrange"]

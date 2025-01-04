@@ -1,6 +1,7 @@
 import dis
 import inspect
-from typing import Sequence, Union
+from collections.abc import Sequence
+from typing import Union
 
 import functorch._C
 import torch
