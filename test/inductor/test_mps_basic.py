@@ -48,6 +48,7 @@ class MPSBasicTests(TestCase):
     test_addmm = CommonTemplate.test_addmm
     test_signbit = CommonTemplate.test_signbit
     test_view_as_complex = CommonTemplate.test_view_as_complex
+    test_remainder = CommonTemplate.test_remainder
 
     @parametrize("dtype", MPS_DTYPES)
     def test_add(self, dtype):
