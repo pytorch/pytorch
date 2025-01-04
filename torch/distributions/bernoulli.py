@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 from numbers import Number
+from typing import Optional
 
 import torch
 from torch import nan, Tensor
@@ -41,7 +42,12 @@ class Bernoulli(ExponentialFamily):
     has_enumerate_support = True
     _mean_carrier_measure = 0
 
-    def __init__(self, probs=None, logits=None, validate_args=None):
+    def __init__(
+        self,
+        probs: Optional[Tensor | Number] = None,
+        logits: Optional[Tensor | Number] = None,
+        validate_args: Optional[bool] = None,
+    ) -> None:
         if (probs is None) == (logits is None):
             raise ValueError(
                 "Either `probs` or `logits` must be specified, but not both."

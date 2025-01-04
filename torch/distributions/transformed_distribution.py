@@ -1,5 +1,7 @@
 # mypy: allow-untyped-defs
 
+from typing import Optional
+
 import torch
 from torch import Tensor
 from torch.distributions import constraints
@@ -48,7 +50,12 @@ class TransformedDistribution(Distribution):
     """
     arg_constraints: dict[str, constraints.Constraint] = {}
 
-    def __init__(self, base_distribution, transforms, validate_args=None):
+    def __init__(
+        self,
+        base_distribution: Distribution,
+        transforms: Transform | list[Transform],
+        validate_args: Optional[bool] = None,
+    ) -> None:
         if isinstance(transforms, Transform):
             self.transforms = [
                 transforms,

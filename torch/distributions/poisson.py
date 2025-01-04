@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 from numbers import Number
+from typing import Optional
 
 import torch
 from torch import Tensor
@@ -45,7 +46,11 @@ class Poisson(ExponentialFamily):
     def variance(self) -> Tensor:
         return self.rate
 
-    def __init__(self, rate, validate_args=None):
+    def __init__(
+        self,
+        rate: Number | Tensor,
+        validate_args: Optional[bool] = None,
+    ) -> None:
         (self.rate,) = broadcast_all(rate)
         if isinstance(rate, Number):
             batch_shape = torch.Size()

@@ -2,7 +2,7 @@
 import math
 import warnings
 from numbers import Number
-from typing import Optional, Union
+from typing import Optional
 
 import torch
 from torch import nan, Tensor
@@ -76,12 +76,12 @@ class Wishart(ExponentialFamily):
 
     def __init__(
         self,
-        df: Union[torch.Tensor, Number],
+        df: Tensor | Number,
         covariance_matrix: Optional[torch.Tensor] = None,
         precision_matrix: Optional[torch.Tensor] = None,
         scale_tril: Optional[torch.Tensor] = None,
-        validate_args=None,
-    ):
+        validate_args: Optional[bool] = None,
+    ) -> None:
         assert (covariance_matrix is not None) + (scale_tril is not None) + (
             precision_matrix is not None
         ) == 1, "Exactly one of covariance_matrix or precision_matrix or scale_tril may be specified."

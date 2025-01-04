@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 from numbers import Number
+from typing import Optional
 
 import torch
 from torch import Tensor
@@ -53,7 +54,12 @@ class Gamma(ExponentialFamily):
     def variance(self) -> Tensor:
         return self.concentration / self.rate.pow(2)
 
-    def __init__(self, concentration, rate, validate_args=None):
+    def __init__(
+        self,
+        concentration: float | Tensor,
+        rate: float | Tensor,
+        validate_args: Optional[bool] = None,
+    ) -> None:
         self.concentration, self.rate = broadcast_all(concentration, rate)
         if isinstance(concentration, Number) and isinstance(rate, Number):
             batch_shape = torch.Size()

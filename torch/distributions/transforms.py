@@ -4,11 +4,14 @@ import math
 import numbers
 import operator
 import weakref
+from collections.abc import Sequence
 from typing import Optional
 
 import torch
 import torch.nn.functional as F
+from torch import Tensor
 from torch.distributions import constraints
+from torch.distributions.distribution import Distribution
 from torch.distributions.utils import (
     _sum_rightmost,
     broadcast_all,
@@ -92,7 +95,7 @@ class Transform:
     domain: constraints.Constraint
     codomain: constraints.Constraint
 
-    def __init__(self, cache_size=0):
+    def __init__(self, cache_size: int = 0) -> None:
         self._cache_size = cache_size
         self._inv: Optional[weakref.ReferenceType[Transform]] = None
         if cache_size == 0:
@@ -218,7 +221,7 @@ class _InverseTransform(Transform):
     This class is private; please instead use the ``Transform.inv`` property.
     """
 
-    def __init__(self, transform: Transform):
+    def __init__(self, transform: Transform) -> None:
         super().__init__(cache_size=transform._cache_size)
         self._inv: Transform = transform  # type: ignore[assignment]
 
@@ -285,7 +288,7 @@ class ComposeTransform(Transform):
             the latest single value is cached. Only 0 and 1 are supported.
     """
 
-    def __init__(self, parts: list[Transform], cache_size=0):
+    def __init__(self, parts: list[Transform], cache_size: int = 0) -> None:
         if cache_size:
             parts = [part.with_cache(cache_size) for part in parts]
         super().__init__(cache_size=cache_size)
@@ -413,7 +416,12 @@ class IndependentTransform(Transform):
             dimensions to treat as dependent.
     """
 
-    def __init__(self, base_transform, reinterpreted_batch_ndims, cache_size=0):
+    def __init__(
+        self,
+        base_transform: Transform,
+        reinterpreted_batch_ndims: int,
+        cache_size=0,
+    ) -> None:
         super().__init__(cache_size=cache_size)
         self.base_transform = base_transform.with_cache(cache_size)
         self.reinterpreted_batch_ndims = reinterpreted_batch_ndims
@@ -480,11 +488,18 @@ class ReshapeTransform(Transform):
     Arguments:
         in_shape (torch.Size): The input event shape.
         out_shape (torch.Size): The output event shape.
+        cache_size (int): Size of cache. If zero, no caching is done. If one,
+            the latest single value is cached. Only 0 and 1 are supported.
     """
 
     bijective = True
 
-    def __init__(self, in_shape, out_shape, cache_size=0):
+    def __init__(
+        self,
+        in_shape: torch.Size,
+        out_shape: torch.Size,
+        cache_size: int = 0,
+    ) -> None:
         self.in_shape = torch.Size(in_shape)
         self.out_shape = torch.Size(out_shape)
         if self.in_shape.numel() != self.out_shape.numel():
@@ -567,7 +582,7 @@ class PowerTransform(Transform):
     codomain = constraints.positive
     bijective = True
 
-    def __init__(self, exponent, cache_size=0):
+    def __init__(self, exponent: Tensor, cache_size: int = 0) -> None:
         super().__init__(cache_size=cache_size)
         (self.exponent,) = broadcast_all(exponent)
 
@@ -719,7 +734,13 @@ class AffineTransform(Transform):
     """
     bijective = True
 
-    def __init__(self, loc, scale, event_dim=0, cache_size=0):
+    def __init__(
+        self,
+        loc: float | Tensor,
+        scale: float | Tensor,
+        event_dim: int = 0,
+        cache_size: int = 0,
+    ) -> None:
         super().__init__(cache_size=cache_size)
         self.loc = loc
         self.scale = scale
@@ -758,7 +779,7 @@ class AffineTransform(Transform):
             if self.loc != other.loc:
                 return False
         else:
-            if not (self.loc == other.loc).all().item():
+            if not (self.loc == other.loc).all().item():  # type: ignore[union-attr]
                 return False
 
         if isinstance(self.scale, numbers.Number) and isinstance(
@@ -767,7 +788,7 @@ class AffineTransform(Transform):
             if self.scale != other.scale:
                 return False
         else:
-            if not (self.scale == other.scale).all().item():
+            if not (self.scale == other.scale).all().item():  # type: ignore[union-attr]
                 return False
 
         return True
@@ -776,7 +797,7 @@ class AffineTransform(Transform):
     def sign(self) -> int:
         if isinstance(self.scale, numbers.Real):
             return 1 if float(self.scale) > 0 else -1 if float(self.scale) < 0 else 0
-        return self.scale.sign()
+        return int(self.scale.sign().prod().item())  # type: ignore[union-attr]
 
     def _call(self, x):
         return self.loc + self.scale * x
@@ -790,7 +811,7 @@ class AffineTransform(Transform):
         if isinstance(scale, numbers.Real):
             result = torch.full_like(x, math.log(abs(scale)))
         else:
-            result = torch.abs(scale).log()
+            result = scale.abs().log()  # type: ignore[union-attr]
         if self.event_dim:
             result_size = result.size()[: -self.event_dim] + (-1,)
             result = result.view(result_size).sum(-1)
@@ -1040,7 +1061,13 @@ class CatTransform(Transform):
 
     transforms: list[Transform]
 
-    def __init__(self, tseq, dim=0, lengths=None, cache_size=0):
+    def __init__(
+        self,
+        tseq: Sequence[Transform],
+        dim: int = 0,
+        lengths: Optional[Sequence[int]] = None,
+        cache_size=0,
+    ) -> None:
         assert all(isinstance(t, Transform) for t in tseq)
         if cache_size:
             tseq = [t.with_cache(cache_size) for t in tseq]
@@ -1144,7 +1171,9 @@ class StackTransform(Transform):
 
     transforms: list[Transform]
 
-    def __init__(self, tseq, dim=0, cache_size=0):
+    def __init__(
+        self, tseq: Sequence[Transform], dim: int = 0, cache_size: int = 0
+    ) -> None:
         assert all(isinstance(t, Transform) for t in tseq)
         if cache_size:
             tseq = [t.with_cache(cache_size) for t in tseq]
@@ -1224,12 +1253,12 @@ class CumulativeDistributionTransform(Transform):
     codomain = constraints.unit_interval
     sign = +1
 
-    def __init__(self, distribution, cache_size=0):
+    def __init__(self, distribution: Distribution, cache_size: int = 0) -> None:
         super().__init__(cache_size=cache_size)
         self.distribution = distribution
 
     @property
-    def domain(self) -> constraints.Constraint:  # type: ignore[override]
+    def domain(self) -> Optional[constraints.Constraint]:  # type: ignore[override]
         return self.distribution.support
 
     def _call(self, x):

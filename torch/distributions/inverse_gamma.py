@@ -1,4 +1,6 @@
 # mypy: allow-untyped-defs
+from typing import Optional
+
 import torch
 from torch import Tensor
 from torch.distributions import constraints
@@ -37,8 +39,14 @@ class InverseGamma(TransformedDistribution):
     }
     support = constraints.positive
     has_rsample = True
+    base_dist: Gamma
 
-    def __init__(self, concentration, rate, validate_args=None):
+    def __init__(
+        self,
+        concentration: float | Tensor,
+        rate: float | Tensor,
+        validate_args: Optional[bool] = None,
+    ) -> None:
         base_dist = Gamma(concentration, rate, validate_args=validate_args)
         neg_one = -base_dist.rate.new_ones(())
         super().__init__(

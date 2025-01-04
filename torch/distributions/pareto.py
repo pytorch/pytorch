@@ -1,4 +1,6 @@
 # mypy: allow-untyped-defs
+from typing import Optional
+
 from torch import Tensor
 from torch.distributions import constraints
 from torch.distributions.exponential import Exponential
@@ -27,7 +29,12 @@ class Pareto(TransformedDistribution):
     """
     arg_constraints = {"alpha": constraints.positive, "scale": constraints.positive}
 
-    def __init__(self, scale, alpha, validate_args=None):
+    def __init__(
+        self,
+        scale: float | Tensor,
+        alpha: float | Tensor,
+        validate_args: Optional[bool] = None,
+    ) -> None:
         self.scale, self.alpha = broadcast_all(scale, alpha)
         base_dist = Exponential(self.alpha, validate_args=validate_args)
         transforms = [ExpTransform(), AffineTransform(loc=0, scale=self.scale)]

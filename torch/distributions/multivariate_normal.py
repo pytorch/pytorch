@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 import math
+from typing import Optional
 
 import torch
 from torch import Tensor
@@ -132,12 +133,12 @@ class MultivariateNormal(Distribution):
 
     def __init__(
         self,
-        loc,
-        covariance_matrix=None,
-        precision_matrix=None,
-        scale_tril=None,
-        validate_args=None,
-    ):
+        loc: Tensor,
+        covariance_matrix: Optional[Tensor] = None,
+        precision_matrix: Optional[Tensor] = None,
+        scale_tril: Optional[Tensor] = None,
+        validate_args: Optional[bool] = None,
+    ) -> None:
         if loc.dim() < 1:
             raise ValueError("loc must be at least one-dimensional.")
         if (covariance_matrix is not None) + (scale_tril is not None) + (
@@ -165,7 +166,7 @@ class MultivariateNormal(Distribution):
                 covariance_matrix.shape[:-2], loc.shape[:-1]
             )
             self.covariance_matrix = covariance_matrix.expand(batch_shape + (-1, -1))
-        else:
+        elif precision_matrix is not None:
             if precision_matrix.dim() < 2:
                 raise ValueError(
                     "precision_matrix must be at least two-dimensional, "
@@ -175,6 +176,10 @@ class MultivariateNormal(Distribution):
                 precision_matrix.shape[:-2], loc.shape[:-1]
             )
             self.precision_matrix = precision_matrix.expand(batch_shape + (-1, -1))
+        else:
+            raise ValueError(
+                "At least one of covariance_matrix, precision_matrix or scale_tril must be specified."
+            )
         self.loc = loc.expand(batch_shape + (-1,))
 
         event_shape = self.loc.shape[-1:]

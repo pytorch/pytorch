@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 import math
 from numbers import Number
+from typing import Optional
 
 import torch
 from torch import Tensor
@@ -52,7 +53,11 @@ class ContinuousBernoulli(ExponentialFamily):
     has_rsample = True
 
     def __init__(
-        self, probs=None, logits=None, lims=(0.499, 0.501), validate_args=None
+        self,
+        probs: Optional[Tensor | Number] = None,
+        logits: Optional[Tensor | Number] = None,
+        lims: tuple[float, float] = (0.499, 0.501),
+        validate_args: Optional[bool] = None,
     ) -> None:
         if (probs is None) == (logits is None):
             raise ValueError(

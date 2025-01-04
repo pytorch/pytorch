@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 from numbers import Number, Real
+from typing import Optional
 
 import torch
 from torch import Tensor
@@ -37,7 +38,12 @@ class Beta(ExponentialFamily):
     support = constraints.unit_interval
     has_rsample = True
 
-    def __init__(self, concentration1, concentration0, validate_args=None):
+    def __init__(
+        self,
+        concentration1: float | Tensor,
+        concentration0: float | Tensor,
+        validate_args: Optional[bool] = None,
+    ) -> None:
         if isinstance(concentration1, Real) and isinstance(concentration0, Real):
             concentration1_concentration0 = torch.tensor(
                 [float(concentration1), float(concentration0)]
@@ -47,7 +53,7 @@ class Beta(ExponentialFamily):
                 concentration1, concentration0
             )
             concentration1_concentration0 = torch.stack(
-                [concentration1, concentration0], -1
+                [concentration1, concentration0], -1  # type: ignore[list-item]
             )
         self._dirichlet = Dirichlet(
             concentration1_concentration0, validate_args=validate_args

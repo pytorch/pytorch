@@ -1,5 +1,7 @@
 # mypy: allow-untyped-defs
 
+from typing import Optional
+
 import torch
 from torch import Tensor
 from torch.distributions import constraints
@@ -43,8 +45,11 @@ class Independent(Distribution):
     arg_constraints: dict[str, constraints.Constraint] = {}
 
     def __init__(
-        self, base_distribution, reinterpreted_batch_ndims, validate_args=None
-    ):
+        self,
+        base_distribution,
+        reinterpreted_batch_ndims,
+        validate_args: Optional[bool] = None,
+    ) -> None:
         if reinterpreted_batch_ndims > len(base_distribution.batch_shape):
             raise ValueError(
                 "Expected reinterpreted_batch_ndims <= len(base_distribution.batch_shape), "

@@ -1,4 +1,6 @@
 # mypy: allow-untyped-defs
+from typing import Optional
+
 import torch
 from torch import nan, Tensor
 from torch.distributions import constraints
@@ -44,7 +46,12 @@ class Kumaraswamy(TransformedDistribution):
     support = constraints.unit_interval
     has_rsample = True
 
-    def __init__(self, concentration1, concentration0, validate_args=None):
+    def __init__(
+        self,
+        concentration1: float | Tensor,
+        concentration0: float | Tensor,
+        validate_args: Optional[bool] = None,
+    ) -> None:
         self.concentration1, self.concentration0 = broadcast_all(
             concentration1, concentration0
         )

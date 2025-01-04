@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 from numbers import Number
+from typing import Optional
 
 import torch
 from torch import Tensor
@@ -45,20 +46,25 @@ class Geometric(Distribution):
     arg_constraints = {"probs": constraints.unit_interval, "logits": constraints.real}
     support = constraints.nonnegative_integer
 
-    def __init__(self, probs=None, logits=None, validate_args=None):
+    def __init__(
+        self,
+        probs: Optional[Number | Tensor] = None,
+        logits: Optional[Number | Tensor] = None,
+        validate_args: Optional[bool] = None,
+    ) -> None:
         if (probs is None) == (logits is None):
             raise ValueError(
                 "Either `probs` or `logits` must be specified, but not both."
             )
         if probs is not None:
             (self.probs,) = broadcast_all(probs)
-        else:
+        if logits is not None:  # Note: 'if is None' instead of 'else' to help mypy
             (self.logits,) = broadcast_all(logits)
         probs_or_logits = probs if probs is not None else logits
         if isinstance(probs_or_logits, Number):
             batch_shape = torch.Size()
         else:
-            batch_shape = probs_or_logits.size()
+            batch_shape = probs_or_logits.size()  # type: ignore[union-attr]
         super().__init__(batch_shape, validate_args=validate_args)
         if self._validate_args and probs is not None:
             # Add an extra check beyond unit_interval

@@ -1,4 +1,6 @@
 # mypy: allow-untyped-defs
+from typing import Optional
+
 import torch
 from torch import Tensor
 from torch.distributions import constraints
@@ -33,7 +35,12 @@ class Weibull(TransformedDistribution):
     }
     support = constraints.positive
 
-    def __init__(self, scale, concentration, validate_args=None):
+    def __init__(
+        self,
+        scale: float | Tensor,
+        concentration: float | Tensor,
+        validate_args: Optional[bool] = None,
+    ) -> None:
         self.scale, self.concentration = broadcast_all(scale, concentration)
         self.concentration_reciprocal = self.concentration.reciprocal()
         base_dist = Exponential(

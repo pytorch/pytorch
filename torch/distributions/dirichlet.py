@@ -1,4 +1,6 @@
 # mypy: allow-untyped-defs
+from typing import Optional
+
 import torch
 from torch import Tensor
 from torch.autograd import Function
@@ -53,7 +55,11 @@ class Dirichlet(ExponentialFamily):
     support = constraints.simplex
     has_rsample = True
 
-    def __init__(self, concentration, validate_args=None):
+    def __init__(
+        self,
+        concentration: Tensor,
+        validate_args: Optional[bool] = None,
+    ) -> None:
         if concentration.dim() < 1:
             raise ValueError(
                 "`concentration` parameter must be at least one-dimensional."
@@ -94,9 +100,9 @@ class Dirichlet(ExponentialFamily):
     def mode(self) -> Tensor:
         concentrationm1 = (self.concentration - 1).clamp(min=0.0)
         mode = concentrationm1 / concentrationm1.sum(-1, True)
-        mask = (self.concentration < 1).all(axis=-1)
+        mask = (self.concentration < 1).all(dim=-1)
         mode[mask] = torch.nn.functional.one_hot(
-            mode[mask].argmax(axis=-1), concentrationm1.shape[-1]
+            mode[mask].argmax(dim=-1), concentrationm1.shape[-1]
         ).to(mode)
         return mode
 

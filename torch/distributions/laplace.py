@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 from numbers import Number
+from typing import Optional
 
 import torch
 from torch import Tensor
@@ -47,7 +48,12 @@ class Laplace(Distribution):
     def stddev(self) -> Tensor:
         return (2**0.5) * self.scale
 
-    def __init__(self, loc, scale, validate_args=None):
+    def __init__(
+        self,
+        loc: float | Tensor,
+        scale: float | Tensor,
+        validate_args: Optional[bool] = None,
+    ) -> None:
         self.loc, self.scale = broadcast_all(loc, scale)
         if isinstance(loc, Number) and isinstance(scale, Number):
             batch_shape = torch.Size()

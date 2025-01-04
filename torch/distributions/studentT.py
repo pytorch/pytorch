@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 import math
+from typing import Optional
 
 import torch
 from torch import inf, nan, Tensor
@@ -59,7 +60,13 @@ class StudentT(Distribution):
         m[self.df <= 1] = nan
         return m
 
-    def __init__(self, df, loc=0.0, scale=1.0, validate_args=None):
+    def __init__(
+        self,
+        df: float | Tensor,
+        loc: float | Tensor = 0.0,
+        scale: float | Tensor = 1.0,
+        validate_args: Optional[bool] = None,
+    ) -> None:
         self.df, self.loc, self.scale = broadcast_all(df, loc, scale)
         self._chi2 = Chi2(self.df)
         batch_shape = self.df.size()
