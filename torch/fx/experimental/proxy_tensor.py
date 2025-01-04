@@ -2126,7 +2126,7 @@ class _MakefxTracer:
         # TODO: kind of a bad way to do it, should maybe figure out a better way
         if self.tracing_mode == "symbolic":
             assert self.fake_tensor_mode is not None
-            t.shape_env = self.fake_tensor_mode.shape_env
+            t.shape_env = self.fake_tensor_mode.shape_env  # type: ignore[assignment]
         return t
 
     def trace(self, f: Callable, *args: object) -> fx.GraphModule:

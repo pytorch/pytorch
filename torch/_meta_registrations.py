@@ -1,9 +1,9 @@
-# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 import math
 from enum import Enum
 from functools import wraps
-from typing import List, Optional, Sequence, Tuple, Union
+from typing import Callable, List, Optional, Sequence, Tuple, TypeVar, Union
+from typing_extensions import ParamSpec
 
 import torch
 import torch._prims_common as utils
@@ -39,13 +39,16 @@ from torch._refs import _broadcast_shapes, _maybe_broadcast
 from torch.utils import _pytree as pytree
 
 
+_T = TypeVar("_T")
+_P = ParamSpec("_P")
+
 aten = torch.ops.aten
 
 _meta_lib_dont_use_me_use_register_meta = torch.library.Library("aten", "IMPL", "Meta")
 MODE_SUM, MODE_MEAN, MODE_MAX = range(3)
 
 
-def register_meta(op):
+def register_meta(op) -> Callable[[Callable[_P, _T]], Callable[_P, _T]]:
     def wrapper(fn):
         fn = _convert_out_params(fn)
 
