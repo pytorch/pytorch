@@ -1,9 +1,12 @@
 #pragma once
 
 #include <c10/core/DeviceType.h>
-#include <c10/cuda/CUDAMacros.h>
 #include <c10/macros/Export.h>
 #include <c10/util/Exception.h>
+
+#ifdef USE_CUDA
+#include <c10/cuda/CUDAMacros.h>
+#endif
 
 #include <cstddef>
 #include <cstdint>
@@ -183,11 +186,13 @@ struct C10_API Device final {
         !is_cpu() || index_ <= 0,
         "CPU device index must be -1 or zero, got ",
         static_cast<int>(index_));
+#ifdef USE_CUDA
 #ifdef FBCODE_CAFFE2
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
         !is_cuda() || index_ <= C10_COMPILE_TIME_MAX_GPUS,
         "CUDA device index must be not exceeding ",
         C10_COMPILE_TIME_MAX_GPUS);
+#endif
 #endif
   }
 };
