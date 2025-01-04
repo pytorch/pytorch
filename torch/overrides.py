@@ -887,7 +887,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.nn.functional.gaussian_nll_loss: lambda input, target, var, full=False, eps=1e-06, reduction="mean": -1,
         torch.nn.functional.gelu: lambda input, approximate="none": -1,
         torch.nn.functional.glu: lambda input, dim=-1: -1,
-        torch.nn.functional.grid_sample: lambda input, grid, mode="bilinear", padding_mode="zeros", align_corners=None: -1,  # noqa: B950
+        torch.nn.functional.grid_sample: lambda input, grid, mode="bilinear", padding_mode="zeros", align_corners=None, value=None: -1,  # noqa: B950
         torch.nn.functional.group_norm: lambda input, num_groups, weight=None, bias=None, eps=1e-05: -1,
         torch.nn.functional.gumbel_softmax: lambda logits, tau=1, hard=False, eps=1e-10, dim=-1: -1,
         torch.nn.functional.hardshrink: lambda input, lambd=0.5: -1,
