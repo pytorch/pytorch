@@ -1,5 +1,6 @@
 import ctypes
 import logging
+import threading
 import time
 
 import torch
@@ -25,9 +26,9 @@ class Allocator:
         self.allocated = {}
 
     def malloc(self, size):
-        new_data = torch.empty(size, dtype=torch.uint8)
-        ptr = new_data.data_ptr()
-        self.allocated[ptr] = new_data
+        mem = ctypes.create_string_buffer(size)
+        ptr = ctypes.addressof(mem)
+        self.allocated[ptr] = (size, mem)
         return ptr
 
     def free(self, ptr):
@@ -41,23 +42,28 @@ class Allocator:
         return ptr in self.allocated
 
     def tensor_from_meta(self, meta):
+        def create_tensor_from_data_ptr(ptr, size):
+            storage = torch._C._construct_storage_from_data_pointer(
+                ptr, torch.device("cpu"), size
+            )
+            return torch.Tensor(storage)
+
+        found_base = None
         # Usual case, we're receiving a known Tensor
-        found_base = self.allocated.get(meta.data_ptr, None)
+        if meta.data_ptr in self.allocated:
+            found_base = create_tensor_from_data_ptr(
+                meta.data_ptr, self.allocated[meta.data_ptr][0]
+            )
 
         # Might be a rewrap of another storage at a different offset
         # Slow path to try and find the corresponding storage
         if found_base is None:
-            for tag, t in self.allocated.items():
+            for tag, (size, _) in self.allocated.items():
                 # t is always a 1D uint8 storage!
-                if meta.data_ptr > tag and meta.data_ptr < tag + t.nelement():
+                if meta.data_ptr > tag and meta.data_ptr < tag + size:
                     # Blame @ngimel for this
-                    slice_size = t.nelement() - (meta.data_ptr - tag)
-                    found_base = torch.tensor((), dtype=torch.uint8).set_(
-                        t.untyped_storage()[meta.data_ptr - tag :],
-                        size=(slice_size,),
-                        stride=(1,),
-                        storage_offset=0,
-                    )
+                    slice_size = size - (meta.data_ptr - tag)
+                    found_base = create_tensor_from_data_ptr(meta.data_ptr, slice_size)
 
         # Might be an empty tensor
         if found_base is None and meta.nelem_in_bytes == 0:
@@ -91,6 +97,7 @@ class Driver:
         super().__init__()
         self.num_devices = num_devices
         self.is_initialized = False
+        self.rlock = threading.RLock()
 
     def _lazy_init(self):
         if self.is_initialized:
@@ -121,19 +128,20 @@ class Driver:
         self.is_initialized = True
 
     def exec(self, cmd, *args):
-        self._lazy_init()
-        log.info("Main process launched: %s(*%s)", cmd, safe_str(args))
+        with self.rlock:
+            self._lazy_init()
+            log.info("Main process launched: %s(*%s)", cmd, safe_str(args))
 
-        if cmd in Driver.registry:
-            res = Driver.registry[cmd](self, *args)
-        else:
-            res = self.run_on_executor(self.curr_device_idx, cmd, *args)
+            if cmd in Driver.registry:
+                res = Driver.registry[cmd](self, *args)
+            else:
+                res = self.run_on_executor(self.curr_device_idx, cmd, *args)
 
-        log.info("Main process result for %s received: %s", cmd, safe_str(res))
-        if res == "ERROR":
-            raise RuntimeError(f"Error in daemon while executing {cmd}, see logs")
-        else:
-            return res
+            log.info("Main process result for %s received: %s", cmd, safe_str(res))
+            if res == "ERROR":
+                raise RuntimeError(f"Error in daemon while executing {cmd}, see logs")
+            else:
+                return res
 
     def run_on_executor(self, device_idx, cmd, *args):
         req_queue, ans_queue, _ = self.devices[device_idx]

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import argparse
+import contextlib
 import copy
 import glob
 import json
@@ -906,6 +907,41 @@ def run_test(
     return ret_code
 
 
+def install_cpp_extensions(cpp_extensions_test_dir, env=os.environ):
+    # Wipe the build folder, if it exists already
+    cpp_extensions_test_build_dir = os.path.join(cpp_extensions_test_dir, "build")
+    if os.path.exists(cpp_extensions_test_build_dir):
+        shutil.rmtree(cpp_extensions_test_build_dir)
+
+    # Build the test cpp extensions modules
+    cmd = [sys.executable, "setup.py", "install", "--root", "./install"]
+    return_code = shell(cmd, cwd=cpp_extensions_test_dir, env=env)
+    if return_code != 0:
+        return None, return_code
+
+    install_directory = ""
+    # install directory is the one that is named site-packages
+    for root, directories, _ in os.walk(
+        os.path.join(cpp_extensions_test_dir, "install")
+    ):
+        for directory in directories:
+            if "-packages" in directory:
+                install_directory = os.path.join(root, directory)
+
+    assert install_directory, "install_directory must not be empty"
+    return install_directory, 0
+
+
+@contextlib.contextmanager
+def extend_python_path(install_directory):
+    python_path = os.environ.get("PYTHONPATH", "")
+    try:
+        os.environ["PYTHONPATH"] = os.pathsep.join([install_directory, python_path])
+        yield
+    finally:
+        os.environ["PYTHONPATH"] = python_path
+
+
 def try_set_cpp_stack_traces(env, command, set=True):
     # Print full c++ stack traces during retries
     env = env or {}
@@ -1052,8 +1088,6 @@ def _test_cpp_extensions_aot(test_directory, options, use_ninja):
             if return_code != 0:
                 return return_code
 
-    # "install" the test modules and run tests
-    python_path = os.environ.get("PYTHONPATH", "")
     from shutil import copyfile
 
     os.environ["USE_NINJA"] = shell_env["USE_NINJA"]
@@ -1072,10 +1106,9 @@ def _test_cpp_extensions_aot(test_directory, options, use_ninja):
                     install_directory = os.path.join(root, directory)
 
         assert install_directory, "install_directory must not be empty"
-        os.environ["PYTHONPATH"] = os.pathsep.join([install_directory, python_path])
-        return run_test(ShardedTest(test_module, 1, 1), test_directory, options)
+        with extend_python_path(install_directory):
+            return run_test(ShardedTest(test_module, 1, 1), test_directory, options)
     finally:
-        os.environ["PYTHONPATH"] = python_path
         if os.path.exists(test_directory + "/" + test_module + ".py"):
             os.remove(test_directory + "/" + test_module + ".py")
         os.environ.pop("USE_NINJA")
@@ -1098,40 +1131,31 @@ def test_autoload_disable(test_module, test_directory, options):
 
 
 def _test_autoload(test_directory, options, enable=True):
-    # Wipe the build folder, if it exists already
     cpp_extensions_test_dir = os.path.join(test_directory, "cpp_extensions")
-    cpp_extensions_test_build_dir = os.path.join(cpp_extensions_test_dir, "build")
-    if os.path.exists(cpp_extensions_test_build_dir):
-        shutil.rmtree(cpp_extensions_test_build_dir)
-
-    # Build the test cpp extensions modules
-    cmd = [sys.executable, "setup.py", "install", "--root", "./install"]
-    return_code = shell(cmd, cwd=cpp_extensions_test_dir, env=os.environ)
+    install_directory, return_code = install_cpp_extensions(cpp_extensions_test_dir)
     if return_code != 0:
         return return_code
 
-    # "install" the test modules and run tests
-    python_path = os.environ.get("PYTHONPATH", "")
-
     try:
-        cpp_extensions = os.path.join(test_directory, "cpp_extensions")
-        install_directory = ""
-        # install directory is the one that is named site-packages
-        for root, directories, _ in os.walk(os.path.join(cpp_extensions, "install")):
-            for directory in directories:
-                if "-packages" in directory:
-                    install_directory = os.path.join(root, directory)
-
-        assert install_directory, "install_directory must not be empty"
-        os.environ["PYTHONPATH"] = os.pathsep.join([install_directory, python_path])
         os.environ["TORCH_DEVICE_BACKEND_AUTOLOAD"] = str(int(enable))
-
-        cmd = [sys.executable, "test_autoload.py"]
-        return_code = shell(cmd, cwd=test_directory, env=os.environ)
-        return return_code
+        with extend_python_path(install_directory):
+            cmd = [sys.executable, "test_autoload.py"]
+            return_code = shell(cmd, cwd=test_directory, env=os.environ)
+            return return_code
     finally:
-        os.environ["PYTHONPATH"] = python_path
         os.environ.pop("TORCH_DEVICE_BACKEND_AUTOLOAD")
+
+
+def run_test_with_openreg(test_module, test_directory, options):
+    openreg_dir = os.path.join(
+        test_directory, "cpp_extensions", "open_registration_extension"
+    )
+    install_dir, return_code = install_cpp_extensions(openreg_dir)
+    if return_code != 0:
+        return return_code
+
+    with extend_python_path(install_dir):
+        return run_test(test_module, test_directory, options)
 
 
 def test_distributed(test_module, test_directory, options):
@@ -1457,6 +1481,8 @@ CUSTOM_HANDLERS = {
     "test_ci_sanity_check_fail": run_ci_sanity_check,
     "test_autoload_enable": test_autoload_enable,
     "test_autoload_disable": test_autoload_disable,
+    "test_cpp_extensions_open_device_registration": run_test_with_openreg,
+    "test_transformers": run_test_with_openreg,
 }
 
 
