@@ -835,7 +835,7 @@ static Tensor& linalg_cholesky_mps_impl(const Tensor& input, bool upper, Tensor&
 
     for (int64_t j = k + 1; j < numBlocks; j++) {
       uint32_t activeNB_j = (uint32_t)std::min(N - j * NB, (int64_t)NB);
-      for (int64_t h = j; h < numBlocks; h++) {
+      for (int64_t h = k + 1; h <= j; h++) {
         uint32_t activeNB_h = (uint32_t)std::min(N - h * NB, (int64_t)NB);
         dispatch_sync_with_rethrow(stream->queue(), ^() {
           @autoreleasepool {

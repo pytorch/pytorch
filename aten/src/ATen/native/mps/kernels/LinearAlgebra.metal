@@ -249,6 +249,12 @@ kernel void applySYRK(
   for (uint idx = tid; idx < actSize_j * actSize_h; idx += tpg) {
     uint r = idx / actSize_h;
     uint c = idx % actSize_h;
+
+    // If j == h, only process the lower-triangular portion
+    // i.e., only apply the update if r >= c
+    if (j == h && r < c) {
+      continue;
+    }
     float sumVal = tile[idx];
     for (uint p = 0; p < actSize_k; p++) {
       sumVal -= left[r * actSize_k + p] * right[c * actSize_k + p];
