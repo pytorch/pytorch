@@ -1901,6 +1901,8 @@ class BaseTy(Enum):
     SymInt = auto()
     SymBool = auto()
     GraphModule = auto()
+    NoneType = auto()
+    Operator = auto()
 
 
 @dataclass(frozen=True)

@@ -223,9 +223,9 @@ def hop_schema_from_fx_node(node):
 
     def _collect_example_val(node):
         meta_val = node.meta.get("val", None)
-        if meta_val is None:
-            assert node.op == "get_attr"
+        if node.op == "get_attr":
             meta_val = getattr(node.graph.owning_module, node.target)
+            assert meta_val is not None
         return meta_val
 
     example_inputs = []
@@ -236,6 +236,10 @@ def hop_schema_from_fx_node(node):
             arg, (torch.fx.immutable_collections.immutable_list, list, tuple)
         ):
             example_inputs.append([_collect_example_val(x) for x in arg])
+        elif isinstance(arg, (str, bool, torch.dtype, torch._ops.OpOverload)):
+            example_inputs.append(arg)
+        elif arg is None:
+            example_inputs.append(None)
         else:
             raise RuntimeError(f"Unsupported arg type {type(arg)}")
 
@@ -248,7 +252,9 @@ def hop_schema_from_fx_node(node):
     # vs 2. return a tuple with one element.
     example_output = _collect_example_val(node)
     return FunctionSchemaGen.from_example(
-        hop._name, tuple(bound_args.arguments.items()), (list(example_output),)
+        hop._name,
+        tuple(bound_args.arguments.items()),
+        (example_output,) if example_output is not None else (),
     )
 
 
