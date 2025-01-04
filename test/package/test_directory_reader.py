@@ -10,12 +10,7 @@ from unittest import skipIf
 
 import torch
 from torch.package import PackageExporter, PackageImporter
-from torch.testing._internal.common_utils import (
-    IS_FBCODE,
-    IS_SANDCASTLE,
-    IS_WINDOWS,
-    run_tests,
-)
+from torch.testing._internal.common_utils import IS_WINDOWS, run_tests, skipIfMetaOr
 
 
 try:
@@ -37,8 +32,8 @@ except ImportError:
 packaging_directory = Path(__file__).absolute().parent
 
 
-@skipIf(
-    IS_FBCODE or IS_SANDCASTLE or IS_WINDOWS,
+@skipIfMetaOr(
+    IS_WINDOWS,
     "Tests that use temporary files are disabled in fbcode",
 )
 class DirectoryReaderTest(PackageTestCase):
