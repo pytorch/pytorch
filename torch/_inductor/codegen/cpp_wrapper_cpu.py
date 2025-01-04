@@ -1911,7 +1911,7 @@ if (custom_op_wrapper.get() == NULL) {
             return "std::numeric_limits<float>::infinity()"
         elif val == float("-inf"):
             return "-std::numeric_limits<float>::infinity()"
-        elif val == float("nan"):
+        elif math.isnan(val):
             return "std::numeric_limits<float>::quiet_NaN()"
         else:
             return f"{val}"
