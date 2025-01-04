@@ -957,7 +957,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
         # In some cases, we have to do dynamic lookup because getattr_static is not enough. For example, threading.local
         # has side-effect free __getattribute__ and the attribute is not visible without a dynamic lookup.
-        if (
+        if not object_has_getattribute(self.value) and (
             subobj is NO_SUCH_SUBOBJ  # e.g., threading.local
             or isinstance(
                 subobj, _collections._tuplegetter
@@ -966,10 +966,15 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 inspect.ismemberdescriptor(subobj) and name in self.value.__slots__
             )  # handle memberdecriptor and slots
             or self._is_c_defined_property(subobj)
+            or inspect.isgetsetdescriptor(
+                subobj
+            )  # handle getsetdescriptor like __dict__
         ):
             # Call __getattribute__, we have already checked that this is not overridden and side-effect free. We don't
             # want to call getattr because it can be user-overridden.
             subobj = self.value.__getattribute__(name)
+        elif object_has_getattribute(self.value) and subobj is NO_SUCH_SUBOBJ:
+            raise AttributeError
 
         return subobj
 
