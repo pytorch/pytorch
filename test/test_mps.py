@@ -6540,6 +6540,7 @@ class TestMPS(TestCaseMPS):
 
         helper((2, 8, 4, 5))
 
+    @xfailIf(MACOS_VERSION < 14.0)
     def test_angle(self):
         def helper(shape, dtype):
             cpu_x = torch.randn(shape, device='cpu', dtype=dtype, requires_grad=False)
