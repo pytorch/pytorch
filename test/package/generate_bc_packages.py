@@ -6,7 +6,7 @@ from torch.package import PackageExporter
 from torch.testing._internal.common_utils import IS_FBCODE, IS_SANDCASTLE
 
 
-packaging_directory = f"{Path(__file__).parent}/package_bc"
+packaging_directory = str(Path(__file__).absolute().parent / "package_bc")
 torch.package.package_exporter._gate_torchscript_serialization = False
 
 

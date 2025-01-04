@@ -66,6 +66,8 @@ class MetalOverrides(OpOverrides):
             return "HUGE_VALF"
         elif val == -torch.inf:
             return "-HUGE_VALF"
+        elif isinstance(val, bool):
+            return "true" if val else "false"
         return str(val)
 
     @staticmethod
@@ -79,6 +81,15 @@ class MetalOverrides(OpOverrides):
     @staticmethod
     def where(a: CSEVariable, b: CSEVariable, c: CSEVariable) -> str:
         return f"{a} ? {b} : {c}"
+
+    @staticmethod
+    def remainder(a: CSEVariable, b: CSEVariable) -> str:
+        if b.dtype is not None and not b.dtype.is_floating_point:
+            return f"{a} % {b}"
+        # Upcast to float otherwise results of remainder op are wrong for half
+        float_a = f"static_cast<float>({a})" if a.dtype != torch.float else a
+        float_b = f"static_cast<float>({b})" if b.dtype != torch.float else b
+        return f"{float_a} - {float_b} * metal::floor({float_a} / {float_b})"
 
     @staticmethod
     def maximum(a: CSEVariable, b: CSEVariable) -> str:
@@ -140,6 +151,10 @@ class MetalOverrides(OpOverrides):
     @staticmethod
     def sqrt(x: CSEVariable) -> str:
         return f"metal::sqrt({x})"
+
+    @staticmethod
+    def atanh(x: CSEVariable) -> str:
+        return f"metal::atanh({x})"
 
     @staticmethod
     def floordiv(a: CSEVariable, b: CSEVariable) -> str:
