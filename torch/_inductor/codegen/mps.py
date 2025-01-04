@@ -117,6 +117,10 @@ class MetalOverrides(OpOverrides):
         return f"metal::isinf({x})"
 
     @staticmethod
+    def log(x: CSEVariable) -> str:
+        return f"metal::log({x})"
+
+    @staticmethod
     def abs(x: CSEVariable) -> str:
         return f"metal::abs({x})"
 
