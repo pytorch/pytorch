@@ -1206,7 +1206,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
   // Flag to enable the print of hash value of input/output of collectives for
   // verification.
-  std::atomic<bool> enableCollecticeHashDebug_{};
+  std::atomic<bool> enableCollectiveHashDebug_{};
 
   // Whether or not TORCH_NCCL_AVOID_RECORD_STREAMS was set
   bool avoidRecordStreams_ = false;
