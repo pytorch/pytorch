@@ -80,8 +80,13 @@ class MetalOverrides(OpOverrides):
 
     @staticmethod
     def masked(mask: CSEVariable, body: sympy.Expr, other: CSEVariable) -> str:
-        # TODO: Add a proper implementation considering there are no lambdas in Metal
-        return f"{mask} ? {body()} : {other}"
+        with V.kernel.mask_loads(mask, other) as new_mask:
+            result = body()
+
+        if result.bounds.is_bool:
+            other = bool(other)
+
+        return ops.where(new_mask, result, other)
 
     @staticmethod
     def where(a: CSEVariable, b: CSEVariable, c: CSEVariable) -> str:
