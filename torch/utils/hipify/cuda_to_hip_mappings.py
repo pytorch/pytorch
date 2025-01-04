@@ -8422,6 +8422,8 @@ CUDA_SPECIAL_MAP = collections.OrderedDict(
 PYTORCH_SPECIFIC_MAPPINGS = collections.OrderedDict(
     [
         ("USE_CUDA", ("USE_ROCM", API_PYTORCH)),
+        ("TORCH_CUDA_CPP_API", ("TORCH_HIP_CPP_API", API_PYTORCH)),
+        ("TORCH_CUDA_CU_API", ("TORCH_HIP_API", API_PYTORCH)),
         ("CUDA_VERSION", ("TORCH_HIP_VERSION", API_PYTORCH)),
         ("cudaHostAllocator", ("hipHostAllocator", API_PYTORCH)),
         ("cudaDeviceAllocator", ("hipDeviceAllocator", API_PYTORCH)),
