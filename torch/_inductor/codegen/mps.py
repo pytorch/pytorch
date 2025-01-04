@@ -75,6 +75,15 @@ class MetalOverrides(OpOverrides):
         return f"{a} ? {b} : {c}"
 
     @staticmethod
+    def remainder(a: CSEVariable, b: CSEVariable) -> str:
+        if b.dtype is not None and not b.dtype.is_floating_point:
+            return f"{a} % {b}"
+        # Upcast to float otherwise results of remainder op are wrong for half
+        float_a = f"static_cast<float>({a})" if a.dtype != torch.float else a
+        float_b = f"static_cast<float>({b})" if b.dtype != torch.float else b
+        return f"{float_a} - {float_b} * metal::floor({float_a} / {float_b})"
+
+    @staticmethod
     def maximum(a: CSEVariable, b: CSEVariable) -> str:
         # TODO: Fix nan propagation, see https://github.com/pytorch/pytorch/issues/143976
         return f"metal::max(static_cast<decltype({a}+{b})>({a}), static_cast<decltype({a}+{b})>({b}))"
