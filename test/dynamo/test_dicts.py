@@ -62,6 +62,31 @@ class DictTests(torch._dynamo.test_case.TestCase):
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         self.assertEqual(fn(x), opt_fn(x))
 
+    def test_dict_contains(self):
+        sd = dict()
+        sd[2] = 5
+        sd[4] = 10
+
+        def fn(x):
+            if 1 in sd:
+                x = x * 2
+            else:
+                x = x * 3
+            return x
+
+        x = torch.randn(4)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(x), opt_fn(x))
+
+        # Ensure a recompilation
+        sd[1] = 15
+        self.assertEqual(fn(x), opt_fn(x))
+
+        # Ensure not recompilation because the traced program remains same here.
+        sd[2] = 10
+        with unittest.mock.patch("torch._dynamo.config.error_on_recompile", True):
+            self.assertEqual(fn(x), opt_fn(x))
+
     def test_dict_subclass_methods_fallback_readonly(self):
         sd = SimpleDict()
         sd[2] = 5
@@ -317,6 +342,55 @@ class DictTests(torch._dynamo.test_case.TestCase):
         opt_fn = torch.compile(fn, backend=cnts)
         x = torch.randn(4)
         self.assertEqual(opt_fn(x, d), fn(x, d))
+
+    def test_lazy_key_guarding(self):
+        d = {"a": 2, "b": 3, "c": 5}
+
+        def fn(x):
+            return x * d["a"]
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+
+        x = torch.randn(4)
+        ref = fn(x)
+        res = opt_fn(x)
+        self.assertEqual(ref, res)
+
+        # Since key c was not used, it should not lead to a recompilation
+        d.pop("c")
+        d["d"] = 10
+
+        with unittest.mock.patch("torch._dynamo.config.error_on_recompile", True):
+            ref = fn(x)
+            res = opt_fn(x)
+            self.assertEqual(ref, res)
+
+    def test_lazy_key_non_const_guarding(self):
+        d = {
+            list: 2,
+            dict: 3,
+            OrderedDict: 5,
+            namedtuple: 7,
+        }
+
+        def fn(x):
+            return x * d[list]
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+
+        x = torch.randn(4)
+        ref = fn(x)
+        res = opt_fn(x)
+        self.assertEqual(ref, res)
+
+        # Since key c was not used, it should not lead to a recompilation
+        d.pop(dict)
+        d[defaultdict] = 10
+
+        with unittest.mock.patch("torch._dynamo.config.error_on_recompile", True):
+            ref = fn(x)
+            res = opt_fn(x)
+            self.assertEqual(ref, res)
 
     def test_dict_mutation_side_effect(self):
         def fn(d):
