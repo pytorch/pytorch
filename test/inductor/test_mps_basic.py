@@ -61,6 +61,9 @@ class MPSBasicTests(TestCase):
             ),
         )
 
+    def test_log(self):
+        self.common(lambda x: x.log(), (torch.rand(1024),))
+
     def test_acos(self):
         self.common(lambda x: x.acos(), (torch.rand(1024),))
 
