@@ -9,8 +9,8 @@ from torch.utils._sympy.printers import ExprPrinter as ExprPrinter_
 
 from ..ops_handler import StoreMode
 from ..scheduler import SchedulerNode
-from ..utils import get_kernel_metadata
-from ..virtualized import V
+from ..utils import get_bounds_index_expr, get_kernel_metadata
+from ..virtualized import ops, V
 from .common import CSEVariable, DeferredLine, IndentedBuffer, OpOverrides
 from .simd import IterationRangesEntry, SIMDKernel, SIMDScheduling
 
@@ -69,6 +69,14 @@ class MetalOverrides(OpOverrides):
         elif isinstance(val, bool):
             return "true" if val else "false"
         return str(val)
+
+    @staticmethod
+    def index_expr(expr: sympy.Expr, dtype: torch.dtype) -> str:
+        idx_str = V.kernel.index_to_str(V.kernel.prepare_indexing(expr))
+        var = V.kernel.cse.generate(
+            V.kernel.compute, idx_str, bounds=get_bounds_index_expr(expr)
+        )
+        return ops.to_dtype(var, dtype)
 
     @staticmethod
     def where(a: CSEVariable, b: CSEVariable, c: CSEVariable) -> str:
@@ -148,12 +156,20 @@ class MetalOverrides(OpOverrides):
     def atanh(x: CSEVariable) -> str:
         return f"metal::atanh({x})"
 
+    @staticmethod
+    def floordiv(a: CSEVariable, b: CSEVariable) -> str:
+        # a and b are integer type
+        quot = f"{a} / {b}"
+        rem = f"{a} % {b}"
+        return f"(({a} < 0) != ({b} < 0) ? ({rem} != 0 ? {quot} - 1 : {quot}) : {quot})"
+
 
 class MetalKernel(SIMDKernel):
     overrides = MetalOverrides  # type: ignore[assignment]
     suffix = ";"
     newvar_prefix = "auto "
     sexpr = MetalExprPrinter().doprint
+    kexpr = sexpr
 
     def __init__(
         self,
