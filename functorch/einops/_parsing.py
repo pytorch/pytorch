@@ -27,7 +27,11 @@ from __future__ import annotations
 
 import keyword
 import warnings
-from typing import Collection, List, Mapping, Optional, Set, Tuple, Union
+from typing import List, Optional, Set, Tuple, TYPE_CHECKING, Union
+
+
+if TYPE_CHECKING:
+    from collections.abc import Collection, Mapping
 
 
 _ellipsis: str = "\u2026"  # NB, this is a single unicode symbol. String is used as it is not a list, but can be iterated
