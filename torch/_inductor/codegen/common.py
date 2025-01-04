@@ -979,7 +979,7 @@ pointwise_overrides_data: Dict[str, OverridesData] = dict(
     ),
     polygamma=OverridesData(
         type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
-        cpp=lambda x, y: f"calc_polygamma({y}, {x})",
+        cpp=lambda x, y: f"{x} == 0 ? calc_digamma({y}) : calc_polygamma({y}, {x})",
         name="polygamma",
     ),
     # psi - alias to digamma
@@ -1839,8 +1839,6 @@ class Kernel(CodeGen):
                                 config.cpu_backend == "triton"
                                 if device_str == "cpu"
                                 else config.cuda_backend == "triton"
-                                if device_str != "mps"
-                                else False
                             )
                         else:
                             triton_backend = False
