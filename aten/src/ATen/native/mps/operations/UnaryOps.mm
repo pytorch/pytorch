@@ -310,10 +310,9 @@ Tensor& angle_out_mps(const Tensor& self, Tensor& output) {
       // not available, and NaN is not propagated correctly:
       auto imagPart = [mpsGraph constantWithScalar:0.0 shape:inputTensor.shape dataType:inputTensor.dataType];
       auto result = [mpsGraph atan2WithPrimaryTensor:imagPart secondaryTensor:inputTensor name:nil];
-      auto nanMask = [mpsGraph isNaNWithTensor:result name:nil];
-      auto nanTensor = [mpsGraph constantWithScalar:NAN dataType:inputTensor.dataType];
+      auto nanMask = [mpsGraph isNaNWithTensor:inputTensor name:nil];
       return [mpsGraph selectWithPredicateTensor:nanMask
-                             truePredicateTensor:nanTensor
+                             truePredicateTensor:inputTensor
                             falsePredicateTensor:result
                                             name:nil];
     });
