@@ -11,6 +11,15 @@
 #include <ostream>
 #include <memory>
 
+
+#define Py_BUILD_CORE_MODULE
+#if IS_PYTHON_3_13_PLUS
+// see https://github.com/python/cpython/issues/112136
+#include <internal/pycore_modsupport.h>
+#endif
+#undef Py_BUILD_CORE_MODULE
+#endif
+
 #define PY_BEGIN try {
 #define PY_END(v) } catch(mpy::exception_set & err) { return (v); }
 
