@@ -114,6 +114,12 @@ COPY ./common/install_aotriton.sh install_aotriton.sh
 RUN ["/bin/bash", "-c", "./install_aotriton.sh /opt/rocm && rm -rf install_aotriton.sh aotriton_version.txt common_utils.sh"]
 ENV AOTRITON_INSTALLED_PREFIX /opt/rocm/aotriton
 
+# This is needed by sccache
+COPY ./common/install_openssl.sh install_openssl.sh
+ENV OPENSSL_ROOT_DIR /opt/openssl
+RUN bash ./install_openssl.sh
+ENV OPENSSL_DIR /opt/openssl
+
 # Install ccache/sccache (do this last, so we get priority in PATH)
 COPY ./common/install_cache.sh install_cache.sh
 ENV PATH /opt/cache/bin:$PATH
