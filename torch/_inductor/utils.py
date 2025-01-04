@@ -2438,3 +2438,26 @@ def set_kernel_post_grad_provenance_tracing(node_schedule, kernel_name):
                 V.debug._inductor_triton_kernel_to_post_grad_node_info[kernel_name] = [
                     origin.name for origin in node.node.origins
                 ]
+
+
+def partialize_and_update_signature(func, **kwargs):
+    """
+    Equivalent to functools.partial but also updates the signature on returned function
+    """
+    original_sig = inspect.signature(func)
+    parameters = original_sig.parameters
+
+    new_parameters = {
+        key: value for key, value in parameters.items() if key not in kwargs
+    }
+    new_sig = inspect.Signature(parameters=list(new_parameters.values()))
+
+    partial_func = functools.partial(func, **kwargs)
+
+    def wrapper(*args, **kwargs):
+        return partial_func(*args, **kwargs)
+
+    wrapper.__signature__ = new_sig  # type: ignore[attr-defined]
+    wrapper.__name__ = func.__name__
+
+    return wrapper
