@@ -1293,12 +1293,16 @@ class CommonTemplate:
                 device=self.device,
             )
             _, code = run_and_get_code(fn, x, y)
-            self.assertEqual(
-                " ".join(code).count(
-                    "view_dtype" if config.cpp_wrapper else "aten.view"
-                ),
-                3,
-            )
+            # cpp_wrapper falls back to Python function calls with complex inputs, so
+            # there are still two calls to aten.view when it's enabled.
+            code = " ".join(code)
+            if config.cpp_wrapper:
+                self.assertEqual(code.count("view_dtype"), 1)
+                # The additional 2 counts here come from error messages containing this
+                # string.
+                self.assertEqual(code.count("aten.view"), 4)
+            else:
+                self.assertEqual(code.count("aten.view"), 3)
 
     def test_add_complex5(self):
         def fn(a, b, alpha):
@@ -5198,17 +5202,24 @@ class CommonTemplate:
             (torch.randn([1, 2, 4, 8]),),
         )
 
-    def test_var_mean(self):
+    @parametrize("tile_reduction", (False, True))
+    def test_var_mean(self, tile_reduction: bool):
         def fn(x):
             return (
                 *torch.var_mean(x, -1),
                 *torch.var_mean(x, [1, 3]),
             )
 
-        self.common(
-            fn,
-            (torch.randn([1, 2, 4, 8]),),
-        )
+        with config.patch(
+            {
+                "triton.prefer_nd_tiling": tile_reduction,
+                "triton.tile_reductions": tile_reduction,
+            }
+        ):
+            self.common(
+                fn,
+                (torch.randn([1, 2, 4, 8]),),
+            )
 
     def test_var_correction(self):
         def fn(x):
