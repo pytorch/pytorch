@@ -84,7 +84,7 @@ class MetalOverrides(OpOverrides):
             result = body()
 
         if result.bounds.is_bool:
-            other = bool(other)
+            other = bool(other)  # type: ignore[assignment]
 
         return ops.where(new_mask, result, other)
 
