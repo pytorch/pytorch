@@ -848,16 +848,6 @@ def jagged_scaled_dot_product_attention(
             **output_nt_info,
         ).transpose(1, 2)
     elif backend_choice == SDPBackend.CUDNN_ATTENTION:
-        # (
-        #    query_reshaped,
-        #    key_reshaped,
-        #    value_reshaped,
-        #    cumulative_sequence_length_q,
-        #    cumulative_sequence_length_kv,
-        #    max_seqlen_batch_q,
-        #    max_seqlen_batch_kv,
-        #    output_nt_info,
-        #) = _sdpa_nested_preprocessing(query, key, value)
         (
             query_reshaped,
             key_reshaped,

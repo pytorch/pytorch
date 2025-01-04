@@ -6725,7 +6725,7 @@ torch.cuda.synchronize()
                 check_forward_backward()
         val = os.getenv("TORCH_CUDNN_SDPA_NESTED_TENSOR_ENABLED")
         check_cudnn = int(val) if val is not None else 0
-        if 'cuda' in str(device) and check_cudnn:
+        if 'cuda' in str(device) and check_cudnn and (dtype == torch.float16 or dtype == torch.bfloat16):
             with torch.nn.attention.sdpa_kernel(torch.nn.attention.SDPBackend.CUDNN_ATTENTION):
                 check_forward_backward(skip_backward=True)
 
