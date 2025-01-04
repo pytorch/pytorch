@@ -116,7 +116,7 @@ def getattr_static_helper(value, name):
 
     # In some cases, we have to do dynamic lookup because getattr_static is not enough. For example, threading.local
     # has side-effect free __getattribute__ and the attribute is not visible without a dynamic lookup.
-    if (
+    if not object_has_getattribute(value) and (
         subobj is NO_SUCH_SUBOBJ  # e.g., threading.local
         or isinstance(
             subobj, _collections._tuplegetter
@@ -130,6 +130,8 @@ def getattr_static_helper(value, name):
         # Call __getattribute__, we have already checked that this is not overridden and side-effect free. We don't
         # want to call getattr because it can be user-overridden.
         subobj = value.__getattribute__(name)
+    elif object_has_getattribute(value) and subobj is NO_SUCH_SUBOBJ:
+        raise AttributeError
 
     return subobj
 

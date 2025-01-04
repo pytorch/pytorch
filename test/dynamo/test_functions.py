@@ -4355,7 +4355,9 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
             return x, str(a)
 
         eager_custom_str = foo_custom_str(torch.ones(4))
-        dynamo_custom_str = torch.compile(foo_custom_str, backend="eager", fullgraph=True)(torch.ones(4))
+        dynamo_custom_str = torch.compile(
+            foo_custom_str, backend="eager", fullgraph=True
+        )(torch.ones(4))
 
         self.assertEqual(eager_custom_str[1], dynamo_custom_str[1])
         self.assertEqual(eager_custom_str[1], "ok")
@@ -4368,9 +4370,9 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
             return x, str(a)
 
         eager_default_str = foo_default_str(torch.ones(4))
-        dynamo_default_str = torch.compile(foo_default_str, backend="eager", fullgraph=True)(
-            torch.ones(4)
-        )
+        dynamo_default_str = torch.compile(
+            foo_default_str, backend="eager", fullgraph=True
+        )(torch.ones(4))
 
         # Check that the tensor output from eager and dynamo modes are the same
         self.assertEqual(eager_default_str[0], dynamo_default_str[0])
