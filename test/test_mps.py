@@ -6106,6 +6106,14 @@ class TestMPS(TestCaseMPS):
 
         helper(1, 1, 4, 5)
 
+    def test_minimum_maximum_nan_propagation(self):
+        x = torch.rand(32, device="mps")
+        y = torch.rand(32, device="mps")
+        x[3] = torch.nan
+        y[5] = torch.nan
+        self.assertTrue(torch.minimum(x, y).isnan().any().item())
+        self.assertTrue(torch.maximum(x, y).isnan().any().item())
+
     def test_clamp_fp16_fp32(self):
         cpu_x = torch.randn(10, device='cpu', dtype=torch.float, requires_grad=False)
         x = cpu_x.detach().clone().to('mps')
