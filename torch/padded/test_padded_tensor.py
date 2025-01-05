@@ -64,11 +64,11 @@ class TestAttention(TestCase):
 
     def test_attention_1(self):
         inputs = [torch.ones(4, 2, dtype=torch.int32)]
-        MULTIPLIERS = {0: 8, 1: 8, 2: 1}
+        MULTIPLIERS = {0: 128, 1: 128, 2: 1}
         inputs_p = pytree.tree_map(
-            lambda x: PaddedTensor(x, {0: 8, 1: 8, 2: 1}, None), inputs
+            lambda x: PaddedTensor(x, {0: 128, 1: 128, 2: 1}, None), inputs
         )
-        output_shapes_p = [torch.Size([8, 8, 10]) for _ in range(3)]
+        output_shapes_p = [torch.Size([128, 128, 10]) for _ in range(3)]
 
         self.run_unpadded_padded(self.f_1, inputs, inputs_p, output_shapes_p)
 
@@ -165,7 +165,10 @@ class TestAttention(TestCase):
         self.run_unpadded_padded(self.f_4, inputs, inputs_p, output_shapes_p)
 
     def f_5(self, q, k, v, mask):
-        y = F.scaled_dot_product_attention(q, k, v, attn_mask=mask, dropout_p=0.0)
+        # y = F.scaled_dot_product_attention(q, k, v, attn_mask=mask, dropout_p=0.0)
+        y, _ = torch.ops.aten._scaled_dot_product_flash_attention_for_cpu(
+            q, k, v, attn_mask=mask, dropout_p=0.0
+        )
         return (y,)
 
     def test_attention_5(self):
@@ -228,20 +231,15 @@ class TestAttention(TestCase):
 
         inputs = [x, freqs_cis, mask, input_pos, k_cache, v_cache]
 
-        # inputs_p = [
-        #    PaddedTensor(x, {0: 8, 1: 8, 2: 1}, None),
-        #    PaddedTensor(freqs_cis, {0: 8, 1: 1, 2: 1}, None),
-        #    mask,
-        #    PaddedTensor(input_pos, {0: 8, 1: 1, 2: 1}, None),
-        # ]
+        N = 16
 
         inputs_p = [
-            PaddedTensor(x, {0: 1, 1: 1, 2: 1}, None),
-            PaddedTensor(freqs_cis, {0: 1, 1: 1, 2: 1}, None),
+            PaddedTensor(x, {0: N, 1: N, 2: 1}, None),
+            PaddedTensor(freqs_cis, {0: N, 1: 1, 2: 1}, None),
             mask,
-            PaddedTensor(input_pos, {0: 1, 1: 1, 2: 1}, None),
-            PaddedTensor(k_cache, {0: 1, 1: 1, 2: 1}, None),
-            PaddedTensor(v_cache, {0: 1, 1: 1, 2: 1}, None),
+            PaddedTensor(input_pos, {0: 1, 1: N, 2: 1}, None),
+            PaddedTensor(k_cache, {0: 1, 1: 1, 2: N}, None),
+            PaddedTensor(v_cache, {0: 1, 1: 1, 2: N}, None),
         ]
 
         self.run_unpadded_padded(f, inputs, inputs_p, None)
@@ -252,4 +250,4 @@ if __name__ == "__main__":
 
 # cls = TestAttention()
 # cls.setUp()
-# cls.test_attention_4()
+# cls.test_all()

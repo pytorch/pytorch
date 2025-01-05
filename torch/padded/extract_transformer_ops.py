@@ -22,5 +22,5 @@ dot_aten_graph(
     transformer,
     (torch.ones(4, 2, dtype=torch.int32), torch.ones(2, dtype=torch.int32)),
     "transformer_graph.pdf",
-    30,
+    100,
 )
