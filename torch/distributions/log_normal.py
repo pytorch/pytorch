@@ -3,6 +3,7 @@ from typing_extensions import Self
 
 from torch import Tensor
 from torch.distributions import constraints
+from torch.distributions.constraints import Constraint
 from torch.distributions.normal import Normal
 from torch.distributions.transformed_distribution import TransformedDistribution
 from torch.distributions.transforms import ExpTransform
@@ -32,9 +33,12 @@ class LogNormal(TransformedDistribution):
         scale (float or Tensor): standard deviation of log of the distribution
     """
 
-    arg_constraints = {"loc": constraints.real, "scale": constraints.positive}
-    support = constraints.positive
-    has_rsample = True
+    arg_constraints: dict[str, Constraint] = {
+        "loc": constraints.real,
+        "scale": constraints.positive,
+    }
+    support = constraints.positive  # type: ignore[assignment]
+    has_rsample: bool = True
     base_dist: Normal
 
     def __init__(

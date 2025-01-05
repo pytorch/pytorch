@@ -23,9 +23,9 @@ class Distribution:
         validate_args (bool, optional): Whether to validate arguments. Default: None.
     """
 
-    has_rsample = False
-    has_enumerate_support = False
-    _validate_args = __debug__
+    has_rsample: bool = False
+    has_enumerate_support: bool = False
+    _validate_args: bool = __debug__
 
     @staticmethod
     def set_default_validate_args(value: bool) -> None:

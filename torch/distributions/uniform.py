@@ -31,11 +31,13 @@ class Uniform(Distribution):
     """
 
     # TODO allow (loc,scale) parameterization to allow independent constraints.
-    arg_constraints = {
+    arg_constraints: dict[str, Constraint] = {
         "low": constraints.dependent(is_discrete=False, event_dim=0),
         "high": constraints.dependent(is_discrete=False, event_dim=0),
     }
-    has_rsample = True
+    has_rsample: bool = True
+    low: Tensor
+    high: Tensor
 
     @property
     def mean(self) -> Tensor:

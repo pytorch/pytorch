@@ -5,6 +5,7 @@ from typing_extensions import Self
 import torch
 from torch import Size, Tensor
 from torch.distributions import constraints
+from torch.distributions.constraints import Constraint
 from torch.distributions.distribution import Distribution
 from torch.distributions.utils import _standard_normal, lazy_property
 from torch.types import _size
@@ -123,14 +124,15 @@ class MultivariateNormal(Distribution):
         the corresponding lower triangular matrices using a Cholesky decomposition.
     """
 
-    arg_constraints = {
+    arg_constraints: dict[str, Constraint] = {
         "loc": constraints.real_vector,
         "covariance_matrix": constraints.positive_definite,
         "precision_matrix": constraints.positive_definite,
         "scale_tril": constraints.lower_cholesky,
     }
     support = constraints.real_vector
-    has_rsample = True
+    has_rsample: bool = True
+    loc: Tensor
 
     def __init__(
         self,

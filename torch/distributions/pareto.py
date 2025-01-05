@@ -30,7 +30,13 @@ class Pareto(TransformedDistribution):
         alpha (float or Tensor): Shape parameter of the distribution
     """
 
-    arg_constraints = {"alpha": constraints.positive, "scale": constraints.positive}
+    arg_constraints: dict[str, Constraint] = {
+        "alpha": constraints.positive,
+        "scale": constraints.positive,
+    }
+    alpha: Tensor
+    scale: Tensor
+    base_distribution: Exponential
 
     def __init__(
         self,
@@ -66,7 +72,7 @@ class Pareto(TransformedDistribution):
         return self.scale.pow(2) * a / ((a - 1).pow(2) * (a - 2))
 
     @constraints.dependent_property(is_discrete=False, event_dim=0)
-    def support(self) -> Constraint:
+    def support(self) -> Constraint:  # type: ignore[override]
         return constraints.greater_than_eq(self.scale)
 
     def entropy(self) -> Tensor:

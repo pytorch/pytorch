@@ -6,6 +6,7 @@ import torch
 import torch.jit
 from torch import Tensor
 from torch.distributions import constraints
+from torch.distributions.constraints import Constraint
 from torch.distributions.distribution import Distribution
 from torch.distributions.utils import broadcast_all, lazy_property
 from torch.types import _size
@@ -22,7 +23,7 @@ def _eval_poly(y: Tensor, coef: list[float]) -> Tensor:
     return result
 
 
-_I0_COEF_SMALL: list[float] = [
+_I0_COEF_SMALL: Final[list[float]] = [
     1.0,
     3.5156229,
     3.0899424,
@@ -31,7 +32,7 @@ _I0_COEF_SMALL: list[float] = [
     0.360768e-1,
     0.45813e-2,
 ]
-_I0_COEF_LARGE: list[float] = [
+_I0_COEF_LARGE: Final[list[float]] = [
     0.39894228,
     0.1328592e-1,
     0.225319e-2,
@@ -42,7 +43,7 @@ _I0_COEF_LARGE: list[float] = [
     -0.1647633e-1,
     0.392377e-2,
 ]
-_I1_COEF_SMALL: list[float] = [
+_I1_COEF_SMALL: Final[list[float]] = [
     0.5,
     0.87890594,
     0.51498869,
@@ -51,7 +52,7 @@ _I1_COEF_SMALL: list[float] = [
     0.301532e-2,
     0.32411e-3,
 ]
-_I1_COEF_LARGE: list[float] = [
+_I1_COEF_LARGE: Final[list[float]] = [
     0.39894228,
     -0.3988024e-1,
     -0.362018e-2,
@@ -63,8 +64,8 @@ _I1_COEF_LARGE: list[float] = [
     -0.420059e-2,
 ]
 
-_COEF_SMALL: list[list[float]] = [_I0_COEF_SMALL, _I1_COEF_SMALL]
-_COEF_LARGE: list[list[float]] = [_I0_COEF_LARGE, _I1_COEF_LARGE]
+_COEF_SMALL: Final[list[list[float]]] = [_I0_COEF_SMALL, _I1_COEF_SMALL]
+_COEF_LARGE: Final[list[list[float]]] = [_I0_COEF_LARGE, _I1_COEF_LARGE]
 
 
 def _log_modified_bessel_fn(x: Tensor, order: int = 0) -> Tensor:
@@ -127,9 +128,14 @@ class VonMises(Distribution):
         concentration (float or Tensor): concentration parameter
     """
 
-    arg_constraints = {"loc": constraints.real, "concentration": constraints.positive}
+    arg_constraints: dict[str, Constraint] = {
+        "loc": constraints.real,
+        "concentration": constraints.positive,
+    }
     support = constraints.real
-    has_rsample = False
+    has_rsample: bool = False
+    loc: Tensor
+    concentration: Tensor
 
     def __init__(
         self,

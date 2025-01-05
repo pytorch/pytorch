@@ -4,6 +4,7 @@ from typing_extensions import Self
 import torch
 from torch import Tensor
 from torch.distributions import constraints
+from torch.distributions.constraints import Constraint
 from torch.distributions.gamma import Gamma
 from torch.distributions.transformed_distribution import TransformedDistribution
 from torch.distributions.transforms import PowerTransform
@@ -35,12 +36,12 @@ class InverseGamma(TransformedDistribution):
             (often referred to as beta)
     """
 
-    arg_constraints = {
+    arg_constraints: dict[str, Constraint] = {
         "concentration": constraints.positive,
         "rate": constraints.positive,
     }
-    support = constraints.positive
-    has_rsample = True
+    support = constraints.positive  # type: ignore[assignment]
+    has_rsample: bool = True
     base_dist: Gamma
 
     def __init__(

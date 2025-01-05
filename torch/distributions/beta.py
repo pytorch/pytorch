@@ -4,6 +4,7 @@ from typing_extensions import Self
 import torch
 from torch import Tensor
 from torch.distributions import constraints
+from torch.distributions.constraints import Constraint
 from torch.distributions.dirichlet import Dirichlet
 from torch.distributions.exp_family import ExponentialFamily
 from torch.distributions.utils import broadcast_all
@@ -31,12 +32,12 @@ class Beta(ExponentialFamily):
             (often referred to as beta)
     """
 
-    arg_constraints = {
+    arg_constraints: dict[str, Constraint] = {
         "concentration1": constraints.positive,
         "concentration0": constraints.positive,
     }
     support = constraints.unit_interval
-    has_rsample = True
+    has_rsample: bool = True
 
     def __init__(
         self,

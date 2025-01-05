@@ -4,6 +4,7 @@ from typing_extensions import Self
 import torch
 from torch import nan, Tensor
 from torch.distributions import constraints
+from torch.distributions.constraints import Constraint
 from torch.distributions.transformed_distribution import TransformedDistribution
 from torch.distributions.transforms import AffineTransform, PowerTransform
 from torch.distributions.uniform import Uniform
@@ -41,12 +42,14 @@ class Kumaraswamy(TransformedDistribution):
             (often referred to as beta)
     """
 
-    arg_constraints = {
+    arg_constraints: dict[str, Constraint] = {
         "concentration1": constraints.positive,
         "concentration0": constraints.positive,
     }
-    support = constraints.unit_interval
-    has_rsample = True
+    support = constraints.unit_interval  # type: ignore[assignment]
+    has_rsample: bool = True
+    concentration0: Tensor
+    concentration1: Tensor
 
     def __init__(
         self,

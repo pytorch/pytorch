@@ -5,6 +5,7 @@ import torch
 from torch import Tensor
 from torch.distributions import constraints
 from torch.distributions.categorical import Categorical
+from torch.distributions.constraints import Constraint
 from torch.distributions.distribution import Distribution
 from torch.distributions.transformed_distribution import TransformedDistribution
 from torch.distributions.transforms import ExpTransform
@@ -38,11 +39,14 @@ class ExpRelaxedCategorical(Distribution):
     (Jang et al., 2017)
     """
 
-    arg_constraints = {"probs": constraints.simplex, "logits": constraints.real_vector}
+    arg_constraints: dict[str, Constraint] = {
+        "probs": constraints.simplex,
+        "logits": constraints.real_vector,
+    }
     support = (
         constraints.real_vector
     )  # The true support is actually a submanifold of this.
-    has_rsample = True
+    has_rsample: bool = True
 
     def __init__(
         self,
@@ -126,9 +130,12 @@ class RelaxedOneHotCategorical(TransformedDistribution):
         logits (Tensor): unnormalized log probability for each event
     """
 
-    arg_constraints = {"probs": constraints.simplex, "logits": constraints.real_vector}
-    support = constraints.simplex
-    has_rsample = True
+    arg_constraints: dict[str, Constraint] = {
+        "probs": constraints.simplex,
+        "logits": constraints.real_vector,
+    }
+    support = constraints.simplex  # type: ignore[assignment]
+    has_rsample: bool = True
     base_dist: ExpRelaxedCategorical
 
     def __init__(

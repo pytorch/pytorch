@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 r"""
 PyTorch provides two global :class:`ConstraintRegistry` objects that link
 :class:`~torch.distributions.constraints.Constraint` objects to
@@ -155,12 +154,10 @@ class ConstraintRegistry:
             return lambda fac: self.register(constraint, fac)
 
         # Support calling on singleton instances.
-        if isinstance(constraint, constraints.Constraint):
+        if isinstance(constraint, Constraint):
             constraint = type(constraint)  # type: ignore[assignment]
 
-        if not isinstance(constraint, type) or not issubclass(
-            constraint, constraints.Constraint
-        ):
+        if not isinstance(constraint, type) or not issubclass(constraint, Constraint):
             raise TypeError(
                 f"Expected constraint to be either a Constraint subclass or instance, but got {constraint}"
             )

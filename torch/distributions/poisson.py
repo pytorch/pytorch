@@ -4,6 +4,7 @@ from typing_extensions import Self
 import torch
 from torch import Tensor
 from torch.distributions import constraints
+from torch.distributions.constraints import Constraint
 from torch.distributions.exp_family import ExponentialFamily
 from torch.distributions.utils import broadcast_all
 from torch.types import _Number, Number, _size
@@ -32,8 +33,9 @@ class Poisson(ExponentialFamily):
         rate (Number, Tensor): the rate parameter
     """
 
-    arg_constraints = {"rate": constraints.nonnegative}
+    arg_constraints: dict[str, Constraint] = {"rate": constraints.nonnegative}
     support = constraints.nonnegative_integer
+    rate: Tensor
 
     @property
     def mean(self) -> Tensor:

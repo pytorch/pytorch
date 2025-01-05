@@ -55,8 +55,8 @@ class MixtureSameFamily(Distribution):
             instance. Right-most batch dimension indexes component.
     """
 
-    arg_constraints: dict[str, constraints.Constraint] = {}
-    has_rsample = False
+    arg_constraints: dict[str, Constraint] = {}
+    has_rsample: bool = False
 
     def __init__(
         self,
