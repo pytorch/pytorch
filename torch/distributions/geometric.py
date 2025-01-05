@@ -64,7 +64,8 @@ class Geometric(Distribution):
         if isinstance(probs_or_logits, Number):
             batch_shape = torch.Size()
         else:
-            batch_shape = probs_or_logits.size()  # type: ignore[union-attr]
+            assert probs_or_logits is not None
+            batch_shape = probs_or_logits.size()
         super().__init__(batch_shape, validate_args=validate_args)
         if self._validate_args and probs is not None:
             # Add an extra check beyond unit_interval
