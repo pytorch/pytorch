@@ -13415,7 +13415,6 @@ if HAS_GPU and not TEST_WITH_ASAN:
             def forward(self, x):
                 return self.gru(x)
 
-        @expectedFailureXPU
         def test_rnn_compile_safe(self):
             device = torch.device(GPU_TYPE)
             model = RNNTest.Model().to(device)
