@@ -1066,7 +1066,7 @@ class CatTransform(Transform):
         tseq: Sequence[Transform],
         dim: int = 0,
         lengths: Optional[Sequence[int]] = None,
-        cache_size=0,
+        cache_size: int = 0,
     ) -> None:
         assert all(isinstance(t, Transform) for t in tseq)
         if cache_size:
