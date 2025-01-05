@@ -52,7 +52,7 @@ class ExpRelaxedCategorical(Distribution):
         validate_args: Optional[bool] = None,
     ) -> None:
         self._categorical = Categorical(probs, logits)
-        self.temperature = temperature
+        (self.temperature,) = broadcast_all(temperature)
         batch_shape = self._categorical.batch_shape
         event_shape = self._categorical.param_shape[-1:]
         super().__init__(batch_shape, event_shape, validate_args=validate_args)

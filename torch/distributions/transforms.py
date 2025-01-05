@@ -1,15 +1,16 @@
-# mypy: allow-untyped-defs
 import functools
 import math
 import operator
 import weakref
 from collections.abc import Sequence
-from typing import Optional, Union
+from typing import Any, Optional, Union
+from typing_extensions import Self
 
 import torch
 import torch.nn.functional as F
-from torch import Tensor
+from torch import Size, Tensor
 from torch.distributions import constraints
+from torch.distributions.constraints import Constraint
 from torch.distributions.distribution import Distribution
 from torch.distributions.utils import (
     _sum_rightmost,
@@ -19,7 +20,7 @@ from torch.distributions.utils import (
     vec_to_tril_matrix,
 )
 from torch.nn.functional import pad, softplus
-from torch.types import _Number
+from torch.types import _Number, _size
 
 
 __all__ = [
@@ -92,8 +93,9 @@ class Transform:
     """
 
     bijective = False
-    domain: constraints.Constraint
-    codomain: constraints.Constraint
+    domain: Constraint
+    codomain: Constraint
+    _cached_x_y: tuple[Optional[Tensor], Optional[Tensor]]
 
     def __init__(self, cache_size: int = 0) -> None:
         self._cache_size = cache_size
@@ -106,7 +108,7 @@ class Transform:
             raise ValueError("cache_size must be 0 or 1")
         super().__init__()
 
-    def __getstate__(self):
+    def __getstate__(self) -> dict[str, Any]:
         state = self.__dict__.copy()
         state["_inv"] = None
         return state
@@ -139,21 +141,21 @@ class Transform:
         """
         raise NotImplementedError
 
-    def with_cache(self, cache_size=1):
+    def with_cache(self, cache_size: int = 1) -> Self:
         if self._cache_size == cache_size:
             return self
         if type(self).__init__ is Transform.__init__:
             return type(self)(cache_size=cache_size)
         raise NotImplementedError(f"{type(self)}.with_cache is not implemented")
 
-    def __eq__(self, other):
+    def __eq__(self, other: object) -> bool:
         return self is other
 
-    def __ne__(self, other):
+    def __ne__(self, other: object) -> bool:
         # Necessary for Python2
         return not self.__eq__(other)
 
-    def __call__(self, x):
+    def __call__(self, x: Tensor) -> Tensor:
         """
         Computes the transform `x => y`.
         """
@@ -161,12 +163,13 @@ class Transform:
             return self._call(x)
         x_old, y_old = self._cached_x_y
         if x is x_old:
+            assert y_old is not None
             return y_old
         y = self._call(x)
         self._cached_x_y = x, y
         return y
 
-    def _inv_call(self, y):
+    def _inv_call(self, y: Tensor) -> Tensor:
         """
         Inverts the transform `y => x`.
         """
@@ -174,24 +177,25 @@ class Transform:
             return self._inverse(y)
         x_old, y_old = self._cached_x_y
         if y is y_old:
+            assert x_old is not None
             return x_old
         x = self._inverse(y)
         self._cached_x_y = x, y
         return x
 
-    def _call(self, x):
+    def _call(self, x: Tensor) -> Tensor:
         """
         Abstract method to compute forward transformation.
         """
         raise NotImplementedError
 
-    def _inverse(self, y):
+    def _inverse(self, y: Tensor) -> Tensor:
         """
         Abstract method to compute inverse transformation.
         """
         raise NotImplementedError
 
-    def log_abs_det_jacobian(self, x, y):
+    def log_abs_det_jacobian(self, x: Tensor, y: Tensor) -> Tensor:
         """
         Computes the log det jacobian `log |dy/dx|` given input and output.
         """
@@ -200,14 +204,14 @@ class Transform:
     def __repr__(self) -> str:
         return self.__class__.__name__ + "()"
 
-    def forward_shape(self, shape):
+    def forward_shape(self, shape: Size) -> Size:
         """
         Infers the shape of the forward computation, given the input shape.
         Defaults to preserving shape.
         """
         return shape
 
-    def inverse_shape(self, shape):
+    def inverse_shape(self, shape: Size) -> Size:
         """
         Infers the shapes of the inverse computation, given the output shape.
         Defaults to preserving shape.
@@ -226,12 +230,12 @@ class _InverseTransform(Transform):
         self._inv: Transform = transform  # type: ignore[assignment]
 
     @constraints.dependent_property(is_discrete=False)
-    def domain(self):
+    def domain(self) -> Constraint:  # type: ignore[override]
         assert self._inv is not None
         return self._inv.codomain
 
     @constraints.dependent_property(is_discrete=False)
-    def codomain(self):
+    def codomain(self) -> Constraint:  # type: ignore[override]
         assert self._inv is not None
         return self._inv.domain
 
@@ -249,11 +253,11 @@ class _InverseTransform(Transform):
     def inv(self) -> Transform:
         return self._inv
 
-    def with_cache(self, cache_size=1):
+    def with_cache(self, cache_size: int = 1) -> Transform:  # type: ignore[override]
         assert self._inv is not None
         return self.inv.with_cache(cache_size).inv
 
-    def __eq__(self, other):
+    def __eq__(self, other: object) -> bool:
         if not isinstance(other, _InverseTransform):
             return False
         assert self._inv is not None
@@ -262,18 +266,18 @@ class _InverseTransform(Transform):
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}({repr(self._inv)})"
 
-    def __call__(self, x):
+    def __call__(self, x: Tensor) -> Tensor:
         assert self._inv is not None
         return self._inv._inv_call(x)
 
-    def log_abs_det_jacobian(self, x, y):
+    def log_abs_det_jacobian(self, x: Tensor, y: Tensor) -> Tensor:
         assert self._inv is not None
         return -self._inv.log_abs_det_jacobian(y, x)
 
-    def forward_shape(self, shape):
+    def forward_shape(self, shape: Size) -> Size:
         return self._inv.inverse_shape(shape)
 
-    def inverse_shape(self, shape):
+    def inverse_shape(self, shape: Size) -> Size:
         return self._inv.forward_shape(shape)
 
 
@@ -283,24 +287,26 @@ class ComposeTransform(Transform):
     The transforms being composed are responsible for caching.
 
     Args:
-        parts (list of :class:`Transform`): A list of transforms to compose.
+        parts (sequence of :class:`Transform`): A sequence of transforms to compose.
         cache_size (int): Size of cache. If zero, no caching is done. If one,
             the latest single value is cached. Only 0 and 1 are supported.
     """
 
-    def __init__(self, parts: list[Transform], cache_size: int = 0) -> None:
+    parts: Sequence[Transform]
+
+    def __init__(self, parts: Sequence[Transform], cache_size: int = 0) -> None:
         if cache_size:
             parts = [part.with_cache(cache_size) for part in parts]
         super().__init__(cache_size=cache_size)
-        self.parts = parts
+        self.parts = list(parts)
 
-    def __eq__(self, other):
+    def __eq__(self, other: object) -> bool:
         if not isinstance(other, ComposeTransform):
             return False
         return self.parts == other.parts
 
     @constraints.dependent_property(is_discrete=False)
-    def domain(self):
+    def domain(self) -> Constraint:  # type: ignore[override]
         if not self.parts:
             return constraints.real
         domain = self.parts[0].domain
@@ -315,7 +321,7 @@ class ComposeTransform(Transform):
         return domain
 
     @constraints.dependent_property(is_discrete=False)
-    def codomain(self):
+    def codomain(self) -> Constraint:  # type: ignore[override]
         if not self.parts:
             return constraints.real
         codomain = self.parts[-1].codomain
@@ -351,17 +357,17 @@ class ComposeTransform(Transform):
             inv._inv = weakref.ref(self)
         return inv
 
-    def with_cache(self, cache_size=1):
+    def with_cache(self, cache_size: int = 1) -> "ComposeTransform":
         if self._cache_size == cache_size:
             return self
         return ComposeTransform(self.parts, cache_size=cache_size)
 
-    def __call__(self, x):
+    def __call__(self, x: Tensor) -> Tensor:
         for part in self.parts:
             x = part(x)
         return x
 
-    def log_abs_det_jacobian(self, x, y):
+    def log_abs_det_jacobian(self, x: Tensor, y: Tensor) -> Tensor:
         if not self.parts:
             return torch.zeros_like(x)
 
@@ -382,12 +388,12 @@ class ComposeTransform(Transform):
             event_dim += part.codomain.event_dim - part.domain.event_dim
         return functools.reduce(operator.add, terms)
 
-    def forward_shape(self, shape):
+    def forward_shape(self, shape: Size) -> Size:
         for part in self.parts:
             shape = part.forward_shape(shape)
         return shape
 
-    def inverse_shape(self, shape):
+    def inverse_shape(self, shape: Size) -> Size:
         for part in reversed(self.parts):
             shape = part.inverse_shape(shape)
         return shape
@@ -426,7 +432,7 @@ class IndependentTransform(Transform):
         self.base_transform = base_transform.with_cache(cache_size)
         self.reinterpreted_batch_ndims = reinterpreted_batch_ndims
 
-    def with_cache(self, cache_size=1):
+    def with_cache(self, cache_size: int = 1) -> "Self | IndependentTransform":
         if self._cache_size == cache_size:
             return self
         return IndependentTransform(
@@ -434,13 +440,13 @@ class IndependentTransform(Transform):
         )
 
     @constraints.dependent_property(is_discrete=False)
-    def domain(self):
+    def domain(self) -> Constraint:  # type: ignore[override]
         return constraints.independent(
             self.base_transform.domain, self.reinterpreted_batch_ndims
         )
 
     @constraints.dependent_property(is_discrete=False)
-    def codomain(self):
+    def codomain(self) -> Constraint:  # type: ignore[override]
         return constraints.independent(
             self.base_transform.codomain, self.reinterpreted_batch_ndims
         )
@@ -453,17 +459,17 @@ class IndependentTransform(Transform):
     def sign(self) -> int:
         return self.base_transform.sign
 
-    def _call(self, x):
+    def _call(self, x: Tensor) -> Tensor:
         if x.dim() < self.domain.event_dim:
             raise ValueError("Too few dimensions on input")
         return self.base_transform(x)
 
-    def _inverse(self, y):
+    def _inverse(self, y: Tensor) -> Tensor:
         if y.dim() < self.codomain.event_dim:
             raise ValueError("Too few dimensions on input")
         return self.base_transform.inv(y)
 
-    def log_abs_det_jacobian(self, x, y):
+    def log_abs_det_jacobian(self, x: Tensor, y: Tensor) -> Tensor:
         result = self.base_transform.log_abs_det_jacobian(x, y)
         result = _sum_rightmost(result, self.reinterpreted_batch_ndims)
         return result
@@ -471,10 +477,10 @@ class IndependentTransform(Transform):
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}({repr(self.base_transform)}, {self.reinterpreted_batch_ndims})"
 
-    def forward_shape(self, shape):
+    def forward_shape(self, shape: Size) -> Size:
         return self.base_transform.forward_shape(shape)
 
-    def inverse_shape(self, shape):
+    def inverse_shape(self, shape: Size) -> Size:
         return self.base_transform.inverse_shape(shape)
 
 
@@ -496,8 +502,8 @@ class ReshapeTransform(Transform):
 
     def __init__(
         self,
-        in_shape: torch.Size,
-        out_shape: torch.Size,
+        in_shape: _size,
+        out_shape: _size,
         cache_size: int = 0,
     ) -> None:
         self.in_shape = torch.Size(in_shape)
@@ -507,31 +513,31 @@ class ReshapeTransform(Transform):
         super().__init__(cache_size=cache_size)
 
     @constraints.dependent_property
-    def domain(self):
+    def domain(self) -> Constraint:  # type: ignore[override]
         return constraints.independent(constraints.real, len(self.in_shape))
 
     @constraints.dependent_property
-    def codomain(self):
+    def codomain(self) -> Constraint:  # type: ignore[override]
         return constraints.independent(constraints.real, len(self.out_shape))
 
-    def with_cache(self, cache_size=1):
+    def with_cache(self, cache_size: int = 1) -> "ReshapeTransform":
         if self._cache_size == cache_size:
             return self
         return ReshapeTransform(self.in_shape, self.out_shape, cache_size=cache_size)
 
-    def _call(self, x):
+    def _call(self, x: Tensor) -> Tensor:
         batch_shape = x.shape[: x.dim() - len(self.in_shape)]
         return x.reshape(batch_shape + self.out_shape)
 
-    def _inverse(self, y):
+    def _inverse(self, y: Tensor) -> Tensor:
         batch_shape = y.shape[: y.dim() - len(self.out_shape)]
         return y.reshape(batch_shape + self.in_shape)
 
-    def log_abs_det_jacobian(self, x, y):
+    def log_abs_det_jacobian(self, x: Tensor, y: Tensor) -> Tensor:
         batch_shape = x.shape[: x.dim() - len(self.in_shape)]
         return x.new_zeros(batch_shape)
 
-    def forward_shape(self, shape):
+    def forward_shape(self, shape: Size) -> Size:
         if len(shape) < len(self.in_shape):
             raise ValueError("Too few dimensions on input")
         cut = len(shape) - len(self.in_shape)
@@ -539,9 +545,9 @@ class ReshapeTransform(Transform):
             raise ValueError(
                 f"Shape mismatch: expected {shape[cut:]} but got {self.in_shape}"
             )
-        return shape[:cut] + self.out_shape
+        return shape[:cut] + self.out_shape  # type: ignore[return-value]
 
-    def inverse_shape(self, shape):
+    def inverse_shape(self, shape: Size) -> Size:
         if len(shape) < len(self.out_shape):
             raise ValueError("Too few dimensions on input")
         cut = len(shape) - len(self.out_shape)
@@ -549,7 +555,7 @@ class ReshapeTransform(Transform):
             raise ValueError(
                 f"Shape mismatch: expected {shape[cut:]} but got {self.out_shape}"
             )
-        return shape[:cut] + self.in_shape
+        return shape[:cut] + self.in_shape  # type: ignore[return-value]
 
 
 class ExpTransform(Transform):
@@ -562,16 +568,16 @@ class ExpTransform(Transform):
     bijective = True
     sign = +1
 
-    def __eq__(self, other):
+    def __eq__(self, other: object) -> bool:
         return isinstance(other, ExpTransform)
 
-    def _call(self, x):
+    def _call(self, x: Tensor) -> Tensor:
         return x.exp()
 
-    def _inverse(self, y):
+    def _inverse(self, y: Tensor) -> Tensor:
         return y.log()
 
-    def log_abs_det_jacobian(self, x, y):
+    def log_abs_det_jacobian(self, x: Tensor, y: Tensor) -> Tensor:
         return x
 
 
@@ -584,11 +590,11 @@ class PowerTransform(Transform):
     codomain = constraints.positive
     bijective = True
 
-    def __init__(self, exponent: Tensor, cache_size: int = 0) -> None:
+    def __init__(self, exponent: Union[Tensor, float], cache_size: int = 0) -> None:
         super().__init__(cache_size=cache_size)
         (self.exponent,) = broadcast_all(exponent)
 
-    def with_cache(self, cache_size=1):
+    def with_cache(self, cache_size: int = 1) -> "PowerTransform":
         if self._cache_size == cache_size:
             return self
         return PowerTransform(self.exponent, cache_size=cache_size)
@@ -597,28 +603,28 @@ class PowerTransform(Transform):
     def sign(self) -> Tensor:
         return self.exponent.sign()
 
-    def __eq__(self, other):
+    def __eq__(self, other: object) -> bool:
         if not isinstance(other, PowerTransform):
             return False
         return self.exponent.eq(other.exponent).all().item()
 
-    def _call(self, x):
+    def _call(self, x: Tensor) -> Tensor:
         return x.pow(self.exponent)
 
-    def _inverse(self, y):
+    def _inverse(self, y: Tensor) -> Tensor:
         return y.pow(1 / self.exponent)
 
-    def log_abs_det_jacobian(self, x, y):
+    def log_abs_det_jacobian(self, x: Tensor, y: Tensor) -> Tensor:
         return (self.exponent * y / x).abs().log()
 
-    def forward_shape(self, shape):
+    def forward_shape(self, shape: Size) -> Size:
         return torch.broadcast_shapes(shape, getattr(self.exponent, "shape", ()))
 
-    def inverse_shape(self, shape):
+    def inverse_shape(self, shape: Size) -> Size:
         return torch.broadcast_shapes(shape, getattr(self.exponent, "shape", ()))
 
 
-def _clipped_sigmoid(x):
+def _clipped_sigmoid(x: Tensor) -> Tensor:
     finfo = torch.finfo(x.dtype)
     return torch.clamp(torch.sigmoid(x), min=finfo.tiny, max=1.0 - finfo.eps)
 
@@ -633,18 +639,18 @@ class SigmoidTransform(Transform):
     bijective = True
     sign = +1
 
-    def __eq__(self, other):
+    def __eq__(self, other: object) -> bool:
         return isinstance(other, SigmoidTransform)
 
-    def _call(self, x):
+    def _call(self, x: Tensor) -> Tensor:
         return _clipped_sigmoid(x)
 
-    def _inverse(self, y):
+    def _inverse(self, y: Tensor) -> Tensor:
         finfo = torch.finfo(y.dtype)
         y = y.clamp(min=finfo.tiny, max=1.0 - finfo.eps)
         return y.log() - (-y).log1p()
 
-    def log_abs_det_jacobian(self, x, y):
+    def log_abs_det_jacobian(self, x: Tensor, y: Tensor) -> Tensor:
         return -F.softplus(-x) - F.softplus(x)
 
 
@@ -659,16 +665,16 @@ class SoftplusTransform(Transform):
     bijective = True
     sign = +1
 
-    def __eq__(self, other):
+    def __eq__(self, other: object) -> bool:
         return isinstance(other, SoftplusTransform)
 
-    def _call(self, x):
+    def _call(self, x: Tensor) -> Tensor:
         return softplus(x)
 
-    def _inverse(self, y):
+    def _inverse(self, y: Tensor) -> Tensor:
         return (-y).expm1().neg().log() + y
 
-    def log_abs_det_jacobian(self, x, y):
+    def log_abs_det_jacobian(self, x: Tensor, y: Tensor) -> Tensor:
         return -softplus(-x)
 
 
@@ -700,18 +706,18 @@ class TanhTransform(Transform):
     bijective = True
     sign = +1
 
-    def __eq__(self, other):
+    def __eq__(self, other: object) -> bool:
         return isinstance(other, TanhTransform)
 
-    def _call(self, x):
+    def _call(self, x: Tensor) -> Tensor:
         return x.tanh()
 
-    def _inverse(self, y):
+    def _inverse(self, y: Tensor) -> Tensor:
         # We do not clamp to the boundary here as it may degrade the performance of certain algorithms.
         # one should use `cache_size=1` instead
         return torch.atanh(y)
 
-    def log_abs_det_jacobian(self, x, y):
+    def log_abs_det_jacobian(self, x: Tensor, y: Tensor) -> Tensor:
         # We use a formula that is more numerically stable, see details in the following link
         # https://github.com/tensorflow/probability/blob/master/tensorflow_probability/python/bijectors/tanh.py#L69-L80
         return 2.0 * (math.log(2.0) - x - softplus(-2.0 * x))
@@ -723,13 +729,13 @@ class AbsTransform(Transform):
     domain = constraints.real
     codomain = constraints.positive
 
-    def __eq__(self, other):
+    def __eq__(self, other: object) -> bool:
         return isinstance(other, AbsTransform)
 
-    def _call(self, x):
+    def _call(self, x: Tensor) -> Tensor:
         return x.abs()
 
-    def _inverse(self, y):
+    def _inverse(self, y: Tensor) -> Tensor:
         return y
 
 
@@ -764,25 +770,25 @@ class AffineTransform(Transform):
         return self._event_dim
 
     @constraints.dependent_property(is_discrete=False)
-    def domain(self):
+    def domain(self) -> Constraint:  # type: ignore[override]
         if self.event_dim == 0:
             return constraints.real
         return constraints.independent(constraints.real, self.event_dim)
 
     @constraints.dependent_property(is_discrete=False)
-    def codomain(self):
+    def codomain(self) -> Constraint:  # type: ignore[override]
         if self.event_dim == 0:
             return constraints.real
         return constraints.independent(constraints.real, self.event_dim)
 
-    def with_cache(self, cache_size=1):
+    def with_cache(self, cache_size: int = 1) -> "AffineTransform":
         if self._cache_size == cache_size:
             return self
         return AffineTransform(
             self.loc, self.scale, self.event_dim, cache_size=cache_size
         )
 
-    def __eq__(self, other):
+    def __eq__(self, other: object) -> bool:
         if not isinstance(other, AffineTransform):
             return False
 
@@ -808,13 +814,13 @@ class AffineTransform(Transform):
             return 1 if float(self.scale) > 0 else -1 if float(self.scale) < 0 else 0
         return self.scale.sign()
 
-    def _call(self, x):
+    def _call(self, x: Tensor) -> Tensor:
         return self.loc + self.scale * x
 
-    def _inverse(self, y):
+    def _inverse(self, y: Tensor) -> Tensor:
         return (y - self.loc) / self.scale
 
-    def log_abs_det_jacobian(self, x, y):
+    def log_abs_det_jacobian(self, x: Tensor, y: Tensor) -> Tensor:
         shape = x.shape
         scale = self.scale
         if isinstance(scale, _Number):
@@ -827,12 +833,12 @@ class AffineTransform(Transform):
             shape = shape[: -self.event_dim]
         return result.expand(shape)
 
-    def forward_shape(self, shape):
+    def forward_shape(self, shape: Size) -> Size:
         return torch.broadcast_shapes(
             shape, getattr(self.loc, "shape", ()), getattr(self.scale, "shape", ())
         )
 
-    def inverse_shape(self, shape):
+    def inverse_shape(self, shape: Size) -> Size:
         return torch.broadcast_shapes(
             shape, getattr(self.loc, "shape", ()), getattr(self.scale, "shape", ())
         )
@@ -859,7 +865,7 @@ class CorrCholeskyTransform(Transform):
     codomain = constraints.corr_cholesky
     bijective = True
 
-    def _call(self, x):
+    def _call(self, x: Tensor) -> Tensor:
         x = torch.tanh(x)
         eps = torch.finfo(x.dtype).eps
         x = x.clamp(min=-1 + eps, max=1 - eps)
@@ -874,7 +880,7 @@ class CorrCholeskyTransform(Transform):
         y = r * pad(z1m_cumprod_sqrt[..., :-1], [1, 0], value=1)
         return y
 
-    def _inverse(self, y):
+    def _inverse(self, y: Tensor) -> Tensor:
         # inverse stick-breaking
         # See: https://mc-stan.org/docs/2_18/reference-manual/cholesky-factors-of-correlation-matrices-1.html
         y_cumsum = 1 - torch.cumsum(y * y, dim=-1)
@@ -886,7 +892,9 @@ class CorrCholeskyTransform(Transform):
         x = (t.log1p() - t.neg().log1p()) / 2
         return x
 
-    def log_abs_det_jacobian(self, x, y, intermediates=None):
+    def log_abs_det_jacobian(
+        self, x: Tensor, y: Tensor, intermediates: None = None
+    ) -> Tensor:
         # Because domain and codomain are two spaces with different dimensions, determinant of
         # Jacobian is not well-defined. We return `log_abs_det_jacobian` of `x` and the
         # flattened lower triangular part of `y`.
@@ -900,7 +908,7 @@ class CorrCholeskyTransform(Transform):
         tanh_logdet = -2 * (x + softplus(-2 * x) - math.log(2.0)).sum(dim=-1)
         return stick_breaking_logdet + tanh_logdet
 
-    def forward_shape(self, shape):
+    def forward_shape(self, shape: Size) -> Size:
         # Reshape from (..., N) to (..., D, D).
         if len(shape) < 1:
             raise ValueError("Too few dimensions on input")
@@ -908,9 +916,9 @@ class CorrCholeskyTransform(Transform):
         D = round((0.25 + 2 * N) ** 0.5 + 0.5)
         if D * (D - 1) // 2 != N:
             raise ValueError("Input is not a flattend lower-diagonal number")
-        return shape[:-1] + (D, D)
+        return shape[:-1] + (D, D)  # type: ignore[return-value]
 
-    def inverse_shape(self, shape):
+    def inverse_shape(self, shape: Size) -> Size:
         # Reshape from (..., D, D) to (..., N).
         if len(shape) < 2:
             raise ValueError("Too few dimensions on input")
@@ -918,7 +926,7 @@ class CorrCholeskyTransform(Transform):
             raise ValueError("Input is not square")
         D = shape[-1]
         N = D * (D - 1) // 2
-        return shape[:-2] + (N,)
+        return shape[:-2] + (N,)  # type: ignore[return-value]
 
 
 class SoftmaxTransform(Transform):
@@ -934,24 +942,24 @@ class SoftmaxTransform(Transform):
     domain = constraints.real_vector
     codomain = constraints.simplex
 
-    def __eq__(self, other):
+    def __eq__(self, other: object) -> bool:
         return isinstance(other, SoftmaxTransform)
 
-    def _call(self, x):
+    def _call(self, x: Tensor) -> Tensor:
         logprobs = x
         probs = (logprobs - logprobs.max(-1, True)[0]).exp()
         return probs / probs.sum(-1, True)
 
-    def _inverse(self, y):
+    def _inverse(self, y: Tensor) -> Tensor:
         probs = y
         return probs.log()
 
-    def forward_shape(self, shape):
+    def forward_shape(self, shape: Size) -> Size:
         if len(shape) < 1:
             raise ValueError("Too few dimensions on input")
         return shape
 
-    def inverse_shape(self, shape):
+    def inverse_shape(self, shape: Size) -> Size:
         if len(shape) < 1:
             raise ValueError("Too few dimensions on input")
         return shape
@@ -975,17 +983,17 @@ class StickBreakingTransform(Transform):
     codomain = constraints.simplex
     bijective = True
 
-    def __eq__(self, other):
+    def __eq__(self, other: object) -> bool:
         return isinstance(other, StickBreakingTransform)
 
-    def _call(self, x):
+    def _call(self, x: Tensor) -> Tensor:
         offset = x.shape[-1] + 1 - x.new_ones(x.shape[-1]).cumsum(-1)
         z = _clipped_sigmoid(x - offset.log())
         z_cumprod = (1 - z).cumprod(-1)
         y = pad(z, [0, 1], value=1) * pad(z_cumprod, [1, 0], value=1)
         return y
 
-    def _inverse(self, y):
+    def _inverse(self, y: Tensor) -> Tensor:
         y_crop = y[..., :-1]
         offset = y.shape[-1] - y.new_ones(y_crop.shape[-1]).cumsum(-1)
         sf = 1 - y_crop.cumsum(-1)
@@ -995,22 +1003,22 @@ class StickBreakingTransform(Transform):
         x = y_crop.log() - sf.log() + offset.log()
         return x
 
-    def log_abs_det_jacobian(self, x, y):
+    def log_abs_det_jacobian(self, x: Tensor, y: Tensor) -> Tensor:
         offset = x.shape[-1] + 1 - x.new_ones(x.shape[-1]).cumsum(-1)
         x = x - offset.log()
         # use the identity 1 - sigmoid(x) = exp(-x) * sigmoid(x)
         detJ = (-x + F.logsigmoid(x) + y[..., :-1].log()).sum(-1)
         return detJ
 
-    def forward_shape(self, shape):
+    def forward_shape(self, shape: Size) -> Size:
         if len(shape) < 1:
             raise ValueError("Too few dimensions on input")
-        return shape[:-1] + (shape[-1] + 1,)
+        return shape[:-1] + (shape[-1] + 1,)  # type: ignore[return-value]
 
-    def inverse_shape(self, shape):
+    def inverse_shape(self, shape: Size) -> Size:
         if len(shape) < 1:
             raise ValueError("Too few dimensions on input")
-        return shape[:-1] + (shape[-1] - 1,)
+        return shape[:-1] + (shape[-1] - 1,)  # type: ignore[return-value]
 
 
 class LowerCholeskyTransform(Transform):
@@ -1025,13 +1033,13 @@ class LowerCholeskyTransform(Transform):
     domain = constraints.independent(constraints.real, 2)
     codomain = constraints.lower_cholesky
 
-    def __eq__(self, other):
+    def __eq__(self, other: object) -> bool:
         return isinstance(other, LowerCholeskyTransform)
 
-    def _call(self, x):
+    def _call(self, x: Tensor) -> Tensor:
         return x.tril(-1) + x.diagonal(dim1=-2, dim2=-1).exp().diag_embed()
 
-    def _inverse(self, y):
+    def _inverse(self, y: Tensor) -> Tensor:
         return y.tril(-1) + y.diagonal(dim1=-2, dim2=-1).log().diag_embed()
 
 
@@ -1043,14 +1051,14 @@ class PositiveDefiniteTransform(Transform):
     domain = constraints.independent(constraints.real, 2)
     codomain = constraints.positive_definite
 
-    def __eq__(self, other):
+    def __eq__(self, other: object) -> bool:
         return isinstance(other, PositiveDefiniteTransform)
 
-    def _call(self, x):
+    def _call(self, x: Tensor) -> Tensor:
         x = LowerCholeskyTransform()(x)
         return x @ x.mT
 
-    def _inverse(self, y):
+    def _inverse(self, y: Tensor) -> Tensor:
         y = torch.linalg.cholesky(y)
         return LowerCholeskyTransform().inv(y)
 
@@ -1098,12 +1106,12 @@ class CatTransform(Transform):
     def length(self) -> int:
         return sum(self.lengths)
 
-    def with_cache(self, cache_size=1):
+    def with_cache(self, cache_size: int = 1) -> "CatTransform":
         if self._cache_size == cache_size:
             return self
         return CatTransform(self.transforms, self.dim, self.lengths, cache_size)
 
-    def _call(self, x):
+    def _call(self, x: Tensor) -> Tensor:
         assert -x.dim() <= self.dim < x.dim()
         assert x.size(self.dim) == self.length
         yslices = []
@@ -1114,7 +1122,7 @@ class CatTransform(Transform):
             start = start + length  # avoid += for jit compat
         return torch.cat(yslices, dim=self.dim)
 
-    def _inverse(self, y):
+    def _inverse(self, y: Tensor) -> Tensor:
         assert -y.dim() <= self.dim < y.dim()
         assert y.size(self.dim) == self.length
         xslices = []
@@ -1125,7 +1133,7 @@ class CatTransform(Transform):
             start = start + length  # avoid += for jit compat
         return torch.cat(xslices, dim=self.dim)
 
-    def log_abs_det_jacobian(self, x, y):
+    def log_abs_det_jacobian(self, x: Tensor, y: Tensor) -> Tensor:
         assert -x.dim() <= self.dim < x.dim()
         assert x.size(self.dim) == self.length
         assert -y.dim() <= self.dim < y.dim()
@@ -1148,20 +1156,21 @@ class CatTransform(Transform):
         if dim < 0:
             return torch.cat(logdetjacs, dim=dim)
         else:
-            return sum(logdetjacs)
+            zero = torch.zeros((), device=x.device, dtype=x.dtype)
+            return sum(logdetjacs, start=zero)
 
     @property
     def bijective(self) -> bool:  # type: ignore[override]
         return all(t.bijective for t in self.transforms)
 
     @constraints.dependent_property
-    def domain(self):
+    def domain(self) -> Constraint:  # type: ignore[override]
         return constraints.cat(
             [t.domain for t in self.transforms], self.dim, self.lengths
         )
 
     @constraints.dependent_property
-    def codomain(self):
+    def codomain(self) -> Constraint:  # type: ignore[override]
         return constraints.cat(
             [t.codomain for t in self.transforms], self.dim, self.lengths
         )
@@ -1192,15 +1201,15 @@ class StackTransform(Transform):
         self.transforms = list(tseq)
         self.dim = dim
 
-    def with_cache(self, cache_size=1):
+    def with_cache(self, cache_size: int = 1) -> "StackTransform":
         if self._cache_size == cache_size:
             return self
         return StackTransform(self.transforms, self.dim, cache_size)
 
-    def _slice(self, z):
+    def _slice(self, z: Tensor) -> list[Tensor]:
         return [z.select(self.dim, i) for i in range(z.size(self.dim))]
 
-    def _call(self, x):
+    def _call(self, x: Tensor) -> Tensor:
         assert -x.dim() <= self.dim < x.dim()
         assert x.size(self.dim) == len(self.transforms)
         yslices = []
@@ -1208,7 +1217,7 @@ class StackTransform(Transform):
             yslices.append(trans(xslice))
         return torch.stack(yslices, dim=self.dim)
 
-    def _inverse(self, y):
+    def _inverse(self, y: Tensor) -> Tensor:
         assert -y.dim() <= self.dim < y.dim()
         assert y.size(self.dim) == len(self.transforms)
         xslices = []
@@ -1216,7 +1225,7 @@ class StackTransform(Transform):
             xslices.append(trans.inv(yslice))
         return torch.stack(xslices, dim=self.dim)
 
-    def log_abs_det_jacobian(self, x, y):
+    def log_abs_det_jacobian(self, x: Tensor, y: Tensor) -> Tensor:
         assert -x.dim() <= self.dim < x.dim()
         assert x.size(self.dim) == len(self.transforms)
         assert -y.dim() <= self.dim < y.dim()
@@ -1233,11 +1242,11 @@ class StackTransform(Transform):
         return all(t.bijective for t in self.transforms)
 
     @constraints.dependent_property
-    def domain(self):
+    def domain(self) -> Constraint:  # type: ignore[override]  # type: ignore[override]
         return constraints.stack([t.domain for t in self.transforms], self.dim)
 
     @constraints.dependent_property
-    def codomain(self):
+    def codomain(self) -> Constraint:  # type: ignore[override]  # type: ignore[override]
         return constraints.stack([t.codomain for t in self.transforms], self.dim)
 
 
@@ -1269,19 +1278,19 @@ class CumulativeDistributionTransform(Transform):
         self.distribution = distribution
 
     @property
-    def domain(self) -> Optional[constraints.Constraint]:  # type: ignore[override]
+    def domain(self) -> Optional[Constraint]:  # type: ignore[override]
         return self.distribution.support
 
-    def _call(self, x):
+    def _call(self, x: Tensor) -> Tensor:
         return self.distribution.cdf(x)
 
-    def _inverse(self, y):
+    def _inverse(self, y: Tensor) -> Tensor:
         return self.distribution.icdf(y)
 
-    def log_abs_det_jacobian(self, x, y):
+    def log_abs_det_jacobian(self, x: Tensor, y: Tensor) -> Tensor:
         return self.distribution.log_prob(x)
 
-    def with_cache(self, cache_size=1):
+    def with_cache(self, cache_size: int = 1) -> "CumulativeDistributionTransform":
         if self._cache_size == cache_size:
             return self
         return CumulativeDistributionTransform(self.distribution, cache_size=cache_size)
