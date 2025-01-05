@@ -3569,7 +3569,7 @@ Examples::
 """.format(**common_args),
 )
 
-add_docstr( # change should be made here
+add_docstr(
     torch.diagonal,
     r"""
 diagonal(input, offset=0, dim1=0, dim2=1) -> Tensor
