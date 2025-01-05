@@ -764,12 +764,6 @@ static Tensor& linalg_cholesky_mps_impl(const Tensor& input, bool upper, Tensor&
     return out;
   }
 
-  Tensor input_ = input.is_contiguous() ? input : input.clone(at::MemoryFormat::Contiguous);
-  if (!out.is_contiguous()) {
-    out = out.contiguous();
-  }
-  out.copy_(input_);
-
   int64_t ndim = out.dim();
   int64_t N = out.size(-1);
   int64_t B = 1;
@@ -1029,7 +1023,7 @@ Tensor& addbmm_out_mps(const Tensor& self,
 }
 
 Tensor cholesky_mps(const Tensor& self, bool upper) {
-  Tensor out = at::zeros_like(self);
+  Tensor out = self.clone(at::MemoryFormat::Contiguous);
   mps::linalg_cholesky_mps_impl(self, upper, out);
   return out;
 }
@@ -1045,7 +1039,7 @@ Tensor& linalg_cholesky_out_mps(const Tensor& self, bool upper, Tensor& out) {
 }
 
 Tensor linalg_cholesky_mps(const Tensor& self, bool upper) {
-  Tensor out = at::zeros_like(self);
+  Tensor out = self.clone(at::MemoryFormat::Contiguous);
   return mps::linalg_cholesky_mps_impl(self, upper, out);
   ;
 }
