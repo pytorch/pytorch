@@ -1,8 +1,8 @@
-# mypy: allow-untyped-defs
 import math
 import warnings
 from functools import total_ordering
-from typing import Callable
+from typing import Any, Callable, Union
+from typing_extensions import Protocol, TypeAlias, TypeVar
 
 import torch
 from torch import inf, Tensor
@@ -38,17 +38,29 @@ from .uniform import Uniform
 from .utils import _sum_rightmost, euler_constant as _euler_gamma
 
 
-_KL_REGISTRY: dict[
-    tuple[type, type], Callable
-] = {}  # Source of truth mapping a few general (type, type) pairs to functions.
-_KL_MEMOIZE: dict[
-    tuple[type, type], Callable
-] = {}  # Memoized version mapping many specific (type, type) pairs to functions.
-
 __all__ = ["register_kl", "kl_divergence"]
 
+P = TypeVar("P", bound=Distribution)
+Q = TypeVar("Q", bound=Distribution)
+P2 = TypeVar("P2", bound=Distribution)
+Q2 = TypeVar("Q2", bound=Distribution)
+_KL: TypeAlias = Callable[[P, Q], Tensor]
 
-def register_kl(type_p, type_q):
+# NOTE: Technically, this should be annotated as a polymorphic mapping, but we keep it simple.
+# Source of truth mapping a few general (type, type) pairs to functions.
+_KL_REGISTRY: dict[tuple[type[Distribution], type[Distribution]], _KL[Any, Any]] = {}
+# Memoized version mapping many specific (type, type) pairs to functions.
+_KL_MEMOIZE: dict[tuple[type[Distribution], type[Distribution]], _KL[Any, Any]] = {}
+
+
+# NOTE: Technically, P2 and Q2 should be bound to P and Q, but this requires
+#   higher kinded types, which are currently not supported in Python.
+class _KL_Decorator(Protocol):
+    def __call__(self, arg: _KL[P2, Q2], /) -> _KL[P2, Q2]:
+        ...
+
+
+def register_kl(type_p: type[P], type_q: type[Q]) -> _KL_Decorator:
     """
     Decorator to register a pairwise function with :meth:`kl_divergence`.
     Usage::
@@ -83,7 +95,7 @@ def register_kl(type_p, type_q):
             f"Expected type_q to be a Distribution subclass but got {type_q}"
         )
 
-    def decorator(fun):
+    def decorator(fun: _KL[P2, Q2]) -> _KL[P2, Q2]:
         _KL_REGISTRY[type_p, type_q] = fun
         _KL_MEMOIZE.clear()  # reset since lookup order may have changed
         return fun
@@ -95,13 +107,13 @@ def register_kl(type_p, type_q):
 class _Match:
     __slots__ = ["types"]
 
-    def __init__(self, *types):
+    def __init__(self, *types: type) -> None:
         self.types = types
 
-    def __eq__(self, other):
+    def __eq__(self, other: "_Match") -> bool:  # type: ignore[override]
         return self.types == other.types
 
-    def __le__(self, other):
+    def __le__(self, other: "_Match") -> bool:
         for x, y in zip(self.types, other.types):
             if not issubclass(x, y):
                 return False
@@ -110,7 +122,7 @@ class _Match:
         return True
 
 
-def _dispatch_kl(type_p, type_q):
+def _dispatch_kl(type_p: type[P], type_q: type[Q]) -> _KL[P, Q]:
     """
     Find the most specific approximate match, assuming single inheritance.
     """
@@ -137,21 +149,21 @@ def _dispatch_kl(type_p, type_q):
     return left_fun
 
 
-def _infinite_like(tensor):
+def _infinite_like(tensor: Tensor) -> Tensor:
     """
     Helper function for obtaining infinite KL Divergence throughout
     """
     return torch.full_like(tensor, inf)
 
 
-def _x_log_x(tensor):
+def _x_log_x(tensor: Tensor) -> Tensor:
     """
     Utility function for calculating x log x
     """
     return torch.special.xlogy(tensor, tensor)  # produces correct result for x=0
 
 
-def _batch_trace_XXT(bmat):
+def _batch_trace_XXT(bmat: Tensor) -> Tensor:
     """
     Utility function for calculating the trace of XX^{T} with X having arbitrary trailing batch dimensions
     """
@@ -200,7 +212,7 @@ def kl_divergence(p: Distribution, q: Distribution) -> Tensor:
 
 
 @register_kl(Bernoulli, Bernoulli)
-def _kl_bernoulli_bernoulli(p, q):
+def _kl_bernoulli_bernoulli(p: Bernoulli, q: Bernoulli) -> Tensor:
     t1 = p.probs * (
         torch.nn.functional.softplus(-q.logits)
         - torch.nn.functional.softplus(-p.logits)
@@ -216,7 +228,7 @@ def _kl_bernoulli_bernoulli(p, q):
 
 
 @register_kl(Beta, Beta)
-def _kl_beta_beta(p, q):
+def _kl_beta_beta(p: Beta, q: Beta) -> Tensor:
     sum_params_p = p.concentration1 + p.concentration0
     sum_params_q = q.concentration1 + q.concentration0
     t1 = q.concentration1.lgamma() + q.concentration0.lgamma() + (sum_params_p).lgamma()
@@ -228,7 +240,7 @@ def _kl_beta_beta(p, q):
 
 
 @register_kl(Binomial, Binomial)
-def _kl_binomial_binomial(p, q):
+def _kl_binomial_binomial(p: Binomial, q: Binomial) -> Tensor:
     # from https://math.stackexchange.com/questions/2214993/
     # kullback-leibler-divergence-for-binomial-distributions-p-and-q
     if (p.total_count < q.total_count).any():
@@ -244,7 +256,7 @@ def _kl_binomial_binomial(p, q):
 
 
 @register_kl(Categorical, Categorical)
-def _kl_categorical_categorical(p, q):
+def _kl_categorical_categorical(p: Categorical, q: Categorical) -> Tensor:
     t = p.probs * (p.logits - q.logits)
     t[(q.probs == 0).expand_as(t)] = inf
     t[(p.probs == 0).expand_as(t)] = 0
@@ -252,7 +264,9 @@ def _kl_categorical_categorical(p, q):
 
 
 @register_kl(ContinuousBernoulli, ContinuousBernoulli)
-def _kl_continuous_bernoulli_continuous_bernoulli(p, q):
+def _kl_continuous_bernoulli_continuous_bernoulli(
+    p: ContinuousBernoulli, q: ContinuousBernoulli
+) -> Tensor:
     t1 = p.mean * (p.logits - q.logits)
     t2 = p._cont_bern_log_norm() + torch.log1p(-p.probs)
     t3 = -q._cont_bern_log_norm() - torch.log1p(-q.probs)
@@ -260,7 +274,7 @@ def _kl_continuous_bernoulli_continuous_bernoulli(p, q):
 
 
 @register_kl(Dirichlet, Dirichlet)
-def _kl_dirichlet_dirichlet(p, q):
+def _kl_dirichlet_dirichlet(p: Dirichlet, q: Dirichlet) -> Tensor:
     # From http://bariskurt.com/kullback-leibler-divergence-between-two-dirichlet-and-beta-distributions/
     sum_p_concentration = p.concentration.sum(-1)
     sum_q_concentration = q.concentration.sum(-1)
@@ -272,14 +286,14 @@ def _kl_dirichlet_dirichlet(p, q):
 
 
 @register_kl(Exponential, Exponential)
-def _kl_exponential_exponential(p, q):
+def _kl_exponential_exponential(p: Exponential, q: Exponential) -> Tensor:
     rate_ratio = q.rate / p.rate
     t1 = -rate_ratio.log()
     return t1 + rate_ratio - 1
 
 
 @register_kl(ExponentialFamily, ExponentialFamily)
-def _kl_expfamily_expfamily(p, q):
+def _kl_expfamily_expfamily(p: ExponentialFamily, q: ExponentialFamily) -> Tensor:
     if not type(p) == type(q):
         raise NotImplementedError(
             "The cross KL-divergence between different exponential families cannot \
@@ -297,7 +311,7 @@ def _kl_expfamily_expfamily(p, q):
 
 
 @register_kl(Gamma, Gamma)
-def _kl_gamma_gamma(p, q):
+def _kl_gamma_gamma(p: Gamma, q: Gamma) -> Tensor:
     t1 = q.concentration * (p.rate / q.rate).log()
     t2 = torch.lgamma(q.concentration) - torch.lgamma(p.concentration)
     t3 = (p.concentration - q.concentration) * torch.digamma(p.concentration)
@@ -306,7 +320,7 @@ def _kl_gamma_gamma(p, q):
 
 
 @register_kl(Gumbel, Gumbel)
-def _kl_gumbel_gumbel(p, q):
+def _kl_gumbel_gumbel(p: Gumbel, q: Gumbel) -> Tensor:
     ct1 = p.scale / q.scale
     ct2 = q.loc / q.scale
     ct3 = p.loc / q.scale
@@ -317,17 +331,17 @@ def _kl_gumbel_gumbel(p, q):
 
 
 @register_kl(Geometric, Geometric)
-def _kl_geometric_geometric(p, q):
+def _kl_geometric_geometric(p: Geometric, q: Geometric) -> Tensor:
     return -p.entropy() - torch.log1p(-q.probs) / p.probs - q.logits
 
 
 @register_kl(HalfNormal, HalfNormal)
-def _kl_halfnormal_halfnormal(p, q):
+def _kl_halfnormal_halfnormal(p: HalfNormal, q: HalfNormal) -> Tensor:
     return _kl_normal_normal(p.base_dist, q.base_dist)
 
 
 @register_kl(Laplace, Laplace)
-def _kl_laplace_laplace(p, q):
+def _kl_laplace_laplace(p: Laplace, q: Laplace) -> Tensor:
     # From http://www.mast.queensu.ca/~communications/Papers/gil-msc11.pdf
     scale_ratio = p.scale / q.scale
     loc_abs_diff = (p.loc - q.loc).abs()
@@ -338,7 +352,9 @@ def _kl_laplace_laplace(p, q):
 
 
 @register_kl(LowRankMultivariateNormal, LowRankMultivariateNormal)
-def _kl_lowrankmultivariatenormal_lowrankmultivariatenormal(p, q):
+def _kl_lowrankmultivariatenormal_lowrankmultivariatenormal(
+    p: LowRankMultivariateNormal, q: LowRankMultivariateNormal
+) -> Tensor:
     if p.event_shape != q.event_shape:
         raise ValueError(
             "KL-divergence between two Low Rank Multivariate Normals with\
@@ -372,7 +388,9 @@ def _kl_lowrankmultivariatenormal_lowrankmultivariatenormal(p, q):
 
 
 @register_kl(MultivariateNormal, LowRankMultivariateNormal)
-def _kl_multivariatenormal_lowrankmultivariatenormal(p, q):
+def _kl_multivariatenormal_lowrankmultivariatenormal(
+    p: MultivariateNormal, q: LowRankMultivariateNormal
+) -> Tensor:
     if p.event_shape != q.event_shape:
         raise ValueError(
             "KL-divergence between two (Low Rank) Multivariate Normals with\
@@ -402,7 +420,9 @@ def _kl_multivariatenormal_lowrankmultivariatenormal(p, q):
 
 
 @register_kl(LowRankMultivariateNormal, MultivariateNormal)
-def _kl_lowrankmultivariatenormal_multivariatenormal(p, q):
+def _kl_lowrankmultivariatenormal_multivariatenormal(
+    p: LowRankMultivariateNormal, q: MultivariateNormal
+) -> Tensor:
     if p.event_shape != q.event_shape:
         raise ValueError(
             "KL-divergence between two (Low Rank) Multivariate Normals with\
@@ -439,7 +459,9 @@ def _kl_lowrankmultivariatenormal_multivariatenormal(p, q):
 
 
 @register_kl(MultivariateNormal, MultivariateNormal)
-def _kl_multivariatenormal_multivariatenormal(p, q):
+def _kl_multivariatenormal_multivariatenormal(
+    p: MultivariateNormal, q: MultivariateNormal
+) -> Tensor:
     # From https://en.wikipedia.org/wiki/Multivariate_normal_distribution#Kullback%E2%80%93Leibler_divergence
     if p.event_shape != q.event_shape:
         raise ValueError(
@@ -464,19 +486,21 @@ def _kl_multivariatenormal_multivariatenormal(p, q):
 
 
 @register_kl(Normal, Normal)
-def _kl_normal_normal(p, q):
+def _kl_normal_normal(p: Normal, q: Normal) -> Tensor:
     var_ratio = (p.scale / q.scale).pow(2)
     t1 = ((p.loc - q.loc) / q.scale).pow(2)
     return 0.5 * (var_ratio + t1 - 1 - var_ratio.log())
 
 
 @register_kl(OneHotCategorical, OneHotCategorical)
-def _kl_onehotcategorical_onehotcategorical(p, q):
+def _kl_onehotcategorical_onehotcategorical(
+    p: OneHotCategorical, q: OneHotCategorical
+) -> Tensor:
     return _kl_categorical_categorical(p._categorical, q._categorical)
 
 
 @register_kl(Pareto, Pareto)
-def _kl_pareto_pareto(p, q):
+def _kl_pareto_pareto(p: Pareto, q: Pareto) -> Tensor:
     # From http://www.mast.queensu.ca/~communications/Papers/gil-msc11.pdf
     scale_ratio = p.scale / q.scale
     alpha_ratio = q.alpha / p.alpha
@@ -488,12 +512,14 @@ def _kl_pareto_pareto(p, q):
 
 
 @register_kl(Poisson, Poisson)
-def _kl_poisson_poisson(p, q):
+def _kl_poisson_poisson(p: Poisson, q: Poisson) -> Tensor:
     return p.rate * (p.rate.log() - q.rate.log()) - (p.rate - q.rate)
 
 
 @register_kl(TransformedDistribution, TransformedDistribution)
-def _kl_transformed_transformed(p, q):
+def _kl_transformed_transformed(
+    p: TransformedDistribution, q: TransformedDistribution
+) -> Tensor:
     if p.transforms != q.transforms:
         raise NotImplementedError
     if p.event_shape != q.event_shape:
@@ -502,7 +528,7 @@ def _kl_transformed_transformed(p, q):
 
 
 @register_kl(Uniform, Uniform)
-def _kl_uniform_uniform(p, q):
+def _kl_uniform_uniform(p: Uniform, q: Uniform) -> Tensor:
     result = ((q.high - q.low) / (p.high - p.low)).log()
     result[(q.low > p.low) | (q.high < p.high)] = inf
     return result
@@ -510,12 +536,12 @@ def _kl_uniform_uniform(p, q):
 
 # Different distributions
 @register_kl(Bernoulli, Poisson)
-def _kl_bernoulli_poisson(p, q):
+def _kl_bernoulli_poisson(p: Bernoulli, q: Poisson) -> Tensor:
     return -p.entropy() - (p.probs * q.rate.log() - q.rate)
 
 
 @register_kl(Beta, ContinuousBernoulli)
-def _kl_beta_continuous_bernoulli(p, q):
+def _kl_beta_continuous_bernoulli(p: Beta, q: ContinuousBernoulli) -> Tensor:
     return (
         -p.entropy()
         - p.mean * q.logits
@@ -525,12 +551,12 @@ def _kl_beta_continuous_bernoulli(p, q):
 
 
 @register_kl(Beta, Pareto)
-def _kl_beta_infinity(p, q):
+def _kl_beta_infinity(p: Beta, q: Pareto) -> Tensor:
     return _infinite_like(p.concentration1)
 
 
 @register_kl(Beta, Exponential)
-def _kl_beta_exponential(p, q):
+def _kl_beta_exponential(p: Beta, q: Exponential) -> Tensor:
     return (
         -p.entropy()
         - q.rate.log()
@@ -539,7 +565,7 @@ def _kl_beta_exponential(p, q):
 
 
 @register_kl(Beta, Gamma)
-def _kl_beta_gamma(p, q):
+def _kl_beta_gamma(p: Beta, q: Gamma) -> Tensor:
     t1 = -p.entropy()
     t2 = q.concentration.lgamma() - q.concentration * q.rate.log()
     t3 = (q.concentration - 1) * (
@@ -553,7 +579,7 @@ def _kl_beta_gamma(p, q):
 
 
 @register_kl(Beta, Normal)
-def _kl_beta_normal(p, q):
+def _kl_beta_normal(p: Beta, q: Normal) -> Tensor:
     E_beta = p.concentration1 / (p.concentration1 + p.concentration0)
     var_normal = q.scale.pow(2)
     t1 = -p.entropy()
@@ -568,7 +594,7 @@ def _kl_beta_normal(p, q):
 
 
 @register_kl(Beta, Uniform)
-def _kl_beta_uniform(p, q):
+def _kl_beta_uniform(p: Beta, q: Uniform) -> Tensor:
     result = -p.entropy() + (q.high - q.low).log()
     result[(q.low > p.support.lower_bound) | (q.high < p.support.upper_bound)] = inf
     return result
@@ -578,12 +604,14 @@ def _kl_beta_uniform(p, q):
 
 
 @register_kl(ContinuousBernoulli, Pareto)
-def _kl_continuous_bernoulli_infinity(p, q):
+def _kl_continuous_bernoulli_infinity(p: ContinuousBernoulli, q: Pareto) -> Tensor:
     return _infinite_like(p.probs)
 
 
 @register_kl(ContinuousBernoulli, Exponential)
-def _kl_continuous_bernoulli_exponential(p, q):
+def _kl_continuous_bernoulli_exponential(
+    p: ContinuousBernoulli, q: Exponential
+) -> Tensor:
     return -p.entropy() - torch.log(q.rate) + q.rate * p.mean
 
 
@@ -592,7 +620,7 @@ def _kl_continuous_bernoulli_exponential(p, q):
 
 
 @register_kl(ContinuousBernoulli, Normal)
-def _kl_continuous_bernoulli_normal(p, q):
+def _kl_continuous_bernoulli_normal(p: ContinuousBernoulli, q: Normal) -> Tensor:
     t1 = -p.entropy()
     t2 = 0.5 * (math.log(2.0 * math.pi) + torch.square(q.loc / q.scale)) + torch.log(
         q.scale
@@ -604,7 +632,7 @@ def _kl_continuous_bernoulli_normal(p, q):
 
 
 @register_kl(ContinuousBernoulli, Uniform)
-def _kl_continuous_bernoulli_uniform(p, q):
+def _kl_continuous_bernoulli_uniform(p: ContinuousBernoulli, q: Uniform) -> Tensor:
     result = -p.entropy() + (q.high - q.low).log()
     return torch.where(
         torch.max(
@@ -620,12 +648,14 @@ def _kl_continuous_bernoulli_uniform(p, q):
 @register_kl(Exponential, ContinuousBernoulli)
 @register_kl(Exponential, Pareto)
 @register_kl(Exponential, Uniform)
-def _kl_exponential_infinity(p, q):
+def _kl_exponential_infinity(
+    p: Exponential, q: Union[Beta, ContinuousBernoulli, Pareto, Uniform]
+) -> Tensor:
     return _infinite_like(p.rate)
 
 
 @register_kl(Exponential, Gamma)
-def _kl_exponential_gamma(p, q):
+def _kl_exponential_gamma(p: Exponential, q: Gamma) -> Tensor:
     ratio = q.rate / p.rate
     t1 = -q.concentration * torch.log(ratio)
     return (
@@ -638,7 +668,7 @@ def _kl_exponential_gamma(p, q):
 
 
 @register_kl(Exponential, Gumbel)
-def _kl_exponential_gumbel(p, q):
+def _kl_exponential_gumbel(p: Exponential, q: Gumbel) -> Tensor:
     scale_rate_prod = p.rate * q.scale
     loc_scale_ratio = q.loc / q.scale
     t1 = scale_rate_prod.log() - 1
@@ -651,7 +681,7 @@ def _kl_exponential_gumbel(p, q):
 
 
 @register_kl(Exponential, Normal)
-def _kl_exponential_normal(p, q):
+def _kl_exponential_normal(p: Exponential, q: Normal) -> Tensor:
     var_normal = q.scale.pow(2)
     rate_sqr = p.rate.pow(2)
     t1 = 0.5 * torch.log(rate_sqr * var_normal * 2 * math.pi)
@@ -665,17 +695,19 @@ def _kl_exponential_normal(p, q):
 @register_kl(Gamma, ContinuousBernoulli)
 @register_kl(Gamma, Pareto)
 @register_kl(Gamma, Uniform)
-def _kl_gamma_infinity(p, q):
+def _kl_gamma_infinity(
+    p: Gamma, q: Union[Beta, ContinuousBernoulli, Pareto, Uniform]
+) -> Tensor:
     return _infinite_like(p.concentration)
 
 
 @register_kl(Gamma, Exponential)
-def _kl_gamma_exponential(p, q):
+def _kl_gamma_exponential(p: Gamma, q: Exponential) -> Tensor:
     return -p.entropy() - q.rate.log() + q.rate * p.concentration / p.rate
 
 
 @register_kl(Gamma, Gumbel)
-def _kl_gamma_gumbel(p, q):
+def _kl_gamma_gumbel(p: Gamma, q: Gumbel) -> Tensor:
     beta_scale_prod = p.rate * q.scale
     loc_scale_ratio = q.loc / q.scale
     t1 = (
@@ -696,7 +728,7 @@ def _kl_gamma_gumbel(p, q):
 
 
 @register_kl(Gamma, Normal)
-def _kl_gamma_normal(p, q):
+def _kl_gamma_normal(p: Gamma, q: Normal) -> Tensor:
     var_normal = q.scale.pow(2)
     beta_sqr = p.rate.pow(2)
     t1 = (
@@ -720,7 +752,9 @@ def _kl_gamma_normal(p, q):
 @register_kl(Gumbel, Gamma)
 @register_kl(Gumbel, Pareto)
 @register_kl(Gumbel, Uniform)
-def _kl_gumbel_infinity(p, q):
+def _kl_gumbel_infinity(
+    p: Gumbel, q: Union[Beta, ContinuousBernoulli, Exponential, Gamma, Pareto, Uniform]
+) -> Tensor:
     return _infinite_like(p.loc)
 
 
@@ -728,7 +762,7 @@ def _kl_gumbel_infinity(p, q):
 
 
 @register_kl(Gumbel, Normal)
-def _kl_gumbel_normal(p, q):
+def _kl_gumbel_normal(p: Gumbel, q: Normal) -> Tensor:
     param_ratio = p.scale / q.scale
     t1 = (param_ratio / math.sqrt(2 * math.pi)).log()
     t2 = (math.pi * param_ratio * 0.5).pow(2) / 3
@@ -742,12 +776,14 @@ def _kl_gumbel_normal(p, q):
 @register_kl(Laplace, Gamma)
 @register_kl(Laplace, Pareto)
 @register_kl(Laplace, Uniform)
-def _kl_laplace_infinity(p, q):
+def _kl_laplace_infinity(
+    p: Laplace, q: Union[Beta, ContinuousBernoulli, Exponential, Gamma, Pareto, Uniform]
+) -> Tensor:
     return _infinite_like(p.loc)
 
 
 @register_kl(Laplace, Normal)
-def _kl_laplace_normal(p, q):
+def _kl_laplace_normal(p: Laplace, q: Normal) -> Tensor:
     var_normal = q.scale.pow(2)
     scale_sqr_var_ratio = p.scale.pow(2) / var_normal
     t1 = 0.5 * torch.log(2 * scale_sqr_var_ratio / math.pi)
@@ -763,12 +799,14 @@ def _kl_laplace_normal(p, q):
 @register_kl(Normal, Gamma)
 @register_kl(Normal, Pareto)
 @register_kl(Normal, Uniform)
-def _kl_normal_infinity(p, q):
+def _kl_normal_infinity(
+    p: Normal, q: Union[Beta, ContinuousBernoulli, Exponential, Gamma, Pareto, Uniform]
+) -> Tensor:
     return _infinite_like(p.loc)
 
 
 @register_kl(Normal, Gumbel)
-def _kl_normal_gumbel(p, q):
+def _kl_normal_gumbel(p: Normal, q: Gumbel) -> Tensor:
     mean_scale_ratio = p.loc / q.scale
     var_scale_sqr_ratio = (p.scale / q.scale).pow(2)
     loc_scale_ratio = q.loc / q.scale
@@ -779,7 +817,7 @@ def _kl_normal_gumbel(p, q):
 
 
 @register_kl(Normal, Laplace)
-def _kl_normal_laplace(p, q):
+def _kl_normal_laplace(p: Normal, q: Laplace) -> Tensor:
     loc_diff = p.loc - q.loc
     scale_ratio = p.scale / q.scale
     loc_diff_scale_ratio = loc_diff / p.scale
@@ -794,12 +832,14 @@ def _kl_normal_laplace(p, q):
 @register_kl(Pareto, Beta)
 @register_kl(Pareto, ContinuousBernoulli)
 @register_kl(Pareto, Uniform)
-def _kl_pareto_infinity(p, q):
+def _kl_pareto_infinity(
+    p: Pareto, q: Union[Beta, ContinuousBernoulli, Uniform]
+) -> Tensor:
     return _infinite_like(p.scale)
 
 
 @register_kl(Pareto, Exponential)
-def _kl_pareto_exponential(p, q):
+def _kl_pareto_exponential(p: Pareto, q: Exponential) -> Tensor:
     scale_rate_prod = p.scale * q.rate
     t1 = (p.alpha / scale_rate_prod).log()
     t2 = p.alpha.reciprocal()
@@ -810,7 +850,7 @@ def _kl_pareto_exponential(p, q):
 
 
 @register_kl(Pareto, Gamma)
-def _kl_pareto_gamma(p, q):
+def _kl_pareto_gamma(p: Pareto, q: Gamma) -> Tensor:
     common_term = p.scale.log() + p.alpha.reciprocal()
     t1 = p.alpha.log() - common_term
     t2 = q.concentration.lgamma() - q.concentration * q.rate.log()
@@ -825,7 +865,7 @@ def _kl_pareto_gamma(p, q):
 
 
 @register_kl(Pareto, Normal)
-def _kl_pareto_normal(p, q):
+def _kl_pareto_normal(p: Pareto, q: Normal) -> Tensor:
     var_normal = 2 * q.scale.pow(2)
     common_term = p.scale / (p.alpha - 1)
     t1 = (math.sqrt(2 * math.pi) * q.scale * p.alpha / p.scale).log()
@@ -839,12 +879,12 @@ def _kl_pareto_normal(p, q):
 
 @register_kl(Poisson, Bernoulli)
 @register_kl(Poisson, Binomial)
-def _kl_poisson_infinity(p, q):
+def _kl_poisson_infinity(p: Poisson, q: Union[Bernoulli, Binomial]) -> Tensor:
     return _infinite_like(p.rate)
 
 
 @register_kl(Uniform, Beta)
-def _kl_uniform_beta(p, q):
+def _kl_uniform_beta(p: Uniform, q: Beta) -> Tensor:
     common_term = p.high - p.low
     t1 = torch.log(common_term)
     t2 = (
@@ -868,7 +908,7 @@ def _kl_uniform_beta(p, q):
 
 
 @register_kl(Uniform, ContinuousBernoulli)
-def _kl_uniform_continuous_bernoulli(p, q):
+def _kl_uniform_continuous_bernoulli(p: Uniform, q: ContinuousBernoulli) -> Tensor:
     result = (
         -p.entropy()
         - p.mean * q.logits
@@ -886,14 +926,14 @@ def _kl_uniform_continuous_bernoulli(p, q):
 
 
 @register_kl(Uniform, Exponential)
-def _kl_uniform_exponetial(p, q):
+def _kl_uniform_exponetial(p: Uniform, q: Exponential) -> Tensor:
     result = q.rate * (p.high + p.low) / 2 - ((p.high - p.low) * q.rate).log()
     result[p.low < q.support.lower_bound] = inf
     return result
 
 
 @register_kl(Uniform, Gamma)
-def _kl_uniform_gamma(p, q):
+def _kl_uniform_gamma(p: Uniform, q: Gamma) -> Tensor:
     common_term = p.high - p.low
     t1 = common_term.log()
     t2 = q.concentration.lgamma() - q.concentration * q.rate.log()
@@ -909,7 +949,7 @@ def _kl_uniform_gamma(p, q):
 
 
 @register_kl(Uniform, Gumbel)
-def _kl_uniform_gumbel(p, q):
+def _kl_uniform_gumbel(p: Uniform, q: Gumbel) -> Tensor:
     common_term = q.scale / (p.high - p.low)
     high_loc_diff = (p.high - q.loc) / q.scale
     low_loc_diff = (p.low - q.loc) / q.scale
@@ -922,7 +962,7 @@ def _kl_uniform_gumbel(p, q):
 
 
 @register_kl(Uniform, Normal)
-def _kl_uniform_normal(p, q):
+def _kl_uniform_normal(p: Uniform, q: Normal) -> Tensor:
     common_term = p.high - p.low
     t1 = (math.sqrt(math.pi * 2) * q.scale / common_term).log()
     t2 = (common_term).pow(2) / 12
@@ -931,7 +971,7 @@ def _kl_uniform_normal(p, q):
 
 
 @register_kl(Uniform, Pareto)
-def _kl_uniform_pareto(p, q):
+def _kl_uniform_pareto(p: Uniform, q: Pareto) -> Tensor:
     support_uniform = p.high - p.low
     t1 = (q.alpha * q.scale.pow(q.alpha) * (support_uniform)).log()
     t2 = (_x_log_x(p.high) - _x_log_x(p.low) - support_uniform) / support_uniform
@@ -941,7 +981,7 @@ def _kl_uniform_pareto(p, q):
 
 
 @register_kl(Independent, Independent)
-def _kl_independent_independent(p, q):
+def _kl_independent_independent(p: Independent[P], q: Independent[Q]) -> Tensor:
     if p.reinterpreted_batch_ndims != q.reinterpreted_batch_ndims:
         raise NotImplementedError
     result = kl_divergence(p.base_dist, q.base_dist)
@@ -949,14 +989,14 @@ def _kl_independent_independent(p, q):
 
 
 @register_kl(Cauchy, Cauchy)
-def _kl_cauchy_cauchy(p, q):
+def _kl_cauchy_cauchy(p: Cauchy, q: Cauchy) -> Tensor:
     # From https://arxiv.org/abs/1905.10965
     t1 = ((p.scale + q.scale).pow(2) + (p.loc - q.loc).pow(2)).log()
     t2 = (4 * p.scale * q.scale).log()
     return t1 - t2
 
 
-def _add_kl_info():
+def _add_kl_info() -> None:
     """Appends a list of implemented KL functions to the doc for kl_divergence."""
     rows = [
         "KL divergence is currently implemented for the following distribution pairs:"
