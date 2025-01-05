@@ -142,7 +142,7 @@ class RelaxedBernoulli(TransformedDistribution):
 
     def __init__(
         self,
-        temperature,
+        temperature: Tensor,
         probs: Optional[Union[Tensor, Number]] = None,
         logits: Optional[Union[Tensor, Number]] = None,
         validate_args: Optional[bool] = None,
