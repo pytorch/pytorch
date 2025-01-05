@@ -76,10 +76,10 @@ class Wishart(ExponentialFamily):
 
     def __init__(
         self,
-        df: Union[torch.Tensor, Number],
-        covariance_matrix: Optional[torch.Tensor] = None,
-        precision_matrix: Optional[torch.Tensor] = None,
-        scale_tril: Optional[torch.Tensor] = None,
+        df: Union[Tensor, Number],
+        covariance_matrix: Optional[Tensor] = None,
+        precision_matrix: Optional[Tensor] = None,
+        scale_tril: Optional[Tensor] = None,
         validate_args=None,
     ):
         assert (covariance_matrix is not None) + (scale_tril is not None) + (
