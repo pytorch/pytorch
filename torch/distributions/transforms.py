@@ -420,7 +420,7 @@ class IndependentTransform(Transform):
         self,
         base_transform: Transform,
         reinterpreted_batch_ndims: int,
-        cache_size=0,
+        cache_size: int = 0,
     ) -> None:
         super().__init__(cache_size=cache_size)
         self.base_transform = base_transform.with_cache(cache_size)
