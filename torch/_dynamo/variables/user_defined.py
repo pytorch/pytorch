@@ -131,6 +131,11 @@ def getattr_static_helper(value, name):
         # want to call getattr because it can be user-overridden.
         subobj = value.__getattribute__(name)
     elif object_has_getattribute(value) and subobj is NO_SUCH_SUBOBJ:
+        # If the object has an overridden getattribute method, Dynamo has
+        # already tried tracing it, and encountered an AttributeError. We
+        # call getattr_static only when the __getattribute__ tracing fails
+        # (check var_getattr impl). So, it is safe here to raise the
+        # AttributeError.
         raise AttributeError
 
     return subobj
