@@ -66,9 +66,32 @@ You can create your own registry by creating a new :class:`ConstraintRegistry`
 object.
 """
 
-from torch.distributions import constraints, transforms
-from torch.types import _Number
+import numbers
+from typing import Callable, Optional, overload, Union
+from typing_extensions import TypeAlias, TypeVar
 
+from torch.distributions import constraints, transforms
+from torch.distributions.constraints import (
+    Cat,
+    Constraint,
+    CorrCholesky,
+    GreaterThan,
+    GreaterThanEq,
+    HalfOpenInterval,
+    Independent,
+    Interval,
+    LessThan,
+    LowerCholesky,
+    NonNegative,
+    Positive,
+    PositiveDefinite,
+    PositiveSemidefinite,
+    Real,
+    Simplex,
+    Stack,
+)
+from torch.distributions.transforms import Transform
+from torch.types import _Number
 
 __all__ = [
     "ConstraintRegistry",
@@ -76,17 +99,41 @@ __all__ = [
     "transform_to",
 ]
 
+Con = TypeVar("Con", bound=Constraint, contravariant=True)
+T = TypeVar("T")
+Factory: TypeAlias = Callable[[T], Transform]
+
 
 class ConstraintRegistry:
     """
     Registry to link constraints to transforms.
     """
 
-    def __init__(self):
-        self._registry = {}
+    def __init__(self) -> None:
+        self._registry: dict[type[Constraint], Factory] = {}
         super().__init__()
 
-    def register(self, constraint, factory=None):
+    @overload
+    def register(
+        self,
+        constraint: Union[Con, type[Con]],
+        factory: Factory[Con],
+    ) -> Factory[Con]:
+        ...
+
+    @overload  # decorator usage
+    def register(
+        self,
+        constraint: Union[Con, type[Con]],
+        factory: None = ...,
+    ) -> Union[Callable[[Factory[Con]], Factory[Con]]]:
+        ...
+
+    def register(
+        self,
+        constraint: Union[Con, type[Con]],
+        factory: Optional[Factory[Con]] = None,
+    ) -> Union[Factory[Con], Callable[[Factory[Con]], Factory[Con]]]:
         """
         Registers a :class:`~torch.distributions.constraints.Constraint`
         subclass in this registry. Usage::
@@ -105,11 +152,11 @@ class ConstraintRegistry:
         """
         # Support use as decorator.
         if factory is None:
-            return lambda factory: self.register(constraint, factory)
+            return lambda fac: self.register(constraint, fac)
 
         # Support calling on singleton instances.
         if isinstance(constraint, constraints.Constraint):
-            constraint = type(constraint)
+            constraint = type(constraint)  # type: ignore[assignment]
 
         if not isinstance(constraint, type) or not issubclass(
             constraint, constraints.Constraint
@@ -121,7 +168,7 @@ class ConstraintRegistry:
         self._registry[constraint] = factory
         return factory
 
-    def __call__(self, constraint):
+    def __call__(self, constraint: Constraint) -> Transform:
         """
         Looks up a transform to constrained space, given a constraint object.
         Usage::
@@ -161,12 +208,12 @@ transform_to = ConstraintRegistry()
 
 @biject_to.register(constraints.real)
 @transform_to.register(constraints.real)
-def _transform_to_real(constraint):
+def _transform_to_real(constraint: Real) -> Transform:
     return transforms.identity_transform
 
 
 @biject_to.register(constraints.independent)
-def _biject_to_independent(constraint):
+def _biject_to_independent(constraint: Independent) -> Transform:
     base_transform = biject_to(constraint.base_constraint)
     return transforms.IndependentTransform(
         base_transform, constraint.reinterpreted_batch_ndims
@@ -174,26 +221,28 @@ def _biject_to_independent(constraint):
 
 
 @transform_to.register(constraints.independent)
-def _transform_to_independent(constraint):
+def _transform_to_independent(constraint: Independent) -> Transform:
     base_transform = transform_to(constraint.base_constraint)
     return transforms.IndependentTransform(
         base_transform, constraint.reinterpreted_batch_ndims
     )
 
 
-@biject_to.register(constraints.positive)
+@biject_to.register(constraints.positive)  # type: ignore[arg-type]
 @biject_to.register(constraints.nonnegative)
 @transform_to.register(constraints.positive)
 @transform_to.register(constraints.nonnegative)
-def _transform_to_positive(constraint):
+def _transform_to_positive(constraint: Union[Positive, NonNegative]) -> Transform:
     return transforms.ExpTransform()
 
 
-@biject_to.register(constraints.greater_than)
+@biject_to.register(constraints.greater_than)  # type: ignore[arg-type]
 @biject_to.register(constraints.greater_than_eq)
 @transform_to.register(constraints.greater_than)
 @transform_to.register(constraints.greater_than_eq)
-def _transform_to_greater_than(constraint):
+def _transform_to_greater_than(
+    constraint: Union[GreaterThan, GreaterThanEq]
+) -> Transform:
     return transforms.ComposeTransform(
         [
             transforms.ExpTransform(),
@@ -204,7 +253,7 @@ def _transform_to_greater_than(constraint):
 
 @biject_to.register(constraints.less_than)
 @transform_to.register(constraints.less_than)
-def _transform_to_less_than(constraint):
+def _transform_to_less_than(constraint: LessThan) -> Transform:
     return transforms.ComposeTransform(
         [
             transforms.ExpTransform(),
@@ -213,11 +262,11 @@ def _transform_to_less_than(constraint):
     )
 
 
-@biject_to.register(constraints.interval)
+@biject_to.register(constraints.interval)  # type: ignore[arg-type]
 @biject_to.register(constraints.half_open_interval)
 @transform_to.register(constraints.interval)
 @transform_to.register(constraints.half_open_interval)
-def _transform_to_interval(constraint):
+def _transform_to_interval(constraint: Union[Interval, HalfOpenInterval]) -> Transform:
     # Handle the special case of the unit interval.
     lower_is_0 = (
         isinstance(constraint.lower_bound, _Number) and constraint.lower_bound == 0
@@ -236,56 +285,58 @@ def _transform_to_interval(constraint):
 
 
 @biject_to.register(constraints.simplex)
-def _biject_to_simplex(constraint):
+def _biject_to_simplex(constraint: Simplex) -> Transform:
     return transforms.StickBreakingTransform()
 
 
 @transform_to.register(constraints.simplex)
-def _transform_to_simplex(constraint):
+def _transform_to_simplex(constraint: Simplex) -> Transform:
     return transforms.SoftmaxTransform()
 
 
 # TODO define a bijection for LowerCholeskyTransform
 @transform_to.register(constraints.lower_cholesky)
-def _transform_to_lower_cholesky(constraint):
+def _transform_to_lower_cholesky(constraint: LowerCholesky) -> Transform:
     return transforms.LowerCholeskyTransform()
 
 
-@transform_to.register(constraints.positive_definite)
+@transform_to.register(constraints.positive_definite)  # type: ignore[arg-type]
 @transform_to.register(constraints.positive_semidefinite)
-def _transform_to_positive_definite(constraint):
+def _transform_to_positive_definite(
+    constraint: Union[PositiveDefinite, PositiveSemidefinite]
+) -> Transform:
     return transforms.PositiveDefiniteTransform()
 
 
 @biject_to.register(constraints.corr_cholesky)
 @transform_to.register(constraints.corr_cholesky)
-def _transform_to_corr_cholesky(constraint):
+def _transform_to_corr_cholesky(constraint: CorrCholesky) -> Transform:
     return transforms.CorrCholeskyTransform()
 
 
 @biject_to.register(constraints.cat)
-def _biject_to_cat(constraint):
+def _biject_to_cat(constraint: Cat) -> Transform:
     return transforms.CatTransform(
         [biject_to(c) for c in constraint.cseq], constraint.dim, constraint.lengths
     )
 
 
 @transform_to.register(constraints.cat)
-def _transform_to_cat(constraint):
+def _transform_to_cat(constraint: Cat) -> Transform:
     return transforms.CatTransform(
         [transform_to(c) for c in constraint.cseq], constraint.dim, constraint.lengths
     )
 
 
 @biject_to.register(constraints.stack)
-def _biject_to_stack(constraint):
+def _biject_to_stack(constraint: Stack) -> Transform:
     return transforms.StackTransform(
         [biject_to(c) for c in constraint.cseq], constraint.dim
     )
 
 
 @transform_to.register(constraints.stack)
-def _transform_to_stack(constraint):
+def _transform_to_stack(constraint: Stack) -> Transform:
     return transforms.StackTransform(
         [transform_to(c) for c in constraint.cseq], constraint.dim
     )
