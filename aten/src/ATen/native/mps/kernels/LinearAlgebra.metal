@@ -68,6 +68,27 @@ struct UpdateParams {
   uint batch_stride;
 };
 
+inline float blockReduceSum(
+    threadgroup float* sharedScratch,
+    float val,
+    uint tid,
+    uint tpg) {
+  // Store this thread's partial sum in shared memory.
+  sharedScratch[tid] = val;
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+
+  // Reduce in powers of 2.
+  for (uint offset = tpg >> 1; offset > 0; offset >>= 1) {
+    if (tid < offset) {
+      sharedScratch[tid] += sharedScratch[tid + offset];
+    }
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+  }
+
+  // The reduced sum is now in sharedScratch[0].
+  return sharedScratch[0];
+}
+
 kernel void factorDiagonalBlock(
     device float* A [[buffer(0)]],
     constant BlockParams& sizes [[buffer(1)]],
@@ -83,49 +104,86 @@ kernel void factorDiagonalBlock(
   const uint actSize = sizes.activeNB;
   const uint batch_offset = bid * sizes.batch_stride;
 
-  uint row0 = k * NB;
-  uint col0 = k * NB;
+  const uint row0 = k * NB;
+  const uint col0 = k * NB;
 
-  threadgroup float tile[32 * 32];
-  for (uint i = tid; i < 32 * 32; i += tpg) {
-    tile[i] = 0.0f;
-  }
-  threadgroup_barrier(mem_flags::mem_threadgroup);
-
-  uint tileSize = actSize * actSize;
+  threadgroup float tile[32][33];
+  threadgroup float reduceScratch[1024];
+  const uint tileSize = actSize * actSize;
+  //-----------------------------------
+  // Load block from global to shared
+  //-----------------------------------
   for (uint i = tid; i < tileSize; i += tpg) {
     uint r = i / actSize;
     uint c = i % actSize;
-    tile[i] = A[batch_offset + (row0 + r) * N + (col0 + c)];
+    tile[r][c] = A[batch_offset + (row0 + r) * N + (col0 + c)];
   }
   threadgroup_barrier(mem_flags::mem_threadgroup);
 
+  //------------------------------------------------------
+  // Factorization: for kk in [0..actSize-1]
+  // We do:
+  //  1) tile[kk][kk] = √(tile[kk][kk] - Σ tile[kk][i]^2)
+  //  2) tile[j][kk]  = (tile[j][kk] - Σ tile[j][i]*tile[kk][i]) / tile[kk][kk]
+  //------------------------------------------------------
   for (uint kk = 0; kk < actSize; kk++) {
-    if (tid == 0) {
-      float sumVal = tile[kk * actSize + kk];
-      for (uint i = 0; i < kk; i++) {
-        float val = tile[kk * actSize + i];
-        sumVal -= val * val;
+    //
+    // 1) Diagonal update in parallel
+    //
+    //    diagVal = tile[kk][kk] - ∑(tile[kk][i]^2, i=0..kk-1)
+    //    tile[kk][kk] = sqrt(diagVal)
+    //
+    float diagElt = 0.0f;
+    if (kk > 0) {
+      // Each thread accumulates partial sums for tile[kk][i]^2
+      // over i in [0..kk-1], stepping by tpg
+      float partialSum = 0.0f;
+      for (uint i = tid; i < kk; i += tpg) {
+        float val = tile[kk][i];
+        partialSum += val * val;
       }
-      tile[kk * actSize + kk] = sqrt(sumVal);
+      // Do a parallel sum across the thread group.
+      diagElt = blockReduceSum(reduceScratch, partialSum, tid, tpg);
+    }
+
+    if (tid == 0) {
+      float diagVal = tile[kk][kk] - diagElt;
+      tile[kk][kk] = sqrt(diagVal);
     }
     threadgroup_barrier(mem_flags::mem_threadgroup);
 
-    float diagVal = tile[kk * actSize + kk];
+    float pivot = tile[kk][kk];
+    //
+    // 2) Off-diagonal update, for j in [kk+1..actSize-1]
+    //
+    //    tile[j][kk] = ( tile[j][kk] - ∑ tile[j][i]*tile[kk][i], i=0..kk-1 ) /
+    //    pivot
+    //
+    // We can process each row j in parallel. Each thread picks up
+    // multiple rows j. For each row, we do a parallel reduction of
+    // the sum over i in [0..kk-1].
     for (uint j = kk + 1 + tid; j < actSize; j += tpg) {
-      float sumVal = tile[j * actSize + kk];
+      // 2a) partial sum of tile[j][i]*tile[kk][i]
+      //     for i in [0..kk-1].
+      float partialSum = 0.0f;
       for (uint i = 0; i < kk; i++) {
-        sumVal -= tile[j * actSize + i] * tile[kk * actSize + i];
+        partialSum += tile[j][i] * tile[kk][i];
       }
-      tile[j * actSize + kk] = sumVal / diagVal;
+
+      // 2b) tile[j][kk] = (tile[j][kk] - partialSum) / pivot
+      float val = tile[j][kk];
+      val -= partialSum;
+      val /= pivot;
+      tile[j][kk] = val;
     }
     threadgroup_barrier(mem_flags::mem_threadgroup);
   }
 
+  // from shared to global
   for (uint i = tid; i < tileSize; i += tpg) {
     uint r = i / actSize;
     uint c = i % actSize;
-    A[batch_offset + (row0 + r) * N + (col0 + c)] = tile[i];
+    A[batch_offset + (row0 + r) * N + (col0 + c)] = tile[r][c];
   }
 }
 
@@ -155,11 +213,6 @@ kernel void applyTRSM(
 
   threadgroup float diag[32 * 32];
   threadgroup float target[32 * 32];
-  for (uint i = tid; i < 32 * 32; i += tpg) {
-    diag[i] = 0.0f;
-    target[i] = 0.0f;
-  }
-  threadgroup_barrier(mem_flags::mem_threadgroup);
 
   for (uint i = tid; i < actSize_k * actSize_k; i += tpg) {
     uint r = i / actSize_k;
@@ -221,13 +274,6 @@ kernel void applySYRK(
   threadgroup float left[32 * 32];
   threadgroup float right[32 * 32];
   threadgroup float tile[32 * 32];
-
-  for (uint i = tid; i < 32 * 32; i += tpg) {
-    left[i] = 0.0f;
-    right[i] = 0.0f;
-    tile[i] = 0.0f;
-  }
-  threadgroup_barrier(mem_flags::mem_threadgroup);
 
   for (uint i = tid; i < actSize_j * actSize_k; i += tpg) {
     uint r = i / actSize_k;
