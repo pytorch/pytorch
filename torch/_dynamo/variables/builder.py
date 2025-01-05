@@ -14,6 +14,7 @@ import math
 import operator
 import random
 import re
+import sys
 import types
 import warnings
 import weakref
@@ -141,6 +142,7 @@ from .dicts import (
     DefaultDictVariable,
     DictKeySetVariable,
     FrozensetVariable,
+    PythonSysModulesVariable,
     SetVariable,
 )
 from .distributed import (
@@ -572,16 +574,37 @@ class VariableBuilder:
                 output, tuple_cls=type(value), source=self.source
             )
             return result
+        elif value is torch.utils._pytree.SUPPORTED_NODES:
+            # For SUPPORTED_NODES, we guard on the dictionary version (PEP509)
+            # under the assumption that the values themselves don't change.
+            self.install_guards(GuardBuilder.DICT_VERSION)
+
+            # The keys on the SUPPORTED_NODES can be arbitrary, so save on the
+            # key order.
+            self.tx.output.guard_on_key_order.add(self.source.name())
+            result = {
+                TypingVariable(k): UserDefinedObjectVariable(
+                    v,
+                    source=DictGetItemSource(
+                        self.get_source(), ConstDictKeySource(self.get_source(), i)
+                    ),
+                )
+                for i, (k, v) in enumerate(value.items())
+            }
+            return ConstDictVariable(result, type(value))
+        elif value is sys.modules:
+            self.install_guards(GuardBuilder.FUNCTION_MATCH)
+            return PythonSysModulesVariable(source=self.source)
         elif istype(value, (dict, collections.defaultdict, collections.OrderedDict)):
             self.install_guards(GuardBuilder.SEQUENCE_LENGTH)
 
+            # Optimisation for the common case strings, ints, etc
             all_const = all(ConstantVariable.is_literal(k) for k in value.keys())
-
-            # For all_const, we dont have to guard on anything yet. We guard on
-            # keys lazily by adding a dict_getitem entry for each accessed key.
-            # For cases where we need to guard on all keys, we lazily put guards
-            # during the dict call_method (check dicts.py)
-            if not all_const:
+            if all_const:
+                # TODO(anijain2305) - Do we have to guard on all the keys? Can
+                # keys be guarded lazily, similar to values?
+                self.install_guards(GuardBuilder.DICT_CONST_KEYS)
+            else:
                 # Guard on the key order
                 # This is not ideal, i.e., there is no need to guard on the key
                 # order. But we guard on the key order because of the complexity
@@ -702,7 +725,7 @@ class VariableBuilder:
 
             install_guard(
                 self.get_source().make_guard(GuardBuilder.TYPE_MATCH),
-                keywords_source.make_guard(GuardBuilder.DICT_KEYS_MATCH),
+                keywords_source.make_guard(GuardBuilder.DICT_KEYS),
                 args_source.make_guard(GuardBuilder.SEQUENCE_LENGTH),
             )
             return FunctoolsPartialVariable(func_obj, args, keywords)
