@@ -337,6 +337,8 @@ xla/
 .env
 .envrc
 .psenvrc
+.venv
+.venv/
 
 # generated shellcheck directories
 .shellcheck_generated*/
