@@ -5,7 +5,7 @@ import numbers
 import operator
 import weakref
 from collections.abc import Sequence
-from typing import Optional
+from typing import Optional, Union
 
 import torch
 import torch.nn.functional as F
@@ -736,8 +736,8 @@ class AffineTransform(Transform):
 
     def __init__(
         self,
-        loc: float | Tensor,
-        scale: float | Tensor,
+        loc: Union[Tensor, float],
+        scale: Union[Tensor, float],
         event_dim: int = 0,
         cache_size: int = 0,
     ) -> None:

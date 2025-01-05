@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 import math
-from typing import Optional
+from typing import Optional, Union
 
 import torch
 from torch import inf, nan, Tensor
@@ -62,9 +62,9 @@ class StudentT(Distribution):
 
     def __init__(
         self,
-        df: float | Tensor,
-        loc: float | Tensor = 0.0,
-        scale: float | Tensor = 1.0,
+        df: Union[Tensor, float],
+        loc: Union[Tensor, float] = 0.0,
+        scale: Union[Tensor, float] = 1.0,
         validate_args: Optional[bool] = None,
     ) -> None:
         self.df, self.loc, self.scale = broadcast_all(df, loc, scale)

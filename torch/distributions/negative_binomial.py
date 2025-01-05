@@ -1,5 +1,5 @@
 # mypy: allow-untyped-defs
-from typing import Optional
+from typing import Optional, Union
 
 import torch
 import torch.nn.functional as F
@@ -41,7 +41,7 @@ class NegativeBinomial(Distribution):
 
     def __init__(
         self,
-        total_count: float | Tensor,
+        total_count: Union[Tensor, float],
         probs: Optional[Tensor] = None,
         logits: Optional[Tensor] = None,
         validate_args: Optional[bool] = None,

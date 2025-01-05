@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 from numbers import Number
-from typing import Optional
+from typing import Optional, Union
 
 import torch
 from torch import nan, Tensor
@@ -35,8 +35,8 @@ class FisherSnedecor(Distribution):
 
     def __init__(
         self,
-        df1: float | Tensor,
-        df2: float | Tensor,
+        df1: Union[Tensor, float],
+        df2: Union[Tensor, float],
         validate_args: Optional[bool] = None,
     ) -> None:
         self.df1, self.df2 = broadcast_all(df1, df2)

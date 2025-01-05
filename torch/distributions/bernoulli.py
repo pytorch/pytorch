@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 from numbers import Number
-from typing import Optional
+from typing import Optional, Union
 
 import torch
 from torch import nan, Tensor
@@ -44,8 +44,8 @@ class Bernoulli(ExponentialFamily):
 
     def __init__(
         self,
-        probs: Optional[Tensor | Number] = None,
-        logits: Optional[Tensor | Number] = None,
+        probs: Optional[Union[Tensor, Number]] = None,
+        logits: Optional[Union[Tensor, Number]] = None,
         validate_args: Optional[bool] = None,
     ) -> None:
         if (probs is None) == (logits is None):

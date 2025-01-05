@@ -1,5 +1,5 @@
 # mypy: allow-untyped-defs
-from typing import Optional
+from typing import Optional, Union
 
 import torch
 from torch import Tensor
@@ -37,8 +37,8 @@ class Weibull(TransformedDistribution):
 
     def __init__(
         self,
-        scale: float | Tensor,
-        concentration: float | Tensor,
+        scale: Union[Tensor, float],
+        concentration: Union[Tensor, float],
         validate_args: Optional[bool] = None,
     ) -> None:
         self.scale, self.concentration = broadcast_all(scale, concentration)

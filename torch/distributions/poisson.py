@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 from numbers import Number
-from typing import Optional
+from typing import Optional, Union
 
 import torch
 from torch import Tensor
@@ -48,7 +48,7 @@ class Poisson(ExponentialFamily):
 
     def __init__(
         self,
-        rate: Number | Tensor,
+        rate: Union[Tensor, Number],
         validate_args: Optional[bool] = None,
     ) -> None:
         (self.rate,) = broadcast_all(rate)

@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 from numbers import Number
-from typing import Optional
+from typing import Optional, Union
 
 import torch
 from torch import Tensor
@@ -48,8 +48,8 @@ class Geometric(Distribution):
 
     def __init__(
         self,
-        probs: Optional[Number | Tensor] = None,
-        logits: Optional[Number | Tensor] = None,
+        probs: Optional[Union[Tensor, Number]] = None,
+        logits: Optional[Union[Tensor, Number]] = None,
         validate_args: Optional[bool] = None,
     ) -> None:
         if (probs is None) == (logits is None):

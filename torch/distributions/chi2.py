@@ -1,5 +1,5 @@
 # mypy: allow-untyped-defs
-from typing import Optional
+from typing import Optional, Union
 
 from torch import Tensor
 from torch.distributions import constraints
@@ -28,7 +28,7 @@ class Chi2(Gamma):
 
     def __init__(
         self,
-        df: float | Tensor,
+        df: Union[Tensor, float],
         validate_args: Optional[bool] = None,
     ) -> None:
         super().__init__(0.5 * df, 0.5, validate_args=validate_args)

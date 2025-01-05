@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 from numbers import Number, Real
-from typing import Optional
+from typing import Optional, Union
 
 import torch
 from torch import Tensor
@@ -40,8 +40,8 @@ class Beta(ExponentialFamily):
 
     def __init__(
         self,
-        concentration1: float | Tensor,
-        concentration0: float | Tensor,
+        concentration1: Union[Tensor, float],
+        concentration0: Union[Tensor, float],
         validate_args: Optional[bool] = None,
     ) -> None:
         if isinstance(concentration1, Real) and isinstance(concentration0, Real):

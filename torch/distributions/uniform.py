@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 from numbers import Number
-from typing import Optional
+from typing import Optional, Union
 
 import torch
 from torch import nan, Tensor
@@ -54,8 +54,8 @@ class Uniform(Distribution):
 
     def __init__(
         self,
-        low: float | Tensor,
-        high: float | Tensor,
+        low: Union[Tensor, float],
+        high: Union[Tensor, float],
         validate_args: Optional[bool] = None,
     ) -> None:
         self.low, self.high = broadcast_all(low, high)

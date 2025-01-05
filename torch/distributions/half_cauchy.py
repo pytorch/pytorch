@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 import math
-from typing import Optional
+from typing import Optional, Union
 
 import torch
 from torch import inf, Tensor
@@ -37,7 +37,7 @@ class HalfCauchy(TransformedDistribution):
 
     def __init__(
         self,
-        scale: float | Tensor,
+        scale: Union[Tensor, float],
         validate_args: Optional[bool] = None,
     ) -> None:
         base_dist = Cauchy(0, scale, validate_args=False)

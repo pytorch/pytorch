@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 from numbers import Number
-from typing import Optional
+from typing import Optional, Union
 
 import torch
 from torch import Tensor
@@ -46,8 +46,8 @@ class LogitRelaxedBernoulli(Distribution):
     def __init__(
         self,
         temperature: Tensor,
-        probs: Optional[Tensor | Number] = None,
-        logits: Optional[Tensor | Number] = None,
+        probs: Optional[Union[Tensor, Number]] = None,
+        logits: Optional[Union[Tensor, Number]] = None,
         validate_args: Optional[bool] = None,
     ) -> None:
         self.temperature = temperature
@@ -143,8 +143,8 @@ class RelaxedBernoulli(TransformedDistribution):
     def __init__(
         self,
         temperature,
-        probs: Optional[Tensor | Number] = None,
-        logits: Optional[Tensor | Number] = None,
+        probs: Optional[Union[Tensor, Number]] = None,
+        logits: Optional[Union[Tensor, Number]] = None,
         validate_args: Optional[bool] = None,
     ) -> None:
         base_dist = LogitRelaxedBernoulli(temperature, probs, logits)
