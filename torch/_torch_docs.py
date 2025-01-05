@@ -3569,7 +3569,7 @@ Examples::
 """.format(**common_args),
 )
 
-add_docstr(
+add_docstr( # change should be made here
     torch.diagonal,
     r"""
 diagonal(input, offset=0, dim1=0, dim2=1) -> Tensor
@@ -3609,13 +3609,17 @@ Examples::
             [ 0.6927, -0.3735, -0.4945]])
 
 
-    >>> torch.diagonal(a, 0)
+    >>> torch.diagonal(a)
     tensor([-1.0854, -0.0905, -0.4945])
 
 
     >>> torch.diagonal(a, 1)
     tensor([ 1.1431,  0.0360])
 
+    >>> b = torch.randn(2, 5, 4)
+    >>> torch.diagonal(b, 1, 2)
+    tensor([[-0.3008,  0.0224, -0.1028,  0.4461],
+            [ 0.2887,  1.8640,  1.6997,  1.7034]])
 
     >>> x = torch.randn(2, 5, 4, 2)
     >>> torch.diagonal(x, offset=-1, dim1=1, dim2=2)
