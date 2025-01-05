@@ -36,8 +36,12 @@ The following constraints are implemented:
 - ``constraints.symmetric``
 - ``constraints.unit_interval``
 """
+from collections.abc import Sequence
+from typing import Callable, Generic, Optional, TypeVar
+from typing_extensions import TypeAlias, TypeIs
 
 import torch
+from torch import Tensor
 
 
 __all__ = [
@@ -91,10 +95,10 @@ class Constraint:
             when computing validity.
     """
 
-    is_discrete = False  # Default to continuous.
-    event_dim = 0  # Default to univariate.
+    is_discrete: bool = False  # Default to continuous.
+    event_dim: int = 0  # Default to univariate.
 
-    def check(self, value):
+    def check(self, value: Tensor) -> Tensor:
         """
         Returns a byte tensor of ``sample_shape + batch_shape`` indicating
         whether each event in value satisfies this constraint.
@@ -119,7 +123,9 @@ class _Dependent(Constraint):
             ``.event_dim`` attribute will raise a NotImplementedError.
     """
 
-    def __init__(self, *, is_discrete=NotImplemented, event_dim=NotImplemented):
+    def __init__(
+        self, *, is_discrete: bool = NotImplemented, event_dim: int = NotImplemented
+    ) -> None:
         self._is_discrete = is_discrete
         self._event_dim = event_dim
         super().__init__()
@@ -150,11 +156,11 @@ class _Dependent(Constraint):
             event_dim = self._event_dim
         return _Dependent(is_discrete=is_discrete, event_dim=event_dim)
 
-    def check(self, x):
+    def check(self, x: Tensor) -> Tensor:
         raise ValueError("Cannot determine validity of dependent constraint")
 
 
-def is_dependent(constraint):
+def is_dependent(constraint) -> TypeIs[_Dependent]:
     """
     Checks if ``constraint`` is a ``_Dependent`` object.
 
@@ -180,7 +186,11 @@ def is_dependent(constraint):
     return isinstance(constraint, _Dependent)
 
 
-class _DependentProperty(property, _Dependent):
+T = TypeVar("T", covariant=True)
+R = TypeVar("R", covariant=True)
+
+
+class _DependentProperty(property, _Dependent, Generic[T, R]):
     """
     Decorator that extends @property to act like a `Dependent` constraint when
     called on a class and act like a property when called on an object.
@@ -208,16 +218,19 @@ class _DependentProperty(property, _Dependent):
 
     def __init__(
         self,
-        fn: Optional[Callable[..., Any]] = None,
+        fn: Optional[Callable[[T], R]] = None,
         *,
         is_discrete: Optional[bool] = NotImplemented,
         event_dim: Optional[int] = NotImplemented,
     ) -> None:
-        super().__init__(fn)
-        self._is_discrete = is_discrete
-        self._event_dim = event_dim
+        property.__init__(self, fn)
+        _Dependent.__init__(self, is_discrete=is_discrete, event_dim=event_dim)
 
-    def __call__(self, fn: Callable[..., Any]) -> "_DependentProperty":  # type: ignore[override]
+    _T2 = TypeVar("_T2", covariant=True)
+    _R2 = TypeVar("_R2", covariant=True)
+
+    # polymorphic decorator
+    def __call__(self, fn: Callable[[_T2], _R2]) -> "_DependentProperty[_T2, _R2]":  # type: ignore[override]
         """
         Support for syntax to customize static attributes::
 
@@ -236,7 +249,9 @@ class _IndependentConstraint(Constraint):
     independent entries are valid.
     """
 
-    def __init__(self, base_constraint, reinterpreted_batch_ndims):
+    def __init__(
+        self, base_constraint: Constraint, reinterpreted_batch_ndims: int
+    ) -> None:
         assert isinstance(base_constraint, Constraint)
         assert isinstance(reinterpreted_batch_ndims, int)
         assert reinterpreted_batch_ndims >= 0
@@ -252,7 +267,7 @@ class _IndependentConstraint(Constraint):
     def event_dim(self) -> int:  # type: ignore[override]
         return self.base_constraint.event_dim + self.reinterpreted_batch_ndims
 
-    def check(self, value):
+    def check(self, value: Tensor) -> Tensor:
         result = self.base_constraint.check(value)
         if result.dim() < self.reinterpreted_batch_ndims:
             expected = self.base_constraint.event_dim + self.reinterpreted_batch_ndims
@@ -322,7 +337,7 @@ class _Boolean(Constraint):
 
     is_discrete = True
 
-    def check(self, value):
+    def check(self, value: Tensor) -> Tensor:
         return (value == 0) | (value == 1)
 
 
@@ -334,7 +349,7 @@ class _OneHot(Constraint):
     is_discrete = True
     event_dim = 1
 
-    def check(self, value):
+    def check(self, value: Tensor) -> Tensor:
         is_boolean = (value == 0) | (value == 1)
         is_normalized = value.sum(-1).eq(1)
         return is_boolean.all(-1) & is_normalized
@@ -347,12 +362,12 @@ class _IntegerInterval(Constraint):
 
     is_discrete = True
 
-    def __init__(self, lower_bound, upper_bound):
+    def __init__(self, lower_bound: int, upper_bound: int) -> None:
         self.lower_bound = lower_bound
         self.upper_bound = upper_bound
         super().__init__()
 
-    def check(self, value):
+    def check(self, value: Tensor) -> Tensor:
         return (
             (value % 1 == 0) & (self.lower_bound <= value) & (value <= self.upper_bound)
         )
@@ -372,11 +387,11 @@ class _IntegerLessThan(Constraint):
 
     is_discrete = True
 
-    def __init__(self, upper_bound):
+    def __init__(self, upper_bound: int) -> None:
         self.upper_bound = upper_bound
         super().__init__()
 
-    def check(self, value):
+    def check(self, value: Tensor) -> Tensor:
         return (value % 1 == 0) & (value <= self.upper_bound)
 
     def __repr__(self) -> str:
@@ -392,11 +407,11 @@ class _IntegerGreaterThan(Constraint):
 
     is_discrete = True
 
-    def __init__(self, lower_bound):
+    def __init__(self, lower_bound: int) -> None:
         self.lower_bound = lower_bound
         super().__init__()
 
-    def check(self, value):
+    def check(self, value: Tensor) -> Tensor:
         return (value % 1 == 0) & (value >= self.lower_bound)
 
     def __repr__(self) -> str:
@@ -410,7 +425,7 @@ class _Real(Constraint):
     Trivially constrain to the extended real line `[-inf, inf]`.
     """
 
-    def check(self, value):
+    def check(self, value: Tensor) -> Tensor:
         return value == value  # False for NANs.
 
 
@@ -419,11 +434,11 @@ class _GreaterThan(Constraint):
     Constrain to a real half line `(lower_bound, inf]`.
     """
 
-    def __init__(self, lower_bound):
+    def __init__(self, lower_bound: float) -> None:
         self.lower_bound = lower_bound
         super().__init__()
 
-    def check(self, value):
+    def check(self, value: Tensor) -> Tensor:
         return self.lower_bound < value
 
     def __repr__(self) -> str:
@@ -437,11 +452,11 @@ class _GreaterThanEq(Constraint):
     Constrain to a real half line `[lower_bound, inf)`.
     """
 
-    def __init__(self, lower_bound):
+    def __init__(self, lower_bound: float) -> None:
         self.lower_bound = lower_bound
         super().__init__()
 
-    def check(self, value):
+    def check(self, value: Tensor) -> Tensor:
         return self.lower_bound <= value
 
     def __repr__(self) -> str:
@@ -455,11 +470,11 @@ class _LessThan(Constraint):
     Constrain to a real half line `[-inf, upper_bound)`.
     """
 
-    def __init__(self, upper_bound):
+    def __init__(self, upper_bound: float) -> None:
         self.upper_bound = upper_bound
         super().__init__()
 
-    def check(self, value):
+    def check(self, value: Tensor) -> Tensor:
         return value < self.upper_bound
 
     def __repr__(self) -> str:
@@ -473,12 +488,12 @@ class _Interval(Constraint):
     Constrain to a real interval `[lower_bound, upper_bound]`.
     """
 
-    def __init__(self, lower_bound, upper_bound):
+    def __init__(self, lower_bound: float, upper_bound: float) -> None:
         self.lower_bound = lower_bound
         self.upper_bound = upper_bound
         super().__init__()
 
-    def check(self, value):
+    def check(self, value: Tensor) -> Tensor:
         return (self.lower_bound <= value) & (value <= self.upper_bound)
 
     def __repr__(self) -> str:
@@ -494,12 +509,12 @@ class _HalfOpenInterval(Constraint):
     Constrain to a real interval `[lower_bound, upper_bound)`.
     """
 
-    def __init__(self, lower_bound, upper_bound):
+    def __init__(self, lower_bound: float, upper_bound: float) -> None:
         self.lower_bound = lower_bound
         self.upper_bound = upper_bound
         super().__init__()
 
-    def check(self, value):
+    def check(self, value: Tensor) -> Tensor:
         return (self.lower_bound <= value) & (value < self.upper_bound)
 
     def __repr__(self) -> str:
@@ -518,7 +533,7 @@ class _Simplex(Constraint):
 
     event_dim = 1
 
-    def check(self, value):
+    def check(self, value: Tensor) -> Tensor:
         return torch.all(value >= 0, dim=-1) & ((value.sum(-1) - 1).abs() < 1e-6)
 
 
@@ -534,7 +549,7 @@ class _Multinomial(Constraint):
     is_discrete = True
     event_dim = 1
 
-    def __init__(self, upper_bound):
+    def __init__(self, upper_bound: int) -> None:
         self.upper_bound = upper_bound
 
     def check(self, x):
@@ -548,7 +563,7 @@ class _LowerTriangular(Constraint):
 
     event_dim = 2
 
-    def check(self, value):
+    def check(self, value: Tensor) -> Tensor:
         value_tril = value.tril()
         return (value_tril == value).view(value.shape[:-2] + (-1,)).min(-1)[0]
 
@@ -560,7 +575,7 @@ class _LowerCholesky(Constraint):
 
     event_dim = 2
 
-    def check(self, value):
+    def check(self, value: Tensor) -> Tensor:
         value_tril = value.tril()
         lower_triangular = (
             (value_tril == value).view(value.shape[:-2] + (-1,)).min(-1)[0]
@@ -578,7 +593,7 @@ class _CorrCholesky(Constraint):
 
     event_dim = 2
 
-    def check(self, value):
+    def check(self, value: Tensor) -> Tensor:
         tol = (
             torch.finfo(value.dtype).eps * value.size(-1) * 10
         )  # 10 is an adjustable fudge factor
@@ -594,7 +609,7 @@ class _Square(Constraint):
 
     event_dim = 2
 
-    def check(self, value):
+    def check(self, value: Tensor) -> Tensor:
         return torch.full(
             size=value.shape[:-2],
             fill_value=(value.shape[-2] == value.shape[-1]),
@@ -608,7 +623,7 @@ class _Symmetric(_Square):
     Constrain to Symmetric square matrices.
     """
 
-    def check(self, value):
+    def check(self, value: Tensor) -> Tensor:
         square_check = super().check(value)
         if not square_check.all():
             return square_check
@@ -620,7 +635,7 @@ class _PositiveSemidefinite(_Symmetric):
     Constrain to positive-semidefinite matrices.
     """
 
-    def check(self, value):
+    def check(self, value: Tensor) -> Tensor:
         sym_check = super().check(value)
         if not sym_check.all():
             return sym_check
@@ -632,7 +647,7 @@ class _PositiveDefinite(_Symmetric):
     Constrain to positive-definite matrices.
     """
 
-    def check(self, value):
+    def check(self, value: Tensor) -> Tensor:
         sym_check = super().check(value)
         if not sym_check.all():
             return sym_check
@@ -646,7 +661,12 @@ class _Cat(Constraint):
     each of size `lengths[dim]`, in a way compatible with :func:`torch.cat`.
     """
 
-    def __init__(self, cseq, dim=0, lengths=None):
+    def __init__(
+        self,
+        cseq: Sequence[Constraint],
+        dim: int = 0,
+        lengths: Optional[Sequence[int]] = None,
+    ) -> None:
         assert all(isinstance(c, Constraint) for c in cseq)
         self.cseq = list(cseq)
         if lengths is None:
@@ -664,7 +684,7 @@ class _Cat(Constraint):
     def event_dim(self) -> int:  # type: ignore[override]
         return max(c.event_dim for c in self.cseq)
 
-    def check(self, value):
+    def check(self, value: Tensor) -> Tensor:
         assert -value.dim() <= self.dim < value.dim()
         checks = []
         start = 0
@@ -682,7 +702,7 @@ class _Stack(Constraint):
     in a way compatible with :func:`torch.stack`.
     """
 
-    def __init__(self, cseq, dim=0):
+    def __init__(self, cseq: Sequence[Constraint], dim: int = 0) -> None:
         assert all(isinstance(c, Constraint) for c in cseq)
         self.cseq = list(cseq)
         self.dim = dim
@@ -699,7 +719,7 @@ class _Stack(Constraint):
             dim += 1
         return dim
 
-    def check(self, value):
+    def check(self, value: Tensor) -> Tensor:
         assert -value.dim() <= self.dim < value.dim()
         vs = [value.select(self.dim, i) for i in range(value.size(self.dim))]
         return torch.stack(
@@ -737,3 +757,34 @@ positive_semidefinite = _PositiveSemidefinite()
 positive_definite = _PositiveDefinite()
 cat = _Cat
 stack = _Stack
+
+# Type aliases.
+Dependent: TypeAlias = _Dependent
+DependentProperty: TypeAlias = _DependentProperty
+Independent: TypeAlias = _IndependentConstraint
+Boolean: TypeAlias = _Boolean
+OneHot: TypeAlias = _OneHot
+NonNegativeInteger: TypeAlias = _IntegerGreaterThan
+PositiveInteger: TypeAlias = _IntegerGreaterThan
+IntegerInterval: TypeAlias = _IntegerInterval
+Real: TypeAlias = _Real
+RealVector: TypeAlias = independent
+Positive: TypeAlias = _GreaterThan
+NonNegative: TypeAlias = _GreaterThanEq
+GreaterThan: TypeAlias = _GreaterThan
+GreaterThanEq: TypeAlias = _GreaterThanEq
+LessThan: TypeAlias = _LessThan
+Multinomial: TypeAlias = _Multinomial
+UnitInterval: TypeAlias = _Interval
+Interval: TypeAlias = _Interval
+HalfOpenInterval: TypeAlias = _HalfOpenInterval
+Simplex: TypeAlias = _Simplex
+LowerTriangular: TypeAlias = _LowerTriangular
+LowerCholesky: TypeAlias = _LowerCholesky
+CorrCholesky: TypeAlias = _CorrCholesky
+Square: TypeAlias = _Square
+Symmetric: TypeAlias = _Symmetric
+PositiveSemidefinite: TypeAlias = _PositiveSemidefinite
+PositiveDefinite: TypeAlias = _PositiveDefinite
+Cat: TypeAlias = _Cat
+Stack: TypeAlias = _Stack
