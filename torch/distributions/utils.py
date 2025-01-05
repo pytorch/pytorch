@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 from functools import update_wrapper
 from numbers import Number
-from typing import Any, Callable, Generic, overload
+from typing import Any, Callable, Generic, overload, Union
 from typing_extensions import TypeVar
 
 import torch
@@ -159,7 +159,7 @@ class lazy_property(Generic[T, R]):
         ...
 
     def __get__(
-        self, instance: T | None, obj_type: Any = None
+        self, instance: Union[T, None], obj_type: Any = None
     ) -> "R | _lazy_property_and_property[T, R]":
         if instance is None:
             return _lazy_property_and_property(self.wrapped)
