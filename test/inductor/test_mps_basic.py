@@ -42,6 +42,7 @@ class MPSBasicTests(TestCase):
     test_add_inplace_permuted_mps = CommonTemplate.test_add_inplace_permuted
     test_addmm = CommonTemplate.test_addmm
     test_cat_empty = CommonTemplate.test_cat_empty
+    test_floordiv = CommonTemplate.test_floordiv
     test_inf = CommonTemplate.test_inf
     test_max_min = CommonTemplate.test_max_min
     test_max_pool2d2 = CommonTemplate.test_max_pool2d2
