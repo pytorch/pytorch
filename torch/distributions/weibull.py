@@ -4,6 +4,7 @@ from typing_extensions import Self
 import torch
 from torch import Tensor
 from torch.distributions import constraints
+from torch.distributions.constraints import Constraint
 from torch.distributions.exponential import Exponential
 from torch.distributions.gumbel import euler_constant
 from torch.distributions.transformed_distribution import TransformedDistribution
@@ -32,11 +33,14 @@ class Weibull(TransformedDistribution):
         validate_args (bool, optional): Whether to validate arguments. Default: None.
     """
 
-    arg_constraints = {
+    arg_constraints: dict[str, Constraint] = {
         "scale": constraints.positive,
         "concentration": constraints.positive,
     }
-    support = constraints.positive
+    support = constraints.positive  # type: ignore[assignment]
+    scale: Tensor
+    concentration: Tensor
+    concentration_reciprocal: Tensor
 
     def __init__(
         self,

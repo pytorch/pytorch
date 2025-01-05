@@ -5,6 +5,7 @@ from typing_extensions import Self
 import torch
 from torch import inf, Tensor
 from torch.distributions import constraints
+from torch.distributions.constraints import Constraint
 from torch.distributions.normal import Normal
 from torch.distributions.transformed_distribution import TransformedDistribution
 from torch.distributions.transforms import AbsTransform
@@ -32,9 +33,9 @@ class HalfNormal(TransformedDistribution):
         scale (float or Tensor): scale of the full Normal distribution
     """
 
-    arg_constraints = {"scale": constraints.positive}
-    support = constraints.nonnegative
-    has_rsample = True
+    arg_constraints: dict[str, Constraint] = {"scale": constraints.positive}
+    support = constraints.nonnegative  # type: ignore[assignment]
+    has_rsample: bool = True
     base_dist: Normal
 
     def __init__(

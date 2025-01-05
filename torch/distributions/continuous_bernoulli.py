@@ -5,6 +5,7 @@ from typing_extensions import Self
 import torch
 from torch import Tensor
 from torch.distributions import constraints
+from torch.distributions.constraints import Constraint
 from torch.distributions.exp_family import ExponentialFamily
 from torch.distributions.utils import (
     broadcast_all,
@@ -47,10 +48,13 @@ class ContinuousBernoulli(ExponentialFamily):
     https://arxiv.org/abs/1907.06845
     """
 
-    arg_constraints = {"probs": constraints.unit_interval, "logits": constraints.real}
+    arg_constraints: dict[str, Constraint] = {
+        "probs": constraints.unit_interval,
+        "logits": constraints.real,
+    }
     support = constraints.unit_interval
-    _mean_carrier_measure = 0
-    has_rsample = True
+    _mean_carrier_measure: float = 0
+    has_rsample: bool = True
 
     def __init__(
         self,

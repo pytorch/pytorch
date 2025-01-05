@@ -5,6 +5,7 @@ import torch
 import torch.nn.functional as F
 from torch import Tensor
 from torch.distributions import constraints
+from torch.distributions.constraints import Constraint
 from torch.distributions.distribution import Distribution
 from torch.distributions.gamma import Gamma
 from torch.distributions.utils import (
@@ -34,12 +35,13 @@ class NegativeBinomial(Distribution):
         logits (Tensor): Event log-odds for probabilities of success
     """
 
-    arg_constraints = {
+    arg_constraints: dict[str, Constraint] = {
         "total_count": constraints.greater_than_eq(0),
         "probs": constraints.half_open_interval(0.0, 1.0),
         "logits": constraints.real,
     }
     support = constraints.nonnegative_integer
+    total_count: Tensor
 
     def __init__(
         self,
@@ -53,17 +55,11 @@ class NegativeBinomial(Distribution):
                 "Either `probs` or `logits` must be specified, but not both."
             )
         if probs is not None:
-            (
-                self.total_count,
-                self.probs,
-            ) = broadcast_all(total_count, probs)
+            (self.total_count, self.probs) = broadcast_all(total_count, probs)
             self.total_count = self.total_count.type_as(self.probs)
         else:
             assert logits is not None  # helps mypy
-            (
-                self.total_count,
-                self.logits,
-            ) = broadcast_all(total_count, logits)
+            (self.total_count, self.logits) = broadcast_all(total_count, logits)
             self.total_count = self.total_count.type_as(self.logits)
 
         self._param = self.probs if probs is not None else self.logits

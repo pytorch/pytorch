@@ -5,6 +5,7 @@ from typing_extensions import Self
 import torch
 from torch import Tensor
 from torch.distributions import constraints
+from torch.distributions.constraints import Constraint
 from torch.distributions.distribution import Distribution
 from torch.distributions.multivariate_normal import _batch_mahalanobis, _batch_mv
 from torch.distributions.utils import _standard_normal, lazy_property
@@ -88,13 +89,16 @@ class LowRankMultivariateNormal(Distribution):
             capacitance = I + cov_factor.T @ inv(cov_diag) @ cov_factor
     """
 
-    arg_constraints = {
+    arg_constraints: dict[str, Constraint] = {
         "loc": constraints.real_vector,
         "cov_factor": constraints.independent(constraints.real, 2),
         "cov_diag": constraints.independent(constraints.positive, 1),
     }
     support = constraints.real_vector
-    has_rsample = True
+    has_rsample: bool = True
+    loc: Tensor
+    cov_factor: Tensor
+    cov_diag: Tensor
 
     def __init__(
         self,

@@ -30,7 +30,9 @@ class Uniform(Distribution):
         high (float or Tensor): upper range (exclusive).
     """
 
-    has_rsample = True
+    has_rsample: bool = True
+    low: Tensor
+    high: Tensor
 
     @property
     def arg_constraints(self):

@@ -47,7 +47,7 @@ class Independent(Distribution, Generic[D]):
             reinterpret as event dims
     """
 
-    arg_constraints: dict[str, constraints.Constraint] = {}
+    arg_constraints: dict[str, Constraint] = {}
     base_dist: D
 
     def __init__(

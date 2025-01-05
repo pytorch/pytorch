@@ -52,8 +52,11 @@ class Categorical(Distribution):
         logits (Tensor): event log probabilities (unnormalized)
     """
 
-    arg_constraints = {"probs": constraints.simplex, "logits": constraints.real_vector}
-    has_enumerate_support = True
+    arg_constraints: dict[str, Constraint] = {
+        "probs": constraints.simplex,
+        "logits": constraints.real_vector,
+    }
+    has_enumerate_support: bool = True
 
     def __init__(
         self,

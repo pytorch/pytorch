@@ -4,6 +4,7 @@ from typing_extensions import Self
 import torch
 from torch import Tensor
 from torch.distributions import constraints
+from torch.distributions.constraints import Constraint
 from torch.distributions.distribution import Distribution
 from torch.distributions.utils import (
     broadcast_all,
@@ -44,7 +45,10 @@ class Geometric(Distribution):
         logits (Number, Tensor): the log-odds of sampling `1`.
     """
 
-    arg_constraints = {"probs": constraints.unit_interval, "logits": constraints.real}
+    arg_constraints: dict[str, Constraint] = {
+        "probs": constraints.unit_interval,
+        "logits": constraints.real,
+    }
     support = constraints.nonnegative_integer
 
     def __init__(

@@ -6,6 +6,7 @@ from torch import Tensor
 from torch.autograd import Function
 from torch.autograd.function import once_differentiable
 from torch.distributions import constraints
+from torch.distributions.constraints import Constraint
 from torch.distributions.exp_family import ExponentialFamily
 from torch.types import _size
 
@@ -52,11 +53,12 @@ class Dirichlet(ExponentialFamily):
             (often referred to as alpha)
     """
 
-    arg_constraints = {
+    arg_constraints: dict[str, Constraint] = {
         "concentration": constraints.independent(constraints.positive, 1)
     }
     support = constraints.simplex
-    has_rsample = True
+    has_rsample: bool = True
+    concentration: Tensor
 
     def __init__(
         self,

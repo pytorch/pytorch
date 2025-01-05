@@ -4,6 +4,7 @@ from typing_extensions import Self
 import torch
 from torch import Tensor
 from torch.distributions import constraints
+from torch.distributions.constraints import Constraint
 from torch.distributions.exp_family import ExponentialFamily
 from torch.distributions.utils import broadcast_all
 from torch.types import _Number, _size
@@ -34,13 +35,15 @@ class Gamma(ExponentialFamily):
             (often referred to as beta), rate = 1 / scale
     """
 
-    arg_constraints = {
+    arg_constraints: dict[str, Constraint] = {
         "concentration": constraints.positive,
         "rate": constraints.positive,
     }
     support = constraints.nonnegative
-    has_rsample = True
-    _mean_carrier_measure = 0
+    has_rsample: bool = True
+    _mean_carrier_measure: float = 0
+    concentration: Tensor
+    rate: Tensor
 
     @property
     def mean(self) -> Tensor:
