@@ -17,7 +17,7 @@ __all__ = ["VonMises"]
 
 def _eval_poly(y: Tensor, coef: list[float]) -> Tensor:
     coef = list(coef)
-    result = coef.pop()
+    result = torch.full_like(y, fill_value=coef.pop())
     while coef:
         result = coef.pop() + y * result
     return result
