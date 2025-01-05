@@ -801,62 +801,77 @@ static Tensor& linalg_cholesky_mps_impl(const Tensor& input, bool upper, Tensor&
                                          static_cast<uint32_t>(batch_stride)};
         id<MTLBuffer> sizesBuffer = [device newBufferWithBytes:sizes.data()
                                                         length:sizes.size() * sizeof(uint32_t)
-                                                       options:MTLResourceStorageModeShared];
+                                                       options:MTLResourceStorageModePrivate];
         [computeEncoder setBuffer:sizesBuffer offset:0 atIndex:1];
         MTLSize gridSize = MTLSizeMake(B, 1, 1);
         [computeEncoder dispatchThreadgroups:gridSize threadsPerThreadgroup:threadGroupSize];
       });
 
-      for (int64_t j = k + 1; j < numBlocks; j++) {
-        uint32_t activeNB_j = (uint32_t)std::min(N - j * NB, (int64_t)NB);
+      int64_t startJ = k + 1;
+      int64_t nBlocksJ = (numBlocks - (k + 1));
+      if (nBlocksJ <= 0) {
+        // no TRSM to do
+      } else {
+        uint32_t activeNB_k = (uint32_t)std::min(N - k * NB, (int64_t)NB);
+
+        std::array<uint32_t, 8> sizes = {static_cast<uint32_t>(N),
+                                         static_cast<uint32_t>(NB),
+                                         static_cast<uint32_t>(k),
+                                         static_cast<uint32_t>(startJ),
+                                         static_cast<uint32_t>(nBlocksJ),
+                                         static_cast<uint32_t>(activeNB_k),
+                                         static_cast<uint32_t>(B),
+                                         static_cast<uint32_t>(batch_stride)};
+        id<MTLBuffer> sizesBuffer = [device newBufferWithBytes:sizes.data()
+                                                        length:sizes.size() * sizeof(uint32_t)
+                                                       options:MTLResourceStorageModePrivate];
+        // total threadgroups is B * nBlocksJ
+        MTLSize gridSize = MTLSizeMake(B * nBlocksJ, 1, 1);
+        MTLSize threadGroupSize = MTLSizeMake(1024, 1, 1);
 
         dispatch_sync_with_rethrow(stream->queue(), ^() {
           [computeEncoder setComputePipelineState:applyTRSMPSO];
-
-          std::array<uint32_t, 8> sizes = {static_cast<uint32_t>(N),
-                                           static_cast<uint32_t>(NB),
-                                           static_cast<uint32_t>(k),
-                                           static_cast<uint32_t>(j),
-                                           static_cast<uint32_t>(activeNB_k),
-                                           static_cast<uint32_t>(activeNB_j),
-                                           static_cast<uint32_t>(B),
-                                           static_cast<uint32_t>(batch_stride)};
-          id<MTLBuffer> sizesBuffer = [device newBufferWithBytes:sizes.data()
-                                                          length:sizes.size() * sizeof(uint32_t)
-                                                         options:MTLResourceStorageModeShared];
           [computeEncoder setBuffer:sizesBuffer offset:0 atIndex:1];
 
-          MTLSize gridSize = MTLSizeMake(B, 1, 1);
           [computeEncoder dispatchThreadgroups:gridSize threadsPerThreadgroup:threadGroupSize];
         });
-      }
+      };
+      int64_t nBlocksJ_64 = numBlocks - startJ; // how many j-blocks remain
+      if (nBlocksJ_64 <= 0) {
+        // no SYRK to do
+      } else {
+        // number of j-blocks
+        uint32_t nBlocksJ = static_cast<uint32_t>(nBlocksJ_64);
 
-      for (int64_t j = k + 1; j < numBlocks; j++) {
-        uint32_t activeNB_j = (uint32_t)std::min(N - j * NB, (int64_t)NB);
-        for (int64_t h = k + 1; h <= j; h++) {
-          uint32_t activeNB_h = (uint32_t)std::min(N - h * NB, (int64_t)NB);
-          dispatch_sync_with_rethrow(stream->queue(), ^() {
-            [computeEncoder setComputePipelineState:applySYRKPSO];
+        // total number of (j,h) pairs for jRel in [0..nBlocksJ-1], hRel in [0..jRel]
+        // sum of 1..nBlocksJ = nBlocksJ*(nBlocksJ+1)/2
+        uint32_t nPairs = nBlocksJ * (nBlocksJ + 1) / 2;
 
-            std::array<uint32_t, 10> sizes = {static_cast<uint32_t>(N),
-                                              static_cast<uint32_t>(NB),
-                                              static_cast<uint32_t>(k),
-                                              static_cast<uint32_t>(j),
-                                              static_cast<uint32_t>(h),
-                                              static_cast<uint32_t>(activeNB_k),
-                                              static_cast<uint32_t>(activeNB_j),
-                                              static_cast<uint32_t>(activeNB_h),
-                                              static_cast<uint32_t>(B),
-                                              static_cast<uint32_t>(batch_stride)};
-            id<MTLBuffer> sizesBuffer = [device newBufferWithBytes:sizes.data()
-                                                            length:sizes.size() * sizeof(uint32_t)
-                                                           options:MTLResourceStorageModeShared];
-            [computeEncoder setBuffer:sizesBuffer offset:0 atIndex:1];
+        // active size for the diagonal block k
+        uint32_t activeNB_k = (uint32_t)std::min(N - k * NB, (int64_t)NB);
 
-            MTLSize gridSize = MTLSizeMake(B, 1, 1);
-            [computeEncoder dispatchThreadgroups:gridSize threadsPerThreadgroup:threadGroupSize];
-          });
-        }
+        std::array<uint32_t, 9> sizes = {static_cast<uint32_t>(N),
+                                         static_cast<uint32_t>(NB),
+                                         static_cast<uint32_t>(k),
+                                         static_cast<uint32_t>(startJ),
+                                         static_cast<uint32_t>(nBlocksJ),
+                                         static_cast<uint32_t>(activeNB_k),
+                                         static_cast<uint32_t>(B),
+                                         static_cast<uint32_t>(batch_stride),
+                                         static_cast<uint32_t>(nPairs)};
+        id<MTLBuffer> sizesBuffer = [device newBufferWithBytes:&sizes
+                                                        length:sizeof(sizes)
+                                                       options:MTLResourceStorageModePrivate];
+
+        MTLSize gridSize = MTLSizeMake(B * nPairs, 1, 1);
+        MTLSize threadGroupSize = MTLSizeMake(1024, 1, 1);
+
+        dispatch_sync_with_rethrow(stream->queue(), ^() {
+          [computeEncoder setComputePipelineState:applySYRKPSO];
+          [computeEncoder setBuffer:sizesBuffer offset:0 atIndex:1];
+
+          [computeEncoder dispatchThreadgroups:gridSize threadsPerThreadgroup:threadGroupSize];
+        });
       }
     }
   }

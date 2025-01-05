@@ -47,25 +47,24 @@ struct BlockParams {
 struct TRSMParams {
   uint N;
   uint NB;
-  uint k;
-  uint j;
+  uint k; // current diagonal block
+  uint startJ; // first block to process, i.e. k+1
+  uint nBlocksJ; // total number of j blocks in this step
   uint activeNB_k;
-  uint activeNB_j;
   uint batch_size;
   uint batch_stride;
 };
 
-struct UpdateParams {
+struct SYRKBatchedParams {
   uint N;
   uint NB;
-  uint k;
-  uint j;
-  uint h;
-  uint activeNB_k;
-  uint activeNB_j;
-  uint activeNB_h;
+  uint k; // current diagonal block index
+  uint startJ; // typically k+1
+  uint nBlocksJ; // how many j-blocks total in [startJ..numBlocks)
+  uint activeNB_k; // size of block 'k'
   uint batch_size;
   uint batch_stride;
+  uint nPairs; // total # of (j, h) pairs
 };
 
 inline float blockReduceSum(
@@ -191,25 +190,40 @@ kernel void applyTRSM(
     device float* A [[buffer(0)]],
     constant TRSMParams& sizes [[buffer(1)]],
     uint tid [[thread_position_in_threadgroup]],
-    uint bid [[threadgroup_position_in_grid]],
+    uint tgid [[threadgroup_position_in_grid]],
     uint tpg [[threads_per_threadgroup]]) {
-  if (bid >= sizes.batch_size)
+  // decode which batch and which j block from tgid:
+  // total threadgroups across all batches and all j's
+  // tgid goes from [0 .. batch_size * nBlocksJ - 1]
+  // so:
+  //   b = tgid / nBlocksJ (which batch)
+  //   idxJ = tgid % nBlocksJ (which j block within that step)
+  uint b = tgid / sizes.nBlocksJ;
+  uint idxJ = tgid % sizes.nBlocksJ;
+  if (b >= sizes.batch_size) {
     return;
+  }
+
+  // compute the actual j block index
+  uint j = sizes.startJ + idxJ;
 
   const uint N = sizes.N;
   const uint NB = sizes.NB;
   const uint k = sizes.k;
-  const uint j = sizes.j;
   const uint actSize_k = sizes.activeNB_k;
-  const uint actSize_j = sizes.activeNB_j;
-  const uint batch_offset = bid * sizes.batch_stride;
+  const uint batch_offset = b * sizes.batch_stride;
 
-  if (j == k || actSize_k == 0 || actSize_j == 0) {
+  uint row0 = j * NB; // row offset
+  uint col0 = k * NB; // column offset
+
+  // how many rows in the j block, might be smaller if j is near the end
+  uint actSize_j = (uint)min((int)(N - row0), (int)NB);
+  if (actSize_k == 0 || actSize_j == 0) {
     return;
   }
-
-  uint row0 = j * NB;
-  uint col0 = k * NB;
+  if (j == k) {
+    return; // no-op if same block
+  }
 
   threadgroup float diag[32 * 32];
   threadgroup float target[32 * 32];
@@ -247,44 +261,75 @@ kernel void applyTRSM(
 
 kernel void applySYRK(
     device float* A [[buffer(0)]],
-    constant UpdateParams& sizes [[buffer(1)]],
+    constant SYRKBatchedParams& sizes [[buffer(1)]],
     uint tid [[thread_position_in_threadgroup]],
-    uint bid [[threadgroup_position_in_grid]],
+    uint tgid [[threadgroup_position_in_grid]],
     uint tpg [[threads_per_threadgroup]]) {
-  if (bid >= sizes.batch_size)
+  // 1) Decode which batch and which (j,h) pair from tgid
+  uint b = tgid / sizes.nPairs; // batch index
+  uint pairID = tgid % sizes.nPairs; // enumerates (j,h) within a single “round”
+  if (b >= sizes.batch_size) {
     return;
+  }
 
+  // 2) Map pairID -> (jRel, hRel)
+  //    We want jRel in [0..nBlocksJ-1], hRel in [0..jRel].
+  //    The total number of pairs is nPairs = nBlocksJ*(nBlocksJ+1)/2.
+  //    We can decode pairID by incrementing jRel until
+  //    jRel*(jRel+1)/2 <= pairID < (jRel+1)*(jRel+2)/2.
+  //    Then hRel = pairID - (jRel*(jRel+1)/2).
+
+  uint jRel = 0;
+  uint accum = 0; // jRel*(jRel+1)/2
+  while (true) {
+    uint nextAccum = (jRel + 1) * (jRel + 2) / 2;
+    if (nextAccum > pairID) {
+      break;
+    }
+    jRel++;
+    accum = nextAccum;
+  }
+  uint hRel = pairID - accum;
+
+  // 3) Actual j, h in global block coordinates
+  uint j = sizes.startJ + jRel;
+  uint h = sizes.startJ + hRel;
+
+  // 4) Compute activeNB_j, activeNB_h, and confirm we skip any invalid
+  //    (Though typically none should be invalid if CPU setup is correct)
   const uint N = sizes.N;
   const uint NB = sizes.NB;
   const uint k = sizes.k;
-  const uint j = sizes.j;
-  const uint h = sizes.h;
   const uint actSize_k = sizes.activeNB_k;
-  const uint actSize_j = sizes.activeNB_j;
-  const uint actSize_h = sizes.activeNB_h;
-  const uint batch_offset = bid * sizes.batch_stride;
 
+  uint row0 = j * NB;
+  uint col0 = h * NB;
+  uint actSize_j = min((uint)(N - row0), NB);
+  uint actSize_h = min((uint)(N - col0), NB);
   if (actSize_j == 0 || actSize_h == 0 || actSize_k == 0) {
     return;
   }
 
-  uint row0 = j * NB;
-  uint col0 = h * NB;
-
+  // 5) Local (threadgroup) storage
   threadgroup float left[32 * 32];
   threadgroup float right[32 * 32];
   threadgroup float tile[32 * 32];
 
+  uint batch_offset = b * sizes.batch_stride;
+
+  // Load "left" tile
   for (uint i = tid; i < actSize_j * actSize_k; i += tpg) {
     uint r = i / actSize_k;
     uint c = i % actSize_k;
     left[i] = A[batch_offset + (j * NB + r) * N + (k * NB + c)];
   }
+  // Load "right" tile
   for (uint i = tid; i < actSize_h * actSize_k; i += tpg) {
     uint r = i / actSize_k;
     uint c = i % actSize_k;
     right[i] = A[batch_offset + (h * NB + r) * N + (k * NB + c)];
   }
+  // Load "tile" we will update
   for (uint i = tid; i < actSize_j * actSize_h; i += tpg) {
     uint r = i / actSize_h;
     uint c = i % actSize_h;
@@ -292,13 +337,13 @@ kernel void applySYRK(
   }
   threadgroup_barrier(mem_flags::mem_threadgroup);
 
+  // 6) Perform the SYRK update
   for (uint idx = tid; idx < actSize_j * actSize_h; idx += tpg) {
     uint r = idx / actSize_h;
     uint c = idx % actSize_h;
 
-    // If j == h, only process the lower-triangular portion
-    // i.e., only apply the update if r >= c
-    if (j == h && r < c) {
+    // If j == h, only process lower-tri portion => r >= c
+    if ((j == h) && (r < c)) {
       continue;
     }
     float sumVal = tile[idx];
@@ -309,6 +354,7 @@ kernel void applySYRK(
   }
   threadgroup_barrier(mem_flags::mem_threadgroup);
 
+  // 7) Store the result
   for (uint i = tid; i < actSize_j * actSize_h; i += tpg) {
     uint r = i / actSize_h;
     uint c = i % actSize_h;
