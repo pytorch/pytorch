@@ -7142,7 +7142,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
     @largeTensorTest("40GB", device="cuda")
     def test_layer_norm_large_tensor(self):
         # test for https://github.com/pytorch/pytorch/issues/136291
-        device=torch.device("cuda")
+        device = torch.device("cuda")
         b, n, dp = 16, 3000, 16
         pairwise_repr = torch.ones(b, n, n, dp)
 
