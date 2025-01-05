@@ -7150,7 +7150,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         pairwise_repr = pairwise_repr.to(dtype=torch.float32, device=device)
         norm = attn_bias_norm(pairwise_repr)
         self.assertEqual(norm.shape, torch.Size([16, 3000, 3000, 16]))
-        # check last value to make sure it is correct. 
+        # check last value to make sure it is correct.
         # check all values will take too long
         self.assertEqual(norm[-1][-1][-1][-1], 0.0)
 
