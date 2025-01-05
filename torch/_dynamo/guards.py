@@ -88,6 +88,7 @@ from .source import (
     ChainedSource,
     ConstDictKeySource,
     DefaultsSource,
+    DictGetItemSource,
     FlattenScriptObjectSource,
     FSDPNNModuleSource,
     GetItemSource,
@@ -122,7 +123,6 @@ from .utils import (
     builtin_dict_keys,
     common_constant_types,
     dict_keys,
-    dict_keys_repr,
     get_custom_getattr,
     get_torch_function_mode_stack,
     get_torch_function_mode_stack_at,
@@ -421,7 +421,7 @@ def _get_closure_vars():
             "___odict_getitem": collections.OrderedDict.__getitem__,
             "___key_to_id": key_to_id,
             "___dict_version": dict_version,
-            "___dict_contains": lambda a, b: a in b,
+            "___dict_contains": lambda a, b: dict.__contains__(b, a),
             "___tuple_iterator_len": tuple_iterator_len,
             "___normalize_range_iter": normalize_range_iter,
             "___tuple_iterator_getitem": tuple_iterator_getitem,
@@ -666,7 +666,7 @@ class GuardBuilder(GuardBuilderBase):
         # does not call the overridden keys method.
         for key in builtin_dict_keys(example_value):
             value = example_value[key]
-            value_source = GetItemSource(guard.originating_source, index=key)
+            value_source = DictGetItemSource(guard.originating_source, index=key)
             guard_manager_enum = self.get_guard_manager_type(
                 value_source, example_value
             )
@@ -1050,33 +1050,36 @@ class GuardBuilder(GuardBuilderBase):
                     example_value=example_value,
                     guard_manager_enum=guard_manager_enum,
                 )
+        elif istype(source, DictGetItemSource):
+            assert base_guard_manager  # to make mypy happy
+            assert isinstance(base_example_value, (dict, collections.OrderedDict))
+            if isinstance(base_guard_manager, DictGuardManager):
+                assert self.manager_guards_on_keys(base_guard_manager_enum)
+                out = getitem_on_dict_manager(
+                    source,
+                    base_guard_manager,
+                    base_example_value,
+                    example_value,
+                    guard_manager_enum,
+                )
+            else:
+                if isinstance(source.index, ConstDictKeySource):
+                    raise RuntimeError(
+                        "Expecting clean index here. Likely Dynamo forgot to mark"
+                        " a dict as guard_on_key_order"
+                    )
+                out = base_guard_manager.dict_getitem_manager(
+                    key=source.index,
+                    source=source_name,
+                    example_value=example_value,
+                    guard_manager_enum=guard_manager_enum,
+                )
         elif istype(source, GetItemSource):
             assert base_guard_manager  # to make mypy happy
-            if isinstance(base_example_value, (dict, collections.OrderedDict)):
-                # TODO(anijain2305) - Consider isolating GetItemSource and
-                # DictGetItemSource for dicts) so that GetItemSource is only for non dict objects.
-                if isinstance(base_guard_manager, DictGuardManager):
-                    assert self.manager_guards_on_keys(base_guard_manager_enum)
-                    out = getitem_on_dict_manager(
-                        source,
-                        base_guard_manager,
-                        base_example_value,
-                        example_value,
-                        guard_manager_enum,
-                    )
-                else:
-                    if isinstance(source.index, ConstDictKeySource):
-                        raise RuntimeError(
-                            "Expecting clean index here. Likely Dynamo forgot to mark"
-                            " a dict as guard_on_key_order"
-                        )
-                    out = base_guard_manager.dict_getitem_manager(
-                        key=source.index,
-                        source=source_name,
-                        example_value=example_value,
-                        guard_manager_enum=guard_manager_enum,
-                    )
-            elif isinstance(base_example_value, list) and not source.index_is_slice:
+            assert not isinstance(
+                base_example_value, (dict, collections.OrderedDict)
+            ), "Use DictGetItemSource"
+            if isinstance(base_example_value, list) and not source.index_is_slice:
                 out = base_guard_manager.list_getitem_manager(
                     key=source.index,
                     source=source_name,
@@ -1642,7 +1645,7 @@ class GuardBuilder(GuardBuilderBase):
         return self.FUNCTION_MATCH(guard)
 
     def SEQUENCE_LENGTH(self, guard):
-        # This guard is used to check lenght of PySequence objects like list,
+        # This guard is used to check length of PySequence objects like list,
         # tuple, collections.deque etc
         ref = self.arg_ref(guard)
         value = self.get(guard.name)
@@ -1728,29 +1731,6 @@ class GuardBuilder(GuardBuilderBase):
             get_verbose_code_parts(code, guard),
         )
 
-    def DICT_KEYS(self, guard):
-        # Guard on the keys and their order
-        ref = self.arg_ref(guard)
-        value = self.get(guard.name)
-
-        self.TYPE_MATCH(guard)
-        code = []
-        any_key_is_id = any(key_is_id(k) for k in builtin_dict_keys(value))
-        const_keys_repr = dict_keys_repr(
-            key_to_id(value),
-            local=is_from_local_source(guard.originating_source),
-        )
-        if any_key_is_id:
-            code.append(f"___key_to_id({ref}) == {const_keys_repr}")
-        else:
-            code.append(f"list({ref}.keys()) == {const_keys_repr}")
-
-        self._set_guard_export_info(guard, code)
-        if self.requires_key_order_guarding(guard.originating_source):
-            self.guard_on_dict_keys_and_order(value, guard)
-        else:
-            self.guard_on_dict_keys_and_ignore_order(value, guard)
-
     def WEAKREF_ALIVE(self, guard):
         code = [f"{self.arg_ref(guard)} is not None"]
 
@@ -1759,10 +1739,15 @@ class GuardBuilder(GuardBuilderBase):
             get_verbose_code_parts(code, guard)
         )
 
-    def DICT_CONST_KEYS(self, guard):
-        """Constant keys match"""
+    def DICT_KEYS_MATCH(self, guard):
+        """Insert guard to check that the keys of a dict are same"""
         ref = self.arg_ref(guard)
         value = self.get(guard.name)
+
+        if value is torch.utils._pytree.SUPPORTED_NODES:
+            # For SUPPORTED_NODES, we can guard on the dictionary version (PEP509).
+            self.DICT_VERSION(guard)
+            return
 
         code = []
         # Ensure that we call dict.keys and not value.keys (which can call
