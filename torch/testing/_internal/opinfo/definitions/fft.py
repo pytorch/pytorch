@@ -14,7 +14,7 @@ from torch.testing._internal.common_dtype import (
     all_types_and,
     all_types_and_complex_and,
 )
-from torch.testing._internal.common_utils import TEST_SCIPY, TEST_WITH_ROCM
+from torch.testing._internal.common_utils import TEST_SCIPY, TEST_WITH_ROCM, GPU_TYPE
 from torch.testing._internal.opinfo.core import (
     DecorateInfo,
     ErrorInput,
@@ -165,7 +165,7 @@ op_db: List[OpInfo] = [
                 unittest.skip("Skipped!"),
                 "TestCommon",
                 "test_complex_half_reference_testing",
-                device_type="cuda",
+                device_type=GPU_TYPE,
                 dtypes=[torch.complex32],
                 active_if=TEST_WITH_ROCM,
             ),
@@ -264,7 +264,7 @@ op_db: List[OpInfo] = [
                 unittest.skip("Skipped!"),
                 "TestCommon",
                 "test_complex_half_reference_testing",
-                device_type="cuda",
+                device_type=GPU_TYPE,
             ),
         ),
     ),
@@ -723,7 +723,7 @@ python_ref_db: List[OpInfo] = [
                 "TestCommon",
                 "test_python_ref_torch_fallback",
                 dtypes=(torch.float16,),
-                device_type="cuda",
+                device_type=GPU_TYPE,
             ),
             # AssertionError: Reference result was farther (0.0953431016138116) from the precise
             # computation than the torch result was (0.09305490684430734)
@@ -732,7 +732,7 @@ python_ref_db: List[OpInfo] = [
                 "TestCommon",
                 "test_python_ref_executor",
                 dtypes=(torch.float16,),
-                device_type="cuda",
+                device_type=GPU_TYPE,
             ),
         ],
     ),
@@ -793,7 +793,7 @@ python_ref_db: List[OpInfo] = [
                 unittest.skip("Skipped!"),
                 "TestCommon",
                 "test_python_ref_executor",
-                device_type="cuda",
+                device_type=GPU_TYPE,
             ),
         ],
     ),

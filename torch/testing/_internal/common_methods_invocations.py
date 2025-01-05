@@ -10099,7 +10099,7 @@ foreach_unary_op_db: List[OpInfo] = [
                 unittest.expectedFailure,
                 "TestForeach",
                 "test_unary_op_tensors_on_different_devices",
-                device_type="cuda",
+                device_type=GPU_TYPE,
                 dtypes=(torch.bool,),
             ),
         ),
@@ -10209,7 +10209,7 @@ foreach_unary_op_db: List[OpInfo] = [
                 unittest.expectedFailure,
                 "TestForeach",
                 "test_autodiff",
-                device_type="cuda",
+                device_type=GPU_TYPE,
                 dtypes=(torch.complex128,),
             ),
         ),
@@ -10262,7 +10262,7 @@ foreach_unary_op_db: List[OpInfo] = [
                 unittest.expectedFailure,
                 "TestForeach",
                 "test_autodiff",
-                device_type="cuda",
+                device_type=GPU_TYPE,
                 dtypes=(torch.complex128,),
             ),
         ),
@@ -10315,7 +10315,7 @@ foreach_unary_op_db: List[OpInfo] = [
                 unittest.expectedFailure,
                 "TestForeach",
                 "test_autodiff",
-                device_type="cuda",
+                device_type=GPU_TYPE,
                 dtypes=(torch.complex128,),
             ),
         ),
@@ -10397,7 +10397,7 @@ foreach_unary_op_db: List[OpInfo] = [
                 unittest.expectedFailure,
                 "TestForeach",
                 "test_autodiff",
-                device_type="cuda",
+                device_type=GPU_TYPE,
                 dtypes=(torch.complex128,),
             ),
         ),
@@ -10478,7 +10478,7 @@ foreach_unary_op_db: List[OpInfo] = [
                 unittest.expectedFailure,
                 "TestForeach",
                 "test_autodiff",
-                device_type="cuda",
+                device_type=GPU_TYPE,
                 dtypes=(torch.complex128,),
             ),
         ),
@@ -10531,7 +10531,7 @@ foreach_unary_op_db: List[OpInfo] = [
                 unittest.expectedFailure,
                 "TestForeach",
                 "test_autodiff",
-                device_type="cuda",
+                device_type=GPU_TYPE,
                 dtypes=(torch.complex128,),
             ),
         ),
@@ -10642,7 +10642,7 @@ foreach_unary_op_db: List[OpInfo] = [
                 unittest.expectedFailure,
                 "TestForeach",
                 "test_autodiff",
-                device_type="cuda",
+                device_type=GPU_TYPE,
                 dtypes=(torch.complex128,),
             ),
         ),
@@ -10770,7 +10770,7 @@ foreach_unary_op_db: List[OpInfo] = [
                 unittest.expectedFailure,
                 "TestForeach",
                 "test_autodiff",
-                device_type="cuda",
+                device_type=GPU_TYPE,
                 dtypes=(torch.complex128,),
             ),
         ),
@@ -10828,7 +10828,7 @@ foreach_unary_op_db: List[OpInfo] = [
                 unittest.expectedFailure,
                 "TestForeach",
                 "test_autodiff",
-                device_type="cuda",
+                device_type=GPU_TYPE,
                 dtypes=(torch.complex128,),
             ),
         ),
@@ -10948,7 +10948,7 @@ foreach_binary_op_db: List[OpInfo] = [
                 unittest.expectedFailure,
                 "TestForeach",
                 "test_autodiff",
-                device_type="cuda",
+                device_type=GPU_TYPE,
                 dtypes=(torch.complex128,),
             ),
             DecorateInfo(
@@ -10987,7 +10987,7 @@ foreach_binary_op_db: List[OpInfo] = [
                 unittest.expectedFailure,
                 "TestForeach",
                 "test_autodiff",
-                device_type="cuda",
+                device_type=GPU_TYPE,
                 dtypes=(torch.complex128,),
             ),
             DecorateInfo(
@@ -11027,7 +11027,7 @@ foreach_binary_op_db: List[OpInfo] = [
                 unittest.expectedFailure,
                 "TestForeach",
                 "test_autodiff",
-                device_type="cuda",
+                device_type=GPU_TYPE,
                 dtypes=(torch.complex128,),
             ),
             DecorateInfo(
@@ -11067,7 +11067,7 @@ foreach_binary_op_db: List[OpInfo] = [
                 unittest.expectedFailure,
                 "TestForeach",
                 "test_autodiff",
-                device_type="cuda",
+                device_type=GPU_TYPE,
                 dtypes=(torch.complex128,),
             ),
             DecorateInfo(
@@ -11106,14 +11106,14 @@ foreach_binary_op_db: List[OpInfo] = [
                 unittest.skip("failed starting on ROCm 6.2"),
                 "TestForeach",
                 "test_parity",
-                device_type="cuda",
+                device_type=GPU_TYPE,
                 dtypes=(torch.complex64,),
                 active_if=TEST_WITH_ROCM),
             DecorateInfo(
                 unittest.expectedFailure,
                 "TestForeach",
                 "test_binary_op_with_scalar_self_support",
-                device_type="cuda",
+                device_type=GPU_TYPE,
                 dtypes=(torch.bool,),
                 active_if=lambda kwargs: kwargs["is_fastpath"],
             ),
@@ -11260,7 +11260,7 @@ foreach_reduce_op_db: List[ForeachFuncInfo] = [
                 unittest.expectedFailure,
                 "TestForeach",
                 "test_foreach_reduce_large_input",
-                device_type="cuda",
+                device_type=GPU_TYPE,
                 dtypes=integral_types_and(torch.bool),
             ),
         ),
@@ -12502,7 +12502,7 @@ op_db: List[OpInfo] = [
                            toleranceOverride({torch.float32: tol(atol=9e-3, rtol=8e-5)}),
                            "TestInductorOpInfo",
                            "test_comprehensive",
-                           device_type="cuda"
+                           device_type=GPU_TYPE
                        ),
                    ],
                    supports_inplace_autograd=False,
@@ -13390,7 +13390,7 @@ op_db: List[OpInfo] = [
                             }),
                             "TestInductorOpInfo",
                             "test_comprehensive",
-                            device_type="cuda"
+                            device_type=GPU_TYPE
                         ),
                     )),
     UnaryUfuncInfo('frac',
@@ -13784,7 +13784,7 @@ op_db: List[OpInfo] = [
                # Caching allocator allocated memory was 0 and is now reported as 307200 on device 0.
                # CUDA driver allocated memory was 1254555648 and is now 1242955776.
                DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit',
-                            dtypes=(torch.cfloat,), device_type="cuda"),
+                            dtypes=(torch.cfloat,), device_type=GPU_TYPE),
            )),
     OpInfo('linspace',
            dtypes=all_types_and_complex_and(torch.bfloat16, torch.float16),
@@ -13813,7 +13813,7 @@ op_db: List[OpInfo] = [
                # Caching allocator allocated memory was 0 and is now reported as 307200 on device 0.
                # CUDA driver allocated memory was 1254555648 and is now 1242955776.
                DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit',
-                            dtypes=(torch.cfloat,), device_type="cuda"),
+                            dtypes=(torch.cfloat,), device_type=GPU_TYPE),
            )),
     OpInfo('logspace',
            dtypes=all_types_and_complex_and(torch.half, torch.bfloat16),
@@ -13839,15 +13839,15 @@ op_db: List[OpInfo] = [
 
                # Off-by-one issue when casting floats to ints
                DecorateInfo(unittest.expectedFailure, 'TestDecomp', 'test_quick',
-                            dtypes=(torch.int16, torch.int32, torch.int64), device_type="cuda"),
+                            dtypes=(torch.int16, torch.int32, torch.int64), device_type=GPU_TYPE),
                DecorateInfo(unittest.expectedFailure, 'TestDecomp', 'test_comprehensive',
-                            dtypes=(torch.int16, torch.int32, torch.int64), device_type="cuda"),
+                            dtypes=(torch.int16, torch.int32, torch.int64), device_type=GPU_TYPE),
                # UserWarning: CUDA caching allocator reports a memory leak not verified by the driver API
                # in __main__.TestJitCUDA.test_variant_consistency_jit_logspace_cuda_complex64!
                # Caching allocator allocated memory was 0 and is now reported as 307200 on device 0.
                # CUDA driver allocated memory was 1254555648 and is now 1242955776.
                DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit',
-                            dtypes=(torch.cfloat,), device_type="cuda"),
+                            dtypes=(torch.cfloat,), device_type=GPU_TYPE),
            )),
     OpInfo('logspace',
            dtypes=all_types_and_complex_and(torch.half, torch.bfloat16),
@@ -13873,15 +13873,15 @@ op_db: List[OpInfo] = [
 
                # Off-by-one issue when casting floats to ints
                DecorateInfo(unittest.expectedFailure, 'TestDecomp', 'test_quick',
-                            dtypes=(torch.int16, torch.int32, torch.int64), device_type="cuda"),
+                            dtypes=(torch.int16, torch.int32, torch.int64), device_type=GPU_TYPE),
                DecorateInfo(unittest.expectedFailure, 'TestDecomp', 'test_comprehensive',
-                            dtypes=(torch.int16, torch.int32, torch.int64), device_type="cuda"),
+                            dtypes=(torch.int16, torch.int32, torch.int64), device_type=GPU_TYPE),
                # UserWarning: CUDA caching allocator reports a memory leak not verified by the driver API
                # in __main__.TestJitCUDA.test_variant_consistency_jit_logspace_cuda_complex64!
                # Caching allocator allocated memory was 0 and is now reported as 307200 on device 0.
                # CUDA driver allocated memory was 1254555648 and is now 1242955776.
                DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit',
-                            dtypes=(torch.cfloat,), device_type="cuda"),
+                            dtypes=(torch.cfloat,), device_type=GPU_TYPE),
            )),
     UnaryUfuncInfo('log',
                    ref=np.log,
@@ -14148,7 +14148,7 @@ op_db: List[OpInfo] = [
                        torch.float32: tol(atol=1e-5, rtol=1e-5),
                        torch.complex64: tol(atol=1e-5, rtol=1e-5),
                    }),
-                   "TestDecomp", "test_comprehensive", device_type="cuda",
+                   "TestDecomp", "test_comprehensive", device_type=GPU_TYPE,
                ),
            ],
            skips=(
@@ -14211,9 +14211,9 @@ op_db: List[OpInfo] = [
            supports_fwgrad_bwgrad=True,
            decorators=(
                DecorateInfo(toleranceOverride({torch.float64: tol(atol=2e-7, rtol=2e-7)}),
-                            "TestDecomp", "test_comprehensive", device_type="cuda"),
+                            "TestDecomp", "test_comprehensive", device_type=GPU_TYPE),
                DecorateInfo(toleranceOverride({torch.float16: tol(atol=1e-3, rtol=2e-3)}),
-                            "TestInductorOpInfo", "test_comprehensive", device_type="cuda"),
+                            "TestInductorOpInfo", "test_comprehensive", device_type=GPU_TYPE),
            )),
     OpInfo('var_mean',
            variant_test_name='unbiased',
@@ -14227,9 +14227,9 @@ op_db: List[OpInfo] = [
            supports_fwgrad_bwgrad=True,
            decorators=(
                DecorateInfo(toleranceOverride({torch.float64: tol(atol=2e-7, rtol=2e-7)}),
-                            "TestDecomp", "test_comprehensive", device_type="cuda"),
+                            "TestDecomp", "test_comprehensive", device_type=GPU_TYPE),
                DecorateInfo(toleranceOverride({torch.float16: tol(atol=1e-3, rtol=2e-3)}),
-                            "TestInductorOpInfo", "test_comprehensive", device_type="cuda"),
+                            "TestInductorOpInfo", "test_comprehensive", device_type=GPU_TYPE),
            )),
     OpInfo('std_mean',
            dtypes=floating_and_complex_types_and(torch.half, torch.bfloat16),
@@ -14242,7 +14242,7 @@ op_db: List[OpInfo] = [
            supports_fwgrad_bwgrad=True,
            decorators=(
                DecorateInfo(toleranceOverride({torch.float64: tol(atol=2e-7, rtol=2e-7)}),
-                            "TestDecomp", "test_comprehensive", device_type="cuda"),
+                            "TestDecomp", "test_comprehensive", device_type=GPU_TYPE),
            )),
     OpInfo('std_mean',
            variant_test_name='unbiased',
@@ -14262,7 +14262,7 @@ op_db: List[OpInfo] = [
                    }),
                    "TestDecomp",
                    "test_comprehensive",
-                   device_type="cuda"
+                   device_type=GPU_TYPE
                ),
                DecorateInfo(
                    toleranceOverride({
@@ -14271,7 +14271,7 @@ op_db: List[OpInfo] = [
                    }),
                    "TestInductorOpInfo",
                    "test_comprehensive",
-                   device_type="cuda"
+                   device_type=GPU_TYPE
                ),
            )),
     OpInfo('meshgrid',
@@ -14626,7 +14626,7 @@ op_db: List[OpInfo] = [
                 unittest.expectedFailure,
                 "TestJit",
                 "test_variant_consistency_jit",
-                device_type="cuda",
+                device_type=GPU_TYPE,
             ),
             DecorateInfo(unittest.skip("FP16 corss_entropy cases have not been enabled on MPS yet"),
                          dtypes=(torch.half,), device_type="mps"),
@@ -14787,7 +14787,7 @@ op_db: List[OpInfo] = [
                # 'aten::native_batch_norm.out' with arguments from the 'CPU' backend.
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning', device_type="cpu"),
                # RuntimeError: out_invstd.dim() == 1 && out_invstd.is_contiguous() && out_invstd.sizes()[0]
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out', device_type="cuda"),
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out', device_type=GPU_TYPE),
                # Problem with _get_numerical_jacobian
                # IndexError: tuple index out of range
                DecorateInfo(unittest.skip("Skipped!"), 'TestFwdGradients', 'test_forward_mode_AD'),
@@ -14817,7 +14817,7 @@ op_db: List[OpInfo] = [
                # 'aten::native_batch_norm.out' with arguments from the 'CPU' backend.
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning', device_type="cpu"),
                # RuntimeError: out_invstd.dim() == 1 && out_invstd.is_contiguous() && out_invstd.sizes()[0]
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out', device_type="cuda"),
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out', device_type=GPU_TYPE),
                # Problem with _get_numerical_jacobian
                # IndexError: tuple index out of range
                DecorateInfo(unittest.skip("Skipped!"), 'TestFwdGradients', 'test_forward_mode_AD'),
@@ -14844,7 +14844,7 @@ op_db: List[OpInfo] = [
                # 'aten::native_batch_norm.out' with arguments from the 'CPU' backend.
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning', device_type="cpu"),
                # RuntimeError: out_invstd.dim() == 1 && out_invstd.is_contiguous() && out_invstd.sizes()[0]
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out', device_type="cuda"),
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out', device_type=GPU_TYPE),
                # Problem with _get_numerical_jacobian
                # IndexError: tuple index out of range
                DecorateInfo(unittest.skip("Skipped!"), 'TestFwdGradients', 'test_forward_mode_AD'),
@@ -14853,9 +14853,9 @@ op_db: List[OpInfo] = [
                DecorateInfo(toleranceOverride({torch.float32: tol(atol=5e-5, rtol=5e-5)}),
                             "TestCompositeCompliance", "test_forward_ad"),
                # _batch_norm_with_update expects contiguous inputs for cudnn and miopen
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples', device_type="cuda"),
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples', device_type=GPU_TYPE),
                DecorateInfo(unittest.expectedFailure,
-                            'TestMeta', 'test_dispatch_symbolic_meta_outplace_all_strides', device_type="cuda"),
+                            'TestMeta', 'test_dispatch_symbolic_meta_outplace_all_strides', device_type=GPU_TYPE),
                # _batch_norm_with_update does not have python bindings
                DecorateInfo(unittest.skip("Skipped!"), 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
                # aten out variants do not accept out= kwarg, only python out variants
@@ -14874,7 +14874,7 @@ op_db: List[OpInfo] = [
                    toleranceOverride({torch.float16: tol(atol=1.3e-5, rtol=2e-2)}),
                    "TestInductorOpInfo",
                    "test_comprehensive",
-                   device_type="cuda"
+                   device_type=GPU_TYPE
                ),
            ],
            sample_inputs_func=sample_inputs_cosine_similarity),
@@ -15759,7 +15759,7 @@ op_db: List[OpInfo] = [
                 toleranceOverride({torch.float16: tol(atol=4e-3, rtol=1.3e-3)}),
                 "TestInductorOpInfo",
                 "test_comprehensive",
-                device_type="cuda"
+                device_type=GPU_TYPE
             ),
         ),
         skips=(
@@ -15772,7 +15772,7 @@ op_db: List[OpInfo] = [
                 unittest.skip("Skipped!"),
                 "TestJit",
                 "test_variant_consistency_jit",
-                device_type="cuda",
+                device_type=GPU_TYPE,
             ),
         ),
     ),
@@ -16303,15 +16303,15 @@ op_db: List[OpInfo] = [
                          device_type=GPU_TYPE, dtypes=(torch.bfloat16, torch.float16, torch.float32),
                          active_if=TEST_WITH_ROCM and PLATFORM_SUPPORTS_MEM_EFF_ATTENTION),
             # for element 1, was torch.Size([4, 4, 0]) but real shape was torch.Size([16, 3, 0])
-            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_outplace", device_type="cuda",
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_outplace", device_type=GPU_TYPE,
                          dtypes=[torch.float16, torch.bfloat16, torch.float32],
                          active_if=TEST_WITH_ROCM and PLATFORM_SUPPORTS_FLASH_ATTENTION),
-            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace", device_type="cuda",
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace", device_type=GPU_TYPE,
                          dtypes=[torch.float16, torch.bfloat16, torch.float32],
                          active_if=TEST_WITH_ROCM and PLATFORM_SUPPORTS_FLASH_ATTENTION),
             # for element 1, was torch.Size([4, 4, 11]) but real shape was torch.Size([16, 11])
             DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace_all_strides",
-                         device_type="cuda", dtypes=[torch.float32],
+                         device_type=GPU_TYPE, dtypes=[torch.float32],
                          active_if=TEST_WITH_ROCM and PLATFORM_SUPPORTS_FLASH_ATTENTION),),
     ),
     OpInfo(
@@ -16910,7 +16910,7 @@ op_db: List[OpInfo] = [
                    "TestCommon",
                    "test_compare_cpu",
                    dtypes=(torch.float32,),
-                   device_type="cuda",
+                   device_type=GPU_TYPE,
                ),
            ),
            sample_inputs_func=sample_inputs_mode,),
@@ -17268,10 +17268,10 @@ op_db: List[OpInfo] = [
                        DecorateInfo(unittest.skip("Skipped!"), 'TestMathBits'),
                        DecorateInfo(toleranceOverride({torch.bfloat16: tol(atol=1e-3, rtol=0.016)}),
                                     "TestUnaryUfuncs", "test_reference_numerics_extremal",
-                                    device_type="cuda"),
+                                    device_type=GPU_TYPE),
                        DecorateInfo(toleranceOverride({torch.bfloat16: tol(atol=1e-3, rtol=0.016)}),
                                     "TestUnaryUfuncs", "test_reference_numerics_normal",
-                                    device_type="cuda"),
+                                    device_type=GPU_TYPE),
                    ),
                    supports_forward_ad=True,
                    supports_fwgrad_bwgrad=True,
@@ -17536,7 +17536,7 @@ op_db: List[OpInfo] = [
                DecorateInfo(toleranceOverride({torch.float32: tol(atol=1e-05, rtol=1.2e-03)}),
                             'TestCommon', 'test_noncontiguous_samples'),
                DecorateInfo(toleranceOverride({torch.complex64: tol(atol=1e-05, rtol=1e-05)}),
-                            "TestDecomp", "test_comprehensive", device_type="cuda",
+                            "TestDecomp", "test_comprehensive", device_type=GPU_TYPE,
                             active_if=TEST_WITH_ROCM),
            ),
            skips=(
@@ -17689,7 +17689,7 @@ op_db: List[OpInfo] = [
                            "TestInductorOpInfo",
                            "test_comprehensive",
                            dtypes=(torch.float16,),
-                           device_type="cuda",
+                           device_type=GPU_TYPE,
                        ),
                    ),
                    # tan(pi/2 * odd_number) is nan
@@ -20056,7 +20056,7 @@ op_db: List[OpInfo] = [
                    }),
                    "TestInductorOpInfo",
                    "test_comprehensive",
-                   device_type="cuda"
+                   device_type=GPU_TYPE
                ),
            ),
            sample_inputs_func=sample_inputs_logcumsumexp,
@@ -21270,7 +21270,7 @@ op_db: List[OpInfo] = [
         decorators=[
             DecorateInfo(
                 toleranceOverride({torch.float16: tol(atol=1e-4, rtol=2e-3)}),
-                'TestInductorOpInfo', 'test_comprehensive', device_type="cuda",
+                'TestInductorOpInfo', 'test_comprehensive', device_type=GPU_TYPE,
             ),
         ],
         sample_inputs_func=sample_inputs_cosine_embedding_loss,
@@ -21578,7 +21578,7 @@ op_db: List[OpInfo] = [
                 unittest.skip("Skipped!"),
                 "TestJit",
                 "test_variant_consistency_jit",
-                device_type="cuda",
+                device_type=GPU_TYPE,
             ),
         ),
     ),
@@ -21598,7 +21598,7 @@ op_db: List[OpInfo] = [
                 unittest.skip("Skipped!"),
                 "TestJit",
                 "test_variant_consistency_jit",
-                device_type="cuda",
+                device_type=GPU_TYPE,
             ),
         ),
     ),
@@ -21992,13 +21992,13 @@ python_ref_db = [
             # https://github.com/pytorch/pytorch/issues/82230
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback',
                          dtypes=(torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64),
-                         device_type="cuda"),
+                         device_type=GPU_TYPE),
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref',
                          dtypes=(torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64),
-                         device_type="cuda"),
+                         device_type=GPU_TYPE),
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor',
                          dtypes=(torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64),
-                         device_type="cuda"),
+                         device_type=GPU_TYPE),
         ),
     ),
     PythonRefInfo(
@@ -22021,13 +22021,13 @@ python_ref_db = [
             # https://github.com/pytorch/pytorch/issues/82230
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback',
                          dtypes=(torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64),
-                         device_type="cuda"),
+                         device_type=GPU_TYPE),
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref',
                          dtypes=(torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64),
-                         device_type="cuda"),
+                         device_type=GPU_TYPE),
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor',
                          dtypes=(torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64),
-                         device_type="cuda"),
+                         device_type=GPU_TYPE),
         ),
     ),
     PythonRefInfo(
@@ -22042,13 +22042,13 @@ python_ref_db = [
             # Off-by-one issue when casting floats to ints
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback',
                          dtypes=(torch.int16, torch.int32, torch.int64),
-                         device_type="cuda"),
+                         device_type=GPU_TYPE),
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref',
                          dtypes=(torch.int16, torch.int32, torch.int64),
-                         device_type="cuda"),
+                         device_type=GPU_TYPE),
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor',
                          dtypes=(torch.int16, torch.int32, torch.int64),
-                         device_type="cuda"),
+                         device_type=GPU_TYPE),
         ),
     ),
     PythonRefInfo(
@@ -22063,13 +22063,13 @@ python_ref_db = [
             # Off-by-one issue when casting floats to ints
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback',
                          dtypes=(torch.int16, torch.int32, torch.int64),
-                         device_type="cuda"),
+                         device_type=GPU_TYPE),
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref',
                          dtypes=(torch.int16, torch.int32, torch.int64),
-                         device_type="cuda"),
+                         device_type=GPU_TYPE),
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor',
                          dtypes=(torch.int16, torch.int32, torch.int64),
-                         device_type="cuda"),
+                         device_type=GPU_TYPE),
         ),
     ),
     PythonRefInfo(
@@ -22547,10 +22547,10 @@ python_ref_db = [
         skips=(
             DecorateInfo(toleranceOverride({torch.bfloat16: tol(atol=1e-3, rtol=0.016)}),
                          "TestUnaryUfuncs", "test_reference_numerics_extremal",
-                         device_type="cuda"),
+                         device_type=GPU_TYPE),
             DecorateInfo(toleranceOverride({torch.bfloat16: tol(atol=1e-3, rtol=0.016)}),
                          "TestUnaryUfuncs", "test_reference_numerics_normal",
-                         device_type="cuda"),
+                         device_type=GPU_TYPE),
         ),
     ),
     ElementwiseUnaryPythonRefInfo(
@@ -23022,7 +23022,7 @@ python_ref_db = [
         skips=(
             # RuntimeError: It appears that you're trying to get value out of a tracing tensor - erroring out!
             DecorateInfo(
-                unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor', device_type="cuda"
+                unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor', device_type=GPU_TYPE
             ),
         ),
     ),
@@ -23146,13 +23146,13 @@ python_ref_db = [
             # computation than the torch result was (nan)!
             DecorateInfo(
                 unittest.expectedFailure, 'TestCommon', 'test_python_ref',
-                dtypes=(torch.complex32,), device_type="cuda"
+                dtypes=(torch.complex32,), device_type=GPU_TYPE
             ),
             # Reference result was farther (0.7433461727239705) from the precise
             # computation than the torch result was (nan)!
             DecorateInfo(
                 unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback',
-                dtypes=(torch.complex32,), device_type="cuda"
+                dtypes=(torch.complex32,), device_type=GPU_TYPE
             ),
         ),
     ),
@@ -23444,13 +23444,13 @@ python_ref_db = [
             # computation than the torch result was (nan)!
             DecorateInfo(
                 unittest.expectedFailure, 'TestCommon', 'test_python_ref',
-                dtypes=(torch.complex32,), device_type="cuda"
+                dtypes=(torch.complex32,), device_type=GPU_TYPE
             ),
             # Reference result was farther (inf) from the precise
             # computation than the torch result was (nan)!
             DecorateInfo(
                 unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback',
-                dtypes=(torch.complex32,), device_type="cuda"
+                dtypes=(torch.complex32,), device_type=GPU_TYPE
             ),
             # Skipping integers because they are being raised to negative powers causing an error
             DecorateInfo(unittest.expectedFailure, 'TestBinaryUfuncs',
@@ -23554,13 +23554,13 @@ python_ref_db = [
             # computation than the torch result was (nan)!
             DecorateInfo(
                 unittest.expectedFailure, 'TestCommon', 'test_python_ref',
-                dtypes=(torch.complex32,), device_type="cuda"
+                dtypes=(torch.complex32,), device_type=GPU_TYPE
             ),
             # Reference result was farther (0.7433461727239705) from the precise
             # computation than the torch result was (nan)!
             DecorateInfo(
                 unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback',
-                dtypes=(torch.complex32,), device_type="cuda"
+                dtypes=(torch.complex32,), device_type=GPU_TYPE
             ),
         ),
     ),
