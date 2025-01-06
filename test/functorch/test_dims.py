@@ -538,7 +538,7 @@ class TestMin(TestCase):
         r = rn(img[i, j])
         r = r.order(i, j).view(2, 1000)
         r2 = rn(imgf)
-        torch.testing.assert_close(r2, r, atol=1e-06)
+        torch.testing.assert_close(r2, r, atol=1e-6, rtol=1e-7)
 
     def test_dim_args(self):
         a = dimlists()
