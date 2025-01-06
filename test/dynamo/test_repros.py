@@ -15,15 +15,17 @@ import inspect
 import itertools
 import os
 import random
+import typing
 import unittest
 import warnings
 import weakref
 from abc import ABC
 from collections import namedtuple
+from collections.abc import Iterator
 from copy import deepcopy
 from enum import Enum, IntEnum
 from functools import wraps
-from typing import Any, Dict, Iterator, List, Literal, Tuple, TypedDict
+from typing import Any, Dict, List, Literal, Tuple, TypedDict
 from unittest import mock
 
 import numpy as np
@@ -6496,6 +6498,13 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
 
         with mock.patch("torch._dynamo.eval_frame._maybe_set_eval_frame", bad):
             fn(torch.ones(3))
+
+    def test_torchname(self):
+        def fn(obj):
+            return torch.typename(obj)
+
+        opt_fn = torch.compile(fn, backend="eager")
+        self.assertEqual(fn(typing.Any), opt_fn(typing.Any))
 
 
 instantiate_parametrized_tests(ReproTests)
