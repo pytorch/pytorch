@@ -1705,23 +1705,22 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         gemm_num,
         dtype,
     ):
-        class Linear_Gate_Up(torch.nn.Module):
+        class M(torch.nn.Module):
             def __init__(self, in_feature, out_feature, gemm_num):
                 super().__init__()
-                self.gemm_num = gemm_num
                 self.linears = [
                     torch.nn.Linear(in_feature, out_feature, bias=False)
                     for _ in range(gemm_num)
                 ]
 
             def forward(self, x):
-                return [self.linears[i](x) for i in range(self.gemm_num)]
+                return [linear(x) for linear in self.linears]
 
         torch._dynamo.reset()
         torch._inductor.metrics.reset()
         counters.clear()
         assert dtype == torch.bfloat16
-        mod = Linear_Gate_Up(in_features, out_features, gemm_num).eval()
+        mod = M(in_features, out_features, gemm_num).eval()
         B = (2, batch_size) if input_3d else (batch_size,)
         v = torch.randn(*B, in_features).to(torch.bfloat16)
         with verify(dtype) as (atol, rtol), torch.autocast(
@@ -1771,7 +1770,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         dtype,
         epilogue,
     ):
-        class Linear_Gate_Up(torch.nn.Module):
+        class M(torch.nn.Module):
             def __init__(self, in_feature, out_feature, bias, epilogue):
                 super().__init__()
                 self.linear0 = torch.nn.Linear(
@@ -1797,7 +1796,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         torch._inductor.metrics.reset()
         counters.clear()
         assert dtype == torch.bfloat16
-        mod = Linear_Gate_Up(in_features, out_features, bias, epilogue).eval()
+        mod = M(in_features, out_features, bias, epilogue).eval()
         B = (2, batch_size) if input_3d else (batch_size,)
         v = torch.randn(*B, in_features).to(torch.bfloat16)
         with verify(dtype) as (atol, rtol), torch.autocast(
