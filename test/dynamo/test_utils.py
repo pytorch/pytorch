@@ -282,6 +282,9 @@ class TestDynamoTimed(TestCase):
  'start_time_us': 100,
  'structured_logging_overhead_s': 0.0,
  'structured_logging_overhead_us': 0,
+ 'tensorify_float_attempt': None,
+ 'tensorify_float_failure': None,
+ 'tensorify_float_success': None,
  'triton_compile_time_us': 0,
  'triton_version': None}""",  # noqa: B950
         )
@@ -359,6 +362,9 @@ class TestDynamoTimed(TestCase):
  'start_time_us': 100,
  'structured_logging_overhead_s': 0.0,
  'structured_logging_overhead_us': 0,
+ 'tensorify_float_attempt': None,
+ 'tensorify_float_failure': None,
+ 'tensorify_float_success': None,
  'triton_compile_time_us': 0,
  'triton_version': None}""",  # noqa: B950
         )
@@ -393,27 +399,25 @@ class TestInductorConfigParsingForLogging(TestCase):
         """
         obj = TestCase
         test_mock_config = {
-            "some": {1: "0", obj: "this", "name": obj, "some": True},
-            "data": {1: "0", obj: "this", "name": obj, "some": True},
+            "some": {"name": obj, "some": True},
+            "data": {"name": obj, "some": True},
             "list": [
-                {1: "0", obj: "this", "name": obj, "some": True},
-                {1: "0", obj: "this", "name": obj, "some": True},
+                {"name": obj, "some": True},
+                {"name": obj, "some": True},
             ],
             "object": {
-                1: "0",
-                obj: "this",
                 "name": obj,
                 "some": True,
-                "data": {1: "0", obj: "this", "name": obj, "some": True},
+                "data": {"name": obj, "some": True},
             },
         }
         expected = (
-            """{"some": {"1": "0", "name": "Value is not JSON serializable", "some": true},"""
-            """ "data": {"1": "0", "name": "Value is not JSON serializable", "some": true}, "list": """
-            """[{"1": "0", "name": "Value is not JSON serializable", "some": true}, """
-            """{"1": "0", "name": "Value is not JSON serializable", "some": true}], "object": """
-            """{"1": "0", "name": "Value is not JSON serializable", "some": true, "data": """
-            """{"1": "0", "name": "Value is not JSON serializable", "some": true}}}"""
+            """{"some": {"name": "Value is not JSON serializable", "some": true}, """
+            """"data": {"name": "Value is not JSON serializable", "some": true}, """
+            """"list": [{"name": "Value is not JSON serializable", "some": true}, """
+            """{"name": "Value is not JSON serializable", "some": true}], """
+            """"object": {"name": "Value is not JSON serializable", "some": true, """
+            """"data": {"name": "Value is not JSON serializable", "some": true}}}"""
         )
         mocked_inductor_config.get_config_copy.return_value = test_mock_config
         inductor_config_json = utils._scrubbed_inductor_config_for_logging()

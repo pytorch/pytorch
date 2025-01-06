@@ -10,6 +10,7 @@ import sys
 import time
 import warnings
 from abc import ABC, abstractmethod
+from inspect import currentframe
 from itertools import count
 from typing import (
     Any,
@@ -43,15 +44,18 @@ from torch._dynamo import (
 from torch._dynamo.device_interface import get_interface_for_device
 from torch._dynamo.repro.after_aot import wrap_compiler_debug
 from torch._dynamo.utils import (
+    CompileEventLogger,
     counters,
     detect_fake_mode,
     dynamo_timed,
     flatten_graph_inputs,
-    get_chromium_event_logger,
     lazy_format_graph_code,
     set_feature_use,
 )
 from torch._functorch import config as functorch_config
+from torch._functorch._aot_autograd.subclass_parametrization import (
+    unwrap_tensor_subclass_parameters,
+)
 from torch._functorch.aot_autograd import (
     aot_export_module,
     make_boxed_func,
@@ -88,12 +92,14 @@ from torch.monitor import _WaitCounter
 from torch.utils._ordered_set import OrderedSet
 
 from .._dynamo.backends.common import aot_autograd
+from .._dynamo.exc import ShortenTraceback, SkipFrame
 from ..fx._lazy_graph_module import _use_lazy_graph_module
 from ..fx.graph import _PyTreeCodeGen
 from ..utils._triton import has_triton
 from . import config, metrics
 from .debug import DebugContext
 from .decomposition import select_decomp_table
+from .exc import InductorError
 from .fx_passes.joint_graph import joint_graph_passes
 from .fx_passes.post_grad import post_grad_passes, view_to_reshape
 from .fx_passes.pre_grad import pre_grad_passes
@@ -563,12 +569,10 @@ def compile_fx_inner(
         stack.enter_context(_WaitCounter("pytorch.wait_counter.dynamo_compile").guard())
         stack.enter_context(with_fresh_cache_if_config())
         stack.enter_context(DebugContext())
-
-        get_chromium_event_logger().add_event_data(
+        CompileEventLogger.pt2_compile(
             "inductor_compile",
             is_backward=kwargs["is_backward"],
         )
-
         return wrap_compiler_debug(_compile_fx_inner, compiler_name="inductor")(
             gm,
             example_inputs,
@@ -695,6 +699,12 @@ def _compile_fx_inner(
                     triton_bundler_meta,
                 ) = TritonBundler.collect()
                 mb_compiled_graph.set_triton_bundle(triton_bundle)
+            except (ShortenTraceback, SkipFrame):
+                raise
+            except Exception as e:
+                raise InductorError(e, currentframe()).with_traceback(
+                    e.__traceback__
+                ) from None
             finally:
                 TritonBundler.end_compile()
             if triton_bundler_meta is not None:
@@ -724,7 +734,6 @@ def _compile_fx_inner(
         # and a tlparse log for every cache action.
         # In the event of a bypass, we also logged to the remote table earlier
         # with log_cache_bypass.
-        chromium_log = get_chromium_event_logger()
         cache_state = (
             cache_info["cache_state"] if cache_info is not None else "disabled"
         )
@@ -733,14 +742,14 @@ def _compile_fx_inner(
         # fx_graph_cache_miss
         # fx_graph_cache_bypass
         # fx_graph_cache_disabled
-        chromium_log.log_instant_event(
+        CompileEventLogger.instant(
             f"fx_graph_cache_{cache_state}",
-            start_time,
-            metadata=cache_info,
+            metadata=cache_info or {},
+            time_ns=start_time,
         )
         # Add event data about cache hits/miss
         # TODO: add remote cache get/put timings here too
-        chromium_log.add_event_data(
+        CompileEventLogger.pt2_compile(
             "inductor_compile",
             cache_state=cache_state,
             cache_event_time=start_time,
@@ -925,9 +934,7 @@ class _InProcessFxCompile(FxCompile):
                     "inductor_post_grad_graph",
                     payload_fn=lambda: gm.print_readable(
                         print_output=False, include_stride=True, include_device=True
-                    )
-                    + "# "
-                    + provenance_tracking_json,
+                    ),
                 )
                 if config.is_fbcode():
                     log_optimus_to_scuba(
@@ -1334,6 +1341,9 @@ def compile_fx_aot(
     config_patches: Optional[Dict[str, str]] = None,
 ) -> Union[List[str], str]:
     assert isinstance(model_, GraphModule), model_
+
+    # [See NOTE] Unwrapping subclasses AOT
+    unwrap_tensor_subclass_parameters(model_)
 
     config_patches: Dict[str, Any] = (
         {"cpp_wrapper": True}
@@ -1883,15 +1893,20 @@ def compile_fx(
         ), compiled_autograd._disable(), functorch_config.patch(
             unlift_effect_tokens=True
         ):
-            return aot_autograd(
-                fw_compiler=fw_compiler,
-                bw_compiler=bw_compiler,
-                inference_compiler=inference_compiler,
-                decompositions=decompositions,
-                partition_fn=partition_fn,
-                keep_inference_input_mutations=True,
-                cudagraphs=cudagraphs,
-            )(model_, example_inputs_)
+            try:
+                return aot_autograd(
+                    fw_compiler=fw_compiler,
+                    bw_compiler=bw_compiler,
+                    inference_compiler=inference_compiler,
+                    decompositions=decompositions,
+                    partition_fn=partition_fn,
+                    keep_inference_input_mutations=True,
+                    cudagraphs=cudagraphs,
+                )(model_, example_inputs_)
+            except ShortenTraceback as e:
+                # We will also shorten the traceback inside dynamo.
+                # This is only useful if inductor is called directly with an FX graph.
+                raise e.remove_dynamo_frames() from None  # see TORCHDYNAMO_VERBOSE=1
 
 
 def graph_returns_tuple(gm: GraphModule) -> bool:

@@ -10,7 +10,7 @@
 #include <ATen/native/cpu/utils.h>
 #include <c10/util/Unroll.h>
 #include <c10/util/irange.h>
-#include <cpuinfo.h>
+
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
 #else
@@ -19,6 +19,7 @@
 
 #if AT_KLEIDIAI_ENABLED()
 #include <ATen/native/kleidiai/kai_kernels.h>
+#include <cpuinfo.h>
 #endif
 
 #if (defined(_WIN32) || defined(_WIN64))
