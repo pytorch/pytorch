@@ -21681,6 +21681,10 @@ python_ref_db = [
             DecorateInfo(
                 toleranceOverride({torch.float16: tol(atol=1e-05, rtol=1e-03)}),
                 'TestUnaryUfuncs', device_type='cuda'),
+            DecorateInfo(
+                toleranceOverride({torch.complex64: tol(atol=5e-05, rtol=2e-05)}),
+                'TestUnaryUfuncs', 'test_reference_numerics_extremal', device_type='cpu'
+            ),
             precisionOverride({torch.bfloat16: 1e-2}),
         ],
         skips=(
