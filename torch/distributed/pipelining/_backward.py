@@ -2,7 +2,7 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import collections
 import logging
-from typing import Any, Deque, Dict, Iterator, List, Optional, Set, Union
+from typing import Any, Deque, Dict, Iterator, List, Optional, Set, Tuple, Union
 
 import torch
 from torch.autograd.graph import GradientEdge, Node
@@ -38,7 +38,7 @@ def _get_grad_fn_or_grad_acc(t: torch.Tensor) -> Union[Node, None]:
 
 def reverse_closure(
     roots: List[Node], target_nodes: Set[Node], reverse_edges_dict
-) -> tuple[Set[Node], Set[Node]]:
+) -> Tuple[Set[Node], Set[Node]]:
     """
     This function returns the reverse closure of the given roots,
     i.e. the set of nodes that can be reached from the roots by following the
@@ -144,7 +144,7 @@ def stage_backward_input(
     output_grads: Optional[List[torch.Tensor]],
     input_values: List[torch.Tensor],
     weights: Iterator[Parameter],
-) -> tuple[tuple[Optional[torch.Tensor], ...], List[Dict[str, Any]]]:
+) -> Tuple[Tuple[Optional[torch.Tensor], ...], List[Dict[str, Any]]]:
     """
     Compute the gradients for only the stage inputs with
     respect to the stage outputs (if non-last stage) or loss (if last stage)
@@ -223,7 +223,7 @@ def stage_backward_input(
 
 def stage_backward_weight(
     weights: Iterator[Parameter], param_groups: List[Dict[str, Any]], retain_graph=False
-) -> tuple[Optional[torch.Tensor], ...]:
+) -> Tuple[Optional[torch.Tensor], ...]:
     # map weights to param_group_weights
     grad_acc_to_weight = {}
     weight_grads: List[Optional[torch.Tensor]] = []
@@ -274,7 +274,7 @@ def stage_backward(
     output_grads,
     input_values,
     outputs_with_grads_idxs: Optional[List[int]] = None,  # deprecated, not used
-) -> tuple[Optional[torch.Tensor], ...]:
+) -> Tuple[Optional[torch.Tensor], ...]:
     """
     This is a helper function to:
     1. compute the gradients for the stage inputs, and
