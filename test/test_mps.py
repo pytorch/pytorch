@@ -8604,47 +8604,44 @@ class TestLogical(TestCaseMPS):
         helper(self._wrap_tensor((1, 0, 1, 0)), self._wrap_tensor(True))
         helper(self._wrap_tensor((1, 0, 1, 0)), self._wrap_tensor(False))
 
-    def test_min_max(self):
-        def helper(dtype):
-            for _ in range(10):
-                if dtype == torch.float32 or dtype == torch.float16:
-                    x = torch.randn((30, 15), device='mps', dtype=dtype)
-                else:
-                    x = torch.randint(0, 100, (30, 15), device="mps", dtype=dtype)
-                x_cpu = x.to("cpu")
+    @parametrize("dtype", [torch.float32, torch.float16, torch.int32, torch.int16, torch.uint8, torch.int8, torch.bool])
+    def test_min_max(self, dtype):
+        for _ in range(10):
+            if dtype == torch.float32 or dtype == torch.float16:
+                x = torch.randn((30, 15), device='mps', dtype=dtype)
+            else:
+                x = torch.randint(0, 100, (30, 15), device="mps", dtype=dtype)
+            x_cpu = x.to("cpu")
 
-                y = x.max()
-                y_cpu = x_cpu.max()
-                self.assertEqual(y, y_cpu)
+            y = x.max()
+            y_cpu = x_cpu.max()
+            self.assertEqual(y, y_cpu)
 
-                z = x.min()
-                z_cpu = x_cpu.min()
-                self.assertEqual(z, z_cpu)
+            z = x.min()
+            z_cpu = x_cpu.min()
+            self.assertEqual(z, z_cpu)
 
-        [helper(dtype) for dtype in [torch.float32, torch.float16, torch.int32, torch.int16, torch.uint8, torch.int8, torch.bool]]
+    @parametrize("dtype", [torch.float32, torch.float16] + ([torch.bfloat16] if MACOS_VERSION >= 14.0 else []))
+    def test_min_max_nan_propagation(self, dtype):
+        cpu_x = torch.tensor([1.0, float("nan"), 3.0], device="cpu", dtype=dtype)
+        mps_x = cpu_x.detach().clone().to('mps')
 
-    def test_min_max_nan_propagation(self):
-        def helper(dtype):
-            cpu_x = torch.tensor([1.0, float("nan"), 3.0], device="cpu")
-            mps_x = cpu_x.detach().clone().to('mps')
+        cpu_max = torch.max(cpu_x)
+        mps_max = torch.max(mps_x).to('cpu')
 
-            cpu_max = torch.max(cpu_x)
-            mps_max = torch.max(mps_x).to('cpu')
+        cpu_amax = torch.amax(cpu_x)
+        mps_amax = torch.amax(mps_x).to('cpu')
 
-            cpu_amax = torch.amax(cpu_x)
-            mps_amax = torch.amax(mps_x).to('cpu')
+        cpu_min = torch.min(cpu_x)
+        mps_min = torch.min(mps_x).to('cpu')
 
-            cpu_min = torch.min(cpu_x)
-            mps_min = torch.min(mps_x).to('cpu')
+        cpu_amin = torch.amin(cpu_x)
+        mps_amin = torch.amin(mps_x).to('cpu')
 
-            cpu_amin = torch.amin(cpu_x)
-            mps_amin = torch.amin(mps_x).to('cpu')
-
-            self.assertEqual(cpu_max, mps_max)
-            self.assertEqual(cpu_amax, mps_amax)
-            self.assertEqual(cpu_min, mps_min)
-            self.assertEqual(cpu_amin, mps_amin)
-        [helper(dtype) for dtype in [torch.float32, torch.float16, torch.bfloat16]]
+        self.assertEqual(cpu_max, mps_max)
+        self.assertEqual(cpu_amax, mps_amax)
+        self.assertEqual(cpu_min, mps_min)
+        self.assertEqual(cpu_amin, mps_amin)
 
     def test_isin(self):
         def helper(dtype):
@@ -12697,6 +12694,7 @@ instantiate_device_type_tests(TestConsistency, globals(), only_for="cpu")
 instantiate_device_type_tests(TestErrorInputs, globals(), allow_mps=True, only_for="mps")
 instantiate_device_type_tests(TestCommon, globals(), allow_mps=True, only_for="mps")
 instantiate_device_type_tests(TestLinalgMPS, globals(), allow_mps=True, only_for="mps")
+instantiate_parametrized_tests(TestLogical)
 instantiate_parametrized_tests(TestMPS)
 
 if __name__ == "__main__":
