@@ -444,7 +444,7 @@ class CppGroupedGemmTemplate(CppGemmTemplate):
         for inp_idx in range(self.gemm_grouped_num):
             kernel_args["inp" + str(inp_idx)] = inp_list[inp_idx]
 
-        def _bias_add_epilogue(buf, inp):
+        def _bias_add_epilogue(buf: ir.IRNode, inp: ir.IRNode) -> ir.Pointwise:
             return create_epilogue_with_attr(
                 buf, "bias_add", other=inp, beta=self.beta, dtype=self.layout.dtype
             )
