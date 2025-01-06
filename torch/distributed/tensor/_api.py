@@ -3,7 +3,7 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import inspect
 import warnings
-from typing import Any, Callable, cast, Optional, Sequence
+from typing import Any, Callable, cast, Optional, Sequence, Tuple
 
 import torch
 import torch.distributed.tensor._dispatch as op_dispatch
@@ -122,10 +122,10 @@ class _FromTorchTensor(torch.autograd.Function):
         ctx,  # pyre-ignore[2]: Parameter must be annotated.
         input: torch.Tensor,
         device_mesh: DeviceMesh,
-        placements: tuple[Placement, ...],
+        placements: Tuple[Placement, ...],
         run_check: bool,
         shape: Optional[torch.Size] = None,
-        stride: Optional[tuple[int, ...]] = None,
+        stride: Optional[Tuple[int, ...]] = None,
     ) -> "DTensor":
         ctx.previous_placement = placements
         ctx.previous_device_mesh = device_mesh
@@ -354,7 +354,7 @@ class DTensor(torch.Tensor):
         *,
         run_check: bool = False,
         shape: Optional[torch.Size] = None,
-        stride: Optional[tuple[int, ...]] = None,
+        stride: Optional[Tuple[int, ...]] = None,
     ) -> "DTensor":
         """
         Create a :class:`DTensor` from a local torch.Tensor on each rank
@@ -581,7 +581,7 @@ class DTensor(torch.Tensor):
         return self._spec.mesh
 
     @property
-    def placements(self) -> tuple[Placement, ...]:
+    def placements(self) -> Tuple[Placement, ...]:
         """
         The placements attribute of this DTensor that describes the layout of this
         DTensor on the its DeviceMesh.

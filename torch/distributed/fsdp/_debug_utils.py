@@ -4,7 +4,7 @@ import time
 from collections import defaultdict
 from contextlib import contextmanager
 from enum import Enum
-from typing import Dict, Iterator, List, Set
+from typing import Dict, Iterator, List, Set, Tuple
 
 import torch
 import torch.distributed as dist
@@ -65,7 +65,7 @@ class SimpleProfiler:
 
 def _get_sharded_module_tree_with_module_name_to_fqns(
     model: torch.nn.Module,
-) -> tuple[str, Dict[str, List[str]]]:
+) -> Tuple[str, Dict[str, List[str]]]:
     """
     It is used for composable fully_shard() code path, it returns
       1. sharded module tree info: each line reprents a submodule name that contats the

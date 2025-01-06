@@ -17,6 +17,7 @@ from typing import (
     Iterator,
     List,
     Optional,
+    Tuple,
     Union,
 )
 
@@ -981,7 +982,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         self,
         *args,
         **kwargs,
-    ) -> Iterator[tuple[str, torch.Tensor]]:
+    ) -> Iterator[Tuple[str, torch.Tensor]]:
         """Return an iterator over module buffers, yielding both the name of the buffer and the buffer itself.
 
         Intercepts buffer names and removes all occurrences of the FSDP-specific flattened buffer prefix
@@ -999,7 +1000,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         self,
         *args,
         **kwargs,
-    ) -> Iterator[tuple[str, torch.nn.Parameter]]:
+    ) -> Iterator[Tuple[str, torch.nn.Parameter]]:
         """Return an iterator over module parameters, yielding both the name of the parameter and the parameter itself.
 
         Intercepts parameter names and removes all occurrences of the FSDP-specific flattened parameter prefix
