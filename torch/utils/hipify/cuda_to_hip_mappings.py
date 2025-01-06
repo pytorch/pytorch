@@ -7293,6 +7293,10 @@ CUDA_IDENTIFIER_MAP = collections.OrderedDict(
             ("HIPBLAS_COMPUTE_32F", CONV_MATH_FUNC, API_BLAS)
         ),
         (
+            "CUBLAS_COMPUTE_32F_FAST_TF32",
+            ("HIPBLAS_COMPUTE_32F_FAST_TF32", CONV_MATH_FUNC, API_BLAS)
+        ),
+        (
             "CUBLAS_COMPUTE_64F",
             ("HIPBLAS_COMPUTE_64F", CONV_MATH_FUNC, API_BLAS)
         ),
