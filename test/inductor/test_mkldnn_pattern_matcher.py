@@ -152,23 +152,24 @@ class TestPatternMatcherBase(TestCase):
     ):
         counters.clear()
         torch._dynamo.reset()
-        assert matcher_check_fn is not None or (
-            matcher_count is not None and matcher_nodes is not None
-        )
-        if check_autocast == torch.bfloat16 and (
-            torch.ops.mkldnn._is_mkldnn_bf16_supported() or is_xpu
+        has_xpu = any(isinstance(input, torch.Tensor) and input.device.type == "xpu"
+                      for input in inputs)
+        if (
+            check_autocast == torch.bfloat16
+            and (torch.ops.mkldnn._is_mkldnn_bf16_supported() or has_xpu)
         ):
-            if is_xpu:
+            if has_xpu:
                 maybe_autocast = torch.amp.autocast(
                     device_type="xpu", dtype=torch.bfloat16
                 )
             else:
                 maybe_autocast = torch.cpu.amp.autocast(dtype=torch.bfloat16)
             atol, rtol = 1e-2, 1e-2
-        elif check_autocast == torch.float16 and (
-            torch.ops.mkldnn._is_mkldnn_fp16_supported() or is_xpu
+        elif (
+            check_autocast == torch.float16
+            and (torch.ops.mkldnn._is_mkldnn_fp16_supported() or has_xpu)
         ):
-            if is_xpu:
+            if has_xpu:
                 maybe_autocast = torch.amp.autocast(
                     device_type="xpu", dtype=torch.float16
                 )
@@ -1237,7 +1238,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
             [qconv2d_pointwise_default, convert_element_type, clamp_min, clamp_max, convert_element_type, quantize_per_tensor]
             [qconv2d_pointwise_default, convert_element_type, clamp_min, clamp_max, convert_element_type]
         """
-        self._qconv2d_unary_cpu_test_helper(
+        self._qconv2d_unary_test_helper(
             device="xpu",
             unary_op=torch.nn.Hardtanh(),
             int8_mixed_bf16=True,
@@ -1290,7 +1291,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
              clamp_max, mul, div, convert_element_type, quantize_per_tensor]
             [qconv2d_pointwise_default, convert_element_type, add, clamp_min, clamp_max, mul, div, convert_element_type]
         """
-        self._qconv2d_unary_cpu_test_helper(
+        self._qconv2d_unary_test_helper(
             device="xpu",
             unary_op=torch.nn.Hardswish(),
             int8_mixed_bf16=True,
@@ -1342,7 +1343,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
              convert_element_type, quantize_per_tensor]
             [qconv2d_pointwise_default, convert_element_type, sigmoid, mul, convert_element_type]
         """
-        self._qconv2d_unary_cpu_test_helper(
+        self._qconv2d_unary_test_helper(
             device="xpu",
             unary_op=torch.nn.SiLU(),
             int8_mixed_bf16=True,
