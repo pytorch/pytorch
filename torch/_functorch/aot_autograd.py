@@ -13,6 +13,7 @@ from typing import (
     Optional,
     Protocol,
     Sequence,
+    Tuple,
     Type,
     TypeVar,
 )
@@ -560,7 +561,7 @@ def process_inputs(
 
 def construct_fake_mode(
     flat_args: List[Any], aot_config: AOTConfig
-) -> tuple[FakeTensorMode, Optional[ShapeEnv]]:
+) -> Tuple[FakeTensorMode, Optional[ShapeEnv]]:
     fake_mode = detect_fake_mode(flat_args)
     if fake_mode is None:
         shape_env = ShapeEnv() if aot_config.dynamic_shapes else None
@@ -576,7 +577,7 @@ def create_aot_dispatcher_function(
     aot_config: AOTConfig,
     fake_mode: FakeTensorMode,
     shape_env: Optional[ShapeEnv],
-) -> tuple[Callable, ViewAndMutationMeta]:
+) -> Tuple[Callable, ViewAndMutationMeta]:
     with dynamo_timed("create_aot_dispatcher_function", log_pt2_compile_event=True):
         return _create_aot_dispatcher_function(
             flat_fn, fake_flat_args, aot_config, fake_mode, shape_env
@@ -589,7 +590,7 @@ def _create_aot_dispatcher_function(
     aot_config: AOTConfig,
     fake_mode: FakeTensorMode,
     shape_env: Optional[ShapeEnv],
-) -> tuple[Callable, ViewAndMutationMeta]:
+) -> Tuple[Callable, ViewAndMutationMeta]:
     """
     Traces the forward and backward graphs of the attr:`flat_fn` to generate a
     joint graph. The joint graph is an Fx graph with Aten ops. Please refer to
@@ -1007,7 +1008,7 @@ def aot_module(mod: nn.Module, *args, **kwargs) -> nn.Module:
 
 def _try_get_metadata_from_dynamo(
     mod: torch.nn.Module, param_keys: KeysView[str], full_args_num: int
-) -> tuple[Optional[List[torch._guards.Source]], List[int]]:
+) -> Tuple[Optional[List[torch._guards.Source]], List[int]]:
     """
     Metadata is forwarded from Dynamo to AOTDispatch via special fields on GraphModule.
     We first verify that `mod` does come from Dynamo, then we handle cases where
@@ -1203,7 +1204,7 @@ def aot_module_simplified(
     # historically returned a function that was not the boxed calling
     # convention.  This should get fixed...
     # NB: GraphModule/nn.Module rely on the non-boxed calling convention here
-    def forward(*runtime_args: tuple[Any]):
+    def forward(*runtime_args: Tuple[Any]):
         full_args = []
         full_args.extend(params_flat)
         full_args.extend(runtime_args)
@@ -1232,7 +1233,7 @@ def aot_export_module(
     # If None, will be infered from inputs and mod.graph.nodes if mod is a graph module, but the inferred result might be wrong.
     dynamic_shapes: Optional[bool] = None,
     kwargs=None,
-) -> tuple[torch.fx.GraphModule, GraphSignature]:
+) -> Tuple[torch.fx.GraphModule, GraphSignature]:
     """
     This function takes in a module, and returns:
     (1) an FX graph that can be exported
@@ -1542,7 +1543,7 @@ def _aot_export_function(
     # If None, `dynamic_shapes` will be infered from inputs, but the inferred result might be wrong.
     dynamic_shapes: Optional[bool] = None,
     kwargs=None,
-) -> tuple[torch.fx.GraphModule, ViewAndMutationMeta, pytree.TreeSpec, pytree.TreeSpec]:
+) -> Tuple[torch.fx.GraphModule, ViewAndMutationMeta, pytree.TreeSpec, pytree.TreeSpec]:
     kwargs = kwargs or {}
 
     flat_fn, out_spec = create_tree_flattened_fn(func, args, kwargs)

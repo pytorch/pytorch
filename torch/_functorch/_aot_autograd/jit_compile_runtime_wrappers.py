@@ -14,7 +14,7 @@ import logging
 import time
 import traceback
 from contextlib import nullcontext
-from typing import Any, Callable, List, Optional, Sequence
+from typing import Any, Callable, List, Optional, Sequence, Tuple
 
 import torch
 import torch.utils.dlpack
@@ -82,7 +82,7 @@ aten = torch.ops.aten
 
 # Returns a Callable and a ViewAndMutationMeta.
 # Currently, only export needs the ViewAndMutationMeta after this function.
-DispatchReturn = tuple[Callable, ViewAndMutationMeta]
+DispatchReturn = Tuple[Callable, ViewAndMutationMeta]
 
 
 def _create_wrappers_for_dispatch(needs_autograd: bool) -> List[CompilerWrapper]:
