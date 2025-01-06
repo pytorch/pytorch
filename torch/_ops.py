@@ -154,7 +154,7 @@ class OperatorBase:
     #       with ctx.redispatch_to_next():
     #           out = ctx.functionalize(inner_f)(*args_unwrapped)
     #           return ctx.wrap_tensors(out)
-    def py_functionalize_impl(self, fn: Callable[_P, _R]) -> Callable[_P, _R]:
+    def py_functionalize_impl(self, fn: Callable[_P, _T]) -> Callable[_P, _T]:
         from torch._subclasses.functional_tensor import (
             CppFunctionalizeAPI as _CppFunctionalizeAPI,
             FunctorchFunctionalizeAPI as _FunctorchFunctionalizeAPI,
