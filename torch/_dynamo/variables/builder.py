@@ -573,6 +573,7 @@ class VariableBuilder:
             )
             return result
         elif istype(value, (dict, collections.defaultdict, collections.OrderedDict)):
+            self.install_guards(GuardBuilder.TYPE_MATCH)
             all_const = all(ConstantVariable.is_literal(k) for k in value.keys())
 
             # For all_const, we dont have to guard on anything yet. We guard on
