@@ -163,13 +163,17 @@ class OperatorBase:
 
         # Construct our three flavors of functionalization,
         # each of which have slightly different wrap/unwrap/redispatch policies
-        def functionalize_dk_fn(*args, **kwargs):
+        def functionalize_dk_fn(*args: _P.args, **kwargs: _P.kwargs) -> _T:
             return fn(_CppFunctionalizeAPI(), *args, **kwargs)
 
-        def functionalize_dispatch_mode_fn(mode, *args, **kwargs):
+        def functionalize_dispatch_mode_fn(
+            mode, *args: _P.args, **kwargs: _P.kwargs
+        ) -> _T:
             return fn(_PythonFunctionalizeAPI(mode), *args, **kwargs)
 
-        def functionalize_functorch_fn(interpreter, *args, **kwargs):
+        def functionalize_functorch_fn(
+            interpreter, *args: _P.args, **kwargs: _P.kwargs
+        ) -> _T:
             return fn(_FunctorchFunctionalizeAPI(interpreter), *args, **kwargs)
 
         self.py_impl(DispatchKey.Functionalize)(functionalize_dk_fn)
