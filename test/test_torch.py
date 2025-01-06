@@ -53,7 +53,6 @@ from torch.testing._internal.common_device_type import (
     dtypes, dtypesIfCUDA, dtypesIfCPU, deviceCountAtLeast,
     skipMeta, PYTORCH_CUDA_MEMCHECK, largeTensorTest, onlyNativeDeviceTypes, skipCUDAIfNotRocm,
     get_all_device_types, skipXLA)
-from typing import Tuple
 import torch.backends.quantized
 import torch.testing._internal.data
 from torch.testing._internal.common_cuda import (
@@ -2772,6 +2771,14 @@ else:
                     'expected scalar_type Float but found Short'):
                 op(t, 0, out=(values, indices))
 
+            # Range-check 0-d tensors
+            x = torch.rand([])
+            dim = 100
+            with self.assertRaisesRegex(
+                    IndexError,
+                    'Expected reduction dim -1 or 0 for scalar but got 100'):
+                op(x, dim)
+
             # Check that op over a zero length dimension doesn't crash on backprop.
             # Also check that op over other dimensions in a tensor with a zero-length
             # dimension also works
@@ -3503,7 +3510,7 @@ else:
 
     def _prepare_data_for_index_copy_and_add_deterministic(
         self, dim: int, device: torch.device
-    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         assert (dim >= 0 and dim < 3)
         a = [5, 4, 3]
         a[dim] = 2000
