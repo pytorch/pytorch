@@ -84,7 +84,7 @@ class DocstringLinter(_linter.FileLinter):
 
         def next_token(start: int, token_type: int, error: str) -> int:  # type: ignore[return]
             for i in range(start, len(tokens)):
-                if (t := tokens[i]).type == token_type:
+                if tokens[i].type == token_type:
                     return i
             _linter.ParseError.check(False, tokens[-1], error)
 
@@ -137,12 +137,12 @@ class DocstringLinter(_linter.FileLinter):
                 print()
             top = sorted(v, reverse=True)[:REPORT_TOP_RESULTS]
             if len(top) == 1:
-                s = "s"
-                t = ""
-            else:
                 s = ""
                 t = f"{len(top)} "
-            print(f"Top {t}undocumented {k}s:")
+            else:
+                s = "es" if k.endswith("s") else "s"
+                t = ""
+            print(f"Top {t}undocumented {k}{s}:")
             for lines, path, tname in top:
                 print(f"    {lines} lines: {path}:{tname}")
 
