@@ -201,8 +201,7 @@ class TestPatternMatcher(TestCase):
             return x - 2
 
         patterns = PatternMatcherPass()
-        torch.set_default_device("cuda")
-        inputs = [torch.empty(4, 5, dtype=torch.float32)]
+        inputs = [torch.empty(4, 5, dtype=torch.float32, device="cuda")]
         register_replacement(pattern1, replacement1, inputs, fwd_only, patterns)
         register_replacement(pattern2, replacement2, inputs, fwd_only, patterns)
 
@@ -234,7 +233,7 @@ class TestPatternMatcher(TestCase):
             y2 = y.relu() - 2
             return y2
 
-        inp = torch.rand(3, 5)
+        inp = torch.rand(3, 5, device="cuda")
         self.assertEqual(f(inp), f_replaced(inp))
         self.assertEqual(count, 2)
 
@@ -242,7 +241,6 @@ class TestPatternMatcher(TestCase):
     @skipIfXpu
     @skipCUDAIf(not SM80OrLater, "need sm_80")
     @inductor_config.patch(force_fuse_int_mm_with_mul=True)
-    @inductor_config.patch("test_configs.runtime_triton_dtype_assert", True)
     def test_fused_int_mm_mul_epilogue(self):
         def fn1(a, b, c):
             return (
