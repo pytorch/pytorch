@@ -9,7 +9,7 @@ This file contains utilities related to functionalization in AOTAutograd:
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional
+from typing import Optional, Tuple
 
 import torch
 from torch import Tensor
@@ -337,11 +337,11 @@ class MetadataKey:
     This should be equal whenever has_same_metadata would return True
     """
 
-    size: tuple[SymIntEqByExpr, ...]
+    size: Tuple[SymIntEqByExpr, ...]
     layout: torch.layout
     is_sparse: bool
     # these are empty when is_sparse
-    stride: Optional[tuple[SymIntEqByExpr, ...]]
+    stride: Optional[Tuple[SymIntEqByExpr, ...]]
     storage_offset: Optional[SymIntEqByExpr]
     is_conj: bool
     is_neg: bool

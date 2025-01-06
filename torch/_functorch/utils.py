@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 import contextlib
-from typing import Union
+from typing import Tuple, Union
 
 import torch
 from torch._C._functorch import (
@@ -37,4 +37,4 @@ def unwrap_dead_wrappers(args):
     return result
 
 
-argnums_t = Union[int, tuple[int, ...]]
+argnums_t = Union[int, Tuple[int, ...]]
