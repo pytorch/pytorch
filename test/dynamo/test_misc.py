@@ -1123,6 +1123,7 @@ L['x'].ndimension() == 2
 L['x'].requires_grad == False
 L['x'].size()[1] == L['x'].size()[0]
 L['x'].storage_offset() == 0
+___dict_contains('builtins', G['sys'].modules)
 ___dict_contains('operator', G['sys'].modules)
 ___dict_contains('operator', G['sys'].modules)
 hasattr(L['x'], '_dynamo_dynamic_indices') == False
@@ -7843,24 +7844,43 @@ utils_device.CURRENT_DEVICE == None""".split(
         def fn(x):
             return x + 1
 
-        initial_state = read_state()
-        y = torch.randn(10)
-        try:
-            for round in range(3):
-                for i in range(len(initial_state)):
-                    new_state = [False] * len(initial_state)
-                    new_state[i] = True
-                    write_state(new_state)
-                    assert read_state() == new_state
-                    last_state.clear()
-                    fn(y)
-                    assert last_state == new_state
-                    if round == 0:
-                        assert cnt == i + 1
-                    else:
-                        assert cnt == len(initial_state)
-        finally:
-            write_state(initial_state)
+        import contextlib
+
+        @contextlib.contextmanager
+        def _hip_allow_tf32():
+            # for HIP/AMDGPU, tf32 is behind a flag because the TF32 support is new
+            # and only for MI300+
+            hip_allow_tf32 = os.environ.get("HIPBLASLT_ALLOW_TF32", None)
+            os.environ["HIPBLASLT_ALLOW_TF32"] = "1"
+
+            try:
+                yield
+            finally:
+                if hip_allow_tf32 is not None:
+                    os.environ["HIPBLASLT_ALLOW_TF32"] = hip_allow_tf32
+                else:
+                    del os.environ["HIPBLASLT_ALLOW_TF32"]
+
+        tf32_ctx = _hip_allow_tf32 if torch.version.hip else contextlib.nullcontext
+        with tf32_ctx():
+            initial_state = read_state()
+            y = torch.randn(10)
+            try:
+                for round in range(3):
+                    for i in range(len(initial_state)):
+                        new_state = [False] * len(initial_state)
+                        new_state[i] = True
+                        write_state(new_state)
+                        assert read_state() == new_state
+                        last_state.clear()
+                        fn(y)
+                        assert last_state == new_state
+                        if round == 0:
+                            assert cnt == i + 1
+                        else:
+                            assert cnt == len(initial_state)
+            finally:
+                write_state(initial_state)
 
     def test_grad_state_mutated(self):
         prior = torch.is_grad_enabled()
@@ -11835,6 +11855,21 @@ fn
 
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         self.assertEqual(fn(x, get_foo()), opt_fn(x, get_foo()))
+
+    def test_dunder_weakref(self):
+        class Foo:
+            pass
+
+        def fn(x):
+            foo = Foo()
+            # tests isgetsetdescriptor
+            if foo.__weakref__:
+                return torch.cos(x)
+            return torch.sin(x)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+        self.assertEqual(fn(x), opt_fn(x))
 
 
 class TestTracer(JitTestCase):
