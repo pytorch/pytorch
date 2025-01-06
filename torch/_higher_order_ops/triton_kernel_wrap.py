@@ -1319,7 +1319,14 @@ class TritonHOPifier:
 
                 iter_kernel = iter_kernel.fn
             assert isinstance(iter_kernel, JITFunction)
-            new_kernel = autotune(configs=new_configs, key=[])(iter_kernel)
+            prune_configs_by = {
+                "perf_model": variable.kernel.perf_model,
+                "early_config_prune": variable.kernel.early_config_prune,
+                "configs_top_k": variable.kernel.configs_top_k,
+            }
+            new_kernel = autotune(
+                configs=new_configs, key=[], prune_configs_by=prune_configs_by
+            )(iter_kernel)
             # create a new variable to contain the new (wrapped) kernel;
             # skip kernel_idx to get a new record in the kernel side table
             new_var = type(variable)(new_kernel, None, variable.grid)
