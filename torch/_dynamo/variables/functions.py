@@ -18,6 +18,7 @@ from typing import (
     TypeVar,
 )
 from typing_extensions import Never
+from unittest.mock import patch
 
 import torch
 
@@ -29,6 +30,7 @@ from ..source import AttrSource, ConstantSource, DefaultsSource, GetItemSource
 from ..utils import (
     check_constant_args,
     check_unspec_or_constant_args,
+    counters,
     identity,
     is_function,
     is_wrapper_or_member_descriptor,
@@ -325,6 +327,63 @@ class UserFunctionVariable(BaseUserFunctionVariable):
                 with torch._dynamo.side_effects.allow_side_effects_under_checkpoint(tx):
                     return super().call_function(tx, args, kwargs)
         return super().call_function(tx, args, kwargs)
+
+
+class FunctionDecoratedByContextlibContextManagerVariable(BaseUserFunctionVariable):
+    # TODO(guilherme): replace this with a generic GeneratorFunctionVariable
+
+    """functions that behaves like iterators
+
+    .. note::
+
+        This is only used when the function is annotated with @contextlib.contextmanager
+    """
+
+    def __init__(self, vt: VariableTracker, **kwargs):
+        super().__init__(**kwargs)
+        self.vt = vt
+        self.inline_tracer = None
+
+    def __getattr__(self, name):
+        if name in self.__class__.__dict__.keys():
+            return getattr(self, name)
+        return getattr(self.vt, name)
+
+    def call_function(
+        self,
+        tx: "InstructionTranslator",
+        args: "List[VariableTracker]",
+        kwargs: "Dict[str, VariableTracker]",
+    ) -> "VariableTracker":
+        from torch._dynamo.bytecode_transformation import is_generator
+
+        assert is_generator(self.get_code())
+        from torch._dynamo.symbolic_convert import InliningInstructionTranslator
+
+        self.inline_tracer = InliningInstructionTranslator.build_inline_tracer(
+            tx,
+            self,
+            [*self.self_args(), *args],
+            kwargs,
+            stop_generator_on_yield=True,
+        )
+
+        return self
+
+    def next_variable(self, tx):
+        from torch._dynamo import exc
+
+        tracer = self.inline_tracer
+
+        try:
+            # Hierarchically, tx can be seen as the parent of the inline tracer
+            # created on call_function. Any exception needs to be propagated to tx
+            # for Dynamo to behave correctly
+            with patch.dict(counters, {"unimplemented": counters["inline_call"]}):
+                return tracer.inline_call_().next_variable(tx)
+        except exc.ObservedException as e:
+            tx.exn_vt_stack.extend(tracer.exn_vt_stack)
+            raise e
 
 
 class UserMethodVariable(UserFunctionVariable):
@@ -1049,25 +1108,36 @@ class DynamoTritonHOPifier(TritonHOPifier):
         grid = grid.call_function(tx, [meta], {})
         return grid
 
-    # We use this function to wrap user-defined functions (e.g., early_config_prune, perf_model)
-    def call_user_defined_fn(self, user_fn, args, kwargs, tx):
-        result = UserFunctionVariable(user_fn).call_function(tx, args, kwargs)
+    # We use this function to wrap call_prune_configs
+    def call_user_defined_fn(self, user_fn, args, kwargs, tx, variable):
+        from .builder import SourcelessBuilder
+
+        wrapped_user_function = SourcelessBuilder.create(tx, user_fn)
+        result = wrapped_user_function.call_function(tx, args, kwargs)
         return result
 
-    def apply_heuristic(
-        self,
-        kwarg_key: str,
-        heuristic: Callable[..., Any],
-        args: Dict,
-        kwargs: Dict,
-        tx,
-    ) -> Any:
-        # Realize the results before we return
-        result = self.call_user_defined_fn(heuristic, [{**args, **kwargs}], {}, tx)
-        assert isinstance(result, ConstantVariable)
-        return {kwarg_key: result.realize().value}
+    def wrap_user_defined_obj(self, user_obj, tx, variable, name):
+        from .builder import VariableBuilder
 
-    # We need to override call_getitem here so that we can call GetItemSource
+        wrapped_user_obj = VariableBuilder(
+            tx, AttrSource(variable.kernel_source, f"{name}")
+        )._wrap(user_obj)
+        return wrapped_user_obj
+
+    def maybe_unpack_configs(self, configs, tx):
+        # unpack the list of configs
+        configs = configs.unpack_var_sequence(tx)
+
+        # guard_as_python_constant inserts guards for Dynamo to check if the configs object changed.
+        configs = [config.guard_as_python_constant() for config in configs]
+
+        return configs
+
+    def maybe_unpack_heuristic_result(self, result: Any) -> Any:
+        return result.guard_as_python_constant()
+
+    # We need to override call_getitem here so that we can add the source in the case
+    # where we call the triton kernel with a grid
     def call_getitem(
         self,
         variable: "TritonKernelVariable",
@@ -1083,61 +1153,8 @@ class DynamoTritonHOPifier(TritonHOPifier):
             kernel=variable.kernel,
             kernel_idx=variable.kernel_idx,
             grid=args[0],
-            source=variable.source,
+            kernel_source=variable.source,
         )
-
-    def call_prune_configs_if_required(  # type: ignore[no-untyped-def]
-        self,
-        autotuner,
-        args,
-        kwargs,
-        configs,
-        tx,
-    ):
-        # we need this to process the configs for the user-defined functions
-        from .builder import VariableBuilder
-
-        # Reimplement autotuner.prune_configs(...) here
-        # see triton/runtime/autotuner.py for the upstream reference
-        # We do this to avoid calling prune_configs, which in turn calls early_config_prune and perf_model
-        # These are both user-defined functions which can contain side effects, so we want to sandbox them in Dynamo
-
-        configs_variable = VariableBuilder(tx, AttrSource(autotuner.source, "configs"))(
-            autotuner.kernel.configs
-        )
-        if autotuner.kernel.early_config_prune:
-            # call the first user-defined function here (early_config_prune)
-            configs_variable = self.call_user_defined_fn(
-                autotuner.kernel.early_config_prune,
-                [configs_variable, args],
-                kwargs,
-                tx,
-            )
-        # realize the pruned configs
-        configs_variable = [config.realize().value for config in configs_variable.items]
-
-        if autotuner.kernel.perf_model:
-            top_k = autotuner.kernel.configs_top_k
-            if isinstance(top_k, float) and top_k <= 1.0:
-                top_k = int(len(configs_variable) * top_k)
-            if len(configs_variable) > top_k:
-                est_timing = {
-                    # call the user-defined function here as well
-                    config: self.call_user_defined_fn(
-                        autotuner.kernel.perf_model,
-                        [args],
-                        {**kwargs, **config.all_kwargs()},
-                        tx,
-                    )
-                    for config in configs_variable
-                }
-                # realize the results of calling perf_model
-                est_timing = {k: v.realize().value for k, v in est_timing.items()}
-                configs_variable = sorted(
-                    est_timing.keys(), key=lambda x: est_timing[x]
-                )[:top_k]
-
-        return configs_variable
 
     def call_HOP(self, variable, grids, combined_args_raw, tx) -> ConstantVariable:
         from .constant import ConstantVariable
@@ -1213,8 +1230,10 @@ class TritonKernelVariable(VariableTracker):
     grid: "TritonGridType"
     kernel: "TritonKernelType"
     kernel_idx: Optional[int]
+    kernel_source: "AttrSource"
 
     def __init__(self, kernel, kernel_idx, grid, **kwargs) -> None:
+        self.kernel_source = kwargs.pop("kernel_source", None)
         super().__init__(**kwargs)
         dynamo_triton_hopifier_singleton.init_variable(self, kernel, kernel_idx, grid)
 

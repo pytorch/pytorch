@@ -4,6 +4,7 @@ from enum import auto, Enum
 from typing import Collection, Dict, List, Mapping, Optional, Set, TYPE_CHECKING, Union
 
 from torch._library.fake_class_registry import FakeScriptObject
+from torch._subclasses.fake_tensor import is_fake
 
 
 if TYPE_CHECKING:
@@ -499,7 +500,6 @@ def _immutable_dict(items):
 def _make_argument_spec(node, token_names) -> ArgumentSpec:
     from torch import ScriptObject, SymBool, SymFloat, SymInt
     from torch._library.fake_class_registry import FakeScriptObject
-    from torch._subclasses.fake_tensor import FakeTensor
 
     if isinstance(node, (int, bool, float, type(None), str)):
         # For const outputs we just directly return this
@@ -511,7 +511,7 @@ def _make_argument_spec(node, token_names) -> ArgumentSpec:
     val = node.meta["val"]
     if node.name in token_names:
         return TokenArgument(name=node.name)
-    elif isinstance(val, FakeTensor):
+    elif is_fake(val):
         return TensorArgument(name=node.name)
     elif isinstance(val, SymInt):
         return SymIntArgument(name=node.name)

@@ -858,18 +858,22 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
 
     @with_comms
     @skip_if_lt_x_gpu(2)
-    def test_setting_meta_device_model_broadcasting(self) -> None:
+    def test_setting_meta_device_model_broadcasting_and_memory(self) -> None:
         # This test verifies that we can set model state dict by a meta device model
         # With the correlated changes in state_dict, meta device model should be accepted
         # in broadcasting and get copied successfully.
         torch.manual_seed(0)
         with torch.device("meta"):
-            meta_model = nn.Sequential(*[nn.Linear(4, 4, bias=False) for _ in range(2)])
+            meta_model = nn.Sequential(
+                *[nn.Linear(10000, 10000, bias=False) for _ in range(4)]
+            )
             for layer in meta_model:
                 fully_shard(layer)
             fully_shard(meta_model)
         with torch.device("cpu"):
-            cpu_model = nn.Sequential(*[nn.Linear(4, 4, bias=False) for _ in range(2)])
+            cpu_model = nn.Sequential(
+                *[nn.Linear(10000, 10000, bias=False) for _ in range(4)]
+            )
             full_sd = cpu_model.state_dict()
         set_model_state_dict(
             meta_model,
@@ -887,6 +891,47 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
                 .to(device=cpu_model_value.device)
             )
             self.assertEqual(cpu_model_value, meta_model_value)
+        # Memory allocated and reserved are lower due to the change at _distribute_tensors
+        # from view to clone. This test would fail if with view due to higher memory cost.
+        memory_allocated = torch.cuda.memory_allocated(0) / 1024 / 1024
+        memory_reserved = torch.cuda.memory_reserved(0) / 1024 / 1024
+        self.assertTrue(memory_allocated <= 384)
+        self.assertTrue(memory_reserved <= 768)
+
+    @with_comms
+    @skip_if_lt_x_gpu(2)
+    def test_multi_device_load_model_state_dict(self) -> None:
+        torch.manual_seed(0)
+        with torch.device("meta"):
+            meta_submodel = nn.Linear(4, 4, bias=False)
+        with torch.device("cpu"):
+            cpu_submodel = nn.Linear(4, 4, bias=False)
+        with torch.device("cuda"):
+            cuda_submodel = nn.Linear(4, 4, bias=False)
+
+        two_device_model_with_meta = nn.Sequential(meta_submodel, cuda_submodel)
+        two_device_model_without_meta = nn.Sequential(cpu_submodel, cuda_submodel)
+
+        with torch.device("cpu"):
+            model_to_set = nn.Sequential(
+                *[nn.Linear(4, 4, bias=False) for _ in range(2)]
+            )
+            full_sd = model_to_set.state_dict()
+        set_model_state_dict(
+            two_device_model_with_meta,
+            model_state_dict=full_sd,
+            options=StateDictOptions(
+                broadcast_from_rank0=True, full_state_dict=True, strict=False
+            ),
+        )
+        with self.assertRaisesRegex(ValueError, "Multiple devices found"):
+            set_model_state_dict(
+                two_device_model_without_meta,
+                model_state_dict=full_sd,
+                options=StateDictOptions(
+                    broadcast_from_rank0=True, full_state_dict=True, strict=False
+                ),
+            )
 
 
 class TestNoComm(MultiProcessTestCase):
