@@ -3867,6 +3867,9 @@ class ConstantBuffer(InputBuffer):
 
 @ir_dataclass
 class NoneAsConstantBuffer(IRNode):
+    def get_reads(self) -> OrderedSet[Dep]:
+        return OrderedSet()
+
     def get_unbacked_symbol_uses(self) -> OrderedSet[sympy.Symbol]:
         return OrderedSet()
 
@@ -5353,13 +5356,18 @@ class ExternKernel(InputsKernel):
             args.extend(self.codegen_const_args())
         return args
 
-    def get_kwargs_value(self, arg_name):  # type: ignore[no-untyped-def]
+    def get_kwargs_value(self, arg_name, **kwargs):  # type: ignore[no-untyped-def]
+        """Given an argument name, queries for values in (in order):
+        1. any provided kwargs for this function.
+        2. the class self.kwargs member.
+        3. any available default arguments in self.allarg_properties."""
+        if arg_name in kwargs:
+            return kwargs.get(arg_name)
         if arg_name in self.kwargs:
             return self.kwargs.get(arg_name)
-        if self.allarg_properties and self.allarg_properties.get(arg_name):
+        if self.allarg_properties and arg_name in self.allarg_properties:
             return self.allarg_properties.get(arg_name).get("default_value")  # type: ignore[union-attr]
-        else:
-            raise AssertionError(f"{arg_name} not in self.allarg_properties")
+        raise AssertionError(f"{arg_name} not in self.allarg_properties")
 
     def codegen_kwargs(self, skip_out=False):  # type: ignore[no-untyped-def]
         if V.graph.cpp_wrapper:
@@ -5442,18 +5450,9 @@ class ExternKernel(InputsKernel):
         return index, tuple(new_sizes)
 
     def get_unbacked_symbol_uses(self) -> OrderedSet[sympy.Symbol]:
+        # NB: It's not necessary to check regular inputs as we automatically
+        # have dependencies on them
         r = OrderedSet[sympy.Symbol]()
-        # NB: It's not necessary to check regular tensor inputs as we automatically
-        # have dependencies on them.
-        #
-        # For unbacked sympy expr input, we need to explicitly add them to r because the
-        # dependency tracking logic assumes we have the buffer names to create
-        # the read write dependencies. But for unbacked exprs, we calculate the mapping
-        # of symbol to buf on the fly during compute depdencies in scheduler. So we just
-        # look at the inputs and track the used unbacked symbols here.
-        for arg in self.inputs:
-            if isinstance(arg, ShapeAsConstantBuffer):
-                r |= maybe_free_unbacked_symbols(arg.expr)
         for arg in self.constant_args:
             r |= maybe_free_unbacked_symbols(arg)
         for arg in self.kwargs.values():
@@ -6543,7 +6542,8 @@ class FallbackKernel(ExternKernelAlloc):
         args, kwargs = self.unflatten_args(self.inputs, self.constant_args)
         args = self.fill_non_provided_args(args, kwargs)
         ordered_kwargs = [
-            kwargs.get(key, None) for key in self.ordered_kwargs_for_cpp_kernel
+            self.get_kwargs_value(key, **kwargs)
+            for key in self.ordered_kwargs_for_cpp_kernel
         ]
         if not V.graph.aot_mode:
             # No need to serialize in the cpp wrapper JIT mode
@@ -6608,7 +6608,24 @@ class FallbackKernel(ExternKernelAlloc):
 
     def codegen(self, wrapper) -> None:  # type: ignore[no-untyped-def]
         kernel = self.op_overload
-        if kernel.namespace == "aten":  # type: ignore[union-attr]
+        if V.graph.cpp_wrapper and any(i.dtype.is_complex for i in self.inputs):
+            # If any inputs to this fallback op are complex, they may have the Conjugate
+            # or Negative dispatch keys applied.  The cpp_wrapper fallback ops that
+            # _aren't_ runtime dispatched implicitly bypass the conversions for those
+            # keys internally (since they're applied at dispatch time).  Since there's
+            # no way to tell at compile time whether a tensor will have these keys
+            # applied, pessimize complex fallback ops by always using the runtime
+            # dispatched fallback.
+            #
+            # This is not currently expected to be a performance issue, since few models
+            # utilized complex ops, but this decision may need to be reconsidered if
+            # that changes.
+            log_msg = (
+                f"Using proxy executor as fallback for {kernel} due to complex inputs."
+            )
+            log.warning(log_msg)
+            self.use_runtime_dispatch = True
+        elif kernel.namespace == "aten":  # type: ignore[union-attr]
             # Aten Fallback Ops
             assert isinstance(kernel, torch._ops.OpOverload)
             if V.graph.cpp_wrapper:
@@ -6625,10 +6642,9 @@ class FallbackKernel(ExternKernelAlloc):
         elif kernel.namespace == "_quantized":  # type: ignore[union-attr]
             # Internal Quantized Fallback Ops
             assert isinstance(kernel, torch._ops.OpOverload)
-        else:
+        elif V.graph.cpp_wrapper:
             # For non-aten OpOverload, i.e. custom ops
-            if V.graph.cpp_wrapper:
-                self.use_runtime_dispatch = True
+            self.use_runtime_dispatch = True
 
         if self.use_runtime_dispatch:
             self.codegen_comment(wrapper)
@@ -7154,21 +7170,23 @@ class InvokeSubgraph(ExternKernel):
             layout=MultiOutputLayout(device=device),
         )
 
-        outputs = [
-            MultiOutput(
-                FixedLayout(
-                    device=output.get_device(),
-                    dtype=output.get_dtype(),
-                    size=output.get_size(),  # type: ignore[arg-type]
-                    stride=output.get_stride(),
-                    offset=output.get_layout().offset,
-                ),
-                invoke_subgraph,
-                [(list, i)],
-            )
-            for i, output in enumerate(outputs)
-        ]
+        def create_output(output: IRNode, ind: int):
+            if isinstance(output, (ShapeAsConstantBuffer, NoneAsConstantBuffer)):
+                return output
+            else:
+                return MultiOutput(
+                    FixedLayout(
+                        device=output.get_device(),
+                        dtype=output.get_dtype(),
+                        size=output.get_size(),  # type: ignore[arg-type]
+                        stride=output.get_stride(),
+                        offset=output.get_layout().offset,
+                    ),
+                    invoke_subgraph,
+                    [(list, ind)],
+                )
 
+        outputs = [create_output(output, i) for i, output in enumerate(outputs)]
         invoke_subgraph.outputs = outputs
         return outputs
 
@@ -7179,7 +7197,7 @@ class InvokeSubgraph(ExternKernel):
 @ir_dataclass(frozen=False)
 class Conditional(ExternKernel):
     predicate: Optional[IRNode] = None
-    operands: Optional[List[TensorBox]] = None
+    operands: Optional[List[Union[TensorBox, ShapeAsConstantBuffer]]] = None
     true_subgraph: Optional[Subgraph] = None
     false_subgraph: Optional[Subgraph] = None
     outputs: Optional[List[MultiOutput]] = None
@@ -7187,7 +7205,7 @@ class Conditional(ExternKernel):
     def __init__(
         self,
         predicate: IRNode,
-        operands: List[TensorBox],
+        operands: List[Union[TensorBox, ShapeAsConstantBuffer]],
         true_subgraph: Subgraph,
         false_subgraph: Subgraph,
         layout: MultiOutputLayout,
@@ -7197,15 +7215,13 @@ class Conditional(ExternKernel):
         self.true_subgraph = true_subgraph
         self.false_subgraph = false_subgraph
 
-        inputs = []
-        if not isinstance(predicate, ShapeAsConstantBuffer):
-            inputs.append(predicate)
-        inputs.extend(operands)
+        sym_args, tensor_args = _split_by_sym_type([predicate] + operands)
 
         super().__init__(
             name=None,
             layout=layout,
-            inputs=inputs,
+            inputs=tensor_args,
+            constant_args=sym_args,
         )
 
         self.name = V.graph.register_buffer(self)
@@ -7217,7 +7233,7 @@ class Conditional(ExternKernel):
         predicate: TensorBox,
         true_fn: Subgraph,
         false_fn: Subgraph,
-        operands: List[TensorBox],
+        operands: List[Union[TensorBox, ShapeAsConstantBuffer]],
     ):
         predicate = cls.realize_input(predicate)
         operands = [cls.realize_input(x) for x in operands]
@@ -7297,18 +7313,32 @@ class Conditional(ExternKernel):
         wrapper.codegen_conditional(self)
 
 
+def _split_by_sym_type(
+    args: List[Any],
+) -> Tuple[List[ShapeAsConstantBuffer], List[Any]]:
+    non_sym_args = []
+    sym_args = []
+    for arg in args:
+        if isinstance(arg, ShapeAsConstantBuffer):
+            sym_args.append(arg.expr)
+        else:
+            non_sym_args.append(arg)
+
+    return sym_args, non_sym_args
+
+
 @ir_dataclass(frozen=False)
 class WhileLoop(ExternKernel):
-    carried_inputs: Optional[List[TensorBox]] = None
-    additional_inputs: Optional[List[TensorBox]] = None
+    carried_inputs: Optional[List[Union[TensorBox, ShapeAsConstantBuffer]]] = None
+    additional_inputs: Optional[List[Union[TensorBox, ShapeAsConstantBuffer]]] = None
     cond_subgraph: Optional[Subgraph] = None
     body_subgraph: Optional[Subgraph] = None
     outputs: Optional[List[MultiOutput]] = None
 
     def __init__(
         self,
-        carried_inputs: List[TensorBox],
-        additional_inputs: List[TensorBox],
+        carried_inputs: List[Union[TensorBox, ShapeAsConstantBuffer]],
+        additional_inputs: List[Union[TensorBox, ShapeAsConstantBuffer]],
         cond_subgraph: Subgraph,
         body_subgraph: Subgraph,
         layout: MultiOutputLayout,
@@ -7318,12 +7348,13 @@ class WhileLoop(ExternKernel):
         self.cond_subgraph = cond_subgraph
         self.body_subgraph = body_subgraph
 
+        sym_args, tensor_args = _split_by_sym_type(carried_inputs + additional_inputs)
         super().__init__(
             name=None,
             layout=layout,
-            inputs=carried_inputs + additional_inputs,
+            inputs=tensor_args,
+            constant_args=sym_args,
         )
-
         self.name = V.graph.register_buffer(self)
         V.graph.register_operation(self)
 
@@ -7332,8 +7363,8 @@ class WhileLoop(ExternKernel):
         cls,
         cond_fn: Subgraph,
         body_fn: Subgraph,
-        carried_inputs: List[TensorBox],
-        additional_inputs: List[TensorBox],
+        carried_inputs: List[Union[TensorBox, ShapeAsConstantBuffer]],
+        additional_inputs: List[Union[TensorBox, ShapeAsConstantBuffer]],
     ):
         carried_inputs = [cls.realize_input(x) for x in carried_inputs]
         additional_inputs = [cls.realize_input(x) for x in additional_inputs]

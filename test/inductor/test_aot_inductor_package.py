@@ -19,7 +19,12 @@ from torch._inductor.package import AOTICompiledModel, load_package, package_aot
 from torch._inductor.test_case import TestCase
 from torch._inductor.utils import fresh_inductor_cache
 from torch.export import Dim
-from torch.testing._internal.common_utils import IS_FBCODE, TEST_CUDA
+from torch.testing._internal.common_utils import (
+    IS_FBCODE,
+    skipIfRocm,
+    skipIfXpu,
+    TEST_CUDA,
+)
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 
 
@@ -151,10 +156,7 @@ class TestAOTInductorPackage(TestCase):
 
             torch.manual_seed(0)
             with tempfile.NamedTemporaryFile(suffix=".pt2") as f:
-                ep = torch.export.export(
-                    model,
-                    example_inputs,
-                )
+                ep = torch.export.export(model, example_inputs, strict=True)
                 with fresh_inductor_cache():
                     # cubin files are removed when exiting this context
                     package_path = torch._inductor.aoti_compile_and_package(
@@ -182,6 +184,8 @@ class TestAOTInductorPackage(TestCase):
         self.check_model(Model(), example_inputs)
 
     @unittest.skipIf(IS_FBCODE, "cmake won't work in fbcode")
+    @skipIfRocm  # build system may be different
+    @skipIfXpu  # build system may be different
     def test_compile_after_package(self):
         if not self.package_cpp_only:
             raise unittest.SkipTest("Only meant to test cpp package")
@@ -209,7 +213,7 @@ class TestAOTInductorPackage(TestCase):
             options = {
                 "aot_inductor.package_cpp_only": self.package_cpp_only,
             }
-            ep = torch.export.export(model, example_inputs)
+            ep = torch.export.export(model, example_inputs, strict=True)
             package_path = torch._inductor.aoti_compile_and_package(
                 ep, inductor_configs=options
             )
@@ -297,7 +301,7 @@ class TestAOTInductorPackage(TestCase):
             torch.randn(3, 4, device=self.device),
         )
         ep1 = torch.export.export(
-            Model1(), example_inputs1, dynamic_shapes=dynamic_shapes
+            Model1(), example_inputs1, dynamic_shapes=dynamic_shapes, strict=True
         )
         aoti_files1 = torch._inductor.aot_compile(
             ep1.module(), example_inputs1, options=options
@@ -314,7 +318,7 @@ class TestAOTInductorPackage(TestCase):
                 return x * t
 
         example_inputs2 = (torch.randn(5, 5, device=self.device),)
-        ep2 = torch.export.export(Model2(self.device), example_inputs2)
+        ep2 = torch.export.export(Model2(self.device), example_inputs2, strict=True)
         aoti_files2 = torch._inductor.aot_compile(
             ep2.module(), example_inputs2, options=options
         )
@@ -353,7 +357,7 @@ class TestAOTInductorPackage(TestCase):
         )
         self.check_model(Model1(), example_inputs1)
         ep1 = torch.export.export(
-            Model1(), example_inputs1, dynamic_shapes=dynamic_shapes
+            Model1(), example_inputs1, dynamic_shapes=dynamic_shapes, strict=True
         )
         aoti_files1 = torch._inductor.aot_compile(
             ep1.module(), example_inputs1, options=options
@@ -365,7 +369,7 @@ class TestAOTInductorPackage(TestCase):
             torch.randn(3, 4, device=device),
         )
         ep2 = torch.export.export(
-            Model1(), example_inputs2, dynamic_shapes=dynamic_shapes
+            Model1(), example_inputs2, dynamic_shapes=dynamic_shapes, strict=True
         )
         aoti_files2 = torch._inductor.aot_compile(
             ep2.module(), example_inputs2, options=options
@@ -397,7 +401,7 @@ class TestAOTInductorPackage(TestCase):
             torch.randn(2, 4, device=self.device),
             torch.randn(3, 4, device=self.device),
         )
-        ep = torch.export.export(Model(), example_inputs)
+        ep = torch.export.export(Model(), example_inputs, strict=True)
         aoti_files = torch._inductor.aot_compile(
             ep.module(),
             example_inputs,
@@ -426,12 +430,10 @@ class TestAOTInductorPackage(TestCase):
             torch.randn(2, 4, device=self.device),
             torch.randn(3, 4, device=self.device),
         )
-        ep = torch.export.export(Model(), example_inputs)
+        ep = torch.export.export(Model(), example_inputs, strict=True)
 
         buffer = io.BytesIO()
-        buffer = torch._inductor.aoti_compile_and_package(
-            ep, package_path=buffer
-        )  # type: ignore[arg-type]
+        buffer = torch._inductor.aoti_compile_and_package(ep, package_path=buffer)  # type: ignore[arg-type]
         for _ in range(2):
             loaded = load_package(buffer)
             self.assertTrue(
