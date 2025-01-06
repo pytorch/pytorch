@@ -419,6 +419,9 @@ class LocalBufferContext:
                 )
                 self.global_buffers[global_buffer_name] = global_buffer
                 self.global_to_local[global_buffer_name] = local_buffer
+                # If case that a global buffer is not removed by this context, consider using
+                # extra member to record the buffers removed by this context. Refer to issue:
+                # https://github.com/pytorch/pytorch/issues/144186
                 assert (
                     global_buffer_name not in V.graph.removed_buffers
                 ), "global buffer not removed by this context"
