@@ -1,7 +1,7 @@
 # mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 import inspect
-from typing import Callable, Dict, List, Optional
+from typing import Callable, Dict, List, Optional, Tuple
 
 import torch
 import torch._decomp
@@ -104,7 +104,7 @@ def trace(self: Tensor) -> Tensor:
 
 
 @maybe_register_decomposition(aten.log_sigmoid_forward.default)
-def log_sigmoid_forward(self: Tensor) -> tuple[Tensor, Tensor]:
+def log_sigmoid_forward(self: Tensor) -> Tuple[Tensor, Tensor]:
     min = torch.minimum(self.new_zeros(()), self)
     z = torch.exp(-torch.abs(self))
     if self.is_cuda or self.is_xpu:
@@ -138,7 +138,7 @@ def native_layer_norm_backward(
     weight: Optional[Tensor],
     bias: Optional[Tensor],
     output_mask: List[bool],
-) -> tuple[Optional[Tensor], Optional[Tensor], Optional[Tensor]]:
+) -> Tuple[Optional[Tensor], Optional[Tensor], Optional[Tensor]]:
     input_shape = input.shape
     input_ndim = input.dim()
 
@@ -224,7 +224,7 @@ def native_batch_norm_backward(
     train: bool,
     eps: float,
     output_mask: List[bool],
-) -> tuple[Tensor, Optional[Tensor], Optional[Tensor]]:
+) -> Tuple[Tensor, Optional[Tensor], Optional[Tensor]]:
     input_shape = input.shape
     input_rank = input.dim()
     assert input_rank >= 2, "rank of the input must be at least 2"
@@ -307,7 +307,7 @@ def batch_norm_backward(
     eps: float,
     output_mask: List[bool],
     reserve: Tensor,
-) -> tuple[Tensor, Optional[Tensor], Optional[Tensor]]:
+) -> Tuple[Tensor, Optional[Tensor], Optional[Tensor]]:
     return native_batch_norm_backward(
         grad_out,
         input,
