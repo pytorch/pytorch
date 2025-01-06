@@ -917,8 +917,6 @@ def chunk_default(func, *args, **kwargs):
 
     if operating_on_batch:
         chunks = new_kwargs["chunks"]
-        dim0_size = inp._size[0]
-        chunk_size = math.ceil(dim0_size / chunks)
 
         # get _offsets of the chunks
         lengths = inp._offsets.diff()
