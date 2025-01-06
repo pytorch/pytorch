@@ -795,12 +795,12 @@ class BuildExtension(build_ext):
                 _append_sycl_std_if_no_std_present(sycl_cflags)
                 host_cflags = extra_cc_cflags + common_cflags + post_cflags
                 append_std17_if_no_std_present(host_cflags)
-                # escaping quoted arguments to pass them thru DPC++ compiler
+                # escaping quoted arguments to pass them thru SYCL compiler
                 host_cflags = [item.replace('"', '\\\\"') for item in host_cflags]
                 host_cflags = ' '.join(host_cflags)
                 # Note the order: shlex.quote sycl_flags first, _wrap_sycl_host_flags
-                # second. Reason is that sycl host flags is quoted space containing
-                # string passed to DPC++ compiler.
+                # second. Reason is that sycl host flags are quoted, space containing
+                # strings passed to SYCL compiler.
                 sycl_cflags = [shlex.quote(f) for f in sycl_cflags]
                 sycl_cflags += _wrap_sycl_host_flags(host_cflags)
                 sycl_dlink_post_cflags = SYCL_DLINK_FLAGS
@@ -1514,10 +1514,11 @@ def load(name,
 
     SYCL support with mixed compilation is provided. Simply pass SYCL source
     files (``.sycl``) along with other sources. Such files will be detected
-    and compiled with icpx (Intel DPC++ sycl compiler) rather than the C++
-    compiler. You can pass additional flags to icpx via ``extra_sycl_cflags``,
-    just like with ``extra_cflags`` for C++. icpx compiler is expected to
-    be found via system PATH environment variable.
+    and compiled with SYCL compiler (such as Intel DPC++ Compiler) rather
+    than the C++ compiler. You can pass additional flags to SYCL compiler
+    via ``extra_sycl_cflags``, just like with ``extra_cflags`` for C++.
+    SYCL compiler is expected to be found via system PATH environment
+    variable.
 
     Args:
         name: The name of the extension to build. This MUST be the same as the
@@ -1526,8 +1527,8 @@ def load(name,
         extra_cflags: optional list of compiler flags to forward to the build.
         extra_cuda_cflags: optional list of compiler flags to forward to nvcc
             when building CUDA sources.
-        extra_sycl_cflags: optional list of compiler flags to forward to icpx
-            when building SYCL sources.
+        extra_sycl_cflags: optional list of compiler flags to forward to SYCL
+            compiler when building SYCL sources.
         extra_ldflags: optional list of linker flags to forward to the build.
         extra_include_paths: optional list of include directories to forward
             to the build.
@@ -2585,7 +2586,7 @@ def _write_ninja_file_to_build_library(path,
         sycl_cflags += extra_sycl_cflags
         _append_sycl_std_if_no_std_present(sycl_cflags)
         host_cflags = cflags
-        # escaping quoted arguments to pass them thru DPC++ compiler
+        # escaping quoted arguments to pass them thru SYCL compiler
         host_cflags = [item.replace('\\"', '\\\\"') for item in host_cflags]
         host_cflags = ' '.join(host_cflags)
         sycl_cflags += _wrap_sycl_host_flags(host_cflags)
@@ -2660,9 +2661,9 @@ def _write_ninja_file(path,
     `cuda_cflags`: list of flags to pass to $nvcc. Can be None.
     `cuda_post_cflags`: list of flags to append to the $nvcc invocation. Can be None.
     `cuda_dlink_post_cflags`: list of flags to append to the $nvcc device code link invocation. Can be None.
-    `sycl_cflags`: list of flags to pass to $icpx. Can be None.
-    `sycl_post_cflags`: list of flags to append to the $icpx invocation. Can be None.
-    `sycl_dlink_post_cflags`: list of flags to append to the $nvcc device code link invocation. Can be Non
+    `sycl_cflags`: list of flags to pass to SYCL compiler. Can be None.
+    `sycl_post_cflags`: list of flags to append to the SYCL compiler invocation. Can be None.
+    `sycl_dlink_post_cflags`: list of flags to append to the SYCL compiler device code link invocation. Can be None.
 e.
     `sources`: list of paths to source files
     `objects`: list of desired paths to objects, one per source.
@@ -2756,7 +2757,7 @@ e.
 
     if with_sycl:
         sycl_compile_rule = ['rule sycl_compile']
-        # icpx compiler does not recognize .sycl extension automatically,
+        # SYCL compiler does not recognize .sycl extension automatically,
         # so we pass '-x c++' explicitly notifying compiler of file format
         sycl_compile_rule.append(
             '  command = $sycl $sycl_cflags -c -x c++ $in -o $out $sycl_post_cflags')
