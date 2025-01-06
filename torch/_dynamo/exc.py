@@ -162,7 +162,7 @@ class AttributeMutationError(Unsupported):
 
 
 class InfiniteGeneratorError(Unsupported):
-    def __init__(self, msg) -> None:
+    def __init__(self, msg: str) -> None:
         super().__init__(msg)
 
 
@@ -271,6 +271,12 @@ class ObservedAttributeError(ObservedException):
 
 
 class ObservedRuntimeError(ObservedException):
+    # A RuntimeError exception to be raised from inside Dynamo tracing. This can happen on generator.throw(..) method
+    pass
+
+
+class ObservedTypeError(ObservedException):
+    # A TypeError exception to be raised from inside Dynamo tracing. This can happen on generator.send(..) method
     pass
 
 
@@ -280,6 +286,7 @@ observed_exception_map = {
     KeyError: ObservedKeyError,
     AttributeError: ObservedAttributeError,
     RuntimeError: ObservedRuntimeError,
+    TypeError: ObservedTypeError,
 }
 
 

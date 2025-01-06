@@ -2509,7 +2509,7 @@ class InstructionTranslatorBase(
     def CALL_INTRINSIC_1(self, inst):
         if inst.argval == 3:
             # INTRINSIC_STOPITERATION_ERROR
-            self.STOPITERATION_ERROR(self.pop())
+            self.STOPITERATION_ERROR(self.stack[-1])
         elif inst.argval == 5:
             # INTRINSIC_UNARY_POSITIVE
             self.UNARY_POSITIVE(inst)
@@ -3308,8 +3308,8 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             ):
                 assert isinstance(self, InliningGeneratorInstructionTranslator)
                 # When the generator returns None, we raise StopIteration
-                r = self.symbolic_result
-                assert r.as_python_constant() is None
+                # r = self.symbolic_result
+                # assert r.as_python_constant() is None
                 exc.raise_observed_exception(StopIteration, self)
             else:
                 return self.symbolic_result
