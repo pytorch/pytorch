@@ -21,7 +21,18 @@ import weakref
 from contextlib import contextmanager
 from copy import deepcopy
 from inspect import currentframe
-from typing import Any, Callable, Dict, List, Optional, Set, Type, TYPE_CHECKING, Union
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    List,
+    Optional,
+    Set,
+    Tuple,
+    Type,
+    TYPE_CHECKING,
+    Union,
+)
 from weakref import ReferenceType
 
 import torch
@@ -637,7 +648,7 @@ class GuardBuilder(GuardBuilderBase):
         self._cached_guard_managers: Dict[
             str, torch._C._dynamo.guards.GuardManager
         ] = {}
-        self._cached_duplicate_input_guards: Set[tuple[str, str]] = set()
+        self._cached_duplicate_input_guards: Set[Tuple[str, str]] = set()
 
     def guard_on_dict_keys_and_ignore_order(self, example_value, guard):
         dict_mgr = self.get_guard_manager(guard)
@@ -1501,7 +1512,7 @@ class GuardBuilder(GuardBuilderBase):
         ref = self.arg_ref(guard)
         val = self.get(guard.name)
         if np:
-            np_types: tuple[Type[Any], ...] = (
+            np_types: Tuple[Type[Any], ...] = (
                 np.int8,
                 np.int16,
                 np.int32,
@@ -1823,10 +1834,10 @@ class GuardBuilder(GuardBuilderBase):
             ]
 
         if output_graph.export_constraints:
-            names: Dict[str, tuple[int, int]] = {}
-            source_pairs: List[tuple[Source, Source]] = []
+            names: Dict[str, Tuple[int, int]] = {}
+            source_pairs: List[Tuple[Source, Source]] = []
             derived_equalities: List[  # type: ignore[type-arg]
-                tuple[Source, Union[Source, Symbol], Callable]
+                Tuple[Source, Union[Source, Symbol], Callable]
             ] = []
             phantom_symbols: Dict[str, Symbol] = {}
             relaxed_sources: Set[Source] = set()
@@ -2184,7 +2195,7 @@ class PyExprCSEPass:
                 log.exception("Failed to visit expr at line %s.\n%s", ex.lineno, e)
                 raise
 
-    def replace(self, expr: str) -> tuple[List[str], str]:
+    def replace(self, expr: str) -> Tuple[List[str], str]:
         replacer = self.Replacer(self._config, self._new_var)
         new_node = replacer.visit(ast.parse(expr))
         return replacer.preface, _ast_unparse(new_node)
@@ -2565,13 +2576,13 @@ class CheckFunctionManager:
         return None
 
 
-def build_guard_function(code_parts, closure_args) -> tuple[str, str]:
+def build_guard_function(code_parts, closure_args) -> Tuple[str, str]:
     from torch._inductor.utils import IndentedBuffer
 
     csepass = PyExprCSEPass()
     csepass.count(code_parts)
 
-    def replace(expr: str) -> tuple[List[str], str]:
+    def replace(expr: str) -> Tuple[List[str], str]:
         return csepass.replace(expr)
 
     # Generate the inner body of the guard function.
