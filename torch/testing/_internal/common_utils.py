@@ -54,7 +54,6 @@ from typing import (
     Iterator,
     List,
     Optional,
-    Tuple,
     Type,
     TypeVar,
     Union,
@@ -1051,7 +1050,7 @@ def retry_shell(
     timeout=None,
     retries=1,
     was_rerun=False,
-) -> Tuple[int, bool]:
+) -> tuple[int, bool]:
     # Returns exicode + whether it was rerun
     assert (
         retries >= 0
@@ -1864,7 +1863,7 @@ def runOnRocm(fn):
             raise unittest.SkipTest("test currently only works on the ROCm stack")
     return wrapper
 
-def runOnRocmArch(arch: Tuple[str, ...]):
+def runOnRocmArch(arch: tuple[str, ...]):
     def dec_fn(fn):
         @wraps(fn)
         def wrap_fn(self, *args, **kwargs):
@@ -2692,7 +2691,7 @@ class RelaxedBooleanPair(BooleanPair):
     def _process_inputs(self, actual, expected, *, id):
         # We require only one of the inputs of the inputs to be a boolean and the other can also be a boolean, a
         # number, or a single element tensor or array, whereas in default BooleanPair both inputs have to be booleans.
-        tensor_or_array_types: Tuple[Type, ...] = (torch.Tensor, np.ndarray)
+        tensor_or_array_types: tuple[Type, ...] = (torch.Tensor, np.ndarray)
         other_supported_types = (*self._supported_types, *self._supported_number_types, *tensor_or_array_types)
         if not (
             (isinstance(actual, self._supported_types) and isinstance(expected, other_supported_types))
@@ -2749,7 +2748,7 @@ class RelaxedNumberPair(NumberPair):
     def _process_inputs(self, actual, expected, *, id):
         # We require only one of the inputs of the inputs to be a number and the other can also be a number or a single
         # element tensor or array, whereas in default NumberPair both inputs have to be numbers.
-        tensor_or_array_types: Tuple[Type, ...] = (torch.Tensor, np.ndarray)
+        tensor_or_array_types: tuple[Type, ...] = (torch.Tensor, np.ndarray)
         other_supported_types = (*self._supported_types, *tensor_or_array_types)
         if not (
                 (isinstance(actual, self._supported_types) and isinstance(expected, other_supported_types))
@@ -2835,7 +2834,7 @@ class UnittestPair(Pair):
 
     Define the :attr:`UnittestPair.CLS` in a subclass to indicate which class(es) of the inputs the pair should support.
     """
-    CLS: Union[Type, Tuple[Type, ...]]
+    CLS: Union[Type, tuple[Type, ...]]
     TYPE_NAME: Optional[str] = None
 
     def __init__(self, actual, expected, **other_parameters):
