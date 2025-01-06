@@ -310,19 +310,20 @@ static PyObject* THPStream_exit(PyObject* _self, PyObject* unused) {
           static_cast<c10::DeviceType>(self->device_type)))) {
     Py_RETURN_NONE;
   }
-  auto ctx_stream =
-      THPObjectPtr(PyDict_GetItemString(self->context, "_ctx_stream"));
-  if (!ctx_stream) {
+  PyObject* ctx_stream = nullptr;
+  if (PyDict_GetItemStringRef(self->context, "_ctx_stream", &ctx_stream) < 0) {
     throw python_error();
   }
-  auto ctx_device_index =
-      THPObjectPtr(PyDict_GetItemString(self->context, "_ctx_device_index"));
-  if (!ctx_device_index) {
+  TORCH_CHECK(ctx_stream, "ctx_stream should be initialized.");
+  PyObject* ctx_device_index = nullptr;
+  if (PyDict_GetItemStringRef(
+          self->context, "_ctx_device_index", &ctx_device_index) < 0) {
     throw python_error();
   }
-  auto prev_stream = (THPStream*)ctx_stream.release();
+  TORCH_CHECK(ctx_device_index, "ctx_device_index should be initialized.");
+  auto prev_stream = (THPStream*)(THPObjectPtr(ctx_stream).get());
   auto prev_device_index =
-      THPUtils_unpackDeviceIndex(ctx_device_index.release());
+      THPUtils_unpackDeviceIndex(THPObjectPtr(ctx_device_index).get());
   at::accelerator::setCurrentStream(c10::Stream::unpack3(
       prev_stream->stream_id,
       static_cast<c10::DeviceIndex>(prev_stream->device_index),
