@@ -2348,6 +2348,10 @@ class TestPatternMatcher(TestPatternMatcherBase):
                     counters["inductor"]["qlinear_binary_matcher_nodes"],
                     0 if TEST_ACL else expected_matcher_nodes,
                 )
+                self.assertEqual(
+                    counters["inductor"]["qlinear_binary_lower_count"],
+                    0 if TEST_ACL else 2,
+                )
 
             self._test_common(
                 mod,
