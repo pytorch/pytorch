@@ -1229,6 +1229,8 @@ def _get_cudnn_allow_tf32() -> _bool: ...  # THPModule_allowTF32CuDNN
 def _set_cudnn_allow_tf32(arg: _bool) -> None: ...  # THPModule_setAllowTF32CuDNN
 def _get_cublas_allow_tf32() -> _bool: ...  # THPModule_allowTF32CuBLAS
 def _set_cublas_allow_tf32(arg: _bool) -> None: ...  # THPModule_setAllowTF32CuBLAS
+def _get_allow_tf32_onednn_matmul() -> _bool: ...  # THPModule_allowTF32oneDNN_Matmul
+def _set_allow_tf32_onednn_matmul(arg: _bool) -> None: ...  # THPModule_setAllowTF32oneDNN_Matmul
 def _get_float32_matmul_precision() -> str: ...  # THPModule_float32MatmulPrecision
 def _set_float32_matmul_precision(
     arg: str,
