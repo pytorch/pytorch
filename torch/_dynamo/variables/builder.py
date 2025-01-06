@@ -14,6 +14,7 @@ import math
 import operator
 import random
 import re
+import sys
 import types
 import warnings
 import weakref
@@ -573,7 +574,9 @@ class VariableBuilder:
             )
             return result
         elif istype(value, (dict, collections.defaultdict, collections.OrderedDict)):
-            self.install_guards(GuardBuilder.SEQUENCE_LENGTH)
+            # TODO(anijain2305) - Consider moving SEQUENCE_LENGTH check to DICT_KEYS_MATCH
+            if value is not sys.modules:
+                self.install_guards(GuardBuilder.SEQUENCE_LENGTH)
 
             all_const = all(ConstantVariable.is_literal(k) for k in value.keys())
 

@@ -663,8 +663,21 @@ class SIMDKernel(Kernel):
 
     @classmethod
     def is_compatible(
-        cls, groups: Iterable[sympy.Expr], lengths: Sequence[Sequence[sympy.Expr]]
+        cls,
+        groups: Iterable[sympy.Expr],
+        lengths: Sequence[Sequence[sympy.Expr]],
+        reduction_numel: sympy.Expr = sympy.S.One,
     ):
+        # Fill in the reduction numel, in case the node is missing it.
+        sizevars = V.graph.sizevars
+        if len(lengths[1]) == 0 and (
+            sizevars.statically_known_equals(
+                sympy_product(groups),
+                sympy_product(lengths[0]) * reduction_numel,
+            )
+        ):
+            lengths = (lengths[0], [reduction_numel])
+
         try:
             cls._split_iteration_ranges(groups, lengths)
             return True
@@ -672,10 +685,13 @@ class SIMDKernel(Kernel):
             return False
 
     def split_and_set_ranges(self, lengths: Sequence[Sequence[sympy.Expr]]):
-        groups = [rt.numel for rt in self.range_trees]
+        tiling = {rt.prefix: rt.numel for rt in self.range_trees}
         if not self.inside_reduction:
-            groups[-1] = sympy.S.One
+            for prefix in tiling:
+                if prefix_is_reduction(prefix):
+                    tiling[prefix] = sympy.S.One
 
+        groups = [*tiling.values()]
         return self.map_kernel_groups_to_node_sizes(groups, lengths, self.set_ranges)
 
     @classmethod
@@ -1626,7 +1642,9 @@ class SIMDScheduling(BaseScheduling):
 
     @classmethod
     @functools.lru_cache(32)
-    def candidate_tilings(cls, node, is_pointwise: bool) -> List[CandidateTiling]:
+    def candidate_tilings(cls, node, numel, reduction_numel) -> List[CandidateTiling]:
+        is_pointwise = reduction_numel == 1
+
         def tile_ranges(is_pointwise: bool, ranges, rw) -> List[CandidateTiling]:
             """
             Compute tiling candidates by dividing up the iteration ranges.
@@ -1712,7 +1730,7 @@ class SIMDScheduling(BaseScheduling):
                                     collapse_ranges(ranges[:split]),
                                     collapse_ranges(ranges[split:]),
                                 ],
-                                is_pointwise,
+                                reduction_numel,
                             ),
                             score=score,
                             name=dep.name,
@@ -1736,7 +1754,9 @@ class SIMDScheduling(BaseScheduling):
         # Fill in the missing ranges.
         full_tilings = [
             CandidateTiling(
-                tiling=cls.complete_partial_tiling(tiling.tiling, node),
+                tiling=cls.complete_partial_tiling(
+                    tiling.tiling, numel, reduction_numel
+                ),
                 score=tiling.score,
                 name=tiling.name,
             )
@@ -1771,18 +1791,22 @@ class SIMDScheduling(BaseScheduling):
 
     @classmethod
     def complete_partial_tiling(
-        cls, tiling: Dict[str, sympy.Expr], node
+        cls,
+        tiling: Dict[str, sympy.Expr],
+        numel: sympy.Expr,
+        reduction_numel: sympy.Expr,
     ) -> Dict[str, sympy.Expr]:
         """
         Given a tiling for only pointwise or reduction dimensions, adds the missing one.
         """
         splits = list(tiling.values())
         is_pointwise = "x" in tiling
-        missing_ranges = node.get_ranges()[1 if is_pointwise else 0]
-        missing_numel = [sympy_product(missing_ranges)]
+
+        total_numel = numel * reduction_numel
+        missing_tiling = [total_numel / sympy_product(splits)]
 
         tiling_args = (
-            (splits, missing_numel) if is_pointwise else (missing_numel, splits)
+            (splits, missing_tiling) if is_pointwise else (missing_tiling, splits)
         )
         return cls.create_tiling(*tiling_args)
 
@@ -1790,7 +1814,8 @@ class SIMDScheduling(BaseScheduling):
     def get_nd_tilings(
         cls,
         node_schedule,
-        is_pointwise: bool,
+        pointwise_numel,
+        reduction_numel,
     ) -> List[Dict[str, Tuple[sympy.Expr]]]:
         """
         Creates N-dimensional tiling candidiates, attempting to simplify loads/stores
@@ -1798,16 +1823,21 @@ class SIMDScheduling(BaseScheduling):
 
         Returns a list of tilings ranked by dimensionality.
         """
+        is_pointwise = reduction_numel == 1
         tilings = OrderedSet[Dict[str, sympy.Expr]]()
         for node in EnableReduction.filter(node_schedule):
             if not isinstance(node, scheduler.SchedulerNode):
                 continue
 
-            # Use the node ranges as the default tiling candidate.
+            # If this is a reduction schedule, skip nodes which are missing their
+            # reduction ranges.
             node_ranges = node.get_ranges()
+            if not is_pointwise and len(node_ranges[1]) == 0:
+                continue
+
+            # Use the node ranges as the default tiling candidate.
             ranges_to_tile = node_ranges[0 if is_pointwise else 1]
             node_tilings = [ranges_to_tile]
-            pointwise_numel = sympy_product(node_ranges[0])
 
             # Search the indexing expressions for more candidates.
             # If we see modular indexing, try to subdivide ranges into their implied
@@ -1877,7 +1907,9 @@ class SIMDScheduling(BaseScheduling):
                 )
                 tilings.add(
                     cls.complete_partial_tiling(
-                        cls.create_partial_tiling(collapsed_splits, is_pointwise), node
+                        cls.create_partial_tiling(collapsed_splits, is_pointwise),
+                        pointwise_numel,
+                        reduction_numel,
                     )
                 )
 
@@ -1916,7 +1948,7 @@ class SIMDScheduling(BaseScheduling):
                 for node in EnableReduction.filter(node_schedule):
                     if (
                         not config.triton.tile_reductions
-                        and len(cls.candidate_tilings(node, is_pointwise)) > 0
+                        and len(cls.candidate_tilings(node, numel, reduction_numel)) > 0
                     ):
                         perf_hint_log.info(
                             textwrap.dedent(
@@ -1932,7 +1964,7 @@ class SIMDScheduling(BaseScheduling):
         seen_names = OrderedSet[str]()
         candidate_tiles: Counter[CandidateTiling] = collections.Counter()
         for node in EnableReduction.filter(node_schedule):
-            for candidate_tiling in cls.candidate_tilings(node, is_pointwise):
+            for candidate_tiling in cls.candidate_tilings(node, numel, reduction_numel):
                 if candidate_tiling.name in seen_names:
                     continue
                 elif candidate_tiling.name is not None:
@@ -1989,13 +2021,16 @@ class SIMDScheduling(BaseScheduling):
         # Optionally, prefer tiling into as many dimensions as possible.
         if config.triton.prefer_nd_tiling:
             ranked_tilings = (
-                cls.get_nd_tilings(node_schedule, is_pointwise) + ranked_tilings
+                cls.get_nd_tilings(node_schedule, numel, reduction_numel)
+                + ranked_tilings
             )
 
         for tiling in ranked_tilings:
             assert isinstance(tiling, dict)
             if all(
-                SIMDKernel.is_compatible(tiling.values(), node.get_ranges())
+                SIMDKernel.is_compatible(
+                    tiling.values(), node.get_ranges(), reduction_numel=reduction_numel
+                )
                 for node in node_schedule
                 if isinstance(node, scheduler.SchedulerNode)
             ):
