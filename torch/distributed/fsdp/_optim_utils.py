@@ -17,6 +17,7 @@ from typing import (
     Optional,
     Sequence,
     Set,
+    Tuple,
     TYPE_CHECKING,
     Union,
 )
@@ -70,7 +71,7 @@ class FSDPParamInfo:
     param_requires_grad: List[bool]
 
 
-def sorted_items(dictionary: Dict[str, Any]) -> Iterator[tuple[str, Any]]:
+def sorted_items(dictionary: Dict[str, Any]) -> Iterator[Tuple[str, Any]]:
     keys = sorted(dictionary.keys())
     for k in keys:
         yield k, dictionary[k]
@@ -125,7 +126,7 @@ class _OptimStateKey(NamedTuple):
     IDs to make it independent of each rank's own optimizer construction.
     """
 
-    unflat_param_names: tuple[str, ...]
+    unflat_param_names: Tuple[str, ...]
     is_fsdp_managed: bool
 
 
@@ -908,7 +909,7 @@ def _rekey_sharded_optim_state_dict(
     assert len(param_to_param_key) <= len(param_to_fqns)
 
     unflat_param_names_to_flat_param_key: Dict[
-        tuple[str, ...], Union[int, str]
+        Tuple[str, ...], Union[int, str]
     ] = {}  # for "state"
     unflat_param_name_to_flat_param_key: Dict[
         str, Union[int, str]
@@ -1195,7 +1196,7 @@ def _map_param_key_to_optim_keys(
     param_to_fqns: Dict[nn.Parameter, List[str]],
     fqn_to_fsdp_param_info: Dict[str, FSDPParamInfo],
     merge_keys: bool = False,
-) -> tuple[List[_OptimStateKey], Dict[_OptimStateKey, Union[int, str]]]:
+) -> Tuple[List[_OptimStateKey], Dict[_OptimStateKey, Union[int, str]]]:
     """
     Construct the local mapping between the ``_OptimStateKey`` and parameter keys
     and all the ``_OptimStateKey`` across ranks. If ``merge_keys`` is False, rank0
@@ -1346,7 +1347,7 @@ def _convert_all_state_info(
     gathered_state_info: List[Dict[str, StateInfo]],
     input_states: Dict[str, Any],
     output_states: Dict[str, Dict[str, Any]],
-) -> tuple[Optional[torch.dtype], Dict[str, List[Optional[torch.Tensor]]]]:
+) -> Tuple[Optional[torch.dtype], Dict[str, List[Optional[torch.Tensor]]]]:
     """
     Given the ``gathered_state_info`` and ``input_states``, the API converted
     the StateInfo into the original state if the state is not a non-scalar
