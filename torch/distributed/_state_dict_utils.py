@@ -13,6 +13,7 @@ from typing import (
     MutableMapping,
     NamedTuple,
     Optional,
+    Tuple,
     TYPE_CHECKING,
     Union,
 )
@@ -91,7 +92,7 @@ def _iterate_state_dict(
     device: Optional[torch.device] = None,
     cpu_offload: bool = False,
     companion_obj: Any = None,
-    ranks_only: tuple[int, ...] = (),
+    ranks_only: Tuple[int, ...] = (),
     type_check: bool = True,
     non_blocking: bool = True,
 ) -> Dict[str, Any]:
@@ -208,7 +209,7 @@ def _gather_state_dict(
     pg: Optional[dist.ProcessGroup] = None,
     device: Optional[torch.device] = None,
     cpu_offload: bool = False,
-    ranks_only: tuple[int, ...] = (),
+    ranks_only: Tuple[int, ...] = (),
     type_check: bool = True,
 ) -> Dict[str, Any]:
     """
@@ -293,7 +294,7 @@ def _gather_state_dict(
 def _offload_state_dict_to_cpu(
     state_dict: Dict[str, Any],
     *,
-    ranks_only: tuple[int, ...] = (),
+    ranks_only: Tuple[int, ...] = (),
     type_check: bool = True,
 ) -> Dict[str, Any]:
     """
@@ -671,7 +672,7 @@ def _distribute_state_dict(
 # TODO: We should consolidate the code here as some not all modules can depend on
 # DCP.
 PATH_ITEM = Union[str, int]
-OBJ_PATH = tuple[PATH_ITEM, ...]
+OBJ_PATH = Tuple[PATH_ITEM, ...]
 FLATTEN_MAPPING = Dict[str, OBJ_PATH]
 STATE_DICT_TYPE = Dict[str, Any]
 CONTAINER_TYPE = MutableMapping[PATH_ITEM, Any]
@@ -703,7 +704,7 @@ def _traverse_state_dict(
 
 def _flatten_state_dict(
     state_dict: STATE_DICT_TYPE,
-) -> tuple[STATE_DICT_TYPE, FLATTEN_MAPPING]:
+) -> Tuple[STATE_DICT_TYPE, FLATTEN_MAPPING]:
     """
     Flatten ``state_dict`` made of nested dicts and lists into a top level dictionary.
 
