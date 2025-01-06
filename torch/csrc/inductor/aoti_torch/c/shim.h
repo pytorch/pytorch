@@ -44,8 +44,11 @@
 // to symbol clashes at link time if libtorch is included in a DLL and binary
 // that depends on the DLL. As a short term fix, we don't export the symbols.
 // In the long term, this will need to be addressed when Windows is supported.
-// #define AOTI_TORCH_EXPORT __declspec(dllexport)
-#define AOTI_TORCH_EXPORT
+#ifdef EXPORT_AOTI_FUNCTIONS
+#define AOTI_TORCH_EXPORT __declspec(dllexport)
+#else
+#define AOTI_TORCH_EXPORT __declspec(dllimport)
+#endif
 #else // !_WIN32
 #define AOTI_TORCH_EXPORT
 #endif // _WIN32
@@ -96,6 +99,7 @@ using AOTITorchError = int32_t;
 // desired for perf reasons.)
 AOTI_TORCH_EXPORT int32_t aoti_torch_device_type_cpu();
 AOTI_TORCH_EXPORT int32_t aoti_torch_device_type_cuda();
+AOTI_TORCH_EXPORT int32_t aoti_torch_device_type_xpu();
 AOTI_TORCH_EXPORT int32_t aoti_torch_device_type_privateuse1();
 
 AOTI_TORCH_EXPORT int32_t aoti_torch_dtype_float8_e5m2();
@@ -120,7 +124,18 @@ AOTI_TORCH_EXPORT int32_t aoti_torch_dtype_complex64();
 AOTI_TORCH_EXPORT int32_t aoti_torch_dtype_complex128();
 
 AOTI_TORCH_EXPORT int32_t aoti_torch_layout_strided();
+AOTI_TORCH_EXPORT int32_t aoti_torch_layout_sparse_coo();
+AOTI_TORCH_EXPORT int32_t aoti_torch_layout_sparse_csr();
+AOTI_TORCH_EXPORT int32_t aoti_torch_layout_sparse_csc();
+AOTI_TORCH_EXPORT int32_t aoti_torch_layout_sparse_bsr();
+AOTI_TORCH_EXPORT int32_t aoti_torch_layout_sparse_bsc();
 AOTI_TORCH_EXPORT int32_t aoti_torch_layout__mkldnn();
+AOTI_TORCH_EXPORT int32_t aoti_torch_layout_jagged();
+
+AOTI_TORCH_EXPORT int32_t aoti_torch_memory_format_contiguous_format();
+AOTI_TORCH_EXPORT int32_t aoti_torch_memory_format_channels_last();
+AOTI_TORCH_EXPORT int32_t aoti_torch_memory_format_channels_last_3d();
+AOTI_TORCH_EXPORT int32_t aoti_torch_memory_format_preserve_format();
 
 // Functions for converting a single-element tensor to a scalar value
 AOTI_TORCH_EXPORT AOTITorchError
@@ -457,6 +472,9 @@ aoti_torch_assign_tensors_out(AtenTensorHandle src, AtenTensorHandle* ret_dst);
 AOTI_TORCH_EXPORT AOTITorchError
 aoti_torch_clone(AtenTensorHandle self, AtenTensorHandle* ret);
 
+AOTI_TORCH_EXPORT AOTITorchError
+aoti_torch_clone_preserve_strides(AtenTensorHandle self, AtenTensorHandle* ret);
+
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_addmm_out(
     AtenTensorHandle out,
     AtenTensorHandle self,
@@ -655,6 +673,20 @@ AOTI_TORCH_EXPORT void aoti_torch_check(
         static_cast<uint32_t>(__LINE__),           \
         TORCH_CHECK_MSG(cond, "", ##__VA_ARGS__)); \
   }
+#endif
+
+AOTI_TORCH_EXPORT void aoti_torch_warn(
+    const char* func,
+    const char* file,
+    uint32_t line,
+    const char* msg);
+
+#ifdef DISABLE_WARN
+#define AOTI_TORCH_WARN(...) ((void)0);
+#else
+#define AOTI_TORCH_WARN(...) \
+  aoti_torch_warn(           \
+      __func__, __FILE__, static_cast<uint32_t>(__LINE__), #__VA_ARGS__);
 #endif
 
 #ifdef __cplusplus

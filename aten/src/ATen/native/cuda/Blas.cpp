@@ -1050,6 +1050,19 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
   IntArrayRef mat2_sizes = mat2.sizes();
   at::native::resize_output(out, {mat1_sizes[0], mat2_sizes[1]});
 
+  // If any of M, K, N is 0 - return early (the tensorwise/rowwise float8 gemm kernels
+  // do not support this case).
+  if (mat1_sizes[0] == 0 || mat1_sizes[1] == 0 || mat2_sizes[1] == 0) {
+    // `out` was created with `at::empty`. In the case where we are multiplying
+    // MxK by KxN and K is the zero dim, we need to initialize here to properly
+    // return a tensor of zeros.
+    if (mat1_sizes[1] == 0) {
+      out.zero_();
+    }
+
+    return out;
+  }
+
   // We are doing row-wise scaling
   if (scaling_choice == ScalingType::RowWise) {
     TORCH_CHECK(out.dtype() == kBFloat16, "Only bf16 high precsion output types are supported for row-wise scaling.");

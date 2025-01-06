@@ -94,7 +94,7 @@ inline bool THPUtils_checkScalar(PyObject* obj) {
 
 namespace torch {
 
-bool should_allow_numbers_as_tensors(const std::string& name);
+TORCH_PYTHON_API bool should_allow_numbers_as_tensors(const std::string& name);
 
 enum class ParameterType {
   TENSOR,
@@ -511,7 +511,8 @@ inline PyObject* toPyObject(const c10::SymInt& symint) {
     return r;
   } else {
     auto m = symint.maybe_as_int();
-    return THPUtils_packInt64(*m);
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+    return THPUtils_packInt64(m.value());
   }
 }
 
@@ -812,6 +813,7 @@ inline std::optional<at::Layout> PythonArgs::layoutOptional(int i) {
 inline at::Device deviceFromLong(int64_t device_index) {
   TORCH_CHECK(device_index >= 0, "Device index must not be negative");
   return at::Device(
+      // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
       at::getAccelerator(true).value(),
       static_cast<c10::DeviceIndex>(device_index));
 }
