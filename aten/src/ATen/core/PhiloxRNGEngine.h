@@ -12,7 +12,6 @@
 #endif
 
 #include <array>
-#include <ATen/core/Array.h>
 #include <c10/macros/Macros.h>
 #include <cmath>
 #include <cstdint>

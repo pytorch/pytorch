@@ -150,13 +150,13 @@ def triton_op(
             # dependency and serve the model with Cubin. This guarantees that triton changes won't break BC.
             # In the long term, we may export multiple cubins for the triton op directly.
 
-            from torch.compiler import is_exporting
+            from torch.export._trace import _need_decompose_custom_triton_op
 
-            if is_exporting():
-                return mode.__torch_dispatch__(op, types, args, kwargs)
-            else:
+            if _need_decompose_custom_triton_op():
                 with mode:
                     return fn(*args, **kwargs)
+            else:
+                return mode.__torch_dispatch__(op, types, args, kwargs)
 
         result.register_torch_dispatch(FunctionalTensorMode, functional_decomp)
         return result

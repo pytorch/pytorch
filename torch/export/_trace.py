@@ -157,6 +157,25 @@ def _ignore_backend_decomps():
         torch.backends.nnpack.set_flags(*orig_nnpack_flag)
 
 
+# See # NOTE [Export custom triton op]
+decompose_custom_triton_ops = False
+
+
+@contextmanager
+def _enable_custom_triton_op_decomposition():
+    global decompose_custom_triton_ops
+    old = decompose_custom_triton_ops
+    try:
+        decompose_custom_triton_ops = True
+        yield decompose_custom_triton_ops
+    finally:
+        decompose_custom_triton_ops = old
+
+
+def _need_decompose_custom_triton_op():
+    return decompose_custom_triton_ops
+
+
 def _fixup_key(x):
     return "L__self__" + _strip_root(x)
 
@@ -658,9 +677,12 @@ def _export_to_torch_ir(
     with torch._dynamo.config.patch(dataclasses.asdict(DEFAULT_EXPORT_DYNAMO_CONFIG)):
         try:
             module_call_specs: Dict[str, Dict[str, pytree.TreeSpec]] = {}
-            with _wrap_submodules(
-                f, preserve_module_call_signature, module_call_specs
-            ), _ignore_backend_decomps():
+            ctx = nullcontext()
+            if not isinstance(f, torch.fx.GraphModule):
+                ctx = _wrap_submodules(  # type: ignore[assignment]
+                    f, preserve_module_call_signature, module_call_specs
+                )
+            with ctx, _ignore_backend_decomps():
                 gm_torch_level, _ = torch._dynamo.export(
                     f,
                     dynamic_shapes=dynamic_shapes,  # type: ignore[arg-type]
@@ -707,6 +729,7 @@ def _export_to_aten_ir(
     decomp_table=None,
     _check_autograd_state: bool = True,
     _is_torch_jit_trace: bool = False,
+    decompose_custom_triton_ops: bool = False,
 ) -> ATenExportArtifact:
     # [NOTE] If the user is exporting under training mode, we want to detect if there is any
     # state change in the autograd global state and error. If the user is exporting under inference
@@ -720,6 +743,11 @@ def _export_to_aten_ir(
         if not pre_dispatch and is_grad_enabled:
             grad_safe_guard = AutogradStateOpsFailSafeguard()  # type: ignore[assignment]
 
+    custom_triton_op_decomposition_ctx = (
+        _enable_custom_triton_op_decomposition()
+        if decompose_custom_triton_ops
+        else nullcontext()
+    )
     # This _reparametrize_module makes sure inputs and module.params/buffers have the same fake_mode,
     # otherwise aot_export_module will error out because it sees a mix of fake_modes.
     # And we want aot_export_module to use the fake_tensor mode in dynamo to keep the pipeline easy to reason about.
@@ -729,7 +757,7 @@ def _export_to_aten_ir(
         tie_weights=True,
         strict=True,
         stack_weights=True,
-    ), grad_safe_guard, _ignore_backend_decomps(), _compiling_state_context():  # type: ignore[attr-defined]
+    ), grad_safe_guard, _ignore_backend_decomps(), _compiling_state_context(), custom_triton_op_decomposition_ctx:  # type: ignore[attr-defined]
         gm, graph_signature = transform(aot_export_module)(
             mod,
             fake_args,
@@ -1053,7 +1081,7 @@ def _process_jit_trace_inputs_for_export(example_inputs, example_kwarg_inputs):
     return example_inputs, example_kwarg_inputs
 
 
-def _process_export_inputs(mod, args, kwargs, dynamic_shapes):
+def _get_original_state_dict(mod: torch.nn.Module) -> Dict[str, Any]:
     # Explicitly not calling mode.state_dict() as we do not want the module state for serialization
     # but the running module state so we can always match by id() the entries here with the graph inputs
     named_parameters = dict(mod.named_parameters(remove_duplicate=False))
@@ -1064,6 +1092,10 @@ def _process_export_inputs(mod, args, kwargs, dynamic_shapes):
     for k in non_persistent_buffers:
         original_state_dict.pop(k, None)
 
+    return original_state_dict
+
+
+def _process_export_inputs(mod, args, kwargs, dynamic_shapes):
     if not isinstance(args, tuple):
         raise UserError(
             UserErrorType.INVALID_INPUT,
@@ -1075,7 +1107,7 @@ def _process_export_inputs(mod, args, kwargs, dynamic_shapes):
     if isinstance(dynamic_shapes, torch.export.ShapesCollection):
         dynamic_shapes = dynamic_shapes.dynamic_shapes(mod, args, kwargs)
 
-    return args, kwargs, original_in_spec, original_state_dict, dynamic_shapes
+    return args, kwargs, original_in_spec, dynamic_shapes
 
 
 def _get_module_call_graph(
@@ -1541,10 +1573,6 @@ def _export_to_aten_ir_make_fx(
         strict=True,
         stack_weights=True,
     ), _ignore_backend_decomps(), _compiling_state_context():  # type: ignore[attr-defined]
-        param_len = len(dict(mod.named_parameters(remove_duplicate=False)))
-        buffer_len = len(dict(mod.named_buffers(remove_duplicate=False)))
-        params_len = param_len + buffer_len
-
         gm, graph_signature = transform(_make_fx_helper)(
             mod,
             fake_args,
@@ -1680,9 +1708,12 @@ def _non_strict_export(
             new_preserved_call_signatures = [
                 "_export_root." + i for i in preserve_module_call_signature
             ]
-            with _wrap_submodules(
-                wrapped_mod, new_preserved_call_signatures, module_call_specs
-            ):
+            ctx = nullcontext()
+            if not isinstance(mod, torch.fx.GraphModule):
+                ctx = _wrap_submodules(  # type: ignore[assignment]
+                    wrapped_mod, new_preserved_call_signatures, module_call_specs
+                )
+            with ctx:
                 gm, sig = aot_export(wrapped_mod, args, kwargs=kwargs, **flags)
                 log.debug("Exported program from AOTAutograd:\n%s", gm)
 
@@ -1800,9 +1831,10 @@ def _export_for_training(
         args,
         kwargs,
         orig_in_spec,
-        original_state_dict,
         dynamic_shapes,
     ) = _process_export_inputs(mod, args, kwargs, dynamic_shapes)
+
+    original_state_dict = _get_original_state_dict(mod)
 
     export_func = (
         functools.partial(
@@ -1964,9 +1996,10 @@ def _export(
         args,
         kwargs,
         original_in_spec,
-        original_state_dict,
         dynamic_shapes,
     ) = _process_export_inputs(mod, args, kwargs, dynamic_shapes)
+
+    original_state_dict = _get_original_state_dict(mod)
 
     # Call the appropriate export function based on the strictness of tracing.
     export_func = _strict_export if strict else _non_strict_export

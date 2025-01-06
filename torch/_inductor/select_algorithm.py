@@ -34,6 +34,7 @@ import sympy
 
 import torch
 import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncCompile pools
+from torch._dynamo.device_interface import get_interface_for_device
 from torch._dynamo.testing import rand_strided
 from torch._dynamo.utils import counters, dynamo_timed, identity, preserve_rng_state
 from torch.utils._filelock import FileLock
@@ -70,6 +71,7 @@ from .runtime.hints import DeviceProperties
 from .utils import (
     FakeIndentedBuffer,
     get_dtype_size,
+    is_gpu,
     Placeholder,
     restore_stdout_stderr,
     sympy_dot,
@@ -90,6 +92,8 @@ PRINT_AUTOTUNE = True
 DEBUG = False
 
 if TYPE_CHECKING:
+    import concurrent
+
     from torch._inductor.codegen.simd import IterationRangesRoot
 
 
@@ -693,8 +697,6 @@ class TritonTemplateKernel(TritonKernel):
             lengths = [V.graph.sizevars.simplify(s) for s in input_node.get_size()]
             assert len(indices) == len(lengths)
 
-            stride = self.named_input_nodes[input_name].get_stride()
-
             index_symbols = [sympy.Symbol(x, integer=True) for x in indices]
             assert len(indices) == len(lengths)
 
@@ -720,7 +722,6 @@ class TritonTemplateKernel(TritonKernel):
                 sympy.Integer(1), sympy_product(lengths)
             )
             xindex_range_root.set_name("xindex")
-            xindex_expr = xindex_range_root.expr
 
             # Note - ["None" override_mask]
             # MM Templates work by taking out of bounds index values and wrapping them around to 0
@@ -1752,16 +1753,35 @@ class AlgorithmSelectorCache(PersistentCache):
 
             def precompile_with_captured_stdout(choice):
                 with restore_stdout_stderr(initial_stdout, initial_stderr):
-                    start_time = time.time()
                     choice.precompile()
-                    return time.time() - start_time
+
+            def on_complete(future):
+                assert future in start_times
+                elapsed_times[future] = time.time() - start_times[future]
 
             executor = ThreadPoolExecutor(max_workers=num_workers)
+            async_compile = torch._inductor.async_compile.AsyncCompile()
 
-            futures = {}
+            futures: Dict[concurrent.futures.Future[Any], ChoiceCaller] = {}
+            start_times: Dict[concurrent.futures.Future[Any], float] = {}
+            elapsed_times: Dict[concurrent.futures.Future[Any], float] = {}
+
             for c in choices:
                 if hasattr(c, "precompile"):
-                    future = executor.submit(precompile_with_captured_stdout, c)
+                    triton_cuda_choice = isinstance(
+                        c, TritonTemplateCaller
+                    ) and isinstance(c.bmreq, TritonGPUBenchmarkRequest)
+                    if triton_cuda_choice and async_compile.use_process_pool():
+                        with open(c.bmreq.module_path) as file:
+                            source_code = file.read()
+                        future = async_compile.triton(
+                            kernel_name=c.bmreq.kernel_name, source_code=source_code
+                        ).future
+                    else:
+                        future = executor.submit(precompile_with_captured_stdout, c)
+
+                    start_times[future] = time.time()
+                    future.add_done_callback(on_complete)
                     futures[future] = c
 
             @functools.lru_cache(None)
@@ -1780,7 +1800,7 @@ class AlgorithmSelectorCache(PersistentCache):
                         log.info(
                             "Precompiling benchmark choice %s took %.02fs",
                             futures[future],
-                            future.result(),
+                            elapsed_times[future],
                         )
 
                 executor.shutdown(wait=True)
@@ -1964,10 +1984,16 @@ class AlgorithmSelectorCache(PersistentCache):
             inpts, output = benchmark_tensors.unpack()
             output.zero_()
             result = choice.benchmark(*inpts, out=output)
+            device_type = next(
+                (tensor.device.type for tensor in inpts if is_gpu(tensor.device.type)),
+                "cuda",
+            )
+            device_interface = get_interface_for_device(device_type)
+            if device_interface.is_available():
+                device_interface.synchronize()  # shake out any CUDA errors
+
             if VERIFY and autotune_args.expected is not None:
                 autotune_args.verify(**VERIFY)
-            if torch.cuda.is_available():
-                torch.cuda.synchronize()  # shake out any CUDA errors
             return result
 
         def benchmark_in_current_process(
