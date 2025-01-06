@@ -310,9 +310,12 @@ static PyObject* THPStream_exit(PyObject* _self, PyObject* unused) {
   }
   auto ctx_stream =
       THPObjectPtr(PyDict_GetItemString(self->context, "_ctx_stream"));
+  if (!ctx_stream) {
+    throw python_error();
+  }
   auto ctx_device_index =
       THPObjectPtr(PyDict_GetItemString(self->context, "_ctx_device_index"));
-  if ((!ctx_stream) || (!ctx_device_index)) {
+  if (!ctx_device_index) {
     throw python_error();
   }
   auto prev_stream = (THPStream*)ctx_stream.get();
