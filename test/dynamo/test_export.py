@@ -10,8 +10,9 @@ import inspect
 import io
 import operator
 import unittest
+from collections.abc import Sequence
 from enum import Enum
-from typing import Dict, List, Sequence
+from typing import Dict, List
 from unittest.mock import patch
 
 import torch
@@ -1924,7 +1925,7 @@ def forward(self, l_x_):
             )
             with self.assertRaisesRegex(
                 torch._dynamo.exc.UncapturedHigherOrderOpError,
-                "Cond doesn't work unless it is captured completely with torch.compile",
+                "Expected true_fn_output and false_fn_output to have same metadata but found",
             ):
                 # True branch and false branch return tensors of different shape
                 torch._dynamo.export(mod)(torch.randn(3, 2))
@@ -3400,7 +3401,8 @@ def forward(self, x):
 
         example_inputs = (torch.rand(5),)
         with self.assertRaisesRegex(
-            RuntimeError, "Unmatched number of outputs from cond"
+            torch._dynamo.exc.UncapturedHigherOrderOpError,
+            "Expected true_fn_output and false_fn_output to have same number of outputs but got",
         ):
             torch._dynamo.export(
                 f_mismatch_return_length,
@@ -3420,7 +3422,7 @@ def forward(self, x):
         example_inputs = (torch.rand(5),)
         with self.assertRaisesRegex(
             torch._dynamo.exc.UncapturedHigherOrderOpError,
-            "Cond doesn't work unless it is captured completely with torch.compile",
+            "Expected true_fn_output and false_fn_output to have same metadata but found",
         ):
             torch._dynamo.export(f_return_tensor_mismatch, aten_graph=True)(
                 *example_inputs,

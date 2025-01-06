@@ -242,7 +242,7 @@ class NCCLComm {
       std::vector<uint64_t>& ranks_ull);
 #endif
 
-#if defined(IS_NCCLX) && defined(NCCL_COMM_DUMP)
+#if (defined(IS_NCCLX) || defined(USE_ROCM)) && defined(NCCL_COMM_DUMP)
   std::unordered_map<std::string, std::string> ncclCommDump();
 #endif
 
@@ -356,6 +356,9 @@ struct ncclRedOpRAII {
   bool premul_sum_ = false;
 };
 
+void printNcclCommProxyTrace(
+    std::string dumpReason,
+    const std::unordered_map<std::string, std::string>& dumpMap);
 } // namespace c10d
 
 #endif // USE_C10D_NCCL

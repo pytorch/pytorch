@@ -261,6 +261,9 @@ class TestFP8Matmul(TestCase):
         x = torch.empty_strided((16, 16), (16, 1), device="cuda", dtype=base_dtype)
         y = torch.empty_strided((16, 32), (1, 64), device="cuda", dtype=base_dtype)
 
+        x.normal_()
+        y.normal_()
+
         x_scale = tensor_to_scale(x, input_dtype).float()
         y_scale = tensor_to_scale(y, input_dtype).float()
 
