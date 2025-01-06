@@ -12,7 +12,18 @@ from contextlib import nullcontext
 from copy import deepcopy
 from enum import auto, Enum
 from functools import wraps
-from typing import Any, Callable, cast, Dict, List, no_type_check, Optional, Type, Union
+from typing import (
+    Any,
+    Callable,
+    cast,
+    Dict,
+    List,
+    no_type_check,
+    Optional,
+    Tuple,
+    Type,
+    Union,
+)
 from unittest import mock
 
 import torch
@@ -101,7 +112,7 @@ class FSDPTestModel(nn.Module, ABC):
     FSDP unit tests."""
 
     @abstractmethod
-    def get_input(self, device) -> tuple[torch.Tensor, ...]:
+    def get_input(self, device) -> Tuple[torch.Tensor, ...]:
         """Returns an input for the model as as tuple."""
         ...
 
@@ -961,7 +972,7 @@ class DoubleLinear(nn.Module):
 
     def forward(
         self, x: torch.Tensor
-    ) -> Union[tuple[torch.Tensor, torch.Tensor], torch.Tensor]:
+    ) -> Union[Tuple[torch.Tensor, torch.Tensor], torch.Tensor]:
         if self.use_second_linear:
             return self.relu(self.lin1(x)), self.relu(self.lin2(x))
         return self.relu(self.lin1(x))
@@ -1084,7 +1095,7 @@ def check_sharded_parity(
     cls,  # unit test class
     replicated_module: nn.Module,
     sharded_module: nn.Module,
-    prefixes_to_ignore: tuple[str, ...] = (),
+    prefixes_to_ignore: Tuple[str, ...] = (),
 ):
     for (replicated_name, replicated_param), (sharded_name, sharded_param) in zip(
         replicated_module.named_parameters(), sharded_module.named_parameters()
