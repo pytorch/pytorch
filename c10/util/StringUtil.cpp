@@ -83,7 +83,7 @@ std::ostream& operator<<(std::ostream& out, const SourceLocation& loc) {
   return out;
 }
 
-size_t ReplaceAll(std::string& s, c10::string_view from, c10::string_view to) {
+size_t ReplaceAll(std::string& s, std::string_view from, std::string_view to) {
   if (from.empty()) {
     return 0;
   }
@@ -92,7 +92,7 @@ size_t ReplaceAll(std::string& s, c10::string_view from, c10::string_view to) {
   std::string::size_type last_pos = 0u;
   std::string::size_type cur_pos = 0u;
   std::string::size_type write_pos = 0u;
-  const c10::string_view input(s);
+  const std::string_view input(s);
 
   if (from.size() >= to.size()) {
     // If the replacement string is not larger than the original, we

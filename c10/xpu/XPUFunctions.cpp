@@ -44,8 +44,18 @@ void enumDevices(std::vector<std::unique_ptr<sycl::device>>& devices) {
 }
 
 inline void initGlobalDevicePoolState() {
-  // Enumerate all GPU devices and record them.
-  enumDevices(gDevicePool.devices);
+  // Attempt to initialize XPU devices. If no device is found or the driver is
+  // not installed correctly, issue a warning message instead of raising an
+  // exception to avoid disrupting the user experience.
+  try {
+    // Enumerate all GPU devices and record them.
+    enumDevices(gDevicePool.devices);
+  } catch (const sycl::exception& e) {
+    TORCH_WARN(
+        "Failed to initialize XPU devices. The driver may not be installed, installed incorrectly, or incompatible with the current setup. ",
+        "Please refer to the guideline (https://github.com/pytorch/pytorch?tab=readme-ov-file#intel-gpu-support) for proper installation and configuration.");
+    return;
+  }
   if (gDevicePool.devices.empty()) {
     TORCH_WARN("XPU device count is zero!");
     return;
@@ -56,8 +66,9 @@ inline void initGlobalDevicePoolState() {
       gDevicePool.devices.size() <= std::numeric_limits<DeviceIndex>::max(),
       "Too many XPU devices, DeviceIndex overflowed!");
 
-#ifdef _WIN32
-  // default context feature is disabled by default on Windows.
+#if defined(_WIN32) && SYCL_COMPILER_VERSION < 20250000
+  // The default context feature is disabled by default on Windows for SYCL
+  // compiler versions earlier than 2025.0.0.
   std::vector<sycl::device> deviceList;
   for (auto it = gDevicePool.devices.begin(); it != gDevicePool.devices.end();
        ++it) {

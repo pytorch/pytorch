@@ -39,6 +39,7 @@ from torch._dynamo.debug_utils import (
 )
 from torch._dynamo.trace_rules import is_fbcode
 from torch._dynamo.utils import clone_inputs, counters, same
+from torch._inductor.output_code import OutputCode
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import (
     fx_placeholder_targets,
@@ -50,8 +51,7 @@ from .. import config
 
 
 if TYPE_CHECKING:
-    from torch._inductor.codecache import CompiledFxGraph
-    from torch._inductor.compile_fx import _CompileFxCallableEx, _CompileFxKwargsEx
+    from torch._inductor.compile_fx import _CompileFxCallable, _CompileFxKwargs
     from torch._inductor.utils import InputType
 
 
@@ -67,9 +67,9 @@ use_buck = inductor_config.is_fbcode()
 
 
 def wrap_compiler_debug(
-    unconfigured_compiler_fn: "_CompileFxCallableEx",
+    unconfigured_compiler_fn: "_CompileFxCallable",
     compiler_name: str,
-) -> "_CompileFxCallableEx":
+) -> "_CompileFxCallable":
     """
     Minifier for Fx Graph modules after Aot Autograd has finished. We wrap both
     forward and backward call separately with the backend compiler_fn - like
@@ -82,8 +82,8 @@ def wrap_compiler_debug(
     def debug_wrapper(
         gm: torch.fx.GraphModule,
         example_inputs: Sequence["InputType"],
-        **kwargs: Unpack["_CompileFxKwargsEx"],
-    ) -> Union["CompiledFxGraph", str]:
+        **kwargs: Unpack["_CompileFxKwargs"],
+    ) -> OutputCode:
         from torch._subclasses import FakeTensorMode
 
         compiler_fn = functools.partial(unconfigured_compiler_fn, **kwargs)
@@ -100,7 +100,7 @@ def wrap_compiler_debug(
             # Call the compiler_fn - which is either aot_autograd or inductor
             # with fake inputs
             inner_compiled_fn = compiler_fn(gm, example_inputs)
-        except Exception as e:
+        except Exception:
             # TODO: Failures here are troublesome because no real inputs,
             # need a different serialization strategy
             if config.repro_after == "aot":
@@ -197,7 +197,7 @@ def wrap_compiler_debug(
                             torch.cuda.synchronize()
                             break
                     return out
-                except Exception as e:
+                except Exception:
                     if config.repro_level == 1:
                         dump_compiler_graph_state(
                             fx.GraphModule(gm, orig_graph),

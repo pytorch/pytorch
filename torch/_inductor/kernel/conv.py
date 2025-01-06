@@ -1,9 +1,8 @@
-# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 from __future__ import annotations
 
 import logging
-from typing import cast, List, Optional, Sequence, Tuple, TYPE_CHECKING, TypedDict
+from typing import cast, Optional, Sequence, Tuple, TYPE_CHECKING, TypedDict
 
 import torch
 from torch._inductor.codegen.rocm.ck_conv_template import CKGroupedConvFwdTemplate
@@ -79,7 +78,7 @@ platform_configs = tuple(
 )
 
 # On ROCm convert num_stages to 1 as pipelining provides no benefit
-if torch.version.hip:
+if torch.version.hip and torch.cuda.is_available():
     platform_configs = build_rocm_gemm_configs(platform_configs)
 
 
@@ -420,7 +419,7 @@ def conv_layout(
         stride = ir.convert_shape_to_inductor(output.stride())  # type: ignore[assignment]
 
     return ir.FixedLayout(
-        x.get_device(),
+        x.get_device_or_error(),
         x.get_dtype(),
         sizes,
         stride,
@@ -460,12 +459,12 @@ def convert_1x1_conv_to_mm(x, weight, bias):
 def convolution(
     x: TensorBox,
     weight: TensorBox,
-    bias: TensorBox,
-    stride: List[int],
-    padding: List[int],
-    dilation: List[int],
+    bias: Optional[TensorBox],
+    stride: Sequence[int],
+    padding: Sequence[int],
+    dilation: Sequence[int],
     transposed: bool,
-    output_padding: List[int],
+    output_padding: Sequence[int],
     groups: int,
 ):
     stride = tuple(stride)

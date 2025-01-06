@@ -9,13 +9,13 @@
 
 import functools
 import logging
-import time
 from typing import Any, Callable, Dict, List, Tuple, TypeVar
 from typing_extensions import ParamSpec
 
 import torch
 import torch.distributed as dist
 from torch.distributed.logging_handlers import _log_handlers
+from torch.monitor import _WaitCounter
 
 
 __all__: List[str] = []
@@ -91,14 +91,8 @@ def _exception_logger(func: Callable[_P, _T]) -> Callable[_P, _T]:
 def _time_logger(func: Callable[_P, _T]) -> Callable[_P, _T]:
     @functools.wraps(func)
     def wrapper(*args: _P.args, **kwargs: _P.kwargs) -> _T:
-        t1 = time.time_ns()
-        func_return = func(*args, **kwargs)
-        time_spent = time.time_ns() - t1
-
-        msg_dict = _get_msg_dict(func.__name__, *args, **kwargs)
-        msg_dict["time_spent"] = f"{time_spent}ns"
-        _c10d_logger.debug(msg_dict)
-
+        with _WaitCounter(f"pytorch.wait_counter.c10d.{func.__name__}").guard():
+            func_return = func(*args, **kwargs)
         return func_return
 
     return wrapper
