@@ -294,7 +294,7 @@ class ViewInverseSignature:
     g: NativeFunctionsViewGroup
 
     def name(self) -> str:
-        return functionalization.reverse_opname(self.g.view, include_namespace=False)
+        return functionalization.reverse_name(self.g.view, include_namespace=False)
 
     def decl(self) -> str:
         return_type = functionalization.returns_type(self.g.view.func)

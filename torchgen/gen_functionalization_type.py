@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
-from typing import Callable, TYPE_CHECKING
+from typing import Callable, Optional, TYPE_CHECKING
 
 from torchgen.api import cpp, dispatcher, functionalization
 from torchgen.api.translate import translate
@@ -755,8 +755,8 @@ class ViewMetaSpecialization:
         return functionalization.is_multi_output(self.f.func)
 
     @property
-    def is_as_strided(func: FunctionSchema) -> bool:
-        return str(func.name) == "as_strided"
+    def is_as_strided(self) -> bool:
+        return str(self.f.func.name) == "as_strided"
 
     @property
     def out_index(self) -> str:
@@ -765,8 +765,8 @@ class ViewMetaSpecialization:
         return "0"
 
     @property
-    def name(self) -> str:
-        return functionalization.name(self.f.func)
+    def classname(self) -> str:
+        return functionalization.classname(self.f.func)
 
     def decl(self) -> list[str]:
         base_ctor_arguments = functionalization.base_ctor_arguments(self.f.func)
@@ -841,14 +841,14 @@ class ViewMetaSpecialization:
 
         return [
             f"""
-struct TORCH_API {self.name} : public ViewMeta {{
-  FUNCTIONALIZATION_VIEWMETA_NAME({self.name});
+struct TORCH_API {self.classname} : public ViewMeta {{
+  FUNCTIONALIZATION_VIEWMETA_NAME({self.classname});
   FUNCTIONALIZATION_VIEWMETA_SERIALIZABLE_TUPLE(\n{serializable_tuple_args});
 
-  {self.name}(const SerializableTuple& tpl)
-      : {self.name}({destructure_tuple_args}) {{}}
+  {self.classname}(const SerializableTuple& tpl)
+      : {self.classname}({destructure_tuple_args}) {{}}
 
-  {self.name}({ctor_parameters})
+  {self.classname}({ctor_parameters})
       : at::functionalization::ViewMeta({base_ctor_bindings}),
 {ctor_assignments} {{}}
 
@@ -867,7 +867,7 @@ struct TORCH_API {self.name} : public ViewMeta {{
 
     # Generate a call to the actual operation.
     def opcall(self, is_reverse: bool, reapply_views: bool) -> str:
-        opname = functionalization.opname(
+        opname = functionalization.name(
             self.g,
             is_reverse=is_reverse,
             include_namespace=True,
@@ -875,6 +875,7 @@ struct TORCH_API {self.name} : public ViewMeta {{
         )
 
         # Expected arguments for the operation.
+        assert self.g.view_copy is not None
         op_arguments = functionalization.op_arguments(self.g.view_copy.func, is_reverse)
 
         # The context is composed by the constructor arguments (which are also
@@ -902,7 +903,7 @@ struct TORCH_API {self.name} : public ViewMeta {{
     def impl(self) -> list[str]:
         functions = [
             f"""
-at::Tensor {self.name}::forward(const at::Tensor& base) {{
+at::Tensor {self.classname}::forward(const at::Tensor& base) {{
   if (reapply_views) {{
     return {self.opcall(is_reverse=False, reapply_views=True)};
   }} else {{
@@ -910,7 +911,7 @@ at::Tensor {self.name}::forward(const at::Tensor& base) {{
   }}
 }}""",
             f"""
-at::Tensor {self.name}::reverse(const at::Tensor& base, const Tensor& mutated_view) {{
+at::Tensor {self.classname}::reverse(const at::Tensor& base, const Tensor& mutated_view) {{
   return {self.opcall(is_reverse=True, reapply_views=True)};
 }}""",
         ]
@@ -919,7 +920,7 @@ at::Tensor {self.name}::reverse(const at::Tensor& base, const Tensor& mutated_vi
         # implementation.
         if self.is_multi_output:
             functions.append(f"""
-std::shared_ptr<at::functionalization::ViewMeta> {self.name}::to_out_index(int64_t out_index) {{
+std::shared_ptr<at::functionalization::ViewMeta> {self.classname}::to_out_index(int64_t out_index) {{
   return {self.new("out_index")};
 }}
 """)
@@ -928,12 +929,12 @@ std::shared_ptr<at::functionalization::ViewMeta> {self.name}::to_out_index(int64
 
     # Create the Python binding for this specialized class.
     def binding(self) -> list[str]:
-        name = functionalization.name(self.f.func, with_namespace=True)
+        name = functionalization.classname(self.f.func, with_namespace=True)
         return [f"  create_binding_with_pickle<{name}>(functionalization);"]
 
     # Generate an instanciation of this specialized class.
     def new(self, out_index: str = "0") -> str:
-        name = functionalization.name(self.f.func, with_namespace=True)
+        name = functionalization.classname(self.f.func, with_namespace=True)
         ctor_arguments = functionalization.base_ctor_arguments(
             self.f.func
         ) + functionalization.extra_ctor_arguments(self.f.func)
@@ -945,6 +946,7 @@ std::shared_ptr<at::functionalization::ViewMeta> {self.name}::to_out_index(int64
         return f"std::make_shared<{name}>({arguments})"
 
     # Run the function `run` for both: `view` and `view_inplace` functions.
+    @staticmethod
     def map(
         g: NativeFunctionsViewGroup, run: Callable[[ViewMetaSpecialization], list[str]]
     ) -> list[str]:
@@ -960,7 +962,7 @@ std::shared_ptr<at::functionalization::ViewMeta> {self.name}::to_out_index(int64
 def gen_functionalization_view_meta_classes_base(
     selector: SelectiveBuilder,
     g: NativeFunctionsViewGroup,
-    run: [[ViewMetaSpecialization], list[str]],
+    run: Callable[[ViewMetaSpecialization], list[str]],
 ) -> list[str]:
     if not selector.include_all_operators:
         return []

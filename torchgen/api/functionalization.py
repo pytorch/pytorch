@@ -92,13 +92,13 @@ inverse_return_mode_binding = Binding(
 
 
 # Name of the `ViewMeta` specialization class created.
-def name(func: FunctionSchema, with_namespace: bool = False) -> str:
+def classname(func: FunctionSchema, with_namespace: bool = False) -> str:
     namespace = "at::functionalization::" if with_namespace else ""
     return f"{namespace}{func.name.unambiguous_name()}_ViewMeta"
 
 
 # Name of the operation called inside the `forward`/`reverse` implementations.
-def opname(
+def name(
     g: NativeFunctionsViewGroup,
     *,
     is_reverse: bool,
@@ -110,7 +110,7 @@ def opname(
         # since we always plumb the runtime "reapply_views" argument into the reverse function.
         assert is_reverse
     if is_reverse:
-        return reverse_opname(g.view, include_namespace)
+        return reverse_name(g.view, include_namespace)
     # in the forward case, we just directly call into the at::_ops API (so we always need the namespace)
     assert include_namespace
     assert g.view_copy is not None
@@ -122,7 +122,7 @@ def opname(
     return f"at::_ops::{api_name}::call"
 
 
-def reverse_opname(f: NativeFunction, include_namespace: bool) -> str:
+def reverse_name(f: NativeFunction, include_namespace: bool) -> str:
     # for the reverse: we plumb the "reapply_views" flag into that function and support
     # both copy and non-copy variants. (We could avoid doing that, but that would require
     # writing out twice as many view inverse functions).
