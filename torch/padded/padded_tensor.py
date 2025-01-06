@@ -772,7 +772,7 @@ class PaddedTensor(torch.Tensor):
         tensor: torch.Tensor,
         multipliers: Optional[Dict[int, int]],
         orig_shape: Optional[torch.Size] = None,
-        view_shape_stack: Optional[torch.Size] = None,
+        view_shape_stack: Optional[list] = None,
     ):
         assert type(multipliers) is dict
 
@@ -807,7 +807,7 @@ class PaddedTensor(torch.Tensor):
         tensor: torch.Tensor,
         multipliers: Optional[Dict[int, int]],
         orig_shape: Optional[torch.Size] = None,
-        view_shape_stack: Optional[torch.Size] = None,
+        view_shape_stack: Optional[list] = None,
     ):
         if multipliers is None:
             multipliers = {}
@@ -879,6 +879,7 @@ class PaddedTensor(torch.Tensor):
         # Modify results
         out = op.modify_results(out)
 
+        # Merge arguments view_shape_stacks
         view_shape_stack = []
         for arg in args:
             if type(arg) is PaddedTensor:

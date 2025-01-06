@@ -222,10 +222,12 @@ class TestAttention(TestCase):
         return (y,)
 
     def test_attention_all(self):
-        x = torch.ones(4, 2, dtype=torch.int32)
-        freqs_cis = torch.randn(2, 1, 2)
-        mask = torch.ones([1, 1, 2, 16])
-        input_pos = torch.ones([2], dtype=torch.int32)
+        SEQLEN = 2
+
+        x = torch.ones(4, SEQLEN, dtype=torch.int32)
+        freqs_cis = torch.randn(2, 1, SEQLEN)
+        mask = torch.ones([1, 1, SEQLEN, 16])
+        input_pos = torch.ones([SEQLEN], dtype=torch.int32)
 
         k_cache, v_cache = self.create_kv_cache()
 
