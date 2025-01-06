@@ -12,6 +12,7 @@ from typing import (
     Literal,
     Optional,
     Sized,
+    Tuple,
     TypeVar,
 )
 
@@ -53,7 +54,7 @@ class ConcaterIterDataPipe(IterDataPipe):
         [0, 1, 2, 0, 1, 2, 3, 4]
     """
 
-    datapipes: tuple[IterDataPipe]
+    datapipes: Tuple[IterDataPipe]
 
     def __init__(self, *datapipes: IterDataPipe):
         if len(datapipes) == 0:
@@ -667,7 +668,7 @@ class MultiplexerIterDataPipe(IterDataPipe):
 
 
 @functional_datapipe("zip")
-class ZipperIterDataPipe(IterDataPipe[tuple[_T_co]]):
+class ZipperIterDataPipe(IterDataPipe[Tuple[_T_co]]):
     r"""
     Aggregates elements into a tuple from each of the input DataPipes (functional name: ``zip``).
 
@@ -684,7 +685,7 @@ class ZipperIterDataPipe(IterDataPipe[tuple[_T_co]]):
         [(0, 10, 20), (1, 11, 21), (2, 12, 22), (3, 13, 23), (4, 14, 24)]
     """
 
-    datapipes: tuple[IterDataPipe]
+    datapipes: Tuple[IterDataPipe]
 
     def __init__(self, *datapipes: IterDataPipe):
         if not all(isinstance(dp, IterDataPipe) for dp in datapipes):
@@ -694,7 +695,7 @@ class ZipperIterDataPipe(IterDataPipe[tuple[_T_co]]):
         super().__init__()
         self.datapipes = datapipes  # type: ignore[assignment]
 
-    def __iter__(self) -> Iterator[tuple[_T_co]]:
+    def __iter__(self) -> Iterator[Tuple[_T_co]]:
         iterators = [iter(datapipe) for datapipe in self.datapipes]
         yield from zip(*iterators)
 
