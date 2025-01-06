@@ -34,6 +34,7 @@ from typing import (
     NamedTuple,
     Optional,
     Set,
+    Tuple,
     TYPE_CHECKING,
     Union,
 )
@@ -1010,7 +1011,7 @@ class FlattenInputOutputSignature(torch.fx.Transformer):
     def __init__(
         self,
         m: torch.fx.GraphModule,
-        flat_args: tuple[Any],
+        flat_args: Tuple[Any],
         matched_input_elements_positions: List[int],
         flat_results: List[Any],
         matched_output_elements_positions: List[int],
@@ -1377,7 +1378,7 @@ def export(
         Dict[torch._ops.OpOverload, Callable[..., Any]]
     ] = None,
     tracing_mode: str = "symbolic",
-    dynamic_shapes: Optional[Union[Dict[str, Any], tuple[Any], List[Any]]] = None,
+    dynamic_shapes: Optional[Union[Dict[str, Any], Tuple[Any], List[Any]]] = None,
     specialize_float: bool = True,
     assume_static_by_default: bool = False,
     same_signature: bool = True,
@@ -1468,7 +1469,7 @@ def export(
         graph = None
         out_guards = None
         graph_captured_input = None
-        graph_captured_result: Optional[tuple[torch.Tensor, ...]] = None
+        graph_captured_result: Optional[Tuple[torch.Tensor, ...]] = None
         fake_mode = None
         result_traced = None
 
