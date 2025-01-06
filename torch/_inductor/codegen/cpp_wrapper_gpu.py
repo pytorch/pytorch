@@ -514,7 +514,8 @@ class CppWrapperGpu(CppWrapperCpu):
             )
 
         if (
-            config.triton.autotune_at_compile_time
+            triton
+            and config.triton.autotune_at_compile_time
             and kernel_name not in self.kernel_autotune_names
         ):
             # Call PythonWrapperCodegen to create the autotune code block
