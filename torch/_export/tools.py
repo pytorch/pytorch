@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import logging
 import warnings
-from typing import Any, Dict, Iterable, Optional, Tuple
+from typing import Any, Dict, Iterable, Optional
 
 import torch
 import torch.export
@@ -17,9 +17,9 @@ __all__ = ["report_exportability"]
 def _generate_inputs_for_submodules(
     model: torch.nn.Module,
     target_submodules: Iterable[str],
-    args: Tuple[Any, ...],
+    args: tuple[Any, ...],
     kwargs: Optional[Dict[str, Any]] = None,
-) -> Dict[str, Tuple[Any, Any]]:
+) -> Dict[str, tuple[Any, Any]]:
     """
     Generate inputs for targeting submdoules in the given model. Note that if two submodules refer to the same obj, this
     function doesn't work.
@@ -60,7 +60,7 @@ def _generate_inputs_for_submodules(
 
 def report_exportability(
     mod: torch.nn.Module,
-    args: Tuple[Any, ...],
+    args: tuple[Any, ...],
     kwargs: Optional[Dict[str, Any]] = None,
     *,
     strict: bool = True,
