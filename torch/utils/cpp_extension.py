@@ -503,6 +503,15 @@ def _check_cuda_version(compiler_name: str, compiler_version: TorchVersion) -> N
             )
 
 
+def _wrap_sycl_host_flags(cflags):
+    host_cxx = get_cxx_compiler()
+    host_cflags = [
+        f'-fsycl-host-compiler={host_cxx}',
+        shlex.quote(f'-fsycl-host-compiler-options={cflags}'),
+    ]
+    return host_cflags
+
+
 class BuildExtension(build_ext):
     """
     A custom :mod:`setuptools` build extension .
@@ -774,17 +783,17 @@ class BuildExtension(build_ext):
                 append_std17_if_no_std_present(sycl_cflags)
                 if not any(flag.startswith('-sycl-std=') for flag in sycl_cflags):
                     sycl_cflags.append('-sycl-std=2020')
-                host_cxx = get_cxx_compiler()
                 host_cflags = extra_cc_cflags + common_cflags + post_cflags
                 append_std17_if_no_std_present(host_cflags)
-                # escaping quoted arguments to pass them thru icpx
+                # escaping quoted arguments to pass them thru DPC++ compiler
                 host_cflags = [item.replace('"', '\\\\"') for item in host_cflags]
                 host_cflags = ' '.join(host_cflags)
-                # note that -fsycl-host-compiler-options will be quoted as needed
-                # with shlex.quote below
-                sycl_cflags += [f'-fsycl-host-compiler={host_cxx}', f'-fsycl-host-compiler-options={host_cflags}']
-                sycl_dlink_post_cflags = SYCL_DLINK_FLAGS
+                # Note the order: shlex.quote sycl_flags first, _wrap_sycl_host_flags
+                # second. Reason is that sycl host flags is quoted space containing
+                # string passed to DPC++ compiler.
                 sycl_cflags = [shlex.quote(f) for f in sycl_cflags]
+                sycl_cflags += _wrap_sycl_host_flags(host_cflags)
+                sycl_dlink_post_cflags = SYCL_DLINK_FLAGS
                 sycl_post_cflags = [shlex.quote(f) for f in sycl_post_cflags]
 
             _write_ninja_file_and_compile_objects(
@@ -2566,14 +2575,11 @@ def _write_ninja_file_to_build_library(path,
         sycl_cflags += extra_sycl_cflags
         if not any(flag.startswith('-sycl-std=') for flag in sycl_cflags):
             sycl_cflags.append('-sycl-std=2020')
-        host_cxx = get_cxx_compiler()
         host_cflags = cflags
-        # escaping quoted arguments to pass them thru icpx
+        # escaping quoted arguments to pass them thru DPC++ compiler
         host_cflags = [item.replace('\\"', '\\\\"') for item in host_cflags]
         host_cflags = ' '.join(host_cflags)
-        # note that -fsycl-host-compiler-options will be quoted as needed
-        # with shlex.quote below
-        sycl_cflags += [f'-fsycl-host-compiler={host_cxx}', shlex.quote(f'-fsycl-host-compiler-options={host_cflags}')]
+        sycl_cflags += _wrap_sycl_host_flags(host_cflags)
         sycl_dlink_post_cflags = SYCL_DLINK_FLAGS
     else:
         sycl_cflags = None
