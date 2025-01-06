@@ -10,7 +10,7 @@ import time
 import types
 import warnings
 from contextlib import contextmanager, nullcontext
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Type, Union
 
 import torch
 import torch._dynamo
@@ -1435,7 +1435,9 @@ def _export_to_aten_ir_make_fx(
 ) -> ATenExportArtifact:
     def _make_fx_helper(mod, args, kwargs, **flags):
         from torch._functorch._aot_autograd.schemas import GraphSignature
-        from torch._functorch._aot_autograd.subclass_utils import get_types_for_subclass
+        from torch._functorch._aot_autograd.subclass_utils import (
+            get_subclass_typing_container,
+        )
 
         kwargs = kwargs or {}
 
@@ -1512,8 +1514,6 @@ def _export_to_aten_ir_make_fx(
                                         (proxy, attr),
                                         {},
                                     )
-                                    # Even though the name says tensor tracking, the impl
-                                    # suggests it tracks everything?
                                     track_tensor_tree(
                                         out, inner_proxy, constant=None, tracer=tracer
                                     )
@@ -1529,9 +1529,13 @@ def _export_to_aten_ir_make_fx(
 
                 # Dictionary that tracks subclass type to original getattr function
                 # and the attributes we can proxy.
-                tensor_type_to_old_getattribute = {}
+                tensor_type_to_old_getattribute: Dict[
+                    Type[torch.Tensor], Tuple[Callable, Set[str]]
+                ] = {}
                 for arg in args:
-                    subclass_types_to_instances = get_types_for_subclass(arg)
+                    subclass_types_to_instances: Dict[
+                        Type[torch.Tensor], List[Type[torch.Tensor]]
+                    ] = get_subclass_typing_container(arg)
                     for subclass_type in subclass_types_to_instances:
                         if subclass_type not in tensor_type_to_old_getattribute:
                             assert len(subclass_types_to_instances[subclass_type]) > 0
@@ -1539,7 +1543,7 @@ def _export_to_aten_ir_make_fx(
                             # Query subclass specific attrs
                             attrs_to_proxy = set(dir(instance)) - set(dir(torch.Tensor))
                             tensor_type_to_old_getattribute[subclass_type] = (
-                                subclass_type.__getattribute__,
+                                subclass_type.__getattribute__,  # type: ignore[attr-defined]
                                 attrs_to_proxy,
                             )
 
@@ -1553,11 +1557,11 @@ def _export_to_aten_ir_make_fx(
                             original_getattr=old_getattr,
                             attrs_to_proxy=attrs_to_proxy,
                         )
-                        k.__getattribute__ = custom  # type: ignore[assignment]
+                        k.__getattribute__ = custom  # type: ignore[assignment, attr-defined]
                     yield
                 finally:
                     for k, (old_getattr, _) in tensor_type_to_old_getattribute.items():
-                        k.__getattribute__ = old_getattr  # type: ignore[method-assign]
+                        k.__getattribute__ = old_getattr  # type: ignore[method-assign, attr-defined]
 
             with ctx, override_getattribute_for_subclasses(flat_args):
                 gm = make_fx(
