@@ -30,6 +30,7 @@ from sympy.printing.precedence import PRECEDENCE
 
 import torch
 import torch._logging
+import torch.utils._pytree as pytree
 from torch._dynamo.device_interface import get_interface_for_device
 from torch._dynamo.utils import identity, preserve_rng_state
 from torch._prims_common import is_integer_dtype
@@ -104,8 +105,6 @@ from .triton_utils import (
 
 if TYPE_CHECKING:
     from types import ModuleType
-
-    from torch._inductor.dtype_propagation import DtypePropagationOpsHandler
 
     from ..ir import IRNode
 
@@ -753,12 +752,6 @@ class TritonCSEVariable(CSEVariable):
                         break
 
 
-def get_dtype_handler() -> DtypePropagationOpsHandler:
-    from torch._inductor.dtype_propagation import DtypePropagationOpsHandler
-
-    return DtypePropagationOpsHandler()
-
-
 def maybe_upcast_float32(convert_output: bool = True):
     """
     Codegen helper to upcast arguments to float32, depending on the config and dtype.
@@ -785,17 +778,27 @@ def maybe_upcast_float32(convert_output: bool = True):
             upcast_args = [maybe_upcast_arg(arg) for arg in args]
             upcast_kwargs = {key: maybe_upcast_arg(val) for key, val in kwargs.items()}
 
+            # Infer the output dtype from the inputs.
+            # This promotes to the largest input type.
+            all_args = args + tuple(kwargs.values())
+            input_dtypes = [
+                var.dtype
+                for var in all_args
+                if isinstance(var, CSEVariable) and var.dtype is not None
+            ]
+            result_dtype = (
+                functools.reduce(torch.promote_types, input_dtypes)
+                if len(input_dtypes) > 0
+                else None
+            )
+
             # Call the decorated function, optionally downcasting the result.
             result = func(*upcast_args, **upcast_kwargs)
-            any_needs_upcast = convert_output and any(
-                needs_upcast(var) for var in itertools.chain(args, kwargs.values())
+            needs_downcast = (
+                convert_output
+                and any(needs_upcast(var) for var in all_args)
+                and result_dtype not in (torch.float32, None)
             )
-            result_dtype = (
-                None
-                if not any_needs_upcast
-                else getattr(get_dtype_handler(), func.__name__)(*args, **kwargs)
-            )
-            needs_downcast = result_dtype not in (torch.float32, None)
             downcast_string = (
                 f".to({triton_type(result_dtype)})"
                 if needs_downcast and result_dtype is not None
@@ -917,25 +920,6 @@ class TritonOverrides(OpOverrides):
     @maybe_upcast_float32()
     def abs(x):
         return f"tl_math.abs({x})"
-
-    # TODO - register these ops as having divergent dtype
-    # output if doing graph pass to remove consecutive casts
-
-    @staticmethod
-    def truediv(x, y):
-        out = f"({x} / {y})"
-        out_dtype = get_dtype_handler().truediv(x, y)
-        if out_dtype in (torch.float16, torch.float32):
-            out = f"{out}.to({triton_type(out_dtype)})"
-        return out
-
-    @staticmethod
-    def mod(x, y):
-        out = f"({x} % {y})"
-        out_dtype = get_dtype_handler().mod(x, y)
-        if out_dtype in (torch.float16, torch.float32):
-            out = f"{out}.to({triton_type(out_dtype)})"
-        return out
 
     @staticmethod
     @maybe_upcast_float32()
@@ -2301,6 +2285,27 @@ class TritonKernel(SIMDKernel):
         reduction_type: ReductionType,
         value: Union[CSEVariable, Tuple[CSEVariable, ...]],
     ) -> Union[CSEVariable, Tuple[CSEVariable, ...]]:
+        def maybe_upcast(value: CSEVariable) -> CSEVariable:
+            # Math reductions in FP16/BF16 are less accurate because the Triton compiler does not
+            # automatically promote to FP32 for accumulation. Additionally, max/min reductions
+            # do not support FP16/BF16. We manually promote to FP32 here.
+            return (
+                ops.to_dtype(value, torch.float32)
+                if value.dtype
+                in [
+                    torch.float16,
+                    torch.bfloat16,
+                ]
+                else value
+            )
+
+        original_dtypes = [val.dtype for val in pytree.tree_leaves(value)]
+        value = pytree.tree_map(maybe_upcast, value)
+        if any(x in [torch.float16, torch.bfloat16] for x in original_dtypes):
+            # Only promote FB16/BF16; do not promote other integer/boolean dtypes
+            src_dtype = torch.promote_types(src_dtype, torch.float32)
+            dtype = torch.promote_types(dtype, torch.float32)
+
         assert self.inside_reduction
         masks = OrderedSet(f"{tree.prefix}mask" for tree in self.range_trees)
         self.filter_masks(masks)
@@ -2562,9 +2567,29 @@ class TritonKernel(SIMDKernel):
         if isinstance(result_var, tuple):
             assert all(isinstance(x, TritonCSEVariable) for x in result_var)
             self.outside_loop_vars.update(result_var)
+
+            # Match output dtype with input dtype
+            if reduction_type == "welford_reduce":
+                assert len(original_dtypes) == 1
+                original_dtypes = len(result_var) * original_dtypes
+
+            assert len(result_var) == len(original_dtypes)
+            for var, orig_dtype in zip(result_var, original_dtypes):
+                assert orig_dtype is not None
+                if var.dtype != orig_dtype:
+                    self.post_loop_combine.writeline(
+                        f"{var} = {var}.to({triton_compute_type(orig_dtype)})"
+                    )
         else:
             assert isinstance(result_var, TritonCSEVariable)
             self.outside_loop_vars.add(result_var)
+
+            # Match output dtype with input dtype
+            if result_var.dtype != original_dtypes[0]:
+                assert original_dtypes[0] is not None
+                self.post_loop_combine.writeline(
+                    f"{result_var} = {result_var}.to({triton_compute_type(original_dtypes[0])})"
+                )
 
         return result_var
 
