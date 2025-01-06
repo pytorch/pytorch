@@ -4,7 +4,7 @@ import copy
 import functools
 import itertools
 import unittest
-from typing import Callable, List, Optional, Union
+from typing import Callable, List, Optional, Tuple, Union
 
 import torch
 import torch.distributed as dist
@@ -58,7 +58,7 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
 c10d_ops = torch.ops.c10d
 
 # For recording FSDP events like unshard or post-backward
-EventType = tuple[str, str, TrainingState]
+EventType = Tuple[str, str, TrainingState]
 
 
 class TestFullyShardCollectiveOps(FSDPTestMultiThread):
