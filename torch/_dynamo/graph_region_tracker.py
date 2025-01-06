@@ -13,6 +13,7 @@ from typing import (
     List,
     Optional,
     Set,
+    Tuple,
     TYPE_CHECKING,
     TypeVar,
 )
@@ -33,7 +34,7 @@ if TYPE_CHECKING:
 Node = torch.fx.Node
 Region = List[Node]
 IdenticalNodes = List[Node]
-GlobalStateKey = tuple[bool, bool, int, bool, bool, torch.dtype, bool, bool, bool, bool]
+GlobalStateKey = Tuple[bool, bool, int, bool, bool, torch.dtype, bool, bool, bool, bool]
 
 log = logging.getLogger(__name__)
 graph_expansion_log = torch._logging.getArtifactLogger(
@@ -47,7 +48,7 @@ def debug_log(msg: str, *args) -> None:  # type: ignore[no-untyped-def]
 
 def _extract_tensor_metadata_for_node_hash(
     x: torch.Tensor,
-) -> tuple[Callable[[T], T], tuple[Any, ...]]:
+) -> Tuple[Callable[[T], T], Tuple[Any, ...]]:
     from torch._inductor.codecache import _ident, extract_tensor_metadata_for_cache_key
 
     out = []
@@ -103,7 +104,7 @@ def _extract_tensor_arg(arg: Any) -> Any:
 
 def _normalize_args(
     node: Node,
-) -> tuple[tuple[str, ...], tuple[Optional[Any], ...]]:
+) -> Tuple[Tuple[str, ...], Tuple[Optional[Any], ...]]:
     flat_args, _ = tree_flatten(node.args)
     sorted_kwargs = sorted(node.kwargs.items(), key=lambda x: x[0])
     sorted_keys = tuple(sorted(node.kwargs.keys()))

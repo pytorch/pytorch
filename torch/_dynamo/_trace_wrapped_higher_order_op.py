@@ -1,4 +1,4 @@
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import torch
 import torch.utils._pytree as pytree
@@ -100,7 +100,7 @@ class ModIndex(torch.autograd.Function):
         return torch.ops.aten.index(x, indices)
 
     @staticmethod
-    def setup_context(ctx: Any, inputs: tuple[Any, ...], output: Any) -> None:
+    def setup_context(ctx: Any, inputs: Tuple[Any, ...], output: Any) -> None:
         x, indices = inputs
         ctx.save_for_backward(*indices)
         ctx.input_shape = x.shape
@@ -131,8 +131,8 @@ class TransformGetItemToIndex(TorchFunctionMode):
     def __torch_function__(
         self,
         func: OpOverload,
-        types: tuple[torch._C._TensorMeta, ...],
-        args: tuple[object, ...] = (),
+        types: Tuple[torch._C._TensorMeta, ...],
+        args: Tuple[object, ...] = (),
         kwargs: Optional[Dict[str, object]] = None,
     ) -> object:
         if func == torch.Tensor.__getitem__:
@@ -161,8 +161,8 @@ _trace_wrapped_op = TraceWrapped()
 
 def _assert_meta(
     grad: torch.Tensor,
-    size: tuple[int, ...],
-    stride: tuple[int, ...],
+    size: Tuple[int, ...],
+    stride: Tuple[int, ...],
     dtype: torch.dtype,
 ) -> torch.Tensor:
     assert grad.size() == size, "size mismatch"
