@@ -488,7 +488,7 @@ def grad(
                 accumulate_grad=False,
             )
 
-        result = torch.vmap(vjp, 0, 0, allow_none_pass_through=True)(grad_outputs_)
+        result = torch.vmap(vjp, 0, 0)(grad_outputs_)
     else:
         result = _engine_run_backward(
             outputs,
