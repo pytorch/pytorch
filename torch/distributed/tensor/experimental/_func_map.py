@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 # Copyright (c) Meta Platforms, Inc. and affiliates
-from typing import Callable, Optional, Sequence, Union
+from typing import Callable, Optional, Sequence, Tuple, Union
 
 import torch
 from torch.distributed._functional_collectives import AsyncCollectiveTensor
@@ -17,8 +17,8 @@ except ImportError:
 __all__ = ["local_map"]
 
 PlacementType = Optional[Sequence[Placement]]
-InputPlacements = Optional[tuple[PlacementType, ...]]
-OutputPlacements = Union[PlacementType, tuple[PlacementType, ...]]
+InputPlacements = Optional[Tuple[PlacementType, ...]]
+OutputPlacements = Union[PlacementType, Tuple[PlacementType, ...]]
 
 
 def local_map(
