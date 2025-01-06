@@ -280,8 +280,9 @@ static PyObject* THPStream_enter(PyObject* _self, PyObject* unused) {
   at::accelerator::setCurrentStream(c10::Stream::unpack3(
       self->stream_id, stream_device_idx, stream_device_type));
   // Save the current device index and previous stream to the context.
-  auto ctx_device_index = THPUtils_packDeviceIndex(cur_device_idx);
-  auto ctx_stream = THPStream_Wrap(cur_stream);
+  auto ctx_device_index =
+      THPObjectPtr(THPUtils_packDeviceIndex(cur_device_idx));
+  auto ctx_stream = THPObjectPtr(THPStream_Wrap(cur_stream));
   TORCH_CHECK(!(self->context), "Stream's context should not be initialized.");
   auto dict = THPObjectPtr(PyDict_New());
   if (!dict) {
@@ -289,10 +290,11 @@ static PyObject* THPStream_enter(PyObject* _self, PyObject* unused) {
   }
   self->context = dict.release();
   if (PyDict_SetItemString(
-          self->context, "_ctx_device_index", ctx_device_index) < 0) {
+          self->context, "_ctx_device_index", ctx_device_index.get()) < 0) {
     throw python_error();
   }
-  if (PyDict_SetItemString(self->context, "_ctx_stream", ctx_stream) < 0) {
+  if (PyDict_SetItemString(self->context, "_ctx_stream", ctx_stream.get()) <
+      0) {
     throw python_error();
   }
   Py_INCREF(_self);
@@ -318,8 +320,9 @@ static PyObject* THPStream_exit(PyObject* _self, PyObject* unused) {
   if (!ctx_device_index) {
     throw python_error();
   }
-  auto prev_stream = (THPStream*)ctx_stream.get();
-  auto prev_device_index = THPUtils_unpackDeviceIndex(ctx_device_index.get());
+  auto prev_stream = (THPStream*)ctx_stream.release();
+  auto prev_device_index =
+      THPUtils_unpackDeviceIndex(ctx_device_index.release());
   at::accelerator::setCurrentStream(c10::Stream::unpack3(
       prev_stream->stream_id,
       static_cast<c10::DeviceIndex>(prev_stream->device_index),
