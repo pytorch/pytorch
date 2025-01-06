@@ -265,101 +265,96 @@ kernel void applySYRK(
     uint tid [[thread_position_in_threadgroup]],
     uint tgid [[threadgroup_position_in_grid]],
     uint tpg [[threads_per_threadgroup]]) {
-  // 1) Decode which batch and which (j,h) pair from tgid
-  uint b = tgid / sizes.nPairs; // batch index
-  uint pairID = tgid % sizes.nPairs; // enumerates (j,h) within a single “round”
-  if (b >= sizes.batch_size) {
-    return;
-  }
-
-  // 2) Map pairID -> (jRel, hRel)
-  //    We want jRel in [0..nBlocksJ-1], hRel in [0..jRel].
-  //    The total number of pairs is nPairs = nBlocksJ*(nBlocksJ+1)/2.
-  //    We can decode pairID by incrementing jRel until
-  //    jRel*(jRel+1)/2 <= pairID < (jRel+1)*(jRel+2)/2.
-  //    Then hRel = pairID - (jRel*(jRel+1)/2).
-
-  uint jRel = 0;
-  uint accum = 0; // jRel*(jRel+1)/2
-  while (true) {
-    uint nextAccum = (jRel + 1) * (jRel + 2) / 2;
-    if (nextAccum > pairID) {
-      break;
+    
+    // rarly exit check for batch size
+    uint b = tgid / sizes.nPairs;
+    if (b >= sizes.batch_size) return;
+    
+    uint pairID = tgid % sizes.nPairs;
+    
+    // optimized pair decode using quadratic formula
+    uint jRel = (-1 + sqrt(1 + 8 * float(pairID))) / 2;
+    uint accum = jRel * (jRel + 1) / 2;
+    uint hRel = pairID - accum;
+    
+    uint j = sizes.startJ + jRel;
+    uint h = sizes.startJ + hRel;
+    
+    const uint N = sizes.N;
+    const uint NB = sizes.NB;
+    const uint k = sizes.k;
+    const uint actSize_k = sizes.activeNB_k;
+    const uint row0 = j * NB;
+    const uint col0 = h * NB;
+    const uint actSize_j = min((uint)(N - row0), NB);
+    const uint actSize_h = min((uint)(N - col0), NB);
+    
+    // early exit for invalid ones
+    if (actSize_j == 0 || actSize_h == 0 || actSize_k == 0) return;
+    
+    threadgroup float left[32 * 32];
+    threadgroup float right[32 * 32];
+    threadgroup float tile[32 * 32];
+    
+    const uint batch_offset = b * sizes.batch_stride;
+    const uint threads = min(tpg, actSize_j * actSize_k);
+    
+    for (uint i = tid; i < actSize_j * actSize_k; i += threads) {
+        const uint r = i / actSize_k;
+        const uint c = i % actSize_k;
+        const uint global_idx = batch_offset + (j * NB + r) * N + (k * NB + c);
+        left[r * actSize_k + c] = A[global_idx];
     }
-    jRel++;
-    accum = nextAccum;
-  }
-  uint hRel = pairID - accum;
-
-  // 3) Actual j, h in global block coordinates
-  uint j = sizes.startJ + jRel;
-  uint h = sizes.startJ + hRel;
-
-  // 4) Compute activeNB_j, activeNB_h, and confirm we skip any invalid
-  //    (Though typically none should be invalid if CPU setup is correct)
-  const uint N = sizes.N;
-  const uint NB = sizes.NB;
-  const uint k = sizes.k;
-  const uint actSize_k = sizes.activeNB_k;
-
-  uint row0 = j * NB;
-  uint col0 = h * NB;
-  uint actSize_j = min((uint)(N - row0), NB);
-  uint actSize_h = min((uint)(N - col0), NB);
-  if (actSize_j == 0 || actSize_h == 0 || actSize_k == 0) {
-    return;
-  }
-
-  // 5) Local (threadgroup) storage
-  threadgroup float left[32 * 32];
-  threadgroup float right[32 * 32];
-  threadgroup float tile[32 * 32];
-
-  uint batch_offset = b * sizes.batch_stride;
-
-  // Load "left" tile
-  for (uint i = tid; i < actSize_j * actSize_k; i += tpg) {
-    uint r = i / actSize_k;
-    uint c = i % actSize_k;
-    left[i] = A[batch_offset + (j * NB + r) * N + (k * NB + c)];
-  }
-  // Load "right" tile
-  for (uint i = tid; i < actSize_h * actSize_k; i += tpg) {
-    uint r = i / actSize_k;
-    uint c = i % actSize_k;
-    right[i] = A[batch_offset + (h * NB + r) * N + (k * NB + c)];
-  }
-  // Load "tile" we will update
-  for (uint i = tid; i < actSize_j * actSize_h; i += tpg) {
-    uint r = i / actSize_h;
-    uint c = i % actSize_h;
-    tile[i] = A[batch_offset + (row0 + r) * N + (col0 + c)];
-  }
-  threadgroup_barrier(mem_flags::mem_threadgroup);
-
-  // 6) Perform the SYRK update
-  for (uint idx = tid; idx < actSize_j * actSize_h; idx += tpg) {
-    uint r = idx / actSize_h;
-    uint c = idx % actSize_h;
-
-    // If j == h, only process lower-tri portion => r >= c
-    if ((j == h) && (r < c)) {
-      continue;
+    
+    for (uint i = tid; i < actSize_h * actSize_k; i += threads) {
+        const uint r = i / actSize_k;
+        const uint c = i % actSize_k;
+        const uint global_idx = batch_offset + (h * NB + r) * N + (k * NB + c);
+        right[r * actSize_k + c] = A[global_idx];
     }
-    float sumVal = tile[idx];
-    for (uint p = 0; p < actSize_k; p++) {
-      sumVal -= left[r * actSize_k + p] * right[c * actSize_k + p];
+    
+    for (uint i = tid; i < actSize_j * actSize_h; i += threads) {
+        const uint r = i / actSize_h;
+        const uint c = i % actSize_h;
+        const uint global_idx = batch_offset + (row0 + r) * N + (col0 + c);
+        tile[r * actSize_h + c] = A[global_idx];
     }
-    tile[idx] = sumVal;
-  }
-  threadgroup_barrier(mem_flags::mem_threadgroup);
-
-  // 7) Store the result
-  for (uint i = tid; i < actSize_j * actSize_h; i += tpg) {
-    uint r = i / actSize_h;
-    uint c = i % actSize_h;
-    A[batch_offset + (row0 + r) * N + (col0 + c)] = tile[i];
-  }
+    
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+    
+    for (uint idx = tid; idx < actSize_j * actSize_h; idx += threads) {
+        const uint r = idx / actSize_h;
+        const uint c = idx % actSize_h;
+        
+        if ((j == h) && (r < c)) continue;
+        
+        const uint tile_idx = r * actSize_h + c;
+        float sum = tile[tile_idx];
+        
+        const uint left_row = r * actSize_k;
+        const uint right_row = c * actSize_k;
+        
+        uint p = 0;
+        for (; p + 4 <= actSize_k; p += 4) {
+            sum -= left[left_row + p] * right[right_row + p]
+                 + left[left_row + p + 1] * right[right_row + p + 1]
+                 + left[left_row + p + 2] * right[right_row + p + 2]
+                 + left[left_row + p + 3] * right[right_row + p + 3];
+        }
+        for (; p < actSize_k; p++) {
+            sum -= left[left_row + p] * right[right_row + p];
+        }
+        
+        tile[tile_idx] = sum;
+    }
+    
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+    for (uint i = tid; i < actSize_j * actSize_h; i += threads) {
+        const uint r = i / actSize_h;
+        const uint c = i % actSize_h;
+        const uint global_idx = batch_offset + (row0 + r) * N + (col0 + c);
+        A[global_idx] = tile[r * actSize_h + c];
+    }
 }
 
 #define INSTANTIATE_NAIVE_MM(DTYPE)                          \
