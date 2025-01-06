@@ -109,7 +109,6 @@ jobs:
           path: "pytorch"
           submodules: recursive
       - name: Build
-        if: steps.filter.outputs.is-test-matrix-empty == 'False' || inputs.test-matrix == ''
         id: build
         shell: bash
         env:
