@@ -52,9 +52,9 @@ import torch
 import torch.distributed as dist
 from torch import SymInt, Tensor
 from torch._dynamo.utils import (
+    CompileEventLogger,
     counters,
     dynamo_timed,
-    get_chromium_event_logger,
     get_metrics_context,
 )
 from torch._inductor import config, exc, metrics
@@ -63,34 +63,6 @@ from torch._inductor.codegen.rocm.compile_command import (
     rocm_compile_command,
     rocm_compiler,
 )
-from torch._inductor.custom_graph_pass import CustomGraphPass, CustomGraphPassType
-from torch._inductor.output_code import has_frozen_params
-from torch._utils_internal import log_cache_bypass
-from torch.compiler import config as cconfig
-from torch.utils._ordered_set import OrderedSet
-
-from .remote_cache import create_cache
-from .runtime import autotune_cache
-from .runtime.autotune_cache import AutotuneCacheBundler
-from .triton_bundler import TritonBundler
-
-
-T = TypeVar("T")
-
-
-if TYPE_CHECKING:
-    from collections.abc import KeysView
-
-    from .compile_fx import _CompileFxKwargs, CompiledFxGraph
-    from .output_code import CompiledFxGraphConstants, OutputCode
-    from .remote_cache import JsonDataTy, RemoteCache
-    from .utils import InputType
-
-
-"""
-codecache.py, cpp_builder.py and cpu_vec_isa.py import rule:
-https://github.com/pytorch/pytorch/issues/124245#issuecomment-2197778902
-"""
 from torch._inductor.cpp_builder import (
     _set_gpu_runtime_env,
     _transform_cuda_paths,
@@ -102,6 +74,8 @@ from torch._inductor.cpp_builder import (
     normalize_path_separator,
 )
 from torch._inductor.cpu_vec_isa import pick_vec_isa
+from torch._inductor.custom_graph_pass import CustomGraphPass, CustomGraphPassType
+from torch._inductor.output_code import has_frozen_params
 from torch._inductor.runtime.compile_tasks import (
     _module_to_triton_kernel,
     _reload_python_module,
@@ -120,22 +94,16 @@ from torch._subclasses.fake_tensor import (
     FakeTensor,
     TensorMetadata,
 )
+from torch._utils_internal import log_cache_bypass
+from torch.compiler import config as cconfig
 from torch.fx.experimental.symbolic_shapes import has_hint, hint_int, ShapeEnv
+from torch.utils._ordered_set import OrderedSet
 
+from .remote_cache import create_cache
+from .runtime import autotune_cache
+from .runtime.autotune_cache import AutotuneCacheBundler
+from .triton_bundler import TritonBundler
 
-if TYPE_CHECKING:
-    from concurrent.futures import Future
-
-    from torch._inductor.graph import GraphLowering
-    from torch._inductor.ir import ChoiceCaller
-    from torch._inductor.runtime.hints import HalideInputSpec, HalideMeta
-
-
-_HERE = os.path.abspath(__file__)
-_TORCH_PATH = os.path.dirname(os.path.dirname(_HERE))
-_LINKER_SCRIPT = os.path.join(_TORCH_PATH, "_inductor/script.ld")
-
-_IS_WINDOWS = sys.platform == "win32"
 
 if config.is_fbcode():
     from triton.fb import build_paths
@@ -162,13 +130,29 @@ else:
         return False
 
 
-output_code_log = torch._logging.getArtifactLogger(__name__, "output_code")
+if TYPE_CHECKING:
+    from collections.abc import KeysView
+    from concurrent.futures import Future
 
+    from torch._inductor.graph import GraphLowering
+    from torch._inductor.ir import ChoiceCaller
+    from torch._inductor.runtime.hints import HalideInputSpec, HalideMeta
+
+    from .compile_fx import _CompileFxKwargs, CompiledFxGraph
+    from .output_code import CompiledFxGraphConstants, OutputCode
+    from .remote_cache import JsonDataTy, RemoteCache
+    from .utils import InputType
+
+    T = TypeVar("T")
+
+
+_HERE = os.path.abspath(__file__)
+_TORCH_PATH = os.path.dirname(os.path.dirname(_HERE))
+_LINKER_SCRIPT = os.path.join(_TORCH_PATH, "_inductor/script.ld")
+_IS_WINDOWS = sys.platform == "win32"
 LOCK_TIMEOUT = 600
 
-_IS_WINDOWS = sys.platform == "win32"
-
-
+output_code_log = torch._logging.getArtifactLogger(__name__, "output_code")
 log = logging.getLogger(__name__)
 
 
@@ -1070,12 +1054,10 @@ class FxGraphCache:
             triton_bundler_meta = TritonBundler.read_and_emit(bundle)
             if (meta := triton_bundler_meta) is not None:
                 cache_info["triton_bundler_meta"] = str(meta)
-                logger = get_chromium_event_logger()
-                if "inductor_compile" in logger.get_stack():
-                    # TODO: Clean up autograd cache integration
-                    logger.add_event_data(
-                        "inductor_compile", cached_kernel_names=meta.cached_kernel_names
-                    )
+                # TODO: Clean up autograd cache integration
+                CompileEventLogger.try_add_pt2_compile(
+                    "inductor_compile", cached_kernel_names=meta.cached_kernel_names
+                )
                 if len(meta.cached_kernel_names) > 0:
                     get_metrics_context().increment("num_triton_bundles", 1)
 
@@ -1823,7 +1805,7 @@ class AotCodeCompiler:
 @clear_on_fresh_inductor_cache
 @functools.lru_cache
 def cpp_prefix_path() -> str:
-    path = Path(__file__).absolute().parent / "codegen/cpp_prefix.h"
+    path = Path(__file__).parent / "codegen/cpp_prefix.h"
     with path.open() as f:
         content = f.read()
         _, filename = write(
@@ -2577,7 +2559,7 @@ class HalideCodeCache(CppPythonBindingsCodeCache):
         donefile = str(dirpath / "done")
         lockfile = str(dirpath / "lock")
         need_compile = not os.path.exists(donefile)
-        jobs = []
+        jobs: List[Any] = []
         if need_compile:
             write_atomic(genfile, source_code)
             cmd = [
@@ -2727,7 +2709,7 @@ def _worker_task_halide(lockfile: str, jobs: List[partial[Any]]) -> None:
         raise
 
 
-def touch(filename: str):  # type: ignore[no-untyped-def]
+def touch(filename: str) -> None:
     open(filename, "a").close()
 
 
