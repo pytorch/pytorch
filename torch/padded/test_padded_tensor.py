@@ -208,20 +208,20 @@ class TestAttention(TestCase):
         output_shapes_p = [torch.Size([4, 2, 10])]
         self.run_unpadded_padded(self.f_7, inputs, inputs_p, output_shapes_p)
 
-    def test_all(self):
-        def f(x, freqs_cis, mask, input_pos, k_cache, v_cache):
-            bsz, seqlen = x.shape
+    def f_attention(self, x, freqs_cis, mask, input_pos, k_cache, v_cache):
+        bsz, seqlen = x.shape
 
-            q, k, v = self.f_1(x)
-            q, k, v = self.f_2(q, k, v, bsz, seqlen)
-            q, k, v = self.f_3(q, k, v, freqs_cis)
-            k, v = self.f_4(k, v, input_pos, k_cache, v_cache)
-            (y,) = self.f_5(q, k, v, mask)
-            (y,) = self.f_6(y, bsz, seqlen)
-            (y,) = self.f_7(y)
+        q, k, v = self.f_1(x)
+        q, k, v = self.f_2(q, k, v, bsz, seqlen)
+        q, k, v = self.f_3(q, k, v, freqs_cis)
+        k, v = self.f_4(k, v, input_pos, k_cache, v_cache)
+        (y,) = self.f_5(q, k, v, mask)
+        (y,) = self.f_6(y, bsz, seqlen)
+        (y,) = self.f_7(y)
 
-            return (y,)
+        return (y,)
 
+    def test_attention_all(self):
         x = torch.ones(4, 2, dtype=torch.int32)
         freqs_cis = torch.randn(2, 1, 2)
         mask = torch.ones([1, 1, 2, 16])
@@ -241,6 +241,9 @@ class TestAttention(TestCase):
             PaddedTensor(k_cache, {0: 1, 1: 1, 2: N}, None),
             PaddedTensor(v_cache, {0: 1, 1: 1, 2: N}, None),
         ]
+
+        f = self.f_attention
+        # f = torch.compile(self.f_attention)
 
         self.run_unpadded_padded(f, inputs, inputs_p, None)
 

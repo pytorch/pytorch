@@ -289,7 +289,7 @@ class ExpandOp(SlicingOp):
     #    return args, kwargs, (pa, shape), padded_kwargs
 
 
-class ElementwiseUnaryOp(SlicingOp):
+class ElementwiseUnaryOp(NonSlicingOp):
     def __init__(self) -> None:
         super().__init__()
 
@@ -404,24 +404,24 @@ class ScaledDotProductAttentionOp(SlicingOp):
         attn_shape = input_shape[:-1]
         return [input_shape, attn_shape]
 
-    def modify_args(self, args, kwargs):
-        def fn(padded_tensor):
-            tensor = slice_nd(
-                padded_tensor.tensor,
-                [0] * len(padded_tensor.orig_shape),
-                padded_tensor.orig_shape,
-            )
+    # def modify_args(self, args, kwargs):
+    #    def fn(padded_tensor):
+    #        tensor = slice_nd(
+    #            padded_tensor.tensor,
+    #            [0] * len(padded_tensor.orig_shape),
+    #            padded_tensor.orig_shape,
+    #        )
 
-            return tensor
+    #        return tensor
 
-        if kwargs is None:
-            kwargs = {}
-        tensor_args, tensor_kwargs = pytree.tree_map_only(
-            PaddedTensor, fn, (args, kwargs)
-        )
-        tensor_args = list(tensor_args)
+    #    if kwargs is None:
+    #        kwargs = {}
+    #    tensor_args, tensor_kwargs = pytree.tree_map_only(
+    #        PaddedTensor, fn, (args, kwargs)
+    #    )
+    #    tensor_args = list(tensor_args)
 
-        return args, kwargs, tensor_args, tensor_kwargs
+    #    return args, kwargs, tensor_args, tensor_kwargs
 
 
 class IndexOp(SlicingOp):
@@ -505,20 +505,20 @@ class SplitWithSizesOp(SlicingOp):
             for i in range(len(indices_or_sections))
         ]
 
-    def modify_args(self, args, kwargs):
-        _, _, dim = args
+    # def modify_args(self, args, kwargs):
+    #    _, _, dim = args
 
-        if dim < 0:
-            dim += len(args[0].orig_shape)
+    #    if dim < 0:
+    #        dim += len(args[0].orig_shape)
 
-        tensor_args, tensor_kwargs = padded_to_tensor(args, kwargs)
+    #    tensor_args, tensor_kwargs = padded_to_tensor(args, kwargs)
 
-        # Slice the input tensor to the correct shape
-        tensor_args[0] = torch.ops.aten.slice(
-            tensor_args[0], dim, 0, sum(tensor_args[1])
-        )
+    #    # Slice the input tensor to the correct shape
+    #    tensor_args[0] = torch.ops.aten.slice(
+    #        tensor_args[0], dim, 0, sum(tensor_args[1])
+    #    )
 
-        return args, kwargs, tensor_args, tensor_kwargs
+    #    return args, kwargs, tensor_args, tensor_kwargs
 
 
 class CatOp(SlicingOp):
@@ -567,23 +567,13 @@ class EmbeddingOp(SlicingOp):
         return [torch.Size(out_shape)]
 
 
-class NoOp(SlicingOp):
+class NoOp(NonSlicingOp):
     def __init__(self) -> None:
         super().__init__()
 
     def infer_shape(self, args, kwargs):
         input_shape = args[0].orig_shape
         return [input_shape]
-
-    def modify_args(self, args, kwargs):
-        if kwargs is None:
-            kwargs = {}
-        tensor_args, tensor_kwargs = pytree.tree_map_only(
-            PaddedTensor, lambda x: x.tensor, (args, kwargs)
-        )
-        tensor_args = list(tensor_args)
-
-        return args, kwargs, tensor_args, tensor_kwargs
 
     def modify_results(self, results):
         return results
