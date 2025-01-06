@@ -57,7 +57,6 @@ if not [%XPU_VERSION%]==[] if [%XPU_VERSION%]==[2025.0] (
     set XPU_EXTRA_VERSION=2025.0.1+1226
     set XPU_EXTRA_INSTALLED=0
     set XPU_EXTRA_UNINSTALL=0
-    set XPU_ENABLE_KINETO=1
 )
 
 :: Check if XPU bundle is target version or already installed
