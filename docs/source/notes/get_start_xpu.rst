@@ -22,7 +22,7 @@ Intel GPUs support (Prototype) is ready in PyTorch* 2.6 for Intel® Data Center 
 Software Prerequisite
 ---------------------
 
-Visit `PyTorch Installation Prerequisites for Intel GPUs <https://www.intel.com/content/www/us/en/developer/articles/tool/pytorch-prerequisites-for-intel-gpu/2-6.html>`_ for Driver Installation.
+Visit `PyTorch Installation Prerequisites for Intel GPUs <https://www.intel.com/content/www/us/en/developer/articles/tool/pytorch-prerequisites-for-intel-gpu/2-6.html#driver-installation>`_ for Driver Installation.
 
 Installation from binaries only need Intel GPU Drivers, while building from source requires Intel GPU Drivers and Intel® Deep Learning Essentials.
 
