@@ -254,6 +254,7 @@ filegroup(
     # target that generates these sources...
 )
 
+# TODO: Enable support for KleidiAI bazel build
 header_template_rule(
     name = "aten_src_ATen_config",
     src = "aten/src/ATen/Config.h.in",
@@ -273,6 +274,7 @@ header_template_rule(
         "@AT_PARALLEL_NATIVE@": "1",
         "@AT_BLAS_F2C@": "0",
         "@AT_BLAS_USE_CBLAS_DOT@": "1",
+        "@AT_KLEIDIAI_ENABLED@": "0",
     },
 )
 
@@ -552,7 +554,7 @@ cc_library(
         ":caffe2_headers",
         ":caffe2_perfkernels_avx",
         ":caffe2_perfkernels_avx2",
-        "//third_party/miniz-2.1.0:miniz",
+        "//third_party/miniz-3.0.2:miniz",
         "@com_google_protobuf//:protobuf",
         "@eigen",
         "@fbgemm//:fbgemm_src_headers",
@@ -1049,7 +1051,10 @@ py_test(
     name = "test_bazel",
     srcs = ["test/_test_bazel.py"],
     main = "test/_test_bazel.py",
-    deps = [":pytorch_py"],
+    deps = [
+        ":pytorch_py",
+        rules.requirement("networkx"),
+    ],
 )
 
 # all tests

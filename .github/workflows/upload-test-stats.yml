@@ -53,7 +53,7 @@ jobs:
           cache: pip
 
       - run: |
-          pip3 install requests==2.32.2 rockset==1.0.3 boto3==1.35.42
+          pip3 install requests==2.32.2 boto3==1.35.42
 
       - name: Upload test artifacts
         id: upload-s3
@@ -72,7 +72,6 @@ jobs:
 
       - name: Upload test stats
         env:
-          ROCKSET_API_KEY: ${{ secrets.ROCKSET_API_KEY }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           WORKFLOW_RUN_ID: ${{ github.event.workflow_run.id }}
           WORKFLOW_RUN_ATTEMPT: ${{ github.event.workflow_run.run_attempt }}
@@ -95,16 +94,15 @@ jobs:
           # Analyze the results from disable tests rerun and upload them to S3
           python3 -m tools.stats.check_disabled_tests --workflow-run-id "${WORKFLOW_RUN_ID}" --workflow-run-attempt "${WORKFLOW_RUN_ATTEMPT}" --repo "${REPO_FULLNAME}"
 
-      - name: Upload gpt-fast benchmark results to Rockset
+      - name: Upload gpt-fast benchmark results to s3
         if: steps.upload-s3.outcome && steps.upload-s3.outcome == 'success' && contains(github.event.workflow_run.name, 'inductor-micro-benchmark')
         env:
-          ROCKSET_API_KEY: ${{ secrets.ROCKSET_API_KEY }}
           WORKFLOW_RUN_ID: ${{ github.event.workflow_run.id }}
           WORKFLOW_RUN_ATTEMPT: ${{ github.event.workflow_run.run_attempt }}
           REPO_FULLNAME: ${{ github.event.workflow_run.repository.full_name }}
           HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
         run: |
-          python3 -m tools.stats.upload_dynamo_perf_stats --workflow-run-id "${WORKFLOW_RUN_ID}" --workflow-run-attempt "${WORKFLOW_RUN_ATTEMPT}" --repo "${REPO_FULLNAME}" --head-branch "${HEAD_BRANCH}" --rockset-collection oss_ci_benchmark --rockset-workspace benchmarks --dynamodb-table torchci-oss-ci-benchmark --match-filename "^gpt_fast_benchmark"
+          python3 -m tools.stats.upload_dynamo_perf_stats --workflow-run-id "${WORKFLOW_RUN_ID}" --workflow-run-attempt "${WORKFLOW_RUN_ATTEMPT}" --repo "${REPO_FULLNAME}" --head-branch "${HEAD_BRANCH}" --dynamodb-table torchci-oss-ci-benchmark --match-filename "^gpt_fast_benchmark"
 
   check-api-rate:
     if: ${{ always() && github.repository_owner == 'pytorch' }}

@@ -8,7 +8,7 @@ from typing import Callable, List, Optional, Union
 import torch
 import torch._inductor.runtime.runtime_utils
 from torch import Tensor
-from torch._dynamo.utils import counters
+from torch._dynamo.utils import counters, dynamo_timed
 from torch._inductor import utils
 from torch._inductor.autoheuristic.autoheuristic import (
     AHContext,
@@ -381,7 +381,16 @@ def should_pad_mm_bf16(dtype, M, N, K):
     return False
 
 
-def should_pad_bench(
+def should_pad_bench(*args, **kwargs):
+    with dynamo_timed(
+        "pad_mm_benchmark",
+        log_pt2_compile_event=True,
+        dynamo_compile_column_us="compile_time_autotune_time_us",
+    ):
+        return _should_pad_bench(*args, **kwargs)
+
+
+def _should_pad_bench(
     match, mat1: Tensor, mat2: Tensor, op, input: Optional[Tensor] = None
 ) -> bool:
     do_bench = functools.partial(
@@ -390,7 +399,6 @@ def should_pad_bench(
     )
     m_padded_length = 0
     n_padded_length = 0
-    batchsize = 1
     with no_dispatch():
         if op is torch.ops.aten.mm or op is torch.ops.aten.addmm:
             m = mat1.shape[0]
@@ -400,7 +408,6 @@ def should_pad_bench(
             n_padded_length = get_padded_length(n, get_alignment_size(mat2))
             m_padded_length = get_padded_length(m, get_alignment_size(mat1))
         elif op is torch.ops.aten.bmm:
-            batchsize = mat1.shape[0]
             m = mat1.shape[1]
             k = mat1.shape[2]
             n = mat2.shape[2]

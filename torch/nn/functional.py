@@ -3230,7 +3230,7 @@ def poisson_nll_loss(
 def gaussian_nll_loss(
     input: Tensor,
     target: Tensor,
-    var: Tensor,
+    var: Union[Tensor, float],
     full: bool = False,
     eps: float = 1e-6,
     reduction: str = "mean",
@@ -3243,7 +3243,8 @@ def gaussian_nll_loss(
         input: expectation of the Gaussian distribution.
         target: sample from the Gaussian distribution.
         var: tensor of positive variance(s), one for each of the expectations
-            in the input (heteroscedastic), or a single one (homoscedastic).
+            in the input (heteroscedastic), or a single one (homoscedastic),
+            or a positive scalar value to be used for all expectations.
         full (bool, optional): include the constant term in the loss calculation. Default: ``False``.
         eps (float, optional): value added to var, for stability. Default: 1e-6.
         reduction (str, optional): specifies the reduction to apply to the output:
@@ -3263,6 +3264,14 @@ def gaussian_nll_loss(
             eps=eps,
             reduction=reduction,
         )
+
+    # Entries of var must be non-negative
+    if isinstance(var, float):
+        if var < 0:
+            raise ValueError("var has negative entry/entries")
+        var = var * torch.ones_like(input)
+    elif torch.any(var < 0):
+        raise ValueError("var has negative entry/entries")
 
     # Check var size
     # If var.size == input.size, the case is heteroscedastic and no further checks are needed.
@@ -3290,10 +3299,6 @@ def gaussian_nll_loss(
     # Check validity of reduction mode
     if reduction != "none" and reduction != "mean" and reduction != "sum":
         raise ValueError(reduction + " is not valid")
-
-    # Entries of var must be non-negative
-    if torch.any(var < 0):
-        raise ValueError("var has negative entry/entries")
 
     # Clamp for stability
     var = var.clone()
@@ -5973,6 +5978,21 @@ def _none_or_dtype(input: Optional[Tensor]) -> Optional[DType]:
     raise RuntimeError("input to _none_or_dtype() must be None or torch.Tensor")
 
 
+def _check_key_padding_mask(
+    key_padding_mask: torch.Tensor, src_len: int, bsz: int
+) -> None:
+    torch._check_with(
+        AssertionError,
+        key_padding_mask.shape[0] == bsz,
+        lambda: f"Expected key_padded_mask.shape[0] to be {bsz}, but got {key_padding_mask.shape[0]}",
+    )
+    torch._check_with(
+        AssertionError,
+        key_padding_mask.shape[1] == src_len,
+        lambda: f"Expected key_padded_mask.shape[1] to be {src_len}, but got {key_padding_mask.shape[1]}",
+    )
+
+
 def multi_head_attention_forward(
     query: Tensor,
     key: Tensor,
@@ -6311,10 +6331,9 @@ def multi_head_attention_forward(
 
     # merge key padding and attention masks
     if key_padding_mask is not None:
-        assert key_padding_mask.shape == (
-            bsz,
-            src_len,
-        ), f"expecting key_padding_mask shape of {(bsz, src_len)}, but got {key_padding_mask.shape}"
+        if not torch.jit.is_scripting() and not torch.jit.is_tracing():
+            _check_key_padding_mask(key_padding_mask, src_len, bsz)
+
         key_padding_mask = (
             key_padding_mask.view(bsz, 1, 1, src_len)
             .expand(-1, num_heads, -1, -1)

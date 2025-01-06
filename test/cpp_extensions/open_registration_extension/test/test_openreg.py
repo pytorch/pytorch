@@ -1,7 +1,6 @@
 # Owner(s): ["module: cpp"]
 
 import os
-import unittest
 
 import psutil
 import pytorch_openreg
@@ -14,7 +13,6 @@ class TestOpenReg(TestCase):
     def test_initializes(self):
         self.assertEqual(torch._C._get_privateuse1_backend_name(), "openreg")
 
-    @unittest.SkipTest
     def test_autograd_init(self):
         # Make sure autograd is initialized
         torch.ones(2, requires_grad=True, device="openreg").sum().backward()
@@ -30,7 +28,7 @@ class TestOpenReg(TestCase):
                 thread_name = file.read().strip()
             all_thread_names.add(thread_name)
 
-        for i in range(pytorch_openreg._device_daemon.NUM_DEVICES):
+        for i in range(pytorch_openreg.NUM_DEVICES):
             self.assertIn(f"pt_autograd_{i}", all_thread_names)
 
     def test_factory(self):
@@ -67,6 +65,11 @@ class TestOpenReg(TestCase):
 
         self.assertEqual(out, cpu_a.masked_select(cpu_a.gt(0)))
 
+    def test_generator(self):
+        generator = torch.Generator(device="openreg:1")
+        self.assertEqual(generator.device.type, "openreg")
+        self.assertEqual(generator.device.index, 1)
+
     def test_pin_memory(self):
         cpu_a = torch.randn(10)
         self.assertFalse(cpu_a.is_pinned())
@@ -79,6 +82,55 @@ class TestOpenReg(TestCase):
         stream = torch.Stream(device="openreg:1")
         stream.synchronize()
         self.assertEqual(True, stream.query())
+
+    def test_stream_wait_stream(self):
+        stream_1 = torch.Stream(device="openreg:0")
+        stream_2 = torch.Stream(device="openreg:1")
+        # Does not crash!
+        stream_2.wait_stream(stream_1)
+
+    def test_record_event(self):
+        stream = torch.Stream(device="openreg:1")
+        event1 = stream.record_event()
+        self.assertNotEqual(0, event1.event_id)
+        event2 = stream.record_event()
+        self.assertNotEqual(0, event2.event_id)
+        self.assertNotEqual(event1.event_id, event2.event_id)
+
+    def test_event_elapsed_time(self):
+        stream = torch.Stream(device="openreg:1")
+        e1 = torch.Event(device="openreg:1", enable_timing=True)
+        e1.record(stream)
+        e2 = torch.Event(device="openreg:1", enable_timing=True)
+        e2.record(stream)
+
+        e2.synchronize()
+        self.assertTrue(e2.query())
+
+        ms = e1.elapsed_time(e2)
+        self.assertTrue(ms > 0)
+
+    def test_stream_wait_event(self):
+        s1 = torch.Stream(device="openreg")
+        s2 = torch.Stream(device="openreg")
+        e = s1.record_event()
+        s2.wait_event(e)
+
+    def test_event_wait_stream(self):
+        s1 = torch.Stream(device="openreg")
+        s2 = torch.Stream(device="openreg")
+        e1 = s1.record_event()
+        e1.wait(s2)
+
+    def test_expand(self):
+        x = torch.tensor([[1], [2], [3]], device="openreg")
+        y = x.expand(3, 2)
+        self.assertEqual(y.to(device="cpu"), torch.tensor([[1, 1], [2, 2], [3, 3]]))
+        self.assertEqual(x.data_ptr(), y.data_ptr())
+
+    def test_empty_tensor(self):
+        empty_tensor = torch.tensor((), device="openreg")
+        self.assertEqual(empty_tensor.to(device="cpu"), torch.tensor(()))
 
 
 if __name__ == "__main__":

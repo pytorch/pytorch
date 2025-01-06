@@ -1,9 +1,9 @@
-# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 import math
 from enum import Enum
 from functools import wraps
-from typing import List, Optional, Sequence, Tuple, Union
+from typing import Callable, List, Optional, Sequence, Tuple, TypeVar, Union
+from typing_extensions import ParamSpec
 
 import torch
 import torch._prims_common as utils
@@ -39,12 +39,16 @@ from torch._refs import _broadcast_shapes, _maybe_broadcast
 from torch.utils import _pytree as pytree
 
 
+_T = TypeVar("_T")
+_P = ParamSpec("_P")
+
 aten = torch.ops.aten
 
 _meta_lib_dont_use_me_use_register_meta = torch.library.Library("aten", "IMPL", "Meta")
+MODE_SUM, MODE_MEAN, MODE_MAX = range(3)
 
 
-def register_meta(op):
+def register_meta(op) -> Callable[[Callable[_P, _T]], Callable[_P, _T]]:
     def wrapper(fn):
         fn = _convert_out_params(fn)
 
@@ -520,18 +524,28 @@ def meta__cslt_sparse_mm(
     alpha: Optional[Tensor] = None,
     out_dtype: Optional[torch.dtype] = None,
     transpose_result: bool = False,
+    alg_id: int = 0,
+    split_k: int = 1,
+    split_k_one_kernel: bool = False,
 ):
     assert dense_B.dtype in {
         torch.float32,
         torch.float16,
         torch.bfloat16,
         torch.int8,
-    }, "_cslt_sparse_mm only supports fp16, bf16, and int8"
+        torch.float8_e4m3fn,
+    }, "_cslt_sparse_mm only supports fp16, bf16, int8, and fp8e4m3"
     assert compressed_A.dtype == dense_B.dtype, "inputs must have the same dtype"
     assert len(dense_B.shape) == 2, "_cslt_sparse_mm only supports 2d inputs"
 
-    is_int8_input_type = compressed_A.dtype == torch.int8
-    compression_factor = 10 if is_int8_input_type else 9
+    is_8bit_input_type = compressed_A.dtype in [torch.int8, torch.float8_e4m3fn]
+    compression_factor = 10 if is_8bit_input_type else 9
+
+    if is_8bit_input_type:
+        assert (
+            not dense_B.is_contiguous()
+        ), "dense input must be transposed for 8bit dtypes"
+
     k = dense_B.size(0)
     n = dense_B.size(1)
     m = (compressed_A.numel() * 16) // (compression_factor * k)
@@ -539,14 +553,18 @@ def meta__cslt_sparse_mm(
         assert m == bias.size(0)
 
     if out_dtype is not None:
-        assert is_int8_input_type and out_dtype in {
-            torch.float16,
-            torch.bfloat16,
-            torch.int32,
-        }, "out_dtype is only supported for i8i8->fp16, bf16, or i32 matmul"
+        assert (
+            is_8bit_input_type
+            and out_dtype
+            in {
+                torch.float16,
+                torch.bfloat16,
+                torch.int32,
+                torch.float8_e4m3fn,
+            }
+        ), "out_dtype is not supported for {compressed_A.dtype} x {dense_B.dtype} -> {out_dtype} matmul!"
     output_shape = (n, m) if transpose_result else (m, n)
-    result = dense_B.new_empty(output_shape, dtype=out_dtype)
-    return result
+    return dense_B.new_empty(output_shape, dtype=out_dtype)
 
 
 @register_meta(aten.index_reduce.default)
@@ -1447,7 +1465,6 @@ def _linalg_solve_ex(
         device=B.device,
     )
     shape = A.shape
-    ndim = A.ndim
     LU_ = torch.empty_strided(
         size=shape,
         stride=make_contiguous_strides_for(shape, False),
@@ -1495,7 +1512,7 @@ def linalg_solve_triangular_meta(
 
 
 @register_meta(aten.triangular_solve)
-@out_wrapper("solution", "cloned_coefficient")
+@out_wrapper("X", "M", exact_dtype=True)
 def triangular_solve_meta(
     self: Tensor,
     A: Tensor,
@@ -1850,18 +1867,15 @@ def meta_pad2d_backward(grad_output, self, padding):
     dim_w = 2
     dim_h = 1
     dim_plane = 0
-    nbatch = 1
 
     self_shape = self.shape
     if self.dim() == 4:
-        nbatch = self_shape[0]
         dim_w += 1
         dim_h += 1
         dim_plane += 1
 
     pad_l, pad_r, pad_t, pad_b = padding
 
-    nplane = self_shape[dim_plane]
     input_h = self_shape[dim_h]
     input_w = self_shape[dim_w]
     output_h = input_h + pad_t + pad_b
@@ -2246,6 +2260,44 @@ def is_channels_last(ten):
     return torch._prims_common.suggest_memory_format(ten) == torch.channels_last
 
 
+@register_meta(aten.miopen_batch_norm.default)
+def meta_miopen_batch_norm(
+    input_tensor: torch.Tensor,
+    weight: torch.Tensor,
+    bias: Optional[torch.Tensor],
+    running_mean: Optional[torch.Tensor],
+    running_var: Optional[torch.Tensor],
+    training: bool,
+    exponential_average_factor: float,
+    epsilon: float,
+):
+    # In batch norm the output is of the same shape as the input
+    out_shape = input_tensor.shape
+
+    # If tensor is provided for running_mean and running_var then use this. If these are not
+    # provded then we return the shape of weight tensor. Similar to how this is handled in the decomposition
+    save_mean_shape = running_mean.shape if running_mean is not None else weight.shape
+    save_var_shape = running_var.shape if running_var is not None else weight.shape
+
+    def pick_memory_format():
+        if is_channels_last(input_tensor):
+            return torch.channels_last
+        if input_tensor.is_contiguous(memory_format=torch.contiguous_format):
+            return torch.contiguous_format
+        return torch.contiguous_format
+
+    out = input_tensor.new_empty(out_shape).to(memory_format=pick_memory_format())
+
+    if training:
+        save_mean = input_tensor.new_empty(save_mean_shape)
+        save_var = input_tensor.new_empty(save_var_shape)
+    else:
+        save_mean = input_tensor.new_empty((0,))
+        save_var = input_tensor.new_empty((0,))
+
+    return out, save_mean, save_var
+
+
 @register_meta(aten.convolution.default)
 def meta_conv(
     input_tensor: torch.Tensor,
@@ -2397,6 +2449,19 @@ if torch._C._has_mkldnn:
         output_shape[-1] = w.shape[1]
         assert output_dtype in [torch.float32, torch.bfloat16]
         out = x.new_empty(output_shape, dtype=output_dtype)
+        return out
+
+    @register_meta(torch.ops.onednn.linear_dynamic_fp16.default)
+    @register_meta(torch.ops.onednn.linear_relu_dynamic_fp16.default)
+    def meta_linear_dynamic_fp16(
+        x,
+        w,
+        bias,
+    ):
+        output_shape = list(x.shape)
+        # The weight has been transposed during the qlinear weight prepack process.
+        output_shape[-1] = w.shape[1]
+        out = x.new_empty(output_shape)
         return out
 
     _meta_lib_dont_use_me_use_register_meta_for_quantized = torch.library.Library(
@@ -3275,6 +3340,21 @@ def meta__convert_weight_to_int4pack(w, inner_k_tiles):
     )
 
 
+@register_meta([aten._convert_weight_to_int4pack_for_cpu])
+def meta__convert_weight_to_int4pack_for_cpu(w, inner_k_tiles):
+    torch._check(w.dim() == 2, lambda: "w must be a 2D tensor")
+    torch._check(
+        w.dtype is torch.int32,
+        lambda: f"expected w to be int32, got {w.dtype}",
+    )
+    n = w.size(0)
+    k = w.size(1)  # w is [n][k] int32
+    return w.new_empty(
+        (n, k // 2),
+        dtype=torch.uint8,
+    )
+
+
 @register_meta([aten._weight_int4pack_mm])
 def meta__weight_int4pack_mm(x, w, q_group_size, q_scale_and_zeros):
     torch._check(x.dim() == 2, lambda: "x must be a 2D tensor")
@@ -3288,6 +3368,176 @@ def meta__weight_int4pack_mm(x, w, q_group_size, q_scale_and_zeros):
         lambda: f"expected w to be int32, got {w.dtype}",
     )
     return x.new_empty(x.size(0), w.size(0) * 8, dtype=x.dtype)
+
+
+@register_meta([aten._weight_int4pack_mm_for_cpu])
+def meta__weight_int4pack_mm_for_cpu(x, w, q_group_size, q_scale_and_zeros):
+    torch._check(x.dim() == 2, lambda: "x must be a 2D tensor")
+    torch._check(w.dim() == 2, lambda: "w must be a 2D tensor")
+    torch._check(
+        x.dtype in [torch.float32, torch.float16, torch.bfloat16],
+        lambda: f"expected x to be f32/f16/bf16, got {x.dtype}",
+    )
+    torch._check(
+        w.dtype is torch.uint8,
+        lambda: f"expected w to be uint8, got {w.dtype}",
+    )
+    return x.new_empty(x.size(0), w.size(0), dtype=x.dtype)
+
+
+def kai_roundup(a: int, b: int) -> int:
+    return ((a + b - 1) // b) * b
+
+
+def get_kai_packed_weight_size(n_bits, N, K, groupsize):
+    if n_bits == 4:
+        if groupsize == K:  # channelwise
+            # dotprod params only [1x8x32_neon_dotprod]
+            kai_nr = 8
+            kai_kr = 16
+            kai_sr = 2
+            kai_num_bytes_sum_rhs = 4  # sizeof(int32_t)
+            kai_num_bytes_multiplier_rhs = 4  # sizeof(float)
+            kai_num_bytes_bias = 4  # sizeof(float)
+
+            def kai_k_roundedup(k, kr, sr):
+                # Since we pack a float and int32 value at the end of the row,
+                # we must make sure that k is a multiple of 4 for alignment
+                kr_sr_roundedup4 = kai_roundup(kr * sr, 4)
+                return kai_roundup(k, kr_sr_roundedup4)
+
+            def kai_get_rhs_packed_stride_rhs_pack_nxk_qsi4cxp_qsu4cxs1s0(
+                k, nr, kr, sr
+            ):
+                k_internal = kai_k_roundedup(k, kr, sr)
+
+                assert (k_internal % 2) == 0, "k_internal must be even"
+
+                return nr * (
+                    (k_internal // 2)
+                    + kai_num_bytes_multiplier_rhs
+                    + kai_num_bytes_sum_rhs
+                    + kai_num_bytes_bias
+                )
+
+            def kai_get_rhs_packed_size_rhs_pack_nxk_qsi4cxp_qsu4cxs1s0(
+                n, k, nr, kr, sr
+            ):
+                num_rows = kai_roundup(n, nr) // nr
+
+                return (
+                    num_rows
+                    * kai_get_rhs_packed_stride_rhs_pack_nxk_qsi4cxp_qsu4cxs1s0(
+                        k, nr, kr, sr
+                    )
+                )
+
+            return kai_get_rhs_packed_size_rhs_pack_nxk_qsi4cxp_qsu4cxs1s0(
+                N, K, kai_nr, kai_kr, kai_sr
+            )
+        elif groupsize % 32 == 0 and K % groupsize == 0:  # groupwise
+            kai_nr = 8
+            kai_kr = 16
+            kai_sr = 2
+            kai_num_bytes_sum_rhs = 4
+            kai_num_bytes_bias = 4
+            kai_nr_multiple_of = 4
+            kai_bl_multiple_of = 32
+
+            def kai_get_rhs_packed_size_rhs_pack_nxk_qsi4c32p_qsu4c32s1s0(
+                n, k, nr, kr, sr, bl
+            ):
+                assert (bl % kr) == 0
+                assert (nr % kai_nr_multiple_of) == 0
+                assert (bl % kai_bl_multiple_of) == 0
+
+                num_rows = kai_roundup(n, nr) // nr
+
+                return (
+                    num_rows
+                    * kai_get_rhs_packed_stride_rhs_pack_nxk_qsi4c32p_qsu4c32s1s0(
+                        k, nr, kr, sr, bl
+                    )
+                )
+
+            def kai_get_rhs_packed_stride_rhs_pack_nxk_qsi4c32p_qsu4c32s1s0(
+                k, nr, kr, sr, bl
+            ):
+                assert (bl % kr) == 0
+                assert (nr % kai_nr_multiple_of) == 0
+                assert (bl % kai_bl_multiple_of) == 0
+
+                # kr and sr are unused in the calculation
+                num_bytes_multiplier_rhs = kai_get_bf16_datatype_size_in_bytes()
+                num_blocks_per_row = kai_num_blocks_per_row(k, bl)
+                num_bytes_per_block = kai_num_bytes_per_block(
+                    bl, num_bytes_multiplier_rhs
+                )
+
+                return nr * (
+                    (num_bytes_per_block * num_blocks_per_row)
+                    + kai_num_bytes_sum_rhs
+                    + kai_num_bytes_bias
+                )
+
+            # This funtion retuns size of these datatypes stored as enum. We modify it to just return bf16 datatype
+            # https://gitlab.arm.com/kleidi/kleidiai/-/blob/main/kai/kai_common.h?ref_type=heads#L55
+            def kai_get_bf16_datatype_size_in_bytes():
+                return 2  # 2 bytes
+
+            def kai_num_blocks_per_row(k, bl):
+                assert (bl % kai_bl_multiple_of) == 0
+                return kai_roundup(k, bl) // bl
+
+            def kai_num_bytes_per_block(bl, num_bytes_multiplier_rhs):
+                assert (bl % kai_bl_multiple_of) == 0
+                return (bl // 2) + num_bytes_multiplier_rhs
+
+            return kai_get_rhs_packed_size_rhs_pack_nxk_qsi4c32p_qsu4c32s1s0(
+                N, K, kai_nr, kai_kr, kai_sr, groupsize
+            )
+
+
+@register_meta([aten._dyn_quant_pack_4bit_weight])
+def meta__dyn_quant_pack_4bit_weight(
+    weights, scales_zeros, bias: Optional[Tensor], block_size, in_features, out_features
+):
+    torch._check(
+        weights.dtype is torch.uint8,
+        lambda: f"expected w to be uint8, got {weights.dtype}",
+    )
+    if torch.backends.kleidiai.is_available() and (
+        (block_size == in_features and scales_zeros.dtype == torch.float)
+        or (
+            block_size < in_features
+            and block_size % 32 == 0
+            and in_features % block_size == 0
+            and scales_zeros.dtype == torch.bfloat16
+        )
+    ):
+        packed_weight_size = get_kai_packed_weight_size(
+            4, out_features, in_features, block_size
+        )
+        return weights.new_empty(int(packed_weight_size), dtype=torch.uint8)
+    packed_weight_size = weights.numel() + scales_zeros.numel()
+    return weights.new_empty(packed_weight_size, dtype=torch.float)
+
+
+@register_meta([aten._dyn_quant_matmul_4bit])
+def meta__dyn_quant_matmul_4bit(
+    inp,
+    packed_weights,
+    block_size,
+    in_features,
+    out_features,
+):
+    torch._check(inp.dim() == 2, lambda: "input must be a 2D tensor")
+    torch._check(
+        inp.dtype in [torch.float32],
+        lambda: f"expected input to be f32, got {inp.dtype}",
+    )
+    M = inp.size(0)
+    return inp.new_empty(M, out_features, dtype=inp.dtype)
 
 
 @register_meta([aten._weight_int8pack_mm])
@@ -3398,7 +3648,6 @@ def meta_embedding_bag(
         num_bags -= 1
 
     output = weight.new_empty(num_bags, weight.size(1))
-    MODE_SUM, MODE_MEAN, MODE_MAX = range(3)
 
     if per_sample_weights is not None:
         torch._check(
@@ -3679,6 +3928,36 @@ def meta_fill(self, val):
 
 @register_meta(aten.relu_.default)
 def meta_relu_(self):
+    return self
+
+
+@register_meta(aten._add_relu.Tensor)
+@out_wrapper()
+def meta__add_relu(self, other, alpha=1) -> Tensor:
+    return elementwise_meta(
+        self, other, type_promotion=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
+    )
+
+
+@register_meta([aten.rrelu_with_noise])
+@out_wrapper()
+def meta_rrelu_with_noise(
+    self, noise, lower=0.125, upper=0.3333333333333333, training=False, generator=None
+):
+    return torch.empty_like(self)
+
+
+@register_meta([aten.rrelu_with_noise_functional])
+def meta_rrelu_with_noise_functional(
+    self, noise, lower=0.125, upper=0.3333333333333333, training=False, generator=None
+):
+    return torch.empty_like(self), torch.empty_like(noise)
+
+
+@register_meta([aten.rrelu_with_noise_])
+def meta_rrelu_with_noise_(
+    self, lower=0.125, upper=0.3333333333333333, training=False, generator=None
+):
     return self
 
 
@@ -4733,6 +5012,8 @@ def zeros_like(
 
 @register_meta(aten.select.int)
 def meta_select(self, dim, index):
+    from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
+
     ndim = self.dim()
     torch._check_index(
         ndim != 0,
@@ -4743,7 +5024,9 @@ def meta_select(self, dim, index):
     size = self.size(dim)
 
     torch._check_index(
-        not (-index > size or index >= size),
+        not (
+            guard_size_oblivious(-index > size) or guard_size_oblivious(index >= size)
+        ),
         lambda: f"select(): index {index} out of range for tensor of size "
         f"{self.size()} at dimension {dim}",
     )
@@ -5040,7 +5323,6 @@ def meta__scaled_dot_product_cudnn_attention(
     H = query.size(1)
     S_Q = query.size(2)
     S_KV = key.size(2)
-    D_QK = query.size(-1)
     D_V = value.size(-1)
 
     res = torch.empty((B, H, S_Q, D_V), dtype=query.dtype, device=query.device)
@@ -5112,7 +5394,6 @@ def meta__scaled_dot_product_flash_attention_for_cpu(
     batch_size = query.size(0)
     num_heads = query.size(1)
     max_seqlen_batch_q = query.size(2)
-    head_dim = query.size(3)
 
     attention = torch.empty_like(query)
     logsumexp = torch.empty(
@@ -5194,9 +5475,7 @@ def meta__scaled_dot_product_efficient_attention(
 
     B = query.size(0)
     M = query.size(1)
-    N = key.size(1)
     num_heads = query.size(-2)
-    K = query.size(-1)
     Kv = value.size(-1)
 
     res = torch.empty(B, M, num_heads, Kv, dtype=query.dtype, device=query.device)
@@ -5428,7 +5707,6 @@ def meta__efficient_attention_forward(
     M = query.size(1)
     N = key.size(1)
     num_heads = query.size(-2)
-    K = query.size(-1)
     Kv = value.size(-1)
 
     res = torch.empty(B, M, num_heads, Kv, dtype=query.dtype, device=query.device)
@@ -5551,13 +5829,16 @@ def meta_scaled_mm(
         def is_col_major(stride):
             return stride[0] == 1 and stride[1] > 1
 
+        def has_zero_dim(tensor_2d):
+            return tensor_2d.size(0) == 0 or tensor_2d.size(1) == 0
+
         torch._check(
-            is_row_major(self.stride()),
-            lambda: "self must be row_major",
+            is_row_major(self.stride()) or has_zero_dim(self),
+            lambda: f"self must be row_major, got stride {self.stride()}",
         )
         torch._check(
-            is_col_major(mat2.stride()),
-            lambda: "mat2 must be col_major",
+            is_col_major(mat2.stride()) or has_zero_dim(mat2),
+            lambda: f"mat2 must be col_major, got stride {mat2.stride()}",
         )
         torch._check(
             self.size(1) % 16 == 0,
@@ -5573,7 +5854,7 @@ def meta_scaled_mm(
             scale_a.dtype == torch.float32 and scale_b.dtype == torch.float32,
             lambda: "Both scale_a and scale_b must be float (fp32) tensors.",
         )
-        m, k = self.shape
+        m, _k = self.shape
         n = mat2.size(1)
         if scale_a.numel() == 1 and scale_b.numel() == 1:
             # tensorwise scaling
@@ -5973,6 +6254,11 @@ def argmax_argmin_meta(self, dim=None, keepdim=False):
 
 @register_meta(aten.scalar_tensor.default)
 def scalar_tensor(s, dtype=None, layout=None, device=None, pin_memory=None):
+    # NB: It's always wrong to try to create a scalar tensor with the jagged layout.
+    # Rather than fix this everywhere, just use the strided layout and let NJT handle
+    # scalar tensor broadcasting.
+    if layout == torch.jagged:
+        layout = torch.strided
     return torch.empty(
         (), dtype=dtype, layout=layout, device=device, pin_memory=pin_memory
     )
@@ -6382,7 +6668,6 @@ def meta_embedding_bag_dense_backward(
         grad.dtype in [torch.float16, torch.bfloat16, torch.float32, torch.float64],
         lambda: f"Unsupported input type encountered: {grad.dtype}",
     )
-    MODE_SUM, MODE_MEAN, MODE_MAX = range(3)
     if mode == MODE_MAX:
         torch._check(maximum_indices is not None)
     index_grad_weight = grad.new_empty((num_weights, grad.size(1)))
@@ -6399,7 +6684,6 @@ def meta_embedding_bag_per_sample_weights_backward(
     mode,
     padding_idx=-1,
 ):
-    MODE_SUM, MODE_MEAN, MODE_MAX = range(3)
     embedding_features = grad.size(1)
     torch._check(
         mode == MODE_SUM,

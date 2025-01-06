@@ -592,8 +592,8 @@ struct TORCH_API TensorType : public SharedType {
   static TensorTypePtr create(
       std::optional<at::ScalarType> scalar_type,
       std::optional<Device> device,
-      const SymbolicShape& sizes,
-      const VaryingShape<Stride>& stride_,
+      SymbolicShape sizes,
+      VaryingShape<Stride> stride_,
       std::optional<bool> requires_grad,
       std::optional<bool> undefined = false);
 
@@ -625,13 +625,13 @@ struct TORCH_API TensorType : public SharedType {
     return strides_;
   }
 
-  std::optional<at::Device> device() const {
+  const std::optional<at::Device>& device() const {
     return device_;
   }
-  std::optional<at::ScalarType> scalarType() const {
+  const std::optional<at::ScalarType>& scalarType() const {
     return scalar_type_;
   }
-  std::optional<bool> requiresGrad() const {
+  const std::optional<bool>& requiresGrad() const {
     return requires_grad_;
   }
   bool requires_grad() const override {
@@ -656,7 +656,7 @@ struct TORCH_API TensorType : public SharedType {
     const auto& shape = sizes();
 
     for (size_t i = 0; i < shape.size(); i++) {
-      if (!shape[i]) {
+      if (!shape[i].has_value()) {
         return std::optional<size_t>{};
       }
       prod *= shape[i].value();
@@ -1955,12 +1955,6 @@ struct getTypePtr_<std::string> final {
   }
 };
 template <>
-struct getTypePtr_<c10::string_view> final {
-  static decltype(auto) call() {
-    return StringType::get();
-  }
-};
-template <>
 struct getTypePtr_<std::string_view> final {
   static decltype(auto) call() {
     return StringType::get();
@@ -2251,7 +2245,7 @@ static const TypeKind Kind = TypeKind::ScalarTypeType;
 static ScalarTypeTypePtr get();
 
 private:
-ScalarTypeType() : EnumerationType() {}
+ScalarTypeType()  {}
 };
 
 struct MemoryFormatType;
@@ -2265,7 +2259,7 @@ static const TypeKind Kind = TypeKind::MemoryFormatType;
 static MemoryFormatTypePtr get();
 
 private:
-MemoryFormatType() : EnumerationType() {}
+MemoryFormatType()  {}
 };
 
 struct LayoutType;
@@ -2279,7 +2273,7 @@ static const TypeKind Kind = TypeKind::LayoutType;
 static LayoutTypePtr get();
 
 private:
-LayoutType() : EnumerationType() {}
+LayoutType()  {}
 };
 
 namespace detail {

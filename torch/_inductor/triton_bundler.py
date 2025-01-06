@@ -5,7 +5,7 @@ import uuid
 from pathlib import Path
 from typing import List, Optional, Tuple
 
-from torch._dynamo.utils import counters, dynamo_timed
+from torch._dynamo.utils import counters, dynamo_timed, set_feature_use
 from torch._utils_internal import justknobs_check
 
 from .runtime.runtime_utils import triton_cache_dir
@@ -143,11 +143,15 @@ class TritonBundler:
         """
         if not TritonBundler.is_enabled():
             cls.end_compile()
+            set_feature_use(
+                "pytorch/remote_cache:bundle_triton_into_fx_graph_cache_v2", False
+            )
             return [], None
+        set_feature_use(
+            "pytorch/remote_cache:bundle_triton_into_fx_graph_cache_v2", True
+        )
 
-        with dynamo_timed(
-            key="TritonBundler.collect", fwd_only=False, log_pt2_compile_event=True
-        ):
+        with dynamo_timed(key="TritonBundler.collect", log_pt2_compile_event=True):
             entries = cls._entries
             if entries is not None:
                 result: List[TritonKernelArtifacts] = []
@@ -164,6 +168,16 @@ class TritonBundler:
                             with open(filepath, "rb") as file:
                                 payload = file.read()
                                 if filepath.endswith(".json"):
+                                    # Make sure there's no sentinel value
+                                    if TritonBundler._REPLACE_BYTES in payload:
+                                        log.warning(
+                                            "Bundle contains illegal %s, payload: %s",
+                                            TritonBundler._REPLACE_BYTES,
+                                            payload,
+                                        )
+                                        raise AssertionError(
+                                            "Bundle contains illegal bytes"
+                                        )
                                     # Remove the path from payload
                                     payload = payload.replace(
                                         str.encode(path), TritonBundler._REPLACE_BYTES
@@ -211,9 +225,7 @@ class TritonBundler:
             return None
 
         with dynamo_timed(
-            key="TritonBundler.read_and_emit",
-            fwd_only=False,
-            log_pt2_compile_event=True,
+            key="TritonBundler.read_and_emit", log_pt2_compile_event=True
         ):
             kernel_names: List[str] = []
 
