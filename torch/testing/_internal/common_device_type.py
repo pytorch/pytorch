@@ -11,7 +11,18 @@ import unittest
 from collections import namedtuple
 from enum import Enum
 from functools import partial, wraps
-from typing import Any, ClassVar, Dict, Iterable, List, Optional, Sequence, Set, Union
+from typing import (
+    Any,
+    ClassVar,
+    Dict,
+    Iterable,
+    List,
+    Optional,
+    Sequence,
+    Set,
+    Tuple,
+    Union,
+)
 
 import torch
 from torch._inductor.utils import GPU_TYPES
@@ -1838,7 +1849,7 @@ def skipCUDAIfNotMiopenSuggestNHWC(fn):
 
 
 # Skips a test for specified CUDA versions, given in the form of a list of [major, minor]s.
-def skipCUDAVersionIn(versions: Optional[List[tuple[int, int]]] = None):
+def skipCUDAVersionIn(versions: Optional[List[Tuple[int, int]]] = None):
     def dec_fn(fn):
         @wraps(fn)
         def wrap_fn(self, *args, **kwargs):
@@ -1856,7 +1867,7 @@ def skipCUDAVersionIn(versions: Optional[List[tuple[int, int]]] = None):
 
 
 # Skips a test for CUDA versions less than specified, given in the form of [major, minor].
-def skipCUDAIfVersionLessThan(versions: Optional[tuple[int, int]] = None):
+def skipCUDAIfVersionLessThan(versions: Optional[Tuple[int, int]] = None):
     def dec_fn(fn):
         @wraps(fn)
         def wrap_fn(self, *args, **kwargs):
