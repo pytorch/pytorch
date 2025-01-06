@@ -114,7 +114,13 @@ class DotMode(TorchDispatchMode):
                     self.out_tensor_to_op[arg_id] = str(arg_id)
 
             else:
-                node_str = "%s\n%s" % (type(arg).__name__, str(arg))
+                arg_str = ""
+                if any([type(l) is Tensor for l in pytree.tree_leaves(arg)]):
+                    arg_str = "list of tensors"
+                else:
+                    arg_str = str(arg)
+
+                node_str = "%s\n%s" % (type(arg).__name__, arg_str)
                 arg_id = str(uuid.uuid4())
                 self.g.node(arg_id, node_str, color="blue")
                 self.g.edge(arg_id, node_id)
