@@ -6,7 +6,6 @@ from typing import Callable, Dict, Tuple, Type
 
 import torch
 from torch import inf
-from torch.special import entr
 
 from .bernoulli import Bernoulli
 from .beta import Beta
@@ -143,6 +142,13 @@ def _infinite_like(tensor):
     Helper function for obtaining infinite KL Divergence throughout
     """
     return torch.full_like(tensor, inf)
+
+
+def _x_log_x(tensor):
+    """
+    Utility function for calculating x log x
+    """
+    return torch.special.xlogy(tensor, tensor)  # produces correct result for x=0
 
 
 def _batch_trace_XXT(bmat):
@@ -843,12 +849,12 @@ def _kl_uniform_beta(p, q):
     t1 = torch.log(common_term)
     t2 = (
         (q.concentration1 - 1)
-        * (entr(p.low) - entr(p.high) - common_term)
+        * (_x_log_x(p.high) - _x_log_x(p.low) - common_term)
         / common_term
     )
     t3 = (
         (q.concentration0 - 1)
-        * (entr(1 - p.low) - entr(1 - p.high) + common_term)
+        * (_x_log_x(1 - p.high) - _x_log_x(1 - p.low) + common_term)
         / common_term
     )
     t4 = (
@@ -892,7 +898,9 @@ def _kl_uniform_gamma(p, q):
     t1 = common_term.log()
     t2 = q.concentration.lgamma() - q.concentration * q.rate.log()
     t3 = (
-        (1 - q.concentration) * (entr(p.low) - entr(p.high) - common_term) / common_term
+        (1 - q.concentration)
+        * (_x_log_x(p.high) - _x_log_x(p.low) - common_term)
+        / common_term
     )
     t4 = q.rate * (p.high + p.low) / 2
     result = -t1 + t2 + t3 + t4
@@ -926,7 +934,7 @@ def _kl_uniform_normal(p, q):
 def _kl_uniform_pareto(p, q):
     support_uniform = p.high - p.low
     t1 = (q.alpha * q.scale.pow(q.alpha) * (support_uniform)).log()
-    t2 = (entr(p.low) - entr(p.high) - support_uniform) / support_uniform
+    t2 = (_x_log_x(p.high) - _x_log_x(p.low) - support_uniform) / support_uniform
     result = t2 * (q.alpha + 1) - t1
     result[p.low < q.support.lower_bound] = inf
     return result
