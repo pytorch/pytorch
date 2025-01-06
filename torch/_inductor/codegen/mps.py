@@ -264,7 +264,7 @@ class MetalKernel(SIMDKernel):
             with code.indent():
                 if len(idx_var_names) > 1:
                     for idx, name in enumerate(idx_var_names):
-                        code.writeline(f"auto {name} = thread_pos.{chr(120+idx)};")
+                        code.writeline(f"auto {name} = thread_pos.{chr(120 + idx)};")
                 code.splice(self.body)
             code.writeline("}")
         code.writeline('""")')
