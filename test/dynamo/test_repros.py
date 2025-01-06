@@ -6511,13 +6511,11 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
         self.assertEqual(fn(typing.Any), opt_fn(typing.Any))
 
     @unittest.skipIf(not TEST_CUDA, "test requires CUDA")
+    @unittest.skipIf(not dist.is_available(), "test requires distributed")
     def test_ddp_checkpoint(self):
+        # https://github.com/pytorch/pytorch/issues/144035
         DIM = 256
         SEQ_LEN = 32
-
-        # https://github.com/pytorch/pytorch/issues/144035
-        if not dist.is_available():
-            unittest.skip("distributed not available")
 
         @torch.compile(backend="eager", fullgraph=True)
         def mlp_forward(x, w1, w2, b1, b2):
