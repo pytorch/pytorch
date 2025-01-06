@@ -2113,6 +2113,10 @@ def clone_graph(input_graph: torch.fx.GraphModule) -> torch.fx.GraphModule:
     return CopyGraph(input_graph).transform()
 
 
+# TODO: remove in follow up diff, used internally
+_seen_patterns = OrderedSet[str]()
+
+
 def get_arg_value(
     node: torch.fx.Node, arg_number: int, kwarg_name: Optional[str] = None
 ) -> Any:
