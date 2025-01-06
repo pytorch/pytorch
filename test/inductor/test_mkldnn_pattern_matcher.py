@@ -2167,7 +2167,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 # 2. QLinear Unary fusion in post-grad fusion pass
                 self.assertEqual(
                     counters["inductor"]["qlinear_unary_matcher_count"],
-                    0 if TEST_ACL else 2,
+                    2,
                 )
                 self.assertEqual(
                     counters["inductor"]["qlinear_unary_lower_count"],
@@ -2447,7 +2447,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
             # 3. QLinear Unary fusion in post-grad fusion pass * 1
             self.assertEqual(
                 counters["inductor"]["qlinear_unary_matcher_count"],
-                0 if TEST_ACL else 1,
+                1,
             )
 
         self._test_common(
