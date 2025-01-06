@@ -6,7 +6,7 @@ compilation, capturing user-friendly tracebacks, and debug messages.
 
 import collections
 from contextlib import contextmanager
-from typing import List, Tuple
+from typing import List
 
 import torch
 import torch.fx.traceback as fx_traceback
@@ -28,7 +28,7 @@ def set_model_name(name):
     model_name = name
 
 
-def get_aot_compilation_context() -> Tuple[List[str], str, int]:
+def get_aot_compilation_context() -> tuple[List[str], str, int]:
     return list(graph_being_compiled), model_name, nth_graph
 
 

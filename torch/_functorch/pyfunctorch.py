@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import contextlib
 from abc import ABC, abstractmethod
-from typing import Any, List, Tuple
+from typing import Any, List
 
 import torch
 import torch.utils._pytree as pytree
@@ -265,7 +265,7 @@ def retrieve_all_functorch_interpreters() -> List[FuncTorchInterpreter]:
     return [coerce_cinterpreter(ci) for ci in cis]
 
 
-def compare_functorch_state(states: List[Tuple[Any, ...]]) -> bool:
+def compare_functorch_state(states: List[tuple[Any, ...]]) -> bool:
     # There are four possible cases covered here:
     # 1. Current stack empty AND stack when generated not empty -> Invalidate
     # 2. Current stack not empty AND stack when generated empty -> Invalidate

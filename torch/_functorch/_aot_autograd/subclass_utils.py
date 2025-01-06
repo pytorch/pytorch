@@ -6,7 +6,7 @@ and this includes tensor subclasses that implement __torch_dispatch__.
 """
 
 import typing
-from typing import Any, Iterable, List, Optional, Tuple, Union
+from typing import Any, Iterable, List, Optional, Union
 
 import torch
 import torch.utils._pytree as pytree
@@ -120,7 +120,7 @@ def create_subclass_metadata(
 # computes metadata about "how to reconstruct the current list of subclasses,
 # if we were given their flattened dense tensors instead"
 def create_subclass_meta(
-    curr_args: Union[List[Any], Tuple[Any, ...]],
+    curr_args: Union[List[Any], tuple[Any, ...]],
     *,
     count_symints: bool = True,
     with_memory_format: bool = False,
@@ -305,13 +305,13 @@ def remap_unwrapped_subclass_arg_indices(wrapped_args, static_input_indices):
 # Turns a flattened list of tensor arguments into (maybe) subclass tensors.
 # This function is used both at trace time and runtime, so we have an is_runtime flag telling us which context we're in.
 def wrap_tensor_subclasses(
-    unwrapped_args: Union[Tuple[Any, ...], List[Any]],
+    unwrapped_args: Union[tuple[Any, ...], List[Any]],
     *,
     subclass_metas: List[Union[PlainTensorMeta, SubclassCreationMeta]],
     num_fw_outs_saved_for_bw: Optional[int] = None,
     included_subclass_symints: bool = False,
     is_runtime: bool = False,
-) -> Tuple[Any, ...]:
+) -> tuple[Any, ...]:
     wrapped_args = []
     num_args_tallied = 0
     for subclass_meta in subclass_metas:
@@ -372,7 +372,7 @@ def wrap_tensor_subclasses(
 # - when is_joint_structure is False, args is [*primals]
 def wrap_tensor_subclasses_maybe_joint(
     unwrapped_args, *, is_joint_structure: bool, meta: ViewAndMutationMeta
-) -> Union[Tuple[Any, ...], List[Any]]:
+) -> Union[tuple[Any, ...], List[Any]]:
     # Since this function is re-used for both inference and joint graphs,
     if is_joint_structure:
         assert isinstance(unwrapped_args, tuple) and len(unwrapped_args) == 2

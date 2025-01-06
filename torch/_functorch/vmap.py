@@ -33,7 +33,7 @@ from torch.utils._pytree import (
 
 
 in_dims_t = Union[int, Tuple]
-out_dims_t = Union[int, Tuple[int, ...]]
+out_dims_t = Union[int, tuple[int, ...]]
 
 
 def doesnt_support_saved_tensors_hooks(f):
@@ -69,7 +69,7 @@ def _validate_and_get_batch_size(
     return batch_sizes[0]
 
 
-def _num_outputs(batched_outputs: Union[Tensor, Tuple[Tensor, ...]]) -> int:
+def _num_outputs(batched_outputs: Union[Tensor, tuple[Tensor, ...]]) -> int:
     if isinstance(batched_outputs, tuple):
         return len(batched_outputs)
     return 1
@@ -91,7 +91,7 @@ def _as_tuple(
 
 def _process_batched_inputs(
     in_dims: in_dims_t, args: Tuple, func: Callable
-) -> Tuple[int, List[Any], List[Any], TreeSpec]:
+) -> tuple[int, List[Any], List[Any], TreeSpec]:
     if not isinstance(in_dims, int) and not isinstance(in_dims, tuple):
         raise ValueError(
             f"vmap({_get_name(func)}, in_dims={in_dims}, ...)(<inputs>): "
@@ -186,7 +186,7 @@ def _maybe_remove_batch_dim(name, batched_output, vmap_level, batch_size, out_di
 
 # Undos the batching (and any batch dimensions) associated with the `vmap_level`.
 def _unwrap_batched(
-    batched_outputs: Union[Tensor, Tuple[Tensor, ...]],
+    batched_outputs: Union[Tensor, tuple[Tensor, ...]],
     out_dims: out_dims_t,
     vmap_level: int,
     batch_size: int,

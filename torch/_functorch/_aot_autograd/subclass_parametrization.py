@@ -1,4 +1,4 @@
-from typing import List, Tuple
+from typing import List
 
 import torch
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
@@ -59,7 +59,7 @@ def unwrap_tensor_subclass_parameters(module: torch.nn.Module) -> torch.nn.Modul
     becomes: {"parametrizations.p2.original0": torch.Tensor, "parametrizations.p2.original1": torch.Tensor}
 
     """
-    name_param: List[Tuple[str, torch.nn.Parameter]] = list(
+    name_param: List[tuple[str, torch.nn.Parameter]] = list(
         module.named_parameters(recurse=False)
     )
     for name, param in name_param:

@@ -1,5 +1,5 @@
 from collections import deque
-from typing import Callable, Dict, List, Set, Tuple
+from typing import Callable, Dict, List, Set
 
 import networkx as nx
 import numpy as np
@@ -28,7 +28,7 @@ class KnapsackEvaluator:
         node_memories: Dict[str, float],
         saved_nodes_set: Set[str],
         peak_memory_after_forward_pass: float,
-    ) -> List[Tuple[float, str]]:
+    ) -> List[tuple[float, str]]:
         """
         Simulates the backward pass and keeps track of the peak memory usage.
 
@@ -188,7 +188,7 @@ class KnapsackEvaluator:
     def evaluate_distribution_of_results_for_knapsack_algo(
         self,
         knapsack_algo: Callable[
-            [List[float], List[float], float], Tuple[float, List[int], List[int]]
+            [List[float], List[float], float], tuple[float, List[int], List[int]]
         ],
         memory_budget_values: List[float],
     ) -> List[Dict[str, float]]:
@@ -216,7 +216,7 @@ class KnapsackEvaluator:
     def get_knee_point_memory_budget(
         self,
         knapsack_algo: Callable[
-            [List[float], List[float], float], Tuple[float, List[int], List[int]]
+            [List[float], List[float], float], tuple[float, List[int], List[int]]
         ],
         max_mem_budget: float = 0.1,
         min_mem_budget: float = 0.001,

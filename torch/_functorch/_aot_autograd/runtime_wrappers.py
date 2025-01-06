@@ -13,7 +13,7 @@ import pprint
 from contextlib import nullcontext
 from dataclasses import dataclass, field
 from functools import wraps
-from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Sequence, Union
 
 import torch
 import torch.utils.dlpack
@@ -90,7 +90,7 @@ class CompilerWrapper:
         aot_config: AOTConfig,
         *,
         fw_metadata: ViewAndMutationMeta,
-    ) -> Tuple[Callable, List[Tensor], ViewAndMutationMeta]:
+    ) -> tuple[Callable, List[Tensor], ViewAndMutationMeta]:
         """
         Process the inputs to the compiler_fn. You can pass in extra metadata via kwargs.
         Args:
@@ -454,7 +454,7 @@ class FunctionalizedRngRuntimeWrapper(CompilerWrapper):
         aot_config,
         *,
         fw_metadata,
-    ) -> Tuple[Callable, List[Tensor], ViewAndMutationMeta]:
+    ) -> tuple[Callable, List[Tensor], ViewAndMutationMeta]:
         if config.functionalize_rng_ops:
             # Update example inputs for the fw_compiler
             fake_mode = detect_fake_mode()
@@ -526,7 +526,7 @@ class FakifiedOutWrapper(CompilerWrapper):
         aot_config,
         *,
         fw_metadata,
-    ) -> Tuple[Callable, List[Tensor], ViewAndMutationMeta]:
+    ) -> tuple[Callable, List[Tensor], ViewAndMutationMeta]:
         tracing_context = torch._guards.TracingContext.try_get()
         if tracing_context and tracing_context.fakify_first_call:
             self.out_metas = [
@@ -784,7 +784,7 @@ class AOTDedupeWrapper(CompilerWrapper):
         aot_config: AOTConfig,
         *,
         fw_metadata: ViewAndMutationMeta,
-    ) -> Tuple[Callable, List[Tensor], ViewAndMutationMeta]:
+    ) -> tuple[Callable, List[Tensor], ViewAndMutationMeta]:
         # Use information about whether or not flat_fn mutates its arguments
         # or not to handle dupe args
 
@@ -1017,7 +1017,7 @@ class AOTSyntheticBaseWrapper(CompilerWrapper):
         aot_config: AOTConfig,
         *,
         fw_metadata: ViewAndMutationMeta,
-    ) -> Tuple[Callable, List[Tensor], ViewAndMutationMeta]:
+    ) -> tuple[Callable, List[Tensor], ViewAndMutationMeta]:
         is_inference = not self.trace_joint
         flat_args_with_synthetic_bases, synthetic_base_info = merge_view_inputs(
             aot_config,
@@ -1069,7 +1069,7 @@ class AOTSyntheticBaseWrapper(CompilerWrapper):
         )
         replay_views = config.view_replay_for_aliased_outputs
 
-        def _unpack_synthetic_bases(primals: Tuple[Any, ...]) -> List[Any]:
+        def _unpack_synthetic_bases(primals: tuple[Any, ...]) -> List[Any]:
             f_args_inner = []
             for inner_idx_or_tuple in synthetic_base_info:
                 if isinstance(inner_idx_or_tuple, int):
@@ -1254,7 +1254,7 @@ def merge_view_inputs(
     *,
     # The autograd case currently has more restrictions than the inference case.
     is_inference: bool,
-) -> Tuple[List[Any], Optional[List[Union[int, Tuple[int, torch.Tensor]]]]]:
+) -> tuple[List[Any], Optional[List[Union[int, tuple[int, torch.Tensor]]]]]:
     def _are_differentiable_views(view1, view2):
         if view1 is view2:
             return True
@@ -1293,7 +1293,7 @@ def merge_view_inputs(
     # - another int (corresponding to the index in the argument list of the element from the outer calling convention)
     # - idx, view_tensor, where we can generate the new output with view_tensor._view_func(old_args[idx])
     #   idx corresponds to which synthetic base from the outer calling context to view
-    inner_calling_convention_meta: Dict[int, Union[int, Tuple[int, torch.Tensor]]] = {}
+    inner_calling_convention_meta: Dict[int, Union[int, tuple[int, torch.Tensor]]] = {}
     for aliased_input_indices in storage_ref_to_idx.values():
         if len(aliased_input_indices) <= 1 or not any(
             # We only care about mutations that affect all aliases,
@@ -1430,7 +1430,7 @@ def merge_view_inputs(
             inner_calling_convention_meta[old_idx] = new_idx
         # post process into a list
         post_processed_calling_convention_meta: List[
-            Union[int, Tuple[int, torch.Tensor]]
+            Union[int, tuple[int, torch.Tensor]]
         ] = [-1 for _ in range(len(inner_calling_convention_meta))]
         for k, v in inner_calling_convention_meta.items():
             post_processed_calling_convention_meta[k] = v
@@ -2141,7 +2141,7 @@ def pre_compile(
     aot_config: AOTConfig,
     *,
     fw_metadata: ViewAndMutationMeta,
-) -> Tuple[Callable, List[Tensor], ViewAndMutationMeta]:
+) -> tuple[Callable, List[Tensor], ViewAndMutationMeta]:
     """
     Runs a sequence of wrappers on the given function and arguments.
     Mutates wrappers in place.
@@ -2159,7 +2159,7 @@ def post_compile(
     aot_config: AOTConfig,
     *,
     runtime_metadata: ViewAndMutationMeta,
-) -> Tuple[Callable, ViewAndMutationMeta]:
+) -> tuple[Callable, ViewAndMutationMeta]:
     """
     Runs a sequence of wrappers on the given function. Should be called after pre_compile()
     """

@@ -14,7 +14,7 @@ It does so by:
 import warnings
 from contextlib import contextmanager, nullcontext
 from functools import wraps
-from typing import Any, Callable, List, Tuple, Union
+from typing import Any, Callable, List, Union
 from unittest.mock import patch
 
 import torch
@@ -232,7 +232,7 @@ def create_joint(fn: Callable, *, aot_config: AOTConfig) -> Any:
 
         if config.functionalize_rng_ops:
             PhiloxStateTracker.mark_beginning_of_backward()
-        backward_out: Tuple[Tensor, ...] = ()
+        backward_out: tuple[Tensor, ...] = ()
         # Call the backwards pass
         if grad_primals:
             functional_tensor_mode = torch.utils._python_dispatch._detect_infra_mode(
