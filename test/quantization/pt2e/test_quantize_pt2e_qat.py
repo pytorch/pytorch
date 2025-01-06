@@ -1130,7 +1130,7 @@ class TestQuantizeMixQATAndPTQ(QuantizationTestCase):
         model_pt2e = convert_pt2e(model_pt2e)
         quant_result_pt2e = model_pt2e(*example_inputs)  # noqa: F841
 
-        exported_model = torch.export.export(model_pt2e, example_inputs)
+        exported_model = torch.export.export(model_pt2e, example_inputs, strict=True)
 
         node_occurrence = {
             # conv2d: 1 for act, 1 for weight, 1 for output

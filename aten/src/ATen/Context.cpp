@@ -242,7 +242,7 @@ void Context::setBenchmarkLimitCuDNN(int b) {
 
 bool Context::allowTF32CuBLAS() const {
 #ifdef USE_ROCM
-    const auto allow_tf32 = c10::utils::check_env(hipblaslt_allow_tf32);
+    const static auto allow_tf32 = c10::utils::check_env(hipblaslt_allow_tf32);
     if (allow_tf32 != true) {
       return false;
     }
@@ -252,7 +252,7 @@ bool Context::allowTF32CuBLAS() const {
 
 void Context::setAllowTF32CuBLAS(bool b) {
 #ifdef USE_ROCM
-  const auto allow_tf32 = c10::utils::check_env(hipblaslt_allow_tf32);
+  const static auto allow_tf32 = c10::utils::check_env(hipblaslt_allow_tf32);
   if (allow_tf32 != true) {
     LOG(INFO) << "torch.backends.cuda.matmul.allow_tf32 is not supported on ROCm by default. "
               << "Please set environment variable HIPBLASLT_ALLOW_TF32=1 to enable it.";
@@ -360,6 +360,40 @@ void Context::setBlasPreferredBackend(at::BlasBackend b) {
   blas_preferred_backend = b;
 #endif
 }
+
+at::ROCmFABackend Context::getROCmFAPreferredBackend() const {
+  return rocm_fa_preferred_backend;
+}
+
+void Context::setROCmFAPreferredBackend(at::ROCmFABackend b) {
+
+  // TODO: add plumbing for hasCK for validity checking
+  TORCH_CHECK((b != at::ROCmFABackend::Ck) || hasROCM(),
+      "Cannot set preferred flash attention backend to Ck if PyTorch has not been compiled for ROCm.");
+#ifdef USE_ROCM
+  if(b == at::ROCmFABackend::Ck) {
+    static const bool ck_unsupported = []() {
+      static const std::vector<std::string> archs = {
+          "gfx90a",  "gfx942"
+      };
+      for (auto index: c10::irange(getNumGPUs())) {
+        if (!detail::getCUDAHooks().isGPUArch(index, archs)) {
+          TORCH_WARN_ONCE(
+            "Attempting to use CK on an unsupported architecture! Cannot set backend to CK");
+          return true;
+        }
+      }
+      return false;
+    }();
+    if(!ck_unsupported) rocm_fa_preferred_backend = b;
+  }
+  else {
+     rocm_fa_preferred_backend = b;
+  }
+#endif
+  rocm_fa_preferred_backend = b;
+}
+
 
 bool Context::allowFP16ReductionCuBLAS() const {
   return allow_fp16_reduction_cublas;
