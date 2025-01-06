@@ -78,6 +78,7 @@ from torch._dynamo.metrics_context import MetricsContext, RuntimeMetricsContext
 from torch._guards import CompileId, Source, TracingContext
 from torch._subclasses.meta_utils import is_sparse_compressed
 from torch._utils_internal import (
+    justknobs_check,
     log_chromium_event_internal,
     log_compilation_event,
     record_chromium_event_internal,
@@ -2018,13 +2019,71 @@ def is_safe_constant(v):
     )
 
 
+@functools.lru_cache(None)
+def common_constants():
+    return {
+        # We zero-one specialize shapes, so specialize these constants
+        # too
+        0,
+        1,
+    }
+
+
+def is_torch_sym(value):
+    return isinstance(value, (torch.SymBool, torch.SymInt)) and not isinstance(
+        value.node, torch.nested._internal.nested_int.NestedIntNode
+    )
+
+
+def is_int_specialization_case(value, source):
+    from .source import is_from_defaults
+
+    return not TracingContext.get().force_unspec_int_unbacked_size_like and (
+        # Assume integers from global variables want to be specialized
+        not source.guard_source().is_local()
+        # Assume that integers that came from NN modules want to be
+        # specialized (as we don't expect users to be changing the
+        # NN modules on the fly), unless explicitly disabled
+        or (
+            source.guard_source().is_specialized_nn_module()
+            and not config.allow_unspec_int_on_nn_module
+        )
+        or (
+            source.guard_source().is_unspecialized_builtin_nn_module()
+            and not config.allow_unspec_int_on_nn_module
+        )
+        or is_from_defaults(source)
+        # TODO: Delete this condition when rollout is done.  NB: this
+        # condition never evaluates True in open source
+        or (
+            not justknobs_check("pytorch/dynamo:enable_unspecialize_zero_one_plain_int")
+            and value in common_constants()
+        )
+    )
+
+
 def specialize_symnode(arg):
-    from .variables import ConstantVariable, SymNodeVariable
+    from .variables import ConstantVariable, LazyVariableTracker, SymNodeVariable
 
     # Guard and specialize
+    if isinstance(arg, LazyVariableTracker) and not arg.is_realized():
+        # Find if the arg would be realized as SymNodeVariable later on. If yes,
+        # realize it and specialize. Else return the arg.
+
+        source = arg.original_source()
+        value = arg.original_value()
+
+        is_symnode_vt = is_torch_sym(value) or (
+            not config.specialize_int
+            and type(value) is int
+            and not is_int_specialization_case(value, source)
+        )
+
+        if not is_symnode_vt:
+            return arg
+
     if isinstance(arg, SymNodeVariable):
         return ConstantVariable.create(arg.evaluate_expr())
-
     return arg
 
 
