@@ -6556,17 +6556,16 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
         dataloader = torch.utils.data.DataLoader(dataset, batch_size=10)
         model = MLP(DIM, 4 * DIM, DIM)
 
-        # required for DDP wrapper initialization
-        prior_master_addr = os.environ.get("MASTER_ADDR", None)
-        prior_master_port = os.environ.get("MASTER_PORT", None)
-        assert not ((prior_master_addr is None) ^ (prior_master_port is None))
-        os.environ["MASTER_ADDR"] = "localhost"
-        os.environ["MASTER_PORT"] = "12355"
-        dist.init_process_group(backend="nccl", world_size=1, rank=0)
-        model = model.to("cuda")
-        model = nn.parallel.DistributedDataParallel(model)
-
         try:
+            # required for DDP wrapper initialization
+            prior_master_addr = os.environ.get("MASTER_ADDR", None)
+            prior_master_port = os.environ.get("MASTER_PORT", None)
+            os.environ["MASTER_ADDR"] = "localhost"
+            os.environ["MASTER_PORT"] = "12355"
+            dist.init_process_group(backend="nccl", world_size=1, rank=0)
+            model = model.to("cuda")
+            model = nn.parallel.DistributedDataParallel(model)
+
             for batch in dataloader:
                 x, y = batch
                 x = x.to("cuda")
@@ -6575,11 +6574,14 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
                 loss.backward()
         finally:
             dist.destroy_process_group()
-            if prior_master_addr and prior_master_port:
+            if prior_master_addr:
                 os.environ["MASTER_ADDR"] = prior_master_addr
-                os.environ["MASTER_PORT"] = prior_master_port
             else:
                 del os.environ["MASTER_ADDR"]
+
+            if prior_master_port:
+                os.environ["MASTER_PORT"] = prior_master_port
+            else:
                 del os.environ["MASTER_PORT"]
 
 
