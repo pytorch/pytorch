@@ -63,6 +63,12 @@ struct EnableTorchFunction {
     at::impl::PythonTorchFunctionTLS::set_disabled_state(
         at::impl::TorchFunctionDisabledState::ENABLED);
   }
+
+  EnableTorchFunction(const EnableTorchFunction& other) = delete;
+  EnableTorchFunction(EnableTorchFunction&& other) = delete;
+  EnableTorchFunction& operator=(const EnableTorchFunction& other) = delete;
+  EnableTorchFunction& operator=(EnableTorchFunction&& other) = delete;
+
   ~EnableTorchFunction() {
     at::impl::PythonTorchFunctionTLS::set_disabled_state(old_);
   }
@@ -73,6 +79,12 @@ struct EnablePythonDispatcher {
   EnablePythonDispatcher() : old_(c10::impl::PythonDispatcherTLS::get_state()) {
     c10::impl::PythonDispatcherTLS::set_state(getPyInterpreter());
   }
+  EnablePythonDispatcher(const EnablePythonDispatcher& other) = delete;
+  EnablePythonDispatcher(EnablePythonDispatcher&& other) = delete;
+  EnablePythonDispatcher& operator=(const EnablePythonDispatcher& other) =
+      delete;
+  EnablePythonDispatcher& operator=(EnablePythonDispatcher&& other) = delete;
+
   ~EnablePythonDispatcher() {
     c10::impl::PythonDispatcherTLS::set_state(old_);
   }
@@ -210,6 +222,9 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
   py::class_<KinetoEvent>(m, "_KinetoEvent")
       // name of the event
       .def("name", [](const KinetoEvent& e) { return e.name(); })
+      .def(
+          "overload_name",
+          [](const KinetoEvent& e) { return e.overload_name(); })
       // PyTorch thread id of the start callback
       .def(
           "start_thread_id",
