@@ -1,14 +1,15 @@
 # mypy: allow-untyped-defs
 import sys
-from typing import Any, Callable, Iterable, List, Tuple
+from typing import Any, Callable
+from collections.abc import Iterable
 
 
 __all__ = ["trace_dependencies"]
 
 
 def trace_dependencies(
-    callable: Callable[[Any], Any], inputs: Iterable[Tuple[Any, ...]]
-) -> List[str]:
+    callable: Callable[[Any], Any], inputs: Iterable[tuple[Any, ...]]
+) -> list[str]:
     """Trace the execution of a callable in order to determine which modules it uses.
 
     Args:

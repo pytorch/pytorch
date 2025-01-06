@@ -26,14 +26,8 @@ from pathlib import Path
 from typing import (
     Any,
     Callable,
-    Generator,
-    List,
-    Mapping,
     NamedTuple,
     Optional,
-    Sequence,
-    Tuple,
-    Type,
     TYPE_CHECKING,
 )
 from typing_extensions import Self
@@ -98,6 +92,7 @@ except ImportError:
 
 
 if TYPE_CHECKING:
+    from collections.abc import Generator, Mapping, Sequence
     from torch.onnx._internal.fx import diagnostics
 
 
@@ -746,7 +741,7 @@ def timed(
     return (time_total, result) if return_result else time_total
 
 
-def _normalize_bench_inputs(example_inputs) -> Tuple[Tuple[Any], Mapping[str, Any]]:
+def _normalize_bench_inputs(example_inputs) -> tuple[tuple[Any], Mapping[str, Any]]:
     # NOTE(bowbao): For huggingface benchmark, example_inputs are formatted as dictionary,
     # and consumed like `model(**example_inputs)`.
     # For other benchmarks, example_inputs are formatted as tuple and consumed
@@ -1780,7 +1775,7 @@ class OnnxModel(abc.ABC):
             for ort_input, pt_input in zip(self.onnx_session.get_inputs(), pt_inputs)
         }
 
-    def adapt_onnx_outputs_to_pt(self, onnx_outputs: List[npt.NDArray]) -> Any:
+    def adapt_onnx_outputs_to_pt(self, onnx_outputs: list[npt.NDArray]) -> Any:
         pt_outputs = [
             torch.from_numpy(onnx_output).to(current_device)
             for onnx_output in onnx_outputs
@@ -2218,11 +2213,11 @@ class OnnxExportErrorRow:
         )
 
     @property
-    def headers(self) -> List[str]:
+    def headers(self) -> list[str]:
         return [field.name for field in dataclasses.fields(self)]
 
     @property
-    def row(self) -> List[str]:
+    def row(self) -> list[str]:
         return [getattr(self, field.name) for field in dataclasses.fields(self)]
 
 
@@ -2272,7 +2267,7 @@ class OnnxContext:
 
 def optimize_onnx_ctx(
     output_directory: str,
-    onnx_model_cls: Type[OnnxModel],
+    onnx_model_cls: type[OnnxModel],
     run_n_iterations: Callable,
     dynamic_shapes: bool = False,
     copy_before_export: bool = False,

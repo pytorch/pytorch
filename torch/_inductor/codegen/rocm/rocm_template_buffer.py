@@ -1,4 +1,5 @@
-from typing import Callable, Sequence, TypeVar
+from typing import Callable, TypeVar
+from collections.abc import Sequence
 from typing_extensions import ParamSpec
 
 from ...ir import Buffer, Layout, TemplateBuffer

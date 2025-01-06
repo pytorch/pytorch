@@ -1,7 +1,6 @@
 # Owner(s): ["module: c10d"]
 import threading
 import unittest
-from typing import List
 
 import torch
 import torch.distributed as dist
@@ -65,7 +64,7 @@ class TestWithNCCL(MultiProcessTestCase):
         return 2
 
     @property
-    def ranks(self) -> List[int]:
+    def ranks(self) -> list[int]:
         return list(range(self.world_size))
 
     @property
@@ -556,7 +555,7 @@ class CompileTest(TestCase):
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @fresh_inductor_cache()
     def test_inductor_all_reduce_coalesced(self):
-        def func(args: List[torch.Tensor]) -> torch.Tensor:
+        def func(args: list[torch.Tensor]) -> torch.Tensor:
             bufs = [arg + 42 for arg in args]
             # Expect in-place with inductor allocated buf
             ar0 = funcol.all_reduce_coalesced(bufs, "avg", "0")
@@ -714,7 +713,7 @@ class CompileTest(TestCase):
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @fresh_inductor_cache()
     def test_inductor_all_gather_into_tensor_coalesced(self):
-        def func(args: List[torch.Tensor]) -> torch.Tensor:
+        def func(args: list[torch.Tensor]) -> torch.Tensor:
             ag0 = funcol.all_gather_into_tensor_coalesced(args, "0")
             ag0 = [funcol.wait_tensor(out) for out in ag0]
             return ag0
@@ -796,7 +795,7 @@ class CompileTest(TestCase):
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @fresh_inductor_cache()
     def test_inductor_reduce_scatter_tensor_coalesced(self):
-        def func(args: List[torch.Tensor]) -> torch.Tensor:
+        def func(args: list[torch.Tensor]) -> torch.Tensor:
             rs0 = funcol.reduce_scatter_tensor_coalesced(
                 args, "avg", [0] * len(args), "0"
             )

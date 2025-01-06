@@ -4,7 +4,7 @@ import functools
 import itertools
 import operator
 import time
-from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING, Union
+from typing import Any, Optional, TYPE_CHECKING, Union
 
 import torch
 from torch._dynamo.external_utils import (
@@ -114,10 +114,10 @@ class AutogradCompilerInstance:
 
     def begin_capture(
         self,
-        inputs: List[torch.Tensor],
-        sizes: List[int],
-        scalars: List[Union[int, float]],
-        origins: List[List[Tuple[int, str]]],
+        inputs: list[torch.Tensor],
+        sizes: list[int],
+        scalars: list[Union[int, float]],
+        origins: list[list[tuple[int, str]]],
     ):
         counters["compiled_autograd"]["captures"] += 1
         self.id = next(COMPILE_COUNTER)
@@ -132,7 +132,7 @@ class AutogradCompilerInstance:
         )
 
         self.aot_graph_cls_name: Optional[str] = None
-        self.aot_graph_infos: Dict[int, Dict[str, Any]] = {}
+        self.aot_graph_infos: dict[int, dict[str, Any]] = {}
         self.fx_tracer.root = torch.nn.Module()
         self.fx_tracer.graph = torch.fx.Graph(tracer_cls=PythonKeyTracer)
         self.fx_tracer.tensor_attrs = {}
@@ -218,7 +218,7 @@ class AutogradCompilerInstance:
 
         with disable_proxy_modes_tracing():
             # create fake Tensors
-            grad_ins: List[Optional[torch.Tensor]] = []
+            grad_ins: list[Optional[torch.Tensor]] = []
             for output_metadata in output_metadatas:
                 if output_metadata is None:
                     grad_ins.append(None)
@@ -301,8 +301,8 @@ class AutogradCompilerInstance:
     # When compiled autograd traces those nodes, it lifts the scalar tensors, resulting in a graph
     # with some cpu 0-dim tensor inputs. To prevent the entire graph from skipping cudagraph, we move the
     # scalars tensors to cuda. This works because ATen/prims ops will accept cuda 0-dim tensors too.
-    def move_graph_nodes_to_cuda(self, graph) -> List[int]:
-        to_move: Dict[int, torch.fx.Node] = {}
+    def move_graph_nodes_to_cuda(self, graph) -> list[int]:
+        to_move: dict[int, torch.fx.Node] = {}
         has_cuda_inputs = False
         nodes = list(graph.nodes)
         assert nodes[0].target == "inputs"
@@ -401,7 +401,7 @@ class AutogradCompilerInstance:
         # Proper fix is Richard's Python compiled autograd effort which will avoid calling make_fx and
         # should prevent these ops from going into the CA graph.
         self.dce()
-        runtime_inputs_to_move: List[int] = []
+        runtime_inputs_to_move: list[int] = []
         if snapshot_cudagraph_enabled():
             runtime_inputs_to_move = self.move_graph_nodes_to_cuda(self.fx_tracer.graph)
 
@@ -776,7 +776,7 @@ class AutogradCompilerInstance:
         return proxy_tensor.proxy
 
     def bind_tensors_to_proxies(
-        self, tensors, proxies, origins: Optional[List[Tuple[int, str]]] = None
+        self, tensors, proxies, origins: Optional[list[tuple[int, str]]] = None
     ):
         if isinstance(proxies, torch.fx.Proxy):
             if origins:

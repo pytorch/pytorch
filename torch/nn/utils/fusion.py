@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import copy
-from typing import Optional, Tuple, TypeVar
+from typing import Optional, TypeVar
 
 import torch
 
@@ -62,7 +62,7 @@ def fuse_conv_bn_weights(
     bn_w: Optional[torch.Tensor],
     bn_b: Optional[torch.Tensor],
     transpose: bool = False,
-) -> Tuple[torch.nn.Parameter, torch.nn.Parameter]:
+) -> tuple[torch.nn.Parameter, torch.nn.Parameter]:
     r"""Fuse convolutional module parameters and BatchNorm module parameters into new convolutional module parameters.
 
     Args:
@@ -161,7 +161,7 @@ def fuse_linear_bn_weights(
     bn_eps: float,
     bn_w: torch.Tensor,
     bn_b: torch.Tensor,
-) -> Tuple[torch.nn.Parameter, torch.nn.Parameter]:
+) -> tuple[torch.nn.Parameter, torch.nn.Parameter]:
     r"""Fuse linear module parameters and BatchNorm module parameters into new linear module parameters.
 
     Args:

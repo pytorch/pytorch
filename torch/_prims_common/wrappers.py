@@ -2,7 +2,8 @@
 import inspect
 import warnings
 from functools import wraps
-from typing import Callable, NamedTuple, Optional, overload, Sequence, Tuple, TypeVar
+from typing import Callable, NamedTuple, Optional, overload, TypeVar
+from collections.abc import Sequence
 from typing_extensions import ParamSpec
 
 import torch
@@ -253,7 +254,7 @@ def out_wrapper(
         out_type = (
             TensorLikeType
             if is_tensor
-            else Tuple[tuple(TensorLikeType for _ in range(len(out_names)))]
+            else tuple[tuple(TensorLikeType for _ in range(len(out_names)))]
         )
         return_type = (
             TensorLikeType
@@ -292,7 +293,7 @@ def out_wrapper(
             assert (
                 isinstance(result, TensorLike)
                 and is_tensor
-                or isinstance(result, Tuple)  # type: ignore[arg-type]
+                or isinstance(result, tuple)  # type: ignore[arg-type]
                 and len(result) == len(out_names)  # type: ignore[arg-type]
             )
             if out is not None:
@@ -320,7 +321,7 @@ def out_wrapper(
                     )
                     _safe_copy_out(copy_from=result, copy_to=out, exact_dtype=exact_dtype)  # type: ignore[arg-type]
                 else:
-                    assert isinstance(out, Tuple)  # type: ignore[arg-type]
+                    assert isinstance(out, tuple)  # type: ignore[arg-type]
                     torch._check_type(
                         len(out) == len(result),  # type: ignore[arg-type]
                         lambda: f"expected tuple of {len(result)} elements but got {len(out)}",  # type: ignore[arg-type]

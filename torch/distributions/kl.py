@@ -2,7 +2,7 @@
 import math
 import warnings
 from functools import total_ordering
-from typing import Callable, Dict, Tuple, Type
+from typing import Callable
 
 import torch
 from torch import inf
@@ -38,11 +38,11 @@ from .uniform import Uniform
 from .utils import _sum_rightmost, euler_constant as _euler_gamma
 
 
-_KL_REGISTRY: Dict[
-    Tuple[Type, Type], Callable
+_KL_REGISTRY: dict[
+    tuple[type, type], Callable
 ] = {}  # Source of truth mapping a few general (type, type) pairs to functions.
-_KL_MEMOIZE: Dict[
-    Tuple[Type, Type], Callable
+_KL_MEMOIZE: dict[
+    tuple[type, type], Callable
 ] = {}  # Memoized version mapping many specific (type, type) pairs to functions.
 
 __all__ = ["register_kl", "kl_divergence"]

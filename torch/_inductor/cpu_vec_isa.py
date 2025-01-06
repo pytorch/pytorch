@@ -7,7 +7,7 @@ import re
 import subprocess
 import sys
 import warnings
-from typing import Any, Callable, Dict, List, Union
+from typing import Any, Callable, Union
 
 import torch
 from torch._inductor import config
@@ -33,9 +33,9 @@ def _get_isa_dry_compile_fingerprint(isa_flags: str) -> str:
 
 class VecISA:
     _bit_width: int
-    _macro: List[str]
+    _macro: list[str]
     _arch_flags: str
-    _dtype_nelements: Dict[torch.dtype, int]
+    _dtype_nelements: dict[torch.dtype, int]
 
     # Note [Checking for Vectorized Support in Inductor]
     # TorchInductor CPU vectorization reuses PyTorch vectorization utility functions
@@ -79,7 +79,7 @@ cdll.LoadLibrary("__lib_path__")
     def nelements(self, dtype: torch.dtype = torch.float) -> int:
         return self._dtype_nelements[dtype]
 
-    def build_macro(self) -> List[str]:
+    def build_macro(self) -> list[str]:
         return self._macro
 
     def build_arch_flags(self) -> str:
@@ -300,11 +300,11 @@ class InvalidVecISA(VecISA):
     __hash__: Callable[[VecISA], Any] = VecISA.__hash__
 
 
-def x86_isa_checker() -> List[str]:
-    supported_isa: List[str] = []
+def x86_isa_checker() -> list[str]:
+    supported_isa: list[str] = []
 
     def _check_and_append_supported_isa(
-        dest: List[str], isa_supported: bool, isa_name: str
+        dest: list[str], isa_supported: bool, isa_name: str
     ) -> None:
         if isa_supported:
             dest.append(isa_name)
@@ -333,7 +333,7 @@ supported_vec_isa_list = [VecAMX(), VecAVX512(), VecAVX2(), VecNEON(), VecSVE()]
 
 def get_isa_from_cpu_capability(
     capability: Union[str, None],
-    vec_isa_list: List[VecISA],
+    vec_isa_list: list[VecISA],
     invalid_vec_isa: InvalidVecISA,
 ):
     # AMX setting is not supported in eager
@@ -364,8 +364,8 @@ def get_isa_from_cpu_capability(
 # might have too much redundant content that is useless for ISA check. Hence,
 # we only cache some key isa information.
 @functools.lru_cache(None)
-def valid_vec_isa_list() -> List[VecISA]:
-    isa_list: List[VecISA] = []
+def valid_vec_isa_list() -> list[VecISA]:
+    isa_list: list[VecISA] = []
     if sys.platform == "darwin" and platform.processor() == "arm":
         isa_list.append(VecNEON())
 
@@ -411,7 +411,7 @@ def pick_vec_isa() -> VecISA:
     if config.is_fbcode() and (platform.machine() in ["x86_64", "AMD64"]):
         return VecAVX2()
 
-    _valid_vec_isa_list: List[VecISA] = valid_vec_isa_list()
+    _valid_vec_isa_list: list[VecISA] = valid_vec_isa_list()
     if not _valid_vec_isa_list:
         return invalid_vec_isa
 

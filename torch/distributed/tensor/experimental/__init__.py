@@ -1,6 +1,6 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 from contextlib import contextmanager
-from typing import Iterator
+from collections.abc import Iterator
 
 from torch.distributed.tensor._api import DTensor
 from torch.distributed.tensor.experimental._attention import context_parallel

@@ -1,5 +1,5 @@
 # mypy: allow-untyped-defs
-from typing import Dict, List, Optional
+from typing import Optional
 
 import torch
 import torch.nn as nn
@@ -28,7 +28,7 @@ def post_training_sparse_quantize(
     model,
     data_sparsifier_class,
     sparsify_first=True,
-    select_embeddings: Optional[List[nn.Module]] = None,
+    select_embeddings: Optional[list[nn.Module]] = None,
     **sparse_config,
 ):
     """Takes in a model and applies sparsification and quantization to only embeddings & embeddingbags.
@@ -67,7 +67,7 @@ def post_training_sparse_quantize(
     else:
         embedding_modules = []
         assert isinstance(
-            select_embeddings, List
+            select_embeddings, list
         ), "the embedding_modules must be a list of embedding modules"
         for emb in select_embeddings:
             assert (
@@ -104,7 +104,7 @@ def post_training_sparse_quantize(
         torch.ao.quantization.convert(model, inplace=True)
 
         # retrieve scale & zero_points
-        quantize_params: Dict[str, Dict] = {
+        quantize_params: dict[str, dict] = {
             "scales": {},
             "zero_points": {},
             "dequant_weights": {},

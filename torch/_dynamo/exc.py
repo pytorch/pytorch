@@ -6,7 +6,7 @@ import textwrap
 import typing
 from enum import auto, Enum
 from traceback import extract_stack, format_exc, format_list, StackSummary
-from typing import Any, NoReturn, Optional, Tuple, Type, TYPE_CHECKING
+from typing import Any, NoReturn, Optional, TYPE_CHECKING
 
 import torch._guards
 
@@ -273,7 +273,7 @@ observed_exception_map = {
 }
 
 
-def raise_observed_exception(e: Type[Exception], tx: Any) -> None:
+def raise_observed_exception(e: type[Exception], tx: Any) -> None:
     from .variables import BuiltinVariable
 
     # CPython here raises an exception. Since there is no python code, we have to manually setup the exception
@@ -425,7 +425,7 @@ def augment_exc_message(exc: Exception, msg: str = "\n", export: bool = False) -
 
 def get_exc_message(
     e: Exception, compile_id: CompileId
-) -> Tuple[Optional[str], Optional[int]]:
+) -> tuple[Optional[str], Optional[int]]:
     filename = None
     lineno = None
     if e.innermost_user_frame_summary is not None:  # type: ignore[attr-defined]

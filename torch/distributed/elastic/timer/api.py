@@ -10,7 +10,7 @@ import threading
 import time
 from contextlib import contextmanager
 from inspect import getframeinfo, stack
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Optional
 
 
 __all__ = [
@@ -103,7 +103,7 @@ class RequestQueue(abc.ABC):
         """
 
     @abc.abstractmethod
-    def get(self, size: int, timeout: float) -> List[TimerRequest]:
+    def get(self, size: int, timeout: float) -> list[TimerRequest]:
         """
         Gets up to ``size`` number of timer requests in a blocking fashion
         (no more than ``timeout`` seconds).
@@ -134,7 +134,7 @@ class TimerServer(abc.ABC):
         self._stop_signaled = False
 
     @abc.abstractmethod
-    def register_timers(self, timer_requests: List[TimerRequest]) -> None:
+    def register_timers(self, timer_requests: list[TimerRequest]) -> None:
         """
         Processes the incoming timer requests and registers them with the server.
         The timer request can either be a acquire-timer or release-timer request.
@@ -143,13 +143,13 @@ class TimerServer(abc.ABC):
         """
 
     @abc.abstractmethod
-    def clear_timers(self, worker_ids: Set[Any]) -> None:
+    def clear_timers(self, worker_ids: set[Any]) -> None:
         """
         Clears all timers for the given ``worker_ids``.
         """
 
     @abc.abstractmethod
-    def get_expired_timers(self, deadline: float) -> Dict[str, List[TimerRequest]]:
+    def get_expired_timers(self, deadline: float) -> dict[str, list[TimerRequest]]:
         """
         Returns all expired timers for each worker_id. An expired timer
         is a timer for which the expiration_time is less than or equal to

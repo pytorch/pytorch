@@ -17,17 +17,8 @@ from typing import (
     Any,
     Callable,
     cast,
-    Dict,
-    Generator,
-    Iterable,
-    List,
     Literal,
-    Mapping,
     Optional,
-    Sequence,
-    Set,
-    Tuple,
-    Type,
     TYPE_CHECKING,
     TypeVar,
     Union,
@@ -69,6 +60,7 @@ from ._fake_tensor_utils import _CacheKeyState, _PySymInputStub, _SymIntOutputSt
 
 
 if TYPE_CHECKING:
+    from collections.abc import Generator, Iterable, Mapping, Sequence
     from types import TracebackType
 
     from torch._guards import Source
@@ -94,7 +86,7 @@ class _Unassigned:
 
 _UNASSIGNED = _Unassigned()
 
-DimList = List
+DimList = list
 
 pytree = torch.utils._pytree
 T = TypeVar("T")
@@ -145,7 +137,7 @@ class MetadataMismatchError(RuntimeError):
     reason: str
 
 
-def ordered_set(*items: T) -> Dict[T, Literal[True]]:
+def ordered_set(*items: T) -> dict[T, Literal[True]]:
     return dict.fromkeys(items, True)
 
 
@@ -160,8 +152,8 @@ def unset_fake_temporarily() -> Generator[Optional[TorchDispatchMode], None, Non
 
 
 def get_plain_tensors(
-    subclass: Tensor, *, out: List[Union[Tensor, int, SymInt]]
-) -> List[Union[Tensor, int, SymInt]]:
+    subclass: Tensor, *, out: list[Union[Tensor, int, SymInt]]
+) -> list[Union[Tensor, int, SymInt]]:
     # This function is used in Runtime, do not add redundant asserts
     todo = [subclass]
     while todo:
@@ -240,7 +232,7 @@ def torch_decomp_decompositions(func: OpOverload) -> bool:
     ) and decomposition_table[func].__name__ in dir(decompositions)
 
 
-def tree_flatten_only(ty: Type[T], tree: PyTree) -> List[T]:
+def tree_flatten_only(ty: type[T], tree: PyTree) -> list[T]:
     flat_vals = pytree.tree_leaves(tree)
     return [elem for elem in flat_vals if isinstance(elem, ty)]
 
@@ -273,7 +265,7 @@ class FakeTensorConverter:
         return self.meta_converter.tensor_memo
 
     meta_converter: MetaConverter
-    constant_storage_mapping: Dict[StorageWeakRef, List[ReferenceType]]
+    constant_storage_mapping: dict[StorageWeakRef, list[ReferenceType]]
     export: bool
 
     def __init__(self, *, copy_data: bool = False, export: bool = False) -> None:
@@ -573,7 +565,7 @@ class SymNumberMemoDescriptor:
         return f"_{self._name}_epoch"
 
     def __get__(
-        self, obj: FakeTensor, objtype: Optional[Type[FakeTensor]] = None
+        self, obj: FakeTensor, objtype: Optional[type[FakeTensor]] = None
     ) -> Optional[Union[torch.SymInt, torch.SymFloat]]:
         if (r := getattr(obj, self._memo(obj))) is None:
             return None
@@ -666,13 +658,13 @@ class FakeTensor(Tensor):
 
     # We don't support named tensors; graph break
     @property
-    def names(self) -> List[str]:
+    def names(self) -> list[str]:
         raise UnsupportedFakeTensorException(
             "torch.compile doesn't support named tensors"
         )
 
     @names.setter
-    def names(self, _: List[str]) -> None:
+    def names(self, _: list[str]) -> None:
         raise NotImplementedError
 
     @staticmethod
@@ -766,7 +758,7 @@ class FakeTensor(Tensor):
     def __torch_dispatch__(  # type: ignore[override] # TODO
         cls,
         func: OpOverload,
-        types: Sequence[Type],
+        types: Sequence[type],
         args: Sequence[object] = (),
         kwargs: Mapping[str, object] = immutable_dict(),
     ) -> object:
@@ -839,7 +831,7 @@ class FakeTensor(Tensor):
     @staticmethod
     def _find_common_device(
         func: OpOverload, flat_args: Sequence[object]
-    ) -> Tuple[torch.device, bool]:
+    ) -> tuple[torch.device, bool]:
         # Returns: (common_device, has_scalar_only_inputs)
 
         # cpu - zero-dim tensors can be called in cuda kernels,
@@ -934,8 +926,8 @@ class TensorMetadata:
     """
 
     dtype: torch.dtype
-    shape: Tuple[_MetadataIntLike, ...]
-    stride: Tuple[_MetadataIntLike, ...]
+    shape: tuple[_MetadataIntLike, ...]
+    stride: tuple[_MetadataIntLike, ...]
     device: torch.device
     layout: torch.layout
     memory_format: Optional[torch.memory_format]
@@ -953,7 +945,7 @@ class TensorMetadata:
 
     def _flatten_into(
         self,
-        result: List[object],
+        result: list[object],
         mode: FakeTensorMode,
         state: _CacheKeyState,
     ) -> None:
@@ -1016,10 +1008,10 @@ class _DispatchCacheKey:
     Key for the FakeTensor dispatch cache.
     """
 
-    key: Tuple[object, ...]
+    key: tuple[object, ...]
     hashvalue: int
 
-    def __init__(self, tup: Tuple[object, ...]) -> None:
+    def __init__(self, tup: tuple[object, ...]) -> None:
         self.key = tup
         self.hashvalue = hash(tup)
 
@@ -1065,7 +1057,7 @@ class _DispatchCacheEntry:
     is_output_tuple flag helps in differentiating the return type
     """
 
-    output_infos: Tuple[_DispatchCacheEntryOutputInfo]
+    output_infos: tuple[_DispatchCacheEntryOutputInfo]
     is_output_tuple: bool = False
 
 
@@ -1088,7 +1080,7 @@ class DispatchCacheInfo:
 
     hits: int
     misses: int
-    bypasses: Dict[str, int]
+    bypasses: dict[str, int]
     size: int
 
 
@@ -1102,10 +1094,10 @@ class DispatchCacheInfo:
 
 
 class FakeTensorMode(TorchDispatchMode):
-    cache: Dict[_DispatchCacheKey, _DispatchCacheEntry] = {}
+    cache: dict[_DispatchCacheKey, _DispatchCacheEntry] = {}
     cache_hits: int = 0
     cache_misses: int = 0
-    cache_bypasses: Dict[str, int] = defaultdict(int)
+    cache_bypasses: dict[str, int] = defaultdict(int)
     # Every time you retrace using the same fake tensor mode, you should
     # advance the epoch so we don't reuse unbacked memos
     epoch: int = 0
@@ -1200,8 +1192,8 @@ class FakeTensorMode(TorchDispatchMode):
         # in_kernel_invocation
         # If another fake mode was already active when we enter, we also stash it here.
         # That way when we exit, we know to re-enable the previous fake mode.
-        self.enter_stack: List[
-            Tuple[bool, Optional[TorchDispatchMode], Optional[bool]]
+        self.enter_stack: list[
+            tuple[bool, Optional[TorchDispatchMode], Optional[bool]]
         ] = []
 
         self.shape_env = shape_env
@@ -1264,7 +1256,7 @@ class FakeTensorMode(TorchDispatchMode):
     def __torch_dispatch__(
         self,
         func: OpOverload,
-        types: Sequence[Type],
+        types: Sequence[type],
         args: Sequence[object] = (),
         kwargs: Mapping[str, object] = immutable_dict(),
     ) -> object:
@@ -1301,7 +1293,7 @@ class FakeTensorMode(TorchDispatchMode):
 
     def __exit__(
         self,
-        a: Optional[Type[BaseException]],
+        a: Optional[type[BaseException]],
         b: Optional[BaseException],
         c: Optional[TracebackType],
     ) -> None:
@@ -1348,7 +1340,7 @@ class FakeTensorMode(TorchDispatchMode):
     def _cached_dispatch_impl(
         self,
         func: OpOverload,
-        types: Sequence[Type],
+        types: Sequence[type],
         args: Sequence[object],
         kwargs: Mapping[str, object],
     ) -> object:
@@ -1466,7 +1458,7 @@ class FakeTensorMode(TorchDispatchMode):
 
     def _prep_args_for_hash(
         self,
-        result: List[object],
+        result: list[object],
         args: Union[Mapping[str, object], Sequence[object], Iterable[object]],
         state: _CacheKeyState,
     ) -> None:
@@ -1726,7 +1718,7 @@ class FakeTensorMode(TorchDispatchMode):
         key: _DispatchCacheKey,
         func: OpOverload,
         args: Sequence[object],
-    ) -> Union[Optional[FakeTensor], Tuple[Optional[FakeTensor], ...]]:
+    ) -> Union[Optional[FakeTensor], tuple[Optional[FakeTensor], ...]]:
         """
         Create a new FakeTensor from the cache entry.
         """
@@ -1750,9 +1742,9 @@ class FakeTensorMode(TorchDispatchMode):
 
     def _crosscheck_cache_output(
         self,
-        output: Union[Optional[FakeTensor], Tuple[Optional[FakeTensor], ...]],
+        output: Union[Optional[FakeTensor], tuple[Optional[FakeTensor], ...]],
         func: OpOverload,
-        types: Sequence[Type],
+        types: Sequence[type],
         args: Sequence[object],
         kwargs: Mapping[str, object],
     ) -> None:
@@ -1788,7 +1780,7 @@ class FakeTensorMode(TorchDispatchMode):
     def dispatch(
         self,
         func: OpOverload,
-        types: Sequence[Type],
+        types: Sequence[type],
         args: Sequence[object] = (),
         kwargs: Mapping[str, object] = immutable_dict(),
     ) -> object:
@@ -1974,7 +1966,7 @@ class FakeTensorMode(TorchDispatchMode):
     def _dispatch_impl(
         self,
         func: OpOverload,
-        types: Sequence[Type],
+        types: Sequence[type],
         args: Sequence[object],
         kwargs: Mapping[str, object],
     ) -> Optional[FakeTensor]:
@@ -2428,13 +2420,13 @@ class FakeTensorMode(TorchDispatchMode):
         converter: FakeTensorConverter,
         flat_args: Sequence[object],
         args_spec: TreeSpec,
-    ) -> Tuple[List[object], List[FakeTensor]]:
+    ) -> tuple[list[object], list[FakeTensor]]:
         """
         Checks if the list of tensors are fake tensors.
         If not, try to convert them to fake tensors.
         Returns the original args, kwargs, and a flattened list of (args, kwargs) that are fake tensors.
         """
-        flat_arg_fake_tensors: List[FakeTensor] = []
+        flat_arg_fake_tensors: list[FakeTensor] = []
 
         def validate(x: T) -> Union[T, FakeTensor]:
             if not isinstance(x, Tensor):
@@ -2655,7 +2647,7 @@ def run_fallback_kernel(
 
         r = func(*args, **kwargs)
 
-    storages: Set[_StoragePointer] = set()
+    storages: set[_StoragePointer] = set()
 
     for e in flat_args:
         if isinstance(e, Tensor):
@@ -2695,7 +2687,7 @@ class FakeCopyMode(TorchFunctionMode):
     def __torch_function__(
         self,
         func: OpOverload,
-        types: Sequence[Type],
+        types: Sequence[type],
         args: Sequence[object] = (),
         kwargs: Optional[Mapping[str, object]] = None,
     ) -> FakeTensor:
@@ -2710,7 +2702,7 @@ class FakeCopyMode(TorchFunctionMode):
         elif func == Tensor.__deepcopy__:
             assert len(args) == 2 and len(kwargs) == 0
             tensor = cast(Tensor, args[0])
-            memo = cast(Dict[int, FakeTensor], args[1])
+            memo = cast(dict[int, FakeTensor], args[1])
 
             if id(tensor) in memo:
                 return memo[id(tensor)]

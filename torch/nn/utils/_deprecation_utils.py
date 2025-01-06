@@ -1,6 +1,6 @@
 import importlib
 import warnings
-from typing import Any, Callable, List
+from typing import Any, Callable
 
 
 _MESSAGE_TEMPLATE = (
@@ -9,7 +9,7 @@ _MESSAGE_TEMPLATE = (
 
 
 def lazy_deprecated_import(
-    all: List[str],
+    all: list[str],
     old_module: str,
     new_module: str,
 ) -> Callable:

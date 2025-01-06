@@ -4,10 +4,8 @@ from __future__ import annotations
 from typing import (
     Any,
     Callable,
-    Mapping,
     Protocol,
     runtime_checkable,
-    Sequence,
     TYPE_CHECKING,
 )
 
@@ -17,6 +15,7 @@ from torch.utils import _pytree as pytree
 
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping, Sequence
     import inspect
 
 # TODO(bowbao): Add diagnostics for IO adapters.

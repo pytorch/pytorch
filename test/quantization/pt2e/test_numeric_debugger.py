@@ -3,7 +3,6 @@
 import copy
 import unittest
 from collections import Counter
-from typing import Dict
 
 import torch
 from torch.ao.quantization import (
@@ -37,8 +36,8 @@ class TestNumericDebugger(TestCase):
 
         bfs_trace_with_node_process(model, _assert_node_has_debug_handle)
 
-    def _extract_debug_handles(self, model) -> Dict[str, int]:
-        debug_handle_map: Dict[str, int] = {}
+    def _extract_debug_handles(self, model) -> dict[str, int]:
+        debug_handle_map: dict[str, int] = {}
 
         def _extract_debug_handles_from_node(node):
             nonlocal debug_handle_map
@@ -54,8 +53,8 @@ class TestNumericDebugger(TestCase):
 
         return debug_handle_map
 
-    def _extract_debug_handles_with_prev_decomp_op(self, model) -> Dict[str, int]:
-        prev_decomp_op_to_debug_handle_map: Dict[str, int] = {}
+    def _extract_debug_handles_with_prev_decomp_op(self, model) -> dict[str, int]:
+        prev_decomp_op_to_debug_handle_map: dict[str, int] = {}
 
         def _extract_debug_handles_with_prev_decomp_op_from_node(node):
             nonlocal prev_decomp_op_to_debug_handle_map

@@ -420,7 +420,7 @@ def _save_weight_qparams(
             destination[prefix + "weight_axis"] = weight_axis
 
 
-def _get_weight_qparam_keys(state_dict: typing.Dict[str, typing.Any], prefix: str):
+def _get_weight_qparam_keys(state_dict: dict[str, typing.Any], prefix: str):
     keys = ["weight_qscheme", "weight_dtype"]
     weight_qscheme = state_dict[prefix + "weight_qscheme"]
     if weight_qscheme is not None:

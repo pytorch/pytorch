@@ -2,7 +2,7 @@
 
 import os
 import sys
-from typing import cast, List, Optional, Union
+from typing import cast, Optional, Union
 
 import torch
 import torch.distributed as dist
@@ -177,17 +177,17 @@ class FaultyStorageWriter(TestStorageBase, StorageWriter):
         self._fail_rank("fail_prepare_local_plan")
         return plan
 
-    def prepare_global_plan(self, plans: List[SavePlan]) -> List[SavePlan]:
+    def prepare_global_plan(self, plans: list[SavePlan]) -> list[SavePlan]:
         self._fail_rank("fail_prepare_global_plan")
         return plans
 
     def write_data(
         self, plan: SavePlan, planner: SavePlanner
-    ) -> Future[List[WriteResult]]:
+    ) -> Future[list[WriteResult]]:
         self._fail_rank("fail_write_data")
         return self._fail_rank_async("fail_write_data_async", [])
 
-    def finish(self, metadata: Metadata, results: List[List[WriteResult]]) -> None:
+    def finish(self, metadata: Metadata, results: list[list[WriteResult]]) -> None:
         self._fail_rank("fail_finish")
 
     @classmethod
@@ -210,7 +210,7 @@ class FaultyStorageReader(TestStorageBase, StorageReader):
         self._fail_rank("fail_prepare_local_plan")
         return plan
 
-    def prepare_global_plan(self, plans: List[LoadPlan]) -> List[LoadPlan]:
+    def prepare_global_plan(self, plans: list[LoadPlan]) -> list[LoadPlan]:
         self._fail_rank("fail_prepare_global_plan")
         return plans
 

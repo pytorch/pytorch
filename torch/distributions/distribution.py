@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 import warnings
-from typing import Any, Dict, Optional
+from typing import Any, Optional
 from typing_extensions import deprecated
 
 import torch
@@ -113,7 +113,7 @@ class Distribution:
         return self._event_shape
 
     @property
-    def arg_constraints(self) -> Dict[str, constraints.Constraint]:
+    def arg_constraints(self) -> dict[str, constraints.Constraint]:
         """
         Returns a dictionary from argument names to
         :class:`~torch.distributions.constraints.Constraint` objects that

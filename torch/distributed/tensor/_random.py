@@ -2,7 +2,7 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import contextlib
 import warnings
-from typing import Dict, List, Optional, Union
+from typing import Optional, Union
 
 import torch
 import torch.distributed as dist
@@ -110,12 +110,12 @@ class _RNGStateTracker:
                 f"{self.__class__.__name__} instantiation requires the presence of CUDA/CUDA-like device"
             )
 
-        self._states: Dict[str, Tensor] = {}
+        self._states: dict[str, Tensor] = {}
         self._devices = [self._device_handle.current_device()]
         self._use_distribute_region = True
 
     @property
-    def rng_states(self) -> Dict[str, Tensor]:
+    def rng_states(self) -> dict[str, Tensor]:
         return self._states
 
     @property
@@ -267,7 +267,7 @@ class OffsetBasedRNGTracker(_RNGStateTracker):
         mesh = spec.mesh
         # note: dim_map does not allow double sharding which is the FSDP(fully_shard)+TP
         # case. Replace the custom logic with dim_map once we support it.
-        dim_map: List[Union[int, List[int]]] = [-1] * spec.ndim
+        dim_map: list[Union[int, list[int]]] = [-1] * spec.ndim
         for i, placement in enumerate(spec.placements):
             if isinstance(placement, Shard):
                 shard_dim = placement.dim
@@ -275,7 +275,7 @@ class OffsetBasedRNGTracker(_RNGStateTracker):
                     dim_map[shard_dim] = [i]
                 else:
                     mesh_dim_list = dim_map[shard_dim]
-                    assert isinstance(mesh_dim_list, List)
+                    assert isinstance(mesh_dim_list, list)
                     mesh_dim_list.append(i)
 
         # Compute shard coordinate:
@@ -291,7 +291,7 @@ class OffsetBasedRNGTracker(_RNGStateTracker):
             shard_idx = 0
             total_num_shards = 1
             # the tensor dim is sharded on more than 1 mesh dim
-            if isinstance(mesh_dim, List):
+            if isinstance(mesh_dim, list):
                 rank_coord = [mesh_coordinate[d] for d in mesh_dim]
                 num_shards = [mesh_size[d] for d in mesh_dim]
                 # compute the shard idx and total number of shards
@@ -356,7 +356,7 @@ class OffsetBasedRNGTracker(_RNGStateTracker):
         self.set_offset("parallel-rng", old_offset + numel)
 
     def _calc_shard_linear_idx(
-        self, shard_coord: List[int], shard_size: List[int]
+        self, shard_coord: list[int], shard_size: list[int]
     ) -> int:
         # compute shard linear index
         shard_linear_idx = 0

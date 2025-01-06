@@ -9,13 +9,10 @@ from enum import auto, Enum
 from typing import (
     Any,
     Callable,
-    Dict,
-    List,
     NamedTuple,
     Optional,
-    Sequence,
-    Tuple,
     TypeVar,
+TYPE_CHECKING,
 )
 
 import sympy
@@ -29,6 +26,9 @@ from . import config, dependencies
 from .codegen.common import index_prevent_reordering
 from .utils import cache_on_self, sympy_index_symbol_with_prefix, sympy_subs
 from .virtualized import ops, V
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 
 T = TypeVar("T")
@@ -93,14 +93,14 @@ class LoopBody:
     indexing simplifications and makes it easier to analyze loop bodies.
     """
 
-    indexing_exprs: Dict[str, sympy.Expr]
-    indexing_exprs_name: Dict[sympy.Expr, str]
-    submodules: Dict[str, Any]
-    subblocks: Dict[str, LoopBodyBlock]
-    indirect_vars: List[sympy.Symbol]
-    indirect_var_ranges: Dict[sympy.Symbol, sympy.Expr]
+    indexing_exprs: dict[str, sympy.Expr]
+    indexing_exprs_name: dict[sympy.Expr, str]
+    submodules: dict[str, Any]
+    subblocks: dict[str, LoopBodyBlock]
+    indirect_vars: list[sympy.Symbol]
+    indirect_var_ranges: dict[sympy.Symbol, sympy.Expr]
     root_block: LoopBodyBlock
-    memory_usage: Dict[MemoryUsageType, List[MemoryEntry]]
+    memory_usage: dict[MemoryUsageType, list[MemoryEntry]]
     op_counts: collections.Counter[str]
 
     def __init__(self, fn, args, var_ranges, iter_vars, reduce_vars):
@@ -130,7 +130,7 @@ class LoopBody:
         self.submodules = {"get_index": self.get_index}
         self.subblocks = {}
         self.indirect_vars = []
-        self.indirect_var_ranges: Dict[sympy.Symbol, sympy.Expr] = {}
+        self.indirect_var_ranges: dict[sympy.Symbol, sympy.Expr] = {}
         self.memory_usage = {t: [] for t in MemoryUsageType}
         self.op_counts = collections.Counter()
         self.root_block = LoopBodyBlock(self, fn, args)  # traces
@@ -443,7 +443,7 @@ class LoopBodyBlock:
     operations will manifest as an extra LoopBodyBlock.
     """
 
-    def __init__(self, body: LoopBody, fn: Callable[..., Any], args: List[Any]):
+    def __init__(self, body: LoopBody, fn: Callable[..., Any], args: list[Any]):
         self.body = body
 
         def add_index(expr: sympy.Expr, mtype: MemoryUsageType, **kwargs):
@@ -500,11 +500,11 @@ class LoopBodyBlock:
             def bucketize(
                 self,
                 values: T,
-                boundaries: Tuple[str, sympy.Expr, sympy.Expr, sympy.Expr],
+                boundaries: tuple[str, sympy.Expr, sympy.Expr, sympy.Expr],
                 boundary_indices: T,
                 indexing_dtype: torch.dtype,
                 right: bool,
-                sorter: Optional[Tuple[str, sympy.Expr]] = None,
+                sorter: Optional[tuple[str, sympy.Expr]] = None,
                 sorter_indices: Optional[T] = None,
             ) -> T:
                 """
@@ -562,7 +562,7 @@ class LoopBodyBlock:
             def scan(
                 dtype_proxy,
                 combine_fn: Callable[
-                    [Tuple[Any, ...], Tuple[Any, ...]], Tuple[Any, ...]
+                    [tuple[Any, ...], tuple[Any, ...]], tuple[Any, ...]
                 ],
                 value_proxy,
             ):

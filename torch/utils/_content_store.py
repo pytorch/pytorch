@@ -34,7 +34,7 @@ import hashlib
 import os.path
 import struct
 from collections import defaultdict
-from typing import Dict, Optional, Set
+from typing import Optional
 
 import torch
 import torch._prims as prims
@@ -147,7 +147,7 @@ class ContentStoreWriter:
     #     name
     def __init__(self, loc: str, stable_hash: bool = False) -> None:
         self.loc: str = loc
-        self.seen_storage_hashes: Set[str] = set()
+        self.seen_storage_hashes: set[str] = set()
         self.stable_hash = stable_hash
 
     # TODO: offer some sort of non-blocking API to speed things up
@@ -193,7 +193,7 @@ class ContentStoreReader:
     def __init__(self, loc: str, *, cache=True) -> None:
         self.loc = loc
         self.storage_cache: Optional[
-            Dict[Optional[torch.device], Dict[str, StorageWeakRef]]
+            dict[Optional[torch.device], dict[str, StorageWeakRef]]
         ] = None
         if cache:
             self.storage_cache = defaultdict(dict)

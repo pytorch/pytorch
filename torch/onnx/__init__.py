@@ -48,7 +48,7 @@ __all__ = [
     "is_onnxrt_backend_supported",
 ]
 
-from typing import Any, Callable, Collection, Mapping, Sequence, TYPE_CHECKING
+from typing import Any, Callable, TYPE_CHECKING
 
 import torch
 from torch import _C
@@ -106,6 +106,7 @@ from ._internal._exporter_legacy import (  # usort: skip. needs to be last to av
 
 
 if TYPE_CHECKING:
+    from collections.abc import Collection, Mapping, Sequence
     import os
 
 # Set namespace for exposed private names

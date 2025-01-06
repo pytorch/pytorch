@@ -2,7 +2,7 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 from abc import ABC, abstractmethod
 from functools import partial
-from typing import Any, Dict, Optional, Tuple, Union
+from typing import Any, Optional, Union
 
 import torch
 import torch.nn as nn
@@ -282,7 +282,7 @@ class RowwiseParallel(ParallelStyle):
         if isinstance(module, nn.Linear):
             partition_fn = self._partition_linear_fn
             # rowwise linear runtime sharding requires input tensor shard on last dim
-            self.desired_input_layouts: Tuple[Placement, ...] = (Shard(-1),)
+            self.desired_input_layouts: tuple[Placement, ...] = (Shard(-1),)
         elif isinstance(module, nn.Embedding):
             partition_fn = self._partition_embedding_fn
             # rowwise embedding runtime sharding requires input tensor replicated
@@ -449,12 +449,12 @@ class PrepareModuleInput(ParallelStyle):
     def __init__(
         self,
         *,
-        input_layouts: Optional[Union[Placement, Tuple[Optional[Placement]]]] = None,
+        input_layouts: Optional[Union[Placement, tuple[Optional[Placement]]]] = None,
         desired_input_layouts: Optional[
-            Union[Placement, Tuple[Optional[Placement]]]
+            Union[Placement, tuple[Optional[Placement]]]
         ] = None,
-        input_kwarg_layouts: Optional[Dict[str, Placement]] = None,
-        desired_input_kwarg_layouts: Optional[Dict[str, Placement]] = None,
+        input_kwarg_layouts: Optional[dict[str, Placement]] = None,
+        desired_input_kwarg_layouts: Optional[dict[str, Placement]] = None,
         use_local_output: bool = False,
     ):
         self.input_layouts = (
@@ -596,8 +596,8 @@ class PrepareModuleOutput(ParallelStyle):
     def __init__(
         self,
         *,
-        output_layouts: Union[Placement, Tuple[Placement]],
-        desired_output_layouts: Union[Placement, Tuple[Placement]],
+        output_layouts: Union[Placement, tuple[Placement]],
+        desired_output_layouts: Union[Placement, tuple[Placement]],
         use_local_output: bool = True,
     ):
         self.output_layouts = (

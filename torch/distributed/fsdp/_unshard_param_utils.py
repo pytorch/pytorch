@@ -1,7 +1,8 @@
 # mypy: allow-untyped-defs
 import contextlib
 import warnings
-from typing import cast, Generator
+from typing import cast
+from collections.abc import Generator
 
 import torch
 import torch.distributed.fsdp._traversal_utils as traversal_utils

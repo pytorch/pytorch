@@ -4,7 +4,8 @@ import os
 import threading
 import warnings
 from datetime import timedelta
-from typing import Generator, Tuple
+from typing import Tuple
+from collections.abc import Generator
 from urllib.parse import urlparse
 
 import torch
@@ -76,7 +77,7 @@ if is_available():
     from .options import TensorPipeRpcBackendOptions  # noqa: F401
     from .server_process_global_profiler import _server_process_global_profile
 
-    rendezvous_iterator: Generator[Tuple[Store, int, int], None, None]
+    rendezvous_iterator: Generator[tuple[Store, int, int], None, None]
 
     __all__ += ["init_rpc", "BackendType", "TensorPipeRpcBackendOptions"]
     __all__ = __all__ + api.__all__ + backend_registry.__all__  # noqa: PLE0605

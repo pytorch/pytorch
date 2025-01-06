@@ -20,17 +20,13 @@ from typing import (  # type: ignore[attr-defined]
     _type_check,
     _type_repr,
     Any,
-    Dict,
     ForwardRef,
     Generic,
     get_type_hints,
-    Iterator,
-    List,
-    Set,
-    Tuple,
     TypeVar,
     Union,
 )
+from collections.abc import Iterator
 
 from torch.utils.data.datapipes._hook_iterator import _SnapshotState, hook_iterator
 
@@ -56,10 +52,10 @@ TYPE2ABC = {
     int: Integer,
     float: numbers.Real,
     complex: numbers.Complex,
-    dict: Dict,
-    list: List,
-    set: Set,
-    tuple: Tuple,
+    dict: dict,
+    list: list,
+    set: set,
+    tuple: tuple,
     None: type(None),
 }
 
@@ -474,7 +470,7 @@ def reinforce_type(self, expected_type):
     hint to restrict the type requirement of DataPipe instance.
     """
     if isinstance(expected_type, tuple):
-        expected_type = Tuple[expected_type]
+        expected_type = tuple[expected_type]
     _type_check(expected_type, msg="'expected_type' must be a type")
 
     if not issubtype(expected_type, self.type.param):

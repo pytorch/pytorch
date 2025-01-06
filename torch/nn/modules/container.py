@@ -5,16 +5,12 @@ from collections import abc as container_abcs, OrderedDict
 from itertools import chain, islice
 from typing import (
     Any,
-    Dict,
-    Iterable,
-    Iterator,
-    Mapping,
     Optional,
     overload,
-    Tuple,
     TypeVar,
     Union,
 )
+from collections.abc import Iterable, Iterator, Mapping
 from typing_extensions import deprecated, Self
 
 import torch
@@ -107,7 +103,7 @@ class Sequential(Module):
                 ]))
     """
 
-    _modules: Dict[str, Module]  # type: ignore[assignment]
+    _modules: dict[str, Module]  # type: ignore[assignment]
 
     @overload
     def __init__(self, *args: Module) -> None:
@@ -302,7 +298,7 @@ class ModuleList(Module):
                 return x
     """
 
-    _modules: Dict[str, Module]  # type: ignore[assignment]
+    _modules: dict[str, Module]  # type: ignore[assignment]
 
     def __init__(self, modules: Optional[Iterable[Module]] = None) -> None:
         super().__init__()
@@ -490,7 +486,7 @@ class ModuleDict(Module):
                 return x
     """
 
-    _modules: Dict[str, Module]  # type: ignore[assignment]
+    _modules: dict[str, Module]  # type: ignore[assignment]
 
     def __init__(self, modules: Optional[Mapping[str, Module]] = None) -> None:
         super().__init__()
@@ -539,7 +535,7 @@ class ModuleDict(Module):
         return self._modules.keys()
 
     @_copy_to_script_wrapper
-    def items(self) -> Iterable[Tuple[str, Module]]:
+    def items(self) -> Iterable[tuple[str, Module]]:
         r"""Return an iterable of the ModuleDict key/value pairs."""
         return self._modules.items()
 
@@ -771,7 +767,7 @@ class ParameterDict(Module):
 
     def __init__(self, parameters: Any = None) -> None:
         super().__init__()
-        self._keys: Dict[str, None] = {}
+        self._keys: dict[str, None] = {}
         if parameters is not None:
             self.update(parameters)
 
@@ -855,7 +851,7 @@ class ParameterDict(Module):
         del self[key]
         return v
 
-    def popitem(self) -> Tuple[str, Any]:
+    def popitem(self) -> tuple[str, Any]:
         """Remove and return the last inserted `(key, parameter)` pair from the ParameterDict."""
         k, _ = self._keys.popitem()
         # We need the key in the _keys to be able to access/del
@@ -888,7 +884,7 @@ class ParameterDict(Module):
         r"""Return an iterable of the ParameterDict keys."""
         return self._keys.keys()
 
-    def items(self) -> Iterable[Tuple[str, Any]]:
+    def items(self) -> Iterable[tuple[str, Any]]:
         r"""Return an iterable of the ParameterDict key/value pairs."""
         return ((k, self[k]) for k in self._keys)
 

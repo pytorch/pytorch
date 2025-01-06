@@ -6,9 +6,12 @@ from __future__ import annotations
 import dataclasses
 import enum
 import logging
-from typing import Mapping, Sequence
 
 from torch.onnx._internal.diagnostics.infra import formatter, sarif
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping, Sequence
 
 
 class Level(enum.IntEnum):

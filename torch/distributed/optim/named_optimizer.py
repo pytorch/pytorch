@@ -5,14 +5,11 @@ from copy import deepcopy
 from typing import (
     Any,
     Callable,
-    Collection,
-    Dict,
-    List,
-    Mapping,
     Optional,
     overload,
     Union,
 )
+from collections.abc import Collection, Mapping
 
 import torch
 import torch.nn as nn
@@ -21,7 +18,7 @@ from torch.distributed._shard.sharded_tensor import ShardedTensor
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 
 
-__all__: List[str] = []
+__all__: list[str] = []
 
 logger = logging.getLogger(__name__)
 
@@ -129,7 +126,7 @@ class _NamedOptimizer(optim.Optimizer):
                         )
                 param_group["params"] = params
 
-    def state_dict(self) -> Dict[str, Any]:
+    def state_dict(self) -> dict[str, Any]:
         """
         Return the ``state_dict`` of the optimizer.
 
@@ -317,7 +314,7 @@ class _NamedOptimizer(optim.Optimizer):
         # Calling ``step`` will load the initial state for optimizer states.
         self.step(closure=None)
 
-    def _pre_load_state_dict(self, state_dict) -> Dict[str, Any]:
+    def _pre_load_state_dict(self, state_dict) -> dict[str, Any]:
         # TODO(chienchin): This API should be FSDP agnostic and should support
         # general user hooks.
         if isinstance(self.module, FSDP):
@@ -326,7 +323,7 @@ class _NamedOptimizer(optim.Optimizer):
             )
         return state_dict
 
-    def _post_state_dict(self, state_dict) -> Dict[str, Any]:
+    def _post_state_dict(self, state_dict) -> dict[str, Any]:
         # TODO(chienchin): This API should be FSDP agnostic and should support
         # general user hooks.
         if isinstance(self.module, FSDP):
@@ -334,6 +331,6 @@ class _NamedOptimizer(optim.Optimizer):
         return state_dict
 
 
-def _gen_param_group_key(param_keys: List[str]) -> str:
+def _gen_param_group_key(param_keys: list[str]) -> str:
     """Concatenate all param keys as a unique indentifier for one param group."""
     return "/".join(sorted(param_keys))

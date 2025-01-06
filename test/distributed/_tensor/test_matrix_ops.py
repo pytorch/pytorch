@@ -2,7 +2,7 @@
 # Owner(s): ["oncall: distributed"]
 
 import itertools
-from typing import cast, List, Optional
+from typing import cast, Optional
 
 import torch
 import torch.nn.functional as F
@@ -102,7 +102,7 @@ class DistMatrixOpsTest(DTensorTestBase):
         local_res = torch.mm(t1, t2)
 
         def test_placement_comb(
-            placements1: List[Placement], placements2: List[Placement]
+            placements1: list[Placement], placements2: list[Placement]
         ) -> None:
             dt1 = distribute_tensor(t1, device_mesh, placements1)
             dt2 = distribute_tensor(t2, device_mesh, placements2)
@@ -186,9 +186,9 @@ class DistMatrixOpsTest(DTensorTestBase):
         batch_2 = torch.rand(4, 8, 8, device=self.device_type, requires_grad=True)
 
         def test_placement_comb(
-            tensor_placements: List[Placement],
-            batch_1_placements: List[Placement],
-            batch_2_placements: List[Placement],
+            tensor_placements: list[Placement],
+            batch_1_placements: list[Placement],
+            batch_2_placements: list[Placement],
             beta: int,
             alpha: int,
             batch_1_grad: Optional[torch.Tensor],
@@ -252,8 +252,8 @@ class DistMatrixOpsTest(DTensorTestBase):
         local_result.backward(grad_local_res)
 
         def test_placement_comb(
-            placements1: List[Placement],
-            placements2: List[Placement],
+            placements1: list[Placement],
+            placements2: list[Placement],
         ) -> None:
             mat1_dt = distribute_tensor(mat1, device_mesh, placements1)
             mat2_dt = distribute_tensor(mat2, device_mesh, placements2)

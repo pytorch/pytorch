@@ -1,4 +1,3 @@
-from typing import List, Tuple
 
 import torch
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
@@ -6,7 +5,7 @@ from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
 class UnwrapTensorSubclass(torch.nn.Module):
     def forward(self, *tensors) -> torch.Tensor:  # type: ignore[no-untyped-def]
-        todo: List[torch.Tensor] = list(tensors)
+        todo: list[torch.Tensor] = list(tensors)
         for tp, meta, inner_tensors_attrs in reversed(self.rebuild_stack):
             num_children: int = len(inner_tensors_attrs)
             d = {  # noqa: C416
@@ -19,7 +18,7 @@ class UnwrapTensorSubclass(torch.nn.Module):
         assert len(todo) == 1
         return todo[0]
 
-    def right_inverse(self, tensor: torch.Tensor) -> List[torch.Tensor]:
+    def right_inverse(self, tensor: torch.Tensor) -> list[torch.Tensor]:
         assert type(tensor) is not torch.Tensor
         rebuild_stack = []
         plain_tensors = []
@@ -59,7 +58,7 @@ def unwrap_tensor_subclass_parameters(module: torch.nn.Module) -> torch.nn.Modul
     becomes: {"parametrizations.p2.original0": torch.Tensor, "parametrizations.p2.original1": torch.Tensor}
 
     """
-    name_param: List[Tuple[str, torch.nn.Parameter]] = list(
+    name_param: list[tuple[str, torch.nn.Parameter]] = list(
         module.named_parameters(recurse=False)
     )
     for name, param in name_param:

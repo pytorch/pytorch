@@ -7,9 +7,12 @@ from __future__ import annotations
 import builtins
 import functools
 import operator
-from typing import Iterable, TypeVar
+from typing import TypeVar, TYPE_CHECKING
 
 from ..decorators import substitute_in_graph
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable
 
 
 __all__ = [

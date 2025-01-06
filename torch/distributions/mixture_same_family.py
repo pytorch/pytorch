@@ -1,5 +1,4 @@
 # mypy: allow-untyped-defs
-from typing import Dict
 
 import torch
 from torch.distributions import Categorical, constraints
@@ -51,7 +50,7 @@ class MixtureSameFamily(Distribution):
         component_distribution: `torch.distributions.Distribution`-like
             instance. Right-most batch dimension indexes component.
     """
-    arg_constraints: Dict[str, constraints.Constraint] = {}
+    arg_constraints: dict[str, constraints.Constraint] = {}
     has_rsample = False
 
     def __init__(

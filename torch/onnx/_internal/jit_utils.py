@@ -9,7 +9,8 @@ from __future__ import annotations
 import dataclasses
 import re
 import typing
-from typing import Any, Iterable, Sequence
+from typing import Any
+from collections.abc import Iterable, Sequence
 
 import torch
 from torch import _C

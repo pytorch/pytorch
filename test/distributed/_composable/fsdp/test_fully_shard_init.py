@@ -3,7 +3,7 @@
 import copy
 import itertools
 import unittest
-from typing import List, Optional
+from typing import Optional
 
 import torch
 import torch.distributed as dist
@@ -211,8 +211,8 @@ class TestFullyShardManagedModulesAndStates(FSDPTestMultiThread):
 
     def _check_managed_modules(
         self,
-        managed_modules: List[nn.Module],
-        expected_managed_modules: List[nn.Module],
+        managed_modules: list[nn.Module],
+        expected_managed_modules: list[nn.Module],
     ):
         self.assertEqual(len(managed_modules), len(expected_managed_modules))
         # Check set comparison since we do not require anything about the order
@@ -262,10 +262,10 @@ class TestFullyShardManagedModulesAndStates(FSDPTestMultiThread):
 
     def _check_managed_states(
         self,
-        managed_params: List[nn.Parameter],
-        managed_buffers: List[torch.Tensor],
-        expected_managed_params: List[nn.Parameter],
-        expected_managed_buffers: List[torch.Tensor],
+        managed_params: list[nn.Parameter],
+        managed_buffers: list[torch.Tensor],
+        expected_managed_params: list[nn.Parameter],
+        expected_managed_buffers: list[torch.Tensor],
     ):
         self.assertEqual(len(managed_params), len(expected_managed_params))
         self.assertEqual(len(managed_buffers), len(expected_managed_buffers))
@@ -370,7 +370,7 @@ class TestFullyShardShardedParameterTensor(FSDPTestMultiThread):
         self._check_1d_sharded_parameters(orig_params, sharded_params)
 
     def _check_1d_sharded_parameters(
-        self, orig_params: List[nn.Parameter], sharded_params: List[nn.Parameter]
+        self, orig_params: list[nn.Parameter], sharded_params: list[nn.Parameter]
     ):
         self.assertEqual(len(orig_params), len(sharded_params))
         global_mesh = init_device_mesh("cuda", (self.world_size,))

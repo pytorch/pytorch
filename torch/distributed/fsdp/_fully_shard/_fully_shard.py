@@ -5,14 +5,11 @@ from typing import (
     Any,
     Callable,
     cast,
-    Dict,
-    Iterable,
-    List,
     NoReturn,
     Optional,
-    Type,
     Union,
 )
+from collections.abc import Iterable
 
 import torch
 import torch.nn as nn
@@ -42,14 +39,14 @@ __all__ = [
 ]
 
 
-cls_to_fsdp_cls: Dict[Type, Type] = {}
+cls_to_fsdp_cls: dict[type, type] = {}
 
 
 # The decorator adds a state object to `module` that can be accessed via
 # `fully_shard.state(module)`. The state object and module are 1:1.
 @contract(state_cls=FSDPState)  # type: ignore[operator]
 def fully_shard(
-    module: Union[nn.Module, List[nn.Module]],
+    module: Union[nn.Module, list[nn.Module]],
     *,
     mesh: Optional[DeviceMesh] = None,
     reshard_after_forward: Union[bool, int] = True,
@@ -331,7 +328,7 @@ class FSDPModule:
                 if fsdp_param_group := state._fsdp_param_group:
                     fsdp_param_group.reshard_after_backward = reshard_after_backward
 
-    def set_modules_to_forward_prefetch(self, modules: List["FSDPModule"]) -> None:
+    def set_modules_to_forward_prefetch(self, modules: list["FSDPModule"]) -> None:
         """
         Sets the FSDP modules for which this FSDP module should explicitly
         prefetch all-gathers in forward. The prefetching runs after this
@@ -351,7 +348,7 @@ class FSDPModule:
             module._get_fsdp_state() for module in modules
         ]
 
-    def set_modules_to_backward_prefetch(self, modules: List["FSDPModule"]) -> None:
+    def set_modules_to_backward_prefetch(self, modules: list["FSDPModule"]) -> None:
         """
         Sets the FSDP modules for which this FSDP module should explicitly
         prefetch all-gathers in backward. This overrides the default backward

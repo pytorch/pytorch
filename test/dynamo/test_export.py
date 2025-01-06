@@ -12,7 +12,6 @@ import operator
 import unittest
 from collections.abc import Sequence
 from enum import Enum
-from typing import Dict, List
 from unittest.mock import patch
 
 import torch
@@ -1999,7 +1998,7 @@ def forward(self, l_x_):
                 self.assertIn("val", node.meta)
 
     def test_input_container_type(self):
-        def f(x: torch.Tensor, y: List[torch.Tensor]) -> Dict[str, torch.Tensor]:
+        def f(x: torch.Tensor, y: list[torch.Tensor]) -> dict[str, torch.Tensor]:
             return {"a": x.sum() + sum(y).sum()}
 
         inp = (torch.randn(6, 5), [torch.randn(6, 5), torch.randn(6, 5)])

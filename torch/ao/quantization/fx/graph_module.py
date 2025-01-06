@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 import copy
-from typing import Any, Dict, Set, Union
+from typing import Any, Union
 
 import torch
 from torch.fx import GraphModule
@@ -18,9 +18,9 @@ __all__ = [
 class FusedGraphModule(GraphModule):
     def __init__(
         self,
-        root: Union[torch.nn.Module, Dict[str, Any]],
+        root: Union[torch.nn.Module, dict[str, Any]],
         graph: Graph,
-        preserved_attr_names: Set[str],
+        preserved_attr_names: set[str],
     ):
         self.preserved_attr_names = preserved_attr_names
         preserved_attrs = {
@@ -48,9 +48,9 @@ class FusedGraphModule(GraphModule):
 class ObservedGraphModule(GraphModule):
     def __init__(
         self,
-        root: Union[torch.nn.Module, Dict[str, Any]],
+        root: Union[torch.nn.Module, dict[str, Any]],
         graph: Graph,
-        preserved_attr_names: Set[str],
+        preserved_attr_names: set[str],
     ):
         self.preserved_attr_names = {
             "_activation_post_process_map",
@@ -101,9 +101,9 @@ def _get_observed_graph_module_attr(
 class ObservedStandaloneGraphModule(ObservedGraphModule):
     def __init__(
         self,
-        root: Union[torch.nn.Module, Dict[str, Any]],
+        root: Union[torch.nn.Module, dict[str, Any]],
         graph: Graph,
-        preserved_attr_names: Set[str],
+        preserved_attr_names: set[str],
     ):
         preserved_attr_names = preserved_attr_names.union(
             {
@@ -148,9 +148,9 @@ class QuantizedGraphModule(GraphModule):
 
     def __init__(
         self,
-        root: Union[torch.nn.Module, Dict[str, Any]],
+        root: Union[torch.nn.Module, dict[str, Any]],
         graph: Graph,
-        preserved_attr_names: Set[str],
+        preserved_attr_names: set[str],
     ):
         self.preserved_attr_names = preserved_attr_names
         preserved_attrs = {

@@ -13,7 +13,7 @@ import warnings
 from abc import ABCMeta, abstractmethod
 from collections import OrderedDict
 from functools import partial
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Optional
 
 import torch
 import torch.nn as nn
@@ -339,7 +339,7 @@ class UniformQuantizationObserverBase(ObserverBase):
     @torch.jit.export
     def _calculate_qparams(
         self, min_val: torch.Tensor, max_val: torch.Tensor
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         r"""Calculates the quantization parameters, given min and max
         value tensors. Works for both per tensor and per channel cases
 
@@ -789,13 +789,13 @@ class PerChannelMinMaxObserver(UniformQuantizationObserverBase):
 
     def _load_from_state_dict(
         self,
-        state_dict: Dict[str, Any],
+        state_dict: dict[str, Any],
         prefix: str,
-        local_metadata: Dict[str, torch.Tensor],
+        local_metadata: dict[str, torch.Tensor],
         strict: bool,
-        missing_keys: List[str],
-        unexpected_keys: List[str],
-        error_msgs: List[str],
+        missing_keys: list[str],
+        unexpected_keys: list[str],
+        error_msgs: list[str],
     ):
         version = local_metadata.get("version", None)
         if version is not None and version < 3:
@@ -849,13 +849,13 @@ class PerChannelMinMaxObserver(UniformQuantizationObserverBase):
 
     def _load_from_state_dict_script(
         self,
-        state_dict: Dict[str, Any],
+        state_dict: dict[str, Any],
         prefix: str,
-        local_metadata: Dict[str, torch.Tensor],
+        local_metadata: dict[str, torch.Tensor],
         strict: bool,
-        missing_keys: List[str],
-        unexpected_keys: List[str],
-        error_msgs: List[str],
+        missing_keys: list[str],
+        unexpected_keys: list[str],
+        error_msgs: list[str],
     ):
         self._load_from_state_dict(
             state_dict,
@@ -1113,7 +1113,7 @@ class HistogramObserver(UniformQuantizationObserverBase):
 
         return norm.sum().item()
 
-    def _non_linear_param_search(self) -> Tuple[torch.Tensor, torch.Tensor]:
+    def _non_linear_param_search(self) -> tuple[torch.Tensor, torch.Tensor]:
         r"""Non-linear parameter search.
 
         An approximation for L2 error minimization for selecting min/max.
@@ -1522,7 +1522,7 @@ class RecordingObserver(ObserverBase):
         qscheme: Quantization scheme to be used
         reduce_range: Reduces the range of the quantized data type by 1 bit
     """
-    __annotations__ = {"tensor_val": List[Optional[torch.Tensor]]}
+    __annotations__ = {"tensor_val": list[Optional[torch.Tensor]]}
 
     def __init__(self, dtype=torch.quint8):
         super().__init__(dtype=dtype, is_dynamic=False)
@@ -1682,7 +1682,7 @@ class PerBlock(Granularity):
         block_size (Tuple[int, ...]): The size of each quantization group
     """
 
-    block_size: Tuple[int, ...]
+    block_size: tuple[int, ...]
 
 
 @dataclass(frozen=True)
@@ -1763,8 +1763,8 @@ class PerToken(Granularity):
 
 
 def get_block_size(
-    input_shape: Tuple[int, ...], granularity: Granularity
-) -> Tuple[int, ...]:
+    input_shape: tuple[int, ...], granularity: Granularity
+) -> tuple[int, ...]:
     """Get the block size based on the input shape and granularity type.
 
     Args:
@@ -1845,7 +1845,7 @@ class AffineQuantizedObserverBase(ABC, torch.nn.Module):
         """
 
     @abstractmethod
-    def calculate_qparams(self) -> Tuple[torch.Tensor, torch.Tensor]:
+    def calculate_qparams(self) -> tuple[torch.Tensor, torch.Tensor]:
         """Calculate quantization parameter based on the stats attached to the observer module
         and returns a tuple of scale and zero_point Tensor
         """
@@ -1910,8 +1910,8 @@ def load_observer_state_dict(mod, obs_dict):
     load the stats back into the model. The observer state_dict can be saved
     using torch.ao.quantization.get_observer_state_dict
     """
-    missing_keys: List[str] = []
-    unexpected_keys: List[str] = []
+    missing_keys: list[str] = []
+    unexpected_keys: list[str] = []
     for name, module in mod.named_modules():
         prefix = name + "."
         if _is_activation_post_process(module):

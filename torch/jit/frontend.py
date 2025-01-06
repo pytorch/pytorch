@@ -4,7 +4,6 @@ import dataclasses
 import inspect
 import re
 import string
-import sys
 from collections import namedtuple
 from textwrap import dedent
 from typing import List, Tuple  # noqa: F401
@@ -1128,10 +1127,7 @@ class ExprBuilder(Builder):
             return Subscript(base, [build_SliceExpr(ctx, base, expr.slice)])
         elif sub_type is ast.ExtSlice:
             return Subscript(base, build_ExtSlice(ctx, base, expr.slice))
-        elif sys.version_info >= (
-            3,
-            9,
-        ):  # In Python3.9 array indicies are not wrapped in ast.Index
+        else:  # In Python3.9 array indicies are not wrapped in ast.Index
             if sub_type is ast.Tuple:
                 # N-dimensional indexing using Tuple: x[(i, j, k)] is equivalent to x[i, j, k]
                 indices = []
@@ -1150,8 +1146,6 @@ class ExprBuilder(Builder):
                     indices.append(tup)
                 return Subscript(base, indices)
             return Subscript(base, [build_expr(ctx, expr.slice)])
-        else:  # Ellipsis (can only happen in Python 2)
-            raise NotSupportedError(base.range(), "ellipsis is not supported")
 
     @staticmethod
     def build_List(ctx, expr):

@@ -1,5 +1,4 @@
 # mypy: allow-untyped-defs
-from typing import Dict
 
 import torch
 from torch.distributions import constraints
@@ -46,7 +45,7 @@ class TransformedDistribution(Distribution):
     :class:`~torch.distributions.relaxed_bernoulli.RelaxedBernoulli` and
     :class:`~torch.distributions.relaxed_categorical.RelaxedOneHotCategorical`
     """
-    arg_constraints: Dict[str, constraints.Constraint] = {}
+    arg_constraints: dict[str, constraints.Constraint] = {}
 
     def __init__(self, base_distribution, transforms, validate_args=None):
         if isinstance(transforms, Transform):

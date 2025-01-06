@@ -4,12 +4,11 @@
 import os
 import shutil
 from subprocess import check_call, check_output
-from typing import List
 
 from pygit2 import Repository
 
 
-def list_dir(path: str) -> List[str]:
+def list_dir(path: str) -> list[str]:
     """'
     Helper for getting paths for Python
     """

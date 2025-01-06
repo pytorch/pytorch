@@ -1,5 +1,4 @@
 # mypy: allow-untyped-defs
-from typing import Dict
 
 import torch
 from torch.distributions import constraints
@@ -40,7 +39,7 @@ class Independent(Distribution):
         reinterpreted_batch_ndims (int): the number of batch dims to
             reinterpret as event dims
     """
-    arg_constraints: Dict[str, constraints.Constraint] = {}
+    arg_constraints: dict[str, constraints.Constraint] = {}
 
     def __init__(
         self, base_distribution, reinterpreted_batch_ndims, validate_args=None

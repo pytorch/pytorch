@@ -3,7 +3,7 @@ import contextlib
 import inspect
 import logging
 from collections import defaultdict
-from typing import Any, Callable, Dict, List, Set, Tuple, TYPE_CHECKING, Union
+from typing import Any, Callable, TYPE_CHECKING, Union
 
 import torch
 import torch.utils._pytree as pytree
@@ -85,8 +85,8 @@ def fakify(
     mode: FakeTensorMode,
     kp: KeyPath,
     t: Any,
-    t_constraints: Dict[int, Dict[int, Constraint]],
-    sources: Dict[Tuple[int, int], List[Source]],
+    t_constraints: dict[int, dict[int, Constraint]],
+    sources: dict[tuple[int, int], list[Source]],
 ):
     source = key_path_to_source(kp)
     if _is_constant_argument(t) or isinstance(t, torch.ScriptObject):
@@ -153,7 +153,7 @@ def make_fake_inputs(
     combined_args = _combine_args(nn_module, args, kwargs)
     _check_dynamic_shapes(combined_args, dynamic_shapes)
     constraints = _process_dynamic_shapes(combined_args, dynamic_shapes)
-    t_constraints: Dict[int, Dict[int, Constraint]] = defaultdict(dict)
+    t_constraints: dict[int, dict[int, Constraint]] = defaultdict(dict)
     for constraint in constraints:
         t_constraints[constraint.t_id][constraint.dim] = constraint
 
@@ -202,17 +202,17 @@ def make_fake_inputs(
             original_signature = inspect.signature(nn_module.forward)
         else:
             original_signature = None
-        sources: Dict[Tuple[int, int], List[Source]] = defaultdict(list)
+        sources: dict[tuple[int, int], list[Source]] = defaultdict(list)
         fake_args, fake_kwargs = tree_map_with_path(
             lambda kp, val: fakify(fake_mode, kp, val, t_constraints, sources),
             (args, kwargs),
         )
 
-        names: Dict[str, Tuple[int, int]] = {}
-        source_pairs: List[Tuple[Source, Source]] = []
-        derived_equalities: List[Tuple[Source, Union[Source, Symbol], Callable]] = []
-        phantom_symbols: Dict[str, Symbol] = {}
-        relaxed_sources: Set[Source] = set()
+        names: dict[str, tuple[int, int]] = {}
+        source_pairs: list[tuple[Source, Source]] = []
+        derived_equalities: list[tuple[Source, Union[Source, Symbol], Callable]] = []
+        phantom_symbols: dict[str, Symbol] = {}
+        relaxed_sources: set[Source] = set()
         for constraint in constraints:
             torch.export.dynamic_shapes._process_equalities(
                 constraint,
@@ -243,9 +243,9 @@ def make_fake_inputs(
 
 
 def _flatten_dynamic_shapes(
-    combined_args: Dict[str, Any],
-    dynamic_shapes: Union[Dict[str, Any], Tuple[Any], List[Any]],
-) -> List[Any]:
+    combined_args: dict[str, Any],
+    dynamic_shapes: Union[dict[str, Any], tuple[Any], list[Any]],
+) -> list[Any]:
     flat_shapes = []
 
     def _tree_map_helper(path, t, shape):
@@ -271,7 +271,7 @@ def _clean_dynamic_markers(tensor: torch.Tensor) -> None:
 def produce_guards_and_solve_constraints(
     fake_mode: FakeTensorMode,
     gm: torch.fx.GraphModule,
-    dynamic_shapes: Union[Dict[str, Any], Tuple[Any], List[Any], None],
+    dynamic_shapes: Union[dict[str, Any], tuple[Any], list[Any], None],
     equalities_inputs: EqualityConstraint,
     original_signature: inspect.Signature,
     _is_torch_jit_trace=False,
@@ -336,8 +336,8 @@ def produce_guards_and_solve_constraints(
 def make_constraints(
     fake_mode: FakeTensorMode,
     gm: torch.fx.GraphModule,
-    combined_args: Dict[str, Any],
-    dynamic_shapes: Union[Dict[str, Any], Tuple[Any], List[Any], None],
+    combined_args: dict[str, Any],
+    dynamic_shapes: Union[dict[str, Any], tuple[Any], list[Any], None],
     num_lifted_inputs: int,
 ):
     """
@@ -423,7 +423,7 @@ def _gather_constant_attrs(m: torch.nn.Module) -> ConstantAttrMap:
     buffers_parameters = set(m.buffers())
     buffers_parameters.update(m.parameters())
 
-    def inner(m: torch.nn.Module, prefix_atoms: List[str], constants):
+    def inner(m: torch.nn.Module, prefix_atoms: list[str], constants):
         for k, v in m.__dict__.items():
             if isinstance(
                 v,
@@ -449,8 +449,8 @@ def _gather_constant_attrs(m: torch.nn.Module) -> ConstantAttrMap:
 @contextlib.contextmanager
 def _fakify_script_objects(
     mod: torch.nn.Module,
-    args: Tuple[Any],
-    kwargs: Dict[Any, Any],
+    args: tuple[Any],
+    kwargs: dict[Any, Any],
     fake_mode: torch._subclasses.fake_tensor.FakeTensorMode,
 ):
     # This context manager is used to fakify script objects into FakeScriptObject.
@@ -485,7 +485,7 @@ def _fakify_script_objects(
 
     def _leaf_mod_and_attr(
         mod: torch.nn.Module, attr_fqn: str
-    ) -> Tuple[torch.nn.Module, str]:
+    ) -> tuple[torch.nn.Module, str]:
         *prefix_attr, last_attr = attr_fqn.split(".")
         cur_mod = mod
         for attr in prefix_attr:

@@ -5,7 +5,7 @@ import inspect
 import re
 import typing
 from enum import IntEnum
-from typing import Annotated, Any, Dict, ForwardRef, List, Optional, Tuple, Union
+from typing import Annotated, Any, ForwardRef, Optional, Union
 
 from torch._export.serde import schema
 from torch._export.serde.union import _Union
@@ -21,17 +21,17 @@ def _check(x, msg):
 
 
 def _staged_schema():
-    yaml_ret: Dict[str, Any] = {}
+    yaml_ret: dict[str, Any] = {}
     defs = {}
-    cpp_enum_defs: Dict[str, str] = {}
-    cpp_class_defs: Dict[str, str] = {}
-    cpp_type_decls: List[str] = []
-    cpp_json_defs: List[str] = []
-    thrift_enum_defs: List[str] = []
-    thrift_type_defs: Dict[str, str] = {}
+    cpp_enum_defs: dict[str, str] = {}
+    cpp_class_defs: dict[str, str] = {}
+    cpp_type_decls: list[str] = []
+    cpp_json_defs: list[str] = []
+    thrift_enum_defs: list[str] = []
+    thrift_type_defs: dict[str, str] = {}
 
-    def _handle_aggregate(ty) -> Tuple[Dict[str, Any], Dict[str, Any], Dict[str, Any]]:
-        def dump_type(t, level: int) -> Tuple[str, str, str]:
+    def _handle_aggregate(ty) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
+        def dump_type(t, level: int) -> tuple[str, str, str]:
             CPP_TYPE_MAP = {
                 str: "std::string",
                 int: "int64_t",
@@ -125,7 +125,7 @@ def _staged_schema():
                     f"Default value {v} is not supported yet in export schema."
                 )
 
-        def dump_field(f) -> Tuple[Dict[str, Any], str, Optional[str], str, int]:
+        def dump_field(f) -> tuple[dict[str, Any], str, Optional[str], str, int]:
             t, cpp_type, thrift_type = dump_type(f.type, 0)
             ret = {"type": t}
             cpp_default: Optional[str] = None
@@ -524,12 +524,12 @@ def _hash_content(s: str):
 
 @dataclasses.dataclass
 class _Commit:
-    result: Dict[str, Any]
+    result: dict[str, Any]
     checksum_next: str
     yaml_path: str
-    additions: Dict[str, Any]
-    subtractions: Dict[str, Any]
-    base: Dict[str, Any]
+    additions: dict[str, Any]
+    subtractions: dict[str, Any]
+    base: dict[str, Any]
     checksum_head: Optional[str]
     cpp_header: str
     cpp_header_path: str

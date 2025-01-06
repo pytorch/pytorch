@@ -6,7 +6,8 @@ import re
 import sys
 import traceback
 import weakref
-from typing import Any, Callable, Dict, List, Optional, Sequence, Set, Tuple, Union
+from typing import Any, Callable, Optional, Union
+from collections.abc import Sequence
 from typing_extensions import deprecated
 
 import torch
@@ -42,8 +43,8 @@ __all__ = [
 # The keys in the set are of the form `namespace + "/" + op_name + "/" + dispatch_key`.
 # This set is maintained to ensure that two libraries don't try to override the exact same functionality to avoid
 # libraries calling into kernels not intended to be called.
-_impls: Set[str] = set()
-_defs: Set[str] = set()
+_impls: set[str] = set()
+_defs: set[str] = set()
 
 # prim is reserved by TorchScript interpreter
 _reserved_namespaces = ["prim"]
@@ -94,9 +95,9 @@ class Library:
             kind, ns, dispatch_key, filename, lineno
         )
         self.ns = ns
-        self._op_defs: Set[str] = set()
-        self._op_impls: Set[str] = set()
-        self._registration_handles: List[torch._library.utils.RegistrationHandle] = []
+        self._op_defs: set[str] = set()
+        self._op_impls: set[str] = set()
+        self._registration_handles: list[torch._library.utils.RegistrationHandle] = []
         self.kind = kind
         self.dispatch_key = dispatch_key
         # Use a finalizer to setup the "destructor" instead of __del__.
@@ -442,7 +443,7 @@ def _scoped_library(*args, **kwargs):
         lib._destroy()
 
 
-_keep_alive: List[Library] = []
+_keep_alive: list[Library] = []
 
 
 NAMELESS_SCHEMA = re.compile(r"\(.*\) -> .*")
@@ -1275,12 +1276,12 @@ _OPCHECK_DEFAULT_UTILS = (
 
 def opcheck(
     op: Union[torch._ops.OpOverload, torch._ops.OpOverloadPacket, CustomOpDef],
-    args: Tuple[Any, ...],
-    kwargs: Optional[Dict[str, Any]] = None,
+    args: tuple[Any, ...],
+    kwargs: Optional[dict[str, Any]] = None,
     *,
     test_utils: Union[str, Sequence[str]] = _OPCHECK_DEFAULT_UTILS,
     raise_exception: bool = True,
-) -> Dict[str, str]:
+) -> dict[str, str]:
     """Given an operator and some sample arguments, tests if the operator is
     registered correctly.
 

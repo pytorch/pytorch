@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import logging
-from typing import cast, Optional, Sequence, Tuple, TYPE_CHECKING, TypedDict
+from typing import cast, Optional, TYPE_CHECKING, TypedDict
 
 import torch
 from torch._inductor.codegen.rocm.ck_conv_template import CKGroupedConvFwdTemplate
@@ -33,6 +33,7 @@ from .mm_common import build_rocm_gemm_configs, filtered_configs
 
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
     from ..ir import TensorBox
 
 log = logging.getLogger(__name__)
@@ -72,7 +73,7 @@ kernel_configs = [
 
 # Create filtered list of configs based on conv
 platform_configs = tuple(
-    cast(Tuple[int, int, int, int, int], config["config"])
+    cast(tuple[int, int, int, int, int], config["config"])
     for config in kernel_configs
     if config["cond"]
 )

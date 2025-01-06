@@ -4,7 +4,6 @@ import math
 import numbers
 import operator
 import weakref
-from typing import List
 
 import torch
 import torch.nn.functional as F
@@ -285,7 +284,7 @@ class ComposeTransform(Transform):
             the latest single value is cached. Only 0 and 1 are supported.
     """
 
-    def __init__(self, parts: List[Transform], cache_size=0):
+    def __init__(self, parts: list[Transform], cache_size=0):
         if cache_size:
             parts = [part.with_cache(cache_size) for part in parts]
         super().__init__(cache_size=cache_size)
@@ -1038,7 +1037,7 @@ class CatTransform(Transform):
        y = t(x)
     """
 
-    transforms: List[Transform]
+    transforms: list[Transform]
 
     def __init__(self, tseq, dim=0, lengths=None, cache_size=0):
         assert all(isinstance(t, Transform) for t in tseq)
@@ -1142,7 +1141,7 @@ class StackTransform(Transform):
        y = t(x)
     """
 
-    transforms: List[Transform]
+    transforms: list[Transform]
 
     def __init__(self, tseq, dim=0, cache_size=0):
         assert all(isinstance(t, Transform) for t in tseq)

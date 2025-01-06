@@ -2,7 +2,7 @@
 
 import logging
 import weakref
-from typing import Dict, List, TYPE_CHECKING
+from typing import TYPE_CHECKING
 
 import torch
 from torch._logging import getArtifactLogger
@@ -84,8 +84,8 @@ class OptimizerVariable(UserDefinedObjectVariable):
         self,
         tx,
         name,
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         """This is an optimization to avoid tracing the very slow initialization of the optimizer"""
         if name == "_init_group":

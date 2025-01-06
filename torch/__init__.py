@@ -313,7 +313,7 @@ def _load_global_deps() -> None:
     except OSError as err:
         # Can only happen for wheel with cuda libs as PYPI deps
         # As PyTorch is not purelib, but nvidia-*-cu12 is
-        cuda_libs: _Dict[str, str] = {
+        cuda_libs: dict[str, str] = {
             "cublas": "libcublas.so.*[0-9]",
             "cudnn": "libcudnn.so.*[0-9]",
             "cuda_nvrtc": "libnvrtc.so.*[0-9]",
@@ -561,7 +561,7 @@ class SymInt:
             # https://github.com/arogozhnikov/einops/blob/6181e1e95dc58c00a3143c1726da1c6ee0463164/einops/einops.py#L237
             # return hash(builtins.int(self))
 
-    def as_integer_ratio(self) -> _Tuple["SymInt", builtins.int]:
+    def as_integer_ratio(self) -> tuple["SymInt", builtins.int]:
         """Represent this int as an exact integer ratio"""
         return self, 1
 
@@ -673,7 +673,7 @@ class SymFloat:
         """Return True if the float is an integer."""
         raise TypeError("type stub not overridden")
 
-    def as_integer_ratio(self) -> _Tuple[builtins.int, builtins.int]:
+    def as_integer_ratio(self) -> tuple[builtins.int, builtins.int]:
         """Represent this float as an exact integer ratio"""
         return builtins.float(self).as_integer_ratio()
 
@@ -837,17 +837,17 @@ def sym_max(a, b):
         return builtins.max(a, b)
 
 
-def __all_and_float_types() -> _Tuple[_Tuple[_Type, ...], _Tuple[_Type, ...]]:
+def __all_and_float_types() -> tuple[tuple[type, ...], tuple[type, ...]]:
     try:
         import numpy as np
 
-        all_types: _Tuple[_Type, ...] = (
+        all_types: tuple[type, ...] = (
             np.integer,
             np.floating,
             builtins.int,
             builtins.float,
         )
-        float_types: _Tuple[_Type, ...] = (np.floating, builtins.float)
+        float_types: tuple[type, ...] = (np.floating, builtins.float)
     except ModuleNotFoundError:
         all_types = (builtins.int, builtins.float)
         float_types = (builtins.float,)
@@ -1179,7 +1179,7 @@ def set_default_device(
     _GLOBAL_DEVICE_CONTEXT.device_context = device_context
 
 
-def set_default_tensor_type(t: _Union[_Type["torch.Tensor"], str], /) -> None:
+def set_default_tensor_type(t: _Union[type["torch.Tensor"], str], /) -> None:
     r"""
     .. warning::
 
@@ -1968,7 +1968,7 @@ class QUInt2x4Storage(_LegacyStorage):
         return torch.quint2x4
 
 
-_storage_classes: _Set[_Type[_Union[TypedStorage, UntypedStorage]]] = {
+_storage_classes: set[type[_Union[TypedStorage, UntypedStorage]]] = {
     UntypedStorage,
     DoubleStorage,
     FloatStorage,
@@ -1991,7 +1991,7 @@ _storage_classes: _Set[_Type[_Union[TypedStorage, UntypedStorage]]] = {
 }
 
 # The _tensor_classes set is initialized by the call to initialize_python_bindings.
-_tensor_classes: _Set[_Type["torch.Tensor"]] = set()
+_tensor_classes: set[type["torch.Tensor"]] = set()
 
 # If you edit these imports, please update torch/__init__.py.in as well
 from torch import amp as amp, random as random, serialization as serialization
@@ -2241,7 +2241,7 @@ class _TorchCompileInductorWrapper:
     compiler_name = "inductor"
 
     def __init__(self, mode, options, dynamic):
-        self.config: _Dict[str, _Any] = {}
+        self.config: dict[str, _Any] = {}
         self.dynamic = dynamic
         self.apply_mode(mode)
         self.apply_options(options)
@@ -2273,7 +2273,7 @@ class _TorchCompileInductorWrapper:
                 f"Unrecognized mode={mode}, should be one of: default, reduce-overhead, max-autotune, max-autotune-no-cudagraphs"
             )
 
-    def apply_options(self, options: _Optional[_Dict[str, _Any]]):
+    def apply_options(self, options: _Optional[dict[str, _Any]]):
         from torch._inductor.compiler_bisector import CompilerBisector
 
         if bisect_changes := CompilerBisector.get_config_change("inductor"):
@@ -2287,7 +2287,7 @@ class _TorchCompileInductorWrapper:
 
         from torch._inductor import config
 
-        current_config: _Dict[str, _Any] = config.get_config_copy()
+        current_config: dict[str, _Any] = config.get_config_copy()
 
         for key, val in options.items():
             attr_name = key.replace("-", "_")
@@ -2375,7 +2375,7 @@ def compile(
     dynamic: _Optional[builtins.bool] = None,
     backend: _Union[str, _Callable] = "inductor",
     mode: _Union[str, None] = None,
-    options: _Optional[_Dict[str, _Union[str, builtins.int, builtins.bool]]] = None,
+    options: _Optional[dict[str, _Union[str, builtins.int, builtins.bool]]] = None,
     disable: builtins.bool = False,
 ) -> _Callable[_InputT, _RetT]: ...
 
@@ -2388,7 +2388,7 @@ def compile(
     dynamic: _Optional[builtins.bool] = None,
     backend: _Union[str, _Callable] = "inductor",
     mode: _Union[str, None] = None,
-    options: _Optional[_Dict[str, _Union[str, builtins.int, builtins.bool]]] = None,
+    options: _Optional[dict[str, _Union[str, builtins.int, builtins.bool]]] = None,
     disable: builtins.bool = False,
 ) -> _Callable[[_Callable[_InputT, _RetT]], _Callable[_InputT, _RetT]]: ...
 
@@ -2400,7 +2400,7 @@ def compile(
     dynamic: _Optional[builtins.bool] = None,
     backend: _Union[str, _Callable] = "inductor",
     mode: _Union[str, None] = None,
-    options: _Optional[_Dict[str, _Union[str, builtins.int, builtins.bool]]] = None,
+    options: _Optional[dict[str, _Union[str, builtins.int, builtins.bool]]] = None,
     disable: builtins.bool = False,
 ) -> _Union[
     _Callable[[_Callable[_InputT, _RetT]], _Callable[_InputT, _RetT]],
@@ -2592,7 +2592,7 @@ if not _running_with_deploy():
 
     class _TritonLibrary:
         lib = torch.library.Library("triton", "DEF")
-        ops_table: _Dict[_Tuple[str, str], _Callable] = {}
+        ops_table: dict[tuple[str, str], _Callable] = {}
 
         @classmethod
         def registerOp(cls, op_key, full_schema, op_impl, dispatch_key):

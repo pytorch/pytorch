@@ -1,7 +1,7 @@
 # Owner(s): ["oncall: distributed"]
 import copy
 from dataclasses import dataclass
-from typing import List, Union
+from typing import Union
 
 import torch
 from torch.distributed._shard import _shard_tensor, sharded_tensor
@@ -495,7 +495,7 @@ class TestShardingSpec(TestCase):
 @dataclass
 class GridShardingSpec(ShardingSpec):
     grid_size: int
-    placements: List[Union[torch.distributed._remote_device, str]]
+    placements: list[Union[torch.distributed._remote_device, str]]
 
     def __post_init__(self):
         for i, remote_device in enumerate(self.placements):

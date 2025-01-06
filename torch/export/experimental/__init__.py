@@ -7,7 +7,7 @@ from torch.export.exported_program import _decompose_exported_program
 
 def _copy_graph_module_and_signature(
     ep: torch.fx.GraphModule,
-) -> typing.Tuple[
+) -> tuple[
     torch.fx.GraphModule, torch.export.graph_signature.ExportGraphSignature
 ]:
     # copy.deepcopy lets the objects override __deepcopy__ methods with graph_copy() and node_copy(),

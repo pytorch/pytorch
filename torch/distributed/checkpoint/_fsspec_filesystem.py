@@ -5,7 +5,8 @@ import io
 import os
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Generator, Optional, TYPE_CHECKING, Union
+from typing import Optional, TYPE_CHECKING, Union
+from collections.abc import Generator
 
 from fsspec.core import url_to_fs
 

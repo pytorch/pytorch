@@ -8,7 +8,7 @@ import logging
 import os
 import pickle
 from collections import defaultdict
-from typing import DefaultDict, Optional, Tuple, TYPE_CHECKING, TypeVar, Union
+from typing import Optional, TYPE_CHECKING, TypeVar, Union
 from typing_extensions import Self
 
 import torch._dynamo.config
@@ -104,13 +104,13 @@ class CodeId:
 
 @dataclasses.dataclass
 class CodeState:
-    automatic_dynamic: DefaultDict[str, FrameStateSizeEntry] = dataclasses.field(
+    automatic_dynamic: defaultdict[str, FrameStateSizeEntry] = dataclasses.field(
         default_factory=lambda: defaultdict(FrameStateSizeEntry)
     )
 
 
-_INIT_CODE_STATE: Optional[DefaultDict[CodeId, CodeState]] = None
-_CODE_STATE: Optional[DefaultDict[CodeId, CodeState]] = None
+_INIT_CODE_STATE: Optional[defaultdict[CodeId, CodeState]] = None
+_CODE_STATE: Optional[defaultdict[CodeId, CodeState]] = None
 
 
 @dataclasses.dataclass(frozen=True)
@@ -167,10 +167,10 @@ class FrameStateSizeEntry:
     # NB: We don't have cases where we have a known dimensionality but
     # we know NOTHING about the individual sizes
     size: Union[
-        AutoDynamic, AutoUnset, Tuple[Union[int, AutoDynamic], ...]
+        AutoDynamic, AutoUnset, tuple[Union[int, AutoDynamic], ...]
     ] = dataclasses.field(default=auto_unset)
     stride: Union[
-        AutoDynamic, AutoUnset, Tuple[Union[int, AutoDynamic, InferStride], ...]
+        AutoDynamic, AutoUnset, tuple[Union[int, AutoDynamic, InferStride], ...]
     ] = dataclasses.field(default=auto_unset)
 
     def render(self) -> str:
@@ -186,7 +186,7 @@ class FrameStateSizeEntry:
             else:
                 return str(s)
 
-        def render_tuple(ss: Tuple[Union[int, AutoDynamic, InferStride], ...]) -> str:
+        def render_tuple(ss: tuple[Union[int, AutoDynamic, InferStride], ...]) -> str:
             return "[" + ", ".join(render_single(s) for s in ss) + "]"
 
         # Common cases
@@ -245,7 +245,7 @@ class FrameStateSizeEntry:
         return self.stride[dim] is auto_dynamic
 
     @staticmethod
-    def _munge_symint(xs: Tuple[int, ...]) -> Tuple[Union[AutoDynamic, int], ...]:
+    def _munge_symint(xs: tuple[int, ...]) -> tuple[Union[AutoDynamic, int], ...]:
         return tuple(auto_dynamic if isinstance(x, torch.SymInt) else x for x in xs)
 
     @classmethod
@@ -254,7 +254,7 @@ class FrameStateSizeEntry:
 
     @classmethod
     def make_tensor(
-        cls, size: Tuple[int, ...], stride: Tuple[int, ...]
+        cls, size: tuple[int, ...], stride: tuple[int, ...]
     ) -> FrameStateSizeEntry:
         return FrameStateSizeEntry(
             scalar=auto_dynamic,
@@ -263,7 +263,7 @@ class FrameStateSizeEntry:
         )
 
     @classmethod
-    def make_size(cls, size: Tuple[int, ...]) -> FrameStateSizeEntry:
+    def make_size(cls, size: tuple[int, ...]) -> FrameStateSizeEntry:
         return FrameStateSizeEntry(
             scalar=auto_unset,
             size=cls._munge_symint(size),
@@ -283,9 +283,9 @@ class FrameStateSizeEntry:
     @classmethod
     def _merge_atom_tup(
         cls,
-        xs: Union[AutoDynamic, AutoUnset, Tuple[_T, ...]],
-        ys: Union[AutoDynamic, AutoUnset, Tuple[_T, ...]],
-    ) -> Union[AutoDynamic, AutoUnset, Tuple[Union[AutoDynamic, _T], ...]]:
+        xs: Union[AutoDynamic, AutoUnset, tuple[_T, ...]],
+        ys: Union[AutoDynamic, AutoUnset, tuple[_T, ...]],
+    ) -> Union[AutoDynamic, AutoUnset, tuple[Union[AutoDynamic, _T], ...]]:
         if xs is auto_unset:
             return ys
         if ys is auto_unset:
@@ -528,7 +528,7 @@ def get_remote_cache() -> Optional[RemoteCache[JsonDataTy]]:
     )
 
 
-def render_code_state(cs: DefaultDict[CodeId, CodeState]) -> str:
+def render_code_state(cs: defaultdict[CodeId, CodeState]) -> str:
     return "\n".join(
         f"{k.filename}:{k.firstlineno}:{k.name}:\n"
         + "\n".join(
@@ -538,7 +538,7 @@ def render_code_state(cs: DefaultDict[CodeId, CodeState]) -> str:
     )
 
 
-def get_code_state() -> DefaultDict[CodeId, CodeState]:
+def get_code_state() -> defaultdict[CodeId, CodeState]:
     global _CODE_STATE, _INIT_CODE_STATE
     if _CODE_STATE is not None:
         return _CODE_STATE
@@ -550,7 +550,7 @@ def get_code_state() -> DefaultDict[CodeId, CodeState]:
     if cache_key is None:
         return _CODE_STATE
 
-    def hit(ty: str) -> DefaultDict[CodeId, CodeState]:
+    def hit(ty: str) -> defaultdict[CodeId, CodeState]:
         global _INIT_CODE_STATE
         assert isinstance(_CODE_STATE, defaultdict)
         log.info("get_code_state %s hit %s, %d entries", path, ty, len(_CODE_STATE))

@@ -18,16 +18,11 @@ from typing import (
     Any,
     Callable,
     cast,
-    Dict,
-    Generator,
     IO,
-    Iterable,
-    Iterator,
-    List,
     Optional,
-    Tuple,
     Union,
 )
+from collections.abc import Generator, Iterable, Iterator
 
 import torch
 from torch import Tensor
@@ -95,14 +90,14 @@ class _TensorLoader(ABC):
         pass
 
     @abstractmethod
-    def values(self) -> Iterator[Tuple[torch.Tensor, object]]:
+    def values(self) -> Iterator[tuple[torch.Tensor, object]]:
         pass
 
 
 class _SerialCpuLoader(_TensorLoader):
     def __init__(self, resolve_fun: Callable) -> None:
         self.resolve_fun = resolve_fun
-        self.items: List[Tuple[int, object]] = []
+        self.items: list[tuple[int, object]] = []
 
     def add(self, size: int, obj: object) -> None:
         self.items.append((size, obj))
@@ -110,7 +105,7 @@ class _SerialCpuLoader(_TensorLoader):
     def start_loading(self) -> None:
         pass
 
-    def values(self) -> Iterator[Tuple[torch.Tensor, object]]:
+    def values(self) -> Iterator[tuple[torch.Tensor, object]]:
         for _, obj in self.items:
             tensor = self.resolve_fun(obj).detach()
             tensor = tensor.cpu()
@@ -130,7 +125,7 @@ class _OverlappingCpuLoader(_TensorLoader):
         inflight_threshhold: int = 1_000_000,
     ) -> None:
         self.resolve_fun = resolve_fun
-        self.items: List[Tuple[int, object]] = []
+        self.items: list[tuple[int, object]] = []
         self.inflight_threshhold = inflight_threshhold
         self.in_flight_data = 0
         self.current_items: collections.deque = collections.deque()
@@ -150,7 +145,7 @@ class _OverlappingCpuLoader(_TensorLoader):
     def _done(self) -> bool:
         return self.idx >= len(self.items)
 
-    def _drain(self) -> List[Tuple[torch.Tensor, object]]:
+    def _drain(self) -> list[tuple[torch.Tensor, object]]:
         drained = []
         if self.in_flight_data >= self.inflight_threshhold:
             self.stream.synchronize()
@@ -184,7 +179,7 @@ class _OverlappingCpuLoader(_TensorLoader):
                 )
                 self.in_flight_data += tensor.numel() * tensor.element_size()
 
-    def _finish(self) -> Iterable[Tuple[torch.Tensor, object]]:
+    def _finish(self) -> Iterable[tuple[torch.Tensor, object]]:
         assert self._done
         if len(self.current_items) > 0:
             self.stream.synchronize()
@@ -202,7 +197,7 @@ class _OverlappingCpuLoader(_TensorLoader):
         self.items.sort(key=operator.itemgetter(0))
         self._refill()
 
-    def values(self) -> Iterator[Tuple[torch.Tensor, object]]:
+    def values(self) -> Iterator[tuple[torch.Tensor, object]]:
         self.start_loading()
         while not self._done:
             drained = self._drain()
@@ -223,14 +218,14 @@ def _item_size(item: WriteItem) -> int:
     return size * torch._utils._element_size(dtype)
 
 
-def _split_by_size_and_type(bins: int, items: List[WriteItem]) -> List[List[WriteItem]]:
+def _split_by_size_and_type(bins: int, items: list[WriteItem]) -> list[list[WriteItem]]:
     if bins == 1:
         return [items]
 
     bytes_w = [wi for wi in items if wi.type == WriteItemType.BYTE_IO]
     tensor_w = [wi for wi in items if wi.type != WriteItemType.BYTE_IO]
 
-    buckets: List[List[WriteItem]] = [[] for _ in range(bins)]
+    buckets: list[list[WriteItem]] = [[] for _ in range(bins)]
     bucket_sizes = [0 for _ in range(bins)]
 
     tensor_w.sort(key=_item_size, reverse=True)
@@ -498,7 +493,7 @@ class _FileSystemWriter(StorageWriter):
 
         return plan
 
-    def prepare_global_plan(self, plans: List[SavePlan]) -> List[SavePlan]:
+    def prepare_global_plan(self, plans: list[SavePlan]) -> list[SavePlan]:
         new_plans = [
             dataclasses.replace(plan, storage_data=_StoragePrefix(f"__{i}_"))
             for i, plan in enumerate(plans)
@@ -509,7 +504,7 @@ class _FileSystemWriter(StorageWriter):
         self,
         plan: SavePlan,
         planner: SavePlanner,
-    ) -> Future[List[WriteResult]]:
+    ) -> Future[list[WriteResult]]:
         storage_plan: _StoragePrefix = plan.storage_data
         file_count = 0
 
@@ -568,11 +563,11 @@ class _FileSystemWriter(StorageWriter):
             while True:
                 res += result_queue.get_nowait()
         except queue.Empty:
-            fut: Future[List[WriteResult]] = Future()
+            fut: Future[list[WriteResult]] = Future()
             fut.set_result(res)
             return fut
 
-    def finish(self, metadata: Metadata, results: List[List[WriteResult]]) -> None:
+    def finish(self, metadata: Metadata, results: list[list[WriteResult]]) -> None:
         storage_md = {}
         for wr_list in results:
             storage_md.update({wr.index: wr.storage_data for wr in wr_list})
@@ -619,7 +614,7 @@ class FileSystemReader(StorageReader):
         super().__init__()
         self.fs = FileSystem()
         self.path = self.fs.init_path(path)
-        self.storage_data: Dict[MetadataIndex, _StorageInfo] = {}
+        self.storage_data: dict[MetadataIndex, _StorageInfo] = {}
         self.load_id = _generate_uuid()
 
     def _slice_file(self, file, sinfo: _StorageInfo) -> io.IOBase:
@@ -633,7 +628,7 @@ class FileSystemReader(StorageReader):
 
     def read_data(self, plan: LoadPlan, planner: LoadPlanner) -> Future[None]:
         # group requests by file
-        per_file: Dict[str, List[ReadItem]] = {}
+        per_file: dict[str, list[ReadItem]] = {}
         for read_item in plan.items:
             item_md = self.storage_data[read_item.storage_index]
             path = item_md.relative_path
@@ -693,7 +688,7 @@ class FileSystemReader(StorageReader):
     def prepare_local_plan(self, plan: LoadPlan) -> LoadPlan:
         return plan
 
-    def prepare_global_plan(self, plans: List[LoadPlan]) -> List[LoadPlan]:
+    def prepare_global_plan(self, plans: list[LoadPlan]) -> list[LoadPlan]:
         return plans
 
     @property

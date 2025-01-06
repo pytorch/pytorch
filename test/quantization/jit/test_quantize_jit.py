@@ -7,7 +7,6 @@ import itertools
 import unittest
 
 # Standard library
-from typing import List, Tuple
 
 import torch
 import torch.jit
@@ -1355,7 +1354,7 @@ class TestQuantizeJitPasses(QuantizationTestCase):
                     [SimpleLinearLayer() for i in range(2)]
                 )
 
-            def forward(self, x: torch.Tensor) -> List[torch.Tensor]:
+            def forward(self, x: torch.Tensor) -> list[torch.Tensor]:
                 states = []
                 for layer in self.layers:
                     val = layer(x)
@@ -2724,7 +2723,7 @@ class TestQuantizeJitOps(QuantizationTestCase):
                 self.conv1 = torch.nn.Conv2d(3, 3, 3).float()
                 self.conv2 = torch.nn.Conv2d(3, 3, 3).float()
 
-            def forward(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+            def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
                 x1 = self.conv1(x)
                 x2 = self.conv2(x)
                 return x1, x2

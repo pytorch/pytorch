@@ -9,7 +9,7 @@ import time
 import zipfile
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Optional
 
 import boto3  # type: ignore[import]
 import requests
@@ -122,8 +122,8 @@ def download_gha_artifacts(
 def upload_to_dynamodb(
     dynamodb_table: str,
     repo: str,
-    docs: List[Any],
-    generate_partition_key: Optional[Callable[[str, Dict[str, Any]], str]],
+    docs: list[Any],
+    generate_partition_key: Optional[Callable[[str, dict[str, Any]], str]],
 ) -> None:
     print(f"Writing {len(docs)} documents to DynamoDB {dynamodb_table}")
     # https://boto3.amazonaws.com/v1/documentation/api/latest/guide/dynamodb.html#batch-writing

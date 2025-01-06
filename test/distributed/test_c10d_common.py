@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from datetime import timedelta
 from itertools import product
 from sys import platform
-from typing import Dict, Optional
+from typing import Optional
 
 import torch
 import torch.distributed as dist
@@ -972,7 +972,7 @@ class CommonDistributedDataParallelTest:
     @dataclass
     class CustomOutput:
         o1: Optional[torch.Tensor]
-        o2: Dict[str, torch.Tensor]
+        o2: dict[str, torch.Tensor]
 
     class DataclassOutputModule(nn.Module):
         def __init__(self, skip_o1):

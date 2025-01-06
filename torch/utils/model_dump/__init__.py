@@ -238,7 +238,7 @@ def get_model_info(
         # so re-used strings are stored efficiently.
         # However, JSON has no way of representing this,
         # so we have to do it manually.
-        interned_strings : Dict[str, int] = {}
+        interned_strings : dict[str, int] = {}
 
         def ist(s):
             if s not in interned_strings:

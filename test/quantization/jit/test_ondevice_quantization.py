@@ -1,7 +1,6 @@
 # Owner(s): ["oncall: quantization"]
 
 import io
-from typing import Dict
 
 import torch
 import torch._C
@@ -449,7 +448,7 @@ class TestOnDeviceDynamicPTQFinalize(TestCase):
             self.assertTrue(torch.allclose(ref_output, output))
 
             # Now serialize to flabuffer and load from fb and check
-            dict: Dict[str, str] = {}
+            dict: dict[str, str] = {}
             bytes = torch._C._save_mobile_module_to_bytes(m._c, dict)
             m = LiteScriptModule(torch._C._load_mobile_module_from_bytes(bytes))
             fb_output = m(*inputs)

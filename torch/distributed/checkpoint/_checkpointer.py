@@ -1,5 +1,5 @@
 from concurrent.futures import Future
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 
 import torch.distributed as dist
 import torch.distributed.checkpoint.state_dict_loader as loader
@@ -13,7 +13,7 @@ from torch.distributed.checkpoint.storage import (
 )
 
 
-__all__: List[str] = []
+__all__: list[str] = []
 
 
 class _Checkpointer:
@@ -90,7 +90,7 @@ class _Checkpointer:
             planner=self.save_planner,
         )
 
-    def load(self, state_dict: Dict[str, Any]) -> None:
+    def load(self, state_dict: dict[str, Any]) -> None:
         """Calls :py:meth: `torch.distributed.state_dict_loader.load`. Utilizing values passed during initialization."""
         loader.load(
             state_dict,

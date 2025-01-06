@@ -1,6 +1,6 @@
 import os
 from contextlib import contextmanager, ExitStack
-from typing import Generator
+from collections.abc import Generator
 
 from torch.distributed.elastic.multiprocessing.errors import record
 

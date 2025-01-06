@@ -2,7 +2,7 @@
 import itertools
 import unittest.mock
 from contextlib import contextmanager
-from typing import Iterator
+from collections.abc import Iterator
 
 import torch
 import torch._C

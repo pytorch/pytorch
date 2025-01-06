@@ -1,5 +1,4 @@
 # mypy: allow-untyped-defs
-from typing import List
 
 from torch._C import _compile_graph_to_code_table, _generate_upgraders_graph
 
@@ -20,7 +19,7 @@ def format_bytecode(table):
     return formatted_table
 
 
-def generate_upgraders_bytecode() -> List:
+def generate_upgraders_bytecode() -> list:
     yaml_content = []
     upgraders_graph_map = _generate_upgraders_graph()
     for upgrader_name, upgrader_graph in upgraders_graph_map.items():

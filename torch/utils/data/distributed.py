@@ -1,5 +1,6 @@
 import math
-from typing import Iterator, Optional, TypeVar
+from typing import Optional, TypeVar
+from collections.abc import Iterator
 
 import torch
 import torch.distributed as dist

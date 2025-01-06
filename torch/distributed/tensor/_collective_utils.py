@@ -3,7 +3,7 @@ import logging
 import math
 from dataclasses import dataclass
 from functools import lru_cache
-from typing import List, Optional
+from typing import Optional
 
 import torch
 import torch.distributed._functional_collectives as funcol
@@ -73,7 +73,7 @@ def shard_dim_alltoall(input, gather_dim, shard_dim, mesh, mesh_dim):
 
 def mesh_scatter(
     output: torch.Tensor,
-    scatter_list: List[torch.Tensor],
+    scatter_list: list[torch.Tensor],
     mesh: DeviceMesh,
     mesh_dim: int = 0,
     async_op: bool = False,
@@ -195,8 +195,8 @@ def unpad_tensor(tensor: torch.Tensor, pad_dim: int, pad_size: int) -> torch.Ten
 
 
 def fill_empty_tensor_to_shards(
-    shards: List[torch.Tensor], shard_dim: int, num_empty_tensors: int
-) -> List[torch.Tensor]:
+    shards: list[torch.Tensor], shard_dim: int, num_empty_tensors: int
+) -> list[torch.Tensor]:
     if num_empty_tensors == 0:
         return shards
     tensor_size = list(shards[0].size())
@@ -244,9 +244,9 @@ class MeshTopoInfo:
     """
 
     mesh: DeviceMesh
-    mesh_dim_devices: List[int]
-    mesh_dim_bandwidth: List[float]
-    mesh_dim_latency: List[float]
+    mesh_dim_devices: list[int]
+    mesh_dim_bandwidth: list[float]
+    mesh_dim_latency: list[float]
 
     @staticmethod
     @lru_cache(None)

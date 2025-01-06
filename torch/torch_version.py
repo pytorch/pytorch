@@ -1,4 +1,5 @@
-from typing import Any, Iterable
+from typing import Any
+from collections.abc import Iterable
 
 from torch._vendor.packaging.version import InvalidVersion, Version
 from torch.version import __version__ as internal_version
