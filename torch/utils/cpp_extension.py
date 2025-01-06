@@ -282,6 +282,19 @@ COMMON_HIPCC_FLAGS = [
     '-D__HIP_NO_HALF_CONVERSIONS__=1',
 ]
 
+COMMON_SYCL_FLAGS = [
+    '-fsycl',
+    '-fsycl-targets=spir64_gen,spir64',
+]
+
+SYCL_ARCH_LIST = os.environ.get('TORCH_XPU_ARCH_LIST', 'pvc,xe-lpg')
+
+SYCL_DLINK_FLAGS = [
+    *COMMON_SYCL_FLAGS,
+    '-fsycl-link',
+    f'-Xs "-device {SYCL_ARCH_LIST}"',
+]
+
 JIT_EXTENSION_VERSIONER = ExtensionVersioner()
 
 PLAT_TO_VCVARS = {
@@ -753,14 +766,11 @@ class BuildExtension(build_ext):
             sycl_cflags = None
             sycl_dlink_post_cflags = None
             if with_sycl:
-                sycl_common_cflags = ['-fsycl', '-fsycl-targets=spir64_gen,spir64']
-                sycl_cflags = extra_cc_cflags + common_cflags + sycl_common_cflags
+                sycl_cflags = extra_cc_cflags + common_cflags + COMMON_SYCL_FLAGS
                 if isinstance(extra_postargs, dict):
                     sycl_post_cflags = extra_postargs['sycl']
                 else:
                     sycl_post_cflags = list(extra_postargs)
-                # "preview breaking changes" flags allows to support both C++ ABIs
-                sycl_cflags += ['-fpreview-breaking-changes', '-D__INTEL_PREVIEW_BREAKING_CHANGES']
                 append_std17_if_no_std_present(sycl_cflags)
                 if not any(flag.startswith('-sycl-std=') for flag in sycl_cflags):
                     sycl_cflags.append('-sycl-std=2020')
@@ -773,8 +783,7 @@ class BuildExtension(build_ext):
                 # note that -fsycl-host-compiler-options will be quoted as needed
                 # with shlex.quote below
                 sycl_cflags += [f'-fsycl-host-compiler={host_cxx}', f'-fsycl-host-compiler-options={host_cflags}']
-                sycl_arch_list = os.environ.get('TORCH_XPU_ARCH_LIST', 'pvc,xe-lpg')
-                sycl_dlink_post_cflags = sycl_common_cflags + ['-fsycl-link', f'-Xs "-device {sycl_arch_list}"']
+                sycl_dlink_post_cflags = SYCL_DLINK_FLAGS
                 sycl_cflags = [shlex.quote(f) for f in sycl_cflags]
                 sycl_post_cflags = [shlex.quote(f) for f in sycl_post_cflags]
 
@@ -2553,11 +2562,8 @@ def _write_ninja_file_to_build_library(path,
         cuda_flags = None
 
     if with_sycl:
-        sycl_common_cflags = ['-fsycl', '-fsycl-targets=spir64_gen,spir64']
-        sycl_cflags = cflags + sycl_common_cflags
+        sycl_cflags = cflags + COMMON_SYCL_FLAGS
         sycl_cflags += extra_sycl_cflags
-        # "preview breaking changes" flags allows to support both C++ ABIs
-        sycl_cflags += ['-fpreview-breaking-changes', '-D__INTEL_PREVIEW_BREAKING_CHANGES']
         if not any(flag.startswith('-sycl-std=') for flag in sycl_cflags):
             sycl_cflags.append('-sycl-std=2020')
         host_cxx = get_cxx_compiler()
@@ -2568,8 +2574,7 @@ def _write_ninja_file_to_build_library(path,
         # note that -fsycl-host-compiler-options will be quoted as needed
         # with shlex.quote below
         sycl_cflags += [f'-fsycl-host-compiler={host_cxx}', shlex.quote(f'-fsycl-host-compiler-options={host_cflags}')]
-        sycl_arch_list = os.environ.get('TORCH_XPU_ARCH_LIST', 'pvc,xe-lpg')
-        sycl_dlink_post_cflags = sycl_common_cflags + ['-fsycl-link', f'-Xs "-device {sycl_arch_list}"']
+        sycl_dlink_post_cflags = SYCL_DLINK_FLAGS
     else:
         sycl_cflags = None
         sycl_dlink_post_cflags = None
