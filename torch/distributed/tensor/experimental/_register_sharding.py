@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 # Copyright (c) Meta Platforms, Inc. and affiliates
 from functools import partial
-from typing import Callable, List, Sequence, Union
+from typing import Callable, List, Sequence, Tuple, Union
 
 import torch
 from torch._ops import OpOverload
@@ -68,7 +68,7 @@ def register_sharding(op: Union[OpOverload, List[OpOverload]]):
 
     def custom_strategy(
         custom_sharding_fn: Callable[
-            ..., Sequence[tuple[PlacementList, PlacementList]]
+            ..., Sequence[Tuple[PlacementList, PlacementList]]
         ],
         mesh: DeviceMesh,
         op_schema: OpSchema,

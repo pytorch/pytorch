@@ -1,4 +1,4 @@
-from typing import cast, List, Sequence
+from typing import cast, List, Sequence, Tuple
 
 import torch
 import torch.distributed.tensor._api as dtensor
@@ -16,7 +16,7 @@ from torch.distributed.tensor.placement_types import (
 
 def compute_local_shape_and_global_offset(
     global_shape: ShapeType, mesh: DeviceMesh, placements: Sequence[Placement]
-) -> tuple[tuple[int, ...], tuple[int, ...]]:
+) -> Tuple[Tuple[int, ...], Tuple[int, ...]]:
     """
     Compute the local tensor shape and the global offsets into the original tensor
     of a DTensor on its current global rank. This is useful for checkpointing purpose.
@@ -165,7 +165,7 @@ def compute_local_shape_and_global_offset(
 
 def compute_global_tensor_info(
     tensor: torch.Tensor, mesh: DeviceMesh, placements: Sequence[Placement]
-) -> tuple[List[int], List[int]]:
+) -> Tuple[List[int], List[int]]:
     """
     Compute the global size and stride of a DTensor from the given local tensor.
     The local size is multiplited by `world_size` per Sharding dim.
@@ -245,7 +245,7 @@ def try_find_mesh_from_args(
 
 def compute_local_stride(
     global_stride: ShapeType, mesh: DeviceMesh, placements: Sequence[Placement]
-) -> tuple[int, ...]:
+) -> Tuple[int, ...]:
     """
     Compute the stride of a local tensor shard, given the global stride of the DTensor.
     NOTE: Currently this function is assuming the DTensor is evenly shardable.
