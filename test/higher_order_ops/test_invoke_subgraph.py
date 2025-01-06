@@ -197,6 +197,37 @@ class TestInvokeSubgraphCompile(TestCase):
         res = opt_fn(q, k, v)
         res.sum().backward()
 
+    def test_symint_from_fwd_to_bwd(self):
+        @mark_compile_region
+        def gn(x, y):
+            a = torch.sum(x, (1,), keepdim=True).view(y.shape[1], y.shape[0])
+            return torch.matmul(a, y)
+
+        def fn(x, y):
+            return gn(x, y)
+
+        opt_fn = torch.compile(fn, backend="inductor", fullgraph=True)
+
+        x = torch.randn(64, 1, requires_grad=True)
+        y = torch.randn(8, 8, requires_grad=True)
+        ref = fn(x, y)
+        res = opt_fn(x, y)
+        self.assertEqual(ref, res)
+
+        x = torch.randn(256, 1, requires_grad=True)
+        y = torch.randn(16, 16, requires_grad=True)
+        ref = fn(x, y)
+        res = opt_fn(x, y)
+        self.assertEqual(ref, res)
+        res.sum().backward()
+
+        x = torch.randn(16, 1, requires_grad=True)
+        y = torch.randn(4, 4, requires_grad=True)
+        ref = fn(x, y)
+        res = opt_fn(x, y)
+        self.assertEqual(ref, res)
+        res.sum().backward()
+
     def test_dedupe(self):
         @mark_compile_region
         def gn(x, y):
@@ -431,11 +462,16 @@ class GraphModule(torch.nn.Module):
             return gn(x)
 
         opt_fn = torch.compile(fn, backend="inductor", fullgraph=True)
-        x = torch.randn(8, 8, requires_grad=True)
+        # requires_grad is False deliberately to force None the joint_graph
+        # outputs
+        x = torch.randn(8, 8, requires_grad=False)
 
         ref = mod(x)
         res = opt_fn(x)
         self.assertEqual(ref, res)
+
+        ref.sum().backward()
+        res.sum().backward()
 
     def test_fail_with_direct_invoke_subgraph(self):
         from torch._higher_order_ops import invoke_subgraph
@@ -592,6 +628,27 @@ class GraphModule(torch.nn.Module):
             return (sin,)
 """,
             )
+
+    @requires_cuda
+    def test_return_none(self):
+        from torch.nn import functional as F
+
+        weight = torch.ones(
+            1000, device="cuda:0", dtype=torch.float32, requires_grad=True
+        )
+        ones = torch.ones(1000, device="cuda:0", dtype=torch.float32)
+
+        @mark_compile_region
+        def fn(x, train):
+            return F.dropout(x * weight, 0.33, train)
+
+        @torch._dynamo.optimize_assert("inductor")
+        def run(x, train=True):
+            return fn(x, train)
+
+        r1 = run(ones, train=False)
+        r1.sum().backward()
+        weight.grad.clone()
 
     def test_dynamic(self):
         @mark_compile_region
