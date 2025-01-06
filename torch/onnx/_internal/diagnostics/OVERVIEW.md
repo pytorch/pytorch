@@ -4,9 +4,9 @@ NOTE: This feature is underdevelopment and is subject to change.
 
 Summary of source tree:
 - [OVERVIEW.md](OVERVIEW.md): Technical overview of the diagnostics infrastructure.
-- [generated/](generated): Generated diagnostics rules from [rules.yaml](rules.yaml).
 - [infra/](infra): Generic diagnostics infrastructure built on top of [SARIF](https://docs.oasis-open.org/sarif/sarif/v2.1.0/sarif-v2.1.0.html).
-- [_diagnostic.py](diagnostic.py): Python API for diagnostics.
+- [_diagnostic.py](_diagnostic.py): Python API for diagnostics.
+- [_rules.py](_rules.py): Generated diagnostics rules from [rules.yaml](rules.yaml).
 - [rules.yaml](rules.yaml): Single source of truth for diagnostics rules. Used to generate C++ and Python interfaces, and documentation pages.
 - [tools/onnx/](/tools/onnx): Scripts for generating source code and documentation for diagnostics rules.
 

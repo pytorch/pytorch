@@ -1,12 +1,14 @@
 # Security Policy
 
- - [**Reporting a Vulnerability**](#reporting-a-vulnerability)
+ - [**Reporting Security Issues**](#reporting-security-issues)
  - [**Using Pytorch Securely**](#using-pytorch-securely)
    - [Untrusted models](#untrusted-models)
-   - [Untrusted inputs](#untrusted-inputs)
+   - [Untrusted inputs during training and prediction](#untrusted-inputs-during-training-and-prediction)
    - [Data privacy](#data-privacy)
    - [Using distributed features](#using-distributed-features)
 - [**CI/CD security principles**](#cicd-security-principles)
+  - [Release pipelines security](#release-pipelines-security)
+
 ## Reporting Security Issues
 
 Beware that none of the topics under [Using Pytorch Securely](#using-pytorch-securely) are considered vulnerabilities of Pytorch.
@@ -48,7 +50,7 @@ If applicable, prepare your model against bad inputs and prompt injections. Some
     - Validation: Enforce strict rules on allowed characters and data types.
     - Filtering: Remove potentially malicious scripts or code fragments.
     - Encoding: Convert special characters into safe representations.
-    - Verification: Run tooling that identifies potential script injections (e.g. [models that detect prompt injection attempts](https://python.langchain.com/docs/guides/safety/hugging_face_prompt_injection)).
+    - Verification: Run tooling that identifies potential script injections (e.g. [models that detect prompt injection attempts](https://python.langchain.com/v0.1/docs/guides/productionization/safety/hugging_face_prompt_injection/)).
 
 ### Data privacy
 
