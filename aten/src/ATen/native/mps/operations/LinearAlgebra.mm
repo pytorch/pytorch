@@ -871,7 +871,8 @@ static Tensor& linalg_cholesky_mps_impl(const Tensor& input, bool upper, Tensor&
       }
     });
   }
-  return upper ? out.triu_() : out.tril_();
+  out.tril_();
+  return upper ? out.transpose_(ndim - 2, ndim - 1) : out;
 }
 } // namespace mps
 
