@@ -178,8 +178,9 @@ void EmbeddingBagImpl::pretty_print(std::ostream& stream) const {
     stream << ", include_last_offset=" << std::boolalpha
            << options.include_last_offset();
   }
-  if (options.padding_idx().has_value()) {
-    stream << ", padding_idx=" << options.padding_idx().value();
+  auto const& padding_idx_opt = options.padding_idx();
+  if (padding_idx_opt.has_value()) {
+    stream << ", padding_idx=" << padding_idx_opt.value();
   }
   stream << ")";
 }
