@@ -1,7 +1,6 @@
-# mypy: allow-untyped-defs
 import contextlib
 import logging
-from typing import Any, Callable, List, Optional
+from typing import Any, Callable, List, Optional, TypeVar
 from unittest.mock import patch
 
 import torch
@@ -11,7 +10,7 @@ from torch.utils._ordered_set import OrderedSet
 from ..._dynamo.utils import counters
 from .. import config, ir
 from ..kernel.mm_common import mm_args
-from ..select_algorithm import DataProcessorTemplateWrapper
+from ..select_algorithm import ChoiceCaller, DataProcessorTemplateWrapper
 from ..utils import parallel_num_threads
 from ..virtualized import V
 from .cpp import get_export_declaration
@@ -126,9 +125,9 @@ extern "C" {{export_declaration}}
 """
 
 
-def get_deduplicated_act(act_mapping: dict[int, ir.TensorBox]):
+def get_deduplicated_act(act_mapping: dict[int, ir.IRNode]) -> List[ir.IRNode]:
     act_deduplicated = []
-    act_deduplicated_name = OrderedSet[str]()
+    act_deduplicated_name: OrderedSet[str] = OrderedSet()
     for act_idx in range(len(act_mapping.values())):
         act = act_mapping[act_idx]
         if act.get_name() not in act_deduplicated_name:
@@ -140,15 +139,15 @@ def get_deduplicated_act(act_mapping: dict[int, ir.TensorBox]):
 class CppGroupedGemmTemplate(CppGemmTemplate):
     def __init__(
         self,
-        input_nodes,
+        input_nodes: List[ir.IRNode],
         layout: ir.Layout,
         num_threads: int,
         register_blocking: GemmBlocking,
-        beta=1,
-        alpha=1,
-        has_bias=False,
+        beta: int = 1,
+        alpha: int = 1,
+        has_bias: bool = False,
         epilogue_creator: Optional[Callable[[ir.Buffer], ir.Pointwise]] = None,
-        act_mapping: Optional[dict[int, ir.TensorBox]] = None,
+        act_mapping: Optional[dict[int, ir.IRNode]] = None,
         gemm_grouped_num: int = 1,
     ) -> None:
         """
@@ -177,10 +176,10 @@ class CppGroupedGemmTemplate(CppGemmTemplate):
         ]
 
     @staticmethod
-    def _fake_get_dtype(fake_outs):
+    def _fake_get_dtype(fake_outs: List[ir.Buffer]) -> Callable[[str], torch.dtype]:
         _get_dtype_real = V.graph.get_dtype
 
-        def get_dtype(name):
+        def get_dtype(name: str) -> torch.dtype:
             for fake_out in fake_outs:
                 if name == fake_out.get_name():
                     return fake_out.get_dtype()
@@ -191,19 +190,17 @@ class CppGroupedGemmTemplate(CppGemmTemplate):
     @classmethod
     def add_choices(
         cls,
-        choices,
-        layout,
-        input_nodes,
-        beta=1,
-        alpha=1,
+        choices: List[ChoiceCaller],
+        layout: ir.Layout,
+        input_nodes: List[ir.IRNode],
+        beta: int = 1,
+        alpha: int = 1,
         has_bias: tuple[bool, ...] = (False, False),
-        trans_w=False,
-        input_indices=None,
+        trans_w: bool = False,
+        input_indices: Optional[List[int]] = None,
         epilogue_creator: Optional[Callable[[ir.Buffer], ir.Pointwise]] = None,
-        act_mapping: Optional[
-            dict[int, ir.TensorBox]
-        ] = None,  # gemm idx to its act buf
-    ):
+        act_mapping: Optional[dict[int, ir.IRNode]] = None,  # gemm idx to its act buf
+    ) -> DataProcessorTemplateWrapper:
         # Input nodes order: x, optional[x1], ... w0, w1, ... optional[b0], optional[b1], ...
         gemm_grouped_num = len(has_bias)
         assert act_mapping
@@ -212,34 +209,45 @@ class CppGroupedGemmTemplate(CppGemmTemplate):
         bias_start_idx = wgt_start_idx + gemm_grouped_num
         input_indices = list(range(len(input_nodes)))
 
-        def reorder_and_filter(inputs, layout_or_out):
+        _T = TypeVar("_T", ir.IRNode, torch.Tensor)
+        _U = TypeVar("_U", ir.Layout, torch.Tensor)
+
+        def reorder_and_filter(
+            inputs: List[_T],
+            layout_or_out: _U,
+        ) -> tuple[List[_T], _U]:
+            assert input_indices is not None, "input_indices must be set"
             return [inputs[idx] for idx in input_indices], layout_or_out
 
         new_inputs, new_layout = reorder_and_filter(input_nodes, layout)
 
-        def maybe_to_dense(inputs, layout_or_out):
+        def maybe_to_dense(
+            inputs: List[_T],
+            layout_or_out: _U,
+        ) -> tuple[List[_T], _U]:
             new_inputs = list(inputs)
             for idx in range(wgt_start_idx, wgt_start_idx + gemm_grouped_num):
                 if isinstance(inputs[idx], torch.Tensor):
                     W = inputs[idx]
+                    assert isinstance(W, torch.Tensor), "W must be a torch.Tensor"
                     new_inputs[idx] = W.to_dense() if W.is_mkldnn else W
             return new_inputs, layout_or_out
 
-        def normalize_shapes(inputs, layout_or_out):
-            new_inputs = list(inputs)
+        def normalize_shapes(
+            inputs: List[_T],
+            layout_or_out: _U,
+        ) -> tuple[List[_T], _U]:
+            new_inputs: List[_T] = list(inputs)
             if not trans_w:
                 return new_inputs, layout_or_out
-            X = next(iter(new_inputs))
-            W_list = new_inputs[wgt_start_idx : wgt_start_idx + gemm_grouped_num]
-            new_W_list = []
-            for W in W_list:
-                new_W_list.append(transpose_w(W, trans_w))
-            new_inputs[wgt_start_idx : wgt_start_idx + gemm_grouped_num] = new_W_list
-            B_list = new_inputs[bias_start_idx:]
-            new_B_list = []
-            for B in B_list:
-                new_B_list.append(expand_bias(B, X))
-            new_inputs[bias_start_idx:] = new_B_list
+            X = new_inputs[0]
+            for wgt_idx in range(wgt_start_idx, wgt_start_idx + gemm_grouped_num):
+                new_input = new_inputs[wgt_idx]
+                new_inputs[wgt_idx] = transpose_w(new_input, trans_w)
+            for bias_idx in range(bias_start_idx, len(new_inputs)):
+                new_bias = expand_bias(new_inputs[bias_idx], X)
+                assert new_bias is not None
+                new_inputs[bias_idx] = new_bias
             return new_inputs, layout_or_out
 
         num_threads = parallel_num_threads()
@@ -267,7 +275,10 @@ class CppGroupedGemmTemplate(CppGemmTemplate):
         )
         padding = padded_n - n
 
-        def pack_weight(inputs, layout_or_out):
+        def pack_weight(
+            inputs: List[_T],
+            layout_or_out: _U,
+        ) -> tuple[List[_T], _U]:
             new_W_list = []
             new_inputs = list(inputs)
             W_list = new_inputs[wgt_start_idx : wgt_start_idx + gemm_grouped_num]
@@ -277,12 +288,15 @@ class CppGroupedGemmTemplate(CppGemmTemplate):
             new_inputs[wgt_start_idx : wgt_start_idx + gemm_grouped_num] = new_W_list
             return new_inputs, layout_or_out
 
-        def preprocessor(inputs, layout):
+        def preprocessor(
+            inputs: List[_T],
+            layout: _U,
+        ) -> tuple[List[_T], _U]:
             return pack_weight(
                 *normalize_shapes(*maybe_to_dense(*reorder_and_filter(inputs, layout)))
             )
 
-        def postprocessor(output):
+        def postprocessor(output: _T) -> _T:
             if isinstance(output, ir.TensorBox):
                 template_buffer = ir.InputsKernel.unwrap_storage_for_input(output)
                 assert isinstance(template_buffer, ir.CppTemplateBuffer)
@@ -296,7 +310,7 @@ class CppGroupedGemmTemplate(CppGemmTemplate):
                     W_tensor.append(V.graph.constants[W_node.get_name()])
                 new_input_nodes[
                     wgt_start_idx : wgt_start_idx + gemm_grouped_num
-                ] = W_tensor
+                ] = W_tensor  # type: ignore[assignment]
                 new_input_nodes, _ = pack_weight(
                     *normalize_shapes(*maybe_to_dense(new_input_nodes, layout))
                 )
@@ -304,6 +318,7 @@ class CppGroupedGemmTemplate(CppGemmTemplate):
                 prune_tensors(input_nodes, new_input_nodes)
                 for idx in range(wgt_start_idx, wgt_start_idx + gemm_grouped_num):
                     W_packed = new_input_nodes[idx]
+                    assert isinstance(W_packed, torch.Tensor)
                     W_packed_constant = V.graph.add_tensor_constant(W_packed)
                     template_buffer.inputs[
                         idx
@@ -328,7 +343,7 @@ class CppGroupedGemmTemplate(CppGemmTemplate):
         template.maybe_append_choice(choices)
         return template
 
-    def render(  # type: ignore[override,return]
+    def render(  # type: ignore[override,return,no-untyped-def]
         self,
         kernel: CppTemplateKernel,
         template_buffer_node: Optional[ir.CppTemplateBuffer] = None,
@@ -405,7 +420,7 @@ class CppGroupedGemmTemplate(CppGemmTemplate):
             not self.epilogue_creator and not epilogue_nodes
         ), "Epilogue fusion is not implemented yet in Grouped GEMM Template"
 
-        kernel_args = {}
+        kernel_args: dict[str, Optional[ir.IRNode]] = {}
         for x_idx in range(wgt_start_idx):
             kernel_args["X" + str(x_idx)] = act_deduplicated[x_idx]
         for w_idx in range(self.gemm_grouped_num):
@@ -442,8 +457,7 @@ class CppGroupedGemmTemplate(CppGemmTemplate):
             Y_2d_list=Y_2d_list,
         )
         with contextlib.ExitStack() as stack:
-            for buf in fake_buffers:
-                stack.enter_context(
-                    patch.object(V.graph, "get_dtype", self._fake_get_dtype(buf))
-                )
+            stack.enter_context(
+                patch.object(V.graph, "get_dtype", self._fake_get_dtype(fake_buffers))
+            )
             return self._template_from_string(GEMM_TEMPLATE).render(**options)
