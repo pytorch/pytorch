@@ -2756,6 +2756,16 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn(8, 8), torch.randn(8, 8)))
 
+    @skipCUDAIf(True, "Not implemented for CUDA")
+    def test_logaddexp(self):
+        self.common(
+            torch.logaddexp,
+            (
+                torch.randn(8, 8).to(dtype=torch.complex64),
+                torch.randn(8, 8).to(dtype=torch.complex64),
+            ),
+        )
+
     def test_sigmoid(self):
         def fn(a, b):
             return (torch.sigmoid(a), torch.sigmoid(a + b))
