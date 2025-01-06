@@ -2,6 +2,7 @@
 import argparse
 import sys
 
+
 # Unroll loops when block_size is a multiple of vector length.
 def unroll(num_unrolls, IndexType, InType, OutType, use_weights):
     def compute(regid, InType, use_weights):
@@ -23,7 +24,7 @@ def unroll(num_unrolls, IndexType, InType, OutType, use_weights):
                 "                svAll,\n"
                 "                svreinterpret_f16_u32(svld1uh_u32(\n"
                 "                    svAll, reinterpret_cast<const uint16_t*>("
-                f"&ip[{regid} * vLen])))),\n"  # noqa
+                f"&ip[{regid} * vLen])))),\n"
                 f"            vsum{regid});"
             )
         elif InType == "at::BFloat16":
@@ -36,7 +37,7 @@ def unroll(num_unrolls, IndexType, InType, OutType, use_weights):
                 "                svld1uh_u32(\n"
                 "                    svAll, reinterpret_cast<const uint16_t*>("
                 f"&ip[{regid} * vLen])),\n"
-                "                16)),\n"  # noqa
+                "                16)),\n"
                 f"            vsum{regid});"
             )
         elif InType == "uint8_t":
@@ -45,11 +46,11 @@ def unroll(num_unrolls, IndexType, InType, OutType, use_weights):
                 "            svAll,\n"
                 "            vwgt,\n"
                 "            svcvt_f32_u32_x(svAll,"
-                f" svld1ub_u32(svAll, &ip[{regid} * vLen])),\n"  # noqa
+                f" svld1ub_u32(svAll, &ip[{regid} * vLen])),\n"
                 f"            svadd_f32_x(svAll, vsum{regid}, vbio));"
             )
         else:
-            raise ValueError(f"Unknown datatype \"{InType}\"")
+            raise ValueError(f'Unknown datatype "{InType}"')
 
         return code
 
@@ -74,9 +75,7 @@ def unroll(num_unrolls, IndexType, InType, OutType, use_weights):
       int64_t start_offset = offsets[i];
       int64_t end_offset = offsets[i + 1];""")
     code.append(
-        "      for ("
-        + "int64_t"
-        + " j = start_offset; j < end_offset; ++j) {"  # noqa
+        "      for (" + "int64_t" + " j = start_offset; j < end_offset; ++j) {"
     )
 
     code.append("        const auto idx = indices[pos];")
@@ -91,7 +90,7 @@ def unroll(num_unrolls, IndexType, InType, OutType, use_weights):
         code.append("        " + OutType + " bio{};")
         code.append("        if (weights) {")
         code.append(
-            "          wgt = weights[IS_WEIGHT_POSITIONAL ? (j - start_offset) : pos];"  # noqa
+            "          wgt = weights[IS_WEIGHT_POSITIONAL ? (j - start_offset) : pos];"
         )
         code.append("        }")
         code.append("        if (scale_bias) {")
@@ -103,7 +102,7 @@ def unroll(num_unrolls, IndexType, InType, OutType, use_weights):
         code.append("        " + OutType + " wgt = 1.f;")
         code.append("        if (weights) {")
         code.append(
-            "          wgt = weights[IS_WEIGHT_POSITIONAL ? (j - start_offset) : pos];"  # noqa
+            "          wgt = weights[IS_WEIGHT_POSITIONAL ? (j - start_offset) : pos];"
         )
         code.append("        }")
 
@@ -124,8 +123,10 @@ def unroll(num_unrolls, IndexType, InType, OutType, use_weights):
     code.append("        const svfloat32_t vlen_inv = svdup_n_f32(len_inv);")
 
     for i in range(num_unrolls):
-        code.append(f"        svst1_f32(svAll, &op[{i} * vLen],"
-                    + f" svmul_f32_x(svAll, vsum{i}, vlen_inv));")
+        code.append(
+            f"        svst1_f32(svAll, &op[{i} * vLen],"
+            + f" svmul_f32_x(svAll, vsum{i}, vlen_inv));"
+        )
 
     code.append("      } else {")
     # inv of length
@@ -190,20 +191,18 @@ def generic(IndexType, InType, OutType, use_weights):
                 "                  pg,\n"
                 "                  vwgt,\n"
                 "                  svcvt_f32_u32_x(pg,"
-                " svld1ub_u32(pg, &ip[k])),\n"  # noqa
+                " svld1ub_u32(pg, &ip[k])),\n"
                 "                  svadd_f32_x(pg,"
                 " svld1_f32(pg, &op[k]), vbio)));"
             )
         else:
-            raise ValueError(f"Unknown datatype \"{InType}\"")
+            raise ValueError(f'Unknown datatype "{InType}"')
 
         return code
 
     code = []
 
-    code.append(
-        "    for (int64_t i = 0; i < output_size; ++i) {"
-    )
+    code.append("    for (int64_t i = 0; i < output_size; ++i) {")
 
     code.append("      " + OutType + "* const op = &out[i * block_size];")
 
@@ -221,9 +220,7 @@ def generic(IndexType, InType, OutType, use_weights):
         + "      int64_t end_offset = offsets[i + 1];"
     )
     code.append(
-        "      for ("
-        + "int64_t"
-        + " j = start_offset; j < end_offset; ++j) {"  # noqa
+        "      for (" + "int64_t" + " j = start_offset; j < end_offset; ++j) {"
     )
 
     code.append("        const auto idx = indices[pos];")
@@ -239,7 +236,7 @@ def generic(IndexType, InType, OutType, use_weights):
         code.append("        " + OutType + " bio{};")
         code.append("        if (weights) {")
         code.append(
-            "          wgt = weights[IS_WEIGHT_POSITIONAL ? (j - start_offset) : pos];"  # noqa
+            "          wgt = weights[IS_WEIGHT_POSITIONAL ? (j - start_offset) : pos];"
         )
         code.append("        }")
         code.append("        if (scale_bias) {")
@@ -251,7 +248,7 @@ def generic(IndexType, InType, OutType, use_weights):
         code.append("        " + OutType + " wgt = 1.f;")
         code.append("        if (weights) {")
         code.append(
-            "          wgt = weights[IS_WEIGHT_POSITIONAL ? (j - start_offset) : pos];"  # noqa
+            "          wgt = weights[IS_WEIGHT_POSITIONAL ? (j - start_offset) : pos];"
         )
         code.append("        }")
 
@@ -261,8 +258,9 @@ def generic(IndexType, InType, OutType, use_weights):
     # compute and store main loop
     code.append("        svbool_t pg;")
     code.append("        for (int64_t k = 0;")
-    code.append("             svptest_first(svAll, pg = svwhilelt_b32_s64("
-                + "k, block_size));")
+    code.append(
+        "             svptest_first(svAll, pg = svwhilelt_b32_s64(" + "k, block_size));"
+    )
     code.append("             k += vLen) {")
     code.extend(compute(InType, use_weights))
     code.append("        }\n")
@@ -274,9 +272,11 @@ def generic(IndexType, InType, OutType, use_weights):
     code.append("        const float len_inv = 1.0f / length;")
     code.append("        svfloat32_t vlen_inv = svdup_n_f32(len_inv);")
     code.append("        svbool_t pg;")
-    code.append("        for (int64_t j = 0;\n"
-                "             svptest_first(svAll, pg = svwhilelt_b32_s64("
-                "j, block_size));")
+    code.append(
+        "        for (int64_t j = 0;\n"
+        "             svptest_first(svAll, pg = svwhilelt_b32_s64("
+        "j, block_size));"
+    )
     code.append("             j += vLen) {")
     code.append(
         "          svst1_f32(\n"
@@ -286,6 +286,7 @@ def generic(IndexType, InType, OutType, use_weights):
     code.append("      }")
     code.append("    }")
     return code
+
 
 def main():
     parser = argparse.ArgumentParser()
@@ -375,12 +376,21 @@ def main():
 
             # Resolve the Lint warnings: Limit of 80 characters in one line.
             extra_space = "\n      "
-            ret_string = "  return " + fn_base + suffix \
-                    + "<" + is_weight_positional + ">("
+            ret_string = (
+                "  return " + fn_base + suffix + "<" + is_weight_positional + ">("
+            )
             if len(ret_string) <= 80:
                 code.append(ret_string)
             else:
-                code.append("  return " + fn_base + suffix + "<" + extra_space + is_weight_positional + ">(")
+                code.append(
+                    "  return "
+                    + fn_base
+                    + suffix
+                    + "<"
+                    + extra_space
+                    + is_weight_positional
+                    + ">("
+                )
 
             code.append("      block_size,")
             code.append("      output_size,")
@@ -403,6 +413,7 @@ def main():
         fout.write("\n".join(code) + "\n")
 
     print("Created " + filename)
+
 
 if __name__ == "__main__":
     main()
