@@ -12,8 +12,15 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, NamedTuple
 
+import clang_format  # type: ignore[import-untyped]
+
 
 IS_WINDOWS: bool = os.name == "nt"
+
+
+CLANG_FORMAT_EXE = (
+    Path(clang_format.__file__).absolute().parent / "data" / "bin" / "clang-format"
+)
 
 
 def eprint(*args: Any, **kwargs: Any) -> None:
@@ -173,7 +180,7 @@ def main() -> None:
     )
     parser.add_argument(
         "--binary",
-        required=True,
+        default=str(CLANG_FORMAT_EXE),
         help="clang-format binary path",
     )
     parser.add_argument(

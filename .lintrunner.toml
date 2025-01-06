@@ -96,17 +96,13 @@ exclude_patterns = [
 ]
 init_command = [
     'python3',
-    'tools/linter/adapters/s3_init.py',
-    '--config-json=tools/linter/adapters/s3_init_config.json',
-    '--linter=clang-format',
+    'tools/linter/adapters/pip_init.py',
     '--dry-run={{DRYRUN}}',
-    '--output-dir=.lintbin',
-    '--output-name=clang-format',
+    'clang-format==17.0.6',
 ]
 command = [
     'python3',
     'tools/linter/adapters/clangformat_linter.py',
-    '--binary=.lintbin/clang-format',
     '--',
     '@{{PATHSFILE}}'
 ]

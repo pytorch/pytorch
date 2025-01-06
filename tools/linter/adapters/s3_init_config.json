@@ -6,20 +6,6 @@
         "Validate the new download url and hash by running 'lintrunner init' to pull the new binaries and then run 'lintrunner' to try linting the files.",
         "Some binaries have custom builds; see https://github.com/pytorch/test-infra/blob/main/.github/workflows/clang-tidy-linux.yml and https://github.com/pytorch/test-infra/blob/main/.github/workflows/clang-tidy-macos.yml"
     ],
-    "clang-format": {
-        "Darwin-arm": {
-            "download_url": "https://oss-clang-format.s3.us-east-2.amazonaws.com/macos-arm/17.0.6/clang-format",
-            "hash": "47c47f3c8275fd6e25d07128ef9a655d3f898eae6a59a7c7a801967871bdb2f7"
-        },
-        "Darwin-i386": {
-            "download_url": "https://oss-clang-format.s3.us-east-2.amazonaws.com/macos-i386/17.0.6/clang-format",
-            "hash": "23423cbe62feb535c05c88e6f47e420ca2777603f90dff4d33d19b6f5177a79e"
-        },
-        "Linux": {
-            "download_url": "https://oss-clang-format.s3.us-east-2.amazonaws.com/linux64/17.0.6/clang-format",
-            "hash": "920159a0fafc7c65f6819e8a0b739ecc8e655f50f20a3a1db975a3473b86431b"
-        }
-    },
     "clang-tidy": {
         "Darwin-i386": {
             "download_url": "https://oss-clang-format.s3.us-east-2.amazonaws.com/macos-i386/15.0.6/clang-tidy",
