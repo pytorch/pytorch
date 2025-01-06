@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 from typing import Any, Callable, List, Optional, Tuple, TYPE_CHECKING, TypeVar
+from typing_extensions import ParamSpec
 
 import torch
 
@@ -27,7 +28,8 @@ __all__ = [
 ]
 
 
-_F = TypeVar("_F", bound=Callable[..., Any])
+_P = ParamSpec("_P")
+_R = TypeVar("_R")
 
 
 def compile(*args, **kwargs):
@@ -130,11 +132,11 @@ def allow_in_graph(fn):
 
 
 def substitute_in_graph(
-    original_fn: _F,
+    original_fn: Callable[_P, _R],
     *,
     can_constant_fold_through: bool = False,
     skip_signature_check: bool = False,
-) -> Callable[[_F], _F]:
+) -> Callable[[Callable[_P, _R]], Callable[_P, _R]]:
     """
     Register a polyfill handler for a function, usually a C function from the C extension, to be
     used in place of the original function when inlining the original function in the graph.
