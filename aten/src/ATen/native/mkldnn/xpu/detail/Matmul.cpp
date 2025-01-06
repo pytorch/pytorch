@@ -194,7 +194,14 @@ sycl::event matmul(
   pattr.set_scratchpad_mode(dnnl::scratchpad_mode::user);
 
   if (m1_dt == dnnl::memory::data_type::f32) {
-    pattr.set_fpmath_mode(dnnl::fpmath_mode::strict);
+    auto precision = at::globalContext().float32MatmulPrecision();
+    if (precision == at::Float32MatmulPrecision::MEDIUM) {
+      pattr.set_fpmath_mode(dnnl::fpmath_mode::bf16);
+    } else if (precision == at::Float32MatmulPrecision::HIGH) {
+      pattr.set_fpmath_mode(dnnl::fpmath_mode::tf32);
+    } else {
+      pattr.set_fpmath_mode(dnnl::fpmath_mode::strict);
+    }
   }
 
   // STEP3: create primitive

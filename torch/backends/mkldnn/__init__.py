@@ -106,9 +106,23 @@ class MkldnnModule(PropModule):
     )
 
 
+class MatMulModule:
+    def __getattr__(self, name):
+        if name == "allow_tf32":
+            return torch._C._get_allow_tf32_onednn_matmul()
+        # TODO: support allow_fp16_reduced_precision_reduction and allow_bf16_reduced_precision_reduction
+        raise AttributeError("Unknown attribute " + name)
+
+    def __setattr__(self, name, value):
+        if name == "allow_tf32":
+            return torch._C._set_allow_tf32_onednn_matmul(value)
+        raise AttributeError("Unknown attribute " + name)
+
+
 if TYPE_CHECKING:
     enabled: ContextProp
     deterministic: ContextProp
     allow_tf32: ContextProp
 
 sys.modules[__name__] = MkldnnModule(sys.modules[__name__], __name__)
+matmul = MatMulModule()
