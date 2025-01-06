@@ -656,10 +656,11 @@ struct TORCH_API TensorType : public SharedType {
     const auto& shape = sizes();
 
     for (size_t i = 0; i < shape.size(); i++) {
-      if (!shape[i].has_value()) {
+      auto const &s = shape[i];
+      if (!s.has_value()) {
         return std::optional<size_t>{};
       }
-      prod *= shape[i].value();
+      prod *= s.value();
     }
     return prod;
   }

@@ -25,9 +25,9 @@ void EmbeddingImpl::reset() {
       TORCH_CHECK(
           options.padding_idx() >= -options.num_embeddings(),
           "Padding_idx must be within num_embedding");
-      // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
       options.padding_idx(
-          options.num_embeddings() + options.padding_idx().value());
+          // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+          options.num_embeddings() + *options.padding_idx());
     }
   }
 
@@ -51,7 +51,7 @@ void EmbeddingImpl::reset_parameters() {
   if (options.padding_idx().has_value()) {
     torch::NoGradGuard no_grad;
     // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
-    weight[options.padding_idx().value()].fill_(0);
+    weight[*options.padding_idx()].fill_(0);
   }
 }
 
@@ -130,7 +130,7 @@ void EmbeddingBagImpl::reset_parameters() {
   auto const& padding_idx_opt = options.padding_idx();
   if (padding_idx_opt.has_value()) {
     torch::NoGradGuard no_grad;
-    weight[padding_idx_opt.value()].fill_(0);
+    weight[*padding_idx_opt].fill_(0);
   }
   torch::nn::init::normal_(weight);
 }
