@@ -5714,6 +5714,13 @@ class TestMPS(TestCaseMPS):
 
         helper(2, 8, 4, 5)
 
+    def test_fmin(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/143933
+        scalar = torch.tensor(.5)
+        x_mps = torch.rand(32, device="mps")
+        x_cpu = x_mps.detach().cpu()
+        self.assertEqual(torch.fmin(x_mps, scalar), torch.fmin(x_cpu, scalar))
+
     # Test forward sum
     def test_sum(self):
         def helper(n, c, h, w, dtype=torch.float32):
@@ -12540,7 +12547,7 @@ class TestMetalLibrary(TestCaseMPS):
         self.assertEqual(x, y)
         self.assertEqual(x, z)
 
-    def test_metal_arange_with_arg(self):
+    def test_metal_arange_with_arg(self, start=3.14, step=.5):
         x = torch.zeros(12, device="mps")
         lib = torch.mps._compile_shader("""
             kernel void arange(device float* x, constant float& start, constant float& step,
@@ -12548,8 +12555,11 @@ class TestMetalLibrary(TestCaseMPS):
               x[idx] = start + idx * step;
             }
         """)
-        lib.arange(x, 3.14, .5)
-        self.assertEqual(x, torch.arange(3.14, 8.66, .5, device='mps'))
+        lib.arange(x, start, step)
+        self.assertEqual(x, torch.arange(start, 8.66, .5, device='mps'))
+
+    def test_metal_arange_with_arg_and_scalar_tensor(self):
+        self.test_metal_arange_with_arg(step=torch.tensor(.5))
 
     def test_metal_arange_with_arg_and_cast(self):
         x = torch.zeros(12, device="mps", dtype=torch.half)
