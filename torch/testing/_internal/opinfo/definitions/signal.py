@@ -3,7 +3,7 @@
 import unittest
 from functools import partial
 from itertools import product
-from typing import Callable, List
+from typing import Callable, List, Tuple
 
 import numpy
 
@@ -285,7 +285,7 @@ def make_signal_windows_opinfo(
     reference_inputs_func: Callable,
     error_inputs_func: Callable,
     *,
-    skips: tuple[DecorateInfo, ...] = (),
+    skips: Tuple[DecorateInfo, ...] = (),
 ):
     r"""Helper function to create OpInfo objects related to different windows."""
     return OpInfo(
