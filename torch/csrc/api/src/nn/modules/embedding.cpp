@@ -26,7 +26,8 @@ void EmbeddingImpl::reset() {
           options.padding_idx() >= -options.num_embeddings(),
           "Padding_idx must be within num_embedding");
       // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
-      options.padding_idx(options.num_embeddings() + *options.padding_idx());
+      options.padding_idx(
+          options.num_embeddings() + options.padding_idx().value());
     }
   }
 
@@ -49,18 +50,21 @@ void EmbeddingImpl::reset_parameters() {
   torch::nn::init::normal_(weight);
   if (options.padding_idx().has_value()) {
     torch::NoGradGuard no_grad;
-    weight[*options.padding_idx()].fill_(0);
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+    weight[options.padding_idx().value()].fill_(0);
   }
 }
 
 void EmbeddingImpl::pretty_print(std::ostream& stream) const {
   stream << "torch::nn::Embedding(num_embeddings=" << options.num_embeddings()
          << ", embedding_dim=" << options.embedding_dim();
-  if (options.padding_idx().has_value()) {
-    stream << ", padding_idx=" << *options.padding_idx();
+  auto const& padding_idx_opt = options.padding_idx();
+  if (padding_idx_opt.has_value()) {
+    stream << ", padding_idx=" << padding_idx_opt.value();
   }
-  if (options.max_norm().has_value()) {
-    stream << ", max_norm=" << *options.max_norm();
+  auto const& max_norm_opt = options.max_norm();
+  if (max_norm_opt.has_value()) {
+    stream << ", max_norm=" << max_norm_opt.value();
   }
   if (options.norm_type() != 2) {
     stream << ", norm_type=" << options.norm_type();
@@ -93,8 +97,9 @@ EmbeddingBagImpl::EmbeddingBagImpl(EmbeddingBagOptions options_)
 }
 
 void EmbeddingBagImpl::reset() {
-  if (options.padding_idx().has_value()) {
-    auto padding_idx = options.padding_idx().value();
+  auto const& padding_idx_opt = options.padding_idx();
+  if (padding_idx_opt.has_value()) {
+    auto padding_idx = padding_idx_opt.value();
     if (padding_idx > 0) {
       TORCH_CHECK(
           padding_idx < options.num_embeddings(),
@@ -122,9 +127,10 @@ void EmbeddingBagImpl::reset() {
 }
 
 void EmbeddingBagImpl::reset_parameters() {
-  if (options.padding_idx().has_value()) {
+  auto const& padding_idx_opt = options.padding_idx();
+  if (padding_idx_opt.has_value()) {
     torch::NoGradGuard no_grad;
-    weight[options.padding_idx().value()].fill_(0);
+    weight[padding_idx_opt.value()].fill_(0);
   }
   torch::nn::init::normal_(weight);
 }
