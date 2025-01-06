@@ -443,7 +443,7 @@ class _AllReduce(Function):
     def forward(ctx, op, group, tensor):
         ctx.group = group
         ctx.op = op
-        tensor = tensor.clone()
+        tensor = tensor.clone().contiguous()
         dist.all_reduce(tensor, op=op, group=group)
         return tensor
 
