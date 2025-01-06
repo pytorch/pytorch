@@ -9568,7 +9568,7 @@ def forward(self, x):
     def test_placeholder_naming_order_variadic(self):
         class Mod(torch.nn.Module):
             def forward(self, a, b, c, **kwargs):
-                return a + b + c + kwargs["d"]
+                return a - b + c * kwargs["d"]
 
         mod = Mod()
         args = (torch.randn(3),)
