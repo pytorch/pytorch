@@ -1,6 +1,7 @@
 #include <torch/csrc/jit/operator_upgraders/version_map.h>
 
 #include <algorithm>
+#include <atomic>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -9,7 +10,7 @@ namespace torch::jit {
 
 // this flag is used to make sure the elements in the version map
 // are sorted according to when the upgraders are introduced.
-static bool isVersionMapSorted = false;
+static std::atomic<bool> isVersionMapSorted = false;
 
 // Main entry point for all operators that have valid upgraders.
 // Note for developers: The list of upgraders should be SORTED
