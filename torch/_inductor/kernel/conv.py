@@ -513,6 +513,7 @@ def convolution(
                 "output_padding": (0,) + output_padding,
             }
         )
+        # (N, C, L) -> (N, C, 1, L)
         x = L[aten.unsqueeze](x, dim=2)
         weight = L[aten.unsqueeze](weight, dim=2)
 
@@ -555,11 +556,7 @@ def convolution(
     ):
         return convert_1x1_conv_to_mm(x, weight, bias)
 
-    if (
-        bias is not None
-        and ir.get_device_type(x) != "cpu"
-        and ir.get_device_type(x) != "xpu"
-    ):
+    if bias is not None and ir.get_device_type(x) != "cpu":
         # peel off the bias, cudnn is slower with it
         result = convolution(x, weight, None, **kwargs)
         return L[aten.add](
