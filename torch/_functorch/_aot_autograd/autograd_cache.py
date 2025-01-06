@@ -14,7 +14,7 @@ import pickle
 import shutil
 import time
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING, Union
+from typing import Any, Callable, Dict, List, Optional, Tuple, TYPE_CHECKING, Union
 
 import torch
 from torch._dynamo.utils import counters, get_chromium_event_logger
@@ -304,7 +304,7 @@ def autograd_cache_key(
     config: AOTConfig,
     fx_config: _CompileFxKwargs,
     # TODO: add args and parameters
-) -> tuple[str, List[str]]:
+) -> Tuple[str, List[str]]:
     """
     Generate a unique hash of the FX graph for caching.
     """
