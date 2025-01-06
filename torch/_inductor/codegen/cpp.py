@@ -170,6 +170,8 @@ def reduction_init(reduction_type, dtype):
         return 1
     if reduction_type in ("max", "argmax", "min", "argmin"):
         cdtype = DTYPE_TO_CPP[dtype]
+        if dtype == torch.bool and reduction_type in ("argmin", "argmax"):
+            cdtype = DTYPE_TO_CPP[torch.float]
         min_var = (
             f"-std::numeric_limits<{cdtype}>::infinity()"
             if is_float_dtype(dtype)
@@ -196,6 +198,8 @@ def reduction_acc_type(reduction_type, dtype):
     if is_welford_reduction(reduction_type):
         return f"Welford<{scalar_type}>"
     if reduction_type in ("argmin", "argmax"):
+        if dtype == torch.bool:
+            scalar_type = DTYPE_TO_CPP[torch.float]
         return f"IndexValue<{scalar_type}>"
     return scalar_type
 
@@ -228,6 +232,17 @@ def reduction_combine(
             mean, m2, weight = reduction_project(reduction_type, next_value)
         return f"welford_combine({var}, {{{mean}, {m2}, {weight}}})"
     if reduction_type in ("argmin", "argmax"):
+        if (
+            hasattr(next_value, "dtype")
+            and next_value.dtype == torch.bool
+            and not next_value.is_vec
+        ):
+            if index is not None:
+                return f"{reduction_type}_combine({var}, static_cast<float>({next_value}), {index})"
+            else:
+                return (
+                    f"{reduction_type}_combine({var}, static_cast<float>({next_value}))"
+                )
         if index is not None:
             return f"{reduction_type}_combine({var}, {next_value}, {index})"
         else:
@@ -848,8 +863,8 @@ class CppOverrides(OpOverrides):
             return tuple(V.kernel.cse.try_get(cache_key) for cache_key in cache_keys)
 
         code = BracesBuffer()
-        exponent = V.kernel.cse.newvar()
-        mantissa = V.kernel.cse.newvar()
+        exponent = V.kernel.cse.newvar(dtype=torch.int32)
+        mantissa = V.kernel.cse.newvar(dtype=x.dtype)
         code.writeline(f"int32_t {exponent};")
         code.writeline(f"auto {mantissa} = std::frexp({x}, &{exponent});")
         V.kernel.compute.splice(code)
@@ -1682,8 +1697,8 @@ class CppVecOverrides(CppOverrides):
         cdtype = DTYPE_TO_CPP[x.dtype]
         size = V.kernel.tail_size if V.kernel.tail_size else V.kernel.tiling_factor
         code = BracesBuffer()
-        exponent = V.kernel.cse.newvar()
-        mantissa = V.kernel.cse.newvar()
+        exponent = V.kernel.cse.newvar(dtype=torch.int32)
+        mantissa = V.kernel.cse.newvar(dtype=x.dtype)
         exponent.update_on_args("frexp", (x,), kwargs={})
         mantissa.update_on_args("frexp", (x,), kwargs={})
         n_vec = V.kernel._get_num_vectors(x.dtype)
@@ -2275,7 +2290,10 @@ class CppKernel(Kernel):
 
     @property
     def assert_function(self) -> str:
-        return "AOTI_TORCH_CHECK"
+        if V.graph.aot_mode:
+            return "AOTI_TORCH_CHECK"
+        else:
+            return "TORCH_CHECK"
 
     def decide_parallel_depth(self, max_parallel_depth, threads):
         assert self.call_ranges is not None
@@ -2706,6 +2724,8 @@ class CppVecKernel(CppKernel):
             raise NotImplementedError(f"store mode={mode}")
 
     def reduction(self, dtype, src_dtype, reduction_type, value):
+        # Note: For argmax and argmin on bool type, we always convert bool to float.
+        # Fix issue: https://github.com/pytorch/pytorch/issues/143568
         assert reduction_type in VECTORIZABLE_RTYPES
         argmax_or_argmin = reduction_type in ("argmax", "argmin")
         horizontal_reduction = self.tiling_idx >= self.reduction_depth
@@ -3002,6 +3022,8 @@ class CppVecKernel(CppKernel):
         if reduction_type in ("argmin", "argmax"):
             n_src = self._get_num_vectors(scalar_type)
             n_idx = self._get_num_vectors(torch.int64)
+            if dtype == torch.bool:
+                return f"IndexValueVec<{DTYPE_TO_CPP[torch.float]}, {n_src}, {n_idx}>"
             return f"IndexValueVec<{DTYPE_TO_CPP[scalar_type]}, {n_src}, {n_idx}>"
         if dtype == torch.bool:
             assert reduction_type in ("min", "max", "any", "sum")
@@ -3092,6 +3114,8 @@ class CppVecKernel(CppKernel):
         elif reduction_type in ("argmin", "argmax"):
             assert src_dtype is not None
             cdtype = DTYPE_TO_CPP[src_dtype]
+            if src_dtype == torch.bool:
+                cdtype = DTYPE_TO_CPP[torch.float]
             n_src = self._get_num_vectors(src_dtype)
             n_idx = self._get_num_vectors(torch.int64)
             t_extra = ""

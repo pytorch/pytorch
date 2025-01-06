@@ -277,7 +277,9 @@ static Tensor& bce_loss_out_impl(const Tensor& input,
 } // namespace BCELoss
 
 static inline MPSGraphTensor* divisionNoNaN(MPSGraph* mpsGraph, MPSGraphTensor* divident, MPSGraphTensor* divisor) {
-  auto* div = [mpsGraph divisionWithPrimaryTensor:divident secondaryTensor:divisor name:@"divisionTensor"];
+  auto* div = [mpsGraph divisionWithPrimaryTensor:divident
+                                  secondaryTensor:castMPSTensor(mpsGraph, divisor, divident.dataType)
+                                             name:@"divisionTensor"];
   // Replace NaNs with 0 for divident elements equal to 0
   return [mpsGraph selectWithPredicateTensor:castMPSTensor(mpsGraph, divisor, MPSDataTypeBool)
                          truePredicateTensor:div

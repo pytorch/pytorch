@@ -217,7 +217,7 @@ class MiscTests(torch._inductor.test_case.TestCase):
         self.assertTrue(same(val4, correct1))
         self.assertEqual(counter.frame_count, 3)
 
-    @torch._dynamo.config.patch(accumulated_cache_size_limit=1)
+    @torch._dynamo.config.patch(accumulated_recompile_limit=1)
     def test_dynamo_disabled_in_custom_op_kernels(self):
         counters.clear()
 
@@ -1032,24 +1032,6 @@ class MiscTests(torch._inductor.test_case.TestCase):
             return res
 
         torch._dynamo.testing.standard_test(self, fn, 1, expected_ops=1)
-
-    @unittest.skipIf(sys.version_info[:2] <= (3, 8), "Requires astunparse")
-    def test_cse_dict_guards(self):
-        def fn(x):
-            ret = torch.zeros(3)
-            for v in x.values():
-                ret = ret + v
-            return ret
-
-        from torch._dynamo.guards import build_guard_function
-
-        x = {3: torch.randn(3), 2: torch.randn(3), 4: torch.randn(3)}
-        _, guards = torch._dynamo.export(fn, x)
-
-        code_lists = [c for g in guards for c in g.code_list or []]
-        _, pycode = build_guard_function(code_lists, [])
-        # Make sure we just call "list(dict.keys())" once
-        self.assertEqual(pycode.count("keys"), 1)
 
     def test_os_environ_get(self):
         cnts = torch._dynamo.testing.CompileCounter()
@@ -2564,7 +2546,7 @@ utils_device.CURRENT_DEVICE == None""".split(
 
         cnts = torch._dynamo.testing.CompileCounter()
         opt_fn = torch.compile(mandelbrot_numpy, backend=cnts, fullgraph=True)
-        n_iter = torch._dynamo.config.cache_size_limit - 2
+        n_iter = torch._dynamo.config.recompile_limit - 2
         for i in range(n_iter):
             x = i + 3
             ref = mandelbrot_numpy(x)
@@ -2757,7 +2739,7 @@ utils_device.CURRENT_DEVICE == None""".split(
         self.assertEqual(cnts.frame_count, 1)
 
     # cache size limit needs to be larger than the `dtypes` list size
-    @torch._dynamo.config.patch(cache_size_limit=12)
+    @torch._dynamo.config.patch(recompile_limit=12)
     def test_dtypes_no_graphbreaks(self):
         dtypes = [
             # floats
@@ -2875,146 +2857,6 @@ utils_device.CURRENT_DEVICE == None""".split(
         ref = fn(mv_out_op, torch.empty(0), torch.ones(3, 3), torch.ones(3))
         res = opt_fn(mv_out_op, torch.empty(0), torch.ones(3, 3), torch.ones(3))
         self.assertEqual(ref, res)
-
-    def test_dict_mutation_side_effect(self):
-        def fn(d):
-            d["c"] = d["a"] + d.pop("b")
-            return d
-
-        args1 = {"a": torch.randn(10), "b": torch.randn(10)}
-        args2 = dict(args1)
-        assert fn(args1) is args1
-        cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch.compile(fn, backend=cnts)
-        self.assertIs(opt_fn(args2), args2)
-        self.assertTrue(same(args1, args2))
-        self.assertEqual(cnts.frame_count, 1)
-        self.assertEqual(cnts.op_count, 1)
-
-    def test_dict_copy_alias(self):
-        @torch.compile(backend="eager", fullgraph=True)
-        def run(x, d0):
-            d1 = d0.copy()
-            d1[0] = 1
-            return x + 1, d1
-
-        d0 = {}
-        res, d1 = run(torch.zeros(1), d0)
-        self.assertTrue(same(res, torch.ones(1)))
-        self.assertEqual(d0, {})
-        self.assertEqual(d1, {0: 1})
-
-    def test_dict_subclass_get_method(self):
-        class dotdict(dict):
-            """dot.notation access to dictionary attributes"""
-
-            __getattr__ = dict.get
-            __setattr__ = dict.__setitem__
-            __delattr__ = dict.__delitem__
-
-        config = dotdict({"a": 1, "b": 2})
-
-        def fn(x):
-            x2 = x * 2
-            x3 = x * config.get("a", 3)
-            return x3
-
-        x = torch.randn(2)
-        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
-        self.assertEqual(fn(x), opt_fn(x))
-
-    def test_dict_order_keys(self):
-        def fn(d):
-            c = 0
-            for v in d.values():
-                c += v
-            return c
-
-        args1 = {}
-        args1["a"] = torch.rand(10)
-        args1["b"] = torch.rand(10)
-        cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch.compile(fn, backend=cnts)
-        self.assertEqual(fn(args1), opt_fn(args1))
-        self.assertEqual(cnts.frame_count, 1)
-        self.assertEqual(cnts.op_count, 2)
-
-        # A different order of keys recompiles
-        args2 = {}
-        args2["b"] = args1["b"]
-        args2["a"] = args1["a"]
-        self.assertEqual(fn(args2), opt_fn(args2))
-        self.assertEqual(cnts.frame_count, 2)
-        # Extra calls don't recompile
-        self.assertEqual(cnts.frame_count, 2)
-
-    def test_dict_namedtuple(self):
-        def fn(d):
-            return d[3] * 2
-
-        args1 = {collections.namedtuple: None, 3: torch.randn(3)}
-        cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch.compile(fn, backend=cnts)
-        self.assertEqual(fn(args1), opt_fn(args1))
-        self.assertEqual(cnts.frame_count, 1)
-        # Test a failing namedtuple guard
-        args2 = {2: None, 3: torch.randn(3)}
-        self.assertEqual(fn(args2), opt_fn(args2))
-        self.assertEqual(cnts.frame_count, 2)
-
-    def test_dict_order_keys_tensors(self):
-        def fn(d, x):
-            return d[x] + 3
-
-        args1 = {}
-        x = torch.randn(10)
-        y = torch.randn(10)
-        z = torch.randn(10)
-        args1[x] = y
-        args1[3] = z
-
-        cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch.compile(fn, backend=cnts)
-        self.assertEqual(fn(args1, x), opt_fn(args1, x))
-        self.assertEqual(cnts.frame_count, 1)
-
-        # Calling again doesn't recompile (same id and key order)
-        opt_fn(args1, x)
-        self.assertEqual(cnts.frame_count, 1)
-        args2 = {}
-        args2[3] = z
-        args2[x] = y
-
-        # Different order recompiles
-        self.assertEqual(fn(args2, x), opt_fn(args2, x))
-        self.assertEqual(cnts.frame_count, 2)
-
-    def test_dict_order_keys_modules(self):
-        def fn(d, x):
-            return d[x](torch.ones(2, 2))
-
-        args1 = {}
-        x = torch.nn.Linear(2, 2)
-        y = torch.nn.Linear(2, 2)
-        z = torch.nn.Linear(2, 2)
-        args1[x] = y
-        args1[3] = z
-
-        cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch.compile(fn, backend=cnts)
-        self.assertEqual(fn(args1, x), opt_fn(args1, x))
-        self.assertEqual(cnts.frame_count, 1)
-
-        # Calling again doesn't recompile (same id and key order)
-        opt_fn(args1, x)
-        self.assertEqual(cnts.frame_count, 1)
-        args2 = {}
-        args2[3] = z
-        args2[x] = y
-
-        # Different order recompiles
-        self.assertEqual(fn(args2, x), opt_fn(args2, x))
-        self.assertEqual(cnts.frame_count, 2)
 
     def test_mutable_mapping_multiple_inheritance(self):
         class MyWeirdDict(collections.abc.MutableMapping, torch.nn.Module):
@@ -8002,24 +7844,43 @@ utils_device.CURRENT_DEVICE == None""".split(
         def fn(x):
             return x + 1
 
-        initial_state = read_state()
-        y = torch.randn(10)
-        try:
-            for round in range(3):
-                for i in range(len(initial_state)):
-                    new_state = [False] * len(initial_state)
-                    new_state[i] = True
-                    write_state(new_state)
-                    assert read_state() == new_state
-                    last_state.clear()
-                    fn(y)
-                    assert last_state == new_state
-                    if round == 0:
-                        assert cnt == i + 1
-                    else:
-                        assert cnt == len(initial_state)
-        finally:
-            write_state(initial_state)
+        import contextlib
+
+        @contextlib.contextmanager
+        def _hip_allow_tf32():
+            # for HIP/AMDGPU, tf32 is behind a flag because the TF32 support is new
+            # and only for MI300+
+            hip_allow_tf32 = os.environ.get("HIPBLASLT_ALLOW_TF32", None)
+            os.environ["HIPBLASLT_ALLOW_TF32"] = "1"
+
+            try:
+                yield
+            finally:
+                if hip_allow_tf32 is not None:
+                    os.environ["HIPBLASLT_ALLOW_TF32"] = hip_allow_tf32
+                else:
+                    del os.environ["HIPBLASLT_ALLOW_TF32"]
+
+        tf32_ctx = _hip_allow_tf32 if torch.version.hip else contextlib.nullcontext
+        with tf32_ctx():
+            initial_state = read_state()
+            y = torch.randn(10)
+            try:
+                for round in range(3):
+                    for i in range(len(initial_state)):
+                        new_state = [False] * len(initial_state)
+                        new_state[i] = True
+                        write_state(new_state)
+                        assert read_state() == new_state
+                        last_state.clear()
+                        fn(y)
+                        assert last_state == new_state
+                        if round == 0:
+                            assert cnt == i + 1
+                        else:
+                            assert cnt == len(initial_state)
+            finally:
+                write_state(initial_state)
 
     def test_grad_state_mutated(self):
         prior = torch.is_grad_enabled()
@@ -10599,7 +10460,7 @@ ShapeEnv not equal: field values don't match:
 
         foo()
 
-    def test_dict_subclass_cannot_be_initialized_in_graph(self):
+    def test_dict_subclass_initialization_in_graph(self):
         for super_class in (
             collections.OrderedDict,
             dict,
@@ -10615,11 +10476,10 @@ ShapeEnv not equal: field values don't match:
                 assert "key" in c
                 return c["key"] + 1
 
-            fn_opt = torch.compile(fn, backend="eager", fullgraph=True)
-            with self.assertRaisesRegex(
-                torch._dynamo.exc.Unsupported, "call_function UserDefinedClassVariable"
-            ):
-                print(fn_opt(torch.zeros(1)))
+            opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+
+            x = torch.rand(4)
+            self.assertEqual(fn(x), opt_fn(x))
 
     @wrapDeterministicFlagAPITest
     def test_backward_deterministic_mode_mismatch_warning(self):
@@ -11467,103 +11327,6 @@ fn
 
         f(torch.tensor([30, 30], device="cuda"), torch.tensor([68, 32], device="cuda"))
 
-    def test_custom_iter_dict(self):
-        class ReversedDict(dict):
-            def __iter__(self):
-                return reversed(list(self.keys()))
-
-        d = {
-            "foo": 1,
-            "bar": 2,
-        }
-
-        d = ReversedDict(d)
-
-        @torch.compile(backend="eager")
-        def fn(x, d):
-            return x * d["foo"] * d["bar"]
-
-        fn(torch.randn(4), d)
-        with unittest.mock.patch("torch._dynamo.config.error_on_recompile", True):
-            fn(torch.randn(4), d)
-
-    def test_custom_keys_iter_dict(self):
-        class ReversedDict(dict):
-            def keys(self):
-                return ["bar", "foo"]
-
-        d = {
-            "foo": 1,
-            "bar": 2,
-        }
-
-        d = ReversedDict(d)
-
-        @torch.compile(backend="eager")
-        def fn(x, d):
-            return x * d["foo"] * d["bar"]
-
-        fn(torch.randn(4), d)
-        with unittest.mock.patch("torch._dynamo.config.error_on_recompile", True):
-            fn(torch.randn(4), d)
-
-    def test_dict_guard_on_keys_order(self):
-        d = {
-            2: 4,
-            3: 5,
-        }
-
-        cnts = torch._dynamo.testing.CompileCounter()
-
-        def fn(x, d):
-            for key, value in d.items():
-                x = x * key + value
-            return x
-
-        opt_fn = torch.compile(fn, backend=cnts)
-        opt_fn(torch.randn(4), d)
-        opt_fn(torch.randn(4), d)
-        # No recompilation
-        self.assertEqual(cnts.frame_count, 1)
-
-        # move 2 to the end
-        d[2] = d.pop(2)
-
-        x = torch.randn(4)
-        res = opt_fn(x, d)
-        # Check recompilation
-        self.assertEqual(cnts.frame_count, 2)
-        self.assertEqual(res, fn(x, d))
-
-    def test_dict_guard_on_keys_order2(self):
-        d = {
-            2: 4,
-            3: 5,
-        }
-
-        cnts = torch._dynamo.testing.CompileCounter()
-
-        def fn(x, d):
-            for key in d:
-                value = d[key]
-                x = x * key + value
-            return x
-
-        opt_fn = torch.compile(fn, backend=cnts)
-        opt_fn(torch.randn(4), d)
-        opt_fn(torch.randn(4), d)
-        # No recompilation
-        self.assertEqual(cnts.frame_count, 1)
-
-        # move 2 to the end
-        d[2] = d.pop(2)
-
-        x = torch.randn(4)
-        res = opt_fn(x, d)
-        # Check recompilation
-        self.assertEqual(cnts.frame_count, 2)
-        self.assertEqual(res, fn(x, d))
-
     def test_contains_dunder_dict(self):
         class UserDefined:
             def __init__(self) -> None:
@@ -12050,6 +11813,63 @@ fn
         _, ne = run(torch.ones(1))
         self.assertFalse(ne)
         self.assertEqual(len(counters["graph_break"]), 1)
+
+    def test_overridden_getattribute(self):
+        class Foo:
+            attribute_map = {}
+
+            def __init__(self):
+                self.attribute_map = {
+                    "a_premap": "a",
+                }
+
+            def __setattr__(self, key, value):
+                if key in super().__getattribute__("attribute_map"):
+                    key = super().__getattribute__("attribute_map")[key]
+                super().__setattr__(key, value)
+
+            def __getattribute__(self, key):
+                if key == "sentinel":
+                    raise AttributeError()
+                if key != "attribute_map" and key in super().__getattribute__(
+                    "attribute_map"
+                ):
+                    key = super().__getattribute__("attribute_map")[key]
+                return super().__getattribute__(key)
+
+            def __getattr__(self, key):
+                if key == "sentinel":
+                    return 5
+                raise AttributeError()
+
+        def get_foo():
+            f = Foo()
+            f.a_premap = 2
+            f.b = 3
+            return f
+
+        def fn(x, f):
+            return x * f.a_premap * f.a * f.b * f.sentinel
+
+        x = torch.randn(4)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(x, get_foo()), opt_fn(x, get_foo()))
+
+    def test_dunder_weakref(self):
+        class Foo:
+            pass
+
+        def fn(x):
+            foo = Foo()
+            # tests isgetsetdescriptor
+            if foo.__weakref__:
+                return torch.cos(x)
+            return torch.sin(x)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+        self.assertEqual(fn(x), opt_fn(x))
 
 
 class TestTracer(JitTestCase):

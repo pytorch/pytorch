@@ -1239,13 +1239,27 @@ class CPUReproTests(TestCase):
     def test_decomposed_dequant_relu_quant_int8(self):
         self._test_decomposed_dequant_relu_quant_helper(torch.int8)
 
-    def _test_dequant_quant_lowering_helper(self, dtype):
+    def _test_dequant_quant_lowering_helper(self, dtype, dequant_out_dtype=None):
         def fn(
-            x, scale, zero_point, use_dequant, use_quant, quant_min, quant_max, dtype
+            x,
+            scale,
+            zero_point,
+            use_dequant,
+            use_quant,
+            quant_min,
+            quant_max,
+            dtype,
+            dequant_out_dtype,
         ):
             if use_dequant:
                 x = torch.ops.quantized_decomposed.dequantize_per_tensor(
-                    x, scale, zero_point, quant_min, quant_max, dtype
+                    x,
+                    scale,
+                    zero_point,
+                    quant_min,
+                    quant_max,
+                    dtype,
+                    out_dtype=dequant_out_dtype,
                 )
 
             x = torch.relu(x)
@@ -1264,8 +1278,14 @@ class CPUReproTests(TestCase):
         quant_min = 0 if dtype == torch.uint8 else -128
         quant_max = 255 if dtype == torch.uint8 else 127
 
-        for use_dequant, use_quant, use_tensor_overload in itertools.product(
-            use_dequant_list, use_quant_list, use_tensor_overload_list
+        for (
+            use_dequant,
+            use_quant,
+            use_tensor_overload,
+        ) in itertools.product(
+            use_dequant_list,
+            use_quant_list,
+            use_tensor_overload_list,
         ):
             x = torch.clamp(
                 torch.randn((1, 7, 7, 9), dtype=torch.float32) * 100,
@@ -1293,6 +1313,7 @@ class CPUReproTests(TestCase):
                         quant_min,
                         quant_max,
                         dtype,
+                        dequant_out_dtype,
                     ),
                 )
                 check_metrics_vec_kernel_count(1)
@@ -1300,10 +1321,16 @@ class CPUReproTests(TestCase):
     @requires_vectorization
     def test_dequant_quant_lowering_uint8(self):
         self._test_dequant_quant_lowering_helper(torch.uint8)
+        self._test_dequant_quant_lowering_helper(
+            torch.uint8, dequant_out_dtype=torch.bfloat16
+        )
 
     @requires_vectorization
     def test_dequant_quant_lowering_int8(self):
         self._test_dequant_quant_lowering_helper(torch.int8)
+        self._test_dequant_quant_lowering_helper(
+            torch.int8, dequant_out_dtype=torch.bfloat16
+        )
 
     def _test_dequant_maxpool2d_lowering_helper(self, dtype):
         def fn(x, scale, zero_point, quant_min, quant_max, dtype):
@@ -1488,13 +1515,24 @@ class CPUReproTests(TestCase):
     def test_per_tensor_fake_quant_int8(self):
         self._test_per_tensor_fake_quant_helper(torch.int8)
 
-    def _test_per_channel_fake_quant_helper(self, dtype, input_dtype=torch.float32):
-        def fn(input, scales, zero_points, axis, quant_min, quant_max, dtype):
+    def _test_per_channel_fake_quant_helper(
+        self, dtype, input_dtype=torch.float32, output_dtype=None
+    ):
+        def fn(
+            input, scales, zero_points, axis, quant_min, quant_max, dtype, output_dtype
+        ):
             input = torch.ops.quantized_decomposed.quantize_per_channel(
                 input, scales, zero_points, axis, quant_min, quant_max, dtype
             )
             input = torch.ops.quantized_decomposed.dequantize_per_channel(
-                input, scales, zero_points, axis, quant_min, quant_max, dtype
+                input,
+                scales,
+                zero_points,
+                axis,
+                quant_min,
+                quant_max,
+                dtype,
+                out_dtype=output_dtype,
             )
             return input
 
@@ -1514,7 +1552,19 @@ class CPUReproTests(TestCase):
         with config.patch({"cpp.simdlen": None}):
             torch._dynamo.reset()
             metrics.reset()
-            self.common(fn, (x, scales, zero_points, axis, quant_min, quant_max, dtype))
+            self.common(
+                fn,
+                (
+                    x,
+                    scales,
+                    zero_points,
+                    axis,
+                    quant_min,
+                    quant_max,
+                    dtype,
+                    output_dtype,
+                ),
+            )
             check_metrics_vec_kernel_count(1)
 
     @requires_vectorization
@@ -1575,10 +1625,16 @@ class CPUReproTests(TestCase):
         self._test_per_channel_fake_quant_helper(
             torch.uint8, input_dtype=torch.bfloat16
         )
+        self._test_per_channel_fake_quant_helper(
+            torch.uint8, input_dtype=torch.bfloat16, output_dtype=torch.bfloat16
+        )
 
     @requires_vectorization
     def test_per_channel_fake_quant_int8_bf16_input(self):
         self._test_per_channel_fake_quant_helper(torch.int8, input_dtype=torch.bfloat16)
+        self._test_per_channel_fake_quant_helper(
+            torch.int8, input_dtype=torch.bfloat16, output_dtype=torch.bfloat16
+        )
 
     def _test_non_contiguous_load_buf_quant_helper(self, dtype):
         def fn(
@@ -2271,6 +2327,19 @@ class CPUReproTests(TestCase):
         cfn = torch.compile(torch.constant_pad_nd)
         res = cfn(x, size)
         self.assertEqual(res_aten_eager, res)
+        check_metrics_vec_kernel_count(1)
+
+    @requires_vectorization
+    def test_frexp(self):
+        def fn(x):
+            x_frac, x_exp = torch.frexp(x)  # x_frac: int32, x_exp: float32
+            x = x_frac * x_exp
+            return x
+
+        x = torch.randn(64, 1)
+        torch._dynamo.reset()
+        metrics.reset()
+        self.common(fn, (x,))
         check_metrics_vec_kernel_count(1)
 
     def test_bitwise_right_shift(self):
@@ -3282,7 +3351,7 @@ class CPUReproTests(TestCase):
         input_tensor = torch.zeros(shape[0], requires_grad=False, device="cpu")
         src_tensor = torch.ones(shape[1], requires_grad=False, device="cpu")
         with self.assertRaisesRegex(
-            torch._dynamo.exc.BackendCompilerFailed, r".*shape error in scatter op"
+            torch._inductor.exc.InductorError, r".*shape error in scatter op"
         ):
             fn(input_tensor, src_tensor, shape[2], shape[3], shape[4], shape[5])
 
@@ -4980,6 +5049,16 @@ class CPUReproTests(TestCase):
             c_model = torch.compile(model)
             c_output = c_model(x)
             self.assertTrue(torch.allclose(output, c_output))
+
+    @requires_vectorization
+    def test_bool_max(self):
+        torch.manual_seed(777)
+        x = torch.randn(size=[128, 2501]).ge(0)
+
+        def fn(x):
+            return torch.max(x, 1, False)
+
+        self.common(fn, (x,))
 
 
 if __name__ == "__main__":

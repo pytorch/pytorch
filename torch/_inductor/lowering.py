@@ -1,4 +1,3 @@
-# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 import dataclasses
 import functools
@@ -10,7 +9,8 @@ import os
 import warnings
 from collections import defaultdict
 from collections.abc import Iterable
-from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, TypeVar, Union
+from typing_extensions import ParamSpec
 from unittest.mock import patch
 
 import sympy
@@ -77,11 +77,15 @@ from .utils import (
 from .virtualized import ops, V
 
 
+_T = TypeVar("_T")
+_P = ParamSpec("_P")
+
 # TODO(jansel): we should implement decomps or lowerings for these
 # https://github.com/pytorch/torchdynamo/issues/327
 FALLBACK_ALLOW_LIST = OrderedSet(
     [
         "torchvision::roi_align",
+        "aten::index_add",
     ]
 )
 
@@ -465,7 +469,7 @@ def register_lowering(
         ELEMENTWISE_TYPE_PROMOTION_KIND
     ] = ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
     convert_input_to_bool=False,
-):
+) -> Callable[[Callable[_P, _T]], Callable[_P, _T]]:
     """
     Shim to support decorator syntax.
     """
@@ -591,12 +595,13 @@ def make_pointwise(
         # in tracing, we will annotate pointwise nodes that correspond to the output of
         # a pointwise node that would have been run in eager. intermediary pointwise nodes
         # during decompositions are not annotated.
+        low_pr_fp = (torch.bfloat16, torch.float16)
         emulate_precision_casts = (
             V.graph is not None
             and getattr(V.graph, "current_node", None) is not None
             and V.graph.current_node.meta is not None
             and V.graph.current_node.meta.get("low_precision_pointwise_barrier", False)
-            and dtype in (torch.bfloat16, torch.float16)
+            and dtype in low_pr_fp
         )
 
         def inner_fn(index):
@@ -611,11 +616,12 @@ def make_pointwise(
                 return override_fn_when_gpu_float64(*[load(index) for load in loaders])
             else:
                 inputs_loaded = []
-                for load in loaders:
+                for inp_index, load in enumerate(loaders):
                     out = load(index)
-                    if emulate_precision_casts:
-                        downcast = ops.to_dtype(out, dtype, use_compute_types=False)
-                        out = ops.to_dtype(downcast, dtype)
+                    inp_dtype = inputs[inp_index].get_dtype()
+                    if emulate_precision_casts and inp_dtype in low_pr_fp:
+                        downcast = ops.to_dtype(out, inp_dtype, use_compute_types=False)
+                        out = ops.to_dtype(downcast, inp_dtype)
                     inputs_loaded.append(out)
 
                 out = fn(*inputs_loaded)
@@ -1354,6 +1360,8 @@ def quantized_decomposed_dequantize_per_channel(
     quant_min: int,
     quant_max: int,
     dtype: torch.dtype,
+    *,
+    out_dtype: Optional[torch.dtype] = None,
 ) -> TensorBox:
     assert len(scales.get_size()) == 1, "expect scales 1 dim"
     assert len(zero_points.get_size()) == 1, "expect zero_points 1 dim"
@@ -1363,6 +1371,9 @@ def quantized_decomposed_dequantize_per_channel(
     assert axis < len(
         input.get_size()
     ), f"Expecting axis to be < {len(input.get_size())}"
+
+    if out_dtype is None:
+        out_dtype = torch.float32
 
     input_loader = input.make_loader()
     scales_loader = scales.make_loader()
@@ -1380,11 +1391,12 @@ def quantized_decomposed_dequantize_per_channel(
         if zero_points.dtype != torch.float32:
             zero_point = ops.to_dtype(zero_point, torch.float32)
         val = ops.sub(ops.to_dtype(input, torch.float32), zero_point) * scale
+        val = ops.to_dtype(val, out_dtype)
         return val
 
     return Pointwise.create(
         device=input.get_device(),
-        dtype=torch.float32,
+        dtype=out_dtype,
         inner_fn=inner_fn,
         ranges=input.get_size(),
     )
@@ -1439,10 +1451,15 @@ def quantized_decomposed_dequantize_per_tensor_default(
     quant_min: int,
     quant_max: int,
     dtype: torch.dtype,
+    *,
+    out_dtype: Optional[torch.dtype] = None,
 ) -> TensorBox:
     assert (
         input.get_dtype() == dtype
     ), f"Expecting input to have dtype {dtype}, but got dtype: {input.get_dtype()}"
+
+    if out_dtype is None:
+        out_dtype = torch.float32
 
     input_loader = input.make_loader()
 
@@ -1450,11 +1467,12 @@ def quantized_decomposed_dequantize_per_tensor_default(
         input = input_loader(idx)
         scale, zero_point = _create_constants(scale, zero_point, dtype=torch.float32)
         val = ops.sub(ops.to_dtype(input, torch.float32), zero_point) * scale
+        val = ops.to_dtype(val, out_dtype)
         return val
 
     return Pointwise.create(
         device=input.get_device(),
-        dtype=torch.float32,
+        dtype=out_dtype,
         inner_fn=functools.partial(
             inner_fn, scale=float(scale), zero_point=int(zero_point)
         ),
@@ -1520,6 +1538,8 @@ def quantized_decomposed_dequantize_per_tensor_tensor(
     quant_min: int,
     quant_max: int,
     dtype: torch.dtype,
+    *,
+    out_dtype: Optional[torch.dtype] = None,
 ) -> TensorBox:
     assert len(scale.get_size()) == 0 or (
         len(scale.get_size()) == 1 and scale.get_size()[0] == 1
@@ -1530,6 +1550,9 @@ def quantized_decomposed_dequantize_per_tensor_tensor(
     assert (
         input.get_dtype() == dtype
     ), f"Expecting input to have dtype {dtype}, but got dtype: {input.get_dtype()}"
+
+    if out_dtype is None:
+        out_dtype = torch.float32
 
     input_loader = input.make_loader()
     scale_loader = scale.make_loader()
@@ -1544,11 +1567,12 @@ def quantized_decomposed_dequantize_per_tensor_tensor(
         if zero_point.dtype != torch.float32:
             _zero_point = ops.to_dtype(_zero_point, torch.float32)
         val = ops.sub(ops.to_dtype(input, torch.float32), _zero_point) * _scale
+        val = ops.to_dtype(val, out_dtype)
         return val
 
     return Pointwise.create(
         device=input.get_device(),
-        dtype=torch.float32,
+        dtype=out_dtype,
         inner_fn=inner_fn,
         ranges=input.get_size(),
     )
@@ -1940,8 +1964,10 @@ def fallback_node_due_to_unsupported_type(node: torch.fx.Node, allow_cpu_inputs=
     return check_skip_condition(node, node, is_output=True)
 
 
-def make_fallback(op, layout_constraint=None, warn=True):
-    assert op not in decompositions, f"both a fallback and a decomp for same op: {op}"
+def make_fallback(op, layout_constraint=None, warn=True, override_decomp=False):
+    assert (
+        op not in decompositions or override_decomp
+    ), f"both a fallback and a decomp for same op: {op}"
     if (
         warn
         and bool(os.getenv("CI"))
@@ -1951,6 +1977,7 @@ def make_fallback(op, layout_constraint=None, warn=True):
             config.fallback_random
             and op in torch._decomp.decompositions_for_rng.extra_random_decomps
         )
+        and not override_decomp
     ):
         # Note: 'warn' is holdover from when this was a warning, but for ops that previously
         # set warn=False we do not want a CI error.
@@ -4554,6 +4581,9 @@ fallback_adaptive_avg_pool2d = fallback_handler(
 
 @register_lowering(aten._adaptive_avg_pool2d)
 def _adaptive_avg_pool2d(x, output_size):
+    if x.get_dtype() == torch.int64:
+        # not supported in eager
+        raise RuntimeError("'adaptive_avg_pool2d' not implemented for 'Long'")
     assert isinstance(x, TensorBox)
     assert len(output_size) == 2
     x.realize_hint()
@@ -4626,6 +4656,9 @@ fallback_adaptive_max_pool2d = fallback_handler(
 
 @register_lowering(aten.adaptive_max_pool2d)
 def adaptive_max_pool2d(x, output_size):
+    if x.get_dtype() == torch.int64:
+        # not supported in eager
+        raise RuntimeError("adaptive_max_pool2d not implemented for Long")
     assert isinstance(x, TensorBox)
     assert len(output_size) == 2
     x.realize_hint()
@@ -4980,13 +5013,17 @@ def _avg_poolnd(
         return total
 
     if not had_padding or divisor_override:
-        if divisor_override:
-            scale = 1 / divisor_override
-        else:
-            scale = 1.0 / window_size
+        divisor = divisor_override if divisor_override else window_size
+        if dtype.is_floating_point:
+            scale = 1 / divisor
 
-        def fn(idx):
-            return ops.mul(fn_sum(idx, x_loader), ops.constant(scale, dtype))
+            def fn(idx):
+                return ops.mul(fn_sum(idx, x_loader), ops.constant(scale, dtype))
+
+        else:
+
+            def fn(idx):
+                return ops.truediv(fn_sum(idx, x_loader), ops.constant(divisor, dtype))
 
     else:
 
@@ -6404,7 +6441,7 @@ def sym_numel(a):
 
 
 for method, func in magic_methods.items():
-    register_lowering(method_to_operator(method))(func)
+    register_lowering(method_to_operator(method))(func)  # type: ignore[arg-type]
 
 
 @register_lowering(torch.sym_sum)
