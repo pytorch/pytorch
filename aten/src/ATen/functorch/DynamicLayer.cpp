@@ -41,7 +41,7 @@ DynamicLayer::DynamicLayer(
   }
   switch (transform_type) {
     case TransformType::Vmap:
-      TORCH_INTERNAL_ASSERT(batchSize.has_value());
+      // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
       interpreter_ = Interpreter::Vmap(layerId, std::move(batchSize.value()), randomness.value());
       break;
     case TransformType::Grad:
@@ -51,7 +51,7 @@ DynamicLayer::DynamicLayer(
       interpreter_ = Interpreter::Jvp(layerId, prev_fwd_grad_mode.value());
       break;
     case TransformType::Functionalize:
-      TORCH_INTERNAL_ASSERT(functionalize_add_back_views.has_value());
+      // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
       interpreter_ = Interpreter::Functionalize(layerId, functionalize_add_back_views.value());
       break;
     default:

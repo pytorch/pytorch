@@ -157,8 +157,9 @@ void EmbeddingBagImpl::pretty_print(std::ostream& stream) const {
   stream << "torch::nn::EmbeddingBag(num_embeddings="
          << options.num_embeddings()
          << ", embedding_dim=" << options.embedding_dim();
-  if (options.max_norm().has_value()) {
-    stream << ", max_norm=" << *options.max_norm();
+  auto const& max_norm_opt = options.max_norm();
+  if (max_norm_opt.has_value()) {
+    stream << ", max_norm=" << *max_norm_opt;
   }
   if (options.norm_type() != 2) {
     stream << ", norm_type=" << options.norm_type();

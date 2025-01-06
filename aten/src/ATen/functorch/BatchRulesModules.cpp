@@ -162,6 +162,7 @@ grid_sample_backward_helper_in(
 
 static std::tuple<Tensor, std::optional<int64_t>, Tensor, std::optional<int64_t>>
 grid_sample_backward_helper_out(
+    // NOLINTNEXTLINE(performance-unnecessary-value-param)
     std::tuple<Tensor, Tensor> bw_out,
     int64_t grad_input_out_bdim,
     int64_t grad_grid_out_bdim,
