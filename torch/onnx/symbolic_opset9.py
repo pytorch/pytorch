@@ -6241,9 +6241,16 @@ def _euclidean_dist(g: jit_utils.GraphContext, x1, x2):
     )
     x2_ = g.op("Concat", *[x2, x2_pad, x2_norm], axis_i=-1)
     result = matmul(g, x1_, transpose(g, x2_, -2, -1))
-    result = sqrt(
-        g, clamp_min(g, result, symbolic_helper._generate_wrapped_number(g, 0.0))
+    dtype = _type_utils.JitScalarType.from_value(result)
+    min = g.op(
+        "Cast", 
+        symbolic_helper._generate_wrapped_number(g, 0.0), 
+        to_i=dtype.onnx_type()
     )
+    result = symbolic_helper._op_with_optional_float_cast(
+            g, "Max", result, min, opset_before=12
+    )
+    result = sqrt(g, result)
     return result
 
 
