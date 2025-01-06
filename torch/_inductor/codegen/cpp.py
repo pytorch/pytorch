@@ -4772,7 +4772,7 @@ class CppScheduling(BaseScheduling):
                 if not node.check_outer_fusion_loop_level_attr(
                     cpp_kernel_proxy_list, node.outer_loop_fusion_depth
                 ):
-                    for removed_buffer in scope.removed_buffers:
+                    for removed_buffer in scope.global_buffers.keys():
                         # Restore the removed buffers by this context, before
                         # fallback to codegen without using Local Buffer
                         V.graph.removed_buffers.remove(removed_buffer)
