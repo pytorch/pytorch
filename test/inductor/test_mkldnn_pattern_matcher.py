@@ -2639,11 +2639,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
         cases = itertools.product(add_fn_list, fake_quant_x2_list)
         for add_fn, fq_x2 in cases:
             mod = M(add_fn, use_relu, fq_x2).eval().to(device=device)
-            v = (
-                torch.randn((4, 4), dtype=torch.float32, requires_grad=False)
-                .add(1)
-                .to(device=device)
-            )
+            v = torch.randn((4, 4), dtype=torch.float32, requires_grad=False, device=device).add(1)
 
             def matcher_check_fn():
                 # 1. Dequant-linear pattern matched in quantization weight prepack * 4
@@ -2720,15 +2716,29 @@ class TestPatternMatcher(TestPatternMatcherBase):
     @parametrize("is_qat", [True, False])
     @parametrize("is_dynamic", [True, False])
     def test_qlinear_add_cpu(self, use_relu, is_qat, is_dynamic):
-        self._qlinear_add_cpu_test_helper(
+        self._qlinear_add_test_helper(
             use_relu=use_relu, is_qat=is_qat, is_dynamic=is_dynamic
         )
 
+    @skipIfNoDynamoSupport
+    @skipIfNoONEDNN
+    @skipIfNoXPU
+    @parametrize("use_relu", [True])
+    @parametrize("is_qat", [False])
+    @parametrize("is_dynamic", [False])
+    def test_qlinear_add_xpu(self, use_relu, is_qat, is_dynamic):
+        self._qlinear_add_test_helper(
+            device="xpu", use_relu=use_relu, is_qat=is_qat, is_dynamic=is_dynamic
+        )
+
+    @skipIfNoDynamoSupport
+    @skipIfNoONEDNNBF16
+    @skipIfNoONEDNN
     @parametrize("use_relu", [True, False])
     @parametrize("is_qat", [True, False])
     @parametrize("is_dynamic", [True, False])
     def test_qlinear_add_int8_mixed_bf16(self, use_relu, is_qat, is_dynamic):
-        self._qlinear_add_cpu_test_helper(
+        self._qlinear_add_test_helper(
             int8_mixed_bf16=True,
             use_relu=use_relu,
             is_qat=is_qat,
@@ -2989,6 +2999,40 @@ class TestPatternMatcher(TestPatternMatcherBase):
             matcher_check_fn=matcher_check_fn,
             is_dynamic=True,
         )
+
+    @skipIfNoDynamoSupport
+    @skipIfNoONEDNN
+    @skipIfNoXPU
+    def test_qlinear_mul_xpu(self):
+        r"""
+        This testcase will quantize a Linear->Mul pattern.
+        """
+
+        class M(torch.nn.Module):
+            def __init__(self, use_bias):
+                super().__init__()
+                self.linear = torch.nn.Linear(4, 5, use_bias)
+
+            def forward(self, x1, x2):
+                return torch.mul(self.linear(x1), x2)
+
+        bias_list = [True, False]
+        for bias in bias_list:
+            mod = M(bias).eval().to(device="xpu")
+            x1 = torch.randn((2, 4)).to(device="xpu")
+            x2 = torch.randn((2, 5)).to(device="xpu")
+
+            def matcher_check_fn():
+                self.assertEqual(
+                    counters["inductor"]["qlinear_weight_prepack_matcher_count"], 1
+                )
+
+            self._test_common(
+                mod,
+                (x1, x2),
+                check_quantization=True,
+                matcher_check_fn=matcher_check_fn,
+            )
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
