@@ -5,7 +5,7 @@
 
 import dataclasses
 import unittest
-from collections import OrderedDict
+from collections import defaultdict, namedtuple, OrderedDict
 from dataclasses import dataclass, fields, is_dataclass
 from typing import Any, Optional, Tuple
 
@@ -317,6 +317,149 @@ class DictTests(torch._dynamo.test_case.TestCase):
         opt_fn = torch.compile(fn, backend=cnts)
         x = torch.randn(4)
         self.assertEqual(opt_fn(x, d), fn(x, d))
+
+    def test_dict_mutation_side_effect(self):
+        def fn(d):
+            d["c"] = d["a"] + d.pop("b")
+            return d
+
+        args1 = {"a": torch.randn(10), "b": torch.randn(10)}
+        args2 = dict(args1)
+        assert fn(args1) is args1
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnts)
+        self.assertIs(opt_fn(args2), args2)
+        self.assertTrue(same(args1, args2))
+        self.assertEqual(cnts.frame_count, 1)
+        self.assertEqual(cnts.op_count, 1)
+
+    def test_dict_copy_alias(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def run(x, d0):
+            d1 = d0.copy()
+            d1[0] = 1
+            return x + 1, d1
+
+        d0 = {}
+        res, d1 = run(torch.zeros(1), d0)
+        self.assertTrue(same(res, torch.ones(1)))
+        self.assertEqual(d0, {})
+        self.assertEqual(d1, {0: 1})
+
+    def test_dict_subclass_get_method(self):
+        class dotdict(dict):
+            """dot.notation access to dictionary attributes"""
+
+            __getattr__ = dict.get
+            __setattr__ = dict.__setitem__
+            __delattr__ = dict.__delitem__
+
+        config = dotdict({"a": 1, "b": 2})
+
+        def fn(x):
+            x2 = x * 2
+            x3 = x * config.get("a", 3)
+            return x3
+
+        x = torch.randn(2)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(x), opt_fn(x))
+
+    def test_dict_order_keys(self):
+        def fn(d):
+            c = 0
+            for v in d.values():
+                c += v
+            return c
+
+        args1 = {}
+        args1["a"] = torch.rand(10)
+        args1["b"] = torch.rand(10)
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnts)
+        self.assertEqual(fn(args1), opt_fn(args1))
+        self.assertEqual(cnts.frame_count, 1)
+        self.assertEqual(cnts.op_count, 2)
+
+        # A different order of keys recompiles
+        args2 = {}
+        args2["b"] = args1["b"]
+        args2["a"] = args1["a"]
+        self.assertEqual(fn(args2), opt_fn(args2))
+        self.assertEqual(cnts.frame_count, 2)
+        # Extra calls don't recompile
+        self.assertEqual(cnts.frame_count, 2)
+
+    def test_dict_namedtuple(self):
+        def fn(d):
+            if namedtuple in d:
+                return d[3] * 2
+            else:
+                return d[3] * 3
+
+        args1 = {namedtuple: None, 3: torch.randn(3)}
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnts)
+        self.assertEqual(fn(args1), opt_fn(args1))
+        self.assertEqual(cnts.frame_count, 1)
+        # Test a failing namedtuple guard
+        args2 = {2: None, 3: torch.randn(3)}
+        self.assertEqual(fn(args2), opt_fn(args2))
+        self.assertEqual(cnts.frame_count, 2)
+
+    def test_dict_order_keys_tensors(self):
+        def fn(d, x):
+            return d[x] + 3
+
+        args1 = {}
+        x = torch.randn(10)
+        y = torch.randn(10)
+        z = torch.randn(10)
+        args1[x] = y
+        args1[3] = z
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnts)
+        self.assertEqual(fn(args1, x), opt_fn(args1, x))
+        self.assertEqual(cnts.frame_count, 1)
+
+        # Calling again doesn't recompile (same id and key order)
+        opt_fn(args1, x)
+        self.assertEqual(cnts.frame_count, 1)
+        args2 = {}
+        args2[3] = z
+        args2[x] = y
+
+        # Different order recompiles
+        self.assertEqual(fn(args2, x), opt_fn(args2, x))
+        self.assertEqual(cnts.frame_count, 2)
+
+    def test_dict_order_keys_modules(self):
+        def fn(d, x):
+            return d[x](torch.ones(2, 2))
+
+        args1 = {}
+        x = torch.nn.Linear(2, 2)
+        y = torch.nn.Linear(2, 2)
+        z = torch.nn.Linear(2, 2)
+        args1[x] = y
+        args1[3] = z
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnts)
+        self.assertEqual(fn(args1, x), opt_fn(args1, x))
+        self.assertEqual(cnts.frame_count, 1)
+
+        # Calling again doesn't recompile (same id and key order)
+        opt_fn(args1, x)
+        self.assertEqual(cnts.frame_count, 1)
+        args2 = {}
+        args2[3] = z
+        args2[x] = y
+
+        # Different order recompiles
+        self.assertEqual(fn(args2, x), opt_fn(args2, x))
+        self.assertEqual(cnts.frame_count, 2)
 
 
 def is_tensor(x):

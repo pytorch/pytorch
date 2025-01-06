@@ -369,6 +369,7 @@ def mps_ops_modifier(ops):
         'acosh',
         'all',
         'allclose',
+        'angle',
         'any',
         'addcdiv',
         'addcmul',
@@ -673,7 +674,6 @@ def mps_ops_modifier(ops):
         'rounddecimals_3': None,
         'rounddecimals_0': None,
         '__rsub__': None,
-        'angle': None,
         'cauchy_': None,
         'cauchy': None,
         'cholesky': None,
@@ -846,6 +846,7 @@ def mps_ops_modifier(ops):
         'log1p': [torch.int64],
         'sigmoid': [torch.int64],
         'atan2': [torch.int64],
+        'angle': [torch.int64],
 
         # GEMM on MPS is not supported for integral types
         'nn.functional.linear': [torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
@@ -6105,6 +6106,14 @@ class TestMPS(TestCaseMPS):
 
         helper(1, 1, 4, 5)
 
+    def test_minimum_maximum_nan_propagation(self):
+        x = torch.rand(32, device="mps")
+        y = torch.rand(32, device="mps")
+        x[3] = torch.nan
+        y[5] = torch.nan
+        self.assertTrue(torch.minimum(x, y).isnan().any().item())
+        self.assertTrue(torch.maximum(x, y).isnan().any().item())
+
     def test_clamp_fp16_fp32(self):
         cpu_x = torch.randn(10, device='cpu', dtype=torch.float, requires_grad=False)
         x = cpu_x.detach().clone().to('mps')
@@ -6576,6 +6585,22 @@ class TestMPS(TestCaseMPS):
             self.assertEqual(abs_result, abs_result_cpu)
 
         helper((2, 8, 4, 5))
+
+    @xfailIf(MACOS_VERSION < 14.0)
+    def test_angle(self):
+        def helper(shape, dtype):
+            cpu_x = torch.randn(shape, device='cpu', dtype=dtype, requires_grad=False)
+            cpu_x.flatten()[0] = torch.nan  # Test that NaN is propagated correctly
+            x = cpu_x.detach().clone().to('mps')
+
+            angle_result = torch.angle(x)
+            angle_result_cpu = torch.angle(cpu_x)
+
+            self.assertEqual(angle_result, angle_result_cpu)
+
+        helper((2, 8, 4, 5), torch.float16)
+        helper((2, 8, 4, 5), torch.float32)
+        helper((2, 8, 4, 5), torch.complex64)
 
     def test_log(self):
         def helper(shape):
@@ -8290,6 +8315,13 @@ class TestMPS(TestCaseMPS):
             helper((2, 8, 3, 5), 0.1, op_name, inplace)
             helper((2, 8, 3, 5), 0.2, op_name, inplace)
 
+        # Test float32  int alpha
+        # See https://github.com/pytorch/pytorch/issues/143932
+        x = torch.rand(32, device='mps', dtype=torch.float32)
+        y = torch.arange(32, device='mps', dtype=torch.int32)
+        self.assertEqual(torch.add(x, y, alpha=2).cpu(), torch.add(x.cpu(), y.cpu(), alpha=2))
+        self.assertEqual(torch.add(x, 3, alpha=2).cpu(), torch.add(x.cpu(), 3, alpha=2))
+
     # Test add
     def test_add_scalars(self):
         def helper(alpha):
@@ -8447,6 +8479,15 @@ class TestMPS(TestCaseMPS):
         helper(np.array([[1, 1, 1, 1, 1]]), (0 + 1 + 2 + 3 + 4) / 5, (6 - 2 * 2), 10000)
         helper(np.array([1, 1, 1, 1, 1]), (0 + 1 + 2 + 3 + 4) / 5, (6 - 2 * 2), 10000)
         helper(np.array([[1, 1, 1, 1, 1, 1, 1]]), 0, 0, 7, False)
+
+    def test_non_contiguous_sampling_variation(self):
+        torch.manual_seed(42)
+        # transpose so it's made non-contiguous
+        probs = torch.tensor([[.25, .1], [.25, .1], [.25, .1], [.25, .7]]).T.to("mps")
+        samples = {torch.multinomial(probs, 1).flatten()[0].item() for _ in range(200)}
+        # we should get different samples rather than the same value repeated,
+        # indicating the sampling is working properly on non-contiguous tensors
+        self.assertNotEqual(len(samples), 1)
 
     def test_cumsum_dim_check(self):
         x = torch.rand((3, 3), device="mps")
@@ -8843,6 +8884,21 @@ class TestNLLLoss(TestCaseMPS):
 
             self.assertEqual(result_long['mps'].to('cpu'), result_long['cpu'])
             self.assertEqual(grad_long['mps'].to('cpu'), grad_long['cpu'])
+
+    def test_nll_loss_backward(self):
+        # Copy-n-pasted from similar test_torchinductor.py test
+        # Used to crash with `error: 'mps.divide' op requires the same element type for all operands and results`
+
+        labels = (
+            torch.zeros([5], dtype=torch.int64, device="mps"),
+            torch.tensor([-100, -100, 3, -100, -100], dtype=torch.int64, device="mps"),
+        )
+        for label in labels:
+            inp = torch.rand(5, 5, device="mps", dtype=torch.half)
+            grad_out = torch.empty((), device=inp.device, dtype=inp.dtype)
+            total_weight = torch.tensor(1.0, device=inp.device)
+            torch.ops.aten.nll_loss_backward(grad_out, inp, label, None, 1, -100, total_weight)
+
 
 class TestTopK(TestCase):
     def _test_topk(self, shape, largest):
@@ -12586,7 +12642,7 @@ class TestMetalLibrary(TestCaseMPS):
         self.assertEqual(x, y)
         self.assertEqual(x, z)
 
-    def test_metal_arange_with_arg(self):
+    def test_metal_arange_with_arg(self, start=3.14, step=.5):
         x = torch.zeros(12, device="mps")
         lib = torch.mps._compile_shader("""
             kernel void arange(device float* x, constant float& start, constant float& step,
@@ -12594,8 +12650,11 @@ class TestMetalLibrary(TestCaseMPS):
               x[idx] = start + idx * step;
             }
         """)
-        lib.arange(x, 3.14, .5)
-        self.assertEqual(x, torch.arange(3.14, 8.66, .5, device='mps'))
+        lib.arange(x, start, step)
+        self.assertEqual(x, torch.arange(start, 8.66, .5, device='mps'))
+
+    def test_metal_arange_with_arg_and_scalar_tensor(self):
+        self.test_metal_arange_with_arg(step=torch.tensor(.5))
 
     def test_metal_arange_with_arg_and_cast(self):
         x = torch.zeros(12, device="mps", dtype=torch.half)
