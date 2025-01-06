@@ -5,7 +5,7 @@ import random
 import unittest
 from functools import partial
 from itertools import chain, product
-from typing import Iterable, List
+from typing import Iterable, List, Tuple
 
 import numpy as np
 from numpy import inf
@@ -747,14 +747,14 @@ def sample_inputs_linalg_lstsq(op_info, device, dtype, requires_grad=False, **kw
 
     device = torch.device(device)
 
-    drivers: tuple[str, ...]
+    drivers: Tuple[str, ...]
     if device.type == "cuda":
         drivers = ("gels",)
     else:
         drivers = ("gels", "gelsy", "gelss", "gelsd")
 
     # we generate matrices of shape (..., n + delta, n)
-    deltas: tuple[int, ...]
+    deltas: Tuple[int, ...]
     if device.type == "cpu" or has_cusolver():
         deltas = (-1, 0, +1)
     # only square systems if Cusolver is not available
