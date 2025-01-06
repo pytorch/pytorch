@@ -503,6 +503,11 @@ def _check_cuda_version(compiler_name: str, compiler_version: TorchVersion) -> N
             )
 
 
+def _append_sycl_std_if_no_std_present(cflags):
+    if not any(flag.startswith('-sycl-std=') for flag in cflags):
+        cflags.append('-sycl-std=2020')
+
+
 def _wrap_sycl_host_flags(cflags):
     host_cxx = get_cxx_compiler()
     host_cflags = [
@@ -781,8 +786,7 @@ class BuildExtension(build_ext):
                 else:
                     sycl_post_cflags = list(extra_postargs)
                 append_std17_if_no_std_present(sycl_cflags)
-                if not any(flag.startswith('-sycl-std=') for flag in sycl_cflags):
-                    sycl_cflags.append('-sycl-std=2020')
+                _append_sycl_std_if_no_std_present(sycl_cflags)
                 host_cflags = extra_cc_cflags + common_cflags + post_cflags
                 append_std17_if_no_std_present(host_cflags)
                 # escaping quoted arguments to pass them thru DPC++ compiler
@@ -2573,8 +2577,7 @@ def _write_ninja_file_to_build_library(path,
     if with_sycl:
         sycl_cflags = cflags + COMMON_SYCL_FLAGS
         sycl_cflags += extra_sycl_cflags
-        if not any(flag.startswith('-sycl-std=') for flag in sycl_cflags):
-            sycl_cflags.append('-sycl-std=2020')
+        _append_sycl_std_if_no_std_present(sycl_cflags)
         host_cflags = cflags
         # escaping quoted arguments to pass them thru DPC++ compiler
         host_cflags = [item.replace('\\"', '\\\\"') for item in host_cflags]
