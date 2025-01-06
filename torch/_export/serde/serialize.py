@@ -142,6 +142,8 @@ _TORCH_TO_SERIALIZE_DTYPE = {
     torch.complex128: ScalarType.COMPLEXDOUBLE,
     torch.bool: ScalarType.BOOL,
     torch.bfloat16: ScalarType.BFLOAT16,
+    torch.float8_e4m3fn: ScalarType.FLOAT8E4M3FN,
+    torch.float8_e5m2: ScalarType.FLOAT8E5M2,
 }
 
 

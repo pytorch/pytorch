@@ -245,8 +245,9 @@ class MicroPipelineTPTest(TestCase):
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @parametrize("A_dims", [2, 3])
     @parametrize("gather_dim", [0, 1, 2])
+    @parametrize("return_A", [True, False])
     @fresh_inductor_cache()
-    def test_fuse_all_gather_scaled_matmul(self, A_dims, gather_dim):
+    def test_fuse_all_gather_scaled_matmul(self, A_dims, gather_dim, return_A):
         if gather_dim >= A_dims:
             return
 
@@ -266,9 +267,14 @@ class MicroPipelineTPTest(TestCase):
                 C = torch._scaled_mm(
                     A.flatten(0, -2), B, A_scale, B_scale, out_dtype=out_dtype
                 )
-                return C.view(*A.shape[:-1], -1)
+                C = C.view(*A.shape[:-1], -1)
             else:
-                return torch._scaled_mm(A, B, A_scale, B_scale, out_dtype=out_dtype)
+                C = torch._scaled_mm(A, B, A_scale, B_scale, out_dtype=out_dtype)
+
+            if return_A:
+                return A, C
+            else:
+                return None, C
 
         if A_dims == 2:
             A_shard_shape = [64, 32]
