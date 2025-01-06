@@ -527,10 +527,8 @@ class AutogradCompilerInstance:
                         # So any deviation is an error
                         raise StopIteration
 
-                    # verbose_log.debug(f"renaming {ca_node.name} to aot{aot_id}_{aot_node.name}")
                     ca_node.name = f"aot{aot_id}{aot_id_postfix}_{aot_node.name}"
                     for i, inp in enumerate(aot_node.all_input_nodes):
-                        # verbose_log.debug(f"renaming {ca_node.all_input_nodes[i].name} to aot{aot_id}_{inp.name}")
                         ca_node.all_input_nodes[
                             i
                         ].name = f"aot{aot_id}{aot_id_postfix}_{inp.name}"
