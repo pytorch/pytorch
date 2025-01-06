@@ -4,7 +4,7 @@ import logging
 import operator
 from collections import defaultdict
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, List, Union
+from typing import Any, Callable, Dict, List, Tuple, Union
 
 import torch
 from torch._dispatch.python import enable_python_dispatcher
@@ -61,7 +61,7 @@ def graph_call_function(graph: torch.fx.Graph, fn, *args, **kwargs):
 @dataclass
 class ViewOp:
     target: torch._ops.OpOverload
-    args: tuple[Any, ...]
+    args: Tuple[Any, ...]
     kwargs: Dict[str, Any]
 
 

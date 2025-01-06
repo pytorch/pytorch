@@ -20,6 +20,7 @@ from typing import (
     no_type_check,
     Optional,
     Sequence,
+    Tuple,
     Type,
     Union,
 )
@@ -1549,7 +1550,7 @@ class SIMDScheduling(BaseScheduling):
         enable_autotune: bool,
         mixed_sizes: bool,
         only_gen_src_code: bool = False,
-    ) -> List[tuple[str, Any, Any]]:
+    ) -> List[Tuple[str, Any, Any]]:
         from .triton_combo_kernel import ComboKernel
 
         fused_node_lists = [node.get_nodes() for node in subkernel_nodes]
@@ -1790,7 +1791,7 @@ class SIMDScheduling(BaseScheduling):
         cls,
         node_schedule,
         is_pointwise: bool,
-    ) -> List[Dict[str, tuple[sympy.Expr]]]:
+    ) -> List[Dict[str, Tuple[sympy.Expr]]]:
         """
         Creates N-dimensional tiling candidiates, attempting to simplify loads/stores
         by tiling the kernel into higher dimensions.
