@@ -161,12 +161,12 @@ def vector_norm(
                     f"Received a tensor with {x.ndim} dimensions, but only tensors with up to 64 dims are supported!"
                 )
             if keepdim or x.ndim == 0:
-                return to_result_dtype(x)
+                return to_result_dtype(x).contiguous()
             elif dim is None:
                 return x.flatten()[0]
             else:
                 new_shape = [s for d, s in enumerate(x.shape) if d not in dim]
-                return to_result_dtype(x.view(new_shape))
+                return to_result_dtype(x.view(new_shape)).contiguous()
 
         if not (is_ord_even and utils.is_float_dtype(x.dtype)):
             x = torch.abs(x)
