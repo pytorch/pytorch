@@ -11,6 +11,7 @@ from typing import (
     OrderedDict,
     overload,
     Set,
+    Tuple,
     TypeVar,
 )
 
@@ -23,7 +24,7 @@ from torch.nn.utils.rnn import PackedSequence
 __all__ = []  # type: ignore[var-annotated]
 
 
-def _pack_kwargs(*args: Any, **kwargs: Any) -> tuple[tuple[Any, ...], tuple[str, ...]]:
+def _pack_kwargs(*args: Any, **kwargs: Any) -> Tuple[Tuple[Any, ...], Tuple[str, ...]]:
     """
     Turn argument list into separate key list and value list (unpack_kwargs does the opposite).
 
@@ -56,7 +57,7 @@ def _cast_forward_inputs(
     dtype: Optional[torch.dtype],
     *args: Any,
     **kwargs: Any,
-) -> tuple[Any, Any]:
+) -> Tuple[Any, Any]:
     """
     Cast floating point tensors in ``args`` and ``kwargs`` to ``input_dtype``.
 
@@ -74,8 +75,8 @@ def _cast_forward_inputs(
 
 
 def _unpack_kwargs(
-    flat_args: tuple[Any, ...], kwarg_keys: tuple[str, ...]
-) -> tuple[tuple[Any, ...], Dict[str, Any]]:
+    flat_args: Tuple[Any, ...], kwarg_keys: Tuple[str, ...]
+) -> Tuple[Tuple[Any, ...], Dict[str, Any]]:
     """See _pack_kwargs."""
     assert len(kwarg_keys) <= len(
         flat_args
@@ -101,7 +102,7 @@ def _recursive_to(
 @overload
 def _recursive_to(
     inputs: T, target_device: torch.device, use_side_stream_for_tensor_copies: bool
-) -> tuple[T]:
+) -> Tuple[T]:
     ...
 
 
@@ -263,11 +264,11 @@ def _apply_to_tensors(fn, container):
 
 
 def _to_kwargs(
-    inputs: tuple[Any, ...],
+    inputs: Tuple[Any, ...],
     kwargs: Optional[Dict[str, Any]],
     target_device: torch.device,
     use_side_stream_for_tensor_copies: bool,
-) -> tuple[tuple[Any, ...], tuple[Dict[str, Any], ...]]:
+) -> Tuple[Tuple[Any, ...], Tuple[Dict[str, Any], ...]]:
     moved_inputs = (
         _recursive_to(inputs, target_device, use_side_stream_for_tensor_copies)
         if inputs
