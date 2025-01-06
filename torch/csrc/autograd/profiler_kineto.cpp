@@ -771,8 +771,9 @@ void enableProfiler(
   KinetoThreadLocalState::push(state_ptr);
 
   if (has_cpu) {
-    config.global() ? pushProfilingCallbacks</*global=*/true>(scopes)
-                    : pushProfilingCallbacks</*global=*/false>(scopes);
+    config.pushGlobalCallbacks()
+        ? pushProfilingCallbacks</*global=*/true>(scopes)
+        : pushProfilingCallbacks</*global=*/false>(scopes);
   }
 
   if (!config.global()) {
