@@ -415,30 +415,6 @@ class CompileEventLogger:
             )
         CompileEventLogger.add_data(top_event, log_level, **metadata)
 
-    # MAIN API: These functions are syntactic sugar for the basic operations above without
-    # needing to use a specific log level. These are easier to use because you don't need
-    # to import CompileEventLogLevel to use them.
-    @staticmethod
-    def add(event_name: str, **metadata: object):
-        """
-        Tries to automagically determine the appropriate log level to log a given event.
-
-        - If the event is active and being logged to pt2_compile_events, this function will log
-        to PT2 Compile Events
-        - If the event is active and being logged only to chromium, this function will log to chromium
-        - If the event is not actively in the stack, it will log an instant event to chromium.
-
-        This function will never log directly to CompilationMetrics. To do so, call add_to_compilation_metrics directly.
-        """
-        chromium_log = get_chromium_event_logger()
-        in_stack = event_name in chromium_log.get_stack()
-        # Because the only difference between CHROMIUM and PT2_COMPILE are assertions, we can just call
-        # add_event_metadata here
-        if in_stack:
-            chromium_log.add_event_data(event_name, **metadata)
-        else:
-            chromium_log.log_instant_event(event_name, time.time_ns(), **metadata)
-
     @staticmethod
     def increment(
         event_name: str, log_level: CompileEventLogLevel, key: str, value: int
