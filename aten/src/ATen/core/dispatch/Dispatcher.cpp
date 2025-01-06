@@ -113,7 +113,7 @@ void Dispatcher::waitForDef(const FunctionSchema& schema) {
   using namespace std::chrono_literals;
   std::unique_lock<std::mutex> lock(guard_->mutex);
   bool r = cond_var_.wait_for(lock, 2s, [&]{
-    return findOp(schema.operator_name()) != std::nullopt;
+    return findOp(schema.operator_name()).has_value();
   });
   TORCH_INTERNAL_ASSERT(r,
     "Expected main interpreter to define ", schema.operator_name(),
@@ -184,7 +184,7 @@ const std::vector<OperatorName> Dispatcher::getAllOpNames() {
 // are done
 OperatorHandle Dispatcher::findOrRegisterName_(const OperatorName& op_name) {
   const auto found = findOp(op_name);
-  if (found != std::nullopt) {
+  if (found.has_value()) {
     return *found;
   }
 

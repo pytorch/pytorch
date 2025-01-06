@@ -19,18 +19,14 @@
 #include <torch/csrc/onnx/back_compat.h>
 #include <torch/csrc/onnx/onnx.h>
 #include <torch/version.h>
-#include <optional>
 
-C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wnewline-eof")
 #include <onnx/checker.h>
-C10_DIAGNOSTIC_POP()
 #include <onnx/onnx_pb.h>
 #include <onnx/proto_utils.h>
-C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wsuggest-override")
 #include <onnx/shape_inference/implementation.h>
-C10_DIAGNOSTIC_POP()
 
 #include <memory>
+#include <optional>
 #include <regex>
 #include <set>
 #include <sstream>

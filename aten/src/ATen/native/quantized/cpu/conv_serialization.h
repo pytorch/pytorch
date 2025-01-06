@@ -288,7 +288,7 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> deserialize_conv(
 
   TORCH_CHECK(tensors.size() == 3, "Wrong number of tensors", tensors.size());
   auto & weight = tensors[1];
-  auto & bias = tensors[2];
+  auto & bias [[maybe_unused]] = tensors[2];
   TORCH_INTERNAL_ASSERT(weight.has_value(), "Weight should always be present in serialized qconv.");
 
   torch::List<int64_t> stride, padding, output_padding, dilation;

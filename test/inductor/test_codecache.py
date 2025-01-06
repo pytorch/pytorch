@@ -512,7 +512,7 @@ class TestFxGraphCache(TestCase):
             compiled_fn = torch.compile(fn, dynamic=True, fullgraph=True)
 
             x = torch.randn(4, 4, device=GPU_TYPE)
-            result = compiled_fn(x)
+            compiled_fn(x)
 
             self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 0)
             self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
@@ -551,7 +551,7 @@ class TestFxGraphCache(TestCase):
             x = torch.randn(4, device=GPU_TYPE)
             y = torch.randn(4, device=GPU_TYPE)
 
-            result = compiled_fn(x, y)
+            compiled_fn(x, y)
 
             self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
             self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
@@ -565,7 +565,7 @@ class TestFxGraphCache(TestCase):
             PyCodeCache.cache_clear()
             shutil.rmtree(os.path.join(cache_dir(), "triton"), ignore_errors=True)
 
-            result = compiled_fn(x, y)
+            compiled_fn(x, y)
 
             self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
             self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
@@ -579,7 +579,91 @@ class TestFxGraphCache(TestCase):
             PyCodeCache.cache_clear()
             shutil.rmtree(os.path.join(cache_dir(), "triton"), ignore_errors=True)
 
-            result = compiled_fn2(x, y)
+            compiled_fn2(x, y)
+
+            self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 2)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_bypass"], 0)
+
+    @requires_gpu()
+    @requires_triton()
+    @config.patch({"fx_graph_cache": True})
+    @config.patch({"fx_graph_remote_cache": False})
+    @parametrize("bundle_triton", (False, True))
+    def test_triton_higher_order_op_different_configs(self, bundle_triton):
+        """
+        Verify that user defined triton kernel with
+        different configs are cached separately.
+        """
+
+        add_kernel1 = triton.autotune(
+            configs=[
+                triton.Config({"BLOCK_SIZE": 128}, num_stages=3, num_warps=8),
+                triton.Config({"BLOCK_SIZE": 128}, num_stages=4, num_warps=4),
+            ],
+            key=[],
+        )(add_kernel)
+
+        add_kernel2 = triton.autotune(
+            configs=[
+                triton.Config({"BLOCK_SIZE": 64}, num_stages=3, num_warps=8),
+                triton.Config({"BLOCK_SIZE": 64}, num_stages=4, num_warps=4),
+            ],
+            key=[],
+        )(add_kernel)
+
+        def fn(x, y):
+            n_elements = x.numel()
+            grid = lambda meta: (  # noqa: E731
+                triton.cdiv(n_elements, meta["BLOCK_SIZE"]),
+            )
+            add_kernel1[grid](x, y, x, n_elements)
+            return x
+
+        def fn2(x, y):
+            n_elements = x.numel()
+            grid = lambda meta: (  # noqa: E731
+                triton.cdiv(n_elements, meta["BLOCK_SIZE"]),
+            )
+            add_kernel2[grid](x, y, x, n_elements)
+            return x
+
+        with config.patch(bundle_triton_into_fx_graph_cache=bundle_triton):
+            compiled_fn = torch.compile(fn, fullgraph=True)
+            compiled_fn2 = torch.compile(fn2, fullgraph=True)
+
+            x = torch.randn(4, device=GPU_TYPE)
+            y = torch.randn(4, device=GPU_TYPE)
+
+            compiled_fn(x, y)
+
+            self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_bypass"], 0)
+
+            # A second call should hit. (First reset so in-memory guards
+            # don't prevent compilation).
+            self.reset()
+
+            # Clean PyCodeCache and triton kernels
+            PyCodeCache.cache_clear()
+            shutil.rmtree(os.path.join(cache_dir(), "triton"), ignore_errors=True)
+
+            compiled_fn(x, y)
+
+            self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_bypass"], 0)
+
+            # A second call should hit. (First reset so in-memory guards
+            # don't prevent compilation).
+            self.reset()
+
+            # Clean PyCodeCache and triton kernels
+            PyCodeCache.cache_clear()
+            shutil.rmtree(os.path.join(cache_dir(), "triton"), ignore_errors=True)
+
+            compiled_fn2(x, y)
 
             self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 2)
             self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
@@ -614,7 +698,7 @@ class TestFxGraphCache(TestCase):
             x = torch.randn(4, device=GPU_TYPE)
             y = torch.randn(4, device=GPU_TYPE)
 
-            result = compiled_fn(x, y)
+            compiled_fn(x, y)
 
             self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
             self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
@@ -628,7 +712,7 @@ class TestFxGraphCache(TestCase):
             PyCodeCache.cache_clear()
             shutil.rmtree(os.path.join(cache_dir(), "triton"), ignore_errors=True)
 
-            result = compiled_fn(x, y)
+            compiled_fn(x, y)
 
             self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
             self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
@@ -684,7 +768,6 @@ class TestFxGraphCache(TestCase):
 
         # Verify the "hit" case.
         self.reset()
-        counter_val = 5
         self.assertEqual(fn(a, b), compiled_fn(a, b))
         self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
 
