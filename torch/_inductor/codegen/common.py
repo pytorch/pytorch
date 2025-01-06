@@ -20,6 +20,7 @@ from typing import (
     List,
     NamedTuple,
     Optional,
+    Tuple,
     TYPE_CHECKING,
     Union,
 )
@@ -1731,27 +1732,27 @@ class Kernel(CodeGen):
         dtype: torch.dtype,
         src_dtype: torch.dtype,
         reduction_type: ReductionType,
-        value: Union[CSEVariable, tuple[CSEVariable, ...]],
-    ) -> Union[CSEVariable, tuple[CSEVariable, ...]]:
+        value: Union[CSEVariable, Tuple[CSEVariable, ...]],
+    ) -> Union[CSEVariable, Tuple[CSEVariable, ...]]:
         raise NotImplementedError
 
     def scan(
         self,
-        dtypes: tuple[torch.dtype, ...],
+        dtypes: Tuple[torch.dtype, ...],
         combine_fn: Callable[
-            [tuple[CSEVariable, ...], tuple[CSEVariable, ...]], tuple[CSEVariable, ...]
+            [Tuple[CSEVariable, ...], Tuple[CSEVariable, ...]], Tuple[CSEVariable, ...]
         ],
-        values: tuple[CSEVariable, ...],
-    ) -> tuple[CSEVariable, ...]:
+        values: Tuple[CSEVariable, ...],
+    ) -> Tuple[CSEVariable, ...]:
         raise NotImplementedError
 
     def sort(
         self,
-        dtypes: tuple[torch.dtype, ...],
-        values: tuple[CSEVariable, ...],
+        dtypes: Tuple[torch.dtype, ...],
+        values: Tuple[CSEVariable, ...],
         stable: bool,
         descending: bool,
-    ) -> tuple[CSEVariable, ...]:
+    ) -> Tuple[CSEVariable, ...]:
         raise NotImplementedError
 
     def var_ranges(self):
@@ -1760,11 +1761,11 @@ class Kernel(CodeGen):
     def bucketize(
         self,
         values: CSEVariable,
-        boundaries: tuple[str, sympy.Expr, sympy.Expr, sympy.Expr],
+        boundaries: Tuple[str, sympy.Expr, sympy.Expr, sympy.Expr],
         boundary_indices: CSEVariable,
         indexing_dtype: torch.dtype,
         right: bool,
-        sorter: Optional[tuple[str, sympy.Expr]] = None,
+        sorter: Optional[Tuple[str, sympy.Expr]] = None,
         sorter_indices: Optional[CSEVariable] = None,
     ) -> CSEVariable:
         """
@@ -2035,39 +2036,39 @@ class Kernel(CodeGen):
                 dtype: torch.dtype,
                 src_dtype: torch.dtype,
                 reduction_type: ReductionType,
-                value: Union[CSEVariable, tuple[CSEVariable, ...]],
-            ) -> Union[CSEVariable, tuple[CSEVariable, ...]]:
+                value: Union[CSEVariable, Tuple[CSEVariable, ...]],
+            ) -> Union[CSEVariable, Tuple[CSEVariable, ...]]:
                 self.num_reduction += 1
                 return self.reduction(dtype, src_dtype, reduction_type, value)
 
             @staticmethod
             def scan(
-                dtypes: tuple[torch.dtype, ...],
+                dtypes: Tuple[torch.dtype, ...],
                 combine_fn: Callable[
-                    [tuple[CSEVariable, ...], tuple[CSEVariable, ...]],
-                    tuple[CSEVariable, ...],
+                    [Tuple[CSEVariable, ...], Tuple[CSEVariable, ...]],
+                    Tuple[CSEVariable, ...],
                 ],
-                values: tuple[CSEVariable, ...],
-            ) -> tuple[CSEVariable, ...]:
+                values: Tuple[CSEVariable, ...],
+            ) -> Tuple[CSEVariable, ...]:
                 return self.scan(dtypes, combine_fn, values)
 
             @staticmethod
             def sort(
-                dtypes: tuple[torch.dtype, ...],
-                values: tuple[CSEVariable, ...],
+                dtypes: Tuple[torch.dtype, ...],
+                values: Tuple[CSEVariable, ...],
                 stable: bool,
                 descending: bool,
-            ) -> tuple[CSEVariable, ...]:
+            ) -> Tuple[CSEVariable, ...]:
                 return self.sort(dtypes, values, stable, descending)
 
             @staticmethod
             def bucketize(
                 values: CSEVariable,
-                boundaries: tuple[str, sympy.Expr, sympy.Expr, sympy.Expr],
+                boundaries: Tuple[str, sympy.Expr, sympy.Expr, sympy.Expr],
                 boundary_indices: CSEVariable,
                 indexing_dtype: torch.dtype,
                 right: bool,
-                sorter: Optional[tuple[str, sympy.Expr]] = None,
+                sorter: Optional[Tuple[str, sympy.Expr]] = None,
                 sorter_indices: Optional[CSEVariable] = None,
             ) -> CSEVariable:
                 """

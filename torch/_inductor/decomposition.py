@@ -4,7 +4,7 @@ import logging
 import math
 import sys
 import typing
-from typing import Any, Callable, Dict, List, Optional, Union
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import torch
 import torch._decomp as decomp
@@ -223,7 +223,7 @@ def convolution_backward(
     output_padding: List[int],
     groups: int,
     output_mask: List[bool],
-) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     if not output_mask[2] or not is_gpu(grad_output.device.type):
         return NotImplemented
     grad_bias = aten.sum(grad_output, [0] + list(range(2, grad_output.dim())))
@@ -787,7 +787,7 @@ def miopen_batch_norm(
     training: bool,
     exponential_average_factor: float,
     epsilon: float,
-) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     a, b, c = aten.native_batch_norm(
         input,
         weight,
@@ -848,7 +848,7 @@ def choose_qparams_tensor(
     quant_max: int,
     eps: float,
     dtype: torch.dtype,
-) -> tuple[torch.Tensor, torch.Tensor]:
+) -> Tuple[torch.Tensor, torch.Tensor]:
     min_val, max_val = torch.aminmax(input)
     scale = (max_val - min_val) / float(quant_max - quant_min)
     scale = torch.max(scale, torch.Tensor([eps]))
@@ -965,7 +965,7 @@ def max_pool2d_with_indices(
     padding: Union[int, List[int]] = 0,
     dilation: Union[int, List[int]] = 1,
     ceil_mode: bool = False,
-) -> tuple[torch.Tensor, torch.Tensor]:
+) -> Tuple[torch.Tensor, torch.Tensor]:
     if dilation == 1:
         dilation = [1, 1]
 
@@ -1011,7 +1011,7 @@ def max_pool2d_with_indices(
 @register_decomposition(aten.adaptive_max_pool2d)
 def adaptive_max_pool2d(
     x: torch.Tensor, output_size: List[int]
-) -> tuple[torch.Tensor, torch.Tensor]:
+) -> Tuple[torch.Tensor, torch.Tensor]:
     *batch, h_in, w_in = x.shape
     h_out, w_out = output_size
 
@@ -1054,7 +1054,7 @@ def rrelu_with_noise_functional(
     upper: float = 0.3333333333333333,
     training: bool = False,
     generator: Optional[torch.Generator] = None,
-) -> tuple[torch.Tensor, torch.Tensor]:
+) -> Tuple[torch.Tensor, torch.Tensor]:
     if training:
         not_positive = self <= 0
         r = aten.uniform(self, lower, upper, generator=generator)

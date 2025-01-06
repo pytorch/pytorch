@@ -22,6 +22,7 @@ from typing import (
     Dict,
     List,
     Optional,
+    Tuple,
     Type,
     TYPE_CHECKING,
     TypeVar,
@@ -651,7 +652,7 @@ class TritonTemplateKernel(TritonKernel):
         self,
         input_name: str,
         output_name: str,
-        indices: Union[List[Any], tuple[Any]],
+        indices: Union[List[Any], Tuple[Any]],
         mask: Optional[str] = None,
         other: Optional[Union[float, int]] = 0.0,
         indent_width: int = 4,
@@ -826,7 +827,7 @@ class TritonTemplateKernel(TritonKernel):
 
     def store_output(
         self,
-        indices: Union[List[Any], tuple[Any]],
+        indices: Union[List[Any], Tuple[Any]],
         val: str,
         mask: Optional[str] = None,
         indent_width: int = 4,

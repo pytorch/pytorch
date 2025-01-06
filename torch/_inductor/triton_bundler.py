@@ -3,7 +3,7 @@ import logging
 import os
 import uuid
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 from torch._dynamo.utils import counters, dynamo_timed, set_feature_use
 from torch._utils_internal import justknobs_check
@@ -134,7 +134,7 @@ class TritonBundler:
     @classmethod
     def collect(
         cls,
-    ) -> tuple[List[TritonKernelArtifacts], Optional[TritonBundlerMetadata]]:
+    ) -> Tuple[List[TritonKernelArtifacts], Optional[TritonBundlerMetadata]]:
         """
         This is the main function called when a cache write happens. This function
         converts all the previously remembered kernels into bundled format so that
