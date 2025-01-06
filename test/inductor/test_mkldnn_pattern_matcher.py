@@ -3714,7 +3714,7 @@ class TestDynamicPatternMatcher(TestPatternMatcherBase):
                 )
                 self.assertEqual(
                     counters["inductor"]["qlinear_unary_matcher_count"],
-                    3 if annotate_matmul and not TEST_ACL else 0,
+                    3 if annotate_matmul else 0,
                 )
 
             quantizer = X86InductorQuantizer()
