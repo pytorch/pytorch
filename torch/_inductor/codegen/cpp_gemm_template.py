@@ -3,7 +3,7 @@ import contextlib
 import logging
 import math
 from functools import lru_cache
-from typing import Any, Callable, cast, Dict, List, Optional, Union
+from typing import Any, Callable, cast, Dict, List, Optional, TypeVar, Union
 from unittest.mock import patch
 
 import torch
@@ -299,9 +299,10 @@ def get_padded_n(n, block_n):
     return (n + block_n - 1) // block_n * block_n
 
 
-def transpose_w(
-    W: Union[ir.IRNode, torch.Tensor], trans_w: bool
-) -> Union[ir.IRNode, torch.Tensor]:
+_T = TypeVar("_T", ir.IRNode, torch.Tensor)
+
+
+def transpose_w(W: _T, trans_w: bool) -> _T:
     """
     Transpose W based on the trans_w flag.
     """
@@ -317,9 +318,7 @@ def transpose_w(
     return W
 
 
-def expand_bias(
-    B: Union[ir.IRNode, torch.Tensor, None], X: Union[ir.IRNode, torch.Tensor]
-) -> Optional[Union[ir.IRNode, torch.Tensor]]:
+def expand_bias(B: Optional[_T], X: _T) -> Optional[_T]:
     """
     Expand Bias to the same size of X.
     """
@@ -336,7 +335,7 @@ def expand_bias(
     return B
 
 
-def prune_tensors(input_nodes: List[ir.TensorBox], new_input_nodes: List[ir.TensorBox]):
+def prune_tensors(input_nodes: List[ir.IRNode], new_input_nodes: List[ir.IRNode]):
     """
     Prune unused tensors from `V.graph` since the GEMM Template use new packed weight.
     """
@@ -798,7 +797,7 @@ class CppGemmTemplate(CppTemplate):
         trans_w=False,
         input_indices=None,
         epilogue_creator: Optional[Callable[[ir.Buffer], ir.Pointwise]] = None,
-        act_mapping: Optional[dict[int, ir.TensorBox]] = None,
+        act_mapping: Optional[dict[int, ir.IRNode]] = None,
     ):
         if input_indices is None:
             input_indices = list(range(len(input_nodes)))
