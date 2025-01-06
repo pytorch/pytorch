@@ -726,7 +726,11 @@ def _bind_signature_to_inputs(mod, fake_args, fake_kwargs):
     else:
         sig = inspect.signature(mod.forward)
 
-    return sig.bind(*fake_args, **fake_kwargs).arguments
+    # Rather than binding both fake_args and fake_kwargs to sig names, we
+    # (partially) bind only fake_args, while reusing fake_kwarg names. This
+    # ensures that fake_kwargs do not get reordered, which is important to
+    # match flattened user inputs.
+    return {**sig.bind_partial(*fake_args).arguments, **fake_kwargs}
 
 
 def _name_hoo_subgraph_placeholders(gm: torch.fx.GraphModule) -> None:
@@ -821,14 +825,6 @@ def placeholder_naming_pass(
 
     # map user input names with mod.forward() signature
     combined_args = _bind_signature_to_inputs(mod, fake_args, fake_kwargs)
-    # reorder following args, kwargs
-    combined_args = {
-        name: combined_args[name]
-        for name in [
-            *list(combined_args.keys())[:len(fake_args)],
-            *list(fake_kwargs.keys()),
-        ]
-    }
 
     flat_args_with_path, _ = tree_flatten_with_path(combined_args)
     user_input_names = [

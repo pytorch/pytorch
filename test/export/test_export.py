@@ -9546,6 +9546,7 @@ def forward(self, x):
                 super().__init__()
                 self.layer1 = torch.nn.Linear(3, 16)
                 self.layer2 = torch.nn.Linear(3, 32)
+
             def forward(self, x1, x2, flag=True):
                 x1o = self.layer1(x1)
                 x2o = self.layer2(x2)
@@ -9562,7 +9563,7 @@ def forward(self, x):
         )
 
         # check that graph input names are as expected
-        self.assertEqual(ep.graph_signature.user_inputs, ('x1', False, 'x2'))
+        self.assertEqual(ep.graph_signature.user_inputs, ("x1", False, "x2"))
 
     def test_placeholder_naming_collisions(self):
         # test collisions between nested user inputs
