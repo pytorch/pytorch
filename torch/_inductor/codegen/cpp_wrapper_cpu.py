@@ -1967,7 +1967,7 @@ if (custom_op_wrapper.get() == NULL) {
                 elif isinstance(raw_arg, complex):
                     real = self.generate_float_value(raw_arg.real)
                     imag = self.generate_float_value(raw_arg.imag)
-                    return f"PyComplex_FromDoubles({real, imag})"
+                    return f"PyComplex_FromDoubles({real}, {imag})"
                 elif isinstance(raw_arg, torch.SymInt):
                     expr = raw_arg.node.expr
                     return f"PyLong_FromLongLong({cexpr(expr)})"
