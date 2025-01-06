@@ -1,7 +1,7 @@
 # Owner(s): ["oncall: distributed"]
 
 from copy import deepcopy
-from typing import List, Tuple
+from typing import List
 
 import torch
 import torch.nn as nn
@@ -28,12 +28,12 @@ class TestContract(TestCase):
     @skipIfTorchDynamo("Dynamo does not support the state key")
     def test_add_hooks(self):
         def forward_pre_hook(
-            module: nn.Module, inp: Tuple[torch.Tensor]
-        ) -> Tuple[torch.Tensor]:
+            module: nn.Module, inp: tuple[torch.Tensor]
+        ) -> tuple[torch.Tensor]:
             return inp
 
         def forward_hook(
-            module: nn.Module, inp: Tuple[torch.Tensor], out: torch.Tensor
+            module: nn.Module, inp: tuple[torch.Tensor], out: torch.Tensor
         ) -> torch.Tensor:
             return out
 
@@ -44,9 +44,9 @@ class TestContract(TestCase):
 
         def backward_hook(
             module: nn.Module,
-            grad_input: Tuple[torch.Tensor],
+            grad_input: tuple[torch.Tensor],
             grad_output: torch.Tensor,
-        ) -> Tuple[torch.Tensor]:
+        ) -> tuple[torch.Tensor]:
             return grad_input
 
         @contract()
@@ -92,8 +92,8 @@ class TestContract(TestCase):
     @skipIfTorchDynamo("Dynamo does not support the state key")
     def test_state(self):
         def check_and_update_state_hook(
-            module: nn.Module, inp: Tuple[torch.Tensor]
-        ) -> Tuple[torch.Tensor]:
+            module: nn.Module, inp: tuple[torch.Tensor]
+        ) -> tuple[torch.Tensor]:
             self.assertEqual(api.state(module).dummy_state, 7)
             api.state(module).dummy_state = 8
             return inp
