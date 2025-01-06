@@ -1920,6 +1920,9 @@ class GraphLowering(torch.fx.Interpreter):
                 V.graph.all_codegen_kernel_names,
             )
 
+            # Dump the inductor_triton_kernel_to_post_grad_node_info to a json file for debugging trace
+            V.debug.log_inductor_triton_kernel_to_post_grad_node_info()
+
             result = self.wrapper_code.generate(self.is_inference)
             self.wrapper_code.pop_codegened_graph()
             return result
@@ -2040,12 +2043,17 @@ class GraphLowering(torch.fx.Interpreter):
         return mod
 
     def get_output_names(self) -> List[str]:
-        return [
-            node.get_name()
-            for node in self.graph_outputs
-            if not isinstance(node, ir.NoneAsConstantBuffer)
-            and not isinstance(node, ir.ShapeAsConstantBuffer)
-        ]
+        names = []
+        shape_counter = itertools.count(0)
+        none_counter = itertools.count(0)
+        for node in self.graph_outputs:
+            if isinstance(node, ir.NoneAsConstantBuffer):
+                names.append(f"{self.name}_none{next(none_counter)}")
+            elif isinstance(node, ir.ShapeAsConstantBuffer):
+                names.append(f"{self.name}_shape{next(shape_counter)}")
+            else:
+                names.append(node.get_name())
+        return names
 
     def is_unspec_arg(self, name: str) -> bool:
         # dynamo wraps unspec variable as 0d CPU tensor,

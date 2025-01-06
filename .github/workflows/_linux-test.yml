@@ -230,7 +230,10 @@ jobs:
           TD_DISTRIBUTED: ${{ steps.keep-going.outputs.ci-td-distributed }}
           SCCACHE_BUCKET: ossci-compiler-cache-circleci-v2
           SCCACHE_REGION: us-east-1
-          SCCACHE_S3_KEY_PREFIX: ${{ github.workflow }}
+          # Use the build environment here to make sure that all build jobs in the same environment
+          # will share the same cache regardless of which workflow they belong. This should improve
+          # the cache usage for jobs in non-pull workflows like periodic, slow, or inductor
+          SCCACHE_S3_KEY_PREFIX: ${{ inputs.build-environment || github.workflow }}
           SHM_SIZE: ${{ contains(inputs.build-environment, 'cuda') && '2g' || '1g' }}
           DOCKER_IMAGE: ${{ inputs.docker-image }}
           XLA_CUDA: ${{ contains(inputs.build-environment, 'xla') && '0' || '' }}

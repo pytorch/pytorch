@@ -68,7 +68,7 @@ __global__ void distribution_elementwise_grid_stride_kernel(int64_t numel,
                                                             const dist_t dist_func,
                                                             const transform_t transform_func) {
   auto [seed, offset] = at::cuda::philox::unpack(philox_args);
-  int64_t idx = blockIdx.x * blockDim.x + threadIdx.x;
+  int64_t idx = ((int64_t) blockIdx.x) * blockDim.x + threadIdx.x;
   curandStatePhilox4_32_10_t state;
   curand_init(seed, idx, offset, &state);
 
