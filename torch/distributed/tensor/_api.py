@@ -4,6 +4,7 @@
 import inspect
 import warnings
 from typing import Any, Callable, cast, Optional, Sequence, Tuple
+from typing_extensions import deprecated
 
 import torch
 import torch.distributed.tensor._dispatch as op_dispatch
@@ -791,6 +792,7 @@ def distribute_tensor(
     )
 
 
+@deprecated("Please use `distribute_tensor` with `src_data_rank=None` instead.")
 def _shard_tensor(
     full_tensor: torch.Tensor,
     placements: Sequence[Shard],
@@ -825,9 +827,6 @@ def _shard_tensor(
         >>> full_tensor = torch.arange(world_size, device=f"cuda:{rank}")
         >>> dtensor = _shard_tensor(full_tensor, [Shard(1)], device_mesh)
     """
-    warnings.warn(
-        "This API is deprecated, please use `distribute_tensor` with `src_data_rank=None` instead."
-    )
     return distribute_tensor(full_tensor, device_mesh, placements, src_data_rank=None)
 
 
