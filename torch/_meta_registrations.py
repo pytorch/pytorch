@@ -2470,6 +2470,8 @@ if torch._C._has_mkldnn:
         unary_op_args,
         unary_op_algorithm,
     ):
+        if binary_op_name == "sum":
+            return x_2
         output_shape = list(x.shape)
         # The weight has been transposed during the qlinear weight prepack process.
         output_shape[-1] = w.shape[1]
