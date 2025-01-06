@@ -155,13 +155,13 @@ class TestMean(TestCase):
         assert_allclose(a3d.mean(axis=2, where=_wh_partial), np.array(_res))
         assert_allclose(np.mean(a3d, axis=2, where=_wh_partial), np.array(_res))
 
-        with pytest.warns(RuntimeWarning) as w:
+        with pytest.warns(RuntimeWarning):
             assert_allclose(
                 a.mean(axis=1, where=wh_partial), np.array([np.nan, 5.5, 9.5, np.nan])
             )
-        with pytest.warns(RuntimeWarning) as w:
+        with pytest.warns(RuntimeWarning):
             assert_equal(a.mean(where=False), np.nan)
-        with pytest.warns(RuntimeWarning) as w:
+        with pytest.warns(RuntimeWarning):
             assert_equal(np.mean(a, where=False), np.nan)
 
 
