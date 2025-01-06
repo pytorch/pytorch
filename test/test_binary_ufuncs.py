@@ -3523,7 +3523,7 @@ class TestBinaryUfuncs(TestCase):
     def test_lerp_tensor_type_promotion(self, device, dtype):
         start = make_tensor((5, 5), dtype=dtype, device=device, low=1, high=100)
         end = make_tensor((5, 5), dtype=dtype, device=device, low=1, high=100)
-        weight = make_tensor((5, 5), dtype=torch.float, device=device, low=1, high=100)
+        weight = torch.rand((), dtype=torch.float, device=device)
 
         actual = torch.lerp(start, end, weight)
         expected = start + weight.to(dtype) * (end - start)
