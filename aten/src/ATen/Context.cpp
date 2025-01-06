@@ -252,6 +252,14 @@ void Context::setBenchmarkLimitCuDNN(int b) {
   benchmark_limit_cudnn = b;
 }
 
+bool Context::allowTF32oneDNN_Matmul() const {
+  return float32_matmul_precision != at::Float32MatmulPrecision::HIGHEST;
+}
+
+void Context::setAllowTF32oneDNN_Matmul(bool b) {
+  float32_matmul_precision = b ? at::Float32MatmulPrecision::HIGH : at::Float32MatmulPrecision::HIGHEST;
+}
+
 bool Context::allowTF32CuBLAS() const {
 #ifdef USE_ROCM
     const auto allow_tf32 = c10::utils::check_env(hipblaslt_allow_tf32);
