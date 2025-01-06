@@ -366,6 +366,8 @@ class LocalBufferContext:
         self.global_buffers: Dict[str, ir.Buffer] = {}
         # map global buffer name to local buffer
         self.global_to_local: Dict[str, ir.Buffer] = {}
+        # record the global buffers that are removed by this LocalBufferContext
+        self.removed_buffers: OrderedSet[str] = OrderedSet()
 
     def __enter__(self):
         self.exit_stack.__enter__()
@@ -419,7 +421,12 @@ class LocalBufferContext:
                 )
                 self.global_buffers[global_buffer_name] = global_buffer
                 self.global_to_local[global_buffer_name] = local_buffer
-                V.graph.removed_buffers.add(global_buffer_name)
+                if global_buffer_name not in V.graph.removed_buffers:
+                    # Record the global buffers that are removed by this LocalBufferContext
+                    # since which may need to restore. Refer to issue:
+                    # https://github.com/pytorch/pytorch/issues/144186
+                    self.removed_buffers.add(global_buffer_name)
+                    V.graph.removed_buffers.add(global_buffer_name)
 
     def localize_function(
         self,
