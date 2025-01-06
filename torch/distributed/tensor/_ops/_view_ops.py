@@ -1,7 +1,18 @@
 # mypy: allow-untyped-defs
 # Copyright (c) Meta Platforms, Inc. and affiliates
 from dataclasses import dataclass
-from typing import Callable, cast, Dict, Iterable, List, Optional, Sequence, Set, Union
+from typing import (
+    Callable,
+    cast,
+    Dict,
+    Iterable,
+    List,
+    Optional,
+    Sequence,
+    Set,
+    Tuple,
+    Union,
+)
 
 import torch
 from torch import Tensor
@@ -26,7 +37,7 @@ from torch.distributed.tensor.placement_types import Placement, Replicate, Shard
 
 aten = torch.ops.aten
 
-Shape = tuple[int, ...]
+Shape = Tuple[int, ...]
 
 
 @dataclass
@@ -38,7 +49,7 @@ class DimSpec:
 
 
 # Rules that map each dimension of the output to dimensions of the input tensor
-DimMap = tuple[DimSpec, ...]
+DimMap = Tuple[DimSpec, ...]
 
 
 @dataclass
@@ -134,7 +145,7 @@ class Split(DimSpec):
     split_id: int
 
     @classmethod
-    def new(cls, dim: DimSpec, group_shape: tuple[int, ...], idx: int) -> DimSpec:
+    def new(cls, dim: DimSpec, group_shape: Tuple[int, ...], idx: int) -> DimSpec:
         assert len(group_shape) > 0
         if len(group_shape) == 1:
             # not really a group, just return the input dim back
@@ -197,7 +208,7 @@ def expand(input_shape: Shape, shape: Shape) -> DimMap:
     return tuple(mapping)
 
 
-def normalize_sizes(sizes: Union[Shape, tuple[Shape]]) -> Shape:
+def normalize_sizes(sizes: Union[Shape, Tuple[Shape]]) -> Shape:
     if isinstance(sizes[0], int):
         return cast(Shape, sizes)
     elif len(sizes) == 1:
@@ -375,7 +386,7 @@ def view_groups(from_size: Shape, to_size: Shape) -> DimMap:
     return tuple(result_pp)
 
 
-def dim_tile(ndim: int, dims: tuple[int, ...]) -> DimMap:
+def dim_tile(ndim: int, dims: Tuple[int, ...]) -> DimMap:
     if len(dims) < ndim:
         dims = (1,) * (ndim - len(dims)) + dims
     return dim_repeat(ndim, dims)
@@ -473,7 +484,7 @@ def propagate_shape_and_sharding(
     local_in_shape: Shape,
     rule: DimMap,
     mesh_sizes: Shape,
-) -> tuple[Sequence[Placement], Sequence[Placement]]:
+) -> Tuple[Sequence[Placement], Sequence[Placement]]:
     """
     Determine input target sharding and output sharding based on
     given global tensor shape and input source sharding.
