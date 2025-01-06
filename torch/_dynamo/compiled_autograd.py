@@ -4,7 +4,7 @@ import functools
 import itertools
 import operator
 import time
-from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING, Union
+from typing import Any, Dict, List, Optional, TYPE_CHECKING, Union
 
 import torch
 from torch._dynamo.external_utils import (
@@ -117,7 +117,7 @@ class AutogradCompilerInstance:
         inputs: List[torch.Tensor],
         sizes: List[int],
         scalars: List[Union[int, float]],
-        origins: List[List[Tuple[int, str]]],
+        origins: List[List[tuple[int, str]]],
     ):
         counters["compiled_autograd"]["captures"] += 1
         self.id = next(COMPILE_COUNTER)
@@ -776,7 +776,7 @@ class AutogradCompilerInstance:
         return proxy_tensor.proxy
 
     def bind_tensors_to_proxies(
-        self, tensors, proxies, origins: Optional[List[Tuple[int, str]]] = None
+        self, tensors, proxies, origins: Optional[List[tuple[int, str]]] = None
     ):
         if isinstance(proxies, torch.fx.Proxy):
             if origins:

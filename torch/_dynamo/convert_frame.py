@@ -22,7 +22,7 @@ import typing
 import weakref
 from pathlib import Path
 from types import CellType, CodeType, FunctionType, ModuleType
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple, TypeVar, Union
+from typing import Any, Callable, Dict, List, Optional, Set, TypeVar, Union
 from typing_extensions import ParamSpec
 from weakref import ReferenceType
 
@@ -619,7 +619,7 @@ def _compile(
     globals: Dict[str, object],
     locals: Dict[str, object],
     builtins: Dict[str, object],
-    closure: Tuple[CellType],
+    closure: tuple[CellType],
     compiler_fn: CompilerFn,
     one_graph: bool,
     export: bool,
