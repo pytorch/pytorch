@@ -2,7 +2,6 @@
 from typing import List, Tuple
 
 import torch
-from torch._vmap_internals import _vmap
 
 from . import forward_ad as fwAD
 
@@ -545,7 +544,7 @@ def _jacfwd(func, inputs, strict=False, vectorize=False):
                 output_info.append(primal_outs)
                 return tuple(jv)
 
-        outputs_before_split = _vmap(jvp)(tangents)
+        outputs_before_split = torch.vmap(jvp)(tangents)
         is_outputs_tuple, outputs = output_info
         # Step 3: for each of the output tangents, split along dim 0
         jacobian_input_output = []

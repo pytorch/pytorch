@@ -10512,7 +10512,7 @@ class TestAutogradForwardModeBatchedGrad(TestCase):
                 x = fwAD.make_dual(input, tangent)
                 return fwAD.unpack_dual(x)[1]
 
-        x_tangent = torch._vmap_internals._vmap(jvp, 0, 0)(tangent)
+        x_tangent = torch.vmap(jvp, 0, 0)(tangent)
 
         self.assertIsNot(x_tangent, tangent)
 
@@ -10532,9 +10532,7 @@ class TestAutogradForwardModeBatchedGrad(TestCase):
                     fwAD.unpack_dual(view._base)[1],
                 )
 
-        x_tangent, view_tangent, base_tangent = torch._vmap_internals._vmap(jvp, 0, 0)(
-            tangent
-        )
+        x_tangent, view_tangent, base_tangent = torch.vmap(jvp, 0, 0)(tangent)
 
         self.assertFalse(
             view_tangent._is_view()
@@ -10557,9 +10555,7 @@ class TestAutogradForwardModeBatchedGrad(TestCase):
                     fwAD.unpack_dual(view._base)[1],
                 )
 
-        x_tangent, view_tangent, base_tangent = torch._vmap_internals._vmap(jvp, 0, 0)(
-            tangent
-        )
+        x_tangent, view_tangent, base_tangent = torch.vmap(jvp, 0, 0)(tangent)
 
         self.assertIs(view_tangent._base, base_tangent)
         self.assertIs(x_tangent, tangent)
@@ -10586,7 +10582,7 @@ class TestAutogradForwardModeBatchedGrad(TestCase):
                     dual.as_strided((5,), (1,), 0)
             return unpacked_tangent
 
-        torch._vmap_internals._vmap(jvp, 0, 0)(tangent)
+        torch.vmap(jvp, 0, 0)(tangent)
 
 
 class TestAutogradForwardMode(TestCase):

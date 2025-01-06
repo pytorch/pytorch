@@ -12,7 +12,6 @@ import warnings
 from typing import cast, List, Optional, Sequence, Tuple, Union
 
 import torch
-from torch import _vmap_internals
 from torch.overrides import handle_torch_function, has_torch_function, is_tensor_like
 from torch.types import _size, _TensorOrTensors, _TensorOrTensorsOrGradEdge
 
@@ -489,9 +488,7 @@ def grad(
                 accumulate_grad=False,
             )
 
-        result = _vmap_internals._vmap(vjp, 0, 0, allow_none_pass_through=True)(
-            grad_outputs_
-        )
+        result = torch.vmap(vjp, 0, 0, allow_none_pass_through=True)(grad_outputs_)
     else:
         result = _engine_run_backward(
             outputs,

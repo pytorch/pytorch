@@ -8,7 +8,6 @@ from typing_extensions import deprecated
 
 import torch
 import torch.testing
-from torch._vmap_internals import _vmap, vmap
 from torch.overrides import is_tensor_like
 from torch.types import _TensorOrTensors
 
@@ -1099,7 +1098,7 @@ def _test_batched_grad_forward_ad(func, inputs) -> bool:
         expected = [torch.stack(shards) for shards in zip(*expected)]
 
         try:
-            result = _vmap(jvp)(torch.stack(tangents))
+            result = torch.vmap(jvp)(torch.stack(tangents))
         except RuntimeError as ex:
             # Rethrow to provide a better error message
             raise GradcheckError(
@@ -1153,7 +1152,7 @@ def _test_batched_grad(input, output, output_idx) -> bool:
         warnings.filterwarnings("ignore", message="There is a performance drop")
         warnings.filterwarnings("ignore", message="Please use torch.vmap")
         try:
-            result = vmap(vjp)(torch.stack(grad_outputs))
+            result = torch.vmap(vjp)(torch.stack(grad_outputs))
         except RuntimeError as ex:
             # It's OK that we're not raising the error at the correct callsite.
             # That's because the callsite is always going to inside the Python
