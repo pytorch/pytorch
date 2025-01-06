@@ -87,7 +87,7 @@ class NonSlicingOp(SlicingOp):
         return results
 
 
-class OnesLikeOp(SlicingOp):
+class OnesLikeOp(NonSlicingOp):
     def __init__(self) -> None:
         super().__init__()
 
@@ -190,7 +190,7 @@ class ViewOp(SlicingOp):
                 b = args[0].view_shape_stack[-1]
             else:
                 # TODO: Remove this hard-coded hack.
-                b = [2]
+                b = [987]
 
             # Find the first non-1 dim
             idx = 0
@@ -225,7 +225,7 @@ class ViewAsRealOp(SlicingOp):
         return [input_shape + (2,)]
 
 
-class UnsqueezeOp(SlicingOp):
+class UnsqueezeOp(NonSlicingOp):
     def __init__(self) -> None:
         super().__init__()
 
@@ -239,7 +239,7 @@ class UnsqueezeOp(SlicingOp):
         return [input_shape[:dim] + (1,) + input_shape[dim:]]
 
 
-class PolarOp(SlicingOp):
+class PolarOp(NonSlicingOp):
     def __init__(self) -> None:
         super().__init__()
 
@@ -394,7 +394,7 @@ class MeanOp(SlicingOp):
         return [torch.Size(list(input_shape[:dim]) + [1])]
 
 
-class ScaledDotProductAttentionOp(SlicingOp):
+class ScaledDotProductAttentionOp(NonSlicingOp):
     def __init__(self) -> None:
         super().__init__()
 
@@ -424,7 +424,7 @@ class ScaledDotProductAttentionOp(SlicingOp):
     #    return args, kwargs, tensor_args, tensor_kwargs
 
 
-class IndexOp(SlicingOp):
+class IndexOp(NonSlicingOp):
     def __init__(self) -> None:
         super().__init__()
 
@@ -444,7 +444,7 @@ class IndexOp(SlicingOp):
         return [torch.Size(input_shape_mod)]
 
 
-class SelectOp(SlicingOp):
+class SelectOp(NonSlicingOp):
     def __init__(self) -> None:
         super().__init__()
 
@@ -530,7 +530,7 @@ class CatOp(SlicingOp):
         return [input_shape]
 
 
-class StackOp(SlicingOp):
+class StackOp(NonSlicingOp):
     def __init__(self) -> None:
         super().__init__()
 
@@ -544,7 +544,7 @@ class StackOp(SlicingOp):
         return [input[0].orig_shape[:dim] + (len(input),) + input[0].orig_shape[dim:]]
 
 
-class DetachOp(SlicingOp):
+class DetachOp(NonSlicingOp):
     def __init__(self) -> None:
         super().__init__()
 
@@ -553,7 +553,7 @@ class DetachOp(SlicingOp):
         return [input_shape]
 
 
-class EmbeddingOp(SlicingOp):
+class EmbeddingOp(NonSlicingOp):
     def __init__(self) -> None:
         super().__init__()
 
