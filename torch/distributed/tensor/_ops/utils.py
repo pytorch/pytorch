@@ -3,7 +3,17 @@
 import functools
 import itertools
 import operator
-from typing import Callable, cast, Iterable, List, Optional, Sequence, TypeVar, Union
+from typing import (
+    Callable,
+    cast,
+    Iterable,
+    List,
+    Optional,
+    Sequence,
+    Tuple,
+    TypeVar,
+    Union,
+)
 from typing_extensions import ParamSpec
 
 import torch
@@ -186,10 +196,10 @@ def infer_broadcast_dims_map(
 
 
 def map_placements_after_broadcast(
-    placements: tuple[Placement, ...],
+    placements: Tuple[Placement, ...],
     shape: torch.Size,
     broadcast_dims_map: List[int],
-) -> tuple[Placement, ...]:
+) -> Tuple[Placement, ...]:
     """Map each placement based on the output shape after broadcast."""
     new_placements: List[Placement] = []
     for placement in placements:
