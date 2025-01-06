@@ -1,5 +1,5 @@
 import threading
-from typing import Optional, Tuple, Type
+from typing import Optional, Type
 
 
 __all__ = ["LinearBlockSparsePattern"]
@@ -56,7 +56,7 @@ class LinearBlockSparsePattern:
         LinearBlockSparsePattern.rlock.release()
 
     @staticmethod
-    def block_size() -> Tuple[int, int]:
+    def block_size() -> tuple[int, int]:
         return (
             LinearBlockSparsePattern.row_block_size,
             LinearBlockSparsePattern.col_block_size,
