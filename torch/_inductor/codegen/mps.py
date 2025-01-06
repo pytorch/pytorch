@@ -186,6 +186,10 @@ class MetalOverrides(OpOverrides):
         rem = f"{a} % {b}"
         return f"(({a} < 0) != ({b} < 0) ? ({rem} != 0 ? {quot} - 1 : {quot}) : {quot})"
 
+    @staticmethod
+    def floor(x: CSEVariable) -> str:
+        return f"metal::floor({x})"
+
 
 class MetalKernel(SIMDKernel):
     overrides = MetalOverrides  # type: ignore[assignment]
