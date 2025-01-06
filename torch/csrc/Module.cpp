@@ -1119,29 +1119,6 @@ static PyObject* THPModule_allowTF32CuBLAS(
   Py_RETURN_FALSE;
 }
 
-static PyObject* THPModule_setAllowTF32oneDNN_Matmul(
-    PyObject* _unused,
-    PyObject* arg) {
-  HANDLE_TH_ERRORS
-  TORCH_CHECK(
-      PyBool_Check(arg),
-      "set_allow_tf32_onednn_matmul expects a bool, "
-      "but got ",
-      THPUtils_typename(arg));
-  at::globalContext().setAllowTF32oneDNN_Matmul(arg == Py_True);
-  Py_RETURN_NONE;
-  END_HANDLE_TH_ERRORS
-}
-
-static PyObject* THPModule_allowTF32oneDNN_Matmul(
-    PyObject* _unused,
-    PyObject* noargs) {
-  if (at::globalContext().allowTF32oneDNN_Matmul()) {
-    Py_RETURN_TRUE;
-  }
-  Py_RETURN_FALSE;
-}
-
 static PyObject* THPModule_setAllowFP16ReductionCuBLAS(
     PyObject* _unused,
     PyObject* arg) {
@@ -1630,14 +1607,6 @@ static std::initializer_list<PyMethodDef> TorchMethods = {
     {"_warn_deprecation", THPModule_warnDeprecation, METH_NOARGS, nullptr},
     {"_get_cublas_allow_tf32", THPModule_allowTF32CuBLAS, METH_NOARGS, nullptr},
     {"_set_cublas_allow_tf32", THPModule_setAllowTF32CuBLAS, METH_O, nullptr},
-    {"_get_allow_tf32_onednn_matmul",
-     THPModule_allowTF32oneDNN_Matmul,
-     METH_NOARGS,
-     nullptr},
-    {"_set_allow_tf32_onednn_matmul",
-     THPModule_setAllowTF32oneDNN_Matmul,
-     METH_O,
-     nullptr},
     {"_get_float32_matmul_precision",
      THPModule_float32MatmulPrecision,
      METH_NOARGS,
