@@ -1,5 +1,5 @@
 # mypy: allow-untyped-defs
-from typing import List, Sequence
+from typing import List, Sequence, Tuple
 
 import numpy as np
 
@@ -90,7 +90,7 @@ def _compute_local_shape_and_global_offset(
     mesh: DeviceMesh,
     placements: Sequence[Placement],
     my_coordinate: List[int],
-) -> tuple[tuple[int, ...], tuple[int, ...]]:
+) -> Tuple[Tuple[int, ...], Tuple[int, ...]]:
     """
     Same as torch.distributed._tensor._utils.compute_local_shape_and_global_offset but
     with custom my_coordinate input. This is the modified implementation for visualize_sharding.
