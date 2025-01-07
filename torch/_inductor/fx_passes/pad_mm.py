@@ -589,6 +589,9 @@ def _should_pad_bench(
                 return ah_should_pad
 
         if ori_time is None:
+            # if we can, we should benchmark the original and padded kernels
+            # together since grouped benchmarking has better accuracy with
+            # lower overhead (since GPU warmups are shared)
             ori_time, pad_time = benchmarker.benchmark_many_gpu(
                 [orig_bench_fn, pad_bench_fn], warmup=5
             )

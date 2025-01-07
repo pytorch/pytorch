@@ -377,6 +377,8 @@ class MultiKernelCall:
 
             return inner
 
+        # benchmarking the sub kernels together improves accuracy and
+        # decreases overhead (since GPU warmups are now shared)
         return benchmarker.benchmark_many_gpu(
             [wrap_fn(kernel) for kernel in self.kernels],
             rep=40,
