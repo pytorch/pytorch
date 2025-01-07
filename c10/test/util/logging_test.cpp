@@ -23,6 +23,7 @@ TEST(LoggingTest, TestEnforceFalse) {
     CAFFE_ENFORCE(false, "This throws.");
     // This should never be triggered.
     ADD_FAILURE();
+    // NOLINTNEXTLINE(*catch*)
   } catch (const ::c10::Error&) {
   }
   std::swap(FLAGS_caffe2_use_fatal_for_enforce, kFalse);
@@ -80,6 +81,7 @@ TEST(
 }
 
 namespace {
+// NOLINTNEXTLINE(cppcoreguidelines-special-member-functions)
 struct Noncopyable {
   int x;
 

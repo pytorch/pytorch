@@ -40,8 +40,7 @@ Tensor& _sparse_mm_mkl_(
 #include <ATen/ExpandUtils.h>
 #include <ATen/SparseCsrTensorImpl.h>
 
-namespace at {
-namespace sparse_csr {
+namespace at::sparse_csr {
 
 #ifdef MKL_ILP64
 static constexpr ScalarType TORCH_INT_TYPE = at::kLong;
@@ -257,7 +256,6 @@ Tensor& _sparse_mm_mkl_(
   return self;
 }
 
-} // namespace native
 } // namespace at
 
 #endif // AT_MKL_ENABLED

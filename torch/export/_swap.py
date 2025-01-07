@@ -424,7 +424,7 @@ def _swap_modules(
 
     gm = ep.module()
     gm.validate_inputs = False  # type: ignore[assignment]
-    gm.graph.eliminate_dead_code()
+    gm.graph.eliminate_dead_code()  # type: ignore[operator, union-attr]
     assert isinstance(gm, torch.fx.GraphModule)
     _fix_input_output_signature(gm, ep.module_call_graph[0].signature)
 

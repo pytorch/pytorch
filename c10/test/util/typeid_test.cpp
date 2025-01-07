@@ -70,6 +70,7 @@ TEST(TypeMetaTest, TypeMeta) {
   EXPECT_NE(bar_meta.name().find("TypeMetaTestBar"), c10::string_view::npos);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-special-member-functions)
 class ClassAllowAssignment {
  public:
   ClassAllowAssignment() = default;
@@ -78,6 +79,7 @@ class ClassAllowAssignment {
   int x{42};
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-special-member-functions)
 class ClassNoAssignment {
  public:
   ClassNoAssignment() = default;

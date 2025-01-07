@@ -512,7 +512,7 @@ def _modify_graph_op_device(
                 _modify_graph_op_device(submod, new_device)
             elif isinstance(submod, InterpreterModule):
                 # If unflattening has been performed, we need to access its graph module by `.graph_module`
-                _modify_graph_op_device(submod.graph_module, new_device)
+                _modify_graph_op_device(submod.graph_module, new_device)  # type: ignore[arg-type]
             else:
                 logger.warning(
                     f"Skipping device modification for submodule {node.target} because it is a {type(submod)}"  # noqa: G004
@@ -688,33 +688,33 @@ class Pipe(torch.nn.Module):
             logger.info("Auto-splitting model")
             traced = split_policy(traced)  # type: ignore[arg-type]
 
-        logger.debug(traced.print_readable(print_output=False))
+        logger.debug(traced.print_readable(print_output=False))  # type: ignore[operator]
 
         # Deduplicate `get_attr` nodes that refer to the same parameter . Downstream code for moving
         # parameters relies on the invariant that parameter accesses happen once. This is not necessarily
         # the case (especially with custom tracers), so fix that up here.
         get_attr_nodes: Dict[str, fx.Node] = {}
-        for node in traced.graph.nodes:
+        for node in traced.graph.nodes:  # type: ignore[union-attr]
             if node.op == "get_attr":
                 get_attr_nodes.setdefault(node.target, node)
 
                 if get_attr_nodes[node.target] != node:
                     node.replace_all_uses_with(get_attr_nodes[node.target])
-                    traced.graph.erase_node(node)
+                    traced.graph.erase_node(node)  # type: ignore[operator, union-attr]
 
         # avoid looking at next node by keeping track of previous pipe_split
         prev_pipe_split_idx = -1
         pipe_split_nodes_to_erase = set()
-        for i, node in enumerate(traced.graph.nodes):
+        for i, node in enumerate(traced.graph.nodes):  # type: ignore[arg-type, union-attr]
             if (node.op, node.target) == ("call_function", pipe_split):
                 if prev_pipe_split_idx == i - 1:
                     pipe_split_nodes_to_erase.add(node)
                 prev_pipe_split_idx = i
 
         for node in pipe_split_nodes_to_erase:
-            traced.graph.erase_node(node)
+            traced.graph.erase_node(node)  # type: ignore[operator, union-attr]
 
-        traced.recompile()
+        traced.recompile()  # type: ignore[operator]
 
         part_idx = 0
 
@@ -1075,12 +1075,12 @@ class Pipe(torch.nn.Module):
             )
         else:
             # Support kwargs for the first stage
-            submod0.graph._codegen = copy.deepcopy(traced.graph._codegen)
+            submod0.graph._codegen = copy.deepcopy(traced.graph._codegen)  # type: ignore[union-attr]
             # `_replace` is actually not "private" or internal. based on this doc:
             # To prevent conflicts with field names, the method and attribute names
             # start with an underscore
-            submod0.graph._codegen.pytree_info = (
-                submod0.graph._codegen.pytree_info._replace(out_spec=None)
+            submod0.graph._codegen.pytree_info = (  # type: ignore[union-attr]
+                submod0.graph._codegen.pytree_info._replace(out_spec=None)  # type: ignore[operator, union-attr]
             )
             submod0.recompile()
 
@@ -1143,6 +1143,13 @@ class Pipe(torch.nn.Module):
 
 
 class SplitPoint(Enum):
+    """
+    Enum representing the points at which a split can occur in the execution of a submodule.
+    Attributes:
+        BEGINNING: Represents adding a split point *before* the execution of a certain submodule in the `forward` function.
+        END: Represents adding a split point *after* the execution of a certain submodule in the `forward` function.
+    """
+
     BEGINNING = 1
     END = 2
 

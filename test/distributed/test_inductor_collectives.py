@@ -411,7 +411,7 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
                 y = self.emb(x)
                 last_dim = y.dim() - 1
                 y = y.transpose_(0, last_dim).contiguous()
-                res = _functional_collectives.all_gather_tensor(y, 0, ranks, tag)
+                _functional_collectives.all_gather_tensor(y, 0, ranks, tag)
                 out = y.transpose_(0, last_dim).contiguous()
                 return out
 
@@ -580,8 +580,8 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
                 .check_regex(
                     "torch.ops._c10d_functional.all_to_all_single.default\\("
                     "arg\\d+_\\d+, "
-                    "\\[\\(s\\d+ // \\d\\), \\(s\\d+ // \\d\\)\\], "
-                    "\\[\\(s\\d+ // \\d\\), \\(s\\d+ // \\d\\)\\]"
+                    "\\[s\\d+ // \\d, s\\d+ // \\d\\], "
+                    "\\[s\\d+ // \\d, s\\d+ // \\d\\]"
                 )
                 .run(code)
             )
@@ -1107,7 +1107,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         out = compiled(input)
         out.sum().backward()
 
-        correct_input = input.clone().detach().requires_grad_()
+        correct_input = input.detach().clone().requires_grad_()
         correct = func(correct_input)
         correct.sum().backward()
         self.assertTrue(same(out, correct))

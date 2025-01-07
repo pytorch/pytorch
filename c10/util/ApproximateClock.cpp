@@ -72,7 +72,9 @@ std::function<time_t(approx_time_t)> ApproximateClockToUnixTimeConverter::
 
   return [=](approx_time_t t_approx) {
     // See above for why this is more stable than `A * t_approx + B`.
-    return (time_t)((double)(t_approx - t0_approx) * scale_factor) + t0;
+    return t_approx > t0_approx
+        ? (time_t)((double)(t_approx - t0_approx) * scale_factor) + t0
+        : 0;
   };
 }
 

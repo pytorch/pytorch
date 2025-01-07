@@ -1,4 +1,5 @@
 # Owner(s): ["module: ProxyTensor"]
+# ruff: noqa: F841
 
 from torch.testing._internal.common_utils import TestCase, run_tests
 import torch
@@ -191,8 +192,8 @@ def forward(self, a_1):
             torch.set_grad_enabled(True)
             return b + c.sin()
         a1 = torch.randn(4, requires_grad=True)
-        a2 = a1.clone().detach().requires_grad_(True)
-        a_tmp = a1.clone().detach().requires_grad_(True)
+        a2 = a1.detach().clone().requires_grad_(True)
+        a_tmp = a1.detach().clone().requires_grad_(True)
         fx_g = make_fx(f, pre_dispatch=True)(a_tmp)
         out1 = f(a1)
         out2 = fx_g(a2)
@@ -922,6 +923,20 @@ def forward(self, x_1):
             if n.op == 'output':
                 continue
             self.assertTrue('val' in n.meta)
+
+    def test_fake_tensor_mode(self):
+        def f(a):
+            d = a.cos()
+            return d
+
+        from torch._guards import detect_fake_mode
+
+        existing_fake_mode = FakeTensorMode()
+        with existing_fake_mode:
+            out = make_fx(f, tracing_mode="real")(torch.tensor([[1, 1, 1, 1, 1, 1, 1, 1]]))
+
+        fake_mode = detect_fake_mode([node.meta.get('val', None) for node in out.graph.nodes])
+        self.assertEqual(fake_mode, existing_fake_mode)
 
 def _get_node(fx_g, cond):
     for n in fx_g.graph.nodes:
@@ -2054,7 +2069,6 @@ out_symbolic_tensor_failures = {
     xfail('scatter_add', ''),
     xfail('scatter', ''),
     xfail('take_along_dim', ''),
-    xfail('triangular_solve', ''),
 
     # SymIntArrayRef expected to contain only concrete
     xfail('ones', ''),

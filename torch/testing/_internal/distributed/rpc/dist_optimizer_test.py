@@ -98,8 +98,8 @@ class DistOptimizerTest(RpcAgentTestFixture):
     @dist_init()
     def test_dist_optim_exception(self):
         # distributed version
-        owner1 = "worker%d" % ((self.rank + 1) % self.world_size)
-        owner2 = "worker%d" % ((self.rank + 2) % self.world_size)
+        owner1 = f"worker{(self.rank + 1) % self.world_size:d}"
+        owner2 = f"worker{(self.rank + 2) % self.world_size:d}"
 
         remote_module1 = rpc.remote(owner1, MyModule)
         remote_module2 = rpc.remote(owner2, MyModule)
@@ -126,8 +126,8 @@ class DistOptimizerTest(RpcAgentTestFixture):
     @dist_init()
     def test_dist_optim_exception_on_constructor(self):
         # distributed version
-        owner1 = "worker%d" % ((self.rank + 1) % self.world_size)
-        owner2 = "worker%d" % ((self.rank + 2) % self.world_size)
+        owner1 = f"worker{(self.rank + 1) % self.world_size:d}"
+        owner2 = f"worker{(self.rank + 2) % self.world_size:d}"
 
         remote_module1 = rpc.remote(owner1, MyModule)
         remote_module2 = rpc.remote(owner2, MyModule)
@@ -146,8 +146,8 @@ class DistOptimizerTest(RpcAgentTestFixture):
         params = [module1.get_w(), module2.get_w()]
         local_optim = optim_cls(params, *args, **kwargs)
 
-        old_w1 = module1.w.clone().detach()
-        old_w2 = module2.w.clone().detach()
+        old_w1 = module1.w.detach().clone()
+        old_w2 = module2.w.detach().clone()
 
         g_cpu = torch.Generator()
         g_cpu.manual_seed(0)
@@ -161,8 +161,8 @@ class DistOptimizerTest(RpcAgentTestFixture):
         local_optim.step()
 
         # distributed version
-        owner1 = "worker%d" % ((self.rank + 1) % self.world_size)
-        owner2 = "worker%d" % ((self.rank + 2) % self.world_size)
+        owner1 = f"worker{(self.rank + 1) % self.world_size:d}"
+        owner2 = f"worker{(self.rank + 2) % self.world_size:d}"
 
         remote_module1 = rpc.remote(owner1, MyModule)
         remote_module2 = rpc.remote(owner2, MyModule)
@@ -217,8 +217,8 @@ class DistOptimizerTest(RpcAgentTestFixture):
         params = [module1.get_w(), module2.get_w()]
         local_optim = optim_cls(params, *args, **kwargs)
 
-        old_w1 = module1.w.clone().detach()
-        old_w2 = module2.w.clone().detach()
+        old_w1 = module1.w.detach().clone()
+        old_w2 = module2.w.detach().clone()
 
         g_cpu = torch.Generator()
         g_cpu.manual_seed(0)
@@ -232,8 +232,8 @@ class DistOptimizerTest(RpcAgentTestFixture):
         local_optim.step()
 
         # distributed version
-        owner1 = "worker%d" % ((self.rank + 1) % self.world_size)
-        owner2 = "worker%d" % ((self.rank + 2) % self.world_size)
+        owner1 = f"worker{(self.rank + 1) % self.world_size:d}"
+        owner2 = f"worker{(self.rank + 2) % self.world_size:d}"
 
         remote_module1 = rpc.remote(owner1, MyModule)
         remote_module2 = rpc.remote(owner2, MyModule, args=(False,))

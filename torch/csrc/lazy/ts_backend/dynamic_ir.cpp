@@ -30,7 +30,7 @@ SizeNode::SizeNode(Value input, size_t dim)
           std::vector<Shape>{},
           1,
           MHash(dim)),
-      dim_(dim){};
+      dim_(dim) {}
 
 int64_t SizeNode::getStaticValue() const {
   return dynamic_cast<const TsNode*>(operand(0).node)
@@ -55,7 +55,7 @@ SizeAdd::SizeAdd(Value a, Value b)
           OpKind{c10::Symbol::fromQualString("aten::add")},
           {std::move(a), std::move(b)},
           std::vector<Shape>{},
-          1){};
+          1) {}
 
 int64_t SizeAdd::getStaticValue() const {
   return DimCast(operand(0))->getStaticValue() +
@@ -75,7 +75,7 @@ SizeMul::SizeMul(Value a, Value b)
           OpKind{c10::Symbol::fromQualString("aten::mul")},
           {std::move(a), std::move(b)},
           std::vector<Shape>{},
-          1){};
+          1) {}
 
 int64_t SizeMul::getStaticValue() const {
   return DimCast(operand(0))->getStaticValue() *
@@ -95,7 +95,7 @@ SizeDiv::SizeDiv(Value a, Value b)
           OpKind{c10::Symbol::fromQualString("aten::div")},
           {std::move(a), std::move(b)},
           std::vector<Shape>{},
-          1){};
+          1) {}
 
 int64_t SizeDiv::getStaticValue() const {
   TORCH_CHECK(

@@ -160,7 +160,7 @@ class NormalizeIRTests(torch._dynamo.test_case.TestCase):
 
         ref = fn(a, b)
 
-        optimized_fn = torch._dynamo.optimize("aot_eager")(fn)
+        optimized_fn = torch.compile(fn, backend="aot_eager")
         res = optimized_fn(a, b)
         self.assertTrue(same(ref, res))
 
@@ -267,9 +267,8 @@ class TestCustomBackendAPI(torch._dynamo.test_case.TestCase):
         self.assertTrue(backend_run)
 
     def test_lookup_backend(self):
-        from torch._dynamo import list_backends, lookup_backend
+        from torch._dynamo import lookup_backend
 
-        backends = list_backends()
         backend_run = False
 
         def my_compiler(gm, example_inputs):

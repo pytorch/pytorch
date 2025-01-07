@@ -67,8 +67,7 @@ at::Tensor& embedding_lookup_fallback_impl(
   }
 
   int64_t current = 0;
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  float* per_sample_weights_data;
+  float* per_sample_weights_data = nullptr;
   if (per_sample_weights_.has_value()) {
     per_sample_weights_data = per_sample_weights_.value().data_ptr<float>();
   }
@@ -79,8 +78,7 @@ at::Tensor& embedding_lookup_fallback_impl(
         "Expect the lengths data to be less than indices size");
 
     for (int i = 0; i < lengths_data[m]; ++i, ++current) {
-      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-      int64_t idx;
+      int64_t idx = -1;
       if (!pruned) {
         idx = indices_data[current];
         TORCH_CHECK((idx >= 0 && idx < N), "Invalid indices data");
@@ -277,8 +275,7 @@ at::Tensor& embedding_bag_nbit_impl(
     offsets_data = offsets_include_last_val.data();
   }
   {
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
-    std::array<int64_t, 3> shape_arr;
+    std::array<int64_t, 3> shape_arr{};
     c10::IntArrayRef shape;
     if(indices.dim() == 2 && is_embedding_op) {
       const auto indices_sizes = indices.sizes();
@@ -447,8 +444,7 @@ at::Tensor& embedding_bag_byte_impl(
     offsets_data = offsets_include_last_val.data();
   }
   {
-    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
-    std::array<int64_t, 3> shape_arr;
+    std::array<int64_t, 3> shape_arr{};
     c10::IntArrayRef shape;
     if (indices.dim() == 2 && is_embedding_op) {
       const auto indices_sizes = indices.sizes();
