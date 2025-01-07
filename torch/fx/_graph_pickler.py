@@ -319,10 +319,11 @@ class _GraphModulePickleData:
         )
 
     def __init__(self, gm: torch.fx.GraphModule) -> None:
+        # Need to do this to ensure the code is created for later pickling.
         if isinstance(gm, torch.fx._lazy_graph_module._LazyGraphModule):
-            python_code = gm._real_recompile()
+            _python_code = gm._real_recompile()
         else:
-            python_code = gm.recompile()
+            _python_code = gm.recompile()
         self.gm_dict = gm.__dict__.copy()
         del self.gm_dict["_graph"]
         self.graph = _GraphPickleData(gm._graph)
@@ -492,6 +493,7 @@ class _GraphPickleData:
             nodes[node] = _NodePickleData(node, nodes)
         self.nodes = tuple(nodes.values())
 
+        # Unpickled variables:
         # self._used_names = graph._used_names
         # -- self._insert = self._root.prepend
         # self._len = graph._len

@@ -4,7 +4,7 @@
 # (This is set by default in the Docker images we build, so you don't
 # need to set it yourself.
 
-set -ex
+set -ex -o pipefail
 
 # Suppress ANSI color escape sequences
 export TERM=vt100
@@ -129,7 +129,7 @@ if [[ "$TEST_CONFIG" == 'default' ]]; then
 fi
 
 if [[ "$TEST_CONFIG" == 'distributed' ]] && [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
-  export HIP_VISIBLE_DEVICES=0,1
+  export HIP_VISIBLE_DEVICES=0,1,2,3
 fi
 
 if [[ "$TEST_CONFIG" == 'slow' ]]; then
@@ -153,6 +153,8 @@ elif [[ "$BUILD_ENVIRONMENT" == *xpu* ]]; then
   export PYTORCH_TESTING_DEVICE_ONLY_FOR="xpu"
   # setting PYTHON_TEST_EXTRA_OPTION
   export PYTHON_TEST_EXTRA_OPTION="--xpu"
+  # Disable sccache for xpu test due to flaky issue https://github.com/pytorch/pytorch/issues/143585
+  sudo rm -rf /opt/cache
 fi
 
 if [[ "$TEST_CONFIG" == *crossref* ]]; then
@@ -313,6 +315,7 @@ test_dynamo_wrapped_shard() {
     --exclude-jit-executor \
     --exclude-distributed-tests \
     --exclude-torch-export-tests \
+    --exclude-aot-dispatch-tests \
     --shard "$1" "$NUM_TEST_SHARDS" \
     --verbose \
     --upload-artifacts-while-running
@@ -379,15 +382,29 @@ test_inductor_aoti() {
   CPP_TESTS_DIR="${BUILD_BIN_DIR}" LD_LIBRARY_PATH="${TORCH_LIB_DIR}" python test/run_test.py --cpp --verbose -i cpp/test_aoti_abi_check cpp/test_aoti_inference
 }
 
-test_inductor_cpp_wrapper() {
+test_inductor_cpp_wrapper_shard() {
+  if [[ -z "$NUM_TEST_SHARDS" ]]; then
+    echo "NUM_TEST_SHARDS must be defined to run a Python test shard"
+    exit 1
+  fi
+
   export TORCHINDUCTOR_CPP_WRAPPER=1
   TEST_REPORTS_DIR=$(pwd)/test/test-reports
   mkdir -p "$TEST_REPORTS_DIR"
 
-  # Run certain inductor unit tests with cpp wrapper. In the end state, we should be able to run all the inductor
-  # unit tests with cpp wrapper.
-  python test/run_test.py --include inductor/test_torchinductor.py --verbose
+  if [[ "$1" -eq "2" ]]; then
+    # For now, manually put the opinfo tests in shard 2, and all other tests in
+    # shard 1.  Test specific things triggering past bugs, for now.
+    python test/run_test.py \
+      --include inductor/test_torchinductor_opinfo \
+      -k 'linalg or to_sparse' \
+      --verbose
+    exit
+  fi
 
+  # Run certain inductor unit tests with cpp wrapper. In the end state, we
+  # should be able to run all the inductor unit tests with cpp_wrapper.
+  python test/run_test.py --include inductor/test_torchinductor --verbose
 
   # Run inductor benchmark tests with cpp wrapper.
   # Skip benchmark tests if it's in rerun-disabled-mode.
@@ -1243,7 +1260,7 @@ EOF
 }
 
 test_bazel() {
-  set -e
+  set -e -o pipefail
 
   # bazel test needs sccache setup.
   # shellcheck source=./common-build.sh
@@ -1412,7 +1429,7 @@ test_linux_aarch64() {
        inductor/test_pattern_matcher inductor/test_perf inductor/test_profiler inductor/test_select_algorithm inductor/test_smoke \
        inductor/test_split_cat_fx_passes inductor/test_standalone_compile inductor/test_torchinductor \
        inductor/test_torchinductor_codegen_dynamic_shapes inductor/test_torchinductor_dynamic_shapes inductor/test_memory \
-       inductor/test_triton_cpu_backend inductor/test_triton_extension_backend \
+       inductor/test_triton_cpu_backend inductor/test_triton_extension_backend inductor/test_mkldnn_pattern_matcher inductor/test_cpu_cpp_wrapper \
        --shard "$SHARD_NUMBER" "$NUM_TEST_SHARDS" --verbose
 }
 
@@ -1421,9 +1438,9 @@ if ! [[ "${BUILD_ENVIRONMENT}" == *libtorch* || "${BUILD_ENVIRONMENT}" == *-baze
   (cd test && python -c "import torch; print(torch.__config__.parallel_info())")
 fi
 if [[ "${TEST_CONFIG}" == *numpy_2* ]]; then
-  # Install numpy-2.0.2 and test inductor tracing
-  python -mpip install --pre numpy==2.0.2
-  python test/run_test.py --include dynamo/test_unspec.py
+  # Install numpy-2.0.2 and compatible scipy & numba versions
+  python -mpip install --pre numpy==2.0.2 scipy==1.13.1 numba==0.60.0
+  python test/run_test.py --include dynamo/test_functions.py dynamo/test_unspec.py test_binary_ufuncs.py test_fake_tensor.py test_linalg.py test_numpy_interop.py test_tensor_creation_ops.py test_torch.py torch_np/test_basic.py
 elif [[ "${BUILD_ENVIRONMENT}" == *aarch64* && "${TEST_CONFIG}" != *perf_cpu_aarch64* ]]; then
   test_linux_aarch64
 elif [[ "${TEST_CONFIG}" == *backward* ]]; then
@@ -1497,7 +1514,7 @@ elif [[ "${TEST_CONFIG}" == *inductor_cpp_wrapper* ]]; then
   install_torchaudio cuda
   install_torchvision
   checkout_install_torchbench hf_T5 llama moco
-  PYTHONPATH=$(pwd)/torchbench test_inductor_cpp_wrapper
+  PYTHONPATH=$(pwd)/torchbench test_inductor_cpp_wrapper_shard "$SHARD_NUMBER"
 elif [[ "${TEST_CONFIG}" == *inductor* ]]; then
   install_torchvision
   test_inductor_shard "${SHARD_NUMBER}"

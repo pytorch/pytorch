@@ -9,6 +9,8 @@
 // up builds.
 
 namespace c10 {
+
+#if !defined(FBCODE_CAFFE2) && !defined(C10_NODEPRECATED)
 // NOLINTNEXTLINE(misc-unused-using-decls)
 using std::bad_optional_access;
 // NOLINTNEXTLINE(misc-unused-using-decls)
@@ -19,6 +21,7 @@ using std::nullopt;
 using std::nullopt_t;
 // NOLINTNEXTLINE(misc-unused-using-decls)
 using std::optional;
+#endif
 
 #if !defined(FBCODE_CAFFE2) && !defined(C10_NODEPRECATED)
 

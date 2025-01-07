@@ -208,6 +208,9 @@ flex_decoding_template = TritonTemplate(
     if HAS_FULL_BLOCKS:
         kv_indices = FULL_KV_IDX + sparse_idx_hz_offset
         kv_num_blocks = tl.load(FULL_KV_NUM_BLKS + sparse_block_hz_offset)
+        # Assign full block in a reverse order for off_t. Prioritize the last CTA.
+        block_n_start = (SPLIT_KV - off_t - 1) * TILE_KV_MULTIPLE
+        block_n_end = block_n_start + TILE_KV_MULTIPLE
         indices_idx = block_n_start // SPARSE_KV_MULTIPLE
         off_n_block_in_sparse = block_n_start % SPARSE_KV_MULTIPLE
         off_n = tl.load(kv_indices + indices_idx) * SPARSE_KV_BLOCK_SIZE + off_n_block_in_sparse * BLOCK_N
@@ -294,10 +297,13 @@ flex_decoding_template = TritonTemplate(
 )
 
 
-def get_split_k(B: int, H: int, Mk: int, SM: int = 128) -> int:
-    """Heuristic for the number of splits from xformer"""
+def get_split_k(B: int, H: int, Mk: int) -> int:
+    num_SM = torch.cuda.get_device_properties("cuda").multi_processor_count
     bh = max(B * H, 1)  # NOTE: Handle B*h=0 case
-    split_k = SM // bh  # Each SM should at least get one block.
+    assert isinstance(bh, (int, sympy.Integer)), "B and H must be concrete integers"
+    split_k = num_SM // bh * 2  # Each SM should at least get one block.
+    # TODO: workload evening at runtime for splits fully masked out.
+    # Before we have runtime workload evening, assign 2 splits per SM.
     split_k = max(split_k, 1)
 
     return split_k
@@ -503,13 +509,19 @@ def create_flex_decoding_kernel(*args, **kwargs):
             continue
 
         cur_kernel_options = original_kernel_options.copy()
+        # Remove prefix for forward kernels options and delete backward kernel options.
+        for k in list(cur_kernel_options.keys()):
+            if k.startswith("fwd_"):
+                v = cur_kernel_options.pop(k)
+                cur_kernel_options[k[4:]] = v
+            if k.startswith("bwd_"):
+                cur_kernel_options.pop(k)
         # Performance tuning
         cur_kernel_options.setdefault("BLOCK_N", BLOCK_N)
         cur_kernel_options.setdefault("SPARSE_KV_BLOCK_SIZE", SPARSE_KV_BLOCK_SIZE)
+        cur_kernel_options.setdefault("num_warps", num_warps)
+        cur_kernel_options.setdefault("num_stages", num_stages)
 
-        # Work around https://github.com/pytorch/pytorch/issues/129625
-        if num_stages == 2:
-            continue
         flex_decoding_template.maybe_append_choice(
             choices=choices,
             input_nodes=[
@@ -529,8 +541,6 @@ def create_flex_decoding_kernel(*args, **kwargs):
                 mask_mod_subgraph,
             ],
             mutated_inputs=[buf_M, buf_L],
-            num_stages=num_stages,
-            num_warps=num_warps,
             call_sizes=query.get_size(),
             **cur_kernel_options,
         )

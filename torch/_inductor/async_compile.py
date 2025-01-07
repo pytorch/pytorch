@@ -4,14 +4,12 @@ from __future__ import annotations
 import atexit
 import functools
 import logging
-import multiprocessing
 import os
 import sys
-from concurrent.futures import Future, ProcessPoolExecutor, ThreadPoolExecutor
+from concurrent.futures import Future, ThreadPoolExecutor
 from concurrent.futures.process import BrokenProcessPool
-from functools import partial
 from time import time
-from typing import Any, Callable, Dict, List, Optional, Set, TYPE_CHECKING
+from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING
 
 import torch
 from torch._dynamo.device_interface import get_registered_device_interfaces
@@ -28,18 +26,13 @@ from torch._inductor.codecache import (
     TritonCodeCache,
     TritonFuture,
 )
-from torch._inductor.compile_worker.subproc_pool import (
-    _warm_process_pool,
-    AnyPool,
-    SubprocKind,
-    SubprocPool,
-)
-from torch._inductor.compile_worker.watchdog import _async_compile_initializer
+from torch._inductor.compile_worker.subproc_pool import SubprocKind, SubprocPool
 from torch._inductor.runtime.compile_tasks import (
     _set_triton_ptxas_path,
     _worker_compile_triton,
 )
 from torch.hub import _Faketqdm, tqdm
+from torch.utils._ordered_set import OrderedSet
 from torch.utils._triton import has_triton_package
 
 
@@ -99,9 +92,8 @@ _IS_WINDOWS = sys.platform == "win32"
 
 log = logging.getLogger(__name__)
 
-
 # Used to keep track of all process pools invoked so far.
-_pool_set: Set[AnyPool] = set()
+_pool_set = OrderedSet[SubprocPool]()
 
 
 def shutdown_compile_workers() -> None:
@@ -121,16 +113,6 @@ try:
     os.register_at_fork(after_in_child=after_fork)
 except AttributeError:
     pass  # register_at_fork does not exists on windows
-
-
-def get_worker_start_method() -> str:
-    """
-    Temporary for internal subprocess pool rollout. Assign config.worker_start_method
-    lazily and return it. TODO: remove after rollout.
-    """
-    if config.worker_start_method is None:
-        config.worker_start_method = config.decide_worker_start_method()
-    return config.worker_start_method
 
 
 def get_compile_threads() -> int:
@@ -163,39 +145,21 @@ class AsyncCompile:
 
     @staticmethod
     @functools.lru_cache(1)
-    def process_pool() -> AnyPool:
-        assert get_compile_threads() > 1
-        pool: AnyPool
-        if get_worker_start_method() == "subprocess":
-            import torch.fx._graph_pickler
+    def process_pool() -> SubprocPool:
+        import torch.fx._graph_pickler
 
-            # Wrapper around ProcessPoolExecutor forks in a new process we control
-            log.info("Creating subprocess pool with %d workers", get_compile_threads())
-            # "fork" causes CUDA problems.
-            pool = SubprocPool(
-                get_compile_threads(),
-                pickler=torch.fx._graph_pickler.SubprocGraphPicker(),
-                kind=SubprocKind.SPAWN,
-            )
-        else:
-            pre_fork_setup()
-            ctx = multiprocessing.get_context(get_worker_start_method())
-            log.info(
-                "Creating forked subprocess pool with %d workers", get_compile_threads()
-            )
-            pool = ProcessPoolExecutor(
-                get_compile_threads(),
-                mp_context=ctx,
-                initializer=partial(_async_compile_initializer, os.getpid()),
-            )
-            # when this pool is created in a subprocess object, the normal exit handler
-            # doesn't run, and we need to register our own handler.
-            # exitpriority has to be high, because another one of the finalizers will
-            # kill the worker thread that sends the shutdown message to the workers...
-            multiprocessing.util.Finalize(None, pool.shutdown, exitpriority=sys.maxsize)
+        assert get_compile_threads() > 1
+        # Wrapper around ProcessPoolExecutor forks in a new process we control
+        log.info("Creating subprocess pool with %d workers", get_compile_threads())
+        # "fork" causes CUDA problems.
+        pool = SubprocPool(
+            get_compile_threads(),
+            pickler=torch.fx._graph_pickler.SubprocGraphPicker(),
+            kind=SubprocKind.SPAWN,
+        )
 
         # Set an attribute we can check to see if the pool is ready.
-        pool.ready_future = pool.submit(AsyncCompile._get_ready)  # type: ignore[union-attr]
+        pool.ready_future = pool.submit(AsyncCompile._get_ready)  # type: ignore[attr-defined]
         _pool_set.add(pool)
         return pool
 
@@ -204,7 +168,8 @@ class AsyncCompile:
         if get_compile_threads() <= 1:
             return
         _compile_start()
-        _warm_process_pool(cls.process_pool(), get_compile_threads())
+        # Pool is initialized on first access
+        cls.process_pool()
         _compile_end()
 
     @classmethod
@@ -213,10 +178,10 @@ class AsyncCompile:
             return task()
         return cls.pool().submit(task)
 
-    def _use_process_pool(self):
+    def use_process_pool(self):
         return (
             get_compile_threads() > 1
-            and self.process_pool().ready_future.done()  # type: ignore[union-attr]
+            and self.process_pool().ready_future.done()  # type: ignore[attr-defined]
         )
 
     def triton(self, kernel_name: str, source_code: str, device_str: str = "cuda"):
@@ -230,7 +195,7 @@ class AsyncCompile:
             )
 
         kernel = TritonCodeCache.load(kernel_name, source_code)
-        if self._use_process_pool():
+        if self.use_process_pool():
             set_feature_use(
                 "pytorch/inductor:enable_parallel_compile_version (post_warmup)", True
             )
@@ -253,6 +218,7 @@ class AsyncCompile:
             with dynamo_timed(
                 "async_compile.precompile",
                 log_pt2_compile_event=True,
+                dynamo_compile_column_us="triton_compile_time_us",
                 log_waitcounter=True,
             ):
                 kernel.precompile()
@@ -323,7 +289,10 @@ class AsyncCompile:
 
     def wait(self, scope: Dict[str, Any]) -> None:
         with dynamo_timed(
-            "async_compile.wait", log_pt2_compile_event=True, log_waitcounter=True
+            "async_compile.wait",
+            log_pt2_compile_event=True,
+            dynamo_compile_column_us="triton_compile_time_us",
+            log_waitcounter=True,
         ):
             num_kernels = len(
                 [
@@ -362,8 +331,8 @@ if (
     or os.environ.get("TORCH_WARM_POOL", "1") != "1"
     # The subprocess pool is only used for the Triton backend
     or not has_triton_package()
-    # Skip for fbcode so we can query the worker_start_method lazily.
-    # TODO: remove once "subprocess" has rolled out internally.
+    # Skip for fbcode. We have internal reports of usages inside multiprocessing
+    # pools that lead a multiplicative number of compile subprocesses.
     or config.is_fbcode()
 ):
     pass

@@ -16,7 +16,6 @@ from torch.quantization._quantized_conversions import (
 from torch.testing import make_tensor
 from torch.testing._internal.common_cuda import (
     SM53OrLater,
-    SM90OrLater,
     _get_torch_cuda_version,
     PLATFORM_SUPPORTS_FP8
 )
@@ -35,14 +34,17 @@ from torch.testing._internal.common_utils import (
     parametrize,
     run_tests,
     skipIfRocmVersionLessThan,
+    TEST_CUDA,
     TEST_WITH_ROCM,
     skipIfRocm,
     TestCase,
 )
 
 _IS_SM8X = False
-if torch.cuda.is_available():
+_IS_SM9X = False
+if TEST_CUDA:
     _IS_SM8X = torch.cuda.get_device_capability(0)[0] == 8
+    _IS_SM9X = torch.cuda.get_device_capability(0)[0] == 9
 
 # Protects against includes accidentally setting the default dtype
 assert torch.get_default_dtype() is torch.float32
@@ -439,6 +441,9 @@ class TestFP8MatmulCuda(TestCase):
         x = torch.empty_strided((16, 16), (16, 1), device="cuda", dtype=base_dtype)
         y = torch.empty_strided((16, 32), (1, 64), device="cuda", dtype=base_dtype)
 
+        x.normal_()
+        y.normal_()
+
         x_scale = tensor_to_scale(x, input_dtype).float()
         y_scale = tensor_to_scale(y, input_dtype).float()
 
@@ -560,7 +565,8 @@ class TestFP8MatmulCuda(TestCase):
         self.assertEqual(out_fp8, out_fp8_s)
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8 or IS_WINDOWS, f8_msg)
-    @unittest.skipIf(not SM90OrLater, "rowwise implementation is currently sm90 specific")
+    @unittest.skipIf(not _IS_SM9X, "rowwise implementation is currently sm90 specific")
+    @skipIfRocm()
     @parametrize("use_fast_accum", [True, False])
     def test_float8_rowwise_scaling_sanity(self, device, use_fast_accum: bool) -> None:
         M, K, N = (1024, 512, 2048)
@@ -571,8 +577,8 @@ class TestFP8MatmulCuda(TestCase):
         x_scales = torch.ones((x.shape[0], 1), device=device, dtype=torch.float32)
         y_scales = torch.ones((1, y.shape[0]), device=device, dtype=torch.float32)
 
-        x_fp8 = x.to(e4m3_type)
-        y_fp8 = y.to(e4m3_type).t()
+        x_fp8 = x.to(torch.float8_e4m3fn)
+        y_fp8 = y.to(torch.float8_e4m3fn).t()
 
         out_fp8 = torch._scaled_mm(
             x_fp8,
@@ -594,8 +600,8 @@ class TestFP8MatmulCuda(TestCase):
         x = torch.full((M, K), fill_value, device=device)
         y = torch.full((N, K), fill_value, device=device)
 
-        x_fp8 = x.to(e4m3_type)
-        y_fp8 = y.to(e4m3_type).t()
+        x_fp8 = x.to(torch.float8_e4m3fn)
+        y_fp8 = y.to(torch.float8_e4m3fn).t()
 
         with self.assertRaisesRegex(
             RuntimeError,
@@ -658,14 +664,15 @@ class TestFP8MatmulCuda(TestCase):
         ):
             torch._scaled_mm(
                 x_fp8,
-                y_fp8.to(e5m2_type),
+                y_fp8.to(torch.float8_e5m2),
                 scale_a=torch.ones((M, 1), device="cuda"),
                 scale_b=torch.ones((1, N), device="cuda"),
                 out_dtype=torch.bfloat16,
             )
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8 or IS_WINDOWS, f8_msg)
-    @unittest.skipIf(not SM90OrLater, "rowwise implementation is currently sm90 specific")
+    @unittest.skipIf(not _IS_SM9X, "rowwise implementation is currently sm90 specific")
+    @skipIfRocm()
     @parametrize("base_dtype", [torch.bfloat16])
     def test_scaled_mm_vs_emulated_row_wise(self, base_dtype):
         torch.manual_seed(42)

@@ -246,7 +246,8 @@ class StateDictType(Enum):
     This enum indicates that which type of ``state_dict`` the FSDP module is
     currently processing (returning or loading).
     The default value is FULL_STATE_DICT to comply the PyTorch convention.
-    ..note::
+
+    .. note::
         FSDP currently supports three types of ``state_dict``:
             1. ``state_dict/load_state_dict`: this pair of APIs return and load
                the non-sharded, unflattened parameters. The semantics is the

@@ -5,18 +5,7 @@ import itertools
 import logging
 import re
 import typing
-from typing import (
-    Any,
-    Callable,
-    Dict,
-    List,
-    Optional,
-    Sequence,
-    Set,
-    Tuple,
-    TypeVar,
-    Union,
-)
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, TypeVar, Union
 from unittest.mock import patch
 
 import sympy
@@ -123,8 +112,8 @@ class MemoryDep(Dep):
         # https://gist.github.com/shunting314/511a7e1ec88aa2e1a8ec85d8445ab129
         # We don't reorder the loop for these cases for now, but in theory
         # we could improve the algorithm to detect the correct loop orders.
-        if len(set(self_strides)) != len(self_strides) or len(
-            set(other_strides)
+        if len(OrderedSet(self_strides)) != len(self_strides) or len(
+            OrderedSet(other_strides)
         ) != len(other_strides):
             log.debug(
                 "unable to decide loop order. self_dep=%s v.s. other_dep=%s, self_strides=%s v.s. other_strides=%s",
@@ -138,13 +127,13 @@ class MemoryDep(Dep):
         # May hanppen if self and other are as follows
         # MemoryDep('addmm_6', 393216*d0 + 768*d1 + d2, {d0: 16, d1: 512, d2: 768}, None)
         # MemoryDep('addmm_6', 98304*d0 + d1 + 768*d2, {d0: 64, d1: 768, d2: 128}, None)
-        if set(self_strides) != set(other_strides):
+        if OrderedSet(self_strides) != OrderedSet(other_strides):
             return None
 
         stride_to_index = {s: i for i, s in enumerate(self_strides)}
         order = [stride_to_index[s] for s in other_strides]
 
-        assert set(order) == set(range(0, self.num_vars))
+        assert OrderedSet(order) == OrderedSet(range(0, self.num_vars))
         return order
 
     def get_offset(self):
@@ -186,7 +175,7 @@ class MemoryDep(Dep):
         new_reordered_sizes = stride_reorder(sizes)
         new_reordered_var_names = stride_reorder(var_names)
 
-        new_simplified_sizes, reindex, prune = V.graph.sizevars._simplify_loops(
+        new_simplified_sizes, reindex, _prune = V.graph.sizevars._simplify_loops(
             new_reordered_var_names,
             new_reordered_sizes,
             index_prevent_reordering(
@@ -397,10 +386,10 @@ class ReadWrites:
             self.var_ranges,
         )
 
-    def with_read(self, dep: Union[Dep, Set[Dep]]) -> "ReadWrites":
-        assert isinstance(dep, (WeakDep, StarDep, set))
-        if not isinstance(dep, set):
-            dep = {dep}
+    def with_read(self, dep: Union[Dep, OrderedSet[Dep]]) -> "ReadWrites":
+        assert isinstance(dep, (WeakDep, StarDep, OrderedSet))
+        if not isinstance(dep, OrderedSet):
+            dep = OrderedSet([dep])
         return ReadWrites(
             OrderedSet.union(self.reads, dep),
             self.writes,
@@ -481,7 +470,7 @@ class _RecordLoadStoreInner(V.MockHandler):  # type: ignore[name-defined]
         # different indexing formulas.
         index_vars = [*var_ranges.keys()]
         sizes = tuple(var_ranges.values())  # type: ignore[assignment]
-        new_sizes, reindex, prune = V.graph.sizevars._simplify_loops(
+        new_sizes, reindex, _prune = V.graph.sizevars._simplify_loops(
             index_vars,
             sizes,
             index_prevent_reordering([index], index_vars, sizes),

@@ -22,8 +22,6 @@ from typing_extensions import Never, ParamSpec
 import torch._thread_safe_fork  # noqa: F401
 from torch._inductor import config
 from torch._inductor.compile_worker.watchdog import _async_compile_initializer
-from torch._subclasses.fake_tensor import FakeTensorMode
-from torch.fx.experimental.symbolic_shapes import ShapeEnv
 
 
 log = logging.getLogger(__name__)
@@ -188,17 +186,31 @@ class SubprocPool:
 
     def _read_thread(self) -> None:
         while True:
-            job_id, data = _recv_msg(self.read_pipe)
+            data = b""
+            try:
+                job_id, data = _recv_msg(self.read_pipe)
+            except Exception:
+                # Something went wrong during the read. There's no way we have a
+                # valid job_id.
+                log.exception("failure in subproc_pool._recv_msg")
+                job_id = -1
+
             if job_id < 0:
+                # read_pipe returned None or got exception
                 if self.running:
                     log.warning("SubprocPool unclean exit")
+                    self.running = False
                 self.read_pipe.close()
+                # Cancel all the pending futures.
+                self.shutdown()
                 return
 
             try:
                 result = self.pickler.loads(data)
             except Exception as e:
-                log.exception("failure in SubprocPool._read_thread")
+                # Something went wrong unpickling. We have a job_id so just
+                # notify that particular future and continue on.
+                log.exception("unpickle failure in SubprocPool._read_thread")
                 result = e
 
             with self.futures_lock:
@@ -319,26 +331,16 @@ class SubprocMain:
     @staticmethod
     def do_job(pickler: SubprocPickler, data: bytes) -> bytes:
         # do the pickle/unpickle in the sub-subproc
-        shape_env = ShapeEnv()
-        fake_mode = FakeTensorMode(shape_env=shape_env)
-
         job = typing.cast(Callable[[], object], pickler.loads(data))
 
         try:
             result = job()
-        except Exception as e:
+        except Exception:
             result = _SubprocExceptionInfo(traceback.format_exc())
         return pickler.dumps(result)
 
 
-AnyPool = typing.Union[ProcessPoolExecutor, SubprocPool]
-
-
-def _warm_process_pool(pool: AnyPool, n: int) -> None:
-    if isinstance(pool, SubprocPool):
-        return  # no need
-    assert isinstance(pool, ProcessPoolExecutor)
-
+def _warm_process_pool(pool: ProcessPoolExecutor, n: int) -> None:
     # We have to fork processes for compiler workers, but the more memory and other resources that are loaded, the
     # slower the os.fork time is, quite drastically. It also holds the GIL so we can't put it on another thread.
 
@@ -354,7 +356,6 @@ def _warm_process_pool(pool: AnyPool, n: int) -> None:
 
     # We force them to start here with some YOLOing of the internal methods.
 
-    # TODO(masnesral): Are these still relevant?
     if hasattr(pool, "_start_queue_management_thread"):
         pool._start_queue_management_thread()
     else:
