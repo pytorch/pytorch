@@ -478,14 +478,9 @@ static Tensor& _exec_fft(Tensor& out, const Tensor& self, IntArrayRef out_sizes,
 
   const auto value_type = c10::toRealValueType(input.scalar_type());
   out.resize_(batched_out_sizes, MemoryFormat::Contiguous);
+
   auto astrides = input.strides();
-  bool all_zero = true;
-  for (const auto& stride : astrides) {
-      if (stride != 0) {
-          all_zero = false;
-          break;
-      }
-  }
+  bool all_zero = std::all_of(astrides.begin(), astrides.end(),  [](auto stride){ return stride == 0; });
   if (all_zero) {
       input = input.clone(MemoryFormat::Contiguous);
   }
