@@ -120,10 +120,15 @@ class ComposabilityTest(MultiProcContinousTest):
         ]
         input = inputs[dp_mesh.get_local_rank()]
         input_mb = [[input[i].reshape((1, dim))] for i in range(num_microbatches)]
+        targets = [
+            torch.rand((num_microbatches, dim), device=self.device)
+            for _ in range(dp_mesh.size())
+        ]
+        target = targets[dp_mesh.get_local_rank()]
+        target_mb = [target[i].reshape((1, dim)) for i in range(num_microbatches)]
 
-        # dummy loss needed just to force backwards to run in schedule step
         def loss_fn(y, target):
-            return y.sum()
+            return torch.nn.functional.cross_entropy(y, target)
 
         # Get stage module i from the entire model
         def get_stage_module(stage_idx, num_stages):
@@ -208,17 +213,17 @@ class ComposabilityTest(MultiProcContinousTest):
         # TODO(whc) should we make it a hard error if you pass arguments into the step API on nonzero ranks?
         # why are we passing inputs/targets on every rank?
         if pp_group.rank() == 0:
-            pipeline_schedule._step_microbatches(arg_mbs=input_mb, target_mbs=input_mb)
+            pipeline_schedule._step_microbatches(arg_mbs=input_mb, target_mbs=[[] for _ in target_mb])
         else:
             pipeline_schedule._step_microbatches(
-                arg_mbs=[[] for _ in input_mb], target_mbs=input_mb
+                arg_mbs=[[] for _ in input_mb], target_mbs=target_mb
             )
 
         # Ref model runs on 2 different inputs, accumulating grads across them.
         # this ensures that we detect if the FSDP reduce becomes a no-op.
         # (in fsdp case, we use one of these inputs on each DP rank)
-        (ref_model(inputs[0]).sum()).backward()
-        (ref_model(inputs[1]).sum()).backward()
+        for sim_dp_rank in range(dp_mesh.size()):
+            (loss_fn(ref_model(inputs[sim_dp_rank]), targets[sim_dp_rank])).backward()
 
         # simulate the built-in averaging done by FSDP
         for p in ref_model.parameters():
@@ -236,7 +241,7 @@ class ComposabilityTest(MultiProcContinousTest):
                     ref_p = ref_parameters[name]
                     self.assertTrue(isinstance(p.grad, DTensor))
                     torch.testing.assert_close(
-                        ref_p.grad, p.grad.full_tensor(), rtol=1e-5, atol=5e-5
+                        ref_p.grad, p.grad.full_tensor()
                     )
         elif dp_type == "DDP":
             for partial_model, offset in zip(partial_models, offsets):
@@ -245,7 +250,7 @@ class ComposabilityTest(MultiProcContinousTest):
                     parts[0] = str(int(parts[0]) + offset)
                     name = ".".join(parts)
                     ref_p = ref_parameters[name]
-                    torch.testing.assert_close(ref_p.grad, p.grad, rtol=1e-5, atol=5e-5)
+                    torch.testing.assert_close(ref_p.grad, p.grad)
 
 
 instantiate_parametrized_tests(ComposabilityTest)
