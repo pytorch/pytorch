@@ -3612,9 +3612,9 @@ class Scheduler:
         if (
             isinstance(scheduler_node.node, ir.MultiOutput)
             and len(scheduler_node.node.inputs) == 1
-            and isinstance(next(iter(scheduler_node.node.inputs)), ir.CppTemplateBuffer)
+            and isinstance(scheduler_node.node.inputs[0], ir.CppTemplateBuffer)
         ):
-            # <TODO> We can remove this code after Fuse MultiOutput and CppTemplateBuffer
+            # <TODO> Remove this code after Fuse MultiOutput and CppTemplateBuffer
             return
 
         counters["inductor"]["extern_calls"] += 1

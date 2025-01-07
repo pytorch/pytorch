@@ -4502,7 +4502,7 @@ class CppTemplateBuffer(TemplateBuffer):
     def get_layout(self) -> Layout:
         if isinstance(self.layout, MultiOutputLayout):
             assert isinstance(self.outputs, Iterable)
-            first_output = next(iter(self.outputs))
+            first_output = self.outputs[0]
             assert isinstance(first_output, Buffer)
             layout = first_output.layout
             assert isinstance(layout, Layout)
