@@ -3,7 +3,7 @@ from os import times
 
 import torch
 import torch.utils._pytree as pytree
-from numpy import outer
+from numpy import dtype, outer
 
 from padded_tensor import *
 from transformer_model import *
@@ -23,11 +23,19 @@ class TestAttention(TestCase):
         self.n_head = 8
         self.vocab_size = 32000
 
+        self.dtype = torch.bfloat16
+
         # Initialize token embeddings and layers
-        self.tok_embeddings = nn.Embedding(self.vocab_size, self.dim)
+        self.tok_embeddings = nn.Embedding(self.vocab_size, self.dim).to(
+            device="cuda", dtype=self.dtype
+        )
         total_head_dim = (self.n_head + 2 * self.n_local_heads) * self.head_dim
-        self.wqkv = nn.Linear(self.dim, total_head_dim, bias=False)
-        self.wo = nn.Linear(self.dim, self.dim, bias=False)
+        self.wqkv = nn.Linear(self.dim, total_head_dim, bias=False).to(
+            device="cuda", dtype=self.dtype
+        )
+        self.wo = nn.Linear(self.dim, self.dim, bias=False).to(
+            device="cuda", dtype=self.dtype
+        )
 
     def create_kv_cache(self):
         max_batch_size = 4
@@ -215,9 +223,11 @@ class TestAttention(TestCase):
 
     def f_5(self, q, k, v, mask):
         # y = F.scaled_dot_product_attention(q, k, v, attn_mask=mask, dropout_p=0.0)
-        y, _ = torch.ops.aten._scaled_dot_product_flash_attention_for_cpu(
-            q, k, v, attn_mask=mask, dropout_p=0.0
+        print(q.shape, k.shape, v.shape, mask.shape)
+        outs = torch.ops.aten._scaled_dot_product_flash_attention(
+            q, k, v, dropout_p=0.0
         )
+        y = outs[0]
         return (y,)
 
     def test_attention_5(self):
@@ -271,14 +281,18 @@ class TestAttention(TestCase):
         return (y,)
 
     def create_inputs(self, SEQLEN):
-        x = torch.ones(4, SEQLEN, dtype=torch.int32)
-        freqs_cis = torch.randn(987, 64, 2)
-        mask = torch.ones([1, 1, SEQLEN, 16])
-        input_pos = torch.ones([SEQLEN], dtype=torch.int32)
+        x = torch.ones(4, SEQLEN, dtype=torch.int32).to(device="cuda")
+        freqs_cis = torch.randn(987, 64, 2).to(device="cuda", dtype=self.dtype)
+        mask = torch.ones([1, 1, SEQLEN, 16], device="cuda")
+        input_pos = torch.ones([SEQLEN], dtype=torch.int32, device="cuda")
 
         k_cache, v_cache = self.create_kv_cache()
+        k_cache = k_cache.to(device="cuda", dtype=self.dtype)
+        v_cache = v_cache.to(device="cuda", dtype=self.dtype)
 
-        return [x, freqs_cis, mask, input_pos, k_cache, v_cache]
+        inputs = [x, freqs_cis, mask, input_pos, k_cache, v_cache]
+
+        return inputs
 
     def test_attention_all(self):
         inputs = self.create_inputs(987)

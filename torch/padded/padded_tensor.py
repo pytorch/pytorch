@@ -395,7 +395,7 @@ class MeanOp(SlicingOp):
         return [torch.Size(list(input_shape[:dim]) + [1])]
 
 
-class ScaledDotProductAttentionOp(NonSlicingOp):
+class ScaledDotProductAttentionOp(SlicingOp):
     def __init__(self) -> None:
         super().__init__()
 
@@ -607,7 +607,7 @@ class OpDatabase:
             "mm": MatmulOp(),
             "bmm": BmmOp(),
             "mean": MeanOp(),
-            "_scaled_dot_product_flash_attention_for_cpu": ScaledDotProductAttentionOp(),
+            "_scaled_dot_product_flash_attention": ScaledDotProductAttentionOp(),
             # Indexing operations
             "index": IndexOp(),
             "select": SelectOp(),
@@ -621,6 +621,7 @@ class OpDatabase:
             "embedding": EmbeddingOp(),
             "slice": NoOp(),
             "unbind": NoOp(),
+            "_to_copy": NoOp(),
         }
 
     def get_op(self, opname):
@@ -887,9 +888,16 @@ class PaddedTensor(torch.Tensor):
                 view_shape_stack += arg.view_shape_stack
 
         out_flat, spec = pytree.tree_flatten(out)
-        out_flat = [
-            PaddedTensor(t, multipliers, s, view_shape_stack)
-            for t, s in zip(out_flat, orig_shape_out)
-        ]
-        out = pytree.tree_unflatten(out_flat, spec)
+
+        out_flat_padded = []
+        for idx, t in enumerate(out_flat):
+            if type(t) is torch.Tensor and idx < len(orig_shape_out):
+                s = orig_shape_out[idx]
+                out_flat_padded.append(
+                    PaddedTensor(t, multipliers, s, view_shape_stack)
+                )
+            else:
+                out_flat_padded.append(t)
+
+        out = pytree.tree_unflatten(out_flat_padded, spec)
         return return_and_correct_aliasing(func, args, kwargs, out)
