@@ -17,7 +17,7 @@ from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional, Tuple, TYPE_CHECKING, Union
 
 import torch
-from torch._dynamo.utils import counters, get_chromium_event_logger
+from torch._dynamo.utils import CompileEventLogger, counters
 from torch._functorch import config
 from torch._inductor.codecache import (
     _ident,
@@ -30,6 +30,7 @@ from torch._inductor.codecache import (
     FxGraphHashDetails,
     write_atomic,
 )
+from torch._inductor.output_code import CompiledFxGraphConstants
 from torch._inductor.runtime.runtime_utils import cache_dir
 from torch._inductor.utils import should_use_remote_fx_graph_cache
 from torch._logging import LazyString
@@ -92,10 +93,6 @@ def should_use_local_autograd_cache():
     if torch._inductor.config.force_disable_caches:
         return False
     return config.enable_autograd_cache
-
-
-def autograd_cache_enabled():
-    return should_use_local_autograd_cache() or should_use_remote_autograd_cache()
 
 
 def check_node_safe(node: Node):
@@ -204,6 +201,8 @@ def check_cacheable(gm: torch.fx.GraphModule):
         raise BypassAOTAutogradCache(
             "Cannot cache a graph with compiled autograd enabled"
         )
+    if torch._inductor.config.freezing:
+        raise BypassAOTAutogradCache("Cannot cache a graph with freezing enabled")
 
     if not (
         torch._inductor.config.fx_graph_cache or should_use_remote_fx_graph_cache()
@@ -217,6 +216,19 @@ def check_cacheable(gm: torch.fx.GraphModule):
         )
     for node in nodes:
         check_node_safe(node)
+
+
+def check_metadata_cacheable(metadata: ViewAndMutationMeta):
+    """
+    When view replay is turned on, we bypass autograd cache if
+    the output is aliased.
+    """
+    if config.view_replay_for_aliased_outputs:
+        for info in metadata.output_info:
+            if info.functional_tensor is not None:
+                raise BypassAOTAutogradCache(
+                    "Cannot cache a graph with functional tensor"
+                )
 
 
 class AOTAutogradCacheDetails(FxGraphHashDetails):
@@ -329,6 +341,7 @@ class FXGraphCacheLoadable:
 
         # TODO: We don't cache debug lines for now, but we should for improved debugging
         remote_cache = None
+        constants = CompiledFxGraphConstants()
         if should_use_remote_fx_graph_cache():
             remote_cache = FxGraphCache.get_remote_cache()
 
@@ -339,6 +352,7 @@ class FXGraphCacheLoadable:
             local=True,
             remote_cache=remote_cache,
             is_backward=self.is_backward(),
+            constants=constants,
         )
         if result is None:
             log.info("FXGraphCache cache miss for key %s", self.fx_graph_cache_key)
@@ -354,8 +368,8 @@ class FXGraphCacheLoadable:
             payload_fn=lambda: json.dumps(cache_info),
         )
 
-        FxGraphCache.post_compile(result, example_inputs, fx_config["cudagraphs"])  # type: ignore[arg-type]
-        result._boxed_call = True
+        # TODO: How come cudagraphs could be None here?
+        result.post_compile(example_inputs, fx_config["cudagraphs"], constants)  # type: ignore[arg-type]
         return result
 
 
@@ -486,14 +500,15 @@ class AOTAutogradCacheEntry:
 
         compiled_fw_func = self.compiled_fw.load(args, fx_config)
         compiled_bw_func = None
-        chromium_log = get_chromium_event_logger()
         if self.compiled_bw is not None:
             compiled_bw_func = self.compiled_bw.load(args, fx_config)
             needs_autograd = True
-            chromium_log.try_add_event_data("backend_compile", dispatch_mode="autograd")
+            CompileEventLogger.try_add_pt2_compile(
+                "backend_compile", dispatch_mode="autograd"
+            )
         else:
             needs_autograd = False
-            chromium_log.try_add_event_data(
+            CompileEventLogger.try_add_pt2_compile(
                 "backend_compile", dispatch_mode="inference"
             )
 
@@ -508,7 +523,7 @@ class AOTAutogradCacheEntry:
         )
 
         req_subclass_dispatch = self.maybe_subclass_meta is not None
-        chromium_log.add_event_data(
+        CompileEventLogger.pt2_compile(
             "backend_compile", requires_subclass_dispatch=req_subclass_dispatch
         )
 
@@ -647,6 +662,7 @@ class AOTAutogradCache:
         """
         Load a result from the cache, and reconstruct a runtime wrapper around the object
         """
+
         gm = mod.gm if isinstance(mod, torch._dynamo.utils.GmWrapper) else mod
         with sanitize_gm_for_cache(gm):
             compiled_fn = None
@@ -745,11 +761,12 @@ class AOTAutogradCache:
                     "components": debug_lines,
                 }
             )
-            chromium_log = get_chromium_event_logger()
-            chromium_log.log_instant_event(
-                f"autograd_cache_{cache_state}", cache_event_time, metadata=cache_info
+            CompileEventLogger.instant(
+                f"autograd_cache_{cache_state}",
+                metadata=cache_info,
+                time_ns=cache_event_time,
             )
-            chromium_log.try_add_event_data(
+            CompileEventLogger.try_add_pt2_compile(
                 "backend_compile",
                 cache_state=cache_state,
                 cache_event_time=cache_event_time,
@@ -814,7 +831,10 @@ class AOTAutogradCache:
                         # cache hit, because we never save it to the cache
                         # If we need to do that, we should do it here
                         return pickle.loads(content)
-                except Exception:
+                except Exception as e:
+                    log_cache_bypass(
+                        "bypass_aot_autograd", "Unable to deserialize: " + str(e)
+                    )
                     log.warning(
                         "remote autograd cache unable to load compiled graph",
                         exc_info=True,
@@ -827,9 +847,20 @@ class AOTAutogradCache:
     def save(key: str, entry: AOTAutogradCacheEntry, remote: bool):
         """Save a single entry into the cache."""
         try:
+            check_metadata_cacheable(entry.runtime_metadata)
             content = pickle.dumps(entry)
+        except BypassAOTAutogradCache as e:
+            counters["aot_autograd"]["autograd_cache_bypass"] += 1
+            log.warning("Bypassing autograd cache due to: %s", e)
+            if remote:
+                log_cache_bypass("bypass_aot_autograd", str(e))
+            return None
         except Exception as e:
             log.warning("AOTAutograd cache unable to serialize compiled graph: %s", e)
+            if remote:
+                log_cache_bypass(
+                    "bypass_aot_autograd", "Unable to serialize: " + str(e)
+                )
             if config.strict_autograd_cache:
                 raise e
             return None

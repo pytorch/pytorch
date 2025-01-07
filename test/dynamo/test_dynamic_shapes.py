@@ -86,11 +86,6 @@ if TEST_Z3:
             DynamicShapesMiscTests.test_parameter_free_dynamic_shapes  # noqa: F821
         )
 
-unittest.expectedFailure(
-    # Test is only valid without dynamic shapes
-    DynamicShapesReproTests.test_many_views_with_mutation_dynamic_shapes  # noqa: F821
-)
-
 # Test takes too long ~700s as of 414a1fd29f04d06e41b7f895368dd1f83a4be29d
 DynamicShapesExportTests.test_retracibility_dynamic_shapes = slowTest(  # noqa: F821
     DynamicShapesExportTests.test_retracibility_dynamic_shapes  # noqa: F821

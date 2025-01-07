@@ -48,7 +48,7 @@ class AutoHeuristicTest(TestCase):
 
     def assert_autoheuristic_collected_data(self):
         self.run_mm()
-        device_name = AutoHeuristic.get_device_identifier()
+        AutoHeuristic.get_device_identifier()
         path = self.get_path_to_autoheuristic_log("pad_mm")
         self.assertTrue(os.path.exists(path))
         num_lines = self.count_lines_in_file(path)

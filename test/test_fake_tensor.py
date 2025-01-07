@@ -1,4 +1,5 @@
 # Owner(s): ["module: meta tensors"]
+# ruff: noqa: F841
 
 
 import contextlib
@@ -911,7 +912,9 @@ class FakeTensorTest(TestCase):
                 return input + np.random.randn(*input.shape)
 
         with FakeTensorMode():
-            ep = torch.export.export(MyNumpyModel(), args=(torch.randn(1000),))
+            ep = torch.export.export(
+                MyNumpyModel(), args=(torch.randn(1000),), strict=True
+            )
             self.assertTrue(isinstance(ep, torch.export.ExportedProgram))
 
     def test_unsqueeze_copy(self):

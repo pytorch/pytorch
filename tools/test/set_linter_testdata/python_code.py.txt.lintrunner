@@ -1,0 +1,134 @@
+tools/test/set_linter_testdata/python_code.py.txt:0:1: Add import for OrderedSet
+    1 | # Basic tests
+    2 |
+    3 | ignored = set()  # noqa: set_linter
+    4 | a = set()
+    5 | b = "set()"
+
+tools/test/set_linter_testdata/python_code.py.txt:4:5: Builtin `set` is deprecated
+    2 |
+    3 | ignored = set()  # noqa: set_linter
+    4 | a = set()
+            ^^^
+    5 | b = "set()"
+    6 | c = set
+
+tools/test/set_linter_testdata/python_code.py.txt:6:5: Builtin `set` is deprecated
+    4 | a = set()
+    5 | b = "set()"
+    6 | c = set
+            ^^^
+    7 | d = c.set
+    8 | f = (
+
+tools/test/set_linter_testdata/python_code.py.txt:9:4: Builtin `set` is deprecated
+    7 | d = c.set
+    8 | f = (
+    9 |    set(
+           ^^^
+   10 |    )
+   11 | )
+
+tools/test/set_linter_testdata/python_code.py.txt:32:8: Builtin `set` is deprecated
+   30 | # Braced sets
+   31 |
+   32 | set1 = {1}
+               ^
+   33 | set2 = {1, 2}
+   34 |
+
+tools/test/set_linter_testdata/python_code.py.txt:32:10: Builtin `set` is deprecated
+   30 | # Braced sets
+   31 |
+   32 | set1 = {1}
+                 ^
+   33 | set2 = {1, 2}
+   34 |
+
+tools/test/set_linter_testdata/python_code.py.txt:33:8: Builtin `set` is deprecated
+   31 |
+   32 | set1 = {1}
+   33 | set2 = {1, 2}
+               ^
+   34 |
+   35 | iterator_set = {i for i in range(10)}
+
+tools/test/set_linter_testdata/python_code.py.txt:33:13: Builtin `set` is deprecated
+   31 |
+   32 | set1 = {1}
+   33 | set2 = {1, 2}
+                    ^
+   34 |
+   35 | iterator_set = {i for i in range(10)}
+
+tools/test/set_linter_testdata/python_code.py.txt:35:16: Builtin `set` is deprecated
+   33 | set2 = {1, 2}
+   34 |
+   35 | iterator_set = {i for i in range(10)}
+                       ^
+   36 |
+   37 | # A dict with two sets.
+
+tools/test/set_linter_testdata/python_code.py.txt:35:37: Builtin `set` is deprecated
+   33 | set2 = {1, 2}
+   34 |
+   35 | iterator_set = {i for i in range(10)}
+                                            ^
+   36 |
+   37 | # A dict with two sets.
+
+tools/test/set_linter_testdata/python_code.py.txt:38:18: Builtin `set` is deprecated
+   36 |
+   37 | # A dict with two sets.
+   38 | dict_set = {"a": {2, 3}, "b": {i for i in range(3)}}
+                         ^
+   39 |
+   40 | # A set containing an object constructed with a dict and a set
+
+tools/test/set_linter_testdata/python_code.py.txt:38:23: Builtin `set` is deprecated
+   36 |
+   37 | # A dict with two sets.
+   38 | dict_set = {"a": {2, 3}, "b": {i for i in range(3)}}
+                              ^
+   39 |
+   40 | # A set containing an object constructed with a dict and a set
+
+tools/test/set_linter_testdata/python_code.py.txt:38:31: Builtin `set` is deprecated
+   36 |
+   37 | # A dict with two sets.
+   38 | dict_set = {"a": {2, 3}, "b": {i for i in range(3)}}
+                                      ^
+   39 |
+   40 | # A set containing an object constructed with a dict and a set
+
+tools/test/set_linter_testdata/python_code.py.txt:38:51: Builtin `set` is deprecated
+   36 |
+   37 | # A dict with two sets.
+   38 | dict_set = {"a": {2, 3}, "b": {i for i in range(3)}}
+                                                          ^
+   39 |
+   40 | # A set containing an object constructed with a dict and a set
+
+tools/test/set_linter_testdata/python_code.py.txt:41:11: Builtin `set` is deprecated
+   39 |
+   40 | # A set containing an object constructed with a dict and a set
+   41 | sos_set = {Something({i: i + 1 for i in range(3)}, {i + 1 for i in range(3)})}
+                  ^
+
+tools/test/set_linter_testdata/python_code.py.txt:41:52: Builtin `set` is deprecated
+   39 |
+   40 | # A set containing an object constructed with a dict and a set
+   41 | sos_set = {Something({i: i + 1 for i in range(3)}, {i + 1 for i in range(3)})}
+                                                           ^
+
+tools/test/set_linter_testdata/python_code.py.txt:41:76: Builtin `set` is deprecated
+   39 |
+   40 | # A set containing an object constructed with a dict and a set
+   41 | sos_set = {Something({i: i + 1 for i in range(3)}, {i + 1 for i in range(3)})}
+                                                                                   ^
+
+tools/test/set_linter_testdata/python_code.py.txt:41:78: Builtin `set` is deprecated
+   39 |
+   40 | # A set containing an object constructed with a dict and a set
+   41 | sos_set = {Something({i: i + 1 for i in range(3)}, {i + 1 for i in range(3)})}
+                                                                                     ^

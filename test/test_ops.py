@@ -1,5 +1,4 @@
 # Owner(s): ["module: unknown"]
-
 import contextlib
 import copy
 import inspect
@@ -12,7 +11,6 @@ from collections import defaultdict
 from collections.abc import Sequence
 from functools import partial
 from importlib import import_module
-from typing import Dict, List
 
 import torch
 import torch._prims as prims
@@ -71,7 +69,6 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ROCM,
     TEST_WITH_TORCHDYNAMO,
     TEST_WITH_TORCHINDUCTOR,
-    TEST_WITH_UBSAN,
     TestCase,
     unMarkDynamoStrictTest,
 )
@@ -653,16 +650,6 @@ class TestCommon(TestCase):
             and dtype == torch.float16
         ):
             self.skipTest("Skipped on ROCm")
-        # skip zero-dim tensors for some composites of reduction operations and view
-        skip_zero_dim_ops = [
-            "_refs.logsumexp",
-            "_refs.log_softmax",
-            "_refs.native_group_norm",
-            "_refs.softmax",
-            "_refs.sum_to_size",
-            "ops.nvprims.view",
-        ]
-
         from copy import copy
 
         from torch._prims.executor import make_traced
@@ -1050,7 +1037,7 @@ class TestCommon(TestCase):
                 try:
                     info = torch.iinfo(t.dtype)
                     return torch.full_like(t, info.max)
-                except TypeError as te:
+                except TypeError:
                     # for non-integer types fills with NaN
                     return torch.full_like(t, float("nan"))
 
@@ -1445,7 +1432,6 @@ class TestCommon(TestCase):
             self.assertEqual(actual, expected, exact_dtype=False)
 
     @ops(op_db, allowed_dtypes=(torch.bool,))
-    @unittest.skipIf(TEST_WITH_UBSAN, "Test uses undefined behavior")
     def test_non_standard_bool_values(self, device, dtype, op):
         # Test boolean values other than 0x00 and 0x01 (gh-54789)
         def convert_boolean_tensors(x):
@@ -1496,7 +1482,7 @@ class TestCommon(TestCase):
         unsupported_dtypes = set()
         supported_backward_dtypes = set()
         unsupported_backward_dtypes = set()
-        dtype_error: Dict[torch.dtype, Exception] = {}
+        dtype_error: dict[torch.dtype, Exception] = {}
 
         def unsupported(dtype, e):
             dtype_error[dtype] = e
@@ -1956,7 +1942,7 @@ class TestCompositeCompliance(TestCase):
                         output_grads_copy.append(output_grad.detach().clone())
                         output_grads.append(torch._lazy_clone(output_grad))
 
-                    input_grads = torch.autograd.grad(
+                    torch.autograd.grad(
                         results,
                         leaf_tensors,
                         output_grads,
@@ -2000,7 +1986,7 @@ class TestCompositeCompliance(TestCase):
             for sample in op.sample_inputs(device, dtype, requires_grad=False):
                 inp = sample.input
                 outs = op(inp, *sample.args, **sample.kwargs)
-                if not isinstance(outs, (tuple, List)):
+                if not isinstance(outs, (tuple, list)):
                     outs = [outs]
 
                 # for all outputs that are views of the input, we should be able to replay the
@@ -2571,8 +2557,6 @@ fake_backward_skips = {
 }
 
 fake_backward_xfails = {skip(s) for s in fake_backward_skips} | {
-    xfail("fft.ihfftn"),  # Mismatch in aten._conj_physical.default
-    xfail("fft.ihfft2"),  # Mismatch in aten._conj_physical.default
     skip("nn.functional.ctc_loss"),
 }
 
@@ -2754,7 +2738,7 @@ class TestFakeTensor(TestCase):
 
             try:
                 op(input, *args, **kwargs)
-            except Exception as e:
+            except Exception:
                 continue
 
             with TestPointwiseMode():

@@ -72,7 +72,7 @@ def check_codegen(
     def run(*ex, **kwargs):
         return model(*ex, **kwargs)
 
-    run = torch._dynamo.optimize(compile_fx_wrapper, nopython=True)(run)
+    run = torch.compile(run, backend=compile_fx_wrapper, fullgraph=True)
 
     if is_cpp_code:
         _, code = run_and_get_cpp_code(run, *example_inputs, **kwargs)
