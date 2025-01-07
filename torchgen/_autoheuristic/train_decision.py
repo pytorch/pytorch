@@ -64,7 +64,6 @@ class AHTrainDecisionTree(AHTrain):
         Given a trained decision tree, and a dataframe containing the training data, returns a list of unsafe leaves.
         """
         X = df[feature_columns]
-        y = df["winner"]
         leaf_ids = model.apply(X)
         unique_leaves = np.unique(leaf_ids)
 
@@ -136,7 +135,6 @@ class AHTrainDecisionTree(AHTrain):
         best_model = None
         best_model_safe_proba = 0
         best_model_num_correct = 0
-        best_model_num_wrong = 0
         best_model_unsafe_leaves = []
         columns = ["set", "crit", "max_depth", "min_samples_leaf"]
         metrics_columns = []
@@ -223,7 +221,6 @@ class AHTrainDecisionTree(AHTrain):
                             )
                             best_model = model
                             best_model_num_correct = num_correct
-                            best_model_num_wrong = num_wrong
                             best_model_safe_proba = safe_proba
                             best_model_unsafe_leaves = unsafe_leaves
 
@@ -786,7 +783,6 @@ class DecisionEvaluator:
     def top_k_classes(self, model, probas, k, avail_choices):
         # Get classes and their corresponding probabilities
         classes = model.classes_
-        class_proba_pairs = list(zip(classes, probas))
 
         # Sort by probability (descending) and filter out zero probabilities
         sorted_classes = [

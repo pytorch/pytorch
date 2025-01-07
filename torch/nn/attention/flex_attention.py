@@ -969,12 +969,13 @@ def _nested_mod_func_adapter(
     if is_score_mod:
 
         def nt_score_mod(score, b, h, q_idx, kv_idx):
+            b_nested = q_seq_idx[q_idx]
             q_nested = q_idx - q_offsets[q_seq_idx[q_idx]]
             kv_nested = kv_idx - kv_offsets[kv_seq_idx[kv_idx]]
             is_same_sequence = q_seq_idx[q_idx] == kv_seq_idx[kv_idx]
             return torch.where(
                 is_same_sequence,
-                orig_mod_func(score, b, h, q_nested, kv_nested),  # type: ignore[call-arg]
+                orig_mod_func(score, b_nested, h, q_nested, kv_nested),  # type: ignore[call-arg]
                 # don't allow inter-sequence attention
                 float("-inf"),
             )
@@ -983,11 +984,12 @@ def _nested_mod_func_adapter(
     else:
 
         def nt_mask_mod(b, h, q_idx, kv_idx):
+            b_nested = q_seq_idx[q_idx]
             q_nested = q_idx - q_offsets[q_seq_idx[q_idx]]
             kv_nested = kv_idx - kv_offsets[kv_seq_idx[kv_idx]]
             # don't allow inter-sequence attention
             is_same_sequence = q_seq_idx[q_idx] == kv_seq_idx[kv_idx]
-            return orig_mod_func(b, h, q_nested, kv_nested) & is_same_sequence  # type: ignore[call-arg]
+            return orig_mod_func(b_nested, h, q_nested, kv_nested) & is_same_sequence  # type: ignore[call-arg]
 
         return nt_mask_mod
 
@@ -1083,6 +1085,8 @@ def _apply_kernel_options(
     kernel_options.setdefault("PRESCALE_QK", False)
     kernel_options.setdefault("ROWS_GUARANTEED_SAFE", False)
     kernel_options.setdefault("BLOCKS_ARE_CONTIGUOUS", False)
+    # This forces all biases grad scatters to be done in the DQ iteration loop of the backwards
+    kernel_options.setdefault("WRITE_DQ", True)
 
     # If forward kernel needs to return logsumexp is decided by this rule internally.
     assert "OUTPUT_LOGSUMEXP" not in kernel_options

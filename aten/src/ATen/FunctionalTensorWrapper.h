@@ -105,10 +105,6 @@ struct TORCH_API FunctionalTensorWrapper : public c10::TensorImpl {
     return is_symbolic_;
   }
 
-  // Runs the forward_fn of every ViewMeta collected in the current instance
-  // to some other base.
-  Tensor apply_view_metas(const Tensor& base);
-
   // Retrieves the ViewMeta sequence of this tensor.
   const std::vector<std::shared_ptr<functionalization::ViewMeta>>& view_metas() const;
 

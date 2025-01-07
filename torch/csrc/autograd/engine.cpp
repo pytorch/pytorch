@@ -262,7 +262,6 @@ auto ReadyQueue::pop() -> NodeTask {
   // Lock mutex for accesses to heap_
   std::unique_lock<std::mutex> lock(mutex_);
   not_empty_.wait(lock, [this] { return !heap_.empty(); });
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
   auto task = std::move(const_cast<NodeTask&>(heap_.top()));
   heap_.pop();
   return task;
@@ -735,14 +734,14 @@ void GraphTask::exec_post_processing() {
       // the stashed streams should be enough. If leaf_stream.device_index()
       // happens to be for a new device, operator* on the std::nullopt should
       // throw an error.
-      const auto caller_current_stream =
-          // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
-          *caller_current_streams_[leaf_stream.device_index()];
+      const auto& caller_current_stream =
+          caller_current_streams_[leaf_stream.device_index()];
 
-      if (caller_current_stream != leaf_stream) {
+      if (caller_current_stream.has_value() &&
+          caller_current_stream != leaf_stream) {
         auto event = c10::Event{leaf_stream.device_type()};
         event.record(leaf_stream);
-        caller_current_stream.wait(event);
+        caller_current_stream->wait(event);
       }
     }
 
@@ -873,8 +872,9 @@ template <typename T>
 const InputMetadata& get_input_metadata(const T& thing);
 
 template <>
-const InputMetadata& get_input_metadata<c10::optional<InputMetadata>>(
-    const c10::optional<InputMetadata>& thing) {
+const InputMetadata& get_input_metadata<std::optional<InputMetadata>>(
+    const std::optional<InputMetadata>& thing) {
+  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
   return thing.value();
 }
 
@@ -888,8 +888,8 @@ template <typename T>
 bool has_input_metadata(const T& thing);
 
 template <>
-bool has_input_metadata<c10::optional<InputMetadata>>(
-    const c10::optional<InputMetadata>& thing) {
+bool has_input_metadata<std::optional<InputMetadata>>(
+    const std::optional<InputMetadata>& thing) {
   return thing.has_value();
 }
 
@@ -992,7 +992,7 @@ void validate_outputs(
 }
 
 void validate_outputs(
-    const std::vector<c10::optional<InputMetadata>>& input_metadata,
+    const std::vector<std::optional<InputMetadata>>& input_metadata,
     variable_list& grads,
     const std::function<std::string(const std::string&)>& format_error) {
   return validate_outputs_impl(input_metadata, grads, format_error);
@@ -1321,6 +1321,7 @@ auto Engine::execute(
     TORCH_CHECK(
         !AnomalyMode::is_enabled(),
         "compiled_autograd does not support AnomalyMode")
+    GraphTaskGuard guard(graph_task);
     return (*compiled_autograd)(
         graph_root, *graph_task, accumulate_grad, outputs);
   }

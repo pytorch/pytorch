@@ -2,35 +2,7 @@
 # mypy: allow-untyped-defs
 import warnings
 
-import triton
-import triton.language as tl
-
-
-# In the latest triton, math functions were shuffled around into different modules:
-# https://github.com/openai/triton/pull/3172
-try:
-    from triton.language.extra import libdevice
-
-    libdevice = tl.extra.libdevice  # noqa: F811
-    math = tl.math
-except ImportError:
-    if hasattr(tl.extra, "cuda") and hasattr(tl.extra.cuda, "libdevice"):
-        libdevice = tl.extra.cuda.libdevice
-        math = tl.math
-    elif hasattr(tl.extra, "intel") and hasattr(tl.extra.intel, "libdevice"):
-        libdevice = tl.extra.intel.libdevice
-        math = tl.math
-    else:
-        libdevice = tl.math
-        math = tl
-
-
-try:
-    from triton.language.standard import _log2
-except ImportError:
-
-    def _log2(x):
-        raise NotImplementedError
+from .triton_compat import _log2, libdevice, math, tl, triton  # noqa: F401
 
 
 def set_driver_to_cpu():
@@ -212,7 +184,7 @@ def device_assert_then(cond, msg, r):
 
 @triton.jit
 def randint64(seed, offset, low, high):
-    r0, r1, r2, r3 = tl.randint4x(seed, offset)
+    r0, r1, _r2, _r3 = tl.randint4x(seed, offset)
     r0 = r0.to(tl.uint64)
     r1 = r1.to(tl.uint64)
     result = r0 | (r1 << 32)

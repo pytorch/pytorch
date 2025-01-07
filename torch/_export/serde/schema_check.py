@@ -5,7 +5,7 @@ import inspect
 import re
 import typing
 from enum import IntEnum
-from typing import Annotated, Any, Dict, ForwardRef, List, Optional, Tuple, Union
+from typing import Annotated, Any, Dict, ForwardRef, List, Optional, Union
 
 from torch._export.serde import schema
 from torch._export.serde.union import _Union
@@ -30,8 +30,8 @@ def _staged_schema():
     thrift_enum_defs: List[str] = []
     thrift_type_defs: Dict[str, str] = {}
 
-    def _handle_aggregate(ty) -> Tuple[Dict[str, Any], Dict[str, Any], Dict[str, Any]]:
-        def dump_type(t, level: int) -> Tuple[str, str, str]:
+    def _handle_aggregate(ty) -> tuple[Dict[str, Any], Dict[str, Any], Dict[str, Any]]:
+        def dump_type(t, level: int) -> tuple[str, str, str]:
             CPP_TYPE_MAP = {
                 str: "std::string",
                 int: "int64_t",
@@ -80,15 +80,6 @@ def _staged_schema():
                         "map<",
                         ">",
                     )
-                elif o == tuple:
-                    if typing.get_args(t) == ():
-                        return "Tuple[()]", "std::tuple<>", "bool"
-                    yaml_head, cpp_head, thrift_head, thrift_tail = (
-                        "Tuple",
-                        "std::tuple",
-                        "bool",
-                        "",
-                    )
                 elif o == Union:
                     assert level == 0, "Optional is only supported at the top level."
                     args = typing.get_args(t)
@@ -111,8 +102,6 @@ def _staged_schema():
                     (f"{cpp_head}<{', '.join(cpp_arg_types)}>"),
                     f"{thrift_head}{', '.join(thrift_arg_types)}{thrift_tail}",
                 )
-            elif t == ():
-                return "()", "", ""
             else:
                 raise AssertionError(f"Type {t} is not supported in export schema.")
 
@@ -136,7 +125,7 @@ def _staged_schema():
                     f"Default value {v} is not supported yet in export schema."
                 )
 
-        def dump_field(f) -> Tuple[Dict[str, Any], str, Optional[str], str, int]:
+        def dump_field(f) -> tuple[Dict[str, Any], str, Optional[str], str, int]:
             t, cpp_type, thrift_type = dump_type(f.type, 0)
             ret = {"type": t}
             cpp_default: Optional[str] = None
@@ -561,9 +550,11 @@ def update_schema():
         assert match is not None
         checksum_head = match.group(1)
 
-        thrift_content = importlib.resources.read_text(__package__, "schema.thrift")
+        thrift_content = importlib.resources.read_text(
+            __package__, "export_schema.thrift"
+        )
         match = re.search("checksum<<([A-Fa-f0-9]{64})>>", thrift_content)
-        _check(match is not None, "checksum not found in schema.thrift")
+        _check(match is not None, "checksum not found in export_schema.thrift")
         assert match is not None
         thrift_checksum_head = match.group(1)
         thrift_content = thrift_content.splitlines()
@@ -584,7 +575,7 @@ def update_schema():
     src, cpp_header, thrift_schema = _staged_schema()
     additions, subtractions = _diff_schema(dst, src)
     yaml_path = __package__.replace(".", "/") + "/schema.yaml"
-    thrift_schema_path = __package__.replace(".", "/") + "/schema.thrift"
+    thrift_schema_path = __package__.replace(".", "/") + "/export_schema.thrift"
     torch_prefix = "torch/"
     assert yaml_path.startswith(torch_prefix)  # sanity check
     assert thrift_schema_path.startswith(torch_prefix)  # sanity check
@@ -618,7 +609,7 @@ def check(commit: _Commit, force_unsafe: bool = False):
             kind = commit.result[k]["kind"]
             fields = v["fields"]
             for f, d in fields.items():
-                if "default" not in d and kind == "struct":
+                if kind == "struct" and "default" not in d:
                     reason += (
                         f"Field {k}.{f} is added to schema.py without a default value as an incomparible change "
                         + "which requires major version bump.\n"
