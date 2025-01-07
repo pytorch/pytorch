@@ -1,6 +1,3 @@
-#ifndef TORCH_CSRC_INDUCTOR_CPP_WRAPPER_DEVICE_INTERNAL_CPU
-#define TORCH_CSRC_INDUCTOR_CPP_WRAPPER_DEVICE_INTERNAL_CPU
+#pragma once
 
 #include <torch/csrc/inductor/aoti_torch/generated/c_shim_cpu.h>
-
-#endif // TORCH_CSRC_INDUCTOR_CPP_WRAPPER_DEVICE_INTERNAL_CPU
