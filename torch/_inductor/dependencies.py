@@ -5,18 +5,7 @@ import itertools
 import logging
 import re
 import typing
-from typing import (
-    Any,
-    Callable,
-    Dict,
-    List,
-    Optional,
-    Sequence,
-    Set,
-    Tuple,
-    TypeVar,
-    Union,
-)
+from typing import Any, Callable, Dict, List, Optional, Sequence, TypeVar, Union
 from unittest.mock import patch
 
 import sympy
@@ -76,8 +65,8 @@ class Dep(abc.ABC):
 class MemoryDep(Dep):
     name: str
     index: sympy.Expr
-    var_names: Tuple[sympy.Symbol, ...]
-    size: Tuple[sympy.Expr, ...]
+    var_names: tuple[sympy.Symbol, ...]
+    size: tuple[sympy.Expr, ...]
     mode: Optional[str] = None
 
     def __repr__(self) -> str:
@@ -123,8 +112,8 @@ class MemoryDep(Dep):
         # https://gist.github.com/shunting314/511a7e1ec88aa2e1a8ec85d8445ab129
         # We don't reorder the loop for these cases for now, but in theory
         # we could improve the algorithm to detect the correct loop orders.
-        if len(set(self_strides)) != len(self_strides) or len(
-            set(other_strides)
+        if len(OrderedSet(self_strides)) != len(self_strides) or len(
+            OrderedSet(other_strides)
         ) != len(other_strides):
             log.debug(
                 "unable to decide loop order. self_dep=%s v.s. other_dep=%s, self_strides=%s v.s. other_strides=%s",
@@ -138,13 +127,13 @@ class MemoryDep(Dep):
         # May hanppen if self and other are as follows
         # MemoryDep('addmm_6', 393216*d0 + 768*d1 + d2, {d0: 16, d1: 512, d2: 768}, None)
         # MemoryDep('addmm_6', 98304*d0 + d1 + 768*d2, {d0: 64, d1: 768, d2: 128}, None)
-        if set(self_strides) != set(other_strides):
+        if OrderedSet(self_strides) != OrderedSet(other_strides):
             return None
 
         stride_to_index = {s: i for i, s in enumerate(self_strides)}
         order = [stride_to_index[s] for s in other_strides]
 
-        assert set(order) == set(range(0, self.num_vars))
+        assert OrderedSet(order) == OrderedSet(range(0, self.num_vars))
         return order
 
     def get_offset(self):
@@ -186,7 +175,7 @@ class MemoryDep(Dep):
         new_reordered_sizes = stride_reorder(sizes)
         new_reordered_var_names = stride_reorder(var_names)
 
-        new_simplified_sizes, reindex, prune = V.graph.sizevars._simplify_loops(
+        new_simplified_sizes, reindex, _prune = V.graph.sizevars._simplify_loops(
             new_reordered_var_names,
             new_reordered_sizes,
             index_prevent_reordering(
@@ -376,8 +365,8 @@ class WeakDep(Dep):
 @dataclasses.dataclass(frozen=True)
 class IndexExprDep:
     index: sympy.Expr  # type: ignore[assignment]
-    var_names: Tuple[sympy.Symbol, ...]
-    size: Tuple[sympy.Expr, ...]
+    var_names: tuple[sympy.Symbol, ...]
+    size: tuple[sympy.Expr, ...]
 
 
 @dataclasses.dataclass
@@ -397,10 +386,10 @@ class ReadWrites:
             self.var_ranges,
         )
 
-    def with_read(self, dep: Union[Dep, Set[Dep]]) -> "ReadWrites":
-        assert isinstance(dep, (WeakDep, StarDep, set))
-        if not isinstance(dep, set):
-            dep = {dep}
+    def with_read(self, dep: Union[Dep, OrderedSet[Dep]]) -> "ReadWrites":
+        assert isinstance(dep, (WeakDep, StarDep, OrderedSet))
+        if not isinstance(dep, OrderedSet):
+            dep = OrderedSet([dep])
         return ReadWrites(
             OrderedSet.union(self.reads, dep),
             self.writes,
@@ -475,13 +464,13 @@ class _RecordLoadStoreInner(V.MockHandler):  # type: ignore[name-defined]
     @classmethod
     def _normalize(
         cls, index: sympy.Expr, var_ranges: VarRanges
-    ) -> Tuple[sympy.Expr, Tuple[sympy.Symbol, ...], Tuple[sympy.Expr, ...]]:
+    ) -> tuple[sympy.Expr, tuple[sympy.Symbol, ...], tuple[sympy.Expr, ...]]:
         # Try to further simplify the indexes even if simplify_loops didn't
         # convert it to the simplest form because of the interference from
         # different indexing formulas.
         index_vars = [*var_ranges.keys()]
         sizes = tuple(var_ranges.values())  # type: ignore[assignment]
-        new_sizes, reindex, prune = V.graph.sizevars._simplify_loops(
+        new_sizes, reindex, _prune = V.graph.sizevars._simplify_loops(
             index_vars,
             sizes,
             index_prevent_reordering([index], index_vars, sizes),
@@ -500,7 +489,7 @@ class _RecordLoadStoreInner(V.MockHandler):  # type: ignore[name-defined]
 
     def canonicalize(
         self, index: sympy.Expr
-    ) -> Tuple[sympy.Expr, Tuple[sympy.Symbol, ...], Tuple[sympy.Expr, ...]]:
+    ) -> tuple[sympy.Expr, tuple[sympy.Symbol, ...], tuple[sympy.Expr, ...]]:
         if not self._should_normalize:
             sizes = [V.graph.sizevars.simplify(x) for x in self._var_ranges.values()]
             var_names = [k for k, v in zip(self._var_ranges.keys(), sizes) if v != 1]
@@ -539,11 +528,11 @@ class _RecordLoadStoreInner(V.MockHandler):  # type: ignore[name-defined]
     def bucketize(
         self,
         values: T,
-        boundaries: Tuple[str, sympy.Expr, sympy.Expr, sympy.Expr],
+        boundaries: tuple[str, sympy.Expr, sympy.Expr, sympy.Expr],
         boundary_indices: T,
         indexing_dtype: torch.dtype,
         right: bool,
-        sorter: Optional[Tuple[str, sympy.Expr]] = None,
+        sorter: Optional[tuple[str, sympy.Expr]] = None,
         sorter_indices: Optional[T] = None,
     ) -> None:
         """Records the names of the buffers that bucketize will read from."""
@@ -561,7 +550,7 @@ class RecordLoadStore(V.KernelFormatterHandler):  # type: ignore[name-defined]
 
 
 # TODO: check call sites
-def var_builder(prefix: str) -> Tuple[VarRanges, Callable[[sympy.Expr], sympy.Symbol]]:
+def var_builder(prefix: str) -> tuple[VarRanges, Callable[[sympy.Expr], sympy.Symbol]]:
     cnt = itertools.count()
     var_ranges: VarRanges = {}
 
@@ -664,7 +653,7 @@ def extract_loop_body_with_args(fn, args, var_ranges, normalize=False):
 
 def extract_input_node_reduction_ranges(
     input_node: "torch._inductor.ir.IRNode",
-) -> Tuple[Optional[List[sympy.Expr]], Optional[List[sympy.Expr]]]:
+) -> tuple[Optional[List[sympy.Expr]], Optional[List[sympy.Expr]]]:
     """
     Returns the size and reduction size of all inputs, if the sizes and reduction_sizes (if exist) are all the same.
     It's possible that a node has multiple inputs, some are Reduction nodes and others are Pointwise nodes.
@@ -769,8 +758,8 @@ class FreeUnbackedSymbolsOpsHandler:
         dtype: torch.dtype,
         src_dtype: torch.dtype,
         reduction_type: ReductionType,
-        value: Union[None, Tuple[None, ...]],
-    ) -> Union[None, Tuple[None, ...]]:
+        value: Union[None, tuple[None, ...]],
+    ) -> Union[None, tuple[None, ...]]:
         num_values = reduction_num_outputs(reduction_type)
         return (None,) * num_values if num_values > 1 else None
 

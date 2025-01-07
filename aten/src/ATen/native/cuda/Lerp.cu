@@ -9,6 +9,10 @@
 namespace at::native {
 namespace {
 
+void lerp_scalar_kernel(
+    at::TensorIteratorBase& iter,
+    const c10::Scalar& weight);
+
 constexpr char lerp_tensor_name[] = "lerp_tensor";
 void lerp_tensor_kernel(at::TensorIteratorBase& iter) {
   auto dtype = iter.common_dtype();
@@ -24,15 +28,27 @@ void lerp_tensor_kernel(at::TensorIteratorBase& iter) {
       }
   ); // lerp_tensor_string
   AT_DISPATCH_COMPLEX_TYPES_AND(kComplexHalf, dtype, "lerp_cuda", [&] {
-        jitted_gpu_kernel<
-          /*name=*/ lerp_tensor_name,
-          /*return_dtype=*/ scalar_t,
-          /*common_dtype=*/ scalar_t,
-          /*arity=*/ 3>(iter, lerp_tensor_string);
-      });
+      if (iter.is_cpu_scalar(3)) {
+        auto weight_val = iter.scalar_value<scalar_t>(3);
+        iter.remove_operand(3);
+        return lerp_scalar_kernel(iter, weight_val);
+      }
+
+      jitted_gpu_kernel<
+        /*name=*/ lerp_tensor_name,
+        /*return_dtype=*/ scalar_t,
+        /*common_dtype=*/ scalar_t,
+        /*arity=*/ 3>(iter, lerp_tensor_string);
+    });
 #else
   AT_DISPATCH_COMPLEX_TYPES_AND(kComplexHalf, dtype, "lerp_cuda", [&] {
       using opmath_t = at::opmath_type<scalar_t>;
+      if (iter.is_cpu_scalar(3)) {
+        auto weight_val = iter.scalar_value<scalar_t>(3);
+        iter.remove_operand(3);
+        return lerp_scalar_kernel(iter, weight_val);
+      }
+
       at::native::gpu_kernel(
         iter,
         [] GPU_LAMBDA(
@@ -51,14 +67,20 @@ void lerp_tensor_kernel(at::TensorIteratorBase& iter) {
       at::ScalarType::Half, at::ScalarType::BFloat16,
       dtype, "lerp_cuda",
       [&] {
+        if (iter.is_cpu_scalar(3)) {
+          auto weight_val = iter.scalar_value<scalar_t>(3);
+          iter.remove_operand(3);
+          return lerp_scalar_kernel(iter, weight_val);
+        }
+
         at::native::gpu_kernel(
-            iter,
-            [] GPU_LAMBDA(
-                scalar_t self_val,
-                scalar_t end_val,
-                scalar_t weight_val) -> scalar_t {
-              return lerp(self_val, end_val, weight_val);
-            });
+          iter,
+          [] GPU_LAMBDA(
+              scalar_t self_val,
+              scalar_t end_val,
+              scalar_t weight_val) -> scalar_t {
+            return lerp(self_val, end_val, weight_val);
+          });
       });
   }
 }

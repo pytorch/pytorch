@@ -3,15 +3,17 @@
 
 from dataclasses import dataclass, field
 from enum import IntEnum
-from typing import Annotated, Dict, List, Optional, Tuple
+from typing import Annotated, Dict, List, Optional
 
 from torch._export.serde.union import _Union
 
 # NOTE: Please update this value if any modifications are made to the schema
-SCHEMA_VERSION = (8, 1)
+SCHEMA_VERSION = (8, 3)
 TREESPEC_VERSION = 1
 
 
+# NOTE: If you updated the schema, please run `scripts/export/update_schema.py`
+# to update the auto generated files.
 class ScalarType(IntEnum):
     UNKNOWN = 0
     BYTE = 1
@@ -28,6 +30,8 @@ class ScalarType(IntEnum):
     BOOL = 12
     BFLOAT16 = 13
     UINT16 = 28
+    FLOAT8E4M3FN = 29
+    FLOAT8E5M2 = 30
 
 
 class Layout(IntEnum):
@@ -58,8 +62,8 @@ class Device:
 @dataclass(repr=False)
 class SymExprHint(_Union):
     as_int: Annotated[int, 10]
-    as_float: Annotated[float, 20]
-    as_bool: Annotated[bool, 30]
+    as_bool: Annotated[bool, 20]
+    as_float: Annotated[float, 30]
 
 
 # This is for storing the symbolic expressions behind symints/symfloats/symbools
@@ -76,6 +80,11 @@ class SymExpr:
 class SymInt(_Union):
     as_expr: Annotated[SymExpr, 10]
     as_int: Annotated[int, 20]
+
+@dataclass(repr=False)
+class SymFloat(_Union):
+    as_expr: Annotated[SymExpr, 10]
+    as_float: Annotated[float, 20]
 
 
 @dataclass(repr=False)
@@ -106,6 +115,16 @@ class SymIntArgument(_Union):
     as_name: Annotated[str, 10]
     as_int: Annotated[int, 20]
 
+# In most cases we will use the "as_name" field to store arguments which are
+# SymFloats.
+# The "as_float" field is used in the case where we have a list containing a mix
+# of SymFloat and float (ex. [1.0, s0, ...]). We will serialize this type of list to
+# be List[SymFloatArgument] and map the SymFloats to the "as_name" field, and ints
+# to the "as_float" field.
+@dataclass(repr=False)
+class SymFloatArgument(_Union):
+    as_name: Annotated[str, 10]
+    as_float: Annotated[float, 20]
 
 # In most cases we will use the "as_name" field to store arguments which are
 # SymBools.
@@ -136,7 +155,7 @@ class TokenArgument:
 @dataclass(repr=False)
 class OptionalTensorArgument(_Union):
     as_tensor: Annotated[TensorArgument, 20]
-    as_none: Annotated[Tuple[()], 10]
+    as_none: Annotated[bool, 10]
 
 
 @dataclass
@@ -154,7 +173,7 @@ class CustomObjArgument:
 # This is actually a union type
 @dataclass(repr=False)
 class Argument(_Union):
-    as_none: Annotated[Tuple[()], 10]
+    as_none: Annotated[bool, 10]
     as_tensor: Annotated[TensorArgument, 20]
     as_tensors: Annotated[List[TensorArgument], 30]
     as_int: Annotated[int, 50]
@@ -177,7 +196,8 @@ class Argument(_Union):
     as_optional_tensors: Annotated[List[OptionalTensorArgument], 190]
     as_custom_obj: Annotated[CustomObjArgument, 210]
     as_operator: Annotated[str, 220]
-
+    as_sym_float: Annotated[SymFloatArgument, 230]
+    as_sym_floats: Annotated[List[SymFloatArgument], 240]
 
 @dataclass
 class NamedArgument:
@@ -208,7 +228,7 @@ class Graph:
     # list.
     is_single_tensor_return: Annotated[bool, 70] = False
     custom_obj_values: Annotated[Dict[str, CustomObjArgument], 80] = field(default_factory=dict)
-
+    sym_float_values: Annotated[Dict[str, SymFloat], 90] = field(default_factory=dict)
 
 @dataclass
 class UserInputSpec:
@@ -218,7 +238,7 @@ class UserInputSpec:
 
 @dataclass(repr=False)
 class ConstantValue(_Union):
-    as_none: Annotated[Tuple[()], 10]
+    as_none: Annotated[bool, 10]
     as_int: Annotated[int, 20]
     as_float: Annotated[float, 30]
     as_string: Annotated[str, 40]
