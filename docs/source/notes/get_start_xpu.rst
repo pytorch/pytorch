@@ -11,20 +11,20 @@ Hardware Prerequisite
    * - Supported OS
      - Validated Hardware
    * - Linux
-     - Intel® Data Center GPU Max Series/ Intel® Client GPUs
+     - Intel® Client GPUs / Intel® Data Center GPU Max Series
    * - Windows
      - Intel® Client GPUs
    * - WSL2 (experimental feature)
      - Intel® Client GPUs
 
-Intel GPUs support (Prototype) is ready in PyTorch* 2.6 for Intel® Data Center GPU Max Series and Intel® Client GPUs on both Linux and Windows, which brings Intel GPUs and the SYCL* software stack into the official PyTorch stack with consistent user experience to embrace more AI application scenarios.
+Intel GPUs support (Prototype) is ready in PyTorch* 2.6 for Intel® Client GPUs and Intel® Data Center GPU Max Series on both Linux and Windows, which brings Intel GPUs and the SYCL* software stack into the official PyTorch stack with consistent user experience to embrace more AI application scenarios.
 
 Software Prerequisite
 ---------------------
 
-Visit `PyTorch Installation Prerequisites for Intel GPUs <https://www.intel.com/content/www/us/en/developer/articles/tool/pytorch-prerequisites-for-intel-gpu/2-6.html#driver-installation>`_ for Driver Installation.
+Visit `Intel GPUs Driver Installation <https://www.intel.com/content/www/us/en/developer/articles/tool/pytorch-prerequisites-for-intel-gpu/2-6.html#driver-installation>`_.
 
-Installation from binaries only need Intel GPU Drivers, while building from source requires Intel GPU Drivers and Intel® Deep Learning Essentials.
+Installation from binaries only need Intel GPU Drivers, while building from source requires Intel GPU Drivers and Intel® Deep Learning Essentials. Please refer to  `PyTorch Installation Prerequisites for Intel GPUs <https://www.intel.com/content/www/us/en/developer/articles/tool/pytorch-prerequisites-for-intel-gpu/2-6.html>`_.
 
 
 Installation
@@ -33,7 +33,7 @@ Installation
 Binaries
 ^^^^^^^^
 
-Now we have Intel GPU Driver installed. Use the following commands to install ``pytorch``, ``torchvision``, ``torchaudio`` on Linux.
+Now we have `Intel GPU Driver <https://www.intel.com/content/www/us/en/developer/articles/tool/pytorch-prerequisites-for-intel-gpu/2-6.html#driver-installation>`_ installed. Use the following commands to install ``pytorch``, ``torchvision``, ``torchaudio`` on Linux.
 
 For release wheels
 
@@ -52,7 +52,7 @@ For nightly wheels
 From Source
 ^^^^^^^^^^^
 
-Now we have Intel GPU Driver and Intel® Deep Learning Essentials installed. Follow guides to build ``pytorch``, ``torchvision``, ``torchaudio`` from source.
+Now we have `Intel GPU Driver and Intel® Deep Learning Essentials <https://www.intel.com/content/www/us/en/developer/articles/tool/pytorch-prerequisites-for-intel-gpu/2-6.html>`_ installed. Follow guides to build ``pytorch``, ``torchvision``, ``torchaudio`` from source.
 
 Build from source for ``torch`` refer to `PyTorch Installation Build from source <https://github.com/pytorch/pytorch?tab=readme-ov-file#from-source>`_.
 
