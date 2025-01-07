@@ -1135,7 +1135,9 @@ class DynamoTritonHOPifier(TritonHOPifier):
 
     def maybe_unpack_heuristic_result(self, result: Any) -> Any:
         if not result.is_python_constant():
-            self.raise_unsupported("Values in triton configs must be constant values.")
+            self.raise_unsupported(
+                "Values returned from @triton.heuristic wrappers must be constant values."
+            )
 
         return result.guard_as_python_constant()
 
