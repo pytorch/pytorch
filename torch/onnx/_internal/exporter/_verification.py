@@ -12,7 +12,7 @@ import math
 from typing import Any, TYPE_CHECKING
 
 import torch
-from torch.utils.pytree import tree_leaves
+from torch.utils import pytree
 
 
 if TYPE_CHECKING:
@@ -79,7 +79,7 @@ def verify_onnx_program(
     if kwargs is None:
         kwargs = {}
     torch_module = exported_program.module()
-    torch_outputs = tree_leaves(torch_module(*args, **kwargs))
+    torch_outputs = pytree.tree_iter(torch_module(*args, **kwargs))
     onnx_outputs = onnx_program(*args, **kwargs)
     results = []
     for torch_output, onnx_output, output_val in zip(
