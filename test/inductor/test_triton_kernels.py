@@ -3888,7 +3888,7 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
                 ],
                 key=["N"],
             )
-            # torch.randin(...)[0] will produce a non-constant value
+            # torch.randint(...)[0] will produce a non-constant value
             @triton.heuristics({"EVEN_N": lambda nargs: torch.randint(1, (1, 1))[0]})
             @triton.jit
             def heuristics_kernel(
