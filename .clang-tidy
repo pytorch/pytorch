@@ -13,6 +13,10 @@ bugprone-*,
 -bugprone-reserved-identifier,
 -bugprone-swapped-arguments,
 -bugprone-unchecked-optional-access,
+clang-analyzer-core.*,
+clang-analyzer-cplusplus.*,
+clang-analyzer-nullability.*,
+clang-analyzer-deadcode.*,
 clang-diagnostic-missing-prototypes,
 cppcoreguidelines-*,
 -cppcoreguidelines-avoid-do-while,
@@ -29,7 +33,6 @@ cppcoreguidelines-*,
 -cppcoreguidelines-pro-type-static-cast-downcast,
 -cppcoreguidelines-pro-type-union-access,
 -cppcoreguidelines-pro-type-vararg,
--cppcoreguidelines-special-member-functions,
 -cppcoreguidelines-non-private-member-variables-in-classes,
 -facebook-hte-RelativeInclude,
 hicpp-exception-baseclass,
@@ -56,13 +59,16 @@ readability-container-size-empty,
 readability-delete-null-pointer,
 readability-duplicate-include
 readability-misplaced-array-index,
-readability-redundant-function-ptr-dereference,
-readability-redundant-smartptr-get,
+readability-redundant*
 readability-simplify-subscript-expr,
 readability-string-compare,
+-readability-redundant-access-specifiers,
+-readability-redundant-control-flow,
 '
 HeaderFilterRegex: '^(aten/|c10/|torch/).*$'
 WarningsAsErrors: '*'
 CheckOptions:
-  misc-header-include-cycle.IgnoredFilesList: 'format.h;ivalue.h;custom_class.h;Dict.h;List.h'
+  cppcoreguidelines-special-member-functions.AllowSoleDefaultDtor: true
+  cppcoreguidelines-special-member-functions.AllowImplicitlyDeletedCopyOrMove: true
+  misc-header-include-cycle.IgnoredFilesList: 'format.h;ivalue.h;custom_class.h;Dict.h;List.h;IListRef.h'
 ...

@@ -454,7 +454,7 @@ def require_backend_is_available(backends):
 def require_world_size(world_size):
     if int(os.environ["WORLD_SIZE"]) < world_size:
         return skip_but_pass_in_sandcastle(
-            "Test requires world size of %d" % world_size
+            f"Test requires world size of {world_size:d}"
         )
     return lambda func: func
 
@@ -587,6 +587,11 @@ class TestDistBackend(MultiProcessTestCase):
     @property
     def init_method(self):
         return f"{FILE_SCHEMA}{self.file_name}"
+
+    @property
+    def destroy_pg_upon_exit(self) -> bool:
+        # Overriding base test class: do not auto destroy PG upon exit.
+        return False
 
     @classmethod
     def _run(cls, rank, test_name, file_name, pipe, **kwargs):
@@ -2437,9 +2442,7 @@ class DistributedTest:
             rank_to_GPU = init_multigpu_helper(dist.get_world_size(), BACKEND)
             device_id = rank_to_GPU[rank][0]
 
-            input_split_sizes = []
-            for src in group:
-                input_split_sizes.append(src + 1)
+            input_split_sizes = [src + 1 for src in group]
             start_len = sum(input_split_sizes[:rank])
             end_len = start_len + input_split_sizes[rank]
             sum_len = sum(input_split_sizes)
@@ -3464,9 +3467,7 @@ class DistributedTest:
             rank_to_GPU = init_multigpu_helper(dist.get_world_size(), BACKEND)
             device_id = rank_to_GPU[rank][0]
 
-            output_split_sizes = []
-            for dst in group:
-                output_split_sizes.append(dst + 1)
+            output_split_sizes = [dst + 1 for dst in group]
             sum_len = sum(output_split_sizes)
             value = 2
 
@@ -4060,7 +4061,7 @@ class DistributedTest:
                     self.assertGreaterAlmostEqual(
                         float(time.time()),
                         float(expected_time[0]),
-                        msg="destination rank: %d, my rank: %d" % (dest, rank)
+                        msg=f"destination rank: {dest:d}, my rank: {rank:d}"
                         + " (if you see this failure, please report in #14554)",
                     )
 
@@ -5180,7 +5181,7 @@ class DistributedTest:
             gradient_as_bucket_view=False,
         ):
             model = Net()
-            device = devices[0] if devices else torch.device("cuda:%d" % rank)
+            device = devices[0] if devices else torch.device(f"cuda:{rank:d}")
             ddp_model = DistributedDataParallel(
                 copy.deepcopy(model).to(device),
                 device_ids=device_ids,
@@ -5686,7 +5687,7 @@ class DistributedTest:
                 )
 
             dist.barrier()
-            map_location = {"cuda:%d" % 0: "cuda:%d" % self.rank}
+            map_location = {"cuda:0": f"cuda:{self.rank:d}"}
             checkpoint = torch.load(chkpt_file, map_location=map_location)
             dummy_post_localSGD_opt.load_state_dict(checkpoint["optimizer_state_dict"])
 
@@ -10132,7 +10133,7 @@ class DistributedTest:
                 )
 
             dist.barrier()
-            map_location = {"cuda:%d" % 0: "cuda:%d" % rank}
+            map_location = {"cuda:0": f"cuda:{rank:d}"}
             with self.assertLogs("torch.distributed") as captured:
                 checkpoint = torch.load(chkpt_file, map_location=map_location)
 

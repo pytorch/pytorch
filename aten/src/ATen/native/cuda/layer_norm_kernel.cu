@@ -519,7 +519,7 @@ __global__ void GammaBetaBackwardSimpleCUDAKernel(
     const T_ACC* rstd,
     T* dg,
     T* db) {
-  const int64_t j = blockIdx.x * blockDim.x + threadIdx.x;
+  const int64_t j = ((int64_t) blockIdx.x) * blockDim.x + threadIdx.x;
   if (j < N) {
     T_ACC sum1 = 0;
     T_ACC sum2 = 0;
@@ -562,7 +562,7 @@ __global__ void GammaBetaBackwardCUDAKernel_32x32(
   T_ACC dg_sum = 0;
   T_ACC db_sum = 0;
 
-  const int64_t j = blockIdx.x * blockDim.x + threadIdx.x;
+  const int64_t j = ((int64_t) blockIdx.x) * blockDim.x + threadIdx.x;
 
   if (j < N) {
     constexpr int unroll_factor = 8;
@@ -659,7 +659,7 @@ __global__ void GammaBetaBackwardCUDAKernel(
   T_ACC* s_dg;
   T_ACC* s_db;
 
-  const int64_t j = blockIdx.x * blockDim.x + threadIdx.x;
+  const int64_t j = ((int64_t) blockIdx.x) * blockDim.x + threadIdx.x;
 
   T_ACC dg_sum = 0;
   T_ACC db_sum = 0;
@@ -840,8 +840,8 @@ void cuLoadWriteStridedInputs(
 {
   int i1 = i1_block+thr_load_row_off;
   if (i1 < i1_end) {
-    T curr_mean = mean[i1];
-    T curr_rstd = rstd[i1];
+    T_ACC curr_mean = mean[i1];
+    T_ACC curr_rstd = rstd[i1];
     for (int k = 0;  k < blockDim.y;  ++k) {
       int i2 = i2_off + k;
       int load_idx = i1*N+i2;

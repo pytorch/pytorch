@@ -2,19 +2,34 @@
 import copy
 import dataclasses
 import dis
+import functools
 import itertools
 import sys
 import types
-from typing import Any, Callable, cast, Dict, Iterator, List, Optional, Tuple, Union
+from typing import (
+    Any,
+    Callable,
+    cast,
+    Dict,
+    Iterator,
+    List,
+    Optional,
+    Sequence,
+    Tuple,
+    Union,
+)
 
+from ..utils._backport_slots import dataclass_slots
 from .bytecode_analysis import (
     get_indexof,
     propagate_line_nums,
     remove_extra_line_nums,
     stacksize_analysis,
 )
+from .utils import is_safe_constant
 
 
+@dataclass_slots
 @dataclasses.dataclass
 class InstructionExnTabEntry:
     start: "Instruction"
@@ -41,6 +56,7 @@ class InstructionExnTabEntry:
         )
 
 
+@dataclass_slots
 @dataclasses.dataclass
 class Instruction:
     """A mutable version of dis.Instruction"""
@@ -56,6 +72,7 @@ class Instruction:
     # extra fields to make modification easier:
     target: Optional["Instruction"] = None
     exn_tab_entry: Optional[InstructionExnTabEntry] = None
+    argrepr: Optional[str] = None
 
     def __hash__(self) -> int:
         return id(self)
@@ -67,21 +84,47 @@ class Instruction:
         return f"Instruction(opname={self.opname}, offset={self.offset})"
 
 
-def convert_instruction(i: dis.Instruction) -> Instruction:
-    if sys.version_info >= (3, 13):
-        starts_line = i.line_number
-    else:
-        starts_line = i.starts_line
-    return Instruction(
-        i.opcode,
-        i.opname,
-        i.arg,
-        i.argval,
-        i.offset,
-        starts_line,
-        i.is_jump_target,
-        getattr(i, "positions", None),
-    )
+if sys.version_info >= (3, 13):
+
+    def convert_instruction(i: dis.Instruction) -> Instruction:
+        return Instruction(
+            i.opcode,
+            i.opname,
+            i.arg,
+            i.argval,
+            i.offset,
+            i.line_number,
+            i.is_jump_target,
+            i.positions,
+        )
+
+elif sys.version_info >= (3, 11):
+
+    def convert_instruction(i: dis.Instruction) -> Instruction:
+        return Instruction(
+            i.opcode,
+            i.opname,
+            i.arg,
+            i.argval,
+            i.offset,
+            i.starts_line,
+            i.is_jump_target,
+            i.positions,
+        )
+
+else:
+
+    def convert_instruction(i: dis.Instruction) -> Instruction:
+        return Instruction(
+            i.opcode,
+            i.opname,
+            i.arg,
+            i.argval,
+            i.offset,
+            i.starts_line,
+            i.is_jump_target,
+            None,
+        )
 
 
 class _NotProvided:
@@ -89,10 +132,20 @@ class _NotProvided:
         return "_NotProvided"
 
 
-def inst_has_op_bits(name):
-    return (sys.version_info >= (3, 11) and name == "LOAD_GLOBAL") or (
-        sys.version_info >= (3, 12) and name in ("LOAD_ATTR", "LOAD_SUPER_ATTR")
-    )
+if sys.version_info >= (3, 12):
+
+    def inst_has_op_bits(name):
+        return name in ("LOAD_ATTR", "LOAD_GLOBAL", "LOAD_SUPER_ATTR")
+
+elif sys.version_info >= (3, 11):
+
+    def inst_has_op_bits(name):
+        return name == "LOAD_GLOBAL"
+
+else:
+
+    def inst_has_op_bits(name):
+        return False
 
 
 def create_instruction(
@@ -137,6 +190,17 @@ def create_instruction(
 def create_jump_absolute(target) -> Instruction:
     inst = "JUMP_FORWARD" if sys.version_info >= (3, 11) else "JUMP_ABSOLUTE"
     return create_instruction(inst, target=target)
+
+
+def create_load_const(val, checked=True) -> Instruction:
+    """
+    In general we should only create `LOAD_CONST` for immutable objects, but
+    sometimes it's convenient _and safe_ for Dynamo create `LOAD_CONST` for
+    mutable objects. In such cases, use `checked=False`.
+    """
+    if checked:
+        assert is_safe_constant(val), f"unsafe constant {val}"
+    return create_instruction("LOAD_CONST", argval=val)
 
 
 def create_dup_top() -> Instruction:
@@ -514,6 +578,7 @@ def linetable_311_writer(first_lineno: int):
     return linetable, update
 
 
+@dataclass_slots
 @dataclasses.dataclass
 class ExceptionTableEntry:
     start: int
@@ -1140,11 +1205,12 @@ def update_offsets(instructions) -> None:
 
 def debug_bytes(*args) -> str:
     index = range(max(map(len, args)))
-    result = []
-    for arg in (
-        [index] + list(args) + [[int(a != b) for a, b in zip(args[-1], args[-2])]]
-    ):
-        result.append(" ".join(f"{x:03}" for x in arg))
+    result = [
+        " ".join(f"{x:03}" for x in arg)
+        for arg in [index]
+        + list(args)
+        + [[int(a != b) for a, b in zip(args[-1], args[-2])]]
+    ]
 
     return "bytes mismatch\n" + "\n".join(result)
 
@@ -1399,6 +1465,52 @@ def populate_kw_names_argval(instructions, consts):
 # If safe=True, we do not make any bytecode modifications.
 # Mainly used for debugging bytecode_transformation (see debug_checks)
 def cleaned_instructions(code, safe=False) -> List[Instruction]:
+    instructions = _cached_cleaned_instructions(code, safe)
+    # We have a lot of code that implicitly mutates the instruction array. We
+    # could do better here by making the copies explicit when necessary.
+    return _clone_instructions(instructions)
+
+
+# Copy an instructions array, making sure to remap the individual instruction targets.
+def _clone_instructions(instructions):
+    # This is super hot and this is the fastest way to do this (tried copy.copy
+    # and dataclasses.replace).
+    copied = [
+        Instruction(
+            i.opcode,
+            i.opname,
+            i.arg,
+            i.argval,
+            i.offset,
+            i.starts_line,
+            i.is_jump_target,
+            i.positions,
+            i.target,
+            i.exn_tab_entry,
+            i.argrepr,
+        )
+        for i in instructions
+    ]
+
+    remap = dict(zip(instructions, copied))
+    # Handle `None` in the remapper so we don't need an extra `if`.
+    remap[None] = None
+
+    for i in copied:
+        i.target = remap[i.target]
+        if entry := i.exn_tab_entry:
+            i.exn_tab_entry = InstructionExnTabEntry(
+                remap[entry.start],
+                remap[entry.end],
+                remap[entry.target],
+                entry.depth,
+                entry.lasti,
+            )
+    return copied
+
+
+@functools.lru_cache
+def _cached_cleaned_instructions(code, safe=False) -> Sequence[Instruction]:
     instructions = list(map(convert_instruction, dis.get_instructions(code)))
     check_offsets(instructions)
     if sys.version_info >= (3, 11):

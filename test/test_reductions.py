@@ -5,7 +5,7 @@ import torch
 import numpy as np
 
 import math
-from typing import Dict, List, Sequence
+from collections.abc import Sequence
 import random
 from functools import partial
 from itertools import product, combinations, permutations
@@ -61,7 +61,7 @@ def _generate_input(shape, dtype, device, with_extremal):
 # TODO: replace with make_tensor
 def _rand_shape(dim, min_size, max_size):
     shape = []
-    for i in range(dim):
+    for _ in range(dim):
         shape.append(random.randint(min_size, max_size))
     return tuple(shape)
 
@@ -736,7 +736,7 @@ class TestReductions(TestCase):
 
     # TODO: kill this ane replace with common creation ops
     def _make_tensors(self, shape, val_range=(-100, 100), use_floating=True, use_integral=True,
-                      use_complex=False) -> Dict[str, List[torch.Tensor]]:
+                      use_complex=False) -> dict[str, list[torch.Tensor]]:
         float_types = [torch.double,
                        torch.float]
         int_types = [torch.int64,
@@ -778,7 +778,7 @@ class TestReductions(TestCase):
             types += int_types
         if use_complex:
             types += complex_types
-        tensors: Dict[str, List[torch.Tensor]] = {"cont": [], "noncont": [], "slice": []}
+        tensors: dict[str, list[torch.Tensor]] = {"cont": [], "noncont": [], "slice": []}
         for dtype in types:
             tensors["cont"].append(make_contiguous(shape, dtype))
             tensors["noncont"].append(make_non_contiguous(shape, dtype))
@@ -3116,6 +3116,30 @@ class TestReductions(TestCase):
             actual)
         self.assertEqual(actual.dtype, dtype)
 
+    @dtypes(torch.uint8, torch.int8, torch.int, torch.long, torch.float, torch.double)
+    def test_histc_min_max_errors(self, device, dtype):
+        with self.assertRaisesRegex(RuntimeError, "max must be larger than min"):
+            torch.histc(torch.tensor([1., 2., 3.], dtype=dtype, device=device), bins=4, min=5, max=1)
+
+    @dtypes(torch.float, torch.double)
+    def test_histc_min_max_corner_cases(self, device, dtype):
+        actual = torch.histc(
+            torch.tensor([1., 2, 1], dtype=dtype, device=device),
+            bins=4, min=5, max=5)
+        self.assertEqual(
+            torch.tensor([2, 0, 0, 1], dtype=dtype, device=device),
+            actual)
+
+    @onlyCUDA
+    @dtypes(torch.uint8, torch.int8, torch.int, torch.long)
+    def test_histc_min_max_corner_cases_cuda(self, device, dtype):
+        actual = torch.histc(
+            torch.tensor([1., 2, 1], dtype=dtype, device=device),
+            bins=4, min=5, max=5)
+        self.assertEqual(
+            torch.tensor([2, 0, 0, 1], dtype=dtype, device=device),
+            actual)
+
     """
     Runs torch.histogram and numpy.histogram on the specified input parameters
     and asserts that their output is equal.
@@ -3619,7 +3643,7 @@ as the input tensor excluding its innermost dimension'):
                 out_dtype = torch.bool  # output of all/any is bool irrespective of input dtype
 
             xb = x.to(dtype)
-            yb = x.to(dtype)
+
             # any
             self.assertEqual((2, 0), xb.any(2).shape)
             self.assertEqual((2, 0, 1), xb.any(2, keepdim=True).shape)

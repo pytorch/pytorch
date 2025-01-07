@@ -5,7 +5,7 @@ import operator
 import typing
 import warnings
 from contextlib import contextmanager
-from typing import Any, Dict, List, Optional, Sequence, Set, Tuple, Union
+from typing import Any, Dict, List, Optional, Sequence, Set, Union
 
 import torch
 import torch.export._trace
@@ -13,6 +13,7 @@ from torch import _C
 from torch._export.passes.replace_quantized_ops_with_standard_ops_pass import (
     replace_quantized_ops_with_standard_ops,
 )
+from torch.export.dynamic_shapes import _tree_map_with_path, Dim
 from torch.export.exported_program import ExportedProgram
 from torch.export.graph_signature import (
     ConstantArgument,
@@ -51,7 +52,7 @@ def _trace_and_get_graph_from_model(model, args):
     # No perf impact for when there are reused weights since https://github.com/pytorch/pytorch/pull/85665
     prev_autocast_cache_enabled = torch.is_autocast_cache_enabled()
     torch.set_autocast_cache_enabled(False)
-    trace_graph, torch_out, inputs_states = torch.jit._get_trace_graph(
+    trace_graph, torch_out, _inputs_states = torch.jit._get_trace_graph(
         model,
         args,
         strict=False,
@@ -71,7 +72,7 @@ def _trace_and_get_graph_from_model(model, args):
 
 def _create_jit_graph(
     model: Union[torch.nn.Module, torch.jit.ScriptFunction], args: Sequence[Any]
-) -> Tuple[torch.Graph, List["_C.IValue"], Any, Optional[torch.ScriptModule]]:
+) -> tuple[torch.Graph, List["_C.IValue"], Any, Optional[torch.ScriptModule]]:
     if isinstance(model, (torch.jit.ScriptFunction, torch.jit.ScriptModule)):
         flattened_args = tuple(torch.jit._flatten(tuple(args))[0])
         torch_out = None
@@ -161,7 +162,7 @@ def inplace_optimize_sym_size_div(gm: torch.fx.GraphModule):
         sym_size_int = torch.ops.aten.sym_size.int(im, dim)
         return sym_size_int // scale
 
-    replaced_patterns = subgraph_rewriter.replace_pattern(gm, pattern, replacement)
+    subgraph_rewriter.replace_pattern(gm, pattern, replacement)
 
 
 def is_valid_for_codegen(name):
@@ -262,7 +263,7 @@ def construct_fqn(ir, ref_map, name_map):
 
 def get_block_to_lifted_attrs(
     graph: torch._C.Graph,
-) -> Tuple[Dict[torch._C.Block, Set[str]], Dict[str, str]]:
+) -> tuple[Dict[torch._C.Block, Set[str]], Dict[str, str]]:
     """
     Perform two passes to get a mapping of blocks to a set of FQNs of its lifted attributes.
     When a graph has control flow, the graph will be divided into multiple blocks. We want to convert
@@ -833,9 +834,7 @@ class TS2FXGraphConverter:
         self._convert_prim_iterator(node)
 
     def _convert_prim_iterator(self, node: torch._C.Node):
-        output_list = []
-        for inp in node.inputs():
-            output_list.append(self.get_fx_value_by_ir_value(inp))
+        output_list = [self.get_fx_value_by_ir_value(inp) for inp in node.inputs()]
 
         output_name = node.output().debugName()
         self.name_to_node[output_name] = output_list
@@ -967,7 +966,7 @@ class TS2FXGraphConverter:
 
     def convert_aten_to(self, node: torch._C.Node):
         target = get_op_overload(node)
-        args, kwargs = self.get_args_kwargs(node, target._schema)
+        args, _kwargs = self.get_args_kwargs(node, target._schema)
 
         # special handle aten.to.dtype and aten.to.prim_dtype followed by inplace_mutation_op
         # coz aten.to + inplace_mutation_op pattern would trigger
@@ -1017,7 +1016,7 @@ class TS2FXGraphConverter:
         if target == torch.ops.aten.add.t:
             # special handle python list/tuple add: "aten::add.t(t[] a, t[] b) -> t[]" for
             # RuntimeError: aten::add() Expected a value of type 'List[t]' for argument 'a' but instead found type 'immutable_list'.
-            args, kwargs = self.get_args_kwargs(node, target._schema)
+            args, _kwargs = self.get_args_kwargs(node, target._schema)
             output_name = node.output().debugName()
             self.name_to_node[output_name] = self.fx_graph.call_function(list_add, args)
         else:
@@ -1198,7 +1197,7 @@ class TS2FXGraphConverter:
         target = get_op_overload(node)
         schema = target._schema
 
-        args, kwargs = self.get_args_kwargs(node, schema)
+        args, _kwargs = self.get_args_kwargs(node, schema)
 
         output_name = node.output().debugName()
         self.name_to_node[output_name] = args[0]
@@ -1376,7 +1375,7 @@ class ExplainTS2FXGraphConverter(TS2FXGraphConverter):
     def convert_node(self, node):
         try:
             super().convert_node(node)
-        except Exception as e:
+        except Exception:
             self.unsupported_node_list.append(node)
 
 
@@ -1395,7 +1394,7 @@ class TS2EPConverter:
     def __init__(
         self,
         ts_model: Union[torch.jit.ScriptModule, torch.jit.ScriptFunction],
-        sample_args: Tuple[Any, ...],
+        sample_args: tuple[Any, ...],
         sample_kwargs: Optional[Dict[str, Any]] = None,
     ):
         self.ts_model = ts_model
@@ -1512,10 +1511,18 @@ DEBUG: (TORCH_LOGS="+export" <cmd>), additionally
         gm: torch.fx.GraphModule,
         name_to_constant: Dict[str, Any],
     ):
+        dynamic_shapes = _tree_map_with_path(
+            lambda path, x: (
+                [Dim.AUTO] * x.dim() if isinstance(x, torch.Tensor) else None  # type: ignore[attr-defined]
+            ),
+            self.sample_args,
+        )
+
         # TODO: adjust input orders to match GraphSignature convention
         ep = torch.export._trace._export(
             gm,
             self.sample_args,
+            dynamic_shapes=dynamic_shapes,
             strict=False,
             pre_dispatch=True,
         )
@@ -1534,7 +1541,7 @@ DEBUG: (TORCH_LOGS="+export" <cmd>), additionally
         for k in name_to_constant:
             ep.state_dict.pop(k, None)
 
-        for i, spec in enumerate(ep.graph_signature.input_specs):
+        for spec in ep.graph_signature.input_specs:
             # Mark as constant tensors for erroneously traced buffers.
             if spec.kind == InputKind.BUFFER and spec.target in name_to_constant:
                 assert isinstance(

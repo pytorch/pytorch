@@ -7,9 +7,8 @@ class StaticForLoop(torch.nn.Module):
     """
 
     def forward(self, x):
-        ret = []
-        for i in range(10):  # constant
-            ret.append(i + x)
+        # constant
+        ret = [i + x for i in range(10)]
         return ret
 
 example_args = (torch.randn(3, 2),)

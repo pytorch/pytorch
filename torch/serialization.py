@@ -67,8 +67,6 @@ __all__ = [
     "skip_data",
 ]
 
-IS_FBCODE = not hasattr(torch.version, "git_version")
-
 DEFAULT_PROTOCOL = 2
 
 LONG_SIZE = struct.Struct("=l").size
@@ -94,7 +92,8 @@ else:
 
 
 def _default_to_weights_only(pickle_module):
-    return pickle_module is None and not IS_FBCODE
+    is_fbcode = not hasattr(torch.version, "git_version")
+    return pickle_module is None and not is_fbcode
 
 
 # _serialization_tls is used to store thread local state specific to serialization
@@ -141,9 +140,6 @@ class LoadEndianness(Enum):
     BIG = 3
 
 
-_default_load_endian: Optional[LoadEndianness] = None
-
-
 def get_default_load_endianness() -> Optional[LoadEndianness]:
     """
     Get fallback byte order for loading files
@@ -155,7 +151,9 @@ def get_default_load_endianness() -> Optional[LoadEndianness]:
     Returns:
         default_load_endian: Optional[LoadEndianness]
     """
-    return _default_load_endian
+    from torch.utils.serialization import config
+
+    return config.load.endianness
 
 
 def set_default_load_endianness(endianness):
@@ -169,13 +167,11 @@ def set_default_load_endianness(endianness):
     Args:
         endianness: the new fallback byte order
     """
-    global _default_load_endian
     if not isinstance(endianness, LoadEndianness) and endianness is not None:
         raise TypeError("Invalid argument type in function set_default_load_endianness")
-    _default_load_endian = endianness
+    from torch.utils.serialization import config
 
-
-_compute_crc32: bool = True
+    config.load.endianness = endianness
 
 
 def get_crc32_options() -> bool:
@@ -184,7 +180,9 @@ def get_crc32_options() -> bool:
 
     Defaults to ``True``.
     """
-    return _compute_crc32
+    from torch.utils.serialization import config
+
+    return config.save.compute_crc32
 
 
 def set_crc32_options(compute_crc32: bool):
@@ -199,14 +197,12 @@ def set_crc32_options(compute_crc32: bool):
     Args:
         compute_crc32 (bool): set crc32 compuation flag
     """
-    global _compute_crc32
-    _compute_crc32 = compute_crc32
+    from torch.utils.serialization import config
+
+    config.save.compute_crc32 = compute_crc32
 
 
-_default_mmap_options: int = MAP_PRIVATE
-
-
-def get_default_mmap_options() -> int:
+def get_default_mmap_options() -> Optional[int]:
     """
     Get default mmap options for :func:`torch.load` with ``mmap=True``.
 
@@ -216,7 +212,9 @@ def get_default_mmap_options() -> int:
     Returns:
         default_mmap_options: int
     """
-    return _default_mmap_options
+    from torch.utils.serialization import config
+
+    return config.load.mmap_flags
 
 
 class set_default_mmap_options:
@@ -243,16 +241,19 @@ class set_default_mmap_options:
                 "Invalid argument in function set_default_mmap_options, "
                 f"expected mmap.MAP_PRIVATE or mmap.MAP_SHARED, but got {flags}"
             )
-        global _default_mmap_options
-        self.prev = _default_mmap_options
-        _default_mmap_options = flags
+        # global config
+        from torch.utils.serialization import config
+
+        self.prev = config.load.mmap_flags
+        config.load.mmap_flags = flags
 
     def __enter__(self) -> None:
         pass
 
     def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any) -> None:
-        global _default_mmap_options
-        _default_mmap_options = self.prev
+        from torch.utils.serialization import config
+
+        config.load.mmap_flags = self.prev
 
 
 def clear_safe_globals() -> None:
@@ -262,21 +263,29 @@ def clear_safe_globals() -> None:
     _weights_only_unpickler._clear_safe_globals()
 
 
-def get_safe_globals() -> List[Any]:
+def get_safe_globals() -> List[Union[Callable, Tuple[Callable, str]]]:
     """
     Returns the list of user-added globals that are safe for ``weights_only`` load.
     """
     return _weights_only_unpickler._get_safe_globals()
 
 
-def add_safe_globals(safe_globals: List[Any]) -> None:
+def add_safe_globals(safe_globals: List[Union[Callable, Tuple[Callable, str]]]) -> None:
     """
     Marks the given globals as safe for ``weights_only`` load. For example, functions
     added to this list can be called during unpickling, classes could be instantiated
     and have state set.
 
+    Each item in the list can either be a function/class or a tuple of the form
+    (function/class, string) where string is the full path of the function/class.
+
+    Within the serialized format, each function is identified with its full
+    path as ``{__module__}.{__name__}``. When calling this API, you can provide this
+    full path that should match the one in the checkpoint otherwise the default
+    ``{fn.__module__}.{fn.__name__}`` will be used.
+
     Args:
-        safe_globals (List[Any]): list of globals to mark as safe
+        safe_globals (List[Union[Callable, Tuple[Callable, str]]]): list of globals to mark as safe
 
     Example:
         >>> # xdoctest: +SKIP("Can't torch.save(t, ...) as doctest thinks MyTensor is defined on torch.serialization")
@@ -343,7 +352,13 @@ def get_unsafe_globals_in_checkpoint(f: FILE_LIKE) -> List[str]:
     Returns:
         A list of strings of pickle GLOBALs in the checkpoint that are not allowlisted for ``weights_only``.
     """
-    safe_global_strings = set(_weights_only_unpickler._get_allowed_globals().keys())
+    default_safe_globals_strings = set(
+        _weights_only_unpickler._get_allowed_globals().keys()
+    )
+    user_safe_global_strings = set(
+        _weights_only_unpickler._get_user_allowed_globals().keys()
+    )
+    safe_global_strings = default_safe_globals_strings.union(user_safe_global_strings)
 
     with _open_file_like(f, "rb") as opened_file:
         if not _is_zipfile(opened_file):
@@ -755,10 +770,10 @@ class _open_zipfile_writer_file(_opener):
             # for writing out the file.
             self.file_stream = io.FileIO(self.name, mode="w")
             super().__init__(
-                torch._C.PyTorchFileWriter(self.file_stream, _compute_crc32)
+                torch._C.PyTorchFileWriter(self.file_stream, get_crc32_options())
             )
         else:
-            super().__init__(torch._C.PyTorchFileWriter(self.name, _compute_crc32))
+            super().__init__(torch._C.PyTorchFileWriter(self.name, get_crc32_options()))
 
     def __exit__(self, *args) -> None:
         self.file_like.write_end_of_file()
@@ -774,7 +789,7 @@ class _open_zipfile_writer_buffer(_opener):
                 raise AttributeError(msg)
             raise TypeError(msg)
         self.buffer = buffer
-        super().__init__(torch._C.PyTorchFileWriter(buffer, _compute_crc32))
+        super().__init__(torch._C.PyTorchFileWriter(buffer, get_crc32_options()))
 
     def __exit__(self, *args) -> None:
         self.file_like.write_end_of_file()
@@ -1191,7 +1206,22 @@ def _save(
             # this means to that to get tensors serialized, you need to implement
             # .cpu() on the underlying Storage
             if storage.device.type != "cpu":
-                storage = storage.cpu()
+                from torch.utils.serialization import config
+
+                if (
+                    config.save.use_pinned_memory_for_d2h
+                    and torch.accelerator.is_available()
+                    and torch.accelerator.current_accelerator().type
+                    == storage.device.type
+                ):
+                    new_storage = torch.empty(
+                        num_bytes, dtype=torch.uint8, device="cpu", pin_memory=True
+                    ).untyped_storage()
+                    new_storage.copy_(storage)
+                    torch.accelerator.current_stream(storage.device.index).synchronize()
+                    storage = new_storage
+                else:
+                    storage = storage.cpu()
             # Now that it is on the CPU we can directly copy it into the zip file
             zip_file.write_record(name, storage, num_bytes)
 
@@ -1312,7 +1342,8 @@ def load(
     """
     torch._C._log_api_usage_once("torch.load")
     UNSAFE_MESSAGE = (
-        "Re-running `torch.load` with `weights_only` set to `False` will likely succeed, "
+        "In PyTorch 2.6, we changed the default value of the `weights_only` argument in `torch.load` "
+        "from `False` to `True`. Re-running `torch.load` with `weights_only` set to `False` will likely succeed, "
         "but it can result in arbitrary code execution. Do it only if you got the file from a "
         "trusted source."
     )
@@ -1326,6 +1357,8 @@ def load(
         has_unsafe_global = re.search(unsafe_global_pattern, message) is not None
         blocklist_pattern = r"whose module (\S+) is blocked"
         has_blocklist = re.search(blocklist_pattern, message) is not None
+        import_pattern = r"(\S+) must be (\S+) to load"
+        has_import = re.search(import_pattern, message) is not None
         if has_unsafe_global:
             updated_message = (
                 "Weights only load failed. This file can still be loaded, to do so you have two options, "
@@ -1335,12 +1368,15 @@ def load(
                 + message
             )
         else:
-            updated_message = f"Weights only load failed. {UNSAFE_MESSAGE}\n"
-            if not has_blocklist:
-                updated_message += (
-                    "Please file an issue with the following so that we can make "
-                    "`weights_only=True` compatible with your use case: WeightsUnpickler error: "
-                )
+            if has_import:
+                return f"Weights only load failed. {message}\n {UNSAFE_MESSAGE}\n"
+            else:
+                updated_message = f"Weights only load failed. {UNSAFE_MESSAGE}\n"
+                if not has_blocklist:
+                    updated_message += (
+                        "Please file an issue with the following so that we can make "
+                        "`weights_only=True` compatible with your use case: WeightsUnpickler error: "
+                    )
             updated_message += message
         return updated_message + DOCS_MESSAGE
 
@@ -1395,7 +1431,9 @@ def load(
 
     # make flipping default BC-compatible
     if mmap is None:
-        mmap = False
+        from torch.utils.serialization import config
+
+        mmap = config.load.mmap
 
     _check_dill_version(pickle_module)
 
@@ -1417,6 +1455,11 @@ def load(
                         " silence this warning)",
                         UserWarning,
                     )
+                    if weights_only:
+                        raise RuntimeError(
+                            "Cannot use ``weights_only=True`` with TorchScript archives passed to "
+                            "``torch.load``. " + UNSAFE_MESSAGE
+                        )
                     opened_file.seek(orig_position)
                     return torch.jit.load(opened_file, map_location=map_location)
                 if mmap:
