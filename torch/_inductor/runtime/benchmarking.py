@@ -59,6 +59,23 @@ class Benchmarker:
     def __init__(self: Self) -> None:
         pass
 
+    def infer_device_type(fn_args: Tuple[Any, ...], fn_kwargs: Dict[str, Any]) -> Any:
+        inferred_device = None
+        for arg_or_kwarg in chain(fn_args, fn_kwargs.values()):
+            if not isinstance(arg_or_kwarg, torch.Tensor):
+                continue
+            if inferred_device is None:
+                inferred_device = arg_or_kwarg.device
+            elif arg_or_kwarg.device != inferred_device:
+                raise ValueError(
+                    "Can't safely infer the device type of `fn` with multiple device types in `fn_args` and `fn_kwargs`!"
+                )
+        if inferred_device is None:
+            raise ValueError(
+                "Can't safely infer the device type of `fn` with no device types in `fn_args` or `fn_kwargs`! You should be calling `.benchmark_cpu` or `.benchmark_gpu` directly."  # noqa: B950
+            )
+        return inferred_device
+
     @time_and_count
     def benchmark(
         self: Self,
@@ -86,20 +103,7 @@ class Benchmarker:
         Returns:
         - The runtime of `fn(*fn_args, **fn_kwargs)`, in milliseconds.
         """
-        inferred_device = None
-        for arg_or_kwarg in chain(fn_args, fn_kwargs.values()):
-            if not isinstance(arg_or_kwarg, torch.Tensor):
-                continue
-            if inferred_device is None:
-                inferred_device = arg_or_kwarg.device
-            elif arg_or_kwarg.device != inferred_device:
-                raise ValueError(
-                    "Can't safely infer the device type of `fn` with multiple device types in `fn_args` and `fn_kwargs`!"
-                )
-        if inferred_device is None:
-            raise ValueError(
-                "Can't safely infer the device type of `fn` with no device types in `fn_args` or `fn_kwargs`! You should be calling `.benchmark_cpu` or `.benchmark_gpu` directly."  # noqa: B950
-            )
+        inferred_device = self.infer_device_type(fn_args, fn_kwargs)
         _callable = lambda: fn(*fn_args, **fn_kwargs)  # noqa: E731
         if inferred_device == torch.device("cpu"):
             return self.benchmark_cpu(_callable, **kwargs)
@@ -146,6 +150,53 @@ class Benchmarker:
     @time_and_count
     def benchmark_gpu(self: Self, *args: Any, **kwargs: Any) -> float:
         raise NotImplementedError
+    
+    @time_and_count
+    def benchmark_many(
+        self: Self,
+        fns: List[Callable[..., Any]],
+        fns_args: List[Tuple[Any, ...]],
+        fns_kwargs: List[Dict[str, Any]],
+        **kwargs: Any,
+    ) -> float:
+        """Benchmark `fn(*fn_args, *fn_kwargs)` for `fn`, `fn_args`, and `fn_kwargs` in `fns`,
+        `fns_args`, and `fns_kwargs`, and return the runtimes, in milliseconds (the actual runtime
+        calculation is dictated by the benchmarking implementation, but may be one of [mean, median,
+        minimum, etc.]). Functions as a convenience wrapper around device-specific implementations,
+        like `benchmark_many_cpu` and `benchmark_many_gpu`. Raises `ValueError(...)` if we can't safely
+        infer the device type of any `fn` in `fns`, or if there is more than one device type in `fns`;
+        for example, if multiple device types are found in the `fn_args` and `fn_kwargs` of a given `fn`
+        from `fns`, or if no device types are found, or if some `fn1` and `fn2` from `fns` have different
+        inferred device types.
+
+        Arguments:
+        - fns: The list of functions to benchmark.
+        - fns_args: The list of functions' arguments.
+        - fns_kwargs: The list of functions' kwargs.
+
+        Keyword Arguments:
+        - **kwargs: The benchmarking implementation's kwargs.
+
+        Returns:
+        - The runtimes of `fn(*fn_args, **fn_kwargs)`, for `fn`, `fn_args`, and `fn_kwargs` in `fns`,
+        in milliseconds.
+        """
+        inferred_device = None
+        for fn_args, fn_kwargs in zip(fns_args, fns_kwargs):
+            this_inferred_device = self.infer_device_type(fn_args, fn_kwargs)
+            if inferred_device is None:
+                inferred_device = this_inferred_device
+            elif this_inferred_device != inferred_device:
+                raise ValueError(
+                    "Multiple device types inferred from `fns`."
+                )
+        callables = [lambda: fn(*fn_args, **fn_kwargs) for fn, fn_args, fn_kwargs in zip(fns, fns_args, fns_kwargs)]  # noqa: E731
+        if inferred_device == torch.device("cpu"):
+            return self.benchmark_many_cpu(callables, **kwargs)
+        # TODO(nmacchioni): For non-CPU functions we default to using the GPU-specific benchmarking
+        # implementation which was written specifically with CUDA devices in mind, we may want to
+        # explore alternate implementations for other device types.
+        return self.benchmark_gpu(callables, **kwargs)
     
     @time_and_count
     def benchmark_many_cpu(
@@ -441,7 +492,7 @@ class GroupedInductorBenchmarker(InductorBenchmarker):
 
         # benchmark `_callable`
         interleaved_event_pairs = self.get_interleaved_event_pairs(
-            len(callables), estimation_iters
+            len(callables), benchmark_iters
         )
         for event_pairs in interleaved_event_pairs:
             for _callable, (start_event, end_event) in zip(callables, event_pairs):
