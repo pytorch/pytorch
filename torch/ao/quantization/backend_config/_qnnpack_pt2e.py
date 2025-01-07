@@ -110,7 +110,7 @@ def get_pooling_configs():
     dtype_configs = [weighted_op_quint8_dtype_config]
 
     def root_node_getter(node_pattern):
-        getitem, maxpool, index = node_pattern
+        _getitem, maxpool, _index = node_pattern
         return maxpool
 
     backend_pattern_configs.append(

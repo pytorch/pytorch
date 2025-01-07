@@ -224,7 +224,7 @@ class TestTorchDlPack(TestCase):
             x = torch.zeros(1, device=device)
             torch.cuda._sleep(2**20)
             self.assertTrue(torch.cuda.default_stream().query())
-            d = x.__dlpack__(1)
+            x.__dlpack__(1)
         # check that the default stream has work (a pending cudaStreamWaitEvent)
         self.assertFalse(torch.cuda.default_stream().query())
 

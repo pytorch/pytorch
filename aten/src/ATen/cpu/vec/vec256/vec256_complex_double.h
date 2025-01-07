@@ -188,24 +188,26 @@ public:
     return map(std::log1p);
   }
   Vectorized<c10::complex<double>> asin() const {
-    // asin(x)
-    // = -i*ln(iz + sqrt(1 -z^2))
-    // = -i*ln((ai - b) + sqrt(1 - (a + bi)*(a + bi)))
-    // = -i*ln((-b + ai) + sqrt(1 - (a**2 - b**2) - 2*abi))
-    const __m256d one = _mm256_set1_pd(1);
+    // TODO: The vectorized implementation requires special handling for the case where real number/imag number is 0/Inf/NaN.
+    // // asin(x)
+    // // = -i*ln(iz + sqrt(1 -z^2))
+    // // = -i*ln((ai - b) + sqrt(1 - (a + bi)*(a + bi)))
+    // // = -i*ln((-b + ai) + sqrt(1 - (a**2 - b**2) - 2*abi))
+    // const __m256d one = _mm256_set1_pd(1);
 
-    auto conj = conj_();
-    auto b_a = _mm256_permute_pd(conj, 0x05);                         //-b        a
-    auto ab = _mm256_mul_pd(conj, b_a);                               //-ab       -ab
-    auto im = _mm256_add_pd(ab, ab);                                  //-2ab      -2ab
+    // auto conj = conj_();
+    // auto b_a = _mm256_permute_pd(conj, 0x05);                         //-b        a
+    // auto ab = _mm256_mul_pd(conj, b_a);                               //-ab       -ab
+    // auto im = _mm256_add_pd(ab, ab);                                  //-2ab      -2ab
 
-    auto val_2 = _mm256_mul_pd(values, values);                       // a*a      b*b
-    auto re = _mm256_hsub_pd(val_2, _mm256_permute_pd(val_2, 0x05));  // a*a-b*b  b*b-a*a
-    re = _mm256_sub_pd(one, re);
+    // auto val_2 = _mm256_mul_pd(values, values);                       // a*a      b*b
+    // auto re = _mm256_hsub_pd(val_2, _mm256_permute_pd(val_2, 0x05));  // a*a-b*b  b*b-a*a
+    // re = _mm256_sub_pd(one, re);
 
-    auto root = Vectorized(_mm256_blend_pd(re, im, 0x0A)).sqrt();         //sqrt(re + i*im)
-    auto ln = Vectorized(_mm256_add_pd(b_a, root)).log();                 //ln(iz + sqrt())
-    return Vectorized(_mm256_permute_pd(ln.values, 0x05)).conj();         //-i*ln()
+    // auto root = Vectorized(_mm256_blend_pd(re, im, 0x0A)).sqrt();         //sqrt(re + i*im)
+    // auto ln = Vectorized(_mm256_add_pd(b_a, root)).log();                 //ln(iz + sqrt())
+    // return Vectorized(_mm256_permute_pd(ln.values, 0x05)).conj();         //-i*ln()
+    return map(std::asin);
   }
   Vectorized<c10::complex<double>> acos() const {
     // acos(x) = pi/2 - asin(x)
