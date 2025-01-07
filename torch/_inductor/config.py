@@ -141,8 +141,11 @@ memory_pool = os.environ.get("TORCHINDUCTOR_MEMORY_POOL", "intermediates")
 # codegen benchmark harness
 benchmark_harness = True
 
-# fuse pointwise into templates
+# fuse pointwise into templates epilogues
 epilogue_fusion = True
+
+# fuse pointwise into template prologues
+prologue_fusion = False
 
 # do epilogue fusions before other fusions
 epilogue_fusion_first = False
@@ -222,7 +225,7 @@ post_grad_fusion_options: Dict[str, Dict[str, Any]] = {}
 # enable reordering pass for improving memory locality
 reorder_for_locality = True
 
-# Scale down RBLOCK for better occupancy
+# Scale down Rn_BLOCK for better occupancy
 dynamic_scale_rblock = os.environ.get("TORCHINDUCTOR_DYNAMIC_SCALE_RBLOCK", "1") == "1"
 
 # this forces fusion for int_mm with mul. Needed when you want to avoid realizing the int32
@@ -288,6 +291,12 @@ intra_node_bw = 300
 # unit: GB/s, uni-directional P2P bandwidth per node
 # default value is InfiniBand
 inter_node_bw = 25
+
+# use Inductor's experimental benchmarker (runtime/benchmarking.py)
+# to benchmark kernels during autotuning, otherwise fall back to
+# Triton's `do_bench`. the experimental benchmarker may produce
+# results that are not consistent with `do_bench`'s results
+use_experimental_benchmarker = False
 
 # enable slow autotuning passes to select algorithms
 max_autotune = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE") == "1"
@@ -470,6 +479,9 @@ max_fusion_size = 64
 # max number of inputs to generate cat as a pointwise op with masked laods
 max_pointwise_cat_inputs = 8
 
+# force concat to be generated as a pointwise op with masked loads
+force_pointwise_cat = False
+
 # replace small reductions with pointwise, disable with `= 1`
 unroll_reductions_threshold = 8
 
@@ -543,33 +555,8 @@ optimize_scatter_upon_const_tensor = (
     os.environ.get("TORCHINDUCTOR_OPTIMIZE_SCATTER_UPON_CONST_TENSOR", "1") == "1"
 )
 
-
-# The multiprocessing start method to use for inductor workers in the codecache.
-# Can be "subprocess" or "fork".
-def decide_worker_start_method() -> str:
-    # TODO: For internal rollout, we use a killswitch to disable the "subprocess"
-    # start method. The justknob check should not be performed at import, however,
-    # so for fbcode, we assign worker_start_method to None below and call this method
-    # lazily in async_compile.py. Remove this after "subprocess" rollout completes.
-    if "TORCHINDUCTOR_WORKER_START" in os.environ:
-        start_method = os.environ["TORCHINDUCTOR_WORKER_START"]
-    elif is_fbcode() and not torch._utils_internal.justknobs_check(
-        "pytorch/inductor:subprocess_parallel_compile"
-    ):
-        start_method = "fork"
-    else:
-        start_method = "subprocess"
-    assert start_method in (
-        "subprocess",
-        "fork",
-    ), f"Invalid start method: {start_method}"
-    return start_method
-
-
-# TODO: Set start method directly after internal rollout of "subprocess".
-worker_start_method: Optional[str] = (
-    None if is_fbcode() else decide_worker_start_method()
-)
+# Deprecated. This setting does nothing.
+worker_start_method: Optional[str] = None
 
 # Flags to turn on all_reduce fusion. These 2 flags should be automaticaly turned
 # on by DDP and should not be set by the users.
@@ -766,21 +753,6 @@ freezing: bool = os.environ.get("TORCHINDUCTOR_FREEZING", "0") == "1"
 # of potentially keeping multiple copies of weights.
 freezing_discard_parameters: bool = False
 
-# Kill switch for allowing temporary tensors to be allocated as stack arrays. Tests
-# should be run with this flag both on and off to make sure we have coverage.
-allow_stack_allocation: bool = False
-
-# Enables an alternate DSO interface (the "minimal ArrayRef interface") intended
-# to maximize performance for use cases that it can accommodate at the expense of
-# generality. In brief:
-# - inputs and outputs are ArrayRefTensor<T> (note that strides are required, but the
-#   tensor must be contiguous)
-# - constant handling is unchanged because it is not a per-inference-iteration bottleneck
-#
-# When the DSO is generated in this mode, the usual interface will also be supported,
-# but performance for that interface may be degraded.
-use_minimal_arrayref_interface: bool = False
-
 # decompose some memory bound matmul/bmm to mul
 decompose_mem_bound_mm: bool = False
 
@@ -803,6 +775,15 @@ check_stack_no_cycles_TESTING_ONLY: bool = False
 
 # When True, complex_memory_overlap always reports True
 always_complex_memory_overlap_TESTING_ONLY: bool = False
+
+# enable linear binary folding
+enable_linear_binary_folding = (
+    os.environ.get("TORCHINDUCTOR_ENABLE_LINEAR_BINARY_FOLDING", "0") == "1"
+)
+
+
+# Adds NVTX annotations aroung training phases
+annotate_training: bool = os.environ.get("TORCHINDUCTOR_ANNOTATE_TRAINING", "0") == "1"
 
 
 # config specific to codegen/cpp.py
@@ -871,9 +852,10 @@ class cpp:
     )
 
     # Use ffp-contract when compiling
-    enable_floating_point_contract_flag = (
-        os.environ.get("TORCHINDUCTOR_CPP_ENABLE_FLOATING_POINT_CONTRACT_FLAG", "0")
-        == "1"
+    # Options: "off" (default), "on", "fast"
+    # Per https://godbolt.org/z/bf4bvfc9r , clang/gcc has different behavior for "fast"
+    enable_floating_point_contract_flag = os.environ.get(
+        "TORCHINDUCTOR_CPP_ENABLE_FLOATING_POINT_CONTRACT_FLAG", "off"
     )
 
     # Disable the tiling select heuristic
@@ -987,6 +969,10 @@ class triton:
     # Setting to None means uninitialized
     autotune_at_compile_time: Optional[bool] = None
 
+    # Allows tiling reductions into multiple dimensions.
+    # For best results, this should be used with prefer_nd_tiling.
+    tile_reductions: bool = False
+
     # should we stop a fusion to allow better tiling?
     tiling_prevents_pointwise_fusion = True
     tiling_prevents_reduction_fusion = True
@@ -1028,7 +1014,7 @@ class triton:
     # hint to Triton when arguments are divisible by 16
     divisible_by_16 = True
 
-    # Minimum RBLOCK to be used for a TritonSplitScanKernel
+    # Minimum R0_BLOCK to be used for a TritonSplitScanKernel
     # NOTE: This also indirectly controls the size of workspace buffer required
     min_split_scan_rblock = 256
 
@@ -1058,6 +1044,12 @@ class triton:
 
     # Whether to upcast float16 / bfloat16 to float32 in triton codegen (Experimental)
     codegen_upcast_to_fp32 = True
+
+    # Whether persistent matmul kernels should be enabled this flag only has effect when on h100
+    # with a verison of triton new enough to support TMA
+    enable_persistent_tma_matmul = (
+        os.environ.get("ENABLE_PERSISTENT_TMA_MATMUL", "0") == "1"
+    )
 
 
 class aot_inductor:
@@ -1117,6 +1109,24 @@ class aot_inductor:
 
     # Dictionary of presets that can be passed in
     presets: Dict[str, Any] = {}
+
+    # Kill switch for allowing temporary tensors to be allocated as stack arrays. Tests
+    # should be run with this flag both on and off to make sure we have coverage.
+    allow_stack_allocation: bool = False
+
+    # Enables an alternate DSO interface (the "minimal ArrayRef interface") intended
+    # to maximize performance for use cases that it can accommodate at the expense of
+    # generality. In brief:
+    # - inputs and outputs are ArrayRefTensor<T> (note that strides are required, but the
+    #   tensor must be contiguous)
+    # - constant handling is unchanged because it is not a per-inference-iteration bottleneck
+    #
+    # When the DSO is generated in this mode, the usual interface will also be supported,
+    # but performance for that interface may be degraded.
+    use_minimal_arrayref_interface: bool = False
+
+    # Experimental. Flag to control whether to include weight in .so
+    package_constants_in_so: bool = True
 
 
 class cuda:
@@ -1334,52 +1344,8 @@ class trace:
 
     log_autotuning_results: bool = False
 
-
-def get_feature_local_version(feature_name: str) -> Optional[int]:
-    """Get the local version of a benchmarking feature. A feature's local version
-    is hardcoded like `torch._inductor.fb.FEATURE_FOO_VERSION`, where `feature_foo`
-    is the feature name.
-    """
-    try:
-        from torch._inductor.fb import benchmarking
-    except ImportError:
-        return None
-    return getattr(benchmarking, feature_name.upper() + "_VERSION", None)
-
-
-class benchmarking:
-    """Class containing all configurations relating to benchmarking, specifically
-    the various features of benchmarking. Feature enablement is controlled differently
-    depending on whether we are running in OSS or fbcode, and adheres to the following
-    formula:
-
-    [OSS]
-        1. Check if the corresponding environment variable, which follows the format
-        `TORCHINDUCTOR_BENCHMARKING_FEATURE_FOO=...`, where `feature_foo` is the feature,
-        is set; this value is stored in `benchmarking.feature_foo.env_val`. If the environment
-        variable is set and `env_val == "1"`, the feature is force-enabled; if the environment
-        variable is set and `env_val == "0"`, the feature is force-disabled.
-        2. If the corresponding environment variable is un-set, we return the OSS default; the
-        OSS default is stored in `benchmarking.feature_foo.oss_default`.
-
-    [fbcode]
-        1. Same as [OSS #1].
-        2. We compare the feature's local version, see `get_feature_local_version(...)`, with
-        the fetched JK version of the same name, like `"pytorch/benchmarking:FEATURE_FOO_VERSION"`.
-        If the feature's local version is greater than or equal to the JK version we consider the
-        feature to be enabled; if the feature's local version is less than the JK version we consider
-        the feature to be disabled. Intuitively, one can reason about this by taking the JK version,
-        let's call this X, and saying "this feature works at and after version X". If, for whatever
-        reason, we are unable to get a feature's local version we will automatically default to
-        disabling the feature.
-    """
-
-    class inductor_benchmarker:
-        env_val: Optional[str] = os.environ.get(
-            "TORCHINDUCTOR_BENCHMARKING_INDUCTOR_BENCHMARKER"
-        )
-        oss_default: bool = False
-        local_version: Optional[int] = get_feature_local_version("inductor_benchmarker")
+    # Save mapping info from inductor generated triton kernel to post_grad fx nodes
+    log_inductor_triton_kernel_to_post_grad_node_info: bool = True
 
 
 _save_config_ignore = [
@@ -1410,9 +1376,16 @@ external_matmul: List[Callable[[torch.Tensor, torch.Tensor, torch.Tensor], None]
 
 
 class test_configs:
-    force_extern_kernel_in_multi_template = False
+    force_extern_kernel_in_multi_template: bool = False
+
+    max_mm_configs: Optional[int] = None
 
     runtime_triton_dtype_assert = False
+
+    # regex to control the set of considered autotuning
+    # choices (aka configs) by name and / or description
+    autotune_choice_name_regex: Optional[str] = None
+    autotune_choice_desc_regex: Optional[str] = None
 
 
 if TYPE_CHECKING:

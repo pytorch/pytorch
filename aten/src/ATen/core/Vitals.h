@@ -11,7 +11,7 @@ TORCH_API bool torchVitalEnabled();
 
 struct TORCH_API TorchVitalAttr {
   // always initialized to empty
-  std::string value = "";
+  std::string value;
   template <typename T>
   TorchVitalAttr& operator<<(const T& t) {
     if (torchVitalEnabled()) {

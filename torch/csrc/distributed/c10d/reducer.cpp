@@ -1162,8 +1162,8 @@ void Reducer::initialize_buckets(
       // Make gradient type in the reduced precision if mixed precision is
       // enabled. This ensures that the type is correct when e.g. rebuilding
       // buckets.
-      if (mixed_precision_param_dtype_) {
-        options = options.dtype(*mixed_precision_param_dtype_);
+      if (mixed_precision_param_dtype_.has_value()) {
+        options = options.dtype(mixed_precision_param_dtype_);
       }
       bucket.gradients = at::empty({static_cast<long>(offset)}, options);
 
@@ -1625,8 +1625,9 @@ void Reducer::finalize_backward() {
       // sparse metadata is set so the bucket should have sparse_tensor_indices
       if (sparse_metadata_) {
         REDUCER_CHECK(
-            bucket.sparse_tensor_indices.value().numel() ==
-                bucket.gradients.sizes()[0],
+            bucket.sparse_tensor_indices.has_value() &&
+                bucket.sparse_tensor_indices.value().numel() ==
+                    bucket.gradients.sizes()[0],
             logger_,
             "Sparse metadata and gradient size mismatch");
         auto sparse_result = at::sparse_coo_tensor(
@@ -1689,7 +1690,7 @@ void Reducer::finalize_backward() {
 
 void Reducer::runGradCallbackForVariable(
     at::Tensor& variable,
-    GradCallback&& cb) {
+    const GradCallback& cb) {
 #ifdef _WIN32
   cb(variable.mutable_grad());
 #else

@@ -25,7 +25,6 @@ env:
   AWS_DEFAULT_REGION: us-east-1
   BINARY_ENV_FILE: /tmp/env
   BUILD_ENVIRONMENT: linux-binary-manywheel
-  BUILDER_ROOT: /builder
   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
   PR_NUMBER: ${{ github.event.pull_request.number }}
   PYTORCH_FINAL_PACKAGE_DIR: /artifacts
@@ -52,13 +51,13 @@ jobs:
     needs: get-label-type
     with:
       PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
-      DOCKER_IMAGE: pytorch/manylinux-builder:cpu-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cpu-main
+      DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.9"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
@@ -74,13 +73,13 @@ jobs:
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
-      DOCKER_IMAGE: pytorch/manylinux-builder:cpu-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cpu-main
+      DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.9"
       build_name: manywheel-py3_9-cpu
@@ -97,13 +96,13 @@ jobs:
     needs: manywheel-py3_9-cpu-test
     with:
       PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
-      DOCKER_IMAGE: pytorch/manylinux-builder:cpu-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cpu-main
+      DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.9"
       build_name: manywheel-py3_9-cpu
@@ -119,7 +118,6 @@ jobs:
     needs: get-label-type
     with:
       PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -142,7 +140,6 @@ jobs:
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -166,7 +163,6 @@ jobs:
     needs: manywheel-py3_9-cpu-cxx11-abi-test
     with:
       PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -189,14 +185,14 @@ jobs:
     needs: get-label-type
     with:
       PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu118
       GPU_ARCH_VERSION: 11.8
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.8-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda11.8-main
+      DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.9"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
@@ -213,14 +209,14 @@ jobs:
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu118
       GPU_ARCH_VERSION: 11.8
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.8-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda11.8-main
+      DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.9"
       build_name: manywheel-py3_9-cuda11_8
@@ -237,14 +233,14 @@ jobs:
     needs: manywheel-py3_9-cuda11_8-test
     with:
       PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu118
       GPU_ARCH_VERSION: 11.8
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.8-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda11.8-main
+      DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.9"
       build_name: manywheel-py3_9-cuda11_8
@@ -260,14 +256,14 @@ jobs:
     needs: get-label-type
     with:
       PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu124
       GPU_ARCH_VERSION: 12.4
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux-builder:cuda12.4-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.4-main
+      DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.9"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
@@ -284,14 +280,14 @@ jobs:
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu124
       GPU_ARCH_VERSION: 12.4
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux-builder:cuda12.4-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.4-main
+      DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.9"
       build_name: manywheel-py3_9-cuda12_4
@@ -308,14 +304,14 @@ jobs:
     needs: manywheel-py3_9-cuda12_4-test
     with:
       PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu124
       GPU_ARCH_VERSION: 12.4
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux-builder:cuda12.4-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.4-main
+      DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.9"
       build_name: manywheel-py3_9-cuda12_4
@@ -331,7 +327,6 @@ jobs:
     needs: get-label-type
     with:
       PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -339,6 +334,7 @@ jobs:
       GPU_ARCH_VERSION: 12.6
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.6-main
+      DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.9"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
@@ -355,7 +351,6 @@ jobs:
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -363,6 +358,7 @@ jobs:
       GPU_ARCH_VERSION: 12.6
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.6-main
+      DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.9"
       build_name: manywheel-py3_9-cuda12_6
@@ -379,7 +375,6 @@ jobs:
     needs: manywheel-py3_9-cuda12_6-test
     with:
       PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -387,6 +382,7 @@ jobs:
       GPU_ARCH_VERSION: 12.6
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.6-main
+      DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.9"
       build_name: manywheel-py3_9-cuda12_6
@@ -396,45 +392,45 @@ jobs:
       conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
     uses: ./.github/workflows/_binary-upload.yml
 
-  manywheel-py3_9-rocm6_1-build:
+  manywheel-py3_9-rocm6_2_4-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
     needs: get-label-type
     with:
       PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: rocm6.1
-      GPU_ARCH_VERSION: 6.1
+      DESIRED_CUDA: rocm6.2.4
+      GPU_ARCH_VERSION: 6.2.4
       GPU_ARCH_TYPE: rocm
-      DOCKER_IMAGE: pytorch/manylinux-builder:rocm6.1-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.2.4-main
+      DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.9"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      build_name: manywheel-py3_9-rocm6_1
+      build_name: manywheel-py3_9-rocm6_2_4
       build_environment: linux-binary-manywheel
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-  manywheel-py3_9-rocm6_1-test:  # Testing
+  manywheel-py3_9-rocm6_2_4-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs:
-      - manywheel-py3_9-rocm6_1-build
+      - manywheel-py3_9-rocm6_2_4-build
       - get-label-type
     runs-on: linux.rocm.gpu
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: rocm6.1
-      GPU_ARCH_VERSION: 6.1
+      DESIRED_CUDA: rocm6.2.4
+      GPU_ARCH_VERSION: 6.2.4
       GPU_ARCH_TYPE: rocm
       SKIP_ALL_TESTS: 1
-      DOCKER_IMAGE: pytorch/manylinux-builder:rocm6.1-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.2.4-main
+      DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.9"
     steps:
@@ -443,108 +439,95 @@ jobs:
       - uses: actions/download-artifact@v4.1.7
         name: Download Build Artifacts
         with:
-          name: manywheel-py3_9-rocm6_1
+          name: manywheel-py3_9-rocm6_2_4
           path: "${{ runner.temp }}/artifacts/"
       - name: Checkout PyTorch
-        uses: malfet/checkout@silent-checkout
+        uses: actions/checkout@v4
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
           path: pytorch
-          quiet-checkout: true
+          show-progress: false
       - name: Clean PyTorch checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-      - name: Checkout pytorch/builder
-        uses: malfet/checkout@silent-checkout
-        with:
-          ref: main
-          submodules: recursive
-          repository: pytorch/builder
-          path: builder
-          quiet-checkout: true
-      - name: Clean pytorch/builder checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: builder
       - name: ROCm set GPU_FLAG
         run: |
           echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
       - name: Pull Docker image
         uses: pytorch/test-infra/.github/actions/pull-docker-image@main
         with:
-          docker-image: pytorch/manylinux-builder:rocm6.1-main
+          docker-image: pytorch/manylinux2_28-builder:rocm6.2.4-main
       - name: Test Pytorch binary
         uses: ./pytorch/.github/actions/test-pytorch-binary
       - name: Teardown ROCm
         uses: ./.github/actions/teardown-rocm
-  manywheel-py3_9-rocm6_1-upload:  # Uploading
+  manywheel-py3_9-rocm6_2_4-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
       id-token: write
       contents: read
-    needs: manywheel-py3_9-rocm6_1-test
+    needs: manywheel-py3_9-rocm6_2_4-test
     with:
       PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: rocm6.1
-      GPU_ARCH_VERSION: 6.1
+      DESIRED_CUDA: rocm6.2.4
+      GPU_ARCH_VERSION: 6.2.4
       GPU_ARCH_TYPE: rocm
-      DOCKER_IMAGE: pytorch/manylinux-builder:rocm6.1-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.2.4-main
+      DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.9"
-      build_name: manywheel-py3_9-rocm6_1
+      build_name: manywheel-py3_9-rocm6_2_4
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
       conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
       conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
     uses: ./.github/workflows/_binary-upload.yml
 
-  manywheel-py3_9-rocm6_2-build:
+  manywheel-py3_9-rocm6_3-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
     needs: get-label-type
     with:
       PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: rocm6.2
-      GPU_ARCH_VERSION: 6.2
+      DESIRED_CUDA: rocm6.3
+      GPU_ARCH_VERSION: 6.3
       GPU_ARCH_TYPE: rocm
-      DOCKER_IMAGE: pytorch/manylinux-builder:rocm6.2-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.3-main
+      DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.9"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      build_name: manywheel-py3_9-rocm6_2
+      build_name: manywheel-py3_9-rocm6_3
       build_environment: linux-binary-manywheel
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-  manywheel-py3_9-rocm6_2-test:  # Testing
+  manywheel-py3_9-rocm6_3-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs:
-      - manywheel-py3_9-rocm6_2-build
+      - manywheel-py3_9-rocm6_3-build
       - get-label-type
     runs-on: linux.rocm.gpu
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: rocm6.2
-      GPU_ARCH_VERSION: 6.2
+      DESIRED_CUDA: rocm6.3
+      GPU_ARCH_VERSION: 6.3
       GPU_ARCH_TYPE: rocm
       SKIP_ALL_TESTS: 1
-      DOCKER_IMAGE: pytorch/manylinux-builder:rocm6.2-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.3-main
+      DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.9"
     steps:
@@ -553,63 +536,50 @@ jobs:
       - uses: actions/download-artifact@v4.1.7
         name: Download Build Artifacts
         with:
-          name: manywheel-py3_9-rocm6_2
+          name: manywheel-py3_9-rocm6_3
           path: "${{ runner.temp }}/artifacts/"
       - name: Checkout PyTorch
-        uses: malfet/checkout@silent-checkout
+        uses: actions/checkout@v4
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
           path: pytorch
-          quiet-checkout: true
+          show-progress: false
       - name: Clean PyTorch checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-      - name: Checkout pytorch/builder
-        uses: malfet/checkout@silent-checkout
-        with:
-          ref: main
-          submodules: recursive
-          repository: pytorch/builder
-          path: builder
-          quiet-checkout: true
-      - name: Clean pytorch/builder checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: builder
       - name: ROCm set GPU_FLAG
         run: |
           echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
       - name: Pull Docker image
         uses: pytorch/test-infra/.github/actions/pull-docker-image@main
         with:
-          docker-image: pytorch/manylinux-builder:rocm6.2-main
+          docker-image: pytorch/manylinux2_28-builder:rocm6.3-main
       - name: Test Pytorch binary
         uses: ./pytorch/.github/actions/test-pytorch-binary
       - name: Teardown ROCm
         uses: ./.github/actions/teardown-rocm
-  manywheel-py3_9-rocm6_2-upload:  # Uploading
+  manywheel-py3_9-rocm6_3-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
       id-token: write
       contents: read
-    needs: manywheel-py3_9-rocm6_2-test
+    needs: manywheel-py3_9-rocm6_3-test
     with:
       PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: rocm6.2
-      GPU_ARCH_VERSION: 6.2
+      DESIRED_CUDA: rocm6.3
+      GPU_ARCH_VERSION: 6.3
       GPU_ARCH_TYPE: rocm
-      DOCKER_IMAGE: pytorch/manylinux-builder:rocm6.2-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.3-main
+      DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.9"
-      build_name: manywheel-py3_9-rocm6_2
+      build_name: manywheel-py3_9-rocm6_3
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
       conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
@@ -622,13 +592,13 @@ jobs:
     needs: get-label-type
     with:
       PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: xpu
       GPU_ARCH_TYPE: xpu
       DOCKER_IMAGE: pytorch/manylinux2_28-builder:xpu-main
+      DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.9"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
@@ -646,7 +616,6 @@ jobs:
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -654,6 +623,7 @@ jobs:
       GPU_ARCH_TYPE: xpu
       SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: pytorch/manylinux2_28-builder:xpu-main
+      DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.9"
     permissions:
@@ -677,30 +647,17 @@ jobs:
           name: manywheel-py3_9-xpu
           path: "${{ runner.temp }}/artifacts/"
       - name: Checkout PyTorch
-        uses: malfet/checkout@silent-checkout
+        uses: actions/checkout@v4
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
           path: pytorch
-          quiet-checkout: true
+          show-progress: false
       - name: Clean PyTorch checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-      - name: Checkout pytorch/builder
-        uses: malfet/checkout@silent-checkout
-        with:
-          ref: main
-          submodules: recursive
-          repository: pytorch/builder
-          path: builder
-          quiet-checkout: true
-      - name: Clean pytorch/builder checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: builder
       - name: Pull Docker image
         uses: pytorch/test-infra/.github/actions/pull-docker-image@main
         with:
@@ -717,13 +674,13 @@ jobs:
     needs: manywheel-py3_9-xpu-test
     with:
       PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: xpu
       GPU_ARCH_TYPE: xpu
       DOCKER_IMAGE: pytorch/manylinux2_28-builder:xpu-main
+      DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.9"
       build_name: manywheel-py3_9-xpu
@@ -739,13 +696,13 @@ jobs:
     needs: get-label-type
     with:
       PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
-      DOCKER_IMAGE: pytorch/manylinux-builder:cpu-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cpu-main
+      DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.10"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
@@ -761,13 +718,13 @@ jobs:
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
-      DOCKER_IMAGE: pytorch/manylinux-builder:cpu-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cpu-main
+      DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.10"
       build_name: manywheel-py3_10-cpu
@@ -784,13 +741,13 @@ jobs:
     needs: manywheel-py3_10-cpu-test
     with:
       PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
-      DOCKER_IMAGE: pytorch/manylinux-builder:cpu-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cpu-main
+      DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.10"
       build_name: manywheel-py3_10-cpu
@@ -806,7 +763,6 @@ jobs:
     needs: get-label-type
     with:
       PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -829,7 +785,6 @@ jobs:
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -853,7 +808,6 @@ jobs:
     needs: manywheel-py3_10-cpu-cxx11-abi-test
     with:
       PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -876,14 +830,14 @@ jobs:
     needs: get-label-type
     with:
       PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu118
       GPU_ARCH_VERSION: 11.8
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.8-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda11.8-main
+      DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.10"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
@@ -900,14 +854,14 @@ jobs:
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu118
       GPU_ARCH_VERSION: 11.8
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.8-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda11.8-main
+      DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.10"
       build_name: manywheel-py3_10-cuda11_8
@@ -924,14 +878,14 @@ jobs:
     needs: manywheel-py3_10-cuda11_8-test
     with:
       PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu118
       GPU_ARCH_VERSION: 11.8
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.8-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda11.8-main
+      DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.10"
       build_name: manywheel-py3_10-cuda11_8
@@ -947,14 +901,14 @@ jobs:
     needs: get-label-type
     with:
       PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu124
       GPU_ARCH_VERSION: 12.4
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux-builder:cuda12.4-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.4-main
+      DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.10"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
@@ -971,14 +925,14 @@ jobs:
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu124
       GPU_ARCH_VERSION: 12.4
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux-builder:cuda12.4-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.4-main
+      DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.10"
       build_name: manywheel-py3_10-cuda12_4
@@ -995,14 +949,14 @@ jobs:
     needs: manywheel-py3_10-cuda12_4-test
     with:
       PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu124
       GPU_ARCH_VERSION: 12.4
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux-builder:cuda12.4-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.4-main
+      DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.10"
       build_name: manywheel-py3_10-cuda12_4
@@ -1018,7 +972,6 @@ jobs:
     needs: get-label-type
     with:
       PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -1026,6 +979,7 @@ jobs:
       GPU_ARCH_VERSION: 12.6
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.6-main
+      DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.10"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
@@ -1042,7 +996,6 @@ jobs:
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -1050,6 +1003,7 @@ jobs:
       GPU_ARCH_VERSION: 12.6
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.6-main
+      DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.10"
       build_name: manywheel-py3_10-cuda12_6
@@ -1066,7 +1020,6 @@ jobs:
     needs: manywheel-py3_10-cuda12_6-test
     with:
       PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -1074,6 +1027,7 @@ jobs:
       GPU_ARCH_VERSION: 12.6
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.6-main
+      DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.10"
       build_name: manywheel-py3_10-cuda12_6
@@ -1083,45 +1037,45 @@ jobs:
       conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
     uses: ./.github/workflows/_binary-upload.yml
 
-  manywheel-py3_10-rocm6_1-build:
+  manywheel-py3_10-rocm6_2_4-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
     needs: get-label-type
     with:
       PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: rocm6.1
-      GPU_ARCH_VERSION: 6.1
+      DESIRED_CUDA: rocm6.2.4
+      GPU_ARCH_VERSION: 6.2.4
       GPU_ARCH_TYPE: rocm
-      DOCKER_IMAGE: pytorch/manylinux-builder:rocm6.1-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.2.4-main
+      DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.10"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      build_name: manywheel-py3_10-rocm6_1
+      build_name: manywheel-py3_10-rocm6_2_4
       build_environment: linux-binary-manywheel
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-  manywheel-py3_10-rocm6_1-test:  # Testing
+  manywheel-py3_10-rocm6_2_4-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs:
-      - manywheel-py3_10-rocm6_1-build
+      - manywheel-py3_10-rocm6_2_4-build
       - get-label-type
     runs-on: linux.rocm.gpu
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: rocm6.1
-      GPU_ARCH_VERSION: 6.1
+      DESIRED_CUDA: rocm6.2.4
+      GPU_ARCH_VERSION: 6.2.4
       GPU_ARCH_TYPE: rocm
       SKIP_ALL_TESTS: 1
-      DOCKER_IMAGE: pytorch/manylinux-builder:rocm6.1-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.2.4-main
+      DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.10"
     steps:
@@ -1130,108 +1084,95 @@ jobs:
       - uses: actions/download-artifact@v4.1.7
         name: Download Build Artifacts
         with:
-          name: manywheel-py3_10-rocm6_1
+          name: manywheel-py3_10-rocm6_2_4
           path: "${{ runner.temp }}/artifacts/"
       - name: Checkout PyTorch
-        uses: malfet/checkout@silent-checkout
+        uses: actions/checkout@v4
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
           path: pytorch
-          quiet-checkout: true
+          show-progress: false
       - name: Clean PyTorch checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-      - name: Checkout pytorch/builder
-        uses: malfet/checkout@silent-checkout
-        with:
-          ref: main
-          submodules: recursive
-          repository: pytorch/builder
-          path: builder
-          quiet-checkout: true
-      - name: Clean pytorch/builder checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: builder
       - name: ROCm set GPU_FLAG
         run: |
           echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
       - name: Pull Docker image
         uses: pytorch/test-infra/.github/actions/pull-docker-image@main
         with:
-          docker-image: pytorch/manylinux-builder:rocm6.1-main
+          docker-image: pytorch/manylinux2_28-builder:rocm6.2.4-main
       - name: Test Pytorch binary
         uses: ./pytorch/.github/actions/test-pytorch-binary
       - name: Teardown ROCm
         uses: ./.github/actions/teardown-rocm
-  manywheel-py3_10-rocm6_1-upload:  # Uploading
+  manywheel-py3_10-rocm6_2_4-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
       id-token: write
       contents: read
-    needs: manywheel-py3_10-rocm6_1-test
+    needs: manywheel-py3_10-rocm6_2_4-test
     with:
       PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: rocm6.1
-      GPU_ARCH_VERSION: 6.1
+      DESIRED_CUDA: rocm6.2.4
+      GPU_ARCH_VERSION: 6.2.4
       GPU_ARCH_TYPE: rocm
-      DOCKER_IMAGE: pytorch/manylinux-builder:rocm6.1-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.2.4-main
+      DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.10"
-      build_name: manywheel-py3_10-rocm6_1
+      build_name: manywheel-py3_10-rocm6_2_4
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
       conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
       conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
     uses: ./.github/workflows/_binary-upload.yml
 
-  manywheel-py3_10-rocm6_2-build:
+  manywheel-py3_10-rocm6_3-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
     needs: get-label-type
     with:
       PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: rocm6.2
-      GPU_ARCH_VERSION: 6.2
+      DESIRED_CUDA: rocm6.3
+      GPU_ARCH_VERSION: 6.3
       GPU_ARCH_TYPE: rocm
-      DOCKER_IMAGE: pytorch/manylinux-builder:rocm6.2-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.3-main
+      DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.10"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      build_name: manywheel-py3_10-rocm6_2
+      build_name: manywheel-py3_10-rocm6_3
       build_environment: linux-binary-manywheel
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-  manywheel-py3_10-rocm6_2-test:  # Testing
+  manywheel-py3_10-rocm6_3-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs:
-      - manywheel-py3_10-rocm6_2-build
+      - manywheel-py3_10-rocm6_3-build
       - get-label-type
     runs-on: linux.rocm.gpu
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: rocm6.2
-      GPU_ARCH_VERSION: 6.2
+      DESIRED_CUDA: rocm6.3
+      GPU_ARCH_VERSION: 6.3
       GPU_ARCH_TYPE: rocm
       SKIP_ALL_TESTS: 1
-      DOCKER_IMAGE: pytorch/manylinux-builder:rocm6.2-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.3-main
+      DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.10"
     steps:
@@ -1240,63 +1181,50 @@ jobs:
       - uses: actions/download-artifact@v4.1.7
         name: Download Build Artifacts
         with:
-          name: manywheel-py3_10-rocm6_2
+          name: manywheel-py3_10-rocm6_3
           path: "${{ runner.temp }}/artifacts/"
       - name: Checkout PyTorch
-        uses: malfet/checkout@silent-checkout
+        uses: actions/checkout@v4
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
           path: pytorch
-          quiet-checkout: true
+          show-progress: false
       - name: Clean PyTorch checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-      - name: Checkout pytorch/builder
-        uses: malfet/checkout@silent-checkout
-        with:
-          ref: main
-          submodules: recursive
-          repository: pytorch/builder
-          path: builder
-          quiet-checkout: true
-      - name: Clean pytorch/builder checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: builder
       - name: ROCm set GPU_FLAG
         run: |
           echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
       - name: Pull Docker image
         uses: pytorch/test-infra/.github/actions/pull-docker-image@main
         with:
-          docker-image: pytorch/manylinux-builder:rocm6.2-main
+          docker-image: pytorch/manylinux2_28-builder:rocm6.3-main
       - name: Test Pytorch binary
         uses: ./pytorch/.github/actions/test-pytorch-binary
       - name: Teardown ROCm
         uses: ./.github/actions/teardown-rocm
-  manywheel-py3_10-rocm6_2-upload:  # Uploading
+  manywheel-py3_10-rocm6_3-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
       id-token: write
       contents: read
-    needs: manywheel-py3_10-rocm6_2-test
+    needs: manywheel-py3_10-rocm6_3-test
     with:
       PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: rocm6.2
-      GPU_ARCH_VERSION: 6.2
+      DESIRED_CUDA: rocm6.3
+      GPU_ARCH_VERSION: 6.3
       GPU_ARCH_TYPE: rocm
-      DOCKER_IMAGE: pytorch/manylinux-builder:rocm6.2-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.3-main
+      DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.10"
-      build_name: manywheel-py3_10-rocm6_2
+      build_name: manywheel-py3_10-rocm6_3
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
       conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
@@ -1309,13 +1237,13 @@ jobs:
     needs: get-label-type
     with:
       PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: xpu
       GPU_ARCH_TYPE: xpu
       DOCKER_IMAGE: pytorch/manylinux2_28-builder:xpu-main
+      DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.10"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
@@ -1333,7 +1261,6 @@ jobs:
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -1341,6 +1268,7 @@ jobs:
       GPU_ARCH_TYPE: xpu
       SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: pytorch/manylinux2_28-builder:xpu-main
+      DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.10"
     permissions:
@@ -1364,30 +1292,17 @@ jobs:
           name: manywheel-py3_10-xpu
           path: "${{ runner.temp }}/artifacts/"
       - name: Checkout PyTorch
-        uses: malfet/checkout@silent-checkout
+        uses: actions/checkout@v4
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
           path: pytorch
-          quiet-checkout: true
+          show-progress: false
       - name: Clean PyTorch checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-      - name: Checkout pytorch/builder
-        uses: malfet/checkout@silent-checkout
-        with:
-          ref: main
-          submodules: recursive
-          repository: pytorch/builder
-          path: builder
-          quiet-checkout: true
-      - name: Clean pytorch/builder checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: builder
       - name: Pull Docker image
         uses: pytorch/test-infra/.github/actions/pull-docker-image@main
         with:
@@ -1404,13 +1319,13 @@ jobs:
     needs: manywheel-py3_10-xpu-test
     with:
       PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: xpu
       GPU_ARCH_TYPE: xpu
       DOCKER_IMAGE: pytorch/manylinux2_28-builder:xpu-main
+      DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.10"
       build_name: manywheel-py3_10-xpu
@@ -1426,13 +1341,13 @@ jobs:
     needs: get-label-type
     with:
       PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
-      DOCKER_IMAGE: pytorch/manylinux-builder:cpu-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cpu-main
+      DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.11"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
@@ -1448,13 +1363,13 @@ jobs:
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
-      DOCKER_IMAGE: pytorch/manylinux-builder:cpu-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cpu-main
+      DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.11"
       build_name: manywheel-py3_11-cpu
@@ -1471,13 +1386,13 @@ jobs:
     needs: manywheel-py3_11-cpu-test
     with:
       PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
-      DOCKER_IMAGE: pytorch/manylinux-builder:cpu-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cpu-main
+      DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.11"
       build_name: manywheel-py3_11-cpu
@@ -1493,7 +1408,6 @@ jobs:
     needs: get-label-type
     with:
       PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -1516,7 +1430,6 @@ jobs:
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -1540,7 +1453,6 @@ jobs:
     needs: manywheel-py3_11-cpu-cxx11-abi-test
     with:
       PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -1563,14 +1475,14 @@ jobs:
     needs: get-label-type
     with:
       PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu118
       GPU_ARCH_VERSION: 11.8
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.8-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda11.8-main
+      DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.11"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
@@ -1587,14 +1499,14 @@ jobs:
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu118
       GPU_ARCH_VERSION: 11.8
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.8-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda11.8-main
+      DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.11"
       build_name: manywheel-py3_11-cuda11_8
@@ -1611,14 +1523,14 @@ jobs:
     needs: manywheel-py3_11-cuda11_8-test
     with:
       PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu118
       GPU_ARCH_VERSION: 11.8
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.8-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda11.8-main
+      DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.11"
       build_name: manywheel-py3_11-cuda11_8
@@ -1634,14 +1546,14 @@ jobs:
     needs: get-label-type
     with:
       PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu124
       GPU_ARCH_VERSION: 12.4
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux-builder:cuda12.4-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.4-main
+      DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.11"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
@@ -1658,14 +1570,14 @@ jobs:
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu124
       GPU_ARCH_VERSION: 12.4
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux-builder:cuda12.4-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.4-main
+      DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.11"
       build_name: manywheel-py3_11-cuda12_4
@@ -1682,14 +1594,14 @@ jobs:
     needs: manywheel-py3_11-cuda12_4-test
     with:
       PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu124
       GPU_ARCH_VERSION: 12.4
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux-builder:cuda12.4-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.4-main
+      DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.11"
       build_name: manywheel-py3_11-cuda12_4
@@ -1705,14 +1617,13 @@ jobs:
     needs: get-label-type
     with:
       PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu124
       GPU_ARCH_VERSION: 12.4
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux-builder:cuda12.4-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.4-main
       use_split_build: False
       DESIRED_PYTHON: "3.11"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
@@ -1728,14 +1639,13 @@ jobs:
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu124
       GPU_ARCH_VERSION: 12.4
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux-builder:cuda12.4-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.4-main
       use_split_build: False
       DESIRED_PYTHON: "3.11"
       build_name: manywheel-py3_11-cuda12_4-full
@@ -1752,14 +1662,13 @@ jobs:
     needs: manywheel-py3_11-cuda12_4-full-test
     with:
       PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu124
       GPU_ARCH_VERSION: 12.4
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux-builder:cuda12.4-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.4-main
       use_split_build: False
       DESIRED_PYTHON: "3.11"
       build_name: manywheel-py3_11-cuda12_4-full
@@ -1775,7 +1684,6 @@ jobs:
     needs: get-label-type
     with:
       PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -1783,6 +1691,7 @@ jobs:
       GPU_ARCH_VERSION: 12.6
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.6-main
+      DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.11"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
@@ -1799,7 +1708,6 @@ jobs:
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -1807,6 +1715,7 @@ jobs:
       GPU_ARCH_VERSION: 12.6
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.6-main
+      DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.11"
       build_name: manywheel-py3_11-cuda12_6
@@ -1823,7 +1732,6 @@ jobs:
     needs: manywheel-py3_11-cuda12_6-test
     with:
       PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -1831,6 +1739,7 @@ jobs:
       GPU_ARCH_VERSION: 12.6
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.6-main
+      DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.11"
       build_name: manywheel-py3_11-cuda12_6
@@ -1840,45 +1749,45 @@ jobs:
       conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
     uses: ./.github/workflows/_binary-upload.yml
 
-  manywheel-py3_11-rocm6_1-build:
+  manywheel-py3_11-rocm6_2_4-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
     needs: get-label-type
     with:
       PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: rocm6.1
-      GPU_ARCH_VERSION: 6.1
+      DESIRED_CUDA: rocm6.2.4
+      GPU_ARCH_VERSION: 6.2.4
       GPU_ARCH_TYPE: rocm
-      DOCKER_IMAGE: pytorch/manylinux-builder:rocm6.1-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.2.4-main
+      DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.11"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      build_name: manywheel-py3_11-rocm6_1
+      build_name: manywheel-py3_11-rocm6_2_4
       build_environment: linux-binary-manywheel
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-  manywheel-py3_11-rocm6_1-test:  # Testing
+  manywheel-py3_11-rocm6_2_4-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs:
-      - manywheel-py3_11-rocm6_1-build
+      - manywheel-py3_11-rocm6_2_4-build
       - get-label-type
     runs-on: linux.rocm.gpu
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: rocm6.1
-      GPU_ARCH_VERSION: 6.1
+      DESIRED_CUDA: rocm6.2.4
+      GPU_ARCH_VERSION: 6.2.4
       GPU_ARCH_TYPE: rocm
       SKIP_ALL_TESTS: 1
-      DOCKER_IMAGE: pytorch/manylinux-builder:rocm6.1-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.2.4-main
+      DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.11"
     steps:
@@ -1887,108 +1796,95 @@ jobs:
       - uses: actions/download-artifact@v4.1.7
         name: Download Build Artifacts
         with:
-          name: manywheel-py3_11-rocm6_1
+          name: manywheel-py3_11-rocm6_2_4
           path: "${{ runner.temp }}/artifacts/"
       - name: Checkout PyTorch
-        uses: malfet/checkout@silent-checkout
+        uses: actions/checkout@v4
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
           path: pytorch
-          quiet-checkout: true
+          show-progress: false
       - name: Clean PyTorch checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-      - name: Checkout pytorch/builder
-        uses: malfet/checkout@silent-checkout
-        with:
-          ref: main
-          submodules: recursive
-          repository: pytorch/builder
-          path: builder
-          quiet-checkout: true
-      - name: Clean pytorch/builder checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: builder
       - name: ROCm set GPU_FLAG
         run: |
           echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
       - name: Pull Docker image
         uses: pytorch/test-infra/.github/actions/pull-docker-image@main
         with:
-          docker-image: pytorch/manylinux-builder:rocm6.1-main
+          docker-image: pytorch/manylinux2_28-builder:rocm6.2.4-main
       - name: Test Pytorch binary
         uses: ./pytorch/.github/actions/test-pytorch-binary
       - name: Teardown ROCm
         uses: ./.github/actions/teardown-rocm
-  manywheel-py3_11-rocm6_1-upload:  # Uploading
+  manywheel-py3_11-rocm6_2_4-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
       id-token: write
       contents: read
-    needs: manywheel-py3_11-rocm6_1-test
+    needs: manywheel-py3_11-rocm6_2_4-test
     with:
       PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: rocm6.1
-      GPU_ARCH_VERSION: 6.1
+      DESIRED_CUDA: rocm6.2.4
+      GPU_ARCH_VERSION: 6.2.4
       GPU_ARCH_TYPE: rocm
-      DOCKER_IMAGE: pytorch/manylinux-builder:rocm6.1-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.2.4-main
+      DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.11"
-      build_name: manywheel-py3_11-rocm6_1
+      build_name: manywheel-py3_11-rocm6_2_4
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
       conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
       conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
     uses: ./.github/workflows/_binary-upload.yml
 
-  manywheel-py3_11-rocm6_2-build:
+  manywheel-py3_11-rocm6_3-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
     needs: get-label-type
     with:
       PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: rocm6.2
-      GPU_ARCH_VERSION: 6.2
+      DESIRED_CUDA: rocm6.3
+      GPU_ARCH_VERSION: 6.3
       GPU_ARCH_TYPE: rocm
-      DOCKER_IMAGE: pytorch/manylinux-builder:rocm6.2-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.3-main
+      DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.11"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      build_name: manywheel-py3_11-rocm6_2
+      build_name: manywheel-py3_11-rocm6_3
       build_environment: linux-binary-manywheel
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-  manywheel-py3_11-rocm6_2-test:  # Testing
+  manywheel-py3_11-rocm6_3-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs:
-      - manywheel-py3_11-rocm6_2-build
+      - manywheel-py3_11-rocm6_3-build
       - get-label-type
     runs-on: linux.rocm.gpu
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: rocm6.2
-      GPU_ARCH_VERSION: 6.2
+      DESIRED_CUDA: rocm6.3
+      GPU_ARCH_VERSION: 6.3
       GPU_ARCH_TYPE: rocm
       SKIP_ALL_TESTS: 1
-      DOCKER_IMAGE: pytorch/manylinux-builder:rocm6.2-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.3-main
+      DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.11"
     steps:
@@ -1997,63 +1893,50 @@ jobs:
       - uses: actions/download-artifact@v4.1.7
         name: Download Build Artifacts
         with:
-          name: manywheel-py3_11-rocm6_2
+          name: manywheel-py3_11-rocm6_3
           path: "${{ runner.temp }}/artifacts/"
       - name: Checkout PyTorch
-        uses: malfet/checkout@silent-checkout
+        uses: actions/checkout@v4
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
           path: pytorch
-          quiet-checkout: true
+          show-progress: false
       - name: Clean PyTorch checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-      - name: Checkout pytorch/builder
-        uses: malfet/checkout@silent-checkout
-        with:
-          ref: main
-          submodules: recursive
-          repository: pytorch/builder
-          path: builder
-          quiet-checkout: true
-      - name: Clean pytorch/builder checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: builder
       - name: ROCm set GPU_FLAG
         run: |
           echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
       - name: Pull Docker image
         uses: pytorch/test-infra/.github/actions/pull-docker-image@main
         with:
-          docker-image: pytorch/manylinux-builder:rocm6.2-main
+          docker-image: pytorch/manylinux2_28-builder:rocm6.3-main
       - name: Test Pytorch binary
         uses: ./pytorch/.github/actions/test-pytorch-binary
       - name: Teardown ROCm
         uses: ./.github/actions/teardown-rocm
-  manywheel-py3_11-rocm6_2-upload:  # Uploading
+  manywheel-py3_11-rocm6_3-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
       id-token: write
       contents: read
-    needs: manywheel-py3_11-rocm6_2-test
+    needs: manywheel-py3_11-rocm6_3-test
     with:
       PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: rocm6.2
-      GPU_ARCH_VERSION: 6.2
+      DESIRED_CUDA: rocm6.3
+      GPU_ARCH_VERSION: 6.3
       GPU_ARCH_TYPE: rocm
-      DOCKER_IMAGE: pytorch/manylinux-builder:rocm6.2-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.3-main
+      DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.11"
-      build_name: manywheel-py3_11-rocm6_2
+      build_name: manywheel-py3_11-rocm6_3
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
       conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
@@ -2066,13 +1949,13 @@ jobs:
     needs: get-label-type
     with:
       PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: xpu
       GPU_ARCH_TYPE: xpu
       DOCKER_IMAGE: pytorch/manylinux2_28-builder:xpu-main
+      DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.11"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
@@ -2090,7 +1973,6 @@ jobs:
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -2098,6 +1980,7 @@ jobs:
       GPU_ARCH_TYPE: xpu
       SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: pytorch/manylinux2_28-builder:xpu-main
+      DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.11"
     permissions:
@@ -2121,30 +2004,17 @@ jobs:
           name: manywheel-py3_11-xpu
           path: "${{ runner.temp }}/artifacts/"
       - name: Checkout PyTorch
-        uses: malfet/checkout@silent-checkout
+        uses: actions/checkout@v4
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
           path: pytorch
-          quiet-checkout: true
+          show-progress: false
       - name: Clean PyTorch checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-      - name: Checkout pytorch/builder
-        uses: malfet/checkout@silent-checkout
-        with:
-          ref: main
-          submodules: recursive
-          repository: pytorch/builder
-          path: builder
-          quiet-checkout: true
-      - name: Clean pytorch/builder checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: builder
       - name: Pull Docker image
         uses: pytorch/test-infra/.github/actions/pull-docker-image@main
         with:
@@ -2161,13 +2031,13 @@ jobs:
     needs: manywheel-py3_11-xpu-test
     with:
       PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: xpu
       GPU_ARCH_TYPE: xpu
       DOCKER_IMAGE: pytorch/manylinux2_28-builder:xpu-main
+      DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.11"
       build_name: manywheel-py3_11-xpu
@@ -2183,13 +2053,13 @@ jobs:
     needs: get-label-type
     with:
       PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
-      DOCKER_IMAGE: pytorch/manylinux-builder:cpu-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cpu-main
+      DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.12"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
@@ -2205,13 +2075,13 @@ jobs:
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
-      DOCKER_IMAGE: pytorch/manylinux-builder:cpu-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cpu-main
+      DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.12"
       build_name: manywheel-py3_12-cpu
@@ -2228,13 +2098,13 @@ jobs:
     needs: manywheel-py3_12-cpu-test
     with:
       PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
-      DOCKER_IMAGE: pytorch/manylinux-builder:cpu-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cpu-main
+      DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.12"
       build_name: manywheel-py3_12-cpu
@@ -2250,7 +2120,6 @@ jobs:
     needs: get-label-type
     with:
       PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -2273,7 +2142,6 @@ jobs:
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -2297,7 +2165,6 @@ jobs:
     needs: manywheel-py3_12-cpu-cxx11-abi-test
     with:
       PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -2320,14 +2187,14 @@ jobs:
     needs: get-label-type
     with:
       PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu118
       GPU_ARCH_VERSION: 11.8
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.8-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda11.8-main
+      DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.12"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
@@ -2344,14 +2211,14 @@ jobs:
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu118
       GPU_ARCH_VERSION: 11.8
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.8-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda11.8-main
+      DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.12"
       build_name: manywheel-py3_12-cuda11_8
@@ -2368,14 +2235,14 @@ jobs:
     needs: manywheel-py3_12-cuda11_8-test
     with:
       PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu118
       GPU_ARCH_VERSION: 11.8
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.8-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda11.8-main
+      DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.12"
       build_name: manywheel-py3_12-cuda11_8
@@ -2391,14 +2258,14 @@ jobs:
     needs: get-label-type
     with:
       PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu124
       GPU_ARCH_VERSION: 12.4
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux-builder:cuda12.4-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.4-main
+      DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.12"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
@@ -2415,14 +2282,14 @@ jobs:
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu124
       GPU_ARCH_VERSION: 12.4
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux-builder:cuda12.4-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.4-main
+      DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.12"
       build_name: manywheel-py3_12-cuda12_4
@@ -2439,14 +2306,14 @@ jobs:
     needs: manywheel-py3_12-cuda12_4-test
     with:
       PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu124
       GPU_ARCH_VERSION: 12.4
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux-builder:cuda12.4-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.4-main
+      DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.12"
       build_name: manywheel-py3_12-cuda12_4
@@ -2462,7 +2329,6 @@ jobs:
     needs: get-label-type
     with:
       PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -2470,6 +2336,7 @@ jobs:
       GPU_ARCH_VERSION: 12.6
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.6-main
+      DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.12"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
@@ -2486,7 +2353,6 @@ jobs:
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -2494,6 +2360,7 @@ jobs:
       GPU_ARCH_VERSION: 12.6
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.6-main
+      DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.12"
       build_name: manywheel-py3_12-cuda12_6
@@ -2510,7 +2377,6 @@ jobs:
     needs: manywheel-py3_12-cuda12_6-test
     with:
       PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -2518,6 +2384,7 @@ jobs:
       GPU_ARCH_VERSION: 12.6
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.6-main
+      DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.12"
       build_name: manywheel-py3_12-cuda12_6
@@ -2527,45 +2394,45 @@ jobs:
       conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
     uses: ./.github/workflows/_binary-upload.yml
 
-  manywheel-py3_12-rocm6_1-build:
+  manywheel-py3_12-rocm6_2_4-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
     needs: get-label-type
     with:
       PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: rocm6.1
-      GPU_ARCH_VERSION: 6.1
+      DESIRED_CUDA: rocm6.2.4
+      GPU_ARCH_VERSION: 6.2.4
       GPU_ARCH_TYPE: rocm
-      DOCKER_IMAGE: pytorch/manylinux-builder:rocm6.1-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.2.4-main
+      DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.12"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      build_name: manywheel-py3_12-rocm6_1
+      build_name: manywheel-py3_12-rocm6_2_4
       build_environment: linux-binary-manywheel
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-  manywheel-py3_12-rocm6_1-test:  # Testing
+  manywheel-py3_12-rocm6_2_4-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs:
-      - manywheel-py3_12-rocm6_1-build
+      - manywheel-py3_12-rocm6_2_4-build
       - get-label-type
     runs-on: linux.rocm.gpu
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: rocm6.1
-      GPU_ARCH_VERSION: 6.1
+      DESIRED_CUDA: rocm6.2.4
+      GPU_ARCH_VERSION: 6.2.4
       GPU_ARCH_TYPE: rocm
       SKIP_ALL_TESTS: 1
-      DOCKER_IMAGE: pytorch/manylinux-builder:rocm6.1-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.2.4-main
+      DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.12"
     steps:
@@ -2574,108 +2441,95 @@ jobs:
       - uses: actions/download-artifact@v4.1.7
         name: Download Build Artifacts
         with:
-          name: manywheel-py3_12-rocm6_1
+          name: manywheel-py3_12-rocm6_2_4
           path: "${{ runner.temp }}/artifacts/"
       - name: Checkout PyTorch
-        uses: malfet/checkout@silent-checkout
+        uses: actions/checkout@v4
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
           path: pytorch
-          quiet-checkout: true
+          show-progress: false
       - name: Clean PyTorch checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-      - name: Checkout pytorch/builder
-        uses: malfet/checkout@silent-checkout
-        with:
-          ref: main
-          submodules: recursive
-          repository: pytorch/builder
-          path: builder
-          quiet-checkout: true
-      - name: Clean pytorch/builder checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: builder
       - name: ROCm set GPU_FLAG
         run: |
           echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
       - name: Pull Docker image
         uses: pytorch/test-infra/.github/actions/pull-docker-image@main
         with:
-          docker-image: pytorch/manylinux-builder:rocm6.1-main
+          docker-image: pytorch/manylinux2_28-builder:rocm6.2.4-main
       - name: Test Pytorch binary
         uses: ./pytorch/.github/actions/test-pytorch-binary
       - name: Teardown ROCm
         uses: ./.github/actions/teardown-rocm
-  manywheel-py3_12-rocm6_1-upload:  # Uploading
+  manywheel-py3_12-rocm6_2_4-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
       id-token: write
       contents: read
-    needs: manywheel-py3_12-rocm6_1-test
+    needs: manywheel-py3_12-rocm6_2_4-test
     with:
       PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: rocm6.1
-      GPU_ARCH_VERSION: 6.1
+      DESIRED_CUDA: rocm6.2.4
+      GPU_ARCH_VERSION: 6.2.4
       GPU_ARCH_TYPE: rocm
-      DOCKER_IMAGE: pytorch/manylinux-builder:rocm6.1-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.2.4-main
+      DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.12"
-      build_name: manywheel-py3_12-rocm6_1
+      build_name: manywheel-py3_12-rocm6_2_4
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
       conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
       conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
     uses: ./.github/workflows/_binary-upload.yml
 
-  manywheel-py3_12-rocm6_2-build:
+  manywheel-py3_12-rocm6_3-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
     needs: get-label-type
     with:
       PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: rocm6.2
-      GPU_ARCH_VERSION: 6.2
+      DESIRED_CUDA: rocm6.3
+      GPU_ARCH_VERSION: 6.3
       GPU_ARCH_TYPE: rocm
-      DOCKER_IMAGE: pytorch/manylinux-builder:rocm6.2-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.3-main
+      DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.12"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      build_name: manywheel-py3_12-rocm6_2
+      build_name: manywheel-py3_12-rocm6_3
       build_environment: linux-binary-manywheel
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
-  manywheel-py3_12-rocm6_2-test:  # Testing
+  manywheel-py3_12-rocm6_3-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs:
-      - manywheel-py3_12-rocm6_2-build
+      - manywheel-py3_12-rocm6_3-build
       - get-label-type
     runs-on: linux.rocm.gpu
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: rocm6.2
-      GPU_ARCH_VERSION: 6.2
+      DESIRED_CUDA: rocm6.3
+      GPU_ARCH_VERSION: 6.3
       GPU_ARCH_TYPE: rocm
       SKIP_ALL_TESTS: 1
-      DOCKER_IMAGE: pytorch/manylinux-builder:rocm6.2-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.3-main
+      DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.12"
     steps:
@@ -2684,63 +2538,50 @@ jobs:
       - uses: actions/download-artifact@v4.1.7
         name: Download Build Artifacts
         with:
-          name: manywheel-py3_12-rocm6_2
+          name: manywheel-py3_12-rocm6_3
           path: "${{ runner.temp }}/artifacts/"
       - name: Checkout PyTorch
-        uses: malfet/checkout@silent-checkout
+        uses: actions/checkout@v4
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
           path: pytorch
-          quiet-checkout: true
+          show-progress: false
       - name: Clean PyTorch checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-      - name: Checkout pytorch/builder
-        uses: malfet/checkout@silent-checkout
-        with:
-          ref: main
-          submodules: recursive
-          repository: pytorch/builder
-          path: builder
-          quiet-checkout: true
-      - name: Clean pytorch/builder checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: builder
       - name: ROCm set GPU_FLAG
         run: |
           echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
       - name: Pull Docker image
         uses: pytorch/test-infra/.github/actions/pull-docker-image@main
         with:
-          docker-image: pytorch/manylinux-builder:rocm6.2-main
+          docker-image: pytorch/manylinux2_28-builder:rocm6.3-main
       - name: Test Pytorch binary
         uses: ./pytorch/.github/actions/test-pytorch-binary
       - name: Teardown ROCm
         uses: ./.github/actions/teardown-rocm
-  manywheel-py3_12-rocm6_2-upload:  # Uploading
+  manywheel-py3_12-rocm6_3-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
     permissions:
       id-token: write
       contents: read
-    needs: manywheel-py3_12-rocm6_2-test
+    needs: manywheel-py3_12-rocm6_3-test
     with:
       PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: rocm6.2
-      GPU_ARCH_VERSION: 6.2
+      DESIRED_CUDA: rocm6.3
+      GPU_ARCH_VERSION: 6.3
       GPU_ARCH_TYPE: rocm
-      DOCKER_IMAGE: pytorch/manylinux-builder:rocm6.2-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.3-main
+      DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.12"
-      build_name: manywheel-py3_12-rocm6_2
+      build_name: manywheel-py3_12-rocm6_3
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
       conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
@@ -2753,13 +2594,13 @@ jobs:
     needs: get-label-type
     with:
       PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: xpu
       GPU_ARCH_TYPE: xpu
       DOCKER_IMAGE: pytorch/manylinux2_28-builder:xpu-main
+      DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.12"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
@@ -2777,7 +2618,6 @@ jobs:
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -2785,6 +2625,7 @@ jobs:
       GPU_ARCH_TYPE: xpu
       SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: pytorch/manylinux2_28-builder:xpu-main
+      DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.12"
     permissions:
@@ -2808,30 +2649,17 @@ jobs:
           name: manywheel-py3_12-xpu
           path: "${{ runner.temp }}/artifacts/"
       - name: Checkout PyTorch
-        uses: malfet/checkout@silent-checkout
+        uses: actions/checkout@v4
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
           path: pytorch
-          quiet-checkout: true
+          show-progress: false
       - name: Clean PyTorch checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-      - name: Checkout pytorch/builder
-        uses: malfet/checkout@silent-checkout
-        with:
-          ref: main
-          submodules: recursive
-          repository: pytorch/builder
-          path: builder
-          quiet-checkout: true
-      - name: Clean pytorch/builder checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: builder
       - name: Pull Docker image
         uses: pytorch/test-infra/.github/actions/pull-docker-image@main
         with:
@@ -2848,13 +2676,13 @@ jobs:
     needs: manywheel-py3_12-xpu-test
     with:
       PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: xpu
       GPU_ARCH_TYPE: xpu
       DOCKER_IMAGE: pytorch/manylinux2_28-builder:xpu-main
+      DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.12"
       build_name: manywheel-py3_12-xpu
@@ -2870,13 +2698,13 @@ jobs:
     needs: get-label-type
     with:
       PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
-      DOCKER_IMAGE: pytorch/manylinux-builder:cpu-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cpu-main
+      DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.13"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
@@ -2892,13 +2720,13 @@ jobs:
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
-      DOCKER_IMAGE: pytorch/manylinux-builder:cpu-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cpu-main
+      DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.13"
       build_name: manywheel-py3_13-cpu
@@ -2915,13 +2743,13 @@ jobs:
     needs: manywheel-py3_13-cpu-test
     with:
       PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
-      DOCKER_IMAGE: pytorch/manylinux-builder:cpu-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cpu-main
+      DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.13"
       build_name: manywheel-py3_13-cpu
@@ -2937,7 +2765,6 @@ jobs:
     needs: get-label-type
     with:
       PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -2960,7 +2787,6 @@ jobs:
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -2984,7 +2810,6 @@ jobs:
     needs: manywheel-py3_13-cpu-cxx11-abi-test
     with:
       PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -3007,14 +2832,14 @@ jobs:
     needs: get-label-type
     with:
       PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu118
       GPU_ARCH_VERSION: 11.8
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.8-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda11.8-main
+      DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.13"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
@@ -3031,14 +2856,14 @@ jobs:
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu118
       GPU_ARCH_VERSION: 11.8
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.8-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda11.8-main
+      DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.13"
       build_name: manywheel-py3_13-cuda11_8
@@ -3055,14 +2880,14 @@ jobs:
     needs: manywheel-py3_13-cuda11_8-test
     with:
       PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu118
       GPU_ARCH_VERSION: 11.8
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.8-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda11.8-main
+      DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.13"
       build_name: manywheel-py3_13-cuda11_8
@@ -3078,14 +2903,14 @@ jobs:
     needs: get-label-type
     with:
       PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu124
       GPU_ARCH_VERSION: 12.4
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux-builder:cuda12.4-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.4-main
+      DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.13"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
@@ -3102,14 +2927,14 @@ jobs:
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu124
       GPU_ARCH_VERSION: 12.4
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux-builder:cuda12.4-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.4-main
+      DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.13"
       build_name: manywheel-py3_13-cuda12_4
@@ -3126,14 +2951,14 @@ jobs:
     needs: manywheel-py3_13-cuda12_4-test
     with:
       PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu124
       GPU_ARCH_VERSION: 12.4
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux-builder:cuda12.4-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.4-main
+      DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.13"
       build_name: manywheel-py3_13-cuda12_4
@@ -3149,7 +2974,6 @@ jobs:
     needs: get-label-type
     with:
       PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -3157,6 +2981,7 @@ jobs:
       GPU_ARCH_VERSION: 12.6
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.6-main
+      DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.13"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
@@ -3173,7 +2998,6 @@ jobs:
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -3181,6 +3005,7 @@ jobs:
       GPU_ARCH_VERSION: 12.6
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.6-main
+      DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.13"
       build_name: manywheel-py3_13-cuda12_6
@@ -3197,7 +3022,6 @@ jobs:
     needs: manywheel-py3_13-cuda12_6-test
     with:
       PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -3205,9 +3029,204 @@ jobs:
       GPU_ARCH_VERSION: 12.6
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.6-main
+      DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.13"
       build_name: manywheel-py3_13-cuda12_6
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+      conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
+      conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
+    uses: ./.github/workflows/_binary-upload.yml
+
+  manywheel-py3_13-rocm6_2_4-build:
+    if: ${{ github.repository_owner == 'pytorch' }}
+    uses: ./.github/workflows/_binary-build-linux.yml
+    needs: get-label-type
+    with:
+      PYTORCH_ROOT: /pytorch
+      PACKAGE_TYPE: manywheel
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: rocm6.2.4
+      GPU_ARCH_VERSION: 6.2.4
+      GPU_ARCH_TYPE: rocm
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.2.4-main
+      DESIRED_DEVTOOLSET: cxx11-abi
+      use_split_build: False
+      DESIRED_PYTHON: "3.13"
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      build_name: manywheel-py3_13-rocm6_2_4
+      build_environment: linux-binary-manywheel
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+  manywheel-py3_13-rocm6_2_4-test:  # Testing
+    if: ${{ github.repository_owner == 'pytorch' }}
+    needs:
+      - manywheel-py3_13-rocm6_2_4-build
+      - get-label-type
+    runs-on: linux.rocm.gpu
+    timeout-minutes: 240
+    env:
+      PYTORCH_ROOT: /pytorch
+      PACKAGE_TYPE: manywheel
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: rocm6.2.4
+      GPU_ARCH_VERSION: 6.2.4
+      GPU_ARCH_TYPE: rocm
+      SKIP_ALL_TESTS: 1
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.2.4-main
+      DESIRED_DEVTOOLSET: cxx11-abi
+      use_split_build: False
+      DESIRED_PYTHON: "3.13"
+    steps:
+      - name: Setup ROCm
+        uses: ./.github/actions/setup-rocm
+      - uses: actions/download-artifact@v4.1.7
+        name: Download Build Artifacts
+        with:
+          name: manywheel-py3_13-rocm6_2_4
+          path: "${{ runner.temp }}/artifacts/"
+      - name: Checkout PyTorch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          submodules: recursive
+          path: pytorch
+          show-progress: false
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: pytorch
+      - name: ROCm set GPU_FLAG
+        run: |
+          echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
+      - name: Pull Docker image
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
+        with:
+          docker-image: pytorch/manylinux2_28-builder:rocm6.2.4-main
+      - name: Test Pytorch binary
+        uses: ./pytorch/.github/actions/test-pytorch-binary
+      - name: Teardown ROCm
+        uses: ./.github/actions/teardown-rocm
+  manywheel-py3_13-rocm6_2_4-upload:  # Uploading
+    if: ${{ github.repository_owner == 'pytorch' }}
+    permissions:
+      id-token: write
+      contents: read
+    needs: manywheel-py3_13-rocm6_2_4-test
+    with:
+      PYTORCH_ROOT: /pytorch
+      PACKAGE_TYPE: manywheel
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: rocm6.2.4
+      GPU_ARCH_VERSION: 6.2.4
+      GPU_ARCH_TYPE: rocm
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.2.4-main
+      DESIRED_DEVTOOLSET: cxx11-abi
+      use_split_build: False
+      DESIRED_PYTHON: "3.13"
+      build_name: manywheel-py3_13-rocm6_2_4
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+      conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
+      conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
+    uses: ./.github/workflows/_binary-upload.yml
+
+  manywheel-py3_13-rocm6_3-build:
+    if: ${{ github.repository_owner == 'pytorch' }}
+    uses: ./.github/workflows/_binary-build-linux.yml
+    needs: get-label-type
+    with:
+      PYTORCH_ROOT: /pytorch
+      PACKAGE_TYPE: manywheel
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: rocm6.3
+      GPU_ARCH_VERSION: 6.3
+      GPU_ARCH_TYPE: rocm
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.3-main
+      DESIRED_DEVTOOLSET: cxx11-abi
+      use_split_build: False
+      DESIRED_PYTHON: "3.13"
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      build_name: manywheel-py3_13-rocm6_3
+      build_environment: linux-binary-manywheel
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+  manywheel-py3_13-rocm6_3-test:  # Testing
+    if: ${{ github.repository_owner == 'pytorch' }}
+    needs:
+      - manywheel-py3_13-rocm6_3-build
+      - get-label-type
+    runs-on: linux.rocm.gpu
+    timeout-minutes: 240
+    env:
+      PYTORCH_ROOT: /pytorch
+      PACKAGE_TYPE: manywheel
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: rocm6.3
+      GPU_ARCH_VERSION: 6.3
+      GPU_ARCH_TYPE: rocm
+      SKIP_ALL_TESTS: 1
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.3-main
+      DESIRED_DEVTOOLSET: cxx11-abi
+      use_split_build: False
+      DESIRED_PYTHON: "3.13"
+    steps:
+      - name: Setup ROCm
+        uses: ./.github/actions/setup-rocm
+      - uses: actions/download-artifact@v4.1.7
+        name: Download Build Artifacts
+        with:
+          name: manywheel-py3_13-rocm6_3
+          path: "${{ runner.temp }}/artifacts/"
+      - name: Checkout PyTorch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          submodules: recursive
+          path: pytorch
+          show-progress: false
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: pytorch
+      - name: ROCm set GPU_FLAG
+        run: |
+          echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
+      - name: Pull Docker image
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
+        with:
+          docker-image: pytorch/manylinux2_28-builder:rocm6.3-main
+      - name: Test Pytorch binary
+        uses: ./pytorch/.github/actions/test-pytorch-binary
+      - name: Teardown ROCm
+        uses: ./.github/actions/teardown-rocm
+  manywheel-py3_13-rocm6_3-upload:  # Uploading
+    if: ${{ github.repository_owner == 'pytorch' }}
+    permissions:
+      id-token: write
+      contents: read
+    needs: manywheel-py3_13-rocm6_3-test
+    with:
+      PYTORCH_ROOT: /pytorch
+      PACKAGE_TYPE: manywheel
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: rocm6.3
+      GPU_ARCH_VERSION: 6.3
+      GPU_ARCH_TYPE: rocm
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.3-main
+      DESIRED_DEVTOOLSET: cxx11-abi
+      use_split_build: False
+      DESIRED_PYTHON: "3.13"
+      build_name: manywheel-py3_13-rocm6_3
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
       conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
@@ -3220,13 +3239,13 @@ jobs:
     needs: get-label-type
     with:
       PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: xpu
       GPU_ARCH_TYPE: xpu
       DOCKER_IMAGE: pytorch/manylinux2_28-builder:xpu-main
+      DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.13"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
@@ -3244,7 +3263,6 @@ jobs:
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -3252,6 +3270,7 @@ jobs:
       GPU_ARCH_TYPE: xpu
       SKIP_ALL_TESTS: 1
       DOCKER_IMAGE: pytorch/manylinux2_28-builder:xpu-main
+      DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.13"
     permissions:
@@ -3275,30 +3294,17 @@ jobs:
           name: manywheel-py3_13-xpu
           path: "${{ runner.temp }}/artifacts/"
       - name: Checkout PyTorch
-        uses: malfet/checkout@silent-checkout
+        uses: actions/checkout@v4
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
           path: pytorch
-          quiet-checkout: true
+          show-progress: false
       - name: Clean PyTorch checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-      - name: Checkout pytorch/builder
-        uses: malfet/checkout@silent-checkout
-        with:
-          ref: main
-          submodules: recursive
-          repository: pytorch/builder
-          path: builder
-          quiet-checkout: true
-      - name: Clean pytorch/builder checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: builder
       - name: Pull Docker image
         uses: pytorch/test-infra/.github/actions/pull-docker-image@main
         with:
@@ -3315,13 +3321,13 @@ jobs:
     needs: manywheel-py3_13-xpu-test
     with:
       PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: xpu
       GPU_ARCH_TYPE: xpu
       DOCKER_IMAGE: pytorch/manylinux2_28-builder:xpu-main
+      DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.13"
       build_name: manywheel-py3_13-xpu
@@ -3337,13 +3343,13 @@ jobs:
     needs: get-label-type
     with:
       PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
-      DOCKER_IMAGE: pytorch/manylinux-builder:cpu-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cpu-main
+      DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.13t"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
@@ -3359,13 +3365,13 @@ jobs:
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
-      DOCKER_IMAGE: pytorch/manylinux-builder:cpu-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cpu-main
+      DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.13t"
       build_name: manywheel-py3_13t-cpu
@@ -3382,13 +3388,13 @@ jobs:
     needs: manywheel-py3_13t-cpu-test
     with:
       PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
-      DOCKER_IMAGE: pytorch/manylinux-builder:cpu-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cpu-main
+      DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.13t"
       build_name: manywheel-py3_13t-cpu
@@ -3404,7 +3410,6 @@ jobs:
     needs: get-label-type
     with:
       PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -3427,7 +3432,6 @@ jobs:
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -3451,7 +3455,6 @@ jobs:
     needs: manywheel-py3_13t-cpu-cxx11-abi-test
     with:
       PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -3474,14 +3477,14 @@ jobs:
     needs: get-label-type
     with:
       PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu118
       GPU_ARCH_VERSION: 11.8
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.8-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda11.8-main
+      DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.13t"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
@@ -3498,14 +3501,14 @@ jobs:
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu118
       GPU_ARCH_VERSION: 11.8
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.8-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda11.8-main
+      DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.13t"
       build_name: manywheel-py3_13t-cuda11_8
@@ -3522,14 +3525,14 @@ jobs:
     needs: manywheel-py3_13t-cuda11_8-test
     with:
       PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu118
       GPU_ARCH_VERSION: 11.8
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.8-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda11.8-main
+      DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.13t"
       build_name: manywheel-py3_13t-cuda11_8
@@ -3545,14 +3548,14 @@ jobs:
     needs: get-label-type
     with:
       PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu124
       GPU_ARCH_VERSION: 12.4
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux-builder:cuda12.4-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.4-main
+      DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.13t"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
@@ -3569,14 +3572,14 @@ jobs:
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu124
       GPU_ARCH_VERSION: 12.4
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux-builder:cuda12.4-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.4-main
+      DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.13t"
       build_name: manywheel-py3_13t-cuda12_4
@@ -3593,14 +3596,14 @@ jobs:
     needs: manywheel-py3_13t-cuda12_4-test
     with:
       PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu124
       GPU_ARCH_VERSION: 12.4
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux-builder:cuda12.4-main
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.4-main
+      DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.13t"
       build_name: manywheel-py3_13t-cuda12_4
@@ -3616,7 +3619,6 @@ jobs:
     needs: get-label-type
     with:
       PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -3624,6 +3626,7 @@ jobs:
       GPU_ARCH_VERSION: 12.6
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.6-main
+      DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.13t"
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
@@ -3640,7 +3643,6 @@ jobs:
     uses: ./.github/workflows/_binary-test-linux.yml
     with:
       PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -3648,6 +3650,7 @@ jobs:
       GPU_ARCH_VERSION: 12.6
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.6-main
+      DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.13t"
       build_name: manywheel-py3_13t-cuda12_6
@@ -3664,7 +3667,6 @@ jobs:
     needs: manywheel-py3_13t-cuda12_6-test
     with:
       PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
       PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -3672,9 +3674,204 @@ jobs:
       GPU_ARCH_VERSION: 12.6
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/manylinux2_28-builder:cuda12.6-main
+      DESIRED_DEVTOOLSET: cxx11-abi
       use_split_build: False
       DESIRED_PYTHON: "3.13t"
       build_name: manywheel-py3_13t-cuda12_6
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+      conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
+      conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
+    uses: ./.github/workflows/_binary-upload.yml
+
+  manywheel-py3_13t-rocm6_2_4-build:
+    if: ${{ github.repository_owner == 'pytorch' }}
+    uses: ./.github/workflows/_binary-build-linux.yml
+    needs: get-label-type
+    with:
+      PYTORCH_ROOT: /pytorch
+      PACKAGE_TYPE: manywheel
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: rocm6.2.4
+      GPU_ARCH_VERSION: 6.2.4
+      GPU_ARCH_TYPE: rocm
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.2.4-main
+      DESIRED_DEVTOOLSET: cxx11-abi
+      use_split_build: False
+      DESIRED_PYTHON: "3.13t"
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      build_name: manywheel-py3_13t-rocm6_2_4
+      build_environment: linux-binary-manywheel
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+  manywheel-py3_13t-rocm6_2_4-test:  # Testing
+    if: ${{ github.repository_owner == 'pytorch' }}
+    needs:
+      - manywheel-py3_13t-rocm6_2_4-build
+      - get-label-type
+    runs-on: linux.rocm.gpu
+    timeout-minutes: 240
+    env:
+      PYTORCH_ROOT: /pytorch
+      PACKAGE_TYPE: manywheel
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: rocm6.2.4
+      GPU_ARCH_VERSION: 6.2.4
+      GPU_ARCH_TYPE: rocm
+      SKIP_ALL_TESTS: 1
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.2.4-main
+      DESIRED_DEVTOOLSET: cxx11-abi
+      use_split_build: False
+      DESIRED_PYTHON: "3.13t"
+    steps:
+      - name: Setup ROCm
+        uses: ./.github/actions/setup-rocm
+      - uses: actions/download-artifact@v4.1.7
+        name: Download Build Artifacts
+        with:
+          name: manywheel-py3_13t-rocm6_2_4
+          path: "${{ runner.temp }}/artifacts/"
+      - name: Checkout PyTorch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          submodules: recursive
+          path: pytorch
+          show-progress: false
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: pytorch
+      - name: ROCm set GPU_FLAG
+        run: |
+          echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
+      - name: Pull Docker image
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
+        with:
+          docker-image: pytorch/manylinux2_28-builder:rocm6.2.4-main
+      - name: Test Pytorch binary
+        uses: ./pytorch/.github/actions/test-pytorch-binary
+      - name: Teardown ROCm
+        uses: ./.github/actions/teardown-rocm
+  manywheel-py3_13t-rocm6_2_4-upload:  # Uploading
+    if: ${{ github.repository_owner == 'pytorch' }}
+    permissions:
+      id-token: write
+      contents: read
+    needs: manywheel-py3_13t-rocm6_2_4-test
+    with:
+      PYTORCH_ROOT: /pytorch
+      PACKAGE_TYPE: manywheel
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: rocm6.2.4
+      GPU_ARCH_VERSION: 6.2.4
+      GPU_ARCH_TYPE: rocm
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.2.4-main
+      DESIRED_DEVTOOLSET: cxx11-abi
+      use_split_build: False
+      DESIRED_PYTHON: "3.13t"
+      build_name: manywheel-py3_13t-rocm6_2_4
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+      conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
+      conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
+    uses: ./.github/workflows/_binary-upload.yml
+
+  manywheel-py3_13t-rocm6_3-build:
+    if: ${{ github.repository_owner == 'pytorch' }}
+    uses: ./.github/workflows/_binary-build-linux.yml
+    needs: get-label-type
+    with:
+      PYTORCH_ROOT: /pytorch
+      PACKAGE_TYPE: manywheel
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: rocm6.3
+      GPU_ARCH_VERSION: 6.3
+      GPU_ARCH_TYPE: rocm
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.3-main
+      DESIRED_DEVTOOLSET: cxx11-abi
+      use_split_build: False
+      DESIRED_PYTHON: "3.13t"
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      build_name: manywheel-py3_13t-rocm6_3
+      build_environment: linux-binary-manywheel
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+  manywheel-py3_13t-rocm6_3-test:  # Testing
+    if: ${{ github.repository_owner == 'pytorch' }}
+    needs:
+      - manywheel-py3_13t-rocm6_3-build
+      - get-label-type
+    runs-on: linux.rocm.gpu
+    timeout-minutes: 240
+    env:
+      PYTORCH_ROOT: /pytorch
+      PACKAGE_TYPE: manywheel
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: rocm6.3
+      GPU_ARCH_VERSION: 6.3
+      GPU_ARCH_TYPE: rocm
+      SKIP_ALL_TESTS: 1
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.3-main
+      DESIRED_DEVTOOLSET: cxx11-abi
+      use_split_build: False
+      DESIRED_PYTHON: "3.13t"
+    steps:
+      - name: Setup ROCm
+        uses: ./.github/actions/setup-rocm
+      - uses: actions/download-artifact@v4.1.7
+        name: Download Build Artifacts
+        with:
+          name: manywheel-py3_13t-rocm6_3
+          path: "${{ runner.temp }}/artifacts/"
+      - name: Checkout PyTorch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          submodules: recursive
+          path: pytorch
+          show-progress: false
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: pytorch
+      - name: ROCm set GPU_FLAG
+        run: |
+          echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
+      - name: Pull Docker image
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
+        with:
+          docker-image: pytorch/manylinux2_28-builder:rocm6.3-main
+      - name: Test Pytorch binary
+        uses: ./pytorch/.github/actions/test-pytorch-binary
+      - name: Teardown ROCm
+        uses: ./.github/actions/teardown-rocm
+  manywheel-py3_13t-rocm6_3-upload:  # Uploading
+    if: ${{ github.repository_owner == 'pytorch' }}
+    permissions:
+      id-token: write
+      contents: read
+    needs: manywheel-py3_13t-rocm6_3-test
+    with:
+      PYTORCH_ROOT: /pytorch
+      PACKAGE_TYPE: manywheel
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: rocm6.3
+      GPU_ARCH_VERSION: 6.3
+      GPU_ARCH_TYPE: rocm
+      DOCKER_IMAGE: pytorch/manylinux2_28-builder:rocm6.3-main
+      DESIRED_DEVTOOLSET: cxx11-abi
+      use_split_build: False
+      DESIRED_PYTHON: "3.13t"
+      build_name: manywheel-py3_13t-rocm6_3
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
       conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}

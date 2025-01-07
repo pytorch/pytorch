@@ -3,6 +3,7 @@
 #include <torch/csrc/python_headers.h>
 
 #include <torch/csrc/Exceptions.h>
+#include <torch/csrc/Export.h>
 #include <torch/csrc/autograd/custom_function.h>
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/saved_variable.h>
@@ -36,7 +37,7 @@ struct PyNode : public Node {
   variable_list apply(variable_list&& inputs) override;
   variable_list defer_to_dynamo(
       variable_list&& inputs,
-      std::optional<PyObject*> compiler);
+      const std::optional<PyObject*>& compiler);
 
   void release_variables() override;
   std::string name() const override;
@@ -150,9 +151,9 @@ struct THPFunction {
 };
 
 bool THPFunction_initModule(PyObject* module);
-extern PyTypeObject THPFunctionType;
-extern PyObject* THPFunctionClass;
-extern PyObject* THPGradientEdgeClass;
+TORCH_PYTHON_API extern PyTypeObject THPFunctionType;
+TORCH_PYTHON_API extern PyObject* THPFunctionClass;
+TORCH_PYTHON_API extern PyObject* THPGradientEdgeClass;
 
 inline bool THPFunction_Check(PyObject* obj) {
   return PyObject_IsInstance(obj, (PyObject*)&THPFunctionType);

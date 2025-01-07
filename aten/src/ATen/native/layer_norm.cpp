@@ -190,13 +190,7 @@ Tensor layer_norm_symint(
     c10::SymIntArrayRef normalized_shape, const std::optional<Tensor>& weight_opt /* optional */, const std::optional<Tensor>& bias_opt /* optional */,
     double eps,
     bool /* cudnn_enable, deprecated */) {
-  // See [Note: hacky wrapper removal for optional tensor]
-  c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
-  const Tensor& weight = *weight_maybe_owned;
-  c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias_opt);
-  const Tensor& bias = *bias_maybe_owned;
-
-  return std::get<0>(at::native_layer_norm_symint(input, normalized_shape, weight, bias, eps));
+  return std::get<0>(at::native_layer_norm_symint(input, normalized_shape, weight_opt, bias_opt, eps));
 }
 
 DEFINE_DISPATCH(LayerNormKernel);
@@ -241,7 +235,8 @@ std::tuple<Tensor, Tensor, Tensor> math_native_layer_norm(
   auto outputs = at::native_batch_norm(
       input_reshaped, /*weight=*/{}, /*bias=*/{}, /*running_mean=*/{},
       /*running_var=*/{}, /*training=*/true, /*momentum=*/0, eps);
-  auto out = std::get<0>(outputs).view(input_shape);
+  auto& [out, mean, rstd] = outputs;
+  out = out.view(input_shape);
   if (weight.defined() && bias.defined()) {
     out = bias.addcmul(out, weight, 1);
   } else if (weight.defined()) {
@@ -249,8 +244,6 @@ std::tuple<Tensor, Tensor, Tensor> math_native_layer_norm(
   } else if (bias.defined()) {
     out = out.add(bias);
   }
-  at::Tensor mean = std::get<1>(outputs);
-  at::Tensor rstd = std::get<2>(outputs);
   std::vector<int64_t> stat_shape;
   for (const auto idx : c10::irange(axis)) {
     stat_shape.push_back(input_shape[idx]);
@@ -260,7 +253,7 @@ std::tuple<Tensor, Tensor, Tensor> math_native_layer_norm(
   }
   mean = mean.view(stat_shape);
   rstd = rstd.view(stat_shape);
-  return std::make_tuple(out, mean, rstd);
+  return outputs;
 }
 
 Tensor rms_norm_symint(
