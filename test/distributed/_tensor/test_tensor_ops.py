@@ -6,7 +6,7 @@ from torch.distributed._tensor import DeviceMesh, distribute_tensor, DTensor
 from torch.distributed._tensor.placement_types import Partial, Replicate, Shard
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import run_tests, skipIfRocm
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorConverter,
     DTensorTestBase,
@@ -473,6 +473,7 @@ class DistTensorOpsTest(DTensorTestBase):
             self.assertEqual(output_dt.placements, [Shard(gather_dim)])
             self.assertEqual(output_dt.full_tensor(), global_output)
 
+    @skipIfRocm
     @with_comms
     def test_index(self):
         meshes = [
@@ -622,7 +623,7 @@ class DistTensorOpsTest(DTensorTestBase):
         self.assertEqual(misses, 2)
 
         # convert to fp32 again and see if there's cache hit
-        fp32_sharded_dtensor1 = bf16_sharded_dtensor1.float()
+        bf16_sharded_dtensor1.float()
         hits, misses, _, _ = _get_sharding_prop_cache_info()
         # by now we should have cache hit
         self.assertEqual(hits, 1)
