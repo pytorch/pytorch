@@ -8,77 +8,47 @@
 # LICENSE file in the root directory of this source tree.
 
 """
-Superset of ``torch.distributed.launch``.
+Module ``torch.distributed.run``.
 
-``torchrun`` provides a superset of the functionality as ``torch.distributed.launch``
-with the following additional functionalities:
+``torch.distributed.run`` is a module that spawns up multiple distributed
+training processes on each of the training nodes.
 
-1. Worker failures are handled gracefully by restarting all workers.
+``torchrun`` is a python
+`console script <https://packaging.python.org/en/latest/specifications/entry-points/#use-for-scripts>`_
+to the main module
+`torch.distributed.run <https://github.com/pytorch/pytorch/blob/master/torch/distributed/run.py>`_
+declared in the ``entry_points`` configuration in
+`setup.py <https://github.com/pytorch/pytorch/blob/master/setup.py>`_.
+It is equivalent to invoking ``python -m torch.distributed.run``.
 
-2. Worker ``RANK`` and ``WORLD_SIZE`` are assigned automatically.
+``torchrun`` can be used for single-node distributed training, in which one or
+more processes per node will be spawned. It can be used for either
+CPU training or GPU training. If it is used for GPU training,
+each distributed process will be operating on a single GPU. This can achieve
+well-improved single-node training performance. ``torchrun`` can also be used in
+multi-node distributed training, by spawning up multiple processes on each node
+for well-improved multi-node distributed training performance as well.
+This will especially be beneficial for systems with multiple Infiniband
+interfaces that have direct-GPU support, since all of them can be utilized for
+aggregated communication bandwidth.
 
-3. Number of nodes is allowed to change between minimum and maximum sizes (elasticity).
-
-.. note:: ``torchrun`` is a python
-          `console script <https://packaging.python.org/en/latest/specifications/entry-points/#use-for-scripts>`_
-          to the main module
-          `torch.distributed.run <https://github.com/pytorch/pytorch/blob/master/torch/distributed/run.py>`_
-          declared in the ``entry_points`` configuration in
-          `setup.py <https://github.com/pytorch/pytorch/blob/master/setup.py>`_.
-          It is equivalent to invoking ``python -m torch.distributed.run``.
-
-
-Transitioning from torch.distributed.launch to torchrun
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-
-``torchrun`` supports the same arguments as ``torch.distributed.launch`` **except**
-for ``--use-env`` which is now deprecated. To migrate from ``torch.distributed.launch``
-to ``torchrun`` follow these steps:
-
-1.  If your training script is already reading ``local_rank`` from the ``LOCAL_RANK`` environment variable.
-    Then you need simply omit the ``--use-env`` flag, e.g.:
-
-    +--------------------------------------------------------------------+--------------------------------------------+
-    |         ``torch.distributed.launch``                               |                ``torchrun``                |
-    +====================================================================+============================================+
-    |                                                                    |                                            |
-    | .. code-block:: shell-session                                      | .. code-block:: shell-session              |
-    |                                                                    |                                            |
-    |    $ python -m torch.distributed.launch --use-env train_script.py  |    $ torchrun train_script.py              |
-    |                                                                    |                                            |
-    +--------------------------------------------------------------------+--------------------------------------------+
-
-2.  If your training script reads local rank from a ``--local-rank`` cmd argument.
-    Change your training script to read from the ``LOCAL_RANK`` environment variable as
-    demonstrated by the following code snippet:
-
-    +-------------------------------------------------------+----------------------------------------------------+
-    |         ``torch.distributed.launch``                  |                    ``torchrun``                    |
-    +=======================================================+====================================================+
-    |                                                       |                                                    |
-    | .. code-block:: python                                | .. code-block:: python                             |
-    |                                                       |                                                    |
-    |                                                       |                                                    |
-    |    import argparse                                    |     import os                                      |
-    |    parser = argparse.ArgumentParser()                 |     local_rank = int(os.environ["LOCAL_RANK"])     |
-    |    parser.add_argument("--local-rank", type=int)      |                                                    |
-    |    args = parser.parse_args()                         |                                                    |
-    |                                                       |                                                    |
-    |    local_rank = args.local_rank                       |                                                    |
-    |                                                       |                                                    |
-    +-------------------------------------------------------+----------------------------------------------------+
+In both cases of single-node distributed training or multi-node distributed
+training, ``torchrun`` will launch the given number of processes per node
+(``--nproc-per-node``). If used for GPU training, this number needs to be less
+or equal to the number of GPUs on the current system (``nproc_per_node``),
+and each process will be operating on a single GPU from *GPU 0 to
+GPU (nproc_per_node - 1)*.
 
 .. versionchanged:: 2.0.0
 
-    The launcher will pass the ``--local-rank=<rank>`` argument to your script.
+    ``torchrun`` will pass the ``--local-rank=<rank>`` argument to your script.
     From PyTorch 2.0.0 onwards, the dashed ``--local-rank`` is preferred over the
     previously used underscored ``--local_rank``.
 
     For backward compatibility, it may be necessary for users to handle both
     cases in their argument parsing code. This means including both ``"--local-rank"``
     and ``"--local_rank"`` in the argument parser. If only ``"--local_rank"`` is
-    provided, the launcher will trigger an error: "error: unrecognized arguments:
+    provided, ``torchrun`` will trigger an error: "error: unrecognized arguments:
     --local-rank=<rank>". For training code that only supports PyTorch 2.0.0+,
     including ``"--local-rank"`` should be sufficient.
 
@@ -90,19 +60,11 @@ to ``torchrun`` follow these steps:
         >>> parser.add_argument("--local-rank", "--local_rank", type=int)
         >>> args = parser.parse_args()
 
-The aformentioned changes suffice to migrate from ``torch.distributed.launch`` to ``torchrun``.
-To take advantage of new features such as elasticity, fault-tolerance, and error reporting of ``torchrun``
-please refer to:
-
-* :ref:`elastic_train_script` for more information on authoring training scripts that are ``torchrun`` compliant.
-* the rest of this page for more information on the features of ``torchrun``.
-
-
 Usage
---------
+-----
 
 Single-node multi-worker
-++++++++++++++++++++++++++++++
+++++++++++++++++++++++++
 
 ::
 
@@ -112,8 +74,17 @@ Single-node multi-worker
         --nproc-per-node=$NUM_TRAINERS
         YOUR_TRAINING_SCRIPT.py (--arg1 ... train script args...)
 
+.. note:: ``--nproc-per-node`` may be
+          ``"gpu"`` (spawn one process per GPU),
+          ``"cpu"`` (spawn one process per CPU),
+          ``"auto"`` (equivalent to ``"gpu"`` if CUDA is available,
+          else equivalent to ``"cpu"``),
+          or an integer specifying the number of processes.
+          See `torch.distributed.run.determine_local_world_size <https://github.com/pytorch/pytorch/blob/0a94bb432ed75cc2d950d81b2921363218a7e459/torch/distributed/run.py#L673-L716>`_
+          for more details.
+
 Stacked single-node multi-worker
-+++++++++++++++++++++++++++++++++++
+++++++++++++++++++++++++++++++++
 
 To run multiple instances (separate jobs) of single-node, multi-worker on the
 same host, we need to make sure that each instance (job) is
@@ -134,7 +105,7 @@ port automatically instead of manually assigning different ports for each run.
 
 
 Fault tolerant (fixed sized number of workers, no elasticity, tolerates 3 failures)
-++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 
 ::
 
@@ -155,7 +126,7 @@ node in your training cluster, but ideally you should pick a node that has a hig
    If no port number is specified ``HOST_NODE_ADDR`` defaults to 29400.
 
 Elastic (``min=1``, ``max=4``, tolerates up to 3 membership changes or failures)
-+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 
 ::
 
@@ -176,7 +147,7 @@ node in your training cluster, but ideally you should pick a node that has a hig
    If no port number is specified ``HOST_NODE_ADDR`` defaults to 29400.
 
 Note on rendezvous backend
-------------------------------
+--------------------------
 
 For multi-node training you need to specify:
 
@@ -200,7 +171,7 @@ enabled (e.g. ``--enable-v2``).
    removed in a future version.
 
 Definitions
---------------
+-----------
 
 1. ``Node`` - A physical instance or a container; maps to the unit that the job manager works with.
 
@@ -230,7 +201,7 @@ A ``Node`` runs ``LOCAL_WORLD_SIZE`` workers which comprise a ``LocalWorkerGroup
 all ``LocalWorkerGroups`` in the nodes in the job comprise the ``WorkerGroup``.
 
 Environment Variables
-----------------------
+---------------------
 
 The following environment variables are made available to you in your script:
 
@@ -267,22 +238,21 @@ The following environment variables are made available to you in your script:
     use the value of ``PYTHON_EXEC`` as executable. The `sys.executable` is used by default.
 
 Deployment
-------------
+----------
 
 1. (Not needed for the C10d backend) Start the rendezvous backend server and get the endpoint (to be
-   passed as ``--rdzv-endpoint`` to the launcher script)
+   passed as ``--rdzv-endpoint`` to ``torchrun``)
 
-2. Single-node multi-worker: Start the launcher on the host to start the agent process which
+2. Single-node multi-worker: Start ``torchrun`` on the host to start the agent process which
    creates and monitors a local worker group.
 
-3. Multi-node multi-worker: Start the launcher with the same arguments on all the nodes
+3. Multi-node multi-worker: Start ``torchrun`` with the same arguments on all the nodes
    participating in training.
 
-When using a job/cluster manager the entry point command to the multi-node job should be this
-launcher.
+When using a job/cluster manager, the entry point command to the multi-node job should be ``torchrun``.
 
 Failure Modes
----------------
+-------------
 
 1. Worker failure: For a training job with ``n`` workers, if ``k<=n`` workers fail all workers
    are stopped and restarted up to ``max_restarts``.
@@ -294,7 +264,7 @@ Failure Modes
 3. Node failure: Same as agent failure.
 
 Membership Changes
---------------------
+------------------
 
 1. Node departure (scale-down): The agent is notified of the departure, all existing workers are
    stopped, a new ``WorkerGroup`` is formed, and all workers are started with a new ``RANK`` and
@@ -305,7 +275,7 @@ Membership Changes
    ``WORLD_SIZE``.
 
 Important Notices
---------------------
+-----------------
 
 1. This utility and multi-process distributed (single-node or
    multi-node) GPU training currently only achieves the best performance using
