@@ -307,7 +307,8 @@ FLEX_ATTENTION_TEMPLATE = r"""
 {{template.codegen_softmax_fusion(kernel.kernel_name)}}
 {{template.codegen_brgemm_pack_function(kernel.kernel_name)}}
 {%- set kernel_args = {"query": query, "key": key, "value": value,
-                       "kv_num_blocks": kv_num_blocks, "kv_indices": kv_indices, "full_kv_num_blocks": full_kv_num_blocks} %}
+                       "kv_num_blocks": kv_num_blocks, "kv_indices": kv_indices,
+                       "full_kv_num_blocks": full_kv_num_blocks, "full_kv_indices": full_kv_indices } %}
 {%- set kernel_args = template.update_kernel_args(kernel_args) %}
 
 extern "C"
@@ -785,6 +786,7 @@ class CppFlexAttentionTemplate(CppTemplate):
         score_mod,
         mask_mod,
         kv_block_size,
+        q_block_size,
         has_other_buffer,
         no_full_kv_block,
         fake_buffers,
@@ -814,9 +816,10 @@ class CppFlexAttentionTemplate(CppTemplate):
         )
         self.mask_buf_idx = get_idx(self.mask_buf_name) if self.mask_buf_name else None
         self.kv_block_size = kv_block_size
+        self.q_block_size = q_block_size
         self.has_other_buffer = has_other_buffer
         self.no_full_kv_block = no_full_kv_block
-        self.other_buffer_input_offset = 1
+        self.other_buffer_input_offset = 2
         if self.no_full_kv_block:
             self.other_buffer_input_offset = 0
         self.fake_buffers = fake_buffers
@@ -980,6 +983,7 @@ class CppFlexAttentionTemplate(CppTemplate):
         score_mod,
         mask_mod,
         kv_block_size,
+        q_block_size,
         has_other_buffer,
         no_full_kv_block,
         fake_buffers,
@@ -1003,6 +1007,7 @@ class CppFlexAttentionTemplate(CppTemplate):
             score_mod=score_mod,
             mask_mod=mask_mod,
             kv_block_size=kv_block_size,
+            q_block_size=q_block_size,
             has_other_buffer=has_other_buffer,
             no_full_kv_block=no_full_kv_block,
             fake_buffers=fake_buffers,
@@ -1051,12 +1056,16 @@ class CppFlexAttentionTemplate(CppTemplate):
             full_kv_num_blocks=self.input_nodes[5]
             if not self.no_full_kv_block
             else None,
+            full_kv_indices=self.input_nodes[6]
+            if not self.no_full_kv_block
+            else None,
             score_mod_other_buffers=self.score_mod_other_buffers,
             mask_mod_other_buffers=self.mask_mod_other_buffers,
             scale=self.scale,
             accumulate_dtype=torch.float,
             query_dtype=query.layout.dtype,
             kvBlockSize=self.kv_block_size,
+            qBlockSize=self.q_block_size,
             template=self,
             output=buf_out,
             kernel=kernel,
