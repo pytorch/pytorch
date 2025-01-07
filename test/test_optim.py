@@ -1323,7 +1323,7 @@ class TestOptimRenewed(TestCase):
                 )
 
             if kwargs.get("differentiable", False):
-                params = [param.clone()]
+                params = [param.detach()]
             else:
                 params = [param]
 
@@ -1357,7 +1357,7 @@ class TestOptimRenewed(TestCase):
             kwargs = optim_input.kwargs
 
             if kwargs.get("differentiable", False):
-                params = [param.clone()]
+                params = [param.detach()]
             else:
                 params = [param]
 
