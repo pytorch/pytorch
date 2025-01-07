@@ -184,7 +184,6 @@ class QConvoneDNNXPU final {
         /*unary_scalars*/ unary_scalars,
         /*unary_algorithm*/ unary_algorithm);
   }
-
 };
 
 TORCH_LIBRARY_IMPL(onednn, XPU, m) {
