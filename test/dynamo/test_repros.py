@@ -6520,13 +6520,13 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
 
         torch.manual_seed(54321)
         torch.cuda.manual_seed_all(54321)
-        expected = f(torch.randn((2, 12, 16, 32, 32), device="cuda")).sum()
+        expected = f(torch.randn((2, 12, 16, 32, 32))).sum()
 
         for backend in ["eager", "aot_eager"]:
             torch.manual_seed(54321)
             torch.cuda.manual_seed_all(54321)
             actual = torch.compile(backend=backend, fullgraph=True)(f)(
-                torch.randn((2, 12, 16, 32, 32), device="cuda")
+                torch.randn((2, 12, 16, 32, 32))
             ).sum()
             self.assertEqual(actual, expected)
 
