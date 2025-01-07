@@ -2240,11 +2240,13 @@ class TestOptimRenewed(TestCase):
         ]
 
         num_params = 4
-        size_of_param_in_bytes = (
-            32 * 16 * dtype.__sizeof__()
-        )
+        size_of_param_in_bytes = 32 * 16 * dtype.__sizeof__()
         for optim_input in beta_1_optim_inputs:
-            zero = 0.0 if isinstance(optim_input.kwargs["betas"][0], float) else torch.tensor(0.0, device=device, dtype=dtype)
+            zero = (
+                0.0
+                if isinstance(optim_input.kwargs["betas"][0], float)
+                else torch.tensor(0.0, device=device, dtype=dtype)
+            )
             beta1_values = (optim_input.kwargs["betas"][0], zero)
             total_sizes = []  # will end up as [big_state_dict_size, no_exp_avg_sd_size]
             for beta1 in beta1_values:
