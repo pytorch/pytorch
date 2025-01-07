@@ -60,7 +60,6 @@ if torch._C._has_mkldnn:
                 node.args[0] != act
                 or (node.args[1].meta.get("val").size() != wgt_size)
                 or (node.args[1] == wgt and gemm_idx != 0)
-                or node.args[1].meta.get("val").dtype != torch.bfloat16  # type: ignore[union-attr]
             )
             for gemm_idx, node in enumerate(computation_nodes)
         ):
