@@ -19,7 +19,6 @@ from collections import namedtuple
 from typing import Any, Container, Dict, Hashable, List, Optional, Tuple, TYPE_CHECKING
 
 import torch
-from torch._guards import CompileId
 from torch.utils._ordered_set import OrderedSet
 
 from ..triton_bundler import TritonBundler
@@ -252,138 +251,129 @@ class CachingAutotuner(KernelInterface):
         self.triton_interpret = os.environ.get("TRITON_INTERPRET", "0") == "1"
 
     def precompile(self, warm_cache_only=False):
+        if warm_cache_only:
+            self._precompile_worker()
+            return
         with self.lock:
-            if self.compile_results:
-                warm_cache_only or self.make_launchers()
-                return
-            assert not self.launchers
-            if not self.configs:
-                raise RuntimeError("No triton configs are available")
-            for c in self.configs:
-                try:
-                    result = self._precompile_config(c)
-                except (OutOfResources, PTXASError) as e:
-                    if len(self.configs) == 1:
-                        # There are no valid Triton configs
-                        raise e
-                    # Skip the config if we run out of
-                    # resources or into a ptxas error
-                    continue
-                self.compile_results.append(result)
+            self._precompile_worker()
+            self._make_launchers()
+            self._dynamic_scale_rblock()
 
-            if len(self.compile_results) == 0:
-                raise RuntimeError(
-                    "No valid triton configs. Report a fatal compilation error"
+    def _precompile_worker(self):
+        if self.compile_results:
+            return
+        assert not self.launchers
+        if not self.configs:
+            raise RuntimeError("No triton configs are available")
+
+        compile_results = []
+        exc = None
+        for c in self.configs:
+            try:
+                compile_results.append(self._precompile_config(c))
+            except (OutOfResources, PTXASError) as e:
+                exc = e
+        if len(compile_results) == 0:
+            raise RuntimeError(f"No valid triton configs. {type(exc).__name__}: {exc}")
+        self.compile_results = compile_results
+        self.configs = None
+
+    def _dynamic_scale_rblock(self):
+        # TODO(jansel): we should find a way to move is (possible) extra compile into the worker process
+        # Currently it relies on _make_launchers(), which requires a cuda context, to populate nreg
+        device_prop = self.device_props
+        if (
+            self.inductor_meta.get("dynamic_scale_rblock", True)
+            and not self.inductor_meta.get("persistent_reduction")
+            and self.heuristic_type == HeuristicType.REDUCTION
+            and self.size_hints is not None
+            # Disable for Intel as Triton is not ready to return n_regs for a compiled_binary.
+            and device_prop.type in ["cuda", "hip"]
+            and device_prop.major
+            and (device_prop.major >= 8 or torch.version.hip)
+            and device_prop.regs_per_multiprocessor is not None
+        ):
+            assert device_prop.regs_per_multiprocessor
+            assert device_prop.max_threads_per_multi_processor
+            assert device_prop.multi_processor_count
+            seen_configs: OrderedSet[Config] = OrderedSet(self.configs)
+            warp_size = device_prop.warp_size or 32
+            for result in self.compile_results:
+                triton_config = result.config
+                compiled_binary = result.kernel
+                assert len(self.size_hints) >= 2
+                xblock = triton_config.kwargs.get("XBLOCK", 1)
+                reduction_kwargs = [
+                    kwarg for kwarg in triton_config.kwargs if kwarg.startswith("R")
+                ]
+                rblocks = [triton_config.kwargs[kwarg] for kwarg in reduction_kwargs]
+                total_block = (self.size_hints["x"] + xblock - 1) // xblock
+                nreg = getattr(compiled_binary, "n_regs", None)
+                if nreg is None:
+                    continue
+
+                # make sure rblocks are not too small
+                if conditional_product(*rblocks) <= 64:
+                    continue
+
+                # each SM of A100 has 65536 32-bit registers. To maximize
+                # the theoretical occupancy, we need run 2048 threads on each
+                # SM. So each thread should use no more than 65536 / 2048
+                # = 32 registers. In cases where occupancy matters, and each
+                # thread uses too many registers, reduce R0_BLOCK to reduce
+                # the register usage.
+                # For kernel https://gist.github.com/shunting314/e4cccc031fe30d378b9b23c08c238cbd
+                # from PLBartForCausalLM, latency improve from
+                # 7.795ms to 4.883ms.
+                #
+                if (
+                    nreg
+                    <= device_prop.regs_per_multiprocessor
+                    // device_prop.max_threads_per_multi_processor
+                ):
+                    continue
+
+                nreg_per_warp = nreg * warp_size
+                nreg_per_block = nreg_per_warp * triton_config.num_warps
+
+                # Previously we set max_blocks_per_sm to 'max_threads_per_multi_processo / (32 * num_warps)'
+                # The formula below is a tighter upper bound since we have the assumption that
+                #   nreg > device_prop.regs_per_multiprocessor // device_prop.max_threads_per_multi_processor
+                # due to the if condition above and:
+                #   regs_per_multiprocessor / nreg_per_block
+                #   = regs_per_multiprocessor / (nreg * 32 * num_warps)
+                #   < regs_per_multiprocessor / ((regs_per_multiprocessor / max_threads_per_multi_processor) * 32 * num_warps)
+                #   = max_threads_per_multi_processor / (32 * num_warps)
+                # Using a tigher upper bound can reveal more optimization opportunities.
+                max_blocks_per_sm = max(
+                    device_prop.regs_per_multiprocessor // nreg_per_block, 1
                 )
 
-            # TODO(jansel): this is broken since n_regs wont be set until _init_handles is called by make_launchers
-            # if we called _init_handles in the worker, we get an error since CUDA is not initialized
-            device_prop = self.device_props
-            if (
-                self.inductor_meta.get("dynamic_scale_rblock", True)
-                and not self.inductor_meta.get("persistent_reduction")
-                and self.heuristic_type == HeuristicType.REDUCTION
-                and self.size_hints is not None
-                # Disable for Intel as Triton is not ready to return n_regs for a compiled_binary.
-                and device_prop.type in ["cuda", "hip"]
-                and device_prop.major
-                and (device_prop.major >= 8 or torch.version.hip)
-                and device_prop.regs_per_multiprocessor is not None
-            ):
-                assert device_prop.regs_per_multiprocessor
-                assert device_prop.max_threads_per_multi_processor
-                assert device_prop.multi_processor_count
-                seen_configs: OrderedSet[Config] = OrderedSet(self.configs)
-                warp_size = device_prop.warp_size or 32
-                for result in self.compile_results:
-                    triton_config = result.config
-                    compiled_binary = result.kernel
-                    assert len(self.size_hints) >= 2
-                    xblock = triton_config.kwargs.get("XBLOCK", 1)
-                    reduction_kwargs = [
-                        kwarg for kwarg in triton_config.kwargs if kwarg.startswith("R")
-                    ]
-                    rblocks = [
-                        triton_config.kwargs[kwarg] for kwarg in reduction_kwargs
-                    ]
-                    total_block = (self.size_hints["x"] + xblock - 1) // xblock
-                    nreg = getattr(compiled_binary, "n_regs", None)
-                    if nreg is None:
-                        continue
+                if total_block <= max_blocks_per_sm * device_prop.multi_processor_count:
+                    # no need to improve occupancy
+                    continue
+                new_config = copy.deepcopy(triton_config)
 
-                    # make sure rblocks are not too small
-                    if conditional_product(*rblocks) <= 64:
-                        continue
+                # Reduce the largest Rn_BLOCK by a factor of 2.
+                largest_rkwarg: str = max(
+                    reduction_kwargs, key=triton_config.kwargs.__getitem__
+                )
+                new_config.kwargs[largest_rkwarg] //= 2
 
-                    # each SM of A100 has 65536 32-bit registers. To maximize
-                    # the theoretical occupancy, we need run 2048 threads on each
-                    # SM. So each thread should use no more than 65536 / 2048
-                    # = 32 registers. In cases where occupancy matters, and each
-                    # thread uses too many registers, reduce R0_BLOCK to reduce
-                    # the register usage.
-                    # For kernel https://gist.github.com/shunting314/e4cccc031fe30d378b9b23c08c238cbd
-                    # from PLBartForCausalLM, latency improve from
-                    # 7.795ms to 4.883ms.
-                    #
-                    if (
-                        nreg
-                        <= device_prop.regs_per_multiprocessor
-                        // device_prop.max_threads_per_multi_processor
-                    ):
-                        continue
+                if new_config in seen_configs:
+                    continue
+                seen_configs.add(new_config)
+                log.debug(
+                    "Dynamically scale down %s from TritonConfig(%s) and get a new TritonConfig(%s)",
+                    largest_rkwarg,
+                    triton_config,
+                    new_config,
+                )
+                self.compile_results.append(self._precompile_config(new_config))
 
-                    nreg_per_warp = nreg * warp_size
-                    nreg_per_block = nreg_per_warp * triton_config.num_warps
+            self._make_launchers()
 
-                    # Previously we set max_blocks_per_sm to 'max_threads_per_multi_processo / (32 * num_warps)'
-                    # The formula below is a tighter upper bound since we have the assumption that
-                    #   nreg > device_prop.regs_per_multiprocessor // device_prop.max_threads_per_multi_processor
-                    # due to the if condition above and:
-                    #   regs_per_multiprocessor / nreg_per_block
-                    #   = regs_per_multiprocessor / (nreg * 32 * num_warps)
-                    #   < regs_per_multiprocessor / ((regs_per_multiprocessor / max_threads_per_multi_processor) * 32 * num_warps)
-                    #   = max_threads_per_multi_processor / (32 * num_warps)
-                    # Using a tigher upper bound can reveal more optimization opportunities.
-                    max_blocks_per_sm = max(
-                        device_prop.regs_per_multiprocessor // nreg_per_block, 1
-                    )
-
-                    if (
-                        total_block
-                        <= max_blocks_per_sm * device_prop.multi_processor_count
-                    ):
-                        # no need to improve occupancy
-                        continue
-                    new_config = copy.deepcopy(triton_config)
-
-                    # Reduce the largest Rn_BLOCK by a factor of 2.
-                    largest_rkwarg: str = max(
-                        reduction_kwargs, key=triton_config.kwargs.__getitem__
-                    )
-                    new_config.kwargs[largest_rkwarg] //= 2
-
-                    if new_config in seen_configs:
-                        continue
-                    seen_configs.add(new_config)
-                    log.debug(
-                        "Dynamically scale down %s from TritonConfig(%s) and get a new TritonConfig(%s)",
-                        largest_rkwarg,
-                        triton_config,
-                        new_config,
-                    )
-                    self.compile_results.append(self._precompile_config(new_config))
-
-            self.configs = None
-            warm_cache_only or self.make_launchers()
-
-    def prepare_for_pickle(self):
-        """drop stuff from triton.JITFunction that does not pickle"""
-        self.fn.fn = None
-        self.fn.__globals__ = None
-        self.fn.repr = _ConstRepr(self.fn.repr(self.fn))
-        self.launchers = []
-
-    def make_launchers(self):
+    def _make_launchers(self):
         if len(self.launchers) == len(self.compile_results):
             return
 
@@ -395,14 +385,30 @@ class CachingAutotuner(KernelInterface):
         with DeviceGuard(device_interface, self.triton_meta["device"]):
             # need to initialize context
             device_interface.synchronize(device_interface.current_device())
-            self.launchers = [x.make_launcher() for x in self.compile_results]
+            launchers = []
+            exc = None
+            for result in self.compile_results:
+                try:
+                    launchers.append(result.make_launcher())
+                except (OutOfResources, PTXASError) as e:
+                    exc = e
+        if len(launchers) == 0:
+            raise RuntimeError(f"No valid triton configs. {type(exc).__name__}: {exc}")
+        self.launchers = launchers
+
+    def prepare_for_pickle(self):
+        """drop stuff from triton.JITFunction that does not pickle"""
+        self.fn.fn = None
+        self.fn.__globals__ = None
+        self.fn.repr = _ConstRepr(self.fn.repr(self.fn))
+        self.launchers = []
 
     def __getstate__(self) -> Dict[str, Any]:
         assert (
             not self.launchers
         ), "pickle should not be called with after make_launchers()"
         return {
-            **super().__getstate__(),
+            **self.__dict__,
             "lock": None,
         }
 
@@ -635,8 +641,6 @@ class CachingAutotuner(KernelInterface):
             log_pt2_compile_event=True,
             metadata={"kernel_name": self.inductor_meta.get("kernel_name")},
             dynamo_compile_runtime_column_us="runtime_triton_autotune_time_us",
-            compile_id=CompileId.from_string(self.inductor_meta.get("compile_id")),
-            is_forward=self.inductor_meta.get("is_forward"),
         ):
             timings = {
                 launcher: self.bench(launcher, *args, **kwargs)
@@ -876,14 +880,13 @@ class TritonCompileResult:
         kernel = self.kernel
         # replace the fields that don't pickle nicely
         kernel_state = {
-            **kernel.__getstate__(),
+            **kernel.__dict__,
             "metadata": kernel.metadata._asdict(),
-            # "src": {**kernel.src.__getstate__(), "fn": None},
             "module": None,  # regenerated by kernel._init_handles()
             "function": None,  # regenerated by kernel._init_handles()
             "run": None,  # regenerated by kernel._init_handles()
         }
-        return {**super().__getstate__(), "kernel": kernel_state}  # type: ignore[dict-item]
+        return {**self.__dict__, "kernel": kernel_state}  # type: ignore[dict-item]
 
     def __setstate__(self, state: Dict[str, Any]) -> None:
         # src = ASTSource.__new__(ASTSource)

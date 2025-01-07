@@ -52,9 +52,9 @@ import torch
 import torch.distributed as dist
 from torch import SymInt, Tensor
 from torch._dynamo.utils import (
+    CompileEventLogger,
     counters,
     dynamo_timed,
-    get_chromium_event_logger,
     get_metrics_context,
 )
 from torch._inductor import config, exc, metrics
@@ -77,6 +77,7 @@ from torch._inductor.cpu_vec_isa import pick_vec_isa
 from torch._inductor.custom_graph_pass import CustomGraphPass, CustomGraphPassType
 from torch._inductor.output_code import has_frozen_params
 from torch._inductor.runtime.compile_tasks import (
+    _module_to_triton_kernel,
     _reload_python_module,
     _reload_python_module_in_subproc,
 )
@@ -1053,12 +1054,10 @@ class FxGraphCache:
             triton_bundler_meta = TritonBundler.read_and_emit(bundle)
             if (meta := triton_bundler_meta) is not None:
                 cache_info["triton_bundler_meta"] = str(meta)
-                logger = get_chromium_event_logger()
-                if "inductor_compile" in logger.get_stack():
-                    # TODO: Clean up autograd cache integration
-                    logger.add_event_data(
-                        "inductor_compile", cached_kernel_names=meta.cached_kernel_names
-                    )
+                # TODO: Clean up autograd cache integration
+                CompileEventLogger.try_add_pt2_compile(
+                    "inductor_compile", cached_kernel_names=meta.cached_kernel_names
+                )
                 if len(meta.cached_kernel_names) > 0:
                     get_metrics_context().increment("num_triton_bundles", 1)
 
@@ -2810,10 +2809,10 @@ class PyCodeCache:
         return parse_stack_trace(entry)
 
 
-def _load_triton_kernel_from_source(
-    kernel_name: str, source_code: str
-) -> CachingAutotuner:
-    return getattr(PyCodeCache.load(source_code), kernel_name)
+class TritonCodeCache:
+    @classmethod
+    def load(cls, kernel_name: str, source_code: str) -> ModuleType:
+        return _module_to_triton_kernel(PyCodeCache.load(source_code), kernel_name)
 
 
 def _cuda_compiler() -> Optional[str]:
@@ -3215,6 +3214,27 @@ class ROCmCodeCache:
 class CodeCacheFuture:
     def result(self) -> Callable[..., Any]:
         raise NotImplementedError
+
+
+class TritonFuture(CodeCacheFuture):
+    kernel: CachingAutotuner
+
+    def __init__(
+        self,
+        kernel: Any,
+        future: Optional[Future[Any]],
+    ) -> None:
+        self.kernel = kernel
+        self.future = future
+
+    def result(self) -> Callable[..., Any]:
+        if self.future is not None:
+            # If the worker failed this will throw an exception.
+            result = self.future.result()
+            assert result is None
+            self.future = None
+            self.kernel.precompile()
+        return self.kernel
 
 
 class LambdaFuture(CodeCacheFuture):
