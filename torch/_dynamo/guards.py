@@ -1749,6 +1749,8 @@ class GuardBuilder(GuardBuilderBase):
             self.DICT_VERSION(guard)
             return
 
+        self.SEQUENCE_LENGTH(guard)
+
         code = []
         # Ensure that we call dict.keys and not value.keys (which can call
         # overridden keys method). In the C++ guards, we relied on PyDict_Next
