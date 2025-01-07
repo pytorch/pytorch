@@ -64,7 +64,6 @@ from typing import (
     Optional,
     Protocol,
     Sequence,
-    Tuple,
     Type,
     TypeVar,
     Union,
@@ -543,7 +542,7 @@ class _TargetExpr(PatternExpr):
         )
 
 
-_SimpleSpec = Tuple[Any, ...]
+_SimpleSpec = tuple[Any, ...]
 
 
 class _TargetArgsExpr(_TargetExpr):
@@ -573,7 +572,7 @@ class _TargetArgsExpr(_TargetExpr):
     @staticmethod
     def simple_flatten(
         args: Sequence[Any], kwargs: Mapping[Any, Any]
-    ) -> Tuple[Sequence[Any], Union[_SimpleSpec, pytree.TreeSpec]]:
+    ) -> tuple[Sequence[Any], Union[_SimpleSpec, pytree.TreeSpec]]:
         values = (*args, *kwargs.values())
         spec = (len(args), *kwargs.keys())
         return values, spec
@@ -581,7 +580,7 @@ class _TargetArgsExpr(_TargetExpr):
     @staticmethod
     def pytree_flatten(
         args: Sequence[Any], kwargs: Mapping[Any, Any]
-    ) -> Tuple[Sequence[Any], Union[_SimpleSpec, pytree.TreeSpec]]:
+    ) -> tuple[Sequence[Any], Union[_SimpleSpec, pytree.TreeSpec]]:
         type_mapping = {immutable_list: tuple, list: tuple, immutable_dict: dict}
 
         def convert_type(x: Any) -> Any:
@@ -986,7 +985,7 @@ class PatternPrettyPrinter:
 
 
 class _PassDictsType(Protocol):
-    def __getitem__(self, k: Tuple[str, torch.fx.node.Target]) -> List[PatternEntry]:
+    def __getitem__(self, k: tuple[str, torch.fx.node.Target]) -> List[PatternEntry]:
         ...
 
 
@@ -1542,7 +1541,7 @@ SERIALIZED_PATTERN_PATH = Path(__file__).parent / "fx_passes" / "serialized_patt
 # test_serialized_patterns_up_to_date() to ensure the patterns are up
 # to date.
 _known_precompiled_patterns: List[
-    Tuple[
+    tuple[
         Any,
         Iterable[Any],
         Callable[[Callable[..., Any], Iterable[Any]], torch.fx.GraphModule],
@@ -1615,7 +1614,7 @@ def gen_pattern_and_search_gm(
     trace_fn: TraceFn,
     scalar_workaround: Union[Dict[str, Union[float, int]], None] = None,
     exclusive_arg_names: Sequence[str] = (),
-) -> Tuple[PatternExpr, torch.fx.GraphModule]:
+) -> tuple[PatternExpr, torch.fx.GraphModule]:
     argnames = [*inspect.signature(search_fn).parameters.keys()]
 
     if scalar_workaround is None:
@@ -1779,7 +1778,7 @@ class PatternMatcherPass:
     ) -> None:
         super().__init__()
         self.patterns: DefaultDict[
-            Tuple[str, torch.fx.node.Target], List[PatternEntry]
+            tuple[str, torch.fx.node.Target], List[PatternEntry]
         ] = defaultdict(list)
         self.pass_name = pass_name
 
@@ -1789,7 +1788,7 @@ class PatternMatcherPass:
         # searches are actually different.
         self.seen_patterns: Dict[str, List[Optional[str]]] = defaultdict(list)
 
-    def __getitem__(self, item: Tuple[str, torch.fx.node.Target]) -> List[PatternEntry]:
+    def __getitem__(self, item: tuple[str, torch.fx.node.Target]) -> List[PatternEntry]:
         return self.patterns[item]
 
     def apply(self, gm: Union[torch.fx.GraphModule, torch.fx.Graph]) -> int:
@@ -1989,7 +1988,7 @@ def joint_fwd_bwd(fn: Callable[..., Any], args: Sequence[Any]) -> torch.fx.Graph
 
     def record_joint_graph(
         joint_graph: torch.fx.GraphModule, inputs: Sequence[Any], **kwargs: Any
-    ) -> Tuple[torch.fx.GraphModule, torch.fx.GraphModule]:
+    ) -> tuple[torch.fx.GraphModule, torch.fx.GraphModule]:
         nonlocal gm
         assert not gm
         gm = clone_graph(joint_graph)
