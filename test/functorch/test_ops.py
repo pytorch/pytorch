@@ -2339,7 +2339,6 @@ class TestOperators(TestCase):
             skip("sparse.sampled_addmm", ""),
             skip("sparse.mm", "reduce"),
             skip("native_layer_norm", "", device_type="cpu"),
-            skip("nn.functional.scaled_dot_product_attention", "", device_type="cuda"), # temp skip
             # RuntimeError: Expected contiguous tensor, but got
             # non-contiguous tensor for argument #2 'grad_output'
             decorate(

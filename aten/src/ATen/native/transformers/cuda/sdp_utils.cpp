@@ -644,6 +644,11 @@ bool can_use_mem_efficient_attention(sdp_params const& params, bool debug) {
   constexpr auto less_than_sm80_mem_efficient_dtypes =
       array_of<at::ScalarType>(at::kHalf, at::kFloat);
 #ifdef USE_ROCM
+ if (params.is_causal){
+     return false ;
+ }
+
+
   constexpr auto aotriton_mem_efficient_dtypes =
       array_of<at::ScalarType>(at::kHalf, at::kFloat, at::kBFloat16);
 #endif
