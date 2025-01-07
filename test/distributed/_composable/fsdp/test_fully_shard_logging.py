@@ -26,13 +26,13 @@ class LoggingTests(LoggingTestCase):
         env["WORLD_SIZE"] = "1"
         env["MASTER_PORT"] = "34715"
         env["MASTER_ADDR"] = "localhost"
-        stdout, stderr = self.run_process_no_exception(
+        _, stderr = self.run_process_no_exception(
             """\
 import logging
 import torch
 import torch.distributed as dist
 import torch.nn as nn
-from torch.distributed._composable.fsdp import fully_shard
+from torch.distributed.fsdp import fully_shard
 logger = logging.getLogger("torch.distributed._composable.fsdp")
 logger.setLevel(logging.DEBUG)
 device = "cuda"

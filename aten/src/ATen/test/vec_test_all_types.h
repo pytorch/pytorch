@@ -568,7 +568,7 @@ private:
     uint64_t seed;
 };
 
-template <typename T, bool is_floating_point = std::is_floating_point_v<T>, bool is_complex = is_complex<T>::value>
+template <typename T, bool is_floating_point = std::is_floating_point_v<T> || std::is_reduced_floating_point_v<T>, bool is_complex = is_complex<T>::value>
 struct ValueGen
 {
     std::uniform_int_distribution<int64_t> dis;
@@ -591,10 +591,13 @@ struct ValueGen
 };
 
 template <typename T>
+using reduced_fp_to_float_t = std::conditional_t<std::is_reduced_floating_point_v<T>, float, T>;
+
+template <typename T>
 struct ValueGen<T, true, false>
 {
     std::mt19937 gen;
-    std::normal_distribution<T> normal;
+    std::normal_distribution<reduced_fp_to_float_t<T>> normal;
     std::uniform_int_distribution<int> roundChance;
     T _start;
     T _stop;
@@ -613,7 +616,7 @@ struct ValueGen<T, true, false>
         //make it  normal +-3sigma
         T divRange = static_cast<T>(6.0);
         T stdev = std::abs(stop / divRange - start / divRange);
-        normal = std::normal_distribution<T>{ mean, stdev };
+        normal = std::normal_distribution<reduced_fp_to_float_t<T>>{ mean, stdev };
         // in real its hard to get rounded value
         // so we will force it by  uniform chance
         roundChance = std::uniform_int_distribution<int>(0, 5);
@@ -1278,6 +1281,13 @@ std::enable_if_t<!is_complex<T>::value, T> local_fmadd(T a, T b, T c) {
     PreventFma noFma;
     T ab = a * b;
     return noFma.add(ab, c);
+}
+
+template <typename T>
+std::enable_if_t<!is_complex<T>::value, T> local_fmsub(T a, T b, T c) {
+    PreventFma noFma;
+    T ab = a * b;
+    return noFma.sub(ab, c);
 }
 
 template <typename T>
