@@ -5,7 +5,7 @@ import itertools
 import logging
 import operator
 from collections import Counter, defaultdict
-from typing import Any, Callable, Dict, List, Optional, Tuple, TypeVar, Union
+from typing import Any, Callable, Dict, List, Optional, TypeVar, Union
 from typing_extensions import ParamSpec
 
 import torch
@@ -1041,7 +1041,7 @@ def register_partial_reduction_pattern():
             if not statically_known_true(input.meta["val"].numel() >= 4096):
                 return True
 
-            def replacement(inp: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+            def replacement(inp: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
                 partial = partial_red.target(inp, reduced_dims, keepdim)
                 complete = full_red.target(partial)
                 return (partial, complete)
