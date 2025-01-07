@@ -5,15 +5,13 @@
 #include <ATen/cuda/nvrtc_stub/ATenNVRTC.h>
 #include <c10/cuda/CUDAGuard.h>
 
-#if !defined(USE_ROCM) && !defined(_WIN32) && defined(CUDA_VERSION) && \
+#if false && !defined(USE_ROCM) && !defined(_WIN32) && defined(CUDA_VERSION) && \
     CUDA_VERSION >= 12000
 #define BUILD_ASYNC_MM_KERNEL
 #endif
 
 #if defined(BUILD_ASYNC_MM_KERNEL)
 
-// TODO(yifu): remove this once cutlass 3.5.1 upgrade is completed
-#if CUTLASS_VERSION != 351
 // We are going to override the cuTensorMapEncodeTiled driver api with our lazy
 // loader
 static CUresult CUDAAPI nvrtc_cuTensorMapEncodeTiled(
@@ -58,19 +56,7 @@ static CUresult CUDAAPI nvrtc_cuTensorMapEncodeTiled(
 #include <cute/tensor.hpp>
 #undef cuTensorMapEncodeTiled
 // Set everything back to normal
-// clang-format on
-#else
-#include <cutlass/core_io.h>
-#include <cutlass/cutlass.h>
-#include <cutlass/gemm/device/gemm.h>
-#include <cutlass/half.h>
-#include <cutlass/numeric_types.h>
-#include <cutlass/trace.h>
-#include <cutlass/util/host_tensor.h>
-#include <cute/tensor.hpp>
-#endif
 
-#include <cutlass/version.h>
 #include <cutlass/gemm/collective/collective_builder.hpp>
 #include <cutlass/gemm/device/gemm_universal_adapter.h>
 #include <cutlass/epilogue/collective/collective_builder.hpp>
@@ -79,6 +65,7 @@ static CUresult CUDAAPI nvrtc_cuTensorMapEncodeTiled(
 #include <cutlass/gemm/dispatch_policy.hpp>
 #include <cutlass/gemm/kernel/gemm_universal.hpp>
 #include <cutlass/util/packed_stride.hpp>
+// clang-format on
 
 #include <torch/csrc/distributed/c10d/cuda/cutlass/gemm/kernel/persistent_async_input_scheduler.cuh>
 
@@ -120,7 +107,7 @@ at::Tensor async_input_mm_impl(
           cutlass::epilogue::collective::EpilogueTileAuto,
           ElementAccumulator,
           ElementAccumulator,
-          ElementC,
+          void,
           LayoutC,
           AlignmentC,
           ElementC,
@@ -146,7 +133,7 @@ at::Tensor async_input_mm_impl(
           KernelSchedule>::CollectiveOp;
 
   using GemmKernel = cutlass::gemm::kernel::GemmUniversal<
-      Shape<int, int, int>,
+      Shape<int, int, int, int>,
       CollectiveMainloop,
       CollectiveEpilogue,
       cutlass::gemm::PersistentAsyncInputScheduler<KernelSchedule>>;
@@ -184,7 +171,7 @@ at::Tensor async_input_mm_impl(
 
   typename Gemm::Arguments arguments{
       cutlass::gemm::GemmUniversalMode::kGemm,
-      {M, N, K},
+      {M, N, K, 1},
       {
           reinterpret_cast<ElementA*>(a.data_ptr<at::BFloat16>()),
           stride_A,
@@ -192,7 +179,7 @@ at::Tensor async_input_mm_impl(
           stride_B,
       },
       {{1, 1},
-       reinterpret_cast<ElementC*>(out.data_ptr<at::BFloat16>()),
+       nullptr,
        stride_C,
        reinterpret_cast<ElementC*>(out.data_ptr<at::BFloat16>()),
        stride_C},
