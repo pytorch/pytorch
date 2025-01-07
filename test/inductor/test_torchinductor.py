@@ -32,6 +32,7 @@ import torch._inductor.aoti_eager
 import torch.nn as nn
 from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.debug_utils import aot_graph_input_parser
+from torch._dynamo.device_interface import get_interface_for_device
 from torch._dynamo.testing import (
     CompileCounterWithBackend,
     expectedFailureCodegenDynamic,
@@ -7375,18 +7376,16 @@ class CommonTemplate:
         def fn(x):
             return x.isinf(), x.isnan()
 
-        self.common(
-            fn, [torch.tensor([1, float("inf"), 2, float("-inf"), float("nan")])]
-        )
-        self.common(
-            fn,
-            [
-                torch.tensor(
-                    [1, float("inf"), 2, float("-inf"), float("nan")],
-                    dtype=torch.float64,
-                )
-            ],
-        )
+        values = [1, float("inf"), 2, float("-inf"), float("nan")]
+        device_interface = get_interface_for_device(self.device)
+        for dtype in [torch.float32, torch.float64]:
+            ctx = (
+                contextlib.nullcontext()
+                if device_interface.is_dtype_supported(dtype)
+                else self.assertRaises(TypeError)
+            )
+            with ctx:
+                self.common(fn, [torch.tensor(values, dtype=dtype)])
 
     @skip_if_halide  # different nan behavior in ==
     def test_isinf2(self):
