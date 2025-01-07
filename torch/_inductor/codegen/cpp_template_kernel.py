@@ -253,9 +253,9 @@ class CppTemplateKernel(CppKernel):
 
             def fn(*args):
                 assert len(args) == 2
-                assert len(next(iter(args))) == len(next(iter(var_sizes)))
+                assert len(args[0]) == len(var_sizes[0])
                 assert len(args[1]) == 0
-                new_args = [arg + offset for arg, offset in zip(next(iter(args)), offsets)]  # type: ignore[arg-type]
+                new_args = [arg + offset for arg, offset in zip(args[0], offsets)]  # type: ignore[arg-type]
                 if reindexers[i] is not None:
                     new_args = reindexers[i](new_args)  # type: ignore[misc]
                 V.ops.store(
@@ -286,15 +286,14 @@ class CppTemplateKernel(CppKernel):
         reindexers: List[Optional[Callable[[List[Any]], List[Any]]]],
         output_names: List[str],
     ) -> str:
-        assert isinstance(dst, Iterable)
-        ref_dst = next(iter(dst))
+        ref_dst = dst[0]
         var_sizes = (tuple(ref_dst.get_size()), ())
         var_ranges = {
             sympy_index_symbol_with_prefix(SymT.INDEX, i): sz
-            for i, sz in enumerate(next(iter(var_sizes)))
+            for i, sz in enumerate(var_sizes[0])
         }
         assert offsets, "offsets should be set outside"
-        assert all(len(offset) == len(next(iter(var_sizes))) for offset in offsets)
+        assert all(len(offset) == len(var_sizes[0]) for offset in offsets)
         output_index = ref_dst.get_layout().make_indexer()([*var_ranges.keys()])
         kernel_group = KernelGroup()
         kernel_group.args = self.args
@@ -308,9 +307,9 @@ class CppTemplateKernel(CppKernel):
 
             def fn(*args):
                 assert len(args) == 2
-                assert len(next(iter(args))) == len(next(iter(var_sizes)))
+                assert len(args[0]) == len(var_sizes[0])
                 assert len(args[1]) == 0
-                new_args = [arg + offset for arg, offset in zip(next(iter(args)), offsets[i])]  # type: ignore[arg-type]
+                new_args = [arg + offset for arg, offset in zip(args[0], offsets[i])]  # type: ignore[arg-type]
                 if reindexers[i] is not None:
                     new_args = reindexers[i](new_args)  # type: ignore[misc]
                 V.ops.store(
@@ -476,9 +475,7 @@ class CppTemplateKernel(CppKernel):
                             self.remove_buffer(multi_output_name)
                 return res
         else:
-            assert isinstance(src, Iterable)
-            assert isinstance(dst, Iterable)
-            if next(iter(dst)).get_name() != next(iter(src)).get_name():
+            if dst[0].get_name() != src[0].get_name():
                 copy_list = []
                 with LocalBufferContext(self.args) as scope:
                     for _src, _dst in zip(src, dst):

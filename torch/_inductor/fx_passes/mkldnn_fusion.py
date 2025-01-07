@@ -49,15 +49,15 @@ if torch._C._has_mkldnn:
         """
         computation_op = mkldnn._linear_pointwise.default
         assert all(node.target == computation_op for node in computation_nodes)
-        first_computation_node = next(iter(computation_nodes))
-        act = next(iter(first_computation_node.args))
+        first_computation_node = computation_nodes[0]
+        act = first_computation_node.args[0]
         wgt = first_computation_node.args[1]
         wgt_size = wgt.meta.get("val").size()  # type: ignore[union-attr]
         if len(computation_nodes) < 2:
             return False
         if any(
             (
-                next(iter(node.args)) != act
+                node.args[0] != act
                 or (node.args[1].meta.get("val").size() != wgt_size)
                 or (node.args[1] == wgt and gemm_idx != 0)
                 or node.args[1].meta.get("val").dtype != torch.bfloat16  # type: ignore[union-attr]
@@ -82,11 +82,10 @@ if torch._C._has_mkldnn:
         computation_op = mkldnn._linear_pointwise.default
         from ..mkldnn_lowerings import grouped_gemm_lowering
 
-        grouped_gemm_lowering._inductor_lowering_function = True  # type: ignore[attr-defined]
-        for node in graph.nodes:
-            if node.target == computation_op:
+        for node in graph.find_nodes(op="call_function", target=computation_op):
+            if node in graph.nodes:  # the node might be fused
                 with graph.inserting_before(node):
-                    act = next(iter(node.all_input_nodes))
+                    act = node.args[0]
                     users = list(act.users)
                     if all(user.target == computation_op for user in users):
                         if not _is_valid_grouped_gemm_fusion(users):
@@ -96,7 +95,7 @@ if torch._C._has_mkldnn:
                             grouped_gemm_lowering,
                             (
                                 act,
-                                [user.all_input_nodes[1] for user in users],
+                                [user.args[1] for user in users],
                                 [user.args[2] for user in users],
                             ),
                         )
