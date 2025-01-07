@@ -500,8 +500,16 @@ def _register_quantized_linear_binary_lowering(
         # bias
         b = kwargs["b"] if "b" in kwargs else None
         # Output QParams
-        o_inv_scale = kwargs["o_inv_scale"] if output_dtype in {torch.uint8, torch.int8} else 1.0
-        o_zero_point = kwargs["o_zp"] if output_dtype in {torch.uint8, torch.int8} else 0
+        o_inv_scale = (
+            kwargs["o_inv_scale"]
+            if output_dtype in OrderedSet([torch.uint8, torch.int8])
+            else 1.0
+        )
+        o_zero_point = (
+            kwargs["o_zp"]
+            if output_dtype in OrderedSet([torch.uint8, torch.int8])
+            else 0
+        )
 
         x2.realize()
         from .mkldnn_fusion import _can_be_inplace
