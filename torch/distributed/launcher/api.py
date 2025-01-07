@@ -64,7 +64,8 @@ class LaunchConfig:
         local_addr: address of the local node if any. If not set, a lookup on the local
                 machine's FQDN will be performed.
         local_ranks_filter: ranks for which to show logs in console. If not set, show from all.
-    ..note:
+
+    .. note::
         `rdzv_timeout` is a legacy argument that will be removed in future.
         Set the timeout via `rdzv_configs['timeout']`
 
