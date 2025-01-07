@@ -352,8 +352,12 @@ class UserDefinedClassVariable(UserDefinedVariable):
 
             return NullContextVariable()
         elif self.value is collections.OrderedDict:
-            return BuiltinVariable.call_custom_dict(
-                tx, collections.OrderedDict, *args, **kwargs
+            return tx.inline_user_function_return(
+                VariableTracker.build(
+                    tx, polyfills.construct_dict
+                ),
+                [self, *args],
+                kwargs,
             )
         elif (
             self.value is collections.defaultdict

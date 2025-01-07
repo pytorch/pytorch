@@ -16,7 +16,7 @@ import torch
 from torch import sym_float, sym_int
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
-from .. import config, variables
+from .. import config, variables, polyfills
 from ..exc import (
     AttributeMutationError,
     unimplemented,
@@ -1026,6 +1026,14 @@ class BuiltinVariable(VariableTracker):
             return tx.output.side_effects.track_object_new_from_user_defined_class(
                 args[0]
             )
+        if self.fn is dict and name == "__new__":
+            assert len(args) == 1
+            assert len(kwargs) == 0
+            return ConstDictVariable({}, dict, mutation_type=ValueMutationNew())
+        if self.fn is OrderedDict and name == "__new__":
+            assert len(args) == 1
+            assert len(kwargs) == 0
+            return ConstDictVariable({}, OrderedDict, mutation_type=ValueMutationNew())
         if self.fn is dict and name == "fromkeys":
             return BuiltinVariable.call_custom_dict_fromkeys(tx, dict, *args, **kwargs)
         return super().call_method(tx, name, args, kwargs)
@@ -1364,6 +1372,16 @@ class BuiltinVariable(VariableTracker):
 
     @staticmethod
     def call_custom_dict(tx: "InstructionTranslator", user_cls, *args, **kwargs):
+        return tx.inline_user_function_return(
+            VariableTracker.build(
+                tx, polyfills.construct_dict
+            ),
+            [VariableTracker.build(tx, user_cls), *args],
+            # [user_cls, args],
+            kwargs,
+        )
+
+
         if not kwargs:
             if not args:
                 args = ({},)

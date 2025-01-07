@@ -10,6 +10,7 @@ Python polyfills for common builtins.
 
 from itertools import repeat as _repeat
 from typing import Any, Callable, List, Sequence, TYPE_CHECKING
+from typing import MutableMapping
 
 import torch
 
@@ -144,6 +145,28 @@ def instantiate_user_defined_class_object(cls, /, *args, **kwargs):
     if isinstance(obj, cls):
         obj.__init__(*args, **kwargs)
     return obj
+
+
+# Used with something like dict(obj)
+def construct_dict(cls, /, *args, **kwargs):
+    dst = cls.__new__(cls)
+    if not kwargs:
+        if not args:
+            args = ({}, )
+        
+        src = args[0]
+        if isinstance(src, (dict, MutableMapping)):
+            for key in src:
+                # This will inline the __getitem__ of the src object
+                dst[key] = src[key]
+        else:
+            for (key, value) in src:
+                dst[key] = value
+        return dst
+    elif kwargs:
+        breakpoint()
+        assert False
+        
 
 
 def foreach_map_fn(*args):
