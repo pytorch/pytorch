@@ -5,6 +5,7 @@
 #include <ATen/native/cuda/Loops.cuh>
 #include <thrust/tuple.h>
 #include <cmath>
+#include <type_traits>
 
 /* Fake quantize a tensor
 Args:
@@ -159,6 +160,38 @@ REGISTER_DISPATCH(fake_quant_tensor_cachemask_stub, &fake_quantize_tensor_cachem
 REGISTER_DISPATCH(fake_quant_tensor_cachemask_tensor_qparams_stub, &fake_quantize_tensor_cachemask_tensor_qparams_kernel_cuda)
 REGISTER_DISPATCH(fake_quant_grad_learnable_tensor_stub, &_fake_quantize_grad_learnable_tensor_kernel_cuda)
 
+// Type to be used for min/max operations on floating point types
+// - long double if either input is long double
+// - double if either input is double or an integer type
+// - float otherwise
+template<typename T1, typename T2>
+struct fmin_max_type {
+  static constexpr bool has_long_double = std::is_same_v<T1, long double> || std::is_same_v<T2, long double>;
+  static constexpr bool has_double = std::is_same_v<T1, double> || std::is_same_v<T2, double>;
+  static constexpr bool has_int = std::is_integral_v<T1> || std::is_integral_v<T2>;
+
+  using type = std::conditional_t<has_long_double, long double,
+                                  std::conditional_t<has_double || has_int, double, float>
+                                 >;
+};
+template<typename T1, typename T2>
+using fmin_max_t = typename fmin_max_type<T1, T2>::type;
+
+// fmin/fmax-like functions available on host & device
+// Doesn't handle NaNs or signed zero as std::fmin/fmax do
+
+template<typename T1, typename T2>
+__host__ __device__ auto _fmin(T1 a, T2 b) {
+  using result_t = fmin_max_t<T1, T2>;
+  return std::min(static_cast<result_t>(a), static_cast<result_t>(b));
+}
+
+template<typename T1, typename T2>
+__host__ __device__ auto _fmax(T1 a, T2 b) {
+  using result_t = fmin_max_t<T1, T2>;
+  return std::max(static_cast<result_t>(a), static_cast<result_t>(b));
+}
+
 // Fake quantize per channel
 
 template<typename SelfType>
@@ -193,7 +226,7 @@ void _fake_quant_per_channel_cachemask_cuda_helper(
         [=] GPU_LAMBDA (const SelfType input_val, const float scale, const scalar_t zero_point) -> SelfType {
           const float inv_scale = 1.0f / scale;
           const auto qval = std::nearbyint(input_val * inv_scale + zero_point);
-          const auto bounded_qval = std::fmin(quant_max, std::fmax(quant_min, qval));
+          const auto bounded_qval = _fmin(quant_max, _fmax(quant_min, qval));
           return (bounded_qval - zero_point) * scale;
       });
     });
@@ -212,7 +245,7 @@ void _fake_quant_per_channel_cachemask_cuda_helper(
       [=] GPU_LAMBDA (const SelfType input_val, const float scale, const int64_t zero_point) -> SelfType {
         const float inv_scale = 1.0f / scale;
         const auto qval = std::nearbyint(input_val * inv_scale + zero_point);
-        const auto bounded_qval = std::fmin(quant_max, std::fmax(quant_min, qval));
+        const auto bounded_qval = _fmin(quant_max, _fmax(quant_min, qval));
         return (bounded_qval - zero_point) * scale;
     });
   }
