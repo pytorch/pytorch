@@ -8,7 +8,7 @@ import re
 import sys
 import warnings
 from enum import Enum
-from typing import Callable, cast, Dict, List, Optional, Sequence, Set, Tuple, Union
+from typing import Any, Callable, cast, Dict, List, Optional, Sequence, Union
 
 import sympy
 
@@ -16,6 +16,7 @@ import torch
 import torch.fx
 from torch._inductor import dependencies
 from torch._prims_common import is_float_dtype, is_integer_dtype
+from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.functions import CeilDiv, FloorDiv, ModularIndexing
 from torch.utils._sympy.symbol import free_symbol_is_type, symbol_is_type, SymT
 
@@ -69,6 +70,7 @@ from .cpp_utils import (
     DTYPE_TO_CPP,
     INDEX_TYPE,
     LocalBufferContext,
+    may_unify_binary_op_mask_type,
     promote_args,
     template_fusion_with_epilogues_supported,
     unify_mask_base_type,
@@ -85,7 +87,7 @@ def get_export_declaration():
 
 schedule_log = torch._logging.getArtifactLogger(__name__, "schedule")
 
-NATIVE_OMP_RTYPES = {"+", "*", "^", "||", "min", "max"}
+NATIVE_OMP_RTYPES = OrderedSet(["+", "*", "^", "||", "min", "max"])
 RTYPE_TO_CPP = {
     "sum": "+",
     "prod": "*",
@@ -98,18 +100,20 @@ RTYPE_TO_CPP = {
     "welford_reduce": "welford",
     "welford_combine": "welford",
 }
-VECTORIZABLE_RTYPES = {
-    "max",
-    "min",
-    "sum",
-    "prod",
-    "xor_sum",
-    "welford_reduce",
-    "welford_combine",
-    "argmin",
-    "argmax",
-    "any",
-}
+VECTORIZABLE_RTYPES = OrderedSet(
+    [
+        "max",
+        "min",
+        "sum",
+        "prod",
+        "xor_sum",
+        "welford_reduce",
+        "welford_combine",
+        "argmin",
+        "argmax",
+        "any",
+    ]
+)
 
 PYTHON_TO_CPP = {
     "Tensor": "at::Tensor",
@@ -166,6 +170,8 @@ def reduction_init(reduction_type, dtype):
         return 1
     if reduction_type in ("max", "argmax", "min", "argmin"):
         cdtype = DTYPE_TO_CPP[dtype]
+        if dtype == torch.bool and reduction_type in ("argmin", "argmax"):
+            cdtype = DTYPE_TO_CPP[torch.float]
         min_var = (
             f"-std::numeric_limits<{cdtype}>::infinity()"
             if is_float_dtype(dtype)
@@ -191,7 +197,9 @@ def reduction_acc_type(reduction_type, dtype):
     scalar_type = DTYPE_TO_CPP[DTYPE_TO_COMPUTATION_DTYPE[dtype]]
     if is_welford_reduction(reduction_type):
         return f"Welford<{scalar_type}>"
-    if reduction_type in {"argmin", "argmax"}:
+    if reduction_type in ("argmin", "argmax"):
+        if dtype == torch.bool:
+            scalar_type = DTYPE_TO_CPP[torch.float]
         return f"IndexValue<{scalar_type}>"
     return scalar_type
 
@@ -224,6 +232,17 @@ def reduction_combine(
             mean, m2, weight = reduction_project(reduction_type, next_value)
         return f"welford_combine({var}, {{{mean}, {m2}, {weight}}})"
     if reduction_type in ("argmin", "argmax"):
+        if (
+            hasattr(next_value, "dtype")
+            and next_value.dtype == torch.bool
+            and not next_value.is_vec
+        ):
+            if index is not None:
+                return f"{reduction_type}_combine({var}, static_cast<float>({next_value}), {index})"
+            else:
+                return (
+                    f"{reduction_type}_combine({var}, static_cast<float>({next_value}))"
+                )
         if index is not None:
             return f"{reduction_type}_combine({var}, {next_value}, {index})"
         else:
@@ -234,7 +253,7 @@ def reduction_combine(
 def reduction_project(reduction_type, acc):
     if is_welford_reduction(reduction_type):
         return f"{acc}.mean", f"{acc}.m2", f"{acc}.weight"
-    elif reduction_type in {"argmin", "argmax"}:
+    elif reduction_type in ("argmin", "argmax"):
         return f"{acc}.index"
     return acc
 
@@ -844,8 +863,8 @@ class CppOverrides(OpOverrides):
             return tuple(V.kernel.cse.try_get(cache_key) for cache_key in cache_keys)
 
         code = BracesBuffer()
-        exponent = V.kernel.cse.newvar()
-        mantissa = V.kernel.cse.newvar()
+        exponent = V.kernel.cse.newvar(dtype=torch.int32)
+        mantissa = V.kernel.cse.newvar(dtype=x.dtype)
         code.writeline(f"int32_t {exponent};")
         code.writeline(f"auto {mantissa} = std::frexp({x}, &{exponent});")
         V.kernel.compute.splice(code)
@@ -969,11 +988,41 @@ class CppOverrides(OpOverrides):
 
     @staticmethod
     def bitwise_left_shift(a, b):
-        return f"decltype({a})({a} << {b})"
+        code = BracesBuffer()
+        code.writeline("[&]()")
+        with code.indent():
+            scalar_t = DTYPE_TO_CPP[a.dtype]
+            code.writeline(
+                f"constexpr decltype({b}) max_shift = sizeof({scalar_t}) * CHAR_BIT;"
+            )
+            code.writeline(
+                f"if ((static_cast<std::make_signed_t<{scalar_t}>>({b}) < 0) || ({b} >= max_shift))"
+            )
+            with code.indent():
+                code.writeline(f"return decltype({a})(0);")
+            code.writeline(
+                f"return decltype({a})(static_cast<std::make_unsigned_t<{scalar_t}>>({a}) << {b});"
+            )
+        code.writeline("()")
+        return code
 
     @staticmethod
     def bitwise_right_shift(a, b):
-        return f"decltype({a})({a} >> {b})"
+        code = BracesBuffer()
+        code.writeline("[&]()")
+        with code.indent():
+            scalar_t = DTYPE_TO_CPP[a.dtype]
+            code.writeline(
+                f"constexpr decltype({b}) max_shift = sizeof({scalar_t}) * CHAR_BIT - std::is_signed_v<{scalar_t}>;"
+            )
+            code.writeline(
+                f"if ((static_cast<std::make_signed_t<{scalar_t}>>({b}) < 0) || ({b} >= max_shift))"
+            )
+            with code.indent():
+                code.writeline(f"return decltype({a})({a} >> max_shift);")
+            code.writeline(f"return decltype({a})({a} >> {b});")
+        code.writeline("()")
+        return code
 
     @staticmethod
     def rand(seed: sympy.Expr, offset: sympy.Expr):
@@ -1253,6 +1302,7 @@ class CppVecOverrides(CppOverrides):
 
     @staticmethod
     def logical_and(a, b):
+        a, b = may_unify_binary_op_mask_type(a, b)
         return f"{a} & {b}"
 
     @staticmethod
@@ -1261,14 +1311,17 @@ class CppVecOverrides(CppOverrides):
 
     @staticmethod
     def logical_or(a, b):
+        a, b = may_unify_binary_op_mask_type(a, b)
         return f"{a} | {b}"
 
     @staticmethod
     def logical_xor(a, b):
+        a, b = may_unify_binary_op_mask_type(a, b)
         return f"{a} ^ {b}"
 
     @staticmethod
     def bitwise_and(a, b):
+        a, b = may_unify_binary_op_mask_type(a, b)
         return f"{a} & {b}"
 
     @staticmethod
@@ -1277,10 +1330,12 @@ class CppVecOverrides(CppOverrides):
 
     @staticmethod
     def bitwise_or(a, b):
+        a, b = may_unify_binary_op_mask_type(a, b)
         return f"{a} | {b}"
 
     @staticmethod
     def bitwise_xor(a, b):
+        a, b = may_unify_binary_op_mask_type(a, b)
         return f"{a} ^ {b}"
 
     @staticmethod
@@ -1394,9 +1449,7 @@ class CppVecOverrides(CppOverrides):
 
     @staticmethod
     def asinh(x):
-        # For real x, asinh(x) = log(x + sqrt(1 + x**2))
-        vec_one = f"decltype({x})(1)"
-        return f"({x} + ({vec_one} + {x}*{x}).sqrt()).log()"
+        return f"{x}.asinh()"
 
     @staticmethod
     def acosh(x):
@@ -1644,8 +1697,8 @@ class CppVecOverrides(CppOverrides):
         cdtype = DTYPE_TO_CPP[x.dtype]
         size = V.kernel.tail_size if V.kernel.tail_size else V.kernel.tiling_factor
         code = BracesBuffer()
-        exponent = V.kernel.cse.newvar()
-        mantissa = V.kernel.cse.newvar()
+        exponent = V.kernel.cse.newvar(dtype=torch.int32)
+        mantissa = V.kernel.cse.newvar(dtype=x.dtype)
         exponent.update_on_args("frexp", (x,), kwargs={})
         mantissa.update_on_args("frexp", (x,), kwargs={})
         n_vec = V.kernel._get_num_vectors(x.dtype)
@@ -1786,11 +1839,11 @@ class CppKernel(Kernel):
         super().__init__(args)
         # Indicate when this kernel is active, for example
         # {x0, {24, 26}} -> this kernel is active when x0 >= 24 and x0 < 26
-        self.active_ranges: dict[sympy.Expr, Tuple[sympy.Expr, ...]] = {}
+        self.active_ranges: dict[sympy.Expr, tuple[sympy.Expr, ...]] = {}
         # Indicate this kernel will be moved under the inner for-loop
         # See move_code_under_inner_loop
         self.inner_itervars: List[sympy.Symbol] = []
-        self.call_ranges: Optional[Tuple[sympy.Expr, ...]] = None
+        self.call_ranges: Optional[tuple[sympy.Expr, ...]] = None
         self.ranges: List[sympy.Expr] = []
         self.itervars: List[sympy.Symbol] = []
         self.reduction_depth = None
@@ -1816,7 +1869,7 @@ class CppKernel(Kernel):
         self.preloads = IndentedBuffer()
         self.poststores = IndentedBuffer()
         self.num_threads = num_threads  # num_threads the kernel specialized for
-        self.reduction_omp_dec: Dict[Tuple[str, str], str] = {}
+        self.reduction_omp_dec: Dict[tuple[str, str], str] = {}
         self.reduction_var_names: List[str] = []
 
     def _gen_parallel_reduction_buffers(
@@ -2029,7 +2082,7 @@ class CppKernel(Kernel):
             self.reduction_prefix.splice(gen_fn(size))
 
     def reduction(self, dtype, src_dtype, reduction_type, value):
-        argmax_or_argmin = reduction_type in {"argmax", "argmin"}
+        argmax_or_argmin = reduction_type in ("argmax", "argmin")
         reduction_key = src_dtype, reduction_type, value
         if reduction_key in self.reduction_cse.reduction_cache:
             return self.reduction_cse.reduction_cache[reduction_key]
@@ -2086,6 +2139,7 @@ class CppKernel(Kernel):
         )
 
     def size_hint(self):
+        assert self.call_ranges is not None
         return V.graph.sizevars.size_hint(
             sympy_product(self.call_ranges), fallback=8192
         )
@@ -2236,7 +2290,10 @@ class CppKernel(Kernel):
 
     @property
     def assert_function(self) -> str:
-        return "AOTI_TORCH_CHECK"
+        if V.graph.aot_mode:
+            return "AOTI_TORCH_CHECK"
+        else:
+            return "TORCH_CHECK"
 
     def decide_parallel_depth(self, max_parallel_depth, threads):
         assert self.call_ranges is not None
@@ -2667,8 +2724,10 @@ class CppVecKernel(CppKernel):
             raise NotImplementedError(f"store mode={mode}")
 
     def reduction(self, dtype, src_dtype, reduction_type, value):
+        # Note: For argmax and argmin on bool type, we always convert bool to float.
+        # Fix issue: https://github.com/pytorch/pytorch/issues/143568
         assert reduction_type in VECTORIZABLE_RTYPES
-        argmax_or_argmin = reduction_type in {"argmax", "argmin"}
+        argmax_or_argmin = reduction_type in ("argmax", "argmin")
         horizontal_reduction = self.tiling_idx >= self.reduction_depth
         init_dtype = src_dtype if argmax_or_argmin else dtype
         assert isinstance(value, CppCSEVariable), value
@@ -2928,7 +2987,7 @@ class CppVecKernel(CppKernel):
         if is_welford_reduction(reduction_type):
             return f"Welford<{vec_type}>()"
 
-        if reduction_type in {"argmin", "argmax"}:
+        if reduction_type in ("argmin", "argmax"):
             cdtype = DTYPE_TO_CPP[scalar_type]
             acc_type = self.reduction_acc_type_vec(reduction_type, dtype)
             if reduction_type == "argmin":
@@ -2960,9 +3019,11 @@ class CppVecKernel(CppKernel):
         vec_type = self._get_vec_type(scalar_type)
         if is_welford_reduction(reduction_type):
             return f"Welford<{vec_type}>"
-        if reduction_type in {"argmin", "argmax"}:
+        if reduction_type in ("argmin", "argmax"):
             n_src = self._get_num_vectors(scalar_type)
             n_idx = self._get_num_vectors(torch.int64)
+            if dtype == torch.bool:
+                return f"IndexValueVec<{DTYPE_TO_CPP[torch.float]}, {n_src}, {n_idx}>"
             return f"IndexValueVec<{DTYPE_TO_CPP[scalar_type]}, {n_src}, {n_idx}>"
         if dtype == torch.bool:
             assert reduction_type in ("min", "max", "any", "sum")
@@ -3053,6 +3114,8 @@ class CppVecKernel(CppKernel):
         elif reduction_type in ("argmin", "argmax"):
             assert src_dtype is not None
             cdtype = DTYPE_TO_CPP[src_dtype]
+            if src_dtype == torch.bool:
+                cdtype = DTYPE_TO_CPP[torch.float]
             n_src = self._get_num_vectors(src_dtype)
             n_idx = self._get_num_vectors(torch.int64)
             t_extra = ""
@@ -3284,6 +3347,11 @@ class CppTile2DKernel(CppVecKernel):
 
     def store(self, name, index, value, mode=None):
         assert "buf" in name
+        assert isinstance(value, CppCSEVariable), value
+        if not value.is_vec:
+            # this happens when we store a scalar into a vectorized buffer like "fill"
+            value = self.broadcast(value)
+
         var = self.args.output(name)
 
         inner = self.inner_itervar()
@@ -3344,7 +3412,7 @@ class CppTile2DKernel(CppVecKernel):
         )
 
 
-def get_loop_body_lowp_fp(_body: LoopBody) -> Tuple[Optional[torch.dtype], bool]:
+def get_loop_body_lowp_fp(_body: LoopBody) -> tuple[Optional[torch.dtype], bool]:
     """
     Returns the low precision data type (torch.float16/torch.bfloat16) contained in the nodes
     and if all the nodes can codegen with this data type without converting to float.
@@ -3401,7 +3469,7 @@ class TilingSelect:
         self,
         fn_list,
         var_sizes_list,
-    ) -> Tuple[List[int], List[int]]:
+    ) -> tuple[List[int], List[int]]:
         # TODO(jgong5): support alternative tiling factors and data types
         loop_bodies = _get_loop_body(fn_list)
         all_dtypes = _get_dtype_from_loopbodies(loop_bodies)
@@ -3578,10 +3646,10 @@ class TilingSelect:
         for fn, var_sizes in zip(fn_list, var_sizes_list):
             rw = dependencies.extract_read_writes(fn, *var_sizes)
             all_index += [dep.index for dep in itertools.chain(rw.reads, rw.writes)]
-        contig_vars = set()
+        contig_vars = OrderedSet[int]()
         contig_vars_list = []
-        non_contig_stride_const = set()
-        non_contig_stride_other = set()
+        non_contig_stride_const = OrderedSet[int]()
+        non_contig_stride_other = OrderedSet[int]()
         for index in all_index:
             for var in index.free_symbols:
                 if not re.search(r"^d\d+$", var.name):
@@ -4223,7 +4291,7 @@ class CppScheduling(BaseScheduling):
                     if isinstance(node, FusedSchedulerNode):
                         assert len(node.snodes) > 0, node.snodes
                         var_ranges = None
-                        indexing_exprs = set()
+                        indexing_exprs = OrderedSet[Any]()
                         for snode in node.snodes:
                             v, exprs = get_indexing_ranges_exprs(snode)
                             if var_ranges is None:
@@ -4331,7 +4399,7 @@ class CppScheduling(BaseScheduling):
         ranges2 = node_to_recomp.node.data.get_size()
         ranges1 = None
         if isinstance(ref_node, FusedSchedulerNode):
-            ranges_set = set()
+            ranges_set = OrderedSet[tuple[Any, ...]]()
             for snode in ref_node.snodes:
                 if isinstance(snode.node, ir.TemplateBuffer):
                     break
@@ -4614,7 +4682,7 @@ class CppScheduling(BaseScheduling):
                 # 1115a25c36340554442f28f9570abd42f0aface2/aten/src/ATen/native/cpu/SoftMaxKernel.cpp#L159
                 # where the buffer is with size of last dim and contiguous.
                 # Only support this typical case at first.
-                visited_scheduler_nodes: Set[str] = set()
+                visited_scheduler_nodes = OrderedSet[str]()
                 for scheduler_node in node.get_nodes():
                     # all users inside same OuterLoopFusedSchedulerNode
                     assert isinstance(scheduler_node, SchedulerNode)
@@ -4725,6 +4793,10 @@ class CppScheduling(BaseScheduling):
                 if not node.check_outer_fusion_loop_level_attr(
                     cpp_kernel_proxy_list, node.outer_loop_fusion_depth
                 ):
+                    for removed_buffer in scope.removed_buffers:
+                        # Restore the removed buffers by this context before
+                        # fallback to codegen without using Local Buffer
+                        V.graph.removed_buffers.remove(removed_buffer)
                     return False
                 metrics.cpp_outer_loop_fused_inner_counts.append(
                     metrics.CppOuterLoopFusedCount(
@@ -4789,10 +4861,12 @@ class CppScheduling(BaseScheduling):
         self,
         template_node: BaseSchedulerNode,
         epilogue_nodes: Sequence[BaseSchedulerNode],
+        prologue_nodes: Sequence[BaseSchedulerNode],
     ):
         """
         Codegen a CPP template, possibly with fused epilogues
         """
+        assert not prologue_nodes
         counters["inductor"]["cpp_epilogue_fusion_counter"] += len(epilogue_nodes)
         assert self.is_cpp_template(
             template_node
@@ -4908,7 +4982,7 @@ class KernelGroup:
         new_kernel.codegen_loops(code, ws)
 
     def get_num_args(self):
-        arg_defs, call_args, arg_types = self.args.cpp_argdefs()
+        arg_defs, _call_args, _arg_types = self.args.cpp_argdefs()
         args_num = len(arg_defs)
         return args_num
 
