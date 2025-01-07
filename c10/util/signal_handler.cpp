@@ -112,8 +112,6 @@ FatalSignalHandler::FatalSignalHandler()
     : fatalSignalHandlersInstalled(false),
       fatalSignalReceived(false),
       fatalSignalName("<UNKNOWN>"),
-      writingCond(),
-      writingMutex(),
       signalReceived(false) {}
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)

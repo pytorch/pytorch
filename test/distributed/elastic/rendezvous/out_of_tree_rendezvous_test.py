@@ -5,10 +5,9 @@
 #
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
-
+import pathlib
 import sys
 import unittest
-from pathlib import Path
 
 import torch.distributed.elastic.rendezvous as rdvz
 
@@ -19,7 +18,7 @@ TEST_PACKAGE_PATH = "/out_of_tree_test_package/src"
 
 class OutOfTreeRendezvousTest(unittest.TestCase):
     def test_out_of_tree_handler_loading(self):
-        current_path = str(Path(__file__).absolute().parent)
+        current_path = str(pathlib.Path(__file__).parent.resolve())
         rdvz._register_out_of_tree_handlers()
         registry_dict = rdvz.rendezvous_handler_registry._registry
 
