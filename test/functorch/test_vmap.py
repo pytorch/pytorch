@@ -14,8 +14,7 @@ import random
 import types
 import unittest
 import warnings
-from collections import namedtuple
-from typing import OrderedDict
+from collections import namedtuple, OrderedDict
 from unittest.case import skipIf
 
 from common_utils import (
