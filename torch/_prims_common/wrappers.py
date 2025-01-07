@@ -385,9 +385,6 @@ def _maybe_remove_out_wrapper(fn: Callable):
 def backwards_not_supported(prim):
     def redispatch_prim(args, kwargs):
         with torch._C._AutoDispatchBelowAutograd():
-            old = torch._C._dispatch_tls_is_dispatch_key_excluded(
-                torch._C.DispatchKey.ADInplaceOrView
-            )
             return prim(*args, **kwargs)
 
     class BackwardsNotSupported(torch.autograd.Function):

@@ -1,4 +1,5 @@
 #include <c10/util/BFloat16.h>
+#include <c10/util/complex.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/utils/byte_order.h>
 

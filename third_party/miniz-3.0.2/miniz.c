@@ -3946,23 +3946,25 @@ static mz_bool mz_zip_reader_read_central_dir(mz_zip_archive *pZip, mz_uint flag
 
                     // Read zip64 extended information field
                     // Header ID: 0x0001, field size: 2 bytes
-                    extra_size_remaining -= sizeof(mz_uint16) * 2;
-                    pExtra_data += sizeof(mz_uint16) * 2;
-                    if (decomp_size == MZ_UINT32_MAX && extra_size_remaining >= sizeof(mz_uint64)) {
-                        decomp_size = MZ_READ_LE64(pExtra_data);
-                        extra_size_remaining -= sizeof(mz_uint64);
-                        pExtra_data += sizeof(mz_uint64);
-                    }
-                    if (comp_size == MZ_UINT32_MAX && extra_size_remaining >= sizeof(mz_uint64)) {
-                        comp_size = MZ_READ_LE64(pExtra_data);
-                        extra_size_remaining -= sizeof(mz_uint64);
-                        pExtra_data += sizeof(mz_uint64);
-                    }
-                    if (local_header_ofs == MZ_UINT32_MAX && extra_size_remaining >= sizeof(mz_uint64)) {
-                        local_header_ofs = MZ_READ_LE64(pExtra_data);
-                        extra_size_remaining -= sizeof(mz_uint64);
-                        pExtra_data += sizeof(mz_uint64);
-                    }
+		    		if (extra_size_remaining >= sizeof(mz_uint16) * 2) {
+		    			extra_size_remaining = extra_size_remaining - sizeof(mz_uint16) * 2;
+					    pExtra_data += sizeof(mz_uint16) * 2;
+					    if (decomp_size == MZ_UINT32_MAX && extra_size_remaining >= sizeof(mz_uint64)) {
+							decomp_size = MZ_READ_LE64(pExtra_data);
+							extra_size_remaining -= sizeof(mz_uint64);
+							pExtra_data += sizeof(mz_uint64);
+					    }
+					    if (comp_size == MZ_UINT32_MAX && extra_size_remaining >= sizeof(mz_uint64)) {
+							comp_size = MZ_READ_LE64(pExtra_data);
+							extra_size_remaining -= sizeof(mz_uint64);
+							pExtra_data += sizeof(mz_uint64);
+					    }
+					    if (local_header_ofs == MZ_UINT32_MAX && extra_size_remaining >= sizeof(mz_uint64)) {
+							local_header_ofs = MZ_READ_LE64(pExtra_data);
+							extra_size_remaining -= sizeof(mz_uint64);
+							pExtra_data += sizeof(mz_uint64);
+					    }
+					}
 					MZ_FREE(buf);
                 }
             }

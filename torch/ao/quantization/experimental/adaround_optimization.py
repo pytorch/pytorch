@@ -205,7 +205,7 @@ class AdaptiveRoundingOptimizer:
                 optimizer.zero_grad()
                 q_weight = ada_quantizer(q_module.weight)
                 if isinstance(module, torch.nn.Conv1d):
-                    q_out = torch.nn.functional.conv1d(
+                    q_out = torch.nn.functional.conv1d(  # type: ignore[call-overload, misc]
                         q_inp,
                         q_weight,
                         bias=q_module.bias,
@@ -249,6 +249,6 @@ class AdaptiveRoundingOptimizer:
         ada_quantizer = ada_quantizer.eval()
         q_weight = ada_quantizer(q_module.weight)
         # At the end of optimization, we need to copy the adarounded weight back to the original module
-        q_module.weight.data.copy_(q_weight)
+        q_module.weight.data.copy_(q_weight)  # type: ignore[operator]
         # Eager mode requires observer to be set as "weight_fake_quant" to be parsed
         q_module.weight_fake_quant = ada_quantizer.activation_post_process

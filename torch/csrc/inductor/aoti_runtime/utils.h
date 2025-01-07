@@ -119,6 +119,18 @@ class RAIIAtenTensorHandle {
     return result;
   }
 
+  int64_t* sizes() const {
+    int64_t* result = nullptr;
+    AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_get_sizes(handle_.get(), &result));
+    return result;
+  }
+
+  int64_t* strides() const {
+    int64_t* result = nullptr;
+    AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_get_strides(handle_.get(), &result));
+    return result;
+  }
+
  private:
   std::unique_ptr<AtenTensorOpaque, DeleterFnPtr> handle_;
 };
@@ -188,6 +200,18 @@ class ConstantHandle {
     return data_;
   }
 
+  int64_t* sizes() const {
+    int64_t* result = nullptr;
+    AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_get_sizes(handle_, &result));
+    return result;
+  }
+
+  int64_t* strides() const {
+    int64_t* result = nullptr;
+    AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_get_strides(handle_, &result));
+    return result;
+  }
+
  private:
   AtenTensorHandle handle_{};
   void* data_ = nullptr;
@@ -215,5 +239,9 @@ inline AtenTensorHandle wrap_with_raii_handle_if_needed(
 
 #define CACHE_TORCH_LAYOUT(layout) \
   static auto cached_torch_layout_##layout = aoti_torch_layout_##layout()
+
+#define CACHE_TORCH_MEMORY_FORMAT(format)           \
+  static auto cached_torch_memory_format_##format = \
+      aoti_torch_memory_format_##format()
 
 } // namespace torch::aot_inductor

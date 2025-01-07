@@ -25,6 +25,7 @@ def _register_same_name(name, with_log=False):
 
 _register_same_name("deviceCount")
 _register_same_name("getDevice")
+_register_same_name("setDevice")
 _register_same_name("uncheckedSetDevice")
 _register_same_name("exchangeDevice")
 _register_same_name("malloc", True)
@@ -43,6 +44,7 @@ _register_same_name("synchronizeEvent")
 _register_same_name("elapsedTime")
 _register_same_name("block")
 _register_same_name("queryEvent")
+_register_same_name("hasPrimaryContext")
 
 
 # TODO: replace it with implementing torch.openreg.device

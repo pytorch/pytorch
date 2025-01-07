@@ -1,4 +1,5 @@
 # Owner(s): ["module: sparse"]
+# ruff: noqa: F841
 
 import torch
 import itertools
@@ -14,7 +15,7 @@ from torch.testing._internal.common_utils import TestCase, run_tests, skipIfRocm
     skipIfCrossRef
 from torch.testing._internal.common_cuda import TEST_CUDA
 from numbers import Number
-from typing import Dict, Any
+from typing import Any
 from packaging import version
 from torch.testing._internal.common_cuda import \
     (SM53OrLater, SM80OrLater, TEST_MULTIGPU)
@@ -333,7 +334,7 @@ class TestSparse(TestSparseBase):
                 self.assertEqual(t._values(), tc._values())
                 return tc
 
-            value_map: Dict[Any, Any] = {}
+            value_map: dict[Any, Any] = {}
             for idx, val in zip(t._indices().t(), t._values()):
                 idx_tup = tuple(idx.tolist())
                 if idx_tup in value_map:
@@ -3764,8 +3765,7 @@ class TestSparse(TestSparseBase):
                     self.assertEqual(s_res.to_dense(), t_res)
                 else:
                     with self.assertRaisesRegex(RuntimeError,
-                                                r"The expanded size of the tensor \(\d\) "
-                                                r"must match the existing size \(\d\)"):
+                                                r"does not broadcast"):
                         torch._sparse_broadcast_to(s, s1)
 
     @coalescedonoff
