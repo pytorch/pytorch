@@ -8,17 +8,7 @@ import logging
 import re
 from collections import defaultdict
 from math import inf
-from typing import (
-    Any,
-    Callable,
-    Dict,
-    List,
-    Optional,
-    Sequence,
-    Tuple,
-    TYPE_CHECKING,
-    Union,
-)
+from typing import Any, Callable, Dict, List, Optional, Sequence, TYPE_CHECKING, Union
 
 import sympy
 
@@ -940,7 +930,7 @@ class HalideKernel(SIMDKernel):
         # group the expression by variables used
         offset = sympy.S.Zero
         split_expr = {s: sympy.S.Zero for s in symbols}
-        split_failed: List[Tuple[List[sympy.Symbol], sympy.Expr]] = []
+        split_failed: List[tuple[List[sympy.Symbol], sympy.Expr]] = []
         index = sympy.expand(self.rename_indexing(index))
         for part in index.args if isinstance(index, sympy.Add) else [index]:
             part_vars = [v for v in part.free_symbols if v in split_expr]
@@ -1177,8 +1167,8 @@ class HalideKernel(SIMDKernel):
         dtype: torch.dtype,
         src_dtype: torch.dtype,
         reduction_type: ReductionType,
-        value: Union[CSEVariable, Tuple[CSEVariable, ...]],
-    ) -> Union[CSEVariable, Tuple[CSEVariable, ...]]:
+        value: Union[CSEVariable, tuple[CSEVariable, ...]],
+    ) -> Union[CSEVariable, tuple[CSEVariable, ...]]:
         """Codegen a reduction operation"""
         assert self.inside_reduction
         assert not self._load_mask
@@ -1273,12 +1263,12 @@ class HalideKernel(SIMDKernel):
 
     def scan(
         self,
-        dtypes: Tuple[torch.dtype, ...],
+        dtypes: tuple[torch.dtype, ...],
         combine_fn: Callable[
-            [Tuple[CSEVariable, ...], Tuple[CSEVariable, ...]], Tuple[CSEVariable, ...]
+            [tuple[CSEVariable, ...], tuple[CSEVariable, ...]], tuple[CSEVariable, ...]
         ],
-        values_orig: Tuple[CSEVariable, ...],
-    ) -> Tuple[CSEVariable, ...]:
+        values_orig: tuple[CSEVariable, ...],
+    ) -> tuple[CSEVariable, ...]:
         assert self.inside_reduction
         assert len(dtypes) == len(values_orig)
         values: List[HalideCSEVariable] = []
