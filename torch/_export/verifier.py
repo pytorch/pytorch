@@ -3,7 +3,7 @@ import inspect
 import math
 import operator
 from collections.abc import Iterable
-from typing import Any, Dict, final, List, Tuple, Type, TYPE_CHECKING
+from typing import Any, Dict, final, List, Type, TYPE_CHECKING
 
 import torch
 from torch._ops import HigherOrderOperator, OpOverload
@@ -139,10 +139,10 @@ class Verifier(metaclass=_VerifierMeta):
             round,
         ]
 
-    def allowed_op_types(self) -> Tuple[Type[Any], ...]:
+    def allowed_op_types(self) -> tuple[Type[Any], ...]:
         return (OpOverload, HigherOrderOperator)
 
-    def allowed_getattr_types(self) -> Tuple[Type[Any], ...]:
+    def allowed_getattr_types(self) -> tuple[Type[Any], ...]:
         return (torch.fx.GraphModule,)
 
     def check_valid_op(self, op):
@@ -161,7 +161,7 @@ class Verifier(metaclass=_VerifierMeta):
 
     @final
     def _check_graph_module(self, gm: torch.fx.GraphModule) -> None:
-        def _allowed_getattr_types() -> Tuple[Type[Any], ...]:
+        def _allowed_getattr_types() -> tuple[Type[Any], ...]:
             ret = self.allowed_getattr_types()
             assert not any(t is object for t in ret)
             return ret
@@ -172,7 +172,7 @@ class Verifier(metaclass=_VerifierMeta):
                 assert all(inspect.isbuiltin(op) for op in ret)
                 return ret
 
-            def _allowed_op_types() -> Tuple[Type[Any], ...]:
+            def _allowed_op_types() -> tuple[Type[Any], ...]:
                 ret = self.allowed_op_types()
                 assert not any(t is object for t in ret)
                 return ret
