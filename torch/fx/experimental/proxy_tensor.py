@@ -131,6 +131,7 @@ pytree.register_pytree_node(
         [(pytree.SequenceKey(i), x) for i, x in enumerate(xs)],
         None,
     ),
+    serialized_type_name="torch.Size",
 )
 
 
@@ -408,7 +409,11 @@ def extract_val(val: _ExtractValType) -> _ExtractValType:
             # approach would be to maintain a per-trace FakeTensorMode and
             # from_real_tensor to create fake values (don't forget to
             # snapshot_fake)
-            fake_tensor_mode = FakeTensorMode(allow_fallback_kernels=True)
+            from torch._guards import detect_fake_mode
+
+            fake_tensor_mode = detect_fake_mode(val)
+            if not fake_tensor_mode:
+                fake_tensor_mode = FakeTensorMode(allow_fallback_kernels=True)
             with fake_tensor_mode:
                 return torch.empty_strided(
                     val.shape, val.stride(), device=val.device, dtype=val.dtype
@@ -1189,7 +1194,7 @@ def wrap_key(
         def get_tensor_proxy_slot(t: Tensor) -> Union[Tensor, Proxy]:
             return get_proxy_slot(t, tracer, t, lambda x: x.proxy)
 
-        out = f(*tensors)
+        out = f(*tensors)  # type:ignore[call-arg]
         out = pytree.tree_map_only(Tensor, get_tensor_proxy_slot, out)
         out = pytree.tree_map_only(
             _AnyScriptObject, lambda t: get_proxy_slot(t, tracer, t, lambda x: x), out
@@ -2013,6 +2018,13 @@ class _MakefxTracer:
             self._restore_modes(*prev_modes)
 
     def _trace_inner(self, f: Callable, *args: object) -> GraphModule:
+        # TODO: We need to explicitly import torch._dynamo before calling dispatch_trace,
+        # because dispatch_trace will introduce the lazy import of torch._dynamo,
+        # and some contexts set before calling dispatch_trace will cause problems with the import of torch._dynamo,
+        # such as some torch API(torch.ones and so on) in populate_builtin_to_tensor_fn_map() will be affected
+        # by the context set before dispatch_trace.
+        import torch._dynamo
+
         phs = pytree.tree_map(lambda _: torch.fx._symbolic_trace.PH, args)
 
         def _wrap_fake(args: T) -> T:
@@ -2118,7 +2130,7 @@ class _MakefxTracer:
         # TODO: kind of a bad way to do it, should maybe figure out a better way
         if self.tracing_mode == "symbolic":
             assert self.fake_tensor_mode is not None
-            t.shape_env = self.fake_tensor_mode.shape_env
+            t.shape_env = self.fake_tensor_mode.shape_env  # type: ignore[assignment]
         return t
 
     def trace(self, f: Callable, *args: object) -> fx.GraphModule:

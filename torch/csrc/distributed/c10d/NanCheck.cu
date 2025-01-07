@@ -233,6 +233,10 @@ void checkForNan(const at::Tensor& tensor, at::cuda::CUDAStream& stream) {
   const size_t numThreadsPerBlock =
       std::min<size_t>(maxNumThreadsPerBlock, tensor.numel());
 
+  if (!(numThreadsPerBlock > 0)) {
+    return;
+  }
+
   const size_t numBlocks = std::min<size_t>(
       maxNumBlocks,
       (tensor.numel() + numThreadsPerBlock - 1) / numThreadsPerBlock);

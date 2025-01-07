@@ -7,6 +7,7 @@ from typing import Dict
 import torch
 import torch.distributed as dist
 from torch.distributed import distributed_c10d
+from torch.utils._typing_utils import not_none
 
 from . import default_hooks as default
 
@@ -398,7 +399,9 @@ def powerSGD_hook(
         >>> ddp_model.register_comm_hook(state, powerSGD_hook)
     """  # noqa: B950
     process_group = state.process_group
-    group_to_use = process_group if process_group is not None else dist.group.WORLD
+    group_to_use = (
+        process_group if process_group is not None else not_none(dist.group.WORLD)
+    )
     world_size = group_to_use.size()
 
     # The input tensor is a flattened 1D tensor.
@@ -707,7 +710,9 @@ def batched_powerSGD_hook(
         >>> ddp_model.register_comm_hook(state, batched_powerSGD_hook)
     """  # noqa: B950
     process_group = state.process_group
-    group_to_use = process_group if process_group is not None else dist.group.WORLD
+    group_to_use = (
+        process_group if process_group is not None else not_none(dist.group.WORLD)
+    )
     world_size = group_to_use.size()
 
     # The input tensor is a flattened 1D tensor.

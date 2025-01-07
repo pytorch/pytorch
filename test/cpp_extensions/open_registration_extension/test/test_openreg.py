@@ -1,7 +1,6 @@
 # Owner(s): ["module: cpp"]
 
 import os
-import unittest
 
 import psutil
 import pytorch_openreg
@@ -14,7 +13,6 @@ class TestOpenReg(TestCase):
     def test_initializes(self):
         self.assertEqual(torch._C._get_privateuse1_backend_name(), "openreg")
 
-    @unittest.SkipTest
     def test_autograd_init(self):
         # Make sure autograd is initialized
         torch.ones(2, requires_grad=True, device="openreg").sum().backward()
@@ -66,6 +64,11 @@ class TestOpenReg(TestCase):
         out = torch.masked_select(a, mask)
 
         self.assertEqual(out, cpu_a.masked_select(cpu_a.gt(0)))
+
+    def test_generator(self):
+        generator = torch.Generator(device="openreg:1")
+        self.assertEqual(generator.device.type, "openreg")
+        self.assertEqual(generator.device.index, 1)
 
     def test_pin_memory(self):
         cpu_a = torch.randn(10)
@@ -124,6 +127,10 @@ class TestOpenReg(TestCase):
         y = x.expand(3, 2)
         self.assertEqual(y.to(device="cpu"), torch.tensor([[1, 1], [2, 2], [3, 3]]))
         self.assertEqual(x.data_ptr(), y.data_ptr())
+
+    def test_empty_tensor(self):
+        empty_tensor = torch.tensor((), device="openreg")
+        self.assertEqual(empty_tensor.to(device="cpu"), torch.tensor(()))
 
 
 if __name__ == "__main__":

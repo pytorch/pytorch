@@ -1,16 +1,21 @@
 # mypy: allow-untyped-defs
+from __future__ import annotations
+
 import collections
+import functools
 import typing
 from enum import auto, Enum
 from typing import Dict, List, Optional, Union
 
 
+# The following maximums only apply to runtime autotuning, when using FixedTritonConfig one may see larger values
 # NOTE: if these fail asserts submit a PR to increase them
 TRITON_MAX_BLOCK = {
     "X": 4096,
     "Y": 1024,
     "Z": 1024,
-    "R": 4096 * 16,  # * 16 is multi-kernel only
+    "R0_": 4096 * 16,  # * 16 is multi-kernel only
+    "R1_": 2048 * 16,  # * 16 is multi-kernel only
 }
 TRITON_MAX_RSPLIT = 64
 
@@ -27,7 +32,7 @@ class TileHint(Enum):
     DEFAULT = 1
 
 
-def _is_triton_available():
+def _is_triton_available() -> bool:
     try:
         import triton  # noqa: F401
 
@@ -94,6 +99,7 @@ class HeuristicType(Enum):
     SPLIT_SCAN = auto()
     TEMPLATE = auto()
     USER_AUTOTUNE = auto()
+    FIXED = auto()
 
 
 class AutotuneHint(Enum):
@@ -111,15 +117,16 @@ class DeviceProperties(typing.NamedTuple):
 
     type: str  # type: ignore[assignment]
     index: int  # type: ignore[assignment]
+    multi_processor_count: int
     cc: int
     major: Optional[int] = None
     regs_per_multiprocessor: Optional[int] = None
     max_threads_per_multi_processor: Optional[int] = None
-    multi_processor_count: Optional[int] = None
     warp_size: Optional[int] = None
 
     @classmethod
-    def create(cls, device):
+    @functools.lru_cache(None)
+    def create(cls, device) -> DeviceProperties:
         import torch
         from torch._dynamo.device_interface import get_interface_for_device
 
@@ -129,28 +136,25 @@ class DeviceProperties(typing.NamedTuple):
             device_type = "hip"
 
         device_interface = get_interface_for_device(device)
-        if device_type in ["cuda", "hip", "xpu"]:
-            props = device_interface.get_device_properties(device)
-            return cls(
-                type=device_type,
-                index=device.index,
-                cc=device_interface.get_compute_capability(device),
-                major=props.major if hasattr(props, "major") else None,
-                regs_per_multiprocessor=props.regs_per_multiprocessor
-                if hasattr(props, "regs_per_multiprocessor")
-                else None,
-                max_threads_per_multi_processor=props.max_threads_per_multi_processor
-                if hasattr(props, "max_threads_per_multi_processor")
-                else None,
-                multi_processor_count=props.multi_processor_count
-                if hasattr(props, "multi_processor_count")
-                else None,
-                warp_size=props.warp_size if hasattr(props, "warp_size") else 32,
-            )
+        props = device_interface.get_device_properties(device)
+        try:
+            multi_processor_count = props.multi_processor_count
+        except AttributeError:
+            if device_type == "xpu":
+                multi_processor_count = props.gpu_subslice_count
+            else:
+                raise
         return cls(
             type=device_type,
             index=device.index,
+            multi_processor_count=multi_processor_count,
             cc=device_interface.get_compute_capability(device),
+            major=getattr(props, "major", None),
+            regs_per_multiprocessor=getattr(props, "regs_per_multiprocessor", None),
+            max_threads_per_multi_processor=getattr(
+                props, "max_threads_per_multi_processor", None
+            ),
+            warp_size=getattr(props, "warp_size", 32 if device_type != "cpu" else None),
         )
 
 
@@ -162,22 +166,22 @@ class HalideInputSpec(typing.NamedTuple):
     offset: Optional[str] = None
     alias_of: Optional[str] = None
 
-    def bindings_type(self):
+    def bindings_type(self) -> str:
         if self.ctype in ("half*", "bfloat16*"):
             return "uint16_t*"  # half not defined
         return self.ctype
 
-    def halide_type(self):
+    def halide_type(self) -> str:
         if self.ctype == "half*":
             return "halide_type_t(halide_type_float, 16)"  # half not defined
         if self.ctype == "bfloat16*":
             return "halide_type_t(halide_type_bfloat, 16)"  # half not defined
         return f"halide_type_of<{self.ctype.replace('*', '')}>()"
 
-    def is_scalar(self):
+    def is_scalar(self) -> bool:
         return self.shape is None
 
-    def is_buffer(self):
+    def is_buffer(self) -> bool:
         return self.shape is not None
 
 
@@ -188,7 +192,7 @@ class HalideMeta(typing.NamedTuple):
     scheduler_flags: Optional[Dict[str, Union[int, str]]] = None
     cuda_device: Optional[int] = None
 
-    def args(self):
+    def args(self) -> List[str]:
         """Command line args to pass to halide generator"""
         args = [f"target={self.target}"]
         if self.scheduler:
@@ -199,5 +203,5 @@ class HalideMeta(typing.NamedTuple):
                 args.append(f"autoscheduler.{k}={v}")
         return args
 
-    def is_cuda(self):
+    def is_cuda(self) -> bool:
         return self.cuda_device is not None
