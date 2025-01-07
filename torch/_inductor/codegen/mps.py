@@ -194,6 +194,10 @@ class MetalOverrides(OpOverrides):
     def floor(x: CSEVariable) -> str:
         return f"metal::floor({x})"
 
+    @staticmethod
+    def sign(x: CSEVariable) -> str:
+        return f"metal::sign({x})"
+
 
 class MetalKernel(SIMDKernel):
     overrides = MetalOverrides  # type: ignore[assignment]
