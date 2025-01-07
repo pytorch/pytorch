@@ -94,7 +94,7 @@ transformer_configs = {
         vocab_size=32000,
     ),
     "mini": dict(n_layer=2, n_head=2, dim=288),
-    "mini_primes": dict(n_layer=1, n_head=5, dim=10),
+    "mini_primes": dict(n_layer=1, n_head=8, dim=1024),
     "stories15M": dict(n_layer=6, n_head=6, dim=288),
     "stories110M": dict(n_layer=12, n_head=12, dim=768),
     "llama-3-8b": dict(

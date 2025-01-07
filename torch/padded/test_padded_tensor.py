@@ -17,10 +17,10 @@ class TestAttention(TestCase):
         super().setUp()
 
         # Define model parameters
-        self.n_local_heads = 512
-        self.head_dim = 2
+        self.n_local_heads = 8
+        self.head_dim = 128
         self.dim = 1024
-        self.n_head = 512
+        self.n_head = 8
         self.vocab_size = 32000
 
         # Initialize token embeddings and layers
@@ -272,7 +272,7 @@ class TestAttention(TestCase):
 
     def create_inputs(self, SEQLEN):
         x = torch.ones(4, SEQLEN, dtype=torch.int32)
-        freqs_cis = torch.randn(2, 1, SEQLEN)
+        freqs_cis = torch.randn(987, 64, 2)
         mask = torch.ones([1, 1, SEQLEN, 16])
         input_pos = torch.ones([SEQLEN], dtype=torch.int32)
 
