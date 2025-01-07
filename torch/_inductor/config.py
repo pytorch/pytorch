@@ -292,6 +292,12 @@ intra_node_bw = 300
 # default value is InfiniBand
 inter_node_bw = 25
 
+# use Inductor's experimental benchmarker (runtime/benchmarking.py)
+# to benchmark kernels during autotuning, otherwise fall back to
+# Triton's `do_bench`. the experimental benchmarker may produce
+# results that are not consistent with `do_bench`'s results
+use_experimental_benchmarker = False
+
 # enable slow autotuning passes to select algorithms
 max_autotune = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE") == "1"
 
