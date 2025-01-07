@@ -128,9 +128,8 @@ class TestOpRecorder(common_utils.TestCase):
             _ = self.opset.Add([input_x, input_y], input_z)
 
         self.assertEqual(len(tracer.nodes), 6)
-        print(tracer.nodes)
-        self.assertEqual(tracer.nodes[0].op_type, "Concat")
-        self.assertEqual(tracer.nodes[0].attributes["axis"].value, 0)
+        self.assertEqual(tracer.nodes[-2].op_type, "Concat")
+        self.assertEqual(tracer.nodes[-2].attributes["axis"].value, 0)
 
     def test_process_python_sequence_mix_symbolic_constant_creates_extra_concat(self):
         # Elements in the list must be 0D tensors
@@ -144,10 +143,9 @@ class TestOpRecorder(common_utils.TestCase):
         with onnxscript.evaluator.default_as(tracer := self.recorder):
             _ = self.opset.Add([input_x, 42], input_z)
 
-        self.assertEqual(len(tracer.nodes), 7)
-        print(tracer.nodes)
-        self.assertEqual(tracer.nodes[0].op_type, "Concat")
-        self.assertEqual(tracer.nodes[0].attributes["axis"].value, 0)
+        self.assertEqual(len(tracer.nodes), 5)
+        self.assertEqual(tracer.nodes[-2].op_type, "Concat")
+        self.assertEqual(tracer.nodes[-2].attributes["axis"].value, 0)
 
     def test_process_python_sequence_mix_constant_symbolic_creates_extra_concat(self):
         # Elements in the list must be 0D tensors
@@ -162,10 +160,9 @@ class TestOpRecorder(common_utils.TestCase):
             # Constant first
             _ = self.opset.Add([42, input_x], input_z)
 
-        self.assertEqual(len(tracer.nodes), 7)
-        print(tracer.nodes)
-        self.assertEqual(tracer.nodes[0].op_type, "Concat")
-        self.assertEqual(tracer.nodes[0].attributes["axis"].value, 0)
+        self.assertEqual(len(tracer.nodes), 5)
+        self.assertEqual(tracer.nodes[-2].op_type, "Concat")
+        self.assertEqual(tracer.nodes[-2].attributes["axis"].value, 0)
 
 
 if __name__ == "__main__":
