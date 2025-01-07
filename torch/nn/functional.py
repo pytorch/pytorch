@@ -26,6 +26,19 @@ from torch.overrides import (
 )
 
 
+def batch_add(tensor, value):
+    """
+    Adds a value to each element in the tensor batch.
+    Args:
+        tensor (torch.Tensor): Input tensor.
+        value (float): Value to add.
+    Returns:
+        torch.Tensor: Tensor with added value.
+    """
+    if not isinstance(tensor, torch.Tensor):
+        raise TypeError("Input must be a PyTorch tensor.")
+    return tensor + value
+
 if TYPE_CHECKING:
     from torch.types import _dtype as DType
 else:

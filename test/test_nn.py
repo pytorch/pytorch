@@ -57,6 +57,15 @@ from torch.testing._internal.common_mkldnn import bf32_on_and_off
 
 AMPERE_OR_ROCM = TEST_WITH_ROCM or tf32_is_not_fp32()
 
+from torch.nn.functional import batch_add
+
+def test_batch_add():
+    tensor = torch.ones((3, 3))
+    value = 2
+    result = batch_add(tensor, value)
+    expected = torch.ones((3, 3)) + 2
+    assert torch.equal(result, expected), "batch_add function failed."
+    
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
 load_tests = load_tests
