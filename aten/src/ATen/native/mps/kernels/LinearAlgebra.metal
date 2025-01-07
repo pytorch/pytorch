@@ -103,6 +103,7 @@ template <typename T>
 kernel void factorDiagonalBlock(
     device T* A [[buffer(0)]],
     constant BlockParams& sizes [[buffer(1)]],
+    device int* success [[buffer(2)]],
     uint tid [[thread_position_in_threadgroup]],
     uint bid [[threadgroup_position_in_grid]],
     uint tpg [[threads_per_threadgroup]]) {
@@ -142,6 +143,11 @@ kernel void factorDiagonalBlock(
 
     if (tid == 0) {
       T diagVal = tile[kk][kk] - diagElt;
+      // Check for positive definiteness
+      if (diagVal <= T(0)) {
+        success[bid] = 0; // matrix is not positive definite
+        return;
+      }
       tile[kk][kk] = sqrt_cast(diagVal);
     }
     threadgroup_barrier(mem_flags::mem_threadgroup);
@@ -166,6 +172,10 @@ kernel void factorDiagonalBlock(
     uint r = i / actSize;
     uint c = i % actSize;
     A[batch_offset + (row0 + r) * N + (col0 + c)] = tile[r][c];
+  }
+
+  if (tid == 0) {
+    success[bid] &= 1; // Mark successful completion
   }
 }
 
@@ -350,6 +360,7 @@ kernel void applySYRK(
   factorDiagonalBlock<DTYPE>(                                       \
       device DTYPE * A [[buffer(0)]],                               \
       constant BlockParams & sizes [[buffer(1)]],                   \
+      device int* success [[buffer(2)]],                            \
       uint tid [[thread_position_in_threadgroup]],                  \
       uint bid [[threadgroup_position_in_grid]],                    \
       uint tpg [[threads_per_threadgroup]])

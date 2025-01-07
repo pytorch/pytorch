@@ -783,6 +783,10 @@ static Tensor& linalg_cholesky_mps_impl(const Tensor& input, bool upper, Tensor&
   int64_t NB = std::min<int64_t>(32, N);
   int64_t numBlocks = (N + NB - 1) / NB;
 
+  // for checking matrix's positive definitness
+  Tensor success = at::empty({B}, input.options().dtype(kInt)).fill_(1);
+  id<MTLBuffer> successBuffer = getMTLBufferStorage(success);
+
   MTLSize threadGroupSize = MTLSizeMake(1024, 1, 1);
   id<MTLBuffer> outBuffer = getMTLBufferStorage(out);
   id<MTLComputeCommandEncoder> computeEncoder = stream->commandEncoder();
@@ -803,6 +807,7 @@ static Tensor& linalg_cholesky_mps_impl(const Tensor& input, bool upper, Tensor&
                                                         length:sizes.size() * sizeof(uint32_t)
                                                        options:MTLResourceStorageModePrivate];
         [computeEncoder setBuffer:sizesBuffer offset:0 atIndex:1];
+        [computeEncoder setBuffer:successBuffer offset:0 atIndex:2];
         MTLSize gridSize = MTLSizeMake(B, 1, 1);
         [computeEncoder dispatchThreadgroups:gridSize threadsPerThreadgroup:threadGroupSize];
 
@@ -871,6 +876,7 @@ static Tensor& linalg_cholesky_mps_impl(const Tensor& input, bool upper, Tensor&
       }
     });
   }
+  TORCH_CHECK(success.all().item<bool>(), "linalg.cholesky: Input matrix is not positive definite");
   out.tril_();
   return upper ? out.transpose_(ndim - 2, ndim - 1) : out;
 }
