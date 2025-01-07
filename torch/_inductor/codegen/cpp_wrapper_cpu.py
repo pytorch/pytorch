@@ -4,7 +4,7 @@ import math
 import os
 import sys
 from itertools import count
-from typing import Callable, Dict, List, Optional, Sequence, Tuple
+from typing import Callable, Dict, List, Optional, Sequence
 
 import sympy
 from sympy import Expr
@@ -150,7 +150,11 @@ class CppWrapperCpu(PythonWrapperCodegen):
 
                 cpp_wrapper_src = (
                 '''
-                #include <pybind11/pybind11.h>
+                #include <optional>
+                #include <Python.h>
+
+                #define PYBIND11_SIMPLE_GIL_MANAGEMENT
+                #include <pybind11/gil.h>
                 namespace py = pybind11;
 
                 class RAIIPyObject {
@@ -789,7 +793,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
 
         with self.prefix.indent():
             # This is a mapping to the index of constant folding graph's output
-            const_index_mapping: List[Optional[Tuple[int, str]]] = [None] * len(
+            const_index_mapping: List[Optional[tuple[int, str]]] = [None] * len(
                 V.graph.const_output_index
             )
             for idx, (name, _) in enumerate(V.graph.constants.items()):
@@ -1408,7 +1412,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
         call_strs = []
         final_tmp_name = None
 
-        def create_reinterpret_call() -> Tuple[str, str]:
+        def create_reinterpret_call() -> tuple[str, str]:
             tmp_name = f"tmp_tensor_handle_{next(self.tmp_tensor_id)}"
             args = [
                 f"{data.get_name()}",
@@ -1432,7 +1436,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
             )
             return tmp_name, call_str
 
-        def create_dtypeview_call(reinterpret_call: str) -> Tuple[str, List[str]]:
+        def create_dtypeview_call(reinterpret_call: str) -> tuple[str, List[str]]:
             tmp_AtenTensorHandle = f"tmp_{data.get_name()}_{next(self.tmp_tensor_id)}"
             call_strs = [f"AtenTensorHandle {tmp_AtenTensorHandle};"]
             dtype_name = str(dtype).split(".")[-1]
@@ -1961,7 +1965,7 @@ if (custom_op_wrapper.get() == NULL) {
                 elif isinstance(raw_arg, bool):
                     return f"PyBool_FromLong({1 if raw_arg else 0})"
                 elif isinstance(raw_arg, complex):
-                    return f"PyComplex_FromDoubles({raw_arg.real, raw_arg.imag})"
+                    return f"PyComplex_FromDoubles({raw_arg.real}, {raw_arg.imag})"
                 elif isinstance(raw_arg, torch.SymInt):
                     expr = raw_arg.node.expr
                     return f"PyLong_FromLongLong({cexpr(expr)})"

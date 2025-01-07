@@ -1,10 +1,11 @@
 # Owner(s): ["oncall: distributed"]
 
+import math
+import pathlib
 import sys
-from pathlib import Path
 
 
-REPO_ROOT = Path(__file__).absolute().parents[3]
+REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent.parent.parent
 
 sys.path.insert(0, str(REPO_ROOT))
 from tools.flight_recorder.components.types import COLLECTIVES, MatchState
@@ -113,14 +114,22 @@ class FlightRecorderEventTest(TestCase):
 
     def test_all_events(self):
         for collective in sorted(COLLECTIVES):
+            input_sizes = [[4, 4]]
+            output_sizes = [[4, 4]]
+            expectedState = MatchState.FULLY_MATCHED
+            if collective == "_reduce_scatter_base":
+                input_sizes = [[4, 4]]
+                output_sizes = [[input_sizes[0][0] * 2]]
+            if collective == "all_gather":
+                output_sizes = [[math.prod(input_sizes[0]) * 2]]
+            if collective == "all_to_all":
+                expectedState = MatchState.UNDECIDED
             event = create_one_event(
-                collective, ("0", "default"), [[4, 4]], [[4, 4]], "scheduled", 1
+                collective, ("0", "default"), input_sizes, output_sizes, "scheduled", 1
             )
             membership = {"0": {0, 1}}
-            self.assertEqual(
-                match_one_event(event, event, membership, "0"), MatchState.FULLY_MATCHED
-            )
-            break
+            result = match_one_event(event, event, membership, "0")
+            self.assertEqual(result, expectedState)
 
 
 if __name__ == "__main__":
