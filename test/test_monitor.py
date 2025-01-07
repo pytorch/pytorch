@@ -104,7 +104,7 @@ class TestMonitor(TestCase):
         wait_counter = _WaitCounter(
             "test_wait_counter",
         )
-        with wait_counter.guard() as wcg:
+        with wait_counter.guard():
             pass
 
 
