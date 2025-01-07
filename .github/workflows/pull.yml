@@ -202,18 +202,6 @@ jobs:
         ]}
     secrets: inherit
 
-  linux-focal-py3_9-clang10-test:
-    name: linux-focal-py3.9-clang10
-    uses: ./.github/workflows/_linux-test.yml
-    needs:
-      - linux-focal-py3_9-clang10-build
-      - target-determination
-    with:
-      build-environment: linux-focal-py3.9-clang10
-      docker-image: ${{ needs.linux-focal-py3_9-clang10-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-focal-py3_9-clang10-build.outputs.test-matrix }}
-    secrets: inherit
-
   linux-focal-py3_13-clang10-build:
     name: linux-focal-py3.13-clang10
     uses: ./.github/workflows/_linux-build.yml
