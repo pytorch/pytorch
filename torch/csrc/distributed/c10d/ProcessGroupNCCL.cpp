@@ -806,16 +806,18 @@ ProcessGroupNCCL::CUDAEventCache::CUDAEventCache() = default;
 std::shared_ptr<at::cuda::CUDAEvent> ProcessGroupNCCL::CUDAEventCache::create(
     bool timing) {
   // register the deleter as a callback when the WorkNCCL object is destroyed.
-  auto deleter = [this, timing](at::cuda::CUDAEvent* event) {
-    std::lock_guard<std::mutex> lock(this->cacheMutex_);
+  auto deleter = [lockPtr = this->cacheMutexPtr_,
+                  eventPtr = this->eventsArrayPtr_,
+                  timing](at::cuda::CUDAEvent* event) {
+    std::lock_guard<std::mutex> lock(*lockPtr);
     // We put the event back to the cache deque once the WorkNCCL object is
     // destroyed.
-    this->eventsArray_[timing ? 1 : 0].push_back(event);
+    (*eventPtr)[timing ? 1 : 0].push_back(event);
   };
   at::cuda::CUDAEvent* event = nullptr;
   {
-    std::lock_guard<std::mutex> lock(cacheMutex_);
-    auto& events = eventsArray_[timing ? 1 : 0];
+    std::lock_guard<std::mutex> lock(*cacheMutexPtr_);
+    auto& events = (*eventsArrayPtr_)[timing ? 1 : 0];
     // If we still have events in the cache, we reuse it. Otherwise, we create a
     // new one.
     if (!events.empty()) {
