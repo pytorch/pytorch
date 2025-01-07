@@ -6,7 +6,6 @@ from abc import ABC, abstractmethod
 from typing import Any, Callable, ContextManager, Dict, List, Optional, Tuple, Union
 
 import torch
-import torch.utils._pytree as pytree
 from torch._C import _functionalization_reapply_views_tls as _reapply_views
 from torch._ops import _get_dispatch_mode_pre_dispatch
 from torch._subclasses.meta_utils import is_sparse_any
@@ -16,6 +15,7 @@ from torch.utils._python_dispatch import (
     return_and_correct_aliasing,
     TorchDispatchMode,
 )
+from torch.utils.pytree import tree_iter, tree_map_only
 
 
 not_implemented_log = torch._logging.getArtifactLogger(__name__, "not_implemented")
@@ -479,7 +479,7 @@ class FunctionalTensorMode(TorchDispatchMode):
                 self._allow_token_discovery, self._tokens, func, args, kwargs
             )
 
-        args_unwrapped, kwargs_unwrapped = pytree.tree_map_only(
+        args_unwrapped, kwargs_unwrapped = tree_map_only(
             FunctionalTensor, unwrap, (args, kwargs)
         )
 
@@ -515,9 +515,7 @@ class FunctionalTensorMode(TorchDispatchMode):
                 # because args are sometimes not functional tensors for some reason?
                 if func in FunctionalTensor.metadata_fns:
                     outs_unwrapped = func(*args_unwrapped, **kwargs_unwrapped)
-                    outs_wrapped = pytree.tree_map_only(
-                        torch.Tensor, wrap, outs_unwrapped
-                    )
+                    outs_wrapped = tree_map_only(torch.Tensor, wrap, outs_unwrapped)
                 else:
                     # When we dispatch to the C++ functionalization kernel, we might need to jump back to the
                     # PreDispatch mode stack afterwards, to handle any other PreDispatch modes underneath
@@ -536,9 +534,7 @@ class FunctionalTensorMode(TorchDispatchMode):
                             torch.ops.aten._to_copy.default,
                         ):
                             torch._freeze_functional_tensor(outs_unwrapped)  # type: ignore[attr-defined]
-                    outs_wrapped = pytree.tree_map_only(
-                        torch.Tensor, wrap, outs_unwrapped
-                    )
+                    outs_wrapped = tree_map_only(torch.Tensor, wrap, outs_unwrapped)
             finally:
                 torch._disable_functionalization()
                 torch._functionalize_enable_reapply_views(old_apply_views)  # type: ignore[attr-defined]
@@ -553,10 +549,7 @@ class FunctionalTensorMode(TorchDispatchMode):
 
         if (
             # If no outputs are our functional subclass, then don't try to fix up aliasing
-            not any(
-                isinstance(x, FunctionalTensor)
-                for x in pytree.tree_leaves(outs_wrapped)
-            )
+            not any(isinstance(x, FunctionalTensor) for x in tree_iter(outs_wrapped))
             # Since lift_fresh lifts its argument into a functional tensor, we can skip the
             # aliasing correction step. Otherwise, we would be setting the storage of a
             # lifted tensor to that of an unlifted tensor.
@@ -616,10 +609,10 @@ def dispatch_functionalize(func, mode: FunctionalTensorMode = FunctionalTensorMo
             torch._C.DispatchKeySet(torch._C.DispatchKey.Functionalize)
         )
         with disable_above, mode:
-            func_args = pytree.tree_map_only(torch.Tensor, to_fun, args)
-            func_kwargs = pytree.tree_map_only(torch.Tensor, to_fun, kwargs)
+            func_args = tree_map_only(torch.Tensor, to_fun, args)
+            func_kwargs = tree_map_only(torch.Tensor, to_fun, kwargs)
             func_outputs = func(*func_args, **func_kwargs)
-            outputs = pytree.tree_map_only(FunctionalTensor, from_fun, func_outputs)
+            outputs = tree_map_only(FunctionalTensor, from_fun, func_outputs)
 
             return outputs
 
@@ -672,16 +665,12 @@ class PythonFunctionalizeAPI(BaseFunctionalizeAPI):
 
     def wrap_tensors(self, args: Tuple[Any]) -> Tuple[Any]:
         with self.mode:
-            return torch.utils._pytree.tree_map_only(
-                torch.Tensor, FunctionalTensor.to_functional, args
-            )
+            return tree_map_only(torch.Tensor, FunctionalTensor.to_functional, args)
 
     def unwrap_tensors(
         self, args: Union[torch.Tensor, Tuple[torch.Tensor, ...], List[torch.Tensor]]
     ) -> Any:
-        return torch.utils._pytree.tree_map_only(
-            FunctionalTensor, FunctionalTensor.from_functional, args
-        )
+        return tree_map_only(FunctionalTensor, FunctionalTensor.from_functional, args)
 
     def functionalize(self, inner_f: Callable) -> Callable:
         return dispatch_functionalize(inner_f, self.mode)

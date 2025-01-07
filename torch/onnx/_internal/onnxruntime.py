@@ -29,7 +29,7 @@ from torch.fx._compatibility import compatibility
 from torch.fx.passes.fake_tensor_prop import FakeTensorProp
 from torch.fx.passes.operator_support import OperatorSupport
 from torch.fx.passes.tools_common import CALLABLE_NODE_OPS
-from torch.utils import _pytree
+from torch.utils import pytree
 
 
 if TYPE_CHECKING:
@@ -282,7 +282,7 @@ def _extract_graph_module_outputs(graph_module: torch.fx.GraphModule) -> Any:
 
 def _infer_ep_from_graph_module(graph_module: torch.fx.GraphModule) -> Tuple[str, ...]:
     """Return the all valid devices (i.e., GPU or CPU) among outputs of this torch.fx.GraphModule."""
-    flattened_output_args, _ = _pytree.tree_flatten(
+    flattened_output_args = pytree.tree_leaves(
         _extract_graph_module_outputs(graph_module)
     )
     # Output arguments with example value (type: torch.Tensor) in the `graph_module`.
@@ -933,9 +933,7 @@ class OrtBackend:
                     else:
                         return value
 
-                prim_outputs = _pytree.tree_map(
-                    maybe_map_to_meta_val, extracted_outputs
-                )
+                prim_outputs = pytree.tree_map(maybe_map_to_meta_val, extracted_outputs)
             else:
                 try:
                     prim_outputs = FakeTensorProp(graph_module).propagate(

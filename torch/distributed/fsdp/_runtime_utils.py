@@ -37,7 +37,7 @@ from torch.distributed.utils import (
     _p_assert,
     _to_kwargs,
 )
-from torch.utils import _pytree as pytree
+from torch.utils.pytree import tree_iter
 
 
 logger = logging.getLogger(__name__)
@@ -534,7 +534,13 @@ def _root_pre_forward(
         if handle:
             should_cast_buffers_to_full_prec = handle._force_full_precision
         else:
-            should_cast_buffers_to_full_prec = True
+            # If the root has no handle (no managed parameters), then we fall
+            # back to checking if any child wants to force full precision as a
+            # workaround
+            handles = traversal_utils._get_fsdp_handles(module)
+            should_cast_buffers_to_full_prec = any(
+                handle._force_full_precision for handle in handles
+            )
 
         if should_cast_buffers_to_full_prec:
             _cast_buffers_to_dtype_and_device(
@@ -1490,9 +1496,10 @@ def _register_post_backward_reshard_only_hook(
     if already_registered or flat_param.requires_grad:
         return
     if inp_tensors is None:
-        args_flat = pytree.arg_tree_leaves(*args, **kwargs)
         inp_tensors = [
-            obj for obj in args_flat if torch.is_tensor(obj) and obj.requires_grad
+            obj
+            for obj in tree_iter((args, kwargs))
+            if torch.is_tensor(obj) and obj.requires_grad
         ]
     assert inp_tensors is not None  # mypy
     hook_handle = register_multi_grad_hook(

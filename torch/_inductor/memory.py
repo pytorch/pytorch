@@ -4,7 +4,7 @@ import collections
 import dataclasses
 import heapq
 import logging
-from typing import Callable, Dict, List, Tuple, TYPE_CHECKING, TypedDict, Union
+from typing import Callable, Dict, List, TYPE_CHECKING, TypedDict, Union
 
 from torch._utils_internal import signpost_event
 from torch.utils._ordered_set import OrderedSet
@@ -113,7 +113,7 @@ def get_freeable_input_buf(
 
 def compute_size_for_scheduler_buffer(
     name_to_buf: Dict[str, SchedulerBuffer]
-) -> Dict[str, Tuple[int, int]]:
+) -> Dict[str, tuple[int, int]]:
     """
     Compute the size of each scheduler buffer, including (1) memory allocated when
     it is created and (2) memory deallocated when it is freed.
@@ -134,7 +134,7 @@ def compute_size_for_scheduler_buffer(
     from .ir import MultiOutput
     from .scheduler import OutputNode
 
-    sched_buf_to_size: Dict[str, Tuple[int, int]] = dict()
+    sched_buf_to_size: Dict[str, tuple[int, int]] = dict()
 
     def _compute_and_update_buf_size(
         sched_buf: SchedulerBuffer, user_of_MultiOutputLayout: bool = False
@@ -246,7 +246,7 @@ def estimate_peak_memory(
     nodes: List[BaseSchedulerNode],
     name_to_freeable_input_buf: Dict[str, FreeableInputBuffer],
     graph_outputs: OrderedSet[str],
-) -> Tuple[int, List[int]]:
+) -> tuple[int, List[int]]:
     """
     Given a list of nodes in their execution order, estimate the peak memory, by
     keeping track of the liveliness of SchedulerBuffers and FreeableInputBuffers.

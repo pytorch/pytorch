@@ -10,7 +10,7 @@ from torch.fx.experimental.shape_inference.infer_symbol_values import (
     infer_symbol_values,
 )
 from torch.fx.experimental.symbolic_shapes import DimDynamic, ShapeEnv
-from torch.utils import _pytree
+from torch.utils.pytree import tree_flatten, tree_unflatten
 
 
 """
@@ -23,7 +23,7 @@ def infer_shape(gm, input_tensors):
     shape_env = ShapeEnv()
     fake_mode = FakeTensorMode(shape_env=shape_env, allow_non_fake_inputs=True)
 
-    flatten_inputs, spec = _pytree.tree_flatten(input_tensors)
+    flatten_inputs, spec = tree_flatten(input_tensors)
     dim_count = 1
     for input_tensor in flatten_inputs:
         dim_count += input_tensor.dim() - 1
@@ -53,7 +53,7 @@ def infer_shape(gm, input_tensors):
                 sym_tensor = torch.randn(desired_size)
                 sym_tensors.append(sym_tensor)
                 i += curr_dim - 1
-            sym_tensors = _pytree.tree_unflatten(sym_tensors, spec)
+            sym_tensors = tree_unflatten(sym_tensors, spec)
         try:
             with fake_mode:
                 make_fx(

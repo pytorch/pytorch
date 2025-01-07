@@ -25,8 +25,8 @@ from typing import Any, Dict, Iterator, List, Optional, Set, Tuple, TypeVar
 
 import torch
 import torch.cuda._gpu_trace as gpu_trace
-from torch.utils import _pytree as pytree
 from torch.utils._python_dispatch import TorchDispatchMode
+from torch.utils.pytree import tree_map_
 
 
 DEFAULT_STREAM_ID = 0
@@ -523,7 +523,7 @@ class ArgumentHandler:
             metadata_only = is_factory or (
                 argument.alias_info is not None and not argument.alias_info.is_write
             )
-            pytree.tree_map_(
+            tree_map_(
                 functools.partial(
                     self._handle_argument,
                     is_write=is_write,
@@ -540,7 +540,7 @@ class ArgumentHandler:
             metadata_only = is_factory or (
                 res.alias_info is not None and not res.alias_info.is_write
             )
-            pytree.tree_map_(
+            tree_map_(
                 functools.partial(
                     self._handle_argument,
                     is_write=not metadata_only,
