@@ -6688,56 +6688,56 @@ class GraphModule(torch.nn.Module):
         m, args = WHILE_LOOP_TESTS["const_and_symint_output"]
         dynamic_shapes = {"t": {0: torch.export.Dim("dim_t")}} if dynamic else None
         ep = self._check_export(m, args, strict=strict, dynamic_shapes=dynamic_shapes)
-        if not strict and dynamic:
+        # strict or dynamic gives a slightly different graph
+        if not strict and not dynamic:
             self.assertExpectedInline(
                 normalize_gm(ep.module().print_readable(print_output=False)),
                 """\
 class GraphModule(torch.nn.Module):
     def forward(self, t):
-        t: "f32[s0, 3]";
+        t: "f32[2, 3]";
 
         t, = fx_pytree.tree_flatten_spec(([t], {}), self._in_spec)
-        sym_size_int_1: "Sym(s0)" = torch.ops.aten.sym_size.int(t, 0)
-
-        add: "Sym(s0 + 1)" = sym_size_int_1 + 1
         sum_1: "f32[]" = torch.ops.aten.sum.default(t)
         to: "i64[]" = torch.ops.aten.to.dtype(sum_1, torch.int64);  sum_1 = None
         item: "Sym(u0)" = torch.ops.aten.item.default(to);  to = None
-        sin: "f32[s0, 3]" = torch.ops.aten.sin.default(t)
+        sin: "f32[2, 3]" = torch.ops.aten.sin.default(t)
 
         while_loop_cond_graph_0 = self.while_loop_cond_graph_0
         while_loop_body_graph_0 = self.while_loop_body_graph_0
-        while_loop = torch.ops.higher_order.while_loop(while_loop_cond_graph_0, while_loop_body_graph_0, (sym_size_int_1, 3, 1, 1, 1, add, item, sin), ());  while_loop_cond_graph_0 = while_loop_body_graph_0 = sym_size_int_1 = add = item = sin = None
-        getitem: "Sym(u8)" = while_loop[0]
-        getitem_1: "Sym(u9)" = while_loop[1]
-        getitem_2: "Sym(u10)" = while_loop[2]
-        getitem_3: "Sym(u11)" = while_loop[3]
-        getitem_4: "Sym(u12)" = while_loop[4]
-        getitem_5: "Sym(u13)" = while_loop[5]
-        getitem_6: "Sym(u14)" = while_loop[6]
-        getitem_7: "f32[s0, 3]" = while_loop[7];  while_loop = None
+        while_loop = torch.ops.higher_order.while_loop(while_loop_cond_graph_0, while_loop_body_graph_0, (2, 3, 1, 1, 1, 3, item, sin), ());  while_loop_cond_graph_0 = while_loop_body_graph_0 = item = sin = None
 
-        add_1: "Sym(u8 + 1)" = getitem + 1
-        add_2: "Sym(u9 + 1)" = getitem_1 + 1
-        add_3: "Sym(u10 + 1)" = getitem_2 + 1
-        add_4: "Sym(u11 + 1)" = getitem_3 + 1
-        add_5: "Sym(u12 + 1)" = getitem_4 + 1
-        add_6: "Sym(u13 + 1)" = getitem_5 + 1
-        add_7: "Sym(u14 + 1)" = getitem_6 + 1
-        add_8: "f32[s0, 3]" = torch.ops.aten.add.Tensor(getitem_7, 1)
+        getitem_8: "Sym(u8)" = while_loop[0]
+        getitem_9: "Sym(u9)" = while_loop[1]
+        getitem_10: "Sym(u10)" = while_loop[2]
+        getitem_11: "Sym(u11)" = while_loop[3]
+        getitem_12: "Sym(u12)" = while_loop[4]
+        getitem_13: "Sym(u13)" = while_loop[5]
+        getitem_14: "Sym(u14)" = while_loop[6]
 
-        add_9: "f32[s0, 3]" = torch.ops.aten.add.Tensor(t, getitem);  getitem = None
-        add_10: "f32[s0, 3]" = torch.ops.aten.add.Tensor(t, getitem_1);  getitem_1 = None
-        add_11: "f32[s0, 3]" = torch.ops.aten.add.Tensor(t, getitem_2);  getitem_2 = None
-        add_12: "f32[s0, 3]" = torch.ops.aten.add.Tensor(t, getitem_3);  getitem_3 = None
-        add_13: "f32[s0, 3]" = torch.ops.aten.add.Tensor(t, getitem_4);  getitem_4 = None
-        add_14: "f32[s0, 3]" = torch.ops.aten.add.Tensor(t, getitem_5);  getitem_5 = None
-        add_15: "f32[s0, 3]" = torch.ops.aten.add.Tensor(t, getitem_6);  getitem_6 = None
-        add_16: "f32[s0, 3]" = torch.ops.aten.add.Tensor(getitem_7, t);  getitem_7 = t = None
-        return pytree.tree_unflatten((add_1, add_2, add_3, add_4, add_5, add_6, add_7, add_8, add_9, add_10, add_11, add_12, add_13, add_14, add_15, add_16), self._out_spec)
+        getitem_7: "f32[2, 3]" = while_loop[7];  while_loop = None
+
+        add: "Sym(u8 + 1)" = getitem_8 + 1
+        add_1: "Sym(u9 + 1)" = getitem_9 + 1
+        add_2: "Sym(u10 + 1)" = getitem_10 + 1
+        add_3: "Sym(u11 + 1)" = getitem_11 + 1
+        add_4: "Sym(u12 + 1)" = getitem_12 + 1
+        add_5: "Sym(u13 + 1)" = getitem_13 + 1
+        add_6: "Sym(u14 + 1)" = getitem_14 + 1
+        add_7: "f32[2, 3]" = torch.ops.aten.add.Tensor(getitem_7, 1)
+
+        add_8: "f32[2, 3]" = torch.ops.aten.add.Tensor(t, getitem_8);  getitem_8 = None
+        add_9: "f32[2, 3]" = torch.ops.aten.add.Tensor(t, getitem_9);  getitem_9 = None
+        add_10: "f32[2, 3]" = torch.ops.aten.add.Tensor(t, getitem_10);  getitem_10 = None
+        add_11: "f32[2, 3]" = torch.ops.aten.add.Tensor(t, getitem_11);  getitem_11 = None
+        add_12: "f32[2, 3]" = torch.ops.aten.add.Tensor(t, getitem_12);  getitem_12 = None
+        add_13: "f32[2, 3]" = torch.ops.aten.add.Tensor(t, getitem_13);  getitem_13 = None
+        add_14: "f32[2, 3]" = torch.ops.aten.add.Tensor(t, getitem_14);  getitem_14 = None
+        add_15: "f32[2, 3]" = torch.ops.aten.add.Tensor(getitem_7, t);  getitem_7 = t = None
+        return pytree.tree_unflatten((add, add_1, add_2, add_3, add_4, add_5, add_6, add_7, add_8, add_9, add_10, add_11, add_12, add_13, add_14, add_15), self._out_spec)
 
     class while_loop_cond_graph_0(torch.nn.Module):
-        def forward(self, a_1: "Sym(u1)", b_1: "Sym(u2)", c1_1: "Sym(u3)", c2_1: "Sym(u4)", c3_1: "Sym(u5)", c0_1: "Sym(u6)", u0_1: "Sym(u7)", x_1: "f32[s0, 3]"):
+        def forward(self, a_1: "Sym(u1)", b_1: "Sym(u2)", c1_1: "Sym(u3)", c2_1: "Sym(u4)", c3_1: "Sym(u5)", c0_1: "Sym(u6)", u0_1: "Sym(u7)", x_1: "f32[2, 3]"):
             mul: "Sym(u3*u4)" = c1_1 * c2_1;  c1_1 = c2_1 = None
             mul_1: "Sym(u3*u4*u5)" = mul * c3_1;  mul = c3_1 = None
             mul_2: "Sym(u1*u2)" = a_1 * b_1;  a_1 = b_1 = None
@@ -6745,9 +6745,9 @@ class GraphModule(torch.nn.Module):
             return lt
 
     class while_loop_body_graph_0(torch.nn.Module):
-        def forward(self, a_1: "Sym(u1)", b_1: "Sym(u2)", c1_1: "Sym(u3)", c2_1: "Sym(u4)", c3_1: "Sym(u5)", c0_1: "Sym(u6)", u0_1: "Sym(u7)", x_1: "f32[s0, 3]"):
+        def forward(self, a_1: "Sym(u1)", b_1: "Sym(u2)", c1_1: "Sym(u3)", c2_1: "Sym(u4)", c3_1: "Sym(u5)", c0_1: "Sym(u6)", u0_1: "Sym(u7)", x_1: "f32[2, 3]"):
             add: "Sym(u7 + 1)" = u0_1 + 1;  u0_1 = None
-            add_1: "f32[s0, 3]" = torch.ops.aten.add.Tensor(x_1, 1);  x_1 = None
+            add_1: "f32[2, 3]" = torch.ops.aten.add.Tensor(x_1, 1);  x_1 = None
             return (b_1, c1_1, c2_1, c3_1, a_1, 0, add, add_1)
 """,  # noqa: B950
             )
@@ -6765,7 +6765,8 @@ class GraphModule(torch.nn.Module):
         self._check_compile(m, args, dynamic=dynamic, backend=backend)
         if (
             isinstance(backend, EagerAndRecordGraphs)
-            and dynamic
+            # cross ref or dynamic gives a slightly different graph
+            and not dynamic
             and not TEST_WITH_CROSSREF
         ):
             self.assertEqual(len(backend.graphs), 1)
@@ -6773,51 +6774,49 @@ class GraphModule(torch.nn.Module):
                 normalize_gm(backend.graphs[0].print_readable(print_output=False)),
                 """\
 class GraphModule(torch.nn.Module):
-    def forward(self, s0: "Sym(s0)", s1: "Sym(s1)", L_t_: "f32[s0, s1]"):
+    def forward(self, L_t_: "f32[2, 3]"):
         l_t_ = L_t_
 
-        add: "Sym(s0 + 1)" = s0 + 1
         sum_1: "f32[]" = l_t_.sum()
         to: "i64[]" = sum_1.to(torch.int64);  sum_1 = None
         item: "Sym(u0)" = to.item();  to = None
-        child: "f32[s0, s1]" = l_t_.sin()
+        child: "f32[2, 3]" = l_t_.sin()
 
         cond_fn_0 = self.cond_fn_0
         body_fn_0 = self.body_fn_0
-        while_loop = torch.ops.higher_order.while_loop(cond_fn_0, body_fn_0, (s0, s1, 1, 1, 1, add, item, child), (s0, s1));  cond_fn_0 = body_fn_0 = s0 = s1 = add = item = child = None
-        getitem_4: "Sym(u8)" = while_loop[0]
-        getitem_5: "Sym(u9)" = while_loop[1]
-        getitem_6: "Sym(u10)" = while_loop[2]
-        getitem_7: "Sym(u11)" = while_loop[3]
-        getitem_8: "Sym(u12)" = while_loop[4]
-        getitem_9: "Sym(u13)" = while_loop[5]
-        getitem_10: "Sym(u14)" = while_loop[6]
-        child_1: "f32[s0, s1]" = while_loop[7];  while_loop = None
+        while_loop = torch.ops.higher_order.while_loop(cond_fn_0, body_fn_0, (2, 3, 1, 1, 1, 3, item, child), ());  cond_fn_0 = body_fn_0 = item = child = None
 
-        add_1: "Sym(u8 + 1)" = getitem_4 + 1
-        add_2: "Sym(u9 + 1)" = getitem_5 + 1
-        add_3: "Sym(u10 + 1)" = getitem_6 + 1
-        add_4: "Sym(u11 + 1)" = getitem_7 + 1
-        add_5: "Sym(u12 + 1)" = getitem_8 + 1
-        add_6: "Sym(u13 + 1)" = getitem_9 + 1
-        add_7: "Sym(u14 + 1)" = getitem_10 + 1
-        add_8: "f32[s0, s1]" = child_1 + 1
+        getitem_8: "Sym(u8)" = while_loop[0]
+        getitem_9: "Sym(u9)" = while_loop[1]
+        getitem_10: "Sym(u10)" = while_loop[2]
+        getitem_11: "Sym(u11)" = while_loop[3]
+        getitem_12: "Sym(u12)" = while_loop[4]
+        getitem_13: "Sym(u13)" = while_loop[5]
+        getitem_14: "Sym(u14)" = while_loop[6]
 
-        add_9: "f32[s0, s1]" = getitem_4 + l_t_;  getitem_4 = None
-        add_10: "f32[s0, s1]" = getitem_5 + l_t_;  getitem_5 = None
-        add_11: "f32[s0, s1]" = getitem_6 + l_t_;  getitem_6 = None
-        add_12: "f32[s0, s1]" = getitem_7 + l_t_;  getitem_7 = None
-        add_13: "f32[s0, s1]" = getitem_8 + l_t_;  getitem_8 = None
-        add_14: "f32[s0, s1]" = getitem_9 + l_t_;  getitem_9 = None
-        add_15: "f32[s0, s1]" = getitem_10 + l_t_;  getitem_10 = None
-        add_16: "f32[s0, s1]" = child_1 + l_t_;  child_1 = l_t_ = None
-        return (add_1, add_2, add_3, add_4, add_5, add_6, add_7, add_8, add_9, add_10, add_11, add_12, add_13, add_14, add_15, add_16)
+        child_1: "f32[2, 3]" = while_loop[7];  while_loop = None
+
+        add: "Sym(u8 + 1)" = getitem_8 + 1
+        add_1: "Sym(u9 + 1)" = getitem_9 + 1
+        add_2: "Sym(u10 + 1)" = getitem_10 + 1
+        add_3: "Sym(u11 + 1)" = getitem_11 + 1
+        add_4: "Sym(u12 + 1)" = getitem_12 + 1
+        add_5: "Sym(u13 + 1)" = getitem_13 + 1
+        add_6: "Sym(u14 + 1)" = getitem_14 + 1
+        add_7: "f32[2, 3]" = child_1 + 1
+
+        add_8: "f32[2, 3]" = getitem_8 + l_t_;  getitem_8 = None
+        add_9: "f32[2, 3]" = getitem_9 + l_t_;  getitem_9 = None
+        add_10: "f32[2, 3]" = getitem_10 + l_t_;  getitem_10 = None
+        add_11: "f32[2, 3]" = getitem_11 + l_t_;  getitem_11 = None
+        add_12: "f32[2, 3]" = getitem_12 + l_t_;  getitem_12 = None
+        add_13: "f32[2, 3]" = getitem_13 + l_t_;  getitem_13 = None
+        add_14: "f32[2, 3]" = getitem_14 + l_t_;  getitem_14 = None
+        add_15: "f32[2, 3]" = child_1 + l_t_;  child_1 = l_t_ = None
+        return (add, add_1, add_2, add_3, add_4, add_5, add_6, add_7, add_8, add_9, add_10, add_11, add_12, add_13, add_14, add_15)
 
     class cond_fn_0(torch.nn.Module):
-        def forward(self, unbacked_symint: "Sym(u1)", unbacked_symint_0: "Sym(u2)", unbacked_symint_1: "Sym(u3)", unbacked_symint_2: "Sym(u4)", unbacked_symint_3: "Sym(u5)", unbacked_symint_4: "Sym(u6)", unbacked_symint_5: "Sym(u7)", child: "f32[s0, s1]", s0, s1):
-            s0_1 = s0
-            s1_1 = s1
-
+        def forward(self, unbacked_symint: "Sym(u1)", unbacked_symint_0: "Sym(u2)", unbacked_symint_1: "Sym(u3)", unbacked_symint_2: "Sym(u4)", unbacked_symint_3: "Sym(u5)", unbacked_symint_4: "Sym(u6)", unbacked_symint_5: "Sym(u7)", child: "f32[2, 3]"):
             mul: "Sym(u3*u4)" = unbacked_symint_1 * unbacked_symint_2;  unbacked_symint_1 = unbacked_symint_2 = None
             mul_1: "Sym(u3*u4*u5)" = mul * unbacked_symint_3;  mul = unbacked_symint_3 = None
             mul_2: "Sym(u1*u2)" = unbacked_symint * unbacked_symint_0;  unbacked_symint = unbacked_symint_0 = None
@@ -6825,12 +6824,9 @@ class GraphModule(torch.nn.Module):
             return lt
 
     class body_fn_0(torch.nn.Module):
-        def forward(self, unbacked_symint: "Sym(u1)", unbacked_symint_0: "Sym(u2)", unbacked_symint_1: "Sym(u3)", unbacked_symint_2: "Sym(u4)", unbacked_symint_3: "Sym(u5)", unbacked_symint_4: "Sym(u6)", unbacked_symint_5: "Sym(u7)", child: "f32[s0, s1]", s0, s1):
-            s0_1 = s0
-            s1_1 = s1
-
+        def forward(self, unbacked_symint: "Sym(u1)", unbacked_symint_0: "Sym(u2)", unbacked_symint_1: "Sym(u3)", unbacked_symint_2: "Sym(u4)", unbacked_symint_3: "Sym(u5)", unbacked_symint_4: "Sym(u6)", unbacked_symint_5: "Sym(u7)", child: "f32[2, 3]"):
             add: "Sym(u7 + 1)" = unbacked_symint_5 + 1;  unbacked_symint_5 = None
-            child_1: "f32[s0, s1]" = child + 1;  child = None
+            child_1: "f32[2, 3]" = child + 1;  child = None
             return (unbacked_symint_0, unbacked_symint_1, unbacked_symint_2, unbacked_symint_3, unbacked_symint, 0, add, child_1)
 """,  # noqa: B950
             )
