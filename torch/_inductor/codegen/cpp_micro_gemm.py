@@ -9,7 +9,15 @@ import sympy
 import torch
 
 from .. import cpp_builder, ir
-from ..cpu_vec_isa import pick_vec_isa, VecAMX, VecAVX2, VecAVX512, VecISA
+from ..cpu_vec_isa import (
+    pick_vec_isa,
+    VecAMX,
+    VecAVX2,
+    VecAVX512,
+    VecISA,
+    VecNEON,
+    VecSVE,
+)
 from ..utils import IndentedBuffer, parallel_num_threads
 from ..virtualized import V
 from .common import KernelTemplate
@@ -319,6 +327,22 @@ class CppMicroGemmRef(CppMicroGemm):
         [(4, 24, 1), (4, 16, 1), (8, 8, 1)],
         input_dtype=torch.bfloat16,
         input2_dtype=torch.int8,
+        output_dtype=torch.float,
+        compute_dtype=torch.float,
+    ),
+    *generate_gemm_config(
+        VecNEON,
+        [(4, 24, 1), (4, 16, 1), (8, 8, 1)],
+        input_dtype=torch.float,
+        input2_dtype=torch.float,
+        output_dtype=torch.float,
+        compute_dtype=torch.float,
+    ),
+    *generate_gemm_config(
+        VecSVE,
+        [(4, 24, 1), (4, 16, 1), (8, 8, 1)],
+        input_dtype=torch.float,
+        input2_dtype=torch.float,
         output_dtype=torch.float,
         compute_dtype=torch.float,
     ),
