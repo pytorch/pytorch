@@ -506,7 +506,7 @@ bool check_cudnn_hardware_support(sdp_params const& params, bool debug) {
 
 bool check_for_nested_inputs(sdp_params const& params, bool debug) {
   static const bool enable_cudnn_nested = c10::utils::check_env("TORCH_CUDNN_SDPA_NESTED_TENSOR_ENABLED") == true;
-  if (!enable_cudnn_nested) {
+  if (has_for_nested_inputs(params) && !enable_cudnn_nested) {
     if (debug) {
       TORCH_WARN("Experimental cuDNN SDPA nested tensor support is not enabled.");
     }
