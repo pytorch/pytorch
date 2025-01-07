@@ -5,7 +5,7 @@ import functools
 import itertools
 import math
 import operator
-from typing import Any, Tuple
+from typing import Any
 
 import torch
 from torch._dynamo.utils import counters
@@ -1911,7 +1911,7 @@ def _register_qconv_weight_prepack_pass(pattern, pass_number, dtype=torch.float3
                 packed_weight_op, args=packed_weight_inputs
             )
 
-            new_args: Tuple[Any, ...] = (
+            new_args: tuple[Any, ...] = (
                 qx,
                 x_scale,
                 x_zp,
@@ -2225,7 +2225,7 @@ def _register_qlinear_weight_prepack_pass(
                 packed_weight_op, args=packed_weight_inputs
             )
 
-            new_args: Tuple[Any, ...] = (
+            new_args: tuple[Any, ...] = (
                 qx,
                 x_scale,
                 x_zp,
@@ -2727,7 +2727,7 @@ def _register_linear_dynamic_fp16_weight_prepack_pass(
             )
 
             # create new linear node and insert on graph
-            new_args: Tuple[Any, ...] = (
+            new_args: tuple[Any, ...] = (
                 x,
                 prepack_weight_node,
                 bias,
@@ -2968,7 +2968,7 @@ def _register_smooth_quant_int_mm_pattern():
                         prod *= d
                     x_scale_is_scalar = prod == 1
 
-                new_args: Tuple[Any, ...]
+                new_args: tuple[Any, ...]
                 if x_scale_is_scalar:
                     # in this case, we can call onednn.qlinear directly
                     new_args = (
