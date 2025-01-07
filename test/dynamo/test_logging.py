@@ -10,7 +10,11 @@ import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
 import torch.distributed as dist
-from torch._dynamo.testing import empty_line_normalizer, skipIfNotPy311
+from torch._dynamo.testing import (
+    empty_line_normalizer,
+    extract_graph_and_tracker,
+    skipIfNotPy311,
+)
 from torch._dynamo.trace_rules import _as_posix_path
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.testing._internal.common_utils import (
@@ -162,7 +166,7 @@ from user code:
         )
 
     test_aot = within_range_record_test(2, 6, aot=logging.INFO)
-    test_inductor_debug = within_range_record_test(3, 22, inductor=logging.DEBUG)
+    test_inductor_debug = within_range_record_test(3, 25, inductor=logging.DEBUG)
     test_inductor_info = within_range_record_test(2, 9, inductor=logging.INFO)
 
     @make_logging_test()
@@ -483,7 +487,7 @@ LoweringException: AssertionError:
     def test_distributed_rank_logging(self):
         env = dict(os.environ)
         env["TORCH_LOGS"] = "dynamo"
-        stdout, stderr = self.run_process_no_exception(
+        _, stderr = self.run_process_no_exception(
             """\
 import torch.distributed as dist
 import logging
@@ -731,6 +735,29 @@ TRACE FX call mul from test_logging.py:N in fn (LoggingTests.test_trace_call_pre
         self.assertGreater(len(records), 0)
         self.assertLess(len(records), 3)
 
+    @make_logging_test(graph_region_expansion=True)
+    def test_graph_region_expansion(self, records):
+        with torch._dynamo.config.patch("track_nodes_for_deduplication", True):
+
+            def inner_fn(x, y):
+                x0 = x + 1
+                y0 = y + 2
+                z = x0.sum() + y0.sum()
+                return z
+
+            def fn(x, y):
+                o0 = inner_fn(x, y)
+                o1 = torch.sin(o0)
+                o2 = inner_fn(x, o1)
+                o3 = inner_fn(x, y)
+                return o2 * o3 * o3
+
+            graph, tracker = extract_graph_and_tracker(
+                fn, torch.randn(10, 10), torch.randn(10, 10)
+            )
+            tracker.get_identical_regions(graph)
+            self.assertGreater(len(records), 0)
+
     @skipIfTorchDynamo("too slow")
     @make_logging_test(**torch._logging.DEFAULT_LOGGING)
     def test_default_logging(self, records):
@@ -769,7 +796,7 @@ TRACE FX call mul from test_logging.py:N in fn (LoggingTests.test_trace_call_pre
             env = dict(os.environ)
             env["TORCH_LOGS"] = "dynamo"
             env["TORCH_LOGS_OUT"] = file_path
-            stdout, stderr = self.run_process_no_exception(
+            _, stderr = self.run_process_no_exception(
                 """\
 import torch
 @torch.compile(backend="eager")
@@ -838,6 +865,7 @@ exclusions = {
     "overlap",
     "aot_graphs",
     "aot_graphs_effects",
+    "pre_grad_graphs",
     "post_grad_graphs",
     "compiled_autograd",
     "compiled_autograd_verbose",
@@ -864,6 +892,7 @@ exclusions = {
     "cudagraph_static_inputs",
     "benchmarking",
     "loop_ordering",
+    "graph_region_expansion",
 }
 for name in torch._logging._internal.log_registry.artifact_names:
     if name not in exclusions:

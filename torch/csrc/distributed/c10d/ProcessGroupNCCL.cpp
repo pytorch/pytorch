@@ -29,7 +29,6 @@
 #include <torch/csrc/distributed/c10d/ProcessGroupNCCL.hpp>
 #include <torch/csrc/distributed/c10d/TraceUtils.h>
 #include <torch/csrc/distributed/c10d/Utils.hpp>
-#include <torch/csrc/distributed/c10d/logger.hpp>
 #include <torch/torch.h>
 #include <optional>
 
@@ -348,7 +347,7 @@ static void cacheAllocatorDeregisterHook(
 static std::
     unordered_map<std::string, std::unordered_map<std::string, std::string>>
     getNCCLCommDumpMap() {
-#if defined(IS_NCCLX) && defined(NCCL_COMM_DUMP)
+#if (defined(IS_NCCLX) || defined(USE_ROCM)) && defined(NCCL_COMM_DUMP)
   std::unordered_map<
       std::string /* ncclUniqueID */,
       std::unordered_map<std::string, std::string> /* dump from this comm */>
@@ -381,6 +380,11 @@ std::string dump_nccl_trace(
     bool includeStackTraces,
     bool onlyActive) {
   auto ncclDumpMap = getNCCLCommDumpMap();
+#if defined(USE_ROCM) && defined(NCCL_COMM_DUMP)
+  for (const auto& [ncclUniqueIDStr, dump] : ncclDumpMap) {
+    printNcclCommProxyTrace("Received dump signal " + ncclUniqueIDStr, dump);
+  }
+#endif
   return FlightRecorder::get()->dump(
       ncclDumpMap, includeCollectives, includeStackTraces, onlyActive);
 }
@@ -790,6 +794,12 @@ bool ProcessGroupNCCL::WorkNCCL::wait(std::chrono::milliseconds timeout) {
 }
 
 void ProcessGroupNCCL::WorkNCCL::abort() {
+  // dump before aborting for rcclexp
+#if defined(USE_ROCM) && defined(NCCL_COMM_DUMP)
+  auto dumpMap = ncclComm_->ncclCommDump();
+  printNcclCommProxyTrace("WorkNCCL::abort", dumpMap);
+#endif
+
   // Abort all communicators of this work
   ncclComm_->abort();
 
@@ -896,7 +906,7 @@ ProcessGroupNCCL::ProcessGroupNCCL(
   // TODO, we should either deprecate TORCH_NCCL_DUMP_ON_TIMEOUT
   // or change its name to reflect that dump happens on exception including
   // both timeout and other errors.
-  dumpOnTimeoutOrEx_ = getCvarBool(TORCH_NCCL_DUMP_ON_TIMEOUT, false) ||
+  dumpOnTimeoutOrEx_ = getCvarBool(TORCH_NCCL_DUMP_ON_TIMEOUT, true) ||
       (dist_debug_level_ >= DebugLevel::Detail);
   // logging C++ stack isn't safe. Introduce a variable to control it.
   logCppStackOnUncleanShutdown_ =
@@ -1275,19 +1285,10 @@ bool ProcessGroupNCCL::waitForFutureOrTimeout(
     std::future<bool>& fut,
     const std::chrono::milliseconds& timeOutMilSec,
     const std::string& futDescription,
-    bool throwException,
-    bool log) {
+    ::c10d::C10dLoggingData& debugLog,
+    bool throwException) {
   std::string errorMsg;
   bool complete = false;
-
-  ::c10d::C10dLoggingData data;
-  if (log) {
-    data.integers["pg_id"] = static_cast<int64_t>(local_id_);
-    data.integers["rank"] = rank_;
-    data.integers["global_rank"] = globalRank();
-    data.integers["world_size"] = getSize();
-    data.strings["flight_recorder_version"] = c10d::version_val_str;
-  }
 
   TORCH_CHECK(fut.valid(), "Expected a valid future");
   std::future_status status = fut.wait_for(timeOutMilSec);
@@ -1298,10 +1299,8 @@ bool ProcessGroupNCCL::waitForFutureOrTimeout(
       bool result = fut.get();
       if (result) {
         VLOG(2) << logPrefix()
-                << "future is successfully executed for: " << futDescription;
-        if (log) {
-          data.strings["status"] = "SUCCESS";
-        }
+                << "future successfully executed for: " << futDescription;
+        debugLog.strings["status"] = "SUCCESS";
         complete = true;
       }
     } catch (const std::exception& e) {
@@ -1311,20 +1310,17 @@ bool ProcessGroupNCCL::waitForFutureOrTimeout(
           futDescription,
           ": ",
           e.what());
-      if (log) {
-        data.strings["status"] = "EXCEPTION";
-        data.strings["exception"] = e.what();
-      }
+
+      debugLog.strings["status"] = "EXCEPTION";
+      debugLog.strings["exception"] = e.what();
       LOG(ERROR) << errorMsg;
     } catch (...) {
       errorMsg = c10::str(
           logPrefix(),
           "Unknown exception thrown when waiting for future ",
           futDescription);
-      if (log) {
-        data.strings["status"] = "EXCEPTION";
-        data.strings["exception"] = "Unknown exception";
-      }
+      debugLog.strings["status"] = "EXCEPTION";
+      debugLog.strings["exception"] = "Unknown exception";
       LOG(ERROR) << errorMsg;
     }
   } else {
@@ -1335,14 +1331,8 @@ bool ProcessGroupNCCL::waitForFutureOrTimeout(
         " timed out after ",
         timeOutMilSec.count(),
         " ms");
-    data.strings["status"] = "TIMEOUT";
+    debugLog.strings["status"] = "TIMEOUT";
     LOG(ERROR) << errorMsg;
-  }
-  if (log) {
-    auto logger = c10d::C10dLogger::getLogger();
-    if (logger) {
-      logger->log(data);
-    }
   }
   if (throwException && !errorMsg.empty()) {
     C10_THROW_ERROR(DistBackendError, errorMsg);
@@ -1418,8 +1408,9 @@ void ProcessGroupNCCL::abort() {
   std::future<bool> fut =
       std::async(std::launch::async, [this]() { return this->abortComms(); });
 
+  ::c10d::C10dLoggingData debugLog;
   waitForFutureOrTimeout(
-      fut, options_->timeout, "ProcessGroup abort", true, false);
+      fut, options_->timeout, "ProcessGroup abort", debugLog, true);
   LOG(INFO) << logPrefix() << "ProcessGroupNCCL aborts successfully.";
 
   // We need to wait for abort to finish before we can safely shut down
@@ -1450,7 +1441,8 @@ void ProcessGroupNCCL::shutdown() {
   // timeout is reach, this will throw an exception.
   for (auto& it : devNCCLCommMap_) {
     auto& ncclComm = it.second;
-    ncclComm->waitReady();
+    // Use long interval to avoid acquiring CPU too frequently
+    ncclComm->waitReady(true);
   }
   // Tell watchdog to (1) flush its queue and (2) do not use comm objects
   // anymore because I am going to destroy them now
@@ -1481,44 +1473,66 @@ void ProcessGroupNCCL::shutdown() {
 
 // NOLINTNEXTLINE(bugprone-exception-escape)
 ProcessGroupNCCL::~ProcessGroupNCCL() {
-  VLOG(2) << logPrefix() << "ProcessGroupNCCL destructor entered.";
+  LOG(INFO) << logPrefix() << "ProcessGroupNCCL destructor entered.";
 
-  if (!terminateProcessGroup_.load()) {
-    if (rank_ % localDeviceCount_ == 0) {
-      TORCH_WARN_ONCE(
-          "WARNING: process group has NOT been destroyed before we destruct ProcessGroupNCCL. ",
-          "On normal program exit, the application should call destroy_process_group to ",
-          "ensure that any pending NCCL operations have finished in this process. "
-          "In rare cases this process can exit before this point and block the progress of "
-          "another member of the process group. This constraint has always been present, "
-          "but this warning has only been added since PyTorch 2.4");
-    }
-    // If user haven't explicitly destroy/shutdown process group, destructor
-    // needs to do so
-    // Note: we have rewritten `shutdown` to represent the destroy behavior.
-    // Here we route to `abort()` explicitly to maintain the old behavior, until
-    // we fix everything.
-    abort();
+  if (terminateProcessGroup_.load())
+    // `shutdown()` or `abort` already called. Skip the favor of disposing
+    // communicators.
+    goto join_threads;
+
+  // If user haven't explicitly destroy/shutdown process group, destructor
+  // needs to do so
+  // First print warning on first rank of each node
+  if (rank_ % localDeviceCount_ == 0) {
+    TORCH_WARN_ONCE(
+        "WARNING: destroy_process_group() was not called before program exit, "
+        "which can leak resources. For more info, please see "
+        "https://pytorch.org/docs/stable/distributed.html#shutdown");
   }
+
+  // Note 1: in distributed_c10d.py, a reference to PG is held by the global
+  // context. Therefore, we are here only when the global context is tearing
+  // down, which means the entire program is exiting.  At this point, user will
+  // no longer care about the result of any collective, thus we can use abort
+  // instead of destroy to make the destruction non-blocking.
+
+  // TODO: Note 1 is not true in case of a C++ program using libtorch, which
+  // does not have the global context mentioned. In that case, calling `abort()`
+  // here could lead to corrupted result. We should consider not doing anything
+  // and just let things leak.
+  // Adversarial example:
+  /*
+    Work routine(Tensor& t) {
+      pg = ProcessGroupNCCL(…);
+      w = pg.allReduce(t);
+      return w;
+    }
+  */
+  abort();
+
+join_threads:
+  // Make sure we've told threads to stop; doesn't hurt if we'd done so before.
+  // Tell watchdog and onCompletionHook:
+  terminateProcessGroup_.store(true);
+  workMetaListCV_.notify_one();
+  // Tell heartbeat thread:
+  terminateHeartbeatMonitorThread_.store(true);
+  monitorWakeUpCV_.notify_one();
 
   // Wait for all threads to finish before returning
-#ifdef ENABLE_NCCL_ERROR_CHECKING
-  if (!blockingWait_) {
-    if (ncclCommWatchdogThread_.joinable()) {
-      ncclCommWatchdogThread_.join();
-      VLOG(2) << logPrefix() << "ProcessGroupNCCL watchdog thread joined.";
-    }
-    if (ncclHeartbeatMonitorThread_.joinable()) {
-      ncclHeartbeatMonitorThread_.join();
-      VLOG(2) << logPrefix()
-              << "ProcessGroupNCCL heart beat monitor thread joined.";
-    }
+  if (ncclCommWatchdogThread_.joinable()) {
+    ncclCommWatchdogThread_.join();
+    LOG(INFO) << logPrefix() << "ProcessGroupNCCL watchdog thread joined.";
   }
-#endif
+  if (ncclHeartbeatMonitorThread_.joinable()) {
+    ncclHeartbeatMonitorThread_.join();
+    LOG(INFO) << logPrefix()
+              << "ProcessGroupNCCL heart beat monitor thread joined.";
+  }
   if (onCompletionHookThread_.joinable()) {
     onCompletionHookThread_.join();
-    VLOG(2) << logPrefix()
-            << "ProcessGroupNCCL onCompletionHookThread thread joined.";
+    LOG(INFO) << logPrefix()
+              << "ProcessGroupNCCL onCompletionHookThread thread joined.";
   }
 }
 
@@ -1742,6 +1756,12 @@ void ProcessGroupNCCL::heartbeatMonitor() {
     // Store debug info to storage if no other thread does it. (By default to
     // local disk)
     bool dumpStackTrace = true;
+    ::c10d::C10dLoggingData debugLog;
+    debugLog.integers["pg_id"] = static_cast<int64_t>(local_id_);
+    debugLog.integers["rank"] = rank_;
+    debugLog.integers["global_rank"] = globalRank();
+    debugLog.integers["world_size"] = getSize();
+    debugLog.strings["flight_recorder_version"] = c10d::version_val_str;
     for (int i = 0; i < 2; i++) {
       std::future<bool> asyncDebugDump =
           std::async(std::launch::async, [this, dumpStackTrace]() {
@@ -1753,15 +1773,23 @@ void ProcessGroupNCCL::heartbeatMonitor() {
           asyncDebugDump,
           std::chrono::milliseconds(waitTimeoutDumpInMilSec_),
           "Flight recorder dump in heartbeatMonitor",
-          false,
-          true);
+          debugLog,
+          false);
 
       if (complete) {
+        LOG(INFO)
+            << logPrefix()
+            << "Finished flight recorder successfully. Output can be analyzed using the fr_trace script.";
         break;
       }
       // If we failed to dump, try dumping without stack trace in the 2nd
       // iteration.
       dumpStackTrace = false;
+    }
+    debugLog.integers["trace_enabled"] = int64_t(dumpStackTrace);
+    auto logger = c10d::C10dLogger::getLogger();
+    if (logger) {
+      logger->log(debugLog);
     }
     // Indicate to watchdog thread that we have finished dumping.
     promiseFlightRecorderDump_.set_value();
@@ -2023,9 +2051,9 @@ void ProcessGroupNCCL::broadcastDumpSignal() {
         reinterpret_cast<uint8_t*>(&rank) + sizeof(rank));
     globalStore_->set(std::string(EXCEPTION_DUMP), vec);
     if (!shouldDump_.load()) {
-      LOG(ERROR)
+      LOG(INFO)
           << logPrefix()
-          << "Broadcasting flight-recorder dump signal to other processes via TCPStore.";
+          << "Broadcasting flight recorder dump signal to other processes via TCPStore.";
     }
     // signal the monitor thread on PG0 to start dumping
     shouldDump_.store(true);
@@ -3778,6 +3806,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::allreduce_sparse(
 
 c10::intrusive_ptr<Work> ProcessGroupNCCL::allreduce_impl(
     at::Tensor& tensor,
+    const char* profilingTitle,
     const AllreduceOptions& opts) {
   return collective(
       tensor,
@@ -3799,7 +3828,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::allreduce_impl(
             stream.stream());
       },
       OpType::ALLREDUCE,
-      "nccl:all_reduce");
+      profilingTitle);
 }
 
 c10::intrusive_ptr<Work> ProcessGroupNCCL::allreduce(
@@ -3848,7 +3877,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::allreduce(
       this->getSize()); // worldSize
 
   // avoidRecordStreams_ note: collective() will stash tensors.
-  return allreduce_impl(tensor, opts);
+  return allreduce_impl(tensor, "nccl:all_reduce", opts);
 }
 
 c10::intrusive_ptr<Work> ProcessGroupNCCL::allreduce_coalesced(
@@ -4556,7 +4585,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::barrier(const BarrierOptions& opts) {
       at::zeros({1}, at::TensorOptions().device(barDevice).dtype(at::kFloat));
 
   // All reduce to achieve the barrier
-  auto work = allreduce_impl(barrierTensor);
+  auto work = allreduce_impl(barrierTensor, "nccl:all_reduce_barrier");
 
   // Work will take over barrierTensors
   auto ncclWork = dynamic_cast<ProcessGroupNCCL::WorkNCCL*>(work.get());

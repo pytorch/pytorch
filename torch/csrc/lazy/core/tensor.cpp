@@ -122,8 +122,9 @@ BackendDataPtr LazyTensor::GetDataHandle() {
   if (data()->ir_value) {
     ApplyPendingGraph();
   } else {
-    TORCH_CHECK(data()->tensor_data);
-    data()->handle = TensorToDataHandle(*data()->tensor_data, GetDevice());
+    auto const& tensor_data = data()->tensor_data;
+    TORCH_CHECK(tensor_data.has_value());
+    data()->handle = TensorToDataHandle(*tensor_data, GetDevice());
   }
 
   return data()->handle;

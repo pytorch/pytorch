@@ -1,7 +1,5 @@
 #include <ATen/detail/CUDAHooksInterface.h>
 
-#include <c10/util/CallOnce.h>
-
 #include <memory>
 
 namespace at {
@@ -22,30 +20,26 @@ namespace detail {
 //
 // CUDAHooks doesn't actually contain any data, so leaking it is very benign;
 // you're probably losing only a word (the vptr in the allocated object.)
-static CUDAHooksInterface* cuda_hooks = nullptr;
 
 const CUDAHooksInterface& getCUDAHooks() {
-  // NB: The once_flag here implies that if you try to call any CUDA
+  auto create_impl= [] {
+#if !defined C10_MOBILE
+    auto cuda_hooks =
+        CUDAHooksRegistry()->Create("CUDAHooks", CUDAHooksArgs{});
+    if (cuda_hooks) {
+      return cuda_hooks;
+    }
+#endif
+    return std::make_unique<CUDAHooksInterface>();
+    };
+  // NB: The static initialization here implies that if you try to call any CUDA
   // functionality before libATen_cuda.so is loaded, CUDA is permanently
   // disabled for that copy of ATen.  In principle, we can relax this
   // restriction, but you might have to fix some code.  See getVariableHooks()
   // for an example where we relax this restriction (but if you try to avoid
   // needing a lock, be careful; it doesn't look like Registry.h is thread
   // safe...)
-#if !defined C10_MOBILE
-  static c10::once_flag once;
-  c10::call_once(once, [] {
-    cuda_hooks =
-        CUDAHooksRegistry()->Create("CUDAHooks", CUDAHooksArgs{}).release();
-    if (!cuda_hooks) {
-      cuda_hooks = new CUDAHooksInterface();
-    }
-  });
-#else
-  if (cuda_hooks == nullptr) {
-    cuda_hooks = new CUDAHooksInterface();
-  }
-#endif
+  static auto cuda_hooks = create_impl();
   return *cuda_hooks;
 }
 } // namespace detail
