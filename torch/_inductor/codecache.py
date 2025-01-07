@@ -2733,6 +2733,11 @@ class HalideCodeCache(CppPythonBindingsCodeCache):
         cls._standalone_runtime_path = sofile
         return sofile
 
+    @classmethod
+    def _get_uncompiled_header(cls, device: str) -> str | None:
+        """Header precompiling is currently disabled for halide."""
+        return None
+
 
 def _worker_task_halide(lockfile: str, jobs: List[partial[Any]]) -> None:
     from torch.utils._filelock import FileLock
