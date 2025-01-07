@@ -1080,11 +1080,13 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 counters["inductor"]["qconv2d_unary_matcher_count"],
                 2,
             )
-            self.assertEqual(counters["inductor"]["qconv2d_unary_lower_count"], 2)
+            self.assertEqual(
+                counters["inductor"]["qconv2d_unary_lower_count"], 0 if TEST_ACL else 2
+            )
             if qconv2d_unary_matcher_nodes:
                 self.assertEqual(
                     counters["inductor"]["qconv2d_unary_matcher_nodes"],
-                    0 if TEST_ACL else qconv2d_unary_matcher_nodes,
+                    qconv2d_unary_matcher_nodes,
                 )
 
         self._test_common(
@@ -1505,7 +1507,10 @@ class TestPatternMatcher(TestPatternMatcherBase):
             )
             self.assertEqual(
                 counters["inductor"]["qconv2d_unary_matcher_count"],
-                0 if TEST_ACL else 3,
+                3,
+            )
+            self.assertEqual(
+                counters["inductor"]["qconv2d_unary_lower_count"], 0 if TEST_ACL else 4
             )
 
         self._test_common(
@@ -1676,11 +1681,14 @@ class TestPatternMatcher(TestPatternMatcherBase):
             #    [qconv2d_pointwise_default, quantize_per_tensor]
             self.assertEqual(
                 counters["inductor"]["qconv2d_unary_matcher_count"],
-                0 if TEST_ACL else 1,
+                1,
             )
             self.assertEqual(
                 counters["inductor"]["qconv2d_unary_matcher_nodes"],
-                0 if TEST_ACL else 2,
+                2,
+            )
+            self.assertEqual(
+                counters["inductor"]["qconv2d_unary_lower_count"], 0 if TEST_ACL else 1
             )
 
         self._test_common(
@@ -1727,7 +1735,9 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 counters["inductor"]["qconv2d_unary_matcher_count"],
                 2,
             )
-            self.assertEqual(counters["inductor"]["qconv2d_unary_lower_count"], 2)
+            self.assertEqual(
+                counters["inductor"]["qconv2d_unary_lower_count"], 0 if TEST_ACL else 2
+            )
 
         self._test_common(
             mod,
@@ -2652,6 +2662,10 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 )
                 self.assertEqual(
                     counters["inductor"]["qconv2d_unary_matcher_count"],
+                    1,
+                )
+                self.assertEqual(
+                    counters["inductor"]["qconv2d_unary_lower_count"],
                     0 if TEST_ACL else 1,
                 )
 
@@ -2747,7 +2761,10 @@ class TestPatternMatcher(TestPatternMatcherBase):
             )
             self.assertEqual(
                 counters["inductor"]["qconv2d_unary_matcher_count"],
-                0 if TEST_ACL else 2,
+                2,
+            )
+            self.assertEqual(
+                counters["inductor"]["qconv2d_unary_lower_count"], 0 if TEST_ACL else 2
             )
 
         self._test_common(
