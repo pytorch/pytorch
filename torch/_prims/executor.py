@@ -30,7 +30,7 @@ def execute(
     raise ValueError(msg)
 
 
-def make_traced(fn: Callable[[Unpack[Ts]], T]) -> Callable[[Unpack[Ts]], T]:
+def make_traced(fn: Callable[P, T]) -> Callable[P, T]:
     """
     Returns a function that, when called, will
     trace its torch operations to prims and then
