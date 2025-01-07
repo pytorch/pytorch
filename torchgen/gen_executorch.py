@@ -307,7 +307,7 @@ def gen_unboxing(
     use_aten_lib: bool,
     kernel_index: ETKernelIndex,
     manual_registration: bool,
-    add_exception_boundary: bool,
+    add_exception_boundary: bool = False,
 ) -> None:
     # Iterable type for write_sharded is a Tuple of (native_function, (kernel_key, metadata))
     def key_func(
