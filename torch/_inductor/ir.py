@@ -7393,7 +7393,7 @@ class WhileLoop(ExternKernel):
 
             from torch._higher_order_ops.while_loop import check_meta_consistency
 
-            check_meta_consistency(fake_while_loop_inputs, fake_subgraph_inputs)  # type: ignore[arg-type]
+            check_meta_consistency(fake_while_loop_inputs, fake_subgraph_inputs, "while_loop_inputs", "subgraph_inputs")  # type: ignore[arg-type]
             if subgraph.graph is None:
                 # create and lower subgraphs
                 subgraph.graph = V.graph.make_subgraph(

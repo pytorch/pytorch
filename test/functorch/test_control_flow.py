@@ -6962,6 +6962,74 @@ class GraphModule(torch.nn.Module):
 """,  # noqa: B950
             )
 
+    @skipIfTorchDynamo("Skip because we're testing export")
+    # TODO: we cannot turn on strict=False yet, also see #141762
+    # torch._dynamo.exc.Unsupported: call_method UserDefinedObjectVariable(set) __contains__
+    # [TorchInGraphFunctionVariable(<method 'add' of 'torch._C.TensorBase' objects>)] {}
+    # Seems we're inside the PreDispatchTorchFunctionMode, _side_effectful_need_to_be_preserved_pre_dispatch
+    # becomes a user defined variable instead of SetVariable.
+    @parametrize("strict", [True])
+    @parametrize("dynamic", [True, False])
+    def test_while_loop_op_pytree_int_carry_export(self, strict, dynamic):
+        m, args = WHILE_LOOP_TESTS["pytree_int_carry"]
+        dynamic_shapes = {"x": {0: torch.export.Dim("dim_x")}} if dynamic else None
+        ep = self._check_export(m, args, strict=strict, dynamic_shapes=dynamic_shapes)
+        if strict and dynamic:
+            self.assertExpectedInline(
+                normalize_gm(ep.module().print_readable(print_output=False)),
+                """\
+class GraphModule(torch.nn.Module):
+    def forward(self, x):
+        x: "f32[s0, 3]";
+
+        x, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
+        sym_size_int_1: "Sym(s0)" = torch.ops.aten.sym_size.int(x, 0)
+
+        sin: "f32[s0, 3]" = torch.ops.aten.sin.default(x);  x = None
+
+        while_loop_cond_graph_0 = self.while_loop_cond_graph_0
+        while_loop_body_graph_0 = self.while_loop_body_graph_0
+        while_loop = torch.ops.higher_order.while_loop(while_loop_cond_graph_0, while_loop_body_graph_0, (sym_size_int_1, 3, 1, 1, 2, sin), ());  while_loop_cond_graph_0 = while_loop_body_graph_0 = sym_size_int_1 = sin = None
+
+        getitem_6: "Sym(u5)" = while_loop[0]
+        getitem_7: "Sym(u6)" = while_loop[1]
+        getitem_8: "Sym(u7)" = while_loop[2]
+        getitem_9: "Sym(u8)" = while_loop[3]
+        getitem_10: "Sym(u9)" = while_loop[4]
+
+        getitem_5: "f32[s0, 3]" = while_loop[5];  while_loop = None
+
+        add: "Sym(u7 + 1)" = getitem_8 + 1
+        add_1: "Sym(u8 + 1)" = getitem_9 + 1
+        add_2: "Sym(u9 + 1)" = getitem_10 + 1
+
+        add_3: "f32[s0, 3]" = torch.ops.aten.add.Tensor(getitem_5, getitem_8);  getitem_8 = None
+        add_4: "f32[s0, 3]" = torch.ops.aten.add.Tensor(getitem_5, getitem_9);  getitem_9 = None
+        add_5: "f32[s0, 3]" = torch.ops.aten.add.Tensor(getitem_5, getitem_10);  getitem_10 = None
+        return pytree.tree_unflatten((getitem_6, getitem_7, add, add_1, add_2, add_3, add_4, add_5, getitem_5), self._out_spec)
+
+    class while_loop_cond_graph_0(torch.nn.Module):
+        def forward(self, arg0_1: "Sym(u15)", arg1_1: "Sym(u16)", arg2_1: "Sym(u17)", arg3_1: "Sym(u18)", arg4_1: "Sym(u19)", arg5_1: "f32[s0, 3]"):
+            mul: "Sym(u17*u18)" = arg2_1 * arg3_1;  arg2_1 = arg3_1 = None
+            mul_1: "Sym(u17*u18*u19)" = mul * arg4_1;  mul = arg4_1 = None
+            mul_2: "Sym(u15*u16)" = arg0_1 * arg1_1;  arg0_1 = arg1_1 = None
+            lt: "Sym(u17*u18*u19 < u15*u16)" = mul_1 < mul_2;  mul_1 = mul_2 = None
+            return lt
+
+    class while_loop_body_graph_0(torch.nn.Module):
+        def forward(self, arg0_1: "Sym(u15)", arg1_1: "Sym(u16)", arg2_1: "Sym(u17)", arg3_1: "Sym(u18)", arg4_1: "Sym(u19)", arg5_1: "f32[s0, 3]"):
+            add: "Sym(u15 + 1)" = arg0_1 + 1;  arg0_1 = None
+            add_1: "Sym(u16 + 1)" = arg1_1 + 1;  arg1_1 = None
+
+            add_2: "Sym(u17 + 1)" = arg2_1 + 1;  arg2_1 = None
+            add_3: "Sym(u18 + 1)" = arg3_1 + 1;  arg3_1 = None
+            add_4: "Sym(u19 + 1)" = arg4_1 + 1;  arg4_1 = None
+
+            add_5: "f32[s0, 3]" = torch.ops.aten.add.Tensor(arg5_1, 1);  arg5_1 = None
+            return (add, add_1, add_2, add_3, add_4, add_5)
+""",  # noqa: B950
+            )
+
     @skipIfTorchDynamo("Graph is not captured correctly when test with dynamo")
     @parametrize("dynamic", [True, False])
     @parametrize("backend", ["eager", "aot_eager", "inductor"])
@@ -7036,6 +7104,20 @@ class GraphModule(torch.nn.Module):
             return (add, add_1, add_2, add_3, add_4, child_1)
 """,  # noqa: B950
             )
+
+    @skipIfTorchDynamo("Graph is not captured correctly when test with dynamo")
+    def test_while_loop_unbacked_bindings(self):
+        from torch._dynamo.testing import EagerAndRecordGraphs
+
+        m, args = WHILE_LOOP_TESTS["pytree_int_carry"]
+        backend = EagerAndRecordGraphs()
+        self._check_compile(m, args, dynamic=True, backend=backend)
+        self.assertEqual(len(backend.graphs), 1)
+        while_loop_nodes = backend.graphs[0].graph.find_nodes(
+            op="call_function", target=torch.ops.higher_order.while_loop
+        )
+        self.assertEqual(len(while_loop_nodes), 1)
+        self.assertEqual(len(while_loop_nodes[0].meta.get("unbacked_bindings")), 5)
 
 
 _hop_schema_test_schema_types = [
