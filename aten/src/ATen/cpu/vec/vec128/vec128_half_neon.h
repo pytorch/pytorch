@@ -234,7 +234,7 @@ class Vectorized<c10::Half> : public Vectorized16<float16x8_t, c10::Half, BlendH
     }
     return loadu(res);
 #endif
-  };
+  }
   bool has_inf_nan() const {
     __at_align__ c10::Half tmp[size()];
     store(tmp);

@@ -6,6 +6,7 @@
 #include <c10/util/string_view.h>
 
 #include <cstddef>
+#include <optional>
 #include <ostream>
 #include <sstream>
 #include <string>
@@ -56,6 +57,14 @@ inline std::ostream& _str(std::ostream& ss, const T& t) {
   return ss;
 }
 
+template <typename T>
+inline std::ostream& _str(std::ostream& ss, const std::optional<T>& t) {
+  if (t.has_value()) {
+    return _str(ss, t.value());
+  }
+  ss << "std::nullopt";
+  return ss;
+}
 // Overloads of _str for wide types; forces narrowing.
 C10_API std::ostream& _str(std::ostream& ss, const wchar_t* wCStr);
 C10_API std::ostream& _str(std::ostream& ss, const wchar_t& wChar);
@@ -130,7 +139,7 @@ inline std::string Join(const std::string& delimiter, const Container& v) {
 // Replace all occurrences of "from" substring to "to" string.
 // Returns number of replacements
 size_t C10_API
-ReplaceAll(std::string& s, c10::string_view from, c10::string_view to);
+ReplaceAll(std::string& s, std::string_view from, std::string_view to);
 
 /// Represents a location in source code (for debugging).
 struct C10_API SourceLocation {
@@ -146,7 +155,7 @@ inline bool isPrint(char s) {
   return s > 0x1f && s < 0x7f;
 }
 
-inline void printQuotedString(std::ostream& stmt, const string_view str) {
+inline void printQuotedString(std::ostream& stmt, const std::string_view str) {
   stmt << "\"";
   for (auto s : str) {
     switch (s) {

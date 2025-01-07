@@ -102,8 +102,12 @@ void CUDAHooks::init() const {
 #endif
 }
 
-const Generator& CUDAHooks::getDefaultCUDAGenerator(DeviceIndex device_index) const {
+const Generator& CUDAHooks::getDefaultGenerator(DeviceIndex device_index) const {
   return at::cuda::detail::getDefaultCUDAGenerator(device_index);
+}
+
+Generator CUDAHooks::getNewGenerator(DeviceIndex device_index) const {
+  return make_generator<at::CUDAGeneratorImpl>(device_index);
 }
 
 Device CUDAHooks::getDeviceFromPtr(void* data) const {
@@ -466,6 +470,6 @@ void CUDAHooks::deviceSynchronize(DeviceIndex device_index) const {
 using at::CUDAHooksRegistry;
 using at::RegistererCUDAHooksRegistry;
 
-REGISTER_CUDA_HOOKS(CUDAHooks);
+REGISTER_CUDA_HOOKS(CUDAHooks)
 
 } // namespace at::cuda::detail

@@ -15,6 +15,7 @@ from typing_extensions import override, TypeAlias
 
 from torch._dynamo.utils import dynamo_timed
 from torch._inductor import config
+from torch.monitor import _WaitCounter
 
 
 try:
@@ -45,14 +46,16 @@ remote_fx_cache_get_timed = functools.partial(
     "FbRemoteFxGraphCache.get",
     phase_name="remote_fx_graph_cache_get",
     log_pt2_compile_event=False,
-    fwd_only=False,
+    dynamo_compile_column_us="remote_fx_graph_cache_get_time_us",
+    log_waitcounter=True,
 )
 remote_fx_cache_put_timed = functools.partial(
     dynamo_timed,
     "FbRemoteFxGraphCache.put",
     phase_name="remote_fx_graph_cache_put",
     log_pt2_compile_event=False,
-    fwd_only=False,
+    dynamo_compile_column_us="remote_fx_graph_cache_put_time_us",
+    log_waitcounter=True,
 )
 
 
@@ -162,29 +165,31 @@ class RemoteCache(Generic[_T]):
     # See if the cache contains `key`. Returns `None` if the value is not
     # present in the cache.
     def get(self, key: str) -> Optional[_T]:
-        sample = self._create_sample()
-        try:
-            result = self._get(key, sample)
-            cache_stats.get(type(self).__name__, result)
-        except Exception:
-            cache_stats.exception(type(self).__name__)
-            raise
-        self._log_sample(sample)
-        return result
+        with _WaitCounter("pytorch.remote_cache.get").guard():
+            sample = self._create_sample()
+            try:
+                result = self._get(key, sample)
+                cache_stats.get(type(self).__name__, result)
+            except Exception:
+                cache_stats.exception(type(self).__name__)
+                raise
+            self._log_sample(sample)
+            return result
 
     # Add `value` to the cache with the key `key`. Note that `None` is not a
     # valid value even if _T supports it (because you can't tell the difference
     # between `None` and a missing cache entry).
     def put(self, key: str, value: _T) -> None:
-        assert value is not None
-        sample = self._create_sample()
-        try:
-            self._put(key, value, sample)
-            cache_stats.put(type(self).__name__)
-        except Exception:
-            cache_stats.exception(type(self).__name__)
-            raise
-        self._log_sample(sample)
+        with _WaitCounter("pytorch.remote_cache.put").guard():
+            assert value is not None
+            sample = self._create_sample()
+            try:
+                self._put(key, value, sample)
+                cache_stats.put(type(self).__name__)
+            except Exception:
+                cache_stats.exception(type(self).__name__)
+                raise
+            self._log_sample(sample)
 
     # Used to convert data from the cache into structured data.
     def _decode(self, data: _U, sample: Optional[Sample]) -> _T:  # type: ignore[override]
@@ -234,7 +239,6 @@ class RedisRemoteCacheBackend(RemoteCacheBackend[bytes]):
     A Redis implementation of a remote/distributed cache.
     """
 
-    _key_fmt: str
     _redis: Optional[redis.Redis] = None
 
     def __init__(self, cache_id: str) -> None:
@@ -243,14 +247,13 @@ class RedisRemoteCacheBackend(RemoteCacheBackend[bytes]):
             # We had trouble importing redis - just skip init.
             return
 
-        self._key_fmt = f"pt2:{cache_id}:{{key}}"
-        self._redis = redis.Redis(
-            host=os.environ.get("TORCHINDUCTOR_REDIS_HOST", "localhost"),
-            port=int(os.environ.get("TORCHINDUCTOR_REDIS_PORT", 6379)),
-        )
-
-    def __get_key(self, key: str) -> str:
-        return self._key_fmt.format(key=key)
+        if "TORCHINDUCTOR_REDIS_URL" in os.environ:
+            self._redis = redis.Redis.from_url(os.environ["TORCHINDUCTOR_REDIS_URL"])
+        else:
+            self._redis = redis.Redis(
+                host=os.environ.get("TORCHINDUCTOR_REDIS_HOST", "localhost"),
+                port=int(os.environ.get("TORCHINDUCTOR_REDIS_PORT", 6379)),
+            )
 
     @override
     def _get(self, key: str) -> Optional[bytes]:
@@ -259,7 +262,7 @@ class RedisRemoteCacheBackend(RemoteCacheBackend[bytes]):
             return None
 
         try:
-            value = self._redis.get(self.__get_key(key))
+            value = self._redis.get(key)
         except redis.exceptions.ConnectionError:
             # Redis is lazy and doesn't actually attempt to connect until the
             # first use. Mark is as unavailable now.
@@ -277,7 +280,7 @@ class RedisRemoteCacheBackend(RemoteCacheBackend[bytes]):
             return
 
         try:
-            self._redis.set(self.__get_key(key), data)
+            self._redis.set(key, data)
         except redis.exceptions.ConnectionError:
             # Redis is lazy and doesn't actually attempt to connect until the
             # first use. Mark is as unavailable now.
@@ -285,16 +288,31 @@ class RedisRemoteCacheBackend(RemoteCacheBackend[bytes]):
 
 
 class RedisRemoteCache(RemoteCache[JsonDataTy]):
-    def __init__(self, key: str) -> None:
+    def __init__(self, cache_id: str) -> None:
         # Special test handling: If we're just going to override the backend
         # anyway don't require redis
         if self.__class__.backend_override_cls:
             # This is totally bogus but it works for now...
             backend = typing.cast(RemoteCacheBackend[bytes], None)
         else:
-            backend = RedisRemoteCacheBackend(key)
+            backend = RedisRemoteCacheBackend(cache_id)
         serde = RemoteCacheJsonSerde()
         super().__init__(backend, serde)
+        version = 1  # consistency between various types of keys
+        self._key_fmt = f"pt2:{cache_id}::{{key}}:c{version}"
+
+    def _get_key(self, key: str) -> str:
+        return self._key_fmt.format(key=key)
+
+    @override
+    def _get(self, key: str, sample: Optional[Sample]) -> Optional[JsonDataTy]:
+        key = self._get_key(key)
+        return super()._get(key, sample)
+
+    @override
+    def _put(self, key: str, value: JsonDataTy, sample: Optional[Sample]) -> None:
+        key = self._get_key(key)
+        super()._put(key, value, sample)
 
 
 class RemoteAutotuneCache(RedisRemoteCache):

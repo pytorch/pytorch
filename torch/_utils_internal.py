@@ -154,7 +154,7 @@ def check_if_torch_exportable():
 
 
 def export_training_ir_rollout_check() -> bool:
-    return False
+    return True
 
 
 def log_torch_jit_trace_exportability(
@@ -165,10 +165,6 @@ def log_torch_jit_trace_exportability(
 ):
     _, _, _, _ = api, type_of_export, export_outcome, result
     return
-
-
-def capture_pre_autograd_graph_using_training_ir() -> bool:
-    return False
 
 
 def justknobs_check(name: str, default: bool = True) -> bool:
@@ -264,5 +260,11 @@ def log_chromium_event_internal(
     stack: List[str],
     logger_uuid: str,
     start_time_ns: int,
+):
+    return None
+
+
+def record_chromium_event_internal(
+    event: Dict[str, Any],
 ):
     return None

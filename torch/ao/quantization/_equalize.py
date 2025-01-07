@@ -191,8 +191,7 @@ def expand_groups_in_paired_modules_list(paired_modules_list):
         elif len(group) == 2:
             new_list.append(group)
         elif len(group) > 2:
-            for i in range(len(group) - 1):
-                new_list.append([group[i], group[i + 1]])
+            new_list.extend([group[i], group[i + 1]] for i in range(len(group) - 1))
 
     return new_list
 

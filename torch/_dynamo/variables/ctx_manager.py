@@ -994,7 +994,7 @@ class FSDPParamGroupUseTrainingStateVariable(ContextWrappingVariable):
             self.param_group_var.value._training_state = value
 
     def module_name(self):
-        return "torch.distributed._composable.fsdp._fsdp_param_group.FSDPParamGroup"
+        return "torch.distributed.fsdp._fully_shard._fsdp_param_group.FSDPParamGroup"
 
     def fn_name(self):
         return "use_training_state"
@@ -1026,17 +1026,16 @@ class SDPAKernelVariable(ContextWrappingVariable):
 
     @staticmethod
     def _backends_to_nodes(tx, backends):
-        nodes = []
-        for backend in backends:
-            # convert to/from string in order to bake the backend into FX graph
-            nodes.append(
-                tx.output.create_node(
-                    "call_function",
-                    torch.nn.attention._backend_from_string,
-                    (backend.name,),
-                    {},
-                )
+        # convert to/from string in order to bake the backend into FX graph
+        nodes = [
+            tx.output.create_node(
+                "call_function",
+                torch.nn.attention._backend_from_string,
+                (backend.name,),
+                {},
             )
+            for backend in backends
+        ]
         return nodes
 
     def enter(self, tx):
