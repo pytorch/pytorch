@@ -2004,7 +2004,6 @@ class CppCodeCache:
     def _get_uncompiled_header(cls, device: str) -> str | None:
         """
         Given a device type, returns the path to a CPP header file to be precompiled.
-        Currently, this is only utilized by the cpp_wrapper classes.
         """
         return None
 
@@ -2243,6 +2242,19 @@ class CppPythonBindingsCodeCache(CppCodeCache):
         return module
 
     @classmethod
+    def _get_uncompiled_header(cls, device: str) -> str | None:
+        if device.startswith("cpu"):
+            return str(
+                Path(torch.__file__).resolve().parent
+                / "include"
+                / "torch"
+                / "csrc"
+                / "inductor"
+                / "cpp_prefix.h"
+            )
+        return None
+
+    @classmethod
     def load_pybinding_async(
         cls,
         argtypes: List[str],
@@ -2367,10 +2379,6 @@ class CppWrapperCodeCache(CppPythonBindingsCodeCache):
 
     @classmethod
     def _get_uncompiled_header(cls, device: str) -> str | None:
-        """
-        Given a device type, returns the path to a CPP header file to be precompiled.
-        Currently, this is only utilized by the cpp_wrapper classes.
-        """
         return _get_cpp_wrapper_header(device)
 
 
