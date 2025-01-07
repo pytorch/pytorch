@@ -47,30 +47,6 @@ def remote_autograd_cache_default() -> Optional[bool]:
 enable_remote_autograd_cache = remote_autograd_cache_default()
 
 
-# When AOTAutograd regenerates aliased graph outputs,
-# attempt to use functionalization's view-replay logic
-# before falling back to the autograd engine's view replay or as_strided.
-# This can have some perf implications
-# (although for many models this will not matter).
-# (1) If you have many view ops chained together, replaying all of them
-#     at runtime can have more overhead compared to a single as_strided call
-# (2) If you are doing training, AsStridedBackward is quite slow,
-#     and the individual view op backward formulas will likely be faster.
-# (3) Some backends like XLA do not support as_strided
-
-# Temporary hack: disable this flag for internal
-# (needed to fix an internal issue while avoiding bumping XLA pin)
-# eventually: either default this config to false completely
-# once XLA pin update works,
-# or default config to true and fix relevant bugs
-from torch._inductor.config import is_fbcode
-
-
-# View replay is currently not compatible with AOTAutogradCache, since
-# FunctionalTensors are not serializable. We'll need to make them
-# serializable before enabling warm cache with this config turned on.
-view_replay_for_aliased_outputs = (not is_fbcode()) and (not enable_autograd_cache)
-
 # Restricts the amount of computation AOTAutograd can do.
 # NB: We have essentially disabled this heuristic now. However, this is kept
 # here for now in case it's useful. Setting it low can artificially reduce the
@@ -189,6 +165,7 @@ fake_tensor_propagate_real_tensors = False
 
 # This controls whether we collect donated buffer. This flag must be set
 # False if a user wants to retain_graph=True for backward.
+from torch._inductor.config import is_fbcode
 donated_buffer = False if is_fbcode() else True
 
 # Controls the default graph output format used by draw_graph

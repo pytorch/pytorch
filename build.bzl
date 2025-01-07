@@ -123,7 +123,7 @@ def define_targets(rules):
             ":ts_native_functions.cpp",
             ":ts_native_functions.yaml",
         ],
-        outs = GENERATED_AUTOGRAD_CPP + GENERATED_AUTOGRAD_PYTHON + GENERATED_PYTHON_CPP + GENERATED_TESTING_PY,
+        outs = GENERATED_AUTOGRAD_CPP + GENERATED_AUTOGRAD_PYTHON + GENERATED_TESTING_PY,
         cmd = "$(execpath //tools/setup_helpers:generate_code) " +
               "--gen-dir=$(RULEDIR) " +
               "--native-functions-path $(location :native_functions.yaml) " +

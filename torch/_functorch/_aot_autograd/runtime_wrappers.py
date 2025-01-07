@@ -172,8 +172,7 @@ class AliasOfInputHandler:
         self.base_idx = info.base_idx
         self.unwrap_out = _unwrap_tensoralias if trace_joint else _identity
         self.requires_grad = info.requires_grad
-        self.functional_tensor = info.functional_tensor
-        self.replay_views = config.view_replay_for_aliased_outputs
+        self.view_meta_sequence = info.view_meta_sequence
 
     def __call__(self, orig_inputs, fw_outs, out):
         aliased_base_tensor = orig_inputs[self.base_idx]
@@ -181,8 +180,7 @@ class AliasOfInputHandler:
             aliased_base_tensor,
             self.unwrap_out(out),
             self.requires_grad,
-            self.functional_tensor,
-            replay_views=self.replay_views,
+            self.view_meta_sequence,
         )
 
 
@@ -209,8 +207,7 @@ class AliasOfIntermediateHandler:
 
         self.unwrap_out = _unwrap_tensoralias if trace_joint else _identity
         self.requires_grad = info.requires_grad
-        self.functional_tensor = info.functional_tensor
-        self.replay_views = config.view_replay_for_aliased_outputs
+        self.view_meta_sequence = info.view_meta_sequence
 
     def __call__(self, orig_inputs, fw_outs, out):
         aliased_base_tensor = fw_outs[self.base_idx]
@@ -218,8 +215,7 @@ class AliasOfIntermediateHandler:
             aliased_base_tensor,
             self.unwrap_out(out),
             self.requires_grad,
-            self.functional_tensor,
-            replay_views=self.replay_views,
+            self.view_meta_sequence,
         )
 
 
@@ -276,7 +272,6 @@ def _create_runtime_wrapper(
     if config.unlift_effect_tokens:
         assert len(runtime_metadata.tokens) == 0
 
-    replay_views = config.view_replay_for_aliased_outputs
     if runtime_metadata.num_outputs_aliased > 0:
         output_handlers = tuple(
             make_output_handler(info, runtime_metadata, trace_joint)
@@ -1069,12 +1064,6 @@ class AOTSyntheticBaseWrapper(CompilerWrapper):
             aliased_arg_idx_with_metadata_mutations
         )
 
-        num_aliased_args_with_metadata_mutations = len(
-            aliased_arg_idx_with_metadata_mutations
-        )
-
-        replay_views = config.view_replay_for_aliased_outputs
-
         def _unpack_synthetic_bases(primals: Tuple[Any, ...]) -> List[Any]:
             f_args_inner = []
             for inner_idx_or_tuple in synthetic_base_info:
@@ -1087,7 +1076,6 @@ class AOTSyntheticBaseWrapper(CompilerWrapper):
                         base,
                         view_tensor,
                         view_tensor.requires_grad,
-                        replay_views=replay_views,
                     )
                     f_args_inner.append(view_arg)
             return f_args_inner

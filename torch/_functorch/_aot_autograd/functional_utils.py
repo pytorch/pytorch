@@ -227,9 +227,7 @@ def gen_alias_from_base(
     aliased_base_tensor,
     target_meta_tensor,
     target_requires_grad,
-    target_functional_tensor: Optional[FunctionalTensorMetadataEq] = None,
-    *,
-    replay_views,
+    target_view_meta_sequence: Optional[ViewMetaSequence] = None,
 ):
     # Patch the correct requires_grad field of the output tensor, depending on whether:
     # (i) the reconstructed output (out) was came from a tensor that requires grad or not;
@@ -247,14 +245,12 @@ def gen_alias_from_base(
     # functions applied to itself (collected during functionalization) so as
     # to replay them (view functions) on the aliased_base_tensor.
     if (
-        replay_views
-        and target_functional_tensor is not None
-        and not torch._functionalize_is_symbolic(target_functional_tensor.tensor)
+        target_view_meta_sequence is not None
+        and not all(vm.has_symbolic_inputs for vm in target_view_meta_sequence.sequence)
     ):
-        functional_tensor = target_functional_tensor.tensor
-
-        out = torch._functionalize_apply_view_metas(
-            functional_tensor, aliased_base_tensor
+        out = torch._C._functionalization.apply_view_meta_sequence(
+            aliased_base_tensor,
+            target_view_meta_sequence.sequence
         )
         # If re-applying the ViewMeta sequence succeeded, there should be no more
         # problems going forward. We just check we got to the target shape and
@@ -360,25 +356,66 @@ class MetadataKey:
         )
 
 
-# Wrapper around a FunctionalTensorWrapper for comparing only the resulting metadata
-# after applying all the ViewMeta operations.
-class FunctionalTensorMetadataEq:
+# Recursively compare the equality of 2 different objects, assuming that in 
+# the outer call, both `lhs` and `rhs` will be ViewMeta instances.
+def _view_meta_equals(lhs: object, rhs: object) -> bool:
+    # Both `lhs` and `rhs` should be of the same type.
+    if type(lhs) != type(rhs):
+        return False
+
+    # If they are ViewMeta derived objects, compare their innards by
+    # calling `as_tuple`.
+    ViewMeta = torch._C._functionalization.ViewMeta
+    if isinstance(lhs, ViewMeta) and isinstance(rhs, ViewMeta):
+        return _view_meta_equals(lhs.as_tuple(), rhs.as_tuple())  # type: ignore
+
+    # If they are ListLike objects, compare each of their elements.
+    ListLike = (list, tuple)
+    if isinstance(lhs, ListLike) and isinstance(rhs, ListLike):
+        return all(_view_meta_equals(l, r) for l, r in zip(lhs, rhs))
+
+    # If they are Tensor objects, compare each of their elements, and
+    # retrieve the result as a boolean.
+    if isinstance(lhs, Tensor) and isinstance(rhs, Tensor):
+        return bool(lhs.eq(rhs).all().item())
+
+    # Finally, check whether they are any of the allowed literals.
+    AllowedLiteral = (str, int, float, bool)
+    if isinstance(lhs, AllowedLiteral) and isinstance(rhs, AllowedLiteral):
+        return lhs == rhs
+
+    # Otherwise, raise an error.
+    # This is so we don't get False results unexpectedly.
+    raise ValueError(f"_view_meta_equals: unsupported type: {type(lhs)}")
+
+
+# ViewMeta sequence wrapper for equality comparisons. 
+class ViewMetaSequence:
     def __init__(self, tensor: torch.Tensor) -> None:
         assert torch._is_functional_tensor(tensor)
-        self.tensor = tensor
+        self.sequence = torch._C._functionalization.get_view_meta_sequence(tensor)
 
     def __eq__(self, other: object) -> bool:
         # If other is None, then it probably means that we weren't able to recreate
-        # the FunctionalTensorMetadataEq. One of this cases is when we update the
-        # view metadata by calling: create_synthetic_base_metadata.
+        # the ViewMeta sequence. One example is when we update the view metadata by 
+        # calling: create_synthetic_base_metadata.
         if other is None:
             return True
 
-        # Comparison agains any other type is not implemented.
-        if not isinstance(other, FunctionalTensorMetadataEq):
+        # Comparison against any other type is not implemented.
+        if not isinstance(other, ViewMetaSequence):
             return NotImplemented
 
-        return has_same_metadata(self.tensor, other.tensor)
+        # Compare the length of their inner sequence.
+        if len(self.sequence) != len(other.sequence):
+            return False
+
+        # Compare each of their ViewMeta instances.
+        for l, r in zip(self.sequence, other.sequence):
+            if not _view_meta_equals(l, r):
+                return False
+
+        return True
 
 
 # new_arg and arg here are either:
