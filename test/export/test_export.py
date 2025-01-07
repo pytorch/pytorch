@@ -9752,6 +9752,47 @@ def forward(self, x):
     return (foo_functional,)""",
         )
 
+    def test_placeholder_naming_order(self):
+        # See https://github.com/pytorch/pytorch/issues/143732
+
+        class Mod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.layer1 = torch.nn.Linear(3, 16)
+                self.layer2 = torch.nn.Linear(3, 32)
+
+            def forward(self, x1, x2, flag=True):
+                x1o = self.layer1(x1)
+                x2o = self.layer2(x2)
+                return torch.cat([x1o, x2o], dim=1)
+
+        mod = Mod()
+        args = (torch.rand(1, 3),)
+        kwargs = {"flag": False, "x2": torch.rand(1, 3)}
+        ep = export(mod, args, kwargs)
+
+        # check that graph is behaviorally correct
+        self.assertTrue(
+            torch.allclose(ep.module()(*args, **kwargs), mod(*args, **kwargs))
+        )
+
+        # check that graph input names are as expected
+        self.assertEqual(ep.graph_signature.user_inputs, ("x1", False, "x2"))
+
+    def test_placeholder_naming_order_variadic(self):
+        class Mod(torch.nn.Module):
+            def forward(self, a, b, c, **kwargs):
+                return a - b + c * kwargs["d"]
+
+        mod = Mod()
+        args = (torch.randn(3),)
+        kwargs = {"c": torch.randn(3), "b": torch.randn(3), "d": torch.randn(3)}
+        ep = export(mod, args, kwargs)
+        self.assertTrue(
+            torch.allclose(ep.module()(*args, **kwargs), mod(*args, **kwargs))
+        )
+        self.assertEqual(ep.graph_signature.user_inputs, ("a", "c", "b", "d"))
+
     def test_placeholder_naming_collisions(self):
         # test collisions between nested user inputs
         class Foo(torch.nn.Module):
