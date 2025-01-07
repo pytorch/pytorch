@@ -369,16 +369,16 @@ kernel void applySYRK(
   template [[host_name("applyTRSM_" #DTYPE)]] kernel void applyTRSM<DTYPE>( \
       device DTYPE * A [[buffer(0)]],                                       \
       constant TRSMParams & sizes [[buffer(1)]],                            \
-      uint3 tid [[thread_position_in_threadgroup]],                          \
-      uint3 tgid [[threadgroup_position_in_grid]],                           \
+      uint3 tid [[thread_position_in_threadgroup]],                         \
+      uint3 tgid [[threadgroup_position_in_grid]],                          \
       uint3 tpg [[threads_per_threadgroup]])
 
 #define INSTANTIATE_SYRK(DTYPE)                                             \
   template [[host_name("applySYRK_" #DTYPE)]] kernel void applySYRK<DTYPE>( \
       device DTYPE * A [[buffer(0)]],                                       \
       constant SYRKBatchedParams & sizes [[buffer(1)]],                     \
-      uint3 tid [[thread_position_in_threadgroup]],                          \
-      uint3 tgid [[threadgroup_position_in_grid]],                           \
+      uint3 tid [[thread_position_in_threadgroup]],                         \
+      uint3 tgid [[threadgroup_position_in_grid]],                          \
       uint3 tpg [[threads_per_threadgroup]])
 
 INSTANTIATE_FACTOR_DIAGONAL(float);
