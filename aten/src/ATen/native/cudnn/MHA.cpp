@@ -31,6 +31,33 @@ void run_cudnn_SDP_fprop(
       false, "PyTorch was not compiled with cuDNN Flash Attention enabled!");
 }
 
+void run_cudnn_SDP_fprop_nestedtensor(
+    int64_t b,
+    int64_t h_q,
+    int64_t h_k,
+    int64_t h_v,
+    int64_t s_q,
+    int64_t s_kv,
+    int64_t d_qk,
+    int64_t d_v,
+    float scaling_factor,
+    bool return_softmaxstats,
+    bool is_causal,
+    double dropout_probability,
+    const Tensor& cum_seqlen_q,
+    const Tensor& cum_seqlen_kv,
+    const Tensor& q,
+    const Tensor& k,
+    const Tensor& v,
+    const std::optional<Tensor>& attn_bias,
+    Tensor& softmaxstats,
+    Tensor& o,
+    Tensor& dropoutseed,
+    Tensor& dropoutoffset) {
+  TORCH_CHECK(
+      false, "PyTorch was not compiled with cuDNN Flash Attention enabled!");
+}
+
 void run_cudnn_SDP_bprop(
     int64_t b,
     int64_t h,
