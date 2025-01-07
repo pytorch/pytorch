@@ -776,9 +776,9 @@ static Tensor& linalg_cholesky_mps_impl(const Tensor& input, bool upper, Tensor&
   auto stream = getCurrentMPSStream();
   auto device = MPSDevice::getInstance()->device();
 
-  auto factorDiagonalPSO = lib.getPipelineStateForFunc("factorDiagonalBlock");
-  auto applyTRSMPSO = lib.getPipelineStateForFunc("applyTRSM");
-  auto applySYRKPSO = lib.getPipelineStateForFunc("applySYRK");
+  auto factorDiagonalPSO = lib.getPipelineStateForFunc("factorDiagonalBlock_" + mps::scalarToMetalTypeString(out));
+  auto applyTRSMPSO = lib.getPipelineStateForFunc("applyTRSM_" + mps::scalarToMetalTypeString(out));
+  auto applySYRKPSO = lib.getPipelineStateForFunc("applySYRK_" + mps::scalarToMetalTypeString(out));
 
   int64_t NB = std::min<int64_t>(32, N);
   int64_t numBlocks = (N + NB - 1) / NB;
