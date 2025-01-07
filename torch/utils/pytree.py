@@ -90,8 +90,8 @@ if _TYPE_CHECKING:
         "FlattenFunc",
         "UnflattenFunc",
         "FlattenWithKeysFunc",
-        "FromDumpableContextFunc",
         "ToDumpableContextFunc",
+        "FromDumpableContextFunc",
     ]
 
 
