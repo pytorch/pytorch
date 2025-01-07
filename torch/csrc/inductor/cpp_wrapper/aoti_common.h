@@ -17,8 +17,4 @@ using bfloat16 = at::BFloat16;
   return (nbytes + 64 - 1) & -64;
 }
 
-// This header is required by cpp.py, but include it here so that it gets caught
-// by header precompilation.
-#include <torch/csrc/inductor/cpp_prefix.h>
-
 #endif // TORCH_CSRC_INDUCTOR_CPP_WRAPPER_AOTI_COMMON
