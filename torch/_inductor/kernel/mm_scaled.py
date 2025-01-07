@@ -1,5 +1,5 @@
 import logging
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Sequence
 
 import sympy
 
@@ -519,7 +519,7 @@ def tuned_scaled_mm(
 
     scale_a, scale_b = realize_inputs(scale_a, scale_b)
 
-    input_nodes: Tuple[Any, ...]
+    input_nodes: tuple[Any, ...]
     # workaround for Inductor not supporting optional tensor input arguments
     if bias is None:
         input_nodes = (mat_a, mat_b, scale_a, scale_b)

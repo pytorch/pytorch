@@ -8,7 +8,7 @@ import subprocess
 import textwrap
 import threading
 import time
-from typing import Dict, List, Optional, Set, Tuple, Union
+from typing import Dict, List, Optional, Set, Union
 
 from worker.main import WorkerFailure, WorkerOutput
 
@@ -55,7 +55,7 @@ class CorePool:
             True for _ in range(min_core_id, min_core_id + self._num_cores)
         ]
 
-        self._reservations: Dict[str, Tuple[int, ...]] = {}
+        self._reservations: Dict[str, tuple[int, ...]] = {}
         self._lock = threading.Lock()
 
     def reserve(self, n: int) -> Optional[str]:
@@ -87,11 +87,11 @@ class CorePool:
 class Runner:
     def __init__(
         self,
-        work_items: Tuple[WorkOrder, ...],
+        work_items: tuple[WorkOrder, ...],
         core_pool: Optional[CorePool] = None,
         cadence: float = 1.0,
     ) -> None:
-        self._work_items: Tuple[WorkOrder, ...] = work_items
+        self._work_items: tuple[WorkOrder, ...] = work_items
         self._core_pool: CorePool = core_pool or CorePool(0, CPU_COUNT - 4)
         self._cadence: float = cadence
 
