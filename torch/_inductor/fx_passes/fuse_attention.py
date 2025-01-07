@@ -588,6 +588,69 @@ def _sfdp_params_check(match):
             return False
     return True
 
+def _sfdp_pattern_alibi(query, key, value, alibi_bias, inv_scale_factor, dropout_p):
+    """
+    This pattern matches:
+        attn_weights = ((Q @ K^T).div(inv_scale_factor) + alibi_bias).softmax(dim=-1)
+        attn_weights = torch.nn.functional.dropout(attn_weights, p=dropout_p)
+        output = attn_weights.matmul(V)
+
+    The ALiBi bias is often shaped like (batch_size, num_heads, seq_len, seq_len).
+    """
+    attn_weights = (
+        torch.matmul(query, key.transpose(-2, -1))
+        .div(inv_scale_factor)
+        .add(alibi_bias)
+        .softmax(dim=-1)
+    )
+    attn_weights = torch.nn.functional.dropout(attn_weights, p=dropout_p)
+    return attn_weights.matmul(value)
+
+
+def _sfdp_replacement_alibi(query, key, value, alibi_bias, inv_scale_factor, dropout_p):
+    """
+    We want to replace it with a fused call to scaled_dot_product_attention
+    plus passing the `alibi_bias` via the attn_mask argument.
+
+    Because ALiBi is just a bias term added to the logits, we can fold it
+    into the `attn_mask` argument in scaled_dot_product_attention (PyTorch
+    expects the mask to broadcast to shape (batch_size, num_heads, seq_len, seq_len)).
+    """
+    counters["inductor"]["fuse_attention"] += 1
+
+    # Note: we interpret alibi_bias as a "mask" that is added to the logits.
+    # The standard scaled_dot_product_attention expects an attn_mask that *adds*
+    # to the logits. So we can just feed alibi_bias as "attn_mask":
+    return _scaled_dot_product_attention(
+        query,
+        key,
+        value,
+        attn_mask=alibi_bias,          # ALiBi is a bias, so treat it like the mask
+        dropout_p=dropout_p,
+        is_causal=False,               # ALiBi is usually for causal LMs, but let's keep it flexible
+        scale=1.0 / inv_scale_factor,
+    )
+
+def _sfdp_alibi_extra_check(match):
+    if not _sfdp_params_check(match):
+        return False
+    # Further check if the bias is indeed the correct shape:
+    # e.g. match.kwargs["alibi_bias"].meta["val"] is a tensor
+    if "alibi_bias" not in match.kwargs:
+        return False
+    alibi_bias_tensor = match.kwargs["alibi_bias"].meta["val"]
+    if not isinstance(alibi_bias_tensor, torch.Tensor):
+        return False
+    # shape checks, e.g. (batch_size, num_heads, seq_len, seq_len)
+    # You can get Q’s shape from match.kwargs["query"].meta["val"].shape
+    query_tensor = match.kwargs["query"].meta["val"]
+    if alibi_bias_tensor.dim() != 4:
+        return False
+    if alibi_bias_tensor.device != query_tensor.device:
+        return False
+    return True
+
+
 
 def _sfdp_extra_check(scale_factor_op=None, disable_cuda=False):
     def fn(match):
@@ -684,6 +747,11 @@ def _get_sfdp_patterns():
         m_bs1 = functools.partial(m_bs1_inp, dtype=dtype)
         m_bs1_float = functools.partial(m_bs1_inp, dtype=torch.float)
         m_bs1_bool = functools.partial(m_bs1_inp, dtype=torch.bool)
+
+        alibi_inp = functools.partial(
+            torch.zeros, (2, 4, 8, 8), device=device, dtype=dtype, requires_grad=False
+        )
+
 
         candidates = [
             (
@@ -833,6 +901,13 @@ def _get_sfdp_patterns():
                 [g(), g(), g(), b_bool(), b_float()],
                 d,
                 _sfdp_params_check,
+            ),
+            (
+                _sfdp_pattern_alibi,
+                _sfdp_replacement_alibi,
+                [g(), g(), g(), alibi_inp(), c()],
+                d,  # dropout_p
+                _sfdp_alibi_extra_check,
             ),
         ]
         mask_fp32_patterns = ["pattern_16"]

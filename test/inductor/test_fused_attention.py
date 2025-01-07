@@ -953,6 +953,60 @@ class TestSDPAPatternRewriterTemplate(TestCase):
             check_train=False,
         )
 
+    def _test_sdpa_rewriter_alibi(self):
+        """
+        Tests a pattern that includes an ALiBi-like bias term added to the
+        attention logits before softmax. Then uses dropout, just like
+        the existing patterns do.
+        """
+    def dot_prod_attention_alibi(
+            query: torch.Tensor,
+            key: torch.Tensor,
+            value: torch.Tensor,
+            alibi_bias: torch.Tensor,
+            training: bool,
+    ) -> torch.Tensor:
+        """
+        Suppose all have shape (batch_size, n_head, seq_len, embed_dim),
+        and 'alibi_bias' is shaped (batch_size, n_head, seq_len, seq_len).
+        """
+        attn_weights = (
+            torch.matmul(query, key.transpose(-2, -1))
+            .div(math.sqrt(query.shape[-1]))
+            .add(alibi_bias)
+            .softmax(dim=-1)
+        )
+        attn_weights = torch.nn.functional.dropout(attn_weights, p=0.2, training=training)
+        return attn_weights.matmul(value)
+
+        # Create some example inputs
+        # (4, 2, 16, 32) -> typical shape: 4 batches, 2 heads, seq=16, embed=32
+        tensor_shape = (4, 2, 16, 32)
+
+        query = torch.randn(tensor_shape, device=self.device)
+        key = torch.randn(tensor_shape, device=self.device)
+        value = torch.randn(tensor_shape, device=self.device)
+
+        # shape = (4, 2, 16, 16) for an ALiBi-style bias
+        # In practice, ALiBi often has some gradient along seq_len dimension,
+        # but for testing, random or zero is okay.
+        alibi_bias = torch.randn((4, 2, 16, 16), device=self.device) * 0.1
+
+        args = [query, key, value, alibi_bias]
+
+        # we pass has_dropout=True because the function includes dropout
+        # override_check_equal=True so we do a stricter (forward+backward) check
+        # even though there's dropout (some patterns do extremely low dropout to pass).
+        self._check_common(
+            dot_prod_attention_alibi,
+            args1=args,
+            has_dropout=True,
+            override_check_equal=True,
+            check_train=True,   # Test forward+backward
+            contains=True,      # We want to check that the pattern is recognized
+            has_fuse_pattern=True,  # Expecting to fuse into _scaled_dot_product_attention
+        )
+
 
 if HAS_CUDA and PLATFORM_SUPPORTS_FUSED_ATTENTION:
 
@@ -1080,6 +1134,9 @@ if HAS_CPU:
         )
         test_sdpa_rewriter_19_cpu = functools.partialmethod(
             TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_19
+        )
+        test_sdpa_rewriter_alibi_cpu = (
+            TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_alibi
         )
 
     class SDPAPatternRewriterCpuDynamicTests(SDPAPatternRewriterCpuTests):
