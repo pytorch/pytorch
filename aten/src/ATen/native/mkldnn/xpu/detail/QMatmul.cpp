@@ -29,7 +29,8 @@ void quantized_matmul(
     torch::List<std::optional<at::Scalar>>& unary_post_op_args,
     c10::string_view unary_post_op_algorithm) {
   // [Note] Quantized Matrix Multiplication at XPU
-  // The following code integrates oneDNN quantized gemm. The quantization config we support:
+  // The following code integrates oneDNN quantized gemm. The quantization
+  // config we support:
   // activation: s8&u8; per tensor calibrated; symmetric&asymmetric
   // weight: s8; per_tensor/per_channel calibrated; symmetric
   bool m2_trans = true;

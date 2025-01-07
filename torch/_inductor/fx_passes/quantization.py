@@ -11,6 +11,7 @@ import torch
 from torch._dynamo.utils import counters
 from torch.fx.experimental.symbolic_shapes import has_free_symbols
 from torch.fx.node import map_arg
+from torch.utils._ordered_set import OrderedSet
 
 from ..lowering import lowerings as L, require_channels_last
 from ..pattern_matcher import Arg, CallFunction, filter_nodes, KeywordArg, ListOf, Match
@@ -427,8 +428,16 @@ def _register_quantized_linear_lowering(
         b = kwargs["b"] if "b" in kwargs else None
 
         # Output QParams
-        o_inv_scale = kwargs["o_inv_scale"] if (output_dtype == torch.uint8 or output_dtype == torch.int8) else 1.0
-        o_zero_point = kwargs["o_zp"] if (output_dtype == torch.uint8 or output_dtype == torch.int8) else 0
+        o_inv_scale = (
+            kwargs["o_inv_scale"]
+            if output_dtype in OrderedSet([torch.uint8, torch.int8])
+            else 1.0
+        )
+        o_zero_point = (
+            kwargs["o_zp"]
+            if output_dtype in OrderedSet([torch.uint8, torch.int8])
+            else 0
+        )
         assert (
             kwargs["postop_name"] == "none"
         )  # Expected no post op fused in weight prepack phase
