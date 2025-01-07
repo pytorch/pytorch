@@ -2,6 +2,7 @@
  * Copyright (c) 2024, Tri Dao.
  ******************************************************************************/
 #include <c10/core/ScalarType.h>
+#include <c10/core/DeviceType.h>
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 
 #include <cstdint>
@@ -530,28 +531,9 @@ mha_fwd(const at::Tensor &q,         // batch_size x seqlen_q x num_heads x head
         // See Note [Acquire lock when using random generators]
         std::lock_guard<std::mutex> lock(gen->mutex_);
         at::PhiloxCudaState philox_state = gen->philox_cuda_state(counter_offset);
-        if (at::cuda::currentStreamCaptureStatus() == at::cuda::CaptureStatus::None) {
-          auto [seed, offset] = at::cuda::philox::unpack(philox_state);
-          seed_t = at::scalar_tensor(at::Scalar(static_cast<int64_t>(seed)), at::dtype(at::kLong));
-          offset_t = at::scalar_tensor(at::Scalar(static_cast<int64_t>(offset)), at::dtype(at::kLong));
-        } else {
-          seed_t = at::empty({}, at::dtype(at::kLong).device(at::kCUDA));
-          offset_t = at::empty({}, at::dtype(at::kLong).device(at::kCUDA));
-        //   TODO patch in order to build
+        seed_t = at::empty({2}, at::TensorOptions().dtype(c10::kUInt64).device(at::kCUDA));
         params.rng_state = reinterpret_cast<uint64_t*>(seed_t.data_ptr());
-        //   params.seed = seed_t.data_ptr<int64_t>();
-        //   params.extragraph_offset = offset_t.data_ptr<int64_t>();
-        }
         params.philox_args = philox_state;
-    } else {
-        if (at::cuda::currentStreamCaptureStatus() != at::cuda::CaptureStatus::None) {
-            seed_t = at::empty({}, at::dtype(at::kLong).device(at::kCUDA));
-            offset_t = at::empty({}, at::dtype(at::kLong).device(at::kCUDA));
-        } else {
-            seed_t = at::empty({}, at::dtype(at::kLong));
-            offset_t = at::empty({}, at::dtype(at::kLong));
-        }
-
     }
 
     set_params_alibi(params, alibi_slopes_, batch_size, num_heads);
@@ -780,9 +762,9 @@ mha_varlen_fwd(const at::Tensor &q,  // total_q x num_heads x head_size, total_q
     // We want to checkpoint and save the RNG state for backward if dropout
     // We get the default generator and return the seed and offset which will
     // be used in the backward function
-    auto gen = at::get_generator_or_default<at::CUDAGeneratorImpl>(std::nullopt, at::cuda::detail::getDefaultCUDAGenerator());
     at::Tensor seed_t, offset_t;
     if (p_dropout > 0.0)  {
+        auto gen = at::get_generator_or_default<at::CUDAGeneratorImpl>(std::nullopt, at::cuda::detail::getDefaultCUDAGenerator());
         // number of times random will be generated per thread, to offset philox counter in thc random
         // state
         // We use a custom RNG that increases the offset by batch_size * nheads * 32.
@@ -790,28 +772,9 @@ mha_varlen_fwd(const at::Tensor &q,  // total_q x num_heads x head_size, total_q
         // See Note [Acquire lock when using random generators]
         std::lock_guard<std::mutex> lock(gen->mutex_);
         at::PhiloxCudaState philox_state = gen->philox_cuda_state(counter_offset);
-        if (at::cuda::currentStreamCaptureStatus() == at::cuda::CaptureStatus::None) {
-          auto [seed, offset] = at::cuda::philox::unpack(philox_state);
-          seed_t = at::scalar_tensor(at::Scalar(static_cast<int64_t>(seed)), at::dtype(at::kLong));
-          offset_t = at::scalar_tensor(at::Scalar(static_cast<int64_t>(offset)), at::dtype(at::kLong));
-        } else {
-          seed_t = at::empty({}, at::dtype(at::kLong).device(at::kCUDA));
-          offset_t = at::empty({}, at::dtype(at::kLong).device(at::kCUDA));
-          //   TODO patch in order to build
-          params.rng_state = reinterpret_cast<uint64_t*>(seed_t.data_ptr());
-        //   params.seed = seed_t.data_ptr<int64_t>();
-        //   params.extragraph_offset = offset_t.data_ptr<int64_t>();
-        }
+        seed_t = at::empty({2}, at::TensorOptions().dtype(c10::kUInt64).device(at::kCUDA));
+        params.rng_state = reinterpret_cast<uint64_t*>(seed_t.data_ptr());
         params.philox_args = philox_state;
-    } else {
-        if (at::cuda::currentStreamCaptureStatus() != at::cuda::CaptureStatus::None) {
-            seed_t = at::empty({}, at::dtype(at::kLong).device(at::kCUDA));
-            offset_t = at::empty({}, at::dtype(at::kLong).device(at::kCUDA));
-        } else {
-            seed_t = at::empty({}, at::dtype(at::kLong));
-            offset_t = at::empty({}, at::dtype(at::kLong));
-        }
-
     }
 
     set_params_alibi(params, alibi_slopes_, batch_size, num_heads);
@@ -1029,15 +992,9 @@ mha_bwd(const at::Tensor &dout,  // batch_size x seqlen_q x num_heads, x head_si
     auto launch = &run_mha_bwd;
 
     at::PhiloxCudaState philox_args;
+
     if (is_dropout) {
-        if (at::cuda::currentStreamCaptureStatus() ==
-                at::cuda::CaptureStatus::None)
-        {
-            philox_args = at::PhiloxCudaState(*philox_seed.data_ptr<int64_t>(), *philox_offset.data_ptr<int64_t>());
-        } else { // dropout + capture
-            philox_args = at::PhiloxCudaState(
-                philox_seed.data_ptr<int64_t>(), philox_offset.data_ptr<int64_t>(), 0);
-        }
+        params.rng_state = philox_seed.data_ptr<uint64_t>();
     }
     params.philox_args = philox_args;
 
@@ -1269,14 +1226,7 @@ mha_varlen_bwd(const at::Tensor &dout,  // total_q x num_heads, x head_size
 
     at::PhiloxCudaState philox_args;
     if (is_dropout) {
-        if (at::cuda::currentStreamCaptureStatus() ==
-                at::cuda::CaptureStatus::None)
-        {
-            philox_args = at::PhiloxCudaState(*philox_seed.data_ptr<int64_t>(), *philox_offset.data_ptr<int64_t>());
-        } else { // dropout + capture
-            philox_args = at::PhiloxCudaState(
-                philox_seed.data_ptr<int64_t>(), philox_offset.data_ptr<int64_t>(), 0);
-        }
+        params.rng_state = philox_seed.data_ptr<uint64_t>();
     }
     params.philox_args = philox_args;
 
