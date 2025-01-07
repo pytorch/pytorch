@@ -25,7 +25,6 @@ from typing import (
     List,
     Optional,
     Sequence,
-    Tuple,
     TypeVar,
     Union,
 )
@@ -77,7 +76,7 @@ def is_grouped_gemm_fusion(node1: BaseSchedulerNode, node2: BaseSchedulerNode) -
         node1.is_template()
         and isinstance(node2.node, MultiOutput)
         and len(node2.node.inputs) == 1
-        and next(iter(node2.node.inputs)).get_name() in node1.get_buffer_names()
+        and node2.node.inputs[0].get_name() in node1.get_buffer_names()
     )
 
 
@@ -188,7 +187,7 @@ class SchedulerDonatedBuffer(SchedulerBuffer):
 
 
 class BaseSchedulerNode:
-    group: Tuple[torch.device, Tuple[Tuple[sympy.Expr, ...], ...]]
+    group: tuple[torch.device, tuple[tuple[sympy.Expr, ...], ...]]
     read_writes: dependencies.ReadWrites
     unmet_dependencies: OrderedSet[Dep]
     # .min_order and .max_order are only relevant for "grouped" nodes such as FusedSchedulerNode.
@@ -821,7 +820,7 @@ class BaseSchedulerNode:
     @staticmethod
     def get_prologue_template_epilogue(
         nodes: List[BaseSchedulerNode],
-    ) -> Tuple[List[BaseSchedulerNode], BaseSchedulerNode, List[BaseSchedulerNode]]:
+    ) -> tuple[List[BaseSchedulerNode], BaseSchedulerNode, List[BaseSchedulerNode]]:
         """
         For the list of nodes, get the prologue, template, and epilogue
         """
@@ -838,7 +837,7 @@ class WhyNoFuse:
     # @dataclass(slots=True) instead of manually specifying __slots__.
     __slots__ = ["node1", "node2", "reason", "args"]
     reason: str
-    args: Tuple[Any, ...]
+    args: tuple[Any, ...]
 
     def __init__(self, node1: BaseSchedulerNode, node2: BaseSchedulerNode) -> None:
         self.node1 = node1
@@ -956,7 +955,7 @@ class NopKernelSchedulerNode(BaseSchedulerNode):
 
 
 class SchedulerNode(BaseSchedulerNode):
-    _sizes: Tuple[Sequence[sympy.Expr], ...]
+    _sizes: tuple[Sequence[sympy.Expr], ...]
     _body: LoopBody
 
     def __init__(
@@ -970,7 +969,7 @@ class SchedulerNode(BaseSchedulerNode):
 
     def _compute_attrs(
         self,
-        extra_indexing_constraints: Optional[Tuple[Dict[Any, Any], List[Any]]] = None,
+        extra_indexing_constraints: Optional[tuple[Dict[Any, Any], List[Any]]] = None,
         recompute_sizes_body_func: Optional[Callable[..., Any]] = None,
     ) -> None:
         assert isinstance(self.node, (ir.ComputedBuffer, ir.TemplateBuffer))
@@ -1002,7 +1001,7 @@ class SchedulerNode(BaseSchedulerNode):
 
     def recompute_size_and_body(
         self,
-        extra_indexing_constraints: Optional[Tuple[Dict[Any, Any], List[Any]]] = None,
+        extra_indexing_constraints: Optional[tuple[Dict[Any, Any], List[Any]]] = None,
         recompute_sizes_body_func: Optional[Callable[..., Any]] = None,
     ) -> None:
         self._compute_attrs(
@@ -1277,7 +1276,7 @@ class FusedSchedulerNode(BaseSchedulerNode):
                     node for node in node1.get_nodes() if node.is_template()
                 ]
                 assert len(template_nodes) == 1
-                template_node = next(iter(template_nodes))
+                template_node = template_nodes[0]
                 assert len(template_node.read_writes.writes) == 1
                 write = next(iter(template_node.read_writes.writes))
                 assert isinstance(write, MemoryDep)
@@ -1846,7 +1845,7 @@ class GroupedSchedulerNode(BaseSchedulerNode):
 def pick_loop_order(
     stride_lengths: List[List[int]],
     sizes: Sequence[sympy.Expr],
-    priority_idx: Tuple[int, ...] = (),
+    priority_idx: tuple[int, ...] = (),
 ) -> List[int]:
     """
     A heuristic to decide loop iteration orders.  This has not been well
@@ -2001,7 +2000,7 @@ class Scheduler:
         self.num_orig_nodes = len(self.nodes)
         self.create_foreach_nodes()
         self.nodes = self.topological_sort_schedule(self.nodes)
-        self.logged_slow_fusion = OrderedSet[Tuple[str, str]]()
+        self.logged_slow_fusion = OrderedSet[tuple[str, str]]()
         if config._pre_fusion_custom_pass is not None:
             self.nodes = config._pre_fusion_custom_pass(self.nodes)
         self.nodes = self.fuse_nodes(self.nodes)
@@ -2538,7 +2537,7 @@ class Scheduler:
 
     def benchmark_fused_nodes(
         self, nodes: Sequence[BaseSchedulerNode]
-    ) -> Tuple[float, str]:
+    ) -> tuple[float, str]:
         """
         Benchmark fused list of nodes and return the execution time
         in milliseconds on randomly generated inputs.
@@ -2908,12 +2907,12 @@ class Scheduler:
 
     def get_possible_fusions(
         self, nodes: List[BaseSchedulerNode]
-    ) -> List[Tuple[BaseSchedulerNode, BaseSchedulerNode]]:
+    ) -> List[tuple[BaseSchedulerNode, BaseSchedulerNode]]:
         """
         Helper to find all legal fusion opportunities, sorted by self.score_fusion()
         """
         possible_fusions = []
-        seen = OrderedSet[Tuple[BaseSchedulerNode, BaseSchedulerNode]]()
+        seen = OrderedSet[tuple[BaseSchedulerNode, BaseSchedulerNode]]()
 
         def check_all_pairs(nodes: List[BaseSchedulerNode]) -> None:
             for node1_index, node1 in enumerate(nodes):
@@ -3092,7 +3091,7 @@ class Scheduler:
         self,
         node1: BaseSchedulerNode,
         node2: BaseSchedulerNode,
-        common_buf_names: Tuple[str, ...],
+        common_buf_names: tuple[str, ...],
     ) -> str:
         """
         Try to decide reasons why fusion fail due to no shared memory even though
@@ -3229,7 +3228,7 @@ class Scheduler:
             and not (
                 isinstance(node.node, MultiOutput)
                 and len(node.node.inputs) == 1
-                and isinstance(next(iter(node.node.inputs)), ir.CppTemplateBuffer)
+                and isinstance(node.node.inputs[0], ir.CppTemplateBuffer)
             )
         )
 
@@ -3575,14 +3574,14 @@ class Scheduler:
         return sum(self.dep_size_hint(dep) for dep in common_memory_deps)
 
     def get_possible_fusions_with_highest_priority(
-        self, possible_fusions: List[Tuple[BaseSchedulerNode, BaseSchedulerNode]]
-    ) -> List[Tuple[BaseSchedulerNode, BaseSchedulerNode]]:
+        self, possible_fusions: List[tuple[BaseSchedulerNode, BaseSchedulerNode]]
+    ) -> List[tuple[BaseSchedulerNode, BaseSchedulerNode]]:
         # Group the possible fusions based on their priority from the backend.
         # Only return the group of possible fusions with highest priority.
         if len(possible_fusions) == 0:
             return possible_fusions
         possible_fusions_group_by_priority: Dict[
-            int, List[Tuple[BaseSchedulerNode, BaseSchedulerNode]]
+            int, List[tuple[BaseSchedulerNode, BaseSchedulerNode]]
         ] = {}
 
         for node1, node2 in possible_fusions:
@@ -3607,7 +3606,7 @@ class Scheduler:
         return possible_fusions_with_highest_priority
 
     def score_fusion_key(
-        self, nodes: Tuple[BaseSchedulerNode, BaseSchedulerNode]
+        self, nodes: tuple[BaseSchedulerNode, BaseSchedulerNode]
     ) -> Any:
         """
         Shim for list.sort(key=...)
@@ -3829,7 +3828,7 @@ class Scheduler:
 
     def benchmark_combo_kernel(
         self, node_list: Sequence[BaseSchedulerNode]
-    ) -> Tuple[float, float, str]:
+    ) -> tuple[float, float, str]:
         """
         Benchmark fused list of nodes and return the execution time
         in milliseconds on randomly generated inputs.
@@ -3970,7 +3969,7 @@ class BaseScheduling:
 
     def group_fn(
         self, sizes: Sequence[Sequence[sympy.Expr]]
-    ) -> Tuple[Tuple[sympy.Expr, ...], ...]:
+    ) -> tuple[tuple[sympy.Expr, ...], ...]:
         """
         Process the iteration sizes in case a transformation needs to be applied.
         """
@@ -4017,7 +4016,7 @@ class BaseScheduling:
 
     def benchmark_fused_nodes(
         self, nodes: Sequence[BaseSchedulerNode]
-    ) -> Tuple[float, str]:
+    ) -> tuple[float, str]:
         """
         Benchmark fused list of nodes and return the execution time
         in milliseconds on randomly generated inputs.
@@ -4035,7 +4034,7 @@ class BaseScheduling:
 
     def benchmark_combo_kernel(
         self, node_list: Sequence[BaseSchedulerNode]
-    ) -> Tuple[float, float, str]:
+    ) -> tuple[float, float, str]:
         """
         Benchmark the list of nodes to combine and return the execution time
         and memory copy time in milliseconds on randomly generated inputs.

@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 import itertools
-from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, Iterable, List, Optional, Union
 
 import sympy
 from sympy.parsing.sympy_parser import parse_expr
@@ -149,7 +149,7 @@ class CppTemplateKernel(CppKernel):
         )
         return f"{inner_name}[{cexpr_index(index)}]"
 
-    def slice_nd(self, node, ranges: List[Tuple[Any, Any]]) -> ir.ReinterpretView:
+    def slice_nd(self, node, ranges: List[tuple[Any, Any]]) -> ir.ReinterpretView:
         """
         Slice the given node with a list of ranges (start and end) corresponding to its dims.
         The dim is not sliced if the corresponding range is empty.
@@ -280,7 +280,7 @@ class CppTemplateKernel(CppKernel):
 
     def store_grouped_gemm_pointwise_nodes(
         self,
-        dst: Tuple[ir.Buffer],
+        dst: tuple[ir.Buffer],
         nodes: List[ir.IRNode],
         offsets: List[sympy.Expr],
         reindexers: List[Optional[Callable[[List[Any]], List[Any]]]],
@@ -392,13 +392,13 @@ class CppTemplateKernel(CppKernel):
 
     def store_outputs(
         self,
-        dst: Tuple[ir.Buffer],
-        src: Tuple[ir.IRNode],
-        orig_src: Optional[Tuple[ir.IRNode]] = None,
+        dst: tuple[ir.Buffer],
+        src: tuple[ir.IRNode],
+        orig_src: Optional[tuple[ir.IRNode]] = None,
         epilogue_nodes: Optional[List[ir.IRNode]] = None,
         offsets: Optional[List[Any]] = None,
         reindexers: Optional[List[Optional[Callable[[List[Any]], List[Any]]]]] = None,
-        multi_output_buffers: Optional[Tuple[ir.MultiOutput]] = None,
+        multi_output_buffers: Optional[tuple[ir.MultiOutput]] = None,
     ):
         assert isinstance(dst, Iterable)
         assert all(_dst.get_size() == _src.get_size() for _src, _dst in zip(src, dst))
