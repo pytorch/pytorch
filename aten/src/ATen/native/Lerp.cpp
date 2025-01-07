@@ -16,10 +16,14 @@ TORCH_META_FUNC(lerp_Tensor)(
     const Tensor& self, const Tensor& end, const Tensor& weight) {
   TORCH_CHECK(self.dtype() == end.dtype(), "expected dtype ", self.dtype(),
               " for `end` but got dtype ", end.dtype());
-
+  bool promote_weight = weight.dim() == 0 && self.dtype() != weight.dtype();
+  if (!promote_weight) {
+    TORCH_CHECK(self.dtype() == weight.dtype(), "expected dtype ", self.dtype(),
+                " for `weight` but got dtype ", weight.dtype());
+  }
   build(at::TensorIteratorConfig()
         .allow_cpu_scalars(true)
-        .promote_inputs_to_common_dtype(true)
+        .promote_inputs_to_common_dtype(promote_weight)
         .add_output(maybe_get_output())
         .add_const_input(self)
         .add_const_input(end)
