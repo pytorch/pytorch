@@ -6,7 +6,7 @@ import logging
 import os
 import os.path
 import re
-from typing import Dict, List, Optional, Tuple, TYPE_CHECKING
+from typing import Dict, List, Optional, TYPE_CHECKING
 from typing_extensions import override
 
 import torch
@@ -61,8 +61,8 @@ def inductor_meta_from_config() -> _InductorMetaTy:
 @dataclasses.dataclass
 class AutotuneCache:
     configs_hash: str
-    local_cache: Optional[Tuple[RemoteCache[JsonDataTy], str]] = None
-    remote_cache: Optional[Tuple[RemoteCache[JsonDataTy], str]] = None
+    local_cache: Optional[tuple[RemoteCache[JsonDataTy], str]] = None
+    remote_cache: Optional[tuple[RemoteCache[JsonDataTy], str]] = None
 
     # Create a AutotuneCache. Returns None if none of the caches can be used.
     @staticmethod
@@ -479,7 +479,7 @@ class LocalAutotuneCache(RemoteCache[JsonDataTy]):
         super()._put(key, value, sample)
 
 
-def _splitext_nodot(basename: str) -> Tuple[str, str]:
+def _splitext_nodot(basename: str) -> tuple[str, str]:
     root, ext = os.path.splitext(basename)
     if ext:
         ext = ext[1:]
