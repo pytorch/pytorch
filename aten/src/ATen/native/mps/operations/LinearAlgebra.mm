@@ -831,7 +831,7 @@ static Tensor& linalg_cholesky_mps_impl(const Tensor& input, bool upper, Tensor&
                                                                 length:trsmSizes.size() * sizeof(uint32_t)
                                                                options:MTLResourceStorageModePrivate];
 
-            MTLSize trsmGridSize = MTLSizeMake(B * nBlocksJ, 1, 1);
+            MTLSize trsmGridSize = MTLSizeMake(B, nBlocksJ, 1);
             [computeEncoder setComputePipelineState:applyTRSMPSO];
             [computeEncoder setBuffer:trsmSizesBuffer offset:0 atIndex:1];
             [computeEncoder dispatchThreadgroups:trsmGridSize threadsPerThreadgroup:threadGroupSize];
@@ -852,7 +852,7 @@ static Tensor& linalg_cholesky_mps_impl(const Tensor& input, bool upper, Tensor&
                                                                 length:sizeof(syrkSizes)
                                                                options:MTLResourceStorageModePrivate];
 
-            MTLSize syrkGridSize = MTLSizeMake(B * nPairs, 1, 1);
+            MTLSize syrkGridSize = MTLSizeMake(B, nPairs, 1);
             [computeEncoder setComputePipelineState:applySYRKPSO];
             [computeEncoder setBuffer:syrkSizesBuffer offset:0 atIndex:1];
             [computeEncoder dispatchThreadgroups:syrkGridSize threadsPerThreadgroup:threadGroupSize];

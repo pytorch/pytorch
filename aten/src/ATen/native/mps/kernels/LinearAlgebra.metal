@@ -183,11 +183,11 @@ template <typename T>
 kernel void applyTRSM(
     device T* A [[buffer(0)]],
     constant TRSMParams& sizes [[buffer(1)]],
-    uint tid [[thread_position_in_threadgroup]],
-    uint tgid [[threadgroup_position_in_grid]],
-    uint tpg [[threads_per_threadgroup]]) {
-  uint b = tgid / sizes.nBlocksJ;
-  uint idxJ = tgid % sizes.nBlocksJ;
+    uint3 tid [[thread_position_in_threadgroup]],
+    uint3 tgid [[threadgroup_position_in_grid]],
+    uint3 tpg [[threads_per_threadgroup]]) {
+  uint b = tgid.x;
+  uint idxJ = tgid.y;
   if (b >= sizes.batch_size) {
     return;
   }
@@ -214,12 +214,12 @@ kernel void applyTRSM(
   threadgroup T diag[32 * 32];
   threadgroup T target[32 * 32];
 
-  for (uint i = tid; i < actSize_k * actSize_k; i += tpg) {
+  for (uint i = tid.x; i < actSize_k * actSize_k; i += tpg.x) {
     uint r = i / actSize_k;
     uint c = i % actSize_k;
     diag[i] = A[batch_offset + (k * NB + r) * N + (k * NB + c)];
   }
-  for (uint i = tid; i < actSize_j * actSize_k; i += tpg) {
+  for (uint i = tid.x; i < actSize_j * actSize_k; i += tpg.x) {
     uint r = i / actSize_k;
     uint c = i % actSize_k;
     target[i] = A[batch_offset + (row0 + r) * N + (col0 + c)];
@@ -228,7 +228,7 @@ kernel void applyTRSM(
 
   for (uint col = 0; col < actSize_k; col++) {
     T diag_val = diag[col * actSize_k + col];
-    for (uint row = tid; row < actSize_j; row += tpg) {
+    for (uint row = tid.x; row < actSize_j; row += tpg.x) {
       T sumVal = target[row * actSize_k + col];
       for (uint p = 0; p < col; p++) {
         sumVal -= target[row * actSize_k + p] * diag[col * actSize_k + p];
@@ -238,7 +238,7 @@ kernel void applyTRSM(
     threadgroup_barrier(mem_flags::mem_threadgroup);
   }
 
-  for (uint i = tid; i < actSize_j * actSize_k; i += tpg) {
+  for (uint i = tid.x; i < actSize_j * actSize_k; i += tpg.x) {
     uint r = i / actSize_k;
     uint c = i % actSize_k;
     A[batch_offset + (row0 + r) * N + (col0 + c)] = target[i];
@@ -249,13 +249,13 @@ template <typename T>
 kernel void applySYRK(
     device T* A [[buffer(0)]],
     constant SYRKBatchedParams& sizes [[buffer(1)]],
-    uint tid [[thread_position_in_threadgroup]],
-    uint tgid [[threadgroup_position_in_grid]],
-    uint tpg [[threads_per_threadgroup]]) {
-  uint b = tgid / sizes.nPairs;
+    uint3 tid [[thread_position_in_threadgroup]],
+    uint3 tgid [[threadgroup_position_in_grid]],
+    uint3 tpg [[threads_per_threadgroup]]) {
+  uint b = tgid.x;
+  uint pairID = tgid.y;
   if (b >= sizes.batch_size)
     return;
-  uint pairID = tgid % sizes.nPairs;
 
   uint jRel = (-1 + sqrt(1 + 8 * float(pairID))) / 2;
   uint hRel = pairID - (jRel * (jRel + 1) >> 1);
@@ -279,23 +279,23 @@ kernel void applySYRK(
   threadgroup T right_t[32 * 32];
   threadgroup T tile[32 * 32];
 
-  const uint threads = min(tpg, actSize_j * actSize_k);
+  const uint threads = min(tpg.x, actSize_j * actSize_k);
 
-  for (uint i = tid; i < actSize_j * actSize_k; i += threads) {
+  for (uint i = tid.x; i < actSize_j * actSize_k; i += threads) {
     uint r = i / actSize_k;
     uint c = i % actSize_k;
     left[r * actSize_k + c] =
         A[batch_offset + (j * NB + r) * N + (sizes.k * NB + c)];
   }
 
-  for (uint i = tid; i < actSize_h * actSize_k; i += threads) {
+  for (uint i = tid.x; i < actSize_h * actSize_k; i += threads) {
     uint r = i / actSize_k;
     uint c = i % actSize_k;
     right_t[c * actSize_h + r] =
         A[batch_offset + (h * NB + r) * N + (sizes.k * NB + c)];
   }
 
-  for (uint i = tid; i < actSize_j * actSize_h; i += threads) {
+  for (uint i = tid.x; i < actSize_j * actSize_h; i += threads) {
     uint r = i / actSize_h;
     uint c = i % actSize_h;
     tile[r * actSize_h + c] = A[batch_offset + (row0 + r) * N + (col0 + c)];
@@ -303,7 +303,7 @@ kernel void applySYRK(
 
   threadgroup_barrier(mem_flags::mem_threadgroup);
 
-  for (uint idx = tid; idx < actSize_j * actSize_h; idx += threads) {
+  for (uint idx = tid.x; idx < actSize_j * actSize_h; idx += threads) {
     uint r = idx / actSize_h;
     uint c = idx % actSize_h;
 
@@ -348,7 +348,7 @@ kernel void applySYRK(
 
   threadgroup_barrier(mem_flags::mem_threadgroup);
 
-  for (uint i = tid; i < actSize_j * actSize_h; i += threads) {
+  for (uint i = tid.x; i < actSize_j * actSize_h; i += threads) {
     uint r = i / actSize_h;
     uint c = i % actSize_h;
     A[batch_offset + (row0 + r) * N + (col0 + c)] = tile[r * actSize_h + c];
@@ -369,17 +369,17 @@ kernel void applySYRK(
   template [[host_name("applyTRSM_" #DTYPE)]] kernel void applyTRSM<DTYPE>( \
       device DTYPE * A [[buffer(0)]],                                       \
       constant TRSMParams & sizes [[buffer(1)]],                            \
-      uint tid [[thread_position_in_threadgroup]],                          \
-      uint tgid [[threadgroup_position_in_grid]],                           \
-      uint tpg [[threads_per_threadgroup]])
+      uint3 tid [[thread_position_in_threadgroup]],                          \
+      uint3 tgid [[threadgroup_position_in_grid]],                           \
+      uint3 tpg [[threads_per_threadgroup]])
 
 #define INSTANTIATE_SYRK(DTYPE)                                             \
   template [[host_name("applySYRK_" #DTYPE)]] kernel void applySYRK<DTYPE>( \
       device DTYPE * A [[buffer(0)]],                                       \
       constant SYRKBatchedParams & sizes [[buffer(1)]],                     \
-      uint tid [[thread_position_in_threadgroup]],                          \
-      uint tgid [[threadgroup_position_in_grid]],                           \
-      uint tpg [[threads_per_threadgroup]])
+      uint3 tid [[thread_position_in_threadgroup]],                          \
+      uint3 tgid [[threadgroup_position_in_grid]],                           \
+      uint3 tpg [[threads_per_threadgroup]])
 
 INSTANTIATE_FACTOR_DIAGONAL(float);
 INSTANTIATE_FACTOR_DIAGONAL(half);
