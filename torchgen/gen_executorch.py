@@ -269,11 +269,12 @@ class ComputeCodegenUnboxedKernels:
         exception_boundary_begin = ""
         exception_boundary_end = ""
         if self.add_exception_boundary:
-            exception_boundary_begin = "try {"
-            exception_boundary_end = """} catch (const std::exception& ex) {
-              ET_LOG(Error, "Kernel threw an exception: %s", ex.what());
-              context.fail(torch::executor::Error::error);
-            }"""
+            indent = " " * 8
+            exception_boundary_begin = indent + "try {"
+            exception_boundary_end = f"""{indent}}} catch (const std::exception& ex) {{
+{indent}  ET_LOG(Error, "Kernel threw an exception: %s", ex.what());
+{indent}  context.fail(torch::executor::Error::error);
+{indent}}}"""
         newline = "\n    "
         return "\n".join(
             [
@@ -283,13 +284,13 @@ Kernel(
     []({contextArg.defn()}, EValue** stack) {{
         {code_connector.join(code_list)}
 
-        {exception_boundary_begin}
+{exception_boundary_begin}
         internal::EventTracerProfileOpScope event_tracer_op_scope(context.internal_event_tracer(), "native_call_{f.func.name}");
         EXECUTORCH_SCOPE_PROF("native_call_{f.func.name}");
         {ret_prefix}{kernel_call}(context, {args_str});
         {event_tracer_output_logging}
         {return_assignment}
-        {exception_boundary_end}
+{exception_boundary_end}
     }}
 ),
 """
@@ -332,7 +333,9 @@ def gen_unboxing(
         key_fn=key_func,
         env_callable=lambda unbox_kernel_entry: {
             "unboxed_kernels": [
-                ComputeCodegenUnboxedKernels(selector, use_aten_lib, add_exception_boundary)(unbox_kernel_entry)
+                ComputeCodegenUnboxedKernels(
+                    selector, use_aten_lib, add_exception_boundary
+                )(unbox_kernel_entry)
             ],
             "fn_header": header
             if unbox_kernel_entry == items[0]
