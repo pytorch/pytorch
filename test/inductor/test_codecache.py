@@ -881,8 +881,8 @@ class TestFxGraphCache(TestCase):
 
         self.assertNotEqual(a, b)
 
-    @config.patch({"fx_graph_cache": False})
-    @config.patch({"fx_graph_remote_cache": False})
+    @config.patch({"fx_graph_cache": False, "fx_graph_remote_cache": False})
+    @requires_cuda
     def test_async_compile_cache(self):
         class SimpleFunction(torch.autograd.Function):
             @staticmethod
