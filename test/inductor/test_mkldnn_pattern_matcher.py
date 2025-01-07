@@ -1002,7 +1002,9 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 counters["inductor"]["qconv2d_weight_prepack_matcher_nodes"],
                 12 if int8_mixed_bf16 else 8,
             )
-            self.assertEqual(counters["inductor"]["qconv2d_unary_lower_count"], 2)
+            self.assertEqual(
+                counters["inductor"]["qconv2d_unary_lower_count"], 0 if TEST_ACL else 2
+            )
 
         self._test_common(
             mod,
