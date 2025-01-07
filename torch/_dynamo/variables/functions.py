@@ -19,6 +19,7 @@ from ..exc import (
     handle_observed_exception,
     InfiniteGeneratorError,
     ObservedException,
+    ObservedGeneratorExit,
     ObservedUserStopIteration,
     raise_observed_exception,
     SkipFrame,
@@ -424,6 +425,8 @@ class GeneratorObjectVariable(VariableTracker):
         try:
             tracer._raise_exception_variable(None)
         except ObservedException as e:
+            # if no handler is available (i.e. user code doesn't catch it), the
+            # exception is raised again.
             tracer.exception_handler(e)
 
     def _is_inside_try_finally(self, tracer):
@@ -463,10 +466,19 @@ class GeneratorObjectVariable(VariableTracker):
             if self._is_generator_new():
                 return variables.ConstantVariable(None)
 
-            # raise GeneratorExit
-            self._setup_exception(tx, variables.ExceptionVariable(GeneratorExit, ()))
+            # The idea here is to raise GeneratorExit to see if user code catches it.
+            # Any other exception is propagated to the parent frame.
+            try:
+                self._setup_exception(
+                    tx, variables.ExceptionVariable(GeneratorExit, ())
+                )
+            except ObservedGeneratorExit:
+                # If it doesn't catch, we just return None, as per the text above
+                return variables.ConstantVariable(None)
+
             tracer = self._get_inline_tracer(tx)
             try:
+                # If the generator yields any other value, we raise a RuntimeError
                 if self.next_variable(tx):
                     # TODO: change "raise_observed_exception" to raise an exception
                     # with a message
@@ -501,7 +513,13 @@ class GeneratorObjectVariable(VariableTracker):
 
             # Setup the exception table and jump target in case of try...finally
             tracer = self._get_inline_tracer(tx)
-            self._setup_exception(tx, args[0])
+            try:
+                self._setup_exception(tx, args[0])
+            except ObservedException:
+                # propagate the exception back to the parent caller
+                tx.exn_vt_stack.extend(tracer.exn_vt_stack)
+                return variables.ConstantVariable(None)
+
             retval = self.next_variable(tx)
 
             if self._is_inside_try_finally(tracer):
