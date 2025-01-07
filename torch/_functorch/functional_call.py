@@ -1,4 +1,3 @@
-# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 
@@ -157,7 +156,7 @@ def functional_call(
 
 @exposed_in("torch.func")
 def stack_module_state(
-    models: List[nn.Module],
+    models: Union[Sequence[nn.Module], nn.ModuleList],
 ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     """stack_module_state(models) -> params, buffers
 

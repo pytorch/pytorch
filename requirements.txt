@@ -1,21 +1,21 @@
 # Python dependencies required for development
 astunparse
-expecttest>=0.2.1
+cmake
+expecttest>=0.3.0
+filelock
+fsspec
 hypothesis
+jinja2
+lintrunner ; platform_machine != "s390x"
+networkx
+ninja
 numpy
+optree>=0.13.0
+packaging
 psutil
 pyyaml
 requests
 setuptools
+sympy==1.13.3
 types-dataclasses
 typing-extensions>=4.10.0
-sympy==1.13.1 ; python_version >= "3.9"
-filelock
-networkx
-jinja2
-fsspec
-lintrunner ; platform_system != "Windows"
-ninja
-packaging
-optree>=0.13.0
-cmake

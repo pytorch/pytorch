@@ -6,8 +6,19 @@ import functools
 import inspect
 import itertools
 import types
-from typing import Any, Callable, Dict, List, Optional, Tuple, TYPE_CHECKING, TypeVar
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    List,
+    Optional,
+    Sequence,
+    Tuple,
+    TYPE_CHECKING,
+    TypeVar,
+)
 from typing_extensions import Never
+from unittest.mock import patch
 
 import torch
 
@@ -19,6 +30,7 @@ from ..source import AttrSource, ConstantSource, DefaultsSource, GetItemSource
 from ..utils import (
     check_constant_args,
     check_unspec_or_constant_args,
+    counters,
     identity,
     is_function,
     is_wrapper_or_member_descriptor,
@@ -30,7 +42,7 @@ from .constant import ConstantVariable
 
 
 try:
-    from torch.distributed._composable.fsdp import _fsdp_param_group
+    from torch.distributed.fsdp._fully_shard import _fsdp_param_group
 except ModuleNotFoundError:
     _fsdp_param_group = None
 
@@ -305,7 +317,7 @@ class UserFunctionVariable(BaseUserFunctionVariable):
             and not tx.output.current_tracer.allow_side_effects_under_checkpoint
         ):
             try:
-                from torch.distributed._composable.fsdp._fsdp_state import FSDPState
+                from torch.distributed.fsdp._fully_shard._fsdp_state import FSDPState
             except Exception:
                 FSDPState = None
             if FSDPState is not None and self.fn in [
@@ -315,6 +327,63 @@ class UserFunctionVariable(BaseUserFunctionVariable):
                 with torch._dynamo.side_effects.allow_side_effects_under_checkpoint(tx):
                     return super().call_function(tx, args, kwargs)
         return super().call_function(tx, args, kwargs)
+
+
+class FunctionDecoratedByContextlibContextManagerVariable(BaseUserFunctionVariable):
+    # TODO(guilherme): replace this with a generic GeneratorFunctionVariable
+
+    """functions that behaves like iterators
+
+    .. note::
+
+        This is only used when the function is annotated with @contextlib.contextmanager
+    """
+
+    def __init__(self, vt: VariableTracker, **kwargs):
+        super().__init__(**kwargs)
+        self.vt = vt
+        self.inline_tracer = None
+
+    def __getattr__(self, name):
+        if name in self.__class__.__dict__.keys():
+            return getattr(self, name)
+        return getattr(self.vt, name)
+
+    def call_function(
+        self,
+        tx: "InstructionTranslator",
+        args: "List[VariableTracker]",
+        kwargs: "Dict[str, VariableTracker]",
+    ) -> "VariableTracker":
+        from torch._dynamo.bytecode_transformation import is_generator
+
+        assert is_generator(self.get_code())
+        from torch._dynamo.symbolic_convert import InliningInstructionTranslator
+
+        self.inline_tracer = InliningInstructionTranslator.build_inline_tracer(
+            tx,
+            self,
+            [*self.self_args(), *args],
+            kwargs,
+            stop_generator_on_yield=True,
+        )
+
+        return self
+
+    def next_variable(self, tx):
+        from torch._dynamo import exc
+
+        tracer = self.inline_tracer
+
+        try:
+            # Hierarchically, tx can be seen as the parent of the inline tracer
+            # created on call_function. Any exception needs to be propagated to tx
+            # for Dynamo to behave correctly
+            with patch.dict(counters, {"unimplemented": counters["inline_call"]}):
+                return tracer.inline_call_().next_variable(tx)
+        except exc.ObservedException as e:
+            tx.exn_vt_stack.extend(tracer.exn_vt_stack)
+            raise e
 
 
 class UserMethodVariable(UserFunctionVariable):
@@ -1039,6 +1108,52 @@ class DynamoTritonHOPifier(TritonHOPifier):
         grid = grid.call_function(tx, [meta], {})
         return grid
 
+    # We use this function to wrap call_prune_configs
+    def call_user_defined_fn(self, user_fn, args, kwargs, tx, variable):
+        from .builder import SourcelessBuilder
+
+        wrapped_user_function = SourcelessBuilder.create(tx, user_fn)
+        result = wrapped_user_function.call_function(tx, args, kwargs)
+        return result
+
+    def wrap_user_defined_obj(self, user_obj, tx, variable, name):
+        from .builder import VariableBuilder
+
+        wrapped_user_obj = VariableBuilder(
+            tx, AttrSource(variable.kernel_source, f"{name}")
+        )._wrap(user_obj)
+        return wrapped_user_obj
+
+    def maybe_unpack_configs(self, configs, tx):
+        # unpack the list of configs
+        configs = configs.unpack_var_sequence(tx)
+
+        # guard_as_python_constant inserts guards for Dynamo to check if the configs object changed.
+        configs = [config.guard_as_python_constant() for config in configs]
+
+        return configs
+
+    # We need to override call_getitem here so that we can add the source in the case
+    # where we call the triton kernel with a grid
+    def call_getitem(
+        self,
+        variable: "TritonKernelVariable",
+        args: Sequence[Any],
+    ) -> "TritonKernelVariable":
+        # __getitem__ should only be called if we don't already have a grid
+        # Only grid needs to be passed
+        if variable.grid is not None or len(args) != 1:
+            self.raise_unsupported(
+                "Triton kernels should be called with only a single grid"
+            )
+
+        return type(variable)(
+            kernel=variable.kernel,
+            kernel_idx=variable.kernel_idx,
+            grid=args[0],
+            kernel_source=variable.source,
+        )
+
     def call_HOP(self, variable, grids, combined_args_raw, tx) -> ConstantVariable:
         from .constant import ConstantVariable
         from .dicts import ConstDictVariable
@@ -1113,8 +1228,10 @@ class TritonKernelVariable(VariableTracker):
     grid: "TritonGridType"
     kernel: "TritonKernelType"
     kernel_idx: Optional[int]
+    kernel_source: "AttrSource"
 
     def __init__(self, kernel, kernel_idx, grid, **kwargs) -> None:
+        self.kernel_source = kwargs.pop("kernel_source", None)
         super().__init__(**kwargs)
         dynamo_triton_hopifier_singleton.init_variable(self, kernel, kernel_idx, grid)
 

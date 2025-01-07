@@ -7,6 +7,7 @@ import dataclasses
 import os
 import sys
 import unittest
+from pathlib import Path
 from typing import Tuple
 
 import onnxruntime
@@ -24,7 +25,8 @@ from torch.testing._internal import common_utils
 from torch.testing._internal.common_utils import skipIfNNModuleInlined
 
 
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.append(str(Path(__file__).absolute().parents[1]))
+
 import onnx_test_common
 
 
@@ -696,9 +698,9 @@ class TestDynamoWithONNXRuntime(onnx_test_common._TestONNXRuntime):
                 return tensor_x
 
         if test_local_backend:
-            local_aot_ort, local_ort = make_aot_ort(dynamic=True)
+            local_aot_ort, _ = make_aot_ort(dynamic=True)
         else:
-            local_aot_ort, local_ort = "onnxrt", None
+            local_aot_ort, _ = "onnxrt", None
 
         prefix = f"test_dump_model_{'local' if test_local_backend else 'onnxrt'}_"
         expected = f"{prefix}0.onnx"
@@ -722,12 +724,12 @@ class TestDynamoWithONNXRuntime(onnx_test_common._TestONNXRuntime):
 
         with onnxrt_dump_path(prefix):
             example_args = example_args_collection[0]
-            result = compiled_model(*example_args)
+            compiled_model(*example_args)
             self.assertTrue(os.path.exists(expected))
             self.assertTrue(os.path.exists(expected_graph))
             self.assertFalse(os.path.exists(not_expected))
 
-            result = compiled_model(*example_args)
+            compiled_model(*example_args)
             self.assertTrue(os.path.exists(expected))
             self.assertFalse(os.path.exists(not_expected))
 
