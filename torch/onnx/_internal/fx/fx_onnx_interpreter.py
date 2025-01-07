@@ -22,7 +22,7 @@ from torch.onnx._internal.fx import (
     onnxfunction_dispatcher,
     type_utils as fx_type_utils,
 )
-from torch.utils.pytree import tree_leaves
+from torch.utils import pytree
 
 
 def _fx_node_to_onnx_message_formatter(
@@ -242,8 +242,8 @@ def _fill_tensor_shape_type(
         # onnxscript_values is a single tensor, but expected_values is a list of tensors.
         return
 
-    flat_onnxscript_values = tree_leaves(onnxscript_values)
-    flat_expected_values = tree_leaves(expected_values)
+    flat_onnxscript_values = pytree.tree_iter(onnxscript_values)
+    flat_expected_values = pytree.tree_iter(expected_values)
     for i, (onnxscript_value, expected_value) in enumerate(
         zip(flat_onnxscript_values, flat_expected_values)
     ):
@@ -687,7 +687,7 @@ class FxOnnxInterpreter:
         else:
             # ONNX can't represent collection types (e.g., dictionary, tuple of tuple of
             # tensor, etc), we flatten the collection and register each element as output.
-            flat_args = tree_leaves(node.args[0])
+            flat_args = pytree.tree_iter(node.args[0])
             for arg in flat_args:
                 assert isinstance(
                     arg, torch.fx.Node
