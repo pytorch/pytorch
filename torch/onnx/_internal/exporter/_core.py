@@ -8,10 +8,10 @@ import inspect
 import itertools
 import logging
 import operator
+import pathlib
 import textwrap
 import traceback
 import typing
-from pathlib import Path
 from typing import Any, Callable, Literal, Mapping, Sequence
 
 import onnxscript
@@ -1215,7 +1215,7 @@ def export(
     profiler = _maybe_start_profiler(profile)
 
     # Create the artifacts directory if it does not exist
-    artifacts_dir = Path(artifacts_dir)
+    artifacts_dir = pathlib.Path(artifacts_dir)
     if report or profile or dump_exported_program:
         artifacts_dir.mkdir(parents=True, exist_ok=True)
 

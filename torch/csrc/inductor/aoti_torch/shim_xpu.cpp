@@ -49,25 +49,24 @@ AOTITorchError aoti_torch_delete_xpu_stream_guard(XPUStreamGuardHandle guard) {
       { delete reinterpret_cast<at::StreamGuard*>(guard); });
 }
 
-AOTI_TORCH_EXPORT AOTITorchError
-aoti_torch_get_current_xpu_stream(int32_t device_index, void** ret_stream) {
+AOTITorchError aoti_torch_get_current_xpu_stream(
+    int32_t device_index,
+    void** ret_stream) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE(
       { *ret_stream = &(at::xpu::getCurrentXPUStream(device_index).queue()); });
 }
 
-AOTI_TORCH_EXPORT AOTITorchError
-aoti_torch_get_current_xpu_device(int32_t* device_index) {
+AOTITorchError aoti_torch_get_current_xpu_device(int32_t* device_index) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE(
       { *device_index = static_cast<int32_t>(c10::xpu::current_device()); });
 }
 
-AOTI_TORCH_EXPORT AOTITorchError
-aoti_torch_set_current_xpu_device(const int32_t& device_index) {
+AOTITorchError aoti_torch_set_current_xpu_device(const int32_t& device_index) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE(
       { c10::xpu::set_device(static_cast<int8_t>(device_index)); });
 }
 
-AOTI_TORCH_EXPORT AOTITorchError aoti_torch_get_current_sycl_queue(void** ret) {
+AOTITorchError aoti_torch_get_current_sycl_queue(void** ret) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
     int32_t device_index = static_cast<int32_t>(c10::xpu::current_device());
     *ret = &(at::xpu::getCurrentXPUStream(device_index).queue());

@@ -149,8 +149,6 @@ static PyObject* THPSize_repr(THPSize* self) {
   END_HANDLE_TH_ERRORS
 }
 
-extern PyTypeObject THPSizeType;
-
 template <typename FnType, FnType fn, typename... Args>
 static PyObject* wrap_tuple_fn(Args... args) {
   THPObjectPtr result((*fn)(std::forward<Args>(args)...));

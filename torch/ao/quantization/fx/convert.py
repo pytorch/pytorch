@@ -992,6 +992,7 @@ def convert(
     qconfig_mapping: Union[QConfigMapping, Dict[str, Any], None] = None,
     backend_config: Union[BackendConfig, Dict[str, Any], None] = None,
     is_decomposed: bool = False,
+    keep_original_weights: bool = False,
 ) -> GraphModule:
     """
     We will convert an observed model (a module with observer calls) to a reference
@@ -1243,7 +1244,9 @@ def convert(
 
     # TODO: maybe move this to quantize_fx.py
     if not is_reference:
-        model = lower_to_fbgemm(model, node_name_to_qconfig, node_name_to_scope)
+        model = lower_to_fbgemm(
+            model, node_name_to_qconfig, node_name_to_scope, keep_original_weights
+        )
 
     # TODO: this looks hacky, we want to check why we need this and see if we can
     # remove this

@@ -202,6 +202,11 @@ static Tensor& mm_out_mps_impl(const Tensor& self, const Tensor& other, Tensor& 
 
   using CachedGraph = MPSBinaryCachedGraph;
   TORCH_CHECK(self.dim() == 2 && other.dim() == 2, "tensors must be 2-D");
+  TORCH_CHECK(self.dtype() == other.dtype(),
+              "expected mat1 and mat2 to have the same dtype, but got: ",
+              self.dtype(),
+              " != ",
+              other.dtype())
   TORCH_CHECK(supportedFloatingOrComplexType(self), "MPS device does not support mm for non-float inputs");
 
   TensorArg args[]{{output, "out", 0}, {self, "mat1", 1}, {other, "mat2", 2}};

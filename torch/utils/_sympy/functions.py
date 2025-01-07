@@ -4,7 +4,6 @@ import math
 import operator
 import sys
 from typing import (
-    Any,
     Callable,
     Iterable,
     List,
@@ -14,6 +13,7 @@ from typing import (
     TypeVar,
     Union,
 )
+from typing_extensions import TypeVarTuple, Unpack
 
 import sympy
 from sympy import S
@@ -32,6 +32,7 @@ from .numbers import int_oo
 
 
 _T = TypeVar("_T", bound=SupportsFloat)
+_Ts = TypeVarTuple("_Ts")
 
 # Portions of this file are adapted from the Sympy codebase, which was
 # licensed as follows:
@@ -101,9 +102,11 @@ def _is_symbols_binary_summation(expr: sympy.Expr) -> bool:
     )
 
 
-def _keep_float(f: Callable[..., _T]) -> Callable[..., Union[_T, sympy.Float]]:
+def _keep_float(
+    f: Callable[[Unpack[_Ts]], _T]
+) -> Callable[[Unpack[_Ts]], Union[_T, sympy.Float]]:
     @functools.wraps(f)
-    def inner(*args: Any) -> Union[_T, sympy.Float]:
+    def inner(*args: Unpack[_Ts]) -> Union[_T, sympy.Float]:
         r: Union[_T, sympy.Float] = f(*args)
         if any(isinstance(a, sympy.Float) for a in args) and not isinstance(
             r, sympy.Float
@@ -204,8 +207,8 @@ class FloorDiv(sympy.Function):
         return self.args[1]
 
     def _sympystr(self, printer: sympy.printing.StrPrinter) -> str:
-        base = printer.parenthesize(self.base, self.precedence)
-        divisor = printer.parenthesize(self.divisor, self.precedence)
+        base = printer.parenthesize(self.base, PRECEDENCE["Atom"] - 0.5)
+        divisor = printer.parenthesize(self.divisor, PRECEDENCE["Atom"] - 0.5)
         return f"({base}//{divisor})"
 
     # Automatic evaluation.

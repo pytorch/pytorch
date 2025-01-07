@@ -2245,7 +2245,7 @@ static const TypeKind Kind = TypeKind::ScalarTypeType;
 static ScalarTypeTypePtr get();
 
 private:
-ScalarTypeType() : EnumerationType() {}
+ScalarTypeType()  {}
 };
 
 struct MemoryFormatType;
@@ -2259,7 +2259,7 @@ static const TypeKind Kind = TypeKind::MemoryFormatType;
 static MemoryFormatTypePtr get();
 
 private:
-MemoryFormatType() : EnumerationType() {}
+MemoryFormatType()  {}
 };
 
 struct LayoutType;
@@ -2273,7 +2273,7 @@ static const TypeKind Kind = TypeKind::LayoutType;
 static LayoutTypePtr get();
 
 private:
-LayoutType() : EnumerationType() {}
+LayoutType()  {}
 };
 
 namespace detail {

@@ -935,7 +935,7 @@ class OpInfo:
             # Make sure `dtyesIfCUDA` is dynamic, if dynamic dispatch is used for CPU
             # This is because, below we set dtypesIfCUDA to dtypes if they are None.
             assert isinstance(self.dtypesIfCUDA, utils._dynamic_dispatch_dtypes), (
-                f"To use dynamic dypes for operator {self.name}, "
+                f"To use dynamic dtypes for operator {self.name}, "
                 "acquire the dtypes dynamically for argument `dtypesIfCUDA`."
                 "This is to ensure that CUDA dtypes are acquired correctly as they"
                 "differ from CPU dtypes occasionally"

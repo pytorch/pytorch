@@ -23,6 +23,7 @@ torch.cuda
     get_device_name
     get_device_properties
     get_gencode_flags
+    get_stream_from_external
     get_sync_debug_mode
     init
     ipc_collect

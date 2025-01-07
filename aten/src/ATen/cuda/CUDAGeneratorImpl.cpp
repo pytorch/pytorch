@@ -214,11 +214,13 @@ void CUDAGeneratorState::replay_prologue(uint64_t wholegraph_increment) {
   // Ensures the generator is not in capturing mode.
   at::cuda::assertNotCapturing(
       "Cannot prepare for replay during capturing stage.");
-  seed_extragraph_.fill_(int64_t(seed_));
-  offset_extragraph_.fill_(int64_t(philox_offset_per_thread_));
-  // Applies the total increment achieved during previous captures to update the
-  // offset.
-  increase(wholegraph_increment);
+  if (wholegraph_increment) {
+      seed_extragraph_.fill_(int64_t(seed_));
+      offset_extragraph_.fill_(int64_t(philox_offset_per_thread_));
+      // Applies the total increment achieved during previous captures to update the
+      // offset.
+      increase(wholegraph_increment);
+  }
 }
 
 /**

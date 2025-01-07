@@ -7,7 +7,8 @@ import re
 import subprocess
 import time
 from threading import Lock
-from typing import Any, List, Optional, Sequence
+from typing import Any, Callable, List, Optional, Sequence, TypeVar
+from typing_extensions import ParamSpec
 
 
 logger = logging.getLogger("strobelight_function_profiler")
@@ -21,6 +22,9 @@ console_handler.setFormatter(formatter)
 logger.addHandler(console_handler)
 logger.setLevel(logging.INFO)
 logger.propagate = False
+
+_P = ParamSpec("_P")
+_R = TypeVar("_R")
 
 
 class StrobelightCLIProfilerError(Exception):
@@ -246,7 +250,9 @@ class StrobelightCLIFunctionProfiler:
                 self._stop_strobelight_no_throw(collect_results=False)
             return False
 
-    def profile(self, work_function: Any, *args: Any, **kwargs: Any) -> Any:
+    def profile(
+        self, work_function: Callable[_P, _R], *args: _P.args, **kwargs: _P.kwargs
+    ) -> Optional[_R]:
         self.current_run_id = None
 
         if locked := StrobelightCLIFunctionProfiler._lock.acquire(False):
@@ -279,6 +285,7 @@ class StrobelightCLIFunctionProfiler:
                 self._stop_strobelight_no_throw(collect_results=False)
                 StrobelightCLIFunctionProfiler._lock.release()
                 raise error
+        return None
 
 
 # A function decorator that wraps profile, if no profiler is provided one with
@@ -288,13 +295,15 @@ class StrobelightCLIFunctionProfiler:
 # @strobelight(stop_at_error=True,...)
 def strobelight(
     profiler: Optional[StrobelightCLIFunctionProfiler] = None, **kwargs: Any
-) -> Any:
+) -> Callable[[Callable[_P, _R]], Callable[_P, Optional[_R]]]:
     if not profiler:
         profiler = StrobelightCLIFunctionProfiler(**kwargs)
 
-    def strobelight_inner(work_function: Any) -> Any:
+    def strobelight_inner(
+        work_function: Callable[_P, _R]
+    ) -> Callable[_P, Optional[_R]]:
         @functools.wraps(work_function)
-        def wrapper_function(*args: Any, **kwargs: Any) -> Any:
+        def wrapper_function(*args: _P.args, **kwargs: _P.kwargs) -> Optional[_R]:
             return profiler.profile(work_function, *args, **kwargs)
 
         return wrapper_function

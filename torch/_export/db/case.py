@@ -4,7 +4,7 @@ import re
 import string
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Set
 from types import ModuleType
 
 import torch
@@ -42,7 +42,7 @@ class SupportLevel(Enum):
     NOT_SUPPORTED_YET = 0
 
 
-ArgsType = Tuple[Any, ...]
+ArgsType = tuple[Any, ...]
 
 
 def check_inputs_type(args, kwargs):

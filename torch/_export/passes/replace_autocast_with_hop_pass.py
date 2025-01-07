@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 from __future__ import annotations
 
-from typing import List, Optional, Tuple, TYPE_CHECKING, Union
+from typing import List, Optional, TYPE_CHECKING, Union
 
 import torch
 from torch._higher_order_ops.wrap import wrap_with_autocast
@@ -145,7 +145,7 @@ def _split_autocast(gm: torch.fx.GraphModule) -> torch.fx.GraphModule:
 
 def _sequential_split_and_maybe_inline_subgraphs(
     gm: torch.fx.GraphModule, graph_signature: Optional[ExportGraphSignature]
-) -> Tuple[torch.fx.GraphModule, Optional[ExportGraphSignature]]:
+) -> tuple[torch.fx.GraphModule, Optional[ExportGraphSignature]]:
     """
     Helper function for replace_autocast_with_hop_pass().
     Split the graph module into multiple subgraphs based on the autocast nodes.
@@ -177,7 +177,7 @@ def _sequential_split_and_maybe_inline_subgraphs(
 
 def replace_autocast_with_hop_pass(
     gm: torch.fx.GraphModule, graph_signature: Optional[ExportGraphSignature]
-) -> Tuple[torch.fx.GraphModule, Optional[ExportGraphSignature]]:
+) -> tuple[torch.fx.GraphModule, Optional[ExportGraphSignature]]:
     """
     Split gm into sub-graph-modules using `sequential_split_and_maybe_inline_subgraphs`, and
     then recursively call itself on each of the submodules.

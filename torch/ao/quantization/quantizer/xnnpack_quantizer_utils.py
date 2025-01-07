@@ -1,4 +1,3 @@
-# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 import itertools
 from dataclasses import dataclass
@@ -70,8 +69,8 @@ AnnotatorType = Callable[
 OP_TO_ANNOTATOR: Dict[str, AnnotatorType] = {}
 
 
-def register_annotator(op: str):
-    def decorator(annotator: AnnotatorType):
+def register_annotator(op: str) -> Callable[[AnnotatorType], None]:
+    def decorator(annotator: AnnotatorType) -> None:
         OP_TO_ANNOTATOR[op] = annotator
 
     return decorator

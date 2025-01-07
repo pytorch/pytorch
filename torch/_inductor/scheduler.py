@@ -415,7 +415,7 @@ class BaseSchedulerNode:
         Decide if there should be inplace updates for the node
         and record the decision in the active kernel.
         """
-        from .codegen.wrapper import buffer_reuse_key
+        from .codegen.wrapper import can_match_buffer_size
 
         if not (
             isinstance(self, SchedulerNode)
@@ -487,8 +487,7 @@ class BaseSchedulerNode:
                             )
                             and len(input_buf.node.get_inputs_that_alias_output()) > 0
                         )
-                        and buffer_reuse_key(input_buf.node)
-                        == buffer_reuse_key(buf.node)
+                        and can_match_buffer_size(input_buf.node, buf.node)
                     ):
                         # if there isn't a triton kernel, then we don't need to call triton-specific things.
                         # but TODO this might be a convenient place to signal to the Collective kernels to inplace
@@ -1140,15 +1139,30 @@ class SchedulerNode(BaseSchedulerNode):
             log.fatal("Error in codegen for %s", self.node)
             raise
 
+    def pointwise_or_reduction_read_writes(
+        self, pointwise: bool = True
+    ) -> dependencies.ReadWrites:
+        """
+        Get the memory dependencies in either the pointwise or the reduction axes.
+        """
+        keep_sizes, ignore_sizes = self._sizes if pointwise else reversed(self._sizes)
+        return dependencies.extract_read_writes(
+            self._body, keep_sizes, hidden_args=[[sympy.S.Zero] * len(ignore_sizes)]
+        )
+
     @cache_on_self
     def pointwise_read_writes(self) -> dependencies.ReadWrites:
         """
-        Get the memory dependencies in the non-reduction axis.
+        Get the memory dependencies in the non-reduction axes.
         """
-        sizes, reduction_sizes = self._sizes
-        return dependencies.extract_read_writes(
-            self._body, sizes, hidden_args=[[sympy.S.Zero] * len(reduction_sizes)]
-        )
+        return self.pointwise_or_reduction_read_writes(pointwise=True)
+
+    @cache_on_self
+    def reduction_read_writes(self) -> dependencies.ReadWrites:
+        """
+        Get the memory dependencies in the reduction axes.
+        """
+        return self.pointwise_or_reduction_read_writes(pointwise=False)
 
     def can_inplace(self, read_dep: dependencies.Dep) -> bool:
         if self.is_template():

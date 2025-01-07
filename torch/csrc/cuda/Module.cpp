@@ -1867,6 +1867,21 @@ PyObject* THCPModule_benchmarkLimitCuDNN(PyObject* _unused, PyObject* noargs) {
   return THPUtils_packInt32(at::globalContext().benchmarkLimitCuDNN());
 }
 
+static void initCudaMethodBindings(PyObject* module) {
+  auto m = py::handle(module).cast<py::module>();
+  m.def(
+      "_cuda_getStreamFromExternal",
+      [](uintptr_t data_ptr, c10::DeviceIndex device_index) {
+        cudaStream_t ext_stream =
+            // NOLINTNEXTLINE(performance-no-int-to-ptr)
+            reinterpret_cast<cudaStream_t>(reinterpret_cast<void*>(data_ptr));
+        at::cuda::CUDAStream stream =
+            c10::cuda::getStreamFromExternal(ext_stream, device_index);
+        return std::make_tuple(
+            stream.id(), stream.device_index(), stream.device_type());
+      });
+}
+
 // NOLINTNEXTLINE(*-c-arrays*, *-global-variables)
 static struct PyMethodDef _THCPModule_methods[] = {
     {"_cuda_init", THCPModule_initExtension, METH_NOARGS, nullptr},
@@ -2127,6 +2142,7 @@ void initModule(PyObject* module) {
   shared::initGdsBindings(module);
   registerCudaDeviceProperties(module);
   registerCudaPluggableAllocator(module);
+  initCudaMethodBindings(module);
 }
 
 } // namespace torch::cuda

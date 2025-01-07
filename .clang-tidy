@@ -13,6 +13,10 @@ bugprone-*,
 -bugprone-reserved-identifier,
 -bugprone-swapped-arguments,
 -bugprone-unchecked-optional-access,
+clang-analyzer-core.*,
+clang-analyzer-cplusplus.*,
+clang-analyzer-nullability.*,
+clang-analyzer-deadcode.*,
 clang-diagnostic-missing-prototypes,
 cppcoreguidelines-*,
 -cppcoreguidelines-avoid-do-while,
@@ -55,10 +59,11 @@ readability-container-size-empty,
 readability-delete-null-pointer,
 readability-duplicate-include
 readability-misplaced-array-index,
-readability-redundant-function-ptr-dereference,
-readability-redundant-smartptr-get,
+readability-redundant*
 readability-simplify-subscript-expr,
 readability-string-compare,
+-readability-redundant-access-specifiers,
+-readability-redundant-control-flow,
 '
 HeaderFilterRegex: '^(aten/|c10/|torch/).*$'
 WarningsAsErrors: '*'

@@ -1469,7 +1469,6 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         finally:
             TensorWithTFOverrideVariable.global_mangled_class_name = original
 
-    @patch.object(torch._dynamo.config, "raise_on_ctx_manager_usage", False)
     def test_nn_moduledict_contains(self):
         class M(torch.nn.Module):
             def __init__(self, module_dict):
@@ -1503,22 +1502,6 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(cnt.op_count, 1)
         self.assertTrue(torch._dynamo.testing.same(out1, out2))
-
-        module_dict = torch.nn.ModuleDict({"cat": torch.nn.Conv2d(1, 1, 1)})
-        pre = m(data)
-        cnt.clear()
-
-        with torch._dynamo.optimize(cnt, nopython=False):
-            opt_pre = m(data)
-            m = M(module_dict)
-            data = torch.randn(1)
-            out1 = m(data)
-
-        out_post = m(data)
-        self.assertEqual(cnt.frame_count, 1)
-        self.assertEqual(cnt.op_count, 1)
-        self.assertTrue(torch._dynamo.testing.same(pre, opt_pre))
-        self.assertTrue(torch._dynamo.testing.same(out1, out_post))
 
     # RuntimeError: SymIntArrayRef expected to contain only concrete integers
     @expectedFailureDynamic

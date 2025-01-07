@@ -211,7 +211,11 @@ class CppCSEVariable(CSEVariable):
             if any(arg.is_vec for arg in args if isinstance(arg, CppCSEVariable)):
                 self.is_vec = True
         # NOTE [Deduce dtype of CppCSEVariable at runtime]
-        self.dtype = deduce_dtype_for_cpp_cse_variable(name, *args, **kwargs)
+        if self.dtype is None:
+            # Take frexp for example: 2 output with different data type.
+            # The output dtype can't be deduced, since we don't know the idx
+            # of return tensor everywhere invoking update_on_args
+            self.dtype = deduce_dtype_for_cpp_cse_variable(name, *args, **kwargs)
         assert self.dtype is not None
 
     def _set_dependent_itervars(self, index: sympy.Expr):
@@ -362,6 +366,8 @@ class LocalBufferContext:
         self.global_buffers: Dict[str, ir.Buffer] = {}
         # map global buffer name to local buffer
         self.global_to_local: Dict[str, ir.Buffer] = {}
+        # record the global buffers that are removed by this LocalBufferContext
+        self.removed_buffers: OrderedSet[str] = OrderedSet()
 
     def __enter__(self):
         self.exit_stack.__enter__()
@@ -415,7 +421,12 @@ class LocalBufferContext:
                 )
                 self.global_buffers[global_buffer_name] = global_buffer
                 self.global_to_local[global_buffer_name] = local_buffer
-                V.graph.removed_buffers.add(global_buffer_name)
+                if global_buffer_name not in V.graph.removed_buffers:
+                    # Record the global buffers that are removed by this LocalBufferContext
+                    # since which may need to restore. Refer to issue:
+                    # https://github.com/pytorch/pytorch/issues/144186
+                    self.removed_buffers.add(global_buffer_name)
+                    V.graph.removed_buffers.add(global_buffer_name)
 
     def localize_function(
         self,

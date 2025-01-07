@@ -126,8 +126,7 @@ struct TensorDataContainer {
   AT_FORALL_COMPLEX_TYPES(TENSOR)
 #undef TENSOR
   TensorDataContainer(std::initializer_list<TensorDataContainer> init_list)
-      : sizes_(),
-        scalar_type_(init_list.begin()->scalar_type()),
+      : scalar_type_(init_list.begin()->scalar_type()),
         type_(TensorDataContainerType::InitList),
         init_list_(init_list) {
     const TensorDataContainer& first_elem = *(init_list.begin());

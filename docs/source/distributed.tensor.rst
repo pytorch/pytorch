@@ -49,8 +49,9 @@ In addition to existing ``torch.Tensor`` methods, it also offers a set of additi
 on all devices, etc.
 
 .. autoclass:: DTensor
-    :members:
-    :member-order: bysource
+    :members: from_local, to_local, full_tensor, redistribute, device_mesh, placements
+    :member-order: groupwise
+    :special-members: __create_chunk_list__
 
 
 DeviceMesh as the distributed communicator
@@ -85,6 +86,8 @@ DTensor supports the following types of :class:`Placement` on each :class:`Devic
   :members:
   :undoc-members:
 
+
+.. _create_dtensor:
 
 Different ways to create a DTensor
 ---------------------------------------

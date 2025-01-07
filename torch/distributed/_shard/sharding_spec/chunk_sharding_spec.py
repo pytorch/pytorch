@@ -162,7 +162,9 @@ class ChunkShardingSpec(ShardingSpec):
                         narrowed_tensor.detach().clone().resize_(scatter_shape)
                     )
                 else:
-                    tensor_to_scatter = narrowed_tensor.detach().clone().contiguous()
+                    tensor_to_scatter = narrowed_tensor.detach().clone(
+                        memory_format=torch.contiguous_format
+                    )
 
                 tensors_to_scatter[
                     dist.get_group_rank(process_group, remote_global_rank)

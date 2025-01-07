@@ -377,7 +377,7 @@ std::string NCCLComm::repr() const {
   return c10::str((void*)ncclComm_);
 }
 
-#if defined(IS_NCCLX) && defined(NCCL_COMM_DUMP)
+#if (defined(IS_NCCLX) || defined(USE_ROCM)) && defined(NCCL_COMM_DUMP)
 std::unordered_map<std::string, std::string> NCCLComm::ncclCommDump() {
   std::unordered_map<std::string, std::string> dump;
   if (isAborted()) {
@@ -519,6 +519,17 @@ std::string getNcclErrorDetailStr(
       interpret = "Unknown NCCL error!";
   }
   return interpret + err;
+}
+
+// Dump proxyTrace log to stdout
+void printNcclCommProxyTrace(
+    std::string dumpReason,
+    const std::unordered_map<std::string, std::string>& dumpMap) {
+  LOG(INFO) << "Dumping nccl comm trace, reason: " << dumpReason;
+  for (auto& [key, value] : dumpMap) {
+    LOG(INFO) << "key: " << key << ", value: " << value;
+  }
+  LOG(INFO) << "----------------------";
 }
 
 } // namespace c10d

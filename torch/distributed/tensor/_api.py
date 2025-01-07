@@ -229,6 +229,9 @@ class DTensor(torch.Tensor):
     To ensure numerical correctness of the ``DTensor`` sharded computation when calling PyTorch operators, ``DTensor``
     requires every Tensor argument of the operator be DTensor.
 
+    .. note:: Directly using the Tensor subclass constructor here is not the recommended way to create a ``DTensor``
+        (i.e. it does not handle autograd correctly hence is not the public API). Please refer to the `create_dtensor`_
+        section to see how to create a ``DTensor``.
     """
 
     _local_tensor: torch.Tensor
@@ -603,6 +606,16 @@ class DTensor(torch.Tensor):
             raise RuntimeError("Unsupported tensor type!")
 
     def __create_chunk_list__(self):
+        """
+        Return a list of ChunkStorageMetadata, which is a dataclass that describes the size/offset of the local shard/replica
+        on current rank. For DTensor, each rank will have a single local shard/replica, so the returned list usually only
+        has one element.
+
+        This dunder method is primariy used for distributed checkpoint purpose.
+
+        Returns:
+            A List[:class:`ChunkStorageMetadata`] object that represents the shard size/offset on the current rank.
+        """
         from torch.distributed.checkpoint.planner_helpers import (
             _create_chunk_from_dtensor,
         )
@@ -627,6 +640,8 @@ def distribute_tensor(
     tensor: torch.Tensor,
     device_mesh: Optional[DeviceMesh] = None,
     placements: Optional[Sequence[Placement]] = None,
+    *,
+    src_data_rank: Optional[int] = 0,
 ) -> DTensor:
     """
     Distribute a leaf ``torch.Tensor`` (i.e. nn.Parameter/buffers) to the ``device_mesh`` according
@@ -650,6 +665,14 @@ def distribute_tensor(
             number of elements as ``device_mesh.ndim``. If not specified, we will
             by default replicate the tensor across the ``device_mesh`` from the
             first rank of each dimension of the `device_mesh`.
+
+    Keyword args:
+        src_data_rank (int, optional): the rank of the source data for the logical/global tensor, it is
+            used by :meth:`distribute_tensor` to scatter/broadcast the shards/replicas to other ranks.
+            By default, we use ``group_rank=0`` on each DeviceMesh dimension as the source data to preserve
+            the single-device semantic. If passing ``None`` explicitly, :meth:`distribute_tensor` simply uses
+            its local data instead of trying to preserve the single-device semantic via scatter/broadcast.
+            Default: 0
 
     Returns:
         A :class:`DTensor` or ``XLAShardedTensor`` object.
@@ -735,10 +758,14 @@ def distribute_tensor(
                 # normalize shard placement dim
                 placement = Shard(placement.dim + tensor.ndim)
                 placements[idx] = placement
-            local_tensor = placement._shard_tensor(local_tensor, device_mesh, idx)
+            local_tensor = placement._shard_tensor(
+                local_tensor, device_mesh, idx, src_data_rank
+            )
         elif placement.is_replicate():
             placement = cast(Replicate, placement)
-            local_tensor = placement._replicate_tensor(local_tensor, device_mesh, idx)
+            local_tensor = placement._replicate_tensor(
+                local_tensor, device_mesh, idx, src_data_rank
+            )
         else:
             raise RuntimeError(
                 f"Trying to distribute tensor with unsupported placements {placement} on device mesh dimension {idx}!"

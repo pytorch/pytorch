@@ -30,7 +30,6 @@ from typing import (
     List,
     Optional,
     Set,
-    Tuple,
     Type,
     Union,
 )
@@ -358,7 +357,7 @@ def serialize_torch_artifact(artifact: Optional[Any]) -> bytes:
         del copyreg.dispatch_table[FakeTensor]
 
 
-def deserialize_torch_artifact(serialized: Union[Dict[str, Any], Tuple[Any, ...], bytes]):
+def deserialize_torch_artifact(serialized: Union[Dict[str, Any], tuple[Any, ...], bytes]):
     if isinstance(serialized, (dict, tuple)):
         return serialized
     if len(serialized) == 0:
@@ -1516,7 +1515,7 @@ class GraphModuleDeserializer(metaclass=Final):
         names_to_symbols: Dict[str, sympy.Symbol]
         state_dict: Dict[str, Union[torch.Tensor, torch.nn.Parameter]]
         constants: Dict[str, Union[torch.Tensor, FakeScriptObject, torch.ScriptObject]]
-        example_inputs: Optional[Tuple[Tuple[torch.Tensor, ...], Dict[str, Any]]]
+        example_inputs: Optional[tuple[tuple[torch.Tensor, ...], Dict[str, Any]]]
 
     def __init__(self) -> None:
         self.serialized_name_to_node: Dict[str, torch.fx.Node] = {}
@@ -1948,7 +1947,7 @@ class GraphModuleDeserializer(metaclass=Final):
         serialized_graph_module: GraphModule,
         serialized_state_dict: Union[Dict[str, torch.Tensor], bytes],
         constants: Union[Dict[str, Any], bytes],
-        example_inputs: Optional[Union[Tuple[Tuple[torch.Tensor, ...], Dict[str, Any]], bytes]] = None,
+        example_inputs: Optional[Union[tuple[tuple[torch.Tensor, ...], Dict[str, Any]], bytes]] = None,
         symbol_name_to_range: Optional[Dict[str, symbolic_shapes.ValueRanges]] = None,
     ) -> Result:
         global _CURRENT_DESERIALIZER
@@ -2435,7 +2434,7 @@ class ExportedProgramDeserializer(metaclass=Final):
         exported_program: ExportedProgram,
         state_dict: Union[Dict[str, torch.Tensor], bytes],
         constants: Union[Dict[str, torch.Tensor], bytes],
-        example_inputs: Optional[Union[Tuple[Tuple[torch.Tensor, ...], Dict[str, Any]], bytes]] = None,
+        example_inputs: Optional[Union[tuple[tuple[torch.Tensor, ...], Dict[str, Any]], bytes]] = None,
         *,
         _unsafe_skip_version_check=False,
     ) -> ep.ExportedProgram:
@@ -2594,7 +2593,7 @@ def deserialize(
 
 def _canonicalize_graph(
     sorted_inputs, sorted_outputs, graph
-) -> Tuple[Graph, Dict[str, str]]:
+) -> tuple[Graph, Dict[str, str]]:
     def _get_argument(a: Argument):
         if a.type == "as_none":
             return None
@@ -2663,7 +2662,7 @@ def _canonicalize_graph(
         graph_inputs: Set[str] = set()
         def_table: Dict[str, int] = {}
         edges: Dict[int, Edges] = {}
-        candidates: List[Tuple[str, List[Tuple[str, List[int]]], int]] = []
+        candidates: List[tuple[str, List[tuple[str, List[int]]], int]] = []
         rank: Dict[str, int] = {}
         ret: List[Node] = []
 
@@ -2901,7 +2900,7 @@ def canonicalize(ep: ExportedProgram) -> ExportedProgram:
     assert len(graph.inputs) == len(signature.input_specs)
     assert len(graph.outputs) == len(signature.output_specs)
 
-    def rank_input(inp) -> Tuple[int, Optional[str], int]:
+    def rank_input(inp) -> tuple[int, Optional[str], int]:
         idx, (_arg, spec) = inp
         assert isinstance(spec, InputSpec)
         if spec.type == "user_input":
@@ -2921,7 +2920,7 @@ def canonicalize(ep: ExportedProgram) -> ExportedProgram:
         else:
             raise AssertionError(f"Unknown input type: {spec}")
 
-    def rank_output(out) -> Tuple[int, Optional[str], int]:
+    def rank_output(out) -> tuple[int, Optional[str], int]:
         idx, (_arg, spec) = out
         assert isinstance(spec, OutputSpec)
         if spec.type == "user_output":

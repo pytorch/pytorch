@@ -16,7 +16,6 @@ from typing import (
     List,
     Optional,
     Set,
-    Tuple,
     Type,
     TYPE_CHECKING,
     Union,
@@ -378,7 +377,7 @@ def register_dataclass_as_pytree_node(
         cls
     ), f"Only dataclasses can be registered with this function: {cls}"
 
-    def default_flatten_fn(obj: Any) -> Tuple[List[Any], Context]:
+    def default_flatten_fn(obj: Any) -> tuple[List[Any], Context]:
         flattened = []
         flat_names = []
         none_names = []
@@ -395,7 +394,7 @@ def register_dataclass_as_pytree_node(
         flat_names, none_names = context
         return cls(**dict(zip(flat_names, values)), **dict.fromkeys(none_names))
 
-    def default_flatten_fn_with_keys(obj: Any) -> Tuple[List[Any], Context]:
+    def default_flatten_fn_with_keys(obj: Any) -> tuple[List[Any], Context]:
         flattened, (flat_names, _none_names) = flatten_fn(obj)  # type: ignore[misc]
         return [(MappingKey(k), v) for k, v in zip(flat_names, flattened)], flat_names
 
@@ -737,7 +736,7 @@ def _name_hoo_subgraph_placeholders(gm: torch.fx.GraphModule) -> None:
     and gather the top-level named placeholder nodes.
     """
     # gather all HOO subgraphs and their top-level named placeholder nodes
-    subgraph_ph_tuples: List[Tuple[torch.fx.GraphModule, List[torch.fx.Node]]] = []
+    subgraph_ph_tuples: List[tuple[torch.fx.GraphModule, List[torch.fx.Node]]] = []
     for node in gm.graph.nodes:
         if node.op == "call_function" and isinstance(
             node.target, torch._ops.HigherOrderOperator

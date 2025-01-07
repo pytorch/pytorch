@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Any, Dict
 
 
-REPO_ROOT = Path(__file__).absolute().parents[2]
+REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 
 
 def flatten_data(d: Dict[str, Any]) -> Dict[str, Any]:

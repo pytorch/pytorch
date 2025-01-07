@@ -7,6 +7,7 @@ import gc
 import gzip
 import io
 import os
+import pathlib
 import pickle
 import platform
 import re
@@ -4444,7 +4445,7 @@ class TestSerialization(TestCase, SerializationMixin):
         with tempfile.NamedTemporaryFile() as f:
             njt = torch.nested.nested_tensor([[1, 2, 3], [4, 5]], layout=torch.jagged)
             torch.save(njt, f)
-            filename = Path(f.name)
+            filename = pathlib.Path(f.name)
             import_string = "import torch._dynamo;" if should_import else ""
             err_msg = (
                 "_pickle.UnpicklingError: Weights only load failed. ``torch.nested`` and ``torch._dynamo``"
