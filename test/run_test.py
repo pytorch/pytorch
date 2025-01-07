@@ -182,7 +182,7 @@ ROCM_BLOCKLIST = [
     "test_jit_legacy",
     "test_cuda_nvml_based_avail",
     "test_jit_cuda_fuser",
-    "distributed/tensor/test_attention",
+    "distributed/_tensor/test_attention",
 ]
 
 # whitelist of tests for s390x
