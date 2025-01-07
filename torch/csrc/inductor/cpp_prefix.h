@@ -1,15 +1,12 @@
-#ifndef TORCH_CSRC_INDUCTOR_CPP_PREFIX
-#define TORCH_CSRC_INDUCTOR_CPP_PREFIX
+#pragma once
 
 #include <omp.h>
 #include <algorithm>
 #include <atomic>
 #include <cmath>
 #include <cstdlib>
-#include <limits>
 #include <map>
 #include <memory>
-#include <optional>
 
 // WARNING: be extra careful when including more ATen/c10 header files here!
 // Because AOTInductor generated code will copy-paste this cpp_prefix.h for
@@ -40,6 +37,9 @@
 #endif
 
 #if INDUCTOR_USE_VECTOR_TYPES()
+#include <limits>
+#include <optional>
+
 #include <ATen/cpu/vec/functional.h>
 #include <ATen/cpu/vec/vec.h>
 #else
@@ -1085,5 +1085,3 @@ class AMXState {
     tile_release();
   }
 };
-
-#endif // TORCH_CSRC_INDUCTOR_CPP_PREFIX
