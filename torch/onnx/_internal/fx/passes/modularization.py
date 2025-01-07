@@ -10,7 +10,7 @@ from typing import Any, Dict, Final, Generator, Iterator, Sequence, Tuple
 import torch
 import torch.fx
 from torch.onnx._internal.fx import _pass, diagnostics
-from torch.utils import _pytree as pytree
+from torch.utils.pytree import tree_map_
 
 
 _FX_TRACER_NN_MODULE_META_TYPE = Tuple[str, type]
@@ -560,8 +560,8 @@ class _ModuleNode(_IRNode):
                 module_inputs[arg] = None
 
         for node in nodes:
-            pytree.tree_map(_extract_arg_if_node_outside_module, node.args)
-            pytree.tree_map(_extract_arg_if_node_outside_module, node.kwargs)
+            tree_map_(_extract_arg_if_node_outside_module, node.args)
+            tree_map_(_extract_arg_if_node_outside_module, node.kwargs)
         return list(module_inputs.keys())
 
     def module_outputs(self) -> Sequence[torch.fx.Node]:
