@@ -315,14 +315,14 @@ static PyObject* THPStream_exit(PyObject* _self, PyObject* unused) {
       0) {
     throw python_error();
   }
-  TORCH_INTERNAL_ERROR(
+  TORCH_INTERNAL_ASSERT(
       ctx_stream.get(), "ctx_stream should be present on the context dict.");
   THPObjectPtr* ctx_device_index = nullptr;
   if (PyDict_GetItemStringRef(
           self->context, "_ctx_device_index", &ctx_device_index.get()) < 0) {
     throw python_error();
   }
-  TORCH_INTERNAL_ERROR(
+  TORCH_INTERNAL_ASSERT(
       ctx_device_index,
       "ctx_device_index should be present on the context dict.");
   auto prev_stream = (THPStream*)(ctx_stream.get());
