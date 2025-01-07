@@ -282,7 +282,7 @@ def _extract_graph_module_outputs(graph_module: torch.fx.GraphModule) -> Any:
 
 def _infer_ep_from_graph_module(graph_module: torch.fx.GraphModule) -> Tuple[str, ...]:
     """Return the all valid devices (i.e., GPU or CPU) among outputs of this torch.fx.GraphModule."""
-    flattened_output_args = pytree.tree_leaves(
+    flattened_output_args = pytree.tree_iter(
         _extract_graph_module_outputs(graph_module)
     )
     # Output arguments with example value (type: torch.Tensor) in the `graph_module`.

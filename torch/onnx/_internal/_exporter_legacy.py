@@ -24,6 +24,7 @@ from typing import Any, Callable, Mapping, Sequence, TYPE_CHECKING, TypeVar
 
 import torch
 import torch._ops
+import torch.utils.pytree as pytree
 from torch.onnx import errors
 from torch.onnx._internal import io_adapter
 from torch.onnx._internal._lazy_import import onnxscript_apis, onnxscript_ir as ir
@@ -34,7 +35,6 @@ from torch.onnx._internal.fx import (
     patcher as patcher,
     registration,
 )
-from torch.utils.pytree import tree_any
 
 
 # We can only import onnx from this module in a type-checking context to ensure that
@@ -593,13 +593,13 @@ class Exporter:
         """Asserts that the model and its input do not contain fake tensors."""
 
         # Case 1: Model with fake inputs/weights and without enabling fake mode
-        has_any_fake_tensor = tree_any(
+        has_any_fake_tensor = pytree.tree_any(
             lambda x: isinstance(x, torch._subclasses.FakeTensor),
             (self.model_args, self.model_kwargs),
         )
         has_any_fake_param_or_buffer = False
         if isinstance(self.model, torch.nn.Module):
-            has_any_fake_param_or_buffer = tree_any(
+            has_any_fake_param_or_buffer = pytree.tree_any(
                 lambda x: isinstance(x, torch._subclasses.FakeTensor),
                 (self.model.parameters(), self.model.buffers()),
             )
@@ -610,14 +610,14 @@ class Exporter:
                 "Cannot export a model with fake inputs/weights without enabling fake mode.",
             )
         # Case 2: Model with non fake inputs/weights and enabled fake mode
-        has_any_non_fake_tensors = tree_any(
+        has_any_non_fake_tensors = pytree.tree_any(
             lambda x: isinstance(x, torch.Tensor)
             and not isinstance(x, torch._subclasses.FakeTensor),
             (self.model_args, self.model_kwargs),
         )
         has_any_non_fake_param_or_buffer = False
         if isinstance(self.model, torch.nn.Module):
-            has_any_non_fake_param_or_buffer = tree_any(
+            has_any_non_fake_param_or_buffer = pytree.tree_any(
                 lambda x: isinstance(x, torch.Tensor)
                 and not isinstance(x, torch._subclasses.FakeTensor),
                 (self.model.parameters(), self.model.buffers()),
