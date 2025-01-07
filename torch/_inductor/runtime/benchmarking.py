@@ -441,16 +441,18 @@ class GroupedInductorBenchmarker(InductorBenchmarker):
                     break
             # adjust `benchmark_iters` to fit in the maximum benchmarking duration,
             # we're alloted `max_benchmark_duration` per-callable, and since we've
-            # pruned the callables we can assume the 
+            # pruned the callables we can assume the maximum duration of any callable
+            # is equivalent to `target_timing`
+            benchmark_iters = max(
+                min(benchmark_iters, max_benchmark_duration // target_timing), 1
+            )
         else:
             callables_to_benchmark = callables
-
-        # adjust `benchmark_iters` to fit in the maximum benchmarking duration, we're
-        # alloted `max_benchmark_duration` per-callable, so we can just take the average
-        # of the estimated timings. note that if we are pruning
-        benchmark_iters = max(
-            min(benchmark_iters, max_benchmark_duration // mean(estimated_timings)), 1
-        )
+            # in the case that we haven't pruned the callables, we can take the average
+            # of the estimated timings to determine the appropriate number of iterations
+            benchmark_iters = max(
+                min(benchmark_iters, max_benchmark_duration // mean(estimated_timings)), 1
+            )
 
         # do the memory warmup
         for _ in range(memory_warmup_iters):
