@@ -1,3 +1,6 @@
+import time
+from os import times
+
 import torch
 import torch.utils._pytree as pytree
 from numpy import outer
@@ -14,10 +17,10 @@ class TestAttention(TestCase):
         super().setUp()
 
         # Define model parameters
-        self.n_local_heads = 5
+        self.n_local_heads = 512
         self.head_dim = 2
-        self.dim = 10
-        self.n_head = 5
+        self.dim = 1024
+        self.n_head = 512
         self.vocab_size = 32000
 
         # Initialize token embeddings and layers
@@ -43,6 +46,52 @@ class TestAttention(TestCase):
         # Run the function on unpadded and padded inputs
         outputs = fn(*inputs)
         outputs_p = fn(*inputs_p)
+
+        ## Check the shapes of the padded outputs
+        # for x_p, shape in zip(outputs_p, outputs_p_shapes):
+        #    self.assertEqual(x_p.shape, shape)
+
+        # Check the non-padded values are the same
+        for x, x_p in zip(outputs, outputs_p):
+            slice_idx = [slice(0, s) for s in x.shape]
+            self.assertEqual(x, x_p.tensor[tuple(slice_idx)])
+
+    def run_unpadded_padded_bench(self, fn, inputs, inputs_p, outputs_p_shapes):
+        # Run the function on unpadded and padded inputs
+        times_unpadded = []
+        for _ in range(10):
+            start = time.time()
+            outputs = fn(*inputs)
+            times_unpadded.append(time.time() - start)
+
+        times_padded = []
+        for _ in range(10):
+            start = time.time()
+            outputs_p = fn(*inputs_p)
+            print(f"Padded time (eager): {time.time() - start}")
+            times_padded.append(time.time() - start)
+
+        fn_compiled = torch.compile(fn, mode="reduce-overhead")
+
+        times_compiled_unpadded = []
+        for _ in range(10):
+            start = time.time()
+            outputs = fn_compiled(*inputs)
+            times_compiled_unpadded.append(time.time() - start)
+
+        times_compiled_padded = []
+        for _ in range(10):
+            start = time.time()
+            outputs_p = fn_compiled(*inputs_p)
+            times_compiled_padded.append(time.time() - start)
+
+        def median(x):
+            return sorted(x)[len(x) // 2]
+
+        print(f"Unpadded time (eager): {median(times_unpadded)}")
+        print(f"Padded time (eager): {median(times_padded)}")
+        print(f"Unpadded time (compiled): {median(times_compiled_unpadded)}")
+        print(f"Padded time (compiled): {median(times_compiled_padded)}")
 
         ## Check the shapes of the padded outputs
         # for x_p, shape in zip(outputs_p, outputs_p_shapes):
@@ -221,9 +270,7 @@ class TestAttention(TestCase):
 
         return (y,)
 
-    def test_attention_all(self):
-        SEQLEN = 2
-
+    def create_inputs(self, SEQLEN):
         x = torch.ones(4, SEQLEN, dtype=torch.int32)
         freqs_cis = torch.randn(2, 1, SEQLEN)
         mask = torch.ones([1, 1, SEQLEN, 16])
@@ -231,23 +278,47 @@ class TestAttention(TestCase):
 
         k_cache, v_cache = self.create_kv_cache()
 
-        inputs = [x, freqs_cis, mask, input_pos, k_cache, v_cache]
+        return [x, freqs_cis, mask, input_pos, k_cache, v_cache]
+
+    def test_attention_all(self):
+        inputs = self.create_inputs(987)
+        x, freqs_cis, mask, input_pos, k_cache, v_cache = inputs
 
         N = 16
 
         inputs_p = [
-            PaddedTensor(x, {0: N, 1: N, 2: 1}, None),
-            PaddedTensor(freqs_cis, {0: N, 1: 1, 2: 1}, None),
+            PaddedTensor(x, {0: N, 1: N}, None),
+            PaddedTensor(freqs_cis, {0: N, 1: N, 2: 1}, None),
             mask,
-            PaddedTensor(input_pos, {0: 1, 1: N, 2: 1}, None),
+            PaddedTensor(input_pos, {0: 1, 1: 1, 2: N}, None),
             PaddedTensor(k_cache, {0: 1, 1: 1, 2: N}, None),
             PaddedTensor(v_cache, {0: 1, 1: 1, 2: N}, None),
         ]
 
-        f = self.f_attention
-        # f = torch.compile(self.f_attention)
+        self.run_unpadded_padded(self.f_attention, inputs, inputs_p, None)
 
-        self.run_unpadded_padded(f, inputs, inputs_p, None)
+        import sys
+
+        dot_aten_graph(
+            self.f_attention, inputs, "/tmp/alex/graph.pdf", max_nodes=sys.maxsize
+        )
+
+    def test_attention_bench(self):
+        inputs = self.create_inputs(987)
+        x, freqs_cis, mask, input_pos, k_cache, v_cache = inputs
+
+        N = 16
+
+        inputs_p = [
+            PaddedTensor(x, {0: N, 1: N}, None),
+            PaddedTensor(freqs_cis, {0: N, 1: N, 2: 1}, None),
+            mask,
+            PaddedTensor(input_pos, {0: 1, 1: 1, 2: N}, None),
+            PaddedTensor(k_cache, {0: 1, 1: 1, 2: N}, None),
+            PaddedTensor(v_cache, {0: 1, 1: 1, 2: N}, None),
+        ]
+
+        self.run_unpadded_padded_bench(self.f_attention, inputs, inputs_p, None)
 
 
 if __name__ == "__main__":
@@ -255,4 +326,4 @@ if __name__ == "__main__":
 
 # cls = TestAttention()
 # cls.setUp()
-# cls.test_all()
+# cls.test_attention_all()

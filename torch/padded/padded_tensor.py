@@ -27,6 +27,7 @@ def slice_nd(input, start_idxs, end_idxs):
 
                 input = torch.ops.aten.slice(input, dim_idx, start_idx, end_idx)
 
+    # return input
     return input.clone()
 
 
