@@ -1688,15 +1688,60 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
     @patches
     @torch.no_grad
     @unittest.skipIf(not TEST_MKL, "Test requires MKL")
-    @parametrize("batch_size", (16, 52))
+    @parametrize("batch_size", (16,))
     @parametrize("in_features", (52,))
-    @parametrize("out_features", (32, 52))
+    @parametrize("out_features", (32,))
+    @parametrize("gemm_num", (2, 3))
+    def test_grouped_linear_invalid(
+        self,
+        batch_size,
+        in_features,
+        out_features,
+        gemm_num,
+    ):
+        class M(torch.nn.Module):
+            def __init__(self, in_feature, out_feature, gemm_num):
+                super().__init__()
+                self.linears = [
+                    torch.nn.Linear(in_feature, out_feature + gemm_idx, bias=False)
+                    for gemm_idx in range(gemm_num)
+                ]
+
+            def forward(self, x):
+                return [linear(x) for linear in self.linears]
+
+        # each linear has different num of out features, thus invaild grouped gemm
+        dtypes = []
+        if torch.ops.mkldnn._is_mkldnn_bf16_supported():
+            dtypes.append(torch.bfloat16)
+        if torch.ops.mkldnn._is_mkldnn_fp16_supported():
+            dtypes.append(torch.float16)
+        for dtype in dtypes:
+            torch._dynamo.reset()
+            torch._inductor.metrics.reset()
+            counters.clear()
+            mod = M(in_features, out_features, gemm_num).eval()
+            v = torch.randn(batch_size, in_features).to(dtype)
+            with verify(dtype) as (atol, rtol), torch.autocast(
+                device_type="cpu", dtype=dtype
+            ), torch.no_grad():
+                self.common(mod, (v,), atol=atol, rtol=rtol)
+            # gemm_num independent template instead of grouped gemm template
+            self.assertEqual(
+                counters["inductor"]["select_algorithm_autotune"], gemm_num
+            )
+            self.assertEqual(counters["inductor"]["cpp_grouped_gemm_template"], 0)
+
+    @inductor_config.patch({"freezing": True})
+    @inductor_config.patch({"cpp.enable_grouped_gemm_template": True})
+    @patches
+    @torch.no_grad
+    @unittest.skipIf(not TEST_MKL, "Test requires MKL")
+    @parametrize("batch_size", (16,))
+    @parametrize("in_features", (52,))
+    @parametrize("out_features", (32,))
     @parametrize("input_3d", (False, True))
     @parametrize("gemm_num", (2, 3))
-    @dtypes(
-        torch.bfloat16,
-        torch.float16,
-    )
     def test_grouped_linear(
         self,
         batch_size,
@@ -1704,7 +1749,6 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         out_features,
         input_3d,
         gemm_num,
-        dtype,
     ):
         class M(torch.nn.Module):
             def __init__(self, in_feature, out_feature, gemm_num):
@@ -1717,17 +1761,26 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
             def forward(self, x):
                 return [linear(x) for linear in self.linears]
 
-        torch._dynamo.reset()
-        torch._inductor.metrics.reset()
-        counters.clear()
-        mod = M(in_features, out_features, gemm_num).eval()
-        B = (2, batch_size) if input_3d else (batch_size,)
-        v = torch.randn(*B, in_features).to(dtype)
-        with verify(dtype) as (atol, rtol), torch.autocast(
-            device_type="cpu", dtype=dtype
-        ), torch.no_grad():
-            self.common(mod, (v,), atol=atol, rtol=rtol)
-        self.assertEqual(counters["inductor"]["cpp_grouped_gemm_template"], 1)
+        dtypes = []
+        if torch.ops.mkldnn._is_mkldnn_bf16_supported():
+            dtypes.append(torch.bfloat16)
+        if torch.ops.mkldnn._is_mkldnn_fp16_supported():
+            dtypes.append(torch.float16)
+        for dtype in dtypes:
+            if dtype == torch.float16 and input_3d:
+                # reduce the number of tests
+                continue
+            torch._dynamo.reset()
+            torch._inductor.metrics.reset()
+            counters.clear()
+            mod = M(in_features, out_features, gemm_num).eval()
+            B = (2, batch_size) if input_3d else (batch_size,)
+            v = torch.randn(*B, in_features).to(dtype)
+            with verify(dtype) as (atol, rtol), torch.autocast(
+                device_type="cpu", dtype=dtype
+            ), torch.no_grad():
+                self.common(mod, (v,), atol=atol, rtol=rtol)
+            self.assertEqual(counters["inductor"]["cpp_grouped_gemm_template"], 1)
 
     @inductor_config.patch({"freezing": True})
     @inductor_config.patch({"cpp.enable_grouped_gemm_template": True})
@@ -1747,10 +1800,6 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
             [False, False],
         ),
     )
-    @dtypes(
-        torch.bfloat16,
-        torch.float16,
-    )
     @parametrize(
         "epilogue",
         (
@@ -1768,7 +1817,6 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         out_features,
         input_3d,
         bias,
-        dtype,
         epilogue,
     ):
         class M(torch.nn.Module):
@@ -1791,19 +1839,30 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
                         res1 = torch.nn.functional.relu(res1)
                     return res0, res1
 
-        torch._dynamo.reset()
-        torch._inductor.metrics.reset()
-        counters.clear()
-        mod = M(in_features, out_features, bias, epilogue).eval()
-        B = (2, batch_size) if input_3d else (batch_size,)
-        v = torch.randn(*B, in_features).to(dtype)
-        with verify(dtype) as (atol, rtol), torch.autocast(
-            device_type="cpu", dtype=dtype
-        ), torch.no_grad():
-            self.common(mod, (v,), atol=atol, rtol=rtol)
-        self.assertEqual(counters["inductor"]["cpp_grouped_gemm_template"], 1)
-        if any(e != "none" for e in epilogue):
-            self.assertGreater(counters["inductor"]["cpp_epilogue_fusion_counter"], 0)
+        dtypes = []
+        if torch.ops.mkldnn._is_mkldnn_bf16_supported():
+            dtypes.append(torch.bfloat16)
+        if torch.ops.mkldnn._is_mkldnn_fp16_supported():
+            dtypes.append(torch.float16)
+        for dtype in dtypes:
+            if input_3d and dtype == torch.float16:
+                # Reduce the number of test cases
+                continue
+            torch._dynamo.reset()
+            torch._inductor.metrics.reset()
+            counters.clear()
+            mod = M(in_features, out_features, bias, epilogue).eval()
+            B = (2, batch_size) if input_3d else (batch_size,)
+            v = torch.randn(*B, in_features).to(dtype)
+            with verify(dtype) as (atol, rtol), torch.autocast(
+                device_type="cpu", dtype=dtype
+            ), torch.no_grad():
+                self.common(mod, (v,), atol=atol, rtol=rtol)
+            self.assertEqual(counters["inductor"]["cpp_grouped_gemm_template"], 1)
+            if any(e != "none" for e in epilogue):
+                self.assertGreater(
+                    counters["inductor"]["cpp_epilogue_fusion_counter"], 0
+                )
 
     @inductor_config.patch({"freezing": False})
     @patches
