@@ -253,9 +253,9 @@ class CppTemplateKernel(CppKernel):
 
             def fn(*args):
                 assert len(args) == 2
-                assert len(next(iter(args))) == len(next(iter(var_sizes)))
+                assert len(args[0]) == len(var_sizes[0])
                 assert len(args[1]) == 0
-                new_args = [arg + offset for arg, offset in zip(next(iter(args)), offsets)]  # type: ignore[arg-type]
+                new_args = [arg + offset for arg, offset in zip(args[0], offsets)]  # type: ignore[arg-type]
                 if reindexers[i] is not None:
                     new_args = reindexers[i](new_args)  # type: ignore[misc]
                 V.ops.store(
@@ -285,7 +285,7 @@ class CppTemplateKernel(CppKernel):
         offsets: Optional[List[sympy.Expr]] = None,
         reindexers: Optional[List[Optional[Callable[[List[Any]], List[Any]]]]] = None,
     ) -> str:
-        ref_dst = next(iter(dst))
+        ref_dst = dst[0]
         var_sizes = (tuple(ref_dst.get_size()), ())
         var_ranges = {
             sympy_index_symbol_with_prefix(SymT.INDEX, i): sz
@@ -302,9 +302,9 @@ class CppTemplateKernel(CppKernel):
         cpp_kernel_proxy = CppKernelProxy(kernel_group)
         bodies = []
         var_sizes_list = []
-        assert isinstance(next(iter(nodes)), Iterable)
+        assert isinstance(nodes[0], Iterable)
         grouped_gemm_number = len(nodes)
-        epilogue_nodes = next(iter(nodes))
+        epilogue_nodes = nodes[0]
         assert isinstance(epilogue_nodes, Iterable)
         for i, _ in enumerate(epilogue_nodes):
             output_names = []
@@ -328,9 +328,9 @@ class CppTemplateKernel(CppKernel):
 
             def fn(*args):
                 assert len(args) == 2
-                assert len(next(iter(args))) == len(next(iter(var_sizes)))
+                assert len(args[0]) == len(var_sizes[0])
                 assert len(args[1]) == 0
-                new_args = [arg + offset for arg, offset in zip(next(iter(args)), offsets)]  # type: ignore[arg-type]
+                new_args = [arg + offset for arg, offset in zip(args[0], offsets)]  # type: ignore[arg-type]
                 if reindexers[i] is not None:
                     new_args = reindexers[i](new_args)  # type: ignore[misc]
                 for gemm_idx in range(grouped_gemm_number):
@@ -431,7 +431,7 @@ class CppTemplateKernel(CppKernel):
                 not epilogue_nodes
             ), "epilogue_nodes not supported for Grouped GEMM yet"
         else:
-            if next(iter(dst)).get_name() != next(iter(src)).get_name():
+            if dst[0].get_name() != src[0].get_name():
                 copy_list = []
                 with LocalBufferContext(self.args) as scope:
                     for _src, _dst in zip(src, dst):

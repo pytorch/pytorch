@@ -107,7 +107,7 @@ class CppTemplate(KernelTemplate):
             kernel_hash_name,
             self.name,
             self.input_nodes,
-            next(iter(self.output_node)).get_layout()
+            self.output_node[0].get_layout()
             if isinstance(self.output_node, Iterable)
             else self.output_node.get_layout(),
             make_kernel_render,
