@@ -49,4 +49,6 @@ using bfloat16 = at::BFloat16;
   return (nbytes + 64 - 1) & -64;
 }
 
+#include <torch/csrc/inductor/cpp_prefix.h>
+
 #endif // TORCH_CSRC_INDUCTOR_CPP_WRAPPER_COMMON
